@@ -255,6 +255,7 @@ function readySnapshot(): ClientSnapshot {
 function client(snapshot: ClientSnapshot) {
   return {
     snapshot,
+    switchAccount: vi.fn(),
     selectCollective: vi.fn(),
     createInvite: vi.fn(),
     pairHost: vi.fn(),
@@ -363,18 +364,38 @@ it('opens the destination navigation from the collective home on narrow screens'
   ).toBe('true');
 });
 
+it('opens the current Human member profile from the identity card', async () => {
+  await act(async () => root.render(<CollectiveWorkspace embedded={false} client={client(readySnapshot())} />));
+
+  const identity = container.querySelector('summary[aria-label="当前身份：You"]');
+  expect(identity).not.toBeNull();
+  const profile = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
+    (button) => button.textContent === '看我的成员资料',
+  );
+  expect(profile).toBeDefined();
+  await act(async () => profile?.click());
+
+  expect(container.querySelector('[aria-label="成员资料"]')?.textContent).toContain('You');
+  expect(container.querySelector('[aria-label="# general"]')).not.toBeNull();
+});
+
 it('keeps a concrete channel target direct and returns home through the collective title', async () => {
   window.history.replaceState({}, '', '/?channelId=%E4%BA%A7%E5%93%81%E6%96%B9%E5%90%91');
-  await act(async () => root.render(<CollectiveWorkspace embedded={false} client={client(readySnapshot())} />));
+  const snapshot = readySnapshot();
+  await act(async () => root.render(<CollectiveWorkspace embedded={false} client={client(snapshot)} />));
 
   expect(container.querySelector('[data-testid="collective-home"]')).toBeNull();
   expect(container.querySelector('[aria-label="# 产品方向"]')).not.toBeNull();
+  const namespace = collectiveClientNamespace(snapshot);
+  expect(namespace).not.toBeUndefined();
+  expect(window.localStorage.getItem(`collective-channel:${namespace}`)).toBe('产品方向');
 
   const homeButton = container.querySelector<HTMLButtonElement>('[aria-label="打开猫咖共创组首页"]');
   expect(homeButton).not.toBeNull();
   await act(async () => homeButton?.click());
   expect(container.querySelector('[data-testid="collective-home"]')).not.toBeNull();
   expect(new URL(window.location.href).searchParams.has('channelId')).toBe(false);
+  expect(window.localStorage.getItem(`collective-channel:${namespace}`)).toBeNull();
 });
 
 it('opens a channel from a home receipt and records a reloadable channel target', async () => {
@@ -418,7 +439,7 @@ it('returns home when the active world is chosen without switching worlds', asyn
   expect(currentClient.selectCollective).not.toHaveBeenCalled();
 });
 
-it('does not carry a channel destination into a newly selected collective', async () => {
+it('does not invent a saved channel when a newly selected collective opens at home', async () => {
   window.history.replaceState({}, '', '/?channelId=%E4%BA%A7%E5%93%81%E6%96%B9%E5%90%91');
   const firstSnapshot = readySnapshot();
   const firstCollective = firstSnapshot.collective;
@@ -452,7 +473,7 @@ it('does not carry a channel destination into a newly selected collective', asyn
   expect(container.querySelector('[aria-label="# 产品方向"]')).toBeNull();
   const secondNamespace = collectiveClientNamespace({ ...firstSnapshot, collective: secondCollective });
   expect(secondNamespace).not.toBeUndefined();
-  expect(window.localStorage.getItem(`collective-channel:${secondNamespace}`)).toBe('general');
+  expect(window.localStorage.getItem(`collective-channel:${secondNamespace}`)).toBeNull();
 });
 
 it('lets an exact Host Work focus bypass the home and land on its public result', async () => {

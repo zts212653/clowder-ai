@@ -96,9 +96,8 @@ test('owner disable during a successful owner HTTP read fences the reply after t
   const pending = f.request({ kind: 'state' });
   await entered;
   await f.runtime.inventoryStore.transaction((tx) => {
-    const grant = tx.grants.get(f.installed.pluginInstanceId);
-    assert.ok(grant);
-    tx.grants.put({ ...grant, grantRevision: grant.grantRevision + 1, effectiveGrants: [] });
+    const instance = tx.instances.get(f.installed.pluginInstanceId)!;
+    tx.instances.put({ ...instance, activationState: 'disabled', lifecycleRevision: instance.lifecycleRevision + 1 });
   });
   release();
   assert.equal((await pending).kind, 'error');

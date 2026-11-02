@@ -330,15 +330,21 @@ describe('DispatchProposalStore (in-memory)', () => {
     assert.equal(pending[0].proposalId, 'dp-new');
   });
 
-  it('superseded proposal does not appear in settled list', async () => {
+  it('superseded history retains its closure without inventing a user decision', async () => {
     const store = new InMemoryDispatchProposalStore();
-    await store.create(createInput({ proposalId: 'dp-old' }));
+    await store.create(createInput({ proposalId: 'dp-old', createdAt: 1000 }));
     await anchor(store, 'dp-old');
-    await store.create(createInput({ proposalId: 'dp-new' }));
+    await store.create(createInput({ proposalId: 'dp-new', createdAt: 2000 }));
 
-    // Superseded is terminal but not a operator decision — should not be in settled
+    // The history includes closed requests; supersession is not a user approval.
     const settled = await store.listSettledByUser('user-1', 10);
-    assert.equal(settled.length, 0, 'superseded proposals should not appear in settled');
+    assert.equal(settled.length, 1);
+    assert.equal(settled[0].proposalId, 'dp-old');
+    assert.equal(settled[0].status, 'superseded');
+    assert.equal(settled[0].supersededBy, 'dp-new');
+    assert.equal(settled[0].supersededAt, 2000);
+    assert.equal(settled[0].decidedAt, undefined);
+    assert.equal(settled[0].decidedBy, undefined);
   });
 
   it('already-approved proposal is not superseded by new same-K create', async () => {

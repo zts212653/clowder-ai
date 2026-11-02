@@ -3,7 +3,6 @@ import {
   logPluginStartFailure,
   type PluginStartPhase,
   pluginStartFailureReport,
-  startFailedMessage,
   startFailureRecord,
 } from './diagnostics/plugin-start-failure.js';
 import {
@@ -174,7 +173,7 @@ export class ExternalPluginLifecycleService {
         } else {
           try {
             await this.options.supervisor.configRefresh?.(input.instanceId);
-          } catch (error) {
+          } catch (_error) {
             try {
               await this.options.supervisor.stop(input.instanceId, 'configuration_refresh_failed');
             } finally {
@@ -328,8 +327,7 @@ export class ExternalPluginLifecycleService {
       } catch (error) {
         const failedAt = this.now();
         this.reportStartFailure(current, 'restart_resume', error, failedAt);
-        if (!this.restartRecoveryStopped)
-          await this.projectResumeFailure(instanceId, startFailureRecord(error, failedAt, current.packageDigest));
+        if (!this.restartRecoveryStopped) await this.projectResumeFailure(instanceId, startFailureRecord(failedAt));
       }
     });
   }
@@ -362,7 +360,7 @@ export class ExternalPluginLifecycleService {
         return;
       }
       transaction.instances.put({
-        ...withRuntimeFailure(current, failure.record, failure.detail),
+        ...withRuntimeFailure(current, failure.record),
         activationState: 'error',
         runtimeState: 'stopped',
         lifecycleRevision: current.lifecycleRevision + 1,
@@ -407,7 +405,7 @@ export class ExternalPluginLifecycleService {
       const current = currentInstance(transaction, instanceId);
       assertRevision(current, expectedRevision);
       const base = options.failure
-        ? withRuntimeFailure(current, options.failure.record, options.failure.detail)
+        ? withRuntimeFailure(current, options.failure.record)
         : options.clearRuntimeError
           ? withoutRuntimeFailure(current)
           : current;
@@ -439,14 +437,14 @@ export class ExternalPluginLifecycleService {
     } catch (error) {
       const failedAt = this.now();
       this.reportStartFailure(enabled, phase, error, failedAt);
-      const failure = startFailureRecord(error, failedAt, enabled.packageDigest);
+      const failure = startFailureRecord(failedAt);
       await this.advance(
         instanceId,
         enabled.lifecycleRevision,
         { activationState: 'error', runtimeState: 'stopped' },
         { failure, at: failedAt },
       );
-      throw new PluginLifecycleError('START_FAILED', startFailedMessage(failure.detail));
+      throw new PluginLifecycleError('START_FAILED', 'official plugin runtime failed to start');
     }
     return this.readCurrent(instanceId);
   }

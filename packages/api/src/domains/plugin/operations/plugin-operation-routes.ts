@@ -68,7 +68,6 @@ export interface InstalledPluginOperationResult {
 interface ActivePlugin {
   readonly instance: PluginInstanceRecord;
   readonly packageRecord: ExecutablePluginPackageRecord;
-  readonly grantRevision: number | undefined;
 }
 
 function response(
@@ -224,8 +223,6 @@ export class InstalledPluginOperations {
     return {
       instance,
       packageRecord,
-      grantRevision: snapshot.grants.find((grant) => grant.pluginInstanceId === instance.pluginInstanceId)
-        ?.grantRevision,
     };
   }
 
@@ -294,7 +291,7 @@ export class InstalledPluginOperations {
     const declaration = JSON.stringify(declaredOperation);
     const fence: PluginOperationCommitFence = {
       assertRequestCurrent,
-      assertRecords: (instance, record, grant) => {
+      assertRecords: (instance, record) => {
         assertRequestCurrent();
         if (
           !instance ||
@@ -306,7 +303,6 @@ export class InstalledPluginOperations {
           instance.lifecycleState !== 'installed' ||
           instance.activationState !== active.instance.activationState ||
           instance.runtimeState !== active.instance.runtimeState ||
-          grant?.grantRevision !== active.grantRevision ||
           record.packageDigest !== active.packageRecord.packageDigest ||
           JSON.stringify(operation(record.manifest, operationKey)) !== declaration
         )
@@ -322,7 +318,6 @@ export class InstalledPluginOperations {
       fence.assertRecords(
         instance,
         snapshot.packages.find((candidate) => candidate.packageDigest === instance?.packageDigest),
-        snapshot.grants.find((candidate) => candidate.pluginInstanceId === instance?.pluginInstanceId),
       );
     };
     const rejected = actionInputRejection(action, body);
@@ -348,10 +343,6 @@ export class InstalledPluginOperations {
       const result = await this.options.settingsInvocation?.({
         pluginInstanceId: active.instance.pluginInstanceId,
         packageRecord: active.packageRecord,
-        effectiveGrants:
-          (await this.options.inventory.snapshot()).grants.find(
-            (grant) => grant.pluginInstanceId === active.instance.pluginInstanceId,
-          )?.effectiveGrants ?? [],
         method: action.action.method,
         params,
         assertCurrent,
@@ -439,8 +430,7 @@ export class InstalledPluginOperations {
           'status' in fresh ||
           fresh.instance.pluginInstanceId !== active.instance.pluginInstanceId ||
           fresh.instance.packageDigest !== active.instance.packageDigest ||
-          fresh.instance.lifecycleRevision !== active.instance.lifecycleRevision ||
-          fresh.grantRevision !== active.grantRevision
+          fresh.instance.lifecycleRevision !== active.instance.lifecycleRevision
         )
           expiredOperation();
       };
@@ -452,10 +442,6 @@ export class InstalledPluginOperations {
         const result = await this.options.settingsInvocation?.({
           pluginInstanceId: active.instance.pluginInstanceId,
           packageRecord: active.packageRecord,
-          effectiveGrants:
-            (await this.options.inventory.snapshot()).grants.find(
-              (grant) => grant.pluginInstanceId === active.instance.pluginInstanceId,
-            )?.effectiveGrants ?? [],
           method: declared.action.method,
           params,
           assertCurrent,

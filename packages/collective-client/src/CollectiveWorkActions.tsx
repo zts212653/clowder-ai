@@ -82,7 +82,7 @@ export function WorkActions({
         <div className="work-actions work-secondary-actions">
           {roadmapActions.map((action) => (
             <button key={action.label} type="button" className="quiet-action" onClick={() => action.onInvoke(work)}>
-              {action.label}
+              {t(action.label)}
             </button>
           ))}
         </div>

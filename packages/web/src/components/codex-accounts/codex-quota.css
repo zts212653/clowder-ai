@@ -134,3 +134,50 @@
   text-align: left;
   font: inherit;
 }
+
+.account-quota-failure {
+  color: var(--shell-muted, var(--cafe-text-muted));
+  line-height: 1.6;
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+.account-quota-failure-title {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  text-align: left;
+  font: inherit;
+}
+.account-quota-dot {
+  display: inline-block;
+  flex: 0 0 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--shell-muted, var(--cafe-text-muted));
+}
+.account-quota-failure[data-active="true"]:not([data-kind="service_unreachable"]) .account-quota-dot {
+  background: var(--semantic-warning);
+}
+.account-quota-failure-reason {
+  margin-top: 2px;
+}
+.account-quota-failure-reason button,
+.account-quota-failure small > button {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  color: var(--shell-ink, var(--cafe-text));
+}
+.account-quota-renewed {
+  color: var(--shell-muted, var(--cafe-text-muted));
+}
+.account-quota-query-details p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.account-quota-switch-hint {
+  margin-top: 6px;
+  color: var(--shell-body, var(--cafe-text));
+  white-space: normal;
+}

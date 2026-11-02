@@ -57,6 +57,7 @@ export function SidebarViewBarV2({
   return (
     <div
       className="sticky top-0 z-10 flex items-center gap-1 px-3 py-1.5"
+      data-chat-background-surface="frame"
       style={{ background: 'var(--shell-frame)' }}
       data-testid="sidebar-tabs-row"
       data-scroll-occluder="true"
@@ -71,6 +72,7 @@ export function SidebarViewBarV2({
             aria-expanded={open}
             data-testid="sidebar-view-menu"
             className="shell-rail-item shell-focusable inline-flex h-7 min-w-0 max-w-full items-center gap-1 rounded-lg px-2 text-xs"
+            data-chat-background-surface="selected"
             style={{ color: 'var(--shell-body)', background: 'var(--shell-selected)' }}
           >
             <span className="shrink-0">{copy.grouping}</span>

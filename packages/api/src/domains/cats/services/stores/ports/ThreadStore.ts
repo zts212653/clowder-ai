@@ -18,6 +18,7 @@ import { generateThreadId, normalizeThreadGoalObjective } from '@cat-cafe/shared
 import { type OwnedThreadSeed, ownedThreadFromSeed, requireOwnedThread } from './OwnedThreadSeed.js';
 import type { StoreReadOptions } from './StoreReadOptions.js';
 import { throwIfStoreReadAborted } from './StoreReadOptions.js';
+import { mergeThreadRoadmap, type RoadmapMutation, type ThreadRoadmap, threadRoadmapSchema } from './ThreadRoadmap.js';
 
 /** Default thread ID for the lobby (backwards-compatible single-thread mode) */
 export const DEFAULT_THREAD_ID = 'default';
@@ -136,7 +137,7 @@ export function buildExternalRuntimeAnchorThreadId(runtime: ExternalRuntimeAncho
   return `external-runtime:${runtime}:${userId}`;
 }
 
-export type MentionRoutingSuppressionReason = 'no_action' | 'cross_paragraph' | 'inline_action';
+export type MentionRoutingSuppressionReason = 'no_action' | 'cross_paragraph' | 'inline_action' | 'void_hold';
 export type MentionActionabilityMode = 'strict' | 'relaxed';
 
 export interface ThreadMentionRoutingFeedbackItem {
@@ -487,6 +488,8 @@ export interface GuideStateV1 {
  *  that survive session seal / handoff / new-member join. */
 export interface ThreadMetadataV1 {
   v: 1;
+  /** Original work-line roadmap coordinates; derived file state never lives here. */
+  roadmap?: ThreadRoadmap;
   /** Dev worktree absolute paths */
   worktrees?: string[];
   /** Associated PRs — dedupe key: `${repo.toLowerCase()}#${number}` */
@@ -515,6 +518,7 @@ export function refKey(ref: { repo: string; number: number }): string {
 
 /** #872: Patch shape for thread metadata merge operations. */
 export type ThreadMetadataPatch = {
+  roadmap?: RoadmapMutation;
   worktrees?: string[];
   prs?: Array<{ repo: string; number: number }>;
   issues?: Array<{ repo: string; number: number }>;
@@ -536,6 +540,7 @@ export function mergeThreadMetadata(
   patch: ThreadMetadataPatch,
 ): ThreadMetadataV1 {
   const base: ThreadMetadataV1 = existing ? { ...existing } : { v: 1 };
+  if (patch.roadmap) base.roadmap = mergeThreadRoadmap(base.roadmap, patch.roadmap);
 
   // --- worktrees: append + dedupe, then remove ---
   if (patch.worktrees || patch.removeWorktrees) {
@@ -656,6 +661,7 @@ export function parseThreadMetadataJson(raw: string): ThreadMetadataV1 | null {
   try {
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object' || parsed.v !== 1) return null;
+    if (parsed.roadmap !== undefined && !threadRoadmapSchema.safeParse(parsed.roadmap).success) return null;
 
     // Shape validation — reject malformed v1 to prevent merge corruption
     if (parsed.worktrees !== undefined) {
@@ -1019,6 +1025,11 @@ export class ThreadStore implements IThreadStore {
     return `${threadId}:${catId}`;
   }
 
+  private isVisibleToUser(thread: Thread, userId: string, indexed: ReadonlySet<string> | undefined): boolean {
+    if (thread.deletedAt || thread.externalRuntimeAnchorState) return false;
+    return thread.createdBy === userId || thread.id === DEFAULT_THREAD_ID || (indexed?.has(thread.id) ?? false);
+  }
+
   create(
     userId: string,
     title?: string,
@@ -1167,12 +1178,7 @@ export class ThreadStore implements IThreadStore {
     const result: Thread[] = [];
     for (const thread of this.threads.values()) {
       throwIfStoreReadAborted(options);
-      if (thread.externalRuntimeAnchorState) continue;
-      const ownedOrDefault = thread.createdBy === userId || thread.id === DEFAULT_THREAD_ID;
-      const userIndexed = indexed?.has(thread.id) ?? false;
-      if ((ownedOrDefault || userIndexed) && !thread.deletedAt) {
-        result.push(thread);
-      }
+      if (this.isVisibleToUser(thread, userId, indexed)) result.push(thread);
     }
     throwIfStoreReadAborted(options);
     // Sort by lastActiveAt descending (most recent first)
@@ -1181,8 +1187,13 @@ export class ThreadStore implements IThreadStore {
   }
 
   listCandidates(userId: string, threadIds: readonly string[]): Thread[] {
-    const candidates = new Set(threadIds);
-    return this.list(userId).filter((thread) => candidates.has(thread.id));
+    const indexed = this.userThreadIndex.get(userId);
+    const result: Thread[] = [];
+    for (const id of new Set(threadIds)) {
+      const thread = this.threads.get(id);
+      if (thread && this.isVisibleToUser(thread, userId, indexed)) result.push(thread);
+    }
+    return result.sort((a, b) => b.lastActiveAt - a.lastActiveAt);
   }
 
   listByProject(userId: string, projectPath: string): Thread[] {

@@ -3,6 +3,7 @@ import { ArtworkActions } from './ArtworkActions';
 import { ArtworkGalleryArrows } from './ArtworkGalleryNavigation';
 import { ArtworkPreviewVideo } from './ArtworkPreviewVideo';
 import type { ArtworkGallery } from './artwork-gallery';
+import { ContentMediaElement } from './ContentMediaElement';
 import { useArtworkViewport } from './useArtworkViewport';
 /** Unadmitted/remote previews have presentation controls, never a fabricated review or Chat sender. */
 export function ArtworkPreviewMedia({
@@ -22,6 +23,7 @@ export function ArtworkPreviewMedia({
   return (
     <div
       ref={root}
+      data-chat-background-layer="opaque"
       className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden"
       {...viewport.handlers}
     >
@@ -38,9 +40,10 @@ export function ArtworkPreviewMedia({
       {video ? (
         <ArtworkPreviewVideo url={url} stageStyle={viewport.stageStyle} onSize={setSize} />
       ) : (
-        <img
+        <ContentMediaElement
+          kind="image"
           src={url}
-          alt={title}
+          title={title}
           style={viewport.stageStyle}
           className="object-contain"
           onLoad={(event) =>

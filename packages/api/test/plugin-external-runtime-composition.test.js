@@ -13,6 +13,7 @@ import {
   resolvePluginRuntimePersistencePaths,
 } from '../dist/domains/plugin/index.js';
 import { callbacksRoutes } from '../dist/routes/callbacks.js';
+import { assertHostListenLifecycle } from './helpers/plugin-host-listen-contract.js';
 import {
   completeExternalHandshake,
   EXTERNAL_PACKAGE_DIGEST,
@@ -78,7 +79,6 @@ test('composition recovers both durable stores and resumes enabled owner intent 
     computedPackageDigest: EXTERNAL_PACKAGE_DIGEST,
     expectedPackageDigest: EXTERNAL_PACKAGE_DIGEST,
     packagePluginId: externalCandidate().pluginId,
-    effectiveGrants: ['messaging.send'],
     signalSchemas: {
       'schemas/external.signal.v1.schema.json': {
         type: 'object',
@@ -124,8 +124,6 @@ test('composition recovers both durable stores and resumes enabled owner intent 
 test('dormant composition binds messaging routes to its single K-1 domain', async () => {
   const projectRoot = await mkdtemp(resolve(tmpdir(), 'cat-cafe-m0-composition-messaging-'));
   const manifest = externalManifest();
-  const grants = ['messaging.send', 'messaging.appendElements', 'message.event.subscribe'];
-  manifest.features[0].capabilities = grants;
   const runtime = createDormantPluginRuntimeComposition({
     projectRoot,
     messageStore: new MessageStore(),
@@ -136,7 +134,6 @@ test('dormant composition binds messaging routes to its single K-1 domain', asyn
     computedPackageDigest: EXTERNAL_PACKAGE_DIGEST,
     expectedPackageDigest: EXTERNAL_PACKAGE_DIGEST,
     packagePluginId: externalCandidate().pluginId,
-    effectiveGrants: grants,
     signalSchemas: {
       'schemas/external.signal.v1.schema.json': {
         type: 'object',
@@ -193,7 +190,6 @@ test('production handshake policy covers verified external source readiness with
     computedPackageDigest: EXTERNAL_PACKAGE_DIGEST,
     expectedPackageDigest: EXTERNAL_PACKAGE_DIGEST,
     packagePluginId: externalCandidate().pluginId,
-    effectiveGrants: ['messaging.send'],
     signalSchemas: {
       'schemas/external.signal.v1.schema.json': {
         type: 'object',
@@ -266,37 +262,23 @@ test('production composition constructs and recovers K-2D but exposes no startup
     ),
   );
   assert.ok(gate, 'the desktop resume gate must be a Host-owned deferred promise');
-  // Initial package activation also needs the listening Host; preserve this exact ordering.
-  assert.match(
-    source,
-    new RegExp(
-      `listen:\\s*async\\s*\\(\\)\\s*=>\\s*\\{\\s*const\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*await app\\.listen\\(\\{ port: PORT, host: HOST \\}\\);\\s*(?:startupMilestone\\('http-listening'\\);\\s*)?${gate[1]}\\(\\);\\s*await initialPlugins\\?\\.activate\\(\\);\\s*return\\s+\\1;\\s*\\}`,
-    ),
-    'desktop windows may app.inject; the gate opens only once app.listen has booted Fastify',
-  );
+  await assertHostListenLifecycle(source, gate[1]);
   assert.equal(source.split(`${gate[1]}()`).length - 1, 1, 'the gate has a single release point');
   assert.ok(
     managerCompositionIndex >= 0 && managerCompositionIndex < recoveryIndex,
     'Plugin Manager state projection must be composed before durable instances resume',
   );
-  assert.match(
-    source,
-    new RegExp(`app\\.addHook\\('onClose', async \\(\\) => ${runtimeName}\\.shutdown\\('api_shutdown'\\)\\)`),
-  );
+  assert.match(source, new RegExp(`registerPluginRuntimeShutdown\\(app, ${runtimeName}\\)`));
+  assert.match(source, /import\('\.\/routes\/plugin-runtime-shutdown\.js'\)/);
   assert.match(source, /createPluginManagerRuntimeComposition\(\{/);
   assert.match(source, /const pluginManagerCatalog = createHostOfficialPluginCatalog\(\)/);
   assert.match(catalogSource, /new MachineOfficialPluginCatalog\(\{/);
   assert.match(catalogSource, /validateCatalog: validatePluginCatalog/);
   assert.match(catalogSource, /loadMachinePluginCatalog\(OFFICIAL_PLUGIN_CATALOG_URL\)/);
-  assert.match(catalogSource, /\.\.\.OFFICIAL_PLUGIN_HOST_POLICIES/);
   assert.doesNotMatch(source, /weixinMpHandlers/);
   assert.doesNotMatch(source, /limbAdapterRegistry/);
   const callbackRoutes = readFileSync(new URL('../src/routes/callbacks.ts', import.meta.url), 'utf8');
   assert.doesNotMatch(callbackRoutes, /registerCallback(?:WeCom|Lark)ActionRoutes/);
-  assert.match(
-    source,
-    /localGrantPolicy:\s*\(manifest\)\s*=>\s*resolveLocalPluginEffectiveGrants\(pluginManagerHostPolicies, manifest\)/,
-  );
   assert.doesNotMatch(source, /repositoryPluginManagerCompatibility|resolveRepositoryReplacementPluginIds/);
   assert.doesNotMatch(source, /ensureOfficialPluginSignalRoutes|OfficialPluginHistoryImportService/);
   assert.match(source, /registerPluginManagerRoutes\(managerApp/);

@@ -4,6 +4,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { nativeOpeningCapsuleRevision } from '../dist/domains/cats/services/agents/invocation/request-generation-capsule-source.js';
 import { KimiAgentService } from '../dist/domains/cats/services/agents/providers/KimiAgentService.js';
 import { isKimiNativeL0ChannelAvailable } from '../dist/domains/cats/services/agents/providers/kimi-l0-agent-file.js';
 import { discoverAdditionalRuntimes } from '../dist/routes/native-additional-runtimes.js';
@@ -59,16 +60,20 @@ test('an obsolete kimi-cli shim alone is not a supported Kimi installation', (t)
 test('dispatch uses the native program, native configuration and native identity channel together', async (t) => {
   const { root, bin } = fixture(t);
   let launch;
+  let prepared;
   const service = new KimiAgentService({
     model: 'selected-model',
     mcpServerPath: '',
-    l0CompilerFn: async () => 'owned native identity',
+    l0CompilerFn: async () => 'owned native identity\n## 主人画像\n\n先讲结果。',
     rawArchive: createMockArchive(),
   });
   const messages = await collect(
     service.invoke('hello', {
       workingDirectory: root,
       systemPrompt: 'owned pack',
+      beforeProviderLaunch: async (request) => {
+        prepared = request;
+      },
       spawnCliOverride: async function* (options) {
         launch = options;
         yield { role: 'assistant', content: '42' };
@@ -82,6 +87,13 @@ test('dispatch uses the native program, native configuration and native identity
   assert.ok(!launch.args.includes('--prompt'));
   assert.equal(launch.env.KIMI_CODE_HOME, undefined, 'the existing parent binding is inherited unchanged');
   assert.ok(messages.some((m) => m.type === 'text' && m.content === '42'));
+  assert.equal(
+    nativeOpeningCapsuleRevision(prepared, { mode: 'cold' }, 'owner', {
+      readCapsule: () => ({ content: '先讲结果。', revision: 'sha256:kimi-opening' }),
+    }),
+    'sha256:kimi-opening',
+    'the actual native agent-file instructions must preserve their capsule source',
+  );
 });
 
 test('a zero-exit deprecation banner without a model response cannot become a successful blank turn', async (t) => {

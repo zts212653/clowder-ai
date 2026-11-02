@@ -7,6 +7,7 @@ import { StaticFeatureAuthority } from '../host-broker/static-feature-authority.
 import type { ExecutablePluginPackageRecord } from '../host-inventory/types.js';
 import { desktopWindowContribution } from './admission.js';
 import { unexpectedDesktopLossId } from './desktop-loss.js';
+import { ObservationDiagnostics } from './observation-diagnostics.js';
 import { DesktopWindowObserver } from './observer.js';
 import { resolveCompanionArchiveContract } from './published-companion-v2.js';
 import type {
@@ -16,7 +17,7 @@ import type {
   DesktopWindowRuntimeOptions as Options,
 } from './types.js';
 
-/** One owner desktop body; observations are ephemeral, while installation, grants and leases remain in their stores. */
+/** One owner desktop body; observations are ephemeral, while installation and leases remain in their stores. */
 export class DesktopWindowPluginRuntime implements BundledPluginRuntime {
   readonly features: StaticFeatureAuthority;
   private active: ActiveWindow | undefined;
@@ -33,13 +34,13 @@ export class DesktopWindowPluginRuntime implements BundledPluginRuntime {
       broker: options.broker,
       admission: 'desktop-companion',
       now: this.now,
-      verifyActivePackage: async (id, digest) => {
+      verifyActivePackage: async (id, digest, diagnostics) => {
         const run = this.active;
         if (!run || run.id !== id || run.digest !== digest || run.closing)
           throw new Error('desktop package unavailable');
         // The surface serves frozen Host buffers; mutable executable admission
         // keeps verifyIntegrity. Every authority check still validates the seal.
-        await (run.package.verifyStaticIntegrity?.() ?? run.package.verifyIntegrity());
+        await (run.package.verifyStaticIntegrity?.(diagnostics) ?? run.package.verifyIntegrity());
         if (this.active !== run || run.closing) throw new Error('desktop ended during package verification');
       },
     });
@@ -79,10 +80,21 @@ export class DesktopWindowPluginRuntime implements BundledPluginRuntime {
     )
       return null;
     try {
-      return await this.features.run(run.lease, async () =>
-        this.active === run && run.ready && !run.closing && this.now() - observation.observedAt < this.freshnessMs
-          ? structuredClone(observation)
-          : null,
+      return await this.features.run(
+        run.lease,
+        async () => {
+          // The observer can publish a new genuine sample while package IO waits.
+          // Read its current projection without polling or changing its timestamp.
+          const current = run.observer?.observation;
+          return this.active === run &&
+            run.ready &&
+            !run.closing &&
+            current &&
+            this.now() - current.observedAt < this.freshnessMs
+            ? structuredClone(current)
+            : null;
+        },
+        new ObservationDiagnostics('presence'),
       );
     } catch {
       return null;
@@ -105,20 +117,31 @@ export class DesktopWindowPluginRuntime implements BundledPluginRuntime {
 
   async show(): Promise<void> {
     const run = this.active;
-    if (!run?.ready || !run.observer || !run.lease || !(await this.presence()))
+    if (!run?.ready || !run.observer || !run.window || !run.lease || run.closing)
       throw new Error('desktop body unavailable');
+    const observer = run.observer;
+    const window = run.window;
+    // Join the live attempt when Host IO has aged the projection. An explicit
+    // owner click may wait for fresh evidence; it cannot revive a failed run.
+    if (!observer.observation || this.now() >= observer.observation.expiresAt)
+      await this.observeOrClose(run, () => observer.observe());
+    if (this.active !== run || !(await this.presence())) throw new Error('desktop body unavailable');
     // Admit the send atomically with authority, but never hold a store transaction
     // while waiting for an OS process. A later close is ordered after this send.
     const admitted = await this.features.run(run.lease, async () => ({
-      completion: run.window!.show().then(
+      completion: window.show().then(
         () => ({ ok: true as const }),
         (error: unknown) => ({ ok: false as const, error }),
       ),
     }));
     const result = await admitted.completion;
     if (!result.ok) throw result.error;
+    await this.observeOrClose(run, () => observer.observeAfterShow());
+  }
+
+  private async observeOrClose(run: ActiveWindow, observe: () => Promise<void>): Promise<void> {
     try {
-      await run.observer.observeAfterShow();
+      await observe();
     } catch (error) {
       this.observationLost(run, error);
       throw error;
@@ -141,6 +164,8 @@ export class DesktopWindowPluginRuntime implements BundledPluginRuntime {
       if (installed.pluginId === 'official.companion' && !companionContract)
         throw new Error('companion archive contract unavailable');
       const publicCompanionV2 = companionContract !== undefined;
+      controller.signal.throwIfAborted();
+      await this.options.executor.prepare?.();
       controller.signal.throwIfAborted();
       connection = await this.options.broker.openBuiltinConnection(id);
       const run: ActiveWindow = {
@@ -253,12 +278,13 @@ export class DesktopWindowPluginRuntime implements BundledPluginRuntime {
   }
 
   private observationLost(run: ActiveWindow, error: unknown): void {
+    const observation = run.observer?.diagnostic(error);
     this.lost(run, {
-      reason:
-        error instanceof Error && error.message === 'desktop heartbeat expired' ? 'heartbeat-expired' : 'poll-failed',
+      reason: observation?.error?.reason === 'heartbeat_expired' ? 'heartbeat-expired' : 'poll-failed',
       exitCode: null,
       signal: null,
       initiator: 'host-observer',
+      ...(observation ? { observation } : {}),
     });
   }
 
@@ -267,7 +293,7 @@ export class DesktopWindowPluginRuntime implements BundledPluginRuntime {
     failure: DesktopWindowFailure = { reason: 'unknown', exitCode: null, signal: null },
   ): void {
     if (this.active !== run || run.closing) return;
-    const observation = run.observer?.diagnostic();
+    const observation = failure.observation ?? run.observer?.diagnostic();
     const firstFailure = observation ? { ...failure, observation } : failure;
     // Claim the first live terminal cause before aborting: the executor's
     // abort handler synchronously calls onClosed(undefined) back into lost().

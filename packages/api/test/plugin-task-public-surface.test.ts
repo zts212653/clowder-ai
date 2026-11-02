@@ -9,16 +9,22 @@ function fixture() {
     pluginId: 'example',
     pluginInstanceId: 'instance',
     ownerUserId: 'owner',
-    effectiveGrants: ['task.read', 'task.write'],
     taskStore: store,
     readThreadStore: { get: async (id) => ({ id, createdBy: 'owner' }) } as never,
   });
   return { store, host };
 }
 
-test('Task public surface has four methods; selectors and combined filters return the same owned task', async () => {
+test('Task public surface includes data-controller binding; selectors and combined filters return the same owned task', async () => {
   const { store, host } = fixture();
-  assert.deepEqual(Object.keys(host).sort(), ['create', 'get', 'list', 'update']);
+  assert.deepEqual(Object.keys(host).sort(), [
+    'bindDataController',
+    'create',
+    'get',
+    'list',
+    'revokeDataController',
+    'update',
+  ]);
   const task = store.create({
     threadId: 'thread',
     title: 'Work',

@@ -1,4 +1,5 @@
 'use client';
+import type { MemberVisualAssets } from '@cat-cafe/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CatData } from '@/hooks/useCatData';
 import { API_URL, apiFetch } from '@/utils/api-client';
@@ -18,6 +19,7 @@ import {
 } from '../../hub-cat-editor.model';
 import { buildMemberPatchPayload } from '../../hub-cat-editor.payload';
 import type { CatStrategyEntry } from '../../hub-strategy-types';
+import { commitMemberAvatar } from './member-avatar-draft';
 import {
   changedFields,
   type MemberDraft,
@@ -26,7 +28,7 @@ import {
   rebaseMemberDraft,
   templateForm,
 } from './member-editor-state';
-import { type RuntimeChoice, switchMemberRuntime } from './member-runtime-draft';
+import { patchMemberRuntime, type RuntimeChoice, switchMemberRuntime } from './member-runtime-draft';
 import { useMemberSaveTrace } from './useMemberSaveTrace';
 
 async function readResponse<T>(response: Response): Promise<T> {
@@ -183,7 +185,7 @@ export function useMemberEditor(
 
   const patch = useCallback((change: Partial<HubCatEditorFormState>) => {
     setNotice(null);
-    setDraft((previous) => ({ ...previous, form: { ...previous.form, ...change } }));
+    setDraft((previous) => patchMemberRuntime(previous, change));
   }, []);
   const switchRuntime = (next: RuntimeChoice) => {
     setNotice(null);
@@ -335,6 +337,8 @@ export function useMemberEditor(
     conflicted,
     refreshBaseline,
     patch,
+    avatarCommitted: (value: { avatar?: string; visualAssets: MemberVisualAssets }) =>
+      setDraft((previous) => commitMemberAvatar(previous, value)),
     switchRuntime,
     setSection,
     chooseTemplate,

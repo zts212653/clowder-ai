@@ -47,6 +47,7 @@ import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadS
 import { canAccessThread, isSharedDefaultThread } from '../domains/guides/guide-state-access.js';
 import { resolveOwnerGate } from '../utils/owner-gate.js';
 import { resolveUserId } from '../utils/request-identity.js';
+import { createSessionListReadDiagnostics } from './session-list-read-diagnostics.js';
 
 const bindSessionSchema = z.object({
   cliSessionId: z.string().min(1).max(500),
@@ -337,7 +338,9 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
     }
 
     const { threadId } = request.params;
+    const diagnostic = createSessionListReadDiagnostics(request);
     const thread = await threadStore.get(threadId);
+    diagnostic.phase('access_check');
     const access = await resolveThreadAccess({
       threadStore,
       thread,
@@ -356,10 +359,13 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
     // When caller identifies as a specific cat (MCP tool), restrict to own sessions only.
     // Query param `catId` is ignored when it differs from caller — prevents cross-cat enumeration.
     const effectiveCatId = callerCatId ?? catId;
+    diagnostic.scope(effectiveCatId ? 'cat' : 'thread');
     if (callerCatId && catId && catId !== callerCatId) {
       return reply.status(403).send({ error: `Cannot query sessions for cat '${catId}' — you are '${callerCatId}'` });
     }
     if (parsedPage.data.view === 'import') {
+      diagnostic.scope('import');
+      diagnostic.phase('import_record');
       const coordinate = thread?.sessionImport;
       const session =
         coordinate && (!effectiveCatId || coordinate.catId === effectiveCatId)
@@ -377,32 +383,41 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
       return reply.send({ importedSession: imported ? { catId: imported.catId, ...imported.externalImport } : null });
     }
     const sendSessions = async (visibleSessions: SessionRecord[]) => {
+      diagnostic.phase('runtime_metadata');
       if (limit === undefined && offset === undefined) {
-        return reply.send({ sessions: await attachRuntimeSessionSummaries(visibleSessions, runtimeSessionStore) });
+        const sessions = await attachRuntimeSessionSummaries(visibleSessions, runtimeSessionStore);
+        diagnostic.phase('response');
+        return reply.send({ sessions });
       }
       const pageLimit = limit ?? 20;
       const pageOffset = offset ?? 0;
       const selected = visibleSessions.slice(pageOffset, pageOffset + pageLimit);
       const hasMore = pageOffset + selected.length < visibleSessions.length;
+      const sessions = await attachRuntimeSessionSummaries(selected, runtimeSessionStore);
+      diagnostic.phase('response');
       return reply.send({
-        sessions: await attachRuntimeSessionSummaries(selected, runtimeSessionStore),
+        sessions,
         hasMore,
         ...(hasMore ? { nextOffset: pageOffset + selected.length } : {}),
       });
     };
 
     if (effectiveCatId) {
+      diagnostic.phase('chain_read');
       const sessions = await sessionChainStore.getChain(
         effectiveCatId as CatId,
         threadId,
         access.scope === 'user' ? userId : undefined,
       );
+      diagnostic.phase('visibility_filter');
       const visibleSessions = filterThreadRecords(access, sessions);
       return sendSessions(visibleSessions);
     }
 
     // No catId filter at all (hub UI god-view) — shared system threads stay user-scoped.
-    const sessions = await sessionChainStore.getChainByThread(threadId);
+    diagnostic.phase('chain_read');
+    const sessions = await sessionChainStore.getChainByThread(threadId, diagnostic.chainOptions);
+    diagnostic.phase('visibility_filter');
     const visibleSessions = filterThreadRecords(access, sessions);
     return sendSessions(visibleSessions);
   });

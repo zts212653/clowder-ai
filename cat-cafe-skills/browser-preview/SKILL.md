@@ -1,6 +1,6 @@
 ---
 name: browser-preview
-tips_exempt: Managed preview expiry is an internal lifecycle safety boundary; the existing browser-preview skill and status output already expose the operator-visible behavior.
+tips_exempt: "2026-10-28: clarifies the existing Hub preview and delivery-state workflow so agent automation does not activate the desktop; no new end-user action."
 description: >
   Hub 内嵌浏览器预览 localhost 应用。
   Use when: 写前端代码、跑 dev server、需要看页面效果、调 UI、operator说"看看效果"。
@@ -40,10 +40,10 @@ Hub 内置了嵌入式浏览器面板（F120），可以直接预览运行中的
 
 改代码 → HMR 热更新 → browser panel 内页面自动刷新，无需手动操作。
 
-### 猫主动打开浏览器（Phase C — 必须掌握）
+### 猫主动展示 Hub 内嵌预览（Phase C）
 operator说过："别手动让我输入，你最好打开浏览器，把页面放出来。"
 
-**猫应该主动替operator打开浏览器**，不要等operator点 toast 或手动输 URL。
+**猫应该主动在 Hub 内嵌面板展示页面**，不要等operator点 toast 或手动输 URL。这里的“打开”始终是 Hub 内嵌预览，不启动或激活系统浏览器；自动测试另走 `webapp-testing` 的无头实例。
 
 #### 调用步骤（按顺序执行，不要跳步）
 
@@ -77,6 +77,7 @@ Step 3: 读返回的 deliveryStatus，再决定怎么报告
   → queued      = 目标 thread 不在前台，已写入其 ThreadState；切到该 thread 自动揭示
   → blocked     = presentation lock 等阻止了展示（看 deliveryReason）
   → unconfirmed = 没有任何 Hub 客户端确认送达（没连接 / 无匹配 client）——必须如实说"未能确认打开"
+  → queued / blocked / unconfirmed 都保留原送达状态，不改用 open、可见浏览器或应用 activate 补展示
 ```
 
 > **admission ≠ visible**：`allowed: true` 只证明服务端受理了请求。报告"已打开"之前必须看到 `deliveryStatus: "applied"`。
@@ -112,10 +113,12 @@ Step 3: 读返回的 deliveryStatus，再决定怎么报告
 ### 两层可视化策略
 operator拍板："简单的用富文本，复杂的用猫主动打开浏览器。"
 
+这里的复杂应用展示指 Hub 内嵌预览。
+
 | 场景 | 方式 | 怎么做 |
 |------|------|--------|
 | 简单可视化（图表、动画、计算器） | `html_widget` rich block 内联渲染 | 用 `rich-messaging` skill 发 `html_widget` block |
-| 复杂应用（完整页面、多组件交互） | 猫主动打开浏览器 | 调用 `auto-open` API |
+| 复杂应用（完整页面、多组件交互） | 猫主动展示 Hub 内嵌预览 | 调用 `cat_cafe_preview_open` |
 
 ## 技术要点（猫猫需要知道的）
 
@@ -136,10 +139,10 @@ operator拍板："简单的用富文本，复杂的用猫主动打开浏览器�
 
 ## 什么时候主动用
 
-- 写完前端组件/页面 → **主动调 auto-open 打开浏览器展示**（不要等operator点）
+- 写完前端组件/页面 → **主动调 `cat_cafe_preview_open` 展示 Hub 内嵌预览**（不要等operator点）
 - 调样式/布局 → 改代码后在 browser panel 里实时查看
 - operator说"看看效果"/"给我看看" → 主动打开 browser panel 展示
-- dev server 已在 Terminal 跑着 → 主动打开浏览器，不要只提示
+- dev server 已在 Terminal 跑着且需要展示成品 → 主动展示 Hub 内嵌预览，不要只提示
 - invocation/`-p` 中启动的 dev server → 必须走 `preview:process`，并在报告中同时给出 status 与 origin；不能把 `running/detached` 写成跨回合已存活
 - 跨回合展示 → 同时检查 `expiresAt`；status/stop 按目标 cwd 身份选择，不按启动命令族选择：`cat-cafe-*` worktree 一律使用相同 bounded outer `--dir` + inner `--cwd` + port，非 worktree 项目才使用 ordinary form
 - 简单可视化（图表/动画） → 用 `html_widget` rich block 内联渲染

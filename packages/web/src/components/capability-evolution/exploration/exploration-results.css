@@ -72,6 +72,7 @@
 }
 .exploration-cases button[aria-pressed="true"] {
   background: var(--cafe-surface-elevated);
+  --chat-background-role: cafe-elevated;
   outline: 1px solid var(--cafe-border);
 }
 .exploration-cases [data-result="satisfied"] > svg {
@@ -120,6 +121,7 @@
   grid-template-columns: minmax(0, 1fr) 24px minmax(0, 1fr);
   gap: 12px;
   background: var(--cafe-surface);
+  --chat-background-role: cafe;
   padding: 16px;
   border-radius: 8px;
 }
@@ -209,6 +211,7 @@
   min-width: 0;
   padding: 12px;
   background: var(--cafe-surface);
+  --chat-background-role: cafe;
   border-radius: 10px;
 }
 .exploration-trace figcaption {

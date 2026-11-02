@@ -10,6 +10,8 @@ describe('apiFetch 401 retry', () => {
   afterEach(() => {
     globalThis.fetch = originalFetch;
     vi.unstubAllGlobals();
+    window.localStorage.removeItem('cat-cafe:shell-language');
+    window.localStorage.removeItem('cat-cafe:shell-presentation');
   });
 
   async function loadApiModules() {
@@ -57,6 +59,21 @@ describe('apiFetch 401 retry', () => {
       name: 'AbortError',
     });
     expect(useToastStore.getState().toasts).toEqual([]);
+  });
+
+  it('reports a lost response in the current English shell language', async () => {
+    window.localStorage.setItem('cat-cafe:shell-presentation', 'v2');
+    window.localStorage.setItem('cat-cafe:shell-language', 'en');
+    globalThis.fetch = vi.fn(async (url: RequestInfo | URL) => {
+      if (String(url).includes('/api/session')) return new Response('{}', { status: 200 });
+      throw new TypeError('Failed to fetch');
+    });
+    const { apiFetch, useToastStore } = await loadApiModules();
+    await expect(apiFetch('/api/messages')).rejects.toThrow('Failed to fetch');
+    expect(useToastStore.getState().toasts[0]).toMatchObject({
+      title: 'Backend connection problem',
+      message: 'No response was received. Check the service and refresh to confirm the result of your operation.',
+    });
   });
 
   it('retries once after 401 by re-establishing session', async () => {

@@ -1,3 +1,4 @@
+import { isTaskHandoffSource } from '../domains/ball-custody/OrdinaryTaskHandoffContract.js';
 /**
  * Queue Management API Routes (F39)
  *
@@ -43,12 +44,13 @@ import {
 } from '../domains/cats/services/agents/invocation/lifecycle-append-projection.js';
 import { emitLifecycleMessageUpdated } from '../domains/cats/services/agents/invocation/lifecycle-message-update.js';
 import type { NativeControlReceiptPort } from '../domains/cats/services/agents/invocation/NativeControlReceipt.js';
+import { capturePendingPrivateTargets } from '../domains/cats/services/agents/invocation/PendingPrivateInputStop.js';
 import type { QueueProcessor } from '../domains/cats/services/agents/invocation/QueueProcessor.js';
 import { queueEntryId } from '../domains/cats/services/agents/invocation/queue-ledger/QueueLedger.js';
 import { settleResponseFromDraft } from '../domains/cats/services/agents/invocation/response-draft-settlement.js';
 import type { IDraftStore } from '../domains/cats/services/stores/ports/DraftStore.js';
 import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
-import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
+import { type IMessageStore, isTimelinePublished } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { IThreadStore, Thread } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import type { ITurnExecutionStore } from '../domains/cats/services/stores/ports/TurnExecutionStore.js';
 import type { DynamicTaskStore } from '../infrastructure/scheduler/DynamicTaskStore.js';
@@ -64,6 +66,7 @@ import { resolveUserId } from '../utils/request-identity.js';
 import { type LiveExecutionCandidate, registerActiveExecutionRoutes } from './active-execution-routes.js';
 import { commitRecoveredFailedResponse } from './callback-a2a-trigger.js';
 import { getMultiMentionOrchestrator } from './callback-multi-mention-routes.js';
+import { registerCollectiveReplyRecovery } from './collective-reply-recovery.js';
 import { resolveQueueAuthorIntentByCatId } from './message-disposition-admission.js';
 import { nativeControlReceiptHooks, nativeQueueControlCommand } from './native-control-receipts.js';
 import { registerQueueRoutingRecovery } from './queue-routing-recovery.js';
@@ -355,6 +358,14 @@ function projectQueueStartResult(result: { started: boolean; entry?: QueueEntry 
     : { started: result.started };
 }
 
+async function cancelUnpublishedQueueSource(messageStore: IMessageStore | undefined, messageId: string): Promise<void> {
+  const source = await messageStore?.getById(messageId);
+  // Queue owns only future work. Published speech and existing delivery refs
+  // remain History even when the owner withdraws its remaining Queue target.
+  if (source && (isTimelinePublished(source) || source.lifecycle?.dispatchRefs?.length)) return;
+  await messageStore?.markCanceled(messageId);
+}
+
 /**
  * Auth + ownership guard.
  * Returns { userId, thread } or sends error reply and returns null.
@@ -391,6 +402,9 @@ async function guardThreadOwnership(
 
 export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, opts) => {
   const { threadStore, invocationQueue, queueProcessor, invocationTracker, socketManager, messageStore } = opts;
+  registerCollectiveReplyRecovery(app, opts, (request, reply, threadId) =>
+    guardThreadOwnership(request, reply, threadStore, threadId),
+  );
   registerQueueRoutingRecovery(app, opts, (request, reply, threadId) =>
     guardThreadOwnership(request, reply, threadStore, threadId),
   );
@@ -494,6 +508,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     if (!messageStore || !opts.invocationRecordStore) {
       throw new Error('durable execution failure stores are unavailable');
     }
+    const retirePending = snapshotPendingPrivateStop(input.threadId, input.userId, [input.catId]);
     const hasReplacementProducer = () =>
       queueProcessor.hasProcessingSlotReservation(input.threadId, input.catId) &&
       !queueProcessor.hasProcessingSlotReservation(input.threadId, input.catId, input.executionId);
@@ -590,6 +605,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       if (!updated) throw new Error('control-plane failure parent terminalization lost its running fence');
     }
 
+    await retirePending();
     // Durable repair may await while another invocation owns this cat's local
     // settlement. Never retire that producer's locks or reservation for this orphan.
     if (!hasReplacementProducer()) {
@@ -612,6 +628,23 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     return { reconciled: true };
   };
 
+  // Tracker-owned executions capture their Stop synchronously from the abort
+  // signal. These controls also cover process-only and already-orphaned owners.
+  const snapshotPendingPrivateStop = (threadId: string, userId: string, catIds?: readonly string[]) => {
+    const pending = capturePendingPrivateTargets(invocationQueue.list(threadId, userId), catIds);
+    return async () => {
+      try {
+        for (const [catId, entryIds] of pending)
+          await queueProcessor.retirePendingPrivateInputs(threadId, userId, catId, entryIds);
+      } catch (cause) {
+        throw Object.assign(new Error('后台通知的停止状态未能保存，请重试停止', { cause }), {
+          statusCode: 503,
+          code: 'PRIVATE_STOP_RETIREMENT_FAILED',
+        });
+      }
+    };
+  };
+
   const cancelProcessOwnedInvocation = async (input: {
     threadId: string;
     userId: string;
@@ -628,6 +661,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       catId: input.catId,
       userId: input.ownerUserId ?? input.userId,
     };
+    const retirePending = snapshotPendingPrivateStop(input.threadId, executionOwner.userId, [input.catId]);
     let processResult = await opts.cliExecutionOwnerService?.terminateExact(executionOwner);
     for (
       let attempt = 1;
@@ -646,6 +680,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
         return { cancelled: false, controlPlaneUnavailable: true };
       }
     }
+    await retirePending();
     // The request already resolved this exact live owner. A zero-signal result
     // means it exited in the snapshot-to-signal race; cancellation is
     // idempotently complete and its durable child truth still needs closing.
@@ -717,6 +752,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       };
     }
 
+    const retirePending = snapshotPendingPrivateStop(input.threadId, input.userId, [input.catId]);
     const processSnapshot = await retryProcessOwnerSnapshot(input.request, opts.cliExecutionOwnerService);
     if (!processSnapshot.complete) {
       try {
@@ -760,6 +796,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
         code: 'EXECUTION_OWNER_CHANGED',
       };
     }
+    await retirePending();
     if (inflight) {
       const retirement = await queueProcessor.retirePrestartProcessingGroup(input.threadId, input.catId, input.userId);
       if (retirement === 'terminalization_failed') {
@@ -1016,18 +1053,22 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     const queueRevision = invocationQueue.snapshotRevision(threadId, guard.userId);
     const enrichedQueue = await enrichQueueEntries(queueEntries, messageStore);
     return {
-      queue: enrichedQueue.map((entry) => {
-        const internal = queueEntries.find((candidate) => candidate.id === entry.id);
-        if (!internal) return entry;
-        const projection = projectLifecycleAppendAction({
-          threadId,
-          userId: guard.userId,
-          queueRevision,
-          entry: internal,
-          invocationTracker,
-        });
-        return projection.available ? { ...entry, lifecycleActions: { append: projection.action } } : entry;
-      }),
+      queue: await Promise.all(
+        enrichedQueue.map(async (entry) => {
+          const internal = queueEntries.find((candidate) => candidate.id === entry.id);
+          if (!internal || !messageStore) return entry;
+          const sources = await Promise.all(queueEntryMessageIds(internal).map((id) => messageStore.getById(id)));
+          if (sources.some(isTaskHandoffSource)) return entry;
+          const projection = projectLifecycleAppendAction({
+            threadId,
+            userId: guard.userId,
+            queueRevision,
+            entry: internal,
+            invocationTracker,
+          });
+          return projection.available ? { ...entry, lifecycleActions: { append: projection.action } } : entry;
+        }),
+      ),
       queueRevision,
       activeInvocations,
     };
@@ -1151,7 +1192,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
         const remaining = invocationQueue.list(threadId, guard.userId).filter((candidate) => candidate.id !== entryId);
         for (const messageId of messageIds) {
           const hasSibling = remaining.some((candidate) => queueEntryMessageIds(candidate).includes(messageId));
-          if (!hasSibling) await messageStore?.markCanceled(messageId);
+          if (!hasSibling) await cancelUnpublishedQueueSource(messageStore, messageId);
         }
         removed = await invocationQueue.commitClaimedWithdrawal(threadId, entryId);
         if (!removed) throw new Error('Queue withdrawal claim changed before commit');
@@ -1870,7 +1911,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     const guard = await guardThreadOwnership(request, reply, threadStore, threadId);
     if (!guard) return;
 
-    // Claim one exact ledger row at a time. Processing rows are the only business-level block.
+    // Claim one exact ledger row at a time; the canonical claim also protects in-flight Append custody.
     const cleared: QueueEntry[] = [];
     const candidates = invocationQueue.list(threadId, guard.userId);
     for (const candidate of candidates) {
@@ -1885,7 +1926,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
         const remaining = invocationQueue.list(threadId, guard.userId).filter((entry) => entry.id !== claimed.id);
         for (const messageId of messageIds) {
           const hasSibling = remaining.some((entry) => queueEntryMessageIds(entry).includes(messageId));
-          if (!hasSibling) await messageStore?.markCanceled(messageId);
+          if (!hasSibling) await cancelUnpublishedQueueSource(messageStore, messageId);
         }
         const removed = await invocationQueue.commitClaimedWithdrawal(threadId, claimed.id);
         if (!removed) throw new Error('Queue clear claim changed before commit');
@@ -1923,15 +1964,25 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       queueProcessor.unregisterEntryCompleteHook?.(claimed.id);
       cleared.push(claimed);
     }
+    const remaining = invocationQueue.list(threadId, guard.userId);
+    const queue = await enrichQueueEntries(remaining, messageStore);
     await emitQueueUpdated(
       socketManager,
       guard.userId,
       threadId,
-      invocationQueue.list(threadId, guard.userId),
-      'cleared',
+      remaining,
+      queue.length ? 'withdraw_failed' : 'cleared',
     );
-
-    return { cleared: cleared.map(projectPublicQueueEntry) };
+    const result = { cleared: cleared.map(projectPublicQueueEntry), queue };
+    if (queue.length) {
+      reply.status(409);
+      return {
+        ...result,
+        code: cleared.length ? 'QUEUE_WITHDRAWAL_PARTIAL' : 'QUEUE_WITHDRAWAL_FAILED',
+        error: cleared.length ? '已停止部分消息；其余消息仍保留在待处理队列中' : '尚未停止，消息仍保留在待处理队列中',
+      };
+    }
+    return result;
   });
 
   // POST /api/threads/:threadId/cancel/:catId — F122B AC-B9: Per-cat cancel
@@ -1943,6 +1994,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       if (!guard) return;
 
       if (!invocationTracker.has(threadId, catId)) {
+        const retirePending = snapshotPendingPrivateStop(threadId, guard.userId, [catId]);
         // F-invocation-stale-recovery: 404 short-circuit blocked orphan cleanup (Thread 1 bug).
         // When the in-memory tracker has no slot, the invocation may still have a persistent
         // running InvocationRecord (e.g., CLI exited before record was marked done, or process
@@ -1965,6 +2017,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
               return { error: '该猫当前未在执行', code: 'CAT_NOT_ACTIVE' };
             }
 
+            await snapshotPendingPrivateStop(threadId, guard.userId, orphanRecord.targetCats)();
             await opts.invocationRecordStore.update(orphanRecord.id, { status: 'canceled' });
             // P2-1 + P2 (codex 第4轮 a5e8eea2): the WHOLE record is being canceled, so broadcast
             // done + release slot for EVERY targetCat — not just the requested one.
@@ -1994,6 +2047,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
           (lockRelease.releasedHolders > 0 || lockRelease.rejectedWaiters > 0) &&
           queueProcessor.canReleaseSlotForUser(threadId, catId, guard.userId)
         ) {
+          await retirePending();
           for (const m of buildCancelMessages({ cancelled: true, catIds: [catId] })) {
             socketManager.broadcastAgentMessage(m, threadId);
           }
@@ -2039,6 +2093,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     const guard = await guardThreadOwnership(request, reply, threadStore, threadId);
     if (!guard) return;
 
+    const retirePending = snapshotPendingPrivateStop(threadId, guard.userId);
     // 1. Abort all active InvocationTracker slots (controllers + slot deletion).
     //    This clears the primary busy source (invocationTracker.has) that hasActiveExecution checks.
     //    cancelAll aborts in-flight requests and removes active slots atomically.
@@ -2068,6 +2123,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       reply.status(409);
       return { error: '启动中的队列状态已变化，请重试', code: 'PRESTART_STATE_CHANGED' };
     }
+    await retirePending();
     if (prestartRetirement.retiredCatIds.length > 0) {
       await emitQueueUpdated(
         socketManager,

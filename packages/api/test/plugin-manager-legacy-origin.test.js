@@ -24,7 +24,6 @@ function installation(pluginId, index, recordedOrigin) {
     version: '0.1.0',
     displayName: `Plugin ${index}`,
     ownerAuthRequired: false,
-    capabilities: [{ id: 'messaging.send', kind: 'messaging', name: 'Messages' }],
   };
   return {
     candidate,
@@ -38,7 +37,7 @@ function installation(pluginId, index, recordedOrigin) {
         version: '0.1.0',
         contractVersion: '0.1.0',
         name: `Installed ${index}`,
-        features: [{ id: 'messages', name: 'Messages', resources: [], capabilities: ['messaging.send'] }],
+        features: [{ id: 'messages', name: 'Messages', resources: [] }],
         runtime: { transport: 'builtin' },
       },
       ...(recordedOrigin
@@ -61,13 +60,6 @@ function installation(pluginId, index, recordedOrigin) {
       installedAt: 1000,
       updatedAt: 1000,
     },
-    grant: {
-      pluginInstanceId,
-      requestedCapabilities: ['messaging.send'],
-      effectiveGrants: index === 0 ? [] : ['messaging.send'],
-      grantRevision: 2,
-      updatedAt: 1000,
-    },
   };
 }
 
@@ -88,7 +80,6 @@ test('mixed legacy origins remain readable through real file stores and Manager 
     schemaVersion: 1,
     packages: installations.map((row) => row.packageRecord),
     instances: installations.map((row) => row.instance),
-    grants: installations.map((row) => row.grant),
   };
   const path = join(root, 'inventory.json');
   await writeFile(path, JSON.stringify(snapshot));
@@ -182,7 +173,6 @@ test('mixed legacy origins remain readable through real file stores and Manager 
       assert.equal(plugin.intent, row.instance.activationState);
       assert.equal(plugin.live, row.instance.runtimeState === 'healthy' ? 'running' : 'stopped');
       assert.equal(plugin.lifecycleRevision, row.instance.lifecycleRevision);
-      assert.equal(plugin.capabilities[0].active, false, 'no broker lease means no active capability');
     }
     const absent = await app.inject({ method: 'GET', url: '/api/plugin-manager/plugins/not.installed' });
     assert.equal(absent.statusCode, 404, absent.body);
@@ -201,5 +191,5 @@ test('mixed legacy origins remain readable through real file stores and Manager 
   assert.equal(installCalls, 0, 'an unknown source does not become an update route');
   assert.equal(writes, 0);
   assert.deepEqual(await readFile(path), before, 'read operations preserve the original disk bytes');
-  assert.deepEqual(await store.snapshot(), parsedBefore, 'no new provenance, grants or lifecycle changes');
+  assert.deepEqual(await store.snapshot(), parsedBefore, 'no new provenance or lifecycle changes');
 });

@@ -31,6 +31,7 @@ function identityFields(projection: PawFeelDispositionProjection) {
   return {
     ...(projection.ownerCatId ? { ownerCatId: projection.ownerCatId } : {}),
     ...(projection.taskId ? { taskId: projection.taskId } : {}),
+    ...(projection.repairBinding ? { repairBinding: projection.repairBinding } : {}),
     ...(projection.actionLeaseRef ? { leaseId: projection.actionLeaseRef.leaseId } : {}),
   };
 }

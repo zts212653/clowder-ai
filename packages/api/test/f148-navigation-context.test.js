@@ -10,6 +10,21 @@ const { extractBatonContext, summarizeActiveTasks, formatNavigationHeader } = aw
   '../dist/domains/cats/services/agents/routing/navigation-context.js'
 );
 
+it('shows known absent waits only for the current owner, without treating unknown as absent', () => {
+  const text = formatNavigationHeader({
+    currentCatId: 'codex',
+    baton: null,
+    tasks: [
+      { id: '1', title: '自己的待办', status: 'doing', ownerCatId: 'codex', hasActiveWait: false },
+      { id: '2', title: '别猫的待办', status: 'todo', ownerCatId: 'opus', hasActiveWait: false },
+      { id: '3', title: '状态未知', status: 'todo', ownerCatId: 'codex' },
+      { id: '4', title: '已登记等待', status: 'blocked', ownerCatId: 'codex', hasActiveWait: true },
+    ],
+  });
+  assert.match(text, /自己的待办.*\[未挂等待\]/);
+  assert.doesNotMatch(text, /(?:别猫的待办|状态未知|已登记等待).*\[未挂等待\]/);
+});
+
 describe('extractBatonContext', () => {
   const messages = [
     { id: 'm1', catId: 'codex', content: '我在干活，你别动', timestamp: 1000, userId: 'u1' },

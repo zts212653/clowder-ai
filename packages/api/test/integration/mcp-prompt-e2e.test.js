@@ -155,6 +155,7 @@ describe('MCP Prompt Injection E2E', () => {
     const task = taskStore.create({
       threadId: 'thread-e2e',
       title: '设计图标',
+      userId: 'user-1',
       why: '暹罗猫负责视觉',
       createdBy: 'user',
       ownerCatId: 'gemini',

@@ -196,7 +196,7 @@ function summarizeDebugValue(value: string | null | undefined): string {
 function summarizeDebugSecret(value: string | null | undefined): string {
   if (value === null) return '(cleared)';
   if (!value) return '(unset)';
-  return `${value.slice(0, 6)}***`;
+  return '[REDACTED]';
 }
 
 export function summarizeOpenCodeEnvForDebug(env: Record<string, string | null> | undefined): OpenCodeEnvDebugSummary {
@@ -308,6 +308,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
     if (options?.accountEnv) {
       for (const [k, v] of Object.entries(options.accountEnv)) childEnv[k] = v;
     }
+    childEnv.CAT_CAFE_GUARD_NODE = process.execPath;
     if (readOnly) {
       childEnv.CAT_CAFE_READONLY = 'true';
       childEnv.OPENCODE_CONFIG_CONTENT = JSON.stringify({

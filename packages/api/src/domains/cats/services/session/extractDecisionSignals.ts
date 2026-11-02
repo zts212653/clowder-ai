@@ -4,6 +4,7 @@
  * Zero LLM cost — regex patterns reuse AutoSummarizer's proven set.
  */
 
+import { sliceUnicodeSafe } from '../../../../utils/unicode-safe-slice.js';
 import type { ThreadMemorySourceRef } from '../stores/ports/ThreadStore.js';
 
 const MAX_DECISIONS = 8;
@@ -42,7 +43,7 @@ function extractFromText(text: string, patterns: RegExp[], max: number): string[
   const sentences = text.split(/[。！？\n]/).filter((s) => s.trim().length > 5);
   const matches: string[] = [];
   for (const s of sentences) {
-    const trimmed = s.trim().slice(0, MAX_SENTENCE_LEN);
+    const trimmed = sliceUnicodeSafe(s.trim(), 0, MAX_SENTENCE_LEN);
     if (patterns.some((p) => p.test(trimmed)) && matches.length < max) {
       matches.push(trimmed);
     }

@@ -402,6 +402,8 @@ export interface AgentMessage {
   messageTimestamp?: number;
   /** F52: Cross-thread origin metadata (set for cross-thread callback messages) */
   extra?: {
+    cloudBridgeReturn?: import('@cat-cafe/shared').CloudBridgeReturnV1;
+    startupRecovery?: import('@cat-cafe/shared').CodexStartupRecovery;
     outputLayout?: import('@cat-cafe/shared').MessageOutputLayoutV1;
     crossPost?: {
       sourceThreadId: string;
@@ -909,8 +911,8 @@ export interface AgentContextBinding {
 
 /** Provider-native identity for one exact, still-open Agent Client run. */
 export interface AgentClientActiveRunHandle {
-  readonly provider: 'openai_codex' | 'anthropic' | 'anthropic_acp' | 'opencode' | 'other';
-  readonly carrier: 'codex_app_server' | 'claude_agent_sdk' | 'acp' | 'other';
+  readonly provider: 'openai_codex' | 'anthropic' | 'anthropic_acp' | 'opencode' | 'google' | 'other';
+  readonly carrier: 'codex_app_server' | 'claude_agent_sdk' | 'acp' | 'agy_stream_json' | 'other';
   readonly threadId: string;
   readonly turnId: string;
 }
@@ -924,6 +926,8 @@ export interface AgentClientDispatchInput {
   readonly deliveryId?: string;
   /** Exact adapter evidence; delivery and Stop never wait for this callback. */
   readonly onInputRead?: () => Promise<void>;
+  /** Queued internal turns retain Queue custody until their own terminal result. */
+  readonly onInputCompleted?: (completed: boolean) => Promise<void>;
 }
 
 export interface AgentClientDispatchOptions {
@@ -953,7 +957,12 @@ export type AgentClientDispatchResult =
 /** Live-only adapter. Durable Queue/History state must never be stored here. */
 export interface AgentClientActiveRunDispatcher {
   readonly invocationId: string;
-  readonly capabilities: { readonly append: boolean; readonly steer: boolean; readonly inputReadReceipt?: boolean };
+  readonly capabilities: {
+    readonly append: boolean;
+    readonly steer: boolean;
+    readonly inputReadReceipt?: boolean;
+    readonly inputCompletionReceipt?: boolean;
+  };
   readonly handle: AgentClientActiveRunHandle;
   /** Exact native consumption of this run’s first input; never awaited by delivery or Stop. */
   readonly initialInputRead?: Promise<number>;
@@ -972,7 +981,13 @@ export interface AgentClientActiveRunDispatchRegistration {
 export interface PluginNativeActionTarget {
   readonly instanceId: string;
   readonly contributionId: string;
-  readonly method: string;
+}
+
+/** Host-issued lease coordinates. These restrict a native call; they grant no authority alone. */
+export interface MemberSessionExecutionScope {
+  readonly sessionId: string;
+  readonly generation: number;
+  readonly executionId: string;
 }
 
 export type ToolExecutionPolicy =
@@ -985,7 +1000,7 @@ export type ToolExecutionPolicy =
       readonly mode: 'plugin_native';
       readonly pluginInstanceId: string;
       readonly contributionId: string;
-      readonly actionMethods: readonly string[];
+      readonly memberSession?: MemberSessionExecutionScope;
     };
 
 /**
@@ -1044,6 +1059,8 @@ export interface LocalSessionReadInput {
 }
 
 export interface AgentServiceOptions {
+  /** Host logical SessionRecord identity; sessionId remains the native resume id. */
+  hostSessionId?: string;
   /** Binding restored from the canonical SessionRecord, including across API restarts. */
   nativeSessionBinding?: import('@cat-cafe/shared').NativeSessionBinding;
   /** Imported histories must never be silently replaced by a fresh native session. */
@@ -1059,7 +1076,7 @@ export interface AgentServiceOptions {
    * Never a plugin or SDK DTO. */
   pluginNativeLaunch?: {
     readonly server: import('../../plugin/declared/native-mcp-types.js').NativeMcpServer;
-    readonly sandbox: { readonly kind: 'public'; readonly workspaceRoot: string };
+    readonly sandbox: { readonly kind: 'public' | 'scoped-member'; readonly workspaceRoot: string };
     readonly assertCurrent: () => void | Promise<void>;
   };
   /** F317 Host-only continuous companion port; no model-supplied configuration. */
@@ -1224,6 +1241,10 @@ export interface ProviderRequestGenerationCommitV1 {
  * Interface that all agent services must implement
  */
 export interface AgentService {
+  /** Pin one prepared carrier generation before Host policy, L0 and capacity admission. Idempotent on a pinned view. */
+  forInvocation?(): AgentService;
+  /** Release a pinned Host invocation even when policy/preflight exits before a provider iterator starts. Idempotent. */
+  releaseInvocation?(): Promise<void>;
   /**
    * Invoke the agent with a prompt and stream back messages
    * @param prompt The user's prompt/message
@@ -1318,6 +1339,13 @@ export interface AgentService {
 
   /** True only when this concrete carrier applies the requested policy before model launch. */
   supportsToolExecutionPolicy?(policy: ToolExecutionPolicy): boolean;
+  /** Reject unsupported scoped-native authentication before any Queue/model admission. */
+  assertScopedMemberAccount?(account: import('@cat-cafe/shared').ExecutionAccountSnapshot): void;
+  /** An inspected native credential, resolved by its carrier without catalog/login copies. */
+  resolveScopedNativeAccount?(input: {
+    readonly workingDirectory: string;
+    readonly accountRef?: string;
+  }): Promise<import('../../../config/account-resolver.js').RuntimeProviderProfile | null>;
 
   /** F254 D2: effective carrier capability for this concrete service instance. */
   freshnessCarrierCapability?(

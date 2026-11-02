@@ -13,6 +13,8 @@ const COMPARISON_ENVELOPE_LIMIT = 8 * 2 * 1024 * 1024;
 export interface PullRequestChangesDependencies {
   resolveRoot?: typeof getWorktreeRoot;
   execute?: typeof executeGitHubProcess;
+  /** Set only by the authenticated chat read adapter; it grants no local file access. */
+  allowForeignRepository?: boolean;
 }
 
 export class PullRequestChangesReadError extends Error {
@@ -32,7 +34,7 @@ function sha(value: unknown): string {
   if (typeof value !== 'string' || !/^[a-f0-9]{40}$/.test(value)) throw new Error('Invalid SHA');
   return value;
 }
-function repositoryFromRemote(remote: string): string | null {
+export function repositoryFromRemote(remote: string): string | null {
   const value = remote.trim();
   const match =
     /^(?:git@github\.com:|https:\/\/github\.com\/|ssh:\/\/git@github\.com\/)([A-Za-z0-9-]+\/[A-Za-z0-9_.-]+?)(?:\.git)?$/.exec(
@@ -68,9 +70,11 @@ export async function readPullRequestChanges(
     ).stdout;
   }
   try {
-    const remote = await run('git', ['-C', root, 'remote', 'get-url', 'origin'], 4096);
-    if (repositoryFromRemote(remote) !== target.repoFullName)
-      throw new PullRequestChangesReadError('repository_mismatch', 409);
+    if (!dependencies.allowForeignRepository) {
+      const remote = await run('git', ['-C', root, 'remote', 'get-url', 'origin'], 4096);
+      if (repositoryFromRemote(remote) !== target.repoFullName)
+        throw new PullRequestChangesReadError('repository_mismatch', 409);
+    }
     const pull = object(
       JSON.parse(await run('gh', ['api', `repos/${target.repoFullName}/pulls/${target.prNumber}`], 256 * 1024)),
     );

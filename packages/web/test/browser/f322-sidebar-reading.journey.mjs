@@ -5,6 +5,7 @@ import path from 'node:path';
 import { realSurfaceApiResponse } from './f307-real-surface-fixtures.mjs';
 import { createChatProofHarness } from './f322-chat-proof-harness.mjs';
 import { startNativeHost } from './f322-native-reply-next.mjs';
+import { runSidebarScrollJourney } from './f322-sidebar-scroll.journey.mjs';
 import { buildChatProof } from './fixtures/f322-chat-real-page-build.mjs';
 import { createChatProofApi } from './fixtures/f322-chat-real-page-data.mjs';
 
@@ -14,6 +15,7 @@ export async function runSidebarReadingJourney(t, browser) {
   const evidence = process.env.F322_SIDEBAR_READING_EVIDENCE_DIR ?? path.join(os.tmpdir(), 'f322-sidebar-reading');
   mkdirSync(evidence, { recursive: true });
   const built = await buildChatProof();
+  await runSidebarScrollJourney(t, browser, built, evidence);
   for (const [count, deep, keepFacts] of [
     [11, false, false],
     [260, false, false],

@@ -53,6 +53,7 @@ function clearDefaultDraft(): void {
 }
 
 export interface NewConversationAdmission {
+  ownerUserId: string | null;
   ready: boolean;
   loadFailed: boolean;
   localSaveFailed: boolean;
@@ -298,6 +299,7 @@ export function useNewConversationAdmission(onNavigate: (threadId: string) => vo
   );
 
   return {
+    ownerUserId: ready ? ownerRef.current : null,
     ready,
     loadFailed,
     localSaveFailed,

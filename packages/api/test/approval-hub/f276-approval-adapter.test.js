@@ -196,6 +196,7 @@ describe('F276ApprovalAdapter', () => {
     assert.deepEqual(item.detail, {
       displayName: '吴浪',
       materialized: { claims: 1, relationships: 1, events: 0 },
+      canonicalEffectProofRef: 'person-memory-decision:decision_wu_lang',
     });
     assert.doesNotMatch(JSON.stringify(item), /evidenceExcerpt|sourceBundle|privateAliases/);
   });
@@ -241,5 +242,20 @@ describe('F276ApprovalAdapter', () => {
     assert.equal(item.summary, '人物提案（内容已清除）');
     assert.deepEqual(item.detail, { dispositionReason: 'not_important' });
     assert.equal(item.decidedAt, 400);
+    candidate.state = 'withdrawn';
+    candidate.latestUndoReceipt = {
+      candidateId: candidate.candidateId,
+      candidateState: 'withdrawn',
+      verdict: 'undone',
+      undoneAt: 400,
+    };
+    const [undone] = await new F276ApprovalAdapter(store).listSettled('owner-1');
+    assert.equal(undone.status, 'withdrawn');
+    assert.equal(undone.detail.undoApplied, true);
+    assert.equal(undone.detail.displayName, undefined, 'purged names are not recovered for a result sentence');
+    candidate.replacedByProposalId = 'replacement';
+    const [replaced] = await new F276ApprovalAdapter(store).listSettled('owner-1');
+    assert.equal(replaced.status, 'superseded');
+    assert.equal(replaced.detail.undoApplied, undefined, 'a stale Undo does not override a newer closure');
   });
 });

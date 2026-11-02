@@ -6,7 +6,7 @@ description: >
   Not for: 单一任务（直接做）、已有 thread 之间的被动协调（用 cross-thread-sync）、单 session 内 subagent 并行（CLI 内置能力）、发现跨 scope 问题但已有归属 thread（用 cross_post_message，不要新建 thread）。
   Output: 角色与依赖计划、获批子 thread 派发、横向交付与最终回流。
   GOTCHA: projectPath 是子 thread 的工作区/真相源归属，不是外部目标仓；社区 PR review 目标可以是 clowder-ai，但工作区仍可能应继承 cat-cafe。
-tips_exempt: "2026-09-28：星系协作契约只调整既有编排方法，不新增用户操作或 runtime 权限。"
+tips_exempt: "2026-10-22：Task 派发指引只纠正既有编排调用，不新增用户操作或 runtime 权限。"
 triggers:
   - "拆任务"
   - "分 thread"
@@ -132,6 +132,8 @@ object 与 author grounding，再执行 maintainer 五问与 custody 判断。�
 **指挥与代码审阅分开**：子 thread 的执行猫按难度、风险和当前可用性自行选择非作者 reviewer，在子 thread 完成审阅、修复和门禁；不默认把 review 交给主 thread 的指挥猫，也不为选猫或调整 reviewer 逐次请指挥批准。已有审阅保持清楚的责任与目标连续性，替换时收口旧分派，避免重复审查。主 thread 负责产品范围、依赖取舍、整合和体验验收；只有真正超出子 thread 决策边界的冲突才上报。逐条进展都去读源码/trace再发修改意见，即使自称“抽核”，也会把执行闭环收回指挥部。来源：F317 operator `[thread-id]#private-source-id`。
 
 获批且尚未派发时，向真实子 thread 投工作包。**必须包含主 thread ID**，并带授权源、整项交付边界、依赖/单写面和停点。通知不自动转移实现责任；按 `custody-recognition` / `cross-cat-handoff` 核已有责任或使用合法传球载体：
+
+复用旧 thread 只确定执行位置，不证明新批工作已有 Task/approved delegate。结构化实现派发须使用覆盖本批工作的真实 Task.id 和 `terminalPredicate: { kind: "task_done" }`，不能用资产编号代替；完整例子与 `existing_standing` 边界见 `cross-cat-handoff` 的 Action Successor 节。若原任务内的合法执行已经启动，就消费其结果，不再补投重复工作包。
 
 ```
 → cat_cafe_cross_post_message(

@@ -7,6 +7,7 @@ import { approvalMemberCopy } from '@/components/rich/approval-member.shell-copy
 import { proposalCardCopy } from '@/components/rich/proposal-card.shell-copy';
 import { useSidebarProjectionStore } from '@/stores/sidebarProjectionStore';
 import { apiFetch } from '@/utils/api-client';
+import { observeApiSessionOwner } from '@/utils/api-session-identity';
 import { checkShellCopyParity } from '../../__tests__/shell-copy-parity-check';
 import { mailboxEntryCopy } from '../mailbox-entry.shell-copy';
 import { ThreadProposalDecision } from '../ThreadProposalDecision';
@@ -91,6 +92,7 @@ const host: ApprovalHost = {
   originalPlaceAction: <button type="button">在原处打开</button>,
 };
 beforeEach(() => {
+  observeApiSessionOwner('owner');
   useSidebarProjectionStore.setState({ rows: [], pendingThreadCommands: {}, hasCanonicalSnapshot: false });
   registry.known = true;
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);

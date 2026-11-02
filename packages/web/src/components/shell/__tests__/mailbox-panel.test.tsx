@@ -29,7 +29,15 @@ vi.mock('@/stores/chatStore', () => ({
 }));
 vi.mock('@/stores/approvalHubStore', () => {
   // The rail button follows approval decisions through the store (getState/subscribe); nothing is decided in this suite.
-  const state = { fetchPending: data.approvalRefresh, items: [], decisionAttempts: {}, deciding: {}, error: null };
+  const state = {
+    fetchPending: data.approvalRefresh,
+    ensurePending: vi.fn(async () => undefined),
+    pendingRequestVersion: 0,
+    items: [],
+    decisionAttempts: {},
+    deciding: {},
+    error: null,
+  };
   const useApprovalHubStore = (s: (v: typeof state) => unknown) => s(state);
   useApprovalHubStore.getState = () => state;
   useApprovalHubStore.subscribe = () => () => undefined;
@@ -195,11 +203,13 @@ describe('F322 待办 (the mailbox) on the unified read', () => {
     show(ok({ items: [], totalCount: 0, attentionCount: 0 }));
     render();
     open();
-    const ignored = document.querySelector<HTMLButtonElement>('[data-testid="mailbox-open-ignored"]');
+    const history = document.querySelector<HTMLButtonElement>('[data-testid="mailbox-history"]');
+    act(() => history?.click());
+    const ignored = document.querySelector<HTMLButtonElement>('[data-testid="mailbox-history-tab-ignored"]');
     expect(ignored).not.toBeNull();
     act(() => ignored?.click());
-    expect(data.view.setPersonalView).toHaveBeenCalledWith('ignored', 'week');
-    expect(text('mailbox-title')).toBe('已忽略');
+    expect(data.view.setPersonalView).toHaveBeenCalledWith('ignored', 'all');
+    expect(text('mailbox-title')).toBe('已处理的');
   });
 
   it('opens Schedule from the second mailbox tab through the original Workspace destination and closes the panel', () => {
@@ -707,8 +717,8 @@ describe('F322 待办 (the mailbox) on the unified read', () => {
         act(() => toggle(0)?.click());
         expect(text('mailbox-place-note')).toBeNull();
         expect(openOriginal()).toHaveLength(0);
-        expect(text('mailbox-history')).toBe('已处理的 @你');
-        expect(text('mailbox-records')).toBe('审批记录');
+        expect(text('mailbox-history')).toBe('已处理的›');
+        expect(text('mailbox-records')).toBeNull();
       });
 
       it.each([

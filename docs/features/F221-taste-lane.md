@@ -8,12 +8,21 @@ description: "per-user 品味信号的结构化提议、operator 审批、可靠
 description_source: human
 description_author: opus
 description_updated_at: 2026-07-12T12:45:00Z
-tips_exempt: "2026-09-04 续租：修复既有 Taste authority/index/reader 锚点漂移并增加集合守卫；不新增用户可操作入口或学习步骤。"
+tips_exempt: "Renewed 2026-10-23 for F332 consolidation and AC-B12 status correction: existing Taste proposals, Approval Hub decisions and canonical readers remain the entry points. Recording merged code does not claim the pending publication/recovery journey passed; this documentation change adds no user action or surface."
 ---
 
 # F221: Taste Lane — per-user 品味导航
 
-> **Status**: in-progress | **Owner**: Ragdoll | **Priority**: P1
+> **Status**: closed (consolidated into F332; 未完成结果继续承接，非全部交付) | **Owner**: Ragdoll | **Priority**: P1
+
+## 2026-10-23 项目收拢至 F332
+
+You 在 `[thread-id]#private-source-id` 明确要求关闭旧记忆项目、
+保留有价值的结果并新立一项。本项目登记据此归入 [F332](F332-experience-informed-memory.md)；
+**本文件仍保留原合同及历史证据的权威，未被逐项替代的合同继续有效。**
+原 AC 实情、Task、owner、accepted scope 和等待不变；本次不声称全部完成、不关闭来源、不迁移数据。
+
+> **关闭前状态快照**: in-progress | **Owner**: Ragdoll | **Priority**: P1
 
 ## Architecture Ownership
 
@@ -229,7 +238,7 @@ taste 信号（"这不美"/"太客服了"/"aha"/"这就是我要的"）
 - [x] AC-B9: 信号路由 hard test：`propose_profile_update` with taste content -> routing warning
 - [x] AC-B10: 信号路由 soft layer：L0 或 skill 中明确三类信号区分指南
 - [x] AC-B11: Eval 可观测：propose->approve/reject->consume 链路有计数/日志可查
-- [ ] AC-B12: public approval 只在 exact vignette + index commit 已进入 `origin/main` 后 approved；dirty/diverged primary main 不被修改，push 失败/竞争/crash 可恢复（当前 blocker：实现尚未合入 main；合入后以 alpha/真实审批验证完成并同步 Feature Truth）
+- [ ] AC-B12: public approval 只在 exact vignette + index commit 已进入 `origin/main` 后 approved；dirty/diverged primary main 不被修改，push 失败/竞争/crash 可恢复（2026-10-23 纠正：#3980 `3b9646acbe`、#4052 `c8575732e6` 已在 main；真实批准发布/恢复终态仍须消费对应证据，此项按 F332 C4 承接，未自动补绿）
 
 ## 需求点 Checklist
 

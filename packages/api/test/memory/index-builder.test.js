@@ -1005,6 +1005,8 @@ Some content.
     };
     const builder2 = new IndexBuilder(store, docsDir, { embedding: modelB, vectorStore });
     const priorIndexVersion = vectorStore.getMeta().indexing_version;
+    const priorSourceClaims = vectorStore.getMeta().document_source_claims;
+    assert.ok(priorSourceClaims, 'successful rebuild persists scanner source claims');
     assert.equal((await builder2.embedMissingDocumentVectors()).docsEmbedded, 1);
     assert.equal(vectorStore.count(), 1, 'still 1 vector after re-embed');
     assert.equal(vectorStore.getMeta().embedding_model_id, 'model-B', 'meta updated to model-B');
@@ -1012,6 +1014,11 @@ Some content.
       vectorStore.getMeta().indexing_version,
       priorIndexVersion,
       'model switch must preserve scanner version',
+    );
+    assert.equal(
+      vectorStore.getMeta().document_source_claims,
+      priorSourceClaims,
+      'model switch must preserve source identity history',
     );
   });
 

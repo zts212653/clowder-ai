@@ -62,6 +62,7 @@ export function PluginManagerBindings({
       if (mounted.current) setBusy(false);
     }
   };
+  if (bindings.length === 0) return null;
   return (
     <section className="space-y-3" data-plugin-detail-section="bindings">
       <SettingsText as="h4" variant="xs" tone="muted" className="font-semibold">
@@ -72,34 +73,28 @@ export function PluginManagerBindings({
           {error}
         </p>
       )}
-      {bindings.length === 0 ? (
-        <SettingsText as="p" variant="sm" tone="muted">
-          暂无会话绑定。
-        </SettingsText>
-      ) : (
-        <ul className="space-y-3">
-          {bindings.map((binding) => (
-            <li key={binding.key} className="flex items-start gap-3">
-              <div className="min-w-0 flex-1">
-                <a className="console-inline-link break-all" href={`/thread/${encodeURIComponent(binding.threadId)}`}>
-                  {binding.threadTitle ?? binding.threadId}
-                </a>
-                <SettingsText as="p" variant="xs" tone="muted" className="break-all">
-                  {binding.key}
-                </SettingsText>
-              </div>
-              <button
-                type="button"
-                disabled={busy || !confirm}
-                className="console-inline-link shrink-0 disabled:opacity-50"
-                onClick={() => void disconnect(binding)}
-              >
-                断开绑定
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+      <ul className="space-y-3">
+        {bindings.map((binding) => (
+          <li key={binding.key} className="flex items-start gap-3">
+            <div className="min-w-0 flex-1">
+              <a className="console-inline-link break-all" href={`/thread/${encodeURIComponent(binding.threadId)}`}>
+                {binding.threadTitle ?? binding.threadId}
+              </a>
+              <SettingsText as="p" variant="xs" tone="muted" className="break-all">
+                {binding.key}
+              </SettingsText>
+            </div>
+            <button
+              type="button"
+              disabled={busy || !confirm}
+              className="console-inline-link shrink-0 disabled:opacity-50"
+              onClick={() => void disconnect(binding)}
+            >
+              断开绑定
+            </button>
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }

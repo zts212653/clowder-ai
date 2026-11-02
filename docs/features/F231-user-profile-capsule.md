@@ -4,12 +4,21 @@ related_features: [F221, F203, F102, F200, F229, F260, F263, F287, F296, F312]
 topics: [user-profile-capsule, per-user-alignment, l0-layering, relationship-distillation, nurturing-moat]
 doc_kind: spec
 created: 2026-06-11
-tips_exempt: "Renewed 2026-09-07 after Phase E implementation: corpus layer adds owner-wide shared facts via cat-initiated propose_profile_update(targetLayer:'corpus'), approved by operator in Approval Hub. This is internal cat infrastructure — no new user-facing action or surface to advertise."
+tips_exempt: "Renewed 2026-10-23 for F332 consolidation: capsule and authenticated Profile reads, cat-initiated profile proposals and existing Approval Hub decisions retain their current contracts. This project-status consolidation does not activate a new context projection, approve persona migration or add a user-facing entry."
 ---
 
 # F231: 启动胶囊 — per-user 画像注入与 L0 分层
 
-> **Status**: in-progress (Phase C 功能性完成；Phase D topology 代码已合入；live migration apply 暂停——relationship granularity 于 2026-07-12 重新打开，不能再把 individual primer 冲突预设为待合并内容) ；Phase E（shared profile corpus / owner-wide 层）**merged** PR #4416（squash `f7f0338bf7`，2026-09-08）——AC-E1/E2/E3 ✅） | **Owner**: Ragdoll（Ragdoll Fable-5）；topology repair owner: Maine Coon Sol | **Priority**: P1
+> **Status**: closed (consolidated into F332; 未完成结果继续承接，非全部交付) | **Owner**: Ragdoll（Ragdoll Fable-5）；topology repair owner: Maine Coon Sol | **Priority**: P1
+
+## 2026-10-23 项目收拢至 F332
+
+You 在 `[thread-id]#private-source-id` 明确要求关闭旧记忆项目、
+保留有价值的结果并新立一项。本项目登记据此归入 [F332](F332-experience-informed-memory.md)；
+**本文件仍保留原合同及历史证据的权威，未被逐项替代的合同继续有效。**
+原 AC 实情、Task、owner、accepted scope 和等待不变；本次不声称全部完成、不关闭来源、不迁移数据。
+
+> **关闭前状态快照**: in-progress (Phase C 功能性完成；Phase D topology 代码已合入；live migration apply 暂停——relationship granularity 于 2026-07-12 重新打开，不能再把 individual primer 冲突预设为待合并内容) ；Phase E（shared profile corpus / owner-wide 层）**merged** PR #4416（squash `f7f0338bf7`，2026-09-08）——AC-E1/E2/E3 ✅） | **Owner**: Ragdoll（Ragdoll Fable-5）；topology repair owner: Maine Coon Sol | **Priority**: P1
 
 ## Architecture Ownership
 

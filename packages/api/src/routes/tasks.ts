@@ -1,3 +1,6 @@
+import { adoptOrdinaryTaskTenant } from '../domains/ball-custody/adopt-ordinary-task-tenant.js';
+import { OrdinaryTaskHandoffError } from '../domains/ball-custody/OrdinaryTaskHandoffContract.js';
+import type { OrdinaryTaskHandoffService } from '../domains/ball-custody/OrdinaryTaskHandoffService.js';
 import type { PreparedArtifactReader } from '../domains/growing/ports/PreparedArtifactReader.js';
 /**
  * Task CRUD Routes (毛线球)
@@ -14,8 +17,13 @@ import { catIdSchema, entrustedWorkHumanDecisionV1Schema } from '@cat-cafe/share
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { MAX_BALL_CUSTODY_HTTP_PROBE_TIMEOUT_MS } from '../domains/ball-custody/BallCustodyProbeTaskSpec.js';
+import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
-import { isEntrustedWorkTerminalActionRequiredError } from '../domains/cats/services/stores/ports/TaskStoreContract.js';
+import {
+  isEntrustedWorkTerminalActionRequiredError,
+  isOrdinaryImplementTask,
+} from '../domains/cats/services/stores/ports/TaskStoreContract.js';
+import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import {
   EntrustedWorkHumanTerminalError,
   type EntrustedWorkHumanTerminalResult,
@@ -30,9 +38,13 @@ import {
   resolveStrictUserId,
   resolveUserId,
 } from '../utils/request-identity.js';
+import { updateOrdinaryTaskAsHuman } from './task-native-human-update.js';
 
 export interface TasksRoutesOptions {
   taskStore: ITaskStore;
+  threadStore?: Pick<IThreadStore, 'get'>;
+  ordinaryTaskHandoffs?: OrdinaryTaskHandoffService;
+  messageStore?: Pick<IMessageStore, 'appendIdempotent' | 'getByIdempotencyKey' | 'getById'>;
   socketManager: SocketManager;
   artifactReader?: PreparedArtifactReader;
   deploymentWaitLifecycleHolder?: { current?: DeploymentWaitLifecycleService };
@@ -110,6 +122,7 @@ const createSchema = z.object({
 
 const updateSchema = z
   .object({
+    expectedOwnerRevision: z.number().int().nonnegative().optional(),
     title: z.string().min(1).max(200).optional(),
     ownerCatId: catIdSchema().nullable().optional(),
     status: z.enum(VALID_STATUSES).optional(),
@@ -149,24 +162,6 @@ function toUpdateInput(data: z.infer<typeof updateSchema>): UpdateTaskInput {
   return input;
 }
 
-async function terminalizeDeploymentWaitForPatch(
-  task: TaskItem | null,
-  patch: { readonly ownerCatId?: string | null; readonly status?: TaskItem['status'] },
-  holder: TasksRoutesOptions['deploymentWaitLifecycleHolder'],
-): Promise<void> {
-  if (
-    task?.kind !== 'work' ||
-    (!task.deploymentWait?.await && task.deploymentWait?.waitOutcome?.delivery !== 'pending')
-  ) {
-    return;
-  }
-  if (patch.ownerCatId !== undefined && patch.ownerCatId !== task.ownerCatId) {
-    await holder?.current?.ownerChanged(task.id);
-    return;
-  }
-  if (patch.status === 'done') await holder?.current?.taskCompleted(task.id);
-}
-
 function humanTerminalHttpStatus(error: EntrustedWorkHumanTerminalError): 403 | 404 | 409 | 503 {
   if (error.code === 'HUMAN_TERMINAL_NOT_FOUND') return 404;
   if (error.code === 'HUMAN_TERMINAL_FORBIDDEN') return 403;
@@ -196,7 +191,9 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
       return { error: 'Invalid request body', details: result.error.issues };
     }
 
-    const task = await taskStore.create(toCreateInput(result.data));
+    const userId = resolveUserId(request);
+    if (!userId) return reply.code(401).send({ error: 'Identity required' });
+    const task = await taskStore.create({ ...toCreateInput(result.data), userId });
     socketManager.broadcastToRoom(`thread:${task.threadId}`, 'task_created', task);
 
     reply.status(201);
@@ -236,12 +233,42 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
       return { error: 'Invalid request body', details: result.error.issues };
     }
 
-    const before = await taskStore.get(id);
-    await terminalizeDeploymentWaitForPatch(before, result.data, opts.deploymentWaitLifecycleHolder);
+    let before = await taskStore.get(id);
+    if (before && isOrdinaryImplementTask(before)) {
+      const userId = resolveUserId(request);
+      const adopted = userId
+        ? await adoptOrdinaryTaskTenant({ task: before, userId, tasks: taskStore, threads: opts.threadStore })
+        : null;
+      if (!adopted) return reply.code(403).send({ error: 'Task owner identity required' });
+      before = adopted;
+    }
+    // Task aggregate reconciles deployment waits inside the same successful write.
+    // A rejected assignment must not terminalize a wait as a preliminary side effect.
     let updated: TaskItem | null;
     try {
-      updated = await taskStore.update(id, toUpdateInput(result.data));
+      if (before && isOrdinaryImplementTask(before)) {
+        const userId = resolveUserId(request);
+        if (!userId || userId !== before.userId) return reply.code(403).send({ error: 'Task owner identity required' });
+        const mutation = await updateOrdinaryTaskAsHuman({
+          task: before,
+          userId,
+          patch: toUpdateInput(result.data),
+          expectedOwnerRevision: result.data.expectedOwnerRevision,
+          tasks: taskStore,
+          messages: opts.messageStore,
+          handoffs: opts.ordinaryTaskHandoffs,
+        });
+        if (mutation.kind !== 'updated' && mutation.kind !== 'replayed')
+          return reply.code(409).send({
+            error: 'Task assignment changed',
+            reason: mutation.kind === 'refused' ? mutation.reason : 'not_found',
+          });
+        updated = mutation.task;
+      } else updated = await taskStore.update(id, toUpdateInput(result.data));
     } catch (error) {
+      if (error instanceof Error && error.message.startsWith('TASK_EXECUTION_MUST_STOP'))
+        return reply.code(409).send({ error: error.message });
+      if (error instanceof OrdinaryTaskHandoffError) return reply.code(409).send({ error: error.code });
       if (isEntrustedWorkTerminalActionRequiredError(error)) {
         reply.status(409);
         return {
@@ -255,6 +282,8 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
       reply.status(404);
       return { error: 'Task not found' };
     }
+
+    await opts.deploymentWaitLifecycleHolder?.current?.recordTaskMutationOutcome(updated);
 
     socketManager.broadcastToRoom(`thread:${updated.threadId}`, 'task_updated', updated);
 
@@ -366,10 +395,20 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
   // DELETE /api/tasks/:id
   app.delete('/api/tasks/:id', async (request, reply) => {
     const { id } = request.params as { id: string };
+    const current = await taskStore.get(id);
+    if (current && isOrdinaryImplementTask(current)) {
+      const userId = resolveUserId(request);
+      const adopted = userId
+        ? await adoptOrdinaryTaskTenant({ task: current, userId, tasks: taskStore, threads: opts.threadStore })
+        : null;
+      if (!adopted) return reply.code(403).send({ error: 'Task owner identity required' });
+    }
     let deleted: boolean;
     try {
       deleted = await taskStore.delete(id);
     } catch (error) {
+      if (error instanceof Error && error.message.startsWith('TASK_EXECUTION_MUST_STOP'))
+        return reply.code(409).send({ error: error.message });
       if (!isEntrustedWorkTerminalActionRequiredError(error)) throw error;
       reply.status(409);
       return {

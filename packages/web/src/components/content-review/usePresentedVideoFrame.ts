@@ -1,5 +1,5 @@
 'use client';
-import { type RefObject, useCallback, useEffect, useState } from 'react';
+import { type RefObject, useCallback, useEffect, useRef, useState } from 'react';
 import { useArtworkVideoPosition } from './ArtworkMediaViewport';
 
 type PresentedFrame = { mediaTime: number; observedPlayhead: number };
@@ -43,7 +43,7 @@ export function usePresentedVideoFrame(videoRef: RefObject<HTMLVideoElement>, sr
     const video = videoRef.current;
     if (video) setSeeking(video.seeking);
   }, [videoRef]);
-  const seekTo = useCallback(
+  const place = useCallback(
     (position: number, options?: { pause?: boolean }) => {
       const video = videoRef.current;
       if (!video) return;
@@ -55,6 +55,19 @@ export function usePresentedVideoFrame(videoRef: RefObject<HTMLVideoElement>, sr
     },
     [videoRef],
   );
-  useArtworkVideoPosition(videoRef, identity, src, seekTo);
+  // A place, chapter or discussion the person asked for outranks where this source was last left.
+  const requested = useRef(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: each loaded source starts without a request.
+  useEffect(() => {
+    requested.current = false;
+  }, [src, identity]);
+  const seekTo = useCallback(
+    (position: number, options?: { pause?: boolean }) => {
+      requested.current = true;
+      place(position, options);
+    },
+    [place],
+  );
+  useArtworkVideoPosition(videoRef, identity, src, place, requested);
   return { frameTime: seeking ? null : (frame?.mediaTime ?? null), onSeeking, onSeeked, seekTo };
 }

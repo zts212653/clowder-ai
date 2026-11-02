@@ -12,6 +12,7 @@ import { MessageStore } from '../dist/domains/cats/services/stores/ports/Message
 import { TaskStore } from '../dist/domains/cats/services/stores/ports/TaskStore.js';
 import { ThreadStore } from '../dist/domains/cats/services/stores/ports/ThreadStore.js';
 import { F232PreparedArtifactReader } from '../dist/domains/growing/F232PreparedArtifactReader.js';
+import { withCurrentOwnerOperation } from '../dist/domains/plugin/carrier/plugin-owner-operation-context.js';
 import { createPluginMessagingHost } from '../dist/domains/plugin/host-surface/plugin-messaging-host.js';
 import { createPluginThreadHost } from '../dist/domains/plugin/host-surface/plugin-thread-host.js';
 import { createPluginTaskHost } from '../dist/domains/plugin/host-surface/task/plugin-task-host.js';
@@ -23,7 +24,7 @@ import { collectiveServiceFixture } from './helpers/f202-collective-service-fixt
 
 const matrixPath = process.env.F202_CANDIDATE_MATRIX;
 test(
-  'frozen Collective Work creates, attaches and closes one real Host Task; absent grant refuses mutations',
+  'frozen Collective Work keeps one real Host Task through close and same-instance lifecycle advance',
   {
     skip: !matrixPath && process.env.F202_ARTIFACT_GATE_REQUIRED !== '1',
     timeout: 60000,
@@ -49,36 +50,45 @@ test(
     const work = await f.connector.acceptWork(f.source, f.agent, f.input);
     await f.connector.sync(f.connection.connectionId);
     const manifest = parse(await readFile(join(packageRoot, 'plugin.yaml'), 'utf8'));
+    let controllerAuthority = {
+      pluginId: manifest.pluginId,
+      pluginInstanceId,
+      moduleRef: `plugin:${manifest.pluginId}`,
+      lifecycleRevision: 1,
+    };
+    const admission = {
+      messageStore: messages,
+      isCatAvailable: (id) => id === 'codex',
+      assertCurrent: async () => {},
+      readCurrentDataControllerAuthority: async () => ({ ...controllerAuthority }),
+      withCurrentDataControllerAuthority: async (run) => run({ ...controllerAuthority }),
+    };
     const deps = {
       pluginId: manifest.pluginId,
       pluginInstanceId,
       ownerUserId,
-      effectiveGrants: ['task.read', 'task.write', 'task.admitEntrusted'],
       taskStore: tasks,
       threadStore: threads,
       readThreadStore: threads,
       assertCurrent: async () => {},
       artifactReader: new F232PreparedArtifactReader({ messages }),
-      admission: { messageStore: messages, isCatAvailable: (id) => id === 'codex', assertCurrent: async () => {} },
+      admission,
     };
     const taskHost = createPluginTaskHost(deps);
-    const denied = createPluginTaskHost({ ...deps, effectiveGrants: ['task.read', 'task.write'] });
     const reader = createPluginMessagingHost({
       ...deps,
       manifest,
       messageStore: messages,
-      effectiveGrants: ['thread.readContent'],
       messaging: {},
     });
     const records = new Map();
     const sent = new Map();
     const context = {
       pluginInstanceId,
-      tasks: denied,
+      tasks: taskHost,
       threads: createPluginThreadHost({
         ...deps,
         projectPath: f.root,
-        effectiveGrants: ['thread.read', 'thread.list', 'thread.readContent', 'thread.write'],
         threadDeepLinkUrl: (id) => `https://fixture.invalid/thread/${id}`,
         cats: {
           getAllCatIds: () => ['codex'],
@@ -133,15 +143,39 @@ test(
     const caller = workModule.createCollectiveMessageWorkCaller(f.connector, context);
     const subject = `collective-work:${f.connection.connectionId}:${work.workId}`;
     const send = () => caller.send(f.connection.connectionId, work.assignmentEventId, ownerUserId, async () => {});
-    await assert.rejects(send(), /task.admitEntrusted/);
-    assert.equal(tasks.getBySubject(subject), null);
-    context.tasks = taskHost;
     const wake = await send();
     const task = await taskHost.get({ subjectKey: subject });
     assert.ok(task?.entrustedWork);
     assert.notEqual(task.threadId, channel.id);
     assert.equal(threads.get(task.threadId).parentThreadId, channel.id);
     assert.equal((await send()).messageId, wake.messageId);
+    const ownerOperation = {
+      kind: 'owner-operation',
+      userId: ownerUserId,
+      pluginInstanceId,
+      operationKey: 'work',
+      actionId: 'bind-original-task',
+      requestId: 'bind-original-task-controller',
+      confirmed: true,
+      signal: new AbortController().signal,
+      assertWriteCurrent: () => {},
+      assertCurrent: async () => {},
+    };
+    const bound = await withCurrentOwnerOperation(ownerOperation, () =>
+      taskHost.bindDataController({
+        taskId: task.id,
+        expectedTaskRevision: task.entrustedWork.revision,
+        operationId: 'bind-original-task-controller',
+        expected: {
+          ownerCatId: task.ownerCatId,
+          threadId: task.threadId,
+          subjectKey: task.subjectKey,
+          firstSourceRef: task.entrustedWork.admission.sourceRefs[0],
+          admissionAuthorityRef: task.entrustedWork.admission.authorityRef,
+        },
+      }),
+    );
+    assert.equal(bound.task.entrustedWork.dataController.currentForCaller, true);
     const action = {
       userId: ownerUserId,
       catId: 'codex',
@@ -161,9 +195,6 @@ test(
       extra: { rich: { blocks: [{ kind: 'file', v: 1, id: 'report', fileName: 'report.md', url: artifactRef }] } },
     });
     await caller.withCurrentMessage(action, async (binding) => {
-      context.tasks = denied;
-      await assert.rejects(binding.registerArtifactRefs(binding.work.revision, [artifactRef]), /task.admitEntrusted/);
-      context.tasks = taskHost;
       await binding.registerArtifactRefs(binding.work.revision, [artifactRef]);
       assert.deepEqual((await taskHost.get({ id: task.id })).entrustedWork.artifactRefs, [artifactRef]);
     });
@@ -227,12 +258,14 @@ test(
         result,
         async () => {},
       );
-    context.tasks = denied;
-    await assert.rejects(reconcile(), /task.admitEntrusted/);
-    assert.notEqual((await taskHost.get({ id: task.id })).status, 'done');
-    context.tasks = taskHost;
     assert.equal((await reconcile()).result, 'closed');
     assert.equal((await reconcile()).result, 'already_closed');
+    const beforeLifecycleAdvance = structuredClone(tasks.get(task.id));
+    controllerAuthority = { ...controllerAuthority, lifecycleRevision: controllerAuthority.lifecycleRevision + 1 };
+    const afterLifecycleAdvance = await taskHost.get({ id: task.id });
+    assert.equal(afterLifecycleAdvance?.entrustedWork?.dataController?.currentForCaller, false);
+    assert.equal((await reconcile()).result, 'already_closed');
+    assert.deepEqual(tasks.get(task.id), beforeLifecycleAdvance);
     const closed = await taskHost.get({ id: task.id });
     assert.equal(closed.status, 'done');
     assert.deepEqual(closed.entrustedWork.artifactRefs, [artifactRef]);

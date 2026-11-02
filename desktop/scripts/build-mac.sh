@@ -66,11 +66,16 @@ bold "Step 1/6 — Build web application"
 if [[ $SKIP_WEB -eq 0 ]]; then
   cd "$PROJECT_ROOT"
   pnpm install --frozen-lockfile || die "Frozen dependency installation failed"
-  pnpm run build
+  # API's standalone build re-emits shared output; finish it before Web reads it.
+  CAT_CAFE_DESKTOP_WEB_BUILD=1 pnpm -r --workspace-concurrency=1 run build
   ok "Web application built"
 else
   ok "Skipped (--skip-web)"
 fi
+
+# A reused ordinary Web build must not bypass the Desktop image profile.
+WEB_BUILD_REVISION="$(git -C "$PROJECT_ROOT" rev-parse HEAD)"
+node "$SCRIPT_DIR/verify-web-build.cjs" "$PROJECT_ROOT/packages/web" "$WEB_BUILD_REVISION" || die "Desktop Web admission failed; rebuild instead of reusing incompatible artifacts"
 
 # ─── Step 2: frozen runtime packages ──────────────────────────────
 bold "Step 2/6 — frozen runtime packages"
@@ -97,6 +102,9 @@ else
   [[ -d "$DEPLOY_ROOT" ]] || die "bundled/deploy/ missing. Run without --skip-deploy first."
   ok "Skipped (--skip-deploy)"
 fi
+
+# This is the Web tree electron-builder actually packages, including reuse.
+node "$SCRIPT_DIR/verify-web-build.cjs" "$DEPLOY_ROOT/web" "$WEB_BUILD_REVISION" || die "Desktop deploy Web admission failed; rebuild instead of reusing incompatible artifacts"
 
 # ─── Step 3: Bundle Node.js portable (both archs) ──────────────────────
 bold "Step 3/6 — Bundle Node.js portable (arm64 + x64)"
@@ -230,7 +238,9 @@ rm -rf "${DESKTOP_DIR}/dist"
 # Build .app bundles only (--dir). electron-builder's built-in dmgbuild
 # under-allocates disk image size when afterPack injects large node_modules,
 # causing "No space left on device". We create DMGs ourselves via hdiutil.
-EB_ARGS=("--mac" "dir")
+# Keep the source checkout clean; the requested version belongs to the package.
+VERSION="${CATCAFE_VERSION:-$(node -p "require('./package.json').version")}"
+EB_ARGS=("--mac" "dir" "--config.extraMetadata.version=$VERSION")
 for arch in "${ARCHS[@]}"; do
   EB_ARGS+=("--$arch")
 done
@@ -271,7 +281,6 @@ done
 # prevents ejection. main.js has a runtime guard for this case, but a clear
 # install UI prevents the user from ever hitting that error path.
 mkdir -p "$DIST_DIR"
-VERSION="$(node -p "require('./package.json').version")"
 
 # Creates a simple green drag arrow background for the install DMG using only
 # Python's standard library, avoiding external image dependencies on build
@@ -397,7 +406,7 @@ for arch in "${ARCHS[@]}"; do
   #   2. Convert the writable image to compressed UDZO for distribution.
   rw_dmg="$(mktemp -u).dmg"
   echo "  Creating writable staging DMG for ${arch} ..."
-  hdiutil create -volname "Clowder AI" -srcfolder "$dmg_staging" -ov \
+  hdiutil create -puppetstrings -volname "Clowder AI" -srcfolder "$dmg_staging" -ov \
     -fs HFS+ -format UDRW "$rw_dmg" \
     || die "hdiutil create (writable) failed for ${arch}"
   rm -rf "$dmg_staging"

@@ -216,6 +216,42 @@ terms:
     note: "Allowed in internal docs; public phrasing should be product/team language unless explicitly branded."
 
 path_policies:
+  - pattern: "CLAUDE.opensource.md"
+    outbound: sanitize
+    inbound: public-source
+    risk: P1
+    reason: "Canonical public agent guide; reviewed community edits port here."
+
+  - pattern: "CLAUDE.md"
+    outbound: generate-and-sanitize
+    inbound: manual-port
+    risk: P1
+    reason: "Home harness stays home; public guide changes port to CLAUDE.opensource.md."
+
+  - pattern: "AGENTS.opensource.md"
+    outbound: sanitize
+    inbound: public-source
+    risk: P1
+    reason: "Canonical public agent guide; reviewed community edits port here."
+
+  - pattern: "AGENTS.md"
+    outbound: generate-and-sanitize
+    inbound: manual-port
+    risk: P1
+    reason: "Home harness stays home; public guide changes port to AGENTS.opensource.md."
+
+  - pattern: "GEMINI.opensource.md"
+    outbound: sanitize
+    inbound: public-source
+    risk: P1
+    reason: "Canonical public agent guide; reviewed community edits port here."
+
+  - pattern: "GEMINI.md"
+    outbound: generate-and-sanitize
+    inbound: manual-port
+    risk: P1
+    reason: "Home harness stays home; public guide changes port to GEMINI.opensource.md."
+
   - pattern: "assets/system-prompts/**"
     outbound: sanitize
     inbound: manual-port

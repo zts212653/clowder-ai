@@ -110,7 +110,7 @@ export const homeCopy = defineShellCopy(
         changedFiles: (count: number) => `${count} 个文件`,
         noMatch: '没有找到匹配的内容',
         // Only places verified reachable in the new shell (headers, mailbox, settings), not the design's wishful sentence.
-        signpost: '任务和作品在对话顶栏；审批和需要我处理在待办；成员、账户和配置在设置与管理。',
+        signpost: '毛线球、作品在对话顶栏；审批和需要我处理在待办；成员、账户和配置在设置与管理。',
         // Two entries whose final homes are not wired yet (north-star §1.8, 10-03): each says where it belongs and, until
         // that is connected, opens from here. The link ends the sentence in both languages, so `tail` is the full stop.
         transitional: {
@@ -137,6 +137,7 @@ export const homeCopy = defineShellCopy(
       // Name and one-line description of each tool row. What a row opens is not here (home-rows.ts hands the host the same
       // destination object the classic launcher does); the words only.
       rows: {
+        tasks: { label: '毛线球', description: '当前对话的毛线球与状态' },
         files: { label: '文件与代码', description: '按目录浏览项目文件' },
         changes: { label: '变更', description: '工作区里已修改的文件' },
         git: { label: 'Git', description: '分支、提交与仓库状态' },
@@ -279,6 +280,7 @@ export const homeCopy = defineShellCopy(
         },
       },
       rows: {
+        tasks: { label: 'Tasks', description: 'Tasks and their status in this conversation' },
         files: { label: 'Files & code', description: 'Browse project files by folder' },
         changes: { label: 'Changes', description: 'Files modified in the workspace' },
         git: { label: 'Git', description: 'Branches, commits and repository status' },

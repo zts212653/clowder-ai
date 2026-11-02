@@ -73,6 +73,8 @@ for (const language of ['zh', 'en'] as const)
       root.render(<RetainedResult session={session} sessions={sessions} />);
     });
     expect(container.textContent).toContain(language === 'zh' ? zh : en);
+    expect(container.querySelector('[data-testid="decision-result-details"]')).toBeNull();
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-expanded="false"]')?.click());
     expect(container.textContent).toContain('Human fact');
     expect(container.textContent).not.toContain('cognitive-honesty');
     expect(container.textContent).not.toContain('(concept)');

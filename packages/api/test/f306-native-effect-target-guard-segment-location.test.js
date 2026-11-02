@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync as removeFixture, symlinkS
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, describe, test } from 'node:test';
+import { assertGuardedOrUnproved } from './helpers/native-effect-policy-assertions.js';
 
 const { decideNativeHookPayload } = await import('../../../scripts/native-effect-target-guard.mjs');
 const { segmentLocations } = await import('../../../scripts/native-effect-segment-locations.mjs');
@@ -69,7 +70,7 @@ describe('F306 AC-C7: each segment is judged where it runs, not against the whol
       [`cd /tmp || git reset --hard`, runtimeRoot],
     ]) {
       const decision = decideBoth(command, cwd);
-      assert.equal(decision.decision, 'deny', `${command} (cwd ${cwd}) → ${decision.reasonCode}`);
+      assertGuardedOrUnproved(decision, `${command} (cwd ${cwd}) → ${decision.reasonCode}`);
     }
   });
 

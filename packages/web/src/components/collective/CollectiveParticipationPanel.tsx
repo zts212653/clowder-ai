@@ -39,7 +39,7 @@ export function CollectiveParticipationContent({
   readonly workPolicy?: CollectiveWorkPolicyState;
   readonly surface?: 'all' | 'roster' | 'work' | 'policy';
 }) {
-  const { view, busy, error, notice, mutate, reload } = state;
+  const { view, busy, error, notice, mutate, recoverReply, reload } = state;
   const channelIds = useMemo(() => [...new Set([...channels, channelId])].sort(), [channelId, channels]);
   const requests =
     view?.requests.filter(
@@ -81,6 +81,7 @@ export function CollectiveParticipationContent({
               mutate={async (path, body) => {
                 await mutate(path, body);
               }}
+              recoverReply={recoverReply}
               control={participationControl}
             />
           )}

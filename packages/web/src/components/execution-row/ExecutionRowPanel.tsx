@@ -123,6 +123,7 @@ export function ExecutionRowPanel({ controller }: { controller: ExecutionRowCont
     <div
       data-testid="execution-row-panel"
       className="absolute inset-x-0 bottom-full z-20 max-h-[50vh] overflow-y-auto rounded-t-xl border border-b-0 shadow-lg"
+      data-chat-background-surface="cafe"
       style={{ background: 'var(--cafe-surface)', borderColor: 'var(--cafe-border, currentColor)' }}
     >
       <RunningSection controller={controller} words={words} />

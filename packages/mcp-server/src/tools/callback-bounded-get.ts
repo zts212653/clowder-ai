@@ -1,6 +1,7 @@
 import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { errorResult, successResult, type ToolResult } from './file-tools.js';
+import { resolveInvocationRequestSignal } from './invocation-auth.js';
 
 export interface CallbackReadBudget {
   timeoutMs: number;
@@ -29,6 +30,7 @@ export function boundedCallbackGet(
   headers: Record<string, string>,
   budget: CallbackReadBudget,
 ): Promise<{ status: number; body: string }> {
+  const signal = resolveInvocationRequestSignal(budget.signal);
   if (
     !Number.isInteger(budget.timeoutMs) ||
     budget.timeoutMs < 1 ||
@@ -50,7 +52,7 @@ export function boundedCallbackGet(
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      budget.signal?.removeEventListener('abort', abort);
+      signal?.removeEventListener('abort', abort);
       response?.destroy();
       request?.destroy();
       if (error) reject(error);
@@ -59,11 +61,11 @@ export function boundedCallbackGet(
     function abort() {
       finish(new Error('Callback read cancelled'));
     }
-    if (budget.signal?.aborted) {
+    if (signal?.aborted) {
       abort();
       return;
     }
-    budget.signal?.addEventListener('abort', abort, { once: true });
+    signal?.addEventListener('abort', abort, { once: true });
     try {
       const target = new URL(url);
       if (target.protocol !== 'http:' && target.protocol !== 'https:') throw new Error('Unsupported callback protocol');

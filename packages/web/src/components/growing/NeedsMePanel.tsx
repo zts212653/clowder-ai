@@ -102,7 +102,7 @@ export function NeedsMePanel({
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <p className="text-micro font-bold uppercase tracking-[0.16em] text-cafe-muted">Needs Me</p>
-            {(projection.loading && !projection.confirmed) || projection.error ? null : (
+            {(projection.loading && !projection.confirmed) || projection.error || projection.partial ? null : (
               <span
                 data-testid="needs-me-count"
                 className="rounded-full bg-cafe-surface px-2 py-0.5 text-micro font-semibold text-cafe-secondary"
@@ -131,7 +131,12 @@ export function NeedsMePanel({
           暂时无法读取需要你判断的事；任务和准备好的内容仍然保留，请稍后刷新。
         </div>
       ) : null}
-      {!projection.loading && !projection.error && items.length === 0 ? (
+      {projection.partial ? (
+        <output className="mt-6 block rounded-xl border border-cafe-subtle p-4 text-sm text-cafe-secondary">
+          部分待办来源暂不可用。已读取的待办仍可处理，完整结果恢复后会自动补齐。
+        </output>
+      ) : null}
+      {!projection.loading && !projection.error && !projection.partial && items.length === 0 ? (
         <div className="mt-6 rounded-xl border border-dashed border-cafe-subtle px-6 py-12 text-center">
           <p
             className="text-cafe-black text-[length:var(--console-font-2xl)] leading-[1.25]"

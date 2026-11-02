@@ -4,6 +4,20 @@ import { createRoot } from 'react-dom/client';
 import { expect, it, vi } from 'vitest';
 import { VideoWorkSidebar } from '../VideoWorkSidebar';
 
+it('releases the sidebar width when this version has neither chapters nor subtitles', async () => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  const host = document.createElement('div'),
+    root = createRoot(host);
+  try {
+    await act(async () =>
+      root.render(<VideoWorkSidebar record={null} loading={false} error={null} onSeek={vi.fn()} />),
+    );
+    expect(host.querySelector('aside')).toBeNull();
+  } finally {
+    await act(async () => root.unmount());
+  }
+});
+
 it('story and material are views of one fixed version; no story is required to watch a film', async () => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   const container = document.createElement('div');
@@ -56,7 +70,7 @@ it('story and material are views of one fixed version; no story is required to w
     await act(async () =>
       root.render(<VideoWorkSidebar record={null} loading={false} error="索引读取失败" onSeek={seek} />),
     );
-    expect(container.textContent).toContain('索引读取失败');
+    expect(container.querySelector('aside')).toBeNull(); // Read failures live in the player's top bar, without reserving a column.
     expect(container.textContent).not.toContain('尚未登记');
   } finally {
     await act(async () => root.unmount());

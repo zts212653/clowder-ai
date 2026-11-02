@@ -29,7 +29,6 @@ export async function installCollectiveNativeFixture({ app, f, registry, message
     pluginInstanceId: instanceId,
     ownerUserId: message.userId,
     manifest,
-    effectiveGrants: ['thread.readContent'],
     messageStore: messages,
     threadStore: threads,
     messaging: {},
@@ -53,7 +52,6 @@ export async function installCollectiveNativeFixture({ app, f, registry, message
       configReadiness: 'ready',
     },
     packageRecord: { manifest },
-    effectiveGrants: manifest.features.flatMap((feature) => feature.capabilities),
   };
   const carrier = createModuleHostInvocation({ runtime: { actions: () => actions } });
   const nativeActions = new NativePluginActions(async () => admission);

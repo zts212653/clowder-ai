@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { assertGuardedOrUnproved } from './helpers/native-effect-policy-assertions.js';
 
 const { decideNativeHookPayload } = await import('../../../scripts/native-effect-target-guard.mjs');
 const { constrainedGhPullRequestOperation } = await import('../../../scripts/native-effect-repository-classifier.mjs');
@@ -249,7 +250,7 @@ describe('F306 scheduled-eval native guard closure', () => {
     assert.equal(decide(command).decision, 'allow', command);
   });
 
-  test('keeps unsupported mutations fail-closed when the invocation target is protected', () => {
+  test('unsupported commands stay unproved and recognised protected mutations refuse', () => {
     for (const command of [
       'date 010100002026',
       'node -e "process.stdout.write(String(Date.now()))"',
@@ -310,7 +311,7 @@ describe('F306 scheduled-eval native guard closure', () => {
       'stat .cat-cafe/evidence.sqlite & node -e "process.exit(0)"',
       'stat .cat-cafe/evidence.sqlite && curl -X DELETE http://127.0.0.1:3012/api/tasks/1',
     ]) {
-      assert.equal(decide(command).decision, 'deny', command);
+      assertGuardedOrUnproved(decide(command), command);
     }
   });
 

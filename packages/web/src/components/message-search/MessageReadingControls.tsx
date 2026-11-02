@@ -1,3 +1,6 @@
+import { useChatStore } from '@/stores/chatStore';
+import { useShellPresentation } from '../shell/shell-presentation';
+import { useF307ExperienceWorkbenchStore } from '../workbench/experience-workbench-store';
 import type { MessageReadingTrip } from './message-reading-trip';
 import type { MessageSearchHost } from './useMessageSearchHost';
 
@@ -20,7 +23,26 @@ function progressLabel(trip: MessageReadingTrip): string {
 
 export function MessageReadingControls({ host }: { host: MessageSearchHost }) {
   const trip = host.session?.trip;
+  const journey6 = useShellPresentation() === 'v2';
+  const findReturn = !!host.session?.find;
+  const originTitle = useChatStore(
+    (state) => state.threads.find((thread) => thread.id === trip?.origin.threadId)?.title,
+  );
+  const foregroundId = useChatStore((state) =>
+    state.rightPanelOpen && state.rightPanelMode === 'workspace' ? state.workspaceForegroundSurfaceId : null,
+  );
+  const worksOwnsReturn = useF307ExperienceWorkbenchStore(
+    (state) =>
+      journey6 &&
+      host.session?.find?.destination === 'works' &&
+      !!foregroundId &&
+      state.layout.activeSurfaceId === foregroundId &&
+      state.layout.surfaces.some(
+        (surface) => surface.id === foregroundId && surface.artifactListView?.findSessionId === host.session?.id,
+      ),
+  );
   if (!trip || trip.status === 'completed') return null;
+  if (worksOwnsReturn && trip.status !== 'unavailable' && trip.status !== 'interrupted' && host.persisted) return null;
   const index = trip.pending?.kind === 'target' ? trip.pending.index : (trip.settledIndex ?? -1);
   return (
     <nav
@@ -35,32 +57,40 @@ export function MessageReadingControls({ host }: { host: MessageSearchHost }) {
       }}
     >
       <div className="flex items-center gap-1">
-        <output className="px-2 text-xs text-cafe-secondary" aria-live="polite">
-          {progressLabel(trip)}
-        </output>
-        <button
-          type="button"
-          className={controlClass}
-          aria-label="上一处结果"
-          disabled={index <= 0}
-          onClick={() => host.moveTo(index - 1)}
-        >
-          ↑
-        </button>
-        <button
-          type="button"
-          className={controlClass}
-          aria-label="下一处结果"
-          disabled={index + 1 >= trip.targets.length}
-          onClick={() => host.moveTo(index + 1)}
-        >
-          ↓
-        </button>
-        <button type="button" className={controlClass} onClick={host.returnToOrigin}>
-          回到刚才
-        </button>
+        {!findReturn && (
+          <>
+            <output className="px-2 text-xs text-cafe-secondary" aria-live="polite">
+              {progressLabel(trip)}
+            </output>
+            <button
+              type="button"
+              className={controlClass}
+              aria-label="上一处结果"
+              disabled={index <= 0}
+              onClick={() => host.moveTo(index - 1)}
+            >
+              ↑
+            </button>
+            <button
+              type="button"
+              className={controlClass}
+              aria-label="下一处结果"
+              disabled={index + 1 >= trip.targets.length}
+              onClick={() => host.moveTo(index + 1)}
+            >
+              ↓
+            </button>
+          </>
+        )}
+        {!worksOwnsReturn && (
+          <button type="button" className={`${controlClass} max-w-52 truncate`} onClick={host.returnToOrigin}>
+            {findReturn ? '‹ 回到查找' : journey6 ? `‹ 回到「${originTitle || '刚才那条对话'}」` : '回到刚才'}
+          </button>
+        )}
       </div>
-      <p className="mt-1 px-2 text-micro text-cafe-secondary">{statusText[trip.status]}</p>
+      {(!findReturn || trip.status === 'unavailable' || trip.status === 'interrupted') && (
+        <p className="mt-1 px-2 text-micro text-cafe-secondary">{statusText[trip.status]}</p>
+      )}
       {!host.persisted && (
         <p className="mt-1 px-2 text-micro text-cafe-secondary">恢复记录保存失败，当前页面仍可返回。</p>
       )}

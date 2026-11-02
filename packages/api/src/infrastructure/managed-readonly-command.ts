@@ -91,7 +91,7 @@ export async function runManagedReadonlyCommand(
     signal.throwIfAborted();
     const plan = readonlyCommandPlan(command, cwd, home, timeoutMs, processId);
     const environment = readonlyEnvironment(home, home);
-    const executable = readonlyCodexExecutable(environment);
+    const executable = await readonlyCodexExecutable(environment);
     signal.throwIfAborted();
     wire = await createDirectAgentCarrierSession(
       {

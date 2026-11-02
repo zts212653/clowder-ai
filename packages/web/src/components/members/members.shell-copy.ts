@@ -1,4 +1,5 @@
 import { deploymentDefaults } from '@cat-cafe/shared';
+import { settingsDetailCopy } from '../settings/settings-detail.shell-copy';
 import { defineShellCopy } from '../shell/shell-copy';
 import { continuationCopy } from './members.continuation-copy';
 import { membersCopySamples } from './members.copy-samples';
@@ -29,7 +30,7 @@ export const membersCopy = defineShellCopy(
       读取中: '读取中',
       '正在读取成员名单…': '正在读取成员名单…',
       成员名单读取失败: '成员名单读取失败',
-      成员与运行时: '成员与运行时',
+      成员与运行时: settingsDetailCopy.zh.members.title,
       '家里的成员、各自用的模型、接入方式，以及现在能不能接活。':
         '家里的成员、各自用的模型、接入方式，以及现在能不能接活。',
       添加成员: '添加成员',
@@ -65,6 +66,10 @@ export const membersCopy = defineShellCopy(
       限制已撤回: '限制已撤回',
       已恢复: '已恢复',
       最近一次接活顺利完成: '最近一次接活顺利完成',
+      最近一次接活未成功: '最近一次接活未成功',
+      额度已用完: '额度已用完',
+      登录验证未通过: '登录验证未通过',
+      没连上服务: '没连上服务',
       本周额度不足: '本周额度紧张',
       今日额度不足: '今日额度紧张',
       服务响应超时: '服务响应超时',
@@ -202,7 +207,7 @@ export const membersCopy = defineShellCopy(
       读取中: 'Loading',
       '正在读取成员名单…': 'Loading members…',
       成员名单读取失败: "Couldn't load members",
-      成员与运行时: 'Members & runtimes',
+      成员与运行时: settingsDetailCopy.en.members.title,
       '家里的成员、各自用的模型、接入方式，以及现在能不能接活。':
         'Our partners: their models, how they connect, and whether they can take work right now.',
       添加成员: 'Add member',
@@ -238,6 +243,10 @@ export const membersCopy = defineShellCopy(
       限制已撤回: 'Restriction retracted',
       已恢复: 'Recovered',
       最近一次接活顺利完成: 'The latest work dispatch finished successfully',
+      最近一次接活未成功: 'The latest work dispatch did not finish successfully',
+      额度已用完: 'Quota used up',
+      登录验证未通过: 'Sign-in was rejected',
+      没连上服务: 'Could not reach the service',
       本周额度不足: 'Weekly quota low',
       今日额度不足: 'Daily quota low',
       服务响应超时: 'Service timed out',

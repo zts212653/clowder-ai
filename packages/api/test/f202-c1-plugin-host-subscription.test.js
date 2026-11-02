@@ -56,12 +56,11 @@ function createFixture() {
     });
   };
   restart();
-  const createSession = (effectiveGrants = ['message.event.subscribe'], manifest) =>
+  const createSession = (manifest) =>
     createPluginMessagingSubscriptionSession({
       pluginId: PLUGIN_ID,
       pluginInstanceId: INSTANCE_ID,
       ownerUserId: OWNER,
-      effectiveGrants,
       threadStore: threads,
       bindingStore: bindings,
       messaging,
@@ -119,9 +118,7 @@ describe('F202 C1 — caller-bound Host messaging subscriptions', () => {
           },
         ],
       };
-      await h
-        .createSession(['message.event.subscribe'], manifest)
-        .host.subscribe({ threadId: thread.id, method: 'fixture.outbound' });
+      await h.createSession(manifest).host.subscribe({ threadId: thread.id, method: 'fixture.outbound' });
       const targets = h.delivery.lifecycleTargetsForThread(thread.id);
       assert.deepEqual(targets, [
         {
@@ -159,6 +156,22 @@ describe('F202 C1 — caller-bound Host messaging subscriptions', () => {
       assert.equal(h.calls[0].params.presentation !== undefined, presentation !== undefined);
       assert.equal(h.calls[0].params.threadHandle, undefined);
     }
+  });
+
+  test('cleanup after Host stop is idempotent and cannot withdraw a replacement session', async () => {
+    const h = createFixture();
+    const thread = await h.threads.create(OWNER, 'Stop cleanup');
+    const first = h.createSession();
+    await first.host.subscribe({ threadId: thread.id, method: 'fixture.outbound' });
+    await first.stop('owner_disabled');
+    const replacement = h.createSession();
+    await replacement.host.subscribe({ threadId: thread.id, method: 'fixture.outbound' });
+    await first.host.unsubscribe({ threadId: thread.id });
+    await assert.rejects(first.host.subscribe({ threadId: thread.id, method: 'fixture.outbound' }), /stopped/);
+    await publish(h.messaging, thread.id, 'replacement remains active');
+    await h.delivery.drain(thread.id);
+    assert.equal(h.calls.length, 1);
+    await replacement.stop('owner_disabled');
   });
 
   test('delivers through the package-declared action without exposing a handle', async () => {
@@ -239,15 +252,11 @@ describe('F202 C1 — caller-bound Host messaging subscriptions', () => {
     assert.equal(h.calls[0].params.envelope.payload.elements[0].payload.text, 'echo accepted');
   });
 
-  test('subscription grant and shape are checked without plugin thread ownership', async () => {
+  test('subscription shape is checked before dispatch', async () => {
     const h = createFixture();
     const ownThread = await h.threads.create(OWNER, 'Owned');
     const foreignThread = await h.threads.create('another-owner', 'Foreign');
 
-    await assert.rejects(
-      () => h.createSession([]).host.subscribe({ threadId: ownThread.id, method: 'fixture.outbound' }),
-      (error) => error?.code === 'PERMISSION',
-    );
     await h.createSession().host.subscribe({ threadId: foreignThread.id, method: 'fixture.outbound' });
     await assert.rejects(
       () => h.createSession().host.subscribe({ threadId: ownThread.id, method: ' fixture.outbound' }),

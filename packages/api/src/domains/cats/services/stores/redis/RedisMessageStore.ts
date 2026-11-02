@@ -17,7 +17,9 @@ import { withOwnerUncertaintyIndex } from './owner-uncertainty-lua.js';
 import { readOwnerUncertainty } from './owner-uncertainty-read.js';
 import { recordRedisCompanionAcceptance } from './redis-companion-acceptance.js';
 import { artifactMessageHash, MESSAGE_ARTIFACT_FIELDS } from './redis-message-artifact-fields.js';
+import { readArtifactBeforeRange, readArtifactMessagePage } from './redis-message-artifact-page.js';
 import { evidenceMessageHash, MESSAGE_EVIDENCE_FIELDS } from './redis-message-evidence-fields.js';
+import { MESSAGE_RECIPIENT_FIELDS, recipientMessageHash } from './redis-message-recipient-fields.js';
 import {
   HANDLE_USER_MENTIONS_LUA,
   MIGRATE_HANDLED_USER_MENTIONS_LUA,
@@ -47,7 +49,11 @@ import {
 
 import { isDeepStrictEqual } from 'node:util';
 import type { CatId, CustodyOfferV1, LifecycleStoredMessageMetadata } from '@cat-cafe/shared';
-import { custodyOfferV1Schema, isLifecycleStoredMessageMetadata } from '@cat-cafe/shared';
+import {
+  custodyOfferV1Schema,
+  isLifecycleStoredMessageMetadata,
+  messageSearchAnswerBindingSchema,
+} from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import {
@@ -72,6 +78,11 @@ import { cursorFor, parseCursor } from '../cursor.js';
 import type { LifecycleAppendRecoveryInput, LifecycleAppendRecoveryResult } from '../lifecycle-append-recovery.js';
 import type { LifecycleWakeCoverageInput, LifecycleWakeCoverageResult } from '../lifecycle-wake-coverage.js';
 import { messageFrom } from '../message-from.js';
+import {
+  ATTACH_MESSAGE_SEARCH_ANSWER_LUA,
+  type MessageSearchAnswerAttachment,
+  messageSearchAnswerBlock,
+} from '../message-search-answer-binding.js';
 import { notifyMessageTimelineChange } from '../notify-message-timeline-change.js';
 import type {
   AdvanceLifecycleInputDispatchResult,
@@ -1007,7 +1018,21 @@ return redis.call('HGETALL', KEYS[1])
 const UPDATE_EXTRA_IF_NOT_RECALLED_LUA = `
 if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
 if redis.call('HGET', KEYS[1], 'recall') or redis.call('HGET', KEYS[1], '_tombstone') then return 0 end
-redis.call('HSET', KEYS[1], 'extra', ARGV[1])
+local extra=cjson.decode(ARGV[1])
+local currentRaw=redis.call('HGET',KEYS[1],'extra')
+local current={}
+if currentRaw and currentRaw ~= '' then current=cjson.decode(currentRaw) end
+extra.messageSearchAnswer=current.messageSearchAnswer
+if current.messageSearchAnswer then
+  local binding=current.messageSearchAnswer
+  local blocks={}
+  if extra.rich and extra.rich.blocks then
+    for _,block in ipairs(extra.rich.blocks) do if block.id ~= binding.blockId then table.insert(blocks,block) end end
+  end
+  table.insert(blocks,{kind='card',v=1,id=binding.blockId,title='',meta={domain='message-search-answer',publicationRef=binding.publicationRef}})
+  extra.rich={v=1,blocks=blocks}
+end
+redis.call('HSET', KEYS[1], 'extra', cjson.encode(extra))
 if ARGV[2] ~= '' then redis.call('HSETNX', KEYS[1], 'pluginMessage', ARGV[2]) end
 return 1
 `;
@@ -1537,7 +1562,7 @@ export class RedisMessageStore {
     if (!(ledgerStore instanceof RedisQueueLedgerStore) || !ledgerStore.usesRedisClient(this.redis)) {
       throw new Error('Redis message admission requires the matching Redis Queue ledger');
     }
-    const messageId = generateSortableId(input.timestamp);
+    const messageId = input.reservedId ?? generateSortableId(input.timestamp);
     const entries = [...buildAdmission(messageId)];
     for (const entry of entries) {
       assertQueueLedgerEntry(entry);
@@ -2034,6 +2059,11 @@ export class RedisMessageStore {
   async getById(id: string): Promise<StoredMessage | null> {
     const data = await this.redis.hgetall(MessageKeys.detail(id));
     return this.hydrateHash(data);
+  }
+
+  async getArtifactById(id: string): Promise<StoredMessage | null> {
+    const messages = await this.hydrateMessages([id], { artifactOnly: true, strict: true, includeDeleted: true });
+    return messages[0] ?? null;
   }
 
   /** Read F278 marker sources in bounded, narrow Redis batches. */
@@ -2743,6 +2773,8 @@ export class RedisMessageStore {
         options,
         hydrate: (ids) => this.hydrateMessages(ids, { strict: true }),
       });
+    if (options?.artifactProjection || options?.recipientProjection)
+      return readArtifactMessagePage(this, threadId, n, userId, options);
     const key = MessageKeys.thread(threadId);
     return this.fetchVisibleDesc(
       key,
@@ -3247,6 +3279,11 @@ export class RedisMessageStore {
     options?: ThreadMessageReadOptions,
   ): Promise<StoredMessage[]> {
     const n = limit ?? DEFAULT_LIMIT;
+    if (options?.artifactProjection || options?.recipientProjection)
+      return readArtifactMessagePage(this, threadId, n, userId, options, {
+        timestamp,
+        ...(beforeId ? { id: beforeId } : {}),
+      });
     const key = MessageKeys.thread(threadId);
     const userFilter = userId ? (m: StoredMessage) => m.userId === userId || isSystemUserMessage(m) : undefined;
     const isVisible = resolveThreadMessageVisibility(options, userId);
@@ -3302,8 +3339,9 @@ export class RedisMessageStore {
     let offset = 0;
     let nextCursor: BoundedThreadMessagePage['nextCursor'];
 
+    const projected = options?.artifactProjection || options?.recipientProjection;
     let cursorRank: number | null | undefined;
-    if (beforeId) {
+    if (beforeId && !projected) {
       cursorRank = await this.redis.zrevrank(key, beforeId);
       storageRoundTrips += 1;
     }
@@ -3311,7 +3349,9 @@ export class RedisMessageStore {
     while (result.length < resultTarget && scannedCount < rawLimit) {
       const count = Math.min(chunkSize, rawLimit - scannedCount);
       let raw: string[];
-      if (cursorRank !== null && cursorRank !== undefined) {
+      if (beforeId && projected) {
+        raw = await readArtifactBeforeRange(this.redis, key, timestamp, beforeId, offset, count);
+      } else if (cursorRank !== null && cursorRank !== undefined) {
         const start = cursorRank + 1 + offset;
         raw = await this.redis.zrevrange(key, start, start + count - 1, 'WITHSCORES');
       } else {
@@ -3339,7 +3379,11 @@ export class RedisMessageStore {
       if (validIds.length > 0) {
         const messages = await this.hydrateMessages(
           validIds,
-          options?.artifactProjection ? { artifactOnly: true, strict: true } : undefined,
+          options?.recipientProjection
+            ? { recipientOnly: true, strict: true }
+            : options?.artifactProjection
+              ? { artifactOnly: true, strict: true }
+              : undefined,
         );
         storageRoundTrips += 1;
         for (const message of messages) {
@@ -3598,17 +3642,41 @@ export class RedisMessageStore {
       : null;
   }
 
+  async attachMessageSearchAnswer(id: string, input: MessageSearchAnswerAttachment): Promise<StoredMessage | null> {
+    const parsed = messageSearchAnswerBindingSchema.safeParse(input.binding);
+    if (!parsed.success) return null;
+    const changed = await this.redis.eval(
+      ATTACH_MESSAGE_SEARCH_ANSWER_LUA,
+      1,
+      MessageKeys.detail(id),
+      input.ownerUserId,
+      input.threadId,
+      input.catId,
+      JSON.stringify(parsed.data),
+      JSON.stringify(messageSearchAnswerBlock(parsed.data)),
+    );
+    if (Number(changed) !== 1) return null;
+    const result = await this.getById(id);
+    if (result) notifyMessageTimelineChange(this, result);
+    return result;
+  }
+
   async updateExtra(id: string, extra: HostMessageExtra): Promise<StoredMessage | null> {
     const msg = await this.getById(id);
     if (!msg) return null;
     const { hostExtra: current, pluginMessage } = splitMessageExtra(msg.extra);
     const {
+      messageSearchAnswer: _stripAnswer,
       pluginMessage: _stripPlugin,
       custodyOfferV1: _stripCustody,
       entrustedWorkHumanTerminalReceiptV1: _stripEntrustedWorkTerminal,
       evolutionPreparationSubmissionV1: _stripPreparation,
       dotAsk: _stripDotAsk,
       deliveryBoundary: _stripBoundary,
+      collectiveOwnerAdmissionV1: _stripCollectiveAdmission,
+      collectiveAuthorizationInvalid: _stripCollectiveInvalid,
+      collectiveWorkInvocationV1: _stripCollectiveInvocation,
+      collectiveWorkDelegationV1: _stripCollectiveDelegation,
       ...hostPatch
     } = extra as Record<string, unknown>;
     const merged = { ...current, ...hostPatch };
@@ -3620,7 +3688,10 @@ export class RedisMessageStore {
       pluginMessage ? JSON.stringify(pluginMessage) : '',
     );
     if (Number(updated) !== 1) return null;
-    return this.getById(id);
+    const result = await this.getById(id);
+    if (result && hostPatch.rich !== undefined && JSON.stringify(current?.rich) !== JSON.stringify(result.extra?.rich))
+      notifyMessageTimelineChange(this, result);
+    return result;
   }
 
   async compareAndTransitionCustodyOffer(
@@ -3682,6 +3753,7 @@ export class RedisMessageStore {
   async augmentStreamMetadata(id: string, patch: StreamMetadataAugmentInput): Promise<StoredMessage | null> {
     const msg = await this.getById(id);
     if (!msg) return null;
+    const previousRich = JSON.stringify(msg.extra?.rich);
     const augmented = applyStreamMetadataAugment(msg, patch);
     const fields: Record<string, string> = {};
     if (patch.thinking && augmented.thinking) fields.thinking = augmented.thinking;
@@ -3706,7 +3778,8 @@ export class RedisMessageStore {
       );
     }
     const updated = (await this.getById(id)) ?? augmented;
-    if (patch.mentionsUser) notifyMessageTimelineChange(this, updated);
+    if (patch.mentionsUser || (patch.extra?.rich && previousRich !== JSON.stringify(updated.extra?.rich)))
+      notifyMessageTimelineChange(this, updated);
     return updated;
   }
 
@@ -4200,12 +4273,14 @@ export class RedisMessageStore {
       humanOnly?: true;
       evidenceOnly?: true;
       artifactOnly?: true;
+      recipientOnly?: true;
     },
   ): Promise<StoredMessage[]> {
     const pipeline = this.redis.multi();
     for (const id of ids) {
       if (options?.humanOnly) pipeline.eval(HUMAN_SOURCE_HASH_LUA, 1, MessageKeys.detail(id));
       else if (options?.evidenceOnly) pipeline.hmget(MessageKeys.detail(id), ...MESSAGE_EVIDENCE_FIELDS);
+      else if (options?.recipientOnly) pipeline.hmget(MessageKeys.detail(id), ...MESSAGE_RECIPIENT_FIELDS);
       else if (options?.artifactOnly) pipeline.hmget(MessageKeys.detail(id), ...MESSAGE_ARTIFACT_FIELDS);
       else pipeline.hgetall(MessageKeys.detail(id));
     }
@@ -4232,24 +4307,27 @@ export class RedisMessageStore {
 
       if (options?.strict && results.length !== ids.length) throw new Error('Owner uncertainty hydration incomplete');
       const messages: StoredMessage[] = [];
-      for (const [err, data] of results) {
+      for (const [index, [err, data]] of results.entries()) {
         if (
           err ||
           !data ||
           typeof data !== 'object' ||
-          (options?.strict && !options.artifactOnly && Array.isArray(data))
+          (options?.strict && !options.artifactOnly && !options.recipientOnly && Array.isArray(data))
         ) {
           if (options?.strict) throw new Error('Owner uncertainty hydration failed');
           continue;
         }
-        const d = options?.artifactOnly
-          ? artifactMessageHash(data)
-          : options?.humanOnly
-            ? humanSourceHash(data)
-            : options?.evidenceOnly
-              ? evidenceMessageHash(data)
-              : (data as Record<string, string>);
+        const d = options?.recipientOnly
+          ? recipientMessageHash(data, ids[index])
+          : options?.artifactOnly
+            ? artifactMessageHash(data)
+            : options?.humanOnly
+              ? humanSourceHash(data)
+              : options?.evidenceOnly
+                ? evidenceMessageHash(data)
+                : (data as Record<string, string>);
         if (!d) {
+          if (options?.recipientOnly) throw new Error('Recipient source hydration failed');
           if (options?.artifactOnly) throw new Error('Artifact source hydration failed');
           continue;
         }

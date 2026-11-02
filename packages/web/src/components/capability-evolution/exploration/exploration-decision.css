@@ -76,6 +76,7 @@
 }
 .exploration-reading-tabs button[aria-pressed="true"] {
   background: var(--cafe-surface-elevated);
+  --chat-background-role: cafe-elevated;
   color: var(--cafe-text);
   font-weight: 600;
 }
@@ -132,6 +133,7 @@
 }
 .exploration-slice-filters [aria-pressed="true"] {
   background: var(--cafe-surface-elevated);
+  --chat-background-role: cafe-elevated;
   box-shadow: inset 0 -2px currentColor;
 }
 .exploration-evidence-focus {
@@ -139,6 +141,7 @@
   border-radius: 10px;
   overflow: hidden;
   background: var(--console-card-bg);
+  --chat-background-role: console-card;
 }
 .exploration-case-nav {
   display: flex;
@@ -161,6 +164,7 @@
 }
 .exploration-case-nav button[aria-pressed="true"] {
   background: var(--cafe-surface-elevated);
+  --chat-background-role: cafe-elevated;
   outline: 1px solid var(--cafe-border);
 }
 .exploration-pair-focus {

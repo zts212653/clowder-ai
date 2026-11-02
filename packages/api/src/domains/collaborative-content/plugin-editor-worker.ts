@@ -37,7 +37,6 @@ export function createPluginEditorWorker(
           providerId: authority.providerId,
           packageDigest: authority.packageDigest,
           providerVersion: authority.providerVersion,
-          grantRevision: authority.grantRevision,
           lifecycleRevision: authority.lifecycleRevision,
           executionLeaseDigest: authority.executionLeaseDigest,
         },

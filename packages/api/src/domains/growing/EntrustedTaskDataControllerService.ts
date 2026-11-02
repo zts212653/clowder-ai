@@ -5,12 +5,9 @@ import type {
 } from '../cats/services/stores/ports/TaskDataControllerTransition.js';
 import type { ITaskStore, TaskMutationWriteFence } from '../cats/services/stores/ports/TaskStoreContract.js';
 
-const REQUIRED_GRANTS = ['task.read', 'task.write', 'task.admitEntrusted'] as const;
-
 export interface VerifiedEntrustedTaskDataControllerAuthority {
   readonly ownerUserId: string;
   readonly controller: EntrustedTaskDataControllerAuthority;
-  readonly effectiveGrants: readonly string[];
   readonly ownerOperation: EntrustedTaskDataControllerOwnerOperation & { readonly confirmed: true };
 }
 
@@ -94,6 +91,4 @@ function assertVerifiedAuthority(authority: VerifiedEntrustedTaskDataControllerA
   if (authority.ownerOperation.actorRef !== `user:${authority.ownerUserId}`) {
     throw new Error('Task data controller owner operation does not match the installation owner');
   }
-  const missing = REQUIRED_GRANTS.find((grant) => !authority.effectiveGrants.includes(grant));
-  if (missing) throw new Error(`Task data controller requires ${missing}`);
 }

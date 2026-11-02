@@ -165,9 +165,23 @@ export class ElectronDesktopWindowExecutor implements DesktopWindowExecutor {
     const bridgeFrame = z
       .object({ v: z.literal(1), type: z.literal('companion'), id: z.string().uuid(), command: z.unknown() })
       .strict();
+    const replyToBridge = (id: string, result: CompanionReply) => {
+      if (ended) return;
+      const safeReply = validateCompanionReply(result, launch.companionContract)
+        ? result
+        : { kind: 'error', code: 'unavailable' };
+      child.stdin.write(`${JSON.stringify({ v: 1, type: 'companion', id, reply: safeReply })}\n`, (error) => {
+        if (error) fail(new Error('desktop connection ended'));
+      });
+    };
     const handleBridge = (frame: z.infer<typeof bridgeFrame>) => {
-      if (bridgeRequests.has(frame.id) || bridgeRequests.size >= 16)
-        throw new Error('desktop bridge request budget exceeded');
+      if (bridgeRequests.has(frame.id)) throw new Error('desktop bridge request budget exceeded');
+      // The child may have expired its request while the original Host effect
+      // is still pending. Keep the effect bound without killing a valid child.
+      if (bridgeRequests.size >= 16) {
+        replyToBridge(frame.id, { kind: 'error', code: 'unavailable' });
+        return;
+      }
       bridgeRequests.add(frame.id);
       const operation: Promise<CompanionReply> =
         validateCompanionCommand(frame.command, launch.companionContract) && launch.request
@@ -177,16 +191,7 @@ export class ElectronDesktopWindowExecutor implements DesktopWindowExecutor {
         .catch(() => ({ kind: 'error', code: 'unavailable' }) as const)
         .then((result) => {
           bridgeRequests.delete(frame.id);
-          if (ended) return;
-          const safeReply = validateCompanionReply(result, launch.companionContract)
-            ? result
-            : { kind: 'error', code: 'unavailable' };
-          child.stdin.write(
-            `${JSON.stringify({ v: 1, type: 'companion', id: frame.id, reply: safeReply })}\n`,
-            (error) => {
-              if (error) fail(new Error('desktop connection ended'));
-            },
-          );
+          replyToBridge(frame.id, result);
         });
     };
     child.stdout.on('data', (chunk: Buffer) => {

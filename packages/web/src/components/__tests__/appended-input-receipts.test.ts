@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dispatchReadText } from '@/lib/dispatch-receipt-display';
+import { dispatchReadText, dispatchReceiptDisplay } from '@/lib/dispatch-receipt-display';
 import type { ChatMessage } from '@/stores/chat-types';
 import { appendedInputReadDisplay, projectAppendedInputReceipts } from '../AppendedInputReceipts';
 
@@ -40,6 +40,22 @@ const response: ChatMessage = {
 };
 
 describe('projectAppendedInputReceipts', () => {
+  it('shows a confirmed native write as waiting for read while its internal turn is unfinished', () => {
+    const receipt = dispatchReceiptDisplay(
+      {
+        targetId: 'cat-1',
+        statusMessageId: response.id,
+        phase: 'dispatched',
+        dispatchedAt: appended.timestamp,
+        appendAcceptance: 'written',
+        inputRead: { status: 'pending' },
+      },
+      true,
+    );
+    expect(receipt.state).toBe('pending');
+    expect(dispatchReadText(receipt, true)).toBe('已收到，等读取确认');
+  });
+
   it('does not call an uncertain provider handoff received in the response receipt', () => {
     const source: ChatMessage = {
       ...appended,

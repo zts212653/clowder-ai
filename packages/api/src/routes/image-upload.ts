@@ -3,7 +3,8 @@
  * Handles multipart file saving and validation for image uploads.
  */
 
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { findMessageStickerByDigest, messageStickerReference } from '@cat-cafe/shared';
 import type { SavedImageAsset } from '../utils/image-storage.js';
 import { ImageUploadError, saveImageBufferToUploadDir } from '../utils/image-storage.js';
 
@@ -31,14 +32,19 @@ export async function saveUploadedImages(files: UploadImageFile[], uploadDir: st
   const saved: SavedImage[] = [];
   for (const file of files) {
     const buffer = await file.toBuffer();
+    const image = await saveImageBufferToUploadDir({
+      buffer,
+      mimeType: file.mimetype,
+      uploadDir,
+      filenameStem: `${Date.now()}-${randomUUID().slice(0, 8)}`,
+      onExists: 'error',
+    });
+    const sticker =
+      file.mimetype === 'image/png'
+        ? findMessageStickerByDigest(`sha256:${createHash('sha256').update(buffer).digest('hex')}`)
+        : undefined;
     saved.push(
-      await saveImageBufferToUploadDir({
-        buffer,
-        mimeType: file.mimetype,
-        uploadDir,
-        filenameStem: `${Date.now()}-${randomUUID().slice(0, 8)}`,
-        onExists: 'error',
-      }),
+      sticker ? { ...image, content: { ...image.content, sticker: messageStickerReference(sticker.id) } } : image,
     );
   }
 

@@ -15,7 +15,7 @@ import {
   type ProcessError,
   type WalCheckpointResult,
 } from './memory-process-protocol.js';
-import { MemoryReadExecution } from './memory-read-execution.js';
+import { MemoryReadExecution, type MemoryReadSnapshot } from './memory-read-execution.js';
 import type { VectorRepackResult } from './repack-passage-vectors.js';
 
 function decodeError(error: ProcessError): Error {
@@ -45,7 +45,12 @@ class MemoryProcess {
 
   run<T>(
     job: MemoryProcessJob,
-    options?: { signal?: AbortSignal; deadlineAt?: number; embedding?: IEmbeddingService },
+    options?: {
+      signal?: AbortSignal;
+      deadlineAt?: number;
+      embedding?: IEmbeddingService;
+      onReadSnapshot?: (snapshot: MemoryReadSnapshot) => void;
+    },
   ): Promise<T> {
     if (this.pending >= 64) return Promise.reject(new Error('Memory process queue is full'));
     this.pending++;
@@ -60,6 +65,13 @@ class MemoryProcess {
         if (settled) return;
         settled = true;
         execution?.annotate(error);
+        if (execution) {
+          try {
+            options?.onReadSnapshot?.(execution.snapshot(error === undefined ? 'fulfilled' : 'rejected'));
+          } catch {
+            /* An observer cannot replace completion. */
+          }
+        }
         if (timer) clearTimeout(timer);
         options?.signal?.removeEventListener('abort', abort);
         cleanupActive();
@@ -109,9 +121,26 @@ class MemoryProcess {
                       stderrTail: diagnostics.tail(id),
                     }),
               );
+            let nativeStartObserved = false;
             const onMessage = (message: ChildMessage) => {
               if (ownsNativeWrite && controller.signal.aborted) return;
-              if (execution?.onMessage(message, id)) return;
+              if (execution?.onMessage(message, id)) {
+                // Existing CJK progress/finish, plus at most one native-input start and final completion.
+                if (
+                  message.type === 'read-diagnostic' &&
+                  message.id === id &&
+                  (message.diagnostic.phase === 'cjk-read' ||
+                    (message.diagnostic.phase === 'sql-start' && message.diagnostic.sql.native && !nativeStartObserved))
+                ) {
+                  if (message.diagnostic.phase === 'sql-start') nativeStartObserved = true;
+                  try {
+                    options?.onReadSnapshot?.(execution.snapshot('pending'));
+                  } catch {
+                    /* Optional private progress. */
+                  }
+                }
+                return;
+              }
               if (message.type === 'started') {
                 channel('cat-cafe.memory-process').publish({ kind: job.kind, pid: message.pid, id });
               } else if (message.type === 'embedding') {

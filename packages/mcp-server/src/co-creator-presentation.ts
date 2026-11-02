@@ -4,6 +4,7 @@ import { normalizeObjectSchema } from '@modelcontextprotocol/sdk/server/zod-comp
 import { toJsonSchemaCompat } from '@modelcontextprotocol/sdk/server/zod-json-schema-compat.js';
 import { ListToolsRequestSchema, type Tool } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
+import { invocationFetch, resolveInvocationEnv } from './tools/invocation-auth.js';
 
 const configResponse = z.object({
   config: z.object({
@@ -43,11 +44,11 @@ function projectDescriptions(value: unknown, current: Presentation): unknown {
 }
 
 async function readCurrentPresentation(current: Presentation): Promise<Presentation> {
-  const apiUrl = process.env.CAT_CAFE_API_URL;
+  const apiUrl = resolveInvocationEnv('CAT_CAFE_API_URL');
   if (!apiUrl) return current;
   try {
     // Read the existing API projection. Catalog/template resolution stays in the API.
-    const response = await fetch(`${apiUrl}/api/config`, { signal: AbortSignal.timeout(2_000) });
+    const response = await invocationFetch(`${apiUrl}/api/config`, { signal: AbortSignal.timeout(2_000) });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const parsed = configResponse.parse(await response.json());
     const display = coCreatorDisplay(parsed.config.coCreator);

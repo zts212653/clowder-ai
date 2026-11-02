@@ -14,7 +14,6 @@ function fixture() {
   const deps = {
     pluginId: 'example',
     pluginInstanceId: 'instance',
-    effectiveGrants: ['task.read', 'task.write'],
     taskStore,
     threadStore,
   };

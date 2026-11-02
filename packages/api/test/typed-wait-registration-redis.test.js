@@ -38,6 +38,43 @@ describe('typed wait registration keeps exact private Redis authority', () => {
     assert.equal((await resolveTypedWaitContinuation({ taskStore: cold, ...h.identity })).kind, 'bypass');
   });
 
+  for (const sessionHandoff of [
+    undefined,
+    { proposalId: 'approved-handoff', continuationEntryId: 'private-entry', sourceSessionId: 'sealed-session' },
+  ]) {
+    test(`authorization and ${sessionHandoff ? 'handoff' : 'message'} source survive cold hydration only in the private receipt`, async (t) => {
+      const h = await harness(t);
+      const authorization = {
+        ownerAuthProvenance: 'strict',
+        toolExecutionPolicy: {
+          mode: 'callback_allowlist',
+          allowedCallbackRoutes: ['POST /api/callbacks/register-deployment-wait'],
+        },
+      };
+      const receipt = createTypedWaitRegistration({
+        task: h.task,
+        active: h.active,
+        invocationId: h.identity.invocationId,
+        source: { ...h.receipt.source, ...(sessionHandoff ? { sessionHandoff } : {}) },
+        authorization,
+      });
+      const current = await h.taskStore.get(h.task.id);
+      assert.ok(
+        await h.taskStore.replaceDeploymentWaitIfGeneration(h.task.id, {
+          expectedGeneration: 1,
+          expectedDeploymentWait: current.deploymentWait,
+          expectedUpdatedAt: current.updatedAt,
+          deploymentWait: current.deploymentWait,
+          waitRegistration: receipt,
+        }),
+      );
+      const cold = new RedisTaskStore(h.redis);
+      assert.deepEqual((await cold.getWaitRegistration(h.task.id)).receipt.authorization, authorization);
+      assert.deepEqual((await cold.getWaitRegistration(h.task.id)).receipt.source, receipt.source);
+      assert.equal(JSON.stringify(await cold.get(h.task.id)).includes('ownerAuthProvenance'), false);
+    });
+  }
+
   test('a losing Task CAS cannot overwrite the winning generation receipt', async (t) => {
     const h = await harness(t);
     const active = { ...h.active, generation: 2, ownerFence: { kind: 'containing_task', generation: 2 } };
@@ -57,6 +94,46 @@ describe('typed wait registration keeps exact private Redis authority', () => {
       null,
     );
     assert.deepEqual((await h.taskStore.getWaitRegistration(h.task.id)).receipt, h.receipt);
+  });
+
+  test('matched legacy receipt can seal authorization once without replacing its source or scope', async (t) => {
+    const h = await harness(t);
+    const authorization = { ownerAuthProvenance: 'strict' };
+    const current = await h.taskStore.get(h.task.id);
+    const waitOutcome = {
+      v: 1,
+      domain: 'deployment',
+      outcomeId: `wait:${h.active.subjectRef}:g1:matched`,
+      generation: 1,
+      subjectRef: h.active.subjectRef,
+      ownerFence: h.active.ownerFence,
+      reason: 'matched',
+      delivery: 'pending',
+      registeredAt: h.active.createdAt,
+      at: Date.now(),
+      actor: { kind: 'system' },
+    };
+    assert.ok(
+      await h.taskStore.replaceDeploymentWaitIfGeneration(h.task.id, {
+        expectedGeneration: 1,
+        expectedDeploymentWait: current.deploymentWait,
+        deploymentWait: { waitOutcome },
+      }),
+    );
+    const replace = (receipt) =>
+      h.taskStore.replaceDeploymentWaitIfGeneration(h.task.id, {
+        expectedGeneration: 1,
+        expectedDeploymentWait: { waitOutcome },
+        deploymentWait: { waitOutcome },
+        waitRegistration: receipt,
+      });
+    await assert.rejects(replace({ ...h.receipt, invocationId: 'another-invocation', authorization }), /does not bind/);
+    assert.deepEqual((await h.taskStore.getWaitRegistration(h.task.id)).receipt, h.receipt);
+    assert.ok(await replace({ ...h.receipt, authorization }));
+    const cold = new RedisTaskStore(h.redis);
+    assert.deepEqual((await cold.getWaitRegistration(h.task.id)).receipt, { ...h.receipt, authorization });
+    await assert.rejects(replace({ ...h.receipt, authorization: { ownerAuthProvenance: 'unknown' } }), /does not bind/);
+    assert.deepEqual((await cold.getWaitRegistration(h.task.id)).receipt.authorization, authorization);
   });
 
   test('collector-only updates retain the same active registration', async (t) => {

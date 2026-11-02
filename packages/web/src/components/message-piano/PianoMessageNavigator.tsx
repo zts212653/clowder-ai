@@ -1,6 +1,6 @@
 'use client';
 
-import { useId, useLayoutEffect, useMemo, useRef } from 'react';
+import { useCallback, useId, useLayoutEffect, useMemo, useRef } from 'react';
 import { useCatData } from '@/hooks/useCatData';
 import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
 import { catSlug } from '@/lib/cat-slug';
@@ -40,16 +40,41 @@ export function PianoMessageNavigator({
   const activeKey = geometry?.keys[input.selected];
   const activeMessage = activeKey ? byId.get(activeKey.id) : undefined;
   const idFor = (id: string) => `piano-${prefix}-${encodeURIComponent(id)}`;
-  const sender = (message: (typeof messages)[number]) =>
-    getSenderLabel(message, (id) => getCatById(id.toLowerCase()), coCreator);
-  const identityColor = (message: (typeof messages)[number]) => {
-    const actorCatId = message.from?.kind === 'agent' ? message.from.catId : undefined;
-    return actorCatId
-      ? `var(--color-${catSlug(getCatById(actorCatId.toLowerCase())?.id ?? actorCatId)}-primary, var(--console-cat-fallback))`
-      : message.from?.kind === 'user'
-        ? 'var(--cafe-text-muted)'
+  const sender = useCallback(
+    (message: (typeof messages)[number]) => getSenderLabel(message, (id) => getCatById(id.toLowerCase()), coCreator),
+    [getCatById, coCreator],
+  );
+  const identityColor = useCallback(
+    (message: (typeof messages)[number]) => {
+      const actorCatId = message.from?.kind === 'agent' ? message.from.catId : undefined;
+      return actorCatId
+        ? `var(--color-${catSlug(getCatById(actorCatId.toLowerCase())?.id ?? actorCatId)}-primary, var(--console-cat-fallback))`
         : 'var(--cafe-text-muted)';
-  };
+    },
+    [getCatById],
+  );
+  const keys = geometry?.keys;
+  const keyDetails = useMemo(
+    () =>
+      keys?.flatMap((key, index) => {
+        const message = byId.get(key.id);
+        if (!message) return [];
+        const previous = byId.get(keys[index - 1]?.id);
+        const sameSender =
+          !!previous?.from && !!message.from && JSON.stringify(previous.from) === JSON.stringify(message.from);
+        const status = `${key.error ? '，这里出过错' : ''}${key.awaitingResponse ? '，等你回应' : ''}`;
+        return [
+          {
+            key,
+            message,
+            sameSender,
+            label: `${sender(message)}，${formatTime(message.timestamp)}：${messageNavigatorPreviewText(message) ?? ''}${status}`,
+            color: identityColor(message),
+          },
+        ];
+      }),
+    [keys, byId, sender, identityColor],
+  );
 
   return (
     <div
@@ -73,28 +98,19 @@ export function PianoMessageNavigator({
           aria-label="更早的消息尚未加载"
         />
       )}
-      {geometry?.keys.map((key, index) => {
-        const message = byId.get(key.id);
-        if (!message) return null;
-        const previous = byId.get(geometry.keys[index - 1]?.id);
-        const sameSender =
-          !!previous?.from && !!message.from && JSON.stringify(previous.from) === JSON.stringify(message.from);
-        const preview = messageNavigatorPreviewText(message);
-        const status = `${key.error ? '，这里出过错' : ''}${key.awaitingResponse ? '，等你回应' : ''}`;
-        return (
-          <PianoMessageKey
-            key={key.id}
-            keyData={key}
-            message={message}
-            id={idFor(key.id)}
-            label={`${sender(message)}，${formatTime(message.timestamp)}：${preview ?? ''}${status}`}
-            selected={activeKey?.id === key.id}
-            compact={compact}
-            sameSender={sameSender}
-            color={identityColor(message)}
-          />
-        );
-      })}
+      {keyDetails?.map(({ key, message, sameSender, label, color }) => (
+        <PianoMessageKey
+          key={key.id}
+          keyData={key}
+          message={message}
+          id={idFor(key.id)}
+          label={label}
+          selected={activeKey?.id === key.id}
+          compact={compact}
+          sameSender={sameSender}
+          color={color}
+        />
+      ))}
       {geometry && (
         <>
           <div

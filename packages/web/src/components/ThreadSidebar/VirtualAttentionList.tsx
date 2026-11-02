@@ -59,7 +59,10 @@ export const VirtualAttentionList = forwardRef<VirtualThreadListHandle, VirtualA
       for (const row of rows) {
         const cached = measured.get(row.key);
         const estimate = getRowHeight?.(row) ?? ROW_HEIGHT_PX;
-        const height = getRowHeight && cached?.row === row && cached.estimate === estimate ? cached.height : estimate;
+        // HTTP snapshots replace row objects even when their rendered facts are
+        // unchanged. Keep the measured estimate for the stable row key until
+        // its content is measured again, its estimate changes, or width resets.
+        const height = getRowHeight && cached?.estimate === estimate ? cached.height : estimate;
         result.push(result[result.length - 1] + height);
       }
       return result;

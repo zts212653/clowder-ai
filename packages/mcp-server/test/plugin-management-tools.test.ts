@@ -25,8 +25,6 @@ const replacement = {
   currentPackageDigest: `sha512-${'A'.repeat(86)}==`,
   candidatePackageDigest: `sha512-${'B'.repeat(85)}A==`,
   expectedLifecycleRevision: 8,
-  expectedGrantRevision: 1,
-  candidateEffectiveGrants: [],
 };
 
 it('archive replacement uses a closed fence on archive requests only', () => {
@@ -36,7 +34,7 @@ it('archive replacement uses a closed fence on archive requests only', () => {
   const request = { source: { kind: 'local-archive', path: '/tmp/plugin.tgz' }, replacement };
   assert.equal(schema.safeParse({ request }).success, true);
   for (const bad of [
-    { ...replacement, expectedGrantRevision: 0 },
+    { ...replacement, expectedLifecycleRevision: 0 },
     { ...replacement, candidatePackageDigest: `sha512-${'B'.repeat(86)}==` },
     { ...replacement, unexpected: true },
     { ...replacement, pluginInstanceId: '' },
@@ -78,7 +76,7 @@ it('MCP preserves the Host offer in its error and forwards the exact owner-confi
   const offered = await handlers.install({ request: { source } });
   assert.equal(offered.isError, true);
   assert.match(JSON.stringify(offered), /ARCHIVE_REPLACEMENT_CONFIRMATION_REQUIRED/);
-  assert.match(JSON.stringify(offered), /expectedGrantRevision/);
+  assert.match(JSON.stringify(offered), /expectedLifecycleRevision/);
   const confirmed = await handlers.install({ request: { source, replacement } });
   assert.notEqual(confirmed.isError, true);
   assert.deepEqual(calls, [{ source }, { source, replacement }]);

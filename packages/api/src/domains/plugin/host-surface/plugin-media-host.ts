@@ -2,7 +2,6 @@ import { type MediaReadInput, type MediaReadResult, validateMessagingRowInput } 
 import { MessagingError } from '../../messaging/contract/host-types.js';
 import type { MediaEntitlementLedger } from '../../messaging/media-entitlements.js';
 import type { FileMessagingMediaLedger } from '../../messaging/media-ledger.js';
-import { hostCapabilityRefusal } from './host-capability-refusal.js';
 
 export interface PluginStreams {
   read(reference: string, options?: { readonly signal?: AbortSignal }): AsyncIterable<Uint8Array>;
@@ -10,7 +9,6 @@ export interface PluginStreams {
 
 export interface MediaReadContext {
   readonly pluginInstanceId: string;
-  readonly effectiveGrants: readonly string[];
 }
 
 const DENIED_MESSAGE = 'Media access denied';
@@ -22,7 +20,7 @@ export class PluginMediaReadService {
       readonly ledger: Pick<FileMessagingMediaLedger, 'readChunk'> &
         Partial<Pick<FileMessagingMediaLedger, 'openVerifiedStream'>>;
       readonly entitlements: Pick<MediaEntitlementLedger, 'isEntitled'>;
-      readonly onRejected?: (reason: 'capability' | 'entitlement' | 'range') => void;
+      readonly onRejected?: (reason: 'entitlement' | 'range') => void;
     },
   ) {}
 
@@ -33,11 +31,7 @@ export class PluginMediaReadService {
   ): AsyncIterable<Uint8Array> {
     options.signal?.throwIfAborted();
     options.assertCurrent?.();
-    if (!context.effectiveGrants.includes('streams.read'))
-      throw hostCapabilityRefusal(
-        new MessagingError('PERMISSION', 'streams.read capability is not granted'),
-        'streams.read',
-      );
+
     if (!(await this.options.entitlements.isEntitled(context.pluginInstanceId, reference)))
       throw new MessagingError('MEDIA_ACCESS_DENIED', DENIED_MESSAGE);
     const opened = await this.options.ledger.openVerifiedStream?.(reference);
@@ -59,13 +53,6 @@ export class PluginMediaReadService {
   }
 
   async read(context: MediaReadContext, input: MediaReadInput): Promise<MediaReadResult> {
-    if (!context.effectiveGrants.includes('streams.read')) {
-      this.options.onRejected?.('capability');
-      throw hostCapabilityRefusal(
-        new MessagingError('PERMISSION', 'streams.read capability is not granted'),
-        'streams.read',
-      );
-    }
     const validated = validateMessagingRowInput('streams.read', input);
     if (!validated.valid) {
       this.options.onRejected?.('range');
@@ -114,11 +101,7 @@ export function createPluginStreamsHost(
   return {
     async *read(reference, options) {
       assertCurrent();
-      if (!context.effectiveGrants.includes('streams.read'))
-        throw hostCapabilityRefusal(
-          new MessagingError('PERMISSION', 'streams.read capability is not granted'),
-          'streams.read',
-        );
+
       if (!service) throw new MessagingError('MEDIA_ACCESS_DENIED', 'Host streams are unavailable');
       yield* service.stream(context, reference, { ...options, assertCurrent });
     },

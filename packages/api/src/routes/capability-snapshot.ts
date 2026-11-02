@@ -25,6 +25,9 @@ import {
 } from './callback-auth-prehandler.js';
 
 export interface CapabilitySnapshotRoutesOptions {
+  readonly resolvePluginMcpView?: () => Promise<
+    import('../config/capabilities/invocation-plugin-mcp-view.js').InvocationPluginMcpView | undefined
+  >;
   /**
    * Registered in this plugin's scope: Fastify encapsulation means a sibling
    * plugin's auth hook does not reach these routes.
@@ -89,6 +92,7 @@ export const capabilitySnapshotRoutes: FastifyPluginAsync<CapabilitySnapshotRout
         isProjectView: !!query.projectPath,
         config: await readCapabilitiesConfigState(projectRoot),
         scope,
+        pluginMcpView: await options.resolvePluginMcpView?.(),
       });
     },
   );

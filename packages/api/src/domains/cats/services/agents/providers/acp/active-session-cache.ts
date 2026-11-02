@@ -2,7 +2,7 @@ import type { AcpMcpServer, AcpNewSessionResult } from './types.js';
 
 export class AcpSessionBindingError extends Error {}
 
-function signature(cwd: string, servers: AcpMcpServer[]) {
+export function acpSessionBindingSignature(cwd: string, servers: AcpMcpServer[]) {
   const normalized = servers.map((server) => {
     if (
       !('command' in server) ||
@@ -29,13 +29,14 @@ export class ActiveSessionCache {
     this.sessions.delete(sessionId);
   }
   remember(result: AcpNewSessionResult, cwd: string, servers: AcpMcpServer[]) {
-    if (result.sessionId) this.sessions.set(result.sessionId, { signature: signature(cwd, servers), result });
+    if (result.sessionId)
+      this.sessions.set(result.sessionId, { signature: acpSessionBindingSignature(cwd, servers), result });
     return result;
   }
   get(sessionId: string, cwd: string, servers: AcpMcpServer[], available: boolean) {
     const entry = this.sessions.get(sessionId);
     if (!entry) return undefined;
-    if (!available || entry.signature !== signature(cwd, servers)) {
+    if (!available || entry.signature !== acpSessionBindingSignature(cwd, servers)) {
       throw new AcpSessionBindingError(
         'ACP 活跃会话的工作目录、MCP 或运行状态已改变；请显式开启新会话。原历史已保留。',
       );

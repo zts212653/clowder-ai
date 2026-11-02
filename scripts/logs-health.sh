@@ -12,7 +12,21 @@ API_DATA_DIR="${1:-packages/api/data}"
 PROJECT_DATA_DIR="${2:-data}"
 RUNTIME_LOG_DIR="$API_DATA_DIR/logs/api"
 PROCESS_LOG_DIR="$PROJECT_DATA_DIR/logs/process"
-AUDIT_LOG_DIR="$API_DATA_DIR/audit-logs"
+AUDIT_LOG_SOURCE="default (API cwd)"
+if [ -n "${3:-}" ]; then
+    AUDIT_LOG_DIR="$3"
+    AUDIT_LOG_SOURCE="explicit argument"
+elif [ -n "${AUDIT_LOG_DIR:-}" ]; then
+    AUDIT_LOG_SOURCE="deployment environment"
+else
+    AUDIT_LOG_DIR="$API_DATA_DIR/audit-logs"
+fi
+if [ "$AUDIT_LOG_SOURCE" != "default (API cwd)" ]; then
+    case "$AUDIT_LOG_DIR" in
+        /*|[a-zA-Z]:[\\/]*) ;;
+        *) AUDIT_LOG_DIR="$(dirname "$API_DATA_DIR")/$AUDIT_LOG_DIR" ;;
+    esac
+fi
 FORENSIC_DIR="$API_DATA_DIR/cli-raw-archive"
 
 WARN_DISK_MB=500          # warn if any layer exceeds this
@@ -151,6 +165,7 @@ printf "  LOG_LEVEL:     %s\n" "${LOG_LEVEL:-info (default)}"
 printf "  Runtime dir:   %s\n" "$RUNTIME_LOG_DIR"
 printf "  Process dir:   %s\n" "$PROCESS_LOG_DIR"
 printf "  Audit dir:     %s\n" "$AUDIT_LOG_DIR"
+printf "  Audit source:  %s\n" "$AUDIT_LOG_SOURCE"
 printf "  Forensics dir: %s\n" "$FORENSIC_DIR"
 echo ""
 

@@ -95,7 +95,7 @@ it('cannot select the invalid detected default, including a synthetic change eve
   expect(host.querySelector<HTMLOptionElement>('option[value=dsh]')?.disabled).toBe(true);
   await choose('dsh');
   expect(host.querySelector<HTMLSelectElement>('select[aria-label="使用工具"]')?.value).toBe('claude');
-  expect(host.querySelector('[data-testid=member-save-bar]')).toBeNull();
+  expect(host.querySelector('[data-testid=member-save-bar]')?.textContent).toContain('没有改动');
 });
 it('rejects a legacy invalid ACP/CLI draft before sending a member write', async () => {
   await mount({ ...cat, clientId: 'acp', carrier: 'cli' });

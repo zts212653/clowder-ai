@@ -22,7 +22,9 @@ export async function fetchOfficialPackageArchive(entry: OfficialPluginCatalogEn
   if (entry.distribution !== 'bundled') return downloadCatalogArchive(entry);
   const registered = registeredBundledArchive(entry);
   if (!registered) throw new Error('Host does not register this bundled archive identity');
-  const bytes = await readFile(new URL(`./bundled-packages/${registered.archivePath}`, import.meta.url));
+  const bytes = await readFile(
+    new URL(`../../../dist/domains/plugin/bundled-packages/${registered.archivePath}`, import.meta.url),
+  );
   verifyPluginPackageDigest(bytes, registered.packageDigest);
   return bytes;
 }

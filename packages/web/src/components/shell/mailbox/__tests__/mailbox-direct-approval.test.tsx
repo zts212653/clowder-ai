@@ -2,6 +2,7 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { useApprovalHubStore } from '@/stores/approvalHubStore';
+import { observeApiSessionOwner } from '@/utils/api-session-identity';
 import { createApprovalSessions } from '../approval-sessions';
 import { HostedApprovalCard } from '../HostedApprovalCard';
 import { resolveOriginalPlace } from '../original-place';
@@ -18,7 +19,10 @@ vi.mock('@/utils/scrollToMessage', () => ({ scrollToMessage: vi.fn() }));
 vi.mock('@/utils/teleport', () => ({ planTeleport: () => ({}), kickTeleportResolve: vi.fn() }));
 vi.mock('../../../ThreadSidebar/thread-navigation', () => ({ pushThreadRouteWithHistory: vi.fn() }));
 
-beforeEach(() => vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true));
+beforeEach(() => {
+  observeApiSessionOwner('owner-1');
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+});
 const mounted: Array<() => void> = [];
 afterEach(() => {
   for (const dispose of mounted.splice(0)) dispose();
@@ -52,9 +56,24 @@ async function mountOriginalProposal(extra: Record<string, unknown> = {}) {
     latestRead: () => ({ result: read, generation }),
     now: () => Date.now(),
   });
-  useApprovalHubStore.setState({ items: [item], deciding: {}, decisionAttempts: {}, count: 1 });
+  useApprovalHubStore.setState({
+    items: [item],
+    deciding: {},
+    decisionAttempts: {},
+    count: 1,
+    pendingReadAvailable: true,
+    isLoading: false,
+    pendingOwnerUserId: OWNER,
+  });
   network.fetch.mockImplementation(async (path: string) => {
-    if (path === '/api/approval-hub/pending') return Response.json({ items: [item], count: 1 });
+    if (path === '/api/approval-hub/pending')
+      return Response.json({
+        items: [item],
+        count: 1,
+        pendingReadAvailable: true,
+        isLoading: false,
+        pendingOwnerUserId: OWNER,
+      });
     if (path === `/api/threads/${detail.parentThreadId}`)
       return Response.json({
         id: detail.parentThreadId,

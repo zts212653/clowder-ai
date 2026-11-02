@@ -46,12 +46,17 @@ function mergeSubtree(nodes: TreeNode[], targetPath: string, children: TreeNode[
 
 export interface FileData {
   path: string;
+  /** Authorized absolute path after the existing Workspace root and realpath checks. Display/copy only. */
+  absolutePath?: string;
   content: string;
   sha256: string;
-  size: number;
+  /** Undefined when the reader has not obtained source metadata (for example an unread Office attachment). */
+  size?: number;
   mime: string;
   truncated: boolean;
   binary?: boolean;
+  pageCount?: number;
+  pageUnit?: 'pages' | 'slides' | 'sheets';
 }
 
 async function discoverWorktrees(projectPath: string): Promise<WorktreeEntry[]> {
@@ -257,23 +262,6 @@ export function useWorkspace({
     onReload: fetchFile,
   });
 
-  // Reveal file in system file manager (Finder/Explorer)
-  const revealInFinder = useCallback(
-    async (path: string) => {
-      if (!worktreeId) return;
-      try {
-        await apiFetch('/api/workspace/reveal', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ worktreeId, path }),
-        });
-      } catch {
-        /* ignore */
-      }
-    },
-    [worktreeId],
-  );
-
   return {
     worktrees: currentWorktrees,
     worktreesLoading: !worktreesReadyForProject || worktreesLoading,
@@ -293,7 +281,6 @@ export function useWorkspace({
     fetchFile,
     search,
     resetSearch,
-    revealInFinder,
     setEditDirty,
     applyExternalChange,
     dismissExternalChange,

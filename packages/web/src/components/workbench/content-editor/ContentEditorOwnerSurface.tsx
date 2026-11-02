@@ -220,8 +220,6 @@ function parseAdmission(value: unknown, expectedSessionRef: string, apiBase: str
     !isBoundedToken(surface.installationInstanceId) ||
     !isBoundedToken(surface.providerVersion) ||
     !isBoundedToken(surface.packageDigest) ||
-    !Number.isSafeInteger(surface.grantRevision) ||
-    Number(surface.grantRevision) < 1 ||
     !Number.isSafeInteger(surface.lifecycleRevision) ||
     Number(surface.lifecycleRevision) < 1 ||
     surface.activationState !== 'enabled' ||

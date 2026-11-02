@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { F306ApprovalAdapter } from '../../../api/dist/domains/approval-hub/adapters/F306ApprovalAdapter.js';
 import { InvocationQueue } from '../../../api/dist/domains/cats/services/agents/invocation/InvocationQueue.js';
 import { MessageQueueRuntimeConversationReturnGateway } from '../../../api/dist/domains/runtime-interaction/MessageQueueRuntimeConversationReturnGateway.js';
 import {
@@ -42,6 +43,7 @@ export async function createInboxConversationFixture(language) {
       );
       await app.register(runtimeInteractionRoutes, { service });
       return {
+        approvalAdapter: new F306ApprovalAdapter(store),
         service,
         store,
         queue,
@@ -68,7 +70,7 @@ export async function createInboxConversationFixture(language) {
       };
     },
   });
-  async function create(id) {
+  async function create(id, deadline = {}) {
     const title = language === 'en' ? `Where should we verify ${id}?` : `${id} 在哪里验证？`;
     return service.createConversationDecision({
       version: 1,
@@ -89,6 +91,7 @@ export async function createInboxConversationFixture(language) {
         ],
       },
       allowTextResponse: true,
+      ...deadline,
     });
   }
   async function createProvider(id, kind) {

@@ -108,11 +108,6 @@ for (const release of RELEASES) {
       assert.equal(ref?.payload.type, 'file');
       assert.equal(ref.payload.fileName, 'report.pdf');
       const sent = calls.filter(({ method }) => method === 'sendMedia');
-      assert.equal(
-        pkg.grants.includes('streams.read'),
-        release.media,
-        'media delivery follows the declared capability',
-      );
       if (release.media) {
         assert.equal(sent.length, 1, 'one media upload');
         const [externalId, media] = sent[0].args;

@@ -100,9 +100,16 @@
   position: relative;
   display: flex;
   align-items: center;
-  min-height: 52px;
-  padding: 0 56px 0 16px;
+  min-height: 72px;
+  padding: 9px 56px 9px 16px;
   border-bottom: 1px solid var(--shell-hairline);
+}
+.destination-heading {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
 }
 .destination-header h1 {
   margin: 0;
@@ -332,7 +339,7 @@
   }
   .navigation-close {
     position: absolute;
-    top: 16px;
+    top: 23px;
     right: 12px;
     display: block;
     border: 0;
@@ -389,7 +396,7 @@
 .destination-search-trigger {
   position: absolute;
   z-index: 1;
-  top: 12px;
+  top: 22px;
   right: 16px;
   display: grid;
   place-items: center;

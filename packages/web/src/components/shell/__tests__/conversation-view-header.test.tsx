@@ -2,6 +2,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatMessage, QueueEntry } from '@/stores/chat-types';
+import { useSidebarProjectionStore } from '@/stores/sidebarProjectionStore';
 
 const state = vi.hoisted(() => ({
   apiFetch: vi.fn(),
@@ -13,10 +14,6 @@ const state = vi.hoisted(() => ({
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 vi.mock('@/utils/api-client', () => ({ apiFetch: state.apiFetch }));
-vi.mock('@/stores/sidebarProjectionStore', () => ({
-  useSidebarProjectionStore: (select: (value: { rows: { id: string; participants: string[] }[] }) => unknown) =>
-    select({ rows: [{ id: 'thread-view', participants: state.participants }] }),
-}));
 vi.mock('@/stores/activeExecutionStore', () => ({
   useActiveExecutionStore: (
     select: (value: { executionsByKey: Record<string, { threadId: string; catId: string }> }) => unknown,
@@ -52,6 +49,27 @@ describe('F322 conversation view control in the real v2 header', () => {
   let host: HTMLDivElement;
   let root: Root;
   async function render() {
+    useSidebarProjectionStore.setState({
+      rows: [
+        {
+          id: 'thread-view',
+          title: 'Conversation view test',
+          participants: state.participants,
+          pinned: false,
+          favorited: false,
+          labels: [],
+          preferredCats: [],
+          projectPath: '/test/project',
+          lastActiveAt: 0,
+          systemKind: null,
+          isHubThread: false,
+          unreadCount: 0,
+          hasUserMention: false,
+          presence: { status: 'idle' },
+        },
+      ],
+      pendingThreadCommands: {},
+    });
     await act(async () =>
       root.render(
         <ChatContainerHeader
@@ -130,6 +148,7 @@ describe('F322 conversation view control in the real v2 header', () => {
   });
   afterEach(() => {
     act(() => root.unmount());
+    useSidebarProjectionStore.setState({ rows: [], pendingThreadCommands: {} });
     host.remove();
     vi.restoreAllMocks();
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;

@@ -11,6 +11,7 @@ import {
   collectiveWorkProjectionSchema,
   collectiveWorkStatusSchema,
 } from './collective-collaboration.js';
+import { collectiveTimeFactSchema } from './collective-time.js';
 
 export const collectiveWorkProjectSummarySchema = z
   .object({
@@ -21,6 +22,7 @@ export const collectiveWorkProjectSummarySchema = z
     purpose: z.string().trim().min(1).max(4000),
     status: z.enum(['active', 'completed']),
     revision: z.number().int().positive(),
+    targetDate: collectiveTimeFactSchema.optional(),
   })
   .strict();
 
@@ -66,6 +68,9 @@ export const collectiveWorkMatterSchema = collectiveWorkProjectionSchema
     revision: true,
     status: true,
     executionStatus: true,
+    time: true,
+    timeSuggestions: true,
+    materialLinks: true,
   })
   .extend({
     intendedOutcomePreview: z.string().max(500),

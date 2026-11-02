@@ -8,11 +8,11 @@ import { FilePluginInventoryStore, HostInventoryControlPlane } from '../dist/dom
 import { parsePluginInventorySnapshot } from '../dist/domains/plugin/host-inventory/snapshot.js';
 
 const digest = (text) => `sha512-${createHash('sha512').update(text).digest('base64')}`;
-// Published @clowder-ai/feishu-meeting-intake@0.1.0-alpha.9 manifest.
+// Preserve an installed package whose declared contract is newer than this Host.
 const oldManifest = {
   pluginId: 'official.feishu-meeting-intake',
   version: '0.1.0-alpha.9',
-  contractVersion: '0.1.0',
+  contractVersion: '9.0.0',
   name: 'Feishu Meeting Intake',
   features: [
     {
@@ -51,7 +51,7 @@ function oldSnapshot() {
         packageDigest: digest('old'),
         pluginId: oldManifest.pluginId,
         version: oldManifest.version,
-        contractVersion: '0.1.0',
+        contractVersion: '9.0.0',
         manifest: oldManifest,
         signalSchemas: {},
         packageState: 'installed',
@@ -89,6 +89,7 @@ function replacement() {
   const manifest = {
     ...current,
     version: '0.1.0-alpha.11',
+    contractVersion: '0.1.0',
     features: [{ id: 'messages', name: 'Messages', resources: [], capabilities: ['messaging.send'] }],
   };
   return {
@@ -96,10 +97,9 @@ function replacement() {
     packagePluginId: manifest.pluginId,
     computedPackageDigest: digest('new'),
     expectedPackageDigest: digest('new'),
-    effectiveGrants: ['messaging.send'],
   };
 }
-test('incompatible old manifest remains durable but is not exposed as an executable manifest', async () => {
+test('legacy inventory reads preserve disk bytes and actual writes drop retired grants while retaining the raw manifest', async () => {
   const root = await mkdtemp(join(tmpdir(), 'plugin-incompatible-'));
   const path = join(root, 'inventory.json');
   const original = oldSnapshot();
@@ -109,9 +109,15 @@ test('incompatible old manifest remains durable but is not exposed as an executa
   assert.equal(snapshot.packages[0].manifest, null);
   assert.deepEqual(snapshot.packages[0].incompatibleManifest, oldManifest);
   assert.deepEqual(snapshot.instances, original.instances);
-  assert.deepEqual(snapshot.grants, original.grants);
   await store.transaction(() => {});
-  assert.deepEqual(JSON.parse(await readFile(path, 'utf8')), original);
+  assert.deepEqual(
+    JSON.parse(await readFile(path, 'utf8')),
+    original,
+    'a read-only transaction does not rewrite inventory',
+  );
+  await store.transaction((tx) => tx.instances.put(snapshot.instances[0]));
+  const { grants: _legacyGrants, ...current } = original;
+  assert.deepEqual(JSON.parse(await readFile(path, 'utf8')), current);
 });
 test('invalid replacement leaves old authority intact; compatible upgrade replaces atomically', async () => {
   const root = await mkdtemp(join(tmpdir(), 'plugin-incompatible-upgrade-'));
@@ -119,9 +125,9 @@ test('invalid replacement leaves old authority intact; compatible upgrade replac
   await writeFile(path, JSON.stringify(oldSnapshot()));
   const store = new FilePluginInventoryStore(path);
   const host = new HostInventoryControlPlane(store, { now: () => 5 });
-  const fence = { pluginInstanceId: 'old-instance', expectedLifecycleRevision: 1, expectedGrantRevision: 1 };
+  const fence = { pluginInstanceId: 'old-instance', expectedLifecycleRevision: 1 };
   await assert.rejects(host.upgradePackage({ ...replacement(), manifest: oldManifest, ...fence }), {
-    code: 'INVALID_MANIFEST',
+    code: 'CONTRACT_VERSION_MISMATCH',
   });
   assert.deepEqual(JSON.parse(await readFile(path, 'utf8')), oldSnapshot());
   await host.upgradePackage({ ...replacement(), ...fence });
@@ -129,7 +135,6 @@ test('invalid replacement leaves old authority intact; compatible upgrade replac
   assert.equal(s.instances[0].pluginInstanceId, 'old-instance');
   assert.equal(s.instances[0].packageDigest, digest('new'));
   assert.equal(s.packages.find((p) => p.packageDigest === digest('new')).manifest.version, '0.1.0-alpha.11');
-  assert.deepEqual(s.grants[0].effectiveGrants, ['messaging.send']);
   assert.deepEqual(s.packages.find((p) => p.packageDigest === digest('old')).incompatibleManifest, oldManifest);
 });
 for (const [name, mutate] of [
@@ -151,12 +156,6 @@ for (const [name, mutate] of [
       s.packages[0].manifest = { ...oldManifest, features: null };
     },
   ],
-  [
-    'excess authority',
-    (s) => {
-      s.grants[0].effectiveGrants = ['unrequested'];
-    },
-  ],
 ])
   test(`incompatibility does not hide corrupt ${name}`, () => {
     const s = oldSnapshot();
@@ -170,7 +169,6 @@ test('restart and Manager isolate old installs while a normal package remains us
   const { createDormantPluginRuntimeComposition, createPluginManagerRuntimeComposition } = await import(
     '../dist/domains/plugin/index.js'
   );
-  const { reconcileOfficialPluginGrants } = await import('../dist/domains/plugin/manager/official-plugin-grants.js');
   const root = await mkdtemp(join(tmpdir(), 'plugin-incompatible-manager-'));
   const hostRoot = join(root, '.cat-cafe/plugin-host');
   await mkdir(hostRoot, { recursive: true });
@@ -186,14 +184,6 @@ test('restart and Manager isolate old installs while a normal package remains us
   good.packagePluginId = good.manifest.pluginId;
   good.provenance = { kind: 'local-archive' };
   const normal = await runtime.inventory.installPackage(good);
-  assert.deepEqual(
-    await reconcileOfficialPluginGrants({
-      store: runtime.inventoryStore,
-      inventory: runtime.inventory,
-      hostPolicies: [{ pluginId: oldManifest.pluginId, effectiveGrants: ['messaging.send'] }],
-    }),
-    [],
-  );
   assert.equal((await runtime.recoverAfterRestart()).resumeRequested, 0);
   const { manager } = createPluginManagerRuntimeComposition({
     runtime,
@@ -222,10 +212,6 @@ test('restart and Manager isolate old installs while a normal package remains us
   await runtime.lifecycle.prepare(normal.pluginInstanceId, 1);
   assert.equal((await manager.get('official.normal')).plugin.config, 'ready');
   const snapshot = await runtime.inventoryStore.snapshot();
-  assert.deepEqual(
-    snapshot.grants.find((g) => g.pluginInstanceId === 'old-instance'),
-    original.grants[0],
-  );
   assert.deepEqual(snapshot.packages.find((p) => p.packageDigest === digest('old')).incompatibleManifest, oldManifest);
 });
 
@@ -280,30 +266,4 @@ test('Manager strictly replaces an incompatible install from a compatible archiv
   assert.equal((await manager.get(oldManifest.pluginId)).plugin.diagnostic?.code, undefined);
   assert.equal(await readFile(join(dataDir, 'user-data.txt'), 'utf8'), 'keep me');
   assert.equal((await runtime.inventoryStore.snapshot()).instances[0].packageDigest, entry.packageDigest);
-});
-
-test('historical capability diagnostics survive old inventory and expire on compatible replacement', async () => {
-  const snapshot = oldSnapshot();
-  snapshot.instances[0].lastRuntimeError = { code: 'PERMISSION_DENIED', exitCode: null, signal: null, occurredAt: 2 };
-  snapshot.instances[0].lastRuntimeErrorDetail = {
-    kind: 'capability_not_granted',
-    capability: 'events.publish',
-    occurredAt: 2,
-    packageDigest: digest('old'),
-  };
-  assert.deepEqual(
-    parsePluginInventorySnapshot(snapshot).instances[0].lastRuntimeErrorDetail,
-    snapshot.instances[0].lastRuntimeErrorDetail,
-  );
-  const root = await mkdtemp(join(tmpdir(), 'plugin-retired-diagnostic-'));
-  const path = join(root, 'inventory.json');
-  await writeFile(path, JSON.stringify(snapshot));
-  const store = new FilePluginInventoryStore(path);
-  await new HostInventoryControlPlane(store).upgradePackage({
-    ...replacement(),
-    pluginInstanceId: 'old-instance',
-    expectedLifecycleRevision: 1,
-    expectedGrantRevision: 1,
-  });
-  assert.equal((await store.snapshot()).instances[0].lastRuntimeErrorDetail, undefined);
 });

@@ -11,9 +11,13 @@ import {
 } from '../../../../../config/capabilities/capability-orchestrator.js';
 import {
   assertMappedCapabilitySource,
-  isSameCapabilityRoot,
   resolveInvokeCapabilityRoot,
 } from '../../../../../config/capabilities/invoke-capability-root.js';
+import { readInvocationMcpConfig } from '../../../../../config/capabilities/invoke-mcp-config.js';
+import {
+  bindManagedMcpStdioConfig,
+  materializeNativeMcpHttp,
+} from '../../../../../config/capabilities/managed-mcp-config.js';
 import { isManagedCatCafeSplit } from '../../../../../config/capabilities/mcp-constants.js';
 import {
   resolveMcpArgs,
@@ -53,7 +57,7 @@ export async function resolveProviderMcpConfigResolution(input: {
     ALLOWED_WORKSPACE_DIRS: resolveMcpWorkspaceRoot(input.workingDirectory),
   };
   for (const key of MCP_CALLBACK_ENV_KEYS) {
-    const val = input.callbackEnv![key];
+    const val = input.callbackEnv?.[key];
     if (val && !(input.credentialFile && (key === 'CAT_CAFE_INVOCATION_ID' || key === 'CAT_CAFE_CALLBACK_TOKEN')))
       catCafeEnvEntries[key] = val;
   }
@@ -66,27 +70,11 @@ export async function resolveProviderMcpConfigResolution(input: {
   try {
     // F249: Project config is the single truth source for MCP resolution.
     // Try project first; fall back to global for uninitialized projects.
-    let capConfig = null;
-    let configSourceRoot = capabilitiesProjectRoot;
-    let accessScope: 'global' | 'project' = 'global';
-    if (input.workingDirectory && !isSameCapabilityRoot(input.workingDirectory, capabilitiesProjectRoot)) {
-      try {
-        const projectRaw = readFileSync(join(input.workingDirectory, '.cat-cafe', 'capabilities.json'), 'utf-8');
-        const parsed = JSON.parse(projectRaw);
-        if (parsed?.version === 1 || parsed?.version === 2) {
-          capConfig = parsed;
-          configSourceRoot = input.workingDirectory;
-          accessScope = 'project';
-        }
-      } catch {
-        /* No project config — fall back to global */
-      }
-    }
-    if (!capConfig) {
-      const raw = readFileSync(join(capabilitiesProjectRoot, '.cat-cafe', 'capabilities.json'), 'utf-8');
-      const parsed = JSON.parse(raw);
-      if (parsed?.version === 1 || parsed?.version === 2) capConfig = parsed;
-    }
+    const {
+      config: capConfig,
+      configSourceRoot,
+      accessScope,
+    } = readInvocationMcpConfig(capabilitiesProjectRoot, input.workingDirectory);
     if (capConfig && catId) {
       if (input.provider === 'kimi') {
         // Retired or unusable descriptors may be absent from resolveServersForCat.
@@ -190,7 +178,21 @@ export async function resolveProviderMcpConfigResolution(input: {
     }),
     '#712: MCP invoke-time injection',
   );
-  return { servers: mcpServers, source: resolved ? 'capabilities.json' : 'fallback' };
+  return {
+    servers: materializeNativeMcpHttp(
+      Object.fromEntries(
+        Object.entries(mcpServers).map(([name, server]) => [
+          name,
+          bindManagedMcpStdioConfig(server, {
+            ...input.callbackEnv,
+            ...(input.credentialFile ? { CAT_CAFE_CREDENTIAL_FILE: input.credentialFile } : {}),
+          }),
+        ]),
+      ),
+      { ...input.callbackEnv, ...(input.credentialFile ? { CAT_CAFE_CREDENTIAL_FILE: input.credentialFile } : {}) },
+    ),
+    source: resolved ? 'capabilities.json' : 'fallback',
+  };
 }
 
 export async function resolveProviderMcpConfig(

@@ -3,6 +3,7 @@
 import type { CollectivePairingIntentMessage } from '@cat-cafe/shared';
 import { useEffect, useState } from 'react';
 import { AvatarImageWithFallback } from '@/components/AvatarImageWithFallback';
+import { isCanonicalAvatarUrl } from '@/lib/avatar-url';
 import { apiFetch } from '@/utils/api-client';
 
 interface EntryCat {
@@ -124,7 +125,13 @@ export function CollectiveEntryReview({
                   }
                 />
                 <AvatarImageWithFallback
-                  src={cat.avatar?.startsWith('/avatars/') || cat.avatar?.startsWith('/uploads/') ? cat.avatar : null}
+                  src={
+                    cat.avatar?.startsWith('/avatars/') ||
+                    cat.avatar?.startsWith('/uploads/') ||
+                    (cat.avatar?.startsWith('/api/cats/') && isCanonicalAvatarUrl(cat.avatar))
+                      ? cat.avatar
+                      : null
+                  }
                   alt=""
                   className="h-12 w-12 shrink-0 rounded-full object-cover"
                 />

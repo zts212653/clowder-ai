@@ -26,7 +26,6 @@ function fixture(runtime) {
     packages: [
       { pluginId: instance.pluginId, packageDigest: instance.packageDigest, manifest: { pluginId: instance.pluginId } },
     ],
-    grants: [{ pluginInstanceId: instance.pluginInstanceId, grantRevision: 1, effectiveGrants: [] }],
   };
   return new BundledPluginRuntimeCarrier({
     inventory: {

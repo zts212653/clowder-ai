@@ -1,6 +1,7 @@
 import type { TaskItem, UpdateTaskInput } from '@cat-cafe/shared';
 import { createModuleLogger } from '../../infrastructure/logger.js';
 import type { ITaskStore } from '../cats/services/stores/ports/TaskStore.js';
+import { isOrdinaryImplementTask } from '../cats/services/stores/ports/TaskStoreContract.js';
 import type { ActionSuccessorCompletionService } from './ActionSuccessorCompletionService.js';
 import type { ActionSuccessorLeaseStore } from './ActionSuccessorLeaseStore.js';
 import type { ActionSuccessorLease } from './action-successor-state-machine.js';
@@ -72,7 +73,7 @@ export class TaskActionSuccessorLifecycle {
       try {
         const taskId = lease.subjectRef.slice('subject:task:'.length);
         const task = await taskStore.get(taskId);
-        if (!task || task.status !== 'done') {
+        if (!task || task.status !== 'done' || isOrdinaryImplementTask(task)) {
           stats.skipped += 1;
           continue;
         }
@@ -96,6 +97,7 @@ export class TaskActionSuccessorLifecycle {
   }
 
   private async getActiveLease(task: TaskItem): Promise<ActionSuccessorLease | null> {
+    if (isOrdinaryImplementTask(task)) return null;
     if (!task.userId) return null;
     const lease = await this.deps.leaseStore.getByIdentity({
       tenantScope: task.userId,

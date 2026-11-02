@@ -39,6 +39,22 @@ describe('schedule proposal decisions', () => {
     assert.equal(runner.getTaskSummaries().length, 0);
   });
 
+  it('persists a rejected decision in the canonical card thread for the next invocation', async () => {
+    const proposal = createProposal({ proposalId: 'schedule-origin-rejection' });
+    store.create(proposal);
+    fixture.anchor(proposal);
+
+    const response = await fixture.decide(proposal.proposalId, 'reject', { rejectionReason: 'not now' });
+
+    assert.equal(response.statusCode, 200);
+    const messages = await fixture.messageStore.getByThread('thread-owner');
+    assert.equal(messages.length, 1, 'a socket update is not a durable origin-thread decision receipt');
+    assert.match(messages[0].content, /已拒绝/);
+    assert.match(messages[0].content, /not now/);
+    const { assembleContext } = await import('../../dist/domains/cats/services/context/ContextAssembler.js');
+    assert.match(assembleContext(messages).contextText, /已拒绝/);
+  });
+
   it('blocks tombstoned approve and reject before claim or scheduler effect', async () => {
     for (const action of ['approve', 'reject']) {
       const value = createProposal({ proposalId: `schedule-tombstoned-${action}` });

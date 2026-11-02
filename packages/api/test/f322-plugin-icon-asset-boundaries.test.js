@@ -41,7 +41,7 @@ for (const scenario of [
     await promisify(execFile)('tar', ['-czf', archivePath, '-C', source, 'package']);
     const bytes = await readFile(archivePath);
     const digest = `sha512-${createHash('sha512').update(bytes).digest('base64')}`;
-    const entry = catalogEntry(digest, { effectiveGrants: [] });
+    const entry = catalogEntry(digest, {});
     const store = new MemoryPluginInventoryStore();
     const before = await store.snapshot();
     const assets = new PluginManagerPackageAssetService({

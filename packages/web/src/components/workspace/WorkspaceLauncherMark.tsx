@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { MemoryBookStarIcon } from '@/components/shell/ShellIcons';
+import { MemoryBookStarIcon, YarnBallIcon } from '@/components/shell/ShellIcons';
 import type { WorkspaceMode } from '@/lib/workspace-modes';
 
 type LauncherMarkMode = WorkspaceMode | 'status' | 'theater' | 'capability-evolution';
@@ -9,7 +9,9 @@ export function WorkspaceLauncherMark({ mode }: { mode: LauncherMarkMode }) {
   // Keep the 20px box this tile has always used; the glyph stays decorative (aria-hidden) like its neighbours.
   if (mode === 'recall') return <MemoryBookStarIcon className="h-5 w-5" />;
 
-  const paths: Record<Exclude<LauncherMarkMode, 'recall'>, ReactNode> = {
+  if (mode === 'tasks') return <YarnBallIcon className="h-5 w-5" />;
+
+  const paths: Record<Exclude<LauncherMarkMode, 'recall' | 'tasks'>, ReactNode> = {
     dev: <path d="M8 4 3 8l5 4M12 4l5 4-5 4M11 2 9 14" />,
     'capability-evolution': <path d="M5 2c6 3 6 9 0 12M11 2c-6 3-6 9 0 12M5.8 5h4.4M5 8h6M5.8 11h4.4" />,
     'needs-me': (
@@ -28,12 +30,6 @@ export function WorkspaceLauncherMark({ mode }: { mode: LauncherMarkMode }) {
       <>
         <circle cx="8" cy="8" r="6" />
         <path d="M8 4v4l3 2" />
-      </>
-    ),
-    tasks: (
-      <>
-        <circle cx="8" cy="8" r="6" />
-        <path d="m5 8 2 2 4-4" />
       </>
     ),
     team: (

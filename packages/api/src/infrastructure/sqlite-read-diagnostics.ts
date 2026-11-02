@@ -1,5 +1,23 @@
 import { createHash } from 'node:crypto';
 import type Database from 'better-sqlite3';
+import {
+  captureNativeReadResources,
+  type NativeReadResourceDelta,
+  type NativeReadResources,
+  nativeReadResourceDelta,
+} from './sqlite-native-read-resources.js';
+
+export interface SqliteNativeReadContext {
+  kind: 'vector-knn';
+  requestedK: number;
+  dimensions: number;
+}
+
+interface NativeReadObservation extends SqliteNativeReadContext {
+  resourcesBefore: NativeReadResources | null;
+  resourcesAfter?: NativeReadResources | null;
+  resourceDelta?: NativeReadResourceDelta | null;
+}
 
 export interface SqliteReadDiagnostic {
   databasePath: string;
@@ -9,6 +27,7 @@ export interface SqliteReadDiagnostic {
   startedAt: number;
   elapsedMs: number;
   rows: number | null;
+  native?: NativeReadObservation;
 }
 
 export interface SqliteReadDiagnosticOptions {
@@ -21,6 +40,8 @@ export interface SqliteReadDiagnosticOptions {
   maxPerCallsite?: number;
   getRequestId?: () => string | null;
   clock?: () => number;
+  /** A caller-owned allow-list may describe scalar native input counts, never binding values. */
+  describeNativeRead?: (sql: string, bindings: readonly unknown[]) => SqliteNativeReadContext | undefined;
 }
 
 /** Bounded native-read witnesses. Binding values, SQL text and row contents never reach the sink. */
@@ -49,18 +70,25 @@ export function createSqliteReadDiagnostics(
     safely(() => sink?.(event));
   }
 
-  function beginRead(db: Database.Database, statement: Database.Statement, startedAt: number) {
+  function beginRead(
+    db: Database.Database,
+    statement: Database.Statement,
+    startedAt: number,
+    bindings: readonly unknown[],
+  ) {
     if ((!options.onReadStarted && !options.onReadFinished) || observedCalls >= maxReports) return;
     observedCalls++;
     return safely(() => {
       const sqlFingerprint = fingerprints.get(statement) ?? createHash('sha256').update(statement.source).digest('hex');
       fingerprints.set(statement, sqlFingerprint);
+      const context = safely(() => options.describeNativeRead?.(statement.source, bindings));
       const event = {
         databasePath: db.name,
         sqlFingerprint,
         caller: (new Error().stack ?? '').split('\n').slice(3, 11),
         requestId: options.getRequestId?.() ?? null,
         startedAt,
+        ...(context ? { native: { ...context, resourcesBefore: captureNativeReadResources() } } : {}),
       };
       notify(options.onReadStarted, event);
       return event;
@@ -75,7 +103,23 @@ export function createSqliteReadDiagnostics(
     elapsedMs: number,
     witness: ReturnType<typeof beginRead>,
   ) {
-    if (witness) notify(options.onReadFinished, { ...witness, elapsedMs, rows });
+    if (witness) {
+      const resourcesAfter = witness.native ? captureNativeReadResources() : undefined;
+      notify(options.onReadFinished, {
+        ...witness,
+        elapsedMs,
+        rows,
+        ...(witness.native
+          ? {
+              native: {
+                ...witness.native,
+                resourcesAfter,
+                resourceDelta: nativeReadResourceDelta(witness.native.resourcesBefore, resourcesAfter ?? null),
+              },
+            }
+          : {}),
+      });
+    }
     recordSlowRead(db, statement, rows, startedAt, elapsedMs);
   }
 
@@ -119,7 +163,7 @@ export function createSqliteReadDiagnostics(
             if (!active || reports >= maxReports) return Reflect.apply(all, statementReceiver, bindings);
             const startedAt = Date.now();
             const start = clock();
-            const witness = beginRead(db, statement, startedAt);
+            const witness = beginRead(db, statement, startedAt, bindings);
             let rows: number | null = null;
             try {
               const result: unknown = Reflect.apply(all, statementReceiver, bindings);

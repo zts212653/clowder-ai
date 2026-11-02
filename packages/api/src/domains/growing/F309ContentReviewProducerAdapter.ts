@@ -38,7 +38,10 @@ export class F309ContentReviewProducerAdapter implements NeedsMeProducerAdapter 
     const receipts: ProducerAttentionReceiptV1[] = [];
     for (const reviewId of this.deps.store.listReviewIds(ownerUserId)) {
       const review = this.deps.store.get(reviewId);
-      if (review?.rounds.at(-1)?.state !== 'awaiting_human') continue;
+      const round = review?.rounds.at(-1);
+      // Canonical retirement already excludes this round; rereading its source
+      // cannot restore eligibility. A new judgment clears retirement explicitly.
+      if (round?.state !== 'awaiting_human' || round.attentionRetiredReason) continue;
       const receipt = await this.readCurrentReceipt({ ownerUserId, producerSubjectRef: reviewId });
       if (receipt?.eligible) receipts.push(receipt);
     }

@@ -3,7 +3,15 @@
 import { ChatMessage } from '@/components/ChatMessage';
 import type { ChatMessage as Message } from '@/stores/chatStore';
 
-const reasons = [{ code: 'quota_exhausted', summary: 'quota exhausted', sourceRefs: ['fixture:quota'] }];
+const reasons = [
+  { code: 'routing_signal_recovered', summary: '已恢复 9 条历史状态记录', sourceRefs: ['fixture:history'] },
+  {
+    code: 'routing_capacity_unverified',
+    summary: 'Execution capacity is unverified (pool applicability unknown); account observation is fresh',
+    sourceRefs: ['fixture:capacity'],
+  },
+  { code: 'quota_exhausted', summary: 'quota exhausted', sourceRefs: ['fixture:quota'] },
+];
 function receipt(id: string, humanAttempt: boolean): Message {
   return {
     id,

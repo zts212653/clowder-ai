@@ -235,6 +235,43 @@ export const NEEDS_ME_PRODUCER_IDS = [
   'f290.collective_work_result',
 ] as const;
 
+const producerAttentionUnavailableSourceV1Schema = z
+  .object({
+    producerId: z.enum(NEEDS_ME_PRODUCER_IDS),
+    status: z.literal('unavailable'),
+    reason: z.enum(['source_unavailable', 'source_incomplete', 'source_invalid', 'source_read_failed']),
+  })
+  .strict();
+
+/** Read coverage is explicit so one failed producer never masquerades as a complete empty snapshot. */
+export const producerAttentionCoverageV1Schema = z
+  .discriminatedUnion('state', [
+    z.object({ state: z.literal('complete') }).strict(),
+    z
+      .object({
+        state: z.literal('partial'),
+        unavailableSources: z
+          .array(producerAttentionUnavailableSourceV1Schema)
+          .min(1)
+          .max(NEEDS_ME_PRODUCER_IDS.length),
+      })
+      .strict(),
+  ])
+  .superRefine((coverage, context) => {
+    if (coverage.state !== 'partial') return;
+    const seen = new Set<string>();
+    coverage.unavailableSources.forEach((source, index) => {
+      if (seen.has(source.producerId)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['unavailableSources', index, 'producerId'],
+          message: 'producer attention coverage cannot repeat an unavailable source',
+        });
+      }
+      seen.add(source.producerId);
+    });
+  });
+
 const producerCoordinateSchema = z
   .object({
     producerId: z.enum(NEEDS_ME_PRODUCER_IDS),
@@ -325,5 +362,6 @@ export type EntrustedWorkV1 = z.infer<typeof entrustedWorkV1Schema>;
 export type EntrustedWorkTaskRefV1 = z.infer<typeof entrustedWorkTaskRefV1Schema>;
 export type PhaseBNeedsMeProducerId = (typeof PHASE_B_NEEDS_ME_PRODUCER_IDS)[number];
 export type NeedsMeProducerId = (typeof NEEDS_ME_PRODUCER_IDS)[number];
+export type ProducerAttentionCoverageV1 = z.infer<typeof producerAttentionCoverageV1Schema>;
 export type ProducerAttentionReevaluationLinkV1 = z.infer<typeof producerAttentionReevaluationLinkV1Schema>;
 export type ProducerAttentionReceiptV1 = z.infer<typeof producerAttentionReceiptV1Schema>;

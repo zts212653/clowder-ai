@@ -1,3 +1,4 @@
+import { sliceUnicodeSafe } from '../../utils/unicode-safe-slice.js';
 import type { AbstractiveInput, AbstractiveResult, DurableCandidate } from './abstractive-summary-types.js';
 
 // ─── Parse natural language output into structured segments ─────
@@ -18,7 +19,7 @@ export function parseNaturalLanguageOutput(text: string, input: AbstractiveInput
     const firstLine = text.trim().split('\n')[0]?.trim();
     topicLabel =
       firstLine && firstLine.length > 5 && firstLine.length < 200
-        ? firstLine.replace(/^[-*>\s]+/, '').slice(0, 80)
+        ? sliceUnicodeSafe(firstLine.replace(/^[-*>\s]+/, ''), 0, 80)
         : `Thread ${input.threadId.slice(7, 19)} Summary`;
     titleEnd = firstLine ? text.indexOf(firstLine) + firstLine.length : 0;
   }

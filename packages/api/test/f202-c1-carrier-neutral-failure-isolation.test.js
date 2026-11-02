@@ -57,7 +57,6 @@ async function twoCarrierHost(t) {
     computedPackageDigest: digest,
     expectedPackageDigest: digest,
     packagePluginId: bundledManifest.pluginId,
-    effectiveGrants: [],
     signalSchemas: {},
   });
   await store.transaction((transaction) => {

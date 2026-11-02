@@ -1,6 +1,6 @@
 /** Explicit owner finish removes a checkout after a verified original-only archive. */
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, rmdirSync, statfsSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, rmdirSync, statfsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { git } from './worktree-reaper-probes.mjs';
 import {
@@ -10,11 +10,7 @@ import {
   verifyReleaseArchive,
   verifySourceOriginals,
 } from './worktree-release-archive.mjs';
-
-function append(root, record, at) {
-  mkdirSync(root, { recursive: true });
-  appendFileSync(join(root, 'ledger.jsonl'), `${JSON.stringify({ at: new Date(at).toISOString(), ...record })}\n`);
-}
+import { appendRelease as append, discardReleaseArchive } from './worktree-release-transactions.mjs';
 
 function freeBytes(path) {
   const st = statfsSync(path);
@@ -27,7 +23,10 @@ export function removeFinishedWorktree({ repo, root, entry, validate, actor, aut
   const txn = randomUUID();
   const archivePath = join(dirname(root), RELEASE_ARCHIVES, txn);
   const restore = releaseRestoreCommand(repo, entry, archivePath);
+  const automatic = actor === 'worktree-lifecycle';
+  const st = automatic ? lstatSync(entry.path) : null;
   const base = {
+    repo,
     action: 'release',
     txn,
     from: entry.originalPath ?? entry.path,
@@ -38,26 +37,50 @@ export function removeFinishedWorktree({ repo, root, entry, validate, actor, aut
     authorizationRef,
     sourceRef: entry.finishSourceRef,
     head: entry.head,
+    ...(entry.lifecycle.origin ? { origin: entry.lifecycle.origin } : {}),
     ...(entry.mergedAt ? { mergedAt: entry.mergedAt } : {}),
+    ...(entry.mergedPr ? { mergedPr: entry.mergedPr } : {}),
     restore,
+    ...(automatic
+      ? { processPid: process.pid, sourceIdentity: { dev: st.dev, ino: st.ino }, lifecycle: entry.lifecycle }
+      : {}),
   };
-  append(root, { ...base, state: 'pending' }, clock());
-  const { manifest, manifestSha256 } = createReleaseArchive({ repo, entry, archivePath, txn });
-  verifyReleaseArchive(archivePath, manifestSha256, repo);
-  validate();
-  verifySourceOriginals(entry, manifest);
-  const before = freeBytes(dirname(entry.path));
-  // Hashing originals can take time. Refresh the caller's process/job/owner
-  // observations at the destructive boundary; this is a probe, not an admission lock.
-  validate();
+  let phase = 'preserving';
+  append(root, { ...base, state: 'pending', ...(automatic ? { phase } : {}) }, clock());
   let done;
+  let manifest;
   try {
+    const archive = createReleaseArchive({ repo, entry, archivePath, txn });
+    manifest = archive.manifest;
+    const { manifestSha256 } = archive;
+    verifyReleaseArchive(archivePath, manifestSha256, repo);
+    validate();
+    verifySourceOriginals(entry, manifest);
+    const before = freeBytes(dirname(entry.path));
+    // Refresh observations after hashing, immediately before the destructive boundary.
+    validate();
+    if (automatic) append(root, { ...base, state: 'pending', phase: 'removing', manifestSha256 }, clock());
+    phase = 'removing';
     const result = git(repo, ['worktree', 'remove', entry.path]);
     if (!result.ok || existsSync(entry.path)) throw new Error('git worktree remove refused');
     const after = freeBytes(dirname(entry.path));
     done = { ...base, state: 'done', manifestSha256, diskFreeBytesBefore: before, diskFreeBytesAfter: after };
     append(root, done, clock());
   } catch (cause) {
+    if (automatic && existsSync(entry.path)) {
+      try {
+        // Git can fail after partially removing a tree. Keep the sole recovery copy in that case.
+        if (phase === 'removing') verifySourceOriginals(entry, manifest);
+        discardReleaseArchive(root, base);
+        append(root, { ...base, state: 'aborted', reason: `${cause.message}; automatic retry paused` }, clock());
+      } catch (cleanup) {
+        append(
+          root,
+          { ...base, state: 'interrupted', reason: `${cause.message}; ${cleanup.message}; automatic retry paused` },
+          clock(),
+        );
+      }
+    }
     const status = existsSync(entry.path)
       ? 'worktree release incomplete'
       : 'working copy removed but release completion failed';
@@ -110,6 +133,7 @@ export function directReleaseReceipt({ repo, root, path, owner, sourceRef }) {
         'head',
         'restore',
         'mergedAt',
+        'mergedPr',
       ].every((key) => previous.pending[key] === r[key]) &&
       Number.isFinite(Date.parse(r.at)) &&
       Date.parse(r.at) >= Date.parse(previous.pending.at)
@@ -133,7 +157,8 @@ export function directReleaseReceipt({ repo, root, path, owner, sourceRef }) {
     manifest.head !== r.head ||
     manifest.owner !== owner ||
     manifest.sourceRef !== sourceRef ||
-    manifest.mergedAt !== r.mergedAt
+    manifest.mergedAt !== r.mergedAt ||
+    manifest.mergedPr !== r.mergedPr
   )
     throw new Error('release archive receipt mismatch');
   return {
@@ -144,6 +169,7 @@ export function directReleaseReceipt({ repo, root, path, owner, sourceRef }) {
     sourceRef,
     head: r.head,
     ...(r.mergedAt ? { mergedAt: r.mergedAt } : {}),
+    ...(r.mergedPr ? { mergedPr: r.mergedPr } : {}),
     archivePath: r.archivePath,
     restore: r.restore,
     diskFreeBytesBefore: r.diskFreeBytesBefore,

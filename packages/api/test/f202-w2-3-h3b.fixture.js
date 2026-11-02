@@ -118,7 +118,7 @@ export default {
 const digestOf = (seed) => `sha512-${createHash('sha512').update(seed).digest('base64')}`;
 
 /**
- * @param packages `{ manifest, grants?, exposes? }` each; by default one package with the grant,
+ * @param packages `{ manifest, exposes? }` each; by default one package,
  *   exposing all three methods.
  * @param withRegistry false composes the Host without a registry, as production does until h3c.
  * @param registryOptions passed to the registry (its listener error hook).
@@ -156,7 +156,6 @@ export async function conversationHostHarness({ packages, withRegistry = true, r
       computedPackageDigest: digest,
       expectedPackageDigest: digest,
       packagePluginId: spec.manifest.pluginId,
-      effectiveGrants: spec.grants ?? ['cloud.conversation.host'],
     });
     instances.push(installed.pluginInstanceId);
   }

@@ -10,6 +10,15 @@ import type { ITaskStore } from './TaskStoreContract.js';
 
 export const TASK_QUERY_MAX_RESULTS = 50;
 
+/** Shared by bounded discovery and exact Task reads; thread ownership does not widen record visibility. */
+export function taskBelongsToQueryOwner(task: Pick<TaskItem, 'userId'>, ownerUserId: string): boolean {
+  return ownerUserId.length > 0 && task.userId === ownerUserId;
+}
+
+export function compareTaskQueryRecency(left: TaskItem, right: TaskItem): number {
+  return right.updatedAt - left.updatedAt || right.createdAt - left.createdAt || right.id.localeCompare(left.id);
+}
+
 export interface TaskQueryFilters {
   readonly threadIds: readonly string[];
   readonly ownerUserId: string;
@@ -85,16 +94,13 @@ export async function queryTaskItems(
   }
   const threadIds = canonicalThreadIds(filters.threadIds);
   const perThreadTasks = await Promise.all(threadIds.map((threadId) => taskStore.listByThread(threadId)));
-  let matched = perThreadTasks.flat().filter((task) => task.userId === filters.ownerUserId);
+  let matched = perThreadTasks.flat().filter((task) => taskBelongsToQueryOwner(task, filters.ownerUserId));
   if (filters.catId) matched = matched.filter((task) => task.ownerCatId === filters.catId);
   if (filters.status) matched = matched.filter((task) => task.status === filters.status);
   if (filters.kind) matched = matched.filter((task) => task.kind === filters.kind);
   if (filters.taskId) matched = matched.filter((task) => task.id === filters.taskId);
   if (filters.featureId) matched = matched.filter((task) => task.relatedFeatureId === filters.featureId);
-  matched.sort(
-    (left, right) =>
-      right.updatedAt - left.updatedAt || right.createdAt - left.createdAt || right.id.localeCompare(left.id),
-  );
+  matched.sort(compareTaskQueryRecency);
 
   const totalMatched = matched.length;
   const tasks = matched.slice(0, TASK_QUERY_MAX_RESULTS);

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createFileContextAttachment } from '@/components/chat-context-reference';
+import { useContentOpen } from '@/components/content-review/useContentOpen';
 import { useConfirm } from '@/components/useConfirm';
 import type { WorkspaceSurfaceDescriptor } from '@/components/workbench/workbench-contract';
 import { LinkedRootRemoveButton } from '@/components/workspace/LinkedRootsManager';
@@ -13,7 +14,7 @@ import { useChatStore } from '@/stores/chatStore';
 import { worktreeHeadLabel, worktreeLabel } from '@/utils/worktree-label';
 import { F307FilesRevealStatus } from './F307FilesRevealStatus';
 import { findNode, mergeSubtree, requestTree, type SubtreeLoad, TreeRequestError, useFilesReveal } from './files-tree';
-import { createFileSurface, createFilesSurface, resolveFilesTarget } from './real-surface-adapters';
+import { createFilesSurface, resolveFilesTarget } from './real-surface-adapters';
 import {
   IDENTITY_PLACEHOLDER,
   IDENTITY_STATUS,
@@ -32,6 +33,7 @@ export function F307FilesOwnerSurface({
   onReturnToNavigationOrigin?: () => void;
 }) {
   const target = resolveFilesTarget(surface);
+  const opening = useContentOpen();
   const worktreeId = target?.worktreeId ?? null;
   const projectPath = useChatStore((state) => state.currentProjectPath);
   const currentThreadId = useChatStore((state) => state.currentThreadId);
@@ -121,29 +123,33 @@ export function F307FilesOwnerSurface({
   const openFile = useCallback(
     (path: string, scrollToLine?: number | null) => {
       if (!target) return;
-      onOpenSurface(
-        createFileSurface({
+      const file = {
+        worktreeId: target.worktreeId,
+        path,
+        scrollToLine,
+        navigationOrigin: {
+          kind: 'file-tree' as const,
           worktreeId: target.worktreeId,
-          path,
-          scrollToLine,
-          navigationOrigin: {
-            kind: 'file-tree',
-            worktreeId: target.worktreeId,
-            ...(target.repoRoot ? { repoRoot: target.repoRoot } : {}),
-          },
-          ...(identity?.resolvedRoot && identity.rootEpoch !== undefined
-            ? {
-                rootSelection: {
-                  root: identity.resolvedRoot,
-                  branch: identity.branch,
-                  expectedEpoch: identity.rootEpoch,
-                },
-              }
-            : {}),
-        }),
-      );
+          ...(target.repoRoot ? { repoRoot: target.repoRoot } : {}),
+        },
+        ...(identity?.resolvedRoot && identity.rootEpoch !== undefined
+          ? {
+              rootSelection: {
+                root: identity.resolvedRoot,
+                branch: identity.branch,
+                expectedEpoch: identity.rootEpoch,
+              },
+            }
+          : {}),
+      };
+      void opening.openContent({
+        kind: 'workspace',
+        target: file,
+        origin: file.navigationOrigin,
+        attach: onOpenSurface,
+      });
     },
-    [onOpenSurface, target, identity],
+    [onOpenSurface, target, identity, opening.openContent],
   );
 
   const treeCallbacks = useMemo<TreeCallbacks>(
@@ -311,6 +317,7 @@ export function F307FilesOwnerSurface({
       )}
       <F307FilesRevealStatus reveal={reveal} />
       <WorkspaceTree
+        worktreeId={worktreeId ?? undefined}
         tree={tree}
         loading={loading}
         expandedPaths={expandedPaths}
@@ -335,6 +342,12 @@ export function F307FilesOwnerSurface({
         emptyTitle="这个工作区还没有文件"
         emptyDescription="可以新建或上传文件，也可以从 Workspace Home 打开另一个工作区"
       />
+      {opening.error && (
+        <p role="alert" className="p-3 text-xs text-cafe-error">
+          {opening.error}
+        </p>
+      )}
+      {opening.lightbox}
     </div>
   );
 }

@@ -8,8 +8,16 @@ it.each([
   'cover.png',
   'cover.jpg',
   'cover.webp',
+  'cover.ico',
+  'cover.avif',
   'clip.mp4',
+  'clip.mkv',
+  'clip.avi',
+  'clip.m4v',
+  'clip.ogv',
   'notes.md',
+  'notes.markdown',
+  'notes.mdx',
   'notes.txt',
   'notes.docx',
 ])('v2 %s uses the existing artwork split and fullscreen controller', (path) => {
@@ -30,6 +38,43 @@ it.each([
   expect(projected.hostEligible).toBe(true);
   expect(projected.splitPreferenceActive).toBe(true);
   expect(isWorkspaceFullWindowSurface(file, 'classic')).toBe(false);
+});
+
+it.each([
+  'package.json',
+  'tsconfig.json',
+  'Cargo.toml',
+  'config.yaml',
+  'data.csv',
+  'build.log',
+  '.env',
+  '.gitignore',
+  'Makefile',
+  'Dockerfile',
+  'LICENSE',
+  'notes.conf',
+  'notes.pdf',
+  'notes.pptx',
+  'notes.xlsx',
+  'source.ts',
+  'source.py',
+])('v2 %s stays in the ordinary file surface instead of implicitly entering work presentation', (path) => {
+  const file = createFileSurface({ worktreeId: 'wt-a', path });
+  expect(isWorkspaceFullWindowSurface(file, 'v2')).toBe(false);
+  const projected = projectWorkspaceWorkHost(
+    {
+      threadId: 'thread-a',
+      viewMode: 'single',
+      isDesktop: true,
+      statusPanelOpen: true,
+      rightPanelMode: 'workspace',
+      shellPresentation: 'v2',
+    },
+    createInitialWorkbenchState([file]),
+    createArtifactWorkPresentationState(),
+  );
+  expect(projected.hostEligible).toBe(false);
+  expect(projected.splitPreferenceActive).toBe(false);
 });
 
 it('explicit work mode suppresses the sidebar beside Chat and keeps it suppressed after full-window', () => {

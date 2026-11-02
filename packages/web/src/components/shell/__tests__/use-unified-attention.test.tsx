@@ -1,6 +1,7 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { apiSessionIdentity, observeApiSessionOwner } from '@/utils/api-session-identity';
 
 const mocks = vi.hoisted(() => ({ apiFetch: vi.fn() }));
 vi.mock('@/utils/api-client', () => ({ apiFetch: mocks.apiFetch }));
@@ -463,6 +464,111 @@ describe('useUnifiedAttention — one verified read of the owner’s attention',
       expect(latest.readsStarted).toBe(first);
       expect(first()).toBe(2);
     });
+  });
+
+  it('does not redownload or clear the same query when reopening or changing presentation tabs', async () => {
+    route(() => Promise.resolve(Response.json(readBody())));
+    await mount();
+    const result = latest.result;
+    await act(async () => {
+      latest.setPersonalView?.('visible', 'week');
+      latest.setMentionPeriod?.('week');
+    });
+    expect(mocks.apiFetch.mock.calls.filter(([path]) => path !== '/api/session')).toHaveLength(1);
+    expect(latest.result).toBe(result);
+    expect(latest.resultGeneration).toBe(1);
+  });
+
+  it('coalesces simultaneous invalidations into one fresh read, without losing the write barrier', async () => {
+    route(() => Promise.resolve(Response.json(readBody())));
+    await mount();
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('cat-cafe:proposal-updated'));
+      window.dispatchEvent(new CustomEvent('cat-cafe:runtime-interaction-updated'));
+      window.dispatchEvent(new CustomEvent('cat-cafe:user-mention-updated'));
+    });
+    expect(latest.readsStarted()).toBe(2);
+    expect(mocks.apiFetch.mock.calls.filter(([path]) => path !== '/api/session')).toHaveLength(2);
+  });
+
+  it('keeps a verified cached history on refresh failure, but withdraws it when session verification fails', async () => {
+    route(() => Promise.resolve(Response.json(readBody())));
+    await mount();
+    route(() => Promise.resolve(Response.json(readBody({ mentionPeriod: 'handled' }))));
+    await act(async () => latest.setMentionPeriod?.('handled'));
+    const previous = latest.result.kind === 'ok' ? latest.result.read : null;
+    expect(previous).not.toBeNull();
+    route(() => Promise.resolve(new Response('{}', { status: 500 })));
+    await act(async () => latest.refetch());
+    expect(latest.result.kind).toBe('failed');
+    expect(latest.staleRead).toBe(previous);
+    route(
+      () => Promise.resolve(new Response('{}', { status: 500 })),
+      () => Promise.resolve(new Response('{}', { status: 401 })),
+    );
+    await act(async () => latest.refetch());
+    expect(latest.staleRead).toBeNull();
+  });
+  it('refuses a late old principal after an external session owner change', async () => {
+    const session = deferred(),
+      body = deferred();
+    route(
+      () => body.promise,
+      () => session.promise,
+    );
+    await mount();
+    await act(async () => observeApiSessionOwner('owner-2'));
+    await act(async () => session.resolve(Response.json({ userId: 'owner-1' })));
+    await act(async () => body.resolve(Response.json(readBody())));
+    expect(apiSessionIdentity.getSnapshot().ownerUserId).toBe('owner-2');
+    expect(latest.result.kind).toBe('failed');
+    expect(latest.staleRead).toBeNull();
+  });
+
+  it('keeps old history pages visible across refresh failures without treating them as newly verified', async () => {
+    route(() => Promise.resolve(Response.json(readBody())));
+    await mount();
+    const head = readBody({
+      mentionPeriod: 'handled',
+      totalCount: 21,
+      page: { offset: 0, limit: 20, scope: 'known_rows', hasMore: true },
+    });
+    route(() => Promise.resolve(Response.json(head)));
+    await act(async () => latest.setMentionPeriod?.('handled'));
+    const tail = readBody({
+      mentionPeriod: 'handled',
+      totalCount: 21,
+      page: { offset: 20, limit: 20, scope: 'known_rows', hasMore: false },
+    });
+    route(() => Promise.resolve(Response.json(tail)));
+    await act(async () => latest.nextPage?.());
+    expect(latest.pages).toHaveLength(2);
+    expect(latest.currentPages).toHaveLength(2);
+
+    const refresh = deferred();
+    route(() => refresh.promise);
+    await act(async () => latest.refetch());
+    expect(latest.pages).toHaveLength(2);
+    expect(latest.currentPages).toHaveLength(0);
+    await act(async () => refresh.resolve(Response.json(head)));
+    expect(latest.pages).toHaveLength(2);
+    expect(latest.currentPages).toHaveLength(1);
+
+    route(() => Promise.resolve(new Response('{}', { status: 500 })));
+    await act(async () => latest.refetch());
+    expect(latest.staleRead).not.toBeNull();
+    expect(latest.pages).toHaveLength(2);
+    expect(latest.currentPages).toHaveLength(0);
+    await act(async () => latest.refetch());
+    expect(latest.staleRead).not.toBeNull();
+    expect(latest.pages).toHaveLength(2);
+    expect(latest.currentPages).toHaveLength(0);
+  });
+  it('refuses a response for another mention window rather than caching it under the requested query', async () => {
+    route(() => Promise.resolve(Response.json(readBody())));
+    await mount();
+    await act(async () => latest.setMentionPeriod?.('handled'));
+    expect(latest.result.kind).toBe('failed');
   });
 
   it('aborts the in-flight read on unmount', async () => {

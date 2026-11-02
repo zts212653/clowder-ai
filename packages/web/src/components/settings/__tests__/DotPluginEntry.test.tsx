@@ -97,6 +97,9 @@ describe('F247 default plugin owner and recovery entry', () => {
     await act(async () => dotButton?.click());
     await flushEffects();
     expect(container.textContent).toContain('等待目标 dot 订阅');
+    const proSetup = container.querySelector<HTMLAnchorElement>('a[href*="plugin=official.companion.personal-chrome"]');
+    expect(proSetup?.textContent).toContain('Personal Chrome');
+    expect(container.textContent).toContain('ChatGPT Pro');
     expect(container.textContent).toContain('尚未验证');
     expect(container.textContent).not.toContain('收到过原图');
     expect(dot.displayName).toBe('ChatGPT dot');

@@ -11,6 +11,8 @@ import type { IMessageStore } from '../cats/services/stores/ports/MessageStore.j
 import { deploymentWaitGeneration } from '../cats/services/stores/ports/TaskDeploymentWaitState.js';
 import type { ITaskStore } from '../cats/services/stores/ports/TaskStore.js';
 import { receiptOwnsOutcome } from './DeploymentWaitAuthority.js';
+import { resolveDeploymentWaitAuthorization } from './DeploymentWaitAuthorization.js';
+import type { SessionHandoffWaitSourceDeps } from './SessionHandoffWaitSource.js';
 
 export interface DeploymentWaitStartIdentity {
   readonly messageId: string;
@@ -49,7 +51,7 @@ export async function checkDeploymentWaitStart(
 /** Rechecks the canonical Task and current deployment at the execution boundary. */
 export class DeploymentWaitStartGuard {
   constructor(
-    private readonly deps: {
+    private readonly deps: SessionHandoffWaitSourceDeps & {
       readonly taskStore: Pick<ITaskStore, 'getWaitRegistration' | 'replaceDeploymentWaitIfGeneration'>;
       readonly messageStore: Pick<IMessageStore, 'getById'>;
       readonly observationProvider: DeploymentObservationProvider;
@@ -116,6 +118,9 @@ export class DeploymentWaitStartGuard {
           return { ok: false, reason: 'authority_stale' };
       }
       return { ok: false, reason: 'evidence_stale' };
+    }
+    if (snapshot.receipt?.authorization && !(await resolveDeploymentWaitAuthorization(snapshot.receipt, this.deps))) {
+      return { ok: false, reason: 'authority_stale' };
     }
     const current = await this.deps.taskStore.getWaitRegistration(carrier.waitId);
     return !!current?.task.deploymentWait?.waitOutcome &&

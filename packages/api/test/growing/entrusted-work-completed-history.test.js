@@ -55,6 +55,9 @@ async function fixture({ withReader = true } = {}) {
       async listCurrentReceipts() {
         return [];
       },
+      async readCurrentReceipts() {
+        return { receipts: [], coverage: { state: 'complete' } };
+      },
     },
   });
   return {
@@ -131,6 +134,9 @@ test('unsealed legacy completion remains discoverable without sampling current m
     },
     producerCatalog: {
       async listCurrentReceipts() {
+        throw new Error('history is not active attention');
+      },
+      async readCurrentReceipts() {
         throw new Error('history is not active attention');
       },
     },

@@ -1,4 +1,5 @@
 import type { PawFeelDispositionEvent, PawFeelDispositionProjection, PawFeelDispositionState } from '@cat-cafe/shared';
+import { pawFeelRepairBinding } from '@cat-cafe/shared';
 import {
   assertBlockedResumeCondition,
   preserveActiveRepairIdentity,
@@ -124,7 +125,10 @@ function transitionFix(
     state: 'fix',
     ownerCatId: event.ownerCatId,
     taskId: event.taskId,
-    actionLeaseRef: { leaseId: event.leaseId, generation: event.leaseGeneration },
+    repairBinding: pawFeelRepairBinding(event),
+    ...(event.leaseId && event.leaseGeneration !== undefined
+      ? { actionLeaseRef: { leaseId: event.leaseId, generation: event.leaseGeneration } }
+      : {}),
     custodyEvidenceRef: event.custodyEvidenceRef,
     ...(event.directRepairBinding ? { directRepairBinding: event.directRepairBinding } : {}),
   };
@@ -193,6 +197,7 @@ function clearPriorResponsibility(projection: PawFeelDispositionProjection): Paw
     blocker: _blocker,
     ownerCatId: _ownerCatId,
     taskId: _taskId,
+    repairBinding: _repairBinding,
     actionLeaseRef: _actionLeaseRef,
     custodyEvidenceRef: _custodyEvidenceRef,
     directRepairBinding: _directRepairBinding,
@@ -215,8 +220,7 @@ function assertRequestedActionMatches(projection: PawFeelDispositionProjection, 
       event.type === 'fix' &&
       requested.ownerCatId === event.ownerCatId &&
       requested.taskId === event.taskId &&
-      requested.leaseId === event.leaseId &&
-      requested.leaseGeneration === event.leaseGeneration &&
+      JSON.stringify(pawFeelRepairBinding(requested)) === JSON.stringify(pawFeelRepairBinding(event)) &&
       requested.custodyEvidenceRef === event.custodyEvidenceRef &&
       JSON.stringify(requested.directRepairBinding) === JSON.stringify(event.directRepairBinding));
   if (!matches) fail('terminal signature does not match the durable signature request');

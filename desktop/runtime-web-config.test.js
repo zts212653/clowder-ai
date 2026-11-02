@@ -11,6 +11,7 @@ function fixture() {
   const revision = 'a'.repeat(40);
   const config = {
     distDir: '.next',
+    images: { unoptimized: true },
     env: { NEXT_PUBLIC_CAT_CAFE_BUILD_REVISION: revision },
     basePath: '',
     experimental: { proxyTimeout: 120000 },
@@ -87,6 +88,10 @@ for (const [name, update] of [
   ['invalid JSON', (f) => fs.writeFileSync(path.join(f.root, '.next/required-server-files.json'), '{')],
   ['unsupported manifest', (f) => f.save({ version: 2, config: f.config })],
   ['unsafe distDir', (f) => f.save({ version: 1, config: { ...f.config, distDir: '../other-build' } })],
+  [
+    'image cache inside installation',
+    (f) => f.save({ version: 1, config: { ...f.config, images: { unoptimized: false } } }),
+  ],
   [
     'mismatched revision',
     (f) =>

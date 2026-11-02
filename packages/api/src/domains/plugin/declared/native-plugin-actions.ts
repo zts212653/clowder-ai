@@ -1,5 +1,4 @@
-import { randomBytes } from 'node:crypto';
-import { isDeepStrictEqual } from 'node:util';
+import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import type { PluginNativeActionTarget } from '../../cats/services/types.js';
 import { type PluginCallContext, withPluginCallContext } from '../carrier/plugin-call-context.js';
 import type { PluginRuntimeAdmission } from '../carrier/runtime-carrier.js';
@@ -16,19 +15,20 @@ export class NativePluginActionError extends Error {
 interface Binding {
   readonly instanceId: string;
   readonly admission: PluginRuntimeAdmission;
-  readonly connections: ReadonlyMap<string, { readonly token: string; readonly methods: ReadonlySet<string> }>;
+  readonly connections: ReadonlyMap<string, { readonly token: string }>;
   readonly invoke: (method: string, input: unknown) => Promise<unknown>;
 }
 
 /** A native MCP transport can call only actions belonging to its current local activation. */
 export class NativePluginActions {
+  // One secret per Host lifetime. Enable/disable changes authority, not credentials.
+  readonly #hostSecret = randomBytes(32);
   readonly #bindings = new Map<string, Binding>();
   readonly #tokens = new Map<
     string,
     {
       readonly binding: Binding;
       readonly contributionId: string;
-      readonly methods: ReadonlySet<string>;
     }
   >();
   readonly #generations = new Map<string, number>();
@@ -45,19 +45,13 @@ export class NativePluginActions {
     if (generation !== this.generation(instanceId) || this.#bindings.has(instanceId)) {
       throw new NativePluginActionError(409, 'Plugin activation changed during startup');
     }
-    const allowed = new Set(
-      admission.packageRecord.manifest.features
-        .filter((feature) => feature.capabilities.every((capability) => admission.effectiveGrants.includes(capability)))
-        .flatMap((feature) =>
-          (feature.contributions ?? []).filter((item) => item.type === 'mcp').map((item) => item.id),
-        ),
-    );
-    const connections = new Map<string, { token: string; methods: ReadonlySet<string> }>();
+    const connections = new Map<string, { token: string }>();
     for (const contribution of admission.packageRecord.manifest.contributions ?? []) {
-      if (contribution.type === 'mcp' && allowed.has(contribution.id) && contribution.actions?.length) {
+      if (contribution.type === 'mcp') {
         connections.set(contribution.id, {
-          token: randomBytes(32).toString('hex'),
-          methods: new Set(contribution.actions.map((action) => action.method)),
+          token: createHmac('sha256', this.#hostSecret)
+            .update(JSON.stringify([instanceId, contribution.id]))
+            .digest('hex'),
         });
       }
     }
@@ -68,18 +62,20 @@ export class NativePluginActions {
       invoke,
     };
     this.#bindings.set(instanceId, binding);
-    for (const [contributionId, connection] of connections)
-      this.#tokens.set(connection.token, { binding, contributionId, methods: connection.methods });
+    for (const [contributionId, connection] of connections) {
+      this.#tokens.set(connection.token, { binding, contributionId });
+      process.env[this.environmentKey(instanceId, contributionId, 'TOKEN')] = connection.token;
+      process.env[this.environmentKey(instanceId, contributionId, 'PATH')] = '/api/plugin-runtime/action';
+    }
   }
 
   /** Resolve policy coordinates from the active Host-issued token, not package-supplied identity. */
-  target(token: string, method: string): PluginNativeActionTarget | undefined {
+  target(token: string): PluginNativeActionTarget | undefined {
     const connection = this.#tokens.get(token);
-    if (!connection?.methods.has(method)) return undefined;
+    if (!connection) return undefined;
     return Object.freeze({
       instanceId: connection.binding.instanceId,
       contributionId: connection.contributionId,
-      method,
     });
   }
 
@@ -91,6 +87,23 @@ export class NativePluginActions {
       CLOWDER_PLUGIN_ACTION_TOKEN: connection.token,
       CLOWDER_PLUGIN_ACTION_PATH: '/api/plugin-runtime/action',
     };
+  }
+
+  /** Durable MCP registration stores a reference, while its value belongs to this Host process. */
+  environmentReferences(instanceId: string, contributionId: string): Readonly<Record<string, string>> {
+    if (!this.#bindings.get(instanceId)?.connections.has(contributionId)) return {};
+    return {
+      CLOWDER_PLUGIN_ACTION_TOKEN: `\${${this.environmentKey(instanceId, contributionId, 'TOKEN')}}`,
+      CLOWDER_PLUGIN_ACTION_PATH: `\${${this.environmentKey(instanceId, contributionId, 'PATH')}}`,
+    };
+  }
+
+  private environmentKey(instanceId: string, contributionId: string, field: 'TOKEN' | 'PATH'): string {
+    const id = createHash('sha256')
+      .update(JSON.stringify([instanceId, contributionId]))
+      .digest('hex')
+      .toUpperCase();
+    return `CLOWDER_PLUGIN_${id}_ACTION_${field}`;
   }
 
   deactivate(instanceId: string): void {
@@ -107,8 +120,7 @@ export class NativePluginActions {
   async call(token: string, method: string, input: unknown, caller: PluginCallContext): Promise<unknown> {
     const connection = this.#tokens.get(token);
     if (!connection) throw new NativePluginActionError(401, 'Plugin connection is not active');
-    const { binding, methods } = connection;
-    if (!methods.has(method)) throw new NativePluginActionError(403, 'Action is not declared by this MCP contribution');
+    const { binding } = connection;
     let finished = false;
     const checkCaller = caller.assertCurrent.bind(caller);
     const checkInvocation = (caller.assertInvocationCurrent ?? caller.assertCurrent).bind(caller);
@@ -131,14 +143,18 @@ export class NativePluginActions {
         current.instance.activationState !== 'enabled' ||
         current.instance.lifecycleState !== 'installed' ||
         current.instance.configReadiness !== 'ready' ||
-        current.instance.packageDigest !== binding.admission.instance.packageDigest ||
-        !isDeepStrictEqual([...current.effectiveGrants].sort(), [...binding.admission.effectiveGrants].sort())
+        current.instance.packageDigest !== binding.admission.instance.packageDigest
       )
         throw new NativePluginActionError(409, 'Plugin call is no longer current');
       await checkCaller();
       await assertInvocationCurrent();
     };
-    const context = Object.freeze({ ...caller, assertCurrent, assertInvocationCurrent });
+    const context = Object.freeze({
+      ...caller,
+      assertCurrent,
+      assertInvocationCurrent,
+      nativeAction: Object.freeze({ id: randomUUID(), contributionId: connection.contributionId, method }),
+    });
     await assertCurrent();
     try {
       const result = await withPluginCallContext(binding.instanceId, context, () => binding.invoke(method, input));

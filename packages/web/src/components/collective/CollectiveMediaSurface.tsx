@@ -41,7 +41,7 @@ export function CollectiveMediaSurface({
         onBack={onBack}
         leadingAction={
           <button type="button" className="px-2 text-xs text-cafe-accent" onClick={onBack}>
-            返回原讨论
+            {reference.projectReturn ? '返回原项目' : '返回原讨论'}
           </button>
         }
         capabilities={capabilities}

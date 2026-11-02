@@ -3,12 +3,14 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, test } from 'node:test';
-import { validateEffectiveGrants, validateManifest } from '@clowder-ai/plugin-contract';
+import { validateManifest } from '@clowder-ai/plugin-contract';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
+import { RedisPluginPrivateStorage } from '../dist/domains/plugin/host-surface/plugin-private-storage.js';
 import {
   createDormantPluginRuntimeComposition,
   createPluginManagerRuntimeComposition,
 } from '../dist/domains/plugin/index.js';
+import { FakeStorageRedis } from './helpers/fake-plugin-storage-redis.js';
 import {
   assertRedisIsolationOrThrow,
   cleanupClientKeyspace,
@@ -17,62 +19,18 @@ import {
 
 const roots = [];
 
+test('Host authority records remain separate even when a plugin chooses the same namespace and key', async () => {
+  const redis = new FakeStorageRedis();
+  const ordinary = new RedisPluginPrivateStorage(redis);
+  const authority = new RedisPluginPrivateStorage(redis, 'host-member-sessions:v1');
+  await authority.set('grants', 'same-key', { grantedBy: 'actual-owner-operation' });
+  await ordinary.set('grants', 'same-key', { grantedBy: 'plugin-input' });
+  assert.deepEqual((await authority.get('grants', 'same-key')).value, { grantedBy: 'actual-owner-operation' });
+});
+
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
-
-class FakeStorageRedis {
-  hashes = new Map();
-  ttlCommands = [];
-
-  async hget(key, field) {
-    return this.hashes.get(key)?.get(field) ?? null;
-  }
-
-  async hgetall(key) {
-    return Object.fromEntries(this.hashes.get(key) ?? []);
-  }
-
-  async eval(script, _keyCount, key, field, expectedRevision, value) {
-    const hash = this.hashes.get(key) ?? new Map();
-    const currentRaw = hash.get(field);
-    const match = currentRaw?.match(/^(\d+):([vd]):(.*)$/s);
-    const currentRevision = match === undefined || match === null ? null : Number(match[1]);
-    const currentKind = match?.[2];
-    if (script.includes('plugin-private-storage:delete-v1')) {
-      return this.applyDelete(hash, key, field, currentRevision, currentKind, expectedRevision);
-    }
-    if (expectedRevision !== '*') {
-      const expected = expectedRevision === '' ? null : Number(expectedRevision);
-      if (currentRevision !== expected) return 0;
-    }
-    const revision = Number(hash.get('') ?? 0) + 1;
-    hash.set('', String(revision));
-    hash.set(field, `${revision}:v:${value}`);
-    this.hashes.set(key, hash);
-    return revision;
-  }
-
-  applyDelete(hash, key, field, currentRevision, currentKind, expectedRevision) {
-    if (currentRevision === null || currentKind !== 'v') return 0;
-    if (expectedRevision !== '*' && currentRevision !== Number(expectedRevision)) return 0;
-    const revision = Number(hash.get('') ?? 0) + 1;
-    hash.set('', String(revision));
-    hash.delete(field);
-    this.hashes.set(key, hash);
-    return revision;
-  }
-
-  async expire(...args) {
-    this.ttlCommands.push(['expire', ...args]);
-    return 1;
-  }
-
-  async pexpire(...args) {
-    this.ttlCommands.push(['pexpire', ...args]);
-    return 1;
-  }
-}
 
 async function tempRoot(label) {
   const root = await mkdtemp(join(tmpdir(), label));
@@ -136,13 +94,12 @@ test('module plugins receive isolated persistent storage with revision-fenced co
     projectRoot,
     messageStore: new MessageStore(),
     redis,
-    contract: { manifestContractVersions: ['0.1.0'], validateEffectiveGrants, validateManifest },
+    contract: { manifestContractRange: '0.1.0', validateManifest },
   });
   const composition = createPluginManagerRuntimeComposition({
     runtime,
     catalogProvider: { snapshot: async () => ({ entries: [], status: 'fresh', checkedAt: 1 }) },
     catalogManifests: [],
-    localGrantPolicy: (manifest) => manifest.features.flatMap((feature) => feature.capabilities),
   });
   const first = await composition.manager.install({
     source: { kind: 'local-directory', path: await writeStorageFixture('dev.clowder.storage-first') },
@@ -306,50 +263,3 @@ test(
     }
   },
 );
-
-test('module plugin storage fails closed when the package lacks the matching grant', async () => {
-  const projectRoot = await tempRoot('cat-cafe-f202-storage-grant-project-');
-  const runtime = createDormantPluginRuntimeComposition({
-    projectRoot,
-    messageStore: new MessageStore(),
-    redis: new FakeStorageRedis(),
-    contract: { manifestContractVersions: ['0.1.0'], validateEffectiveGrants, validateManifest },
-  });
-  const composition = createPluginManagerRuntimeComposition({
-    runtime,
-    catalogProvider: { snapshot: async () => ({ entries: [], status: 'fresh', checkedAt: 1 }) },
-    catalogManifests: [],
-    localGrantPolicy: () => [],
-  });
-  const installed = await composition.manager.install({
-    source: { kind: 'local-directory', path: await writeStorageFixture('dev.clowder.storage-ungranted', []) },
-  });
-  const detail = (await composition.manager.get(installed.pluginId)).plugin;
-  await composition.manager.setEnabled(installed.pluginId, {
-    enabled: true,
-    expectedRevision: detail.lifecycleRevision,
-  });
-
-  await assert.rejects(
-    runtime.supervisor.invoke(installed.pluginInstanceId, 'fixture.storage', {
-      operation: 'get',
-      key: 'cursor',
-    }),
-    /lacks plugin\.state\.get/,
-  );
-  await assert.rejects(
-    runtime.supervisor.invoke(installed.pluginInstanceId, 'fixture.storage', {
-      operation: 'set',
-      key: 'cursor',
-      value: 1,
-    }),
-    /lacks plugin\.state\.set/,
-  );
-  await assert.rejects(
-    runtime.supervisor.invoke(installed.pluginInstanceId, 'fixture.storage', {
-      operation: 'delete',
-      key: 'cursor',
-    }),
-    /lacks plugin\.state\.set/,
-  );
-});

@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, describe, it, mock } from 'node:test';
+import { serializeContextAttachmentsPrompt } from '@cat-cafe/shared';
 import { canonicalTestMessageInput, canonicalTestQueueInput } from './helpers/message-from-fixtures.js';
 
 const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
@@ -1084,4 +1085,138 @@ it('settles exact accepted private inputs after provider done retired its tracke
   assert.equal(source.lifecycle.dispatchRefs[0].phase, 'settled');
   assert.deepEqual(source.lifecycle.dispatchRefs[0].inputRead, { status: 'read', at: readAt });
   assert.deepEqual((await harness.messageStore.getById(run.response.id)).lifecycle.inputMessageIds, []);
+});
+
+describe('Append hands the carrier the same body a fresh turn would see', () => {
+  // 2026-10-24 F320 live case: a quote-only comment (empty composer text, the
+  // comment inside a context_attachment block) reached the Claude carrier as ''
+  // and was rejected `invalid_input`, then held every later message for that cat.
+  const quote = {
+    v: 1,
+    id: 'ctx-quote-append-1',
+    kind: 'quote',
+    text: '托管账号启动时，这一类变量只放行家里自己设置的那几个，其余一律清空。',
+    comment: '那好像也会出现bug和不兼容吧？',
+    selectionStart: 3,
+    selectionEnd: 40,
+    source: { kind: 'message', threadId: 'thread-1', messageId: 'msg-quoted-source', senderCatId: 'opus' },
+  };
+
+  async function admitWithBlocks(harness, { content, contentBlocks, visibility, whisperTo }) {
+    sequence += 1;
+    const queueInput = canonicalTestQueueInput({
+      threadId: 'thread-1',
+      userId: 'user-1',
+      kind: 'conversation_input',
+      ownerAuthProvenance: 'strict',
+      sourceId: `append-body-${sequence}`,
+      content,
+      targetCats: ['opus'],
+      intent: 'execute',
+    });
+    const result = await harness.queue.send(
+      harness.messageStore,
+      canonicalTestMessageInput({
+        threadId: 'thread-1',
+        userId: 'user-1',
+        catId: null,
+        from: queueInput.from,
+        content,
+        ...(contentBlocks ? { contentBlocks } : {}),
+        ...(visibility ? { visibility, whisperTo } : {}),
+        mentions: ['opus'],
+        timestamp: Date.now(),
+        deliveryStatus: 'queued',
+      }),
+      queueInput,
+    );
+    assert.equal(result.outcome, 'enqueued');
+    return result;
+  }
+
+  it('delivers a quote-only comment as its serialized attachment instead of an empty body', async () => {
+    const harness = createHarness();
+    const admitted = await admitWithBlocks(harness, {
+      content: '',
+      contentBlocks: [{ type: 'context_attachment', attachment: quote }],
+    });
+    const dispatch = mock.fn(async () => ({ accepted: true, handle: {} }));
+    const run = bindRun(harness, dispatch);
+    assert.equal((await append(harness, admitted, run)).outcome, 'appended');
+    assert.equal(dispatch.mock.calls.length, 1);
+    assert.equal(dispatch.mock.calls[0].arguments[0].text, serializeContextAttachmentsPrompt([quote]));
+  });
+
+  it('keeps typed text first and appends the quote the way a fresh turn does', async () => {
+    const harness = createHarness();
+    const admitted = await admitWithBlocks(harness, {
+      content: '顺便看一下这句',
+      contentBlocks: [{ type: 'context_attachment', attachment: quote }],
+    });
+    const dispatch = mock.fn(async () => ({ accepted: true, handle: {} }));
+    const run = bindRun(harness, dispatch);
+    assert.equal((await append(harness, admitted, run)).outcome, 'appended');
+    assert.equal(
+      dispatch.mock.calls[0].arguments[0].text,
+      `顺便看一下这句\n${serializeContextAttachmentsPrompt([quote])}`,
+    );
+  });
+
+  // A pre-admission reject must leave no handoff custody behind: the restored
+  // source has to start a fresh turn once the busy parent ends.
+  async function assertCleanRestoreStartsNextTurn(harness, admitted) {
+    const queued = await harness.queue.getDurableEntry('thread-1', admitted.entry.id);
+    assert.equal(queued.status, 'queued');
+    assert.deepEqual(queued.payload, admitted.entry.payload);
+    assert.equal(queued.delivery.appendPendingByTarget, undefined);
+    assert.equal(queued.delivery.appendRecoveryByTarget?.opus, undefined);
+    assert.equal(queued.delivery.routingHeldTargetIds?.includes('opus') ?? false, false);
+    harness.invocationTracker.completeAll('thread-1', ['opus', 'codex']);
+    harness.invocationRecordStore.create.mock.mockImplementation(async () => ({
+      outcome: 'created',
+      invocationId: `fresh-after-restored-append-${sequence}`,
+    }));
+    await harness.processor.requestDrain('thread-1');
+    await waitFor(() => harness.router.routeExecution.mock.calls.length === 1);
+  }
+
+  it('never hands an empty body to the carrier; the source starts the next turn', async () => {
+    const harness = createHarness();
+    const admitted = await admitWithBlocks(harness, { content: '   ' });
+    const dispatch = mock.fn(async () => ({ accepted: false, reason: 'invalid_input', acceptance: 'not_accepted' }));
+    const run = bindRun(harness, dispatch);
+    const result = await append(harness, admitted, run);
+    assert.equal(result.outcome, 'rejected');
+    assert.equal(dispatch.mock.calls.length, 0);
+    const source = harness.messageStore.getById(admitted.message.id);
+    assert.equal(source.lifecycle?.appendFailures, undefined);
+    assert.deepEqual(source.lifecycle?.dispatchRefs ?? [], []);
+    assert.deepEqual(activeInputs(harness), []);
+    await assertCleanRestoreStartsNextTurn(harness, admitted);
+  });
+
+  it('a source the target may not see is restored without handoff custody', async () => {
+    const harness = createHarness();
+    const admitted = await admitWithBlocks(harness, {
+      content: 'whisper admitted for opus',
+      visibility: 'whisper',
+      whisperTo: ['opus'],
+    });
+    // Admission already refuses unauthorized whisper targets, so this branch only
+    // fires when the source's audience changes between admission and Append.
+    const readStored = harness.messageStore.getById.bind(harness.messageStore);
+    harness.messageStore.getById = (id) => {
+      const stored = readStored(id);
+      return id === admitted.message.id && stored ? { ...stored, whisperTo: ['codex'] } : stored;
+    };
+    const dispatch = mock.fn(async () => ({ accepted: true, handle: {} }));
+    const run = bindRun(harness, dispatch);
+    const result = await append(harness, admitted, run);
+    assert.equal(result.outcome, 'rejected');
+    assert.equal(dispatch.mock.calls.length, 0);
+    const queued = await harness.queue.getDurableEntry('thread-1', admitted.entry.id);
+    assert.equal(queued.status, 'queued');
+    assert.equal(queued.delivery.appendPendingByTarget, undefined);
+    assert.equal(queued.delivery.routingHeldTargetIds?.includes('opus') ?? false, false);
+  });
 });

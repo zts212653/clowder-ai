@@ -201,16 +201,11 @@ async function fixture(
   await chmod(sentinel, 0o700);
   const store = new MemoryPluginInventoryStore();
   const inventory = new HostInventoryControlPlane(store, { createInstanceId: () => 'pi_registry', now: () => 1 });
-  let grants = 0;
   const admission = (npmBin = 'npm') =>
     new LocalPluginPackageAdmission({
       inventory,
       packagesRoot,
       npmBin,
-      grantPolicy: () => {
-        grants++;
-        return ['messaging.send'];
-      },
     });
   return {
     root,
@@ -224,7 +219,6 @@ async function fixture(
     admission,
     marker,
     sentinel,
-    grants: () => grants,
   };
 }
 
@@ -234,8 +228,7 @@ async function reject(f, code) {
     assert.equal(error.cause?.code, code);
     return true;
   });
-  assert.equal(f.grants(), 0);
-  for (const key of ['instances', 'packages', 'grants']) assert.deepEqual((await f.store.snapshot())[key], []);
+  for (const key of ['instances', 'packages']) assert.deepEqual((await f.store.snapshot())[key], []);
   await assert.rejects(access(f.marker), { code: 'ENOENT' });
 }
 
@@ -336,6 +329,5 @@ test('refuses relocation that makes an absent optional dependency visible from a
     assert.equal(error.cause?.code, 'DEPENDENCY_LOCK_MISMATCH');
     return true;
   });
-  assert.equal(f.grants(), 0);
-  for (const key of ['instances', 'packages', 'grants']) assert.deepEqual((await f.store.snapshot())[key], []);
+  for (const key of ['instances', 'packages']) assert.deepEqual((await f.store.snapshot())[key], []);
 });

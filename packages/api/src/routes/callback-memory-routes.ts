@@ -6,11 +6,21 @@ import { rankToMatchRank } from '../domains/memory/f163-types.js';
 import type { IEvidenceStore, IMarkerQueue, IReflectionService } from '../domains/memory/interfaces.js';
 import { MessageSearchService } from '../domains/memory/MessageSearchService.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
+import { registerCallbackMessageSearchAnswerRoutes } from './callback-message-search-answer-routes.js';
 import { registerCallbackRecallMetrics } from './callback-recall-metrics.js';
 import { mapKindToSourceType } from './evidence-helpers.js';
 import { executeMessageSearch, messageSearchQuerySchema, toMessageSearchInput } from './message-search-handler.js';
 
 interface CallbackMemoryRoutesDeps {
+  cloudReturnGrantStore?: Pick<
+    import('../domains/cats/services/cloud-bridge/cloud-return-grant.js').CloudReturnGrantStore,
+    'claim' | 'release'
+  >;
+  messageSearchAnswerService?: import('../domains/memory/MessageSearchAnswerPublicationService.js').MessageSearchAnswerPublicationService;
+  registry?: Pick<
+    import('../domains/cats/services/agents/invocation/InvocationRegistry.js').InvocationRegistry,
+    'isLatest'
+  >;
   messageSearchService?: MessageSearchService;
   messageStore?: Pick<IMessageStore, 'getById'>;
   threadStore?: Pick<IThreadStore, 'get' | 'list'>;
@@ -36,6 +46,12 @@ export async function registerCallbackMemoryRoutes(
   deps: CallbackMemoryRoutesDeps,
 ): Promise<void> {
   await registerCallbackRecallMetrics(app);
+  registerCallbackMessageSearchAnswerRoutes(app, {
+    service: deps.messageSearchAnswerService,
+    threadStore: deps.threadStore,
+    registry: deps.registry,
+    cloudReturnGrantStore: deps.cloudReturnGrantStore,
+  });
   const messageSearchService =
     deps.messageSearchService ??
     (deps.messageStore && deps.threadStore

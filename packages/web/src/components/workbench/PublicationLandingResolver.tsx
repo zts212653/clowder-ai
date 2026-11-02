@@ -188,7 +188,7 @@ export function PublicationLandingResolver({
         </p>
       ) : null}
       {boundMissing ? (
-        <p role="alert" className="my-2 text-sm text-cafe-error">
+        <p data-content-opening-state="blocked" role="alert" className="my-2 text-sm text-cafe-error">
           {BOUND_REVIEW_NOT_HELD}
         </p>
       ) : !catalogue ? (
@@ -197,7 +197,7 @@ export function PublicationLandingResolver({
             正在核对作品的原讨论…
           </p>
           {error ? (
-            <button type="button" onClick={() => setAttempt((n) => n + 1)}>
+            <button data-content-opening-state="blocked" type="button" onClick={() => setAttempt((n) => n + 1)}>
               重新读取
             </button>
           ) : null}
@@ -269,7 +269,7 @@ function ContextChoice({
   const only = contexts.length === 1 ? contexts[0] : undefined;
   if (only)
     return (
-      <div className="mt-3 text-sm">
+      <div data-content-opening-state="blocked" className="mt-3 text-sm">
         <p>这件作品关联了猫的任务审阅。</p>
         <button
           type="button"
@@ -282,7 +282,7 @@ function ContextChoice({
       </div>
     );
   return (
-    <label className="mt-3 block text-sm">
+    <label data-content-opening-state="blocked" className="mt-3 block text-sm">
       选择这次要继续的讨论
       <select
         aria-label="作品讨论上下文"

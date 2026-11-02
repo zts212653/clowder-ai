@@ -3,7 +3,21 @@ import assert from 'node:assert/strict';
 import { readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { assertInheritedHostAuthorityCleared, directMcpContract } from './helpers/direct-mcp-contract.js';
 import { capabilityFile, fixture, managed, memberIds, providers, putConfig } from './helpers/invoke-mcp-workspace.js';
+
+function transport(provider, server, _name) {
+  // Codex's fixture already checks the relay in upstreamMcpServersFromArgs.
+  if (provider === 'codex') return server;
+  const { launchEnv, upstream } = directMcpContract(server);
+
+  assert.equal(
+    launchEnv.ALLOWED_WORKSPACE_DIRS,
+    upstream.env?.ALLOWED_WORKSPACE_DIRS,
+    'secret protection must inspect the same admitted workspace as the upstream reader',
+  );
+  return upstream;
+}
 
 for (const [provider, invoke] of Object.entries(providers)) {
   test(`${provider}: default Alpha capabilities come from workspace; binaries remain in Alpha`, async (t) => {
@@ -11,7 +25,11 @@ for (const [provider, invoke] of Object.entries(providers)) {
     const before = f.sentinelPaths.map((p) => readFileSync(p));
     const mcp = await invoke(f);
     assert.deepEqual(Object.keys(mcp), ['cat-cafe-collab']);
-    assert.deepEqual(mcp['cat-cafe-collab'].args, [join(f.dist, 'collab.js')]);
+    const collab = transport(provider, mcp['cat-cafe-collab'], 'cat-cafe-collab');
+    assert.equal(collab.command, process.execPath);
+    assert.deepEqual(collab.args, [join(f.dist, 'collab.js')]);
+    const workspace = provider === 'opencode' ? f.main : process.env.ALLOWED_WORKSPACE_DIRS?.trim() || f.main;
+    assert.equal(collab.env.ALLOWED_WORKSPACE_DIRS, workspace);
     assert.deepEqual(
       f.sentinelPaths.map((p, i) => readFileSync(p).equals(before[i])),
       [true, true, true, true],
@@ -78,6 +96,13 @@ for (const [provider, invoke] of Object.entries(providers)) {
     ]);
     const mcp = await invoke(f);
     assert.deepEqual(Object.keys(mcp), ['fixture-external']);
-    assert.deepEqual(mcp['fixture-external'].args, [join(f.main, 'external-server.js')]);
+    const external = transport(provider, mcp['fixture-external'], 'fixture-external');
+    assert.equal(external.command, 'node');
+    assert.deepEqual(external.args, [join(f.main, 'external-server.js')]);
+    if (provider === 'claude') {
+      assertInheritedHostAuthorityCleared(external.env);
+    } else {
+      assert.deepEqual(external.env ?? {}, {}, 'external source resolution must not grant host callback authority');
+    }
   });
 }

@@ -23,6 +23,7 @@ import type {
   AttachEntrustedWorkArtifactInput,
   AttachEntrustedWorkArtifactResult,
 } from './EntrustedWorkArtifactEvidence.js';
+import type { OrdinaryTaskMutation, OrdinaryTaskMutationResult } from './OrdinaryTaskMutation.js';
 import type {
   EntrustedTaskDataControllerTransition,
   EntrustedTaskDataControllerTransitionResult,
@@ -34,6 +35,15 @@ export const TASK_SUBJECT_ALREADY_EXISTS = 'TASK_SUBJECT_ALREADY_EXISTS' as cons
 export const TASK_SUBJECT_NAMESPACE_RESERVED = 'TASK_SUBJECT_NAMESPACE_RESERVED' as const;
 export const TASK_SUBJECT_SNAPSHOT_CONFLICT = 'TASK_SUBJECT_SNAPSHOT_CONFLICT' as const;
 
+/** The cutover excludes typed custody, tracking and namespaced producers such as F266. */
+export function isOrdinaryImplementTask(task: {
+  readonly kind?: TaskItem['kind'];
+  readonly subjectKey?: string | null;
+  readonly entrustedWork?: unknown;
+}): boolean {
+  return task.kind === 'work' && task.subjectKey === null && task.entrustedWork === undefined;
+}
+
 /** Internal read/authorize/write fence. Null asserts that the subject is still absent. */
 export interface TaskSubjectUpsertCondition {
   readonly expected: TaskItem | null;
@@ -41,6 +51,8 @@ export interface TaskSubjectUpsertCondition {
 
 /** Host-owned liveness fence checked at the aggregate's actual write boundary. */
 export interface TaskMutationWriteFence {
+  /** Existing canonical keys read by this host fence; watched alongside the Task, never a second store. */
+  readonly watchKeys?: readonly string[];
   assertCurrent(): void | Promise<void>;
 }
 
@@ -187,6 +199,7 @@ export function assertEntrustedWorkGenericUpdateAllowed(task: TaskItem): void {
 }
 
 export function assertEntrustedWorkGenericDeletionAllowed(task: TaskItem): void {
+  if (isOrdinaryImplementTask(task) && task.executionRef) throw new Error('TASK_EXECUTION_MUST_STOP_BEFORE_DELETION');
   if (!task.entrustedWork) return;
   throw Object.assign(new Error(`Entrusted work task ${task.id} cannot be deleted outside its typed lifecycle`), {
     code: ENTRUSTED_WORK_TERMINAL_ACTION_REQUIRED,
@@ -204,6 +217,10 @@ export function assertEntrustedWorkGenericUpsertAllowed(task: TaskItem): void {
 export class TaskPageCursorExpiredError extends Error {}
 
 export interface ITaskStore {
+  mutateOrdinaryTask(
+    command: OrdinaryTaskMutation,
+    writeFence?: TaskMutationWriteFence,
+  ): OrdinaryTaskMutationResult | Promise<OrdinaryTaskMutationResult>;
   transitionEntrustedTaskDataController(
     input: EntrustedTaskDataControllerTransition,
     writeFence?: TaskMutationWriteFence,

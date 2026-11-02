@@ -135,6 +135,7 @@
   color: var(--cafe-text-secondary);
   padding: 3px 7px;
   background: var(--cafe-surface-elevated);
+  --chat-background-role: cafe-elevated;
   border-radius: 4px;
 }
 .exploration-selection-heading h3 svg {
@@ -150,6 +151,7 @@
   border: 1px solid var(--cafe-border-subtle);
   border-radius: 16px;
   background: var(--console-card-bg);
+  --chat-background-role: console-card;
 }
 .exploration-navigation > * {
   min-width: 0;
@@ -211,6 +213,7 @@
   border: 1px solid var(--cafe-border);
   border-radius: 6px;
   background: var(--cafe-surface);
+  --chat-background-role: cafe;
   color: var(--cafe-text);
   font-size: var(--console-font-sm);
 }
@@ -277,6 +280,7 @@
   padding: 14px 16px;
   border-radius: 12px;
   background: var(--console-card-bg);
+  --chat-background-role: console-card;
   color: var(--cafe-text);
   font-size: var(--console-font-sm);
   overflow-wrap: anywhere;
@@ -301,6 +305,7 @@
   padding: 8px;
   color: var(--cafe-text);
   background: var(--console-field-bg);
+  --chat-background-role: console-field;
   font: inherit;
   border: 1px solid var(--cafe-border);
   border-radius: 6px;

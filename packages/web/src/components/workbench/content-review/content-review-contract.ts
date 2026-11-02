@@ -41,6 +41,7 @@ export interface ContentReviewController {
   setTarget(target: WorkspaceAnnotationTarget | null): void;
   setActiveAnnotationId(id: string | null): void;
   submitAnnotation(): Promise<void>;
+  addOpinion?(body: string, target: WorkspaceAnnotationTarget): Promise<boolean>;
   /** With `expectedSourceRevision`, only moves onto that exact revision; otherwise onto the current one. */
   refreshSource(options?: { readonly expectedSourceRevision?: string }): Promise<void>;
   act(action: WorkspaceContentReviewAction): Promise<boolean>;
@@ -59,8 +60,12 @@ export interface ContentLandingCapabilities {
   historyReadOnly: boolean;
 }
 export interface ContentReviewWorkflow {
+  assetDetail?: ReactNode;
+  onCloseAssetDetail?: () => void;
   responseDiscussion?: ReactNode;
   videoWork?: boolean;
+  /** Display name of the already selected original work/version; not an owner coordinate. */
+  chatTitle?: string;
   playbackHidden?: boolean;
   onPlaybackTime?: (seconds: number) => void;
   chapterNavigation?: ReactNode;

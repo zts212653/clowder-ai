@@ -49,6 +49,12 @@ export function useWorkspaceContentReview({ worktreeId, path, publication, evolu
   const retainedId = retained?.reviewId,
     retainedRevision = retained?.revision;
   const evolutionKey = evolution ? JSON.stringify(evolution) : undefined;
+  const opinionRequests = useRef(
+    new Map<
+      string,
+      { operationId: string; expectedRevision: number; body: string; target: WorkspaceAnnotationTarget }
+    >(),
+  );
   const base = publication || evolution ? '/api/content-reviews' : '/api/workspace/content-reviews';
   const [view, setView] = useState<WorkspaceContentReviewView | null>(null),
     [error, setError] = useState<string | null>(null),
@@ -324,6 +330,23 @@ export function useWorkspaceContentReview({ worktreeId, path, publication, evolu
       state.save({ activeAnnotationId });
     },
     submitAnnotation,
+    addOpinion: async (body: string, target: WorkspaceAnnotationTarget) => {
+      if (!view || busy || !(view.canReply ?? view.canWrite)) return false;
+      const key = JSON.stringify([view.review.reviewId, body, target]);
+      let request = opinionRequests.current.get(key);
+      if (!request) {
+        request = { operationId: crypto.randomUUID(), expectedRevision: view.review.revision, body, target };
+        opinionRequests.current.set(key, request);
+      }
+      const response = await apiFetch(`${base}/${encodeURIComponent(view.review.reviewId)}/annotations`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(request),
+      });
+      if (!response.ok) return false;
+      await load();
+      return true;
+    },
     refreshSource,
     act,
   };

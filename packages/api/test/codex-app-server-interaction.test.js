@@ -78,6 +78,9 @@ class InteractionWire {
     if (message.method === 'thread/resume') {
       this.inbox.push({ id: message.id, result: { thread: { id: message.params.threadId } } });
     }
+    if (message.method === 'thread/turns/list') {
+      this.inbox.push({ id: message.id, result: { data: [], nextCursor: null } });
+    }
     if (message.method === 'turn/start') {
       this.inbox.push({ id: message.id, result: { turn: { id: 'provider-turn', status: 'inProgress' } } });
     }

@@ -17,6 +17,8 @@ export interface OfficialPluginCatalogSnapshot {
 
 export interface OfficialPluginCatalogProvider {
   snapshot(): Promise<OfficialPluginCatalogSnapshot>;
+  /** Current Host-owned/cached entries without starting a remote refresh. */
+  localSnapshot?(): OfficialPluginCatalogSnapshot | Promise<OfficialPluginCatalogSnapshot>;
 }
 
 interface ParsedVersion {

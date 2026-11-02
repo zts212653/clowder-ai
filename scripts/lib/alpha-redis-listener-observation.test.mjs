@@ -9,6 +9,9 @@ import { redisFixture } from './alpha-redis-process-test-fixture.mjs';
 
 const listenerTimeout = () => Object.assign(new Error('spawnSync lsof ETIMEDOUT'), { code: 'ETIMEDOUT' });
 
+// Mock observations use a logical clock; real Git fixture latency is not a simulated timeout.
+const observationNow = () => 0;
+
 test('Redis verification reobserves a transient unreadable argv with the entire ownership scope', (t) => {
   const f = redisFixture(t);
   const proof = captureNamedAlphaRedisIdentity(f.raw, f.deps);
@@ -16,6 +19,7 @@ test('Redis verification reobserves a transient unreadable argv with the entire 
   let captures = 0;
   assert.equal(
     verifyNamedAlphaRedisIdentity(f.raw, proof, {
+      observationNow,
       readListeners: () => {
         listeners += 1;
         return [proof.pid];
@@ -59,6 +63,7 @@ test('argv reobservation refuses replacement, persistent uncertainty, changed sc
     () =>
       verifyNamedAlphaRedisIdentity(f.raw, proof, {
         ...f.deps,
+        observationNow,
         capture: () => {
           captures += 1;
           f.f.git(['checkout', '--detach'], f.f.alphaRoot);
@@ -78,6 +83,7 @@ test('listener timeout and unreadable argv share one reobservation allowance', (
   assert.throws(
     () =>
       verifyNamedAlphaRedisIdentity(f.raw, proof, {
+        observationNow,
         readListeners: () => {
           if (++listeners === 1) throw listenerTimeout();
           return [proof.pid];
@@ -103,6 +109,7 @@ test('a transient listener timeout reobserves the complete Redis identity before
     let reads = 0;
     const value = operation({
       ...f.deps,
+      observationNow,
       readListeners: () => {
         if (++reads === 1) throw listenerTimeout();
         return [proof.pid];
@@ -122,6 +129,7 @@ test('listener reobservation never accepts replacement, stale scope or an exhaus
       () =>
         verifyNamedAlphaRedisIdentity(f.raw, proof, {
           ...f.deps,
+          observationNow,
           readListeners: () => {
             reads += 1;
             if (reads === 1 || failAgain) throw listenerTimeout();
@@ -153,6 +161,7 @@ test('listener reobservation never accepts replacement, stale scope or an exhaus
     () =>
       verifyNamedAlphaRedisIdentity(f.raw, proof, {
         ...f.deps,
+        observationNow,
         readListeners: () => {
           reads += 1;
           f.f.git(['checkout', '--detach'], f.f.alphaRoot);
@@ -172,6 +181,7 @@ test('a new incarnation after listener timeout cannot receive a protocol command
   assert.throws(
     () =>
       pingNamedAlphaRedis(f.raw, proof, {
+        now: observationNow,
         readListeners: () => {
           if (++reads === 1) throw listenerTimeout();
           return [proof.pid];

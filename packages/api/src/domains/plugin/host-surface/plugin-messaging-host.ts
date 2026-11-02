@@ -11,12 +11,17 @@ import { isSystemUserMessage, resolveThreadMessageVisibility } from '../../cats/
 import { MessagingError } from '../../messaging/contract/host-types.js';
 import { validateDraft } from '../../messaging/contract/validate.js';
 import type { MessagingService } from '../../messaging/messaging-service.js';
-import { hostCapabilityRefusal } from './host-capability-refusal.js';
 import { pluginMessageSourceOf } from './plugin-messaging-source.js';
 import {
   createUnavailablePluginMessagingSubscriptionHost,
   type PluginMessagingSubscriptionHost,
 } from './plugin-messaging-subscription-host.js';
+import {
+  createPluginSentMessageReader,
+  type PluginSentMessage,
+  type PluginSentMessageLookup,
+  type PluginSentMessageReadServices,
+} from './plugin-sent-message-read.js';
 
 const SEND_KEYS = new Set([
   'threadId',
@@ -29,16 +34,14 @@ const SEND_KEYS = new Set([
   'sender',
   'contentBlocks',
   'identity',
-  'url',
   'meta',
 ]);
 export type PluginMessagingSendInput = Omit<MessageDraft, 'address'> & {
   readonly threadId: string;
-  readonly wake?: 'auto' | { readonly catId: string };
+  readonly wake?: import('../../messaging/ingress-wake.js').PluginMessageWake;
   readonly sender?: { readonly id: string; readonly name?: string };
   readonly contentBlocks?: readonly MessageContent[];
   readonly identity?: string;
-  readonly url?: string;
   readonly meta?: Readonly<Record<string, unknown>>;
 };
 
@@ -71,18 +74,20 @@ export type PluginMessage = Pick<
 
 export interface PluginMessagingHost extends PluginMessagingSubscriptionHost {
   get(messageId: string): Promise<PluginMessage | null>;
+  findSent(input: PluginSentMessageLookup): Promise<PluginSentMessage | null>;
   send(input: PluginMessagingSendInput): Promise<SendReceipt>;
 }
 
-export interface PluginMessagingHostDeps {
+export interface PluginMessagingHostDeps extends PluginSentMessageReadServices {
   readonly pluginId: string;
   readonly pluginInstanceId: string;
   readonly ownerUserId: string;
-  readonly effectiveGrants: readonly string[];
   readonly manifest: PluginManifest;
   readonly threadStore: IThreadStore;
-  readonly messageStore?: Pick<IMessageStore, 'getById'>;
+  readonly messageStore?: Pick<IMessageStore, 'getById'> & Partial<Pick<IMessageStore, 'getByIdempotencyKey'>>;
   readonly assertCurrent?: () => void;
+  /** Host-only execution lease check, consumed after asynchronous send preparation. */
+  readonly assertAdmissionCurrent?: () => Promise<void>;
   readonly messaging: MessagingService;
   readonly subscriptions?: PluginMessagingSubscriptionHost;
 }
@@ -93,6 +98,9 @@ export function createUnavailablePluginMessagingHost(): PluginMessagingHost {
     ...subscriptions,
     async get() {
       throw new MessagingError('PERMISSION', 'Host message read service is unavailable');
+    },
+    async findSent() {
+      throw new MessagingError('PERMISSION', 'Durable Host delivery lookup is unavailable');
     },
     async send() {
       throw new MessagingError('PERMISSION', 'Host messaging services are unavailable');
@@ -113,10 +121,17 @@ function wakeOf(value: unknown): PluginMessagingSendInput['wake'] {
     throw new MessagingError('VALIDATION', 'wake must be auto or { catId }');
   }
   const candidate = value as Record<string, unknown>;
-  if (Object.keys(candidate).length !== 1 || !Object.hasOwn(candidate, 'catId')) {
-    throw new MessagingError('VALIDATION', 'wake must contain only catId');
+  if (
+    Object.keys(candidate).some((key) => !['catId', 'exact'].includes(key)) ||
+    !Object.hasOwn(candidate, 'catId') ||
+    (candidate.exact !== undefined && candidate.exact !== true)
+  ) {
+    throw new MessagingError('VALIDATION', 'wake must contain catId and optional exact:true');
   }
-  return { catId: boundedString(candidate.catId, 'wake.catId', 200) };
+  return {
+    catId: boundedString(candidate.catId, 'wake.catId', 200),
+    ...(candidate.exact === true ? { exact: true as const } : {}),
+  };
 }
 
 function recordOf(input: PluginMessagingSendInput): Record<string, unknown> {
@@ -145,15 +160,11 @@ function isReadablePluginMessage(message: StoredMessage, ownerUserId: string): b
 
 export function createPluginMessagingHost(input: PluginMessagingHostDeps): PluginMessagingHost {
   return {
+    findSent: createPluginSentMessageReader(input),
     ...(input.subscriptions ?? createUnavailablePluginMessagingSubscriptionHost().host),
     async get(value) {
       input.assertCurrent?.();
-      if (!input.effectiveGrants.includes('thread.readContent')) {
-        throw hostCapabilityRefusal(
-          new MessagingError('PERMISSION', `${input.pluginId} lacks thread.readContent`),
-          'thread.readContent',
-        );
-      }
+
       const id = boundedString(value, 'messageId', 500);
       if (!input.messageStore) throw new MessagingError('NOT_FOUND', 'Host message read service is unavailable');
       const message = structuredClone(await input.messageStore.getById(id));
@@ -175,12 +186,7 @@ export function createPluginMessagingHost(input: PluginMessagingHostDeps): Plugi
     },
     async send(value) {
       input.assertCurrent?.();
-      if (!input.effectiveGrants.includes('messaging.send')) {
-        throw hostCapabilityRefusal(
-          new MessagingError('PERMISSION', `${input.pluginId} lacks messaging.send`),
-          'messaging.send',
-        );
-      }
+
       const record = recordOf(value);
       const threadId = boundedString(record.threadId, 'threadId', 500);
       const thread = await input.threadStore.get(threadId);
@@ -223,12 +229,11 @@ export function createPluginMessagingHost(input: PluginMessagingHostDeps): Plugi
       const { source, sender } = pluginMessageSourceOf(input.manifest, origin, {
         sender: record.sender,
         identity: record.identity,
-        url: record.url,
         meta: record.meta,
       });
       const scope = {
         canSend: true,
-        canSubscribe: input.effectiveGrants.includes('message.event.subscribe'),
+        canSubscribe: true,
       };
       let address: MessageDraft['address'];
       if (origin?.kind === 'external') {
@@ -257,6 +262,7 @@ export function createPluginMessagingHost(input: PluginMessagingHostDeps): Plugi
       const draft = { ...validated, address };
       const receipt = await input.messaging.sendFromHost({ pluginInstanceId: input.pluginInstanceId }, draft, {
         source,
+        ...(input.assertAdmissionCurrent ? { assertAdmissionCurrent: input.assertAdmissionCurrent } : {}),
         ...(parsedContentBlocks === undefined
           ? {}
           : { contentBlocks: parsedContentBlocks.data as readonly MessageContent[] }),

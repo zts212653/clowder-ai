@@ -13,7 +13,7 @@ import { addSkill, removeSkill } from '../../../skills/skill-manage.js';
 import type { PluginRuntimeAdmission } from '../carrier/runtime-carrier.js';
 import { packageDirectoryName } from '../external-runtime/filesystem-package-locator.js';
 import { ExternalPluginRuntimeError, type VerifiedPluginPackageLocator } from '../external-runtime/types.js';
-import type { BuiltinPluginPackageMaterializer } from '../manager/builtin-package-materializer.js';
+import type { BuiltinPluginPackageMaterializer } from '../manager/package-assets/builtin-package-materializer.js';
 import type { PluginRuntimeConfigurationPort } from '../manifest-configuration-projection.js';
 import { activateDeclaredMcp, removeDeclaredMcp } from './declared-mcp-resources.js';
 import { pluginResourceRoot } from './declared-resource-paths.js';
@@ -21,11 +21,14 @@ import type { DeclaredMcpLaunch } from './native-mcp-launches.js';
 
 export interface DeclaredStaticResourceHost {
   readonly projectRoot: string;
+  /** Read-only deployments keep local resources/launches without publishing to shared clients. */
+  readonly persistCapabilities?: boolean;
   readonly packages: VerifiedPluginPackageLocator;
   readonly mcpPackages?: BuiltinPluginPackageMaterializer;
   readonly resourcesRoot?: string;
   readonly configuration: PluginRuntimeConfigurationPort;
   readonly mcpConfigIO?: McpConfigIO;
+  readonly nativeActionEnvironmentReferences?: (contributionId: string) => Readonly<Record<string, string>>;
   readonly nativeActionEnvironment?: (contributionId: string) => Readonly<Record<string, string>>;
 }
 
@@ -55,7 +58,7 @@ export async function restoreDeclaredSkillPolicy(
   host: DeclaredStaticResourceHost | undefined,
   previous: readonly CapabilityEntry[],
 ): Promise<void> {
-  if (!host || previous.length === 0) return;
+  if (!host || host.persistCapabilities === false || previous.length === 0) return;
   await withCapabilityLock(host.projectRoot, async () => {
     const config = await readCapabilitiesConfig(host.projectRoot);
     await writeCapabilitiesConfig(host.projectRoot, {
@@ -121,6 +124,7 @@ export async function activateDeclaredSkills(
     await located.release();
   }
 
+  if (host.persistCapabilities === false) return;
   const mountRules = await readMountRules(host.projectRoot, host.projectRoot);
   await withCapabilityLock(host.projectRoot, async () => {
     for (const skillName of materialized.names) {
@@ -142,7 +146,7 @@ export async function activateDeclaredSkills(
 }
 
 export async function removeDeclaredSkills(pluginId: string, host: DeclaredStaticResourceHost | undefined) {
-  if (!host) return;
+  if (!host || host.persistCapabilities === false) return;
   const mountRules = await readMountRules(host.projectRoot, host.projectRoot);
   await withCapabilityLock(host.projectRoot, async () => {
     const config = await readCapabilitiesConfig(host.projectRoot);

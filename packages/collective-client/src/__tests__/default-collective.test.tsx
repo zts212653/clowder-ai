@@ -199,4 +199,80 @@ describe('F290 default product entry', () => {
     expect(html).toContain(work.title);
     expect(html).toContain('项目');
   });
+
+  it('renders the complete English result channel without Chinese product chrome', () => {
+    const acceptedAt = new Date().toISOString();
+    const collective = {
+      collectiveId: message.collectiveId,
+      name: 'Co-creation room',
+      createdByHumanId: 'human_12345678',
+      createdAt: acceptedAt,
+      role: 'steward' as const,
+    };
+    const resultEvent: CollectiveEventEnvelope = {
+      ...message,
+      body: `Original result: [Open shared work](http://localhost:5272/api/collaboration/work-result-files/wrf_${'a'.repeat(64)}/result.md)`,
+      acceptedAt,
+    };
+    const actor = { kind: 'human' as const, humanId: 'human_12345678', displayName: 'You' };
+    client.snapshot = {
+      ...client.snapshot,
+      collective,
+      me: {
+        human: { humanId: 'human_12345678', displayName: 'You', createdAt: acceptedAt },
+        auth: { provider: 'github', handle: 'operator' },
+        collectives: [collective],
+      },
+      events: [resultEvent],
+      members: {
+        humans: [
+          {
+            humanId: 'human_12345678',
+            displayName: 'You',
+            role: 'steward',
+          },
+        ],
+        cafes: [],
+      },
+      collaboration: {
+        serviceInstanceId: message.serviceInstanceId,
+        collectiveId: message.collectiveId,
+        works: [
+          {
+            v: 1,
+            serviceInstanceId: message.serviceInstanceId,
+            collectiveId: message.collectiveId,
+            workId: 'work_aaaaaaaa',
+            sourceEventId: resultEvent.eventId,
+            sourceLocation: { channelId: 'general' },
+            title: 'Original result review',
+            intendedOutcome: 'Keep the exact returned document available for collaboration.',
+            proposedBy: actor,
+            accountableHumanId: actor.humanId,
+            dependencyWorkIds: [],
+            lifecycle: 'completed',
+            status: 'completed',
+            resultEventId: resultEvent.eventId,
+            resultRevision: 1,
+            revision: 2,
+            createdAt: acceptedAt,
+            updatedAt: acceptedAt,
+            history: [
+              { revision: 1, action: 'proposed', actor, at: acceptedAt },
+              { revision: 2, action: 'result_accepted', actor, at: acceptedAt, eventId: resultEvent.eventId },
+            ],
+          },
+        ],
+        roadmaps: [],
+        votes: [],
+        bindingVotes: [],
+        decisions: [],
+      },
+    };
+    vi.stubGlobal('location', new URL('http://localhost:5272/?lang=en&channelId=general'));
+    const html = renderToStaticMarkup(<CollectiveClient />);
+    expect(html).toContain('Original result review');
+    expect(html).toContain('Open shared work');
+    expect(html).not.toMatch(/[\u3400-\u9fff]/u);
+  });
 });

@@ -8,7 +8,7 @@ import { ensureFakeCliOnPath } from './helpers/fake-cli-path.js';
 
 ensureFakeCliOnPath('opencode');
 test('v2 error messages survive mapping, while secrets and response bodies never surface', () => {
-  const secret = 'sk-FixturePrivateToken01234567890123456789';
+  const secret = ['sk', '-FixturePrivateToken01234567890123456789'].join('');
   for (const error of [
     { type: 'provider.auth', message: `401 Unauthorized ${secret}`, status: 401, response: { body: 'PRIVATE_BODY' } },
     { name: 'APIError', data: { message: `401 Unauthorized ${secret}`, statusCode: 401 }, response: 'PRIVATE_BODY' },

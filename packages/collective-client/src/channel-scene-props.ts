@@ -4,6 +4,7 @@ import type {
   ClientTarget,
   CollectiveBindingVoteChoice,
   CollectiveBindingVoteProjection,
+  CollectiveChannelProjection,
   CollectiveCollaborationProjection,
   CollectiveEventEnvelope,
   CollectiveMemberDirectory,
@@ -17,16 +18,19 @@ import type {
 } from './client-types.js';
 import type { FirstEntryGuide } from './first-entry/use-first-entry-guide.js';
 import type { ProjectSuggestionDecisionHandler } from './ProjectSuggestionActions.js';
+import type { ProjectTargetChangeHandler } from './ProjectTimeSummary.js';
 import type { RoadmapViewState } from './roadmap-view-model.js';
 import type { ProjectTaskResponsibility } from './use-collective-collaboration.js';
 import type { InformalVoteDraft } from './VoteCard.js';
 import type { VoteDraft } from './VoteDraftForm.js';
+import type { WorkTimeChangeHandler } from './WorkTimeEditor.js';
 
 export interface ChannelSceneProps {
   readonly collective: CollectiveMembership;
   readonly humanId: string;
   readonly humanName: string;
   readonly channelId: string;
+  readonly channel?: CollectiveChannelProjection;
   readonly content: ChannelContent;
   readonly onSelectContent: (content: ChannelContent) => void;
   readonly focusEventId?: string;
@@ -89,6 +93,8 @@ export interface ChannelSceneProps {
   ) => Promise<void>;
   readonly onWithdrawBindingVote: (vote: CollectiveBindingVoteProjection) => Promise<void>;
   readonly onSettleBindingVote: (vote: CollectiveBindingVoteProjection) => Promise<void>;
+  readonly onChangeWorkTime?: WorkTimeChangeHandler;
+  readonly onChangeProjectTarget?: ProjectTargetChangeHandler;
   readonly onSetWorkDependencies: (
     work: CollectiveWorkProjection,
     dependencyWorkIds: readonly string[],

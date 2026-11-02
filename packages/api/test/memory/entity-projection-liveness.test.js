@@ -11,6 +11,7 @@ import { SqliteEvidenceStore } from '../../dist/domains/memory/SqliteEvidenceSto
 import { RunLedger } from '../../dist/infrastructure/scheduler/RunLedger.js';
 import { registerEntityProposalDecisionRoutes } from '../../dist/routes/entity-proposal-decision-routes.js';
 import { anchorApproval } from '../approval-hub/helpers.js';
+import { createIndexWriterDiagnostics } from '../helpers/index-writer-diagnostics.js';
 
 // The earlier child-writer design fails this case: RunLedger.record on the API
 // connection waits on the projection's writer lock and freezes every endpoint.
@@ -35,7 +36,9 @@ test(
     db.transaction(() => {
       for (let i = 0; i < 400_000; i++) insert.run(`msg-${i}`);
     })();
-    const ledger = new RunLedger(db);
+    const diagnostics = createIndexWriterDiagnostics(db);
+    t.after(() => diagnostics.close());
+    const ledger = new RunLedger(diagnostics.database);
     const proposals = new InMemoryEntityProposalStore();
     const proposal = proposals.create({
       entityId: 'person:scale',
@@ -72,6 +75,11 @@ test(
     const address = app.server.address();
     assert.ok(address && typeof address !== 'string');
     const url = `http://127.0.0.1:${address.port}/health`;
+    // Establish the client/server path before measuring responsiveness under
+    // projection. Cold client initialization is not projection work.
+    const warmupStarted = performance.now();
+    assert.equal(await (await fetch(url)).text(), 'ok');
+    const warmupHealthMs = performance.now() - warmupStarted;
     const health = [];
     const writes = [];
     const publications = [];
@@ -80,6 +88,7 @@ test(
     let phase = 'before-projection';
     let stagedRows = 0;
     let slowestWrite;
+    let slowestHealth;
     const telemetry = channel('cat-cafe.entity-mention-projection');
     const subscriber = (message) => {
       const event = message;
@@ -96,29 +105,53 @@ test(
     let running = true;
     const probe = (async () => {
       while (running) {
+        const healthPhase = phase;
+        const healthRows = stagedRows;
+        const healthCpu = process.cpuUsage();
         const started = performance.now();
         assert.equal(await (await fetch(url)).text(), 'ok');
-        health.push(performance.now() - started);
+        const healthMs = performance.now() - started;
+        health.push(healthMs);
+        if (!slowestHealth || healthMs > slowestHealth.durationMs) {
+          slowestHealth = {
+            durationMs: healthMs,
+            atMs: started - probeStarted,
+            phaseBefore: healthPhase,
+            phaseAfter: phase,
+            stagedRowsBefore: healthRows,
+            stagedRowsAfter: stagedRows,
+            processCpuUs: process.cpuUsage(healthCpu),
+          };
+        }
+        diagnostics.phase(phase);
+        // The shared helper's passageCount records the current stagedRows here.
+        diagnostics.beforeWrite(stagedRows);
         const cpu = process.cpuUsage();
         const writeStart = performance.now();
-        ledger.record({
-          task_id: 'fixture',
-          subject_key: 'fixture:live',
-          outcome: 'delivered',
-          signal_summary: null,
-          duration_ms: 0,
-          started_at: Date.now(),
-          assigned_cat_id: null,
-        });
-        const durationMs = performance.now() - writeStart;
-        const processCpuUs = process.cpuUsage(cpu);
-        writes.push(durationMs);
-        if (!slowestWrite || durationMs > slowestWrite.durationMs) {
-          slowestWrite = { durationMs, atMs: writeStart - probeStarted, phase, stagedRows, processCpuUs };
+        try {
+          ledger.record({
+            task_id: 'fixture',
+            subject_key: 'fixture:live',
+            outcome: 'delivered',
+            signal_summary: null,
+            duration_ms: 0,
+            started_at: Date.now(),
+            assigned_cat_id: null,
+          });
+        } finally {
+          const durationMs = performance.now() - writeStart;
+          const processCpuUs = process.cpuUsage(cpu);
+          diagnostics.afterWrite({ startedAt: writeStart, elapsedMs: durationMs });
+          writes.push(durationMs);
+          if (!slowestWrite || durationMs > slowestWrite.durationMs) {
+            slowestWrite = { durationMs, atMs: writeStart - probeStarted, phase, stagedRows, processCpuUs };
+          }
         }
         await pause(10);
       }
     })();
+    // Awaited below after the request settles; do not emit an earlier unhandled rejection.
+    void probe.catch(() => {});
     try {
       const response = await fetch(
         `http://127.0.0.1:${address.port}/api/entity-proposals/${proposal.proposalId}/approve`,
@@ -128,20 +161,26 @@ test(
       assert.equal(proposals.get(proposal.proposalId).status, 'approved');
     } finally {
       running = false;
-      await probe;
-      t.diagnostic(
-        JSON.stringify({
-          rows: 400_000,
-          healthSamples: health.length,
-          healthMaxMs: Math.max(...health),
-          ledgerMaxMs: Math.max(...writes),
-          publishMaxMs: Math.max(...publications),
-          slowestWrite,
-          checkpointSamples: checkpoints.length,
-          checkpointMaxMs: Math.max(...checkpoints.map((result) => result.durationMs)),
-          lastCheckpoint: checkpoints.at(-1),
-        }),
-      );
+      try {
+        await probe;
+      } finally {
+        t.diagnostic(
+          JSON.stringify({
+            rows: 400_000,
+            warmupHealthMs,
+            healthSamples: health.length,
+            healthMaxMs: Math.max(...health),
+            slowestHealth,
+            ledgerMaxMs: Math.max(...writes),
+            publishMaxMs: Math.max(...publications),
+            slowestWrite,
+            checkpointSamples: checkpoints.length,
+            checkpointMaxMs: Math.max(...checkpoints.map((result) => result.durationMs)),
+            lastCheckpoint: checkpoints.at(-1),
+            ledgerDiagnostics: diagnostics.summary(),
+          }),
+        );
+      }
     }
     assert.equal(
       db.prepare('SELECT count(*) AS n FROM entity_mentions WHERE entity_id=?').get('person:scale').n,

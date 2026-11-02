@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import type { PluginDescription, PluginIconSpec } from '@cat-cafe/shared';
-import type { Capability, PluginManifest } from '@clowder-ai/plugin-contract';
+import type { PluginManifest } from '@clowder-ai/plugin-contract';
 import { BUNDLED_PACKAGE_ARCHIVES } from './bundled-package-index.js';
 import { CHATGPT_DOT_PLUGIN_MANIFEST } from './chatgpt-dot-manifest.js';
 
@@ -17,8 +17,8 @@ export interface OfficialPluginCatalogEntry {
   readonly bundledFormat?: 'manifest' | 'archive';
   readonly archiveUrl: string;
   readonly packageDigest: string;
-  readonly effectiveGrants: readonly Capability[];
-  /** Canonical discovery presentation. Host grants and installation truth remain separate. */
+
+  /** Canonical discovery presentation. Discovery and installation truth remain separate. */
   readonly presentation?: {
     readonly displayName: string;
     readonly description: PluginDescription;
@@ -53,7 +53,6 @@ export interface OfficialPluginCatalogPolicy {
   readonly bundledFormat?: 'manifest' | 'archive';
   readonly releaseTag: 'next';
   readonly bootstrapRelease: OfficialPluginRelease;
-  readonly effectiveGrants: readonly Capability[];
 }
 
 export function officialPluginCatalogEntry(
@@ -69,7 +68,6 @@ export function officialPluginCatalogEntry(
     version: release.version,
     archiveUrl: release.archiveUrl,
     packageDigest: release.packageDigest,
-    effectiveGrants: policy.effectiveGrants,
   };
 }
 
@@ -91,7 +89,6 @@ export const OFFICIAL_PLUGIN_POLICIES = [
       archiveUrl: BUNDLED_PACKAGE_ARCHIVES['chatgpt-dot'].archiveUrl,
       packageDigest: BUNDLED_PACKAGE_ARCHIVES['chatgpt-dot'].packageDigest,
     },
-    effectiveGrants: [],
   },
   {
     catalogId: 'genoffice-docx',
@@ -104,7 +101,6 @@ export const OFFICIAL_PLUGIN_POLICIES = [
       archiveUrl: 'https://registry.npmjs.org/@clowder-ai/genoffice-docx/-/genoffice-docx-0.1.0-alpha.1.tgz',
       packageDigest: 'sha512-MT893A4JY0zi8WWgI3xxNqE2ENoX8032rdRiJRvUIQxq7A0uvB8gbiapj1cuHBLCuRxgBNg5wBRnwGX69sPxrQ==',
     },
-    effectiveGrants: [],
   },
   {
     catalogId: 'companion',
@@ -117,7 +113,6 @@ export const OFFICIAL_PLUGIN_POLICIES = [
       archiveUrl: `https://registry.npmjs.org/@clowder-ai/companion/-/companion-${PUBLISHED_COMPANION_V2.version}.tgz`,
       packageDigest: PUBLISHED_COMPANION_V2.packageDigest,
     },
-    effectiveGrants: ['windows.create'],
   },
 ] as const satisfies readonly OfficialPluginCatalogPolicy[];
 

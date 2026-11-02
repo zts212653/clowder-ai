@@ -109,6 +109,7 @@ describe('F247 source-bound Remote MCP return contract', () => {
       targetCatId: 'gpt-pro',
     });
     const { secret } = await agentKeyRegistry.issue('gpt-pro', 'alice', { scope: 'cloud-conversation' });
+    const broadcasts = [];
     const app = Fastify();
     await app.register(callbacksRoutes, {
       registry: new InvocationRegistry(),
@@ -117,7 +118,7 @@ describe('F247 source-bound Remote MCP return contract', () => {
       cloudReturnGrantStore: grantStore,
       messageStore: store,
       threadStore,
-      socketManager: { broadcastAgentMessage: () => undefined },
+      socketManager: { broadcastAgentMessage: (message) => broadcasts.push(message) },
     });
 
     const proactive = await app.inject({
@@ -173,6 +174,17 @@ describe('F247 source-bound Remote MCP return contract', () => {
     assert.equal(accepted.statusCode, 200);
     const stored = (await store.getByThread(thread.id)).find((message) => message.content === 'bound remote response');
     assert.equal(stored.replyTo, source.id);
+    assert.deepEqual(stored.extra.cloudBridgeReturn, {
+      v: 1,
+      threadId: thread.id,
+      sourceMessageId: source.id,
+      targetCatId: 'gpt-pro',
+      dispatchInvocationId: 'inv-cloud',
+    });
+    assert.deepEqual(
+      broadcasts.find((message) => message.messageId === stored.id).extra.cloudBridgeReturn,
+      stored.extra.cloudBridgeReturn,
+    );
 
     const consumedReplay = await app.inject({
       method: 'POST',
@@ -184,6 +196,39 @@ describe('F247 source-bound Remote MCP return contract', () => {
     assert.equal(consumedReplay.json().status, 'duplicate');
     assert.equal(consumedReplay.json().messageId, stored.id);
     assert.equal((await store.getByThread(thread.id)).filter((message) => message.replyTo === source.id).length, 1);
+    assert.deepEqual((await store.getById(stored.id)).extra.cloudBridgeReturn, stored.extra.cloudBridgeReturn);
+
+    const legacyBinding = signer.sign({
+      threadId: thread.id,
+      userId: 'alice',
+      sourceMessageId: other.id,
+      dispatchInvocationId: 'legacy-verified-attempt',
+      targetCatId: 'gpt-pro',
+    });
+    const legacy = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-agent-key-secret': secret },
+      payload: {
+        threadId: thread.id,
+        replyTo: other.id,
+        content: 'legacy authenticated return',
+        cloudReturnBinding: legacyBinding,
+      },
+    });
+    assert.equal(legacy.statusCode, 200);
+    const legacyStored = await store.getById(legacy.json().messageId);
+    assert.deepEqual(legacyStored.extra.cloudBridgeReturn, {
+      v: 1,
+      threadId: thread.id,
+      sourceMessageId: other.id,
+      targetCatId: 'gpt-pro',
+      dispatchInvocationId: 'legacy-verified-attempt',
+    });
+    assert.deepEqual(
+      broadcasts.find((message) => message.messageId === legacyStored.id).extra.cloudBridgeReturn,
+      legacyStored.extra.cloudBridgeReturn,
+    );
     await app.close();
   });
 

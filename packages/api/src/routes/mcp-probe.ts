@@ -8,6 +8,7 @@
 import type { CapabilityEntry, McpToolInfo } from '@cat-cafe/shared';
 import type { StdioClientTransport, StdioServerParameters } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { resolvePencilCommand } from '../config/capabilities/capability-orchestrator.js';
+import { resolveEnvReferences } from '../utils/env-references.js';
 import { loadMcpClient, loadMcpHttp, loadMcpStdio } from '../utils/lazy-mcp-sdk.js';
 
 export interface McpProbeResult {
@@ -45,22 +46,10 @@ function sanitizeEnv(
 ): Record<string, string> | undefined {
   const safe: Record<string, string> = { ...defaults };
   if (!env) return safe;
-  for (const [key, value] of Object.entries(env)) {
+  for (const [key, value] of Object.entries(resolveEnvReferences(env))) {
     if (typeof value === 'string') safe[key] = value;
   }
   return safe;
-}
-
-/**
- * Resolve `${ENV_VAR}` references in header values from process.env.
- * Supports bare `${VAR}` as well as embedded `Bearer ${VAR}` patterns.
- */
-function resolveEnvVarsInRecord(record: Record<string, string>): Record<string, string> {
-  const resolved: Record<string, string> = {};
-  for (const [key, value] of Object.entries(record)) {
-    resolved[key] = value.replace(/\$\{([^}]+)\}/g, (_, name) => process.env[name] ?? '');
-  }
-  return resolved;
 }
 
 function remainingTimeout(deadlineMs: number): number {
@@ -156,7 +145,7 @@ async function probeHttpMcp(capability: CapabilityEntry, options: { timeoutMs?: 
   if (Date.now() >= deadlineMs) throw new Error(`Probe timeout after ${timeoutMs}ms`);
   const requestInit: RequestInit = {};
   if (capability.mcpServer?.headers && Object.keys(capability.mcpServer.headers).length > 0) {
-    requestInit.headers = resolveEnvVarsInRecord(capability.mcpServer.headers);
+    requestInit.headers = resolveEnvReferences(capability.mcpServer.headers);
   }
 
   const transport = new StreamableHTTPClientTransport(parsed, { requestInit });

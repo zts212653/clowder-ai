@@ -54,6 +54,8 @@ export interface ApprovalProducerCatalogEntry {
    */
   systemOriginExemption: 'server_attested' | 'forbidden';
   history: boolean;
+  /** Required admission choice: terminal decisions are persisted to the canonical card thread. */
+  decisionReceipt: { mode: 'shared-origin-thread'; routePrefix?: string };
   /** Null keeps the producer on its existing binary reject path. */
   humanDispositionReasonCodes: readonly HumanDispositionReasonCode[] | null;
 }
@@ -81,6 +83,7 @@ export const APPROVAL_PRODUCER_CATALOG = {
     // body cannot rewrite any of the three. Verified at the creation site by opus5.
     systemOriginExemption: 'server_attested',
     history: true,
+    decisionReceipt: { mode: 'shared-origin-thread' },
     humanDispositionReasonCodes: null,
   },
   F139: {
@@ -93,6 +96,7 @@ export const APPROVAL_PRODUCER_CATALOG = {
     sourcePolicy: 'message-or-event',
     systemOriginExemption: 'forbidden',
     history: true,
+    decisionReceipt: { mode: 'shared-origin-thread' },
     humanDispositionReasonCodes: null,
   },
   F193: {
@@ -109,6 +113,7 @@ export const APPROVAL_PRODUCER_CATALOG = {
     // @codex-luna, PR #1349 review — not independently re-walked by opus5.
     systemOriginExemption: 'server_attested',
     history: true,
+    decisionReceipt: { mode: 'shared-origin-thread' },
     humanDispositionReasonCodes: null,
   },
   F221: {
@@ -121,6 +126,7 @@ export const APPROVAL_PRODUCER_CATALOG = {
     sourcePolicy: 'message-or-event',
     systemOriginExemption: 'forbidden',
     history: true,
+    decisionReceipt: { mode: 'shared-origin-thread' },
     humanDispositionReasonCodes: null,
   },
   F225: {
@@ -136,6 +142,7 @@ export const APPROVAL_PRODUCER_CATALOG = {
     // InvocationRecord; the request body cannot rewrite any of them.
     systemOriginExemption: 'server_attested',
     history: true,
+    decisionReceipt: { mode: 'shared-origin-thread' },
     humanDispositionReasonCodes: HUMAN_DISPOSITION_REASON_CODES,
   },
   F231: {
@@ -152,6 +159,7 @@ export const APPROVAL_PRODUCER_CATALOG = {
     // → reject); omitting it falls back to the record value. Verified by opus5.
     systemOriginExemption: 'server_attested',
     history: true,
+    decisionReceipt: { mode: 'shared-origin-thread' },
     humanDispositionReasonCodes: null,
   },
   F260: {
@@ -168,6 +176,7 @@ export const APPROVAL_PRODUCER_CATALOG = {
     // re-walked by opus5.
     systemOriginExemption: 'server_attested',
     history: true,
+    decisionReceipt: { mode: 'shared-origin-thread' },
     humanDispositionReasonCodes: null,
   },
   F276: {
@@ -180,6 +189,7 @@ export const APPROVAL_PRODUCER_CATALOG = {
     sourcePolicy: 'message-required',
     systemOriginExemption: 'forbidden',
     history: true,
+    decisionReceipt: { mode: 'shared-origin-thread' },
     humanDispositionReasonCodes: ['not_important', 'wrong_lane', 'bad_evidence', 'wrong', 'other'],
   },
   F306: {
@@ -196,7 +206,8 @@ export const APPROVAL_PRODUCER_CATALOG = {
     // not call ApprovalIngress, but this required catalog claim stays accurate if
     // shared ingress validation is reused later.
     systemOriginExemption: 'server_attested',
-    history: false,
+    history: true,
+    decisionReceipt: { mode: 'shared-origin-thread', routePrefix: '/api/runtime-interactions' },
     humanDispositionReasonCodes: null,
   },
   F321: {
@@ -213,6 +224,7 @@ export const APPROVAL_PRODUCER_CATALOG = {
     // id plus its exact revision; original source coordinates come from Event.
     systemOriginExemption: 'server_attested',
     history: true,
+    decisionReceipt: { mode: 'shared-origin-thread' },
     humanDispositionReasonCodes: null,
   },
   F266: {
@@ -227,6 +239,7 @@ export const APPROVAL_PRODUCER_CATALOG = {
     // derives user/cat/thread/message identity from its InvocationRecord.
     systemOriginExemption: 'server_attested',
     history: true,
+    decisionReceipt: { mode: 'shared-origin-thread' },
     humanDispositionReasonCodes: null,
   },
 } as const satisfies Record<ApprovalProducerId, ApprovalProducerCatalogEntry>;

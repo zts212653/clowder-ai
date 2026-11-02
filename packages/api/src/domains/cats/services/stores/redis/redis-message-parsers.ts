@@ -23,6 +23,7 @@ import {
   asrPersonMemoryDynamicSceneEntryV1Schema,
   CatRoutingErrorSchema,
   catOwnedSeedCueCarrierV1Schema,
+  collectiveOwnerAdmissionV1Schema,
   companionIdentitySnapshotV1Schema,
   contentModificationReceiptV1Schema,
   contentModificationSourceMessageV1Schema,
@@ -33,6 +34,7 @@ import {
   evolutionPreparationSubmissionV1Schema,
   evolutionUseSourceV1Schema,
   isCloudBridgeRetryV1,
+  isCloudBridgeReturnV1,
   isLifecycleStoredMessageMetadata,
   isMessageFrom,
   isProviderSemanticEvent,
@@ -41,12 +43,15 @@ import {
   localReviewGitRevisionSchema,
   MessageBundleCarrierV1Schema,
   MessageContentsSchema,
+  messageSearchAnswerBindingSchema,
+  parseCodexStartupRecovery,
   readMessageOutputLayout,
   routingPreflightReceiptV1Schema,
   writeOpportunityPresentationRetryCarrierV1Schema,
   writeOpportunityReentryCarrierV1Schema,
 } from '@cat-cafe/shared';
-import { parsePluginMessageExtra } from '../../../../messaging/envelope.js';
+import { ordinaryTaskHandoffRequestSchema } from '../../../../ball-custody/OrdinaryTaskHandoffContract.js';
+import { parsePersistedPluginMessageExtra } from '../../../../messaging/envelope.js';
 import { MAX_PERSISTED_SUBEXECUTION_EVENTS, type MessageMetadata } from '../../types.js';
 import { liveResultNoticeSchema, liveReturnProjectionSchema } from '../live-result-carriers.js';
 import { parseMessageDeliveryBoundary } from '../message-delivery-boundary.js';
@@ -65,7 +70,7 @@ export function safeParseMessageFrom(raw: string | undefined | null): MessageFro
 }
 
 function parsePluginMessage(value: unknown): StoredPluginMessage | undefined {
-  return (parsePluginMessageExtra(value) as StoredPluginMessage | null) ?? undefined;
+  return (parsePersistedPluginMessageExtra(value) as StoredPluginMessage | null) ?? undefined;
 }
 
 /** Parse the F288 payload stored in its own Redis hash field (fail-closed). */
@@ -248,6 +253,12 @@ type ExtraCarrierPersistenceClassification<
  * Every StoredMessage.extra key must be classified when it is introduced.
  */
 type ExtraCarrierPersistence = ExtraCarrierPersistenceClassification<{
+  cloudBridgeReturn: 'parsed';
+  taskHandoff: 'parsed';
+  taskHandoffInvalid: 'derived';
+  taskAssignmentRequestDigest: 'parsed';
+  collectiveOwnerAdmissionV1: 'parsed';
+  collectiveAuthorizationInvalid: 'derived';
   outputLayout: 'parsed';
   a2aFailureReturn: 'parsed';
   coveredA2AFailureReturns: 'parsed';
@@ -261,6 +272,7 @@ type ExtraCarrierPersistence = ExtraCarrierPersistenceClassification<{
   liveAdmission: 'parsed';
   routingTargetSource: 'parsed';
   rich: 'parsed';
+  messageSearchAnswer: 'parsed';
   callbackRichRequestDigest: 'parsed';
   isExplicitPost: 'parsed';
   mediaPublication: 'parsed';
@@ -298,6 +310,7 @@ type ExtraCarrierPersistence = ExtraCarrierPersistenceClassification<{
   pluginMessage: 'parsed';
   routingWarnings: 'parsed';
   cloudBridgeRetry: 'parsed';
+  startupRecovery: 'parsed';
 }>;
 
 function isNonEmptyString(value: unknown): value is string {
@@ -512,6 +525,34 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
     const outputLayout = readMessageOutputLayout(parsed.outputLayout);
     if (outputLayout) result.outputLayout = outputLayout;
     let hasField = modification.success || modificationReceipt.success || outputLayout !== undefined;
+    if (
+      typeof parsed.taskAssignmentRequestDigest === 'string' &&
+      /^[0-9a-f]{64}$/.test(parsed.taskAssignmentRequestDigest)
+    ) {
+      result.taskAssignmentRequestDigest = parsed.taskAssignmentRequestDigest;
+      hasField = true;
+    }
+    if (parsed.taskHandoff !== undefined || parsed.taskHandoffInvalid !== undefined) {
+      const handoff = ordinaryTaskHandoffRequestSchema.safeParse(parsed.taskHandoff);
+      if (handoff.success && parsed.taskHandoffInvalid === undefined) result.taskHandoff = handoff.data;
+      else result.taskHandoffInvalid = true;
+      hasField = true;
+    }
+    // Legacy receipts remain readable after plugin migration, never executable invocation/delegation carriers.
+    if (parsed.collectiveOwnerAdmissionV1 !== undefined) {
+      const admission = collectiveOwnerAdmissionV1Schema.safeParse(parsed.collectiveOwnerAdmissionV1);
+      if (admission.success) result.collectiveOwnerAdmissionV1 = admission.data;
+      else result.collectiveAuthorizationInvalid = true;
+      hasField = true;
+    }
+    if (
+      parsed.collectiveAuthorizationInvalid !== undefined ||
+      parsed.collectiveWorkInvocationV1 !== undefined ||
+      parsed.collectiveWorkDelegationV1 !== undefined
+    ) {
+      result.collectiveAuthorizationInvalid = true;
+      hasField = true;
+    }
     const failureReturn = parseA2AFailureReturn(parsed.a2aFailureReturn);
     if (failureReturn) {
       result.a2aFailureReturn = failureReturn;
@@ -623,6 +664,11 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
     }
 
     // Validate rich sub-field shape
+    const messageSearchAnswer = messageSearchAnswerBindingSchema.safeParse(parsed.messageSearchAnswer);
+    if (messageSearchAnswer.success) {
+      result.messageSearchAnswer = messageSearchAnswer.data;
+      hasField = true;
+    }
     if (parsed.rich && typeof parsed.rich === 'object' && parsed.rich.v === 1 && Array.isArray(parsed.rich.blocks)) {
       result.rich = parsed.rich as RichMessageExtra;
       hasField = true;
@@ -646,6 +692,15 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
 
     if (isCloudBridgeRetryV1(parsed.cloudBridgeRetry)) {
       result.cloudBridgeRetry = parsed.cloudBridgeRetry;
+      hasField = true;
+    }
+    if (isCloudBridgeReturnV1(parsed.cloudBridgeReturn)) {
+      result.cloudBridgeReturn = parsed.cloudBridgeReturn;
+      hasField = true;
+    }
+    const startupRecovery = parseCodexStartupRecovery(parsed.startupRecovery);
+    if (startupRecovery) {
+      result.startupRecovery = startupRecovery;
       hasField = true;
     }
 
@@ -1034,16 +1089,32 @@ export function safeParseConnectorSource(raw: string | undefined): ConnectorSour
   if (!raw) return undefined;
   try {
     const parsed = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined;
+    const source = parsed as Record<string, unknown>;
     if (
-      typeof parsed === 'object' &&
-      parsed !== null &&
-      typeof parsed.connector === 'string' &&
-      typeof parsed.label === 'string' &&
-      typeof parsed.icon === 'string'
-    ) {
-      return parsed as ConnectorSource;
-    }
-    return undefined;
+      typeof source.connector !== 'string' ||
+      typeof source.label !== 'string' ||
+      typeof source.icon !== 'string' ||
+      (source.themeColor !== undefined && typeof source.themeColor !== 'string') ||
+      (source.meta !== undefined &&
+        (typeof source.meta !== 'object' || source.meta === null || Array.isArray(source.meta))) ||
+      (source.sender !== undefined &&
+        (typeof source.sender !== 'object' ||
+          source.sender === null ||
+          Array.isArray(source.sender) ||
+          typeof (source.sender as Record<string, unknown>).id !== 'string' ||
+          ((source.sender as Record<string, unknown>).name !== undefined &&
+            typeof (source.sender as Record<string, unknown>).name !== 'string')))
+    )
+      return undefined;
+    return {
+      connector: source.connector,
+      label: source.label,
+      icon: source.icon,
+      ...(source.themeColor === undefined ? {} : { themeColor: source.themeColor }),
+      ...(source.meta === undefined ? {} : { meta: source.meta as ConnectorSource['meta'] }),
+      ...(source.sender === undefined ? {} : { sender: source.sender as ConnectorSource['sender'] }),
+    };
   } catch {
     return undefined;
   }

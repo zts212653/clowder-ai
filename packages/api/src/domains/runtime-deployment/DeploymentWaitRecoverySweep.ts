@@ -55,7 +55,11 @@ export class DeploymentWaitRecoverySweep {
   }
 
   private async inspect(task: TaskItem): Promise<{ checked: number; recovered: number }> {
-    if (task.deploymentWait?.currentExecutionClaim || task.deploymentWait?.waitOutcome?.delivery === 'pending') {
+    if (
+      task.deploymentWait?.currentExecutionClaim ||
+      task.deploymentWait?.waitOutcome?.delivery === 'pending' ||
+      task.deploymentWait?.waitOutcome?.delivery === 'not_applicable'
+    ) {
       const result = await this.lifecycle.recoverOutcome(task.id);
       return { checked: 0, recovered: result.kind === 'notified' ? 1 : 0 };
     }

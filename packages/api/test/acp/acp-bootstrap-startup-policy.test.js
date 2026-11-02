@@ -2,15 +2,37 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { verifyAcpBootstrap } from '../../dist/domains/cats/services/agents/providers/acp/bootstrap/acp-bootstrap-context.js';
 import { auditedWindowsAcpStartup } from '../../dist/domains/cats/services/agents/providers/acp/bootstrap/acp-bootstrap-startup-policy.js';
+import { prepareDshSecretPatch } from '../../dist/domains/cats/services/agents/providers/dsh-secret-patch.js';
 
 const windows = { skip: process.platform !== 'win32' };
-const bridge = resolve('packages/api/dist/domains/cats/services/agents/providers/pi/pi-acp-bridge.js');
+const bridge = fileURLToPath(
+  new URL('../../dist/domains/cats/services/agents/providers/pi/pi-acp-bridge.js', import.meta.url),
+);
 const args = [bridge, '--pi-command', process.execPath];
 const cleanEnv = { NODE_OPTIONS: '', NODE_PATH: '' };
+
+test('Windows DSH startup admits the exact managed guard overlay, then rejects any patch delta', windows, async (t) => {
+  const entry = process.env.ACP_DSH_AUDITED_ENTRY;
+  if (!entry) return t.skip('requires the already audited local DSH installation');
+  const root = mkdtempSync(join(tmpdir(), 'acp-dsh-secret-policy-'));
+  const env = { ...cleanEnv, DSH_HOME: join(root, 'native-home') };
+  try {
+    const argv = await prepareDshSecretPatch('dsh', ['--profile', 'acp'], root);
+    assert.equal(auditedWindowsAcpStartup(process.execPath, [entry, ...argv], env), 'dsh-0.2.0-rc.2');
+    assert.equal(auditedWindowsAcpStartup(process.execPath, [entry, ...argv, '--patch', 'unsafe.yml'], env), undefined);
+    const patch = argv.at(-1);
+    assert.ok(patch);
+    writeFileSync(patch, '!!js/function >\n  function() {}');
+    assert.equal(auditedWindowsAcpStartup(process.execPath, [entry, ...argv], env), undefined);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test('only the exact built-in Pi bridge shape admits the volume policy', windows, () => {
   assert.equal(auditedWindowsAcpStartup(process.execPath, args, cleanEnv), 'builtin-pi');
@@ -31,6 +53,18 @@ test('only the exact built-in Pi bridge shape admits the volume policy', windows
   ]) {
     assert.equal(auditedWindowsAcpStartup(process.execPath, args, { ...cleanEnv, ...env }), undefined);
   }
+});
+
+test('persistent builtin Pi scope flags retain the exact Windows startup audit', windows, () => {
+  const root = join(tmpdir(), 'pi-persistent-state');
+  const persistent = [...args, '--session-root', root, '--session-scope', 'a'.repeat(64)];
+  assert.equal(auditedWindowsAcpStartup(process.execPath, persistent, cleanEnv), 'builtin-pi');
+  for (const invalid of [
+    [...persistent, '--extension', 'untrusted.js'],
+    [...args, '--session-root', 'relative', '--session-scope', 'a'.repeat(64)],
+    [...args, '--session-root', root, '--session-scope', '../escape'],
+  ])
+    assert.equal(auditedWindowsAcpStartup(process.execPath, invalid, cleanEnv), undefined);
 });
 
 test('Pi initialize completes without launching Pi or using ancestor instructions', windows, () => {
@@ -60,6 +94,8 @@ test('Pi initialize completes without launching Pi or using ancestor instruction
 test('cold-start verification fails closed if the admitted startup environment changes', windows, () => {
   const root = mkdtempSync(join(tmpdir(), 'acp-policy-recheck-'));
   const env = { ...cleanEnv };
+  const previousMode = process.env.CAT_CAFE_WINDOWS_ACP_BOOTSTRAP_MODE;
+  process.env.CAT_CAFE_WINDOWS_ACP_BOOTSTRAP_MODE = 'trusted-host';
   try {
     const context = verifyAcpBootstrap(
       { projectRoot: root, command: process.execPath, args, poolKey: { projectPath: root, providerProfile: 'pi' } },
@@ -70,6 +106,8 @@ test('cold-start verification fails closed if the admitted startup environment c
     env.NODE_OPTIONS = '--require unsafe.js';
     assert.throws(() => context.verifyCwd(), /startup.*changed/i);
   } finally {
+    if (previousMode === undefined) delete process.env.CAT_CAFE_WINDOWS_ACP_BOOTSTRAP_MODE;
+    else process.env.CAT_CAFE_WINDOWS_ACP_BOOTSTRAP_MODE = previousMode;
     rmSync(root, { recursive: true, force: true });
   }
 });

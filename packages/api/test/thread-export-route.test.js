@@ -232,6 +232,40 @@ describe('POST /api/threads/:threadId/export-image', () => {
     });
   });
 
+  it('passes the resolved partial selection to image rendering and counts the source once', async () => {
+    const block = { id: 'selected-card', kind: 'card', v: 1, title: '审批卡统一结果行' };
+    const app = await buildApp(
+      createMessageStore([
+        makeMessage({
+          content: '两件都弄好了：',
+          extra: {
+            rich: { v: 1, blocks: [block, { id: 'excluded-card', kind: 'card', v: 1, title: '额度表 · 本周' }] },
+          },
+        }),
+      ]),
+    );
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/threads/thread-1/export-selection-image',
+      headers: { 'x-cat-cafe-user': 'user-1' },
+      payload: {
+        items: [
+          { kind: 'quote', messageId: 'message-1', text: '两件都弄好了：', renderedOccurrences: 1 },
+          { kind: 'rich_block', messageId: 'message-1', sourceMessageIds: ['message-1'], blockId: 'selected-card' },
+        ],
+      },
+    });
+    await app.close();
+    assert.equal(res.statusCode, 200, res.body);
+    assert.deepEqual(captures[0].options.selectionMessageIds, ['message-1']);
+    assert.deepEqual(
+      captures[0].options.selectionItems.map((item) => item.kind),
+      ['quote', 'rich_block'],
+    );
+    assert.equal(captures[0].options.selectionItems[0].readableContent, '两件都弄好了：');
+    assert.equal(captures[0].options.selectionItems[1].richBlock.id, 'selected-card');
+  });
+
   it('does not launch capture when selection resolution fails', async () => {
     const app = await buildApp(createMessageStore([makeMessage({ id: 'message-1', _tombstone: true, content: '' })]));
 

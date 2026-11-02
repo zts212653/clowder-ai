@@ -6,6 +6,7 @@ import { useApprovalHubStore } from '@/stores/approvalHubStore';
 import { apiFetch } from '@/utils/api-client';
 import { createApprovalSessions } from '../approval-sessions';
 import { MailboxRow } from '../MailboxRow';
+import { collectiveFailure } from './collective-failure.fixture';
 import { approvalRow, okRead, storeItem } from './mailbox-fixtures';
 
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
@@ -43,11 +44,12 @@ afterEach(() => {
   vi.mocked(apiFetch).mockReset();
   vi.unstubAllGlobals();
 });
-it.each([
-  'F193',
-  'F221',
-  'F260',
-] as const)('puts original %s decisions on the collapsed first layer and retains the current-read barrier', async (feature) => {
+it.each(
+  (['F193', 'F221', 'F260'] as const).flatMap((feature) => [false, true].map((outage) => ({ feature, outage }))),
+)('puts original $feature on the first layer (Collective failure=$outage) and retains the current-read barrier', async ({
+  feature,
+  outage,
+}) => {
   item = storeItem({
     sourceFeatureId: feature,
     detail: {
@@ -85,7 +87,7 @@ it.each([
     refreshStore: () => useApprovalHubStore.getState().fetchPending(),
     storeItems: () => useApprovalHubStore.getState().items,
     attempts: () => useApprovalHubStore.getState().decisionAttempts,
-    latestRead: () => ({ result: okRead([row]), generation: 1 }),
+    latestRead: () => ({ result: outage ? collectiveFailure(okRead([row]), true) : okRead([row]), generation: 1 }),
     now: Date.now,
   });
   await act(async () =>

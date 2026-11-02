@@ -5,6 +5,7 @@ import {
   collectiveHumanIdSchema,
   collectiveLocationSchema,
 } from './collective.js';
+import { collectiveProjectArtifactReturnSchema } from './collective-project-artifact-return.js';
 
 /** Public navigation coordinates only. A ref grants no content read or annotation authority. */
 export const collectiveMediaSurfaceRefV1Schema = collectiveConnectionCoordinatesSchema
@@ -18,6 +19,7 @@ export const collectiveMediaSurfaceRefV1Schema = collectiveConnectionCoordinates
     artifactId: z.string().trim().min(1).max(256),
     sourceEventId: collectiveEventIdSchema,
     ownerRevision: z.number().int().positive().safe(),
+    projectReturn: collectiveProjectArtifactReturnSchema.optional(),
   })
   .strict();
 export type CollectiveMediaSurfaceRefV1 = z.infer<typeof collectiveMediaSurfaceRefV1Schema>;

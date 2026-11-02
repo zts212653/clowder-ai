@@ -25,6 +25,8 @@ code_anchors:
   - packages/api/src/config/alpha-coordinates.ts
   - scripts/daemon-state.mjs
   - scripts/lib/daemon-state.mjs
+  - scripts/lib/process-identity.mjs
+  - scripts/lib/process-birth-identity.mjs
   - scripts/lib/daemon-stop-operation.mjs
   - scripts/lib/daemon-stop-record.mjs
   - scripts/lib/daemon-stop-claim.mjs

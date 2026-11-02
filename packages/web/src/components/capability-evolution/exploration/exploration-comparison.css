@@ -80,9 +80,11 @@
   border-radius: 4px;
   font-size: var(--console-font-xs);
   background: var(--cafe-surface);
+  --chat-background-role: cafe;
 }
 .exploration-pair-cases button[aria-pressed="true"] {
   background: var(--cafe-surface-elevated);
+  --chat-background-role: cafe-elevated;
   outline: 1px solid var(--cafe-border);
 }
 .exploration-pair-title {

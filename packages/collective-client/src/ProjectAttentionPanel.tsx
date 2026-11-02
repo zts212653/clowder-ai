@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { CollectiveMemberDirectory, CollectiveRoadmapRecord, CollectiveWorkProjection } from './client-types.js';
+import { useCollectiveLanguage } from './collective-copy.js';
+import { ProjectMaterialAttentionRow } from './ProjectMaterialAttentionRow.js';
 import { workAccountabilityRequestState } from './roadmap-view-model.js';
 
-type ProjectAttentionKind = 'accountability_request' | 'unassigned' | 'result_ready';
+type ProjectAttentionKind = 'accountability_request' | 'unassigned' | 'result_ready' | 'date_suggestion' | 'overdue';
 
 interface ProjectAttentionItem {
   readonly key: string;
@@ -21,6 +23,7 @@ export function ProjectAttentionPanel({
   currentHumanId,
   hidden = false,
   onOpen,
+  onOpenMaterials,
 }: {
   readonly roadmaps: readonly CollectiveRoadmapRecord[];
   readonly works: readonly CollectiveWorkProjection[];
@@ -28,8 +31,16 @@ export function ProjectAttentionPanel({
   readonly humanNames: Readonly<Record<string, string>>;
   readonly currentHumanId: string;
   readonly hidden?: boolean;
+  readonly onOpenMaterials?: (roadmap: CollectiveRoadmapRecord) => void;
   readonly onOpen: (roadmap: CollectiveRoadmapRecord, work: CollectiveWorkProjection) => void;
 }) {
+  const en = useCollectiveLanguage() === 'en';
+  const [materialCounts, setMaterialCounts] = useState<Record<string, number>>({});
+  const onMaterialCount = useCallback(
+    (id: string, count: number) =>
+      setMaterialCounts((current) => (current[id] === count ? current : { ...current, [id]: count })),
+    [],
+  );
   const [selectedHumanId, setSelectedHumanId] = useState(currentHumanId);
   const [showAll, setShowAll] = useState(false);
   useEffect(() => {
@@ -37,6 +48,12 @@ export function ProjectAttentionPanel({
     setShowAll(false);
   }, [currentHumanId]);
   const items = useMemo(() => projectAttentionItems(roadmaps, works), [roadmaps, works]);
+  const materialProjects = roadmaps.filter(
+    (project) => project.status === 'active' && (showAll || project.accountableHumanId === selectedHumanId),
+  );
+  const materialCount = onOpenMaterials
+    ? materialProjects.filter((project) => (materialCounts[project.roadmapId] ?? 0) > 0).length
+    : 0;
   const selected = showAll ? items : items.filter((item) => item.targetHumanId === selectedHumanId);
   const people = humans.some((human) => human.humanId === currentHumanId)
     ? humans
@@ -54,7 +71,9 @@ export function ProjectAttentionPanel({
       <header>
         <div>
           <strong>待办</strong>
-          <span>{selected.length} 件</span>
+          <span>
+            {selected.length + materialCount} {en ? 'items' : '件'}
+          </span>
         </div>
         <div className="project-attention-controls">
           <button
@@ -85,11 +104,23 @@ export function ProjectAttentionPanel({
           </label>
         </div>
       </header>
-      {selected.length ? (
+      {selected.length || onOpenMaterials ? (
         <ul>
+          {!selected.length && !materialCount && (
+            <li className="project-attention-empty">当前没有需要这位成员处理的项目事项。</li>
+          )}
+          {onOpenMaterials &&
+            materialProjects.map((project) => (
+              <ProjectMaterialAttentionRow
+                key={project.roadmapId}
+                project={project}
+                onOpen={onOpenMaterials}
+                onCount={onMaterialCount}
+              />
+            ))}
           {selected.map((item) => (
             <li key={item.key}>
-              <span className={`project-attention-status is-${item.kind}`}>{attentionStatus(item)}</span>
+              <span className={`project-attention-status is-${item.kind}`}>{attentionStatus(item, en)}</span>
               <div>
                 <strong>{item.work.title}</strong>
                 <span>
@@ -98,7 +129,7 @@ export function ProjectAttentionPanel({
                 </span>
               </div>
               <button type="button" onClick={() => onOpen(item.roadmap, item.work)}>
-                {attentionAction(item, currentHumanId)}
+                {attentionAction(item, currentHumanId, en)}
               </button>
             </li>
           ))}
@@ -120,6 +151,33 @@ function projectAttentionItems(
     const containing = active.filter((roadmap) => roadmap.workIds.includes(work.workId));
     if (!containing.length) continue;
     for (const item of attentionItemsForWork(work, containing)) if (!items.has(item.key)) items.set(item.key, item);
+  }
+  for (const work of works) {
+    const project = active.find((project) => project.workIds.includes(work.workId));
+    if (
+      !project ||
+      !work.accountableHumanId ||
+      ['proposed', 'completed', 'cancelled', 'declined'].includes(work.lifecycle)
+    )
+      continue;
+    if (work.timeSuggestions?.some((item) => item.status === 'pending'))
+      items.set(`date:${work.workId}`, {
+        key: `date:${work.workId}`,
+        kind: 'date_suggestion',
+        targetHumanId: work.accountableHumanId,
+        roadmap: project,
+        work,
+        sinceAt: work.timeSuggestions.find((item) => item.status === 'pending')!.at,
+      });
+    if (work.time?.businessDeadline && Date.parse(work.time.businessDeadline.value) < Date.now())
+      items.set(`overdue:${work.workId}`, {
+        key: `overdue:${work.workId}`,
+        kind: 'overdue',
+        targetHumanId: work.accountableHumanId,
+        roadmap: project,
+        work,
+        sinceAt: work.time.businessDeadline.value,
+      });
   }
   return [...items.values()].sort(
     (left, right) => left.sinceAt.localeCompare(right.sinceAt) || left.work.title.localeCompare(right.work.title),
@@ -176,13 +234,17 @@ function resultAttentionItem(
   };
 }
 
-function attentionStatus(item: ProjectAttentionItem) {
+function attentionStatus(item: ProjectAttentionItem, en = false) {
+  if (item.kind === 'date_suggestion') return en ? 'Date suggestion' : '日期建议';
+  if (item.kind === 'overdue') return en ? 'Past deadline' : '超过截止';
   if (item.kind === 'accountability_request') return '责任邀请';
   if (item.kind === 'result_ready') return '待验收';
   return '待指派';
 }
 
-function attentionAction(item: ProjectAttentionItem, currentHumanId: string) {
+function attentionAction(item: ProjectAttentionItem, currentHumanId: string, en = false) {
+  if (item.kind === 'overdue') return en ? 'Change date / View' : '改日期… / 去看看';
+  if (item.kind === 'date_suggestion') return en ? 'Review suggestions' : '确认日期建议';
   if (item.targetHumanId !== currentHumanId) return '查看任务';
   if (item.kind === 'accountability_request') return '处理邀请';
   if (item.kind === 'result_ready') return '验收结果';

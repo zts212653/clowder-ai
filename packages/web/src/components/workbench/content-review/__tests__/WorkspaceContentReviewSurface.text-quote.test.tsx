@@ -1,4 +1,5 @@
 import type { WorkspaceContentReviewView } from '@cat-cafe/shared';
+import { EditorView } from '@codemirror/view';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -78,7 +79,15 @@ describe('F309 text landing: a selection goes through the one existing chat quot
   beforeAll(() => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   });
+  const rangeRects = Object.getOwnPropertyDescriptor(Range.prototype, 'getClientRects');
+  const rangeBounds = Object.getOwnPropertyDescriptor(Range.prototype, 'getBoundingClientRect');
   beforeEach(() => {
+    // CodeMirror measures real ranges; jsdom provides no layout APIs for them.
+    Object.defineProperty(Range.prototype, 'getClientRects', { configurable: true, value: () => [] });
+    Object.defineProperty(Range.prototype, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => new DOMRect(0, 0, 800, 20),
+    });
     mocks.apiFetch.mockReset();
     revealChat.mockReset();
     useChatStore.setState({ currentThreadId: 'thread-a', pendingChatInsert: null });
@@ -91,6 +100,10 @@ describe('F309 text landing: a selection goes through the one existing chat quot
     container.remove();
     useChatStore.setState(initial, true);
     vi.restoreAllMocks();
+    if (rangeRects) Object.defineProperty(Range.prototype, 'getClientRects', rangeRects);
+    else Reflect.deleteProperty(Range.prototype, 'getClientRects');
+    if (rangeBounds) Object.defineProperty(Range.prototype, 'getBoundingClientRect', rangeBounds);
+    else Reflect.deleteProperty(Range.prototype, 'getBoundingClientRect');
   });
 
   async function render(current: WorkspaceContentReviewView, sourceText: string, visible = true) {
@@ -452,11 +465,39 @@ describe('F309 text landing: a selection goes through the one existing chat quot
     expect(composerAttachments('thread-a')[0]).toMatchObject({ text, comment: 'kept comment' });
   });
 
+  it('uses one toolbar for the document and leaves native body context selection untouched', async () => {
+    await render(textView('notes.md'), 'Intro line.\nA unique source quote.\n');
+    expect(container.querySelectorAll('[data-testid="content-file-toolbar"]')).toHaveLength(1);
+    const body = container.querySelector('[data-testid="rendered-markdown"]')!;
+    const context = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+    body.dispatchEvent(context);
+    expect(context.defaultPrevented).toBe(false);
+    expect(container.querySelector('[role="menu"]')).toBeNull();
+    const name = container.querySelector('[data-testid="content-file-toolbar"] [title="notes.md"]')!;
+    await act(async () => name.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })));
+    expect(container.querySelectorAll('[role="menu"]')).toHaveLength(1);
+  });
+
   it('a code selection carries the real line range of the file', async () => {
     const sourceText = 'const a = 1;\nconst b = 2;\nconst c = 3;\n';
     await render(textView('src/a.ts'), sourceText);
-    const node = textNodeContaining(container.querySelector('[data-testid="workspace-content-review-text"]')!, 'b = 2');
-    await annotate(node, 0, 'const b = 2;'.length, 'why two?');
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+    const cm = container.querySelector<HTMLElement>('.cm-editor');
+    expect(cm).not.toBeNull();
+    const editor = EditorView.findFromDOM(cm!);
+    expect(editor).not.toBeNull();
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 800, 600));
+    vi.spyOn(editor!, 'coordsAtPos').mockReturnValue({ left: 10, right: 100, top: 20, bottom: 40 });
+    vi.spyOn(editor!, 'posAtCoords').mockReturnValue(13);
+    await act(async () => editor!.dispatch({ selection: { anchor: 13, head: 25 } }));
+    const trigger = container.querySelector<HTMLButtonElement>('[data-testid="workspace-code-selection-add-to-chat"]');
+    expect(trigger).not.toBeNull();
+    await act(async () => trigger!.click());
+    const comment = document.querySelector<HTMLTextAreaElement>('[data-testid="context-annotation-comment"]')!;
+    await act(async () => typeComment(comment, 'why two?'));
+    await act(async () =>
+      comment.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })),
+    );
     expect(useChatStore.getState().pendingChatInsert?.contextAttachments?.[0]).toMatchObject({
       kind: 'quote',
       text: 'const b = 2;',

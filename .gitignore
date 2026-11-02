@@ -183,6 +183,8 @@ docs/discussions/exported-threads/
 *.mov
 *.mp4
 !site/assets/guides/*.mp4
+# 官网「30 秒看一个功能」的演示片（720p，每支约 4MB）
+!site/assets/demos/*.mp4
 *.avi
 *.mkv
 *.wav

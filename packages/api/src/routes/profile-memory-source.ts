@@ -1,6 +1,8 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import type { MemoryOwnerSourceCoordinate, MemoryOwnerSourceResponse } from '@cat-cafe/shared';
+import { LEGACY_PROFILE_CAPSULE_RELATIVE_PATH } from '@cat-cafe/shared/profile-contract';
+import { readProfileOpeningReference } from '@cat-cafe/shared/profile-opening-reference';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { resolveThreadMessageVisibility } from '../domains/cats/services/stores/visibility.js';
@@ -13,6 +15,7 @@ export interface ProfileMemorySourceReaders {
 }
 
 interface ProfileProvenanceCoordinate {
+  label?: string;
   threadId?: string;
   messageId?: string;
   occurredAt: number | null;
@@ -23,7 +26,15 @@ export async function readProfileMemorySource(
   ownerUserId: string,
   readers: ProfileMemorySourceReaders,
 ): Promise<MemoryOwnerSourceResponse> {
-  const provenance = listTargetProvenance(entry);
+  const opening = entry.layer === 'primer' ? readProfileOpeningReference(entry.content) : null;
+  const provenance = [
+    ...(opening?.excerpts.map((item, index) => ({
+      ...item.source,
+      label: `开场参考 ${index + 1} · ${item.kind === 'relationship' ? '陪伴与关系' : '历史能力判断'}`,
+      occurredAt: null,
+    })) ?? []),
+    ...listTargetProvenance(entry),
+  ];
   if (provenance.length === 0) return { status: 'not_recorded', sources: [] };
   const sources: MemoryOwnerSourceCoordinate[] = [];
   for (const coordinate of provenance) {
@@ -49,7 +60,11 @@ function listTargetProvenance(entry: StoredProfileMemoryEntry): ProfileProvenanc
       continue;
     }
     const fields = parseMetadata(content);
-    if (fields.target !== entry.targetPath) continue;
+    if (
+      fields.target !== entry.targetPath &&
+      !(entry.layer === 'capsule' && fields.target === LEGACY_PROFILE_CAPSULE_RELATIVE_PATH)
+    )
+      continue;
     const threadId = fields.signalSourceThread ?? fields.thread;
     const messageId = fields.signalSourceMessage;
     result.push({
@@ -88,7 +103,7 @@ async function projectCoordinate(
   if (!message || message.threadId !== thread.id || message.deletedAt) return null;
   if (!resolveThreadMessageVisibility({ includeQueuedUserMessages: true }, ownerUserId)(message)) return null;
   return {
-    label: thread.title?.trim() || '画像来源',
+    label: coordinate.label ?? (thread.title?.trim() || '画像来源'),
     occurredAt: message.timestamp,
     canOpen: true,
     threadId: thread.id,

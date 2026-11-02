@@ -3,6 +3,7 @@ import type { MemberText } from './MemberRuntimeFields';
 import type { MemberDraft } from './member-editor-state';
 
 const labels: Record<keyof HubCatEditorFormState, [string, string]> = {
+  banner: ['横幅', 'Banner'],
   accountBindingMode: ['账号跟随方式', 'Account binding mode'],
   agyNativeEnabled: ['Antigravity 原生运行', 'Native Antigravity'],
   agyAcpEnabled: ['启用官方 ACP', 'Enable official ACP'],
@@ -37,6 +38,7 @@ const labels: Record<keyof HubCatEditorFormState, [string, string]> = {
   provider: ['供应商', 'Provider'],
   mcpSupport: ['MCP 工具', 'MCP tools'],
   acpTransport: ['ACP 传输', 'ACP transport'],
+  acpAgentProvider: ['插件 ACP client', 'Connection'],
   acpCommand: ['ACP 程序', 'ACP command'],
   acpStartupArgs: ['ACP 启动参数', 'ACP arguments'],
   acpMaxLiveProcesses: ['ACP 进程上限', 'ACP process limit'],

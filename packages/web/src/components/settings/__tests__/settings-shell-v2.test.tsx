@@ -72,9 +72,11 @@ describe('F322 设置与管理 shell (v2)', () => {
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
 
-  it('shows 11 first-level items and lands on 猫猫团队 › 成员与运行时 by default', () => {
+  it('shows the eight settings destinations and keeps the team default', () => {
     render('');
-    expect(host.querySelectorAll('[data-testid^="settings-entry-"]')).toHaveLength(11);
+    const entries = host.querySelectorAll('[data-testid^="settings-entry-"]');
+    expect(entries).toHaveLength(8);
+    expect(entries[0]?.getAttribute('data-testid')).toBe('settings-entry-you');
     expect(host.querySelector('[data-testid="settings-entry-team"]')?.getAttribute('aria-current')).toBe('page');
     expect(host.querySelector('[data-testid="content"]')?.getAttribute('data-section')).toBe('members');
   });
@@ -105,7 +107,7 @@ describe('F322 设置与管理 shell (v2)', () => {
     click('settings-entry-connect');
     expect(nav.replace).toHaveBeenCalledTimes(1);
     const url = String(nav.replace.mock.calls[0]?.[0]);
-    expect(url).toContain('s=im');
+    expect(url).toContain('s=marketplace');
     expect(url).toContain('from=thread-1');
     expect(url).toContain('cat=opus');
   });
@@ -124,21 +126,15 @@ describe('F322 设置与管理 shell (v2)', () => {
     expect(nav.push).toHaveBeenLastCalledWith('/signals?from=thread-1');
     click('settings-entry-starry');
     expect(nav.push).toHaveBeenLastCalledWith('/starry?from=thread-1');
-
-    // The conversation's Workspace panels open in the last conversation, so we also navigate back to it.
-    click('settings-entry-schedule');
-    expect(chat.setWorkspaceMode).toHaveBeenLastCalledWith('schedule');
-    expect(nav.push).toHaveBeenLastCalledWith('/thread/thread-1');
-    click('settings-entry-eval');
-    expect(chat.setWorkspaceMode).toHaveBeenLastCalledWith('eval');
-    click('settings-entry-community');
-    expect(chat.setWorkspaceMode).toHaveBeenLastCalledWith('community');
   });
 
-  it('team member abilities & routing stays reachable as a second-level item of 猫猫团队', () => {
-    render('from=thread-1');
-    click('settings-team-workspace');
-    expect(chat.openTeamSubject).toHaveBeenCalledWith(null);
+  it('has no duplicate Workspace tools in the catalogue or team tabs', () => {
+    render('s=members');
+    for (const id of ['schedule', 'evolution', 'eval', 'community']) {
+      expect(host.querySelector(`[data-testid="settings-entry-${id}"]`)).toBeNull();
+    }
+    expect(host.querySelector('[data-testid="settings-team-workspace"]')).toBeNull();
+    expect(host.querySelector('button[aria-label="固定「成员能力与路由状态」到窄栏"]')).toBeNull();
   });
 
   it('主题 is a real panel reached at s=theme', () => {
@@ -149,26 +145,18 @@ describe('F322 设置与管理 shell (v2)', () => {
 
   it('any first-level or second-level item can be pinned; first-level pins are namespaced', () => {
     render('s=system');
-    const toggles = [...host.querySelectorAll<HTMLElement>('[data-testid="settings-pin-toggle"]')];
     act(() => host.querySelector<HTMLElement>('button[aria-label="固定「猫猫团队」到窄栏"]')?.click());
     expect(pins.pin).toHaveBeenLastCalledWith('dest:team');
     // the selected second-level item (old section id) is pinnable
     act(() => host.querySelector<HTMLElement>('button[aria-label="固定「系统配置」到窄栏"]')?.click());
     expect(pins.pin).toHaveBeenLastCalledWith('system');
-    expect(toggles.length).toBeGreaterThan(11);
-  });
-
-  it('the Workspace team panel is pinnable under its own identity, not as dest:team', () => {
-    render('');
-    act(() => host.querySelector<HTMLElement>('button[aria-label="固定「成员能力与路由状态」到窄栏"]')?.click());
-    expect(pins.pin).toHaveBeenLastCalledWith('dest:team-workspace');
   });
 
   it('standalone (pinned section) view and the classic shell are untouched', () => {
     render('s=notify&standalone=1');
     expect(host.querySelector('[data-testid="settings-v2"]')).toBeNull();
     expect(host.querySelector('[data-testid="content"]')?.getAttribute('data-section')).toBe('notify');
-    writeShellPresentation('classic');
+    act(() => writeShellPresentation('classic'));
     render('s=notify');
     expect(host.querySelector('[data-testid="settings-v2"]')).toBeNull();
     expect(host.querySelector('nav[aria-label="设置导航"]')).not.toBeNull();

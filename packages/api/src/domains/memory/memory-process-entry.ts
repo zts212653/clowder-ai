@@ -1,7 +1,9 @@
+import type Database from 'better-sqlite3';
 import * as sqliteVec from 'sqlite-vec';
 import { createSqliteReadDiagnostics } from '../../infrastructure/sqlite-read-diagnostics.js';
 import { CatCafeScanner } from './CatCafeScanner.js';
 import { checkpointMemoryDatabase } from './checkpoint-memory-database.js';
+import { prepareFileVectorReadWindow } from './file-vector-read-window.js';
 import { GenericRepoScanner } from './GenericRepoScanner.js';
 import type { EmbedModelInfo, IEmbeddingService } from './interfaces.js';
 import { memoryProcessStderrBoundary } from './memory-process-diagnostics.js';
@@ -13,6 +15,7 @@ import {
   type ParentMessage,
 } from './memory-process-protocol.js';
 import type { MemoryReadDiagnostic } from './memory-read-execution.js';
+import { describePassageVectorRead } from './native-vector-read-context.js';
 import { PassageVectorStore } from './PassageVectorStore.js';
 import { projectEntityMentions } from './project-entity-mentions.js';
 import { repackPassageVectorDatabase } from './repack-passage-vectors.js';
@@ -52,6 +55,11 @@ function embeddingProxy(snapshot: EmbeddingSnapshot): IEmbeddingService {
   };
 }
 
+function prepareVectorReadQuery(job: MemoryProcessJob, db: Database.Database) {
+  if (job.kind !== 'search' && job.kind !== 'message-search') return;
+  return job.embedding?.passages ? prepareFileVectorReadWindow(db) : undefined;
+}
+
 async function execute(
   job: MemoryProcessJob,
   started: () => void,
@@ -80,6 +88,8 @@ async function execute(
   let detachReadDiagnostics: (() => void) | undefined;
   try {
     const db = store.getDb();
+    // Only a killable read-pool child may map file-backed vector reads.
+    const readVectorQuery = prepareVectorReadQuery(job, db);
     // Register existing vec0 tables; this does not create/migrate or mutate them.
     try {
       sqliteVec.load(db);
@@ -90,6 +100,7 @@ async function execute(
       detachReadDiagnostics = createSqliteReadDiagnostics({
         onSlowRead() {},
         maxReports: 20,
+        describeNativeRead: describePassageVectorRead,
         onReadStarted: (sql) => report({ phase: 'sql-start', sql }),
         onReadFinished: (sql) => report({ phase: 'sql-finish', sql }),
       })(db);
@@ -106,10 +117,20 @@ async function execute(
             embedding: embeddingProxy(job.embedding),
             mode: job.embedding.mode,
             vectorStore: new VectorStore(db, dim),
-            ...(job.embedding.passages ? { passageVectorStore: new PassageVectorStore(db, dim) } : {}),
+            ...(job.embedding.passages ? { passageVectorStore: new PassageVectorStore(db, dim, readVectorQuery) } : {}),
           });
         }
-        if (job.kind === 'message-search') return await store.searchMessagePassages(job.query, job.options);
+        if (job.kind === 'message-search')
+          return await store.searchMessagePassages(job.query, {
+            ...job.options,
+            onCjkRead: (cjk) => {
+              try {
+                report({ phase: 'cjk-read', cjk });
+              } catch {
+                /* Private IPC is optional. */
+              }
+            },
+          });
         const result = await store.searchWithMeta(job.query, job.options);
         return { result, shadow: lookupShadowRanking(result.items.map((item) => item.anchor)) };
       }
@@ -136,7 +157,13 @@ process.on('message', (message: ParentMessage) => {
   void execute(
     message.job,
     () => send({ type: 'started', id: message.id, pid: process.pid }),
-    (diagnostic) => send({ type: 'read-diagnostic', id: message.id, diagnostic }),
+    (diagnostic) => {
+      try {
+        send({ type: 'read-diagnostic', id: message.id, diagnostic });
+      } catch {
+        /* Optional witness. */
+      }
+    },
   ).then(
     (value) => finish({ type: 'result', id: message.id, value }),
     (error) => finish({ type: 'result', id: message.id, error: encodeProcessError(error) }),

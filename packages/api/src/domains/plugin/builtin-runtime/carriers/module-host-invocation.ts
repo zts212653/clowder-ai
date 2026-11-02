@@ -72,6 +72,7 @@ function projectNativeContext(caller: PluginCallContext | undefined) {
         threadId: caller.threadId,
         userId: caller.userId,
         invocationId: caller.invocationId,
+        ...(caller.outputOperation ? { outputOperation: Object.freeze({ id: caller.outputOperation.id }) } : {}),
         ownerAuthProvenance: caller.ownerAuthProvenance ?? 'unknown',
         ...(caller.originTriggerMessageId === undefined
           ? {}

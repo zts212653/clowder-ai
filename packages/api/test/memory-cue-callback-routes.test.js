@@ -134,7 +134,7 @@ describe('F287 owner-authenticated memory cue callbacks', () => {
     return {
       cueId: 'cue-1',
       opportunityId: 'opportunity-1',
-      catalogVersion: 6,
+      catalogVersion: 7,
       resolverFamily: 'person_entity',
       resolverVersion: 1,
       family: 'person_memory',
@@ -165,6 +165,54 @@ describe('F287 owner-authenticated memory cue callbacks', () => {
       occurredAt: 900,
     });
   }
+
+  it('forwards bounded window selectors only after authenticating the original handle', async () => {
+    const input = coordinate({ family: 'evidence', resolverFamily: 'project_knowledge', anchor: 'F312' });
+    present(input);
+    const handle = handles.issue(input);
+    for (const window of [{ query: 'Release sequence' }, { offset: 8_000 }]) {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/callbacks/memory-cues/drill',
+        payload: { handle, requestId: JSON.stringify(window), window },
+      });
+      assert.equal(response.statusCode, 200, response.body);
+      assert.deepEqual(readCalls.at(-1).window, window);
+      assert.equal(readCalls.at(-1).expectedRevision, input.revision);
+    }
+    const count = readCalls.length;
+    for (const headers of [
+      { 'x-test-owner': 'other' },
+      { 'x-test-thread': 'other' },
+      { 'x-test-invocation': 'other' },
+      { 'x-test-cat': 'other' },
+    ]) {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/callbacks/memory-cues/drill',
+        headers,
+        payload: { handle, requestId: 'wrong-scope', window: { offset: 8_000 } },
+      });
+      assert.equal(response.statusCode, 404);
+    }
+    for (const window of [
+      { offset: -1 },
+      { offset: 0.5 },
+      { offset: Number.MAX_SAFE_INTEGER + 1 },
+      { query: '' },
+      { query: 'a'.repeat(201) },
+      { offset: 0, query: 'ambiguous' },
+      { path: '../private.md' },
+    ]) {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/callbacks/memory-cues/drill',
+        payload: { handle, requestId: 'invalid', window },
+      });
+      assert.equal(response.statusCode, 400, JSON.stringify(window));
+    }
+    assert.equal(readCalls.length, count, 'invalid or cross-scope selectors must not reach the source reader');
+  });
 
   it('keeps handles opaque, process-scoped and bound to exact owner/thread/invocation scope', async () => {
     const input = coordinate({ anchor: 'person:secret-anchor' });
@@ -212,6 +260,7 @@ describe('F287 owner-authenticated memory cue callbacks', () => {
     });
     assert.deepEqual(readCalls, [
       {
+        opportunityId: 'opportunity-1',
         family: 'person_memory',
         anchor: 'person:alden',
         expectedRevision: 'revision-1',

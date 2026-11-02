@@ -6,6 +6,27 @@ import path from 'node:path';
 export async function assertPersonalMailboxJourney(page, fixture, language, evidence) {
   const composer = page.locator('[data-testid="chat-input-composer-row"] textarea');
   const original = await composer.inputValue();
+  const openIgnored = async () => {
+    await page.getByTestId('mailbox-history').click();
+    await page.getByTestId('mailbox-history-tab-ignored').click();
+  };
+  const readAllDisplayed = async (count) => {
+    for (let step = 0; step < 5; step++) {
+      await page.waitForFunction(() => document.querySelectorAll('[data-testid="mailbox-history-row"]').length > 0);
+      if ((await page.getByTestId('mailbox-history-row').count()) >= count) break;
+      const more = page.getByTestId('mailbox-history-load-more');
+      if (!(await more.count())) break;
+      const before = await page.getByTestId('mailbox-history-row').count();
+      await more.click();
+      await page.waitForFunction(
+        (n) =>
+          document.querySelectorAll('[data-testid="mailbox-history-row"]').length > n ||
+          !document.querySelector('[data-testid="mailbox-history-load-more"]'),
+        before,
+      );
+    }
+    assert.equal(await page.getByTestId('mailbox-history-row').count(), count);
+  };
   await composer.evaluate((input) => input.setSelectionRange(3, 8));
   await page.getByTestId('mailbox-button').click();
   await page.getByTestId('mailbox-mentions-ignore-all').waitFor();
@@ -50,28 +71,26 @@ export async function assertPersonalMailboxJourney(page, fixture, language, evid
     saved,
     'recent UI receipt expiry never expires the actual TTL=0 preferences',
   );
-  await page.getByTestId('mailbox-open-ignored').waitFor();
+  await page.getByTestId('mailbox-history').waitFor();
   await page.screenshot({ path: path.join(evidence, 'j3-inbox-bulk-ignore.png') });
   await page.reload();
   await page.getByTestId('file-block-open').waitFor();
   await page.getByTestId('mailbox-button').click();
   await page.waitForFunction(() => document.querySelector('[data-testid="mailbox-tab-count"]')?.textContent === '1');
-  await page.getByTestId('mailbox-open-ignored').click();
-  await page.waitForFunction(
-    (value) => document.querySelector('[data-testid="mailbox-state-text"]')?.textContent === value,
-    language === 'en' ? `${fixture.mentionCount} items in this scope` : `当前范围共 ${fixture.mentionCount} 件`,
-  );
+  await openIgnored();
+  await readAllDisplayed(fixture.mentionCount);
   assert.match(await page.getByTestId('mailbox-button').getAttribute('aria-label'), /1 件|1 items/);
   assert.equal(await page.getByTestId('mailbox-mention-resolve').count(), 0);
   const recoveredCoordinate = entries[0].coordinate;
-  const recoveredRow = page.getByTestId('mailbox-item').first();
-  assert.ok((await recoveredRow.getAttribute('data-row-key')).includes(recoveredCoordinate.decisionRef));
-  await recoveredRow.getByTestId('mailbox-item-toggle').click();
-  await recoveredRow.getByTestId('mailbox-item-restore').click();
-  await page.waitForFunction(
-    (value) => document.querySelector('[data-testid="mailbox-state-text"]')?.textContent === value,
-    language === 'en' ? `${fixture.mentionCount - 1} items in this scope` : `当前范围共 ${fixture.mentionCount - 1} 件`,
+  const historyRow = page.locator(
+    `[data-testid="mailbox-history-row"][data-decision-ref="${recoveredCoordinate.decisionRef}"]`,
   );
+  await historyRow.getByTestId('mailbox-history-item-toggle').click();
+  const recoveredRow = historyRow.getByTestId('mailbox-item');
+  assert.ok((await recoveredRow.getAttribute('data-row-key')).includes(recoveredCoordinate.decisionRef));
+  await recoveredRow.getByTestId('mailbox-item-restore').click();
+  await historyRow.waitFor({ state: 'detached' });
+  await readAllDisplayed(fixture.mentionCount - 1);
   const restored = await fixture.readPreferences();
   assert.equal(
     restored.ignoredItems.owners['default-user'].entries.filter((entry) => entry.coordinate.kind === 'mailbox').length,
@@ -117,8 +136,10 @@ export async function assertPersonalMailboxJourney(page, fixture, language, evid
   // Canonical history is a different lane: an older batch has an individual recovery path, independent of last-batch undo.
   await page.getByTestId('mailbox-button').click();
   await page.getByTestId('mailbox-history').click();
-  const older = page.getByTestId('mailbox-item').filter({ hasText: fixture.handledHistory[0].threadId });
-  await older.getByTestId('mailbox-item-toggle').click();
+  await page.getByTestId('mailbox-history-tab-mentions').click();
+  const olderHistory = page.getByTestId('mailbox-history-row').filter({ hasText: fixture.handledHistory[0].threadId });
+  await olderHistory.getByTestId('mailbox-history-item-toggle').click();
+  const older = olderHistory.getByTestId('mailbox-item');
   assert.equal(
     await page.getByTestId('mailbox-mentions-undo').innerText(),
     language === 'en' ? 'Undo last handled batch (1 item)' : '撤销刚才的批量处理（1 件）',
@@ -143,15 +164,24 @@ export async function assertPersonalMailboxJourney(page, fixture, language, evid
   );
   assert.deepEqual(recoveryPosts, [{ method: 'POST', path: '/api/concierge/work/mentions/restore' }]);
   await page.getByTestId('mailbox-handled-back').click();
-  await page.getByTestId('mailbox-open-ignored').click();
-  await page.getByTestId('mailbox-period-earlier').click();
-  const empty = page.getByTestId('mailbox-ignored-empty');
-  const expectedEmpty = language === 'en' ? 'No ignored items yet' : '还没有忽略的事项';
-  await page.waitForFunction(
-    (expected) => document.querySelector('[data-testid="mailbox-ignored-empty"]')?.textContent === expected,
-    expectedEmpty,
+  await openIgnored();
+  await readAllDisplayed(fixture.mentionCount - 1);
+  await page.getByTestId('mailbox-history-select').click();
+  for (const checkbox of await page.getByRole('checkbox').all()) await checkbox.check();
+  const restoredAll = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === '/api/config/ignored-items' && response.request().method() === 'PATCH',
   );
-  assert.equal(await empty.innerText(), expectedEmpty);
+  await page.getByTestId('mailbox-history-restore-selected').click();
+  assert.equal((await restoredAll).status(), 200);
+  const expectedEmpty = language === 'en' ? 'No ignored items yet' : '还没有忽略的事项';
+  await page.getByText(expectedEmpty, { exact: true }).waitFor();
+  assert.equal(
+    (await fixture.readPreferences()).ignoredItems.owners['default-user'].entries.filter(
+      (entry) => entry.coordinate.kind === 'mailbox',
+    ).length,
+    0,
+  );
   await page.screenshot({ path: path.join(evidence, 'j3-ignored-empty.png') });
   await page.getByTestId('mailbox-close').click();
   assert.equal(await composer.inputValue(), original);

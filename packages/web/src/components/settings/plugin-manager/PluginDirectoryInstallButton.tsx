@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { DirectoryBrowser } from '../../ThreadSidebar/DirectoryBrowser';
 import { SettingsPrimaryButton } from '../primitives/SettingsPrimaryButton';
@@ -23,7 +23,13 @@ function cycleDialogFocus(container: HTMLElement | null, backwards: boolean) {
   targets[(index + (backwards ? -1 : 1) + targets.length) % targets.length]?.focus();
 }
 
-export function PluginDirectoryInstallButton({ onInstall }: { onInstall: (path: string) => Promise<void> }) {
+export function PluginDirectoryInstallButton({
+  onInstall,
+  renderTrigger,
+}: {
+  onInstall: (path: string) => Promise<void>;
+  renderTrigger?: (open: () => void) => ReactNode;
+}) {
   const titleId = useId();
   const [open, setOpen] = useState(false);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
@@ -102,7 +108,11 @@ export function PluginDirectoryInstallButton({ onInstall }: { onInstall: (path: 
 
   return (
     <>
-      <SettingsSecondaryButton onClick={openDialog}>从本地目录安装</SettingsSecondaryButton>
+      {renderTrigger ? (
+        renderTrigger(openDialog)
+      ) : (
+        <SettingsSecondaryButton onClick={openDialog}>从本地目录安装</SettingsSecondaryButton>
+      )}
       {open &&
         createPortal(
           <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[var(--console-overlay-backdrop)] p-4 backdrop-blur-sm">

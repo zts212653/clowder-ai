@@ -1,7 +1,9 @@
-import { ComposerControl, ComposerFrame } from '@cat-cafe/ui';
-import { type FormEvent, type KeyboardEvent, useEffect, useId, useRef, useState } from 'react';
-import { CollectiveIcon } from './CollectiveIcon.js';
+import { type FormEvent, type KeyboardEvent, useCallback, useEffect, useId, useRef, useState } from 'react';
+import { ComposerContext } from './ComposerContext.js';
+import { ComposerFeedback } from './ComposerFeedback.js';
+import { ComposerInput } from './ComposerInput.js';
 import { ComposerMentionMenu } from './ComposerMentionMenu.js';
+import { ComposerRichContent } from './ComposerRichContent.js';
 import { ComposerTray } from './ComposerTray.js';
 import { actorDisplayName } from './channel-model.js';
 import type {
@@ -10,7 +12,7 @@ import type {
   CollectiveRecipient,
   DeliveryState,
 } from './client-types.js';
-import { useCollectiveText } from './collective-copy.js';
+import { useCollectiveLanguage, useCollectiveText } from './collective-copy.js';
 import {
   clearConfirmedComposerDraft,
   type ReplySelection,
@@ -18,41 +20,25 @@ import {
   replyDraftError,
   selectReply,
 } from './composer-draft.js';
-import { participantKey, participantRecipient } from './participant-identity.js';
-import { participantLabel } from './participant-label.js';
-import { SharedArtifactQuoteTags } from './SharedArtifactQuoteTags.js';
+import { type ComposerSend, hasComposerContextContent, sendComposerMessage } from './composer-submission.js';
+import { ComposerMessageQuotes } from './MessageQuotes.js';
+import { useComposerAttachments } from './use-composer-attachments.js';
+import { useComposerQuotes } from './use-composer-quotes.js';
+import { useComposerVoice } from './use-composer-voice.js';
+import { useServiceComposerDraft } from './use-service-composer-draft.js';
 import { useSharedArtifactComposer } from './use-shared-artifact-composer.js';
 
-export interface HumanMention {
-  readonly humanId: string;
-  readonly displayName: string;
-  readonly avatarUrl?: string;
-}
-export interface MentionSelection {
-  readonly recipient: CollectiveRecipient;
-  readonly label: string;
-}
-function selectionAvailable(
-  recipient: CollectiveRecipient,
-  participants: readonly CollectiveParticipant[],
-  humans: readonly HumanMention[],
-  channelId: string,
-) {
-  if (recipient.kind === 'human') return humans.some((human) => human.humanId === recipient.humanId);
-  return (
-    recipient.kind !== 'agent' ||
-    participants.some(
-      (item) =>
-        item.connectionId === recipient.connectionId &&
-        item.catId === recipient.agentId &&
-        item.humanId === recipient.humanId &&
-        item.participationRevision === recipient.participationRevision &&
-        item.availability === 'declared' &&
-        item.channelIds.includes(channelId),
-    )
-  );
-}
+export type { HumanMention, MentionSelection } from './composer-mentions.js';
 
+import {
+  composerMentionOptions,
+  type HumanMention,
+  type MentionSelection,
+  selectionAvailable,
+} from './composer-mentions.js';
+
+// The coordinator keeps mention selection, reply identity and exact send/draft consumption together.
+// Visual input, source context and feedback are separate components; further splitting would duplicate this state.
 export function Composer({
   placeholder,
   channelId,
@@ -74,13 +60,7 @@ export function Composer({
   readonly participants?: readonly CollectiveParticipant[];
   readonly humans?: readonly HumanMention[];
   readonly delivery: DeliveryState;
-  readonly onSend: (
-    body: string,
-    recipient: CollectiveRecipient,
-    entrust: boolean,
-    responseRequested: boolean,
-    replyToEventId?: string,
-  ) => Promise<void>;
+  readonly onSend: ComposerSend;
   readonly mention?: MentionSelection;
   readonly compact?: boolean;
   readonly rootEventId?: string;
@@ -89,17 +69,36 @@ export function Composer({
   readonly replyEvents?: readonly CollectiveEventEnvelope[];
 }) {
   const t = useCollectiveText();
+  const language = useCollectiveLanguage();
   const draftKey = `collective-draft:${namespace}:${channelId}:${rootEventId ?? 'channel'}`;
   const [draft, setDraft] = useState(() => readDraft(draftKey));
+  const fileInput = useRef<HTMLInputElement>(null);
   const attachment = useSharedArtifactComposer(draft, setDraft, rootEventId);
   const [mentionQuery, setMentionQuery] = useState<string>();
   const [activeOption, setActiveOption] = useState(0);
   const [expanded, setExpanded] = useState(false);
-  const [entrust, setEntrust] = useState(draft.entrust ?? false);
-  const [responseRequested, setResponseRequested] = useState(draft.responseRequested ?? false);
+  const entrust = draft.entrust ?? false;
+  const setEntrust = useCallback((entrust: boolean) => setDraft((current) => ({ ...current, entrust })), []);
+  const responseRequested = draft.responseRequested ?? false;
+  const setResponseRequested = useCallback(
+    (responseRequested: boolean) => setDraft((current) => ({ ...current, responseRequested })),
+    [],
+  );
   const [pending, setPending] = useState(false);
+  const durable = useServiceComposerDraft({
+    draftKey,
+    namespace,
+    channelId,
+    rootEventId,
+    draft,
+    setDraft,
+    paused: pending,
+  });
+  const files = useComposerAttachments(draftKey, channelId, draft, setDraft, durable.ready);
+  const voice = useComposerVoice({ namespace, draftKey, channelId, rootEventId, language, draft, setDraft, durable });
   const [storageNotice, setStorageNotice] = useState<string>();
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  useComposerQuotes(draft.contextAttachments?.length, setDraft, inputRef, setStorageNotice, language);
   const sending = useRef(false);
   const listId = useId();
   const reworkFocus =
@@ -112,33 +111,34 @@ export function Composer({
   const replyEvent = replyEvents?.find((event) => event.eventId === draft.replyToEventId);
   const replyError = replyDraftError(draft, replyEvents, participants, channelId);
   const unresolved = /(^|\s)@/u.test(draft.body);
-  const inputPlaceholder = replyEvent ? `回复 ${actorDisplayName(replyEvent)} 的消息` : placeholder;
-  const query = (mentionQuery ?? '').toLocaleLowerCase();
-  const options = [
-    ...participants
-      .filter((item) => item.availability === 'declared' && item.channelIds.includes(channelId))
-      .map((item) => ({
-        key: participantKey(item),
-        label: participantLabel(item, participants),
-        detail: `${item.humanDisplayName} · ${item.endpointLabel} (${item.endpointId.slice(-6)})`,
-        recipient: participantRecipient(item),
-        kind: 'agent' as const,
-        avatarUrl: item.avatarDataUrl,
-      })),
-    ...humans.map((human) => ({
-      key: human.humanId,
-      label: human.displayName,
-      detail: '成员 · 人',
-      recipient: { kind: 'human' as const, humanId: human.humanId },
-      kind: 'human' as const,
-      avatarUrl: human.avatarUrl,
-    })),
-  ].filter((item) => `${item.label} ${item.detail}`.toLocaleLowerCase().includes(query));
+  const inputPlaceholder = replyEvent
+    ? language === 'en'
+      ? `Reply to ${actorDisplayName(replyEvent)}`
+      : `回复 ${actorDisplayName(replyEvent)} 的消息`
+    : placeholder;
+  const options = composerMentionOptions(
+    participants,
+    humans,
+    channelId,
+    (mentionQuery ?? '').toLocaleLowerCase(),
+    t('成员 · 人'),
+  );
   const activeIndex = Math.min(activeOption, Math.max(0, options.length - 1));
+  const artifactAction = Boolean(attachment.selections.length || attachment.rework || attachment.reply);
+  const mixedAttachmentAction = hasComposerContextContent(draft) && artifactAction;
   const disabled =
     pending ||
+    voice.blocksSend ||
+    Boolean(draft.richEditor) ||
+    !durable.ready ||
+    !!durable.conflict ||
+    mixedAttachmentAction ||
     delivery.kind === 'requesting' ||
-    !draft.body.trim() ||
+    (!draft.body.trim() &&
+      !draft.attachments?.length &&
+      !draft.contextAttachments?.length &&
+      !draft.richBlocks?.length) ||
+    files.pending ||
     !available ||
     unresolved ||
     !!replyError ||
@@ -163,14 +163,14 @@ export function Composer({
     setEntrust(false);
     setResponseRequested(false);
     inputRef.current?.focus();
-  }, [mention]);
+  }, [mention, setEntrust, setResponseRequested]);
   useEffect(() => {
     if (!reply) return;
     setDraft((current) => selectReply(current, reply));
     setEntrust(false);
     setResponseRequested(false);
     inputRef.current?.focus();
-  }, [reply]);
+  }, [reply, setEntrust, setResponseRequested]);
 
   const select = (index: number) => {
     const selected = options[index];
@@ -194,16 +194,16 @@ export function Composer({
     sending.current = true;
     setPending(true);
     try {
-      if (attachment.selections.length || attachment.rework || attachment.reply) {
+      if (artifactAction) {
+        await durable.flush(draft);
         await attachment.send(draft.body.trim(), draft.recipient);
-      } else if (draft.replyToEventId) {
-        await onSend(draft.body.trim(), draft.recipient, entrust, responseRequested, draft.replyToEventId);
       } else {
-        await onSend(draft.body.trim(), draft.recipient, entrust, responseRequested);
+        await sendComposerMessage(onSend, draft, await durable.flush(draft));
       }
-      setDraft((current) => clearConfirmedComposerDraft(current, draft));
-      setEntrust(false);
-      setResponseRequested(false);
+      const consume = artifactAction ? await durable.clearAfterAction(draft) : await durable.acknowledged(draft);
+      if (consume) setDraft((current) => clearConfirmedComposerDraft(current, draft));
+      if (draft.attachments?.length) await files.confirm(draft.attachments);
+      if (consume) await voice.confirm(draft);
       setExpanded(false);
       setMentionQuery(undefined);
     } finally {
@@ -240,52 +240,46 @@ export function Composer({
   return (
     <form
       className={compact ? 'composer composer-compact' : 'composer'}
+      data-draft-ready={durable.ready}
       onSubmit={(event) => void submit(event).catch(() => undefined)}
+      onDragOver={(event) => {
+        if (event.dataTransfer.types.includes('Files')) event.preventDefault();
+      }}
+      onDrop={(event) => {
+        if (!event.dataTransfer.files.length) return;
+        event.preventDefault();
+        void files.add([...event.dataTransfer.files]);
+      }}
     >
       {mentionQuery !== undefined && (
         <ComposerMentionMenu options={options} id={listId} active={activeIndex} onSelect={select} />
       )}
-      <SharedArtifactQuoteTags attachment={attachment} />
-      {replyEvent && (
-        <div className="composer-recipient" role="group" aria-label="回复来源">
-          <span>
-            回复 {actorDisplayName(replyEvent)}：{replyEvent.body.replace(/\s+/gu, ' ').slice(0, 60)}
-          </span>
-        </div>
-      )}
-      {draft.recipient.kind !== 'channel' && (
-        <div className="composer-recipient">
-          <span>@{draft.recipientLabel || '已选成员'}</span>
-          <button
-            type="button"
-            aria-label="移除 @"
-            onClick={() => {
-              setDraft((current) => ({
-                ...current,
-                recipient: { kind: 'channel' },
-                recipientLabel: '',
-                replyNeedsSelection: false,
-              }));
-              setEntrust(false);
-              setResponseRequested(false);
-            }}
-          >
-            ×
-          </button>
-        </div>
-      )}
-      {(replyError || !available) && (
-        <p role="alert" className="composer-warning">
-          {replyError ?? '参与设置已变化，请重新选择成员；消息尚未发送。'}
-        </p>
-      )}
-      {unresolved && mentionQuery === undefined && (
-        <p role="alert" className="composer-warning">
-          请用 @ 选择当前频道的成员，或移除没选中的 @。
-        </p>
-      )}
+      <ComposerContext
+        attachment={attachment}
+        draft={draft}
+        replyEvent={replyEvent}
+        replyError={replyError}
+        available={available}
+        unresolved={unresolved && mentionQuery === undefined}
+        onRemoveRecipient={() => {
+          setDraft((current) => ({
+            ...current,
+            recipient: { kind: 'channel' },
+            recipientLabel: '',
+            replyNeedsSelection: false,
+          }));
+          setEntrust(false);
+          setResponseRequested(false);
+        }}
+      />
+      <ComposerMessageQuotes draft={draft} setDraft={setDraft} />
+      <ComposerRichContent draft={draft} setDraft={setDraft} expanded={expanded} />
       {expanded && (
         <ComposerTray
+          files={files}
+          channelId={channelId}
+          voiceDevice={voice.device}
+          onFiles={() => fileInput.current?.click()}
           recipientKind={draft.recipient.kind}
           entrust={entrust}
           responseRequested={responseRequested}
@@ -298,51 +292,41 @@ export function Composer({
           onResponseRequested={setResponseRequested}
         />
       )}
-      <ComposerFrame className="composer-box">
-        <ComposerControl
-          type="button"
-          className="composer-expand"
-          aria-label={t('更多输入选项')}
-          aria-expanded={expanded}
-          onClick={() => setExpanded((value) => !value)}
-        >
-          +
-        </ComposerControl>
-        <textarea
-          ref={inputRef}
-          id={inputId}
-          value={draft.body}
-          placeholder={inputPlaceholder}
-          aria-label={inputPlaceholder}
-          aria-autocomplete="list"
-          rows={1}
-          required
-          disabled={pending}
-          aria-controls={mentionQuery !== undefined ? listId : undefined}
-          aria-activedescendant={mentionQuery !== undefined && options.length ? `${listId}-${activeIndex}` : undefined}
-          onKeyDown={keyDown}
-          onChange={(event) => {
+      <ComposerInput
+        voice={voice}
+        files={files}
+        inputRef={inputRef}
+        fileRef={fileInput}
+        expanded={expanded}
+        onExpand={() => setExpanded((value) => !value)}
+        disabled={disabled}
+        input={{
+          id: inputId,
+          value: draft.body,
+          placeholder: inputPlaceholder,
+          'aria-label': inputPlaceholder,
+          'aria-autocomplete': 'list',
+          required: !hasComposerContextContent(draft),
+          'aria-controls': mentionQuery !== undefined ? listId : undefined,
+          'aria-activedescendant':
+            mentionQuery !== undefined && options.length ? `${listId}-${activeIndex}` : undefined,
+          onKeyDown: keyDown,
+          onChange(event) {
             const body = event.target.value;
             setDraft((current) => ({ ...current, body }));
             const match = body.slice(0, event.target.selectionStart).match(/(?:^|\s)@([^\s@]*)$/u);
             setMentionQuery(match?.[1]);
             setActiveOption(0);
-          }}
-        />
-        <button type="submit" className="composer-send" aria-label={t('发送')} disabled={disabled}>
-          <CollectiveIcon kind="send" />
-        </button>
-      </ComposerFrame>
-      {storageNotice && (
-        <p className="composer-warning" role="status">
-          {storageNotice}
-        </p>
-      )}
-      {delivery.kind !== 'idle' && (
-        <p className={`delivery-state delivery-${delivery.kind}`} role="status">
-          {delivery.label}
-        </p>
-      )}
+          },
+        }}
+      />
+      <ComposerFeedback
+        durable={durable}
+        fileNotice={files.notice}
+        storageNotice={storageNotice}
+        mixedAttachmentAction={mixedAttachmentAction}
+        delivery={delivery}
+      />
     </form>
   );
 }

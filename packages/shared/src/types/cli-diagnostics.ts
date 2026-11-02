@@ -63,6 +63,28 @@ export type CliErrorReasonCode =
  *  - web side: `ChatMessage.extra.cliDiagnostics` (after useAgentMessages error-path unpacking)
  */
 export interface CliDiagnostics {
+  /** Same-request evidence from Codex's startup account check. No arbitrary error.data. */
+  accountCheck?: {
+    category:
+      | 'discovery_failed'
+      | 'discovery_timeout'
+      | 'network_error'
+      | 'rate_limited'
+      | 'upstream_error'
+      | 'auth_rejected'
+      | 'configuration_conflict'
+      | 'unknown';
+    rpcMethod?: string;
+    rpcCode?: number;
+    httpStatus?: number;
+    causeCode?: string;
+    causeMessage?: string;
+    causeProvided: boolean;
+    attempt: number;
+    /** Which attempt actually returned this evidence, distinct from the total startup attempts. */
+    evidenceAttempt?: number;
+    elapsedMs: number;
+  };
   /** Whitelist classification; undefined = unknown stderr / stream error */
   reasonCode?: CliErrorReasonCode;
   /** Always present; humanized title for error bubble (i18n: zh-CN in Phase A) */
@@ -101,4 +123,18 @@ export interface CliDiagnostics {
     spawnCwdKey?: string;
     profileId?: string;
   };
+}
+
+/** Runner-owned projection on the invocation's original response, including no-text waits. */
+export interface CodexStartupRecovery {
+  invocationId: string;
+  stage: 'checking' | 'retry_wait' | 'ready' | 'failed' | 'cancelled';
+  sequence: number;
+  attempt: number;
+  maxAttempts: number;
+  startedAt: number;
+  deadlineAt: number;
+  updatedAt: number;
+  nextRetryAt?: number;
+  diagnostics?: CliDiagnostics;
 }

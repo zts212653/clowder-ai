@@ -111,24 +111,46 @@ describe('v2 two-level composer', () => {
     expect(menu?.closest('[data-testid="chat-input-composer-row"]')).not.toBeNull();
   });
 
-  it('offers a choice only during work and consumes it on this send without changing defaults', async () => {
+  it('keeps the send strategy chosen in + for this thread instead of one message', async () => {
+    const { apiFetch } = await import('@/utils/api-client');
+    vi.mocked(apiFetch).mockImplementation(async (_url, init) => {
+      const saved = init?.method === 'PUT';
+      return new Response(
+        JSON.stringify({
+          productDefault: 'next_work',
+          global: null,
+          thread: saved ? 'continue_current' : null,
+          effective: saved ? 'continue_current' : 'next_work',
+          source: saved ? 'thread' : 'product',
+        }),
+        { status: 200 },
+      );
+    });
     useChatStore.setState({
       hasActiveInvocation: true,
-      activeInvocations: { 'one-shot-run': { catId: 'opus', mode: 'execute', startedAt: Date.now() } },
+      activeInvocations: { 'strategy-run': { catId: 'opus', mode: 'execute', startedAt: Date.now() } },
     });
-    await act(async () => renderComposer());
+    await act(async () => root.render(<ChatInput presentation="v2" threadId="thread-strategy" onSend={onSend} />));
     act(() => button('添加')?.click());
-    const trigger = document.querySelector<HTMLButtonElement>('[data-testid="message-disposition-trigger"]');
-    expect(trigger).not.toBeNull();
-    act(() => trigger?.click());
-    act(() => document.querySelector<HTMLButtonElement>('[data-disposition-option="continue_current"]')?.click());
-    act(() => button('添加')?.click());
+    const trigger = () => document.querySelector<HTMLButtonElement>('[data-testid="message-disposition-trigger"]');
+    expect(trigger()?.textContent).toContain('发送策略：排队等待');
+    act(() => trigger()?.click());
+    expect(document.querySelectorAll('[data-disposition-scope]')).toHaveLength(2);
+    await act(async () =>
+      document.querySelector<HTMLButtonElement>('[data-disposition-option="continue_current"]')?.click(),
+    );
+    const write = vi.mocked(apiFetch).mock.calls.find(([, init]) => init?.method === 'PUT');
+    expect(JSON.parse(String(write?.[1]?.body))).toEqual({
+      scope: 'thread',
+      threadId: 'thread-strategy',
+      disposition: 'continue_current',
+    });
+    expect(trigger()?.textContent).toContain('发送策略：引导当前回复');
     typeInto('继续这个方向');
     await act(async () => button('发送消息')?.click());
-    expect(onSend.mock.calls[0]?.[6]).toBe('continue_current');
-    typeInto('下一条按默认发送');
+    typeInto('再补一处');
     await act(async () => button('发送消息')?.click());
-    expect(onSend.mock.calls[1]?.[6]).toBeUndefined();
+    expect(onSend.mock.calls.map((call) => call[6])).toEqual([undefined, undefined]);
   });
   it('keeps mobile controls on one row and clips header and draft dividers inside the card', () => {
     threadReplyDrafts.set('thread-layout', {

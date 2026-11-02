@@ -36,6 +36,40 @@ function completeBindings() {
 }
 
 describe('F246 ApprovalProducerRegistry', () => {
+  it('projects original expiry and withdrawal through settled history without guessing other closure reasons', async () => {
+    const bindings = completeBindings();
+    bindings.F225.adapter.listSettled = async () =>
+      ['expired', 'withdrawn', 'superseded'].map((status) => ({
+        proposalId: `handoff-${status}`,
+        sourceFeatureId: 'F225',
+        requesterCatId: 'codex61-sol',
+        ownerUserId: 'owner-1',
+        status,
+        summary: 'Original handoff',
+        detail: {},
+        createdAt: 1,
+        decidedAt: 2,
+        navigation: {
+          state: 'anchored',
+          originRef: { kind: 'message', threadId: 'source', messageId: 'origin' },
+          approvalCardRef: { threadId: 'source', messageId: `card-${status}` },
+        },
+      }));
+    const rows = await new ApprovalProducerRegistry(bindings).listSettledFor('F225', 'owner-1', 20);
+    assert.deepEqual(
+      rows.map((row) => [row.resolution, row.closedReason]),
+      [
+        ['closed_without_decision', 'expired'],
+        ['closed_without_decision', 'withdrawn'],
+        ['closed_without_decision', undefined],
+      ],
+    );
+    assert.equal(
+      rows.every((row) => !Object.hasOwn(row, 'status')),
+      true,
+    );
+  });
+
   it('returns adapters and manifest in canonical catalog order', () => {
     const registry = new ApprovalProducerRegistry(completeBindings());
 

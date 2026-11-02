@@ -1,3 +1,6 @@
+import type { SettledHistoryPageOptions } from '../../../utils/settled-history-page.js';
+import { type ApprovalDecisionRead, projectApprovalDecisionRead } from '../ports/IApprovalAdapter.js';
+import { projectSettledPage } from '../project-settled-page.js';
 /**
  * F246 Phase B: F193 (Cross-Thread Dispatch) → ApprovalItem adapter.
  *
@@ -21,9 +24,19 @@ export class F193ApprovalAdapter implements IApprovalAdapter {
 
   constructor(private readonly store: IDispatchProposalStore) {}
 
+  async listSettledPage(owner: string, options: SettledHistoryPageOptions) {
+    return projectSettledPage(this.store, owner, options, toSettledItem);
+  }
+
   async listPending(userId: string): Promise<ApprovalItem[]> {
     const proposals = await this.store.listPendingByUser(userId);
     return compactApprovalProjections(proposals.map((p) => toItem(p)));
+  }
+
+  async readDecision(userId: string, proposalId: string): Promise<ApprovalDecisionRead> {
+    const p = await this.store.get(proposalId);
+    if (!p || p.ownerUserId !== userId) return { state: 'closed' };
+    return projectApprovalDecisionRead(p.status, () => toSettledItem(p));
   }
 
   async listSettled(userId: string, opts?: ListSettledOpts): Promise<SettledApprovalItem[]> {
@@ -61,7 +74,7 @@ function toItem(p: DispatchProposal): ApprovalItem | null {
 }
 
 function toSettledItem(p: DispatchProposal): SettledApprovalItem | null {
-  if (p.status !== 'approved' && p.status !== 'rejected') {
+  if (p.status !== 'approved' && p.status !== 'rejected' && p.status !== 'superseded') {
     throw new Error(`toSettledItem: unexpected status ${p.status} for proposal ${p.proposalId}`);
   }
   const navigation = projectApprovalNavigation(p, {
@@ -82,10 +95,14 @@ function toSettledItem(p: DispatchProposal): SettledApprovalItem | null {
       content: p.content,
       effectClass: p.effectClass,
       ...actionDetail(p),
+      ...(!(p.status === 'superseded' ? p.supersededAt : p.decidedAt) ? { closureTimeUnknown: true } : {}),
+      ...(p.status === 'approved' && p.deliveredMessageId
+        ? { canonicalEffectProofRef: `dispatch-message:${p.deliveredMessageId}` }
+        : {}),
     },
     navigation,
-    decidedAt: p.decidedAt ?? 0,
-    decidedBy: p.decidedBy ?? '',
+    decidedAt: p.status === 'superseded' ? (p.supersededAt ?? 0) : (p.decidedAt ?? 0),
+    decidedBy: p.status === 'superseded' ? '' : (p.decidedBy ?? ''),
     createdAt: p.createdAt,
   };
 }

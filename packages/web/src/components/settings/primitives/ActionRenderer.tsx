@@ -203,7 +203,10 @@ function SequencedActionRenderer({
         if (verdict.outcome === 'continue') {
           // P1-2 fix: don't overwrite img result with bare polling status —
           // only update lastResult if the poll carries visual data (e.g. label change)
-          if (verdict.state.render !== 'polling' && verdict.state.render !== 'status') {
+          const data = verdict.state.data;
+          const carriesLink =
+            data !== null && typeof data === 'object' && 'url' in data && typeof data.url === 'string';
+          if (carriesLink || (verdict.state.render !== 'polling' && verdict.state.render !== 'status')) {
             setLastResult(verdict.state);
           }
           pollRef.current = setTimeout(poll, intervalMs);

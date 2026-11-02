@@ -262,7 +262,11 @@ describe('B6: multi_mention queue dispatch', () => {
     assert.equal(res.statusCode, 200, res.body);
     const body = res.json();
     assert.ok(body.requestId);
-    assert.deepEqual(body.routing_preflight, routingDecision);
+    assert.equal(body.routing_preflight, undefined);
+    assert.equal(body.routing_admission.stage, 'queue_admitted');
+    assert.equal(body.routing_admission.executionPreflight, 'pending');
+    assert.equal(body.routing_admission.targets[0].availabilityObservation, 'unavailable');
+    assert.deepEqual(body.routing_admission.targets[0].reasons, routingDecision.targets[0].reasons);
     assert.deepEqual(invocationQueue.list('thread-1', 'user-1')[0].targets, ['codex']);
 
     // Router should NOT have been called directly (queue path used)

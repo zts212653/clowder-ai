@@ -6,7 +6,6 @@ import { WorkGalleryCard } from '@/components/artifacts/WorkGalleryCard';
 import { useCatData } from '@/hooks/useCatData';
 import { useGlobalArtifacts } from '@/hooks/useGlobalArtifacts';
 import { resolveCatNameplateName } from '@/lib/cat-display-name';
-import { mergeArtifactPages } from '@/lib/merge-artifact-pages';
 import { useActiveExecutionStore } from '@/stores/activeExecutionStore';
 import { ShellCatAvatar } from '../shell/ShellCatAvatar';
 import { ShellGlyph } from '../shell/ShellIcons';
@@ -19,46 +18,44 @@ export function RecentWorks({
   onOpen,
   onOpenAll,
   onDiscuss,
+  ownerUserId,
 }: {
   onOpen: (artifact: GlobalArtifactDTO) => void;
   onOpenAll: () => void;
   onDiscuss?: (artifact: GlobalArtifactDTO) => void;
+  ownerUserId?: string | null;
 }) {
   const t = useShellCopy(newConversationCopy);
   const { getCatById } = useCatData();
   // Keep the existing cheap owner-global landing read. A person scrolling further requests the existing complete Works catalogue once.
-  const recent = useGlobalArtifacts(true, { view: 'recent-works', limit: 12 });
-  const [expanded, setExpanded] = useState(false);
-  const all = useGlobalArtifacts(expanded, { view: 'works' });
-  const useAll = expanded && !all.loading && (all.artifacts.length > 0 || all.complete);
+  const recent = useGlobalArtifacts(ownerUserId !== null, { view: 'recent-works', limit: 12 }, ownerUserId);
+  const [expansion, setExpansion] = useState({ ownerUserId, expanded: false });
+  const expanded = expansion.ownerUserId === ownerUserId && expansion.expanded;
+  const all = useGlobalArtifacts(expanded && ownerUserId !== null, { view: 'works' }, ownerUserId);
+  const useAll = expanded && !all.loading && all.complete && all.workLineage === 'resolved';
   const source = useAll ? all : recent;
-  const lineage = useAll && !all.complete && recent.workLineage !== 'resolved' ? 'unavailable' : source.workLineage;
+  const lineage = source.workLineage;
   const works = useMemo(
-    () =>
-      projectRecentWorks(
-        useAll && !all.complete ? mergeArtifactPages(recent.artifacts, all.artifacts, lineage) : source.artifacts,
-        lineage,
-        Number.POSITIVE_INFINITY,
-      ),
-    [useAll, all.complete, all.artifacts, recent.artifacts, source.artifacts, lineage],
+    () => projectRecentWorks(source.artifacts, lineage, Number.POSITIVE_INFINITY),
+    [source.artifacts, lineage],
   );
-  const progressive = useProgressiveWorks(works.length, 'recent-works');
+  const progressive = useProgressiveWorks(works.length, JSON.stringify(['recent-works', ownerUserId]));
   const executions = useActiveExecutionStore((state) => state.executionsByKey);
   const running = useMemo(
     () => new Set(Object.values(executions).map((item) => JSON.stringify([item.threadId, item.catId]))),
     [executions],
   );
   const failed = (source.error || !source.complete) && works.length === 0;
-  const waitingForWorks = source.loading || (useAll && all.loadingMore && works.length === 0);
+  const waitingForWorks = (source.loading || (expanded && (all.loading || all.loadingMore))) && works.length === 0;
   const complete = useAll && all.complete && all.workLineage === 'resolved';
   const more = progressive.more || !expanded;
   const loadMore = useCallback(() => {
-    if (!expanded) setExpanded(true);
+    if (!expanded) setExpansion({ ownerUserId, expanded: true });
     else progressive.loadMore();
-  }, [expanded, progressive.loadMore]);
+  }, [expanded, progressive.loadMore, ownerUserId]);
   // The same sentinel admits the original complete read, then reveals batches from that source without a cap.
   const { sentinel } = useRecentCatalogueSentinel(
-    more && works.length > 0 && !source.loading && !all.error && !all.loading,
+    expanded && more && works.length > 0 && !source.loading && !all.error && !all.loading && all.complete,
     loadMore,
   );
   return (
@@ -76,6 +73,9 @@ export function RecentWorks({
           <ShellGlyph name="chevronRight" className="h-3 w-3" />
         </button>
       </div>
+      {!source.loading && !source.complete && works.length > 0 && (
+        <p className="mb-3 text-xs text-[var(--shell-muted)]">{t.partialWorks}</p>
+      )}
       {waitingForWorks && <output aria-busy="true">{t.loadingWorks}</output>}
       {!waitingForWorks && failed && (
         <div role="alert">

@@ -1,10 +1,15 @@
 'use client';
-import { useState } from 'react';
+
+import type { MemberVisualAssets } from '@cat-cafe/shared';
+import { useEffect, useState } from 'react';
+import { resolveAvatarUrl } from '@/lib/avatar-url';
 import { uploadAvatarAsset, uploadRefAudioAsset } from '../../hub-cat-editor.client';
 import { autoSlug, type HubCatEditorFormState, type StrategyFormState } from '../../hub-cat-editor.model';
 import { SelectField, TextAreaField, TextField } from '../../hub-cat-editor-fields';
 import { TagEditor } from '../../hub-tag-editor';
 import { MemberAdvancedFields } from './MemberAdvancedFields';
+import { MemberBannerFields } from './MemberBannerFields';
+import { MemberCanonAvatar } from './MemberCanonAvatar';
 import type { MemberText } from './MemberRuntimeFields';
 import { MemberSessionFields } from './MemberSessionFields';
 
@@ -40,17 +45,29 @@ export function MemberAdditionalFields({
   editing,
   strategy,
   patchStrategy,
+  visualAssets,
+  onAvatarCommitted,
+  onUploadingChange,
 }: {
   section: string;
+  visualAssets?: MemberVisualAssets;
+  onAvatarCommitted?: (value: { avatar?: string; visualAssets: MemberVisualAssets }) => void;
   form: HubCatEditorFormState;
   patch: (change: Partial<HubCatEditorFormState>) => void;
   t: MemberText;
   editing: boolean;
   strategy: StrategyFormState | null | undefined;
   patchStrategy: (change: Partial<StrategyFormState>) => void;
+  onUploadingChange?(uploading: boolean): void;
 }) {
+  const [canonLinked, setCanonLinked] = useState(visualAssets ? visualAssets.state !== 'unlinked' : false);
   const [uploadError, setUploadError] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [bannerUploading, setBannerUploading] = useState(false);
+  useEffect(() => {
+    onUploadingChange?.(uploading || bannerUploading);
+    return () => onUploadingChange?.(false);
+  }, [uploading, bannerUploading, onUploadingChange]);
   const fields = (items: MemberField[]) =>
     items.map(([key, zh, en]) => {
       if (key === 'mentionPatterns' || key === 'strengths')
@@ -139,43 +156,47 @@ export function MemberAdditionalFields({
             {t('外观', 'Appearance')} · {form.colorPrimary}
           </summary>
           <div className="space-y-4">
-            {form.avatar && (form.avatar.startsWith('/') || /^https?:\/\//.test(form.avatar)) && (
-              <img
-                src={form.avatar}
-                alt={t('头像预览', 'Avatar preview')}
-                className="h-16 w-16 rounded-full object-cover"
+            {editing ? (
+              <MemberCanonAvatar
+                key={form.catId}
+                catId={form.catId}
+                name={form.nickname || form.displayName}
+                initial={visualAssets}
+                onCommitted={onAvatarCommitted}
+                onLinked={setCanonLinked}
               />
+            ) : null}
+            {!canonLinked && (
+              <>
+                {form.avatar && (form.avatar.startsWith('/') || /^https?:\/\//.test(form.avatar)) && (
+                  <img
+                    src={resolveAvatarUrl(form.avatar)}
+                    alt={t('头像预览', 'Avatar preview')}
+                    className="h-16 w-16 rounded-full object-cover"
+                  />
+                )}
+                <details>
+                  <summary className="cursor-pointer text-sm">{t('使用图片地址', 'Use an image URL')}</summary>
+                  <TextField label={t('头像', 'Avatar')} value={form.avatar} onChange={(avatar) => patch({ avatar })} />
+                </details>
+                <label className="block text-sm">
+                  {t('上传头像', 'Upload avatar')}
+                  <input
+                    className="mt-2 block w-full text-sm"
+                    type="file"
+                    accept="image/*"
+                    disabled={uploading}
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (file) void upload(file, 'avatar');
+                    }}
+                  />
+                </label>
+              </>
             )}
-            <details>
-              <summary className="cursor-pointer text-sm">{t('使用图片地址', 'Use an image URL')}</summary>
-              <TextField label={t('头像', 'Avatar')} value={form.avatar} onChange={(avatar) => patch({ avatar })} />
-            </details>
-            <label className="block text-sm">
-              {t('上传头像', 'Upload avatar')}
-              <input
-                className="mt-2 block w-full text-sm"
-                type="file"
-                accept="image/*"
-                disabled={uploading}
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  if (file) void upload(file, 'avatar');
-                }}
-              />
-            </label>
-            <label className="flex items-center gap-3 text-sm">
-              {t('成员主色', 'Member color')}
-              <input
-                type="color"
-                value={form.colorPrimary}
-                onChange={(event) => patch({ colorPrimary: event.target.value })}
-              />
-              <span className="rounded-full border px-4 py-2" style={{ color: form.colorPrimary }}>
-                {form.name || t('我的伙伴', 'My teammate')}
-              </span>
-            </label>
           </div>
         </details>
+        <MemberBannerFields form={form} patch={patch} t={t} onUploadingChange={setBannerUploading} />
         {uploadError && (
           <p role="alert" className="text-sm text-conn-red-text">
             {uploadError}

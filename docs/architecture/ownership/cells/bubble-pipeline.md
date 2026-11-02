@@ -4,6 +4,7 @@ title: Bubble Pipeline
 summary: Provider-normalized semantic event 到用户可见 bubble 的单一投影边界；覆盖服务器 message identity、named-message writer、live/hydration convergence 与 typed execution projection，以及 MessageStore dispatchRefs 驱动的实际投递头像与响应终态。
 canonical_features: [F177, F183, F254, F264, F322]
 code_anchors:
+  - packages/api/src/domains/cats/services/stores/message-search-answer-binding.ts
   - packages/web/src/lib/provider-semantic-registry.ts
   - packages/web/src/hooks/agent-messages/system-projections.ts
   - packages/web/src/hooks/named-message-writer.ts
@@ -22,6 +23,7 @@ code_anchors:
   - packages/web/src/components/MessageDispatchAvatars.tsx
   - packages/web/src/components/ConnectorBubble.tsx
 doc_anchors:
+  - docs/architecture/f322-message-search-answer-contract.md
   - docs/decisions/043-queue-durable-single-ledger.md
   - docs/features/F117-message-delivery-lifecycle.md
   - docs/features/F306-codex-app-capability-parity.md
@@ -42,6 +44,7 @@ doc_anchors:
   - feature-specs/2026-08-13-1291-gate6-live-terminal-receipt-consumption.md
 static_scan_hints: [AgentMessageType, system_info, provider_signal, BubbleEvent, bubbleKind, bubbleIdentity, BubbleReducer, bubble-event-adapter, formatVisibleSystemInfo, useAgentMessages, useChatHistory, useSocket, queue_updated, dispatchRefs, dispatchedAt, statusMessageId, TurnExecutionMessageProjection, executionKind, routing_guard, freshness_supplement, auxiliaryTurnExecutions, MessageDispatchAvatars, lifecycleStatus, evidenceRef, lineage, originalMessageId, sourceInvocationId, chatStore, hydration, IndexedDB]
 cited_by:
+  - {feature: F322, date: 2026-10-26, delta: "the original message/R stores only a server-owned answer publication ref/digest binding; the memory owner resolves the sole snapshot and fresh permissions for rendering/actions"}
   - {feature: F117-canonical-source-entry, date: 2026-09-08, delta: the source bubble is materialized once at first actual delivery; MessageStore dispatchRefs own per-target delivery identity and time, while each exact response bubble owns processing and terminal state without Queue receipt projection}
   - {feature: F264-author-intent-steer-ui, date: 2026-09-03, delta: the Steer modal offers non-interrupting send as author intent for every selectable target; admission appends to an exact accepting run or preserves the same row for ordinary drain when the carrier is unavailable or already stopped}
   - {feature: F254-ADR-043-read-adoption, date: 2026-09-03, delta: full queued-body adoption links the original source dispatchRef to the already-processing response so its member avatar and processing bubble appear on the original timeline message without copying or moving the body}

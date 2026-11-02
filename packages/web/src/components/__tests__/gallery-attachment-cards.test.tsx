@@ -1,4 +1,4 @@
-import type { MediaContextAttachment } from '@cat-cafe/shared';
+import type { AssetContextAttachment, MediaContextAttachment } from '@cat-cafe/shared';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -59,6 +59,10 @@ function Probe() {
         data-testid="opened"
         data-index={scope?.work?.gallery?.index}
         data-place={scope?.work?.reference?.selectionId}
+        data-origin={JSON.stringify(scope?.work?.reference?.origin)}
+        data-preview-url={scope?.work?.url}
+        data-pending={scope?.work?.pending}
+        data-surface={scope?.work?.surface?.id}
       >
         {scope?.work?.title}
       </output>
@@ -131,6 +135,44 @@ it('a restored composer tag reopens its original image and place without replaci
   expect(container.querySelector('textarea')).toBe(composer);
   expect(composer?.value).toBe('原来的话');
 });
+it('opens the exact stored version preview before the original gallery or owner read completes', async () => {
+  const pending = new Promise<Response>(() => {});
+  mocks.apiFetch.mockReturnValue(pending);
+  await render(true);
+  const composer = container.querySelector('textarea');
+  const tag = container.querySelector<HTMLButtonElement>('button[aria-label="打开图 2 · 第 4 处"]');
+  await act(async () => tag?.click());
+  const opened = container.querySelector('[data-testid="opened"]');
+  expect(opened?.textContent).toBe('图片2.png');
+  const preview = new URL(opened!.getAttribute('data-preview-url')!);
+  expect(preview.pathname).toBe(`/api/workspace/content-reviews/${reviewId}/media`);
+  expect(preview.searchParams.get('expectedSourceRevision')).toBe(revision);
+  expect(opened?.getAttribute('data-surface')).toBeNull();
+  expect(opened?.getAttribute('data-pending')).toBe('true');
+  expect(opened?.getAttribute('data-place')).toBeNull();
+  expect(container.querySelector('textarea')).toBe(composer);
+});
+it('keeps the opinion message coordinates separate from a gallery publication grant', async () => {
+  await act(async () =>
+    root.render(
+      <ArtworkLightboxProvider threadId={THREAD}>
+        <ContentBlocks
+          blocks={[{ type: 'context_attachment', attachment: attachment(0) }]}
+          messageSource={{ threadId: THREAD, messageId: 'queued-opinion' }}
+        />
+        <Probe />
+      </ArtworkLightboxProvider>,
+    ),
+  );
+  const place = container.querySelector<HTMLButtonElement>('button[aria-label="打开图 1 · 第 3 处"]');
+  expect(place).not.toBeNull();
+  await act(async () => place?.click());
+  expect(JSON.parse(container.querySelector('[data-testid="opened"]')?.getAttribute('data-origin') ?? 'null')).toEqual({
+    kind: 'message',
+    threadId: THREAD,
+    messageId: 'queued-opinion',
+  });
+});
 it('never overlays a stored circle onto changed workspace bytes or guesses another source message', async () => {
   const changed = { ...mediaView(), sourceState: 'changed' as const };
   mocks.apiFetch.mockImplementation(
@@ -199,55 +241,28 @@ it('renders the actual sent blocks as one gallery, with the Human body once and 
     '0 0 1440 900',
   ]);
 });
-it('keeps thumbnail numbers readable in screen pixels when the original and preview sizes differ', async () => {
-  let notifyResize: ResizeObserverCallback | undefined;
-  vi.stubGlobal(
-    'ResizeObserver',
-    class {
-      constructor(callback: ResizeObserverCallback) {
-        notifyResize = callback;
-      }
-      observe() {}
-      disconnect() {}
+it('keeps each number outside the thumbnail coordinate system while its region remains on the original pixels', async () => {
+  const original = attachment(0);
+  await render(false, [
+    {
+      ...original,
+      selections: [
+        { ...original.selections[0], selection: { kind: 'image-region', x: 1400, y: 880, width: 40, height: 20 } },
+      ],
     },
-  );
-  try {
-    const original = attachment(0);
-    await render(false, [
-      {
-        ...original,
-        selections: [
-          { ...original.selections[0], selection: { kind: 'image-region', x: 1400, y: 880, width: 40, height: 20 } },
-        ],
-      },
-    ]);
-    const image = container.querySelector('img')!;
-    let width = 128;
-    Object.defineProperties(image, {
-      naturalWidth: { value: 1440 },
-      naturalHeight: { value: 900 },
-      getBoundingClientRect: { value: () => ({ width, height: (width * 900) / 1440 }) },
-    });
-    await act(async () => image.dispatchEvent(new Event('load')));
-    const assertReadable = () => {
-      const mark = container.querySelector('[data-selection-id="3"]')!;
-      const scale = width / 1440;
-      expect(Number(mark.querySelector('circle')?.getAttribute('r')) * scale).toBeGreaterThanOrEqual(8);
-      expect(Number(mark.querySelector('text')?.getAttribute('font-size')) * scale).toBeGreaterThanOrEqual(10);
-      expect(mark.querySelector('text')?.textContent).toBe('3');
-      expect(mark.querySelector('rect')?.getAttribute('x')).toBe('1400');
-      expect(mark.querySelector('rect')?.getAttribute('width')).toBe('40');
-      const circle = mark.querySelector('circle')!;
-      expect(Number(circle.getAttribute('cx')) + Number(circle.getAttribute('r'))).toBeLessThanOrEqual(1440);
-      expect(Number(circle.getAttribute('cy')) + Number(circle.getAttribute('r'))).toBeLessThanOrEqual(900);
-    };
-    assertReadable();
-    width = 64;
-    await act(async () => notifyResize?.([], {} as ResizeObserver));
-    assertReadable();
-  } finally {
-    vi.unstubAllGlobals();
-  }
+  ]);
+  const image = container.querySelector('img')!;
+  Object.defineProperties(image, {
+    naturalWidth: { value: 1440 },
+    naturalHeight: { value: 900 },
+  });
+  await act(async () => image.dispatchEvent(new Event('load')));
+  const mark = container.querySelector('[data-testid="review-pending-chat-mark"][data-selection-id="3"]')!;
+  const number = container.querySelector('[data-testid="media-selection-number"]')!;
+  expect(number.textContent).toBe('3');
+  expect(number.closest('svg')).toBeNull();
+  expect(mark.querySelector('rect')?.getAttribute('x')).toBe('1400');
+  expect(mark.querySelector('rect')?.getAttribute('width')).toBe('40');
 });
 it('a close while the original message read is pending prevents a late reopen', async () => {
   let answer: ((response: Response) => void) | undefined;
@@ -294,4 +309,50 @@ it('cannot use an adjacent or edited message as the original gallery', async () 
   expect(container.querySelector('[data-testid="opened"]')?.textContent).toBe('');
   expect(container.querySelector('[role="alert"]')?.textContent).toContain('原消息');
   expect(mocks.apiFetch).toHaveBeenCalledTimes(1);
+});
+
+it('groups a material chip with this exact film version and leaves another version separate', async () => {
+  const source = {
+    kind: 'publication' as const,
+    contentRef: 'work:film',
+    ownerRevision: 4,
+    ledgerRef: 'ledger',
+    expectedLedgerRevision: 1,
+  };
+  const film: MediaContextAttachment = {
+    ...attachment(0),
+    gallery: undefined,
+    source,
+    mediaType: 'video/mp4',
+    title: '片子 · 第 4 版',
+    selections: [],
+  };
+  const asset: AssetContextAttachment = {
+    v: 1,
+    id: 'asset',
+    kind: 'asset',
+    name: 'hero.jpg',
+    workTitle: '片子',
+    mediaType: 'image/jpeg',
+    indexedVersionRef: 'asset:sha256:' + 'a'.repeat(64),
+    work: { reference: { contentRef: source.contentRef, ownerRevision: 4 }, metadataRevision: 1, assetId: 'hero' },
+  };
+  await act(async () =>
+    root.render(
+      <ContextAttachmentList
+        compact
+        attachments={[
+          film,
+          asset,
+          { ...asset, id: 'other', work: { ...asset.work, reference: { ...asset.work.reference, ownerRevision: 5 } } },
+        ]}
+        onRemove={vi.fn()}
+      />,
+    ),
+  );
+  const group = container.querySelector('[data-testid="gallery-composer-group"]');
+  expect(group?.textContent).toContain('片子 · 第 4 版');
+  expect(group?.querySelectorAll('[data-context-kind="asset"]')).toHaveLength(1);
+  expect(container.querySelectorAll('[data-context-kind="asset"]')).toHaveLength(2);
+  expect(container.textContent).toContain('片子 · 第 5 版');
 });

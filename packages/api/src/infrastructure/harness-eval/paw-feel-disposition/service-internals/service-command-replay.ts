@@ -1,4 +1,10 @@
-import { type PawFeelDispositionEvent, refIdentity } from '@cat-cafe/shared';
+import {
+  type PawFeelDispositionEvent,
+  pawFeelRepairBinding,
+  pawFeelRepairRequest,
+  refIdentity,
+  repairRequestForBinding,
+} from '@cat-cafe/shared';
 import { matchesPawFeelResumeSelectorRequest } from '../blocker-recovery/resume-condition.js';
 import type { PawFeelDispositionCommand, PawFeelResolvedCommandContext } from '../commands.js';
 import { PawFeelDispositionServiceError } from '../service-guards.js';
@@ -38,13 +44,18 @@ function replayFix(
   command: Extract<PawFeelDispositionCommand, { type: 'mark_fix' }>,
   existing: Extract<PawFeelDispositionEvent, { type: 'fix' }>,
 ): PawFeelResolvedCommandContext {
-  if (existing.leaseId !== command.leaseId || !existing.directRepairBinding) {
+  if (
+    JSON.stringify(pawFeelRepairBinding(existing) && repairRequestForBinding(pawFeelRepairBinding(existing)!)) !==
+      JSON.stringify(pawFeelRepairRequest(command)) ||
+    !existing.directRepairBinding
+  ) {
     return collision(command.eventId, 'stored fix does not match the requested direct-repair lease');
   }
   return {
     fix: {
       ownerCatId: existing.ownerCatId,
       taskId: existing.taskId,
+      ...(existing.repairBinding ? { repairBinding: existing.repairBinding } : {}),
       leaseId: existing.leaseId,
       leaseGeneration: existing.leaseGeneration,
       custodyEvidenceRef: existing.custodyEvidenceRef,
@@ -60,7 +71,9 @@ function replaySignature(
   if (command.action.type !== 'fix') return { signatureAction: existing.action };
   if (
     existing.action.type !== 'fix' ||
-    existing.action.leaseId !== command.action.leaseId ||
+    JSON.stringify(
+      pawFeelRepairBinding(existing.action) && repairRequestForBinding(pawFeelRepairBinding(existing.action)!),
+    ) !== JSON.stringify(pawFeelRepairRequest(command.action)) ||
     !existing.action.directRepairBinding
   ) {
     return collision(command.eventId, 'stored signature request does not match the direct-repair lease');

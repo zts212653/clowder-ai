@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { decideNativeHookPayload } from '../../../scripts/native-effect-target-guard.mjs';
-import { gateHookProgram, nativeHookPrograms } from './helpers/native-hook-programs.js';
+import { assertGuardedOrUnproved } from './helpers/native-effect-policy-assertions.js';
+import { gateHookProgram, nativeHookPrograms, nativeHookTestEnv } from './helpers/native-hook-programs.js';
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'f306-friction-')));
 const main = join(root, 'cat-cafe'),
@@ -17,7 +18,8 @@ const noHost = { selfHost: () => ({ confidence: 'none' }) };
 function parity(command, expected, cwd = runtime) {
   for (const tool_name of ['Bash', 'exec_command']) {
     const result = decideNativeHookPayload({ tool_name, cwd, tool_input: { command, cmd: command } }, noHost);
-    assert.equal(result.decision, expected, `${command}: ${JSON.stringify(result)}`);
+    if (expected === 'deny') assertGuardedOrUnproved(result, `${command}: ${JSON.stringify(result)}`);
+    else assert.equal(result.decision, expected, `${command}: ${JSON.stringify(result)}`);
   }
 }
 
@@ -89,11 +91,12 @@ test('repository refresh cannot discard invocation environment prefixes', () => 
     const command = `${prefix} git fetch origin`;
     parity(command, 'deny');
     const judged = spawnSync(program, [hook], {
+      env: nativeHookTestEnv(),
       input: JSON.stringify({ tool_name: provider, cwd: runtime, tool_input: { command } }),
       encoding: 'utf8',
     });
     assert.equal(judged.status, 0, judged.stderr);
-    assert.ok(judged.stdout.includes('"deny"'), command);
+    assert.ok(!judged.stdout.includes('read_only'), command);
   }
   parity('git fetch origin', 'allow');
   parity('git fetch origin 2>&1', 'allow');
@@ -115,11 +118,12 @@ test('fetch ref narrowing retains wrapper and Git-selector coordinates', () => {
   for (const [program, script, tool_name] of nativeHookPrograms())
     for (const command of commands) {
       const judged = spawnSync(program, [new URL(script, import.meta.url).pathname], {
+        env: nativeHookTestEnv(),
         input: JSON.stringify({ tool_name, cwd: '/tmp', tool_input: { command, cmd: command } }),
         encoding: 'utf8',
       });
       assert.equal(judged.status, 0, judged.stderr);
-      assert.ok(judged.stdout.includes('"deny"'), command);
+      assert.ok(!judged.stdout.includes('read_only'), command);
     }
   parity(`env -C ${main} git fetch --prune origin`, 'allow', '/tmp');
   parity('git fetch origin main:refs/heads/review-main', 'allow', main);
@@ -198,7 +202,7 @@ test('HTTP argv is a candidate and cannot prove protected reads without its exec
       noHost,
     );
     assert.equal(result.effect, 'unknown');
-    assert.equal(result.decision, 'deny');
+    assert.equal(result.reasonCode, 'unrecognised_effect_deferred');
   }
   for (const command of [
     "curl --data '{}' http://localhost:3004/api/metrics",
@@ -302,7 +306,7 @@ test('GitHub API observations are remote reads and fields change the default met
         noHost,
       );
       assert.notEqual(result.effect, 'read', command);
-      assert.equal(result.decision, 'deny', command);
+      assertGuardedOrUnproved(result, command);
     }
   }
 });
@@ -337,6 +341,7 @@ test('gate hook distinguishes data from execution, including nested shell positi
     ["cat <<'EOF' | bash\npnpm gate\nEOF", true],
   ]) {
     const result = spawnSync(gateProgram, [gateScript], {
+      env: nativeHookTestEnv(),
       input: JSON.stringify({ tool_name: 'Bash', tool_input: { command } }),
       encoding: 'utf8',
     });

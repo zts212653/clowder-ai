@@ -190,7 +190,7 @@ test('cleanup failure through pnpm is not a successful stop and retains its evid
   assert.equal(f.run('stop').status, 1, 'retry must not erase a failed terminal outcome');
 });
 
-test('a later managed start keeps the original failed completion and owner result intact', async (t) => {
+test('a later managed start refuses unresolved cleanup and preserves its original registration and outcomes', async (t) => {
   const f = await fixture(t, { exitCode: 7, wrapped: true, report: true });
   assert.equal(f.run('stop').status, 1);
   assert.equal(JSON.parse(f.run('status').stdout).status, 'stopped');
@@ -199,10 +199,13 @@ test('a later managed start keeps the original failed completion and owner resul
   const failedOwner = readFileSync(failedOwnerPath, 'utf8');
   assert.notEqual(JSON.parse(failedCompletion).exitCode, 0);
   assert.equal(JSON.parse(failedOwner).exitCode, 7);
+  const originalRecord = readFileSync(f.recordPath);
   const started = f.run('start', ['--', 'pnpm', 'run', 'start']);
-  assert.equal(started.status, 0, started.stderr || started.stdout);
+  assert.equal(started.status, 1, started.stderr || started.stdout);
+  assert.match(started.stderr, /cleanup remains unsettled/);
   const current = JSON.parse(readFileSync(f.recordPath, 'utf8'));
-  assert.notEqual(current.completionPath, f.record.completionPath);
+  assert.equal(current.completionPath, f.record.completionPath);
+  assert.deepEqual(readFileSync(f.recordPath), originalRecord);
   assert.equal(readFileSync(f.record.completionPath, 'utf8'), failedCompletion);
   assert.equal(readFileSync(failedOwnerPath, 'utf8'), failedOwner);
 });
@@ -225,11 +228,31 @@ test('lease expiry also waits for a reported wrapped launcher cleanup', async (t
 
 test('a changed process identity cannot be signalled using the stored launchd PID', async (t) => {
   const f = await fixture(t);
-  writeFileSync(f.recordPath, JSON.stringify({ ...f.record, processCommand: 'different incarnation' }));
   try {
-    assert.equal(f.run('stop').status, 1);
-    assert.equal(f.events(), '', 'an identity mismatch must not start cleanup');
+    for (const field of ['processCommand', 'processStartedAt']) {
+      writeFileSync(f.recordPath, JSON.stringify({ ...f.record, [field]: 'different incarnation' }));
+      for (const completed of [false, true]) {
+        if (completed) {
+          writeFileSync(
+            f.record.completionPath,
+            JSON.stringify({
+              pid: f.record.pid,
+              expiresAt: f.record.expiresAt,
+              exitCode: 0,
+              forced: false,
+            }),
+          );
+        }
+        const stopped = f.run('stop');
+        assert.equal(stopped.status, 1, stopped.stderr || stopped.stdout);
+        assert.match(stopped.stderr, /exact process ownership is not proven/);
+        assert.equal(f.events(), '', 'a mismatched live identity must never be signalled, even with a receipt');
+        assert.ok(existsSync(f.recordPath));
+      }
+      rmSync(f.record.completionPath, { force: true });
+    }
   } finally {
+    rmSync(f.record.completionPath, { force: true });
     writeFileSync(f.recordPath, JSON.stringify(f.record));
   }
 });

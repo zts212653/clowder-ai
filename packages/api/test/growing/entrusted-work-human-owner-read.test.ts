@@ -8,7 +8,10 @@ import { EntrustedWorkLifecycleService } from '../../src/domains/growing/Entrust
 import { EntrustedWorkOwnerReadService } from '../../src/domains/growing/EntrustedWorkOwnerReadService.js';
 import { registerEntrustedWorkReadRoutes } from '../../src/routes/entrusted-work-read-routes.js';
 
-const producerCatalog = { listCurrentReceipts: async () => [] };
+const producerCatalog = {
+  listCurrentReceipts: async () => [],
+  readCurrentReceipts: async () => ({ receipts: [], coverage: { state: 'complete' as const } }),
+};
 
 async function admittedFixture() {
   const tasks = new TaskStore();

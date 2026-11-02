@@ -25,7 +25,6 @@ test('a verified archive offers exact legacy replacement before changing the ins
       packagePluginId: oldManifest.pluginId,
       computedPackageDigest: oldArchive.integrity,
       expectedPackageDigest: oldArchive.integrity,
-      effectiveGrants: [],
       signalSchemas: {},
     });
     const before = await store.snapshot();
@@ -34,7 +33,6 @@ test('a verified archive offers exact legacy replacement before changing the ins
     const admission = new LocalPluginPackageAdmission({
       inventory,
       packagesRoot: join(root, 'packages'),
-      grantPolicy: () => [],
     });
     await assert.rejects(admission.install({ kind: 'local-archive', path: archivePath }), (error) => {
       assert.equal(error.code, 'ARCHIVE_REPLACEMENT_CONFIRMATION_REQUIRED');
@@ -44,8 +42,6 @@ test('a verified archive offers exact legacy replacement before changing the ins
         currentPackageDigest: oldArchive.integrity,
         candidatePackageDigest: nextArchive.integrity,
         expectedLifecycleRevision: before.instances[0].lifecycleRevision,
-        expectedGrantRevision: before.grants[0].grantRevision,
-        candidateEffectiveGrants: [],
       });
       return true;
     });
@@ -55,7 +51,7 @@ test('a verified archive offers exact legacy replacement before changing the ins
   }
 });
 
-async function fixture(t, { provenance, grantPolicy = () => [], reconcileConfiguration } = {}) {
+async function fixture(t, { provenance, reconcileConfiguration } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'legacy-archive-replacement-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const oldManifest = manifest({ version: '0.1.0', signals: undefined });
@@ -69,7 +65,6 @@ async function fixture(t, { provenance, grantPolicy = () => [], reconcileConfigu
     packagePluginId: oldManifest.pluginId,
     computedPackageDigest: oldArchive.integrity,
     expectedPackageDigest: oldArchive.integrity,
-    effectiveGrants: [],
     signalSchemas: {},
     ...(provenance ? { provenance } : {}),
   });
@@ -86,7 +81,6 @@ async function fixture(t, { provenance, grantPolicy = () => [], reconcileConfigu
   const admission = new LocalPluginPackageAdmission({
     inventory,
     packagesRoot: join(root, 'packages'),
-    grantPolicy,
     lifecycle,
     reconcileConfiguration,
   });
@@ -111,44 +105,10 @@ async function fixture(t, { provenance, grantPolicy = () => [], reconcileConfigu
   };
 }
 
-test('an invalid Host grant decision is rejected before offering legacy replacement', async (t) => {
-  const h = await fixture(t, { grantPolicy: () => ['unknown.capability'] });
-  const before = await h.store.snapshot();
-  await assert.rejects(h.admission.install(h.source), (error) => {
-    assert.equal(error.code, 'INVENTORY_REJECTED');
-    assert.equal(error.cause.code, 'INVALID_GRANT');
-    return true;
-  });
-  assert.deepEqual(await h.store.snapshot(), before);
-  assert.deepEqual(h.lifecycleCalls, []);
-});
-
-test('a changed Host policy requires a new confirmation even when the instance is unchanged', async (t) => {
-  let grants = [];
-  const h = await fixture(t, { grantPolicy: () => grants });
-  const replacement = await h.offer();
-  const before = await h.store.snapshot();
-  grants = ['messaging.send'];
-  await assert.rejects(h.admission.install(h.source, { replacement }), { code: 'STALE_ARCHIVE_REPLACEMENT' });
-  assert.deepEqual(await h.store.snapshot(), before);
-  assert.deepEqual(h.lifecycleCalls, []);
-});
-
-test('confirmation cannot add a capability outside the Host policy', async (t) => {
-  const h = await fixture(t);
-  const replacement = await h.offer();
-  replacement.candidateEffectiveGrants.push('messaging.send');
-  const before = await h.store.snapshot();
-  await assert.rejects(h.admission.install(h.source, { replacement }), { code: 'STALE_ARCHIVE_REPLACEMENT' });
-  assert.deepEqual(await h.store.snapshot(), before);
-  assert.deepEqual(h.lifecycleCalls, []);
-});
-
 for (const enabled of [false, true]) {
   test(`confirmed legacy archive preserves the instance and activation intent (enabled=${enabled})`, async (t) => {
     const reconciled = [];
     const h = await fixture(t, {
-      grantPolicy: () => ['messaging.send'],
       reconcileConfiguration: async (...args) => reconciled.push(args),
     });
     if (enabled)
@@ -172,7 +132,6 @@ for (const enabled of [false, true]) {
     assert.equal(after.instances[0].packageDigest, h.nextArchive.integrity);
     assert.equal(after.instances[0].activationState, enabled ? 'enabled' : 'disabled');
     assert.ok(after.packages.some((record) => record.packageDigest === h.oldArchive.integrity));
-    assert.deepEqual(after.grants[0].effectiveGrants, ['messaging.send']);
     assert.deepEqual(reconciled, [['official.test-source', 'pi_original']]);
     assert.deepEqual(
       h.lifecycleCalls,
@@ -194,7 +153,6 @@ for (const field of [
   'currentPackageDigest',
   'candidatePackageDigest',
   'expectedLifecycleRevision',
-  'expectedGrantRevision',
 ]) {
   test(`rejects a changed ${field} before touching lifecycle or inventory`, async (t) => {
     const h = await fixture(t);
@@ -219,13 +177,13 @@ test('changed archive bytes cannot consume an earlier confirmation', async (t) =
   assert.deepEqual(h.lifecycleCalls, []);
 });
 
-for (const recordKind of ['instances', 'grants']) {
+for (const recordKind of ['instances']) {
   test(`an intervening owner ${recordKind} mutation invalidates the offer`, async (t) => {
     const h = await fixture(t);
     const replacement = await h.offer();
     await h.store.transaction((tx) => {
       const record = tx[recordKind].get('pi_original');
-      const key = recordKind === 'instances' ? 'lifecycleRevision' : 'grantRevision';
+      const key = 'lifecycleRevision';
       tx[recordKind].put({ ...record, [key]: record[key] + 1 });
     });
     const before = await h.store.snapshot();
@@ -235,7 +193,7 @@ for (const recordKind of ['instances', 'grants']) {
   });
 }
 
-for (const kind of ['local-directory', 'catalog', 'git']) {
+for (const kind of ['local-directory', 'git']) {
   test(`legacy confirmation does not allow switching the known ${kind} source`, async (t) => {
     const h = await fixture(t, {
       provenance: {
@@ -252,6 +210,56 @@ for (const kind of ['local-directory', 'catalog', 'git']) {
   });
 }
 
+for (const enabled of [false, true]) {
+  test(`same-package catalog archive replacement requires confirmation and retains the instance (enabled=${enabled})`, async (t) => {
+    const h = await fixture(t, {
+      provenance: { kind: 'catalog', catalogId: 'test', packageName: '@clowder-ai/official-test-source' },
+    });
+    if (enabled)
+      await h.store.transaction((tx) =>
+        tx.instances.put({
+          ...tx.instances.get('pi_original'),
+          activationState: 'enabled',
+          runtimeState: 'healthy',
+          configReadiness: 'ready',
+        }),
+      );
+    const before = await h.store.snapshot();
+    const replacement = await h.offer();
+    assert.deepEqual(await h.store.snapshot(), before);
+    assert.deepEqual(h.lifecycleCalls, []);
+    await h.admission.install(h.source, { replacement });
+    const after = await h.store.snapshot();
+    assert.equal(after.instances.length, 1);
+    assert.equal(after.instances[0].pluginInstanceId, before.instances[0].pluginInstanceId);
+    assert.equal(after.instances[0].installedAt, before.instances[0].installedAt);
+    assert.equal(after.instances[0].packageDigest, h.nextArchive.integrity);
+    assert.equal(after.instances[0].activationState, enabled ? 'enabled' : 'disabled');
+    const installed = after.packages.find((record) => record.packageDigest === h.nextArchive.integrity);
+    assert.equal(installed.provenance.kind, 'local-archive');
+    assert.equal(installed.provenance.packageName, '@clowder-ai/official-test-source');
+    assert.deepEqual(
+      h.lifecycleCalls,
+      enabled
+        ? [
+            ['stop', 'pi_original'],
+            ['start', 'pi_original'],
+          ]
+        : [],
+    );
+  });
+}
+
+test('catalog replacement refuses a different recorded npm identity', async (t) => {
+  const h = await fixture(t, {
+    provenance: { kind: 'catalog', catalogId: 'test', packageName: '@clowder-ai/unrelated-package' },
+  });
+  const before = await h.store.snapshot();
+  await assert.rejects(h.admission.install(h.source), { code: 'INVENTORY_REJECTED' });
+  assert.deepEqual(await h.store.snapshot(), before);
+  assert.deepEqual(h.lifecycleCalls, []);
+});
+
 test('configuration failure restores the legacy package and preserves instance history', async (t) => {
   const h = await fixture(t, {
     reconcileConfiguration: async () => {
@@ -265,6 +273,5 @@ test('configuration failure restores the legacy package and preserves instance h
   assert.equal(after.instances[0].pluginInstanceId, before.instances[0].pluginInstanceId);
   assert.equal(after.instances[0].packageDigest, before.instances[0].packageDigest);
   assert.equal(after.instances[0].installedAt, before.instances[0].installedAt);
-  assert.deepEqual(after.grants[0].effectiveGrants, before.grants[0].effectiveGrants);
   assert.ok(after.instances[0].lifecycleRevision > before.instances[0].lifecycleRevision);
 });

@@ -3,6 +3,7 @@
  * Only external provider I/O is replaced. This proves installed-package lifecycle,
  * declared group settings and selected command parity, not real-account acceptance or old-code removal.
  */
+
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -45,9 +46,7 @@ import {
   createDormantPluginRuntimeComposition,
   createPluginManagerRuntimeComposition,
 } from '../dist/domains/plugin/index.js';
-import { FilesystemBuiltinPluginPackageMaterializer } from '../dist/domains/plugin/manager/builtin-package-materializer.js';
-import { resolveLocalPluginEffectiveGrants } from '../dist/domains/plugin/manager/machine-catalog-provider.js';
-import { OFFICIAL_PLUGIN_HOST_POLICIES } from '../dist/domains/plugin/manager/official-plugin-host-policies.js';
+import { FilesystemBuiltinPluginPackageMaterializer } from '../dist/domains/plugin/manager/package-assets/builtin-package-materializer.js';
 import { resolvePluginRuntimePersistencePaths } from '../dist/domains/plugin/runtime-composition.js';
 import { MemoryConnectorThreadBindingStore } from '../dist/infrastructure/connectors/ConnectorThreadBindingStore.js';
 
@@ -199,7 +198,6 @@ for (const release of candidateReleases) {
         runtime,
         catalogProvider: { snapshot: async () => ({ entries: [], status: 'fresh', checkedAt: 1 }) },
         catalogManifests: [],
-        localGrantPolicy: (manifest) => resolveLocalPluginEffectiveGrants(OFFICIAL_PLUGIN_HOST_POLICIES, manifest),
       });
       let source = { kind: 'local-archive', path: archive };
       let sourceCommit = null;

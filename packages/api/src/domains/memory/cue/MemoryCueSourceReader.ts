@@ -1,14 +1,16 @@
-import type { RecallScopeV1 } from '@cat-cafe/shared';
+import type { MemoryCueDocumentWindowRequest, RecallScopeV1 } from '@cat-cafe/shared';
 import type { MemoryCueDrillCoordinate } from './MemoryCueDrillHandleService.js';
 import type { MemoryCueInvalidationReason } from './MemoryCueEpisodeStore.js';
 
 export interface MemoryCueSourceReader {
   read(input: {
+    opportunityId?: string;
     family: MemoryCueDrillCoordinate['family'];
     anchor: string;
     expectedRevision: string;
     scope: RecallScopeV1;
     consumerCatId?: string;
+    window?: MemoryCueDocumentWindowRequest;
   }): Promise<
     { status: 'ok'; payload: unknown } | { status: 'not_available'; invalidationReason?: MemoryCueInvalidationReason }
   >;

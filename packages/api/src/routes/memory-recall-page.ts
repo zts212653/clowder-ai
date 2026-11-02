@@ -45,6 +45,8 @@ async function readCueRow(row: RecallTimelineRow, context: ProjectionContext) {
     { ownerUserId: owner, threadId: row.thread_id },
     readCandidate,
     readers.cueSourceReader,
+    readers.profileMemoryStore,
+    readers,
   )({
     invocation_id: row.invocation_id,
     cue_id: cue.cueId,
@@ -65,6 +67,7 @@ async function readCueRow(row: RecallTimelineRow, context: ProjectionContext) {
       resolverFamily: cue.resolverFamily,
       timestamp: cue.presentedAt,
       source: 'push' as const,
+      ...(cue.pushSurface ? { pushSurface: cue.pushSurface } : {}),
       cueStatus: cue.status,
       results: [
         {
@@ -73,6 +76,8 @@ async function readCueRow(row: RecallTimelineRow, context: ProjectionContext) {
           anchor: cue.sourceAnchor,
           sourceType: cue.resolverFamily,
           href: view.href,
+          ...(view.profileMemoryId ? { profileMemoryId: view.profileMemoryId } : {}),
+          sourceUnavailableReason: view.sourceUnavailableReason,
         },
       ],
     },

@@ -55,9 +55,7 @@ function fakeMessageHandler(overrides = {}) {
 
 async function activeHarness(handler, options = {}) {
   let now = options.now ?? 5_000;
-  const inventory = await readyInventory(
-    options.effectiveGrants === undefined ? {} : { effectiveGrants: options.effectiveGrants },
-  );
+  const inventory = await readyInventory();
   const store = options.store ?? new MemoryHostBrokerStore();
   const broker = new HostBrokerControlPlane({
     inventory,
@@ -168,7 +166,6 @@ describe('K-2B durable Broker call ledger', () => {
         runtimeLeaseId: session.runtimeLeaseId,
         pluginInstanceId: INSTANCE_ID,
         packageDigest: session.packageDigest,
-        grantRevision: session.grantRevision,
         method: 'messaging.send',
         settlementKey,
         inputDigest: digestBrokerValue(input),
@@ -186,19 +183,7 @@ describe('K-2B durable Broker call ledger', () => {
     assert.equal(call.revision, 3);
   });
 
-  it('rechecks grants and runtime expiry on every call', async () => {
-    const revokedHandler = fakeMessageHandler();
-    const revoked = await activeHarness(revokedHandler);
-    await revoked.inventory.transaction((transaction) => {
-      const grant = transaction.grants.get(INSTANCE_ID);
-      transaction.grants.put({ ...grant, grantRevision: grant.grantRevision + 1, effectiveGrants: [] });
-    });
-    await assert.rejects(
-      revoked.connection.call('messaging.send', messageSendInput()),
-      isBrokerError('AUTHORITY_CHANGED'),
-    );
-    assert.equal(revokedHandler.dispatchCount(), 0);
-
+  it('rechecks runtime expiry on every call', async () => {
     const expiredHandler = fakeMessageHandler();
     const expired = await activeHarness(expiredHandler);
     expired.setNow(15_001);
@@ -207,15 +192,6 @@ describe('K-2B durable Broker call ledger', () => {
       isBrokerError('SESSION_NOT_ACTIVE'),
     );
     assert.equal(expiredHandler.dispatchCount(), 0);
-  });
-
-  it('rejects a capability absent at handshake without misclassifying authority drift', async () => {
-    const handler = fakeMessageHandler();
-    const { connection, store } = await activeHarness(handler, { effectiveGrants: [] });
-
-    await assert.rejects(connection.call('messaging.send', messageSendInput()), isBrokerError('CAPABILITY_DENIED'));
-    assert.equal(handler.dispatchCount(), 0);
-    assert.equal((await store.snapshot()).sessions[0].phase, 'active');
   });
 
   it('does not expose the retired owner-import event bypass', async () => {

@@ -3,8 +3,8 @@ import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { after, before } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { chromium } from 'playwright';
 import { build } from 'vite';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
 import { visibleAttentionFixture } from './f322-visible-attention.fixture.mjs';
 
 // Real rail, mailbox, tooltip, settings shell, preference/pin stores and navigation hooks.
@@ -176,7 +176,7 @@ export async function openProof({
         '/api/session': session,
         '/api/approval-hub/pending': { items: [], count: 0 },
         // The classic presentation (reached by the theme test) still reads Needs Me for its own rail.
-        '/api/entrusted-work/needs-me': { ownerReads: [] },
+        '/api/entrusted-work/needs-me': { ownerReads: [], coverage: { state: 'complete' } },
         // The v2 conversation header's own reads (ThreadIndicator, DaemonActiveIndicator, cat roster).
         '/api/threads/thread-return': { id: 'thread-return', title: '返回原处的对话', projectPath: '/work/fixture' },
         '/api/threads/thread-return/active-pane': { active: false },

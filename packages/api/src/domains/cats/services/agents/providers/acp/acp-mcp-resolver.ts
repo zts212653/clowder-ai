@@ -22,6 +22,10 @@ import {
   SENSITIVE_KEY_PATTERNS,
 } from '../../../../../../config/capabilities/capability-orchestrator.js';
 import {
+  invocationPluginMcpConfig,
+  projectInvocationPluginMcp,
+} from '../../../../../../config/capabilities/invocation-plugin-mcp-view.js';
+import {
   assertMappedCapabilitySource,
   resolveDeclaredCapabilityRoot,
 } from '../../../../../../config/capabilities/invoke-capability-root.js';
@@ -255,6 +259,7 @@ export async function resolveAcpMcpServers(
      * (MCP dist is under the runtime root).
      */
     configSourceRoot?: string;
+    accessScope?: 'global' | 'project';
   },
 ): Promise<AcpMcpServer[]> {
   // F161: when mcpSupport is explicitly disabled, skip ALL MCP servers
@@ -269,8 +274,9 @@ export async function resolveAcpMcpServers(
   // Use pre-loaded config from factory when available (proper API path);
   // fall back to direct read only for backward compat / tests.
   const configSourceRoot = opts?.configSourceRoot ?? resolveDeclaredCapabilityRoot() ?? projectRoot;
-  const capConfig =
+  const loadedConfig =
     opts?.capabilitiesConfig !== undefined ? opts.capabilitiesConfig : readCapabilitiesConfigSync(configSourceRoot);
+  const capConfig = loadedConfig && opts?.catId ? invocationPluginMcpConfig(loadedConfig, opts.catId) : loadedConfig;
   assertMappedCapabilitySource(capConfig !== null, resolveBinaryRoot(projectRoot), configSourceRoot);
   const retiredCapabilityIds = new Set(
     capConfig?.capabilities.filter(isRetiredGithubMcpCapability).map((capability) => capability.id) ?? [],
@@ -330,6 +336,7 @@ export async function resolveAcpMcpServers(
   // project-local capabilities.json must resolve relative to that project, not the runtime root.
   const externalRoot = configSourceRoot;
   const missing: string[] = [];
+  const unavailableLocal = new Set<string>();
   if (externalNames.length > 0) {
     if (capConfig) {
       for (const name of externalNames) {
@@ -337,13 +344,23 @@ export async function resolveAcpMcpServers(
           log.info({ name }, 'Skipping disabled external server (capabilities.json)');
           continue;
         }
-        const cap = capConfig.capabilities.find((c) => c.type === 'mcp' && c.id === name);
-        if (!cap?.mcpServer) {
+        const storedCapability = capConfig.capabilities.find((c) => c.type === 'mcp' && c.id === name);
+        if (!storedCapability) {
           missing.push(name);
           continue;
         }
-        // F249: respect globalEnabled for external servers
-        const isEnabled = cap.globalEnabled ?? cap.enabled ?? true;
+        const { capability: cap, available } = projectInvocationPluginMcp(storedCapability);
+        if (!available) {
+          unavailableLocal.add(name);
+          continue;
+        }
+        if (!cap.mcpServer) {
+          missing.push(name);
+          continue;
+        }
+        const isEnabled = opts?.catId
+          ? isMcpEnabledForCat(cap, opts.catId, { accessScope: opts.accessScope })
+          : (cap.globalEnabled ?? cap.enabled ?? true);
         if (!isEnabled) {
           log.info({ name }, 'Skipping globally disabled external server');
           continue;
@@ -358,9 +375,16 @@ export async function resolveAcpMcpServers(
           }
           continue;
         }
-        const server = capabilityEntryToAcpMcpServer(name, cap.mcpServer, externalRoot);
-        if (server) servers.push(server);
-        else missing.push(name);
+        const serverName = cap.pluginId ? cap.id.replaceAll(':', '__') : name;
+        const server = capabilityEntryToAcpMcpServer(serverName, cap.mcpServer, externalRoot);
+        if (server) {
+          if (servers.some((current) => current.name === server.name)) {
+            log.warn({ name: server.name }, 'Skipping duplicate encoded MCP server name');
+            continue;
+          }
+          if ('command' in server && cap.pluginId) server.hostSource = 'plugin';
+          servers.push(server);
+        } else missing.push(name);
       }
     } else {
       missing.push(...externalNames);
@@ -376,7 +400,7 @@ export async function resolveAcpMcpServers(
   }
 
   const inactiveFromWhitelist = [...expanded].filter(
-    (name) => disabled?.has(name) || retiredCapabilityIds.has(name),
+    (name) => disabled?.has(name) || retiredCapabilityIds.has(name) || unavailableLocal.has(name),
   ).length;
   if (effectiveWhitelist.length > 0 && servers.length === 0 && (inactiveFromWhitelist === 0 || missing.length > 0)) {
     throw new Error(
@@ -429,13 +453,14 @@ export function resolveDisabledServerIds(
   projectRoot: string,
   catId: string,
   preloadedConfig?: CapabilitiesConfig | null,
+  options: { accessScope?: 'global' | 'project' } = {},
 ): Set<string> {
   const capConfig = preloadedConfig !== undefined ? preloadedConfig : readCapabilitiesConfigSync(projectRoot);
   if (!capConfig) return new Set();
   const disabled = new Set(
-    capConfig.capabilities
-      .filter((cap) => cap.type === 'mcp')
-      .filter((cap) => !isMcpEnabledForCat(cap, catId))
+    invocationPluginMcpConfig(capConfig, catId)
+      .capabilities.filter((cap) => cap.type === 'mcp')
+      .filter((cap) => !projectInvocationPluginMcp(cap).available || !isMcpEnabledForCat(cap, catId, options))
       .map((cap) => cap.id),
   );
   if (disabled.has('cat-cafe')) {

@@ -2,13 +2,12 @@ import { type ReactNode, type RefObject, useEffect, useLayoutEffect, useMemo, us
 import type { AttentionListRow } from './attention-clusters';
 
 interface MeasuredRow {
-  row: AttentionListRow;
   height: number;
   estimate: number;
 }
 
 function sameMeasurement(previous: MeasuredRow | undefined, next: MeasuredRow): boolean {
-  return previous?.row === next.row && previous.height === next.height && previous.estimate === next.estimate;
+  return previous?.height === next.height && previous.estimate === next.estimate;
 }
 
 /** Optional words never decide the line count. Only the unshrunk presence symbols and badges do. */
@@ -88,14 +87,19 @@ export function useMeasuredSidebarRows(
         const key = slot.dataset.virtualRowKey;
         const row = key ? rowByKey.get(key) : undefined;
         const height = slot.firstElementChild?.getBoundingClientRect().height ?? 0;
-        return key && row && height > 0 ? [{ key, row, height: Math.ceil(height), estimate: getRowHeight(row) }] : [];
+        return key && row && height > 0 ? [{ key, height: Math.ceil(height), estimate: getRowHeight(row) }] : [];
       });
       setMeasured((current) => {
-        if (!resized && values.every((value) => sameMeasurement(current.get(value.key), value))) return current;
+        const removedKeys = [...current.keys()].filter((key) => !rowByKey.has(key));
+        if (
+          !resized &&
+          removedKeys.length === 0 &&
+          values.every((value) => sameMeasurement(current.get(value.key), value))
+        )
+          return current;
         const next = resized ? new Map<string, MeasuredRow>() : new Map(current);
-        for (const value of values)
-          next.set(value.key, { row: value.row, height: value.height, estimate: value.estimate });
-        for (const key of next.keys()) if (!rowByKey.has(key)) next.delete(key);
+        for (const value of values) next.set(value.key, { height: value.height, estimate: value.estimate });
+        for (const key of removedKeys) next.delete(key);
         return next;
       });
     };

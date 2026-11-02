@@ -70,12 +70,6 @@ describe('F202 C1 Core cutover gate — production-composition activation prereq
     const base = externalManifest();
     const manifest = {
       ...base,
-      // The package must REQUEST secret.read for the Host to be allowed to grant it; an
-      // effective grant outside the manifest request is rejected at admission by design.
-      features: base.features.map((feature) => ({
-        ...feature,
-        capabilities: [...feature.capabilities, 'secret.read'],
-      })),
       configuration: [{ key: 'FEISHU_APP_SECRET', label: 'Feishu app secret', kind: 'secret', required: true }],
     };
     const packages = {
@@ -96,7 +90,6 @@ describe('F202 C1 Core cutover gate — production-composition activation prereq
       computedPackageDigest: EXTERNAL_PACKAGE_DIGEST,
       expectedPackageDigest: EXTERNAL_PACKAGE_DIGEST,
       packagePluginId: EXTERNAL_PLUGIN_ID,
-      effectiveGrants: ['messaging.send', 'secret.read'],
       signalSchemas: {
         'schemas/external.signal.v1.schema.json': {
           type: 'object',

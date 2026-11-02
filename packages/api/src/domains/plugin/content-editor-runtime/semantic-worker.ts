@@ -10,7 +10,6 @@ export interface EditorWorkerAuthority {
   readonly providerId: string;
   readonly packageDigest: string;
   readonly providerVersion: string;
-  readonly grantRevision: number;
   readonly lifecycleRevision: number;
   readonly executionLeaseDigest: string;
 }
@@ -70,7 +69,6 @@ export class ContentEditorSemanticWorker {
         !handle ||
         handle.packageDigest !== authority.packageDigest ||
         handle.providerVersion !== authority.providerVersion ||
-        handle.grantRevision !== authority.grantRevision ||
         handle.lifecycleRevision !== authority.lifecycleRevision ||
         `sha256:${createHash('sha256').update(handle.executionLease).digest('hex')}` !== authority.executionLeaseDigest
       )

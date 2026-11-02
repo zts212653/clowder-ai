@@ -5,7 +5,13 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
 
 import { apiFetch } from '@/utils/api-client';
+import { writeShellLanguage } from '../../shell/shell-language';
 import { CollectiveLaunchSurface } from '../CollectiveLaunchSurface';
+import {
+  beginWorldDirectoryObservation,
+  publishWorldDirectoryObservation,
+  resetWorldDirectoryStoreForTests,
+} from '../collective-world-directory-store';
 
 const mockApiFetch = vi.mocked(apiFetch);
 const explicitTarget = (collectiveId: string) =>
@@ -51,12 +57,15 @@ describe('Collective world navigation surface', () => {
     root = createRoot(container);
     mockApiFetch.mockReset();
     window.history.replaceState({}, '', '/collective');
+    writeShellLanguage('zh');
+    resetWorldDirectoryStoreForTests();
   });
 
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
     window.history.replaceState({}, '', '/collective');
+    resetWorldDirectoryStoreForTests();
     vi.restoreAllMocks();
   });
 
@@ -108,7 +117,7 @@ describe('Collective world navigation surface', () => {
     await flush();
     const iframe = container.querySelector('iframe');
     if (!iframe?.contentWindow) throw new Error('Collective iframe was not mounted');
-    expect(new URL(iframe.src).searchParams.get('collectiveId')).toBe('col_target000');
+    expect(new URL(iframe.src).searchParams.get('collectiveId')).toBeNull();
     const postMessage = vi.spyOn(iframe.contentWindow, 'postMessage');
     await act(async () => {
       window.dispatchEvent(
@@ -141,13 +150,15 @@ describe('Collective world navigation surface', () => {
         }),
       );
     });
-    expect(container.textContent).toContain('目标共同家园已不可用');
-    expect(new URL(iframe.src).searchParams.get('collectiveId')).toBe('col_target000');
+    expect(container.textContent).toContain('当前账号现在进不去这个共同体');
+    expect(new URL(iframe.src).searchParams.get('collectiveId')).toBeNull();
   });
 
   it('presents an expired session as a neutral sign-in notice and retains the exact selected world', async () => {
     window.history.replaceState({}, '', explicitTarget('col_target000'));
-    mockApiFetch.mockResolvedValue(response({ runtimeStatus: 'active', connections: [connection('col_target000')] }));
+    mockApiFetch.mockImplementation(async () =>
+      response({ runtimeStatus: 'active', connections: [connection('col_target000')] }),
+    );
     await act(async () => root.render(<CollectiveLaunchSurface />));
     await flush();
     const iframe = container.querySelector('iframe');
@@ -170,9 +181,9 @@ describe('Collective world navigation surface', () => {
       serviceInstanceId: 'svc_12345678',
     });
     const notice = container.querySelector('[role="status"]');
-    expect(notice?.textContent).toContain('需要重新登录');
+    expect(notice?.textContent).toContain('请换账号或重新登录');
     expect(notice?.className).not.toContain('conn-red');
-    expect(new URL(iframe.src).searchParams.get('collectiveId')).toBe('col_target000');
+    expect(new URL(iframe.src).searchParams.get('collectiveId')).toBeNull();
   });
 
   it('refuses an incomplete explicit target instead of opening a paired fallback', async () => {
@@ -181,7 +192,7 @@ describe('Collective world navigation surface', () => {
     await act(async () => root.render(<CollectiveLaunchSurface />));
     await flush();
 
-    expect(container.textContent).toContain('目标共同家园地址不完整');
+    expect(container.textContent).toContain('这个共同体的入口不完整');
     expect(container.querySelector('iframe')).toBeNull();
   });
 
@@ -195,16 +206,103 @@ describe('Collective world navigation surface', () => {
     );
     await act(async () => root.render(<CollectiveLaunchSurface />));
     await flush();
-    expect(new URL(container.querySelector('iframe')?.src ?? '').searchParams.get('collectiveId')).toBe(
-      'col_target000',
-    );
+    const iframe = container.querySelector('iframe');
+    if (!iframe?.contentWindow) throw new Error('Collective iframe was not mounted');
+    expect(new URL(iframe.src).searchParams.get('collectiveId')).toBeNull();
+    const post = vi.spyOn(iframe.contentWindow, 'postMessage');
+    const send = async (data: unknown) =>
+      act(async () =>
+        window.dispatchEvent(
+          new MessageEvent('message', { origin: 'http://localhost:5201', source: iframe.contentWindow, data }),
+        ),
+      );
+    await send({ type: 'collective:world-directory-ready' });
+    const init = post.mock.calls.find(([data]) => data.type === 'collective:host-world-directory-init')?.[0];
+    if (!init) throw new Error('Missing directory handshake');
+    await send({
+      type: 'collective:client-world-directory',
+      bridgeId: init.bridgeId,
+      revision: 1,
+      state: 'ready',
+      serviceInstanceId: 'svc_12345678',
+      humanId: 'human_12345678',
+      currentCollectiveId: 'col_target000',
+      memberships: [
+        { collectiveId: 'col_target000', name: 'Target A', role: 'member' },
+        { collectiveId: 'col_target111', name: 'Target B', role: 'member' },
+      ],
+    });
 
     await act(async () => {
       window.history.pushState({}, '', explicitTarget('col_target111'));
       window.dispatchEvent(new PopStateEvent('popstate'));
     });
-    expect(new URL(container.querySelector('iframe')?.src ?? '').searchParams.get('collectiveId')).toBe(
-      'col_target111',
+    expect(container.querySelector('iframe')).toBe(iframe);
+    expect(new URL(iframe.src).searchParams.get('collectiveId')).toBeNull();
+    expect(post).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'collective:host-select-world',
+        collectiveId: 'col_target111',
+      }),
+      'http://localhost:5201',
     );
+  });
+
+  it('keeps the verified world name in a retryable unavailable surface without exposing a raw failure', async () => {
+    beginWorldDirectoryObservation({
+      serviceUrl: 'http://localhost:5201',
+      bridgeId: 'bridge_cached',
+      expectedServiceInstanceId: 'svc_12345678',
+    });
+    publishWorldDirectoryObservation({
+      serviceUrl: 'http://localhost:5201',
+      bridgeId: 'bridge_cached',
+      directory: {
+        type: 'collective:client-world-directory',
+        bridgeId: 'bridge_cached',
+        revision: 1,
+        state: 'ready',
+        serviceInstanceId: 'svc_12345678',
+        humanId: 'human_12345678',
+        currentCollectiveId: 'col_target000',
+        memberships: [{ collectiveId: 'col_target000', name: '猫咖共创组', role: 'member' }],
+      },
+    });
+    window.history.replaceState({}, '', explicitTarget('col_target000'));
+    mockApiFetch.mockImplementation(async () =>
+      response({ runtimeStatus: 'active', connections: [connection('col_target000')] }),
+    );
+    await act(async () => root.render(<CollectiveLaunchSurface />));
+    await flush();
+    const iframe = container.querySelector('iframe');
+    if (!iframe?.contentWindow) throw new Error('Collective iframe was not mounted');
+    const post = vi.spyOn(iframe.contentWindow, 'postMessage');
+    const send = async (data: unknown) =>
+      act(async () =>
+        window.dispatchEvent(
+          new MessageEvent('message', { origin: 'http://localhost:5201', source: iframe.contentWindow, data }),
+        ),
+      );
+    await send({ type: 'collective:world-directory-ready' });
+    const init = post.mock.calls.find(([data]) => data.type === 'collective:host-world-directory-init')?.[0];
+    if (!init) throw new Error('Missing directory handshake');
+    await send({
+      type: 'collective:client-world-directory',
+      bridgeId: init.bridgeId,
+      revision: 1,
+      state: 'unavailable',
+      code: 'service_unavailable',
+      serviceInstanceId: 'svc_12345678',
+    });
+
+    expect(container.textContent).toContain('暂时无法打开猫咖共创组');
+    expect(container.textContent).not.toContain('Failed to fetch');
+    await act(async () => writeShellLanguage('en'));
+    expect(container.textContent).toContain("Can't open 猫咖共创组");
+    expect(container.textContent).toContain('Your existing content and draft are safe');
+    const retry = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Retry');
+    expect(retry).toBeDefined();
+    await act(async () => retry?.click());
+    expect(container.querySelector('iframe')).not.toBe(iframe);
   });
 });

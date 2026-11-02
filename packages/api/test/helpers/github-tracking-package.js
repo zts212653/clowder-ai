@@ -9,18 +9,25 @@ import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { parse } from 'yaml';
 
-export async function loadTrackingPackage(t) {
+export async function loadTrackingPackage(t, generation = 'c1') {
   const matrixPath = process.env.F202_CANDIDATE_MATRIX;
   assert.ok(matrixPath, 'Set F202_CANDIDATE_MATRIX; this producer gate must not silently skip');
   const matrix = JSON.parse(await readFile(matrixPath, 'utf8'));
   const root = await mkdtemp(join(tmpdir(), 'native-tracking-package-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const roots = new Map();
-  const pins = {
-    '@clowder-ai/plugin-contract': '785543498768f4e65fca2f1c60ff9a9c45693f45a304692a73042cc13e50a713',
-    '@clowder-ai/plugin-sdk': '59fedad9d87043558b57315cc1ad0f4fb22cebdcf1329bec84825a3579d3db03',
-    '@clowder-ai/github-operations': 'fee6fbfa937e11d1e3878a6a07ab7b69dbe6cc767e229cebc025826fd4440e7c',
-  };
+  const pins =
+    generation === 'current'
+      ? {
+          '@clowder-ai/plugin-contract': 'd98817b1476ef33bb00cf59e27c3e90f4097bbf4f9ad74232944cb0aa2f14ce9',
+          '@clowder-ai/plugin-sdk': '5a0f7d0823048b3da588308fa7f7f11abe7a4408d7d7814ce04a4b41a311647c',
+          '@clowder-ai/github-operations': '004171d8531a4b93b73fd042eef3cddf42a51efe58886dce985b93f31ca4ad82',
+        }
+      : {
+          '@clowder-ai/plugin-contract': '785543498768f4e65fca2f1c60ff9a9c45693f45a304692a73042cc13e50a713',
+          '@clowder-ai/plugin-sdk': '59fedad9d87043558b57315cc1ad0f4fb22cebdcf1329bec84825a3579d3db03',
+          '@clowder-ai/github-operations': 'fee6fbfa937e11d1e3878a6a07ab7b69dbe6cc767e229cebc025826fd4440e7c',
+        };
   for (const [name, sha256] of Object.entries(pins)) {
     const row = [...matrix.canonical, ...matrix.allPackages].find((item) => item.name === name);
     assert.ok(row, `missing ${name}`);

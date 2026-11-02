@@ -92,4 +92,64 @@ describe('RedisProposalStore requester withdraw', { skip: redisIsolationSkipReas
     const hydrated = await store.get(proposal.proposalId);
     assert.equal(hydrated.status, claim ? 'approving' : 'withdrawn');
   });
+
+  it('persists revision lineage without a TTL and atomically races replacement against approval', async () => {
+    const base = {
+      sourceThreadId: 'thread_src',
+      sourceInvocationId: 'inv_3',
+      sourceCatId: 'opus',
+      sourceMessageId: 'msg_3',
+      title: 'F330 发版',
+      reason: 'Revise',
+      parentThreadId: 'thread_src',
+      preferredCats: ['codex'],
+      projectPath: '/projects/cat-cafe',
+      createdBy: 'alice',
+      suggestedGroupId: 'attention_release',
+      groupSuggestionReason: 'explicit',
+      suggestedPinned: true,
+    };
+    const original = await store.create(base);
+    const request = {
+      messageId: 'revision_message',
+      instruction: '换 Argon 审',
+      requestedBy: 'alice',
+      requestedAt: 10,
+      choices: { suggestedGroupId: null, pinned: false },
+    };
+    await store.recordRevisionRequest(original.proposalId, request);
+    await store.recordRevisionRequest(original.proposalId, { ...request, queuedAt: 11 });
+    const { RedisProposalStore } = await import('../dist/domains/cats/services/stores/redis/RedisProposalStore.js');
+    const reopened = new RedisProposalStore(redis);
+    const read = await reopened.get(original.proposalId);
+    assert.equal(read.suggestedGroupId, 'attention_release');
+    assert.equal(read.suggestedPinned, true);
+    assert.equal(read.revisionRequest.queuedAt, 11);
+    assert.deepEqual(read.revisionRequest.choices, request.choices);
+    const { ProposalKeys } = await import('../dist/domains/cats/services/stores/redis-keys/proposals/proposal-keys.js');
+    assert.equal(await redis.ttl(ProposalKeys.detail(original.proposalId)), -1);
+
+    const replacement = await reopened.create({
+      ...base,
+      sourceMessageId: request.messageId,
+      supersedesProposalId: original.proposalId,
+    });
+    assert.equal(
+      await reopened.supersedePending(original.proposalId, replacement.proposalId, request.messageId),
+      null,
+      'invisible cards cannot retire the original',
+    );
+    await reopened.setCardMessageId(replacement.proposalId, 'visible_replacement');
+    const [claim, replaced] = await Promise.all([
+      reopened.claimForApproval({ proposalId: original.proposalId, approvedBy: 'alice' }),
+      reopened.supersedePending(original.proposalId, replacement.proposalId, request.messageId),
+    ]);
+    assert.equal(Number(Boolean(claim)) + Number(Boolean(replaced)), 1);
+    if (replaced) {
+      assert.equal((await reopened.get(original.proposalId)).supersededByProposalId, replacement.proposalId);
+      assert.ok(
+        (await reopened.listSettledByUser('alice')).some((proposal) => proposal.proposalId === original.proposalId),
+      );
+    }
+  });
 });

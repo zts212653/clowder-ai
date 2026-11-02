@@ -13,7 +13,7 @@ test('stream readers return bytes, release on cancellation and allow reading the
   const expected = Buffer.alloc(150000, 7);
   const reference = await ledger.register(expected);
   const service = new PluginMediaReadService({ ledger, entitlements: { isEntitled: async () => true } });
-  const context = { pluginInstanceId: 'fixture', effectiveGrants: ['streams.read'] };
+  const context = { pluginInstanceId: 'fixture' };
   const first = service.stream(context, reference)[Symbol.asyncIterator]();
   assert.ok((await first.next()).value instanceof Uint8Array);
   await first.return();
@@ -26,10 +26,6 @@ test('stream readers return bytes, release on cancellation and allow reading the
     for await (const _ of service.stream(context, reference, { signal: abort.signal })) {
     }
   }, /abort/i);
-  await assert.rejects(async () => {
-    for await (const _ of service.stream({ ...context, effectiveGrants: [] }, reference)) {
-    }
-  }, /streams.read/);
 });
 
 const { HostMediaSourceImporter } = await import('../dist/domains/plugin/media-source-importer.js');

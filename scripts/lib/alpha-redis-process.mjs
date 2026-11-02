@@ -64,9 +64,9 @@ function withIdentityReobservation(
   }
 }
 
-function redisScope(raw) {
+function redisScope(raw, { requireClean = true } = {}) {
   const coordinates = parseNamedAlphaCoordinates(raw);
-  assertNamedAlphaCheckout(coordinates, { requireBuilds: true, requireTarget: true });
+  assertNamedAlphaCheckout(coordinates, { requireBuilds: true, requireTarget: true, requireClean });
   const dataDirectory = join(coordinates.alphaRoot, '.cat-cafe/redis');
   if (realpathSync(dataDirectory) !== dataDirectory) throw new Error('Redis directory is not its exact Alpha home');
   return { projectRoot: coordinates.alphaRoot, dataDirectory, port: coordinates.ports.redis };
@@ -119,9 +119,8 @@ export function captureNamedAlphaRedisIdentity(raw, deps = {}) {
   return withIdentityReobservation((readListeners) => captureRedisIdentityOnce(raw, { ...deps, readListeners }), deps);
 }
 
-/** OS metadata must prove the same incarnation before PING, CONFIG, BGSAVE or shutdown is considered. */
-function verifyRedisIdentityOnce(raw, proof, { readListeners = listenerPids, capture = captureProcessIdentity } = {}) {
-  const scope = redisScope(raw);
+function storedProofScope(raw, proof) {
+  const scope = redisScope(raw, { requireClean: false });
   if (
     !proof ||
     proof.v !== 1 ||
@@ -133,6 +132,22 @@ function verifyRedisIdentityOnce(raw, proof, { readListeners = listenerPids, cap
     !proof.process
   )
     throw new Error('Alpha Redis ownership proof is missing or changed');
+  return scope;
+}
+
+/** Historical scope only. This never supplies live ownership or authorizes a protocol command. */
+export function assertNamedAlphaRedisHistoricalProof(raw, proof) {
+  const scope = storedProofScope(raw, proof);
+  if (
+    !validRedisIdentity(proof.process, scope.dataDirectory) ||
+    Date.parse(`${proof.process.startedAt} UTC`) !== proof.process.startedAtEpochMs
+  )
+    throw new Error('Alpha Redis historical process identity is inconsistent');
+}
+
+/** OS metadata must prove the same incarnation before PING, CONFIG, BGSAVE or shutdown is considered. */
+function verifyRedisIdentityOnce(raw, proof, { readListeners = listenerPids, capture = captureProcessIdentity } = {}) {
+  const scope = storedProofScope(raw, proof);
   const listeners = readListeners(scope.port);
   if (listeners.length !== 1 || listeners[0] !== proof.pid) throw new Error('Alpha Redis listener was replaced');
   const current = captureAlphaIdentity(proof.pid, capture, REDIS_SUBJECT);

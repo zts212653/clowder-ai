@@ -6,6 +6,15 @@
 export const CURRENT_RELATIONSHIP_PROFILE_URI = 'cat-cafe-profile://relationship/current' as const;
 /** Phase E: canonical URI for the owner-wide shared corpus. */
 export const CURRENT_CORPUS_PROFILE_URI = 'cat-cafe-profile://corpus/current' as const;
+export const CURRENT_CAPSULE_PROFILE_URI = 'cat-cafe-profile://capsule/current' as const;
+export const PROFILE_CAPSULE_RELATIVE_PATH = 'capsule.md' as const;
+export const LEGACY_PROFILE_CAPSULE_RELATIVE_PATH = 'operator-capsule.md' as const;
+
+/** A canonical file, including an empty file or tombstone, always shadows the old name. */
+export function profileCapsuleReadRelativePath(exists: (relativePath: string) => boolean): string {
+  return exists(PROFILE_CAPSULE_RELATIVE_PATH) ? PROFILE_CAPSULE_RELATIVE_PATH : LEGACY_PROFILE_CAPSULE_RELATIVE_PATH;
+}
+export const PROFILE_MEMORY_TOMBSTONE_PREFIX = '{"catCafeProfileTombstone":1,';
 export const DEFAULT_PROFILE_USER_ID = 'default-user';
 export const USER_CAPSULE_CHAR_LIMIT = 300;
 
@@ -66,18 +75,31 @@ export function relationshipKeyFromPrimerRelativePath(targetPath: string): strin
  * bind the exact rendered profile segment, instead of accidentally binding a
  * newer on-disk profile body after compilation has already happened.
  */
-export function renderUserCapsuleSection(raw: string): string {
+export function splitUserCapsule(raw: string): { prefix: string; body: string } {
+  if (raw.startsWith(PROFILE_MEMORY_TOMBSTONE_PREFIX)) return { prefix: '', body: '' };
   const lines = raw.trim().split('\n');
-  let body: string;
+  let bodyStart: number;
   if (lines[0]?.trim() === '---') {
     const closingFence = lines.findIndex((line, index) => index > 0 && line.trim() === '---');
-    body = (closingFence < 0 ? lines.slice(1) : lines.slice(closingFence + 1)).join('\n').trim();
+    bodyStart = closingFence < 0 ? 1 : closingFence + 1;
   } else {
     const metadataFence = lines.findIndex((line) => line.trim() === '---');
-    body = (metadataFence < 0 ? raw : lines.slice(metadataFence + 1).join('\n')).trim();
+    bodyStart = metadataFence < 0 ? 0 : metadataFence + 1;
   }
+  return {
+    prefix: bodyStart ? `${lines.slice(0, bodyStart).join('\n')}\n` : '',
+    body: lines.slice(bodyStart).join('\n').trim(),
+  };
+}
+
+export function userCapsuleCharacterCount(body: string): number {
+  return [...body.replace(/\s/g, '')].length;
+}
+
+export function renderUserCapsuleSection(raw: string): string {
+  const { body } = splitUserCapsule(raw);
   if (!body) return '';
-  const charCount = [...body.replace(/\s/g, '')].length;
+  const charCount = userCapsuleCharacterCount(body);
   if (charCount > USER_CAPSULE_CHAR_LIMIT) {
     throw new Error(
       `USER_CAPSULE exceeds ${USER_CAPSULE_CHAR_LIMIT}-character limit: ${charCount} characters. ` +

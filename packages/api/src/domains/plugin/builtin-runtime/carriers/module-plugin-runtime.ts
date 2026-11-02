@@ -6,6 +6,7 @@ import type { IThreadStore } from '../../../cats/services/stores/ports/ThreadSto
 import type { MessagingService } from '../../../messaging/messaging-service.js';
 import type { SubscriptionDelivery } from '../../../messaging/subscription-delivery.js';
 import { type PluginInvocationOutcome, settlePluginInvocation } from '../../carrier/host-invocation.js';
+import type { SharedMcpFactory } from '../../declared/shared-mcp-factory.js';
 import { verifyPackageEntrypoint } from '../../external-runtime/package-entrypoint-authority.js';
 import {
   ExternalPluginRuntimeError,
@@ -38,7 +39,7 @@ import {
 import type { PluginThreadProjectionDeps } from '../../host-surface/plugin-thread-projections.js';
 import type { PluginTaskAdmissionServices } from '../../host-surface/task/plugin-task-data-services.js';
 import { createPluginTaskHost, type PluginTaskHost } from '../../host-surface/task/plugin-task-host.js';
-import type { BuiltinPluginPackageMaterializer } from '../../manager/builtin-package-materializer.js';
+import type { BuiltinPluginPackageMaterializer } from '../../manager/package-assets/builtin-package-materializer.js';
 import {
   type PluginRuntimeConfigurationPort,
   type ResolvedConfigurationField,
@@ -77,14 +78,16 @@ export interface PluginModuleEntrypointShape {
 export type ModulePluginLogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 export interface ModulePluginHostShape {
-  /** Installation identity for attribution; Host operations retain their own grant and lifecycle checks. */
+  /** Installation identity for attribution; Host operations retain their own identity and lifecycle checks. */
   readonly pluginInstanceId: string;
   readonly config: { get(key: string): Promise<unknown> };
   readonly secrets: { get(key: string): Promise<string | undefined> };
   readonly storage: PluginStorageHost;
   readonly tasks: PluginTaskHost;
   readonly members?: PluginNeutralHost['members'];
+  readonly memberSessions?: PluginNeutralHost['memberSessions'];
   readonly collectiveArtifactOwner?: PluginNeutralHost['collectiveArtifactOwner'];
+  readonly collectiveMaterialSource?: PluginNeutralHost['collectiveMaterialSource'];
   readonly threads: PluginThreadHost;
   readonly messaging: PluginMessagingHost;
   readonly streams: PluginStreams;
@@ -137,7 +140,8 @@ export interface ModulePluginRuntimeOptions {
     readonly projectPath: string;
   };
   readonly messaging?: {
-    readonly messageStore?: Pick<IMessageStore, 'getById'>;
+    readonly messageStore?: Pick<IMessageStore, 'getById'> & Partial<Pick<IMessageStore, 'getByIdempotencyKey'>>;
+    readonly readMessageTargets?: (threadId: string, messageId: string) => Promise<readonly string[]>;
     readonly service: MessagingService;
     readonly delivery: Pick<SubscriptionDelivery, 'register' | 'unregister'>;
     readonly threadStore: IThreadStore;
@@ -153,7 +157,6 @@ interface LoadedModule {
   readonly packageRecord: ExecutablePluginPackageRecord;
   readonly packageDigest: string;
   readonly manifest: PluginManifest;
-  readonly effectiveGrants: readonly string[];
   /** Hook shape is stable for this verified definition’s loaded generation. */
   readonly hasSettings: boolean;
   readonly located: VerifiedPluginPackage;
@@ -195,6 +198,22 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
 
   constructor(private readonly options: ModulePluginRuntimeOptions) {}
 
+  async resolveMcpFactory(pluginInstanceId: string, contributionId: string): Promise<SharedMcpFactory | undefined> {
+    const loaded = this.#loaded.get(pluginInstanceId);
+    const declarations = loaded?.manifest.contributions?.filter((c) => c.type === 'mcp' && c.id === contributionId);
+    const declaration = declarations?.length === 1 ? declarations[0] : undefined;
+    if (!loaded || declaration?.type !== 'mcp' || !declaration.sharedFactory) return undefined;
+    const { entrypoint } = await verifyPackageEntrypoint(loaded.packageRecord, loaded.located, contributionId);
+    await loaded.located.verifyIntegrity();
+    const namespace: Record<string, unknown> = await import(pathToFileURL(entrypoint).href);
+    if (this.#loaded.get(pluginInstanceId) !== loaded || !this.#neutralActivations.has(pluginInstanceId))
+      throw new ExternalPluginRuntimeError('INSTANCE_NOT_RUNNABLE', 'MCP factory activation changed');
+    const factory = namespace[declaration.sharedFactory.export];
+    if (typeof factory !== 'function')
+      throw new ExternalPluginRuntimeError('INVALID_ENTRYPOINT', 'MCP factory export is unavailable');
+    return factory as SharedMcpFactory;
+  }
+
   /**
    * Claims any admitted package that declares a module to load. The claim reads the
    * manifest alone — never a pluginId (clause 6) — so registering this runtime after the
@@ -223,11 +242,7 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
     });
   }
 
-  async start(
-    pluginInstanceId: string,
-    admittedPackage: ExecutablePluginPackageRecord,
-    admittedGrants: readonly string[],
-  ): Promise<void> {
+  async start(pluginInstanceId: string, admittedPackage: ExecutablePluginPackageRecord): Promise<void> {
     if (this.#loaded.has(pluginInstanceId) || this.#unfinished.has(pluginInstanceId)) {
       throw new ExternalPluginRuntimeError(
         'RUNTIME_ALREADY_ACTIVE',
@@ -237,7 +252,6 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
     // These are Host-owned authority values, never the caller's or the module's mutable objects.
     // Capture before package resolution yields, and retain them through every admission phase.
     const packageRecord = snapshotModuleAuthority(admittedPackage);
-    const effectiveGrants = snapshotModuleAuthority(admittedGrants);
     const located = await this.#resolvePackage(pluginInstanceId, packageRecord);
     const activationToken = Symbol(pluginInstanceId);
     this.#neutralActivations.set(pluginInstanceId, activationToken);
@@ -276,13 +290,12 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
       const resolved = await resolveManifestConfiguration({
         pluginInstanceId,
         manifest: packageRecord.manifest,
-        effectiveGrants,
         configuration: this.options.configuration,
       });
       for (const field of resolved) if (field.kind !== 'secret') moduleConfigValue(field);
       const settingsHost = await createModuleSettingsHost(
-        { pluginInstanceId, packageRecord, effectiveGrants },
-        this.options,
+        { pluginInstanceId, packageRecord },
+        { ...this.options, variantMode: 'runtime' },
         async () => assertActivation(),
       );
       const threads = this.options.threads
@@ -291,7 +304,6 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
             pluginId: packageRecord.pluginId,
             ownerUserId: this.options.threads.ownerUserId,
             projectPath: this.options.threads.projectPath,
-            effectiveGrants,
             assertCurrent: assertActivation,
             threadStore: this.options.threads.threadStore,
           })
@@ -301,7 +313,6 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
             pluginId: packageRecord.pluginId,
             pluginInstanceId,
             ownerUserId: this.options.messaging.ownerUserId,
-            effectiveGrants,
             threadStore: this.options.messaging.threadStore,
             assertCurrent: assertActivation,
             messaging: this.options.messaging.service,
@@ -312,10 +323,12 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
       const messaging = this.options.messaging
         ? createPluginMessagingHost({
             messageStore: this.options.messaging.messageStore,
+            ...(this.options.messaging.readMessageTargets
+              ? { readMessageTargets: this.options.messaging.readMessageTargets }
+              : {}),
             pluginId: packageRecord.pluginId,
             pluginInstanceId,
             ownerUserId: this.options.messaging.ownerUserId,
-            effectiveGrants,
             manifest: packageRecord.manifest,
             threadStore: this.options.messaging.threadStore,
             assertCurrent: assertActivation,
@@ -323,11 +336,7 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
             subscriptions: subscriptions.host,
           })
         : createUnavailablePluginMessagingHost();
-      const streams = createPluginStreamsHost(
-        this.options.media,
-        { pluginInstanceId, effectiveGrants },
-        assertActivation,
-      );
+      const streams = createPluginStreamsHost(this.options.media, { pluginInstanceId }, assertActivation);
       const neutral = await this.options.neutral?.(
         pluginInstanceId,
         packageRecord.packageDigest,
@@ -353,7 +362,6 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
           ...(taskAdmission ? { admission: taskAdmission } : {}),
           pluginInstanceId,
           pluginId: packageRecord.pluginId,
-          effectiveGrants,
           taskStore: this.options.taskStore,
           ownerUserId: this.options.taskOwnerUserId,
           threadStore: this.options.messaging?.threadStore,
@@ -398,7 +406,6 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
         subscriptions,
         packageDigest: packageRecord.packageDigest,
         manifest: packageRecord.manifest,
-        effectiveGrants,
       });
     } catch (error) {
       operationActivation.abort();
@@ -464,11 +471,7 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
     }
   }
 
-  async uninstall(
-    pluginInstanceId: string,
-    packageRecord: ExecutablePluginPackageRecord,
-    effectiveGrants: readonly string[],
-  ): Promise<void> {
+  async uninstall(pluginInstanceId: string, packageRecord: ExecutablePluginPackageRecord): Promise<void> {
     const located = await this.#resolvePackage(pluginInstanceId, packageRecord);
     let disposed = false;
     const current = async () => {
@@ -481,11 +484,7 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
       if (typeof entry?.create !== 'function')
         throw new ExternalPluginRuntimeError('INVALID_ENTRYPOINT', 'Module must export create()');
       const definition = entry.create(structuredClone(packageRecord.manifest));
-      const host = await createModuleSettingsHost(
-        { pluginInstanceId, packageRecord, effectiveGrants },
-        this.options,
-        current,
-      );
+      const host = await createModuleSettingsHost({ pluginInstanceId, packageRecord }, this.options, current);
       await definition.preUninstall?.(host);
       await definition.uninstall?.(host);
     } finally {
@@ -498,7 +497,6 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
     const admitted = {
       ...input,
       packageRecord: snapshotModuleAuthority(input.packageRecord),
-      effectiveGrants: snapshotModuleAuthority(input.effectiveGrants),
     };
     const id = admitted.pluginInstanceId;
     const loaded = this.#loaded.get(id);

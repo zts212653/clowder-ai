@@ -1,6 +1,6 @@
 import type { ImmutableMedia } from '@cat-cafe/shared';
-import Image from 'next/image';
 import { type RefObject, useCallback } from 'react';
+import { ContentMediaElement } from '@/components/content-review/ContentMediaElement';
 import { videoArtworkCopy } from '@/components/content-review/video-artwork.shell-copy';
 import { useShellCopy } from '@/components/shell/shell-copy';
 
@@ -33,33 +33,31 @@ export function WorkspaceReviewMediaElement({
   if (!src) return <p className="p-4 text-sm text-cafe-muted">{error ?? t.loading}</p>;
   if (media.kind === 'image')
     return (
-      <Image
+      <ContentMediaElement
+        kind="image"
         src={src}
-        alt={t.imageAlt}
+        title={t.imageAlt}
         width={media.width}
         height={media.height}
-        unoptimized
         className="absolute inset-0 h-full w-full object-contain"
-        data-testid="workspace-content-review-media"
+        testId="workspace-content-review-media"
         onError={imageError}
       />
     );
   return (
-    // biome-ignore lint/a11y/useMediaCaption: The source owner supplies real tracks; no invented captions.
-    <video
-      ref={video}
-      controls={!selectionActive && !customControls}
-      crossOrigin="use-credentials"
-      playsInline
+    <ContentMediaElement
+      kind="video"
       src={src}
+      videoRef={video}
       className="absolute inset-0 h-full w-full object-contain"
-      data-testid="workspace-content-review-media"
-      onSeeking={onSeeking}
-      onSeeked={onSeeked}
-      onTimeUpdate={(event) => onSeconds(event.currentTarget.currentTime)}
+      testId="workspace-content-review-media"
+      videoProps={{
+        controls: !selectionActive && !customControls,
+        onSeeking,
+        onSeeked,
+        onTimeUpdate: (event) => onSeconds(event.currentTarget.currentTime),
+      }}
       onError={() => onError(t.videoError)}
-    >
-      {t.unsupported}
-    </video>
+    />
   );
 }

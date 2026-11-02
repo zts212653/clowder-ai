@@ -59,6 +59,8 @@ class FakeAppServerWire {
       this.inbox.push({ id: message.id, result: { account: { type: 'chatgpt' } } });
     } else if (message.method === 'thread/start' || message.method === 'thread/resume') {
       this.inbox.push({ id: message.id, result: { thread: { id: this.threadId, turns: [] } } });
+    } else if (message.method === 'thread/turns/list') {
+      this.inbox.push({ id: message.id, result: { data: [], nextCursor: null } });
     } else if (message.method === 'turn/start') {
       this.inbox.push({ id: message.id, result: { turn: { id: 'turn-1', status: 'inProgress', items: [] } } });
       setImmediate(() => {

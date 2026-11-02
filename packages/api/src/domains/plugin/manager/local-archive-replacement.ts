@@ -7,7 +7,6 @@ import {
 import type { PluginManifest } from '@clowder-ai/plugin-contract';
 import { type PackageAdmissionContractRuntime, verifyPackageAdmission } from '../host-inventory/manifest-verifier.js';
 import type { PackageAdmissionCandidate, PluginInventorySnapshot } from '../host-inventory/types.js';
-import { PluginInventoryError } from '../host-inventory/types.js';
 
 export class PluginArchiveReplacementError extends Error {
   constructor(
@@ -27,8 +26,8 @@ function stale(): never {
   );
 }
 
-/** Only a legacy instance without recorded provenance needs this explicit replacement offer. */
-export function confirmLegacyArchiveReplacement(
+/** Bind explicit legacy or same-package catalog replacement to the exact installation and archive. */
+export function confirmArchiveReplacement(
   sourceKind: string,
   snapshot: PluginInventorySnapshot,
   candidate: PackageAdmissionCandidate & { readonly manifest: PluginManifest },
@@ -39,29 +38,29 @@ export function confirmLegacyArchiveReplacement(
     (instance) => instance.pluginId === candidate.packagePluginId && instance.lifecycleState === 'installed',
   );
   const previous = snapshot.packages.find((record) => record.packageDigest === current?.packageDigest);
-  const legacy = sourceKind === 'local-archive' && current && previous && previous.provenance === undefined;
-  if (!legacy) {
+  const legacy = previous?.provenance === undefined;
+  const sameCatalogPackage =
+    previous?.provenance?.kind === 'catalog' &&
+    candidate.provenance?.kind === 'local-archive' &&
+    previous.provenance.packageName === candidate.provenance.packageName;
+  if (sourceKind !== 'local-archive' || !current || !previous || (!legacy && !sameCatalogPackage)) {
     if (confirmation !== undefined) stale();
     return false;
   }
-  // Read-only preflight uses the same contract and grant verifier as the eventual upgrade.
+  // Read-only preflight uses the same package verifier as the eventual upgrade.
   // Its timestamp is discarded; no inventory record is persisted by this call.
-  const verified = verifyPackageAdmission(candidate, 0, contract);
-  const grant = snapshot.grants.find((record) => record.pluginInstanceId === current.pluginInstanceId);
-  if (!grant) throw new PluginInventoryError('INVENTORY_INVARIANT', 'current instance has no grant record');
+  verifyPackageAdmission(candidate, 0, contract);
   const expected: PluginArchiveReplacementConfirmation = {
     pluginId: current.pluginId,
     pluginInstanceId: current.pluginInstanceId,
     currentPackageDigest: current.packageDigest,
     candidatePackageDigest: candidate.computedPackageDigest,
     expectedLifecycleRevision: current.lifecycleRevision,
-    expectedGrantRevision: grant.grantRevision,
-    candidateEffectiveGrants: [...verified.effectiveGrants],
   };
   if (confirmation === undefined) {
     throw new PluginArchiveReplacementError(
       'ARCHIVE_REPLACEMENT_CONFIRMATION_REQUIRED',
-      'Confirm replacing this legacy installation while retaining its instance, configuration, and data.',
+      'Confirm replacing this installation while retaining its instance, configuration, and data.',
       {
         confirmation: expected,
         displayName: candidate.manifest.name,

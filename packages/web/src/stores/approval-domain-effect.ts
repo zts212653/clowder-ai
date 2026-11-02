@@ -48,3 +48,30 @@ export function readDomainWriteEffect(
       ? 'entity-written'
       : undefined;
 }
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+/** Called only after the history row has passed its owner/proposal/publication fence. */
+export function canonicalDomainEffect(value: unknown): DomainApprovalEffect | undefined {
+  const row = asRecord(value);
+  if (row?.resolution !== 'accepted') return;
+  const materialization = asRecord(row.materialization),
+    detail = asRecord(row.detail);
+  const proof = materialization?.effectProofRef;
+  if (
+    materialization?.state !== 'succeeded' ||
+    typeof proof !== 'string' ||
+    !proof.trim() ||
+    proof !== detail?.canonicalEffectProofRef
+  )
+    return;
+  if (row.sourceFeatureId === 'F193') return 'dispatch-delivered';
+  if (row.sourceFeatureId === 'F260') return 'entity-written';
+  if (row.sourceFeatureId === 'F221' && proof.startsWith(`taste-proposal:${row.proposalId}:vignette:`))
+    return 'taste-written';
+  return undefined;
+}

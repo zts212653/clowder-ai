@@ -24,7 +24,7 @@ export type MemoryProcessJob =
       kind: 'message-search';
       dbPath: string;
       query: string;
-      options: Omit<MessagePassageSearchOptions, 'signal'>;
+      options: Omit<MessagePassageSearchOptions, 'signal' | 'onReadSnapshot' | 'onCjkRead'>;
       embedding?: EmbeddingSnapshot;
       flags: Record<string, string>;
     }

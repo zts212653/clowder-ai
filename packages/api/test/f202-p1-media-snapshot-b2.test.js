@@ -47,11 +47,7 @@ async function fixture() {
     },
   });
   const media = new PluginMediaReadService({ ledger, entitlements });
-  const read = () =>
-    media.read(
-      { pluginInstanceId: 'subscriber', effectiveGrants: ['streams.read'] },
-      { reference, offset: 0, limit: 1 },
-    );
+  const read = () => media.read({ pluginInstanceId: 'subscriber' }, { reference, offset: 0, limit: 1 });
   return {
     messaging,
     entitlements,

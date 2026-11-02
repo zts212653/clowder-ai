@@ -47,7 +47,7 @@ export async function createInboxInformationFixture(language) {
         const records = [],
           deliveries = [],
           vignettes = [];
-        for (const verb of ['approve', 'reject']) {
+        for (const verb of ['approve', 'reject', 'unknown']) {
           const thread = threads.create(
             owner,
             language === 'en' ? `Information proposals ${verb}` : `信息卡原操作 ${verb}`,
@@ -78,20 +78,23 @@ export async function createInboxInformationFixture(language) {
                   : '核对原证据并送回结果。\n\n') + '- Controlled original request.\n'.repeat(40),
             })
           ).proposal;
-          const preference = taste.create({
-            proposalId: `information-taste-${verb}`,
-            userId: owner,
-            catId: 'codex61-sol',
-            threadId: thread.id,
-            sourceMessageId: origin.id,
-            approvalOriginRef: originRef,
-            dimension: 'cognitive-honesty',
-            tags: ['evidence'],
-            privacy: 'public',
-            scene: language === 'en' ? 'Discussing how to describe verified work' : '讨论怎样说明已验证的工作',
-            takeaway: language === 'en' ? 'Explain the actual result first' : '先说明实际结果',
-            quote: 'Keep the original evidence.\n'.repeat(40),
-          });
+          const preference =
+            verb === 'unknown'
+              ? null
+              : taste.create({
+                  proposalId: `information-taste-${verb}`,
+                  userId: owner,
+                  catId: 'codex61-sol',
+                  threadId: thread.id,
+                  sourceMessageId: origin.id,
+                  approvalOriginRef: originRef,
+                  dimension: 'cognitive-honesty',
+                  tags: ['evidence'],
+                  privacy: 'public',
+                  scene: language === 'en' ? 'Discussing how to describe verified work' : '讨论怎样说明已验证的工作',
+                  takeaway: language === 'en' ? 'Explain the actual result first' : '先说明实际结果',
+                  quote: 'Keep the original evidence.\n'.repeat(40),
+                });
           const name = language === 'en' ? `Observable result ${verb}` : `可见结果 ${verb}`;
           const concept = entity.create({
             proposalId: `information-entity-${verb}`,
@@ -113,6 +116,7 @@ export async function createInboxInformationFixture(language) {
             ['F221', preference, taste, buildTasteProposalCardBlock],
             ['F260', concept, entity, buildEntityProposalCardBlock],
           ]) {
+            if (verb === 'unknown' && kind === 'F221') continue;
             const proposalId = proposal.proposalId ?? proposal.id;
             const envelope = await ingress.publish(
               {
@@ -130,7 +134,21 @@ export async function createInboxInformationFixture(language) {
             );
             const card = messages.getById(envelope.approvalCardRef.messageId);
             assert.ok(card);
-            records.push({ kind, verb, proposalId, thread, card, block: card.extra.rich.blocks[0], envelope });
+            records.push({
+              kind,
+              verb,
+              initiallySettled: verb === 'unknown',
+              proposalId,
+              thread,
+              card,
+              block: card.extra.rich.blocks[0],
+              envelope,
+            });
+            // Exact approved-without-effect crash window: no delivery/upsert takes place.
+            if (verb === 'unknown') {
+              if (kind === 'F193') await dispatch.approve(proposalId, owner, 'strict');
+              else entity.markApproved(proposalId, owner);
+            }
           }
         }
         await app.register(dispatchProposalRoutes, {
@@ -175,13 +193,55 @@ export async function createInboxInformationFixture(language) {
           deliveries,
           vignettes,
           target,
+          async createSuperseded(thread) {
+            const origin = messages.append({
+              userId: owner,
+              threadId: thread.id,
+              from: { kind: 'user', userId: owner },
+              content: 'Controlled same-lineage replacement',
+              timestamp: Date.now(),
+            });
+            const published = [];
+            for (const proposalId of ['superseded-original', 'superseding-current']) {
+              const { proposal } = await dispatch.create({
+                proposalId,
+                sourceThreadId: thread.id,
+                targetThreadId: target.id,
+                senderCatId: 'codex61-sol',
+                ownerUserId: owner,
+                targetCats: ['codex61-sol'],
+                createdAt: Date.now(),
+                approvalOriginRef: { kind: 'message', threadId: thread.id, messageId: origin.id },
+                content: 'This assignment was replaced by a newer request.',
+              });
+              const envelope = await ingress.publish(
+                {
+                  producerId: 'F193',
+                  canonicalProposalId: proposalId,
+                  ownerUserId: owner,
+                  requesterCatId: 'codex61-sol',
+                  originRef: proposal.approvalOriginRef,
+                  cardThreadId: thread.id,
+                  cardContent: 'Controlled replacement proposal',
+                  cardBlock: buildDispatchProposalCardBlock(proposal),
+                  createdAt: proposal.createdAt,
+                },
+                dispatch,
+              );
+              const card = messages.getById(envelope.approvalCardRef.messageId);
+              published.push({ proposalId, card, block: card.extra.rich.blocks[0] });
+            }
+            return published;
+          },
           failTasteFinalizationOnce() {
             failTasteFinalization = true;
           },
           adapters: [
             new F193ApprovalAdapter(dispatch),
             new F221ApprovalAdapter(taste),
-            new F260ApprovalAdapter(entity),
+            new F260ApprovalAdapter(entity, undefined, (p) =>
+              registry.getEntityProposalEffectProof(p.entityId, p.proposalId, p.ownerUserId),
+            ),
           ],
           async effects() {
             return {

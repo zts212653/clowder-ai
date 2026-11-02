@@ -30,6 +30,7 @@ interface InvocationTrajectoryRouteDependencies {
   listInvocationSummaries: (
     sessions: ReadableSession[],
     limit: number,
+    userId: string,
     signal?: AbortSignal,
   ) => Promise<{
     invocations: InvocationTrajectorySummary[];
@@ -208,7 +209,7 @@ export function registerInvocationTrajectoryRoutes(
     }
     return reply.send(
       await withTranscriptReadSignal(request, reply, (signal) =>
-        dependencies.listInvocationSummaries(scopedSessions, Math.min(limitValue, 500), signal),
+        dependencies.listInvocationSummaries(scopedSessions, Math.min(limitValue, 500), userId, signal),
       ),
     );
   });

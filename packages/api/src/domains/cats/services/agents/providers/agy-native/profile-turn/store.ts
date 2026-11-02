@@ -27,6 +27,12 @@ export interface AgyNativeTurnScope {
 
 export class AgyNativeProfileBusyError extends Error {}
 
+export function nativeTurnEnvironmentMarkers(owner: ProfileTurnOwner, home: string): string[] {
+  // CLI owner markers remain in every row, including manifests that appear
+  // during the scan. Only the profile's command/environment text is scoped.
+  return [owner.runHome ? `--gemini_dir=${join(owner.runHome, '.gemini')}` : `HOME=${home}`];
+}
+
 export function isNativeTurnRetiredFromSnapshot(
   owner: ProfileTurnOwner,
   home: string,

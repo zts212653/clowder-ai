@@ -30,8 +30,10 @@ test('widget sanitizer typechecks with distinct nominal Trusted Types declaratio
     const program = ts.createProgram([ambient, path.join(webRoot, 'src/components/rich/sanitize-widget-html.ts')], {
       noEmit: true,
       strict: true,
-      types: [],
-      lib: ['lib.dom.d.ts', 'lib.es2020.d.ts'],
+      types: ['node'],
+      lib: ['lib.dom.d.ts', 'lib.dom.iterable.d.ts', 'lib.es2022.d.ts'],
+      target: ts.ScriptTarget.ES2022,
+      jsx: ts.JsxEmit.ReactJSX,
       module: ts.ModuleKind.ESNext,
       moduleResolution: ts.ModuleResolutionKind.Bundler,
       esModuleInterop: true,

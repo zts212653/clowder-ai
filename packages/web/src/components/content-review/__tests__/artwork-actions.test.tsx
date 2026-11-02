@@ -114,6 +114,7 @@ it('more and right click expose the same file actions and use the full path for 
   await act(async () => button('复制路径').click());
   expect(mocks.writeText).toHaveBeenCalledWith('/home/user/original.jpg');
   expect(container.textContent).toContain('已复制路径');
+  expect(document.activeElement).toBe(button('⋯'));
   const image = container.querySelector('img');
   await act(async () =>
     image?.dispatchEvent(

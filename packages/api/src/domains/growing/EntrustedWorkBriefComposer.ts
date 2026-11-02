@@ -1,4 +1,8 @@
-import type { EntrustedWorkOwnerReadV1, ProducerAttentionReceiptV1 } from '@cat-cafe/shared';
+import type {
+  EntrustedWorkOwnerReadV1,
+  ProducerAttentionCoverageV1,
+  ProducerAttentionReceiptV1,
+} from '@cat-cafe/shared';
 
 interface EntrustedWorkBriefInput {
   currentState: 'todo' | 'doing' | 'blocked' | 'done';
@@ -11,6 +15,7 @@ interface EntrustedWorkBriefInput {
   freshnessState: 'current' | 'stale';
   preparedArtifact: EntrustedWorkOwnerReadV1['preparedArtifact'];
   timeRefs: EntrustedWorkOwnerReadV1['timeRefs'];
+  attentionCoverage: ProducerAttentionCoverageV1;
   attentionReceipts: EntrustedWorkOwnerReadV1['attentionReceipts'];
   terminal?: EntrustedWorkOwnerReadV1['terminal'];
 }
@@ -117,6 +122,7 @@ function composeNextOwner(
 ): Brief['nextOwner'] {
   if (input.freshnessState === 'stale' || input.currentState === 'done') return { kind: 'unknown' };
   if (evidence.length > 0) return { kind: 'human', ownerRef: `user:${input.ownerUserId}`, evidence };
+  if (input.attentionCoverage.state === 'partial') return { kind: 'unknown' };
   if (!input.taskOwnerCatId) return { kind: 'unknown' };
   return {
     kind: 'cat',
@@ -132,5 +138,8 @@ function composeNeedsMe(
 ): Brief['needsMe'] {
   if (input.freshnessState === 'stale') return { state: 'unknown', reason: 'stale_owner_read' };
   if (evidence.length > 0) return { state: 'needed', evidence };
+  if (input.attentionCoverage.state === 'partial') {
+    return { state: 'unknown', reason: 'attention_source_unavailable' };
+  }
   return { state: 'not_needed', evidenceRef: input.ownerRef, revision: input.revision };
 }

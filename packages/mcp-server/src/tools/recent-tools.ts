@@ -1,4 +1,5 @@
 import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+import { invocationFetch } from './invocation-auth.js';
 
 /**
  * List Recent Tool — F188 Phase F (AC-F2)
@@ -15,13 +16,16 @@ import { deploymentDefaults, formatRecallMeta } from '@cat-cafe/shared';
 import { z } from 'zod';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
+import { resolveInvocationEnv } from './invocation-auth.js';
 
 const defineTool = defineMcpMigrationFactory('recent-tools.ts', undefined, {
   resourceFamily: 'evidence-navigation',
   authority: 'local-runtime',
 });
 
-const API_URL = process.env['CAT_CAFE_API_URL'] ?? deploymentDefaults.apiBaseUrl;
+function resolveApiUrl(): string {
+  return resolveInvocationEnv('CAT_CAFE_API_URL') ?? deploymentDefaults.apiBaseUrl;
+}
 
 export const listRecentInputSchema = {
   scope: z
@@ -77,14 +81,14 @@ export async function handleListRecent(input: {
   if (input.since) params.set('since', input.since);
   if (input.limit != null) params.set('limit', String(input.limit));
   if (input.kinds && input.kinds.length > 0) params.set('kinds', input.kinds.join(','));
-  const currentThreadId = process.env['CAT_CAFE_THREAD_ID']?.trim();
+  const currentThreadId = resolveInvocationEnv('CAT_CAFE_THREAD_ID')?.trim();
   if (currentThreadId) params.set('currentThreadId', currentThreadId);
 
   const qs = params.toString();
-  const url = `${API_URL}/api/library/recent${qs ? `?${qs}` : ''}`;
+  const url = `${resolveApiUrl()}/api/library/recent${qs ? `?${qs}` : ''}`;
 
   try {
-    const response = await fetch(url);
+    const response = await invocationFetch(url);
     if (!response.ok) {
       const text = await response.text();
       return recallErrorResult(

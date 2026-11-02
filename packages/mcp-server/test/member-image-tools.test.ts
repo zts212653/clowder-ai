@@ -4,8 +4,11 @@ import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, mock, test } from 'node:test';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { CANONICAL_TOOL_REGISTRY } from '../src/canonical-server-tools.js';
-import { applyReadonlyFilter } from '../src/server-toolsets.js';
+import { applyReadonlyFilter, registerCollabToolset } from '../src/server-toolsets.js';
 import { readMemberImage } from '../src/tools/member-image-tools.js';
 
 let dir: string;
@@ -139,7 +142,7 @@ test('Linux descriptor verification rejects an outside target before reading any
   assert.equal(reads, 0);
 });
 
-test('the canonical member publication entry is exposed only to the full member profile', () => {
+test('the canonical member publication entry is exposed only to the full member profile', async () => {
   const tool = CANONICAL_TOOL_REGISTRY.find((row) => row.name === 'cat_cafe_publish_image');
   assert.ok(tool);
   assert.deepEqual(tool.policy.runtimeProfiles, ['full']);
@@ -148,10 +151,27 @@ test('the canonical member publication entry is exposed only to the full member 
     { readonly: true },
     { readonly: true, hasAgentKey: true, agentKeyUnion: true },
     { desktopMode: 'live-companion' },
-    { collectiveWork: true },
-    { participation: true },
   ]) {
     assert.equal(applyReadonlyFilter([tool], env).length, 0);
   }
   assert.equal(applyReadonlyFilter([tool], { readonly: false }).length, 1);
+  // Private principals use the actual durable allowlist consumed at registration;
+  // collectiveWork/participation are not ToolsetEnv fields and never selected a profile.
+  const server = new McpServer({ name: 'restricted-member', version: '1' });
+  registerCollabToolset(server, { allowedToolNames: ['cat_cafe_list_threads'] });
+  const client = new Client({ name: 'restricted-reader', version: '1' });
+  const [ct, st] = InMemoryTransport.createLinkedPair();
+  try {
+    await Promise.all([server.connect(st), client.connect(ct)]);
+    assert.equal(
+      (await client.listTools()).tools.some((entry) => entry.name === tool.name),
+      false,
+    );
+    const denied = await client.callTool({ name: tool.name, arguments: {} });
+    assert.equal(denied.isError, true);
+    assert.match(JSON.stringify(denied), /not found/i);
+  } finally {
+    await client.close();
+    await server.close();
+  }
 });

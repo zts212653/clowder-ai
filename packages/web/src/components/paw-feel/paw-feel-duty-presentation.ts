@@ -31,6 +31,10 @@ function dispositionDetail(item: PawFeelInboxItem, language: 'zh' | 'en'): strin
     case 'duplicate':
       return disposition.duplicateOf ? t.duplicate(disposition.duplicateOf) : undefined;
     case 'fix': {
+      if (disposition.repairBinding?.kind === 'task_assignment') {
+        const detail = t.assignment(disposition.ownerCatId ?? 'unknown', disposition.taskId ?? 'unavailable');
+        return item.responsibility.validExit ? detail : `${detail} · ${t.failedAssignment}`;
+      }
       const binding = t.binding(
         disposition.ownerCatId ?? 'unknown',
         disposition.taskId ?? 'unavailable',

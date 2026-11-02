@@ -145,6 +145,36 @@ test('alpha cannot create a registry, directory, CLI config or lock file', async
   assert.equal(existsSync(project), false);
 });
 
+for (const [label, env] of [
+  ['unlabelled linked worktree', {}],
+  ['runtime-labelled linked worktree without a runtime root', { CAT_CAFE_DEPLOYMENT_ID: 'runtime' }],
+] as const) {
+  test(`${label} cannot bootstrap the shared registry or implicit plugin migration`, async (t) => {
+    const { root, binary } = await fixture(t);
+    const project = join(root, 'must-not-exist');
+    await writeFile(join(binary, '.git'), 'gitdir: ../main/.git/worktrees/preview\n');
+    assert.deepEqual(await initializeFirstRunCapabilities(project, binary, env), { status: 'read_only' });
+    assert.equal(existsSync(project), false);
+    await writeCapabilitiesConfig(project, {
+      version: 2,
+      capabilities: [{ id: 'existing', type: 'skill', source: 'external', enabled: true }],
+    });
+    assert.equal(await readImplicitStartupCapabilities(project, binary, env), null);
+  });
+}
+
+test('a runtime label without a root preserves main-checkout and standalone first-run initialization', async (t) => {
+  const { project, binary } = await fixture(t);
+  for (const checkout of ['standalone', 'main']) {
+    if (checkout === 'main') await mkdir(join(binary, '.git'));
+    const target = join(project, checkout);
+    assert.deepEqual(await initializeFirstRunCapabilities(target, binary, { CAT_CAFE_DEPLOYMENT_ID: 'runtime' }), {
+      status: 'initialized',
+    });
+    assert.equal((await readCapabilitiesConfig(target))?.capabilities.length, 6);
+  }
+});
+
 test('concurrent initialization shares the existing capability lock and creates only six entries', async (t) => {
   const { project, binary } = await fixture(t);
   const results = await Promise.all([
@@ -159,14 +189,14 @@ test('concurrent initialization shares the existing capability lock and creates 
 
 test('subsequent implicit plugin migration cannot treat empty, unreadable or alpha registries as bootstrap authority', async (t) => {
   const { project, binary, file } = await fixture(t);
-  assert.equal(await readImplicitStartupCapabilities(project, {}), null);
+  assert.equal(await readImplicitStartupCapabilities(project, binary, {}), null);
   for (const bytes of ['{"version":2,"capabilities":[]}', '{broken']) {
     await writeFile(file, bytes);
-    assert.equal(await readImplicitStartupCapabilities(project, {}), null);
+    assert.equal(await readImplicitStartupCapabilities(project, binary, {}), null);
     assert.equal(await readFile(file, 'utf8'), bytes);
   }
   await rm(file);
   await initializeFirstRunCapabilities(project, binary, {});
-  assert.equal((await readImplicitStartupCapabilities(project, {}))?.capabilities.length, 6);
-  assert.equal(await readImplicitStartupCapabilities(project, { CAT_CAFE_DEPLOYMENT_ID: 'alpha' }), null);
+  assert.equal((await readImplicitStartupCapabilities(project, binary, {}))?.capabilities.length, 6);
+  assert.equal(await readImplicitStartupCapabilities(project, binary, { CAT_CAFE_DEPLOYMENT_ID: 'alpha' }), null);
 });

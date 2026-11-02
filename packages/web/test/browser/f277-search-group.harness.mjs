@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { ThreadStore } from '../../../api/dist/domains/cats/services/stores/ports/ThreadStore.js';
 import cors from '../../../api/node_modules/@fastify/cors/index.js';
 import Fastify from '../../../api/node_modules/fastify/fastify.js';
+import { installProposalV2Fixture } from './f277-proposal-v2.harness.mjs';
 
 export async function startSearchGroupApi(port = 0) {
   const owner = 'f277-search-browser-owner';
@@ -37,11 +38,16 @@ export async function startSearchGroupApi(port = 0) {
     }
   });
   await app.register(configThreadAttentionRoutes, { projectRoot: root, threadStore: store });
+  const proposals = await installProposalV2Fixture(app, { store, owner, root });
   app.get('/api/threads', async () => ({
     threads: store.list(owner).map((thread) => ({ ...thread, unreadCount: 0 })),
   }));
+  app.get('/api/threads/:threadId', async (request, reply) => {
+    const thread = await store.get(request.params.threadId);
+    return thread?.createdBy === owner ? thread : reply.code(404).send({ error: 'Thread not found' });
+  });
   app.get('/api/session', async () => ({ userId: owner }));
-  app.get('/api/cats', async () => ({ cats: [] }));
+  app.get('/api/cats', async () => ({ cats: proposals.cats }));
   app.get('/api/labels', async () => []);
   app.get('/api/governance/health', async () => ({ projects: [] }));
   app.get('/api/projects/cwd', async () => ({ path: '/workspace/cat-cafe' }));
@@ -66,6 +72,7 @@ export async function startSearchGroupApi(port = 0) {
     threads,
     store,
     async close() {
+      await proposals.close();
       await app.close();
       await rm(root, { recursive: true, force: true });
     },

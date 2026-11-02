@@ -70,7 +70,18 @@ export function MailboxRuntimeCard({
         title: source.title,
         meta: { kind: 'runtime_interaction', interactionId: source.interactionId },
       }}
-      host={{ ownerUserId, revision: source.revision, cardRef: source.cardRef, readCurrent }}
+      host={{
+        ownerUserId,
+        revision: source.revision,
+        cardRef: source.cardRef,
+        readCurrent,
+        verifyCurrentRead: () => {
+          const current = sessions.currentItem?.(ownerUserId, `f306.runtime_interaction:${source.interactionId}`);
+          return Boolean(
+            current?.runtimeInteraction && JSON.stringify(current.runtimeInteraction) === JSON.stringify(source),
+          );
+        },
+      }}
       copy={copy}
       presentation="mailbox"
       secondaryActions={secondaryActions}

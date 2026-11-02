@@ -7,6 +7,7 @@ import { useCatData } from '@/hooks/useCatData';
 import { useLiveProjectFolds } from '@/hooks/useLiveProjectFolds';
 import { resolveCatNameplateName } from '@/lib/cat-display-name';
 import { activeExecutionKey, useActiveExecutionStore } from '@/stores/activeExecutionStore';
+import { clearExecutionDetailRequest, useExecutionDetailRequest } from './execution-detail-request';
 import { HomeExecutionRow } from './HomeExecutionRow';
 import { HomeLiveProject } from './HomeLiveProject';
 import { groupLiveProjects } from './live-project-groups';
@@ -36,6 +37,9 @@ function HomeLiveContent({
     [executionsByKey, currentProject, unavailable],
   );
   const running = projects.flatMap((project) => project.executions);
+  const request = useExecutionDetailRequest();
+  const requestedKey = request && request.hostThreadId === threadId ? request.executionKey : null;
+  const hasRequestedRow = requestedKey !== null && running.some((item) => activeExecutionKey(item) === requestedKey);
   const showProjects = projects.length > 1 || (projects.length === 1 && projects[0].path !== currentProject);
   const nicknameOwners = new Map<string, Set<string>>();
   for (const catId of new Set(running.map((execution) => execution.catId))) {
@@ -80,6 +84,12 @@ function HomeLiveContent({
               here={threadId !== undefined && execution.threadId === threadId}
               now={now}
               onSelectExecution={onSelectExecution}
+              detail={
+                activeExecutionKey(execution) === requestedKey ? (
+                  <ManagedExecutionDetail threadId={threadId} />
+                ) : undefined
+              }
+              detailRevision={activeExecutionKey(execution) === requestedKey ? request?.revision : undefined}
             />
           ));
           return showProjects || project.unavailable ? (
@@ -87,9 +97,16 @@ function HomeLiveContent({
               key={project.path}
               group={project}
               current={project.path === currentProject}
-              collapsed={folds.collapsed[project.path] === true}
+              collapsed={
+                folds.collapsed[project.path] === true &&
+                !project.executions.some((item) => activeExecutionKey(item) === requestedKey)
+              }
               busy={folds.loading || folds.saving}
-              toggle={() => void folds.toggle(project.path)}
+              toggle={() => {
+                const revealed = project.executions.some((item) => activeExecutionKey(item) === requestedKey);
+                if (revealed) clearExecutionDetailRequest();
+                if (!revealed || folds.collapsed[project.path] !== true) void folds.toggle(project.path);
+              }}
               now={now}
             >
               {rows}
@@ -99,6 +116,7 @@ function HomeLiveContent({
           );
         })}
       </div>
+      {requestedKey && !hasRequestedRow ? <ManagedExecutionDetail threadId={threadId} /> : null}
       {folds.error && showProjects && (
         <p className="home-card-foot text-xs" data-tone="warn" role="status">
           {t.live.foldFailed}
@@ -114,10 +132,5 @@ function HomeLiveContent({
 }
 
 export function HomeLiveCard(props: Parameters<typeof HomeLiveContent>[0]) {
-  return (
-    <>
-      <ManagedExecutionDetail threadId={props.threadId} />
-      <HomeLiveContent {...props} />
-    </>
-  );
+  return <HomeLiveContent {...props} />;
 }

@@ -55,24 +55,18 @@ function createWindowPreferences({ motion, setBallSize }) {
         motion.revoke('preference_settled');
         return;
       }
-      if (
-        !ticket ||
-        pendingMutations.size ||
-        disabled ||
-        ticket.epoch !== epoch ||
-        ticket.sequence !== sequences[ticket.group] ||
-        suspended.size
-      )
-        return;
+      if (!ticket || pendingMutations.size || disabled || ticket.sequence !== sequences[ticket.group]) return;
+      // Geometry follows the latest trusted settings read even if showing the
+      // window revoked its motion epoch while the request was in flight.
+      const geometry = reply.kind === 'settings' && reply.status === 'available' && setBallSize(reply.values.ballSize);
+      if (ticket.epoch !== epoch || suspended.size) return;
       if (reply.kind === 'state') {
         behaviorEnabled = reply.behaviorEnabled === true;
         if (behaviorEnabled) motion.arm();
         else motion.revoke('behavior_disabled_or_unknown');
-      } else if (reply.kind === 'settings' && reply.status === 'available') {
-        if (setBallSize(reply.values.ballSize)) {
-          motion.revoke('geometry_changed');
-          motion.arm();
-        }
+      } else if (geometry) {
+        motion.revoke('geometry_changed');
+        motion.arm();
       } else if (reply.kind === 'error') {
         behaviorEnabled = false;
         motion.revoke('preference_unavailable');

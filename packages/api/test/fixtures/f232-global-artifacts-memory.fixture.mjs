@@ -3,6 +3,7 @@ import { setImmediate as nextTurn } from 'node:timers/promises';
 import Fastify from 'fastify';
 
 const { threadsRoutes } = await import(process.argv[2]);
+const threadCatalogue = process.argv[3] === 'thread';
 const pageSize = 200;
 const totalPages = 32;
 const totalMessages = pageSize * totalPages;
@@ -52,6 +53,7 @@ const app = Fastify();
 try {
   await app.register(threadsRoutes, {
     threadStore: {
+      get: async () => ({ id: 'T', title: 'Synthetic', createdBy: 'alice' }),
       list: async () => [{ id: 'T', title: 'Synthetic', createdBy: 'alice' }],
       getThreadMemory: async () => null,
     },
@@ -65,17 +67,21 @@ try {
     },
     taskStore: { listByThread: async () => [] },
   });
-  const response = await app.inject({ method: 'GET', url: '/api/artifacts', headers: { 'x-cat-cafe-user': 'alice' } });
+  const response = await app.inject({
+    method: 'GET',
+    url: threadCatalogue ? '/api/threads/T/artifacts' : '/api/artifacts',
+    headers: { 'x-cat-cafe-user': 'alice' },
+  });
   assert.equal(response.statusCode, 200, response.body);
   const body = response.json();
-  assert.equal(body.total, 2);
+  assert.equal(body.artifacts.length, 2);
   assert.deepEqual(
     body.artifacts.map((artifact) => artifact.sourceMessageId),
     [`m-${totalMessages - 1}`, 'm-0'],
   );
   assert.equal(pages, totalPages);
   process.stdout.write(
-    `${JSON.stringify({ pages, messages: totalMessages, artifacts: body.total, peakHeapMiB: peakHeap / 2 ** 20 })}\n`,
+    `${JSON.stringify({ pages, messages: totalMessages, artifacts: body.artifacts.length, peakHeapMiB: peakHeap / 2 ** 20 })}\n`,
   );
 } finally {
   await app.close();

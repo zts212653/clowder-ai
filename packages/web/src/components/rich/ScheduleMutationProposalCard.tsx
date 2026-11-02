@@ -1,18 +1,20 @@
 'use client';
 import { useApprovalHost } from '@/components/ApprovalHost';
-import { describeReconcile } from '@/components/shell/mailbox/approval-reconcile';
 import { ApprovalMember } from './ApprovalMember';
 import { scheduleEffect } from './read-schedule-approval';
 import { ScheduleApprovalContent } from './ScheduleApprovalContent';
+import { ScheduleApprovalResult } from './ScheduleApprovalResult';
+import { RetainedApprovalCardResult } from './use-original-approval-read';
 import { type ScheduleApprovalProps, useScheduleApprovalController } from './useScheduleApprovalController';
 
 export { isScheduleMutationProposalCardBlock } from './read-schedule-approval';
 
 /** The original F139 card and writer, shared by Chat, Hub and Inbox. Original owner re-reads supply content and results. */
 export function ScheduleMutationProposalCard(props: ScheduleApprovalProps) {
-  const { t, language, proposal, checking, busy, error, unknown, blocked, decide, reread } =
+  const { t, language, proposal, checking, busy, error, unknown, blocked, decide, reread, retained } =
     useScheduleApprovalController(props);
   const host = useApprovalHost();
+  if (retained) return <RetainedApprovalCardResult item={retained} reread={reread} />;
   if (!proposal)
     return (
       <div className="space-y-2 text-sm text-cafe-muted">
@@ -34,10 +36,23 @@ export function ScheduleMutationProposalCard(props: ScheduleApprovalProps) {
         ...(proposal.status === 'approved' && !effect ? { effectUnknown: true } : {}),
       }
     : null;
+  if (terminal)
+    return (
+      <ScheduleApprovalResult
+        proposal={proposal}
+        terminal={terminal}
+        effect={effect}
+        error={error}
+        unknown={unknown}
+        reread={reread}
+      />
+    );
+
   return (
     <article
       data-testid={`schedule-approval-${proposal.proposalId}`}
       className="space-y-3 rounded-xl p-3 text-sm"
+      data-chat-background-surface="paper"
       style={{ color: 'var(--shell-ink)', background: 'var(--shell-paper)', border: '1px solid var(--shell-hairline)' }}
     >
       <header className="flex flex-wrap items-center gap-2 text-xs text-cafe-muted">
@@ -47,18 +62,7 @@ export function ScheduleMutationProposalCard(props: ScheduleApprovalProps) {
           {new Date(proposal.createdAt).toLocaleString(language === 'en' ? 'en-US' : 'zh-CN')}
         </time>
       </header>
-      {terminal ? (
-        <output data-testid="schedule-approval-result">
-          {
-            describeReconcile(
-              { kind: 'decided', terminal },
-              { language, ownerUserId: proposal.ownerUserId, originalEffect: effect },
-            ).line
-          }
-        </output>
-      ) : (
-        <ScheduleApprovalContent proposal={proposal} />
-      )}
+      <ScheduleApprovalContent proposal={proposal} />
       {proposal.status === 'applying' ? <output className="block">{t.applying}</output> : null}
       {error ? (
         <p role="alert" className="text-conn-red-text">

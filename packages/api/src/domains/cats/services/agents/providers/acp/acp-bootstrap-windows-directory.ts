@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { isAbsolute, join } from 'node:path';
+import { isTrustedHostCompatibilityEnabled } from '../../../../../../config/trusted-host-compatibility.js';
 import { windowsAcpBootstrapError } from './bootstrap/acp-bootstrap-windows-error.js';
 import { WINDOWS_VOLUME_IDENTITY_SCRIPT } from './bootstrap/acp-bootstrap-windows-volume.js';
 
@@ -11,8 +12,9 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 try {
   [Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)
+  [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
   $request = [Console]::In.ReadToEnd() | ConvertFrom-Json
-  if ($request.allowVolumeRootDelete) { ${WINDOWS_VOLUME_IDENTITY_SCRIPT} }
+  ${WINDOWS_VOLUME_IDENTITY_SCRIPT}
   $sidType = [System.Security.Principal.SecurityIdentifier]
   $user = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
   $trusted = @($user.Value, 'S-1-5-18', 'S-1-5-32-544')
@@ -45,6 +47,9 @@ try {
   }
 
   function Assert-Directory([string] $path) {
+    if (-not [System.IO.Directory]::Exists($path) -and -not [System.IO.File]::Exists($path)) {
+      Fail 'VERIFICATION_UNAVAILABLE' "ACP bootstrap directory does not exist: $path" $path
+    }
     $attributes = [System.IO.File]::GetAttributes($path)
     if (($attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
       throw 'ACP bootstrap directory must not be a symlink or reparse point'
@@ -88,19 +93,23 @@ try {
     $parent = [System.IO.Directory]::GetParent($path)
     while ($null -ne $parent) {
       Assert-Directory $parent.FullName
+      if ($null -eq $parent.Parent -and -not [AcpVolumeIdentity]::IsRoot($parent.FullName)) {
+        Fail 'PARENT_VOLUME' 'ACP bootstrap parent is not a verified local NTFS volume root' $parent.FullName
+      }
+      if ($request.trustedHostCompatibility) {
+        $parent = $parent.Parent
+        continue
+      }
       $parentAcl = [System.IO.Directory]::GetAccessControl($parent.FullName)
       Assert-SupportedAcl $parentAcl $parent.FullName
       if ($parentOwners -notcontains $parentAcl.GetOwner($sidType).Value) {
         Fail 'PARENT_OWNER' "ACP bootstrap parent has an untrusted owner: $($parent.FullName) owner=$($parentAcl.GetOwner($sidType).Value)" $parent.FullName
       }
       $mask = 0xD0040
-      if ($request.allowVolumeRootDelete -and $null -eq $parent.Parent) {
-        if (-not [AcpVolumeIdentity]::IsRoot($parent.FullName)) {
-          Fail 'PARENT_VOLUME' 'ACP bootstrap parent is not a verified local NTFS volume root' $parent.FullName
-        }
+      if ($null -eq $parent.Parent) {
         # A true volume root cannot be renamed; its private child cannot be deleted
         # without child DELETE or parent DELETE_CHILD. All other checks stay intact.
-        $mask = 0xC0040
+        if ($request.allowVolumeRootDelete) { $mask = 0xC0040 }
       }
       foreach ($rule in $parentAcl.GetAccessRules($true, $true, $sidType)) {
         # DELETE / DELETE_CHILD / WRITE_DAC / WRITE_OWNER can bypass a
@@ -187,7 +196,12 @@ export function ensureWindowsAcpBootstrapDirectories(
         // incompatible PowerShell 7 modules. Let WinPS build its own paths.
         // https://learn.microsoft.com/powershell/module/microsoft.powershell.core/about/about_psmodulepath
         env: Object.fromEntries(Object.entries(process.env).filter(([name]) => name.toUpperCase() !== 'PSMODULEPATH')),
-        input: JSON.stringify({ root, cwd, allowVolumeRootDelete: options.allowVolumeRootDelete === true }),
+        input: JSON.stringify({
+          root,
+          cwd,
+          allowVolumeRootDelete: options.allowVolumeRootDelete === true,
+          trustedHostCompatibility: isTrustedHostCompatibilityEnabled(),
+        }),
         encoding: 'utf8',
         timeout: 20_000,
         maxBuffer: 256 * 1024,

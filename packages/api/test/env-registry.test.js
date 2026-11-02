@@ -87,6 +87,27 @@ describe('env-registry', () => {
     assert.equal(apiKey.sensitive, true);
   });
 
+  it('keeps the desktop plugin bridge handoff internal and its bearer sensitive', () => {
+    const bridgeNames = ['CAT_CAFE_PLUGIN_NETWORK_BRIDGE_URL', 'CAT_CAFE_PLUGIN_NETWORK_BRIDGE_TOKEN'];
+    for (const name of bridgeNames) {
+      const definition = ENV_VARS.find((entry) => entry.name === name);
+      assert.ok(definition, `${name} must be registered`);
+      assert.equal(definition.hubVisible, false, `${name} is an internal desktop handoff`);
+      assert.equal(definition.runtimeEditable, false);
+      assert.equal(isEditableEnvVar(definition), false);
+    }
+    assert.equal(ENV_VARS.find((entry) => entry.name === bridgeNames[1]).sensitive, true);
+    setEnv(bridgeNames[0], 'http://127.0.0.1:41827');
+    setEnv(bridgeNames[1], 'test-only-bridge-bearer');
+    for (const summary of [buildEnvSummary(), buildSystemEnvSummary()]) {
+      assert.equal(
+        summary.some((entry) => bridgeNames.includes(entry.name)),
+        false,
+      );
+      assert.equal(JSON.stringify(summary).includes('test-only-bridge-bearer'), false);
+    }
+  });
+
   it('registers KIMI_QUOTA_API_FALLBACK_ENABLED as bootstrap-only quota config', () => {
     const def = ENV_VARS.find((v) => v.name === 'KIMI_QUOTA_API_FALLBACK_ENABLED');
     assert.ok(def, 'KIMI_QUOTA_API_FALLBACK_ENABLED should be in registry');
@@ -834,6 +855,36 @@ describe('PATCH /api/config/env (route)', () => {
       const body = JSON.parse(res.payload);
       assert.match(body.error, /not editable/);
       assert.equal(readFileSync(envFilePath, 'utf8'), 'CAT_OPUS_MAX_PROMPT_CHARS=150000\n');
+    } finally {
+      await app.close();
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects desktop plugin bridge handoff edits without changing the file or process', async () => {
+    const { configRoutes } = await import('../dist/routes/config.js');
+    const tempRoot = mkdtempSync(resolve(tmpdir(), 'cat-cafe-env-'));
+    const envFilePath = resolve(tempRoot, '.env');
+    const bridgeNames = ['CAT_CAFE_PLUGIN_NETWORK_BRIDGE_URL', 'CAT_CAFE_PLUGIN_NETWORK_BRIDGE_TOKEN'];
+    const original = `${bridgeNames.map((name) => `${name}=original`).join('\n')}\n`;
+    writeFileSync(envFilePath, original, 'utf8');
+    for (const name of bridgeNames) setEnv(name, 'original');
+    const app = Fastify({ logger: false });
+    try {
+      await configRoutes(app, { projectRoot: tempRoot, envFilePath, auditLog: { append: async () => {} } });
+      await app.ready();
+      for (const name of bridgeNames) {
+        const res = await app.inject({
+          method: 'PATCH',
+          url: '/api/config/env',
+          headers: { 'x-cat-cafe-user': 'codex' },
+          payload: { updates: [{ name, value: 'changed' }] },
+        });
+        assert.equal(res.statusCode, 400, name);
+        assert.match(JSON.parse(res.payload).error, /not editable/);
+        assert.equal(readFileSync(envFilePath, 'utf8'), original);
+        assert.equal(process.env[name], 'original');
+      }
     } finally {
       await app.close();
       rmSync(tempRoot, { recursive: true, force: true });

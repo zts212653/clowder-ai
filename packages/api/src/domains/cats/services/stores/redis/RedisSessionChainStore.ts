@@ -27,6 +27,11 @@ import type {
 } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { isHomeSession } from '../../session/session-scope.js';
+import {
+  observeSessionChainRead,
+  type SessionChainReadOptions,
+  type SessionIndexBuildObservation,
+} from '../ports/SessionChainReadOptions.js';
 import type {
   CliSessionBinding,
   CompressionEventResult,
@@ -309,7 +314,12 @@ return 1
 export class RedisSessionChainStore implements ISessionChainStore {
   private readonly redis: RedisClient;
   private threadIndexReady = false;
-  private threadIndexBuild: { promise: Promise<void>; controller: AbortController; readers: number } | null = null;
+  private threadIndexBuild: {
+    promise: Promise<void>;
+    controller: AbortController;
+    readers: number;
+    observation: SessionIndexBuildObservation;
+  } | null = null;
 
   constructor(redis: RedisClient) {
     this.redis = redis;
@@ -635,12 +645,14 @@ export class RedisSessionChainStore implements ISessionChainStore {
     return records.sort((a, b) => a.seq - b.seq);
   }
 
-  async getChainByThread(threadId: string, options?: StoreReadOptions): Promise<SessionRecord[]> {
+  async getChainByThread(threadId: string, options?: SessionChainReadOptions): Promise<SessionRecord[]> {
     throwIfStoreReadAborted(options);
     await this.ensureThreadIndex(options);
     throwIfStoreReadAborted(options);
+    observeSessionChainRead(options, { phase: 'chain_keys' });
     const chainKeys = await awaitStoreRead(this.redis.smembers(SessionChainKeys.byThread(threadId)), options);
 
+    observeSessionChainRead(options, { phase: 'chain_members' });
     const allIds: string[] = [];
     for (const chainKey of chainKeys) {
       throwIfStoreReadAborted(options);
@@ -649,6 +661,7 @@ export class RedisSessionChainStore implements ISessionChainStore {
     }
     if (!allIds.length) return [];
 
+    observeSessionChainRead(options, { phase: 'session_records' });
     const pipeline = this.redis.pipeline();
     for (const id of allIds) {
       throwIfStoreReadAborted(options);
@@ -671,31 +684,53 @@ export class RedisSessionChainStore implements ISessionChainStore {
   }
 
   /**
-   * Phase A shipped before the per-thread index existed. Rebuild it once per
-   * store instance from the durable chain keys, then keep it current in the
-   * create Lua transaction. A failed/aborted rebuild deliberately leaves the
-   * flag false so the next caller retries instead of trusting a partial index.
+   * Phase A shipped before the per-thread index existed. Backfill legacy chains
+   * once per database, then keep the index current in the create Lua transaction.
+   * A durable completion marker avoids scanning the whole database on every API
+   * restart. Failed/aborted backfills never certify a partial index.
    */
-  private async ensureThreadIndex(options?: StoreReadOptions): Promise<void> {
-    if (this.threadIndexReady) return;
+  private async ensureThreadIndex(options?: SessionChainReadOptions): Promise<void> {
+    if (this.threadIndexReady) {
+      observeSessionChainRead(options, { phase: 'index_wait', index: { mode: 'ready' } });
+      return;
+    }
+    const mode = this.threadIndexBuild ? 'joined' : 'started';
     if (!this.threadIndexBuild) {
       const controller = new AbortController();
+      const observation: SessionIndexBuildObservation = {
+        id: crypto.randomUUID(),
+        phase: 'checking',
+        scanBatches: 0,
+        chainKeys: 0,
+      };
       const build = (async () => {
-        const chainKeys = await this.scanKeys('session-chain:*', { signal: controller.signal });
-        const BATCH_SIZE = 500;
-        for (let i = 0; i < chainKeys.length; i += BATCH_SIZE) {
-          controller.signal.throwIfAborted();
-          const pipeline = this.redis.pipeline();
-          for (const chainKey of chainKeys.slice(i, i + BATCH_SIZE)) {
-            const threadId = parseThreadIdFromChainKey(chainKey);
-            if (threadId) pipeline.sadd(SessionChainKeys.byThread(threadId), chainKey);
-          }
-          await pipeline.exec();
-        }
+        const readOptions = { signal: controller.signal };
+        const complete = await awaitStoreRead(this.redis.get(SessionChainKeys.threadIndexComplete()), readOptions);
         controller.signal.throwIfAborted();
+        if (complete === '1') {
+          this.threadIndexReady = true;
+          observation.phase = 'ready';
+          return;
+        }
+        observation.phase = 'scan';
+        const scanStarted = performance.now();
+        const chainKeys = await this.scanKeys('session-chain:*', { signal: controller.signal }, (count) => {
+          observation.scanBatches += 1;
+          observation.chainKeys += count;
+        });
+        observation.scanMs = Math.round(performance.now() - scanStarted);
+        observation.phase = 'backfill';
+        const backfillStarted = performance.now();
+        await this.backfillThreadIndex(chainKeys, readOptions);
+        controller.signal.throwIfAborted();
+        // No TTL: this proof belongs to the same persistent dataset as its indexes.
+        // Old binaries already maintain byThread in CREATE_LUA and can ignore it.
+        await awaitStoreRead(this.redis.set(SessionChainKeys.threadIndexComplete(), '1'), readOptions);
         this.threadIndexReady = true;
+        observation.backfillMs = Math.round(performance.now() - backfillStarted);
+        observation.phase = 'ready';
       })();
-      const state = { promise: build, controller, readers: 0 };
+      const state = { promise: build, controller, readers: 0, observation };
       this.threadIndexBuild = state;
       // A canceled caller may have stopped waiting before the shared promise
       // rejects. Observe that rejection and leave the next cold read free to retry.
@@ -704,11 +739,13 @@ export class RedisSessionChainStore implements ISessionChainStore {
           if (this.threadIndexBuild === state) this.threadIndexBuild = null;
         },
         () => {
+          observation.phase = controller.signal.aborted ? 'aborted' : 'failed';
           if (this.threadIndexBuild === state) this.threadIndexBuild = null;
         },
       );
     }
     const state = this.threadIndexBuild;
+    observeSessionChainRead(options, { phase: 'index_wait', index: { mode, build: state.observation } });
     state.readers += 1;
     try {
       await awaitStoreRead(state.promise, options);
@@ -717,6 +754,23 @@ export class RedisSessionChainStore implements ISessionChainStore {
       if (state.readers === 0 && !this.threadIndexReady && !state.controller.signal.aborted) {
         if (this.threadIndexBuild === state) this.threadIndexBuild = null;
         state.controller.abort(options?.signal?.reason ?? new Error('Session index build has no active readers'));
+      }
+    }
+  }
+
+  private async backfillThreadIndex(chainKeys: string[], options: StoreReadOptions): Promise<void> {
+    const BATCH_SIZE = 500;
+    for (let i = 0; i < chainKeys.length; i += BATCH_SIZE) {
+      throwIfStoreReadAborted(options);
+      const pipeline = this.redis.pipeline();
+      for (const chainKey of chainKeys.slice(i, i + BATCH_SIZE)) {
+        const threadId = parseThreadIdFromChainKey(chainKey);
+        if (threadId) pipeline.sadd(SessionChainKeys.byThread(threadId), chainKey);
+      }
+      const results = await awaitStoreRead(pipeline.exec(), options);
+      if (!results) throw new Error('Session thread index backfill returned no results');
+      for (const [error] of results) {
+        if (error) throw error;
       }
     }
   }
@@ -1048,7 +1102,11 @@ export class RedisSessionChainStore implements ISessionChainStore {
    * We must manually add the keyPrefix for matching, then strip it from results
    * so that subsequent commands (which DO auto-prefix) work correctly.
    */
-  private async scanKeys(pattern: string, options?: StoreReadOptions): Promise<string[]> {
+  private async scanKeys(
+    pattern: string,
+    options?: StoreReadOptions,
+    onBatch?: (count: number) => void,
+  ): Promise<string[]> {
     throwIfStoreReadAborted(options);
     const prefix = (this.redis.options as { keyPrefix?: string }).keyPrefix ?? '';
     const prefixedPattern = `${prefix}${pattern}`;
@@ -1070,6 +1128,7 @@ export class RedisSessionChainStore implements ISessionChainStore {
         else resolve(keys);
       };
       const onData = (batch: string[]): void => {
+        onBatch?.(batch.length);
         for (const k of batch) {
           // Strip prefix so subsequent auto-prefixing commands work
           const stripped = prefix && k.startsWith(prefix) ? k.slice(prefix.length) : k;

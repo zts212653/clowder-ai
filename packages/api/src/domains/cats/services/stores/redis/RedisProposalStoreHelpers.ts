@@ -13,6 +13,7 @@ import {
 import { applyProposalOverrides } from '../ports/ProposalSnapshot.js';
 import type { FinalizeApprovalInput } from '../ports/ProposalStore.js';
 import { hydrateApprovalPublication, serializeApprovalPublication } from './RedisApprovalPublication.js';
+import { hydrateProposalRevision, serializeProposalRevision } from './RedisProposalRevisionFields.js';
 
 /**
  * CAS Lua: atomically check current status matches expected → HSET fields + ZREM/ZADD pending index.
@@ -29,6 +30,10 @@ local current = redis.call('HGET', KEYS[1], 'status')
 if current ~= ARGV[2] then
   return 0
 end
+if KEYS[3] then
+  local t = redis.call('TYPE', KEYS[3]).ok
+  if t ~= 'none' and t ~= 'zset' then return redis.error_reply('proposal history index type conflict') end
+end
 local fields = {}
 for i = 5, #ARGV do
   fields[#fields + 1] = ARGV[i]
@@ -40,6 +45,11 @@ if ARGV[3] == 'zrem' then
   redis.call('ZREM', KEYS[2], ARGV[1])
 elseif ARGV[3] == 'zadd' then
   redis.call('ZADD', KEYS[2], ARGV[4], ARGV[1])
+end
+if KEYS[3] then
+  local status = redis.call('HGET', KEYS[1], 'status')
+  local field = status == 'rejected' and 'rejectedAt' or status == 'withdrawn' and 'withdrawnAt' or nil
+  if field then redis.call('ZADD', KEYS[3], tonumber(redis.call('HGET', KEYS[1], field)), ARGV[1]) end
 end
 return 1
 `;
@@ -90,6 +100,7 @@ export function serializeProposal(proposal: ThreadProposal): string[] {
     String(proposal.createdAt),
   ];
   if (proposal.initialMessage) fields.push('initialMessage', proposal.initialMessage);
+  fields.push(...serializeProposalRevision(proposal));
   if (proposal.sourceMessageId) fields.push('sourceMessageId', proposal.sourceMessageId);
   if (proposal.cardMessageId) fields.push('cardMessageId', proposal.cardMessageId);
   if (proposal.reportingMode) fields.push('reportingMode', proposal.reportingMode);
@@ -126,6 +137,7 @@ export function hydrateProposal(data: Record<string, string>): ThreadProposal {
     ...optionalSourceMessage(data.sourceMessageId),
   };
   if (initialMessage) proposal.initialMessage = initialMessage;
+  hydrateProposalRevision(proposal, data);
   if (data.reportingMode) proposal.reportingMode = data.reportingMode as ReportingMode;
   if (data.declaredWorkMode) proposal.declaredWorkMode = data.declaredWorkMode as DeclaredWorkMode;
   if (data.approvedBy) proposal.approvedBy = data.approvedBy;

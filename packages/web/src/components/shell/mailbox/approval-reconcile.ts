@@ -1,3 +1,4 @@
+import type { DomainApprovalEffect } from '@/stores/approval-domain-effect';
 import { readTerminal } from './approval-reconcile-terminal';
 
 /**
@@ -6,8 +7,8 @@ import { readTerminal } from './approval-reconcile-terminal';
  * A write's own answer is not the decision's outcome. A 2xx can leave the proposal open (a partly approved F276
  * selection), a 5xx can land after the side effect, a lost connection says nothing at all, and the Approval Hub store
  * removes an item optimistically before anyone has re-read it. So the panel states only what a canonical re-read proved,
- * and that re-read must have started after the write ended. "After" is a read generation, not a clock: the client's and the
- * server's clocks need not agree, but the panel knows which of its own reads it started later.
+ * and that re-read must have started after the write ended. Unified reads use their local generation; an independent
+ * pending/history confirmation is started and fenced by the exact confirming attempt. Neither uses clock comparison.
  *
  * Pure on purpose: the events say what the store and the unified read reported, the state says what may be shown, and
  * `describeReconcile` turns the state into the one line and the one rule about the actions. Nothing here defaults to
@@ -49,6 +50,10 @@ export interface Terminal {
   /** Transient proof from the original producer and the exact created Thread, never from a POST response. */
   threadId?: string;
   effectUnknown?: boolean;
+  /** Producer-owned durable proof, recovered from an exact fenced settled row. */
+  domainEffect?: DomainApprovalEffect;
+  /** Original producer reason when supplied; legacy closure alone never means expiry or withdrawal. */
+  closedReason?: 'expired' | 'withdrawn';
 }
 
 /** The settled lookup: a row for exactly this proposal and producer, or nothing that can be relied on. */
@@ -97,6 +102,8 @@ export type ReconcileEvent =
   /** The store's current attempt for this proposal (null when it has none). `readGeneration`: reads started so far. */
   | { type: 'attempt'; attempt: TrackedAttempt | null; readGeneration: number }
   | { type: 'read'; read: ReadEvidence }
+  /** A post-write owner pending/history read proved this exact attempt terminal. */
+  | { type: 'terminal-read'; attemptId: number; terminal: Terminal }
   /** The user asked to read again. `readGeneration`: reads started so far, before the one this asks for. */
   | { type: 'reread'; readGeneration: number };
 
@@ -215,6 +222,11 @@ export function reduceReconcile(model: ReconcileModel, event: ReconcileEvent): R
       return onAttempt(model, event.attempt, event.readGeneration);
     case 'read':
       return onRead(model, event.read);
+    case 'terminal-read': {
+      if (model.state.kind !== 'confirming' || model.state.attemptId !== event.attemptId) return model;
+      const terminal = readTerminal(event.terminal);
+      return terminal ? { ...model, state: { kind: 'decided', terminal } } : model;
+    }
     case 'reread':
       return onReread(model, event.readGeneration);
   }

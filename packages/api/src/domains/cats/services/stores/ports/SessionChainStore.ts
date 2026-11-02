@@ -31,7 +31,7 @@ export function upsertCapacityPinRecoveryNote(provenance: string, note: string):
 import { randomUUID } from 'node:crypto';
 import type { CatId, HybridProgress, SessionCapacityPin, SessionPolicySnapshot, SessionRecord } from '@cat-cafe/shared';
 import { isHomeSession } from '../../session/session-scope.js';
-import type { StoreReadOptions } from './StoreReadOptions.js';
+import type { SessionChainReadOptions } from './SessionChainReadOptions.js';
 import { throwIfStoreReadAborted } from './StoreReadOptions.js';
 
 export interface CreateSessionInput {
@@ -171,7 +171,7 @@ export interface ISessionChainStore {
   /** Get full session chain (sorted by seq) */
   getChain(catId: CatId, threadId: string, userId?: string): SessionRecord[] | Promise<SessionRecord[]>;
   /** Get all cats' sessions for a thread */
-  getChainByThread(threadId: string, options?: StoreReadOptions): SessionRecord[] | Promise<SessionRecord[]>;
+  getChainByThread(threadId: string, options?: SessionChainReadOptions): SessionRecord[] | Promise<SessionRecord[]>;
   /** Update partial fields */
   update(id: string, patch: SessionRecordPatch): SessionRecord | null | Promise<SessionRecord | null>;
   /** Look up by CLI session ID */
@@ -509,7 +509,7 @@ export class SessionChainStore implements ISessionChainStore {
       .sort((a, b) => a.seq - b.seq);
   }
 
-  getChainByThread(threadId: string, options?: StoreReadOptions): SessionRecord[] {
+  getChainByThread(threadId: string, options?: SessionChainReadOptions): SessionRecord[] {
     throwIfStoreReadAborted(options);
     const results: SessionRecord[] = [];
     for (const record of this.records.values()) {

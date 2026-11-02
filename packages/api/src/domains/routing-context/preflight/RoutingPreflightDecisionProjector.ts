@@ -49,7 +49,7 @@ export type FreshRoutingContextResolution = Extract<RoutingContextResolution, { 
 type RoutingPreflightTarget = RoutingPreflightDecisionV1['targets'][number];
 
 export function freshTargetDecision(
-  input: { ownerRequestedAttempt?: boolean },
+  input: { ownerRequestedAttempt?: boolean; requireCapacityProof?: boolean },
   resolution: FreshRoutingContextResolution,
   targetCatId: string,
 ): RoutingPreflightTarget {
@@ -72,22 +72,41 @@ export function freshTargetDecision(
     input.ownerRequestedAttempt === true &&
     candidate.availability === 'unavailable' &&
     candidate.dispatch?.ownerAttemptAllowed === true;
+  const capacity = candidate.binding.capacityFacts?.current;
+  const capacityWarning =
+    input.requireCapacityProof &&
+    capacity &&
+    (capacity.state !== 'fresh' ||
+      capacity.windows.length === 0 ||
+      capacity.windows.some((window) => window.freshness === 'stale' || window.applicability === 'unknown'));
   const disposition = ownerAttempt
     ? ('warned' as const)
     : candidate.availability === 'unavailable'
       ? ('rejected' as const)
       : candidate.availability === 'available' &&
+          !capacityWarning &&
           !candidate.reasons.some((reason) => reason.code === CAPABILITY_PROFILE_INVALID_REASON)
         ? ('allowed' as const)
         : ('warned' as const);
   return {
     targetCatId,
     disposition,
+    ...(candidate.binding.capacityFacts ? { capacityFacts: candidate.binding.capacityFacts } : {}),
     ...(ownerAttempt ? { ownerAttempt: true as const } : {}),
     ...(candidate.dispatch?.automaticRetryAt !== undefined
       ? { automaticRetryAt: candidate.dispatch.automaticRetryAt }
       : {}),
-    reasons: candidate.reasons,
+    reasons:
+      capacityWarning && candidate.reasons.length < 32
+        ? [
+            ...candidate.reasons,
+            {
+              code: 'routing_capacity_unverified',
+              summary: `Execution capacity is unverified (${capacity.reason ?? 'pool applicability unknown'}); account observation is ${capacity.state}; the explicit target remains unchanged`,
+              sourceRefs: [capacity.evidenceRef ?? resolution.snapshot.catalogRevision],
+            },
+          ]
+        : candidate.reasons,
     contextualSignals: contextualSignalsForCandidate(candidate),
     alternatives: disposition === 'allowed' ? [] : alternativesFor(resolution.snapshot, targetCatId),
   };

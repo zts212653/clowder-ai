@@ -4,6 +4,10 @@ title: Hub Action Surface
 summary: First-party Hub user-visible actions that let cats surface files, previews, rich blocks, workflow state, and other in-context artifacts to the user.
 canonical_features: [F022, F063, F096, F120, F131, F223, F232, F284, F290, F299, F307, F310, F322]
 code_anchors:
+  - packages/web/src/components/CapabilityTipStrip.tsx
+  - packages/web/src/components/FeatureDemoHost.tsx
+  - packages/web/src/stores/featureDemoStore.ts
+  - packages/shared/src/feature-demos.ts
   - packages/shared/src/types/context-attachment.ts
   - packages/shared/src/schemas/context-attachment.schema.ts
   - packages/api/src/routes/messages.schema.ts
@@ -35,6 +39,7 @@ code_anchors:
   - packages/shared/src/types/unified-attention.ts
   - packages/web/src/components/shell/review-notes/UserMentionDetails.tsx
 doc_anchors:
+  - feature-specs/2026-10-22-f331-demo-entry.md
   - docs/features/F022-rich-blocks.md
   - docs/features/F063-hub-workspace-explorer.md
   - docs/features/F096-interactive-rich-blocks.md
@@ -52,6 +57,7 @@ doc_anchors:
   - docs/architecture/skill-consumption-receipt-contract.md
 static_scan_hints: [ContextAttachment, context_attachment, Add to chat, workspace:navigate, preview:auto-open, create_rich_block, rich block, workspace panel, browser preview, surface to user, in-context artifact]
 cited_by:
+  - {feature: F331, date: 2026-10-22, delta: "AppShell owns the temporary demo player; waiting-row rotation cannot remove playback and the existing tip keeps its original action"}
   - {feature: F223, date: 2026-06-03, delta: new cell}
   - {feature: F232, date: 2026-06-12, delta: update — thread artifacts aggregation endpoint + ArtifactsPanel drawer}
   - {feature: F284, date: 2026-07-31, delta: update — contextual Workspace shell and deterministic existing-surface reveal policy}

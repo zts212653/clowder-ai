@@ -114,6 +114,61 @@ test('common HTTP/callback entry retains real video, authenticates production, a
   assert.ok(created.body.length <= 12000);
   const saved = JSON.parse(created.json().json);
   assert.equal(saved.reference.ownerRevision, 1);
+  const resolveFile = (auth: Record<string, string> = { 'x-fixture-user': 'operator' }) =>
+    app.inject({
+      method: 'GET',
+      url: '/api/works/resolve-file?threadId=thread-cover&worktreeId=root&path=movie.mp4',
+      headers: auth,
+    });
+  assert.equal((await resolveFile({})).statusCode, 401);
+  const snapshots = t.mock.method(film.workspace, 'openMedia');
+  const fileLanding = await resolveFile();
+  assert.equal(fileLanding.statusCode, 200, fileLanding.body);
+  assert.equal(snapshots.mock.callCount(), 1, 'one file landing must freeze/probe its current video only once');
+  assert.deepEqual(fileLanding.json().artifact.work, { ...saved.reference, currentOwnerRevision: 1 });
+  assert.equal(fileLanding.json().artifact.name, command.title);
+  const directLanding = await app.inject({
+    method: 'GET',
+    url: `/api/works/resolve-file?threadId=thread-cover&contentRef=${encodeURIComponent(saved.reference.contentRef)}&ownerRevision=1`,
+    headers: { 'x-fixture-user': 'operator' },
+  });
+  assert.equal(directLanding.statusCode, 200, directLanding.body);
+  assert.deepEqual(directLanding.json().artifact.work, fileLanding.json().artifact.work);
+  assert.equal((await resolveFile(headers())).statusCode, 401, 'callback credentials cannot act as the human reader');
+  const traversal = await app.inject({
+    method: 'GET',
+    url: '/api/works/resolve-file?threadId=thread-cover&worktreeId=root&path=..%2Fmovie.mp4',
+    headers: { 'x-fixture-user': 'operator' },
+  });
+  assert.notEqual(traversal.statusCode, 200, 'the source owner rejects a path outside its registered root');
+  const findPublications = f.owner.findSourcePublications.bind(f.owner);
+  const changedDuringLookup = t.mock.method(f.owner, 'findSourcePublications', async (input) => {
+    const found = await findPublications(input);
+    await writeFile(film.path, Buffer.from('changed while locating the prior work'));
+    return found;
+  });
+  const changedLanding = await resolveFile();
+  assert.equal(changedLanding.statusCode, 409, changedLanding.body);
+  assert.equal(changedLanding.json().error, 'publication_changed');
+  changedDuringLookup.mock.restore();
+  await writeFile(film.path, film.bytes);
+
+  await writeFile(`${film.root}/unregistered.mp4`, film.bytes);
+  const originalThread = f.thread.current;
+  const revokedDuringLookup = t.mock.method(f.owner, 'findSourcePublications', async (input) => {
+    const found = await findPublications(input);
+    assert.deepEqual(found, []);
+    f.thread.current = null;
+    return found;
+  });
+  const revokedLanding = await app.inject({
+    method: 'GET',
+    url: '/api/works/resolve-file?threadId=thread-cover&worktreeId=root&path=unregistered.mp4',
+    headers: { 'x-fixture-user': 'operator' },
+  });
+  assert.equal(revokedLanding.statusCode, 403, revokedLanding.body);
+  revokedDuringLookup.mock.restore();
+  f.thread.current = originalThread;
   const retained = await f.media.read(saved.reference.contentRef, 1, {
     userId: 'operator',
     actor: { kind: 'human', actorId: 'operator' },

@@ -1,11 +1,29 @@
-import type { AgentService, PluginNativeActionTarget, ToolExecutionPolicy } from '../../types.js';
+import type {
+  AgentService,
+  MemberSessionExecutionScope,
+  PluginNativeActionTarget,
+  ToolExecutionPolicy,
+} from '../../types.js';
 
 const MAX_REPLAY_DENIED_TOOL_NAMES = 32;
 const MAX_ALLOWED_CALLBACK_ROUTES = 32;
-const MAX_NATIVE_ACTION_METHODS = 256;
 
 function nativeCoordinate(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 && value.length <= 256 && value.trim() === value;
+}
+
+function memberScope(value: MemberSessionExecutionScope): MemberSessionExecutionScope {
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    Object.keys(value).some((key) => !['sessionId', 'generation', 'executionId'].includes(key)) ||
+    !nativeCoordinate(value.sessionId) ||
+    !nativeCoordinate(value.executionId) ||
+    !Number.isSafeInteger(value.generation) ||
+    value.generation < 1
+  )
+    throw new Error('invalid member native policy');
+  return { sessionId: value.sessionId, generation: value.generation, executionId: value.executionId };
 }
 
 export class ToolExecutionPolicyUnavailableError extends Error {
@@ -43,23 +61,13 @@ export function normalizeToolExecutionName(rawName: string): string {
 
 export function normalizeToolExecutionPolicy(policy: ToolExecutionPolicy): ToolExecutionPolicy {
   if (policy.mode === 'plugin_native') {
-    if (
-      Object.keys(policy).some(
-        (key) => !['mode', 'pluginInstanceId', 'contributionId', 'actionMethods'].includes(key),
-      ) ||
-      !nativeCoordinate(policy.pluginInstanceId) ||
-      !nativeCoordinate(policy.contributionId) ||
-      !Array.isArray(policy.actionMethods) ||
-      policy.actionMethods.length === 0 ||
-      policy.actionMethods.length > MAX_NATIVE_ACTION_METHODS ||
-      !policy.actionMethods.every(nativeCoordinate)
-    )
+    if (!nativeCoordinate(policy.pluginInstanceId) || !nativeCoordinate(policy.contributionId))
       throw new Error('invalid plugin native policy');
     return {
       mode: 'plugin_native',
       pluginInstanceId: policy.pluginInstanceId,
       contributionId: policy.contributionId,
-      actionMethods: [...new Set(policy.actionMethods)].sort(),
+      ...(policy.memberSession === undefined ? {} : { memberSession: memberScope(policy.memberSession) }),
     };
   }
   if (policy.mode === 'callback_allowlist') {
@@ -121,8 +129,7 @@ export function toolExecutionPolicyDenial(
     if (normalized.mode !== 'plugin_native') throw new Error('invalid plugin native policy');
     return rawToolName === 'POST /api/plugin-runtime/action' &&
       nativeTarget?.instanceId === normalized.pluginInstanceId &&
-      nativeTarget.contributionId === normalized.contributionId &&
-      normalized.actionMethods.includes(nativeTarget.method)
+      nativeTarget.contributionId === normalized.contributionId
       ? null
       : { reason: 'plugin_native_tool_policy', toolName: normalizeToolExecutionName(rawToolName) };
   }
@@ -142,4 +149,25 @@ export function toolExecutionPolicyDenial(
   return normalized.replayDeniedToolNames.includes(toolName)
     ? { reason: 'replay_denied_tool', toolName }
     : { reason: 'read_only_tool_policy', toolName };
+}
+
+/**
+ * Project a durable invocation policy onto the exact tool names an in-process
+ * carrier may advertise and execute. `undefined` means the invocation has no
+ * durable policy (the family surface applies). Every current durable mode
+ * denies the MCP gateway surface: read_only denies all tools, while
+ * callback_allowlist and plugin_native are callback-route/plugin-action
+ * boundaries that an MCP tool name cannot represent, so they fail closed.
+ */
+export function toolExecutionPolicyAllowedToolNames(
+  policy: ToolExecutionPolicy | undefined,
+): readonly string[] | undefined {
+  if (!policy) return undefined;
+  const normalized = normalizeToolExecutionPolicy(policy);
+  switch (normalized.mode) {
+    case 'read_only':
+    case 'callback_allowlist':
+    case 'plugin_native':
+      return [];
+  }
 }

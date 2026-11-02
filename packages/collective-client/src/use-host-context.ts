@@ -14,8 +14,10 @@ import type { ClientRequest } from './client-request.js';
 import type { ClientSnapshot } from './client-types.js';
 import type { collectiveArtifactClient } from './collective-artifact-client.js';
 import { useHostAccountabilityContext } from './use-host-accountability-context.js';
+import { useHostDocumentSurface } from './use-host-document-surface.js';
 import { useHostMediaShare } from './use-host-media-share.js';
 import { type MediaSelection, useHostMediaSurface } from './use-host-media-surface.js';
+import { type ProjectAttentionFocus, useHostProjectAttentionContext } from './use-host-project-attention-context.js';
 import { useHostUiPlacement } from './use-host-ui-placement.js';
 import { useHostWorkPolicy } from './use-host-work-policy.js';
 
@@ -24,12 +26,13 @@ export function useHostContext(
   snapshot: ClientSnapshot,
   channelId: string,
   channelIds: readonly string[],
-  humanSession?: { request: ClientRequest; refresh: () => Promise<void> },
+  humanSession?: { request: ClientRequest; refresh: () => Promise<void>; onPaired?: () => void },
   media?: {
     selection?: MediaSelection;
     api?: ReturnType<typeof collectiveArtifactClient>;
     onShared?: Parameters<typeof useHostMediaShare>[0]['onShared'];
     humanName?: (humanId: string) => string;
+    onDocumentReturn?: Parameters<typeof useHostDocumentSurface>[0]['onDocumentReturn'];
   },
   onOpenMembers?: () => void,
 ) {
@@ -41,6 +44,7 @@ export function useHostContext(
   const [open, setOpen] = useState(false);
   const [cafeSection, setCafeSection] = useState<CollectiveCafeSection>('cats');
   const [focusWork, setFocusWork] = useState<
+    | ProjectAttentionFocus
     | { workId: string; channelId: string; eventId: string }
     | { workId: string; channelId: string; roadmapId: string; accountabilityRequestId: string }
   >();
@@ -57,6 +61,7 @@ export function useHostContext(
   const serviceInstanceId = snapshot.meta?.serviceInstanceId;
   const collectiveId = snapshot.collective?.collectiveId;
   const humanId = snapshot.me?.human.humanId;
+  const onHostPaired = humanSession?.onPaired;
   const projectionReady =
     snapshot.participants !== undefined && snapshot.members !== undefined && snapshot.collaboration !== undefined;
   const applyWorkFocus = useCallback((value: CollectiveHostWorkFocus) => {
@@ -76,6 +81,11 @@ export function useHostContext(
     setFocusWork({ workId: work.workId, channelId: value.channelId, eventId: value.resultEventId });
     return true;
   }, []);
+  const projectAttentionContext = useHostProjectAttentionContext({
+    context: publicContext,
+    snapshot,
+    onFocus: setFocusWork,
+  });
   const { handleFocus: handleAccountabilityFocus, reset: resetAccountabilityContext } = useHostAccountabilityContext({
     hostOrigin,
     context: publicContext,
@@ -93,11 +103,13 @@ export function useHostContext(
       setFocusWork(undefined);
       pendingWorkFocus.current = undefined;
       resetAccountabilityContext();
+      projectAttentionContext.reset();
       reconciledWorks.current.clear();
       setParticipationReady(undefined);
       const matched = hostInitMatches(parsed.data, serviceInstanceId, collectiveId, humanId) ? parsed.data : undefined;
       liveBridge.current = matched;
       setBridge(matched);
+      if (matched?.authorityStatus === 'connected') onHostPaired?.();
       return true;
     };
     const handleParticipationReady = (data: unknown) => {
@@ -154,7 +166,8 @@ export function useHostContext(
         handleParticipationReady(event.data) ||
         handleReconciled(event.data) ||
         handleWorkFocus(event.data) ||
-        handleAccountabilityFocus(event.data)
+        handleAccountabilityFocus(event.data) ||
+        projectAttentionContext.handleFocus(event.data)
       )
         return;
       handleAction(event.data);
@@ -167,7 +180,10 @@ export function useHostContext(
     collectiveId,
     hostOrigin,
     humanId,
+    onHostPaired,
     handleAccountabilityFocus,
+    projectAttentionContext.handleFocus,
+    projectAttentionContext.reset,
     resetAccountabilityContext,
     serviceInstanceId,
   ]);
@@ -240,12 +256,21 @@ export function useHostContext(
     channelId,
     onShared: media?.onShared,
   });
+  const documentSurfaceReady = useHostDocumentSurface({
+    context: publicContext,
+    bridge,
+    hostOrigin,
+    generation: JSON.stringify([bridge, channelKey, open, cafeSection, projectionReady]),
+    ...media,
+  });
   useHostMediaSurface({
     context: publicContext,
     bridge,
     hostOrigin,
     channelId,
     generation: JSON.stringify([bridge, channelKey, open, cafeSection, projectionReady]),
+    // This adapter's acknowledgement also negotiates project-aware media return coordinates.
+    projectReturnSupported: documentSurfaceReady,
     ...media,
   });
   useEffect(() => {
@@ -286,6 +311,7 @@ export function useHostContext(
   }, []);
   const hide = useCallback(() => setOpen(false), []);
   return {
+    documentSurfaceReady,
     shareMedia: bridge && bridge.authorityStatus !== 'revoked' ? shareMedia : undefined,
     requestWorkPermission: humanSession ? requestWorkPermission : undefined,
     available: Boolean(bridge),

@@ -7,6 +7,7 @@ import { checkShellCopyParity } from '@/components/shell/__tests__/shell-copy-pa
 import { writeShellPresentation } from '@/components/shell/shell-presentation';
 import { getContextAttachmentDraft, syncContextAttachmentDraftToStorage } from '@/components/thread-drafts';
 import { useChatStore } from '@/stores/chatStore';
+import { openFileMenu } from '@/test-utils/open-file-menu';
 import { WorkspaceSurfaceVisibilityProvider } from '../../WorkspaceSurfaceVisibility';
 import { WorkspaceContentReviewSurface } from '../WorkspaceContentReviewSurface';
 import { mediaView, reviewId, revision, view as textView } from './WorkspaceContentReviewSurface.fixture';
@@ -93,7 +94,7 @@ it('a readable historical image can be circled for Chat while drawing and saving
   await act(async () => actions[0]?.click());
   expect(actions[0]?.getAttribute('aria-pressed')).toBe('true');
   expect(container.querySelector('textarea')).toBeNull();
-  expect(mocks.apiFetch).toHaveBeenCalledTimes(1);
+  expect(mocks.apiFetch.mock.calls.filter(([url]) => !String(url).includes('/file-info'))).toHaveLength(1);
 });
 
 it('keeps an acknowledged removal cleared when the image owner remounts hidden', async () => {
@@ -127,6 +128,7 @@ it('references the original work once when its hidden surface is explicitly show
 it('offers a whole-image Chat action before selecting, preserving the same draft and exact source without sending', async () => {
   await openImage();
   useChatStore.getState().setPendingChatInsert({ threadId, text: '原聊天里还没发出的想法' });
+  await openFileMenu(container);
   const action = container.querySelector<HTMLButtonElement>('[data-testid="workspace-media-chat-whole-work"]');
   expect(action, 'opening an image must offer the same Chat path without requiring a selection').not.toBeNull();
   await act(async () => action?.click());
@@ -145,7 +147,7 @@ it('offers a whole-image Chat action before selecting, preserving the same draft
     },
     selections: [],
   });
-  expect(mocks.apiFetch).toHaveBeenCalledTimes(1);
+  expect(mocks.apiFetch.mock.calls.filter(([url]) => !String(url).includes('/file-info'))).toHaveLength(1);
 });
 
 it('does not offer a separate modification sender beside the image Chat path', async () => {
@@ -213,7 +215,7 @@ it('adding the whole image twice retains one reference with the original attachm
   expect(first?.kind).toBe('media');
   await act(async () => button?.click());
   expect(useChatStore.getState().pendingChatInsert?.contextAttachments).toEqual([first]);
-  expect(mocks.apiFetch).toHaveBeenCalledTimes(1);
+  expect(mocks.apiFetch.mock.calls.filter(([url]) => !String(url).includes('/file-info'))).toHaveLength(1);
 });
 
 it('does not overwrite already circled places when the whole-image action is chosen', async () => {
@@ -237,12 +239,13 @@ it('does not overwrite already circled places when the whole-image action is cho
   await act(async () => syncContextAttachmentDraftToStorage(threadId, [selection]));
   expect(getContextAttachmentDraft(threadId)).toEqual([selection]);
   const before = useChatStore.getState().pendingChatInsert;
+  await openFileMenu(container);
   await act(async () =>
     container.querySelector<HTMLButtonElement>('[data-testid="workspace-media-chat-whole-work"]')?.click(),
   );
   expect(useChatStore.getState().pendingChatInsert).toEqual(before);
   expect(container.textContent).toContain('输入框里已有这幅作品的选区');
-  expect(mocks.apiFetch).toHaveBeenCalledTimes(1);
+  expect(mocks.apiFetch.mock.calls.filter(([url]) => !String(url).includes('/file-info'))).toHaveLength(1);
 });
 
 it('keeps the existing text request entry and offers no image action for a document', async () => {

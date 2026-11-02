@@ -1,19 +1,34 @@
 import { existsSync, lstatSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { secretRuntimeScript } from '@cat-cafe/mcp-server/dist/secret-runtime.js';
 import { validateAgyNativeConfigReceipt, writeAgyNativeConfigReceipt } from './agy-native-config-receipt.js';
 
 /** Host-only config: an existing different hook is never overwritten or silently enabled. */
 export function materializeAgyNativeEffectGuard(input: {
   profileHome: string;
+  accountHome?: string;
   runtimeRoot: string;
   readOnly: boolean;
+  /** Host-admitted command directory; legacy hook callers can omit it. */
+  workspaceRoot?: string;
+  pluginServerName?: string;
 }): string {
-  const script = realpathSync(join(input.runtimeRoot, 'scripts/agy-native-effect-guard.mjs'));
+  const script = realpathSync(secretRuntimeScript('agy-native-effect-guard.mjs'));
   const quote = (value: string) => `'${value.replaceAll("'", `'"'"'`)}'`;
   // Carry the host state coordinate separately: isolated OAuth HOME is not the
   // home in which our daemon writes its self-host record.
-  const command = [process.execPath, script, homedir(), input.readOnly ? 'read-only' : 'normal'].map(quote).join(' ');
+  const command = [
+    process.execPath,
+    script,
+    homedir(),
+    input.pluginServerName !== undefined ? 'plugin-native' : input.readOnly ? 'read-only' : 'normal',
+    input.accountHome ?? input.profileHome,
+    ...(input.workspaceRoot !== undefined ? [realpathSync(input.workspaceRoot)] : []),
+    ...(input.pluginServerName !== undefined ? [input.pluginServerName] : []),
+  ]
+    .map(quote)
+    .join(' ');
   const config = {
     'cat-cafe-native-effect': {
       PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command, timeout: 5 }] }],

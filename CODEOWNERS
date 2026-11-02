@@ -1,25 +1,51 @@
 # Clowder AI — CODEOWNERS
-# Each line is a file pattern followed by one or more owners.
-# Order matters — later matches take precedence.
+# Public-repository ownership; preserved by the upstream sync manifest.
+# Later matches replace earlier owners. One eligible non-author owner must approve.
+# See MAINTAINERS.md section 4.3 for semantic risks beyond these path boundaries.
 
-# Default: maintainer team
-*                           @zts212653
+# Ordinary changes: trusted maintainers may review each other's PRs.
+# New invitees become eligible only after accepting repository Write access.
+*                                           @zts212653 @mindfn @whutzefengxie-ops @EdgarR1170 @YukinaXSer @bkkzz @zlzfun @liu-zhengdong @LeslieKuo
 
-# Core packages — require maintainer review
-packages/api/               @zts212653
-packages/shared/            @zts212653
-packages/mcp-server/        @zts212653
+# Governance, security policy, CI, release and sync tooling.
+/CODEOWNERS                                 @zts212653
+/MAINTAINERS.md                              @zts212653
+/CONTRIBUTING.md                             @zts212653
+/SECURITY.md                                 @zts212653
+/.github/                                   @zts212653
+/.githooks/                                  @zts212653
+/scripts/                                   @zts212653
+/sync-manifest.yaml                          @zts212653
+/cat-cafe-skills/                            @zts212653
+/sop-definitions/                            @zts212653
+/assets/system-prompts/                      @zts212653
+/assets/prompt-templates/                    @zts212653
+/assets/prompt-hooks/                        @zts212653
+/docs/architecture/                          @zts212653
 
-# Frontend
-packages/web/               @zts212653
+# Dependencies and runtime/build configuration.
+**/package.json                             @zts212653
+**/tsconfig*.json                            @zts212653
+/pnpm-lock.yaml                              @zts212653
+/pnpm-workspace.yaml                         @zts212653
+/patches/                                   @zts212653
+/biome.json                                  @zts212653
+/cat-config.json                             @zts212653
+/packages/api/src/config/                    @zts212653
+/desktop/scripts/                            @zts212653
 
-# Skills and governance
-cat-cafe-skills/            @zts212653
-
-# CI and scripts
-.github/                    @zts212653
-scripts/                    @zts212653
-
-# Configuration
-cat-config.json             @zts212653
-sync-manifest.yaml          @zts212653
+# Execution core, persistence, authorization and public protocol contracts.
+/packages/api/src/infrastructure/            @zts212653
+/packages/api/src/domains/cats/services/agents/ @zts212653
+/packages/api/src/domains/cats/services/session/ @zts212653
+/packages/api/src/**/stores/                  @zts212653
+/packages/api/src/skill-security/             @zts212653
+/packages/api/src/scripts/                    @zts212653
+/packages/api/src/routes/*auth*               @zts212653
+/packages/api/src/routes/callback-*           @zts212653
+/packages/api/src/routes/*migration*          @zts212653
+/packages/shared/                            @zts212653
+/packages/mcp-server/                        @zts212653
+/packages/collective-client/                 @zts212653
+/packages/collective-service/                @zts212653
+/packages/collective-connector/              @zts212653

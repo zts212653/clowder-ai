@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { validateSessionBinding as validateLegacySessionBinding } from '@clowder-ai/plugin-contract-beta23';
 import {
   HostBrokerControlPlane,
   HostBrokerError,
@@ -10,6 +11,7 @@ import {
   INSTANCE_ID,
   PACKAGE_DIGEST,
   PLUGIN_ID,
+  pluginManifest,
   readyInventory,
 } from './plugin-host-broker-helpers.js';
 
@@ -48,8 +50,6 @@ describe('K-2B Host Broker handshake', () => {
       wireVersion: '0.1.0',
       pluginInstanceId: INSTANCE_ID,
       brokerSessionId: 'bs-1',
-      grantRevision: 1,
-      effectiveGrants: ['messaging.send'],
       bindingNonce: 'nonce-1',
     });
     assert.equal(await connection.ready({ bindingNonce: binding.bindingNonce }), null);
@@ -62,22 +62,15 @@ describe('K-2B Host Broker handshake', () => {
     assert.equal(inventorySnapshot.instances[0].runtimeState, 'healthy');
   });
 
-  it('treats reordered effective grants as the same Host authority', async () => {
-    const { connection, inventory, store } = await harness({
-      inventoryOptions: { effectiveGrants: ['messaging.send', 'message.event.subscribe'] },
-    });
-
+  it('projects legacy hello fields only for a raw legacy manifest and activates the old client binding', async () => {
+    const manifest = pluginManifest();
+    manifest.features[0].capabilities = ['messaging.send'];
+    const { connection } = await harness({ inventoryOptions: { manifest } });
     const binding = await connection.hello(candidateHello());
-    await inventory.transaction((transaction) => {
-      const grants = transaction.grants.get(INSTANCE_ID);
-      transaction.grants.put({
-        ...grants,
-        effectiveGrants: ['message.event.subscribe', 'messaging.send'],
-      });
-    });
-
+    assert.equal(binding.grantRevision, 1);
+    assert.deepEqual(binding.effectiveGrants, ['messaging.send']);
+    assert.equal(validateLegacySessionBinding(binding), true);
     assert.equal(await connection.ready({ bindingNonce: binding.bindingNonce }), null);
-    assert.equal((await store.snapshot()).sessions[0].phase, 'active');
   });
 
   it('fails closed when candidate identity differs from the exact installed package', async () => {
@@ -162,8 +155,8 @@ describe('K-2B Host Broker handshake', () => {
     const binding = await connection.hello(candidateHello());
     await connection.ready({ bindingNonce: binding.bindingNonce });
     await inventory.transaction((transaction) => {
-      const grants = transaction.grants.get(INSTANCE_ID);
-      transaction.grants.put({ ...grants, grantRevision: grants.grantRevision + 1 });
+      const instance = transaction.instances.get(INSTANCE_ID);
+      transaction.instances.put({ ...instance, runtimeState: 'stopped' });
     });
 
     await assert.rejects(

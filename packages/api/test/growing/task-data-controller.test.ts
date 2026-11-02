@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import '../helpers/setup-cat-registry.js';
+import { transitionEntrustedTaskDataController } from '../../src/domains/cats/services/stores/ports/TaskDataControllerTransition.js';
 import { TaskStore } from '../../src/domains/cats/services/stores/ports/TaskStore.js';
+import { hydrateTask, serializeTask } from '../../src/domains/cats/services/stores/redis/RedisTaskCodec.js';
 
 const owner = {
   userId: 'owner',
@@ -17,7 +20,6 @@ const controller = {
   pluginInstanceId: 'pi-current',
   moduleRef: 'plugin:official.collective-connector',
   lifecycleRevision: 8,
-  grantRevision: 3,
 };
 
 const operation = {
@@ -177,7 +179,7 @@ test('a confirmed current installation can replace the same module binding from 
   const { store, admitted } = fixture();
   const first = await store.transitionEntrustedTaskDataController(bind(admitted.id));
   assert.equal(first.kind, 'bound');
-  const nextController = { ...controller, pluginInstanceId: 'pi-reinstalled', lifecycleRevision: 1, grantRevision: 1 };
+  const nextController = { ...controller, pluginInstanceId: 'pi-reinstalled', lifecycleRevision: 1 };
   const rebound = await store.transitionEntrustedTaskDataController({
     ...bind(admitted.id, 2),
     operationId: 'owner-operation:adopt-reinstalled-instance',
@@ -262,5 +264,107 @@ test('closed, generic, and missing Tasks refuse without creating or rewriting an
     const result = await store.transitionEntrustedTaskDataController(bind(taskId));
     assert.equal(result.kind, expectedKind);
     assert.deepEqual(store.listByThread(owner.threadId), before);
+  }
+});
+
+// Captured from the parent f0056865 transition/codec, not regenerated with the new digest algorithm.
+function legacyControllerFixture(active = false) {
+  const { admitted } = fixture();
+  const history = JSON.parse(
+    readFileSync(new URL('../fixtures/growing/task-controller-legacy-history.json', import.meta.url), 'utf8'),
+  );
+  if (active) {
+    history.bindingRevision = 1;
+    history.state = 'active';
+    history.receipts = history.receipts.slice(0, 1);
+    delete history.revocationReceiptRef;
+  }
+  return {
+    originalReceipts: history.receipts,
+    task: hydrateTask({
+      ...serializeTask(admitted),
+      id: 'legacy-controller-task',
+      entrustedWork: JSON.stringify({
+        ...admitted.entrustedWork,
+        revision: history.bindingRevision + 1,
+        dataController: history,
+      }),
+    }),
+  };
+}
+
+test('legacy controller receipt JSON survives reads and subsequent canonical Task writes unchanged', () => {
+  const { task, originalReceipts } = legacyControllerFixture();
+  assert.equal(JSON.stringify(task.entrustedWork?.dataController?.receipts), JSON.stringify(originalReceipts));
+  const persisted = hydrateTask(serializeTask(task));
+  assert.equal(JSON.stringify(persisted.entrustedWork?.dataController?.receipts), JSON.stringify(originalReceipts));
+  assert.ok(persisted.entrustedWork?.dataController);
+  assert.equal('grantRevision' in persisted.entrustedWork.dataController.binding, false);
+
+  const next = transitionEntrustedTaskDataController(task, {
+    ...bind(task.id, 3),
+    operationId: 'owner-operation:new-bind',
+  });
+  assert.equal(next.kind, 'bound');
+  if (next.kind !== 'bound') return;
+  assert.equal(
+    JSON.stringify(next.task.entrustedWork?.dataController?.receipts.slice(0, 2)),
+    JSON.stringify(originalReceipts),
+  );
+  assert.ok(next.receipt.kind === 'bind');
+  assert.equal('grantRevision' in next.receipt.controller, false);
+});
+
+test('legacy bind and revoke retry through current controller coordinates without rewriting receipts or state', () => {
+  for (const active of [true, false]) {
+    const { task, originalReceipts } = legacyControllerFixture(active);
+    const before = JSON.stringify(task);
+    const replay = transitionEntrustedTaskDataController(task, {
+      ...bind(task.id),
+      ownerOperation: { ...operation, requestId: 'new-retry', confirmedAt: operation.confirmedAt + 100 },
+    });
+    assert.equal(replay.kind, 'replayed');
+    if (replay.kind === 'replayed') assert.equal(JSON.stringify(replay.receipt), JSON.stringify(originalReceipts[0]));
+    if (!active) {
+      const revoke = transitionEntrustedTaskDataController(task, {
+        action: 'revoke',
+        taskId: task.id,
+        expectedTaskRevision: 2,
+        operationId: 'owner-operation:revoke-original-task',
+        expectedBindingRevision: 1,
+        expectedControllerReceiptRef: originalReceipts[0].receiptRef,
+        controller,
+        ownerOperation: { ...operation, actionId: 'release', requestId: 'retry-revoke' },
+      });
+      assert.equal(revoke.kind, 'replayed');
+      if (revoke.kind === 'replayed') assert.equal(JSON.stringify(revoke.receipt), JSON.stringify(originalReceipts[1]));
+      assert.equal(task.entrustedWork?.dataController?.state, 'revoked');
+    }
+    assert.equal(JSON.stringify(task), before);
+  }
+});
+
+test('legacy operation IDs still reject changed business payloads and caller/controller coordinates', () => {
+  const { task, originalReceipts } = legacyControllerFixture();
+  const before = JSON.stringify(task);
+  for (const input of [
+    { ...bind(task.id), expected: { ...owner, threadId: 'different-thread' } },
+    { ...bind(task.id), controller: { ...controller, pluginInstanceId: 'different-instance' } },
+    { ...bind(task.id), controller: { ...controller, lifecycleRevision: 9 } },
+    { ...bind(task.id), ownerOperation: { ...operation, actorRef: 'user:other-owner' } },
+    { ...bind(task.id), ownerOperation: { ...operation, actionId: 'different-action' } },
+    {
+      action: 'revoke' as const,
+      taskId: task.id,
+      expectedTaskRevision: 2,
+      operationId: 'owner-operation:revoke-original-task',
+      expectedBindingRevision: 2,
+      expectedControllerReceiptRef: originalReceipts[0].receiptRef,
+      controller,
+      ownerOperation: { ...operation, actionId: 'release' },
+    },
+  ]) {
+    assert.equal(transitionEntrustedTaskDataController(task, input).kind, 'operation_conflict');
+    assert.equal(JSON.stringify(task), before);
   }
 });

@@ -55,7 +55,7 @@ function setup() {
   return { deps, events, invocationQueue, messageStore, appendTrigger };
 }
 
-async function enqueue(deps, triggerMessage, targetCats = ['codex']) {
+async function enqueue(deps, triggerMessage, targetCats = ['codex'], options = {}) {
   return enqueueA2ATargets(deps, {
     targetCats,
     content: triggerMessage.content,
@@ -65,10 +65,65 @@ async function enqueue(deps, triggerMessage, targetCats = ['codex']) {
     triggerMessage,
     callerCatId: 'opus',
     parentInvocationId: 'parent-1',
+    ...options,
   });
 }
 
 describe('enqueueA2ATargets single durable ledger', () => {
+  for (const mixed of [false, true])
+    it(`does not promise a new execution preflight for exact continuation${mixed ? ' in mixed fan-out' : ''}`, async () => {
+      const { deps, invocationQueue, messageStore, appendTrigger } = setup();
+      const trigger = appendTrigger(`continuation-${mixed}`);
+      const targets = mixed ? ['codex', 'fable5'] : ['codex'];
+      const admitted = await invocationQueue.enqueueExistingMessageDurable(messageStore, trigger.id, {
+        from: trigger.from,
+        userId: 'u1',
+        ownerAuthProvenance: 'strict',
+        threadId: 't1',
+        kind: 'message_wake',
+        content: trigger.content,
+        messageId: trigger.id,
+        sourceId: trigger.id,
+        sourceCategory: 'a2a',
+        targetCats: targets,
+        intent: 'execute',
+        autoExecute: true,
+        authorIntentByCatId: {
+          codex: { requested: 'continue_current', boundParentInvocationId: 'exact-parent' },
+          ...(mixed ? { fable5: { requested: 'next_work' } } : {}),
+        },
+      });
+      assert.equal(admitted.outcome, 'enqueued');
+      deps.routingDispatchPreflight = {
+        preflight: mock.fn(async ({ targetCatIds }) => ({
+          v: 1,
+          ownerId: 'u1',
+          observedAt: Date.now(),
+          resolverState: 'fresh',
+          snapshotRef: 'snapshot:B',
+          targets: targetCatIds.map((targetCatId) => ({
+            targetCatId,
+            disposition: 'allowed',
+            reasons: [],
+            alternatives: [],
+          })),
+        })),
+      };
+      const result = await enqueue(deps, trigger, targets, { preAdmittedEntries: [admitted.entry] });
+      assert.deepEqual(result.enqueued, targets);
+      if (mixed) {
+        assert.deepEqual(
+          result.routingAdmission.targets.map((target) => target.targetCatId),
+          ['fable5'],
+        );
+        assert.deepEqual(deps.routingDispatchPreflight.preflight.mock.calls[0].arguments[0].targetCatIds, ['fable5']);
+      } else {
+        assert.equal(result.routingAdmission, undefined);
+        assert.equal(deps.routingDispatchPreflight.preflight.mock.calls.length, 0);
+        assert.equal(invocationQueue.list('t1', 'u1')[0].delivery.routingAdmission, undefined);
+      }
+    });
+
   it('fans one public Agent message into one deterministic source row with pending targets', async () => {
     const { deps, invocationQueue, messageStore, appendTrigger } = setup();
     const trigger = appendTrigger('a2a-source-1');
@@ -116,7 +171,21 @@ describe('enqueueA2ATargets single durable ledger', () => {
     const result = await enqueue(deps, appendTrigger('a2a-unavailable'));
     assert.deepEqual(result.enqueued, ['codex']);
     assert.deepEqual(invocationQueue.list('t1', 'u1')[0].targets, ['codex']);
-    assert.equal(result.routingPreflight, decision, 'the caller receives typed reasons and alternatives');
+    assert.equal(
+      result.routingPreflight,
+      undefined,
+      'enqueue acknowledgement cannot impersonate an execution decision',
+    );
+    assert.equal(result.routingAdmission.stage, 'queue_admitted');
+    assert.equal(result.routingAdmission.executionPreflight, 'pending');
+    assert.equal(result.routingAdmission.targets[0].disposition, undefined);
+    assert.equal(result.routingAdmission.snapshotRef, decision.snapshotRef);
+    assert.deepEqual(result.routingAdmission.targets[0].reasons, decision.targets[0].reasons);
+    const provenance = invocationQueue.list('t1', 'u1')[0].delivery.routingAdmission;
+    assert.equal(provenance.stage, 'queue_admitted');
+    assert.equal(provenance.targets[0].targetCatId, 'codex');
+    assert.match(provenance.targets[0].factsRef, /^sha256:/);
+    assert.equal(provenance.targets[0].capacityFacts, undefined, 'Queue only retains decision provenance');
     assert.equal(deps.routingDispatchPreflight.preflight.mock.calls[0].arguments[0].ownerRequestedAttempt, undefined);
   });
 

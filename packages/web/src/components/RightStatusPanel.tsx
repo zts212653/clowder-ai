@@ -392,6 +392,7 @@ export function RightStatusPanel({
       className="flex flex-col gap-3 overflow-y-auto px-4 py-[18px]"
       data-console-panel="status"
       data-file-origin-scroll
+      data-chat-background-surface="console-shell"
       style={{
         width: width ?? 304,
         flexShrink: 0,

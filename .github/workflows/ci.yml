@@ -2,19 +2,15 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, next]
     paths-ignore:
       - 'docs/**'
       - '*.md'
       - 'designs/**'
       - 'assets/**'
   pull_request:
-    branches: [main]
-    paths-ignore:
-      - 'docs/**'
-      - '*.md'
-      - 'designs/**'
-      - 'assets/**'
+    branches: [main, next]
+    # Required checks must report for docs/assets-only PRs as well.
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -26,6 +22,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -38,6 +36,10 @@ jobs:
           python3 -B .github/scripts/public-test-namespace-init.test.py
           sudo --preserve-env "$(command -v node)" --test .github/scripts/run-public-test-distributable.test.mjs
       - run: pnpm check
+      - name: API dev supervisor regression
+        run: node --test packages/api/test/dev-supervisor.test.js
+      - name: Browser env wrapper regression
+        run: node --test --test-name-pattern='applies --env' packages/web/test/run-with-node-env-test.test.cjs
 
   build:
     name: Build
@@ -59,6 +61,23 @@ jobs:
           --script test:onboarding:production-contracts
       - run: pnpm --filter @cat-cafe/shared build
       - run: pnpm --filter @cat-cafe/api build
+      - name: Managed Codex layout link diagnostic
+        run: >-
+          pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs
+          node --import tsx --test --test-timeout=60000 --test-name-pattern="managed layout"
+          test/codex-managed-layout-diagnostic.test.ts
+      - name: ACP Host policy matrix and existing Unix permissions
+        run: >-
+          node --import tsx --test
+          packages/api/test/acp/acp-bootstrap-posix-preservation.test.ts
+          packages/api/test/acp/acp-host-policy-matrix.test.ts
+      - name: Audit diagnostics respect explicit paths
+        run: node --test scripts/logs-health-audit.test.mjs
+      - name: Plugin native auth link diagnostic
+        run: >-
+          pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs
+          node --import tsx --test --test-timeout=60000 --test-name-pattern="auth link"
+          test/f320-plugin-account.test.ts
       - name: Native PR and Issue tracking source fence (original candidate bytes)
         shell: bash
         run: |
@@ -146,6 +165,7 @@ jobs:
     timeout-minutes: 15
     outputs:
       mode: ${{ steps.contract.outputs.mode }}
+      plan-artifact-id: ${{ steps.plan_artifact.outputs.artifact-id }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -162,6 +182,7 @@ jobs:
             packages/api/scripts/plan-public-test-shards.mjs
             packages/api/scripts/run-public-test-shard.mjs
             packages/api/scripts/summarize-public-test-shards.mjs
+            packages/api/scripts/select-public-test-reports.mjs
             packages/api/scripts/public-test-provenance.mjs
             packages/api/scripts/resolve-public-test-files.mjs
           )
@@ -192,10 +213,11 @@ jobs:
           mkdir -p "$RUNNER_TEMP/public-test"
           pnpm --filter @cat-cafe/api run test:public:plan -- --output "$RUNNER_TEMP/public-test/plan.json"
       - name: Upload exact public-test plan
+        id: plan_artifact
         if: steps.contract.outputs.mode == 'sharded'
         uses: actions/upload-artifact@v4
         with:
-          name: public-test-plan-${{ github.sha }}
+          name: public-test-plan-${{ github.sha }}-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/public-test/plan.json
           if-no-files-found: error
 
@@ -227,8 +249,9 @@ jobs:
       - name: Download exact public-test plan
         uses: actions/download-artifact@v4
         with:
-          name: public-test-plan-${{ github.sha }}
+          artifact-ids: ${{ needs.public-test-prepare.outputs.plan-artifact-id }}
           path: ${{ runner.temp }}/public-test
+          merge-multiple: true
       - name: Install owned Redis test executables
         if: matrix.lane != 'serial-shared'
         run: |
@@ -273,9 +296,9 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: public-test-report-${{ github.sha }}-${{ matrix.lane }}
+          name: public-test-report-${{ github.sha }}-${{ matrix.lane }}-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/public-test/reports/${{ matrix.lane }}.json
-          if-no-files-found: warn
+          if-no-files-found: error
 
   public-test-summary:
     name: Public test evidence
@@ -291,27 +314,48 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24.20.0
-      - name: Download exact plan and all lane reports
+      - name: Download exact public-test plan
         uses: actions/download-artifact@v4
         with:
-          pattern: public-test-*
-          path: ${{ runner.temp }}/public-test/artifacts
+          artifact-ids: ${{ needs.public-test-prepare.outputs.plan-artifact-id }}
+          path: ${{ runner.temp }}/public-test/plan
           merge-multiple: true
+      - name: Download all public-test report attempts without merging
+        uses: actions/download-artifact@v4
+        with:
+          pattern: public-test-report-${{ github.sha }}-*
+          path: ${{ runner.temp }}/public-test/artifacts
+          merge-multiple: false
       - name: Prove complete public-test coverage and summarize timing
         run: |
-          mkdir -p "$RUNNER_TEMP/public-test/reports"
-          find "$RUNNER_TEMP/public-test/artifacts" -name '*.json' -exec cp {} "$RUNNER_TEMP/public-test/reports/" \;
-          plan_path=$(find "$RUNNER_TEMP/public-test/artifacts" -name 'plan.json' -print -quit)
-          test -n "$plan_path"
+          plan_path="$RUNNER_TEMP/public-test/plan/plan.json"
+          node packages/api/scripts/select-public-test-reports.mjs \
+            --plan "$plan_path" \
+            --artifacts-dir "$RUNNER_TEMP/public-test/artifacts" \
+            --reports-dir "$RUNNER_TEMP/public-test/reports" \
+            --sha "$GITHUB_SHA" --attempt "$GITHUB_RUN_ATTEMPT"
           node packages/api/scripts/summarize-public-test-shards.mjs \
             --plan "$plan_path" \
             --reports-dir "$RUNNER_TEMP/public-test/reports" \
-            --output "$RUNNER_TEMP/public-test/summary.json" \
-            --max-critical-path-ms 600000
+            --output "$RUNNER_TEMP/public-test/summary.json"
+          # Coverage, provenance and failed tests remain blocking. Runner-dependent
+          # elapsed time is an optimization target; job timeouts still bound hangs.
+          node --input-type=module <<'NODE'
+          import { appendFileSync, readFileSync } from 'node:fs';
+          const summary = JSON.parse(readFileSync(`${process.env.RUNNER_TEMP}/public-test/summary.json`, 'utf8'));
+          const targetMs = 600_000;
+          const seconds = (summary.criticalPathMs / 1000).toFixed(1);
+          const line = `Public tests: ${summary.selectedFileCount} files, critical path ${seconds}s, runner minutes ${summary.runnerMinutes.toFixed(2)} (timing target ${targetMs / 1000}s).`;
+          console.log(line);
+          if (summary.criticalPathMs > targetMs) {
+            console.log(`::warning title=Public test timing::${line} All coverage and provenance checks passed; the timing target is advisory.`);
+          }
+          if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${line}\n`);
+          NODE
       - name: Upload public-test evidence
         uses: actions/upload-artifact@v4
         with:
-          name: public-test-summary-${{ github.sha }}
+          name: public-test-summary-${{ github.sha }}-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/public-test/summary.json
           if-no-files-found: error
 

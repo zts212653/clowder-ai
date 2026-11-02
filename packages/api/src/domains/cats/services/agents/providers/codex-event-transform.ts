@@ -1,4 +1,9 @@
-import { type CatId, isProviderSemanticEvent, normalizeThreadGoalObjective } from '@cat-cafe/shared';
+import {
+  type CatId,
+  isProviderSemanticEvent,
+  normalizeThreadGoalObjective,
+  readOutputMessageIdentity,
+} from '@cat-cafe/shared';
 import { isCodexSessionReplacementProvenance } from '../../runtime-session/CodexSessionReplacementProvenance.js';
 import type { AgentMessage } from '../../types.js';
 
@@ -21,6 +26,7 @@ export function parseCodexReconnectNotice(event: unknown): CodexReconnectNotice 
 }
 
 import { normalizeTaskStatus } from '../invocation/invoke-helpers.js';
+import { withNativeSignatureRemoval } from '../message-output-native-finalization.js';
 import { type CodexApprovalSurface, classifyCodexGithubAppApprovalFailure } from './codex-app-approval-routing.js';
 import { buildCodexAsyncQuestionMessages } from './codex-async-question.js';
 import { codexOutputMessage } from './codex-output-message.js';
@@ -546,6 +552,11 @@ export function transformCodexEvent(
       catId,
       content: `${firstChunk && hadPriorTextTurn ? '\n\n' : ''}${e.delta}`,
       textMode: 'append',
+      outputMessage: {
+        ...codexOutputMessage(e, { id: e.item_id }, firstChunk && hadPriorTextTurn),
+        complete: false,
+        textMode: 'append',
+      },
       timestamp: Date.now(),
     };
   }
@@ -601,6 +612,22 @@ export function transformCodexEvent(
       if (!state.agentMessageTextByItemId.has(itemId)) state.agentMessageItemOrder.push(itemId);
       state.agentMessageTextByItemId.set(itemId, stripped.content);
       if (state.streamedAgentMessageItemIds?.has(itemId)) {
+        const outputMessage = codexOutputMessage(e, item, false);
+        // Native completion replaces only this item. The route owns the whole
+        // response body and preserves preceding process runs/tool boundaries.
+        if (readOutputMessageIdentity(outputMessage)) {
+          const completion: AgentMessage = {
+            type: 'text',
+            catId,
+            content: stripped.content,
+            outputMessage,
+            timestamp: Date.now(),
+          };
+          const finalized = stripped.signature
+            ? withNativeSignatureRemoval(completion, item.text.slice(stripped.content.length))
+            : completion;
+          return asyncQuestionMessages.length > 0 ? [finalized, ...asyncQuestionMessages] : finalized;
+        }
         const replacement: AgentMessage = {
           type: 'text',
           catId,

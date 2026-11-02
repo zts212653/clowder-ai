@@ -130,9 +130,9 @@ it('replaces an owner profile through its original route with the read revision 
   await act(async () => root.render(<MemoryTaste />));
   await click('画像');
   await click('共同画像');
-  await click('修改画像');
+  await click('编辑');
   await act(async () => setText('画像内容', '先给清楚的结果。'));
-  await click('保存画像');
+  await click('保存');
   const call = apiFetch.mock.calls.find(([, init]) => init?.method === 'POST');
   expect(call?.[0]).toBe('/api/memory/profile/corpus/actions');
   expect(JSON.parse(call?.[1].body)).toEqual(

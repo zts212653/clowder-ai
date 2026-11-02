@@ -111,7 +111,7 @@ it('has one custom seek control, keeps native controls for other viewers and tra
   expect(container.querySelectorAll('input[aria-label="视频播放位置"]')).toHaveLength(1);
   await act(async () => writeShellLanguage('en'));
   expect(container.textContent).not.toMatch(/选时间段|圈这一帧|画笔|播放|视频/);
-  const range = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Select time range');
+  const range = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Select range');
   await act(async () => range?.click());
   expect(container.querySelector('[aria-label="Range start"]')).toBeTruthy();
   expect(container.querySelector('[aria-label="Range end"]')).toBeTruthy();
@@ -180,4 +180,40 @@ it('keeps circle disabled until an actually presented paused frame is ready and 
     endTick: 5197824,
   });
   expect(onFrame).not.toHaveBeenCalled();
+});
+
+it('uses the image toolbar structure for video tools and retains frame brush in its final menu', async () => {
+  const props = {
+    media,
+    video: { current: video },
+    seconds: 82,
+    frameReady: true,
+    mode: 'view' as const,
+    canAnnotate: true,
+    canMarkup: true,
+    onModeChange: vi.fn(),
+    onRange: vi.fn(),
+    onFrame: vi.fn(),
+    seekTo: vi.fn(),
+    annotations: [],
+    onAnnotationActive: vi.fn(),
+    children: null,
+  };
+  await act(async () => root.render(<VideoArtworkControls {...props} />));
+  const tools = container.querySelector('[data-testid="artwork-annotation-toolbar"]');
+  expect(tools).not.toBeNull();
+  expect([...tools!.querySelectorAll(':scope > button')].map((node) => node.textContent)).toEqual([
+    '选时间段',
+    '圈这一帧',
+  ]);
+  expect(tools!.querySelectorAll(':scope > button svg')).toHaveLength(2);
+  const more = tools!.querySelector('summary');
+  expect(more).not.toBeNull();
+  expect(more!.textContent).not.toMatch(/▶|⋯/);
+  expect(tools!.querySelector('details button')?.textContent).toBe('画笔');
+  await act(async () => writeShellLanguage('en'));
+  expect([...tools!.querySelectorAll(':scope > button')].map((node) => node.textContent)).toEqual([
+    'Select range',
+    'Circle frame',
+  ]);
 });

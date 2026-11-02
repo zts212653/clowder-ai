@@ -6,7 +6,7 @@ import type {
   UnifiedAttentionReadV1,
   UnifiedAttentionVisibleApproval,
 } from '@cat-cafe/shared';
-import { collectiveAccountabilityAttentionItemSchema } from '@cat-cafe/shared';
+import { collectiveAccountabilityAttentionItemSchema, collectiveProjectAttentionItemSchema } from '@cat-cafe/shared';
 import type { CollectiveAccountabilityAttentionSourceRead } from './companion-collective-accountability-source.js';
 import { projectDecisionItems } from './companion-decision-items.js';
 import { type DecisionPersonalViewInput, selectDecisionPersonalItems } from './companion-decision-personal-view.js';
@@ -43,6 +43,9 @@ function projectionSources(
   return {
     ...base,
     ...(collectiveAccountability ? { collectiveAccountabilityRequests: collectiveAccountability.state } : {}),
+    ...(collectiveAccountability?.projectRead
+      ? { collectiveProjectAttention: collectiveAccountability.projectRead.state }
+      : {}),
     ...(userMentions ? { userMentions: userMentions.state } : {}),
   };
 }
@@ -138,6 +141,30 @@ function collectiveAccountabilityItems(
       collectiveAccountabilityRequest: request,
       linkedNeedsMe: [],
     });
+  }
+  if (source.projectRead) {
+    for (const reason of source.projectRead.reasons) reasons.add(reason);
+    for (const candidate of source.projectRead.items) {
+      const parsed = collectiveProjectAttentionItemSchema.safeParse(candidate);
+      if (!parsed.success) {
+        reasons.add('collective_project_attention_invalid');
+        continue;
+      }
+      const value = parsed.data,
+        decisionRef = `${value.producerId}:${value.subjectRef}`;
+      if (seen.has(decisionRef)) {
+        reasons.add('collective_project_attention_identity_conflict');
+        continue;
+      }
+      seen.add(decisionRef);
+      const summary =
+        value.kind === 'triage'
+          ? `${value.projectTitle} 来了 ${value.count} 份外部材料 · 去分拣`
+          : value.kind === 'date_suggestion'
+            ? `${value.workTitle} 有 ${value.count} 条日期建议 · 等你确认`
+            : `${value.workTitle} 已超过截止 · 改日期或去看看`;
+      items.push({ decisionRef, kind: 'judgment', summary, collectiveProjectAttention: value, linkedNeedsMe: [] });
+    }
   }
   return items;
 }

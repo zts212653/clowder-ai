@@ -7,6 +7,7 @@ import {
 } from '../../runtime-session/CodexSessionReplacementProvenance.js';
 import { asCodexAppServerRecord } from './CodexAppServerEventMapper.js';
 import { isCodexAppServerRpcError } from './codex-app-server-rpc-error.js';
+import { projectCodexThreadMetadata, readCodexActiveWriterMetadata } from './codex-history-reader.js';
 
 /**
  * F296 B4a: the continuity fact this adapter observed at the provider boundary.
@@ -102,6 +103,8 @@ export async function resolveCodexAppServerThread(input: {
   localLiveLease: boolean;
   request: (method: string, params: Record<string, unknown>) => Promise<unknown>;
   now: () => number;
+  /** Read the historical turn coordinates before accepting notification-only receipts. */
+  onResumeMetadata?: (threadId: string) => Promise<void>;
 }): Promise<CodexAppServerThreadVerdict> {
   if (input.thread.kind === 'start') {
     if (input.requireExactResume)
@@ -114,10 +117,10 @@ export async function resolveCodexAppServerThread(input: {
         requestedThreadId: input.resumeReplacement.previousNativeThreadId,
         threadId,
         replacement: input.resumeReplacement,
-        raw,
+        raw: projectCodexThreadMetadata(raw),
       };
     }
-    return { kind: 'started', threadId, raw };
+    return { kind: 'started', threadId, raw: projectCodexThreadMetadata(raw) };
   }
 
   const requestedThreadId = input.thread.threadId;
@@ -132,7 +135,7 @@ export async function resolveCodexAppServerThread(input: {
         threadId: requestedThreadId,
         observedAt: detectedAt,
         localLiveLease: input.localLiveLease,
-        readThread: () => input.request('thread/read', { threadId: requestedThreadId, includeTurns: true }),
+        readThread: () => readCodexActiveWriterMetadata(input.request, requestedThreadId),
       });
       throw new CodexActiveWriterRecoveryError(failure.message, detection);
     }
@@ -172,7 +175,7 @@ export async function resolveCodexAppServerThread(input: {
       requestedThreadId,
       threadId: threadIdOf(fallback),
       replacement,
-      raw: fallback,
+      raw: projectCodexThreadMetadata(fallback),
     };
   }
 
@@ -180,9 +183,10 @@ export async function resolveCodexAppServerThread(input: {
   if (input.requireExactResume && threadId !== requestedThreadId) {
     throw new CodexAppServerExactResumeRequiredError('Capacity recovery did not resume the original native thread');
   }
+  await input.onResumeMetadata?.(threadId);
   // A response for a different id is never coerced to resumed.
   if (threadId !== requestedThreadId) {
-    return { kind: 'mismatched', requestedThreadId, threadId, raw };
+    return { kind: 'mismatched', requestedThreadId, threadId, raw: projectCodexThreadMetadata(raw) };
   }
-  return { kind: 'resumed', requestedThreadId, threadId, raw };
+  return { kind: 'resumed', requestedThreadId, threadId, raw: projectCodexThreadMetadata(raw) };
 }

@@ -61,6 +61,7 @@ export interface CatVariant {
   readonly accountRef?: string;
   /** Native tools own authentication and omitted model/effort defaults. */
   readonly configurationSource?: 'native_tool' | 'managed_account';
+  readonly agentProvider?: string | null;
   /** A local tool's selection, or an explicit per-member exception. */
   readonly accountBindingMode?: 'follow' | 'override';
   /** Internal creation ownership; not part of the public member projection. */
@@ -83,6 +84,8 @@ export interface CatVariant {
   readonly strengths?: readonly string[];
   /** F32-b P4c: Override breed-level avatar for this variant */
   readonly avatar?: string;
+  /** Member-only banner. Null explicitly removes a template value; siblings never inherit it. */
+  readonly banner?: string | null;
   /** F32-b P4c: Override breed-level color for this variant */
   readonly color?: CatColor;
   /**

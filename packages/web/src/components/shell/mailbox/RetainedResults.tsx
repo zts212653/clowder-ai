@@ -8,6 +8,7 @@ import { PersonMemoryRetainedReceipt } from '../../rich/PersonMemoryRetainedRece
 import { personMemoryCopy } from '../../rich/person-memory.shell-copy';
 import { useShellCopy } from '../shell-copy';
 import { useShellLanguage } from '../shell-language';
+import { ApprovalDecisionReceipt } from './ApprovalDecisionReceipt';
 import { ApprovalResultLink } from './ApprovalResultLink';
 import { useApprovalHeading } from './approval-heading';
 import { describeReconcile } from './approval-reconcile';
@@ -61,10 +62,58 @@ export function RetainedResult({ session, sessions }: { session: ApprovalSession
     !originalEffect
       ? { ...state, terminal: { ...state.terminal, effectUnknown: true } }
       : state;
-  const view = describeReconcile(displayed, { language, ownerUserId: session.ownerUserId, originalEffect });
+  const view = describeReconcile(displayed, {
+    language,
+    ownerUserId: session.ownerUserId,
+    sourceFeatureId: feature,
+    originalEffect,
+    materialization: session.approval.materialization,
+  });
+  if (state.kind === 'decided') {
+    return (
+      <li
+        data-testid="mailbox-retained-result"
+        data-decision-key={JSON.stringify([session.address.sourceFeatureId, session.address.proposalId])}
+        data-state={state.kind}
+        className="min-w-0 px-4 py-2 text-sm"
+      >
+        <div data-testid="mailbox-retained-line">
+          <ApprovalDecisionReceipt
+            session={session}
+            terminal={displayed.kind === 'decided' ? displayed.terminal : state.terminal}
+            line={[view.line, feature === 'F128' ? null : title].filter(Boolean).join(' · ')}
+            heading={title}
+            effectFailed={session.approval.materialization.state === 'failed' && !originalEffect}
+          >
+            {view.canReread ? (
+              <button
+                type="button"
+                data-testid="mailbox-retained-reread"
+                onClick={() => sessions.reread(session.key)}
+                className="shell-focusable text-xs"
+              >
+                {session.approval.materialization.state === 'failed' && !originalEffect ? t.retry : t.reread}
+              </button>
+            ) : null}
+            <button
+              type="button"
+              data-testid="mailbox-retained-dismiss"
+              onClick={() => sessions.close(session.key)}
+              className="shell-focusable text-xs"
+              style={MUTED}
+            >
+              {t.dismiss}
+            </button>
+          </ApprovalDecisionReceipt>
+        </div>
+      </li>
+    );
+  }
   return (
     <li
       data-testid="mailbox-retained-result"
+      data-chat-background-surface="paper"
+      data-decision-key={JSON.stringify([session.address.sourceFeatureId, session.address.proposalId])}
       data-state={session.model.state.kind}
       className="flex flex-col gap-1.5 rounded-[14px] px-4 py-3 text-sm"
       style={{ border: '1px solid var(--shell-hairline)', background: 'var(--shell-paper)' }}
@@ -83,7 +132,9 @@ export function RetainedResult({ session, sessions }: { session: ApprovalSession
           {view.line}
         </output>
       ) : null}
-      {feature === 'F276' ? <PersonMemoryRetainedReceipt approval={session.approval} /> : null}
+      {feature === 'F276' ? (
+        <PersonMemoryRetainedReceipt approval={session.approval} ownerUserId={session.ownerUserId} />
+      ) : null}
       <div className="flex items-center gap-2">
         <ApprovalResultLink state={session.model.state} />
         {view.canReread ? (

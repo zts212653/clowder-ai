@@ -147,6 +147,7 @@ export function useCollectiveConnectorLaunch(input: {
     onPaired,
     mutateConnection,
     selectConnection,
+    refresh: load,
   };
 }
 
@@ -165,7 +166,12 @@ function automaticallySelectedService(
   status: CollectiveConnectorStatus,
   selectedConnectionId?: string,
 ): string | undefined {
-  const connection = preferredConnection(status.connections, selectedConnectionId);
+  const candidates =
+    status.remoteService && !selectedConnectionId
+      ? status.connections.filter((item) => item.serviceUrl === status.remoteService?.serviceUrl)
+      : status.connections;
+  const connection = preferredConnection(candidates, selectedConnectionId);
   if (connection) return connection.serviceUrl;
+  if (status.remoteService) return status.remoteService.serviceUrl;
   return status.localService?.state === 'ready' ? status.localService.serviceUrl : undefined;
 }

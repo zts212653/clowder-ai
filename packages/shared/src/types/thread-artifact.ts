@@ -16,6 +16,8 @@ export interface ThreadArtifactDTO {
   type: ThreadArtifactType;
   /** 显示名（fileName / caption / filePath / PR 标题） */
   name: string;
+  /** MIME projected from the original durable file block; a display name must not overwrite this fact. */
+  mime?: string;
   /** 哪只猫产生的（null = 未知 / 系统） */
   catId: string | null;
   /** 产生 / 更新时间（毫秒 epoch；排序键，时间倒序） */

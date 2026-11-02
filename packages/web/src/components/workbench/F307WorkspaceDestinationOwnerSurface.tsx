@@ -24,6 +24,7 @@ import {
   isCapabilityEvolutionWorkspaceSurface,
   resolveCapabilityEvolutionTargetThreadId,
 } from './capability-evolution-workspace-adapter';
+import { resolveCommitChangesTarget } from './commit-changes-surface';
 import { useF307ExperienceWorkbenchStore } from './experience-workbench-store';
 import { F307FilesOwnerSurface } from './F307FilesOwnerSurface';
 import { F307OwnerUnavailable as OwnerUnavailable } from './F307OwnerUnavailable';
@@ -34,7 +35,6 @@ import {
   resolvePullRequestChangesTarget,
 } from './pull-request-changes-surface';
 import {
-  createArtifactSurface,
   createEvolutionProgramSurface,
   createFileSurface,
   createTeamWorkspaceSurface,
@@ -143,7 +143,7 @@ function WorkspaceModeOwnerSurface({
         key={JSON.stringify([threadId, surface.artifactListView])}
         threadId={threadId}
         initialView={surface.artifactListView}
-        onSelectArtifact={(artifact, navigationOrigin) => {
+        onSelectArtifact={(artifact, navigationOrigin, resolvedSurface) => {
           if (artifact.type === 'pr') {
             const target = createPullRequestChangesSurface({
               artifact,
@@ -161,13 +161,7 @@ function WorkspaceModeOwnerSurface({
               });
             return;
           }
-          onOpenSurface(
-            createArtifactSurface({
-              threadId: 'threadId' in artifact ? artifact.threadId : threadId,
-              artifact,
-              navigationOrigin,
-            }),
-          );
+          onOpenSurface(resolvedSurface);
         }}
       />
     );
@@ -200,12 +194,23 @@ export function WorkspaceDestinationOwnerSurface({
   hostWorktreeId?: string | null;
   hostThreadId?: string | null;
 }) {
+  const commitTarget = resolveCommitChangesTarget(surface);
+  if (commitTarget)
+    return (
+      <ChangesPanel
+        worktreeId={commitTarget.worktreeId}
+        commitTarget={commitTarget}
+        basisPct={40}
+        onBack={onReturnToNavigationOrigin}
+      />
+    );
   if (isPullRequestChangesSurfaceCandidate(surface)) {
     const target = resolvePullRequestChangesTarget(surface);
     return target ? (
       <ChangesPanel
         worktreeId={target.worktreeId}
         pullRequestTarget={target}
+        chatSource={surface.navigationOrigin?.kind === 'chat-file-link'}
         basisPct={40}
         onBack={onReturnToNavigationOrigin}
       />

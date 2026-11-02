@@ -126,6 +126,10 @@ export class ReplyLayersHarness {
     window.localStorage.setItem(SHELL_PRESENTATION_STORAGE_KEY, 'v2');
   }
 
+  setCatCatalogLoaded(loaded: boolean): void {
+    registry.cats = loaded ? [OPUS, ASTRA] : [];
+  }
+
   render(message: ChatMessageData): void {
     this.renderTimeline([message]);
   }

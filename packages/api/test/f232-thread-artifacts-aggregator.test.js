@@ -303,6 +303,7 @@ test('file block with non-video mimeType wins over misleading video-looking file
     fileLedger: [],
   });
   assert.equal(r[0].type, 'file');
+  assert.equal(r[0].mime, 'application/pdf');
 });
 
 test('file block with mov extension → type=video', () => {

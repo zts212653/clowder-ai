@@ -68,6 +68,20 @@ describe('F193ApprovalAdapter', () => {
     assert.equal(items[0].requesterCatId, 'opus');
   });
 
+  it('retains a superseded original as a system closure without a human decider', async () => {
+    const store = new InMemoryDispatchProposalStore();
+    await createAnchored(store, { proposalId: 'old', createdAt: 1000 });
+    await createAnchored(store, { proposalId: 'new', createdAt: 2000 });
+    const [row] = await new F193ApprovalAdapter(store).listSettled('user-1');
+    assert.equal(row?.proposalId, 'old');
+    assert.equal(row.status, 'superseded');
+    assert.equal(row.decidedAt, 2000);
+    assert.equal(row.decidedBy, '');
+    assert.equal((await store.listPendingByUser('user-1'))[0].proposalId, 'new');
+    assert.equal(await store.approve('old', 'user-1'), null);
+    assert.deepEqual(await store.listSettledByUser('foreign', 10), []);
+  });
+
   it('returns empty for user with no pending proposals', async () => {
     const store = new InMemoryDispatchProposalStore();
     const adapter = new F193ApprovalAdapter(store);

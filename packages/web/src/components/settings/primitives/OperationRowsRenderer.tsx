@@ -16,6 +16,7 @@ import { apiFetch } from '@/utils/api-client';
 import type { PlatformActionDef } from '../../HubConfigIcons';
 import type { ActionRendererProps } from './ActionRenderer';
 import { type ActionApiResult, actionCallFailure, actionRequest, rowActionRequest } from './ActionRendererState';
+import { ActionResultLink } from './ActionResultLink';
 import {
   awaitingOwnerMessage,
   confirmedActionRequest,
@@ -56,7 +57,8 @@ export function OperationRowsRenderer({
   const [rows, setRows] = useState<PluginOperationRows | undefined>();
   const [listing, setListing] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
-  const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [actionMessage, setActionMessage] = useState<{ text: string; rowKey?: string } | null>(null);
+  const [actionResult, setActionResult] = useState<{ result: ActionApiResult; rowKey?: string } | null>(null);
   const [awaitingOwner, setAwaitingOwner] = useState(false);
   const [busyKeys, setBusyKeys] = useState<ReadonlySet<string>>(() => new Set());
   // Row keys are plugin data; a Map keeps keys such as `__proto__` or `toString` ordinary.
@@ -64,7 +66,8 @@ export function OperationRowsRenderer({
   const confirmAction = useActionConfirmation();
   const listRequestId = useRef(0);
   const operationEpoch = useRef(0);
-  const inputKey = JSON.stringify([target, operation]);
+  // Detail refreshes change runtime timestamps, not the declared operation or this receipt.
+  const inputKey = JSON.stringify([stableTarget, operation.name, operation.actions, operation.rowActions]);
   const configKey = JSON.stringify(pendingConfigValues ?? {});
   const previousConfigKey = useRef(configKey);
 
@@ -115,6 +118,7 @@ export function OperationRowsRenderer({
     operationEpoch.current += 1;
     setRows(undefined);
     setActionMessage(null);
+    setActionResult(null);
     setBusyKeys(new Set());
     setRowErrors(new Map());
     void list(false);
@@ -133,6 +137,7 @@ export function OperationRowsRenderer({
     setListing(false);
     setListError(null);
     setActionMessage(null);
+    setActionResult(null);
     setBusyKeys(new Set());
     setRowErrors(new Map());
   }, [configKey]);
@@ -145,8 +150,10 @@ export function OperationRowsRenderer({
 
   const refresh = useCallback(async () => {
     const epoch = operationEpoch.current;
-    if ((await confirmAction(listAction.label, listAction.confirm)) && epoch === operationEpoch.current)
+    if ((await confirmAction(listAction.label, listAction.confirm)) && epoch === operationEpoch.current) {
+      setActionResult(null);
       await list(true);
+    }
   }, [confirmAction, list, listAction.confirm, listAction.label]);
 
   const settle = useCallback(
@@ -169,6 +176,7 @@ export function OperationRowsRenderer({
       if (!(await confirmAction(label, declared.confirm, rowAction.confirm)) || epoch !== operationEpoch.current)
         return;
       setBusyKeys((current) => new Set(current).add(row.key));
+      setActionResult(null);
       setRowErrors((current) => withoutError(current, row.key));
       const request = rowActionRequest(stableTarget, operation.name, declared.id, rowAction.input);
       const result = await send(rowAction.confirm ?? declared.confirm, request, true);
@@ -176,9 +184,17 @@ export function OperationRowsRenderer({
       const failure = await settle(result, label, declared.next);
       if (epoch !== operationEpoch.current) return;
       if (failure !== null) setRowErrors((current) => new Map(current).set(row.key, failure));
+      else {
+        setActionMessage(
+          result?.label && result.render !== 'url'
+            ? { text: result.label, rowKey: declared.next === listAction.id ? undefined : row.key }
+            : null,
+        );
+        if (result) setActionResult({ result, ...(declared.next === listAction.id ? {} : { rowKey: row.key }) });
+      }
       setBusyKeys((current) => withoutKey(current, row.key));
     },
-    [confirmAction, operation.name, operation.rowActions, send, settle, stableTarget],
+    [confirmAction, operation.name, operation.rowActions, send, settle, stableTarget, listAction.id],
   );
 
   const runButton = useCallback(
@@ -186,12 +202,16 @@ export function OperationRowsRenderer({
       const epoch = operationEpoch.current;
       if (!(await confirmAction(action.label, action.confirm)) || epoch !== operationEpoch.current) return;
       setListError(null);
+      setActionResult(null);
       const result = await send(action.confirm, actionRequest(stableTarget, operation.name, action.id), true);
       if (epoch !== operationEpoch.current) return;
       const failure = await settle(result, action.label, action.next);
       if (epoch !== operationEpoch.current) return;
       if (failure !== null) setListError(failure);
-      else setActionMessage(result?.label ?? null);
+      else {
+        setActionMessage(result?.label && result.render !== 'url' ? { text: result.label } : null);
+        if (result) setActionResult({ result });
+      }
     },
     [confirmAction, operation.name, send, settle, stableTarget],
   );
@@ -228,15 +248,18 @@ export function OperationRowsRenderer({
           {listError}
         </p>
       )}
-      {actionMessage && (
+      {actionMessage && actionMessage.rowKey === undefined && (
         <p role="status" className="text-xs text-cafe-secondary">
-          {actionMessage}
+          {actionMessage.text}
         </p>
       )}
       {awaitingOwner && (
         <p className="text-xs text-cafe-muted" data-testid={`${target.id}-rows-awaiting-owner`}>
           {awaitingOwnerMessage(listAction.label)}
         </p>
+      )}
+      {actionResult && actionResult.rowKey === undefined && (
+        <ActionResultLink result={actionResult.result} testId={`${target.id}-result-link`} />
       )}
       {rows && rows.rows.length === 0 && (
         <p className="text-sm text-cafe-muted" data-testid={`${target.id}-rows-empty`}>
@@ -247,12 +270,12 @@ export function OperationRowsRenderer({
         <ul className="divide-y divide-cafe-border rounded-lg border border-cafe-border">
           {rows.rows.map((row) => (
             <li key={row.key} className="px-3 py-2" data-testid={`${target.id}-row-${row.key}`}>
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
+              <div className="flex flex-col items-start gap-2 sm:flex-row sm:justify-between sm:gap-3">
+                <div className="w-full min-w-0 sm:w-auto sm:flex-1">
                   <p className="break-words text-sm font-medium">{row.label}</p>
                   {row.detail && <p className="break-all text-xs text-cafe-secondary">{row.detail}</p>}
                 </div>
-                <div className="flex shrink-0 gap-2">
+                <div className="flex flex-wrap gap-2 sm:shrink-0">
                   {(row.actions ?? []).map((rowAction) => {
                     const declared = operation.rowActions?.find((candidate) => candidate.id === rowAction.action);
                     if (!declared) return null;
@@ -271,6 +294,14 @@ export function OperationRowsRenderer({
                   })}
                 </div>
               </div>
+              {actionMessage?.rowKey === row.key && (
+                <p role="status" className="mt-1 text-xs text-cafe-secondary">
+                  {actionMessage.text}
+                </p>
+              )}
+              {actionResult?.rowKey === row.key && (
+                <ActionResultLink result={actionResult.result} testId={`${target.id}-row-${row.key}-result-link`} />
+              )}
               {rowErrors.has(row.key) && (
                 <p
                   role="alert"

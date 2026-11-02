@@ -2,19 +2,21 @@
 
 import { resolvePluginDescription } from '@cat-cafe/shared';
 import type { ReactNode } from 'react';
-import {
-  SettingsResourceToggleSwitch,
-  settingsResourceActionGroupClass,
-  settingsResourceCardClass,
-  settingsResourceRowClass,
-} from '../../SettingsResourceCard';
-import { SettingsDeleteButton } from '../primitives/SettingsDeleteButton';
-import { SettingsPrimaryButton } from '../primitives/SettingsPrimaryButton';
+import { settingsResourceCardClass } from '../../SettingsResourceCard';
 import { SettingsText } from '../primitives/SettingsText';
-import { PluginInstallationProgress } from './PluginInstallationProgress';
+import { PluginRowActions } from './controls/PluginManagerActions';
+import { pluginManagerText } from './controls/plugin-manager.shell-copy';
 import { PluginSourceLabel } from './PluginSourceLabel';
+import { PluginStatusDot } from './PluginStatusDot';
 import { PluginVisual } from './PluginVisual';
-import { type PluginManagerPresentation, pluginAttentionReason } from './plugin-manager-attention';
+import type { PluginBatchResult } from './plugin-batch-model';
+import { batchResultText } from './plugin-batch-model';
+import {
+  type PluginManagerPresentation,
+  pluginAttentionReason,
+  pluginAttentionTone,
+  pluginHasUpdate,
+} from './plugin-manager-attention';
 import type { PluginManagerDesignFixture } from './plugin-manager-fixtures';
 
 export function PluginListSection({
@@ -22,101 +24,37 @@ export function PluginListSection({
   title,
   ariaLabel,
   rows,
+  count,
+  action,
 }: {
-  kind: 'installed' | 'attention' | 'recommended' | 'other';
+  kind: 'installed' | 'attention' | 'recommended' | 'other' | 'available';
   title: string;
   ariaLabel: string;
   rows: readonly ReactNode[];
+  count?: number;
+  action?: ReactNode;
 }) {
   if (rows.length === 0) return null;
   return (
     <section data-plugin-section={kind} className="space-y-2">
-      <SettingsText as="h3" variant="xs" tone="muted" className="px-1 font-semibold">
-        {title}
-      </SettingsText>
-      <ul aria-label={ariaLabel} className="space-y-2">
+      <div className="flex min-h-7 items-center justify-between gap-2">
+        <SettingsText as="h3" variant="xs" tone="muted" className="px-1 font-semibold">
+          {title}
+          {count === undefined ? '' : ` · ${count}`}
+        </SettingsText>
+        {action}
+      </div>
+      <ul
+        aria-label={ariaLabel}
+        className={
+          count === undefined
+            ? 'space-y-2'
+            : 'overflow-hidden rounded-xl border border-cafe-border bg-[var(--console-card-bg)] divide-y divide-cafe-border'
+        }
+      >
         {rows}
       </ul>
     </section>
-  );
-}
-
-function PluginListActions({
-  plugin,
-  installed,
-  canInstall,
-  canSetEnabled,
-  showLifecycleToggle,
-  canUninstall,
-  busy,
-  onInstall,
-  onSetEnabled,
-  onBlockedToggle,
-  onUninstall,
-  quietUninstall,
-}: {
-  plugin: PluginManagerDesignFixture;
-  installed: boolean;
-  canInstall: boolean;
-  canSetEnabled: boolean;
-  showLifecycleToggle: boolean;
-  canUninstall: boolean;
-  busy: boolean;
-  onInstall: (() => void) | undefined;
-  onSetEnabled: ((enabled: boolean) => void) | undefined;
-  onBlockedToggle: (() => void) | undefined;
-  onUninstall: (() => void) | undefined;
-  quietUninstall: boolean;
-}) {
-  const actionSubject = plugin.id === 'official.chatgpt-dot' ? 'dot协作' : plugin.displayName;
-  if (canInstall && !installed) {
-    return (
-      <SettingsPrimaryButton onClick={() => onInstall?.()} disabled={busy}>
-        {busy ? <PluginInstallationProgress /> : plugin.id === 'official.chatgpt-dot' ? '开启 dot 协作' : '安装'}
-      </SettingsPrimaryButton>
-    );
-  }
-  if (!installed && !canUninstall) return null;
-  return (
-    <>
-      {installed && canInstall && (
-        <SettingsPrimaryButton onClick={() => onInstall?.()} disabled={busy}>
-          {busy ? <PluginInstallationProgress /> : '更新'}
-        </SettingsPrimaryButton>
-      )}
-      {installed && showLifecycleToggle && (
-        <SettingsResourceToggleSwitch
-          enabled={plugin.intent === 'enabled'}
-          busy={busy}
-          onClick={(event) => {
-            event.stopPropagation();
-            if (canSetEnabled) {
-              onSetEnabled?.(plugin.intent !== 'enabled');
-              return;
-            }
-            onBlockedToggle?.();
-          }}
-          ariaLabel={`${plugin.intent === 'enabled' ? '禁用' : '启用'}${actionSubject}`}
-          ariaPressed={plugin.intent === 'enabled'}
-        />
-      )}
-      {canUninstall && (
-        <span
-          data-plugin-uninstall
-          className={
-            quietUninstall
-              ? 'pointer-events-none opacity-0 group-hover/plugin-row:pointer-events-auto group-hover/plugin-row:opacity-100 group-focus-within/plugin-row:pointer-events-auto group-focus-within/plugin-row:opacity-100'
-              : 'contents'
-          }
-        >
-          <SettingsDeleteButton
-            onClick={() => onUninstall?.()}
-            disabled={busy}
-            aria-label={`${plugin.artifact === 'quarantined' ? '移除' : '卸载'}${actionSubject}`}
-          />
-        </span>
-      )}
-    </>
   );
 }
 
@@ -125,10 +63,14 @@ export function PluginListRow({
   selected,
   onSelect,
   onInstall,
+  onConfigure,
+  progress,
   onSetEnabled,
+  onRepair,
   onBlockedToggle,
   onUninstall,
   busy,
+  locked = false,
   enableBlockedReason,
   locale,
   presentation = 'v1',
@@ -137,78 +79,138 @@ export function PluginListRow({
   selected: boolean;
   onSelect: () => void;
   onInstall?: () => void;
+  onConfigure?: () => void;
+  progress?: PluginBatchResult;
   onSetEnabled?: (enabled: boolean) => void;
+  onRepair?: () => void;
   onBlockedToggle?: () => void;
   onUninstall?: () => void;
   busy: boolean;
+  locked?: boolean;
   enableBlockedReason?: string;
   locale: string;
   presentation?: PluginManagerPresentation;
 }) {
   const installed = plugin.artifact === 'installed';
   const canInstall = plugin.actions?.install ?? !installed;
-  const canSetEnabled = plugin.actions?.setEnabled ?? installed;
-  const canUninstall = plugin.actions?.uninstall ?? installed;
-  const showLifecycleToggle = installed;
   const description = resolvePluginDescription(plugin.description, locale);
-  const reason = presentation === 'v2' ? pluginAttentionReason(plugin) : undefined;
+  const reason = presentation === 'v2' ? pluginAttentionReason(plugin, locale) : undefined;
+  const t = pluginManagerText(locale);
+  const summary = progress
+    ? batchResultText(progress)
+    : (reason ?? (pluginHasUpdate(plugin) ? t.newVersion(plugin.availableVersion) : description));
+  const modern = presentation === 'v2';
   return (
     <li
       data-plugin-id={plugin.id}
       data-plugin-list-row="true"
       aria-current={selected ? 'true' : undefined}
-      className={`${settingsResourceCardClass} group/plugin-row min-h-[88px] transition-colors ${
+      className={`${modern ? '' : `${settingsResourceCardClass} min-h-[88px]`} group/plugin-row [container-type:inline-size] transition-colors ${
         selected ? '' : 'hover:bg-[var(--console-hover-bg)]'
       }`}
-      style={selected ? { backgroundColor: 'var(--console-active-bg)' } : undefined}
+      data-chat-background-surface={selected ? (modern ? 'selected' : 'console-active') : undefined}
+      style={selected ? { backgroundColor: modern ? 'var(--shell-selected)' : 'var(--console-active-bg)' } : undefined}
     >
-      <div className={`${settingsResourceRowClass} min-h-[88px] w-full`}>
-        <button type="button" className="flex min-w-0 flex-1 items-center gap-3 text-left" onClick={onSelect}>
-          <PluginVisual icon={plugin.icon} iconBg={plugin.iconBg} name={plugin.displayName} />
+      <div
+        className={
+          modern
+            ? 'relative flex min-h-[62px] w-full items-center gap-3 px-3.5 py-2 [@container(max-width:23rem)]:min-h-[80px]'
+            : 'grid min-h-[88px] w-full grid-cols-[minmax(0,1fr)_auto_auto_auto] items-center gap-2 px-4 py-3 [@container(max-width:23rem)]:grid-cols-[minmax(0,1fr)_auto]'
+        }
+      >
+        <button
+          type="button"
+          className={`flex min-w-0 items-center gap-3 text-left ${modern ? 'flex-1 [@container(max-width:23rem)]:pr-10' : ''}`}
+          onClick={onSelect}
+        >
+          <PluginVisual
+            icon={plugin.icon}
+            iconBg={plugin.iconBg}
+            name={plugin.displayName}
+            className={modern ? '!h-[34px] !w-[34px] !rounded-[9px]' : ''}
+          />
           <span className="min-w-0 flex-1">
-            <SettingsText as="span" variant="sm" tone="default" className="block truncate font-semibold">
-              {plugin.displayName}
-            </SettingsText>
-            <PluginSourceLabel trust={plugin.trust} repositoryName={plugin.repositoryName} />
-            <span
-              data-plugin-description="true"
-              className={`mt-0.5 block overflow-hidden ${presentation === 'v2' ? 'truncate' : 'line-clamp-2'}`}
-            >
-              <SettingsText as="span" variant="xs" tone="secondary">
-                {description}
+            <span className="flex min-w-0 items-center gap-1.5">
+              <SettingsText
+                as="span"
+                variant="sm"
+                tone="default"
+                title={plugin.displayName}
+                className="block truncate font-medium"
+              >
+                {plugin.displayName}
               </SettingsText>
+              {modern && (plugin.trust === 'unknown' || plugin.trust === 'unverified') && (
+                <span
+                  data-plugin-source-trust={plugin.trust}
+                  title={t.source[plugin.trust]}
+                  className="max-w-[45%] shrink-0 truncate rounded border border-cafe-border px-1 text-micro font-normal text-cafe-muted"
+                >
+                  {t.unknownSource}
+                </span>
+              )}
             </span>
-            {installed && canInstall && (
-              <SettingsText as="span" variant="xs" tone="secondary" className="block">
-                有更新 · {plugin.availableVersion}
-              </SettingsText>
+            {!modern && (
+              <PluginSourceLabel
+                trust={plugin.trust}
+                repositoryName={plugin.repositoryName}
+                compact
+                locale={locale}
+                availableVersion={installed && canInstall ? plugin.availableVersion : undefined}
+              />
             )}
-            {reason && (
-              <span data-plugin-attention className="mt-1 flex items-center gap-1.5 text-xs text-cafe-secondary">
+            {modern && (
+              <span
+                data-plugin-summary
+                data-plugin-attention={reason ? '' : undefined}
+                className="mt-0.5 flex min-w-0 items-center gap-1.5 text-compact text-cafe-secondary [@container(max-width:23rem)]:pr-8"
+              >
+                {(reason || pluginHasUpdate(plugin)) && (
+                  <PluginStatusDot tone={reason ? pluginAttentionTone(plugin) : 'update'} />
+                )}
+                <span
+                  className={
+                    reason
+                      ? 'min-w-0 truncate [@container(max-width:23rem)]:whitespace-normal [@container(max-width:23rem)]:overflow-visible [@container(max-width:23rem)]:text-clip'
+                      : 'truncate'
+                  }
+                  title={plugin.diagnostic && reason ? plugin.diagnostic : summary}
+                >
+                  {summary}
+                </span>
+              </span>
+            )}
+            {presentation === 'v1' && (
+              <span
+                data-plugin-description="true"
+                className="mt-0.5 block line-clamp-2 text-compact text-cafe-secondary"
+              >
+                {description}
+              </span>
+            )}
+            {!modern && reason && (
+              <span data-plugin-attention className="mt-1 flex items-center gap-1.5 text-compact text-cafe-secondary">
                 <span aria-hidden="true" className="h-2 w-2 shrink-0 rounded-full bg-conn-amber-text" />
-                <span className="truncate" title={reason}>
+                <span className="truncate" title={plugin.diagnostic ?? reason}>
                   {reason}
                 </span>
               </span>
             )}
           </span>
         </button>
-        <div className={settingsResourceActionGroupClass}>
-          <PluginListActions
-            plugin={plugin}
-            installed={installed}
-            canInstall={canInstall}
-            canSetEnabled={canSetEnabled}
-            showLifecycleToggle={showLifecycleToggle}
-            canUninstall={canUninstall}
-            busy={busy}
-            onInstall={onInstall}
-            onSetEnabled={onSetEnabled}
-            onBlockedToggle={onBlockedToggle}
-            onUninstall={onUninstall}
-            quietUninstall={presentation === 'v2' && !selected}
-          />
-        </div>
+        <PluginRowActions
+          onConfigure={onConfigure}
+          plugin={plugin}
+          locale={locale}
+          busy={busy}
+          locked={locked}
+          onInstall={onInstall}
+          onRepair={onRepair}
+          onSetEnabled={onSetEnabled}
+          onBlockedToggle={onBlockedToggle}
+          onUninstall={onUninstall}
+          allowOverflow={!modern}
+        />
       </div>
       {enableBlockedReason && (
         <output className="block px-4 pb-3 text-xs text-conn-amber-text">{enableBlockedReason}</output>

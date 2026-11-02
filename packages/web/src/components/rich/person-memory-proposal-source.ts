@@ -1,8 +1,11 @@
 import { type ApprovalHubItem, isPersonMemoryProposalCardBlock, type RichCardBlock } from '@cat-cafe/shared';
 import { z } from 'zod';
 import { matchHostedApproval } from '@/components/shell/mailbox/approval-match';
+import { readApprovalProducerBody } from '@/lib/approval-producer-read';
+import { readFreshApprovalResultOwner } from '@/lib/approval-result-owner';
 import { useApprovalHubStore } from '@/stores/approvalHubStore';
 import { apiFetch } from '@/utils/api-client';
+import { apiSessionIdentity } from '@/utils/api-session-identity';
 
 const receiptSchema = z.object({
   decisionId: z.string().min(1),
@@ -16,8 +19,25 @@ const snapshotSchema = z.object({
   remainingDraftIds: z.array(z.string()).optional(),
   publicationState: z.literal('anchored'),
   approvalCardMessageId: z.string(),
+  replacedByProposalId: z.string().min(1).optional(),
+  hasRetainedWrites: z.boolean().optional(),
+  materialized: z
+    .object({
+      claims: z.number().int().nonnegative(),
+      relationships: z.number().int().nonnegative(),
+      events: z.number().int().nonnegative(),
+    })
+    .optional(),
+  undoApplied: z.boolean().optional(),
   decisionReceipt: receiptSchema.optional(),
-  undoReceipt: z.object({ requestId: z.string(), verdict: z.literal('undone') }).optional(),
+  undoReceipt: z
+    .object({
+      requestId: z.string(),
+      verdict: z.literal('undone'),
+      candidateId: z.string().optional(),
+      candidateState: z.enum(['pending_approval', 'partially_materialized', 'withdrawn']).optional(),
+    })
+    .optional(),
 });
 export type PersonMemorySnapshot = z.infer<typeof snapshotSchema>;
 export type PersonMemoryCoordinate = { threadId: string; messageId: string };
@@ -27,13 +47,14 @@ export function isPersonMemoryPending(snapshot: PersonMemorySnapshot): boolean {
 export async function readPersonMemorySnapshot(
   proposalId: string,
   messageId: string,
+  fresh = true,
 ): Promise<PersonMemorySnapshot | null> {
-  const response = await apiFetch(
-    `/api/person-memory-proposals/${encodeURIComponent(proposalId)}`,
-    {},
-    { afterCurrentGet: true },
-  );
-  const parsed = snapshotSchema.safeParse(response.ok ? await response.json() : null);
+  const owner = apiSessionIdentity.getSnapshot().ownerUserId;
+  const path = `/api/person-memory-proposals/${encodeURIComponent(proposalId)}`;
+  const body = owner
+    ? await readApprovalProducerBody({ owner, producer: 'F276', proposalId }, path, { fresh })
+    : await apiFetch(path, {}, { afterCurrentGet: true }).then((response) => (response.ok ? response.json() : null));
+  const parsed = snapshotSchema.safeParse(body);
   return parsed.success && parsed.data.proposalId === proposalId && parsed.data.approvalCardMessageId === messageId
     ? parsed.data
     : null;
@@ -99,21 +120,25 @@ export async function readPersonMemorySource(
   ref: PersonMemoryCoordinate,
   original?: RichCardBlock,
   expected?: ApprovalHubItem,
+  expectedOwnerUserId?: string,
+  fresh = true,
 ): Promise<{ snapshot: PersonMemorySnapshot; item: ApprovalHubItem | null } | null> {
   try {
-    const session = await apiFetch('/api/session', {}, { afterCurrentGet: true });
-    const owner: unknown = session.ok ? await session.json() : null;
+    const ownerId = await readFreshApprovalResultOwner();
+    const owner = { userId: ownerId };
     if (
       !record(owner) ||
       typeof owner.userId !== 'string' ||
       !owner.userId ||
+      (expectedOwnerUserId !== undefined && expectedOwnerUserId !== owner.userId) ||
       (expected && expected.ownerUserId !== owner.userId)
     )
       return null;
-    const snapshot = await readPersonMemorySnapshot(proposalId, ref.messageId);
+    const snapshot = await readPersonMemorySnapshot(proposalId, ref.messageId, fresh);
     if (!snapshot) return null;
     if (!isPersonMemoryPending(snapshot)) return { snapshot, item: null };
-    await useApprovalHubStore.getState().fetchPending();
+    if (fresh) await useApprovalHubStore.getState().fetchPending();
+    else await useApprovalHubStore.getState().ensurePending(owner.userId);
     const store = useApprovalHubStore.getState();
     if (!store.pendingReadAvailable || store.isLoading) return null;
     const copies = store.items.filter((i) => i.proposalId === proposalId && i.sourceFeatureId === 'F276');

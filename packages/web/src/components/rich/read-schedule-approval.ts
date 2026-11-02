@@ -5,6 +5,8 @@ import type {
   ScheduleMutationTaskDefinition,
 } from '@cat-cafe/shared';
 import { matchHostedApproval } from '@/components/shell/mailbox/approval-match';
+import { readFreshApprovalResultOwner } from '@/lib/approval-result-owner';
+import { useApprovalHubStore } from '@/stores/approvalHubStore';
 import { apiFetch } from '@/utils/api-client';
 
 import {
@@ -123,10 +125,10 @@ export async function readScheduleSource(
   proposalId: string,
   coordinate: ScheduleCoordinate,
   item?: ApprovalHubItem,
+  fresh = true,
 ): Promise<ScheduleMutationProposal | null> {
-  const session = await apiFetch('/api/session', {}, { afterCurrentGet: true });
-  const owner: unknown = session.ok ? await session.json() : null;
-  if (!scheduleObject(owner) || !text(owner.userId) || (item && owner.userId !== item.ownerUserId)) return null;
+  const owner = { userId: await readFreshApprovalResultOwner() };
+  if (!text(owner.userId) || (item && owner.userId !== item.ownerUserId)) return null;
   const proposal = await readScheduleProposal(proposalId);
   if (!proposal || proposal.ownerUserId !== owner.userId || proposal.publication.state !== 'anchored') return null;
   const ref = proposal.publication.envelope.approvalCardRef;
@@ -137,9 +139,11 @@ export async function readScheduleSource(
   )
     return null;
   if (proposal.status === 'approved' || proposal.status === 'rejected') return proposal;
-  const response = await apiFetch('/api/approval-hub/pending', {}, { afterCurrentGet: true });
-  const body: unknown = response.ok ? await response.json() : null;
-  if (!scheduleObject(body) || !Array.isArray(body.items)) return null;
+  if (fresh) await useApprovalHubStore.getState().fetchPending();
+  else await useApprovalHubStore.getState().ensurePending(owner.userId);
+  const store = useApprovalHubStore.getState();
+  if (!store.pendingReadAvailable || store.isLoading) return null;
+  const body = { items: store.items };
   const copies = body.items.filter(
     (v) => scheduleObject(v) && v.sourceFeatureId === 'F139' && v.proposalId === proposalId,
   );

@@ -61,7 +61,7 @@ export function ArtworkFloatingHeader({
             {t.workMode}
           </button>
         ) : null}
-        <div ref={chrome?.setActions} className={styles.headerActions} />
+        <div ref={chrome?.setActions} role="group" aria-label={t.more} tabIndex={-1} className={styles.headerActions} />
         <button ref={closeRef} type="button" aria-label={t.close} onClick={onClose}>
           ×
         </button>

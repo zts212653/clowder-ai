@@ -14,19 +14,32 @@ const desktopPostInstallScriptPath = path.resolve(
 );
 const desktopInstallerScriptPath = path.resolve(import.meta.dirname, '../../../desktop/installer/cat-cafe.iss');
 
-test('api build uses the public native command without the prepared-artifact wrapper', async () => {
+test('api build keeps native copy and packaging behind the selected edition entry', async () => {
   const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf8'));
+  const { activeProfile } = JSON.parse(
+    await readFile(new URL('../../shared/src/deployment-profiles.json', import.meta.url), 'utf8'),
+  );
   const buildScript = packageJson.scripts?.build;
+  let actualBuildScript;
 
   assert.equal(typeof buildScript, 'string');
-  assert.doesNotMatch(buildScript, /gate-prepared-artifacts/);
-  assert.match(buildScript, /pnpm --dir \.\.\/shared build/);
-  assert.doesNotMatch(buildScript, /pnpm --dir \.\.\/collective-(?:connector|service) build/);
-  assert.match(buildScript, /node \.\/scripts\/copy-bundled-plugin-packages\.mjs/);
-  assert.match(buildScript, /node \.\/scripts\/copy-marketplace-catalog-data\.mjs/);
-  assert.doesNotMatch(buildScript, /\bmkdir -p\b/);
-  assert.doesNotMatch(buildScript, /\bcp\s+src\/marketplace\/catalog-data/);
-  assert.equal(packageJson.scripts?.['build:actual'], undefined);
+  assert.ok(['home', 'opensource'].includes(activeProfile), 'build contract requires a known edition');
+  if (activeProfile === 'home') {
+    assert.match(buildScript, /node \.\.\/\.\.\/desktop\/scripts\/build-app-assist\.cjs/);
+    assert.match(buildScript, /gate-prepared-artifacts\.mjs run --artifact api -- pnpm run build:actual/);
+    actualBuildScript = packageJson.scripts?.['build:actual'];
+  } else {
+    assert.doesNotMatch(buildScript, /gate-prepared-artifacts/);
+    assert.equal(packageJson.scripts?.['build:actual'], undefined);
+    actualBuildScript = buildScript;
+  }
+  assert.equal(typeof actualBuildScript, 'string');
+  assert.match(actualBuildScript, /pnpm --dir \.\.\/shared build/);
+  assert.doesNotMatch(actualBuildScript, /collective-service|collective-connector/);
+  assert.match(actualBuildScript, /node \.\/scripts\/copy-bundled-plugin-packages\.mjs/);
+  assert.match(actualBuildScript, /node \.\/scripts\/copy-marketplace-catalog-data\.mjs/);
+  assert.doesNotMatch(actualBuildScript, /\bmkdir -p\b/);
+  assert.doesNotMatch(actualBuildScript, /\bcp\s+src\/marketplace\/catalog-data/);
 });
 
 test('api test script builds mcp-server with workspace dependencies first', async () => {

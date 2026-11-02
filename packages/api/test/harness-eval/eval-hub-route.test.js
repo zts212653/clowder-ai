@@ -2,10 +2,11 @@ import assert from 'node:assert/strict';
 import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
-import { describe, it } from 'node:test';
+import { beforeEach, describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import Fastify from 'fastify';
 import { evalHubRoutes } from '../../dist/routes/eval-hub.js';
+import { createEvalHubCorpus } from './eval-hub-corpus-fixture.js';
 import { seedCanonicalMeasurementCensusState } from './publish-verdict-fixtures.js';
 
 /**
@@ -31,7 +32,10 @@ function makeLiveHarnessFeedbackWithEvidence(snapName, attrName) {
   return root;
 }
 
-const repoHarnessFeedbackRoot = fileURLToPath(new URL('../../../../docs/harness-feedback', import.meta.url));
+let repoHarnessFeedbackRoot;
+beforeEach((t) => {
+  repoHarnessFeedbackRoot = createEvalHubCorpus(t);
+});
 
 async function buildApp() {
   const app = Fastify({ logger: false });
@@ -67,15 +71,11 @@ describe('Eval Hub API route', () => {
 
     assert.equal(response.statusCode, 200);
     const body = response.json();
-    // PR-3 (F192 H 收尾): #2114 merge added a 2nd verdict to main since this test
-    // was authored. Assert >= 1 (count-tolerant) + verify the original fixture
-    // verdict still appears by ID — not by index (more verdicts WILL accumulate
-    // as scheduled evals publish more artifacts).
-    assert.ok(body.counts.total >= 1, `expected at least 1 verdict, got ${body.counts.total}`);
-    const originalVerdict = body.items.find((v) => v.id === '2026-05-23-eval-a2a-live-verdict');
-    assert.ok(originalVerdict, 'fixture verdict 2026-05-23-eval-a2a-live-verdict must remain in summary');
+    assert.equal(body.counts.total, 5);
+    const originalVerdict = body.items.find((v) => v.id === 'fixture-a2a-observed-window');
+    assert.ok(originalVerdict, 'fixture verdict fixture-a2a-observed-window must remain in summary');
     assert.equal(originalVerdict.systemWorkspace.kind, 'eval_domain');
-    assert.equal(originalVerdict.evidence.snapshotRefs[0], 'snapshot:bundle/2026-05-23-eval-a2a-live-verdict/snapshot');
+    assert.equal(originalVerdict.evidence.snapshotRefs[0], 'snapshot:bundle/fixture-a2a-observed-window/snapshot');
     await app.close();
   });
 

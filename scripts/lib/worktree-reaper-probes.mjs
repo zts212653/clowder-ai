@@ -43,8 +43,8 @@ export function safeRealpath(p) {
  * (`--worktree`) or the clone's own config (`--local`), so a key set in the shared repository config
  * can never make every worktree look declared. `{}` = undeclared; null = unreadable.
  */
-export function lifecycleConfig(dir, scope) {
-  const res = git(dir, ['config', scope, '--get-regexp', '^catcafe\\.lifecycle\\.']);
+export function lifecycleConfig(dir, scope, env = {}) {
+  const res = git(dir, ['config', scope, '--get-regexp', '^catcafe\\.lifecycle\\.'], env);
   if (!res.ok) return res.code === 1 ? {} : null; // 1 = no matching key
   // git lower-cases variable names; map them back to the declared camelCase keys.
   const names = {
@@ -53,17 +53,19 @@ export function lifecycleConfig(dir, scope) {
     createdat: 'createdAt',
     expiresat: 'expiresAt',
     retention: 'retention',
+    origin: 'origin',
+    prsource: 'prSource',
   };
   /** @type {Record<string, string>} */
   const out = {};
   for (const line of res.out.split('\n').filter(Boolean)) {
     const i = line.indexOf(' ');
     const key = names[line.slice('catcafe.lifecycle.'.length, i).toLowerCase()];
-    if (key === 'retention') {
+    if (key === 'retention' || key === 'origin') {
       try {
-        out.retention = JSON.parse(line.slice(i + 1));
+        out[key] = JSON.parse(line.slice(i + 1));
       } catch {
-        out.retention = null;
+        out[key] = null;
       } // corrupt owner intent must fail closed, never disappear
     } else if (key) out[key] = line.slice(i + 1);
   }

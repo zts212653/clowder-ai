@@ -155,6 +155,7 @@ export function MessageActionsOverlay({
         <div
           ref={plane}
           data-message-actions-owner={messageId}
+          data-chat-background-layer="opaque"
           style={{
             position: 'fixed',
             width: 'max-content',

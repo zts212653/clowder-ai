@@ -3,6 +3,7 @@ import type {
   PawFeelDirectRepairOutcomeV1,
   PawFeelDispositionEvent,
   PawFeelDispositionProjection,
+  PawFeelRepairRequest,
   PawFeelResumeSelectorV1,
 } from '@cat-cafe/shared';
 import { ownerTruthRefV1Schema } from '@cat-cafe/shared';
@@ -22,7 +23,9 @@ export interface PawFeelCommandEvidenceOptions {
   directRepairResolver?: {
     resolve(input: {
       projection: PawFeelDispositionProjection;
-      leaseId: string;
+      leaseId?: string;
+      repairBinding?: PawFeelRepairRequest;
+      userId?: string;
       actionRef: string;
     }): Promise<PawFeelDirectRepairResolution>;
   };
@@ -48,6 +51,7 @@ function serviceError(error: unknown, fallback: string): PawFeelDispositionServi
 
 interface WriteContextInput {
   actor: PawFeelTrustedPrincipal;
+  userId?: string;
   command: PawFeelDispositionCommand;
   projection: PawFeelDispositionProjection;
   existing?: PawFeelDispositionEvent;
@@ -73,18 +77,15 @@ async function resolveDirectFix(
       'fix requires source-routed direct action authority in addition to Task/F167 custody',
     );
   }
-  const requested =
-    command.type === 'mark_fix'
-      ? { leaseId: command.leaseId, actionRef: command.actionRef }
-      : command.action.type === 'fix'
-        ? command.action
-        : undefined;
+  const requested = command.type === 'mark_fix' ? command : command.action.type === 'fix' ? command.action : undefined;
   if (!requested) throw new Error('unreachable non-fix signature action');
   let resolution: PawFeelDirectRepairResolution;
   try {
     resolution = await resolver.resolve({
       projection: input.projection,
       leaseId: requested.leaseId,
+      repairBinding: requested.repairBinding,
+      userId: input.userId,
       actionRef: requested.actionRef,
     });
   } catch (error) {

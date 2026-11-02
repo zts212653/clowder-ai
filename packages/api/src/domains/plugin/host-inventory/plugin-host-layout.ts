@@ -28,6 +28,7 @@ export const PLUGIN_HOST_ENTRIES = {
   outboundMedia: 'outbound-media.json',
   mediaStaging: 'media-staging.json',
   mediaPostProcessing: 'media-post-processing',
+  projectOutputs: 'project-outputs',
   quarantines: 'quarantines.json',
   dotConnection: 'dot-connection.json',
   dotDispatches: 'dot-dispatches',

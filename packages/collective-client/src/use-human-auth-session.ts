@@ -1,5 +1,11 @@
 import { type Dispatch, type SetStateAction, useCallback, useEffect, useMemo, useRef } from 'react';
-import { type ClientRequest, CollectiveClientRequestError, collectiveClientErrorMessage } from './client-request.js';
+import {
+  type ClientReadPolicy,
+  type ClientRequest,
+  CollectiveClientRequestError,
+  collectiveClientErrorMessage,
+  fetchClientJson,
+} from './client-request.js';
 import type {
   ClientSnapshot,
   CollectiveMe,
@@ -111,6 +117,7 @@ async function initializeHumanSession(context: AuthBootContext): Promise<void> {
     restrictedScope: me ? missingMembershipScope(meta.serviceInstanceId, me) : undefined,
     phase: me ? phaseForHuman(me) : 'entry',
     events: [],
+    channels: undefined,
     collaboration: undefined,
     participants: undefined,
     members: undefined,
@@ -129,38 +136,74 @@ function resolveHumanAuthIntent(phase: ClientSnapshot['phase'], invitationMode: 
 export function useHumanAuthSession(snapshot: ClientSnapshot, setSnapshot: Dispatch<SetStateAction<ClientSnapshot>>) {
   const token = useRef<string | null>(null);
   const authWindow = useRef<Window | null>(null);
+  const sessionGeneration = useRef(0);
 
   // One browser-service request per instance; share the lane across effect replays and refreshes.
   const requestTail = useRef<Promise<void>>(Promise.resolve());
-  const request = useCallback(<Result>(path: string, init?: RequestInit): Promise<Result> => {
-    const options: RequestInit = {
+  const binaryRequest = useCallback(async (path: string, init?: RequestInit) => {
+    if (!path.startsWith('/api/') || path.startsWith('//')) throw new Error('Invalid Service path');
+    const credential = token.current;
+    const generation = sessionGeneration.current;
+    if (!credential) throw new CollectiveClientRequestError(401, '请先登录');
+    const response = await fetch(path, {
       ...init,
       credentials: 'same-origin',
       headers: {
-        'content-type': 'application/json',
-        ...(token.current ? { authorization: `Bearer ${token.current}` } : {}),
         ...init?.headers,
+        authorization: `Bearer ${credential}`,
+        'x-collective-message-content': '2',
       },
-    };
-    const result = requestTail.current.then(async () => {
-      options.signal?.throwIfAborted();
-      const response = await fetch(path, options);
-      const payload = (await response.json()) as Result & { error?: { message?: string } };
-      if (!response.ok) {
-        throw new CollectiveClientRequestError(
-          response.status,
-          payload.error?.message ?? `请求失败（${response.status}）`,
-        );
-      }
-      return payload;
     });
-    // Settle the lane after either outcome, without retrying or hiding this request's failure.
-    requestTail.current = result.then(
-      () => undefined,
-      () => undefined,
-    );
-    return result;
+    if (credential !== token.current || generation !== sessionGeneration.current) {
+      await response.body?.cancel();
+      throw new Error('身份已变化');
+    }
+    if (!response.ok) {
+      const result = (await response.json()) as { error?: { code?: string; message?: string } };
+      throw new CollectiveClientRequestError(
+        response.status,
+        result.error?.message ?? `请求失败（${response.status}）`,
+        result.error?.code,
+      );
+    }
+    return response;
   }, []);
+  const request = useCallback(
+    <Result>(path: string, init?: RequestInit, policy?: ClientReadPolicy): Promise<Result> => {
+      const generation = sessionGeneration.current;
+      const options: RequestInit = {
+        ...init,
+        credentials: 'same-origin',
+        headers: {
+          'content-type': 'application/json',
+          'x-collective-message-content': '2',
+          ...(token.current ? { authorization: `Bearer ${token.current}` } : {}),
+          ...init?.headers,
+        },
+      };
+      const result = requestTail.current.then(async () => {
+        options.signal?.throwIfAborted();
+        if (generation !== sessionGeneration.current) throw new Error('身份已变化');
+        const { response, payload } = await fetchClientJson<Result>(path, options, policy);
+        if (generation !== sessionGeneration.current) throw new Error('身份已变化');
+        if (!response.ok) {
+          throw new CollectiveClientRequestError(
+            response.status,
+            payload.error?.message ?? `请求失败（${response.status}）`,
+            payload.error?.code,
+          );
+        }
+        return payload;
+      });
+      // Settle the lane after either outcome, without retrying or hiding this request's failure.
+      requestTail.current = result.then(
+        () => undefined,
+        () => undefined,
+      );
+      return result;
+    },
+    [],
+  );
 
   const loadMe = useCallback(async () => {
     const credential = token.current;
@@ -168,6 +211,7 @@ export function useHumanAuthSession(snapshot: ClientSnapshot, setSnapshot: Dispa
       return await request<CollectiveMe>('/api/me');
     } catch (error) {
       if (error instanceof CollectiveClientRequestError && error.status === 401 && credential === token.current) {
+        ++sessionGeneration.current;
         token.current = null;
         sessionStorage.removeItem(`${SESSION_KEY}:${location.origin}`);
         setSnapshot((current) => {
@@ -179,6 +223,7 @@ export function useHumanAuthSession(snapshot: ClientSnapshot, setSnapshot: Dispa
             me: undefined,
             collective: undefined,
             events: [],
+            channels: undefined,
             collaboration: undefined,
             participants: undefined,
             members: undefined,
@@ -191,6 +236,7 @@ export function useHumanAuthSession(snapshot: ClientSnapshot, setSnapshot: Dispa
 
   const enterSession = useCallback(
     async (sessionToken: string) => {
+      ++sessionGeneration.current;
       token.current = sessionToken;
       sessionStorage.setItem(`${SESSION_KEY}:${location.origin}`, sessionToken);
       const cleanUrl = new URL(location.href);
@@ -206,6 +252,7 @@ export function useHumanAuthSession(snapshot: ClientSnapshot, setSnapshot: Dispa
         collective: selectedCollective(me),
         restrictedScope: current.meta ? missingMembershipScope(current.meta.serviceInstanceId, me) : undefined,
         events: [],
+        channels: undefined,
         collaboration: undefined,
         participants: undefined,
         members: undefined,
@@ -317,7 +364,40 @@ export function useHumanAuthSession(snapshot: ClientSnapshot, setSnapshot: Dispa
     }
   }, [invitationMode, request, snapshot.phase, snapshot.providers]);
 
-  return { token, request, loadMe, invitationMode, bootstrap, authenticate, configureProvider };
+  const switchAccount = useCallback(() => {
+    ++sessionGeneration.current;
+    token.current = null;
+    authWindow.current?.close();
+    authWindow.current = null;
+    sessionStorage.removeItem(`${SESSION_KEY}:${location.origin}`);
+    setSnapshot((current) => ({
+      ...current,
+      phase: 'entry',
+      me: undefined,
+      collective: undefined,
+      restrictedScope: undefined,
+      events: [],
+      channels: undefined,
+      collaboration: undefined,
+      participants: undefined,
+      members: undefined,
+      notice: undefined,
+      error: undefined,
+      delivery: { kind: 'idle' },
+    }));
+  }, [setSnapshot]);
+
+  return {
+    token,
+    request,
+    binaryRequest,
+    loadMe,
+    invitationMode,
+    bootstrap,
+    authenticate,
+    configureProvider,
+    switchAccount,
+  };
 }
 
 export { CollectiveClientRequestError, collectiveClientErrorMessage } from './client-request.js';

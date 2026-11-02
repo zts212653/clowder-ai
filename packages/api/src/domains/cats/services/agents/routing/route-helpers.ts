@@ -34,9 +34,11 @@ const log = createModuleLogger('context-transport');
 const PROMPT_MESSAGE_SAFETY_CHAR_LIMIT = 100_000;
 
 import { estimateTokens } from '../../../../../utils/token-counter.js';
+import { sliceUnicodeSafe } from '../../../../../utils/unicode-safe-slice.js';
 import { matchExplicitApprovedTasteTrigger } from '../../../../memory/cue/ExplicitApprovedTasteTriggerCatalog.js';
 import type { MemoryCueOpportunitySeed } from '../../../../memory/cue/MemoryCueInvocationPromptService.js';
 import type { NudgeProcessResult } from '../../../../memory/EntityNudgeService.js';
+import { formatRoadmapPointer, readNavigationRoadmap } from '../../../../workspace/thread-roadmap-source.js';
 import type { CloudDispatchProvenance } from '../../cloud-bridge/types.js';
 import { buildMessageMap, formatMessage } from '../../context/ContextAssembler.js';
 import { CO_CREATOR_TIME_ZONE, formatPromptTime } from '../../format-time.js';
@@ -126,6 +128,7 @@ export interface RouteBroadcaster {
 
 /** Dependencies shared across route strategies */
 export interface RouteStrategyDeps {
+  messageSearchAnswerService?: import('../../../../memory/MessageSearchAnswerPublicationService.js').MessageSearchAnswerPublicationService;
   routingDispatchPreflight?: import('../../../../routing-context/RoutingDispatchPreflightPort.js').RoutingDispatchPreflightPort;
   services: Record<string, AgentService>;
   unavailableServices?: ReadonlyMap<string, AgentRegistrationFailure>;
@@ -155,6 +158,7 @@ export interface RouteStrategyDeps {
   skillLoadEventLog?: import('../../tool-usage/SkillLoadEventLog.js').SkillLoadEventLog;
   /** F148 Phase F: Task store for navigation context (optional, fail-open) */
   taskStore?: import('../../stores/ports/TaskStore.js').ITaskStore;
+  ownedWaitStatusReader?: import('../../../../ball-custody/OwnedWaitStatus.js').OwnedWaitStatusReader;
   /** RFC A79: exact lifecycle situation shared with UI and read-only thread context. */
   threadExecutionSituationSource?: import('../invocation/thread-execution-situation.js').ThreadExecutionSituationSource;
   /** F222: Frustration auto-issue store (optional, fail-open) */
@@ -266,6 +270,10 @@ export function mergePersistedPromptMessages(
 
 /** Common options for both strategies */
 export interface RouteOptions {
+  /** Trusted Queue provenance for comparing B with C; never an execution grant. */
+  routingAdmission?: import('@cat-cafe/shared').RoutingAdmissionProvenanceV1;
+  /** Server-owned ingress only; never copied from an HTTP/MCP request body. */
+  contextSourceIngress?: import('../../../../memory/cue/ContextSourceAdmission.js').ContextSourceIngress;
   /** Persist the exact policy refusal before publishing its receipt; Queue owns recovery. */
   onRoutingPreflightRejected?: (target: RoutingPreflightDecisionV1['targets'][number]) => Promise<void>;
   /** Server-owned one-shot owner click for this exact pending target. */
@@ -1639,7 +1647,7 @@ async function resolveRecentFilesTouched(
   try {
     const activeSession = await Promise.resolve(sessionChainStore.getActive(catId, threadId, userId));
     if (isHomeSession(activeSession) && activeSession.userId === userId) {
-      return transcriptWriter.getFilesTouched(activeSession.id, { threadId, catId });
+      return await transcriptWriter.getFilesTouched(activeSession.id, { threadId, catId });
     }
 
     const threadSessions = await Promise.resolve(sessionChainStore.getChainByThread(threadId));
@@ -1650,8 +1658,9 @@ async function resolveRecentFilesTouched(
           isHomeSession(session) && session.status === 'active' && session.catId === catId && session.userId === userId,
       );
     if (!callerSession) return [];
-    return transcriptWriter.getFilesTouched(callerSession.id, { threadId, catId: callerSession.catId });
+    return await transcriptWriter.getFilesTouched(callerSession.id, { threadId, catId: callerSession.catId });
   } catch {
+    log.warn({ threadId, catId }, 'Optional recent file observations unavailable; preserving authoritative context');
     return [];
   }
 }
@@ -1919,6 +1928,27 @@ async function assembleIncrementalContextInternal(
       const tasks = await Promise.resolve(deps.taskStore.listByThread(threadId));
       activeTasks = summarizeActiveTasks(tasks);
       allThreadTasks = tasks;
+      if (deps.ownedWaitStatusReader) {
+        try {
+          const hasActiveWait = await deps.ownedWaitStatusReader({ userId, threadId, catId }, tasks);
+          if (hasActiveWait !== undefined) {
+            const ownedIds = new Set(
+              tasks
+                .filter(
+                  (task) =>
+                    task.kind === 'work' &&
+                    task.userId === userId &&
+                    task.threadId === threadId &&
+                    task.ownerCatId === catId,
+                )
+                .map((task) => task.id),
+            );
+            activeTasks = activeTasks.map((task) => (ownedIds.has(task.id) ? { ...task, hasActiveWait } : task));
+          }
+        } catch {
+          // Unknown wait state must not erase the existing Task/navigation context.
+        }
+      }
     } catch {
       // fail-open: tasks stay empty
     }
@@ -1971,9 +2001,15 @@ async function assembleIncrementalContextInternal(
       };
     }
   }
+  const roadmap =
+    threadStore && options?.contextProjection?.contextMode !== 'hot'
+      ? await readNavigationRoadmap(threadStore, userId, threadId)
+      : undefined;
   const navigationHeader = formatNavigationHeader({
     threadId,
     currentCatId: catId,
+    recentWorkDirectory: Boolean(threadStore) && options?.contextProjection?.contextMode !== 'hot',
+    ...(roadmap ? { roadmapPointer: formatRoadmapPointer(roadmap) } : {}),
     baton,
     tasks: activeTasks,
     ...(executionSituation ? { executionSituation } : {}),
@@ -2378,7 +2414,7 @@ async function assembleSmartWindowContext(
             if (estimateTokens(summary.slice(0, mid)) <= hcConfig.maxThreadMemoryTokens) lo = mid;
             else hi = mid - 1;
           }
-          summary = `${summary.slice(0, lo)}…`;
+          summary = `${sliceUnicodeSafe(summary, 0, lo)}…`;
         }
         threadMemorySummary = summary;
         // storedFileArtifacts already pre-read via preReadStoredArtifacts (G1→G2 bridge)

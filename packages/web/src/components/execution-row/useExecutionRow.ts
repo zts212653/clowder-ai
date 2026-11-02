@@ -17,6 +17,7 @@ import { activeExecutionKey, useActiveExecutionStore } from '@/stores/activeExec
 import { useToastStore } from '@/stores/toastStore';
 import { isStreamingTipSuppressed } from '../capability-tip-placement';
 import { useShellCopy } from '../shell/shell-copy';
+import { useMessageNavigation } from '../thread-chat/MessageNavigationContext';
 import { useQueueActionConvergence } from '../useQueueActionConvergence';
 import { locateExecution } from './execution-location';
 import { executionRowCopy } from './execution-row.shell-copy';
@@ -37,6 +38,7 @@ function useNow(active: boolean): number {
 }
 
 export function useExecutionRow(threadId: string) {
+  const navigateToMessage = useMessageNavigation();
   const words = useShellCopy(executionRowCopy);
   const { getCatById } = useCatData({ fetch: false });
   const resolveCatName = useCallback((catId: string) => resolveCatNameplateName(catId, getCatById), [getCatById]);
@@ -112,7 +114,7 @@ export function useExecutionRow(threadId: string) {
 
   const forceReset = useRowForceReset({ threadId, convergence });
   const locate = (execution: (typeof executions)[number]) => {
-    if (locateExecution(execution) === 'unavailable')
+    if (locateExecution(execution, navigateToMessage) === 'unavailable')
       useToastStore
         .getState()
         .addToast({ type: 'info', title: words.actions.locate, message: words.actions.unavailable, duration: 5000 });

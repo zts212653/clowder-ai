@@ -19,7 +19,6 @@ function admission(contributions, pluginInstanceId = 'pi_webhook') {
       pluginId: 'dev.clowder.webhook-fixture',
       manifest: { contributions },
     },
-    effectiveGrants: [],
   };
 }
 

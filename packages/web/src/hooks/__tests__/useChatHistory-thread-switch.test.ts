@@ -7,6 +7,7 @@ import { useTaskStore } from '@/stores/taskStore';
 import { apiFetch } from '@/utils/api-client';
 import { loadThreadMessages } from '@/utils/offline-store';
 import { __resetTaskCacheForTest, useChatHistory } from '../useChatHistory';
+import { useChatSocketCallbacks } from '../useChatSocketCallbacks';
 
 vi.mock('@/utils/api-client', () => ({
   apiFetch: vi.fn(),
@@ -92,6 +93,37 @@ describe('useChatHistory thread switch ordering', () => {
     });
     container.remove();
     apiFetchMock.mockReset();
+  });
+
+  it('task updates do not rerender history and socket owners that only consume task actions', async () => {
+    let renders = 0;
+    function ActionConsumer() {
+      useChatHistory('thread-a');
+      useChatSocketCallbacks({ threadId: 'thread-a', handleAgentMessage: () => true });
+      renders += 1;
+      return null;
+    }
+    await act(async () => {
+      root.render(React.createElement(ThreadChatHistoryAdmissionProvider, null, React.createElement(ActionConsumer)));
+    });
+    const beforeUpdate = renders;
+    await act(async () => {
+      useTaskStore.getState().addTask({
+        id: 'background-task',
+        threadId: 'thread-a',
+        kind: 'work',
+        subjectKey: null,
+        title: 'background progress',
+        ownerCatId: null,
+        status: 'doing',
+        why: '',
+        createdBy: 'user',
+        createdAt: 1,
+        updatedAt: 1,
+      });
+    });
+    expect(useTaskStore.getState().tasks[0]?.id).toBe('background-task');
+    expect(renders).toBe(beforeUpdate);
   });
 
   it('does not clear previous thread messages before setCurrentThread runs', () => {

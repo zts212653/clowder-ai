@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { after, before, test } from 'node:test';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
 import { availablePort } from './f290-runtime-journey.harness.mjs';
 import { objectFirstDuckBody, objectRelevance } from './f311-object-first-bodies.mjs';
 import { startObjectFirstPreview } from './f311-object-first-preview.fixture.mjs';

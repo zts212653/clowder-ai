@@ -170,8 +170,8 @@ function runAcceptance(plugins, acceptanceReviewedSha) {
 test('published M0 behavior catalog passes all signed execution planes through real Host seams', async () => {
   const report = await runM0dJointAcceptance();
   assert.equal(report.catalog.catalogMatches, true);
-  assert.equal(report.catalog.count, 18);
-  assert.deepEqual(report.counts, { pass: 18 });
+  assert.equal(report.catalog.count, 12);
+  assert.deepEqual(report.counts, { pass: 12 });
   assert.equal(isM0dAcceptancePassed(report), true);
   assert.deepEqual(
     Object.fromEntries(
@@ -180,10 +180,10 @@ test('published M0 behavior catalog passes all signed execution planes through r
         .map((plane) => [plane, report.cases.filter((row) => row.plane === plane).length]),
     ),
     {
-      'host-control': 5,
+      'host-control': 2,
       'host-to-plugin-delivery': 1,
-      'plugin-to-host-wire': 9,
-      'wire-admission': 3,
+      'plugin-to-host-wire': 7,
+      'wire-admission': 2,
     },
   );
   assert.equal(
@@ -200,19 +200,7 @@ test('published M0 behavior catalog passes all signed execution planes through r
     report.cases.every((row) => row.verdictOracle !== undefined),
     true,
   );
-  const deniedDelivery = report.cases.find((row) => row.id === 'denied-on-message-rejected');
-  assert.equal(deniedDelivery.observed.rawHostErrorCode, 'CAPABILITY_DENIED');
-  assert.equal(deniedDelivery.observed.runtimeStartCount, 0);
-  assert.equal(deniedDelivery.observed.deliveryFrameCount, 0);
-  assert.deepEqual(deniedDelivery.observed.observations, { messages: [[], []], output_events: [[], []] });
-  assert.equal(deniedDelivery.childPidObserved, false);
-  assert.match(deniedDelivery.packageDigest, /^sha512-/);
-  const revocation = report.cases.find((row) => row.id === 'preset-visible-revocable');
-  assert.deepEqual(revocation.observed.observations.grant_state.at(-1), {
-    capability: 'messaging.send',
-    visible: true,
-    granted: false,
-  });
+
   const replayRetention = report.cases.find((row) => row.id === 'delete-replay-events-preserves-canonical-messages');
   assert.equal(replayRetention.observed.observations.replay_events[0].length > 0, true);
   assert.deepEqual(replayRetention.observed.observations.replay_events.at(-1), []);
@@ -223,11 +211,10 @@ test('published M0 behavior catalog passes all signed execution planes through r
   const snapshotRoundTrip = report.cases.find((row) => row.id === 'stale-cursor-snapshot-roundtrip');
   assert.equal(snapshotRoundTrip.observed.roundTrip.snapshot.snapshotAckToken, '<opaque>');
   assert.equal(snapshotRoundTrip.observed.result.ackToken, null);
-
-  const canonicalFailures = report.cases
-    .filter((row) => row.verdict === 'canonical-mismatch')
-    .map((row) => ({ id: row.id, failures: row.failures, observed: row.observed }));
-  assert.deepEqual(canonicalFailures, []);
+  assert.deepEqual(
+    report.cases.filter((row) => row.verdict === 'canonical-mismatch'),
+    [],
+  );
 });
 
 test('signed execution metadata is the only operation-to-method dispatch source', async () => {
@@ -307,14 +294,14 @@ test('catalog integrity mismatch makes the acceptance verdict fail closed', () =
 test('partial frozen classifications cannot pass canonical acceptance', () => {
   assert.equal(
     isM0dAcceptancePassed({
-      catalog: { catalogMatches: true, count: 18 },
-      counts: { pass: 18 },
+      catalog: { catalogMatches: true, count: 12 },
+      counts: { pass: 12 },
     }),
     true,
   );
   assert.equal(
     isM0dAcceptancePassed({
-      catalog: { catalogMatches: true, count: 18 },
+      catalog: { catalogMatches: true, count: 12 },
       counts: { pass: 9, 'schema-incompatible-at-frozen-sha': 3, 'not-implemented-at-frozen-sha': 6 },
     }),
     false,
@@ -324,7 +311,7 @@ test('partial frozen classifications cannot pass canonical acceptance', () => {
 test('frozen classification count drift makes the acceptance verdict fail closed', () => {
   assert.equal(
     isM0dAcceptancePassed({
-      catalog: { catalogMatches: true, count: 18 },
+      catalog: { catalogMatches: true, count: 12 },
       counts: { pass: 8, 'schema-incompatible-at-frozen-sha': 3, 'not-implemented-at-frozen-sha': 7 },
     }),
     false,
@@ -334,7 +321,7 @@ test('frozen classification count drift makes the acceptance verdict fail closed
 test('unknown verdict categories make the acceptance verdict fail closed', () => {
   assert.equal(
     isM0dAcceptancePassed({
-      catalog: { catalogMatches: true, count: 18 },
+      catalog: { catalogMatches: true, count: 12 },
       counts: {
         pass: 9,
         'schema-incompatible-at-frozen-sha': 3,

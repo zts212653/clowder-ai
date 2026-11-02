@@ -12,7 +12,9 @@ import {
 } from '@/components/ApprovalHost';
 import type { PublishedMessageCoordinate } from '@/components/content-review/usePublishedContent';
 import { useShellCopy } from '@/components/shell/shell-copy';
+import { useShellPresentation } from '@/components/shell/shell-presentation';
 import { pushThreadRouteWithHistory } from '@/components/ThreadSidebar/thread-navigation';
+import { recordThreadProposalDemoUse } from '@/lib/feature-demo-telemetry';
 import type { RichCardBlock } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
@@ -30,6 +32,7 @@ import {
   readReportingModeEdit,
 } from './ProposalCardUtils';
 import { proposalCardCopy } from './proposal-card.shell-copy';
+import { useApprovalStatus } from './use-approval-status';
 
 export type ProposalCardInput =
   | { block: RichCardBlock; proposal?: never; messageId?: string; coordinate?: PublishedMessageCoordinate }
@@ -41,17 +44,32 @@ function selectExistingProjectPaths(state: ReturnType<typeof useChatStore.getSta
 }
 
 export function useProposalCardState({ block, proposal }: ProposalCardInput) {
+  const isV2 = useShellPresentation() === 'v2';
   const t = useShellCopy(proposalCardCopy);
   const proposalId = useMemo(
     () => proposal?.proposalId ?? (block ? extractProposalId(block) : null),
     [block, proposal?.proposalId],
   );
-  const [status, setStatus] = useState<ProposalCardStatus>(proposal?.status ?? 'pending');
-  const [resultThreadId, setResultThreadId] = useState<string | null>(proposal?.createdThreadId ?? null);
+  const native = useApprovalStatus(
+    'F128',
+    proposalId,
+    `/api/proposals/${encodeURIComponent(proposalId ?? '')}`,
+    !proposal,
+  );
+  const [status, setStatus] = useState<ProposalCardStatus>(
+    proposal?.status ?? (native.status as ProposalCardStatus | null) ?? 'pending',
+  );
+  const [resultThreadId, setResultThreadId] = useState<string | null>(
+    proposal?.createdThreadId ??
+      (typeof native.terminal?.detail.createdThreadId === 'string' ? native.terminal.detail.createdThreadId : null),
+  );
   const [editing, setEditing] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [pinOnApprove, setPinOnApprove] = useState(false);
+  const [pinOnApprove, setPinOnApprove] = useState(proposal?.suggestedPinned ?? false);
+  const [attentionGroupId, setAttentionGroupId] = useState(
+    proposal?.attentionGroupId !== undefined ? (proposal.attentionGroupId ?? '') : (proposal?.suggestedGroupId ?? ''),
+  );
   const guardedWrite = useGuardedWrite();
   const authorizeContinuation = useAuthorizeWrite();
   const writeBlocked = useWriteBlocked(loading);
@@ -98,38 +116,23 @@ export function useProposalCardState({ block, proposal }: ProposalCardInput) {
     setResultThreadId(proposal.createdThreadId ?? null);
   }, [proposal]);
 
-  // Mount: fetch real status so reload / multi-tab views don't drift to stale "pending".
   useEffect(() => {
-    if (!proposalId || proposal) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await apiFetch(`/api/proposals/${proposalId}`);
-        if (!res.ok || cancelled) return;
-        const data = (await res.json()) as { proposal: ProposalSnapshot };
-        if (data.proposal && !cancelled) {
-          setStatus(data.proposal.status);
-          if (data.proposal.createdThreadId) setResultThreadId(data.proposal.createdThreadId);
-          if (data.proposal.reportingMode) {
-            setEffectiveReportingMode(data.proposal.reportingMode);
-            setEdits((prev) => ({ ...prev, reportingMode: data.proposal.reportingMode ?? prev.reportingMode }));
-          }
-          if (data.proposal.declaredWorkMode) {
-            setEffectiveDeclaredWorkMode(data.proposal.declaredWorkMode);
-            setEdits((prev) => ({
-              ...prev,
-              declaredWorkMode: data.proposal.declaredWorkMode ?? prev.declaredWorkMode,
-            }));
-          }
-        }
-      } catch {
-        // best-effort sync; keep the optimistic 'pending' if fetch fails
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [proposalId, proposal]);
+    if (proposal || !native.status) return;
+    setStatus(native.status as ProposalCardStatus);
+    if (typeof native.terminal?.detail.createdThreadId === 'string')
+      setResultThreadId(native.terminal.detail.createdThreadId);
+    const data = native.record as ProposalSnapshot | null;
+    if (!data) return;
+    if (data.createdThreadId) setResultThreadId(data.createdThreadId);
+    if (data.reportingMode) {
+      setEffectiveReportingMode(data.reportingMode);
+      setEdits((previous) => ({ ...previous, reportingMode: data.reportingMode ?? previous.reportingMode }));
+    }
+    if (data.declaredWorkMode) {
+      setEffectiveDeclaredWorkMode(data.declaredWorkMode);
+      setEdits((previous) => ({ ...previous, declaredWorkMode: data.declaredWorkMode ?? previous.declaredWorkMode }));
+    }
+  }, [proposal, native.record, native.status, native.terminal]);
 
   // Subscribe to socket-driven updates so other tabs / async approves reflect immediately.
   useEffect(() => {
@@ -159,19 +162,22 @@ export function useProposalCardState({ block, proposal }: ProposalCardInput) {
       if (!proposalId) return;
       setLoading(true);
       setError(null);
-      const body: Record<string, unknown> = editing
-        ? {
-            title: edits.title.trim() || undefined,
-            parentThreadId: edits.parentThreadId.trim() || undefined,
-            preferredCats: parsePreferredCats(edits.preferredCats),
-            initialMessage: edits.initialMessage.trim() ? edits.initialMessage.trim() : null,
-            // F128: empty box = no override (keep the proposal's projectPath); a path re-homes the
-            // child thread. Backend validates + fail-loud rejects an invalid path (400).
-            projectPath: edits.projectPath.trim() || undefined,
-            reportingMode: edits.reportingMode,
-            declaredWorkMode: edits.declaredWorkMode || undefined,
-          }
-        : {};
+      const body: Record<string, unknown> =
+        editing && !isV2
+          ? {
+              title: edits.title.trim() || undefined,
+              parentThreadId: edits.parentThreadId.trim() || undefined,
+              preferredCats: parsePreferredCats(edits.preferredCats),
+              initialMessage: edits.initialMessage.trim() ? edits.initialMessage.trim() : null,
+              // F128: empty box = no override (keep the proposal's projectPath); a path re-homes the
+              // child thread. Backend validates + fail-loud rejects an invalid path (400).
+              projectPath: edits.projectPath.trim() || undefined,
+              reportingMode: edits.reportingMode,
+              declaredWorkMode: edits.declaredWorkMode || undefined,
+            }
+          : isV2 && proposal
+            ? { projectPath: edits.projectPath.trim() || undefined, attentionGroupId: attentionGroupId || null }
+            : {};
       if (pinOnApprove) body.pinned = true;
       let receivedResponse = false;
       try {
@@ -182,14 +188,17 @@ export function useProposalCardState({ block, proposal }: ProposalCardInput) {
         });
         receivedResponse = true;
         reportEvidence({ outcome: res.ok ? 'settled' : 'http-error', status: res.status });
-        const data = (await res.json()) as { threadId?: string; error?: string };
+        const data = (await res.json()) as { threadId?: string; error?: string; warnings?: string[] };
         if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+        recordThreadProposalDemoUse(data);
         const newThreadId = data.threadId ?? null;
         setEffectiveReportingMode(editing ? edits.reportingMode : effectiveReportingMode);
         setEffectiveDeclaredWorkMode(editing ? edits.declaredWorkMode : effectiveDeclaredWorkMode);
         setResultThreadId(newThreadId);
         setStatus('approved');
+        window.dispatchEvent(new CustomEvent('cat-cafe:proposal-updated', { detail: { proposalId } }));
         setEditing(false);
+        if (data.warnings?.length) setError(data.warnings.join(' · '));
         if (newThreadId) {
           if (!authorizeContinuation('producer-card')) {
             setError(t.continuationRefused);
@@ -213,6 +222,9 @@ export function useProposalCardState({ block, proposal }: ProposalCardInput) {
       pinOnApprove,
       authorizeContinuation,
       t.continuationRefused,
+      isV2,
+      proposal,
+      attentionGroupId,
     ],
   );
 
@@ -235,6 +247,7 @@ export function useProposalCardState({ block, proposal }: ProposalCardInput) {
           throw new Error(data.error ?? `HTTP ${res.status}`);
         }
         setStatus('rejected');
+        window.dispatchEvent(new CustomEvent('cat-cafe:proposal-updated', { detail: { proposalId } }));
       } catch (err) {
         if (!receivedResponse) reportEvidence({ outcome: 'network-error' });
         setError(err instanceof Error ? err.message : '驳回失败');
@@ -258,6 +271,8 @@ export function useProposalCardState({ block, proposal }: ProposalCardInput) {
     error,
     pinOnApprove,
     setPinOnApprove,
+    attentionGroupId,
+    setAttentionGroupId,
     writeBlocked,
     edits,
     setEdits,

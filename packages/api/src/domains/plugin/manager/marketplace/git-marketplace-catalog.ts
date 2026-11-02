@@ -3,7 +3,6 @@ import { validateManifest } from '@clowder-ai/plugin-contract';
 import type { LocalPluginPackageAdmission } from '../local-package-admission.js';
 import {
   type PluginManagerCatalogCandidate,
-  pluginManagerCapabilitiesFromManifest,
   pluginManagerContributionsFromManifest,
 } from '../plugin-manager-projection.js';
 import type { PluginManagerCatalogPort, PluginManagerCatalogSnapshot } from '../plugin-manager-service.js';
@@ -81,7 +80,6 @@ export class GitMarketplaceCatalog implements PluginManagerCatalogPort {
           ...(manifest.icon ? { icon: manifest.icon } : {}),
           ownerAuthRequired: false,
           compatibleReplacement: true,
-          capabilities: pluginManagerCapabilitiesFromManifest(manifest),
           contributions: pluginManagerContributionsFromManifest(manifest),
           directorySource: {
             kind: 'git',
@@ -103,6 +101,17 @@ export class GitMarketplaceCatalog implements PluginManagerCatalogPort {
         ? { status: 'degraded' as const, message: `${failed} 个插件仓库没有同步成功，已保留上次可用的目录。` }
         : {}),
     };
+  }
+
+  async localSnapshot(): Promise<PluginManagerCatalogSnapshot> {
+    return (
+      (await this.options.base.localSnapshot?.()) ?? {
+        candidates: [],
+        status: 'loading',
+        refreshedAt: null,
+        message: 'Loading available plugins; installed plugins are ready.',
+      }
+    );
   }
 
   private async packageEntry(pluginId: string) {

@@ -82,4 +82,89 @@ describe('F193 atomic lineage abort recovery', () => {
     assert.equal(afterC.status, 'superseded');
     assert.equal(afterC.supersededBy, 'dp-approved-C');
   });
+
+  it('restores delivery rollback custody when the approved predecessor fails before the staged successor aborts', async () => {
+    const store = new InMemoryDispatchProposalStore();
+    const proposedAction = {
+      subjectRef: 'subject:task:staged-delivery-retry',
+      actionFamily: 'implement',
+      successorSlot: 'implementer',
+      mode: 'single',
+      terminalPredicate: { kind: 'task_done' },
+    };
+    const input = {
+      ...proposalInput('dp-revert-first-A', 1000),
+      sourceInvocationId: 'inv-staged-retry',
+      proposedAction,
+    };
+    await store.create(input);
+    await anchor(store, input.proposalId);
+    await store.approve(input.proposalId, input.ownerUserId, 'strict');
+    await store.create({ ...input, proposalId: 'dp-revert-first-B', createdAt: 2000 });
+    assert.equal(await store.revertToPending(input.proposalId), null);
+    assert.equal((await store.get(input.proposalId)).status, 'superseded');
+
+    await store.abortStaged('dp-revert-first-B', 'card publication failed');
+
+    const restored = await store.get(input.proposalId);
+    assert.equal(restored.status, 'pending', 'an unpublished successor must return delivery retry custody');
+    assert.equal(restored.supersededBy, undefined);
+    assert.equal(restored.supersededAt, undefined);
+    assert.deepEqual(
+      (await store.listPendingByUser(input.ownerUserId)).map((p) => p.proposalId),
+      [input.proposalId],
+    );
+    assert.deepEqual(await store.listSettledByUser(input.ownerUserId, 1), []);
+    assert.deepEqual(
+      await store.findCanonicalAdmissionBlocks({
+        ownerUserId: input.ownerUserId,
+        canonicalSubjectRef: proposedAction.subjectRef,
+      }),
+      [{ proposalId: input.proposalId, status: 'pending' }],
+    );
+    assert.deepEqual(await store.findNegativeAuthorizationBlocks({ ...input, targetCats: ['sonnet'] }), [
+      { proposalId: input.proposalId, status: 'pending', targetCats: ['sonnet'] },
+    ]);
+    assert.equal(await store.getApprovalOwnerAuthProvenance(input.proposalId), undefined);
+  });
+
+  it('keeps the direct pending predecessor ahead of an older failed delivery during staged abort', async () => {
+    const store = new InMemoryDispatchProposalStore();
+    await store.create(proposalInput('old-approved', 1000));
+    await anchor(store, 'old-approved');
+    await store.approve('old-approved', 'user-1', 'strict');
+    await store.create(proposalInput('current-pending', 2000));
+    await anchor(store, 'current-pending');
+    await store.create(proposalInput('failed-staged', 3000));
+    await store.revertToPending('old-approved');
+    await store.abortStaged('failed-staged', 'publication failed');
+    assert.deepEqual(
+      (await store.listPendingByUser('user-1')).map((p) => p.proposalId),
+      ['current-pending'],
+    );
+    assert.equal((await store.get('old-approved')).supersededBy, 'current-pending');
+    assert.equal((await store.get('current-pending')).supersededAt, undefined);
+  });
+
+  it('restores the newest failed delivery and reparents earlier failures when both outlive the staged holder', async () => {
+    const store = new InMemoryDispatchProposalStore();
+    for (const [id, time] of [
+      ['older-approved', 1000],
+      ['newer-approved', 2000],
+    ]) {
+      await store.create(proposalInput(id, time));
+      await anchor(store, id);
+      await store.approve(id, 'user-1', 'strict');
+    }
+    await store.create(proposalInput('failed-staged', 3000));
+    await store.revertToPending('newer-approved');
+    await store.revertToPending('older-approved');
+    await store.abortStaged('failed-staged', 'publication failed');
+    assert.deepEqual(
+      (await store.listPendingByUser('user-1')).map((p) => p.proposalId),
+      ['newer-approved'],
+    );
+    assert.equal((await store.get('older-approved')).supersededBy, 'newer-approved');
+    assert.equal((await store.get('newer-approved')).supersededAt, undefined);
+  });
 });

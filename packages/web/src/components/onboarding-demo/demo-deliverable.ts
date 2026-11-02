@@ -1,11 +1,25 @@
-// Fixed, self-contained content. Never interpolate user data into this document.
-export const DEMO_DELIVERABLE_HTML = `<!doctype html>
-<html lang="zh-CN">
+import type { ShellLanguage } from '../shell/shell-language';
+import { demoDeliverableCopy } from './demo-deliverable.shell-copy';
+
+// Only bundled dictionaries enter the script. Task input remains DOM text, never HTML.
+export function getDemoDeliverableHtml(language: ShellLanguage = 'zh'): string {
+  const initialLanguage = language === 'en' ? 'en' : 'zh';
+  const serialize = (copy: typeof demoDeliverableCopy.zh) => ({
+    ...copy,
+    // The opaque-origin document renders dynamic counts without evaluating code.
+    count: copy.count('{done}', '{total}'),
+  });
+  const dictionaries = JSON.stringify({
+    zh: serialize(demoDeliverableCopy.zh),
+    en: serialize(demoDeliverableCopy.en),
+  }).replace(/</g, '\\u003c');
+  return `<!doctype html>
+<html lang="${initialLanguage === 'en' ? 'en' : 'zh-CN'}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'; connect-src 'none'">
-  <title>今天待办 · 演示成果</title>
+  <title data-demo-copy="title"></title>
   <style>
     :root { color-scheme:light dark; --bg:#f4f1ea;--card:#fffdf9;--ink:#302c28;--muted:#756e66;--line:#e8e1d7;--accent:#a65420;--soft:#f6e8d8;--success:#27714e; }
     @media(prefers-color-scheme:dark){:root{--bg:#1d1b19;--card:#282521;--ink:#f3eee6;--muted:#b6ada0;--line:#454039;--accent:#edab77;--soft:#493326;--success:#83ceab;}}
@@ -27,29 +41,32 @@ export const DEMO_DELIVERABLE_HTML = `<!doctype html>
   </style>
 </head>
 <body data-stage="waiting">
-<section id="waiting"><strong>今天待办</strong>团队接单后，设计草图会出现在这里。<br>同一个页面将逐步成为可以操作的成果。</section>
+<section id="waiting"><strong data-demo-copy="todo"></strong><span data-demo-copy="waitingOne"></span><br><span data-demo-copy="waitingTwo"></span></section>
 <main>
-  <div class="eyebrow">留一点时间，做好今天的小事</div>
-  <h1>今天待办</h1>
+  <div class="eyebrow" data-demo-copy="eyebrow"></div>
+  <h1 data-demo-copy="todo"></h1>
   <p id="stage-note" role="status"></p>
-  <p class="intro">从一件小事开始，给每个完成的瞬间打个勾。</p>
-  <div class="entry" role="group" aria-label="添加任务"><input id="new-task" type="text" placeholder="写下你想完成的一件事" aria-label="新任务" aria-describedby="feedback" maxlength="160" autocomplete="off"><button id="add-task" type="button">添加</button></div>
+  <p class="intro" data-demo-copy="intro"></p>
+  <div class="entry" role="group" data-demo-label="addGroup"><input id="new-task" type="text" data-demo-placeholder="placeholder" data-demo-label="newTask" aria-describedby="feedback" maxlength="160" autocomplete="off"><button id="add-task" type="button" data-demo-copy="add"></button></div>
   <p id="feedback" role="status"></p>
-  <div class="toolbar" aria-label="筛选任务"><button data-filter="all" aria-pressed="true">全部</button><button data-filter="open" aria-pressed="false">未完成</button><button data-filter="done" aria-pressed="false">已完成</button><span id="count"></span></div>
-  <ul id="tasks" aria-label="任务列表"></ul>
+  <div class="toolbar" data-demo-label="filterGroup"><button data-filter="all" aria-pressed="true" data-demo-copy="all"></button><button data-filter="open" aria-pressed="false" data-demo-copy="open"></button><button data-filter="done" aria-pressed="false" data-demo-copy="done"></button><span id="count"></span></div>
+  <ul id="tasks" data-demo-label="taskList"></ul>
   <p id="empty" hidden></p>
   <div id="review-notes" hidden></div>
-  <footer><span>演示成果 · 由设计、开发和互审共同完善<br>这里的操作仅用于体验，关闭或重新打开后会重置。</span><button id="reset" type="button">重置示例</button></footer>
+  <footer><span><span data-demo-copy="footerOne"></span><br><span data-demo-copy="footerTwo"></span></span><button id="reset" type="button" data-demo-copy="reset"></button></footer>
 </main>
 <script>
   (() => {
+    const dictionaries = ${dictionaries};
+    let language = '${initialLanguage}';
+    let copy = dictionaries[language];
     let stage = 'waiting';
     let nextId = 4;
     let filter = 'all';
     const initial = () => [
-      { id: 1, title: '看看三位伙伴如何协作', done: true },
-      { id: 2, title: '试着添加一件自己的小事', done: false },
-      { id: 3, title: '创建自己的猫猫团队', done: false },
+      { id: 1, title: copy.taskOne, copyKey: 'taskOne', done: true },
+      { id: 2, title: copy.taskTwo, copyKey: 'taskTwo', done: false },
+      { id: 3, title: copy.taskThree, copyKey: 'taskThree', done: false },
     ];
     let tasks = initial();
     const list = document.querySelector('#tasks');
@@ -71,16 +88,16 @@ export const DEMO_DELIVERABLE_HTML = `<!doctype html>
         check.disabled = ['waiting', 'design', 'architecture'].includes(stage);
         check.addEventListener('change', () => {
           task.done = check.checked;
-          feedback.textContent = task.done ? '又完成了一件小事。' : '任务已恢复为未完成。';
+          showFeedback(task.done ? 'completed' : 'reopened');
           render();
         });
         const title = document.createElement('span'); title.textContent = task.title;
         label.append(check, title); row.append(label); list.append(row);
       }
       const remaining = tasks.filter(task => !task.done).length;
-      document.querySelector('#count').textContent = \`\${tasks.length - remaining} / \${tasks.length} 已完成\`;
+      document.querySelector('#count').textContent = copy.count.replace('{done}', String(tasks.length - remaining)).replace('{total}', String(tasks.length));
       empty.hidden = visible.length > 0 || stage !== 'final';
-      empty.textContent = filter === 'open' && remaining === 0 ? '今天的任务都完成了，做得很好！' : filter === 'done' ? '还没有已完成的任务，从一件小事开始吧。' : '还没有任务，写下今天的第一件小事吧。';
+      empty.textContent = filter === 'open' && remaining === 0 ? copy.allDone : filter === 'done' ? copy.noDone : copy.noTasks;
       document.querySelectorAll('[data-filter]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.filter === filter)));
       if (focusedId !== null) {
         const remaining = [...list.querySelectorAll('input:not(:disabled)')];
@@ -92,35 +109,48 @@ export const DEMO_DELIVERABLE_HTML = `<!doctype html>
     };
     const addTask = () => {
       const title = input.value.trim();
-      if (!title) { feedback.textContent = stage === 'final' ? '先写下一件小事，再点击添加。' : ''; input.focus(); return; }
+      if (!title) { showFeedback(stage === 'final' ? 'blank' : ''); input.focus(); return; }
       tasks.push({ id: nextId++, title, done: false }); input.value = '';
-      feedback.textContent = filter === 'done' ? '已添加新任务。切换到“全部”或“未完成”即可查看。' : '新任务已添加。';
+      showFeedback(filter === 'done' ? 'addedHidden' : 'added');
       render(); input.focus();
     };
     document.querySelector('#add-task').addEventListener('click', addTask);
     input.addEventListener('keydown', event => { if (event.key === 'Enter' && !event.isComposing) { event.preventDefault(); addTask(); } });
-    document.querySelectorAll('[data-filter]').forEach(button => button.addEventListener('click', () => { filter = button.dataset.filter; feedback.textContent = ''; render(); }));
-    document.querySelector('#reset').addEventListener('click', () => { tasks = initial(); nextId = 4; filter = 'all'; input.value = ''; feedback.textContent = '示例已重置。'; render(); });
-    const notes = {
-      waiting: '', design: '设计草图 · 先确定添加、勾选和筛选的位置',
-      architecture: '方案整合 · 无需登录，独立任务 ID，保留筛选条件',
-      initial: '初版实现 · 可以操作，正在交给架构师审查',
-      review: '互审中 · 两个边界细节正在修正', final: '修正版 · 添加、完成、筛选与边界提示均已就绪',
+    document.querySelectorAll('[data-filter]').forEach(button => button.addEventListener('click', () => { filter = button.dataset.filter; showFeedback(''); render(); }));
+    document.querySelector('#reset').addEventListener('click', () => { tasks = initial(); nextId = 4; filter = 'all'; input.value = ''; showFeedback('resetDone'); render(); });
+    let feedbackKey = '';
+    function showFeedback(key) {
+      feedbackKey = key;
+      feedback.textContent = key ? copy[key] : '';
+    }
+    const applyCopy = () => {
+      document.documentElement.lang = language === 'en' ? 'en' : 'zh-CN';
+      document.querySelectorAll('[data-demo-copy]').forEach(element => { element.textContent = copy[element.dataset.demoCopy]; });
+      document.querySelectorAll('[data-demo-label]').forEach(element => { element.setAttribute('aria-label', copy[element.dataset.demoLabel]); });
+      input.placeholder = copy.placeholder;
+      for (const task of tasks) if (task.copyKey) task.title = copy[task.copyKey];
+      showFeedback(feedbackKey);
     };
     window.addEventListener('message', event => {
       const data = event.data;
-      if (event.source !== window.parent || !data || data.type !== 'clowder-onboarding-stage' || data.version !== 1 || !Object.hasOwn(notes, data.stage)) return;
+      if (event.source !== window.parent || !data || data.type !== 'clowder-onboarding-stage' || data.version !== 1 || !Object.hasOwn(copy.stages, data.stage)) return;
+      if (data.language === 'zh' || data.language === 'en') {
+        language = data.language;
+        copy = dictionaries[language];
+        applyCopy();
+      }
       stage = data.stage;
       document.body.dataset.stage = stage;
-      document.querySelector('#stage-note').textContent = notes[stage];
+      document.querySelector('#stage-note').textContent = copy.stages[stage];
       const interactive = ['initial', 'review', 'final'].includes(stage);
       document.querySelectorAll('input, button').forEach(control => { control.disabled = !interactive; });
       const review = document.querySelector('#review-notes');
       review.hidden = !['review', 'final'].includes(stage);
-      review.textContent = stage === 'final' ? '✓ 已修正：全部完成时给出鼓励提示；空白输入时提示补充。' : '待修正：① 全部完成后列表空白　② 空白输入没有反馈';
+      review.textContent = stage === 'final' ? copy.reviewFixed : copy.reviewIssues;
       render();
       window.parent.postMessage({ type: 'clowder-onboarding-stage-ready', version: 1, stage }, '*');
     });
+    applyCopy();
     render();
     window.parent.postMessage({ type: 'clowder-onboarding-ready', version: 1 }, '*');
   })();
@@ -128,3 +158,6 @@ export const DEMO_DELIVERABLE_HTML = `<!doctype html>
 </body>
 </html>
 `;
+}
+
+export const DEMO_DELIVERABLE_HTML = getDemoDeliverableHtml();

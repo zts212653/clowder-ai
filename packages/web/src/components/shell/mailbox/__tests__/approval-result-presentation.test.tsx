@@ -2,9 +2,12 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { apiFetch } from '@/utils/api-client';
+import { observeApiSessionOwner } from '@/utils/api-session-identity';
 import { writeShellLanguage } from '../../shell-language';
+import { ApprovalDecisionReceipt } from '../ApprovalDecisionReceipt';
 import { describeReconcile, INITIAL_RECONCILE, type ReconcileState } from '../approval-reconcile';
 import { createApprovalSessions } from '../approval-sessions';
+import { producerKind } from '../HandledApprovalRow';
 import { RetainedResult } from '../RetainedResults';
 import { approvalRow, okRead, storeItem, visibleApproval } from './mailbox-fixtures';
 
@@ -17,6 +20,36 @@ beforeEach(() => {
   vi.mocked(apiFetch).mockReset();
 });
 const disposals: Array<() => void> = [];
+it.each([
+  ['in_progress', '正在处理…'],
+  ['failed', '没存上'],
+] as const)('distinguishes an accepted %s effect from an unknown effect', (state, expected) => {
+  const model: ReconcileState = { kind: 'decided', terminal: { resolution: 'accepted', effectUnknown: true } };
+  const materialization =
+    state === 'in_progress'
+      ? { state, attemptRef: 'original-attempt' }
+      : { state, failureRef: 'original-failure', retryable: true };
+  const view = describeReconcile(model, { language: 'zh', sourceFeatureId: 'F231', materialization });
+  expect(view.line).toBe(`已同意 · ${expected}`);
+  expect(
+    describeReconcile(model, {
+      language: 'zh',
+      sourceFeatureId: 'F231',
+      materialization,
+      originalEffect: 'profile-written',
+    }).line,
+  ).toBe('已同意 · 已写入档案');
+});
+it('uses the current card names in handled history instead of the old approval-center abbreviations', () => {
+  expect((['F128', 'F139', 'F193', 'F225', 'F321'] as const).map((id) => producerKind(id, 'zh'))).toEqual([
+    '新对话',
+    '定时任务',
+    '派活',
+    '会话接力',
+    '记忆纠错',
+  ]);
+  expect(producerKind('F128', 'en')).toBe('New conversation');
+});
 afterEach(() => {
   for (const dispose of disposals.splice(0)) dispose();
   writeShellLanguage('zh');
@@ -24,8 +57,95 @@ afterEach(() => {
 });
 
 it.each([
+  'F225',
+  'F231',
+] as const)('restores the complete %s original from an actionless publication without mounting a writer', async (feature) => {
+  const item = storeItem({ sourceFeatureId: feature, proposalId: 'published-result' });
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  disposals.push(() => {
+    act(() => root.unmount());
+    container.remove();
+  });
+  const block = {
+    kind: 'card' as const,
+    v: 1 as const,
+    id: `${feature === 'F225' ? 'handoff' : 'profile-update'}-published-result`,
+    title: 'Original proposal',
+    bodyMarkdown:
+      feature === 'F231'
+        ? 'Original reason\n\n**当前内容：**\n```\nBefore content\n```\n\n**提议改为：**\n```\nAfter content\n```'
+        : 'Original reason',
+    fields: [{ label: '下一步', value: 'Continue the accepted verification.' }],
+    meta: { approval: { producerId: feature, canonicalProposalId: item.proposalId } },
+  };
+  await act(async () =>
+    root.render(
+      <ApprovalDecisionReceipt
+        session={{ approval: visibleApproval(item), ownerUserId: 'owner-1', originalBlock: block }}
+        terminal={{ resolution: 'accepted' }}
+        line="Approved · Effect not yet confirmed"
+      />,
+    ),
+  );
+  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-expanded="false"]')?.click());
+  expect(container.textContent).not.toContain('missing proposalId');
+  expect(container.querySelector('[data-testid="original-approval-long-content"]')).not.toBeNull();
+  expect(container.textContent).toContain(
+    feature === 'F225' ? 'Continue the accepted verification.' : 'Before content',
+  );
+  if (feature === 'F231') expect(container.textContent).toContain('After content');
+  expect(container.querySelectorAll('input, textarea, select, form')).toHaveLength(0);
+  expect(
+    [...container.querySelectorAll('button')].filter((button) => !button.hasAttribute('aria-expanded')),
+  ).toHaveLength(0);
+  expect(vi.mocked(apiFetch).mock.calls).toHaveLength(0);
+});
+
+it('disclosing a settled receipt cannot reopen its original writer even if a later original read says pending', async () => {
+  vi.mocked(apiFetch).mockResolvedValue(Response.json({ proposal: { status: 'pending' } }));
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  disposals.push(() => {
+    act(() => root.unmount());
+    container.remove();
+  });
+  const item = storeItem({ sourceFeatureId: 'F225', proposalId: 'settled-handoff' });
+  await act(async () => {
+    writeShellLanguage('en');
+    root.render(
+      <ApprovalDecisionReceipt
+        session={{
+          approval: visibleApproval(item),
+          ownerUserId: 'owner-1',
+          originalBlock: {
+            id: 'handoff-settled-handoff',
+            kind: 'card',
+            v: 1,
+            title: 'Original handoff',
+            actions: [{ action: 'handoff:approve', label: 'Approve', payload: { proposalId: 'settled-handoff' } }],
+          },
+        }}
+        terminal={{ resolution: 'accepted' }}
+        line="Approved · Handoff started"
+      />,
+    );
+  });
+  expect(vi.mocked(apiFetch).mock.calls).toHaveLength(0);
+  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-expanded="false"]')?.click());
+  const writer = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
+    (button) => button.textContent === 'Approve and hand off',
+  );
+  expect(writer).toBeUndefined();
+  expect(container.textContent).not.toContain('missing proposalId');
+  expect(vi.mocked(apiFetch).mock.calls.some(([, options]) => options?.method === 'POST')).toBe(false);
+});
+
+it.each([
   ['zh', '已拒绝 · 你'],
-  ['en', 'Rejected · You'],
+  ['en', 'Declined · You'],
 ] as const)('formats the authenticated owner in %s without changing canonical metadata', (language, expected) => {
   const state: ReconcileState = { kind: 'decided', terminal: { resolution: 'rejected', decidedBy: 'default-user' } };
   expect(describeReconcile(state, { ownerUserId: 'default-user', language })).toEqual({
@@ -84,7 +204,14 @@ it('the actual retained-result consumer supplies its verified owner and live she
   });
   session.model = {
     ...INITIAL_RECONCILE,
-    state: { kind: 'decided', terminal: { resolution: 'rejected', decidedBy: 'default-user' } },
+    state: {
+      kind: 'decided',
+      terminal: {
+        resolution: 'rejected',
+        decidedBy: 'default-user',
+        decidedAt: new Date(2026, 9, 22, 5, 44).getTime(),
+      },
+    },
   };
   const container = document.createElement('div');
   document.body.append(container);
@@ -97,7 +224,11 @@ it('the actual retained-result consumer supplies its verified owner and live she
     writeShellLanguage('en');
     root.render(<RetainedResult session={session} sessions={sessions} />);
   });
-  expect(container.querySelector('[data-testid="mailbox-retained-line"]')?.textContent).toBe('Rejected · You');
+  expect(container.querySelector('[data-testid="proposal-result-label"]')?.textContent).toBe('Declined · 05:44');
+  expect(container.querySelector('[data-testid="proposal-result-details"]')).toBeNull();
+  await act(async () =>
+    container.querySelector<HTMLButtonElement>('[data-testid="thread-proposal-result"] button')?.click(),
+  );
   expect(container.textContent).not.toContain('default-user');
   expect(container.querySelector('[data-testid="mailbox-retained-dismiss"]')?.textContent).toBe('Got it');
   expect(container.textContent).not.toContain('**A real result**');
@@ -110,6 +241,7 @@ it('the actual retained-result consumer supplies its verified owner and live she
 });
 
 async function domainResult(kind: 'F225' | 'F231', body: unknown, ok = true, effectUnknown = true) {
+  observeApiSessionOwner('owner-1');
   vi.mocked(apiFetch).mockResolvedValue({ ok, status: ok ? 200 : 503, json: async () => body } as Response);
   const item = storeItem({
     sourceFeatureId: kind,
@@ -161,7 +293,7 @@ it.each([
       : { proposalId: 'owned-result', status: 'approved' };
   const { container, session } = await domainResult(kind, body);
   const line = container.querySelector('[data-testid="mailbox-retained-line"]')?.textContent;
-  expect(line).toContain(kind === 'F225' ? 'Handoff started' : 'Profile written');
+  expect(line).toContain(kind === 'F225' ? 'handoff started' : 'written to your profile');
   expect(line).not.toContain('not yet confirmed');
   expect(line).toContain('You');
   expect(session.model.state).toMatchObject({ kind: 'decided', terminal: { effectUnknown: true } });
@@ -182,7 +314,7 @@ it.each([
       : { proposalId: 'owned-result', status: 'approved' };
   const { container, session } = await domainResult(kind, body, true, false);
   expect(container.querySelector('[data-testid="mailbox-retained-line"]')?.textContent).toContain(
-    kind === 'F225' ? 'Handoff started' : 'Profile written',
+    kind === 'F225' ? 'handoff started' : 'written to your profile',
   );
   expect(container.textContent).toContain(kind === 'F225' ? 'Session handoff' : 'Profile update');
   expect(container.textContent).not.toContain('A real result');
@@ -201,9 +333,11 @@ it.each([
   ['F231', { error: 'unavailable' }, false],
 ] as const)('does not invent a retained effect for %s from a missing or contradictory original receipt', async (kind, body, ok) => {
   const { container } = await domainResult(kind, body, ok);
-  expect(container.querySelector('[data-testid="mailbox-retained-line"]')?.textContent).toBe(
-    'Approved · Effect not yet confirmed · You',
+  expect(container.querySelector('[data-testid="decision-result-label"]')?.textContent).toBe(
+    `Approved · Effect not yet confirmed · You · ${kind === 'F225' ? 'Session handoff' : 'Profile update'}`,
   );
+  expect(container.querySelector('[data-testid="decision-result-details"]')).toBeNull();
+  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-expanded="false"]')?.click());
   expect(container.querySelector('[data-testid="mailbox-retained-reread"]')).not.toBeNull();
 });
 
@@ -265,5 +399,6 @@ it('the retained person-memory result names the exact person after the pending c
     root.render(<RetainedResult session={session} sessions={sessions} />);
   });
   expect(container.querySelector('[data-testid="mailbox-retained-result"]>div')?.textContent).toContain('Lin original');
+  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-expanded="false"]')?.click());
   expect(container.querySelector('[data-testid="person-memory-undo"]')).not.toBeNull();
 });

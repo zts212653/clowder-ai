@@ -1,12 +1,15 @@
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { ActionSuccessorKeys } from '../../../../ball-custody/action-successor-keys.js';
-import { parseActionSuccessorLease } from '../../../../ball-custody/action-successor-redis-codecs.js';
 import {
   type ApprovedTaskContinuationInput,
   type ApprovedTaskContinuationResult,
   decideApprovedTaskContinuation,
   implementationUsedProposal,
 } from '../../../../ball-custody/approved-task-continuation.js';
+import {
+  type ApprovedTaskImplementationHistory,
+  parseApprovedTaskImplementationHistory,
+} from '../../../../ball-custody/approved-task-implementation-history.js';
 import { ProposalKeys } from '../redis-keys/proposals/proposal-keys.js';
 import { TaskKeys } from '../redis-keys/task-keys.js';
 import { ThreadKeys } from '../redis-keys/thread-keys.js';
@@ -14,7 +17,11 @@ import { hydrateProposal } from './RedisProposalStoreHelpers.js';
 import { hydrateTask } from './RedisTaskCodec.js';
 import { runWithExclusiveRedisWatchSession } from './RedisWatchSession.js';
 
-async function readWatchedImplementationHistory(session: RedisClient, currentDetailKey: string | null) {
+async function readWatchedImplementationHistory(
+  session: RedisClient,
+  currentDetailKey: string | null,
+  input: ApprovedTaskContinuationInput,
+) {
   // Current identity is not history: completed/fresh-revision leases remain in the canonical ALL index.
   const prefix = session.options.keyPrefix ?? '';
   const indexed = await session.smembers(ActionSuccessorKeys.ALL);
@@ -26,9 +33,10 @@ async function readWatchedImplementationHistory(session: RedisClient, currentDet
   await session.watch(...detailKeys);
   const records = await session.mget(...detailKeys);
   try {
-    const leases = records.map(parseActionSuccessorLease);
-    // An indexed but unreadable payload is missing history, never proof that implementation did not occur.
-    return leases.every((lease) => lease !== null) ? leases : null;
+    const target = { tenantScope: input.actor.userId, subjectRef: `subject:task:${input.taskId}` };
+    const leases = records.map((raw) => parseApprovedTaskImplementationHistory(raw, target));
+    // Only a decoded, unrelated identity is skipped. Missing or unreadable history throws below.
+    return leases.filter((lease): lease is ApprovedTaskImplementationHistory => lease !== null);
   } catch {
     return null;
   }
@@ -58,7 +66,7 @@ export async function continueRedisApprovedTask(
       session.hgetall(childKey),
       session.get(identityKey),
     ]);
-    const implementations = await readWatchedImplementationHistory(session, leaseDetailKey);
+    const implementations = await readWatchedImplementationHistory(session, leaseDetailKey, input);
     if (!implementations) return { outcome: 'rejected', reason: 'unavailable' };
     const proposal = hydrateProposal(rawProposal);
     const priorImplementation = implementations.find((lease) => implementationUsedProposal(lease, proposal)) ?? null;

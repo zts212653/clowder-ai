@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { CatData } from '@/hooks/useCatData';
 import { initialState } from '../hub-cat-editor.model';
 import { buildMemberPatchPayload } from '../hub-cat-editor.payload';
+import { commitMemberAvatar } from '../settings/members/member-avatar-draft';
 import {
   type MemberDraft,
   persistMemberDraft,
@@ -162,4 +163,23 @@ describe('member drafts survive navigation and concurrent edits', () => {
     expect(rebased.form).toMatchObject({ nickname: 'local nickname', carrier: 'cli' });
     expect(buildMemberPatchPayload(rebased.form, latest)).toEqual({ nickname: 'local nickname' });
   });
+});
+
+it('commits the separately saved canon avatar without dropping other unsaved member fields', () => {
+  const draft: MemberDraft = {
+    version: 1,
+    baseline: original,
+    form: { ...initialState(original), nickname: '还没保存的昵称', avatar: '/old-unsaved.png' },
+    templateId: null,
+    section: 'identity',
+  };
+  const committed = commitMemberAvatar(draft, {
+    avatar: '/api/cats/draft/avatar?bindingRevision=1',
+    visualAssets: { state: 'selected', bindingRevision: 1 },
+  });
+  expect(committed.form.nickname).toBe('还没保存的昵称');
+  expect(committed.form.avatar).toBe(committed.baseline?.avatar);
+  const patch = buildMemberPatchPayload(committed.form, committed.baseline!);
+  expect(patch.nickname).toBe('还没保存的昵称');
+  expect(patch).not.toHaveProperty('avatar');
 });

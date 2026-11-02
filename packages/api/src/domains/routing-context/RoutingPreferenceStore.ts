@@ -10,6 +10,7 @@ export interface IRoutingPreferenceStore {
   getRevision(ownerId: string, revisionId: string): Promise<RoutingPreferenceRevisionV1 | null>;
   getByCommand(ownerId: string, commandId: string): Promise<RoutingPreferenceRevisionV1 | null>;
   getHead(ownerId: string, preferenceId: string): Promise<RoutingPreferenceRevisionV1 | null>;
+  readDecisionHeads(ownerId: string): Promise<RoutingPreferenceRevisionV1[]>;
   listByOwner(ownerId: string): Promise<RoutingPreferenceRevisionV1[]>;
   listChain(ownerId: string, preferenceId: string): Promise<RoutingPreferenceRevisionV1[]>;
 }

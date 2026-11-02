@@ -7,6 +7,7 @@ import { writeShellLanguage } from '../../shell-language';
 import { writeShellPresentation } from '../../shell-presentation';
 import { createApprovalSessions } from '../approval-sessions';
 import { MailboxRow } from '../MailboxRow';
+import { collectiveFailure } from './collective-failure.fixture';
 import { okRead } from './mailbox-fixtures';
 import { REVIEW_OWNER, reviewItem, reviewView } from './mailbox-review-fixtures';
 
@@ -39,14 +40,19 @@ afterEach(() => {
 function response(body: unknown, status = 200): Response {
   return { ok: status >= 200 && status < 300, status, json: async () => body } as Response;
 }
-async function renderReview(readCurrent = true) {
+async function renderReview(readCurrent = true, outage = false) {
   const sessions = createApprovalSessions({
     readsStarted: () => readStarts,
     refetch: vi.fn(),
     refreshStore: async () => {},
     storeItems: () => [],
     attempts: () => ({}),
-    latestRead: () => ({ result: okRead([reviewItem()], { identity: { ownerUserId: REVIEW_OWNER } }), generation: 1 }),
+    latestRead: () => ({
+      result: outage
+        ? collectiveFailure(okRead([reviewItem()], { identity: { ownerUserId: REVIEW_OWNER } }))
+        : okRead([reviewItem()], { identity: { ownerUserId: REVIEW_OWNER } }),
+      generation: 1,
+    }),
     now: Date.now,
   });
   await act(async () =>
@@ -96,7 +102,10 @@ it('keeps the original English labels and original persistent draft key', async 
   expect(container.textContent).not.toContain('你的判断');
 });
 
-it('posts the original revision-bound decision and shows its canonical receipt result', async () => {
+it.each([
+  false,
+  true,
+])('posts the original revision-bound decision (Collective failure=%s) and shows its canonical result', async (outage) => {
   const initial = reviewView();
   const settled = reviewView();
   settled.review.revision = 6;
@@ -124,7 +133,7 @@ it('posts the original revision-bound decision and shows its canonical receipt r
       },
     });
   });
-  await renderReview();
+  await renderReview(true, outage);
   await act(async () => button('通过此版本').click());
   const writes = vi.mocked(apiFetch).mock.calls.filter(([, options]) => options?.method === 'POST');
   expect(writes).toHaveLength(1);

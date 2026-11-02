@@ -55,7 +55,12 @@ export function MailboxOriginalApprovalCard({
         setRefused(true);
         return false;
       }
-      sessions.open({ ownerUserId, decisionRef: item.decisionRef, approval: source.approval });
+      sessions.open({
+        ownerUserId,
+        decisionRef: item.decisionRef,
+        approval: source.approval,
+        originalBlock: source.proof.block,
+      });
       writing.current = true;
       setRefused(false);
       return true;
@@ -90,7 +95,12 @@ export function MailboxOriginalApprovalCard({
           onClick={() => {
             setReload((n) => n + 1);
             setRefused(false);
-            sessions.open({ ownerUserId, decisionRef: item.decisionRef, approval: source.approval });
+            sessions.open({
+              ownerUserId,
+              decisionRef: item.decisionRef,
+              approval: source.approval,
+              originalBlock: source.proof.block,
+            });
             sessions.reread(key);
           }}
         >

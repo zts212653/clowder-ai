@@ -2,12 +2,18 @@ import { createHash } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/store.js';
 import { CollectiveMarkdownOwner } from '../src/domains/collaborative-content/collective-artifact/markdown-owner.js';
 import { WorkspaceContentReviewStore } from '../src/domains/collaborative-content/workspace-review/store.js';
 import { collectiveContentScopeRef } from '../src/domains/video-studio/content-owner/collective-scope.js';
 import { ProjectContentOwnerService } from '../src/domains/video-studio/content-owner/service.js';
-import { CollectiveConnector, startCollectiveServer } from './helpers/f202-collective-installed-business.js';
+import {
+  CollectiveConnector,
+  collectivePackageRoot,
+  loadCollectiveModule,
+  startCollectiveServer,
+} from './helpers/f202-collective-installed-business.js';
 import { participationFixture } from './helpers/f202-collective-participation.fixture.js';
 
 export async function collectiveArtifactOwnerFixture(
@@ -21,10 +27,13 @@ export async function collectiveArtifactOwnerFixture(
   const root = await mkdtemp(join(tmpdir(), 'f290-real-owner-'));
   const serviceDirectory = join(root, 'service');
   const f = await participationFixture(serviceDirectory);
+  const { loadCollectiveClient } = await loadCollectiveModule('client-assets.js');
+  const client = await loadCollectiveClient(pathToFileURL(`${join(collectivePackageRoot, 'assets/client')}/`));
   const server = await startCollectiveServer({
     store: f.store,
     port: 0,
     allowedHostOrigins: ['http://localhost:5182', ...(options.additionalHostOrigins ?? [])],
+    clientAssets: client.files,
   });
   let reviews: WorkspaceContentReviewStore | undefined;
   let modifications: ArtifactReviewStore | undefined;
@@ -196,6 +205,7 @@ export async function collectiveArtifactOwnerFixture(
     request,
     port,
     targetConnection: f.connection,
+    serviceEndpointCredential: connectionCredential(),
     modifications,
   };
 }

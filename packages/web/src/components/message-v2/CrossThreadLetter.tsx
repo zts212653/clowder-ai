@@ -43,10 +43,12 @@ export function CrossThreadLetter({
     <section
       data-cross-thread-letter
       className="w-full min-w-0 overflow-hidden rounded-[10px] border"
+      data-chat-background-surface="paper"
       style={{ backgroundColor: 'var(--shell-paper)', borderColor: 'var(--shell-hairline)', color: 'var(--shell-ink)' }}
     >
       <div
         className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 border-b px-3 py-2 text-compact"
+        data-chat-background-surface="frame"
         style={{ backgroundColor: 'var(--shell-frame)', borderColor: 'var(--shell-hairline)' }}
       >
         <span className="inline-flex shrink-0 items-center gap-1.5 font-semibold">

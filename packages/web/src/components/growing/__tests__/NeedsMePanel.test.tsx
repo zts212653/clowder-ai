@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   loading: false,
   confirmed: false,
   error: false,
+  partial: false,
   refetch: vi.fn(),
 }));
 
@@ -148,6 +149,7 @@ describe('F310 NeedsMePanel', () => {
     mocks.confirmed = false;
     mocks.loading = false;
     mocks.error = false;
+    mocks.partial = false;
     mocks.refetch.mockReset();
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -249,6 +251,21 @@ describe('F310 NeedsMePanel', () => {
     expect(container.textContent).toContain('任务和准备好的内容仍然保留');
     expect(container.textContent).toContain('请稍后刷新');
     expect(container.textContent).not.toContain('owner truth');
+  });
+
+  it('keeps healthy items usable while a partial source withholds the exact count and empty state', async () => {
+    mocks.partial = true;
+    mocks.ownerReads = [ownerRead({ eligible: true })];
+
+    await act(async () => {
+      root.render(<NeedsMePanel />);
+    });
+
+    expect(container.textContent).toContain('部分待办来源暂不可用');
+    expect(container.textContent).toContain('已读取的待办仍可处理');
+    expect(container.querySelector('[data-testid="needs-me-item"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="needs-me-count"]')).toBeNull();
+    expect(container.textContent).not.toContain('暂时没有要你判断的事');
   });
 
   it('renders exactly the current producer judgment with prepared Artifact truth', async () => {

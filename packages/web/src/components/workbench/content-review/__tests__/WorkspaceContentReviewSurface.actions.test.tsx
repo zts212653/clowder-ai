@@ -1,6 +1,7 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { openFileMenu } from '@/test-utils/open-file-menu';
 import { WorkspaceContentReviewSurface } from '../WorkspaceContentReviewSurface';
 import { mediaView, reviewId, revision, view } from './WorkspaceContentReviewSurface.fixture';
 
@@ -186,6 +187,7 @@ it('replies to and resolves an ordinary-file annotation through F309 review acti
     await Promise.resolve();
     await Promise.resolve();
   });
+  await openFileMenu(container);
   await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="打开作品讨论"]')?.click());
   const textarea = container.querySelector<HTMLTextAreaElement>('[aria-label="回复批注 ordinary-action-comment"]');
   if (!textarea) throw new Error('ordinary discussion reply input is missing');

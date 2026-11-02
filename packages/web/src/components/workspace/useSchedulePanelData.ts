@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useShellCopy } from '@/components/shell/shell-copy';
 import { apiFetch } from '@/utils/api-client';
 import type { GlobalControlState, RunLedgerRow, ScheduleTask } from './schedule-helpers';
+import { schedulePanelCopy } from './schedule-panel.shell-copy';
 
 const REFRESH_MS = 30_000;
 
 export function useSchedulePanelData(threadFilter: string | null | undefined, enabled = true) {
+  const t = useShellCopy(schedulePanelCopy);
   // undefined is All; null is an unresolved Current Thread, never All.
   const resource =
     threadFilter === null
@@ -19,7 +22,7 @@ export function useSchedulePanelData(threadFilter: string | null | undefined, en
   const [snapshot, setSnapshot] = useState<{
     resource: string | null;
     tasks: ScheduleTask[];
-    error: string | null;
+    error: 'read_failed' | null;
   }>({ resource: null, tasks: [], error: null });
   const [globalControl, setGlobalControl] = useState<GlobalControlState | null>(null);
   const [history, setHistory] = useState<{
@@ -68,7 +71,7 @@ export function useSchedulePanelData(threadFilter: string | null | undefined, en
           setSnapshot((previous) => ({
             resource: path,
             tasks: previous.resource === path ? previous.tasks : [],
-            error: '同步调度任务失败，请稍后重试。',
+            error: 'read_failed',
           }));
       }
     },
@@ -140,10 +143,10 @@ export function useSchedulePanelData(threadFilter: string | null | undefined, en
     const res = await apiFetch('/api/schedule/control', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ enabled, reason: enabled ? null : 'Paused from panel', updatedBy: 'user' }),
+      body: JSON.stringify({ enabled, reason: enabled ? null : t.pausedFromPanel, updatedBy: 'user' }),
     }).catch(() => null);
     if (res) await fetchControl(true);
-  }, [globalControl, fetchControl]);
+  }, [globalControl, fetchControl, t.pausedFromPanel]);
 
   const handleToggleTask = useCallback(
     async (task: ScheduleTask) => {
@@ -177,7 +180,8 @@ export function useSchedulePanelData(threadFilter: string | null | undefined, en
   return {
     tasks: snapshot.resource === resource ? snapshot.tasks : [],
     loading: resource !== null && snapshot.resource !== resource,
-    tasksError: resource === null ? '当前对话尚未确定。' : snapshot.resource === resource ? snapshot.error : null,
+    tasksError:
+      resource === null ? t.threadUnresolved : snapshot.resource === resource && snapshot.error ? t.syncFailed : null,
     globalControl,
     expandedId,
     runHistory: history?.resource === resource ? history.runs : [],

@@ -28,7 +28,7 @@ function cue(
   };
 }
 
-test('all eight exact-delivery families preserve producer status and source owner scope without drilling seeds', async () => {
+test('all declared exact-delivery families preserve producer status and source owner scope without drilling seeds', async () => {
   const reads: Array<{ family: string; owner: string; invocationId: string; revision: string }> = [];
   const f = await recallFixture((readers) => {
     readers.personMemoryStore = {
@@ -58,7 +58,7 @@ test('all eight exact-delivery families preserve producer status and source owne
     for (const family of RECALL_RESOLVER_FAMILIES) f.episodes.append(cue(f.now, family, family));
     const response = await f.get('?source=push');
     const body = response.json();
-    assert.equal(body.records.length, 8);
+    assert.equal(body.records.length, RECALL_RESOLVER_FAMILIES.length);
     assert.deepEqual(
       body.records.map((row: { event: { resolverFamily: string } }) => row.event.resolverFamily).sort(),
       [...RECALL_RESOLVER_FAMILIES].sort(),

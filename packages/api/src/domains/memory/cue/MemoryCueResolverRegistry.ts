@@ -8,6 +8,7 @@ import {
   type RecallResolverFamily,
   type RecallScopeV1,
 } from '@cat-cafe/shared';
+import type { ContextSourceOmission } from './context-source-omission.js';
 
 export interface MemoryCueSourceProjection {
   title: string;
@@ -39,6 +40,7 @@ export interface MemoryCueResolverContext {
   consumerCatId?: string;
   signal?: AbortSignal;
   createDrillHandle(input: CreateMemoryCueDrillHandleInput): string;
+  recordOmission?(reason: ContextSourceOmission): void;
 }
 
 export interface MemoryCueResolver {

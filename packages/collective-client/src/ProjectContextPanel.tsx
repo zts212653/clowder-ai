@@ -1,4 +1,8 @@
 import type { CollectiveRoadmapRecord, CollectiveWorkProjection } from './client-types.js';
+import { useCollectiveLanguage } from './collective-copy.js';
+import { MaterialSources } from './MaterialSources.js';
+import type { useProjectMaterials } from './ProjectMaterialsContext.js';
+import { formatWorkDate, projectLatestDeadline } from './project-time.js';
 import {
   formatHistoryTime,
   type RoadmapViewState,
@@ -9,11 +13,13 @@ import { workBlockingPresentation } from './work-blocking-presentation.js';
 
 export function ProjectContextPanel({
   roadmap,
+  materialFeed,
   works,
   availableWorks,
   view,
   onOpenSource,
 }: {
+  readonly materialFeed?: ReturnType<typeof useProjectMaterials>;
   readonly roadmap: CollectiveRoadmapRecord;
   readonly works: readonly CollectiveWorkProjection[];
   readonly availableWorks: readonly CollectiveWorkProjection[];
@@ -23,6 +29,9 @@ export function ProjectContextPanel({
   const completed = works.filter((work) => work.lifecycle === 'completed');
   const blocked = works.filter((work) => work.status === 'blocked');
   const activity = projectActivity(roadmap, works).slice(0, 8);
+  const language = useCollectiveLanguage(),
+    en = language === 'en',
+    latest = projectLatestDeadline(works);
   return (
     <aside className="project-context" aria-label="项目上下文与动态">
       <header>
@@ -38,6 +47,24 @@ export function ProjectContextPanel({
           <dt>已完成</dt>
           <dd>{completed.length ? completed.map((work) => work.title).join('、') : '还没有已完成任务'}</dd>
         </div>
+        {(roadmap.targetDate || latest) && (
+          <div>
+            <dt>{en ? 'Dates' : '时间'}</dt>
+            <dd>
+              {roadmap.targetDate && (
+                <span>
+                  {en ? 'Target' : '目标'} · {formatWorkDate(roadmap.targetDate, language)} ·{' '}
+                  {roadmap.targetDate.actor.displayName}
+                </span>
+              )}
+              {latest && (
+                <small>
+                  {en ? 'Latest task deadline' : '任务里最晚的截止'} · {formatWorkDate(latest, language)}
+                </small>
+              )}
+            </dd>
+          </div>
+        )}
         <div>
           <dt>当前阻塞</dt>
           <dd>
@@ -60,6 +87,7 @@ export function ProjectContextPanel({
           ))}
         </details>
       )}
+      {materialFeed && <MaterialSources feed={materialFeed} view={view} />}
       <section className="project-context-activity" aria-label="项目动态">
         <h3>动态</h3>
         {activity.length ? (

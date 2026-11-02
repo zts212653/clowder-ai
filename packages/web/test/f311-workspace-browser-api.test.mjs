@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { test } from 'node:test';
+import { CLIENT_REQUEST_DIAGNOSTIC_HEADER } from '@cat-cafe/shared';
 import { createFixtureApi } from './browser/f311-workspace-browser.harness.mjs';
 
 const webOrigin = 'http://127.0.0.1:43111';
@@ -45,11 +46,24 @@ test('owned API preflight settles without a Program write and refuses foreign or
   const f = await fixture(t);
   const response = await fetch(`${f.url}${programPath}`, {
     method: 'OPTIONS',
-    headers: { origin: webOrigin, 'access-control-request-method': 'POST' },
+    headers: {
+      origin: webOrigin,
+      'access-control-request-method': 'POST',
+      'access-control-request-headers': CLIENT_REQUEST_DIAGNOSTIC_HEADER,
+    },
   });
   assert.equal(response.status, 204);
   assert.equal(response.headers.get('access-control-allow-origin'), webOrigin);
   assert.match(response.headers.get('access-control-allow-headers'), /x-csrf-token/i);
+  assert.ok(
+    response.headers
+      .get('access-control-allow-headers')
+      .toLowerCase()
+      .split(',')
+      .map((header) => header.trim())
+      .includes(CLIENT_REQUEST_DIAGNOSTIC_HEADER),
+    'the real client diagnostic header must pass preflight',
+  );
   assert.deepEqual(f.programWrites, []);
   const foreign = await fetch(`${f.url}${programPath}`, {
     method: 'OPTIONS',

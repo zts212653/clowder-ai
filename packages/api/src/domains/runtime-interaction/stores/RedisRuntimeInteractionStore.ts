@@ -6,6 +6,10 @@ import type {
   RuntimeInteractionTerminalReasonCode,
 } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
+import { SettledIndexPreparingError } from '../../../utils/redis-settled-index.js';
+import { readRedisSettledPage } from '../../../utils/redis-settled-page.js';
+import type { SettledHistoryPageOptions, SettledHistorySourcePage } from '../../../utils/settled-history-page.js';
+import { requireHistoryIndexTime } from '../../../utils/settled-history-page.js';
 import type {
   ClaimRuntimeInteractionSubmissionInput,
   CompleteRuntimeInteractionSubmissionInput,
@@ -26,10 +30,12 @@ import {
   SETTLE_CONVERSATION_LUA,
   SETTLE_LUA,
 } from './redis-runtime-interaction-scripts.js';
+import { advanceRuntimeHistoryIndex, runtimeSettledKey } from './runtime-history-index.js';
 
 export const RuntimeInteractionKeys = {
   detail: (interactionId: string) => `runtime-interaction:${interactionId}`,
   active: () => 'runtime-interaction:active',
+  settledByUser: runtimeSettledKey,
   pendingByUser: (userId: string) => `runtime-interaction:user:${userId}:pending`,
   activeByInvocation: (invocationId: string) => `runtime-interaction:invocation:${invocationId}:active`,
 } as const;
@@ -100,11 +106,12 @@ export class RedisRuntimeInteractionStore implements RuntimeInteractionStore {
     if (!existing) return null;
     const transitioned = await this.redis.eval(
       SETTLE_LUA,
-      4,
+      5,
       RuntimeInteractionKeys.detail(input.interactionId),
       RuntimeInteractionKeys.pendingByUser(existing.request.owner.userId),
       RuntimeInteractionKeys.active(),
       RuntimeInteractionKeys.activeByInvocation(existing.request.owner.invocationId),
+      runtimeSettledKey(existing.request.owner.userId),
       input.hostEpoch,
       input.terminal.status,
       JSON.stringify(input.terminal),
@@ -132,11 +139,12 @@ export class RedisRuntimeInteractionStore implements RuntimeInteractionStore {
     if (!existing) return null;
     const transitioned = await this.redis.eval(
       COMPLETE_SUBMISSION_LUA,
-      4,
+      5,
       RuntimeInteractionKeys.detail(input.interactionId),
       RuntimeInteractionKeys.pendingByUser(existing.request.owner.userId),
       RuntimeInteractionKeys.active(),
       RuntimeInteractionKeys.activeByInvocation(existing.request.owner.invocationId),
+      runtimeSettledKey(existing.request.owner.userId),
       String(input.expectedRevision),
       input.operationId,
       input.terminal.status,
@@ -152,11 +160,12 @@ export class RedisRuntimeInteractionStore implements RuntimeInteractionStore {
     if (!existing) return null;
     const transitioned = await this.redis.eval(
       SETTLE_CONVERSATION_LUA,
-      4,
+      5,
       RuntimeInteractionKeys.detail(input.interactionId),
       RuntimeInteractionKeys.pendingByUser(existing.request.owner.userId),
       RuntimeInteractionKeys.active(),
       RuntimeInteractionKeys.activeByInvocation(existing.request.owner.invocationId),
+      runtimeSettledKey(existing.request.owner.userId),
       String(input.expectedRevision),
       input.terminal.status,
       JSON.stringify(input.terminal),
@@ -216,6 +225,40 @@ export class RedisRuntimeInteractionStore implements RuntimeInteractionStore {
     return read.records.filter((record) => record.status === 'pending' && record.request.owner.userId === userId);
   }
 
+  /** Owner index bounds ordinary reads; legacy discovery advances one bounded, resumable batch. */
+  async listSettledPage(
+    owner: string,
+    options: SettledHistoryPageOptions,
+  ): Promise<SettledHistorySourcePage<RuntimeInteractionRecord>> {
+    if (!(await advanceRuntimeHistoryIndex(this.redis, parseRecord))) throw new SettledIndexPreparingError();
+    return readRedisSettledPage(this.redis, runtimeSettledKey(owner), options, async (id, at) => {
+      const p = await this.get(id);
+      if (!p) return null;
+      if (
+        p.request.interactionId !== id ||
+        !(p.request.owner.userId === owner) ||
+        !(!!p.cardRef && !!p.terminal && p.status !== 'pending' && p.status !== 'staged')
+      )
+        throw new Error('Settled index canonical identity/owner/status mismatch');
+      requireHistoryIndexTime(at, p.terminal?.settledAt);
+      return p;
+    });
+  }
+
+  async listSettledByUser(userId: string, limit: number): Promise<RuntimeInteractionRecord[]> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw new Error('invalid runtime history limit');
+    if (!(await advanceRuntimeHistoryIndex(this.redis, parseRecord))) throw new SettledIndexPreparingError();
+    const ids = await this.redis.zrevrange(runtimeSettledKey(userId), 0, limit - 1);
+    return (await this.readMany(ids)).filter(
+      (record) =>
+        record.request.owner.userId === userId &&
+        record.cardRef &&
+        record.terminal &&
+        record.status !== 'pending' &&
+        record.status !== 'staged',
+    );
+  }
+
   private async invalidateRecords(
     records: RuntimeInteractionRecord[],
     reasonCode: RuntimeInteractionTerminalReasonCode,
@@ -234,11 +277,12 @@ export class RedisRuntimeInteractionStore implements RuntimeInteractionStore {
     const id = existing.request.interactionId;
     const transitioned = await this.redis.eval(
       INVALIDATE_LUA,
-      4,
+      5,
       RuntimeInteractionKeys.detail(id),
       RuntimeInteractionKeys.pendingByUser(existing.request.owner.userId),
       RuntimeInteractionKeys.active(),
       RuntimeInteractionKeys.activeByInvocation(existing.request.owner.invocationId),
+      runtimeSettledKey(existing.request.owner.userId),
       JSON.stringify(terminal),
       String(now),
       id,

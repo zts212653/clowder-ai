@@ -26,6 +26,11 @@
   margin-left: auto;
   flex: none;
 }
+.headerActions:focus-visible {
+  outline: 2px solid var(--semantic-info);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
 .header > button,
 .headerActions > button,
 .headerActions > a,
@@ -37,19 +42,47 @@
   font-size: 12px;
   white-space: nowrap;
 }
+.toolbarTrigger {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--cafe-text-secondary);
+  font-size: 18px;
+  line-height: 1;
+}
+.toolbarTrigger:hover {
+  background: var(--cafe-surface-elevated);
+  --chat-background-role: cafe-elevated;
+}
+.toolbarTrigger:focus-visible {
+  outline: 2px solid var(--cafe-accent);
+  outline-offset: 2px;
+}
 .menu {
   position: fixed;
+  margin: 0;
   z-index: 90;
   width: 300px;
   max-width: calc(100vw - 16px);
-  max-height: calc(100dvh - 24px);
+  max-height: min(550px, calc(100dvh - 24px));
   overflow: auto;
   padding: 6px;
   border: 1px solid var(--cafe-border);
   border-radius: 12px;
   background: var(--cafe-surface);
+  --chat-background-role: cafe;
   color: var(--cafe-text);
   box-shadow: 0 12px 48px #0005;
+}
+.headerActions > .download,
+.workHeader .download {
+  background: transparent;
+  color: inherit;
+}
+.download:hover {
+  text-decoration: underline;
 }
 .menu button,
 .menu a {
@@ -68,10 +101,12 @@
 .menu button:hover,
 .menu a:hover {
   background: var(--cafe-surface-elevated);
+  --chat-background-role: cafe-elevated;
 }
 .menu button:focus-visible,
 .menu a:focus-visible {
   background: var(--cafe-surface-elevated);
+  --chat-background-role: cafe-elevated;
   outline: 2px solid var(--cafe-accent);
   outline-offset: -2px;
 }
@@ -109,6 +144,7 @@
 }
 .info .path {
   background: var(--cafe-surface-elevated);
+  --chat-background-role: cafe-elevated;
   padding: 6px;
   font-family: monospace;
   margin-top: 6px;
@@ -123,9 +159,11 @@
   border-radius: 8px;
   padding: 8px 14px;
   background: var(--cafe-surface);
+  --chat-background-role: cafe;
   color: var(--cafe-text);
   box-shadow: 0 4px 20px #0004;
   font-size: 13px;
+  white-space: nowrap;
 }
 @media (max-width: 600px) {
   .header {

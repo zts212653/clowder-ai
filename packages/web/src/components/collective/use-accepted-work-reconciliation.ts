@@ -5,18 +5,21 @@ import { useCallback, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 
 export function useAcceptedWorkReconciliation() {
-  const [error, setError] = useState<string>();
+  const [notice, setNotice] = useState<string>();
   const reconcile = useCallback(async (input: CollectiveAcceptedWorkResult) => {
     try {
       await reconcileAcceptedWorkResult(input);
-      setError(undefined);
+      setNotice(undefined);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '公共结果已验收，但私人 Task 尚未同步');
+      setNotice(cause instanceof WorkReconciliationPending ? cause.message : genericPendingMessage);
       throw cause;
     }
   }, []);
-  return { error, reconcile };
+  return { notice, reconcile };
 }
+
+const genericPendingMessage = '公共结果已验收；我的 Café 尚未同步原 Task。无需重新验收。';
+class WorkReconciliationPending extends Error {}
 
 async function reconcileAcceptedWorkResult(input: CollectiveAcceptedWorkResult): Promise<void> {
   const response = await apiFetch(
@@ -28,16 +31,23 @@ async function reconcileAcceptedWorkResult(input: CollectiveAcceptedWorkResult):
     },
   );
   const body: unknown = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(workReconciliationFailure(body, response.status));
+  if (!response.ok) throw new WorkReconciliationPending(workReconciliationPendingMessage(body));
   if (isCompletedWorkReconciliation(body)) return;
   const pending = typeof body === 'object' && body !== null && 'result' in body && body.result === 'not_admitted';
-  throw new Error(pending ? '公共结果已验收，正在等待私人 Task 建立后同步' : '私人 Task 尚未确认本次公共结果');
+  throw new WorkReconciliationPending(
+    pending ? '公共结果已验收；我的 Café 还在等待原 Task 建立后同步。无需重新验收。' : genericPendingMessage,
+  );
 }
 
-function workReconciliationFailure(value: unknown, status: number): string {
-  return typeof value === 'object' && value !== null && 'error' in value && typeof value.error === 'string'
-    ? value.error
-    : `Work reconciliation failed (${status})`;
+function workReconciliationPendingMessage(value: unknown): string {
+  const code =
+    typeof value === 'object' && value !== null && 'code' in value && typeof value.code === 'string'
+      ? value.code
+      : undefined;
+  if (code === 'OWNER_ADOPTION_REQUIRED') return '公共结果已验收；原 Task 仍在等待我的 Café 接管。无需重新验收。';
+  if (code === 'COLLECTIVE_RESULT_TERMINAL_CONFLICT')
+    return '公共结果已验收；原 Task 已是终态，家内没有改写它。无需重新验收。';
+  return genericPendingMessage;
 }
 
 function isCompletedWorkReconciliation(

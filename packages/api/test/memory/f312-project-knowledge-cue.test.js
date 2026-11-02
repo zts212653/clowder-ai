@@ -75,7 +75,10 @@ describe('F312 Project Knowledge cue vertical slice', () => {
     assert.deepEqual(Object.keys(drilled.payload).sort(), [
       'anchor',
       'content',
+      'contentRange',
       'contentTruncated',
+      'location',
+      'nextOffset',
       'sourcePath',
       'sourceRevision',
       'summary',
@@ -94,6 +97,50 @@ describe('F312 Project Knowledge cue vertical slice', () => {
       status: 'not_available',
       invalidationReason: 'source_corrected',
     });
+  });
+
+  it('locates and continues a feature through the runtime reader without mixing corrected pages', async (t) => {
+    const { createMemoryCueRuntime } = await import('../../dist/domains/memory/cue/createMemoryCueRuntime.js');
+    const root = mkdtempSync(join(tmpdir(), 'f332-feature-window-'));
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    mkdirSync(join(root, 'features'));
+    const sourcePath = 'features/F312-memory.md';
+    const content =
+      '# Feature\n' + 'Earlier material.\n'.repeat(400) + '## Recovery procedure\n' + 'Later material.\n'.repeat(400);
+    writeFileSync(join(root, sourcePath), content);
+    const item = evidence('F312', sourcePath);
+    const store = { getByAnchor: async () => item };
+    const source = new ProjectKnowledgeMemoryCueSource({
+      projectDocsRoot: root,
+      evidenceStore: store,
+      episodeStore: { hasTerminalConsumptionForSource: () => false },
+    });
+    const cue = await source.resolve({ ownerUserId, featureId: 'F312' });
+    const runtime = createMemoryCueRuntime({
+      evidenceStore: store,
+      projectDocsRoot: root,
+      ownerUserId,
+      episodeStore: {},
+      handles: {},
+      messageStore: {},
+      eventStore: {},
+      entityRegistry: {},
+      tasteRepository: {},
+      profileRepository: {},
+      autoDreamStore: {},
+    });
+    const input = { family: 'evidence', anchor: cue.anchor, expectedRevision: cue.revision, scope };
+    const located = await runtime.sourceReader.read({ ...input, window: { query: 'Recovery procedure' } });
+    assert.match(located.payload.content, /Recovery procedure/);
+    assert.ok(located.payload.contentRange.start > 4_000);
+    const next = await runtime.sourceReader.read({ ...input, window: { offset: located.payload.nextOffset } });
+    assert.equal(next.payload.contentRange.start, located.payload.contentRange.end);
+    writeFileSync(join(root, sourcePath), content + 'corrected');
+    assert.equal(
+      (await runtime.sourceReader.read({ ...input, window: { offset: located.payload.nextOffset } }))
+        .invalidationReason,
+      'source_corrected',
+    );
   });
 
   it('rejects an index row that points outside the canonical feature authority', async () => {

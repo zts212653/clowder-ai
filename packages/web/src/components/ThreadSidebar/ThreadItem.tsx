@@ -21,6 +21,7 @@ import { ThreadPinV2 } from './ThreadPinV2';
 import { ThreadRowSignals } from './ThreadRowSignals';
 import { RowTip, RowTitleTip } from './ThreadRowTips';
 import { ThreadSettingsPanel } from './ThreadSettingsPanel';
+import { useOpenThreadSettings } from './ThreadSettingsProvider';
 import { formatSidebarActivityTime, threadSignalsCopy } from './thread-signals.shell-copy';
 import { formatRelativeTime, formatSidebarStatusTime } from './thread-utils';
 
@@ -86,6 +87,7 @@ function ThreadItemComponent({
   const hasDraftDecoration = useSidebarDraftDecoration(id);
   // F322 v2: one soft selection fill (no accent tint); the empty-participants note only matters as a hover fact.
   const isV2 = useShellPresentation() === 'v2';
+  const openThreadSettings = useOpenThreadSettings();
   const copy = useShellCopy(threadSignalsCopy);
   const { getCatById } = useCatData();
   const canDelete = id !== 'default' && onDelete;
@@ -184,8 +186,9 @@ function ThreadItemComponent({
 
   const startThreadSettings = useCallback(() => {
     setIsMoreOpen(false);
-    setIsSettingsOpen(true);
-  }, []);
+    if (isV2 && openThreadSettings) openThreadSettings(id, moreButtonRef);
+    else setIsSettingsOpen(true);
+  }, [id, isV2, openThreadSettings]);
 
   const startReplay = useCallback(() => {
     setIsMoreOpen(false);

@@ -5,14 +5,21 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, test } from 'node:test';
 import { promisify } from 'node:util';
-import { validateEffectiveGrants, validateManifest } from '@clowder-ai/plugin-contract';
+import { catRegistry } from '@cat-cafe/shared';
+import { validateManifest } from '@clowder-ai/plugin-contract';
 import Fastify from 'fastify';
-
+import {
+  fileBasedMcpIO,
+  installMcpCapability,
+  removeMcpCapability,
+} from '../dist/config/capabilities/capability-mcp-service.js';
 import {
   readCapabilitiesConfig,
   withCapabilityLock,
   writeCapabilitiesConfig,
 } from '../dist/config/capabilities/capability-orchestrator.js';
+import { prepareKimiMcpConfig } from '../dist/domains/cats/services/agents/providers/kimi-mcp-config.js';
+import { resolveProviderMcpConfig } from '../dist/domains/cats/services/agents/providers/provider-mcp-config.js';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { LimbRegistry } from '../dist/domains/limb/LimbRegistry.js';
 import { activateDeclaredMcp } from '../dist/domains/plugin/declared/declared-mcp-resources.js';
@@ -21,9 +28,61 @@ import {
   createPluginManagerRuntimeComposition,
 } from '../dist/domains/plugin/index.js';
 import { registerPluginManagerRoutes } from '../dist/routes/plugin-manager-routes.js';
+import { directMcpContract } from './helpers/direct-mcp-contract.js';
 
 const roots = [];
 const execFileAsync = promisify(execFile);
+
+test('file-based MCP projection can read an uninitialized registry without creating it', async () => {
+  const root = await tempRoot('plugin-mcp-uninitialized-projection-');
+  assert.deepEqual(await fileBasedMcpIO(root).readConfig(), { version: 2, capabilities: [] });
+  await assert.rejects(readFile(join(root, '.cat-cafe/capabilities.json')), { code: 'ENOENT' });
+});
+
+for (const state of ['absent', 'corrupt']) {
+  test(`file-based MCP mutations refuse ${state} host registries before writing CLI or project config`, async () => {
+    const root = await tempRoot('plugin-mcp-invalid-home-');
+    const consumer = await tempRoot('plugin-mcp-preserved-project-');
+    await writeCapabilitiesConfig(consumer, {
+      version: 2,
+      capabilities: [
+        { id: 'memory', type: 'mcp', source: 'cat-cafe', enabled: true, mcpServer: { command: 'node' } },
+        {
+          id: 'plugin:other:native',
+          pluginId: 'other',
+          type: 'mcp',
+          source: 'plugin',
+          enabled: true,
+          mcpServer: { command: 'node' },
+        },
+      ],
+    });
+    const consumerPath = join(consumer, '.cat-cafe/capabilities.json');
+    const consumerBytes = await readFile(consumerPath, 'utf8');
+    await mkdir(join(root, '.cat-cafe'), { recursive: true });
+    await writeFile(
+      join(root, '.cat-cafe/governance-registry.json'),
+      JSON.stringify({ entries: [{ projectPath: consumer }] }),
+    );
+    const path = join(root, '.cat-cafe/capabilities.json');
+    const bytes = '{ broken registry';
+    if (state === 'corrupt') await writeFile(path, bytes);
+    const io = fileBasedMcpIO(root, {
+      google: join(root, '.test-cli/google.json'),
+      antigravity: join(root, '.test-cli/antigravity.json'),
+    });
+    const entry = { id: 'test-mcp', type: 'mcp', enabled: true, source: 'external', mcpServer: { command: 'node' } };
+    const failure = new RegExp(
+      `Cannot synchronize global capabilities.*${state === 'corrupt' ? 'parse_error' : 'absent'}`,
+    );
+    await assert.rejects(() => installMcpCapability(root, entry, io), failure);
+    await assert.rejects(() => removeMcpCapability(root, entry.id, io, { hard: true }), failure);
+    if (state === 'corrupt') assert.equal(await readFile(path, 'utf8'), bytes);
+    else await assert.rejects(readFile(path), { code: 'ENOENT' });
+    assert.equal(await readFile(consumerPath, 'utf8'), consumerBytes);
+    await assert.rejects(() => stat(join(root, '.test-cli')), { code: 'ENOENT' });
+  });
+}
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
@@ -49,17 +108,20 @@ function fakeTaskRunner() {
   };
 }
 
-function createRuntime(projectRoot, { limbRegistry = new LimbRegistry(), taskRunner = fakeTaskRunner() } = {}) {
+function createRuntime(
+  projectRoot,
+  { limbRegistry = new LimbRegistry(), taskRunner = fakeTaskRunner(), mcpConfigIO } = {},
+) {
   return {
     limbRegistry,
     taskRunner,
     runtime: createDormantPluginRuntimeComposition({
       projectRoot,
       messageStore: new MessageStore(),
-      contract: { manifestContractVersions: ['0.1.0'], validateEffectiveGrants, validateManifest },
+      contract: { manifestContractRange: '0.1.0', validateManifest },
       limbRegistry,
       taskRunner,
-      mcpConfigIO: {
+      mcpConfigIO: mcpConfigIO ?? {
         readConfig: () => readCapabilitiesConfig(projectRoot),
         writeAndRegenCli: async (config) => {
           await writeCapabilitiesConfig(projectRoot, config);
@@ -123,12 +185,11 @@ async function writeFixturePackage({
   return packageRoot;
 }
 
-async function installAndEnable(runtime, packageRoot, localGrantPolicy = () => []) {
+async function installAndEnable(runtime, packageRoot) {
   const composition = createPluginManagerRuntimeComposition({
     runtime,
     catalogProvider: { snapshot: async () => ({ entries: [], status: 'fresh', checkedAt: 1 }) },
     catalogManifests: [],
-    localGrantPolicy,
   });
   const installed = await composition.manager.install({ source: { kind: 'local-directory', path: packageRoot } });
   const beforeEnable = (await composition.manager.get(installed.pluginId)).plugin;
@@ -177,6 +238,163 @@ test('an installed package activates and removes its declared MCP capability', a
   );
 });
 
+test('MCP connections dispatch the active installed plugin handlers', async () => {
+  const projectRoot = await tempRoot('mcp-independent-features-');
+  const contributions = ['basic', 'migration'].map((id) => ({
+    type: 'mcp',
+    id,
+    runtime: { transport: 'stdio', entrypoint: 'dist/mcp.js' },
+  }));
+  const packageRoot = await writeFixturePackage({
+    pluginId: 'dev.clowder.independent-features',
+    contribution: contributions[0],
+    contributions,
+    features: contributions.map((item) => ({
+      id: item.id,
+      name: item.id,
+      resources: [],
+      contributions: [{ type: 'mcp', id: item.id }],
+    })),
+    actions: "{ 'basic.run': async () => ({ ok: true }), 'migration.run': async () => ({ migrated: true }) }",
+    files: { 'dist/mcp.js': 'process.exit(0);\n' },
+  });
+  const { runtime } = createRuntime(projectRoot);
+  const { composition, installed } = await installAndEnable(runtime, packageRoot);
+  const registered = (await readCapabilitiesConfig(projectRoot)).capabilities.filter(
+    (entry) => entry.type === 'mcp' && entry.pluginId === installed.pluginId,
+  );
+  assert.deepEqual(
+    registered.map((entry) => entry.id),
+    [`plugin:${installed.pluginId}:basic`, `plugin:${installed.pluginId}:migration`],
+  );
+  const actions = runtime.supervisor.nativeActions;
+  const token = actions.environment(installed.pluginInstanceId, 'basic').CLOWDER_PLUGIN_ACTION_TOKEN;
+  assert.ok(token);
+  assert.ok(actions.environment(installed.pluginInstanceId, 'migration').CLOWDER_PLUGIN_ACTION_TOKEN);
+  const caller = {
+    userId: 'owner',
+    catId: 'codex',
+    threadId: 'thread',
+    invocationId: 'inv',
+    assertCurrent: async () => {},
+  };
+  assert.deepEqual(await actions.call(token, 'basic.run', {}, caller), { ok: true });
+  assert.deepEqual(await actions.call(token, 'migration.run', {}, caller), { migrated: true });
+  await disable(composition, installed.pluginId);
+  await assert.rejects(actions.call(token, 'basic.run', {}, caller), { statusCode: 401 });
+});
+
+for (const phase of ['package replacement', 'restart recovery']) {
+  test(`${phase} refreshes retained native and static MCP registrations`, async () => {
+    const projectRoot = await tempRoot('mcp-retained-grants-home-');
+    const consumer = await tempRoot('mcp-retained-grants-project-');
+    await writeCapabilitiesConfig(projectRoot, { version: 2, capabilities: [] });
+    await writeCapabilitiesConfig(consumer, { version: 2, capabilities: [] });
+    await writeFile(
+      join(projectRoot, '.cat-cafe/governance-registry.json'),
+      JSON.stringify({ entries: [{ projectPath: consumer }] }),
+    );
+    const native = {
+      type: 'mcp',
+      id: 'native',
+      runtime: { transport: 'stdio', entrypoint: 'dist/mcp.js' },
+    };
+    const plain = { type: 'mcp', id: 'plain', runtime: native.runtime };
+    const packageRoot = await writeFixturePackage({
+      pluginId: 'dev.clowder.retained-grants',
+      contribution: native,
+      contributions: [native, plain],
+      features: [
+        {
+          id: 'native',
+          name: 'Native',
+          resources: [],
+          contributions: [{ type: 'mcp', id: 'native' }],
+          capabilities: phase === 'package replacement' ? [] : ['task.read', 'task.write'],
+        },
+        { id: 'plain', name: 'Plain', resources: [], contributions: [{ type: 'mcp', id: 'plain' }], capabilities: [] },
+      ],
+      actions: "{ 'native.run': async () => ({ ok: true }) }",
+      files: { 'dist/mcp.js': 'process.exit(0);\n' },
+    });
+    const cli = join(projectRoot, '.test-cli/google.json');
+    const io = fileBasedMcpIO(projectRoot, { google: cli, antigravity: join(projectRoot, '.test-cli/agy.json') });
+    const { runtime } = createRuntime(projectRoot, { mcpConfigIO: io });
+    let activeRuntime = runtime;
+    try {
+      const { composition, installed } = await installAndEnable(runtime, packageRoot);
+      const id = `plugin:${installed.pluginId}:native`;
+      const name = id.replaceAll(':', '__');
+      if (phase === 'package replacement') {
+        assert.ok((await readCapabilitiesConfig(consumer)).capabilities.some((entry) => entry.id === id));
+        const manifestPath = join(packageRoot, 'manifest.json');
+        const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+        manifest.version = '1.1.0';
+        manifest.features[0].capabilities = ['task.read', 'task.write'];
+        await writeFile(manifestPath, JSON.stringify(manifest));
+        await composition.manager.install({ source: { kind: 'local-directory', path: packageRoot } });
+      } else {
+        // This is the durable output of the old publisher: tool present, no action environment.
+        await installMcpCapability(
+          projectRoot,
+          {
+            id,
+            type: 'mcp',
+            source: 'plugin',
+            pluginId: installed.pluginId,
+            enabled: true,
+            mcpServer: { command: process.execPath, args: ['obsolete.js'], env: {} },
+          },
+          io,
+        );
+        await runtime.shutdown();
+        assert.ok((await readCapabilitiesConfig(consumer)).capabilities.some((entry) => entry.id === id));
+        const restarted = createRuntime(projectRoot, { mcpConfigIO: io }).runtime;
+        activeRuntime = restarted;
+        const recovery = await restarted.recoverAfterRestart();
+        assert.equal(recovery.resumeRequested, 1);
+        await restarted.lifecycle.drainRestartRecovery();
+      }
+      for (const root of [projectRoot, consumer]) {
+        const entries = (await readCapabilitiesConfig(root)).capabilities;
+        assert.equal(
+          entries.some((entry) => entry.id === id),
+          true,
+          `${phase}: refresh native registration`,
+        );
+        assert.ok(entries.some((entry) => entry.id === `plugin:${installed.pluginId}:plain`));
+      }
+      const injected = await resolveProviderMcpConfig({
+        callbackEnv: { CAT_CAFE_CAT_ID: 'codex' },
+        workingDirectory: consumer,
+        mcpServerPath: join(projectRoot, 'packages/mcp-server/dist/index.js'),
+        provider: 'codex',
+      });
+      assert.ok(injected[name]);
+      const { upstream } = directMcpContract(injected[name]);
+      const currentToken = activeRuntime.supervisor.nativeActions.environment(
+        installed.pluginInstanceId,
+        'native',
+      ).CLOWDER_PLUGIN_ACTION_TOKEN;
+      assert.ok(currentToken);
+      assert.ok(upstream.env.CLOWDER_PLUGIN_ACTION_TOKEN === currentToken);
+      const lease = await prepareKimiMcpConfig({
+        workingDirectory: consumer,
+        mcpServerPath: join(projectRoot, 'packages/mcp-server/dist/index.js'),
+        callbackEnv: { CAT_CAFE_CAT_ID: 'codex' },
+      });
+      try {
+        const rendered = JSON.parse(await readFile(join(consumer, '.kimi-code/mcp.json'), 'utf8'));
+        assert.ok(rendered.mcpServers[name]);
+      } finally {
+        await lease.dispose();
+      }
+    } finally {
+      await activeRuntime.shutdown();
+    }
+  });
+}
+
 test('installed native MCP receives its scoped action token without exposing a public direct tool', async (t) => {
   const projectRoot = await tempRoot('cat-cafe-f202-native-action-project-');
   const packageRoot = await writeFixturePackage({
@@ -185,7 +403,6 @@ test('installed native MCP receives its scoped action token without exposing a p
       type: 'mcp',
       id: 'native',
       runtime: { transport: 'stdio', entrypoint: 'dist/mcp.js' },
-      actions: [{ method: 'native.run' }],
     },
     actions: "{ 'native.run': async input => ({ value: input.value }) }",
     files: { 'dist/mcp.js': 'process.exit(0);\n' },
@@ -195,18 +412,19 @@ test('installed native MCP receives its scoped action token without exposing a p
   const capability = (await readCapabilitiesConfig(projectRoot)).capabilities.find(
     (item) => item.type === 'mcp' && item.pluginId === installed.pluginId,
   );
-  const token = capability.mcpServer.env.CLOWDER_PLUGIN_ACTION_TOKEN;
-  assert.ok(token);
+  const reference = capability.mcpServer.env.CLOWDER_PLUGIN_ACTION_TOKEN;
+  assert.match(reference, /^\$\{[A-Z0-9_]+\}$/);
   const launch = await runtime.supervisor.resolveNativeMcpLaunch({
     mode: 'plugin_native',
     pluginInstanceId: installed.pluginInstanceId,
     contributionId: 'native',
-    actionMethods: ['native.run'],
   });
-  assert.equal(launch.env.CLOWDER_PLUGIN_ACTION_TOKEN, token);
+  const token = launch.env.CLOWDER_PLUGIN_ACTION_TOKEN;
+  assert.ok(token);
+  assert.equal(process.env[reference.slice(2, -1)], token);
   assert.equal(launch.command, capability.mcpServer.command);
   assert.deepEqual(launch.args, capability.mcpServer.args);
-  assert.equal(capability.mcpServer.env.CLOWDER_PLUGIN_ACTION_PATH, '/api/plugin-runtime/action');
+  assert.equal(launch.env.CLOWDER_PLUGIN_ACTION_PATH, '/api/plugin-runtime/action');
   const app = Fastify();
   t.after(() => app.close());
   app.addHook('preHandler', async (request) => {
@@ -333,7 +551,6 @@ for (const layout of ['external', 'shipped']) {
           installedAt: 1,
           updatedAt: 1,
         },
-        effectiveGrants: [],
       },
       {
         projectRoot,
@@ -425,7 +642,6 @@ test('local archive MCP materialization resolves its verified dependency closure
         installedAt: 1,
         updatedAt: 1,
       },
-      effectiveGrants: [],
     },
     {
       projectRoot,
@@ -617,54 +833,6 @@ test('an installed package schedules its declared action and unregisters on disa
   assert.equal(taskRunner.tasks.size, 0);
 });
 
-test('a declared schedule without schedule.register fails activation and rolls back static resources', async () => {
-  const projectRoot = await tempRoot('cat-cafe-f202-schedule-grant-project-');
-  const mcp = {
-    type: 'mcp',
-    id: 'schedule-grant-mcp',
-    runtime: { transport: 'stdio', entrypoint: 'dist/mcp.js' },
-  };
-  const schedule = {
-    type: 'schedule',
-    id: 'schedule-grant-denied',
-    schedule: { kind: 'interval', everyMs: 60_000 },
-    action: { method: 'fixture.tick' },
-    policy: { overlap: 'skip', timeoutMs: 5_000 },
-  };
-  const packageRoot = await writeFixturePackage({
-    pluginId: 'dev.clowder.schedule-grant-fixture',
-    contribution: schedule,
-    contributions: [mcp, schedule],
-    capabilities: ['schedule.register'],
-    files: { 'dist/mcp.js': 'process.exit(0);\n' },
-    actions: "{ 'fixture.tick': async () => ({ ok: true }) }",
-  });
-  const taskRunner = fakeTaskRunner();
-  const { runtime } = createRuntime(projectRoot, { taskRunner });
-  const composition = createPluginManagerRuntimeComposition({
-    runtime,
-    catalogProvider: { snapshot: async () => ({ entries: [], status: 'fresh', checkedAt: 1 }) },
-    catalogManifests: [],
-  });
-  const installed = await composition.manager.install({ source: { kind: 'local-directory', path: packageRoot } });
-  const beforeEnable = (await composition.manager.get(installed.pluginId)).plugin;
-
-  await assert.rejects(
-    composition.manager.setEnabled(installed.pluginId, {
-      enabled: true,
-      expectedRevision: beforeEnable.lifecycleRevision,
-    }),
-    /runtime failed to start/,
-  );
-  assert.equal(taskRunner.tasks.size, 0);
-  assert.equal(
-    (await readCapabilitiesConfig(projectRoot))?.capabilities.some(
-      (candidate) => candidate.pluginId === installed.pluginId,
-    ),
-    false,
-  );
-});
-
 test('an installed package exposes declared cat tools through the shared contribution entrypoint', async () => {
   const projectRoot = await tempRoot('cat-cafe-f202-tool-project-');
   const tool = {
@@ -775,7 +943,6 @@ test('a runtime-contribution startup failure rolls back static and live registra
     runtime,
     catalogProvider: { snapshot: async () => ({ entries: [], status: 'fresh', checkedAt: 1 }) },
     catalogManifests: [],
-    localGrantPolicy: () => ['schedule.register'],
   });
   const installed = await composition.manager.install({ source: { kind: 'local-directory', path: packageRoot } });
   const beforeEnable = (await composition.manager.get(installed.pluginId)).plugin;
@@ -886,4 +1053,161 @@ test('Host shutdown removes live registrations but preserves declared MCP state'
     ),
     false,
   );
+});
+
+test('plugin MCP lifecycle reaches existing projects and their provider injection without a manual sync', async () => {
+  const projectRoot = await tempRoot('plugin-mcp-cascade-home-');
+  // The Host first-run bootstrap owns creation of the authoritative registry.
+  await writeCapabilitiesConfig(projectRoot, { version: 2, capabilities: [] });
+  const broken = await tempRoot('plugin-mcp-cascade-broken-');
+  const consumer = await tempRoot('plugin-mcp-cascade-consumer-');
+  const disabledProject = await tempRoot('plugin-mcp-cascade-disabled-');
+  await mkdir(join(broken, '.cat-cafe'), { recursive: true });
+  const brokenPath = join(broken, '.cat-cafe/capabilities.json');
+  const invalidConfig = '{ invalid config: do not overwrite';
+  await writeFile(brokenPath, invalidConfig);
+  await writeCapabilitiesConfig(consumer, { version: 2, capabilities: [] });
+  await writeCapabilitiesConfig(disabledProject, { version: 2, capabilities: [] });
+  await mkdir(join(projectRoot, '.cat-cafe'), { recursive: true });
+  await writeFile(
+    join(projectRoot, '.cat-cafe/governance-registry.json'),
+    JSON.stringify({
+      entries: [broken, consumer, disabledProject].map((projectPath) => ({ projectPath })),
+    }),
+  );
+  const packageRoot = await writeFixturePackage({
+    pluginId: 'dev.clowder.project-mcp',
+    contribution: {
+      type: 'mcp',
+      id: 'native',
+      runtime: { transport: 'stdio', entrypoint: 'dist/mcp.js' },
+    },
+    actions: "{ 'native.run': async input => ({ value: input.value }) }",
+    files: { 'dist/mcp.js': 'process.exit(0);\n' },
+  });
+  const io = fileBasedMcpIO(projectRoot, {
+    google: join(projectRoot, '.gemini/settings.json'),
+    antigravity: join(projectRoot, '.test-antigravity/mcp.json'),
+  });
+  const { runtime } = createRuntime(projectRoot, { mcpConfigIO: io });
+  const { composition, installed } = await installAndEnable(runtime, packageRoot);
+  const id = `plugin:${installed.pluginId}:native`;
+  const name = id.replaceAll(':', '__');
+  const projectEntry = (await readCapabilitiesConfig(consumer)).capabilities.find((entry) => entry.id === id);
+  assert.ok(projectEntry?.mcpServer, 'plugin registration must cascade to an already initialized project');
+  const inject = (workingDirectory = consumer, catId = 'codex') =>
+    resolveProviderMcpConfig({
+      callbackEnv: { CAT_CAFE_CAT_ID: catId },
+      workingDirectory,
+      mcpServerPath: join(projectRoot, 'packages/mcp-server/dist/index.js'),
+      provider: 'codex',
+    });
+  assert.ok((await inject())[name], 'the real project-first provider must expose the synchronized MCP');
+  await writeCapabilitiesConfig(consumer, { version: 2, capabilities: [{ ...projectEntry, blockedCats: ['codex'] }] });
+  const allCatIds = [...catRegistry.getAllIds()];
+  assert.ok(allCatIds.includes('codex'), 'fixture needs real registry to model whole-project disable');
+  const allowedCat = allCatIds.find((catId) => catId !== 'codex');
+  assert.ok(allowedCat, 'fixture needs a member who remains enabled');
+  const caller = {
+    userId: 'owner',
+    catId: allowedCat,
+    threadId: 'thread',
+    invocationId: 'inv',
+    assertCurrent: async () => {},
+  };
+  const initialReference = projectEntry.mcpServer.env.CLOWDER_PLUGIN_ACTION_TOKEN;
+  const initialToken = process.env[initialReference.slice(2, -1)];
+  assert.ok(initialToken, 'the fixture must exercise a real Host-lifetime connection token');
+  const assertFreshDescriptor = async (previousToken, phase) => {
+    const homeEntry = (await readCapabilitiesConfig(projectRoot)).capabilities.find((entry) => entry.id === id);
+    const currentReference = homeEntry.mcpServer.env.CLOWDER_PLUGIN_ACTION_TOKEN;
+    assert.equal(currentReference, initialReference);
+    const currentToken = process.env[currentReference.slice(2, -1)];
+    assert.ok(currentToken);
+    assert.equal(currentToken, previousToken, `${phase}: the same Host keeps its credential`);
+    for (const path of [consumer, disabledProject]) {
+      const entry = (await readCapabilitiesConfig(path)).capabilities.find((entry) => entry.id === id);
+      assert.ok(
+        entry.mcpServer.env.CLOWDER_PLUGIN_ACTION_TOKEN === currentReference,
+        `${phase}: project must retain the reference without persisting its value`,
+      );
+    }
+    const providerEntry = (await inject(consumer, allowedCat))[name];
+    assert.ok(providerEntry, `${phase}: provider must retain the activated plugin`);
+    const { upstream, launchEnv } = directMcpContract(providerEntry);
+    assert.equal(upstream.command, homeEntry.mcpServer.command);
+    assert.deepEqual(upstream.args, homeEntry.mcpServer.args);
+    assert.equal(upstream.env.CLOWDER_PLUGIN_ACTION_PATH, '/api/plugin-runtime/action');
+    assert.equal(launchEnv.CLOWDER_PLUGIN_ACTION_TOKEN, upstream.env.CLOWDER_PLUGIN_ACTION_TOKEN);
+    assert.ok(
+      upstream.env.CLOWDER_PLUGIN_ACTION_TOKEN === currentToken,
+      `${phase}: provider must inject the active token`,
+    );
+    assert.deepEqual(
+      await runtime.supervisor.nativeActions.call(
+        upstream.env.CLOWDER_PLUGIN_ACTION_TOKEN,
+        'native.run',
+        { value: phase },
+        caller,
+      ),
+      { value: phase },
+    );
+    assert.equal((await inject())[name], undefined, `${phase}: blocked member must stay blocked`);
+    assert.equal(
+      (await inject(disabledProject, allowedCat))[name],
+      undefined,
+      `${phase}: blocked project must stay blocked`,
+    );
+    return currentToken;
+  };
+  await writeCapabilitiesConfig(disabledProject, {
+    version: 2,
+    capabilities: [{ ...projectEntry, blockedCats: allCatIds }],
+  });
+  await runtime.supervisor.stopAll('test_restart');
+  await assert.rejects(runtime.supervisor.nativeActions.call(initialToken, 'native.run', {}, caller), {
+    statusCode: 401,
+  });
+  await runtime.supervisor.start(installed.pluginInstanceId);
+  const restartedToken = await assertFreshDescriptor(initialToken, 'restart');
+  assert.deepEqual((await readCapabilitiesConfig(consumer)).capabilities.find((entry) => entry.id === id).blockedCats, [
+    'codex',
+  ]);
+  assert.equal((await inject())[name], undefined, 'explicit project member disable survives reactivation');
+
+  const manifestPath = join(packageRoot, 'manifest.json');
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+  manifest.version = '1.1.0';
+  manifest.contributions[0].runtime.args = ['--updated'];
+  await writeFile(manifestPath, JSON.stringify(manifest));
+  await composition.manager.install({ source: { kind: 'local-directory', path: packageRoot } });
+  const updatedToken = await assertFreshDescriptor(restartedToken, 'package update');
+  const updated = (await readCapabilitiesConfig(consumer)).capabilities.find((entry) => entry.id === id);
+  assert.ok(updated.mcpServer.args.includes('--updated'), 'package update must cascade the new launch descriptor');
+  assert.deepEqual(updated.blockedCats, ['codex']);
+  assert.deepEqual(
+    (await readCapabilitiesConfig(disabledProject)).capabilities.find((entry) => entry.id === id).blockedCats,
+    allCatIds,
+  );
+  assert.equal((await inject(disabledProject))[name], undefined, 'whole-project disable survives package update');
+  assert.equal(
+    await readFile(brokenPath, 'utf8'),
+    invalidConfig,
+    'a bad project must not block good projects or lose data',
+  );
+
+  const beforeUninstall = (await composition.manager.get(installed.pluginId)).plugin;
+  await composition.manager.uninstall(installed.pluginId, { expectedRevision: beforeUninstall.lifecycleRevision });
+  await assert.rejects(runtime.supervisor.nativeActions.call(updatedToken, 'native.run', {}, caller), {
+    statusCode: 401,
+  });
+  assert.equal(
+    (await readCapabilitiesConfig(consumer)).capabilities.some((entry) => entry.id === id),
+    false,
+  );
+  assert.equal(
+    (await readCapabilitiesConfig(disabledProject)).capabilities.some((entry) => entry.id === id),
+    false,
+  );
+  assert.equal((await inject())[name], undefined, 'uninstall must remove the project launch descriptor');
 });

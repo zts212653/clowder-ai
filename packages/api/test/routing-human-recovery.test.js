@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import { routingSignalClosures } from '@cat-cafe/shared';
 import { routeSerial } from '../dist/domains/cats/services/agents/routing/route-serial.js';
 import { AutomaticRoutingSignalService } from '../dist/domains/routing-context/AutomaticRoutingSignalService.js';
+import { buildRoutingSignalDecisionProjection } from '../dist/domains/routing-context/preflight/RoutingSignalDecisionProjection.js';
 import { RoutingContextResolver } from '../dist/domains/routing-context/RoutingContextResolver.js';
 import { RuntimeRoutingDispatchPreflight } from '../dist/domains/routing-context/RoutingDispatchPreflightPort.js';
 import { RoutingDispatchSignalAdapter } from '../dist/domains/routing-context/RoutingDispatchSignalAdapter.js';
@@ -25,6 +26,10 @@ function harness(catIds = ['sol', 'terra']) {
     },
     async getOwnerRevision() {
       return events.length;
+    },
+    async readDecisionProjection(ownerId) {
+      const owned = events.filter((event) => event.ownerId === ownerId);
+      return buildRoutingSignalDecisionProjection({ ownerId, revision: owned.length, events: owned });
     },
     async listByOwner(ownerId) {
       return events.filter((event) => event.ownerId === ownerId);
@@ -141,10 +146,10 @@ describe('F293 controlled human recovery journey', () => {
     assert.equal(calls, 1, 'automatic retries are blocked before invoking the provider');
     providerFails = false;
     const attempted = await send('thread-a', true);
-    assert.ok(
-      attempted.some(
-        (event) => event.type === 'system_info' && JSON.parse(event.content).target?.ownerAttempt === true,
-      ),
+    assert.equal(
+      attempted.some((event) => event.type === 'system_info' && JSON.parse(event.content).type === 'routing_preflight'),
+      false,
+      'an already requested owner attempt proceeds without another routing notice',
     );
     assert.equal(calls, 2, 'a human attempt reaches the recovered provider');
     assert.equal((await h.decide()).targets[0].disposition, 'allowed');

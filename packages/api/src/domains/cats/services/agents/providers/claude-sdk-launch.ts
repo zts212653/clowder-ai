@@ -14,9 +14,17 @@ import {
 } from './ClaudeAgentService.js';
 import { composeManagedSettingsDocument } from './claude-compaction-launch-plan.js';
 import { resolveClaudeMcpConfig } from './claude-mcp-config.js';
+import {
+  applyClaudeMemberEnvironment,
+  CLAUDE_MEMBER_SETTINGS,
+  captureClaudeMemberOptions,
+  claudeMemberToolPattern,
+} from './claude-scoped-native.js';
+import { withClaudeSecretHooks } from './claude-secret-hook-settings.js';
 import { appendLocalImagePathHints, collectImageAccessDirectories } from './image-cli-bridge.js';
 import { extractTrustedImagePaths } from './image-paths.js';
 import { compileL0ViaSubprocess } from './l0-compiler.js';
+import { writeInvocationMcpConfigFile } from './session-credential-file.js';
 
 function effortValue(effort: string): EffortLevel | undefined {
   if (!effort) return undefined;
@@ -83,7 +91,11 @@ export async function prepareClaudeSdkLaunch(input: {
   abortController: AbortController;
   options?: AgentServiceOptions;
 }): Promise<{ prompt: string; model: string; sdkOptions: Options }> {
-  const { options, catId } = input;
+  const { catId } = input;
+  const member = captureClaudeMemberOptions(input.options);
+  const options = member ?? input.options;
+  const launch = member?.pluginNativeLaunch;
+  await launch?.assertCurrent();
   if (options?.signal?.aborted) throw options.signal.reason ?? new Error('Invocation cancelled');
   // Alternate spawn transports cannot silently be ignored by this carrier.
   if (options?.spawnCliOverride) throw new Error('claude_sdk_spawn_override_unsupported');
@@ -94,46 +106,78 @@ export async function prepareClaudeSdkLaunch(input: {
     options?.resolveTrustedImagePath,
   );
   const prompt = appendLocalImagePathHints(input.prompt, imagePaths);
-  const { effectiveModel, useEnvModelOverride } = resolveClaudeModelSelection(options?.callbackEnv, input.model);
+  const { effectiveModel, useEnvModelOverride } = member
+    ? { effectiveModel: input.model, useEnvModelOverride: false }
+    : resolveClaudeModelSelection(options?.callbackEnv, input.model);
   const effort = effortValue(resolveClaudeEffortLevel(catId, effectiveModel, options?.reasoningEffortOverride));
   const l0 = await input.l0CompilerFn({
     catId,
     userId: options?.callbackEnv?.CAT_CAFE_USER_ID ?? options?.auditContext?.userId,
+    ...(member ? { projection: 'scoped-member' as const, runtimeModel: input.model } : {}),
   });
   const nativeInstructions = [
     { body: l0, injectionDecision: 'native_l0_compiled' },
     ...(options?.systemPrompt ? [{ body: options.systemPrompt, injectionDecision: 'route_append_system_prompt' }] : []),
   ];
   const mcpResolution =
-    !readOnly && options?.callbackEnv && input.mcpServerPath
+    !readOnly && !member && options?.callbackEnv && input.mcpServerPath
       ? await resolveClaudeMcpConfig({
           callbackEnv: options.callbackEnv,
           workingDirectory: options.workingDirectory,
           mcpServerPath: input.mcpServerPath,
         })
       : undefined;
-  const mcpServers = mcpResolution?.servers ?? {};
-  const operator = sdkOperatorArgs(readOnly ? [] : (options?.cliConfigArgs ?? []));
+  const mcpServers = launch
+    ? {
+        [launch.server.name]: {
+          alwaysLoad: true,
+          command: launch.server.command,
+          args: launch.server.args,
+          cwd: launch.server.workingDirectory,
+          env: launch.server.env,
+        },
+      }
+    : (mcpResolution?.servers ?? {});
+  const operator = sdkOperatorArgs(readOnly || member ? [] : (options?.cliConfigArgs ?? []));
   const additionalDirectories = [
     ...new Set([...(operator.additionalDirectories ?? []), ...collectImageAccessDirectories(imagePaths)]),
   ];
   const plan = options?.compactionLaunchPlan;
-  const settingSources: NonNullable<Options['settingSources']> = readOnly
-    ? []
-    : options?.callbackEnv?.[ANTHROPIC_PROFILE_MODE_KEY] === 'api_key'
-      ? ['project', 'local']
-      : ['user', 'project', 'local'];
-  const accountSettings = options?.claudeTokenAccount
-    ? await composeClaudeTokenSettingsDocument(operator.settings, options?.workingDirectory, settingSources)
-    : operator.settings;
-  const settings = plan?.ready
+  const settingSources: NonNullable<Options['settingSources']> =
+    readOnly || member
+      ? []
+      : options?.callbackEnv?.[ANTHROPIC_PROFILE_MODE_KEY] === 'api_key'
+        ? ['project', 'local']
+        : ['user', 'project', 'local'];
+  const accountSettings =
+    !member && options?.claudeTokenAccount
+      ? await composeClaudeTokenSettingsDocument(operator.settings, options?.workingDirectory, settingSources)
+      : operator.settings;
+  const composedSettings = plan?.ready
     ? composeManagedSettingsDocument(plan, accountSettings, options?.workingDirectory)
     : accountSettings;
-  const overrides = { ...buildClaudeEnvOverrides(options?.callbackEnv), ...options?.accountEnv };
+  const settings = member
+    ? CLAUDE_MEMBER_SETTINGS
+    : readOnly
+      ? composedSettings
+      : withClaudeSecretHooks(composedSettings, options?.workingDirectory);
+  const overrides = {
+    ...buildClaudeEnvOverrides(options?.callbackEnv, {
+      contextNativeWindowTokens: options?.contextNativeWindowTokens,
+    }),
+    ...options?.accountEnv,
+  };
   if (options?.callbackEnv?.[ANTHROPIC_PROFILE_MODE_KEY] === 'subscription')
     for (const key of SUBSCRIPTION_MODE_DENY_KEYS) overrides[key] = null;
   applyClaudeTokenAccountEnv(overrides, options?.claudeTokenAccount);
+  if (member) applyClaudeMemberEnvironment(overrides);
   const env = buildChildEnv(overrides, { workingDirectory: options?.workingDirectory });
+  // Opt in after account/env assembly so inherited SDK labels cannot overwrite the app label.
+  // The native CLI also branches on this label; it is not a telemetry-only setting.
+  const entrypoint = process.env.CAT_CAFE_CLAUDE_SDK_ENTRYPOINT?.trim();
+  if (entrypoint && entrypoint !== 'cat-cafe' && entrypoint !== 'sdk-ts')
+    throw new Error('claude_sdk_entrypoint_invalid: use cat-cafe or sdk-ts');
+  if (entrypoint) env.CLAUDE_CODE_ENTRYPOINT = entrypoint;
   // SDK 0.3.285 otherwise hides session_state_changed as sdk_host_only. Native
   // idle is the drain receipt for background agents AND their report turns.
   env.CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS = '1';
@@ -158,6 +202,7 @@ export async function prepareClaudeSdkLaunch(input: {
     providerNativeVisibility: 'unknown',
   });
   await options?.beforeProviderLaunch?.(request);
+  await launch?.assertCurrent();
   return {
     prompt,
     model: effectiveModel,
@@ -169,10 +214,11 @@ export async function prepareClaudeSdkLaunch(input: {
       effort,
       systemPrompt: nativeInstructions.map((entry) => entry.body).join('\n\n'),
       includePartialMessages: true,
-      permissionMode: readOnly ? 'plan' : 'bypassPermissions',
-      ...(readOnly ? { tools: [] } : { allowDangerouslySkipPermissions: true }),
+      permissionMode: member ? 'default' : readOnly ? 'plan' : 'bypassPermissions',
+      ...(readOnly || member ? { tools: [] } : { allowDangerouslySkipPermissions: true }),
+      ...(launch ? { allowedTools: [claudeMemberToolPattern(launch.server.name)], persistSession: false } : {}),
       strictMcpConfig: true,
-      mcpServers: mcpServers as Options['mcpServers'],
+      mcpServers: {},
       settingSources,
       ...(options?.sessionId ? { resume: options.sessionId } : {}),
       ...(additionalDirectories.length ? { additionalDirectories } : {}),
@@ -186,7 +232,15 @@ export async function prepareClaudeSdkLaunch(input: {
           }
         : {}),
       ...(!readOnly || Object.keys(operator.extraArgs).length > 0
-        ? { extraArgs: { ...operator.extraArgs, ...(readOnly ? {} : { chrome: null }) } }
+        ? {
+            extraArgs: {
+              ...operator.extraArgs,
+              ...(member ? { 'no-chrome': null, 'disable-slash-commands': null } : readOnly ? {} : { chrome: null }),
+              ...(mcpResolution || launch
+                ? { 'mcp-config': writeInvocationMcpConfigFile({ mcpServers }, options?.callbackEnv) }
+                : {}),
+            },
+          }
         : {}),
     },
   };

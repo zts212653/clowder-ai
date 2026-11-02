@@ -159,6 +159,7 @@ export async function setup(options = {}) {
     panel,
     writes,
     errors,
+    requests,
     created,
     entryWrites,
     recoverDiscovery: () => {

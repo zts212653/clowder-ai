@@ -5,10 +5,12 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { CardBlock } from '@/components/rich/CardBlock';
 import { HandoffProposalCard } from '@/components/rich/HandoffProposalCard';
 import { apiFetch } from '@/utils/api-client';
+import { observeApiSessionOwner } from '@/utils/api-session-identity';
 import { writeShellLanguage } from '../../shell-language';
 import { writeShellPresentation } from '../../shell-presentation';
 import { createApprovalSessions } from '../approval-sessions';
 import { MailboxRow } from '../MailboxRow';
+import { collectiveFailure } from './collective-failure.fixture';
 import { approvalRow, okRead, storeItem } from './mailbox-fixtures';
 
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
@@ -42,6 +44,7 @@ function source(kind: 'F225' | 'F231'): UnifiedAttentionItemV1 {
   return item;
 }
 beforeEach(() => {
+  observeApiSessionOwner('owner-1');
   vi.stubGlobal('React', React);
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   starts = 1;
@@ -49,6 +52,7 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
   vi.mocked(apiFetch).mockImplementation(async (url, options) => {
+    if (String(url) === '/api/session') return json({ userId: 'owner-1' });
     if (options?.method === 'POST') return json({ proposalId: 'original-p', status: 'approved' });
     if (String(url).includes('/session-handoff/'))
       return json({ proposal: { proposalId: 'original-p', status: 'pending' } });
@@ -63,14 +67,25 @@ afterEach(() => {
   writeShellLanguage('zh');
   vi.unstubAllGlobals();
 });
-async function render(item: UnifiedAttentionItemV1, current = true, readOwner = 'owner-1', hasReader = true) {
+async function render(
+  item: UnifiedAttentionItemV1,
+  current = true,
+  readOwner = 'owner-1',
+  hasReader = true,
+  outage = false,
+) {
   const sessions = createApprovalSessions({
     readsStarted: () => starts,
     refetch: () => {},
     refreshStore: async () => {},
     storeItems: () => [],
     attempts: () => ({}),
-    latestRead: () => ({ result: okRead([item], { identity: { ownerUserId: readOwner } }), generation: 1 }),
+    latestRead: () => ({
+      result: outage
+        ? collectiveFailure(okRead([item], { identity: { ownerUserId: readOwner } }), true)
+        : okRead([item], { identity: { ownerUserId: readOwner } }),
+      generation: 1,
+    }),
     now: Date.now,
   });
   if (!hasReader) delete sessions.currentItem;
@@ -91,8 +106,8 @@ async function render(item: UnifiedAttentionItemV1, current = true, readOwner = 
   return sessions;
 }
 const primary = (kind: 'F225' | 'F231') =>
-  [...container.querySelectorAll('button')].find((b) =>
-    b.textContent?.includes(kind === 'F225' ? '批准并接力' : '批准并写入'),
+  [...container.querySelectorAll('button')].find(
+    (b) => !b.hasAttribute('aria-expanded') && b.textContent?.includes(kind === 'F225' ? '批准并接力' : '批准并写入'),
   );
 it.each([
   'F225',
@@ -162,7 +177,7 @@ it.each([
   );
   await render(source(kind));
   expect(primary(kind)).toBeUndefined();
-  expect(container.textContent).toContain('已批准');
+  expect(container.textContent).toContain(kind === 'F225' ? '已同意 · 接力已发起' : '已同意 · 已写入档案');
 });
 
 it.each([
@@ -226,4 +241,17 @@ it.each([
   expect(button?.style.background).toBe('var(--shell-primary)');
   await act(async () => button?.click());
   expect(vi.mocked(apiFetch).mock.calls.filter(([, options]) => options?.method === 'POST')).toHaveLength(1);
+});
+
+it.each([
+  'F225',
+  'F231',
+] as const)('submits the original %s writer under a dual Collective failure with its original payload', async (kind) => {
+  const item = source(kind);
+  await render(item, true, 'owner-1', true, true);
+  await act(async () => primary(kind)?.click());
+  const posts = vi.mocked(apiFetch).mock.calls.filter(([, options]) => options?.method === 'POST');
+  expect(posts).toHaveLength(1);
+  expect(posts[0][0]).toBe(`/api/${kind === 'F225' ? 'session-handoff' : 'profile-updates'}/original-p/approve`);
+  expect(posts[0][1]?.body && JSON.parse(String(posts[0][1].body))).toBeDefined();
 });

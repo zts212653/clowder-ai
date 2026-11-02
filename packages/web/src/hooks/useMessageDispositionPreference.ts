@@ -6,6 +6,9 @@ import type {
   MessageWorkDisposition,
 } from '@cat-cafe/shared';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { messageDispositionCopy } from '@/components/message-disposition.shell-copy';
+import { useShellCopy } from '@/components/shell/shell-copy';
+import { useShellPresentation } from '@/components/shell/shell-presentation';
 import { apiFetch } from '@/utils/api-client';
 
 const DEFAULT_SNAPSHOT: MessageDispositionPreferenceSnapshot = {
@@ -63,8 +66,14 @@ function applySavedSnapshot(
   return { threadId, value: next };
 }
 
+class PreferenceHttpError extends Error {
+  constructor(readonly status: number) {
+    super(`Send mode preference HTTP ${status}`);
+  }
+}
+
 async function readSnapshot(response: Response): Promise<MessageDispositionPreferenceSnapshot> {
-  if (!response.ok) throw new Error(`偏好保存失败 (${response.status})`);
+  if (!response.ok) throw new PreferenceHttpError(response.status);
   return (await response.json()) as MessageDispositionPreferenceSnapshot;
 }
 
@@ -72,12 +81,21 @@ export function useMessageDispositionPreference(
   threadId: string | undefined,
   enabled: boolean,
 ): MessageDispositionPreferenceController {
+  const localized = useShellCopy(messageDispositionCopy);
+  const t = (useShellPresentation() === 'v2' ? localized : messageDispositionCopy.zh).composer;
   const [snapshotState, setSnapshotState] = useState<ScopedSnapshot>({
     threadId: undefined,
     value: DEFAULT_SNAPSHOT,
   });
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [failure, setError] = useState<{ cause: unknown; fallback: 'loadFailed' | 'saveFailed' } | null>(null);
+  const error = failure
+    ? failure.cause instanceof PreferenceHttpError
+      ? t.httpFailed(failure.cause.status)
+      : failure.cause instanceof Error
+        ? failure.cause.message
+        : t[failure.fallback]
+    : null;
   const operationSequence = useRef(0);
   const snapshot = snapshotState.threadId === threadId ? snapshotState.value : DEFAULT_SNAPSHOT;
 
@@ -99,7 +117,7 @@ export function useMessageDispositionPreference(
       })
       .catch((cause: unknown) => {
         if (operationSequence.current === sequence) {
-          setError(cause instanceof Error ? cause.message : '偏好读取失败');
+          setError({ cause, fallback: 'loadFailed' });
         }
       })
       .finally(() => {
@@ -125,7 +143,7 @@ export function useMessageDispositionPreference(
         return true;
       } catch (cause) {
         if (operationSequence.current === sequence) {
-          setError(cause instanceof Error ? cause.message : '偏好保存失败');
+          setError({ cause, fallback: 'saveFailed' });
         }
         return false;
       } finally {

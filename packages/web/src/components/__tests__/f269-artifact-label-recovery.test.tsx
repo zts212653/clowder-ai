@@ -1,6 +1,7 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { openFileMenu } from '@/test-utils/open-file-menu';
 
 const LONG_ARTIFACT_NAME = 'docs/features/assets/F269/一份非常长而且必须能够复制完整值的产物审计报告-final-reviewed.md';
 const LONG_BINARY_NAME = 'exports/F269/一份非常长而且必须能够复制完整值的产物审计证据归档-final-reviewed.zip';
@@ -183,14 +184,14 @@ describe('F269 artifact compact-label recovery', () => {
     );
     roots.push(root);
 
-    const measured = Array.from(container.querySelectorAll<HTMLElement>('[data-overflow-measure="inline"]')).filter(
-      (element) => element.textContent === LONG_BINARY_NAME,
+    expect(container.querySelector(`[title="${LONG_BINARY_NAME}"]`)).not.toBeNull();
+    await openFileMenu(container);
+    expect(container.querySelector('[role="menu"]')?.textContent).toContain(LONG_BINARY_NAME);
+    const copy = [...container.querySelectorAll<HTMLButtonElement>('[role="menu"] button')].find(
+      (item) => item.textContent === '复制完整文件名',
     );
-    expect(measured).toHaveLength(2);
-    for (const element of measured) setInlineOverflow(element);
-    await act(async () => window.dispatchEvent(new Event('resize')));
-
-    expect(container.querySelectorAll('button[aria-label="复制完整产物名称"]')).toHaveLength(2);
-    expect(container.querySelector(`[title="${LONG_BINARY_NAME}"]`)).toBeNull();
+    expect(copy).toBeTruthy();
+    await act(async () => copy!.click());
+    expect(writeText).toHaveBeenCalledWith(LONG_BINARY_NAME);
   });
 });

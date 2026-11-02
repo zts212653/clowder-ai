@@ -2,8 +2,11 @@ import { useContext } from 'react';
 import { WorkActions } from './CollectiveWorkActions.js';
 import type { RoadmapAction } from './channel-collaboration.js';
 import type { CollectiveParticipant, CollectiveWorkProjection } from './client-types.js';
-import { useCollectiveText } from './collective-copy.js';
+import { useCollectiveLanguage, useCollectiveText } from './collective-copy.js';
 import { HostWorkPermissionContext } from './use-host-work-policy.js';
+import { WorkTimeCommandContext } from './WorkTimeCommandContext.js';
+import { WorkTimePanel } from './WorkTimePanel.js';
+import { WorkTimeSummary } from './WorkTimeSummary.js';
 import { workExecutionPresentation } from './work-execution-presentation.js';
 
 export function CollectiveWorkCard({
@@ -39,7 +42,9 @@ export function CollectiveWorkCard({
   readonly onComplete: (work: CollectiveWorkProjection) => void;
   readonly roadmapActions?: readonly RoadmapAction[];
 }) {
+  const { change: changeTime } = useContext(WorkTimeCommandContext);
   const home = useContext(HostWorkPermissionContext);
+  const language = useCollectiveLanguage();
   const t = useCollectiveText();
   const ownerProposal =
     work.proposedBy.kind === 'agent' && work.proposedBy.humanId === currentHumanId && Boolean(work.proposedRequestKind);
@@ -86,10 +91,19 @@ export function CollectiveWorkCard({
       <WorkOwnership work={work} accountable={accountable} execution={execution} />
       {dependencies.length > 0 && (
         <p className="work-dependencies">
-          {t('前置任务')} · {dependencies.join('、')}
+          {t('前置任务')} · {dependencies.join(language === 'en' ? ', ' : '、')}
         </p>
       )}
       <WorkResultStatus work={work} />
+      {work.lifecycle !== 'proposed' && (
+        <details className="channel-work-dates">
+          <summary>
+            {language === 'en' ? 'Dates' : '时间'}
+            <WorkTimeSummary work={work} />
+          </summary>
+          <WorkTimePanel work={work} currentHumanId={currentHumanId} onChange={changeTime} />
+        </details>
+      )}
       <WorkActions
         work={work}
         currentHumanId={currentHumanId}
@@ -139,14 +153,23 @@ function WorkOwnership({
 }
 
 function WorkResultStatus({ work }: { readonly work: CollectiveWorkProjection }) {
+  const language = useCollectiveLanguage();
   if (work.lifecycle === 'result_ready') {
-    return <p className="work-result">结果 v{work.resultRevision ?? 1} 已回到原讨论，等负责人确认。</p>;
+    const resultRevision = work.resultRevision ?? 1;
+    return (
+      <p className="work-result">
+        {language === 'en'
+          ? `Result v${resultRevision} returned to the original discussion and awaits its owner.`
+          : `结果 v${resultRevision} 已回到原讨论，等负责人确认。`}
+      </p>
+    );
   }
   const latestRequest = work.history.findLast((entry) => entry.action === 'revision_requested');
   if (work.lifecycle !== 'in_progress' || !latestRequest?.note) return null;
   return (
     <p className="work-result">
-      已退回结果 v{latestRequest.resultRevision ?? 1} · {latestRequest.note}
+      {language === 'en' ? 'Revision requested for result' : '已退回结果'} v{latestRequest.resultRevision ?? 1} ·{' '}
+      {latestRequest.note}
     </p>
   );
 }

@@ -165,6 +165,7 @@ export async function cloudReturnHarness() {
     app,
     agentKeyRegistry,
     messageStore,
+    threadStore,
     grantStore,
     thread,
     otherThread,

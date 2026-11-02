@@ -1,6 +1,6 @@
 import type { CollectiveRoadmapRecord, CollectiveWorkProjection } from './client-types.js';
 
-export type RoadmapLens = 'stage' | 'dependencies' | 'mine' | 'artifacts';
+export type RoadmapLens = 'stage' | 'dependencies' | 'mine' | 'artifacts' | 'triage';
 export type RoadmapPresentation = 'graph' | 'board';
 export type RoadmapScope = 'focus' | 'all' | 'unfinished';
 export type RoadmapRelation = 'all' | 'mine';
@@ -293,6 +293,7 @@ export const stageLabels = {
 } as const;
 
 export const roadmapHistoryLabels: Record<CollectiveRoadmapRecord['history'][number]['action'], string> = {
+  target_date_changed: '修改了项目目标日期',
   created: '新建了项目',
   works_changed: '调整了项目任务',
   completed: '完成了项目',
@@ -300,6 +301,10 @@ export const roadmapHistoryLabels: Record<CollectiveRoadmapRecord['history'][num
 };
 
 export const workHistoryLabels: Record<CollectiveWorkProjection['history'][number]['action'], string> = {
+  material_linked: '材料已关联',
+  time_changed: '修改了日期',
+  time_suggested: '建议修改日期',
+  time_suggestion_resolved: '处理了日期建议',
   proposed: '建议了任务',
   committed: '接纳了任务',
   accountability_assigned: '接下了任务',

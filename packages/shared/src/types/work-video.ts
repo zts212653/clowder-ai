@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { assetBindingSelectionSchema } from './asset-canon.js';
 import {
   videoProjectAssetSchema,
   videoProjectDigestSchema,
@@ -60,6 +61,7 @@ export const workVideoContextSchema = z
             asset: videoProjectAssetSchema,
             versionId: text(256),
             uses: z.array(text(2000)).min(1).max(1000),
+            bindingSelection: assetBindingSelectionSchema.optional(),
           })
           .strict()
           .refine(

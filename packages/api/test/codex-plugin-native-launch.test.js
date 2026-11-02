@@ -1,18 +1,19 @@
 import assert from 'node:assert/strict';
-import { spawn, spawnSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { test } from 'node:test';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { resolveCodexAccountLaunch } from '../dist/config/codex-account-launch.js';
 import {
   CodexAgentService,
   codexConfigObjectFromArgs,
 } from '../dist/domains/cats/services/agents/providers/CodexAgentService.js';
+import { writeMcpProbe } from './helpers/mcp-probe.js';
 
 // This suite tests only the provider's launch boundary. The Host resolver and
 // public source admission are separate authorities; these callbacks are fakes,
@@ -21,7 +22,6 @@ const policy = {
   mode: 'plugin_native',
   pluginInstanceId: 'instance-a',
   contributionId: 'native',
-  actionMethods: ['native.read'],
 };
 
 async function collect(stream) {
@@ -66,6 +66,7 @@ async function fixture(t, serviceOverrides = {}) {
   const calls = [];
   const projections = [];
   let duringL0 = async () => {};
+  let duringSpawn = async () => {};
   let current = true;
   let currentChecks = 0;
   const server = {
@@ -85,16 +86,23 @@ async function fixture(t, serviceOverrides = {}) {
     },
   };
   const spawnFn = (_command, args, options) => {
-    const launchArgs = codexConfigObjectFromArgs(args).mcp_servers?.[server.name]?.args;
-    const specPath = launchArgs?.[1];
-    const spec = specPath ? JSON.parse(readFileSync(specPath, 'utf8')) : undefined;
+    const descriptor = codexConfigObjectFromArgs(args).mcp_servers?.[server.name];
+    const inherited = Object.fromEntries(
+      (descriptor?.env_vars ?? [])
+        .filter((key) => options.env[key] !== undefined)
+        .map((key) => [key, options.env[key]]),
+    );
+    const spec = descriptor ? { ...descriptor, env: { ...inherited, ...descriptor.env } } : undefined;
+    const specPath = spec?.env?.CAT_CAFE_CREDENTIAL_FILE;
     const specMode = specPath ? statSync(specPath).mode & 0o777 : undefined;
+    const authentication = specPath ? JSON.parse(readFileSync(specPath, 'utf8')) : undefined;
     const authPath = options.env.CODEX_HOME && join(options.env.CODEX_HOME, 'auth.json');
     const authTarget = authPath && existsSync(authPath) ? realpathSync(authPath) : undefined;
     calls.push({
       args: [...args],
       options: { ...options, env: { ...options.env } },
       spec,
+      authentication,
       specMode,
       specPath,
       authTarget,
@@ -113,7 +121,14 @@ async function fixture(t, serviceOverrides = {}) {
       child.emit('close', null, 'SIGTERM');
       return true;
     };
-    setImmediate(() => {
+    setImmediate(async () => {
+      try {
+        await duringSpawn(calls.at(-1));
+      } catch (error) {
+        child.emit('error', error);
+        child.kill();
+        return;
+      }
       child.stdout.end(`${JSON.stringify({ type: 'turn.completed', usage: {} })}\n`);
       child.exitCode = 0;
       child.emit('exit', 0, null);
@@ -161,9 +176,51 @@ async function fixture(t, serviceOverrides = {}) {
     onL0: (fn) => {
       duringL0 = fn;
     },
+    onSpawn: (fn) => {
+      duringSpawn = fn;
+    },
     currentChecks: () => currentChecks,
   };
 }
+
+test('the admitted plugin runs directly without a protection process or native hooks', async (t) => {
+  const f = await fixture(t);
+  f.options.callbackEnv.CAT_CAFE_CALLBACK_TOKEN += '-long-fixture-value';
+  const file = join(f.packageRoot, 'result.txt');
+  await writeFile(file, 'clean');
+  writeMcpProbe(f.launch.server.args[0], `return {text:readFileSync(${JSON.stringify(file)},'utf8')};`);
+  let checked = false;
+  f.onSpawn(async (call) => {
+    const config = codexConfigObjectFromArgs(call.args);
+    assert.equal(config.features.hooks, false);
+    const server = config.mcp_servers[f.launch.server.name];
+    const client = new Client({ name: 'private-plugin-consumer', version: '1' });
+    const transport = new StdioClientTransport({
+      command: server.command,
+      args: server.args,
+      env: call.spec.env,
+      stderr: 'pipe',
+    });
+    transport.stderr?.on('data', () => {});
+    try {
+      await client.connect(transport);
+      assert.equal((await client.listTools()).tools[0].name, 'probe');
+      const clean = await client.callTool({ name: 'probe', arguments: {} });
+      assert.equal(JSON.parse(clean.content[0].text).text, 'clean');
+      const fake = ['ghp', '_', 'Z'.repeat(36)].join('');
+      const blocked = await client.callTool({ name: 'probe', arguments: { text: fake } });
+      assert.notEqual(blocked.isError, true);
+      await writeFile(file, fake);
+      const redacted = await client.callTool({ name: 'probe', arguments: {} });
+      assert.ok(JSON.stringify(redacted).includes(fake), 'third-party MCP result inspection was explicitly retired');
+      checked = true;
+    } finally {
+      await client.close();
+    }
+  });
+  const messages = await collect(f.service.invoke('Fixture prompt', f.options));
+  assert.equal(checked, true, JSON.stringify(messages));
+});
 
 async function refused(f, options) {
   let messages = [];
@@ -232,16 +289,15 @@ test(
     }
     assert.equal(args.includes('--add-dir'), false);
     const values = configValues(args);
-    assert.equal(values.get('mcp_servers'), '{}');
-    const servers = [...values.keys()].filter((key) => key.startsWith('mcp_servers.'));
-    assert.ok(servers.length > 0, 'the admitted server must actually be injected');
-    assert.ok(servers.every((key) => key.startsWith('mcp_servers.plugin__fixture__native.')));
-    assert.equal(values.get('mcp_servers.plugin__fixture__native.command'), JSON.stringify(process.execPath));
+    const configured = codexConfigObjectFromArgs(args).mcp_servers;
+    assert.deepEqual(Object.keys(configured), [f.launch.server.name]);
+    assert.equal(configured[f.launch.server.name].command, process.execPath);
     const { spec, specMode, specPath } = f.calls[0];
     assert.equal(spec.command, process.execPath);
     assert.deepEqual(spec.args, [join(f.packageRoot, 'native.mjs'), '--bound']);
     assert.equal(spec.cwd, f.packageRoot);
-    assert.equal(spec.env.CAT_CAFE_CALLBACK_TOKEN, 'current-fixture');
+    assert.equal(spec.env.CAT_CAFE_CALLBACK_TOKEN, undefined);
+    assert.equal(f.calls[0].authentication.callbackToken, 'current-fixture');
     assert.equal(spec.env.CLOWDER_PLUGIN_ACTION_TOKEN, 'activation-fixture');
     assert.equal(spec.env.OPENAI_API_KEY, undefined);
     assert.equal(specMode, 0o600);
@@ -400,12 +456,38 @@ test(
       await refused(f, f.options);
       assert.equal(
         f.service.supportsToolExecutionPolicy(policy),
-        false,
-        'provider capability is not enabled by this launch implementation',
+        true,
+        'exec supports the policy, while each invalid launch still fails before spawn',
       );
     }
   },
 );
+
+test('a scoped member has the same hard tool fence with its own identity projection and frozen model', async (t) => {
+  const compiled = [];
+  const f = await fixture(t, {
+    l0CompilerFn: async (input) => {
+      compiled.push(input);
+      return 'Identity constant: @codex model=gpt-5.3-codex';
+    },
+  });
+  f.options.pluginNativeLaunch.sandbox.kind = 'scoped-member';
+  const messages = await collect(f.service.invoke('Only the admitted member tools are available.', f.options));
+  assert.equal(
+    messages.some((message) => message.type === 'error'),
+    false,
+  );
+  assert.equal(f.calls.length, 1);
+  assert.equal(compiled[0].projection, 'scoped-member');
+  assert.equal(compiled[0].runtimeModel, 'gpt-5.3-codex');
+  assert.ok(f.calls[0].args.includes('--ephemeral'));
+  assert.equal(f.calls[0].spec.command, process.execPath);
+  assert.equal(f.calls[0].spec.default_tools_approval_mode, 'approve');
+  const config = configValues(f.calls[0].args);
+  assert.equal(config.get('features.shell_tool'), 'false');
+  assert.equal(config.get('features.hooks'), 'false');
+  assert.equal(config.get('permissions.plugin_native_public.network'), '{enabled=false}');
+});
 
 test(
   'OAuth public HOME uses the selected account rather than ambient login and projects only auth',

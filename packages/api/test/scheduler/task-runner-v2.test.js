@@ -2088,6 +2088,7 @@ describe('TaskRunnerV2 — timer hold offline recovery (F323)', () => {
   });
 
   it('re-arms a recoverable timer hold after RUN_FAILED and fires exactly once after recovery', async () => {
+    const policy = { mode: 'callback_allowlist', allowedCallbackRoutes: ['POST /api/callbacks/hold-ball'] };
     const [{ TaskRunnerV2 }, { reminderTemplate }] = await Promise.all([
       import('../../dist/infrastructure/scheduler/TaskRunnerV2.js'),
       import('../../dist/infrastructure/scheduler/templates/reminder.js'),
@@ -2114,6 +2115,7 @@ describe('TaskRunnerV2 — timer hold offline recovery (F323)', () => {
           sourceCategory: input.sourceCategory,
           content: input.content,
           ownerAuthProvenance: input.ownerAuthProvenance,
+          toolExecutionPolicy: input.toolExecutionPolicy,
         });
         assert.ok(result.message?.id, 'successful admission carries its durable message');
         return result.message.id;
@@ -2123,7 +2125,10 @@ describe('TaskRunnerV2 — timer hold offline recovery (F323)', () => {
     const fireAt = now - 60_000;
     const slaUntilMs = now + 60_000;
     const id = 'hold-ball-not-admitted-retry';
-    dynamicTaskStore.insert(makeTimerHoldDef({ id, fireAt, slaUntilMs }), 'strict');
+    dynamicTaskStore.insert(makeTimerHoldDef({ id, fireAt, slaUntilMs }), {
+      ownerAuthProvenance: 'strict',
+      toolExecutionPolicy: policy,
+    });
 
     assert.equal(runner.hydrateDynamic(dynamicTaskStore, { get: () => reminderTemplate }), 1);
     runner.start();
@@ -2155,6 +2160,8 @@ describe('TaskRunnerV2 — timer hold offline recovery (F323)', () => {
     const wakeAttempts = deliveries.filter((input) => input.targetCatId);
     assert.equal(wakeAttempts.length, 2, 'retry uses the original wake identity');
     assert.ok(wakeAttempts.every((input) => input.idempotencyKey === `hold-ball-wake:${id}`));
+    assert.ok(wakeAttempts.every((input) => JSON.stringify(input.toolExecutionPolicy) === JSON.stringify(policy)));
+    assert.deepEqual(harness.admitted('thread-hold', 'user-1')[0].execution.readOnlyToolPolicy, policy);
     rows = ledger.query(id, 10);
     assert.equal(rows[0].outcome, 'RUN_DELIVERED');
     const tombstone = dynamicTaskStore.getById(id);

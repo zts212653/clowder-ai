@@ -1,5 +1,13 @@
 // Polyfills for jsdom test environment
-import { vi } from 'vitest';
+import { beforeEach, vi } from 'vitest';
+import { approvalResultRead } from './lib/approval-result-read';
+import { observeApiSessionOwner } from './utils/api-session-identity';
+
+// Each case starts as a new browser session; remounts within a case retain the shared resource.
+beforeEach(() => {
+  approvalResultRead.clear();
+  observeApiSessionOwner(null);
+});
 
 // React Flow requires ResizeObserver
 if (typeof globalThis.ResizeObserver === 'undefined') {

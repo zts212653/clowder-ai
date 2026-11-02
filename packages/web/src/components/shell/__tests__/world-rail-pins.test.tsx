@@ -9,7 +9,12 @@ import { SettingsSourceReturnProvider, useSettingsReadingPort } from '../useSett
 const data = vi.hoisted(() => ({ push: vi.fn(), pinned: [] as string[], pathname: '/thread/current' }));
 const openTeamSubject = vi.hoisted(() => vi.fn());
 const setCurrentThread = vi.hoisted(() => vi.fn());
-const chat = vi.hoisted(() => ({ setWorkspaceMode: vi.fn(), openTeamSubject, setCurrentThread }));
+const chat = vi.hoisted(() => ({
+  setWorkspaceMode: vi.fn(),
+  openEvolutionWorkspace: vi.fn(),
+  openTeamSubject,
+  setCurrentThread,
+}));
 vi.mock('@/stores/chatStore', () => ({
   useChatStore: Object.assign((select: (state: typeof chat) => unknown) => select(chat), {
     getState: () => chat,
@@ -125,6 +130,23 @@ describe('F322 rail: pins above the mailbox', () => {
     expect(order.slice(-3)).toEqual(['rail-pin-dest-starry', 'hairline', 'mailbox-button']);
   });
 
+  it.each([
+    ['schedule', '调度'],
+    ['evolution', '能力进化'],
+    ['eval', '评估'],
+    ['community', '社区'],
+  ])('the saved %s pin remains visible and opens its original Workspace destination', (id, label) => {
+    data.pinned = [`dest:${id}`];
+    data.pathname = '/settings';
+    window.history.replaceState(null, '', '/settings?from=current');
+    render();
+    expect(all().map((pin) => pin.getAttribute('aria-label'))).toEqual([label]);
+    act(() => all()[0]?.click());
+    if (id === 'evolution') expect(chat.openEvolutionWorkspace).toHaveBeenCalledOnce();
+    else expect(chat.setWorkspaceMode).toHaveBeenCalledWith(id);
+    expect(data.push).toHaveBeenCalledWith('/thread/current');
+  });
+
   it('the Workspace team pin opens the team panel in the last conversation, not a settings section', async () => {
     data.pinned = ['dest:team-workspace'];
     data.pathname = '/settings';
@@ -164,7 +186,7 @@ describe('F322 rail: pins above the mailbox', () => {
     act(() => host.querySelector<HTMLButtonElement>('[data-testid="settings-button"]')?.click());
     expect(entryReader.captureReadingRef).toHaveBeenCalledOnce();
     expect(readSettingsReadingSession()?.label).toBe('Current actual title');
-    expect(data.push).toHaveBeenCalledWith('/settings?from=current');
+    expect(data.push).toHaveBeenCalledWith('/settings?s=you&from=current');
   });
   it('the actual pinned section captures through the same Settings entry consumer', () => {
     data.pinned = ['notify'];

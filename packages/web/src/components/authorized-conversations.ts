@@ -1,5 +1,11 @@
 import { apiFetch } from '@/utils/api-client';
 import { parseChatGptConversationUrl } from '@/utils/chatgpt-chat-url';
+import {
+  PERSONAL_CHROME_PLUGIN_ID,
+  type PersonalChromeSetupIssue,
+  personalChromeInstallIssue,
+  readPersonalChromeSetupIssue,
+} from '@/utils/personal-chrome-availability';
 
 export interface AuthorizedConversationCandidate {
   conversationId: string;
@@ -12,18 +18,24 @@ export interface AuthorizedConversationCandidate {
 /** The conversations the extension may use, as a view needs them. */
 export type AuthorizedConversationsRead =
   | { kind: 'loading' }
-  | { kind: 'error' }
-  | { kind: 'ready'; candidates: AuthorizedConversationCandidate[] };
+  | { kind: 'error'; message?: string; actionLabel?: string }
+  | {
+      kind: 'ready';
+      candidates: AuthorizedConversationCandidate[];
+      connectionIssue?: string;
+      connectionActionLabel?: string;
+    };
 
 /** The authorization source's answer; the recovery card also reads its connection and title fields. */
 export interface PersonalChromeStateResponse {
   status?: {
     status?: string;
     helper?: { state?: string };
-    delivery?: { failure?: string; reloadRequired?: boolean };
+    delivery?: { failure?: string; reloadRequired?: boolean; pageReloadRequired?: boolean };
   };
   titleSync?: { status?: string; errorCode?: string; updatedCount?: number; requestedCount?: number };
   error?: string;
+  setupIssue?: PersonalChromeSetupIssue;
 }
 
 export interface AuthorizedConversationsSnapshot {
@@ -126,7 +138,15 @@ export async function fetchAuthorizedConversations(
     };
   }
   signal.throwIfAborted();
-  const { response, body } = await action('list', signal);
+  const [inventoryIssue, { response, body }] = await Promise.all([
+    readPersonalChromeSetupIssue(signal),
+    action('list', signal),
+  ]);
+  const setupIssue =
+    inventoryIssue ??
+    (response.status === 404 && body.error === `Plugin '${PERSONAL_CHROME_PLUGIN_ID}' is not installed`
+      ? personalChromeInstallIssue
+      : undefined);
   if (response.ok && (body.ok !== true || body.render !== 'rows' || !Array.isArray(body.data?.rows))) {
     throw new Error('The authorization list could not be read');
   }
@@ -138,6 +158,7 @@ export async function fetchAuthorizedConversations(
       ...(status ? { status } : {}),
       ...(titleSync ? { titleSync } : {}),
       ...(body.error ? { error: body.error } : {}),
+      ...(setupIssue ? { setupIssue } : {}),
     },
     candidates: response.ok && body.ok === true && body.render === 'rows' ? authorizedCandidates(body.data?.rows) : [],
   };

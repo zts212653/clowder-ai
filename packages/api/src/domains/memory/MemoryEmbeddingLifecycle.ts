@@ -75,6 +75,8 @@ export class MemoryEmbeddingLifecycle {
   private vectorStore: VectorStore | undefined;
   private passageVectorStore: PassageVectorStore | undefined;
   private activation: Promise<EmbeddingActivationResult> | undefined;
+  private catchUp: Promise<{ docsEmbedded: number; durationMs: number }> | undefined;
+  private recoveryTimer: ReturnType<typeof setTimeout> | undefined;
   private generation = 0;
   private readonly createEmbeddingService: (config: EmbedConfig) => IEmbeddingService;
   private readonly initializeVectorBackend: (store: SqliteEvidenceStore, dim: number) => Promise<VectorBackend>;
@@ -114,6 +116,9 @@ export class MemoryEmbeddingLifecycle {
   deactivate(): void {
     this.generation++;
     this.activation = undefined;
+    this.catchUp = undefined;
+    clearTimeout(this.recoveryTimer);
+    this.recoveryTimer = undefined;
     this.mode = 'off';
     this.status = 'off';
     this.reason = undefined;
@@ -148,10 +153,43 @@ export class MemoryEmbeddingLifecycle {
     return this.passageVectorStore;
   }
 
-  async catchUpAfterReady(): Promise<{ docsEmbedded: number; durationMs: number }> {
-    const result = await this.indexBuilder.embedMissingDocumentVectors();
-    this.indexBuilder.startPassageEmbeddingWarmup();
-    return result;
+  catchUpAfterReady(): Promise<{ docsEmbedded: number; durationMs: number }> {
+    if (this.catchUp) return this.catchUp;
+    clearTimeout(this.recoveryTimer);
+    this.recoveryTimer = undefined;
+    const catchUp = this.catchUpOnce(this.generation).finally(() => {
+      if (this.catchUp === catchUp) this.catchUp = undefined;
+    });
+    this.catchUp = catchUp;
+    return catchUp;
+  }
+
+  private async catchUpOnce(generation: number): Promise<{ docsEmbedded: number; durationMs: number }> {
+    try {
+      return await this.indexBuilder.embedMissingDocumentVectors();
+    } catch (error) {
+      this.scheduleRecovery(generation);
+      throw error;
+    } finally {
+      // A document timeout cannot suppress this independent accelerator. The
+      // builder already coalesces passage work; retired generations start none.
+      if (this.generation === generation) this.indexBuilder.startPassageEmbeddingWarmup();
+    }
+  }
+
+  private scheduleRecovery(generation: number): void {
+    if (!this.isCurrent(generation) || this.recoveryTimer) return;
+    // Reuse the startup/reprobe cadence. Source stamps select only unfinished
+    // current documents; no lexical rescan, force rebuild or second queue.
+    this.recoveryTimer = setTimeout(() => {
+      this.recoveryTimer = undefined;
+      if (!this.isCurrent(generation)) return;
+      void this.catchUpAfterReady().catch(() => {
+        if (!this.isCurrent(generation)) return;
+        console.warn('[memory] document vector recovery failed; retrying in 30s');
+      });
+    }, 30_000);
+    this.recoveryTimer.unref();
   }
 
   private async activateOnce(generation: number): Promise<EmbeddingActivationResult> {

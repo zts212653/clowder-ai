@@ -2234,7 +2234,7 @@ describe('HubCatEditor', () => {
     const payload = JSON.parse(String(patchCall?.[1]?.body));
     expect(payload.clientId).toBe('google');
     expect(payload.carrier).toBe('cli'); // Native CLI is selected by the explicit agyProfile below.
-    expect(payload.acp).toBeUndefined(); // Inactive config cannot override the canonical carrier.
+    expect(payload.acp).toBeNull(); // Switching to Native explicitly clears the previous ACP configuration.
     expect(payload.agyProfile).toMatchObject({
       carrier: 'native',
       model: 'gemini-3.8-flash-high',

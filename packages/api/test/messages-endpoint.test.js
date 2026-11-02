@@ -61,6 +61,27 @@ describe('GET /api/messages', () => {
     assert.equal(body.hasMore, false);
   });
 
+  it('projects server-admitted cloud reply provenance without another extra carrier', async () => {
+    const proof = {
+      v: 1,
+      threadId: 'thread-pro',
+      sourceMessageId: 'source119',
+      targetCatId: 'gpt-pro',
+      dispatchInvocationId: 'attempt119',
+    };
+    messageStore.append({
+      from: { kind: 'agent', catId: 'gpt-pro' },
+      userId: 'default-user',
+      content: 'authenticated reply',
+      mentions: [],
+      timestamp: 1000,
+      extra: { cloudBridgeReturn: proof },
+    });
+    const response = await app.inject({ method: 'GET', url: '/api/messages' });
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(response.json().messages[0].extra, { cloudBridgeReturn: proof });
+  });
+
   it('projects the modification source carrier in real history without requiring another extra field', async () => {
     const metadata = {
       v: 1,
@@ -912,7 +933,7 @@ describe('GET /api/messages', () => {
 
   // ── F97: Connector message type mapping ──────────────────────────
 
-  it('maps message with source field to type=connector', async () => {
+  it('maps message with source field to type=connector without legacy implicit navigation', async () => {
     messageStore.append(
       canonicalTestMessageInput({
         userId: 'default-user',
@@ -939,7 +960,7 @@ describe('GET /api/messages', () => {
     assert.equal(msg.source.connector, 'github-review');
     assert.equal(msg.source.label, 'GitHub Review');
     assert.equal(msg.source.icon, '🔔');
-    assert.equal(msg.source.url, 'https://github.com/org/repo/pull/42');
+    assert.equal(Object.hasOwn(msg.source, 'url'), false);
   });
 
   it('includes source.meta in API response (F098-C: needed for direction parsing)', async () => {
@@ -965,7 +986,7 @@ describe('GET /api/messages', () => {
     const msg = body.messages[0];
     assert.equal(msg.type, 'connector');
     assert.equal(msg.source.connector, 'github-review');
-    assert.equal(msg.source.url, 'https://github.com/org/repo/pull/42');
+    assert.equal(Object.hasOwn(msg.source, 'url'), false);
     assert.deepStrictEqual(
       msg.source.meta,
       { targets: ['codex', 'gpt52'], initiator: 'opus' },

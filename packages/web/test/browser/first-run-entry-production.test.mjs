@@ -173,7 +173,7 @@ async function fixture(shell, scenario) {
     '/api/concierge/config': { enabled: false },
     '/api/concierge/thread': { thread: null },
     '/api/threads/default/read/latest': { ok: true },
-    '/api/entrusted-work/needs-me': { ownerReads: [] },
+    '/api/entrusted-work/needs-me': { ownerReads: [], coverage: { state: 'complete' } },
     '/api/approval-hub/pending': { items: [], count: 0 },
     '/api/artifacts': { view: 'works', artifacts: [], total: 0, complete: true, workLineage: 'resolved' },
     '/api/projects/cwd': { path: '/author-entry-fixture' },

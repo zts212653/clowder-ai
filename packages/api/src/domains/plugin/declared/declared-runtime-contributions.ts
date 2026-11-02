@@ -10,23 +10,31 @@ import type { TaskSpec_P1 } from '../../../infrastructure/scheduler/types.js';
 import { LimbRegistry } from '../../limb/LimbRegistry.js';
 import { loadLimbDeclaration } from '../../limb/limb-yaml-loader.js';
 import { type InvokeContext, PluginLimbAdapter } from '../../limb/PluginLimbAdapter.js';
+import type { PluginCallContext } from '../carrier/plugin-call-context.js';
 import { withPluginOwnerWebhook } from '../carrier/plugin-owner-request-context.js';
 import type { PluginRuntimeAdmission } from '../carrier/runtime-carrier.js';
 import { ExternalPluginRuntimeError, type VerifiedPluginPackageLocator } from '../external-runtime/types.js';
-import { hostCapabilityRefusal } from '../host-surface/host-capability-refusal.js';
 import { effectivePluginConfigurationValue } from '../manager/plugin-configuration-values.js';
 import type { PluginRuntimeConfigurationPort } from '../manifest-configuration-projection.js';
 import type { CloudConversationHostLease, CloudConversationHostRegistry } from './cloud-conversation-host-registry.js';
+import type { AgentSessionProviderLifecycle } from './declared-agent-session-providers.js';
 import {
   admitCloudConversationHosts,
   type DeclaredActionSurface,
   isCloudConversationHost,
   registerCloudConversationHosts,
 } from './declared-cloud-conversation-hosts.js';
+import {
+  type DeclaredPluginTool,
+  type DeclaredPluginToolCall,
+  directToolSchema,
+  invokeDeclaredDirectTool,
+} from './declared-direct-tool-call.js';
 import { resolvePackageFile } from './declared-resource-paths.js';
 import { scheduleTask } from './declared-schedule-task.js';
 import { type DeclaredPluginWebhook, resolveDeclaredWebhook, validateDeclaredWebhooks } from './declared-webhooks.js';
 
+export type { DeclaredPluginTool, DeclaredPluginToolCall } from './declared-direct-tool-call.js';
 export type { DeclaredPluginWebhook } from './declared-webhooks.js';
 
 export interface DeclaredScheduleTaskRunner {
@@ -35,6 +43,7 @@ export interface DeclaredScheduleTaskRunner {
 }
 
 export interface DeclaredRuntimeContributionHost {
+  readonly agentSessionProviders?: AgentSessionProviderLifecycle;
   readonly packages: VerifiedPluginPackageLocator;
   readonly limbRegistry?: LimbRegistry;
   readonly taskRunner?: DeclaredScheduleTaskRunner;
@@ -45,9 +54,11 @@ export interface DeclaredRuntimeContributionHost {
 }
 
 interface ActiveRuntimeContributions {
+  readonly releaseAgentProvider?: () => Promise<void>;
   readonly lifetime: AbortController;
   readonly pluginId: string;
   readonly pluginInstanceId: string;
+  readonly packageDigest: string;
   readonly limbNodeIds: readonly string[];
   readonly scheduleTaskIds: readonly string[];
   readonly tools: readonly DirectToolContribution[];
@@ -58,20 +69,6 @@ interface ActiveRuntimeContributions {
 
 type InvokePluginAction = (pluginInstanceId: string, method: string, params: unknown) => Promise<unknown>;
 
-export interface DeclaredPluginTool {
-  readonly contributionId: string;
-  readonly name: string;
-  readonly description?: string;
-  readonly inputSchema: {
-    readonly type: 'object';
-    readonly properties?: Readonly<Record<string, object>>;
-    readonly required?: readonly string[];
-    readonly $schema?: string;
-  };
-}
-
-export type DeclaredPluginToolCall = { readonly handled: false } | { readonly handled: true; readonly value: unknown };
-
 /**
  * Runtime-only declarations live exactly as long as the package activation. Static resources
  * (skill/MCP) deliberately live outside this registry because Host shutdown must not remove them.
@@ -79,7 +76,10 @@ export type DeclaredPluginToolCall = { readonly handled: false } | { readonly ha
 export class DeclaredRuntimeContributions {
   readonly #active = new Map<string, ActiveRuntimeContributions>();
 
-  constructor(private readonly host: DeclaredRuntimeContributionHost) {}
+  constructor(
+    private readonly host: DeclaredRuntimeContributionHost,
+    private readonly resolveAdmission?: (id: string) => Promise<PluginRuntimeAdmission>,
+  ) {}
 
   async activate(
     admission: PluginRuntimeAdmission,
@@ -108,16 +108,8 @@ export class DeclaredRuntimeContributions {
     const scheduleTaskIds: string[] = [];
     const cloudHostLeases: CloudConversationHostLease[] = [];
     const cloudHostRegistry = this.host.cloudConversationHosts;
+    let releaseAgentProvider: (() => Promise<void>) | undefined;
     try {
-      if (schedules.length > 0 && !admission.effectiveGrants.includes('schedule.register')) {
-        throw hostCapabilityRefusal(
-          new ExternalPluginRuntimeError(
-            'DELIVERY_REJECTED',
-            `${admission.packageRecord.pluginId} lacks schedule.register`,
-          ),
-          'schedule.register',
-        );
-      }
       if (schedules.length > 0 && !this.host.taskRunner) {
         throw new ExternalPluginRuntimeError('UNSUPPORTED_TRANSPORT', 'Host task runner is unavailable');
       }
@@ -133,10 +125,13 @@ export class DeclaredRuntimeContributions {
         scheduleTaskIds.push(task.id);
       }
       registerCloudConversationHosts(admission, cloudHosts, cloudHostRegistry, actions, cloudHostLeases);
+      releaseAgentProvider = await this.host.agentSessionProviders?.activate(admission);
       this.#active.set(pluginInstanceId, {
+        releaseAgentProvider,
         lifetime: new AbortController(),
         pluginId: admission.packageRecord.pluginId,
         pluginInstanceId,
+        packageDigest: admission.instance.packageDigest,
         limbNodeIds,
         scheduleTaskIds,
         tools,
@@ -145,21 +140,36 @@ export class DeclaredRuntimeContributions {
         invoke,
       });
     } catch (error) {
+      await releaseAgentProvider?.();
       this.#remove({ limbNodeIds, scheduleTaskIds, cloudHostLeases });
       throw error;
     }
   }
 
-  deactivate(pluginInstanceId: string): void {
+  async deactivate(pluginInstanceId: string): Promise<void> {
     const active = this.#active.get(pluginInstanceId);
     if (!active) return;
     this.#active.delete(pluginInstanceId);
     active.lifetime.abort();
     this.#remove(active);
+    await active.releaseAgentProvider?.();
   }
 
-  deactivateAll(): void {
-    for (const pluginInstanceId of [...this.#active.keys()]) this.deactivate(pluginInstanceId);
+  async refreshAgentSessionProviders(admission: PluginRuntimeAdmission): Promise<void> {
+    const id = admission.instance.pluginInstanceId;
+    const active = this.#active.get(id);
+    if (!active?.releaseAgentProvider) return;
+    const pending = { ...active, releaseAgentProvider: undefined };
+    this.#active.set(id, pending);
+    await active.releaseAgentProvider();
+    const releaseAgentProvider = await this.host.agentSessionProviders?.activate(admission);
+    if (this.#active.get(id) === pending && !active.lifetime.signal.aborted) {
+      this.#active.set(id, { ...pending, releaseAgentProvider });
+    } else await releaseAgentProvider?.();
+  }
+
+  async deactivateAll(): Promise<void> {
+    await Promise.all([...this.#active.keys()].map((id) => this.deactivate(id)));
   }
 
   listPluginTools(pluginId: string): readonly DeclaredPluginTool[] | undefined {
@@ -178,6 +188,7 @@ export class DeclaredRuntimeContributions {
     contributionId: string,
     toolName: string,
     args: Readonly<Record<string, unknown>>,
+    caller?: PluginCallContext,
   ): Promise<DeclaredPluginToolCall> {
     const active = this.#activeForPlugin(pluginId);
     if (!active) return { handled: false };
@@ -190,9 +201,13 @@ export class DeclaredRuntimeContributions {
     }
     return {
       handled: true,
-      value: await active.invoke(active.pluginInstanceId, tool.action.method, {
-        ...args,
-        ...(tool.action.params ?? {}),
+      value: await invokeDeclaredDirectTool({
+        binding: active,
+        isCurrent: () => this.#active.get(active.pluginInstanceId) === active,
+        invoke: () =>
+          active.invoke(active.pluginInstanceId, tool.action.method, { ...args, ...(tool.action.params ?? {}) }),
+        caller,
+        resolveAdmission: this.resolveAdmission,
       }),
     };
   }
@@ -299,25 +314,12 @@ export class DeclaredRuntimeContributions {
   }
 }
 
-function directToolSchema(tool: DirectToolContribution): DeclaredPluginTool['inputSchema'] {
-  const schema = tool.inputSchema;
-  if (schema.type !== 'object') {
-    throw new ExternalPluginRuntimeError(
-      'PROTOCOL_VIOLATION',
-      `Tool contribution ${tool.id} must declare an object input schema`,
-    );
-  }
-  return schema as DeclaredPluginTool['inputSchema'];
-}
-
 async function configurationSnapshot(
   admission: PluginRuntimeAdmission,
   configuration: PluginRuntimeConfigurationPort,
 ): Promise<Record<string, string>> {
   const values: Record<string, string> = {};
   for (const field of admission.packageRecord.manifest.configuration ?? []) {
-    const grant = field.kind === 'secret' ? 'secret.read' : 'plugin.config.read';
-    if (!admission.effectiveGrants.includes(grant)) continue;
     const raw =
       field.kind === 'secret'
         ? await configuration.readSecret(admission.instance.pluginInstanceId, field.key)

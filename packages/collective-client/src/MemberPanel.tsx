@@ -37,7 +37,7 @@ export function MemberPanel({
     >
       <header className="context-header">
         <div>
-          <span>{t('共同家园')}</span>
+          <span>{t('共同体')}</span>
           <h2>{t(member === 'members' ? '成员' : '成员资料')}</h2>
         </div>
         <button type="button" aria-label={t('关闭成员资料')} onClick={onClose}>
@@ -97,7 +97,7 @@ function MemberProfile({
           <h3>{human.displayName}</h3>
         </div>
         <dl className="member-facts">
-          <dt>在共同家园的身份</dt>
+          <dt>你在这里是</dt>
           <dd>{current?.role === 'steward' ? '维护者' : current ? '成员' : '历史消息中的署名'}</dd>
           {cafes.length > 0 && (
             <>

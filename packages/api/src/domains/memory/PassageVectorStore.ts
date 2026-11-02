@@ -1,6 +1,7 @@
 // F209 Phase A: passage-level vector CRUD for raw semantic / hybrid recall.
 
 import type Database from 'better-sqlite3';
+import type { FileVectorQueryReader } from './file-vector-read-window.js';
 
 export function passageVectorKey(docAnchor: string, passageId: string): string {
   return JSON.stringify([docAnchor, passageId]);
@@ -17,7 +18,8 @@ export function parsePassageVectorKey(key: string): { docAnchor: string; passage
 export class PassageVectorStore {
   constructor(
     private db: Database.Database,
-    private dim: number,
+    _dim: number,
+    private readonly readQuery: FileVectorQueryReader = (query) => query(),
   ) {}
 
   upsert(passageKey: string, embedding: Float32Array): void {
@@ -37,13 +39,21 @@ export class PassageVectorStore {
     this.db.prepare('DELETE FROM passage_vectors WHERE passage_key = ?').run(passageKey);
   }
 
+  /** Read vec0's indexed key map without loading its vector BLOBs (also used by vector repacking). */
+  existingKeys(keys: readonly string[]): Set<string> {
+    if (keys.length === 0) return new Set();
+    const rows = this.db
+      .prepare(`SELECT id FROM passage_vectors_rowids WHERE id IN (${keys.map(() => '?').join(',')})`)
+      .all(...keys) as Array<{ id: string }>;
+    return new Set(rows.map(({ id }) => id));
+  }
+
   search(queryVec: Float32Array, k: number): Array<{ passageKey: string; distance: number }> {
-    return this.db
-      .prepare(
-        `SELECT passage_key as passageKey, distance FROM passage_vectors
+    const statement = this.db.prepare(
+      `SELECT passage_key as passageKey, distance FROM passage_vectors
       WHERE embedding MATCH ? AND k = ?`,
-      )
-      .all(queryVec, k) as Array<{ passageKey: string; distance: number }>;
+    );
+    return this.readQuery(() => statement.all(queryVec, k)) as Array<{ passageKey: string; distance: number }>;
   }
 
   clearAll(): void {

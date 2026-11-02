@@ -4,6 +4,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
   isStableThreadAttentionAnchor,
+  recordRecentThreadAttentionGroup,
   resolveThreadAttentionPreferences,
   saveThreadAttentionPreference,
 } from '../config/user-preferences-thread-attention.js';
@@ -83,6 +84,11 @@ async function applyGroupCommand(
       const created = groups.find((group) => command.threadIds.every((threadId) => group.threadIds.includes(threadId)));
       if (!created) throw new Error('Created Group not found');
       saveThreadAttentionPreference(projectRoot, { anchor: `group:${created.id}`, alias: command.name });
+    }
+    if (command.action === 'create' || command.action === 'organize' || command.action === 'move') {
+      const threadId = command.action === 'move' ? command.threadId : command.threadIds[0];
+      const target = groups.find((group) => group.threadIds.includes(threadId!));
+      if (target) recordRecentThreadAttentionGroup(projectRoot, target.id);
     }
   });
   return undo;

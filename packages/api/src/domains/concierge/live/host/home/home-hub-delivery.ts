@@ -5,14 +5,11 @@ import type { IThreadStore } from '../../../../cats/services/stores/ports/Thread
 import type { HomeActionRequest, HomeActionResult } from '../../../action/HomeActionController.js';
 import { ownerLiteralValues } from '../../../action/jev/JevPageSelector.js';
 import type { PageChoice } from '../../../action/PageActionLoop.js';
-import {
-  type HomeOwnedTarget,
-  homeComposerLiteralValues,
-  homeHubStateSchema,
-  homeHubTargets,
-} from './home-hub-targets.js';
+import { type HomeHubPage, HomeHubPages } from './home-hub-pages.js';
+import { type HomeOwnedTarget, homeComposerLiteralValues, homeHubTargets } from './home-hub-targets.js';
 import { appendHomeOwnerDraft } from './home-owner-draft.js';
 import { HomeWindowCapabilities } from './home-window-capabilities.js';
+import { deliverHomeWork } from './home-work-delivery.js';
 
 export interface HomeHubEmitter {
   isConnected?(ownerUserId: string, socketId: string): boolean;
@@ -26,9 +23,10 @@ export interface HomeHubEmitter {
   emit(ownerUserId: string, event: string, data: unknown, socketIds?: readonly string[]): void;
 }
 type Outcome = Pick<HomeActionResult, 'status' | 'reason'>;
-interface Command {
+export interface HomeHubCommand {
   ownerUserId: string;
   clientId: string;
+  clientToken: string;
   signal: AbortSignal;
   expiresAt: number;
   authorize(expectedRevision?: number): Promise<unknown>;
@@ -56,8 +54,9 @@ function validHomeChoice(
 
 /** Short-lived delivery capabilities only; thread, draft and persistent result owners remain authoritative. */
 export class HomeHubDelivery {
-  private readonly commands = new Map<string, Command>();
+  private readonly commands = new Map<string, HomeHubCommand>();
   private readonly clients: HomeWindowCapabilities;
+  readonly pages: HomeHubPages;
   constructor(
     private readonly deps: {
       messages: Pick<IMessageStore, 'getOwnerComposerDraft' | 'putOwnerComposerDraft'>;
@@ -67,6 +66,7 @@ export class HomeHubDelivery {
     },
   ) {
     this.clients = new HomeWindowCapabilities(deps.emitter.isConnected);
+    this.pages = new HomeHubPages(deps.emitter, this.clients, deps.threads);
   }
 
   registerClient(ownerUserId: string, clientId: string, socketId?: string) {
@@ -77,28 +77,12 @@ export class HomeHubDelivery {
     return this.clients.unregister(ownerUserId, clientId, clientToken);
   }
 
-  private async windows(ownerUserId: string) {
-    const values = await this.deps.emitter.emitWithAck(
-      ownerUserId,
-      'home:inspect',
-      {},
-      1_500,
-      this.clients.connections(ownerUserId),
-    );
-    const states = values.flatMap((value) => {
-      const parsed = homeHubStateSchema.safeParse(value);
-      return parsed.success && this.clients.owns(ownerUserId, parsed.data.clientId, parsed.data.clientToken)
-        ? [parsed.data]
-        : [];
-    });
-    return states;
-  }
-
-  async targets(request: HomeActionRequest): Promise<HomeOwnedTarget[]> {
-    const states = await this.windows(request.userId);
-    // Two foreground consumers are ambiguous; never fan an operation out to both.
-    if (states.length !== 1 || request.signal.aborted) return [];
-    return homeHubTargets(states[0], await this.deps.threads.list(request.userId), request.text);
+  async targets(request: HomeActionRequest, selected?: Pick<HomeHubPage, 'id'>): Promise<HomeOwnedTarget[]> {
+    const discovery = await this.pages.read(request.userId);
+    if (!('pages' in discovery) || request.signal.aborted) return [];
+    const pages = selected ? discovery.pages.filter((page) => page.id === selected.id) : discovery.pages;
+    const threads = await this.deps.threads.list(request.userId);
+    return pages.flatMap((page) => homeHubTargets(page.state, threads, request.text)).slice(0, 32);
   }
 
   async execute(
@@ -111,9 +95,10 @@ export class HomeHubDelivery {
     if (this.commands.size >= 64 || request.signal.aborted || !(await this.deps.isCurrent(request)))
       return { status: 'stale', reason: 'home_source_unavailable' };
     const expiresAt = Date.now() + 10_000;
-    const command: Command = {
+    const command: HomeHubCommand = {
       ownerUserId: request.userId,
       clientId: target.clientId,
+      clientToken: target.clientToken,
       signal: request.signal,
       expiresAt,
       authorize: (revision) => this.authorize(request, target, choice, expiresAt, revision),
@@ -127,61 +112,21 @@ export class HomeHubDelivery {
     resolve: () => Promise<HomeWorkPublication | null>,
     assertCurrent: () => Promise<void>,
     signal: AbortSignal = new AbortController().signal,
+    page?: HomeHubPage,
   ): Promise<'applied' | 'blocked' | 'unconfirmed'> {
-    await assertCurrent();
-    const states = await this.windows(ownerUserId);
-    await assertCurrent();
-    if (signal.aborted) return 'blocked';
-    if (states.length !== 1) return 'unconfirmed';
-    const [state] = states;
-    let publication: HomeWorkPublication | null = null;
-    const expiresAt = Date.now() + 10_000;
-    const command: Command = {
+    return deliverHomeWork({
       ownerUserId,
-      clientId: state.clientId,
+      resolve,
+      assertCurrent,
       signal,
-      expiresAt,
-      authorize: async () => {
-        try {
-          await assertCurrent();
-          const windows = await this.windows(ownerUserId);
-          if (windows.length !== 1 || windows[0].clientId !== state.clientId || windows[0].route !== state.route)
-            return { kind: 'blocked' };
-          publication = await resolve();
-          await assertCurrent();
-          if (!publication || signal.aborted || Date.now() >= expiresAt) return { kind: 'blocked' };
-          return {
-            kind: 'navigate',
-            clientId: state.clientId,
-            baseRoute: state.route,
-            expiresAt,
-            action: { kind: 'publication', ...publication },
-          };
-        } catch {
-          return { kind: 'blocked' };
-        }
-      },
-    };
-    const result = await this.deliver(command, (receipt) => {
-      const shown = receipt.artifact as HomeWorkPublication['artifact'];
-      return Boolean(
-        publication?.artifact &&
-          shown &&
-          shown.contentRef === publication.artifact.contentRef &&
-          shown.ownerRevision === publication.artifact.ownerRevision,
-      );
+      page,
+      pages: this.pages,
+      deliver: (command, verify) => this.deliver(command, verify),
     });
-    if (signal.aborted) return 'blocked';
-    try {
-      await assertCurrent();
-    } catch {
-      return 'blocked';
-    }
-    return result.status === 'applied' || result.status === 'blocked' ? result.status : 'unconfirmed';
   }
 
   private async deliver(
-    command: Command,
+    command: HomeHubCommand,
     verifyApplied?: (receipt: Record<string, unknown>) => boolean,
   ): Promise<Outcome> {
     for (const [token, pending] of this.commands) if (pending.expiresAt <= Date.now()) this.commands.delete(token);
@@ -210,6 +155,7 @@ export class HomeHubDelivery {
         return (
           v.token === token &&
           v.clientId === command.clientId &&
+          v.clientToken === command.clientToken &&
           typeof v.clientToken === 'string' &&
           this.clients.owns(command.ownerUserId, command.clientId, v.clientToken) &&
           typeof v.status === 'string'
@@ -227,7 +173,7 @@ export class HomeHubDelivery {
   }
 
   private confirmOutcome(
-    command: Command,
+    command: HomeHubCommand,
     grant: unknown,
     receipt: Record<string, unknown> & { status: string; reason?: string },
     verifyApplied?: (receipt: Record<string, unknown>) => boolean,
@@ -269,7 +215,8 @@ export class HomeHubDelivery {
       !this.clients.owns(ownerUserId, clientId, clientToken) ||
       !command ||
       command.ownerUserId !== ownerUserId ||
-      command.clientId !== clientId
+      command.clientId !== clientId ||
+      command.clientToken !== clientToken
     )
       return Promise.resolve({ kind: 'blocked' });
     // Browser/network duplicate consumes do not repeat a CAS or authorize a second navigation.
@@ -306,7 +253,7 @@ export class HomeHubDelivery {
     expiresAt: number,
     expectedRevision?: number,
   ) {
-    const currentTargets = await this.targets(request);
+    const currentTargets = await this.targets(request, { id: original.pageId });
     const target = currentTargets.find(
       (candidate) => candidate.id === original.id && candidate.revision === original.revision,
     );

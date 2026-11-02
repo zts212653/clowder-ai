@@ -43,8 +43,6 @@ function refuse(message: string): never {
 }
 /** Existing Task data lifecycle only. No execution receipt, Queue or Registry dependency. */
 function context(deps: PluginTaskHostDeps) {
-  if (!deps.effectiveGrants.includes('task.write')) refuse('Plugin lacks task.write');
-  if (!deps.effectiveGrants.includes('task.admitEntrusted')) refuse('Plugin lacks task.admitEntrusted');
   const {
     pluginInstanceId: instanceId,
     ownerUserId: userId,

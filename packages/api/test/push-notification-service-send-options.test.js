@@ -25,7 +25,7 @@ const BASE_SUB = {
 /** @type {Record<string, string | undefined>} */
 let envSnapshot = {};
 
-function resetProxyEnv() {
+function resetLaunchEnv() {
   for (const key of ENV_KEYS) {
     delete process.env[key];
   }
@@ -35,7 +35,7 @@ function resetProxyEnv() {
  * @param {Record<string, string | undefined>} overrides
  */
 function applyEnv(overrides) {
-  resetProxyEnv();
+  resetLaunchEnv();
   for (const [key, value] of Object.entries(overrides)) {
     if (typeof value === 'string') {
       process.env[key] = value;
@@ -65,7 +65,7 @@ function createService() {
 describe('PushNotificationService sendNotification options', () => {
   beforeEach(() => {
     envSnapshot = Object.fromEntries(ENV_KEYS.map((key) => [key, process.env[key]]));
-    resetProxyEnv();
+    resetLaunchEnv();
   });
 
   afterEach(() => {

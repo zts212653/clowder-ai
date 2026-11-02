@@ -113,7 +113,13 @@ export interface ApprovalHubItem
 }
 
 /** Legacy adapter vocabulary; canonical renderers consume SettledApprovalHubItem. */
-export type SettledStatus = 'approved' | 'rejected' | 'withdrawn' | 'superseded';
+export type SettledStatus =
+  | 'approved'
+  | 'rejected'
+  | 'withdrawn'
+  | 'superseded'
+  | 'expired'
+  | 'closed_without_decision';
 
 export interface SettledApprovalItem extends Omit<ApprovalItem, 'status' | 'expiresAt' | 'inlineApprovable'> {
   status: SettledStatus;

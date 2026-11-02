@@ -4,6 +4,7 @@
  */
 
 export const ProposalKeys = {
+  userSettled: (userId: string) => `proposals:settled:${encodeURIComponent(userId)}`,
   /** Hash with proposal fields: proposal:{proposalId} */
   detail: (id: string) => `proposal:${id}`,
 

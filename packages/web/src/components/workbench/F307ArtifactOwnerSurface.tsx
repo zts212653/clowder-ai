@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
-
 import { ArtifactDetailView } from '@/components/artifacts/ArtifactDetailView';
+import { messagePublicationSource } from '@/components/content-review/usePublishedContent';
 import { useThreadArtifacts } from '@/hooks/useThreadArtifacts';
 import { scrollToMessage } from '@/utils/scrollToMessage';
 import { ArtifactFileSourceResolver } from './ArtifactFileSourceResolver';
@@ -99,7 +99,16 @@ export function F307ArtifactOwnerSurface({
         onResolved={(resolved) => resolveSurface(resolved)}
       />
     );
-  if (artifact.url && /^\/uploads\/[^/]+\.(png|jpe?g|webp|mp4)$/i.test(artifact.url))
+  if (
+    artifact.url &&
+    artifact.sourceMessageId &&
+    artifact.publicationItem &&
+    messagePublicationSource(
+      { threadId: target.threadId, messageId: artifact.sourceMessageId, messageRevision: String(artifact.createdAt) },
+      artifact.publicationItem,
+      artifact.url,
+    )
+  )
     return (
       <ArtifactPublicationSurface
         key={`${target.threadId}:${target.artifactId}`}

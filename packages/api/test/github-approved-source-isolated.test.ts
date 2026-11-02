@@ -28,6 +28,29 @@ test('writer proof rejects stale, active, public and extra-field evidence', asyn
   try {
     await writeFile(path, JSON.stringify(proof), { mode: 0o600 });
     assert.match((await readWriterEvidence(path)).ref, /^sha256:/);
+    const installedRecoveryInstance = {
+      pluginId: 'official.github-operations',
+      instanceId: 'pi_2033aea0-229d-4554-a309-7dca009ddd12',
+      packageDigest: APPROVAL.archiveDigest,
+      intent: 'disabled',
+      live: 'stopped',
+      recoveryMode: 'import-only',
+    };
+    await writeFile(path, JSON.stringify({ ...proof, githubInstalledInstances: 1, installedRecoveryInstance }));
+    assert.match((await readWriterEvidence(path)).ref, /^sha256:/);
+    for (const changed of [
+      { ...installedRecoveryInstance, live: 'running' },
+      { ...installedRecoveryInstance, intent: 'enabled' },
+      { ...installedRecoveryInstance, packageDigest: 'wrong' },
+      { ...installedRecoveryInstance, recoveryMode: '' },
+    ]) {
+      await writeFile(
+        path,
+        JSON.stringify({ ...proof, githubInstalledInstances: 1, installedRecoveryInstance: changed }),
+      );
+      await assert.rejects(readWriterEvidence(path));
+    }
+    await writeFile(path, JSON.stringify(proof));
     await assert.rejects(readWriterEvidence(path, proof.observedAt + 300001), /Refresh/);
     for (const changed of [
       { ...proof, githubInstalledInstances: 1 },

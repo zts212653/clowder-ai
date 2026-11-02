@@ -26,6 +26,7 @@ export function closeCollectiveScope(
     collective: me?.collectives.find((item) => item.collectiveId === scope.collectiveId),
     restrictedScope: { ...scope, reason },
     events: [],
+    channels: undefined,
     participants: undefined,
     members: undefined,
     collaboration: undefined,

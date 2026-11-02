@@ -37,6 +37,13 @@ function sanitizePreferences(value: unknown): ResolvedPreferences {
   return {
     aliases,
     open,
+    ...(Array.isArray(candidate.recentGroupIds)
+      ? {
+          recentGroupIds: [
+            ...new Set(candidate.recentGroupIds.filter((id) => typeof id === 'string' && GROUP_ID_RE.test(id))),
+          ],
+        }
+      : {}),
     ...(Object.keys(memberSort).length ? { memberSort } : {}),
     ...(Object.keys(collapsedPeek).length ? { collapsedPeek } : {}),
   };
@@ -93,6 +100,7 @@ export function saveThreadAttentionPreference(
     return {
       ...current,
       threadAttention: {
+        ...(existing.recentGroupIds ? { recentGroupIds: existing.recentGroupIds } : {}),
         aliases,
         open,
         ...(Object.keys(memberSort).length ? { memberSort } : {}),
@@ -101,4 +109,17 @@ export function saveThreadAttentionPreference(
     };
   });
   return resolveThreadAttentionPreferences(projectRoot);
+}
+
+export function recordRecentThreadAttentionGroup(projectRoot: string, groupId: string): void {
+  updateUserPreferences(projectRoot, (current) => {
+    const existing = sanitizePreferences(current.threadAttention);
+    return {
+      ...current,
+      threadAttention: {
+        ...existing,
+        recentGroupIds: [groupId, ...(existing.recentGroupIds ?? []).filter((id) => id !== groupId)],
+      },
+    };
+  });
 }

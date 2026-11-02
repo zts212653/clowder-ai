@@ -16,7 +16,7 @@
     "prepare": "tsc",
     "lint": "tsc --noEmit",
     "test": "pnpm run build && node --test test/*.test.js",
-    "clean": "rm -rf dist"
+    "clean": "node ../../scripts/clean-path.mjs dist"
   },
   "devDependencies": {
     "typescript": "^5.3.3"

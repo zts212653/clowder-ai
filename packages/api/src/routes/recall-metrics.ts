@@ -28,6 +28,9 @@ export interface RecallMetricsRoutesOptions {
   messageStore?: SignalMessageStore & RecallReplyMessageStore;
   personMemoryStore?: RecallSourceReaders['personMemoryStore'];
   cueSourceReader?: RecallSourceReaders['cueSourceReader'];
+  profileMemoryStore?: RecallSourceReaders['profileMemoryStore'];
+  tasteSources?: RecallSourceReaders['tasteSources'];
+  eventSources?: RecallSourceReaders['eventSources'];
   /** Optional: pass threadStore to enable thread ownership validation on /api/recall/events. */
   threadStore?: Pick<IThreadStore, 'get' | 'list'>;
 }

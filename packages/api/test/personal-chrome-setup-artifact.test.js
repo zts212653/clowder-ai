@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readdir, readFile, realpath, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { pathToFileURL } from 'node:url';
 import { withOwnerOperationRequest } from '../dist/domains/plugin/carrier/plugin-owner-operation-context.js';
 import { FilesystemVerifiedPluginPackageLocator } from '../dist/domains/plugin/external-runtime/filesystem-package-locator.js';
 import {
@@ -13,7 +14,8 @@ import {
   publishPluginPackageArchive,
 } from '../dist/domains/plugin/index.js';
 import { PersonalChromeSetup } from '../dist/domains/plugin/manager/chrome-setup/personal-chrome-setup.js';
-import { TRUSTED_CHROME_SETUP_DELIVERY as pin } from '../dist/domains/plugin/manager/chrome-setup/personal-chrome-setup-policy.js';
+import { TRUSTED_CHROME_SETUP_DELIVERIES } from '../dist/domains/plugin/manager/chrome-setup/personal-chrome-setup-policy.js';
+import { FilesystemBuiltinPluginPackageMaterializer } from '../dist/domains/plugin/manager/package-assets/builtin-package-materializer.js';
 
 const archive = process.env.F202_CHROME_SETUP_ARCHIVE;
 
@@ -22,10 +24,13 @@ test(
   {
     skip: !archive && 'Run the candidate gate with F202_CHROME_SETUP_ARCHIVE pointing to the exact prepared archive',
   },
-  async () => {
+  async (t) => {
     const bytes = await readFile(archive);
-    assert.equal(`sha512-${createHash('sha512').update(bytes).digest('base64')}`, pin.digest);
+    const digest = `sha512-${createHash('sha512').update(bytes).digest('base64')}`;
+    const pin = TRUSTED_CHROME_SETUP_DELIVERIES.find((delivery) => delivery.digest === digest);
+    assert.ok(pin, 'only an exact Host-trusted archive can exercise HOME setup');
     const root = await realpath(await mkdtemp(join(tmpdir(), 'chrome-setup-artifact-')));
+    t.after(() => rm(root, { recursive: true, force: true }));
     const home = join(root, 'home');
     await mkdir(home);
     const packagesRoot = join(root, 'packages');
@@ -33,6 +38,7 @@ test(
     const packages = new FilesystemVerifiedPluginPackageLocator(packagesRoot);
     const located = await packages.resolveInstalledPackage(pin.digest);
     const manifest = structuredClone(located.manifest);
+    assert.equal(manifest.version, pin.version);
     await located.release();
     assert.ok(!manifest.configuration.some((x) => x.key === 'hostChromeSetup'));
     const store = new MemoryPluginInventoryStore();
@@ -42,14 +48,30 @@ test(
       computedPackageDigest: pin.digest,
       expectedPackageDigest: pin.digest,
       packagePluginId: manifest.pluginId,
-      effectiveGrants: [],
+      ...(['0.1.0-alpha.6', '0.1.0-alpha.7'].includes(pin.version)
+        ? {
+            provenance: {
+              kind: 'catalog',
+              catalogId: 'personal-chrome-companion',
+              packageName: '@clowder-ai/personal-chrome-companion',
+            },
+          }
+        : {}),
     });
     const lifecycle = new ExternalPluginLifecycleService({
       store,
       supervisor: { start: async () => {}, stop: async () => {} },
     });
     await lifecycle.prepare('pi_fresh_chrome', 1);
-    const setup = new PersonalChromeSetup({ inventory: store, lifecycle, packages, projectRoot: root, home });
+    const materializer = new FilesystemBuiltinPluginPackageMaterializer({ packagesRoot });
+    const setup = new PersonalChromeSetup({
+      inventory: store,
+      lifecycle,
+      packages,
+      materializer,
+      projectRoot: root,
+      home,
+    });
     const invoke = (action) =>
       withOwnerOperationRequest(
         {
@@ -68,20 +90,51 @@ test(
     const inspected = await invoke('inspect');
     assert.equal(inspected.status, 200, JSON.stringify(inspected));
     assert.deepEqual(await readdir(home), before, 'inspect must not write HOME');
+    const helperRoot = join(root, '.cat-cafe/plugin-host/personal-chrome-host');
+    const authorizations = join(helperRoot, 'conversation-binding.json');
+    const timestamp = '2026-10-01T00:00:00.000Z';
+    const retained = JSON.stringify({
+      schemaVersion: 2,
+      provider: 'chatgpt',
+      updatedAt: timestamp,
+      conversations: Array.from({ length: 20 }, (_, index) => ({
+        conversationId: `retained-${index}`,
+        chatUrl: `https://chatgpt.com/c/retained-${index}`,
+        authorizedAt: timestamp,
+        updatedAt: timestamp,
+      })),
+    });
+    await mkdir(helperRoot, { recursive: true, mode: 0o700 });
+    await writeFile(authorizations, retained, { mode: 0o600 });
     const installed = await invoke('install');
     assert.equal(installed.status, 200, JSON.stringify(installed));
-    const helperRoot = join(root, '.cat-cafe/plugin-host/personal-chrome-host');
     const paired = join(helperRoot, 'pairing.json');
     const pairingBefore = await readFile(paired, 'utf8');
     const retry = await invoke('install');
     assert.equal(retry.status, 200, JSON.stringify(retry));
     assert.equal(await readFile(paired, 'utf8'), pairingBefore);
-    const authorizations = join(helperRoot, 'conversation-binding.json');
-    await writeFile(authorizations, JSON.stringify({ fixture: 'retained-owner-authorizations' }));
+    const readerPackage = await packages.resolveInstalledPackage(pin.digest);
+    try {
+      const { readPersonalChromeConversationAuthorizations } = await import(
+        pathToFileURL(join(readerPackage.rootDir, 'native-host/conversation-binding.mjs')).href
+      );
+      assert.equal(
+        (await readPersonalChromeConversationAuthorizations(authorizations, { migrateLegacy: false })).conversations
+          .length,
+        20,
+      );
+    } finally {
+      await readerPackage.release();
+    }
+    assert.equal(
+      await readFile(authorizations, 'utf8'),
+      retained,
+      'install, repair and actual package read retain existing authorization bytes',
+    );
     const removed = await invoke('uninstall');
     assert.equal(removed.status, 200, JSON.stringify(removed));
     await assert.rejects(readFile(paired), { code: 'ENOENT' });
-    assert.equal(JSON.parse(await readFile(authorizations, 'utf8')).fixture, 'retained-owner-authorizations');
+    assert.equal(await readFile(authorizations, 'utf8'), retained);
     assert.equal((await store.snapshot()).instances[0].pluginInstanceId, 'pi_fresh_chrome');
     // All filesystem manipulation in this test belongs to this fresh temp HOME.
     const registrationRoot =
@@ -106,6 +159,7 @@ test(
         inventory: store,
         lifecycle,
         packages,
+        materializer,
         projectRoot: root,
         home: home2,
       });

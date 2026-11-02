@@ -178,6 +178,55 @@ describe('EventStreamService — stale + snapshot (INV-9)', () => {
     );
   });
 
+  test('historical presentation metadata cannot invalidate snapshot or append', async () => {
+    const handleId = await issueHandle();
+    const { subscriptionId } = await stream.subscribe(CTX, handleId);
+    const sent = await sendService.send(CTX, {
+      address: { kind: 'thread_handle', handle: handleId },
+      idempotencyKey: 'snapshot-historical-presentation',
+      payload: {
+        provenance: { epistemicStatus: 'inference' },
+        elements: [{ elementId: 'el-1', kind: 'text', payload: { text: 'historical body' } }],
+      },
+    });
+    const stored = messageStore.getById(sent.messageId);
+    stored.extra.pluginMessage = {
+      ...stored.extra.pluginMessage,
+      presentation: {
+        connector: 'github-operations',
+        label: 'GitHub',
+        icon: 'github',
+        url: 'https://github.com/owner/repo/pull/42',
+      },
+    };
+
+    const append = new appendMod.AppendService({
+      messageStore,
+      handles,
+      ledger: new ledgerMod.MessagingLedger(new memory.MemoryLedgerStore()),
+      events,
+      appendLock: new memory.MemoryAppendLock(),
+    });
+    await append.appendElements(CTX, {
+      handle: sent.messageHandle,
+      operationId: 'append-after-historical-presentation',
+      elements: [{ elementId: 'el-2', kind: 'text', payload: { text: 'still appendable' } }],
+    });
+
+    const result = await stream.snapshot(CTX, subscriptionId);
+    assert.equal(result.envelopes.length, 1);
+    assert.equal(result.envelopes[0].revision, 2);
+    assert.deepEqual(
+      result.envelopes[0].payload.elements.map((element) => element.payload.text),
+      ['historical body', 'still appendable'],
+    );
+    assert.deepEqual(messageStore.getById(sent.messageId).extra.pluginMessage.presentation, {
+      connector: 'github-operations',
+      label: 'GitHub',
+      icon: 'github',
+    });
+  });
+
   // W2-5b-0: Host messages are on the stream since G5 (the publishing seam), so the catch-up
   // snapshot carries them too. The old exclusion ("host mutations are not represented by the plugin
   // event log") predates G5 and left a catching-up subscriber without any cat or user message.

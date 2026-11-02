@@ -1,3 +1,4 @@
+import { useCollectiveLanguage, useCollectiveText } from './collective-copy.js';
 import { useSharedArtifactReading } from './SharedArtifactReading.js';
 import { sharedArtifactRequestState } from './shared-artifact-request-state.js';
 import { useSharedArtifacts } from './use-collective-artifacts.js';
@@ -5,6 +6,8 @@ import { useSharedArtifactRequestReceipt } from './use-shared-artifact-request-r
 
 /** System projections from owner receipts and the canonical ledger; no generated Human/Cat message is appended. */
 export function SharedArtifactMessageFeedback({ eventId }: { readonly eventId: string }) {
+  const language = useCollectiveLanguage();
+  const t = useCollectiveText();
   const shared = useSharedArtifacts();
   const reading = useSharedArtifactReading();
   const annotations =
@@ -21,8 +24,10 @@ export function SharedArtifactMessageFeedback({ eventId }: { readonly eventId: s
     <div className="shared-artifact-message-feedback">
       {annotations.map((annotation, index) => (
         <p key={annotation.id}>
-          引用 {index + 1} · 第 {annotation.collectiveMessage?.ownerRevision} 版 ·{' '}
-          {'quote' in annotation.anchor ? annotation.anchor.quote : '作品中的选区'}
+          {language === 'en'
+            ? `Reference ${index + 1} · version ${annotation.collectiveMessage?.ownerRevision} · `
+            : `引用 ${index + 1} · 第 ${annotation.collectiveMessage?.ownerRevision} 版 · `}
+          {'quote' in annotation.anchor ? annotation.anchor.quote : t('作品中的选区')}
         </p>
       ))}
       {requests
@@ -34,18 +39,20 @@ export function SharedArtifactMessageFeedback({ eventId }: { readonly eventId: s
             onClick={() => shared?.compare(request.requestId)}
             disabled={!request.latestProposalRef}
           >
-            {shared?.catName(request.target.humanId, request.target.catId)} · {sharedArtifactRequestState(request)}
-            {request.latestProposalRef ? ' · 查看对照' : ''}
+            {shared?.catName(request.target.humanId, request.target.catId)} · {t(sharedArtifactRequestState(request))}
+            {request.latestProposalRef ? ` · ${t('查看对照')}` : ''}
           </button>
         ))}
       {receipts.map(({ artifact, version }) => (
         <output key={version.receiptRef} data-source-kind="content-owner-receipt">
           <span>
-            {version.adoptedByHumanId ? shared?.humanName(version.adoptedByHumanId) : '有权成员'}采用了
-            {version.authorCatId ? ` ${version.authorCatId} ` : ''}的修改 ·{' '}
+            {language === 'en'
+              ? `${version.adoptedByHumanId ? shared?.humanName(version.adoptedByHumanId) : t('有权成员')} adopted${version.authorCatId ? ` ${version.authorCatId}'s ` : ' '}changes · `
+              : `${version.adoptedByHumanId ? shared?.humanName(version.adoptedByHumanId) : '有权成员'}采用了${version.authorCatId ? ` ${version.authorCatId} ` : ''}的修改 · `}
           </span>
           <button type="button" onClick={() => shared?.open(artifact, version.ownerRevision)}>
-            {artifact.title} · 第 {version.ownerRevision} 版
+            {artifact.title} ·{' '}
+            {language === 'en' ? `Version ${version.ownerRevision}` : `第 ${version.ownerRevision} 版`}
           </button>
         </output>
       ))}

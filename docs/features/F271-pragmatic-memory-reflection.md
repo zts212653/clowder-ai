@@ -9,12 +9,21 @@ description: "把 session 收尾与每日 context 反射成有来源、有类型
 description_source: human
 description_author: codex-sol
 description_updated_at: 2026-07-20T08:00:00Z
-tips_exempt: "Renewed 2026-09-03 for F312 Phase E E0 qualification: F271 remains an internal write-side producer with no named invocation consumer of its own; user-visible review and reading still reuse existing F221/F231/F255 surfaces."
+tips_exempt: "Renewed 2026-10-23 for F332 consolidation: reflection candidates keep the existing F221/F231/F255 review and reading surfaces, and adoption/rejection outcomes remain to be verified. This status change neither activates a producer nor adds a user action or discovery surface."
 ---
 
 # F271: Pragmatic Memory Reflection — 功利记忆写侧反射
 
-> **Status**: in-progress（Phase A + B implemented；Phase B 首次 live run 超时；Phase C 未开工） | **Owner**: Ragdoll（设计）+ 小太阳·Maine Coon（记忆边界） | **Priority**: P1
+> **Status**: closed (consolidated into F332; 未完成结果继续承接，非全部交付) | **Owner**: Ragdoll（设计）+ 小太阳·Maine Coon（记忆边界） | **Priority**: P1
+
+## 2026-10-23 项目收拢至 F332
+
+You 在 `[thread-id]#private-source-id` 明确要求关闭旧记忆项目、
+保留有价值的结果并新立一项。本项目登记据此归入 [F332](F332-experience-informed-memory.md)；
+**本文件仍保留原合同及历史证据的权威，未被逐项替代的合同继续有效。**
+原 AC 实情、Task、owner、accepted scope 和等待不变；本次不声称全部完成、不关闭来源、不迁移数据。
+
+> **关闭前状态快照**: in-progress（Phase A + B implemented；Phase B 首次 live run 超时；Phase C 未开工） | **Owner**: Ragdoll（设计）+ 小太阳·Maine Coon（记忆边界） | **Priority**: P1
 >
 > **operator signoff**: 2026-07-20，You 批准独立功利线，并要求它提高记忆可用性与 proactive 主动性，而不是生产一坨每日摘要。
 

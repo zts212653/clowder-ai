@@ -35,7 +35,13 @@ assert_named_alpha_prepared() {
   named_alpha_coordinates not-serving --record "$NAMED_ALPHA_COORDINATES" >/dev/null || die "named Alpha may not mutate a serving tree"
 }
 
+hold_named_alpha_lifecycle() {
+  node "$SCRIPT_DIR/lib/alpha-lifecycle-lock.mjs" acquire "$NAMED_ALPHA_COORDINATES" "$$" || die "named Alpha lifecycle already active or unproven"
+  trap 'node "$SCRIPT_DIR/lib/alpha-lifecycle-lock.mjs" release "$NAMED_ALPHA_COORDINATES" "$$"' EXIT
+}
+
 init_named_alpha_worktree() {
+  hold_named_alpha_lifecycle
   require_git_repo
   ensure_remote_exists
   if worktree_exists; then
@@ -48,7 +54,8 @@ init_named_alpha_worktree() {
   git -C "$PROJECT_DIR" fetch origin main
   local target
   target="$(git -C "$PROJECT_DIR" rev-parse --verify 'refs/remotes/origin/main^{commit}')"
-  git -C "$PROJECT_DIR" worktree add "$ALPHA_DIR" -b "$ALPHA_BRANCH" "$target"
+  (cd "$PROJECT_DIR" && node "$SCRIPT_DIR/worktree-new.mjs" "$ALPHA_DIR" \
+    --branch "$ALPHA_BRANCH" --base "$target" --policy merged --role alpha --full)
   assert_named_alpha_prepared
   if [ "$RUN_INSTALL" = true ]; then install_alpha_dependencies; fi
   info "named alpha worktree ready: $ALPHA_DIR"
@@ -77,6 +84,9 @@ assert_named_alpha_ports_idle() {
 start_named_alpha_worktree() {
   umask 077
   worktree_exists || die "named Alpha must be initialized as a registered checkout before start"
+  # Hold admission across sync/build and exec into start-dev. A dead launcher
+  # leaves a stale lease which only a proven-absent PID permits reclaiming.
+  hold_named_alpha_lifecycle
   assert_named_alpha_ports_idle
   sync_named_alpha_worktree
   ensure_alpha_dependencies

@@ -233,7 +233,7 @@ it('distinguishes an unreadable Artifact source from a Project that simply has n
       />,
     ),
   );
-  expect(container.querySelector('[aria-label="项目作品"]')?.textContent).toContain('这个项目还没有作品');
+  expect(container.querySelector('[aria-label="项目作品"]')?.textContent).toContain('还没有引用作品。');
 });
 
 it('shows Human-run and Cat-run Tasks together instead of treating every unassigned Cat as no executor', async () => {

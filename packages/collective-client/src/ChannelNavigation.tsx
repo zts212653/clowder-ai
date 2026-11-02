@@ -10,6 +10,7 @@ export function ChannelNavigation({
   query,
   onQuery,
   onSelect,
+  onCreateChannel,
   onMembers,
   onLibrary,
   libraryActive,
@@ -23,6 +24,7 @@ export function ChannelNavigation({
   readonly query: string;
   readonly onQuery: (value: string) => void;
   readonly onSelect: (id: string) => void;
+  readonly onCreateChannel?: () => void;
   readonly onMembers: () => void;
   readonly onLibrary?: () => void;
   readonly libraryActive?: boolean;
@@ -79,10 +81,10 @@ export function ChannelNavigation({
       <div className="destination-scroll">
         <div className="destination-global-entries">
           {onRoadmap && (
-            <nav className="destination-list destination-global-list" aria-label="项目">
+            <nav className="destination-list destination-global-list" aria-label={t('项目')}>
               <button
                 type="button"
-                aria-label="项目"
+                aria-label={t('项目')}
                 className={`destination-item ${roadmapActive ? 'destination-item-active' : ''}`}
                 aria-current={roadmapActive ? 'page' : undefined}
                 onClick={onRoadmap}
@@ -91,14 +93,14 @@ export function ChannelNavigation({
                   <ShellGlyph name="checkSquare" />
                 </span>
                 <span>
-                  <strong>项目</strong>
+                  <strong>{t('项目')}</strong>
                 </span>
                 {roadmapCount !== undefined && <small>{roadmapCount}</small>}
               </button>
             </nav>
           )}
           {onLibrary && (
-            <nav className="destination-list destination-global-list" aria-label="作品资料库">
+            <nav className="destination-list destination-global-list" aria-label={t('作品资料库')}>
               <button
                 type="button"
                 aria-label={t('全部作品')}
@@ -115,7 +117,7 @@ export function ChannelNavigation({
               </button>
             </nav>
           )}
-          <nav className="destination-list destination-global-list member-destination" aria-label="共同家园成员">
+          <nav className="destination-list destination-global-list member-destination" aria-label={t('成员')}>
             <button type="button" className="destination-item" onClick={onMembers}>
               <span className="destination-symbol">
                 <CollectiveIcon kind="members" />
@@ -128,9 +130,18 @@ export function ChannelNavigation({
           </nav>
         </div>
         <nav className="destination-list" aria-label={t('频道')}>
-          <p>
-            {t('频道')} {channels.length}
-          </p>
+          <div className="destination-list-heading">
+            <p>
+              {t('频道')} {channels.length}
+            </p>
+            {onCreateChannel && (
+              <AppTooltip label={t('新建频道')}>
+                <button type="button" aria-label={t('新建频道')} onClick={onCreateChannel}>
+                  <ShellGlyph name="plus" />
+                </button>
+              </AppTooltip>
+            )}
+          </div>
           {(query ? visible : channels).map((channel) => (
             <button
               key={channel.id}
@@ -145,7 +156,7 @@ export function ChannelNavigation({
               </span>
             </button>
           ))}
-          {query && !visible.length && <p className="navigation-empty">没有同名频道；主区显示匹配的消息。</p>}
+          {query && !visible.length && <p className="navigation-empty">{t('没有同名频道；主区显示匹配的消息。')}</p>}
         </nav>
       </div>
     </>

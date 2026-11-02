@@ -91,11 +91,12 @@ export async function probeRecordedApiPort(
     readListeners = listenerPids,
     isDescendant = isSelfOrDescendantOf,
     fetchImpl = fetch,
+    readiness = false,
   } = {},
 ) {
   const port = state?.ports?.api;
   if (!Number.isSafeInteger(port) || !Number.isSafeInteger(incarnationPid)) return undefined;
-  const ref = `http://127.0.0.1:${port}/health`;
+  const ref = `http://127.0.0.1:${port}${readiness ? '/api/ready' : '/health'}`;
   const ownership = { readListeners, isDescendant };
 
   const ownedBefore = portBelongsTo(port, incarnationPid, ownership);
@@ -113,7 +114,7 @@ export async function probeRecordedApiPort(
     }
     if (!response.ok) return { ok: false, ref };
     const body = await response.json();
-    healthy = body?.status === 'ok';
+    healthy = body?.status === (readiness ? 'ready' : 'ok');
   } catch {
     return { ok: false, ref };
   }

@@ -17,7 +17,7 @@ describe('annotation draft during incoming-message layout changes', () => {
   let owner: MessageActionOwnership;
   const save = vi.fn();
 
-  function Harness({ selectionPresent = true, incomingCount = 0 }) {
+  function Harness({ selectionPresent = true, incomingCount = 0, direct = false }) {
     owner = useMessageActionOwnership('source-message');
     return (
       <MessageActionOwnershipProvider value={owner}>
@@ -28,6 +28,7 @@ describe('annotation draft during incoming-message layout changes', () => {
           positionMode="fixed"
           actionTestId="selection-trigger"
           onSave={save}
+          collectComment={!direct}
         />
       </MessageActionOwnershipProvider>
     );
@@ -89,6 +90,14 @@ describe('annotation draft during incoming-message layout changes', () => {
       document.querySelector<HTMLButtonElement>('[data-testid="context-annotation-save"]')!.click(),
     );
     expect(save).toHaveBeenCalledWith(selection, 'Half-written comment');
+    expect(editor()).toBeNull();
+  });
+
+  it('hands an owner selection to its existing composer without opening a second comment draft', async () => {
+    await act(async () => root.render(<Harness direct />));
+    await act(async () => owner.settle(true, true));
+    await act(async () => document.querySelector<HTMLButtonElement>('[data-testid="selection-trigger"]')?.click());
+    expect(save).toHaveBeenCalledWith(selection, '');
     expect(editor()).toBeNull();
   });
 

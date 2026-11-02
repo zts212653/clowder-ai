@@ -1,6 +1,7 @@
 import { CollectiveScopeRecovery } from './CollectiveScopeRecovery.js';
 import { CollectiveWorkspace } from './CollectiveWorkspace.js';
 import { collectiveClientNamespace } from './human-send-custody.js';
+import { MessageExpressionProvider } from './message-expression-context.js';
 import { OnboardingScene } from './OnboardingScene.js';
 import { ProductShell } from './ProductShell.js';
 import { useCollectiveClient } from './use-collective-client.js';
@@ -21,7 +22,11 @@ function LiveCollectiveClient({ embedded }: { readonly embedded: boolean }) {
     !snapshot.restrictedScope && snapshot.phase === 'ready' && Boolean(snapshot.me?.auth && snapshot.collective);
 
   if (!snapshot.restrictedScope && snapshot.phase === 'ready' && snapshot.collective && snapshot.me) {
-    return <CollectiveWorkspace key={collectiveClientNamespace(snapshot)} embedded={embedded} client={client} />;
+    return (
+      <MessageExpressionProvider value={client.expression}>
+        <CollectiveWorkspace key={collectiveClientNamespace(snapshot)} embedded={embedded} client={client} />
+      </MessageExpressionProvider>
+    );
   }
 
   return (
@@ -45,7 +50,7 @@ function LiveCollectiveClient({ embedded }: { readonly embedded: boolean }) {
           onAuthenticate={client.authenticate}
         />
       ) : snapshot.phase === 'ready' && snapshot.me ? (
-        <p className="channel-empty">选择一个共同家园，继续交流。</p>
+        <p className="channel-empty">选择一个共同体，继续交流。</p>
       ) : (
         <OnboardingScene
           phase={snapshot.phase}

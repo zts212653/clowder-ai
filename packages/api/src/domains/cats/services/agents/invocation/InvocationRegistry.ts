@@ -12,6 +12,10 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import {
+  parseSharedInvocationContext,
+  type SharedInvocationContext,
+} from '@cat-cafe/mcp-server/dist/shared-invocation-context.js';
 import { type CatId, type ManagedWorkBinding } from '@cat-cafe/shared';
 import type { CallerTraceContext } from '../../../../../infrastructure/telemetry/genai-semconv.js';
 import type { ITurnExecutionStore } from '../../stores/ports/TurnExecutionStore.js';
@@ -47,6 +51,8 @@ export interface InvocationRecord {
   traceContext?: CallerTraceContext;
   /** ADR-042 callback authorization boundary, persisted across API restarts. */
   toolExecutionPolicy?: ToolExecutionPolicy;
+  /** Immutable Host launch roots and capability upper bound for shared MCP requests. */
+  readonly sharedMcpContext?: SharedInvocationContext;
   /** Read-only history of a retired authority; terminal records only. */
   readonly retiredAuthorization?: RetiredAuthorizationSnapshot;
   /** In-invocation idempotency keys for callback post-message de-duplication. */
@@ -206,6 +212,7 @@ export class InvocationRegistry {
     originTriggerMessageId?: string,
     ownerAuthProvenance: OwnerAuthProvenance = 'unknown',
     managedWorkBinding?: ManagedWorkBinding,
+    sharedMcpContext?: SharedInvocationContext,
   ): Promise<{ invocationId: string; callbackToken: string }> {
     if (managedWorkBinding) {
       if (ownerAuthProvenance !== 'strict') {
@@ -225,6 +232,7 @@ export class InvocationRegistry {
       userId,
       ownerAuthProvenance,
       ...(managedWorkBinding ? { managedWorkBinding: Object.freeze({ ...managedWorkBinding }) } : {}),
+      ...(sharedMcpContext ? { sharedMcpContext: parseSharedInvocationContext(sharedMcpContext) } : {}),
       catId,
       threadId,
       ...(parentInvocationId ? { parentInvocationId } : {}),

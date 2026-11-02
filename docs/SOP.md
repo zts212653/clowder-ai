@@ -3,7 +3,7 @@ feature_ids: [F042, F083, F303]
 topics: [sop]
 doc_kind: note
 created: 2026-02-26
-updated: 2026-10-15
+updated: 2026-10-23
 ---
 
 # Clowder AI 开发 SOP
@@ -306,11 +306,11 @@ PR-3 是 interim 方案 —— 仍开 per-run PR，只是 label + 猫自决 merg
 
 | 本轮要判断什么 | 选谁 |
 |---|---|
-| 测试能兜住的实现正确性 | 非作者Maine Coon、kimi 或 gemini-argon（只审不写代码），同族不同个体也行 |
+| 测试能兜住的实现正确性 | 非作者Maine Coon、Sonnet、kimi 或 gemini-argon（只审不写代码），同族不同个体也行 |
 | 方向和形状 | 创作位，一次给完；新界面/改版、架构模块或归属变化、做片子，动手前出稿 |
 | 安全、鉴权、生产数据、外部契约 | 优先 cloud；cloud 不可用时只换成一只本地 reviewer，不拆成两路 |
 
-Sonnet 常规 review 暂停（2026-10-15 operator 试行，来源见 dossier v0.11），其他任务不因此停用。按 dossier 现行边界和实时可用性选具体个体；本次不扩大到其他Siamese。
+在这几只里按派活时各家粮的实际情况和现行有效安排挑，已撤销或已过期的暂停、稀缺标签不作排除依据。2026-10-15 试行的 Sonnet 常规 review 暂停已于 2026-10-23 由 operator 撤销（见 dossier v0.13）。Siamese里只有 gemini-argon 参与常规 review，不扩大到其他Siamese。
 
 只有两个风险面确实需要不同的人时才加第二只，并写明各自理由。迭代修复只请改动所在那一面的 reviewer 复审；稀缺席位不进迭代循环，按 dossier `engagementPolicy` 交付单次判断后退出。
 

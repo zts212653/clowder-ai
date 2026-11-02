@@ -43,6 +43,93 @@ function responseMessage(id, targetId, status, content = `${targetId} result`, s
 const scope = { ownerId: 'owner-1', threadId: 'thread-1', callerCatId: 'caller' };
 
 describe('CallerDispatchObservationRegistry', () => {
+  it('projects a terminal response by coordinate without copying its body', async () => {
+    const registry = new CallerDispatchObservationRegistry();
+    const source = inputMessage({
+      refs: [{ targetId: 'b', phase: 'settled', statusMessageId: 'response-b', dispatchedAt: 2 }],
+    });
+    const response = responseMessage('response-b', 'b', 'completed', `${'x'.repeat(1199)}🐾`);
+    const messages = new Map([
+      [source.id, source],
+      [response.id, response],
+    ]);
+    registry.registerPersistedSource(source, ['b']);
+
+    const projection = await registry.project({ getById: async (id) => messages.get(id) ?? null }, scope);
+
+    assert.match(projection.prompt, /source-1 → b: completed; response=response-b\n/);
+    assert.doesNotMatch(projection.prompt, /body=|🐾/);
+    assert.equal(projection.prompt.isWellFormed(), true);
+    assert.equal(projection.included[0]?.terminal, true);
+  });
+
+  it('keeps delivery-failure detail clipping within budget without splitting an emoji', async () => {
+    for (const prefixLength of [1197, 1198, 1199]) {
+      const registry = new CallerDispatchObservationRegistry();
+      const source = inputMessage({
+        refs: [{ targetId: 'b', phase: 'settled', statusMessageId: 'failure-b', dispatchedAt: 2 }],
+      });
+      const content = `${'x'.repeat(prefixLength)}🐾 more text`;
+      const failure = {
+        id: 'failure-b',
+        threadId: 'thread-1',
+        userId: 'owner-1',
+        from: { kind: 'system', service: 'message-delivery' },
+        catId: null,
+        content,
+        timestamp: 3,
+        lifecycle: {
+          kind: 'delivery_failure',
+          orderKey: '3:failure-b',
+          status: 'failed',
+          sourceEntryId: 'entry-1',
+          inputMessageId: 'source-1',
+          requestedTargets: ['b'],
+          reason: 'prestart_timeout',
+          createdAt: 3,
+        },
+      };
+      const messages = new Map([
+        [source.id, source],
+        [failure.id, failure],
+      ]);
+      registry.registerPersistedSource(source, ['b']);
+
+      const projection = await registry.project({ getById: async (id) => messages.get(id) ?? null }, scope);
+      const body = projection.prompt.split('body=')[1].split('\n')[0];
+
+      assert.equal(body.isWellFormed(), true, 'truncated observation must remain valid Unicode for JSON-RPC');
+      assert.ok(body.length <= 1200);
+      const expected = prefixLength === 1197 ? `${'x'.repeat(1197)}🐾…` : `${'x'.repeat(prefixLength)}…`;
+      assert.equal(body, expected);
+      assert.equal(failure.content, content, 'projection must not rewrite the persisted response');
+      assert.equal(projection.included[0]?.terminal, true);
+    }
+  });
+
+  it('keeps an unreturned terminal response as a coordinate-only pending observation', async () => {
+    const registry = new CallerDispatchObservationRegistry();
+    const source = inputMessage({
+      refs: [{ targetId: 'b', phase: 'settled', statusMessageId: 'response-b', dispatchedAt: 2 }],
+    });
+    const response = {
+      ...responseMessage('response-b', 'b', 'completed', 'unreturned body'),
+      threadId: 'thread-2',
+    };
+    const messages = new Map([
+      [source.id, source],
+      [response.id, response],
+    ]);
+    registry.registerPersistedSource(source, ['b']);
+
+    const projection = await registry.project({ getById: async (id) => messages.get(id) ?? null }, scope);
+
+    assert.match(projection.prompt, /unknown.*response=response-b/);
+    assert.doesNotMatch(projection.prompt, /unreturned body|body=/);
+    assert.equal(projection.included[0]?.terminal, false);
+    assert.equal(registry.list(scope).length, 1);
+  });
+
   it('projects exact terminal/open targets and clears only terminal keys included in the prompt', async () => {
     const registry = new CallerDispatchObservationRegistry();
     const source = inputMessage({
@@ -135,9 +222,9 @@ describe('CallerDispatchObservationRegistry', () => {
 
     const projection = await registry.project({ getById: async (id) => messages.get(id) ?? null }, scope);
     for (const status of terminals) {
-      assert.match(projection.prompt, new RegExp(`source-${status} → b: ${status}`));
-      assert.match(projection.prompt, new RegExp(`${status} body`));
+      assert.match(projection.prompt, new RegExp(`source-${status} → b: ${status}; response=response-${status}\\n`));
     }
+    assert.doesNotMatch(projection.prompt, /body=/);
     assert.equal(projection.included.filter((item) => item.terminal).length, terminals.length);
     assert.equal(new Set(projection.included.map((item) => item.key)).size, terminals.length);
   });

@@ -403,7 +403,7 @@ async function dispatchViaQueue(
   parentInvocationId: string,
   actionFence?: ActionSuccessorFence,
   actionCarrierDisposition?: ActionSuccessorCarrierDisposition,
-): Promise<Awaited<ReturnType<typeof enqueueA2ATargets>>['routingPreflight']> {
+): Promise<Awaited<ReturnType<typeof enqueueA2ATargets>>['routingAdmission']> {
   const { invocationQueue, queueProcessor } = deps;
   if (!invocationQueue || !queueProcessor) return;
 
@@ -517,7 +517,7 @@ async function dispatchViaQueue(
     orch.recordResponse(requestId, catId, '[dispatch unavailable: target was not admitted to the queue]');
   }
   if (rejected.length > 0) settleGroupIfComplete(deps, requestId, threadId, userId, log);
-  return result.routingPreflight;
+  return result.routingAdmission;
 }
 
 // ── Result flush ─────────────────────────────────────────────────────
@@ -847,7 +847,7 @@ export function registerMultiMentionRoutes(app: FastifyInstance, deps: MultiMent
         : undefined,
     );
 
-    const routingPreflight = await dispatchViaQueue(
+    const routingAdmission = await dispatchViaQueue(
       deps,
       mmRequest.id,
       targetCatIds,
@@ -881,7 +881,7 @@ export function registerMultiMentionRoutes(app: FastifyInstance, deps: MultiMent
     return reply.send({
       requestId: mmRequest.id,
       status: mmRequest.status,
-      ...(routingPreflight ? { routing_preflight: routingPreflight } : {}),
+      ...(routingAdmission ? { routing_admission: routingAdmission } : {}),
       ...(actionFence && actionAdmissionOutcome
         ? {
             actionLease: {

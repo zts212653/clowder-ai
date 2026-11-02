@@ -11,6 +11,7 @@ import type {
   ConnectorDeliveryInput,
 } from '../../infrastructure/email/deliver-connector-message.js';
 import type { IWaitLifecycleEventLog } from '../ball-custody/WaitLifecycleEventLog.js';
+import type { InvocationRegistry } from '../cats/services/agents/invocation/InvocationRegistry.js';
 import type { IMessageStore } from '../cats/services/stores/ports/MessageStore.js';
 import type { ITaskStore } from '../cats/services/stores/ports/TaskStore.js';
 import type { ITurnExecutionStore } from '../cats/services/stores/ports/TurnExecutionStore.js';
@@ -18,6 +19,7 @@ import { isDeploymentWaitTask } from './DeploymentWaitAuthority.js';
 import { DeploymentWaitCurrentTurnClaim } from './DeploymentWaitCurrentTurnClaim.js';
 import { lifecycleEvent, matchedOutcomeId, originalRegistration } from './DeploymentWaitOutcome.js';
 import { DeploymentWaitPublisher } from './DeploymentWaitPublisher.js';
+import type { SessionHandoffWaitSourceDeps } from './SessionHandoffWaitSource.js';
 
 export interface DeploymentWaitObservation {
   readonly taskId: string;
@@ -42,9 +44,11 @@ export type DeploymentWaitLifecycleResult =
   | DeploymentWaitNotified
   | { readonly kind: 'unrecorded'; readonly reason: 'generation_changed_concurrently' };
 
-export interface DeploymentWaitLifecycleServiceOptions {
+export interface DeploymentWaitLifecycleServiceOptions extends SessionHandoffWaitSourceDeps {
   readonly taskStore: ITaskStore;
-  readonly messageStore?: Pick<IMessageStore, 'appendIdempotent' | 'getByIdempotencyKey'>;
+  readonly messageStore?: Pick<IMessageStore, 'appendIdempotent' | 'getByIdempotencyKey' | 'getById'>;
+  /** Exact historical source proof for receipts written before authorization snapshots existed. */
+  readonly authorizationRegistry?: Pick<InvocationRegistry, 'peekRecord'>;
   readonly deliveryDeps: ConnectorDeliveryDeps;
   readonly eventLog?: IWaitLifecycleEventLog;
   readonly log: {
@@ -146,6 +150,11 @@ export class DeploymentWaitLifecycleService {
 
   async recoverOutcome(taskId: string): Promise<DeploymentWaitLifecycleResult> {
     const task = await this.opts.taskStore.get(taskId);
+    // Audit survives a committed owner removal or terminal Task write; it never authorizes a wake.
+    if (task?.kind === 'work' && task.userId && task.deploymentWait?.waitOutcome?.delivery === 'not_applicable') {
+      await this.appendLifecycleEvent(task, task.deploymentWait.waitOutcome);
+      return { kind: 'state_only', reason: task.deploymentWait.waitOutcome.reason };
+    }
     if (!isDeploymentWaitTask(task)) return { kind: 'not_tracked', reason: 'task_missing_or_unowned' };
     const claim = task.deploymentWait?.currentExecutionClaim;
     if (claim) {
@@ -179,6 +188,13 @@ export class DeploymentWaitLifecycleService {
 
   async taskCompleted(taskId: string): Promise<DeploymentWaitLifecycleResult> {
     return this.terminalize(taskId, 'subject_terminal', { kind: 'system' });
+  }
+
+  /** Post-commit projection only: the Task aggregate already consumed its wait and chose the status. */
+  async recordTaskMutationOutcome(task: TaskItem): Promise<void> {
+    const outcome = task.deploymentWait?.waitOutcome;
+    if (task.kind === 'work' && task.userId && outcome?.delivery === 'not_applicable')
+      await this.appendLifecycleEvent(task, outcome);
   }
 
   async releaseCurrentExecutionClaim(
@@ -234,7 +250,23 @@ export class DeploymentWaitLifecycleService {
   private async appendLifecycleEvent(task: TaskItem, outcome: DeploymentWaitOutcomeV1): Promise<void> {
     if (!this.opts.eventLog) return;
     try {
-      await this.opts.eventLog.append(lifecycleEvent(task, outcome));
+      const event = lifecycleEvent(task, outcome);
+      if (outcome.reason === 'owner_changed' || outcome.reason === 'subject_terminal') {
+        const snapshot = await this.opts.taskStore.getWaitRegistration(task.id);
+        const receipt = snapshot?.receipt;
+        if (
+          receipt?.proofKind === 'deployment_predicate' &&
+          receipt.taskId === task.id &&
+          receipt.userId === task.userId &&
+          receipt.subjectRef === outcome.subjectRef &&
+          receipt.generation === outcome.generation
+        ) {
+          event.ownerUserId = receipt.userId;
+          event.ownerCatId = receipt.catId;
+          event.threadId = receipt.threadId;
+        }
+      }
+      await this.opts.eventLog.append(event);
     } catch (error) {
       this.opts.log.warn({ error, taskId: task.id }, '[F323] deployment wait event append deferred');
     }

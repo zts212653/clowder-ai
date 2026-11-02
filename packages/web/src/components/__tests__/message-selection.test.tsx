@@ -142,7 +142,7 @@ describe('MessageActions selection entry', () => {
       );
     });
 
-    const select = container.querySelector('button[aria-label="多选消息"]') as HTMLButtonElement | null;
+    const select = container.querySelector('button[aria-label="多选：转发或导出"]') as HTMLButtonElement | null;
     expect(select).toBeTruthy();
     const toolbar = select?.closest('div.absolute');
     // At rest the toolbar is neither painted nor clickable, and reserves no row of its own.
@@ -175,7 +175,7 @@ describe('MessageActions selection entry', () => {
       Array.from(toolbar?.querySelectorAll('button') ?? []).map(
         (button) => button.getAttribute('title') ?? button.getAttribute('aria-label'),
       ),
-    ).toEqual(['message-1', '引用回复', '多选消息', '创建分支', '删除']);
+    ).toEqual(['message-1', '引用回复', '多选：转发或导出', '创建分支', '删除']);
     React.act(() => select?.click());
     expect(onEnterSelection).toHaveBeenCalledWith('message-1');
 
@@ -203,7 +203,7 @@ describe('MessageActions selection entry', () => {
       );
     });
 
-    const select = container.querySelector('button[aria-label="多选消息"]') as HTMLButtonElement | null;
+    const select = container.querySelector('button[aria-label="多选：转发或导出"]') as HTMLButtonElement | null;
     const toolbar = select?.closest('div.absolute');
 
     expect(toolbar?.className).toContain('opacity-0');
@@ -299,7 +299,7 @@ describe('MessageActions selection entry', () => {
       );
     });
 
-    const select = container.querySelector('button[aria-label="多选消息"]') as HTMLButtonElement | null;
+    const select = container.querySelector('button[aria-label="多选：转发或导出"]') as HTMLButtonElement | null;
     const toolbar = select?.closest('div.absolute');
 
     React.act(() => select?.focus());

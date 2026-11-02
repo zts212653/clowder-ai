@@ -7,6 +7,7 @@ import type {
 import { WorkIdentityChips } from './ProjectIdentityChip.js';
 import { ProjectResponsibilityInline } from './ProjectResponsibilityInline.js';
 import { workAccountabilityRequestState } from './roadmap-view-model.js';
+import { WorkTimeSummary } from './WorkTimeSummary.js';
 import { workBlockingPresentation } from './work-blocking-presentation.js';
 
 export function ProjectBoardCard({
@@ -76,6 +77,7 @@ export function ProjectBoardCard({
         {projects.length > 0 && <span>{projects.map((project) => project.title).join(' · ')}</span>}
       </button>
       <WorkIdentityChips work={work} humans={humans} participants={participants} humanNames={humanNames} />
+      <WorkTimeSummary work={work} board />
       {downstream.length > 0 && (
         <p className="project-board-downstream">正挡住 {downstream.map((item) => item.title).join('、')}</p>
       )}

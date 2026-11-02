@@ -53,12 +53,20 @@ import { findGitBashPath } from './claude-agent-win.js';
 import { composeManagedSettingsDocument } from './claude-compaction-launch-plan.js';
 import { resolveClaudeMcpConfig } from './claude-mcp-config.js';
 import { extractClaudeUsage, isResultErrorEvent, transformClaudeEvent } from './claude-ndjson-parser.js';
+import {
+  applyClaudeMemberEnvironment,
+  CLAUDE_MEMBER_SETTINGS,
+  captureClaudeMemberOptions,
+  claudeMemberToolPattern,
+} from './claude-scoped-native.js';
+import { withClaudeSecretHooks } from './claude-secret-hook-settings.js';
 import { compileL0ViaSubprocess } from './l0-compiler.js';
 import {
   createMcpSchemaDeliveryLaunchConfig,
   resolveMcpSchemaDeliveryDiscoverySurface,
   resolveMcpSchemaDeliveryForProviderLaunch,
 } from './mcp-schema-delivery-capability.js';
+import { writeInvocationMcpConfigFile } from './session-credential-file.js';
 
 const log = createModuleLogger('claude-agent');
 
@@ -244,8 +252,25 @@ function removePreCompactSettingsTempDir(path: string | undefined): void {
  * - Windows git bash path resolution
  * - subscription mode → strip all ANTHROPIC_* (avoid silent api_key billing)
  * - api_key mode → inject ANTHROPIC_API_KEY / BASE_URL / model override
+ * - unknown third-party models → inject CLAUDE_CODE_MAX_CONTEXT_TOKENS from
+ *   member config, because the CLI otherwise assumes its 200k default window
  */
-export function buildClaudeEnvOverrides(callbackEnv?: Record<string, string>): Record<string, string | null> {
+export interface ClaudeEnvWindowOptions {
+  /** Raw/native provider window owned by member config; never an effective session capacity. */
+  contextNativeWindowTokens?: number | null;
+}
+
+function resolveClaudeNativeWindowTokens(windowOptions?: ClaudeEnvWindowOptions): number | undefined {
+  const nativeWindowTokens = windowOptions?.contextNativeWindowTokens;
+  return typeof nativeWindowTokens === 'number' && Number.isSafeInteger(nativeWindowTokens) && nativeWindowTokens > 0
+    ? nativeWindowTokens
+    : undefined;
+}
+
+export function buildClaudeEnvOverrides(
+  callbackEnv?: Record<string, string>,
+  windowOptions?: ClaudeEnvWindowOptions,
+): Record<string, string | null> {
   const env: Record<string, string | null> = { ...(callbackEnv ?? {}) };
 
   env.CLAUDECODE = null;
@@ -281,6 +306,16 @@ export function buildClaudeEnvOverrides(callbackEnv?: Record<string, string>): R
     const effectiveModel = modelOverride || undefined;
     if (effectiveModel && !isKnownAnthropicModel(effectiveModel)) {
       env.ANTHROPIC_MODEL = effectiveModel;
+
+      // Plain custom IDs can use the member-owned native window. The CLI owns
+      // recognized Claude IDs/aliases and [1m] spellings; leave those alone.
+      // https://code.claude.com/docs/en/model-config#which-ids-claude_code_max_context_tokens-applies-to
+      // Never feed a contracted effective/pinned window back into native configuration.
+      const nativeWindowTokens = resolveClaudeNativeWindowTokens(windowOptions);
+      const cliOwnedWindow = /claude-|^(?:default|best|fable|opus(?:plan)?|sonnet|haiku)$|\[1m\]/i.test(effectiveModel);
+      if (nativeWindowTokens !== undefined && !cliOwnedWindow) {
+        env.CLAUDE_CODE_MAX_CONTEXT_TOKENS = String(nativeWindowTokens);
+      }
     }
   } else if (mode === 'subscription') {
     // Subscription mode must not inherit shell-level Anthropic credentials.
@@ -341,7 +376,6 @@ export class ClaudeAgentService implements AgentService {
   /** F203: compiles per-cat L0 → file for --system-prompt-file. */
   private readonly l0CompilerFn: typeof compileL0ViaSubprocess;
   /** Windows: cached MCP config file path (created once per instance, reused across invocations) */
-  private mcpConfigFilePath: string | undefined;
   /** #780: Raw NDJSON archive for post-mortem diagnostics */
   private readonly rawArchive: RawArchiveSink;
 
@@ -365,7 +399,7 @@ export class ClaudeAgentService implements AgentService {
   }
 
   supportsToolExecutionPolicy(policy: ToolExecutionPolicy): boolean {
-    return policy.mode === 'read_only';
+    return policy.mode === 'read_only' || (policy.mode === 'plugin_native' && Boolean(policy.memberSession));
   }
 
   freshnessCarrierCapability(): AgentFreshnessCarrierCapability {
@@ -391,11 +425,16 @@ export class ClaudeAgentService implements AgentService {
     };
   }
 
-  private async compileL0ToTempFile(userId?: string): Promise<string> {
+  private async compileL0ToTempFile(userId?: string, memberModel?: string): Promise<string> {
     const l0Dir = mkdtempSync(join(tmpdir(), 'cat-cafe-l0-'));
     const l0Path = join(l0Dir, 'system-prompt-l0.md');
     try {
-      await this.l0CompilerFn({ catId: this.catId as string, userId, outPath: l0Path });
+      await this.l0CompilerFn({
+        catId: this.catId as string,
+        userId,
+        outPath: l0Path,
+        ...(memberModel ? { projection: 'scoped-member' as const, runtimeModel: memberModel } : {}),
+      });
     } catch (err) {
       removeL0TempDir(l0Path);
       throw new Error(`L0 compile failed for ${this.catId as string}: ${(err as Error).message}`);
@@ -404,6 +443,10 @@ export class ClaudeAgentService implements AgentService {
   }
 
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
+    const member = captureClaudeMemberOptions(options);
+    options = member ?? options;
+    const scoped = Boolean(member);
+    await member?.pluginNativeLaunch?.assertCurrent();
     const readOnly = options?.toolExecutionPolicy?.mode === 'read_only';
     let effectivePrompt = prompt;
     const imagePaths = await extractTrustedImagePaths(
@@ -417,12 +460,14 @@ export class ClaudeAgentService implements AgentService {
 
     // F198 B-prime refactor: model selection delegates to shared helper so
     // ClaudeBgCarrierService reuses the same rules (single source of truth).
-    const { effectiveModel, useEnvModelOverride } = resolveClaudeModelSelection(
-      options?.callbackEnv,
-      catRegistry.tryGet(this.catId)?.config.configurationSource === 'native_tool'
-        ? getCatModel(this.catId)
-        : this.model,
-    );
+    const { effectiveModel, useEnvModelOverride } = scoped
+      ? { effectiveModel: this.model, useEnvModelOverride: false }
+      : resolveClaudeModelSelection(
+          options?.callbackEnv,
+          catRegistry.tryGet(this.catId)?.config.configurationSource === 'native_tool'
+            ? getCatModel(this.catId)
+            : this.model,
+        );
     const isApiKeyMode = options?.callbackEnv?.[ANTHROPIC_PROFILE_MODE_KEY] === 'api_key';
     // #840 R2 (砚砚 review 2026-06-02): the main prompt must NOT ride argv.
     // A2A briefings + memory + image hints push `effectivePrompt` past the
@@ -454,19 +499,50 @@ export class ClaudeAgentService implements AgentService {
       ...modelArgs,
       ...(effortLevel ? ['--effort', effortLevel] : []),
       '--permission-mode',
-      readOnly ? 'plan' : PERMISSION_MODE,
+      scoped ? 'default' : readOnly ? 'plan' : PERMISSION_MODE,
       // api_key mode: skip user-level ~/.claude/settings.json to prevent config pollution.
       // subscription mode: include user-level so CLI reads auth from ~/.claude/settings.json.
       '--setting-sources',
-      isApiKeyMode ? 'project,local' : 'project,local,user',
+      scoped ? '' : isApiKeyMode ? 'project,local' : 'project,local,user',
       // Enable Chrome MCP integration (built-in, requires Chrome + extension running)
-      ...(readOnly ? [] : ['--chrome']),
+      ...(scoped
+        ? ['--no-chrome', '--disable-slash-commands', '--no-session-persistence']
+        : readOnly
+          ? []
+          : ['--chrome']),
     ];
 
-    if (readOnly) {
+    if (readOnly || scoped) {
       args.push('--tools', '', '--strict-mcp-config');
     }
-    let declaredMcpServerNames: readonly string[] | undefined = readOnly ? [] : undefined;
+    let declaredMcpServerNames: readonly string[] | undefined = readOnly
+      ? []
+      : member?.pluginNativeLaunch
+        ? [member.pluginNativeLaunch.server.name]
+        : undefined;
+
+    if (member?.pluginNativeLaunch) {
+      const server = member.pluginNativeLaunch.server;
+      args.push(
+        '--mcp-config',
+        writeInvocationMcpConfigFile(
+          {
+            mcpServers: {
+              [server.name]: {
+                alwaysLoad: true,
+                command: server.command,
+                args: server.args,
+                cwd: server.workingDirectory,
+                env: server.env,
+              },
+            },
+          },
+          options?.callbackEnv,
+        ),
+        '--allowedTools',
+        claudeMemberToolPattern(server.name),
+      );
+    }
 
     if (options?.sessionId) {
       args.push('--resume', options.sessionId);
@@ -478,7 +554,7 @@ export class ClaudeAgentService implements AgentService {
     // #712: Inject ALL enabled MCP servers from capabilities.json at invoke time.
     // Built-in cat-cafe servers resolve paths from distDir; externals use descriptor values.
     // On Windows, Claude CLI treats inline JSON as a file path — write to temp file.
-    if (!readOnly) {
+    if (!readOnly && !scoped) {
       const mcpResolution = await resolveClaudeMcpConfig({
         callbackEnv: options?.callbackEnv,
         workingDirectory: options?.workingDirectory,
@@ -497,16 +573,7 @@ export class ClaudeAgentService implements AgentService {
         // #712: Always pass --mcp-config + --strict-mcp-config in managed invocations.
         // --strict-mcp-config ensures only the merged config (capabilities.json +
         // user project .mcp.json) is active — no auto-discovered entries leak through.
-        if (IS_WINDOWS) {
-          if (!this.mcpConfigFilePath) {
-            const dir = mkdtempSync(join(tmpdir(), 'cat-cafe-mcp-'));
-            this.mcpConfigFilePath = join(dir, 'mcp-config.json');
-          }
-          writeFileSync(this.mcpConfigFilePath, JSON.stringify({ mcpServers }), 'utf-8');
-          args.push('--mcp-config', this.mcpConfigFilePath);
-        } else {
-          args.push('--mcp-config', JSON.stringify({ mcpServers }));
-        }
+        args.push('--mcp-config', writeInvocationMcpConfigFile({ mcpServers }, options?.callbackEnv));
         args.push('--strict-mcp-config');
         declaredMcpServerNames = Object.keys(mcpServers).sort();
       }
@@ -524,7 +591,7 @@ export class ClaudeAgentService implements AgentService {
     let appendPromptPath: string | undefined;
     let preCompactSettingsPath: string | undefined;
     try {
-      l0Path = await this.compileL0ToTempFile(options?.callbackEnv?.CAT_CAFE_USER_ID);
+      l0Path = await this.compileL0ToTempFile(options?.callbackEnv?.CAT_CAFE_USER_ID, scoped ? this.model : undefined);
       args.push('--system-prompt-file', l0Path);
       // Route layer passes pack-only systemPrompt for native-L0 providers.
       // Keep it as an append layer, but never use it as the carrier's L0 source.
@@ -539,7 +606,7 @@ export class ClaudeAgentService implements AgentService {
       // User flags win when they overlap with ordinary system-injected flags,
       // but native L0 flags are reserved: user overrides would silently remove
       // the compression-immune identity/governance layer.
-      const cliConfigArgs = readOnly ? undefined : options?.cliConfigArgs;
+      const cliConfigArgs = readOnly || scoped ? undefined : options?.cliConfigArgs;
       const userParts = stripReservedSystemPromptArgs(
         cliConfigArgs ? cliConfigArgs.flatMap((arg) => arg.trim().split(/\s+/)) : [],
         this.catId as string,
@@ -592,22 +659,21 @@ export class ClaudeAgentService implements AgentService {
       // repo-root carrier never loads for thread-workspace or external-project
       // cwds — this injection is the carrier of record for every managed spawn.
       const compactionPlan = options?.compactionLaunchPlan;
-      const effectiveUserSettings = options?.claudeTokenAccount
-        ? await composeClaudeTokenSettingsDocument(
-            userSettingsValue,
-            options?.workingDirectory,
-            claudeSettingSources(args),
-          )
-        : userSettingsValue;
-      if (compactionPlan?.ready) {
-        preCompactSettingsPath = writePreCompactSettingsToTempFile(
-          composeManagedSettingsDocument(compactionPlan, effectiveUserSettings, options?.workingDirectory),
-        );
-        args.push('--settings', preCompactSettingsPath);
-      } else if (effectiveUserSettings !== undefined) {
-        // No managed carrier resolved — the user's own --settings passes through untouched.
-        args.push('--settings', effectiveUserSettings);
-      }
+      const effectiveUserSettings =
+        !scoped && options?.claudeTokenAccount
+          ? await composeClaudeTokenSettingsDocument(
+              userSettingsValue,
+              options?.workingDirectory,
+              claudeSettingSources(args),
+            )
+          : userSettingsValue;
+      const composedSettings = compactionPlan?.ready
+        ? composeManagedSettingsDocument(compactionPlan, effectiveUserSettings, options?.workingDirectory)
+        : effectiveUserSettings;
+      preCompactSettingsPath = writePreCompactSettingsToTempFile(
+        scoped ? CLAUDE_MEMBER_SETTINGS : withClaudeSecretHooks(composedSettings, options?.workingDirectory),
+      );
+      args.push('--settings', preCompactSettingsPath);
 
       const claudeCommand = resolveCliCommand('claude');
       log.info({ catId: this.catId, resolved: claudeCommand ?? null }, 'Resolving claude CLI command');
@@ -625,7 +691,9 @@ export class ClaudeAgentService implements AgentService {
       }
 
       let sawResultError = false;
-      const envOverrides = buildClaudeEnvOverrides(options?.callbackEnv);
+      const envOverrides = buildClaudeEnvOverrides(options?.callbackEnv, {
+        contextNativeWindowTokens: options?.contextNativeWindowTokens,
+      });
       // F171: Account env vars applied LAST — user overrides provider-injected values
       if (options?.accountEnv) {
         for (const [k, v] of Object.entries(options.accountEnv)) envOverrides[k] = v;
@@ -637,6 +705,7 @@ export class ClaudeAgentService implements AgentService {
         for (const key of SUBSCRIPTION_MODE_DENY_KEYS) envOverrides[key] = null;
       }
       if (readOnly) envOverrides.CAT_CAFE_READONLY = 'true';
+      if (scoped) applyClaudeMemberEnvironment(envOverrides);
 
       // Debug: log full invocation details (env values redacted by pino redact paths)
       const safeEnvSummary: Record<string, string> = {};
@@ -644,7 +713,7 @@ export class ClaudeAgentService implements AgentService {
         if (v === null) {
           safeEnvSummary[k] = '(cleared)';
         } else if (/key|secret|token|password|cookie|auth|session|bearer|credential/i.test(k)) {
-          safeEnvSummary[k] = v.slice(0, 6) + '***';
+          safeEnvSummary[k] = '[REDACTED]';
         } else {
           safeEnvSummary[k] = v;
         }
@@ -747,6 +816,7 @@ export class ClaudeAgentService implements AgentService {
           : {}),
       };
       applyClaudeTokenAccountEnv(envOverrides, options?.claudeTokenAccount);
+      await member?.pluginNativeLaunch?.assertCurrent();
       const events = options?.spawnCliOverride
         ? options.spawnCliOverride(cliOpts)
         : spawnCli(cliOpts, this.spawnFn ? { spawnFn: this.spawnFn } : undefined);

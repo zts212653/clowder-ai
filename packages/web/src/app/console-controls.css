@@ -17,6 +17,7 @@
   width: 100%;
   border: none;
   background: var(--console-field-bg);
+  --chat-background-role: console-field;
   color: var(--cafe-text);
   border-radius: 0.5rem;
   padding: 0.5rem 0.75rem;
@@ -81,6 +82,7 @@ select.console-form-input {
 .console-button-secondary {
   border-color: var(--console-border-soft);
   background: var(--console-card-bg);
+  --chat-background-role: console-card;
   color: var(--cafe-text);
 }
 
@@ -140,6 +142,7 @@ select.console-form-input {
 
 .console-data-tile {
   background: var(--console-card-bg);
+  --chat-background-role: console-card;
   border-radius: 0.625rem;
   padding: 0.95rem 1rem;
 }

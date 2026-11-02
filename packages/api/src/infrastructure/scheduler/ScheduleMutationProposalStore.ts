@@ -10,6 +10,8 @@ import {
 } from '@cat-cafe/shared';
 import type Database from 'better-sqlite3';
 import type { ApprovalPublicationStore } from '../../domains/approval-hub/ports/ApprovalPublicationStore.js';
+import type { SettledHistoryPageOptions, SettledHistorySourcePage } from '../../utils/settled-history-page.js';
+import { assertSettledHistoryPageOptions } from '../../utils/settled-history-page.js';
 import {
   type AuditRow,
   deleteDynamicTaskWithAudit,
@@ -61,7 +63,11 @@ function materializeCreateTask(mutation: CreateScheduleMutation, appliedAt: numb
 }
 
 export class ScheduleMutationProposalStore implements ApprovalPublicationStore {
-  constructor(private readonly db: Database.Database) {}
+  constructor(private readonly db: Database.Database) {
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_schedule_mutation_settled_page
+      ON schedule_mutation_proposals(owner_user_id, COALESCE(approved_at,rejected_at,0) DESC, proposal_id COLLATE BINARY DESC)
+      WHERE status IN ('approved','rejected')`);
+  }
 
   create(proposal: ScheduleMutationProposal): void {
     if (proposal.status !== 'pending' || proposal.publication.state !== 'staged' || proposal.effectCheckpoint) {
@@ -105,6 +111,44 @@ export class ScheduleMutationProposalStore implements ApprovalPublicationStore {
         )
         .all(ownerUserId) as ProposalRow[]
     ).map(toProposal);
+  }
+
+  listSettledPage(
+    owner: string,
+    options: SettledHistoryPageOptions,
+  ): SettledHistorySourcePage<ScheduleMutationProposal> {
+    assertSettledHistoryPageOptions(options);
+    const at = 'COALESCE(approved_at, rejected_at, 0)';
+    const before = options.before;
+    const select = (clause: string, args: Array<string | number>, limit: number, tied = false) =>
+      this.db
+        .prepare(
+          `SELECT * FROM schedule_mutation_proposals WHERE owner_user_id=? AND status IN ('approved','rejected') ${clause} ORDER BY ${tied ? '' : `${at} DESC, `}proposal_id COLLATE BINARY DESC LIMIT ?`,
+        )
+        .all(owner, ...args, limit) as ProposalRow[];
+    // Two index seeks avoid SQLite walking the already-read timestamp/id prefix for a tuple-expression predicate.
+    const rows = this.db.transaction(() => {
+      if (!before) return select('', [], options.limit + 1);
+      if (before.proposalId === null) return select(`AND ${at} <= ?`, [before.decidedAt], options.limit + 1);
+      const tied = before.proposalId
+        ? select(
+            `AND ${at} = ? AND proposal_id COLLATE BINARY < ?`,
+            [before.decidedAt, before.proposalId],
+            options.limit + 1,
+            true,
+          )
+        : [];
+      return tied.length > options.limit
+        ? tied
+        : [...tied, ...select(`AND ${at} < ?`, [before.decidedAt], options.limit + 1 - tied.length)];
+    })();
+    const records = rows.slice(0, options.limit).map(toProposal);
+    const last = records.at(-1);
+    return {
+      records,
+      hasMore: rows.length > options.limit,
+      frontier: last ? { decidedAt: last.approvedAt ?? last.rejectedAt ?? 0, proposalId: last.proposalId } : null,
+    };
   }
 
   listSettledByUser(ownerUserId: string, limit = 50): ScheduleMutationProposal[] {

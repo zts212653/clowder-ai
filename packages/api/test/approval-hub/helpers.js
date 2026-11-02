@@ -15,6 +15,9 @@ export async function createTestApprovalRegistry(adapters) {
                 featureId: override.featureId,
                 listPending: (...args) => override.listPending(...args),
                 listSettled: (...args) => override.listSettled?.(...args) ?? [],
+                ...(override.listSettledPage
+                  ? { listSettledPage: (...args) => override.listSettledPage(...args) }
+                  : {}),
               }
             : {
                 featureId,
@@ -23,6 +26,9 @@ export async function createTestApprovalRegistry(adapters) {
                 },
                 async listSettled() {
                   return [];
+                },
+                async listSettledPage() {
+                  return { records: [], frontier: null, hasMore: false };
                 },
               },
           lifecycle: { contractVersion: 1, writerGeneration: featureId === 'F266' ? 'v1' : 'legacy' },

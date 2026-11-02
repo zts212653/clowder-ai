@@ -89,6 +89,25 @@ describe('Host Collective world directory', () => {
     ).toBeUndefined();
   });
 
+  it('accepts a current-generation unavailable projection before the Client can identify its Service', () => {
+    const unavailable = {
+      type: 'collective:client-world-directory' as const,
+      bridgeId: generation.bridgeId,
+      revision: 1,
+      state: 'unavailable' as const,
+      code: 'client_unavailable' as const,
+    };
+
+    expect(
+      acceptWorldDirectory({
+        data: unavailable,
+        eventOrigin: generation.serviceOrigin,
+        sourceMatches: true,
+        generation,
+      }),
+    ).toEqual(unavailable);
+  });
+
   it('does not fall back to another world when an explicit target is absent or revoked', () => {
     expect(
       resolveExplicitWorldTarget(directory, {

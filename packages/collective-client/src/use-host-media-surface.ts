@@ -6,10 +6,19 @@ import {
   collectiveMediaSurfaceReturnSchema,
 } from '@cat-cafe/shared';
 import { type MutableRefObject, useEffect, useRef } from 'react';
-import type { collectiveArtifactClient, SharedArtifact } from './collective-artifact-client.js';
+import type {
+  collectiveArtifactClient,
+  SharedArtifact,
+  SharedArtifactOpenOptions,
+} from './collective-artifact-client.js';
 import { serveCollectiveMediaRequest } from './collective-media-surface-client.js';
 
-export type MediaSelection = { artifact: SharedArtifact; ownerRevision?: number; onReturn: () => void };
+export type MediaSelection = {
+  artifact: SharedArtifact;
+  ownerRevision?: number;
+  options?: SharedArtifactOpenOptions;
+  onReturn: () => void;
+};
 type Context = { bridge?: CollectiveHostContextInit; contextId: string; revision: number };
 export function useHostMediaSurface(options: {
   context: MutableRefObject<Context>;
@@ -17,6 +26,7 @@ export function useHostMediaSurface(options: {
   hostOrigin: string | null;
   channelId: string;
   generation: string;
+  projectReturnSupported?: boolean;
   selection?: MediaSelection;
   api?: ReturnType<typeof collectiveArtifactClient>;
   humanName?: (humanId: string) => string;
@@ -26,10 +36,15 @@ export function useHostMediaSurface(options: {
   const active = useRef<CollectiveMediaSurfaceRefV1>();
   const { artifact, ownerRevision } = options.selection ?? {};
   const selectedRevision = ownerRevision ?? artifact?.versions.at(-1)?.ownerRevision;
-  const selectionKey = JSON.stringify([artifact?.artifactId, selectedRevision, artifact?.sourceEventId]);
+  const selectionKey = JSON.stringify([
+    artifact?.artifactId,
+    selectedRevision,
+    artifact?.sourceEventId,
+    options.selection?.options?.projectReturn,
+  ]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: Parent context publication runs first; these primitive signals issue a new ref only after its channel/context generation advances.
   useEffect(() => {
-    const { context, bridge, hostOrigin, channelId, selection } = latest.current;
+    const { context, bridge, hostOrigin, channelId, selection, projectReturnSupported } = latest.current;
     active.current = undefined;
     const { contextId, revision } = context.current;
     if (
@@ -57,10 +72,13 @@ export function useHostMediaSurface(options: {
       artifactId: selection.artifact.artifactId,
       sourceEventId: selection.artifact.sourceEventId,
       ownerRevision: selectedRevision,
+      ...(projectReturnSupported && selection.options?.projectReturn
+        ? { projectReturn: selection.options.projectReturn }
+        : {}),
     };
     active.current = ref;
     window.parent.postMessage({ type: 'collective:client-media-surface', ref }, hostOrigin);
-  }, [options.generation, options.channelId, selectionKey, selectedRevision]);
+  }, [options.generation, options.channelId, options.projectReturnSupported, selectionKey, selectedRevision]);
   useEffect(() => {
     const jobs = new Set<string>();
     const current = (ref: CollectiveMediaSurfaceRefV1) => {

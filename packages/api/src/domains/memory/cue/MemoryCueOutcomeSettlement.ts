@@ -1,4 +1,4 @@
-import type { RecallScopeV1 } from '@cat-cafe/shared';
+import type { MemoryCueDocumentWindowRequest, RecallScopeV1 } from '@cat-cafe/shared';
 import type { MemoryCueDrillCoordinate, MemoryCueDrillHandleService } from './MemoryCueDrillHandleService.js';
 import {
   type MemoryCueEpisodeStore,
@@ -36,14 +36,17 @@ export async function readMemoryCueCurrentSource(
   sourceReader: MemoryCueSourceReader,
   coordinate: MemoryCueDrillCoordinate,
   consumerCatId: string,
+  window?: MemoryCueDocumentWindowRequest,
 ): Promise<MemoryCueCurrentSourceResolution> {
   try {
     return await sourceReader.read({
+      opportunityId: coordinate.opportunityId,
       family: coordinate.family,
       anchor: coordinate.anchor,
       expectedRevision: coordinate.revision,
       scope: coordinate.scope,
       consumerCatId,
+      ...(window ? { window } : {}),
     });
   } catch {
     return { status: 'source_read_failed' };

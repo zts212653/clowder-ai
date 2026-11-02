@@ -1,3 +1,4 @@
+import { useCollectiveText } from './collective-copy.js';
 import { MemberAvatar } from './MemberAvatar.js';
 
 export function ComposerMentionMenu({
@@ -17,8 +18,9 @@ export function ComposerMentionMenu({
   readonly active: number;
   readonly onSelect: (index: number) => void;
 }) {
+  const t = useCollectiveText();
   return (
-    <div className="mention-list" id={id} role="listbox" aria-label="选择要提到的成员">
+    <div className="mention-list" id={id} role="listbox" aria-label={t('选择要提到的成员')}>
       {options.map((option, index) => (
         <button
           key={option.key}
@@ -37,7 +39,7 @@ export function ComposerMentionMenu({
           </span>
         </button>
       ))}
-      {!options.length && <p>没有找到在本频道参与的成员。</p>}
+      {!options.length && <p>{t('没有找到在本频道参与的成员。')}</p>}
     </div>
   );
 }

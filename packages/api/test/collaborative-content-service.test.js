@@ -28,7 +28,6 @@ async function createHarness() {
     installationInstanceId: 'plugin-instance-1',
     providerVersion: '0.8.1039',
     packageDigest: 'sha512-package-1',
-    grantRevision: 3,
     lifecycleRevision: 7,
     activationState: 'enabled',
     runtimeState: 'healthy',
@@ -122,7 +121,7 @@ describe('OfficeProviderBindingStore', () => {
 });
 
 describe('EditorSessionService', () => {
-  it('binds Host-authenticated actor and exact owner, binding, package, grant, and surface revisions', async () => {
+  it('binds Host-authenticated actor and exact owner, binding, package, and surface revisions', async () => {
     const harness = await createHarness();
     const contentRef = await seedContent(harness);
     const active = await issueActiveSession(harness, contentRef, 'cat', 'codex-sol');
@@ -133,7 +132,6 @@ describe('EditorSessionService', () => {
     assert.equal(active.ownerRevision, 1);
     assert.equal(active.bindingRevision, 1);
     assert.equal(active.packageDigest, 'sha512-package-1');
-    assert.equal(active.grantRevision, 3);
   });
 
   it('revokes on renderer mismatch, binding change, or current plugin authority change', async () => {
@@ -168,7 +166,6 @@ describe('EditorSessionService', () => {
       installationInstanceId: 'plugin-instance-1',
       providerVersion: '0.8.1039',
       packageDigest: 'sha512-package-1',
-      grantRevision: 4,
       lifecycleRevision: 8,
       activationState: 'enabled',
       runtimeState: 'healthy',
@@ -461,7 +458,6 @@ describe('CollaborativePatchService', () => {
             installationInstanceId: 'plugin-instance-1',
             providerVersion: '0.8.1039',
             packageDigest: 'sha512-package-1',
-            grantRevision: 4,
             lifecycleRevision: 8,
             activationState: 'disabled',
             runtimeState: 'stopped',

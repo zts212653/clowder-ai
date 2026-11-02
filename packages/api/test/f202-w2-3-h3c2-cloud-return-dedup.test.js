@@ -54,6 +54,8 @@ test('the ingest persists the reply as the configured cloud cat, under the share
   const key = buildCloudReturnMessageIdempotencyKey(h.scope('cloud-alt'));
   assert.equal((await h.messageStore.getByIdempotencyKey('alice', h.thread.id, key)).id, reply.id);
   assert.equal(h.broadcasts.at(-1).message.catId, 'cloud-alt');
+  assert.deepEqual(h.broadcasts.at(-1).message.extra.cloudBridgeReturn, reply.extra.cloudBridgeReturn);
+  assert.equal(reply.extra.cloudBridgeReturn.sourceMessageId, h.source.id);
   assert.deepEqual(await h.grantStore.claim(h.scope('cloud-alt')), { ok: false, reason: 'consumed' });
 });
 

@@ -102,6 +102,58 @@ function seenAndClosed(source, actor = 'opus') {
 }
 
 describe('F278 paw-feel read model', () => {
+  it('reads only the requested audit signals without entering the global responsibility path', async () => {
+    const messages = Array.from({ length: 200 }, (_, index) => message(index));
+    const eventLog = eventLogFixture(messages);
+    const originalReadMany = eventLog.readMany.bind(eventLog);
+    const eventReadBatches = [];
+    eventLog.listSignalIds = async () => assert.fail('bounded audit reads must not enumerate the global ledger');
+    eventLog.readMany = async (signalIds) => {
+      eventReadBatches.push([...signalIds]);
+      return originalReadMany(signalIds);
+    };
+    const byId = new Map(messages.map((entry) => [entry.id, entry]));
+    const sourceReadBatches = [];
+    const readModel = new PawFeelDispositionReadModel({
+      eventLog,
+      messageStore: {
+        async getById() {
+          assert.fail('the source projection reader should serve bounded audit reads');
+        },
+        async getPawFeelSourceProjections(messageIds) {
+          sourceReadBatches.push([...messageIds]);
+          return new Map(
+            messageIds.map((messageId) => [messageId, { kind: 'available', message: byId.get(messageId) }]),
+          );
+        },
+      },
+      followUpResolver: {
+        async resolve() {
+          assert.fail('audit traversal must not resolve issue/responsibility state');
+        },
+      },
+      now: () => NOW,
+    });
+    const requested = [...eventLog.events.keys()].slice(73, 76);
+
+    const entries = await readModel.readAuditSignals(requested);
+
+    assert.deepEqual(eventReadBatches, [requested]);
+    assert.deepEqual(sourceReadBatches, [requested.map((signalId) => signalId.split(':')[0])]);
+    assert.deepEqual(
+      entries.map((entry) => entry.disposition.signalId),
+      requested,
+    );
+    assert.equal(
+      entries.every((entry) => entry.source.availability === 'available'),
+      true,
+    );
+    assert.equal(
+      entries.some((entry) => 'responsibility' in entry || 'issue' in entry),
+      false,
+    );
+  });
+
   it('keeps every row visible in degraded mode and resolves previews from exact source messages', async () => {
     const messages = [message(1, 80), message(2, 2, '[爪感差: pnpm+test output too noisy]')];
     const readModel = new PawFeelDispositionReadModel({

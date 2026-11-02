@@ -1,4 +1,5 @@
 import { collectiveAccountabilityAttentionItemSchema } from './collective-accountability-attention.js';
+import { collectiveProjectAttentionItemSchema } from './collective-project-attention.js';
 import { entrustedWorkOwnerReadV1Schema } from './entrusted-work-owner-read.js';
 import type { ProducerAttentionReceiptV1 } from './growing.js';
 import type { UnifiedAttentionItemV1, UnifiedAttentionReceipt } from './unified-attention.js';
@@ -10,8 +11,23 @@ export function isUnifiedAttentionDecision(item: UnifiedAttentionItemV1): boolea
     item.runtimeInteraction !== undefined ||
     item.choiceRequest !== undefined ||
     exactCollectiveAccountabilityDecision(item) ||
+    exactCollectiveProjectDecision(item) ||
     exactCollectiveResultDecision(item) ||
     exactContentReviewDecision(item)
+  );
+}
+
+function exactCollectiveProjectDecision(item: UnifiedAttentionItemV1): boolean {
+  const parsed = collectiveProjectAttentionItemSchema.safeParse(item.collectiveProjectAttention);
+  return Boolean(
+    parsed.success &&
+      item.kind === 'judgment' &&
+      item.linkedNeedsMe.length === 0 &&
+      item.decisionRef === `${parsed.data.producerId}:${parsed.data.subjectRef}` &&
+      !item.collectiveAccountabilityRequest &&
+      !item.approval &&
+      !item.runtimeInteraction &&
+      !item.choiceRequest,
   );
 }
 

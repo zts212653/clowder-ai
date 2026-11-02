@@ -190,6 +190,7 @@ export function createReleaseArchive({ repo, entry, archivePath, txn }) {
     sourceRef: entry.finishSourceRef,
     head: entry.head,
     ...(entry.mergedAt ? { mergedAt: entry.mergedAt } : {}),
+    ...(entry.mergedPr ? { mergedPr: entry.mergedPr } : {}),
     branch: entry.branch,
     originals,
     originalDirectories,

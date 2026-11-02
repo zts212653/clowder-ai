@@ -102,6 +102,26 @@ export class InMemoryTurnExecutionStore implements ITurnExecutionStore {
     );
   }
 
+  markProviderStarted(invocationId: string, at: number): boolean {
+    const record = this.records.get(invocationId);
+    if (
+      !record ||
+      record.status !== 'running' ||
+      !record.providerLifecycleTracked ||
+      !Number.isFinite(at) ||
+      at < record.startedAt
+    )
+      return false;
+    record.providerStartedAt ??= at;
+    return true;
+  }
+
+  recordProviderTeardown(invocationId: string, at: number): void {
+    const record = this.records.get(invocationId);
+    if (!record || !Number.isFinite(at) || at < record.startedAt) throw new Error('invalid exact provider teardown');
+    record.providerTeardownAt ??= at;
+  }
+
   transitionTerminal(invocationId: string, input: TurnExecutionTerminalInput): TransitionTurnExecutionResult {
     const record = this.records.get(invocationId);
     if (!record) return { outcome: 'not_found', record: null };
@@ -112,6 +132,7 @@ export class InMemoryTurnExecutionStore implements ITurnExecutionStore {
     record.status = input.status;
     record.endedAt = input.endedAt;
     if (input.terminalReason !== undefined) record.terminalReason = input.terminalReason;
+    if (input.providerTeardownAt !== undefined) record.providerTeardownAt = input.providerTeardownAt;
     this.responsePending.add(invocationId);
     return { outcome: 'transitioned', record: cloneTurnExecutionRecord(record) };
   }

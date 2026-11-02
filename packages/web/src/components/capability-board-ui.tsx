@@ -20,6 +20,7 @@ export interface CapabilityBoardItem {
   type: 'mcp' | 'skill';
   source: 'cat-cafe' | 'external' | 'plugin';
   enabled: boolean;
+  accessManagedByPlugin?: boolean;
   globalEnabled?: boolean;
   cats: Record<string, boolean>;
   description?: string;

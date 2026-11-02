@@ -2,11 +2,13 @@ import {
   type EntrustedWorkOwnerReadV1,
   type EntrustedWorkTaskExecutionV1,
   entrustedWorkOwnerReadV1Schema,
+  type ProducerAttentionCoverageV1,
   type ProducerAttentionReceiptV1,
   type TaskItem,
 } from '@cat-cafe/shared';
 import { z } from 'zod';
 import type { ITaskStore } from '../cats/services/stores/ports/TaskStore.js';
+import type { CollectiveWorkCalendarReader } from '../plugin/host-surface/collective-work-calendar.js';
 import { composeEntrustedWorkBrief } from './EntrustedWorkBriefComposer.js';
 import {
   projectEntrustedWorkTimeRefs,
@@ -100,10 +102,21 @@ export interface EntrustedWorkOwnerReadServiceDeps {
   readonly tasks: Pick<ITaskStore, 'get' | 'listByKind'>;
   readonly producerCatalog: NeedsMeProducerCatalog;
   readonly artifactReader?: PreparedArtifactReader;
+  readonly collectiveCalendarReader?: CollectiveWorkCalendarReader;
   readonly taskExecution?: { read(task: TaskItem): Promise<EntrustedWorkTaskExecutionV1> };
 }
 
 export type EntrustedWorkOwnerReadInput = z.input<typeof ownerReadInputSchema>;
+
+export interface EntrustedWorkOwnerReadCollectionV1 {
+  readonly ownerReads: EntrustedWorkOwnerReadV1[];
+  readonly coverage: ProducerAttentionCoverageV1;
+}
+
+const completeAttentionRead = {
+  receipts: [] as ProducerAttentionReceiptV1[],
+  coverage: { state: 'complete' as const },
+};
 
 export class EntrustedWorkOwnerReadService {
   constructor(private readonly deps: EntrustedWorkOwnerReadServiceDeps) {}
@@ -113,19 +126,27 @@ export class EntrustedWorkOwnerReadService {
     const task = await this.deps.tasks.get(input.taskId);
     if (!task) throw new EntrustedWorkOwnerReadError('OWNER_READ_NOT_FOUND', 'Entrusted-work Task not found');
     this.assertViewer(task, input.viewer);
-    const receipts =
+    const attention =
       task.entrustedWork?.closure.state !== 'open'
-        ? []
-        : await this.deps.producerCatalog.listCurrentReceipts(input.viewer.userId);
-    return this.compose(task, input, receipts);
+        ? completeAttentionRead
+        : await this.deps.producerCatalog.readCurrentReceipts(input.viewer.userId);
+    return this.compose(task, input, attention.receipts, this.deps.artifactReader, attention.coverage);
   }
 
   async listForOwner(
     userId: string,
     view: 'active' | 'completed' | 'cancelled' = 'active',
   ): Promise<EntrustedWorkOwnerReadV1[]> {
+    return (await this.readForOwner(userId, view)).ownerReads;
+  }
+
+  async readForOwner(
+    userId: string,
+    view: 'active' | 'completed' | 'cancelled' = 'active',
+  ): Promise<EntrustedWorkOwnerReadCollectionV1> {
     const ownerUserId = boundedRef.parse(userId);
-    const receipts = view === 'active' ? await this.deps.producerCatalog.listCurrentReceipts(ownerUserId) : [];
+    const attention =
+      view === 'active' ? await this.deps.producerCatalog.readCurrentReceipts(ownerUserId) : completeAttentionRead;
     const tasks = await this.deps.tasks.listByKind('work');
     const currentTasks = tasks.filter(
       (task) =>
@@ -138,6 +159,8 @@ export class EntrustedWorkOwnerReadService {
             : task.status !== 'done' && task.entrustedWork?.closure.state === 'open'),
     );
     const artifactReader = this.deps.artifactReader?.createReadScope?.() ?? this.deps.artifactReader;
+    const calendarReader =
+      this.deps.collectiveCalendarReader?.createReadScope?.() ?? this.deps.collectiveCalendarReader;
     const ownerReads: EntrustedWorkOwnerReadV1[] = [];
     // One owner scan at a time; repeated work in the same thread reuses this request's index.
     for (const task of currentTasks) {
@@ -150,19 +173,24 @@ export class EntrustedWorkOwnerReadService {
             includeCancelled: view === 'cancelled',
             viewer: { surface: 'human', userId: ownerUserId },
           },
-          receipts,
+          attention.receipts,
           artifactReader,
+          attention.coverage,
+          calendarReader,
         ),
       );
     }
-    return ownerReads;
+    return { ownerReads, coverage: attention.coverage };
   }
 
   async listNeedsMeForOwner(userId: string): Promise<EntrustedWorkOwnerReadV1[]> {
+    return (await this.readNeedsMeForOwner(userId)).ownerReads;
+  }
+
+  async readNeedsMeForOwner(userId: string): Promise<EntrustedWorkOwnerReadCollectionV1> {
     const ownerUserId = boundedRef.parse(userId);
-    const receipts = (await this.deps.producerCatalog.listCurrentReceipts(ownerUserId)).filter(
-      (receipt) => receipt.eligible,
-    );
+    const attention = await this.deps.producerCatalog.readCurrentReceipts(ownerUserId);
+    const receipts = attention.receipts.filter((receipt) => receipt.eligible);
     const byTask = new Map<string, ProducerAttentionReceiptV1[]>();
     for (const receipt of receipts) {
       const taskId = taskIdFromEntrustedWorkSubjectRef(receipt.taskRef.subjectRef);
@@ -172,6 +200,8 @@ export class EntrustedWorkOwnerReadService {
       byTask.set(taskId, current);
     }
 
+    const calendarReader =
+      this.deps.collectiveCalendarReader?.createReadScope?.() ?? this.deps.collectiveCalendarReader;
     const ownerReads: EntrustedWorkOwnerReadV1[] = [];
     const artifactReader = this.deps.artifactReader?.createReadScope?.() ?? this.deps.artifactReader;
     for (const [taskId, taskReceipts] of byTask) {
@@ -182,12 +212,14 @@ export class EntrustedWorkOwnerReadService {
         { taskId, viewer: { surface: 'human', userId: ownerUserId } },
         taskReceipts,
         artifactReader,
+        attention.coverage,
+        calendarReader,
       );
       if (ownerRead.preparedArtifact && ownerRead.attentionReceipts.some((receipt) => receipt.eligible)) {
         ownerReads.push(ownerRead);
       }
     }
-    return ownerReads;
+    return { ownerReads, coverage: attention.coverage };
   }
 
   private isCurrentVisibleTaskLink(
@@ -216,6 +248,8 @@ export class EntrustedWorkOwnerReadService {
     input: z.output<typeof ownerReadInputSchema>,
     producerReceipts: readonly ProducerAttentionReceiptV1[],
     artifactReader = this.deps.artifactReader,
+    attentionCoverage: ProducerAttentionCoverageV1 = { state: 'complete' },
+    calendarReader = this.deps.collectiveCalendarReader,
   ): Promise<EntrustedWorkOwnerReadV1> {
     this.assertViewer(task, input.viewer);
     const entrusted = task.entrustedWork;
@@ -248,7 +282,20 @@ export class EntrustedWorkOwnerReadService {
       subjectRef,
       producerReceipts,
     });
-    const timeRefs = projectEntrustedWorkTimeRefs(entrusted.time, subjectRef, ownerRef, entrusted.revision);
+    const publicTime = isCurrent ? await calendarReader?.read(task) : undefined;
+    // This is a disposable read of the same Work. Never copy public dates into private Task storage.
+    const dateFacts =
+      publicTime?.state === 'current'
+        ? Object.fromEntries(
+            Object.entries(publicTime.time).map(([key, fact]) => [
+              key,
+              { value: Date.parse(fact.value), sourceRef: fact.sourceRef },
+            ]),
+          )
+        : publicTime?.state === 'unavailable'
+          ? {}
+          : entrusted.time;
+    const timeRefs = projectEntrustedWorkTimeRefs(dateFacts, subjectRef, ownerRef, entrusted.revision);
     const execution =
       entrusted.closure.state === 'open'
         ? await readOwnerTaskExecution({ task, isCurrent, reader: this.deps.taskExecution })
@@ -295,11 +342,14 @@ export class EntrustedWorkOwnerReadService {
         freshnessState: isCurrent ? ('current' as const) : ('stale' as const),
         preparedArtifact,
         timeRefs,
+        attentionCoverage,
         attentionReceipts,
         ...(terminal ? { terminal } : {}),
       }),
       ...(preparedArtifact ? { preparedArtifact } : {}),
+      ...(publicTime ? { publicTime } : {}),
       timeRefs,
+      attentionCoverage,
       attentionReceipts,
     };
     const parsed = entrustedWorkOwnerReadV1Schema.safeParse(candidate);

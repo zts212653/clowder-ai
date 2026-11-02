@@ -48,7 +48,6 @@ function project(
         },
       },
     ],
-    grants: [],
     instances: [
       {
         pluginId: candidate.pluginId,
@@ -95,9 +94,8 @@ describe('Host activation projection through Plugin Manager UI', () => {
         <PluginManagerContent presentation="v2" fixtures={[designFixture(item, undefined, { state: 'absent' })]} />,
       ),
     );
-    expect(container.querySelector('[data-plugin-section="attention"]')?.textContent).toContain(
-      'UNEXPECTED_RUNTIME_FAILURE',
-    );
+    expect(container.querySelector('[data-plugin-section="attention"]')?.textContent).toContain('运行出错');
+    expect(container.querySelector('[title*="UNEXPECTED_RUNTIME_FAILURE"]')).not.toBeNull();
   });
 
   it('shows current activation failure even without a recorded diagnostic', () => {
@@ -107,7 +105,7 @@ describe('Host activation projection through Plugin Manager UI', () => {
         <PluginManagerContent presentation="v2" fixtures={[designFixture(item, undefined, { state: 'absent' })]} />,
       ),
     );
-    expect(container.querySelector('[data-plugin-section="attention"]')?.textContent).toContain('插件运行操作失败');
+    expect(container.querySelector('[data-plugin-section="attention"]')?.textContent).toContain('运行出错');
   });
 
   it.each([
@@ -123,6 +121,23 @@ describe('Host activation projection through Plugin Manager UI', () => {
     );
     expect(container.querySelector('[data-plugin-section="attention"]')).toBeNull();
     expect(container.querySelector('[data-plugin-section="installed"]')).not.toBeNull();
+  });
+
+  it('explains a current Host incompatibility even when the plugin is disabled', () => {
+    const fixture = designFixture(project('disabled', 'stopped'), undefined, { state: 'absent' });
+    fixture.actions = {
+      install: false,
+      repair: false,
+      setEnabled: false,
+      uninstall: true,
+      blockingReasons: ['package-incompatible'],
+    };
+    act(() => root.render(<PluginManagerContent presentation="v2" fixtures={[fixture]} />));
+    expect(container.querySelector('[data-plugin-section="attention"]')?.textContent).toContain(
+      '版本和当前 Host 不兼容，已停用',
+    );
+    act(() => container.querySelector<HTMLButtonElement>('button[data-enabled]')?.click());
+    expect(container.querySelector('output')?.textContent).toContain('当前没有可用的兼容更新');
   });
 
   it('retains v1 grouping for the same production failure', () => {

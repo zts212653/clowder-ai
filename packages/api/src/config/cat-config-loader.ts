@@ -21,6 +21,7 @@ import type {
   Roster,
 } from '@cat-cafe/shared';
 import {
+  backgroundImageUrlSchema,
   CAT_CARRIERS,
   type ClientId,
   catClientSupportsCarrier,
@@ -115,6 +116,11 @@ const catVariantSchema = z
     mentionPatterns: z.array(mentionPatternSchema).optional(), // F32-b: variant-level mentions
     source: z.string().optional(), // #441: legacy field, ignored — kept in schema for old catalog read compat
     configurationSource: z.enum(['native_tool', 'managed_account']).optional(),
+    agentProvider: z
+      .string()
+      .regex(/^plugin:[a-z0-9][a-z0-9._-]{0,127}\/[a-z0-9][a-z0-9._-]{0,63}$/)
+      .nullable()
+      .optional(),
     accountRef: z.string().min(1).optional(), // F127: concrete account binding
     accountBindingMode: z.enum(['follow', 'override']).optional(),
     creationReceipt: z.object({ requestHash: z.string().length(64), payloadHash: z.string().length(64) }).optional(),
@@ -149,6 +155,7 @@ const catVariantSchema = z
     personality: z.string().optional(),
     strengths: z.array(z.string()).optional(),
     avatar: z.string().min(1).optional(), // F32-b P4c: override breed avatar
+    banner: backgroundImageUrlSchema.nullable().optional(),
     color: colorSchema.optional(), // F32-b P4c: override breed color
     /** clowder-ai#1208: explicit context window cap. undefined=Auto, positive int=Manual. */
     contextWindow: z.number().int().positive().optional(),
@@ -667,6 +674,13 @@ export function loadResolvedCatConfig(templatePath?: string, options: CatCatalog
   return parseCatConfig(raw);
 }
 
+/** The startup registry and its provider details must use the same source. */
+export function resolveRuntimeCatTemplatePath(): string {
+  const configured = process.env.CAT_TEMPLATE_PATH ?? DEFAULT_CAT_TEMPLATE_PATH;
+  if (!configured.trim()) throw new Error('runtime_cat_template_unavailable');
+  return resolve(configured);
+}
+
 /**
  * Load and validate the resolved cat config source.
  * Explicit filePath reads that file directly.
@@ -761,10 +775,12 @@ export function toAllCatConfigs(config: CatCafeConfig): Record<string, CatConfig
         displayName: variant.displayName ?? breed.displayName,
         ...(nickname != null ? { nickname } : {}),
         avatar: variant.avatar ?? breed.avatar, // F32-b P4c: variant can override
+        ...(variant.banner ? { banner: variant.banner } : {}),
         color: variant.color ?? breed.color, // F32-b P4c: variant can override
         mentionPatterns,
         ...(variant.accountRef != null ? { accountRef: variant.accountRef } : {}),
         ...(variant.configurationSource ? { configurationSource: variant.configurationSource } : {}),
+        ...(variant.agentProvider !== undefined ? { agentProvider: variant.agentProvider } : {}),
         ...(variant.accountBindingMode ? { accountBindingMode: variant.accountBindingMode } : {}),
         clientId: variant.clientId as ClientId, // #252: Zod now accepts any string; downstream switch/case has default branches
         carrier: resolveCatCarrier(variant as CarrierCompatInput),
@@ -1163,14 +1179,22 @@ export function getCatContextWindowConfig(
 // ── F149: ACP config accessor (raw variant field, not in CatConfig type) ──────
 
 export interface AcpVariantConfig {
+  /** Stable plugin reference; the Host resolves launch settings from the active plugin. */
+  agentProvider?: string;
   command: string;
   startupArgs: string[];
+  /** Optional owner-selected absolute root; full directory checks, no automatic relocation. */
+  bootstrapRoot?: string;
   /** F161 Phase C: ACP wire transport. 'stdio' = NDJSON over stdin/stdout (default). 'httpstream' = spawn process that listens on HTTP port. */
   transport?: 'stdio' | 'httpstream';
   /** Required for httpstream until ACP publishes a stable HTTP transport spec. */
   experimental?: boolean;
   mcpWhitelist?: string[];
   supportsMultiplexing?: boolean;
+  /** iCode protocol adapter: switches AcpAgentService onto iCode's ACP dialect (session/set_model, per-turn session/close, no stdio MCP injection). */
+  protocolAdapter?: 'icode';
+  /** iCode: model configuration id sent to session/set_model (distinct from defaultModel). */
+  modelProfileId?: string;
   /** Phase C: optional pool config overrides */
   pool?: {
     maxLiveProcesses?: number;
@@ -1185,10 +1209,30 @@ export interface AcpVariantConfig {
  */
 export function getAcpConfig(catId: string, projectRoot?: string): AcpVariantConfig | undefined {
   try {
-    const templatePath = projectRoot
-      ? resolveProjectTemplatePath(projectRoot)
-      : (process.env.CAT_TEMPLATE_PATH ?? DEFAULT_CAT_TEMPLATE_PATH);
-    const raw = mergeTemplateWithCatalog(templatePath) ?? readTemplate(templatePath);
+    return readAcpConfigFromTemplate(
+      catId,
+      projectRoot ? resolveProjectTemplatePath(projectRoot) : resolveRuntimeCatTemplatePath(),
+    );
+  } catch {
+    return undefined;
+  }
+}
+
+/** Runtime identity provenance is independent of capability/data/workspace roots. */
+export function getRegisteredAcpConfig(catId: string, projectRoot: string): AcpVariantConfig | undefined {
+  const source = catRegistry.tryGet(catId)?.configurationTemplatePath;
+  return source === undefined
+    ? getAcpConfig(catId, projectRoot)
+    : readAcpConfigFromTemplate(catId, source, { persistMigrations: false });
+}
+
+function readAcpConfigFromTemplate(
+  catId: string,
+  templatePath: string,
+  options: CatCatalogReadOptions = {},
+): AcpVariantConfig | undefined {
+  try {
+    const raw = mergeTemplateWithCatalog(templatePath, options) ?? readTemplate(templatePath);
     const json = JSON.parse(raw) as {
       breeds?: Array<{ catId?: string; variants?: Array<{ catId?: string; acp?: AcpVariantConfig | null }> }>;
     };

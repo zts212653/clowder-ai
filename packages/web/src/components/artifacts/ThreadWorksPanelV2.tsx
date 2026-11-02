@@ -1,14 +1,14 @@
 'use client';
 
 import { type GlobalArtifactDTO, projectThreadWorks, type ThreadArtifactDTO } from '@cat-cafe/shared';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useArtworkLightboxScope } from '@/components/content-review/ArtworkLightboxScope';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useArtifactLightbox } from '@/components/content-review/useArtifactLightbox';
+import { messageFindReturnHref, requestMessageFindReturn } from '@/components/message-search/message-find-events';
 import { useShellCopy } from '@/components/shell/shell-copy';
 import { pushThreadRouteWithHistory } from '@/components/ThreadSidebar/thread-navigation';
 import { artifactObjectId } from '@/components/workbench/real-surface-adapters';
+import type { WorkspaceSurfaceDescriptor } from '@/components/workbench/workbench-contract';
 import { artifactCardMetadata } from '@/components/workspace-home/artifact-card-metadata';
-import { HomeArtifactLightbox } from '@/components/workspace-home/HomeArtifactLightbox';
 import { workspaceV3Copy } from '@/components/workspace-home/workspace-v3.shell-copy';
 import { useCatData } from '@/hooks/useCatData';
 import { useGlobalArtifacts } from '@/hooks/useGlobalArtifacts';
@@ -29,7 +29,11 @@ export type WorksPanelProps = {
   threadId: string;
   width?: number;
   onClose?: () => void;
-  onSelectArtifact?: (artifact: ThreadArtifactDTO | GlobalArtifactDTO, origin: ArtifactListOrigin) => void;
+  onSelectArtifact?: (
+    artifact: ThreadArtifactDTO | GlobalArtifactDTO,
+    origin: ArtifactListOrigin,
+    surface: WorkspaceSurfaceDescriptor,
+  ) => void;
   initialView?: ArtifactListView;
 };
 type Work = ThreadArtifactDTO | GlobalArtifactDTO;
@@ -42,21 +46,21 @@ const matches = (artifact: Work, filter: Filter) =>
 /** The existing artifact-list owner and origin schema, with the original content open callback. */
 export function ThreadWorksPanelV2({ threadId, width, onClose, onSelectArtifact, initialView }: WorksPanelProps) {
   const t = useShellCopy(worksPanelCopy);
-  const floating = useArtifactLightbox(threadId);
-  const floatingScope = useArtworkLightboxScope();
+  const findSessionId = initialView?.findSessionId;
+  const canReturnToFind = messageFindReturnHref(findSessionId, threadId) !== null;
+  const floating = useArtifactLightbox(threadId, onSelectArtifact);
   const cardCopy = useShellCopy(workspaceV3Copy);
   const { getCatById } = useCatData();
-  const [scope, setScope] = useState(initialView?.scope ?? 'thread');
+  const [scope, setScope] = useState(initialView?.scope ?? (threadId === 'default' ? 'global' : 'thread'));
   const [filter, setFilter] = useState<Filter>(initialView?.filter ?? 'all');
   const [query, setQuery] = useState(initialView?.query ?? '');
   const grouping: GroupingMode = initialView?.grouping ?? 'time';
   const [catFilter, setCatFilter] = useState<string | null>(initialView?.catFilter ?? null);
   const collapsed = initialView?.collapsed ?? [];
-  const [selected, setSelected] = useState<Work | null>(null);
   const [notice, setNotice] = useState<string | undefined>();
   const previewOrigin = useRef<HTMLButtonElement | null>(null);
   const scroll = useRef<HTMLDivElement>(null);
-  const thread = useThreadArtifacts(threadId, 'works');
+  const thread = useThreadArtifacts(threadId === 'default' ? undefined : threadId, 'works');
   const global = useGlobalArtifacts(scope === 'global', { view: 'works' });
   const active = scope === 'global' ? global : thread;
   const globalWorks = useMemo(
@@ -100,13 +104,7 @@ export function ThreadWorksPanelV2({ threadId, width, onClose, onSelectArtifact,
     required,
   );
   useWorksViewportReturn(scroll, initialView?.viewport, !active.loading && !active.error);
-  const close = useCallback(() => {
-    const ownsFocus = document.activeElement?.closest('.home-lightbox');
-    setSelected(null);
-    if (ownsFocus && previewOrigin.current?.isConnected) previewOrigin.current.focus({ preventScroll: true });
-  }, []);
   useEffect(() => {
-    setSelected(null);
     setNotice(undefined);
   }, [threadId, scope]);
   const open = (artifact: Work) => {
@@ -126,6 +124,7 @@ export function ThreadWorksPanelV2({ threadId, width, onClose, onSelectArtifact,
         grouping,
         catFilter,
         collapsed: [...collapsed],
+        ...(findSessionId ? { findSessionId } : {}),
         ...(list
           ? {
               viewport: {
@@ -143,11 +142,7 @@ export function ThreadWorksPanelV2({ threadId, width, onClose, onSelectArtifact,
           : {}),
       },
     };
-    const openWorkspace = () => {
-      if (onSelectArtifact) onSelectArtifact(artifact, origin);
-      else useChatStore.getState().openPublishedArtifact(threadId, artifact, origin);
-    };
-    if (!floating.open(artifact, origin)) openWorkspace();
+    floating.open(artifact, origin, visible);
   };
   const jump = (artifact: Work) => {
     if (!artifact.sourceMessageId) {
@@ -169,14 +164,11 @@ export function ThreadWorksPanelV2({ threadId, width, onClose, onSelectArtifact,
   };
   const select = (artifact: Work) => {
     setNotice(undefined);
-    if (floatingScope && (artifact.type === 'image' || artifact.type === 'video') && artifact.url) open(artifact);
-    else if (artifact.type === 'image' && artifact.url) setSelected(artifact);
-    // 有精确坐标的 HTML 原块在 Works 内直接预览；interactive 卡片和旧数据没有坐标，
-    // 仍回原消息处理（审批/选择必须在聊天里承载）。
-    else if (artifact.type === 'widget' && !(artifact.sourceMessageId && artifact.widgetBlockId)) jump(artifact);
+    if (artifact.type === 'widget' && !artifact.work && !(artifact.sourceMessageId && artifact.widgetBlockId))
+      jump(artifact);
     else open(artifact);
   };
-  const image = selected && active.artifacts.find((item) => workKey(item) === workKey(selected));
+
   return (
     <section
       className="v2-works-panel"
@@ -184,6 +176,15 @@ export function ThreadWorksPanelV2({ threadId, width, onClose, onSelectArtifact,
       style={width ? { width, flexShrink: 0 } : undefined}
     >
       <header className="v2-works-header">
+        {canReturnToFind && findSessionId && (
+          <button
+            type="button"
+            className="shell-focusable mb-2 justify-self-start text-left text-xs text-cafe-secondary"
+            onClick={() => requestMessageFindReturn(findSessionId)}
+          >
+            ‹ 回到查找
+          </button>
+        )}
         <div className="v2-works-topline">
           <h2 className="text-sm font-semibold">{t.title}</h2>
           <span className="v2-works-count text-xs text-cafe-muted">
@@ -202,6 +203,7 @@ export function ThreadWorksPanelV2({ threadId, width, onClose, onSelectArtifact,
                 type="button"
                 className="shell-focusable"
                 aria-pressed={scope === value}
+                disabled={value === 'thread' && threadId === 'default'}
                 onClick={() => {
                   setScope(value);
                   setFilter('all');
@@ -287,21 +289,7 @@ export function ThreadWorksPanelV2({ threadId, width, onClose, onSelectArtifact,
           </>
         )}
       </div>
-      {image && (
-        <HomeArtifactLightbox
-          artifact={image}
-          images={visible.filter((item) => item.type === 'image' && !!item.url)}
-          onSelect={setSelected}
-          onClose={close}
-          onAnnotate={() => {
-            open(image);
-            close();
-          }}
-          metadata={meta(image)}
-          notice={notice}
-          artifactKey={workKey}
-        />
-      )}
+      {floating.lightbox}
     </section>
   );
 }

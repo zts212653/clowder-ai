@@ -90,6 +90,35 @@ describe('F296 B1: RedisContextEpochStore', { skip: redisIsolationSkipReason(RED
     assert.equal(read.lastTransitionRef, 'ev:resumed');
   });
 
+  it('round-trips authoritative pending compaction proof across store instances and clears it by full CAS rewrite', async () => {
+    assert.equal(available, true, 'this regression requires a real isolated Redis');
+    const { RedisContextEpochStore } = await import(
+      '../dist/domains/cats/services/stores/redis/RedisContextEpochStore.js'
+    );
+    const key = 'compaction-owner::codex-sol::compaction-thread';
+    const pendingCompaction = { eventId: 'stable-event', runtimeSessionId: 'runtime', evidenceRef: 'provider:compact' };
+    await store.compareAndPut(
+      {
+        scopeKey: key,
+        contextEpoch: 2,
+        contextMode: 'cold',
+        boundRuntimeSessionId: 'runtime',
+        lastTransitionRef: 'provider:compact',
+        pendingCompaction,
+        consumedCompactionEventIds: ['stable-event'],
+        version: 1,
+        updatedAt: Date.now(),
+      },
+      0,
+    );
+    const reopened = new RedisContextEpochStore(redis);
+    const current = await reopened.get(key);
+    assert.deepEqual(current.pendingCompaction, pendingCompaction);
+    const { pendingCompaction: _proof, ...withoutProof } = current;
+    await reopened.compareAndPut({ ...withoutProof, contextMode: 'hot', version: 2 }, 1);
+    assert.equal((await store.get(key)).pendingCompaction, undefined);
+  });
+
   it('persists with no expiry (Iron Rule #5)', async () => {
     if (!available) return;
     await store.compareAndPut(

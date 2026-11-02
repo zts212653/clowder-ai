@@ -170,8 +170,7 @@ function controllerMatchesCurrentAuthority(
     binding.pluginId === current.pluginId &&
     binding.pluginInstanceId === current.pluginInstanceId &&
     binding.moduleRef === current.moduleRef &&
-    binding.lifecycleRevision === current.lifecycleRevision &&
-    binding.grantRevision === current.grantRevision
+    binding.lifecycleRevision === current.lifecycleRevision
   );
 }
 

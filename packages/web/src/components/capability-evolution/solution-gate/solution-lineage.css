@@ -45,6 +45,7 @@
   border-bottom: 1px dashed var(--cafe-border);
   color: var(--cafe-text-muted);
   background: var(--cafe-surface-sunken);
+  --chat-background-role: cafe-sunken;
   font-size: var(--console-font-xs);
 }
 .solution-fixture label {
@@ -55,6 +56,7 @@
 }
 .solution-fixture select {
   background: var(--console-card-bg);
+  --chat-background-role: console-card;
   border: 1px solid var(--cafe-border);
   padding: 4px 8px;
   border-radius: 5px;
@@ -140,6 +142,7 @@
   border: 1px solid var(--cafe-border);
   border-radius: 9px;
   background: var(--console-card-bg);
+  --chat-background-role: console-card;
 }
 .solution-branch-layout button[data-scheme-node="S1"] {
   grid-row: 1 / 3;
@@ -194,6 +197,7 @@
   border-left: 2px solid var(--content-category-diagnosis);
   padding: 8px 16px;
   background: var(--cafe-surface-sunken);
+  --chat-background-role: cafe-sunken;
 }
 .solution-link {
   color: var(--evolution-focus-text);

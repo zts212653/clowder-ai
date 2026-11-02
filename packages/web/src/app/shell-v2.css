@@ -23,6 +23,28 @@
   container: chat-header / inline-size;
 }
 
+/* Use the chat pane's available width, including desktop split panes. */
+[data-thread-chat-full-v2] {
+  container: thread-chat / inline-size;
+}
+
+@container thread-chat (max-width: 420px) {
+  /* 28px latest target + 2px edge + 10px reading gap; both columns inherit this one budget. */
+  [data-thread-chat-full-v2] > [data-thread-chat-history],
+  [data-thread-chat-full-v2] [data-thread-chat-footer] {
+    --thread-chat-inset-end: 2.5rem;
+  }
+
+  /* Stack the existing targets: latest is 12px from the bottom, 28px high, with an 8px gap. */
+  [data-thread-chat-full-v2] > [data-thread-chat-history] > [data-message-piano] {
+    bottom: 3rem;
+  }
+
+  [data-thread-chat-full-v2] > [data-thread-chat-history] [data-thread-scroll-placement="rail"] {
+    right: 0.125rem;
+  }
+}
+
 @container chat-header (max-width: 420px) {
   .shell-chat-header-layout {
     height: auto;
@@ -74,6 +96,7 @@
   height: 16px;
   border: 1px solid var(--shell-muted);
   background: var(--shell-paper);
+  --chat-background-role: paper;
 }
 
 [data-shell="v2"] .settings-resource-toggle-thumb {
@@ -92,6 +115,7 @@
 [data-shell="v2"] .settings-resource-toggle[data-enabled="true"] .settings-resource-toggle-thumb {
   left: 11px;
   background: var(--shell-paper);
+  --chat-background-role: paper;
 }
 
 /* One focus ring for every shell control: external 2px solid ring + 2px gap (DESIGN.md Elevation). */
@@ -145,6 +169,7 @@
  */
 [data-shell="v2"] div:has(> [data-testid="chat-input-composer-row"]) {
   background: var(--shell-work);
+  --chat-background-role: work;
 }
 
 /* The landing composer overlaps the hero fade; its host must not paint a rectangular work-surface behind the card. */
@@ -159,6 +184,7 @@
   padding: 6px 8px;
   align-items: flex-end;
   background: var(--shell-paper);
+  --chat-background-role: paper;
   border: 1px solid var(--shell-hairline-strong);
   border-radius: 16px;
 }

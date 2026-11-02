@@ -1,4 +1,45 @@
 import { parse as parseToml } from 'smol-toml';
+import {
+  bindManagedMcpStdioConfig,
+  materializeNativeMcpHttp,
+} from '../../../../../config/capabilities/managed-mcp-config.js';
+
+/** Native headers belong to the private thread RPC, never the CLI assignment. */
+export function codexNativeMcpThreadConfig(
+  args: readonly string[],
+  callback: Record<string, string>,
+  privateServers: Record<string, Record<string, unknown>> = {},
+): Record<string, unknown> {
+  const config = codexConfigObjectFromArgs(args);
+  const servers = isCodexConfigObject(config.mcp_servers) ? config.mcp_servers : {};
+  const records = Object.fromEntries(
+    Object.entries(servers).filter(([, server]) => isCodexConfigObject(server)),
+  ) as Record<string, Record<string, unknown>>;
+  // Raw plugin launches stay off argv and still pass the existing exact Host matcher.
+  const native = materializeNativeMcpHttp({ ...records, ...privateServers }, callback);
+  return {
+    mcp_servers: Object.fromEntries(
+      Object.entries(native).map(([name, server]) => {
+        if (server.type !== 'http') return [name, server];
+        const { type: _type, headers, ...rest } = server;
+        return [name, { ...rest, ...(headers ? { http_headers: headers } : {}) }];
+      }),
+    ),
+  };
+}
+
+/** Remove only generated MCP assignments after transferring them to private RPC. */
+export function withoutCodexMcpAssignments(args: readonly string[]): string[] {
+  const result: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    if ((args[i] === '--config' || args[i] === '-c') && /^mcp_servers(?:\.|=)/.test(args[i + 1] ?? '')) {
+      i++;
+      continue;
+    }
+    result.push(args[i]!);
+  }
+  return result;
+}
 
 /** Convert generated CLI assignments into the same config used by app-server. */
 export function codexConfigObjectFromArgs(args: readonly string[]): Record<string, unknown> {
@@ -42,8 +83,20 @@ export function isCodexConfigObject(value: unknown): value is Record<string, unk
  * A single root value preserves the server keys without changing their identity.
  * Bare-name configurations retain their existing override form and precedence.
  */
-export function codexMcpConfigArgs(args: readonly string[]): string[] {
-  if (!args.some((argument) => argument.startsWith('mcp_servers."'))) return [...args];
+export function codexMcpConfigArgs(args: readonly string[], callbackEnv: Record<string, string> = {}): string[] {
+  return transformCodexMcpConfig(args, (server) => bindManagedMcpStdioConfig(server, callbackEnv));
+}
+
+/** Normalize the direct private plugin launch without altering its transport. */
+export function normalizeCodexMcpConfigArgs(args: readonly string[]): string[] {
+  return transformCodexMcpConfig(args, (server) => server);
+}
+
+function transformCodexMcpConfig(
+  args: readonly string[],
+  transform: (server: Record<string, unknown>, name: string) => Record<string, unknown>,
+): string[] {
+  if (!args.some((argument) => argument.startsWith('mcp_servers'))) return [...args];
   let config: Record<string, unknown> = {};
   const retained: string[] = [];
   for (let index = 0; index < args.length; index++) {
@@ -58,7 +111,19 @@ export function codexMcpConfigArgs(args: readonly string[]): string[] {
     config = expression.startsWith('mcp_servers=') ? overlay : mergeCodexConfig(config, overlay);
     index++;
   }
-  return [...retained, '--config', `mcp_servers=${inlineToml(config.mcp_servers)}`];
+  const servers = isCodexConfigObject(config.mcp_servers) ? config.mcp_servers : {};
+  const bound = Object.fromEntries(
+    Object.entries(servers).map(([name, server]) => [
+      name,
+      isCodexConfigObject(server) ? transform(server, name) : server,
+    ]),
+  );
+  if (
+    !args.some((arg) => arg.startsWith('mcp_servers."')) &&
+    Object.entries(servers).every(([name, server]) => bound[name] === server)
+  )
+    return [...args];
+  return [...retained, '--config', `mcp_servers=${inlineToml(bound)}`];
 }
 
 function inlineToml(value: unknown): string {

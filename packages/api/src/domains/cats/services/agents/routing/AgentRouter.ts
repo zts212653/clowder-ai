@@ -435,7 +435,10 @@ function buildMentionData(configs: Record<string, import('@cat-cafe/shared').Cat
  * Options for AgentRouter constructor
  */
 export interface AgentRouterOptions {
+  scopedMemberRouting?: import('./scoped-member-routing.js').ScopedMemberRoutingPort;
+  messageSearchAnswerService?: import('../../../../memory/MessageSearchAnswerPublicationService.js').MessageSearchAnswerPublicationService;
   resolveTrustedImagePath?: (hmrId: string) => Promise<string | undefined>;
+  resolveInvocationPluginMcpView?: import('../invocation/invoke-single-cat.js').InvocationDeps['resolveInvocationPluginMcpView'];
   agentRegistry: AgentRegistry;
   registry: InvocationRegistry;
   dotReplyTarget?: (
@@ -481,6 +484,8 @@ export interface AgentRouterOptions {
   draftStore?: IDraftStore;
   /** F065: Task store for bootstrap task snapshot injection */
   taskStore?: ITaskStore;
+  ordinaryTaskHandoffs?: import('../../../../ball-custody/OrdinaryTaskHandoffService.js').OrdinaryTaskHandoffService;
+  ownedWaitStatusReader?: import('../../../../ball-custody/OwnedWaitStatus.js').OwnedWaitStatusReader;
   /** RFC A79: canonical exact-run situation projection for agent context. */
   threadExecutionSituationSource?: import('../invocation/thread-execution-situation.js').ThreadExecutionSituationSource;
   /** F073 P4: Workflow SOP store for stage hint injection */
@@ -545,6 +550,7 @@ export interface AgentRouterOptions {
   personMemoryProposalStatusContextResolver?: import('../../../../memory/people/PersonMemoryProposalStatusContextResolver.js').PersonMemoryProposalStatusContextResolver;
   /** F287: invocation-bound Cue Plane adapter. */
   memoryCuePromptService?: import('../../../../memory/cue/MemoryCueInvocationPromptService.js').MemoryCueInvocationPromptResolver;
+  contextSourceAdmission?: import('../../../../memory/cue/ContextSourceAdmission.js').ContextSourceAdmission;
   profileCueOpportunitySource?: import('../../../../memory/cue/sources/ProfileMemoryCueSource.js').ProfileMemoryCueSource;
   threadOverviewOpportunitySource?: import('../../../../memory/cue/sources/ThreadOverviewMemoryCueSource.js').ThreadOverviewMemoryCueSource;
   eventCueOpportunitySource?: import('../../../../memory/cue/sources/EventMemoryCueSource.js').EventMemoryCueSource;
@@ -557,11 +563,14 @@ export interface AgentRouterOptions {
  * Router that parses @ mentions and routes to appropriate agent services
  */
 export class AgentRouter {
+  private scopedMemberRouting?: AgentRouterOptions['scopedMemberRouting'];
   private services: Record<string, AgentService>;
   private unavailableServices: ReadonlyMap<string, AgentRegistrationFailure> = new Map();
   private registry: InvocationRegistry;
   private messageStore: IMessageStore;
+  private messageSearchAnswerService?: import('../../../../memory/MessageSearchAnswerPublicationService.js').MessageSearchAnswerPublicationService;
   private resolveTrustedImagePath?: (hmrId: string) => Promise<string | undefined>;
+  private resolveInvocationPluginMcpView?: AgentRouterOptions['resolveInvocationPluginMcpView'];
   private sessionManager: SessionManager;
   private deliveryCursorStore: DeliveryCursorStore;
   private threadStore: IThreadStore | null;
@@ -583,6 +592,10 @@ export class AgentRouter {
   private draftStore: IDraftStore | undefined;
   private taskProgressStore: TaskProgressStore | undefined;
   private taskStore: ITaskStore | undefined;
+  private ordinaryTaskHandoffs?: AgentRouterOptions['ordinaryTaskHandoffs'];
+  private ownedWaitStatusReader:
+    | import('../../../../ball-custody/OwnedWaitStatus.js').OwnedWaitStatusReader
+    | undefined;
   private threadExecutionSituationSource?: import('../invocation/thread-execution-situation.js').ThreadExecutionSituationSource;
   private workflowSopStore: IWorkflowSopStore | undefined;
   private executionDigestStore:
@@ -636,6 +649,7 @@ export class AgentRouter {
   private personMemoryProposalStatusContextResolver?: import('../../../../memory/people/PersonMemoryProposalStatusContextResolver.js').PersonMemoryProposalStatusContextResolver;
   /** F287 */
   private memoryCuePromptService?: import('../../../../memory/cue/MemoryCueInvocationPromptService.js').MemoryCueInvocationPromptResolver;
+  private contextSourceAdmission?: import('../../../../memory/cue/ContextSourceAdmission.js').ContextSourceAdmission;
   private profileCueOpportunitySource?: import('../../../../memory/cue/sources/ProfileMemoryCueSource.js').ProfileMemoryCueSource;
   private threadOverviewOpportunitySource?: import('../../../../memory/cue/sources/ThreadOverviewMemoryCueSource.js').ThreadOverviewMemoryCueSource;
   private eventCueOpportunitySource?: import('../../../../memory/cue/sources/EventMemoryCueSource.js').EventMemoryCueSource;
@@ -654,13 +668,16 @@ export class AgentRouter {
   }
 
   constructor(options: AgentRouterOptions) {
+    this.scopedMemberRouting = options.scopedMemberRouting;
     this.services = {};
     this.speechMentionRe = /$^/;
     this.rebuildRuntimeCaches(options.agentRegistry);
 
     this.registry = options.registry;
     this.messageStore = options.messageStore;
+    this.messageSearchAnswerService = options.messageSearchAnswerService;
     this.resolveTrustedImagePath = options.resolveTrustedImagePath;
+    this.resolveInvocationPluginMcpView = options.resolveInvocationPluginMcpView;
     this.sessionManager = new SessionManager(options.sessionStore);
     // #1200 P2-3: wire cursor canonicalizer for v1→v2 async resolution
     const canonicalizer = options.messageStore.canonicalizeCursor
@@ -687,6 +704,8 @@ export class AgentRouter {
     this.draftStore = options.draftStore;
     this.taskProgressStore = options.taskProgressStore;
     this.taskStore = options.taskStore;
+    this.ordinaryTaskHandoffs = options.ordinaryTaskHandoffs;
+    this.ownedWaitStatusReader = options.ownedWaitStatusReader;
     this.threadExecutionSituationSource = options.threadExecutionSituationSource;
     this.workflowSopStore = options.workflowSopStore;
     this.executionDigestStore = options.executionDigestStore;
@@ -720,6 +739,7 @@ export class AgentRouter {
     this.injectionTraceStore = options.injectionTraceStore;
     this.personMemoryProposalStatusContextResolver = options.personMemoryProposalStatusContextResolver;
     this.memoryCuePromptService = options.memoryCuePromptService;
+    this.contextSourceAdmission = options.contextSourceAdmission;
     this.profileCueOpportunitySource = options.profileCueOpportunitySource;
     this.eventCueOpportunitySource = options.eventCueOpportunitySource;
     this.threadOverviewOpportunitySource = options.threadOverviewOpportunitySource;
@@ -1308,11 +1328,15 @@ export class AgentRouter {
   getStrategyDeps(): RouteStrategyDeps {
     const apiPort = process.env.API_SERVER_PORT ?? String(deploymentDefaults.apiPort);
     return {
+      ...(this.messageSearchAnswerService ? { messageSearchAnswerService: this.messageSearchAnswerService } : {}),
       services: this.services,
       unavailableServices: this.unavailableServices,
       ...(this.routingDispatchPreflight ? { routingDispatchPreflight: this.routingDispatchPreflight } : {}),
       invocationDeps: {
         ...(this.resolveTrustedImagePath ? { resolveTrustedImagePath: this.resolveTrustedImagePath } : {}),
+        ...(this.resolveInvocationPluginMcpView
+          ? { resolveInvocationPluginMcpView: this.resolveInvocationPluginMcpView }
+          : {}),
         messageStore: this.messageStore,
         registry: this.registry,
         sessionManager: this.sessionManager,
@@ -1343,6 +1367,7 @@ export class AgentRouter {
         ...(this.transcriptReader ? { transcriptReader: this.transcriptReader } : {}),
         ...(this.sessionSealer ? { sessionSealer: this.sessionSealer } : {}),
         ...(this.taskStore ? { taskStore: this.taskStore } : {}),
+        ...(this.ordinaryTaskHandoffs ? { ordinaryTaskHandoffs: this.ordinaryTaskHandoffs } : {}),
         ...(this.workflowSopStore ? { workflowSopStore: this.workflowSopStore } : {}),
         ...(this.executionDigestStore ? { executionDigestStore: this.executionDigestStore } : {}),
         ...(this.tmuxGateway ? { tmuxGateway: this.tmuxGateway } : {}),
@@ -1356,6 +1381,7 @@ export class AgentRouter {
         ...(this.freshnessStateStore ? { freshnessStateStore: this.freshnessStateStore } : {}),
         ...(this.runtimeInteractionPort ? { runtimeInteractionPort: this.runtimeInteractionPort } : {}),
         ...(this.memoryCuePromptService ? { memoryCuePromptService: this.memoryCuePromptService } : {}),
+        ...(this.contextSourceAdmission ? { contextSourceAdmission: this.contextSourceAdmission } : {}),
         ...(this.profileCueOpportunitySource ? { profileCueOpportunitySource: this.profileCueOpportunitySource } : {}),
         ...(this.threadOverviewOpportunitySource
           ? { threadOverviewOpportunitySource: this.threadOverviewOpportunitySource }
@@ -1367,6 +1393,7 @@ export class AgentRouter {
       ...(this.dotReplyTarget ? { dotReplyTarget: this.dotReplyTarget } : {}),
       deliveryCursorStore: this.deliveryCursorStore,
       ...(this.taskStore ? { taskStore: this.taskStore } : {}),
+      ...(this.ownedWaitStatusReader ? { ownedWaitStatusReader: this.ownedWaitStatusReader } : {}),
       ...(this.threadExecutionSituationSource
         ? { threadExecutionSituationSource: this.threadExecutionSituationSource }
         : {}),
@@ -1499,6 +1526,21 @@ export class AgentRouter {
     };
 
     try {
+      if (this.scopedMemberRouting) {
+        const controlled = await this.scopedMemberRouting.resolve({
+          userId,
+          threadId: resolvedThreadId,
+          sourceMessageId: storedUserMessage.id,
+          targetCats,
+          options: routeOptions,
+        });
+        if (controlled.kind === 'controlled') {
+          yield* controlled.stream;
+          routeSpan.setStatus({ code: SpanStatusCode.OK });
+          return;
+        }
+        if (controlled.kind !== 'ordinary') throw new Error('controlled_member_not_ready');
+      }
       if (strategy === 'parallel') {
         yield* routeParallel(strategyDeps, targetCats, cleanMessage, userId, resolvedThreadId, routeOptions);
       } else {
@@ -1530,6 +1572,20 @@ export class AgentRouter {
     intent: IntentResult,
     options: RouteExecutionOptions,
   ): AsyncIterable<AgentMessage> {
+    if (this.scopedMemberRouting) {
+      const controlled = await this.scopedMemberRouting.resolve({
+        userId,
+        threadId,
+        sourceMessageId: userMessageId,
+        targetCats,
+        options,
+      });
+      if (controlled.kind === 'controlled') {
+        yield* controlled.stream;
+        return;
+      }
+      if (controlled.kind !== 'ordinary') throw new Error('controlled_member_not_ready');
+    }
     const cleanMessage = appendContextAttachmentsToPrompt(stripIntentTags(message), options.contentBlocks);
     const strategy =
       options.targetDispatchMode ?? (intent.intent === 'ideate' && targetCats.length > 1 ? 'parallel' : 'serial');

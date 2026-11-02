@@ -7,14 +7,42 @@ import { codexManagedLaunchArgs } from '../../../../../config/codex-managed-laun
 import type { NativeMcpServer } from '../../../../plugin/declared/native-mcp-launches.js';
 import type { AgentServiceOptions } from '../../types.js';
 import { normalizeToolExecutionPolicy } from '../invocation/tool-execution-policy.js';
-import { codexMcpConfigArgs } from './codex-config-overrides.js';
+import { normalizeCodexMcpConfigArgs } from './codex-config-overrides.js';
 import { CODEX_LIVE_DISABLED_FEATURES } from './codex-live-policy.js';
 
 const AUTH_KEYS = ['OPENAI_API_KEY', 'OPENAI_ORG_ID', 'OPENAI_ORGANIZATION', 'OPENAI_PROJECT_ID'] as const;
 const MINIMAL_PATH = `${dirname(process.execPath)}:/usr/bin:/bin`;
 
+type LinkFile = (target: string, path: string) => void;
+
+/** Windows standard users cannot create file symlinks without Developer Mode.
+ * Keep the failure closed, but make the missing prerequisite diagnosable instead
+ * of surfacing a raw EPERM from an internal temporary path.
+ */
+export function linkCodexPluginAuth(
+  authFile: string,
+  target: string,
+  link: LinkFile = symlinkSync,
+  platform: NodeJS.Platform = process.platform,
+): void {
+  try {
+    link(authFile, target);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (platform === 'win32' && (code === 'EPERM' || code === 'EACCES')) {
+      throw Object.assign(
+        new Error(
+          'plugin_native_auth_link_unavailable: native OAuth requires linking auth.json into a private Codex home, but this Windows user cannot create symlinks. Enable Developer Mode/symlink privilege or use API-key authentication.',
+        ),
+        { code: 'PLUGIN_NATIVE_AUTH_LINK_UNAVAILABLE', cause: error },
+      );
+    }
+    throw error;
+  }
+}
+
 export interface PreparedCodexNativeLaunch {
-  readonly kind: 'public';
+  readonly kind: 'public' | 'scoped-member';
   readonly options: AgentServiceOptions;
   readonly env: Record<string, string>;
   readonly args: readonly string[];
@@ -33,7 +61,7 @@ export async function prepareCodexNativeLaunch(
   if (
     !port ||
     typeof port.assertCurrent !== 'function' ||
-    port.sandbox?.kind !== 'public' ||
+    !['public', 'scoped-member'].includes(port.sandbox?.kind) ||
     options.toolExecutionPolicy?.mode !== 'plugin_native' ||
     carrier !== 'exec_json' ||
     !frozenPrompt ||
@@ -49,6 +77,7 @@ export async function prepareCodexNativeLaunch(
     throw new Error('plugin_native_launch_unavailable');
 
   const policy = normalizeToolExecutionPolicy(options.toolExecutionPolicy);
+  const kind = port.sandbox.kind;
   const attempt = new AbortController();
   const server = snapshotServer(port.server);
   const workspace = port.sandbox.workspaceRoot;
@@ -125,37 +154,36 @@ export async function prepareCodexNativeLaunch(
       // Project only the existing account's auth file, never user config/rules/plugins.
       const auth = realpathSync(join(credentialHome, 'auth.json'));
       if (!statSync(auth).isFile()) throw new Error('plugin_native_auth_file_unavailable');
-      symlinkSync(auth, join(codexHome, 'auth.json'));
+      linkCodexPluginAuth(auth, join(codexHome, 'auth.json'));
     }
 
-    const specPath = join(controlRoot, 'mcp.json');
-    const wrapperPath = join(controlRoot, 'mcp.mjs');
+    if (!callbackEnv.CAT_CAFE_CREDENTIAL_FILE && !callbackEnv.CAT_CAFE_NATIVE_TURN_CREDENTIAL_FILE) {
+      const credentialFile = join(controlRoot, 'invocation.json');
+      writeFileSync(
+        credentialFile,
+        JSON.stringify({
+          invocationId: callbackEnv.CAT_CAFE_INVOCATION_ID,
+          callbackToken: callbackEnv.CAT_CAFE_CALLBACK_TOKEN,
+        }),
+        { mode: 0o600, flag: 'wx' },
+      );
+      callbackEnv.CAT_CAFE_CREDENTIAL_FILE = credentialFile;
+    }
     const pluginEnv = pluginMcpEnvironment({ source: 'plugin', env: { ...server.env } }, callbackEnv);
-    writeFileSync(
-      specPath,
-      JSON.stringify({
-        command: server.command,
-        args: server.args,
-        cwd: server.workingDirectory,
-        // The package receives its explicit activation environment, not provider account secrets.
-        env: { HOME: pluginHome, TMPDIR: scratch, PATH: MINIMAL_PATH, ...pluginEnv },
-      }),
-      { mode: 0o600, flag: 'wx' },
-    );
-    writeFileSync(
-      wrapperPath,
-      [
-        "import { spawn } from 'node:child_process';",
-        "import { readFileSync } from 'node:fs';",
-        "const spec = JSON.parse(readFileSync(process.argv[2], 'utf8'));",
-        "const child = spawn(spec.command, spec.args, { cwd: spec.cwd, env: spec.env, stdio: 'inherit' });",
-        "for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, () => child.kill(signal));",
-        "child.on('error', () => process.exit(1));",
-        "child.on('exit', (code) => process.exit(code ?? 1));",
-      ].join('\n'),
-      { mode: 0o600, flag: 'wx' },
-    );
-    const name = /^[A-Za-z0-9_-]+$/.test(server.name) ? server.name : JSON.stringify(server.name);
+    const directEnv = { ...pluginEnv };
+    if (directEnv.CAT_CAFE_CREDENTIAL_FILE || directEnv.CAT_CAFE_NATIVE_TURN_CREDENTIAL_FILE) {
+      delete directEnv.CAT_CAFE_CALLBACK_TOKEN;
+      delete directEnv.CAT_CAFE_INVOCATION_ID;
+    }
+    // The admitted plugin receives only its explicit activation environment.
+    // Native env_vars projects names, so values never enter argv or a wrapper.
+    Object.assign(env, directEnv, { HOME: home, CODEX_HOME: codexHome, TMPDIR: scratch, PATH: MINIMAL_PATH });
+    const nativeServer = `{${JSON.stringify(server.name)}={command=${JSON.stringify(server.command)},args=[${server.args.map((value) => JSON.stringify(value)).join(',')}],cwd=${JSON.stringify(server.workingDirectory)},env={HOME=${JSON.stringify(pluginHome)},TMPDIR=${JSON.stringify(scratch)},PATH=${JSON.stringify(MINIMAL_PATH)}},env_vars=[${Object.keys(
+      directEnv,
+    )
+      .filter((key) => !['HOME', 'PATH', 'TMPDIR', 'CODEX_HOME'].includes(key))
+      .map((value) => JSON.stringify(value))
+      .join(',')}],enabled=true,default_tools_approval_mode="approve"}}`;
     const args = [
       '--ignore-user-config',
       '--ignore-rules',
@@ -183,7 +211,7 @@ export async function prepareCodexNativeLaunch(
       '--config',
       'apps._default.enabled=false',
       '--config',
-      'mcp_servers={}',
+      `mcp_servers=${nativeServer}`,
       ...[...CODEX_LIVE_DISABLED_FEATURES, 'multi_agent', 'hooks'].flatMap((feature) => [
         '--config',
         `features.${feature}=false`,
@@ -192,12 +220,6 @@ export async function prepareCodexNativeLaunch(
       'features.code_mode_host=true',
       '--config',
       'features.skip_host_skill_discovery=true',
-      '--config',
-      `mcp_servers.${name}.command=${JSON.stringify(process.execPath)}`,
-      '--config',
-      `mcp_servers.${name}.args=${JSON.stringify([wrapperPath, specPath])}`,
-      '--config',
-      `mcp_servers.${name}.enabled=true`,
     ];
     if (accountLaunch) {
       args.push(...codexManagedLaunchArgs({ ...accountLaunch, sqliteHome: codexHome }, []));
@@ -214,10 +236,10 @@ export async function prepareCodexNativeLaunch(
       }
     }
     return {
-      kind: 'public',
+      kind,
       options: captured,
       env,
-      args: Object.freeze(codexMcpConfigArgs(args)),
+      args: Object.freeze(normalizeCodexMcpConfigArgs(args)),
       serverName: server.name,
       assertCurrent,
       dispose,

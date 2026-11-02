@@ -15,7 +15,7 @@ const PAGE_SIZE = 50;
  * every page can contain a newer choice, and no age/count cutoff is valid.
  */
 export async function findLastUserMentions(store: IMessageStore, threadId: string): Promise<readonly CatId[]> {
-  const visibility = { includeQueuedUserMessages: true };
+  const visibility = { includeQueuedUserMessages: true, recipientProjection: true };
   let cursor: { time: number; id: string } | undefined;
   let latest: StoredMessage | undefined;
   for (;;) {

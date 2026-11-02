@@ -57,6 +57,7 @@
       <a href="#scenarios" class="block py-1.5 text-sm text-stone-500 dark:text-slate-500" data-i18n="nav.scenarios">Scenarios</a>
       <a href="#quickstart" class="block py-1.5 text-sm text-stone-500 dark:text-slate-500" data-i18n="nav.quickstart">Quick Start</a>
       <a href="#first-steps" class="block py-1.5 text-sm text-stone-500 dark:text-slate-500" data-i18n="nav.firststeps">First Steps</a>
+      <a href="#demos" class="block py-1.5 text-sm text-stone-500 dark:text-slate-500" data-i18n="nav.demos">Demos</a>
       <a href="#roadmap" class="block py-1.5 text-sm text-stone-500 dark:text-slate-500" data-i18n="nav.journey">Journey</a>
     </div>
   </nav>
@@ -467,6 +468,164 @@ pnpm start</code>
     </div>
   </section>
 
+  <!-- ============ DEMOS: one real conversation per feature ============ -->
+  <section id="demos" class="py-20 px-4">
+    <div class="max-w-5xl mx-auto">
+      <h2 class="text-3xl font-bold text-stone-900 dark:text-white mb-2 text-center" data-i18n="demos.title">See a Feature in 30 Seconds</h2>
+      <p class="text-center text-stone-500 dark:text-slate-500 mb-12" data-i18n="demos.subtitle">Each demo replays a real conversation from the team that builds Clowder AI. Watch it, then say the same thing to your own cats.</p>
+
+      <article class="rounded-2xl border border-stone-200 dark:border-slate-700 bg-white dark:bg-slate-800/50 shadow-sm overflow-hidden flex flex-col md:flex-row">
+        <div class="md:w-3/5 bg-stone-100 dark:bg-slate-900">
+          <video id="demo-proposals" controls playsinline preload="none" class="w-full h-auto"
+                 src="assets/demos/conversation-proposals.en.mp4" data-i18n-src="demos.proposals.video"
+                 poster="assets/demos/conversation-proposals.jpg"
+                 aria-label="Demo: a cat proposes new conversations" data-i18n-aria-label="home.a11y.demo.proposals"></video>
+        </div>
+        <div class="md:w-2/5 p-6 flex flex-col">
+          <a href="https://github.com/zts212653/clowder-ai/issues/82" target="_blank" rel="noopener" class="text-xs text-stone-400 dark:text-slate-500 hover:text-terracotta mb-2" data-i18n="demos.proposals.source">From community issue #82</a>
+          <h3 class="text-xl font-bold text-stone-900 dark:text-white mb-2" data-i18n="demos.proposals.title">Conversation Proposals</h3>
+          <p class="text-stone-600 dark:text-slate-400 text-sm leading-relaxed mb-4" data-i18n="demos.proposals.desc">Hand one big job to a team of cats. A cat splits it into separate pieces of work and fills in a card for each: what, why, and which cat. Approve a card and its conversation opens; say no and the cat revises it.</p>
+          <div class="rounded-xl bg-amber-50 dark:bg-slate-900 border border-amber-200 dark:border-slate-700 p-3 text-sm mb-5">
+            <div class="text-amber-800 dark:text-amber-300 font-medium mb-1" data-i18n="demos.try">Try saying</div>
+            <div class="text-stone-700 dark:text-slate-300" data-i18n="demos.proposals.try">“This is a big job. Split it into threads and open a new conversation for each.”</div>
+          </div>
+          <div class="mt-auto">
+            <button type="button" data-demo-play="demo-proposals" class="rounded-lg bg-terracotta text-white px-4 py-2 text-sm font-medium hover:opacity-90 transition"><span aria-hidden="true">▶ </span><span data-i18n="demos.watch">Watch demo</span></button>
+            <span class="ml-2 text-sm text-stone-400 dark:text-slate-500">0:48</span>
+          </div>
+        </div>
+      </article>
+      <article class="mt-6 rounded-2xl border border-stone-200 dark:border-slate-700 bg-white dark:bg-slate-800/50 shadow-sm overflow-hidden flex flex-col md:flex-row">
+        <div class="md:w-3/5 bg-stone-100 dark:bg-slate-900">
+          <video id="demo-same-bug" controls playsinline preload="none" class="w-full h-auto"
+                 src="assets/demos/same-bug.en.mp4" data-i18n-src="demos.samebug.video"
+                 poster="assets/demos/same-bug.jpg"
+                 aria-label="Demo: the same bug with two endings" data-i18n-aria-label="home.a11y.demo.samebug"></video>
+        </div>
+        <div class="md:w-2/5 p-6 flex flex-col">
+          <a href="https://github.com/zts212653/clowder-ai/pull/1398" target="_blank" rel="noopener" class="text-xs text-stone-400 dark:text-slate-500 hover:text-terracotta mb-2" data-i18n="demos.samebug.source">Hand-off when a cat runs out: from community contributor @mindfn (#1398)</a>
+          <h3 class="text-xl font-bold text-stone-900 dark:text-white mb-2" data-i18n="demos.samebug.title">Same Bug, Two Endings</h3>
+          <p class="text-stone-600 dark:text-slate-400 text-sm leading-relaxed mb-4" data-i18n="demos.samebug.desc">Alone in Claude Code, running out of quota means waiting hours. Bring that session into Clowder AI instead: the cat remembers everything, can pull in another cat, and when it runs out again the work passes to the other cat and keeps going.</p>
+          <div class="rounded-xl bg-amber-50 dark:bg-slate-900 border border-amber-200 dark:border-slate-700 p-3 text-sm mb-5">
+            <div class="text-amber-800 dark:text-amber-300 font-medium mb-1" data-i18n="demos.try">Try saying</div>
+            <div class="text-stone-700 dark:text-slate-300" data-i18n="demos.samebug.try">“Keep fixing it. If you get stuck, bring in another cat.”</div>
+          </div>
+          <div class="mt-auto">
+            <button type="button" data-demo-play="demo-same-bug" class="rounded-lg bg-terracotta text-white px-4 py-2 text-sm font-medium hover:opacity-90 transition"><span aria-hidden="true">▶ </span><span data-i18n="demos.watch">Watch demo</span></button>
+            <span class="ml-2 text-sm text-stone-400 dark:text-slate-500">0:48</span>
+          </div>
+        </div>
+      </article>
+      <article class="mt-6 rounded-2xl border border-stone-200 dark:border-slate-700 bg-white dark:bg-slate-800/50 shadow-sm overflow-hidden flex flex-col md:flex-row">
+        <div class="md:w-3/5 bg-stone-100 dark:bg-slate-900">
+          <video id="demo-steer" controls playsinline preload="none" class="w-full h-auto"
+                 src="assets/demos/steer.en.mp4" data-i18n-src="demos.steer.video"
+                 poster="assets/demos/steer.jpg"
+                 aria-label="Demo: steer a cat while it is still replying" data-i18n-aria-label="home.a11y.demo.steer"></video>
+        </div>
+        <div class="md:w-2/5 p-6 flex flex-col">
+          <h3 class="text-xl font-bold text-stone-900 dark:text-white mb-2" data-i18n="demos.steer.title">Don’t Wait for It to Finish</h3>
+          <p class="text-stone-600 dark:text-slate-400 text-sm leading-relaxed mb-4" data-i18n="demos.steer.desc">The cat is mid-change and you spot one more thing. In the composer’s + menu, choose to steer the current reply, circle the spot, add one line, and send. The cat picks it up in the same turn, then shows the old and new versions side by side.</p>
+          <div class="rounded-xl bg-amber-50 dark:bg-slate-900 border border-amber-200 dark:border-slate-700 p-3 text-sm mb-5">
+            <div class="text-amber-800 dark:text-amber-300 font-medium mb-1" data-i18n="demos.try">Try saying</div>
+            <div class="text-stone-700 dark:text-slate-300" data-i18n="demos.steer.try">“Make this button bigger.”</div>
+          </div>
+          <div class="mt-auto">
+            <button type="button" data-demo-play="demo-steer" class="rounded-lg bg-terracotta text-white px-4 py-2 text-sm font-medium hover:opacity-90 transition"><span aria-hidden="true">▶ </span><span data-i18n="demos.watch">Watch demo</span></button>
+            <span class="ml-2 text-sm text-stone-400 dark:text-slate-500">0:36</span>
+          </div>
+        </div>
+      </article>
+      <article class="mt-6 rounded-2xl border border-stone-200 dark:border-slate-700 bg-white dark:bg-slate-800/50 shadow-sm overflow-hidden flex flex-col md:flex-row">
+        <div class="md:w-3/5 bg-stone-100 dark:bg-slate-900">
+          <video id="demo-panel-vote" controls playsinline preload="none" class="w-full h-auto"
+                 src="assets/demos/panel-vote.en.mp4" data-i18n-src="demos.panelvote.video"
+                 poster="assets/demos/panel-vote.jpg"
+                 aria-label="Demo: several cats think apart, then vote" data-i18n-aria-label="home.a11y.demo.panelvote"></video>
+        </div>
+        <div class="md:w-2/5 p-6 flex flex-col">
+          <h3 class="text-xl font-bold text-stone-900 dark:text-white mb-2" data-i18n="demos.panelvote.title">Can’t Decide? Think Apart, Then Vote</h3>
+          <p class="text-stone-600 dark:text-slate-400 text-sm leading-relaxed mb-4" data-i18n="demos.panelvote.desc">Not sure which way to go? Say “expert panel”: each cat thinks on its own first, and your idea counts as one too. Still split? Say “unknown-first” and the cats check the unknown most likely to overturn the answer. Still can’t decide? Type /vote and let the cats vote. Your idea is on the ballot, and it doesn’t always win.</p>
+          <div class="rounded-xl bg-amber-50 dark:bg-slate-900 border border-amber-200 dark:border-slate-700 p-3 text-sm mb-5">
+            <div class="text-amber-800 dark:text-amber-300 font-medium mb-1" data-i18n="demos.try">Try saying</div>
+            <div class="text-stone-700 dark:text-slate-300" data-i18n="demos.panelvote.try">“Expert panel: should sign-ups pay a deposit? My idea: 50, no refunds.”</div>
+          </div>
+          <div class="mt-auto">
+            <button type="button" data-demo-play="demo-panel-vote" class="rounded-lg bg-terracotta text-white px-4 py-2 text-sm font-medium hover:opacity-90 transition"><span aria-hidden="true">▶ </span><span data-i18n="demos.watch">Watch demo</span></button>
+            <span class="ml-2 text-sm text-stone-400 dark:text-slate-500">0:47</span>
+          </div>
+        </div>
+      </article>
+      <article class="mt-6 rounded-2xl border border-stone-200 dark:border-slate-700 bg-white dark:bg-slate-800/50 shadow-sm overflow-hidden flex flex-col md:flex-row">
+        <div class="md:w-3/5 bg-stone-100 dark:bg-slate-900">
+          <video id="demo-slept" controls playsinline preload="none" class="w-full h-auto"
+                 src="assets/demos/while-we-slept.en.mp4" data-i18n-src="demos.slept.video"
+                 poster="assets/demos/while-we-slept.jpg"
+                 aria-label="Demo: what the cats did while the team slept" data-i18n-aria-label="home.a11y.demo.slept"></video>
+        </div>
+        <div class="md:w-2/5 p-6 flex flex-col">
+          <span class="text-xs text-stone-400 dark:text-slate-500 mb-2" data-i18n="demos.slept.source">Thanks to that night's community contributors: mindfn, amazing-fish, EdgarR1170, whutzefengxie-ops</span>
+          <h3 class="text-xl font-bold text-stone-900 dark:text-white mb-2" data-i18n="demos.slept.title">The 10 Hours We Slept</h3>
+          <p class="text-stone-600 dark:text-slate-400 text-sm leading-relaxed mb-4" data-i18n="demos.slept.desc">One real night, October 22: the whole team went to sleep. A scheduled task woke one cat every two hours to keep the open-source sync moving; GitHub woke another when a community PR changed or CI failed. They handed off to each other, and by morning 37 PRs had been merged.</p>
+          <div class="rounded-xl bg-amber-50 dark:bg-slate-900 border border-amber-200 dark:border-slate-700 p-3 text-sm mb-5">
+            <div class="text-amber-800 dark:text-amber-300 font-medium mb-1" data-i18n="demos.try">Try saying</div>
+            <div class="text-stone-700 dark:text-slate-300" data-i18n="demos.slept.try">“Every morning at 9, check …” or “Keep an eye on this PR.”</div>
+          </div>
+          <div class="mt-auto">
+            <button type="button" data-demo-play="demo-slept" class="rounded-lg bg-terracotta text-white px-4 py-2 text-sm font-medium hover:opacity-90 transition"><span aria-hidden="true">▶ </span><span data-i18n="demos.watch">Watch demo</span></button>
+            <span class="ml-2 text-sm text-stone-400 dark:text-slate-500">0:55</span>
+          </div>
+        </div>
+      </article>
+      <article class="mt-6 rounded-2xl border border-stone-200 dark:border-slate-700 bg-white dark:bg-slate-800/50 shadow-sm overflow-hidden flex flex-col md:flex-row">
+        <div class="md:w-3/5 bg-stone-100 dark:bg-slate-900">
+          <video id="demo-woven" controls playsinline preload="none" class="w-full h-auto"
+                 src="assets/demos/woven-night.en.mp4" data-i18n-src="demos.woven.video"
+                 poster="assets/demos/woven-night.jpg"
+                 aria-label="Demo: one night of cats handing off work, woven into a cloth" data-i18n-aria-label="home.a11y.demo.woven"></video>
+        </div>
+        <div class="md:w-2/5 p-6 flex flex-col">
+          <h3 class="text-xl font-bold text-stone-900 dark:text-white mb-2" data-i18n="demos.woven.title">One Night, Woven</h3>
+          <p class="text-stone-600 dark:text-slate-400 text-sm leading-relaxed mb-4" data-i18n="demos.woven.desc">One real night, October 22: while you slept, 9 cats from 4 families worked across 49 conversations and handed work to each other 262 times. Each window is a conversation; each hand-off pulls a thread. By morning the night's threads were a cloth with 37 knots, one for each PR merged.</p>
+          <div class="rounded-xl bg-amber-50 dark:bg-slate-900 border border-amber-200 dark:border-slate-700 p-3 text-sm mb-5">
+            <div class="text-amber-800 dark:text-amber-300 font-medium mb-1" data-i18n="demos.try">Try saying</div>
+            <div class="text-stone-700 dark:text-slate-300" data-i18n="demos.woven.try">“@another cat, take it from here.”</div>
+          </div>
+          <div class="mt-auto">
+            <button type="button" data-demo-play="demo-woven" class="rounded-lg bg-terracotta text-white px-4 py-2 text-sm font-medium hover:opacity-90 transition"><span aria-hidden="true">▶ </span><span data-i18n="demos.watch">Watch demo</span></button>
+            <span class="ml-2 text-sm text-stone-400 dark:text-slate-500">0:53</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="mt-6 rounded-2xl border border-stone-200 dark:border-slate-700 bg-white dark:bg-slate-800/50 shadow-sm overflow-hidden flex flex-col md:flex-row">
+        <div class="md:w-3/5 bg-stone-100 dark:bg-slate-900">
+          <video id="demo-bundles" controls playsinline preload="none" class="w-full h-auto"
+                 src="assets/demos/bundles.en.mp4" data-i18n-src="demos.bundles.video"
+                 poster="assets/demos/bundles.jpg"
+                 aria-label="Demo: select a few messages, then export them or forward them to another cat" data-i18n-aria-label="home.a11y.demo.bundles"></video>
+        </div>
+        <div class="md:w-2/5 p-6 flex flex-col">
+          <h3 class="text-xl font-bold text-stone-900 dark:text-white mb-2" data-i18n="demos.bundles.title">Pick a Few, Take Them Anywhere</h3>
+          <p class="text-stone-600 dark:text-slate-400 text-sm leading-relaxed mb-4" data-i18n="demos.bundles.desc">Select a few messages once and take them where they need to go. Export a long image to show a colleague, or a Markdown document to keep (Text is handy for an email). Or forward them to another conversation: pick a cat and leave a note, and it gets one merged card and is woken up to carry on.</p>
+          <div class="rounded-xl bg-amber-50 dark:bg-slate-900 border border-amber-200 dark:border-slate-700 p-3 text-sm mb-5">
+            <div class="text-amber-800 dark:text-amber-300 font-medium mb-1" data-i18n="demos.bundles.tryLabel">Try it</div>
+            <div class="text-stone-700 dark:text-slate-300" data-i18n="demos.bundles.try">Hover a message, click “Select to forward or export”, tick a few, then export or forward.</div>
+          </div>
+          <div class="mt-auto">
+            <button type="button" data-demo-play="demo-bundles" class="rounded-lg bg-terracotta text-white px-4 py-2 text-sm font-medium hover:opacity-90 transition"><span aria-hidden="true">▶ </span><span data-i18n="demos.watch">Watch demo</span></button>
+            <span class="ml-2 text-sm text-stone-400 dark:text-slate-500">0:49</span>
+          </div>
+        </div>
+      </article>
+
+      <a href="community.html" class="mt-6 block rounded-2xl border-2 border-dashed border-stone-300 dark:border-slate-700 p-5 text-sm text-stone-500 dark:text-slate-400 hover:border-terracotta hover:text-terracotta transition">
+        <span class="font-semibold" data-i18n="demos.next.title">Which feature next?</span>
+        <span data-i18n="demos.next.desc">Tell us in the community which demo you want to see.</span>
+      </a>
+    </div>
+  </section>
+
   <!-- ============ ROADMAP (Gantt) ============ -->
   <section id="roadmap" class="py-20 px-4">
     <div class="max-w-6xl mx-auto">
@@ -596,6 +755,7 @@ pnpm start</code>
       <a href="#scenarios" class="toc-link px-2.5 py-1 rounded-md text-xs text-stone-500 dark:text-slate-500 hover:text-terracotta hover:bg-terracotta/5 transition" data-section="scenarios" data-i18n="nav.scenarios">Scenarios</a>
       <a href="#quickstart" class="toc-link px-2.5 py-1 rounded-md text-xs text-stone-500 dark:text-slate-500 hover:text-terracotta hover:bg-terracotta/5 transition" data-section="quickstart" data-i18n="nav.quickstart">Quick Start</a>
       <a href="#first-steps" class="toc-link px-2.5 py-1 rounded-md text-xs text-stone-500 dark:text-slate-500 hover:text-terracotta hover:bg-terracotta/5 transition" data-section="first-steps" data-i18n="nav.firststeps">First Steps</a>
+      <a href="#demos" class="toc-link px-2.5 py-1 rounded-md text-xs text-stone-500 dark:text-slate-500 hover:text-terracotta hover:bg-terracotta/5 transition" data-section="demos" data-i18n="nav.demos">Demos</a>
       <a href="#roadmap" class="toc-link px-2.5 py-1 rounded-md text-xs text-stone-500 dark:text-slate-500 hover:text-terracotta hover:bg-terracotta/5 transition" data-section="roadmap" data-i18n="nav.roadmap">Roadmap</a>
     </nav>
   </aside>
@@ -629,6 +789,7 @@ pnpm start</code>
             <li><a href="#scenarios" class="text-stone-600 dark:text-slate-400 hover:text-terracotta transition" data-i18n="nav.scenarios">Scenarios</a></li>
             <li><a href="#quickstart" class="text-stone-600 dark:text-slate-400 hover:text-terracotta transition" data-i18n="nav.quickstart">Quick Start</a></li>
             <li><a href="#first-steps" class="text-stone-600 dark:text-slate-400 hover:text-terracotta transition" data-i18n="nav.firststeps">First Steps</a></li>
+            <li><a href="#demos" class="text-stone-600 dark:text-slate-400 hover:text-terracotta transition" data-i18n="nav.demos">Demos</a></li>
             <li><a href="#roadmap" class="text-stone-600 dark:text-slate-400 hover:text-terracotta transition" data-i18n="nav.roadmap">Roadmap</a></li>
           </ul>
         </div>

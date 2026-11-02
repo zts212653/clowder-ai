@@ -35,7 +35,6 @@ export async function sendPluginInput({ messages, queue, threads, threadId, owne
     pluginId: 'dev.fixture',
     pluginInstanceId: 'instance',
     ownerUserId: owner,
-    effectiveGrants: ['messaging.send'],
     manifest: {
       pluginId: 'dev.fixture',
       name: 'Fixture',

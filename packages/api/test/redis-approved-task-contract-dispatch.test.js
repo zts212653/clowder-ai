@@ -10,7 +10,7 @@ import { revokeAtCommit } from './helpers/approved-task-readmission-fixture.js';
 import { redisIsolationSkipReason } from './helpers/redis-test-helpers.js';
 
 async function dispatchFixture(t) {
-  const f = await approvedTaskFixture(t);
+  const f = await approvedTaskFixture(t, { governed: true });
   assert.equal((await f.continueTask()).statusCode, 200);
   const dispatches = new RedisDispatchProposalStore(f.redis);
   const service = new DispatchActionApprovalService({
@@ -62,7 +62,7 @@ async function assertNoCarrier(f) {
 }
 
 describe(
-  'dispatch approval and recovery consume the same Task continuation',
+  'governed namespaced Task dispatch and recovery consume the same continuation',
   { skip: redisIsolationSkipReason(process.env.REDIS_URL) },
   () => {
     test('atomic dispatch approval rejects revoked contract before approving or claiming', async (t) => {

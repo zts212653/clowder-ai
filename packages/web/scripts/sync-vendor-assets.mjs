@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 
 import { spawn } from 'node:child_process';
-import { existsSync, readdirSync, unwatchFile, watch, watchFile } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, readdirSync, readFileSync, unwatchFile, watch, watchFile } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { deploymentDefaults } from '../../shared/src/deployment-defaults.ts';
+import { FEATURE_DEMOS } from '../../shared/src/feature-demos.ts';
 import { syncBrandManifest } from './sync-brand-manifest.mjs';
 import { copyAsset } from './vendor-asset-publication.mjs';
 import { appGlobalCssFiles, syncStylesheets } from './vendor-stylesheets.mjs';
@@ -141,7 +143,31 @@ function watchAppGlobalCss() {
   ];
 }
 
+/**
+ * @param {{demos?: Record<string, {assetSource: string, posterAssetSource: string, src: string, poster: string, sha256: string}>, repoRoot?: string, publicRoot?: string}} [options]
+ */
+export function syncFeatureDemoAssets({
+  demos = FEATURE_DEMOS,
+  repoRoot = resolve(webRoot, '../..'),
+  publicRoot = resolve(webRoot, 'public'),
+} = {}) {
+  // F331: publish every fixed cut from the same catalogue used by the UI and statistics.
+  for (const demo of Object.values(demos)) {
+    const bytes = readFileSync(resolve(repoRoot, demo.assetSource));
+    if (createHash('sha256').update(bytes).digest('hex') !== demo.sha256) {
+      throw new Error('Published demo bytes changed: register a new cut/version before shipping.');
+    }
+    for (const [source, target] of [
+      [demo.assetSource, demo.src],
+      [demo.posterAssetSource, demo.poster],
+    ]) {
+      copyAsset(resolve(repoRoot, source), resolve(publicRoot, target.slice(1)));
+    }
+  }
+}
+
 function syncVendorAssets() {
+  syncFeatureDemoAssets();
   syncBrandManifest(webRoot, deploymentDefaults.brand);
   copyVadAssets();
   copyOnnxRuntimeAssets();

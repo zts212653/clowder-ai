@@ -13,6 +13,7 @@
  */
 
 import { estimateTokens } from '../../../../utils/token-counter.js';
+import { sliceUnicodeSafe } from '../../../../utils/unicode-safe-slice.js';
 import { formatPromptTimeRange } from '../format-time.js';
 import type { ThreadMemorySourceRef, ThreadMemoryV1 } from '../stores/ports/ThreadStore.js';
 import type { DecisionSignals } from './extractDecisionSignals.js';
@@ -149,7 +150,7 @@ export function buildThreadMemory(
   // truncate it (rough char-level cut, re-estimate)
   if (estimateTokens(summary) > maxTokens) {
     const ratio = maxTokens / Math.max(1, estimateTokens(summary));
-    summary = `${summary.slice(0, Math.floor(summary.length * ratio * 0.9))}...`;
+    summary = `${sliceUnicodeSafe(summary, 0, Math.floor(summary.length * ratio * 0.9))}...`;
   }
 
   // VG-3: Merge structured decision signals

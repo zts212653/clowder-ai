@@ -41,6 +41,9 @@ export interface PersistentProjectPathOptions {
   stat?: typeof stat;
 }
 
+/** Host-owned execution sandboxes are instance data, not checkout source. */
+export const HOST_MEMBER_WORKSPACE_DIRECTORY = '.cat-cafe/member-workspaces';
+
 type DirectoryPathResult =
   | { ok: true; path: string }
   | { ok: false; reason: Exclude<ProjectPathValidationFailureReason, 'denied_root'>; message?: string };
@@ -90,6 +93,11 @@ export async function resolvePersistentProjectPathDetailed(
   if (!isPathUnderRoots(target.path, [runtimeRoot.path])) {
     return validateProjectPathDetailed(target.path, options);
   }
+
+  // Root issues only hash-named member sandboxes. Remapping one to the source
+  // checkout destroys its identity and makes an otherwise valid prepare fail.
+  const memberWorkspace = relative(resolve(runtimeRoot.path, HOST_MEMBER_WORKSPACE_DIRECTORY), target.path);
+  if (/^[a-f0-9]{64}$/.test(memberWorkspace)) return validateProjectPathDetailed(target.path, options);
 
   const workspaceRootRaw = options.workspaceRoot ?? process.env.CAT_CAFE_WORKSPACE_ROOT;
   if (!workspaceRootRaw) {

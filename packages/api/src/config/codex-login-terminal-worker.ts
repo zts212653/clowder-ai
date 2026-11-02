@@ -3,6 +3,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { CliTerminationController } from '../utils/CliTerminationController.js';
+import { withoutUnreviewedCodexEnvironment } from './codex-env-namespace.js';
 
 const requestPath = process.argv[2];
 const request = JSON.parse(readFileSync(requestPath, 'utf8')) as {
@@ -15,7 +16,8 @@ const request = JSON.parse(readFileSync(requestPath, 'utf8')) as {
 const resultPath = join(request.home, '..', 'terminal-result.json');
 const cancelPath = join(request.home, '..', 'terminal-cancel');
 const env = { ...process.env };
-for (const [key, value] of Object.entries(request.env)) {
+// Terminal's own shell env is inherited here; keep its CODEX_*/OPENAI_* knobs out of the managed login.
+for (const [key, value] of Object.entries(withoutUnreviewedCodexEnvironment(request.env, env))) {
   if (value === null) delete env[key];
   else env[key] = value;
 }

@@ -4,7 +4,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
 import { availablePort, stopChild, waitForHttp } from './f290-runtime-journey.harness.mjs';
 import { createInboxEvalRepairFixture } from './f322-inbox-eval-repair.fixture.mjs';
 import { createNextDevTestEnvironment } from './next-dev-test-environment.mjs';
@@ -141,6 +141,8 @@ for (const language of ['zh', 'en'])
         await freeze(page, card, path.join(evidence, `Chat-${record.verb}-before.png`));
         await decide(page, card, record, responses);
         const result = card.getByTestId('eval-repair-result');
+        await card.getByTestId('decision-result-label').waitFor();
+        await card.locator('button[aria-expanded="false"]').click();
         await result.waitFor();
         assert.match(
           await result.innerText(),
@@ -185,6 +187,8 @@ for (const language of ['zh', 'en'])
       for (const record of chatRecords) {
         const card = page.locator(`[data-rich-block-id="${record.block.id}"]`),
           result = card.getByTestId('eval-repair-result');
+        await card.getByTestId('decision-result-label').waitFor();
+        await card.locator('button[aria-expanded="false"]').click();
         await result.waitFor();
         assert.equal(await card.getByTestId('approve-btn').count(), 0);
         if (record.verb === 'approve') assert.match(await result.innerText(), new RegExp(started));

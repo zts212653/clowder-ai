@@ -2,12 +2,13 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
+import { validateHostPluginManifest } from '../dist/domains/plugin/desktop-window-runtime/presentation-manifest.js';
 import {
   HostInventoryControlPlane,
   MemoryPluginInventoryStore,
   PLUGIN_CONTRACT_PACKAGE_VERSION,
   PLUGIN_CONTRACT_VERSION,
-  PLUGIN_MANIFEST_CONTRACT_VERSIONS,
+  PLUGIN_MANIFEST_CONTRACT_RANGE,
 } from '../dist/domains/plugin/host-inventory/index.js';
 
 const packageJson = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
@@ -43,7 +44,6 @@ function candidate(overrides = {}) {
     computedPackageDigest,
     expectedPackageDigest: computedPackageDigest,
     packagePluginId: packageManifest.pluginId,
-    effectiveGrants: ['messaging.send'],
     ...overrides,
   };
 }
@@ -60,38 +60,24 @@ function harness() {
 }
 
 describe('K-2A contract-native inventory', () => {
-  it('pins the API and runtime boundary to the consumed plugin-contract beta.37 archive', () => {
+  it('pins the consumed contract candidate archive and preserves older manifest compatibility', () => {
     assert.equal(
       packageJson.dependencies['@clowder-ai/plugin-contract'],
-      'file:vendor/clowder-ai-plugin-contract-0.1.0-beta.37-c1-785543498768.tgz',
+      'file:vendor/clowder-ai-plugin-contract-0.3.2-candidate.0-f333-20a1e1094c63.tgz',
     );
     const archive = readFileSync(
-      new URL('../vendor/clowder-ai-plugin-contract-0.1.0-beta.37-c1-785543498768.tgz', import.meta.url),
+      new URL('../vendor/clowder-ai-plugin-contract-0.3.2-candidate.0-f333-20a1e1094c63.tgz', import.meta.url),
     );
     assert.equal(
       createHash('sha256').update(archive).digest('hex'),
-      '785543498768f4e65fca2f1c60ff9a9c45693f45a304692a73042cc13e50a713',
+      '20a1e1094c63f1c8c6554d87b8c16ad732430063db611dd5218a44fca4a95a1c',
     );
-    assert.equal(PLUGIN_CONTRACT_PACKAGE_VERSION, '0.1.0-beta.37');
+    assert.equal(PLUGIN_CONTRACT_PACKAGE_VERSION, '0.3.2-candidate.0');
     assert.equal(PLUGIN_CONTRACT_VERSION, '0.1.0');
-    assert.deepEqual(PLUGIN_MANIFEST_CONTRACT_VERSIONS, [
-      '0.1.0',
-      '0.1.0-beta.13',
-      '0.1.0-beta.15',
-      '0.1.0-beta.16',
-      '0.1.0-beta.17',
-      '0.1.0-beta.18',
-      '0.1.0-beta.19',
-      '0.1.0-beta.20',
-      '0.1.0-beta.21',
-      '0.1.0-beta.22',
-      '0.1.0-beta.24',
-      '0.1.0-beta.25',
-      '0.1.0-beta.37',
-    ]);
+    assert.equal(PLUGIN_MANIFEST_CONTRACT_RANGE, `>=0.1.0-beta.13 <=${PLUGIN_CONTRACT_PACKAGE_VERSION}`);
   });
 
-  it('rejects a traversal entrypoint before admitting any package, instance, or grant', async () => {
+  it('rejects a traversal entrypoint before admitting any package or instance', async () => {
     const { store, controlPlane } = harness();
     await assert.rejects(
       controlPlane.installPackage(
@@ -102,10 +88,9 @@ describe('K-2A contract-native inventory', () => {
     const snapshot = await store.snapshot();
     assert.deepEqual(snapshot.packages, []);
     assert.deepEqual(snapshot.instances, []);
-    assert.deepEqual(snapshot.grants, []);
   });
 
-  it('installs package, instance, and grants atomically with orthogonal initial state', async () => {
+  it('installs package and instance atomically with orthogonal initial state', async () => {
     const { store, controlPlane } = harness();
     const installed = await controlPlane.installPackage(candidate());
     const snapshot = await store.snapshot();
@@ -113,7 +98,6 @@ describe('K-2A contract-native inventory', () => {
     assert.equal(installed.pluginInstanceId, 'pi_1');
     assert.equal(snapshot.packages.length, 1);
     assert.equal(snapshot.instances.length, 1);
-    assert.equal(snapshot.grants.length, 1);
     assert.deepEqual(snapshot.instances[0], {
       pluginInstanceId: 'pi_1',
       pluginId: 'dev.clowder.echo',
@@ -126,12 +110,9 @@ describe('K-2A contract-native inventory', () => {
       installedAt: 1_000,
       updatedAt: 1_000,
     });
-    assert.deepEqual(snapshot.grants[0].requestedCapabilities, ['messaging.send', 'onMessage']);
-    assert.deepEqual(snapshot.grants[0].effectiveGrants, ['messaging.send']);
-    assert.equal(snapshot.grants[0].grantRevision, 1);
   });
 
-  it('admits the installed beta.20, beta.21, beta.22 and beta.24 lines and the consumed beta.25 line', async () => {
+  it('admits the installed beta lines and the currently consumed contract', async () => {
     for (const contractVersion of [
       '0.1.0-beta.20',
       '0.1.0-beta.21',
@@ -158,7 +139,7 @@ describe('K-2A contract-native inventory', () => {
     '0.1.0-beta.19',
     '0.1.0-beta.20',
   ]) {
-    it(`restores an admitted ${contractVersion} inventory without changing its identity or grants`, async () => {
+    it(`restores an admitted ${contractVersion} inventory without changing its identity`, async () => {
       const { store, controlPlane } = harness();
       await controlPlane.installPackage(candidate({ manifest: manifest({ contractVersion }) }));
       const saved = await store.snapshot();
@@ -167,16 +148,69 @@ describe('K-2A contract-native inventory', () => {
     });
   }
 
-  it('rejects an unlisted future beta without admitting any inventory', async () => {
+  it('admits compatible declarations without enumerating every library release', async () => {
+    for (const contractVersion of [
+      '0.1.0-beta.14',
+      '0.1.0-beta.23',
+      '0.1.0-beta.99',
+      '0.1.1',
+      '0.2.0-beta.1',
+      '0.2.0+build.1',
+      '0.3.1-beta.1',
+      '0.3.1-candidate.1',
+      '0.3.1',
+      '0.3.2-beta.1',
+    ]) {
+      const { store, controlPlane } = harness();
+      await controlPlane.installPackage(candidate({ manifest: manifest({ contractVersion }) }));
+      assert.equal((await store.snapshot()).packages[0].contractVersion, contractVersion);
+    }
+  });
+
+  it('rejects declarations below the compatibility floor or above the implemented contract without writes', async () => {
+    for (const contractVersion of ['0.0.99', '0.1.0-beta.12', '0.3.2-candidate.1', '0.3.2', '0.4.0', '1.0.0']) {
+      const { store, controlPlane } = harness();
+      const before = await store.snapshot();
+      await assert.rejects(controlPlane.installPackage(candidate({ manifest: manifest({ contractVersion }) })), {
+        code: 'CONTRACT_VERSION_MISMATCH',
+      });
+      assert.deepEqual(await store.snapshot(), before);
+    }
+  });
+
+  it('keeps a plugin declaration unchanged when the Host consumes a newer contract package', async () => {
     const { store, controlPlane } = harness();
-    await assert.rejects(
-      controlPlane.installPackage(candidate({ manifest: manifest({ contractVersion: '0.1.0-beta.99' }) })),
-      { code: 'CONTRACT_VERSION_MISMATCH' },
-    );
+    await controlPlane.installPackage(candidate({ manifest: manifest({ contractVersion: '0.1.0' }) }));
+    assert.notEqual(PLUGIN_CONTRACT_PACKAGE_VERSION, '0.1.0');
+    assert.equal((await store.snapshot()).packages[0].manifest.contractVersion, '0.1.0');
+  });
+
+  it('rejects a newer contract without admitting any inventory', async () => {
+    const { store, controlPlane } = harness();
+    await assert.rejects(controlPlane.installPackage(candidate({ manifest: manifest({ contractVersion: '0.3.2' }) })), {
+      code: 'CONTRACT_VERSION_MISMATCH',
+    });
     assert.deepEqual((await store.snapshot()).packages, []);
   });
 
-  it('can bind admission to an exact newer contract runtime without bypassing Host policy', async () => {
+  it('keeps the old Host range from admitting a plugin that requires the new contract', async () => {
+    const contract = {
+      manifestContractRange: '>=0.1.0-beta.13 <=0.3.1-candidate.0',
+      validateManifest: validateHostPluginManifest,
+    };
+    const store = new MemoryPluginInventoryStore(undefined, { contract });
+    const controlPlane = new HostInventoryControlPlane(store, { contract });
+    await assert.rejects(
+      controlPlane.installPackage(
+        candidate({ manifest: manifest({ contractVersion: PLUGIN_CONTRACT_PACKAGE_VERSION }) }),
+      ),
+      { code: 'CONTRACT_VERSION_MISMATCH' },
+    );
+    assert.deepEqual((await store.snapshot()).packages, []);
+    assert.deepEqual((await store.snapshot()).instances, []);
+  });
+
+  it('can bind admission to an exact newer contract runtime using the selected contract runtime', async () => {
     const exactManifest = manifest({
       contractVersion: '0.1.0-beta.13',
       features: [
@@ -189,10 +223,8 @@ describe('K-2A contract-native inventory', () => {
       ],
     });
     const contract = {
-      manifestContractVersions: ['0.1.0-beta.13'],
+      manifestContractRange: '0.1.0-beta.13',
       validateManifest: (value) => ({ valid: true, manifest: value, errors: [] }),
-      validateEffectiveGrants: (values) =>
-        values.every((value) => value === 'plugin.config.read' || value === 'secret.read'),
     };
     const store = new MemoryPluginInventoryStore(undefined, { contract });
     const controlPlane = new HostInventoryControlPlane(store, {
@@ -205,13 +237,11 @@ describe('K-2A contract-native inventory', () => {
       candidate({
         manifest: exactManifest,
         packagePluginId: exactManifest.pluginId,
-        effectiveGrants: ['plugin.config.read', 'secret.read'],
       }),
     );
 
     const snapshot = await store.snapshot();
     assert.equal(snapshot.packages[0].contractVersion, '0.1.0-beta.13');
-    assert.deepEqual(snapshot.grants[0].effectiveGrants, ['plugin.config.read', 'secret.read']);
   });
 
   it('upgrades the current installation without changing its identity', async () => {
@@ -234,7 +264,6 @@ describe('K-2A contract-native inventory', () => {
     const upgraded = await controlPlane.upgradePackage({
       pluginInstanceId: installed.pluginInstanceId,
       expectedLifecycleRevision: 1,
-      expectedGrantRevision: 1,
       ...candidate({
         archive: 'echo-v2',
         manifest: upgradedManifest,
@@ -243,15 +272,11 @@ describe('K-2A contract-native inventory', () => {
     });
     const snapshot = await store.snapshot();
     const instance = snapshot.instances.find((item) => item.pluginInstanceId === upgraded.pluginInstanceId);
-    const grants = snapshot.grants.find((item) => item.pluginInstanceId === upgraded.pluginInstanceId);
 
     assert.equal(upgraded.pluginInstanceId, installed.pluginInstanceId);
     assert.equal(instance.configReadiness, 'ready');
     assert.equal(instance.activationState, 'enabled');
     assert.equal(instance.runtimeState, 'stopped');
-    assert.equal(grants.grantRevision, 2);
-    assert.deepEqual(grants.requestedCapabilities, ['messaging.send']);
-    assert.deepEqual(grants.effectiveGrants, ['messaging.send']);
   });
 
   it('reinstall mints a fresh namespace and retires the prior instance', async () => {
@@ -269,32 +294,5 @@ describe('K-2A contract-native inventory', () => {
     assert.equal(oldInstance.lifecycleState, 'retired');
     assert.equal(oldInstance.runtimeState, 'stopped');
     assert.equal(newInstance.lifecycleState, 'installed');
-    assert.equal(snapshot.grants.find((item) => item.pluginInstanceId === 'pi_1').grantRevision, 1);
-    assert.equal(snapshot.grants.find((item) => item.pluginInstanceId === 'pi_2').grantRevision, 1);
-  });
-
-  it('revokes one grant at the exact revision without mutating other axes', async () => {
-    const { store, controlPlane } = harness();
-    const installed = await controlPlane.installPackage(
-      candidate({ effectiveGrants: ['messaging.send', 'onMessage'] }),
-    );
-    await store.transaction((tx) => {
-      const current = tx.instances.get(installed.pluginInstanceId);
-      tx.instances.put({ ...current, activationState: 'enabled', runtimeState: 'healthy' });
-    });
-    const before = await store.snapshot();
-
-    const revision = await controlPlane.revokeGrant({
-      pluginInstanceId: installed.pluginInstanceId,
-      capability: 'onMessage',
-      expectedGrantRevision: 1,
-    });
-    const after = await store.snapshot();
-
-    assert.equal(revision, 2);
-    assert.deepEqual(after.packages, before.packages);
-    assert.equal(after.instances[0].activationState, 'enabled');
-    assert.equal(after.instances[0].runtimeState, 'healthy');
-    assert.deepEqual(after.grants[0].effectiveGrants, ['messaging.send']);
   });
 });

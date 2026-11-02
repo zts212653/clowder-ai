@@ -1,36 +1,32 @@
 'use client';
 
 import { isPluginConfigurationFieldRequired } from '@cat-cafe/shared';
+import type { ConfigurationField as ContractConfigurationField } from '@clowder-ai/plugin-contract';
+import { evaluateFieldRequiredness } from '@clowder-ai/plugin-contract/variant';
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
+import { useAgentClientLibraries } from '@/hooks/useAgentClientLibraries';
 import { type PlatformFieldStatus, StepBadge } from '../../HubConfigIcons';
 import { ConfigFieldRenderer } from '../primitives/ConfigFieldRenderer';
 import { SettingsText } from '../primitives/SettingsText';
+import { agentClientConfigurationError, PluginAgentClientsField } from './PluginAgentClientsField';
 import { PluginManagerConfigurationActions } from './PluginManagerConfigurationActions';
 import { PluginManagerOperationField } from './PluginManagerOperationField';
 import { PluginManagerSetupStep } from './PluginManagerSetupStep';
 import { PluginManagerStringList } from './PluginManagerStringList';
+import {
+  configurationUpdates,
+  effectiveFieldValue,
+  renderedFieldValue,
+  variantActiveKeysOf,
+  variantDraftValues,
+  variantProjectionOf,
+} from './plugin-configuration-drafts';
 import type { PluginManagerPresentation } from './plugin-manager-attention';
 import { parsePluginList, pluginFieldLabel, pluginListFormat } from './plugin-manager-field-presentation';
 import type { PluginManagerDesignFixture } from './plugin-manager-fixtures';
 
 type ConfigurationField = NonNullable<PluginManagerDesignFixture['configFields']>[number];
 const EMPTY_CONFIGURATION_FIELDS: readonly ConfigurationField[] = [];
-
-function serializedDefault(field: ConfigurationField): string | undefined {
-  if (field.default === undefined) return undefined;
-  return Array.isArray(field.default) ? JSON.stringify(field.default) : String(field.default);
-}
-
-function effectiveFieldValue(field: ConfigurationField, drafts: Readonly<Record<string, string>>): string {
-  const draft = drafts[field.key];
-  if (draft !== undefined) return draft;
-  if (field.currentValue !== null) return field.currentValue;
-  const defaultValue = serializedDefault(field);
-  if (defaultValue !== undefined) return defaultValue;
-  if (field.kind === 'select') return field.options?.[0]?.value ?? '';
-  if (field.kind === 'boolean') return 'false';
-  return '';
-}
 
 function fieldIsRequired(
   field: ConfigurationField,
@@ -49,32 +45,6 @@ function fieldIsRequired(
   });
 }
 
-function renderedFieldValue(field: ConfigurationField, drafts: Readonly<Record<string, string>>): string {
-  const draft = drafts[field.key];
-  if (draft !== undefined) return draft;
-  if (field.kind === 'select' || field.kind === 'boolean') return effectiveFieldValue(field, drafts);
-  return '';
-}
-
-function configurationUpdates(
-  fields: readonly ConfigurationField[],
-  drafts: Readonly<Record<string, string>>,
-): readonly { key: string; value: string | null }[] {
-  return fields
-    .filter((field) => field.kind !== 'operation' && field.hidden !== true)
-    .flatMap((field) => {
-      const draft = drafts[field.key];
-      if (draft !== undefined) return [{ key: field.key, value: draft.length === 0 ? null : draft }];
-      if (field.currentValue === null && field.default === undefined) {
-        if (field.kind === 'select' && field.options?.[0]) {
-          return [{ key: field.key, value: field.options[0].value }];
-        }
-        if (field.kind === 'boolean') return [{ key: field.key, value: 'false' }];
-      }
-      return [];
-    });
-}
-
 function renderField(field: ConfigurationField): PlatformFieldStatus {
   return {
     envName: field.key,
@@ -90,6 +60,7 @@ function renderField(field: ConfigurationField): PlatformFieldStatus {
             : 'input',
     ...(field.kind === 'number' || field.kind === 'url' ? { inputType: field.kind } : {}),
     ...(field.options === undefined ? {} : { options: field.options.map(({ value, label }) => ({ value, label })) }),
+    ...(field.configurationVariants === undefined ? {} : { configurationVariants: true }),
     currentValue: field.currentValue,
   };
 }
@@ -115,6 +86,10 @@ export function PluginManagerConfigurationSection({
   beforeConfiguration?: ReactNode;
 }) {
   const installed = plugin.artifact === 'installed';
+  const { libraries: clientLibraries } = useAgentClientLibraries(
+    JSON.stringify([plugin.id, plugin.intent, plugin.live, plugin.configFields]),
+  );
+  const clientLibrary = clientLibraries.find((library) => library.pluginId === plugin.id);
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [showSaved, setShowSaved] = useState(false);
@@ -127,6 +102,25 @@ export function PluginManagerConfigurationSection({
       ? `${field.key}:${plugin.intent}:${plugin.live}`
       : field.key;
   const configurableFields = fields.filter((field) => field.kind !== 'operation' && field.hidden !== true);
+  const variantProjection = variantProjectionOf(fields);
+  const variantActiveKeys = variantProjection ? variantActiveKeysOf(fields, variantProjection, fieldValues) : undefined;
+  const variantDrafts = (): Record<string, unknown> =>
+    variantProjection ? variantDraftValues(fields, fieldValues, variantProjection.manifest) : {};
+  const fieldRequired = (field: ConfigurationField): boolean => {
+    if (variantProjection) {
+      const refKey = field.requiredWhen?.key;
+      if (refKey) {
+        const referenced = fields.find((candidate) => candidate.key === refKey);
+        if (referenced?.kind === 'secret' && fieldValues[refKey] === undefined && referenced.currentValue !== null) {
+          // The stored secret is masked; the server already judged its condition
+          // into `requiredNow`, so the client must not compare the mask.
+          return field.requiredNow ?? false;
+        }
+      }
+      return evaluateFieldRequiredness(field as unknown as ContractConfigurationField, variantDrafts());
+    }
+    return fieldIsRequired(field, fields, fieldValues);
+  };
   const declaredSteps = (plugin.steps ?? plugin.setupSteps ?? []).map((step) =>
     typeof step === 'string' ? { text: step } : step,
   );
@@ -136,8 +130,12 @@ export function PluginManagerConfigurationSection({
   );
   const selectedMode = modeField ? effectiveFieldValue(modeField, fieldValues) : undefined;
   const steps = declaredSteps.filter((step) => !step.mode || step.mode === selectedMode).map((step) => step.text);
-  const updates = configurationUpdates(fields, fieldValues);
-  const displayedFields = fields.filter((field) => field.hidden !== true);
+  const updates = configurationUpdates(fields, fieldValues, variantActiveKeys, variantProjection !== undefined);
+  const displayedFields = fields.filter(
+    (field) =>
+      field.hidden !== true &&
+      (variantActiveKeys === undefined || field.kind === 'operation' || variantActiveKeys.has(field.key)),
+  );
   const [operationRevision, setOperationRevision] = useState(0);
   const handleOperationChange = () => {
     setOperationRevision((value) => value + 1);
@@ -166,25 +164,62 @@ export function PluginManagerConfigurationSection({
   };
 
   const validateConfiguration = useCallback(() => {
+    // Variant mode validates against the same normalized projection that
+    // drives requiredness and branch resolution — never the legacy
+    // implicit-first-option path.
+    const normalized = variantProjection
+      ? variantDraftValues(fields, fieldValues, variantProjection.manifest)
+      : undefined;
+    const validationValueOf = (field: ConfigurationField): string => {
+      if (normalized === undefined) return effectiveFieldValue(field, fieldValues);
+      const typed = normalized[field.key];
+      if (typed === undefined || typed === null) return '';
+      return typeof typed === 'string' ? typed : JSON.stringify(typed);
+    };
+    // Existence is not comparability: a stored secret the operator has not
+    // edited is configured even though its mask is not a value. An empty
+    // draft is an explicit deletion and re-judges from scratch.
+    const hasConfiguredValue = (field: ConfigurationField): boolean => {
+      if (validationValueOf(field).trim().length > 0) return true;
+      return field.kind === 'secret' && fieldValues[field.key] === undefined && field.currentValue !== null;
+    };
     const errors = Object.fromEntries(
-      configurableFields.flatMap((field) => {
-        const value = effectiveFieldValue(field, fieldValues);
-        if (fieldIsRequired(field, fields, fieldValues) && value.trim().length === 0) {
-          const label = presentation === 'v2' ? pluginFieldLabel(plugin.id, field) : field.label;
-          return [[field.key, `请填写 ${label}`]];
-        }
-        const format = presentation === 'v2' ? pluginListFormat(plugin.id, field) : undefined;
-        return format && parsePluginList(value, format) === undefined ? [[field.key, '请填写有效的字符串数组']] : [];
-      }),
+      configurableFields
+        .filter((field) => variantActiveKeys === undefined || variantActiveKeys.has(field.key))
+        .flatMap((field) => {
+          const value = validationValueOf(field);
+          if (clientLibrary?.configurationKey === field.key) {
+            const error = agentClientConfigurationError(value);
+            if (error) return [[field.key, error]];
+          }
+          if (fieldRequired(field) && !hasConfiguredValue(field)) {
+            const label = presentation === 'v2' ? pluginFieldLabel(plugin.id, field) : field.label;
+            return [[field.key, `请填写 ${label}`]];
+          }
+          const format = presentation === 'v2' ? pluginListFormat(plugin.id, field) : undefined;
+          return format && parsePluginList(value, format) === undefined ? [[field.key, '请填写有效的字符串数组']] : [];
+        }),
     );
     setFieldErrors(errors);
-    const firstInvalid = configurableFields.find((field) => errors[field.key] !== undefined);
+    const firstInvalid = configurableFields.find(
+      (field) =>
+        (variantActiveKeys === undefined || variantActiveKeys.has(field.key)) && errors[field.key] !== undefined,
+    );
     if (!firstInvalid) return true;
     const input = document.getElementById(`plugin-manager-${plugin.id}-${firstInvalid.key}`);
     input?.focus();
     input?.scrollIntoView?.({ block: 'center' });
     return false;
-  }, [configurableFields, fieldValues, fields, plugin.id, presentation]);
+  }, [
+    configurableFields,
+    fieldValues,
+    fields,
+    plugin.id,
+    presentation,
+    variantProjection,
+    variantActiveKeys,
+    clientLibrary?.configurationKey,
+  ]);
 
   useEffect(() => {
     if (validationRequest <= handledValidationRequest.current) return;
@@ -210,6 +245,11 @@ export function PluginManagerConfigurationSection({
         <SettingsText as="h4" variant="xs" tone="muted" className="font-semibold">
           {presentation === 'v2' ? '配置' : '插件配置'}
         </SettingsText>
+        {clientLibrary?.error && (
+          <p role="alert" className="text-sm text-cafe-secondary">
+            {clientLibrary.error}
+          </p>
+        )}
         {installed ? (
           <>
             {steps.map((step, index) => (
@@ -242,6 +282,13 @@ export function PluginManagerConfigurationSection({
                         pendingConfigValues={fieldValues}
                         onStatusChange={handleOperationChange}
                       />
+                    ) : clientLibrary?.configurationKey === field.key ? (
+                      <PluginAgentClientsField
+                        key={field.key}
+                        presets={clientLibrary.presets}
+                        value={effectiveFieldValue(field, fieldValues)}
+                        onChange={(value) => changeField(field.key, value)}
+                      />
                     ) : listFormat ? (
                       <PluginManagerStringList
                         key={field.key}
@@ -249,7 +296,7 @@ export function PluginManagerConfigurationSection({
                         label={fieldLabel(field)}
                         value={effectiveFieldValue(field, fieldValues)}
                         format={listFormat}
-                        required={fieldIsRequired(field, fields, fieldValues)}
+                        required={fieldRequired(field)}
                         error={fieldErrors[field.key]}
                         onChange={(value) => changeField(field.key, value)}
                       />
@@ -257,8 +304,8 @@ export function PluginManagerConfigurationSection({
                       <ConfigFieldRenderer
                         key={field.key}
                         field={{ ...renderField(field), label: fieldLabel(field) }}
-                        value={renderedFieldValue(field, fieldValues)}
-                        required={fieldIsRequired(field, fields, fieldValues)}
+                        value={renderedFieldValue(field, fieldValues, variantProjection !== undefined)}
+                        required={fieldRequired(field)}
                         error={fieldErrors[field.key]}
                         onChange={changeField}
                         idPrefix={`plugin-manager-${plugin.id}`}

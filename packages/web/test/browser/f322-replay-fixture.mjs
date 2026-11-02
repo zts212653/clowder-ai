@@ -1,3 +1,4 @@
+import { CLIENT_REQUEST_DIAGNOSTIC_HEADER } from '@cat-cafe/shared';
 /** Isolated HTTP boundary fixtures. Always use the original client fetcher/adapter/engine. No Redis or provider. */
 export function createReplayFixture() {
   const t = Date.parse('2026-10-04T08:00:00Z');
@@ -97,7 +98,7 @@ export function createReplayFixture() {
       'Content-Type': 'application/json',
       'Access-Control-Allow-Origin': origin,
       'Access-Control-Allow-Credentials': 'true',
-      'Access-Control-Allow-Headers': 'Content-Type,X-Cat-Cafe-User',
+      'Access-Control-Allow-Headers': `Content-Type,X-Cat-Cafe-User,${CLIENT_REQUEST_DIAGNOSTIC_HEADER}`,
       'Access-Control-Allow-Methods': 'GET,OPTIONS,PUT',
     });
     res.end(JSON.stringify(body));

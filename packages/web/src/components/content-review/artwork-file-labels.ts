@@ -1,5 +1,13 @@
 import type { ShellLanguage } from '@/components/shell/shell-language';
 
+/** One display projection for byte lengths from the file's source metadata. */
+export function fileByteLengthLabel(bytes: number | undefined): string | null {
+  if (bytes === undefined) return null;
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
 /** Dates follow the reader's shell language, not the host process/browser default. */
 export function artworkFileDate(value: string | undefined, language: ShellLanguage, now = new Date()): string {
   if (!value) return '';

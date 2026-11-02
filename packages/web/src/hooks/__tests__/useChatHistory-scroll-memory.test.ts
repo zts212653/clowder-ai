@@ -807,6 +807,165 @@ describe('useChatHistory scroll memory (#27)', () => {
     expect(readChatScrollState(threadId)).toMatchObject({ top: 168, anchor: 'offset' });
   });
 
+  it.each([
+    ['bottom', -32, 'before-observation'],
+    ['offset', -32, 'before-observation'],
+    ['offset', 32, 'before-observation'],
+    ['bottom', -32, 'before-pixels'],
+    ['offset', -32, 'before-pixels'],
+    ['offset', 32, 'before-pixels'],
+    ['bottom', -32, 'between-frames'],
+    ['offset', -32, 'between-frames'],
+    ['offset', 32, 'between-frames'],
+  ] as const)('records native scrolling from %s (delta=%s, scrollend=%s)', async (anchor, delta, timing) => {
+    const threadId = `thread-scrollend-${anchor}-${delta}-${timing}`;
+    const messages = [makeMsg('viewed', 1), makeMsg('other', 2)];
+    useChatStore.setState({
+      currentThreadId: threadId,
+      messages,
+      hasMore: false,
+      isLoadingHistory: false,
+      threadStates: { [threadId]: makeThreadState(messages) },
+    });
+    await act(async () => root.render(React.createElement(HookHost, { threadId })));
+    const el = capturedHook!.scrollContainerRef.current!;
+    const top = defineMutableNumberProp(el, 'scrollTop', 600);
+    defineMutableNumberProp(el, 'clientHeight', 600);
+    defineMutableNumberProp(el, 'scrollHeight', 1200);
+    el.getBoundingClientRect = () => ({ top: 100, bottom: 700 }) as DOMRect;
+    appendMessageBoundary(el, 'viewed', () => ({ top: 350 - top.get(), bottom: 1250 - top.get() }));
+    capturedHook!.messagesEndRef.current!.scrollIntoView = () => top.set(600);
+    cancelInitialRestoreWithWheel(el, -1);
+    if (anchor === 'offset') {
+      top.set(200);
+      act(() => capturedHook!.handleScroll());
+    }
+    const destination = top.get() + delta;
+    act(() => {
+      if (timing === 'between-frames') {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: delta < 0 ? 'PageUp' : 'PageDown' }));
+        top.set(destination - delta / 2);
+        capturedHook!.handleScroll();
+        el.dispatchEvent(new Event('scrollend'));
+        flushAnimationFrames();
+      } else {
+        el.dispatchEvent(new WheelEvent('wheel', { deltaY: delta }));
+        if (timing === 'before-pixels') el.dispatchEvent(new Event('scrollend'));
+      }
+      top.set(destination);
+      if (timing === 'before-observation') el.dispatchEvent(new Event('scrollend'));
+      capturedHook!.handleScroll();
+      window.dispatchEvent(new Event(CHAT_LAYOUT_CHANGED_EVENT));
+      flushAnimationFrames();
+    });
+    expect(top.get()).toBe(destination);
+    expect(readChatScrollState(threadId)).toMatchObject({
+      top: destination,
+      anchor: 'offset',
+      messageAnchor: { messageId: 'viewed', viewportOffsetPx: 350 - destination - 100 },
+    });
+  });
+
+  it.each([
+    ['bottom', -1],
+    ['offset', -1],
+    ['offset', 1],
+  ] as const)('keeps a held scrollbar through delayed movement and a paused drag from %s (direction=%s)', async (anchor, direction) => {
+    const threadId = `thread-held-pointer-${anchor}-${direction}`;
+    const messages = [makeMsg('viewed', 1), makeMsg('other', 2)];
+    useChatStore.setState({
+      currentThreadId: threadId,
+      messages,
+      hasMore: false,
+      isLoadingHistory: false,
+      threadStates: { [threadId]: makeThreadState(messages) },
+    });
+    await act(async () => root.render(React.createElement(HookHost, { threadId })));
+    const el = capturedHook!.scrollContainerRef.current!;
+    const top = defineMutableNumberProp(el, 'scrollTop', 600);
+    defineMutableNumberProp(el, 'clientHeight', 600);
+    defineMutableNumberProp(el, 'scrollHeight', 1600);
+    el.getBoundingClientRect = () => ({ top: 100, bottom: 700 }) as DOMRect;
+    let contentTop = 350;
+    appendMessageBoundary(el, 'viewed', () => ({ top: contentTop - top.get(), bottom: contentTop + 1000 - top.get() }));
+    capturedHook!.messagesEndRef.current!.scrollIntoView = () => top.set(1000);
+    cancelInitialRestoreWithWheel(el, -1);
+    top.set(anchor === 'bottom' ? 1000 : 300);
+    act(() => capturedHook!.handleScroll());
+    const start = top.get();
+    act(() => {
+      el.dispatchEvent(new Event('pointerdown'));
+      for (let frame = 0; frame < 3; frame++) flushAnimationFrames();
+    });
+    // Native scrollbar dragging need not deliver pointermove to the page, and
+    // may emit scrollend while the thumb is still held during a pause.
+    for (const distance of [60, 120, 180]) {
+      act(() => {
+        top.set(start + direction * distance);
+        capturedHook!.handleScroll();
+        el.dispatchEvent(new Event('scrollend'));
+        for (let frame = 0; frame < 3; frame++) flushAnimationFrames();
+        window.dispatchEvent(new Event(CHAT_LAYOUT_CHANGED_EVENT));
+        flushAnimationFrames();
+      });
+      expect(top.get()).toBe(start + direction * distance);
+    }
+    act(() => {
+      // A native drag can leave its last scroll pixels unchanged while skipped
+      // row geometry settles. Release must capture the view the reader sees.
+      contentTop += 80;
+      // Release outside the viewport must also hand layout back to the owner.
+      window.dispatchEvent(new Event('pointerup'));
+      for (let frame = 0; frame < 3; frame++) flushAnimationFrames();
+      expect(top.get()).toBe(start + direction * 180);
+      contentTop += 40;
+      capturedHook!.handleScroll();
+      window.dispatchEvent(new Event(CHAT_LAYOUT_CHANGED_EVENT));
+      flushAnimationFrames();
+    });
+    expect(top.get()).toBe(start + direction * 180 + 40);
+    expect(readChatScrollState(threadId)?.anchor).toBe('offset');
+  });
+
+  it.each([-32, 32])('releases an input that moved and returned to its starting point (delta=%s)', async (delta) => {
+    const threadId = `thread-input-roundtrip-${delta}`;
+    const messages = [makeMsg('viewed', 1), makeMsg('other', 2)];
+    useChatStore.setState({
+      currentThreadId: threadId,
+      messages,
+      hasMore: false,
+      isLoadingHistory: false,
+      threadStates: { [threadId]: makeThreadState(messages) },
+    });
+    await act(async () => root.render(React.createElement(HookHost, { threadId })));
+    const el = capturedHook!.scrollContainerRef.current!;
+    const top = defineMutableNumberProp(el, 'scrollTop', 200);
+    defineMutableNumberProp(el, 'clientHeight', 600);
+    defineMutableNumberProp(el, 'scrollHeight', 1200);
+    el.getBoundingClientRect = () => ({ top: 100, bottom: 700 }) as DOMRect;
+    let contentTop = 350;
+    appendMessageBoundary(el, 'viewed', () => ({ top: contentTop - top.get(), bottom: contentTop + 800 - top.get() }));
+    cancelInitialRestoreWithWheel(el, -1);
+    act(() => {
+      capturedHook!.handleScroll();
+      el.dispatchEvent(new WheelEvent('wheel', { deltaY: delta }));
+      top.set(200 + delta);
+      capturedHook!.handleScroll();
+      flushAnimationFrames();
+      top.set(200);
+      capturedHook!.handleScroll();
+      el.dispatchEvent(new Event('scrollend'));
+      for (let frame = 0; frame < 3; frame++) flushAnimationFrames();
+      contentTop += 40;
+      // A layout-driven scroll observation must preserve the settled message
+      // anchor, rather than recapture it under an input that should have ended.
+      capturedHook!.handleScroll();
+      window.dispatchEvent(new Event(CHAT_LAYOUT_CHANGED_EVENT));
+      flushAnimationFrames();
+    });
+    expect(top.get()).toBe(240);
+  });
+
   it('keeps a real small upward gesture inside the near-bottom band through the next live update', async () => {
     const threadId = 'thread-near-bottom-native-reading';
     const messages = [makeMsg('viewed', 1), makeMsg('other', 2)];
@@ -952,8 +1111,14 @@ describe('useChatHistory scroll memory (#27)', () => {
     }
   });
 
-  it('retires upward input consumed outside this scrollport after a bounded no-movement observation', async () => {
-    const threadId = 'thread-consumed-upward-wheel';
+  it.each([
+    -32,
+    32,
+    'pointerup',
+    'pointercancel',
+    'blur',
+  ] as const)('retires consumed or released input (input=%s)', async (input) => {
+    const threadId = `thread-consumed-input-${input}`;
     const messages = [makeMsg('m1', 1), makeMsg('m2', 2)];
     useChatStore.setState({
       currentThreadId: threadId,
@@ -968,11 +1133,14 @@ describe('useChatHistory scroll memory (#27)', () => {
     defineMutableNumberProp(el, 'clientHeight', 600);
     const height = defineMutableNumberProp(el, 'scrollHeight', 1000);
     const endEl = capturedHook!.messagesEndRef.current!;
-    endEl.scrollIntoView = vi.fn();
+    endEl.scrollIntoView = vi.fn(() => top.set(height.get() - el.clientHeight));
     cancelInitialRestoreWithWheel(el, 1);
     act(() => {
       capturedHook?.handleScroll();
-      el.dispatchEvent(new WheelEvent('wheel', { deltaY: -32 }));
+      el.dispatchEvent(
+        typeof input === 'number' ? new WheelEvent('wheel', { deltaY: input }) : new Event('pointerdown'),
+      );
+      if (typeof input !== 'number') window.dispatchEvent(new Event(input));
       capturedHook?.handleScroll();
       el.dispatchEvent(new Event('scrollend'));
       // A nested scroller consumes the wheel; the outer viewport never moves.
@@ -988,6 +1156,13 @@ describe('useChatHistory scroll memory (#27)', () => {
     expect(top.get()).toBe(600);
     expect(endEl.scrollIntoView).toHaveBeenCalledTimes(1);
     expect(readChatScrollState(threadId)?.anchor).toBe('bottom');
+    act(() => {
+      height.set(1400);
+      window.dispatchEvent(new Event(CHAT_LAYOUT_CHANGED_EVENT));
+      flushAnimationFrames();
+    });
+    expect(top.get()).toBe(800);
+    expect(readChatScrollState(threadId)?.top).toBe(800);
   });
 
   it('does not hold upward intent when the scrollport cannot move upward', async () => {
@@ -1519,6 +1694,9 @@ describe('useChatHistory scroll memory (#27)', () => {
     contentTop += 40;
     act(() => {
       window.dispatchEvent(new Event(CHAT_LAYOUT_CHANGED_EVENT));
+      flushAnimationFrames();
+      expect(writes).not.toHaveBeenCalled();
+      // A queued end is provisional until two native frames remain quiet.
       flushAnimationFrames();
     });
     expect(top.get()).toBe(490);

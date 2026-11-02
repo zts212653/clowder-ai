@@ -931,7 +931,9 @@ describe('i18n dictionary integrity', () => {
       const html = readSite(page);
       const keys = [
         ...new Set([
-          ...[...html.matchAll(/data-i18n(?:-(?:placeholder|label|aria-label|title))?="([^"]+)"/g)].map((m) => m[1]),
+          ...[...html.matchAll(/data-i18n(?:-(?:placeholder|label|aria-label|title|src))?="([^"]+)"/g)].map(
+            (m) => m[1],
+          ),
           // JS helper calls: t('key') / t("key") in the inline page scripts.
           ...[...html.matchAll(/\bt\((['"])([^'"]+)\1\)/g)].map((m) => m[2]),
         ]),
@@ -965,6 +967,39 @@ describe('HTML-referenced local assets exist', () => {
       assert.deepStrictEqual(missing, [], `Missing: ${missing.join(', ')}`);
     });
   }
+});
+
+// ─── Homepage demos: per-language video files + floating TOC coverage ─
+describe('homepage demos contract', () => {
+  const document = new JSDOM(readSite('index.html')).window.document;
+
+  it('every localized demo video file exists in both locales', () => {
+    const videos = [...document.querySelectorAll('video[data-i18n-src]')];
+    assert.ok(videos.length > 0, 'index.html should carry at least one localized demo video');
+    const missing = [];
+    for (const video of videos) {
+      const key = video.getAttribute('data-i18n-src');
+      for (const lang of ['en', 'zh']) {
+        const file = I18N[lang][key];
+        if (!file || !existsSync(resolve(SITE, file))) missing.push(`${lang}:${key}=${file}`);
+      }
+      const poster = video.getAttribute('poster');
+      if (poster && !existsSync(resolve(SITE, poster))) missing.push(`poster:${poster}`);
+    }
+    assert.deepStrictEqual(missing, [], `Missing demo files: ${missing.join(', ')}`);
+  });
+
+  it('every floating TOC link targets a section on the page', () => {
+    const links = [...document.querySelectorAll('#floating-toc .toc-link[data-section]')];
+    const missing = links.map((l) => l.dataset.section).filter((id) => !document.getElementById(id));
+    assert.deepStrictEqual(missing, [], `TOC links without a section: ${missing.join(', ')}`);
+  });
+
+  it('the floating TOC observes the sections its links name, not a second hard-coded list', () => {
+    const toc = readSite('main.js').match(/function initFloatingToc\(\) \{[\s\S]*?\n\}/)?.[0] ?? '';
+    assert.match(toc, /\[\.\.\.tocLinks\]\.map\(\(link\) => link\.dataset\.section\)/);
+    assert.doesNotMatch(toc, /const sections = \[\s*'/);
+  });
 });
 
 // ─── Transparent Clowder AI brand mark ──────────────────────────────

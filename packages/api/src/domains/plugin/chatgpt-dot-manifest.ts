@@ -1,11 +1,10 @@
 import { CHATGPT_CLOUD_ENTRY_LABEL } from '@cat-cafe/shared';
-import type { PluginManifest } from '@clowder-ai/plugin-contract';
 
 export const CHATGPT_DOT_PLUGIN_ID = 'official.chatgpt-dot';
 
 export const CHATGPT_DOT_PLUGIN_MANIFEST = {
   pluginId: CHATGPT_DOT_PLUGIN_ID,
-  version: '0.1.1',
+  version: '0.1.2',
   contractVersion: '0.1.0',
   name: CHATGPT_CLOUD_ENTRY_LABEL,
   icon: { type: 'svg', src: 'assets/chatgpt-cloud.svg' },
@@ -16,4 +15,4 @@ export const CHATGPT_DOT_PLUGIN_MANIFEST = {
     { name: 'dot-dispatch', dataClass: 'interaction-history', strategy: 'retained', schemaVersion: '1' },
   ],
   runtime: { transport: 'builtin' },
-} as const satisfies PluginManifest;
+} as const;

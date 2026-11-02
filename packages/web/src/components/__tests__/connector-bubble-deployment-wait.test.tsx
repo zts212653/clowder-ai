@@ -53,8 +53,8 @@ describe('ConnectorBubble deployment wait avatar', () => {
     expect(container.textContent).toContain('return to the original task for acceptance.');
   });
 
-  it('preserves the fallback for an unregistered connector', () => {
+  it('uses the declared person identity for an unregistered external connector', () => {
     const avatar = render('unregistered-source', 'X');
-    expect(avatar?.textContent).toBe('X');
+    expect(avatar?.textContent).toBe('D');
   });
 });

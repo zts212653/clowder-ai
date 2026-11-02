@@ -20,6 +20,7 @@ interface TransferTargetPickerViewProps {
   error: string | null;
   submitting: boolean;
   itemCount: number;
+  selectionSummary?: string;
   singleItemLabel?: string;
   onClose: () => void;
   onBack: () => void;
@@ -169,6 +170,13 @@ export function TransferTargetPickerView(props: TransferTargetPickerViewProps) {
         }`}
       >
         <TransferPickerHeader {...props} />
+        <div
+          className="max-h-32 shrink-0 overflow-y-auto border-b border-cafe px-[14px] py-2.5 text-[13px] text-cafe-primary"
+          data-testid="transfer-selection-summary"
+        >
+          <p>{props.singleItemLabel ? `转发 ${props.singleItemLabel}` : `转发 ${props.itemCount} 条消息`}</p>
+          {props.selectionSummary && <p className="mt-0.5 text-xs text-cafe-muted">{props.selectionSummary}</p>}
+        </div>
         <TransferPickerBody {...props} />
         {props.targetThreadId ? <TransferPickerFooter {...props} /> : null}
       </div>

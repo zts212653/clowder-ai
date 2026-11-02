@@ -1,7 +1,32 @@
 import { z } from 'zod';
 import { CURRENT_CORPUS_PROFILE_URI, CURRENT_RELATIONSHIP_PROFILE_URI } from '../profile-contract.js';
+import { contextSourcePayloadV1Schema } from './memory-cue-context.js';
 
-export const RECALL_OPPORTUNITY_CATALOG_VERSION = 6 as const;
+export const RECALL_OPPORTUNITY_CATALOG_VERSION = 7 as const;
+
+/** A selector within an already authenticated, revision-pinned canonical document. */
+export const memoryCueDocumentWindowRequestSchema = z
+  .object({
+    offset: z
+      .number()
+      .int()
+      .min(0)
+      .max(Number.MAX_SAFE_INTEGER)
+      .optional()
+      .describe('Zero-based UTF-16 code-unit offset; use nextOffset from the previous page.'),
+    query: z
+      .string()
+      .trim()
+      .min(1)
+      .max(200)
+      .optional()
+      .describe('Case-insensitive literal phrase or heading to locate in this document (1–200 characters).'),
+  })
+  .strict()
+  .refine((value) => value.offset === undefined || value.query === undefined, {
+    message: 'Use either offset (for example 4000) or query (for example "Release sequence"), not both.',
+  });
+export type MemoryCueDocumentWindowRequest = z.infer<typeof memoryCueDocumentWindowRequestSchema>;
 
 export const RECALL_RESOLVER_FAMILIES = [
   'person_entity',
@@ -55,6 +80,8 @@ export const RECALL_OPPORTUNITY_V1_PAIRS = Object.freeze([
     producer: 'present_loop' as const,
   }),
   Object.freeze({ kind: 'thread_opened' as const, producer: 'owner_message' as const }),
+  Object.freeze({ kind: 'fresh_context_sources' as const, producer: 'context_epoch' as const }),
+  Object.freeze({ kind: 'authorized_task_sources' as const, producer: 'task_action_custody' as const }),
 ]);
 
 // F321: timing is server-owned; Luna decides relevance after seeing the whole directory.
@@ -265,6 +292,25 @@ export const threadOpenedOpportunityV1Schema = z
   .strict();
 export type ThreadOpenedOpportunityV1 = z.infer<typeof threadOpenedOpportunityV1Schema>;
 
+export const freshContextSourcesOpportunityV1Schema = z
+  .object({
+    ...opportunityBaseShape,
+    kind: z.literal('fresh_context_sources'),
+    producer: z.literal('context_epoch'),
+    payload: contextSourcePayloadV1Schema,
+  })
+  .strict();
+export const authorizedTaskSourcesOpportunityV1Schema = z
+  .object({
+    ...opportunityBaseShape,
+    kind: z.literal('authorized_task_sources'),
+    producer: z.literal('task_action_custody'),
+    payload: contextSourcePayloadV1Schema,
+  })
+  .strict();
+export type FreshContextSourcesOpportunityV1 = z.infer<typeof freshContextSourcesOpportunityV1Schema>;
+export type AuthorizedTaskSourcesOpportunityV1 = z.infer<typeof authorizedTaskSourcesOpportunityV1Schema>;
+
 export const recallOpportunityV1Schema = z.discriminatedUnion('kind', [
   subjectSeenOpportunityV1Schema,
   deliveryDecisionOpportunityV1Schema,
@@ -276,6 +322,8 @@ export const recallOpportunityV1Schema = z.discriminatedUnion('kind', [
   projectSourceRequiredOpportunityV1Schema,
   ownedSeedAvailableOpportunityV1Schema,
   threadOpenedOpportunityV1Schema,
+  freshContextSourcesOpportunityV1Schema,
+  authorizedTaskSourcesOpportunityV1Schema,
 ]);
 
 const memoryCueInvalidatorsSchema = z.tuple([

@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { chromium } from 'playwright';
 import { build } from 'vite';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
 import { registerEndGrowthJourney } from './chat-end-growth.journey.mjs';
 import { registerNavigationOwnerJourneys } from './chat-navigation-owner.journey.mjs';
 import { registerReadingLandingJourneys } from './chat-reading-landing.journey.mjs';
@@ -44,7 +44,15 @@ registerNavigationOwnerJourneys({ origin, browser: () => browser, bundle: () => 
 
 registerReadingLandingJourneys({ origin, threadId, browser: () => browser, bundle: () => bundle.code });
 registerStreamingWheelJourney({ origin, threadId, browser: () => browser, bundle: () => bundle.code });
-registerReadingWheelJourneys({ origin, threadId, browser: () => browser, bundle: () => bundle.code });
+registerReadingWheelJourneys({
+  origin,
+  threadId,
+  browser: () => browser,
+  bundle: () => bundle.code,
+  // Headless Playwright hides scrollbars by default. A real thumb drag needs
+  // this separate browser; the other recovery journeys keep their environment.
+  launchNativeScrollbarBrowser: () => chromium.launch({ headless: true, ignoreDefaultArgs: ['--hide-scrollbars'] }),
+});
 registerEndGrowthJourney({ origin, threadId, browser: () => browser, bundle: () => bundle.code });
 
 function fixtureApiBody(pathname, state) {

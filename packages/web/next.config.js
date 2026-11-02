@@ -62,6 +62,9 @@ function buildContentSecurityPolicy() {
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // Desktop serves these assets locally. Compile both client and server with
+  // this profile so Next never creates .next/cache/images in the signed app.
+  images: { unoptimized: process.env.CAT_CAFE_DESKTOP_WEB_BUILD === '1' },
   transpilePackages: ['@cat-cafe/ui'],
   ...(testDistDir ? { distDir: testDistDir } : {}),
   ...(testTsconfigPath ? { typescript: { tsconfigPath: testTsconfigPath } } : {}),

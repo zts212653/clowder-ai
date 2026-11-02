@@ -1,10 +1,12 @@
 import { createHash } from 'node:crypto';
 import {
   MAX_MESSAGE_OUTPUT_REFS,
+  type MessageOutputBoundaryRun,
   type MessageOutputHostTail,
   type MessageOutputLayoutV1,
   type MessageOutputOrderRef,
   type MessageOutputRun,
+  type MessageOutputSettlement,
 } from '@cat-cafe/shared';
 import { normalizeJsonUnicode } from '../../../../utils/json-unicode.js';
 import type { MessageOutputState, OutputTextRun } from './message-output-state.js';
@@ -75,8 +77,51 @@ function projectEntries(state: MessageOutputState): OutputProjection {
   return projection;
 }
 
+/** The event sequence proves a display boundary, without inventing native IDs or phases. */
+function toolBoundary(state: MessageOutputState, settlement: MessageOutputSettlement | undefined) {
+  if (!settlement?.succeeded || settlement.nativePhases) return undefined;
+  if (state.reason && !['unknown_output', 'incomplete', 'no_final', 'content_changed'].includes(state.reason))
+    return undefined;
+  const runs: MessageOutputBoundaryRun[] = [];
+  const order: MessageOutputOrderRef[] = [];
+  let content = '';
+  for (const entry of state.entries) {
+    if (entry.kind === 'tool') {
+      if (!entry.toolEventId || entry.executionRef !== state.owner.turnInvocationId) return undefined;
+      order.push({ kind: 'tool', toolEventId: entry.toolEventId, executionRef: entry.executionRef });
+    } else {
+      if (entry.kind !== 'text' || entry.identity || entry.channel) return undefined;
+      const glue = entry.paragraphBoundary ? separator(content, entry.text) : '';
+      const start = content.length;
+      content += glue + entry.text;
+      if (content.length === start) continue;
+      const id = `run-${runs.length}`;
+      runs.push({ id, channel: 'commentary', start, end: content.length, gluePrefixLength: glue.length as 0 | 1 | 2 });
+      order.push({ kind: 'run', runId: id });
+    }
+  }
+  let lastTool = -1;
+  order.forEach((entry, index) => {
+    if (entry.kind === 'tool') lastTool = index;
+  });
+  const answerIds = new Set(order.slice(lastTool + 1).flatMap((entry) => (entry.kind === 'run' ? [entry.runId] : [])));
+  if (lastTool < 0 || !runs.some((run) => answerIds.has(run.id) && content.slice(run.start, run.end).trim()))
+    return undefined;
+  return {
+    basis: 'successful_turn_last_tool' as const,
+    runs: runs.map((run) => ({
+      ...run,
+      channel: answerIds.has(run.id) ? ('final' as const) : ('commentary' as const),
+    })),
+    order,
+  };
+}
+
 /** Build offsets from the normalized content actually published, never a second body. */
-export function materializeMessageOutput(state: MessageOutputState): {
+export function materializeMessageOutput(
+  state: MessageOutputState,
+  settlement?: MessageOutputSettlement,
+): {
   content: string;
   layout: MessageOutputLayoutV1;
 } {
@@ -87,10 +132,13 @@ export function materializeMessageOutput(state: MessageOutputState): {
     owner: state.owner,
     contentRevision: { length: content.length, sha256: createHash('sha256').update(content, 'utf8').digest('hex') },
   };
+  const boundary = reason ? toolBoundary(state, settlement) : undefined;
   return {
     content,
-    layout: reason
-      ? { ...common, status: 'unavailable', reason }
-      : { ...common, status: 'available', runs, order, ...(hostTail ? { hostTail } : {}) },
+    layout: boundary
+      ? { ...common, status: 'available', ...boundary }
+      : reason
+        ? { ...common, status: 'unavailable', reason }
+        : { ...common, status: 'available', runs, order, ...(hostTail ? { hostTail } : {}) },
   };
 }

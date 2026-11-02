@@ -57,7 +57,7 @@ const DELIMITER = new RegExp(
 const OPERATOR_TEXT = /<<-?[ \t]*(?:'[^'\n]*'|"[^"\n]*"|\\?[A-Za-z0-9_][A-Za-z0-9_.-]*)/g;
 
 /** Remove every body (and its terminator line) from the text; null when unsure. */
-function separateHereDocuments(raw) {
+export function separateHereDocuments(raw) {
   const lexer = new HereDocumentLexer(raw);
   while (lexer.index < raw.length) {
     if (lexer.step() === UNSURE) return null;

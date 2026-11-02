@@ -1,6 +1,5 @@
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { ExternalPluginRuntimeError } from '../external-runtime/types.js';
-import { hostCapabilityRefusal } from './host-capability-refusal.js';
 
 const MAX_STORAGE_KEY_LENGTH = 256;
 const MAX_STORAGE_VALUE_BYTES = 1024 * 1024;
@@ -80,33 +79,22 @@ export interface PluginStorageHost {
 
 export function createPluginStorageHost(input: {
   readonly pluginId: string;
-  readonly effectiveGrants: readonly string[];
   readonly storage?: PluginPrivateStoragePort;
 }): PluginStorageHost {
-  const requireGrant = (capability: 'plugin.state.get' | 'plugin.state.set') => {
-    if (!input.effectiveGrants.includes(capability)) {
-      throw hostCapabilityRefusal(
-        new ExternalPluginRuntimeError('DELIVERY_REJECTED', `${input.pluginId} lacks ${capability}`),
-        capability,
-      );
-    }
+  const requireService = () => {
     if (!input.storage) {
       throw new ExternalPluginRuntimeError('UNSUPPORTED_TRANSPORT', 'Host plugin storage is unavailable');
     }
     return input.storage;
   };
   return {
-    get: (key) => requireGrant('plugin.state.get').get(input.pluginId, key),
-    list: () => requireGrant('plugin.state.get').list(input.pluginId),
-    set: (key, value) => requireGrant('plugin.state.set').set(input.pluginId, key, value),
+    get: (key) => requireService().get(input.pluginId, key),
+    list: () => requireService().list(input.pluginId),
+    set: (key, value) => requireService().set(input.pluginId, key, value),
     compareAndSet: (key, expectedRevision, value) =>
-      requireGrant('plugin.state.set').compareAndSet(input.pluginId, key, expectedRevision, value),
-    delete: (key, expectedRevision) => requireGrant('plugin.state.set').delete(input.pluginId, key, expectedRevision),
+      requireService().compareAndSet(input.pluginId, key, expectedRevision, value),
+    delete: (key, expectedRevision) => requireService().delete(input.pluginId, key, expectedRevision),
   };
-}
-
-function storageHashKey(pluginId: string): string {
-  return `plugin-private-state:v1:${encodeURIComponent(pluginId)}`;
 }
 
 function assertStorageKey(key: string): void {
@@ -144,17 +132,25 @@ function decodeRecord(raw: string): PluginStorageEntry {
 
 /** Durable, plugin-id-scoped JSON records. No method in this adapter creates a TTL. */
 export class RedisPluginPrivateStorage implements PluginPrivateStoragePort {
-  constructor(private readonly redis: RedisClient) {}
+  /** keyPrefix is a Host composition choice; it is never part of the package facade. */
+  constructor(
+    private readonly redis: RedisClient,
+    private readonly keyPrefix = 'plugin-private-state:v1',
+  ) {}
+
+  private hashKey(pluginId: string): string {
+    return `${this.keyPrefix}:${encodeURIComponent(pluginId)}`;
+  }
 
   async get(pluginId: string, key: string): Promise<PluginStorageEntry | undefined> {
     assertStorageKey(key);
-    const raw = await this.redis.hget(storageHashKey(pluginId), key);
+    const raw = await this.redis.hget(this.hashKey(pluginId), key);
     if (raw === null) return undefined;
     return decodeRecord(raw);
   }
 
   async list(pluginId: string): Promise<Readonly<Record<string, PluginStorageEntry>>> {
-    const raw = await this.redis.hgetall(storageHashKey(pluginId));
+    const raw = await this.redis.hgetall(this.hashKey(pluginId));
     return Object.fromEntries(
       Object.entries(raw)
         .filter(([key]) => key !== REVISION_COUNTER_FIELD)
@@ -189,7 +185,7 @@ export class RedisPluginPrivateStorage implements PluginPrivateStoragePort {
       await this.redis.eval(
         DELETE_LUA,
         1,
-        storageHashKey(pluginId),
+        this.hashKey(pluginId),
         key,
         expectedRevision === undefined ? '*' : String(expectedRevision),
       ),
@@ -202,7 +198,7 @@ export class RedisPluginPrivateStorage implements PluginPrivateStoragePort {
   async #write(pluginId: string, key: string, expectedRevision: string, value: unknown): Promise<number> {
     assertStorageKey(key);
     const revision = Number(
-      await this.redis.eval(WRITE_LUA, 1, storageHashKey(pluginId), key, expectedRevision, encodeValue(value)),
+      await this.redis.eval(WRITE_LUA, 1, this.hashKey(pluginId), key, expectedRevision, encodeValue(value)),
     );
     if (!Number.isSafeInteger(revision) || revision < 0)
       throw new TypeError('plugin storage returned an invalid revision');

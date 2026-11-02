@@ -1,6 +1,7 @@
 'use client';
 
 import type React from 'react';
+import { personalChromeSettingsHref } from '@/utils/personal-chrome-settings';
 import type { AuthorizedConversationsRead } from './authorized-conversations';
 import { CloudConversationChoices } from './CloudConversationChoices';
 
@@ -84,24 +85,45 @@ function ChooserBody(props: RouteChooserProps) {
   if (authorized.kind === 'error') {
     return (
       <div className="mt-2 flex items-center justify-between gap-2 text-xs text-cafe-secondary">
-        <span>暂时读不到已授权的会话。</span>
+        <div>
+          <p>{authorized.message ?? '暂时读不到已授权的会话。'}</p>
+          <a href={personalChromeSettingsHref()} className={routeGhostClass}>
+            {authorized.actionLabel ?? '检查 Personal Chrome'}
+          </a>
+        </div>
         <button type="button" className={routeGhostClass} disabled={busy !== null} onClick={props.onRetry}>
           重试
         </button>
       </div>
     );
   }
-  if (authorized.candidates.length === 0) return <NothingAuthorized onRetry={props.onRetry} />;
+  if (authorized.candidates.length === 0 && !authorized.connectionIssue)
+    return <NothingAuthorized onRetry={props.onRetry} />;
   return (
-    <CloudConversationChoices
-      candidates={authorized.candidates}
-      selectedConversationId={props.selectedConversationId}
-      boundConversationId={props.boundUsable ? props.boundId : null}
-      busy={busy !== null}
-      onSelect={props.onSelect}
-      name={props.radioName}
-      layout="rows"
-    />
+    <>
+      {authorized.connectionIssue ? (
+        <div className="mt-2 text-xs text-cafe-secondary">
+          <p>{authorized.connectionIssue}</p>
+          <a className={routeGhostClass} href={personalChromeSettingsHref()}>
+            {authorized.connectionActionLabel ?? '检查 Chrome 连接'}
+          </a>
+          <button type="button" className={routeGhostClass} disabled={busy !== null} onClick={props.onRetry}>
+            重新检查
+          </button>
+        </div>
+      ) : null}
+      {authorized.candidates.length > 0 ? (
+        <CloudConversationChoices
+          candidates={authorized.candidates}
+          selectedConversationId={props.selectedConversationId}
+          boundConversationId={props.boundUsable ? props.boundId : null}
+          busy={busy !== null}
+          onSelect={props.onSelect}
+          name={props.radioName}
+          layout="rows"
+        />
+      ) : null}
+    </>
   );
 }
 

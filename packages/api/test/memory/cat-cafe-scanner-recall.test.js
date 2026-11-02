@@ -4,6 +4,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
+import { writeOperationalPrecedentFixture } from '../helpers/operational-precedent-fixture.js';
 
 describe('CatCafeScanner lexical recall', () => {
   let tmpDir;
@@ -80,10 +81,10 @@ doc_kind: note
   });
 
   it('discovers billing-only only from canonical operational evidence, never Taste', async () => {
-    const repositoryDocsRoot = resolve(import.meta.dirname, '../../../../docs');
+    writeOperationalPrecedentFixture(docsDir);
     const { CatCafeScanner } = await import('../../dist/domains/memory/CatCafeScanner.js');
     const scanner = new CatCafeScanner();
-    const results = scanner.discover(repositoryDocsRoot);
+    const results = scanner.discover(docsDir);
 
     const operational = results.find((result) => result.item.anchor === 'LL-098');
     assert.ok(operational, 'billing-only should have a canonical operational lesson');
@@ -92,6 +93,7 @@ doc_kind: note
     assert.match(operationalSummary, /runner_id=0/);
     assert.match(operationalSummary, /steps=\[\]/);
     assert.match(operationalSummary, /billing|spending.limit/i);
+    assert.equal(operationalSummary.length, 300, 'the fixture exercises the scanner summary boundary');
 
     assert.equal(
       results.some((result) =>
@@ -101,8 +103,8 @@ doc_kind: note
       'billing-only must not remain a Taste vignette source',
     );
 
-    const legacy = results.find((result) => result.item.sourcePath === 'taste/vignettes/give-data-not-conclusions.md');
-    assert.ok(legacy, 'canonical legacy vignettes without newer optional metadata remain approved materializations');
+    const legacy = results.find((result) => result.item.sourcePath === 'taste/vignettes/legacy-source.md');
+    assert.ok(legacy, 'legacy vignettes without newer optional metadata remain approved materializations');
     assert.match(legacy.passages[0] ?? '', /给了原始数据/);
   });
 

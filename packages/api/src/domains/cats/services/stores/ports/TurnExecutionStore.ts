@@ -80,6 +80,8 @@ export interface ITurnExecutionStore {
    * Sidebar 需要"这个用户此刻有哪些 child 在跑"，这是 child ledger 自己才答得出的问题。
    */
   listRunningByUser(userId: string): TurnExecutionRecord[] | Promise<TurnExecutionRecord[]>;
+  markProviderStarted(invocationId: string, at: number): boolean | Promise<boolean>;
+  recordProviderTeardown(invocationId: string, at: number): void | Promise<void>;
   transitionTerminal(
     invocationId: string,
     input: TurnExecutionTerminalInput,
@@ -192,6 +194,19 @@ export function assertTurnExecutionIdentityFields(input: Omit<CreateTurnExecutio
     throw new Error(`invalid routingGuardReason: ${String(input.causal.routingGuardReason)}`);
   }
   if (input.causal?.coveredMessageIds !== undefined) assertCoveredMessageIds(input.causal.coveredMessageIds);
+  if (input.causal?.routingPreflight) {
+    if (input.causal.routingPreflight.stage !== 'execution_preflight')
+      throw new Error('invalid routing preflight stage');
+    assertTimestamp(input.causal.routingPreflight.observedAt, 'routingPreflight.observedAt');
+    if (input.causal.routingPreflight.snapshotRef !== undefined)
+      assertNonEmpty(input.causal.routingPreflight.snapshotRef, 'routingPreflight.snapshotRef');
+    const admission = input.causal.routingPreflight.admission;
+    if (admission) {
+      if (admission.stage !== 'queue_admitted') throw new Error('invalid routing admission stage');
+      assertTimestamp(admission.observedAt, 'routingAdmission.observedAt');
+      if (admission.snapshotRef !== undefined) assertNonEmpty(admission.snapshotRef, 'routingAdmission.snapshotRef');
+    }
+  }
 }
 
 export function assertTurnExecutionTerminalInput(
@@ -203,10 +218,18 @@ export function assertTurnExecutionTerminalInput(
   if (input.endedAt < record.startedAt) throw new Error('endedAt cannot precede startedAt');
   if (input.status !== 'succeeded') assertNonEmpty(input.terminalReason ?? '', 'terminalReason');
   if (input.terminalReason !== undefined) assertNonEmpty(input.terminalReason, 'terminalReason');
+  if (input.providerTeardownAt !== undefined) {
+    assertTimestamp(input.providerTeardownAt, 'providerTeardownAt');
+    if (input.providerTeardownAt < record.startedAt)
+      throw new Error('providerTeardownAt must be inside the exact execution lifetime');
+  }
 }
 
 export function cloneTurnExecutionRecord(record: TurnExecutionRecord): TurnExecutionRecord {
   return {
+    ...(record.providerLifecycleTracked ? { providerLifecycleTracked: true } : {}),
+    ...(record.providerStartedAt !== undefined ? { providerStartedAt: record.providerStartedAt } : {}),
+    ...(record.providerTeardownAt !== undefined ? { providerTeardownAt: record.providerTeardownAt } : {}),
     invocationId: record.invocationId,
     parentInvocationId: record.parentInvocationId,
     threadId: record.threadId,
@@ -219,6 +242,9 @@ export function cloneTurnExecutionRecord(record: TurnExecutionRecord): TurnExecu
       ? {
           causal: {
             ...record.causal,
+            ...(record.causal.routingPreflight
+              ? { routingPreflight: copyRoutingPreflight(record.causal.routingPreflight) }
+              : {}),
             ...(record.causal.coveredMessageIds ? { coveredMessageIds: [...record.causal.coveredMessageIds] } : {}),
           },
         }
@@ -230,8 +256,30 @@ export function cloneTurnExecutionRecord(record: TurnExecutionRecord): TurnExecu
   };
 }
 
+function copyRoutingPreflight(provenance: NonNullable<TurnExecutionCausalRefs['routingPreflight']>) {
+  return {
+    stage: provenance.stage,
+    observedAt: provenance.observedAt,
+    ...(provenance.snapshotRef ? { snapshotRef: provenance.snapshotRef } : {}),
+    ...(provenance.admission
+      ? {
+          admission: {
+            stage: provenance.admission.stage,
+            observedAt: provenance.admission.observedAt,
+            ...(provenance.admission.snapshotRef ? { snapshotRef: provenance.admission.snapshotRef } : {}),
+          },
+        }
+      : {}),
+  };
+}
+
 function canonicalCausalRefs(causal: TurnExecutionCausalRefs | undefined): TurnExecutionCausalRefs {
   return {
+    ...(causal?.routingPreflight
+      ? {
+          routingPreflight: copyRoutingPreflight(causal.routingPreflight),
+        }
+      : {}),
     ...(causal?.triggerMessageId !== undefined ? { triggerMessageId: causal.triggerMessageId } : {}),
     ...(causal?.routingGuardReason !== undefined ? { routingGuardReason: causal.routingGuardReason } : {}),
     ...(causal?.coveredMessageIds !== undefined ? { coveredMessageIds: [...causal.coveredMessageIds].sort() } : {}),

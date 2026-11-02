@@ -24,32 +24,16 @@ describe('MarkdownContent code block copy button', () => {
 });
 
 describe('MarkdownContent file path linking', () => {
-  it('converts absolute paths to vscode:// links', () => {
-    // Bare path (not in backticks) — linkified by withMentionsAndLinks in <p>
-    const html = render('See /packages/api/src/routes/messages.ts:42 for details');
-    expect(html).toContain('vscode://file/packages/api/src/routes/messages.ts:42');
-    expect(html).toContain('text-[var(--semantic-info)]');
-  });
-
-  it('renders relative paths as styled span when PROJECT_ROOT is not set', () => {
-    // Bare path (not in backticks) for linkifyFilePaths to detect
-    const html = render('Check packages/web/src/app/page.tsx:10 for the fix');
-    // Without PROJECT_ROOT, relative paths become styled <span>, not <a> links
-    expect(html).toContain('packages/web/src/app/page.tsx:10');
+  it.each([
+    'See /packages/api/src/routes/messages.ts:42 for details',
+    'Check packages/web/src/app/page.tsx:10 for the fix',
+    '入口验收：/home/user/projects/f309-dogfood-scratch/drinks.md',
+    '改好了（/home/user/projects/f309-dogfood-scratch/desserts.md:3）',
+  ])('keeps an unverified path literal without borrowing a project or inventing an editor link: %s', (content) => {
+    const html = render(content);
+    expect(html).toContain(content);
     expect(html).not.toContain('vscode://file');
-    expect(html).toContain('text-[var(--semantic-info)]');
-  });
-
-  it('links a path written straight after Chinese full-width punctuation', () => {
-    // Real chat 2026-09-23: "入口验收：/home/user/drinks.md" stayed plain text because
-    // only whitespace was accepted before a path.
-    const colon = render('入口验收：/home/user/projects/f309-dogfood-scratch/drinks.md');
-    expect(colon).toContain('vscode://file/home/user/projects/f309-dogfood-scratch/drinks.md');
-    expect(colon).toContain('入口验收：');
-
-    const paren = render('改好了（/home/user/projects/f309-dogfood-scratch/desserts.md:3）');
-    expect(paren).toContain('vscode://file/home/user/projects/f309-dogfood-scratch/desserts.md:3');
-    expect(paren).toContain('改好了（');
+    expect(html).not.toContain('data-chat-reference-kind=');
   });
 
   it('still leaves URLs and non-path slashes alone after full-width punctuation', () => {

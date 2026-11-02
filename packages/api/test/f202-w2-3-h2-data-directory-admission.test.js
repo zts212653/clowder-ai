@@ -55,13 +55,12 @@ test('install and upgrade refuse a second plugin that wants the same directory, 
   const store = new MemoryPluginInventoryStore();
   let next = 0;
   const inventory = new HostInventoryControlPlane(store, { createInstanceId: () => `pi_${++next}`, now: () => 1 });
-  const install = (packageManifest, seed, effectiveGrants = []) =>
+  const install = (packageManifest, seed) =>
     inventory.installPackage({
       manifest: packageManifest,
       computedPackageDigest: digestOf(seed),
       expectedPackageDigest: digestOf(seed),
       packagePluginId: packageManifest.pluginId,
-      effectiveGrants,
     });
   const inUse = (error) =>
     error?.code === 'DATA_DIRECTORY_IN_USE' &&
@@ -95,24 +94,20 @@ test('install and upgrade refuse a second plugin that wants the same directory, 
     inventory.upgradePackage({
       pluginInstanceId: admitted.pluginInstanceId,
       expectedLifecycleRevision: 1,
-      expectedGrantRevision: 1,
       manifest: manifest({ pluginId: 'dev.clowder.bystander', version: '0.2.0' }),
       computedPackageDigest: digestOf('bystander-2'),
       expectedPackageDigest: digestOf('bystander-2'),
       packagePluginId: 'dev.clowder.bystander',
-      effectiveGrants: [],
     }),
     inUse,
   );
   await inventory.upgradePackage({
     pluginInstanceId: 'pi_1',
     expectedLifecycleRevision: 1,
-    expectedGrantRevision: 1,
     manifest: manifest({ version: '0.2.0' }),
     computedPackageDigest: digestOf('holder-2'),
     expectedPackageDigest: digestOf('holder-2'),
     packagePluginId: 'dev.clowder.h2-fixture',
-    effectiveGrants: [],
   });
 });
 
@@ -122,6 +117,8 @@ test('a name the Host keeps its own files under is never given to a plugin', asy
   for (const packageManifest of [
     manifest({ runtime: { transport: 'builtin', entrypoint: 'dist/plugin.js', dataDirectory: 'packages' } }),
     manifest({ runtime: { transport: 'builtin', entrypoint: 'dist/plugin.js', dataDirectory: 'inventory.json' } }),
+    manifest({ runtime: { transport: 'builtin', entrypoint: 'dist/plugin.js', dataDirectory: 'project-outputs' } }),
+    manifest({ pluginId: 'project-outputs', runtime: { transport: 'builtin', entrypoint: 'dist/plugin.js' } }),
     manifest({ pluginId: 'resources', runtime: { transport: 'builtin', entrypoint: 'dist/plugin.js' } }),
   ]) {
     await assert.rejects(
@@ -130,7 +127,6 @@ test('a name the Host keeps its own files under is never given to a plugin', asy
         computedPackageDigest: digestOf(JSON.stringify(packageManifest)),
         expectedPackageDigest: digestOf(JSON.stringify(packageManifest)),
         packagePluginId: packageManifest.pluginId,
-        effectiveGrants: [],
       }),
       (error) => error?.code === 'DATA_DIRECTORY_IN_USE' && error.message.includes('reserved'),
     );
@@ -179,7 +175,7 @@ test('the catalog installer reports the conflict as DATA_DIRECTORY_IN_USE and qu
     features: [{ id: 'source', name: 'Source', resources: [], capabilities: ['messaging.send'] }],
   };
   const archive = await packageArchive({ packageManifest: catalogManifest(wantsShared) });
-  const entry = catalogEntry(archive.integrity, { effectiveGrants: ['messaging.send'] });
+  const entry = catalogEntry(archive.integrity, {});
   const { store, installer } = await catalogHarness(archive, entry);
   const holder = new HostInventoryControlPlane(store, { createInstanceId: () => 'pi_holder', now: () => 1 });
   await holder.installPackage({
@@ -187,7 +183,6 @@ test('the catalog installer reports the conflict as DATA_DIRECTORY_IN_USE and qu
     computedPackageDigest: digestOf('catalog-holder'),
     expectedPackageDigest: digestOf('catalog-holder'),
     packagePluginId: 'dev.clowder.holder',
-    effectiveGrants: [],
   });
 
   await assert.rejects(installer.install(entry.catalogId, releaseFence(entry)), (error) => {

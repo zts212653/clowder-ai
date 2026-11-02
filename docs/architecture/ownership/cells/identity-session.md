@@ -4,11 +4,17 @@ title: Identity / Session
 summary: Agent identity、connector session binding、bubble identity、runtime session binding、context continuity、thread access policy 与 user profile 等 subcell 的边界。
 canonical_features: [F032, F088, F136, F171, F183, F211, F231, F262, F291, F296, F299, F320, F322]
 code_anchors:
+  - packages/api/src/routes/member-canon-response.ts
+  - packages/api/src/routes/member-canon-routes.ts
+  - packages/web/src/components/settings/members/MemberCanonAvatar.tsx
+  - packages/api/src/domains/cats/services/agents/providers/pi/pi-session-store.ts
+  - packages/api/src/domains/cats/services/agents/providers/pi/pi-session-runner.ts
   - packages/api/src/domains/cats/services/cloud-bridge/dot/dot-identity.ts
   - cat-config.json
   - packages/api/src/config/cat-config-loader.ts
   - packages/api/src/config/account-resolver.ts
   - packages/api/src/config/account-store-snapshot.ts
+  - packages/api/src/config/account-routing-capacity.ts
   - packages/api/src/config/codex-account-launch.ts
   - packages/api/src/config/codex-login-manager.ts
   - packages/api/src/config/codex-managed-layout.ts
@@ -92,6 +98,7 @@ code_anchors:
   - packages/api/src/routes/callback-read-profile-routes.ts
   - packages/api/src/scripts/migrate-f231-profile.ts
 doc_anchors:
+  - docs/census/issue-1704-pi-native-state.md
   - docs/features/F320-multi-oauth-account-switching.md
   - feature-specs/2026-10-06-f320-codex-backend.md
   - docs/features/F032-agent-plugin-architecture.md
@@ -210,6 +217,8 @@ Watch for new or renamed `catId`, `relationshipKey`, `ProfileRepository`, `CAT_C
 
 The existing account store owns managed account metadata, immutable principal coordinates, notes, login attempt revisions and per-account read-only quota observations. Official Codex owns PKCE, callback validation and credential writing; `CodexLoginManager` only retains live carrier cancellation handles and persists facts through the existing store. Staged results require current attempt identity before adoption, and cannot replace an established principal silently. The running member catalog owns `selectedAccountRefs` and each member's follow/override intent; account metadata stays in its persistent workspace owner. A confirmed preview and one catalog write switch the enabled local Codex followers across families, with explicit inclusion of exceptions and exclusion of disabled/cloud members. Invocation, usage and realtime transcripts retain their accepted execution snapshot. Native default rows are read-only projections of the existing resolver and actual credential home; listing or logging into a backup account does not switch members.
 
+F293 consumes a credential-free projection of that same store: canonical account label, opaque pool/binding/evidence refs and exact-principal observations. The projection neither selects accounts nor proves that a model/execution consumes a particular pool. Pool applicability remains unknown without a provider-issued proof on the frozen execution binding; no accountRef, principal ID or credential path crosses into F293 subjects or evidence. A frozen execution continues to use its accepted account when the live member selection later changes.
+
 The measured first managed combination is macOS + official native Codex 0.159.0 + private file authentication, without forced MDM or legacy managed/requirements policy and without cloud-eligible enterprise/business/education plans. Native personal and team-like plans remain eligible. Unsupported combinations are rejected before credential-bearing launch; no policy is disabled. Shared session/SQLite/memory/image/config state has explicit roots, while auth, secrets, temporary/control state and plugin/browser authentication stay private. Installed-native layout and source-consumer fixtures cover this implementation; real OAuth and cross-account server compaction require owner authorization and remain unclaimed until exercised.
 
 ## F325 Native continuity and retirement
@@ -217,3 +226,7 @@ The measured first managed combination is macOS + official native Codex 0.159.0 
 Native uses the existing SessionManager/SessionChainStore for durable resume bindings, not an in-memory session authority. A verified preflight L0/cwd/permission mismatch can seal the old session and rebuild from canonical history before starting a new one; partial output and exact imported-resume requests cannot silently fall back. Profile serialization protects per-turn credential/config binding. Skills come from the existing mount resolver. Historical Antigravity session import/lifecycle remain readable; Gemini CLI, IDE bridge and SQLite polling are no longer execution carriers.
 
 Official CLI init is verified before stdin delivery; only then does the existing F296 preflight settle the final generation and F299 record its bytes. A prior unsupported scope adopts a newly observed runtime through one unconsumed cold epoch; it becomes hot only after actual generation consumption and another verified resume. Compaction checkpoints advance the existing epoch owner. The raw cumulative result/error and transport diagnostics remain separate from current-turn completion evidence.
+
+## Canon Member Avatar Consumer
+
+F326 Phase D resolves the existing member id, then projects its one member-avatar slot from collaborative-content-plane. The direct Human selects it with its own receipt; mixed avatar/profile PATCH is rejected before either write. Linked members keep the canon projection after profile-only saves, clear remains linked, and unreadable bound bytes never fall back to catalog or another image. This consumer does not move roster or member authority.

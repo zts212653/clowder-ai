@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { setImmediate as yieldTurn } from 'node:timers/promises';
+import * as sqliteVec from 'sqlite-vec';
 import { IndexBuilder } from '../dist/domains/memory/IndexBuilder.js';
 import { PassageVectorStore } from '../dist/domains/memory/PassageVectorStore.js';
 import { SqliteEvidenceStore } from '../dist/domains/memory/SqliteEvidenceStore.js';
+import { ensurePassageVectorTable, ensureVectorTable } from '../dist/domains/memory/schema.js';
 import { VectorStore } from '../dist/domains/memory/VectorStore.js';
 
 function deferred() {
@@ -67,10 +69,10 @@ describe('recall during startup catch-up', () => {
   }
 
   function configureBlockedEmbedding() {
-    store.getDb().exec(`
-      CREATE TABLE evidence_vectors (anchor TEXT PRIMARY KEY, embedding BLOB);
-      CREATE TABLE passage_vectors (passage_key TEXT PRIMARY KEY, embedding BLOB);
-    `);
+    const db = store.getDb();
+    sqliteVec.load(db);
+    assert.equal(ensureVectorTable(db, 1), true);
+    assert.equal(ensurePassageVectorTable(db, 1), true);
     const entered = deferred(),
       release = deferred();
     let first = true;

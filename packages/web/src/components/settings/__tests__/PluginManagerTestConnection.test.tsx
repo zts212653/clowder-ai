@@ -64,7 +64,14 @@ describe('Plugin Manager test connection', () => {
   }
 
   it('prefers package steps and shows a successful test result', async () => {
-    mockApiFetch.mockResolvedValue(new Response(JSON.stringify({ ok: true, message: 'Connection healthy' })));
+    mockApiFetch.mockImplementation(
+      async (path) =>
+        new Response(
+          JSON.stringify(
+            path === '/api/agent-providers' ? { providers: [] } : { ok: true, message: 'Connection healthy' },
+          ),
+        ),
+    );
     await render();
 
     expect(container.textContent).toContain('Install fixture');
@@ -73,17 +80,22 @@ describe('Plugin Manager test connection', () => {
     await act(async () => testButton()?.click());
     await flushEffects();
 
-    expect(mockApiFetch).toHaveBeenCalledWith('/api/plugins/dev.clowder.fixture/test', { method: 'POST' });
+    expect(mockApiFetch).toHaveBeenCalledWith(
+      '/api/plugins/dev.clowder.fixture/test',
+      expect.objectContaining({ method: 'POST', signal: expect.any(AbortSignal) }),
+    );
     expect(container.textContent).toContain('Connection healthy');
     expect(container.querySelector('.bg-conn-emerald-bg')).not.toBeNull();
   });
 
   it('shows declared and HTTP test failures without rewriting their message', async () => {
-    mockApiFetch
-      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: false, message: 'Credentials rejected' })))
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ error: 'Handler returned an invalid result' }), { status: 502 }),
-      );
+    const responses = [
+      new Response(JSON.stringify({ ok: false, message: 'Credentials rejected' })),
+      new Response(JSON.stringify({ error: 'Handler returned an invalid result' }), { status: 502 }),
+    ];
+    mockApiFetch.mockImplementation(async (path) =>
+      path === '/api/agent-providers' ? new Response(JSON.stringify({ providers: [] })) : responses.shift()!,
+    );
     await render();
     await act(async () => testButton()?.click());
     await flushEffects();

@@ -25,7 +25,6 @@ export function externalManifest(runtime = { transport: 'stdio', entrypoint: 'di
         id: 'source',
         name: 'Source',
         resources: [],
-        capabilities: ['messaging.send'],
       },
     ],
     signals: {
@@ -63,7 +62,6 @@ export async function createExternalRuntimeHarness({
   activeLeaseTtlMs,
   brokerStore = new MemoryHostBrokerStore(),
   now = Date.now,
-  effectiveGrants = ['messaging.send'],
   // Injectable so a test can admit this package into an inventory that already holds
   // another carrier's package — carrier-neutral claims need more than one instance.
   inventory = new MemoryPluginInventoryStore(),
@@ -82,7 +80,6 @@ export async function createExternalRuntimeHarness({
     computedPackageDigest: packageDigest,
     expectedPackageDigest: packageDigest,
     packagePluginId: EXTERNAL_PLUGIN_ID,
-    effectiveGrants,
     signalSchemas: {
       'schemas/external.signal.v1.schema.json': {
         type: 'object',

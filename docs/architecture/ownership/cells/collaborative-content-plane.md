@@ -11,8 +11,11 @@ description_confirmed_by: codex-sol
 description_updated_at: 2026-09-13T20:42:00Z
 doc_kind: architecture
 created: 2026-08-27
-canonical_features: [F309]
+canonical_features: [F309, F326]
 code_anchors:
+  - packages/api/src/domains/collaborative-content/asset-canon/service.ts
+  - packages/api/src/domains/collaborative-content/asset-canon/store.ts
+  - packages/api/src/domains/collaborative-content/asset-canon/service-updates.ts
   - packages/api/src/domains/cats/services/cloud-bridge/dot/DotImageService.ts
   - packages/api/src/routes/chatgpt-dot-image-routes.ts
   - packages/api/src/domains/collaborative-content/runtime-composition.ts
@@ -293,3 +296,9 @@ delegation authorizer. Runtime composition defaults to denial for that Cat port.
 file/media routes retain their checks. Phase A defines callable domain ports and tests; it adds no project
 HTTP/MCP entry, editing surface, rendering execution or production activation. Renderer-specific mappings
 remain in the external `remotion-studio` adapter, with only generic frozen JSON fixtures in this repository.
+
+## Editing Desk Canon Library
+
+F326 Phase D appends file-version judgments, explicit supersession events, purpose bindings and exact-version keep decisions in the existing F309 Work SQLite database. F063 still authorizes roots and file reads; F138 owns immutable work bytes and versions. The library never rewrites an old film, creates a review opinion automatically, or infers a successor from a filename. Cat writes retain original-creator authorization; bindings and keep decisions require the direct Human. Selection provenance is validated on new Work index writes, while unchanged original citations remain historical.
+
+Member settings read the same unique member-avatar binding. Catalog response projection and the avatar byte route are consumers; they never write a second avatar value into catalog metadata. Partial profile PATCH remains separate from this selection receipt. Member identity remains owned by identity-session.

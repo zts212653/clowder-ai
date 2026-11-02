@@ -15,7 +15,7 @@
  * check is kept — dirty shared-state files in a worktree are real, not inherited.
  * (Ported from community fix: clowder-ai#325, closes clowder-ai#324)
  */
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { createModuleLogger } from '../infrastructure/logger.js';
 
 const log = createModuleLogger('shared-state-preflight');
@@ -30,31 +30,23 @@ interface GitExecResult {
   exitCode: number | null;
 }
 
-function gitExec(args: string[], cwd: string): GitExecResult {
-  try {
-    return {
-      ok: true,
-      stdout: execFileSync('git', args, {
-        cwd,
-        encoding: 'utf-8',
-        timeout: 5000,
-        stdio: ['ignore', 'pipe', 'pipe'],
-      }).trim(),
-      exitCode: 0,
-    };
-  } catch (error) {
-    const exitCode =
-      typeof error === 'object' && error !== null && 'status' in error
-        ? ((error as { status?: number | null }).status ?? null)
-        : null;
-    return { ok: false, stdout: '', exitCode };
-  }
+function gitExec(args: string[], cwd: string): Promise<GitExecResult> {
+  return new Promise((resolve) => {
+    const child = execFile('git', args, { cwd, encoding: 'utf-8', timeout: 5000 }, (error, stdout) => {
+      resolve({
+        ok: !error,
+        stdout: error ? '' : stdout.trim(),
+        exitCode: error ? (typeof error.code === 'number' ? error.code : null) : 0,
+      });
+    });
+    child.stdin?.end();
+  });
 }
 
 /** Safe git exec — returns trimmed stdout or empty string on failure. */
-function safeExec(cmd: string, args: string[], cwd: string): string {
+async function safeExec(cmd: string, args: string[], cwd: string): Promise<string> {
   if (cmd !== 'git') return '';
-  return gitExec(args, cwd).stdout;
+  return (await gitExec(args, cwd)).stdout;
 }
 
 export interface SharedStatePreflightResult {
@@ -69,19 +61,19 @@ export interface SharedStatePreflightResult {
  * and merge-base to avoid false positives when local and ref have diverged
  * (git diff --name-only ref..HEAD is a tree diff, not a commit-range diff).
  */
-function diffUnpushedShared(ref: string, cwd: string): string[] {
-  const aheadCount = safeExec('git', ['rev-list', '--count', `${ref}..HEAD`], cwd);
+async function diffUnpushedShared(ref: string, cwd: string): Promise<string[]> {
+  const aheadCount = await safeExec('git', ['rev-list', '--count', `${ref}..HEAD`], cwd);
   if (!aheadCount || aheadCount === '0') return [];
-  const mergeBase = safeExec('git', ['merge-base', 'HEAD', ref], cwd);
+  const mergeBase = await safeExec('git', ['merge-base', 'HEAD', ref], cwd);
   const diffBase = mergeBase || ref;
-  const raw = safeExec('git', ['diff', '--name-only', `${diffBase}..HEAD`], cwd);
+  const raw = await safeExec('git', ['diff', '--name-only', `${diffBase}..HEAD`], cwd);
   if (!raw) return [];
   return raw.split('\n').filter((f: string) => f && SHARED_STATE_PATTERN.test(f));
 }
 
-export function checkSharedStatePreflight(projectRoot: string): SharedStatePreflightResult {
+export async function checkSharedStatePreflight(projectRoot: string): Promise<SharedStatePreflightResult> {
   try {
-    const repoProbe = gitExec(['rev-parse', '--is-inside-work-tree'], projectRoot);
+    const repoProbe = await gitExec(['rev-parse', '--is-inside-work-tree'], projectRoot);
     const isGitRepo = repoProbe.ok && repoProbe.stdout === 'true';
     if (!isGitRepo) {
       log.info({ projectRoot, exitCode: repoProbe.exitCode }, 'skip git checks (non-git project root)');
@@ -89,8 +81,8 @@ export function checkSharedStatePreflight(projectRoot: string): SharedStatePrefl
     }
 
     // Check uncommitted changes to shared state (always, including feature branches)
-    const uncommittedRaw = safeExec('git', ['diff', '--name-only'], projectRoot);
-    const stagedRaw = safeExec('git', ['diff', '--cached', '--name-only'], projectRoot);
+    const uncommittedRaw = await safeExec('git', ['diff', '--name-only'], projectRoot);
+    const stagedRaw = await safeExec('git', ['diff', '--cached', '--name-only'], projectRoot);
 
     const uncommittedShared = [...uncommittedRaw.split('\n'), ...stagedRaw.split('\n')].filter(
       (f: string) => f && SHARED_STATE_PATTERN.test(f),
@@ -100,24 +92,24 @@ export function checkSharedStatePreflight(projectRoot: string): SharedStatePrefl
     // On feature branches / worktrees, skip: the branch inherits committed diffs
     // from main that aren't actionable. Enforced at merge-gate (L3) instead.
     let unpushedShared: string[] = [];
-    const currentBranch = safeExec('git', ['branch', '--show-current'], projectRoot);
+    const currentBranch = await safeExec('git', ['branch', '--show-current'], projectRoot);
     const isMainBranch = !currentBranch || MAIN_BRANCHES.has(currentBranch);
 
     if (isMainBranch) {
-      const upstream = safeExec('git', ['rev-parse', '--abbrev-ref', '@{upstream}'], projectRoot);
+      const upstream = await safeExec('git', ['rev-parse', '--abbrev-ref', '@{upstream}'], projectRoot);
       if (upstream) {
-        unpushedShared = diffUnpushedShared(upstream, projectRoot);
+        unpushedShared = await diffUnpushedShared(upstream, projectRoot);
       } else {
         // No upstream — try origin/<branch>, then fall back to origin/main merge-base
-        const branch = currentBranch || safeExec('git', ['branch', '--show-current'], projectRoot);
+        const branch = currentBranch || (await safeExec('git', ['branch', '--show-current'], projectRoot));
         if (branch) {
-          const remoteBranch = safeExec('git', ['rev-parse', '--verify', `origin/${branch}`], projectRoot);
+          const remoteBranch = await safeExec('git', ['rev-parse', '--verify', `origin/${branch}`], projectRoot);
           if (remoteBranch) {
-            unpushedShared = diffUnpushedShared(`origin/${branch}`, projectRoot);
+            unpushedShared = await diffUnpushedShared(`origin/${branch}`, projectRoot);
           } else {
-            const mergeBase = safeExec('git', ['merge-base', 'HEAD', 'origin/main'], projectRoot);
+            const mergeBase = await safeExec('git', ['merge-base', 'HEAD', 'origin/main'], projectRoot);
             if (mergeBase) {
-              unpushedShared = diffUnpushedShared(mergeBase, projectRoot);
+              unpushedShared = await diffUnpushedShared(mergeBase, projectRoot);
             }
           }
         }

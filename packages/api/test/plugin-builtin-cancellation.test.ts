@@ -26,7 +26,6 @@ async function fixture(runtime: Omit<BundledPluginRuntime, 'claims'>) {
     computedPackageDigest: entry.packageDigest,
     expectedPackageDigest: entry.packageDigest,
     packagePluginId: entry.pluginId,
-    effectiveGrants: [],
     signalSchemas: {},
   });
   await store.transaction((tx) => {

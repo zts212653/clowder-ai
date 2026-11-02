@@ -4,6 +4,7 @@ import { runNativeAuthContinuation as run } from './helpers/native-auth-continua
 
 for (const mode of [
   'unknown-step',
+  'anonymous-completion',
   'unnamed-tool',
   'blank-tool',
   'missing-step-index',

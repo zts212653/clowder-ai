@@ -4,13 +4,12 @@
  * AC-P2-12: Verifies transport assembly (staging/contextHint/missionPrefix/M2)
  * is NOT part of the hook pipeline — these remain in the transport layer.
  *
- * AC-P2-14a: Verifies L0 compiler's L1-L7 template loading produces
- * identical content to HookPipeline's L1-L7 hook execution.
+ * Actual final compiler ↔ pipeline equivalence is covered once in
+ * l0-pipeline-equivalence.test.js, including home/public edition variables.
  */
 
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { before, describe, it } from 'node:test';
 
 describe('Transport boundary + L0 equivalence', () => {
@@ -81,35 +80,7 @@ describe('Transport boundary + L0 equivalence', () => {
 
   // -- AC-P2-14a: L0 compiled output equivalence ------------------------------
 
-  describe('L0 compiled output equivalence (AC-P2-14a)', () => {
-    /** L0 section template filenames — same mapping as compile-system-prompt-l0.mjs */
-    const L0_SECTION_FILES = {
-      L1: 'l1-parallel-world.md',
-      L2: 'l2-carry-over.md',
-      L3: 'l3-routing-rules.md',
-      L4: 'l4-iron-laws.md',
-      L5: 'l5-mcp-tools-index.md',
-      L6: 'l6-capability-wakeup.md',
-      L7: 'l7-collaboration-philosophy.md',
-    };
-
-    /**
-     * Strip compiler annotation lines — mirrors loadL0SectionTemplate in
-     * compile-system-prompt-l0.mjs (strips HTML comments + segment labels).
-     */
-    function loadL0SectionDirect(filename) {
-      const filePath = resolve(monorepoRoot, 'assets', 'prompt-templates', filename);
-      const raw = readFileSync(filePath, 'utf8');
-      return raw
-        .split('\n')
-        .filter((line) => {
-          const trimmed = line.trim();
-          return !trimmed.startsWith('<!--') && !/^── \[[A-Z]\d+] .+──$/.test(trimmed);
-        })
-        .join('\n')
-        .trim();
-    }
-
+  describe('L-layer stage boundary (AC-P2-14a)', () => {
     /** @returns {import('@cat-cafe/shared').AssemblerInput} */
     function makeMinimalInput() {
       return {
@@ -168,27 +139,6 @@ describe('Transport boundary + L0 equivalence', () => {
         coCreatorFirstMention: '@lang',
       };
     }
-
-    it('L1-L7 pipeline patches match L0 compiler template loading', () => {
-      const pipeline = new pipelineMod.HookPipeline(registry, resolversMod.RESOLVER_MAP, templateMod.renderSegment);
-      const result = pipeline.executeStage('session-init', makeMinimalInput());
-      const patchMap = Object.fromEntries(result.patches.map((p) => [p.hookId, p.content]));
-
-      for (const [hookId, filename] of Object.entries(L0_SECTION_FILES)) {
-        const l0Direct = loadL0SectionDirect(filename);
-        const pipelineContent = patchMap[hookId];
-
-        assert.ok(pipelineContent, `${hookId} should produce a pipeline patch`);
-
-        // Normalize whitespace for comparison (both should produce same content
-        // after stripping annotations — pipeline uses renderSegment which also
-        // strips comments)
-        const l0Normalized = l0Direct.replace(/\s+/g, ' ').trim();
-        const pipelineNormalized = pipelineContent.replace(/\s+/g, ' ').trim();
-
-        assert.equal(pipelineNormalized, l0Normalized, `${hookId} pipeline output should match L0 direct loading`);
-      }
-    });
 
     it('all 7 L-layer hooks fire in session-init stage', () => {
       const pipeline = new pipelineMod.HookPipeline(registry, resolversMod.RESOLVER_MAP, templateMod.renderSegment);

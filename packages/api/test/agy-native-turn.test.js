@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { describe, test } from 'node:test';
 
-const { projectAgyNativeTurn, readAgyNativeTurn } = await import(
+const { projectAgyNativeTurn, readAgyNativeTurn, observeAgyNativeTurn } = await import(
   '../dist/domains/cats/services/agents/providers/agy-native/agy-native-turn.js'
 );
 const { summarizeAgyStreamJsonTurn } = await import(
@@ -19,6 +20,46 @@ const init = {
     permission_mode: 'request-review',
   },
 };
+
+test('recorded official CLI followups retain separate turns and non-cumulative usage', async () => {
+  for (const name of ['default', 'immediate']) {
+    const events = readFileSync(new URL(`./fixtures/agy-stream-json/followup-${name}.ndjson`, import.meta.url), 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line))
+      .filter((event) => event.event);
+    // The spike used the default upstream agent; adapt only its init to the host-owned fixture agent.
+    events[0] = { ...events[0], init: { ...events[0].init, agent: 'recorded-fixture' } };
+    const expected = {
+      agentName: 'recorded-fixture',
+      spawnCwd: events[0].init.cwd,
+      model: events[0].init.model,
+      permissionMode: 'always-proceed',
+    };
+    const turns = [];
+    for await (const observed of observeAgyNativeTurn(
+      (async function* () {
+        yield* events;
+      })(),
+      expected,
+      undefined,
+      true,
+    ))
+      if (observed.kind === 'result') turns.push(observed.observed.turn);
+    assert.equal(turns.length, 2);
+    assert.deepEqual(
+      turns.map((turn) => turn.outcome),
+      ['ok', 'ok'],
+    );
+    assert.equal(turns[0].turnUsage.inputTokens, turns[0].usage.inputTokens);
+    assert.equal(turns[1].turnUsage.inputTokens, turns[1].usage.inputTokens - turns[0].usage.inputTokens);
+    assert.notEqual(turns[1].turnUsage.inputTokens, turns[1].usage.inputTokens);
+    assert.match(turns[0].finalText, /A_DONE NONE/);
+    assert.match(turns[1].finalText, /A_DONE PAPAYA/);
+    assert.equal(turns[0].toolCalls.length, name === 'default' ? 1 : 2, 'A contains the recorded tools');
+    assert.equal(turns[1].toolCalls.length, 0, 'A tool observations do not bleed into B');
+  }
+});
 
 describe('F325 native stream boundary', () => {
   test('bounds accumulated upstream output before a tool can exhaust the API process', async () => {

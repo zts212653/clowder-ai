@@ -1,9 +1,13 @@
+import { useState } from 'react';
 import type {
   CollectiveMemberDirectory,
   CollectiveParticipant,
   CollectiveRoadmapRecord,
   CollectiveWorkProjection,
 } from './client-types.js';
+import { MaterialSources } from './MaterialSources.js';
+import type { useProjectMaterials } from './ProjectMaterialsContext.js';
+import { formatWorkDate, workTimeLabels } from './project-time.js';
 import {
   actorName,
   canEditWorkDependencies,
@@ -13,11 +17,14 @@ import {
   workHistoryLabels,
 } from './roadmap-view-model.js';
 import { WorkAccountabilityActions } from './WorkAccountabilityActions.js';
+import type { WorkTimeChangeHandler } from './WorkTimeEditor.js';
+import { WorkTimePanel } from './WorkTimePanel.js';
 import { resolveWorkDependencies, unreadableDependencyLabel } from './work-dependency-resolution.js';
 import { workExecutionPresentation } from './work-execution-presentation.js';
 
 export function RoadmapWorkDetails({
   work,
+  materialFeed,
   roadmap,
   allRoadmaps = roadmap ? [roadmap] : [],
   availableWorks,
@@ -27,6 +34,7 @@ export function RoadmapWorkDetails({
   humans = [],
   participants = [],
   canEditDependencies,
+  onChangeTime,
   onSetDependencies,
   onCommitWork,
   onRequestWorkAccountability,
@@ -35,6 +43,7 @@ export function RoadmapWorkDetails({
   onOpenResult,
   onClose,
 }: {
+  readonly materialFeed?: ReturnType<typeof useProjectMaterials>;
   readonly work: CollectiveWorkProjection;
   readonly roadmap?: CollectiveRoadmapRecord;
   readonly allRoadmaps?: readonly CollectiveRoadmapRecord[];
@@ -45,6 +54,7 @@ export function RoadmapWorkDetails({
   readonly humans?: CollectiveMemberDirectory['humans'];
   readonly participants?: readonly CollectiveParticipant[];
   readonly canEditDependencies: boolean;
+  readonly onChangeTime?: WorkTimeChangeHandler;
   readonly onSetDependencies: (work: CollectiveWorkProjection, dependencyWorkIds: readonly string[]) => void;
   readonly onCommitWork?: (
     work: CollectiveWorkProjection,
@@ -66,6 +76,12 @@ export function RoadmapWorkDetails({
   readonly onOpenResult?: (work: CollectiveWorkProjection, view: RoadmapViewState) => void;
   readonly onClose: () => void;
 }) {
+  const [dateHint, setDateHint] = useState<{ text: string; eventId: string; workId: string; request: number }>();
+  const activeHint =
+    dateHint?.workId === work.workId &&
+    materialFeed?.feed.items.some((item) => item.publication.sourceEventId === dateHint.eventId)
+      ? dateHint
+      : undefined;
   const accountable = work.accountableHumanId ? (humanNames[work.accountableHumanId] ?? '共同体成员') : '未分配';
   const dependencies = resolveWorkDependencies(work, availableWorks);
   const dependencyLabels = dependencies.resolved.map(
@@ -110,6 +126,24 @@ export function RoadmapWorkDetails({
           <dd>{dependencyLabels.length ? dependencyLabels.join('、') : '没有前置任务'}</dd>
         </div>
       </dl>
+      {materialFeed && (
+        <MaterialSources
+          feed={materialFeed}
+          work={work}
+          view={view}
+          onSuggestDate={(hint) =>
+            setDateHint((previous) => ({ ...hint, workId: work.workId, request: (previous?.request ?? 0) + 1 }))
+          }
+        />
+      )}
+      <WorkTimePanel
+        key={work.workId}
+        work={work}
+        currentHumanId={currentHumanId}
+        onChange={onChangeTime}
+        sourceHint={activeHint}
+        onClearSourceHint={() => setDateHint(undefined)}
+      />
       {roadmap && (
         <WorkAccountabilityActions
           roadmap={roadmap}
@@ -173,6 +207,13 @@ export function RoadmapWorkDetails({
               <span>
                 {actorName(entry.actor)} · {formatHistoryTime(entry.at)}
               </span>
+              {entry.timeChange && (
+                <p>
+                  {workTimeLabels[entry.timeChange.field][0]} ·{' '}
+                  {entry.timeChange.previous ? formatWorkDate(entry.timeChange.previous, 'zh') : '未定'} →{' '}
+                  {entry.timeChange.current ? formatWorkDate(entry.timeChange.current, 'zh') : '未定'}
+                </p>
+              )}
               {entry.note && <p>{entry.note}</p>}
             </li>
           ))}

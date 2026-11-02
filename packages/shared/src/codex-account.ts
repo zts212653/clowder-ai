@@ -56,6 +56,17 @@ export interface AccountQuotaObservation {
     resetsText?: string;
   }>;
   readonly error?: string;
+  /** Classification of this attempt; never changes the account's sign-in state. */
+  readonly failure?: {
+    readonly kind: 'renewal_required' | 'signin_required' | 'service_unreachable';
+    readonly officialDetail?: string;
+  };
+  /** SHA-256 of the queried access token; contains no reusable credential. */
+  readonly credentialVersion?: string;
+  /** Read-only view projection: current credential differs from the failed attempt. */
+  readonly renewedCredentialVersion?: string;
+  /** Previous successful reading from the same principal, retained on failed refresh. */
+  readonly lastSuccess?: Pick<AccountQuotaObservation, 'observedAt' | 'items'>;
 }
 export function accountQuotaOwnerMatches(
   observation: AccountQuotaObservation | undefined,

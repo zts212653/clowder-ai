@@ -39,20 +39,9 @@ const DELIVER_INPUT = {
   },
 };
 
-function manifestWithCapabilities(...capabilities) {
-  const manifest = externalManifest();
-  return {
-    ...manifest,
-    features: manifest.features.map((feature) => ({
-      ...feature,
-      capabilities: [...new Set([...feature.capabilities, ...capabilities])],
-    })),
-  };
-}
-
-async function runningHarness({ effectiveGrants, manifest, methods = [] }) {
+async function runningHarness({ manifest, methods = [] }) {
   const rootDir = await mkdtemp(join(tmpdir(), 'cat-cafe-m0-stdio-messaging-'));
-  const harness = await createExternalRuntimeHarness({ rootDir, manifest, methods, effectiveGrants });
+  const harness = await createExternalRuntimeHarness({ rootDir, manifest, methods });
   const processes = new FakePluginProcessAdapter();
   const supervisor = new ExternalPluginRuntimeSupervisor({
     inventory: harness.inventory,
@@ -76,9 +65,9 @@ async function runningHarness({ effectiveGrants, manifest, methods = [] }) {
   return { ...harness, child, handle, supervisor };
 }
 
-test('Host delivers to the exact active stdio runtime only after onMessage authority succeeds', async () => {
-  const manifest = manifestWithCapabilities('onMessage');
-  const harness = await runningHarness({ effectiveGrants: ['messaging.send', 'onMessage'], manifest });
+test('Host delivers to the exact active stdio runtime', async () => {
+  const manifest = externalManifest();
+  const harness = await runningHarness({ manifest });
 
   const pending = harness.supervisor.deliver(EXTERNAL_INSTANCE_ID, DELIVER_INPUT);
   const request = await readFrame(harness.child);
@@ -100,9 +89,8 @@ test('stdio maps a K-1 MessagingError to the published DOMAIN_ERROR without clos
     import('../dist/domains/plugin/host-broker/messaging-handler.js'),
   ]);
   const messaging = createMessagingDomain({ messageStore: new MessageStore() });
-  const manifest = manifestWithCapabilities('messaging.send');
+  const manifest = externalManifest();
   const harness = await runningHarness({
-    effectiveGrants: ['messaging.send'],
     manifest,
     methods: createMessagingBrokerHandlers({ messaging }),
   });
@@ -141,9 +129,8 @@ test('stdio preserves the published snapshot-unavailable reason without closing 
   messaging.snapshotPage = async () => {
     throw new SnapshotUnavailableHostError('VIEW_EXPIRED');
   };
-  const manifest = manifestWithCapabilities('message.event.subscribe');
+  const manifest = externalManifest();
   const harness = await runningHarness({
-    effectiveGrants: ['messaging.send', 'message.event.subscribe'],
     manifest,
     methods: createMessagingBrokerHandlers({ messaging }),
   });
@@ -161,40 +148,4 @@ test('stdio preserves the published snapshot-unavailable reason without closing 
   assert.deepEqual(response.error.data, { reason: 'VIEW_EXPIRED' });
   assert.equal(harness.child.terminateCalls, 0);
   await harness.supervisor.stop(EXTERNAL_INSTANCE_ID);
-});
-
-test('Host delivery without onMessage authority fails closed before writing a stdio request', async () => {
-  const manifest = externalManifest();
-  const harness = await runningHarness({ effectiveGrants: ['messaging.send'], manifest });
-
-  await assert.rejects(
-    harness.supervisor.deliver(EXTERNAL_INSTANCE_ID, DELIVER_INPUT),
-    (error) => error?.code === 'DELIVERY_REJECTED',
-  );
-  assert.equal(harness.child.stdin.readableLength, 0);
-  await harness.handle.closed;
-});
-
-test('Host delivery checks onMessage authority before runtime lookup or process creation', async () => {
-  const rootDir = await mkdtemp(join(tmpdir(), 'cat-cafe-m0-stdio-denied-delivery-'));
-  const manifest = manifestWithCapabilities('onMessage');
-  const harness = await createExternalRuntimeHarness({ rootDir, manifest, effectiveGrants: [] });
-  const processes = new FakePluginProcessAdapter();
-  const supervisor = new ExternalPluginRuntimeSupervisor({
-    inventory: harness.inventory,
-    broker: harness.broker,
-    packages: {
-      async resolveInstalledPackage() {
-        throw new Error('denied Host delivery must not resolve or start a plugin package');
-      },
-    },
-    processes,
-  });
-
-  await assert.rejects(
-    supervisor.deliver(EXTERNAL_INSTANCE_ID, DELIVER_INPUT),
-    (error) => error?.code === 'DELIVERY_REJECTED' && error.cause?.code === 'CAPABILITY_DENIED',
-  );
-  assert.equal(processes.specs.length, 0);
-  assert.equal((await harness.inventory.snapshot()).instances[0].runtimeState, 'stopped');
 });

@@ -2,8 +2,8 @@ import { mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { after, before } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { chromium } from 'playwright';
 import { build } from 'vite';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
 
 // Production SettingsShell, SettingsContent, editor and API client. Next compiler/router
 // boundaries and the network are fixtures. No user's configuration or Redis is touched.

@@ -25,11 +25,10 @@
  *   3. JobEventConsumer parses jsonl per-line with try/catch (delegated)
  */
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
 import { type CatId, createCatId } from '@cat-cafe/shared';
-import { resolveCatCafeNodeCommand } from '../../../../../config/capabilities/mcp-constants.js';
 import { getCatModel } from '../../../../../config/cat-models.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import {
@@ -66,8 +65,10 @@ import {
   resolveDefaultClaudeMcpServerPath,
   SUBSCRIPTION_MODE_DENY_KEYS,
 } from './ClaudeAgentService.js';
+import { resolveClaudeMcpConfig } from './claude-mcp-config.js';
 import { JobEventConsumer, type JobState } from './JobEventConsumer.js';
 import { compileL0ViaSubprocess } from './l0-compiler.js';
+import { writeInvocationMcpConfigFile } from './session-credential-file.js';
 import { TranscriptTailer } from './TranscriptTailer.js';
 
 const SHORT_ID_PATTERN = /backgrounded\s*·\s*([a-f0-9]{8})/;
@@ -169,7 +170,6 @@ export class ClaudeBgCarrierService implements AgentService {
   private readonly jobOwnershipEnabled: boolean;
   /** Windows: cached MCP config file path (created once per instance,
    *  reused across invocations to avoid temp file spam). */
-  private mcpConfigFilePath: string | undefined;
   /** F203 Phase C: compiles per-cat L0 → file for --system-prompt-file. */
   private readonly l0CompilerFn: typeof compileL0ViaSubprocess;
 
@@ -313,6 +313,14 @@ export class ClaudeBgCarrierService implements AgentService {
     if (options?.claudeTokenAccount) throw new Error('claude_token_carrier_unsupported');
     const readOnly = options?.toolExecutionPolicy?.mode === 'read_only';
     const l0Path = await this.compileL0ToTempFile(options?.callbackEnv?.CAT_CAFE_USER_ID);
+    const mcpResolution =
+      !readOnly && options?.callbackEnv && this.mcpServerPath
+        ? await resolveClaudeMcpConfig({
+            callbackEnv: options.callbackEnv,
+            workingDirectory: options.workingDirectory,
+            mcpServerPath: this.mcpServerPath,
+          })
+        : undefined;
     return new Promise<StartJobResult>((resolve, reject) => {
       // Critical: even with --bg, the child inherits parent env unless we
       // explicitly strip CLAUDE_CODE_ENTRYPOINT. Otherwise transcript entrypoint
@@ -331,7 +339,9 @@ export class ClaudeBgCarrierService implements AgentService {
         [ANTHROPIC_PROFILE_MODE_KEY]: 'subscription',
         ...(options?.callbackEnv ?? {}),
       };
-      const envOverrides = buildClaudeEnvOverrides(callbackEnvWithMode);
+      const envOverrides = buildClaudeEnvOverrides(callbackEnvWithMode, {
+        contextNativeWindowTokens: options?.contextNativeWindowTokens,
+      });
       if (options?.accountEnv) {
         for (const [k, v] of Object.entries(options.accountEnv)) {
           envOverrides[k] = v;
@@ -415,28 +425,10 @@ export class ClaudeBgCarrierService implements AgentService {
       // Windows: claude CLI treats inline JSON as a file path → write JSON
       // to a temp file. POSIX: pass JSON inline (matches ClaudeAgentService).
       if (!readOnly && options?.callbackEnv && this.mcpServerPath) {
-        const IS_WINDOWS = process.platform === 'win32';
-        if (IS_WINDOWS) {
-          if (!this.mcpConfigFilePath || !existsSync(this.mcpConfigFilePath)) {
-            const dir = mkdtempSync(join(tmpdir(), 'cat-cafe-bg-mcp-'));
-            this.mcpConfigFilePath = join(dir, 'mcp-config.json');
-            writeFileSync(
-              this.mcpConfigFilePath,
-              JSON.stringify({
-                mcpServers: { 'cat-cafe': { command: resolveCatCafeNodeCommand(), args: [this.mcpServerPath] } },
-              }),
-              'utf-8',
-            );
-          }
-          args.push('--mcp-config', this.mcpConfigFilePath);
-        } else {
-          args.push(
-            '--mcp-config',
-            JSON.stringify({
-              mcpServers: { 'cat-cafe': { command: resolveCatCafeNodeCommand(), args: [this.mcpServerPath] } },
-            }),
-          );
-        }
+        args.push(
+          '--mcp-config',
+          writeInvocationMcpConfigFile({ mcpServers: mcpResolution?.servers ?? {} }, options.callbackEnv),
+        );
         // F198 Step-4 (2026-05-14, alpha-evidence): daemon `--bg` discovers
         // cwd `.mcp.json` walking up the tree. WITHOUT this flag, claude
         // would LOAD discovered servers ALONGSIDE our injected cat-cafe MCP

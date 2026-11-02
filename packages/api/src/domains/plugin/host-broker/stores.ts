@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
+import type { SnapshotReadDiagnostics } from '../diagnostics/observation-work.js';
 import type {
   BrokerCallStore,
   BrokerRuntimeLeaseStore,
@@ -47,11 +48,13 @@ function fileQueue(path: string): SerialQueue {
 }
 
 class MutableBrokerSnapshot implements HostBrokerTransaction {
+  private written = false;
   private featureLedger: StaticFeatureLedger | undefined;
   readonly staticFeatures = {
     get: () => structuredClone(this.featureLedger ?? emptyStaticFeatureLedger()),
     put: (ledger: StaticFeatureLedger) => {
       this.featureLedger = structuredClone(ledger);
+      this.written = true;
     },
   };
   private readonly sessionRecords = new Map<string, BrokerSessionRecord>();
@@ -63,19 +66,28 @@ class MutableBrokerSnapshot implements HostBrokerTransaction {
     getBySessionId: (brokerSessionId) =>
       this.clone([...this.sessionRecords.values()].find((record) => record.brokerSessionId === brokerSessionId)),
     list: () => [...this.sessionRecords.values()].map((record) => structuredClone(record)),
-    put: (record) => this.sessionRecords.set(record.connectionId, structuredClone(record)),
+    put: (record) => {
+      this.sessionRecords.set(record.connectionId, structuredClone(record));
+      this.written = true;
+    },
   };
 
   readonly runtimeLeases: BrokerRuntimeLeaseStore = {
     get: (runtimeLeaseId) => this.clone(this.runtimeLeaseRecords.get(runtimeLeaseId)),
     list: () => [...this.runtimeLeaseRecords.values()].map((record) => structuredClone(record)),
-    put: (record) => this.runtimeLeaseRecords.set(record.runtimeLeaseId, structuredClone(record)),
+    put: (record) => {
+      this.runtimeLeaseRecords.set(record.runtimeLeaseId, structuredClone(record));
+      this.written = true;
+    },
   };
 
   readonly calls: BrokerCallStore = {
     get: (ledgerKey) => this.clone(this.callRecords.get(ledgerKey)),
     list: () => [...this.callRecords.values()].map((record) => structuredClone(record)),
-    put: (record) => this.callRecords.set(record.ledgerKey, structuredClone(record)),
+    put: (record) => {
+      this.callRecords.set(record.ledgerKey, structuredClone(record));
+      this.written = true;
+    },
   };
 
   constructor(snapshot: HostBrokerSnapshot) {
@@ -85,6 +97,10 @@ class MutableBrokerSnapshot implements HostBrokerTransaction {
       this.runtimeLeaseRecords.set(record.runtimeLeaseId, structuredClone(record));
     }
     for (const record of snapshot.calls) this.callRecords.set(record.ledgerKey, structuredClone(record));
+  }
+
+  hasWrites(): boolean {
+    return this.written;
   }
 
   toSnapshot(): HostBrokerSnapshot {
@@ -110,9 +126,11 @@ export class MemoryHostBrokerStore implements HostBrokerStore {
     this.current = parseHostBrokerSnapshot(initial);
   }
 
-  async snapshot(): Promise<HostBrokerSnapshot> {
-    await this.queue.settled();
-    return cloneHostBrokerSnapshot(this.current);
+  async snapshot(diagnostics?: SnapshotReadDiagnostics): Promise<HostBrokerSnapshot> {
+    if (diagnostics) await diagnostics.measure('queue', () => this.queue.settled());
+    else await this.queue.settled();
+    const clone = () => cloneHostBrokerSnapshot(this.current);
+    return diagnostics ? diagnostics.sync('clone', clone) : clone();
   }
 
   async transaction<T>(work: (transaction: HostBrokerTransaction) => Promise<T> | T): Promise<T> {
@@ -152,15 +170,21 @@ export class FileHostBrokerStore implements HostBrokerStore {
     this.fileOps = { readFile, mkdir, writeFile, rename, unlink, ...options.fileOps };
   }
 
-  async snapshot(): Promise<HostBrokerSnapshot> {
-    await this.queue.settled();
-    return cloneHostBrokerSnapshot(await this.load());
+  async snapshot(diagnostics?: SnapshotReadDiagnostics): Promise<HostBrokerSnapshot> {
+    if (diagnostics) await diagnostics.measure('queue', () => this.queue.settled());
+    else await this.queue.settled();
+    const loaded = await this.load(diagnostics);
+    const clone = () => cloneHostBrokerSnapshot(loaded);
+    return diagnostics ? diagnostics.sync('clone', clone) : clone();
   }
 
   async transaction<T>(work: (transaction: HostBrokerTransaction) => Promise<T> | T): Promise<T> {
     return this.queue.run(async () => {
       const mutable = new MutableBrokerSnapshot(await this.load());
       const result = await work(mutable);
+      // Keep the fresh read and serialized authority/effect boundary. A callback
+      // that used no write port must not turn a check into a full JSON commit.
+      if (!mutable.hasWrites()) return result;
       const next = mutable.toSnapshot();
       await this.fileOps.mkdir(dirname(this.path), { recursive: true });
       const temporaryPath = `${this.path}.tmp-${process.pid}-${randomUUID()}`;
@@ -182,20 +206,24 @@ export class FileHostBrokerStore implements HostBrokerStore {
     });
   }
 
-  private async load(): Promise<HostBrokerSnapshot> {
+  private async load(diagnostics?: SnapshotReadDiagnostics): Promise<HostBrokerSnapshot> {
     let raw: string;
     try {
-      raw = await this.fileOps.readFile(this.path, 'utf8');
+      const read = () => this.fileOps.readFile(this.path, 'utf8');
+      raw = await (diagnostics ? diagnostics.measure('read', read) : read());
     } catch (error) {
       if (isNotFound(error)) return emptyHostBrokerSnapshot();
       throw error;
     }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      throw new HostBrokerError('CORRUPT_SNAPSHOT', `Host Broker snapshot at ${this.path} is not valid JSON`);
-    }
-    return parseHostBrokerSnapshot(parsed);
+    const parse = () => {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        throw new HostBrokerError('CORRUPT_SNAPSHOT', `Host Broker snapshot at ${this.path} is not valid JSON`);
+      }
+      return parseHostBrokerSnapshot(parsed);
+    };
+    return diagnostics ? diagnostics.sync('parse', parse) : parse();
   }
 }

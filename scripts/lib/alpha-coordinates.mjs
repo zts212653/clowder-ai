@@ -82,6 +82,7 @@ function assertMain(root) {
     'scripts/lib/alpha-coordinates.mjs',
     'scripts/lib/alpha-launch-contract.mjs',
     'scripts/lib/alpha-named-launch.sh',
+    'scripts/lib/alpha-lifecycle-lock.mjs',
     'scripts/lib/alpha-redis-process.mjs',
     'scripts/lib/alpha-redis-leases.mjs',
     'scripts/lib/alpha-identity-diagnostics.mjs',
@@ -155,7 +156,10 @@ export function parseNamedAlphaCoordinates(raw) {
 }
 
 /** Git registration and history are the existing authority source; the tuple is configuration, not a grant. */
-export function assertNamedAlphaCheckout(coordinates, { requireBuilds = false, requireTarget = false } = {}) {
+export function assertNamedAlphaCheckout(
+  coordinates,
+  { requireBuilds = false, requireTarget = false, requireClean = true } = {},
+) {
   const { mainRoot, alphaRoot, branch, targetSha } = coordinates;
   const root = physicalDirectory(alphaRoot);
   const common = assertMain(mainRoot);
@@ -173,8 +177,7 @@ export function assertNamedAlphaCheckout(coordinates, { requireBuilds = false, r
     git(root, ['branch', '--show-current'], 'checkout.branch') !== branch
   )
     throw new Error('Named Alpha checkout is not registered under its exact main branch');
-  if (git(root, ['status', '--porcelain=v1', '--untracked-files=no'], 'checkout.tracked-status'))
-    throw new Error('Named Alpha has tracked changes');
+  if (requireClean) assertCleanNamedAlphaCheckout(root);
   const head = git(root, ['rev-parse', 'HEAD'], 'checkout.head');
   try {
     git(mainRoot, ['merge-base', '--is-ancestor', head, 'refs/remotes/origin/main'], 'checkout.main-lineage');
@@ -193,6 +196,11 @@ export function assertNamedAlphaCheckout(coordinates, { requireBuilds = false, r
     }
   }
   return head;
+}
+
+function assertCleanNamedAlphaCheckout(root) {
+  if (git(root, ['status', '--porcelain=v1', '--untracked-files=no'], 'checkout.tracked-status'))
+    throw new Error('Named Alpha has tracked changes');
 }
 
 export function namedAlphaEnvironment(coordinates) {

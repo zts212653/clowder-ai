@@ -5,21 +5,19 @@
  * text holds no credential: a password needs no "=", a token needs no digit, and V8 copies the whole
  * message into the stack. So no free text is kept — not the message, not the text of a stack line.
  * Kept is only what the Host can vouch for, or what has a shape a credential does not take:
- * - where the error comes from: the Host's own refusal (with the capability), another Host error
- *   (with its closed-set code), or unverified;
+ * - where the error comes from: a Host error with its closed-set code, or unverified;
  * - a conventional error class name, a Node system or `ERR_` code, an integer code, an HTTP status;
  * - code locations (file:line:column) read from a stack whose header is exactly the error's own, so
  *   no line of the message can pass for a frame; only a bounded prefix of the stack is scanned.
  * Causes and aggregated errors get the same treatment, within fixed bounds. A property that throws
  * when read counts as absent.
  */
-export type SafeErrorOrigin = 'host_refusal' | 'host' | 'unverified';
+export type SafeErrorOrigin = 'host' | 'unverified';
 
 export interface SafeErrorProjection {
   readonly origin: SafeErrorOrigin;
   readonly type?: string;
   readonly code?: string | number;
-  readonly capability?: string;
   readonly status?: number;
   readonly at?: readonly string[];
   readonly cause?: SafeErrorProjection;
@@ -28,8 +26,6 @@ export interface SafeErrorProjection {
 
 /** How the caller, which knows the Host's own errors, recognizes one. */
 export interface HostErrorRecognition {
-  /** The refused capability, when this very object is a registered Host refusal. */
-  readonly refusal: (error: object) => string | undefined;
   /** The closed-set code, when this very object is a Host error. */
   readonly hostCode: (error: object) => string | undefined;
 }
@@ -47,7 +43,7 @@ const FRAME_PREFIX = '    at ';
 const LOCATION = /^(?:.*? \()?((?:file:\/\/|\/|node:)[^()]*?):(\d+):(\d+)\)?$/u;
 const UNREADABLE = Symbol('unreadable');
 
-const NO_RECOGNITION: HostErrorRecognition = { refusal: () => undefined, hostCode: () => undefined };
+const NO_RECOGNITION: HostErrorRecognition = { hostCode: () => undefined };
 
 function read(target: object, key: string): unknown {
   try {
@@ -143,11 +139,9 @@ interface Walk {
 }
 
 function recognize(error: object, recognition: HostErrorRecognition) {
-  const capability = attempt(() => recognition.refusal(error));
   const hostCode = attempt(() => recognition.hostCode(error));
-  const origin: SafeErrorOrigin =
-    capability !== undefined ? 'host_refusal' : hostCode !== undefined ? 'host' : 'unverified';
-  return { origin, capability, hostCode };
+  const origin: SafeErrorOrigin = hostCode !== undefined ? 'host' : 'unverified';
+  return { origin, hostCode };
 }
 
 function nested(error: object, depth: number, walk: Walk) {
@@ -175,12 +169,11 @@ function project(value: unknown, depth: number, walk: Walk): SafeErrorProjection
   }
   if (walk.inspected.has(value)) return undefined;
   walk.inspected.add(value);
-  const { origin, capability, hostCode } = recognize(value, walk.recognition);
+  const { origin, hostCode } = recognize(value, walk.recognition);
   return present({
     origin,
     type: conventionalType(value),
     code: hostCode ?? conventionalCode(value),
-    capability,
     status: origin === 'unverified' ? httpStatus(value) : undefined,
     at: locations(value),
     ...nested(value, depth, walk),

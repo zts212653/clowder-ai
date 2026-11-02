@@ -10,7 +10,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   {
     id: 'members',
     label: '成员与运行时',
-    icon: 'users',
+    icon: 'paw',
     color: 'var(--color-opus-primary)',
     description: '管理成员、模型和接入方式，查看当前接活状态与派活偏好。',
   },

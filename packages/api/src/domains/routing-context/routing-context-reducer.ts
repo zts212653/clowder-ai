@@ -14,6 +14,7 @@ import {
   routingSignalEventV1Schema,
 } from '@cat-cafe/shared';
 import type { CapabilityProfileDiagnostic } from './CapabilityProfileRevisionSource.js';
+import { projectRoutingPreferenceHeads } from './preflight/RoutingPreferenceDecisionProjection.js';
 
 export interface ReduceRoutingContextInput {
   ownerId: string;
@@ -24,6 +25,7 @@ export interface ReduceRoutingContextInput {
   profiles: readonly CapabilityProfileRevisionRefV1[];
   profileDiagnostics?: readonly CapabilityProfileDiagnostic[];
   signalEvents: readonly RoutingSignalEventV1[];
+  signalClosures?: ReadonlyMap<string, Exclude<RoutingSignalEventV1, { eventType: 'asserted' }>>;
   preferenceRevisions: readonly RoutingPreferenceRevisionV1[];
 }
 
@@ -70,21 +72,6 @@ function selectProfileHeads(
   return heads;
 }
 
-function selectPreferenceHeads(preferences: readonly RoutingPreferenceRevisionV1[]): RoutingPreferenceRevisionV1[] {
-  const heads = new Map<string, RoutingPreferenceRevisionV1>();
-  for (const preference of preferences) {
-    const current = heads.get(preference.preferenceId);
-    if (
-      current === undefined ||
-      preference.version > current.version ||
-      (preference.version === current.version && preference.revisionId.localeCompare(current.revisionId) > 0)
-    ) {
-      heads.set(preference.preferenceId, preference);
-    }
-  }
-  return [...heads.values()].sort((left, right) => left.preferenceId.localeCompare(right.preferenceId));
-}
-
 function activeSignalReason(signal: AssertedSignal): RoutingReasonV1 {
   return {
     code: `routing_signal_${signal.state}`,
@@ -123,14 +110,7 @@ function coalesceActiveSignalReasons(signals: readonly AssertedSignal[]): Routin
   return reasons;
 }
 
-function inactiveSignalReason(signal: AssertedSignal, closer?: ClosingSignal): RoutingReasonV1 {
-  if (closer?.eventType === 'recovered') {
-    return {
-      code: 'routing_signal_recovered',
-      summary: closer.note ?? closer.reasonCode,
-      sourceRefs: [closer.eventId, signal.eventId, closer.evidenceRef],
-    };
-  }
+function expiredSignalReason(signal: AssertedSignal): RoutingReasonV1 {
   return {
     code: 'routing_signal_expired',
     summary: `${signal.reasonCode} expired without recovery evidence`,
@@ -212,15 +192,24 @@ function reduceCandidateSignals(input: {
     return {
       availability: 'unknown',
       freshness: 'stale',
-      reasons: expired.map((signal) => inactiveSignalReason(signal)),
+      reasons: expired.map(expiredSignalReason),
     };
   }
   if (recovered.length > 0) {
     recovered.sort((left, right) => compareIdentity(left.closer, right.closer));
+    const latest = recovered[recovered.length - 1].closer;
     return {
       availability: 'available',
       freshness: 'fresh',
-      reasons: recovered.map(({ signal, closer }) => inactiveSignalReason(signal, closer)),
+      // Summarize records, not incidents: one probe can close many assertions.
+      // The latest immutable recovery is enough to drill into its full provenance.
+      reasons: [
+        {
+          code: 'routing_signal_recovered',
+          summary: `已恢复 ${recovered.length} 条历史状态记录`,
+          sourceRefs: [latest.eventId],
+        },
+      ],
     };
   }
   return { availability: 'available', freshness: 'fresh', reasons: [] };
@@ -272,14 +261,14 @@ export function reduceRoutingContext(rawInput: ReduceRoutingContextInput): Routi
   const signalEvents = rawInput.signalEvents
     .map((event) => routingSignalEventV1Schema.parse(event))
     .filter((event) => event.ownerId === rawInput.ownerId && event.observedAt <= rawInput.observedAt);
-  const preferenceHeads = selectPreferenceHeads(
+  const preferenceHeads = projectRoutingPreferenceHeads(
     rawInput.preferenceRevisions
       .map((preference) => routingPreferenceRevisionV1Schema.parse(preference))
       .filter((preference) => preference.ownerId === rawInput.ownerId),
   );
   const profileHeads = selectProfileHeads(profiles);
   const profileDiagnostics = rawInput.profileDiagnostics ?? [];
-  const closures = routingSignalClosures(signalEvents);
+  const closures = rawInput.signalClosures ?? routingSignalClosures(signalEvents);
 
   const projectedCandidates: CandidateProjection[] = candidates
     .map((binding) => {

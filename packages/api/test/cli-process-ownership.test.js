@@ -65,6 +65,54 @@ test('production process snapshots distinguish an empty exact PID set from a rea
   assert.deepEqual(await readUnixProcessSnapshot({ pids: [definitelyDeadPid] }), new Map());
 });
 
+test('Windows snapshots report complete absence only for an explicit empty PID set', async (t) => {
+  const platform = Object.getOwnPropertyDescriptor(process, 'platform');
+  Object.defineProperty(process, 'platform', { value: 'win32' });
+  t.after(() => Object.defineProperty(process, 'platform', platform));
+
+  assert.deepEqual(readUnixProcessSnapshotSync({ pids: [] }), new Map());
+  assert.deepEqual(await readUnixProcessSnapshot({ pids: [] }), new Map());
+  assert.equal(readUnixProcessSnapshotSync({ pids: [process.pid] }), null);
+  assert.equal(await readUnixProcessSnapshot({ pids: [process.pid] }), null);
+  assert.equal(readUnixProcessSnapshotSync(), null);
+  assert.equal(await readUnixProcessSnapshot(), null);
+});
+
+test('Windows owner discovery is complete without manifests but preserves unknown manifest liveness', async (t) => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'cat-cafe-windows-owner-discovery-'));
+  const platform = Object.getOwnPropertyDescriptor(process, 'platform');
+  Object.defineProperty(process, 'platform', { value: 'win32' });
+  t.after(() => Object.defineProperty(process, 'platform', platform));
+  try {
+    const service = createCliExecutionOwnerService({ dataDir });
+    assert.deepEqual(await service.listLive(), { owners: [], complete: true });
+
+    const ownerDirectory = join(dataDir, 'cli-process-owners');
+    await mkdir(ownerDirectory);
+    assert.deepEqual(await service.listLive(), { owners: [], complete: true });
+
+    await writeFile(
+      join(ownerDirectory, `${OWNER_ID}.json`),
+      JSON.stringify({
+        v: 1,
+        ownerId: OWNER_ID,
+        createdAt: 1_000,
+        supervisor: identity(process.pid, 1, process.pid),
+        execution: {
+          executionId: 'windows-parent',
+          invocationId: 'windows-child',
+          threadId: 'windows-thread',
+          catId: 'codex-sol',
+          userId: 'windows-user',
+        },
+      }),
+    );
+    assert.deepEqual(await service.listLive(), { owners: [], complete: false });
+  } finally {
+    await rm(dataDir, { recursive: true, force: true });
+  }
+});
+
 test('Linux procfs environment decoding preserves exact token boundaries', () => {
   assert.equal(
     decodeLinuxProcEnvironment(Buffer.from(`HOME=/tmp\0CAT_CAFE_PROCESS_OWNER_ID=${OWNER_ID}\0TERM=xterm\0`, 'utf8')),

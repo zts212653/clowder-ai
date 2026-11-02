@@ -32,8 +32,8 @@ export const videoArtworkCopy = defineShellCopy(
     },
     en: {
       tools: 'Video annotation tools',
-      range: 'Select time range',
-      frame: 'Circle this frame',
+      range: 'Select range',
+      frame: 'Circle frame',
       notReady: 'Wait for a stable frame',
       more: 'More video tools',
       brush: 'Brush',

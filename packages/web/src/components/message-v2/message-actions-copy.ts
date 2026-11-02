@@ -3,7 +3,7 @@ import { defineShellCopy } from '../shell/shell-copy';
 export const messageActionsCopy = defineShellCopy({
   zh: {
     actions: '消息操作',
-    select: '多选消息',
+    select: '多选：转发或导出',
     reply: '引用回复',
     trajectory: '查看这轮轨迹',
     read: '朗读',
@@ -20,7 +20,7 @@ export const messageActionsCopy = defineShellCopy({
   },
   en: {
     actions: 'Message actions',
-    select: 'Select',
+    select: 'Select to forward or export',
     reply: 'Reply',
     trajectory: 'View trajectory',
     read: 'Read aloud',

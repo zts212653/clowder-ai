@@ -4,6 +4,7 @@ import type { ActionSuccessorLease } from './action-successor-state-machine.js';
 import { matchesApprovedTaskIdentity } from './approved-development-proposal.js';
 import { approvedGenericTaskContinuation } from './approved-generic-task-proposal.js';
 import { deriveApprovedTaskContract } from './approved-task-contract.js';
+import type { ApprovedTaskImplementationHistory } from './approved-task-implementation-history.js';
 
 /** Actor coordinates come exclusively from callback authentication. */
 export interface ApprovedTaskContinuationInput {
@@ -58,7 +59,10 @@ export type ApprovedTaskContinuationResult =
         | 'concurrent_change';
     };
 
-export function implementationUsedProposal(lease: ActionSuccessorLease | null, proposal: ThreadProposal): boolean {
+export function implementationUsedProposal(
+  lease: ApprovedTaskImplementationHistory | null,
+  proposal: ThreadProposal,
+): boolean {
   if (
     !lease ||
     lease.actionFamily !== 'implement' ||
@@ -101,7 +105,7 @@ export function decideApprovedTaskContinuation(
   proposal: ThreadProposal | null,
   task: TaskItem | null,
   child: ContinuationChild | null,
-  implementation: ActionSuccessorLease | null,
+  implementation: ApprovedTaskImplementationHistory | null,
 ): ApprovedTaskContinuationResult {
   const reject = (
     reason: Extract<ApprovedTaskContinuationResult, { outcome: 'rejected' }>['reason'],

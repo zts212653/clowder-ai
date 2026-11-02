@@ -58,6 +58,9 @@ class TurnWire {
       const threadId = message.method === 'thread/resume' ? message.params.threadId : this.threadId;
       this.inbox.push({ id: message.id, result: { thread: { id: threadId, turns: [] } } });
     }
+    if (message.method === 'thread/turns/list') {
+      this.inbox.push({ id: message.id, result: { data: [], nextCursor: null } });
+    }
     if (message.method === 'turn/start') {
       this.inbox.push({ id: message.id, result: { turn: { id: 'turn-1', status: 'inProgress', items: [] } } });
       setImmediate(() => {

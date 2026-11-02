@@ -31,16 +31,26 @@ export interface MessageOutputHostTail {
   gluePrefixLength: 2;
 }
 
-export interface MessageOutputRun {
+/** Canonical ranges do not claim a provider-native message identity. */
+export interface MessageOutputBoundaryRun {
   id: string;
-  identity: OutputMessageIdentity;
   channel: 'commentary' | 'final';
-  complete: true;
   /** Half-open UTF-16 range in the message's one canonical content string. */
   start: number;
   end: number;
   /** Explicit aggregation newline glue at the beginning of this range. */
   gluePrefixLength: 0 | 1 | 2;
+}
+
+export interface MessageOutputRun extends MessageOutputBoundaryRun {
+  identity: OutputMessageIdentity;
+  complete: true;
+}
+
+/** Invocation-local terminal fact; never reconstructed from the reply's wording. */
+export interface MessageOutputSettlement {
+  succeeded: boolean;
+  nativePhases: boolean;
 }
 
 export type MessageOutputOrderRef =
@@ -65,9 +75,17 @@ export type MessageOutputLayoutV1 = {
 } & (
   | {
       status: 'available';
+      basis?: never;
       runs: readonly MessageOutputRun[];
       order: readonly MessageOutputOrderRef[];
       hostTail?: MessageOutputHostTail;
+    }
+  | {
+      status: 'available';
+      basis: 'successful_turn_last_tool';
+      runs: readonly MessageOutputBoundaryRun[];
+      order: readonly MessageOutputOrderRef[];
+      hostTail?: never;
     }
   | { status: 'unavailable'; reason: MessageOutputUnavailableReason }
 );

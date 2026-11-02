@@ -12,7 +12,7 @@ import { createPluginTaskHost } from '../dist/domains/plugin/host-surface/task/p
 import { pluginNativeActionRoutes } from '../dist/routes/plugin-native-action-routes.js';
 import { loadTrackingPackage } from './helpers/github-tracking-package.js';
 
-async function fixture(t, pkg) {
+async function fixture(t, pkg, privateSubscription = false) {
   const taskStore = new TaskStore();
   const threadStore = new ThreadStore();
   const messageStore = new MessageStore();
@@ -34,11 +34,9 @@ async function fixture(t, pkg) {
   const inputs = [origin.id];
   let onRead = async () => {},
     onProvider = async () => {};
-  const grants = [...new Set(pkg.manifest.features.flatMap((feature) => feature.capabilities))];
   const tasks = createPluginTaskHost({
     pluginId: pkg.manifest.pluginId,
     pluginInstanceId: instanceId,
-    effectiveGrants: grants,
     taskStore,
     threadStore,
     readThreadStore: threadStore,
@@ -97,14 +95,13 @@ async function fixture(t, pkg) {
   const admission = {
     instance: {
       pluginInstanceId: instanceId,
-      packageDigest: 'fee6fbfa',
+      packageDigest: privateSubscription ? '004171d8' : 'fee6fbfa',
       lifecycleRevision: 1,
       activationState: 'enabled',
       lifecycleState: 'installed',
       configReadiness: 'ready',
     },
     packageRecord: { manifest: pkg.manifest },
-    effectiveGrants: grants,
   };
   const carrier = createModuleHostInvocation({ runtime: { actions: () => active.actions } });
   const actions = new NativePluginActions(async () => admission);
@@ -200,6 +197,17 @@ async function fixture(t, pkg) {
       const result = response.json().result;
       assert.ok(result.automationState.await, 'real package registered a public wait');
       const task = await taskStore.get(result.id);
+      if (privateSubscription) {
+        assert.equal(task, null, 'a fresh private subscription must not manufacture a Host Task');
+        assert.ok(
+          JSON.stringify([...rows.values()]).includes(result.id),
+          'the actual package persisted its subscription',
+        );
+        assert.equal(result.userId, userId);
+        assert.equal(result.ownerCatId, catId);
+        assert.equal(result.threadId, thread.id);
+        return result;
+      }
       assert.ok(task.pluginWait.await, 'real Host task port persisted the active wait');
       assert.equal(task.pluginWait.pluginInstanceId, instanceId);
       return task;
@@ -208,75 +216,97 @@ async function fixture(t, pkg) {
   };
 }
 
-test('actual GitHub package native tracking source binding', async (t) => {
-  const pkg = await loadTrackingPackage(t);
-  for (const kind of ['pr', 'issue']) {
-    await t.test(`${kind}: one adopted input binds only its exact source/hold`, async (t) => {
-      const f = await fixture(t, pkg);
-      const adopted = f.adopt('one');
-      const task = await f.register(kind);
-      assert.deepEqual(task.pluginWait.registration.source, { kind: 'adopted_hold', ...adopted });
-      assert.equal(task.pluginWait.registration.invocationId, f.identity.invocationId);
-      assert.equal((await f.resolve(adopted)).kind, 'bypass');
-      for (const source of [
-        { ...adopted, holdTaskId: 'wrong' },
-        { ...adopted, sourceMessageId: f.origin.id },
-        { ...adopted, invocationId: 'other-invocation' },
-      ])
-        assert.equal((await f.resolve(source)).kind, 'reject');
-    });
-    for (const reversed of [false, true]) {
-      await t.test(`${kind}: ambiguous inputs (${reversed ? 'reversed' : 'normal'}) grant neither hold`, async (t) => {
+const currentGeneration = process.env.F202_TRACKING_GENERATION === 'current';
+
+test(
+  currentGeneration
+    ? 'current GitHub artifact persists fresh private subscriptions through the real Host native route'
+    : 'actual GitHub package native tracking source binding',
+  async (t) => {
+    const pkg = await loadTrackingPackage(t, currentGeneration ? 'current' : 'c1');
+    if (currentGeneration) {
+      for (const kind of ['pr', 'issue']) {
+        const f = await fixture(t, pkg, true);
+        f.adopt('completed-command');
+        const first = await f.register(kind);
+        const replay = await f.register(kind);
+        assert.equal(replay.id, first.id);
+        assert.deepEqual(replay.automationState.await, first.automationState.await);
+        assert.equal(first.automationState.await.generation, 1);
+      }
+      return;
+    }
+    for (const kind of ['pr', 'issue']) {
+      await t.test(`${kind}: one adopted input binds only its exact source/hold`, async (t) => {
         const f = await fixture(t, pkg);
-        const first = f.adopt('one'),
-          second = f.adopt('two');
-        if (reversed) f.inputs.reverse();
+        const adopted = f.adopt('one');
+        const task = await f.register(kind);
+        assert.deepEqual(task.pluginWait.registration.source, { kind: 'adopted_hold', ...adopted });
+        assert.equal(task.pluginWait.registration.invocationId, f.identity.invocationId);
+        assert.equal((await f.resolve(adopted)).kind, 'bypass');
+        for (const source of [
+          { ...adopted, holdTaskId: 'wrong' },
+          { ...adopted, sourceMessageId: f.origin.id },
+          { ...adopted, invocationId: 'other-invocation' },
+        ])
+          assert.equal((await f.resolve(source)).kind, 'reject');
+      });
+      for (const reversed of [false, true]) {
+        await t.test(
+          `${kind}: ambiguous inputs (${reversed ? 'reversed' : 'normal'}) grant neither hold`,
+          async (t) => {
+            const f = await fixture(t, pkg);
+            const first = f.adopt('one'),
+              second = f.adopt('two');
+            if (reversed) f.inputs.reverse();
+            const task = await f.register(kind);
+            assert.equal(task.pluginWait.registration, undefined);
+            for (const source of [first, second]) assert.equal((await f.resolve(source)).kind, 'reject');
+          },
+        );
+      }
+      await t.test(`${kind}: a foreign-thread input poisons otherwise eligible authority`, async (t) => {
+        const f = await fixture(t, pkg);
+        const eligible = f.adopt('one'),
+          foreign = f.adopt('foreign', { threadId: 'another-thread' });
         const task = await f.register(kind);
         assert.equal(task.pluginWait.registration, undefined);
-        for (const source of [first, second]) assert.equal((await f.resolve(source)).kind, 'reject');
+        for (const source of [eligible, foreign]) assert.equal((await f.resolve(source)).kind, 'reject');
+      });
+      await t.test(`${kind}: a different member's hold cannot acquire continuation authority`, async (t) => {
+        const f = await fixture(t, pkg);
+        const foreign = f.adopt('foreign-cat', { catId: 'codex' });
+        const task = await f.register(kind);
+        assert.deepEqual(task.pluginWait.registration.source, { kind: 'primary', sourceMessageId: f.origin.id });
+        assert.equal((await f.resolve(foreign)).kind, 'reject');
+      });
+      await t.test(`${kind}: adoption while source reads await cannot enter the captured input set`, async (t) => {
+        const f = await fixture(t, pkg);
+        let late;
+        f.onRead(async () => {
+          if (!late) late = f.adopt('late-read');
+        });
+        const task = await f.register(kind);
+        assert.deepEqual(task.pluginWait.registration.source, { kind: 'primary', sourceMessageId: f.origin.id });
+        assert.equal((await f.resolve(late)).kind, 'reject');
+      });
+      await t.test(`${kind}: adoption after capture and registration replay preserve the stored receipt`, async (t) => {
+        const f = await fixture(t, pkg);
+        const first = f.adopt('one');
+        let late;
+        f.onProvider(async () => {
+          late = f.adopt('after-capture');
+        });
+        const task = await f.register(kind);
+        const receipt = structuredClone(task.pluginWait.registration);
+        assert.deepEqual(receipt.source, { kind: 'adopted_hold', ...first });
+        assert.equal((await f.resolve(late)).kind, 'reject');
+        const replay = await f.register(kind);
+        assert.equal(replay.pluginWait.generation, task.pluginWait.generation);
+        assert.deepEqual(replay.pluginWait.registration, receipt);
+        assert.equal((await f.resolve(first)).kind, 'bypass');
+        assert.equal((await f.resolve(late)).kind, 'reject');
       });
     }
-    await t.test(`${kind}: a foreign-thread input poisons otherwise eligible authority`, async (t) => {
-      const f = await fixture(t, pkg);
-      const eligible = f.adopt('one'),
-        foreign = f.adopt('foreign', { threadId: 'another-thread' });
-      const task = await f.register(kind);
-      assert.equal(task.pluginWait.registration, undefined);
-      for (const source of [eligible, foreign]) assert.equal((await f.resolve(source)).kind, 'reject');
-    });
-    await t.test(`${kind}: a different member's hold cannot acquire continuation authority`, async (t) => {
-      const f = await fixture(t, pkg);
-      const foreign = f.adopt('foreign-cat', { catId: 'codex' });
-      const task = await f.register(kind);
-      assert.deepEqual(task.pluginWait.registration.source, { kind: 'primary', sourceMessageId: f.origin.id });
-      assert.equal((await f.resolve(foreign)).kind, 'reject');
-    });
-    await t.test(`${kind}: adoption while source reads await cannot enter the captured input set`, async (t) => {
-      const f = await fixture(t, pkg);
-      let late;
-      f.onRead(async () => {
-        if (!late) late = f.adopt('late-read');
-      });
-      const task = await f.register(kind);
-      assert.deepEqual(task.pluginWait.registration.source, { kind: 'primary', sourceMessageId: f.origin.id });
-      assert.equal((await f.resolve(late)).kind, 'reject');
-    });
-    await t.test(`${kind}: adoption after capture and registration replay preserve the stored receipt`, async (t) => {
-      const f = await fixture(t, pkg);
-      const first = f.adopt('one');
-      let late;
-      f.onProvider(async () => {
-        late = f.adopt('after-capture');
-      });
-      const task = await f.register(kind);
-      const receipt = structuredClone(task.pluginWait.registration);
-      assert.deepEqual(receipt.source, { kind: 'adopted_hold', ...first });
-      assert.equal((await f.resolve(late)).kind, 'reject');
-      const replay = await f.register(kind);
-      assert.equal(replay.pluginWait.generation, task.pluginWait.generation);
-      assert.deepEqual(replay.pluginWait.registration, receipt);
-      assert.equal((await f.resolve(first)).kind, 'bypass');
-      assert.equal((await f.resolve(late)).kind, 'reject');
-    });
-  }
-});
+  },
+);

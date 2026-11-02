@@ -56,7 +56,13 @@ function SessionLineText({ hosted, approval }: { hosted: Hosted; approval: Appro
   const key = sessionKey(ownerUserId, approval);
   const session = sessions.get(key);
   const language = useShellLanguage();
-  const view = session ? describeReconcile(session.model.state, { language, ownerUserId }) : null;
+  const view = session
+    ? describeReconcile(session.model.state, {
+        language,
+        ownerUserId,
+        sourceFeatureId: approval.sourceFeatureId,
+      })
+    : null;
   if (!view?.line) return null;
   return (
     <div className="flex items-center gap-2 px-4 pb-3">
@@ -186,6 +192,7 @@ export function MailboxRow({
       data-stale={stale ? 'true' : undefined}
       data-expanded={open ? 'true' : 'false'}
       className="rounded-[14px]"
+      data-chat-background-surface={item.userMention ? 'work' : 'paper'}
       style={{
         opacity: stale ? 0.6 : undefined,
         border: `1px solid ${open ? 'var(--shell-hairline-strong)' : 'var(--shell-hairline)'}`,

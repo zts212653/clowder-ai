@@ -1,7 +1,12 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { expect, it } from 'vitest';
+import { checkShellCopyParity } from '../../shell/__tests__/shell-copy-parity-check';
 import { membersCopy } from '../members.shell-copy';
+
+it('keeps the complete member dictionary in bilingual parity', () => {
+  expect(checkShellCopyParity(membersCopy)).toEqual([]);
+});
 
 interface NamingEntry {
   n: number;
@@ -22,9 +27,10 @@ it.skipIf(!existsSync(dispositionPath))(
     expect(disposition.entries).toHaveLength(211);
     for (const entry of disposition.entries.filter((item) => item.n !== 3 && !item.zh_draft.includes('=>'))) {
       for (const language of ['zh', 'en'] as const) {
-        expect((membersCopy[language] as Record<string, unknown>)[entry.key], `${entry.n}:${language}`).toBe(
-          entry[language],
-        );
+        // The October 26 design correction supersedes the older plural title only.
+        // thread_mvhxkneo3xa8opl1#0001793016199881-002178-de6debdb
+        const expected = entry.key === '成员与运行时' && language === 'en' ? 'Members & runtime' : entry[language];
+        expect((membersCopy[language] as Record<string, unknown>)[entry.key], `${entry.n}:${language}`).toBe(expected);
       }
     }
   },

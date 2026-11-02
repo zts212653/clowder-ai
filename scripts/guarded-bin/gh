@@ -3,9 +3,20 @@
 import { spawnSync } from 'node:child_process';
 import { dirname, delimiter, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { prepareSecretSafeSend } from '../lib/secret-outbound-args.mjs';
+import { assertSecretFree } from '../lib/secret-payload-files.mjs';
+import { executeSecretSafeCommand } from '../lib/secret-command-execution.mjs';
 
 const args = process.argv.slice(2);
 const ownDir = dirname(fileURLToPath(import.meta.url));
+let prepared;
+try {
+  assertSecretFree(args.join('\n'));
+} catch {
+  process.stderr.write('secret_send_blocked: content was unsafe or could not be inspected; use explicit body/file input.\n');
+  process.exit(1);
+}
+process.on('exit', () => prepared?.dispose());
 
 const VALUE_OPTION_ALIASES = Object.freeze({
   repository: Object.freeze(['--repo', '-R']),
@@ -165,10 +176,9 @@ const delegatePath = (process.env.PATH ?? '')
   .filter((entry) => entry && resolve(entry) !== resolve(ownDir))
   .join(delimiter);
 const delegate = process.env.CAT_CAFE_REAL_GH_PATH ?? 'gh';
-const result = spawnSync(delegate, args, {
-  env: { ...process.env, PATH: delegatePath },
-  stdio: 'inherit',
-});
-if (result.error) fail('gh_delegate_failed', result.error.message);
-if (result.signal) process.kill(process.pid, result.signal);
-process.exit(result.status ?? 1);
+try {
+  prepared = await prepareSecretSafeSend('gh', args);
+} catch {
+  fail('secret_send_blocked', 'content was unsafe or could not be inspected; use explicit body/file input.');
+}
+process.exit(await executeSecretSafeCommand(delegate, prepared.args, { ...process.env, PATH: delegatePath }));

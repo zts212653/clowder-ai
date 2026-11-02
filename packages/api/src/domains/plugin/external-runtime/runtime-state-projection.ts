@@ -3,7 +3,7 @@
  *
  * WHY ITS OWN UNIT (seventh-round review P1-B, sol): every write of `runtimeState` must first
  * re-check that the authority the write was decided under still holds, or a stale supervisor can
- * stamp state onto an instance that was reinstalled, disabled or re-granted underneath it. That
+ * stamp state onto an instance that was reinstalled or disabled underneath it. That
  * check is the whole content of these two functions, and it is the same authority question
  * `runtime-crash-projection.ts` answers for the crash path — so the two live side by side rather
  * than inside the lifecycle orchestration.

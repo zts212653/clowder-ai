@@ -1,7 +1,10 @@
 import { execFileSync } from 'node:child_process';
 import { readlinkSync, realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { compareStableBirth, readProcBirth } from './process-birth-identity.mjs';
 import { isProcessRunning } from './process-tree.mjs';
+
+export { compareStableBirth } from './process-birth-identity.mjs';
 
 export const PROCESS_START_TIME_FORMAT = 'ps-lstart-utc-c-v1';
 export const TOKEN_ARG = '--cat-cafe-daemon-token=';
@@ -73,6 +76,7 @@ export function captureProcessIdentity(pid, { runPs = readPsField } = {}) {
   if (!Number.isSafeInteger(pid) || pid <= 1) throw new Error(`Invalid PID: ${pid}`);
   process.kill(pid, 0);
   const { startedAt, startedAtEpochMs } = stableProcessStart(pid, runPs);
+  const procBirth = readProcBirth(pid);
   const commandEnv = { ...process.env, LC_ALL: 'C' };
   const command = runPs(pid, 'command', commandEnv);
   if (!startedAt || !command) throw new Error(`Cannot inspect PID ${pid}`);
@@ -84,6 +88,7 @@ export function captureProcessIdentity(pid, { runPs = readPsField } = {}) {
     ucomm: runPs(pid, 'ucomm', commandEnv),
     argvAvailable: !isArgvUnavailable(command),
     cwd: processCwd(pid),
+    ...(procBirth ?? {}),
   };
 }
 
@@ -239,18 +244,22 @@ function identityMatches(state, identity) {
   if (stored.launchToken != null && !hasLaunchToken) return false;
   if (hasLaunchToken && !identity.command.includes(`${TOKEN_ARG}${stored.launchToken}`)) return false;
 
+  const stableBirth = compareStableBirth(stored, identity);
+  if (stableBirth === false) return false;
+
+  // A launch token is generated per launch and is an exact-incarnation proof
+  // on its own; lstart is not, because it follows the wall clock and can move
+  // after suspend/resume. Pre-format states already relied on this token.
+  if (hasLaunchToken) return true;
+
   if (stored.startedAtFormat !== undefined) {
-    const stableBirthMatches =
+    const legacyBirthMatches =
       stored.startedAtFormat === PROCESS_START_TIME_FORMAT &&
       identity.startedAtFormat === PROCESS_START_TIME_FORMAT &&
       stored.startedAt === identity.startedAt &&
       stored.startedAtEpochMs === identity.startedAtEpochMs;
-    if (!stableBirthMatches) return false;
-    if (hasLaunchToken) return true;
+    if (!legacyBirthMatches) return false;
   }
-
-  // A pre-format token-bound v1 state still has an exact-incarnation launch token.
-  if (hasLaunchToken) return true;
 
   // Tokenless migration is safe only when its whole start-time bucket predates the state.
   const stateWrittenAt = Date.parse(state.launchedAt);
@@ -273,8 +282,11 @@ export function compareStoredIdentity(state, identity) {
   if (identity?.argvAvailable !== false) return identityMatches(state, identity) ? 'match' : 'mismatch';
   const stored = state.process;
   if (!stored || stored.cwd !== identity.cwd) return 'mismatch';
-  const bothStable = Number.isSafeInteger(stored.startedAtEpochMs) && Number.isSafeInteger(identity.startedAtEpochMs);
-  if (bothStable && stored.startedAtEpochMs !== identity.startedAtEpochMs) return 'mismatch';
+  const stableBirth = compareStableBirth(stored, identity);
+  if (stableBirth === false) return 'mismatch';
+  if (stableBirth === true) return 'unknown';
+  // lstart follows the wall clock. Without conclusive birth evidence, an
+  // unreadable argv cannot establish replacement or authorize stop cleanup.
   return 'unknown';
 }
 

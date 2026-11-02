@@ -59,6 +59,44 @@ describe('RFC #1356 Redis Queue ledger', { skip: redisIsolationSkipReason(REDIS_
     };
   }
 
+  it('keeps a host-reserved message identity through atomic admission and replay', async () => {
+    const { generateSortableId } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const reservedId = generateSortableId(100);
+    const queue = new InvocationQueue(store);
+    const source = {
+      from: { kind: 'user', userId: 'owner-1' },
+      userId: 'owner-1',
+      threadId: 'thread-redis',
+      content: 'revise',
+      mentions: ['opus'],
+      timestamp: 100,
+      deliveryStatus: 'queued',
+      idempotencyKey: 'reserved',
+      reservedId,
+    };
+    const input = {
+      from: source.from,
+      userId: source.userId,
+      threadId: source.threadId,
+      content: source.content,
+      kind: 'conversation_input',
+      ownerAuthProvenance: 'strict',
+      targetCats: ['opus'],
+      exactTargets: true,
+      intent: 'execute',
+      idempotencyKey: source.idempotencyKey,
+    };
+    const first = await queue.send(messageStore, source, input);
+    assert.equal(first.outcome, 'enqueued');
+    assert.equal(first.message.id, reservedId);
+    assert.equal((await messageStore.getById(reservedId)).content, 'revise');
+    assert.equal(first.entries[0].payload.messageId, reservedId);
+    const replay = await queue.send(messageStore, source, input);
+    assert.equal(replay.deduped, true);
+    assert.equal(replay.message.id, reservedId);
+    assert.equal((await store.list('thread-redis')).length, 1);
+  });
+
   it('stores one source row with every pending target and rejects a conflicting replay', async () => {
     const entry = row('m1', ['opus', 'codex']);
     assert.equal((await store.enqueue([entry], 5)).outcome, 'enqueued');
@@ -66,6 +104,31 @@ describe('RFC #1356 Redis Queue ledger', { skip: redisIsolationSkipReason(REDIS_
     assert.equal((await store.enqueue([{ ...entry, targets: ['opus'] }], 5)).outcome, 'conflict');
     assert.deepEqual(await store.list('thread-redis'), [entry]);
     assert.deepEqual((await store.getByMessageIds('thread-redis', ['m1', 'missing'])).get('m1'), [entry]);
+  });
+
+  it('rebuilds optional admission provenance without granting execution or changing source identity', async () => {
+    const entry = row('admission-source', ['opus']);
+    await store.enqueue([entry]);
+    const queue = new InvocationQueue(store);
+    await queue.hydrateFromLedger();
+    const observation = {
+      stage: 'queue_admitted',
+      observedAt: 100,
+      snapshotRef: 'snapshot:B',
+      targets: [{ targetCatId: 'opus', factsRef: 'sha256:opaque-facts' }],
+    };
+    assert.equal(await queue.recordRoutingAdmissionObservation('thread-redis', 'owner-1', entry.id, observation), true);
+    assert.equal(
+      (await store.enqueue([entry])).outcome,
+      'replayed',
+      'derived provenance cannot change admission identity',
+    );
+    const rebuilt = new InvocationQueue(store);
+    await rebuilt.hydrateFromLedger();
+    const restored = rebuilt.list('thread-redis', 'owner-1');
+    assert.equal(restored.length, 1);
+    assert.deepEqual(restored[0].delivery.routingAdmission, observation);
+    assert.deepEqual(restored[0].execution, entry.execution, 'the execution policy is unchanged');
   });
 
   it('persists an exact routing hold through sibling handoff, claim recovery and a fresh Queue instance', async () => {

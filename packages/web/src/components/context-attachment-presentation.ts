@@ -8,8 +8,23 @@ import { artworkTitle } from './content-review/artwork-title';
 import { replyBodyCopy } from './reply-body.shell-copy';
 import { useShellCopy } from './shell/shell-copy';
 
+function quoteSourceTitle(source: QuoteContextAttachment['source']): string {
+  switch (source.kind) {
+    case 'workspace_file':
+      return source.path;
+    case 'cli_output':
+      return 'CLI Output';
+    case 'collective_message':
+      return `#${source.channelId}`;
+    case 'message':
+      return source.artifactFile?.fileName ?? 'Message quote';
+  }
+}
+
 function originalPresentation(attachment: ContextAttachment): { title: string; detail: string } {
   switch (attachment.kind) {
+    case 'asset':
+      return { title: attachment.name, detail: `素材 · 第 ${attachment.work.reference.ownerRevision} 版` };
     case 'thread':
       return { title: attachment.title, detail: attachment.threadId };
     case 'project-screening':
@@ -29,18 +44,14 @@ function originalPresentation(attachment: ContextAttachment): { title: string; d
       };
     case 'quote':
       return {
-        title:
-          attachment.source.kind === 'workspace_file'
-            ? attachment.source.path
-            : attachment.source.kind === 'cli_output'
-              ? 'CLI Output'
-              : (attachment.source.artifactFile?.fileName ?? 'Message quote'),
+        title: quoteSourceTitle(attachment.source),
         detail: attachment.text,
       };
   }
 }
 
 const KIND_LABELS: Record<ContextAttachment['kind'], string> = {
+  asset: '素材',
   thread: 'THREAD',
   workspace_file: 'FILE',
   quote: 'QUOTE',
@@ -55,7 +66,9 @@ function quoteTitle(
   humanName: string,
   t: typeof replyBodyCopy.zh,
 ): string {
+  if (source.kind === 'collective_message') return `#${source.channelId}`;
   if (source.kind === 'message' && source.artifactFile) return source.artifactFile.fileName;
+  if (source.kind === 'message' && source.displayLabel) return source.displayLabel;
   // Legacy CLI references do not prove which rendered leaf was quoted.
   if (source.kind === 'cli_output' && source.segmentId !== 'stdout') return t.executionRecord;
   if (loadedSource?.type === 'user') return t.replyBy(humanName);
@@ -72,7 +85,7 @@ export function useContextAttachmentPresentation(attachment: ContextAttachment, 
   const source =
     attachment.kind === 'quote' && attachment.source.kind !== 'workspace_file' ? attachment.source : undefined;
   const loadedSource = useChatStore((state) =>
-    isV2 && source && state.currentThreadId === source.threadId
+    isV2 && source && source.kind !== 'collective_message' && state.currentThreadId === source.threadId
       ? state.messages.find((message) => message.id === source.messageId)
       : undefined,
   );

@@ -11,10 +11,7 @@ import {
 } from '../dist/domains/plugin/runtime-composition.js';
 import { catalogEntry, packageArchive } from './plugin-official-package-installer.fixture.js';
 
-async function desktopManager(
-  t,
-  { preparationFails = false, mixedDesktopCapabilities = false, projectRoot: restartedRoot } = {},
-) {
+async function desktopManager(t, { preparationFails = false, projectRoot: restartedRoot } = {}) {
   const projectRoot = restartedRoot ?? (await mkdtemp(join(tmpdir(), 'f202-desktop-integration-')));
   const html = '<!doctype html><html><body>Installed companion</body></html>';
   const manifest = {
@@ -28,7 +25,6 @@ async function desktopManager(
         id: 'body',
         name: 'Body',
         resources: [],
-        capabilities: ['windows.create'],
         contributions: [{ type: 'desktop-window', id: 'body' }],
       },
     ],
@@ -53,12 +49,10 @@ async function desktopManager(
       },
     ],
   };
-  if (mixedDesktopCapabilities) manifest.features[0].capabilities.push('messaging.send');
   const archive = await packageArchive({ packageManifest: manifest, extraFiles: { 'renderer/index.html': html } });
   const entry = catalogEntry(archive.integrity, {
     pluginId: manifest.pluginId,
     version: manifest.version,
-    effectiveGrants: ['windows.create'],
   });
   const observed = { prepared: 0, opens: 0, closes: 0 };
   const runtime = createDormantPluginRuntimeComposition({
@@ -70,6 +64,15 @@ async function desktopManager(
       },
     },
     desktopExecutor: {
+      prepare: async () => {
+        assert.equal(
+          (await runtime.brokerStore.snapshot()).sessions.filter((session) => session.state === 'active').length,
+          0,
+          'component preparation must finish before a runtime lease is opened',
+        );
+        observed.prepared++;
+        if (preparationFails) throw new Error('desktop component unavailable');
+      },
       open: async () => {
         observed.opens++;
         return {
@@ -274,16 +277,18 @@ test('Manager preserves official desktop preparation and routes enable/disable t
   assert.equal(observed.opens, 0, 'install never opens a desktop window');
   const prepared = await runtime.lifecycle.prepare(installed.pluginInstanceId, 1);
   await composition.manager.setEnabled(entry.pluginId, { enabled: true, expectedRevision: prepared.lifecycleRevision });
+  assert.equal(observed.prepared, 2, 'enable must prepare the current Host component, including after a Host update');
   assert.equal(observed.opens, 1, 'Manager must delegate this builtin to DesktopWindowPluginRuntime');
   assert.equal((await runtime.desktopWindows.presence()).pluginInstanceId, installed.pluginInstanceId);
   const current = (await composition.manager.get(entry.pluginId)).plugin;
   assert.equal(current.contributions[0].kind, 'desktop-window');
   assert.equal(current.live, 'running');
-  assert.equal(current.capabilities.find((capability) => capability.id === 'windows.create').active, true);
   await composition.manager.setEnabled(entry.pluginId, { enabled: false, expectedRevision: current.lifecycleRevision });
   assert.equal(observed.closes, 1);
   assert.equal(await runtime.desktopWindows.presence(), null);
-  assert.equal((await composition.manager.get(entry.pluginId)).plugin.capabilities[0].active, false);
+  const disabled = (await composition.manager.get(entry.pluginId)).plugin;
+  assert.equal(disabled.intent, 'disabled');
+  assert.equal(disabled.live, 'stopped');
 });
 
 test('Manager official installation fails before inventory admission if desktop preparation fails', async (t) => {
@@ -296,11 +301,29 @@ test('Manager official installation fails before inventory admission if desktop 
   assert.equal((await runtime.inventoryStore.snapshot()).instances.length, 0);
 });
 
-test('Manager installer retains the closed desktop admission shape instead of accepting a generic builtin', async (t) => {
-  const { entry, observed, runtime, composition } = await desktopManager(t, { mixedDesktopCapabilities: true });
-  await assert.rejects(composition.officialRouteInstaller.install(entry.catalogId, entry), {
-    code: 'UNSUPPORTED_TRANSPORT',
+test('Manager repairs a current failed desktop activation without changing its package or instance', async (t) => {
+  const { entry, observed, runtime, composition } = await desktopManager(t);
+  const installed = await composition.officialRouteInstaller.install(entry.catalogId, entry);
+  await runtime.lifecycle.prepare(installed.pluginInstanceId, 1);
+  await runtime.inventoryStore.transaction((tx) => {
+    const instance = tx.instances.get(installed.pluginInstanceId);
+    tx.instances.put({ ...instance, activationState: 'error', runtimeState: 'stopped' });
   });
-  assert.equal(observed.prepared, 0);
-  assert.equal((await runtime.inventoryStore.snapshot()).instances.length, 0);
+  const before = await runtime.inventoryStore.snapshot();
+  const failed = (await composition.manager.getLocal(entry.pluginId)).plugin;
+  assert.equal(failed.actions.repair, true);
+  await assert.rejects(composition.manager.repair(entry.pluginId, { expectedRevision: failed.lifecycleRevision - 1 }), {
+    code: 'STALE_REVISION',
+  });
+  assert.equal(observed.opens, 0);
+  await composition.manager.repair(entry.pluginId, { expectedRevision: failed.lifecycleRevision });
+  const repaired = (await composition.manager.getLocal(entry.pluginId)).plugin;
+  assert.equal(repaired.live, 'running');
+  assert.notEqual(repaired.actions.repair, true);
+  assert.equal(repaired.pluginInstanceId, installed.pluginInstanceId);
+  assert.deepEqual((await runtime.inventoryStore.snapshot()).packages, before.packages);
+  await assert.rejects(composition.manager.repair(entry.pluginId, { expectedRevision: repaired.lifecycleRevision }), {
+    code: 'ACTION_NOT_ALLOWED',
+  });
+  assert.equal(observed.opens, 1);
 });

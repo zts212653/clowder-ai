@@ -66,14 +66,14 @@
 
 ---
 
-## 8. Clowder AI 家里独有能力唤醒指南（场景→skill 触发反射）
+## 8. {{PRODUCT_DISPLAY_NAME}} {{CAPABILITY_QUALIFIER}}能力唤醒指南（场景→skill 触发反射）
 
 ── [L6] 能力唤醒 ──
 {{L6_CONTENT}}
 
 ---
 
-## 9. 代码哲学（愿景驱动，不是最小改动）
+## 9. 代码哲学（愿景驱动，改动围绕结果）
 
 ── [L7] 代码哲学 ──
 {{L7_CONTENT}}

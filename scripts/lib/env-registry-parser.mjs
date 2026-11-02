@@ -84,6 +84,7 @@ export function parseVars(src) {
       defaultValue: staticStringValue(properties.get('defaultValue')) ?? '—',
       description: staticStringValue(properties.get('description'))?.replace(/\n\s*/g, ' ') ?? '',
       sensitive: properties.get('sensitive')?.kind === ts.SyntaxKind.TrueKeyword,
+      exampleRecommended: properties.get('exampleRecommended')?.kind === ts.SyntaxKind.TrueKeyword,
     });
   }
   return vars;

@@ -3,6 +3,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
+import { fileURLToPath } from 'node:url';
+import { nativeOpeningCapsuleRevision } from '../dist/domains/cats/services/agents/invocation/request-generation-capsule-source.js';
+import { directMcpContract } from './helpers/direct-mcp-contract.js';
 
 const { AgyNativeAgentService } = await import(
   '../dist/domains/cats/services/agents/providers/agy-native/AgyNativeAgentService.js'
@@ -107,6 +110,7 @@ describe('F325 one-turn native AGY carrier', () => {
     );
     let servers;
     let credential;
+    let currentAuth;
     try {
       const events = await collect(
         f.service.invoke('Use the tools enabled for this project.', {
@@ -122,6 +126,8 @@ describe('F325 one-turn native AGY carrier', () => {
           spawnCliOverride: async function* (launch) {
             servers = JSON.parse(readFileSync(join(geminiDir(launch), 'config/mcp_config.json'), 'utf8')).mcpServers;
             credential = servers['cat-cafe-memory']?.env.CAT_CAFE_CREDENTIAL_FILE;
+            const stored = JSON.parse(readFileSync(credential, 'utf8'));
+            currentAuth = stored.invocationId === 'discovery-inv' && stored.callbackToken === 'fixture-token';
             yield* fakeEvents(
               launch.args[launch.args.indexOf('--agent') + 1],
               launch.cwd,
@@ -133,18 +139,36 @@ describe('F325 one-turn native AGY carrier', () => {
       );
       assert.equal(events.at(-1).errorCode, undefined, JSON.stringify(events));
       assert.deepEqual(Object.keys(servers).sort(), ['cat-cafe-limb', 'cat-cafe-memory', 'project-fixture']);
-      const env = servers['cat-cafe-memory'].env;
-      assert.equal(env.CAT_CAFE_CAT_ID, 'gemini38');
-      assert.equal(env.CAT_CAFE_THREAD_ID, 'discovery-thread');
-      assert.equal(env.CAT_CAFE_USER_ID, 'owner');
-      assert.equal(env.ALLOWED_WORKSPACE_DIRS, process.env.ALLOWED_WORKSPACE_DIRS?.trim() || f.workspace);
-      assert.equal(env.CAT_CAFE_CALLBACK_TOKEN, undefined);
-      assert.equal(env.CAT_CAFE_INVOCATION_ID, undefined);
-      assert.equal(
-        servers['project-fixture'].env,
-        undefined,
-        'external tools must not inherit host callback authority',
-      );
+      assert.equal(currentAuth, true, 'the per-turn file must hold the current invocation credentials before spawn');
+      for (const entry of ['memory', 'limb']) {
+        const { launchEnv, upstream } = directMcpContract(servers[`cat-cafe-${entry}`]);
+        assert.equal(upstream.command, process.execPath);
+        assert.deepEqual(upstream.args, [fileURLToPath(new URL(`../../mcp-server/dist/${entry}.js`, import.meta.url))]);
+
+        assert.equal(upstream.env.ALLOWED_WORKSPACE_DIRS, process.env.ALLOWED_WORKSPACE_DIRS?.trim() || f.workspace);
+        assert.equal(
+          launchEnv.ALLOWED_WORKSPACE_DIRS,
+          upstream.env.ALLOWED_WORKSPACE_DIRS,
+          'secret protection must inspect the same admitted workspace as the upstream reader',
+        );
+        for (const env of [launchEnv, upstream.env]) {
+          assert.equal(env.CAT_CAFE_API_URL, 'http://127.0.0.1:3012');
+          assert.equal(env.CAT_CAFE_CAT_ID, 'gemini38');
+          assert.equal(env.CAT_CAFE_THREAD_ID, 'discovery-thread');
+          assert.equal(env.CAT_CAFE_USER_ID, 'owner');
+          assert.equal(env.CAT_CAFE_CREDENTIAL_FILE, credential);
+          assert.equal(env.CAT_CAFE_CALLBACK_TOKEN, undefined);
+          assert.equal(env.CAT_CAFE_INVOCATION_ID, undefined);
+        }
+      }
+      const { launchEnv, upstream } = directMcpContract(servers['project-fixture']);
+      assert.equal(upstream.command, '/usr/bin/true');
+      assert.deepEqual(upstream.args, ['--fixture']);
+
+      assert.deepEqual(upstream.env, {}, 'external tools must not inherit host callback authority');
+      assert.equal(launchEnv.CAT_CAFE_CREDENTIAL_FILE, undefined);
+      assert.equal(launchEnv.CAT_CAFE_CALLBACK_TOKEN, undefined);
+      assert.equal(launchEnv.CAT_CAFE_INVOCATION_ID, undefined);
       assert.ok(credential && !existsSync(credential), 'terminal cleanup retires the exact credential');
     } finally {
       f.cleanup();
@@ -365,7 +389,8 @@ describe('F325 one-turn native AGY carrier', () => {
       assert.equal(settings.allowNonWorkspaceAccess, false);
       assert.deepEqual(mcp.mcpServers, {});
       assert.doesNotMatch(body, / {2}- (?:run_command|write_to_file|call_mcp_tool)\n/);
-      assert.match(hooks['cat-cafe-native-effect'].PreToolUse[0].hooks[0].command, /'read-only'$/);
+      const guardCommand = hooks['cat-cafe-native-effect'].PreToolUse[0].hooks[0].command;
+      assert.ok(guardCommand.endsWith(`'read-only' '${launch.env.HOME}' '${realpathSync(f.workspace)}'`), guardCommand);
     } finally {
       f.cleanup();
     }
@@ -375,7 +400,7 @@ describe('F325 one-turn native AGY carrier', () => {
     const calls = [];
     const f = fixture(async (options) => {
       calls.push(options);
-      return '# Identity\nHOST-COMPILED-NATIVE-L0\n';
+      return '# Identity\nHOST-COMPILED-NATIVE-L0\n## 主人画像\n\n先讲结果。';
     });
     try {
       let prepared;
@@ -404,6 +429,13 @@ describe('F325 one-turn native AGY carrier', () => {
       assert.deepEqual(calls, [{ catId: 'gemini38', userId: 'owner-native', projection: 'owner' }]);
       assert.match(prepared.nativeInstructions[0].body, /HOST-COMPILED-NATIVE-L0/);
       assert.ok(!prepared.nativeInstructions[0].body.includes('DYNAMIC-PACK'));
+      assert.equal(
+        nativeOpeningCapsuleRevision(prepared, { mode: 'cold' }, 'owner-native', {
+          readCapsule: () => ({ content: '先讲结果。', revision: 'sha256:agy-opening' }),
+        }),
+        'sha256:agy-opening',
+        'the actual AGY agent-file instructions must preserve their capsule source',
+      );
     } finally {
       f.cleanup();
     }
@@ -537,7 +569,7 @@ describe('F325 one-turn native AGY carrier', () => {
         provider: 'google',
         carrier: 'agy_stream_json',
         deliverySemantics: 'queued_internal_turn',
-        activeInvocationGuidance: 'unsupported',
+        activeInvocationGuidance: 'supported',
       });
       const notice = { text: '📬 One new message. Read the current thread with cat_cafe_get_thread_context.' };
       const actions = [];
@@ -662,6 +694,8 @@ describe('F325 one-turn native AGY carrier', () => {
 
   test('launches one native L0 session with isolated HOME, canonical tools, and typed final', async () => {
     const f = fixture();
+    const previousProxy = process.env.HTTPS_PROXY;
+    process.env.HTTPS_PROXY = 'http://native-proxy.example:8080';
     try {
       let launch;
       let prepared;
@@ -692,6 +726,7 @@ describe('F325 one-turn native AGY carrier', () => {
       assert.match(prepared.nativeInstructions[0].body, /F325-TEST-CAT/);
       assert.equal(prepared.runtime.protocol, 'stream-json');
       assert.equal(launch.env.HOME, realpathSync(join(f.base, 'profiles', 'gemini38')));
+      assert.equal(launch.env.HTTPS_PROXY, 'http://native-proxy.example:8080');
       assert.equal(launch.env.GEMINI_API_KEY, null);
       assert.equal(launch.env.CAT_CAFE_AGENT_KEY_SECRET, null);
       assert.equal(launch.env.CAT_CAFE_AGENT_KEY_FILES, null);
@@ -718,6 +753,8 @@ describe('F325 one-turn native AGY carrier', () => {
       assert.equal(events[1].content, 'Hello from native AGY.\n');
       assert.equal(events[2].errorCode, undefined);
     } finally {
+      if (previousProxy === undefined) delete process.env.HTTPS_PROXY;
+      else process.env.HTTPS_PROXY = previousProxy;
       f.cleanup();
     }
   });
@@ -948,6 +985,62 @@ test('Native archives provider frames with invocation provenance and retains unk
       events.at(-1).metadata.diagnostics.agyNative.rawArchivePath,
       'data/cli-raw-archive/native-raw-test.ndjson',
     );
+  } finally {
+    f.cleanup();
+  }
+});
+
+test('shared launch writes native AGY HTTP descriptors with original names and retires private headers', async () => {
+  const f = fixture();
+  let path;
+  try {
+    mkdirSync(join(f.workspace, '.cat-cafe'));
+    writeFileSync(
+      join(f.workspace, '.cat-cafe/capabilities.json'),
+      JSON.stringify({
+        version: 2,
+        capabilities: ['collab', 'memory', 'signals', 'limb', 'audio', 'finance'].map((name) => ({
+          id: `cat-cafe-${name}`,
+          type: 'mcp',
+          source: 'cat-cafe',
+          enabled: true,
+          mcpServer: { command: 'node', args: [] },
+        })),
+      }),
+    );
+    const events = await collect(
+      f.service.invoke('Owned HTTP launch control.', {
+        workingDirectory: f.workspace,
+        callbackEnv: {
+          CAT_CAFE_API_URL: 'http://127.0.0.1:59999',
+          CAT_CAFE_INVOCATION_ID: 'owned-agy-A',
+          CAT_CAFE_CALLBACK_TOKEN: 'owned-agy-token',
+          CAT_CAFE_CAT_ID: 'gemini38',
+          CAT_CAFE_THREAD_ID: 'owned-agy-thread',
+          CAT_CAFE_USER_ID: 'owner',
+          CAT_CAFE_MCP_TRANSPORT: 'shared',
+        },
+        spawnCliOverride: async function* (launch) {
+          path = join(geminiDir(launch), 'config/mcp_config.json');
+          const servers = JSON.parse(readFileSync(path, 'utf8')).mcpServers;
+          assert.equal(Object.keys(servers).length, 6);
+          for (const [name, server] of Object.entries(servers)) {
+            assert.equal(server.command, undefined);
+            assert.equal(new URL(server.serverUrl).searchParams.get('family'), name.slice('cat-cafe-'.length));
+            assert.equal(server.headers['x-invocation-id'], 'owned-agy-A');
+            assert.equal(server.headers['x-callback-token'], 'owned-agy-token');
+          }
+          assert.ok(!JSON.stringify({ args: launch.args, env: launch.env }).includes('owned-agy-token'));
+          yield* fakeEvents(launch.args[launch.args.indexOf('--agent') + 1], launch.cwd, 'owned-agy-session', 'Done.');
+        },
+      }),
+    );
+    assert.equal(
+      events.some((x) => x.type === 'error'),
+      false,
+      JSON.stringify(events),
+    );
+    assert.ok(path && !existsSync(path), 'private native config follows the existing turn owner');
   } finally {
     f.cleanup();
   }

@@ -1,4 +1,5 @@
 import type { ApprovalPublication, DispatchProposal } from '@cat-cafe/shared';
+import type { SettledHistoryPageOptions, SettledHistorySourcePage } from '../../../../utils/settled-history-page.js';
 import type { OwnerAuthProvenance } from '../../../cats/services/owner-auth-provenance.js';
 import type { ApprovalPublicationStore } from '../../ports/ApprovalPublicationStore.js';
 import type {
@@ -36,6 +37,10 @@ export interface IDispatchProposalStore extends ApprovalPublicationStore {
   getNegativeAuthorizationLegacyCutoverAt(): Promise<number | undefined>;
   establishNegativeAuthorizationLegacyCutoverAt(cutoverAt: number): Promise<number>;
   rebuildNegativeAuthorizationIndexes(): Promise<{ exactIndexed: number; legacyIndexed: number }>;
+  listSettledPage?(
+    owner: string,
+    options: SettledHistoryPageOptions,
+  ): SettledHistorySourcePage<DispatchProposal> | Promise<SettledHistorySourcePage<DispatchProposal>>;
   listSettledByUser(userId: string, limit: number): Promise<DispatchProposal[]>;
   getPublication(proposalId: string): Promise<ApprovalPublication | null>;
 }

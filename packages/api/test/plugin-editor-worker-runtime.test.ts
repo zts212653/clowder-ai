@@ -19,7 +19,7 @@ const success =
 
 async function setup(t: TestContext, worker = success, declaredIntegrity?: string) {
   const manifest = staticEditorManifest();
-  const contribution = manifest.contributions![0];
+  const contribution = manifest.contributions?.[0];
   assert.equal(contribution.type, 'content-editor-provider');
   if (contribution.type !== 'content-editor-provider') throw new Error('fixture');
   contribution.semanticMaterializer = {
@@ -56,7 +56,6 @@ async function setup(t: TestContext, worker = success, declaredIntegrity?: strin
     providerId: 'docx',
     packageDigest: handle.packageDigest,
     providerVersion: handle.providerVersion,
-    grantRevision: handle.grantRevision,
     lifecycleRevision: handle.lifecycleRevision,
     executionLeaseDigest: `sha256:${createHash('sha256').update(handle.executionLease).digest('hex')}`,
   };

@@ -33,6 +33,21 @@ describe('background system_info protocol fallback', () => {
     { type: 'context_presentation_receipt', v: 1, invocationId: 'inv-receipt' },
     { type: 'context_continuity', v: 1, invocationId: 'inv-continuity' },
     { type: 'future_internal_protocol_event', v: 1 },
+    {
+      type: 'routing_preflight',
+      target: {
+        targetCatId: 'codex61-sol',
+        disposition: 'warned',
+        reasons: [
+          { code: 'routing_signal_recovered', summary: '已恢复 9 条历史状态记录', sourceRefs: ['history:1'] },
+          {
+            code: 'routing_capacity_unverified',
+            summary: 'Execution capacity is unverified (pool applicability unknown); account observation is fresh',
+            sourceRefs: ['capacity:1'],
+          },
+        ],
+      },
+    },
   ])('fails closed for unprojected structured protocol $type', (payload) => {
     expect(consume(JSON.stringify(payload)).consumed).toBe(true);
   });

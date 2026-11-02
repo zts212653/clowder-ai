@@ -4,8 +4,10 @@ import { useState } from 'react';
 import { useCoCreatorDisplay } from '@/hooks/useCoCreatorConfig';
 import { useChatStore } from '@/stores/chatStore';
 import { useTaskStore } from '@/stores/taskStore';
+import { useShellPresentation } from './shell/shell-presentation';
 import { TaskCard } from './TaskCard';
 import { TaskComposer } from './TaskComposer';
+import { YarnBallPanel } from './yarn-ball/YarnBallPanel';
 
 const STORAGE_KEY = 'taskboard-collapsed';
 
@@ -100,13 +102,20 @@ function handleStatusChange(taskId: string, newStatus: string) {
   fetch(`/api/tasks/${taskId}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ status: newStatus }),
+    body: JSON.stringify({
+      status: newStatus,
+      expectedOwnerRevision: useTaskStore.getState().tasks.find((task) => task.id === taskId)?.ownerRevision ?? 0,
+    }),
   }).catch(() => {
     /* socket task_updated will sync state */
   });
 }
 
 export function TaskBoardPanel() {
+  return useShellPresentation() === 'v2' ? <YarnBallPanel /> : <ClassicTaskBoardPanel />;
+}
+
+function ClassicTaskBoardPanel() {
   const tasks = useTaskStore((s) => s.tasks);
   const threadId = useChatStore((s) => s.currentThreadId);
   const [collapsed, setCollapsed] = useState<Record<SectionKey, boolean>>(getDefaultCollapsed);

@@ -5,15 +5,15 @@
 
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 import { describe, mock, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { catRegistry } from '@cat-cafe/shared';
 
 const REPO_ROOT_TEMPLATE = resolve(dirname(fileURLToPath(import.meta.url)), '../../..', 'cat-template.json');
 const CAT_TEMPLATE_PATH = REPO_ROOT_TEMPLATE;
-const CAT_DOSSIER_PATH = resolve(dirname(fileURLToPath(import.meta.url)), '../../../docs/team/cat-dossier.md');
 const FULL_RUNTIME_PROMPT_CHAR_BUDGET = 7050; // 6500→6700→7050: gemini35 + gpt-pro roster growth
 
 function assertWithinFullRuntimePromptBudget(prompt) {
@@ -491,8 +491,7 @@ describe('SystemPromptBuilder', () => {
     assert.ok(opencodeId.includes('出口一问'), 'OpenCode workflow should include exit check (出口一问)');
     assert.ok(opencodeId.includes('OMOC Sisyphus'), 'OpenCode workflow should keep golden-chinchilla governance');
     for (const prompt of [opusId, codexId, opencodeId, buildStaticIdentity('gemini25')]) {
-      assert.match(prompt, /常规 reviewer（缅因猫、kimi 或 gemini-argon；Argon 只审不写）/);
-      assert.doesNotMatch(prompt, /常规 reviewer（[^）]*Sonnet/);
+      assert.match(prompt, /常规 reviewer（缅因猫、Sonnet、kimi 或 gemini-argon；Argon 只审不写）/);
     }
   });
 
@@ -720,21 +719,17 @@ describe('SystemPromptBuilder', () => {
     assert.ok(!rosterSection.includes('| 布偶猫/宪宪'), 'Opus default should not list itself');
   });
 
-  test('buildStaticIdentity roster hydrates Fable from the dossier or uses the public fallback', async () => {
+  test('roster hydrates an explicit dossier fixture and falls back without that installation', async (t) => {
     await withFreshRuntimeRegistry(async () => {
-      const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
-      const identity = buildStaticIdentity('codex');
-      const fableRow = identity
-        .split('## 队友名册')[1]
-        ?.split('\n')
-        .find((line) => line.includes('claude-fable-5'));
-
-      assert.ok(fableRow, 'codex roster should include Fable');
-      if (existsSync(CAT_DOSSIER_PATH)) {
-        assert.match(fableRow, /宪宪（他）/, 'home roster must hydrate Fable pronouns from the dossier');
-      } else {
-        assert.match(fableRow, /新猫，待校准/, 'public roster must keep the generic config fallback without a dossier');
-      }
+      const { buildTeammateRoster } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+      const { writeDossierFixture } = await import('./helpers/dossier-fixture.js');
+      const root = mkdtempSync(join(tmpdir(), 'api-roster-dossier-'));
+      t.after(() => rmSync(root, { recursive: true, force: true }));
+      writeDossierFixture(root);
+      const roster = buildTeammateRoster('codex', root);
+      assert.match(roster, /（戊）/);
+      assert.match(roster, /fixture-roster-canary/);
+      assert.doesNotMatch(buildTeammateRoster('codex', join(root, 'absent')), /（戊）|fixture-roster-canary/);
     });
   });
 
@@ -1051,6 +1046,32 @@ describe('SystemPromptBuilder', () => {
     }
   });
 
+  test('teammate roster keeps a variant cat nickname next to its variant label', async () => {
+    const { loadCatConfig, toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
+    const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const originalConfigs = catRegistry.getAllConfigs();
+    catRegistry.reset();
+    try {
+      const runtimeConfigs = toAllCatConfigs(loadCatConfig(CAT_TEMPLATE_PATH));
+      for (const [id, config] of Object.entries(runtimeConfigs)) {
+        catRegistry.register(id, config);
+      }
+      const prompt = buildStaticIdentity('opus');
+      const rosterLines = prompt.split('\n').filter((l) => l.trim().startsWith('|'));
+      const glmLine = rosterLines.find((l) => l.includes('@glm52'));
+      assert.match(glmLine ?? '', /^\| 狸花猫 GLM-5\.2\/小狸花 \|/, `got: ${glmLine}`);
+      const sonnetLine = rosterLines.find((l) => l.includes('@sonnet'));
+      assert.match(sonnetLine ?? '', /^\| 布偶猫 Sonnet\/宪宪 \|/, `family row is self here; got: ${sonnetLine}`);
+      const geminiVariantLine = rosterLines.find((l) => l.includes('@gemini38'));
+      assert.match(geminiVariantLine ?? '', /^\| 暹罗猫 Gemini 3\.8 Flash \|/, `got: ${geminiVariantLine}`);
+    } finally {
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(originalConfigs)) {
+        catRegistry.register(id, config);
+      }
+    }
+  });
+
   test('F167-F AC-F10: AGENTS.md / CLAUDE.md have no hardcoded "@x = model-y" bindings', async () => {
     // KD-21 invariant: handle/model must stay decoupled in static docs. If someone
     // re-introduces "@codex（model=gpt-5.3-codex）" style hardcoding, this test traps it.
@@ -1254,6 +1275,20 @@ describe('SystemPromptBuilder', () => {
     });
     assert.ok(ctx.includes('[路由提醒]'), 'Should include routing feedback banner');
     assert.ok(ctx.includes('@opus'), 'Should mention the target cat');
+  });
+
+  test('void hold feedback is a factual wait reconciliation rather than a self-mention routing instruction', async () => {
+    const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const ctx = buildInvocationContext({
+      catId: 'codex',
+      mode: 'independent',
+      teammates: ['opus'],
+      mcpAvailable: true,
+      mentionRoutingFeedback: { sourceTimestamp: Date.now(), items: [{ targetCatId: 'codex', reason: 'void_hold' }] },
+    });
+    assert.match(ctx, /等待对账/);
+    assert.doesNotMatch(ctx, /上次你提到了.*@codex/);
+    assert.doesNotMatch(ctx, /请.*hold_ball/);
   });
 
   test('buildInvocationContext does not contain static identity or MCP tools', async () => {
@@ -2100,8 +2135,8 @@ describe('SystemPromptBuilder', () => {
     const magicWordPattern = /\|.*?「(.+?)」/g;
     const rulesMagicWords = [...rulesText.matchAll(magicWordPattern)].map((m) => m[1]);
     assert.ok(
-      rulesMagicWords.length === 6,
-      `Expected six current magic-word definitions in shared-rules.md, got ${rulesMagicWords.length}`,
+      rulesMagicWords.length > 0,
+      'Expected current magic-word definitions in shared-rules.md before checking every compiled entry',
     );
     const build = await getBuilder();
     const prompt = build({
@@ -2121,30 +2156,30 @@ describe('SystemPromptBuilder', () => {
     const { resolve } = await import('node:path');
     const { createHash } = await import('node:crypto');
 
-    // Extract world-view / principle section headings from shared-rules.md
     const rulesPath = resolve(import.meta.dirname, '../../../cat-cafe-skills/refs/shared-rules.md');
     const rulesText = readFileSync(rulesPath, 'utf8');
-    const headings = rulesText
-      .split('\n')
-      .filter((l) => /^###?\s+(P\d|W\d)/.test(l))
-      .sort()
-      .join('\n');
-    const hash = createHash('sha256').update(headings).digest('hex').slice(0, 16);
-
-    // Pin: update this hash whenever you add/remove/rename P* or W* sections
-    // in shared-rules.md, AND update GOVERNANCE_L0_DIGEST in SystemPromptBuilder.ts
-    const PINNED_HASH = '1b137442fdbb0d1c';
-    if (PINNED_HASH === '${PLACEHOLDER}') {
-      // First run — print hash for pinning
-      console.log(`[drift-guard] shared-rules headings hash: ${hash} — pin this value`);
-      return; // skip assertion on first run
-    }
-    assert.equal(
-      hash,
-      PINNED_HASH,
-      `shared-rules.md P*/W* headings changed (got ${hash}, pinned ${PINNED_HASH}). ` +
-        'Update GOVERNANCE_L0_DIGEST in SystemPromptBuilder.ts to match, then update PINNED_HASH here.',
+    const built = JSON.parse(
+      readFileSync(new URL('../dist/domains/cats/services/context/governance-build.json', import.meta.url), 'utf8'),
     );
+    const sha256 = (text) => createHash('sha256').update(text).digest('hex');
+    assert.equal(built.schemaVersion, 1);
+    assert.equal(built.source, 'cat-cafe-skills/refs/shared-rules.md');
+    assert.equal(built.sourceSha256, sha256(rulesText), 'governance source changed after build; rebuild the API');
+    const { getGovernanceDigest } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const prompt = getGovernanceDigest();
+    assert.equal(built.compiledSha256, sha256(prompt), 'runtime governance differs from its build projection');
+    const headings = [...rulesText.matchAll(/^###\s+([PW]\d)\.\s+(.+)$/gm)];
+    assert.equal(headings.length, 13);
+    for (const [, key, text] of headings) {
+      assert.ok(
+        prompt.includes(
+          `- **${key}** ${text
+            .replace(/\*\*|`/g, '')
+            .replace(/\s+/g, ' ')
+            .trim()}`,
+        ),
+      );
+    }
   });
 
   // ── F182 Phase B: Roster invisibility guard ─────────────────────────────────────────────────

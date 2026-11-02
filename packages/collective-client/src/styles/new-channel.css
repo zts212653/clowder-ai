@@ -1,0 +1,200 @@
+.destination-list-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 28px;
+  padding: 0 4px 0 12px;
+}
+
+.destination-list-heading > p {
+  margin: 0;
+  color: var(--cafe-text-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.destination-list-heading button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  color: var(--cafe-text-muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.destination-list-heading button:hover,
+.destination-list-heading button:focus-visible {
+  color: var(--cafe-text);
+  background: var(--console-hover-bg);
+}
+
+.new-channel-dialog::backdrop {
+  background: var(--console-overlay-backdrop);
+}
+
+.new-channel-dialog {
+  margin: auto;
+  width: min(480px, 100%);
+  max-width: none;
+  max-height: calc(100dvh - 32px);
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--console-border-strong);
+  border-radius: 12px;
+  color: var(--cafe-text);
+  background: var(--console-card-bg);
+  box-shadow: var(--shadow-elevation-3);
+}
+
+.new-channel-dialog > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid var(--console-border-soft);
+}
+
+.new-channel-dialog h2 {
+  margin: 0;
+  font-family: "Source Serif 4", "Songti SC", "Noto Serif CJK SC", Georgia, serif;
+  font-size: 22px;
+  font-weight: 400;
+  line-height: 1.25;
+  letter-spacing: -0.2px;
+}
+
+.new-channel-dialog > header button {
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--cafe-text-muted);
+  background: transparent;
+  font-size: 20px;
+  cursor: pointer;
+}
+
+.new-channel-dialog > form {
+  display: grid;
+  gap: 10px;
+  max-height: calc(100dvh - 102px);
+  padding: 18px 20px 20px;
+  overflow-y: auto;
+}
+
+.new-channel-dialog label {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.new-channel-name {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  border: 1px solid var(--console-border-strong);
+  border-radius: 8px;
+  background: var(--console-card-bg);
+}
+
+.new-channel-name:focus-within {
+  outline: 2px solid var(--cafe-accent);
+  outline-offset: 2px;
+}
+
+.new-channel-name[data-invalid="true"] {
+  border-color: var(--semantic-critical);
+}
+
+.new-channel-name > span {
+  padding-left: 12px;
+  color: var(--cafe-text-muted);
+}
+
+.new-channel-name input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  outline: 0;
+  height: 30px;
+  padding: 0 12px 0 6px;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+}
+
+.new-channel-field-error,
+.new-channel-submit-error,
+.new-channel-visibility {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.new-channel-field-error,
+.new-channel-submit-error {
+  color: var(--cafe-text);
+}
+
+.new-channel-field-error button {
+  border: 0;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.new-channel-visibility {
+  color: var(--cafe-text-muted);
+}
+
+.new-channel-submit-error {
+  border-left: 3px solid var(--semantic-critical);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--semantic-critical-surface);
+}
+
+.new-channel-dialog footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 8px;
+}
+
+.new-channel-dialog footer button {
+  height: 32px;
+  border: 1px solid var(--console-border-strong);
+  border-radius: 8px;
+  padding: 0 12px;
+  color: var(--cafe-text);
+  background: var(--console-card-bg);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.new-channel-dialog footer button.primary {
+  border-color: var(--cafe-accent);
+  color: var(--console-on-accent);
+  background: var(--cafe-accent);
+}
+
+.new-channel-dialog button:disabled,
+.new-channel-dialog input:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+@media (max-width: 520px) {
+  .new-channel-dialog {
+    width: calc(100% - 16px);
+    max-height: calc(100dvh - 16px);
+    margin: auto auto 8px;
+    border-radius: 12px 12px 8px 8px;
+  }
+}

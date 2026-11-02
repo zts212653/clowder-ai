@@ -15,9 +15,8 @@ const policy = () => ({
   mode: 'plugin_native',
   pluginInstanceId: 'instance',
   contributionId: 'native',
-  actionMethods: ['native.read'],
 });
-const target = () => ({ instanceId: 'instance', contributionId: 'native', method: 'native.read' });
+const target = () => ({ instanceId: 'instance', contributionId: 'native' });
 const route = 'POST /api/plugin-runtime/action';
 
 function admission(id = 'instance') {
@@ -41,11 +40,9 @@ function admission(id = 'instance') {
         contributions: ['native', 'other'].map((id) => ({
           type: 'mcp',
           id,
-          actions: [{ method: 'native.read' }, { method: 'native.write' }],
         })),
       },
     },
-    effectiveGrants: [],
   };
 }
 
@@ -102,23 +99,19 @@ async function fixture(t, options = {}) {
 }
 
 test('plugin native scope normalizes and survives invocation policy persistence without input aliases', async () => {
-  const input = { ...policy(), actionMethods: ['native.write', 'native.read', 'native.read'] };
-  const expected = { ...policy(), actionMethods: ['native.read', 'native.write'] };
+  const input = policy();
+  const expected = policy();
   assert.deepEqual(normalizeToolExecutionPolicy(input), expected);
   assert.deepEqual(parseToolExecutionPolicy(JSON.stringify(input)), expected);
   const registry = new InvocationRegistry();
   const issued = await registry.create('owner', 'codex', 'thread', undefined, undefined, input);
-  input.actionMethods.push('native.admin');
+  input.contributionId = 'other';
   const verified = await registry.verify(issued.invocationId, issued.callbackToken);
   assert.equal(verified.ok, true);
   assert.deepEqual(verified.record.toolExecutionPolicy, expected);
   for (const invalid of [
-    { ...policy(), actionMethods: [] },
-    { ...policy(), actionMethods: [42] },
     { ...policy(), contributionId: ' native' },
     { ...policy(), pluginInstanceId: '' },
-    { ...policy(), actionMethods: Array(257).fill('native.read') },
-    { ...policy(), allowedCallbackRoutes: ['POST /api/callbacks/post-message'] },
   ])
     assert.throws(() => normalizeToolExecutionPolicy(invalid));
 });
@@ -129,7 +122,6 @@ test('plugin policy admits only the exact Host-resolved native action target', (
     undefined,
     { ...target(), instanceId: 'foreign' },
     { ...target(), contributionId: 'other' },
-    { ...target(), method: 'native.write' },
   ]) {
     assert.equal(toolExecutionPolicyDenial(policy(), route, candidate)?.reason, 'plugin_native_tool_policy');
   }
@@ -141,16 +133,16 @@ test('plugin policy admits only the exact Host-resolved native action target', (
 test('real native route checks token-bound instance and contribution, not target claims in tool input', async (t) => {
   const f = await fixture(t);
   assert.equal((await f.request()).statusCode, 200);
+  assert.equal((await f.request('instance', 'native', 'native.write')).statusCode, 200);
   for (const args of [
     ['foreign', 'native'],
     ['instance', 'other'],
-    ['instance', 'native', 'native.write'],
   ]) {
     const [instanceId, contributionId, method = 'native.read'] = args;
     const response = await f.request(instanceId, contributionId, method, target());
     assert.equal(response.statusCode, 403, response.body);
   }
-  assert.equal(f.entered(), 1);
+  assert.equal(f.entered(), 2);
 });
 
 test('native target policy is rechecked after awaited admission and after the package result', async (t) => {
@@ -164,7 +156,7 @@ test('native target policy is rechecked after awaited admission and after the pa
   assert.equal(before.entered(), 0);
   const after = await fixture(t, {
     inHandler: async (record) => {
-      record.toolExecutionPolicy = { ...policy(), actionMethods: ['native.write'] };
+      record.toolExecutionPolicy = { ...policy(), pluginInstanceId: 'foreign' };
     },
   });
   const withheld = await after.request();
@@ -172,7 +164,7 @@ test('native target policy is rechecked after awaited admission and after the pa
   assert.equal(withheld.body.includes('private result'), false);
 });
 
-test('read-only callback exceptions do not bypass a plugin-native method scope', async (t) => {
+test('read-only callback exceptions do not bypass a plugin-native instance scope', async (t) => {
   const app = Fastify();
   t.after(() => app.close());
   let handled = false;

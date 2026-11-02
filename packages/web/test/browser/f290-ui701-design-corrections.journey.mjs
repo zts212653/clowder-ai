@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { chromium } from 'playwright';
 import { collectiveArtifactOwnerFixture } from '../../../api/test/collective-artifact-owner.fixture.ts';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
 import { reserveNativeOwnerPorts, startNativeOwner } from './f290-native-owner.harness.mjs';
 
 test(

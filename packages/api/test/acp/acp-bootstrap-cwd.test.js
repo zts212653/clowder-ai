@@ -58,7 +58,17 @@ describe('acp bootstrap cwd', () => {
 
   // All resolveAcpBootstrapCwd() calls in this suite go through the injected
   // throwaway root — the production root is never created, listed, or deleted.
-  const testBootstrapCwd = (projectRoot, profile) => resolveAcpBootstrapCwd(projectRoot, profile, testBootstrapRoot);
+  const testBootstrapCwd = (projectRoot, profile) => {
+    const previous = process.env.CAT_CAFE_WINDOWS_ACP_BOOTSTRAP_MODE;
+    // Directory naming and leaf privacy do not attest the runner's Temp ancestors.
+    if (process.platform === 'win32') process.env.CAT_CAFE_WINDOWS_ACP_BOOTSTRAP_MODE = 'trusted-host';
+    try {
+      return resolveAcpBootstrapCwd(projectRoot, profile, testBootstrapRoot);
+    } finally {
+      if (previous === undefined) delete process.env.CAT_CAFE_WINDOWS_ACP_BOOTSTRAP_MODE;
+      else process.env.CAT_CAFE_WINDOWS_ACP_BOOTSTRAP_MODE = previous;
+    }
+  };
 
   before(() => {
     // Portable throwaway root — never a hard-coded '/tmp' (PR #1207 sweep):
@@ -288,13 +298,19 @@ describe('acp bootstrap cwd', () => {
       indexSource.includes('resolveActiveProjectRoot'),
       'REGRESSION: index.ts must be able to resolve the active runtime project root during registry sync.',
     );
-    assert.ok(
-      indexSource.includes('getAcpConfig(id, projectRoot)'),
-      'REGRESSION: syncAgentRegistry must pass the active project root to getAcpConfig().',
-    );
-    assert.ok(
-      !indexSource.includes('const acpConfig = getAcpConfig(id);'),
-      'REGRESSION: syncAgentRegistry must not read ACP config from the default template root.',
+    const registeredCalls = [...indexSource.matchAll(/\bgetRegisteredAcpConfig\(([^)]*)\)/g)];
+    assert.ok(registeredCalls.length > 0, 'registry sync must read ACP config through the registered source');
+    for (const call of registeredCalls) {
+      assert.equal(
+        call[1].replace(/\s/g, ''),
+        'id,projectRoot',
+        'REGRESSION: every registered ACP lookup must receive the active project root.',
+      );
+    }
+    assert.doesNotMatch(
+      indexSource,
+      /\bgetAcpConfig\(/,
+      'REGRESSION: startup must not bypass the registered configuration template source.',
     );
   });
 

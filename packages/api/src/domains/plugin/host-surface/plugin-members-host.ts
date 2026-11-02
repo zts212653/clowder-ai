@@ -22,10 +22,10 @@ export interface PluginMembersServices {
 }
 export function createPluginMembersHost(deps: {
   readonly services: PluginMembersServices | undefined;
-  readonly assertCurrent: (capabilities: readonly string[]) => Promise<void>;
+  readonly assertCurrent: () => Promise<void>;
 }): PluginMembersHost {
   async function read(id?: string): Promise<readonly PluginMember[]> {
-    await deps.assertCurrent(['thread.listMetadata']);
+    await deps.assertCurrent();
     const services = deps.services;
     if (!services) throw new ExternalPluginRuntimeError('UNSUPPORTED_TRANSPORT', 'Host member directory unavailable');
     const rows = services.listCats().filter((row) => id === undefined || row.catId === id);
@@ -44,7 +44,7 @@ export function createPluginMembersHost(deps: {
         };
       }),
     );
-    await deps.assertCurrent(['thread.listMetadata']);
+    await deps.assertCurrent();
     return result;
   }
   return {

@@ -10,7 +10,8 @@
  *   files / changes / git / terminal / browser ........ rows below (代码)
  *   status (状态与会话) / trajectory / theater (回放) .... rows below (活动)
  *   recall (记忆) / voice (语音与会议) / films / team ...... rows below (其他)
- *   tasks / artifacts ................................. header 任务 / 作品 (HeaderCounts → setWorkspaceMode)
+ *   tasks ............................................. header 毛线球 and the row below, same mode:tasks
+ *   artifacts ......................................... header 作品 (HeaderCounts → setWorkspaceMode)
  *   approval / needs-me ............................... mailbox 待办 rows (打开审批列表 / 打开待处理列表)
  *   schedule / eval / community / capability-evolution . rows below, through their original destinations
  *   product-schedule .................................. To-do and this page's Schedule link
@@ -25,7 +26,7 @@ import { type HomeCopy, homeCopy } from './workspace-home.shell-copy';
 
 export type HomeGroupId = 'code' | 'activity' | 'other';
 
-export type HomeRowIcon = ShellGlyphName | 'memory';
+export type HomeRowIcon = ShellGlyphName | 'memory' | 'yarnBall';
 
 /** A row's words live in the dictionary (`rows.<copyKey>`), in both languages; the row itself only says which. */
 export type HomeRowCopyKey = keyof HomeCopy['rows'];
@@ -71,6 +72,7 @@ export const HOME_ROWS: readonly HomeRow[] = [
   destinationRow('activity', 'play', 'action', 'theater'),
   destinationRow('activity', 'grid', 'mode', 'schedule', '定时任务 cron scheduling'),
   destinationRow('activity', 'checkSquare', 'mode', 'eval', '周期评估 periodic evaluations ledger 台账'),
+  destinationRow('activity', 'yarnBall', 'mode', 'tasks'),
   destinationRow('code', 'folder', 'surface', 'files'),
   // The page lists the worktree's modified files (git status), not a per-conversation set: say what it shows.
   destinationRow('code', 'filePen', 'surface', 'changes', '修改'),

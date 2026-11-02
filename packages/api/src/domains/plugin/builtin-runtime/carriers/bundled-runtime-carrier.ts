@@ -1,5 +1,3 @@
-import { isDeepStrictEqual } from 'node:util';
-import { WIRE_METHOD_REGISTRY } from '@clowder-ai/plugin-contract';
 import {
   attemptPluginAction,
   invocationNotStarted,
@@ -8,6 +6,7 @@ import {
   settlePluginInvocation,
 } from '../../carrier/host-invocation.js';
 import type { PluginRuntimeAdmission, PluginRuntimeCarrier } from '../../carrier/runtime-carrier.js';
+import type { SharedMcpFactory } from '../../declared/shared-mcp-factory.js';
 import { startFailureRecord } from '../../diagnostics/plugin-start-failure.js';
 import { ExternalPluginRuntimeError } from '../../external-runtime/types.js';
 import type { PluginInventoryStore } from '../../host-inventory/ports.js';
@@ -21,17 +20,14 @@ import type { ExecutablePluginPackageRecord, PluginInstanceRecord, RuntimeState 
  * (F202 Train C1 terminal contract, clause 6).
  */
 export interface BundledPluginRuntime {
+  resolveMcpFactory?(pluginInstanceId: string, contributionId: string): Promise<SharedMcpFactory | undefined>;
   claims(packageRecord: Pick<ExecutablePluginPackageRecord, 'manifest'>): boolean;
   /**
    * The carrier hands over the package record it fenced, so a runtime that needs the
    * manifest reads the Host's admitted truth instead of re-deriving one that could have
    * drifted since the fence was taken.
    */
-  start(
-    pluginInstanceId: string,
-    packageRecord: ExecutablePluginPackageRecord,
-    effectiveGrants: readonly string[],
-  ): Promise<void>;
+  start(pluginInstanceId: string, packageRecord: ExecutablePluginPackageRecord): Promise<void>;
   readStream?(
     pluginInstanceId: string,
     reference: string,
@@ -39,11 +35,7 @@ export interface BundledPluginRuntime {
   ): AsyncIterable<Uint8Array>;
   stop(pluginInstanceId: string, reason: string): Promise<void>;
   configRefresh?(pluginInstanceId: string): Promise<void>;
-  uninstall?(
-    pluginInstanceId: string,
-    packageRecord: ExecutablePluginPackageRecord,
-    effectiveGrants: readonly string[],
-  ): Promise<void>;
+  uninstall?(pluginInstanceId: string, packageRecord: ExecutablePluginPackageRecord): Promise<void>;
   invoke?(pluginInstanceId: string, method: string, params: unknown): Promise<unknown>;
   /**
    * F202 W2-3 h3b: invoke, also saying whether the package's action was entered when it fails.
@@ -61,10 +53,8 @@ export interface BundledPluginRuntimeCarrierOptions {
 }
 
 interface RuntimeAuthority {
-  readonly grantRevision: number;
   readonly instance: PluginInstanceRecord;
   readonly packageRecord: ExecutablePluginPackageRecord;
-  readonly effectiveGrants: readonly string[];
 }
 
 interface ActiveBundled {
@@ -89,12 +79,22 @@ export class BundledPluginRuntimeCarrier implements PluginRuntimeCarrier {
     this.#now = options.now ?? Date.now;
   }
 
+  async resolveMcpFactory(pluginInstanceId: string, contributionId: string): Promise<SharedMcpFactory | undefined> {
+    await this.authority(pluginInstanceId);
+    const active = this.#active.get(pluginInstanceId);
+    if (!active?.valid || active.starting || active.stopping) return undefined;
+    const factory = await active.runtime.resolveMcpFactory?.(pluginInstanceId, contributionId);
+    await this.authority(pluginInstanceId);
+    if (this.#active.get(pluginInstanceId) !== active || !active.valid) return undefined;
+    return factory;
+  }
+
   claims({ packageRecord }: PluginRuntimeAdmission): boolean {
     const { runtime } = packageRecord.manifest;
     return (runtime === undefined || runtime.transport === 'builtin') && this.#runtimeFor(packageRecord) !== undefined;
   }
 
-  async start(pluginInstanceId: string): Promise<unknown> {
+  async start(pluginInstanceId: string, admitContributions?: () => Promise<void>): Promise<unknown> {
     const epoch = this.#startEpoch.get(pluginInstanceId) ?? 0;
     const authority = await this.authority(pluginInstanceId);
     if (epoch !== (this.#startEpoch.get(pluginInstanceId) ?? 0)) {
@@ -139,7 +139,7 @@ export class BundledPluginRuntimeCarrier implements PluginRuntimeCarrier {
     try {
       await this.setBundledRuntimeState(authority, 'starting');
       try {
-        await runtime.start(pluginInstanceId, authority.packageRecord, authority.effectiveGrants);
+        await runtime.start(pluginInstanceId, authority.packageRecord);
       } catch (error) {
         packageFailed = true;
         throw error;
@@ -147,6 +147,12 @@ export class BundledPluginRuntimeCarrier implements PluginRuntimeCarrier {
       if (this.#active.get(pluginInstanceId) !== active || !active.valid) {
         throw new ExternalPluginRuntimeError('INSTANCE_NOT_RUNNABLE', 'builtin startup was cancelled');
       }
+      // The module is available to the Host, but its factories/static contributions
+      // must finish admission before the owner-facing card can promise "running".
+      active.starting = false;
+      await admitContributions?.();
+      if (this.#active.get(pluginInstanceId) !== active || !active.valid)
+        throw new ExternalPluginRuntimeError('INSTANCE_NOT_RUNNABLE', 'builtin startup was cancelled');
       await this.setBundledRuntimeState(authority, 'healthy');
       if (!active.valid) throw new ExternalPluginRuntimeError('INSTANCE_NOT_RUNNABLE', 'builtin startup was cancelled');
       return { pluginInstanceId, closed };
@@ -176,11 +182,9 @@ export class BundledPluginRuntimeCarrier implements PluginRuntimeCarrier {
         // Retain the invalid activation and unresolved closed handle for an explicit stop retry.
         throw new AggregateError([error, cleanupError], 'builtin start and cleanup failed');
       }
-      await this.setBundledRuntimeState(
-        authority,
-        'stopped',
-        packageFailed ? this.#startFailure(error, authority.instance.packageDigest) : undefined,
-      ).catch(() => undefined);
+      await this.setBundledRuntimeState(authority, 'stopped', packageFailed ? this.#startFailure() : undefined).catch(
+        () => undefined,
+      );
       if (this.#active.get(pluginInstanceId) === active) this.#active.delete(pluginInstanceId);
     }
     active.resolveClosed();
@@ -217,7 +221,7 @@ export class BundledPluginRuntimeCarrier implements PluginRuntimeCarrier {
     }
     if (reason === 'owner_uninstalled') {
       const runtime = this.#runtimeFor(authority.packageRecord);
-      await runtime?.uninstall?.(pluginInstanceId, authority.packageRecord, authority.effectiveGrants);
+      await runtime?.uninstall?.(pluginInstanceId, authority.packageRecord);
     }
   }
 
@@ -265,19 +269,10 @@ export class BundledPluginRuntimeCarrier implements PluginRuntimeCarrier {
    * `not_started`; past them, the runtime reports where its call failed.
    */
   async attemptInvoke(pluginInstanceId: string, method: string, params: unknown): Promise<PluginInvocationOutcome> {
-    let authority: RuntimeAuthority;
     try {
-      authority = await this.authority(pluginInstanceId);
+      await this.authority(pluginInstanceId);
     } catch (error) {
       return invocationNotStarted(error);
-    }
-    if (
-      method === 'host.messaging.deliver' &&
-      !authority.effectiveGrants.includes(WIRE_METHOD_REGISTRY['host.messaging.deliver'].grant)
-    ) {
-      return invocationNotStarted(
-        new ExternalPluginRuntimeError('DELIVERY_REJECTED', `${pluginInstanceId} lacks Host delivery authority`),
-      );
     }
     const active = this.#active.get(pluginInstanceId);
     if (!active?.valid) {
@@ -318,11 +313,10 @@ export class BundledPluginRuntimeCarrier implements PluginRuntimeCarrier {
    * honestly null. What the owner needs is the same thing the process carrier gives them:
    * a durable record that this start attempt failed, so a plugin that throws while loading
    * is recoverable by disabling or uninstalling it rather than silently not running
-   * (F202 Train C1 terminal contract, clause 6). When the Host refused the package a capability,
-   * the record says which (F202 W2-6b).
+   * (F202 Train C1 terminal contract, clause 6).
    */
-  #startFailure(error: unknown, packageDigest: string): ReturnType<typeof startFailureRecord> {
-    return startFailureRecord(error, this.#now(), packageDigest);
+  #startFailure(): ReturnType<typeof startFailureRecord> {
+    return startFailureRecord(this.#now());
   }
 
   #runtimeFor(packageRecord: Pick<ExecutablePluginPackageRecord, 'manifest'>): BundledPluginRuntime | undefined {
@@ -340,7 +334,6 @@ export class BundledPluginRuntimeCarrier implements PluginRuntimeCarrier {
     const packageRecord = instance
       ? snapshot.packages.find((candidate) => candidate.packageDigest === instance.packageDigest)
       : undefined;
-    const grants = snapshot.grants.find((candidate) => candidate.pluginInstanceId === pluginInstanceId);
     const activationAllowed =
       instance?.activationState === 'enabled' ||
       (allowStopping && ['disabling', 'error', 'disabled'].includes(instance?.activationState ?? ''));
@@ -361,8 +354,6 @@ export class BundledPluginRuntimeCarrier implements PluginRuntimeCarrier {
     return {
       instance,
       packageRecord,
-      effectiveGrants: grants?.effectiveGrants ?? [],
-      grantRevision: grants?.grantRevision ?? 0,
     };
   }
 
@@ -386,7 +377,7 @@ export class BundledPluginRuntimeCarrier implements PluginRuntimeCarrier {
         );
       }
       const base = failure
-        ? withRuntimeFailure(current, failure.record, failure.detail)
+        ? withRuntimeFailure(current, failure.record)
         : runtimeState === 'starting'
           ? withoutRuntimeFailure(current)
           : current;

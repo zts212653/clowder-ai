@@ -5,6 +5,7 @@
 
 import { z } from 'zod';
 import { catIdSchema } from '../registry/cat-id-schema.js';
+import { messageStickerSchema } from '../types/message-stickers.js';
 import { ContextAttachmentContentSchema, ContextAttachmentsSchema } from './context-attachment.schema.js';
 
 /**
@@ -61,6 +62,7 @@ export const ImageContentSchema = z.object({
     z.string().regex(/^hmr:hmr_[A-Za-z0-9_-]{32}$/, 'Expected an opaque Host media reference'),
   ]),
   alt: z.string().optional(),
+  sticker: messageStickerSchema.optional(),
 });
 
 /**

@@ -49,16 +49,21 @@ describe('usePinnedSections', () => {
     expect(state.isPinned('accounts')).toBe(false);
   });
 
-  it('starts a new installation with members and accounts pinned', () => {
+  it('starts with nothing pinned when no preference has been stored', () => {
     const state = renderHook();
 
-    expect(state.pinned).toEqual(['members', 'accounts']);
-    expect(state.isPinned('members')).toBe(true);
-    expect(state.isPinned('accounts')).toBe(true);
+    expect(state.pinned).toEqual([]);
+    expect(state.isPinned('members')).toBe(false);
+    expect(state.isPinned('accounts')).toBe(false);
   });
 
   it('persists an intentional unpin across remounts', () => {
     const state = renderHook();
+    React.act(() => {
+      state.pin('members');
+      state.pin('accounts');
+    });
+    expect(latest?.pinned).toEqual(['members', 'accounts']);
     React.act(() => state.unpin('members'));
     expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null')).toEqual(['accounts']);
 

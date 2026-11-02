@@ -1,5 +1,9 @@
 import { createHash } from 'node:crypto';
-import { mediaPublicationSourceSchema, type WorkspaceMediaSnapshotSource } from '@cat-cafe/shared';
+import {
+  mediaPublicationSourceSchema,
+  reviewedMediaTypeSchema,
+  type WorkspaceMediaSnapshotSource,
+} from '@cat-cafe/shared';
 import { validateActor } from './input-validation.js';
 import { evolutionSnapshotPublication } from './published-evolution-media.js';
 import {
@@ -101,7 +105,7 @@ function validateEvolutionOrigin(
   return true;
 }
 
-function validateWorkOrigin(scope: WorkPublicationScopeV1, publication: ContentSourcePublicationV1) {
+function validateWorkOrigin(scope: WorkPublicationScopeV1, publication: ContentSourcePublicationV1, mediaType: string) {
   requirePublicationIdentity(scope.creationOperationId, 256);
   validateActor(scope.createdBy);
   if (
@@ -109,7 +113,9 @@ function validateWorkOrigin(scope: WorkPublicationScopeV1, publication: ContentS
       (key) => !['kind', 'ownerUserId', 'threadId', 'creationOperationId', 'createdBy'].includes(key),
     ) ||
     publication.threadId !== scope.threadId ||
-    !publication.sourceRef.startsWith('workspace:') ||
+    !(mediaType === 'text/html'
+      ? publication.sourceRef === 'inline-html' && publication.artifactRef === 'inline-html'
+      : reviewedMediaTypeSchema.safeParse(mediaType).success && publication.sourceRef.startsWith('workspace:')) ||
     !/^sha256:[a-f0-9]{64}$/.test(publication.revision)
   )
     throw new TypeError('Invalid work publication');
@@ -131,6 +137,7 @@ function validateSourceScope(
 export function validateContentPublication(
   scope: ContentPublicationScopeV1 | undefined,
   publication: ContentSourcePublicationV1 | undefined,
+  mediaType: string,
 ): void {
   if (!scope && !publication) return;
   if (!scope || !publication) throw new TypeError('Media publication requires both source and authority scope');
@@ -148,7 +155,7 @@ export function validateContentPublication(
     if (publication.threadId && publication.threadId !== scope.threadId)
       throw new TypeError('Task publication thread changed');
   } else if (scope.kind === 'work') {
-    validateWorkOrigin(scope, publication);
+    validateWorkOrigin(scope, publication, mediaType);
     return;
   } else if (validateSourceScope(scope, publication)) return;
   if (publication.threadId) requirePublicationIdentity(publication.threadId);

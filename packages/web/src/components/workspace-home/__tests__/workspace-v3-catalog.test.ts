@@ -6,6 +6,7 @@ describe('one v3 tool catalogue', () => {
     expect(HOME_ROWS.map((row) => row.copyKey).sort()).toEqual(
       [
         'status',
+        'tasks',
         'trajectory',
         'theater',
         'files',

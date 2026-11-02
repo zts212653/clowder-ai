@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { dirname, join } from 'node:path';
 
 import { DaemonStateError, inspectDaemonState } from './daemon-state.mjs';
-import { identityInspectionIsUnreadable } from './process-identity.mjs';
+import { compareStableBirth, identityInspectionIsUnreadable } from './process-identity.mjs';
 import { allProcessesGone } from './process-tree.mjs';
 
 /**
@@ -73,13 +73,23 @@ export function processSetGone(record) {
 
 /** The identity we opened against, so a replacement daemon cannot inherit this operation. */
 export function frozenIdentity(state, identity) {
-  return { pid: state.pid, startedAt: identity?.startedAt, command: identity?.command };
+  return {
+    pid: state.pid,
+    startedAt: identity?.startedAt,
+    command: identity?.command,
+    ...(Number.isSafeInteger(identity?.procStartTicks) ? { procStartTicks: identity.procStartTicks } : {}),
+    ...(typeof identity?.bootId === 'string' && identity.bootId ? { bootId: identity.bootId } : {}),
+  };
 }
 
 export function identityUnchanged(frozen, state, identity) {
   if (!frozen) return false;
   if (frozen.pid !== state.pid) return false;
-  if (frozen.startedAt && identity?.startedAt && frozen.startedAt !== identity.startedAt) return false;
+  const stableBirth = compareStableBirth(frozen, identity);
+  if (stableBirth === false) return false;
+  if (stableBirth !== true && frozen.startedAt && identity?.startedAt && frozen.startedAt !== identity.startedAt) {
+    return false;
+  }
   return !(frozen.command && identity?.command && frozen.command !== identity.command);
 }
 

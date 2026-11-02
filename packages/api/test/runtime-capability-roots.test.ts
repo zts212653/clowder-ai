@@ -8,6 +8,7 @@ import { resolveInvokeCapabilityRoot } from '../src/config/capabilities/invoke-c
 import { resolveStartupCliConfigContext } from '../src/config/capabilities/startup-cli-config.js';
 import { resolveAcpMcpServers } from '../src/domains/cats/services/agents/providers/acp/acp-mcp-resolver.js';
 import { resolveProviderMcpConfigResolution } from '../src/domains/cats/services/agents/providers/provider-mcp-config.js';
+import { directMcpContract } from './helpers/direct-mcp-contract.js';
 
 async function fixture(t: TestContext) {
   const root = await mkdtemp(join(tmpdir(), 'runtime-capability-roots-'));
@@ -62,7 +63,10 @@ test('native MCP admission reads the configuration root and leaves its file unch
     mcpServerPath: join(f.dist, 'index.js'),
   });
   assert.equal(result.source, 'capabilities.json');
-  assert.deepEqual(result.servers['cat-cafe-collab'].args, [join(f.dist, 'collab.js')]);
+  const server = result.servers['cat-cafe-collab'];
+  const { upstream: spec } = directMcpContract(server);
+  assert.equal(spec.command, process.execPath);
+  assert.deepEqual(spec.args, [join(f.dist, 'collab.js')]);
   assert.ok((await readFile(f.file)).equals(before));
 });
 

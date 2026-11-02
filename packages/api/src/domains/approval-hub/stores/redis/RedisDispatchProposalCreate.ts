@@ -37,7 +37,7 @@ const CAS_CREATE_LINEAGE_LUA = `
 
   local hasDedup = ARGV[4] == '1'
   if hasDedup then
-    local existingId = redis.call('GET', KEYS[4])
+    local existingId = redis.call('GET', KEYS[5])
     if existingId then
       local existingStatus = redis.call('HGET', keyBase .. existingId, 'status')
       if existingStatus then return {'DEDUP', existingId} end
@@ -60,6 +60,10 @@ const CAS_CREATE_LINEAGE_LUA = `
     end
   end
 
+  local settledKey = KEYS[4]
+  local settledType = redis.call('TYPE', settledKey).ok
+  if settledType ~= 'none' and settledType ~= 'zset' then return redis.error_reply('history index type conflict') end
+
   local canonicalIndexCount = tonumber(ARGV[5 + oldCount])
   local fieldStart = 6 + oldCount
   local fieldArgs = {}
@@ -78,7 +82,8 @@ const CAS_CREATE_LINEAGE_LUA = `
       local staleId = ARGV[5 + i]
       local staleKey = keyBase .. staleId
       if redis.call('HGET', staleKey, 'status') == 'pending' then
-        redis.call('HSET', staleKey, 'status', 'superseded', 'supersededBy', keeperId)
+        redis.call('HSET', staleKey, 'status', 'superseded', 'supersededBy', keeperId, 'supersededAt', createdAt)
+        redis.call('ZADD', settledKey, tonumber(createdAt), staleId)
         redis.call('ZREM', pendingKey, staleId)
         removeCanonicalAdmissionIndexes(staleId)
         superseded[#superseded + 1] = staleId
@@ -90,7 +95,8 @@ const CAS_CREATE_LINEAGE_LUA = `
   if existingLineage and existingLineage ~= newId then
     local oldKey = keyBase .. existingLineage
     if redis.call('HGET', oldKey, 'status') == 'pending' then
-      redis.call('HSET', oldKey, 'status', 'superseded', 'supersededBy', newId)
+      redis.call('HSET', oldKey, 'status', 'superseded', 'supersededBy', newId, 'supersededAt', createdAt)
+      redis.call('ZADD', settledKey, tonumber(createdAt), existingLineage)
       redis.call('ZREM', pendingKey, existingLineage)
       removeCanonicalAdmissionIndexes(existingLineage)
       superseded[#superseded + 1] = existingLineage
@@ -99,8 +105,8 @@ const CAS_CREATE_LINEAGE_LUA = `
 
   redis.call('ZADD', pendingKey, tonumber(createdAt), newId)
   redis.call('SET', lineageKey, newId)
-  if hasDedup then redis.call('SET', KEYS[4], newId) end
-  local negativeAuthorizationKeyStart = hasDedup and 5 or 4
+  if hasDedup then redis.call('SET', KEYS[5], newId) end
+  local negativeAuthorizationKeyStart = hasDedup and 6 or 5
   local canonicalIndexKeyStart = #KEYS - canonicalIndexCount + 1
   for i = negativeAuthorizationKeyStart, canonicalIndexKeyStart - 1 do
     redis.call('ZADD', KEYS[i], tonumber(createdAt), newId)
@@ -236,6 +242,7 @@ export async function createRedisDispatchProposal(
         lineageRedisKey,
         pendingRedisKey,
         detailRedisKey,
+        DispatchProposalKeys.userSettled(input.ownerUserId),
         dedup.redisKey,
         ...negativeAuthorizationRedisKeys,
         ...canonicalAdmissionRedisKeys,
@@ -244,6 +251,7 @@ export async function createRedisDispatchProposal(
         lineageRedisKey,
         pendingRedisKey,
         detailRedisKey,
+        DispatchProposalKeys.userSettled(input.ownerUserId),
         ...negativeAuthorizationRedisKeys,
         ...canonicalAdmissionRedisKeys,
       ];

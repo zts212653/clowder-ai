@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import type { SharedMarkdownView } from './collective-artifact-client.js';
+import { useCollectiveText } from './collective-copy.js';
 import { MessageMarkdown } from './MessageMarkdown.js';
 import { useSharedArtifactReading } from './SharedArtifactReading.js';
 import { sharedMarkdownDomSelection } from './shared-markdown-selection.js';
 
 /** Selection is only a composer attachment. Neither mouseup nor the chip sends a message. */
 export function SharedArtifactDocument({ view }: { readonly view: SharedMarkdownView }) {
+  const t = useCollectiveText();
   const paper = useRef<HTMLDivElement>(null);
   const reading = useSharedArtifactReading();
   const [notice, setNotice] = useState<string>();
@@ -50,7 +52,7 @@ export function SharedArtifactDocument({ view }: { readonly view: SharedMarkdown
       <div ref={paper} className="shared-artifact-document">
         <MessageMarkdown source={view.text} sourceCoordinates />
       </div>
-      {notice && <output className="composer-warning">{notice}</output>}
+      {notice && <output className="composer-warning">{t(notice)}</output>}
     </>
   );
 }

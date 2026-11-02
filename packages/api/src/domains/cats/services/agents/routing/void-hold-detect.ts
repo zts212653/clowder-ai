@@ -38,10 +38,18 @@ import { finalRoutingSlot } from './final-routing-slot.js';
 export interface HoldPatternEntry {
   readonly id: string;
   readonly re: RegExp;
+  readonly statementOnly?: boolean;
 }
 
 export const HOLD_PATTERNS: readonly HoldPatternEntry[] = [
   // Most-specific first ↓
+  { id: 'cn_no_reply_self_act', statementOnly: true, re: /(?:不回|没回)[^。\n？?]{0,20}我(?:先|就|去|来)/ },
+  // Deliberately name external conditions: waiting on a person is not a timer contract.
+  {
+    id: 'cn_wait_external_then_act',
+    statementOnly: true,
+    re: /(?:等|待)\s*(?:监控|gate\b|ci\b|测试|构建|命令|编译|检查|pr\b|回调|webhook\b)[^。\n，,？?]{0,20}(?:出来|跑完|完成|结束|通过|合入|返回)[^。\n？?]{0,12}(?:我再|我就|再提交|就提交|再继续|再汇报)/i,
+  },
   { id: 'mcp_tool_name', re: /cat_cafe_hold_ball/ },
   { id: 'en_hold_ball_underscore', re: /\bhold_ball\b/i },
   // English words are whitespace-separated; punctuation in task IDs and
@@ -82,8 +90,14 @@ export function matchHoldPattern(text: string): string | null {
   if (!text) return null;
   const slot = finalRoutingSlot(stripTrailingCatSignatures(text));
   if (!slot) return null;
+  // The new declaration checks do not turn questions or inline quotations into promises.
+  const statements = slot
+    .replace(/`[^`]*`|「[^」]*」|“[^”]*”|"[^"\n]*"/g, '')
+    .split(/(?<=[。！？!?])|\n/)
+    .filter((sentence) => !/[？?]\s*$/.test(sentence));
   for (const entry of HOLD_PATTERNS) {
-    if (entry.re.test(slot)) return entry.id;
+    if (entry.statementOnly ? statements.some((sentence) => entry.re.test(sentence)) : entry.re.test(slot))
+      return entry.id;
   }
   return null;
 }
@@ -129,7 +143,9 @@ export function evaluateVoidHold(input: VoidHoldInput): VoidHoldEvaluation {
   if (hasHoldBallToolCall(input.toolNames)) return { shouldEmit: false, matchedPattern: matched };
   if (input.lineStartMentions.length > 0) return { shouldEmit: false, matchedPattern: matched };
   if (input.structuredTargetCats.length > 0) return { shouldEmit: false, matchedPattern: matched };
-  if (input.hasCoCreatorLineStartMention) return { shouldEmit: false, matchedPattern: matched };
+  if (input.hasCoCreatorLineStartMention && matched !== 'cn_no_reply_self_act') {
+    return { shouldEmit: false, matchedPattern: matched };
+  }
   if (input.hasVerifiedEventBackedRoutingExit) return { shouldEmit: false, matchedPattern: matched };
   return { shouldEmit: true, matchedPattern: matched };
 }

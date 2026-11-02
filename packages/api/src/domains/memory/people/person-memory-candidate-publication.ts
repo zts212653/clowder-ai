@@ -30,6 +30,7 @@ import { parseStoredCandidate } from './person-memory-records.js';
 function terminalWithdrawn(
   candidate: StoredPersonMemoryCandidate,
   replacementId: StoredPersonMemoryCandidate['candidateId'],
+  closedAt: number,
 ): StoredPersonMemoryCandidate {
   const {
     personDraft: _personDraft,
@@ -44,6 +45,7 @@ function terminalWithdrawn(
     claimDrafts: [],
     remainingDraftIds: [],
     replacedByProposalId: replacementId,
+    closedAt,
   };
 }
 
@@ -351,11 +353,11 @@ export class PersonMemoryCandidatePublication {
     if (!candidate.personDraft || !candidateRepresentsPerson(original, candidate.personDraft)) {
       throw new Error('F276 replacement identity conflict');
     }
-    const withdrawn = terminalWithdrawn(original, candidate.candidateId);
+    const withdrawn = terminalWithdrawn(original, candidate.candidateId, presentedAt);
     const result = String(
       await this.redis.eval(
         COMMIT_REPLACEMENT_ENVELOPE_LUA,
-        5,
+        6,
         PersonMemoryKeys.candidate(candidate.ownerUserId, candidate.candidateId),
         PersonMemoryKeys.pending(candidate.ownerUserId),
         PersonMemoryKeys.candidate(candidate.ownerUserId, original.candidateId),
@@ -365,6 +367,7 @@ export class PersonMemoryCandidatePublication {
         candidatePersonId(original)
           ? PersonMemoryKeys.forgetFence(original.ownerUserId, candidatePersonId(original) as string)
           : '',
+        PersonMemoryKeys.settled(candidate.ownerUserId),
         JSON.stringify(anchored),
         String(presentedAt),
         candidate.candidateId,

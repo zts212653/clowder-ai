@@ -25,19 +25,22 @@ export interface ProfileMemoryProposalView {
 export interface ProfileMemoryOwnerEntry {
   id: string;
   type: 'profile';
-  layer: 'primer' | 'corpus';
+  layer: 'primer' | 'corpus' | 'capsule';
   relationshipKey: string | null;
   uri: string;
   title: string;
   status: 'active';
   revision: string;
   content: string;
+  updatedAt?: number;
   proposals: ProfileMemoryProposalView[];
 }
 
 export interface ProfileMemoryOwnerBrowse {
   readStatus: 'ready' | 'unavailable';
   entries: ProfileMemoryOwnerEntry[];
+  /** Absent effective capsule: creation base and drafts, never a fabricated active memory. */
+  capsuleSetup?: { revision: string; proposals: ProfileMemoryProposalView[] };
 }
 
 export interface TasteTakeawayCandidate {

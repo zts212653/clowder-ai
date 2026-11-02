@@ -949,6 +949,21 @@ export CAT_CAFE_GATE_BASE_SHA="$GATE_BASE_SHA"
 echo -e "${GREEN}✓ Gate baseline frozen: ${GATE_BASE_SHA:0:8}${NC}"
 echo ""
 
+# Every production prebuild rewrites a stale vendor stylesheet manifest, which
+# dirties the frozen runtime checkout and blocks startup. Targeted routes exit
+# below without running any tests, so check it before routing. Source-only and
+# sub-second; fixture trees without the stylesheet sources skip it. An inherited
+# NODE_TEST_CONTEXT makes a nested node --test exit 0 on failure, so drop it.
+if [ -f "$REPO_ROOT/scripts/vendor-stylesheets.test.mjs" ]; then
+  if ! VENDOR_STYLESHEET_OUTPUT="$(unset NODE_TEST_CONTEXT; node --test "$REPO_ROOT/scripts/vendor-stylesheets.test.mjs" 2>&1)"; then
+    printf '%s\n' "$VENDOR_STYLESHEET_OUTPUT" >&2
+    echo -e "${RED}❌ Vendor stylesheet manifest is stale; run pnpm -C packages/web sync:vendor-assets and commit the result${NC}" >&2
+    exit 1
+  fi
+  echo -e "${GREEN}✓ Vendor stylesheet manifest matches its sources${NC}"
+  echo ""
+fi
+
 # Route from repository and receipt truth after the integration cut is frozen.
 # Local --no-rebase probes use the same classifier, but cannot publish merge
 # evidence. Public exports retain their historical full contract.

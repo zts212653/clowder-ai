@@ -1,6 +1,6 @@
 ---
 name: worktree
-tips_exempt: "Renewed 2026-10-15 for light creation, branch-local assets and explicit compiler-cache trimming; internal developer commands are discovered through this skill, with no end-user Hub operation."
+tips_exempt: "2026-10-27: developer CLI birth/inventory/finish and automatic merged-checkout retirement; no separate end-user Hub action."
 description: "Use when: 创建代码/脚本/API工位或收尾。Not for: docs直推、代清其他owner。Output: 隔离worktree（Redis6398）、实际移除工位的released回执或具名retained回执。"
 triggers:
   - "开始开发"
@@ -42,7 +42,7 @@ search_evidence("{topic}", scope="all")
 **Clowder AI 项目：`../cat-cafe-{feature-name}`（relay-station/ 同级）**
 
 ```bash
-pnpm worktree:new ../cat-cafe-{feature-name} --branch feat/{feature-name} --owner {你的 catId} --policy merged
+pnpm worktree:new ../cat-cafe-{feature-name} --branch feat/{feature-name} --source-ref {原Task或PR的ref} --owner {你的 catId} --policy merged
 ```
 
 - 🔴 **禁止在项目内部创建**（不要用 `.worktrees/` 子目录）
@@ -102,7 +102,7 @@ gh pr diff <n> --name-only          # 或 gh pr view <n> --json files --jq '.fil
 
 ```bash
 # 1. 创建 worktree（唯一入口；owner 默认取 $CAT_CAFE_CAT_ID，policy 默认 merged，登记随创建完成）
-#    满额时直接拒绝并按 owner 列出谁占着位置（见「异常」）；它从不挪动任何人的目录
+#    不设工位数量上限；创建本身不挪动或删除已有目录
 pnpm worktree:new ../cat-cafe-{feature-name} --branch feat/{feature-name}
 cd ../cat-cafe-{feature-name}
 
@@ -212,6 +212,32 @@ pnpm check:worktree-port-offset   # 验证全部 7 个大赛 OFFSET 派生 + 端
 
 详细设计见 *(internal reference removed)*。
 
+## 出生来源与 PR 关联
+
+`worktree:new` 记录本 invocation 的 thread/user/source/role 到工位私有 config，保留原 owner 与出生时间。
+独立 CLI 没有 callback 环境时，带 `--thread-id {原threadId} --user-id {原userId} --source-ref {原Task或PRref}`。
+只在真实创建/使用记录支持时填写；未知旧目录不通过 declare-only 补造出生记录。
+
+作者创建 PR 后，将它关联到自己的 exact HEAD 工位（不改原出生来源）：
+
+```bash
+pnpm worktree:bind-pr {精确工位路径} pr:{OWNER}/{REPO}#{PR_NUMBER}
+```
+
+只读普查用 `pnpm worktree:inventory`，包含 legacy 与非标准路径；capacity 只回答名额，不是完整库存。
+API 每五分钟扫描本部署仓库的续留及已合入未收尾事实，每轮最多四个 PR subject 轮转。
+已登记且来源 thread/user 核对通过、PR 已合入并包含当前 exact HEAD、没有有效续留的工位，
+扫描会调用原生收尾：再次核对干净状态、进程与持久任务、保护名单及 Git 可见 index，
+保全被忽略的本地数据/环境配置和私有 Git metadata，再用无 force 的 Git remove 释放目录、保留分支。
+常驻目录、Alpha、policy=never、locked、未提交改动和仍有消费者的工位保留。
+结果/恢复入口用已有幂等消息回原 thread，投递中断从原收尾账本补投，不唤醒模型或创建 Queue 任务。
+自动归档/删除失败后，同一路径与 HEAD 暂停自动重试，回原 thread 提醒手动收尾，不重复复制多份原件。
+删除尚未开始且原工位仍在时，失败或中断留下的本次重复归档会清除；删除已开始则保留恢复材料。
+下轮扫描从同一账本核对中断：目录和登记已消失、归档验证通过时补发明确的中断对账通知，
+不伪造原 finish 的完成回执。可能部分删除或无法核验时保留归档并报原 thread。
+来源缺失/损坏会写运行日志并保留在 inventory 中，由原维护查证，不能猜同 catId 的另一个线程。
+过期提醒在代码部署后才生效，源码存在不算线上已验收。
+
 ## 收工：核验释放或具名续留
 
 工作结束时，从持有 main 且已包含当前收尾版本的主仓执行唯一收尾入口（merge-gate Step 8 同一套）。旧 feature/review 快照里的 CLI 可能仍执行完整隔离；离开目标目录后调用主仓的 CLI，不从另一份旧快照运行收尾：
@@ -239,21 +265,21 @@ pnpm worktree:finish ../cat-cafe-{feature-name} --source-ref {同一ref} --check
 reaper 尊重有效续留，过期或损坏的续留只报告 review，不能静默按旧策略处置。
 将实际 JSON 回执留在原 Task/PR；`blocked`、merge 成功或单纯命令退出都不替代工位处置。
 
-没有定时回收；`worktree:new` 从不替别人腾位。既有 `reap --apply`/`--purge` 仍是单独授权的显式动作，
-不为满额强删、不代清其他 owner。原始未登记旧目录仍只报告。
+创建不受登记数量阻挡，也不触发同步清理。已合入工位由上述周期扫描收尾；
+既有 `reap --apply`/`--purge` 仍是单独授权的显式动作。原始未登记旧目录仍只报告。
 
-## 异常：满额、想保留、要恢复
+## 异常：想保留、收尾受阻、要恢复
 
 | 场景 | 你看到什么 | 怎么做 |
 |------|-----------|--------|
-| 满额被拒 | `capacity: 40/40 …` + 按 owner 列出的占位目录 | 先收掉自己列表里做完的；其余在对应 owner 的 thread 问一句。**不要去清别人的目录，也不用管 undeclared 老库存**（它们不占名额，由维护者一次性处理） |
+| 工位数量很多 | `worktree:check` 显示库存数量 | 数量只是观测，不阻止创建；不要为了开工先替别的 owner 清目录 |
 | 工作结束但还需保留 | — | 用 `worktree:finish --retain --reason ... --until ... --source-ref ...`；核 `retained` 回执与截止。`never` 是主动长期政策，不替代这次收尾的具名理由 |
 | 临时沙盒 | — | `--policy ttl --ttl-days N`（review 沙盒默认 7） |
 | 工位已完成移除，要恢复 | 原路径不见了 | 按 finish 回执/ledger 的 `archivePath` 与 `restore` 恢复源码及原件，再重装依赖；旧 `quarantinePath` 回执仍用它自己的 move 恢复命令 |
 | 隔离后又在里面干活了 / 改了登记 | — | 不用管：隔离后有改动、新提交或重新登记的目录**不会被 purge**（`review:changed-in-quarantine` / `redeclared-in-quarantine`），恢复回去即可 |
 
 规则细节留给工具（`scripts/lib/worktree-reaper-core.mjs`），这里只记要点：
-- **名额只算登记过的活跃 worktree**（上限 40）；隔离区里的、白名单的（`runtime`/`alpha`/`tutorials`/`sharing`/`recovery-backups`）、没登记的老目录都不算。`pnpm worktree:check` 看当前数字。
+- **数量只作观测，不设硬上限**。`pnpm worktree:check` 分别报告登记工位和未登记旧库存；旧调用的 `--max` 仅供对比，不拒绝创建或令数量检查失败。
 - **只动出生时登记过的目录**；没登记的只进报告（`pnpm worktree:reap` dry-run，账本 `.cat-cafe/tmp/reaper-<date>.tsv`）。
 - **有未提交改动、locked、有进程在用的永远不动**；自动 reaper 仅凭闲置/TTL 推断时仍先隔离，满 14 天且期间无人改动才进入 `--purge` 候选。owner 的显式 finish 用上面的真实移除路径。
 

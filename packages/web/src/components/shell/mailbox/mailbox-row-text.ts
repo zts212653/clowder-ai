@@ -75,6 +75,22 @@ export function useMailboxRowText(item: UnifiedAttentionItemV1): MailboxRowText 
       time: time(choice.createdAt),
     };
   }
+  if (item.collectiveProjectAttention) {
+    const row = item.collectiveProjectAttention;
+    const title =
+      row.kind === 'triage'
+        ? language === 'en'
+          ? `${row.count} new items · Sort`
+          : `来了 ${row.count} 份外部材料 · 去分拣`
+        : row.kind === 'date_suggestion'
+          ? language === 'en'
+            ? `${row.workTitle} · Date suggestions`
+            : `${row.workTitle} · 日期建议等你确认`
+          : language === 'en'
+            ? `${row.workTitle} · Past deadline`
+            : `${row.workTitle} · 已超过截止`;
+    return { catId: null, lead: null, title, source: row.projectTitle, time: time(Date.parse(row.sinceAt)) };
+  }
   if (accountability) {
     const requestedAt = Date.parse(accountability.requestedAt);
     return {

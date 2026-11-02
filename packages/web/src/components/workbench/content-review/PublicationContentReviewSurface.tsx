@@ -107,7 +107,7 @@ function PublicationSurface({
   }, [contentRef, ownerRevision, visible, attempt]);
   if (error)
     return (
-      <section>
+      <section data-content-opening-state="blocked">
         <ContentLandingHeader
           title={titleInHost ? undefined : title}
           leadingAction={leadingAction}

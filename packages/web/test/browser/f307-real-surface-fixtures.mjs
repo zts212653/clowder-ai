@@ -285,8 +285,8 @@ export function fixedFixture(pathname) {
     ['/api/agent-hooks/status', { status: 'ready', targets: [] }],
     ['/api/approval-hub/pending', { items: [], count: 0 }],
     ['/api/approval-hub/settled', { items: [], count: 0 }],
-    ['/api/entrusted-work/owner-reads', { ownerReads: [] }],
-    ['/api/entrusted-work/needs-me', { ownerReads: [needsMeApprovalOwnerRead] }],
+    ['/api/entrusted-work/owner-reads', { ownerReads: [], coverage: { state: 'complete' } }],
+    ['/api/entrusted-work/needs-me', { ownerReads: [needsMeApprovalOwnerRead], coverage: { state: 'complete' } }],
     [
       '/api/cats',
       {

@@ -1,6 +1,8 @@
 import type { RoutingPreflightDecisionV1 } from '@cat-cafe/shared';
+import { InvocationServiceScope } from '../invocation/invocation-service-scope.js';
 import { isRoutingOwnerAttempt } from './routing-owner-attempt.js';
 import { routingPreflightNotice } from './routing-preflight-notice.js';
+import { persistStartupRecovery } from './startup-recovery-projection.js';
 /**
  * Serial Route Strategy
  * Cats respond one by one, each seeing previous responses.
@@ -151,7 +153,11 @@ import {
   type StoredMessage,
   type StoredToolEvent,
 } from '../../stores/ports/MessageStore.js';
-import type { Thread, ThreadRoutingPolicyV1 } from '../../stores/ports/ThreadStore.js';
+import type {
+  Thread,
+  ThreadMentionRoutingFeedbackItem,
+  ThreadRoutingPolicyV1,
+} from '../../stores/ports/ThreadStore.js';
 import {
   projectTurnExecutionMessage,
   type TurnExecutionKind,
@@ -178,7 +184,11 @@ import {
   resolveInvocationCapacitySnapshot,
   sealBeforeInvocationIfNeeded,
 } from '../invocation/invocation-capacity-snapshot.js';
-import { type InvocationParams, invokeSingleCat } from '../invocation/invoke-single-cat.js';
+import {
+  type InvocationParams,
+  invokeSingleCat,
+  prepareInvocationExecutionBinding,
+} from '../invocation/invoke-single-cat.js';
 import { buildMcpCallbackInstructions, needsMcpInjection } from '../invocation/McpPromptInjector.js';
 import {
   MEMBER_TIMEOUT_REASON,
@@ -471,6 +481,7 @@ export async function* routeSerial(
   threadId: string,
   options: RouteOptions = {},
 ): AsyncIterable<AgentMessage> {
+  const invocationServices = new InvocationServiceScope();
   const preparationStartedAt = performance.now();
   let memberPreparationStartedAt = preparationStartedAt;
   let preparationCheckpointAt = preparationStartedAt;
@@ -799,11 +810,47 @@ export async function* routeSerial(
         index++;
         continue;
       }
+      let pinnedService: AgentService | undefined;
+      let servicePreparationError: unknown;
+      try {
+        pinnedService = invocationServices.pin(getService(deps.services, catId, deps.unavailableServices));
+      } catch (error) {
+        servicePreparationError = error;
+      }
+      let executionBinding: Awaited<ReturnType<typeof prepareInvocationExecutionBinding>>;
+      try {
+        executionBinding = await prepareInvocationExecutionBinding(deps.invocationDeps, {
+          catId,
+          threadId,
+          userId,
+          service: pinnedService,
+          ...(catSignal ? { signal: catSignal } : {}),
+        });
+      } catch (error) {
+        yield {
+          type: 'error',
+          catId,
+          errorCode: 'execution_binding_unavailable',
+          error: error instanceof Error ? error.message : 'Execution binding is unavailable',
+          timestamp: Date.now(),
+        };
+        index++;
+        continue;
+      }
 
       if (deps.routingDispatchPreflight) {
         routingDispatchPreflightDecision = await preflightRoutingDispatch(deps.routingDispatchPreflight, {
           ownerId: userId,
           targetCatIds: [catId],
+          executionBindings: [
+            {
+              catId,
+              providerId: executionBinding.catConfig?.provider?.trim() || executionBinding.catConfig?.clientId,
+              ...(executionBinding.executionAccount
+                ? { accountRevision: executionBinding.executionAccount.accountRevision }
+                : {}),
+            },
+          ],
           ...(index < targetCats.length && isRoutingOwnerAttempt(options, catId)
             ? { ownerRequestedAttempt: true }
             : {}),
@@ -962,7 +1009,9 @@ export async function* routeSerial(
       let service: AgentService;
       checkpointPreparation('source_and_pack');
       try {
-        service = getService(deps.services, catId, deps.unavailableServices);
+        if (servicePreparationError) throw servicePreparationError;
+        if (!pinnedService) throw new Error('No frozen provider service');
+        service = pinnedService;
       } catch (error) {
         if (!(error instanceof AgentServiceUnavailableError)) throw error;
         yield { type: 'error', catId, content: error.message, error: error.message, timestamp: Date.now() };
@@ -1548,6 +1597,7 @@ export async function* routeSerial(
       let textContent = '';
       checkpointPreparation('history_and_prompt');
       let persistedDoneContent: string | undefined;
+      let persistedLayoutContent: string | undefined;
       const thinkingChunks: string[] = [];
       let persistedMetadata: MessageMetadata | undefined;
       const remoteCancellation = createRemoteCancellationObserver();
@@ -1919,6 +1969,8 @@ export async function* routeSerial(
         'Delivery route preparation timing',
       );
       for await (const msg of invokeSingleCat(deps.invocationDeps, {
+        executionBinding,
+        ...(options.routingAdmission ? { routingAdmission: options.routingAdmission } : {}),
         onRemoteExecutionDispatched: remoteCancellation.onDispatched,
         ...(options.liveCompanion && index === 0 ? { liveCompanion: options.liveCompanion } : {}),
         ...(options.routeIntent ? { routeIntent: options.routeIntent } : {}),
@@ -1935,6 +1987,11 @@ export async function* routeSerial(
         ownerAuthProvenance,
         threadId,
         invocationOrigin: resolveInvocationOrigin(options.humanDispositionInvocationOrigin),
+        contextSourceIngress:
+          options.contextSourceIngress ??
+          (options.humanDispositionInvocationOrigin === 'direct_owner' && options.currentUserMessageId
+            ? { kind: 'owner', sourceMessageId: options.currentUserMessageId }
+            : undefined),
         routeTopology: 'serial',
         ...(targetContentBlocks ? { contentBlocks: targetContentBlocks } : {}),
         ...(targetUploadDir ? { uploadDir: targetUploadDir } : {}),
@@ -2044,6 +2101,18 @@ export async function* routeSerial(
             }
           }
 
+          if (effectiveMsg.extra?.startupRecovery) {
+            if (
+              !(await persistStartupRecovery(
+                deps.messageStore,
+                effectiveMsg,
+                lifecycleResponseMessageId,
+                ownInvocationId,
+              ))
+            )
+              continue;
+            effectiveMsg = { ...effectiveMsg, messageId: lifecycleResponseMessageId };
+          }
           if (effectiveMsg.type === 'text') {
             const fragment = effectiveMsg.content;
             if (outputProjection) {
@@ -2625,6 +2694,9 @@ export async function* routeSerial(
         const persistedContent = conciergeActionSourceContent
           ? projectConciergeStoredContent(storedContent)
           : storedContent;
+        // Layout hashes must attest the same normalized body for live done and cold history.
+        // Keep the existing done.content policy independent of this proof input.
+        persistedLayoutContent = persistedContent;
         if (conciergeActionSourceContent !== undefined) {
           persistedDoneContent = persistedContent;
         }
@@ -2700,6 +2772,7 @@ export async function* routeSerial(
           );
         }
 
+        const pendingRoutingFeedback: ThreadMentionRoutingFeedbackItem[] = [];
         // #417 / F064 AC-B3: Write-side feedback for inline action-like @mentions
         // clowder-ai#489: counters for detection, shadow, feedback, hint
         if (deps.invocationDeps.threadStore) {
@@ -2715,19 +2788,9 @@ export async function* routeSerial(
           if (routedSetSkips > 0) inlineActionRoutedSetSkip.add(routedSetSkips, agentAttr);
 
           if (inlineHits.length > 0) {
-            try {
-              await deps.invocationDeps.threadStore.setMentionRoutingFeedback(threadId, catId, {
-                sourceTimestamp: Date.now(),
-                items: inlineHits.map((m) => ({ targetCatId: m.catId, reason: 'inline_action' as const })),
-              });
-              inlineActionFeedbackWritten.add(1, agentAttr);
-              log.info(
-                { catId: catId as string, threadId, targets: inlineHits.map((h) => h.catId) },
-                'Inline action @mention detected — wrote routing feedback',
-              );
-            } catch {
-              inlineActionFeedbackWriteFailed.add(1, agentAttr);
-            }
+            pendingRoutingFeedback.push(
+              ...inlineHits.map((m) => ({ targetCatId: m.catId, reason: 'inline_action' as const })),
+            );
             // Keep agent-formatting correction out of public History. The durable
             // next-turn feedback above is the correction channel.
             if (a2aMentions.length === 0 && !phaseHHit) {
@@ -2823,11 +2886,26 @@ export async function* routeSerial(
             ...c2BaseAttr,
             [TRIGGER]: voidHoldEval.matchedPattern ?? 'unknown',
           };
-          // Historical metric name retained for eval continuity. The always-on
-          // protocol prompt is the correction channel, not a public History row.
+          // Historical metric name retained; reconcile privately on the next natural turn.
           c2VoidHoldHintEmitted.add(1, voidHoldFireAttr);
+          pendingRoutingFeedback.push({ targetCatId: catId, reason: 'void_hold' });
           // F192 Phase D — capture trigger for deferred sample event emission.
           pendingC2VoidHoldSampleTrigger = voidHoldFireAttr[TRIGGER] as string;
+        }
+
+        // One write preserves both inline-routing and wait facts instead of overwriting either.
+        if (pendingRoutingFeedback.length > 0 && deps.invocationDeps.threadStore) {
+          const hasInlineFeedback = pendingRoutingFeedback.some((item) => item.reason === 'inline_action');
+          try {
+            await deps.invocationDeps.threadStore.setMentionRoutingFeedback(threadId, catId, {
+              sourceTimestamp: Date.now(),
+              items: pendingRoutingFeedback,
+            });
+            if (hasInlineFeedback) inlineActionFeedbackWritten.add(1, { 'agent.id': catId as string });
+          } catch (err) {
+            if (hasInlineFeedback) inlineActionFeedbackWriteFailed.add(1, { 'agent.id': catId as string });
+            log.warn({ err, catId: catId as string, threadId }, 'Routing reconciliation feedback write failed');
+          }
         }
 
         // F079 Phase 2: Vote interception — extract [VOTE:xxx] from cat response
@@ -3004,6 +3082,13 @@ export async function* routeSerial(
               actionOutputCommitAllowed &&
               visibleTurnInvocationId === ownInvocationId,
           });
+          const outputConfig = executionBinding.catConfig;
+          outputProjection?.settle({
+            succeeded:
+              Boolean(doneMsg) && !hadError && !doneMsg?.errorCode && !catSignal?.aborted && actionOutputCommitAllowed,
+            nativePhases:
+              !outputConfig?.clientId || outputConfig.clientId === 'openai' || outputConfig.provider === 'openai',
+          });
           const streamMessageInput: AppendMessageInput = {
             from: { kind: 'agent', catId },
             userId,
@@ -3137,6 +3222,20 @@ export async function* routeSerial(
                 );
           } else {
             storedMsg = await deps.messageStore.append(streamMessageInput);
+          }
+          if (
+            storedMsg &&
+            ownInvocationId &&
+            actionOutputCommitAllowed &&
+            lifecycleTerminalStatus === 'completed' &&
+            deps.messageSearchAnswerService
+          ) {
+            try {
+              storedMsg = await deps.messageSearchAnswerService.publishResponse(storedMsg, ownInvocationId);
+              allRichBlocks = [...(storedMsg.extra?.rich?.blocks ?? allRichBlocks)];
+            } catch {
+              log.warn({ threadId, messageId: storedMsg.id }, 'Search answer binding pending on committed response');
+            }
           }
           storedMsgId = storedMsg?.id;
           turnStoredMessageId = storedMsgId;
@@ -3404,6 +3503,25 @@ export async function* routeSerial(
               // distinction that used to route mutating tools here belonged to the closure gate,
               // which is retired — nothing downstream re-runs a turn behind the cat's back.
               storedNoText = await deps.messageStore.append(noTextMessageInput);
+            }
+            if (
+              storedNoText &&
+              ownInvocationId &&
+              actionOutputCommitAllowed &&
+              lifecycleTerminalStatus === 'completed' &&
+              deps.messageSearchAnswerService
+            ) {
+              try {
+                storedNoText = await deps.messageSearchAnswerService.publishResponse(storedNoText, ownInvocationId);
+                const bound = storedNoText.extra?.messageSearchAnswer;
+                const block = bound && storedNoText.extra?.rich?.blocks.find((block) => block.id === bound.blockId);
+                if (block && !noTextBlocks.some((current) => current.id === block.id)) noTextBlocks.push(block);
+              } catch {
+                log.warn(
+                  { threadId, messageId: storedNoText.id },
+                  'Search answer binding pending on committed response',
+                );
+              }
             }
             // F088-P3: Stash rich blocks for outbound delivery (no-text branch)
             if (storedNoText && options.persistenceContext && noTextBlocks.length > 0) {
@@ -3780,7 +3898,7 @@ export async function* routeSerial(
           ...ownStampedDone,
           extra: {
             ...ownStampedDone.extra,
-            ...outputLayoutExtra(outputProjection, persistedDoneContent ?? textContent),
+            ...outputLayoutExtra(outputProjection, persistedDoneContent ?? persistedLayoutContent ?? textContent),
           },
           ...(cancellationDiagnostics ? { metadata: persistedMetadata } : {}),
           ...(persistedDoneContent !== undefined ? { content: persistedDoneContent } : {}),
@@ -3801,6 +3919,7 @@ export async function* routeSerial(
       index++;
     }
   } finally {
+    await invocationServices.dispose();
     // Turn-custody observation is recorded after the turn settles: current output persistence,
     // operator handoff writes, and inline child receiver-boundary handoffs must all
     // have had a chance to establish machine evidence before the projection closes.

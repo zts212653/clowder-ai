@@ -1,5 +1,4 @@
 import { type CompanionIdentitySnapshotV1, companionIdentitySnapshotV1Schema } from '@cat-cafe/shared';
-import type { CatData } from '@/hooks/useCatData';
 import type { ChatMessage } from '@/stores/chat-types';
 import { doesAssistantMessageRenderBubble } from '../assistant-message-renderability';
 import type { ShellPresentation } from '../shell/shell-presentation';
@@ -15,25 +14,24 @@ export function resolveReplyCompanionIdentity(message: ChatMessage): CompanionId
 export interface ReplyLayersPresentationContext {
   shellPresentation: ShellPresentation;
   compact: boolean;
-  getCatById: (catId: string) => CatData | undefined;
   currentThreadId?: string;
 }
 
 /**
- * The canonical nameplate predicate. ReplyLayers add one more requirement below: a thread that can own their controls.
+ * Keep the reply body/record layout tied to its durable author, not async catalog hydration.
+ * The header resolves optional profile styling separately; ReplyLayers also require a thread to own their controls.
  */
-export function canRenderReplyNameplate(message: ChatMessage, context: ReplyLayersPresentationContext): boolean {
+export function canRenderLayeredReply(message: ChatMessage, context: ReplyLayersPresentationContext): boolean {
   return Boolean(
     context.shellPresentation === 'v2' &&
       !context.compact &&
       doesAssistantMessageRenderBubble(message, { currentThreadId: context.currentThreadId }) &&
       !resolveReplyCompanionIdentity(message) &&
-      message.catId &&
-      context.getCatById(message.catId),
+      message.catId,
   );
 }
 
 /** A durable carrier may move only when the exact owner row will actually draw ReplyLayers. */
 export function canRenderReplyLayers(message: ChatMessage, context: ReplyLayersPresentationContext): boolean {
-  return Boolean(context.currentThreadId && canRenderReplyNameplate(message, context));
+  return Boolean(context.currentThreadId && canRenderLayeredReply(message, context));
 }

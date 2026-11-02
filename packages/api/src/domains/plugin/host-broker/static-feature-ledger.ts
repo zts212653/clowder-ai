@@ -13,27 +13,21 @@ const epoch = z
   })
   .strict();
 const preference = z.object({ pluginInstanceId: id, featureId: id, enabled: z.boolean() }).strict();
-const lease = z
-  .object({
-    executionLease: id,
-    pluginInstanceId: id,
-    featureId: id,
-    packageRevision: id,
-    integrityEpoch: revision,
-    activationRevision: revision,
-    lifecycleRevision: revision,
-    grantRevision: revision,
-    // Closed Host admission classes: existing zero-effect editors, or a companion window.
-    // This records the grant; it never grants media capture or general package execution.
-    grantedCapabilities: z.union([z.tuple([]), z.tuple([z.literal('windows.create')])]),
-    connectionId: id,
-    brokerSessionId: id,
-    runtimeLeaseId: id,
-    state: z.enum(['provisioning', 'active', 'revoked']),
-    contributionIds: z.array(id),
-    updatedAt: z.number().int().safe().nonnegative(),
-  })
-  .strict();
+const lease = z.object({
+  executionLease: id,
+  pluginInstanceId: id,
+  featureId: id,
+  packageRevision: id,
+  integrityEpoch: revision,
+  activationRevision: revision,
+  lifecycleRevision: revision,
+  connectionId: id,
+  brokerSessionId: id,
+  runtimeLeaseId: id,
+  state: z.enum(['provisioning', 'active', 'revoked']),
+  contributionIds: z.array(id),
+  updatedAt: z.number().int().safe().nonnegative(),
+});
 const ledger = z
   .object({
     epochs: z.array(epoch),

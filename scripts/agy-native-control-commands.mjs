@@ -43,9 +43,9 @@ function fileTargets(call) {
 }
 
 /** Carrier control files use the same shell coordinates and argv parser as the shared effect guard. */
-export function commandTouchesAgyControl(command, cwd, profileHome, isControl, depth = 0) {
+export function commandTouchesAgyControl(command, cwd, profileHome, isControl, depth = 0, toolHome = profileHome) {
   if (depth > 8) return true;
-  const env = { ...process.env, ...(profileHome ? { HOME: profileHome } : {}) };
+  const env = { ...process.env, ...(toolHome ? { HOME: toolHome } : {}) };
   // Preserve shared stdin-to-code attribution before splitting the pipeline.
   // A quoted path printed as data becomes executable only at its shell consumer.
   const delegated = executedInvocations(command, { cwd }).directInvocations ?? [];
@@ -54,7 +54,7 @@ export function commandTouchesAgyControl(command, cwd, profileHome, isControl, d
       (call) =>
         call.delegated &&
         call.script &&
-        commandTouchesAgyControl(call.script, call.cwd ?? cwd, profileHome, isControl, depth + 1),
+        commandTouchesAgyControl(call.script, call.cwd ?? cwd, profileHome, isControl, depth + 1, toolHome),
     )
   )
     return true;
@@ -65,7 +65,7 @@ export function commandTouchesAgyControl(command, cwd, profileHome, isControl, d
     return contexts[index].some(({ directory, bindings }) =>
       expandSegmentBindings(segmentCommandText(segment.text), bindings, env).some(({ text }) => {
         const target = (path) => {
-          const expanded = path.startsWith('~/') && profileHome ? `${profileHome}/${path.slice(2)}` : path;
+          const expanded = path.startsWith('~/') && toolHome ? `${toolHome}/${path.slice(2)}` : path;
           return isControl(expanded, directory ?? cwd, profileHome);
         };
         const parsed = shellInvocation(text);
@@ -81,6 +81,7 @@ export function commandTouchesAgyControl(command, cwd, profileHome, isControl, d
               profileHome,
               isControl,
               depth + 1,
+              toolHome,
             );
           if (profileHome && call.name.toLowerCase() === 'security') return !isReadOnlySecurityCall(call);
           // Printing a filename is data. Read-only calls do not mutate the carrier.

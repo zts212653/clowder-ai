@@ -19,7 +19,7 @@ function catalogFixture() {
   return catalog;
 }
 
-test('Tripo discovery consumes exact plugin-repository release metadata with no Host grants', async () => {
+test('Tripo discovery consumes exact plugin-repository release metadata', async () => {
   const fixture = catalogFixture();
   const catalog = createHostOfficialPluginCatalog(async () => fixture);
   const snapshot = await catalog.snapshot();
@@ -30,7 +30,6 @@ test('Tripo discovery consumes exact plugin-repository release metadata with no 
   assert.equal(entry.packageName, '@clowder-ai/tripo-studio');
   assert.equal(entry.version, fixture.plugins[0].versions[0].version);
   assert.equal(entry.packageDigest, fixture.plugins[0].versions[0].artifact.integrity);
-  assert.deepEqual(entry.effectiveGrants, []);
 });
 
 test('catalog absence cannot manufacture a bundled Tripo release or hide the remaining Host bundle', async () => {

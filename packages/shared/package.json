@@ -53,13 +53,21 @@
     "./routing-preview": {
       "import": "./dist/routing-preview.js",
       "types": "./dist/routing-preview.d.ts"
+    },
+    "./proposal-message": {
+      "import": "./dist/proposal-message.js",
+      "types": "./dist/proposal-message.d.ts"
+    },
+    "./profile-opening-reference": {
+      "import": "./dist/profile-opening-reference.js",
+      "types": "./dist/profile-opening-reference.d.ts"
     }
   },
   "scripts": {
     "build": "tsc",
     "prepare": "tsc",
     "dev": "tsc --watch",
-    "clean": "rm -rf dist",
+    "clean": "node ../../scripts/clean-path.mjs dist",
     "lint": "tsc --noEmit",
     "test": "vitest run"
   },

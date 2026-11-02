@@ -146,6 +146,12 @@ export function MailboxRowBody({
           choice={item.choiceRequest}
           ownerUserId={hosted.ownerUserId}
           readCurrent={readCurrent}
+          verifyCurrentRead={() => {
+            const current = hosted.sessions.currentItem?.(hosted.ownerUserId, item.decisionRef);
+            return Boolean(
+              current?.choiceRequest && JSON.stringify(current.choiceRequest) === JSON.stringify(item.choiceRequest),
+            );
+          }}
           secondaryActions={
             <div
               className="ml-auto flex flex-wrap items-center justify-end gap-2"

@@ -1,5 +1,7 @@
 'use client';
 
+import { ChoiceOptionContent } from '@cat-cafe/ui';
+
 import { useCallback, useRef, useState } from 'react';
 import { useIMEGuard } from '@/hooks/useIMEGuard';
 import type { InteractiveOption, RichInteractiveBlock } from '@/stores/chat-types';
@@ -137,10 +139,7 @@ function SelectInteraction({
               }`}
           >
             <OptionIcon opt={opt} />
-            <div className="flex-1 min-w-0">
-              <span className={`font-semibold ${isSelected ? 'text-conn-amber-text' : ''}`}>{opt.label}</span>
-              {opt.description && <span className="block text-xs text-cafe-secondary mt-0.5">{opt.description}</span>}
-            </div>
+            <ChoiceOptionContent label={opt.label} description={opt.description} selected={isSelected} />
             {isSelected && (
               <svg
                 className="w-5 h-5 text-conn-amber-text shrink-0"

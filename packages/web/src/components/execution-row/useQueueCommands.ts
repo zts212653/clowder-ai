@@ -151,8 +151,8 @@ export function useQueueCommands(
     try {
       const res = await apiFetch(`/api/threads/${threadId}/queue`, { method: 'DELETE' });
       const data = await res.json().catch(() => ({}));
+      if (Array.isArray(data?.queue)) setQueue(threadId, data.queue);
       if (!res.ok) {
-        if (Array.isArray(data?.queue)) setQueue(threadId, data.queue);
         addToast({
           type: 'error',
           title: data?.code === 'QUEUE_WITHDRAWAL_PARTIAL' ? '已停止部分消息' : '停止失败',

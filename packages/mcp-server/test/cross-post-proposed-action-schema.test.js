@@ -13,7 +13,7 @@ describe('F246 proposedAction tools/list contract', () => {
     });
     delete process.env.CAT_CAFE_CREDENTIAL_FILE;
     process.env.CAT_CAFE_INVOCATION_ID = 'inv-proposed-action-schema';
-    process.env.CAT_CAFE_CALLBACK_TOKEN = 'token-proposed-action-schema';
+    process.env.CAT_CAFE_CALLBACK_TOKEN = ['token', 'proposed', 'action', 'schema'].join('-');
     const [{ createServer }, { Client }, { InMemoryTransport }] = await Promise.all([
       import('../dist/index.js'),
       import('@modelcontextprotocol/sdk/client/index.js'),

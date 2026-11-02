@@ -55,6 +55,7 @@ export {
   ACTION_SUBJECT_REF_MAX_LENGTH,
   ACTION_SUBJECT_REF_PATTERN,
   actionSubjectRefSchema,
+  TASK_ACTION_SUBJECT_REF_DESCRIPTION,
 } from './action-subject-ref.js';
 export {
   ACTION_SUCCESSOR_ACTION_FAMILIES,
@@ -94,6 +95,8 @@ export {
   type AgentKeyFailureReason,
   isAgentKeyFailureReason,
 } from './agent-key-reasons.js';
+export type { ApprovalHistoryPage, ApprovalHistoryPageRequest } from './approval-history-page.js';
+export { compareApprovalHistoryId, compareApprovalHistoryItems } from './approval-history-page.js';
 export {
   type ApprovalCardRef,
   type ApprovalDecisionMode,
@@ -300,7 +303,7 @@ export {
 export type { CatAlternative, CatRoutingError } from './cat-routing.js';
 export { CatAlternativeSchema, CatRoutingErrorSchema } from './cat-routing.js';
 // F212: CLI error diagnostics (cross-package data contract; classifier/sanitizer impl stays in api)
-export type { CliDiagnostics, CliErrorReasonCode } from './cli-diagnostics.js';
+export type { CliDiagnostics, CliErrorReasonCode, CodexStartupRecovery } from './cli-diagnostics.js';
 export type { BuiltinAccountClient } from './client-routing.js';
 export {
   BUILTIN_ACCOUNT_CLIENT_FOR_ID,
@@ -332,7 +335,9 @@ export {
   isCloudBridgeRecoveryV1,
   isCloudBridgeRetryV1,
 } from './cloud-bridge-outbound-receipt.js';
+export { type CloudBridgeReturnV1, isCloudBridgeReturnV1 } from './cloud-bridge-return.js';
 export * from './collective.js';
+export * from './collective-channel.js';
 export * from './collective-collaboration.js';
 export * from './collective-decision-vote.js';
 export * from './collective-reaction.js';
@@ -486,6 +491,7 @@ export {
   unregisterConnectorDefinition,
 } from './connector.js';
 export {
+  type AssetContextAttachment,
   type CliOutputQuoteSource,
   CONTEXT_ATTACHMENT_COMMENT_MAX_LENGTH,
   CONTEXT_ATTACHMENT_MAX_COUNT,
@@ -732,8 +738,10 @@ export {
   type NeedsMeProducerId,
   PHASE_B_NEEDS_ME_PRODUCER_IDS,
   type PhaseBNeedsMeProducerId,
+  type ProducerAttentionCoverageV1,
   type ProducerAttentionReceiptV1,
   type ProducerAttentionReevaluationLinkV1,
+  producerAttentionCoverageV1Schema,
   producerAttentionReceiptV1Schema,
   producerAttentionReevaluationLinkV1Schema,
 } from './growing.js';
@@ -978,6 +986,8 @@ export {
 } from './memory-architecture-closure.js';
 // F287 Phase C: bounded Memory Cue Plane shared contract.
 export {
+  type AuthorizedTaskSourcesOpportunityV1,
+  authorizedTaskSourcesOpportunityV1Schema,
   type CatOwnedSeedCueCarrierV1,
   type CueEnvelopeV1,
   catOwnedSeedCueCarrierV1Schema,
@@ -986,6 +996,8 @@ export {
   type DeliveryDecisionOpportunityV1,
   deliveryDecisionCueCarrierV1Schema,
   deliveryDecisionOpportunityV1Schema,
+  type FreshContextSourcesOpportunityV1,
+  freshContextSourcesOpportunityV1Schema,
   isCueEnvelopeV1,
   isRecallOpportunityV1,
   type JudgmentSurfaceEnteredOpportunityV1,
@@ -1012,6 +1024,7 @@ export {
   type ThreadOpenedOpportunityV1,
   threadOpenedOpportunityV1Schema,
 } from './memory-cue.js';
+export { type ContextSourceEvidenceV1, contextSourceEvidenceV1Schema } from './memory-cue-context.js';
 export * from './memory-owner-lifecycle.js';
 export * from './memory-owner-views.js';
 export {
@@ -1194,6 +1207,14 @@ export {
   type PawFeelDutyConfig,
   type PawFeelReconciliationCoverage,
 } from './paw-feel-duty.js';
+export type { PawFeelRepairBinding, PawFeelRepairRequest } from './paw-feel-repair-binding.js';
+export {
+  pawFeelRepairBinding,
+  pawFeelRepairBindingSchema,
+  pawFeelRepairRequest,
+  pawFeelRepairRequestSchema,
+  repairRequestForBinding,
+} from './paw-feel-repair-binding.js';
 // F276 owner-private people and relationship memory contracts
 export {
   type CandidateClaimDraft,
@@ -1308,6 +1329,7 @@ export type {
   PluginManagerConfigFieldKind,
   PluginManagerConfigOption,
   PluginManagerConfigState,
+  PluginManagerConfigurationVariants,
   PluginManagerConfigureRequest,
   PluginManagerContribution,
   PluginManagerContributionTool,
@@ -1389,6 +1411,7 @@ export {
   isAllowedCollectionSignal,
   PROFILE_UPDATE_TARGET_LAYERS,
 } from './profile-update.js';
+export * from './profile-usage.js';
 export type {
   ActiveParticipantInput,
   AssemblerInput,
@@ -1683,6 +1706,7 @@ export type {
   ReviewAutomationState,
   SuggestedCrossPostAction,
   SuggestedCrossPostActionSource,
+  TaskExecutionRef,
   TaskItem,
   TaskKind,
   TaskProbeSpec,

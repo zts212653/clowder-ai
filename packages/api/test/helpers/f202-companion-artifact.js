@@ -14,8 +14,6 @@ import {
   LocalPluginPackageAdmission,
   MemoryPluginInventoryStore,
 } from '../../dist/domains/plugin/index.js';
-import { resolveLocalPluginEffectiveGrants } from '../../dist/domains/plugin/manager/machine-catalog-provider.js';
-import { OFFICIAL_PLUGIN_HOST_POLICIES } from '../../dist/domains/plugin/manager/official-plugin-host-policies.js';
 import { COMPANION_ARTIFACT } from './f202-companion-artifact-pins.js';
 
 export const ARCHIVE = process.env.F202_COMPANION_ARCHIVE;
@@ -41,7 +39,6 @@ export async function companionHarness(t) {
   const admission = new LocalPluginPackageAdmission({
     inventory,
     packagesRoot,
-    grantPolicy: (manifest) => resolveLocalPluginEffectiveGrants(OFFICIAL_PLUGIN_HOST_POLICIES, manifest),
   });
   const registry = new CloudConversationHostRegistry();
   let lifecycle;
@@ -57,8 +54,6 @@ export async function companionHarness(t) {
   const record = (await store.snapshot()).packages.find((row) => row.packageDigest === installed.packageDigest);
   assert.equal(record.provenance.dependencyClosure, 'shipped');
   assert.equal(record.manifest.version, COMPANION_ARTIFACT.version);
-  const grant = (await store.snapshot()).grants.find((row) => row.pluginInstanceId === instanceId);
-  assert.deepEqual([...grant.effectiveGrants].sort(), ['cloud.conversation.host']);
   const packages = new FilesystemVerifiedPluginPackageLocator(packagesRoot);
   const configuration = { readConfig: async () => undefined, readSecret: async () => undefined };
   const logs = [];

@@ -3,8 +3,9 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { ProfileMemoryOwnerAction, ProfileMemoryOwnerEntry } from '@cat-cafe/shared';
 import {
-  CURRENT_CORPUS_PROFILE_URI,
   CURRENT_RELATIONSHIP_PROFILE_URI,
+  LEGACY_PROFILE_CAPSULE_RELATIVE_PATH,
+  PROFILE_CAPSULE_RELATIVE_PATH,
   PROFILE_CORPUS_RELATIVE_PATH,
   relationshipPrimerRelativePath,
 } from '@cat-cafe/shared/profile-contract';
@@ -12,6 +13,7 @@ import { profileRevisionOf } from '@cat-cafe/shared/profile-revision';
 import type Database from 'better-sqlite3';
 import type { FileProfileRepository } from '../../cats/services/profile/ProfileRepository.js';
 import { atomicWriteUtf8 } from '../../cats/services/profile/writeProfileUpdate.js';
+import { sharedProfileMemoryEntry } from './profile-memory-entry.js';
 import {
   profileMemoryTombstoneContent,
   purgeTargetProvenance,
@@ -54,8 +56,10 @@ export class ProfileMemoryLifecycleStore {
 
   list(ownerUserId: string): StoredProfileMemoryEntry[] {
     const entries: StoredProfileMemoryEntry[] = [];
+    const capsule = this.get(ownerUserId, 'capsule');
+    if (capsule) entries.push(capsule);
     const corpus = this.deps.repository.readCorpus(ownerUserId);
-    if (corpus) entries.push(this.corpusEntry(ownerUserId, corpus));
+    if (corpus) entries.push(sharedProfileMemoryEntry(this.deps.repository, ownerUserId, 'corpus', corpus));
     for (const primer of this.deps.repository.listPrimers(ownerUserId)) {
       entries.push({
         id: `primer:${primer.relationshipKey}`,
@@ -76,9 +80,13 @@ export class ProfileMemoryLifecycleStore {
   }
 
   get(ownerUserId: string, memoryId: string): StoredProfileMemoryEntry | null {
+    if (memoryId === 'capsule') {
+      const capsule = this.deps.repository.readCapsule(ownerUserId);
+      return capsule ? sharedProfileMemoryEntry(this.deps.repository, ownerUserId, 'capsule', capsule) : null;
+    }
     if (memoryId === 'corpus') {
       const corpus = this.deps.repository.readCorpus(ownerUserId);
-      return corpus ? this.corpusEntry(ownerUserId, corpus) : null;
+      return corpus ? sharedProfileMemoryEntry(this.deps.repository, ownerUserId, 'corpus', corpus) : null;
     }
     if (!memoryId.startsWith('primer:')) return null;
     const relationshipKey = memoryId.slice('primer:'.length);
@@ -148,10 +156,11 @@ export class ProfileMemoryLifecycleStore {
     }
 
     const current = this.get(input.ownerUserId, input.memoryId);
-    if (!current) return { outcome: 'not_available' };
+    if (!current && input.memoryId !== 'capsule') return { outcome: 'not_available' };
+    const currentRevision = current?.revision ?? profileRevisionOf('');
     const targetRevision = profileRevisionOf(input.command.content);
-    const resumingPreparedWrite = Boolean(existingEvidence && current.revision === targetRevision);
-    if (current.revision !== input.command.expectedRevision && !resumingPreparedWrite) {
+    const resumingPreparedWrite = Boolean(existingEvidence && currentRevision === targetRevision);
+    if (currentRevision !== input.command.expectedRevision && !resumingPreparedWrite) {
       return { outcome: 'stale_revision' };
     }
     if (!existingEvidence) {
@@ -163,7 +172,12 @@ export class ProfileMemoryLifecycleStore {
         targetRevision,
       });
     }
-    if (current.revision !== targetRevision) atomicWriteUtf8(current.path, input.command.content);
+    const target = this.resolveTarget(input.ownerUserId, input.memoryId);
+    if (!target) return { outcome: 'not_available' };
+    if (currentRevision !== targetRevision) {
+      mkdirSync(dirname(target.path), { recursive: true });
+      atomicWriteUtf8(target.path, input.command.content);
+    }
     this.markEvidenceApplied(input.ownerUserId, input.memoryId, input.command.requestId, commandDigest, targetRevision);
     const entry = this.get(input.ownerUserId, input.memoryId);
     if (!entry || entry.revision !== targetRevision)
@@ -211,6 +225,7 @@ export class ProfileMemoryLifecycleStore {
       atomicWriteUtf8(target.path, marker);
     }
     purgeTargetProvenance(target.profileDir, target.targetPath);
+    if (input.memoryId === 'capsule') purgeTargetProvenance(target.profileDir, LEGACY_PROFILE_CAPSULE_RELATIVE_PATH);
     this.markEvidenceApplied(input.ownerUserId, input.memoryId, input.command.requestId, commandDigest, null);
     this.finishHardForgetCleanup(input.ownerUserId, input.memoryId, input.command.requestId);
     return { outcome: 'forgotten' };
@@ -239,30 +254,20 @@ export class ProfileMemoryLifecycleStore {
 
   finishHardForgetCleanup(ownerUserId: string, memoryId: string, requestId: string): void {
     const target = this.resolveTarget(ownerUserId, memoryId);
-    if (target) removeMatchingProfileTombstone(target.path, requestId);
-  }
-
-  private corpusEntry(
-    ownerUserId: string,
-    snapshot: { content: string; path: string; revision: string },
-  ): StoredProfileMemoryEntry {
-    return {
-      id: 'corpus',
-      type: 'profile',
-      layer: 'corpus',
-      relationshipKey: null,
-      uri: CURRENT_CORPUS_PROFILE_URI,
-      title: '共同画像',
-      status: 'active',
-      revision: snapshot.revision,
-      content: snapshot.content,
-      path: snapshot.path,
-      profileDir: this.deps.repository.profileDir(ownerUserId),
-      targetPath: PROFILE_CORPUS_RELATIVE_PATH,
-    };
+    if (target) {
+      const aliases = memoryId === 'capsule' ? [this.deps.repository.legacyCapsulePath(ownerUserId)] : [];
+      removeMatchingProfileTombstone(target.path, requestId, aliases);
+    }
   }
 
   private resolveTarget(ownerUserId: string, memoryId: string) {
+    if (memoryId === 'capsule') {
+      return {
+        path: this.deps.repository.capsulePath(ownerUserId),
+        profileDir: this.deps.repository.profileDir(ownerUserId),
+        targetPath: PROFILE_CAPSULE_RELATIVE_PATH,
+      };
+    }
     if (memoryId === 'corpus') {
       return {
         path: this.deps.repository.corpusPath(ownerUserId),

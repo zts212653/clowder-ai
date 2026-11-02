@@ -9,6 +9,7 @@ import type { VerifiedPluginPackageLocator } from '../../external-runtime/types.
 import type { PluginInventoryStore } from '../../host-inventory/ports.js';
 import type { PluginInstanceRecord } from '../../host-inventory/types.js';
 import type { InstalledPluginOperationResult } from '../../operations/plugin-operation-routes.js';
+import type { BuiltinPluginPackageMaterializer } from '../package-assets/builtin-package-materializer-types.js';
 import { chromeSetupPolicy, isChromeSetupRequest } from './personal-chrome-setup-policy.js';
 import { runChromeSetupProcess } from './personal-chrome-setup-process.js';
 
@@ -52,6 +53,7 @@ const response = (status: number, body: Record<string, unknown>): InstalledPlugi
 export interface PersonalChromeSetupOptions {
   readonly inventory: Pick<PluginInventoryStore, 'snapshot'>;
   readonly packages: VerifiedPluginPackageLocator;
+  readonly materializer?: BuiltinPluginPackageMaterializer;
   readonly lifecycle: Pick<ExternalPluginLifecycleService, 'runWithRuntimeSuspended'>;
   readonly projectRoot: string;
   /** Host startup coordinate, never supplied by a plugin or an HTTP request. */
@@ -81,7 +83,6 @@ export class PersonalChromeSetup {
       return response(403, { error: 'Chrome setup requires the exact Host-trusted package and action' });
     if (declaration.confirm !== undefined && request.confirmed !== true)
       return response(400, { error: 'Confirm this Chrome setup change first' });
-    const initialGrant = snapshot.grants.find((x) => x.pluginInstanceId === initial.pluginInstanceId)?.grantRevision;
     const assertCurrent = async (expected: PluginInstanceRecord) => {
       request.assertCurrent();
       request.signal.throwIfAborted();
@@ -97,8 +98,7 @@ export class PersonalChromeSetup {
         instance.activationState !== initial.activationState ||
         instance.packageDigest !== initial.packageDigest ||
         JSON.stringify(pkg.manifest) !== JSON.stringify(record.manifest) ||
-        JSON.stringify(chromeSetupPolicy(pkg)) !== JSON.stringify(policy) ||
-        latest.grants.find((x) => x.pluginInstanceId === initial.pluginInstanceId)?.grantRevision !== initialGrant
+        JSON.stringify(chromeSetupPolicy(pkg)) !== JSON.stringify(policy)
       )
         throw new Error('SETUP_SOURCE_CHANGED');
       request.assertCurrent();
@@ -109,7 +109,15 @@ export class PersonalChromeSetup {
     const perform = async (expected: PluginInstanceRecord) => {
       const current = () => assertCurrent(expected);
       await current();
-      const verified = await this.options.packages.resolveInstalledPackage(initial.packageDigest);
+      const verified = this.options.materializer
+        ? await this.options.materializer.resolve({
+            pluginInstanceId: initial.pluginInstanceId,
+            pluginId: record.pluginId,
+            packageDigest: initial.packageDigest,
+            ...(record.provenance?.packageName ? { packageName: record.provenance.packageName } : {}),
+            sourceKind: record.provenance?.kind ?? 'local-archive',
+          })
+        : await this.options.packages.resolveInstalledPackage(initial.packageDigest);
       try {
         await verified.verifyIntegrity();
         if (JSON.stringify(verified.manifest) !== JSON.stringify(record.manifest))
@@ -182,7 +190,7 @@ export class PersonalChromeSetup {
           resumeFailureCode: 'CONFIGURATION_RESUME_FAILED',
           preflight: () => assertCurrent(initial),
           operation: async (stopped) => {
-            // Only this queue's stop revision is adopted; package, activation and grant stay fenced.
+            // Only this queue's stop revision is adopted; package and activation stay fenced.
             await assertCurrent(stopped);
             return perform(stopped);
           },

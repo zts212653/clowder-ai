@@ -1,6 +1,10 @@
 import { z } from 'zod';
 import { artifactReviewResponseRecordSchema } from './artifact-review.js';
+import { assetCanonCommandSchema } from './asset-canon-commands.js';
+import { workReferenceSchema } from './work-reference.js';
 import { workVideoContextSchema } from './work-video.js';
+
+export { type WorkReference, workReferenceSchema } from './work-reference.js';
 
 const id = z
   .string()
@@ -8,10 +12,6 @@ const id = z
   .max(256)
   .refine((value) => value === value.trim() && !value.includes('\0'));
 const ref = z.string().min(1).max(2048);
-export const workReferenceSchema = z
-  .object({ contentRef: ref, ownerRevision: z.number().int().positive().safe() })
-  .strict();
-export type WorkReference = z.infer<typeof workReferenceSchema>;
 
 /** A chat reference names immutable owner content; its title and source block never grant access. */
 export const workReferenceCardSchema = z
@@ -21,7 +21,14 @@ export const workReferenceCardSchema = z
     v: z.literal(1),
     title: z.string().min(1).max(240),
     bodyMarkdown: z.string().max(4000),
-    meta: z.object({ kind: z.literal('work_reference'), reference: workReferenceSchema }).strict(),
+    meta: z
+      .object({
+        kind: z.literal('work_reference'),
+        reference: workReferenceSchema,
+        // A display hint only: the owner reauthorizes the exact version before any HTML body is rendered.
+        mediaType: z.literal('text/html').optional(),
+      })
+      .strict(),
   })
   .strict();
 
@@ -35,12 +42,37 @@ export const workWorkspaceSourceSchema = z
   .strict();
 export type WorkWorkspaceSource = z.infer<typeof workWorkspaceSourceSchema>;
 
+/** Bounded tool input. The original UTF-8 source is data; renderers must sanitize before sandboxing. */
+export const MAX_HTML_WORK_BYTES = 1024 * 1024;
+export const MAX_WORK_COMMAND_BYTES = 32 * 1024;
+export const MAX_HTML_WORK_COMMAND_BYTES = 2 * MAX_HTML_WORK_BYTES + MAX_WORK_COMMAND_BYTES;
+export const MAX_HTML_WORK_VERSIONS = 256;
+export const workHtmlSourceSchema = z
+  .object({
+    kind: z.literal('html'),
+    html: z
+      .string()
+      .min(1)
+      .max(MAX_HTML_WORK_BYTES)
+      .refine(
+        (html) =>
+          html.trim().length > 0 &&
+          !html.includes('\0') &&
+          new TextEncoder().encode(html).byteLength <= MAX_HTML_WORK_BYTES &&
+          new TextDecoder('utf-8', { ignoreBOM: true }).decode(new TextEncoder().encode(html)) === html,
+        'HTML must be well-formed UTF-8 within the byte limit',
+      ),
+  })
+  .strict();
+export type WorkHtmlSource = z.infer<typeof workHtmlSourceSchema>;
+const workSourceSchema = z.union([workWorkspaceSourceSchema, workHtmlSourceSchema]);
+
 const submission = {
   operationId: id,
   title: z.string().trim().min(1).max(240),
   changeSummary: z.string().trim().min(1).max(4000),
   versionLabel: z.string().trim().min(1).max(128).optional(),
-  source: workWorkspaceSourceSchema,
+  source: workSourceSchema,
 };
 /** Optional responses name their original round independently of the owner submit CAS. */
 export const workReviewResponseSchema = z
@@ -90,6 +122,7 @@ export const importWorkContextSchema = setWorkContextSchema
 export type ImportWorkContext = z.infer<typeof importWorkContextSchema>;
 
 export const workCommandSchema = z.union([
+  assetCanonCommandSchema,
   commitWorkSchema,
   setWorkContextSchema,
   importWorkContextSchema,
@@ -111,6 +144,7 @@ export const workCommandSchema = z.union([
     })
     .strict(),
   z.object({ action: z.literal('read'), reference: workReferenceSchema }).strict(),
+  z.object({ action: z.literal('read-body'), reference: workReferenceSchema }).strict(),
   z.object({ action: z.literal('publish-reference'), reference: workReferenceSchema }).strict(),
   z
     .object({
@@ -138,7 +172,7 @@ export const workVersionRecordSchema = workReferenceSchema
     title: submission.title,
     changeSummary: submission.changeSummary,
     versionLabel: submission.versionLabel,
-    source: workWorkspaceSourceSchema,
+    source: z.union([workWorkspaceSourceSchema, workHtmlSourceSchema.omit({ html: true })]),
     operationId: id,
     requestDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
     receiptRef: ref,

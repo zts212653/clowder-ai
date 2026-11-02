@@ -1,4 +1,3 @@
-import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { beforeEach, describe, test } from 'node:test';
 import { InvocationQueue } from '../dist/domains/cats/services/agents/invocation/InvocationQueue.js';
@@ -6,6 +5,7 @@ import { InvocationRegistry } from '../dist/domains/cats/services/agents/invocat
 import { AgentRegistry } from '../dist/domains/cats/services/agents/registry/AgentRegistry.js';
 import { AgentRouter } from '../dist/domains/cats/services/agents/routing/AgentRouter.js';
 import { createPluginConversationDelivery } from '../dist/domains/plugin/host-surface/plugin-conversation-delivery.js';
+import './helpers/setup-cat-registry.js';
 
 let createMessagingDomain;
 let createPluginMessagingHost;
@@ -142,18 +142,52 @@ async function fixture(options = {}) {
     pluginId: PLUGIN_ID,
     pluginInstanceId: INSTANCE_ID,
     ownerUserId: OWNER,
-    effectiveGrants: options.grants ?? ['messaging.send'],
     manifest: options.manifest ?? manifest(),
     assertCurrent: options.assertCurrent,
     threadStore: threads,
     messageStore: messages,
     bindingStore: bindings,
+    readMessageTargets: async (threadId, messageId) => {
+      const rows = await queue.getDurableEntriesForMessages(threadId, [messageId]);
+      return (rows.get(messageId) ?? []).flatMap((row) => row.targets);
+    },
     messaging,
   });
   return { host, messages, threads, bindings, messaging, wakes, broadcasts, router, queue, agents };
 }
 
 describe('F202 C1 — plugin Host messaging.send', () => {
+  test('exact wake holds the chosen recipient and durable lookup survives temporary ledger expiry', async () => {
+    const { host, messages, threads, wakes, queue, agents, router } = await fixture();
+    const thread = await threads.create(OWNER, 'Exact game request');
+    agents.markUnavailable('opus', { code: 'rejected-account-binding', message: 'unavailable fixture' });
+    router.refreshFromRegistry(agents);
+    const input = draft(thread.id, { wake: { catId: 'opus', exact: true } });
+    await assert.rejects(() => host.send(input), /explicit plugin recipient/);
+    assert.equal(wakes.length, 0);
+    assert.equal(queue.size(thread.id, OWNER), 0);
+    agents.register('opus', {
+      async *invoke() {
+        throw new Error('no provider IO');
+      },
+    });
+    router.refreshFromRegistry(agents);
+    const sent = await host.send(input);
+    assert.equal(wakes.length, 1);
+    assert.equal(wakes[0][1], 'opus');
+    assert.equal(messages.messages.length, 1);
+    const now = Date.now;
+    try {
+      Date.now = () => now() + 8 * 24 * 3600 * 1000;
+      const found = await host.findSent({ threadId: thread.id, idempotencyKey: input.idempotencyKey });
+      assert.equal(found.messageId, sent.messageId);
+      assert.deepEqual(found.routedCatIds, ['opus']);
+      assert.equal(found.content, 'hello');
+      assert.equal(wakes.length, 1);
+    } finally {
+      Date.now = now;
+    }
+  });
   for (const target of ['unknown-cat', 'removed-cat', 'disabled-cat']) {
     test(`${target} uses ordinary conversation routing to the recent healthy member`, async () => {
       const { host, messages, threads, wakes, broadcasts } = await fixture();
@@ -354,7 +388,6 @@ describe('F202 C1 — plugin Host messaging.send', () => {
       pluginId: PLUGIN_ID,
       pluginInstanceId: 'instance-after-reinstall',
       ownerUserId: OWNER,
-      effectiveGrants: ['messaging.send'],
       manifest: manifest(),
       threadStore: threads,
       bindingStore: bindings,
@@ -367,7 +400,7 @@ describe('F202 C1 — plugin Host messaging.send', () => {
     assert.equal((await messages.getById(receipt.messageId))?.threadId, thread.id);
   });
 
-  test('selects one declared identity and preserves bounded url and metadata', async () => {
+  test('selects one declared identity and preserves metadata without a hidden navigation URL', async () => {
     const secondIdentity = {
       type: 'identity',
       id: 'release-bot',
@@ -385,7 +418,6 @@ describe('F202 C1 — plugin Host messaging.send', () => {
       draft(thread.id, {
         idempotencyKey: 'selected-identity',
         identity: 'release-bot',
-        url: 'https://example.test/pull/42',
         meta: { conversationLabel: 'Release room', nested: { ok: true } },
       }),
     );
@@ -394,21 +426,28 @@ describe('F202 C1 — plugin Host messaging.send', () => {
       connector: 'release-bot',
       label: 'Release Bot',
       icon: 'release-icon',
-      url: 'https://example.test/pull/42',
       meta: { conversationLabel: 'Release room', nested: { ok: true } },
     });
+
+    await assert.rejects(
+      () =>
+        host.send(
+          draft(thread.id, {
+            idempotencyKey: 'retired-hidden-url',
+            identity: 'release-bot',
+            url: 'https://example.test/pull/42',
+          }),
+        ),
+      (error) => error?.code === 'VALIDATION' && /unsupported fields: url/.test(error.message),
+    );
   });
 
-  test('rejects unsafe source urls, non-JSON metadata, and Host-owned metadata keys', async () => {
+  test('rejects non-JSON metadata and Host-owned metadata keys', async () => {
     const { host, threads } = await fixture();
     const thread = await threads.create(OWNER, 'Target');
     const cyclic = {};
     cyclic.self = cyclic;
 
-    await assert.rejects(
-      () => host.send(draft(thread.id, { idempotencyKey: 'bad-url', url: 'file:///tmp/secret' })),
-      (error) => error?.code === 'VALIDATION' && /url/.test(error.message),
-    );
     await assert.rejects(
       () => host.send(draft(thread.id, { idempotencyKey: 'cyclic-meta', meta: cyclic })),
       (error) => error?.code === 'VALIDATION' && /meta/.test(error.message),
@@ -426,7 +465,7 @@ describe('F202 C1 — plugin Host messaging.send', () => {
 
 describe('F202 C1 — generic messaging.get', () => {
   test('reads body revision and persisted publication facts without private extra', async () => {
-    const f = await fixture({ grants: ['thread.readContent'] });
+    const f = await fixture({});
     const thread = await f.threads.create(OWNER, 'Source');
     const message = await f.messages.append({
       timestamp: Date.now(),
@@ -457,10 +496,8 @@ describe('F202 C1 — generic messaging.get', () => {
     assert.notEqual((await f.host.get(message.id)).sourceRevision, value.sourceRevision);
   });
 
-  test('uses existing content grant, owner and thread readability', async () => {
-    const noGrant = await fixture();
-    await assert.rejects(() => noGrant.host.get('unknown'), /thread.readContent/);
-    const f = await fixture({ grants: ['thread.readContent'] });
+  test('uses existing owner and thread readability', async () => {
+    const f = await fixture({});
     const foreign = await f.threads.create('foreign', 'Foreign');
     const message = await f.messages.append({
       timestamp: Date.now(),
@@ -481,7 +518,7 @@ describe('F202 C1 — generic messaging.get', () => {
   });
 
   test('missing, deleted, recalled, tombstoned and canceled sources are unavailable', async () => {
-    const f = await fixture({ grants: ['thread.readContent'] });
+    const f = await fixture({});
     const thread = await f.threads.create(OWNER, 'Source');
     assert.equal(await f.host.get('missing'), null);
     for (const state of [
@@ -506,7 +543,7 @@ describe('F202 C1 — generic messaging.get', () => {
   });
 
   test('direct reads retain owner input and its revision across Queue admission', async () => {
-    const f = await fixture({ grants: ['thread.readContent'] });
+    const f = await fixture({});
     const thread = await f.threads.create(OWNER, 'Source');
     for (const source of [undefined, { connector: 'example', label: 'Example' }]) {
       const message = await f.messages.append({
@@ -532,9 +569,9 @@ describe('F202 C1 — generic messaging.get', () => {
   });
 
   test('queued reads retain owner, thread and non-input visibility boundaries', async () => {
-    const f = await fixture({ grants: ['thread.readContent'] });
+    const f = await fixture({});
     const thread = await f.threads.create(OWNER, 'Source');
-    const foreign = await f.threads.create('foreign', 'Foreign');
+    const _foreign = await f.threads.create('foreign', 'Foreign');
     for (const overrides of [
       { userId: 'foreign' },
       { origin: 'briefing' },
@@ -561,7 +598,7 @@ describe('F202 C1 — generic messaging.get', () => {
 
   test('works with asynchronous stores inside the existing verifier context', async () => {
     const { withPluginTransportPurpose } = await import('../dist/domains/plugin/carrier/plugin-transport-context.js');
-    const f = await fixture({ grants: ['thread.readContent'] });
+    const f = await fixture({});
     const thread = await f.threads.create(OWNER, 'Source');
     const message = await f.messages.append({
       timestamp: Date.now(),
@@ -582,7 +619,6 @@ describe('F202 C1 — generic messaging.get', () => {
 test('stopped plugin client cannot send or read through retained messaging methods', async () => {
   let active = true;
   const h = await fixture({
-    grants: ['messaging.send', 'thread.readContent'],
     assertCurrent: () => {
       if (!active) throw new Error('activation stopped');
     },

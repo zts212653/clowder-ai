@@ -5,6 +5,7 @@ import type {
   PawFeelDispositionEvent,
   PawFeelDispositionProjection,
 } from '@cat-cafe/shared';
+import { pawFeelRepairBinding } from '@cat-cafe/shared';
 import type { CanonicalPawFeelCandidate } from '../friction/paw-feel-source.js';
 import {
   type PawFeelBlockerReopenCommand,
@@ -77,6 +78,8 @@ export interface PawFeelDispositionServiceOptions extends PawFeelCommandEvidence
 }
 
 export interface PawFeelExecutionOptions {
+  /** Authenticated route identity; never accepted from a command body. */
+  userId?: string;
   ownerCatId?: string;
 }
 
@@ -205,6 +208,7 @@ export class PawFeelDispositionService {
       projection: currentProjection,
       ...(existing ? { existing } : {}),
       occurredAt,
+      userId: options.userId ?? (actor.kind === 'cvo' ? actor.id : undefined),
       ...(options.ownerCatId ? { ownerCatId: options.ownerCatId } : {}),
       evidence: this.options,
     });
@@ -227,7 +231,27 @@ export class PawFeelDispositionService {
     }
 
     const nextProjection = projectPawFeelDisposition([...currentEvents, attempted]);
-    const append = await this.options.eventLog.append(attempted, command.expectedSequence);
+    const fix =
+      attempted.type === 'fix'
+        ? attempted
+        : attempted.type === 'signature_requested' && attempted.action.type === 'fix'
+          ? attempted.action
+          : attempted.type === 'repair_outcome_linked'
+            ? currentProjection
+            : undefined;
+    const repair = fix && pawFeelRepairBinding(fix);
+    const assignment =
+      repair?.kind === 'task_assignment' && fix?.ownerCatId
+        ? {
+            ...repair,
+            userId: options.userId ?? (actor.kind === 'cvo' ? actor.id : ''),
+            ownerCatId: fix.ownerCatId,
+            terminal: attempted.type === 'repair_outcome_linked',
+          }
+        : undefined;
+    if (assignment && !assignment.userId)
+      throw new PawFeelDispositionServiceError('fix_evidence_invalid', 'authenticated Task tenant required');
+    const append = await this.options.eventLog.append(attempted, command.expectedSequence, assignment);
     if (append.outcome === 'appended') return { outcome: 'appended', projection: nextProjection };
     if (append.outcome === 'conflict') return append;
     return this.resolveRacedCommand(command.signalId, attempted);

@@ -78,11 +78,49 @@ describe('outbound sync runtime closure', { skip: !isHomeRepo && 'sync manifest 
     return [...managedRoots].some((root) => repoPath === root || repoPath.startsWith(`${root}/`));
   }
 
+  it('exports every pnpm dependency patch required by frozen installation as an exact file', () => {
+    const packageJson = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf8'));
+    const coverage = loadPublicExportCoverage(ROOT);
+    assert.ok(!managedRoots.has('patches'), 'dependency patches must not expose the whole patches directory');
+    for (const [dependency, path] of Object.entries(packageJson.pnpm?.patchedDependencies ?? {})) {
+      assert.equal(typeof path, 'string', `${dependency} must name its patch file`);
+      assert.ok(existsSync(resolve(ROOT, path)), `${dependency} patch is missing: ${path}`);
+      assert.ok(managedFiles.has(path), `${dependency} patch needs an exact managed_files entry: ${path}`);
+      assert.ok(isCoveredByPublicExport(path, coverage), `${dependency} patch is omitted by public export: ${path}`);
+    }
+  });
+
+  it('keeps source-only docs sync assertions with their private home-script inputs', () => {
+    const coverage = loadPublicExportCoverage(ROOT);
+    for (const path of ['scripts/check-sync-docs-runtime-assets.test.mjs', 'scripts/home-package-scripts.mjs']) {
+      assert.ok(!isCoveredByPublicExport(path, coverage), `${path} is a private sync input`);
+    }
+  });
+
   it('owns the revision template and its Git archive attributes in the source-only manifest', () => {
     for (const path of ['.cat-cafe-runtime-revision', '.gitattributes']) {
       assert.ok(managedFiles.has(path), `${path} must be exported`);
       assert.ok(!excluded.has(path), `${path} must not be excluded`);
     }
+  });
+
+  it('exports the manual desktop acceptance entry and its checked-in support files', () => {
+    const supportFiles = execFileSync('git', ['ls-files', '.github/desktop-acceptance'], {
+      cwd: ROOT,
+      encoding: 'utf8',
+    })
+      .trim()
+      .split('\n')
+      .filter(Boolean);
+    assert.ok(supportFiles.length > 0, 'desktop acceptance support must exist');
+    const requiredPaths = [
+      '.github/workflows/verify-desktop-candidate.yml',
+      'scripts/vendor-stylesheet-checkout.test.mjs',
+      ...supportFiles,
+    ];
+    const coverage = loadPublicExportCoverage(ROOT);
+    const missing = requiredPaths.filter((path) => !isCoveredByPublicExport(path, coverage));
+    assert.deepEqual(missing, [], `Desktop acceptance export omits: ${missing.join(', ')}`);
   });
 
   it('preserves templates during repository sync so a public archive binds its own commit', () => {
@@ -672,15 +710,39 @@ describe('outbound sync runtime closure', { skip: !isHomeRepo && 'sync manifest 
     assert.ok(!(manifest.target_owned_files ?? []).includes(carrierPath), 'the absorbed carrier is source-owned');
   });
 
-  it('exports every project hook read by the public F296 authentication contract', () => {
-    const contract = 'packages/api/test/f296-session-hook-source-auth.test.js';
+  it('exports every project hook exercised by the public credential-file HTTP contract', () => {
+    const contract = 'packages/api/test/f333-cli-hook-credentials.test.js';
     const source = readFileSync(resolve(ROOT, contract), 'utf8');
-    const hookReferences = [...source.matchAll(/['"](\.\.\/\.\.\/\.\.\/\.claude\/hooks\/[^'"]+)['"]/g)].map((match) =>
-      toRepoPath(resolveLocalImport(contract, match[1])),
-    );
+    const importedHooks = collectRelativeImports(source, contract)
+      .filter((specifier) => specifier.includes('/.claude/hooks/'))
+      .map((specifier) => toRepoPath(resolveLocalImport(contract, specifier)));
+    const runtimeHooks = new Set();
+    const file = ts.createSourceFile(contract, source, ts.ScriptTarget.Latest, true);
+    function wrapperNames(call, filename) {
+      assert.ok(ts.isIdentifier(filename), `${contract} must use its declared wrapper iteration`);
+      let loop = call.parent;
+      while (loop && !ts.isForOfStatement(loop)) loop = loop.parent;
+      assert.ok(loop && ts.isArrayLiteralExpression(loop.expression), `${contract} must enumerate its wrappers`);
+      assert.ok(ts.isVariableDeclarationList(loop.initializer));
+      assert.equal(loop.initializer.declarations[0].name.getText(file), filename.text);
+      return loop.expression.elements.map((wrapper) => {
+        assert.ok(ts.isStringLiteralLike(wrapper) && wrapper.text.endsWith('.sh'));
+        return wrapper.text;
+      });
+    }
+    function visit(node) {
+      ts.forEachChild(node, visit);
+      if (!ts.isCallExpression(node) || node.expression.getText(file) !== 'resolve') return;
+      const [directory, filename] = node.arguments;
+      if (!directory || !ts.isStringLiteralLike(directory) || !directory.text.startsWith('../../.claude/hooks')) return;
+      for (const wrapper of filename ? wrapperNames(node, filename) : ['']) {
+        runtimeHooks.add(toRepoPath(resolve(ROOT, 'packages/api', directory.text, wrapper)));
+      }
+    }
+    visit(file);
 
-    assert.ok(hookReferences.length > 0, `${contract} must keep its real project-hook references`);
-    for (const hook of hookReferences) {
+    assert.ok(runtimeHooks.size >= 4, `${contract} must exercise the Node carrier and its three real shell wrappers`);
+    for (const hook of new Set([...importedHooks, ...runtimeHooks])) {
       assert.ok(
         managedFiles.has(hook),
         `${hook} must be exported with ${contract}, otherwise test:public reads a missing runtime asset`,
@@ -712,6 +774,7 @@ describe('outbound sync runtime closure', { skip: !isHomeRepo && 'sync manifest 
       .filter(Boolean);
     const exportedClaudePaths = trackedClaudePaths.filter((repoPath) => isExported(repoPath)).sort();
     const expectedClaudePaths = [
+      '.claude/hooks/f236-anchor-posttool.mjs',
       '.claude/hooks/f24-compaction.mjs',
       '.claude/hooks/f24-post-compact-bootstrap.sh',
       '.claude/hooks/f24-pre-compact.sh',
@@ -945,16 +1008,36 @@ describe('outbound sync runtime closure', { skip: !isHomeRepo && 'sync manifest 
     );
   });
 
-  // Behavioural, not textual: run the real blocking grep the way Step 4 runs it, over file types
-  // the sanitizer exports but cannot redact. A secret in exported CommonJS used to be invisible.
-  it('blocks a secret sentinel in every sanitized text type the scan must see', () => {
+  // Exercise the secret scanner and retained privacy grep separately. Both must
+  // see every sanitized type; the content scanner additionally covers binary/unlisted paths.
+  it('blocks secret and private-path sentinels in every sanitized text type', () => {
     const syncScript = readFileSync(SYNC_SCRIPT_PATH, 'utf8');
     const includes = readSanitizedTextExtensions(syncScript).map((ext) => `--include=*.${ext}`);
     const fixtureDir = mkdtempSync(join(tmpdir(), 'scan-includes-'));
     try {
       const sentinels = ['cjs', 'ps1', 'py', 'bat', 'iss', 'html', 'mjs', 'css'];
+      const secret = ['ghp', '_', 'V'.repeat(36)].join('');
       for (const ext of sentinels) {
-        writeFileSync(join(fixtureDir, `sentinel.${ext}`), 'const key = "sk-ant-fixture-not-a-real-key";\n', 'utf8');
+        writeFileSync(join(fixtureDir, `sentinel.${ext}`), `const key = "${secret}";\n`, 'utf8');
+      }
+      const block = syncScript.slice(syncScript.indexOf('# 4b-BLOCK:'), syncScript.indexOf('# Separate you check'));
+      assert.match(block, /secret-content-files\.mjs/, 'Step 4 must invoke the shared content scanner');
+      const output = execFileSync('bash', ['-c', `${block}\nprintf '\\nSCAN_FAILED=%s\\n' "$SCAN_FAILED"`], {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          SOURCE_SYNC_DIR: ROOT,
+          FILTERED_DIR: fixtureDir,
+          SCAN_INCLUDES: includes.join(' '),
+          RED: '',
+          NC: '',
+        },
+      });
+      assert.match(output, /SCAN_FAILED=true/);
+      assert.ok(!output.includes(secret));
+      for (const ext of sentinels) {
+        assert.ok(output.includes(`sentinel.${ext}`), `content scanner must see *.${ext}`);
+        writeFileSync(join(fixtureDir, `sentinel.${ext}`), 'const home = "/home/user/project";\n', 'utf8');
       }
       const matched = execFileSync('grep', ['-rEl', readBlockingScanPattern(syncScript), fixtureDir, ...includes], {
         encoding: 'utf8',

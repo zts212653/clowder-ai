@@ -63,6 +63,8 @@ Ports:
   redis:    6397 (dedicated Alpha instance and data directory)
 
 Behavior:
+  Named init requires CAT_CAFE_CAT_ID and private worktree config, and declares
+  the new checkout's lifecycle before installing dependencies.
   start auto-syncs origin/main with ff-only, reuses the root .env for secrets,
   launches the isolated alpha stack with other sidecars disabled, and auto-migrates
   an existing ../cat-cafe-main-test worktree into ../cat-cafe-alpha.

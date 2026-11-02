@@ -466,10 +466,13 @@ describe('start-dev strict profile isolation', () => {
   it('keeps API dev watcher away from build artifacts', () => {
     const pkg = JSON.parse(readFileSync(resolve(ROOT, 'packages/api/package.json'), 'utf8'));
     const devScript = pkg.scripts.dev;
+    const supervisor = readFileSync(resolve(ROOT, 'packages/api/scripts/dev-supervisor.mjs'), 'utf8');
 
-    assert.match(devScript, /\btsx watch\b/, devScript);
-    assert.match(devScript, /--exclude "dist\/\*\*"/, devScript);
-    assert.match(devScript, /--exclude "\.\.\/shared\/dist\/\*\*"/, devScript);
+    assert.match(devScript, /(?:^| && )node scripts\/dev-supervisor\.mjs$/);
+    assert.match(supervisor, /'watch'/);
+    assert.match(supervisor, /'--exclude',\s*'dist\/\*\*'/);
+    assert.match(supervisor, /'--exclude',\s*'\.\.\/shared\/dist\/\*\*'/);
+    assert.match(supervisor, /'src\/index\.ts'/);
 
     const help = spawnSync(process.execPath, [resolvePackageBin('tsx'), 'watch', '--help'], {
       cwd: resolve(ROOT, 'packages/api'),

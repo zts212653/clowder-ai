@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { appendFile } from 'node:fs/promises';
+import { connectionDiagnosticBatchSchema } from '@cat-cafe/shared';
 import { createChatProofApi } from './f322-chat-real-page-data.mjs';
 
 function homeLease(route, url, leases) {
@@ -53,6 +54,12 @@ export async function installSetupHttpBoundary(context, evidence, unmodeled) {
     }
     if (url.pathname === '/api/cats/runtime-models' && request.method() === 'POST')
       return route.fulfill({ json: { status: 'configured', models: [] } });
+    if (url.pathname === '/api/diagnostics/connection' && request.method() === 'POST') {
+      assert.equal(request.headers()['x-csrf-token'], 'fixture-only');
+      const batch = connectionDiagnosticBatchSchema.parse(request.postDataJSON());
+      await appendFile(`${evidence}/connection-diagnostics.jsonl`, `${JSON.stringify(batch)}\n`);
+      return route.fulfill({ status: 204 });
+    }
     const lease = homeLease(route, url, leases);
     if (lease) return lease;
     const item = { method: request.method(), path: url.pathname };

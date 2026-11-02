@@ -1,4 +1,6 @@
 ---
+anchor: doc:features/F155-add-member-guide-ui-spec
+tips_exempt: Memory identity metadata repair only; this supporting source keeps its existing content and parent feature behavior, with no new user action or capability.
 feature_ids: [F155]
 related_features: [F099, F127]
 topics: [guidance, ui, interaction, accessibility]

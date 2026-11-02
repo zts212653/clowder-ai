@@ -3,6 +3,7 @@
  * Only external provider I/O is replaced. This proves installed-package lifecycle,
  * not yet removal of the old gateway from index.ts or real-account acceptance.
  */
+
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdtemp, readFile } from 'node:fs/promises';
@@ -19,9 +20,7 @@ import {
   createDormantPluginRuntimeComposition,
   createPluginManagerRuntimeComposition,
 } from '../dist/domains/plugin/index.js';
-import { FilesystemBuiltinPluginPackageMaterializer } from '../dist/domains/plugin/manager/builtin-package-materializer.js';
-import { resolveLocalPluginEffectiveGrants } from '../dist/domains/plugin/manager/machine-catalog-provider.js';
-import { OFFICIAL_PLUGIN_HOST_POLICIES } from '../dist/domains/plugin/manager/official-plugin-host-policies.js';
+import { FilesystemBuiltinPluginPackageMaterializer } from '../dist/domains/plugin/manager/package-assets/builtin-package-materializer.js';
 import { resolvePluginRuntimePersistencePaths } from '../dist/domains/plugin/runtime-composition.js';
 import { MemoryConnectorThreadBindingStore } from '../dist/infrastructure/connectors/ConnectorThreadBindingStore.js';
 import { archiveFileName, RELEASES } from './helpers/f202-connector-artifact-pins.js';
@@ -162,7 +161,6 @@ for (const release of RELEASES) {
         runtime,
         catalogProvider: { snapshot: async () => ({ entries: [], status: 'fresh', checkedAt: 1 }) },
         catalogManifests: [],
-        localGrantPolicy: (manifest) => resolveLocalPluginEffectiveGrants(OFFICIAL_PLUGIN_HOST_POLICIES, manifest),
       });
       const installed = await manager.install({ source: { kind: 'local-archive', path: archive } });
       const thread = threads.create('owner', 'Package delivery');

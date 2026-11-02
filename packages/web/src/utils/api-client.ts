@@ -6,11 +6,18 @@
  * - First call lazily establishes session, subsequent calls reuse the cookie
  */
 
+import { resolveShellCopy } from '../components/shell/shell-copy';
+import { readShellLanguage } from '../components/shell/shell-language';
+import { readShellPresentation } from '../components/shell/shell-presentation';
 import { useToastStore } from '../stores/toastStore';
+import { apiClientCopy } from './api-client.shell-copy';
 
 import { markApiGetGeneration } from './api-get-generation';
 import { resolveApiUrl } from './api-origin';
-import { boundedFetch, waitForPromiseWithSignal } from './bounded-fetch';
+import { observeApiSessionOwner } from './api-session-identity';
+import { waitForPromiseWithSignal } from './bounded-fetch';
+import { configureConnectionDiagnostics, scheduleConnectionDiagnosticDelivery } from './connection-diagnostics';
+import { diagnosticFetch, recordConnectionNotice } from './connection-request-trace';
 import { tagSaveRequest, traceSaveTransport } from './member-save-trace';
 
 export { resolveApiUrl } from './api-origin';
@@ -24,6 +31,7 @@ let sessionGate: Promise<void> | null = null;
 let sessionRefresh: Promise<void> | null = null;
 let sessionCsrfToken: string | null = null;
 let lastSessionFailureToastAt = 0;
+configureConnectionDiagnostics(API_URL, () => sessionCsrfToken);
 
 const reportedConnectionErrors = new WeakSet<object>();
 let lastConnectionFailureAt = Number.NEGATIVE_INFINITY;
@@ -34,15 +42,18 @@ export function reportApiConnectionFailure(error: unknown): boolean {
   if (reportedConnectionErrors.has(error)) return true;
   reportedConnectionErrors.add(error);
   const now = Date.now();
-  if (now - lastConnectionFailureAt >= 5_000) {
+  const shown = now - lastConnectionFailureAt >= 5_000;
+  if (shown) {
     lastConnectionFailureAt = now;
+    const t = connectionCopy();
     useToastStore.getState().addToast({
       type: 'error',
-      title: '后端连接异常',
-      message: '未能取得后端响应，请检查服务并刷新确认操作结果。',
+      title: t.connectionTitle,
+      message: t.connectionMessage,
       duration: 5000,
     });
   }
+  recordConnectionNotice(error, shown);
   return true;
 }
 
@@ -79,34 +90,44 @@ interface GetCoordinationState {
 const coordinatedGets = new Map<string, GetCoordinationState>();
 let nextGetGeneration = 0;
 
+function connectionCopy() {
+  return resolveShellCopy(apiClientCopy, readShellPresentation() === 'v2' ? readShellLanguage() : 'zh');
+}
+
 function notifySessionFailure() {
   const now = Date.now();
   if (now - lastSessionFailureToastAt < 3000) return;
   lastSessionFailureToastAt = now;
+  const t = connectionCopy();
   useToastStore.getState().addToast({
     type: 'error',
-    title: '会话恢复失败',
-    message: '登录态没有自动恢复成功。请稍后重试；如果仍无响应，再刷新页面。',
+    title: t.sessionTitle,
+    message: t.sessionMessage,
     duration: 6000,
   });
 }
 
 function ensureSession(): Promise<void> {
   if (sessionGate) return sessionGate;
-  const gate = boundedFetch(`${API_URL}/api/session`, { credentials: 'include' }, SESSION_BOOTSTRAP_TIMEOUT_MS)
+  const gate = diagnosticFetch(API_URL, '/api/session', { credentials: 'include' }, SESSION_BOOTSTRAP_TIMEOUT_MS)
     .then(async (res) => {
       if (!res.ok) {
         throw new Error(`session bootstrap failed (${res.status})`);
       }
       const body = (typeof res.json === 'function' ? await res.json().catch(() => null) : null) as {
         csrfToken?: unknown;
+        userId?: unknown;
       } | null;
+      if (sessionGate !== gate) return;
       sessionCsrfToken = typeof body?.csrfToken === 'string' && body.csrfToken ? body.csrfToken : null;
+      observeApiSessionOwner(body?.userId);
+      scheduleConnectionDiagnosticDelivery();
     })
     .catch((err) => {
       if (sessionGate === gate) {
         sessionGate = null;
         sessionCsrfToken = null;
+        observeApiSessionOwner(null);
       }
       throw err;
     });
@@ -124,21 +145,27 @@ export function refreshApiSession(): Promise<void> {
   const gate = (previous ?? Promise.resolve())
     .catch(() => undefined)
     .then(async () => {
-      const res = await boundedFetch(
-        `${API_URL}/api/session`,
+      const res = await diagnosticFetch(
+        API_URL,
+        '/api/session',
         { credentials: 'include' },
         SESSION_BOOTSTRAP_TIMEOUT_MS,
       );
       if (!res.ok) throw new Error(`session bootstrap failed (${res.status})`);
       const body = (typeof res.json === 'function' ? await res.json().catch(() => null) : null) as {
         csrfToken?: unknown;
+        userId?: unknown;
       } | null;
+      if (sessionGate !== gate) return;
       sessionCsrfToken = typeof body?.csrfToken === 'string' && body.csrfToken ? body.csrfToken : null;
+      observeApiSessionOwner(body?.userId);
+      scheduleConnectionDiagnosticDelivery();
     })
     .catch((err) => {
       if (sessionGate === gate) {
         sessionGate = null;
         sessionCsrfToken = null;
+        observeApiSessionOwner(null);
       }
       throw err;
     })
@@ -154,6 +181,7 @@ function invalidateSession(observedGate: Promise<void>) {
   if (sessionGate === observedGate) {
     sessionGate = null;
     sessionCsrfToken = null;
+    observeApiSessionOwner(null);
   }
 }
 
@@ -243,8 +271,9 @@ async function performSessionRequest(
     init,
     'http.attempt',
     () =>
-      boundedFetch(
-        `${API_URL}${path}`,
+      diagnosticFetch(
+        API_URL,
+        path,
         {
           ...normalized,
           credentials: 'include',
@@ -264,8 +293,9 @@ async function performSessionRequest(
     init,
     'http.attempt',
     () =>
-      boundedFetch(
-        `${API_URL}${path}`,
+      diagnosticFetch(
+        API_URL,
+        path,
         {
           ...refreshed,
           credentials: 'include',

@@ -7,6 +7,7 @@ import { afterEach, test } from 'node:test';
 import { catRegistry } from '@cat-cafe/shared';
 import { _resetDossierCache } from '@cat-cafe/shared/dossier';
 import { DossierCapabilityProfileRevisionSource } from '../dist/domains/routing-context/DossierCapabilityProfileRevisionSource.js';
+import { buildRoutingSignalDecisionProjection } from '../dist/domains/routing-context/preflight/RoutingSignalDecisionProjection.js';
 import { RoutingPreferenceKeys } from '../dist/domains/routing-context/RedisRoutingPreferenceStore.js';
 import { RoutingSignalEventKeys } from '../dist/domains/routing-context/RedisRoutingSignalEventStore.js';
 import { createRoutingContextRuntime } from '../dist/domains/routing-context/RoutingContextRuntime.js';
@@ -91,6 +92,9 @@ function fixture(content, { states = ['no_evidence', 'no_evidence'], preferences
     projectRoot: root,
     getConfigs: () => Object.fromEntries(catIds.map((id) => [id, config])),
   });
+  runtime.signalStore.getOwnerRevision = async () => events.length;
+  runtime.signalStore.readDecisionProjection = async () =>
+    buildRoutingSignalDecisionProjection({ ownerId, revision: events.length, events });
   return { root, path, runtime };
 }
 

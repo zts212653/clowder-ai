@@ -362,7 +362,6 @@ for (const scenario of [
       pluginId: 'dev.fixture.notification',
       pluginInstanceId: 'plugin-notification',
       ownerUserId: 'owner',
-      effectiveGrants: ['messaging.send'],
       threadStore: f.threads,
       messageStore: f.messages,
       messaging,

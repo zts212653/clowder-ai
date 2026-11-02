@@ -57,7 +57,11 @@ export function PersonMemoryUndo({
             requestId: personMemoryUndoRequestId(proposalId, receipt.decisionId),
           }),
         });
-        report(response.ok ? { outcome: 'settled' } : { outcome: 'http-error', status: response.status });
+        report(
+          response.ok
+            ? { outcome: 'settled', status: response.status }
+            : { outcome: 'http-error', status: response.status },
+        );
         const result: unknown = response.ok ? await response.json() : null;
         return Boolean(result && typeof result === 'object' && 'verdict' in result && result.verdict === 'undone');
       });

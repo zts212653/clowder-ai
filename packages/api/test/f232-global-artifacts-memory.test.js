@@ -89,23 +89,25 @@ test('GET /api/artifacts bounds global thread reads while preserving all owner a
   }
 });
 
-test('GET /api/artifacts scans all historical pages without retaining unrelated raw message content', (t) => {
-  const run = spawnSync(
-    process.execPath,
-    [
-      '--max-old-space-size=256',
-      fileURLToPath(new URL('./fixtures/f232-global-artifacts-memory.fixture.mjs', import.meta.url)),
-      new URL('../dist/routes/threads.js', import.meta.url).href,
-    ],
-    { encoding: 'utf8', timeout: 30_000, maxBuffer: 1024 * 1024, env: { ...process.env, NODE_OPTIONS: '' } },
-  );
-  assert.equal(run.status, 0, `bounded child failed (${run.signal ?? run.error?.message ?? 'exit'}): ${run.stderr}`);
-  const result = JSON.parse(run.stdout.trim());
-  assert.equal(result.pages, 32);
-  assert.equal(result.messages, 6400);
-  assert.equal(result.artifacts, 2, 'both the oldest and newest artifact must survive the complete scan');
-  t.diagnostic(`synthetic history scan: ${JSON.stringify(result)}`);
-});
+for (const catalogue of ['global', 'thread'])
+  test(`${catalogue} artifacts scan all historical pages without retaining unrelated raw message content`, (t) => {
+    const run = spawnSync(
+      process.execPath,
+      [
+        '--max-old-space-size=256',
+        fileURLToPath(new URL('./fixtures/f232-global-artifacts-memory.fixture.mjs', import.meta.url)),
+        new URL('../dist/routes/threads.js', import.meta.url).href,
+        catalogue,
+      ],
+      { encoding: 'utf8', timeout: 30_000, maxBuffer: 1024 * 1024, env: { ...process.env, NODE_OPTIONS: '' } },
+    );
+    assert.equal(run.status, 0, `bounded child failed (${run.signal ?? run.error?.message ?? 'exit'}): ${run.stderr}`);
+    const result = JSON.parse(run.stdout.trim());
+    assert.equal(result.pages, 32);
+    assert.equal(result.messages, 6400);
+    assert.equal(result.artifacts, 2, 'both the oldest and newest artifact must survive the complete scan');
+    t.diagnostic(`synthetic history scan: ${JSON.stringify(result)}`);
+  });
 
 test('paged artifact projection exactly preserves legacy equal-time ref ties, ledger precedence and publication indices', async () => {
   const {

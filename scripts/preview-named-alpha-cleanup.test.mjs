@@ -8,6 +8,7 @@ import { test as nodeTest } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { deriveNamedAlphaCoordinates, namedAlphaEnvironment } from './lib/alpha-coordinates.mjs';
 import { namedAlphaFixture } from './lib/alpha-named-fixture.mjs';
+import { readNamedAlphaRedisLeases } from './lib/alpha-redis-leases.mjs';
 import { captureNamedAlphaRedisIdentity, verifyNamedAlphaRedisIdentity } from './lib/alpha-redis-process.mjs';
 import { waitForPreviewFixture } from './lib/preview-fixture-readiness.mjs';
 
@@ -26,33 +27,42 @@ function identityProbeFixture(directory, port, pidFile, mode) {
   const argv = mode.startsWith('argv-');
   const command = argv ? 'ps' : 'lsof';
   const native = execFileSync('which', [command], { encoding: 'utf8' }).trim();
+  const quote = (value) => `'${value.replaceAll("'", "'\\''")}'`;
   writeFileSync(
     join(bin, command),
-    `#!${process.execPath}
-const fs = require('node:fs');
-const args = process.argv.slice(2);
-const target = ${
-      argv
-        ? `args.includes('command=') && fs.existsSync(${JSON.stringify(pidFile)}) &&
-  args[args.indexOf('-p') + 1] === fs.readFileSync(${JSON.stringify(pidFile)}, 'utf8').trim()`
-        : `args.includes('-iTCP:${port}')`
-    };
-if (target && fs.existsSync(${JSON.stringify(armed)}) &&
-    (${JSON.stringify(mode)}.endsWith('always') || !fs.existsSync(${JSON.stringify(observed)}))) {
-  fs.appendFileSync(${JSON.stringify(observed)}, ${JSON.stringify(argv ? 'argv unavailable\n' : 'timeout\n')});
-  ${argv ? "process.stdout.write('(redis-server)\\n');" : 'setTimeout(() => process.exit(1), 10000);'}
-} else {
-  const result = require('node:child_process').spawnSync(${JSON.stringify(native)}, args, { stdio: 'inherit' });
-  process.exit(result.status ?? 1);
+    `#!/bin/sh
+target=false
+${
+  argv
+    ? `previous= selected_pid= command_read=false
+for arg do
+  [ "$previous" != -p ] || selected_pid="$arg"
+  [ "$arg" != command= ] || command_read=true
+  previous="$arg"
+done
+if [ "$command_read" = true ] && [ -f ${quote(pidFile)} ]; then
+  IFS= read -r fixture_pid < ${quote(pidFile)}
+  [ "$selected_pid" != "$fixture_pid" ] || target=true
+fi`
+    : `for arg do [ "$arg" != '-iTCP:${port}' ] || target=true; done`
 }
+if [ "$target" = true ] && [ -f ${quote(armed)} ] &&
+   { ${mode.endsWith('always') ? 'true' : `[ ! -f ${quote(observed)} ]`}; }; then
+  printf '%s\\n' ${quote(argv ? 'argv unavailable' : 'timeout')} >> ${quote(observed)}
+  ${argv ? "printf '%s\\n' '(redis-server)'; exit 0" : 'exec sleep 10'}
+fi
+# Keep healthy native observations within their real identity budget; a Node
+# wrapper for every ps/lsof call adds unrelated startup time to the retry.
+exec ${quote(native)} "$@"
 `,
     { mode: 0o755 },
   );
   return { bin, armed, observed };
 }
 
-for (const [verificationFails, earlyWrapper, missingResult, pnpmWrapper, identityFailureMode] of [
+for (const [verificationFails, earlyWrapper, missingResult, pnpmWrapper, identityFailureMode, trackedServingChange] of [
   [false, false, false],
+  [false, false, false, false, undefined, true],
   [true, false, false],
   [false, true, false],
   [true, true, false],
@@ -65,7 +75,7 @@ for (const [verificationFails, earlyWrapper, missingResult, pnpmWrapper, identit
   [false, false, false, false, 'argv-always'],
 ]) {
   const cleanupRefused = verificationFails || identityFailureMode?.endsWith('always');
-  test(`canonical preview stop ${cleanupRefused ? 'reports refused Redis cleanup and retains ownership' : 'saves Redis and releases the producer lease'}${earlyWrapper ? ' after an early wrapper exit' : ''}${missingResult ? ' but rejects an unpublished owner result' : ''}${pnpmWrapper ? ' through real pnpm' : ''}${identityFailureMode ? ` after ${identityFailureMode}` : ''}`, async (t) => {
+  test(`canonical preview stop ${cleanupRefused ? 'reports refused Redis cleanup and retains ownership' : 'saves Redis and releases the producer lease'}${trackedServingChange ? ' after tracked serving changes' : ''}${earlyWrapper ? ' after an early wrapper exit' : ''}${missingResult ? ' but rejects an unpublished owner result' : ''}${pnpmWrapper ? ' through real pnpm' : ''}${identityFailureMode ? ` after ${identityFailureMode}` : ''}`, async (t) => {
     const disposals = [];
     const f = namedAlphaFixture({ after: (fn) => disposals.push(fn) });
     const sockets = [];
@@ -127,6 +137,7 @@ wait
     const id = createHash('sha256').update(`${f.alphaRoot}\0${ports[0]}`).digest('hex').slice(0, 16);
     const recordPath = join(env.CAT_CAFE_PREVIEW_PROCESS_DIR, `${id}.json`);
     let previewRecord;
+    let redisProof;
     const run = (action, extra = []) =>
       spawnSync(process.execPath, [cli, action, '--port', String(ports[0]), '--cwd', f.alphaRoot, '--json', ...extra], {
         env,
@@ -138,7 +149,7 @@ wait
       run('stop');
       // A failed regression must still keep data and never bypass identity proof.
       if (existsSync(pidFile)) {
-        const proof = captureNamedAlphaRedisIdentity(raw);
+        const proof = redisProof ?? captureNamedAlphaRedisIdentity(raw);
         verifyNamedAlphaRedisIdentity(raw, proof);
         execFileSync('redis-cli', ['-h', '127.0.0.1', '-p', String(coordinates.ports.redis), 'shutdown', 'save']);
       }
@@ -187,8 +198,17 @@ setInterval(()=>{},1000);`,
         }),
     });
     const proof = captureNamedAlphaRedisIdentity(raw);
+    redisProof = proof;
     verifyNamedAlphaRedisIdentity(raw, proof);
     assert.equal(readdirSync(registry).length, 1, 'producer registered its own Redis lease');
+    if (trackedServingChange) {
+      writeFileSync(join(f.alphaRoot, 'packages/web/package.json'), '{"generatedDuringServing":true}\n');
+      assert.throws(() => captureNamedAlphaRedisIdentity(raw), /tracked changes/);
+      verifyNamedAlphaRedisIdentity(raw, proof);
+      const leases = readNamedAlphaRedisLeases(registry);
+      assert.deepEqual(leases.rejected, []);
+      assert.equal(leases.live.length, 1, 'serving generation does not erase the owner lease');
+    }
     const stopped = run('stop');
     if (probe) assert.ok(existsSync(probe.observed), 'exercise the native identity probe failure');
     if (cleanupRefused) {

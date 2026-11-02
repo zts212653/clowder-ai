@@ -173,6 +173,8 @@ function readContentBlockFallback(block: MessageContent): string | null {
     }
     case 'context_attachment': {
       const attachment = block.attachment;
+      if (attachment.kind === 'asset')
+        return `[素材: ${attachment.name} · ${attachment.indexedVersionRef} · ${attachment.work.reference.contentRef}@${attachment.work.reference.ownerRevision}]`;
       if (attachment.kind === 'quote') return `[引用]\n${attachment.text}`;
       if (attachment.kind === 'thread') return `[对话: ${attachment.title}]`;
       if (attachment.kind === 'media') return `[作品: ${attachment.title}]`;

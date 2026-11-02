@@ -1,50 +1,14 @@
 'use client';
-import type { ThreadArtifactDTO } from '@cat-cafe/shared';
-import { type ReactNode, useState } from 'react';
-import { ShellGlyph } from '@/components/shell/ShellIcons';
+import { projectFileContent, type ThreadArtifactDTO } from '@cat-cafe/shared';
+import { type ReactNode, useRef } from 'react';
 import { useShellCopy } from '@/components/shell/shell-copy';
 import { artifactObjectId } from '@/components/workbench/real-surface-adapters';
-import { workspaceV3Copy } from '@/components/workspace-home/workspace-v3.shell-copy';
-import { useArtifactContent } from '@/hooks/useArtifactContent';
-import { API_URL } from '@/utils/api-client';
-import { ArtifactDownloadMenu } from './ArtifactDownloadMenu';
-import { classifyArtifactView, resolveAssetUrl } from './artifact-view';
+import { FileActions } from '../content-review/FileActions';
+import type { WorkCardDescription } from './useWorkCardDescription';
+import { WorkPreview } from './WorkPreview';
 import { worksPanelCopy } from './works-panel.shell-copy';
 import './work-gallery.css';
-function PaperPreview({ artifact }: { artifact: ThreadArtifactDTO }) {
-  const body = useArtifactContent(artifact, null, !!artifact.url);
-  const t = useShellCopy(workspaceV3Copy);
-  return (
-    <span className="work-gallery-paper">
-      {body.content?.split('\n').slice(0, 8).join('\n') ||
-        (body.loading ? t.worksLoading : body.error ? t.worksUnavailable : artifact.name)}
-    </span>
-  );
-}
-function WorkPreview({ artifact }: { artifact: ThreadArtifactDTO }) {
-  const t = useShellCopy(worksPanelCopy);
-  const [failedUrl, setFailedUrl] = useState<string | null>(null);
-  const url = artifact.url ? resolveAssetUrl(artifact.url, API_URL) : null;
-  if (artifact.type === 'image' && url && failedUrl !== url)
-    return (
-      // biome-ignore lint/performance/noImgElement: preserve the original authenticated publication URL.
-      <img src={url} alt={artifact.name} onError={() => setFailedUrl(url)} />
-    );
-  if (classifyArtifactView(artifact) === 'text' && /\.(md|markdown|txt)$/i.test(artifact.name))
-    return <PaperPreview artifact={artifact} />;
-  const type = /\.pdf$/i.test(artifact.name)
-    ? 'PDF'
-    : /\.pptx?$/i.test(artifact.name)
-      ? 'PPT'
-      : t.filters[artifact.type === 'pr' || artifact.type === 'code' ? 'codepr' : artifact.type];
-  return (
-    <span className="work-gallery-kind">
-      <ShellGlyph name={artifact.type === 'video' ? 'play' : 'filePen'} className="h-7 w-7" />
-      <span>{type}</span>
-    </span>
-  );
-}
-/** One card for Workspace Works and new-conversation recent works; each host retains its original owner. */
+/** One card for Works, recent works and chat; each host retains its original owner. */
 export function WorkGalleryCard({
   artifact,
   metadata,
@@ -53,6 +17,14 @@ export function WorkGalleryCard({
   onSelect,
   onOpenSource,
   sourceLabel,
+  onLatest,
+  busy,
+  description,
+  copyName,
+  previewPending,
+  disabled,
+  current,
+  compact = false,
   testId = 'workspace-home-artifact-card',
 }: {
   artifact: ThreadArtifactDTO;
@@ -62,22 +34,46 @@ export function WorkGalleryCard({
   onSelect: (card: HTMLButtonElement) => void;
   onOpenSource?: () => void;
   sourceLabel?: string;
+  onLatest?: () => void;
+  busy?: boolean;
+  description?: WorkCardDescription | null;
+  copyName?: string;
+  previewPending?: boolean;
+  disabled?: boolean;
+  current?: boolean;
+  compact?: boolean;
   testId?: string;
 }) {
+  const t = useShellCopy(worksPanelCopy);
+  const card = useRef<HTMLElement>(null);
+  const facts = projectFileContent(artifact);
+  const untitledImage =
+    artifact.type === 'image' &&
+    (!artifact.name.trim() || (artifact.publicationItem?.kind === 'content-block' && artifact.name === '图片'));
+  const label = untitledImage ? t.untitledImage : artifact.name;
   return (
-    <article className="work-gallery-card">
+    <article ref={card} className="work-gallery-card cafe-presentation">
       <button
         type="button"
-        className="work-gallery-open shell-focusable"
+        className={`work-gallery-open shell-focusable${compact ? ' home-work-summary' : ''}`}
         data-testid={testId}
         data-home-artifact-id={artifactObjectId(artifact)}
+        disabled={busy || disabled}
+        aria-busy={busy || undefined}
+        aria-current={current || undefined}
         onClick={(event) => onSelect(event.currentTarget)}
       >
         <span className="work-gallery-visual">
-          <WorkPreview artifact={artifact} />
+          <WorkPreview
+            title={label}
+            artifact={artifact}
+            description={description}
+            pending={previewPending}
+            compact={compact}
+          />
         </span>
-        <span className="work-gallery-title" title={artifact.name}>
-          {artifact.name}
+        <span className={`work-gallery-title${compact ? ' home-work-label' : ''}`} title={label}>
+          {label}
         </span>
         {subtitle && (
           <span className="work-gallery-subtitle" title={typeof subtitle === 'string' ? subtitle : undefined}>
@@ -85,8 +81,17 @@ export function WorkGalleryCard({
           </span>
         )}
       </button>
+      {onLatest && artifact.work && artifact.work.currentOwnerRevision > artifact.work.ownerRevision && (
+        <button type="button" className="work-gallery-latest shell-focusable" disabled={busy} onClick={onLatest}>
+          {t.newerVersion(artifact.work.currentOwnerRevision)}
+        </button>
+      )}
       <div className="work-gallery-footer">
-        {footer ?? <small title={metadata}>{metadata}</small>}
+        {footer ?? (
+          <small className={compact ? 'home-work-meta' : undefined} title={metadata}>
+            {metadata}
+          </small>
+        )}
         {onOpenSource && (
           <button
             type="button"
@@ -99,7 +104,19 @@ export function WorkGalleryCard({
           </button>
         )}
       </div>
-      <ArtifactDownloadMenu artifact={artifact} />
+      {artifact.url && (
+        <div className="work-gallery-actions">
+          <FileActions
+            source={{ kind: 'url', url: artifact.url }}
+            filename={copyName ?? artifact.name}
+            mime={facts.mime}
+            copyName
+            contextRef={card}
+            src={facts.kind === 'image' ? artifact.url : null}
+            root={card}
+          />
+        </div>
+      )}
     </article>
   );
 }

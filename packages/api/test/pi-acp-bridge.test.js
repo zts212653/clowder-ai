@@ -25,7 +25,8 @@ async function fixture(run, { shim = false, unknownModel = false } = {}) {
     args = [];
     writeFileSync(command, '@ECHO OFF\r\nnode "%~dp0%\\node_modules\\fake-pi\\cli.js" %*\r\n');
   }
-  const bridge = new PiAcpBridge(command, args, (value) => outputs.push(value));
+  const state = mkdtempSync(join(tmpdir(), 'pi-native-state-'));
+  const bridge = new PiAcpBridge(command, args, (value) => outputs.push(value), { root: state, scope: 'c'.repeat(64) });
   const request = async (id, method, params = {}) => {
     await bridge.handle({ jsonrpc: '2.0', id, method, params });
     return outputs.find((item) => item.id === id);
@@ -48,7 +49,7 @@ async function until(check) {
 test('Pi adapter advertises only implemented capabilities and discovers opaque native models', () =>
   fixture(async ({ root, request }) => {
     const initialized = await request('i', 'initialize');
-    assert.equal(initialized.result.agentCapabilities.loadSession, false);
+    assert.equal(initialized.result.agentCapabilities.loadSession, true);
     assert.equal(initialized.result.agentCapabilities.promptCapabilities.image, undefined);
     assert.equal(existsSync(join(root, 'started')), false, 'initialize does not start or authenticate Pi');
     const created = await request('s', 'session/new', { cwd: root, mcpServers: [] });

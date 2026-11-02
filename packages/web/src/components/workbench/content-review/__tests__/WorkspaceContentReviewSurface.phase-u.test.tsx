@@ -2,6 +2,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { useChatStore } from '@/stores/chatStore';
+import { openFileMenu } from '@/test-utils/open-file-menu';
 import { WorkspaceContentReviewSurface } from '../WorkspaceContentReviewSurface';
 import { mediaView, videoDiscussionView, view } from './WorkspaceContentReviewSurface.fixture';
 
@@ -62,6 +63,7 @@ it.each([
   const request = container.querySelector<HTMLButtonElement>('[data-testid="content-modification-entry"]');
   if (kind === 'PNG') {
     expect(request, 'PNG uses the original Chat instead of a second sender').toBeNull();
+    await openFileMenu(container);
     const chat = container.querySelector<HTMLButtonElement>('[data-testid="workspace-media-chat-whole-work"]');
     expect(chat).not.toBeNull();
     expect(chat?.disabled).toBe(false);

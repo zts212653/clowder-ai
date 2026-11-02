@@ -42,12 +42,18 @@ export function readProcessIdentity(pid) {
     }
   }
   const env = { ...process.env, TZ: 'UTC', LANG: 'C', LC_ALL: 'C' };
-  const started = spawnSync('ps', ['-ww', '-p', String(pid), '-o', 'lstart='], { encoding: 'utf8', env });
-  const command = spawnSync('ps', ['-ww', '-p', String(pid), '-o', 'command='], { encoding: 'utf8', env });
-  if (started.status !== 0 || command.status !== 0) return null;
-  const processStartedAt = started.stdout.trim();
-  const processCommand = command.stdout.trim();
-  return processStartedAt && processCommand ? { processStartedAt, processCommand } : null;
+  const observed = spawnSync('ps', ['-ww', '-p', String(pid), '-o', 'lstart=,stat=,command='], {
+    encoding: 'utf8',
+    env,
+  });
+  if (observed.status !== 0) return null;
+  // C-locale lstart is 24 columns. Read birth, state and argv in one snapshot:
+  // an exited, unreaped runner keeps its birth but has <defunct> instead of argv.
+  // It cannot be signalled as an owned live process; stop still requires its
+  // successful completion receipt and, for launchd, the job's PID to disappear.
+  const fields = observed.stdout.trim().match(/^(.{24})\s+(\S+)\s+([\s\S]+)$/);
+  if (!fields || fields[2].startsWith('Z')) return null;
+  return { processStartedAt: fields[1], processCommand: fields[3] };
 }
 
 export function ownsProcess(record) {
@@ -181,6 +187,10 @@ function writeLaunchdPlist(config) {
     '  </array>',
     '  <key>WorkingDirectory</key>',
     `  <string>${xmlEscape(config.cwd)}</string>`,
+    // Previews serve an explicit interactive request. launchd's default daemon
+    // CPU/IO throttling can starve their bounded Git and process identity probes.
+    '  <key>ProcessType</key>',
+    '  <string>Interactive</string>',
     '  <key>RunAtLoad</key>',
     '  <true/>',
     '  <key>KeepAlive</key>',
@@ -214,6 +224,10 @@ export function removeLaunchdJob(config) {
 
 export async function captureLaunchdIdentity(pid, launchdLabel, readIdentity = readProcessIdentity, proof = {}) {
   if (!proof.expectedCommand || !proof.readJobPid) return null;
+  // During exec, native ps can expose only the kernel's parenthesized comm.
+  // Neither proxy form is final proof: the job PID and birth must stay fixed
+  // until the complete expected supervisor argv is observed.
+  const proxies = new Set([`xpcproxy ${launchdLabel}`, '(xpcproxy)']);
   let birth;
   for (let attempt = 0; attempt < 20; attempt += 1) {
     if (proof.readJobPid() !== pid) return null;
@@ -225,7 +239,7 @@ export async function captureLaunchdIdentity(pid, launchdLabel, readIdentity = r
       birth ??= identity.processStartedAt;
       if (identity.processStartedAt !== birth) return null;
       if (identity.processCommand === proof.expectedCommand) return identity;
-      if (identity.processCommand !== `xpcproxy ${launchdLabel}`) return null;
+      if (!proxies.has(identity.processCommand)) return null;
     }
     await new Promise((resolveWait) => setTimeout(resolveWait, 25));
   }

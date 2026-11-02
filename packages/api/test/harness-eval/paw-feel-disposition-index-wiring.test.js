@@ -26,6 +26,15 @@ describe('F278 API composition-root wiring', () => {
     assert.match(source, /agentKeyRegistry/);
   });
 
+  it('composes the bounded audit scan from the canonical ledger and shared read model', () => {
+    assert.match(source, /await loadOrCreatePawFeelInboxAuditCursorSigner\(redis\)/);
+    assert.match(source, /new PawFeelInboxAuditScanService\(\{/);
+    assert.match(source, /eventLog: pawFeelDispositionEventLog/);
+    assert.match(source, /readModel: pawFeelDispositionReadModel/);
+    assert.match(source, /app\.register\(pawFeelInboxAuditScanRoutes,\s*\{/);
+    assert.match(source, /auditScanService: pawFeelInboxAuditScanService/);
+  });
+
   it('registers reconciliation and duty before the unified scheduler starts', () => {
     const reconciliation = source.indexOf('createPawFeelReconciliationTaskSpec({');
     const duty = source.indexOf('createPawFeelDutyTaskSpec({');

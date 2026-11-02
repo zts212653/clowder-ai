@@ -4,7 +4,7 @@ import { useRoutingContext } from '../routing-context/useRoutingContext';
 import { OpenTeamWorkspaceButton } from '../settings/OpenTeamWorkspaceButton';
 import { useShellCopy } from '../shell/shell-copy';
 import { useMemberText } from './editor-presentation';
-import { memberStatus, memberStatusLabel } from './member-projection';
+import { memberLatestWork, memberStatus, memberStatusLabel } from './member-projection';
 import { memberSaveCopy } from './member-save.shell-copy';
 import { useMemberClock } from './useMemberClock';
 import { useMemberLoginCheck } from './useMemberLoginCheck';
@@ -26,7 +26,8 @@ export function MemberCurrentStatus({ cat, onBeforeOpen }: { cat: CatData; onBef
           source: undefined,
         }
       : memberStatus(cat, routing.data, routing.error, now, loginFor(cat));
-  const detail = status.detailIsNote ? status.source : status.detail;
+  const work = memberLatestWork(cat.id, routing.data, now);
+  const detail = work?.detail ?? (routing.data?.resolution.state === 'fresh' ? copy.noRecords : '');
   return (
     <div className="member-detail-summary" data-tone={status.tone}>
       <span className="member-status-label">
@@ -34,14 +35,20 @@ export function MemberCurrentStatus({ cat, onBeforeOpen }: { cat: CatData; onBef
         {t(memberStatusLabel(status))}
       </span>
       {detail && <span> · {t(detail)}</span>}
-      {status.observedAt !== undefined && (
-        <time dateTime={new Date(status.observedAt).toISOString()}>
-          {' '}
-          · {new Date(status.observedAt).toLocaleString()}
-        </time>
+      {work?.observedAt !== undefined && (
+        <time dateTime={new Date(work.observedAt).toISOString()}> · {shortWorkTime(work.observedAt, now)}</time>
       )}
       <span> · </span>
       <OpenTeamWorkspaceButton label={copy.records} catId={cat.id} inline onBeforeOpen={onBeforeOpen} />
     </div>
   );
+}
+
+function shortWorkTime(observedAt: number, now: number) {
+  const date = new Date(observedAt);
+  const today = new Date(now);
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return date.toDateString() === today.toDateString()
+    ? `${pad(date.getHours())}:${pad(date.getMinutes())}`
+    : `${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }

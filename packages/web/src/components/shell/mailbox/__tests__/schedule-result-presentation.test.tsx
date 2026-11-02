@@ -54,6 +54,8 @@ it.each([
   try {
     await act(async () => root.render(<RetainedResult session={session} sessions={sessions} />));
     const line = container.querySelector('[data-testid="mailbox-retained-line"]')?.textContent;
+    expect(container.querySelector('[data-testid="decision-result-details"]')).toBeNull();
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-expanded="false"]')?.click());
     if (matches) expect(line).toContain('定时任务已创建并注册');
     else {
       expect(line).toContain('效果暂未确认');

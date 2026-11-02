@@ -5,7 +5,7 @@ topics: [development-process, intent-alignment, review, merge-gate, process-cost
 tips_exempt: "Renewed 2026-10-15: this delta records the internal F314-to-F311 coordination and evidence handoff. It adds no shipped user entry or runtime capability and establishes no efficacy verdict; future user-facing F311 delivery retains its own discovery requirement."
 doc_kind: spec
 created: 2026-09-02
-updated: 2026-10-18
+updated: 2026-10-23
 description: "让一项托付跨阶段持续做对，尽早交付真实可用结果，以充分且相称的验证减少等待，并让猫自主续办、少占用人的协调注意力。现有 anchor 实验是其中一个有界机制。"
 description_source: human
 description_author: codex-astra
@@ -14,7 +14,7 @@ description_updated_at: 2026-10-03T06:16:00-07:00
 
 # F314: Development Episode Alignment Experiment｜开发交付对齐自进化实验
 
-> **Status**: in-progress / Phase B accepted with its recorded exceptions; Phase C owner binding verified, operator accepts this period's insufficient anchor-effect evidence; bounded comparison delivered with content corrections, overall acceptance remains open | **Owner**: 小星星·Maine Coon（@codex-astra, GPT-6 Astra；方向与整体结果） | **Execution**: 小太阳·Maine Coon（@codex-sol, GPT-5.6 Sol；Task197；Task143 已完成） | **Priority**: P0
+> **Status**: in-progress / Phase B accepted with recorded exceptions; operator B accepts insufficient anchor evidence; method #5788 and published history v10 delivered, content/map design accepted; overall acceptance open, 18-cluster code refactor deferred | **Owner**: 小星星·Maine Coon（@codex-astra, GPT-6 Astra；方向与整体结果） | **Execution**: 小太阳·Maine Coon（@codex-sol, GPT-5.6 Sol；Task197；Task143 已完成） | **Priority**: P0
 >
 > **operator kickoff**: `[thread-id]#private-source-id`——“这个项目可能可以特殊点实验项目；这个出生是我们建立的，但是后续优化迭代我们接入 F311 的自进化。”
 >
@@ -47,9 +47,16 @@ You 认定的痛点（本轮 449 引 1483；速度与结果原话见 1352）：
 
 ## Current State / 现状基线
 
+**2026-10-23 当前核对**（来源：operator 总览 `[thread-id]#private-source-id`）：本次更新文档与索引，不改变已接受的实验取舍或工程授权。
+
+- **已交付**：Phase B 按记录验收、AC-C1 真实绑定、有界自然工作对照、F311 准备材料对接；#5788 共同规则责任方法已发布。谱系当前为第10稿 `publication:10:4704d3160e28ce387067196216b91967635f63f1`，12步/27道错题；正文更稿不重启已在正式环境验证，地图设计验收亦已通过，见下方10-20/10-21记录。
+- **仍未证明**：方法的自然采用与稳定效用、原整合工作的整体验收。此次只读 owner 回读 Program 为 `active / instrumenting / cycle 1 / sequence 134`，`currentAssetVersionRefs=[]`、`observation=insufficient`、`connectedEyes=[]`，六项缺口仍在；这不等于现实中没有采用，也不以内容发布推进实验状态。
+- **已获准停止或暂缓**：operator B 已接受本期锚点证据不足，AC-C2–C5 未达按签字处置，成熟 `keep/sunset` 不再是本期关闭前置；不得为凑成熟重开窗口。18簇原代码重构按10-20决定暂缓，等待开源 intake 与组织仓迁移后再确认，方法发布不解除该边界。
+- **责任与出口**：本次回读 Task197 仍为doing、Task613为revision77/doing，未关闭Feature。原整合与整体结果判断继续；自然效用未知不能写成已验，也不能反过来恢复已取消的成熟实验前置。F311 的 AC-UX6 及真实采用旅程由其原owner验收，不由这次谱系读面交付代签。
+
 **2026-10-04 PDT / 2026-10-05 UTC 验收取舍**：You 已选择决策卡 B，接受本期锚点效果证据不足，解除成熟效用结论对 F314 收口的阻塞，见[逐项处置与签字](#phase-c-本期验收处置--2026-10-05)。Task143 已由部署回流实际完成一次 governed rebind；本现场独立读到 Program `sequence=71`、measurement certificate/四角色均为 v3，consumer=`F100/cat:opus55`，其余仍为 `active/instrumenting/cycle1`、human value owner、空 assets/connectedEyes 与六项 `insufficient` 缺口。没有新 observation、轮次或效用结论。Task197/Task613 与 F314 均未关闭。
 
-本现场 15:15 UTC 回读 Program 为 `active / instrumenting / cycle 1 / sequence 66 / observation insufficient / currentAssetVersionRefs=[]`。Sol 的两次明确加载现行法动作观察已完成；measurement `ae21a2bb…`、baseline `6a3ff9e7…` 均 submitted、无 stale dependency（原报告 `private-source-id`）。两例都保留了局部批准边界，只支持这两个有界观察；自然发现/加载/消费、历史误判根因与正式效果仍未证明。
+本现场 **2026-10-03** 15:15 UTC 回读 Program 为 `active / instrumenting / cycle 1 / sequence 66 / observation insufficient / currentAssetVersionRefs=[]`；这是当时切面，当前回读见本节顶部。Sol 的两次明确加载现行法动作观察已完成；measurement `ae21a2bb…`、baseline `6a3ff9e7…` 均 submitted、无 stale dependency（原报告 `private-source-id`）。两例都保留了局部批准边界，只支持这两个有界观察；自然发现/加载/消费、历史误判根因与正式效果仍未证明。
 
 下列条目是原立项及 Phase C 已记录的历史基线；其中 Program 字段不代表本次重新读取了实时状态。当前运行状态须由其 canonical owner 读取，不能由新的愿景文字推进。
 
@@ -108,7 +115,7 @@ Phase B 的 exact version、证据与 owner receipts 进入既有 Evolution Prog
 - deterministic guard 的 bug/契约修复仍走原 owner 的 test/guard，不因存在 Program 而等待 eval；
 - F311 Phase 3 已足以在成熟证据上形成 `keep | sunset | insufficient`；只有结论为 `tune`、需要受治理写回 owner 资产时，才依赖 Phase 4 的 mutation + fresh outcome 闭环；
 - 未来若要评估另一个不确定机制，必须另立 E0 合格 claim/Program，但仍可挂在 F314 的产品边界下；不得把多个变量塞进本 Program；
-- 首次可行动 verdict 完成后，F314 可以关闭；后续 Program 周期继续由 F311 与具名 consumer 持有，不靠operator或 F314 backlog 人肉续命。
+- **历史关闭设计，已由 operator B 替代**：原设计等待首次可行动 verdict；本期现接受 insufficient，不再以成熟 verdict 为关闭前置。原整合交付与正常整体验收仍须结算，后续 Program 由 F311 与具名 consumer 持有，不据本段自动开轮或关闭Feature。
 
 ### F311 v2 接入：事故档案成为进化谱系的数据（2026-10-14）
 
@@ -123,8 +130,10 @@ Phase B 的 exact version、证据与 owner receipts 进入既有 Evolution Prog
   - 交接、共享规则、L0 提示词；
   - DESIGN.md 里的交付与验收规则。
 
-  版本照 F100 适配器现有的做法从 git 历史读出（#4517 目前只覆盖 request-review 一个文件）。一次发布打包成一个版本，写清改了哪些成员；能追到事故的写出处，追不到的写「未关联」。F311 只投影，不复制资产。
-- **实验**：事故档案里的案例和「16 张 PR 有界对照」里的交付，挂在当时实际生效的那一版下面。每个案例写清偏离、人的代价、同类是否复发。档案不是全量普查，不能算成翻车率。
+  10-14 方案沿 F100 适配器从 git 历史读取（#4517 在当时只覆盖 request-review 一个文件）；后续已实现整组历史投影与独立内容发布。发布写清改了哪些成员；能追到事故的写出处，追不到的写「未关联」。F311 只投影，不复制资产。
+- **案例与历史版本**：事故档案和「16 张 PR 有界对照」按已核来源挂接；仅凭日期或引用不能认定当时实际使用版本。每个案例写清偏离、人的代价、同类是否复发；未知保留未知。档案不是全量普查，也不是正式实验分母，不能算成翻车率。
+
+**2026-10-21 地图设计验收通过**：原地图重叠、相邻连线与末卡备注裁切由F311原现场经#5777/#5822/#5839修复。#5839 merge `9cd14a392ec25f10e1633f1c2e7d5e47fde9ca69` 在正式boot43 / `56a0e1ad7b124e5f034ec563c33a21f3ac3b8d14`加载后复验，12步/27题/11条作者关系、末卡完整、受保护写入与pageErrors均为0；Opus55独立验图并将全貌图放入图册第八章，验收文档状态为 `content-passed-map-passed`。该读面/设计切片已交，不再等待地图修复；F311的AC-UX6、真实采用与效用仍在其原责任内开放。
 
 ### F314 主线对接 F311 指挥现场（2026-10-15）
 
@@ -132,7 +141,7 @@ Phase B 的 exact version、证据与 owner receipts 进入既有 Evolution Prog
 
 - **F314 原现场** `[thread-id]` 的 Astra 继续持有整体方向与 Task `private-source-id`；原执行 Task `private-source-id` 与其 owner 保留。由该现场续接原任务并安排已有执行责任，不把它们搬成另一套任务或让 You 再次路由。
 - **F311 指挥现场** `[thread-id]` 接收整合结果，对齐准备四块 → 探索中的版本/案例/原件 → 具体判断 → 后续实际使用与结果。界面及 adapter 的已有执行现场为 `[thread-id]`；精确接线缺口仍由对应 owner 处理。
-- **下一份交付**：F314 原 owner 回读当前 Program 与任务，给出一份能执行的对接结果：已进入 F311 的材料与精确修订、尚缺的真实使用/观测证据、下一项有事实支持的工作及具名执行者、前后端各自落点和完成条件。并以真实使用者核对现有 F314 页面中的版本/案例来源，将具体缺项交已有实现现场，结果回到 F311 指挥现场。当前只是对接已发起，尚不声称这份交付已经返回。
+- **10-15 对接约定，已交付**：已回读原 Program/任务，给出材料修订、证据缺口、具名执行者及前后端落点，并从正式入口核页面与来源；实际结果见下段及 F311 指挥回执 `[thread-id]#private-source-id`。不再把这份已返回的整合包列作“下一份交付”；后续独立内容发布与读面验收见10-17至10-21记录。
 - **问题处理随整体结果归位**：确定的 bug 在原实现 owner 处修复，修复与后续自然使用证据回到同一项目；F314 主线程继续承担整合与方法判断。公开同步、CI 或其他 feature 的日常修复沿各自已有责任完成，不再用其局部完成代替 F314 的下一份整合交付。
 - **记录与权限边界**：新案例分别记录可核的实际使用版本、处置成员与提交；未知就写未确认，不从日期或引用补因果。复用 `ba0f4524` Program，保留 operator B 的本期不足结论、旧样本与关闭边界；本次对接不自动开新 anchor 窗口、改变量/分母、批准候选或扩大资产写权。需要新的效用实验时先提交具体对象、问题与证据边界，按既有授权另行判断。
 
@@ -166,6 +175,7 @@ Phase B 的 exact version、证据与 owner receipts 进入既有 Evolution Prog
 | **已完成：真实 owner binding**，原 F267 / Task143 | Sol5.6；Task143 done | 曾误等的 F221 #4560 早已合入；原 Task 续办后经 #5071/#5075/#5077 发布 v3，部署回流完成一次 rebind、Program 70→71，终态原件 `private-source-id`。这是 AC-C1 接线证据，不是效用证明。 |
 | **查到断点后：只改有依据的一步**，沿该资产或机器原现场 | 原 owner 持实现；Astra 明确该刀执行猫与结果，按风险选非作者验证 | 未找到方法就修发现入口；已读仍错才改教法；机器错拦或回流断裂就修对应路径。若未发现内容缺陷，明确保留现行方法。每次交可验证改动及新的自然任务结果，不把所有候选改法一起铺开。 |
 | **贯穿当前交付：验证成本与自主续办**，复用 Gate 等原现场 | Gate Astra / Task512；各产品原 owner | 继续原 A–E 与消费者总反馈时间验收；失败后的重验、等待和清理计入成本。F314 消费方法效果，不接管 Gate 实现或重新排整包测试。 |
+| **已交：材料对接、独立更稿与读面**，原 F314 / F311 | Astra / Task613 持内容与整合；F311原执行现场持reader，Opus55持设计验收 | 10-15对接包已返回；正式第10稿12步/27题，Markdown更稿同进程可见；10-21地图Design Gate通过。当前不再等待这几项交付，F311 AC-UX6与真实采用保持其原边界。 |
 | **已接受：本期锚点效果证据不足**，原 F311 Program 保持 | operator B 取舍；Astra 落盘，Sol5.6 消费原 Task197 验收边界 | 本期不新开窗口或为凑成熟追加接线/试跑，AC-C2–C5 按下述 cvo_signoff 处置。Program 继续诚实 insufficient；其余原交付、反例挑战及正常整体验收未被免除，不能立即关闭 F314/Task197/Task613。 |
 
 **成熟机会与退出已作价值取舍。** 第一包核到四个焦点样本均不合格、精确加载窗口与自然对照未建立，无法给可信成熟时间；这不证明永远没有合格样本。Astra 交付含信息价值、成本上限、停止条件与逐项验收变更的决策卡后，You 明确选择 B。未被选择的 A 预算不是获准新实验，不执行；原证书分母与历史 outcome 均不改。
@@ -290,10 +300,10 @@ cvo_signoff:
 |---|---|---|---|---|
 | R1 | “我们可以立项了” | AC-A1, AC-A2 | Feature truth + BACKLOG + source ref | [x] |
 | R2 | “这个项目可能可以特殊点实验项目” | AC-A3, AC-C3, AC-C4 | 出生证；本期实验未达部分见 operator B | [ ] C3/C4: cvo_signoff |
-| R3 | “这个出生是我们建立的” | AC-A1, AC-A3, AC-B1 | 两猫蓝图 + operator kickoff + initial delivery receipt | [ ] |
-| R4 | “后续优化迭代我们接入 F311 的自进化” | AC-C1–AC-C5 | Program seq71/v3；C2–C5 未达处置见 operator B | [ ] C1 met；C2–C5: cvo_signoff |
-| R5 | 质量与效率都必须改善，不能把闭环甩给operator | AC-B3–AC-B7, AC-C4–AC-C5 | 历史验证保留；本期 anchor 效果不足不代签整体结果 | [ ] C4/C5: cvo_signoff；整体对照待验 |
-| R6 | L0 / SOP / skills 中过期机制、失效概念、假命令与重复教法必须审查并收敛 | AC-B1, AC-B8 | keep/rewrite/retire audit + exact diff + non-author review | [ ] |
+| R3 | “这个出生是我们建立的” | AC-A1, AC-A3, AC-B1 | 两猫蓝图 + operator kickoff + initial delivery receipt | [ ] A1/A3已达；B1字面PR预算不符，保留授权例外 |
+| R4 | “后续优化迭代我们接入 F311 的自进化” | AC-C1–AC-C5 | v3真实绑定已达；10-23 Program seq134仍insufficient，C2–C5处置见operator B | [ ] C1 met；C2–C5: cvo_signoff |
+| R5 | 质量与效率都必须改善，不能把闭环甩给operator | AC-B3–AC-B7, AC-C4–AC-C5 | 有界对照及修订已交；本期anchor不足不代签稳定改善 | [ ] C4/C5: cvo_signoff；整体验收开放 |
+| R6 | L0 / SOP / skills 中过期机制、失效概念、假命令与重复教法必须审查并收敛 | AC-B1, AC-B8 | keep/rewrite/retire audit + exact diff + non-author review | [ ] B8已验收；B1授权例外保留，非“尚未收敛” |
 
 ### 覆盖检查
 
@@ -319,21 +329,21 @@ Vision comparison 仍以最初四条 operator source 为准：`private-source-id
 
 ## Phase C Cycle 1 Owner-Version Grounding / 2026-09-05
 
-本节保留当时的 owner/task 基线，不是当前待办指令；其中成熟实验要求现按 operator B 处置，Task143 当前终态与 Program seq71 见上文，不从本节历史记录复活工作。
+本节保留09-05至09-12的 owner/task 基线，不是当前待办指令。10-05真实绑定已完成、operator B已处置成熟实验要求；10-23最新只读Program/Task状态见Current State，不从本节恢复实验或复活任务。
 
-Cycle 1 的唯一变量已经收窄到 F100 owner 明确认领的资产边界：`assetKind=skill`、`assetId=cat-cafe-skills/request-review/SKILL.md`、范围仅为 accepted-source anchor 模板 / 字段 / re-ack。Owner source：`[thread-id]#private-source-id`。当前仓库可复核该文件最近内容 commit 为 `1aff39f464261971eed9bc6722a53a1eb81226ac`、当前 blob 为 `3c5902e12467602bd9f9ae81f098ade05c92e4ea`；这只是可重开源码 revision，**不是** F311 所需的 owner-signed `ExactAssetVersionRef`、current proof、adoption proof 或 actual-use receipt。
+Cycle 1 的唯一变量当时收窄到 F100 owner 明确认领的资产边界：`assetKind=skill`、`assetId=cat-cafe-skills/request-review/SKILL.md`、范围仅为 accepted-source anchor 模板 / 字段 / re-ack。Owner source：`[thread-id]#private-source-id`。该历史切面记录内容 commit `1aff39f464261971eed9bc6722a53a1eb81226ac`、blob `3c5902e12467602bd9f9ae81f098ade05c92e4ea`，不声称它们仍是今天最新版本；源码 revision 本身**不是** owner-signed `ExactAssetVersionRef`、current proof、adoption proof 或 actual-use receipt。
 
-责任与停止条件如下，禁止用一个 carrier 冒充另一个 owner：
+当时责任与条件如下；各状态是该历史切面的记录，当前不得用旧条件覆盖operator B：
 
-| 范围 | Canonical carrier / holder | 停止条件 |
+| 范围 | 当时 canonical carrier / holder | 当时条件与后续处置 |
 |---|---|---|
-| F314 integration / acceptance | Task `private-source-id` / `@codex-sol`（doing） | AC-C5：首次成熟 `keep/sunset`；若为 `tune`，还需 owner mutation receipt + fresh outcome |
+| F314 integration / acceptance | Task `private-source-id` / `@codex-sol`（doing） | 原AC-C5等成熟`keep/sunset`或`tune`后mutation/fresh outcome；**10-05 operator B已解除本期此前置**，当前仅保留原整合与正常整体验收 |
 | F311 Workspace consumption / Alpha acceptance | Task `private-source-id` / `@codex-astra`（doing） | owner-backed `versionReview` 已在新 Alpha 由原 F307 history 读通；AC-UX4 仍须下一项真实同类任务产生 actual-use/source/revert 证据，接口验收不替它关闭 |
 | F314 observation join | Task `private-source-id` / `@codex-sol`（doing） | canonical trajectory、异质 owner surfaces 与 F267 proof 成为 Program 可消费 refs；它不生产资产版本 |
 | F100 exact-version publication + owner reader | Task `private-source-id` / `@opus`（done）；PR #4435 / merge `fce8043d0e16b90fe6f94b2e2757b785832378ec` | Reader 已在 main 注册进 `ProgramAdapterRegistry`，33/33 tests green；live runtime 仍 dormant。该交付只关闭 reader implementation，不替代 owner-loop integration、adoption 或 actual-use proof |
 | F314 owner-loop integration | Child Task `private-source-id` / `@codex-sol`（done）；PR #4517 / merge `2baede2cf314e4f99fc6346d4ba773c67ddbff26`，反向锚定 parent Task `private-source-id` | F100 语义版本/history/parent/diff、exact lineage owner actions、三类 evidence、actual-use 与恢复接口已落地；新 Alpha 对同一 `ba0f…` Program 的 owner/F307 读回与重启恢复通过。自然 adoption/use/fresh outcome 不存在，不能由接口验收补造 |
 
-F100 owner 的 reader implementation 已由 PR #4435 合入 main，owner-loop interface 随 PR #4517 与新 Alpha 同源消费验收闭合；`reader_pending` 与接口 child Task 均已终结。**接口闭合仍不等于 F314 business loop 已闭合。** Parent Task `private-source-id` 继续由 F314 持有，observation Task `private-source-id` 仍独立推进；它们等待自然证据、必要批准、实际采用与 fresh outcome。F314 不把 Git commit、manifest、Alpha deterministic replay 或 owner read 冒充 adoption/use，已完成的 wiring/reader/interface Task 也不得被复活承接这些业务条件。
+F100 reader与owner-loop接口分别由#4435/#4517合入并完成当时接口验收，`reader_pending`与接口child已终结；接口通过不证明实际采用或效用。上表曾等待自然证据与fresh outcome，但**本期锚点效果现按operator B接受不足**，不能继续把这些旧等待写成F314关闭前置。原Program及各Task仍由canonical owner持有，已完成的wiring/reader/interface任务不得复活；当前原整合验收开放也不自动授权新的实验投入。
 
 ## Dependencies
 
@@ -365,6 +375,7 @@ F100 owner 的 reader implementation 已由 PR #4435 合入 main，owner-loop in
 | KD-7 | Phase B 由Maine Coon实现；PR-1 Terra review、PR-2 Opus 5 review | 把高成本架构猫用于边界判断，不用于常规编码；两张 PR 均由同一实现 owner 保持收敛 | 2026-09-02 |
 | KD-8 | PR-2 同时完成 soft-surface convergence，不另开 cleanup PR | operator 确认它属于原始 F314 scope；拆出 follow-up 会再次制造 scope 漂移与无人欠账 | 2026-09-03 |
 | KD-9 | operator B 接受本期 anchor 效果证据不足，解除成熟效用结论关闭前置 | 具体决策卡与原话见 Phase C 逐项 cvo_signoff；不把未达勾成已实现，不关闭其余原交付或 Program | 2026-10-05 |
+| KD-10 | 研发方法立即实施，18簇原代码重构暂缓 | CVO1149拆分授权；#5788只交方法，代码等开源intake与组织仓迁移后再确认，提醒到期不自动开工 | 2026-10-20 |
 
 ## Review Gate
 

@@ -175,9 +175,21 @@ export const CapabilityTipSchema = z
   })
   .strict();
 
+export const CAPABILITY_TIP_USAGE_EVENTS = [
+  'capability_tip_exposed',
+  'capability_tip_action',
+  'capability_tip_dismissed',
+  'capability_tip_demo_exposed',
+  'capability_tip_demo_opened',
+  'capability_tip_demo_started',
+  'capability_tip_demo_completed',
+  'capability_tip_demo_tried',
+  'capability_tip_demo_used',
+] as const;
+
 export const CapabilityTipUsageEventSchema = z
   .object({
-    event: z.enum(['capability_tip_exposed', 'capability_tip_action', 'capability_tip_dismissed']),
+    event: z.enum(CAPABILITY_TIP_USAGE_EVENTS),
     tipId: z
       .string()
       .max(64)

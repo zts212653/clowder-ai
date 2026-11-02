@@ -20,12 +20,18 @@ export function serializeTask(task: TaskItem): Record<string, string> {
     subjectKey: task.subjectKey ?? '',
     title: task.title,
     ownerCatId: task.ownerCatId ?? '',
+    ownerRevision: task.ownerRevision === undefined ? '' : String(task.ownerRevision),
+    ownerChangedAt: task.ownerChangedAt === undefined ? '' : String(task.ownerChangedAt),
+    lastAppliedHandoffMessageRef: task.lastAppliedHandoffMessageRef ?? '',
+    executionRef: task.executionRef ? JSON.stringify(task.executionRef) : '',
     status: task.status,
     why: task.why,
     createdBy: task.createdBy,
     createdAt: String(task.createdAt),
     updatedAt: String(task.updatedAt),
     userId: task.userId ?? '',
+    sourceMessageId: task.sourceMessageId ?? '',
+    sourceSummaryId: task.sourceSummaryId ?? '',
     probe: task.probe ? JSON.stringify(task.probe) : '',
     resolveMode: task.resolveMode ?? '',
   };
@@ -47,15 +53,39 @@ export function hydrateTask(data: Record<string, string>): TaskItem {
     subjectKey: data.subjectKey || null,
     title: data.title ?? '',
     ownerCatId: (data.ownerCatId || null) as CatId | null,
+    ...(data.ownerRevision ? { ownerRevision: Number(data.ownerRevision) } : {}),
+    ...(data.ownerChangedAt ? { ownerChangedAt: Number(data.ownerChangedAt) } : {}),
+    ...(data.lastAppliedHandoffMessageRef ? { lastAppliedHandoffMessageRef: data.lastAppliedHandoffMessageRef } : {}),
     status: (data.status ?? 'todo') as TaskItem['status'],
     why: data.why ?? '',
     createdBy: (data.createdBy ?? 'user') as TaskItem['createdBy'],
     createdAt: parseInt(data.createdAt ?? '0', 10),
     updatedAt: parseInt(data.updatedAt ?? '0', 10),
     userId: data.userId || undefined,
+    ...(data.sourceMessageId ? { sourceMessageId: data.sourceMessageId } : {}),
+    ...(data.sourceSummaryId ? { sourceSummaryId: data.sourceSummaryId } : {}),
     resolveMode: data.resolveMode ? (data.resolveMode as TaskItem['resolveMode']) : undefined,
   };
   hydrated = parseJsonField(hydrated, 'pluginWait', data.pluginWait);
+  // Invalid execution coordinates fail closed rather than making an occupied Task appear idle.
+  if (data.executionRef) {
+    const ref = JSON.parse(data.executionRef) as TaskItem['executionRef'];
+    if (
+      !ref ||
+      ['invocationId', 'parentInvocationId', 'catId', 'threadId'].some(
+        (key) => typeof ref[key as keyof typeof ref] !== 'string' || !ref[key as keyof typeof ref],
+      )
+    )
+      throw new Error(`Invalid executionRef for Task ${data.id}`);
+    if (ref.sourceMessageId !== null && (typeof ref.sourceMessageId !== 'string' || !ref.sourceMessageId))
+      throw new Error(`Invalid execution source for Task ${data.id}`);
+    hydrated = { ...hydrated, executionRef: ref };
+  }
+  if (
+    hydrated.ownerRevision !== undefined &&
+    (!Number.isSafeInteger(hydrated.ownerRevision) || hydrated.ownerRevision < 0)
+  )
+    throw new Error(`Invalid ownerRevision for Task ${data.id}`);
   hydrated = parseJsonField(hydrated, 'automationState', data.automationState);
   hydrated = parseJsonField(hydrated, 'deploymentWait', data.deploymentWait);
   hydrated = parseJsonField(hydrated, 'probe', data.probe);

@@ -39,20 +39,25 @@ export function verifyAcpBootstrap(
   profileId: string,
   bootstrapRoot?: string,
   env?: Record<string, string>,
+  strictRoot = false,
 ): VerifiedAcpBootstrapContext {
   const isolation = auditedWindowsAcpStartup(
     base.command,
     base.args,
     buildChildEnv(env, { workingDirectory: base.projectRoot }),
   );
-  const options = { allowVolumeRootDelete: isolation !== undefined };
+  // An owner-selected root is always strict, even for an audited launch chain.
+  const options = {
+    allowVolumeRootDelete: !strictRoot && isolation !== undefined,
+    preserveExistingPermissions: strictRoot,
+  };
   const cwd = resolveAcpBootstrapCwd(
     base.projectRoot,
     profileId,
     bootstrapRoot,
     undefined,
     undefined,
-    undefined,
+    strictRoot ? false : undefined,
     options,
   );
   const verifyCwd = (

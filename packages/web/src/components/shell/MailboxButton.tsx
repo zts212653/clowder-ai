@@ -2,8 +2,10 @@
 
 import { usePathname } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useApprovalHubStore } from '@/stores/approvalHubStore';
 import { useChatStore } from '@/stores/chatStore';
 import { MailboxPanel } from './MailboxPanel';
+import { createHandledHistoryRead } from './mailbox/handled-history-read';
 import { mailboxEntryCopy } from './mailbox/mailbox-entry.shell-copy';
 import { MAILBOX_NAVIGATE_EVENT, type MailboxNavigation, type MailboxSection } from './mailbox/mailbox-navigation';
 import { openExactPlace } from './mailbox/open-exact-place';
@@ -49,12 +51,20 @@ export function MailboxButton() {
   const view = useUnifiedAttention();
   // Decisions made on an approval's original card are followed here, not in the panel: the panel closes, the decision goes on.
   const sessions = useApprovalSessions(view);
+  const [historyRead] = useState(createHandledHistoryRead);
+  useEffect(() => () => historyRead.dispose(), [historyRead]);
   const state = deriveMailboxState(view.badgeResult ?? view.result);
   const setWorkspaceMode = useChatStore((s) => s.setWorkspaceMode);
   const [open, setOpen] = useState(false);
   const [section, setSection] = useState<MailboxSection>('pending');
   const [selectedProposalId, setSelectedProposalId] = useState<string | null>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
+  const pendingEpoch = useApprovalHubStore((state) => state.pendingRequestVersion);
+  const pendingOwner = view.result.kind === 'ok' ? view.result.read.identity.ownerUserId : null;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new invalidation epoch withdraws the completed pending read.
+  useEffect(() => {
+    if (open && pendingOwner) void useApprovalHubStore.getState().ensurePending(pendingOwner);
+  }, [open, pendingOwner, pendingEpoch]);
 
   // Leaving the page closes the panel: it belongs to the place it was opened from.
   // biome-ignore lint/correctness/useExhaustiveDependencies: pathname is the intentional trigger
@@ -66,7 +76,14 @@ export function MailboxButton() {
     (next: MailboxSection) => {
       setSection(next);
       const previous = view.result.kind === 'ok' ? view.result.read.mentionPeriod : undefined;
-      const period = next === 'history' ? 'handled' : previous && previous !== 'handled' ? previous : 'week';
+      const period =
+        next === 'ignored'
+          ? 'all'
+          : next === 'history'
+            ? 'handled'
+            : previous && previous !== 'handled' && previous !== 'all'
+              ? previous
+              : 'week';
       if (view.setPersonalView) view.setPersonalView(next === 'ignored' ? 'ignored' : 'visible', period);
       else view.setMentionPeriod?.(period);
     },
@@ -144,6 +161,7 @@ export function MailboxButton() {
           state={deriveMailboxPanelState(view.result)}
           view={view}
           sessions={sessions}
+          historyRead={historyRead}
           section={section}
           onSectionChange={changeSection}
           selectedProposalId={selectedProposalId}

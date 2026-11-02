@@ -32,6 +32,37 @@ beforeEach(() => {
 });
 
 describe('lookupSettled', () => {
+  it('does not turn a producer unknown-time sorting sentinel into a real closure date', async () => {
+    answer({
+      items: [
+        row({
+          resolution: 'closed_without_decision',
+          decidedBy: '',
+          decidedAt: 0,
+          detail: { closureTimeUnknown: true },
+        }),
+      ],
+    });
+    const result = await lookupSettled(ask);
+    expect(result.kind).toBe('found');
+    expect(result.kind === 'found' && result.terminal.decidedAt).toBeUndefined();
+  });
+  it.each([
+    'expired',
+    'withdrawn',
+  ] as const)('retains a verified %s closure without inventing a decision', async (closedReason) => {
+    answer({ items: [row({ resolution: 'closed_without_decision', closedReason })] });
+    await expect(lookupSettled(ask)).resolves.toMatchObject({
+      kind: 'found',
+      terminal: { resolution: 'closed_without_decision', closedReason },
+    });
+  });
+
+  it('does not apply a closure reason to an actual rejection', async () => {
+    answer({ items: [row({ resolution: 'rejected', closedReason: 'expired' })] });
+    const found = await lookupSettled(ask);
+    expect(found.kind === 'found' && found.terminal.closedReason).toBeUndefined();
+  });
   it.each(['threadId', 'messageId'])('rejects an exact proposal result whose original %s changed', async (key) => {
     const ref = { threadId: 'original-thread', messageId: 'original-message' };
     answer({
@@ -160,4 +191,30 @@ describe('lookupSettled', () => {
     answer({ items: [null, 'x', 3, [], row()], count: 5 });
     await expect(lookupSettled(ask)).resolves.toMatchObject({ kind: 'found' });
   });
+});
+
+it.each([
+  'F193',
+  'F260',
+])('keeps missing %s effect rereadable until a matching canonical proof arrives', async (feature) => {
+  answer({ items: [row({ sourceFeatureId: feature })] });
+  await expect(lookupSettled({ ...ask, sourceFeatureId: feature })).resolves.toMatchObject({
+    kind: 'found',
+    terminal: { effectUnknown: true },
+  });
+  const proof = 'canonical-proof';
+  answer({
+    items: [
+      row({
+        sourceFeatureId: feature,
+        materialization: { state: 'succeeded', effectProofRef: proof },
+        detail: { canonicalEffectProofRef: proof },
+      }),
+    ],
+  });
+  const result = await lookupSettled({ ...ask, sourceFeatureId: feature });
+  expect(result.kind === 'found' && result.terminal.domainEffect).toBe(
+    feature === 'F193' ? 'dispatch-delivered' : 'entity-written',
+  );
+  expect(result.kind === 'found' && result.terminal.effectUnknown).not.toBe(true);
 });

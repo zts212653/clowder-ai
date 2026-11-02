@@ -4,8 +4,8 @@ related_features: [F143, F198, F230, F246, F254, F296, F306, F183, F039, F117, F
 topics: [claude-agent-sdk, carrier, provider-native, capability-alignment, freshness, runtime]
 doc_kind: spec
 created: 2026-09-16
-updated: 2026-10-18
-tips_exempt: "2026-10-19：本次说明 freshness 通知退役，没有新增操作入口；SDK carrier 仍是默认关闭的内部接入候选，专项启用提示随独立验收提供，不把通知退役验收写成 SDK 整体启用。"
+updated: 2026-10-23
+tips_exempt: "2026-10-23：按 operator 确认同步 A2A/SDK 接入完成及历史通知退役的边界；没有新增入口或改变载体默认值，不以项目关账冒充全家切换 SDK。"
 description: "让Ragdoll经由官方 Claude Agent SDK 获得与 Codex app-server 同级的原生运行待遇：能对齐的逐项原生接入，对不齐的如实标注，不为对称硬造。"
 description_source: human
 description_author: opus5
@@ -14,7 +14,29 @@ description_updated_at: 2026-09-16T16:24:46Z
 
 # F318: Claude Agent SDK Native Carrier — 对齐 Codex app-server 能力
 
-> **Status**: in-progress（Phase A ✅；Phase B SDK carrier 候选已合入（默认关闭）；freshness 通知能力已由 #1615 退役；Phase C/D 其余 carrier 能力未整体完成） | **Owner**: Ragdoll (@opus5, claude-opus-5) | **Priority**: P1
+> **Status**: done（operator 确认 A2A 整合后的当前接入完成；旧专项候选状态不再代表当前交付） | **Completed**: 2026-10-23 | **Owner**: Ragdoll (@opus5, claude-opus-5) | **Priority**: P1
+
+## 当前完成处置（2026-10-23）
+
+You 在 `[thread-id]#private-source-id`
+纠正旧总览：“这个在浪哥接a2a的时候已经完成了，你帮忙update一下我们的feat md 且 f254的freshness也接入了”。
+本次据该直接确认结清当前 SDK/A2A 接入工作，不再把 10-01 的默认关闭候选与未更新 C/D 状态当作项目仍未接入。
+
+- **已落地的链路**：#4944 / `1a2a2ea871` 先交付 SDK carrier；浪哥 #1398 的家内整合
+  #5576 / `ae257e2507` 将 SDK 实际输入、追加、输出和 exact input-read 接到共同 Queue/History。
+  当前 `ClaudeSdkAgentService` 注册 `activeRunDispatch` 的 `append / steer / inputReadReceipt`，
+  从真实 UUID 读取回调报告证据，不另造 Queue。#5600 / `15fb6cd4be` 补齐家内旧消费者兼容。
+- **运行版本证据**：本次认证 self 读取的正式 API 为 `23a06a3cb3755363746260262a6f71c2f195067d`；
+  Git ancestry 确认同时包含上述三个合入。原整合与 Alpha 见
+- **F254 的沿革**：工作中接正文的能力已经纳入共同投递链；后来 #1615/#1616 与家内 #5727
+  退役的是广泛未读 notice、旧 HELD/补读/closure 机制，不是撤销指定收件人的正文投递。
+  当前新消息走 F117 Queue 的 active-run append 或下一轮；不为关账重新装配旧 freshness 通知。
+- **完成不扩写运行事实**：代码默认载体仍为 `print_sdk`，`agent_sdk` 仍需显式选择；本次没有改配置、
+  切载体或重启。历史 census 的 deferred / unavailable 项保留原归宿，未逐项专项实测的能力不补写 PASS。
+
+原 C1（完整 census 逐项落地）和 D1（原专项 runtime 矩阵）不冒充本轮新实测；按本次 operator 对当前
+接入结果的完成确认作 `cvo_signoff` 处置，不继续作为本项目的关闭前置。
+以下 09-16/10-01 候选、计费调查、待切换和实验 Phase 是其各自时点历史，不覆盖本节当前完成状态。
 
 ## 当前交付边界（#1615，2026-10-18）
 
@@ -215,6 +237,8 @@ F318 拥有新 carrier 本体与这张对齐表；每个能力的产品语义仍
 | S3 | session | operator | runtime 重启 → Ragdoll恢复会话与未决请求 | 重启前后 session/请求记录 |
 
 ## Acceptance Criteria
+
+> 本节原勾选保留当时实证；C1/D1 的本次完成处置见当前章节与 Close Gate Report，不伪造专项通过。
 
 ### Phase A（Census 冻结 + 关键能力实测）
 - [x] AC-A1: census 表每格注明来源层级（文档 / types-only / CLI 偶然 / #1398 包装）、disposition（F306 词表 + F318 扩展词 `unavailable_upstream`）、canonical owner 与 maturity，引用当日官方文档或 types 行号，非作者可复核（修订：review 后替换 2026-09-16 立项时的旧层级/状态词表） — 上方 census C1–C28；@codex-sol R4 APPROVED @ 11a6f23，PR #4568 合入 4d4c0f5

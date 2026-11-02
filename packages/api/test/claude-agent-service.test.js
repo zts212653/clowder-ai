@@ -1,3 +1,4 @@
+import { readNativeMcpConfig } from './helpers/direct-mcp-contract.js';
 /**
  * ClaudeAgentService Tests (CLI mode)
  * 测试布偶猫 CLI 子进程调用
@@ -19,6 +20,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { mock, test } from 'node:test';
+import { assertClaudeSettingsPreserved, claudeUserSettings } from './helpers/claude-settings-contract.js';
+import { assertCurrentCallback, directMcpContract } from './helpers/direct-mcp-contract.js';
 import { ensureFakeCliOnPath } from './helpers/fake-cli-path.js';
 import { emitProcessExit, waitForMockProcessReady } from './helpers/mock-process-lifecycle.js';
 import { emitEvents as emitClaudeEvents } from './helpers/provider-archive-test-helpers.js';
@@ -1150,7 +1153,7 @@ test('#712: merges user .mcp.json servers as base layer — managed entries take
     join(projectDir, '.mcp.json'),
     JSON.stringify({
       mcpServers: {
-        filesystem: { command: 'npx', args: ['-y', '@mcp/fs'] },
+        filesystem: { command: 'npx', args: ['-y', '@mcp/fs'], env: { FS_OPTION: 'kept' } },
         github: { type: 'http', url: 'https://api.githubcopilot.com/mcp/' },
         'cat-cafe-collab': { command: 'echo', args: ['stale-should-be-ignored'] },
       },
@@ -1186,25 +1189,50 @@ test('#712: merges user .mcp.json servers as base layer — managed entries take
     assert.ok(mcpConfigIdx >= 0, '--mcp-config should be present');
     assert.ok(args.includes('--strict-mcp-config'), '--strict-mcp-config should be present');
 
-    const parsed = JSON.parse(args[mcpConfigIdx + 1]);
+    const parsed = readNativeMcpConfig(args[mcpConfigIdx + 1]);
     // User-owned server should be merged in
     assert.ok(parsed.mcpServers.filesystem, 'user-owned filesystem should be merged');
-    assert.deepEqual(parsed.mcpServers.filesystem.args, ['-y', '@mcp/fs']);
+    const { launchEnv: filesystemLaunchEnv, upstream: filesystem } = directMcpContract(parsed.mcpServers.filesystem);
+
+    assert.equal(filesystem.command, 'npx');
+    assert.deepEqual(filesystem.args, ['-y', '@mcp/fs']);
+    assert.equal(filesystem.env.FS_OPTION, 'kept');
+    assert.ok(
+      Object.entries(filesystem.env).every(([key, value]) => key === 'FS_OPTION' || value === ''),
+      'only blank inherited Host identities are added',
+    );
+    assert.equal(filesystemLaunchEnv.FS_OPTION, 'kept');
+    assert.equal(filesystemLaunchEnv.CAT_CAFE_CALLBACK_TOKEN, '');
     assert.equal(parsed.mcpServers.github, undefined, 'retired GitHub MCP must not be merged');
     // Managed split servers should be present
     assert.ok(parsed.mcpServers['cat-cafe-collab'], 'managed cat-cafe-collab should be present');
     // Stale user copy should NOT override managed entry
-    assert.notEqual(parsed.mcpServers['cat-cafe-collab'].command, 'echo', 'stale user entry must not override managed');
-    assert.equal(
-      parsed.mcpServers['cat-cafe-collab'].command,
-      process.execPath,
-      'managed entry should use the runtime Node executable',
+    const { launchEnv: collabLaunchEnv, upstream: collab } = directMcpContract(parsed.mcpServers['cat-cafe-collab']);
+    assert.notEqual(collab.command, 'echo', 'stale user entry must not override the managed upstream');
+
+    assert.deepEqual(
+      collab.args.map((path) => realpathSync(path)),
+      [realpathSync(join(mcpDistDir, 'collab.js'))],
     );
+    assert.equal(collab.command, process.execPath, 'managed entry should use the runtime Node executable');
     assert.equal(
-      parsed.mcpServers['cat-cafe-collab'].env.ALLOWED_WORKSPACE_DIRS,
+      collab.env.ALLOWED_WORKSPACE_DIRS,
       projectDir,
       'managed split servers must receive the invocation workspace root',
     );
+    const expectedCallback = {
+      CAT_CAFE_API_URL: 'http://localhost:3004',
+      CAT_CAFE_INVOCATION_ID: 'inv-merge',
+      CAT_CAFE_CALLBACK_TOKEN: 'token-merge',
+    };
+    assertCurrentCallback(Object.fromEntries(Object.entries(collabLaunchEnv).filter(([, value]) => value !== '')), {
+      ALLOWED_WORKSPACE_DIRS: projectDir,
+      ...expectedCallback,
+    });
+    assertCurrentCallback(Object.fromEntries(Object.entries(collab.env).filter(([, value]) => value !== '')), {
+      ALLOWED_WORKSPACE_DIRS: projectDir,
+      ...expectedCallback,
+    });
   } finally {
     if (previousAllowedWorkspaceDirs === undefined) delete process.env.ALLOWED_WORKSPACE_DIRS;
     else process.env.ALLOWED_WORKSPACE_DIRS = previousAllowedWorkspaceDirs;
@@ -1262,7 +1290,7 @@ test('#712: Claude reads capabilities from runtime root while cwd is user projec
     await promise;
 
     const args = spawnFn.mock.calls[0].arguments[1];
-    const parsed = JSON.parse(args[args.indexOf('--mcp-config') + 1]);
+    const parsed = readNativeMcpConfig(args[args.indexOf('--mcp-config') + 1]);
     assert.equal(parsed.mcpServers['cat-cafe-collab'], undefined, 'disabled runtime capability must not be injected');
     assert.ok(parsed.mcpServers['cat-cafe-memory'], 'enabled runtime capability must be injected');
   } finally {
@@ -1321,11 +1349,16 @@ test('Claude MCP config resolves Pencil with the current editor host identifier'
     await promise;
 
     const args = spawnFn.mock.calls[0].arguments[1];
-    const parsed = JSON.parse(args[args.indexOf('--mcp-config') + 1]);
-    assert.deepEqual(parsed.mcpServers.pencil, {
-      command: pencilBin,
-      args: ['--app', 'visual_studio_code'],
-    });
+    const parsed = readNativeMcpConfig(args[args.indexOf('--mcp-config') + 1]);
+    const { launchEnv, upstream: pencil } = directMcpContract(parsed.mcpServers.pencil);
+
+    assert.equal(pencil.command, pencilBin);
+    assert.deepEqual(pencil.args, ['--app', 'visual_studio_code']);
+    assert.ok(
+      Object.values(pencil.env).every((value) => value === ''),
+      'foreign Pencil has no inherited Host callback credentials',
+    );
+    assert.equal(launchEnv.CAT_CAFE_CALLBACK_TOKEN, '');
   } finally {
     if (previousPencilBin === undefined) delete process.env.PENCIL_MCP_BIN;
     else process.env.PENCIL_MCP_BIN = previousPencilBin;
@@ -1396,7 +1429,7 @@ test('#712: Claude merge excludes disabled capability-managed user entries', asy
     await promise;
 
     const args = spawnFn.mock.calls[0].arguments[1];
-    const parsed = JSON.parse(args[args.indexOf('--mcp-config') + 1]);
+    const parsed = readNativeMcpConfig(args[args.indexOf('--mcp-config') + 1]);
     assert.equal(parsed.mcpServers.filesystem, undefined, 'disabled capability must not be re-added from .mcp.json');
     assert.equal(parsed.mcpServers['cat-cafe'], undefined, 'legacy monolith alias must not be re-added from .mcp.json');
     assert.ok(parsed.mcpServers['my-tool'], 'unmanaged user server should still be merged');
@@ -1444,14 +1477,19 @@ test('falls back to default MCP path when CAT_CAFE_MCP_SERVER_PATH is empty', as
     const args = spawnFn.mock.calls[0].arguments[1];
     const mcpConfigIdx = args.indexOf('--mcp-config');
     assert.ok(mcpConfigIdx >= 0, '--mcp-config should be present when fallback resolves');
-    const parsed = JSON.parse(args[mcpConfigIdx + 1]);
+    const parsed = readNativeMcpConfig(args[mcpConfigIdx + 1]);
     // #712: Split servers instead of monolith cat-cafe
     assert.ok(parsed.mcpServers['cat-cafe-collab'], 'split server cat-cafe-collab expected');
     assert.equal(parsed.mcpServers['cat-cafe'], undefined, 'monolith must not be injected');
-    assert.equal(
-      realpathSync(parsed.mcpServers['cat-cafe-collab'].args[0]),
-      realpathSync(join(mcpDistDir, 'collab.js')),
-    );
+    const { launchEnv, upstream: collab } = directMcpContract(parsed.mcpServers['cat-cafe-collab']);
+
+    assert.equal(collab.command, process.execPath);
+    assert.equal(realpathSync(collab.args[0]), realpathSync(join(mcpDistDir, 'collab.js')));
+    for (const env of [launchEnv, collab.env]) {
+      assert.equal(env.CAT_CAFE_API_URL, 'http://localhost:3004');
+      assert.equal(env.CAT_CAFE_INVOCATION_ID, 'inv-1');
+      assert.equal(env.CAT_CAFE_CALLBACK_TOKEN, 'token-1');
+    }
   } finally {
     process.chdir(previousCwd);
     if (previousEnv === undefined) {
@@ -1775,6 +1813,119 @@ test('third-party model (glm-5): omits --model flag and injects ANTHROPIC_MODEL 
   assert.equal(spawnOpts.env.ANTHROPIC_MODEL, 'glm-5', 'ANTHROPIC_MODEL env var must be set to glm-5');
 });
 
+test('third-party model (glm-5.3-flash): injects the member native context window for Claude CLI', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = createClaudeAgentService({ spawnFn, model: 'claude-test-model' });
+
+  const promise = collect(
+    service.invoke('hello', {
+      callbackEnv: {
+        CAT_CAFE_ANTHROPIC_PROFILE_MODE: 'api_key',
+        CAT_CAFE_ANTHROPIC_API_KEY: 'sk-bigmodel',
+        CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE: 'glm-5.3-flash',
+      },
+      contextNativeWindowTokens: 1_000_000,
+    }),
+  );
+  await emitClaudeEvents(proc, [{ type: 'result', subtype: 'success' }]);
+  await promise;
+
+  const spawnOpts = spawnFn.mock.calls[0].arguments[2];
+  assert.equal(
+    spawnOpts.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS,
+    '1000000',
+    'unknown third-party models must receive the configured native window instead of the CLI default',
+  );
+});
+
+test('third-party model: explicit null native window suppresses the effective-capacity fallback', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = createClaudeAgentService({ spawnFn, model: 'claude-test-model' });
+
+  const promise = collect(
+    service.invoke('hello', {
+      callbackEnv: {
+        CAT_CAFE_ANTHROPIC_PROFILE_MODE: 'api_key',
+        CAT_CAFE_ANTHROPIC_API_KEY: 'sk-bigmodel',
+        CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE: 'glm-5.3-flash',
+      },
+      contextNativeWindowTokens: null,
+      contextCapacity: {
+        windowTokens: 1_000_000,
+        inputCeilingTokens: 984_000,
+        source: 'manual',
+        provenance: 'Member context window -> 1,000,000 tokens',
+        actionable: true,
+      },
+    }),
+  );
+  await emitClaudeEvents(proc, [{ type: 'result', subtype: 'success' }]);
+  await promise;
+
+  const spawnOpts = spawnFn.mock.calls[0].arguments[2];
+  assert.equal(
+    spawnOpts.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS,
+    undefined,
+    'null means this invocation has no config-owned native window and must not inject one',
+  );
+});
+
+test('third-party model: absent native configuration never recycles effective capacity', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = createClaudeAgentService({ spawnFn, model: 'claude-test-model' });
+
+  const promise = collect(
+    service.invoke('hello', {
+      callbackEnv: {
+        CAT_CAFE_ANTHROPIC_PROFILE_MODE: 'api_key',
+        CAT_CAFE_ANTHROPIC_API_KEY: 'sk-bigmodel',
+        CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE: 'glm-5.3-flash',
+      },
+      contextCapacity: {
+        windowTokens: 1_000_000,
+        inputCeilingTokens: 984_000,
+        source: 'manual',
+        provenance: 'Member context window -> 1,000,000 tokens',
+        actionable: true,
+      },
+    }),
+  );
+  await emitClaudeEvents(proc, [{ type: 'result', subtype: 'success' }]);
+  await promise;
+
+  const spawnOpts = spawnFn.mock.calls[0].arguments[2];
+  assert.equal(spawnOpts.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS, undefined);
+});
+
+test('native Anthropic model never receives CLAUDE_CODE_MAX_CONTEXT_TOKENS', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = createClaudeAgentService({ spawnFn, model: 'claude-test-model' });
+
+  const promise = collect(
+    service.invoke('hello', {
+      callbackEnv: {
+        CAT_CAFE_ANTHROPIC_PROFILE_MODE: 'api_key',
+        CAT_CAFE_ANTHROPIC_API_KEY: 'sk-anthropic',
+        CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE: 'claude-sonnet-4-6',
+      },
+      contextNativeWindowTokens: 1_000_000,
+    }),
+  );
+  await emitClaudeEvents(proc, [{ type: 'result', subtype: 'success' }]);
+  await promise;
+
+  const spawnOpts = spawnFn.mock.calls[0].arguments[2];
+  assert.equal(
+    spawnOpts.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS,
+    undefined,
+    'native Anthropic model windows are owned by the CLI and must not be overridden',
+  );
+});
+
 test('native Anthropic model (claude-sonnet-4-6): keeps --model flag, no ANTHROPIC_MODEL env var', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
@@ -1990,7 +2141,7 @@ function managedLaunchPlanFixture() {
     [
       '// fixture canonical Node carrier',
       'fetch("/api/sessions/seal"',
-      'CAT_CAFE_INVOCATION_ID CAT_CAFE_CALLBACK_TOKEN',
+      'CAT_CAFE_INVOCATION_ID CAT_CAFE_CALLBACK_TOKEN CAT_CAFE_CREDENTIAL_FILE',
       'X-Invocation-Id X-Callback-Token X-Clowder-Compaction-Carrier',
     ].join('\n'),
   );
@@ -2085,34 +2236,43 @@ test('#1542 P1: a user-supplied --settings is composed with the managed plan, ne
   rmSync(userSettingsPath, { force: true });
 });
 
-test('#1542: user --settings passes through untouched when no managed plan is ready', async () => {
-  const userSettingsPath = join(tmpdir(), `f296-user-solo-${Date.now()}.json`);
-  writeFileSync(userSettingsPath, JSON.stringify({ spinnerTipsEnabled: false }));
+for (const style of ['separate', 'equals'])
+  test(`#1542: user settings and hooks survive security composition without a compaction plan (${style})`, async (t) => {
+    const root = mkdtempSync(join(tmpdir(), 'f296-user-solo-'));
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    const userSettingsPath = join(root, 'settings.json');
+    const original = `${JSON.stringify(claudeUserSettings, null, 2)}\n`;
+    writeFileSync(userSettingsPath, original);
 
-  const proc = createMockProcess();
-  const spawnFn = createMockSpawnFn(proc);
-  const service = createClaudeAgentService({ spawnFn, model: 'claude-test-model' });
+    const proc = createMockProcess();
+    let capturedSettings;
+    const spawnFn = capturingSpawnFn(proc, ([, args]) => {
+      const index = args.indexOf('--settings');
+      assert.ok(index >= 0, 'settings must reach the actual CLI launch');
+      capturedSettings = JSON.parse(readFileSync(args[index + 1], 'utf8'));
+    });
+    const service = createClaudeAgentService({ spawnFn, model: 'claude-test-model' });
+    const promise = collect(
+      service.invoke('hello', {
+        callbackEnv: {
+          CAT_CAFE_API_URL: 'http://localhost:3004',
+          CAT_CAFE_INVOCATION_ID: 'inv-solo',
+          CAT_CAFE_CALLBACK_TOKEN: 'token-solo',
+          CAT_CAFE_ANTHROPIC_PROFILE_MODE: 'api_key',
+          CAT_CAFE_ANTHROPIC_API_KEY: 'sk-test',
+        },
+        cliConfigArgs: style === 'equals' ? [`--settings=${userSettingsPath}`] : ['--settings', userSettingsPath],
+      }),
+    );
+    await emitClaudeEvents(proc, [{ type: 'result', subtype: 'success' }]);
+    await promise;
 
-  const promise = collect(
-    service.invoke('hello', {
-      callbackEnv: {
-        CAT_CAFE_API_URL: 'http://localhost:3004',
-        CAT_CAFE_INVOCATION_ID: 'inv-solo',
-        CAT_CAFE_CALLBACK_TOKEN: 'token-solo',
-        CAT_CAFE_ANTHROPIC_PROFILE_MODE: 'api_key',
-        CAT_CAFE_ANTHROPIC_API_KEY: 'sk-test',
-      },
-      cliConfigArgs: ['--settings', userSettingsPath],
-    }),
-  );
-  await emitClaudeEvents(proc, [{ type: 'result', subtype: 'success' }]);
-  await promise;
-
-  const args = spawnFn.mock.calls[0].arguments[1];
-  assert.equal(args.filter((arg) => arg === '--settings').length, 1);
-  assert.equal(args[args.indexOf('--settings') + 1], userSettingsPath);
-  rmSync(userSettingsPath, { force: true });
-});
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.equal(args.filter((arg) => arg === '--settings').length, 1);
+    assertClaudeSettingsPreserved(capturedSettings);
+    assert.equal(readFileSync(userSettingsPath, 'utf8'), original, 'the original user file is never rewritten');
+    assert.ok(!existsSync(args[args.indexOf('--settings') + 1]), 'the invocation-owned overlay is cleaned up');
+  });
 
 test('#1542: an invalid user --settings fails closed instead of silently dropping the managed carrier', async () => {
   const proc = createMockProcess();

@@ -1,4 +1,4 @@
-import { parseFreshnessCarrierCapability } from '@cat-cafe/shared';
+import { parseCodexStartupRecovery, parseFreshnessCarrierCapability } from '@cat-cafe/shared';
 import { writeTimeoutDiagnostics } from '@/hooks/named-message-writer';
 import type { ContextHealthData, TaskProgressItem } from '@/stores/chat-types';
 import { formatAgyProgressDetail } from '../system-info-visible';
@@ -113,6 +113,35 @@ const projectGovernanceBlocked: StatusProjector = (parsed, _msg, port) => {
 };
 
 const STATUS_PROJECTORS = new Map<string, StatusProjector>([
+  [
+    'codex_startup_recovery',
+    (parsed, msg, port) => {
+      if (isLateForCommittedResponse(msg, port.threadId, port.store())) return;
+      const recovery = parseCodexStartupRecovery(parsed.startupRecovery);
+      if (!recovery || recovery.invocationId !== (msg.turnInvocationId ?? msg.invocationId)) return;
+      const target = namedTarget(msg, port.threadId);
+      const store = port.store();
+      const response = target
+        ? store.getThreadState(port.threadId).messages.find((m) => m.id === target.messageId)
+        : undefined;
+      if (
+        !target ||
+        !response ||
+        response.type !== 'assistant' ||
+        response.catId !== msg.catId ||
+        (response.lifecycle?.kind === 'response' && response.lifecycle.invocationId !== recovery.invocationId)
+      )
+        return;
+      const previous = response.extra?.startupRecovery;
+      if (
+        previous &&
+        (previous.sequence >= recovery.sequence || ['ready', 'failed', 'cancelled'].includes(previous.stage))
+      )
+        return;
+      store.patchThreadMessage(port.threadId, target.messageId, { extra: { startupRecovery: recovery } });
+      if (recovery.stage === 'checking' || recovery.stage === 'retry_wait') port.setCatStatus(msg.catId, 'spawning');
+    },
+  ],
   [
     'provider_recovery',
     (parsed, msg, port) => {

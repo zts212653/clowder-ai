@@ -19,7 +19,7 @@ function carrierRoot({ valid = true, linked = false } = {}) {
     ? [
         '// fixture canonical Node carrier',
         'fetch("/api/sessions/seal"',
-        'CAT_CAFE_INVOCATION_ID CAT_CAFE_CALLBACK_TOKEN',
+        'CAT_CAFE_INVOCATION_ID CAT_CAFE_CALLBACK_TOKEN CAT_CAFE_CREDENTIAL_FILE',
         'X-Invocation-Id X-Callback-Token X-Clowder-Compaction-Carrier',
       ].join('\n')
     : '// stale carrier without callback contract markers';
@@ -153,7 +153,7 @@ describe('F296 #1542 claude compaction launch plan', () => {
       [
         '// carrier outside the trusted install',
         'fetch("/api/sessions/seal"',
-        'CAT_CAFE_INVOCATION_ID CAT_CAFE_CALLBACK_TOKEN',
+        'CAT_CAFE_INVOCATION_ID CAT_CAFE_CALLBACK_TOKEN CAT_CAFE_CREDENTIAL_FILE',
         'X-Invocation-Id X-Callback-Token X-Clowder-Compaction-Carrier',
       ].join('\n'),
     );
@@ -182,7 +182,7 @@ describe('F296 #1542 claude compaction launch plan', () => {
       [
         '// outside-the-install carrier',
         'fetch("/api/sessions/seal"',
-        'CAT_CAFE_INVOCATION_ID CAT_CAFE_CALLBACK_TOKEN',
+        'CAT_CAFE_INVOCATION_ID CAT_CAFE_CALLBACK_TOKEN CAT_CAFE_CREDENTIAL_FILE',
         'X-Invocation-Id X-Callback-Token X-Clowder-Compaction-Carrier',
       ].join('\n'),
     );

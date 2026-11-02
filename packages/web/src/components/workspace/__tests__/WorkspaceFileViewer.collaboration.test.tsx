@@ -68,7 +68,6 @@ it('does not replace an active editor with collaboration while an unsaved draft 
         collaborationAvailable
         onOpenCollaboration={onOpenCollaboration}
         onSave={vi.fn()}
-        revealInFinder={vi.fn()}
       />,
     );
   });
@@ -116,7 +115,6 @@ it('keeps the way back to the collaborative landing first in the toolbar, before
         collaborationAvailable
         onOpenCollaboration={vi.fn()}
         onSave={vi.fn()}
-        revealInFinder={vi.fn()}
       />,
     );
   });

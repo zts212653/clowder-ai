@@ -25,7 +25,6 @@ function fixture() {
     pluginId: 'example',
     pluginInstanceId: 'instance',
     ownerUserId: 'owner',
-    effectiveGrants: ['task.read', 'task.write'],
     taskStore: store,
   });
   const native = <T>(run: () => Promise<T>) => withPluginCallContext('instance', caller, run);
@@ -124,7 +123,6 @@ test('wait projection binds its instance and owner and requires authenticated fi
   const other = createPluginTaskHost({
     pluginId: 'other',
     pluginInstanceId: 'other',
-    effectiveGrants: ['task.write'],
     taskStore: store,
   });
   await assert.rejects(other.update(task.id, { wait: { expectedGeneration: 1, generation: 1, active: null } }));
@@ -341,7 +339,6 @@ test('atomic wait completion emits task.done once and never emits on rejected CA
   const host = createPluginTaskHost({
     pluginId: 'example',
     pluginInstanceId: 'instance',
-    effectiveGrants: ['task.write'],
     taskStore: store,
   });
   const task = await withPluginCallContext('instance', caller, () =>

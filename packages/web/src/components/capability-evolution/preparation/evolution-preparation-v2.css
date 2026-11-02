@@ -35,9 +35,11 @@
   padding: 12px;
   border-color: var(--cafe-border);
   background: var(--console-card-bg);
+  --chat-background-role: console-card;
 }
 [data-evolution-presentation="v2"] .evolution-preparation-tabs button:hover {
   background: var(--cafe-surface);
+  --chat-background-role: cafe;
 }
 [data-evolution-presentation="v2"] .evolution-preparation-tabs button[aria-selected="true"] {
   border-color: var(--cafe-text-secondary);
@@ -46,6 +48,7 @@
 [data-evolution-presentation="v2"] .evolution-preparation-submission {
   border-radius: 12px;
   background: var(--console-card-bg);
+  --chat-background-role: console-card;
 }
 [data-evolution-presentation="v2"] .evolution-preparation-item > summary {
   padding-block: 18px;

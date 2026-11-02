@@ -1,57 +1,40 @@
 'use client';
 import type { ApprovalHubItem } from '@cat-cafe/shared';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback } from 'react';
 import type { ApprovalWriteKind } from '@/components/ApprovalHost';
-import { apiFetch } from '@/utils/api-client';
+import { useApprovalStatus } from './use-approval-status';
 
 type TasteStatus = 'pending' | 'approving' | 'approved' | 'rejected';
 /** The original owner-auth status, including recoverable writer claims hidden by the generic lifecycle projection. */
 export function useTasteApprovalStatus(item: ApprovalHubItem) {
-  const [status, setStatus] = useState<TasteStatus | null>(null);
+  const native = useApprovalStatus(
+    'F221',
+    item.sourceFeatureId === 'F221' ? item.proposalId : null,
+    `/api/taste-proposals/${encodeURIComponent(item.proposalId)}`,
+  );
+  const status = ['pending', 'approving', 'approved', 'rejected'].includes(native.status ?? '')
+    ? (native.status as TasteStatus)
+    : null;
   const read = useCallback(async (): Promise<TasteStatus | null> => {
-    if (item.sourceFeatureId !== 'F221') return null;
-    try {
-      const response = await apiFetch(
-        `/api/taste-proposals/${encodeURIComponent(item.proposalId)}`,
-        {},
-        { afterCurrentGet: true },
-      );
-      if (!response.ok) return null;
-      const body: unknown = await response.json();
-      if (
-        !body ||
-        typeof body !== 'object' ||
-        !('proposalId' in body) ||
-        !('status' in body) ||
-        body.proposalId !== item.proposalId
-      )
-        return null;
-      return ['pending', 'approving', 'approved', 'rejected'].includes(String(body.status))
-        ? (body.status as TasteStatus)
-        : null;
-    } catch {
+    const body = await native.refresh();
+    if (
+      !body ||
+      typeof body !== 'object' ||
+      !('proposalId' in body) ||
+      body.proposalId !== item.proposalId ||
+      !('status' in body) ||
+      !['pending', 'approving', 'approved', 'rejected'].includes(String(body.status))
+    )
       return null;
-    }
-  }, [item.proposalId, item.sourceFeatureId]);
-  useEffect(() => {
-    if (item.sourceFeatureId !== 'F221') return;
-    let live = true;
-    setStatus(null);
-    void read().then((next) => {
-      if (live) setStatus(next);
-    });
-    return () => {
-      live = false;
-    };
-  }, [read, item.sourceFeatureId, item.resolution]);
+    return body.status as TasteStatus;
+  }, [native.refresh, item.proposalId]);
   const refresh = useCallback(async () => {
-    if (item.sourceFeatureId === 'F221') setStatus(await read());
-  }, [read, item.sourceFeatureId]);
+    if (item.sourceFeatureId === 'F221') await native.refresh();
+  }, [native.refresh, item.sourceFeatureId]);
   const beforeWrite = useCallback(
     async (kind: ApprovalWriteKind) => {
       if (item.sourceFeatureId !== 'F221') return true;
       const current = await read();
-      setStatus(current);
       return (current === 'pending' && item.resolution === 'open') || (current === 'approving' && kind === 'approve');
     },
     [read, item.resolution, item.sourceFeatureId],

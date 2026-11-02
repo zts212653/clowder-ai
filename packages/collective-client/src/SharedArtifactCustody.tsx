@@ -1,6 +1,7 @@
 import type { CollectiveArtifactManagement } from '@cat-cafe/shared';
 import { useState } from 'react';
 import type { SharedArtifact } from './collective-artifact-client.js';
+import { useCollectiveLanguage, useCollectiveText } from './collective-copy.js';
 import { artifactCafeLabel } from './shared-artifact-member-label.js';
 import { useSharedArtifacts } from './use-collective-artifacts.js';
 import type { useSharedArtifactManagement } from './use-shared-artifact-management.js';
@@ -12,6 +13,8 @@ export function SharedArtifactCustody({
   readonly artifact: SharedArtifact;
   readonly management: ReturnType<typeof useSharedArtifactManagement>;
 }) {
+  const language = useCollectiveLanguage();
+  const t = useCollectiveText();
   const shared = useSharedArtifacts();
   const [target, setTarget] = useState('');
   const { api, value, pending, unconfirmed } = management;
@@ -30,15 +33,24 @@ export function SharedArtifactCustody({
     ? undefined
     : value.custodianCafe && directory
       ? artifactCafeLabel({ ...value.custodianCafe, humanId: value.custodianHumanId }, directory)
-      : `${shared?.humanName(value.custodianHumanId) ?? '成员'}的 Café`;
+      : language === 'en'
+        ? `${shared?.humanName(value.custodianHumanId) ?? t('成员')}'s Café`
+        : `${shared?.humanName(value.custodianHumanId) ?? '成员'}的 Café`;
   return (
     <div>
-      <h3>保管作品</h3>
-      <p>{value.custodianHumanId ? `${custodianLabel} 保管正文、版本和协作记录。` : '当前保管方暂时无法确认。'}</p>
-      {transfer && <output>{transferLabel(transfer)}</output>}
+      <h3>{t('保管作品')}</h3>
+      <p>
+        {value.custodianHumanId
+          ? language === 'en'
+            ? `${custodianLabel} keeps the document, versions, and collaboration history.`
+            : `${custodianLabel} 保管正文、版本和协作记录。`
+          : t('当前保管方暂时无法确认。')}
+      </p>
+      {transfer && <output>{t(transferLabel(transfer))}</output>}
       {transfer?.targetCafe && directory && (
         <p>
-          本次交接目的地：{artifactCafeLabel({ ...transfer.targetCafe, humanId: transfer.targetHumanId }, directory)}
+          {t('本次交接目的地')}：
+          {artifactCafeLabel({ ...transfer.targetCafe, humanId: transfer.targetHumanId }, directory)}
         </p>
       )}
       {active && value.canManageCustody && (
@@ -47,20 +59,20 @@ export function SharedArtifactCustody({
           disabled={blocked}
           onClick={() => void management.run(async () => api?.cancel(artifact, transfer.transferId))}
         >
-          取消这次交接
+          {t('取消这次交接')}
         </button>
       )}
       {!active && value.canManageCustody && (
         <>
           <label>
-            交接给
+            {t('交接给')}
             <select
-              aria-label="作品接收 Café"
+              aria-label={t('作品接收 Café')}
               value={target}
               onChange={(event) => setTarget(event.target.value)}
               disabled={blocked}
             >
-              <option value="">选择成员与 Café</option>
+              <option value="">{t('选择成员与 Café')}</option>
               {cafes.map((cafe) => (
                 <option key={cafe.connectionId} value={cafe.connectionId}>
                   {directory ? artifactCafeLabel(cafe, directory) : cafe.endpointLabel}
@@ -79,9 +91,9 @@ export function SharedArtifactCustody({
               })
             }
           >
-            交接作品与记录
+            {t('交接作品与记录')}
           </button>
-          <p>交接保留原来源与权限，作品和全部记录核对完成后才切换保管方。</p>
+          <p>{t('交接保留原来源与权限，作品和全部记录核对完成后才切换保管方。')}</p>
         </>
       )}
     </div>

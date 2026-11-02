@@ -1,5 +1,7 @@
+import type { ITaskStore } from '../cats/services/stores/ports/TaskStore.js';
 import type { ActionSuccessorLeaseStore } from './ActionSuccessorLeaseStore.js';
 import type { ActionSuccessorLease } from './action-successor-state-machine.js';
+import { isRetiredTaskAction } from './retired-task-action.js';
 
 // Public vocabulary re-exported so the seven existing importers stay untouched.
 export type {
@@ -21,6 +23,7 @@ import type {
 } from './turn-custody-projection-types.js';
 
 interface TurnCustodyProjectionDeps {
+  readonly tasks?: Pick<ITaskStore, 'get'>;
   readonly actionSuccessorLeaseStore?: Pick<ActionSuccessorLeaseStore, 'get'>;
 }
 
@@ -105,6 +108,8 @@ export class TurnCustodyProjectionService {
     if (!this.deps.actionSuccessorLeaseStore) return unknown('action_store_unavailable');
     const lease = await this.deps.actionSuccessorLeaseStore.get(wake.leaseId);
     if (!lease) return unknown('action_lease_missing');
+    if (await isRetiredTaskAction(this.deps.tasks, lease))
+      return { state: 'covered_empty', evidenceRefs: [`retired-task:${lease.subjectRef}`] };
     if (lease.generation !== wake.generation) return unknown('action_generation_mismatch');
     if (lease.status !== 'active') return unknown('action_terminal');
     if (!lease.holderCatIds.includes(wake.holderCatId)) return unknown('action_holder_mismatch');

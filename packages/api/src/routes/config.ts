@@ -49,11 +49,13 @@ import { resolveOwnerGate } from '../utils/owner-gate.js';
 import { resolveHeaderUserId, resolveStrictUserId } from '../utils/request-identity.js';
 import { getDefaultUploadDir } from '../utils/upload-paths.js';
 import { configCatOrderRoutes } from './config-cat-order.js';
+import { configChatBackgroundRoutes } from './config-chat-background.js';
 import { configConversationViewRoutes } from './config-conversation-view.js';
 import { configIgnoredItemRoutes } from './config-ignored-items.js';
 import { configLiveProjectRoutes } from './config-live-projects.js';
 import { configMessageDispositionRoutes } from './config-message-disposition.js';
 import { configOnboardingRoutes } from './config-onboarding.js';
+import { configProcessTalkRoutes } from './config-process-talk.js';
 import { configThreadAttentionRoutes } from './config-thread-attention.js';
 
 const patchSchema = z.object({
@@ -106,7 +108,7 @@ const timeZonePatchSchema = z
 
 const coCreatorPatchSchema = z.object({
   name: z.string().trim().min(1),
-  aliases: z.array(z.string().trim().min(1)),
+  aliases: z.array(z.string().trim().min(1)).optional(),
   mentionPatterns: z.array(coCreatorMentionInputSchema).min(1),
   timeZone: timeZonePatchSchema.optional(),
   avatar: z.string().trim().nullable().optional(),
@@ -126,6 +128,7 @@ const runtimeStatusQuerySchema = z.object({
 interface ConfigRoutesOptions {
   auditLog?: {
     append(input: { type: string; threadId?: string; data: Record<string, unknown> }): Promise<unknown>;
+    getDirectory?(): string;
   };
   envFilePath?: string;
   projectRoot?: string;
@@ -202,7 +205,9 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
   await app.register(configCatOrderRoutes, { projectRoot });
   await app.register(configLiveProjectRoutes, { projectRoot });
   await app.register(configConversationViewRoutes, { projectRoot, threadStore: opts.threadStore });
+  await app.register(configChatBackgroundRoutes, { projectRoot, threadStore: opts.threadStore });
   await app.register(configIgnoredItemRoutes, { projectRoot });
+  await app.register(configProcessTalkRoutes, { projectRoot });
   await app.register(configMessageDispositionRoutes, { projectRoot });
   await app.register(configOnboardingRoutes, { projectRoot });
   await app.register(configThreadAttentionRoutes, { projectRoot, threadStore: opts.threadStore });
@@ -337,7 +342,7 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
         projectRoot,
         homeDir: home,
         dataDirs: {
-          auditLogs: resolve(apiCwd, process.env.AUDIT_LOG_DIR ?? './data/audit-logs'),
+          auditLogs: auditLog.getDirectory?.() ?? getEventAuditLog().getDirectory(),
           // F212 Phase F (cloud codex R3 P2 on 3083d7c5f + R4 P2-#2 on fc69597675): use
           // the path the pino destination CAPTURED at logger import. Reading process.env.
           // LOG_DIR directly would let runtime `PATCH /api/config/env` edits change what

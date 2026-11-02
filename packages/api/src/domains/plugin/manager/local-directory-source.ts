@@ -224,7 +224,7 @@ function checkVersion(name: string, requested: string, observed: string): void {
   }
 }
 
-/** Cheap first gate, before copying, npm pack, grant policy or inventory writes. */
+/** Cheap first gate, before copying, npm pack or inventory writes. */
 export async function inspectLocalDirectorySource(
   source: string,
   options: { readonly signal?: AbortSignal } = {},

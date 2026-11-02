@@ -19,6 +19,8 @@ export function useArtworkVideoPosition(
   identity: string | undefined,
   src: string | null,
   seekTo: (seconds: number) => void,
+  /** Set once someone asks this player for a specific place; the retained playhead then stays unused. */
+  requested?: RefObject<boolean>,
 ) {
   const positions = useContext(Context);
   useEffect(() => {
@@ -29,7 +31,7 @@ export function useArtworkVideoPosition(
     const restore = () => {
       if (restored || video.readyState < 1) return;
       restored = true;
-      if (!saved) return;
+      if (!saved || requested?.current) return;
       // The original seek owner revokes stale frame readiness; the new player must present its own frame.
       seekTo(saved.seconds);
       if (!saved.paused) void video.play().catch(() => {});
@@ -46,5 +48,5 @@ export function useArtworkVideoPosition(
       video.removeEventListener('loadedmetadata', restore);
       for (const event of ['timeupdate', 'seeked', 'play', 'pause']) video.removeEventListener(event, remember);
     };
-  }, [positions, identity, src, videoRef, seekTo]);
+  }, [positions, identity, src, videoRef, seekTo, requested]);
 }

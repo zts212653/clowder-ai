@@ -19,6 +19,8 @@ export function validateContentOperationContext(
     return;
   }
   if (context === undefined) return;
+  if (!context || typeof context !== 'object' || Array.isArray(context))
+    throw new TypeError('Invalid video project operation context');
   if (
     (context.kind === 'work:create' || context.kind === 'work:submit') &&
     !scope &&
@@ -28,9 +30,6 @@ export function validateContentOperationContext(
     return;
   if (
     !scope ||
-    !context ||
-    typeof context !== 'object' ||
-    Array.isArray(context) ||
     ![
       'video-project:create',
       'video-project:save',

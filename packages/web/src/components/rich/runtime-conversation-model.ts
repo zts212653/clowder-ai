@@ -5,8 +5,11 @@ import {
   type RuntimeInteractionRecord,
   runtimeConversationDecisionRequestSchema,
 } from '@cat-cafe/shared';
+import { readApprovalProducerBody } from '@/lib/approval-producer-read';
+import { readFreshApprovalResultOwner } from '@/lib/approval-result-owner';
 import type { RichInteractiveBlock } from '@/stores/chat-types';
 import { apiFetch } from '@/utils/api-client';
+import { apiSessionIdentity } from '@/utils/api-session-identity';
 
 export interface RuntimeConversationBinding {
   version: 1;
@@ -85,18 +88,25 @@ export function sameConversationPresentation(a: RichInteractiveBlock, b: RichInt
   }
   return JSON.stringify(sorted(a)) === JSON.stringify(sorted(b));
 }
-export async function readConversation(interactionId: string): Promise<ConversationRecord | null> {
-  const response = await apiFetch(`/api/runtime-interactions/${encodeURIComponent(interactionId)}`);
-  if (!response.ok) return null;
-  const body: unknown = await response.json();
+export async function readConversation(interactionId: string, shared = false): Promise<ConversationRecord | null> {
+  const owner = apiSessionIdentity.getSnapshot().ownerUserId;
+  if (shared && owner) {
+    const body = await readApprovalProducerBody(
+      { owner, producer: 'F306', proposalId: interactionId },
+      `/api/runtime-interactions/${encodeURIComponent(interactionId)}`,
+    );
+    return object(body) ? readConversationRecord(body.interaction) : null;
+  }
+  const response = await apiFetch(
+    `/api/runtime-interactions/${encodeURIComponent(interactionId)}`,
+    {},
+    { afterCurrentGet: true },
+  );
+  const body: unknown = response.ok ? await response.json() : null;
   return object(body) ? readConversationRecord(body.interaction) : null;
 }
-export async function readConversationOwner(): Promise<string | null> {
-  const response = await apiFetch('/api/session');
-  if (!response.ok) return null;
-  const body: unknown = await response.json();
-  return object(body) && nonBlank(body.userId) ? body.userId : null;
-}
+
+export const readConversationOwner = readFreshApprovalResultOwner;
 export async function submitConversationAnswer(
   context: RuntimeConversationContext,
   answer: RuntimeConversationResponse,

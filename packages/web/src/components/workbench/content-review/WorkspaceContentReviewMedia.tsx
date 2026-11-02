@@ -320,6 +320,8 @@ export function WorkspaceContentReviewMedia({
       ref={artwork}
       className={`${styles.artwork} ${imageChatPrimary ? styles.imageArtwork : ''} ${media.kind === 'video' ? videoStyles.player : ''}`}
       data-testid="workspace-review-artwork"
+      data-chat-background-layer="opaque"
+      data-content-opening-state={error ? 'blocked' : undefined}
       data-artwork-video-player={media.kind === 'video' ? '' : undefined}
     >
       {saveNotice ? <output className="px-3 text-xs text-cafe-muted">{saveNotice}</output> : null}
@@ -340,10 +342,10 @@ export function WorkspaceContentReviewMedia({
           )}
         </p>
       ) : null}
-      {isV2 && originalUrl ? (
+      {originalUrl || download?.src || src ? (
         <ArtworkActions
           src={src}
-          originalUrl={originalUrl}
+          originalUrl={originalUrl ?? download?.src ?? src!}
           filename={filename ?? download?.filename ?? '作品'}
           mime={mime}
           byteLength={byteLength}
@@ -351,7 +353,14 @@ export function WorkspaceContentReviewMedia({
           height={media.height}
           root={viewportRef}
           viewport={viewport}
-          wholeWorkAction={wholeWorkAction}
+          wholeWorkAction={
+            <>
+              {wholeWorkAction}
+              <button type="button" role="menuitem" aria-label="打开作品讨论" onClick={onOpenDiscussion}>
+                讨论{annotations.length ? ` · ${annotations.length}` : ''}
+              </button>
+            </>
+          }
         />
       ) : null}
       <section
@@ -413,7 +422,7 @@ export function WorkspaceContentReviewMedia({
         </VideoArtworkControls>
       ) : imageChatPrimary ? (
         <ImageArtworkControls
-          unifiedActions={isV2 && !!originalUrl}
+          unifiedActions={!!(originalUrl || download?.src || src)}
           mode={mode}
           canAnnotate={selectable}
           canMarkup={writable && canMarkup && markup.canEdit}

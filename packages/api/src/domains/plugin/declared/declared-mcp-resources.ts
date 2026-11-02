@@ -6,9 +6,13 @@ import type { CapabilityEntry } from '@cat-cafe/shared';
 import type { ConfigurationField, McpContribution } from '@clowder-ai/plugin-contract';
 import { installMcpCapability, removeMcpCapability } from '../../../config/capabilities/capability-mcp-service.js';
 import type { PluginRuntimeAdmission } from '../carrier/runtime-carrier.js';
+import {
+  effectiveConfiguration,
+  resolveVariant,
+  variantFieldRequiredness,
+} from '../configuration-variant-consumption.js';
 import { packageDirectoryName } from '../external-runtime/filesystem-package-locator.js';
 import { ExternalPluginRuntimeError } from '../external-runtime/types.js';
-import { hostCapabilityRefusal } from '../host-surface/host-capability-refusal.js';
 import { effectivePluginConfigurationValue } from '../manager/plugin-configuration-values.js';
 import { pluginResourceRoot, resolvePackageFile } from './declared-resource-paths.js';
 import type { DeclaredStaticResourceHost } from './declared-static-resources.js';
@@ -42,11 +46,13 @@ export async function activateDeclaredMcp(
     for (const contribution of contributions) {
       const entry = await mcpCapability(admission, host, packageRoot, contribution);
       const server = entry.mcpServer;
+      const { mcpServer: _launch, mcpServerOverride: _override, ...installationPolicy } = entry;
       // Copy before passing the entry to mutable configuration I/O. This is the
       // exact verified activation descriptor, not a later capabilities lookup.
       launches.push(
         Object.freeze({
           contributionId: contribution.id,
+          installationPolicy: Object.freeze(installationPolicy),
           server: Object.freeze({
             name: entry.id.replaceAll(':', '__'),
             command: server.command,
@@ -57,7 +63,14 @@ export async function activateDeclaredMcp(
           }),
         }),
       );
-      await installMcpCapability(host.projectRoot, entry, host.mcpConfigIO, {
+      if (host.persistCapabilities === false) continue;
+      // Persist only the standard environment reference, never its process-lifetime value.
+      const { CLOWDER_PLUGIN_ACTION_TOKEN: _token, ...durableEnv } = server.env ?? {};
+      const durableEntry = {
+        ...entry,
+        mcpServer: { ...server, env: { ...durableEnv, ...host.nativeActionEnvironmentReferences?.(contribution.id) } },
+      };
+      await installMcpCapability(host.projectRoot, durableEntry, host.mcpConfigIO, {
         userId: `plugin:${admission.packageRecord.pluginId}`,
       });
       installed.push(entry.id);
@@ -70,7 +83,7 @@ export async function activateDeclaredMcp(
 }
 
 export async function removeDeclaredMcp(pluginId: string, host: DeclaredStaticResourceHost | undefined): Promise<void> {
-  if (!host) return;
+  if (!host || host.persistCapabilities === false) return;
   if (!host.mcpConfigIO) return;
   const config = await host.mcpConfigIO.readConfig();
   const owned = config?.capabilities.filter(
@@ -257,10 +270,57 @@ async function mcpEnvironment(
   contribution: McpContribution,
 ): Promise<{ readonly env?: Readonly<Record<string, string>> }> {
   const fields = new Map((admission.packageRecord.manifest.configuration ?? []).map((field) => [field.key, field]));
+  // Variant-declared manifests (design §3.4): resolve the branch once per
+  // contribution. Non-selected resolutions refuse the launch (fail-closed);
+  // inactive-branch bindings are silently skipped (no config read or error),
+  // and inactive-branch stores are never read.
+  const variants = admission.packageRecord.manifest.configurationVariants;
+  let variantActiveKeys: ReadonlySet<string> | undefined;
+  let variantEffectiveValues: Record<string, unknown> | undefined;
+  if (variants) {
+    const configuration = admission.packageRecord.manifest.configuration ?? [];
+    const readStored = async (field: ConfigurationField): Promise<unknown> => {
+      return field.kind === 'secret'
+        ? host.configuration.readSecret(admission.instance.pluginInstanceId, field.key)
+        : host.configuration.readConfig(admission.instance.pluginInstanceId, field.key);
+    };
+    // Phase 1: branch selection from the discriminator alone,
+    // fail-closed before any other store read.
+    const discriminatorField = fields.get(variants.discriminator);
+    let probe: Record<string, unknown> = {};
+    if (discriminatorField) {
+      const stored = await readStored(discriminatorField);
+      if (stored !== undefined) probe = { [variants.discriminator]: stored };
+    }
+    const resolution = resolveVariant(admission.packageRecord.manifest, probe);
+    if (resolution.status !== 'selected') {
+      throw new ExternalPluginRuntimeError(
+        'CONFIG_UNAVAILABLE',
+        `MCP contribution ${contribution.id} refuses to start: configuration variant is ${resolution.status}`,
+      );
+    }
+    // Phase 2: read only what the selected branch may deliver — common fields
+    // (claimed by no branch) plus the selected branch's fields.
+    const claimedByBranch = new Set(variants.branches.flatMap((branch) => branch.fields));
+    const branch = variants.branches.find((item) => item.id === resolution.branchId);
+    const activeKeys = new Set(branch?.fields ?? []);
+    const stored: Record<string, unknown> = {};
+    for (const field of configuration) {
+      if (claimedByBranch.has(field.key) && !activeKeys.has(field.key)) continue;
+      const value = await readStored(field);
+      if (value !== undefined) stored[field.key] = value;
+    }
+    variantEffectiveValues = effectiveConfiguration(admission.packageRecord.manifest, stored).effectiveValues;
+    variantActiveKeys = new Set([
+      ...configuration.filter((field) => !claimedByBranch.has(field.key)).map((field) => field.key),
+      ...activeKeys,
+    ]);
+  }
   const envEntries = await Promise.all(
     Object.entries(contribution.environment ?? {}).map(async ([name, binding]) => {
+      if (variantActiveKeys && !variantActiveKeys.has(binding.key)) return undefined;
       const field = fields.get(binding.key);
-      const value = await environmentValue(admission, host, contribution, field, binding);
+      const value = await environmentValue(admission, host, field, binding, variantEffectiveValues);
       return value === undefined ? undefined : ([name, value] as const);
     }),
   );
@@ -274,19 +334,26 @@ async function mcpEnvironment(
 async function environmentValue(
   admission: PluginRuntimeAdmission,
   host: DeclaredStaticResourceHost,
-  contribution: McpContribution,
   field: ConfigurationField | undefined,
   binding: { readonly source: 'config' | 'secret'; readonly key: string },
+  /**
+   * Variant path (design §3.4): the contract's effective configuration, present
+   * only for variant-declared manifests with a selected branch. Values are the
+   * contract's product (defaults applied, inactive-branch fields absent), so
+   * the raw store is not re-read and requiredness comes from the contract.
+   */
+  effectiveValues?: Record<string, unknown>,
 ): Promise<string | undefined> {
-  const grant = binding.source === 'secret' ? 'secret.read' : 'plugin.config.read';
-  if (!admission.effectiveGrants.includes(grant)) {
-    throw hostCapabilityRefusal(
-      new ExternalPluginRuntimeError(
+  if (effectiveValues) {
+    const value = field ? effectivePluginConfigurationValue(field, effectiveValues[binding.key]) : undefined;
+    const required = field ? variantFieldRequiredness(field, effectiveValues) : false;
+    if ((value === undefined || value.length === 0) && required) {
+      throw new ExternalPluginRuntimeError(
         'CONFIG_UNAVAILABLE',
-        `MCP contribution ${contribution.id} lacks Host grant ${grant}`,
-      ),
-      grant,
-    );
+        `required ${binding.source} ${binding.key} is unavailable`,
+      );
+    }
+    return value || undefined;
   }
   const raw =
     binding.source === 'secret'

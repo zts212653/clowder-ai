@@ -15,15 +15,23 @@ export type FloatingArtwork = {
   caption?: string;
   reason?: string;
   surface: WorkspaceSurfaceDescriptor | null;
+  pending?: boolean;
+  /** Non-media cards render their existing document owner directly inside the same floating shell. */
+  ownerContentOnly?: boolean;
   openWorkspace?: () => Promise<boolean>;
   gallery?: ArtworkGallery;
-  reference?: { attachment: MediaContextAttachment; selectionId?: string };
+  reference?: {
+    attachment: MediaContextAttachment;
+    selectionId?: string;
+    origin?: { kind: 'composer'; threadId: string } | { kind: 'message'; threadId: string; messageId: string };
+  };
 };
 type Scope = {
   threadId: string;
   work: FloatingArtwork | null;
   workModeWork: FloatingArtwork | null;
   open: (work: FloatingArtwork, expectedGeneration?: number) => boolean;
+  update: (work: FloatingArtwork, expectedGeneration: number) => boolean;
   enterWorkMode: (work: FloatingArtwork, expectedGeneration?: number) => boolean;
   clearWorkMode: () => void;
   getGeneration: () => number;
@@ -88,6 +96,20 @@ export function ArtworkLightboxProvider({ threadId, children }: { threadId: stri
     (next: FloatingArtwork, expectedGeneration?: number) => present(next, false, expectedGeneration),
     [present],
   );
+  // Filling in an already opened preview is not another navigation. Closing,
+  // selecting another work or leaving this thread invalidates its exact ticket.
+  const update = useCallback(
+    (next: FloatingArtwork, expectedGeneration: number) => {
+      if (commands.current.visit !== visit || commands.current.generation !== expectedGeneration) return false;
+      setPresentation((current) =>
+        current.visit !== visit || current.generation !== expectedGeneration || !current.work
+          ? current
+          : { ...current, work: next },
+      );
+      return true;
+    },
+    [visit],
+  );
   const enterWorkMode = useCallback(
     (next: FloatingArtwork, expectedGeneration?: number) => present(next, true, expectedGeneration),
     [present],
@@ -148,6 +170,7 @@ export function ArtworkLightboxProvider({ threadId, children }: { threadId: stri
       work,
       workModeWork,
       open,
+      update,
       enterWorkMode,
       clearWorkMode,
       getGeneration,
@@ -164,6 +187,7 @@ export function ArtworkLightboxProvider({ threadId, children }: { threadId: stri
       work,
       workModeWork,
       open,
+      update,
       enterWorkMode,
       clearWorkMode,
       getGeneration,

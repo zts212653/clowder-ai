@@ -1,12 +1,11 @@
 'use client';
 
+import { VoiceInputButton } from '@cat-cafe/ui';
 import type { useVoiceInput } from '@/hooks/useVoiceInput';
 import { AppTooltip } from './AppTooltip';
 import { chatComposerCopy } from './chat-composer.shell-copy';
-import { LoadingIcon } from './icons/LoadingIcon';
-import { MicIcon } from './icons/MicIcon';
-import { StopRecordingIcon } from './icons/StopRecordingIcon';
 import { useShellCopy } from './shell/shell-copy';
+import { useShellLanguage } from './shell/shell-language';
 
 type StopState = 'available' | 'pending' | 'unavailable' | 'hidden';
 interface ChatComposerActionsProps {
@@ -28,18 +27,17 @@ function ComposerVoiceControl({ voice, disabled }: Pick<ChatComposerActionsProps
   const recording = voice.state === 'recording';
   const transcribing = voice.state === 'transcribing';
   const label = recording ? t.stopRecording : transcribing ? t.transcribing : t.voice;
-  const Icon = recording ? StopRecordingIcon : transcribing ? LoadingIcon : MicIcon;
+  const language = useShellLanguage();
   return (
     <AppTooltip label={label} side="top" shortcut={recording || transcribing ? undefined : '⌥V'}>
-      <button
-        type="button"
-        onClick={recording ? voice.stopRecording : voice.startRecording}
-        disabled={transcribing || (!recording && disabled)}
-        aria-label={label}
-        className={`${control} ${recording ? 'bg-conn-red-text text-[var(--cafe-accent-foreground)] motion-safe:animate-pulse' : 'text-[var(--shell-muted)] hover:bg-[var(--shell-selected)]'}`}
-      >
-        <Icon className="h-4 w-4" />
-      </button>
+      <VoiceInputButton
+        language={language}
+        state={voice.state}
+        disabled={disabled}
+        onStart={voice.startRecording}
+        onStop={voice.stopRecording}
+        className={control}
+      />
     </AppTooltip>
   );
 }

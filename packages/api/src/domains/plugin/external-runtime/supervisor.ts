@@ -1,39 +1,24 @@
 import process from 'node:process';
-import {
-  type PluginDeliveryInput,
-  type PluginDeliveryReceipt,
-  WIRE_METHOD_REGISTRY,
-  WIRE_VERSION,
-} from '@clowder-ai/plugin-contract';
+import { type PluginDeliveryInput, type PluginDeliveryReceipt, WIRE_VERSION } from '@clowder-ai/plugin-contract';
 import type { PluginRuntimeAdmission } from '../carrier/runtime-carrier.js';
-import type { BrokerConnection } from '../host-broker/builtin-loopback.js';
 import { HostBrokerError } from '../host-broker/types.js';
-import type { PluginInventoryTransaction } from '../host-inventory/ports.js';
-import type { RuntimeState } from '../host-inventory/types.js';
 import { NodeExternalPluginProcessAdapter } from './node-process-adapter.js';
 import { verifyPackageEntrypoint } from './package-entrypoint-authority.js';
 import { deferred, type RuntimeExecution } from './runtime-execution.js';
 import { closeRuntimeExecutionResources } from './runtime-execution-cleanup.js';
 import {
   createRuntimeHeartbeatController,
-  type RuntimeHeartbeatController,
   type RuntimeHeartbeatPolicy,
   resolveRuntimeHeartbeatPolicy,
 } from './runtime-heartbeat.js';
 import { projectRuntimeReplacementFailure, RuntimeLeaseRecoveryCoordinator } from './runtime-lease-recovery.js';
 import { projectTerminalState, type RuntimeProjectionDeps, setRuntimeState } from './runtime-state-projection.js';
-import {
-  assertAuthorityUnchanged,
-  projectStartConfiguration,
-  type RunnableAuthority,
-  resolveRunnableAuthority,
-} from './start-authority.js';
-import { createExternalStdioBrokerTransport, type ExternalStdioBrokerTransport } from './stdio-broker-transport.js';
+import { assertAuthorityUnchanged, projectStartConfiguration, resolveRunnableAuthority } from './start-authority.js';
+import { createExternalStdioBrokerTransport } from './stdio-broker-transport.js';
 import type {
   ExternalPluginProcess,
   ExternalPluginRuntimeHandle,
   ExternalPluginRuntimeSupervisorOptions,
-  VerifiedPluginPackage,
 } from './types.js';
 import { ExternalPluginRuntimeError } from './types.js';
 
@@ -126,10 +111,7 @@ export class ExternalPluginRuntimeSupervisor {
       );
     }
     try {
-      await this.options.broker.authorizeHostCall(
-        pluginInstanceId,
-        WIRE_METHOD_REGISTRY['host.messaging.deliver'].grant,
-      );
+      await this.options.broker.authorizeHostCall(pluginInstanceId);
     } catch (error) {
       await this.finish(execution, 'authority_changed', 'stopped', true);
       throw new ExternalPluginRuntimeError(
@@ -180,7 +162,7 @@ export class ExternalPluginRuntimeSupervisor {
     await setRuntimeState(this.projection, execution, 'starting');
     execution.projected = true;
     await located.verifyIntegrity();
-    // F202 C1 gap C: manifest-declared config/secrets, grant-checked and fail-closed. Declared
+    // F202 C1 gap C: manifest-declared config/secrets, validated before delivery. Declared
     // fields are resolved BEFORE the protocol variables are written, and a declared key inside
     // the CLOWDER_ namespace is refused outright, so a package can never restate its own
     // Host-issued identity by shadowing one of them.

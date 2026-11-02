@@ -19,6 +19,7 @@ import {
 } from '../dist/domains/concierge/concierge-search-context.js';
 import { IndexBuilder } from '../dist/domains/memory/IndexBuilder.js';
 import { MessageSearchService } from '../dist/domains/memory/MessageSearchService.js';
+import { MessageQueryQualifier } from '../dist/domains/memory/message-query-qualifier.js';
 import { SqliteEvidenceStore } from '../dist/domains/memory/SqliteEvidenceStore.js';
 import { callbacksRoutes } from '../dist/routes/callbacks.js';
 import { evidenceRoutes } from '../dist/routes/evidence.js';
@@ -83,9 +84,19 @@ async function runMessageSearchJourney() {
     );
     for (const thread of threads) builder.markThreadDirty(thread.id);
     await builder.flushDirtyThreads();
-    const service = new MessageSearchService({ evidenceStore, messageStore, threadStore });
+    const service = new MessageSearchService({
+      evidenceStore,
+      messageStore,
+      threadStore,
+      // Redis/index/reader continuity uses a deterministic qualified source;
+      // native judgment has its own real bounded validation window.
+      qualifier: new MessageQueryQualifier(async (batch) =>
+        JSON.stringify({ requestId: batch.requestId, rows: batch.rows.map((row) => [row.id, 'supported', row.body]) }),
+      ),
+    });
     await app.register(evidenceRoutes, { evidenceStore, messageSearchService: service });
     await app.register(callbacksRoutes, {
+      messageSearchService: service,
       registry,
       agentKeyRegistry,
       messageStore,
@@ -213,7 +224,7 @@ async function runMessageSearchJourney() {
         exactOriginalRead: true,
         sourceExcluded: !cat.results.some((hit) => hit.messageId === question.id),
         privateThreadExcluded: !cat.results.some((hit) => hit.threadId === privateThread.id),
-        providerLatency: 'unknown; no provider invoked',
+        providerLatency: 'unknown; no native provider, deterministic qualification control',
         liveUserHistory: false,
       }),
     );

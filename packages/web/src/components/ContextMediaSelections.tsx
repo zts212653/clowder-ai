@@ -3,8 +3,16 @@
 import type { MediaContextAttachment } from '@cat-cafe/shared';
 import { useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
+import { AppTooltip } from './AppTooltip';
+import { MediaAttachmentThumbnail } from './content-review/MediaAttachmentThumbnail';
 import { removeMediaSelectionFromChat } from './content-review/media-chat-composer';
 import { mediaSelectionLabel } from './content-review/media-chat-selection';
+import styles from './content-review/media-selection-preview.module.css';
+import {
+  selectionPreviewSeconds,
+  selectionPreviewTime,
+  useMediaAttachmentPreview,
+} from './content-review/useMediaAttachmentPreview';
 import { useShellLanguage } from './shell/shell-language';
 
 function StoryQuote({
@@ -51,82 +59,74 @@ export function ContextMediaSelections({
   opening?: boolean;
 }) {
   const english = useShellLanguage() === 'en';
-  const compactWords = attachment.gallery ? 'max-w-24 truncate' : 'max-w-48 truncate';
+  const media = useMediaAttachmentPreview(attachment);
   if (attachment.selections.length === 0) return null;
   return (
-    <span
-      data-testid="media-selections"
-      className={`flex min-w-0 gap-1 ${compact && attachment.gallery ? 'flex-nowrap overflow-x-auto' : compact ? 'mt-1 flex-wrap' : 'mt-1 flex-col'} text-micro text-cafe-secondary`}
-    >
-      {attachment.selections.map((item, index) => (
-        <span
-          key={item.id}
-          data-selection-id={item.id}
-          title={compact ? item.instruction : undefined}
-          className={`flex min-w-0 items-center gap-1 ${compact ? 'shrink-0 rounded-full border border-cafe-subtle px-1.5 py-0.5' : ''}`}
-        >
-          {onOpen ? (
-            <button
-              type="button"
-              disabled={opening}
-              onClick={() => onOpen(item.id)}
-              aria-label={
-                english
-                  ? `Open artwork ${(attachment.gallery?.index ?? 0) + 1} · Place ${item.id}`
-                  : `打开图 ${(attachment.gallery?.index ?? 0) + 1} · 第 ${item.id} 处`
-              }
-              className={`flex min-w-0 gap-1 rounded text-left text-cafe hover:bg-cafe-surface-sunken ${compact ? 'items-center' : 'items-start'}`}
-            >
-              <span
-                data-testid="media-selection-number"
-                className="shrink-0 rounded-full border border-cafe-subtle px-1 font-semibold"
+    <span data-testid="media-selections" className={`${styles.places} ${compact ? styles.compact : ''}`}>
+      {attachment.selections.map((item, index) => {
+        const seconds = selectionPreviewSeconds(item.selection, media);
+        const tooltip = `${seconds === null ? '' : `${selectionPreviewTime(seconds)} · `}${attachment.title}`;
+        const words = item.instruction || (english ? 'Selected place' : mediaSelectionLabel(item));
+        return (
+          <span key={item.id} data-selection-id={item.id} className={styles.place}>
+            <span className={styles.chip}>
+              <AppTooltip
+                label={tooltip}
+                side="top"
+                intent="content"
+                multiline
+                detail={
+                  <span className={styles.hover}>
+                    <MediaAttachmentThumbnail attachment={attachment} item={item} media={media} expanded />
+                    <span className="block whitespace-pre-wrap">{item.instruction}</span>
+                  </span>
+                }
               >
-                {item.id}
-              </span>
-              {compact && !attachment.gallery ? (
-                <span className="shrink-0">{english ? 'Artwork 1' : '图 1'}</span>
+                <button
+                  type="button"
+                  disabled={opening}
+                  onClick={() => onOpen?.(item.id)}
+                  aria-label={
+                    english
+                      ? `Open artwork ${(attachment.gallery?.index ?? 0) + 1} · Place ${item.id}`
+                      : `打开图 ${(attachment.gallery?.index ?? 0) + 1} · 第 ${item.id} 处`
+                  }
+                  className={styles.open}
+                >
+                  <MediaAttachmentThumbnail attachment={attachment} item={item} media={media} compact />
+                  <span data-testid="media-selection-number" className={styles.number}>
+                    {attachment.gallery ? item.id : index + 1}
+                  </span>
+                  <span className={styles.words}>
+                    {Array.from(words).slice(0, 16).join('')}
+                    {Array.from(words).length > 16 ? '…' : ''}
+                  </span>
+                </button>
+              </AppTooltip>
+              {removable ? (
+                <button
+                  type="button"
+                  aria-label={
+                    english
+                      ? `Remove selection ${attachment.gallery ? item.id : index + 1}`
+                      : `移除选区 ${attachment.gallery ? item.id : index + 1}`
+                  }
+                  onClick={() => {
+                    const threadId = useChatStore.getState().currentThreadId;
+                    if (threadId) removeMediaSelectionFromChat(threadId, attachment.id, item.id);
+                  }}
+                  className={styles.remove}
+                >
+                  <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                    <path d="m5.7 4.3 4.3 4.3 4.3-4.3 1.4 1.4-4.3 4.3 4.3 4.3-1.4 1.4-4.3-4.3-4.3 4.3-1.4-1.4L8.6 10 4.3 5.7l1.4-1.4Z" />
+                  </svg>
+                </button>
               ) : null}
-              <span className={`min-w-0 text-xs ${compact ? compactWords : 'whitespace-pre-wrap break-words'}`}>
-                {item.instruction || (english ? 'Selected place' : mediaSelectionLabel(item))}
-              </span>
-            </button>
-          ) : (
-            <>
-              <span
-                data-testid="media-selection-number"
-                className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-cafe-subtle bg-cafe-surface-sunken font-semibold"
-              >
-                {attachment.gallery ? item.id : index + 1}
-              </span>
-              <span className="shrink-0">{mediaSelectionLabel(item)}</span>
-              {attachment.gallery ? (
-                <span className="shrink-0 text-cafe-muted">图 {attachment.gallery.index + 1}</span>
-              ) : null}
-              {(!compact || attachment.gallery) && item.instruction ? (
-                <span className={`min-w-0 text-xs text-cafe ${compact ? compactWords : 'whitespace-pre-wrap'}`}>
-                  {item.instruction}
-                </span>
-              ) : null}
-            </>
-          )}
-          <StoryQuote selection={item.selection} english={english} />
-          {removable ? (
-            <button
-              type="button"
-              aria-label={`移除选区 ${attachment.gallery ? item.id : index + 1}`}
-              onClick={() => {
-                const threadId = useChatStore.getState().currentThreadId;
-                if (threadId) removeMediaSelectionFromChat(threadId, attachment.id, item.id);
-              }}
-              className="shrink-0 rounded p-0.5 text-cafe-muted hover:bg-cafe-surface-sunken hover:text-cafe-secondary"
-            >
-              <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                <path d="m5.7 4.3 4.3 4.3 4.3-4.3 1.4 1.4-4.3 4.3 4.3 4.3-1.4 1.4-4.3-4.3-4.3 4.3-1.4-1.4L8.6 10 4.3 5.7l1.4-1.4Z" />
-              </svg>
-            </button>
-          ) : null}
-        </span>
-      ))}
+            </span>
+            <StoryQuote selection={item.selection} english={english} />
+          </span>
+        );
+      })}
     </span>
   );
 }

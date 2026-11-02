@@ -76,7 +76,7 @@ it('offers a first query and an honest retry without manufacturing a zero meter'
   await act(async () => root.render(<CodexQuotaControl accountRef="codex" reload={async () => {}} />));
   expect(host.querySelector('[role="meter"]')).toBeNull();
   await act(async () => button('Check quota').click());
-  expect(host.textContent).toContain('Quota unavailable');
+  expect(host.textContent).toContain("Couldn't reach the quota service");
   expect(host.querySelector('[role="meter"]')).toBeNull();
   expect(button('Retry').disabled).toBe(false);
 });
@@ -146,4 +146,68 @@ it.each(['zh', 'en'] as const)('shows month/day and minute precision in the %s r
   expect(document.querySelector('[role="tooltip"]')?.textContent).toBe(
     language === 'zh' ? '刷新额度 · 上次 10/21 02:49' : 'Refresh quota · Last checked 10/21 02:49',
   );
+});
+
+it.each([
+  'zh',
+  'en',
+] as const)('uses the successful reading timestamp in the %s stale refresh tooltip across midnight', async (language) => {
+  writeShellLanguage(language);
+  const matches = HTMLElement.prototype.matches;
+  vi.spyOn(HTMLElement.prototype, 'matches').mockImplementation(function (this: HTMLElement, selector) {
+    return selector === ':focus-visible' || matches.call(this, selector);
+  });
+  const failedAt = new Date(2030, 9, 22, 0, 1).getTime();
+  const successfulAt = new Date(2030, 9, 21, 23, 17).getTime();
+  vi.spyOn(Date, 'now').mockReturnValue(failedAt);
+  await act(async () =>
+    root.render(
+      <CodexQuotaControl
+        accountRef="codex"
+        observation={{
+          ...observation,
+          observedAt: failedAt,
+          status: 'unavailable',
+          items: [],
+          failure: { kind: 'service_unreachable' },
+          lastSuccess: { observedAt: successfulAt, items: observation.items },
+        }}
+        reload={async () => {}}
+      />,
+    ),
+  );
+  expect(host.textContent).toContain('10/21 23:17');
+  await act(async () => button(language === 'zh' ? '刷新额度' : 'Refresh quota').focus());
+  expect(document.querySelector('[role="tooltip"]')?.textContent).toBe(
+    language === 'zh' ? '刷新额度 · 上次 10/21 23:17' : 'Refresh quota · Last checked 10/21 23:17',
+  );
+});
+
+it.each(['zh', 'en'] as const)('distinguishes exhausted, low and healthy readings in %s', async (language) => {
+  writeShellLanguage(language);
+  for (const left of [0, 1, 19, 20]) {
+    await act(async () =>
+      root.render(
+        <CodexQuotaControl
+          accountRef="codex"
+          observation={{ ...observation, items: [{ label: 'Week', usedPercent: 100 - left }] }}
+          reload={async () => {}}
+        />,
+      ),
+    );
+    const warning = host.querySelector('.account-quota-warning');
+    expect(warning?.textContent ?? '').toBe(
+      left === 0
+        ? language === 'zh'
+          ? '已用完'
+          : 'Used up'
+        : left < 20
+          ? language === 'zh'
+            ? '接近上限'
+            : 'Near limit'
+          : '',
+    );
+    expect(host.querySelector('[role="meter"]')?.getAttribute('aria-valuenow')).toBe(String(left));
+    expect(host.querySelector<HTMLElement>('.account-quota-meter > span')?.style.width).toBe(`${left}%`);
+  }
 });

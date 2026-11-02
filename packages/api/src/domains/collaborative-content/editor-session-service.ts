@@ -68,7 +68,6 @@ export class EditorSessionService {
       installationInstanceId: binding.installationInstanceId,
       providerVersion: binding.providerVersion,
       packageDigest: authority.packageDigest,
-      grantRevision: authority.grantRevision,
       lifecycleRevision: authority.lifecycleRevision,
       surfaceIntegrity: authority.surfaceIntegrity,
       executionLeaseDigest: authority.executionLeaseDigest,

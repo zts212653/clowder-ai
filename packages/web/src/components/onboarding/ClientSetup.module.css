@@ -66,6 +66,7 @@
 
 .stage {
   background: #fff;
+  --chat-background-role: white;
   border: 1px solid #e4d9d0;
   border-radius: 12px;
   padding: 24px;
@@ -178,6 +179,7 @@
 
 .loginButton {
   background: #fff;
+  --chat-background-role: white;
   border: 1px solid #d7c9bf;
   border-radius: 6px;
   padding: 6px 12px;
@@ -199,6 +201,7 @@
 
 .button {
   background: #fff;
+  --chat-background-role: white;
   border: 1px solid #d7c9bf;
   border-radius: 8px;
   padding: 12px 24px;

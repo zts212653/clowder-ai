@@ -1,11 +1,12 @@
 import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useShellCopy } from '@/components/shell/shell-copy';
+import { ArtworkAnnotationToolbar } from './ArtworkAnnotationToolbar';
 import { useArtworkLightboxScope, useFloatingArtworkPresentation } from './ArtworkLightboxScope';
+import toolbarStyles from './artwork-annotation-toolbar.module.css';
 import styles from './image-artwork.module.css';
 import { imageArtworkCopy } from './image-artwork.shell-copy';
 import type { ReviewCanvasMode } from './ReviewCanvasToolbar';
-import { ReviewToolbarIcon } from './ReviewToolbarIcon';
 import type { useArtworkViewport } from './useArtworkViewport';
 
 /** Image actions share the measured canvas; viewport and annotation authority remain with its owner. */
@@ -16,8 +17,6 @@ export function ImageArtworkControls({
   canMarkup,
   onModeChange,
   viewport,
-  src,
-  download,
   discussionCount,
   onOpenDiscussion,
   wholeWorkAction,
@@ -41,7 +40,7 @@ export function ImageArtworkControls({
   const toolsSlot = useArtworkLightboxScope()?.toolsSlot;
   const tools = (
     <div
-      className={floating ? 'flex flex-wrap items-center gap-2 px-3 py-1' : styles.tools}
+      className={floating ? toolbarStyles.placement : styles.tools}
       data-review-mode={mode}
       style={
         !floating && mode !== 'markup' && typeof viewport.stageStyle.height === 'number'
@@ -53,22 +52,26 @@ export function ImageArtworkControls({
         children
       ) : (
         <section aria-label={t.tools} data-review-mode={mode}>
-          <div className={styles.dock} role="toolbar" aria-label={t.modes}>
-            <button
-              type="button"
-              disabled={!canAnnotate}
-              aria-pressed={mode === 'comment'}
-              onClick={() => onModeChange(mode === 'comment' ? 'view' : 'comment')}
-            >
-              <ReviewToolbarIcon name="rectangle" />
-              {t.circle}
-            </button>
-            <span className={styles.separator} aria-hidden />
-            <button type="button" disabled={!canMarkup} onClick={() => onModeChange('markup')}>
-              <ReviewToolbarIcon name="brush" />
-              {t.brush}
-            </button>
-          </div>
+          <ArtworkAnnotationToolbar
+            label={t.modes}
+            tools={[
+              {
+                id: 'select',
+                label: t.circle,
+                icon: 'rectangle',
+                disabled: !canAnnotate,
+                active: mode === 'comment',
+                onSelect: () => onModeChange(mode === 'comment' ? 'view' : 'comment'),
+              },
+              {
+                id: 'brush',
+                label: t.brush,
+                icon: 'brush',
+                disabled: !canMarkup,
+                onSelect: () => onModeChange('markup'),
+              },
+            ]}
+          />
         </section>
       )}
     </div>
@@ -77,7 +80,7 @@ export function ImageArtworkControls({
     <>
       {!unifiedActions ? (
         <div className={styles.viewOptions}>
-          <details className={styles.menu}>
+          <details className={styles.menu} data-chat-background-layer="opaque">
             <summary aria-label={t.viewport}>
               <span role="status" aria-label={t.scale}>
                 {Math.round(viewport.renderedScale * 100)}%
@@ -106,23 +109,11 @@ export function ImageArtworkControls({
               </button>
             </div>
           </details>
-          <details className={styles.menu}>
-            <summary aria-label={t.more}>
-              <ReviewToolbarIcon name="more" />
-            </summary>
-            <div className={styles.menuBody}>
-              {wholeWorkAction}
-              <button type="button" aria-label={t.discussionLabel} onClick={onOpenDiscussion}>
-                {t.discussion}
-                {discussionCount ? ` · ${discussionCount}` : ''}
-              </button>
-              {src ? (
-                <a href={download?.src ?? src} download={download?.filename ?? '作品.png'}>
-                  {t.download}
-                </a>
-              ) : null}
-            </div>
-          </details>
+          {wholeWorkAction}
+          <button type="button" aria-label={t.discussionLabel} onClick={onOpenDiscussion}>
+            {t.discussion}
+            {discussionCount ? ` · ${discussionCount}` : ''}
+          </button>
         </div>
       ) : null}
       {floating && toolsSlot ? createPortal(tools, toolsSlot) : tools}

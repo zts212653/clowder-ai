@@ -8,6 +8,7 @@ import type {
   ReportingMode,
   ThreadProposal,
 } from '@cat-cafe/shared';
+import type { SettledHistoryPageOptions, SettledHistorySourcePage } from '../../../../../utils/settled-history-page.js';
 import type {
   ApprovedTaskContinuationInput,
   ApprovedTaskContinuationResult,
@@ -25,6 +26,10 @@ export interface CreateProposalInput {
   preferredCats: CatId[];
   projectPath: string;
   initialMessage?: string;
+  suggestedGroupId?: string;
+  suggestedPinned?: boolean;
+  groupSuggestionReason?: ThreadProposal['groupSuggestionReason'];
+  supersedesProposalId?: string;
   /** F128: reporting mode for the created thread (default final-only if omitted). */
   reportingMode?: ReportingMode;
   /** F277: declared placement role; omitted only for legacy proposals. */
@@ -77,6 +82,15 @@ export interface WithdrawProposalInput {
 }
 
 export interface IProposalStore {
+  recordRevisionRequest(
+    proposalId: string,
+    request: NonNullable<ThreadProposal['revisionRequest']>,
+  ): ThreadProposal | null | Promise<ThreadProposal | null>;
+  supersedePending(
+    proposalId: string,
+    replacementId: string,
+    requestMessageId: string,
+  ): ThreadProposal | null | Promise<ThreadProposal | null>;
   continueApprovedTask(
     input: ApprovedTaskContinuationInput,
     memoryAuthority?: MemoryContinuationAuthority,
@@ -84,6 +98,11 @@ export interface IProposalStore {
   create(input: CreateProposalInput): ThreadProposal | Promise<ThreadProposal>;
   get(proposalId: string): ThreadProposal | null | Promise<ThreadProposal | null>;
   listByUser(userId: string, limit?: number): ThreadProposal[] | Promise<ThreadProposal[]>;
+  listSettledPage?(
+    owner: string,
+    options: SettledHistoryPageOptions,
+  ): SettledHistorySourcePage<ThreadProposal> | Promise<SettledHistorySourcePage<ThreadProposal>>;
+  listSettledByUser(userId: string, limit?: number): ThreadProposal[] | Promise<ThreadProposal[]>;
   listPending(userId: string, limit?: number): ThreadProposal[] | Promise<ThreadProposal[]>;
   listByThread(threadId: string, limit?: number): ThreadProposal[] | Promise<ThreadProposal[]>;
   /** Complete authority scan; unlike product lists, this must not truncate. */

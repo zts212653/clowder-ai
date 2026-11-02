@@ -8,12 +8,15 @@ import '../../web/src/app/console-tokens.css';
 import '@cat-cafe/ui/styles.css';
 import './styles/tokens.css';
 import './styles/shell.css';
+import './styles/identity.css';
 import './styles/shell-footer.css';
 import './styles/leave-dialog.css';
 import './styles/leave-responsibilities.css';
 import './styles/channel.css';
 import './styles/channel-message.css';
 import './styles/message-reactions.css';
+import './styles/new-channel.css';
+import './styles/message-expression.css';
 import './styles/collaboration.css';
 import './styles/roadmap.css';
 import './styles/roadmap-projections.css';
@@ -21,6 +24,7 @@ import './styles/project-management.css';
 import './styles/project-list.css';
 import './styles/project-board.css';
 import './styles/project-plan.css';
+import './styles/project-time.css';
 import './styles/project-authoring.css';
 import './styles/roadmap-details.css';
 import './styles/vote.css';
@@ -48,3 +52,7 @@ createRoot(root).render(
     <CollectiveClient />
   </StrictMode>,
 );
+
+import './styles/project-material.css';
+
+import './styles/project-artifact-reference.css';

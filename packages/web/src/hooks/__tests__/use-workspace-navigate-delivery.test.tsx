@@ -11,6 +11,7 @@ Object.assign(globalThis as Record<string, unknown>, { React, IS_REACT_ACT_ENVIR
 const socketState = vi.hoisted(() => {
   const handlers = new Map<string, (...args: unknown[]) => void>();
   const socket = {
+    connected: true,
     emit: vi.fn(),
     on: vi.fn((event: string, handler: (...args: unknown[]) => void) => handlers.set(event, handler)),
     off: vi.fn((event: string) => handlers.delete(event)),

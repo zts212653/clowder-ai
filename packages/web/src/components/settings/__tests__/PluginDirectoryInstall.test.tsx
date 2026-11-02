@@ -30,7 +30,7 @@ function button(label: string) {
   return found as HTMLButtonElement;
 }
 const click = async (label: string) => act(async () => button(label).click());
-const writes = () => fetch.mock.calls.filter(([, init]) => init?.method === 'POST');
+const writes = () => fetch.mock.calls.filter(([url, init]) => url === installEndpoint && init?.method === 'POST');
 async function open(presentation: 'v1' | 'v2' = 'v1') {
   await act(async () => root.render(<PluginManagerLiveContent presentation={presentation} />));
   await click('从本地目录安装');
@@ -47,6 +47,7 @@ beforeEach(() => {
   installResponse = async () => json({ pluginId: 'local-example' }, 201);
   directoryResponse = async () => json(listing(packagePath));
   fetch.mockImplementation(async (url, init) => {
+    if (url === '/api/plugin-manager/marketplaces/refresh') return json({ sources: [] });
     if (url === '/api/plugin-manager/plugins') return json({ plugins: [], catalog: { status: 'fresh' } });
     if (url === '/api/projects/browse' || url === '/api/projects/browse?path=%2Fworkspace%2Fplugins')
       return json(listing('/workspace/plugins'));

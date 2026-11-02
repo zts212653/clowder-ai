@@ -114,7 +114,7 @@ Queue 不再保存或投影 `notified/awakened/seen/handled/failed/terminal` 回
 Queue 自身由 Lua/CAS 转换保证：`enqueue`、按 target 的 `claim/commit/restore`、整 source withdrawal、以及 `reconcileTargets`。初次多目标 admission 在**同一行的一次写入**中全有或全无；不会留下半组 target 或 ghost row。
 
 实际 dispatch 跨越 Queue 与 History 两个 owner。drain 先按唯一 comparator 领取 source entry；同一 source 本轮
-冻结一个 exact target set，并按以下顺序提交：
+冻结当前能够执行的 exact target set，忙碌成员保留为同一行的 pending target，并按以下顺序提交：
 
 1. 为 target set 中每个成员并发创建/确认独立 response lifecycle，并把真实
    `dispatchRef(targetId, responseMessageId, dispatchedAt)` 写入 History；
@@ -129,9 +129,11 @@ transaction 中原子判定；不能先做一次易失 read，再凭旧快照 en
 source，再将该 source 与同一 `targets[]` entry 原子 admission；callback response 只是 parent lineage，不能
 让它的 id 指向另一段只存在于 Queue 的 synthetic 正文。
 
-一次 try-drain 最多启动一条 source：按 comparator 顺序找第一条「完整 pending target set 此刻都可 admission」的
-source。等待中的 source（目标被 Active Run 占用、被取消 fence 压住，或重试尚在等待）不满足条件，原样留在原位，
-但不再挡住它后面的 source：只挡住后面与它有共同目标的 source，所以每个目标仍按 comparator 顺序收到 source；等待
+一次 try-drain 最多领取一条 source：按 comparator 顺序找第一条有可执行成员的 source。每位成员分别受自己的
+Active Run、取消 fence、以及前面同目标 source 的顺序约束；同一消息中的忙碌成员不再连带阻塞空闲成员。
+先投递前一条共享消息中属于空闲成员的那一份，再让它处理自己的后续消息，因此没有越过该成员的旧输入。
+当整条 pending target set 都可执行时沿用一次并行 fan-out；部分可执行时复用现有单目标 claim，完成持久交接就发出
+下一次 drain 信号，不等 provider 完成。既有失败重试仍由 source 的 retry time 控制。等待
 空闲 thread 的 targetless 输入挡住其后全部 source，因为它的目标还未知。只有 comparator head 在解析不出目标时原位
 失败，后面的 source 解析不出目标时等待，并占住其请求的目标。领取不再要求被选 source 是 comparator head；Lua 领取
 本就只校验 row 仍 queued 与 target 匹配。扫描读的是一份快照，并在解析目标时 await，owner 可能在此期间重排；所以
@@ -145,8 +147,13 @@ actual-send 拒绝了其中部分目标（其余目标已交接）。为了不�
 routing 对被拒目标给出的 `automaticRetryAt`（由 route 在拒绝时回报，因为 targetless source 恢复后不再记得它解析到的
 目标）与逐次翻倍的退避（10 秒起，最长 60 分钟）两者中较晚的时刻，到点由定时器触发 drain；等待期间其余 source 照常
 drain。这个等待是进程内状态，重启后直接在启动 drain 里重试。
-同一 source 的 target set 是一次 fan-out，不以“第一个 target 完成 handoff 后再次 drain sibling”拼成并发。一个 target
+一次 execution 仅按自己冻结的 target set 判断交接是否完成，不把同一 source 尚未轮到的成员当成交接失败或追加退避。
+收尾也只释放自己的内存 admitted attempts；另一 execution 仍在处理的 sibling 继续保有其输入证据。一个 target
 进入 provider 后失败，不回滚已经被 sibling 接受的投递；每个 response bubble 独立终局。
+
+2026-11-01 修订来源：`[thread-id]#private-source-id`。
+原“等整组空闲”会让先前一条同时发给 A/B 的消息连带堵住空闲 B 的后续输入；复现与验证见
+`docs/bug-report/2026-11-01-queue-independent-targets/README.md`。
 
 Redis `order` 只索引当前待处理 entry；`messageId → entryId` 只为定位尚待投递的 source，不承担历史 receipt 查询。History 分页与头像投影只读 Message lifecycle。
 
@@ -196,7 +203,9 @@ payload 写一次、起跑读一次，并由对应 store 重建；这些字段�
 
 ### D7 — Queue 没有 terminal row；重做是新的用户意图
 
-目标一旦实际 dispatch，就从 pending `targets[]` 离开。`handled / failed / interrupted / canceled` 属于 response lifecycle，不回写 Queue；source withdrawal 则在 source lifecycle 写成 canceled 后删除尚待投递的整条 Queue Entry。
+目标一旦实际 dispatch，就从 pending `targets[]` 离开。`handled / failed / interrupted / canceled` 属于 response lifecycle，不回写 Queue。Queue 的「停止后续处理」删除尚待投递的整条 Queue Entry；只有未公开且没有实际 dispatch 的 source 才将其可见性投影置为 canceled。已公开的猫消息、原 dispatchRef、response membership 与未知送达记录保留，不因停止未来工作而撤回历史正文。
+
+原生 Append 仍在交接或等待原生内部 turn 完成时，短 claim 与 pending handoff 继续保护原 Queue。一次交接已返回但送达结果仍 unknown 时，禁止自动重发，不禁止主人停止其后续处理；迟到回执仍更新原 History，不重建已撤出的 Queue。批量 Clear 若还有在途条目，返回明确的未完成/部分完成及剩余队列，不把空操作报成全部清空。
 
 用户若要重做失败事项，应发送新消息或执行明确的新动作，由生产者产生新的 source/attempt。旧 response、dispatchRef 与 wait carrier 只保留原 attempt 的终态证据，不能充当 retry token。
 
@@ -233,6 +242,7 @@ Message 已进入成员可见 History，其他 target 的 Queue 责任仍由同�
 3. **没有任何确认弹窗**：用户只关心运行态与终态，不需要理解「无法确认进程状态」。`ForceResetDialog` 退役；`/force-reset` 只作为服务端内部 thread 级对账实现，没有用户入口。终态行不复活（D7）保证迟到输出无法回写已终局的气泡；detached host 由 supervisor 收敛（F220 KD-8），有界。
 4. **同一段对账三处复用**：启动（`StartupReconciler`）、投影读取（read-repair：running 记录 + 无 tracker + 进程快照 complete 且无 owner + 超出 pre-start 窗口 → 以 `execution_owner_lost` 终态化；快照不 complete 时不动）、停止（第 2 条）。已离开 Queue 但从未安装 provider tracker 的 pre-start attempt 超时，以 `prestart_timeout` 正常失败终局；父 InvocationRecord 只有在没有 sibling tracker / process-owner 活性见证时才随 child 终局。
 5. **前端**：权威投影稳定即信；旧 socket busy 标记自愈，不再有「运行状态待确认」死角与基于卡死的强制重置入口。
+6. **停止包含已积压的内部唤醒**：`user_cancel` / `cancel_all` 在实际停止信号处冻结同 owner、thread、member 尚未开始的 `private_input` recipients，立即启动既有 Queue target CAS 持久退休，不等待同轮其他成员结束；写入未决期间阻止该成员自动领取，parent 收尾等待退休完成再释放原执行槽位。无 tracker 的 process-owner / 孤儿对账，以及 thread reset 走同一退休语义。已公开通知与 admission receipt 保留；同 key 重放核对原始 envelope，不因剩余 targets 缩小而复活或误报冲突。完成 hook 按被停止的 member 收到 `canceled_by_user`，其他 member 的 claim 与 hook 继续有效。公开独立排队输入、停止后新入队输入、其他 owner/thread 不在本次快照内；Steer 与 timeout 不触发这一停止行为。退休写入失败保留原行并报告错误，仍完成原执行收尾，不借 finally 自动启动这批旧内部工作。
 
 历史根因：F220 Phase 2 报告（#972）已定性为「多 liveness SoT 无收敛点」；F194 读模型、TurnExecution 持久子真相与本 ADR 的账本已关闭进程内的绝大部分分叉，剩余只有基础设施故障（Redis / API 进程）一类，归 reconciler，不归用户。
 

@@ -1,4 +1,9 @@
-import { type MessageOutputLayoutV1, type MessageOutputRun, readMessageOutputLayout } from '@cat-cafe/shared';
+import {
+  type MessageOutputBoundaryRun,
+  type MessageOutputLayoutV1,
+  type ProcessTalkMode,
+  readMessageOutputLayout,
+} from '@cat-cafe/shared';
 import type { ChatMessage, ToolEvent } from '@/stores/chat-types';
 
 export interface ReplyOutputText {
@@ -16,9 +21,10 @@ export interface ReplyOutputProjection {
   answers: ReplyOutputText[];
   record: (ReplyOutputText | ReplyOutputTool)[];
   processCount: number;
+  showEarlierText?: boolean;
 }
 
-function textRun(content: string, run: MessageOutputRun): ReplyOutputText | undefined {
+function textRun(content: string, run: MessageOutputBoundaryRun): ReplyOutputText | undefined {
   const start = run.start + run.gluePrefixLength;
   if (content.slice(run.start, start) !== '\n'.repeat(run.gluePrefixLength)) return undefined;
   return { kind: 'text', id: run.id, text: content.slice(start, run.end), start, end: run.end };
@@ -42,7 +48,12 @@ function validTools(message: ChatMessage, refs: readonly { toolEventId: string; 
   });
 }
 
-function verifiedLayout(message: ChatMessage, threadId: string, verifiedHash?: string) {
+function verifiedLayout(
+  message: ChatMessage,
+  threadId: string,
+  verifiedHash: string | undefined,
+  processTalk: ProcessTalkMode,
+) {
   const layout = readMessageOutputLayout(message.extra?.outputLayout);
   if (
     message.type !== 'assistant' ||
@@ -50,6 +61,13 @@ function verifiedLayout(message: ChatMessage, threadId: string, verifiedHash?: s
     message.extra?.isExplicitPost ||
     message.contentBlocks?.length ||
     layout?.status !== 'available'
+  )
+    return undefined;
+  if (
+    layout.basis === 'successful_turn_last_tool' &&
+    (processTalk !== 'record' ||
+      message.isStreaming ||
+      (message.lifecycle?.kind === 'response' && message.lifecycle.status !== 'completed'))
   )
     return undefined;
   if (
@@ -66,7 +84,7 @@ function verifiedLayout(message: ChatMessage, threadId: string, verifiedHash?: s
   return layout;
 }
 
-function projectedRuns(content: string, input: readonly MessageOutputRun[]) {
+function projectedRuns(content: string, input: readonly MessageOutputBoundaryRun[]) {
   const runs = new Map<string, ReplyOutputText>();
   for (const run of input) {
     const text = textRun(content, run);
@@ -92,7 +110,12 @@ function composeOutputOrder(
       else if (text.text.trim()) record.push(text);
     }
   }
-  return { answers, record, processCount: record.filter((entry) => entry.kind === 'text').length };
+  return {
+    answers,
+    record,
+    processCount: record.filter((entry) => entry.kind === 'text').length,
+    ...(layout.basis === 'successful_turn_last_tool' ? { showEarlierText: true } : {}),
+  };
 }
 
 function appendHostTail(
@@ -117,8 +140,9 @@ export function projectReplyOutput(
   message: ChatMessage,
   threadId: string,
   verifiedHash?: string,
+  processTalk: ProcessTalkMode = 'whole',
 ): ReplyOutputProjection | undefined {
-  const layout = verifiedLayout(message, threadId, verifiedHash);
+  const layout = verifiedLayout(message, threadId, verifiedHash, processTalk);
   if (!layout) return undefined;
   const tools = layout.order.filter((ref) => ref.kind === 'tool');
   if (!validTools(message, tools)) return undefined;

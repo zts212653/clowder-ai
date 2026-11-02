@@ -8,6 +8,7 @@ import { RedisPersonMemoryStore } from '../../../api/dist/domains/memory/people/
 import { registerPersonMemoryDecisionRoutes } from '../../../api/dist/routes/person-memory-decision-routes.js';
 import { buildPersonMemoryProposalCard } from '../../../api/dist/routes/person-memory-proposal-card.js';
 import { cleanupClientKeyspace } from '../../../api/test/helpers/redis-test-helpers.js';
+import { createPersonMemoryReplacement } from './f322-inbox-person-memory-replacement.fixture.mjs';
 import { createInboxProposalFixture } from './f322-inbox-proposal.fixture.mjs';
 
 /** Real F276 Lua persistence on development6398/db15, unique owned namespace, no production data/provider. */
@@ -107,6 +108,8 @@ export async function createInboxPersonMemoryFixture(language) {
           redis,
           prefix,
           adapters: [new F276ApprovalAdapter(store)],
+          createReplacement: (thread) =>
+            createPersonMemoryReplacement({ language, owner, thread, messages, store, ingress }),
           async effects() {
             return Promise.all(
               records.map(async (r) => {
@@ -120,6 +123,9 @@ export async function createInboxPersonMemoryFixture(language) {
                   candidate,
                   candidateTtl: await redis.ttl(PersonMemoryKeys.candidate(owner, r.proposalId)),
                   claims: claims.filter((c) => c.materializedBy?.candidateId === r.proposalId),
+                  relationships: candidate.materializedPersonId
+                    ? await store.listRelationships(owner, candidate.materializedPersonId)
+                    : [],
                 };
               }),
             );

@@ -237,8 +237,8 @@ describe('F287 D1 Alden golden journey', { concurrency: false }, () => {
       consumerCatId: 'codex-sol',
     });
 
-    assert.match(resolution.promptSegment, /<memory-cue v="1"/);
-    assert.match(resolution.promptSegment, /Alden/);
+    assert.match(resolution.promptSegment, /<recall-opportunity-pointer v="1"/);
+    assert.doesNotMatch(resolution.promptSegment, /Alden/);
     assert.match(resolution.promptSegment, /handle:invocation-real:person-memory:person-alden/);
     assert.equal(resolution.admittedOpportunityIds.length, 1);
     assert.match(

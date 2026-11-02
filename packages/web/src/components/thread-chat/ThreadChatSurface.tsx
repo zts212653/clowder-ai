@@ -20,6 +20,8 @@ import { ChatInput } from '../ChatInput';
 import { ChatMessageRow } from '../ChatMessageRow';
 import { ConnectionStatusBar } from '../ConnectionStatusBar';
 import { getStreamingTipContexts, selectLifecycleTipMessageId } from '../capability-tip-placement';
+import { CatProfileCardScope } from '../cat-profile-card/CatProfileCardScope';
+import { ChatReferenceScope } from '../chat-references/ChatReferenceScope';
 import { buildChatTimelineProjectionKey } from '../chat-timeline-projection-key';
 import { useCompanionConversation } from '../concierge/useCompanionConversation';
 import { useArtworkLightboxScope } from '../content-review/ArtworkLightboxScope';
@@ -32,11 +34,13 @@ import { isMessageSelectableForBundle, MAX_SELECTED_MESSAGES } from '../message-
 import { ImportedSessionNotice } from '../new-conversation/ImportedSessionNotice';
 import { ReplyRecallRuntimeProvider } from '../reply-layers/ReplyRecallRuntimeProvider';
 import type { CardConfirmationEntry } from '../rich/CardBlock';
+import { conversationViewCopy } from '../shell/conversation-view.shell-copy';
+import { useShellCopy } from '../shell/shell-copy';
 import { useShellPresentation } from '../shell/shell-presentation';
 import { ThreadComposerContext } from '../ThreadComposerContext';
 import { TransferTargetPicker } from '../TransferTargetPicker';
 import { VoteActiveBar } from '../VoteActiveBar';
-import { MessageNavigationProvider } from './MessageNavigationContext';
+import { type MessageNavigationOptions, MessageNavigationProvider } from './MessageNavigationContext';
 import { SingleCatConversationTimeline } from './SingleCatConversationTimeline';
 import {
   projectSingleCatConversation,
@@ -68,10 +72,10 @@ function historyHostClassName(composerOnly: boolean, v2: boolean): string {
   return `relative min-h-0 flex-1 overflow-hidden ${v2 ? 'flex flex-col' : ''} ${composerOnly ? 'invisible pointer-events-none' : ''}`;
 }
 
-function footerClassName(compact: boolean, composerOnly: boolean): string | undefined {
-  return compact || composerOnly
-    ? 'relative z-10 border-t border-cafe-divider bg-cafe-surface pointer-events-auto'
-    : undefined;
+function footerClassName(compact: boolean, composerOnly: boolean, v2: boolean): string | undefined {
+  if (compact || composerOnly) return 'relative z-10 border-t border-cafe-divider bg-cafe-surface pointer-events-auto';
+  // ChatInput already owns equal outer margins; reserve only the reading viewport's extra end gutter.
+  return v2 ? '[padding-inline-end:calc(var(--thread-chat-inset-end)-var(--thread-chat-inset-start))]' : undefined;
 }
 
 export type ThreadChatActivity = {
@@ -137,6 +141,7 @@ export function ThreadChatSurface({
   const companion = useCompanionConversation(threadId);
   // The composer is told it is hosted with the one execution row only in the new shell (see ChatInput `presentation`).
   const composerPresentation = useShellPresentation();
+  const historyCopy = useShellCopy(conversationViewCopy);
   const [pianoReady, setPianoReady] = useState(false);
   const liveness = useThreadLiveness(threadId);
   const { hasActive: hasActiveInvocation, catStatuses, catInvocations, intentMode } = liveness;
@@ -148,12 +153,23 @@ export function ThreadChatSurface({
     handleReadingIntent,
     jumpToLatest,
     jumpToMessage,
+    navigateToMessage,
     beginUserScroll,
     scrollContainerRef,
     messagesEndRef,
     isLoadingHistory,
     hasMore,
   } = history;
+  const navigateMessage = useCallback(
+    (messageId: string, options?: MessageNavigationOptions): boolean => {
+      if (options?.loadIfNeeded) {
+        void navigateToMessage(messageId, undefined, { refresh: true });
+        return true;
+      }
+      return jumpToMessage(messageId);
+    },
+    [jumpToMessage, navigateToMessage],
+  );
   useThreadChatReadingPort(threadId, presentation, onReadingPort, history);
   const { handleSend, uploadStatus, uploadError } = useSendMessage(threadId);
   const interactiveSendContext = `thread-chat-surface:${useId()}`;
@@ -251,6 +267,9 @@ export function ThreadChatSurface({
         dedupCount={dedupInfo?.dedupCount}
         selectionMode={selection.selectionMode}
         selected={selected}
+        partiallySelected={selection.isPartiallySelected(message.id)}
+        partSelection={selection.partSelections.get(message.id)}
+        onToggleRichBlock={selection.toggleRichBlockSelection}
         selectionEligible={selectionEligible}
         onEnterSelection={selection.enterMessageSelection}
         onToggleSelection={selection.toggleMessageSelection}
@@ -288,9 +307,10 @@ export function ThreadChatSurface({
 
   const surface = (
     <section
-      className="flex min-h-0 flex-1 flex-col"
+      className="flex min-h-0 flex-1 flex-col [--thread-chat-inset-start:1rem] [--thread-chat-inset-end:4.5rem]"
       data-thread-chat-surface
       data-thread-chat-density={density}
+      data-thread-chat-full-v2={(composerPresentation === 'v2' && !compact && !composerOnly) || undefined}
       data-thread-id={threadId}
     >
       {!composerOnly && companion.header}
@@ -309,7 +329,7 @@ export function ThreadChatSurface({
             composerPresentation === 'v2'
               ? compact
                 ? 'min-h-0 flex-1 overflow-y-auto [overflow-anchor:none] py-3 pl-3 pr-[4.5rem]'
-                : 'min-h-0 flex-1 overflow-y-auto [overflow-anchor:none] p-4 pr-[4.5rem]'
+                : 'min-h-0 flex-1 overflow-y-auto [overflow-anchor:none] py-4 pl-[var(--thread-chat-inset-start)] pr-[var(--thread-chat-inset-end)]'
               : compact
                 ? 'h-full overflow-y-auto [overflow-anchor:none] px-3 py-3'
                 : 'h-full overflow-y-auto [overflow-anchor:none] p-4'
@@ -346,7 +366,7 @@ export function ThreadChatSurface({
               />
             ) : null}
             {!hasMore && messages.length > 0 && (
-              <div className="py-3 text-center text-xs text-cafe-muted">没有更多消息了</div>
+              <div className="py-3 text-center text-xs text-cafe-muted">{historyCopy.noEarlierMessages}</div>
             )}
             <ReplyRecallRuntimeProvider enabled={composerPresentation === 'v2'} threadId={threadId} messages={messages}>
               {visibleMessages.length === 0 && !isLoadingHistory ? (
@@ -387,7 +407,11 @@ export function ThreadChatSurface({
       </div>
 
       <ThreadComposerHost threadId={threadId}>
-        <div ref={footerRef} className={footerClassName(compact, composerOnly)} data-thread-chat-footer>
+        <div
+          ref={footerRef}
+          className={footerClassName(compact, composerOnly, composerPresentation === 'v2')}
+          data-thread-chat-footer
+        >
           <ThreadExecutionLayer threadId={threadId} />
           <VoteActiveBar threadId={threadId} onEnd={() => {}} />
           {footerLead}
@@ -396,6 +420,9 @@ export function ThreadChatSurface({
             <MessageSelectionToolbar
               threadId={threadId}
               selectedMessageIds={selection.normalizedSelectedMessageIds}
+              getSelectionItems={selection.getSelectedBundleItems}
+              unselectedCardCount={selection.unselectedCardCount}
+              selectionError={selection.selectionError}
               onCancel={selection.clearMessageSelection}
               onExportSuccess={selection.clearMessageSelection}
               forwardingDisabled={connectionStatus.forwardingBlocked}
@@ -451,6 +478,8 @@ export function ThreadChatSurface({
             admissionBlocked={connectionStatus.forwardingBlocked}
             sourceThreadId={threadId}
             items={selection.selectedBundleItems}
+            selectionSummary={selection.selectionSummary}
+            selectedMessageCount={selection.normalizedSelectedMessageIds.length}
             onClose={selection.closeSelectionForward}
             onSuccess={selection.clearMessageSelection}
           />
@@ -464,5 +493,18 @@ export function ThreadChatSurface({
       />
     </section>
   );
-  return <MessageNavigationProvider value={jumpToMessage}>{surface}</MessageNavigationProvider>;
+  return (
+    <MessageNavigationProvider value={navigateMessage}>
+      <ChatReferenceScope value={threadId}>
+        {/* Keep the chat/history nodes mounted while only the v2 card capability changes. */}
+        <CatProfileCardScope
+          threadId={threadId}
+          conversationView={conversationViewController}
+          enabled={composerPresentation === 'v2'}
+        >
+          {surface}
+        </CatProfileCardScope>
+      </ChatReferenceScope>
+    </MessageNavigationProvider>
+  );
 }

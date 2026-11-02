@@ -22,6 +22,7 @@ import {
   reduceReconcile,
   type TrackedAttempt,
 } from '../approval-reconcile';
+import { readTerminal } from '../approval-reconcile-terminal';
 
 const submitting = (attemptId: number): TrackedAttempt => ({ attemptId, state: { phase: 'submitting' } });
 const answered = (attemptId: number, status: number): TrackedAttempt => ({
@@ -583,4 +584,13 @@ describe('an operation that ended without saying what it saw (a card that report
     const newer = run([attempt(submitting(2))]);
     expect(reduceReconcile(newer, attempt(ended(1)))).toEqual(newer);
   });
+});
+
+it('keeps a fenced durable domain effect through reconciler normalization, with unknown and rejected negatives', () => {
+  expect(readTerminal({ resolution: 'accepted', domainEffect: 'dispatch-delivered' })?.domainEffect).toBe(
+    'dispatch-delivered',
+  );
+  expect(readTerminal({ resolution: 'accepted', domainEffect: 'entity-written' })?.domainEffect).toBe('entity-written');
+  expect(readTerminal({ resolution: 'rejected', domainEffect: 'entity-written' })?.domainEffect).toBeUndefined();
+  expect(readTerminal({ resolution: 'accepted', domainEffect: 'unproven' })?.domainEffect).toBeUndefined();
 });

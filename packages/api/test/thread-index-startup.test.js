@@ -92,6 +92,44 @@ test('failed catch-up leaves the HTTP service available and close cancels its re
 
 test('production startup opts into deferred history and registers the background listener', () => {
   const source = readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8');
-  assert.match(source, /memoryServices\.indexBuilder\.rebuild\(\{\s*deferThreadIndexing: true/);
+  assert.match(
+    source,
+    /memoryServices\.indexBuilder\.rebuild\(\{\s*deferThreadIndexing: true,\s*deferDocumentEmbedding: true,/,
+  );
   assert.match(source, /registerThreadIndexCatchUp\(app, memoryServices\.indexBuilder,/);
+});
+
+test('vector catch-up warnings retain native timeout diagnostics instead of an empty error object', async () => {
+  const observed = deferred();
+  let record;
+  const app = Fastify({
+    logger: {
+      stream: {
+        write(line) {
+          const row = JSON.parse(line);
+          if (row.msg === '[api] F102: thread vector catch-up failed (non-fatal)') {
+            record = row;
+            observed.resolve();
+          }
+        },
+      },
+    },
+  });
+  registerThreadIndexCatchUp(
+    app,
+    {
+      refreshThreadIndex: async () => ({ docsIndexed: 0, docsSkipped: 0, durationMs: 1 }),
+    },
+    async () => {
+      throw new DOMException('The operation timed out', 'TimeoutError');
+    },
+  );
+  try {
+    await app.listen({ port: 0, host: '127.0.0.1' });
+    await observed.promise;
+    assert.equal(record.err?.message, 'The operation timed out');
+    assert.equal(record.err?.code, 23);
+  } finally {
+    await app.close();
+  }
 });

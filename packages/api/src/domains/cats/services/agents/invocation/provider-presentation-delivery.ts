@@ -4,6 +4,7 @@ import {
   type AdmittedOpportunityPresentationV1,
   type ContextPresentation,
   type ContextPresentationEnvelope,
+  historicalCluePolicy,
   mapToPresentation,
 } from '../../session/context/context-presentation.js';
 import type { DeliveryReceipt } from '../../session/context/delivery-receipt.js';
@@ -13,6 +14,7 @@ import type {
   PresentationReservation,
   PresentationScope,
 } from '../../session/context/PresentationLedger.js';
+import { selectMemoryCueCapacity } from './memory-cue-presentation-capacity.js';
 
 export type ProviderPromptPresentationEnvelope<TReceipt> = ContextPresentationEnvelope<TReceipt>;
 
@@ -36,6 +38,7 @@ export interface ProviderPresentationCommit<TReceipt> {
 }
 
 export interface ProviderPresentationAttempt<TReceipt> {
+  revalidate(): Promise<boolean>;
   readonly effectivePrompt: string;
   readonly promptGenerationId: string;
   readonly admitted: readonly AdmittedProviderPromptPresentation<TReceipt>[];
@@ -104,15 +107,18 @@ function isCurrentAdmission<TReceipt>(
   }
   if (envelope.candidate.epistemicCeiling === 'historical_clue') {
     const clue = envelope.candidate.historicalClueAdmission;
+    const policy = historicalCluePolicy(envelope.candidate);
     if (
       !clue ||
+      !policy ||
       admission.opportunityKind !== 'recall' ||
-      admission.producerOwner !== 'owner_message' ||
+      admission.producerOwner !== policy.producerOwner ||
+      (policy.consumerCatId !== undefined && policy.consumerCatId !== context.consumerCatId) ||
       admission.entryVersion !== clue.entryVersion ||
       admission.presentationPolicyRef !== clue.policyRef ||
       !admission.sourceRefs.includes(clue.sourceAnchor) ||
       !admission.invalidators.some(
-        (ref) => ref.owner === 'thread_overview' && ref.ref === `${clue.sourceAnchor}@${clue.sourceRevision}`,
+        (ref) => ref.owner === policy.invalidatorOwner && ref.ref === `${clue.sourceAnchor}@${clue.sourceRevision}`,
       )
     )
       return false;
@@ -155,13 +161,21 @@ export async function prepareProviderPresentationAttempt<TReceipt>(input: {
     envelope,
     presentation: mapToPresentation(envelope.candidate),
   }));
-  const selectable = projected.flatMap((item) => {
+  const selectableCandidates = projected.flatMap((item) => {
     if (item.presentation.presentation === 'omit') return [];
     const promptSegment = item.envelope.segments[item.presentation.presentation];
     return promptSegment && estimateTokens(promptSegment) <= item.envelope.admission.tokenBudget
       ? [{ ...item, promptSegment }]
       : [];
   });
+  const currentCandidates: typeof selectableCandidates = [];
+  for (const item of selectableCandidates) {
+    // The source owner records a precise invalidation once. Invalid candidates
+    // cannot reserve capacity or mask a healthy independent source.
+    if (!item.envelope.validateCurrent || (await item.envelope.validateCurrent())) currentCandidates.push(item);
+  }
+  const capacity = selectMemoryCueCapacity(currentCandidates);
+  const selectable = capacity.selected;
   const mapperOmitted = projected.filter((item) => {
     if (item.presentation.presentation === 'omit') return true;
     const promptSegment = item.envelope.segments[item.presentation.presentation];
@@ -182,7 +196,13 @@ export async function prepareProviderPresentationAttempt<TReceipt>(input: {
   }
 
   let remaining = selectable;
-  const omitted = [...invalidEnvelopes, ...mapperOmitted.map(({ envelope }) => envelope)];
+  const omitted = [
+    ...invalidEnvelopes,
+    ...mapperOmitted.map(({ envelope }) => envelope),
+    ...selectableCandidates.filter((item) => !selectable.includes(item)).map(({ envelope }) => envelope),
+  ];
+  for (const item of capacity.omitted)
+    item.envelope.recordOmission?.(capacity.duplicates.includes(item) ? 'duplicate' : 'invocation_budget_exhausted');
   if (remaining.length > 0 && !input.ledger) throw new Error('presentation_ledger_unavailable');
 
   for (;;) {
@@ -246,6 +266,12 @@ function createAttempt<TReceipt>(input: {
 }): ProviderPresentationAttempt<TReceipt> {
   let terminal: 'open' | 'confirmed' | 'released' = 'open';
   return {
+    async revalidate() {
+      for (const item of input.reserved) {
+        if (item.envelope.validateCurrent && !(await item.envelope.validateCurrent())) return false;
+      }
+      return true;
+    },
     effectivePrompt: input.effectivePrompt,
     promptGenerationId: input.promptGenerationId,
     admitted: input.reserved.map(({ envelope, presentation, promptSegment }) => ({

@@ -9,6 +9,7 @@ import { createPublicationSurface } from '@/components/workbench/publication-sur
 import { writeStoredSnapshot } from '@/hooks/named-message-writer';
 import type { ChatMessage } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
+import { openFileMenu } from '@/test-utils/open-file-menu';
 
 const mocks = vi.hoisted(() => ({ apiFetch: vi.fn() }));
 vi.mock('@/utils/api-client', () => ({
@@ -83,7 +84,7 @@ it.each([
   await act(async () => {
     container.querySelector<HTMLButtonElement>('button')!.click();
   });
-  const [url, init] = mocks.apiFetch.mock.calls[0]!;
+  const [url, init] = mocks.apiFetch.mock.calls.find(([url]) => url === '/api/content-publications/resolve')!;
   expect(url).toBe('/api/content-publications/resolve');
   const selector =
     kind === 'gallery'
@@ -108,8 +109,12 @@ it.each([
   if (target?.kind !== 'publication') throw Error('missing canonical publication');
   expect(createPublicationSurface(target).messagePublicationSource).toEqual(JSON.parse(init.body).source);
   expect(useChatStore.getState().rightPanelMode).toBe('workspace');
+  if (kind === 'rich-file') expect(useChatStore.getState().workspaceOpenRequest?.presentation).toBe('work-mode');
   expect(useF307ExperienceWorkbenchStore.getState().mainAreaAttentionSurfaceId).toBeNull();
-  expect(container.querySelector('a[download]')).toBeNull();
+  if (kind !== 'gallery') {
+    await openFileMenu(container);
+    expect(container.querySelector('a[download]')).not.toBeNull();
+  }
 });
 
 it('clicking a later same-invocation message attachment submits that exact stored coordinate and returns to its source', async () => {
@@ -150,7 +155,9 @@ it('clicking a later same-invocation message attachment submits that exact store
   );
   const button = [...container.querySelectorAll('button')].find((item) => item.textContent?.includes('b.mp4'))!;
   await act(async () => button.click());
-  expect(JSON.parse(mocks.apiFetch.mock.calls[0]![1].body).source).toEqual({
+  expect(
+    JSON.parse(mocks.apiFetch.mock.calls.find(([url]) => url === '/api/content-publications/resolve')![1].body).source,
+  ).toEqual({
     kind: 'message',
     threadId: 'source-thread',
     messageId: 'second',

@@ -339,7 +339,7 @@ it('renders Plan as a dependency-ordered task table with real delivery, recency,
     '执行',
     '阻塞 / 前置',
     '下一次交付',
-    '最近',
+    '时间',
   ]);
   expect(container.querySelector('[aria-label="项目任务图"]')).toBeNull();
   const orderedIds = [...(plan?.querySelectorAll('[data-project-plan-work-id]') ?? [])].map((row) =>

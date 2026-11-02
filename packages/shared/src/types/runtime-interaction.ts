@@ -57,6 +57,15 @@ export const runtimeQuestionSchema = z
     isOther: z.boolean().optional(),
     isSecret: z.boolean().optional(),
     options: z.array(questionOptionSchema).min(1).optional(),
+    /**
+     * F306 Phase C (iCode parity): the human may select multiple option values.
+     * Additive optional field — legacy records still parse; records carrying it
+     * require readers from this revision onward (strict schemas reject it on
+     * pre-existing readers, which is the documented non-rollback-safe edge).
+     */
+    multiSelect: z.boolean().optional(),
+    /** F306 Phase C (iCode parity): the human may leave this question unanswered. */
+    allowUnanswered: z.boolean().optional(),
   })
   .strict();
 
@@ -203,7 +212,10 @@ const decisionResponseSchema = z
 const answersResponseSchema = z
   .object({
     kind: z.literal('answers'),
-    answers: z.record(nonBlank, z.array(z.string()).min(1)),
+    // F306 Phase C: an empty array is the wire form of "left unanswered"; the
+    // per-question allowUnanswered guard in parseQuestionResponse decides
+    // whether that is admissible for a given question.
+    answers: z.record(nonBlank, z.array(z.string())),
   })
   .strict();
 
@@ -240,7 +252,12 @@ export type RuntimeInteractionTerminalReasonCode =
 
 export type RuntimeInteractionRedactedResponse =
   | { kind: 'decision'; decisionId: string; submittedFieldIds?: string[] }
-  | { kind: 'answers'; answeredQuestionIds: string[]; secretQuestionIds: string[] }
+  | {
+      kind: 'answers';
+      answeredQuestionIds: string[];
+      secretQuestionIds: string[];
+      selectedOptionIndexes?: Record<string, number[]>;
+    }
   | RuntimeConversationRedactedResponse;
 
 export type RuntimeInteractionSource =
@@ -330,6 +347,12 @@ function parseQuestionResponse(
   if (JSON.stringify(expected) !== JSON.stringify(actual)) {
     throw new Error(`question response ids must exactly match: ${expected.join(', ')}`);
   }
+  for (const question of request.questions) {
+    const values = response.answers[question.id] ?? [];
+    if (values.length === 0 && question.allowUnanswered !== true) {
+      throw new Error(`question ${question.id} requires an answer`);
+    }
+  }
   return response;
 }
 
@@ -383,7 +406,27 @@ export function redactRuntimeInteractionResponse(
     request.kind === 'question'
       ? request.questions.filter((question) => question.isSecret).map((question) => question.id)
       : [];
-  return { kind: 'answers', answeredQuestionIds: Object.keys(response.answers), secretQuestionIds };
+  // Only finite, already-published options can be recovered for a result row.
+  // Secret choices and arbitrary answer text never enter the durable receipt.
+  const selectedOptionIndexes = Object.fromEntries(
+    request.kind === 'question'
+      ? request.questions
+          .filter((question) => !question.isSecret && question.options)
+          .flatMap((question) => {
+            const indexes =
+              question.options?.flatMap((option, index) =>
+                response.answers[question.id]?.includes(option.label) ? [index] : [],
+              ) ?? [];
+            return indexes.length ? [[question.id, indexes]] : [];
+          })
+      : [],
+  );
+  return {
+    kind: 'answers',
+    answeredQuestionIds: Object.keys(response.answers),
+    secretQuestionIds,
+    ...(Object.keys(selectedOptionIndexes).length ? { selectedOptionIndexes } : {}),
+  };
 }
 
 function assertUniqueIds(ids: string[], label: string, context: z.RefinementCtx): void {

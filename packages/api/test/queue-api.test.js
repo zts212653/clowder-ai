@@ -508,6 +508,28 @@ describe('Queue Management API', () => {
       expectedRuns: [{ targetId: 'opus', invocationId: 'turn-1', responseMessageId: 'response-1' }],
     });
 
+    deps.messageStore.getById.mock.mockImplementation(async (id) => ({
+      id,
+      userId: 'user-a',
+      threadId: 't1',
+      from: { kind: 'agent', catId: 'codex' },
+      content: 'Task work',
+      timestamp: Date.now(),
+      mentions: ['opus'],
+      extra: { taskHandoffInvalid: true },
+    }));
+    const taskSource = await app.inject({
+      method: 'GET',
+      url: '/api/threads/t1/queue',
+      headers: { 'x-cat-cafe-user': 'user-a' },
+    });
+    assert.equal(taskSource.statusCode, 200, taskSource.body);
+    assert.equal(
+      JSON.parse(taskSource.body).queue[0].lifecycleActions,
+      undefined,
+      'Task work must enter through Task execution binding',
+    );
+    deps.messageStore.getById.mock.mockImplementation(async () => null);
     deps.invocationTracker.getAgentClientActiveRunDispatcher.mock.mockImplementation(() => undefined);
     const unsupported = await app.inject({
       method: 'GET',

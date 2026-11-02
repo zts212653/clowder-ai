@@ -130,7 +130,7 @@ describe('RecentWorks bounded read states', () => {
     };
     render();
 
-    expect(mocks.useGlobalArtifacts).toHaveBeenCalledWith(true, { view: 'recent-works', limit: 12 });
+    expect(mocks.useGlobalArtifacts).toHaveBeenCalledWith(true, { view: 'recent-works', limit: 12 }, undefined);
     expect(host.querySelectorAll('[data-testid="recent-work-card"]')).toHaveLength(2);
     expect(host.querySelector('[role="alert"]')).toBeNull();
   });
@@ -186,17 +186,23 @@ describe('RecentWorks bounded read states', () => {
     expect(host.querySelectorAll('[data-testid="recent-work-card"]')).toHaveLength(12);
     const scroll = () =>
       act(() => visible([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver));
-    scroll();
-    expect(mocks.useGlobalArtifacts).toHaveBeenCalledWith(true, { view: 'works' });
+    expect(mocks.useGlobalArtifacts).not.toHaveBeenCalledWith(true, { view: 'works' }, undefined);
+    act(() => host.querySelector<HTMLButtonElement>('.work-gallery-more')?.click());
+    expect(mocks.useGlobalArtifacts).toHaveBeenCalledWith(true, { view: 'works' }, undefined);
+    if (!complete) {
+      expect(host.querySelectorAll('[data-testid="recent-work-card"]')).toHaveLength(12);
+      expect(host.textContent).not.toContain('这就是全部了');
+      mocks.all = { ...mocks.all!, complete: true };
+      render();
+    }
     expect(host.querySelectorAll('[data-testid="recent-work-card"]')).toHaveLength(24);
     scroll();
     expect(host.querySelectorAll('[data-testid="recent-work-card"]')).toHaveLength(48);
     scroll();
     expect(host.querySelectorAll('[data-testid="recent-work-card"]')).toHaveLength(60);
-    expect(host.textContent?.includes('这就是全部了')).toBe(complete);
-    if (!complete) expect(host.textContent).toContain('更多作品暂时没有读到');
+    expect(host.textContent).toContain('这就是全部了');
   });
-  it('observes the sentinel after the first asynchronous catalogue finishes loading', () => {
+  it('does not automatically drain the catalogue when the homepage initial read becomes ready', () => {
     const observe = vi.fn();
     vi.stubGlobal(
       'IntersectionObserver',
@@ -211,7 +217,8 @@ describe('RecentWorks bounded read states', () => {
     expect(observe).not.toHaveBeenCalled();
     mocks.result = { ...mocks.result, loading: false, artifacts: [artifact('loaded', 2)] };
     render();
-    expect(observe).toHaveBeenCalledExactlyOnceWith(host.querySelector('.work-gallery-more'));
+    expect(observe).not.toHaveBeenCalled();
+    expect(mocks.useGlobalArtifacts).not.toHaveBeenCalledWith(true, { view: 'works' }, undefined);
   });
 
   it.each([
@@ -244,13 +251,13 @@ describe('RecentWorks bounded read states', () => {
     };
     render();
     act(() => host.querySelector<HTMLButtonElement>('.work-gallery-more')?.click());
-    expect(host.querySelectorAll('[data-testid="recent-work-card"]')).toHaveLength(2);
+    expect(host.querySelectorAll('[data-testid="recent-work-card"]')).toHaveLength(1);
     expect(host.querySelector('[data-testid="recent-work-card"] .work-gallery-title')?.getAttribute('title')).toBe(
       'newest',
     );
     mocks.all = { ...mocks.all, loadingMore: false, error: true };
     render();
-    expect(host.querySelectorAll('[data-testid="recent-work-card"]')).toHaveLength(2);
+    expect(host.querySelectorAll('[data-testid="recent-work-card"]')).toHaveLength(1);
     expect(host.querySelector('[role="alert"]')).toBeNull();
     expect(host.textContent).not.toContain('这就是全部了');
   });

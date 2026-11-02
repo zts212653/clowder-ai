@@ -1,4 +1,9 @@
-import { NEEDS_ME_PRODUCER_IDS, type NeedsMeProducerId, type ProducerAttentionReceiptV1 } from '@cat-cafe/shared';
+import {
+  NEEDS_ME_PRODUCER_IDS,
+  type NeedsMeProducerId,
+  type ProducerAttentionCoverageV1,
+  type ProducerAttentionReceiptV1,
+} from '@cat-cafe/shared';
 import type {
   NeedsMeProducerAdapter,
   NeedsMeProducerReevaluateInput,
@@ -44,13 +49,48 @@ export class NeedsMeProducerCatalog {
     const receipts = (
       await Promise.all([...this.adapters.values()].map((adapter) => adapter.listCurrentReceipts(ownerUserId)))
     ).flat();
+    this.assertUniqueReceipts(receipts);
+    return receipts;
+  }
+
+  /** Isolated aggregate for owner reads: healthy producers remain readable while failures stay explicit. */
+  async readCurrentReceipts(ownerUserId: string): Promise<{
+    receipts: ProducerAttentionReceiptV1[];
+    coverage: ProducerAttentionCoverageV1;
+  }> {
+    const entries = [...this.adapters.entries()];
+    const settled = await Promise.allSettled(entries.map(([, adapter]) => adapter.listCurrentReceipts(ownerUserId)));
+    const receipts: ProducerAttentionReceiptV1[] = [];
+    const unavailableSources: Extract<ProducerAttentionCoverageV1, { state: 'partial' }>['unavailableSources'] = [];
+    settled.forEach((result, index) => {
+      const entry = entries[index];
+      if (!entry) throw new Error('Needs Me producer settlement lost its source coordinate');
+      const [producerId] = entry;
+      if (result.status === 'fulfilled') {
+        receipts.push(...result.value);
+        return;
+      }
+      unavailableSources.push({
+        producerId,
+        status: 'unavailable',
+        reason: classifyReadFailure(result.reason),
+      });
+    });
+    this.assertUniqueReceipts(receipts);
+    unavailableSources.sort((left, right) => left.producerId.localeCompare(right.producerId));
+    return {
+      receipts,
+      coverage: unavailableSources.length > 0 ? { state: 'partial', unavailableSources } : { state: 'complete' },
+    };
+  }
+
+  private assertUniqueReceipts(receipts: readonly ProducerAttentionReceiptV1[]): void {
     const seen = new Set<string>();
     for (const receipt of receipts) {
       const key = [receipt.producer.producerId, receipt.producer.subjectRef, receipt.taskRef.subjectRef].join('\u0000');
       if (seen.has(key)) throw new Error('Needs Me producer catalog returned a duplicate producer/Task receipt');
       seen.add(key);
     }
-    return receipts;
   }
 
   reEvaluate(
@@ -59,4 +99,14 @@ export class NeedsMeProducerCatalog {
   ): Promise<NeedsMeProducerReevaluationResult> {
     return this.get(producerId).reEvaluate(input);
   }
+}
+
+function classifyReadFailure(
+  error: unknown,
+): Extract<ProducerAttentionCoverageV1, { state: 'partial' }>['unavailableSources'][number]['reason'] {
+  const message = error instanceof Error ? error.message.toLowerCase() : '';
+  if (message.includes('incomplete')) return 'source_incomplete';
+  if (message.includes('invalid')) return 'source_invalid';
+  if (message.includes('unavailable')) return 'source_unavailable';
+  return 'source_read_failed';
 }

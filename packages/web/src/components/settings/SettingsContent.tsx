@@ -37,6 +37,7 @@ import { SettingsPlaceholder } from './SettingsPlaceholder';
 import { SkillsContent } from './SkillsContent';
 import { useSettingsDetailText } from './settings-detail.shell-copy';
 import { SETTINGS_SECTIONS } from './settings-nav-config';
+import { YouSettingsPage } from './YouSettingsPage';
 
 interface SettingsContentProps {
   section: string;
@@ -199,6 +200,8 @@ export function SettingsContent({ section, initialEditCatId }: SettingsContentPr
   );
 
   if (section === 'marketplace') return <MarketplaceContent />;
+  if (section === 'you')
+    return <YouSettingsPage coCreator={config?.coCreator ?? null} loadError={fetchError !== null} reload={fetchData} />;
   if (section === 'skills') return <SkillsContent />;
   if (section === 'profiles') {
     return (
@@ -249,7 +252,15 @@ export function SettingsContent({ section, initialEditCatId }: SettingsContentPr
               await handleEditorSaved(trace);
               setEditingCat(saved);
             }}
-            onEditCoCreator={() => setCoCreatorEditorOpen(true)}
+            onEditCoCreator={() => {
+              if (isV2) {
+                const params = new URLSearchParams(searchParams.toString());
+                params.set('s', 'you');
+                params.delete('cat');
+                params.delete('view');
+                router.push(`/settings?${params.toString()}`, { scroll: false });
+              } else setCoCreatorEditorOpen(true);
+            }}
             onDelete={handleDeleteMember}
             onToggle={handleToggleAvailability}
             togglingCatId={togglingCatId}
@@ -326,7 +337,21 @@ export function SettingsContent({ section, initialEditCatId }: SettingsContentPr
   })();
 
   return (
-    <div className={section === 'members' ? `mx-auto w-full ${editorOpen ? 'max-w-5xl' : 'max-w-6xl'}` : undefined}>
+    // The plugin manager owns its internal overflow-y-auto regions; keep a
+    // definite-height flex chain here (classic shell, v2 shell and standalone
+    // all render this wrapper directly inside their fixed-layout container) so
+    // its h-full section resolves against a constrained box. Without it the
+    // section grows with content, the detail pane never scrolls, and the
+    // shell's overflow-hidden clips the unreachable tail (Windows-reported).
+    <div
+      className={
+        section === 'plugins'
+          ? 'flex h-full min-h-0 flex-col'
+          : section === 'members'
+            ? `mx-auto w-full ${editorOpen ? 'max-w-5xl' : 'max-w-6xl'}`
+            : undefined
+      }
+    >
       {section !== 'plugins' && !(section === 'members' && (editorOpen || isV2)) && (
         <SettingsPageHeader
           title={section === 'accounts' ? accountsText.title : (sectionText(section)?.title ?? meta.label)}

@@ -294,48 +294,9 @@ describe('loadProtocolsFromDir', () => {
   });
 });
 
-// ── Real protocol template validation ──
-
-describe('real protocol templates', () => {
-  const protocolsDir = join(import.meta.dirname, '../../api/src/plugins');
-
-  it('video-gen protocols all validate and have baseUrl', () => {
-    const dir = join(protocolsDir, 'video-gen/protocols');
-    const templates = loadProtocolsFromDir(dir);
-    assert.ok(templates.size >= 3, `Expected ≥3 video-gen protocols, got ${templates.size}`);
-    for (const [name, t] of templates) {
-      assert.equal(t.mode, 'async', `${name} should be async`);
-      assert.ok(t.capabilities['text2video'], `${name} should have text2video`);
-      assert.ok(t.baseUrl, `${name} should have a default baseUrl`);
-    }
-  });
-
-  it('video-gen poll configs have interval and maxAttempts', () => {
-    const dir = join(protocolsDir, 'video-gen/protocols');
-    const templates = loadProtocolsFromDir(dir);
-    for (const [name, t] of templates) {
-      const cap = t.capabilities['text2video'];
-      const poll = cap?.poll ?? (cap?.inherit ? t.capabilities[cap.inherit]?.poll : undefined);
-      assert.ok(poll, `${name} text2video should resolve a poll definition`);
-      assert.ok(poll.interval >= 1000, `${name} poll.interval should be ≥1000ms, got ${poll.interval}`);
-      assert.ok(poll.maxAttempts >= 1, `${name} poll.maxAttempts should be ≥1, got ${poll.maxAttempts}`);
-    }
-  });
-
-  it('video-analysis protocols all validate and have baseUrl', () => {
-    const dir = join(protocolsDir, 'video-analysis/protocols');
-    const templates = loadProtocolsFromDir(dir);
-    assert.ok(templates.size >= 2, `Expected ≥2 video-analysis protocols, got ${templates.size}`);
-    for (const [name, t] of templates) {
-      assert.equal(t.mode, 'sync', `${name} should be sync`);
-      assert.ok(
-        t.capabilities['analyze'] || t.capabilities['analyze_url'],
-        `${name} should have an analyze capability`,
-      );
-      assert.ok(t.baseUrl, `${name} should have a default baseUrl`);
-    }
-  });
-});
+// Protocol files moved out of the API tree in #5787. The loader/parser
+// contracts above use owned fixtures; package-specific protocol catalogs are
+// verified by their plugin owners rather than an absent legacy API directory.
 
 // ── Credential scrubbing ──
 

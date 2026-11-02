@@ -403,10 +403,14 @@ export interface IEvidenceStore {
     context: EntityMutationContext,
   ): Promise<void>;
   getEntity?(entityId: string): Promise<EntityRecord | null>;
+  /** Exact append-only writer revision; proposal status and user-supplied provenance are not proof. */
+  getEntityProposalEffectProof?(entityId: string, proposalId: string, ownerUserId: string): Promise<string | null>;
   resolveEntityAliases?(query: string): Promise<QueryEntityMatch[]>;
   refreshEntityMentions?(docAnchors?: string[]): Promise<void>;
   deleteByAnchor(anchor: string): Promise<void>;
   getByAnchor(anchor: string): Promise<EvidenceItem | null>;
+  /** Read-only source/vector revision projection from the original index, never a freshness timestamp. */
+  getIndexedSourceRevision?(anchor: string): Promise<{ sourceHash: string; vectorSourceHash: string | null } | null>;
   health(): Promise<boolean>;
   initialize(): Promise<void>;
 }
@@ -429,6 +433,8 @@ export interface IIndexBuilder {
   rebuild(options?: {
     force?: boolean;
     deferThreadIndexing?: boolean;
+    /** API startup fills vectors through its existing post-listen catch-up. */
+    deferDocumentEmbedding?: boolean;
     onProgress?: RebuildProgressCallback;
   }): Promise<RebuildResult>;
   refreshThreadIndex(options?: ThreadIndexRefreshOptions): Promise<RebuildResult>;

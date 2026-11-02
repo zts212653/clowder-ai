@@ -16,7 +16,6 @@ test('one cloud GPT entry enables dot collaboration without installing another C
   assert.ok(dot, 'the default plugin catalog must discover ChatGPT dot');
   assert.equal(dot.distribution, 'bundled');
   assert.equal(dot.packageName, '@cat-cafe/chatgpt-dot');
-  assert.deepEqual(dot.effectiveGrants, [], 'installation does not authorize events or source access');
   assert.equal(
     OFFICIAL_PLUGIN_CATALOG.some((entry) => entry.pluginId === 'official.collective-connector'),
     false,
@@ -52,7 +51,7 @@ test('Host-bundled dot remains discoverable when the external package catalog is
       throw new Error('offline');
     },
     validateCatalog: () => ({ valid: true, catalog: { plugins: [] } }),
-    hostPolicies: [],
+
     bundledEntries: [dot],
   });
   const snapshot = await catalog.snapshot();

@@ -141,6 +141,7 @@ export function createArtifactReviewIntegration(deps: {
     text,
     targets,
     ledgers,
+    publicationReads: { media, ledgers: store.ledgers, messages: deps.messages },
     projectReviews,
     projectMessages,
     reviews,

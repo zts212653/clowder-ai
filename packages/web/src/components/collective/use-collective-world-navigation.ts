@@ -1,6 +1,6 @@
 'use client';
 
-import { type RefObject, useEffect, useMemo } from 'react';
+import { type RefObject, useEffect, useMemo, useSyncExternalStore } from 'react';
 import {
   type CollectiveConnectionProjection,
   type CollectiveConnectorStatus,
@@ -9,6 +9,7 @@ import {
 } from './collective-client';
 import { preferredConnection } from './collective-connection-selection';
 import { type ParsedCollectiveWorldTarget, resolveExplicitWorldTarget } from './collective-world-directory';
+import { getWorldDirectoryStoreSnapshot, subscribeWorldDirectoryStore } from './collective-world-directory-store';
 import { useCollectiveWorldDirectory } from './use-collective-world-directory';
 
 export function useCollectiveWorldNavigation(input: {
@@ -21,7 +22,12 @@ export function useCollectiveWorldNavigation(input: {
 }) {
   const explicitTarget = input.parsedTarget.kind === 'target' ? input.parsedTarget.target : undefined;
   const hasExplicitIntent = input.parsedTarget.kind !== 'none';
-  const connection = resolveWorldConnection(input.status, input.parsedTarget, input.selectedConnectionId);
+  const connection = resolveWorldConnection(
+    input.status,
+    input.parsedTarget,
+    input.selectedConnectionId,
+    input.launchUrl,
+  );
   const explicitServiceKnown = serviceIsKnown(input.status, explicitTarget);
   const explicitServiceApproved = Boolean(
     explicitTarget &&
@@ -39,6 +45,17 @@ export function useCollectiveWorldNavigation(input: {
     connection?.serviceInstanceId ??
     (sameService(input.status?.localService?.serviceUrl, activeLaunchUrl)
       ? input.status?.localService?.serviceInstanceId
+      : sameService(input.status?.remoteService?.serviceUrl, activeLaunchUrl)
+        ? input.status?.remoteService?.serviceInstanceId
+        : undefined);
+  const desiredTarget =
+    explicitTarget ??
+    (connection
+      ? {
+          serviceUrl: connection.serviceUrl,
+          serviceInstanceId: connection.serviceInstanceId,
+          collectiveId: connection.collectiveId,
+        }
       : undefined);
   const { directory, failure, frameGeneration, selectWorld } = useCollectiveWorldDirectory({
     iframeRef: input.iframeRef,
@@ -46,9 +63,24 @@ export function useCollectiveWorldNavigation(input: {
     expectedServiceInstanceId,
   });
   const resolution = useMemo(
-    () => (explicitTarget && directory ? resolveExplicitWorldTarget(directory, explicitTarget) : undefined),
-    [directory, explicitTarget],
+    () => (desiredTarget && directory ? resolveExplicitWorldTarget(directory, desiredTarget) : undefined),
+    [desiredTarget, directory],
   );
+  const storedDirectory = useSyncExternalStore(
+    subscribeWorldDirectoryStore,
+    getWorldDirectoryStoreSnapshot,
+    getWorldDirectoryStoreSnapshot,
+  );
+  const displayName = useMemo(() => {
+    if (!explicitTarget) return undefined;
+    return storedDirectory.services
+      .find(
+        (service) =>
+          sameService(service.serviceUrl, explicitTarget.serviceUrl) &&
+          service.serviceInstanceId === explicitTarget.serviceInstanceId,
+      )
+      ?.memberships.find((membership) => membership.collectiveId === explicitTarget.collectiveId)?.name;
+  }, [explicitTarget, storedDirectory]);
 
   useEffect(() => {
     if (
@@ -62,23 +94,39 @@ export function useCollectiveWorldNavigation(input: {
   }, [directory, resolution, selectWorld]);
 
   const frameUrl = useMemo(() => {
-    return worldFrameUrl(activeLaunchUrl, explicitTarget, connection);
-  }, [activeLaunchUrl, connection, explicitTarget]);
+    return worldFrameUrl(activeLaunchUrl);
+  }, [activeLaunchUrl]);
+  const currentRemote = sameService(input.status?.remoteService?.serviceUrl, activeLaunchUrl)
+    ? input.status?.remoteService
+    : undefined;
+  const remoteOffline = currentRemote?.state === 'offline';
 
   return {
     activeLaunchUrl,
     connection,
     sessionRequired: resolution?.kind === 'directory_unavailable' && resolution.state === 'session_required',
-    error: worldTargetError({
-      parsedTarget: input.parsedTarget,
-      serviceApproved: explicitServiceApproved,
-      directoryFailure: failure,
-      resolution,
-    }),
+    error: remoteOffline
+      ? '暂时连不上这个共同体的服务。'
+      : currentRemote?.state === 'instance_mismatch'
+        ? '这个入口通往另一个共同体 Service；原连接没有被替换，请检查 SSH 转发目标。'
+        : worldTargetError({
+            parsedTarget: input.parsedTarget,
+            serviceApproved: explicitServiceApproved,
+            directoryFailure: failure,
+            resolution,
+          }),
     explicitTarget,
+    displayName,
+    frameKey: activeLaunchUrl ? normalizeCollectiveServiceUrl(activeLaunchUrl) : undefined,
     frameGeneration,
     frameUrl,
     hasExplicitIntent,
+    retryable:
+      remoteOffline ||
+      (input.parsedTarget.kind === 'target' &&
+        resolution?.kind === 'directory_unavailable' &&
+        resolution.state === 'unavailable' &&
+        !failure),
   };
 }
 
@@ -86,10 +134,15 @@ function resolveWorldConnection(
   status: CollectiveConnectorStatus | undefined,
   parsedTarget: ParsedCollectiveWorldTarget,
   selectedConnectionId?: string,
+  launchUrl?: string,
 ): CollectiveConnectionProjection | undefined {
   if (!status) return undefined;
   if (parsedTarget.kind === 'invalid') return undefined;
-  if (parsedTarget.kind === 'none') return preferredConnection(status.connections, selectedConnectionId);
+  if (parsedTarget.kind === 'none')
+    return preferredConnection(
+      launchUrl ? status.connections.filter((item) => sameService(item.serviceUrl, launchUrl)) : status.connections,
+      selectedConnectionId,
+    );
   return status.connections.find(
     (candidate) =>
       candidate.authorityStatus !== 'revoked' &&
@@ -111,21 +164,15 @@ function serviceIsKnown(
   const knownLocalService =
     sameService(status.localService?.serviceUrl, target.serviceUrl) &&
     status.localService?.serviceInstanceId === target.serviceInstanceId;
-  return knownConnection || knownLocalService;
+  const knownRemoteService =
+    sameService(status.remoteService?.serviceUrl, target.serviceUrl) &&
+    status.remoteService?.serviceInstanceId === target.serviceInstanceId;
+  return knownConnection || knownLocalService || knownRemoteService;
 }
 
-function worldFrameUrl(
-  activeLaunchUrl: string | undefined,
-  explicitTarget: Extract<ParsedCollectiveWorldTarget, { kind: 'target' }>['target'] | undefined,
-  connection: CollectiveConnectionProjection | undefined,
-): string | undefined {
+function worldFrameUrl(activeLaunchUrl: string | undefined): string | undefined {
   if (!activeLaunchUrl || typeof window === 'undefined') return undefined;
-  const url = new URL(canonicalClientUrl(activeLaunchUrl, window.location.origin));
-  if (explicitTarget) url.searchParams.set('collectiveId', explicitTarget.collectiveId);
-  else if (connection && sameService(connection.serviceUrl, url.origin)) {
-    url.searchParams.set('collectiveId', connection.collectiveId);
-  }
-  return url.toString();
+  return canonicalClientUrl(activeLaunchUrl, window.location.origin);
 }
 
 function sameService(left?: string, right?: string): boolean {
@@ -139,23 +186,23 @@ function worldTargetError(input: {
   readonly resolution: ReturnType<typeof resolveExplicitWorldTarget> | undefined;
 }): string | undefined {
   if (input.parsedTarget.kind === 'invalid') {
-    return '目标共同家园地址不完整；请从已接入的世界目录重新选择。';
+    return '这个共同体的入口不完整；请从世界栏重新进入。';
+  }
+  if (input.directoryFailure === 'service_mismatch') {
+    return '现在进不去这个共同体；它的服务已经变化，请从世界栏重新进入。';
   }
   if (input.parsedTarget.kind !== 'target') return undefined;
   if (!input.serviceApproved) {
-    return '目标共同家园所在的 Service 尚未接入；请先确认 Service 地址。';
-  }
-  if (input.directoryFailure === 'service_mismatch') {
-    return '目标共同家园已不可用：Service 身份已经变化。';
+    return '暂时连不上这个共同体的服务；请先在设置与管理里确认连接。';
   }
   if (!input.resolution || input.resolution.kind === 'selected') return undefined;
   if (input.resolution.kind === 'missing_membership') {
-    return '目标共同家园已不可用：当前账号不再拥有该成员资格。';
+    return '当前账号现在进不去这个共同体；不会自动切换到别处。';
   }
   if (input.resolution.kind === 'service_mismatch') {
-    return '目标共同家园已不可用：Service 身份已经变化。';
+    return '现在进不去这个共同体；它的服务已经变化，请从世界栏重新进入。';
   }
   return input.resolution.state === 'session_required'
-    ? '目标共同家园需要重新登录；不会自动切换到其他共同家园。'
-    : '目标共同家园所在的 Service 暂时不可达；不会自动切换到其他共同家园。';
+    ? '当前账号现在进不去这个共同体；请换账号或重新登录。不会自动切换到别处。'
+    : '暂时连不上这个共同体的服务；不会自动切换到别处。';
 }

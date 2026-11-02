@@ -35,7 +35,7 @@ async function resolveQuotedAuthors(
   for (const block of message.contentBlocks ?? []) {
     if (block.type !== 'context_attachment' || block.attachment.kind !== 'quote') continue;
     const attachment = block.attachment;
-    if (attachment.source.kind === 'workspace_file') continue;
+    if (attachment.source.kind === 'workspace_file' || attachment.source.kind === 'collective_message') continue;
     const source = await store.getById(attachment.source.messageId);
     if (
       source &&
@@ -61,6 +61,13 @@ function messageHeading(message: AbstractiveMessage): string {
 }
 
 function quoteCoordinate(source: QuoteContextSource): string {
+  if (source.kind === 'collective_message')
+    return `collective:${JSON.stringify([
+      source.serviceInstanceId,
+      source.collectiveId,
+      source.channelId,
+      source.eventId,
+    ])}`;
   return source.kind === 'workspace_file' ? source.path : `${source.threadId}#${source.messageId}`;
 }
 

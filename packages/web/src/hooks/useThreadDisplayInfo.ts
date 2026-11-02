@@ -5,7 +5,14 @@ import { useChatStore } from '@/stores/chatStore';
 import { projectSidebarRows, useSidebarProjectionStore } from '@/stores/sidebarProjectionStore';
 import { apiFetch } from '@/utils/api-client';
 
-type ThreadDisplayInfo = { id: string; title: string | null; projectPath: string; preferredCats?: readonly string[] };
+type ThreadDisplayInfo = {
+  id: string;
+  title: string | null;
+  projectPath: string;
+  preferredCats?: readonly string[];
+  labels?: readonly string[];
+  pinned?: boolean;
+};
 type ExactThread = ThreadDisplayInfo | { id: string; error: true };
 
 function parseThreadDisplayInfo(value: unknown, threadId: string): ThreadDisplayInfo {
@@ -20,7 +27,17 @@ function parseThreadDisplayInfo(value: unknown, threadId: string): ThreadDisplay
   const preferredCats = Array.isArray(detail.preferredCats)
     ? detail.preferredCats.filter((id): id is string => typeof id === 'string')
     : [];
-  return { id: threadId, title: detail.title as string | null, projectPath: detail.projectPath, preferredCats };
+  const labels = Array.isArray(detail.labels)
+    ? detail.labels.filter((label): label is string => typeof label === 'string')
+    : [];
+  return {
+    id: threadId,
+    title: detail.title as string | null,
+    projectPath: detail.projectPath,
+    preferredCats,
+    labels,
+    pinned: detail.pinned === true,
+  };
 }
 
 /** Read the named conversation, including carriers omitted from the sidebar. Never use the global workspace path. */

@@ -6,10 +6,12 @@ import { requestExecutionDetail } from '@/components/workspace-home/execution-de
 import { selectThreadMessages } from '@/hooks/useThreadScopedSelectors';
 import { activeExecutionKey, useActiveExecutionStore } from '@/stores/activeExecutionStore';
 import { useChatStore } from '@/stores/chatStore';
-import { scrollToMessage } from '@/utils/scrollToMessage';
 
 /** An activation rechecks the canonical identity; neither a parent nor a newer reply is a target. */
-export function locateExecution(execution: ActiveExecutionProjection): 'opened' | 'pending' | 'unavailable' {
+export function locateExecution(
+  execution: ActiveExecutionProjection,
+  navigateToMessage: (messageId: string) => boolean,
+): 'opened' | 'pending' | 'unavailable' {
   const current = useActiveExecutionStore.getState().executionsByKey[activeExecutionKey(execution)];
   if (!current || current.startedAt !== execution.startedAt || current.turnInvocationId !== execution.turnInvocationId)
     return 'unavailable';
@@ -30,7 +32,7 @@ export function locateExecution(execution: ActiveExecutionProjection): 'opened' 
   );
   if (!message) return 'unavailable';
   expandMessageExecutionRecord(current.threadId, message);
-  // The row belongs to the displayed conversation (also in split Chat). Its original deferred-message
-  // owner can mount a known target through scrollToMessage; an unreadable target gets explicit feedback.
-  return scrollToMessage(message.id) ? 'opened' : 'unavailable';
+  // The mounted chat owner cancels pending bottom restores and retains this explicit
+  // reading target through subsequent output, including deferred/split chat messages.
+  return navigateToMessage(message.id) ? 'opened' : 'unavailable';
 }

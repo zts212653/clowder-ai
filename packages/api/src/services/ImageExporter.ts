@@ -1,3 +1,4 @@
+import type { ResolvedMessageSelectionItem } from '@cat-cafe/shared';
 import type { Page } from 'puppeteer-core';
 import sharp from 'sharp';
 import { createModuleLogger } from '../infrastructure/logger.js';
@@ -30,6 +31,7 @@ interface BrowserWindowSnapshot {
 
 export interface ImageExportCaptureOptions {
   selectionMessageIds?: readonly string[];
+  selectionItems?: readonly ResolvedMessageSelectionItem[];
 }
 
 export function buildImageExportUrl(url: string, userId: string, options?: ImageExportCaptureOptions): string {
@@ -91,6 +93,11 @@ export class ImageExporter {
       await page.setExtraHTTPHeaders({ 'X-Cat-Cafe-User': userId });
       await page.setViewport({ width: VIEWPORT_WIDTH, height: INITIAL_VIEWPORT_HEIGHT });
 
+      if (options?.selectionItems) {
+        await page.evaluateOnNewDocument((items) => {
+          (globalThis as unknown as { __catCafeImageExportItems: typeof items }).__catCafeImageExportItems = items;
+        }, options.selectionItems);
+      }
       await page.goto(buildImageExportUrl(url, userId, options), {
         waitUntil: 'networkidle2',
         timeout: 30000,

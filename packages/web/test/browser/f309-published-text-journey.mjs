@@ -124,8 +124,9 @@ export function registerPublishedTextJourneys(suite) {
           await reader.getByText('Original words.', { exact: true }).waitFor();
           const handle = await reader.elementHandle();
           assert.equal(await reader.getByText('只读', { exact: true }).count(), 1);
-          for (const action of ['编辑', '请猫修改', '朗读', '采用并写回'])
+          for (const action of ['编辑', '请猫修改', '采用并写回'])
             assert.equal(await reader.getByRole('button', { name: action, exact: true }).count(), 0);
+          assert.equal(await reader.getByRole('button', { name: '朗读', exact: true }).count(), 1);
           await select(
             page,
             reader.getByText('Original words.', { exact: true }),

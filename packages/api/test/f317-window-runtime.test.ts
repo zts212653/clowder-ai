@@ -57,7 +57,7 @@ function fetchSurface(url: string) {
   });
 }
 
-test('installed companion uses the existing Broker, grant and package authority; disable fences before closing', async (t) => {
+test('installed companion uses the existing Broker and package authority; disable fences before closing', async (t) => {
   const f = await desktopWindowFixture();
   let launch: DesktopWindowLaunch | undefined;
   let visible = true;
@@ -126,7 +126,7 @@ test('installed companion uses the existing Broker, grant and package authority;
   await assert.rejects(fetchSurface(launch.url));
 });
 
-test('missing grant blocks opening, and a window closed during startup cannot appear healthy', async (t) => {
+test('a window closed during startup cannot appear healthy', async (t) => {
   const f = await desktopWindowFixture();
   let opens = 0;
   const runtime = createDormantPluginRuntimeComposition({
@@ -145,26 +145,15 @@ test('missing grant blocks opening, and a window closed during startup cannot ap
     await f.cleanup();
   });
   assert.ok(runtime.desktopWindows);
-  const noGrant = { ...f.entry, effectiveGrants: [] };
   const installer = new OfficialPluginPackageInstaller({
     inventory: runtime.inventory,
     packagesRoot: runtime.paths.packagesRoot,
-    catalog: [noGrant],
+    catalog: [f.entry],
     fetchArchive: async () => f.bytes,
   });
-  const installed = await installer.install(noGrant.catalogId, noGrant);
+  const installed = await installer.install(f.entry.catalogId, f.entry);
   const prepared = await runtime.lifecycle.prepare(installed.pluginInstanceId, 1);
   await assert.rejects(runtime.lifecycle.enable(installed.pluginInstanceId, prepared.lifecycleRevision));
-  assert.equal(opens, 0);
-  assert.equal(await runtime.desktopWindows.presence(), null);
-  // Isolated fixture simulates an explicit owner grant; production uses inventory grant revisions.
-  await runtime.inventoryStore.transaction((tx) => {
-    const grant = tx.grants.get(installed.pluginInstanceId)!;
-    tx.grants.put({ ...grant, grantRevision: grant.grantRevision + 1, effectiveGrants: ['windows.create'] });
-    const instance = tx.instances.get(installed.pluginInstanceId)!;
-    tx.instances.put({ ...instance, activationState: 'enabled', runtimeState: 'stopped' });
-  });
-  await assert.rejects(runtime.supervisor.start(installed.pluginInstanceId));
   assert.equal(opens, 1);
   assert.equal(await runtime.desktopWindows.presence(), null);
 });

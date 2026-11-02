@@ -1,7 +1,7 @@
 import type { CliDiagnostics, CliErrorReasonCode } from '@cat-cafe/shared';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
  * F212 Phase B — CliDiagnosticsPanel rendering contract.
@@ -53,6 +53,108 @@ describe('F212 CliDiagnosticsPanel (AC-B2/B3/B4)', () => {
       ...overrides,
     };
   }
+
+  it('shows same-response Codex native failure details without another error banner', async () => {
+    const { NativeFailureDiagnostics } = await import('../TerminalDiagnosticsPanel');
+    act(() =>
+      root.render(
+        React.createElement(NativeFailureDiagnostics, {
+          message: {
+            id: 'codex-response',
+            type: 'assistant',
+            catId: 'codex',
+            content: '暂时无法完成 Codex 账号确认',
+            timestamp: 1,
+            lifecycle: {
+              kind: 'response',
+              status: 'failed',
+              invocationId: 'codex-inv',
+              targetId: 'codex',
+              orderKey: '1',
+              inputMessageIds: [],
+              inputEntryIds: [],
+              startedAt: 1,
+            },
+            metadata: {
+              provider: 'openai',
+              model: 'gpt',
+              cliDiagnostics: build({
+                safeExcerpt: 'workspace routing discovery failed',
+                excerptSource: 'unknown_raw',
+              }),
+            },
+          },
+        }),
+      ),
+    );
+    expect(container.querySelector('[data-testid="cli-diagnostics-toggle"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="cli-diagnostics-banner"]')).toBeNull();
+  });
+
+  it('ends stale retry display at its deadline and preserves a distinct stopped state in both languages', async () => {
+    const { CodexStartupRecoveryStatus } = await import('../CodexStartupRecoveryStatus');
+    const { writeShellLanguage } = await import('../shell/shell-language');
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    const message: import('@/stores/chat-types').ChatMessage = {
+      id: 'startup',
+      type: 'assistant',
+      catId: 'codex',
+      content: '',
+      timestamp: 1_000,
+      lifecycle: {
+        kind: 'response',
+        orderKey: '1',
+        targetId: 'codex',
+        invocationId: 'inv',
+        inputMessageIds: [],
+        inputEntryIds: [],
+        status: 'processing',
+        startedAt: 1_000,
+      },
+      extra: {
+        startupRecovery: {
+          invocationId: 'inv',
+          stage: 'retry_wait',
+          sequence: 2,
+          attempt: 1,
+          maxAttempts: 6,
+          startedAt: 1_000,
+          deadlineAt: 3_000,
+          updatedAt: 1_000,
+          nextRetryAt: 2_000,
+        },
+      },
+    };
+    const recovery = message.extra?.startupRecovery;
+    if (!recovery) throw new Error('fixture must include its startup projection');
+    try {
+      act(() => root.render(React.createElement(CodexStartupRecoveryStatus, { message })));
+      expect(container.textContent).toContain('无需重新发送');
+      expect(container.textContent).toContain('第 2 次尝试将在 1 秒后开始');
+      act(() => vi.advanceTimersByTime(2_000));
+      expect(container.textContent).toContain('本次启动已中断');
+      expect(container.textContent).not.toContain('正在自动重试');
+      act(() => {
+        writeShellLanguage('en');
+        root.render(
+          React.createElement(CodexStartupRecoveryStatus, {
+            message: {
+              ...message,
+              extra: { startupRecovery: { ...recovery, stage: 'cancelled' } },
+            },
+          }),
+        );
+      });
+      expect(container.textContent).toBe('Startup stopped');
+    } finally {
+      act(() => {
+        root.render(null);
+        writeShellLanguage('zh');
+      });
+      vi.useRealTimers();
+    }
+  });
 
   it('AC-B2/B3: renders banner with summary + hint, excerpt hidden by default', async () => {
     const { CliDiagnosticsPanel } = await import('../CliDiagnosticsPanel');

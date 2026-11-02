@@ -18,13 +18,15 @@ const { apiFetchMock, setPendingChatInsert, onOpenProgram, chatStoreState, asset
       { id: 'thread-other', title: '视频工作台' },
     ],
   },
-  assetReviewState: { body: '{}', status: 404 },
+  assetReviewState: { body: '{}', status: 404, calls: 0 },
 }));
 
 vi.mock('@/utils/api-client', () => ({
   apiFetch: async (...args: unknown[]) => {
-    if (String(args[0]).includes('/asset-review'))
+    if (String(args[0]).includes('/asset-review')) {
+      assetReviewState.calls += 1;
       return new Response(assetReviewState.body, { status: assetReviewState.status });
+    }
     const response = await apiFetchMock(...args);
     return response instanceof Response ? response.clone() : response;
   },
@@ -105,6 +107,7 @@ describe('F311 Capability Evolution Workspace', () => {
     apiFetchMock.mockReset();
     assetReviewState.body = '{}';
     assetReviewState.status = 404;
+    assetReviewState.calls = 0;
     useEvolutionReading.setState({ programs: {}, workspaceProgramIds: {}, workspacePages: {} });
     setPendingChatInsert.mockReset();
     onOpenProgram.mockReset();
@@ -144,6 +147,54 @@ describe('F311 Capability Evolution Workspace', () => {
     expect(container.querySelector('[aria-label="当前关注项目"]')).toBeNull();
     expect(container.querySelectorAll('[data-testid^="capability-evolution-program-"]')).toHaveLength(1);
     expect(container.textContent).not.toContain('bcc336788');
+  });
+
+  it('does not turn constitution gaps into a user decision when no approval proposal exists', async () => {
+    localStorage.setItem('cat-cafe:shell-presentation', 'v2');
+    apiFetchMock.mockResolvedValue(new Response(JSON.stringify({ programs: [projection] })));
+
+    await renderWorkspace();
+
+    const row = container.querySelector(
+      '[data-testid="capability-evolution-program-evolution-program:bcc336788a7df9d6075b1efb4c0a7e68"]',
+    );
+    expect(container.textContent).toContain('待判断 0');
+    expect(container.textContent).toContain('目前没有需要你拍板的提议。');
+    expect(row?.textContent).toContain('提出目标（约定待补齐）');
+    expect(row?.textContent).toContain('约定怎样判断改进有效');
+    expect(row?.textContent).not.toContain('等你确认');
+  });
+
+  it('settles a typed 422 owner-capability gap instead of polling it every two seconds', async () => {
+    vi.useFakeTimers();
+    localStorage.setItem('cat-cafe:shell-presentation', 'v2');
+    assetReviewState.body = JSON.stringify({
+      schemaVersion: 1,
+      status: 'unavailable',
+      programRef: { ownerFeatureId: 'F311', ownerStateRef: projection.program.programId },
+      objectRef: projection.program.objectRef,
+      blockers: [{ code: 'owner_version_review_unavailable', ownerRef: projection.program.objectRef }],
+    });
+    assetReviewState.status = 422;
+    apiFetchMock.mockResolvedValue(new Response(JSON.stringify({ programs: [projection] })));
+    try {
+      await renderWorkspace();
+      expect(assetReviewState.calls).toBe(1);
+
+      await act(async () => vi.advanceTimersByTimeAsync(10_000));
+      expect(assetReviewState.calls).toBe(1);
+
+      await act(async () => {
+        window.dispatchEvent(new Event('focus'));
+        await Promise.resolve();
+      });
+      expect(assetReviewState.calls).toBe(2);
+
+      await act(async () => vi.advanceTimersByTimeAsync(10_000));
+      expect(assetReviewState.calls).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('offers a v2 new goal as an unsent draft in the bound conversation, including an empty directory', async () => {

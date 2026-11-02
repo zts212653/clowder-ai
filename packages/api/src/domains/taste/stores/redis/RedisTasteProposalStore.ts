@@ -1,3 +1,6 @@
+import { reconcileSettledIndexTime } from '../../../../utils/reconcile-settled-index-time.js';
+import { readRedisSettledPage } from '../../../../utils/redis-settled-page.js';
+import type { SettledHistoryPageOptions, SettledHistorySourcePage } from '../../../../utils/settled-history-page.js';
 /**
  * F221 Phase B: Redis-backed TasteProposal store.
  *
@@ -205,6 +208,33 @@ export class RedisTasteProposalStore implements ITasteProposalStore, ApprovalPub
     const ids = await this.redis.zrevrange(pendingKey, 0, limit - 1);
     if (!ids.length) return [];
     return this.batchGet(ids, (p) => p.status === 'pending' || p.status === 'approving');
+  }
+
+  async listSettledPage(
+    owner: string,
+    options: SettledHistoryPageOptions,
+  ): Promise<SettledHistorySourcePage<TasteProposal>> {
+    return readRedisSettledPage(this.redis, TasteProposalKeys.userSettled(owner), options, async (id, at) => {
+      const p = await this.get(id);
+      if (!p) return null;
+      if (p.userId !== owner || !['approved', 'rejected'].includes(p.status))
+        throw new Error('Settled index canonical owner/status mismatch');
+      if (p.id !== id) throw new Error('Settled index identity mismatch');
+      await reconcileSettledIndexTime(
+        this.redis,
+        TasteProposalKeys.userSettled(owner),
+        id,
+        at,
+        p.approvedAt ?? p.rejectedAt ?? 0,
+        [
+          {
+            key: TasteProposalKeys.detail(id),
+            fields: { status: p.status, userId: p.userId, approvedAt: p.approvedAt, rejectedAt: p.rejectedAt },
+          },
+        ],
+      );
+      return p;
+    });
   }
 
   async listSettledByUser(userId: string, limit = 50): Promise<TasteProposal[]> {

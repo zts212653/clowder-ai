@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 describe('embedIndexedItems (shared utility with batch splitting + consistency check)', () => {
-  it('splits >64 items into batches of 64', async () => {
+  it('splits large indexing work below the transport maximum without dropping items', async () => {
     const { embedIndexedItems } = await import('../../dist/domains/memory/embed-utils.js');
 
     const batchSizes = [];
@@ -18,7 +18,7 @@ describe('embedIndexedItems (shared utility with batch splitting + consistency c
 
     const upserted = [];
     const mockVectorStore = {
-      upsert: (anchor, vec) => upserted.push(anchor),
+      upsert: (anchor) => upserted.push(anchor),
       checkMetaConsistency: () => ({ consistent: true, reason: 'ok' }),
       clearAll: () => {},
       initMeta: () => {},
@@ -37,18 +37,21 @@ describe('embedIndexedItems (shared utility with batch splitting + consistency c
       batchSizes.every((s) => s <= 64),
       `no batch should exceed 64, got: ${batchSizes}`,
     );
-    assert.equal(batchSizes.length, 3, 'should split 150 into 3 batches (64+64+22)');
+    assert.deepEqual(
+      upserted,
+      items.map((item) => item.anchor),
+    );
   });
 
-  it('handles exactly 64 items in single batch', async () => {
+  it('retains all vectors when indexing exactly the transport maximum', async () => {
     const { embedIndexedItems } = await import('../../dist/domains/memory/embed-utils.js');
 
-    let callCount = 0;
+    let embeddedCount = 0;
     const mockEmbedding = {
       isReady: () => true,
       reprobeIfNeeded: async () => {},
       embed: async (texts) => {
-        callCount++;
+        embeddedCount += texts.length;
         return texts.map(() => new Float32Array([0.1]));
       },
       getModelInfo: () => ({ modelId: 'test', modelRev: 'v1', dim: 1 }),
@@ -67,7 +70,7 @@ describe('embedIndexedItems (shared utility with batch splitting + consistency c
     }));
 
     await embedIndexedItems({ items, embedding: mockEmbedding, vectorStore: mockVectorStore });
-    assert.equal(callCount, 1, 'exactly 64 items should be one batch');
+    assert.equal(embeddedCount, 64);
   });
 
   it('skips when embedding service not ready and reprobe fails', async () => {

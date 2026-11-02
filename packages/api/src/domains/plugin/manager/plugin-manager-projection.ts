@@ -4,7 +4,6 @@ import type {
   PluginManagerActions,
   PluginManagerArtifactState,
   PluginManagerAuthState,
-  PluginManagerCapability,
   PluginManagerConfigState,
   PluginManagerContribution,
   PluginManagerIntentState,
@@ -12,7 +11,8 @@ import type {
   PluginManagerLiveState,
   PluginManagerPackageSource,
 } from '@cat-cafe/shared';
-import type { Capability, PluginManifest } from '@clowder-ai/plugin-contract';
+import type { PluginManifest } from '@clowder-ai/plugin-contract';
+import { hasRetainedDesktopLoss } from '../desktop-window-runtime/desktop-loss.js';
 import { pluginRuntimeDiagnostic } from '../diagnostics/plugin-runtime-diagnostic.js';
 import type { PluginInstanceRecord, PluginInventorySnapshot, PluginPackageRecord } from '../host-inventory/types.js';
 import { sourceSemver } from './local-directory-semver.js';
@@ -23,6 +23,8 @@ export interface PluginManagerCatalogCandidate {
   readonly sourceLabel?: string;
   /** A catalog candidate with a current validated manifest, never an inventory fallback. */
   readonly compatibleReplacement?: boolean;
+  /** Trusted exact archive release; full package compatibility is checked before replacement. */
+  readonly updateRequiresValidation?: boolean;
   readonly pluginId: string;
   readonly packageName: string;
   readonly version: string;
@@ -34,7 +36,6 @@ export interface PluginManagerCatalogCandidate {
   readonly iconBg?: string;
   readonly publisher?: string;
   readonly ownerAuthRequired: boolean;
-  readonly capabilities: readonly Omit<PluginManagerCapability, 'active'>[];
   readonly contributions?: readonly PluginManagerContribution[];
 }
 
@@ -45,8 +46,6 @@ export interface PluginManagerProjectionOverrides {
   readonly configState?: PluginManagerConfigState;
   /** Desired intent reader override for lifecycle error states where activationState is ambiguous. */
   readonly intentState?: PluginManagerIntentState;
-  /** Capability registry truth. A grant or visible label alone does not make a capability active. */
-  readonly activeCapabilityIds?: readonly string[];
 }
 
 export interface DerivePluginManagerActionsInput {
@@ -55,31 +54,6 @@ export interface DerivePluginManagerActionsInput {
   readonly auth: PluginManagerAuthState;
   readonly intent: PluginManagerIntentState;
   readonly activationTransition: boolean;
-}
-
-function capabilityKind(capability: Capability): PluginManagerCapability['kind'] {
-  if (capability.startsWith('messaging.') || capability === 'onMessage') return 'messaging';
-  if (capability.startsWith('schedule.')) return 'schedule';
-  if (capability.startsWith('windows.') || capability.startsWith('whisper.')) return 'identity';
-  return 'service';
-}
-
-export function pluginManagerCapabilitiesFromManifest(
-  manifest: PluginManifest,
-): readonly Omit<PluginManagerCapability, 'active'>[] {
-  const capabilities = new Map<Capability, Omit<PluginManagerCapability, 'active'>>();
-  for (const feature of manifest.features) {
-    for (const capability of feature.capabilities) {
-      if (!capabilities.has(capability)) {
-        capabilities.set(capability, {
-          id: capability,
-          kind: capabilityKind(capability),
-          name: feature.name,
-        });
-      }
-    }
-  }
-  return [...capabilities.values()];
 }
 
 type ManifestContribution = NonNullable<PluginManifest['contributions']>[number];
@@ -108,7 +82,7 @@ function contributionName(contribution: ManifestContribution): string {
   }
 }
 
-/** Projects verified package contributions without relabeling Host permission grants as user-facing tools. */
+/** Projects verified package contributions as the user-facing installed integration surface. */
 export function pluginManagerContributionsFromManifest(manifest: PluginManifest): readonly PluginManagerContribution[] {
   return (manifest.contributions ?? []).map((contribution) => ({
     id: contribution.id,
@@ -271,24 +245,8 @@ function projectionState(
   return { artifact, config, auth, intent, live, activationTransition };
 }
 
-function projectCapabilities(
-  capabilities: readonly Omit<PluginManagerCapability, 'active'>[],
-  effectiveGrants: readonly string[],
-  activeCapabilityIds: readonly string[],
-) {
-  const granted = new Set(effectiveGrants);
-  const active = new Set(activeCapabilityIds);
-  return capabilities.map((capability) => ({
-    ...capability,
-    active: active.has(capability.id) && granted.has(capability.id),
-  }));
-}
-
-function runtimeDiagnostic(
-  instance: PluginInstanceRecord | undefined,
-  grant: Parameters<typeof pluginRuntimeDiagnostic>[1],
-) {
-  const diagnostic = pluginRuntimeDiagnostic(instance, grant);
+function runtimeDiagnostic(instance: PluginInstanceRecord | undefined) {
+  const diagnostic = pluginRuntimeDiagnostic(instance);
   return diagnostic === undefined ? {} : { diagnostic };
 }
 
@@ -303,23 +261,15 @@ export function projectPluginManagerCatalogCandidate(
   const packageRecord = candidatePackage(candidate, snapshot, instance);
   const installedManifest = instance ? (packageRecord?.manifest ?? undefined) : undefined;
   const incompatible = packageRecord?.manifest === null;
-  const grant = instance
-    ? snapshot.grants.find((item) => item.pluginInstanceId === instance.pluginInstanceId)
-    : undefined;
   const { artifact, config, auth, intent, live, activationTransition } = projectionState(
     candidate,
     instance,
     packageRecord,
     overrides,
   );
-  const capabilitySummary = projectCapabilities(
-    installedManifest ? pluginManagerCapabilitiesFromManifest(installedManifest) : candidate.capabilities,
-    grant?.effectiveGrants ?? [],
-    overrides.activeCapabilityIds ?? [],
-  );
 
-  const newerCompatible =
-    candidate.compatibleReplacement === true &&
+  const newerRelease =
+    (candidate.compatibleReplacement === true || candidate.updateRequiresValidation === true) &&
     packageRecord !== undefined &&
     sourceSemver.valid(candidate.version) !== null &&
     sourceSemver.valid(packageRecord.version) !== null &&
@@ -341,29 +291,38 @@ export function projectPluginManagerCatalogCandidate(
     live: incompatible ? 'stopped' : live,
     ...(instance?.activationState === 'error' ? { activationFailed: true } : {}),
     lifecycleRevision: instance?.lifecycleRevision ?? null,
-    capabilitySummary: incompatible ? [] : capabilitySummary,
+    capabilitySummary: [],
     actions: incompatible
       ? {
-          install: newerCompatible,
+          install: newerRelease,
           setEnabled: false,
           uninstall: true,
           blockingReasons: ['package-incompatible'],
         }
       : {
           ...derivePluginManagerActions({ artifact, config, auth, intent, activationTransition }),
-          ...(artifact === 'installed' && newerCompatible && !activationTransition ? { install: true } : {}),
+          ...(artifact === 'installed' &&
+          config === 'ready' &&
+          (auth === 'connected' || auth === 'not-required') &&
+          !activationTransition &&
+          (instance?.activationState === 'error' ||
+            (intent === 'enabled' && live === 'crashed') ||
+            (instance?.pluginId === 'official.companion' && hasRetainedDesktopLoss(instance)))
+            ? { repair: true }
+            : {}),
+          ...(artifact === 'installed' && newerRelease && !activationTransition ? { install: true } : {}),
         },
     ...(incompatible
       ? {
           diagnostic: {
             code: 'PACKAGE_INCOMPATIBLE',
-            message: newerCompatible
-              ? '插件版本与当前 Host 不兼容，已停止运行。配置与数据已保留，可安装兼容更新。'
+            message: newerRelease
+              ? '插件版本与当前 Host 不兼容，已停止运行。配置与数据已保留，可尝试更新，安装前会校验兼容性。'
               : '插件版本与当前 Host 不兼容，已停止运行。配置与数据已保留；当前无可用更新。',
             occurredAt: packageRecord.updatedAt,
             revision: instance?.lifecycleRevision ?? null,
           },
         }
-      : runtimeDiagnostic(instance, grant)),
+      : runtimeDiagnostic(instance)),
   };
 }

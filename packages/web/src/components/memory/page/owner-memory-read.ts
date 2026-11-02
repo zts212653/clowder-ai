@@ -48,7 +48,7 @@ export function isProfileEntry(value: unknown): value is ProfileMemoryRead {
     memoryObject(value) &&
     value.type === 'profile' &&
     value.status === 'active' &&
-    ['primer', 'corpus'].includes(String(value.layer)) &&
+    ['primer', 'corpus', 'capsule'].includes(String(value.layer)) &&
     ['id', 'uri', 'title', 'content'].every((key) => text(value[key])) &&
     revision(value.revision) &&
     (value.relationshipKey === null || text(value.relationshipKey)) &&
@@ -60,7 +60,12 @@ export function isProfileBrowse(value: unknown): value is ProfileMemoryBrowseRea
     memoryObject(value) &&
     value.readStatus === 'ready' &&
     Array.isArray(value.entries) &&
-    value.entries.every(isProfileEntry)
+    value.entries.every(isProfileEntry) &&
+    (value.capsuleSetup === undefined ||
+      (memoryObject(value.capsuleSetup) &&
+        revision(value.capsuleSetup.revision) &&
+        Array.isArray(value.capsuleSetup.proposals) &&
+        value.capsuleSetup.proposals.every(isProfileProposal)))
   );
 }
 export function isEntityEntry(value: unknown): value is EntityMemoryOwnerEntry {

@@ -292,7 +292,7 @@ describe('F322 v2 row facts and recoverable names', () => {
       cats[0].nickname = originalNickname;
     }
   });
-  it('keeps the v2 menu pin path alongside the fixed row pin slot', () => {
+  it('keeps the v2 menu pin command alongside the direct pin shortcut', () => {
     renderItem();
     expect(host.querySelector('[data-testid="thread-pin-button"]')).not.toBeNull();
     act(() => host.querySelector<HTMLButtonElement>('[aria-label="更多操作"]')?.click());

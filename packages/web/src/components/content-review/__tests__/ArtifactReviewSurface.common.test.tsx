@@ -7,6 +7,7 @@ import { mediaView } from '@/components/workbench/content-review/__tests__/Works
 import { workspaceReviewDraftKey } from '@/components/workbench/content-review/workspace-review-draft';
 import { contentContextSelectionKey } from '@/components/workbench/PublicationLandingResolver';
 import { useChatStore } from '@/stores/chatStore';
+import { openFileMenu } from '@/test-utils/open-file-menu';
 import { ArtifactReviewSurface } from '../ArtifactReviewSurface';
 
 const mocks = vi.hoisted(() => ({ controller: vi.fn(), act: vi.fn(), apiFetch: vi.fn() }));
@@ -156,6 +157,7 @@ it('opening discussion and switching canvas modes never discards the original un
   const original = { body: '保留选区', anchor: { kind: 'image-point', x: 8, y: 9 } };
   localStorage.setItem(draftKey, JSON.stringify(original));
   await act(async () => root.render(<ArtifactReviewSurface reviewId={view.review.reviewId} onBack={vi.fn()} />));
+  await openFileMenu(container);
   await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="打开作品讨论"]')?.click());
   expect(container.textContent).toContain('保留原批注');
   expect(JSON.parse(localStorage.getItem(draftKey)!)).toEqual(original);
@@ -304,6 +306,7 @@ it('uses Chat for a writable PNG round while keeping its modification records ac
   await act(async () => root.render(<ArtifactReviewSurface reviewId={view.review.reviewId} onBack={vi.fn()} />));
   const entry = container.querySelector<HTMLButtonElement>('[data-testid="content-modification-entry"]');
   expect(entry?.textContent).toBe('修改记录');
+  await openFileMenu(container);
   const whole = container.querySelector<HTMLButtonElement>('[data-testid="workspace-media-chat-whole-work"]');
   expect(whole).not.toBeNull();
   await act(async () => whole?.click());

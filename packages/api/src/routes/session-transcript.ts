@@ -8,7 +8,9 @@
  * GET  /api/threads/:threadId/sessions/search              — Full-text search
  */
 
+import type { InvocationTrajectorySummary, SessionRecord } from '@cat-cafe/shared';
 import type { FastifyInstance } from 'fastify';
+import { resolveCanonicalInvocationSummaries } from '../domains/cats/services/session/CanonicalInvocationTrajectoryResolver.js';
 import { projectInvocationPromptInput } from '../domains/cats/services/session/InvocationPromptInputProjector.js';
 import { resolveScopedSessionTrajectory } from '../domains/cats/services/session/scoped-session-trajectory.js';
 import { formatEventsChat } from '../domains/cats/services/session/TranscriptFormatter.js';
@@ -59,6 +61,15 @@ export async function sessionTranscriptRoutes(
     onEvent: (event) => app.log.info(event, '[Task229] transcript read diagnostic'),
   });
   app.addHook('onClose', async () => diagnostics.stop());
+  async function resolveInvocationSummary(
+    summary: InvocationTrajectorySummary,
+    session: Pick<SessionRecord, 'scopedInvocation' | 'userId' | 'catId' | 'threadId'>,
+    userId: string,
+  ) {
+    if (session.scopedInvocation) return resolveScopedSessionTrajectory(summary, session, turnExecutionStore);
+    const [canonical] = await resolveCanonicalInvocationSummaries([summary], userId, turnExecutionStore);
+    return canonical;
+  }
   async function readInvocationEvents(
     sessions: ReadableSession[],
     invocationId: string,
@@ -77,12 +88,12 @@ export async function sessionTranscriptRoutes(
 
   registerInvocationTrajectoryRoutes(app, {
     stores: { invocationRecordStore, turnExecutionStore, sessionChainStore, threadStore },
-    listInvocationSummaries: async (sessions, limit, signal) => {
+    listInvocationSummaries: async (sessions, limit, userId, signal) => {
       const page = await invocationReader.list(sessions, limit, signal);
       const invocations = await Promise.all(
         page.invocations.map(async (summary) => {
           const session = await sessionChainStore.get(summary.sessionId);
-          return session ? resolveScopedSessionTrajectory(summary, session, turnExecutionStore) : summary;
+          return session ? resolveInvocationSummary(summary, session, userId) : summary;
         }),
       );
       return { ...page, invocations };
@@ -353,9 +364,7 @@ export async function sessionTranscriptRoutes(
       });
     }
 
-    const summary = page.summary
-      ? await resolveScopedSessionTrajectory(page.summary, session, turnExecutionStore)
-      : page.summary;
+    const summary = page.summary ? await resolveInvocationSummary(page.summary, session, userId) : page.summary;
     const promptInput = await projectInvocationPromptInput(
       { messageStore, turnExecutionStore },
       session,

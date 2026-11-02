@@ -53,6 +53,7 @@ import { useFirstRealMessageSync } from './first-run-quest/useFirstRealMessageSy
 import { BootcampIcon } from './icons/BootcampIcon';
 import { PawIcon } from './icons/PawIcon';
 import { MessageSearchOverlay } from './message-search/MessageSearchOverlay';
+import { openMessageFindDestination, restoreFindWorkspaceOrigin } from './message-search/message-find-destinations';
 import { useMessageSearchHost } from './message-search/useMessageSearchHost';
 import { NewConversationPage } from './new-conversation/NewConversationPage';
 import { DEMO_SETTINGS_URL } from './onboarding-demo/demo-story';
@@ -117,7 +118,13 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
 function ChatContainerContent({ threadId }: ChatContainerProps) {
   const searchParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
   if (searchParams?.get('export') === 'true') {
-    return <ThreadChatExport threadId={threadId} messageIds={searchParams.getAll('messageId')} />;
+    return (
+      <ThreadChatExport
+        threadId={threadId}
+        messageIds={searchParams.getAll('messageId')}
+        selectionItems={window.__catCafeImageExportItems}
+      />
+    );
   }
   return <InteractiveChatContainer threadId={threadId} />;
 }
@@ -193,7 +200,7 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
   const searchParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
   // AC-6: research=multi hint from Signal study "多猫研究" button
   const isResearchMode = searchParams?.get('research') === 'multi';
-  const { clearTasks } = useTaskStore();
+  const { clearTasks } = useTaskStore(useShallow((state) => ({ clearTasks: state.clearTasks })));
   const { cats, hasFetched: registryKnown, isLoading: registryRefreshing } = useCatData();
   const isV2 = useShellPresentation() === 'v2';
   const conversationViewQueue = useChatStore((state) => scopedQueue(state, threadId)) ?? EMPTY_CONVERSATION_QUEUE;
@@ -299,7 +306,8 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
   const registeredWorkId = useRef<string | null>(null);
   const onRegisteredWorkChange = useCallback((id: string | null) => {
     if (registeredWorkId.current === id) return;
-    captureChatReadingBeforeLayoutChange();
+    // Work availability also changes during hydration and unmount. Those are
+    // passive layout changes, not user input that may revoke a pending return.
     registeredWorkId.current = id;
     setMediaComposerSurfaceId(id);
   }, []);
@@ -433,6 +441,8 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
     threadId,
     pushThreadRoute: navigateToThread,
     available: messageSearchAvailable,
+    onOpenDestination: openMessageFindDestination,
+    beforeFindReturn: restoreFindWorkspaceOrigin,
   });
 
   useEffect(() => {
@@ -1042,16 +1052,6 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
               : { flex: '1 1 0%' }
           }
         >
-          <MessageSearchOverlay
-            threadId={threadId}
-            host={messageSearch}
-            available={messageSearchAvailable}
-            resolveSpeaker={(speaker) => {
-              if (speaker === 'user') return coCreator.name;
-              const cat = cats.find((candidate) => candidate.id === speaker);
-              return cat ? formatCatName(cat) : speaker;
-            }}
-          />
           {!workComposerOnlyActive && !showNewConversationLanding && (
             <ChatContainerHeader
               sidebarOpen={sidebarOpen}
@@ -1078,6 +1078,19 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
               conversationViewQueue={conversationViewQueue}
             />
           )}
+
+          {/* Reading controls occupy their own row so the existing history owner
+              measures a viewport whose beginning is actually readable. */}
+          <MessageSearchOverlay
+            threadId={threadId}
+            host={messageSearch}
+            available={messageSearchAvailable}
+            resolveSpeaker={(speaker) => {
+              if (speaker === 'user') return coCreator.name;
+              const cat = cats.find((candidate) => candidate.id === speaker);
+              return cat ? formatCatName(cat) : speaker;
+            }}
+          />
 
           {showNewConversationLanding ? (
             <NewConversationPage

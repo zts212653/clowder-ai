@@ -3,18 +3,18 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { chromium } from 'playwright';
 import { build } from 'vite';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { registerMessageReadingVisibilityCases } from './message-reading-visibility.cases.mjs';
 
 const webRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const repoRoot = path.resolve(webRoot, '../..');
 const origin = 'https://f322-results.test';
 const evidence = path.join(repoRoot, '.cat-cafe/tmp/message-results-browser');
-const productionCss = [
-  ...(await fs.readFile(path.join(webRoot, 'src/app/layout.tsx'), 'utf8')).matchAll(
-    /href="(\/vendor\/app\/[^"]+\.css)"/g,
-  ),
-].map((match) => match[1]);
+const productionCss = JSON.parse(
+  await fs.readFile(path.join(webRoot, 'src/generated/vendor-stylesheets.json'), 'utf8'),
+);
+assert(productionCss.length > 0, 'load the same stylesheet manifest as the real document');
 let browser, script, css;
 const originalCwd = process.cwd();
 const records = Array.from({ length: 18 }, (_, index) => ({
@@ -125,7 +125,7 @@ async function open(
     if (url.pathname === '/proof.css') return route.fulfill({ contentType: 'text/css', body: css });
     if (productionCss.includes(url.pathname))
       return fs
-        .readFile(path.join(webRoot, 'src/app', path.basename(url.pathname)), 'utf8')
+        .readFile(path.join(webRoot, 'public', url.pathname.slice(1)), 'utf8')
         .then((body) => route.fulfill({ contentType: 'text/css', body }));
     if (url.pathname.startsWith('/api/')) {
       let body = { cats: [], tasks: [], queue: [], activeInvocations: [] };
@@ -215,11 +215,17 @@ async function open(
   return { page, errors, queries, pages, releaseHistory };
 }
 
+registerMessageReadingVisibilityCases({ open, evidence });
+
 for (const width of [1440, 390]) {
   test(`search trip leaves the Workspace return clickable and resumes in Chat at ${width}px`, async () => {
     const { page, errors } = await open({ width, height: 900 }, false, false, false, false, true);
     try {
-      await page.locator('[data-message-search-result]').first().getByRole('button', { name: '跳过去' }).click();
+      await page
+        .locator('[data-message-search-result]')
+        .first()
+        .getByRole('button', { name: /^(?:跳过去|去原处)/ })
+        .click();
       const controls = page.getByRole('navigation', { name: '浏览本次检索结果' });
       await page.waitForFunction(() => document.querySelector('nav output')?.textContent === '1 / 2');
       await page.getByRole('button', { name: '查看原图', exact: true }).click();
@@ -238,7 +244,7 @@ for (const width of [1440, 390]) {
       await page.getByRole('button', { name: '‹ 聊天', exact: true }).click({ timeout: 4000 });
       await controls.getByRole('button', { name: '下一处结果' }).click();
       await page.waitForFunction(() => document.querySelector('nav output')?.textContent === '2 / 2');
-      await controls.getByRole('button', { name: '回到刚才', exact: true }).click();
+      await controls.getByRole('button', { name: /^(?:回到刚才|‹ 回到「)/ }).click();
       await page.waitForFunction(
         () =>
           document.querySelector('[data-reading-trip-status]')?.getAttribute('data-reading-trip-status') ===
@@ -348,7 +354,7 @@ test('a tall original chat message lands with its nameplate and beginning inside
     await page.getByRole('textbox', { name: '搜索消息' }).fill('琴键');
     await page.getByRole('button', { name: '搜索', exact: true }).click();
     await page.locator('[data-message-search-result]').first().waitFor();
-    await page.getByRole('button', { name: /跳过去.*第1处/ }).click();
+    await page.getByRole('button', { name: /(?:跳过去|去原处).*第1处/ }).click();
     await page.locator('[data-reading-trip-status="ready"]').waitFor();
     const readyAnchor = await page.evaluate(
       () => JSON.parse(localStorage.getItem('cat-cafe:thread-scroll:recall-controlled')).state,
@@ -416,7 +422,7 @@ test('a tall original chat message lands with its nameplate and beginning inside
     );
     await page.screenshot({ path: path.join(evidence, 'long-message-start-nameplate.png') });
     await fs.writeFile(path.join(evidence, 'long-message-geometry.json'), JSON.stringify(geometry, null, 2));
-    await page.getByRole('button', { name: '回到刚才', exact: true }).click();
+    await page.getByRole('button', { name: /^(?:回到刚才|‹ 回到「)/ }).click();
     await page.locator('[data-reading-trip-status="completed"]').waitFor();
     const returnedTop = await page.locator('[data-reading-surface]').evaluate((el) => el.scrollTop);
     assert(Math.abs(returnedTop - originTop) <= 1);
@@ -443,13 +449,13 @@ test('actual shared results and reading owner keep origin through explicit messa
       .evaluate((el) => ({ top: el.scrollTop, max: el.scrollHeight - el.clientHeight }));
     assert(Math.abs(saved.top - saved.max) <= 1);
     await page.screenshot({ path: path.join(evidence, 'results-light.png') });
-    await page.getByRole('button', { name: /跳过去.*第1处/ }).click();
+    await page.getByRole('button', { name: /(?:跳过去|去原处).*第1处/ }).click();
     await page.waitForFunction(
       () =>
         JSON.parse(localStorage.getItem('cat-cafe:thread-scroll:recall-controlled')).state.messageAnchor?.messageId ===
         'old-0',
     );
-    await page.getByRole('button', { name: '回到刚才' }).click();
+    await page.getByRole('button', { name: /^(?:回到刚才|‹ 回到「)/ }).click();
     await page.locator('[data-reading-trip-status="completed"]').waitFor();
     const returned = await page
       .locator('[data-reading-surface]')
@@ -484,11 +490,11 @@ test('a cold origin returns exactly through two slow history pages after a real 
     await page.getByRole('button', { name: '查找消息', exact: true }).click();
     await page.getByRole('textbox', { name: '搜索消息' }).fill('琴键');
     await page.getByRole('button', { name: '搜索', exact: true }).click();
-    await page.getByRole('button', { name: /跳过去.*第1处/ }).click();
+    await page.getByRole('button', { name: /(?:跳过去|去原处).*第1处/ }).click();
     await page.waitForURL('**/thread/remote-controlled');
     await page.locator('[data-reading-trip-status="ready"]').waitFor();
     await page.reload();
-    await page.getByRole('button', { name: '回到刚才', exact: true }).click();
+    await page.getByRole('button', { name: /^(?:回到刚才|‹ 回到「)/ }).click();
     await page.waitForURL('**/thread/recall-controlled');
     await page.locator('[data-reading-trip-status="completed"]').waitFor({ timeout: 15000 });
     const returned = await page.locator('[data-reading-surface]').evaluate((el) => ({
@@ -519,7 +525,7 @@ test('global provenance, sorting and narrow dark layout keep real text and contr
     await page.waitForFunction(() => document.querySelector('[aria-pressed="true"]') !== null);
     assert.equal(queries.at(-1).messageSort, 'relevance');
     assert.equal(queries.at(-1).threadId, undefined);
-    assert(await page.getByText('索引覆盖范围尚未确认。', { exact: false }).isVisible());
+    await page.getByText('索引覆盖范围尚未确认。', { exact: false }).waitFor({ state: 'visible' });
     assert.equal(
       await page.evaluate(() => Math.max(document.documentElement.scrollWidth, document.body.scrollWidth) - innerWidth),
       0,
@@ -549,13 +555,13 @@ test('middle reading origin restores its signed message offset through the real 
     await page.getByRole('button', { name: '查找消息', exact: true }).click();
     await page.getByRole('textbox', { name: '搜索消息' }).fill('琴键');
     await page.getByRole('button', { name: '搜索', exact: true }).click();
-    await page.getByRole('button', { name: /跳过去.*第1处/ }).click();
+    await page.getByRole('button', { name: /(?:跳过去|去原处).*第1处/ }).click();
     await page.waitForFunction(
       () =>
         JSON.parse(localStorage.getItem('cat-cafe:thread-scroll:recall-controlled')).state.messageAnchor?.messageId ===
         'old-0',
     );
-    await page.getByRole('button', { name: '回到刚才', exact: true }).click();
+    await page.getByRole('button', { name: /^(?:回到刚才|‹ 回到「)/ }).click();
     await page.locator('[data-reading-trip-status="completed"]').waitFor();
     const returned = await page.locator('[data-reading-surface]').evaluate((el) => ({
       top: el.scrollTop,

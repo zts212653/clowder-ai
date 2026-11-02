@@ -23,6 +23,7 @@ import { TurnExecutionKeys } from '../redis-keys/turn-execution-keys.js';
 import { readAuthoritativeHash } from './redis-pipeline-reply.js';
 import { hydrateTurnExecution, type RedisTurnExecutionHash, sortTurnExecutions } from './turn-execution-redis-codec.js';
 import {
+  ADVANCE_TURN_PROVIDER_LUA,
   BIND_TURN_EXECUTION_COVERAGE_LUA,
   CREATE_TURN_EXECUTION_LUA,
   SETTLE_TURN_OUTPUT_FENCE_LUA,
@@ -54,6 +55,7 @@ export class RedisTurnExecutionStore implements ITurnExecutionStore {
         JSON.stringify(input.causal ?? {}),
         createdOutputFence(input),
         input.queueCompletionPolicy ?? '',
+        input.providerLifecycleTracked ? '1' : '',
       ),
     );
     if (result === -1) {
@@ -160,6 +162,37 @@ export class RedisTurnExecutionStore implements ITurnExecutionStore {
     return sortTurnExecutions(records).map(cloneTurnExecutionRecord);
   }
 
+  async markProviderStarted(invocationId: string, at: number): Promise<boolean> {
+    if (!Number.isFinite(at)) return false;
+    return (
+      Number(
+        await this.redis.eval(
+          ADVANCE_TURN_PROVIDER_LUA,
+          1,
+          TurnExecutionKeys.record(invocationId),
+          'providerStartedAt',
+          String(at),
+        ),
+      ) === 1
+    );
+  }
+
+  async recordProviderTeardown(invocationId: string, at: number): Promise<void> {
+    if (
+      !Number.isFinite(at) ||
+      Number(
+        await this.redis.eval(
+          ADVANCE_TURN_PROVIDER_LUA,
+          1,
+          TurnExecutionKeys.record(invocationId),
+          'providerTeardownAt',
+          String(at),
+        ),
+      ) !== 1
+    )
+      throw new Error('invalid exact provider teardown');
+  }
+
   async transitionTerminal(
     invocationId: string,
     input: TurnExecutionTerminalInput,
@@ -178,6 +211,7 @@ export class RedisTurnExecutionStore implements ITurnExecutionStore {
         String(input.endedAt),
         input.terminalReason ?? '',
         invocationId,
+        input.providerTeardownAt === undefined ? '' : String(input.providerTeardownAt),
       ),
     );
     const record = await this.get(invocationId);

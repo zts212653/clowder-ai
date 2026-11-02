@@ -318,6 +318,8 @@ export interface AssemblerInput {
   pingPongWarning: PingPongInput | null;
   teammates: readonly TeammateSnapshot[];
   mentionRoutingItems: readonly string[];
+  /** A private declaration/action discrepancy, distinct from unrouted mentions. */
+  voidHoldFeedback?: boolean;
   promptTags: readonly string[];
   activeParticipants: readonly ActiveParticipantInput[];
   routingPolicyParts: string | null;

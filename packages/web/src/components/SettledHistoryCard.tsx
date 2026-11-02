@@ -63,13 +63,15 @@ export function SettledHistoryCard({ item }: SettledHistoryCardProps) {
             />
             {t.lifecycle[item.resolution === 'accepted' ? item.materialization.state : item.resolution]}
           </span>
-          <span
-            className="ml-auto shrink-0 text-micro text-cafe-interactive/40"
-            data-testid="settled-card-time"
-            title={t.decidedAt(formatApprovalAbsoluteTime(item.decidedAt, language))}
-          >
-            {t.decidedAt(formatApprovalRelativeTime(item.decidedAt, Date.now(), language))}
-          </span>
+          {!item.detail.closureTimeUnknown ? (
+            <span
+              className="ml-auto shrink-0 text-micro text-cafe-interactive/40"
+              data-testid="settled-card-time"
+              title={t.decidedAt(formatApprovalAbsoluteTime(item.decidedAt, language))}
+            >
+              {t.decidedAt(formatApprovalRelativeTime(item.decidedAt, Date.now(), language))}
+            </span>
+          ) : null}
         </div>
       }
       title={approvalDisplayTitle(item, { resolveCatName, language })}

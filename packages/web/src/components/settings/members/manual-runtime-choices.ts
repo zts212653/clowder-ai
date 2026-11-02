@@ -3,10 +3,9 @@ import type { RuntimeChoice } from './member-runtime-draft';
 export const MANUAL_RUNTIME_CHOICES: RuntimeChoice[] = [
   ['anthropic', 'Claude Code'],
   ['openai', 'Codex'],
-  ['google', 'Gemini'],
+  ['google', 'AGY Native'],
   ['kimi', 'Kimi'],
   ['opencode', 'OpenCode'],
-  ['antigravity', 'Antigravity'],
   ['catagent', 'Cat Agent'],
   ['acp', '自定义 ACP'],
 ].map(([clientId, label]) => ({
@@ -15,5 +14,6 @@ export const MANUAL_RUNTIME_CHOICES: RuntimeChoice[] = [
   clientId: clientId as RuntimeChoice['clientId'],
   installed: false,
   models: [],
+  ...(clientId === 'google' ? { agyCarrier: 'native' as const } : {}),
   ...(clientId === 'acp' ? { acp: { command: '', startupArgs: [] } } : {}),
 }));

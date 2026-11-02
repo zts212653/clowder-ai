@@ -18,7 +18,20 @@ export interface CollectiveAccountabilityActionTarget extends CollectiveActionBa
   readonly accountabilityRequestId: string;
 }
 
-export type CollectiveWorkActionTarget = CollectiveWorkResultActionTarget | CollectiveAccountabilityActionTarget;
+export interface CollectiveProjectActionTarget {
+  readonly kind: 'collective-project';
+  readonly connectionId: string;
+  readonly channelId: string;
+  readonly roadmapId?: string;
+  readonly attention: 'triage' | 'date_suggestion' | 'overdue' | 'work_dates';
+  readonly workId?: string;
+  readonly workRevision?: number;
+  readonly actionRef: string;
+}
+export type CollectiveWorkActionTarget =
+  | CollectiveWorkResultActionTarget
+  | CollectiveAccountabilityActionTarget
+  | CollectiveProjectActionTarget;
 
 const commonFields = ['connectionId', 'workId', 'workRevision', 'channelId'] as const;
 const resultFields = [...commonFields, 'resultEventId', 'resultRevision'] as const;
@@ -33,6 +46,7 @@ export function parseCollectiveWorkActionRef(actionRef: string): CollectiveWorkA
     return null;
   }
   if (url.origin !== 'https://cat-cafe.invalid' || url.pathname !== '/collective' || url.hash) return null;
+  if (url.searchParams.get('target') === 'project-attention') return parseProjectTarget(url.searchParams, actionRef);
   return url.searchParams.get('target') === 'accountability'
     ? parseAccountabilityTarget(url.searchParams, actionRef)
     : parseResultTarget(url.searchParams, actionRef);
@@ -108,4 +122,55 @@ function parseAccountabilityTarget(
     return null;
   }
   return { kind: 'collective-accountability', ...common, roadmapId, accountabilityRequestId, actionRef };
+}
+
+function parseProjectTarget(params: URLSearchParams, actionRef: string): CollectiveProjectActionTarget | null {
+  const attention = params.get('attention');
+  const fields = [
+    'target',
+    'connectionId',
+    'channelId',
+    'attention',
+    ...(attention === 'work_dates' ? [] : ['roadmapId']),
+  ];
+  const required = attention === 'triage' ? fields : [...fields, 'workId', 'workRevision'];
+  if (
+    !['triage', 'date_suggestion', 'overdue', 'work_dates'].includes(attention ?? '') ||
+    !onlyFields(params, required) ||
+    required.some((field) => params.getAll(field).length !== 1)
+  )
+    return null;
+  const connectionId = params.get('connectionId')!,
+    channelId = params.get('channelId')!,
+    roadmapId = params.get('roadmapId')!;
+  if (
+    !/^con_[A-Za-z0-9_-]{8,}$/.test(connectionId) ||
+    (attention !== 'work_dates' && !/^roadmap_[A-Za-z0-9_-]{8,}$/.test(roadmapId)) ||
+    !channelId ||
+    channelId.trim() !== channelId ||
+    channelId.length > 160
+  )
+    return null;
+  if (attention === 'triage')
+    return { kind: 'collective-project', connectionId, channelId, roadmapId, attention, actionRef };
+  const workId = params.get('workId')!,
+    text = params.get('workRevision')!,
+    workRevision = Number(text);
+  if (
+    !/^work_[A-Za-z0-9_-]{8,}$/.test(workId) ||
+    !Number.isSafeInteger(workRevision) ||
+    workRevision < 1 ||
+    String(workRevision) !== text
+  )
+    return null;
+  return {
+    kind: 'collective-project',
+    connectionId,
+    channelId,
+    ...(roadmapId ? { roadmapId } : {}),
+    attention: attention as 'date_suggestion' | 'overdue' | 'work_dates',
+    workId,
+    workRevision,
+    actionRef,
+  };
 }

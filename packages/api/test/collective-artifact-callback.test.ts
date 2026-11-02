@@ -168,7 +168,6 @@ for (const selectionMode of ['existing-annotation', 'same-send-selection', 'esca
         mode: 'plugin_native',
         pluginInstanceId: instanceId,
         contributionId: native.COLLECTIVE_NATIVE_ID,
-        actionMethods: native.COLLECTIVE_PUBLIC_METHODS,
       },
       message.id,
       'unknown',

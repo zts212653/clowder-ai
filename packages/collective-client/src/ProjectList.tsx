@@ -6,8 +6,10 @@ import type {
   CollectiveWorkProjection,
 } from './client-types.js';
 import type { SharedArtifact } from './collective-artifact-client.js';
+import { useCollectiveLanguage } from './collective-copy.js';
 import { type ProjectArtifactStatus, ProjectArtifactSummary } from './ProjectArtifactSurface.js';
 import { AgentIdentityChip, HumanIdentityChip } from './ProjectIdentityChip.js';
+import { formatWorkDate } from './project-time.js';
 import { projectBoardColumn, worksForRoadmap } from './roadmap-view-model.js';
 import { workBlockingPresentation } from './work-blocking-presentation.js';
 
@@ -34,7 +36,11 @@ export function ProjectList({
   readonly participants: readonly CollectiveParticipant[];
   readonly humanNames: Readonly<Record<string, string>>;
   readonly onOpen: (roadmap: CollectiveRoadmapRecord) => void;
-  readonly onOpenArtifact?: (artifact: SharedArtifact) => void;
+  readonly onOpenArtifact?: (
+    artifact: SharedArtifact,
+    ownerRevision?: number,
+    options?: import('./collective-artifact-client.js').SharedArtifactOpenOptions,
+  ) => void;
 }) {
   const [filter, setFilter] = useState<ProjectListFilter>('active');
   const [owner, setOwner] = useState('all');
@@ -176,8 +182,13 @@ function ProjectListRow({
   readonly participants: readonly CollectiveParticipant[];
   readonly humanNames: Readonly<Record<string, string>>;
   readonly onOpen: (roadmap: CollectiveRoadmapRecord) => void;
-  readonly onOpenArtifact?: (artifact: SharedArtifact) => void;
+  readonly onOpenArtifact?: (
+    artifact: SharedArtifact,
+    ownerRevision?: number,
+    options?: import('./collective-artifact-client.js').SharedArtifactOpenOptions,
+  ) => void;
 }) {
+  const language = useCollectiveLanguage();
   const projectWorks = worksForRoadmap(roadmap, works);
   const blocked = projectWorks.filter((work) => work.status === 'blocked').length;
   const unassigned = projectWorks.filter((work) => work.status === 'unassigned').length;
@@ -196,6 +207,13 @@ function ProjectListRow({
         <span className="project-list-identity">
           <strong>{roadmap.title}</strong>
           <small>{roadmap.purpose}</small>
+          {roadmap.targetDate && (
+            <small>
+              {language === 'en' ? 'Target' : '目标'} {formatWorkDate(roadmap.targetDate, language)} ·{' '}
+              {roadmap.targetDate.actor.displayName}
+              {language === 'en' ? '' : '定'}
+            </small>
+          )}
         </span>
         <span className="project-list-people">
           <HumanIdentityChip
@@ -243,6 +261,7 @@ function ProjectListRow({
       </button>
       <div className="project-list-artifact-cell">
         <ProjectArtifactSummary
+          roadmap={roadmap}
           works={projectWorks}
           artifacts={artifacts}
           status={artifactStatus}

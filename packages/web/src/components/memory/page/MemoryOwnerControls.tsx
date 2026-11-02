@@ -1,6 +1,7 @@
 import type { MemoryOwnerSourceResponse } from '@cat-cafe/shared';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { ExternalLinkIcon } from '@/components/HubConfigIcons';
 import { handleTeleportEvent } from '@/hooks/useTeleport';
 import { scrollToMessage } from '@/utils/scrollToMessage';
 import { isOwnerSource } from './owner-memory-read';
@@ -29,7 +30,7 @@ export function MemoryOwnerSource({ endpoint }: { endpoint: string }) {
           {item.canOpen && item.threadId && item.messageId && (
             <button
               type="button"
-              className="ml-2 text-cafe-accent underline"
+              className="ml-2 inline-flex items-center gap-1 text-cafe-accent underline"
               onClick={() => {
                 if (!item.threadId || !item.messageId) return;
                 handleTeleportEvent({ threadId: item.threadId, messageId: item.messageId }, null, {
@@ -39,6 +40,9 @@ export function MemoryOwnerSource({ endpoint }: { endpoint: string }) {
               }}
             >
               查看原消息
+              <span aria-hidden="true">
+                <ExternalLinkIcon />
+              </span>
             </button>
           )}
         </div>
@@ -75,11 +79,13 @@ export function MemoryForgetControl({
   noun,
   action,
   retainedAudit = false,
+  quiet = false,
 }: {
   revision: string;
   noun: string;
   action: MemoryOwnerActionState;
   retainedAudit?: boolean;
+  quiet?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
@@ -92,7 +98,7 @@ export function MemoryForgetControl({
           setOpen(!open);
           setConfirmed(false);
         }}
-        className="text-cafe-accent underline"
+        className={quiet ? 'shell-focusable text-cafe-muted' : 'text-cafe-accent underline'}
       >
         忘掉{noun}
       </button>

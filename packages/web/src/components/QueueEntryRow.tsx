@@ -31,35 +31,61 @@ function exactMessageById(messages: readonly ChatMessage[], messageId: string): 
 }
 
 /** Queue UI reads delivery directly from the canonical source refs already present in Chat History. */
-export function deliveredTargetIdsFromHistory(sourceMessageId: string, messages: readonly ChatMessage[]): string[] {
+export function queueTargetLabelsFromHistory(
+  sourceMessageId: string,
+  messages: readonly ChatMessage[],
+): Record<string, string> {
   const source = exactMessageById(messages, sourceMessageId);
   const refs = source?.lifecycle?.dispatchRefs ?? [];
-  return refs.flatMap((ref) => {
-    const status = exactMessageById(messages, ref.statusMessageId)?.lifecycle;
-    const targetDeliveredSource =
-      status?.kind === 'response' &&
-      status.targetId === ref.targetId &&
-      status.inputMessageIds.includes(sourceMessageId);
-    return targetDeliveredSource ? [ref.targetId] : [];
-  });
+  return Object.fromEntries(
+    refs.flatMap((ref) => {
+      const status = exactMessageById(messages, ref.statusMessageId)?.lifecycle;
+      const targetDeliveredSource =
+        status?.kind === 'response' &&
+        status.targetId === ref.targetId &&
+        status.inputMessageIds.includes(sourceMessageId);
+      if (!targetDeliveredSource) return [];
+      const read = ref.inputRead?.status === 'read';
+      const uncertain =
+        ref.appendAcceptance !== 'accepted' &&
+        source?.lifecycle?.appendFailures?.some(
+          (failure) =>
+            failure.targetId === ref.targetId &&
+            failure.responseMessageId === ref.statusMessageId &&
+            failure.acceptance === 'unknown',
+        );
+      const label = uncertain
+        ? read
+          ? '已读，结果未确认'
+          : '投递结果未确认'
+        : ref.appendAcceptance === 'pending'
+          ? '正在确认投递'
+          : ref.appendAcceptance === 'written'
+            ? read
+              ? '本轮已读，等待完成'
+              : '已写入，等待后续轮'
+            : '已投递';
+      return [[ref.targetId, label]];
+    }),
+  );
 }
 
 function QueueTarget({
   catId,
   label,
   avatar,
-  delivered,
+  receipt,
 }: {
   catId: string;
   label: string;
   avatar?: string;
-  delivered: boolean;
+  receipt?: string;
 }) {
   return (
-    <span className="inline-flex items-center gap-1 whitespace-nowrap" data-queue-target-row={catId}>
+    <span className="inline-flex flex-wrap items-center gap-1" data-queue-target-row={catId}>
       <AvatarImageWithFallback src={avatar} alt="" className="h-5 w-5 rounded-full object-cover" />
       <span className="text-xs font-medium text-cafe-secondary">{label}</span>
-      {delivered && <span className="text-micro text-cafe-muted">（已投递）</span>}
+      {receipt && <span className="text-micro text-cafe-muted">（{receipt}）</span>}
     </span>
   );
 }
@@ -70,7 +96,7 @@ export interface QueueEntryRowProps {
   imageCount: number;
   ownerName: string;
   ownerAvatar?: string;
-  deliveredTargetIds: readonly string[];
+  deliveryLabels: Readonly<Record<string, string>>;
   resolveCatName: (catId: string) => string;
   resolveCatAvatar: (catId: string) => string | undefined;
   onRemove: (id: string) => void;
@@ -96,7 +122,7 @@ function QueueEntryRow({
   imageCount,
   ownerName,
   ownerAvatar,
-  deliveredTargetIds,
+  deliveryLabels,
   resolveCatName,
   resolveCatAvatar,
   onRemove,
@@ -109,9 +135,9 @@ function QueueEntryRow({
   const isUrgent = entry.priority === 'urgent';
   const categoryLabel = entry.sourceCategory ? SOURCE_CATEGORY_LABEL[entry.sourceCategory] : null;
   const rowToneClass = isAgent ? 'bg-[var(--color-cocreator-surface)]' : '';
+  const hasRepeat = entry.recoveryActions?.some((action) => action.kind === 'repeat_target');
 
-  const deliveredTargets = new Set(deliveredTargetIds);
-  const targetIds = [...new Set([...entry.targetCats, ...deliveredTargets])];
+  const targetIds = [...new Set([...entry.targetCats, ...Object.keys(deliveryLabels)])];
   const coCreator = useCoCreatorConfig();
   const { getCatById } = useCatData({ fetch: false });
   const sender = resolveMessageSender({ from: entry.from, source: entry.messagePreview?.source }, getCatById, {
@@ -126,7 +152,7 @@ function QueueEntryRow({
       : entry.content;
 
   return (
-    <div className={`flex items-start gap-2 px-3 py-2 rounded-lg ${rowToneClass}`}>
+    <div className={`flex flex-wrap items-start gap-2 px-3 py-2 rounded-lg ${rowToneClass}`}>
       <button
         className="p-0.5 mt-1 text-cafe-muted hover:text-cafe-secondary cursor-grab active:cursor-grabbing shrink-0 touch-none"
         aria-label="Drag to reorder"
@@ -142,7 +168,7 @@ function QueueEntryRow({
         {index + 1}
       </span>
 
-      <div className="flex-1 min-w-0">
+      <div className={`flex-1 min-w-0 ${hasRepeat ? 'basis-[calc(100%-4rem)]' : ''}`}>
         <LongFormReader
           title={`排队消息 · ${sourceLabel}`}
           summary={summary}
@@ -171,7 +197,7 @@ function QueueEntryRow({
                     catId={catId}
                     label={resolveCatName(catId)}
                     avatar={resolveCatAvatar(catId)}
-                    delivered={deliveredTargets.has(catId)}
+                    receipt={deliveryLabels[catId]}
                   />
                 );
               })}
@@ -210,7 +236,7 @@ function QueueEntryRow({
         </div>
       </div>
 
-      <div className="flex items-center gap-1 shrink-0 mt-1">
+      <div className={`flex items-center gap-1 mt-1 ${hasRepeat ? 'ml-12 min-w-0 flex-wrap' : 'shrink-0'}`}>
         <QueueEntryActions entry={entry} onSteer={onSteer} />
         {canRecallEdit && (
           <button

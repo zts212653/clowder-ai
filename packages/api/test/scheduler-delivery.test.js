@@ -1,6 +1,41 @@
 import assert from 'node:assert/strict';
 import { describe, it, mock } from 'node:test';
-import { createDeliverFn, createLifecycleToastFn } from '../dist/infrastructure/scheduler/delivery.js';
+import {
+  createDeliverFn,
+  createDeliverPrivateFn,
+  createLifecycleToastFn,
+} from '../dist/infrastructure/scheduler/delivery.js';
+import { connectorDeliveryHarness } from './helpers/connector-delivery-harness.js';
+
+for (const visibility of ['public', 'private', 'visible-with-private']) {
+  it(`scheduler ${visibility} admission retains the original tool restrictions`, async () => {
+    const h = connectorDeliveryHarness();
+    const deps = {
+      messageStore: h.messageStore,
+      socketManager: { broadcastToRoom() {}, emitToUser() {} },
+      persistedQueueDelivery: h.delivery,
+    };
+    const policy = { mode: 'callback_allowlist', allowedCallbackRoutes: ['POST /api/callbacks/hold-ball'] };
+    const input = {
+      threadId: 'held-thread',
+      userId: 'owner',
+      targetCatId: 'opus',
+      content: 'resume held work',
+      idempotencyKey: 'held-wake',
+      ownerAuthProvenance: 'strict',
+      toolExecutionPolicy: policy,
+      ...(visibility === 'visible-with-private' ? { privateContent: 'private held work' } : {}),
+    };
+    if (visibility === 'private') await createDeliverPrivateFn(deps)(input);
+    else await createDeliverFn(deps)(input);
+    const [entry] = h.admitted('held-thread', 'owner');
+    assert.equal(entry.execution.ownerAuthProvenance, 'strict');
+    assert.deepEqual(entry.execution.readOnlyToolPolicy, policy);
+    if (entry.payload?.messageId) {
+      assert.equal(Object.hasOwn(h.messageStore.getById(entry.payload.messageId), 'toolExecutionPolicy'), false);
+    }
+  });
+}
 
 describe('createDeliverFn', () => {
   it('appends connector message to store and broadcasts connector_message via socket', async () => {

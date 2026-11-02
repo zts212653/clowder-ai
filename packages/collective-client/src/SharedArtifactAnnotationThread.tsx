@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import type { SharedArtifact, SharedMarkdownView } from './collective-artifact-client.js';
+import { useCollectiveLanguage, useCollectiveText } from './collective-copy.js';
 import { MessageMarkdown } from './MessageMarkdown.js';
 import { useSharedArtifacts } from './use-collective-artifacts.js';
 
@@ -13,6 +14,8 @@ export function SharedArtifactAnnotationThread({
   readonly view: SharedMarkdownView;
   readonly annotation: Annotation;
 }) {
+  const language = useCollectiveLanguage();
+  const t = useCollectiveText();
   const shared = useSharedArtifacts();
   const key = JSON.stringify([
     artifact.serviceInstanceId,
@@ -85,16 +88,16 @@ export function SharedArtifactAnnotationThread({
       ))}
       {offset !== undefined && (
         <button type="button" disabled={blocked} onClick={() => void more()}>
-          读取回复（{replies.length}/{total}）
+          {language === 'en' ? `Load replies (${replies.length}/${total})` : `读取回复（${replies.length}/${total}）`}
         </button>
       )}
       {view.view.canWrite && (
         <button type="button" disabled={blocked} onClick={() => void decide()}>
-          {annotation.state === 'open' ? '解决批注' : '重新打开批注'}
+          {t(annotation.state === 'open' ? '解决批注' : '重新打开批注')}
         </button>
       )}
-      {settled === key && <output>正在同步批注…</output>}
-      {failure?.key === key && <p role="alert">{failure.message}</p>}
+      {settled === key && <output>{t('正在同步批注…')}</output>}
+      {failure?.key === key && <p role="alert">{t(failure.message)}</p>}
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import type { DispatchProposal } from '@cat-cafe/shared';
 import { createModuleLogger } from '../../infrastructure/logger.js';
 import { normalizeOwnerAuthProvenance, type OwnerAuthProvenance } from '../cats/services/owner-auth-provenance.js';
+import type { ITaskStore } from '../cats/services/stores/ports/TaskStore.js';
 import type { ActionFreshnessResolution, ActionSubjectTruthResolver } from './ActionSubjectTruthResolver.js';
 import {
   type ActionSuccessorFence,
@@ -9,6 +10,7 @@ import {
 } from './ActionSuccessorAdmissionService.js';
 import type { ActionSuccessorLeaseStore } from './ActionSuccessorLeaseStore.js';
 import type { ActionSuccessorDispatchFailureReason, ActionSuccessorLease } from './action-successor-state-machine.js';
+import { isRetiredTaskAction } from './retired-task-action.js';
 
 export type { ApprovedActionCarrierClassification } from './approved-action-carrier-classification.js';
 export { classifyApprovedActionCarrier } from './approved-action-carrier-classification.js';
@@ -33,6 +35,7 @@ export type ActionSuccessorDispatchDeliveryResult =
     };
 
 export interface ActionSuccessorDispatchRecoveryDeps {
+  readonly tasks?: Pick<ITaskStore, 'get'>;
   readonly leaseStore: Pick<
     ActionSuccessorLeaseStore,
     | 'listPendingDispatches'
@@ -128,6 +131,7 @@ export class ActionSuccessorDispatchRecovery {
   }
 
   async recover(candidate: ActionSuccessorLease): Promise<DispatchRecoveryResult> {
+    if (await isRetiredTaskAction(this.deps.tasks, candidate)) return { outcome: 'ignored' };
     if (candidate.dispatchDeliveryState === 'delivered' && candidate.dispatchDeliveredMessageId) {
       return { outcome: 'delivered', deliveredMessageId: candidate.dispatchDeliveredMessageId };
     }

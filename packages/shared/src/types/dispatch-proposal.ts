@@ -101,6 +101,8 @@ export interface DispatchProposal {
    * records the replacing proposal's ID. Only set when status='superseded'.
    */
   supersededBy?: string;
+  /** System closure time, independent of an approve/reject decision. Absent on legacy records. */
+  supersededAt?: number;
   /**
    * F246 Phase J (AC-J8): Digest of the ActionEnvelope that backs this proposal.
    * Absent on legacy (pre-Phase-J) proposals. When rollout state is 'required',

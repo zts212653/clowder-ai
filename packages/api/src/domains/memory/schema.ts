@@ -1,3 +1,6 @@
+import { CONTEXT_SOURCE_OPPORTUNITY_SCHEMA } from './cue/ContextSourceOpportunityStore.js';
+import { addMessageSearchAnswerRecoveryColumn, MESSAGE_SEARCH_ANSWER_SCHEMA } from './message-search-answer-schema.js';
+import { PROFILE_READ_SCHEMA } from './profile/profile-read-schema.js';
 // F102: SQLite schema — evidence_docs + evidence_fts + edges + markers + schema_version
 // Phase C adds: embedding_meta (V2) + evidence_vectors (vec0, decoupled)
 
@@ -78,7 +81,7 @@ END`,
 
 // Versions 53-57 were deployed by reverted F323 migrations and remain in live
 // schema_version ledgers. They must never be reused even though main returned to V52.
-export const CURRENT_SCHEMA_VERSION = 67;
+export const CURRENT_SCHEMA_VERSION = 74;
 
 function memoryCueLedgerHasConsumerBinding(db: Database.Database): boolean {
   return (db.prepare('PRAGMA table_info(memory_cue_events)').all() as Array<{ name: string }>).some(
@@ -1768,6 +1771,58 @@ export function applyMigrations(db: Database.Database): void {
   // on every open, rather than trusting a one-shot version migration.
   ensureEntityHardForgetProjectionFence(db);
   ensureTasteMemoryProjectionFence(db);
+  if (currentVersion < 68) {
+    db.transaction(() => {
+      db.exec(CONTEXT_SOURCE_OPPORTUNITY_SCHEMA);
+      db.prepare('INSERT INTO schema_version(version,applied_at) VALUES (?,?)').run(68, new Date().toISOString());
+    })();
+  }
+  // V69: bounded exact F260 effect recovery from the original atomic revision ledger.
+  if (currentVersion < 69) {
+    db.transaction(() => {
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_entity_revision_events_proposal_effect
+        ON entity_revision_events(entity_id, actor_id, proposal_id, revision_id)
+        WHERE source = 'proposal-approval'`);
+      db.prepare('INSERT INTO schema_version(version,applied_at) VALUES (?,?)').run(69, new Date().toISOString());
+    })();
+  }
+  // V70: hold continuations retain their authenticated caller's tool restrictions.
+  // Existing rows stay NULL (unknown restrictions); no historical authority is upgraded.
+  if (currentVersion < 70) {
+    db.transaction(() => {
+      const columns = db.prepare('PRAGMA table_info(dynamic_task_defs)').all() as Array<{ name: string }>;
+      if (!columns.some((column) => column.name === 'tool_execution_policy_json'))
+        db.exec('ALTER TABLE dynamic_task_defs ADD COLUMN tool_execution_policy_json TEXT');
+      db.prepare('INSERT INTO schema_version(version,applied_at) VALUES (?,?)').run(70, new Date().toISOString());
+    })();
+  }
+  if (currentVersion < 71) {
+    db.transaction(() => {
+      db.exec(MESSAGE_SEARCH_ANSWER_SCHEMA);
+      db.prepare('INSERT INTO schema_version(version,applied_at) VALUES (?,?)').run(71, new Date().toISOString());
+    })();
+  }
+  if (currentVersion < 72) {
+    db.transaction(() => {
+      addMessageSearchAnswerRecoveryColumn(db);
+      db.prepare('INSERT INTO schema_version(version,applied_at) VALUES (?,?)').run(72, new Date().toISOString());
+    })();
+  }
+  // Filter dated message reads from metadata before visiting historical body pages.
+  // No query/authority change; existing read-only workers never run migrations.
+  if (currentVersion < 73) {
+    db.transaction(() => {
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_message_passage_date
+        ON evidence_passages(doc_anchor, created_at, passage_id)`);
+      db.prepare('INSERT INTO schema_version(version,applied_at) VALUES (?,?)').run(73, new Date().toISOString());
+    })();
+  }
+  if (currentVersion < 74) {
+    db.transaction(() => {
+      db.exec(PROFILE_READ_SCHEMA);
+      db.prepare('INSERT INTO schema_version(version,applied_at) VALUES (?,?)').run(74, new Date().toISOString());
+    })();
+  }
 }
 
 /**

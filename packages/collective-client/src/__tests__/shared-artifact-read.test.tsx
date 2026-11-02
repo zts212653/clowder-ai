@@ -6,7 +6,13 @@ import type { ClientRequest } from '../client-request.js';
 import type { ClientSnapshot } from '../client-types.js';
 import type { collectiveArtifactClient, SharedArtifact, SharedMarkdownView } from '../collective-artifact-client.js';
 import { SharedArtifactCatalogueReconciled } from '../collective-artifact-client.js';
-import { useCollectiveArtifacts } from '../use-collective-artifacts.js';
+import { SharedArtifactReading } from '../SharedArtifactReading.js';
+import { SharedArtifactSurface } from '../SharedArtifactSurface.js';
+import {
+  CollectiveArtifactContext,
+  type CollectiveArtifactState,
+  useCollectiveArtifacts,
+} from '../use-collective-artifacts.js';
 import { useSharedArtifactRead } from '../use-shared-artifact-read.js';
 import { snapshot } from './first-entry-fixture.js';
 
@@ -121,4 +127,79 @@ it('refreshes the catalogue immediately after historical receipt recovery before
   await act(async () => root.render(<Harness />));
   expect(refresh).toHaveBeenCalledOnce();
   expect(host.textContent).toBe('');
+});
+
+it('keeps the promoted result reading, information, and history surfaces in the Host English language', async () => {
+  window.history.replaceState({}, '', '/?lang=en');
+  const promoted = { ...artifact, title: 'Original result', publishedByHumanId: 'owner', workId: 'work_abcdefgh' };
+  const view = {
+    contentRef: promoted.contentRef,
+    ownerRevision: 1,
+    blobDigest,
+    text: '# Original result\n\nExact returned bytes.',
+    view: {
+      review: { revision: 1, annotations: [] },
+      historyReadOnly: false,
+      canWrite: true,
+      annotationPage: { offset: 0, total: 0 },
+    },
+    modifications: { requests: [], total: 0, offset: 0 },
+  } as unknown as SharedMarkdownView;
+  const api = {
+    read: vi.fn(async () => view),
+    history: vi.fn(async () => ({
+      artifactId: promoted.artifactId,
+      contentRef: promoted.contentRef,
+      sourceEventId: promoted.sourceEventId,
+      snapshotOwnerRevision: 1,
+      snapshot: `sha256:${'b'.repeat(64)}`,
+      total: 1,
+      offset: 0,
+      versions: promoted.versions,
+    })),
+  } as unknown as ReturnType<typeof collectiveArtifactClient>;
+  const shared = {
+    api,
+    catalogue: [promoted],
+    status: 'ready',
+    selected: { artifactId: promoted.artifactId },
+    humanId: 'owner',
+    open: vi.fn(),
+    close: vi.fn(),
+    compare: vi.fn(),
+    refresh: vi.fn(async () => undefined),
+    humanName: () => 'You',
+    catName: () => 'Sol',
+    sourceMessage: () => undefined,
+  } as unknown as CollectiveArtifactState;
+  try {
+    await act(async () =>
+      root.render(
+        <CollectiveArtifactContext.Provider value={shared}>
+          <SharedArtifactReading>
+            <SharedArtifactSurface onReturnToSource={() => undefined} onOpenDiscussion={() => undefined} />
+          </SharedArtifactReading>
+        </CollectiveArtifactContext.Provider>,
+      ),
+    );
+    expect(host.textContent).toContain('Exact returned bytes.');
+    expect(host.innerHTML).not.toMatch(/[\u3400-\u9fff]/u);
+
+    const information = [...host.querySelectorAll<HTMLButtonElement>('.shared-artifact-header button')].find((button) =>
+      button.textContent?.includes('Work information'),
+    );
+    await act(async () => information?.click());
+    expect(host.querySelector('.shared-artifact-information')?.textContent).toContain('Linked to the original task');
+    expect(host.innerHTML).not.toMatch(/[\u3400-\u9fff]/u);
+    await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Close work information"]')?.click());
+
+    const history = [...host.querySelectorAll<HTMLButtonElement>('.shared-artifact-header button')].find(
+      (button) => button.textContent === 'Version history',
+    );
+    await act(async () => history?.click());
+    expect(host.querySelector('.shared-artifact-history')?.textContent).toContain('Shared by You.');
+    expect(host.innerHTML).not.toMatch(/[\u3400-\u9fff]/u);
+  } finally {
+    window.history.replaceState({}, '', '/');
+  }
 });

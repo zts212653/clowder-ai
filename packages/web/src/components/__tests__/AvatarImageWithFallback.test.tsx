@@ -52,3 +52,16 @@ describe('AvatarImageWithFallback', () => {
     expect(getImg().getAttribute('src')).toMatch(/^data:image\/svg\+xml/);
   });
 });
+
+it('keeps an unavailable canon source explicit instead of substituting another avatar', async () => {
+  await act(async () =>
+    root.render(<AvatarImageWithFallback src="/api/cats/member/avatar?bindingRevision=1" alt="Member" />),
+  );
+  await act(async () => getImg().dispatchEvent(new Event('error')));
+  expect(container.querySelector('img')).toBeNull();
+  expect(container.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe('这张图打不开了');
+  await act(async () =>
+    root.render(<AvatarImageWithFallback src="/api/cats/member/avatar?bindingRevision=2" alt="Member" />),
+  );
+  expect(getImg().getAttribute('src')).toContain('/api/cats/member/avatar?bindingRevision=2');
+});

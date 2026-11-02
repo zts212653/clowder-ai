@@ -51,7 +51,9 @@ export function ChannelHeader({
         {destinationTitle ? (
           <h1>{destinationTitle}</h1>
         ) : searchCount !== undefined ? (
-          <h1>搜索结果 · {searchCount}</h1>
+          <h1>
+            {t('搜索结果')} · {searchCount}
+          </h1>
         ) : (
           <details className="channel-menu">
             <summary>

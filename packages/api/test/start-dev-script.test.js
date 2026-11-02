@@ -1385,6 +1385,129 @@ fi
   assert.equal(output, 'child-killed');
 });
 
+test('terminate_managed_pids kills a descendant that outlives its parent exiting on TERM', () => {
+  // 2026-10-30 runtime stop: next start exited on TERM, while its next-server child kept waiting
+  // on open browser connections; reparented to init, it survived and stop reported process_set_survived.
+  const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
+  const output = runSourceOnlySnippet(
+    scriptPath,
+    `
+if ! command -v pgrep >/dev/null 2>&1; then
+  printf 'skipped'
+  exit 0
+fi
+sh -c 'sh -c "trap \\"\\" TERM; exec sleep 30" & wait' &
+parent_pid=$!
+child_pid=""
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  child_pid=$(pgrep -P "$parent_pid" | head -n 1 || true)
+  [ -n "$child_pid" ] && break
+  sleep 0.1
+done
+[ -n "$child_pid" ] || { printf 'missing-child'; exit 1; }
+MANAGED_PIDS=("$parent_pid")
+MANAGED_SHUTDOWN_GRACE_SECONDS=0.3
+terminate_managed_pids
+sleep 0.2
+if kill -0 "$parent_pid" 2>/dev/null; then
+  printf 'parent-alive'
+elif kill -0 "$child_pid" 2>/dev/null; then
+  kill -KILL "$child_pid" 2>/dev/null || true
+  printf 'orphan-alive'
+else
+  printf 'orphan-killed'
+fi
+`,
+  );
+
+  assert.equal(output, 'orphan-killed');
+});
+
+test('terminate_managed_pids also KILLs what a surviving descendant spawned after the snapshot', () => {
+  const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
+  const output = runSourceOnlySnippet(
+    scriptPath,
+    `
+if ! command -v pgrep >/dev/null 2>&1; then
+  printf 'skipped'
+  exit 0
+fi
+work=$(mktemp -d)
+cat > "$work/child.sh" <<'SH'
+trap '' TERM
+sleep 0.2
+sh -c 'echo $$ > "$0"; exec sleep 30' "$1" &
+wait
+SH
+sh -c 'sh "$0" "$1" & wait' "$work/child.sh" "$work/grandchild.pid" &
+parent_pid=$!
+child_pid=""
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  child_pid=$(pgrep -P "$parent_pid" | head -n 1 || true)
+  [ -n "$child_pid" ] && break
+  sleep 0.05
+done
+[ -n "$child_pid" ] || { printf 'missing-child'; exit 1; }
+MANAGED_PIDS=("$parent_pid")
+MANAGED_SHUTDOWN_GRACE_SECONDS=0.6
+terminate_managed_pids
+sleep 0.2
+grandchild_pid=$(cat "$work/grandchild.pid" 2>/dev/null || true)
+rm -rf "$work"
+[ -n "$grandchild_pid" ] || { printf 'missing-grandchild'; exit 0; }
+if kill -0 "$grandchild_pid" 2>/dev/null; then
+  kill -KILL "$grandchild_pid" 2>/dev/null || true
+  printf 'grandchild-alive'
+else
+  printf 'grandchild-killed'
+fi
+`,
+  );
+
+  assert.equal(output, 'grandchild-killed');
+});
+
+test('terminate_managed_pids never KILLs a recorded descendant pid that now names another process', () => {
+  const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
+  const output = runSourceOnlySnippet(
+    scriptPath,
+    `
+if ! command -v pgrep >/dev/null 2>&1; then
+  printf 'skipped'
+  exit 0
+fi
+sh -c 'sh -c "trap \\"\\" TERM; exec sleep 30" & wait' &
+parent_pid=$!
+child_pid=""
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  child_pid=$(pgrep -P "$parent_pid" | head -n 1 || true)
+  [ -n "$child_pid" ] && break
+  sleep 0.1
+done
+[ -n "$child_pid" ] || { printf 'missing-child'; exit 1; }
+# The grace is where a pid can be recycled: after it, the recorded start time no longer matches.
+recycled=false
+sleep() { recycled=true; command sleep "$@"; }
+process_started_at() {
+  if [ "$recycled" = true ]; then printf 'another process'; else command ps -p "$1" -o lstart= 2>/dev/null; fi
+}
+MANAGED_PIDS=("$parent_pid")
+MANAGED_SHUTDOWN_GRACE_SECONDS=0.3
+terminate_managed_pids
+unset -f sleep
+sleep 0.2
+if kill -0 "$child_pid" 2>/dev/null; then
+  kill -KILL "$child_pid" 2>/dev/null || true
+  printf 'spared'
+else
+  printf 'killed'
+fi
+`,
+  );
+
+  assert.equal(output, 'spared');
+});
+
 test('managed shutdown leaves enough time for API audio-finalization hooks', () => {
   const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
   const source = readFileSync(scriptPath, 'utf8');

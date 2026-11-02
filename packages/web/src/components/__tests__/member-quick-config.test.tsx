@@ -21,8 +21,10 @@ describe('quick member configuration', () => {
     expect(html).toContain('跟随');
     expect(html).not.toContain('模型恢复跟随');
     expect(html).not.toContain('执行身份');
-    for (const tool of ['Claude Code', 'Codex', 'Gemini', 'Kimi', 'OpenCode', 'Antigravity', 'Cat Agent', '自定义 ACP'])
+    for (const tool of ['Claude Code', 'Codex', 'AGY Native', 'Kimi', 'OpenCode', 'Cat Agent', '自定义 ACP'])
       expect(html).toContain(tool);
+    expect(html).not.toContain('Gemini');
+    expect(html).not.toContain('Antigravity');
   });
   it('shows meaningful threshold controls and hides compression counts for handoff', () => {
     const html = renderToStaticMarkup(

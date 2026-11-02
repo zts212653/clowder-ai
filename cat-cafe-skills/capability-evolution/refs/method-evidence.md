@@ -4,7 +4,7 @@ feature_ids: []
 related_features: [F311, F267]
 topics: [meta-method, provenance, skill-transfer]
 created: 2026-09-10
-updated: 2026-10-01
+updated: 2026-10-22
 knowledge:
   artifact_type: method
   domain: capability-evolution
@@ -15,6 +15,7 @@ knowledge:
   provenance:
     author_type: collaborative
   source_refs:
+    - "[thread-id]#private-source-id"
     - "[thread-id]#private-source-id"
     - "[thread-id]#private-source-id"
     - "[thread-id]#private-source-id"
@@ -55,6 +56,11 @@ Git 保存本文件与相应 skill 的文本修订史；它不替代 asset owner
 | 先确认量尺看得见目标改进；挑版本用过的集合不是独立验收 | [Automating eval design and hillclimbing（claude.dev，2026-09-28）](https://claude.dev/blog/automating-eval-design-and-hillclimbing/)及其 `claude-api` skill 的 `shared/evals/eval-hillclimb.md` §0.5、§3 切分段（本机插件缓存，2026-10-01 读） | 优化比较前按比较设计估计噪声，与剩余空间、最小可行动改进对照；含随机生成步骤时区分生成与打分波动；删减版也是候选。其默认 test 每轮参与选版，按家里口径是模拟考。例子是厂商内部基准且无该例区间，不迁移其数字或模型排名 |
 
 ## 怎样消费与继续修订
+
+10-22 自进化调研的三猫收敛与一手来源边界
+补充了有界材料统计、按区分力选探针、一次通读/精简版对照、评委双向校准、回归计数
+和局部经验泛化检查。来自本次真实讨论中的过强推断与限定外部实验；不是每轮新清单，
+也未证明在家里提高了净效用。现有运行记录、正式版本与使用结果仍归原 owner。
 
 先判断本任务是否出现了相同的决策难题，再读对应原件。原件可能只证明一个
 具体反例，不自动给出普适因果结论；也不要求把全部历史读一遍才能继续。

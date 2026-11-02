@@ -17,6 +17,7 @@ import { afterEach, beforeEach, describe, it } from 'node:test';
 
 const { checkMcpProject } = await import('../dist/mcp/mcp-drift-detector.js');
 const { VALID_MCP_DRIFT_DECISIONS, syncMcpDrift } = await import('../dist/mcp/mcp-drift-resolver.js');
+const { syncMcpAll } = await import('../dist/mcp/mcp-sync-all.js');
 const { canonicalJson, computeGlobalMcpHash, extractMcpEntries, syncMcpProject } = await import(
   '../dist/mcp/mcp-sync-engine.js'
 );
@@ -198,6 +199,53 @@ describe('mcp-drift-resolver: syncMcpDrift', () => {
   afterEach(() => {
     rmSync(globalRoot, { recursive: true, force: true });
     rmSync(projectRoot, { recursive: true, force: true });
+  });
+
+  for (const invalid of ['{ broken JSON', '{"version":999,"capabilities":[]}']) {
+    it(`refuses unreadable project config without overwriting its bytes: ${invalid}`, async () => {
+      writeCapConfig(globalRoot, capConfig([mcpEntry('alpha')]));
+      writeCapConfig(projectRoot, capConfig([]));
+      const path = join(projectRoot, '.cat-cafe/capabilities.json');
+      writeFileSync(path, invalid);
+      const drift = { issues: [{ type: 'global-new', mcpId: 'alpha' }], driftHash: '', summary: {} };
+      for (const operation of [
+        () => checkMcpProject(projectRoot, globalRoot),
+        () => syncMcpProject(projectRoot, globalRoot),
+        () => syncMcpDrift(projectRoot, globalRoot, drift),
+      ]) {
+        await assert.rejects(operation, /Cannot .*project capabilities.*(parse_error|unsupported_shape)/);
+        assert.equal(readFileSync(path, 'utf8'), invalid);
+      }
+    });
+  }
+
+  it('refuses missing or unreadable global config without removing project MCPs', async () => {
+    writeCapConfig(projectRoot, capConfig([mcpEntry('alpha')]));
+    const path = join(projectRoot, '.cat-cafe/capabilities.json');
+    const original = readFileSync(path, 'utf8');
+    const drift = { issues: [{ type: 'project-orphan', mcpId: 'alpha' }], driftHash: '', summary: {} };
+    for (const invalid of [null, '{ broken JSON']) {
+      if (invalid) {
+        writeCapConfig(globalRoot, capConfig([]));
+        writeFileSync(join(globalRoot, '.cat-cafe/capabilities.json'), invalid);
+      }
+      for (const operation of [
+        () => checkMcpProject(projectRoot, globalRoot),
+        () => syncMcpProject(projectRoot, globalRoot),
+        () => syncMcpDrift(projectRoot, globalRoot, drift),
+        () => syncMcpAll(globalRoot),
+      ]) {
+        await assert.rejects(operation, /Cannot .*global capabilities.*(absent|parse_error)/);
+        assert.equal(readFileSync(path, 'utf8'), original);
+      }
+    }
+  });
+
+  it('initializes a missing project config from a valid global config', async () => {
+    writeCapConfig(globalRoot, capConfig([mcpEntry('alpha')]));
+    const drift = await checkMcpProject(projectRoot, globalRoot);
+    await syncMcpDrift(projectRoot, globalRoot, drift);
+    assert.equal(readCapConfig(projectRoot).capabilities[0].id, 'alpha');
   });
 
   it('adds new entries for global-new issues', async () => {

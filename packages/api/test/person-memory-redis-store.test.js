@@ -978,7 +978,7 @@ describe('RedisPersonMemoryStore', { skip: redisIsolationSkipReason(REDIS_URL) }
     assert.equal(replay.outcome, 'replayed');
     assert.deepEqual(first.receipt, replay.receipt);
     assert.equal((await store.getCandidateForOwner(input.ownerUserId, input.candidateId)).state, 'withdrawn');
-    assert.deepEqual(await store.listSettled(input.ownerUserId), []);
+    assert.equal((await store.listSettled(input.ownerUserId))[0]?.candidate.state, 'withdrawn');
     assert.equal(await store.getPerson(input.ownerUserId, approved.receipt.personId), null);
     assert.deepEqual(await store.listClaims(input.ownerUserId, approved.receipt.personId), []);
     assert.deepEqual(await store.listRelationships(input.ownerUserId, approved.receipt.personId), []);
@@ -1136,7 +1136,7 @@ describe('RedisPersonMemoryStore', { skip: redisIsolationSkipReason(REDIS_URL) }
     assert.equal(undone.outcome, 'applied');
     assert.equal((await store.getCandidateForOwner(input.ownerUserId, input.candidateId)).state, 'withdrawn');
     assert.deepEqual(await store.listPending(input.ownerUserId), []);
-    assert.deepEqual(await store.listSettled(input.ownerUserId), []);
+    assert.equal((await store.listSettled(input.ownerUserId))[0]?.candidate.state, 'withdrawn');
     const retainedPerson = await store.getPerson(input.ownerUserId, first.receipt.personId);
     assert.ok(retainedPerson);
     assert.deepEqual(await store.listPeople(input.ownerUserId), [retainedPerson]);
@@ -1150,6 +1150,31 @@ describe('RedisPersonMemoryStore', { skip: redisIsolationSkipReason(REDIS_URL) }
     });
     assert.equal(forgotten.verdict, 'purged');
     assert.deepEqual(await store.listPeople(input.ownerUserId), []);
+  });
+
+  it('rejects inconsistent settled page membership instead of claiming empty history', async () => {
+    const input = candidateInput({ candidateId: 'person_candidate_page_owner' });
+    await stageAndAnchor(input);
+    await store.rejectCandidate({
+      ownerUserId: input.ownerUserId,
+      candidateId: input.candidateId,
+      decisionId: 'page-reject',
+      decidedAt: 300,
+    });
+    let page;
+    for (let batch = 0; batch < 30; batch++) {
+      try {
+        page = await store.listSettledPage(input.ownerUserId, { limit: 30 });
+        break;
+      } catch (error) {
+        if (error.code !== 'APPROVAL_HISTORY_PREPARING') throw error;
+      }
+    }
+    assert.equal(page.records.length, 1);
+    const key = PersonMemoryKeys.candidate(input.ownerUserId, input.candidateId);
+    const canonical = JSON.parse(await redis.get(key));
+    await redis.set(key, JSON.stringify({ ...canonical, ownerUserId: 'other-owner' }));
+    await assert.rejects(store.listSettledPage(input.ownerUserId, { limit: 30 }), /canonical.*mismatch/i);
   });
 
   it('keeps not-now owner-visible but non-recallable, then rejects and purges payload', async () => {
@@ -1318,6 +1343,11 @@ describe('RedisPersonMemoryStore', { skip: redisIsolationSkipReason(REDIS_URL) }
     assert.deepEqual(await store.listSettled(input.ownerUserId), [{ candidate: result.candidate, decidedAt: 300 }]);
     assert.equal((await store.listClaims(input.ownerUserId, approved.receipt.personId)).length, 1);
     assert.equal((await store.getPerson(input.ownerUserId, approved.receipt.personId)).status, 'active');
+    const { F276ApprovalAdapter } = await import('../dist/domains/approval-hub/adapters/F276ApprovalAdapter.js');
+    const [settled] = await new F276ApprovalAdapter(store).listSettled(input.ownerUserId);
+    assert.equal(settled.status, 'rejected');
+    assert.equal(settled.detail.hasRetainedWrites, true, 'rejecting remaining drafts does not undo previous writes');
+    assert.deepEqual(settled.detail.materialized, { claims: 1, relationships: 1, events: 0 });
   });
 
   it('does not overwrite a fully materialized candidate with rejection feedback', async () => {
@@ -1366,6 +1396,11 @@ describe('RedisPersonMemoryStore', { skip: redisIsolationSkipReason(REDIS_URL) }
     const superseded = await store.getCandidateForOwner(original.ownerUserId, original.candidateId);
     const corrected = await store.getCandidateForOwner(replacement.ownerUserId, replacement.candidateId);
     assert.equal(superseded.state, 'withdrawn');
+    assert.ok(
+      (await store.listSettled(original.ownerUserId)).some(
+        (row) => row.candidate.candidateId === original.candidateId && row.candidate.state === 'withdrawn',
+      ),
+    );
     assert.equal(superseded.replacedByProposalId, replacement.candidateId);
     assert.equal(superseded.personDraft, undefined);
     assert.deepEqual(superseded.claimDrafts, []);
@@ -2706,6 +2741,8 @@ describe('RedisPersonMemoryStore', { skip: redisIsolationSkipReason(REDIS_URL) }
     assert.deepEqual(withdrawn.claimDrafts, []);
     assert.deepEqual(withdrawn.remainingDraftIds, []);
     assert.equal(withdrawn.sourceBundle, undefined);
+    assert.equal((await store.listSettled(input.ownerUserId))[0]?.candidate.state, 'withdrawn');
+    assert.equal((await store.listSettled(input.ownerUserId))[0]?.decidedAt, 300);
     assert.deepEqual(await store.listPending(input.ownerUserId), []);
     assert.equal(await redis.get(PersonMemoryKeys.suppression(input.ownerUserId, input.candidateId)), null);
     assert.equal(await store.resolveDormantCandidateBySubject(input.ownerUserId, '黄挺'), null);

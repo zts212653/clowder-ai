@@ -1,4 +1,18 @@
+import { reportAcpHostPolicy, resolveAcpHostPolicy } from './config/acp-host-policy.js';
 import { AgentServiceUnavailableError } from './domains/cats/services/agents/registry/AgentServiceUnavailableError.js';
+import { hasRecentWorkPublication } from './domains/cats/services/agents/routing/recent-global-work-reader.js';
+import { createRefreshingAcpSessionProvider } from './domains/cats/services/agents/session-contract/acp-session-provider.js';
+import {
+  SessionImplementationRegistry,
+  sessionImplementationKey,
+} from './domains/cats/services/agents/session-contract/implementation-registry.js';
+import { resolveMemberSessionRef } from './domains/cats/services/agents/session-contract/plugin-agent-provider.js';
+import {
+  RegisteredSessionAgentService,
+  selectSessionAgentService,
+} from './domains/cats/services/agents/session-contract/registered-session-agent-service.js';
+import { readSessionContractSettings } from './domains/cats/services/agents/session-contract/session-contract-settings.js';
+import { ContextSourceOpportunityStore } from './domains/memory/cue/ContextSourceOpportunityStore.js';
 import {
   createHostMediaPathResolver,
   hostMediaPathRootsFromEnv,
@@ -8,7 +22,9 @@ import { createListenAssetSpeech } from './domains/messaging/outbound-media/spee
 import { createPublishingMessageStore } from './domains/messaging/publishing-message-store.js';
 import { createMessagingStores } from './domains/messaging/stores/factory.js';
 import { SubscriptionDrainScheduler } from './domains/messaging/subscription-drain-scheduler.js';
+import { declaredAgentSessionProviders } from './domains/plugin/declared/declared-agent-session-providers.js';
 import { PLUGIN_HOST_ENTRIES, pluginHostRoot } from './domains/plugin/host-inventory/plugin-host-layout.js';
+import { createCollectiveWorkCalendarReader } from './domains/plugin/host-surface/collective-work-calendar.js';
 import { createPluginConversationDelivery } from './domains/plugin/host-surface/plugin-conversation-delivery.js';
 import { catRegistryMentionPatterns } from './infrastructure/connectors/mention-parser.js';
 /**
@@ -40,15 +56,16 @@ import fastifyWebsocket from '@fastify/websocket';
 import Fastify, { type FastifyReply } from 'fastify';
 import { resolveAnthropicRuntimeProfile, validateRuntimeProviderBinding } from './config/account-resolver.js';
 import { resolveInvokeCapabilityRoot } from './config/capabilities/invoke-capability-root.js';
-import { regenerateStartupCliConfigs } from './config/capabilities/startup-cli-config.js';
+import { migrateStartupCodexMcpConfig, regenerateStartupCliConfigs } from './config/capabilities/startup-cli-config.js';
 import { resolveBoundAccountRefForCat, usesNativeToolConfiguration } from './config/cat-account-binding.js';
 import {
   bootstrapDefaultCatCatalog,
-  getAcpConfig,
   getCoCreatorConfig,
   getConfigSessionStrategy,
   getDefaultCatId,
+  getRegisteredAcpConfig,
   isCatAvailable,
+  resolveRuntimeCatTemplatePath,
   toAllCatConfigs,
 } from './config/cat-config-loader.js';
 import { getCatModel } from './config/cat-models.js';
@@ -67,6 +84,8 @@ import {
 } from './config/runtime-deployment-inclusion.js';
 import { initRuntimeOverrides } from './config/session-strategy-overrides.js';
 import { assertStorageReady } from './config/storage-guard.js';
+import { ApprovalDecisionReceiptOutbox } from './domains/approval-hub/ApprovalDecisionReceiptOutbox.js';
+import { ApprovalDecisionReceiptService } from './domains/approval-hub/ApprovalDecisionReceiptService.js';
 import { ApprovalIngress } from './domains/approval-hub/ApprovalIngress.js';
 import { RedisApprovalLifecycleEpochAuthority } from './domains/approval-hub/ApprovalLifecycleEpochAuthority.js';
 import {
@@ -85,6 +104,7 @@ import { F266ApprovalAdapter } from './domains/approval-hub/adapters/F266Approva
 import { F276ApprovalAdapter } from './domains/approval-hub/adapters/F276ApprovalAdapter.js';
 import { F306ApprovalAdapter } from './domains/approval-hub/adapters/F306ApprovalAdapter.js';
 import { F321ApprovalAdapter } from './domains/approval-hub/adapters/F321ApprovalAdapter.js';
+import { installApprovalDecisionReceiptHooks } from './domains/approval-hub/approval-decision-receipt-hooks.js';
 import { createDispatchProposalStore } from './domains/approval-hub/stores/factories/DispatchProposalStoreFactory.js';
 import { createEntityProposalStore } from './domains/approval-hub/stores/factories/EntityProposalStoreFactory.js';
 import { createActionSuccessorRecoveryCycle } from './domains/ball-custody/ActionSuccessorRecoveryCycle.js';
@@ -94,8 +114,8 @@ import { EventWaitDispositionService } from './domains/ball-custody/EventWaitDis
 import { createSqliteHoldQuotaStore, type IHoldQuotaStore } from './domains/ball-custody/hold-quota-store.js';
 import { RedisHoldQuotaStore } from './domains/ball-custody/hold-quota-store-redis.js';
 import type { ManagedCommandWakeRecoverySweep } from './domains/ball-custody/ManagedCommandWakeRecoverySweep.js';
+import { createManagedCommandWakeAdmission } from './domains/ball-custody/managed-command-wake-admission.js';
 import { createManagedCommandWakeCarrierAdapter } from './domains/ball-custody/managed-command-wake-carrier-adapter.js';
-import type { ManagedCommandWakeRecoveryDeps } from './domains/ball-custody/managed-command-wake-lifecycle.js';
 import { createManagedWakeAdmittedNotifier } from './domains/ball-custody/managed-wake-admitted-notifier.js';
 import { RedisWaitTerminationStore } from './domains/ball-custody/RedisWaitTerminationStore.js';
 import { WaitTerminationService } from './domains/ball-custody/WaitTerminationService.js';
@@ -139,6 +159,7 @@ import {
 } from './domains/cats/services/agents/invocation/response-draft-settlement.js';
 import { SessionContinuationCoordinator } from './domains/cats/services/agents/invocation/SessionContinuationCoordinator.js';
 import { SessionMutex } from './domains/cats/services/agents/invocation/SessionMutex.js';
+import { sharedMcpDeploymentId } from './domains/cats/services/agents/invocation/shared-mcp-launch.js';
 import {
   createSidebarPresenceSource,
   type SidebarTerminalExecution,
@@ -247,6 +268,7 @@ import {
 } from './domains/growing/EntrustedWorkOwnerReadService.js';
 import { EntrustedWorkTaskExecutionService } from './domains/growing/EntrustedWorkTaskExecutionService.js';
 import { F232PreparedArtifactReader } from './domains/growing/F232PreparedArtifactReader.js';
+import { F290CollectiveWorkResultPluginAdapter } from './domains/growing/F290CollectiveWorkResultPluginAdapter.js';
 import { F246NeedsMeProducerAdapter, F306NeedsMeProducerAdapter } from './domains/growing/NeedsMeProducerAdapter.js';
 import { NeedsMeProducerCatalog } from './domains/growing/NeedsMeProducerCatalog.js';
 import { ActivityTracker } from './domains/health/ActivityTracker.js';
@@ -382,6 +404,10 @@ import {
   PawFeelCaptureIntentSidecar,
   PawFeelCaptureService,
 } from './infrastructure/harness-eval/paw-feel-disposition/hot-intake.js';
+import {
+  loadOrCreatePawFeelInboxAuditCursorSigner,
+  PawFeelInboxAuditScanService,
+} from './infrastructure/harness-eval/paw-feel-disposition/inbox-audit-scan.js';
 import { createMemoryCuePawFeelGitTruth } from './infrastructure/harness-eval/paw-feel-disposition/providers/memory-cue-git-truth.js';
 import {
   MEMORY_CUE_PAW_FEEL_PROVIDER_ROUTE,
@@ -402,6 +428,7 @@ import { runSchedulerReplyUserIdBackfill } from './infrastructure/scheduler/sche
 import { securityHeadersPlugin } from './infrastructure/security-headers.js';
 import { sessionAuthPlugin, sessionRoute } from './infrastructure/session-auth.js';
 import { startupMilestone } from './infrastructure/startup-diagnostics.js';
+import { startProcessCpuCapture } from './infrastructure/telemetry/cpu/process-cpu-capture.js';
 import { SocketManager } from './infrastructure/websocket/index.js';
 import { avatarsRoutes } from './routes/avatars.js';
 import {
@@ -485,6 +512,7 @@ import {
   mkdirRoute,
   packsRoutes,
   pawFeelDispositionRoutes,
+  pawFeelInboxAuditScanRoutes,
   pawFeelLegacyCensusRoutes,
   perspectiveRoutes,
   projectSetupRoute,
@@ -545,6 +573,8 @@ import { knowledgeFeedRoutes } from './routes/knowledge-feed.js';
 import { createLiveTaskAuthority } from './routes/live-task-authority.js';
 import { marketplaceRoutes } from './routes/marketplace.js';
 import { mediaRoutes } from './routes/media-routes.js';
+import { registerMemberMcpRoutes, resolveMemberToolFamiliesForCat } from './routes/member-mcp.js';
+import { resolveMessageStickerDirectories } from './routes/message-sticker-runtime-assets.js';
 import { registerPersonMemoryDecisionRoutes } from './routes/person-memory-decision-routes.js';
 import { personMemoryOwnerReadRoutes } from './routes/person-memory-owner-read.js';
 import { previewRoutes } from './routes/preview.js';
@@ -611,6 +641,7 @@ function hasRuntimeSessionDrain(service: AgentService): service is AgentService 
 
 async function main(): Promise<void> {
   startupMilestone('module-graph-loaded');
+  const acpHostPolicy = resolveAcpHostPolicy();
   let managedCommandWakeRecovery: ManagedCommandWakeRecoverySweep | undefined;
   const { logger: customLogger, isDebugMode, LOG_DIR_PATH } = await import('./infrastructure/logger.js');
   let sessionHookAuthenticationReady = (): boolean => false;
@@ -621,11 +652,15 @@ async function main(): Promise<void> {
   startupMilestone('telemetry-ready');
 
   const { registerMemberSaveDiagnostics } = await import('./routes/member-save-diagnostics.js');
+  const { registerConnectionDiagnostics } = await import('./routes/connection-diagnostics.js');
   const { saveSpan } = await import('./utils/member-save-diagnostics.js');
 
   const app = Fastify({ logger: customLogger as unknown as import('fastify').FastifyBaseLogger });
+  reportAcpHostPolicy(app.log, acpHostPolicy);
   const messageReadDiagnostics = registerMessageReadDiagnostics(app);
   const privateUserId = (process.env.CAT_CAFE_USER_ID ?? 'default-user').trim();
+  let approvalDecisionReceipts: ApprovalDecisionReceiptService;
+  installApprovalDecisionReceiptHooks(app, () => approvalDecisionReceipts);
   let runtimeDeploymentRevision: string | null = null;
   let runtimeDeploymentContext: RuntimeDeploymentProcessContext | undefined;
   const deploymentWaitLifecycleHolder: {
@@ -650,6 +685,8 @@ async function main(): Promise<void> {
     origin: resolveFrontendCorsOrigins(process.env, app.log),
     credentials: true,
     exposedHeaders: ['x-clowder-save-id'],
+    // Diagnostic correlation adds a fixed header to GETs; reuse their preflight during polling.
+    maxAge: 600,
   });
 
   // F156 D-2: Anti-clickjacking headers (X-Frame-Options + CSP frame-ancestors)
@@ -660,6 +697,7 @@ async function main(): Promise<void> {
   await app.register(sessionAuthPlugin);
   await app.register(sessionRoute, { ownerUserId: privateUserId });
   registerMemberSaveDiagnostics(app, runtimeDeploymentRevision ?? undefined);
+  registerConnectionDiagnostics(app);
 
   // WebSocket support (F089 terminal)
   await app.register(fastifyWebsocket);
@@ -997,7 +1035,7 @@ async function main(): Promise<void> {
     readDiagnostics: messageReadDiagnostics,
     onAppend: (msg) => {
       appendListener?.(msg);
-      if (userMentionEvent(msg))
+      if (userMentionEvent(msg) || hasRecentWorkPublication(msg))
         socketManager?.emitToUser(msg.userId, 'entrusted_work_projection_invalidated', { ownerUserId: msg.userId });
       custodyOpportunityObservation?.notifySourceChanged(msg);
     },
@@ -1418,6 +1456,32 @@ async function main(): Promise<void> {
       return excluded;
     },
   });
+  const { MessageSearchService } = await import('./domains/memory/MessageSearchService.js');
+  const { MessageSearchAnswerPublicationStore } = await import(
+    './domains/memory/MessageSearchAnswerPublicationStore.js'
+  );
+  const { MessageSearchAnswerPublicationService } = await import(
+    './domains/memory/MessageSearchAnswerPublicationService.js'
+  );
+  const messageSearchService = new MessageSearchService({
+    evidenceStore: memoryServices.evidenceStore,
+    threadStore,
+    messageStore,
+  });
+  const messageSearchAnswerService = new MessageSearchAnswerPublicationService(
+    new MessageSearchAnswerPublicationStore(memoryServices.store.getDb(), (work) =>
+      memoryServices.store.runExclusive(work),
+    ),
+    messageSearchService,
+    messageStore,
+    threadStore,
+  );
+  app.log.info(
+    { messageSearchAnswerRecovery: await messageSearchAnswerService.recoverPreparedResponses() },
+    'Existing search answer bindings reconciled',
+  );
+  const { registerMessageSearchAnswerRoute } = await import('./routes/message-search-answer-route.js');
+  registerMessageSearchAnswerRoute(app, messageSearchAnswerService);
   const profileMemoryLifecycleStore = new ProfileMemoryLifecycleStore({
     db: memoryServices.store.getDb(),
     repository: profileRepository,
@@ -1591,6 +1655,7 @@ async function main(): Promise<void> {
     try {
       const result = await memoryServices.indexBuilder.rebuild({
         deferThreadIndexing: true,
+        deferDocumentEmbedding: true,
         onProgress: (phase, percent) => {
           app.log.info(
             { phase, percent, elapsedMs: Date.now() - startMs },
@@ -1612,6 +1677,7 @@ async function main(): Promise<void> {
       memoryServices.embeddingLifecycle.catchUpAfterReady(),
     );
   }
+  app.addHook('onClose', async () => memoryServices.embeddingLifecycle.deactivate());
 
   // F-4: Global knowledge rebuild (Skills + MEMORY.md → global_knowledge.sqlite)
   if (memoryServices.globalIndexBuilder) {
@@ -1683,7 +1749,7 @@ async function main(): Promise<void> {
   const priorTimelineListener = messageStore.onTimelineChanged;
   messageStore.onTimelineChanged = (message) => {
     priorTimelineListener?.(message);
-    if (userMentionEvent(message) || message.mentionsUser)
+    if (userMentionEvent(message) || message.mentionsUser || hasRecentWorkPublication(message))
       socketManager?.emitToUser(message.userId, 'entrusted_work_projection_invalidated', {
         ownerUserId: message.userId,
       });
@@ -1725,6 +1791,18 @@ async function main(): Promise<void> {
     progress: (entry, targetCatId) => queueProcessor.progressOwnedCarrier(entry, targetCatId),
   });
   const schedulerDeliver = createDeliverFn({ messageStore, socketManager, persistedQueueDelivery });
+  const { WorktreeNoticeService } = await import('./infrastructure/worktrees/WorktreeNoticeService.js');
+  const { WorktreeNoticeStartGuard } = await import('./infrastructure/worktrees/WorktreeNoticeStartGuard.js');
+  const worktreeNotices = new WorktreeNoticeService({
+    repoRoot,
+    scriptRoot: runtimeEntrypointRoot,
+    getThread: async (id) => threadStore.get(id),
+    isOwnerAvailable: (id) => catRegistry.has(id) && isCatAvailable(id),
+    deliver: schedulerDeliver,
+    warn: (message) => app.log.warn(message),
+  });
+  worktreeNotices.start();
+  app.addHook('onClose', async () => worktreeNotices.stop());
   const schedulerDeliverPrivate = createDeliverPrivateFn({ persistedQueueDelivery });
   const schedulerLifecycleToast = createLifecycleToastFn({ socketManager });
   const schedulerFetchContent = createFetchContentFn();
@@ -1757,10 +1835,11 @@ async function main(): Promise<void> {
   // F255 startup reconciliation resolves every persisted cat-life projection immediately,
   // so registry population must precede auto-dream bootstrap as well as AgentRouter construction.
   try {
-    const catConfig = bootstrapDefaultCatCatalog();
+    const templatePath = resolveRuntimeCatTemplatePath();
+    const catConfig = bootstrapDefaultCatCatalog(templatePath);
     const allConfigs = toAllCatConfigs(catConfig);
     for (const [id, config] of Object.entries(allConfigs)) {
-      catRegistry.register(id, config);
+      catRegistry.register(id, config, { configurationTemplatePath: templatePath });
     }
     app.log.info(`[api] CatRegistry initialized: ${catRegistry.getAllIds().join(', ')}`);
   } catch (err) {
@@ -1981,6 +2060,10 @@ async function main(): Promise<void> {
 
   // ── F149 Phase C: ACP process pool registry (variantId → AcpProcessPool) ──
   const acpPoolRegistry: AcpPoolRegistry = new Map();
+  const sessionContractSettings = readSessionContractSettings(process.env);
+  for (const warning of sessionContractSettings.warnings) app.log.warn(warning);
+  const sessionImplementations = new SessionImplementationRegistry();
+  const registeredSessionServices = new Map<string, RegisteredSessionAgentService>();
   // F254: Codex app-server warm hosts are profile-scoped and survive catalog refreshes.
   const codexAppServerPoolRegistry: CodexAppServerPoolRegistry = new Map();
   const nativeRealtimeCompanionEnabled = isNativeRealtimeCompanionDeployment(process.env.CAT_CAFE_DEPLOYMENT_ID);
@@ -1988,144 +2071,198 @@ async function main(): Promise<void> {
   // ── F32-b: AgentRegistry (catId → AgentService) — one instance per cat ──
   // Each cat gets its own AgentService instance with its catId + model.
   const agentRegistry = new AgentRegistry();
-  const syncAgentRegistry = async (configs: Record<string, CatConfig>, warmPrompts = true) => {
-    agentRegistry.reset();
-    clearL0Cache(); // Invalidate stale L0 compilations from previous sync
-    const projectRoot = resolveActiveProjectRoot();
-    const activeAcpProfileIds = new Set<string>();
-    const activeCodexProfileIds = new Set<string>();
-    for (const [id, config] of Object.entries(configs)) {
-      await saveSpan(
-        'registry.member',
-        async () => {
-          const catId = config.id;
-          // F32-b P1 fix: do NOT pass model here — let constructors resolve via
-          // getCatModel(catId) which respects env override (CAT_*_MODEL > config > fallback)
-          let service: AgentService;
-
-          // ── F161: Generic ACP transport path (provider-agnostic) ──
-          // Carrier selection is resolved once by cat-config-loader. The ACP block
-          // below contains only launch details; its mere presence is not routing truth.
-          const acpConfig = config.carrier === 'acp' ? getAcpConfig(id, projectRoot) : undefined;
-          if (config.carrier === 'acp') {
-            if (!acpConfig) {
-              app.log.warn(`[api] Cat "${id}" selects carrier=acp but has no ACP config. It will not be routable.`);
-              return;
-            }
-            activeAcpProfileIds.add(id);
-            let acpService: Awaited<ReturnType<typeof createAcpServiceForConfig>>;
-            try {
-              acpService = await createAcpServiceForConfig({
-                projectRoot,
-                profileId: id,
-                config,
-                effectiveModel: getCatModel(id),
-                acpConfig,
-                poolRegistry: acpPoolRegistry,
-                log: app.log,
-                onUnavailable: (reason) => agentRegistry.markUnavailable(id, reason),
-              });
-            } catch (error) {
-              // A single member's bootstrap/privacy failure must not keep the API
-              // from listening; degrade that member and keep every other cat.
-              const reason = error instanceof Error ? error.message : String(error);
-              app.log.warn(`[api] Cat "${id}" ACP startup failed; marking it unavailable: ${reason}`);
-              agentRegistry.markUnavailable(id, { code: 'ACP_BOOTSTRAP_UNAVAILABLE', message: reason });
-              return;
-            }
-            if (!acpService) return;
-            service = acpService;
-          } else
-            switch (config.clientId) {
-              // ── Provider-specific CLI paths (non-ACP) ──
-              case 'anthropic': {
-                if (config.carrier === 'sdk') {
-                  service = new ClaudeSdkAgentService({ catId });
-                } else {
-                  const { createClaudeAgentServiceForCanary } = await import(
-                    './domains/cats/services/agents/providers/claude-carrier-factory.js'
-                  );
-                  service = createClaudeAgentServiceForCanary(catId);
+  let sessionConfigurationRevision = 0;
+  const syncAgentRegistry = async (configs: Record<string, CatConfig>, warmPrompts = true) =>
+    agentRegistry.refresh(async () => {
+      sessionConfigurationRevision++;
+      clearL0Cache(); // Invalidate stale L0 compilations from previous sync
+      const projectRoot = resolveActiveProjectRoot();
+      const activeAcpProfileIds = new Set<string>();
+      const activeRegisteredSessionIds = new Set<string>();
+      const activeCodexProfileIds = new Set<string>();
+      for (const [id, config] of Object.entries(configs)) {
+        await saveSpan(
+          'registry.member',
+          async () => {
+            const catId = config.id;
+            // F32-b P1 fix: do NOT pass model here — let constructors resolve via
+            // getCatModel(catId) which respects env override (CAT_*_MODEL > config > fallback)
+            const service = await selectSessionAgentService<
+              AgentService | undefined | Promise<AgentService | undefined>
+            >(
+              resolveMemberSessionRef(
+                config.agentProvider,
+                sessionContractSettings.bindings.get(id),
+                config.carrier === 'acp' ? getRegisteredAcpConfig(id, projectRoot)?.agentProvider : undefined,
+              ),
+              async (sessionRef) => {
+                activeAcpProfileIds.add(id);
+                activeRegisteredSessionIds.add(id);
+                const previous = registeredSessionServices.get(id);
+                if (previous && previous.implementationKey !== sessionImplementationKey(sessionRef)) {
+                  await previous.releaseAll('member_binding_changed');
+                  registeredSessionServices.delete(id);
                 }
-                break;
-              }
-              case 'openai': {
-                activeCodexProfileIds.add(id);
-                const appServerHostPool = getOrCreateCodexAppServerPool(codexAppServerPoolRegistry, id);
-                service = new CodexAgentService({
-                  catId,
-                  appServerHostPool,
-                  carrierMode: config.carrier === 'app_server' ? 'app_server' : 'exec_json',
-                  nativeRealtimeCompanionEnabled,
-                });
-                break;
-              }
-              case 'google':
+                const registered =
+                  registeredSessionServices.get(id) ??
+                  new RegisteredSessionAgentService({
+                    catId,
+                    ref: sessionRef,
+                    registry: sessionImplementations,
+                    metadata: { provider: config.provider ?? 'acp', model: getCatModel(id) },
+                    log: app.log,
+                  });
+                registeredSessionServices.set(id, registered);
                 try {
-                  service = createGoogleAgentService(catId, config.agyProfile);
+                  await registered.prepare();
                 } catch (error) {
-                  if (!(error instanceof AgentServiceUnavailableError)) throw error;
-                  agentRegistry.markUnavailable(id, error.reason);
+                  const message = error instanceof Error ? error.message : String(error);
+                  agentRegistry.markUnavailable(id, { code: 'ACP_BOOTSTRAP_UNAVAILABLE', message });
+                  app.log.warn({ catId: id, err: error }, 'Plugin ACP member preparation failed');
                   return;
                 }
-                break;
-              case 'kimi':
-                service = new KimiAgentService({ catId });
-                break;
-              case 'antigravity':
-                agentRegistry.markUnavailable(id, {
-                  code: 'AGY_IDE_EXECUTION_RETIRED',
-                  message: 'AGY IDE 执行入口已退役。请在成员设置选择 Google 的 AGY Native 入口；成员身份与历史保留。',
-                });
-                return;
-              case 'opencode':
-                service = new OpenCodeAgentService({ catId });
-                break;
-              case 'catagent': {
-                const { CatAgentService } = await import(
-                  './domains/cats/services/agents/providers/catagent/CatAgentService.js'
-                );
-                service = new CatAgentService({ catId, projectRoot: findMonorepoRoot(), catConfig: config });
-                break;
-              }
-              case 'a2a': {
-                const { A2AAgentService } = await import('./domains/cats/services/agents/providers/A2AAgentService.js');
-                const envKey = `CAT_${id.toUpperCase()}_A2A_URL`;
-                const a2aUrl = process.env[envKey] ?? '';
-                if (!a2aUrl) {
-                  app.log.warn(`[api] A2A cat "${id}" missing ${envKey} env var. It will not be routable.`);
-                  return;
-                }
-                service = new A2AAgentService({ catId, config: { url: a2aUrl } });
-                break;
-              }
-              default:
-                app.log.warn(`[api] Unknown client "${config.clientId}" for cat "${id}". It will not be routable.`);
-                return;
-            }
-          agentRegistry.register(id, service);
+                return registered;
+              },
+              async () => {
+                let service: AgentService;
+                // ── F161: Generic ACP transport path (provider-agnostic) ──
+                // Carrier selection is resolved once by cat-config-loader. The ACP block
+                // below contains only launch details; its mere presence is not routing truth.
+                const acpConfig = config.carrier === 'acp' ? getRegisteredAcpConfig(id, projectRoot) : undefined;
+                if (config.carrier === 'acp') {
+                  if (!acpConfig) {
+                    app.log.warn(
+                      `[api] Cat "${id}" selects carrier=acp but has no ACP config. It will not be routable.`,
+                    );
+                    return;
+                  }
+                  activeAcpProfileIds.add(id);
+                  let acpService: Awaited<ReturnType<typeof createAcpServiceForConfig>>;
+                  try {
+                    acpService = await createAcpServiceForConfig({
+                      projectRoot,
+                      profileId: id,
+                      config,
+                      effectiveModel: getCatModel(id),
+                      acpConfig,
+                      poolRegistry: acpPoolRegistry,
+                      log: app.log,
+                      onUnavailable: (reason) => agentRegistry.markUnavailable(id, reason),
+                    });
+                  } catch (error) {
+                    // A single member's bootstrap/privacy failure must not keep the API
+                    // from listening; degrade that member and keep every other cat.
+                    const reason = error instanceof Error ? error.message : String(error);
+                    app.log.warn(`[api] Cat "${id}" ACP startup failed; marking it unavailable: ${reason}`);
+                    agentRegistry.markUnavailable(id, { code: 'ACP_BOOTSTRAP_UNAVAILABLE', message: reason });
+                    return;
+                  }
+                  if (!acpService) return;
+                  service = acpService;
+                } else
+                  switch (config.clientId) {
+                    // ── Provider-specific CLI paths (non-ACP) ──
+                    case 'anthropic': {
+                      if (config.carrier === 'sdk') {
+                        service = new ClaudeSdkAgentService({ catId });
+                      } else {
+                        const { createClaudeAgentServiceForCanary } = await import(
+                          './domains/cats/services/agents/providers/claude-carrier-factory.js'
+                        );
+                        service = createClaudeAgentServiceForCanary(catId);
+                      }
+                      break;
+                    }
+                    case 'openai': {
+                      activeCodexProfileIds.add(id);
+                      const appServerHostPool = getOrCreateCodexAppServerPool(codexAppServerPoolRegistry, id);
+                      service = new CodexAgentService({
+                        catId,
+                        appServerHostPool,
+                        carrierMode: config.carrier === 'app_server' ? 'app_server' : 'exec_json',
+                        nativeRealtimeCompanionEnabled,
+                      });
+                      break;
+                    }
+                    case 'google':
+                      try {
+                        service = createGoogleAgentService(catId, config.agyProfile);
+                      } catch (error) {
+                        if (!(error instanceof AgentServiceUnavailableError)) throw error;
+                        agentRegistry.markUnavailable(id, error.reason);
+                        return;
+                      }
+                      break;
+                    case 'kimi':
+                      service = new KimiAgentService({ catId });
+                      break;
+                    case 'antigravity':
+                      agentRegistry.markUnavailable(id, {
+                        code: 'AGY_IDE_EXECUTION_RETIRED',
+                        message:
+                          'AGY IDE 执行入口已退役。请在成员设置选择 Google 的 AGY Native 入口；成员身份与历史保留。',
+                      });
+                      return;
+                    case 'opencode':
+                      service = new OpenCodeAgentService({ catId });
+                      break;
+                    case 'catagent': {
+                      const { CatAgentService } = await import(
+                        './domains/cats/services/agents/providers/catagent/CatAgentService.js'
+                      );
+                      service = new CatAgentService({ catId, projectRoot: findMonorepoRoot(), catConfig: config });
+                      break;
+                    }
+                    case 'a2a': {
+                      const { A2AAgentService } = await import(
+                        './domains/cats/services/agents/providers/A2AAgentService.js'
+                      );
+                      const envKey = `CAT_${id.toUpperCase()}_A2A_URL`;
+                      const a2aUrl = process.env[envKey] ?? '';
+                      if (!a2aUrl) {
+                        app.log.warn(`[api] A2A cat "${id}" missing ${envKey} env var. It will not be routable.`);
+                        return;
+                      }
+                      service = new A2AAgentService({ catId, config: { url: a2aUrl } });
+                      break;
+                    }
+                    default:
+                      app.log.warn(
+                        `[api] Unknown client "${config.clientId}" for cat "${id}". It will not be routable.`,
+                      );
+                      return;
+                  }
+                return service;
+              },
+            );
+            if (service) agentRegistry.register(id, service);
+          },
+          { catId: id },
+        );
+      }
+      for (const [id, registered] of registeredSessionServices) {
+        if (activeRegisteredSessionIds.has(id)) continue;
+        await registered.releaseAll('member_removed');
+        registeredSessionServices.delete(id);
+      }
+      await closeStaleAcpPools(acpPoolRegistry, activeAcpProfileIds, {
+        reason: 'config-sync',
+        onCloseError: (err, profileId, reason) => {
+          app.log.warn({ err, profileId, reason }, 'ACP registry sync failed to close stale member pool');
         },
-        { catId: id },
-      );
-    }
-    await closeStaleAcpPools(acpPoolRegistry, activeAcpProfileIds, {
-      reason: 'config-sync',
-      onCloseError: (err, profileId, reason) => {
-        app.log.warn({ err, profileId, reason }, 'ACP registry sync failed to close stale member pool');
-      },
-    });
-    await closeStaleCodexAppServerPools(codexAppServerPoolRegistry, activeCodexProfileIds, (err, profileId) => {
-      app.log.warn({ err, profileId }, 'Codex app-server registry sync failed to close stale member pool');
-    });
-    if (router) saveSpan('registry.router', () => router.refreshFromRegistry(agentRegistry));
+      });
+      await closeStaleCodexAppServerPools(codexAppServerPoolRegistry, activeCodexProfileIds, (err, profileId) => {
+        app.log.warn({ err, profileId }, 'Codex app-server registry sync failed to close stale member pool');
+      });
+      if (router) saveSpan('registry.router', () => router.refreshFromRegistry(agentRegistry));
 
-    // Pre-compile L0 system prompts for all registered cats in parallel.
-    // Avoids per-invocation subprocess overhead and ensures L0 is ready
-    // before the first message — also bypasses Windows NTFS junction
-    // issues that resolve by the time the user actually interacts (#802).
-    const registeredCatIds = Object.keys(configs).filter((id) => agentRegistry.has(id));
-    if (warmPrompts) await warmL0Cache(registeredCatIds, app.log);
-  };
+      // Pre-compile L0 system prompts for all registered cats in parallel.
+      // Avoids per-invocation subprocess overhead and ensures L0 is ready
+      // before the first message — also bypasses Windows NTFS junction
+      // issues that resolve by the time the user actually interacts (#802).
+      const registeredCatIds = Object.keys(configs).filter((id) => agentRegistry.has(id));
+      if (warmPrompts) await warmL0Cache(registeredCatIds, app.log);
+    });
   await syncAgentRegistry(catRegistry.getAllConfigs());
 
   // F321: one optional curator, using the existing native service and summary storage.
@@ -2437,6 +2574,7 @@ async function main(): Promise<void> {
   // Shared AgentRouter — used by messagesRoutes and invocationsRoutes
   const { TurnCustodyProjectionService } = await import('./domains/ball-custody/TurnCustodyProjectionService.js');
   const turnCustodyProjectionService = new TurnCustodyProjectionService({
+    tasks: taskStore,
     ...(actionSuccessorLeaseStore ? { actionSuccessorLeaseStore } : {}),
   });
   const { LiveCompanionSessions } = await import('./domains/concierge/live/LiveCompanionSessions.js');
@@ -2512,6 +2650,27 @@ async function main(): Promise<void> {
     logger: app.log,
   });
   const memoryCueRuntime = createMemoryCueRuntime({
+    ...(memoryServices.catalog && memoryServices.collectionStores && memoryServices.knowledgeResolver
+      ? {
+          contextProjectDiscovery: {
+            threads: threadStore,
+            catalog: memoryServices.catalog,
+            stores: memoryServices.collectionStores,
+            resolver: memoryServices.knowledgeResolver,
+            homeProjectPath: resolveActiveProjectRoot(),
+            homeDocsRoot: docsRoot,
+          },
+        }
+      : {}),
+    contextSourceOpportunityStore: new ContextSourceOpportunityStore(memoryServices.store.getDb()),
+    contextSourceAuthorization: {
+      threads: threadStore,
+      tasks: taskStore,
+      onOmission: (sourceMessageId, reason) =>
+        app.log.info({ sourceMessageId, reason }, '[F321] context source admission omitted'),
+      ...(actionSuccessorLeaseStore ? { leases: actionSuccessorLeaseStore } : {}),
+      ...(taskApprovedDelegateProvider ? { delegates: taskApprovedDelegateProvider } : {}),
+    },
     threadOverviewSource,
     episodeStore: memoryCueEpisodeStore,
     handles: memoryCueHandles,
@@ -2559,8 +2718,76 @@ async function main(): Promise<void> {
     postCompactContext: ({ cliSessionId }) => inProcessCompactionSurface.postCompactContextFor(cliSessionId),
   });
   let trustedImagePathResolver: (hmrId: string) => Promise<string | undefined> = async () => undefined;
+  const { createOwnedWaitStatusReader } = await import('./domains/ball-custody/OwnedWaitStatus.js');
+  const ownedWaitStatusReader = createOwnedWaitStatusReader({ taskStore, dynamicTaskStore });
+  const { OrdinaryTaskHandoffService } = await import('./domains/ball-custody/OrdinaryTaskHandoffService.js');
+  const cliExecutionOwnerService = createCliExecutionOwnerService({ log: app.log });
+  const { LegacyTaskExecutionResolver } = await import('./domains/ball-custody/LegacyTaskExecution.js');
+  const { taskCliProviderIsStopped } = await import('./domains/ball-custody/task-provider-stop-proof.js');
+  const { taskHandoffDispatchAuthority } = await import('./routes/task-handoff-dispatch-authority.js');
+  const legacyTaskExecutions = new LegacyTaskExecutionResolver({
+    leases: actionSuccessorLeaseStore,
+    messages: messageStore,
+    turns: turnExecutionStore,
+    delegates: taskApprovedDelegateProvider,
+  });
+  const ordinaryTaskHandoffs = new OrdinaryTaskHandoffService({
+    tasks: taskStore,
+    messages: messageStore,
+    threads: threadStore,
+    turns: turnExecutionStore,
+    delegates: taskApprovedDelegateProvider,
+    tracker: invocationTracker,
+    dispatchAuthority: taskHandoffDispatchAuthority(dispatchProposalStore, app.log),
+    legacy: legacyTaskExecutions,
+    providerIsStopped: taskCliProviderIsStopped,
+    stopExecution: async (ref, userId) => {
+      const live = await cliExecutionOwnerService.listLive();
+      if (
+        !live.complete ||
+        !live.owners.some(
+          (owner) =>
+            owner.invocationId === ref.invocationId &&
+            owner.executionId === ref.parentInvocationId &&
+            owner.threadId === ref.threadId &&
+            owner.catId === ref.catId &&
+            owner.userId === userId,
+        )
+      )
+        return;
+      await cliExecutionOwnerService.terminateExact({ ...ref, executionId: ref.parentInvocationId, userId });
+    },
+    onExecutionReleased: (threadId) => {
+      queueProcessor.requestDrain(threadId);
+    },
+  });
+  const { createRootMemberSessions } = await import('./domains/plugin/member-sessions/root.js');
+  const readMessageTargets = async (threadId: string, messageId: string): Promise<readonly string[]> => {
+    const rows = await invocationQueue.getDurableEntriesForMessages(threadId, [messageId]);
+    return [...new Set((rows.get(messageId) ?? []).flatMap((row) => row.targets))];
+  };
+  const rootMemberSessions = redis
+    ? createRootMemberSessions({
+        redis,
+        ownerUserId: privateUserId,
+        projectRoot: resolveActiveProjectRoot(),
+        agents: agentRegistry,
+        threads: threadStore,
+        messages: messageStore,
+        readMessageTargets,
+        turns: turnExecutionStore,
+        profiles: profileRepository,
+        pluginRuntime: () => pluginRuntime,
+        invocationDeps: () => router.getStrategyDeps().invocationDeps,
+      })
+    : undefined;
   router = new AgentRouter({
+    ...(rootMemberSessions ? { scopedMemberRouting: rootMemberSessions.routing } : {}),
+    ordinaryTaskHandoffs,
+    messageSearchAnswerService,
+    ownedWaitStatusReader,
     resolveTrustedImagePath: async (hmrId) => trustedImagePathResolver(hmrId),
+    resolveInvocationPluginMcpView: () => pluginRuntime.supervisor.resolveMemberMcpView(),
 
     agentRegistry,
     registry,
@@ -2615,6 +2842,7 @@ async function main(): Promise<void> {
       personMemoryStore,
       messageStore,
     ),
+    contextSourceAdmission: memoryCueRuntime.contextSourceAdmission,
     memoryCuePromptService: memoryCueRuntime.promptService,
     profileCueOpportunitySource: memoryCueRuntime.profileOpportunitySource,
     eventCueOpportunitySource: memoryCueRuntime.eventOpportunitySource,
@@ -2653,14 +2881,24 @@ async function main(): Promise<void> {
   const deploymentWaitStartGuard = new DeploymentWaitStartGuard({
     taskStore,
     messageStore,
+    handoffProposalStore,
+    sessionChainStore,
     observationProvider: runtimeDeploymentContext?.provider ?? { observe: async () => null },
   });
   const queueProcessor = new QueueProcessor(
     {
+      ordinaryTaskHandoffs,
+      taskStore,
       queue: invocationQueue,
       liveCompanionSessions,
       invocationTracker,
       deploymentWaitStartGuard,
+      worktreeNoticeStartGuard: new WorktreeNoticeStartGuard({
+        repoRoot,
+        scriptRoot: runtimeEntrypointRoot,
+        messageStore,
+        getThread: async (id) => threadStore.get(id),
+      }),
       invocationRecordStore: invocationRecordStore as unknown as InvocationRecordStoreLike,
       router: router as unknown as RouterLike,
       socketManager,
@@ -2863,6 +3101,7 @@ async function main(): Promise<void> {
   if (actionSuccessorLeaseStore && actionSubjectTruthResolver) {
     const { ActionSuccessorRecoverySweep } = await import('./domains/ball-custody/ActionSuccessorRecoverySweep.js');
     actionSuccessorRecovery = new ActionSuccessorRecoverySweep({
+      tasks: taskStore,
       leaseStore: actionSuccessorLeaseStore,
       deliverReturnCarrier: async (carrier) => {
         const invocationKey = actionSuccessorInvocationIdempotencyKey(carrier.idempotencyKey);
@@ -2910,6 +3149,7 @@ async function main(): Promise<void> {
         return recoveryStatus === 'terminal' ? { outcome: 'unavailable' as const } : { outcome: 'enqueued' as const };
       },
       dispatch: {
+        tasks: taskStore,
         leaseStore: actionSuccessorLeaseStore,
         truthResolver: actionSubjectTruthResolver,
         loadProposal: (proposalId) => dispatchProposalStore.get(proposalId),
@@ -3120,6 +3360,10 @@ async function main(): Promise<void> {
     },
   };
   await app.register(messagesRoutes, messagesOpts);
+  await app.register((await import('./routes/cloud-return-read.js')).cloudReturnReadRoutes, {
+    messageStore,
+    threadStore,
+  });
   await app.register(messageBundleRoutes, { messageStore, threadStore });
   // F297 Phase B: 所有"什么在跑"的问题收口到同一个 domain service。
   //
@@ -3127,7 +3371,6 @@ async function main(): Promise<void> {
   // running child 三张执行面各自既提名候选、也自己定性。旧结构把三源都塞进候选、却统一交给
   // 只认识 live invocation 的 classifier 定性，于是 managed command 与 standalone child
   // 候选进来、定性落空、presence=null，被终态回落误报成 done/error（R3 P1-1 / P1-2）。
-  const cliExecutionOwnerService = createCliExecutionOwnerService({ log: app.log });
   const activeExecutionService = createActiveExecutionService({
     invocationTracker,
     recordStore: invocationRecordStore,
@@ -3178,7 +3421,12 @@ async function main(): Promise<void> {
       dismissTracker,
     });
   }
+  let assetCanonService: import('./domains/collaborative-content/asset-canon/service.js').AssetCanonService | undefined;
+  let memberCanonService:
+    | import('./domains/collaborative-content/asset-canon/member-service.js').MemberCanonService
+    | undefined;
   await app.register(catsRoutes, {
+    memberAssets: () => memberCanonService,
     resolveContextCapacitySnapshot: (catId) => router.contextCapacitySnapshot(catId),
     resolveCarrierCapability: (catId) => router.freshnessCarrierCapability(catId),
   });
@@ -3227,7 +3475,11 @@ async function main(): Promise<void> {
   }
   // F300 Task 2.1: the capability board for cats, read through the same pure
   // service as the Console's GET /api/capabilities, without its writes.
-  await app.register(capabilitySnapshotRoutes, { callbackRegistry: registry, agentKeyRegistry });
+  await app.register(capabilitySnapshotRoutes, {
+    callbackRegistry: registry,
+    agentKeyRegistry,
+    resolvePluginMcpView: () => pluginRuntime.supervisor.resolveMemberMcpView(),
+  });
   await app.register(usageRoutes, { invocationRecordStore });
   // F150: Tool/Skill/MCP usage statistics
   if (toolUsageCounter) {
@@ -3238,15 +3490,33 @@ async function main(): Promise<void> {
   {
     const { UnavailableTipEventSink, RedisTipEventSink } = await import('./routes/tip-telemetry.js');
     const tipSink = redis ? new RedisTipEventSink(redis) : new UnavailableTipEventSink();
-    await app.register(tipTelemetryRoutes, { sink: tipSink });
+    const { CapabilityTipsUsageAdapter } = await import(
+      './infrastructure/harness-eval/capability-tips/capability-tips-usage-adapter.js'
+    );
+    const tipUsage = redis ? new CapabilityTipsUsageAdapter(redis) : undefined;
+    await app.register(tipTelemetryRoutes, {
+      sink: tipSink,
+      ...(tipUsage ? { readUsage: (selector) => tipUsage.resolve(selector) } : {}),
+    });
   }
   // F200 Phase B: Recall metrics API
+  const recallOwnerMessageSources = {
+    tasteSources: {
+      ownerUserId: privateUserId,
+      repository: tasteRepository,
+      lifecycle: tasteMemoryLifecycleStore,
+      sourceReaders: { proposalStore: tasteProposalStore, threadStore, messageStore },
+    },
+    eventSources: { store: memoryServices.eventMemoryStore, sourceReaders: eventMemorySourceReaders },
+  };
   await app.register(recallMetricsRoutes, {
     evidenceDb: memoryServices.store.getDb(),
     messageStore,
     threadStore,
     ...(personMemoryStore ? { personMemoryStore } : {}),
     cueSourceReader: memoryCueRuntime.sourceReader,
+    profileMemoryStore: profileMemoryLifecycleStore,
+    ...recallOwnerMessageSources,
   });
   const { memoryCueInvocationReadRoutes } = await import('./routes/memory-cue-invocation-read.js');
   await app.register(memoryCueInvocationReadRoutes, {
@@ -3303,6 +3573,7 @@ async function main(): Promise<void> {
     sourceReaders: entityMemorySourceReaders,
   });
   await app.register(profileMemoryOwnerRoutes, {
+    evidenceDb: memoryServices.store.getDb(),
     ownerUserId: privateUserId,
     store: profileMemoryLifecycleStore,
     lifecycle: profileMemoryLifecycleService,
@@ -3356,9 +3627,8 @@ async function main(): Promise<void> {
   const pawFeelLegacyCensusCursorSigner = redis
     ? await loadOrCreateLegacyPawFeelBlockerCensusCursorSigner(redis)
     : undefined;
-  const pawFeelFixResolver = actionSuccessorLeaseStore
-    ? new PawFeelFixEvidenceResolver({ leaseStore: actionSuccessorLeaseStore, taskStore })
-    : undefined;
+  const pawFeelInboxAuditCursorSigner = redis ? await loadOrCreatePawFeelInboxAuditCursorSigner(redis) : undefined;
+  const pawFeelFixResolver = new PawFeelFixEvidenceResolver({ leaseStore: actionSuccessorLeaseStore, taskStore });
   const pawFeelSourceVerifier = new PawFeelDirectRepairSourceVerifier({
     ownerUserId: privateUserId,
     messageStore,
@@ -3454,6 +3724,14 @@ async function main(): Promise<void> {
         ...(pawFeelDispositionReadModel ? { bundleMembershipResolver: pawFeelDispositionReadModel } : {}),
       })
     : undefined;
+  const pawFeelInboxAuditScanService =
+    pawFeelDispositionEventLog && pawFeelDispositionReadModel && pawFeelInboxAuditCursorSigner
+      ? new PawFeelInboxAuditScanService({
+          eventLog: pawFeelDispositionEventLog,
+          readModel: pawFeelDispositionReadModel,
+          signer: pawFeelInboxAuditCursorSigner,
+        })
+      : undefined;
   const pawFeelBlockerReconciler = pawFeelDispositionService
     ? new PawFeelBlockerReconciler({ service: pawFeelDispositionService })
     : undefined;
@@ -4092,6 +4370,11 @@ async function main(): Promise<void> {
     callbackRegistry: registry,
     agentKeyRegistry,
   });
+  await app.register(pawFeelInboxAuditScanRoutes, {
+    ...(pawFeelInboxAuditScanService ? { auditScanService: pawFeelInboxAuditScanService } : {}),
+    callbackRegistry: registry,
+    agentKeyRegistry,
+  });
   await app.register(pawFeelLegacyCensusRoutes, {
     ...(pawFeelLegacyCensusService ? { censusService: pawFeelLegacyCensusService } : {}),
     callbackRegistry: registry,
@@ -4466,6 +4749,9 @@ async function main(): Promise<void> {
   }
 
   const callbackOpts = {
+    ordinaryTaskHandoffs,
+    ...(routingContextRuntime ? { routingSelection: routingContextRuntime.selectionService } : {}),
+    proposalProjectRoot: resolveActiveProjectRoot(),
     companionCollectiveAccountability: readCollectiveAttention,
     resolveTrustedImagePath: async (hmrId: string) => {
       try {
@@ -4526,6 +4812,7 @@ async function main(): Promise<void> {
     socketManager,
     callbackAuthNotifier,
     taskStore,
+    ownedWaitStatusReader,
     backlogStore,
     threadStore,
     conciergeConfigStore: conciergeConfigStoreShared,
@@ -4563,6 +4850,7 @@ async function main(): Promise<void> {
       : {}),
     approvalIngress,
     profileRepository,
+    profileReadEvidenceDb: memoryServices.store.getDb(),
     agentRegistry,
     router,
     invocationRecordStore,
@@ -4585,6 +4873,8 @@ async function main(): Promise<void> {
     indexBuilder: memoryServices.indexBuilder as
       | { markThreadDirty(threadId: string): void; flushDirtyThreads?(): number | Promise<number> }
       | undefined,
+    messageSearchAnswerService,
+    messageSearchService,
     evidenceStore: memoryServices.evidenceStore,
     markerQueue: memoryServices.markerQueue,
     reflectionService: memoryServices.reflectionService,
@@ -4636,6 +4926,20 @@ async function main(): Promise<void> {
     },
   } as Parameters<typeof callbacksRoutes>[1];
   await app.register(callbacksRoutes, callbackOpts);
+  // F306 Phase B: member MCP gateway — loopback Streamable HTTP MCP for ACP
+  // members (iCode), authenticated per invocation against the live registry.
+  registerMemberMcpRoutes(app, {
+    registry,
+    resolveMemberToolFamilies: ({ catId, sharedContext }) =>
+      resolveMemberToolFamiliesForCat(
+        sharedContext?.capabilityRoot ?? resolveActiveProjectRoot(),
+        catId,
+        sharedContext?.workspaceRoot,
+      ),
+    apiBaseUrl: `http://127.0.0.1:${PORT}`,
+    deploymentId: sharedMcpDeploymentId(`http://127.0.0.1:${PORT}`),
+    log: app.log,
+  });
   await app.register(callbackRuntimeInteractionRoutes, {
     registry,
     callbackAuthNotifier,
@@ -4779,10 +5083,8 @@ async function main(): Promise<void> {
   // Seed only an absent registry before plugin activation can persist schedules
   // into it. Native invoke-time MCP resolution must work without visiting Settings.
   const { initializeFirstRunCapabilities } = await import('./config/capabilities/first-run-capabilities.js');
-  const capabilityInitialization = await initializeFirstRunCapabilities(
-    await resolveInvokeCapabilityRoot(runtimeEntrypointRoot),
-    runtimeEntrypointRoot,
-  );
+  const pluginCapabilityRoot = await resolveInvokeCapabilityRoot(runtimeEntrypointRoot);
+  const capabilityInitialization = await initializeFirstRunCapabilities(pluginCapabilityRoot, runtimeEntrypointRoot);
   if (capabilityInitialization.status === 'unreadable') {
     app.log.warn('[api] Existing capabilities are unreadable; preserved without enabling default tools');
   }
@@ -4841,10 +5143,41 @@ async function main(): Promise<void> {
   const preparedArtifactReader = new F232PreparedArtifactReader({
     messages: messageStore,
   });
+  const collectiveMaterialSourceHolder: import('./domains/plugin/host-surface/collective-material-source.js').CollectiveMaterialSourceHolder =
+    {};
   const collectiveArtifactOwnerHolder: import('./domains/plugin/host-surface/collective-artifact-owner.js').CollectiveArtifactOwnerHolder =
     {};
   const pluginRuntime = cloudConversations.createRuntime({
+    agentSessionProviders: (packages, configuration) =>
+      declaredAgentSessionProviders({
+        configuration,
+        log: app.log,
+        settings: sessionContractSettings,
+        packages,
+        registry: sessionImplementations,
+        services: registeredSessionServices,
+        createProvider: (declaration, { catId }) =>
+          createRefreshingAcpSessionProvider({
+            catId,
+            scope: acpPoolRegistry,
+            revision: () => sessionConfigurationRevision,
+            createService: () => {
+              const config = catRegistry.getAllConfigs()[catId];
+              if (!config) throw new Error('Plugin ACP member unavailable');
+              return createAcpServiceForConfig({
+                projectRoot: resolveActiveProjectRoot(),
+                profileId: catId,
+                config,
+                effectiveModel: getCatModel(catId),
+                acpConfig: declaration.acp,
+                poolRegistry: acpPoolRegistry,
+                log: app.log,
+              });
+            },
+          }),
+      }),
     collectiveArtifactOwner: collectiveArtifactOwnerHolder,
+    collectiveMaterialSource: collectiveMaterialSourceHolder,
     taskArtifactReader: preparedArtifactReader,
     limbRegistry,
     taskRunner: {
@@ -4861,8 +5194,13 @@ async function main(): Promise<void> {
       ],
     ]),
     projectRoot: pluginProjectRoot,
+    capabilityProjectRoot: pluginCapabilityRoot,
+    binaryProjectRoot: runtimeEntrypointRoot,
     editorParentOrigin: new URL(resolveFrontendBaseUrl(process.env, app.log)).origin,
     desktopExecutor: {
+      prepare: async () => {
+        await companionDesktopComponent.prepare();
+      },
       open: async (launch) =>
         new ElectronDesktopWindowExecutor({
           executable: await companionDesktopComponent.executable(),
@@ -4984,6 +5322,7 @@ async function main(): Promise<void> {
     },
     messageStore,
     lifecyclePresentation: (threadId, catId) => deliveryPresentation(threadId, { kind: 'cat', id: catId }),
+    readMessageTargets,
     // P1.3: a v2 subscription's started names the message the invocation answers (origin, else A2A).
     lifecycleTriggerMessageId: async (invocationId) => {
       const record = await registry.getRecord(invocationId);
@@ -4995,6 +5334,7 @@ async function main(): Promise<void> {
     taskStore,
     ...(redis ? { redis } : {}),
     invokeTrigger: createPluginConversationDelivery({ messageStore, queue: invocationQueue, router }),
+    ...(rootMemberSessions ? { memberSessions: rootMemberSessions.forInstance } : {}),
     socketManager: { broadcastToRoom: (room, event, data) => socketManager?.broadcastToRoom(room, event, data) },
     threadStore,
     threadBindingStore: connectorBindingStore,
@@ -5039,12 +5379,10 @@ async function main(): Promise<void> {
   subscriptionDrainScheduler.attach(pluginRuntime.subscriptionDelivery);
   const { registerConciergeDesktopRoutes } = await import('./routes/concierge-desktop.js');
   registerConciergeDesktopRoutes(app, { ownerUserId: privateUserId, desktop: pluginRuntime.ownerDesktop });
-  app.addHook('onClose', async () => pluginRuntime.shutdown('api_shutdown'));
-  const { resolveLocalPluginEffectiveGrants } = await import('./domains/plugin/manager/machine-catalog-provider.js');
+  const { registerPluginRuntimeShutdown } = await import('./routes/plugin-runtime-shutdown.js');
+  registerPluginRuntimeShutdown(app, pluginRuntime);
   const { OFFICIAL_BUNDLED_MANIFESTS } = await import('./domains/plugin/official-catalog.js');
-  const { createHostOfficialPluginCatalog, PLUGIN_MANAGER_HOST_POLICIES: pluginManagerHostPolicies } = await import(
-    './domains/plugin/manager/host-official-catalog.js'
-  );
+  const { createHostOfficialPluginCatalog } = await import('./domains/plugin/manager/host-official-catalog.js');
   const { GitMarketplaceRepository } = await import(
     './domains/plugin/manager/marketplace/git-marketplace-repository.js'
   );
@@ -5064,7 +5402,7 @@ async function main(): Promise<void> {
   });
   const pluginManagerCatalog = createHostOfficialPluginCatalog();
   const { FilesystemBuiltinPluginPackageMaterializer } = await import(
-    './domains/plugin/manager/builtin-package-materializer.js'
+    './domains/plugin/manager/package-assets/builtin-package-materializer.js'
   );
   const { DotPluginStateProjection } = await import(
     './domains/cats/services/cloud-bridge/dot/DotPluginStateProjection.js'
@@ -5082,7 +5420,6 @@ async function main(): Promise<void> {
       await companionDesktopComponent.prepare();
     },
     catalogManifests: OFFICIAL_BUNDLED_MANIFESTS,
-    localGrantPolicy: (manifest) => resolveLocalPluginEffectiveGrants(pluginManagerHostPolicies, manifest),
   });
   const { InstalledPluginOperations, pluginOperationRoutes } = await import(
     './domains/plugin/operations/plugin-operation-routes.js'
@@ -5091,6 +5428,7 @@ async function main(): Promise<void> {
   const personalChromeSetup = new PersonalChromeSetup({
     inventory: pluginRuntime.inventoryStore,
     packages: pluginRuntime.packages,
+    materializer: new FilesystemBuiltinPluginPackageMaterializer({ packagesRoot: pluginRuntime.paths.packagesRoot }),
     lifecycle: pluginRuntime.lifecycle,
     projectRoot: pluginRuntime.projectRoot,
   });
@@ -5104,12 +5442,24 @@ async function main(): Promise<void> {
   const { createCollectiveAccountabilitySource } = await import(
     './routes/companion-collective-accountability-source.js'
   );
-  collectiveAttentionReader = createCollectiveAccountabilitySource(
-    new InstalledPluginOperations({
-      inventory: pluginRuntime.inventoryStore,
-      configuration: pluginManagerRuntime.configuration,
-      invocation: pluginRuntime.supervisor,
-    }),
+  const collectiveSourceOperations = new InstalledPluginOperations({
+    inventory: pluginRuntime.inventoryStore,
+    configuration: pluginManagerRuntime.configuration,
+    invocation: pluginRuntime.supervisor,
+  });
+  const { createInstalledCollectiveMaterialSource } = await import(
+    './domains/plugin/host-surface/collective-material-source.js'
+  );
+  collectiveMaterialSourceHolder.current = createInstalledCollectiveMaterialSource(
+    collectiveSourceOperations,
+    privateUserId,
+  );
+  collectiveAttentionReader = createCollectiveAccountabilitySource(collectiveSourceOperations, privateUserId);
+  const { createCollectiveWorkResultAttentionSource } = await import(
+    './domains/plugin/host-surface/collective-work-result-attention.js'
+  );
+  const collectiveWorkResultAttentionSource = createCollectiveWorkResultAttentionSource(
+    collectiveSourceOperations,
     privateUserId,
   );
   await app.register(pluginOperationRoutes, { operations: installedPluginOperations });
@@ -5125,10 +5475,21 @@ async function main(): Promise<void> {
   );
   const { pluginNativeActionRoutes } = await import('./routes/plugin-native-action-routes.js');
   await app.register(pluginNativeActionRoutes, {
+    ...(rootMemberSessions ? { assertMemberSessionCurrent: rootMemberSessions.assertCallback } : {}),
     actions: pluginRuntime.supervisor.nativeActions,
     registry,
     threadStore,
     sources: { messageStore },
+  });
+  const { registerPluginSharedMcpRoutes } = await import('./routes/plugin-shared-mcp.js');
+  registerPluginSharedMcpRoutes(app, {
+    actions: pluginRuntime.supervisor.nativeActions,
+    supervisor: pluginRuntime.supervisor,
+    registry,
+    threadStore,
+    sources: { messageStore },
+    apiBaseUrl: `http://127.0.0.1:${PORT}`,
+    deploymentId: sharedMcpDeploymentId(`http://127.0.0.1:${PORT}`),
   });
   const { prepareHostInitialPlugins } = await import('./domains/plugin/manager/initial-plugin-installation.js');
   let initialPlugins: Awaited<ReturnType<typeof prepareHostInitialPlugins>> | undefined;
@@ -5144,20 +5505,6 @@ async function main(): Promise<void> {
     // unfinished entries on restart; completed entries (including user uninstalls) stay completed.
     app.log.warn({ err: error }, '[api] Initial plugin installation deferred until next startup');
   }
-  // F202 W2-6: grants follow the Host policy for instances installed before a policy change too;
-  // done before recovery so every resumed runtime starts with the grants it will run with.
-  const { reconcileOfficialPluginGrants } = await import('./domains/plugin/manager/official-plugin-grants.js');
-  const officialGrantChanges = await reconcileOfficialPluginGrants({
-    store: pluginRuntime.inventoryStore,
-    inventory: pluginRuntime.inventory,
-    hostPolicies: pluginManagerHostPolicies,
-  });
-  if (officialGrantChanges.length > 0) {
-    app.log.info(
-      { changes: officialGrantChanges },
-      '[api] F202 official plugin grants reconciled with the Host policy',
-    );
-  }
   // Released once app.listen resolves. A resumed desktop window's bridge calls
   // app.inject; before Fastify has booted that breaks the remaining app.register
   // calls (AVV_ERR_ROOT_PLG_BOOTED). Other plugins resume immediately.
@@ -5167,6 +5514,20 @@ async function main(): Promise<void> {
   });
   const { pluginManagerUploadRoutes, registerPluginManagerRoutes } = await import('./routes/plugin-manager-routes.js');
   const { registerPluginMarketplaceRoutes } = await import('./routes/plugin-marketplace-routes.js');
+  const { registerAgentClientLibraryRoutes } = await import('./routes/agent-client-library-routes.js');
+  registerAgentClientLibraryRoutes(app, {
+    inventory: pluginRuntime.inventoryStore,
+    packages: pluginRuntime.packages,
+    registry: sessionImplementations,
+    configuration: {
+      readConfig: async (instanceId, key) => {
+        const snapshot = await pluginRuntime.inventoryStore.snapshot();
+        const instance = snapshot.instances.find((instance) => instance.pluginInstanceId === instanceId);
+        if (!instance) return undefined;
+        return (await pluginManagerRuntime.configuration.readActionInput(instance.pluginId))[key];
+      },
+    },
+  });
   registerPluginMarketplaceRoutes(app, marketplaceSources);
   const { PluginManagerBindings } = await import('./domains/plugin/manager/plugin-manager-bindings.js');
   await app.register(async (managerApp) => {
@@ -5177,6 +5538,7 @@ async function main(): Promise<void> {
       asset: pluginManagerRuntime.assets,
       documentation: pluginManagerRuntime.assets,
       callbackRegistry: registry,
+      threadStore,
     });
   });
   await app.register(pluginManagerUploadRoutes, { manager: pluginManagerRuntime.manager });
@@ -5492,7 +5854,7 @@ async function main(): Promise<void> {
 
   // F246: Approval Hub — unified operator approval center.
   const approvalProducerRegistry = new ApprovalProducerRegistry({
-    F128: bindLegacyApprovalProducer(new F128ApprovalAdapter(proposalStore)),
+    F128: bindLegacyApprovalProducer(new F128ApprovalAdapter(proposalStore, (id) => threadStore.get(id))),
     F139: bindLegacyApprovalProducer(new F139ApprovalAdapter(scheduleMutationProposalStore)),
     F193: bindLegacyApprovalProducer(new F193ApprovalAdapter(dispatchProposalStore)),
     F221: bindLegacyApprovalProducer(new F221ApprovalAdapter(tasteProposalStore)),
@@ -5503,17 +5865,33 @@ async function main(): Promise<void> {
     F306: bindLegacyApprovalProducer(new F306ApprovalAdapter(runtimeInteractionRuntime.store)),
     F321: bindLegacyApprovalProducer(new F321ApprovalAdapter(eventMemoryCorrectionProposalStore)),
     F260: bindLegacyApprovalProducer(
-      new F260ApprovalAdapter(entityProposalStore, (proposal) => {
-        if (!memoryServices.evidenceStore.inspectEntityConflict) {
-          throw new Error('F260: evidenceStore.inspectEntityConflict not available — Hub projection blocked');
-        }
-        return memoryServices.evidenceStore.inspectEntityConflict(
-          buildEntityRecord(proposal, proposal.ownerUserId),
-          proposal.ownerUserId,
-        );
-      }),
+      new F260ApprovalAdapter(
+        entityProposalStore,
+        (proposal) => {
+          if (!memoryServices.evidenceStore.inspectEntityConflict) {
+            throw new Error('F260: evidenceStore.inspectEntityConflict not available — Hub projection blocked');
+          }
+          return memoryServices.evidenceStore.inspectEntityConflict(
+            buildEntityRecord(proposal, proposal.ownerUserId),
+            proposal.ownerUserId,
+          );
+        },
+        (proposal) =>
+          memoryServices.evidenceStore.getEntityProposalEffectProof?.(
+            proposal.entityId,
+            proposal.proposalId,
+            proposal.ownerUserId,
+          ) ?? null,
+      ),
     ),
     F266: bindV1ApprovalProducer(f266ApprovalAdapter),
+  });
+  approvalDecisionReceipts = new ApprovalDecisionReceiptService({
+    registry: approvalProducerRegistry,
+    messageStore,
+    invocationTracker,
+    outbox: new ApprovalDecisionReceiptOutbox(schedulerDb),
+    logger: app.log,
   });
   const { createArtifactReviewIntegration } = await import('./domains/growing/artifact-review-composition.js');
   const { createProgramContentMediaPort } = await import(
@@ -5551,6 +5929,10 @@ async function main(): Promise<void> {
     './domains/collaborative-content/collective-artifact/owner-router.js'
   );
   const collectiveArtifactOwner = createCollectiveArtifactOwner({
+    transcribeAudio: (
+      await import('./infrastructure/connectors/media/CollectiveSttProvider.js')
+    ).createConfiguredCollectiveTranscriber(),
+    stickerDirectories: resolveMessageStickerDirectories(),
     owner: collaborativeContent.owner,
     media: artifactReview.media,
     reviews: workspaceContentReviews.store,
@@ -5634,6 +6016,8 @@ async function main(): Promise<void> {
     }),
   );
   const livingWorks = new LivingWorkService({
+    changed: (ownerUserId) =>
+      socketManager?.emitToUser(ownerUserId, 'entrusted_work_projection_invalidated', { ownerUserId }),
     responses: workResponses,
     owner: collaborativeContent.owner,
     versions: artifactReview.store.works,
@@ -5658,7 +6042,21 @@ async function main(): Promise<void> {
         (await artifactReview.media.read(reference.contentRef, reference.ownerRevision, workMediaPrincipal(principal)))
           .blobDigest,
     }),
-    authorize: (reference, principal, permission) => livingWorks.authorizeVersion(reference, principal, permission),
+    authorize: (reference, principal, permission) =>
+      livingWorks.authorizeVersion(
+        reference,
+        principal.actor.kind === 'human' && !principal.threadId
+          ? {
+              ...principal,
+              threadId:
+                artifactReview.store.works.get(principal.userId, reference.contentRef, reference.ownerRevision)
+                  ?.threadId ?? '',
+            }
+          : principal,
+        permission,
+      ),
+    verifyAssets: (context, principal, retained) => assetCanonService!.verifySelections(context, principal, retained),
+    assertAssetSelections: (context, owner, retained) => assetCanonService!.assertSelections(context, owner, retained),
     media: async (reference, principal) => {
       const asset = await artifactReview.media.read(
         reference.contentRef,
@@ -5677,13 +6075,82 @@ async function main(): Promise<void> {
       threadId: principal.threadId ?? scope.threadId,
     });
   });
-  await registerLivingWorkRoutes(app, { service: livingWorks, registry, contexts: workContexts });
   const { registerWorkVideoAssetRoutes } = await import('./routes/work-video-asset-routes.js');
   const { VideoProjectAssetIndex } = await import('./domains/video-studio/project/asset-index.js');
   const { resolveWorkspaceContentRoot } = await import('./domains/workspace/workspace-content-source-factory.js');
-  registerWorkVideoAssetRoutes(app, {
+  const canonAssetIndex = new VideoProjectAssetIndex({ resolveRoot: resolveWorkspaceContentRoot });
+  const { MediaOwnerError } = await import('./domains/video-studio/content-owner/media-errors.js');
+  const { AssetCanonService } = await import('./domains/collaborative-content/asset-canon/service.js');
+  const { MemberCanonService } = await import('./domains/collaborative-content/asset-canon/member-service.js');
+  const { getResolvedCats } = await import('./config/resolved-cats.js');
+  const producerAuthorizer = createWorkAuthorizer({
+    ownerUserId: privateUserId,
+    access: artifactReview.media.access,
+    invocation: (id) => registry.peekRecord(id),
+  });
+  assetCanonService = new AssetCanonService({
+    store: artifactReview.store.works.assets,
+    contextStore: artifactReview.store.works.contexts,
     contexts: workContexts,
-    assets: new VideoProjectAssetIndex({ resolveRoot: resolveWorkspaceContentRoot }),
+    authorize: async (principal) => {
+      if (principal.userId !== privateUserId) throw new MediaOwnerError('access_denied');
+      if (principal.actor.kind === 'human') {
+        if (principal.actor.actorId !== privateUserId || principal.invocationId)
+          throw new MediaOwnerError('access_denied');
+      } else await producerAuthorizer({ principal, permission: 'read' });
+    },
+    authorizeWork: (reference, principal, permission) =>
+      livingWorks.authorizeVersion(
+        reference,
+        principal.actor.kind === 'human' && !principal.threadId
+          ? {
+              ...principal,
+              threadId:
+                artifactReview.store.works.get(principal.userId, reference.contentRef, reference.ownerRevision)
+                  ?.threadId ?? '',
+            }
+          : principal,
+        permission,
+      ),
+    authorizeRoot: async (version) => {
+      try {
+        await resolveWorkspaceContentRoot(version.locator.rootId);
+      } catch {
+        throw new MediaOwnerError('access_denied');
+      }
+    },
+    inspect: async (version, principal) => {
+      const locator = await workspaceContentReviews.source.resolveFileLocator({
+        principal: { userId: principal.userId },
+        locator: { worktreeId: version.locator.rootId, path: version.locator.path },
+      });
+      return canonAssetIndex.inspect({ kind: 'workspace', rootId: locator.worktreeId, path: locator.path });
+    },
+    assertMember: async (catId, principal) => {
+      if (
+        principal.actor.kind !== 'human' ||
+        principal.invocationId ||
+        principal.userId !== privateUserId ||
+        !getResolvedCats(resolveActiveProjectRoot())[catId]
+      )
+        throw new MediaOwnerError('access_denied');
+    },
+  });
+  memberCanonService = new MemberCanonService(assetCanonService, privateUserId);
+  await registerLivingWorkRoutes(app, {
+    service: livingWorks,
+    registry,
+    contexts: workContexts,
+    assets: assetCanonService,
+  });
+  registerWorkVideoAssetRoutes(app, { contexts: workContexts, assets: canonAssetIndex });
+  const { registerAssetCanonRoutes } = await import('./routes/asset-canon-routes.js');
+  registerAssetCanonRoutes(app, assetCanonService, canonAssetIndex);
+  const { registerMemberCanonRoutes } = await import('./routes/member-canon-routes.js');
+  registerMemberCanonRoutes(app, {
+    members: memberCanonService,
+    assets: canonAssetIndex,
+    source: workspaceContentReviews.source,
   });
   artifactWorkLineageHolder.independent = new WorkCatalogue(livingWorks, artifactReview.store.works.contexts);
   if (!artifactReview.ledgers) throw new Error('F309 publication ledger requires the F063 source owner');
@@ -5772,8 +6239,9 @@ async function main(): Promise<void> {
       new F246NeedsMeProducerAdapter(approvalProducerRegistry),
       new F306NeedsMeProducerAdapter(runtimeInteractionRuntime.store),
       artifactReview.producer,
+      new F290CollectiveWorkResultPluginAdapter(collectiveWorkResultAttentionSource),
     ],
-    ['f246.approval', 'f306.runtime_interaction', 'f309.content_review'],
+    ['f246.approval', 'f306.runtime_interaction', 'f309.content_review', 'f290.collective_work_result'],
   );
   const { DevelopmentReturnService } = await import(
     './infrastructure/scheduler/development-return/DevelopmentReturnService.js'
@@ -5882,6 +6350,7 @@ async function main(): Promise<void> {
   });
   const entrustedWorkOwnerRead = new EntrustedWorkOwnerReadService({
     tasks: taskStore,
+    collectiveCalendarReader: createCollectiveWorkCalendarReader(collectiveSourceOperations, privateUserId),
     producerCatalog: needsMeProducerCatalog,
     artifactReader: artifactReview.artifactReader,
     taskExecution: entrustedWorkTaskExecution,
@@ -6095,7 +6564,10 @@ async function main(): Promise<void> {
     });
   }
   await app.register(tasksRoutes, {
+    ordinaryTaskHandoffs,
+    messageStore,
     taskStore,
+    threadStore,
     socketManager,
     deploymentWaitLifecycleHolder,
     humanTerminal: entrustedWorkHumanTerminal,
@@ -6344,7 +6816,9 @@ async function main(): Promise<void> {
   await app.register(accountsRoutes);
   await app.register(claudeRescueRoutes);
   await app.register(auditRoutes, { threadStore });
-  await app.register(capabilitiesRoutes);
+  await app.register(capabilitiesRoutes, {
+    resolvePluginMcpView: () => pluginRuntime.supervisor.resolveMemberMcpView(),
+  });
   await app.register(audioProxyRoutes);
 
   {
@@ -6664,12 +7138,6 @@ async function main(): Promise<void> {
   const rebuildJobTracker = new RebuildJobTracker();
 
   // Evidence search (SQLite) + reindex endpoint (D-11) + F-4 federated search + F188 rebuild
-  const { MessageSearchService } = await import('./domains/memory/MessageSearchService.js');
-  const messageSearchService = new MessageSearchService({
-    evidenceStore: memoryServices.evidenceStore,
-    threadStore,
-    messageStore,
-  });
   await app.register(evidenceRoutes, {
     evidenceStore: memoryServices.evidenceStore,
     messageSearchService,
@@ -6779,12 +7247,14 @@ async function main(): Promise<void> {
       searchSources: { tasteRepository, messageSearchService },
       brakeSources: { eventMemoryStore: memoryServices.eventMemoryStore, threadStore, messageStore },
       recallSources: {
+        ...recallOwnerMessageSources,
         threadStore,
         messageStore,
         invocationRecordStore,
         turnExecutionStore,
         ...(personMemoryStore ? { personMemoryStore } : {}),
         cueSourceReader: memoryCueRuntime.sourceReader,
+        profileMemoryStore: profileMemoryLifecycleStore,
       },
       evidenceDb: memoryServices.store.getDb(),
       markerQueue: memoryServices.markerQueue,
@@ -7021,6 +7491,17 @@ async function main(): Promise<void> {
   // delivery boundary, so register cleanup now and late-bind its handle below.
   let designGateThresholdObserver: { close(): void } | null = null;
   app.addHook('onClose', async () => designGateThresholdObserver?.close());
+  let processCpuCapture: { close(): Promise<void> } | undefined;
+  app.addHook('onClose', async () => processCpuCapture?.close());
+
+  // New managed HTTP launches must never race their persistent stdio migration.
+  const migratedCodexServers = await migrateStartupCodexMcpConfig(process.cwd());
+  if (migratedCodexServers.length) {
+    app.log.info(
+      { serverNames: migratedCodexServers },
+      '[api] migrated owned Codex stdio entries; explicit rollback profile preserved',
+    );
+  }
 
   // #603: Preload governance overlay (.local / .local-override)
   // Start listening
@@ -7057,6 +7538,11 @@ async function main(): Promise<void> {
       listen: async () => {
         const listening = await app.listen({ port: PORT, host: HOST });
         startupMilestone('http-listening');
+        processCpuCapture = startProcessCpuCapture({
+          enabled: process.env.CAT_CAFE_CPU_CAPTURE_ONCE === '1',
+          dataDir: process.env.CAT_CAFE_DATA_DIR ?? join(homedir(), '.cat-cafe'),
+          logger: app.log,
+        });
         releaseHostListening();
         await initialPlugins?.activate();
         return listening;
@@ -7345,28 +7831,11 @@ async function main(): Promise<void> {
     log: { warn: (context, message) => app.log.warn(context, message) },
   });
 
-  const admitManagedWake: ManagedCommandWakeRecoveryDeps['admitWake'] = async (input) => {
-    // INV-I1: Message and Queue row in one transaction. The lease was already verified against
-    // this exact envelope, so nothing admitted here can belong to a generation that has moved on.
-    const admitted = await invocationQueue.send(messageStore, input.message, {
-      threadId: input.threadId,
-      userId: input.userId,
-      sourceId: input.message.idempotencyKey,
-      kind: 'conversation_input',
-      ownerAuthProvenance: 'unknown',
-      idempotencyKey: input.message.idempotencyKey,
-      content: input.content,
-      from: input.message.from,
-      targetCats: [input.catId],
-      intent: 'execute',
-      priority: input.priority,
-      sourceCategory: input.sourceCategory,
-      ...(input.actionSuccessorFence ? { actionSuccessorFence: input.actionSuccessorFence } : {}),
-    });
-    if (admitted.outcome === 'full') return {};
-    await notifyManagedWakeAdmitted(input.threadId, input.userId);
-    return { messageId: admitted.message.id };
-  };
+  const admitManagedWake = createManagedCommandWakeAdmission({
+    queue: invocationQueue,
+    messageStore,
+    notifyAdmitted: notifyManagedWakeAdmitted,
+  });
   // Physical embodiment is independent of IM packages and their subscriptions.
   const embodimentOutbound: NonNullable<typeof callbackOpts.outboundHook> = {
     async deliver(threadId, content, catId, _rich, _meta, _origin, triggerMessageId) {
@@ -7465,6 +7934,9 @@ async function main(): Promise<void> {
       const deploymentWaitLifecycle = new DeploymentWaitLifecycleService({
         taskStore,
         messageStore,
+        handoffProposalStore,
+        sessionChainStore,
+        authorizationRegistry: registry,
         deliveryDeps,
         eventLog: waitEventLog,
         log: app.log,

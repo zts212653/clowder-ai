@@ -2,6 +2,7 @@
 import type { CollectiveEventEnvelope } from '@cat-cafe/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
+import { projectReplyRecovery } from './collective-reply-recovery-projection';
 
 export interface ParticipationView {
   revision: number;
@@ -66,6 +67,7 @@ export interface ParticipationView {
     failure?: { code: string };
     privateThread?: { id: string; title?: string };
     execution?: { stage: 'queued' | 'started' | 'ended' | 'failed'; invocationId?: string };
+    recovery?: { status: 'recoverable' };
     attention?:
       | { request: 'response_requested'; state: 'unclaimed' }
       | {
@@ -94,28 +96,38 @@ export function useCollectiveParticipation(connectionId: string) {
   const [notice, setNotice] = useState<string>();
   const busyRef = useRef(false);
   const readRevision = useRef(0);
+  const reading = useRef<number>();
   const base = `/api/plugins/official.collective-connector/connections/${encodeURIComponent(connectionId)}`;
   const load = useCallback(
     async (signal?: AbortSignal) => {
       const revision = ++readRevision.current;
-      const response = await apiFetch(`${base}/participation`, { signal }, { afterCurrentGet: true });
-      if (!response.ok) throw new Error('暂时无法读取参与设置，请重试。');
-      const data = (await response.json()) as ParticipationView;
-      if (
-        !Array.isArray(data.cats) ||
-        !Array.isArray(data.requests) ||
-        !Array.isArray(data.tasks) ||
-        !data.bindings ||
-        !data.desiredParticipation ||
-        !data.channelRoutes ||
-        !data.standingInterests ||
-        !Number.isInteger(data.attentionRevision) ||
-        !Number.isInteger(data.revision)
-      )
-        throw new Error('参与设置暂不可用，请稍后重试。');
-      if (signal?.aborted || revision !== readRevision.current) return;
-      setView(data);
-      setError(undefined);
+      reading.current = revision;
+      try {
+        const response = await apiFetch(`${base}/participation`, { signal }, { afterCurrentGet: true });
+        if (!response.ok) throw new Error('暂时无法读取参与设置，请重试。');
+        const data = (await response.json()) as ParticipationView;
+        if (
+          !Array.isArray(data.cats) ||
+          !Array.isArray(data.requests) ||
+          !Array.isArray(data.tasks) ||
+          !data.bindings ||
+          !data.desiredParticipation ||
+          !data.channelRoutes ||
+          !data.standingInterests ||
+          !Number.isInteger(data.attentionRevision) ||
+          !Number.isInteger(data.revision)
+        )
+          throw new Error('参与设置暂不可用，请稍后重试。');
+        if (signal?.aborted || revision !== readRevision.current) return;
+        setView(data);
+        setError(undefined);
+        releaseCurrentRead(reading, revision);
+        const projected = await projectReplyRecovery(data, signal);
+        if (signal?.aborted || revision !== readRevision.current) return;
+        setView(projected);
+      } finally {
+        releaseCurrentRead(reading, revision);
+      }
     },
     [base],
   );
@@ -128,7 +140,9 @@ export function useCollectiveParticipation(connectionId: string) {
       });
     };
     refresh();
-    const timer = window.setInterval(refresh, 5000);
+    const timer = window.setInterval(() => {
+      if (reading.current === undefined) refresh();
+    }, 5000);
     return () => {
       abort.abort();
       readRevision.current++;
@@ -168,7 +182,55 @@ export function useCollectiveParticipation(connectionId: string) {
       setBusy(false);
     }
   };
-  return { view, busy, error, notice, mutate, reload: () => load().catch((cause) => setError(cause.message)) };
+  const recoverReply = async (request: ParticipationView['requests'][number]) => {
+    if (busyRef.current) return false;
+    const recipient = request.event.recipient;
+    if (!request.messageId || !request.privateThread || recipient?.kind !== 'agent') {
+      setError('原请求缺少可核对的家内来源，不能补交回复。');
+      return false;
+    }
+    busyRef.current = true;
+    readRevision.current++;
+    setBusy(true);
+    setError(undefined);
+    setNotice(undefined);
+    const operationKey = `collective-reply-recovery:${connectionId}:${request.event.eventId}`;
+    const requestId = localStorage.getItem(operationKey) ?? crypto.randomUUID();
+    localStorage.setItem(operationKey, requestId);
+    try {
+      const path = `/api/threads/${encodeURIComponent(request.privateThread.id)}/messages/${encodeURIComponent(request.messageId)}/collective-reply-recovery/${encodeURIComponent(recipient.agentId)}`;
+      const response = await apiFetch(path, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ requestId }),
+      });
+      const result = (await response.json().catch(() => ({}))) as { code?: string; error?: string };
+      if (!response.ok) throw new Error(recoveryError(result.code, result.error));
+      localStorage.removeItem(operationKey);
+      setNotice('已排入同源恢复；公开回复仍以原消息的回执为准。');
+      await load();
+      return true;
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '原回复恢复未完成，请重试。');
+      return false;
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
+  };
+  return {
+    view,
+    busy,
+    error,
+    notice,
+    mutate,
+    recoverReply,
+    reload: () => load().catch((cause) => setError(cause.message)),
+  };
+}
+
+function releaseCurrentRead(reading: { current: number | undefined }, revision: number): void {
+  if (reading.current === revision) reading.current = undefined;
 }
 
 function resumeOperationKey(path: string, connectionId: string, body: Record<string, unknown>) {
@@ -229,4 +291,13 @@ function actionError(code?: string, result?: string) {
   if (code === 'RETURN_UNAVAILABLE') return '原请求暂不可用，无法继续执行或回流。原工作仍保留。';
   if (result === 'needs_clarification') return '这项请求包含期限，请填写截止时间后再安排。';
   return '操作未完成，请检查连接和当前参与设置后重试。';
+}
+
+function recoveryError(code?: string, fallback?: string) {
+  if (code === 'COLLECTIVE_REPLY_RECOVERY_NOT_READY') return '家里的原回复尚未完整完成，当前没有可补交正文。';
+  if (code === 'COLLECTIVE_REPLY_RECOVERY_OUTPUT_UNAVAILABLE') return '原回复正文无法可靠识别，已停止恢复且没有发送。';
+  if (code === 'COLLECTIVE_REPLY_RECOVERY_TARGET_UNAVAILABLE') return '原回复成员当前不可用，请稍后重试。';
+  if (code === 'COLLECTIVE_REPLY_RECOVERY_NOT_FOUND' || code === 'COLLECTIVE_REPLY_RECOVERY_SOURCE_INVALID')
+    return '原请求的来源或授权已经变化，不能沿旧来源补交。';
+  return fallback ?? '原回复恢复未完成，请检查连接后重试。';
 }

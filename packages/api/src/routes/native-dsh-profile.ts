@@ -1,16 +1,18 @@
 import { readdirSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
+import { resolveDshHome } from './native-dsh-home.js';
 
 export type DshProfileState = 'configured' | 'acp_profile_missing' | 'acp_profile_invalid';
 export class InvalidDshProfile extends Error {}
 
 /** Inspect only. DSH owns initialization on the first actual connection. */
-export function dshProfileState(
-  home = process.env.DSH_HOME ?? join(homedir(), '.dsh'),
-  profile = 'acp',
-): DshProfileState {
-  const directory = join(home, 'profiles', profile);
+export function dshProfileState(home?: string, profile = 'acp'): DshProfileState {
+  let directory: string;
+  try {
+    directory = join(resolveDshHome(home), 'profiles', profile);
+  } catch {
+    return 'acp_profile_invalid';
+  }
   try {
     const manifest = JSON.parse(readFileSync(join(directory, 'package.json'), 'utf8'));
     return Array.isArray(manifest?.dsh?.profile?.bundles) &&

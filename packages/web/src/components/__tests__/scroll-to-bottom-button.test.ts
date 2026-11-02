@@ -1,6 +1,7 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, type Mock, vi } from 'vitest';
+import { writeShellLanguage } from '../shell/shell-language';
 
 beforeAll(() => {
   (globalThis as { React?: typeof React }).React = React;
@@ -24,6 +25,7 @@ describe('ScrollToBottomButton', () => {
   let onJumpToLatest: Mock<() => void>;
 
   beforeEach(() => {
+    writeShellLanguage('zh');
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -44,6 +46,27 @@ describe('ScrollToBottomButton', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    writeShellLanguage('zh');
+  });
+
+  it('offers the existing resume action in English when English is selected', async () => {
+    const { ScrollToBottomButton } = await import('@/components/ScrollToBottomButton');
+    writeShellLanguage('en');
+    defineNumberProp(scrollEl, 'scrollTop', 0);
+    act(() =>
+      root.render(
+        React.createElement(ScrollToBottomButton, {
+          scrollContainerRef: { current: scrollEl },
+          messagesEndRef: { current: endEl },
+          onJumpToLatest,
+          placement: 'rail',
+        }),
+      ),
+    );
+    const button = container.querySelector<HTMLButtonElement>('button[aria-label="Back to latest"]');
+    expect(button).not.toBeNull();
+    act(() => button?.click());
+    expect(onJumpToLatest).toHaveBeenCalledOnce();
   });
 
   it('hidden when already at bottom; shows when scrolled up; click scrolls to bottom', async () => {

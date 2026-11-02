@@ -55,7 +55,7 @@ function inventoryOf(...manifests) {
   }));
   const live = new Map(instances.map((instance) => [instance.pluginInstanceId, instance]));
   return {
-    snapshot: async () => ({ packages, instances: [...live.values()], grants: [] }),
+    snapshot: async () => ({ packages, instances: [...live.values()] }),
     transaction: async (apply) =>
       apply({
         instances: {

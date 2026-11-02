@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { after, before, test } from 'node:test';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
 import { ensureWorkspaceOpen } from './f307-workspace-open.mjs';
 import { verifyV2EvolutionJourney } from './f311-v2-journey.mjs';
 import { CONTRACT_THREAD_ID, startEvolutionWorkspaceBrowserFixture } from './f311-workspace-browser.harness.mjs';
@@ -14,6 +14,7 @@ import { verifyJourneyProgress } from './f311-workspace-progress.journey.mjs';
 import {
   verifyThreeProgramsSideBySide,
   verifyUnnamedWorkspaceReadability,
+  verifyV2HomeTruth,
 } from './f311-workspace-readability.journey.mjs';
 import { verifyWorkspaceSidecarReturn } from './f311-workspace-sidecar.journey.mjs';
 import { verifyRichVersionReview } from './f311-workspace-version-review.journey.mjs';
@@ -116,7 +117,7 @@ async function assertContained(locator) {
   assert(sizes.scroll <= sizes.client + 1, `horizontal overflow: ${JSON.stringify(sizes)}`);
 }
 test(
-  'v2 Settings opens the F314 and duck projects, summary and exact main reading',
+  'v2 Workspace tools opens the F314 and duck projects, summary and exact main reading',
   { timeout: 120_000, skip: liveAlpha },
   async () => {
     await verifyV2EvolutionJourney({ fixture, browser, capture });
@@ -165,6 +166,32 @@ test('unnamed project context and next steps remain readable in the real shell',
     await context.close();
   }
 });
+
+test(
+  'v2 home keeps pending decisions distinct from constitution and settles typed 422 gaps',
+  { timeout: 90_000 },
+  async () => {
+    const { page, context } = await authenticatedPage();
+    try {
+      report.measurements.v2HomeTruth = await verifyV2HomeTruth({
+        page,
+        base,
+        threadId,
+        programFixture,
+        navigateShell,
+        capture,
+      });
+      report.claims.push(
+        'The real v2 Workspace tools entry shows zero pending approvals without calling constitution a user decision; typed 422 owner gaps settle instead of polling every two seconds.',
+      );
+    } catch (error) {
+      await capture(page, 'v2-home-truth-failure');
+      throw error;
+    } finally {
+      await context.close();
+    }
+  },
+);
 
 test('three named Programs share one home anatomy side by side in the real shell', { timeout: 90_000 }, async () => {
   const { page, context } = await authenticatedPage();

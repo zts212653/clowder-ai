@@ -1,10 +1,12 @@
 import { releaseChatReadingRef } from '@/utils/chat-scroll-memory';
+import { type MessageFindContext, parseMessageFindContext } from './message-find-state';
 import { interruptMessageReadingTrip, type MessageReadingTrip } from './message-reading-trip';
 
 export interface MessageReadingSession {
   id: string;
   originPersisted: boolean;
   trip: MessageReadingTrip;
+  find?: MessageFindContext;
 }
 
 // Browser-local navigation metadata uses the existing browser persistence carrier.
@@ -33,8 +35,8 @@ function parsePending(value: unknown, count: number): MessageReadingTrip['pendin
   if (value.kind === 'target' && boundedIndex(value.index, count)) return { kind: 'target', index: value.index };
 }
 
-function parseTargets(value: unknown): MessageReadingTrip['targets'] | null {
-  if (!Array.isArray(value) || !value.length || value.length > 200) return null;
+function parseTargets(value: unknown, allowEmpty: boolean): MessageReadingTrip['targets'] | null {
+  if (!Array.isArray(value) || (!value.length && !allowEmpty) || value.length > 200) return null;
   const targets: MessageReadingTrip['targets'][number][] = [];
   for (const target of value) {
     if (!object(target) || !identifier(target.threadId) || !identifier(target.messageId)) return null;
@@ -48,10 +50,10 @@ function parseTargets(value: unknown): MessageReadingTrip['targets'] | null {
   return targets;
 }
 
-function parseTrip(value: unknown): MessageReadingTrip | null {
+function parseTrip(value: unknown, allowEmpty = false): MessageReadingTrip | null {
   if (!object(value) || !identifier(value.searchId) || !object(value.origin)) return null;
   if (!identifier(value.origin.threadId) || !identifier(value.origin.readingRef)) return null;
-  const targets = parseTargets(value.targets);
+  const targets = parseTargets(value.targets, allowEmpty);
   if (!targets) return null;
   if (
     typeof value.generation !== 'number' ||
@@ -83,20 +85,29 @@ function parseSession(value: unknown): MessageReadingSession | null {
     typeof value.originPersisted !== 'boolean'
   )
     return null;
-  const trip = parseTrip(value.trip);
-  return trip ? { id: value.id, originPersisted: value.originPersisted, trip } : null;
+  const find = value.find === undefined ? undefined : parseMessageFindContext(value.find);
+  if (find === null) return null;
+  const trip = parseTrip(value.trip, find !== undefined);
+  return trip ? { id: value.id, originPersisted: value.originPersisted, trip, ...(find ? { find } : {}) } : null;
 }
 
 export function startMessageReadingSession(
   trip: MessageReadingTrip,
   originPersisted: boolean,
+  find?: MessageFindContext,
 ): {
   session: MessageReadingSession;
   persisted: boolean;
 } {
-  const snapshot = parseTrip(trip);
-  if (!snapshot) throw new Error('Invalid reading trip coordinates');
-  const session = { id: crypto.randomUUID(), trip: snapshot, originPersisted };
+  const findSnapshot = find ? parseMessageFindContext(find) : undefined;
+  const snapshot = parseTrip(trip, !!findSnapshot);
+  if (!snapshot || findSnapshot === null) throw new Error('Invalid reading trip coordinates');
+  const session = {
+    id: crypto.randomUUID(),
+    trip: snapshot,
+    originPersisted,
+    ...(findSnapshot ? { find: findSnapshot } : {}),
+  };
   let persisted = false;
   if (typeof window !== 'undefined') {
     let wroteRecord = false;

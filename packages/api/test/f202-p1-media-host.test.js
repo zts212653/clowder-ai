@@ -27,9 +27,8 @@ async function fixture() {
   return { root, ledger, port, entitlements, media };
 }
 
-const allowed = { pluginInstanceId: 'pi_a', effectiveGrants: ['streams.read'] };
-const other = { pluginInstanceId: 'pi_b', effectiveGrants: ['streams.read'] };
-const ungranted = { pluginInstanceId: 'pi_a', effectiveGrants: [] };
+const allowed = { pluginInstanceId: 'pi_a' };
+const other = { pluginInstanceId: 'pi_b' };
 const deliveryScope = { kind: 'delivery', deliveryId: 'delivery-1' };
 
 async function rejectsCode(promise, code) {
@@ -79,7 +78,7 @@ test('grant/read uses bounded chunks, terminal empty chunk and validates offsets
   await rejectsCode(media.read(allowed, { reference, offset: 0, limit: 524289 }), 'VALIDATION');
 });
 
-test('four entitlement failures use indistinguishable code and message; missing capability is distinct', async () => {
+test('four entitlement failures use indistinguishable code and message', async () => {
   const { ledger, entitlements, media } = await fixture();
   const reference = await ledger.register(Buffer.from('secret'), { ownerInstanceId: 'pi_a' });
   const unknown = `hmr_${'z'.repeat(32)}`;
@@ -108,7 +107,6 @@ test('four entitlement failures use indistinguishable code and message; missing 
     return true;
   });
   assert.equal(new Set(messages).size, 1);
-  await rejectsCode(media.read(ungranted, { reference, offset: 0, limit: 1 }), 'PERMISSION');
 });
 
 test('audit is durable, append-only, sanitized, and revoke is idempotent', async () => {
@@ -408,7 +406,7 @@ test('broker exposes the streams.read wire row with contract validation', async 
   assert.equal(handler.validateResult({ offset: 0, dataBase64: '', nextOffset: 0, done: false }), false);
 });
 
-test('admitted external Broker invokes streams.read and gates the capability before bytes', async () => {
+test('admitted external Broker invokes streams.read through the existing media entitlement', async () => {
   const { root, ledger, entitlements, media } = await fixture();
   const reference = await ledger.register(Buffer.from('abc'), { ownerInstanceId: EXTERNAL_INSTANCE_ID });
   await entitlements.grant({
@@ -422,7 +420,6 @@ test('admitted external Broker invokes streams.read and gates the capability bef
   const harness = await createExternalRuntimeHarness({
     rootDir: join(root, 'package'),
     manifest,
-    effectiveGrants: ['streams.read'],
     methods: createMessagingBrokerHandlers({ media }),
   });
   const connection = await harness.broker.openExternalConnection(EXTERNAL_INSTANCE_ID);
@@ -435,25 +432,4 @@ test('admitted external Broker invokes streams.read and gates the capability bef
     done: false,
   });
   assert.equal((await harness.brokerStore.snapshot()).calls.length, 0, 'streams.read has no Broker call ledger');
-});
-
-test('contract permission matrix includes the streams.read L1 row without a Host-owned copy', async () => {
-  const { contractPermissionEntries } = await import('./plugin-m0d-host-control-adapter.js');
-  const schema = JSON.parse(
-    await readFile(
-      new URL('../node_modules/@clowder-ai/plugin-contract/src/schemas/behavior-fixture.schema.json', import.meta.url),
-      'utf8',
-    ),
-  );
-  const entries = contractPermissionEntries();
-  assert.equal(entries.length, new Set(entries.map((entry) => entry.capability)).size);
-  assert.equal(schema.$defs.PermissionMatrixInput.properties.entries.minItems, entries.length);
-  assert.equal(schema.$defs.PermissionMatrixInput.properties.entries.maxItems, entries.length);
-  for (const [capability, layer, firstPartyPreset] of [
-    ['streams.read', 'L1', true],
-    ['cloud.conversation.host', 'L2', false], // contract beta.24, F202 W2-3 h3
-  ]) {
-    const entry = contractPermissionEntries().find((candidate) => candidate.capability === capability);
-    assert.deepEqual(entry, { capability, layer, firstPartyPreset });
-  }
 });

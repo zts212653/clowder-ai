@@ -4,8 +4,9 @@ import { useThreadArtifacts } from '@/hooks/useThreadArtifacts';
 import { useChatStore } from '@/stores/chatStore';
 import { useTaskStore } from '@/stores/taskStore';
 import { AppTooltip } from '../AppTooltip';
+import { conversationTasks, openTaskCount } from '../yarn-ball/conversation-tasks';
 import { headerCountsCopy } from './header-counts.shell-copy';
-import { ShellGlyph, WorksIcon } from './ShellIcons';
+import { WorksIcon, YarnBallIcon } from './ShellIcons';
 import { useShellCopy } from './shell-copy';
 
 function HeaderChip({
@@ -72,19 +73,23 @@ function ThreadWorksCount({ threadId }: { threadId: string | undefined }) {
 }
 
 /**
- * 任务 N (this conversation's 毛线球). N = this conversation's tasks that are not done, from the task store the chat already
- * loads for the open thread. Zero stays unnumbered because "not loaded yet" and "none" are indistinguishable in that store.
+ * 毛线球 N (this conversation's 毛线球). N = this conversation's tasks that are not done, from the task store the chat already
+ * loads for the open thread. A completed thread read distinguishes a known zero from an empty store that has not loaded yet.
  */
 export function ThreadTasksButton() {
   const t = useShellCopy(headerCountsCopy);
   const setWorkspaceMode = useChatStore((s) => s.setWorkspaceMode);
-  const total = useTaskStore((s) => s.tasks.length);
-  const open = useTaskStore((s) => s.tasks.filter((t) => t.status !== 'done').length);
+  const threadId = useChatStore((s) => s.currentThreadId);
+  const allTasks = useTaskStore((s) => s.tasks);
+  const loadedThreadId = useTaskStore((s) => s.loadedThreadId);
+  const tasks = conversationTasks(allTasks, threadId);
+  const total = tasks.length;
+  const open = openTaskCount(tasks);
   return (
     <HeaderChip
-      icon={<ShellGlyph name="checkSquare" className="h-4 w-4" />}
+      icon={<YarnBallIcon />}
       label={t.tasks}
-      count={open || undefined}
+      count={total > 0 || loadedThreadId === threadId ? open : undefined}
       tip={t.tasksTip}
       tipDetail={total > 0 ? t.taskDetail(open, total) : undefined}
       onClick={() => setWorkspaceMode('tasks')}

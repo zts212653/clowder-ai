@@ -108,7 +108,10 @@ async function main(): Promise<void> {
 
   const readOwnedSnapshot = (): OwnedSnapshot | null => {
     if (!owner) return null;
-    const snapshot = readUnixProcessSnapshotSync({ includeEnvironment: true });
+    const snapshot = readUnixProcessSnapshotSync({
+      includeEnvironment: true,
+      environmentMarkers: [`${CLI_PROCESS_OWNER_ENV}=${owner.manifest.ownerId}`],
+    });
     if (!snapshot) return null;
     return { snapshot, targets: findOwnedUnixProcesses(snapshot, owner.manifest.ownerId) };
   };

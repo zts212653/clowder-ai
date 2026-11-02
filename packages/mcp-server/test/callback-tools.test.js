@@ -55,6 +55,44 @@ describe('MCP Callback Tools', () => {
     }
   });
 
+  test('handleSetThreadMetadata forwards roadmap coordinates and revision without cross-thread selectors', async () => {
+    const { handleSetThreadMetadata } = await import('../dist/tools/callback-tools.js');
+    const roadmap = {
+      state: 'active',
+      projectPath: '/authorized/project',
+      path: 'docs/roadmap.md',
+      sourceRef: 'thread:current#source',
+      expectedRevision: null,
+    };
+    let body;
+    globalThis.fetch = async (_url, options) => {
+      body = JSON.parse(options.body);
+      return { ok: true, json: async () => ({ roadmapBinding: { revision: 1 } }) };
+    };
+    const result = await handleSetThreadMetadata({ roadmap });
+    assert.notEqual(result.isError, true);
+    assert.deepEqual(body, { roadmap });
+  });
+
+  test('propose_thread forwards explicit empty fields when clearing an owner revision', async () => {
+    const { handleProposeThread } = await import('../dist/tools/callback-tools.js');
+    let body;
+    globalThis.fetch = async (_url, options) => {
+      body = JSON.parse(options.body);
+      return { ok: true, json: async () => ({ proposalId: 'replacement', status: 'pending' }) };
+    };
+    const result = await handleProposeThread({
+      title: 'same work',
+      reason: 'clear assignments and body',
+      supersedesProposalId: 'original',
+      preferredCats: [],
+      initialMessage: '',
+    });
+    assert.notEqual(result.isError, true);
+    assert.deepEqual(body.preferredCats, []);
+    assert.equal(body.initialMessage, '');
+  });
+
   test('propose_taste forwards an optional takeaway hypothesis with the approval request', async () => {
     const { handleProposeTaste, proposeTasteInputSchema } = await import('../dist/tools/callback-tools.js');
     assert.equal(proposeTasteInputSchema.takeaway.safeParse('我们以为 You 喜欢清楚的来源。').success, true);
@@ -218,8 +256,8 @@ describe('MCP Callback Tools', () => {
     });
 
     assert.equal(result.isError, true);
-    assert.match(result.content[0].text, /pr:<owner>\/<repo>#<positive-number>/);
-    assert.match(result.content[0].text, /subject:<namespace>:<opaque-id>/);
+    assert.match(result.content[0].text, /subject:task:<taskId>/);
+    assert.match(result.content[0].text, /existing Task/);
     assert.equal(attempts, 0, 'invalid metadata must not reach the callback transport');
     assert.deepEqual(
       readdirSync(outboxDir).filter((name) => name.endsWith('.json')),
@@ -928,6 +966,8 @@ describe('MCP Callback Tools', () => {
       limit: 15,
       activeSince: 1234567890,
       keyword: 'design review',
+      includeWork: true,
+      cursor: 'opaque-next',
     });
 
     assert.equal(result.isError, undefined);
@@ -935,6 +975,8 @@ describe('MCP Callback Tools', () => {
     assert.ok(capturedUrl.includes('limit=15'));
     assert.ok(capturedUrl.includes('activeSince=1234567890'));
     assert.ok(capturedUrl.includes('keyword=design+review'));
+    assert.ok(capturedUrl.includes('includeWork=true'));
+    assert.ok(capturedUrl.includes('cursor=opaque-next'));
   });
 
   test('handleCrossPostMessage calls post-message with threadId', async () => {
@@ -2334,8 +2376,8 @@ describe('MCP Callback Tools', () => {
     });
 
     assert.equal(result.isError, true);
-    assert.match(result.content[0].text, /pr:<owner>\/<repo>#<positive-number>/);
-    assert.match(result.content[0].text, /subject:<namespace>:<opaque-id>/);
+    assert.match(result.content[0].text, /subject:task:<taskId>/);
+    assert.match(result.content[0].text, /existing Task/);
     assert.equal(attempts, 0);
     assert.deepEqual(
       readdirSync(outboxDir).filter((name) => name.endsWith('.json')),

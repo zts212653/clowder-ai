@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useApprovalHubStore } from '@/stores/approvalHubStore';
 import type { UnifiedAttentionView } from '../use-unified-attention';
+import { readConfirmedApprovalTerminal } from './approval-confirmation-read';
 import { type ApprovalSessions, createApprovalSessions } from './approval-sessions';
 
 /**
@@ -34,6 +35,7 @@ export function useApprovalSessions(view: UnifiedAttentionView): ApprovalSession
         return { result: current.result, generation: current.resultGeneration };
       },
       now: () => Date.now(),
+      confirmTerminal: readConfirmedApprovalTerminal,
     }),
   );
 

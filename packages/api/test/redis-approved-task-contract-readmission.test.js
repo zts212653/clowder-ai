@@ -14,7 +14,7 @@ import {
 import { redisIsolationSkipReason } from './helpers/redis-test-helpers.js';
 
 describe(
-  'continuation authority at every readmission commit',
+  'governed namespaced Task continuation authority at every lease readmission commit',
   { skip: redisIsolationSkipReason(process.env.REDIS_URL) },
   () => {
     test('replacement callback rejects a commit race without advancing lease or publishing another carrier', async (t) => {

@@ -2,6 +2,7 @@ import type { WorkspaceContentReviewView } from '@cat-cafe/shared';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { openFileMenu } from '@/test-utils/open-file-menu';
 import { WorkspaceContentReviewSurface } from '../WorkspaceContentReviewSurface';
 import { workspaceReviewDraftKey } from '../workspace-review-draft';
 import { discussionView, mediaView, replyView, reviewId, view } from './WorkspaceContentReviewSurface.fixture';
@@ -256,6 +257,7 @@ async function renderDiscussionSurface() {
     await Promise.resolve();
     await Promise.resolve();
   });
+  await openFileMenu(container);
   await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="打开作品讨论"]')?.click());
 }
 

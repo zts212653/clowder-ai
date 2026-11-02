@@ -265,13 +265,14 @@ export function extractAnchor(fm: Record<string, unknown>, sourcePath?: string):
 
 /**
  * Extract feature_ids from frontmatter as keyword strings for non-feature docs.
- * Feature docs use feature_ids as anchor; non-feature docs get them as keywords
- * for discoverability.
+ * Primary feature docs use feature_ids as anchor. Path-anchored supporting docs
+ * retain those references as keywords, including when they live in features/.
  */
 export function extractFeatureIdKeywords(fm: Record<string, unknown> | null, sourcePath: string): string[] {
-  if (!fm || isFeatureDocPath(sourcePath)) return [];
+  if (!fm) return [];
   const featureIds = fm.feature_ids;
   if (!Array.isArray(featureIds)) return [];
+  if (isFeatureDocPath(sourcePath) && extractAnchor(fm, sourcePath) === featureIds[0]) return [];
   return featureIds.filter((id): id is string => typeof id === 'string');
 }
 

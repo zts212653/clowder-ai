@@ -20,6 +20,7 @@ const ENV_KEYS = [
   'ENABLE_PWA_IN_DEV',
   'CAT_CAFE_WEB_TEST_DIST_DIR',
   'CAT_CAFE_WEB_TEST_TSCONFIG',
+  'CAT_CAFE_DESKTOP_WEB_BUILD',
   'NODE_ENV',
 ];
 
@@ -84,6 +85,26 @@ it('precache includes current CSS without eagerly caching every retained histori
 });
 
 describe('next.config rewrites', () => {
+  it('compiles desktop images without writing an optimizer cache into the installed application', () => {
+    const { getImgProps } = require('next/dist/shared/lib/get-img-props');
+    const { imageConfigDefault } = require('next/dist/shared/lib/image-config');
+    const defaultLoader = require('next/dist/shared/lib/image-loader').default;
+    const image = (config) =>
+      getImgProps(
+        { src: '/cats/fixture.png', width: 64, height: 64, alt: 'fixture' },
+        { imgConf: { ...imageConfigDefault, ...config.images }, defaultLoader },
+      ).props;
+    withEnv({ NODE_ENV: 'production', CAT_CAFE_DESKTOP_WEB_BUILD: '1' }, (config) => {
+      assert.equal(config.images?.unoptimized, true);
+      assert.equal(image(config).src, '/cats/fixture.png');
+      assert.equal(image(config).srcSet, undefined);
+    });
+    withEnv({ NODE_ENV: 'production' }, (config) => {
+      assert.notEqual(config.images?.unoptimized, true, 'ordinary Web deployments retain image optimization');
+      assert.match(image(config).src, /^\/_next\/image\?/);
+    });
+  });
+
   it('uses non-adjacent configured API defaults when FRONTEND_PORT selects that Web port', async () => {
     const originalLoad = Module._load;
     Module._load = function loadSyntheticDefaults(request, parent, isMain) {

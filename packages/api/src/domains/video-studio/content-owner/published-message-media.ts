@@ -27,17 +27,21 @@ function messageItemUrl(message: StoredMessage, source: MessageMediaPublicationS
 
 /** Resolve an exact published item; no Task or artifact-title matching participates. */
 export async function readPublishedMessageItem(
-  messages: Pick<IMessageStore, 'getById'>,
+  messages: Pick<IMessageStore, 'getById' | 'getArtifactById'>,
   source: MessageMediaPublicationSource,
   principal: MediaReviewPrincipal,
 ) {
-  const message = await resolveVisibleReplyParent(messages, source.messageId, {
-    threadId: source.threadId,
-    viewer:
-      principal.actor.kind === 'human'
-        ? { type: 'user' }
-        : { type: 'cat', catId: createCatId(principal.actor.actorId) },
-  });
+  const message = await resolveVisibleReplyParent(
+    { getById: (id) => (messages.getArtifactById ? messages.getArtifactById(id) : messages.getById(id)) },
+    source.messageId,
+    {
+      threadId: source.threadId,
+      viewer:
+        principal.actor.kind === 'human'
+          ? { type: 'user' }
+          : { type: 'cat', catId: createCatId(principal.actor.actorId) },
+    },
+  );
   if (
     !message ||
     message.userId !== principal.userId ||

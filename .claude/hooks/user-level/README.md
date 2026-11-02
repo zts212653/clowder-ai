@@ -1,18 +1,18 @@
 # 用户级 Hooks（跟着人走，所有项目生效）
 
 这些 hook 放在 `~/.claude/hooks/`（用户级），不是项目级。
-项目里这份是**参考副本**，方便其他猫或新环境部署。
+项目里这份是安装模板。安装器从当前部署档案绑定称谓；安装后的脚本不依赖当前项目、API 或配置文件。
 
 ## 部署方式
 
 ### Claude Code
 ```bash
-cp .claude/hooks/user-level/session-*.sh ~/.claude/hooks/
-chmod +x ~/.claude/hooks/session-*.sh   # macOS/Linux; Windows Git Bash 可跳过
+pnpm --filter @cat-cafe/api build
+node desktop/scripts/sync-agent-hooks-offline.mjs --project-root "$PWD" --target-root "$HOME"
 ```
-然后在 `~/.claude/settings.json` 的 `hooks` 里加 SessionStart 和 Stop 条目。
+此入口与 Hub 的 Sync hooks 共用 producer，会写入 SessionStart 和 Stop 条目。
 可参考同目录的 `claude-settings.template.json`；模板只使用 `$HOME`，不携带维护者机器上的绝对路径。
-建议优先用 Hub 的 Sync hooks 一键修复；手动复制 template 后，Hub 可能因路径规范化差异继续提示 stale，此时按提示再 sync 一次即可。
+也可以用 Hub 的 Sync hooks 一键修复。不要直接复制 `.sh` 模板；称谓变量必须由安装器作为数据绑定，不能在 shell 中求值执行。
 
 > **Windows 用户**：需要安装 [Git for Windows](https://gitforwindows.org/)（提供 Git Bash）。
 > Hook 命令通过 `bash` 显式调用，确保跨平台执行。如果不装 Git Bash，

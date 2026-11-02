@@ -188,6 +188,15 @@ export type TaskProbeSpec =
       readonly key: string;
     };
 
+/** An exact reference to the existing child execution owner; no mirrored runtime state. */
+export interface TaskExecutionRef {
+  readonly invocationId: string;
+  readonly parentInvocationId: string;
+  readonly catId: string;
+  readonly threadId: string;
+  readonly sourceMessageId: string | null;
+}
+
 export interface TaskItem {
   readonly pluginWait?: PluginWaitState;
   readonly id: string;
@@ -203,6 +212,12 @@ export interface TaskItem {
   readonly subjectKey: string | null;
   readonly title: string;
   readonly ownerCatId: CatId | null;
+  /** Ordinary assignment revision; legacy rows begin at zero. Only owner/home changes advance it. */
+  readonly ownerRevision?: number;
+  /** Assignment timestamp fences unbound legacy callbacks minted before an owner change. */
+  readonly ownerChangedAt?: number;
+  readonly lastAppliedHandoffMessageRef?: string;
+  readonly executionRef?: TaskExecutionRef | null;
   readonly status: TaskStatus;
   readonly why: string;
   readonly createdBy: CatId | 'user' | 'system';
@@ -240,6 +255,8 @@ export interface TaskItem {
 }
 
 export type CreateTaskInput = Pick<TaskItem, 'threadId' | 'title' | 'why' | 'createdBy'> & {
+  /** Host-only reservation for a Task created by its already-running owner. Never an API/tool field. */
+  initialExecutionRef?: TaskExecutionRef;
   kind?: TaskKind;
   subjectKey?: string | null;
   ownerCatId?: CatId | null;

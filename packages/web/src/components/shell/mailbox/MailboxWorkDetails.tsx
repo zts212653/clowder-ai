@@ -15,6 +15,14 @@ function DetailLine({ testId, label, children }: { testId: string; label: string
 export function MailboxWorkDetails({ item }: { item: UnifiedAttentionItemV1 }) {
   const t = useShellCopy(mailboxEntryCopy);
   const accountability = item.collectiveAccountabilityRequest;
+  if (item.collectiveProjectAttention)
+    return (
+      <div className="flex flex-col gap-1.5" data-testid="mailbox-project-attention-details">
+        <DetailLine testId="mailbox-project-attention-project" label={t.accountabilityProject}>
+          {item.collectiveProjectAttention.projectTitle}
+        </DetailLine>
+      </div>
+    );
   if (accountability) {
     return (
       <div className="flex flex-col gap-1.5" data-testid="mailbox-accountability-details">

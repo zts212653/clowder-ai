@@ -8,6 +8,7 @@ import {
 } from '@cat-cafe/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
+import type { CommitChangesTarget } from '../workbench/commit-changes-surface';
 
 export interface ChangedFile {
   status: string;
@@ -100,9 +101,15 @@ async function readChangesResponse(
   return { data: data as ChangesDiffData, error: null };
 }
 
-export function useChangesDiff(worktreeId: string | null, pullRequestTarget?: PullRequestChangesTarget) {
+export function useChangesDiff(
+  worktreeId: string | null,
+  pullRequestTarget?: PullRequestChangesTarget,
+  chatSource = false,
+  commitTarget?: CommitChangesTarget,
+) {
   const prKey = pullRequestTarget ? encodePullRequestChangesTarget(pullRequestTarget) : null;
-  const targetKey = prKey ? `pr:${prKey}` : `local:${worktreeId ?? ''}`;
+  const commitKey = commitTarget ? JSON.stringify(commitTarget) : null;
+  const targetKey = commitKey ? `commit:${commitKey}` : prKey ? `pr:${prKey}` : `local:${worktreeId ?? ''}`;
   const currentKey = useRef(targetKey);
   currentKey.current = targetKey;
   const requestSeq = useRef(0);
@@ -121,11 +128,26 @@ export function useChangesDiff(worktreeId: string | null, pullRequestTarget?: Pu
     setStatus({ key: targetKey, loading: true, error: null });
     try {
       const res = await apiFetch(
-        prKey
-          ? `/api/workspace/pull-request-changes?target=${encodeURIComponent(prKey)}`
-          : `/api/workspace/diff?worktreeId=${encodeURIComponent(worktreeId)}`,
+        commitKey
+          ? `/api/workspace/chat-commit-changes?${new URLSearchParams(JSON.parse(commitKey))}`
+          : prKey
+            ? `/api/workspace/${chatSource ? 'chat-pull-request-changes' : 'pull-request-changes'}?target=${encodeURIComponent(prKey)}`
+            : `/api/workspace/diff?worktreeId=${encodeURIComponent(worktreeId)}`,
       );
       if (!isCurrent()) return;
+      if (commitKey && res.ok) {
+        const value: unknown = await res.clone().json();
+        const expected = JSON.parse(commitKey) as CommitChangesTarget;
+        if (
+          !value ||
+          typeof value !== 'object' ||
+          !('sha' in value) ||
+          value.sha !== expected.sha ||
+          !('worktreeId' in value) ||
+          value.worktreeId !== expected.worktreeId
+        )
+          throw new Error('Commit identity mismatch');
+      }
       const result = await readChangesResponse(res, prKey);
       if (!isCurrent()) return;
       setStored({ key: targetKey, data: result.data });
@@ -133,7 +155,7 @@ export function useChangesDiff(worktreeId: string | null, pullRequestTarget?: Pu
     } catch {
       if (isCurrent()) setStatus({ key: targetKey, loading: false, error: 'network' });
     }
-  }, [worktreeId, prKey, targetKey]);
+  }, [worktreeId, prKey, targetKey, chatSource, commitKey]);
 
   useEffect(() => {
     void refresh();

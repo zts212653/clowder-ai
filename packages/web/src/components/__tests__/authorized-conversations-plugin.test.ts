@@ -37,8 +37,14 @@ it('refreshes titles before listing, and successful refresh does not clear reloa
     throw new Error(path);
   });
   const result = await fetchAuthorizedConversations(new AbortController().signal, { syncTitles: true });
-  expect(fetch.mock.calls.map(([path]) => path)).toEqual([`${base}refresh-titles`, `${base}list`, `${base}status`]);
-  expect(fetch.mock.calls.every(([, init]) => init?.method === 'POST')).toBe(true);
+  expect(fetch.mock.calls.filter(([path]) => path.startsWith(base)).map(([path]) => path)).toEqual([
+    `${base}refresh-titles`,
+    `${base}list`,
+    `${base}status`,
+  ]);
+  expect(fetch.mock.calls.filter(([path]) => path.startsWith(base)).every(([, init]) => init?.method === 'POST')).toBe(
+    true,
+  );
   expect(result.candidates[0].displayTitle).toBe('New title');
   expect(projectPersonalChromeRecoveryStatus(result.body)).toEqual({
     connectionIssue: expect.stringContaining('重载'),
@@ -56,6 +62,36 @@ it('status read failure keeps authorizations and never claims a connection probl
   expect(projectPersonalChromeRecoveryStatus(result.body)).toEqual({});
 });
 
+it('keeps an outdated conversation page actionable after the extension connection is verified', async () => {
+  fetch.mockImplementation(async (path) => {
+    if (path === `${base}list`) return json({ rows: [{ key: 'a', label: 'Saved conversation' }] }, 'rows');
+    if (path === `${base}status`)
+      return json({ helper: { state: 'connected' }, delivery: { reloadRequired: false, pageReloadRequired: true } });
+    throw new Error(path);
+  });
+  const result = await fetchAuthorizedConversations(new AbortController().signal);
+  expect(result.candidates).toHaveLength(1);
+  const issue = projectPersonalChromeRecoveryStatus(result.body).connectionIssue;
+  expect(issue).toContain('原对话页面');
+  expect(issue).toContain('重载');
+  expect(issue).not.toContain('扩展需要重载');
+});
+
+it('settles both inventory and authorization reads when the view is aborted', async () => {
+  fetch.mockImplementation(
+    (_path, init) =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), {
+          once: true,
+        });
+      }),
+  );
+  const controller = new AbortController();
+  const pending = fetchAuthorizedConversations(controller.signal);
+  controller.abort();
+  await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+});
+
 it.each([
   { ok: false, render: 'status', label: 'Unavailable' },
   { ok: true, render: 'rows', data: {} },
@@ -63,7 +99,7 @@ it.each([
 ])('does not turn an unreadable successful HTTP response into an empty authorization list: %j', async (body) => {
   fetch.mockResolvedValue(new Response(JSON.stringify(body)));
   await expect(fetchAuthorizedConversations(new AbortController().signal)).rejects.toThrow('authorization list');
-  expect(fetch).toHaveBeenCalledTimes(1);
+  expect(fetch.mock.calls.filter(([path]) => path.startsWith(base))).toHaveLength(1);
 });
 
 it('lost refresh response still reads authorization and reports unknown refresh outcome', async () => {

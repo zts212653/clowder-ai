@@ -3,18 +3,21 @@
 /**
  * Shared fixture for F267 decision-proof resolution.
  *
- * It builds a complete, hash-consistent owner chain in a throwaway repository root from the REAL
- * committed certificate and result bytes, so every test that uses it exercises the owner's actual
- * artifacts rather than a hand-written stand-in. Extracted so the resolver's fail-closed suite and
- * the normalized-projection suite can share one source of truth instead of drifting apart.
+ * Builds a complete hash-consistent synthetic owner chain in a throwaway root.
+ * Resolver security and normalized projection share the same explicit fixture;
+ * historical certificate validity is a separate source-evidence obligation.
  */
 
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, symlink, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { parse, stringify } from 'yaml';
+import {
+  createMeasurementCertificateFixture,
+  createMeasurementResultFixture,
+} from './helpers/measurement-certificate-fixture.js';
 
 export const CERTIFICATE_REF = 'docs/harness-feedback/certificates/f267-memory-search-quality.yaml';
 export const RESULT_REF =
@@ -30,7 +33,6 @@ export const OWNER_KEYS = [
   'holdoutProof',
   'holdoutSeal',
 ];
-export const sourceRepoRoot = resolve(import.meta.dirname, '../../../..');
 
 export async function moduleUnderTest() {
   return import('../../dist/infrastructure/harness-eval/measurement/measurement-decision-proof-resolver.js');
@@ -60,10 +62,15 @@ function ownerObject(objectType, ownerFeatureId, payload) {
 export async function fixture(options = {}) {
   const repoRoot = await mkdtemp(join(tmpdir(), 'f267-proof-resolver-'));
   const outsideRoot = await mkdtemp(join(tmpdir(), 'f267-proof-outside-'));
-  const certificateBytes = await readFile(resolve(sourceRepoRoot, CERTIFICATE_REF));
-  const resultBytes = await readFile(resolve(sourceRepoRoot, RESULT_REF));
-  const certificate = parse(certificateBytes.toString('utf8'));
-  const result = parse(resultBytes.toString('utf8'));
+  const certificate = await createMeasurementCertificateFixture({
+    certificateId: 'f267-memory-search-quality',
+    domainId: 'eval:memory',
+    bundleId: 'eval:memory/fixture',
+  });
+  const result = createMeasurementResultFixture(certificate);
+  result.resultId = 'f267-memory-search-quality-negative-control-v1';
+  const certificateBytes = Buffer.from(stringify(certificate));
+  const resultBytes = Buffer.from(stringify(result));
   const window = { startMs: 300, endMs: 400 };
   const refs = Object.fromEntries(OWNER_KEYS.map((key) => [key, `${OWNER_ROOT}/${key}.yaml`]));
   const objects = {

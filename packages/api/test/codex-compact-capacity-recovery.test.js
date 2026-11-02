@@ -59,6 +59,8 @@ class CapacityWire {
       this.inbox.push({ id: message.id, result: { requirements: null } });
     if (message.method === 'account/read')
       this.inbox.push({ id: message.id, result: { account: { type: 'chatgpt' } } });
+    if (message.method === 'thread/turns/list')
+      this.inbox.push({ id: message.id, result: { data: [], nextCursor: null } });
     if (message.method === 'thread/resume' && this.resumeRejection) {
       if (this.resumeRejection === 'carrier') this.inbox.destroy(new Error('Max payload size exceeded'));
       else
@@ -157,6 +159,19 @@ test('organic remote-compaction capacity failure resumes completed work without 
     false,
   );
   assert.equal(second.writes.find((message) => message.method === 'thread/resume').params.threadId, 'native-thread');
+});
+
+test('capacity recovery sends a Unicode-valid instruction when its step preview crosses an emoji', async () => {
+  const first = capacityWire(COMPACT_CAPACITY, { plan: true });
+  const plan = first.events.find((event) => event.method === 'turn/plan/updated');
+  plan.params.plan[0].step = `${'a'.repeat(159)}😼finish`;
+  const second = successWire();
+  const { error } = await runWires([first, second]);
+  assert.equal(error, undefined);
+  const resumed = second.writes.find((message) => message.method === 'turn/start').params;
+  const instruction = resumed.additionalContext['cat-cafe.capacity-recovery'].value;
+  assert.ok(instruction.isWellFormed(), 'the actual turn/start payload must pass the strict Unicode writer');
+  assert.ok(instruction.includes(`Resume this recorded step: ${'a'.repeat(159)}.`));
 });
 
 test('the early capacity error notification stays private when the existing planned recovery succeeds', async () => {

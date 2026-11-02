@@ -512,21 +512,29 @@ pnpm worktree:finish ../cat-cafe-{feature-name} --source-ref {同一ref} --check
 # 旧storageDisposition=quarantined只证明不占活跃名额，不能当磁盘回收；保留它的恢复记录。
 ```
 
-### Step 8.5 — 只读核对本 review target 的沙盒
+### Step 8.5 — 核对这个 PR 的全部登记路径
 
-Reviewer 在交 verdict 前已按 receive-review 执行 release/check 或具名续留。作者从仓库内只读列出本 target 下仍登记的活跃沙盒、owner 和续留状态，与 reviewer 回执核对；不停止别人的预览、不代删目录。存在未说明/过期残留则携实际路径请登记 owner 处置，不能把 PR merge 当沙盒已释放。
+Reviewer 每轮 verdict 前仍按 receive-review 收尾。作者在合入后调用下列只读入口：它枚举 Git 的全部登记，
+包含未声明旧树、嵌套 `.review-worktrees`、非标准路径和命名 Alpha，不用 capacity.active 或目录前缀代替完整清单。
+PR 状态及完整提交列表来自 canonical gh；中间 review HEAD 按提交列表关联，兼容 squash。关联查询失败就报告 unknown。
 
 ```bash
-node --input-type=module - {review-target-id} <<'NODE'
-import { capacityHolders, mainRepoFrom } from './scripts/worktree-reaper.mjs';
-import { safeRealpath } from './scripts/lib/worktree-reaper-probes.mjs';
-const id = process.argv[2];
-if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(id)) throw new Error('invalid review target id');
-const root = safeRealpath(`/tmp/cat-cafe-review/${id}`);
-const { active } = capacityHolders({ repo: mainRepoFrom(process.cwd()) });
-console.log(JSON.stringify(active.filter((w) => w.path.startsWith(`${root}/`)), null, 2));
-NODE
+pnpm worktree:inventory --pr pr:{OWNER}/{REPO}#{PR_NUMBER}
 ```
+
+逐项消费 `worktrees` 的实际 released 或有效 retained 回执。`owner-finish-required` 不等于可代删：
+携路径回原责任线程，核用途和原件后由 owner 收尾，不停止别人的预览、不造老工位的出生登记。
+旧树没有来源时沿原聊天/创建记录查证，不因 owner 退役就无限搁置。查不到归属的列 unknown，不宣称零残留。
+
+已合入中间稿与 main 内容不同、普通 finish 拒绝时，由已核原 owner 使用明确的 PR 证据：
+
+```bash
+pnpm worktree:finish {精确工位路径} --source-ref {原Task或PR的ref} --merged-pr pr:{OWNER}/{REPO}#{PR_NUMBER}
+pnpm worktree:finish {精确工位路径} --source-ref {同一ref} --check
+```
+
+工具 fresh 读取 MERGED、完整提交成员及本地 origin/main 中的合入点，保留独有提交/原件与恢复命令；
+脏状态、锁、进程、持久消费者、保护目录及 owner 检查照常执行。该参数不代替旧树的原责任核验。
 
 ### remote review 选择与处理规则
 
@@ -729,11 +737,11 @@ gh pr comment {PR_NUMBER} --body '@codex review'
 
 | 原 reviewer | 降级到 | 说明 |
 |-------------|--------|------|
-| 云端 Codex / 任一Maine Coon（OpenAI 池） | **另一 provider** 的在役非作者 reviewer：kimi 或 gemini-argon（只审不写代码）；按 dossier + F293 可用性选择 | **跨 provider family**：同一 provider 的额度不足时不在其内部换 model |
+| 云端 Codex / 任一Maine Coon（OpenAI 池） | **另一 provider** 的在役非作者 reviewer：Sonnet、kimi 或 gemini-argon（只审不写代码）；按 dossier + F293 可用性选择 | **跨 provider family**：同一 provider 的额度不足时不在其内部换 model |
 | Ragdoll某个体 | 非作者Maine Coon、kimi 或 gemini-argon（只审不写代码） | 稀缺创作/判断席位不进迭代循环 |
 | **禁止** | 作者自己 | 同族不同个体可审，同一个体不能自审 |
 
-Sonnet 常规 review 暂停（2026-10-15 operator 试行，来源见 dossier v0.11），不作为降级默认选项。本次只明确允许 gemini-argon 参与 review，不把其他Siamese一并加入常规 reviewer，也不授权 Argon 写代码。
+Sonnet 与Ragdoll共用 Anthropic 池，所以只作为 OpenAI 池额度不足时的跨 provider 降级选项，不作为Ragdoll个体的降级选项。Siamese里只有 gemini-argon 参与 review，其他Siamese不自动加入常规 reviewer，也不授权 Argon 写代码。
 
 **铁律：降级后仍须校验"reviewer ≠ 作者"**——降级表是建议顺序，不能覆盖 self-review 禁令。
 

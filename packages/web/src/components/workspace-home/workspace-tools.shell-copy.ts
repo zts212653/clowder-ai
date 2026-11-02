@@ -13,7 +13,7 @@ export const workspaceToolsCopy = defineShellCopy({
     beforeSettings: '成员、账户和配置在',
     end: '。',
     otherEntries: '原入口去处',
-    tasks: '任务',
+    tasks: '毛线球',
     works: '作品',
     todo: '待办',
     settings: '设置与管理',

@@ -65,6 +65,16 @@ function makeFixture() {
   mkdirSync(join(repoRoot, 'docs', 'ops'), { recursive: true });
   cpSync(SOURCE_SCRIPT, join(repoRoot, 'scripts', 'intake-from-opensource.sh'));
   mkdirSync(join(repoRoot, 'scripts', 'lib'), { recursive: true });
+  for (const file of [
+    'scripts/publication-branches.json',
+    'scripts/lib/publication-branches.mjs',
+    'scripts/lib/intake-target-lineage.mjs',
+  ])
+    cpSync(resolve(file), join(repoRoot, file));
+  writeFileSync(
+    join(repoRoot, 'scripts/publication-branches.json'),
+    JSON.stringify({ version: 1, integrationBranch: 'main', releaseBranch: 'main' }),
+  );
   cpSync(GH_RETRY_LIB, join(repoRoot, 'scripts', 'lib', 'intake-gh-retry.sh'));
   cpSync(resolve('scripts/lib/intake-brand-paths.mjs'), join(repoRoot, 'scripts/lib/intake-brand-paths.mjs'));
   cpSync(
@@ -101,6 +111,16 @@ function makeRemoteFixture() {
   mkdirSync(join(repoRoot, 'docs', 'ops'), { recursive: true });
   cpSync(SOURCE_SCRIPT, join(repoRoot, 'scripts', 'intake-from-opensource.sh'));
   mkdirSync(join(repoRoot, 'scripts', 'lib'), { recursive: true });
+  for (const file of [
+    'scripts/publication-branches.json',
+    'scripts/lib/publication-branches.mjs',
+    'scripts/lib/intake-target-lineage.mjs',
+  ])
+    cpSync(resolve(file), join(repoRoot, file));
+  writeFileSync(
+    join(repoRoot, 'scripts/publication-branches.json'),
+    JSON.stringify({ version: 1, integrationBranch: 'main', releaseBranch: 'main' }),
+  );
   cpSync(GH_RETRY_LIB, join(repoRoot, 'scripts', 'lib', 'intake-gh-retry.sh'));
   cpSync(resolve('scripts/lib/intake-brand-paths.mjs'), join(repoRoot, 'scripts/lib/intake-brand-paths.mjs'));
   chmodSync(join(repoRoot, 'scripts', 'intake-from-opensource.sh'), 0o755);
@@ -130,6 +150,79 @@ function writeLedger(ledgerPath, lastReviewedHead, entries) {
     'utf-8',
   );
 }
+
+describe('integration watermark ancestry', () => {
+  it('advances along remote next while the target checkout remains on a different main', () => {
+    const f = makeRemoteFixture();
+    try {
+      const base = commitFile(f.targetRoot, 'base.txt', 'base', 'base');
+      git(f.targetRoot, 'push', 'origin', 'main');
+      git(f.targetRoot, 'checkout', '-b', 'next');
+      const next = commitFile(f.targetRoot, 'team.txt', 'next payload', 'sync: cat-cafe next payload');
+      git(f.targetRoot, 'push', 'origin', 'next');
+      git(f.targetRoot, 'checkout', 'main');
+      const main = commitFile(f.targetRoot, 'stable.txt', 'stable payload', 'stable patch');
+      git(f.targetRoot, 'push', 'origin', 'main');
+      writeFileSync(
+        join(f.repoRoot, 'scripts/publication-branches.json'),
+        JSON.stringify({ version: 1, integrationBranch: 'next', releaseBranch: 'main' }),
+      );
+      writeFileSync(
+        f.ledgerPath,
+        JSON.stringify({ target_branch: 'next', last_reviewed_target_head: base, entries: [] }),
+      );
+      runAdvance(f.repoRoot);
+      assert.equal(JSON.parse(readFileSync(f.ledgerPath, 'utf8')).last_reviewed_target_head, next);
+      assert.equal(git(f.targetRoot, 'rev-parse', 'HEAD'), main);
+    } finally {
+      rmSync(f.sandboxRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a target behind the reviewed head without changing ledger bytes', () => {
+    const f = makeFixture();
+    try {
+      writeFileSync(join(f.targetRoot, 'base.txt'), 'base');
+      git(f.targetRoot, 'add', '.');
+      git(f.targetRoot, 'commit', '-m', 'base');
+      const base = git(f.targetRoot, 'rev-parse', 'HEAD');
+      writeFileSync(join(f.targetRoot, 'later.txt'), 'reviewed');
+      git(f.targetRoot, 'add', '.');
+      git(f.targetRoot, 'commit', '-m', 'reviewed contribution');
+      const reviewed = git(f.targetRoot, 'rev-parse', 'HEAD');
+      writeLedger(f.ledgerPath, reviewed, []);
+      const before = readFileSync(f.ledgerPath, 'utf8');
+      git(f.targetRoot, 'checkout', '-B', 'main', base);
+      const result = runResult('bash', ['scripts/intake-from-opensource.sh', '--advance-ledger'], f.repoRoot);
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr + result.stdout, /not an ancestor/);
+      assert.equal(readFileSync(f.ledgerPath, 'utf8'), before);
+    } finally {
+      rmSync(f.sandboxRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a watermark from a different integration branch even at the same commit', () => {
+    const f = makeFixture();
+    try {
+      writeFileSync(join(f.targetRoot, 'base.txt'), 'base');
+      git(f.targetRoot, 'add', '.');
+      git(f.targetRoot, 'commit', '-m', 'base');
+      const head = git(f.targetRoot, 'rev-parse', 'HEAD');
+      writeFileSync(
+        f.ledgerPath,
+        JSON.stringify({ target_branch: 'next', last_reviewed_target_head: head, entries: [] }),
+      );
+      const before = readFileSync(f.ledgerPath, 'utf8');
+      const result = runResult('bash', ['scripts/intake-from-opensource.sh', '--advance-ledger'], f.repoRoot);
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr + result.stdout, /ledger branch/);
+      assert.equal(readFileSync(f.ledgerPath, 'utf8'), before);
+    } finally {
+      rmSync(f.sandboxRoot, { recursive: true, force: true });
+    }
+  });
+});
 
 function runAdvance(repoRoot) {
   return run('bash', ['scripts/intake-from-opensource.sh', '--advance-ledger'], repoRoot);
@@ -629,7 +722,7 @@ describe('intake-from-opensource.sh --advance-ledger', () => {
     assert.equal(git(fixture.targetRoot, 'rev-parse', 'origin/main'), remoteHead);
   });
 
-  it('falls back to local HEAD when fetch fails and origin/main is stale', () => {
+  it('refuses to advance to an unpublished local HEAD when target fetch fails', () => {
     const fixture = makeRemoteFixture();
     fixtures.push(fixture.sandboxRoot);
 
@@ -650,10 +743,11 @@ describe('intake-from-opensource.sh --advance-ledger', () => {
       },
     ]);
 
-    const output = runAdvance(fixture.repoRoot);
-    assert.match(output, /Ledger advanced to:/);
-    const updatedLedger = JSON.parse(readFileSync(fixture.ledgerPath, 'utf-8'));
-    assert.equal(updatedLedger.last_reviewed_target_head, localHead);
+    const before = readFileSync(fixture.ledgerPath, 'utf8');
+    const output = runResult('bash', ['scripts/intake-from-opensource.sh', '--advance-ledger'], fixture.repoRoot);
+    assert.notEqual(output.status, 0);
+    assert.match(output.stderr, /refusing stale watermark/);
+    assert.equal(readFileSync(fixture.ledgerPath, 'utf8'), before);
   });
 });
 
@@ -1142,6 +1236,17 @@ function makeHookFixture() {
   cpSync(GH_RETRY_LIB, join(repoRoot, 'scripts', 'lib', 'intake-gh-retry.sh'));
   cpSync(resolve('scripts/lib/intake-brand-paths.mjs'), join(repoRoot, 'scripts/lib/intake-brand-paths.mjs'));
   chmodSync(join(repoRoot, 'scripts', 'intake-from-opensource.sh'), 0o755);
+
+  // The actual hook runs its secret scanner before the branch-specific guards.
+  // Keep that scanner real in the fixture, including its local module closure.
+  for (const path of [
+    'secret-git-guard.mjs',
+    'lib/secret-content-scan.mjs',
+    'lib/secret-content-rules.mjs',
+    'lib/secret-git-objects.mjs',
+  ]) {
+    cpSync(resolve('scripts', path), join(repoRoot, 'scripts', path));
+  }
 
   cpSync(
     resolve('scripts/materialize-biome-index-snapshot.mjs'),
@@ -1718,6 +1823,9 @@ describe('intake-from-opensource.sh --record strict guard (absorbed)', () => {
       ['README.ja-JP.md', 'README.opensource.ja-JP.md'],
       ['SETUP.md', 'SETUP.md'],
       ['CONTRIBUTING.md', 'CONTRIBUTING.md'],
+      ['CLAUDE.md', 'CLAUDE.opensource.md'],
+      ['AGENTS.md', 'AGENTS.opensource.md'],
+      ['GEMINI.md', 'GEMINI.opensource.md'],
     ];
     const f = makeRecordFixture({
       targetPrFiles: mappings.map(([path]) => ({ path })),
@@ -1748,6 +1856,58 @@ describe('intake-from-opensource.sh --record strict guard (absorbed)', () => {
       { PATH: `${f.mockBin}:${process.env.PATH}` },
     );
     assert.match(output, /Recorded PR #495 → absorbed/);
+  });
+
+  it('rejects each public agent guide absorption when its canonical source is absent from the reviewed diff', () => {
+    const observations = [];
+    for (const target of ['CLAUDE.md', 'AGENTS.md', 'GEMINI.md']) {
+      const source = target.replace('.md', '.opensource.md');
+      const f = makeRecordFixture({
+        targetPrFiles: [{ path: target }],
+        absorbPrFiles: [{ path: 'packages/shared/src/fixture.ts' }],
+        issueBody: [
+          'Source: clowder-ai#495',
+          '## Per-File Decision Table',
+          '| File | Change | Decision | Reason |',
+          `| ${target} | public guide | manual-port | preserve community work |`,
+        ].join('\n'),
+      });
+      fixtures.push(f.sandboxRoot);
+      const result = runResult(
+        'bash',
+        [
+          SOURCE_SCRIPT,
+          '--record',
+          '--pr',
+          '495',
+          '--decision',
+          'absorbed',
+          '--intent-issue',
+          '1234',
+          '--absorb-pr',
+          '1236',
+          '--review-proof',
+          'https://github.com/zts212653/clowder-ai/pull/1236#issuecomment-1',
+        ],
+        f.repoRoot,
+        { PATH: `${f.mockBin}:${process.env.PATH}` },
+      );
+      observations.push({
+        target,
+        rejected: result.status !== 0,
+        sourceNamed: (result.stdout + result.stderr).includes(`${target} -> ${source}`),
+        ledgerEmpty: JSON.parse(readFileSync(f.ledgerPath, 'utf8')).entries.length === 0,
+      });
+    }
+    assert.deepEqual(
+      observations,
+      ['CLAUDE.md', 'AGENTS.md', 'GEMINI.md'].map((target) => ({
+        target,
+        rejected: true,
+        sourceNamed: true,
+        ledgerEmpty: true,
+      })),
+    );
   });
 
   it('rejects a partially ported localized README and does not write an absorbed record', () => {

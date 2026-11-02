@@ -56,6 +56,17 @@ async function harness({
   const calls = [];
   const audits = [];
   const manager = {
+    listLocal: async () => {
+      calls.push(['list-local']);
+      return { ...listed, catalog: { status: 'loading', refreshedAt: null } };
+    },
+    getLocal: async (pluginId) => {
+      calls.push(['get-local', pluginId]);
+      return {
+        plugin: { ...listed.plugins[0], capabilities: [], configFields: [] },
+        catalog: { status: 'loading', refreshedAt: null },
+      };
+    },
     list: async () => {
       calls.push(['list']);
       return listed;
@@ -74,6 +85,10 @@ async function harness({
     },
     update: async (pluginId, request) => {
       calls.push(['update', pluginId, request]);
+      return { pluginId, pluginInstanceId: 'pi_video' };
+    },
+    repair: async (pluginId, request) => {
+      calls.push(['repair', pluginId, request]);
       return { pluginId, pluginInstanceId: 'pi_video' };
     },
     setEnabled: async (pluginId, request) => {
@@ -328,8 +343,6 @@ const archiveReplacement = {
   currentPackageDigest: `sha512-${'A'.repeat(86)}==`,
   candidatePackageDigest: `sha512-${'B'.repeat(85)}A==`,
   expectedLifecycleRevision: 8,
-  expectedGrantRevision: 1,
-  candidateEffectiveGrants: [],
 };
 
 for (const fields of [
@@ -392,26 +405,25 @@ for (const source of [
 }
 
 function verifiedCallbackRegistry({ policy } = {}) {
-  return {
-    verify: async (invocationId, callbackToken) =>
-      invocationId === 'inv-plugin' && callbackToken === 'callback-secret'
-        ? {
-            ok: true,
-            record: {
-              invocationId,
-              callbackToken,
-              threadId: 'thread-plugin',
-              userId: ownerUserId,
-              catId: 'codex-sol',
-              clientMessageIds: new Set(),
-              createdAt: Date.now(),
-              expiresAt: null,
-              state: 'active',
-              ...(policy === undefined ? {} : { toolExecutionPolicy: policy }),
-            },
-          }
-        : { ok: false, reason: 'invalid_token' },
-  };
+  const verify = async (invocationId, callbackToken) =>
+    invocationId === 'inv-plugin' && callbackToken === 'callback-secret'
+      ? {
+          ok: true,
+          record: {
+            invocationId,
+            callbackToken,
+            threadId: 'thread-plugin',
+            userId: ownerUserId,
+            catId: 'codex-sol',
+            clientMessageIds: new Set(),
+            createdAt: Date.now(),
+            expiresAt: null,
+            state: 'active',
+            ...(policy === undefined ? {} : { toolExecutionPolicy: policy }),
+          },
+        }
+      : { ok: false, reason: 'invalid_token' };
+  return { verify, verifyLatest: verify };
 }
 
 test('exposes canonical Manager state/lifecycle operations and version update through one service', async () => {
@@ -422,6 +434,30 @@ test('exposes canonical Manager state/lifecycle operations and version update th
     const list = await app.inject({ method: 'GET', url: '/api/plugin-manager/plugins', headers: readHeaders });
     assert.equal(list.statusCode, 200, list.payload);
     assert.equal(list.json().catalog.status, 'degraded');
+
+    const local = await app.inject({
+      method: 'GET',
+      url: '/api/plugin-manager/plugins/_local',
+      headers: readHeaders,
+    });
+    assert.equal(local.statusCode, 200, local.payload);
+    assert.equal(local.json().catalog.status, 'loading');
+
+    const localDetail = await app.inject({
+      method: 'GET',
+      url: '/api/plugin-manager/plugins/_local/official.video',
+      headers: readHeaders,
+    });
+    assert.equal(localDetail.statusCode, 200, localDetail.payload);
+    assert.equal(localDetail.json().catalog.status, 'loading');
+
+    const pluginNamedLocal = await app.inject({
+      method: 'GET',
+      url: '/api/plugin-manager/plugins/local',
+      headers: readHeaders,
+    });
+    assert.equal(pluginNamedLocal.statusCode, 200, pluginNamedLocal.payload);
+    assert.ok(calls.some((call) => call[0] === 'get' && call[1] === 'local'));
 
     const search = await app.inject({
       method: 'GET',
@@ -470,6 +506,9 @@ test('exposes canonical Manager state/lifecycle operations and version update th
 
     assert.deepEqual(calls, [
       ['list'],
+      ['list-local'],
+      ['get-local', 'official.video'],
+      ['get', 'local'],
       ['search', 'scene'],
       ['get', 'official.video'],
       [
@@ -512,7 +551,7 @@ test('exposes canonical Manager state/lifecycle operations and version update th
     assert.equal(invalidUpdate.statusCode, 400);
     assert.equal(
       (await app.inject({ method: 'POST', url: '/api/plugin-manager/plugins/official.video/repair' })).statusCode,
-      404,
+      403,
     );
   } finally {
     await app.close();
@@ -976,6 +1015,120 @@ test('git install passes the closed source through one Manager route without aud
       payload: { source: { kind: 'git', url, extra: true } },
     });
     assert.equal(invalid.statusCode, 400, invalid.payload);
+  } finally {
+    await app.close();
+  }
+});
+
+test('home local read routes retain authentication, query validation and private namespace', async () => {
+  const { app, calls } = await harness({
+    overrides: {
+      searchLocal: async (query) => {
+        calls.push(['search-local', query]);
+        return { ...listed, catalog: { status: 'loading', refreshedAt: null } };
+      },
+    },
+  });
+  try {
+    for (const url of [
+      '/api/plugin-manager/plugins/_local',
+      '/api/plugin-manager/plugins/_local/search?q=video',
+      '/api/plugin-manager/plugins/_local/official.video',
+    ]) {
+      assert.equal((await app.inject({ method: 'GET', url })).statusCode, 401);
+    }
+    assert.deepEqual(calls, []);
+    const search = await app.inject({
+      method: 'GET',
+      url: '/api/plugin-manager/plugins/_local/search?q=video',
+      headers: readHeaders,
+    });
+    assert.equal(search.statusCode, 200, search.payload);
+    assert.equal(search.json().catalog.status, 'loading');
+    assert.deepEqual(calls, [['search-local', 'video']]);
+    for (const url of [
+      '/api/plugin-manager/plugins/_local/search?q=video&extra=true',
+      '/api/plugin-manager/plugins/_local/-invalid',
+    ]) {
+      assert.equal((await app.inject({ method: 'GET', url, headers: readHeaders })).statusCode, 400);
+    }
+    assert.deepEqual(calls, [['search-local', 'video']]);
+  } finally {
+    await app.close();
+  }
+});
+
+test('home local detail scopes bindings to the verified session or callback user', async () => {
+  const owners = [];
+  const { app } = await harness({
+    callbackRegistry: verifiedCallbackRegistry(),
+    overrides: {
+      getLocal: async () => ({
+        plugin: { ...listed.plugins[0], artifact: 'installed' },
+        catalog: listed.catalog,
+      }),
+    },
+    bindings: {
+      list: async (id, owner) => {
+        owners.push([id, owner]);
+        return [];
+      },
+    },
+  });
+  const url = '/api/plugin-manager/plugins/_local/official.video';
+  const callbackHeaders = {
+    host: 'localhost:3004',
+    origin: 'http://localhost:3004',
+    'x-invocation-id': 'inv-plugin',
+    'x-callback-token': 'callback-secret',
+  };
+  try {
+    const session = await app.inject({ method: 'GET', url, headers: { 'x-test-session-user': 'reader-user' } });
+    assert.equal(session.statusCode, 200, session.payload);
+    const callback = await app.inject({ method: 'GET', url, headers: callbackHeaders, remoteAddress: '127.0.0.1' });
+    assert.equal(callback.statusCode, 200, callback.payload);
+    assert.deepEqual(owners, [
+      ['official.video', 'reader-user'],
+      ['official.video', ownerUserId],
+    ]);
+    const rejected = await app.inject({
+      method: 'GET',
+      url,
+      remoteAddress: '127.0.0.1',
+      headers: { ...callbackHeaders, 'x-callback-token': 'wrong-secret' },
+    });
+    assert.equal(rejected.statusCode, 401);
+    assert.equal(owners.length, 2);
+  } finally {
+    await app.close();
+  }
+});
+
+test('repair retains the Manager owner, strict revision and audit boundaries', async () => {
+  const { app, calls, audits } = await harness();
+  try {
+    const path = '/api/plugin-manager/plugins/official.video/repair';
+    const denied = await app.inject({ method: 'POST', url: path, payload: { expectedRevision: 3 } });
+    assert.equal(denied.statusCode, 403);
+    const extra = await app.inject({
+      method: 'POST',
+      url: path,
+      headers: writeHeaders,
+      payload: { expectedRevision: 3, force: true },
+      remoteAddress: '127.0.0.1',
+    });
+    assert.equal(extra.statusCode, 400);
+    assert.equal(calls.length, 0);
+    const ok = await app.inject({
+      method: 'POST',
+      url: path,
+      headers: writeHeaders,
+      payload: { expectedRevision: 3 },
+      remoteAddress: '127.0.0.1',
+    });
+    assert.equal(ok.statusCode, 200, ok.payload);
+    assert.deepEqual(calls, [['repair', 'official.video', { expectedRevision: 3 }]]);
+    assert.equal(audits.at(-1).data.operation, 'repair');
   } finally {
     await app.close();
   }

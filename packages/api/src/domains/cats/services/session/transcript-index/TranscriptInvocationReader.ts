@@ -10,6 +10,7 @@ import type {
   SessionIndexInput,
 } from './transcript-invocation-index-types.js';
 import {
+  createTranscriptReadMetrics,
   notifyTranscriptRead,
   type TranscriptReadMetrics,
   type TranscriptReadObserver,
@@ -95,9 +96,24 @@ export class TranscriptInvocationReader {
     return { invocations: result.invocations, total: result.total };
   }
 
-  async readFiles(session: IndexedSession, signal?: AbortSignal) {
-    const { result } = await this.read([session], { kind: 'files' }, signal);
-    return result.filesTouched;
+  async readFiles(session: IndexedSession, signal?: AbortSignal, observer?: TranscriptReadObserver) {
+    if (!observer) {
+      const { result } = await this.read([session], { kind: 'files' }, signal);
+      return result.filesTouched;
+    }
+    const started = performance.now();
+    const metrics = createTranscriptReadMetrics(1);
+    try {
+      const { result } = await this.read([session], { kind: 'files' }, signal, observer, metrics);
+      metrics.rows = result.filesTouched.length;
+      metrics.status = 'success';
+      return result.filesTouched;
+    } finally {
+      metrics.elapsedMs = performance.now() - started;
+      if (metrics.workerAwaitMs === 0) metrics.prepareMs = metrics.elapsedMs;
+      if (signal?.aborted) metrics.status = 'aborted';
+      notifyTranscriptRead(observer, metrics);
+    }
   }
 
   async readInvocation(
@@ -112,18 +128,7 @@ export class TranscriptInvocationReader {
       return this.materializePages(result, snapshots, invocationId, page.generationEvidenceOnly);
     }
     const started = performance.now();
-    const metrics: TranscriptReadMetrics = {
-      status: 'failed',
-      sessionCount: sessions.length,
-      rows: 0,
-      prepareMs: 0,
-      workerAwaitMs: 0,
-      materializeMs: 0,
-      elapsedMs: 0,
-      sourceBytesScanned: 0,
-      hydratedBytes: 0,
-      summaryCacheHits: 0,
-    };
+    const metrics = createTranscriptReadMetrics(sessions.length);
     try {
       const { result, snapshots } = await this.read(
         sessions,

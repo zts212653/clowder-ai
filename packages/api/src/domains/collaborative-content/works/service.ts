@@ -19,18 +19,24 @@ import {
 } from '../../video-studio/content-owner/service.js';
 import type { ContentStream } from '../../video-studio/content-owner/stream-content.js';
 import {
-  type ContentActorV1,
   type ContentSettlementReceiptV1,
   type ContentSourcePublicationV1,
   isWorkPublicationScope,
   type WorkPublicationScopeV1,
 } from '../../video-studio/content-owner/types.js';
+import { type WorkListReader, withWorkCatalogueRead } from './catalogue-read.js';
+import type { WorkCatalogueReadObserver } from './catalogue-read-timing.js';
+import { isHtmlWorkSource, openHtmlWorkSource, readHtmlWorkBody } from './html-source.js';
+import { resolveFileWork } from './resolve-file-work.js';
 import type { WorkReviewResponseService } from './review-response.js';
+import type { WorkAuthorizationInput, WorkPrincipal, WorkReadResult } from './types.js';
 import { workVersionRecord } from './version-record.js';
 import type { WorkVersionStore } from './version-store.js';
 
+export type { WorkAuthorizationInput, WorkPrincipal } from './types.js';
+
 export interface OpenWorkSource extends ContentStream {
-  readonly mediaType: 'video/mp4';
+  readonly mediaType: 'video/mp4' | 'text/html';
   /** F063 probes the same frozen snapshot used by this stream; review admission must require this clock. */
   readonly media?: ImmutableMedia;
   readonly publication: ContentSourcePublicationV1;
@@ -38,25 +44,18 @@ export interface OpenWorkSource extends ContentStream {
 }
 export interface WorkSourcePort {
   open(input: { source: WorkWorkspaceSource; principal: WorkPrincipal; threadId: string }): Promise<OpenWorkSource>;
+  /** Locate a current source and freeze it once; submission still requires an explicit expected revision. */
+  openCurrent(input: {
+    locator: Omit<WorkWorkspaceSource, 'expectedSourceRevision'>;
+    principal: WorkPrincipal;
+    threadId: string;
+  }): Promise<OpenWorkSource>;
   inspect(input: { locator: Omit<WorkWorkspaceSource, 'expectedSourceRevision'>; principal: WorkPrincipal }): Promise<{
     source: WorkWorkspaceSource;
     mediaType: string;
     byteLength: number;
     media?: ImmutableMedia;
   }>;
-}
-/** Minted by direct-owner or verified callback routes; actor fields are never accepted in the public DTO. */
-export interface WorkPrincipal {
-  readonly userId: string;
-  readonly threadId: string;
-  readonly actor: ContentActorV1;
-  readonly invocationId?: string;
-  readonly contentTaskId?: string;
-}
-export interface WorkAuthorizationInput {
-  readonly principal: WorkPrincipal;
-  readonly permission: 'read' | 'write';
-  readonly scope?: WorkPublicationScopeV1;
 }
 
 export class WorkProjectionPendingError extends Error {
@@ -76,13 +75,25 @@ export class LivingWorkService {
       versions: WorkVersionStore;
       source: WorkSourcePort;
       responses?: WorkReviewResponseService;
+      changed?(ownerUserId: string): void;
       authorize(input: WorkAuthorizationInput): Promise<void>;
     },
   ) {}
 
   async commit(raw: unknown, principal: WorkPrincipal) {
+    const result = await this.commitVersion(raw, principal);
+    try {
+      this.deps.changed?.(principal.userId);
+    } catch {
+      /* Projection invalidation never changes the canonical save result. */
+    }
+    return result;
+  }
+
+  private async commitVersion(raw: unknown, principal: WorkPrincipal) {
     const command = commitWorkSchema.parse(raw);
     const response = command.action === 'submit' ? command.reviewResponse : undefined;
+    if (response && isHtmlWorkSource(command.source)) throw new MediaOwnerError('invalid_media');
     if (response && !this.deps.responses) throw new MediaOwnerError('media_unavailable');
     await this.deps.authorize({ principal, permission: 'write' });
     const contentRef = command.action === 'submit' ? command.contentRef : createdWorkRef(command, principal);
@@ -121,8 +132,12 @@ export class LivingWorkService {
         command.expectedOwnerRevision,
         current?.currentOwnerRevision ?? 0,
       );
-    const opened = await this.deps.source.open({ source: command.source, principal, threadId: workScope.threadId });
+    const opened = isHtmlWorkSource(command.source)
+      ? openHtmlWorkSource(command.source)
+      : await this.deps.source.open({ source: command.source, principal, threadId: workScope.threadId });
     try {
+      if ((current && current.mediaType !== opened.mediaType) || (response && opened.mediaType !== 'video/mp4'))
+        throw new MediaOwnerError('invalid_media');
       if (command.action === 'submit' && current?.blobDigest === opened.blobDigest)
         throw new MediaOwnerError('publication_changed');
       const pending =
@@ -169,7 +184,7 @@ export class LivingWorkService {
     return this.deps.responses.resolve(command, principal);
   }
 
-  async read(raw: WorkReference, principal: WorkPrincipal) {
+  private async readWorkVersion(raw: WorkReference, principal: WorkPrincipal) {
     const reference = workReferenceSchema.parse(raw);
     const description = await this.deps.owner.describe(reference.contentRef, reference.ownerRevision);
     const scope = description.publicationScope;
@@ -177,59 +192,58 @@ export class LivingWorkService {
     await this.deps.authorize({ principal, permission: 'read', scope });
     const version = this.deps.versions.get(principal.userId, reference.contentRef, reference.ownerRevision);
     if (!version) throw new MediaOwnerError('media_unavailable');
+    return { reference, description, version, scope };
+  }
+
+  async read(raw: WorkReference, principal: WorkPrincipal): Promise<WorkReadResult> {
+    const { reference, description, version, scope } = await this.readWorkVersion(raw, principal);
     const revision = await this.deps.owner.describeRevision(reference.contentRef, reference.ownerRevision);
     await this.deps.authorize({ principal, permission: 'read', scope });
     return { reference, currentOwnerRevision: description.currentOwnerRevision, version, description, revision };
   }
 
+  async readBody(raw: WorkReference, principal: WorkPrincipal) {
+    // A missing fixed version and a forbidden one have the same content-free result at this new boundary.
+    try {
+      const { reference, description, scope } = await this.readWorkVersion(raw, principal);
+      const html = await readHtmlWorkBody(this.deps.owner, reference, description);
+      await this.deps.authorize({ principal, permission: 'read', scope });
+      return { reference, mediaType: 'text/html' as const, html };
+    } catch (error) {
+      if (error instanceof ContentOwnerNotFoundError) throw new MediaOwnerError('access_denied');
+      throw error;
+    }
+  }
+
   async reference(raw: WorkReference, principal: WorkPrincipal) {
-    const { reference, version } = await this.read(raw, principal);
+    const { reference, version, description } = await this.read(raw, principal);
     const block = workReferenceCardSchema.parse({
       id: `work-reference-${sha(JSON.stringify(reference)).slice(7, 31)}`,
       v: 1,
       kind: 'card',
       title: version.title,
       bodyMarkdown: version.changeSummary,
-      meta: { kind: 'work_reference', reference },
+      meta: {
+        kind: 'work_reference',
+        reference,
+        ...(description.mediaType === 'text/html' ? { mediaType: 'text/html' } : {}),
+      },
     });
     return { reference, block };
   }
 
   async list(principal: WorkPrincipal, after?: string, expectedSnapshot?: string, threadFilter?: string) {
-    await this.deps.authorize({ principal, permission: 'read' });
-    const heads = await this.catalogueHeads(principal.userId);
-    const visible = await this.visibleHeads(heads, principal, threadFilter);
-    const snapshot = sha(JSON.stringify(visible));
-    if ((after && !expectedSnapshot) || (expectedSnapshot && expectedSnapshot !== snapshot))
-      throw new MediaOwnerError('publication_changed');
-    const remaining = visible.filter((item) => !after || item.contentRef.localeCompare(after) > 0);
-    const page = remaining.slice(0, 10);
-    const items = await Promise.all(page.map((reference) => this.read(reference, principal)));
-    if (JSON.stringify(heads) !== JSON.stringify(await this.catalogueHeads(principal.userId)))
-      throw new MediaOwnerError('publication_changed');
-    for (const item of items) {
-      const scope = item.description.publicationScope;
-      if (!isWorkPublicationScope(scope)) throw new MediaOwnerError('access_denied');
-      await this.deps.authorize({ principal, permission: 'read', scope });
-    }
-    return { items, snapshot, ...(remaining.length > page.length ? { nextCursor: page.at(-1)?.contentRef } : {}) };
+    return this.withCatalogueRead(principal.userId, (reader) =>
+      reader.list(principal, after, expectedSnapshot, threadFilter),
+    );
   }
 
-  private async visibleHeads(heads: readonly WorkReference[], principal: WorkPrincipal, threadFilter?: string) {
-    const visible = [];
-    for (const reference of heads) {
-      const description = await this.deps.owner.describe(reference.contentRef, reference.ownerRevision);
-      if (!isWorkPublicationScope(description.publicationScope)) continue;
-      if (threadFilter && description.publicationScope.threadId !== threadFilter) continue;
-      try {
-        await this.deps.authorize({ principal, permission: 'read', scope: description.publicationScope });
-        visible.push(reference);
-      } catch (error) {
-        if (error instanceof MediaOwnerError && error.code === 'access_denied') continue;
-        throw error;
-      }
-    }
-    return visible;
+  withCatalogueRead<T>(
+    ownerUserId: string,
+    consume: (reader: WorkListReader) => Promise<T>,
+    observer?: WorkCatalogueReadObserver,
+  ): Promise<T> {
+    return withWorkCatalogueRead({ ...this.deps, read: this.read.bind(this) }, ownerUserId, consume, observer);
   }
 
   async inspectSource(locator: Omit<WorkWorkspaceSource, 'expectedSourceRevision'>, principal: WorkPrincipal) {
@@ -237,6 +251,10 @@ export class LivingWorkService {
     const description = await this.deps.source.inspect({ locator, principal });
     await this.deps.authorize({ principal, permission: 'write' });
     return description;
+  }
+
+  resolveFile(locator: Omit<WorkWorkspaceSource, 'expectedSourceRevision'>, principal: WorkPrincipal) {
+    return resolveFileWork({ ...this.deps, read: this.read.bind(this) }, locator, principal);
   }
 
   async authorizeVersion(reference: WorkReference, principal: WorkPrincipal, permission: 'read' | 'write') {
@@ -253,18 +271,6 @@ export class LivingWorkService {
       if (error instanceof ContentOwnerNotFoundError) return null;
       throw error;
     }
-  }
-
-  private async catalogueHeads(ownerUserId: string) {
-    const heads: WorkReference[] = [];
-    let after: string | undefined;
-    do {
-      const page = await this.deps.owner.listRetainedMedia(ownerUserId, after);
-      heads.push(...page.items);
-      if (heads.length > 10000) throw new MediaOwnerError('media_unavailable');
-      after = page.nextCursor;
-    } while (after);
-    return heads;
   }
 
   private project(

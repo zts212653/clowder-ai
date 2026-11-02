@@ -61,12 +61,10 @@ function nativeFixture() {
             type: 'mcp',
             id: 'native',
             runtime: { transport: 'stdio', entrypoint: 'mcp.js' },
-            actions: [{ method: 'review.submit' }],
           },
         ],
       },
     },
-    effectiveGrants: [],
   };
   const validation = validateManifest(admission.packageRecord.manifest);
   assert.equal(validation.valid, true, JSON.stringify(validation));

@@ -20,6 +20,7 @@ import type {
   CollectiveArtifactOwnerPort,
   CollectiveCustodyOwnerAuthority,
 } from '../../collaborative-content/collective-artifact/owner-port.js';
+import { createCollectiveMessageAttachmentsProxy } from './collective-message-attachments.js';
 import { createCollectiveRetainedMediaProxy, type RetainedMediaOwner } from './collective-retained-media.js';
 
 const coordinates = { serviceInstanceId: true, collectiveId: true, connectionId: true, relayRef: true } as const;
@@ -83,6 +84,7 @@ export function createCollectiveArtifactOwnerProxy(deps: {
     };
   }
   return Object.freeze({
+    attachments: createCollectiveMessageAttachmentsProxy(acquire, deps.signal),
     async execute(input, auth) {
       const operation = collectiveArtifactRelayOperationSchema.parse(input);
       const { owner, current } = await acquire();

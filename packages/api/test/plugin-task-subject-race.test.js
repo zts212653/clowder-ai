@@ -28,7 +28,6 @@ async function fixture(t, backend) {
   const host = createPluginTaskHost({
     pluginId: 'example',
     pluginInstanceId: 'instance',
-    effectiveGrants: ['task.read', 'task.write'],
     taskStore: wrapped,
     threadStore: threads,
   });

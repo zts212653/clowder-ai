@@ -4,11 +4,10 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { fileURLToPath } from 'node:url';
 import { readAheadApi } from './api-startup-read-ahead.mjs';
 import { profileDesktopStartup } from './scripts/profile-desktop-startup.mjs';
+import { createProfileSource } from './test-helpers/profile-source-fixture.mjs';
 
-const sourceRoot = fileURLToPath(new URL('..', import.meta.url));
 test(
   'build trace uses an isolated API, produces portable program hints and releases its port',
   { timeout: 30000 },
@@ -25,6 +24,7 @@ test(
       await fs.mkdir(path.join(frozen, 'api/scripts'));
       await fs.writeFile(path.join(frozen, 'api/scripts/startup-helper.mjs'), 'export const value = 1;');
       await fs.writeFile(entry, code);
+      const sourceRoot = await createProfileSource(root);
       const receipt = await profileDesktopStartup(sourceRoot, frozen, { profileRoot: path.join(root, 'trace') });
       const manifest = JSON.parse(await fs.readFile(receipt.manifest, 'utf8'));
       assert.equal(manifest.entrySha256, createHash('sha256').update(code).digest('hex'));
@@ -67,7 +67,7 @@ test(
         'import fs from "node:fs"; fs.writeFileSync("fixture-pid",String(process.pid)); setInterval(()=>{},100);',
       );
       await assert.rejects(
-        profileDesktopStartup(sourceRoot, frozen, { profileRoot: trace, timeoutMs: 3000 }),
+        profileDesktopStartup(await createProfileSource(root), frozen, { profileRoot: trace, timeoutMs: 3000 }),
         /profile failed/,
       );
       const pid = Number(await fs.readFile(path.join(trace, 'instance/project/fixture-pid'), 'utf8'));
@@ -90,11 +90,14 @@ test('a failed frozen API exposes its root cause and the retained log location',
     await fs.mkdir(path.join(frozen, 'dependencies'));
     await fs.writeFile(path.join(frozen, 'api/package.json'), '{"type":"module"}');
     await fs.writeFile(entry, 'console.error("PR1519_PROFILE_ROOT_CAUSE"); process.exit(42);');
-    await assert.rejects(profileDesktopStartup(sourceRoot, frozen, { profileRoot: trace }), (error) => {
-      assert.ok(error.message.includes(path.join(trace, 'build.log')), 'Missing retained diagnostic path');
-      assert.ok(error.message.includes('PR1519_PROFILE_ROOT_CAUSE'), 'Missing actual child failure');
-      return true;
-    });
+    await assert.rejects(
+      profileDesktopStartup(await createProfileSource(root), frozen, { profileRoot: trace }),
+      (error) => {
+        assert.ok(error.message.includes(path.join(trace, 'build.log')), 'Missing retained diagnostic path');
+        assert.ok(error.message.includes('PR1519_PROFILE_ROOT_CAUSE'), 'Missing actual child failure');
+        return true;
+      },
+    );
   } finally {
     // Only a synthetic exiting module was started; no persistent databases exist.
     await fs.rm(root, { recursive: true, force: true });
@@ -114,7 +117,7 @@ test('an open API port cannot substitute for its completed startup trace', { tim
       entry,
       'import {createServer} from "node:http"; createServer((q,r)=>r.end("ok")).listen(Number(process.env.API_SERVER_PORT),"127.0.0.1",()=>setTimeout(()=>globalThis.__clowderStartupMilestone("http-listening"),1200));',
     );
-    const receipt = await profileDesktopStartup(sourceRoot, frozen, { profileRoot: trace });
+    const receipt = await profileDesktopStartup(await createProfileSource(root), frozen, { profileRoot: trace });
     assert.ok((await fs.stat(receipt.manifest)).size > 0);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
@@ -132,10 +135,10 @@ test('a listening API without a completion milestone still times out and exits',
     await fs.writeFile(path.join(frozen, 'api/package.json'), '{"type":"module"}');
     await fs.writeFile(
       entry,
-      'import fs from "node:fs"; import {createServer} from "node:http"; fs.writeFileSync("fixture-pid",String(process.pid)); createServer((q,r)=>r.end("ok")).listen(Number(process.env.API_SERVER_PORT),"127.0.0.1");',
+      'import fs from "node:fs"; import {createServer} from "node:http"; createServer((q,r)=>r.end("ok")).listen(Number(process.env.API_SERVER_PORT),"127.0.0.1",()=>fs.writeFileSync("fixture-pid",String(process.pid)));',
     );
     await assert.rejects(
-      profileDesktopStartup(sourceRoot, frozen, { profileRoot: trace, timeoutMs: 3000 }),
+      profileDesktopStartup(await createProfileSource(root), frozen, { profileRoot: trace, timeoutMs: 3000 }),
       /profile failed/,
     );
     const pid = Number(await fs.readFile(path.join(trace, 'instance/project/fixture-pid'), 'utf8'));

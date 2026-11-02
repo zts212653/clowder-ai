@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { CLIENT_REQUEST_DIAGNOSTIC_HEADER } from '@cat-cafe/shared';
 import { availablePort, stopChild } from './f290-runtime-journey.harness.mjs';
 import { realSurfaceApiResponse } from './f307-real-surface-fixtures.mjs';
 import { createNextDevTestEnvironment } from './next-dev-test-environment.mjs';
@@ -145,7 +146,10 @@ export function createFixtureApi({
     if (originAllowed) {
       response.setHeader('Access-Control-Allow-Origin', request.headers.origin);
       response.setHeader('Access-Control-Allow-Credentials', 'true');
-      response.setHeader('Access-Control-Allow-Headers', 'Content-Type,x-cat-cafe-user,x-csrf-token');
+      response.setHeader(
+        'Access-Control-Allow-Headers',
+        `Content-Type,x-cat-cafe-user,x-csrf-token,${CLIENT_REQUEST_DIAGNOSTIC_HEADER}`,
+      );
       response.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
       response.setHeader('Vary', 'Origin');
     }

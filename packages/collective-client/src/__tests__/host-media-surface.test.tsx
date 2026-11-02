@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
+
+import { collectiveDocumentBridgeSchema, collectiveMediaSurfaceRefV1Schema } from '@cat-cafe/shared';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
-import type { collectiveArtifactClient } from '../collective-artifact-client.js';
+import type { collectiveArtifactClient, SharedArtifactOpenOptions } from '../collective-artifact-client.js';
 import { useHostContext } from '../use-host-context.js';
 import { mediaArtifact, mediaProjection } from './collective-media-surface.fixture.js';
 import { snapshot } from './first-entry-fixture.js';
@@ -30,10 +32,16 @@ const value = {
 const returned = vi.fn();
 const shared = vi.fn(async () => {});
 const operation = vi.fn(async () => mediaProjection());
-function Harness({ channel = 'general' }) {
+function Harness({
+  channel = 'general',
+  projectReturn,
+}: {
+  channel?: string;
+  projectReturn?: SharedArtifactOpenOptions['projectReturn'];
+}) {
   const host = useHostContext(true, value, channel, ['general', 'other'], undefined, {
     api: { operation } as unknown as ReturnType<typeof collectiveArtifactClient>,
-    selection: { artifact: mediaArtifact, ownerRevision: 1, onReturn: returned },
+    selection: { artifact: mediaArtifact, ownerRevision: 1, options: { projectReturn }, onReturn: returned },
     onShared: shared,
   });
   return (
@@ -42,14 +50,14 @@ function Harness({ channel = 'general' }) {
     </button>
   );
 }
-async function start(channel = 'general') {
+async function start(channel = 'general', projectReturn?: SharedArtifactOpenOptions['projectReturn']) {
   operation.mockReset();
   operation.mockImplementation(async () => mediaProjection());
   returned.mockClear();
   shared.mockClear();
   window.history.replaceState({}, '', `/?hostOrigin=${encodeURIComponent(origin)}`);
   const post = vi.spyOn(window.parent, 'postMessage');
-  await act(async () => root.render(<Harness channel={channel} />));
+  await act(async () => root.render(<Harness channel={channel} projectReturn={projectReturn} />));
   const message = async (data: unknown, from = origin, source: MessageEventSource | null = window.parent) => {
     await act(async () => window.dispatchEvent(new MessageEvent('message', { data, origin: from, source })));
   };
@@ -69,6 +77,28 @@ const openMessage = (post: Awaited<ReturnType<typeof start>>['post']) =>
     ([body]) =>
       typeof body === 'object' && body !== null && 'type' in body && body.type === 'collective:client-media-surface',
   )?.[0];
+
+it('keeps project media readable by a strict old Host before the new owner-backed capability is acknowledged', async () => {
+  const f = await start('general', { roadmapId: 'project-a', channelId: 'general' });
+  const ref = openMessage(f.post).ref;
+  const oldHostRef = collectiveMediaSurfaceRefV1Schema.omit({ projectReturn: true });
+  expect(oldHostRef.parse(ref)).toEqual(ref);
+  await f.message({ type: 'collective:host-media-return', ref });
+  expect(returned).toHaveBeenCalledOnce();
+});
+
+it('binds project return coordinates after a new Host acknowledgement and updates them for the same original version', async () => {
+  const firstProject = { roadmapId: 'project-a', channelId: 'general' };
+  const f = await start('general', firstProject);
+  const ready = f.post.mock.calls.find(([body]) => body.type === 'collective:client-document-ready')![0];
+  await f.message({ ...collectiveDocumentBridgeSchema.strip().parse(ready), type: 'collective:host-document-ready' });
+  const lastRef = () =>
+    f.post.mock.calls.filter(([body]) => body.type === 'collective:client-media-surface').at(-1)![0].ref;
+  expect(lastRef().projectReturn).toEqual(firstProject);
+  const secondProject = { roadmapId: 'project-b', channelId: 'general' };
+  await act(async () => root.render(<Harness projectReturn={secondProject} />));
+  expect(lastRef().projectReturn).toEqual(secondProject);
+});
 
 it('publishes a media ref only after the actual source channel context advances, and preserves the strict base message', async () => {
   const f = await start('other');

@@ -6,6 +6,7 @@ import { useApprovalHubStore } from '@/stores/approvalHubStore';
 import { apiFetch } from '@/utils/api-client';
 import { createApprovalSessions } from '../approval-sessions';
 import { MailboxRow } from '../MailboxRow';
+import { collectiveFailure } from './collective-failure.fixture';
 import { approvalRow, okRead } from './mailbox-fixtures';
 
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
@@ -24,7 +25,10 @@ afterEach(() => {
   vi.mocked(apiFetch).mockReset();
   vi.unstubAllGlobals();
 });
-it('original applying schedule stays recoverable in the canonical accepted/unknown row without re-opening approval', async () => {
+it.each([
+  false,
+  true,
+])('original applying schedule stays recoverable without reopening approval (Collective failure=%s)', async (outage) => {
   let proposal = scheduleProposal('applying');
   const item = scheduleItem(proposal),
     row = approvalRow(item);
@@ -33,7 +37,7 @@ it('original applying schedule stays recoverable in the canonical accepted/unkno
   item.inlineApprovable = false;
   row.approval = { ...item };
   let generation = 1;
-  const read = okRead([row]);
+  const read = outage ? collectiveFailure(okRead([row]), true) : okRead([row]);
   const sessions = createApprovalSessions({
     readsStarted: () => generation,
     refetch: () => {},

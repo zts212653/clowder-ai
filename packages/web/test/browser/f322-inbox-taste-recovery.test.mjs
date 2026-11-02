@@ -4,7 +4,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
 import { availablePort, stopChild, waitForHttp } from './f290-runtime-journey.harness.mjs';
 import { createInboxInformationFixture } from './f322-inbox-information.fixture.mjs';
 import { createNextDevTestEnvironment } from './next-dev-test-environment.mjs';
@@ -195,6 +195,8 @@ for (const language of ['zh', 'en'])
       await page.getByTestId('mailbox-close').click();
       assert.equal(await draft.inputValue(), draftText);
       await page.reload();
+      await chat.getByTestId('decision-result-label').waitFor();
+      await chat.locator('button[aria-expanded="false"]').click();
       await chat.getByTestId('domain-approval-result').waitFor();
       assert.match(await chat.innerText(), language === 'en' ? /Taste written/ : /品味已写入/);
       assert.equal(await chat.getByTestId('approve-btn').count(), 0);

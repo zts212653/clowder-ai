@@ -1,14 +1,11 @@
-import type { MessageMediaItemSelector } from '@cat-cafe/shared';
+import { type MessageMediaItemSelector, projectFileContent } from '@cat-cafe/shared';
 import type { ChatMessage } from '@/stores/chatStore';
 import type { ArtworkGalleryItem } from './artwork-gallery';
 
 export type MessageArtworkItem = ArtworkGalleryItem & { readonly item: MessageMediaItemSelector };
-const video = /\.(mp4|webm|mov)(?:[?#]|$)/i;
-const image = /\.(png|jpe?g|webp|gif|avif|svg)(?:[?#]|$)/i;
-function mediaType(url: string, mime?: string): 'image' | 'video' | null {
-  if (mime?.startsWith('video/') || video.test(url)) return 'video';
-  if (mime?.startsWith('image/') || image.test(url)) return 'image';
-  return null;
+function mediaType(name: string, url: string, mime?: string): 'image' | 'video' | null {
+  const { kind } = projectFileContent({ name, url, mime });
+  return kind === 'image' || kind === 'video' ? kind : null;
 }
 
 /** One visible message, in its existing content/rich-block order. No URL is authority or a publication side effect. */
@@ -16,7 +13,7 @@ export function messageArtworkItems(message: Pick<ChatMessage, 'contentBlocks' |
   const result: MessageArtworkItem[] = [];
   for (const [index, block] of (message.contentBlocks ?? []).entries()) {
     if (block.type !== 'image' && block.type !== 'file') continue;
-    const kind = block.type === 'image' ? 'image' : mediaType(block.url, block.mimeType);
+    const kind = block.type === 'image' ? 'image' : mediaType(block.fileName, block.url, block.mimeType);
     if (!kind) continue;
     const title = block.type === 'file' ? block.fileName : (block.url.split('/').at(-1) ?? '图片');
     result.push({ url: block.url, title, alt: title, mediaType: kind, item: { kind: 'content-block', index } });
@@ -35,7 +32,7 @@ export function messageArtworkItems(message: Pick<ChatMessage, 'contentBlocks' |
         });
       }
     } else if (block.kind === 'file') {
-      const kind = mediaType(block.url, block.mimeType);
+      const kind = mediaType(block.fileName, block.url, block.mimeType);
       if (kind)
         result.push({
           url: block.url,

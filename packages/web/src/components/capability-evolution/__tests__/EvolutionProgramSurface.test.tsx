@@ -189,7 +189,7 @@ describe('F311 Evolution Program Workbench surface', () => {
     apiFetchMock.mockResolvedValue(Response.json(prepared));
     try {
       await renderView(<EvolutionProgramSurface programId={programId} />);
-      expect(container.querySelector('.evolution-v2-reading-heading')?.textContent).toContain('提出目标（等你确认）');
+      expect(container.querySelector('.evolution-v2-reading-heading')?.textContent).toContain('提出目标（约定待补齐）');
       expect(container.querySelector('[data-journey-panel="1"]')?.textContent).toContain('项目目前在提出目标');
       expect(container.textContent).not.toContain('这里展示后续需要完成的内容');
       expect(container.querySelector('[data-testid="evolution-preparation-workspace"]')?.textContent).toContain(

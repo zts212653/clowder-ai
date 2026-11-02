@@ -63,7 +63,7 @@ describe('F202 package quarantine ledger', () => {
     const quarantine = new PluginPackageQuarantineManagerAdapter(store);
     const manager = new PluginManagerService({
       catalog: { snapshot: async () => ({ candidates: [], status: 'fresh', refreshedAt: 12_000 }) },
-      inventory: { snapshot: async () => ({ schemaVersion: 1, packages: [], instances: [], grants: [] }) },
+      inventory: { snapshot: async () => ({ schemaVersion: 1, packages: [], instances: [] }) },
       quarantine,
     });
 
@@ -115,7 +115,7 @@ describe('F202 package quarantine ledger', () => {
           refreshedAt: 13_000,
         }),
       },
-      inventory: { snapshot: async () => ({ schemaVersion: 1, packages: [], instances: [], grants: [] }) },
+      inventory: { snapshot: async () => ({ schemaVersion: 1, packages: [], instances: [] }) },
       quarantine: new PluginPackageQuarantineManagerAdapter(store),
     });
 

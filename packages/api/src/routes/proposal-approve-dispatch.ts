@@ -8,6 +8,7 @@ import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadS
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { primaryMentionHandleForCatId } from '../utils/cat-mention-handle.js';
 import { enrichWithParentThreadHeader } from './proposal-enrich-header.js';
+import { assignedProposalMessage } from './proposal-initial-message.js';
 import {
   buildSourceEnvelopeContent,
   cancelExistingSeed,
@@ -175,16 +176,14 @@ export async function appendApprovedInitialMessage({
   // explicit user-typed initialMessage. Routing/intent must never see the
   // envelope, because title/reason can contain literal @-mentions / #ideate that
   // must not affect dispatch control flow.
-  const hasExplicitInitialMessage = rawInitialMessage !== undefined && rawInitialMessage.length > 0;
   const sourceEnvelopeContent = buildSourceEnvelopeContent(sourceEnvelope);
   // #1387: explicit initialMessage controls routing, but the original source
   // envelope (title/reason/PR URL) must remain child-visible so opensource-ops
   // can ground the external object. Append it after a clear separator; routing
   // already consumes rawInitialMessage, so injected envelope text cannot leak
   // into @-mention / #ideate parsing.
-  const seedContent = hasExplicitInitialMessage
-    ? `${rawInitialMessage}\n\n---\n${sourceEnvelopeContent}`
-    : sourceEnvelopeContent;
+  const displayMessage = assignedProposalMessage(rawInitialMessage, preferredCats ?? []);
+  const seedContent = displayMessage ? `${displayMessage}\n\n---\n${sourceEnvelopeContent}` : sourceEnvelopeContent;
   const routingInput = rawInitialMessage ?? '';
 
   // Lossless source: whenever we know the original trigger message, carry over

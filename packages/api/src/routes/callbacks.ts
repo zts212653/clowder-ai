@@ -1,5 +1,6 @@
 import { getCoCreatorDisplay } from '../config/co-creator-display.js';
 import { cloudPrincipalStanding } from '../domains/cats/services/cloud-bridge/cloud-conversation-identity.js';
+import { cloudReturnProof } from '../domains/cats/services/cloud-bridge/cloud-return-proof.js';
 import { makeCallbackAuthError } from './callback-errors.js';
 /**
  * Callback API Routes — MCP 回传端点
@@ -26,11 +27,13 @@ import {
   isValidAcceptedSource,
   isValidReviewSubjectRef,
   localReviewVerdictSchema,
+  messageSearchAnswerAttachmentSchema,
   normalizeRichBlock,
   normalizeSopDefinitionId,
   resolveWorkflowSopSkill,
   reviewSubjectRefSchema,
   runtimeConversationResponseSchema,
+  richBlockSchema as sharedRichBlockSchema,
   VersionBoundContextAttachmentsSchema,
   workReferenceCardSchema,
 } from '@cat-cafe/shared';
@@ -63,6 +66,7 @@ import {
   currentOrphanCarrierRecovery,
   isCarrierRefreshGeneration,
 } from '../domains/ball-custody/action-successor-state-machine.js';
+import { OrdinaryTaskHandoffError } from '../domains/ball-custody/OrdinaryTaskHandoffContract.js';
 import {
   type ActionSuccessorCarrierAdmissionOutcome,
   type ActionSuccessorCarrierDisposition,
@@ -120,6 +124,7 @@ import {
   type StoredMessage,
 } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
+import { roadmapInputSchema, ThreadRoadmapConflict } from '../domains/cats/services/stores/ports/ThreadRoadmap.js';
 import type { IThreadStore, VotingStateV1 } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import {
   type ITurnExecutionStore,
@@ -149,6 +154,7 @@ import {
   partitionNotificationTargets,
   readEngagementPolicy,
 } from '../domains/routing-context/ScarceSeatNotificationPolicy.js';
+import { readThreadRoadmap } from '../domains/workspace/thread-roadmap-source.js';
 import { createModuleLogger } from '../infrastructure/logger.js';
 import {
   coordinationActiveDispatchCount,
@@ -202,6 +208,10 @@ import { type CallbackMemoryCueDeps, registerCallbackMemoryCueRoutes } from './c
 import { registerCallbackMemoryRoutes } from './callback-memory-routes.js';
 import { projectCallbackMessageBody, projectQueuedCallbackMessageBody } from './callback-message-body.js';
 import { registerCallbackMessageReadRoutes } from './callback-message-read-routes.js';
+import {
+  prepareCallbackSearchAnswer,
+  publishCallbackSearchAnswer,
+} from './callback-message-search-answer-publication.js';
 import { getMultiMentionOrchestrator, registerMultiMentionRoutes } from './callback-multi-mention-routes.js';
 import { registerNativeTurnAdmissionRoute } from './callback-native-turn-admission.js';
 import {
@@ -235,6 +245,7 @@ import {
   type CallbackSkillConsumptionDeps,
   registerCallbackSkillConsumptionRoutes,
 } from './callback-skill-consumption-routes.js';
+import { prepareCallbackTaskHandoff } from './callback-task-handoff.js';
 import { registerCallbackTaskRoutes } from './callback-task-routes.js';
 import { registerCallbackThreadCatsRoutes } from './callback-thread-cats-routes.js';
 import { registerCallbackWithdrawThreadProposalRoutes } from './callback-withdraw-thread-proposal-routes.js';
@@ -253,6 +264,7 @@ import {
   type ThreadContextSelection,
 } from './thread-context-envelope.js';
 import { type KeywordScanTiming, scanRankedThreadContext } from './thread-context-keyword-scan.js';
+import { prepareRoadmapMutation } from './thread-roadmap-binding.js';
 import { detectUserMention } from './user-mention.js';
 import { clearVoteTimer, closeVoteInternal, voteTimers } from './votes.js';
 import { publishDispatchProposal } from './wave2-proposal-publication.js';
@@ -805,6 +817,7 @@ async function ensureDuplicateCallbackWake(input: {
 }
 
 export interface CallbackRoutesOptions {
+  proposalProjectRoot?: string;
   resolveTrustedImagePath?: (hmrId: string) => Promise<string | undefined>;
   liveTaskAuthority?: import('./live-task-authority.js').LiveTaskAuthority;
   /** F293: applied scarcity policy; defaults to the active project dossier. */
@@ -869,6 +882,7 @@ export interface CallbackRoutesOptions {
     threadId: string,
   ) => Promise<{ memberCardCount: number }> | { memberCardCount: number };
   taskStore?: ITaskStore;
+  ownedWaitStatusReader?: import('../domains/ball-custody/OwnedWaitStatus.js').OwnedWaitStatusReader;
   backlogStore?: IBacklogStore;
   /** For thinking mode filtering in thread-context + thread-cats discovery */
   threadStore?: IThreadStore;
@@ -905,6 +919,7 @@ export interface CallbackRoutesOptions {
   /** F246 Phase I: canonical runtime ingress for all approval producers. */
   approvalIngress?: ApprovalIngress;
   /** F231 KD-19: canonical user/persona profile repository. */
+  profileReadEvidenceDb?: import('better-sqlite3').Database;
   profileRepository?: import('../domains/cats/services/profile/ProfileRepository.js').FileProfileRepository;
   /** F155 B-4: Independent guide session store */
   guideSessionStore?: import('../domains/guides/GuideSessionRepository.js').IGuideSessionStore;
@@ -912,6 +927,10 @@ export interface CallbackRoutesOptions {
   agentRegistry?: { getAllEntries(): Map<string, unknown> };
   /** Read-only F293 annotation; Queue preserves all accepted target rows. */
   routingDispatchPreflight?: import('../domains/routing-context/RoutingDispatchPreflightPort.js').RoutingDispatchPreflightPort;
+  routingSelection?: Pick<
+    import('../domains/routing-context/selection/RoutingSelectionService.js').RoutingSelectionService,
+    'read'
+  >;
   /** For post_message @mention → invocation triggering */
   router?: AgentRouter;
   invocationRecordStore?: IInvocationRecordStore;
@@ -936,6 +955,9 @@ export interface CallbackRoutesOptions {
   indexBuilder?: { markThreadDirty(threadId: string): void; flushDirtyThreads?(): number | Promise<number> };
   /** F102: DI memory services — SQLite-backed evidence store */
   evidenceStore: IEvidenceStore;
+  /** Optional shared publisher; caller authentication remains in callback routes. */
+  messageSearchService?: import('../domains/memory/MessageSearchService.js').MessageSearchService;
+  messageSearchAnswerService?: import('../domains/memory/MessageSearchAnswerPublicationService.js').MessageSearchAnswerPublicationService;
   markerQueue: IMarkerQueue;
   reflectionService: IReflectionService;
   /** F254 Phase B: Raw Redis client for freshness notice event log + state store */
@@ -982,6 +1004,7 @@ export interface CallbackRoutesOptions {
   invocationQueue?: import('../domains/cats/services/agents/invocation/InvocationQueue.js').InvocationQueue;
   /** F167 Phase S: durable subject/action/slot admission for A2A successor dispatch. */
   actionSuccessorAdmissionService?: import('../domains/ball-custody/ActionSuccessorAdmissionService.js').ActionSuccessorAdmissionService;
+  ordinaryTaskHandoffs?: import('../domains/ball-custody/OrdinaryTaskHandoffService.js').OrdinaryTaskHandoffService;
   /** Exact Task/Message/Queue recovery for pre-atomic direct carriers with no execution. */
   taskActionSuccessorOrphanRecovery?: import('../domains/ball-custody/TaskActionSuccessorOrphanRecovery.js').TaskActionSuccessorOrphanRecovery;
   /**
@@ -1018,6 +1041,7 @@ export interface CallbackRoutesOptions {
 }
 
 const postMessageSchema = z.object({
+  searchAnswer: messageSearchAnswerAttachmentSchema.optional(),
   content: z.string().min(1).max(50000),
   contextAttachments: VersionBoundContextAttachmentsSchema.optional(),
   threadId: z.string().min(1).optional(),
@@ -1078,6 +1102,8 @@ const listThreadsQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).optional(),
   activeSince: z.coerce.number().int().min(0).optional(),
   keyword: z.string().trim().min(1).max(200).optional(),
+  includeWork: z.enum(['true', 'false']).optional(),
+  cursor: z.string().min(1).max(2000).optional(),
 });
 
 const listLabelsQuerySchema = z.object({
@@ -1088,6 +1114,7 @@ const refItemSchema = z.object({ repo: z.string().min(1).max(200), number: z.num
 const SET_THREAD_METADATA_EMPTY_UPDATE_MESSAGE = 'At least one thread metadata update field is required';
 const setThreadMetadataSchema = z
   .object({
+    roadmap: roadmapInputSchema.optional(),
     // P2: match PATCH /api/threads/:id invariants — trim + min(1) + max
     title: z.string().trim().min(1).max(200).optional(),
     labels: z.array(z.string().trim().min(1).max(50)).max(20).optional(),
@@ -1125,114 +1152,11 @@ const ackMentionsSchema = z.object({
   upToMessageId: z.string().min(1),
 });
 
-/** F22: Rich block creation schema — validates shape + kind-specific fields (cloud Codex P1) */
-const richChecklistItemSchema = z.object({ id: z.string(), text: z.string(), checked: z.boolean().optional() });
-const richMediaItemSchema = z.object({ url: z.string(), alt: z.string().optional(), caption: z.string().optional() });
+/** Shared F22 language; private work-reference metadata keeps its original authority guard. */
+const [sharedRichCardSchema, ...sharedRichOtherSchemas] = sharedRichBlockSchema.options;
 const richBlockSchema = z.discriminatedUnion('kind', [
-  z.object({
-    id: z.string().min(1),
-    kind: z.literal('card'),
-    v: z.literal(1),
-    title: z.string(),
-    bodyMarkdown: z.string().optional(),
-    meta: workReferenceCardSchema.shape.meta.optional(),
-    tone: z.enum(['info', 'success', 'warning', 'danger']).optional(),
-    fields: z.array(z.object({ label: z.string(), value: z.string() })).optional(),
-  }),
-  z.object({
-    id: z.string().min(1),
-    kind: z.literal('diff'),
-    v: z.literal(1),
-    filePath: z.string(),
-    diff: z.string(),
-    languageHint: z.string().optional(),
-  }),
-  z.object({
-    id: z.string().min(1),
-    kind: z.literal('checklist'),
-    v: z.literal(1),
-    title: z.string().optional(),
-    items: z.array(richChecklistItemSchema).min(1),
-  }),
-  z.object({
-    id: z.string().min(1),
-    kind: z.literal('media_gallery'),
-    v: z.literal(1),
-    title: z.string().optional(),
-    items: z.array(richMediaItemSchema).min(1),
-  }),
-  z.object({
-    id: z.string().min(1),
-    kind: z.literal('audio'),
-    v: z.literal(1),
-    url: z.string().optional().default(''),
-    text: z.string().optional(),
-    title: z.string().optional(),
-    durationSec: z.number().optional(),
-    mimeType: z.string().optional(),
-  }),
-  z.object({
-    id: z.string().min(1),
-    kind: z.literal('interactive'),
-    v: z.literal(1),
-    interactiveType: z.enum(['select', 'multi-select', 'card-grid', 'confirm']),
-    title: z.string().optional(),
-    description: z.string().optional(),
-    options: z
-      .array(
-        z.object({
-          id: z.string().min(1),
-          label: z.string().min(1),
-          emoji: z.string().optional(),
-          icon: z.string().optional(),
-          description: z.string().optional(),
-          level: z.number().optional(),
-          group: z.string().optional(),
-          customInput: z.boolean().optional(),
-          customInputPlaceholder: z.string().optional(),
-          action: z
-            .object({
-              type: z.literal('callback'),
-              endpoint: z.string().min(1),
-              payload: z.record(z.unknown()).optional(),
-            })
-            .optional(),
-        }),
-      )
-      .min(1),
-    maxSelect: z.number().int().min(1).optional(),
-    allowRandom: z.boolean().optional(),
-    messageTemplate: z.string().optional(),
-    disabled: z.boolean().optional(),
-    selectedIds: z.array(z.string()).optional(),
-    autoGroup: z.boolean().optional(),
-    groupId: z.string().min(1).optional(),
-  }),
-  // F088 Phase J: file attachment block
-  z.object({
-    id: z.string().min(1),
-    kind: z.literal('file'),
-    v: z.literal(1),
-    url: z
-      .string()
-      .min(1)
-      .refine(
-        (u) => !u.includes('..') && (/^\/uploads\//.test(u) || /^\/api\//.test(u) || /^https:\/\//.test(u)),
-        'file url must start with /uploads/, /api/, or https://',
-      ),
-    fileName: z.string().min(1),
-    mimeType: z.string().optional(),
-    fileSize: z.number().int().min(0).optional(),
-  }),
-  // F120 Phase C: html_widget — inline sandboxed HTML/JS visualization
-  z.object({
-    id: z.string().min(1),
-    kind: z.literal('html_widget'),
-    v: z.literal(1),
-    html: z.string().min(1).max(500_000),
-    title: z.string().optional(),
-    height: z.number().int().min(50).max(2000).optional(),
-  }),
+  sharedRichCardSchema.extend({ meta: workReferenceCardSchema.shape.meta.optional() }),
+  ...sharedRichOtherSchemas,
 ]);
 const createRichBlockSchema = z.object({
   block: richBlockSchema,
@@ -1317,6 +1241,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       registry,
       observationProvider: opts.deploymentObservationProvider,
       lifecycleHolder: opts.deploymentWaitLifecycleHolder,
+      ...(opts.handoffProposalStore ? { handoffProposalStore: opts.handoffProposalStore } : {}),
+      ...(opts.sessionChainStore ? { sessionChainStore: opts.sessionChainStore } : {}),
       ...(opts.invocationTracker ? { invocationTracker: opts.invocationTracker } : {}),
     });
   }
@@ -1510,6 +1436,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       }
       const isCloudReturnAttempt = (isDot && !dotAskAdmission) || (isGptPro && Boolean(replyTo || cloudReturnBinding));
       const usesServerGrant = (isDot || isGptPro) && Boolean(replyTo) && !cloudReturnBinding;
+      let verifiedLegacyReturn: import('@cat-cafe/shared').CloudBridgeReturnV1 | undefined;
       if (isGptPro && cloudReturnBinding) {
         if (!replyTo) {
           reply.status(400);
@@ -1539,6 +1466,13 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
             message: 'Cloud return binding does not authorize this source, thread, user, or cloud cat.',
           };
         }
+        verifiedLegacyReturn = cloudReturnProof({
+          threadId: effectiveThreadId,
+          userId: principal.userId,
+          sourceMessageId: replyTo,
+          targetCatId: String(principal.catId),
+          dispatchInvocationId: bindingVerdict.dispatchInvocationId,
+        });
       }
 
       const { cleanText: storedContent, blocks: extractedBlocks } = extractRichFromText(content);
@@ -1616,6 +1550,26 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         return mediaResolution;
       }
       let richBlocks = mediaResolution.blocks;
+      const preparedAnswer = await prepareCallbackSearchAnswer(
+        opts.messageSearchAnswerService,
+        parsed.data.searchAnswer,
+        principal,
+        effectiveThreadId,
+        clientMessageId,
+        durableMediaDuplicate?.id ??
+          (clientMessageId
+            ? (
+                await messageStore.getByIdempotencyKey(
+                  principal.userId,
+                  effectiveThreadId,
+                  buildCallbackPostMessageIdempotencyKey(principal.catId, clientMessageId),
+                )
+              )?.id
+            : undefined),
+      );
+      if (!preparedAnswer.ok) return reply.status(preparedAnswer.status).send({ error: preparedAnswer.error });
+      if (preparedAnswer.block && !richBlocks.some((block) => block.id === preparedAnswer.block?.id))
+        richBlocks.push(preparedAnswer.block);
       const synthesizer = getVoiceBlockSynthesizer();
       if (!durableMediaDuplicate && synthesizer && richBlocks.some((b) => b.kind === 'audio' && 'text' in b)) {
         try {
@@ -1833,6 +1787,12 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         durableLocalReviewDuplicate ??
         durableCallbackDuplicate;
       const recoverPersistedCallbackMessage = async (persisted: StoredMessage) => {
+        persisted = await publishCallbackSearchAnswer(
+          opts.messageSearchAnswerService,
+          parsed.data.searchAnswer,
+          principal,
+          persisted,
+        );
         const persistedMentions = persisted.mentions.filter(
           (catId) => !persisted.extra?.notificationDelivery?.withoutWakeCatIds.includes(catId),
         );
@@ -1944,6 +1904,11 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         );
       }
 
+      const admittedCloudReturn = !isDot
+        ? cloudReturnGrantClaim
+          ? cloudReturnProof(cloudReturnGrantClaim)
+          : verifiedLegacyReturn
+        : undefined;
       const appendInput: AppendMessageInput = {
         from: { kind: 'agent', catId: principal.catId },
         threadId: effectiveThreadId,
@@ -1954,7 +1919,9 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         ...(mentionsUser ? { mentionsUser } : {}),
         origin: 'callback',
         timestamp: now,
-        ...(extra ? { extra } : {}),
+        ...(extra || admittedCloudReturn
+          ? { extra: { ...extra, ...(admittedCloudReturn ? { cloudBridgeReturn: admittedCloudReturn } : {}) } }
+          : {}),
         ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
         ...(cloudReturnMessageIdempotencyKey || localReviewFactMessageIdempotencyKey || callbackMessageIdempotencyKey
           ? {
@@ -2012,7 +1979,13 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         }
         throw error;
       }
-      const storedMsg = atomicAdmission.message;
+      let storedMsg = atomicAdmission.message;
+      storedMsg = await publishCallbackSearchAnswer(
+        opts.messageSearchAnswerService,
+        parsed.data.searchAnswer,
+        principal,
+        storedMsg,
+      );
       if (!dotAskMatches(storedMsg)) return reply.code(409).send({ kind: 'dot_ask_idempotency_conflict' });
       if (persistedReplay || atomicAdmission.preAdmittedReplayed) {
         return recoverPersistedCallbackMessage(storedMsg);
@@ -2097,6 +2070,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           // #814: Always include isExplicitPost in broadcast so frontend TD112 dedup skips merge
           extra: {
             isExplicitPost: true,
+            ...(storedMsg.extra?.cloudBridgeReturn ? { cloudBridgeReturn: storedMsg.extra.cloudBridgeReturn } : {}),
             ...(validExplicitTargets.length ? { targetCats: validExplicitTargets } : {}),
           },
           ...(mentionsUser ? { mentionsUser } : {}),
@@ -2170,7 +2144,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         threadId: effectiveThreadId,
         messageId: storedMsg.id,
         routed: routingOutcome.routed,
-        ...(deliveryDecision.routingPreflight ? { routing_preflight: deliveryDecision.routingPreflight } : {}),
+        ...(deliveryDecision.routingAdmission ? { routing_admission: deliveryDecision.routingAdmission } : {}),
         ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
         ...(clientMessageId ? { clientMessageId } : {}),
         ...(routing_warnings.length > 0 ? { routing_warnings } : {}),
@@ -2208,9 +2182,10 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       reviewSubjectRef,
       acceptedSourceRef,
       acceptedRevision,
-      action,
+      action: requestedAction,
       proposedAction,
     } = parsed.data;
+    let action = requestedAction;
     const contentBlocks: MessageContent[] | undefined = contextAttachments?.map((attachment) => ({
       type: 'context_attachment',
       attachment,
@@ -2348,6 +2323,31 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // handles still fall through to the existing routing_warnings /
     // allExplicitFailed path (Codex P2 round 1 close).
     const isCrossThread = effectiveThreadId !== actor.threadId;
+    let taskHandoff:
+      | import('../domains/ball-custody/OrdinaryTaskHandoffContract.js').OrdinaryTaskHandoffRequest
+      | undefined;
+    try {
+      if (action && proposedAction) throw new OrdinaryTaskHandoffError('ambiguous_task_action');
+      taskHandoff = await prepareCallbackTaskHandoff({
+        action: action ?? (effectClass === 'assign_work' ? proposedAction : undefined),
+        tasks: taskStore,
+        service: opts.ordinaryTaskHandoffs,
+        messages: messageStore,
+        actor,
+        targets: explicitTargetCats ?? [],
+        targetThreadId: effectiveThreadId,
+        actorCreatedAt: record.createdAt,
+        idempotencyKey: clientMessageId
+          ? buildCallbackPostMessageIdempotencyKey(actor.catId, clientMessageId)
+          : undefined,
+      });
+      if (taskHandoff && !action) action = proposedAction;
+    } catch (error) {
+      if (!(error instanceof OrdinaryTaskHandoffError)) throw error;
+      return reply
+        .code(error.code === 'task_handoff_unavailable' ? 503 : 409)
+        .send({ status: 'task_handoff_refused', reason: error.code });
+    }
     if (isCrossThread) {
       const hasRawLineStartMention = hasPlausibleLineStartMention(content);
       const hasRawTargetCats = (explicitTargetCats?.length ?? 0) > 0;
@@ -2366,7 +2366,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
 
     // F246 Phase B: assign_work on same-thread is invalid — assign_work only makes
     // sense for cross-thread dispatch (per plan Task 3 test matrix).
-    if (!isCrossThread && effectClass === 'assign_work') {
+    if (!isCrossThread && effectClass === 'assign_work' && !taskHandoff) {
       reply.status(400);
       return {
         kind: 'assign_work_same_thread',
@@ -2380,7 +2380,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         message: 'post_message carries one same-thread successor; use multi_mention for deliberate parallel fan-out.',
       };
     }
-    if (action && effectClass === 'assign_work') {
+    if (action && effectClass === 'assign_work' && !taskHandoff) {
       reply.status(400);
       return {
         kind: 'action_with_assign_work',
@@ -2515,7 +2515,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         message: 'parallel rejected-ownership disposition requires exactly one predecessor target cat.',
       };
     }
-    if (isCrossThread && effectClass === 'assign_work' && explicitCoordination) {
+    if (isCrossThread && effectClass === 'assign_work' && explicitCoordination && !taskHandoff) {
       reply.status(400);
       return {
         kind: 'coordination_with_assign_work',
@@ -2525,7 +2525,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
 
     // F246 Phase B: assign_work effect-class intercept — hold as DispatchProposal
     // instead of auto-delivering. Only applies to cross-thread posts.
-    if (isCrossThread && effectClass === 'assign_work' && opts.dispatchProposalStore) {
+    if (isCrossThread && effectClass === 'assign_work' && opts.dispatchProposalStore && !taskHandoff) {
       if (!opts.approvalIngress) {
         throw new Error('[F246] approvalIngress is required for dispatch proposal creation');
       }
@@ -2813,6 +2813,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // full-key canonical authority can deny a genuinely new claim.
     const atomicCanonicalAdmissionStore =
       action &&
+      !taskHandoff &&
       isCrossThread &&
       opts.dispatchProposalStore instanceof RedisDispatchProposalStore &&
       !isPersistedActionSuccessorTransition(action)
@@ -2832,7 +2833,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       action,
       coordinationSubjectRef: coordinationResult.coordination?.subjectRef,
       suppressRouting: coordinationResult.suppressRouting,
-      effectClass,
+      effectClass: taskHandoff ? 'coordinate' : effectClass,
       clientMessageId,
       dispatchProposalStore: opts.dispatchProposalStore,
       deferStructuredActionAdmissionToAtomicClaim: useAtomicCanonicalActionAdmission,
@@ -2853,7 +2854,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         : 'successor_dispatch'
       : undefined;
     let actionHolderCatIds: CatId[] = [];
-    if (action) {
+    if (action && !taskHandoff) {
       if (!opts.actionSuccessorAdmissionService || !opts.invocationQueue || !queueProcessor) {
         successorActionFenceUnavailable.add(1);
         protocolActionWithoutCustodyTotal.add(1);
@@ -3089,6 +3090,25 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // F34-b: Resolve voice blocks (audio with text, no url) before storing
     const synthesizer = getVoiceBlockSynthesizer();
     let richBlocks = [...mediaResolution.blocks, ...bufferedBlocks];
+    const preparedAnswer = await prepareCallbackSearchAnswer(
+      opts.messageSearchAnswerService,
+      parsed.data.searchAnswer,
+      principal,
+      effectiveThreadId,
+      clientMessageId,
+      clientMessageId
+        ? (
+            await messageStore.getByIdempotencyKey(
+              actor.userId,
+              effectiveThreadId,
+              buildCallbackPostMessageIdempotencyKey(actor.catId, clientMessageId),
+            )
+          )?.id
+        : undefined,
+    );
+    if (!preparedAnswer.ok) return reply.status(preparedAnswer.status).send({ error: preparedAnswer.error });
+    if (preparedAnswer.block && !richBlocks.some((block) => block.id === preparedAnswer.block?.id))
+      richBlocks.push(preparedAnswer.block);
     if (!durableLocalRichRecovery && synthesizer && richBlocks.some((b) => b.kind === 'audio' && 'text' in b)) {
       try {
         richBlocks = await synthesizer.resolveVoiceBlocks(richBlocks, actor.catId as string);
@@ -3341,6 +3361,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // identity never falls back to parent (which would collapse multi-turn same-cat).
     const persistedExtra = {
       ...(extra ?? {}),
+      ...(taskHandoff ? { taskHandoff } : {}),
       stream: {
         invocationId: effectiveInvId,
         turnInvocationId: invocationId ?? effectiveInvId,
@@ -3424,6 +3445,18 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       : null;
     const duplicateMsg = durableLocalReviewDuplicate ?? durableActionCarrierDuplicate ?? durableCallbackDuplicate;
     const recoverPersistedCallbackMessage = async (duplicateMsg: StoredMessage) => {
+      if (duplicateMsg.extra?.taskHandoff) {
+        if (!taskHandoff) return reply.code(409).send({ status: 'task_handoff_idempotency_conflict' });
+        const resumed = await opts.ordinaryTaskHandoffs!.apply(duplicateMsg.id);
+        if (resumed.kind === 'refused')
+          return reply.code(409).send({ status: 'task_handoff_refused', reason: resumed.reason });
+      }
+      duplicateMsg = await publishCallbackSearchAnswer(
+        opts.messageSearchAnswerService,
+        parsed.data.searchAnswer,
+        principal,
+        duplicateMsg,
+      );
       const persistedWakeTargets = duplicateMsg.mentions.filter(
         (catId) => !duplicateMsg.extra?.notificationDelivery?.withoutWakeCatIds.includes(catId),
       );
@@ -3631,7 +3664,22 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       }
       throw error;
     }
-    const storedMsg = atomicAdmission.message;
+    let storedMsg = atomicAdmission.message;
+    if (taskHandoff) {
+      const applied = await opts.ordinaryTaskHandoffs!.apply(storedMsg.id);
+      if (applied.kind === 'refused')
+        return reply.code(409).send({
+          status: 'task_handoff_refused',
+          reason: applied.reason,
+          messageId: storedMsg.id,
+        });
+    }
+    storedMsg = await publishCallbackSearchAnswer(
+      opts.messageSearchAnswerService,
+      parsed.data.searchAnswer,
+      principal,
+      storedMsg,
+    );
     if (persistedReplay || atomicAdmission.preAdmittedReplayed) {
       if (localReviewVerdict && !localReviewDuplicateMatches(storedMsg)) {
         reply.status(409);
@@ -3834,7 +3882,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       threadId: effectiveThreadId,
       messageId: storedMsg.id,
       routed: routingOutcome.routed,
-      ...(deliveryDecision.routingPreflight ? { routing_preflight: deliveryDecision.routingPreflight } : {}),
+      ...(deliveryDecision.routingAdmission ? { routing_admission: deliveryDecision.routingAdmission } : {}),
       ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
       ...(clientMessageId ? { clientMessageId } : {}),
       ...(routing_warnings.length > 0 ? { routing_warnings } : {}),
@@ -5100,13 +5148,41 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       return { error: 'Invalid request query', details: parsed.error.issues };
     }
 
-    const { limit, activeSince, keyword } = parsed.data;
+    const { limit, activeSince, keyword, includeWork, cursor } = parsed.data;
 
     if (!threadStore) {
       reply.status(503);
       return { error: 'Thread store not configured' };
     }
 
+    if (includeWork === 'true') {
+      const { readRecentWorkDirectory, DirectoryCursorError } = await import('./recent-work-directory.js');
+      try {
+        return await readRecentWorkDirectory({
+          userId: principal.userId,
+          threadStore,
+          taskStore: opts.taskStore,
+          invocationAuthority: request.callbackAuth,
+          readRunningWork: async () => {
+            const response = await app.inject({
+              method: 'GET',
+              url: '/api/callbacks/companion/running-work',
+              headers: request.headers,
+            });
+            return { statusCode: response.statusCode, body: response.json() };
+          },
+          limit,
+          activeSince,
+          keyword,
+          cursor,
+        });
+      } catch (error) {
+        return reply.code(error instanceof DirectoryCursorError ? 400 : 503).send({
+          error: error instanceof DirectoryCursorError ? error.message : 'Work directory unavailable',
+        });
+      }
+    }
+    if (cursor) return reply.code(400).send({ error: 'cursor requires includeWork=true' });
     const requestedLimit = limit ?? 20;
     let threads = await threadStore.list(principal.userId);
     if (activeSince !== undefined) {
@@ -5189,6 +5265,12 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       threadId: effectiveThreadId,
       title: thread.title,
       labels: thread.labels ?? [],
+      ...(meta?.roadmap
+        ? {
+            roadmap: await readThreadRoadmap({ thread, threadStore, userId: principal.userId }),
+            roadmapBinding: meta.roadmap,
+          }
+        : {}),
       ...(meta?.worktrees ? { worktrees: meta.worktrees } : {}),
       ...(meta?.prs ? { prs: meta.prs } : {}),
       ...(meta?.issues ? { issues: meta.issues } : {}),
@@ -5228,7 +5310,23 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       return { error: 'Thread not found' };
     }
 
-    const { title, labels, ...metadataFields } = parsed.data;
+    const { title, labels, roadmap, ...metadataFields } = parsed.data;
+    let roadmapMutation: Awaited<ReturnType<typeof prepareRoadmapMutation>> | undefined;
+    if (roadmap) {
+      try {
+        roadmapMutation = await prepareRoadmapMutation({
+          roadmap,
+          record: principal,
+          thread,
+          threadStore,
+          messageStore,
+        });
+      } catch (error) {
+        return reply
+          .code(error instanceof ThreadRoadmapConflict ? 409 : 400)
+          .send({ error: error instanceof Error ? error.message : 'Invalid roadmap binding' });
+      }
+    }
 
     // #872 cloud-review P2: validate all rejectable inputs BEFORE applying any mutations.
     // Without this gate, a request with valid title + invalid labels would commit the title
@@ -5253,12 +5351,16 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // #872 cloud-review P2 (R3): failable operations first. atomicMergeThreadMetadata can
     // throw on CAS exhaustion or unparseable stored data; run it before title/labels so
     // a throw doesn't leave visible fields partially committed.
-    const hasMetadataUpdate = Object.keys(metadataFields).length > 0;
+    const hasMetadataUpdate = Object.keys(metadataFields).length > 0 || roadmapMutation !== undefined;
     if (hasMetadataUpdate) {
       try {
-        await threadStore.atomicMergeThreadMetadata(effectiveThreadId, metadataFields);
+        await threadStore.atomicMergeThreadMetadata(effectiveThreadId, {
+          ...metadataFields,
+          ...(roadmapMutation ? { roadmap: roadmapMutation } : {}),
+        });
       } catch (err) {
         // #872: total-limits rejection is a client error (deterministic, not retryable).
+        if (err instanceof ThreadRoadmapConflict) return reply.code(409).send({ error: err.message });
         // Surface as 422 so MCP retry helpers don't retry a request that can never succeed.
         const msg = err instanceof Error ? err.message : String(err);
         if (msg.includes('total limits exceeded')) {
@@ -5298,6 +5400,12 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         ? { titleApplied, titleSource: updated?.titleSource ?? (thread.title ? 'user' : 'temporary') }
         : {}),
       labels: updated?.labels ?? thread.labels ?? [],
+      ...(updated?.threadMetadata?.roadmap
+        ? {
+            roadmap: await readThreadRoadmap({ thread: updated, threadStore, userId: principal.userId }),
+            roadmapBinding: updated.threadMetadata.roadmap,
+          }
+        : {}),
       ...(meta?.worktrees ? { worktrees: meta.worktrees } : {}),
       ...(meta?.prs ? { prs: meta.prs } : {}),
       ...(meta?.issues ? { issues: meta.issues } : {}),
@@ -5798,6 +5906,9 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
   if (taskStore) {
     registerCallbackTaskRoutes(app, {
       taskStore,
+      registry,
+      ...(opts.ordinaryTaskHandoffs ? { ordinaryTaskHandoffs: opts.ordinaryTaskHandoffs } : {}),
+      ...(opts.ownedWaitStatusReader ? { ownedWaitStatusReader: opts.ownedWaitStatusReader } : {}),
       messageStore: opts.messageStore,
       socketManager,
       ...(threadStore ? { threadStore } : {}),
@@ -5833,12 +5944,14 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     registerCallbackThreadCatsRoutes(app, {
       threadStore: opts.threadStore,
       agentRegistry: opts.agentRegistry,
+      ...(opts.routingSelection ? { routingSelection: opts.routingSelection } : {}),
     });
   }
 
   // F128: Cat-side thread proposal callback
   if (opts.proposalStore && opts.threadStore) {
     registerCallbackProposeThreadRoutes(app, {
+      projectRoot: opts.proposalProjectRoot,
       registry,
       proposalStore: opts.proposalStore,
       threadStore: opts.threadStore,
@@ -5940,7 +6053,10 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
   }
 
   if (opts.profileRepository) {
-    registerCallbackReadProfileRoutes(app, { repository: opts.profileRepository });
+    registerCallbackReadProfileRoutes(app, {
+      repository: opts.profileRepository,
+      evidenceDb: opts.profileReadEvidenceDb,
+    });
   }
 
   // F225: Cat-initiated session handoff propose callback
@@ -5956,7 +6072,11 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
   }
 
   await registerCallbackMemoryRoutes(app, {
+    cloudReturnGrantStore: opts.cloudReturnGrantStore,
+    registry,
+    messageSearchAnswerService: opts.messageSearchAnswerService,
     evidenceStore: opts.evidenceStore,
+    messageSearchService: opts.messageSearchService,
     messageStore: opts.messageStore,
     ...(opts.threadStore ? { threadStore: opts.threadStore } : {}),
     markerQueue: opts.markerQueue,

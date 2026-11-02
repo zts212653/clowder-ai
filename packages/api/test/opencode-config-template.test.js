@@ -538,7 +538,7 @@ describe('generateOpenCodeRuntimeConfig', () => {
     });
     // Provider key must NOT be 'openai' — OpenCode treats it as built-in and
     // forces Responses API, ignoring the npm adapter field.
-    assert.equal(config.provider['openai'], undefined, 'must not use reserved "openai" key');
+    assert.equal(config.provider.openai, undefined, 'must not use reserved "openai" key');
     assert.ok(config.provider['openai-compat'], 'must use remapped "openai-compat" key');
     assert.equal(config.provider['openai-compat'].npm, '@ai-sdk/openai-compatible');
     assert.equal(config.model, 'openai-compat/gpt-4o', 'model prefix must match remapped provider key');
@@ -577,7 +577,7 @@ describe('generateOpenCodeRuntimeConfig', () => {
       defaultModel: 'kimi/moonshot-v2',
       apiType: 'openai',
     });
-    assert.ok(config.provider['kimi'], 'custom name must be preserved');
+    assert.ok(config.provider.kimi, 'custom name must be preserved');
     assert.equal(config.model, 'kimi/moonshot-v2');
   });
 
@@ -943,7 +943,8 @@ describe('writeOpenCodeRuntimeConfig', () => {
       );
 
       const content = JSON.parse(readFileSync(configPath, 'utf-8'));
-      assert.deepEqual(content.mcp['external-command-only'].command, ['external-tool']);
+      const external = content.mcp['external-command-only'];
+      assert.deepEqual(external.command, ['external-tool']);
     } finally {
       rmSync(configRoot, { recursive: true, force: true });
       rmSync(runtimeRoot, { recursive: true, force: true });
@@ -1046,11 +1047,7 @@ describe('writeOpenCodeRuntimeConfig', () => {
       const content = JSON.parse(readFileSync(configPath, 'utf-8'));
       const limb = content.mcp['cat-cafe-limb'];
       assert.ok(limb, 'external cat-cafe-limb must be present');
-      assert.deepEqual(
-        limb.command,
-        ['my-custom-limb-server', '--port', '9999'],
-        'external source must keep original command, not rewrite to split entrypoint',
-      );
+      assert.deepEqual(limb.command, ['my-custom-limb-server', '--port', '9999']);
     } finally {
       rmSync(configRoot, { recursive: true, force: true });
       rmSync(runtimeRoot, { recursive: true, force: true });

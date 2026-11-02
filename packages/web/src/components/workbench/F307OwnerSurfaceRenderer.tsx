@@ -1,6 +1,7 @@
 'use client';
 
 import { type ReactNode, useCallback } from 'react';
+import { WorkContentBoundary } from '@/components/artifacts/WorkContentBoundary';
 import { EvolutionProgramSurface } from '@/components/capability-evolution/solution-gate/SolutionGateHost';
 import { ArtifactReviewSurface } from '@/components/content-review/ArtifactReviewSurface';
 import { TheaterReplayContent } from '@/components/story-player/TheaterReplayContent';
@@ -8,12 +9,14 @@ import type { WorkspaceSurfaceDescriptor } from '@/components/workbench/workbenc
 import { BrowserPanel } from '@/components/workspace/BrowserPanel';
 import { TerminalTab } from '@/components/workspace/TerminalTab';
 import type { WorkspaceFileNavigationOrigin } from '@/stores/chat-types';
+import { CollectiveDocumentSurface } from '../collective/CollectiveDocumentSurface';
 import { AgentRunOwnerSurface } from './AgentRunOwnerSurface';
 import { ArtifactFileNavigator } from './ArtifactFileNavigator';
 import { createArtifactReviewSurface, resolveArtifactReviewTarget } from './artifact-review-surface';
 import { CanonicalWorkspaceFileSurface } from './CanonicalWorkspaceFileSurface';
 import { ContentPublicationNavigator } from './ContentPublicationNavigator';
 import { useResolveContentSurface } from './ContentSurfaceResolution';
+import { resolveCollectiveDocumentTarget } from './collective-document-surface';
 import { ContentEditorOwnerSurface } from './content-editor/ContentEditorOwnerSurface';
 import { EvolutionContentReviewSurface } from './content-review/EvolutionContentReviewSurface';
 import { PublicationContentReviewSurface } from './content-review/PublicationContentReviewSurface';
@@ -105,6 +108,8 @@ function F307OwnerSurfaceContent({
       <OwnerUnavailable message="审片项目没有一致的成片引用。" />
     );
   }
+  const collectiveDocument = resolveCollectiveDocumentTarget(surface);
+  if (collectiveDocument) return <CollectiveDocumentSurface source={collectiveDocument} />;
   if (surface.renderer === 'file-preview' || surface.renderer === 'code-editor') {
     return (
       <CanonicalWorkspaceFileSurface
@@ -229,39 +234,50 @@ function F307OwnerSurfaceContent({
     }
     if (surface.ownerStateRef.owner === 'f138-publication') {
       const target = resolvePublicationTarget(surface);
+      const changeVersion = (ownerRevision: number) => {
+        if (!target) return;
+        onRefreshSurface({
+          ...surface,
+          ...createPublicationSurface({
+            ...target,
+            ownerRevision,
+            title: surface.title,
+            htmlWorkSourceThreadId: surface.htmlWorkSourceThreadId,
+            navigationOrigin: surface.navigationOrigin,
+          }),
+          ...(surface.returnTargetRef ? { returnTargetRef: surface.returnTargetRef } : {}),
+        });
+      };
       return target ? (
-        <PublicationLandingResolver
-          sourceSurface={surface}
-          target={target}
-          leadingAction={leadingAction}
+        <WorkContentBoundary
+          reference={target}
+          threadId={hostThreadId}
+          sourceThreadId={surface.htmlWorkSourceThreadId}
           onBack={returnToOrigin}
-          onResolved={(resolved) => resolveSurface(resolved)}
+          onVersionChange={changeVersion}
         >
-          <PublicationContentReviewSurface
-            {...target}
+          <PublicationLandingResolver
+            sourceSurface={surface}
+            target={target}
             leadingAction={leadingAction}
-            title={surface.title}
-            fullWindowAction={fullWindowAction}
-            navigationOrigin={surface.navigationOrigin}
-            onVersionChange={(ownerRevision) =>
-              onRefreshSurface({
-                ...surface,
-                ...createPublicationSurface({
-                  ...target,
-                  ownerRevision,
-                  title: surface.title,
-                  navigationOrigin: surface.navigationOrigin,
-                }),
-                ...(surface.returnTargetRef ? { returnTargetRef: surface.returnTargetRef } : {}),
-              })
-            }
-            onBack={() =>
-              surface.navigationOrigin && onReturnToFileOrigin
-                ? onReturnToFileOrigin(surface, surface.navigationOrigin)
-                : onRequestDetach()
-            }
-          />
-        </PublicationLandingResolver>
+            onBack={returnToOrigin}
+            onResolved={(resolved) => resolveSurface(resolved)}
+          >
+            <PublicationContentReviewSurface
+              {...target}
+              leadingAction={leadingAction}
+              title={surface.title}
+              fullWindowAction={fullWindowAction}
+              navigationOrigin={surface.navigationOrigin}
+              onVersionChange={changeVersion}
+              onBack={() =>
+                surface.navigationOrigin && onReturnToFileOrigin
+                  ? onReturnToFileOrigin(surface, surface.navigationOrigin)
+                  : onRequestDetach()
+              }
+            />
+          </PublicationLandingResolver>
+        </WorkContentBoundary>
       ) : (
         <OwnerUnavailable message="作品引用已不可用。" />
       );

@@ -1,15 +1,16 @@
 'use client';
 
 import type { CollectiveHostParticipationReady } from '@cat-cafe/shared';
-
-import { useMemo, useRef } from 'react';
+import { type RefObject, useEffect, useMemo, useRef, useState } from 'react';
+import { useContentOpen } from '../content-review/useContentOpen';
 import { CollectiveCafeHost } from './CollectiveCafeHost';
+import { CollectiveDocumentWorkspace } from './CollectiveDocumentWorkspace';
 import { CollectiveEntryReview } from './CollectiveEntryReview';
 import {
-  CollectiveConnectionPicker,
   CollectiveConnectorBoundary,
   CollectiveLaunchNotice,
   CollectiveServiceSetup,
+  CollectiveWorldUnavailable,
 } from './CollectiveLaunchChrome';
 import { CollectiveMediaShare } from './CollectiveMediaShare';
 import { CollectiveMediaSurface } from './CollectiveMediaSurface';
@@ -21,7 +22,9 @@ import { useCollectiveActionRef } from './use-collective-action-ref';
 import { useCollectiveAppearanceBridge } from './use-collective-appearance-bridge';
 import { useCollectiveConnectorLaunch } from './use-collective-connector-launch';
 import { useCollectiveContextBridge } from './use-collective-context-bridge';
+import { useCollectiveDocumentBridge } from './use-collective-document-bridge';
 import { useCollectiveEntryPairing } from './use-collective-entry-pairing';
+import { useCollectiveFrameRecovery } from './use-collective-frame-recovery';
 import { useCollectiveMediaRpc } from './use-collective-media-rpc';
 import { useCollectiveMediaShare } from './use-collective-media-share';
 import { useCollectivePairingBridge } from './use-collective-pairing-bridge';
@@ -35,12 +38,16 @@ export function CollectiveLaunchSurface({
 }: {
   readonly initialServiceUrl?: string;
 }) {
+  const contentOpening = useContentOpen();
+  const [documentWorkspace, setDocumentWorkspace] = useState(false);
+  const [documentWorkspaceMounted, setDocumentWorkspaceMounted] = useState(false);
   const actionRef = useCollectiveActionRef();
   const workTarget = useMemo(() => parseCollectiveWorkActionRef(actionRef), [actionRef]);
   const parsedWorldTarget = useMemo(() => parseCollectiveWorldTarget(actionRef), [actionRef]);
   const explicitWorldTarget = parsedWorldTarget.kind === 'target' ? parsedWorldTarget.target : undefined;
   const hasExplicitWorldIntent = parsedWorldTarget.kind !== 'none';
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [frameAttempt, setFrameAttempt] = useState(0);
   const workResult = useAcceptedWorkReconciliation();
   const connector = useCollectiveConnectorLaunch({
     initialServiceUrl,
@@ -70,18 +77,55 @@ export function CollectiveLaunchSurface({
     setServiceInput,
     status,
   } = connector;
-  const liveConnections = status?.connections.filter((item) => item.authorityStatus !== 'revoked') ?? [];
   const pairingBridge = useCollectivePairingBridge({
     iframeRef,
     serviceUrl: world.activeLaunchUrl,
     pair: entry.receive,
   });
   const contextBridge = useCollectiveContextBridge(iframeRef, connection, workResult.reconcile, workTarget);
+  useCollectiveDocumentBridge({
+    iframe: iframeRef,
+    connection,
+    context: contextBridge.context,
+    onOpen: (target, hostKey) => {
+      void contentOpening.openContent({ kind: 'collective', target, hostKey }).then((opened) => {
+        if (opened) {
+          setDocumentWorkspaceMounted(true);
+          setDocumentWorkspace(true);
+        }
+      });
+    },
+    onReturn: () => setDocumentWorkspace(false),
+  });
+  useEffect(() => {
+    const showHost = (event: Event) => {
+      const hostKey =
+        connection &&
+        JSON.stringify([
+          'collective',
+          connection.serviceInstanceId,
+          connection.collectiveId,
+          connection.connectionId,
+          connection.authorizedHumanId,
+        ]);
+      if (documentWorkspace || (event as CustomEvent<{ hostKey?: string }>).detail?.hostKey === hostKey)
+        setDocumentWorkspace(false);
+    };
+    window.addEventListener('collective:show-document-host', showHost);
+    return () => window.removeEventListener('collective:show-document-host', showHost);
+  }, [connection, documentWorkspace]);
   const mediaRpc = useCollectiveMediaRpc(iframeRef, connection, contextBridge.context, contextBridge.mediaRef);
   const mediaShare = useCollectiveMediaShare(iframeRef, connection, contextBridge.context);
   const policyBridge = useCollectiveWorkPolicyBridge(iframeRef, connection, contextBridge.context);
   useCollectiveAppearanceBridge({ iframeRef, frameGeneration: world.frameGeneration });
   const frameUrl = world.frameUrl;
+  useCollectiveFrameRecovery({
+    iframeRef,
+    frameGeneration: world.frameGeneration,
+    remoteState: status?.remoteService?.state,
+    remoteServiceInstanceId: status?.remoteService?.serviceInstanceId,
+    setFrameAttempt,
+  });
 
   if (!status || status.runtimeStatus === 'inactive')
     return <CollectiveConnectorBoundary status={status} error={error} />;
@@ -93,19 +137,23 @@ export function CollectiveLaunchSurface({
       style={{ containerType: 'inline-size', containerName: 'collective-host' }}
     >
       {frameUrl ? (
-        <iframe
-          ref={iframeRef}
-          src={frameUrl}
-          title="Collective"
-          aria-hidden={Boolean(contextBridge.mediaRef || mediaShare.reference)}
-          tabIndex={contextBridge.mediaRef || mediaShare.reference ? -1 : undefined}
-          style={contextBridge.mediaRef || mediaShare.reference ? { visibility: 'hidden' } : undefined}
-          sandbox="allow-forms allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+        <CollectiveWorldFrame
+          iframeRef={iframeRef}
+          frameUrl={frameUrl}
+          frameKey={world.frameKey}
+          frameAttempt={frameAttempt}
+          hidden={Boolean(documentWorkspace || contextBridge.mediaRef || mediaShare.reference)}
           onLoad={() => {
             pairingBridge.handleFrameLoad();
             contextBridge.reset();
           }}
-          className="h-full w-full border-0 bg-[var(--cafe-surface-sunken)]"
+          retryable={world.retryable}
+          error={world.error}
+          displayName={world.displayName}
+          onRetry={() => {
+            setFrameAttempt((attempt) => attempt + 1);
+            void connector.refresh(true);
+          }}
         />
       ) : (
         <CollectiveServiceSetup
@@ -118,33 +166,19 @@ export function CollectiveLaunchSurface({
           onError={setError}
         />
       )}
-      {frameUrl && (
-        <div
-          aria-hidden="true"
-          style={{
-            position: 'absolute',
-            right: 0,
-            bottom: 0,
-            width: `min(${MESSAGE_ACTION_RESERVE.width}px, 100%)`,
-            height: `min(${MESSAGE_ACTION_RESERVE.height}px, 100%)`,
-            pointerEvents: 'none',
-          }}
-        />
-      )}
-      <CollectiveLaunchNotice
+      <CollectiveWorldStatusNotice
         connectorError={error}
         worldError={world.error}
+        worldRetryable={world.retryable}
         sessionRequired={world.sessionRequired}
-        workError={workResult.error}
+        workNotice={workResult.notice}
         pairingError={pairingBridge.error}
         entryError={entry.error}
         entryBusy={entry.busy}
       />
-      <CollectiveConnectionPicker
-        visible={!hasExplicitWorldIntent && liveConnections.length > 1 && !connection}
-        connections={liveConnections}
-        onSelect={selectConnection}
-      />
+      {documentWorkspaceMounted && (
+        <CollectiveDocumentWorkspace visible={documentWorkspace} onBack={() => setDocumentWorkspace(false)} />
+      )}
       {connection && contextBridge.context && (
         <CollectiveCafeHost
           key={`${connection.connectionId}:${contextBridge.context.contextId}:${contextBridge.context.channelId}`}
@@ -213,5 +247,91 @@ export function CollectiveLaunchSurface({
         />
       )}
     </div>
+  );
+}
+
+function CollectiveWorldFrame({
+  iframeRef,
+  frameUrl,
+  frameKey,
+  frameAttempt,
+  hidden,
+  onLoad,
+  retryable,
+  error,
+  displayName,
+  onRetry,
+}: {
+  readonly iframeRef: RefObject<HTMLIFrameElement>;
+  readonly frameUrl: string;
+  readonly frameKey?: string;
+  readonly frameAttempt: number;
+  readonly hidden: boolean;
+  readonly onLoad: () => void;
+  readonly retryable: boolean;
+  readonly error?: string;
+  readonly displayName?: string;
+  readonly onRetry: () => void;
+}) {
+  return (
+    <>
+      <iframe
+        key={`${frameKey ?? frameUrl}:${frameAttempt}`}
+        ref={iframeRef}
+        src={frameUrl}
+        title="Collective"
+        aria-hidden={hidden}
+        tabIndex={hidden ? -1 : undefined}
+        style={hidden ? { visibility: 'hidden' } : undefined}
+        sandbox="allow-forms allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+        allow="microphone"
+        onLoad={onLoad}
+        className="h-full w-full border-0 bg-[var(--cafe-surface-sunken)]"
+      />
+      <div
+        aria-hidden="true"
+        style={{
+          position: 'absolute',
+          right: 0,
+          bottom: 0,
+          width: `min(${MESSAGE_ACTION_RESERVE.width}px, 100%)`,
+          height: `min(${MESSAGE_ACTION_RESERVE.height}px, 100%)`,
+          pointerEvents: 'none',
+        }}
+      />
+      {retryable && error && <CollectiveWorldUnavailable name={displayName} onRetry={onRetry} />}
+    </>
+  );
+}
+
+function CollectiveWorldStatusNotice({
+  connectorError,
+  worldError,
+  worldRetryable,
+  sessionRequired,
+  workNotice,
+  pairingError,
+  entryError,
+  entryBusy,
+}: {
+  readonly connectorError?: string;
+  readonly worldError?: string;
+  readonly worldRetryable: boolean;
+  readonly sessionRequired: boolean;
+  readonly workNotice?: string;
+  readonly pairingError?: string;
+  readonly entryError?: string;
+  readonly entryBusy?: boolean;
+}) {
+  return (
+    <CollectiveLaunchNotice
+      connectorError={connectorError}
+      worldError={worldRetryable ? undefined : worldError}
+      sessionRequired={sessionRequired}
+      workNotice={workNotice}
+      pairingError={worldRetryable ? undefined : pairingError}
+      entryError={worldRetryable ? undefined : entryError}
+      entryBusy={worldRetryable ? false : entryBusy}
+    />
   );
 }

@@ -179,6 +179,53 @@ describe('useApprovalSessions', () => {
     expect(result.current.authorize(KEY)).toBe(false);
   });
 
+  it('confirms exact canonical approval results while unrelated unified sources are still pending', async () => {
+    mocks.apiFetch.mockImplementation((path: string) => {
+      if (path === '/api/session') return json({ userId: OWNER });
+      if (path.startsWith('/api/approval-hub/settled'))
+        return json({
+          items: [
+            {
+              proposalId: 'p-1',
+              sourceFeatureId: 'F128',
+              ownerUserId: OWNER,
+              resolution: 'accepted',
+              navigation: item.navigation,
+            },
+          ],
+        });
+      if (path === '/api/proposals/p-1')
+        return json({ proposal: { proposalId: 'p-1', status: 'approved', createdBy: OWNER, createdThreadId: 'new' } });
+      if (path === '/api/threads/new') return json({ id: 'new', createdBy: OWNER, createdFromProposalId: 'p-1' });
+      if (path === '/api/approval-hub/pending') return json({ items: [], count: 0, coverage: { state: 'complete' } });
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const fake = fakeView();
+    const { result, unmount } = renderHook(() => useApprovalSessions(fake.view()), undefined);
+    try {
+      act(() => {
+        result.current.open(seed);
+        useApprovalHubStore.setState({
+          decisionAttempts: { 'p-1': attempt(1, { phase: 'response_received', status: 200, ok: true }) },
+        });
+      });
+      expect(fake.refetch).toHaveBeenCalledTimes(1);
+      // No unified read is allowed to finish. The exact owner reads above are already sufficient.
+      await vi.waitFor(
+        () =>
+          expect(result.current.get(KEY)?.model.state).toMatchObject({
+            kind: 'decided',
+            terminal: { resolution: 'accepted', threadId: 'new' },
+          }),
+        { timeout: 300 },
+      );
+      expect(fake.state.generation).toBe(1);
+      expect(fake.state.started).toBe(2);
+    } finally {
+      unmount();
+    }
+  });
+
   it('stops listening to the store when it goes away', () => {
     const fake = fakeView();
     const { result, unmount } = renderHook(() => useApprovalSessions(fake.view()), undefined);

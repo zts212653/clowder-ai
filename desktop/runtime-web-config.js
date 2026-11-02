@@ -27,6 +27,11 @@ function loadDesktopWebConfig(web, requireWeb = createRequire(path.join(web, 'pa
   ) {
     throw new Error('Packaged Next production config does not match its build identity');
   }
+  if (config.images?.unoptimized !== true) {
+    throw new Error(
+      'Packaged Next production config requires desktop images without an installation cache; rebuild Web for Desktop',
+    );
+  }
   try {
     if (!fs.readFileSync(path.join(web, '.next', 'BUILD_ID'), 'utf8').trim()) throw new Error('Empty BUILD_ID');
   } catch {

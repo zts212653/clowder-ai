@@ -164,6 +164,50 @@ describe('F300 INV-7: lazy bounded process observations', () => {
     });
     assert.equal(observation.isHostDescendant(2622, 9999), undefined);
   });
+
+  it('accepts lsof matches when another requested listener is absent, while preserving observation failures', () => {
+    const observe = (failure) =>
+      facetModule.createHostProcessObserver(exactFacet().facet, {
+        run: () => {
+          throw Object.assign(new Error('fixture lsof result'), failure);
+        },
+      });
+    assert.deepEqual(observe({ status: 1, stdout: '2622\n', stderr: '' }).readHostPids(), {
+      pids: [2622],
+      complete: true,
+    });
+    for (const failure of [
+      { status: 1, stdout: '2622\n', stderr: 'permission denied' },
+      { status: 1, stdout: '2622\ninvalid\n', stderr: '' },
+      { status: 2, stdout: '2622\n', stderr: '' },
+      { status: 1, signal: 'SIGTERM', stdout: '2622\n', stderr: '' },
+    ]) {
+      assert.deepEqual(observe(failure).readHostPids(), { pids: [], complete: false });
+    }
+    assert.deepEqual(observe({ status: 1, stdout: '2622\n', stderr: '' }).patternTargets('pkill', ['fixture']), {
+      pids: [],
+      complete: false,
+    });
+  });
+});
+
+test('real lsof resolves an occupied and an absent listener in one observation', async (t) => {
+  const occupied = createServer();
+  occupied.listen(0, '127.0.0.1');
+  await once(occupied, 'listening');
+  t.after(() => new Promise((resolve) => occupied.close(resolve)));
+  const vacant = createServer();
+  vacant.listen(0, '127.0.0.1');
+  await once(vacant, 'listening');
+  const vacantPort = vacant.address().port;
+  await new Promise((resolve) => vacant.close(resolve));
+  const observation = facetModule.createHostProcessObserver({
+    runtime: { apiPort: occupied.address().port },
+    hostDependencies: [{ port: vacantPort }],
+  });
+  const result = observation.readHostPids();
+  assert.equal(result.complete, true, JSON.stringify(result));
+  assert.ok(result.pids.includes(process.pid), JSON.stringify(result));
 });
 
 test('real listener and ancestry observations distinguish a host from its feature child', async (t) => {

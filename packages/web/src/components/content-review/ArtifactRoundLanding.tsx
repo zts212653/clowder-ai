@@ -243,7 +243,10 @@ export function ArtifactRoundLanding({
             </>
           }
           workflow={{
-            mediaSource: source,
+            mediaSource: {
+              ...source,
+              downloadSrc: `/api/artifact-reviews/${encodeURIComponent(view.review.reviewId)}/media/${round.number}`,
+            },
             canvasDraftKey: linked ? undefined : `${prefix}round:${round.number}:markup`,
             annotationMaxLength: 8000,
             // 「引用到聊天」 names the same round (or ledger) and Task a modification request does.

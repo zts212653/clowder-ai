@@ -37,7 +37,9 @@ export function useChatSocketCallbacks({ threadId, handleAgentMessage, onIndexEv
       requestStreamCatchUp: s.requestStreamCatchUp,
     })),
   );
-  const { addTask, updateTask } = useTaskStore();
+  const { addTask, updateTask } = useTaskStore(
+    useShallow((state) => ({ addTask: state.addTask, updateTask: state.updateTask })),
+  );
 
   return useMemo<SocketCallbacks>(
     () => ({

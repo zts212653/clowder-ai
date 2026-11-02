@@ -78,7 +78,7 @@ export async function modernCompanionInstallFixture(
         packageDigest: `sha512-${createHash('sha512').update(originalBytes).digest('base64')}`,
         archiveUrl: `https://registry.npmjs.org/@clowder-ai/companion/-/companion-${version}.tgz`,
       }
-    : { ...f.entry, effectiveGrants: ['windows.create' as const] };
+    : { ...f.entry };
   const owner = 'modern-composition-owner';
   const priorOwner = process.env.DEFAULT_OWNER_USER_ID;
   process.env.DEFAULT_OWNER_USER_ID = owner;

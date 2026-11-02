@@ -36,7 +36,11 @@ export function ArtifactReviewSurface({
   const controller = useArtifactReview(reviewId);
   if (!controller.view)
     return (
-      <section className="p-4" data-testid="artifact-review-surface">
+      <section
+        className="p-4"
+        data-testid="artifact-review-surface"
+        data-content-opening-state={controller.error ? 'blocked' : undefined}
+      >
         <ContentLandingHeader
           title={title}
           navigationOrigin={navigationOrigin}
@@ -107,7 +111,7 @@ function AuthorizedReview({
   const round = view.review.rounds.find((item) => item.number === selected);
   if (!latest || !round)
     return (
-      <section className="p-4" data-testid="artifact-review-surface">
+      <section className="p-4" data-testid="artifact-review-surface" data-content-opening-state="blocked">
         <ContentLandingHeader
           title={titleInHost ? undefined : artworkTitle(title ?? view.review.title, '作品')}
           navigationOrigin={navigationOrigin}

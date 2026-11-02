@@ -149,10 +149,24 @@ if (-not $SkipWebBuild) {
     if (git status --porcelain --untracked-files=all -- @buildInputs) { throw "Commit runtime source changes before building a release" }
     pnpm install --frozen-lockfile
     if ($LASTEXITCODE -ne 0) { throw "Frozen dependency installation failed" }
-    pnpm run build
-    if ($LASTEXITCODE -ne 0) { Write-Err "Build failed"; exit 1 }
-    if ((git rev-parse HEAD).Trim() -ne $buildRevision -or
-        (git status --porcelain --untracked-files=all -- @buildInputs)) { throw "Source changed during the build" }
+    $previousDesktopWebBuild = $env:CAT_CAFE_DESKTOP_WEB_BUILD
+    try {
+        $env:CAT_CAFE_DESKTOP_WEB_BUILD = '1'
+        # API's standalone build re-emits shared output; finish it before Web reads it.
+        pnpm -r --workspace-concurrency=1 run build
+        if ($LASTEXITCODE -ne 0) { Write-Err "Build failed"; exit 1 }
+    } finally {
+        if ($null -eq $previousDesktopWebBuild) {
+            Remove-Item Env:CAT_CAFE_DESKTOP_WEB_BUILD -ErrorAction SilentlyContinue
+        } else {
+            $env:CAT_CAFE_DESKTOP_WEB_BUILD = $previousDesktopWebBuild
+        }
+    }
+    $afterBuildInputs = @(git status --porcelain --untracked-files=all -- @buildInputs)
+    if ($LASTEXITCODE -ne 0) { throw 'Could not inspect source after the build' }
+    if ((git rev-parse HEAD).Trim() -ne $buildRevision -or $afterBuildInputs.Count -gt 0) {
+        throw "Source changed during the build.`n$($afterBuildInputs -join "`n")"
+    }
     $webRevision = (Get-Content -LiteralPath (Join-Path $ProjectRoot 'packages/web/.next/.build-commit') -Raw).Trim()
     if ($webRevision -ne $buildRevision) { throw "Web build identity does not match this source revision" }
     # The API's generic tsc build does not stamp itself. Only record its identity
@@ -161,9 +175,9 @@ if (-not $SkipWebBuild) {
     Pop-Location
     Write-Ok "Web application built"
 } else {
-    Assert-WebBuildIdentity (Join-Path $ProjectRoot 'packages/web')
     Write-Ok "Skipped (existing artifacts)"
 }
+Assert-WebBuildIdentity (Join-Path $ProjectRoot 'packages/web')
 
 # Step 2: ordinary frozen install, then materialize portable runtime trees.
 # pnpm 9 hoisted deploy disables lockfile reads; do not use it for releases.

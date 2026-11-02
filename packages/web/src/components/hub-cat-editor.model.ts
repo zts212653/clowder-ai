@@ -25,6 +25,7 @@ export interface HubCatEditorFormState {
   variantLabel: string;
   nickname: string;
   avatar: string;
+  banner?: string;
   colorPrimary: string;
   colorSecondary: string;
   mentionPatterns: string;
@@ -55,6 +56,7 @@ export interface HubCatEditorFormState {
   agyTrustedWorkspaces?: string;
   acpTransport: 'stdio' | 'httpstream';
   acpCommand: string;
+  acpAgentProvider?: string | null;
   acpStartupArgs: string;
   acpMaxLiveProcesses: string;
   acpIdleTtlMinutes: string;
@@ -375,6 +377,7 @@ export function initialState(cat?: CatData | null, draft?: HubCatEditorDraft | n
     variantLabel: cat?.variantLabel ?? '',
     nickname: cat?.nickname ?? createDraft?.templateNickname ?? '',
     avatar: cat?.avatar ?? createDraft?.templateAvatar ?? '',
+    banner: cat?.banner ?? '',
     colorPrimary: cat?.color.primary ?? createDraft?.templateColorPrimary ?? UNKNOWN_CAT_COLOR.primary,
     colorSecondary: cat?.color.secondary ?? createDraft?.templateColorSecondary ?? UNKNOWN_CAT_COLOR.secondary,
     mentionPatterns: joinTags(mentionPatterns),
@@ -418,6 +421,7 @@ export function initialState(cat?: CatData | null, draft?: HubCatEditorDraft | n
     agyHomeRoot: cat?.agyProfile?.homeRoot ?? '',
     agyTrustedWorkspaces: cat?.agyProfile?.trustedWorkspaces?.join('\n') ?? '',
     acpTransport: (acpConfig?.transport as 'stdio' | 'httpstream' | undefined) ?? 'stdio',
+    acpAgentProvider: cat?.agentProvider !== undefined ? cat.agentProvider : acpConfig?.agentProvider,
     acpCommand: acpConfig?.command ?? defaultAcpCommandForClient(clientId),
     acpStartupArgs:
       (acpConfig?.startupArgs ? serializeCommandArgs(acpConfig.startupArgs) : undefined) ??

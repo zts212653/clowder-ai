@@ -1,22 +1,25 @@
-import { createHash } from 'node:crypto';
-import { copyFile, lstat, mkdir, readFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { BUNDLED_PACKAGE_ARCHIVES } from '../dist/domains/plugin/bundled-package-index.js';
+import assert from 'node:assert/strict';
+import { validateManifest } from '@clowder-ai/plugin-contract';
+import { generateBundledPluginArtifacts } from './bundled-plugin-artifacts.mjs';
 
-// The compiled Host registration is the complete allowlist, independent of the build caller's cwd.
-for (const record of Object.values(BUNDLED_PACKAGE_ARCHIVES)) {
-  const source = new URL(`../src/domains/plugin/bundled-packages/${record.archivePath}`, import.meta.url);
-  const target = new URL(`../dist/domains/plugin/bundled-packages/${record.archivePath}`, import.meta.url);
-  const stat = await lstat(source);
-  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('bundled release must be a regular archive');
-  const bytes = await readFile(source);
-  const digest = `sha512-${createHash('sha512').update(bytes).digest('base64')}`;
-  if (digest !== record.packageDigest) throw new Error(`bundled release integrity mismatch: ${record.catalogId}`);
-  await mkdir(dirname(fileURLToPath(target)), { recursive: true });
-  await copyFile(source, target);
-  const copiedDigest = `sha512-${createHash('sha512')
-    .update(await readFile(target))
-    .digest('base64')}`;
-  if (copiedDigest !== record.packageDigest) throw new Error('copied bundled release integrity mismatch');
+// Keep the existing native-build entry point. The build now owns these outputs;
+// no checked-in archive, generated JSON or export-time repacking is required.
+assert.ok(
+  process.argv.slice(2).every((arg) => ['--check', '--source'].includes(arg)),
+  'usage: copy-bundled-plugin-packages.mjs [--check] [--source]',
+);
+// Prepare dev artifacts from TS before starting the watcher. Production uses
+// the just-compiled producer after tsc; both write the same dist layout.
+const { CHATGPT_DOT_PLUGIN_MANIFEST } = await import(
+  process.argv.includes('--source')
+    ? '../src/domains/plugin/chatgpt-dot-manifest.ts'
+    : '../dist/domains/plugin/chatgpt-dot-manifest.js'
+);
+const definitions = [{ catalogId: 'chatgpt-dot', manifest: CHATGPT_DOT_PLUGIN_MANIFEST }];
+for (const { catalogId, manifest } of definitions) {
+  assert.equal(validateManifest(manifest).valid, true, `invalid ${catalogId} manifest`);
 }
+await generateBundledPluginArtifacts(new URL('../dist/domains/plugin/', import.meta.url), definitions, {
+  sourceRoot: new URL('../src/domains/plugin/', import.meta.url),
+  check: process.argv.includes('--check'),
+});

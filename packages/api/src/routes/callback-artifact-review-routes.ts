@@ -12,6 +12,10 @@ import {
 } from '../domains/collaborative-content/artifact-review/inspection.js';
 import type { ArtifactReviewService } from '../domains/collaborative-content/artifact-review/service.js';
 import type { ModificationSourceDiscussions } from '../domains/collaborative-content/modification/source-discussions.js';
+import {
+  inspectPublicationMessageReview,
+  type PublicationReviewReadDeps,
+} from '../domains/collaborative-content/workspace-review/publication-message-read.js';
 import type { MediaReviewPrincipal } from '../domains/video-studio/content-owner/published-media-access.js';
 import { replyArtifactReviewError } from './artifact-review-route-errors.js';
 import {
@@ -25,6 +29,7 @@ import { resolvePrincipalThread } from './callback-scope-helpers.js';
 export interface CallbackArtifactReviewRoutesDeps {
   reviews: ArtifactReviewService;
   sourceDiscussions?: Pick<ModificationSourceDiscussions, 'forReview'>;
+  publicationReads?: PublicationReviewReadDeps;
   threads: Pick<IThreadStore, 'get' | 'list'>;
   registry: CallbackAuthRegistry;
   agentKeyRegistry?: AgentKeyAuthRegistry;
@@ -67,8 +72,15 @@ export async function registerCallbackArtifactReviewRoutes(
               ...(authenticated.kind === 'invocation' ? { invocationId: authenticated.invocationId } : {}),
             };
             const { threadId: _threadId, ...body } = parsed;
-            if (operation === 'read')
+            if (operation === 'read') {
+              const input = inspectArtifactReviewSchema.parse(body);
+              if (input.sourceMessageId) {
+                if (!deps.publicationReads) return reply.code(404).send({ error: 'not_found' });
+                return await inspectPublicationMessageReview(deps.publicationReads, input, principal);
+              }
+              if (input.attachmentId) return reply.code(400).send({ error: 'invalid_action' });
               return await inspectArtifactReview(deps.reviews, body, principal, deps.sourceDiscussions);
+            }
             if (operation === 'prepare') {
               const view = await deps.reviews.prepare(body, principal);
               await deps.changed(principal.userId, view.review.reviewId);

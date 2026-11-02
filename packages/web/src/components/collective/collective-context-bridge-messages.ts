@@ -45,6 +45,8 @@ export function handleCollectiveAccountabilityChange(
 }
 
 export function collectiveFocusKey(context: CollectiveClientContext, target: CollectiveWorkActionTarget): string {
+  if (target.kind === 'collective-project')
+    return `${context.bridgeId}:${context.contextId}:${context.revision}:${target.connectionId}:${target.kind}:${target.roadmapId}:${target.attention}:${target.workId ?? ''}:${target.workRevision ?? ''}`;
   const specific =
     target.kind === 'collective-work'
       ? `${target.resultEventId}:${target.resultRevision}`
@@ -53,6 +55,17 @@ export function collectiveFocusKey(context: CollectiveClientContext, target: Col
 }
 
 export function collectiveFocusMessage(context: CollectiveClientContext, target: CollectiveWorkActionTarget) {
+  if (target.kind === 'collective-project')
+    return {
+      type: 'collective:host-focus-project-attention' as const,
+      bridgeId: context.bridgeId,
+      contextId: context.contextId,
+      contextRevision: context.revision,
+      roadmapId: target.roadmapId,
+      channelId: target.channelId,
+      attention: target.attention,
+      ...(target.workId ? { workId: target.workId, workRevision: target.workRevision } : {}),
+    };
   const base = {
     bridgeId: context.bridgeId,
     contextId: context.contextId,

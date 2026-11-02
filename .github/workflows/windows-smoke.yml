@@ -10,12 +10,13 @@ name: Windows Smoke
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, next]
     paths-ignore:
       - 'docs/**'
       - '*.md'
       - 'designs/**'
       - 'assets/**'
+  workflow_dispatch:
 
 concurrency:
   group: windows-smoke-${{ github.ref }}
@@ -35,6 +36,16 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @cat-cafe/shared build
       - run: pnpm --filter @cat-cafe/api build
+      - name: Managed Codex layout link diagnostic
+        run: >-
+          pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs
+          node --import tsx --test --test-timeout=60000 --test-name-pattern="managed layout"
+          test/codex-managed-layout-diagnostic.test.ts
+      - name: Plugin native auth link diagnostic
+        run: >-
+          pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs
+          node --import tsx --test --test-timeout=60000 --test-name-pattern="auth link"
+          test/f320-plugin-account.test.ts
       - name: Workspace root cold-store, HTTP and persistence regressions
         run: node packages/api/scripts/test-workspace-roots.mjs
       - name: Windows web build and duplicate Trusted Types regression
@@ -70,6 +81,16 @@ jobs:
           desktop/runtime-web-server.test.js
           desktop/runtime-web-config.test.js
           desktop/service-startup.test.js
+          desktop/project-mirror-startup-recovery.test.js
+          desktop/project-resource-materialization.test.js
+          desktop/project-resource-redirection-guard.test.js
+          desktop/project-mirror-recovery.test.js
+          desktop/project-mirror-consumer.test.js
+          desktop/project-mirror-observability.test.js
+          desktop/project-mirror-diagnostic-history.test.js
+          desktop/startup-error-diagnostics.test.js
+          desktop/startup-mirror-diagnostics.test.js
+          desktop/startup-state.test.js
           desktop/main-renderer-lifecycle.test.js
           desktop/startup-timing.test.js
           desktop/visible-renderer.test.js
@@ -95,6 +116,8 @@ jobs:
           desktop/api-startup-cold-budget.test.mjs
           desktop/shutdown-controller.test.js
           desktop/profile-desktop-startup.test.mjs
+          desktop/profile-resources.test.cjs
+          desktop/profile-mirror-cancellation.test.js
           desktop/api-puppeteer-lazy-boundary.test.mjs
           packages/api/test/lazy-heavy-imports.test.js
           desktop/dsh-test-connection.test.mjs
@@ -178,7 +201,7 @@ jobs:
           REQUIRE_OPENCODE_MODEL_ID_TEST: '1'
       - name: Windows ACP bootstrap private directories and test isolation
         run: >-
-          node --import ./packages/api/test/helpers/setup-cat-registry.js --test
+          node --import tsx --import ./packages/api/test/helpers/setup-cat-registry.js --test
           --test-concurrency=2 --test-timeout=60000
           packages/api/test/acp/acp-bootstrap-cwd.test.js
           packages/api/test/acp/acp-bootstrap-platform.test.js
@@ -189,6 +212,17 @@ jobs:
           packages/api/test/acp/acp-bootstrap-relocation.test.js
           packages/api/test/acp/acp-bootstrap-spawn-recheck.test.js
           packages/api/test/acp/acp-bootstrap-startup-policy.test.js
+          packages/api/test/acp/acp-bootstrap-generic-selection.test.ts
+          packages/api/test/acp/acp-bootstrap-explicit-root.test.ts
+          packages/api/test/acp/acp-bootstrap-strict-native.test.ts
+          packages/api/test/acp/acp-bootstrap-posix-preservation.test.ts
+          packages/api/test/acp/acp-bootstrap-check-route.test.ts
+          packages/api/test/acp/acp-host-policy-matrix.test.ts
+          packages/api/test/acp/acp-directory-identity.test.ts
+          packages/api/test/acp-bootstrap-config-recovery.test.js
+          packages/api/test/plugin-inventory-writer-lease.test.js
+          packages/api/test/audit-log-retry.test.js
+          packages/api/test/agent-session-contract/acp-factory-recovery.test.ts
           packages/api/test/account-credential-identity.test.js
           packages/api/test/account-store-adjudication.test.js
         env:
@@ -210,6 +244,12 @@ jobs:
           node --test packages/api/test/cli-spawn-win.test.js
           node --test packages/api/test/process-liveness-probe.test.js
           node --test packages/api/test/pick-directory.test.js
+      - name: Browser env wrapper regression
+        run: node --test --test-name-pattern='applies --env' packages/web/test/run-with-node-env-test.test.cjs
+      - name: Windows stale-process entrypoint guard
+        run: node --test scripts/cleanup-stale-dev-processes.test.mjs
+      - name: API dev supervisor regression
+        run: node --test packages/api/test/dev-supervisor.test.js
       # #1542: the compaction launch plan must hold on Windows (realpath
       # backslash semantics, junction escapes, canonical containment).
       - name: F296 compaction launch plan (Windows paths)

@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/store.js';
 import { WorkCatalogue } from '../src/domains/collaborative-content/works/catalogue.js';
 import { inspectWorkResult } from '../src/domains/collaborative-content/works/inspection.js';
-import { LivingWorkService } from '../src/domains/collaborative-content/works/service.js';
+import { LivingWorkService, type OpenWorkSource } from '../src/domains/collaborative-content/works/service.js';
 import { ProjectContentOwnerService } from '../src/domains/video-studio/content-owner/service.js';
 
 const actor = { kind: 'cat' as const, actorId: 'director' };
@@ -45,6 +45,8 @@ async function fixture(t: { after: (callback: () => Promise<void>) => void }) {
     },
     source: {
       inspect: async () => ({ source: source('first'), mediaType: 'video/mp4', byteLength: 5 }),
+      openCurrent: async (input: { locator: { worktreeId: string; path: string } }): Promise<OpenWorkSource> =>
+        deps.source.open({ source: source(input.locator.path.replace('.mp4', '')) }),
       open: async (input: { source: ReturnType<typeof source> }) => {
         opens++;
         const name = input.source.path.replace('.mp4', '');
@@ -307,4 +309,39 @@ test('Works displays the frozen version production time without changing catalog
   assert.notEqual(page.artifacts[0]?.createdAt, Date.parse(production.createdAt));
   assert.equal(ownerVersion.currentOwnerRevision, 1);
   assert.deepEqual((await catalogue.readThread({ ownerUserId: 'operator', threadId: 'other' })).artifacts, []);
+});
+
+test('file landing reuses the exact registered version, refuses ambiguity and creates no work on a miss', async (t) => {
+  const f = await fixture(t);
+  const service = f.service;
+  const first = await service.commit(create, principal);
+  const second = await service.commit(
+    {
+      ...create,
+      action: 'submit',
+      contentRef: first.reference.contentRef,
+      expectedOwnerRevision: 1,
+      operationId: 'new-cut',
+      source: source('second'),
+    },
+    principal,
+  );
+  const located = await service.resolveFile({ worktreeId: 'authorized-root', path: 'first.mp4' }, principal);
+  assert.deepEqual(located.artifact?.work, { ...first.reference, currentOwnerRevision: 2 });
+  assert.notDeepEqual(located.artifact?.work, { ...second.reference, currentOwnerRevision: 2 });
+  const before = await f.owner.describe(first.reference.contentRef);
+  assert.deepEqual(await service.resolveFile({ worktreeId: 'authorized-root', path: 'unregistered.mp4' }, principal), {
+    artifact: null,
+  });
+  assert.equal((await f.owner.describe(first.reference.contentRef)).currentOwnerRevision, before.currentOwnerRevision);
+  await service.commit({ ...create, operationId: 'separate-work-same-file' }, principal);
+  await assert.rejects(
+    service.resolveFile({ worktreeId: 'authorized-root', path: 'first.mp4' }, principal),
+    /publication_changed/,
+  );
+  f.revoke();
+  await assert.rejects(
+    service.resolveFile({ worktreeId: 'authorized-root', path: 'second.mp4' }, principal),
+    /revoked/,
+  );
 });

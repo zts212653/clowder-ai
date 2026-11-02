@@ -1,6 +1,17 @@
+import { useState } from 'react';
 import type { CollectiveRoadmapRecord, CollectiveWorkProjection } from './client-types.js';
-import type { SharedArtifact } from './collective-artifact-client.js';
+import type { SharedArtifact, SharedArtifactOpenOptions } from './collective-artifact-client.js';
+import { MaterialDialogFrame } from './MaterialDialogFrame.js';
+import { ProjectArtifactReferenceCard } from './ProjectArtifactReferenceCard.js';
+import { ProjectArtifactVersionDialog } from './ProjectArtifactVersionDialog.js';
+import { useProjectArtifactText } from './project-artifact-copy.js';
+import { useProjectArtifactReferences } from './use-project-artifact-references.js';
 
+export type ProjectArtifactOpen = (
+  artifact: SharedArtifact,
+  ownerRevision?: number,
+  options?: SharedArtifactOpenOptions,
+) => void;
 export type ProjectArtifactStatus = 'loading' | 'ready' | 'unavailable' | 'access_denied';
 
 export function ProjectArtifactSurface({
@@ -14,77 +25,202 @@ export function ProjectArtifactSurface({
   readonly works: readonly CollectiveWorkProjection[];
   readonly artifacts: readonly SharedArtifact[];
   readonly status: ProjectArtifactStatus;
-  readonly onOpen?: (artifact: SharedArtifact) => void;
+  readonly onOpen?: ProjectArtifactOpen;
 }) {
-  const projectArtifacts = artifactsForWorks(artifacts, new Set(works.map((work) => work.workId)));
-  const workTitles = new Map(works.map((work) => [work.workId, work.title]));
+  const t = useProjectArtifactText(),
+    refs = useProjectArtifactReferences(roadmap.roadmapId);
+  const [picker, setPicker] = useState(false),
+    [selected, setSelected] = useState<SharedArtifact>();
+  const [notice, setNotice] = useState<string>();
+  const items = refs.feed?.items ?? [],
+    owner = refs.shared?.humanId === roadmap.accountableHumanId;
+  const legacy = artifactsForWorks(artifacts, new Set(works.map((work) => work.workId))).filter(
+    (artifact) =>
+      !items.some((item) => item.reference.artifactId === artifact.artifactId) &&
+      !refs.feed?.removedReferences.some((ref) => ref.artifactId === artifact.artifactId),
+  );
+  const change: Parameters<typeof ProjectArtifactReferenceCard>[0]['onChange'] = async (input) => {
+    if (!refs.client) throw new Error('Project unavailable');
+    const result = await refs.client.change(input);
+    await refs.reload(true);
+    if (result.outcome === 'conflict') setNotice(t('这处引用刚被改过，已显示现在实际使用的版本；请重新选择。'));
+    else setNotice(undefined);
+    return result.outcome !== 'conflict';
+  };
   return (
-    <section className="project-artifacts" aria-label="项目作品">
+    <section className="project-artifacts project-references" aria-label={t('项目作品')}>
       <header>
         <div>
-          <strong>作品</strong>
-          <span>{status === 'ready' ? `${projectArtifacts.length} 件` : '读取状态未确认'}</span>
+          <strong>{t('作品')}</strong>
+          <small>{t('本项目用的版本')}</small>
         </div>
-        <small>{roadmap.title}</small>
+        {owner && refs.client && (
+          <button type="button" onClick={() => setPicker(true)}>
+            {t('引用作品…')}
+          </button>
+        )}
       </header>
-      {status !== 'ready' ? (
+      <p className="project-reference-explanation">
+        {t('本项目引用的是原作品的明确版本。新版只提示，换用只改本项目。')}
+      </p>
+      {notice && <p role="status">{notice}</p>}
+      {refs.error ? (
+        <p role="alert">
+          {t(refs.error)}{' '}
+          <button type="button" onClick={() => void refs.reload()}>
+            {t('重新读取')}
+          </button>
+        </p>
+      ) : refs.client && !refs.feed ? (
+        <p className="project-artifact-empty">{t('正在读取版本记录…')}</p>
+      ) : status !== 'ready' ? (
         <ProjectArtifactState status={status} />
-      ) : projectArtifacts.length === 0 ? (
-        <p className="project-artifact-empty">这个项目还没有作品。任务交回作品后，会按同一 Work 自动出现在这里。</p>
       ) : (
-        <div className="project-artifact-grid">
-          {projectArtifacts.map((artifact) => (
-            <button
-              key={artifact.artifactId}
-              type="button"
-              className="project-artifact-card"
-              onClick={() => onOpen?.(artifact)}
-            >
-              <span aria-hidden="true" className="project-artifact-icon">
-                <svg aria-hidden="true" viewBox="0 0 32 36" fill="none" stroke="currentColor" strokeWidth="1.3">
-                  <path d="M8 3h12l6 6v24H6V3h2Zm12 0v7h6M10 17h12M10 22h12M10 27h8" />
-                </svg>
-              </span>
-              <span>
-                <strong>{artifact.title}</strong>
-                <small>
-                  {workTitles.get(artifact.workId ?? '') ?? '项目任务'} · 第{' '}
-                  {artifact.versions.at(-1)?.ownerRevision ?? 1} 版
-                </small>
-                <small>
-                  #{artifact.sourceLocation.channelId}
-                  {artifact.availability === 'owner_unavailable' ? ' · 内容所在的 Café 暂时不可用' : ''}
-                </small>
-              </span>
-              <span aria-hidden="true">›</span>
-            </button>
+        <>
+          {items.map((item) => (
+            <ProjectArtifactReferenceCard
+              key={item.reference.referenceId}
+              item={item}
+              owner={owner}
+              sourceChannelId={roadmap.sourceLocation.channelId}
+              onChange={change}
+              onOpen={onOpen}
+            />
           ))}
-        </div>
+          {refs.feed?.nextOffset !== undefined && (
+            <button type="button" onClick={() => void refs.more()}>
+              {t('更多作品')}
+            </button>
+          )}
+          {!items.length && !legacy.length && <p className="project-artifact-empty">{t('还没有引用作品。')}</p>}
+          {legacy.length > 0 && (
+            <div className="project-artifact-grid">
+              {legacy.map((artifact) => (
+                <button
+                  type="button"
+                  className="project-artifact-card"
+                  key={artifact.artifactId}
+                  onClick={() => onOpen?.(artifact)}
+                >
+                  <span />
+                  <span>
+                    <strong>{artifact.title}</strong>
+                    <small>{t('还未选择本项目版本')}</small>
+                  </span>
+                  <span>›</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+      {picker && (
+        <MaterialDialogFrame label={t('引用作品')} onClose={() => setPicker(false)}>
+          <h2>{t('引用作品')}</h2>
+          <div className="project-reference-picker">
+            {artifacts
+              .filter(
+                (artifact) =>
+                  artifact.availability === 'available' &&
+                  !items.some((item) => item.reference.artifactId === artifact.artifactId),
+              )
+              .map((artifact) => (
+                <button
+                  type="button"
+                  key={artifact.artifactId}
+                  onClick={() => {
+                    setSelected(artifact);
+                    setPicker(false);
+                  }}
+                >
+                  <strong>{artifact.title}</strong>
+                  <small>
+                    #{artifact.sourceLocation.channelId} ·{' '}
+                    {refs.shared?.humanName?.(artifact.publishedByHumanId) ?? t('共同体成员')}
+                  </small>
+                  <small>
+                    {t('当前可读最新版')} v{artifact.versions.at(-1)?.ownerRevision}
+                  </small>
+                </button>
+              ))}
+          </div>
+          {!artifacts.length && <p>{t('没有可引用的作品。')}</p>}
+          <footer>
+            <button type="button" onClick={() => setPicker(false)}>
+              {t('取消')}
+            </button>
+          </footer>
+        </MaterialDialogFrame>
+      )}
+      {selected && (
+        <ProjectArtifactVersionDialog
+          artifact={selected}
+          roadmapId={roadmap.roadmapId}
+          projectChannelId={roadmap.sourceLocation.channelId}
+          expectedRevision={
+            refs.feed?.removedReferences.find((ref) => ref.artifactId === selected.artifactId)?.revision ?? 0
+          }
+          action="attach"
+          onChange={change}
+          onOpen={onOpen}
+          onClose={() => setSelected(undefined)}
+        />
       )}
     </section>
   );
 }
 
 export function ProjectArtifactSummary({
+  roadmap,
   works,
   artifacts,
   status,
   onOpen,
 }: {
+  readonly roadmap: CollectiveRoadmapRecord;
   readonly works: readonly CollectiveWorkProjection[];
   readonly artifacts: readonly SharedArtifact[];
   readonly status: ProjectArtifactStatus;
-  readonly onOpen?: (artifact: SharedArtifact) => void;
+  readonly onOpen?: ProjectArtifactOpen;
 }) {
+  const t = useProjectArtifactText(),
+    refs = useProjectArtifactReferences(roadmap.roadmapId);
   if (status !== 'ready') return <ProjectArtifactState status={status} compact />;
-  const latest = artifactsForWorks(artifacts, new Set(works.map((work) => work.workId)))[0];
-  if (!latest) return <span className="project-list-artifact-empty">还没有作品</span>;
+  if (refs.error) return <span className="project-list-artifact-empty">{t(refs.error)}</span>;
+  const item = refs.feed?.items[0];
+  if (item)
+    return item.artifact && item.availability === 'available' ? (
+      <button
+        type="button"
+        className="project-list-artifact"
+        onClick={() =>
+          onOpen?.(item.artifact!, item.reference.versionRef.ownerRevision, {
+            projectReturn: {
+              roadmapId: item.reference.roadmapId,
+              referenceId: item.reference.referenceId,
+              channelId: roadmap.sourceLocation.channelId,
+            },
+          })
+        }
+      >
+        <strong>{item.artifact.title}</strong>
+        <small>
+          {t('本项目用的版本')} v{item.reference.versionRef.ownerRevision}
+        </small>
+      </button>
+    ) : (
+      <span className="project-list-artifact-empty">
+        {t('这件作品现在打不开')} · v{item.reference.versionRef.ownerRevision}
+      </span>
+    );
+  const latest = artifactsForWorks(artifacts, new Set(works.map((work) => work.workId))).find(
+    (artifact) => !refs.feed?.removedReferences.some((ref) => ref.artifactId === artifact.artifactId),
+  );
+  if (!latest) return <span className="project-list-artifact-empty">{t('还没有引用作品。')}</span>;
   return (
     <button type="button" className="project-list-artifact" onClick={() => onOpen?.(latest)}>
       <strong>{latest.title}</strong>
-      <small>
-        第 {latest.versions.at(-1)?.ownerRevision ?? 1} 版 · {new Date(latest.updatedAt).toLocaleDateString('zh-CN')}
-      </small>
+      <small>{t('还未选择本项目版本')}</small>
     </button>
   );
 }
@@ -96,24 +232,17 @@ function ProjectArtifactState({
   readonly status: ProjectArtifactStatus;
   readonly compact?: boolean;
 }) {
+  const t = useProjectArtifactText();
   const label =
     status === 'loading'
       ? '正在读取作品…'
       : status === 'access_denied'
-        ? compact
-          ? '无权读取作品'
-          : '你无权读取这个项目的作品。'
-        : compact
-          ? '作品暂时不可读'
-          : '暂时读不到这个项目的作品，请稍后重试。';
-  return <p className={compact ? 'project-list-artifact-empty' : 'project-artifact-empty'}>{label}</p>;
+        ? '你无权读取这个项目的作品。'
+        : '暂时读不到这个项目的作品，请稍后重试。';
+  return <p className={compact ? 'project-list-artifact-empty' : 'project-artifact-empty'}>{t(label)}</p>;
 }
-
-function artifactsForWorks(
-  artifacts: readonly SharedArtifact[],
-  workIds: ReadonlySet<string>,
-): readonly SharedArtifact[] {
+function artifactsForWorks(artifacts: readonly SharedArtifact[], workIds: ReadonlySet<string>) {
   return artifacts
     .filter((artifact) => Boolean(artifact.workId && workIds.has(artifact.workId)))
-    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }

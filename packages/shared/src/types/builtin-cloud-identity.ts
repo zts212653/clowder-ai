@@ -21,6 +21,7 @@ export const BUILTIN_CLOUD_IDENTITY_LOCKED_FIELDS = [
   'commandArgs',
   'cliConfigArgs',
   'acp',
+  'agentProvider',
 ] as const;
 
 export type BuiltinCloudIdentityLockedField = (typeof BUILTIN_CLOUD_IDENTITY_LOCKED_FIELDS)[number];
@@ -38,6 +39,7 @@ export interface BuiltinCloudIdentityCandidate {
   commandArgs?: readonly string[] | null;
   cliConfigArgs?: readonly string[] | null;
   acp?: unknown;
+  agentProvider?: string | null;
   mentionPatterns?: readonly string[] | null;
 }
 
@@ -85,6 +87,7 @@ export function projectBuiltinCloudIdentityProtection(
     if (hasConfiguredValue(candidate.commandArgs)) driftedFields.push('commandArgs');
     if (hasConfiguredValue(candidate.cliConfigArgs)) driftedFields.push('cliConfigArgs');
     if (hasConfiguredValue(candidate.acp)) driftedFields.push('acp');
+    if (hasConfiguredValue(candidate.agentProvider)) driftedFields.push('agentProvider');
     if (!candidate.mentionPatterns?.includes('@dot')) driftedFields.push('mentionPatterns');
     return {
       kind: 'builtin-cloud',
@@ -114,6 +117,7 @@ export function projectBuiltinCloudIdentityProtection(
   if (hasConfiguredValue(candidate.commandArgs)) driftedFields.push('commandArgs');
   if (hasConfiguredValue(candidate.cliConfigArgs)) driftedFields.push('cliConfigArgs');
   if (hasConfiguredValue(candidate.acp)) driftedFields.push('acp');
+  if (hasConfiguredValue(candidate.agentProvider)) driftedFields.push('agentProvider');
   if (!hasBuiltinGptProCanonicalMention(candidate.mentionPatterns)) driftedFields.push('mentionPatterns');
 
   return {

@@ -61,6 +61,7 @@ describe('Workspace home tool rows', () => {
       'activity/action:theater',
       'activity/mode:schedule',
       'activity/mode:eval',
+      'activity/mode:tasks',
       'code/surface:files',
       'code/surface:changes',
       'code/surface:git',
@@ -84,6 +85,7 @@ describe('Workspace home tool rows', () => {
       'workspace-launcher-theater',
       'workspace-launcher-schedule',
       'workspace-launcher-eval',
+      'workspace-launcher-tasks',
       'workspace-launcher-dev-files',
       'workspace-launcher-dev-changes',
       'workspace-launcher-dev-git',
@@ -116,7 +118,6 @@ describe('Workspace home tool rows', () => {
     const relocated = {
       'needs-me': '待办 · 打开待处理列表',
       'product-schedule': '待办及工具页脚 · 日程',
-      tasks: '对话顶栏 · 任务',
       approval: '待办 · 打开审批列表',
       artifacts: '对话顶栏 · 作品',
     } as const;
@@ -136,6 +137,7 @@ describe('Workspace home tool rows', () => {
     for (const query of ['评估', 'periodic']) expect(matching(query)).toContain('mode:eval');
     for (const query of ['社区', 'community']) expect(matching(query)).toContain('mode:community');
     for (const query of ['能力进化', 'evolution']) expect(matching(query)).toContain('workspace:capability-evolution');
+    for (const query of ['毛线球', 'yarn ball', 'tasks']) expect(matching(query)).toContain('mode:tasks');
     expect(matching('会议')).toEqual(['host:voice']);
     expect(matching('zzz-nothing')).toEqual([]);
   });

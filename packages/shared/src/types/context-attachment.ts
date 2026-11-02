@@ -1,18 +1,26 @@
+import type { AssetWorkCoordinate } from './asset-canon.js';
 import type { MediaContextAttachment } from './media-context-attachment.js';
 import type { MessageMediaItemSelector } from './media-publication-source.js';
 import type { ProjectScreeningContextAttachment } from './video-project-message.js';
 
 export type { MediaContextAttachment } from './media-context-attachment.js';
 
-export const CONTEXT_ATTACHMENT_VERSION = 1 as const;
-export const CONTEXT_ATTACHMENT_MAX_COUNT = 12;
-export const CONTEXT_ATTACHMENT_QUOTE_MAX_LENGTH = 20_000;
-export const CONTEXT_ATTACHMENT_COMMENT_MAX_LENGTH = 10_000;
-export const CONTEXT_ATTACHMENT_PROMPT_MAX_CHARS = 48_000;
+import { CONTEXT_ATTACHMENT_VERSION } from './context-attachment-limits.js';
+
+export * from './context-attachment-limits.js';
 
 interface ContextAttachmentBase {
   readonly v: typeof CONTEXT_ATTACHMENT_VERSION;
   readonly id: string;
+}
+/** A material citation belongs to this exact film and index, never a path's current contents. */
+export interface AssetContextAttachment extends ContextAttachmentBase {
+  readonly kind: 'asset';
+  readonly workTitle?: string;
+  readonly name: string;
+  readonly mediaType: string;
+  readonly indexedVersionRef: string;
+  readonly work: AssetWorkCoordinate;
 }
 
 export interface ThreadContextAttachment extends ContextAttachmentBase {
@@ -37,6 +45,8 @@ export interface MessageQuoteSource {
   readonly threadId: string;
   readonly messageId: string;
   readonly senderCatId?: string;
+  /** Bounded citation display metadata; never a user comment, permission or current-decision authority. */
+  readonly displayLabel?: string;
   /** A quoted file leaf of this message. Metadata describes the displayed copy, never write authority. */
   readonly artifactFile?: {
     readonly item: MessageMediaItemSelector;
@@ -67,7 +77,19 @@ export interface WorkspaceFileQuoteSource {
   readonly lineEnd?: number;
 }
 
-export type QuoteContextSource = MessageQuoteSource | CliOutputQuoteSource | WorkspaceFileQuoteSource;
+export interface CollectiveMessageQuoteSource {
+  readonly kind: 'collective_message';
+  readonly serviceInstanceId: string;
+  readonly collectiveId: string;
+  readonly channelId: string;
+  readonly eventId: string;
+}
+
+export type QuoteContextSource =
+  | MessageQuoteSource
+  | CliOutputQuoteSource
+  | WorkspaceFileQuoteSource
+  | CollectiveMessageQuoteSource;
 
 export interface QuoteContextAttachment extends ContextAttachmentBase {
   readonly kind: 'quote';
@@ -81,6 +103,7 @@ export interface QuoteContextAttachment extends ContextAttachmentBase {
 }
 
 export type ContextAttachment =
+  | AssetContextAttachment
   | ThreadContextAttachment
   | WorkspaceFileContextAttachment
   | QuoteContextAttachment

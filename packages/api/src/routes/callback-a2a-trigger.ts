@@ -6,7 +6,7 @@ import { resolveFailedResponseReturn } from './a2a-failure-callers.js';
  * message. There is no direct routeExecution fallback.
  */
 
-import type { CatId, RoutingPreflightDecisionV1 } from '@cat-cafe/shared';
+import type { CatId, RoutingQueueAdmissionReceiptV1 } from '@cat-cafe/shared';
 import type { ActionSuccessorFence } from '../domains/ball-custody/ActionSuccessorAdmissionService.js';
 import type { InvocationQueue, QueueEntry } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
 import {
@@ -38,9 +38,10 @@ import {
   lifecycleResponseTerminalPatchFromAppendInput,
   settleLifecycleResponseInputs,
 } from '../domains/cats/services/stores/ports/MessageStore.js';
+import { routingAdmissionProvenance } from '../domains/routing-context/preflight/RoutingQueueAdmissionObservation.js';
 import {
   inferRoutingContextIntent,
-  preflightRoutingDispatch,
+  observeRoutingQueueAdmission,
   type RoutingDispatchPreflightPort,
 } from '../domains/routing-context/RoutingDispatchPreflightPort.js';
 import { wrapWithDispatchSpan } from '../infrastructure/telemetry/dispatch-span.js';
@@ -86,7 +87,8 @@ export interface A2ATriggerDeps {
     | 'countAgentEntriesForThread'
     | 'getEntrySnapshot'
     | 'list'
-  >;
+  > &
+    Partial<Pick<InvocationQueue, 'recordRoutingAdmissionObservation'>>;
   log: A2ATriggerLogger;
 }
 
@@ -614,7 +616,7 @@ export async function enqueueA2ATargets(
     preAdmittedEntries?: readonly QueueEntry[];
     preAdmittedReplayed?: boolean;
   },
-): Promise<{ enqueued: CatId[]; coalesced?: CatId[]; routingPreflight?: RoutingPreflightDecisionV1 }> {
+): Promise<{ enqueued: CatId[]; coalesced?: CatId[]; routingAdmission?: RoutingQueueAdmissionReceiptV1 }> {
   if (!deps.invocationQueue) throw new Error('A2A dispatch requires the shared Queue admission port');
   const { log } = deps;
   const { threadId, callerCatId } = opts;
@@ -765,6 +767,7 @@ export async function enqueueA2ATargets(
 
   const enqueued: CatId[] = [];
   const coalesced: CatId[] = [];
+  const newExecutionTargets: CatId[] = [];
   const acceptedEntries: QueueEntry[] = [];
   const queueDiagnostics: Array<{ targetCats: CatId[]; outcome: string; entryId?: string; createdAt?: number }> = [];
   const preAdmittedEntry = opts.preAdmittedEntries?.find((entry) =>
@@ -815,6 +818,14 @@ export async function enqueueA2ATargets(
       ...('entry' in result && result.entry ? { entryId: result.entry.id, createdAt: result.entry.enqueuedAt } : {}),
     });
     if (result.outcome === 'enqueued') {
+      // Capture admission intent, before any later append race can fall back to next_work.
+      // Exact continuation belongs to the existing child and must never promise a new C.
+      newExecutionTargets.push(
+        ...pendingAcceptedTargetCats.filter((catId) => {
+          const intent = result.entry?.delivery.authorIntentByTarget?.[catId];
+          return intent?.requested !== 'continue_current' || intent.fallbackAt !== undefined;
+        }),
+      );
       // A failure carrier is an exact scheduling reference to an existing
       // response, not a new business dispatch authored by the reporter.
       if (preAdmittedEntry && result.entry?.sourceCategory !== 'a2a_failure') {
@@ -847,17 +858,32 @@ export async function enqueueA2ATargets(
   const intent = inferRoutingContextIntent(opts.content);
   // An already-admitted failure return schedules its exact predecessor to read
   // an existing result. It is not a new availability-based recipient decision.
-  const routingPreflight =
-    preAdmittedEntry?.sourceCategory !== 'a2a_failure' && deps.routingDispatchPreflight
-      ? await preflightRoutingDispatch(deps.routingDispatchPreflight, {
+  const routingAdmission =
+    preAdmittedEntry?.sourceCategory !== 'a2a_failure' &&
+    deps.routingDispatchPreflight &&
+    newExecutionTargets.length > 0
+      ? await observeRoutingQueueAdmission(deps.routingDispatchPreflight, {
           ownerId: opts.userId,
-          targetCatIds: requestedTargetCats,
+          targetCatIds: [...new Set(newExecutionTargets)],
           ...(intent ? { intent } : {}),
         })
       : undefined;
+  if (routingAdmission && deps.invocationQueue.recordRoutingAdmissionObservation) {
+    try {
+      // Do not race an already claimed worker or rewrite its C. The first B remains opaque provenance.
+      await deps.invocationQueue.recordRoutingAdmissionObservation(
+        threadId,
+        opts.userId,
+        queueEntryId(triggerMessageId),
+        routingAdmissionProvenance(routingAdmission),
+      );
+    } catch {
+      log.warn({ threadId, triggerMessageId }, 'Queue admission observation provenance could not be retained');
+    }
+  }
   return {
     enqueued,
     ...(coalesced.length > 0 ? { coalesced } : {}),
-    ...(routingPreflight ? { routingPreflight } : {}),
+    ...(routingAdmission ? { routingAdmission } : {}),
   };
 }
