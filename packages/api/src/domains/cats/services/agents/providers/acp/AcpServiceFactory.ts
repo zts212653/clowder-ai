@@ -233,6 +233,7 @@ async function ensureAcpPool(
     transport: acpConfig.transport ?? 'stdio',
     supportsMultiplexing: acpConfig.supportsMultiplexing,
     protocolAdapter: acpConfig.protocolAdapter,
+    permissionPolicy: acpConfig.permissionPolicy,
     ...(spawn.antigravity ? { sessionPolicy: { provider: 'antigravity', profile: spawn.antigravity.profile } } : {}),
   });
 
@@ -264,7 +265,11 @@ async function ensureAcpPool(
         ...(spawn.env ? { env: spawn.env } : {}),
         // iCode fail-closed policy: flagged native effects must never be
         // auto-approved by the generic default (allow) path.
-        ...(acpConfig.protocolAdapter === 'icode' ? { defaultPermissionDecision: 'reject' as const } : {}),
+        ...(acpConfig.protocolAdapter === 'icode' || acpConfig.permissionPolicy === 'deny'
+          ? { defaultPermissionDecision: 'reject' as const }
+          : acpConfig.permissionPolicy === 'auto_allow'
+            ? { defaultPermissionDecision: 'allow' as const }
+            : {}),
         ...(spawn.antigravity
           ? { inheritParentEnv: false, permissionHandler: denyAgyAcpPermission, antigravityDiagnostics: true }
           : {}),

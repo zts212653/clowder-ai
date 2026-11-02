@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { fileURLToPath } from 'node:url';
 import { validateManifest } from '@clowder-ai/plugin-contract';
 import { generateBundledPluginArtifacts } from './bundled-plugin-artifacts.mjs';
 
@@ -10,14 +11,28 @@ assert.ok(
 );
 // Prepare dev artifacts from TS before starting the watcher. Production uses
 // the just-compiled producer after tsc; both write the same dist layout.
-const { CHATGPT_DOT_PLUGIN_MANIFEST } = await import(
+const { BUNDLED_PLUGIN_DEFINITIONS: definitions } = await import(
   process.argv.includes('--source')
-    ? '../src/domains/plugin/chatgpt-dot-manifest.ts'
-    : '../dist/domains/plugin/chatgpt-dot-manifest.js'
+    ? '../src/domains/plugin/bundled-plugin-definitions.ts'
+    : '../dist/domains/plugin/bundled-plugin-definitions.js'
 );
-const definitions = [{ catalogId: 'chatgpt-dot', manifest: CHATGPT_DOT_PLUGIN_MANIFEST }];
-for (const { catalogId, manifest } of definitions) {
+const { bundledArchiveRejection } = await import(
+  process.argv.includes('--source')
+    ? '../src/domains/plugin/bundled-archive-admission.ts'
+    : '../dist/domains/plugin/bundled-archive-admission.js'
+);
+for (const { catalogId, manifest, agentProvider } of definitions) {
   assert.equal(validateManifest(manifest).valid, true, `invalid ${catalogId} manifest`);
+  const packageRoot = fileURLToPath(
+    new URL(`../src/domains/plugin/bundled-packages/${catalogId}/${manifest.version}/`, import.meta.url),
+  );
+  if (agentProvider !== undefined)
+    assert.ok(
+      Buffer.byteLength(`${JSON.stringify(agentProvider, null, 2)}\n`) <= 65536,
+      'Agent provider declaration exceeds 64 KiB',
+    );
+  const rejection = bundledArchiveRejection(manifest, agentProvider, packageRoot);
+  assert.equal(rejection, undefined, rejection);
 }
 await generateBundledPluginArtifacts(new URL('../dist/domains/plugin/', import.meta.url), definitions, {
   sourceRoot: new URL('../src/domains/plugin/', import.meta.url),

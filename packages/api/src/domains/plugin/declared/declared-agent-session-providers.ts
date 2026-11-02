@@ -1,4 +1,3 @@
-import { open } from 'node:fs/promises';
 import { isDeepStrictEqual } from 'node:util';
 import type { CatId } from '@cat-cafe/shared';
 import { type SessionImplementationRegistry } from '../../cats/services/agents/session-contract/implementation-registry.js';
@@ -16,6 +15,9 @@ import type { VerifiedPluginPackageLocator } from '../external-runtime/types.js'
 import type { PluginRuntimeConfigurationPort } from '../manifest-configuration-projection.js';
 import { resolveAgentClientLibrary } from './agent-client-library.js';
 import { resolvePackageFile } from './declared-resource-paths.js';
+import { readDeclaration } from './read-agent-provider-declaration.js';
+
+export { readDeclaration } from './read-agent-provider-declaration.js';
 export interface AgentSessionProviderLifecycle {
   activate(admission: PluginRuntimeAdmission): Promise<(() => Promise<void>) | undefined>;
 }
@@ -88,15 +90,12 @@ export function declaredAgentSessionProviders(input: {
         providerId = declarationId(raw);
         const result = parseAgentProviderDeclaration(raw, { packageRoot: located.rootDir });
         if (!result.ok) throw new Error(`${result.code}: ${result.reason}`);
-        const declarations =
-          'configurationKey' in result.declaration
-            ? await resolveAgentClientLibrary({
-                declaration: result.declaration,
-                admission,
-                packageRoot: located.rootDir,
-                configuration: input.configuration ?? { readConfig: async () => undefined },
-              })
-            : [result.declaration];
+        const declarations = await resolveAgentClientLibrary({
+          declaration: result.declaration,
+          admission,
+          packageRoot: located.rootDir,
+          configuration: input.configuration ?? { readConfig: async () => undefined },
+        });
         const registrations: ReturnType<typeof registerPluginAgentProvider>[] = [];
         const boundServices = () =>
           [...input.services.values()].filter((service) =>
@@ -143,18 +142,4 @@ export function declaredAgentSessionProviders(input: {
 
 function declarationId(raw: unknown): string {
   return raw && typeof raw === 'object' && 'id' in raw && typeof raw.id === 'string' ? raw.id.slice(0, 128) : 'unknown';
-}
-
-export async function readDeclaration(path: string): Promise<unknown> {
-  const file = await open(path, 'r');
-  try {
-    const size = (await file.stat()).size;
-    if (size > 65536) throw new Error('Agent provider declaration exceeds 64 KiB');
-    const buffer = Buffer.alloc(65537);
-    const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
-    if (bytesRead !== size) throw new Error('Agent provider declaration changed while reading');
-    return JSON.parse(buffer.subarray(0, bytesRead).toString('utf8'));
-  } finally {
-    await file.close();
-  }
 }

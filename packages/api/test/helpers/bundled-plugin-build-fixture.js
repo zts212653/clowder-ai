@@ -28,6 +28,20 @@ export async function bundledBuildFixture(t, description, fromSource = false) {
     producerPath,
     producer.replace(/description: '[^']*'/, `description: ${JSON.stringify(description)}`),
   );
+  const mode = fromSource ? 'src' : 'dist';
+  const extension = fromSource ? 'ts' : 'js';
+  for (const name of ['bundled-plugin-definitions', 'bundled-archive-admission']) {
+    await cp(
+      join(api, mode, 'domains/plugin', `${name}.${extension}`),
+      join(root, mode, 'domains/plugin', `${name}.${extension}`),
+    );
+  }
+  // The admission parser is the real Host parser, not a build-only schema stub.
+  await symlink(
+    join(api, mode, 'domains/cats'),
+    join(root, mode, 'domains/cats'),
+    process.platform === 'win32' ? 'junction' : 'dir',
+  );
   // Leave only canonical SVG inputs. A checkout must not need old JSON/tar/index outputs.
   const assets = join(root, 'src/domains/plugin/bundled-packages/chatgpt-dot/0.1.2/assets');
   await mkdir(dirname(assets), { recursive: true });
@@ -49,6 +63,7 @@ export async function bundledBuildFixture(t, description, fromSource = false) {
         {
           cwd: tmpdir(),
           encoding: 'utf8',
+          windowsHide: true,
         },
       ),
   };

@@ -1,7 +1,11 @@
 import { lstat, readFile } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { AGENT_PROVIDER_DECLARATION_FILE } from '../cats/services/agents/session-contract/plugin-agent-provider.js';
+import { bundledArchiveRejection } from './bundled-archive-admission.js';
 import { fetchOfficialPackageArchive, registeredBundledArchive } from './bundled-package-source.js';
 import { staticEditorContributions } from './content-editor-runtime/admission.js';
+import { resolvePackageFile } from './declared/declared-resource-paths.js';
+import { AgentProviderDeclarationReadError, readDeclaration } from './declared/read-agent-provider-declaration.js';
 import { desktopWindowContribution } from './desktop-window-runtime/admission.js';
 import { FilesystemVerifiedPluginPackageLocator, type VerifiedPluginPackage } from './external-runtime/index.js';
 import type { PluginManifestValidator } from './external-runtime/package-staging.js';
@@ -356,11 +360,27 @@ export class OfficialPluginPackageInstaller {
       });
     }
     try {
-      if (entry.distribution === 'bundled' && located.manifest.runtime?.transport !== 'builtin') {
-        throw new OfficialPluginInstallError(
-          'UNSUPPORTED_TRANSPORT',
-          'bundled archive must retain its builtin runtime',
-        );
+      if (entry.distribution === 'bundled') {
+        let declaration: unknown;
+        if (located.manifest.runtime === undefined) {
+          try {
+            declaration = await readDeclaration(
+              await resolvePackageFile(located.rootDir, AGENT_PROVIDER_DECLARATION_FILE, 'Agent provider declaration'),
+            );
+          } catch (error) {
+            if (
+              !(error instanceof AgentProviderDeclarationReadError) &&
+              (error as NodeJS.ErrnoException).code !== 'ENOENT'
+            )
+              throw error;
+            throw new OfficialPluginInstallError(
+              'UNSUPPORTED_TRANSPORT',
+              'bundled archive requires a readable ACP declaration',
+            );
+          }
+        }
+        const rejection = bundledArchiveRejection(located.manifest, declaration, located.rootDir);
+        if (rejection) throw new OfficialPluginInstallError('UNSUPPORTED_TRANSPORT', rejection);
       }
       if (located.manifest.pluginId !== entry.pluginId) {
         throw new OfficialPluginInstallError('PACKAGE_ID_MISMATCH', 'package manifest identity differs from catalog');

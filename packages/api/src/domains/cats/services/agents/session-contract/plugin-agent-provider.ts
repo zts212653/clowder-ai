@@ -13,12 +13,15 @@ const acpSchema = z.strictObject({
   startupArgs: z.array(safeText).max(128),
   bootstrapRoot: safeText.min(1).refine(isExplicitAcpBootstrapRoot, '引导目录必须是本机绝对路径').optional(),
   mcpWhitelist: z.array(z.string()).optional(),
+  permissionPolicy: z.enum(['deny', 'auto_allow']).optional(),
 });
+const configurationKeySchema = z.string().regex(/^[A-Za-z][A-Za-z0-9._-]{0,127}$/);
 export interface AgentProviderDeclaration {
   id: string;
   name?: string;
   transport: 'acp';
   acp: z.infer<typeof acpSchema>;
+  configurationKey?: string;
 }
 export interface AgentClientLibraryDeclaration {
   configurationKey: string;
@@ -34,10 +37,10 @@ export function parseAgentProviderDeclaration(
   ctx: { packageRoot: string },
 ): AgentProviderDeclarationResult {
   const invalid = { ok: false, code: 'invalid_declaration', reason: 'Invalid agent provider declaration' } as const;
-  if (record(raw) && 'configurationKey' in raw) {
+  if (record(raw) && !('id' in raw) && 'configurationKey' in raw) {
     const library = z
       .strictObject({
-        configurationKey: z.string().regex(/^[A-Za-z][A-Za-z0-9._-]{0,127}$/),
+        configurationKey: configurationKeySchema,
         presets: z.array(profileSchema).max(16).optional(),
       })
       .safeParse(raw);
@@ -45,12 +48,15 @@ export function parseAgentProviderDeclaration(
     if (library.data.presets && !parseAgentClientProfiles(JSON.stringify(library.data.presets), ctx).ok) return invalid;
     return { ok: true, declaration: library.data };
   }
-  if (!record(raw) || Object.keys(raw).some((key) => !['id', 'transport', 'acp'].includes(key))) return invalid;
+  if (!record(raw) || Object.keys(raw).some((key) => !['id', 'transport', 'acp', 'configurationKey'].includes(key)))
+    return invalid;
   if (typeof raw.id !== 'string' || !/^[a-z0-9][a-z0-9._-]{0,63}$/.test(raw.id) || typeof raw.transport !== 'string')
     return invalid;
   if (raw.transport !== 'acp')
     return { ok: false, code: 'transport_not_allowed', reason: 'Only ACP transport is allowed' };
   if (!record(raw.acp)) return invalid;
+  const configurationKey = configurationKeySchema.optional().safeParse(raw.configurationKey);
+  if (!configurationKey.success) return invalid;
   const parsed = acpSchema.safeParse(raw.acp);
   if (!parsed.success) return invalid;
   const inside = (path: string) => {
@@ -67,7 +73,38 @@ export function parseAgentProviderDeclaration(
       code: 'package_command_forbidden',
       reason: 'Package commands and package script arguments are forbidden',
     };
-  return { ok: true, declaration: { id: raw.id, transport: 'acp', acp: parsed.data } };
+  return {
+    ok: true,
+    declaration: {
+      id: raw.id,
+      transport: 'acp',
+      acp: parsed.data,
+      ...(configurationKey.data === undefined ? {} : { configurationKey: configurationKey.data }),
+    },
+  };
+}
+
+/** A single client's owner configuration may override launch fields, never its identity or transport. */
+export function parseAgentProviderConfiguration(
+  raw: unknown,
+  declaration: AgentProviderDeclaration,
+  ctx: { packageRoot: string },
+): { ok: true; declaration: AgentProviderDeclaration } | { ok: false; reason: string } {
+  try {
+    if (typeof raw !== 'string' || Buffer.byteLength(raw) > 65536) throw new Error('客户端配置须为 64 KiB 以内的 JSON');
+    const overrides = acpSchema.partial().parse(JSON.parse(raw));
+    if (declaration.acp.permissionPolicy === 'auto_allow' && overrides.permissionPolicy === undefined)
+      throw new Error('ACP 权限自动允许需要 owner 显式保存选择，不能继承插件声明');
+    const parsed = parseAgentProviderDeclaration(
+      { id: declaration.id, transport: 'acp', acp: { ...declaration.acp, ...overrides } },
+      ctx,
+    );
+    if (!parsed.ok) return { ok: false, reason: parsed.reason };
+    if (!('id' in parsed.declaration)) return { ok: false, reason: 'Invalid standalone ACP client' };
+    return { ok: true, declaration: parsed.declaration };
+  } catch (error) {
+    return { ok: false, reason: error instanceof Error ? error.message : '客户端配置无效' };
+  }
 }
 
 const profileSchema = z.strictObject({
@@ -97,7 +134,9 @@ export function parseAgentClientProfiles(
   }
 }
 
-export function parsePluginAgentRef(value: unknown): SessionImplementationRef | undefined {
+export function parsePluginAgentRef(
+  value: unknown,
+): Extract<SessionImplementationRef, { pluginId: string }> | undefined {
   const match =
     typeof value === 'string' ? /^plugin:([a-z0-9][a-z0-9._-]{0,127})\/([a-z0-9][a-z0-9._-]{0,63})$/.exec(value) : null;
   return match ? { pluginId: match[1]!, contributionId: match[2]! } : undefined;

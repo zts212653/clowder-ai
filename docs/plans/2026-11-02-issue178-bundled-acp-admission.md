@@ -3,12 +3,12 @@ feature_ids: []
 topics: [plugins, acp, bundled-packages, codeagent, relayagent]
 doc_kind: plan
 created: 2026-11-02
-status: proposed
+status: implementing
 ---
 
 # Issue #178：内置 ACP 声明插件安装修复方案
 
-> 本轮交付为独立 worktree 内的待审方案，没有实施产品改动、安装依赖、启动服务或打包。来源：[插件仓 Issue #178](https://github.com/zts212653/clowder-ai-plugins/issues/178) 及本轮用户确认；不是新增两个客户端的硬编码接入。
+> 本方案已获用户批准实施，用户指定 PR 目标为 next；当前实现与验证在原 worktree 继续。来源：[插件仓 Issue #178](https://github.com/zts212653/clowder-ai-plugins/issues/178)。不是新增两个客户端的硬编码接入；本轮不合并 PR、不打包 EXE。
 
 ## 1. 目标、基线与证据
 
@@ -16,7 +16,7 @@ status: proposed
 
 | 基线/证据 | 已知事实 | 使用限制 |
 | --- | --- | --- |
-| 本工位 | `fix/issue178-bundled-acp-admission`，基于刚刷新后的公共 `upstream/develop@4f9fb8e4fd4f8c1af41840be62166cb1d2dc83d0` | 已有 #1745、#1748；不整体搬入 #1702 或 #1762 |
+| 本工位 | `fix/issue178-bundled-acp-admission`，规划时基于 develop；按用户指定重新基于 `upstream/next@74b5bfd4d59c3722c76140d9df36e332b72a0acd` | 仅移植 #1745 必需的固定连接解析/权限及恢复；不整体搬入 #1702、#1748 或 #1762 |
 | 现场 Issue | CodeAgent 0.1.0，`POST /api/plugin-manager/plugins/install`，`source.kind=catalog`，422 / UNSUPPORTED_TRANSPORT | 现场说明包含 `71020406f`、分析基线 `8270e59a9`；当前公共仓及个人 fork 未取得这两个提交 |
 | 旧对照 | #1702 的 c7 包直接发现/配置 CodeAgent ACP，用户内网验收通过 | 不经过插件压缩包安装，不能证明内置目录准入正确 |
 | 作者此前探针 | #1762 的 `b9e1c035` + CodeAgent beta.4，真实上传路由/安装器返回 201 | 是 local-archive，不能替代现场 0.1.0 的 bundled 验证；#1762 后续 HEAD 已变化 |
@@ -35,7 +35,9 @@ Architecture cell：现有 Plugin Manager → 包准入 → carrier → ACP prov
 | 插件仓 | 保留 manifest、agent-provider.json 和稳定 ID；仅在真实归档不合法时修包并按规则发新版本；文档说明所需 Host 能力 | 本次不要求增加假的 builtin runtime，也不默认新增插件仓 PR |
 | 内网发行集成 | 保留已有预置清单、归档及其版本/摘要；吸收通用 Host 修复；对实际 CodeAgent 0.1.0、RelayAgent 1.0.0 验证 | 不要求用户修改系统盘/祖先 ACL、删除 inventory、重配角色或重新登录 |
 
-公共修复不默认将这两个客户端加入公共预置列表。发行版是否预置、预置哪些插件，继续由其已有定义决定；Host 支持同类声明，与插件名称无关。公共 PR 目标先按现行 develop 路线准备；如需进入 next，在基础能力已具备的目标上单独回灌该增量，不顺带合并 #1762 的其他内容。
+公共修复不默认将这两个客户端加入公共预置列表。发行版是否预置、预置哪些插件，继续由其已有定义决定；Host 支持同类声明，与插件名称无关。公共 PR 目标为用户指定的 next，不顺带合并 #1762 的其他内容。
+
+next 缺少固定客户端 configurationKey/permissionPolicy 支持，实施时必须同时接通解析、owner 覆盖、声明注册、目录投影、权限传递/进程池隔离及既有 root-only 恢复；否则只修门禁仍无法启用现场声明。这部分复用 #1745 的最小逻辑，保持 next 原生客户端默认策略，不迁入模型探测、角色重构或新 UI。
 
 ## 3. 准入规则
 
@@ -84,7 +86,7 @@ Architecture cell：现有 Plugin Manager → 包准入 → carrier → ACP prov
 
 ### H4：用户路径与运维说明
 
-更新 `docs/ops/codeagent-main-acp-plugin.md`：分别说明内置目录与本地包入口，二者安装后走同一启用/绑定流程。保留原生程序、认证、模型、Windows 策略和权限响应的职责边界；本次不同时改写历史模型/身份验收结论。
+next 尚无 develop 的 codeagent-main-acp-plugin 指南，新增 `docs/ops/bundled-acp-plugins.md`：分别说明内置目录与本地包入口，二者安装后走同一启用/绑定流程。保留原生程序、认证、模型、Windows 策略和权限响应的职责边界；本次不同时改写历史模型/身份验收结论。
 
 用户预期操作：已有内置列表 → 安装 → 启用 → 成员选择工具。默认命令可用时无需新增配置；自定义命令/参数仍在现有插件配置入口保存一次。已有本地安装和角色不自动换源、迁移或重建 ID。
 
@@ -114,7 +116,7 @@ Architecture cell：现有 Plugin Manager → 包准入 → carrier → ACP prov
 | T4 | 扩展 `bundled-plugin-build.test.js`、`bundled-plugin-artifacts.test.js` | 两种 build 入口和 check 一致；声明闭包保留；旧包字节不变；坏输入不覆盖有效输出 |
 | T5 | `plugin-manager-routes.test.js` + 新增 bundled catalog 集成 | 真实 catalog POST 安装/回读；日志包含 reqId/来源/code，秘密与本地路径不进入日志 |
 | T6 | installer refresh/update 及新增 retry 集成 | 首次拒绝后同包重试、更新失败保旧、合法更新保配置/绑定；不清数据恢复 |
-| T7 | `agent-session-contract/fixed-client-package.test.js` 扩展 catalog 分支 | 同一稳定版本归档分别经 catalog/local-archive；启用注册同一 provider 引用；fixture 两角色、续聊、停用/恢复/重启通过 |
+| T7 | `bundled-acp-admission.test.js`、`fixed-acp-connection.test.js` 和既有 client-library 生命周期/持久化测试 | 同一稳定版本归档分别经 catalog/local-archive；启用注册同一 provider 引用；fixture 两角色隔离、续聊和停用通过；跨进程更新回读原配置，既有绑定持久化测试通过 |
 | T8 | 内网实际注册的两份 tgz | 从该安装包 index 取版本和 digest，真实 catalog 安装/启用/回读通过；不得用重新制作的替代归档代测 |
 | T9 | 企业实际 CodeAgent/RelayAgent | 用户绑定角色、真实回复、Clowder MCP/协作、重启续接，记录客户端版本和结果；不与 fixture 验证合并报“通过” |
 
@@ -122,7 +124,7 @@ bundled 正负例在隔离安装布局中生成真实 index/归档，并用新�
 
 ## 7. 已核对的实施命令
 
-以下为实施阶段命令，本轮不运行、不以文档自检冒充回归。工作目录均为本工位；依赖只安装到本工位，按锁文件，不链接其他工位 node_modules。
+以下为实施阶段命令；实际结果记录于[验证记录](../review/2026-11-02-bundled-acp-admission-validation.md)。工作目录均为本工位；依赖只安装到本工位，按锁文件，不链接其他工位 node_modules。
 
 ```powershell
 pnpm install --frozen-lockfile
@@ -133,15 +135,15 @@ pnpm --filter @cat-cafe/api run lint
 构建后，在 `packages/api` 执行既有测试沙箱入口；新增文件须先按 T1 创建：
 
 ```powershell
-node scripts/with-test-home.mjs --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 node --import ./test/helpers/setup-cat-registry.js --test --test-concurrency=1 test/bundled-acp-admission.test.js test/plugin-official-package-installer.test.js test/plugin-official-package-installer-refresh.test.js test/f322-bundled-plugin-icons.test.js test/plugin-manager-routes.test.js test/bundled-plugin-build.test.js test/bundled-plugin-artifacts.test.js test/bundled-plugin-closure.test.js test/agent-session-contract/fixed-client-package.test.js
+node scripts/with-test-home.mjs --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 node --import ./test/helpers/setup-cat-registry.js --test --test-concurrency=1 test/bundled-acp-admission.test.js test/plugin-official-package-installer.test.js test/plugin-official-package-installer-refresh.test.js test/f322-bundled-plugin-icons.test.js test/plugin-manager-routes.test.js test/bundled-acp-build.test.js test/bundled-plugin-build.test.js test/bundled-plugin-artifacts.test.js test/bundled-plugin-closure.test.js test/fixed-acp-connection.test.js
 node scripts/copy-bundled-plugin-packages.mjs --check
 node --import tsx scripts/copy-bundled-plugin-packages.mjs --source --check
-pnpm run test:public:plan
+pnpm run test:public:plan -- --output <仓库外的计划文件.json>
 ```
 
 确认新增测试进入 public 测试计划及适用的 Windows/Linux CI；不为本修复新增整套平台工作流。最后只对实际修改的 TS/JS 文件运行 `pnpm exec biome check <实际文件列表>`，并执行 `git diff --check`。`pnpm check` 若报告既有 Windows 基线问题，保留原失败和归因，不改断言/安全规则刷绿。
 
-纯方案本轮校验：`node scripts/check-frontmatter.mjs --strict-delta --base 4f9fb8e4fd4f8c1af41840be62166cb1d2dc83d0`、文档本地链接、`git diff --check`。不需要为写方案安装依赖或启动 Redis。
+文档校验使用 `node scripts/check-frontmatter.mjs --strict-delta --base 74b5bfd4d59c3722c76140d9df36e332b72a0acd`；public 测试计划要求已提交且干净的工作树。测试不启动或连接共享 Redis。
 
 ## 8. 内网交付、负责人及验收
 
@@ -160,8 +162,8 @@ pnpm run test:public:plan
 
 - 回退代码不删除或改写 inventory、归档缓存、角色、配置和历史；若旧 Host 不认识新安装的插件，先按现有入口停用并确认退出，再退回程序。原程序及数据回退包按实例台账保留，不通过卸载清数据。
 - 技术待办：取得含 71020406f/8270e59a9 的实际源码及归档后，把 H2 的内网 checked-in 输入检查接到真实构建入口，固定 T8 证据。当前不伪造这些提交存在，也不把它们作为公共修复的新依赖。
-- 在飞检查：已核对 #1762、#1765、#1725 的相关 changed files；#1765 触及 plugin-manager-routes.ts，实施 H3 前重新核 HEAD 和冲突。此为方案，不接管或改写它们。
+- 在飞检查：已核对 #1762、#1765、#1725 的相关 changed files；这些分支不属于本次交付，不整体合并。提交前以 next 为差异基线，后续如 next 变化再核冲突。
 - 创建工具：桌面 create_worktree 因聚合根不是 Git 仓库且子目录不在其精确白名单而失败；已用仓库 worktree-new.mjs 创建并登记 owner=codex、policy=merged。没有修改主 worktree 或其未提交文件。
-- 工位：`G:/AIwork/clowder-ai/worktrees/fix-issue178-bundled-acp-20261102`。本轮仅计划文档，无服务/端口/PID、无测试安装及数据操作；保留供用户审阅和后续实施，2026-11-09 复查去留，不自动删除。
+- 工位：`G:/AIwork/clowder-ai/worktrees/fix-issue178-bundled-acp-20261102`。实现与测试均在本工位；测试仅创建自有临时目录和协议 fixture 子进程，结束后关闭并移除；无交互服务、监听端口、测试 EXE、真实客户端调用或用户数据操作。工位保留供 PR 修改，2026-11-09 复查去留，不自动删除。
 
-批准前停在方案阶段；后续实施消费本方案，不重新设计客户端协议或扩展内网权限边界。
+本轮验证结果见[验证记录](../review/2026-11-02-bundled-acp-admission-validation.md)；实施不重新设计客户端协议或扩展内网权限边界，PR 指向 next，由用户后续决定是否合并。

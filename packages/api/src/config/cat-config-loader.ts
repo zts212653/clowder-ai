@@ -1183,6 +1183,8 @@ export interface AcpVariantConfig {
   /** Required for httpstream until ACP publishes a stable HTTP transport spec. */
   experimental?: boolean;
   mcpWhitelist?: string[];
+  /** Explicit plugin permission policy; native clients retain their existing policy. */
+  permissionPolicy?: 'deny' | 'auto_allow';
   supportsMultiplexing?: boolean;
   /** iCode protocol adapter: switches AcpAgentService onto iCode's ACP dialect (session/set_model, per-turn session/close, no stdio MCP injection). */
   protocolAdapter?: 'icode';
