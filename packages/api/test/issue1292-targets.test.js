@@ -178,3 +178,19 @@ it('runtime catalog remains authoritative for successor, lead and private launch
   assert.deepEqual(loaded.breeds[0].variants[0].cliConfigArgs, ['fixture-private=true']);
   assert.equal(readFileSync(path, 'utf8'), bytes);
 });
+
+it('ordinary pre-resolved hint uses its successor before the existing conversation history', async (t) => {
+  const h = successorFixture(t);
+  h.threads.updateParticipantActivity(h.threadId, 'codex', true);
+  assert.deepEqual(await h.router.resolveConversationTargetsAtAdmission(['opus'], h.threadId), ['opus-5']);
+  getRoster().opus = { ...getRoster().opus, successor: undefined };
+  assert.deepEqual(await h.router.resolveConversationTargetsAtAdmission(['opus'], h.threadId), ['codex']);
+  assert.deepEqual(await h.router.resolveConversationTargetsAtAdmission(['ghost'], h.threadId), ['codex']);
+  assert.deepEqual(await h.router.resolveConversationTargetsAtAdmission([], h.threadId, '@opus work'), []);
+});
+
+it('ordinary hint remains no-target when neither its relation nor conversation policy yields a valid member', async (t) => {
+  const h = successorFixture(t, { opus: { successor: 'ghost' } });
+  assert.deepEqual(await h.router.resolveConversationTargetsAtAdmission(['opus'], h.threadId), []);
+  assert.deepEqual(await h.router.resolveConversationTargetsAtAdmission(['ghost'], h.threadId), []);
+});

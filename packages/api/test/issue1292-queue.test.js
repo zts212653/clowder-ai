@@ -5,6 +5,7 @@ import { InvocationQueue } from '../dist/domains/cats/services/agents/invocation
 import { PersistedQueueDelivery } from '../dist/domains/cats/services/agents/invocation/PersistedQueueDelivery.js';
 import { queueLedgerAdmissionFingerprint } from '../dist/domains/cats/services/agents/invocation/queue-ledger/QueueLedger.js';
 import { createQueueLedgerAdmission } from '../dist/domains/cats/services/agents/invocation/queue-ledger/QueueLedgerAdmission.js';
+import { createPluginConversationDelivery } from '../dist/domains/plugin/host-surface/plugin-conversation-delivery.js';
 import { generateScriptViaThread } from '../dist/domains/signals/services/podcast-generator.js';
 import { createDeliverFn } from '../dist/infrastructure/scheduler/delivery.js';
 import { privateInput, successorFixture } from './helpers/successor-routing-fixture.js';
@@ -245,3 +246,45 @@ it('direct routeExecution refuses disabled, sentinel and unknown targets before 
   }
   assert.deepEqual(h.calls, []);
 });
+
+for (const [name, hint, content, policy, expected] of [
+  ['ordinary successor', 'opus', 'work', undefined, ['opus-5']],
+  ['disabled prose blocks an ordinary hint', 'codex', '@opus work', undefined, []],
+  ['exact disabled identity cannot follow successor', 'opus', 'work', { exactTarget: true }, null],
+  ['exact chosen identity overrides original prose', 'codex', '@opus work', { exactTarget: true }, ['codex']],
+]) {
+  it(`plugin admission: ${name}`, async (t) => {
+    const h = successorFixture(t);
+    const source = await h.messages.append({
+      from: { kind: 'plugin', instanceId: 'issue1292-plugin' },
+      userId: 'owner',
+      threadId: h.threadId,
+      content,
+      mentions: [],
+      timestamp: 1,
+      extra: {
+        pluginMessage: {
+          instanceId: 'issue1292-plugin',
+          revision: 1,
+          provenance: { epistemicStatus: 'observation' },
+          elements: [{ elementId: 'text', kind: 'text', payload: { text: content } }],
+          appendOps: [],
+        },
+      },
+    });
+    const delivery = createPluginConversationDelivery({ messageStore: h.messages, queue: h.queue, router: h.router });
+    const send = () => delivery.trigger(h.threadId, hint, 'owner', content, source.id, undefined, policy);
+    if (expected === null) {
+      await assert.rejects(send, /explicit plugin recipient/);
+      assert.deepEqual(await h.ledger.list(h.threadId), []);
+    } else {
+      await send();
+      assert.deepEqual((await h.ledger.list(h.threadId))[0].targets, expected);
+      if (expected.length === 0) {
+        await h.processor.requestDrain(h.threadId);
+        assert.deepEqual(await h.ledger.list(h.threadId), []);
+      }
+    }
+    assert.deepEqual(h.calls, []);
+  });
+}

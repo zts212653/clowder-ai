@@ -184,3 +184,16 @@ display alias；#1432 增加 terminal producer capability；#1157 是旧 Queue �
 再次校验当前配置等失败，再最小修复。public source 重放探测只构造原身份，不进行
 首次 admission 校验；实际匹配仍消费存储返回的赢家与原 producer envelope。
 所有 code findings 待非作者对后续精确 HEAD 复审，作者不自行 Approval。
+
+
+## CI 发现的普通插件 hint 边界
+
+F202 的 nonexact wake.catId 是首次目标选择的提示，不是已绑定收件人。有效一跳 successor
+优先；hint 不可用时仍可按现有正文、历史、偏好和配置默认选择有效目标，全部无效才 no-target。
+正文显式禁用 mention 先拒绝，不能借 hint 改投；exact:true 的协议收件人优先于正文，
+不能追 successor。已绑定 Queue 与严格 system admission 不经过这个提示兜底。
+CI 的原三项 F202 检查保持不改，新增真实 plugin delivery 和中央 resolver 交叉回归。
+
+已有 targetless settlement 测试原用 @opus 正文制造空目标；该正文现在是明确的成员身份。
+fixture 改用无 mention 的普通正文，仍原样验证 Memory/Redis 的退休故障、重启、重放与旧 claim
+不能退休新目标。没有放宽这些持久化断言；该 owned Unix-socket 文件由 Linux CI 验证。

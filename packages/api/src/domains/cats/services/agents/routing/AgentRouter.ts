@@ -862,12 +862,10 @@ export class AgentRouter {
     threadId: string,
     content = '',
   ): Promise<CatId[]> {
-    if (requestedCatIds.length > 0)
-      return requestedCatIds
-        .flatMap((id) => this.resolveAdmissionTargets([id], true))
-        .filter((id) => this.isRoutableCat(id));
     const explicit = await this.parseAllMentions(content, threadId, { allowGroupFallback: false });
     if (explicit.mentions.length > 0 || explicit.routing_warnings.length > 0) return explicit.mentions;
+    const hinted = this.filterRoutableCats(requestedCatIds);
+    if (hinted.length > 0) return hinted;
     return (await this.resolveImplicitTargetPreview(content, threadId)).targetCats;
   }
 

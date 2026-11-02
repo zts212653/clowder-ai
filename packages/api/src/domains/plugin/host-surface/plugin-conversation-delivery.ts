@@ -19,7 +19,7 @@ export function createPluginConversationDelivery(deps: {
       const targetCats =
         catId === undefined
           ? await deps.router.resolveSendTargets([], threadId, content)
-          : await deps.router.resolveConversationTargetsAtAdmission([catId], threadId, content);
+          : await deps.router.resolveConversationTargetsAtAdmission([catId], threadId, exact ? '' : content);
       if (exact && catId !== undefined && (targetCats.length !== 1 || targetCats[0] !== catId))
         throw new Error('explicit plugin recipient is unavailable');
       const admitted = await deps.queue.enqueueExistingMessageDurable(deps.messageStore, messageId, {
