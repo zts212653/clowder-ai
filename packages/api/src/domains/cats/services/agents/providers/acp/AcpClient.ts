@@ -70,10 +70,11 @@ export function resolveAcpPromptRequestCeilingMs(activityBudgetMs: number): numb
 
 // ─── Config ──────────────────────────────────────────────���─────
 
-/** Callback for handling ACP permission requests. Call `respond` with the chosen option. */
+/** Respond with the chosen option; transports may supply cancellation for their active prompt. */
 export type AcpPermissionHandler = (
   req: AcpAgentRequest,
   respond: (result: { optionId: string } | { cancelled: true }) => void,
+  options?: { signal?: AbortSignal },
 ) => void | Promise<void>;
 
 /**

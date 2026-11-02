@@ -537,7 +537,7 @@ export class AcpAgentService implements AgentService {
     /** F306 Phase C: iCode ask-user bridge active for this turn. */
     let requestInputBridge: AcpRequestInputBridge | null = null;
     let agyActive = true;
-    const permissionLifetime = new AbortController();
+    let permissionLifetime: AbortController | undefined;
     let permissionHandler: AcpPermissionHandler | undefined;
     const requiresProviderShutdown = () => promptPhase === 'locally_terminated_unacknowledged';
 
@@ -875,6 +875,8 @@ export class AcpAgentService implements AgentService {
             })
           : undefined;
         if (this.executionApproval === 'ask_user') {
+          permissionLifetime?.abort('provider_cancelled');
+          permissionLifetime = new AbortController();
           const audit = options?.auditContext;
           permissionHandler = createAcpPermissionHandler({
             mode: 'ask_user',
@@ -1337,7 +1339,7 @@ export class AcpAgentService implements AgentService {
       yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
     } finally {
       agyActive = false;
-      permissionLifetime.abort('provider_cancelled');
+      permissionLifetime?.abort('provider_cancelled');
       if (permissionHandler && sessionId)
         client.setSessionPermissionHandler(sessionId, (_request, respond) => respond({ cancelled: true }));
       if (this.antigravity && sessionId) client.setSessionPermissionHandler(sessionId);

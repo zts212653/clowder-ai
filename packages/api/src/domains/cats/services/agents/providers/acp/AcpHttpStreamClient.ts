@@ -796,6 +796,7 @@ export class AcpHttpStreamClient {
         request: req,
         handler: this.sessionPermissionHandlers.get(sessionId) ?? this.config.permissionHandler,
         defaultDecision: this.config.defaultPermissionDecision,
+        signal: options.signal,
         write: (response) => this.sendAgentResponse(response, responseOptions),
       });
       return;

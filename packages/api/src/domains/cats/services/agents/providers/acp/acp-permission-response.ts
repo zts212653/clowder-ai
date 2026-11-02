@@ -22,6 +22,7 @@ export async function respondToAcpPermission(input: {
   request: AcpAgentRequest;
   handler?: AcpPermissionHandler;
   defaultDecision?: 'allow' | 'reject';
+  signal?: AbortSignal;
   write(response: AcpResponse): void | Promise<void>;
 }): Promise<void> {
   let responded = false;
@@ -42,7 +43,7 @@ export async function respondToAcpPermission(input: {
     );
   };
   try {
-    if (input.handler) await input.handler(input.request, respond);
+    if (input.handler) await input.handler(input.request, respond, { signal: input.signal });
     else
       respond(
         defaultAcpPermissionResult(input.request.params as unknown as AcpPermissionRequest, input.defaultDecision),

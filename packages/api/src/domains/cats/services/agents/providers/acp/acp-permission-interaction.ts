@@ -39,9 +39,13 @@ export function createAcpPermissionHandler(context: {
   signal?: AbortSignal;
   isActive(): boolean;
 }): AcpPermissionHandler {
-  return async (request, respond) => {
+  return async (request, respond, transport) => {
+    const signal =
+      context.signal && transport?.signal
+        ? AbortSignal.any([context.signal, transport.signal])
+        : (transport?.signal ?? context.signal);
     const params = permissionSchema.parse(request.params);
-    if (params.sessionId !== context.sessionId || !context.isActive() || context.signal?.aborted) {
+    if (params.sessionId !== context.sessionId || !context.isActive() || signal?.aborted) {
       respond({ cancelled: true });
       return;
     }
@@ -59,6 +63,12 @@ export function createAcpPermissionHandler(context: {
       respond(decision ?? { cancelled: true });
       return;
     }
+    // A human may decline or cancel, but cannot broaden a native guard's grant.
+    const offered = params.options.flatMap((option, index) =>
+      context.guard && option.kind.startsWith('allow') && option.optionId !== selected.optionId
+        ? []
+        : [{ ...option, decisionId: `option-${index}` }],
+    );
     if (!context.port || !context.owner) throw new Error('ACP user confirmation is unavailable for this invocation');
     const response = await context.port
       .request(
@@ -79,15 +89,15 @@ export function createAcpPermissionHandler(context: {
             ? {}
             : { description: JSON.stringify(params.toolCall.rawInput, null, 2).slice(0, 8192) }),
           decisions: [
-            ...params.options.map((option, index) => ({
-              id: `option-${index}`,
+            ...offered.map((option) => ({
+              id: option.decisionId,
               label: option.name,
               outcome: option.kind.startsWith('allow') ? ('accept' as const) : ('decline' as const),
             })),
             { id: 'cancel', label: '取消', outcome: 'cancel' },
           ],
         },
-        { signal: context.signal },
+        { signal },
       )
       .catch((error: unknown) => {
         if (error instanceof RuntimeInteractionError && error.reasonCode && cancelledReasons.has(error.reasonCode))
@@ -95,11 +105,7 @@ export function createAcpPermissionHandler(context: {
         throw error;
       });
     const option =
-      response?.kind === 'decision'
-        ? params.options.find((_option, index) => response.decisionId === `option-${index}`)
-        : undefined;
-    respond(
-      option && context.isActive() && !context.signal?.aborted ? { optionId: option.optionId } : { cancelled: true },
-    );
+      response?.kind === 'decision' ? offered.find((option) => response.decisionId === option.decisionId) : undefined;
+    respond(option && context.isActive() && !signal?.aborted ? { optionId: option.optionId } : { cancelled: true });
   };
 }

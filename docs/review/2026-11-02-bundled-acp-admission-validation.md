@@ -36,6 +36,18 @@ created: 2026-11-02
 
 RED 证据包括修订前真实 transport 12 项矩阵中 7 项失败（HTTP 忽略 reject、缺少 session handler/响应围栏等）及固定/目录默认策略与 bundled stdio/static 对照。原始日志保留；新增 ask-user 确认端到端使用真实 Host 交互服务和协议 fixture，不伪称现场原生验收。
 
+独立 fresh-context scan 固定在 `5b74c49b38391b823117fdc865dbfeeac62d0184`，仅生成 findings，不产出批准：
+
+1. FC-1（P2）：AGY guard 只允许 allow_once，外层卡片却可以选 allow_always。修正为卡片和回传仅接受 guard 已允许的那个 allow 选项及拒绝/取消。
+2. FC-2（P2）：HTTP promptStream 等待确认时，取消/预算超时没有中断 handler。把 transport controller.signal 经共同 handler 的可选上下文传入原 RuntimeInteractionPort；复用同一取消语义，不另开通道。
+3. 作者同时补齐 empty-resume replacement：每次 provider-session binding 都先取消上一次 binding，旧卡片不能在新 session 活跃后迟到放行。
+
+`permission-lifecycle-red.log` 对上述场景观察到 4 项失败（HTTP cancel/budget 分开）；`permission-lifecycle-green.log` 为修正后 27/27，含原 23 项决策/交互矩阵及 4 项新回归。HTTP 测试使用真实编译 client.promptStream 和真实 RuntimeInteractionService，以内存 ReadableStream 代替 fetch，不连接外网、不开监听。重绑测试经过真实 AcpAgentService 的空响应重试分支，核对旧交互已失效与迟到请求取消。
+
+最终完整构建通过（api-build-final.log）；受上述修改影响的客户端/空响应重试/iCode/AGY/权限组 127/127（permission-clients-final.log），CodeAgent/RelayAgent 安装/执行主旅程重新验证 2/2（bundled-execution-final.log）。既有 Runtime Interaction 服务/路由/消息发布组 28/28（runtime-interaction-regression.log）。
+
+Fallback scanner 按 next 基线的最新报告触发增长提示；新增条件用于缺省配置、原生 guard 分流及取消生命周期，没有增加安装失败后的另一种低信任执行路径。来源和能力由错误的 bundled/builtin 绑定改为共同判定；异常仍报错或取消，未降级为自动允许。最终 scanner 输出保存在同一 artifacts 目录。
+
 本次未修改用户配置、历史、认证或系统盘/祖先 ACL。没有运行真实企业模型，不重复旧模型调用，不安装测试 EXE；测试 child/server 均限自有临时环境并在退出时关闭。仍需内网验证实际企业 tgz、原生 CodeAgent/RelayAgent、认证、模型/MCP/角色协作和包升级；不关闭插件 Issue #178。
 
 
