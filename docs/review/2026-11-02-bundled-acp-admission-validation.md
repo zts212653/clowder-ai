@@ -45,6 +45,8 @@ Architecture cell：`plugin`，复用既有包准入、carrier、配置存储和
 
 三组主回归共 211 项通过；29 项收尾复验不重复累计。CodeAgent 和 RelayAgent 的同一客户端连续会话与不同成员隔离、权限拒绝、停用后再启用均有实际 ACP 管道输出。最终构建后未再修改产品代码。
 
+非作者审查：独立 reviewer 对 `f789832f13d61754a9710e47a2a814807b105309` 给出 approve，无 P1/P2，并独立执行构建/固定连接权限/CRLF/诊断 10 项通过。两处非阻断文案意见已按实现收窄：reqId 关联请求日志，不声称响应新增标识；默认 deny 限定本次固定客户端，不改写旧目录策略。
+
 公共测试：原有 Windows planner CLI 在 `spawnSync('pnpm')` 无法执行 pnpm.ps1 时返回 `could not resolve pnpm version: undefined`。未将这项报绿或顺带改 CI；改用同一 resolver/planner/validator API，并通过 PowerShell 实测 pnpm 9.15.4、记录真实 tree/lockfile/toolchain，得到 2968 个入选测试，新增 5 份测试分别进入 distributable 分片。记录为 `public-test-selection.log` / `public-test-plan-manual.json`，不冒充全套公共测试执行结果。
 
 Fallback scanner 已按 next 基线执行并提示净增 25。核对：修复的是“发行来源被当成 runtime”这一错误分类，没有增加安装失败降级；scanner 把测试协议/动作分派的布尔条件也计为 fallback。生产连接读取的优先级是“owner 已存值 → manifest 默认 → 空覆盖”，用于保留已有配置；权限缺省固定为 deny。JSON 边界拒绝和已知 I/O 分类保留原错误语义，不通过另一执行器或不受校验路径重试。

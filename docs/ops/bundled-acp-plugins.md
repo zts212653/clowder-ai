@@ -31,7 +31,7 @@ RelayAgent 选择正确的 Python 环境，例如 command 为该环境的 python
 
 保存一次后，后续使用和重启沿用已保存的配置。连接变更不重建工具 ID；例如 CodeAgent 引用保持 `plugin:official.codeagent/codeagent`。已有本地安装、角色及历史不自动迁移到内置来源。
 
-ACP 权限请求默认拒绝。需要 auto_allow 时，由 owner 在已有连接配置中明确保存；插件声明或默认配置不能自行授予该权限。CodeAgent 原生 bypass 参数是另一个独立设置，本修复不自动开启。
+本次固定客户端接入的 ACP 权限请求默认拒绝。需要 auto_allow 时，由 owner 在已有连接配置中明确保存；插件声明或默认配置不能自行授予该权限。旧多客户端目录未指定 permissionPolicy 时仍沿用原有策略。CodeAgent 原生 bypass 参数是另一个独立设置，本修复不自动开启。
 
 ## 失败和重试
 
@@ -40,7 +40,7 @@ ACP 权限请求默认拒绝。需要 auto_allow 时，由 owner 在已有连接
 - 摘要不匹配、坏归档或隔离提示：先核对发行源和原始归档。这类安全拒绝不能通过普通重试自动解除；不要关闭校验或给同一已发布版本换摘要。
 - 配置或原生程序不可用：在原插件配置入口修正路径、参数、环境安装和登录，再启用/重试。不要通过卸载或删除历史来修复启动问题。
 
-安装/更新失败会在 API 日志记录 `Plugin package operation failed`，字段包括 reqId、operation、已知来源/插件标识和公开 code。可与相同 reqId 的 HTTP 响应关联；日志不包含归档内容、连接值、认证头、用户路径或原始错误 cause。
+安装/更新失败会在 API 日志记录 `Plugin package operation failed`，字段包括 reqId、operation、已知来源/插件标识和公开 code。通过相同 reqId 关联 API 的 incoming request / request completed 日志，再对照客户端收到的状态码和错误；本修复未向 HTTP 响应新增 reqId 字段或响应头。失败诊断不包含归档内容、连接值、认证头、用户路径或原始错误 cause。
 
 Windows 引导目录及审计继续使用当前 Host 部署策略。本修复不修改 .env、intranet-host.json、系统盘或祖先 ACL，也不能修复客户端自身的 EPERM、登录或模型接口错误。
 
