@@ -102,6 +102,10 @@ export class RegisteredSessionAgentService implements AgentService {
     return Object.freeze({
       key: this.implementationKey,
       generation: `${binding.generation}:${implementation?.generation ?? (binding.service ? agentServiceGeneration(binding.service) : 'provider')}`,
+      compatibilityRevision: JSON.stringify([
+        this.input.registry.compatibilityRevision(this.input.ref),
+        implementation?.compatibilityRevision ?? implementation?.key ?? this.implementationKey,
+      ]),
       ...(implementation?.clientId ? { clientId: implementation.clientId } : {}),
     });
   }

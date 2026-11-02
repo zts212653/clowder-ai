@@ -12,8 +12,10 @@ import { ThreadStore } from '../../src/domains/cats/services/stores/ports/Thread
 import { createModuleHostInvocation } from '../../src/domains/plugin/builtin-runtime/carriers/module-host-invocation.js';
 import type { PluginRuntimeAdmission } from '../../src/domains/plugin/carrier/runtime-carrier.js';
 import { DeclaredPluginUi } from '../../src/domains/plugin/declared/declared-plugin-ui.js';
+import { DeclaredRuntimeContributions } from '../../src/domains/plugin/declared/declared-runtime-contributions.js';
 import { createPluginThreadHost } from '../../src/domains/plugin/host-surface/plugin-thread-host.js';
 import { pluginUiRoutes } from '../../src/routes/plugin/plugin-ui-routes.js';
+import { pluginWebhookForwardingRoutes } from '../../src/routes/plugin/plugin-webhook-forwarding-routes.js';
 import { configuredFeedbackMember } from './feedback-member.mts';
 import { feedbackStorageFixture } from './feedback-storage.mts';
 
@@ -191,12 +193,25 @@ export async function startInstalledFeedbackFixture() {
     packageRecord: { pluginId: manifest.pluginId, manifest },
   } as unknown as PluginRuntimeAdmission;
   ui.activate(admission);
+  const contributions = new DeclaredRuntimeContributions({
+    packages: {
+      resolveInstalledPackage: async () => ({
+        rootDir: packageRoot,
+        manifest,
+        verifyIntegrity: async () => {},
+        release: async () => {},
+      }),
+    },
+    configuration: { readConfig: async () => undefined, readSecret: async () => undefined },
+  });
+  await contributions.activate(admission, (id, method, input) => invocation.invoke(id, method, input));
   const app = Fastify();
   app.decorateRequest('sessionUserId', undefined);
   app.addHook('onRequest', async (request) => {
     request.sessionUserId = 'fixture-owner';
   });
   await app.register(pluginUiRoutes, { ui });
+  await app.register(pluginWebhookForwardingRoutes, { webhooks: contributions, ui });
   app.get('/api/plugin-manager/plugins/:pluginId/icon', async (_, reply) =>
     reply.type('image/svg+xml').send(await readFile(join(packageRoot, 'assets/icon.svg'))),
   );
@@ -249,6 +264,7 @@ export async function startInstalledFeedbackFixture() {
     modelRuns: memberFixture.modelRuns,
     async stop() {
       ui.deactivate('fixture');
+      await contributions.deactivate('fixture');
       await activation.stop({ reason: 'test_complete' });
       await app.close();
       globalThis.fetch = originalFetch;

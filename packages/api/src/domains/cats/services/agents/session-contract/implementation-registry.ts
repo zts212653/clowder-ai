@@ -17,11 +17,18 @@ export function sessionImplementationKey(ref: SessionImplementationRef): string 
 }
 type Factory = (ctx: { catId: CatId }) => HostSessionImplementation;
 export class SessionImplementationRegistry {
-  private readonly factories = new Map<string, { factory: Factory; token: symbol; generation: string }>();
-  register(ref: SessionImplementationRef, factory: Factory): () => void {
+  private readonly factories = new Map<
+    string,
+    { factory: Factory; token: symbol; generation: string; compatibilityRevision: string }
+  >();
+  register(
+    ref: SessionImplementationRef,
+    factory: Factory,
+    compatibilityRevision = sessionImplementationKey(ref),
+  ): () => void {
     const key = sessionImplementationKey(ref);
     if (this.factories.has(key)) throw new Error(`Duplicate session implementation: ${key}`);
-    const entry = { factory, token: Symbol(key), generation: randomUUID() };
+    const entry = { factory, token: Symbol(key), generation: randomUUID(), compatibilityRevision };
     this.factories.set(key, entry);
     return () => {
       if (this.factories.get(key) === entry) this.factories.delete(key);
@@ -38,5 +45,8 @@ export class SessionImplementationRegistry {
   }
   registrationGeneration(ref: SessionImplementationRef): string | undefined {
     return this.factories.get(sessionImplementationKey(ref))?.generation;
+  }
+  compatibilityRevision(ref: SessionImplementationRef): string | undefined {
+    return this.factories.get(sessionImplementationKey(ref))?.compatibilityRevision;
   }
 }

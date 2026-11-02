@@ -54,7 +54,7 @@ test('installed UI dispatch derives owner facts, rejects anonymous/stale calls a
   ui.activate(admission);
   const generation = ui.list()[0]!.generation;
   assert.equal(ui.list().length, 1);
-  await assert.rejects(ui.call('fixture', 'open', generation, {}), /owner request/);
+  await assert.rejects(ui.call('fixture', 'open', generation), /owner request/);
   const app = Fastify();
   app.decorateRequest('sessionUserId', undefined);
   app.addHook('onRequest', async (request) => {
@@ -63,7 +63,7 @@ test('installed UI dispatch derives owner facts, rejects anonymous/stale calls a
   await app.register(pluginUiRoutes, { ui });
   try {
     const url = '/api/plugin-ui/fixture/open';
-    const payload = { generation, input: { op: 'open', userId: 'forged' } };
+    const payload = { generation, input: { op: 'open' } };
     assert.ok([401, 403].includes((await app.inject({ method: 'POST', url, payload })).statusCode));
     const result = await app.inject({
       method: 'POST',

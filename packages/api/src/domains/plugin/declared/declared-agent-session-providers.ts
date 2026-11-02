@@ -105,6 +105,7 @@ export function declaredAgentSessionProviders(input: {
             registrations.push(
               registerPluginAgentProvider(input.registry, {
                 pluginId: admission.packageRecord.pluginId,
+                packageDigest: admission.packageRecord.packageDigest,
                 declaration,
                 createProvider: input.createProvider,
               }),

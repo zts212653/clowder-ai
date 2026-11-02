@@ -5781,7 +5781,10 @@ async function main(): Promise<void> {
     mediaDir: getDefaultConnectorMediaDir(process.env.CONNECTOR_MEDIA_DIR),
   });
   const { pluginWebhookForwardingRoutes } = await import('./routes/plugin/plugin-webhook-forwarding-routes.js');
-  await app.register(pluginWebhookForwardingRoutes, { webhooks: pluginRuntime.supervisor });
+  await app.register(pluginWebhookForwardingRoutes, {
+    webhooks: pluginRuntime.supervisor,
+    ui: pluginRuntime.supervisor.ui,
+  });
   const { pluginUiRoutes } = await import('./routes/plugin/plugin-ui-routes.js');
   await app.register(pluginUiRoutes, { ui: pluginRuntime.supervisor.ui });
 
@@ -6998,6 +7001,15 @@ async function main(): Promise<void> {
   // Session chain (F24)
   await app.register(sessionChainRoutes, {
     inspectLocalSession,
+    resolveImportExecutionBoundary: async (input) => {
+      const { captureImportedSessionBoundary } = await import(
+        './domains/cats/services/agents/invocation/import-execution-boundary.js'
+      );
+      return captureImportedSessionBoundary(router.getStrategyDeps().invocationDeps, {
+        ...input,
+        service: agentRegistry.get(input.catId),
+      });
+    },
     listLocalSessions,
     sessionChainStore,
     threadStore,

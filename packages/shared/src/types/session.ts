@@ -59,7 +59,7 @@ export interface HostExecutionBoundary {
   readonly clientId: string;
   readonly carrier: string;
   readonly implementationKey: string;
-  /** Process-local generation: a restart conservatively requires a new segment. */
+  /** Stable implementation compatibility revision; never a process-local execution token. */
   readonly implementationGeneration: string;
   readonly accountRef: string | null;
   /** Adapter-provided native state root; absent when the adapter has no verified fact. */

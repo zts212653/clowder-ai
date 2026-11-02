@@ -1259,7 +1259,14 @@ export interface AgentService {
   /** The adapter handles AbortSignal and owns teardown; Host must drain it before terminalizing. */
   readonly cancellationMode?: 'drain';
   /** Host-owned implementation identity; a pinned registered view rejects a replaced generation. */
-  implementationSnapshot?(): Readonly<{ key: string; generation: string; clientId?: ClientId }>;
+  implementationSnapshot?(): Readonly<{
+    key: string;
+    /** Process-local replacement token, used only by pinned execution checks. */
+    generation: string;
+    /** Stable across rebuild/restart; changes when the selected implementation's compatibility changes. */
+    compatibilityRevision?: string;
+    clientId?: ClientId;
+  }>;
   /** Read configuration before any provider lease. Returns owned descriptors, never starts a model turn. */
   captureInvocationOptions?(input: {
     signal?: AbortSignal;

@@ -41,7 +41,7 @@ function fixture(t) {
   let projectPath = resolve(process.cwd());
   let generation = 'controlled-generation-1';
   const service = {
-    implementationSnapshot: () => ({ key: 'test:boundary', generation }),
+    implementationSnapshot: () => ({ key: 'test:boundary', generation, compatibilityRevision: generation }),
     async *invoke(prompt, options) {
       calls.push({ prompt, resume: options.cliSessionId, hostSessionId: options.hostSessionId });
       yield {

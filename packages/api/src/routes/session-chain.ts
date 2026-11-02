@@ -1,3 +1,4 @@
+import { resolve } from 'node:path';
 import {
   type LocalSessionImportOptions,
   localSessionConflict,
@@ -74,6 +75,11 @@ interface RestoreRouteResponse {
 }
 
 interface SessionChainRouteOptions extends FastifyPluginOptions, LocalSessionImportOptions {
+  resolveImportExecutionBoundary?: (input: {
+    catId: CatId;
+    threadId: string;
+    userId: string;
+  }) => Promise<NonNullable<SessionRecord['hostExecutionBoundary']>>;
   sessionChainStore: ISessionChainStore;
   threadStore: IThreadStore;
   messageStore?: IMessageStore;
@@ -681,6 +687,7 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
     }
 
     let importMetadata: Awaited<ReturnType<NonNullable<LocalSessionImportOptions['inspectLocalSession']>>> | undefined;
+    let importBoundary: SessionRecord['hostExecutionBoundary'];
     if (parseResult.data.externalImport) {
       const member = catRegistry.tryGet(catId)?.config;
       if (!member || !localSessionImportTool(member) || !isLocalSessionId(member.clientId, cliSessionId))
@@ -709,10 +716,25 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
           .status(409)
           .send({ code: 'SESSION_PROJECT_MISMATCH', error: 'The project must follow the original session' });
       }
+      if (!opts.resolveImportExecutionBoundary)
+        return reply.status(503).send({ error: 'Session execution boundary verification is unavailable' });
+      try {
+        importBoundary = await opts.resolveImportExecutionBoundary({ catId: catId as CatId, threadId, userId });
+        const project = resolve(importMetadata.projectPath);
+        const expectedRoot = process.platform === 'win32' ? project.toLowerCase() : project;
+        if (importBoundary.clientId !== importMetadata.clientId || importBoundary.workspaceRoot !== expectedRoot)
+          throw new Error('Imported session execution boundary does not match the inspected client and project');
+      } catch (error) {
+        return reply.status(409).send(localSessionFailure(error));
+      }
     }
-    const persistImport = async (sessionId: string) => {
-      if (!importMetadata) return;
-      await sessionChainStore.update(sessionId, {
+    const persistImport = async (record: SessionRecord) => {
+      if (!importMetadata || !importBoundary) return true;
+      // Establish the selected boundary while the new logical owner is still
+      // unbound. Existing unknown histories retain the store's refusal rule.
+      const bound = await sessionChainStore.bindHostExecutionBoundary(record.id, record.cliSessionId, importBoundary);
+      if (!bound) return false;
+      await sessionChainStore.update(record.id, {
         externalImport: {
           cliSessionId,
           clientId: importMetadata.clientId,
@@ -723,6 +745,7 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
         },
         workingDirectory: importMetadata.projectPath,
       });
+      return true;
     };
 
     let session;
@@ -731,7 +754,8 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
     if (active) {
       // Late-bind through the store's atomic CLI-ID claim path. A generic
       // update can race another logical node and steal its runtime identity.
-      await persistImport(active.id);
+      if (!(await persistImport(active)))
+        return reply.status(409).send({ error: 'The existing session has no proven execution boundary' });
       const updated = await sessionChainStore.bindCliSessionId(active.id, cliSessionId);
       if (!updated) {
         reply.status(409);
@@ -753,7 +777,8 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
         catId: catId as CatId,
         userId,
       });
-      await persistImport(logical.id);
+      if (!(await persistImport(logical)))
+        return reply.status(409).send({ error: 'The session changed before its import boundary was verified' });
       const bound = await sessionChainStore.bindCliSessionId(logical.id, cliSessionId);
       if (!bound) {
         reply.status(409);
@@ -763,7 +788,13 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
       mode = 'created';
     }
 
-    if (importMetadata) await threadStore.setSessionImport(threadId, { sessionId: session.id, catId });
+    if (importMetadata && importBoundary) {
+      const bound = await sessionChainStore.bindHostExecutionBoundary(session.id, cliSessionId, importBoundary);
+      if (!bound)
+        return reply.status(409).send({ error: 'Imported session changed before its execution boundary was bound' });
+      session = bound;
+      await threadStore.setSessionImport(threadId, { sessionId: session.id, catId });
+    }
 
     // Audit trail (best-effort, fire-and-forget)
     getEventAuditLog()

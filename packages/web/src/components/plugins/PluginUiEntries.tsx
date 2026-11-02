@@ -6,21 +6,23 @@ import { createPortal } from 'react-dom';
 import { apiFetch } from '@/utils/api-client';
 import { PluginVisual } from '../settings/plugin-manager/PluginVisual';
 import { copyPanelImage, pluginPanelChannel, sandboxedPanelHtml } from './plugin-panel-bridge';
+import { requestPluginHttp } from './plugin-panel-http';
 
 interface Entry {
+  pluginId: string;
   instanceId: string;
   commandId: string;
   label: string;
   generation: string;
   icon?: PluginIconSpec;
 }
-async function invoke(entry: Entry, input: unknown, signal?: AbortSignal): Promise<unknown> {
+async function mount(entry: Entry, signal?: AbortSignal): Promise<unknown> {
   const response = await apiFetch(
     `/api/plugin-ui/${encodeURIComponent(entry.instanceId)}/${encodeURIComponent(entry.commandId)}`,
     {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ generation: entry.generation, input }),
+      body: JSON.stringify({ generation: entry.generation }),
       signal,
     },
     { mutationTimeoutMs: 185_000 },
@@ -111,7 +113,8 @@ export function PluginUiEntries() {
         } else if (message.type === 'clipboard.image') {
           await copyPanelImage(message.value);
           result = true;
-        } else if (message.type === 'invoke') result = await invoke(active, message.input, lifetime.current?.signal);
+        } else if (message.type === 'http')
+          result = await requestPluginHttp(active, message.request, lifetime.current?.signal);
         else throw new Error('不支持的插件面板请求');
         if (token === nonce.current && target === frame.current?.contentWindow)
           target?.postMessage({ channel: pluginPanelChannel, nonce: token, requestId, result }, '*');
@@ -141,7 +144,7 @@ export function PluginUiEntries() {
     setHtml('');
     setActive(entry);
     try {
-      setHtml(sandboxedPanelHtml(await invoke(entry, { op: 'open' }, lifetime.current.signal)));
+      setHtml(sandboxedPanelHtml(await mount(entry, lifetime.current.signal)));
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : '面板打开失败');
     }

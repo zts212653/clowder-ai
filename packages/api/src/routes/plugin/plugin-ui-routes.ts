@@ -1,9 +1,16 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { FastifyPluginAsync } from 'fastify';
+import { z } from 'zod';
 import { withoutPluginCallContext } from '../../domains/plugin/carrier/plugin-call-context.js';
 import { withPluginOwnerRequest } from '../../domains/plugin/carrier/plugin-owner-request-context.js';
 import type { DeclaredPluginUi } from '../../domains/plugin/declared/declared-plugin-ui.js';
 import { pluginAccessError, requirePluginOwnerLocalAccess } from '../plugin-access-guards.js';
+
+const mountRequest = z.strictObject({
+  generation: z.string().min(1).max(200),
+  // Accept the original mount spelling only; business operations use declared HTTP routes.
+  input: z.strictObject({ op: z.literal('open') }).optional(),
+});
 
 export const pluginUiRoutes: FastifyPluginAsync<{ ui: DeclaredPluginUi }> = async (app, { ui }) => {
   app.get('/api/plugin-ui', async (request, reply) => {
@@ -11,16 +18,17 @@ export const pluginUiRoutes: FastifyPluginAsync<{ ui: DeclaredPluginUi }> = asyn
     if ('error' in access) return pluginAccessError(reply, access);
     return { entries: ui.list() };
   });
-  app.post<{ Params: { instanceId: string; commandId: string }; Body: { generation: string; input: unknown } }>(
+  app.post<{ Params: { instanceId: string; commandId: string } }>(
     '/api/plugin-ui/:instanceId/:commandId',
-    { bodyLimit: 24_000_000 },
+    { bodyLimit: 1024 },
     async (request, reply) => {
       const access = requirePluginOwnerLocalAccess(request, 'write');
       if ('error' in access) return pluginAccessError(reply, access);
       const { instanceId, commandId } = request.params;
+      const parsed = mountRequest.safeParse(request.body);
+      if (!parsed.success) return reply.status(400).send({ error: 'Invalid plugin mount request' });
       const pluginId = ui.pluginId(instanceId);
-      if (!pluginId || typeof request.body?.generation !== 'string')
-        return reply.status(409).send({ error: '插件入口已失效，请重新打开' });
+      if (!pluginId) return reply.status(409).send({ error: '插件入口已失效，请重新打开' });
       const controller = new AbortController();
       const cancel = () => controller.abort();
       const timer = setTimeout(cancel, 180_000);
@@ -45,7 +53,7 @@ export const pluginUiRoutes: FastifyPluginAsync<{ ui: DeclaredPluginUi }> = asyn
                 queryDigest: createHash('sha256').update('{}').digest('hex'),
               },
             },
-            () => ui.call(instanceId, commandId, request.body.generation, request.body.input),
+            () => ui.call(instanceId, commandId, parsed.data.generation),
           ),
         );
         if (Buffer.byteLength(JSON.stringify(result) ?? '') > 24_000_000)

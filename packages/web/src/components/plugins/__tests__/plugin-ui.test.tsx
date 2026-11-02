@@ -22,7 +22,17 @@ describe('plugin sidebar panel isolation', () => {
         new Response(
           JSON.stringify(
             path === '/api/plugin-ui'
-              ? { entries: [{ instanceId: 'fixture', commandId: 'open', generation: 'activation', label: '问题反馈' }] }
+              ? {
+                  entries: [
+                    {
+                      pluginId: 'dev.fixture',
+                      instanceId: 'fixture',
+                      commandId: 'open',
+                      generation: 'activation',
+                      label: '问题反馈',
+                    },
+                  ],
+                }
               : { result: { kind: 'plugin-panel', version: 1, html: '<p>isolated package UI</p>' } },
           ),
         ),
@@ -56,6 +66,38 @@ describe('plugin sidebar panel isolation', () => {
         html: '<meta http-equiv="Content-Security-Policy" content="default-src *">',
       }).startsWith('<meta http-equiv="Content-Security-Policy" content="default-src \'none\''),
     ).toBe(true);
+  });
+  it('forwards sandbox HTTP requests through the existing declared plugin route and refuses an escaping path', async () => {
+    await act(async () => root.render(<PluginUiEntries />));
+    await act(async () => container.querySelector('button')?.click());
+    const frame = document.querySelector('iframe')!;
+    const source = frame.contentWindow!;
+    const post = vi.spyOn(source, 'postMessage');
+    const send = (requestId: number, path: string) =>
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          source,
+          data: {
+            channel: 'clowder-plugin-ui/v1',
+            nonce: frame.name,
+            requestId,
+            type: 'http',
+            request: { method: 'POST', path, body: { op: 'list' } },
+          },
+        }),
+      );
+    await act(async () => {
+      send(1, 'feedback');
+    });
+    expect(apiFetch.mock.calls[2]?.[0]).toBe('/api/plugins/dev.fixture/feedback');
+    expect(JSON.parse(apiFetch.mock.calls[2]?.[1].body)).toEqual({ op: 'list' });
+    expect(apiFetch.mock.calls[2]?.[1].headers['x-clowder-plugin-ui-generation']).toBe('activation');
+    const count = apiFetch.mock.calls.length;
+    await act(async () => {
+      send(2, '../../other-plugin/write');
+    });
+    expect(apiFetch.mock.calls.length).toBe(count);
+    expect(post.mock.calls.at(-1)?.[0]).toHaveProperty('error');
   });
   it('production-page HTTP fixture represents an empty installed UI registry without admitting mutations', () => {
     const fixture = createChatProofApi(Date.now(), false, true);

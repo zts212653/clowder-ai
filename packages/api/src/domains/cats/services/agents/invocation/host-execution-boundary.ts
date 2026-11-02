@@ -23,12 +23,13 @@ export function captureHostExecutionBoundary(
   };
   const stateRoot = binding.codexAccountLaunch?.stateRoot;
   const accountOwnerRoot = binding.codexAccountLaunch?.accountOwnerRoot;
+  const implementation = current?.implementation ?? binding.implementation;
   return Object.freeze({
     v: 1,
     clientId: current?.clientId ?? binding.catConfig?.clientId ?? 'undeclared',
     carrier,
-    implementationKey: current?.implementation?.key ?? binding.implementation?.key ?? 'undeclared',
-    implementationGeneration: current?.implementation?.generation ?? binding.implementation?.generation ?? 'undeclared',
+    implementationKey: implementation?.key ?? 'undeclared',
+    implementationGeneration: implementation?.compatibilityRevision ?? implementation?.key ?? 'undeclared',
     accountRef: binding.resolvedAccount?.id ?? binding.effectiveAccountRef ?? null,
     ...(stateRoot ? { accountStateRoot: normalizePath(stateRoot) } : {}),
     ...(accountOwnerRoot ? { accountOwnerRoot: normalizePath(accountOwnerRoot) } : {}),

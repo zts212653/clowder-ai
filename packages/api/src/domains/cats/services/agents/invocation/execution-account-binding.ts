@@ -28,7 +28,7 @@ import {
 import { type CodexLaunchPolicy, captureCodexLaunchPolicy } from '../../../../../config/codex-cli.js';
 import { codexExecutionAccountSnapshot } from '../../../../../config/codex-execution-account.js';
 import { resolveActiveProjectRoot } from '../../../../../utils/active-project-root.js';
-import type { AgentServiceOptions } from '../../types.js';
+import type { AgentService, AgentServiceOptions } from '../../types.js';
 import { hasSupportedEnvTemplate } from '../providers/env-map.js';
 import {
   captureMemberExecutionPreferences,
@@ -47,7 +47,7 @@ export interface FrozenExecutionBinding {
   /** Pure role semantics reference; not the actual client instruction digest or CompatKey. */
   readonly personaDigest?: string;
   readonly hostExecutionBoundary?: Readonly<NonNullable<SessionRecord['hostExecutionBoundary']>>;
-  readonly implementation?: Readonly<{ key: string; generation: string; clientId?: CatConfig['clientId'] }>;
+  readonly implementation?: ReturnType<NonNullable<AgentService['implementationSnapshot']>>;
   readonly sharedMcpLaunch?: Readonly<{ transport: string; context?: SharedInvocationContext }>;
   readonly openCodeMcpConfig?: import('../providers/opencode-config-writer.js').OpenCodeMcpConfigPlan;
   readonly accountEnv?: Record<string, string>;

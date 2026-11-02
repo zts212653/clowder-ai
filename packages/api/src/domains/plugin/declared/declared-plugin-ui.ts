@@ -5,6 +5,7 @@ import { currentPluginOwnerRequestContext, withPluginOwnerWebhook } from '../car
 import type { PluginRuntimeAdmission } from '../carrier/runtime-carrier.js';
 
 export interface PluginUiEntry {
+  pluginId: string;
   instanceId: string;
   commandId: string;
   label: string;
@@ -54,6 +55,7 @@ export class DeclaredPluginUi {
           return command
             ? [
                 {
+                  pluginId: active.admission.packageRecord.pluginId,
                   instanceId,
                   commandId: command.id,
                   label: slot.label,
@@ -77,7 +79,21 @@ export class DeclaredPluginUi {
       )
       .sort((a, b) => a.order - b.order);
   }
-  async call(instanceId: string, commandId: string, generation: string, input: unknown): Promise<unknown> {
+  activation(
+    pluginId: string,
+    instanceId: string,
+    generation: string,
+  ): { signal: AbortSignal; assertCurrent(): void } | undefined {
+    const active = this.#active.get(instanceId);
+    if (!active || active.admission.packageRecord.pluginId !== pluginId || active.generation !== generation) return;
+    return {
+      signal: active.lifetime.signal,
+      assertCurrent: () => {
+        if (this.#active.get(instanceId) !== active) throw new Error('Plugin UI activation expired');
+      },
+    };
+  }
+  async call(instanceId: string, commandId: string, generation: string): Promise<unknown> {
     const active = this.#active.get(instanceId);
     const command = active?.commands.find((c) => c.id === commandId);
     if (!active || !command || active.generation !== generation || !active.slots.some((s) => s.command === commandId))
@@ -95,7 +111,7 @@ export class DeclaredPluginUi {
         const owner = currentPluginOwnerRequestContext(instanceId);
         if (!owner || !owner.requestIdentity) throw new Error('Plugin UI requires an owner request');
         await owner.assertCurrent();
-        return this.invoke(instanceId, command.action.method, input);
+        return this.invoke(instanceId, command.action.method, { op: 'open', ...command.action.params });
       },
       active.lifetime.signal,
     );
