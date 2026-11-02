@@ -475,6 +475,16 @@ test('a scoped member has the same hard tool fence with its own identity project
     },
   });
   f.options.pluginNativeLaunch.sandbox.kind = 'scoped-member';
+  const { catRegistry } = await import('@cat-cafe/shared');
+  const { captureInvocationL0Input } = await import(
+    '../dist/domains/cats/services/agents/providers/l0-input-capture.js'
+  );
+  f.options.frozenL0Input = captureInvocationL0Input({
+    catId: 'codex',
+    catConfig: { ...catRegistry.getOrThrow('codex').config, roleDescription: 'admission frozen role' },
+    model: 'gpt-5.3-codex',
+    projection: 'scoped-member',
+  });
   const messages = await collect(f.service.invoke('Only the admitted member tools are available.', f.options));
   assert.equal(
     messages.some((message) => message.type === 'error'),
@@ -482,6 +492,8 @@ test('a scoped member has the same hard tool fence with its own identity project
   );
   assert.equal(f.calls.length, 1);
   assert.equal(compiled[0].projection, 'scoped-member');
+  assert.equal(compiled[0].frozenInput, f.options.frozenL0Input);
+  assert.match(compiled[0].frozenInput.variables.MEMBER_IDENTITY, /admission frozen role/);
   assert.equal(compiled[0].frozenInput.projection, 'scoped-member');
   assert.match(compiled[0].frozenInput.variables.MEMBER_IDENTITY, /model=gpt-5.3-codex/);
   assert.equal(compiled[0].requireFrozenInput, true);

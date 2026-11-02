@@ -6,6 +6,24 @@ const id = z.string().min(1).max(2048);
 const count = z.number().int().nonnegative();
 const mode = z.enum(['lexical', 'semantic', 'hybrid']);
 export const messageSearchResponseSchema = z.object({
+  notice: z
+    .object({
+      summary: text,
+      counts: z
+        .object({
+          candidates: count,
+          assessed: count,
+          supported: count,
+          rejected: count,
+          indeterminate: count,
+          unassessed: count,
+        })
+        .optional(),
+      execution: text.optional(),
+      coverage: text,
+      nextStep: text,
+    })
+    .optional(),
   searchId: id,
   query: z.string().max(2000),
   results: z
@@ -65,6 +83,9 @@ export const messageSearchResponseSchema = z.object({
         rejected: count,
         indeterminate: count,
         unassessed: count,
+        batches: z
+          .object({ started: count.max(2), completed: count.max(2), cancelled: count.max(2), failed: count.max(2) })
+          .optional(),
       })
       .optional(),
     response: z.object({

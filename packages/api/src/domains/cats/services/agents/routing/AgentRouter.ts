@@ -435,6 +435,7 @@ function buildMentionData(configs: Record<string, import('@cat-cafe/shared').Cat
  * Options for AgentRouter constructor
  */
 export interface AgentRouterOptions {
+  scopedMemberRouting?: import('./scoped-member-routing.js').ScopedMemberRoutingPort;
   messageSearchAnswerService?: import('../../../../memory/MessageSearchAnswerPublicationService.js').MessageSearchAnswerPublicationService;
   resolveTrustedImagePath?: (hmrId: string) => Promise<string | undefined>;
   resolveInvocationPluginMcpView?: import('../invocation/invoke-single-cat.js').InvocationDeps['resolveInvocationPluginMcpView'];
@@ -562,6 +563,7 @@ export interface AgentRouterOptions {
  * Router that parses @ mentions and routes to appropriate agent services
  */
 export class AgentRouter {
+  private scopedMemberRouting?: AgentRouterOptions['scopedMemberRouting'];
   private readonly services: Record<string, AgentService>;
   private readonly unavailableServices = new Map<string, AgentRegistrationFailure>();
   private registry: InvocationRegistry;
@@ -668,6 +670,7 @@ export class AgentRouter {
   }
 
   constructor(options: AgentRouterOptions) {
+    this.scopedMemberRouting = options.scopedMemberRouting;
     this.services = {};
     this.speechMentionRe = /$^/;
     this.rebuildRuntimeCaches(options.agentRegistry);
@@ -1538,6 +1541,21 @@ export class AgentRouter {
     };
 
     try {
+      if (this.scopedMemberRouting) {
+        const controlled = await this.scopedMemberRouting.resolve({
+          userId,
+          threadId: resolvedThreadId,
+          sourceMessageId: storedUserMessage.id,
+          targetCats,
+          options: routeOptions,
+        });
+        if (controlled.kind === 'controlled') {
+          yield* controlled.stream;
+          routeSpan.setStatus({ code: SpanStatusCode.OK });
+          return;
+        }
+        if (controlled.kind !== 'ordinary') throw new Error('controlled_member_not_ready');
+      }
       if (strategy === 'parallel') {
         yield* routeParallel(strategyDeps, targetCats, cleanMessage, userId, resolvedThreadId, routeOptions);
       } else {
@@ -1569,6 +1587,20 @@ export class AgentRouter {
     intent: IntentResult,
     options: RouteExecutionOptions,
   ): AsyncIterable<AgentMessage> {
+    if (this.scopedMemberRouting) {
+      const controlled = await this.scopedMemberRouting.resolve({
+        userId,
+        threadId,
+        sourceMessageId: userMessageId,
+        targetCats,
+        options,
+      });
+      if (controlled.kind === 'controlled') {
+        yield* controlled.stream;
+        return;
+      }
+      if (controlled.kind !== 'ordinary') throw new Error('controlled_member_not_ready');
+    }
     const cleanMessage = appendContextAttachmentsToPrompt(stripIntentTags(message), options.contentBlocks);
     const strategy =
       options.targetDispatchMode ?? (intent.intent === 'ideate' && targetCats.length > 1 ? 'parallel' : 'serial');

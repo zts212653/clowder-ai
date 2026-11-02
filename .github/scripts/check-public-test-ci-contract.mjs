@@ -3,6 +3,10 @@ import { readFileSync } from 'node:fs';
 import { parse } from 'yaml';
 
 const workflow = parse(readFileSync(new URL('../workflows/ci.yml', import.meta.url), 'utf8'));
+assert.ok(
+  !Object.hasOwn(workflow.on.pull_request, 'paths') && !Object.hasOwn(workflow.on.pull_request, 'paths-ignore'),
+  'required public CI must start for every PR, including docs/assets-only changes; workflow-level path filters leave required checks pending',
+);
 for (const event of ['push', 'pull_request']) {
   assert.deepEqual(
     [...workflow.on[event].branches].sort(),

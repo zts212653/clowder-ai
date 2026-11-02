@@ -34,6 +34,45 @@ function fixture(t) {
 }
 const service = { injectsL0Natively: () => true };
 
+test('scoped SDK admission retains runtime without reading ambient MCP or owner profile', async (t) => {
+  const { catId } = fixture(t);
+  const runtime = { path: '/fixture/claude', version: '1.2.3', sha256: 'a'.repeat(64) };
+  const binding = await prepareInvocationExecutionBinding(
+    {
+      apiUrl: 'http://127.0.0.1:13004',
+      threadStore: null,
+      resolveInvocationPluginMcpView: () => {
+        throw new Error('ambient MCP read');
+      },
+      profileRepository: {
+        profileDir: () => {
+          throw new Error('owner profile read');
+        },
+      },
+    },
+    {
+      catId,
+      userId: 'isolated-owner',
+      threadId: 'scoped-thread',
+      service: {
+        ...service,
+        freshnessCarrierCapability: () => ({ carrier: 'claude_agent_sdk' }),
+        captureInvocationOptions: async () => ({ claudeSdkRuntime: runtime }),
+      },
+      toolExecutionPolicy: {
+        mode: 'plugin_native',
+        pluginInstanceId: 'fixture',
+        contributionId: 'tools',
+        memberSession: { sessionId: 'member', generation: 1, executionId: 'turn' },
+      },
+    },
+  );
+  assert.equal(binding.frozenL0Input.projection, 'scoped-member');
+  assert.equal(binding.sharedMcpLaunch.context, undefined);
+  assert.equal(binding.sharedMcpLaunch.transport, 'stdio');
+  assert.deepEqual(binding.providerOptions, { claudeSdkRuntime: runtime });
+});
+
 test('admission fences a role registry change while resolving the thread workspace', async (t) => {
   const { all, catId, member } = fixture(t);
   let enter, release;

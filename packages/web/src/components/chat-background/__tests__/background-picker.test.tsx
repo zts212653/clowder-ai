@@ -111,7 +111,12 @@ it('removes the failed-load retry when a supported shell becomes unsupported', a
   expect(apiFetch).toHaveBeenCalledTimes(1);
 });
 
-it("starts at the quieter 20% cap while retaining each mode's actual readability boundary", async () => {
+it.each([
+  { label: '黄昏的云', url: '/backgrounds/sunset-clouds.jpg' },
+  { label: '窗边陪你', url: '/backgrounds/family-window-companions.webp' },
+  { label: '云上歇班', url: '/backgrounds/family-cloud-day-off.webp' },
+  { label: '围着你打盹', url: '/backgrounds/family-nap-circle.webp' },
+])('selects $label from the built-in gallery and saves its image with the quieter opacity', async ({ label, url }) => {
   vi.mocked(sampleBackgroundOpacity).mockResolvedValue({ light: 0.38, dark: 0.13 });
   vi.mocked(apiFetch).mockImplementation(async (_url, init) =>
     Response.json(
@@ -121,9 +126,15 @@ it("starts at the quieter 20% cap while retaining each mode's actual readability
     ),
   );
   await mount(true);
-  await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="黄昏的云"]')?.click());
+  const choice = [...host.querySelectorAll<HTMLButtonElement>('button')].find(
+    (button) => button.getAttribute('aria-label') === label,
+  );
+  expect(choice).toBeDefined();
+  await act(async () => choice?.click());
   const write = vi.mocked(apiFetch).mock.calls.find(([, init]) => init?.method === 'PUT');
   const saved = JSON.parse(String(write?.[1]?.body)).background;
+  expect(saved.url).toBe(url);
+  expect(saved.name).toBe(label);
   expect(saved.opacity).toEqual({ light: 0.2, dark: 0.13 });
   expect(saved.recommendedOpacity).toEqual(saved.opacity);
   expect(JSON.parse(String(write?.[1]?.body)).metadata.readableOpacity).toEqual({ light: 0.38, dark: 0.13 });

@@ -72,10 +72,12 @@ export type {
   MessageNavigationAdmission,
   MessageNavigationReference,
   MessageSearchInput,
+  MessageSearchNotice,
   MessageSearchResponse,
   MessageSearchResult,
 } from './message-search.js';
 export * from './message-search-answer.js';
+export * from './message-search-notice.js';
 // First-party host-tool identities shared by onboarding discovery and catalog repair.
 export * from './native-tool-identities.js';
 export * from './plugin-archive-replacement.js';

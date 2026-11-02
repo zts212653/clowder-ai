@@ -126,11 +126,14 @@ export async function prepareCodexNativeLaunch(
   }
   const captured: AgentServiceOptions = {
     ...options,
-    frozenL0Input: captureInvocationL0Input(
-      kind === 'scoped-member'
-        ? { catId, projection: kind, catConfig: catRegistry.getOrThrow(catId).config, model: model ?? '' }
-        : { catId, projection: 'public' },
-    ),
+    frozenL0Input:
+      kind === 'scoped-member' && options.frozenL0Input
+        ? options.frozenL0Input
+        : captureInvocationL0Input(
+            kind === 'scoped-member'
+              ? { catId, projection: kind, catConfig: catRegistry.getOrThrow(catId).config, model: model ?? '' }
+              : { catId, projection: 'public' },
+          ),
     signal,
     workingDirectory: canonicalWorkspace,
     callbackEnv,

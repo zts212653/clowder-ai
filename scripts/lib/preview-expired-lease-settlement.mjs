@@ -1,5 +1,5 @@
 import { rmSync } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname } from 'node:path';
 import { assertNamedAlphaNotServing } from './alpha-coordinates.mjs';
 import { acquireNamedAlphaLifecycle } from './alpha-lifecycle-lock.mjs';
 import { assertNamedAlphaRedisHistoricalProof } from './alpha-redis-process.mjs';
@@ -25,6 +25,7 @@ import {
   publishRegistrationResult,
 } from './preview-alpha-registration-settlement.mjs';
 import { readBoundPreviewCommand } from './preview-command-identity.mjs';
+import { capturePreviewDiagnosticLog } from './preview-diagnostic-log.mjs';
 import { EXPIRED_LEASE_SETTLEMENT, publishedExpiredLease } from './preview-expired-lease-journal.mjs';
 import { readForensicRecoveryHistory } from './preview-forensic-recovery-history.mjs';
 import { snapshotRedisRetirementData } from './preview-redis-retirement-data.mjs';
@@ -94,11 +95,7 @@ export async function settleExpiredNamedAlphaLease(config, record, deps, release
     const history = readForensicRecoveryHistory(record, evidence);
     if (!history) throw new Error('saving recovery cannot downgrade to lease retirement');
     for (const [index, snapshot] of history.files.entries()) evidence.sources[`history_${index}`] = snapshot;
-    if (record.logPath) {
-      if (record.logPath !== (config.logPath ?? join(config.stateDir, `${config.id}.log`)))
-        throw new Error('expired preview log changed');
-      evidence.sources.log = recoverySnapshot(record.logPath, { maxBytes: 16 * 1024 * 1024 });
-    }
+    const log = capturePreviewDiagnosticLog(config, record, evidence);
     if (record.origin === 'launchd') evidence.sources.plist = recoverySnapshot(config.plistPath);
     const data = snapshotRedisRetirementData(evidence);
     const state = {
@@ -106,9 +103,13 @@ export async function settleExpiredNamedAlphaLease(config, record, deps, release
       history,
       leaseRemoved: Boolean(published?.savedLease && !recoveryPathExists(evidence.sources.lease.path)),
     };
-    const verify = () => verifyExpiredEvidence(config, record, evidence, deps, state, command);
+    const verify = () => {
+      verifyExpiredEvidence(config, record, evidence, deps, state, command);
+      log.assertCurrent();
+    };
     verify();
     const journal = preserveRegistrationJournal(record, evidence, data.files, EXPIRED_LEASE_SETTLEMENT, {
+      ...log.details,
       directories: data.directories,
       retiredLease: {
         path: evidence.sources.lease.path,

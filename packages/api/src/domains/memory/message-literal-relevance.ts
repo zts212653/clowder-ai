@@ -8,12 +8,28 @@ type Score = { coverage: number; specificity: number };
 // Match SQLite LOWER, which folds ASCII rather than locale-dependent Unicode.
 const fold = (value: string): string => value.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
 
+function chineseLiteralMatch(words: string[]): (content: string) => number {
+  // Preserve the existing small-query native substring path, with early exit.
+  if (words.length <= 4) return (content) => Number(words.some((word) => content.includes(word)));
+  // Long near-matching prefixes can make native alternation slower than the
+  // linear automaton. Bound literal width on the accelerated path; 32 is an
+  // algorithm selection limit, never a query/term truncation.
+  if (words.some((word) => word.length > 32)) {
+    const coverage = literalTermCoverage(words);
+    return (content) => Number(coverage(content) > 0);
+  }
+  // Admission needs any hit. Escaped, flagless alternatives preserve UTF-16
+  // includes semantics; distinct-term counting stays on the ranking path.
+  const literal = new RegExp(words.map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'));
+  return (content) => Number(literal.test(content));
+}
+
 /** Query-derived literal evidence, shared by pre-LIMIT SQL and hybrid ordering. */
 export function messageLiteralRelevance(query: string) {
   const words = [...new Set(query.trim().split(/\s+/).filter(Boolean).map(fold))];
   if (!words.some((word) => /[一-鿿㐀-䶿]/.test(word))) return undefined;
   const coverage = literalTermCoverage(words);
-  const chinese = literalTermCoverage(splitLexicalBackfillWords(query).filter((word) => /[一-鿿㐀-䶿]/.test(word)));
+  const chinese = chineseLiteralMatch(splitLexicalBackfillWords(query).filter((word) => /[一-鿿㐀-䶿]/.test(word)));
   const phrase = fold(query.trim());
   // Spaces between CJK terms are query separators, not stronger evidence in
   // quoted query/diagnostic messages than the same adjacent words in an original.
@@ -50,7 +66,7 @@ export function messageLiteralRelevance(query: string) {
     // SQL LOWER does the same ASCII fold once in native code per callback.
     coverageFolded: coverage,
     matchesChineseFolded(content: string): number {
-      return Number(chinese(content) > 0);
+      return chinese(content);
     },
     compareLexical(a: PassageResult, b: PassageResult): number {
       const left = score(a);

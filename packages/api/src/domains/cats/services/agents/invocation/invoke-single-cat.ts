@@ -210,6 +210,7 @@ import {
   promptGenerationId,
 } from './provider-presentation-delivery.js';
 import { createRequestGenerationRecorder } from './request-generation-recorder.js';
+import { captureScopedMemberLaunch, scopedMemberInvocationDeps } from './scoped-member-launch.js';
 import { resolveManagedSessionPolicySnapshot } from './session-policy-snapshot.js';
 import { prepareSharedMcpLaunch } from './shared-mcp-launch.js';
 
@@ -681,7 +682,7 @@ import {
 } from './invoke-helpers.js';
 import { MEMBER_TIMEOUT_REASON, MemberOutputTimeout, type MemberTimeoutEvent } from './member-output-timeout.js';
 import type { TaskProgressItem, TaskProgressStatus, TaskProgressStore } from './TaskProgressStore.js';
-import { assertToolExecutionPolicySupported } from './tool-execution-policy.js';
+import { assertToolExecutionPolicySupported, normalizeToolExecutionPolicy } from './tool-execution-policy.js';
 
 function usesAgyNativeCarrier(service: AgentService): boolean {
   return service instanceof AgyNativeAgentService;
@@ -1259,6 +1260,8 @@ export interface InvocationDeps {
  * Per-invocation parameters
  */
 export interface InvocationParams {
+  /** Owner-admitted member context; only its declared native MCP and approved prompt are projected. */
+  readonly scopedMemberLaunch?: AgentServiceOptions['pluginNativeLaunch'];
   readonly routingAdmission?: import('@cat-cafe/shared').RoutingAdmissionProvenanceV1;
   /** Frozen before execution preflight/child creation; never persisted with its private account material. */
   readonly executionBinding?: FrozenExecutionBinding;
@@ -1512,8 +1515,14 @@ export async function prepareInvocationExecutionBinding(
     model: input.model,
     workspace,
   });
-  const captureOptions = input.service?.captureInvocationOptions?.bind(input.service);
+  const isScopedMember =
+    input.toolExecutionPolicy?.mode === 'plugin_native' && Boolean(input.toolExecutionPolicy.memberSession);
+  const captureOptions =
+    !isScopedMember || carrier?.carrier === 'claude_agent_sdk'
+      ? input.service?.captureInvocationOptions?.bind(input.service)
+      : undefined;
   const captureOpenCodeMcp =
+    !isScopedMember &&
     catConfig?.clientId === 'opencode' &&
     binding.resolvedAccount &&
     resolveEffectiveOpenCodeModel(catConfig.provider?.trim() || undefined, binding.executionPreferences?.model?.trim())
@@ -1523,8 +1532,9 @@ export async function prepareInvocationExecutionBinding(
         }
       : undefined;
   const exposureProject = pluginMcpExposureProject(workspace.threadProjectPath, workspace.workingDirectory);
-  const mcpTransport = process.env.CAT_CAFE_MCP_TRANSPORT ?? 'shared';
+  const mcpTransport = isScopedMember ? 'stdio' : (process.env.CAT_CAFE_MCP_TRANSPORT ?? 'shared');
   const captureSharedMcp =
+    !isScopedMember &&
     catConfig?.provider !== 'openai-chatgpt-pro' &&
     catConfig?.mcpSupport !== false &&
     input.toolExecutionPolicy?.mode !== 'read_only';
@@ -1533,7 +1543,7 @@ export async function prepareInvocationExecutionBinding(
     captureOptions || captureOpenCodeMcp || captureSharedMcp
       ? await preflightRace(
           Promise.resolve().then(async () => {
-            const view = await deps.resolveInvocationPluginMcpView?.();
+            const view = isScopedMember ? undefined : await deps.resolveInvocationPluginMcpView?.();
             isPluginMcpCurrent = () => view?.isCurrent?.() !== false;
             input.signal?.throwIfAborted();
             return withInvocationPluginMcpView(
@@ -1623,13 +1633,25 @@ export async function prepareInvocationExecutionBinding(
     );
   const frozenL0Input =
     catConfig && (input.service?.injectsL0Natively?.() || catConfig.clientId === 'opencode')
-      ? captureInvocationL0Input({
-          catId: input.catId,
-          catConfig,
-          userId: input.userId,
-          model: binding.executionPreferences?.model,
-          profileRepository: deps.profileRepository,
-        })
+      ? captureInvocationL0Input(
+          isScopedMember
+            ? {
+                catId: input.catId,
+                catConfig,
+                model:
+                  (catConfig.clientId === 'kimi' && binding.accountEnv?.KIMI_MODEL_NAME) ||
+                  binding.executionPreferences?.model ||
+                  catConfig.defaultModel,
+                projection: 'scoped-member',
+              }
+            : {
+                catId: input.catId,
+                catConfig,
+                userId: input.userId,
+                model: binding.executionPreferences?.model,
+                profileRepository: deps.profileRepository,
+              },
+        )
       : undefined;
   const prepared = {
     ...binding,
@@ -1646,13 +1668,14 @@ export async function prepareInvocationExecutionBinding(
 }
 
 export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationParams): AsyncIterable<AgentMessage> {
+  const invocationDeps = params.scopedMemberLaunch ? scopedMemberInvocationDeps(deps) : deps;
   const services = new InvocationServiceScope();
   try {
     const service = params.executionBinding ? params.service : services.pin(params.service);
     let executionBinding: FrozenExecutionBinding;
     try {
       executionBinding =
-        params.executionBinding ?? (await prepareInvocationExecutionBinding(deps, { ...params, service }));
+        params.executionBinding ?? (await prepareInvocationExecutionBinding(invocationDeps, { ...params, service }));
       if (
         deps.threadStore &&
         !executionBinding.workspace.workingDirectory &&
@@ -1671,7 +1694,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       yield { type: 'done', catId: params.catId, timestamp: Date.now() };
       return;
     }
-    yield* invokePreparedSingleCat(deps, { ...params, executionBinding, service });
+    yield* invokePreparedSingleCat(invocationDeps, { ...params, executionBinding, service });
   } finally {
     await services.dispose();
   }
@@ -1686,7 +1709,13 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
   let prompt = params.prompt;
   const invocationPromptAdditions: string[] = [];
   const originTriggerMessageId = params.a2aTriggerMessageId ?? params.executionCausal?.triggerMessageId;
-  const effectiveToolExecutionPolicy = params.toolExecutionPolicy;
+  const effectiveToolExecutionPolicy =
+    params.scopedMemberLaunch && params.toolExecutionPolicy
+      ? normalizeToolExecutionPolicy(params.toolExecutionPolicy)
+      : params.toolExecutionPolicy;
+  const scopedMemberLaunch = captureScopedMemberLaunch(params, frozenExecutionBinding.workspace.workingDirectory);
+  const isScopedMember = scopedMemberLaunch !== undefined;
+  await scopedMemberLaunch?.assertCurrent();
   const isAgyNative = usesAgyNativeCarrier(service);
   assertToolExecutionPolicySupported(service, effectiveToolExecutionPolicy);
   const freshnessCarrierCapability = service.freshnessCarrierCapability?.(
@@ -1731,7 +1760,8 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
 
   const sharedMcpLaunch = frozenExecutionBinding.sharedMcpLaunch;
   if (!sharedMcpLaunch) throw new Error('Shared MCP admission snapshot unavailable');
-  const { transport: mcpTransport, context: sharedMcpContext } = sharedMcpLaunch;
+  const { transport: mcpTransport, context: admittedSharedMcpContext } = sharedMcpLaunch;
+  const sharedMcpContext = isScopedMember ? undefined : admittedSharedMcpContext;
   const { invocationId, callbackToken } = await registry.create(
     userId,
     catId,
@@ -1918,6 +1948,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
     | undefined;
   const resolveInvocationMemoryCues = async (): Promise<void> => {
     invocationPromptAdditions.length = 0;
+    if (isScopedMember) return;
     if (deps.runtimeInteractionPort && params.ownerAuthProvenance === 'strict') {
       try {
         const pendingDecisionPrompt = await deps.runtimeInteractionPort.pendingConversationDecisionPrompt(
@@ -3075,7 +3106,12 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
     if (threadStore) {
       const thread = frozenExecutionBinding.workspace.thread;
       if (thread) {
-        if (threadId !== DEFAULT_THREAD_ID && !thread.systemKind && thread.titleSource === 'temporary') {
+        if (
+          !isScopedMember &&
+          threadId !== DEFAULT_THREAD_ID &&
+          !thread.systemKind &&
+          thread.titleSource === 'temporary'
+        ) {
           firstReplyNamingInstruction =
             '这条对话尚未起名。首次回话时，请调用 cat_cafe_set_thread_metadata 的 title，起一个概括这次任务的短名（不照抄用户原话）。用户自己填过或改过的名字会受保护；猫只起一次名。';
         }
@@ -3224,7 +3260,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
     // F070 Phase 2: Inject dispatch mission context for external projects
     let missionPrefix = '';
     let capturedMissionPack: import('@cat-cafe/shared').DispatchMissionPack | undefined;
-    if (workingDirectory && !isSameProject(workingDirectory, hostProjectRoot) && threadStore) {
+    if (!isScopedMember && workingDirectory && !isSameProject(workingDirectory, hostProjectRoot) && threadStore) {
       try {
         const thread = await preflightRace(
           Promise.resolve(threadStore.get(threadId)),
@@ -3756,7 +3792,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
     let routingContextProjectionFailureAudited = false;
     const resolveRoutingContextProjection = async (): Promise<void> => {
       routingContextPrepend = '';
-      if (!deps.routingContextPromptProjection) return;
+      if (isScopedMember || !deps.routingContextPromptProjection) return;
       try {
         routingContextPrepend = await deps.routingContextPromptProjection.resolve({
           ownerId: userId,
@@ -3810,6 +3846,9 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
     // --append-system-prompt proved unreliable (cats didn't receive content).
     // Codex/Gemini AgentServices also prepend if options.systemPrompt is set,
     // so we intentionally do NOT pass systemPrompt in options to avoid double injection.
+    // A scoped native launch restores its own admitted journal, rather than
+    // resuming an ambient native conversation from the ordinary member route.
+    if (isScopedMember) sessionId = undefined;
     const isResume = !!sessionId;
     const canSkipOnResume = true;
     const compressionKey = `${userId}:${catId as string}:${threadId}`;
@@ -3844,7 +3883,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
     // prompt (a system_info output can't reach cat cognition — see
     // context-management-hint). Queued on the prior warn turn; independent of
     // injectSystemPrompt so it lands even on resumes that skip identity re-injection.
-    const contextHintPrefix = takeContextHintPrefix(compressionKey);
+    const contextHintPrefix = isScopedMember ? '' : takeContextHintPrefix(compressionKey);
 
     // L0-budget-defense PR-B-impl (ADR-038 件套 ④): staging layer prepend.
     // Wired here (next to F225 contextHintPrefix) and NOT folded into
@@ -3854,7 +3893,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
     // turns. ADR-038 contract is "每轮注入生效" → must mirror F225 pattern
     // (independent of injectSystemPrompt). Staging content goes to runtime
     // prompt path, NOT compiled native L0 (砚砚 PR #2221 R1 P2 boundary).
-    const stagingPrepend = buildStagingPrepend(catId);
+    const stagingPrepend = isScopedMember ? '' : buildStagingPrepend(catId);
     let promptWithInvocationAdditions = '';
     let effectivePrompt = '';
     let projectionDeltaSize: 'small' | 'large' | undefined;
@@ -3862,6 +3901,11 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
       includeSystemPrompt: boolean,
       presentationSegments: readonly string[],
     ): { readonly promptWithInvocationAdditions: string; readonly effectivePrompt: string } => {
+      if (isScopedMember) {
+        if (presentationSegments.length || invocationPromptAdditions.length)
+          throw new Error('scoped_member_context_expanded');
+        return { promptWithInvocationAdditions: prompt, effectivePrompt: prompt };
+      }
       if (nativeAuthContinuation) {
         return {
           promptWithInvocationAdditions: NATIVE_AUTH_CONTINUATION_PROMPT,
@@ -4266,6 +4310,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
       ...(executionAccount ? { executionAccount } : {}),
       parentSpan: invocationSpan,
       ...(effectiveToolExecutionPolicy ? { toolExecutionPolicy: effectiveToolExecutionPolicy } : {}),
+      ...(scopedMemberLaunch ? { pluginNativeLaunch: scopedMemberLaunch } : {}),
     };
 
     let lastErrorMessage: string | undefined;
@@ -5613,7 +5658,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
     const initialResumeSessionId = sessionId;
     const shouldTrackGeminiResumeFailures = catId === 'gemini' && Boolean(initialResumeSessionId);
     const resumeFailureCounts: Partial<Record<ResumeFailureKind, number>> = {};
-    const maxAttempts = 2;
+    const maxAttempts = isScopedMember ? 1 : 2;
 
     // Universal debug log: capture everything needed to diagnose invocation issues.
     // This is provider-agnostic — every cat (Claude, Codex, Gemini, OpenCode, etc.)
@@ -5651,11 +5696,12 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
       );
     }
 
-    let allowSessionRetry = Boolean(sessionId) && !requiresImportedHistory && !isAgyAcp;
-    let allowTransientRetry = !isAgyAcp;
+    let allowSessionRetry = !isScopedMember && Boolean(sessionId) && !requiresImportedHistory && !isAgyAcp;
+    let allowTransientRetry = !isScopedMember && !isAgyAcp;
     let nextRequestGenerationReason: RequestGenerationRetryReason | undefined;
     let consumedClaudeCompactionObservation: string | undefined;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      await scopedMemberLaunch?.assertCurrent();
       const attemptStartedAt = Date.now();
       let launchCountThisAttempt = 0;
       // In preflight mode the generation does not exist yet — it is built inside
@@ -6165,7 +6211,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
         // Other self-heal paths (prompt limit, context overflow) all guard on !attemptHasContentOutput.
         // Without this guard, a multi-step run that used a tool then ended with a malformed turn
         // would re-run the original prompt from scratch — duplicating tool actions.
-        if (requiresImportedHistory && msg.type === 'error' && isMalformedToolCallError(msg.error)) {
+        if (!isScopedMember && requiresImportedHistory && msg.type === 'error' && isMalformedToolCallError(msg.error)) {
           for await (const out of streamProcessedOutputs({
             ...msg,
             error: 'malformed_toolcall: 原会话本轮工具调用未完成，原会话仍保留；请重试。',
@@ -6174,6 +6220,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
           continue;
         }
         if (
+          !isScopedMember &&
           !nativeAuthContinuation &&
           msg.type === 'error' &&
           isMalformedToolCallError(msg.error) &&
@@ -6185,7 +6232,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
         // F215 AC-B6 UX fix: when content was already emitted, the malformed error must NOT reach
         // the user with "系统已触发恢复流程" (a lie — no retry fires when attemptHasContentOutput=true).
         // Replace the raw error with an honest partial-output text notice.
-        if (msg.type === 'error' && isMalformedToolCallError(msg.error) && attemptHasContentOutput) {
+        if (!isScopedMember && msg.type === 'error' && isMalformedToolCallError(msg.error) && attemptHasContentOutput) {
           log.warn(
             { catId, error: msg.error },
             '[F215] Malformed after content output — replacing misleading error with partial-output notice',

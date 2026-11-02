@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { dirname, resolve } from 'node:path';
 import type { PluginIconSpec, PluginManagerDetail } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
@@ -150,6 +151,10 @@ export interface DormantPluginRuntimeCompositionOptions {
   readonly taskStore?: ITaskStore;
   readonly members?: PluginMembersServices;
   readonly runtimeInfo?: () => import('./host-surface/plugin-neutral-host.js').PluginRuntimeInfo;
+  readonly memberSessions?: (
+    scope: import('./member-sessions/types.js').MemberSessionScope,
+    signal?: AbortSignal,
+  ) => import('./member-sessions/host.js').PluginMemberSessionsHost;
   readonly redis?: RedisClient;
   /** The Host-wide messaging stores shared with the one publishing MessageStore wrapper. */
   readonly messagingStores?: MessagingStores;
@@ -486,6 +491,21 @@ export function createDormantPluginRuntimeComposition(
         inventory: inventoryStore,
         ...(options.members ? { members: options.members } : {}),
         ...(options.runtimeInfo ? { runtimeInfo: options.runtimeInfo } : {}),
+        ...(options.memberSessions && options.threadOwnerUserId
+          ? {
+              memberSessions: (assertCurrent: () => Promise<void>) =>
+                options.memberSessions!(
+                  {
+                    pluginInstanceId,
+                    packageDigest,
+                    activationId: randomUUID(),
+                    ownerUserId: options.threadOwnerUserId!,
+                    assertCurrent,
+                  },
+                  activationSignal,
+                ),
+            }
+          : {}),
       }),
     packages,
     materializer: builtinPackages,

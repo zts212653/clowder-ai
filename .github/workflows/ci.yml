@@ -10,11 +10,7 @@ on:
       - 'assets/**'
   pull_request:
     branches: [main, next, develop]
-    paths-ignore:
-      - 'docs/**'
-      - '*.md'
-      - 'designs/**'
-      - 'assets/**'
+    # Required checks must report for docs/assets-only PRs as well.
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -92,6 +88,21 @@ jobs:
           src/components/__tests__/member-runtime-catalog.test.tsx
           src/components/settings/plugin-manager/__tests__/agent-client-identity.test.tsx
           src/hooks/__tests__/useSendMessage-routing-confirmation.test.ts
+      - name: Scoped member sessions preserve frozen execution contracts
+        run: >-
+          pnpm --filter @cat-cafe/api exec node scripts/with-test-home.mjs
+          --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1
+          node --import tsx --import ./test/helpers/setup-cat-registry.js
+          --test --test-concurrency=2
+          test/plugin-member-runtime.test.ts
+          test/scoped-member-invocation.test.ts
+          test/claude-scoped-native.test.ts
+          test/claude-sdk-scoped-native.test.ts
+          test/kimi-scoped-native.test.ts
+          test/plugin-member-router.test.ts
+          test/plugin-member-execution.test.ts
+          test/plugin-member-settlement-recovery.test.ts
+          test/codex-plugin-native-launch.test.js
       - name: Owner-confirmed plugin feedback and private-context suppression
         run: pnpm --filter @cat-cafe/api test:plugin-feedback
       - name: Managed Codex layout link diagnostic

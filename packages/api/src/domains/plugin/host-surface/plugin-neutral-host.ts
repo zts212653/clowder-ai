@@ -21,12 +21,14 @@ export interface PluginRuntimeInfo {
 }
 export interface PluginNeutralHost {
   readonly runtimeInfo?: { get(): Promise<PluginRuntimeInfo> };
+  readonly memberSessions?: import('../member-sessions/host.js').PluginMemberSessionsHost;
   readonly collectiveMaterialSource?: CollectiveMaterialSourcePort;
   readonly collectiveArtifactOwner?: CollectiveArtifactOwnerPort;
   readonly members: PluginMembersHost;
 }
 interface Deps {
   readonly runtimeInfo?: () => PluginRuntimeInfo;
+  readonly memberSessions?: (assertCurrent: () => Promise<void>) => PluginNeutralHost['memberSessions'];
   readonly collectiveMaterialSource?: CollectiveMaterialSourceHolder;
   readonly collectiveArtifactOwner?: CollectiveArtifactOwnerHolder;
   readonly activationSignal?: AbortSignal;
@@ -86,6 +88,7 @@ export async function createPluginNeutralHost(deps: Deps): Promise<PluginNeutral
           },
         }
       : {}),
+    ...(deps.memberSessions ? { memberSessions: deps.memberSessions(current) } : {}),
     ...(collective && deps.collectiveMaterialSource
       ? {
           collectiveMaterialSource: createCollectiveMaterialSourceProxy({

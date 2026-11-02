@@ -14,6 +14,9 @@ export interface PluginSentMessageLookup {
   readonly threadId: string;
   readonly idempotencyKey: string;
 }
+export function pluginSentMessageStorageKey(pluginInstanceId: string, idempotencyKey: string): string {
+  return `plugmsg:${encodeURIComponent(pluginInstanceId)}:${encodeURIComponent(idempotencyKey)}`;
+}
 export interface PluginSentMessageReadServices {
   readonly readMessageTargets?: (threadId: string, messageId: string) => Promise<readonly string[]>;
 }
@@ -44,7 +47,7 @@ export function createPluginSentMessageReader(
     if (!thread || thread.deletedAt) return null;
     if (!deps.messageStore?.getByIdempotencyKey || !deps.readMessageTargets)
       throw new MessagingError('PERMISSION', 'Durable Host delivery lookup is unavailable');
-    const key = `plugmsg:${encodeURIComponent(deps.pluginInstanceId)}:${encodeURIComponent(idempotencyKey)}`;
+    const key = pluginSentMessageStorageKey(deps.pluginInstanceId, idempotencyKey);
     const original = await deps.messageStore.getByIdempotencyKey(deps.ownerUserId, threadId, key);
     deps.assertCurrent?.();
     if (!original) return null;
