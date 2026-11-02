@@ -1,7 +1,7 @@
 /** Internal / unstable: data only. The Host owns transport construction. */
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { z } from 'zod';
-import { isExplicitAcpBootstrapRoot } from '../providers/acp/bootstrap/acp-bootstrap-inspect.js';
+import { isExplicitAcpBootstrapRoot } from '../providers/acp/bootstrap/acp-bootstrap-root.js';
 import type { SessionImplementationRef } from './implementation-registry.js';
 export const AGENT_PROVIDER_DECLARATION_FILE = 'agent-provider.json';
 const safeText = z
