@@ -208,7 +208,11 @@ describe('force-reset: releases all stuck state for a thread (escape hatch)', ()
       agentSessionMutex: {
         forceReleaseByScope(scope) {
           lockScopes.push(scope);
-          return { releasedHolders: 1, rejectedWaiters: 0 };
+          return {
+            releasedHolders: 1,
+            rejectedWaiters: 0,
+            releasedInvocations: [{ catId: 'codex-sol', executionId: 'old-parent', invocationId: 'old-turn' }],
+          };
         },
       },
     });
@@ -222,7 +226,10 @@ describe('force-reset: releases all stuck state for a thread (escape hatch)', ()
     assert.equal(res.statusCode, 200);
     assert.deepEqual(JSON.parse(res.body), { ok: true, cancelled: true });
     assert.deepEqual(lockScopes, [{ threadId: THREAD_ID, userId: USER_ID, catId: 'codex-sol' }]);
-    assert.ok(broadcasts.some(({ m }) => m.type === 'done' && m.catId === 'codex-sol'));
+    const terminal = broadcasts.find(({ m }) => m.type === 'done').m;
+    assert.equal(terminal.invocationId, 'old-parent');
+    assert.equal(terminal.turnInvocationId, 'old-turn');
+    assert.equal(terminal.errorCode, 'INVOCATION_CANCELLED');
     assert.ok(queueProcessor.actions.some((action) => action.op === 'releaseSlot' && action.cid === 'codex-sol'));
   });
 
@@ -627,4 +634,36 @@ describe('force-reset: releases all stuck state for a thread (escape hatch)', ()
 
     assert.equal(res.statusCode, 404);
   });
+});
+
+it('#1671 force-reset names every canceled orphan record for the same cat', async () => {
+  const records = ['orphan-1', 'orphan-2'].map((id) => ({
+    id,
+    threadId: THREAD_ID,
+    userId: USER_ID,
+    targetCats: ['codex'],
+    status: 'running',
+    createdAt: 1,
+    updatedAt: 1,
+    intent: 'execute',
+    idempotencyKey: id,
+  }));
+  const { app, broadcasts } = await buildApp({ recordStore: makeRecordStore(records) });
+  try {
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${THREAD_ID}/force-reset`,
+      headers: { 'x-cat-cafe-user': USER_ID },
+    });
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(
+      broadcasts
+        .filter(({ m }) => m.type === 'done')
+        .map(({ m }) => m.invocationId)
+        .sort(),
+      ['orphan-1', 'orphan-2'],
+    );
+  } finally {
+    await app.close();
+  }
 });

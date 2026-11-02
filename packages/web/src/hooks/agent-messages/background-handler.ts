@@ -7,7 +7,13 @@ import {
 } from '@/hooks/named-message-writer';
 import type { CatStatusType } from '@/stores/chat-types';
 import { invocationErrorRowId, isRecoverableInFlightError, upsertErrorRow } from './error-rows';
-import { isStaleTerminalEvent, markThreadInvocationActive, markThreadInvocationComplete } from './invocation-slots';
+import {
+  isStaleTerminalEvent,
+  isUnownedCancellation,
+  markThreadInvocationActive,
+  markThreadInvocationComplete,
+  terminalEventKey,
+} from './invocation-slots';
 import {
   callbackPost,
   dropUnnamedBodyWrite,
@@ -205,11 +211,17 @@ function handleError(msg: BackgroundAgentMessage, options: Options): void {
 }
 
 function handleDone(msg: BackgroundAgentMessage, options: Options): void {
+  const before = options.store.getThreadState(msg.threadId);
+  if (isUnownedCancellation(msg, before.activeInvocations, before.catInvocations)) return;
+  const canceled =
+    msg.errorCode === 'INVOCATION_CANCELLED' ||
+    before.messages.some(
+      (row) => row.id === msg.messageId && row.lifecycle?.kind === 'response' && row.lifecycle.status === 'canceled',
+    );
   // done ends the named response's streaming but never writes its body: the committed snapshot
   // (published at each target's done) is the truth; an empty `done.content` must not wipe it.
   const target = namedTarget(msg, msg.threadId);
   if (target) finishNamedMessage(target, writerStore(options));
-  const before = options.store.getThreadState(msg.threadId);
   if (
     isStaleTerminalEvent(
       before.activeInvocations,
@@ -221,7 +233,9 @@ function handleDone(msg: BackgroundAgentMessage, options: Options): void {
   )
     return;
   // An error already reported this turn: done keeps it and shows no success toast.
-  if (options.store.getThreadState(msg.threadId).catStatuses[msg.catId] !== 'error') {
+  const eventKey = terminalEventKey(msg);
+  const alreadyConsumed = eventKey !== undefined && before.catInvocations[msg.catId]?.lastTerminalEventKey === eventKey;
+  if (!canceled && !alreadyConsumed && before.catStatuses[msg.catId] !== 'error') {
     options.store.updateThreadCatStatus(msg.threadId, msg.catId, 'done');
     options.addToast({
       type: 'success',
@@ -231,6 +245,9 @@ function handleDone(msg: BackgroundAgentMessage, options: Options): void {
       duration: 5000,
     });
   }
+  if (canceled && before.catStatuses[msg.catId] !== 'error')
+    options.store.updateThreadCatStatus(msg.threadId, msg.catId, 'done');
+  if (eventKey) options.store.setThreadCatInvocation(msg.threadId, msg.catId, { lastTerminalEventKey: eventKey });
   if (msg.isFinal) {
     markThreadInvocationComplete(msg, options);
   }

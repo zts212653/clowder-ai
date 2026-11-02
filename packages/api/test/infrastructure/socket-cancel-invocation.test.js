@@ -261,11 +261,18 @@ describe('SocketManager cancel_invocation', () => {
 
   it('recovers a tracker-missing slot when an owner-scoped session lock is force-released', async () => {
     invocationTracker.cancel = mock.fn(() => ({ cancelled: false, catIds: [] }));
-    socketManager.setAgentSessionMutex({
-      forceReleaseByScope() {
-        return { releasedHolders: 1, rejectedWaiters: 0, catIds: ['opus'] };
-      },
+    const { SessionMutex } = await import('../../dist/domains/cats/services/agents/invocation/SessionMutex.js');
+    const mutex = new SessionMutex();
+    await mutex.acquire({
+      key: 'orphan',
+      invocationId: 'orphan-turn',
+      executionId: 'orphan-parent',
+      threadId: 'thread-1',
+      catId: 'opus',
+      userId: 'default-user',
+      acquiredAt: 1,
     });
+    socketManager.setAgentSessionMutex(mutex);
     const socket = await connectClient(port);
     const received = [];
     socket.on('agent_message', (msg) => received.push(msg));
@@ -283,6 +290,10 @@ describe('SocketManager cancel_invocation', () => {
       queueProcessor.releaseSlot.mock.calls.map((call) => call.arguments),
       [['thread-1', 'opus']],
     );
+    const terminal = received.find((msg) => msg.type === 'done');
+    assert.equal(terminal.invocationId, 'orphan-parent');
+    assert.equal(terminal.turnInvocationId, 'orphan-turn');
+    assert.equal(terminal.errorCode, 'INVOCATION_CANCELLED');
     socket.disconnect();
   });
 

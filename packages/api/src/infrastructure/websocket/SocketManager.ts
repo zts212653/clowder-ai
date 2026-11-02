@@ -16,6 +16,7 @@ import type {
   CancelResult,
   InvocationTracker,
 } from '../../domains/cats/services/agents/invocation/InvocationTracker.js';
+import type { ReleasedInvocation } from '../../domains/cats/services/agents/invocation/SessionMutex.js';
 import type { AgentMessage } from '../../domains/cats/services/types.js';
 import { createModuleLogger } from '../logger.js';
 import { sessionUserIdForCookies } from '../session-auth.js';
@@ -47,11 +48,43 @@ function validateRoomJoin(roomInput: unknown, userId: string): RoomJoinAck {
   return { ok: true, room };
 }
 
+type CancelIdentity = Pick<AgentMessage, 'invocationId' | 'turnInvocationId' | 'messageId'>;
+
+function cancelIdentitiesForCat(
+  result: CancelResult,
+  catId: string,
+  released: readonly ReleasedInvocation[],
+): CancelIdentity[] {
+  const run = result.activeRunByCatId?.[catId];
+  const invocationId =
+    result.executionIdByCatId?.[catId] ??
+    (result.executionIds?.length === 1 ? result.executionIds[0] : undefined) ??
+    run?.invocationId;
+  const recovered = released.filter((owner) => owner.catId === catId);
+  const identities: Pick<AgentMessage, 'invocationId' | 'turnInvocationId' | 'messageId'>[] = recovered.map(
+    (owner) => ({
+      invocationId: owner.executionId,
+      turnInvocationId: owner.invocationId,
+    }),
+  );
+  if (invocationId && (run || !recovered.some((owner) => owner.executionId === invocationId))) {
+    identities.unshift({
+      invocationId,
+      ...(run ? { turnInvocationId: run.invocationId, messageId: run.responseMessageId } : {}),
+    });
+  }
+  if (identities.length === 0) identities.push({});
+  return identities;
+}
+
 /**
  * Build the sequence of AgentMessages to broadcast after a successful cancel.
  * Pure function — extracted for testability (avoids duplicating logic in tests).
  */
-export function buildCancelMessages(result: CancelResult): AgentMessage[] {
+export function buildCancelMessages(
+  result: CancelResult,
+  released: readonly ReleasedInvocation[] = [],
+): AgentMessage[] {
   if (!result.cancelled) return [];
   const catIds = result.catIds.length > 0 ? result.catIds : ['opus'];
   const now = Date.now();
@@ -61,12 +94,16 @@ export function buildCancelMessages(result: CancelResult): AgentMessage[] {
   // broadcast is transport cleanup only, so a second centered system row would
   // duplicate the same fact in History.
   for (const catId of catIds) {
-    messages.push({
-      type: 'done',
-      catId: createCatId(catId),
-      isFinal: true,
-      timestamp: now,
-    });
+    for (const identity of cancelIdentitiesForCat(result, catId, released)) {
+      messages.push({
+        type: 'done',
+        errorCode: 'INVOCATION_CANCELLED',
+        ...identity,
+        catId: createCatId(catId),
+        isFinal: true,
+        timestamp: now,
+      });
+    }
   }
 
   return messages;
@@ -320,7 +357,7 @@ export class SocketManager {
               // client receives the same done signal as the REST lock-only recovery path.
               const scopedResult = { ...result, cancelled: true, catIds: [data.catId] };
               log.info({ threadId: data.threadId, catId: data.catId }, 'Cancelled slot (scoped)');
-              for (const msg of buildCancelMessages(scopedResult)) {
+              for (const msg of buildCancelMessages(scopedResult, lockRelease.releasedInvocations)) {
                 this.broadcastAgentMessage(msg, data.threadId);
               }
               if (!this.queueProcessor?.hasProcessingSlotReservation(data.threadId, data.catId)) {
@@ -355,7 +392,10 @@ export class SocketManager {
             );
             const terminalCatIds = [...new Set([...cancelledCatIds, ...recoveredCatIds])];
             if (terminalCatIds.length > 0) {
-              for (const msg of buildCancelMessages({ cancelled: true, catIds: terminalCatIds })) {
+              for (const msg of buildCancelMessages(
+                { ...cancelAllResult, cancelled: true, catIds: terminalCatIds },
+                lockRelease.releasedInvocations,
+              )) {
                 this.broadcastAgentMessage(msg, data.threadId);
               }
               for (const catId of terminalCatIds) {

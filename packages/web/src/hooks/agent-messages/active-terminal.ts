@@ -13,6 +13,8 @@ import {
   findLatestActiveInvocationIdForCat,
   findTerminalActiveInvocationSlot,
   isStaleTerminalEvent,
+  isUnownedCancellation,
+  terminalEventKey,
 } from './invocation-slots';
 import { namedTarget } from './named-target';
 import type { AgentMsg } from './types';
@@ -89,7 +91,10 @@ function markCatDone(msg: AgentMsg, actions: ActiveStoreActions): void {
   actions.setCatInvocation(msg.catId, {
     taskProgress: {
       ...progress,
-      snapshotStatus: progress.snapshotStatus === 'interrupted' ? 'interrupted' : 'completed',
+      snapshotStatus:
+        msg.errorCode === 'INVOCATION_CANCELLED' || progress.snapshotStatus === 'interrupted'
+          ? 'interrupted'
+          : 'completed',
       lastUpdate: Date.now(),
     },
   });
@@ -98,6 +103,7 @@ function markCatDone(msg: AgentMsg, actions: ActiveStoreActions): void {
 export function handleActiveDone(msg: AgentMsg, threadId: string, ctx: ActiveContext): void {
   const { actions } = ctx;
   const state = useChatStore.getState();
+  if (isUnownedCancellation(msg, state.activeInvocations, state.catInvocations)) return;
   const stale = isTerminalStale(msg);
   const terminalSlotKey = findTerminalActiveInvocationSlot(
     state.activeInvocations,
@@ -112,7 +118,11 @@ export function handleActiveDone(msg: AgentMsg, threadId: string, ctx: ActiveCon
   // duplicates it — an empty one must not wipe what streamed.
   const target = namedTarget(msg, threadId);
   if (target) finishNamedMessage(target);
-  if (!stale) markCatDone(msg, actions);
+  if (!stale) {
+    markCatDone(msg, actions);
+    const eventKey = terminalEventKey(msg);
+    if (eventKey) actions.setCatInvocation(msg.catId, { lastTerminalEventKey: eventKey });
+  }
   // Terminal events clean up the exact invocation identity without creating another message.
   if (msg.invocationId) {
     clearTerminalInvocationIdentity(threadId, msg.catId, msg.invocationId, msg.turnInvocationId);

@@ -2006,7 +2006,11 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
               queueProcessor.canReleaseSlotForUser(threadId, orphanCat, guard.userId),
             );
             if (terminalOrphanCats.length > 0) {
-              for (const m of buildCancelMessages({ cancelled: true, catIds: terminalOrphanCats })) {
+              for (const m of buildCancelMessages({
+                cancelled: true,
+                catIds: terminalOrphanCats,
+                executionIds: [orphanRecord.id],
+              })) {
                 socketManager.broadcastAgentMessage(m, threadId);
               }
             }
@@ -2021,7 +2025,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
           (lockRelease.releasedHolders > 0 || lockRelease.rejectedWaiters > 0) &&
           queueProcessor.canReleaseSlotForUser(threadId, catId, guard.userId)
         ) {
-          for (const m of buildCancelMessages({ cancelled: true, catIds: [catId] })) {
+          for (const m of buildCancelMessages({ cancelled: true, catIds: [catId] }, lockRelease.releasedInvocations)) {
             socketManager.broadcastAgentMessage(m, threadId);
           }
           queueProcessor.releaseSlot(threadId, catId);
@@ -2191,7 +2195,21 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     // over the owner-filtered set keeps force-reset aligned with the orphan/normal cancel paths and
     // covers the stale case cancelAll missed without touching a foreign live slot.
     if (terminalCatIds.length > 0) {
-      for (const m of buildCancelMessages({ cancelled: true, catIds: terminalCatIds })) {
+      const executionIdByCatId = { ...cancelAllResult.executionIdByCatId };
+      for (const [catId, ids] of canceledExecutionIdsByCatId) {
+        const [executionId] = ids;
+        if (ids.size === 1 && executionId && !executionIdByCatId[catId]) executionIdByCatId[catId] = executionId;
+      }
+      const recoveredOwners = [...(lockRelease.releasedInvocations ?? [])];
+      for (const [catId, ids] of canceledExecutionIdsByCatId) {
+        for (const executionId of ids) {
+          if (executionId !== executionIdByCatId[catId]) recoveredOwners.push({ catId, executionId });
+        }
+      }
+      for (const m of buildCancelMessages(
+        { ...cancelAllResult, executionIdByCatId, cancelled: true, catIds: terminalCatIds },
+        recoveredOwners,
+      )) {
         socketManager.broadcastAgentMessage(m, threadId);
       }
     }

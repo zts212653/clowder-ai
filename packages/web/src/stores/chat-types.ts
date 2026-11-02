@@ -574,6 +574,8 @@ export interface CompactBoundaryTelemetry {
 }
 
 export interface CatInvocationInfo {
+  /** Bounded terminal-consumption receipt for this cat; never durable lifecycle truth. */
+  lastTerminalEventKey?: string;
   settlement?: import('@cat-cafe/shared').QueueInvocationSettlement;
   /** Exact concrete provider carrier; absent only for legacy events and fails closed in consumers. */
   freshnessCarrierCapability?: import('@cat-cafe/shared').FreshnessCarrierCapability;

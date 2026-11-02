@@ -90,3 +90,100 @@ describe('buildCancelMessages (production function)', () => {
     assert.equal(messages[0].catId, 'unknown-cat');
   });
 });
+
+describe('#1671 cancellation ownership', () => {
+  test('snapshots parent, turn and response identities before teardown', () => {
+    const tracker = new InvocationTracker();
+    tracker.startAll('t1', ['gemini', 'codex'], 'user1', 'parent');
+    const run = {
+      threadId: 't1',
+      targetId: 'gemini',
+      invocationId: 'turn',
+      responseMessageId: 'response',
+      inputEntryIds: [],
+      inputMessageIds: [],
+      privateInputEntryIds: [],
+      startedAt: 1,
+    };
+    assert.equal(tracker.bindLifecycleActiveRun(run, 'parent'), true);
+    const result = tracker.cancel('t1', 'gemini', 'user1', 'user_cancel');
+    tracker.startAll('t1', ['gemini'], 'user1', 'replacement');
+    const [message] = buildCancelMessages({ ...result, catIds: ['gemini'] });
+    assert.equal(message.errorCode, 'INVOCATION_CANCELLED');
+    assert.equal(message.invocationId, 'parent');
+    assert.equal(message.turnInvocationId, 'turn');
+    assert.equal(message.messageId, 'response');
+  });
+
+  test('cancelAll keeps each independent execution owner', () => {
+    const tracker = new InvocationTracker();
+    tracker.startAll('t1', ['gemini'], 'user1', 'gemini-parent');
+    tracker.startAll('t1', ['codex'], 'user1', 'codex-parent');
+    const messages = buildCancelMessages({ ...tracker.cancelAll('t1', 'user1', 'cancel_all'), cancelled: true });
+    assert.deepEqual(
+      messages.map((m) => [m.catId, m.invocationId, m.errorCode]),
+      [
+        ['gemini', 'gemini-parent', 'INVOCATION_CANCELLED'],
+        ['codex', 'codex-parent', 'INVOCATION_CANCELLED'],
+      ],
+    );
+  });
+
+  test('trackerless exact owner and unknown orphan retain cancellation cleanup', () => {
+    const [exact] = buildCancelMessages({ cancelled: true, catIds: ['gemini'], executionIds: ['orphan-parent'] });
+    assert.equal(exact.invocationId, 'orphan-parent');
+    assert.equal(exact.errorCode, 'INVOCATION_CANCELLED');
+    const [unknown] = buildCancelMessages({ cancelled: true, catIds: ['gemini'] });
+    assert.equal(unknown.type, 'done');
+    assert.equal(unknown.errorCode, 'INVOCATION_CANCELLED');
+    assert.equal(unknown.invocationId, undefined);
+  });
+});
+
+test('#1671 lock-only recovery carries the released owner after its tracker vanished', async () => {
+  const { SessionMutex } = await import('../dist/domains/cats/services/agents/invocation/SessionMutex.js');
+  const mutex = new SessionMutex();
+  await mutex.acquire({
+    key: 'orphan-session',
+    invocationId: 'orphan-turn',
+    executionId: 'orphan-parent',
+    threadId: 't1',
+    catId: 'gemini',
+    userId: 'user1',
+    acquiredAt: 1,
+  });
+  const released = mutex.forceReleaseByScope({ threadId: 't1', catId: 'gemini', userId: 'user1' });
+  const [message] = buildCancelMessages({ cancelled: true, catIds: ['gemini'] }, released.releasedInvocations);
+  assert.equal(message.invocationId, 'orphan-parent');
+  assert.equal(message.turnInvocationId, 'orphan-turn');
+  assert.equal(message.errorCode, 'INVOCATION_CANCELLED');
+});
+
+test('#1671 every recovered record of one cat retains its own owner', () => {
+  const messages = buildCancelMessages({ cancelled: true, catIds: ['gemini'] }, [
+    { catId: 'gemini', executionId: 'orphan-1' },
+    { catId: 'gemini', executionId: 'orphan-2' },
+  ]);
+  assert.deepEqual(
+    messages.map((m) => m.invocationId),
+    ['orphan-1', 'orphan-2'],
+  );
+});
+
+test('#1671 a known turn still owns cleanup when a legacy tracker has no parent id', () => {
+  const tracker = new InvocationTracker();
+  tracker.startAll('t1', ['gemini'], 'user1');
+  tracker.bindLifecycleActiveRun({
+    threadId: 't1',
+    targetId: 'gemini',
+    invocationId: 'known-turn',
+    responseMessageId: 'response',
+    inputEntryIds: [],
+    inputMessageIds: [],
+    privateInputEntryIds: [],
+    startedAt: 1,
+  });
+  const [message] = buildCancelMessages(tracker.cancel('t1', 'gemini', 'user1', 'user_cancel'));
+  assert.equal(message.invocationId, 'known-turn');
+  assert.equal(message.messageId, 'response');
+});
