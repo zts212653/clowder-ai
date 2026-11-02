@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, parse, resolve, sep } from 'node:path';
 import { after, before, describe, test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { FileMessagingMediaLedger } from '../dist/domains/messaging/media-ledger.js';
 import { createHostMediaPathResolver } from '../dist/domains/messaging/outbound-media/host-media-paths.js';
 
@@ -103,13 +104,23 @@ describe('Host media paths with the running platform resolver', () => {
     });
   });
 
-  test('uses Windows backslash, drive and UNC semantics', { skip: process.platform !== 'win32' }, () => {
+  test('uses Windows backslash and UNC semantics', { skip: process.platform !== 'win32' }, () => {
     assert.equal(resolvePath(`/uploads/${file.replaceAll('/', '\\')}`), join(roots.uploadDir, file));
     assert.equal(resolvePath('/uploads/..\\outside.mp3'), undefined);
     assert.equal(resolvePath('/uploads/..\\uploads-sibling\\outside.mp3'), undefined);
-    const otherDrive = parse(root).root[0].toUpperCase() === 'C' ? 'D' : 'C';
-    assert.equal(resolvePath(`/uploads/${otherDrive}:\\outside.mp3`), undefined);
     assert.equal(resolvePath('/uploads/\\\\other-host\\share\\outside.mp3'), undefined);
+  });
+
+  test('rejects an existing file on another Windows volume', { skip: process.platform !== 'win32' }, (t) => {
+    const target = [process.execPath, fileURLToPath(import.meta.url)].find(
+      (path) => parse(path).root.toLowerCase() !== parse(root).root.toLowerCase(),
+    );
+    if (!target) {
+      t.skip('no file on another volume is available');
+      return;
+    }
+    assert.ok(existsSync(target), 'the cross-volume target must exist');
+    assert.equal(resolvePath(`/uploads/${target}`), undefined);
   });
 
   test('preserves literal backslashes on POSIX', { skip: process.platform === 'win32' }, async () => {
