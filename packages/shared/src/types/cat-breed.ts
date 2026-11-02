@@ -200,6 +200,8 @@ export interface RosterEntry {
   readonly lead: boolean;
   /** Whether this cat is available (has quota). co-creator 40 美刀教训！ */
   readonly available: boolean;
+  /** Explicit one-hop replacement for implicit targets; never inherits roles or lead. */
+  readonly successor?: string;
   /** co-creator's evaluation of this cat */
   readonly evaluation: string;
 }

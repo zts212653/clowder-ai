@@ -661,6 +661,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     // Server-generated idempotency key if client didn't provide one
     const resolvedIdempotencyKey = idempotencyKey ?? randomUUID();
     const sourcePayloadExtra: NonNullable<StoredMessage['extra']> = {
+      ...(routingResult.routing_warnings.length ? { routingWarnings: routingResult.routing_warnings } : {}),
       ...(!liveSessionId && !whisperVisibility && !admittedMessageBundle
         ? { routingTargetSource: explicitMentionTargetCats ? ('explicit' as const) : ('prose' as const) }
         : {}),
@@ -690,6 +691,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             idempotencyKey: resolvedIdempotencyKey,
             content,
             targetCats,
+            ...(routingResult.routing_warnings.length ? { routingWarnings: routingResult.routing_warnings } : {}),
             ...(messageDisposition ? { messageDisposition } : {}),
             onQueueEntriesAdmitted: async (
               entries: readonly import('../domains/cats/services/agents/invocation/InvocationQueue.js').QueueEntry[],

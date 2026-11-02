@@ -4544,6 +4544,15 @@ export class QueueProcessor {
       await this.deps.queue.rollbackProcessingDurable(claimed.threadId, claimed.id);
       throw new Error(`private pre-admission terminalization lost claimed Queue entry: ${claimed.id}`);
     }
+    const hooks = this.entryCompleteHooks.get(claimed.id) ?? [];
+    this.entryCompleteHooks.delete(claimed.id);
+    for (const { hook } of hooks) {
+      try {
+        hook(claimed.id, 'failed', '');
+      } catch {
+        /* Completion observers cannot undo the committed terminal state. */
+      }
+    }
     this.deps.log.warn(
       {
         event: 'private_input_pre_admission_failed',

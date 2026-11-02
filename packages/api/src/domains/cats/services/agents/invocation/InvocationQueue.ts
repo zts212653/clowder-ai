@@ -418,6 +418,30 @@ export class InvocationQueue {
     // A stable source reuses its winning policy, including an exact parent or
     // fallback. Only genuinely new admissions consult the current defaults.
     const replay = replayEntries?.find((entry) => entry.id === queueEntryId(sourceId));
+    if (this.admissionPolicy.resolvePreResolvedTargets) {
+      requestedTargetCats ??= input.targetCats;
+      if (replay && !isDeepStrictEqual(replay.payload.requestedTargetCats ?? replay.targets, requestedTargetCats)) {
+        throw new Error(`Queue admission identity conflict: ${sourceId}`);
+      }
+      const implicit =
+        input.kind === 'private_input' &&
+        input.from.kind === 'system' &&
+        !input.exactTargets &&
+        !input.executionScope &&
+        !input.actionSuccessorFence &&
+        !input.waitContinuationCarrier &&
+        !input.cloudDispatchProvenance &&
+        !input.requiresExactCloudDispatchProvenance &&
+        !input.liveSessionId &&
+        !input.a2aParentInvocationId &&
+        Object.keys(input.authorIntentByCatId ?? {}).length === 0 &&
+        input.sourceCategory !== 'a2a_failure';
+      const targets = replay
+        ? replay.targets
+        : this.admissionPolicy.resolvePreResolvedTargets(input.targetCats, implicit);
+      if (input.targetCats.length > 0 && targets.length === 0) throw new Error('Queue admission has no valid target');
+      input = { ...input, targetCats: [...targets] };
+    }
     if (
       requestedTargetCats &&
       replay?.payload.requestedTargetCats &&
@@ -643,7 +667,14 @@ export class InvocationQueue {
     messageStore: IMessageStore,
   ): Promise<EnqueueResult & { entries?: QueueEntry[]; notice?: StoredMessage }> {
     const sourceId = InvocationQueue.persistentSourceId(input);
-    const rows = this.createLedgerRows(input, sourceId, this.nextEnqueuedAt(), undefined);
+    const existing = await this.ledgerStore.get(input.threadId, queueEntryId(sourceId));
+    const rows = this.createLedgerRows(
+      input,
+      sourceId,
+      this.nextEnqueuedAt(),
+      undefined,
+      existing ? [existing] : undefined,
+    );
     const result = await messageStore.appendNoticeWithPrivateQueueAdmission(notice, rows, this.ledgerStore);
     if (result.outcome === 'full') return { outcome: 'full' };
     const entries = this.cacheLedgerEntries(result.entries);
