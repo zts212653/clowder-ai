@@ -5,6 +5,7 @@ import { currentPluginOwnerRequestContext } from '../src/domains/plugin/carrier/
 import type { PluginRuntimeAdmission } from '../src/domains/plugin/carrier/runtime-carrier.js';
 import { DeclaredPluginUi } from '../src/domains/plugin/declared/declared-plugin-ui.js';
 import { DeclaredRuntimeContributions } from '../src/domains/plugin/declared/declared-runtime-contributions.js';
+import { securityHeadersPlugin } from '../src/infrastructure/security-headers.js';
 import { pluginUiRoutes } from '../src/routes/plugin/plugin-ui-routes.js';
 import { pluginWebhookForwardingRoutes } from '../src/routes/plugin/plugin-webhook-forwarding-routes.js';
 
@@ -59,6 +60,7 @@ test('HTML and business requests share declared HTTP dispatch; UI only discovers
   t.after(() => contributions.deactivateAll());
   const app = Fastify();
   t.after(() => app.close());
+  await app.register(securityHeadersPlugin);
   app.addHook('onRequest', async (request) => {
     if (request.headers['x-fixture-owner']) request.sessionUserId = 'owner';
   });
@@ -90,6 +92,7 @@ test('HTML and business requests share declared HTTP dispatch; UI only discovers
   const page = await app.inject({ method: 'GET', url: '/api/plugins/dev.fixture/panel', headers });
   assert.equal(page.statusCode, 200);
   assert.match(page.headers['content-type'] ?? '', /text\/html/);
+  assert.equal(page.headers['content-security-policy'], "sandbox allow-scripts; frame-ancestors 'none'");
   assert.equal(page.body, '<p>declared HTML</p>');
   assert.equal((calls[0]!.input as { pane: string }).pane, 'diagnostics');
   await assert.rejects(contexts[0]!.assertCurrent(), /no longer current/);

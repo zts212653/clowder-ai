@@ -14,6 +14,7 @@ created: 2026-10-29
 - 既有 `ui` command/slot-item 声明注册到当前安装代际；`activity-bar.bottom` 在 WorldRail/ActivityBar 渲染，图标复用插件元数据与现有 icon 服务。停用/升级后旧入口和面板请求失效。
 - `/api/plugin-ui` 仅 GET 发现入口，不注册 POST，也不调用 action。侧栏 command 对应唯一的静态 GET webhook：二者 CallbackAction 的 method 与 params 必须相同；页面路径由声明投影，不从插件运行结果取得。HTML 与业务均经 `/api/plugins/:pluginId/*` 通用分发，页面返回标准 HTTP `text/html`，不再使用 `PluginUiPanel` 信封或 `ui.call`。
 - 依赖 Host 的面板通过 iframe 的 HTTP 适配桥访问本插件已声明的 `/api/plugins/:pluginId/*`，沿用 webhook 的路径/方法匹配、CallbackAction 参数与 request 信封、owner 上下文、响应和流处理。Host 限制插件路径与当前挂载代次，过滤认证及 UI 生命周期头；停用后旧面板不能借新激活继续调用。复制和关闭保留为浏览器宿主操作。
+- 通用 HTTP 的 `text/html` 响应由 Host 添加 `CSP: sandbox allow-scripts`；直接导航或弹窗打开原始资源也没有 Host 同源权限。获取资源字节后，面板仍由既有 opaque iframe/CSP 渲染；页面切换后迟到的 HTML 或错误不能覆盖当前面板。
 - 反馈插件 `0.1.0-alpha.2` 声明 GET `panel` 页面与 POST `feedback` 业务 webhook，代替 alpha.1 的 `invoke` 业务通道及专用挂载调用；Host 与插件需要配套采用。共享 HTTP 请求沿用原 UI 的 24 MB 上限，较大的报告和截图使用既有流响应，不放宽普通非流响应上限。
 - 可选 `runtimeInfo.get()` 在活跃 owner HTTP 调用内投影当前实例版本/修订、系统、Node、默认项目和 logger 有效目录。只投影固定字段，不返回环境变量、配置、凭据或会话内容。读取日志和生成报告由插件完成。
 - 普通 `threads.create` 新增可选 `projectRef`，复用 `resolvePersistentProjectPath`；不能与 parentThreadId 同时提供。有 parent 时仍继承该项目，均省略仍用默认项目。线程投影包含实际 projectRef，不能用 prompt 路径伪造绑定。

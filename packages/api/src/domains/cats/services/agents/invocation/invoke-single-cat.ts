@@ -5971,6 +5971,15 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
       )
         throw new Error('provider_entry_fence_rejected');
       const localPluginMcpView = await deps.resolveInvocationPluginMcpView?.();
+      // Durable compatibility permits a newly captured turn after rebuild; this frozen turn still needs its live generation.
+      const currentImplementation = service.implementationSnapshot?.();
+      const frozenImplementation = frozenExecutionBinding.implementation;
+      if (
+        frozenImplementation &&
+        ((currentImplementation?.key ?? frozenImplementation.key) !== frozenImplementation.key ||
+          (currentImplementation?.generation ?? agentServiceGeneration(service)) !== frozenImplementation.generation)
+      )
+        throw new Error('execution_boundary_changed_before_provider_entry:implementation');
       const exposureProject = pluginMcpExposureProject(threadProjectPath, workingDirectory);
       if (injectSystemPrompt && !nativeAuthContinuation) _staticIdentityDigest.delete(identityKey);
       const serviceIter = bindInvocationPluginMcpView(

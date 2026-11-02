@@ -64,6 +64,39 @@ describe('plugin sidebar panel isolation', () => {
       ),
     ).toBe(true);
   });
+  it.each([
+    'success',
+    'failure',
+  ])('ignores a closed page body that finishes with %s after another page opens', async (outcome) => {
+    const entries = ['old', 'current'].map((id) => ({
+      pluginId: `dev.${id}`,
+      instanceId: id,
+      commandId: 'open',
+      resourcePath: 'panel',
+      generation: id,
+      label: id,
+    }));
+    const body = Promise.withResolvers<string>();
+    apiFetch.mockImplementation(async (path: string) => {
+      if (path === '/api/plugin-ui') return Response.json({ entries });
+      const response = new Response('<p>current page</p>', { headers: { 'content-type': 'text/html' } });
+      if (path === '/api/plugins/dev.old/panel') vi.spyOn(response, 'text').mockReturnValue(body.promise);
+      return response;
+    });
+    await act(async () => root.render(<PluginUiEntries />));
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="old"]')?.click());
+    await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="关闭插件面板"]')?.click());
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="current"]')?.click());
+    expect(document.querySelector('iframe')?.getAttribute('srcdoc')).toContain('current page');
+    await act(async () => {
+      if (outcome === 'success') body.resolve('<p>old page</p>');
+      else body.reject(new Error('old page failed'));
+      await body.promise.catch(() => {});
+    });
+    expect(document.querySelector('iframe')?.getAttribute('title')).toBe('current');
+    expect(document.querySelector('iframe')?.getAttribute('srcdoc')).toContain('current page');
+    expect(document.querySelector('[role="alert"]')).toBeNull();
+  });
   it('forwards sandbox HTTP requests through the existing declared plugin route and refuses an escaping path', async () => {
     await act(async () => root.render(<PluginUiEntries />));
     await act(async () => container.querySelector('button')?.click());

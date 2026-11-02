@@ -124,17 +124,15 @@ export function PluginUiEntries() {
   }, [active, close]);
   async function open(entry: Entry) {
     lifetime.current?.abort();
-    lifetime.current = new AbortController();
+    const controller = new AbortController();
+    lifetime.current = controller;
     nonce.current = crypto.randomUUID();
     setError('');
     setHtml('');
     setActive(entry);
     try {
-      const resource = await requestPluginHttp(
-        entry,
-        { method: 'GET', path: entry.resourcePath },
-        lifetime.current.signal,
-      );
+      const resource = await requestPluginHttp(entry, { method: 'GET', path: entry.resourcePath }, controller.signal);
+      if (controller.signal.aborted || lifetime.current !== controller) return;
       if (
         resource.status < 200 ||
         resource.status >= 300 ||
@@ -143,6 +141,7 @@ export function PluginUiEntries() {
         throw new Error('插件页面加载失败，请检查插件状态');
       setHtml(sandboxedPanelHtml(resource.body));
     } catch (failure) {
+      if (controller.signal.aborted || lifetime.current !== controller) return;
       setError(failure instanceof Error ? failure.message : '面板打开失败');
     }
   }

@@ -113,6 +113,7 @@ jobs:
           test/mind-pr1762-review.test.js
           test/host-execution-boundary.test.js
           test/agent-session-contract/persisted-execution-boundary.test.js
+          test/agent-session-contract/late-execution-boundary.test.js
       - name: Native import admission and plugin HTTP panel lifecycle
         run: >-
           pnpm --filter @cat-cafe/api exec node scripts/with-test-home.mjs
