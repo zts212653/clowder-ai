@@ -70,6 +70,8 @@ export class FlatScanner implements RepoScanner {
         if (stat.isDirectory()) {
           if (SKIP_DIRS.has(entry)) continue;
           if (this.isExcluded(relative(root, fullPath))) continue;
+          // Nested repositories own separate collections. The explicitly bound root is still scanned.
+          if (isGitRepositoryRoot(fullPath)) continue;
           this.walkDir(fullPath, root, results, depth + 1);
         } else if (stat.isFile() && entry.endsWith('.md')) {
           if (this.isExcluded(relative(root, fullPath))) continue;
@@ -118,6 +120,16 @@ export class FlatScanner implements RepoScanner {
     if (!this.exclude?.length) return false;
     return this.exclude.some((pattern) => matchGlob(pattern, relPath));
   }
+}
+
+function isGitRepositoryRoot(dir: string): boolean {
+  const gitPath = join(dir, '.git');
+  const stat = lstatSync(gitPath, { throwIfNoEntry: false });
+  if (stat?.isDirectory()) return true;
+  // A symlink or an arbitrary file named .git is not proof of a repository boundary.
+  if (!stat?.isFile()) return false;
+  const marker = /^gitdir: ([^\r\n]+)\r?\n?$/.exec(readFileSync(gitPath, 'utf-8'));
+  return Boolean(marker?.[1].trim());
 }
 
 function extractTitle(content: string): string | null {
