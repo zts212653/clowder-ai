@@ -65,8 +65,8 @@ created: 2026-11-03
 - 合并有效 NO_PROXY/no_proxy/混合大小写条目，去重并补 localhost、127.0.0.1、::1；
   不加入整个私网、0.0.0.0 或通配直连。Unix 的标准大小写值一致，Windows 规范为唯一键。
 - 已有非空环境例外有权威，不导入系统例外；HTTP_PROXY/HTTPS_PROXY/ALL_PROXY 不改。
-- Windows 无环境例外时才读取系统状态；只采用可保真的简单静态例外。
-  延续旧 PR 对通配符、<local>、地址段、端口等不支持形式的保守边界。
+- Windows 无环境例外时才读取系统状态；只采用可保真的 IPv4 字面量与已承诺的回环例外；系统 hostname 精确规则不转为域后缀。
+  通配符、<local>、地址段、端口及其他不能保真的形式保留原环境。
 - PAC/WPAD、读取失败/超时/未知分别返回无敏感值的诊断并保留原环境。
   空 NO_PROXY 与没有 NO_PROXY 分别测试，均不能当作已知无系统例外。
 - 插件原生最小环境不重新继承宿主，不查询宿主系统代理，不扩大网络权限。
@@ -103,3 +103,11 @@ Windows 检测仅在缺少明确环境例外时增加一次有界只读探测；
 不能可靠转换时保留现场，代价是该场景仍可能失败，必须报告未验收而非“完整支持”。
 回退为 revert 本 PR 的代码提交，不需要迁移或清库；现有进程自然结束后新启动恢复旧环境策略。
 实例台账保存在任务 artifacts，启动前查重，结束受控停止，仅保留隔离数据和证据。
+
+### 独立审查修订：系统 hostname 不可保真转换
+
+非作者发现 P2：WinINET 普通 hostname 例外与 NO_PROXY 的域后缀语义不同。
+先以 api.corp.fixture 的生产纯函数回归观察 RED，再限制转换为 IPv4 与回环条目。
+含 hostname 的系统规则整体保留原环境；已有显式环境 NO_PROXY 继续保持其权威。
+来源：[微软 WinINet 例外说明](https://learn.microsoft.com/en-us/windows/win32/wininet/enabling-internet-functionality#listing-the-proxy-bypass)、
+[reqwest NoProxy 规则](https://docs.rs/reqwest/latest/reqwest/struct.NoProxy.html#method.from_string)。

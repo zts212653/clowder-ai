@@ -29,7 +29,7 @@ buildChildEnv 的 bindExecutionOwner=true 解决，不允许 ambient owner 进�
 | --- | --- |
 | 基线 API build | 通过，未启动 API 服务 |
 | 修复后 API TypeScript 编译 | 通过；完整构建在最终 HEAD 再执行并登记 |
-| 最终定向 JS 回归 | 55 项：53 通过、2 Unix 专属跳过；包含新测试、host pool、认证变化 |
+| 最终定向 JS 回归 | 初版 55 项：53 通过、2 Unix 专属跳过；包含新测试、host pool、认证变化 |
 | 新网络/调用回归 | 显式例外、大小写、缺失/空、静态规则、PAC/WPAD、失败保留；普通与续聊、原生 capability/首次/续聊 |
 | F320 / 原生账号 / Windows shim | 66 项：62 通过，4 个 pooled fixture 在 Windows 失败；产品在 Windows 禁用 Unix pooling，交 Linux CI 验证 |
 | 较宽 provider 回归（初次） | 115 项：109 通过，6 失败；其中旧 null 墓碑断言已更新，其余为 Windows POSIX 路径、mock ENOENT/时间及无 Unix shell |
@@ -47,7 +47,7 @@ buildChildEnv 的 bindExecutionOwner=true 解决，不允许 ambient owner 进�
 - 本机 WinHTTP/Internet Settings 只读查询成功：静态代理开启、PAC/WPAD 关闭；
   ProxyOverride 含当前不支持模式。候选记录 windows_proxy_override_unsupported 并保留原环境。
 - 无系统结果、读取失败、PAC/WPAD、不支持模式分别有自动回归；均不是“完整代理支持”。
-- 静态转换只接受保留的简单形式；含连字符、通配符、<local>、地址段、端口等仍不支持。
+- 静态转换只接受 IPv4 字面量与已承诺的回环条目；系统 hostname、通配符、<local>、地址段、端口等均不支持。
 - 显式原生 respect_system_proxy 分支没有改写或验收，也没有关闭原生 feature。
 - 原生配置的 custom provider 为 http://127.0.0.1:15721/v1；当前未监听。
   已向用户请求可用网关/已有认证来源，不在聊天或公共产物中收集密钥。
@@ -75,3 +75,10 @@ direct 的 Node 子进程和只读 PowerShell 查询随测试退出；Unix 实�
 
 本地日志前缀：G:/AIwork/clowder-ai/artifacts/issue1666-next-。
 任务台账：G:/AIwork/clowder-ai/artifacts/issue1666-next-20261103/instances.json。
+
+## 独立审查 P2 修复
+
+初审发现系统 hostname 从精确匹配变为 NO_PROXY 的域后缀匹配，可能额外直连子域。
+新回归先 RED；修复后 hostname 系统例外整体进入 unsupported，不新增匹配管理层。
+P2 修复后定向 56 项：54 通过、2 Unix 专属跳过。
+原 HEAD 19adf9b1 的证据仍属历史，最终提交、CI、复审结果在 PR 和台账绑定。

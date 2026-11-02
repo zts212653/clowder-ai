@@ -1,3 +1,4 @@
+import { isIP } from 'node:net';
 import { createModuleLogger } from '../infrastructure/logger.js';
 import { buildChildEnv } from './cli-spawn.js';
 import { readWindowsSystemProxy, type WindowsSystemProxy } from './windows-system-proxy.js';
@@ -28,9 +29,9 @@ export function deriveCodexNetworkEnvironment(
           .map((entry) => entry.trim())
           .filter(Boolean)
       : [];
-    // Only the old PR's simple static forms are supported. Do not reinterpret
-    // WinINET wildcards, <local>, ranges, ports or URI syntax as NO_PROXY.
-    if (exceptions.some((entry) => !/^[a-zA-Z0-9._]+$/.test(entry) && entry !== '::1'))
+    // WinINET hostnames are exact; NO_PROXY domains also match subdomains.
+    // Only IPv4 literals and the loopback names already added below are safe.
+    if (exceptions.some((entry) => isIP(entry) !== 4 && entry !== '::1' && entry.toLowerCase() !== 'localhost'))
       return { env: { ...input }, diagnostic: 'windows_proxy_override_unsupported' };
   }
   const merged = [

@@ -39,9 +39,9 @@ for (const env of [{}, { NO_PROXY: '' }, { no_proxy: ' , ' }]) {
     const manual = deriveCodexNetworkEnvironment(env, 'win32', {
       enabled: true,
       hasPac: false,
-      proxyOverride: 'internal.fixture;127.0.0.2',
+      proxyOverride: '10.0.0.5;127.0.0.2',
     });
-    assert.equal(manual.env.NO_PROXY, 'internal.fixture,127.0.0.2,localhost,127.0.0.1,::1');
+    assert.equal(manual.env.NO_PROXY, '10.0.0.5,127.0.0.2,localhost,127.0.0.1,::1');
     const disabled = deriveCodexNetworkEnvironment(env, 'win32', { enabled: false, hasPac: false, proxyOverride: '*' });
     assert.equal(disabled.env.NO_PROXY, unix.env.NO_PROXY);
   });
@@ -89,4 +89,14 @@ test('plugin-native complete environments do not inherit ambient credentials or 
   assert.equal(env.OPENAI_API_KEY, undefined);
   assert.equal(env.HTTP_PROXY, undefined);
   assert.equal(env.NO_PROXY, undefined);
+});
+
+// A plain WinINET hostname is exact; NO_PROXY would also bypass its children.
+test('system hostname exceptions cannot be projected as broader domain suffix exceptions', () => {
+  const input = { HTTPS_PROXY: 'http://proxy.fixture.invalid:3128' };
+  for (const proxyOverride of ['api.corp.fixture', '.corp.fixture', 'singlehost', '10.0.0.5;api.corp.fixture']) {
+    const result = deriveCodexNetworkEnvironment(input, 'win32', { enabled: true, hasPac: false, proxyOverride });
+    assert.equal(result.diagnostic, 'windows_proxy_override_unsupported');
+    assert.deepEqual(result.env, input, 'child.api.corp.fixture must keep its system proxy route');
+  }
 });
