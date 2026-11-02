@@ -10,7 +10,7 @@ tips_exempt: 行尾入口、确认复选框和个人设置开关均在原操作�
 
 来源：[Issue #1778](https://github.com/zts212653/clowder-ai/issues/1778) 及当前聊天中的三张现状/参考截图。用户要求先看基于项目现有界面的效果图、用户旅程及技术方案。
 
-状态：用户已接受设计并授权实现。产品实现、定向组件测试和真实组件/API 浏览器旅程已完成；Windows 安装版验证与独立审查在进行中。早期原型与产品验证分别记录，不将演示状态作为持久化证据。
+状态：用户已接受设计并授权实现。产品实现、定向检查、真实组件/API 浏览器旅程、Windows 打包程序旅程及独立审查已完成；[PR #1780](https://github.com/zts212653/clowder-ai/pull/1780) 目标为 `next`，尚未合入或发布。早期原型与产品验证分别记录。
 
 源码基线：`zts212653/clowder-ai` 的远端 `next`，`b926134a02dec551d857d378fc0519ebe66dc090`。实施分支 `feat/issue-1778-quick-delete`，复用原设计工位。runtime 仍保持原检出与构建。
 
@@ -187,8 +187,8 @@ pnpm biome check <本次修改文件列表>
 ### 可重复检查
 
 ```powershell
-# 组件行为、原确认流程、行操作、设置语言与文案命名空间：38/38
-pnpm --filter @cat-cafe/web exec vitest run src/components/ThreadSidebar/__tests__/thread-quick-delete.test.tsx src/components/ThreadSidebar/__tests__/thread-delete-confirm.test.ts src/components/__tests__/thread-item-actions.test.tsx src/components/settings/__tests__/settings-shell-v2-language.test.tsx src/components/shell/__tests__/shell-copy-namespaces.test.ts --maxWorkers=2
+# 组件行为、原确认流程、行操作、设置语言、文案、GET 协调与快照：50/50
+pnpm --filter @cat-cafe/web exec vitest run src/components/ThreadSidebar/__tests__/thread-quick-delete.test.tsx src/components/ThreadSidebar/__tests__/thread-delete-confirm.test.ts src/components/__tests__/thread-item-actions.test.tsx src/components/settings/__tests__/settings-shell-v2-language.test.tsx src/components/shell/__tests__/shell-copy-namespaces.test.ts src/utils/__tests__/api-client-get-coordination.test.ts src/utils/__tests__/sidebar-thread-snapshot-generation.test.ts --maxWorkers=2
 
 # 浏览器完整组合旅程：1/1
 pnpm --filter @cat-cafe/api exec node --import tsx --test --test-concurrency=1 ../web/test/browser/thread-quick-delete.test.mjs
@@ -199,6 +199,20 @@ node scripts/with-test-home.mjs --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 
 
 前端和 API 类型检查已通过。`thread-sidebar-destination-return.test.tsx` 的六项导航/删除检查通过；两项“项目归档”检查在本分支与恢复原始 `next` 侧栏源码后均因 `no project header menu` 失败，属于既有基线，不修改无关项目归档行为。
 
-早期设计原型有独立的 13 项演示检查，不能替代上述产品证据。Windows 安装版、独立审查与最终 PR 状态在完成后补充。本功能未合入或发布。
+连续清理回归曾观察到两个 RED：第二次删除复用第一次删除后的旧列表 GET，导致已删除行残留；展开回收站的旧 GET 也可能遗漏刚删除会话。现在删除/恢复复用现有 canonical invalidation 和 `afterCurrentGet:true`，浏览器延迟响应回归均已 GREEN。
 
-工位为开放 PR 保留；浏览器采证后关闭，隔离测试数据保留，不改动 runtime、个人配置或业务历史。
+### Windows 打包程序与独立审查
+
+验证源码为 `227eafbab19fa3647168f8aa2fd41fd755b4a3c9`。使用官方构建生成的安装运行归档，经项目自带提取器校验哈希/条目后，在标准 Windows 临时目录启动打包 Electron 35.7.5；API/Web 的构建提交均与源码一致。使用独立的数据目录、空白客户端 HOME、13378/13379/6398 端口，不复用个人认证或原生会话。
+
+已走通：classic 首次确认与勾选取消；成功后记住并返回大厅；真正退出应用、释放端口并重开，v2 普通会话一次点击删除；现有回收站恢复后在生产聊天页面读到原 Redis 历史；真实“你”设置重新开启确认，页面刷新后仍要求确认；Esc 取消保留会话。最后一段设置验收在同源码、同实例数据上续验，前面已通过的阶段保留原始记录；不是把一份失败的整套脚本标成通过。页面脚本错误为零，无模型调用。
+
+作者验收期间确实出现过启动错误窗口：Low 完整性测试目录的渲染异常，以及脚本在初始加载未完成时跳转造成的 `ERR_ABORTED`。改用标准目录，并让脚本等待应用 `startup-state.json` 明确报告 `ready` 后再操作；通过桌面窗口检查和进程核对完成收尾。首次使用的预置演示通过产品“稍后再看”动作关闭。上述失败保留为诊断记录，不计入通过项。
+
+范围边界：未执行安装器首装/升级，未改动真实 runtime。官方构建已生成 EXE；额外便携 ZIP 压缩已停止，未签发发布清单或交付发布包。此处证明同一安装运行归档中的 Windows 程序功能旅程，不声明安装器生命周期或升级兼容验收。
+
+非作者 `review_quick_delete` 审查覆盖同一实现提交，发现的 P2 已修复，无未决 P1/P2；独立行为检查 24/24、协调/快照检查 12/12 通过。该实现提交的远端 CI 为 19 项成功、1 项条件跳过。随后只补充本文验证记录，产品代码保持一致；最终远端状态以 PR 检查为准。
+
+早期设计原型有独立的 13 项演示检查，不能替代产品证据。
+
+工位与当前构建目录为开放 PR 保留，2026-11-16 复查；测试进程、窗口和端口均在采证后停止，数据与日志保留。失败目录仅为本次 Windows 启动诊断保留，2026-11-09 复查。未改动 runtime、个人配置或业务历史。
