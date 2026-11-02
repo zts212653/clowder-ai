@@ -7,6 +7,7 @@ import {
 } from '@/stores/sidebarProjectionStore';
 import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
+import { apiSessionIdentity } from '@/utils/api-session-identity';
 import { invalidateSidebarProjection } from '@/utils/sidebar-thread-snapshot';
 import { useShellCopy } from '../shell/shell-copy';
 import { threadDeletionCopy } from './thread-deletion.shell-copy';
@@ -24,7 +25,12 @@ export function useThreadDeletion({
 }) {
   const copy = useShellCopy(threadDeletionCopy);
   const preference = useThreadDeletePreference();
-  const [deleteTarget, setDeleteTarget] = useState<SidebarSnapshotRow | null>(null);
+  const [deleteDraft, setDeleteDraft] = useState<{
+    thread: SidebarSnapshotRow;
+    identity: typeof preference.identity;
+  } | null>(null);
+  // Identity generations also invalidate drafts after an A → B → A change.
+  const deleteTarget = deleteDraft?.identity === preference.identity ? deleteDraft.thread : null;
   const pending = useRef(new Set<string>());
   const [deletingIds, setDeletingIds] = useState<ReadonlySet<string>>(new Set());
   const currentConversation = useRef(currentThreadId);
@@ -32,14 +38,15 @@ export function useThreadDeletion({
 
   const performDelete = useCallback(
     (thread: SidebarSnapshotRow, remember = false) => {
-      if (pending.current.has(thread.id)) return;
+      if (preference.identity !== apiSessionIdentity.getSnapshot() || pending.current.has(thread.id)) return;
       pending.current.add(thread.id);
       setDeletingIds(new Set(pending.current));
-      setDeleteTarget(null);
+      setDeleteDraft(null);
       const isSystem = thread.isHubThread || !!thread.systemKind;
       const url = `/api/threads/${thread.id}${isSystem ? '?force=true' : ''}`;
       void apiFetch(url, { method: 'DELETE' })
         .then(async (response) => {
+          if (preference.identity !== apiSessionIdentity.getSnapshot()) return;
           if (!response.ok) {
             const message = response.status === 409 ? copy.workingMessage : copy.failedMessage;
             useToastStore.getState().addToast({ type: 'error', title: copy.failedTitle, message, duration: 5000 });
@@ -57,6 +64,7 @@ export function useThreadDeletion({
           });
         })
         .catch(() => {
+          if (preference.identity !== apiSessionIdentity.getSnapshot()) return;
           useToastStore
             .getState()
             .addToast({ type: 'error', title: copy.failedTitle, message: copy.uncertainMessage, duration: 5000 });
@@ -67,7 +75,7 @@ export function useThreadDeletion({
           setDeletingIds(new Set(pending.current));
         });
     },
-    [copy, loadTrash, navigateToThread, preference.setConfirmBeforeDelete, showTrash],
+    [copy, loadTrash, navigateToThread, preference.identity, preference.setConfirmBeforeDelete, showTrash],
   );
 
   const requestDelete = useCallback(
@@ -75,10 +83,11 @@ export function useThreadDeletion({
       if (id === 'default' || pending.current.has(id)) return;
       const thread = projectSidebarRows(useSidebarProjectionStore.getState()).find((row) => row.id === id);
       if (!thread) return;
-      if (thread.isHubThread || thread.systemKind || preference.confirmBeforeDelete) setDeleteTarget(thread);
+      if (thread.isHubThread || thread.systemKind || preference.confirmBeforeDelete)
+        setDeleteDraft({ thread, identity: preference.identity });
       else performDelete(thread);
     },
-    [performDelete, preference.confirmBeforeDelete],
+    [performDelete, preference.confirmBeforeDelete, preference.identity],
   );
   const confirmDelete = useCallback(
     (remember: boolean) => {
@@ -86,6 +95,6 @@ export function useThreadDeletion({
     },
     [deleteTarget, performDelete],
   );
-  const cancelDelete = useCallback(() => setDeleteTarget(null), []);
+  const cancelDelete = useCallback(() => setDeleteDraft(null), []);
   return { deleteTarget, deletingIds, requestDelete, confirmDelete, cancelDelete, canRemember: preference.ready };
 }

@@ -10,7 +10,7 @@ tips_exempt: 行尾入口、确认复选框和个人设置开关均在原操作�
 
 来源：[Issue #1778](https://github.com/zts212653/clowder-ai/issues/1778) 及当前聊天中的三张现状/参考截图。用户要求先看基于项目现有界面的效果图、用户旅程及技术方案。
 
-状态：用户已接受设计并授权实现。产品实现、定向检查、真实组件/API 浏览器旅程、Windows 打包程序旅程及独立审查已完成；[PR #1780](https://github.com/zts212653/clowder-ai/pull/1780) 目标为 `next`，尚未合入或发布。早期原型与产品验证分别记录。
+状态：用户已接受设计并授权实现；这表示需求方确认，不代表维护者已正式接纳。产品实现与初轮验证已完成，维护者随后要求修复确认草稿跨身份延续的 P1，本次补充修复及回归；正式复审、triage 与合入结论以 [PR #1780](https://github.com/zts212653/clowder-ai/pull/1780) 为准，目标为 `next`，尚未合入或发布。早期原型与产品验证分别记录。
 
 源码基线：`zts212653/clowder-ai` 的远端 `next`，`b926134a02dec551d857d378fc0519ebe66dc090`。实施分支 `feat/issue-1778-quick-delete`，复用原设计工位。runtime 仍保持原检出与构建。
 
@@ -77,6 +77,7 @@ tips_exempt: 行尾入口、确认复选框和个人设置开关均在原操作�
 | 大厅 | 没有删除入口 |
 | IM Hub / `systemKind` 会话 | 不显示行尾快捷入口；保留菜单、输入名称确认及后端 `force=true` 保护 |
 | 偏好读取失败或用户身份未确定 | 默认显示确认 |
+| 确认框开启期间认证身份变化 | 旧确认框失效并关闭；旧勾选和旧确认回调不能用于新身份 |
 | 删除成功但偏好保存失败 | 告知会话已移入回收站、偏好未保存；下次仍确认 |
 
 ## 3. 视觉与交互规格
@@ -123,6 +124,7 @@ tips_exempt: 行尾入口、确认复选框和个人设置开关均在原操作�
 - 正常刷新/重启并回到相同实例地址后复用该偏好；不以提交 SHA、安装版本作为 key，避免每次升级重置。
 - 不写 `.env`、实例共享配置或其他用户的偏好，不提供跨设备同步。若桌面实例地址发生迁移，首版回退为默认确认；该迁移不承诺自动继承“不再提醒”。
 - 弹窗的勾选状态只是本次局部草稿。普通会话软删除成功后才写入持久偏好；设置页开关则独立保存并即时通知侧栏。
+- 草稿与偏好写入回调绑定现有认证身份快照。身份变化会关闭旧确认框；即使切回原用户，旧草稿也不复活。请求过程中身份变化时，旧响应不保存偏好或导航当前用户。
 
 原型里的偏好仅保存在组件内存，用于评审旅程，不构成这部分持久化实现的证据。
 
@@ -131,7 +133,7 @@ tips_exempt: 行尾入口、确认复选框和个人设置开关均在原操作�
 | 状态 | 所有者 | 生命周期 |
 | --- | --- | --- |
 | 确认偏好 | 共享前端偏好模块 | 用户主动修改；当前客户端刷新/重启可恢复 |
-| `deleteTarget` | 现有侧栏 | 请求确认时设置；取消或确认后关闭 |
+| `deleteDraft` | 现有侧栏 | 请求确认时捕获目标与身份；取消、确认或身份变化后失效 |
 | 本次“不再提醒”勾选 | 确认框 | 打开时为 false；随本次弹窗销毁 |
 | 请求中会话 ID | 删除执行逻辑 | 请求开始到结果处理结束；只供按钮处理中使用 |
 | 软删除标记与回收站 | 现有后端 ThreadStore | 原有删除/恢复流程；不在客户端另存一份会话事实 |
@@ -187,8 +189,8 @@ pnpm biome check <本次修改文件列表>
 ### 可重复检查
 
 ```powershell
-# 组件行为、原确认流程、行操作、设置语言、文案、GET 协调与快照：50/50
-pnpm --filter @cat-cafe/web exec vitest run src/components/ThreadSidebar/__tests__/thread-quick-delete.test.tsx src/components/ThreadSidebar/__tests__/thread-delete-confirm.test.ts src/components/__tests__/thread-item-actions.test.tsx src/components/settings/__tests__/settings-shell-v2-language.test.tsx src/components/shell/__tests__/shell-copy-namespaces.test.ts src/utils/__tests__/api-client-get-coordination.test.ts src/utils/__tests__/sidebar-thread-snapshot-generation.test.ts --maxWorkers=2
+# 组件行为、身份边界、原确认流程、行操作、设置语言、文案、GET 协调与快照：55/55
+pnpm --filter @cat-cafe/web exec vitest run src/components/ThreadSidebar/__tests__/thread-delete-identity.test.tsx src/components/ThreadSidebar/__tests__/thread-quick-delete.test.tsx src/components/ThreadSidebar/__tests__/thread-delete-confirm.test.ts src/components/__tests__/thread-item-actions.test.tsx src/components/settings/__tests__/settings-shell-v2-language.test.tsx src/components/shell/__tests__/shell-copy-namespaces.test.ts src/utils/__tests__/api-client-get-coordination.test.ts src/utils/__tests__/sidebar-thread-snapshot-generation.test.ts --maxWorkers=2
 
 # 浏览器完整组合旅程：1/1
 pnpm --filter @cat-cafe/api exec node --import tsx --test --test-concurrency=1 ../web/test/browser/thread-quick-delete.test.mjs
@@ -211,7 +213,9 @@ node scripts/with-test-home.mjs --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 
 
 范围边界：未执行安装器首装/升级，未改动真实 runtime。官方构建已生成 EXE；额外便携 ZIP 压缩已停止，未签发发布清单或交付发布包。此处证明同一安装运行归档中的 Windows 程序功能旅程，不声明安装器生命周期或升级兼容验收。
 
-非作者 `review_quick_delete` 审查覆盖同一实现提交，发现的 P2 已修复，无未决 P1/P2；独立行为检查 24/24、协调/快照检查 12/12 通过。该实现提交的远端 CI 为 19 项成功、1 项条件跳过。随后只补充本文验证记录，产品代码保持一致；最终远端状态以 PR 检查为准。
+初轮非作者 `review_quick_delete` 审查覆盖同一实现提交，发现的 P2 已修复，当轮未发现其他 P1/P2；独立行为检查 24/24、协调/快照检查 12/12 通过。该实现提交的远端 CI 为 19 项成功、1 项条件跳过。之后维护者在 `5e8d703` 上补充复现身份草稿 P1，因此初轮结论不代表最终批准。
+
+维护者 P1 修复：新增 5 项生产侧栏/删除 hook 回归，先观察到草稿未关闭、旧回调仍发送 DELETE、旧请求保存偏好的 RED，再验证 GREEN。覆盖换用户、身份暂未确定、A→B→A、保留旧确认回调、请求中换用户；相关前端检查合计 55/55。浏览器组合旅程同时通过真实 `refreshApiSession()` 切换认证身份，核对弹窗关闭、未发送删除/未保存偏好、切回原用户后重新勾选才能记住。当前修复尚待维护者复审；没有为此重建或重跑 Windows 安装程序。
 
 早期设计原型有独立的 13 项演示检查，不能替代产品证据。
 

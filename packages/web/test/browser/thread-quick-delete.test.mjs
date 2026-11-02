@@ -9,6 +9,7 @@ import { buildChatProof, origin, webRoot } from './fixtures/f322-chat-real-page-
 const evidence = process.env.THREAD_DELETE_EVIDENCE_DIR ?? path.join(tmpdir(), 'cat-cafe-evidence', 'issue-1778');
 const root = mkdtempSync(path.join(tmpdir(), 'clowder-thread-delete-'));
 const owner = 'thread-delete-browser-owner';
+let sessionOwner = owner;
 Object.assign(process.env, {
   CAT_CAFE_CONFIG_ROOT: root,
   CAT_CAFE_GLOBAL_CONFIG_ROOT: root,
@@ -55,14 +56,14 @@ before(
     app = Fastify();
     app.decorateRequest('sessionUserId', null);
     app.addHook('onRequest', async (request) => {
-      request.sessionUserId = owner;
+      request.sessionUserId = sessionOwner;
     });
     await app.register(threadsRoutes, {
       threadStore: store,
       messageStore: messages,
       invocationTracker: { guardDelete: (id) => ({ acquired: id !== threads[2].id, release() {} }) },
     });
-    app.get('/api/session', async () => ({ userId: owner, csrfToken: 'fixture-only' }));
+    app.get('/api/session', async () => ({ userId: sessionOwner, csrfToken: 'fixture-only' }));
     app.get('/api/messages', async (request) => ({
       messages: messages.getByThread(request.query.threadId),
       hasMore: false,
@@ -193,6 +194,24 @@ test(
     await first.getByTestId('thread-quick-delete').click();
     assert.equal(await remember.isChecked(), false);
     await remember.check();
+    sessionOwner = 'thread-delete-other-owner';
+    await page.evaluate(() => window.__threadDeleteRefreshSession());
+    await dialog.waitFor({ state: 'detached' });
+    assert.equal(requests.filter((request) => request.method === 'DELETE').length, 0);
+    assert.equal(
+      await page.evaluate(() =>
+        Object.keys(localStorage).some(
+          (key) => key.startsWith('clowder:thread-delete-confirm:') && localStorage.getItem(key) === 'off',
+        ),
+      ),
+      false,
+    );
+    sessionOwner = owner;
+    await page.evaluate(() => window.__threadDeleteRefreshSession());
+    assert.equal(await dialog.count(), 0);
+    await first.getByTestId('thread-quick-delete').click();
+    assert.equal(await remember.isChecked(), false);
+    await remember.check();
     assert.notEqual(
       await dialog
         .getByRole('button', { name: '移入回收站', exact: true })
@@ -293,6 +312,7 @@ test(
           result: 'PASS',
           productionThreadRoutes: true,
           productionSidebarAndSettings: true,
+          identityChangeCancelsDraft: true,
           windowsInstaller: 'NOT_RUN',
           requests,
           history: messages.getByThread(threads[0].id).map((message) => message.content),

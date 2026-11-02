@@ -14,7 +14,7 @@ import { ToastContainer } from '@/components/ToastContainer';
 import { primeCoCreatorConfigCache } from '@/hooks/useCoCreatorConfig';
 import { useChatStore } from '@/stores/chatStore';
 import { useThemeStore } from '@/stores/themeStore';
-import { apiFetch } from '@/utils/api-client';
+import { apiFetch, refreshApiSession } from '@/utils/api-client';
 import '@/app/globals.css';
 import '@/app/theme-tokens.css';
 import '@/app/connector-tokens.css';
@@ -77,9 +77,11 @@ function ThreadDeletionJourney() {
 declare global {
   interface Window {
     __threadDeleteTheme: (base: 'light' | 'dark') => void;
+    __threadDeleteRefreshSession: () => Promise<void>;
   }
 }
 window.__threadDeleteTheme = (base) => useThemeStore.getState().setActive(base);
+window.__threadDeleteRefreshSession = refreshApiSession;
 const root = document.getElementById('root');
 if (!root) throw new Error('Missing browser fixture root');
 createRoot(root).render(

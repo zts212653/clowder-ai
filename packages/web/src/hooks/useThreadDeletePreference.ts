@@ -17,11 +17,8 @@ function subscribe(listener: () => void) {
 
 /** The current client's choice, partitioned by the authenticated API owner. */
 export function useThreadDeletePreference() {
-  const owner = useSyncExternalStore(
-    apiSessionIdentity.subscribe,
-    () => apiSessionIdentity.getSnapshot().ownerUserId,
-    () => null,
-  );
+  const identity = useSyncExternalStore(apiSessionIdentity.subscribe, apiSessionIdentity.getSnapshot, () => null);
+  const owner = identity?.ownerUserId;
   const key = owner
     ? `clowder:thread-delete-confirm:v1:${encodeURIComponent(API_URL)}:${encodeURIComponent(owner)}`
     : null;
@@ -36,7 +33,7 @@ export function useThreadDeletePreference() {
   const confirmBeforeDelete = useSyncExternalStore(subscribe, read, () => true);
   const setConfirmBeforeDelete = useCallback(
     (confirm: boolean) => {
-      if (!key) return false;
+      if (!key || identity !== apiSessionIdentity.getSnapshot()) return false;
       try {
         window.localStorage.setItem(key, confirm ? 'on' : 'off');
       } catch {
@@ -45,7 +42,7 @@ export function useThreadDeletePreference() {
       window.dispatchEvent(new Event(CHANGE_EVENT));
       return true;
     },
-    [key],
+    [identity, key],
   );
-  return { confirmBeforeDelete, setConfirmBeforeDelete, ready: owner !== null };
+  return { confirmBeforeDelete, setConfirmBeforeDelete, ready: !!owner, identity };
 }
