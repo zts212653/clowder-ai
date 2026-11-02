@@ -52,7 +52,7 @@ pre-resolved 校验，覆盖 async、notice 与内存同步 admission。不会�
 - 显式 mention 返回 cat_disabled，canonical successor 是首项建议；用户确认后的新目标才可执行。
 - 用户指定、whisper、message_wake、scope、action fence、wait continuation、cloud provenance、
   live session 的身份约束保持 exact，不能因为 successor 扩展权限。
-- 仅无上述身份约束的系统 private_input，在首次 admission 前规范化预解析目标。
+- 无上述身份约束的系统 conversation_input / private_input，在首次 admission 前规范化预解析目标。
 - 公共历史/preferred/policy 在读取时投影 successor；不写回历史或用户成员配置。
 - 已落 Queue 的 targets 是收件人与投递/claim/CAS 的权威。重放保持赢家；配置变化使其失效时
   走既有失败结算，不改 ledger target，也不把旧 target 的结果写给 successor。
@@ -109,8 +109,8 @@ Map delta: none。独立审查须检查 exact 边界与 Queue 状态绑定，不
 ## 实施与作者自查结果
 
 未修改 public seed、backfill allowlist、成员配置、历史文档身份或 guardian 退役面。
-唯一新增的生产 API 是现有 Router 的同步 admission 校验及 Queue policy 接线；
-唯一 successor 算法位于 config loader，所有隐式消费复用它。
+现有 Router 增加同步 admission 校验，Queue policy 接线复用它；ledger 增加读取已有 private
+receipt 的方法。唯一 successor 算法位于 config loader，所有隐式消费复用它。
 
 真实失败观察：原 Queue 接受 opus、ghost、__none__；podcast 实际调用旧 opus 服务；
 显式禁用 mention 被选中；invalid successor 回落无关默认。另有两项消费边界被复现：
@@ -135,21 +135,41 @@ Map delta: none。独立审查须检查 exact 边界与 Queue 状态绑定，不
 | sentinel / 假身份 | admission、直接 execution、注册 alias 三条边界均拒绝 |
 | catalog / lead | runtime-owned successor、lead、launch metadata 保持权威；不继承 lead |
 
-作者验证：相关 11 文件 **398/398**；API build（含 shared/MCP 与 TypeScript）exit 0；
-14 个代码/测试文件 Biome exit 0；git diff --check exit 0。
-3 个新增 `.test.js` 均由 public resolver 选中，CI 的 next PR 触发条件已确认。
+作者最终验证：相关 23 文件 **559/559**，独立 Redis 两文件 **23/23**；
+API build（含 shared/MCP 与 TypeScript）exit 0；29 个代码/测试文件 Biome exit 0；
+git diff --check exit 0。4 个新增 `.test.js` 均由 public resolver 选中，CI 的 next PR
+触发条件已确认；Redis 测试在 CI 使用已有的 owned portless fixture，实际执行而非 skip。
 所有新增文件 ≤350 行；既有大型文件仅修改上述边界，未扩成无关拆分。
 
 旧 agent-router 测试中两条“任意 fallback”断言按已接受契约更新；同文件的协作标题断言
-兼容 LF/CRLF（本机模板实际是 CRLF），没有降低静态身份内容要求。
+兼容 LF/CRLF（本机模板实际是 CRLF），没有降低静态身份内容要求。上传目录断言同样接受
+Windows 分隔符。仅给实际失败的旧 HTTP router 替身补齐既有 routing_warnings 字段，
+没有在生产逻辑中为不完整替身增加防御分支。
 
 在飞重叠已核对到文件/patch：#1762 涉及 Queue.send 的 explicit confirmation；#1702 增加
 display alias；#1432 增加 terminal producer capability；#1157 是旧 Queue 内存幂等逻辑。
 它们没有提供本次一跳 successor admission；本 PR 不搬运其未合入内容。后续合并时应保留
 这些各自契约，尤其 #1762 的确认状态不可被 successor 解释为用户已同意改发。
 
-验证边界：上述是隔离 HTTP 与真实生产类的集成检查，使用假模型服务和内存 ledger；
-不声称已通过真实模型、Redis 安装态、TTS 音色或部署验收。podcast 的 TTS speaker 标签属于
+验证边界：上述是隔离 HTTP、真实生产类、内存/Redis ledger 的集成检查，模型服务为假服务；
+不声称已通过真实模型、生产 Redis、TTS 音色或部署验收。podcast 的 TTS speaker 标签属于
 音色选择，不进入 Queue/模型执行或成员 assignment，本次不重写其历史角色标签。
-无进程/测试安装/桌面入口遗留；工位保留用于 PR 审查。GitHub CI 和非作者审查以最终 HEAD
+自建隔离 Redis 已受控停止、端口释放、合成数据及实例台账保留；无测试安装/桌面入口遗留。
+工位保留用于 PR 审查。GitHub CI 和非作者审查以最终 HEAD
 的远端检查、PR 正文及独立审查回执为准，不消费 #1283 的旧绿灯或同作者 approval 文本。
+
+## 非作者首轮 finding 处置
+
+首轮独立审查针对 c77a00aea08a1acca66dd999e07b0c386d1fddb4，提出四项 P2，均已观察 RED 后修复：
+
+| finding | 根因与修复 | 真实回归 |
+| --- | --- | --- |
+| 重放 | 剩余 targets 不是原 admission；在当前配置解析前读取已有 receipt。private identity 以原 requested targets 和完整 producer envelope 比较，保持旧 receipt 字节兼容；public warning 消费已提交快照 | partial/retired/reopen/config invalid/旧形态/冻结 next fingerprint/公开 UUID warning 重放；Memory + Redis |
+| mention 建议 | catalog 不保证声明 @id；优先已声明 canonical pattern，否则使用 catalog 既有 pattern，canonical successor 身份仍首项 | 用户实际按建议 token 再次解析，得到 successor |
+| Steer | reconcile/target expansion 绕过首次 admission；新增目标复用 exact validator，参与者只消费已提交 target | 真实 Queue targets HTTP API 不落入 ghost / sentinel |
+| 普通 scheduler | 只覆盖 privateContent；无 authority fence 的普通系统输入也应在首次 admission 解析 | createDeliverFn → PersistedQueueDelivery → Queue 的普通/私有分支一致 |
+
+CI 的额外失败还揭示：catalog 可用但 provider 不可用的显式 mention 必须保留原身份并报告
+不可用原因；preview、HTTP 和 plugin 现保持一致。没有为了通过测试重新引入任意 fallback。
+这一轮新增消费了既有 immutable receipt，没有增加持久字段、缓存、迁移或第二套路由。
+所有 code findings 待非作者对后续精确 HEAD 复审，作者不自行 Approval。

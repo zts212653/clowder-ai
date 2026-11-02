@@ -133,3 +133,15 @@ export async function verifyRedisQueueLedgerReplay(
   if (!verified.every((result) => result.matches)) return { outcome: 'conflict', entries: [] };
   return { outcome: 'replayed', entries: verified.flatMap((result) => (result.live ? [result.live] : [])) };
 }
+
+/** Consult the existing immutable producer receipt before applying current target configuration. */
+export async function replayRedisPrivateAdmission(
+  redis: RedisClient,
+  entry: QueueLedgerEntry,
+): Promise<QueueLedgerEnqueueResult | null> {
+  const receipt = await redis.hget(QueueLedgerKeys.privateAdmissions(entry.threadId), entry.id);
+  if (receipt === null) return null;
+  if (receipt !== queueLedgerAdmissionFingerprint(entry)) return { outcome: 'conflict', entries: [] };
+  const current = await getRedisQueueLedgerEntry(redis, entry.threadId, entry.id);
+  return { outcome: 'replayed', entries: current ? [current] : [] };
+}

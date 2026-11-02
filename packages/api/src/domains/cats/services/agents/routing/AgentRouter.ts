@@ -858,7 +858,7 @@ export class AgentRouter {
     threadId: string,
     content = '',
   ): Promise<CatId[]> {
-    if (requestedCatIds.length > 0) return this.filterRoutableCats(requestedCatIds);
+    if (requestedCatIds.length > 0) return this.resolveAdmissionTargets(requestedCatIds, true);
     const explicit = await this.parseAllMentions(content, threadId, { allowGroupFallback: false });
     if (explicit.mentions.length > 0 || explicit.routing_warnings.length > 0) return explicit.mentions;
     return (await this.resolveImplicitTargetPreview(content, threadId)).targetCats;

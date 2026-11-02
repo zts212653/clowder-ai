@@ -36,6 +36,19 @@ it('a mixed explicit mention only selects the available recipient and retains th
   await assert.rejects(h.router.resolveSendTargets(['opus'], h.threadId), /explicit member/);
 });
 
+it('successor suggestion respects the runtime catalog mention pattern and routes when followed', async (t) => {
+  const h = successorFixture(t);
+  process.env.DEFAULT_CAT_ID = 'codex';
+  const configs = catRegistry.getAllConfigs();
+  catRegistry.reset();
+  Object.entries(configs).forEach(([id, config]) =>
+    catRegistry.register(id, id === 'opus-5' ? { ...config, mentionPatterns: ['@replacement'] } : config),
+  );
+  const suggestion = resolveCatTarget('@opus').error.alternatives[0];
+  assert.equal(suggestion.catId, 'opus-5');
+  assert.deepEqual(await h.router.resolveSendTargets([], h.threadId, `${suggestion.mention} work`), ['opus-5']);
+});
+
 it('implicit configured default and runtime override follow the one explicit successor', async (t) => {
   const h = successorFixture(t);
   assert.equal(getDefaultCatId(), 'opus-5');

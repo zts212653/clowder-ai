@@ -10,7 +10,10 @@ function buildAlts(excludeId: string | null, preferFamily?: string): CatAlternat
     .filter(([id, e]) => id !== '__none__' && id !== excludeId && e.available && catRegistry.has(id))
     .map(([id, e]) => ({
       catId: id as CatId,
-      mention: `@${id}`,
+      mention:
+        configs[id]?.mentionPatterns.find((pattern) => pattern === `@${id}`) ??
+        configs[id]?.mentionPatterns[0] ??
+        `@${id}`,
       displayName: configs[id]?.displayName ?? id,
       family: e.family,
     }))

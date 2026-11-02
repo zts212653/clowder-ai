@@ -209,14 +209,14 @@ const cases = [
     expected: ['gemini'],
   },
   {
-    name: 'unavailable ordinary mention has the same visible fallback',
+    name: 'unavailable explicitly mentioned provider keeps its named recipient',
     content: '@opus continue',
     arrange: (f) => {
       f.reply('codex');
       f.agents.markUnavailable('opus', { code: 'rejected-account-binding', message: 'unavailable fixture' });
       f.router.refreshFromRegistry(f.agents);
     },
-    expected: ['codex'],
+    expected: ['opus'],
   },
 ];
 

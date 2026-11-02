@@ -20,7 +20,7 @@ import { InvocationRecordStore } from '../../dist/domains/cats/services/stores/p
 import { MessageStore } from '../../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { ThreadStore } from '../../dist/domains/cats/services/stores/ports/ThreadStore.js';
 
-export function successorFixture(t, rosterOverrides = {}) {
+export function successorFixture(t, rosterOverrides = {}, ledger = new InMemoryQueueLedgerStore()) {
   const oldTemplate = process.env.CAT_TEMPLATE_PATH;
   const oldDefault = process.env.DEFAULT_CAT_ID;
   const oldConfigs = catRegistry.getAllConfigs();
@@ -85,7 +85,6 @@ export function successorFixture(t, rosterOverrides = {}) {
     messageStore: messages,
     threadStore: threads,
   });
-  const ledger = new InMemoryQueueLedgerStore();
   const queue = new InvocationQueue(ledger, {
     resolveTargets: (...args) => router.resolveSendTargets(...args),
     resolvePreResolvedTargets: (...args) => router.resolveAdmissionTargets(...args),
