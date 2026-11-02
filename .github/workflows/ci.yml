@@ -45,7 +45,7 @@ jobs:
     name: Build
     runs-on: ubuntu-latest
     env:
-      PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/playwright-browsers
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.tmp/playwright-browsers
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
