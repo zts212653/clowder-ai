@@ -1,9 +1,11 @@
+import '../helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { catRegistry } from '@cat-cafe/shared';
 import { InvocationTracker } from '../../dist/domains/cats/services/agents/invocation/InvocationTracker.js';
 import { createAcpServiceForConfig } from '../../dist/domains/cats/services/agents/providers/acp/AcpServiceFactory.js';
 import { routeSerial } from '../../dist/domains/cats/services/agents/routing/route-serial.js';
@@ -14,14 +16,34 @@ import { buildCancelMessages, SocketManager } from '../../dist/infrastructure/we
 import { ThreadSequencer } from '../../dist/infrastructure/websocket/ThreadSequencer.js';
 import { appendTestLifecycleResponseSource } from '../helpers/message-from-fixtures.js';
 
-// Diagnostic regression: the pre-existing cancel route emits transport cleanup
-// before routing emits its terminal, even without the bridge. QueueProcessor
-// stamps the routing terminal later; this test stops at the socket emit boundary.
+// A socket cancellation is a request. The route owns the one terminal after
+// execution cleanup; the transport cannot publish an earlier synthetic done.
 for (const bridged of [false, true]) {
   test(
     `cancel broadcast provenance with real ACP child: ${bridged ? 'bridge' : 'built-in'}`,
     { timeout: 15000 },
-    async () => {
+    async (t) => {
+      const all = catRegistry.getAllConfigs();
+      const config = {
+        ...all.codex,
+        id: 'codex',
+        clientId: 'acp',
+        defaultModel: '',
+        mcpSupport: false,
+        configurationSource: 'native_tool',
+        accountRef: undefined,
+        cli: { effort: '' },
+      };
+      catRegistry.reset();
+      Object.entries(all).forEach(([id, member]) => {
+        catRegistry.register(id, id === 'codex' ? config : member);
+      });
+      t.after(() => {
+        catRegistry.reset();
+        Object.entries(all).forEach(([id, member]) => {
+          catRegistry.register(id, member);
+        });
+      });
       const root = await mkdtemp(join(tmpdir(), 'cancel-acp-baseline-'));
       const pools = new Map();
       const previousMode = process.env.CAT_CAFE_WINDOWS_ACP_BOOTSTRAP_MODE;
@@ -33,13 +55,7 @@ for (const bridged of [false, true]) {
           projectRoot: root,
           bootstrapRoot: join(root, 'bootstrap'),
           profileId: 'codex',
-          config: {
-            id: 'codex',
-            clientId: 'acp',
-            defaultModel: '',
-            mcpSupport: false,
-            configurationSource: 'native_tool',
-          },
+          config,
           effectiveModel: '',
           acpConfig: {
             command: 'node',
@@ -94,6 +110,7 @@ for (const bridged of [false, true]) {
           socketManager: { broadcastToRoom() {} },
         };
         let stopped = false;
+        const errors = [];
         let responseMessageId;
         for await (const message of routeSerial(deps, ['codex'], '#wait', 'user1', threadId, {
           signal: batch.signal,
@@ -118,6 +135,7 @@ for (const bridged of [false, true]) {
           },
         })) {
           socket.broadcastAgentMessage(message, threadId);
+          if (message.type === 'error') errors.push({ code: message.errorCode, error: message.error });
           if (message.type === 'text' && message.content === 'waiting' && !stopped) {
             stopped = true;
             const result = tracker.cancel(threadId, 'codex', 'user1', 'user_cancel');
@@ -125,14 +143,18 @@ for (const bridged of [false, true]) {
               socket.broadcastAgentMessage(cleanup, threadId);
           }
         }
-        assert.equal(stopped, true);
+        assert.equal(stopped, true, JSON.stringify(errors));
         const done = emitted.filter(({ event, message }) => event === 'agent_message' && message.type === 'done');
-        assert.equal(done.length, 2, 'existing transport cleanup and durable routing terminal both broadcast');
-        assert.equal(done[0].message.invocationId, undefined);
-        assert.equal(done[0].message.messageId, undefined);
+        const requests = emitted.filter(
+          ({ message }) => message.type === 'status' && /等待执行状态确认/.test(message.content),
+        );
+        assert.equal(requests.length, 1);
+        assert.notEqual(requests[0].message.isFinal, true);
+        assert.equal(done.length, 1, 'only the execution route broadcasts a terminal');
         assert.equal(store.getById(responseMessageId).lifecycle.status, 'canceled');
         assert.equal(store.getById(responseMessageId).lifecycle.invocationId, 'child-turn');
-        assert.ok(done[0].message.seq < done[1].message.seq);
+        assert.ok(requests[0].message.seq < done[0].message.seq);
+        assert.equal(pools.get('codex').getMetrics().activeLeaseCount, 0);
       } finally {
         await Promise.all([...pools.values()].map((pool) => pool.closeAll()));
         if (previousMode === undefined) delete process.env.CAT_CAFE_WINDOWS_ACP_BOOTSTRAP_MODE;

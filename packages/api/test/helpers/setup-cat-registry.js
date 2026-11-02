@@ -34,9 +34,9 @@ process.on('exit', cleanup);
 process.env.CAT_TEMPLATE_PATH = templatePath;
 
 async function registerAllCats() {
-  const { loadCatConfig, toAllCatConfigs } = await import('../../dist/config/cat-config-loader.js');
-  // Pass explicit path → reads ONLY cat-template.json, skips catalog overlay.
-  const allConfigs = toAllCatConfigs(loadCatConfig(TEMPLATE_PATH));
+  const { loadResolvedCatConfig, toAllCatConfigs } = await import('../../dist/config/cat-config-loader.js');
+  // The isolated template has no catalog overlay; preserve template provenance too.
+  const allConfigs = toAllCatConfigs(loadResolvedCatConfig(templatePath));
   for (const [id, config] of Object.entries(allConfigs)) {
     if (!catRegistry.has(id)) {
       catRegistry.register(id, config);

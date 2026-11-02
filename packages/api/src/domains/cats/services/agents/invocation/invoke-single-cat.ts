@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { redactClaudeLaunchToken } from '../../../../../config/claude-token-account.js';
 import type {
   ContextSourceAdmission,
@@ -5,8 +6,16 @@ import type {
   ContextSourceIngress,
 } from '../../../../memory/cue/ContextSourceAdmission.js';
 import { ContextSourceWorkBudget } from '../../../../memory/cue/ContextSourceWorkBudget.js';
-import { type FrozenExecutionBinding, freezeExecutionAccountBinding } from './execution-account-binding.js';
+import { captureInvocationL0Input } from '../providers/l0-input-capture.js';
+import { agentServiceGeneration } from '../registry/AgentRegistry.js';
+import { ExecutionAdmissionConflict } from '../registry/AgentServiceUnavailableError.js';
+import { deepFreeze, type FrozenExecutionBinding, freezeExecutionAccountBinding } from './execution-account-binding.js';
 import { freezeExecutionWorkspace } from './execution-workspace.js';
+import {
+  captureHostExecutionBoundary,
+  changedHostExecutionBoundary,
+  hostExecutionBoundaryRef,
+} from './host-execution-boundary.js';
 import { InvocationServiceScope } from './invocation-service-scope.js';
 import {
   isConfirmedNativeAuthFailure,
@@ -37,8 +46,6 @@ import { rm } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import {
   type CatId,
-  type CliEffortPreset,
-  type CodexSpeedValue,
   type ContextHealth,
   catRegistry,
   type MessageContent,
@@ -54,10 +61,14 @@ import {
   type SessionRecord,
 } from '@cat-cafe/shared';
 import { context, SpanStatusCode, trace } from '@opentelemetry/api';
-import { bindInvocationPluginMcpView } from '../../../../../config/capabilities/invocation-plugin-mcp-view.js';
+import {
+  bindInvocationPluginMcpView,
+  withInvocationPluginMcpView,
+} from '../../../../../config/capabilities/invocation-plugin-mcp-view.js';
+import { captureInvocationMcpSources } from '../../../../../config/capabilities/invoke-mcp-config.js';
 import { pluginMcpExposureProject } from '../../../../../config/capabilities/plugin-mcp-exposure.js';
 import { buildCatGitIdentityEnv } from '../../../../../config/cat-git-identity.js';
-import { getCatModel } from '../../../../../config/cat-models.js';
+import { isPublishedCatalogSnapshotCurrent } from '../../../../../config/cat-registry-reconciliation.js';
 import { parseOpenCodeModel, resolveEffectiveOpenCodeModel } from '../../../../../config/opencode-model.js';
 import { shouldTakeAction } from '../../../../../config/session-strategy.js';
 import { assertSafeTestConfigRoot } from '../../../../../config/test-config-write-guard.js';
@@ -157,7 +168,7 @@ import { ClaudeSdkAgentService } from '../providers/ClaudeSdkAgentService.js';
 import { buildClaudeCompactionLaunchPlan } from '../providers/claude-compaction-launch-plan.js';
 import { isCodexCompactionContinuation } from '../providers/codex-active-work-context.js';
 import { servedFactsPayload } from '../providers/codex-served-model.js';
-import { extractUserEnvTemplates, hasSupportedEnvTemplate, resolveEnvMap } from '../providers/env-map.js';
+import { extractUserEnvTemplates, resolveEnvMap } from '../providers/env-map.js';
 import { compileL0ViaSubprocess } from '../providers/l0-compiler.js';
 import { OC_INSTRUCTIONS_ONLY_ENV } from '../providers/OpenCodeAgentService.js';
 import {
@@ -168,6 +179,7 @@ import {
   summarizeOpenCodeRuntimeConfigForDebug,
 } from '../providers/opencode-config-template.js';
 import {
+  captureOpenCodeMcpConfig,
   writeOpenCodeInstructionsOnlyConfig,
   writeOpenCodeRuntimeConfig,
 } from '../providers/opencode-config-writer.js';
@@ -626,11 +638,12 @@ import type { TranscriptSessionInfo, TranscriptWriter } from '../../session/Tran
 import type { CreateSessionInput, ISessionChainStore } from '../../stores/ports/SessionChainStore.js';
 import type { IThreadStore } from '../../stores/ports/ThreadStore.js';
 import { DEFAULT_THREAD_ID } from '../../stores/ports/ThreadStore.js';
-import type {
-  ITurnExecutionStore,
-  TurnExecutionCausalRefs,
-  TurnExecutionKind,
-  TurnExecutionTerminalInput,
+import {
+  hasUnconfirmedProviderTeardown,
+  type ITurnExecutionStore,
+  type TurnExecutionCausalRefs,
+  type TurnExecutionKind,
+  type TurnExecutionTerminalInput,
 } from '../../stores/ports/TurnExecutionStore.js';
 import type {
   AgentMessage,
@@ -757,8 +770,12 @@ function abortableNext<T>(iter: AsyncIterator<T>, signal: AbortSignal): Promise<
 
 const SERVICE_ITERATOR_CLOSE_TIMEOUT_MS = 1_000;
 
-async function closeServiceIterator<T>(iter: AsyncIterator<T>): Promise<boolean> {
+async function closeServiceIterator<T>(iter: AsyncIterator<T>, drain = false): Promise<boolean> {
   if (!iter.return) return true;
+  if (drain) {
+    await iter.return();
+    return true;
+  }
   let timeout: ReturnType<typeof setTimeout> | null = null;
   try {
     return await Promise.race([
@@ -813,7 +830,7 @@ function registerProxyUpstream(projectRoot: string, slug: string, targetUrl: str
  */
 const _prevContextFill = new Map<string, number>();
 const _needsReinjection = new Set<string>();
-const _staticIdentityRegistryRevision = new Map<string, number>();
+const _staticIdentityDigest = new Map<string, { coordinate: string; digest: string }>();
 
 /** @internal Exposed for testing */
 export function _resetCompressionDetection(): void {
@@ -823,7 +840,7 @@ export function _resetCompressionDetection(): void {
 
 /** @internal Exposed for testing */
 export function _resetStaticIdentityRegistryRevisionForTests(): void {
-  _staticIdentityRegistryRevision.clear();
+  _staticIdentityDigest.clear();
 }
 
 function sessionIdentityKey(userId: string, catId: CatId, threadId: string): string {
@@ -1414,8 +1431,13 @@ export interface InvocationParams {
  * - Accumulating text/metadata from yielded messages
  * - Storing the final response in messageStore
  */
+function resolveInvocationMcpServerPath() {
+  const configured = process.env.CAT_CAFE_MCP_SERVER_PATH?.trim();
+  return configured ? resolve(process.cwd(), configured) : resolveDefaultClaudeMcpServerPath();
+}
+
 export async function prepareInvocationExecutionBinding(
-  deps: Pick<InvocationDeps, 'threadStore'>,
+  deps: Pick<InvocationDeps, 'threadStore' | 'profileRepository' | 'resolveInvocationPluginMcpView' | 'apiUrl'>,
   input: {
     catId: CatId;
     threadId: string;
@@ -1423,20 +1445,226 @@ export async function prepareInvocationExecutionBinding(
     service?: AgentService;
     model?: string;
     signal?: AbortSignal;
+    ownerAuthProvenance?: InvocationParams['ownerAuthProvenance'];
+    toolExecutionPolicy?: AgentServiceOptions['toolExecutionPolicy'];
+    liveCompanion?: AgentServiceOptions['liveCompanion'];
   },
 ): Promise<FrozenExecutionBinding> {
+  input.signal?.throwIfAborted();
+  const memberRegistryRevision = catRegistry.getRevision();
   const catConfig = catRegistry.tryGet(input.catId as string)?.config;
+  if (!isPublishedCatalogSnapshotCurrent(catConfig))
+    throw new ExecutionAdmissionConflict('Member catalog publication is stale; retry after configuration refresh.');
   const carrier = input.service?.freshnessCarrierCapability?.();
-  const workspace = await freezeExecutionWorkspace({
-    threadStore: deps.threadStore,
-    threadId: input.threadId,
-    userId: input.userId,
-    provider: catConfig?.clientId,
-    ...(input.signal ? { signal: input.signal } : {}),
-    requiresAgyWorkspace:
-      Boolean(input.service && usesAgyNativeCarrier(input.service)) || carrier?.carrier === 'agy_acp',
+  const declaredImplementation = input.service?.implementationSnapshot?.();
+  if (declaredImplementation?.clientId && declaredImplementation.clientId !== catConfig?.clientId)
+    throw new ExecutionAdmissionConflict(
+      'execution_client_changed: 成员与已准备的 client 不一致，请在配置刷新后重试。',
+    );
+  const implementationSource =
+    declaredImplementation ??
+    (input.service
+      ? {
+          key: `builtin:${catConfig?.clientId ?? 'unknown'}/${carrier?.carrier ?? 'unknown'}`,
+          generation: agentServiceGeneration(input.service),
+        }
+      : undefined);
+  const implementation = implementationSource ? Object.freeze({ ...implementationSource }) : undefined;
+  const captureThread = async () => {
+    const workspace = await freezeExecutionWorkspace({
+      threadStore: deps.threadStore,
+      threadId: input.threadId,
+      userId: input.userId,
+      provider: catConfig?.clientId,
+      ...(input.signal ? { signal: input.signal } : {}),
+      requiresAgyWorkspace:
+        Boolean(input.service && usesAgyNativeCarrier(input.service)) || carrier?.carrier === 'agy_acp',
+    });
+    input.signal?.throwIfAborted();
+    const [effort, speed] = await Promise.allSettled([
+      preflightRace(
+        Promise.resolve().then(() => deps.threadStore?.getMemberEffort?.(input.threadId, input.catId, input.userId)),
+        'threadStore.getMemberEffort:execution-binding',
+        input.signal,
+      ),
+      preflightRace(
+        Promise.resolve().then(() =>
+          catConfig?.clientId === 'openai'
+            ? deps.threadStore?.getMemberSpeed?.(input.threadId, input.catId, input.userId)
+            : undefined,
+        ),
+        'threadStore.getMemberSpeed:execution-binding',
+        input.signal,
+      ),
+    ] as const);
+    input.signal?.throwIfAborted();
+    return {
+      workspace,
+      threadPreferences: Object.freeze({
+        reasoningEffortOverride: effort.status === 'fulfilled' ? effort.value : undefined,
+        speedOverride: speed.status === 'fulfilled' ? speed.value : undefined,
+        effortReadFailed: effort.status === 'rejected',
+        speedReadFailed: speed.status === 'rejected',
+      }),
+    };
+  };
+  const { workspace, threadPreferences } = await captureThread();
+  const binding = freezeExecutionAccountBinding({
+    catId: input.catId,
+    catConfig,
+    model: input.model,
+    workspace,
   });
-  return freezeExecutionAccountBinding({ catId: input.catId, catConfig, model: input.model, workspace });
+  const isScopedMember =
+    input.toolExecutionPolicy?.mode === 'plugin_native' && Boolean(input.toolExecutionPolicy.memberSession);
+  const captureOptions =
+    !isScopedMember || carrier?.carrier === 'claude_agent_sdk'
+      ? input.service?.captureInvocationOptions?.bind(input.service)
+      : undefined;
+  const captureOpenCodeMcp =
+    !isScopedMember &&
+    catConfig?.clientId === 'opencode' &&
+    binding.resolvedAccount &&
+    resolveEffectiveOpenCodeModel(catConfig.provider?.trim() || undefined, binding.executionPreferences?.model?.trim())
+      ? {
+          mcpServerPath: resolveInvocationMcpServerPath(),
+          ...(workspace.workingDirectory ? { allowedWorkspaceDirs: resolve(workspace.workingDirectory) } : {}),
+        }
+      : undefined;
+  const exposureProject = pluginMcpExposureProject(workspace.threadProjectPath, workspace.workingDirectory);
+  const mcpTransport = isScopedMember ? 'stdio' : (process.env.CAT_CAFE_MCP_TRANSPORT ?? 'shared');
+  const captureSharedMcp =
+    !isScopedMember &&
+    catConfig?.provider !== 'openai-chatgpt-pro' &&
+    catConfig?.mcpSupport !== false &&
+    input.toolExecutionPolicy?.mode !== 'read_only';
+  let isPluginMcpCurrent = () => true;
+  const mcpSources = await captureInvocationMcpSources(async () =>
+    captureOptions || captureOpenCodeMcp || captureSharedMcp
+      ? await preflightRace(
+          Promise.resolve().then(async () => {
+            const view = isScopedMember ? undefined : await deps.resolveInvocationPluginMcpView?.();
+            isPluginMcpCurrent = () => view?.isCurrent?.() !== false;
+            input.signal?.throwIfAborted();
+            return withInvocationPluginMcpView(
+              async () => {
+                const providerOptions = captureOptions
+                  ? await captureOptions({
+                      signal: input.signal,
+                      workingDirectory: workspace.workingDirectory,
+                      toolExecutionPolicy: input.toolExecutionPolicy,
+                      accountEnv: binding.accountEnv,
+                      accountRef: binding.resolvedAccount?.id,
+                      mcpSupport: binding.catConfig?.mcpSupport !== false,
+                      liveCompanion: input.liveCompanion,
+                    })
+                  : undefined;
+                input.signal?.throwIfAborted();
+                const openCodeMcpConfig = captureOpenCodeMcp
+                  ? await captureOpenCodeMcpConfig(
+                      binding.projectRoot,
+                      input.catId,
+                      captureOpenCodeMcp,
+                      workspace.workingDirectory,
+                    )
+                  : undefined;
+                input.signal?.throwIfAborted();
+                const sharedMcpContext = captureSharedMcp
+                  ? await prepareSharedMcpLaunch({
+                      catId: input.catId,
+                      apiUrl: deps.apiUrl,
+                      workingDirectory: workspace.workingDirectory,
+                      transport: mcpTransport,
+                    })
+                  : undefined;
+                return {
+                  ...(providerOptions ? { providerOptions } : {}),
+                  ...(openCodeMcpConfig ? { openCodeMcpConfig } : {}),
+                  sharedMcpLaunch: { transport: mcpTransport, context: sharedMcpContext },
+                };
+              },
+              view,
+              input.ownerAuthProvenance === 'strict' && exposureProject
+                ? { kind: 'member', projectRoot: exposureProject, memberCatId: input.catId }
+                : undefined,
+            );
+          }),
+          'service.captureInvocationOptions:execution-binding',
+          input.signal,
+        )
+      : { sharedMcpLaunch: { transport: mcpTransport } },
+  );
+  const captured = mcpSources.value;
+  input.signal?.throwIfAborted();
+  const currentThread = await captureThread();
+  const workspaceChanged = (
+    ['workingDirectory', 'workingProjectRoot', 'threadProjectPath', 'usesDefaultWorkspace'] as const
+  ).some((key) => workspace[key] !== currentThread.workspace[key]);
+  if (workspaceChanged || !isDeepStrictEqual(threadPreferences, currentThread.threadPreferences))
+    throw new ExecutionAdmissionConflict(
+      'Thread execution configuration changed during admission; retry this invocation.',
+    );
+  if (catRegistry.getRevision() !== memberRegistryRevision || !isPublishedCatalogSnapshotCurrent(catConfig))
+    throw new ExecutionAdmissionConflict(
+      'Member configuration changed during execution admission; retry this invocation.',
+    );
+  const currentAccountBinding = freezeExecutionAccountBinding({
+    catId: input.catId,
+    catConfig,
+    model: input.model,
+    workspace,
+  });
+  if (!isDeepStrictEqual(binding, currentAccountBinding))
+    throw new ExecutionAdmissionConflict(
+      'Execution configuration changed during execution admission; retry this invocation.',
+    );
+  if (
+    input.service?.implementationSnapshot &&
+    !isDeepStrictEqual(input.service.implementationSnapshot(), implementation)
+  )
+    throw new ExecutionAdmissionConflict('session_host_generation_changed');
+  if (!mcpSources.isCurrent())
+    throw new ExecutionAdmissionConflict(
+      'MCP configuration changed during execution admission; retry this invocation.',
+    );
+  if (!isPluginMcpCurrent())
+    throw new ExecutionAdmissionConflict(
+      'Plugin MCP activation changed during execution admission; retry this invocation.',
+    );
+  const frozenL0Input =
+    catConfig && (input.service?.injectsL0Natively?.() || catConfig.clientId === 'opencode')
+      ? captureInvocationL0Input(
+          isScopedMember
+            ? {
+                catId: input.catId,
+                catConfig,
+                model:
+                  (catConfig.clientId === 'kimi' && binding.accountEnv?.KIMI_MODEL_NAME) ||
+                  binding.executionPreferences?.model ||
+                  catConfig.defaultModel,
+                projection: 'scoped-member',
+              }
+            : {
+                catId: input.catId,
+                catConfig,
+                userId: input.userId,
+                model: binding.executionPreferences?.model,
+                profileRepository: deps.profileRepository,
+              },
+        )
+      : undefined;
+  const prepared = {
+    ...binding,
+    ...deepFreeze(captured),
+    memberRegistryRevision,
+    ...(implementation ? { implementation } : {}),
+    threadPreferences,
+    ...(frozenL0Input ? { frozenL0Input } : {}),
+  };
+  return Object.freeze({
+    ...prepared,
+    hostExecutionBoundary: captureHostExecutionBoundary(prepared, carrier?.carrier ?? 'undeclared'),
+  });
 }
 
 export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationParams): AsyncIterable<AgentMessage> {
@@ -1458,7 +1686,8 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       yield {
         type: 'error',
         catId: params.catId,
-        errorCode: 'execution_binding_unavailable',
+        errorCode:
+          error instanceof ExecutionAdmissionConflict ? 'execution_binding_conflict' : 'execution_binding_unavailable',
         error: error instanceof Error ? error.message : 'Execution binding is unavailable',
         timestamp: Date.now(),
       };
@@ -1529,19 +1758,10 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
     ...(deps.workflowSopStore ? { workflowSopStore: deps.workflowSopStore } : {}),
   });
 
-  const mcpTransport = process.env.CAT_CAFE_MCP_TRANSPORT ?? 'shared';
-  const sharedMcpContext =
-    isCloudOnlyInvocation ||
-    frozenExecutionBinding.catConfig?.mcpSupport === false ||
-    isScopedMember ||
-    effectiveToolExecutionPolicy?.mode === 'read_only'
-      ? undefined
-      : await prepareSharedMcpLaunch({
-          catId,
-          apiUrl,
-          workingDirectory: frozenExecutionBinding.workspace.workingDirectory,
-          transport: mcpTransport,
-        });
+  const sharedMcpLaunch = frozenExecutionBinding.sharedMcpLaunch;
+  if (!sharedMcpLaunch) throw new Error('Shared MCP admission snapshot unavailable');
+  const { transport: mcpTransport, context: admittedSharedMcpContext } = sharedMcpLaunch;
+  const sharedMcpContext = isScopedMember ? undefined : admittedSharedMcpContext;
   const { invocationId, callbackToken } = await registry.create(
     userId,
     catId,
@@ -1684,22 +1904,16 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
     // Per-cat git author identity (W1: cats are Agents with identity).
     // GIT_AUTHOR_NAME/GIT_COMMITTER_NAME override the runtime git config's pinned
     // user.name so each cat's commits carry its own name instead of all collapsing
-    // to one. Model comes from getCatModel(catId) — the SAME source as the system-prompt
-    // identity line (env CAT_{CATID}_MODEL > runtime catRegistry), so the author name
+    // to one. Model comes from the admitted choices used for the system-prompt
+    // identity line, so the author name
     // tracks the cat's real model (opus-45 → claude-opus-4-8), not the catId or a stale
     // catalog copy. Email is intentionally NOT set — it inherits git config (the operator's
     // GitHub noreply account) so contribution-graph attribution stays on one account
     // while the name distinguishes the cat. (operator directive 2026-05-28)
     ...buildCatGitIdentityEnv(
       catId as string,
-      catRegistry.tryGet(catId as string)?.config?.breedId,
-      ((): string | undefined => {
-        try {
-          return getCatModel(catId as string);
-        } catch {
-          return undefined;
-        }
-      })(),
+      frozenExecutionBinding.catConfig?.breedId,
+      frozenExecutionBinding.executionPreferences?.model,
     ),
   };
 
@@ -2099,6 +2313,15 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
   const toolSpanTracker = new ToolSpanTracker(invocationSpan, catId as string);
   let activeServiceIterator: AsyncIterator<AgentMessage> | null = null;
   const unclosedServiceIterators = new Set<AsyncIterator<AgentMessage>>();
+  let providerTeardownUnconfirmed = false;
+  const unconfirmedTeardownMessage = () => ({
+    type: 'status' as const,
+    catId,
+    invocationId,
+    providerTeardown: 'unconfirmed' as const,
+    content: '停止尚未确认，执行绑定仍被占用',
+    timestamp: Date.now(),
+  });
   let ordinaryTaskExecutionId: string | undefined;
   let presentationDelivery: { confirm(): Promise<AgentMessage[]>; release(reason: string): Promise<void> } | undefined;
   let currentPresentationAttempt: ProviderPresentationAttempt<InvocationPresentationReceipt> | undefined;
@@ -2141,11 +2364,15 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
     if (!iterator) return;
     activeServiceIterator = null;
     try {
-      if (!(await closeServiceIterator(iterator))) {
+      if (!(await closeServiceIterator(iterator, service.cancellationMode === 'drain'))) {
         log.warn({ catId, threadId, invocationId }, 'Timed out closing abandoned provider iterator');
-      } else unclosedServiceIterators.delete(iterator);
+      } else if (!providerTeardownUnconfirmed) unclosedServiceIterators.delete(iterator);
     } catch (err) {
       log.warn({ catId, threadId, invocationId, err }, 'Failed to close abandoned provider iterator');
+      if (service.cancellationMode === 'drain') {
+        providerTeardownUnconfirmed = true;
+        throw err;
+      }
     }
   };
 
@@ -2765,10 +2992,115 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
       await refreshInvocationPolicyExecution();
     }
 
+    if (deps.turnExecutionStore) {
+      signal.throwIfAborted();
+      const running = await preflightRace(
+        Promise.resolve(deps.turnExecutionStore.listRunningByUser(userId)),
+        'turnExecutionStore.priorProviderStop',
+        signal,
+      );
+      if (
+        running.some(
+          (record) =>
+            record.invocationId !== invocationId &&
+            record.threadId === threadId &&
+            record.catId === catId &&
+            hasUnconfirmedProviderTeardown(record),
+        )
+      ) {
+        turnExecutionFailureReason = 'prior_provider_teardown_unconfirmed';
+        throw new Error('同一角色的上一轮执行尚未确认停止，暂不能开始新任务。请先核对或受控停止原执行。');
+      }
+    }
+
     const catConfig = frozenExecutionBinding.catConfig;
     const provider = catConfig?.clientId;
     let firstReplyNamingInstruction = '';
     const { workingDirectory, threadProjectPath } = frozenExecutionBinding.workspace;
+    const hostExecutionBoundary = frozenExecutionBinding.hostExecutionBoundary;
+    if (deps.sessionChainStore && !hostExecutionBoundary) throw new Error('execution_boundary_missing');
+    const boundaryPreflight = <T>(label: string, run: () => T | Promise<T>): Promise<T> => {
+      signal.throwIfAborted();
+      // Attach the race observer before calling an owner that may synchronously abort and reject.
+      return preflightRace(Promise.resolve().then(run), label, signal);
+    };
+    if (deps.sessionChainStore && activeSessionRecordForResume && hostExecutionBoundary) {
+      const prior = activeSessionRecordForResume;
+      const changes = changedHostExecutionBoundary(prior.hostExecutionBoundary, hostExecutionBoundary);
+      if (changes.length > 0 && (prior.cliSessionId || prior.hostExecutionBoundary)) {
+        if (prior.externalImport)
+          throw new Error(
+            'imported_session_execution_boundary_unproven: 无法核验导入会话的执行绑定，未发送任务或替换历史。请先核验原客户端、账号和工作区。',
+          );
+        // Do not seal a history unless a replacement can receive authorized context.
+        if (!deps.sessionSealer || (!params.contextPromptFactory && !params.rebuildPromptAfterSessionSeal))
+          throw new Error(
+            'execution_boundary_rollover_unavailable: 会话执行绑定已变化或无法核验，当前入口不能安全建立带上下文的新片段，未发送任务。',
+          );
+        const reason = `execution_boundary:${changes.join(',')}`;
+        const sealer = deps.sessionSealer;
+        const sealed = await boundaryPreflight('executionBoundary.requestSeal', () =>
+          sealer.requestSeal({ sessionId: prior.id, reason }),
+        );
+        if (!sealed.accepted) throw new Error('execution_boundary_seal_conflict');
+        const finalized = await boundaryPreflight('executionBoundary.finalize', () =>
+          sealer.finalize({ sessionId: prior.id }),
+        );
+        if (!finalized.sealed) throw new Error('execution_boundary_finalize_failed');
+        await boundaryPreflight('executionBoundary.clearResume', () => sessionManager.delete(userId, catId, threadId));
+        sessionId = undefined;
+        const store = deps.sessionChainStore;
+        const replacement = await boundaryPreflight('executionBoundary.replacement', () =>
+          getOrCreateManagedSessionRecord(store, {
+            threadId,
+            catId,
+            userId,
+            ...(bgChainKey ? { chainKey: bgChainKey } : {}),
+            compressionCount: invocationCapacitySnapshot?.capability.observesCompression === true ? 0 : null,
+          }),
+        );
+        if (replacement.id === prior.id || replacement.cliSessionId)
+          throw new Error('execution_boundary_replacement_conflict');
+        activeSessionRecordForResume = replacement;
+        invocationPolicyRecordId = replacement.id;
+        invocationHasAuthoritativeUsage = false;
+        await refreshInvocationPolicyExecution();
+        if (params.rebuildPromptAfterSessionSeal) prompt = await params.rebuildPromptAfterSessionSeal();
+        yield {
+          type: 'system_info',
+          catId,
+          timestamp: Date.now(),
+          content: JSON.stringify({
+            type: 'session_seal_requested',
+            sessionId: prior.id,
+            sessionSeq: prior.seq + 1,
+            catId,
+            reason,
+          }),
+        };
+      }
+      const store = deps.sessionChainStore;
+      const target = activeSessionRecordForResume;
+      const bound = await boundaryPreflight('executionBoundary.persist', () =>
+        store.bindHostExecutionBoundary(target.id, target.cliSessionId, hostExecutionBoundary),
+      );
+      if (!bound) throw new Error('execution_boundary_binding_conflict');
+      try {
+        await auditLog.append({
+          type: AuditEventTypes.SESSION_EXECUTION_BOUNDARY_RECORDED,
+          threadId,
+          data: {
+            sessionId: bound.id,
+            invocationId,
+            boundaryRef: hostExecutionBoundaryRef(hostExecutionBoundary),
+            changedDimensions: changes,
+          },
+        });
+      } catch (error) {
+        throw new Error('execution_boundary_audit_write_failed', { cause: error });
+      }
+      activeSessionRecordForResume = bound;
+    }
     if (frozenExecutionBinding.workspace.usesDefaultWorkspace)
       yield { type: 'system_info', catId, content: `本次使用默认工作区：${workingDirectory}`, timestamp: Date.now() };
     if (threadStore) {
@@ -2961,7 +3293,11 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
 
     // F127 account injection:
     // Members bind to a concrete accountRef (builtin oauth account or generic api_key account).
-    const defaultModel = invocationCapacitySnapshot?.model?.trim() || catConfig?.defaultModel?.trim() || undefined;
+    const defaultModel =
+      (frozenExecutionBinding.executionPreferences
+        ? frozenExecutionBinding.executionPreferences.model
+        : invocationCapacitySnapshot?.model || catConfig?.defaultModel
+      )?.trim() || undefined;
     const projectRoot = frozenExecutionBinding.projectRoot;
     const effectiveAccountRef = frozenExecutionBinding.effectiveAccountRef;
     const resolvedAccount = frozenExecutionBinding.resolvedAccount;
@@ -3090,24 +3426,8 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
     // Note: google protocol branch no longer needs explicit credential injection
     // — fully handled by resolveEnvMap above.
 
-    // F171: User-defined env vars from account config.
-    // Passed separately via accountEnv — NOT injected into callbackEnv.
-    // callbackEnv is for MCP callback routing; accountEnv is applied LAST
-    // in subprocess env so user vars override provider-injected values.
-    // F161: Template entries (${api_key} / ${base_url}) are already resolved by
-    // resolveEnvMap above — filter them out to prevent literal "${...}" leaking.
-    let accountEnv: Record<string, string> | undefined;
-    if (resolvedAccount?.envVars) {
-      const validEnvKey = /^[A-Z_][A-Za-z0-9_]*$/;
-      const filtered: Record<string, string> = {};
-      for (const [k, v] of Object.entries(resolvedAccount.envVars)) {
-        if (!validEnvKey.test(k) || k.startsWith('CAT_CAFE_')) continue;
-        // Skip template entries — already resolved by resolveEnvMap
-        if (hasSupportedEnvTemplate(v)) continue;
-        filtered[k] = v;
-      }
-      if (Object.keys(filtered).length > 0) accountEnv = filtered;
-    }
+    // Account overrides were filtered once by the admission owner, separately from callback authority.
+    const accountEnv = frozenExecutionBinding.accountEnv;
 
     const trimmedDefaultModel = typeof defaultModel === 'string' ? defaultModel.trim() : undefined;
     const modelProviderName = catConfig?.provider?.trim() || undefined;
@@ -3151,10 +3471,9 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
     // Clowder AI MCP server access (especially in game threads where project-level
     // opencode.json may not be discoverable).
     const hasExplicitOcProvider = Boolean(modelProviderName);
-    const configuredMcpServerPath = process.env.CAT_CAFE_MCP_SERVER_PATH?.trim();
-    const mcpServerPath = configuredMcpServerPath
-      ? resolve(process.cwd(), configuredMcpServerPath)
-      : resolveDefaultClaudeMcpServerPath();
+    const mcpServerPath = frozenExecutionBinding.openCodeMcpConfig
+      ? frozenExecutionBinding.openCodeMcpConfig.mcpServerPath
+      : resolveInvocationMcpServerPath();
 
     // F203 Phase I: compile L0 for OpenCode BEFORE the runtime config condition.
     // OpenCodeAgentService.injectsL0Natively() = true, so the route layer does
@@ -3175,7 +3494,12 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
         // the undefined branch is unreachable post-guard — avoids biome noNonNullAssertion.
         const compilerFn = (hasL0CompilerSeam(service) && service.l0CompilerFn) || compileL0ViaSubprocess;
 
-        const l0Content = await compilerFn({ catId: catId as string, userId });
+        const l0Content = await compilerFn({
+          catId: catId as string,
+          userId,
+          frozenInput: frozenExecutionBinding.frozenL0Input,
+          requireFrozenInput: true,
+        });
         // Write compiled L0 into the runtime config dir (created below or reused).
         const safeCatId = (catId as string).replace(/[^a-zA-Z0-9._-]+/g, '-');
         const safeInvocationId = invocationId.replace(/[^a-zA-Z0-9._-]+/g, '-');
@@ -3269,6 +3593,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
         invocationId,
         runtimeConfigOptions,
         workingDirectory,
+        frozenExecutionBinding.openCodeMcpConfig,
       );
       callbackEnv.OPENCODE_CONFIG = openCodeRuntimeConfigPath;
       if (invocationCapacitySnapshot && effectiveModel && invocationCapacitySnapshot.capacity.windowTokens > 0) {
@@ -3514,8 +3839,8 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
       await resolveAsrPersonMemoryOpportunities(contextContinuityHandshake);
     };
 
-    // F-BLOAT: Only inject staticIdentity (systemPrompt) on new provider sessions.
-    // Exception: compression detected → force re-inject (see _needsReinjection).
+    // Reuse only a successfully delivered prefix with the same content and native coordinate.
+    // Compression or a cold continuity verdict invalidates the previous delivery evidence.
     //
     // Injection method: prepend to prompt string (universal, all CLIs).
     // --append-system-prompt proved unreliable (cats didn't receive content).
@@ -3528,15 +3853,18 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
     const canSkipOnResume = true;
     const compressionKey = `${userId}:${catId as string}:${threadId}`;
     const forceReinjection = _needsReinjection.delete(compressionKey);
-    const registryRevision = catRegistry.getRevision();
     const identityKey = sessionIdentityKey(userId, catId, threadId);
-    const lastStaticIdentityRevision = _staticIdentityRegistryRevision.get(identityKey);
-    const registryChangedSinceStaticIdentity =
-      canSkipOnResume &&
-      isResume &&
-      lastStaticIdentityRevision !== undefined &&
-      lastStaticIdentityRevision !== registryRevision;
-    let injectSystemPrompt = !canSkipOnResume || !isResume || forceReinjection || registryChangedSinceStaticIdentity;
+    if (forceReinjection) _staticIdentityDigest.delete(identityKey);
+    const identityCoordinate = isBgCarrier ? (invocationPolicyRecordId ?? bgChainKey) : sessionId;
+    let appliedIdentityCoordinate = identityCoordinate;
+    const staticIdentityDigest = createHash('sha256')
+      .update(params.systemPrompt ?? '')
+      .digest('hex');
+    const previousStaticIdentity = _staticIdentityDigest.get(identityKey);
+    const staticIdentityChanged =
+      previousStaticIdentity?.digest !== staticIdentityDigest ||
+      previousStaticIdentity.coordinate !== identityCoordinate;
+    let injectSystemPrompt = !canSkipOnResume || !isResume || forceReinjection || staticIdentityChanged;
     /**
      * F296 B4a: whether a cold epoch forces identity re-injection can only be
      * known after the epoch owner has seen the provider continuity verdict, so
@@ -3546,19 +3874,9 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
       const forceContinuityColdIdentity = Boolean(
         hasTargetContinuityHandshake && contextEpochDecision?.contextMode === 'cold',
       );
+      if (forceContinuityColdIdentity) _staticIdentityDigest.delete(identityKey);
       injectSystemPrompt =
-        !canSkipOnResume ||
-        !isResume ||
-        forceReinjection ||
-        registryChangedSinceStaticIdentity ||
-        forceContinuityColdIdentity;
-      if (canSkipOnResume) {
-        if (injectSystemPrompt) {
-          _staticIdentityRegistryRevision.set(identityKey, registryRevision);
-        } else if (isResume && lastStaticIdentityRevision === undefined) {
-          _staticIdentityRegistryRevision.set(identityKey, registryRevision);
-        }
-      }
+        !canSkipOnResume || !isResume || forceReinjection || staticIdentityChanged || forceContinuityColdIdentity;
     };
 
     // F225 软层: deliver a pending context-management hint into the cat's actual
@@ -3844,53 +4162,37 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
       }
     }
 
-    let reasoningEffortOverride: CliEffortPreset | undefined;
-    if (deps.threadStore?.getMemberEffort) {
-      try {
-        reasoningEffortOverride = await deps.threadStore.getMemberEffort(threadId, catId, userId);
-      } catch (err) {
-        log.warn(
-          { catId, threadId, userId, err },
-          'Thread effort override read failed — continuing with inherited effort',
-        );
-        yield {
-          type: 'system_info' as const,
-          catId,
-          content: JSON.stringify({
-            type: 'thread_effort_override_read_failed',
-            message: 'Thread effort override could not be loaded; using the member default for this invocation.',
-          }),
-          timestamp: Date.now(),
-        };
-      }
+    const reasoningEffortOverride = frozenExecutionBinding.threadPreferences?.reasoningEffortOverride;
+    if (frozenExecutionBinding.threadPreferences?.effortReadFailed) {
+      yield {
+        type: 'system_info' as const,
+        catId,
+        content: JSON.stringify({
+          type: 'thread_effort_override_read_failed',
+          message: 'Thread effort override could not be loaded; using the member default for this invocation.',
+        }),
+        timestamp: Date.now(),
+      };
     }
 
-    let threadSpeedOverride: CodexSpeedValue | undefined;
-    if (provider === 'openai' && deps.threadStore?.getMemberSpeed) {
-      try {
-        threadSpeedOverride = await deps.threadStore.getMemberSpeed(threadId, catId, userId);
-      } catch (err) {
-        log.warn(
-          { catId, threadId, userId, err },
-          'Thread speed override read failed — continuing with the member default',
-        );
-        yield {
-          type: 'system_info' as const,
-          catId,
-          content: JSON.stringify({
-            type: 'thread_speed_override_read_failed',
-            message: 'Thread speed override could not be loaded; using the member default for this invocation.',
-          }),
-          timestamp: Date.now(),
-        };
-      }
+    const threadSpeedOverride = frozenExecutionBinding.threadPreferences?.speedOverride;
+    if (frozenExecutionBinding.threadPreferences?.speedReadFailed) {
+      yield {
+        type: 'system_info' as const,
+        catId,
+        content: JSON.stringify({
+          type: 'thread_speed_override_read_failed',
+          message: 'Thread speed override could not be loaded; using the member default for this invocation.',
+        }),
+        timestamp: Date.now(),
+      };
     }
     const requestedServiceTier =
       provider === 'openai' && catConfig
         ? (resolveCodexSpeed({
             clientId: catConfig.clientId,
             authType: resolvedAccount?.authType,
-            model: getCatModel(catId),
+            model: frozenExecutionBinding.executionPreferences?.model ?? catConfig.defaultModel,
             memberDefault: catConfig.cli?.serviceTier,
             threadOverride: threadSpeedOverride,
           }).requested ?? undefined)
@@ -3917,6 +4219,14 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
     const requiresImportedHistory =
       activeSessionRecordForResume?.externalImport?.cliSessionId === sessionId && Boolean(sessionId);
     const baseOptions: AgentServiceOptions = {
+      ...frozenExecutionBinding.providerOptions,
+      ...(frozenExecutionBinding.codexLaunchPolicy
+        ? { codexLaunchPolicy: frozenExecutionBinding.codexLaunchPolicy }
+        : {}),
+      ...(frozenExecutionBinding.executionPreferences
+        ? { executionPreferences: frozenExecutionBinding.executionPreferences }
+        : {}),
+      ...(frozenExecutionBinding.frozenL0Input ? { frozenL0Input: frozenExecutionBinding.frozenL0Input } : {}),
       ...(params.onRemoteExecutionDispatched
         ? { onRemoteExecutionDispatched: params.onRemoteExecutionDispatched }
         : {}),
@@ -4443,6 +4753,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
       }
 
       if (msg.type === 'session_init' && msg.sessionId) {
+        appliedIdentityCoordinate = undefined;
         if (requiresImportedHistory && msg.sessionId !== activeSessionRecordForResume?.externalImport?.cliSessionId) {
           throw new Error('The imported native session was not resumed; refusing to replace its history');
         }
@@ -4905,6 +5216,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
         }
 
         if (sessionRuntimeBindingAccepted) {
+          appliedIdentityCoordinate = isBgCarrier ? (invocationPolicyRecordId ?? bgChainKey) : msg.sessionId;
           try {
             await sessionManager.store(userId, catId, threadId, msg.sessionId);
           } catch {
@@ -5625,13 +5937,51 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
       };
       if (ordinaryTaskExecutionId && unclosedServiceIterators.size > 0)
         throw new Error('task_provider_teardown_unconfirmed');
+      if (deps.sessionChainStore && invocationPolicyRecordId && hostExecutionBoundary) {
+        const currentImplementation = service.implementationSnapshot?.();
+        const currentCarrier = service.freshnessCarrierCapability?.();
+        const providerEntryBoundary = captureHostExecutionBoundary(
+          {
+            ...frozenExecutionBinding,
+            ...(currentImplementation ? { implementation: currentImplementation } : {}),
+          },
+          currentCarrier?.carrier ?? hostExecutionBoundary.carrier,
+          currentImplementation
+            ? { clientId: currentImplementation.clientId, implementation: currentImplementation }
+            : undefined,
+        );
+        const entryChanges = changedHostExecutionBoundary(hostExecutionBoundary, providerEntryBoundary);
+        if (entryChanges.length > 0)
+          throw new Error(`execution_boundary_changed_before_provider_entry:${entryChanges.join(',')}`);
+        const store = deps.sessionChainStore;
+        const logicalId = invocationPolicyRecordId;
+        const target = activeSessionRecordForResume;
+        const bound = await boundaryPreflight('executionBoundary.providerEntry', () =>
+          store.bindHostExecutionBoundary(
+            logicalId,
+            target?.id === logicalId ? target.cliSessionId : undefined,
+            hostExecutionBoundary,
+          ),
+        );
+        if (!bound) throw new Error('execution_boundary_provider_entry_conflict');
+      }
       if (
         deps.turnExecutionStore?.markProviderStarted &&
         !(await deps.turnExecutionStore.markProviderStarted(invocationId, Date.now()))
       )
         throw new Error('provider_entry_fence_rejected');
       const localPluginMcpView = await deps.resolveInvocationPluginMcpView?.();
+      // Durable compatibility permits a newly captured turn after rebuild; this frozen turn still needs its live generation.
+      const currentImplementation = service.implementationSnapshot?.();
+      const frozenImplementation = frozenExecutionBinding.implementation;
+      if (
+        frozenImplementation &&
+        ((currentImplementation?.key ?? frozenImplementation.key) !== frozenImplementation.key ||
+          (currentImplementation?.generation ?? agentServiceGeneration(service)) !== frozenImplementation.generation)
+      )
+        throw new Error('execution_boundary_changed_before_provider_entry:implementation');
       const exposureProject = pluginMcpExposureProject(threadProjectPath, workingDirectory);
+      if (injectSystemPrompt && !nativeAuthContinuation) _staticIdentityDigest.delete(identityKey);
       const serviceIter = bindInvocationPluginMcpView(
         () =>
           (usesProviderContinuityPreflight && service.invokeWithContinuityPreflight
@@ -5647,7 +5997,9 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
       for (;;) {
         let iterResult: IteratorResult<AgentMessage>;
         try {
-          iterResult = await abortableNext(serviceIter, signal);
+          iterResult = await (service.cancellationMode === 'drain'
+            ? serviceIter.next()
+            : abortableNext(serviceIter, signal));
         } catch (error) {
           if (!sourceRefreshRequired) throw error;
           break;
@@ -5664,6 +6016,12 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
           break;
         }
         let msg = await protectNativeProviderResult(iterResult.value, options);
+        if (msg.providerTeardown === 'unconfirmed') {
+          providerTeardownUnconfirmed = true;
+          await closeActiveServiceIterator();
+          yield unconfirmedTeardownMessage();
+          return;
+        }
         if (msg.nativeGoalObservation) {
           if (!threadStore || !deps.sessionChainStore) continue;
           const projected = await projectNativeGoalMessage({
@@ -6016,12 +6374,15 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
             ? { ...msg, type: 'system_info' as const }
             : msg;
         const providerCancelled = msg.errorCode === 'INVOCATION_CANCELLED';
+        // Adapter-owned cancellation still needs its source's teardown verdict.
+        if (msg.type === 'error' && signal.aborted && service.cancellationMode === 'drain') continue;
         if (msg.type === 'error')
           await terminateCurrentRequestGeneration(
             providerCancelled ? 'cancelled' : 'error',
             msg.errorCode ?? 'provider_error',
           );
         if (msg.type === 'done') {
+          if (service.cancellationMode === 'drain') await closeActiveServiceIterator();
           await terminateCurrentRequestGeneration(
             providerCancelled
               ? 'cancelled'
@@ -6436,6 +6797,13 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
       turnExecutionFailureReason === undefined &&
       signal?.aborted !== true;
     if (
+      turnExecutionCompletedSuccessfully &&
+      injectSystemPrompt &&
+      !nativeAuthContinuation &&
+      appliedIdentityCoordinate
+    )
+      _staticIdentityDigest.set(identityKey, { coordinate: appliedIdentityCoordinate, digest: staticIdentityDigest });
+    if (
       !turnExecutionCompletedSuccessfully &&
       !hadError &&
       turnExecutionFailureReason === undefined &&
@@ -6445,7 +6813,14 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
     }
     didComplete = true; // F118 AC-C5: Normal completion reached
   } catch (err) {
-    await closeActiveServiceIterator();
+    if (service.cancellationMode === 'drain' && unclosedServiceIterators.size > 0) providerTeardownUnconfirmed = true;
+    // Preserve the execution failure; the owner records any additional teardown failure.
+    await closeActiveServiceIterator().catch(() => {});
+    if (providerTeardownUnconfirmed) {
+      await terminateCurrentRequestGeneration('unknown', 'provider_teardown_unconfirmed');
+      yield unconfirmedTeardownMessage();
+      return;
+    }
     // F117 KD-22: a member stopped by its output timeout failed; any other stop cancelled it.
     await terminateCurrentRequestGeneration(
       signal.aborted && signal.reason !== MEMBER_TIMEOUT_REASON ? 'cancelled' : 'error',
@@ -6501,20 +6876,25 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
     memberTimeout?.close();
     // F117 KD-22: a member stopped by its output timeout failed; any other stop cancelled it.
     const timedOut = callerSignal?.aborted === true && callerSignal.reason === MEMBER_TIMEOUT_REASON;
-    await closeActiveServiceIterator();
+    let teardownFailure: unknown;
+    await closeActiveServiceIterator().catch((error: unknown) => {
+      teardownFailure = error;
+    });
     if (invocationMcpCredentialFile) releaseInvocationCredentialFile(invocationMcpCredentialFile);
     await terminateCurrentRequestGeneration(
-      turnExecutionCompletedSuccessfully
-        ? 'accepted'
-        : (callerSignal?.aborted || hadProviderCancellation) && !timedOut
-          ? 'cancelled'
-          : timedOut || hadError || turnExecutionFailureReason !== undefined
-            ? 'error'
-            : 'unknown',
+      providerTeardownUnconfirmed
+        ? 'unknown'
+        : turnExecutionCompletedSuccessfully
+          ? 'accepted'
+          : (callerSignal?.aborted || hadProviderCancellation) && !timedOut
+            ? 'cancelled'
+            : timedOut || hadError || turnExecutionFailureReason !== undefined
+              ? 'error'
+              : 'unknown',
       timedOut ? MEMBER_TIMEOUT_REASON : (turnExecutionFailureReason ?? turnExecutionInterruptionReason),
     );
     await presentationDelivery?.release('invocation_finalized_without_delivery');
-    if (deps.turnExecutionStore && ownsTurnExecution) {
+    if (deps.turnExecutionStore && ownsTurnExecution && !providerTeardownUnconfirmed) {
       let terminal: TurnExecutionTerminalInput;
       if (turnExecutionCompletedSuccessfully) {
         terminal = { status: 'succeeded', endedAt: Date.now() };
@@ -6597,9 +6977,9 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
 
     // F118/#1329: Release runtime resume custody before conversation policy
     // custody. Every release is idempotent, including partial acquisition.
-    for (const release of sessionMutexReleases.reverse()) release();
+    if (!providerTeardownUnconfirmed) for (const release of sessionMutexReleases.reverse()) release();
 
-    if (openCodeRuntimeConfigPath) {
+    if (openCodeRuntimeConfigPath && !providerTeardownUnconfirmed) {
       const openCodeRuntimeConfigDir = dirname(openCodeRuntimeConfigPath);
       await rm(openCodeRuntimeConfigDir, { recursive: true, force: true }).catch((err) => {
         log.warn({ invocationId, path: openCodeRuntimeConfigDir, err }, 'Failed to remove OpenCode runtime config dir');
@@ -6671,5 +7051,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
       emitOtelLog('INFO', 'invocation_completed', { [AGENT_ID]: catId, [STATUS]: 'ok' }, invocationSpan);
     }
     invocationSpan.end();
+    // biome-ignore lint/correctness/noUnsafeFinally: explicit consumer return must report failed teardown after local cleanup.
+    if (teardownFailure !== undefined) throw teardownFailure;
   }
 }

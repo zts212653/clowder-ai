@@ -5,6 +5,7 @@ import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { createCatId } from '@cat-cafe/shared';
 import { CLI_EXECUTION_ID_ENV, CLI_EXECUTION_OWNER_BINDING_ENV } from '../src/utils/cli-process-ownership.js';
+import { claudeSdkRuntimeFixture } from './helpers/claude-sdk-runtime-fixture.js';
 import { assertClaudeSettingsPreserved, claudeUserSettings } from './helpers/claude-settings-contract.js';
 
 for (const source of ['relative-file', 'inline'])
@@ -18,6 +19,7 @@ for (const source of ['relative-file', 'inline'])
     const original = `${JSON.stringify(claudeUserSettings, null, 2)}\n`;
     writeFileSync(path, original);
     const prepared = await prepareClaudeSdkLaunch({
+      runtime: claudeSdkRuntimeFixture(),
       catId: createCatId('opus'),
       model: 'claude-test',
       prompt: 'inspect settings',
@@ -52,6 +54,7 @@ test('SDK child strips API-owned credentials and owner capabilities from inherit
     }
   });
   const prepared = await prepareClaudeSdkLaunch({
+    runtime: claudeSdkRuntimeFixture(),
     catId: createCatId('opus'),
     model: 'claude-opus-4-6',
     prompt: 'check',
@@ -86,6 +89,7 @@ test('launch preserves resume, account isolation, native identity and managed F2
   assert.equal(plan.ready, true);
   let recorded: import('../src/domains/cats/services/types.js').PreparedProviderRequestV1 | undefined;
   const prepared = await prepareClaudeSdkLaunch({
+    runtime: claudeSdkRuntimeFixture(),
     catId: createCatId('opus'),
     model: 'claude-opus-4-6',
     prompt: 'actual task',
@@ -132,6 +136,7 @@ test('launch preserves resume, account isolation, native identity and managed F2
 test('read-only policy cannot be reopened through operator tool or MCP flags', async () => {
   const { prepareClaudeSdkLaunch } = await import('../src/domains/cats/services/agents/providers/claude-sdk-launch.js');
   const prepared = await prepareClaudeSdkLaunch({
+    runtime: claudeSdkRuntimeFixture(),
     catId: createCatId('opus'),
     model: 'claude-opus-4-6',
     prompt: 'check',
@@ -163,6 +168,7 @@ test('read-only SDK ignores all operator settings, hooks and extra arguments', a
   );
   const prepare = (compactionLaunchPlan?: ReturnType<typeof buildClaudeCompactionLaunchPlan>) =>
     prepareClaudeSdkLaunch({
+      runtime: claudeSdkRuntimeFixture(),
       catId: createCatId('opus'),
       model: 'claude-opus-4-6',
       prompt: 'inspect',
@@ -216,6 +222,7 @@ test('SDK retains repeated operator directories together with image directories'
   };
   const prepare = (readOnly = false) =>
     prepareClaudeSdkLaunch({
+      runtime: claudeSdkRuntimeFixture(),
       catId: createCatId('opus'),
       model: 'claude-opus-4-6',
       prompt: 'inspect',
@@ -263,6 +270,7 @@ test('production invocation keeps native SDK query with tmux enabled and preserv
   registerWorktrees([{ id: 'f318-tmux-contract', root: fixtureRoot }]);
   let sdkLaunches = 0;
   const sdk = new ClaudeSdkAgentService({
+    runtimeResolver: claudeSdkRuntimeFixture,
     catId: createCatId('opus'),
     model: 'claude-opus-4-6',
     mcpServerPath: '',

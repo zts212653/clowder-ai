@@ -1,8 +1,21 @@
 import { createHash } from 'node:crypto';
-import type { CatConfig, ClientId, ExecutionAccountSnapshot } from '@cat-cafe/shared';
+import type { SharedInvocationContext } from '@cat-cafe/mcp-server/dist/shared-invocation-context.js';
+import {
+  type CatConfig,
+  type CliEffortPreset,
+  type ClientId,
+  type CodexSpeedValue,
+  type ExecutionAccountSnapshot,
+  type ExecutionProfile,
+  projectMemberProfiles,
+  type RoleProfile,
+  type SessionRecord,
+} from '@cat-cafe/shared';
+import type { FrozenL0Input } from '@cat-cafe/shared/l0-input';
 import {
   type RuntimeProviderProfile,
   resolveBuiltinClientForProvider,
+  resolveByAccountRef,
   validateRuntimeProviderBinding,
 } from '../../../../../config/account-resolver.js';
 import { AccountStoreVerdictError } from '../../../../../config/account-store-format.js';
@@ -13,8 +26,15 @@ import {
   type CodexAccountLaunchDescriptor,
   resolveCodexAccountLaunch,
 } from '../../../../../config/codex-account-launch.js';
+import { type CodexLaunchPolicy, captureCodexLaunchPolicy } from '../../../../../config/codex-cli.js';
 import { codexExecutionAccountSnapshot } from '../../../../../config/codex-execution-account.js';
 import { resolveActiveProjectRoot } from '../../../../../utils/active-project-root.js';
+import type { AgentService, AgentServiceOptions } from '../../types.js';
+import { hasSupportedEnvTemplate } from '../providers/env-map.js';
+import {
+  captureMemberExecutionPreferences,
+  type MemberExecutionPreferences,
+} from '../providers/member-execution-preferences.js';
 import type { FrozenExecutionWorkspace } from './execution-workspace.js';
 
 /** A Host-admitted, execution-local choice. It never writes the member catalog. */
@@ -25,7 +45,36 @@ export interface ExecutionAccountSelection {
 }
 
 export interface FrozenExecutionBinding {
+  /** Pure role semantics reference; not the actual client instruction digest or CompatKey. */
+  readonly personaDigest?: string;
+  readonly hostExecutionBoundary?: Readonly<NonNullable<SessionRecord['hostExecutionBoundary']>>;
+  readonly implementation?: ReturnType<NonNullable<AgentService['implementationSnapshot']>>;
+  readonly sharedMcpLaunch?: Readonly<{ transport: string; context?: SharedInvocationContext }>;
+  readonly openCodeMcpConfig?: import('../providers/opencode-config-writer.js').OpenCodeMcpConfigPlan;
+  readonly accountEnv?: Record<string, string>;
+  readonly providerOptions?: Readonly<
+    Pick<
+      AgentServiceOptions,
+      | 'frozenAcpMcpServers'
+      | 'frozenNativeMcpConfig'
+      | 'frozenKimiMcpConfig'
+      | 'frozenCodexMcpInput'
+      | 'claudeSdkRuntime'
+    >
+  >;
+  readonly codexLaunchPolicy?: CodexLaunchPolicy;
+  readonly threadPreferences?: Readonly<{
+    reasoningEffortOverride?: CliEffortPreset;
+    speedOverride?: CodexSpeedValue;
+    effortReadFailed: boolean;
+    speedReadFailed: boolean;
+  }>;
+  readonly executionPreferences?: MemberExecutionPreferences;
+  readonly frozenL0Input?: FrozenL0Input;
+  readonly memberRegistryRevision?: number;
   readonly catConfig?: CatConfig;
+  readonly roleProfile?: RoleProfile;
+  readonly executionProfile?: ExecutionProfile;
   readonly workspace: FrozenExecutionWorkspace;
   readonly projectRoot: string;
   readonly effectiveAccountRef?: string;
@@ -34,7 +83,27 @@ export interface FrozenExecutionBinding {
   readonly executionAccount?: ExecutionAccountSnapshot;
 }
 
-function deepFreeze<T>(value: T): T {
+function memberPersonaDigest(profile: RoleProfile): string {
+  const semantics = {
+    id: profile.id,
+    name: profile.name,
+    displayName: profile.displayName,
+    nickname: profile.nickname,
+    roleDescription: profile.roleDescription,
+    personality: profile.personality,
+    breedId: profile.breedId,
+    relationshipKey: profile.relationshipKey,
+    variantLabel: profile.variantLabel,
+    breedDisplayName: profile.breedDisplayName,
+    teamStrengths: profile.teamStrengths,
+    caution: profile.caution,
+    restrictions: profile.restrictions,
+    strengths: profile.strengths,
+  };
+  return `sha256:${createHash('sha256').update(JSON.stringify(semantics)).digest('hex')}`;
+}
+
+export function deepFreeze<T>(value: T): T {
   if (value && typeof value === 'object' && !Object.isFrozen(value)) {
     for (const child of Object.values(value)) deepFreeze(child);
     Object.freeze(value);
@@ -61,6 +130,7 @@ export function freezeExecutionAccountBinding(input: {
   model?: string;
   workspace: FrozenExecutionWorkspace;
   accountSelection?: ExecutionAccountSelection;
+  providerOptions?: FrozenExecutionBinding['providerOptions'];
   /** Trusted native source. Qualified Kimi only annotates the unchanged Host account; generic ACP owns its account. */
   nativeAccount?: RuntimeProviderProfile | null;
 }): FrozenExecutionBinding {
@@ -95,7 +165,11 @@ export function freezeExecutionAccountBinding(input: {
         (!client && input.nativeAccount.persistedClientId !== provider))
     )
       throw new Error('native account carrier mismatch');
-    const hostAccount = client ? resolveCatRuntimeAccount(projectRoot, input.catId, client, catConfig) : null;
+    const hostAccount = client
+      ? resolveCatRuntimeAccount(projectRoot, input.catId, client, catConfig)
+      : provider === 'acp' && effectiveAccountRef && !input.nativeAccount
+        ? resolveByAccountRef(projectRoot, effectiveAccountRef)
+        : null;
     if (input.nativeAccount && client) {
       const { nativeSourceRevision, ...original } = input.nativeAccount;
       if (
@@ -109,7 +183,8 @@ export function freezeExecutionAccountBinding(input: {
     } else account = input.nativeAccount ?? hostAccount;
     if (input.nativeAccount && effectiveAccountRef && effectiveAccountRef !== input.nativeAccount.id)
       throw new Error('selected native account is unavailable');
-    if (effectiveAccountRef && client && !account) throw new Error(`bound account "${effectiveAccountRef}" not found`);
+    if (effectiveAccountRef && (client || provider === 'acp') && !account)
+      throw new Error(`bound account "${effectiveAccountRef}" not found`);
     const error =
       provider && account
         ? validateRuntimeProviderBinding(provider, account, input.model ?? catConfig?.defaultModel)
@@ -131,6 +206,14 @@ export function freezeExecutionAccountBinding(input: {
       `account "${account.id}" is configured as api_key but has no API key set — add the key in Hub > account settings`,
     );
   const resolvedAccount = account ? deepFreeze(structuredClone(account)) : null;
+  // Preserve F171 filtering. The same selected HOME/environment is used by
+  // provider discovery and later invocation; template values remain resolveEnvMap's responsibility.
+  const accountEnv = Object.fromEntries(
+    Object.entries(resolvedAccount?.envVars ?? {}).filter(
+      ([key, value]) =>
+        /^[A-Z_][A-Za-z0-9_]*$/.test(key) && !key.startsWith('CAT_CAFE_') && !hasSupportedEnvTemplate(value),
+    ),
+  );
   const codexAccountLaunch =
     provider === 'openai' && resolvedAccount
       ? resolveCodexAccountLaunch(resolvedAccount, { cwd: input.workspace.workingProjectRoot })
@@ -145,12 +228,22 @@ export function freezeExecutionAccountBinding(input: {
           : undefined;
   if (selection?.expectedRevision !== undefined && selection.expectedRevision !== executionAccount?.accountRevision)
     throw new Error('selected execution account revision changed');
+  const projectedProfiles = catConfig ? deepFreeze(projectMemberProfiles(catConfig)) : undefined;
   return Object.freeze({
     catConfig,
+    ...(input.providerOptions ? { providerOptions: deepFreeze(input.providerOptions) } : {}),
+    ...(provider === 'openai' ? { codexLaunchPolicy: captureCodexLaunchPolicy() } : {}),
+    ...(catConfig
+      ? { executionPreferences: captureMemberExecutionPreferences(input.catId, catConfig, input.model) }
+      : {}),
+    ...(projectedProfiles
+      ? { ...projectedProfiles, personaDigest: memberPersonaDigest(projectedProfiles.roleProfile) }
+      : {}),
     workspace: input.workspace,
     projectRoot,
     effectiveAccountRef,
     resolvedAccount,
+    ...(Object.keys(accountEnv).length > 0 ? { accountEnv: deepFreeze(accountEnv) } : {}),
     ...(codexAccountLaunch ? { codexAccountLaunch } : {}),
     ...(executionAccount ? { executionAccount } : {}),
   });

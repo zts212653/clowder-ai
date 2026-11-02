@@ -1906,14 +1906,15 @@ describe('Queue Management API', () => {
       { threadId: 't1', userId: 'user-a', catId: 'opus' },
       { preserveHolderExecutionIds: ['inv-active'] },
     ]);
-    // The durable canceled response owns the visible terminal; transport emits
-    // one done event so the frontend clears the old invocation without a
-    // duplicate centered cancellation notice.
+    // A request cannot prove that the previous execution has stopped.
     const broadcastCalls = deps.socketManager.broadcastAgentMessage.mock.calls;
-    assert.ok(broadcastCalls.length >= 1, 'should broadcast done for canceled invocation');
-    const doneCall = broadcastCalls.find((c) => c.arguments[0].type === 'done');
-    assert.ok(doneCall, 'should broadcast done event to clear frontend loading state');
-    assert.equal(doneCall.arguments[0].isFinal, true);
+    const requestCall = broadcastCalls.find((c) => c.arguments[0].type === 'status');
+    assert.ok(requestCall, 'should broadcast the cancellation request');
+    assert.notEqual(requestCall.arguments[0].isFinal, true);
+    assert.equal(
+      broadcastCalls.some((c) => c.arguments[0].type === 'done'),
+      false,
+    );
   });
 
   it('POST /queue/:entryId/steer immediate releases QueueProcessor mutex after cancel (P2 race)', async () => {
@@ -2141,14 +2142,15 @@ describe('Queue Management API', () => {
     });
     assert.equal(res.statusCode, 200, res.body);
 
-    // done should only be broadcast for opus (the steered cat), NOT codex
+    // Only opus receives the request; no sibling is terminalized.
     const broadcastCalls = deps.socketManager.broadcastAgentMessage.mock.calls;
-    const doneCalls = broadcastCalls.filter((c) => c.arguments[0].type === 'done');
-    assert.equal(doneCalls.length, 1, 'should broadcast exactly 1 done event (steered cat only)');
-    assert.equal(doneCalls[0].arguments[0].catId, 'opus');
-    // codex should NOT receive a done event
-    const codexDone = broadcastCalls.find((c) => c.arguments[0].type === 'done' && c.arguments[0].catId === 'codex');
-    assert.equal(codexDone, undefined, 'codex should NOT receive cancel done when not steered');
+    const requestCalls = broadcastCalls.filter((c) => c.arguments[0].type === 'status');
+    assert.equal(requestCalls.length, 1);
+    assert.equal(requestCalls[0].arguments[0].catId, 'opus');
+    assert.equal(
+      broadcastCalls.some((c) => c.arguments[0].type === 'done'),
+      false,
+    );
   });
 
   it('POST /queue/:entryId/steer returns 404 for another user entry', async () => {
@@ -2164,7 +2166,7 @@ describe('Queue Management API', () => {
 
   // ── F122B AC-B9: Per-cat cancel ──
 
-  it('POST /cancel/:catId cancels active cat and broadcasts done (AC-B9)', async () => {
+  it('POST /cancel/:catId requests cancellation without broadcasting done (AC-B9)', async () => {
     deps.invocationTracker.has = mock.fn(() => true);
     deps.invocationTracker.cancel = mock.fn(() => ({
       cancelled: true,
@@ -2187,10 +2189,14 @@ describe('Queue Management API', () => {
       { preserveHolderExecutionIds: ['inv-active'] },
     ]);
 
-    // Should broadcast done for opus
-    const doneCalls = deps.socketManager.broadcastAgentMessage.mock.calls.filter((c) => c.arguments[0].type === 'done');
-    assert.equal(doneCalls.length, 1);
-    assert.equal(doneCalls[0].arguments[0].catId, 'opus');
+    const broadcasts = deps.socketManager.broadcastAgentMessage.mock.calls;
+    const requests = broadcasts.filter((c) => c.arguments[0].type === 'status');
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].arguments[0].catId, 'opus');
+    assert.equal(
+      broadcasts.some((c) => c.arguments[0].type === 'done'),
+      false,
+    );
   });
 
   it('POST /cancel/:catId leaves an executing Queue reservation for normal completion to drain', async () => {

@@ -6,8 +6,16 @@ import { toAllCatConfigs } from './cat-config-loader.js';
 import { type RuntimeCatUpdate, updateRuntimeCat, withRuntimeCatMutationLock } from './runtime-cat-catalog.js';
 
 export class MemberConfigurationConflict extends Error {
+  readonly statusCode = 409;
   constructor() {
     super('成员已在其他页面修改。草稿已保留，请重新读取后核对再保存。');
+  }
+}
+
+export class MemberConfigurationRevisionRequired extends Error {
+  readonly statusCode = 428;
+  constructor() {
+    super('缺少成员保存版本，请重新读取成员配置后再操作。');
   }
 }
 
@@ -22,7 +30,15 @@ export function memberConfigurationRevision(projectRoot: string, catId: string):
   const variant = config.breeds.flatMap((breed) =>
     breed.variants.filter((entry) => (entry.catId ?? breed.catId) === catId),
   )[0];
-  return createHash('sha256').update(JSON.stringify({ cat, variant })).digest('hex');
+  const roster = config.version === 2 ? config.roster[catId] : undefined;
+  return createHash('sha256').update(JSON.stringify({ cat, variant, roster })).digest('hex');
+}
+
+/** The caller holds the existing catalog mutation lock through its complete mutation. */
+export function assertMemberConfigurationRevision(projectRoot: string, catId: string, expected: string | undefined) {
+  if (expected === undefined) throw new MemberConfigurationRevisionRequired();
+  if (saveSpan('catalog.revision', () => memberConfigurationRevision(projectRoot, catId)) !== expected)
+    throw new MemberConfigurationConflict();
 }
 
 export function updateMemberWithRevision(
@@ -32,8 +48,7 @@ export function updateMemberWithRevision(
   patch: RuntimeCatUpdate,
 ) {
   return withRuntimeCatMutationLock(projectRoot, () => {
-    if (expected && saveSpan('catalog.revision', () => memberConfigurationRevision(projectRoot, catId)) !== expected)
-      throw new MemberConfigurationConflict();
+    assertMemberConfigurationRevision(projectRoot, catId, expected);
     return saveSpan('catalog.persist', () => updateRuntimeCat(projectRoot, catId, patch));
   });
 }

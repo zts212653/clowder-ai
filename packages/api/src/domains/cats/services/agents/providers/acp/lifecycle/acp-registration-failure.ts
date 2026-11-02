@@ -1,4 +1,4 @@
-import type { CreateAcpServiceForConfigInput } from './AcpServiceFactory.js';
+import type { CreateAcpServiceForConfigInput } from '../AcpServiceFactory.js';
 
 /** Retire a skipped member's pool and project only its safe registration diagnostic. */
 export async function skipAcpProfile(

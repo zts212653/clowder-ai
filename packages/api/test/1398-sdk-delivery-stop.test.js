@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { ClaudeSdkAgentService } from '../dist/domains/cats/services/agents/providers/ClaudeSdkAgentService.js';
+import { claudeSdkRuntimeFixture } from './helpers/claude-sdk-runtime-fixture.js';
 
 class AsyncInbox {
   #values = [];
@@ -49,6 +50,7 @@ describe('SDK correlation does not invent optional model-read evidence', () => {
       let dispatcher;
       const reads = [];
       const service = new ClaudeSdkAgentService({
+        runtimeResolver: claudeSdkRuntimeFixture,
         catId: 'opus',
         model: 'claude-test',
         l0CompilerFn: async () => 'L0',
@@ -177,6 +179,7 @@ describe('accepted SDK input does not delay exact Stop', () => {
       releaseRead = resolve;
     });
     const service = new ClaudeSdkAgentService({
+      runtimeResolver: claudeSdkRuntimeFixture,
       catId: 'opus',
       model: 'claude-test',
       l0CompilerFn: async () => 'compiled L0',
@@ -267,6 +270,7 @@ describe('accepted SDK input does not delay exact Stop', () => {
     };
     let sdkInput;
     const service = new ClaudeSdkAgentService({
+      runtimeResolver: claudeSdkRuntimeFixture,
       catId: 'opus',
       model: 'claude-test',
       l0CompilerFn: async () => 'compiled L0',

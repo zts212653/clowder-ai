@@ -14,7 +14,7 @@ import {
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
-import { debuglog } from 'node:util';
+import { debuglog, isDeepStrictEqual } from 'node:util';
 import { macProcessEnvironmentCommand } from '#process-environment-snapshot';
 import { CLI_PROCESS_OWNER_ENV } from './cli-process-environment.js';
 
@@ -73,7 +73,9 @@ export interface CliExecutionOwnerSnapshot {
 export interface CliExecutionOwnerTermination {
   matched: number;
   signaled: number;
+  /** Complete control-plane access is distinct from confirmed process retirement. */
   complete: boolean;
+  stopped: boolean;
 }
 
 export interface CliExecutionOwnerService {
@@ -655,12 +657,44 @@ export function createCliExecutionOwnerService(
     async terminateExact(execution) {
       const { records, complete } = readRecoverableRecords();
       const snapshot = await ownerIdentitySnapshot(records, processSnapshotReader);
-      if (!snapshot) return { matched: 0, signaled: 0, complete: false };
+      if (!snapshot) return { matched: 0, signaled: 0, complete: false, stopped: false };
       // An unreadable manifest may belong to the same execution scope. Do not
       // perform a partial destructive cancel while exact ownership is unknown.
-      if (!complete) return { matched: 0, signaled: 0, complete: false };
+      if (!complete) return { matched: 0, signaled: 0, complete: false, stopped: false };
       const result = terminateCliExecutionOwner(execution, records, snapshot, options.kill ?? process.kill);
-      return { matched: result.matched, signaled: result.signaled, complete: result.failed === 0 };
+      const originalScope = records.filter(
+        ({ manifest }) => manifest.execution && sameCliExecutionScope(manifest.execution, execution),
+      );
+      const after = readRecoverableRecords();
+      const scope = [
+        ...originalScope,
+        ...after.records.filter(
+          ({ manifest }) => manifest.execution && sameCliExecutionScope(manifest.execution, execution),
+        ),
+      ];
+      // Retain original birth identities even if a manifest disappeared after
+      // signaling, and veto a new live child in this same execution scope.
+      const identities = scope.flatMap(({ manifest }) =>
+        manifest.root ? [manifest.supervisor, manifest.root] : [manifest.supervisor],
+      );
+      const observed = await processSnapshotReader({ pids: [...new Set(identities.map(({ pid }) => pid))] });
+      const current = readRecoverableRecords();
+      const sameScopeObserved = current.records
+        .filter(({ manifest }) => manifest.execution && sameCliExecutionScope(manifest.execution, execution))
+        .every(({ manifest }) => scope.some((record) => isDeepStrictEqual(record.manifest, manifest)));
+      return {
+        matched: result.matched,
+        signaled: result.signaled,
+        complete: result.failed === 0,
+        stopped:
+          result.failed === 0 &&
+          after.complete &&
+          current.complete &&
+          sameScopeObserved &&
+          originalScope.length > 0 &&
+          observed !== null &&
+          identities.every((identity) => !sameUnixProcess(identity, observed.get(identity.pid))),
+      };
     },
   };
 }

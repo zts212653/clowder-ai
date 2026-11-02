@@ -4,6 +4,7 @@ import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, mock, test } from 'node:test';
+import { readMemberRequestRevision } from './helpers/member-request-revision.js';
 import './helpers/setup-cat-registry.js';
 import {
   resolveAnthropicRuntimeProfile,
@@ -23,6 +24,7 @@ const envKeys = [
   'CAT_CAFE_SKIP_HOMEDIR_MIGRATION',
   'CAT_CAFE_CONFIG_ROOT',
   'CAT_TEMPLATE_PATH',
+  'CAT_CAFE_WINDOWS_ACP_BOOTSTRAP_MODE',
 ];
 const account = { authType: 'api_key', clientId: 'anthropic', baseUrl: 'https://fixture.invalid', models: ['fixture'] };
 const credential = { apiKey: 'FAKE_LOCAL_TEST_KEY' };
@@ -114,7 +116,11 @@ test('account creation, cat binding and save share the workspace pair from a run
       method: 'PATCH',
       url: '/api/cats/account-fixture-cat',
       headers,
-      payload: { accountRef: ref, clientId: 'anthropic' },
+      payload: {
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/account-fixture-cat', headers),
+        accountRef: ref,
+        clientId: 'anthropic',
+      },
     });
     assert.equal(bound.statusCode, 200, bound.body);
     const savedAccount = await app.inject({
@@ -247,6 +253,8 @@ for (const allRejected of [false, true]) {
 }
 
 test('ACP registry construction skips a rejected account and still constructs a healthy member', async () => {
+  // This account test does not attest the runner's inherited Temp ancestor ACLs.
+  if (process.platform === 'win32') process.env.CAT_CAFE_WINDOWS_ACP_BOOTSTRAP_MODE = 'trusted-host';
   put(workspace, 'accounts.json', { bad: account, good: account });
   put(workspace, 'credentials.json', { good: credential });
   put(runtime, 'accounts.json', { bad: { ...account, models: ['different'] } });

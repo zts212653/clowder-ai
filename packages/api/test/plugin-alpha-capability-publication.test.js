@@ -52,6 +52,7 @@ test('a persistent runtime publishes its managed descriptor and current member v
   assert.equal(entry.capabilityId, `plugin:${f.pluginId}:native`);
   assert.equal(entry.pluginId, f.pluginId);
   assert.equal(entry.isCurrent(), true);
+  assert.equal(view.isCurrent(), true);
   const config = await readCapabilitiesConfig(f.capabilityProjectRoot);
   const mcp = config.capabilities.find((entry) => entry.id === `plugin:${f.pluginId}:native`);
   assert.ok(mcp.mcpServer.workingDir.startsWith(f.projectRoot));

@@ -2,8 +2,10 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { type CliEffortPreset, createCatId } from '@cat-cafe/shared';
+import { freezeL0Input, L0_COMPILER_VERSION, renderFrozenL0Input } from '@cat-cafe/shared/l0-input';
 import { ClaudeAgentService } from '../../../domains/cats/services/agents/providers/ClaudeAgentService.js';
 import { CodexAgentService } from '../../../domains/cats/services/agents/providers/CodexAgentService.js';
+import type { CompileL0Options } from '../../../domains/cats/services/agents/providers/l0-compiler.js';
 import type { AgentServiceOptions } from '../../../domains/cats/services/types.js';
 import { spawnCli } from '../../../utils/cli-spawn.js';
 import type { WatcherCandidate } from './candidate.js';
@@ -31,10 +33,21 @@ export function nativeWatcherAdapter(
     WATCHER_INSTRUCTIONS;
   // The evaluator owns these frozen role instructions. Ordinary member L0 is unchanged.
   // The hash below covers this role, not the CLI's built-in system prompt.
-  const compileInstructions = async ({ catId, outPath }: { catId: string; outPath?: string }) => {
-    if (catId !== candidate.catId) throw new Error('watcher_identity_mismatch');
-    if (outPath) writeFileSync(outPath, instructions, { mode: 0o600 });
-    return instructions;
+  const frozenL0Input = freezeL0Input({
+    schemaVersion: 1,
+    compilerVersion: L0_COMPILER_VERSION,
+    catId: candidate.catId,
+    projection: 'owner',
+    template: '{{IDENTITY_BLOCK}}',
+    sections: {},
+    variables: { IDENTITY_BLOCK: instructions },
+  });
+  const compileInstructions = async ({ catId, outPath, frozenInput }: CompileL0Options) => {
+    if (catId !== candidate.catId || frozenInput?.inputDigest !== frozenL0Input.inputDigest)
+      throw new Error('watcher_identity_mismatch');
+    const body = renderFrozenL0Input(frozenInput);
+    if (outPath) writeFileSync(outPath, body, { mode: 0o600 });
+    return body;
   };
 
   return {
@@ -60,6 +73,7 @@ export function nativeWatcherAdapter(
       const launchEvidence: Pick<WatcherCall, 'nativeCommand' | 'nativeEffort' | 'launchDigest'> = {};
       const options: AgentServiceOptions = {
         ...candidate.options,
+        frozenL0Input,
         sessionId: undefined,
         invocationId: 'watcher-offline-' + randomUUID(),
         workingDirectory: input.workingDirectory,
