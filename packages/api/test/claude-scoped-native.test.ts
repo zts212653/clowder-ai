@@ -2,13 +2,22 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import test from 'node:test';
+import { dirname, join } from 'node:path';
+import test, { after } from 'node:test';
 import { createCatId } from '@cat-cafe/shared';
 import { ClaudeAgentService } from '../src/domains/cats/services/agents/providers/ClaudeAgentService.js';
 import { captureClaudeMemberOptions } from '../src/domains/cats/services/agents/providers/claude-scoped-native.js';
 import type { AgentServiceOptions } from '../src/domains/cats/services/types.js';
+import { ensureFakeCliOnPath } from './helpers/fake-cli-path.js';
 import { createMockProcess, emitEvents } from './helpers/provider-archive-test-helpers.js';
+
+const previousPath = process.env.PATH;
+const cliDirectory = dirname(ensureFakeCliOnPath('claude'));
+assert.equal(dirname(cliDirectory), tmpdir());
+after(async () => {
+  process.env.PATH = previousPath;
+  await rm(cliDirectory, { recursive: true, force: true });
+});
 
 async function fixture(t: import('node:test').TestContext) {
   const root = await mkdtemp(join(tmpdir(), 'claude-scoped-'));
