@@ -3776,7 +3776,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       method: 'PATCH',
       url: '/api/cats/acp-deepseek',
       headers: { 'x-cat-cafe-user': 'codex' },
-      payload: { executionApproval: 'auto' },
+      payload: { expectedRevision: listed.configurationRevision, executionApproval: 'auto' },
     });
     assert.equal(autoApproval.statusCode, 200, autoApproval.body);
     assert.equal(autoApproval.json().cat.executionApproval, 'auto');
