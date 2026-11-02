@@ -38,6 +38,25 @@ export function MemberAdvancedFields({
         onChange={(change) => patch({ ...change, acpAgentProvider: null })}
         t={t}
       />
+      {form.carrier === 'acp' && (
+        <>
+          <SelectField
+            label={t('ACP 执行确认', 'ACP execution approval')}
+            value={form.executionApproval ?? 'auto'}
+            options={[
+              { value: 'auto', label: t('自动（默认）', 'Auto (default)') },
+              { value: 'ask_user', label: t('询问用户', 'Ask user') },
+            ]}
+            onChange={(value) => patch({ executionApproval: value as 'auto' | 'ask_user' })}
+          />
+          <p className="text-sm text-cafe-secondary">
+            {t(
+              '询问用户时，客户端的权限请求会显示为会话中的确认卡片；已有拒绝、隔离和原生权限限制仍然有效。',
+              'Ask user shows client permission requests as confirmation cards in the conversation. Existing denials, isolation and native restrictions still apply.',
+            )}
+          </p>
+        </>
+      )}
       {agy && (
         <MemberEditorPresentation.Provider value>
           <MemberCopyContext.Provider value={membersCopy[language]}>

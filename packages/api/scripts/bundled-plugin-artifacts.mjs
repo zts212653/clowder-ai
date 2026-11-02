@@ -47,43 +47,62 @@ export async function generateBundledPluginArtifacts(
   }
 
   const records = [];
-  for (const { catalogId, manifest } of definitions) {
+  for (const { catalogId, manifest, agentProvider, files = [] } of definitions) {
     assert.ok(/^[a-z][a-z0-9-]*$/.test(catalogId), 'invalid bundled catalog id');
     assert.ok(/^\d+\.\d+\.\d+$/.test(manifest.version));
-    assert.ok(/^assets\/[a-z-]+\.svg$/.test(manifest.icon.src));
     const relativeRoot = `bundled-packages/${catalogId}/${manifest.version}/`;
-    const iconPath = new URL(`${relativeRoot}${manifest.icon.src}`, sourceRoot);
-    const rootPath = await realpath(sourceRoot);
-    const sourcePath = fileURLToPath(iconPath);
-    const actualPath = await realpath(iconPath);
-    const inside = relative(rootPath, actualPath);
-    assert.ok(
-      inside && !isAbsolute(inside) && inside !== '..' && !inside.startsWith(`..${sep}`),
-      'bundled source icon must remain inside the source root',
-    );
-    // Root aliases (e.g. macOS /tmp) are allowed. Every component below the
-    // canonical root must be unlinked, including directory symlinks/junctions.
-    const components = relative(fileURLToPath(sourceRoot), sourcePath).split(sep);
-    let current = rootPath;
-    for (const [index, component] of components.entries()) {
-      current = join(current, component);
-      const stat = await lstat(current);
-      assert.ok(!stat.isSymbolicLink(), 'bundled source must not contain links/junctions');
+    const sourceFiles = [...new Set([...(manifest.icon?.src ? [manifest.icon.src] : []), ...files])];
+    if (manifest.runtime?.entrypoint)
+      assert.ok(sourceFiles.includes(manifest.runtime.entrypoint), 'bundle must include its runtime entrypoint');
+    const packageFiles = [];
+    for (const name of sourceFiles) {
       assert.ok(
-        index === components.length - 1 ? stat.isFile() : stat.isDirectory(),
-        'bundled source icon must be a regular file with directory ancestors',
+        typeof name === 'string' &&
+          /^[A-Za-z0-9_./-]+$/.test(name) &&
+          !name.startsWith('/') &&
+          !name.split('/').some((part) => !part || part === '.' || part === '..'),
+        'invalid bundled source path',
       );
+      assert.ok(
+        !['manifest.json', 'plugin.yaml', 'agent-provider.json', 'package.tgz'].includes(name),
+        'reserved bundled source path',
+      );
+      const sourceUrl = new URL(`${relativeRoot}${name}`, sourceRoot);
+      const rootPath = await realpath(sourceRoot);
+      const sourcePath = fileURLToPath(sourceUrl);
+      const actualPath = await realpath(sourceUrl);
+      const inside = relative(rootPath, actualPath);
+      assert.ok(
+        inside && !isAbsolute(inside) && inside !== '..' && !inside.startsWith(`..${sep}`),
+        'bundled source must remain inside the source root',
+      );
+      const components = relative(fileURLToPath(sourceRoot), sourcePath).split(sep);
+      let current = rootPath;
+      for (const [index, component] of components.entries()) {
+        current = join(current, component);
+        const stat = await lstat(current);
+        assert.ok(!stat.isSymbolicLink(), 'bundled source must not contain links/junctions');
+        assert.ok(
+          index === components.length - 1 ? stat.isFile() : stat.isDirectory(),
+          'bundled source must be a regular file with directory ancestors',
+        );
+      }
+      packageFiles.push({ name: `package/${name}`, bytes: await readFile(sourceUrl) });
     }
     const manifestBytes = Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`);
-    const iconBytes = await readFile(iconPath);
+    const providerBytes =
+      agentProvider === undefined ? undefined : Buffer.from(`${JSON.stringify(agentProvider, null, 2)}\n`);
     const tarBytes = tarArchive([
       { name: 'package/manifest.json', bytes: manifestBytes },
-      { name: `package/${manifest.icon.src}`, bytes: iconBytes },
+      ...packageFiles,
+      ...(providerBytes ? [{ name: 'package/agent-provider.json', bytes: providerBytes }] : []),
     ]);
     const archivePath = `${catalogId}/${manifest.version}/package.tgz`;
     const archiveUrl = new URL(`bundled-packages/${archivePath}`, pluginRoot);
     recordFile(new URL(`${relativeRoot}manifest.json`, pluginRoot), manifestBytes);
-    recordFile(new URL(`${relativeRoot}${manifest.icon.src}`, pluginRoot), iconBytes);
+    for (const file of packageFiles)
+      recordFile(new URL(`${relativeRoot}${file.name.slice(8)}`, pluginRoot), file.bytes);
+    if (providerBytes) recordFile(new URL(`${relativeRoot}agent-provider.json`, pluginRoot), providerBytes);
     // Release identity is exact compressed bytes, not just decoded TAR content.
     // The encoder uses fixed metadata/stored DEFLATE and never invokes zlib.
     const bytes = canonicalGzip(tarBytes);

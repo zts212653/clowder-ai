@@ -43,6 +43,7 @@ const fields: Record<FormKey, MemberFieldLabels> = {
   acpStartupArgs: ['ACP 启动参数', 'ACP startup arguments', 'ACP Startup Args'],
   acpMaxLiveProcesses: ['最多进程数', 'Maximum processes', 'ACP Max Processes'],
   acpIdleTtlMinutes: ['闲置时限（分钟）', 'Idle timeout (minutes)', 'ACP Idle TTL (min)'],
+  executionApproval: ['ACP 执行确认', 'ACP execution approval'],
   mcpSupport: ['Clowder AI 工具', 'Clowder AI tools', 'MCP Support'],
   sessionChain: ['会话链', 'Session chain', 'Session State / Chain'],
   contextWindow: ['上下文窗口', 'Context window', 'Context Window'],

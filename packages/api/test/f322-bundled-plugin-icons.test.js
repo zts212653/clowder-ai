@@ -5,6 +5,7 @@ import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { validatePluginCatalog } from '@clowder-ai/plugin-contract';
 import { fetchOfficialPackageArchive } from '../dist/domains/plugin/bundled-package-source.js';
@@ -255,7 +256,8 @@ for (const layout of ['src', 'dist']) {
 // The release contract includes canonical manifest + asset bytes + generated SRI.
 test('shipped bundled artifacts match their canonical producer inputs', async () => {
   const script = new URL('../scripts/copy-bundled-plugin-packages.mjs', import.meta.url);
-  await promisify(execFile)(process.execPath, [script.pathname, '--check'], {
+  await promisify(execFile)(process.execPath, [fileURLToPath(script), '--check'], {
     cwd: new URL('..', import.meta.url),
+    windowsHide: true,
   });
 });

@@ -1,6 +1,7 @@
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, win32 } from 'node:path';
+import { after } from 'node:test';
 import { FilesystemVerifiedPluginPackageLocator } from '../../dist/domains/plugin/external-runtime/filesystem-package-locator.js';
 import {
   HostInventoryControlPlane,
@@ -9,6 +10,9 @@ import {
 } from '../../dist/domains/plugin/index.js';
 import { HostPluginConfigurationService } from '../../dist/domains/plugin/manager/plugin-manager-configuration.js';
 import { readPluginConfig, writePluginConfig } from '../../dist/domains/plugin/plugin-config-store.js';
+
+const roots = [];
+after(() => Promise.all(roots.map((root) => rm(root, { recursive: true, force: true }))));
 
 export const profile = {
   id: 'existing-codeagent',
@@ -20,6 +24,7 @@ export const profile = {
 };
 export async function rootRecoveryFixture({ declaration, inspect, identity, lifecycleFactory } = {}) {
   const projectRoot = await mkdtemp(join(tmpdir(), 'acp-root-recovery-'));
+  roots.push(projectRoot);
   const source = join(projectRoot, 'source');
   const { mkdir } = await import('node:fs/promises');
   await mkdir(source);

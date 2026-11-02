@@ -235,6 +235,7 @@ async function ensureAcpPool(
     transport: acpConfig.transport ?? 'stdio',
     supportsMultiplexing: acpConfig.supportsMultiplexing,
     protocolAdapter: acpConfig.protocolAdapter,
+    permissionPolicy: acpConfig.permissionPolicy,
     ...(spawn.antigravity ? { sessionPolicy: { provider: 'antigravity', profile: spawn.antigravity.profile } } : {}),
   });
 
@@ -266,7 +267,11 @@ async function ensureAcpPool(
         ...(spawn.env ? { env: spawn.env } : {}),
         // iCode fail-closed policy: flagged native effects must never be
         // auto-approved by the generic default (allow) path.
-        ...(acpConfig.protocolAdapter === 'icode' ? { defaultPermissionDecision: 'reject' as const } : {}),
+        ...(acpConfig.protocolAdapter === 'icode' || acpConfig.permissionPolicy === 'deny'
+          ? { defaultPermissionDecision: 'reject' as const }
+          : acpConfig.permissionPolicy === 'auto_allow'
+            ? { defaultPermissionDecision: 'allow' as const }
+            : {}),
         ...(spawn.antigravity
           ? { inheritParentEnv: false, permissionHandler: denyAgyAcpPermission, antigravityDiagnostics: true }
           : {}),
@@ -413,6 +418,9 @@ export async function createAcpServiceForConfig(
       // The factory rejects iCode members without it, so this is always defined.
       sessionModel: acpConfig.protocolAdapter === 'icode' ? icodeModelProfileId : spawn.sessionModel,
       protocolAdapter: acpConfig.protocolAdapter,
+      executionApproval: config.executionApproval ?? 'auto',
+      defaultPermissionDecision:
+        acpConfig.protocolAdapter === 'icode' || acpConfig.permissionPolicy === 'deny' ? 'reject' : 'allow',
       contextBinding: {
         model: effectiveModel,
         ...((config.clientId === 'opencode' || config.clientId === 'kimi') && spawn.contextPolicy?.windowTokens

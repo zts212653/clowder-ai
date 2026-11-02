@@ -1,0 +1,32 @@
+import type { FastifyRequest } from 'fastify';
+import {
+  LocalPluginPackageAdmissionError,
+  PluginArchiveReplacementError,
+  PluginLifecycleError,
+  PluginManagerServiceError,
+} from '../domains/plugin/index.js';
+import { OfficialPluginInstallError } from '../domains/plugin/official-package-errors.js';
+import { PluginManagerUploadError } from './plugin-manager-upload.js';
+
+/** Emit only public error codes and already-validated identities, never the error/cause or request body. */
+export function warnPluginPackageFailure(
+  request: FastifyRequest,
+  context: {
+    operation: 'install' | 'update';
+    sourceKind?: 'catalog' | 'git' | 'local-directory' | 'local-archive';
+    catalogId?: string;
+    pluginId?: string;
+  },
+  error: unknown,
+): void {
+  const code =
+    error instanceof OfficialPluginInstallError ||
+    error instanceof LocalPluginPackageAdmissionError ||
+    error instanceof PluginArchiveReplacementError ||
+    error instanceof PluginLifecycleError ||
+    error instanceof PluginManagerServiceError ||
+    error instanceof PluginManagerUploadError
+      ? error.code
+      : 'PLUGIN_MANAGER_FAILED';
+  request.log.warn({ reqId: request.id, ...context, code }, 'Plugin package operation failed');
+}
