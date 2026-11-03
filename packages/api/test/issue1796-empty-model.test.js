@@ -1,12 +1,21 @@
 /**
- * clowder-ai#1796: empty `defaultModel` on the execution-preferences path.
+ * clowder-ai#1796: empty `defaultModel` accepted by the shared resolver.
  *
- * `captureMemberExecutionPreferences` is the SECOND caller of the two-arg
- * `getCatModel(catId, config.defaultModel)`. For a non-native member whose
- * catalog entry has `defaultModel: ''` — legal per `modelSchema` in
- * packages/api/src/routes/cats.ts — it used to throw on the same stale-window
- * boundary as GET /api/cats. Unlike the member list it does not 500 a page, it
- * breaks a single invocation, which is exactly why it needs its own regression.
+ * The production defect is the catalog-only path: GET /api/cats resolves a
+ * catalog-visible, not-yet-reconciled member whose `defaultModel: ''` is legal
+ * per `modelSchema` (packages/api/src/routes/cats.ts), and the truthiness
+ * fallback in `getCatModel` made the whole page 500.
+ *
+ * `captureMemberExecutionPreferences` is the OTHER caller of the two-arg
+ * `getCatModel(catId, config.defaultModel)`. Its normal production route is NOT
+ * a second defect: `prepareInvocationExecutionBinding`
+ * (invocation/invoke-single-cat.ts) takes config straight from
+ * `catRegistry.tryGet`, so an already-registered empty model resolved to `''`
+ * before this change too. These cases therefore pin SHARED-RESOLVER CONSISTENCY
+ * at the function boundary — the non-native branch must agree with the native
+ * branch on an empty value — not a second broken production invocation. No
+ * claim is made here that this change widens empty-model support for API-key
+ * carriers.
  */
 
 import './helpers/setup-cat-registry.js';
@@ -38,7 +47,7 @@ describe('#1796: empty defaultModel preserves CLI-decided semantics', () => {
   it('non-native member does not throw on an empty catalog model', () => {
     const prefs = captureMemberExecutionPreferences('catalog-empty-1796', {
       ...emptyModelMember,
-      configurationSource: 'app',
+      configurationSource: 'managed_account',
     });
     assert.equal(prefs.model, '');
   });
@@ -46,7 +55,7 @@ describe('#1796: empty defaultModel preserves CLI-decided semantics', () => {
   it('an explicit model argument still wins over the empty catalog value', () => {
     const prefs = captureMemberExecutionPreferences(
       'catalog-empty-1796',
-      { ...emptyModelMember, configurationSource: 'app' },
+      { ...emptyModelMember, configurationSource: 'managed_account' },
       'explicit-model',
     );
     assert.equal(prefs.model, 'explicit-model');
@@ -55,7 +64,7 @@ describe('#1796: empty defaultModel preserves CLI-decided semantics', () => {
   it('a non-empty catalog model is still resolved for a non-native member', () => {
     const prefs = captureMemberExecutionPreferences('catalog-model-1796', {
       ...emptyModelMember,
-      configurationSource: 'app',
+      configurationSource: 'managed_account',
       defaultModel: 'resolved-model',
     });
     assert.equal(prefs.model, 'resolved-model');
