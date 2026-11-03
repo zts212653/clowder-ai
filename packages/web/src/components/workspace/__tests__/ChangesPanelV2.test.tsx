@@ -244,4 +244,94 @@ describe('ChangesPanel v2', () => {
     expect(container.textContent).not.toContain('打开文件');
     writeShellLanguage('zh');
   });
+
+  // #1809：PR 读取权限只由 target 的会话坐标决定，来源（聊天/作品/首页）只决定返回位置。
+  it.each([
+    'v2',
+    'classic',
+  ] as const)('reads a session-scoped PR through the owner-validated chat endpoint in %s', async (presentation) => {
+    writeShellPresentation(presentation);
+    const target: PullRequestChangesTarget = {
+      kind: 'github-pr',
+      v: 1,
+      repoFullName: 'owner/repo',
+      prNumber: 7,
+      worktreeId: 'wt-1',
+      threadId: 'thread-1',
+    };
+    apiFetchMock.mockImplementation(async (url: string) =>
+      url.includes('/api/workspace/chat-pull-request-changes')
+        ? Response.json({
+            ...PAYLOAD,
+            target,
+            comparison: { baseSha: 'a'.repeat(40), headSha: 'b'.repeat(40), mergeBaseSha: 'c'.repeat(40) },
+            completeness: 'complete',
+            omissions: [],
+            totalChangedFiles: 2,
+          })
+        : new Response(`unexpected endpoint ${url}`, { status: 503 }),
+    );
+    await act(async () => {
+      root.render(
+        <ChangesPanel worktreeId="wt-1" basisPct={40} threadId="thread-1" pullRequestTarget={target} />,
+      );
+    });
+    const urls = apiFetchMock.mock.calls.map(([url]) => String(url));
+    expect(urls).toHaveLength(1);
+    expect(urls[0]).toMatch(/^\/api\/workspace\/chat-pull-request-changes\?target=/);
+    expect(container.textContent).toContain('owner/repo#7');
+    expect(container.textContent).toContain('src/a.ts');
+  });
+
+  // #1809：失败后要能重试或到 GitHub 看，且不能再用「选择文件」误导用户以为还有本地内容。
+  it.each([
+    'v2',
+    'classic',
+  ] as const)('offers retry and the canonical GitHub link instead of a file picker in %s', async (presentation) => {
+    writeShellPresentation(presentation);
+    const target: PullRequestChangesTarget = {
+      kind: 'github-pr',
+      v: 1,
+      repoFullName: 'owner/repo',
+      prNumber: 7,
+      worktreeId: 'wt-1',
+      threadId: 'thread-1',
+    };
+    apiFetchMock.mockImplementation(
+      async () =>
+        new Response(JSON.stringify({ error: { code: 'rate_limited' } }), {
+          status: 429,
+          headers: { 'content-type': 'application/json' },
+        }),
+    );
+    await act(async () => {
+      root.render(
+        <ChangesPanel worktreeId="wt-1" basisPct={40} threadId="thread-1" pullRequestTarget={target} />,
+      );
+    });
+    expect(container.textContent).toContain('GitHub 请求受限');
+    expect(container.textContent).not.toContain('选择文件查看差异');
+    expect(container.textContent).not.toContain('Select a file to view diff');
+    const link = container.querySelector<HTMLAnchorElement>('[data-testid="pull-request-changes-github"]');
+    expect(link?.getAttribute('href')).toBe('https://github.com/owner/repo/pull/7');
+    const retry = container.querySelector<HTMLButtonElement>('[data-testid="pull-request-changes-retry"]');
+    expect(retry).not.toBeNull();
+
+    apiFetchMock.mockImplementation(async () =>
+      Response.json({
+        ...PAYLOAD,
+        target,
+        comparison: { baseSha: 'a'.repeat(40), headSha: 'b'.repeat(40), mergeBaseSha: 'c'.repeat(40) },
+        completeness: 'complete',
+        omissions: [],
+        totalChangedFiles: 2,
+      }),
+    );
+    await act(async () => {
+      retry?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(apiFetchMock.mock.calls.length).toBe(2);
+    expect(container.textContent).toContain('src/a.ts');
+    expect(container.textContent).not.toContain('GitHub 请求受限');
+  });
 });
