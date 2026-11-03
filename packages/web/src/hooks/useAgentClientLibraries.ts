@@ -27,9 +27,12 @@ export function useAgentClientLibraries(revision?: string, enabled = true) {
   useEffect(() => {
     if (!enabled) return;
     let current = true;
+    const controller = new AbortController();
     setLoading(true);
     Promise.resolve()
-      .then(() => apiFetch('/api/agent-providers', revision ? { cache: 'no-store' } : undefined))
+      .then(() =>
+        apiFetch('/api/agent-providers', { signal: controller.signal, ...(revision ? { cache: 'no-store' } : {}) }),
+      )
       .then(async (response) => {
         if (!response.ok) throw new Error('ACP 客户端目录暂不可用，请重试或检查插件状态。');
         const body = (await response.json()) as { libraries: AgentClientLibrary[] };
@@ -47,6 +50,7 @@ export function useAgentClientLibraries(revision?: string, enabled = true) {
       });
     return () => {
       current = false;
+      controller.abort();
     };
   }, [revision, enabled]);
   return { libraries: enabled ? libraries : [], loading: enabled && loading, error: enabled ? error : '' };

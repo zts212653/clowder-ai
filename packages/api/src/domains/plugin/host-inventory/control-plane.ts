@@ -82,13 +82,18 @@ function putVerifiedPackage(transaction: PluginInventoryTransaction, verified: V
     existing.pluginId !== verified.package.pluginId ||
     existing.version !== verified.package.version ||
     !isDeepStrictEqual(existing.manifest, verified.package.manifest) ||
-    !isDeepStrictEqual(existing.signalSchemas, verified.package.signalSchemas)
+    !isDeepStrictEqual(existing.signalSchemas, verified.package.signalSchemas) ||
+    (existing.agentClientMetadata !== undefined &&
+      verified.package.agentClientMetadata !== undefined &&
+      !isDeepStrictEqual(existing.agentClientMetadata, verified.package.agentClientMetadata))
   ) {
     throw new PluginInventoryError(
       'PACKAGE_DIGEST_MISMATCH',
       'an immutable digest is already bound to another package',
     );
   }
+  if (existing.agentClientMetadata === undefined && verified.package.agentClientMetadata !== undefined)
+    transaction.packages.put({ ...existing, agentClientMetadata: verified.package.agentClientMetadata });
 }
 
 function createInstance(

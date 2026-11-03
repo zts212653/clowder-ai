@@ -2,6 +2,7 @@ import { lstat, readFile } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { fetchOfficialPackageArchive, registeredBundledArchive } from './bundled-package-source.js';
 import { staticEditorContributions } from './content-editor-runtime/admission.js';
+import { readAgentClientMetadata } from './declared/agent-client-metadata.js';
 import { desktopWindowContribution } from './desktop-window-runtime/admission.js';
 import { FilesystemVerifiedPluginPackageLocator, type VerifiedPluginPackage } from './external-runtime/index.js';
 import type { PluginManifestValidator } from './external-runtime/package-staging.js';
@@ -410,6 +411,7 @@ export class OfficialPluginPackageInstaller {
         }
       }
       const signalSchemas = await readDeclaredSignalSchemas(located.rootDir, located.manifest);
+      const agentClientMetadata = await readAgentClientMetadata(located);
       await publishPluginPackageArchive(this.packagesRoot, entry.packageDigest, bytes);
       return await accept({
         manifest: located.manifest,
@@ -417,6 +419,7 @@ export class OfficialPluginPackageInstaller {
         expectedPackageDigest: entry.packageDigest,
         packagePluginId: entry.pluginId,
         signalSchemas,
+        agentClientMetadata,
         provenance: {
           kind: 'catalog',
           catalogId: entry.catalogId,
@@ -459,6 +462,7 @@ export class OfficialPluginPackageInstaller {
       expectedPackageDigest: entry.packageDigest,
       packagePluginId: entry.pluginId,
       signalSchemas: {},
+      agentClientMetadata: null,
       provenance: { kind: 'catalog', catalogId: entry.catalogId, packageName: entry.packageName },
     });
   }
