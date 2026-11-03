@@ -58,6 +58,19 @@ describe('F32-b: getCatModel dynamic env key', () => {
     assert.equal(getCatModel('not-in-registry-1796', 'fallback-model'), 'fallback-model');
   });
 
+  // Guard the precedence the #1796 fix sits next to: the empty-value acceptance
+  // must not promote '' above an explicit env override.
+  it('a non-empty CAT_*_MODEL env var still wins over an empty fallback (#1796)', () => {
+    const saved = process.env.CAT_ENV_WINS_1796_MODEL;
+    process.env.CAT_ENV_WINS_1796_MODEL = 'env-override-model';
+    try {
+      assert.equal(getCatModel('env-wins-1796', ''), 'env-override-model');
+    } finally {
+      if (saved === undefined) delete process.env.CAT_ENV_WINS_1796_MODEL;
+      else process.env.CAT_ENV_WINS_1796_MODEL = saved;
+    }
+  });
+
   it('getAllCatModels returns models for all registered cats', () => {
     const all = getAllCatModels();
     assert.ok(all.opus);
