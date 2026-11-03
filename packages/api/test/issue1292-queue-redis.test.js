@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
+import { catRegistry } from '@cat-cafe/shared';
 import { createRedisClient } from '@cat-cafe/shared/utils';
 import Fastify from 'fastify';
 import { getRoster } from '../dist/config/cat-config-loader.js';
@@ -87,63 +88,106 @@ test('Redis visible-notice replay keeps the old receipt after its target retires
   assert.equal((await messages.getByThread(h.threadId)).length, 1);
 });
 
-test('Redis confirmed HTTP receipt survives pending, partial, retired and reopened storage', async (t) => {
-  const h = await fixture(t);
-  const request = {
-    method: 'POST',
-    url: '/api/messages',
-    headers: { 'x-cat-cafe-user': 'owner' },
-    payload: {
-      threadId: h.threadId,
-      content: '@opus work',
-      idempotencyKey: randomUUID(),
-      confirmedTargetCats: ['opus-5', 'codex'],
-    },
-  };
-  let sourceId;
-  let entryId;
-  for (const stage of ['first', 'pending', 'partial', 'retired']) {
-    // Recreate all persistence consumers, not only the process-local Queue cache.
-    const ledger = new RedisQueueLedgerStore(h.redis);
-    const messages = new RedisMessageStore(h.redis, { ttlSeconds: 0 });
-    const queue = new InvocationQueue(ledger, {
-      resolveTargets: (...args) => h.router.resolveSendTargets(...args),
-      resolvePreResolvedTargets: (...args) => h.router.resolveAdmissionTargets(...args),
+for (const format of ['confirmed', 'bundle', 'live']) {
+  test(`Redis ${format} HTTP receipt survives pending, partial, retired and reopened storage`, async (t) => {
+    const h = await fixture(t);
+    const targets = format === 'live' ? ['opus-5'] : ['opus-5', 'codex'];
+    const sources = new RedisMessageStore(h.redis, { ttlSeconds: 0 });
+    const sourceThread = h.threads.create('owner', 'Source');
+    const source = await sources.append({
+      from: { kind: 'user', userId: 'owner' },
+      userId: 'owner',
+      threadId: sourceThread.id,
+      content: 'source',
+      mentions: [],
+      timestamp: 1,
     });
-    const app = Fastify();
-    t.after(() => app.close());
-    await app.register(messagesRoutes, {
-      registry: new InvocationRegistry(),
-      router: h.router,
-      messageStore: messages,
-      threadStore: h.threads,
-      invocationQueue: queue,
-      socketManager: { broadcastAgentMessage() {}, broadcastToRoom() {}, emitToUser() {} },
-    });
-    const response = await app.inject(request);
-    assert.equal(response.statusCode, 202, `${stage}: ${response.body}`);
-    if (stage === 'first') {
-      sourceId = response.json().userMessageId;
-      entryId = response.json().entryId;
-      getRoster()['opus-5'] = { ...getRoster()['opus-5'], available: false, successor: 'codex' };
+    const bundle = {
+      sourceThreadId: sourceThread.id,
+      note: 'original note',
+      items: [{ kind: 'message', messageId: source.id }],
+      targetCats: targets,
+    };
+    const request = {
+      method: 'POST',
+      url: '/api/messages',
+      headers: {
+        'x-cat-cafe-user': 'owner',
+        ...(format === 'live' ? { 'x-cat-cafe-live-session': 'redis-call' } : {}),
+      },
+      payload: {
+        threadId: h.threadId,
+        content: format === 'bundle' ? '' : '@opus-5 work',
+        idempotencyKey: randomUUID(),
+        ...(format === 'bundle'
+          ? { messageBundle: bundle }
+          : format === 'confirmed'
+            ? { confirmedTargetCats: targets }
+            : {}),
+      },
+    };
+    let sourceId;
+    let entryId;
+    for (const stage of ['first', 'pending', 'partial', 'retired']) {
+      // Recreate all persistence consumers, not only the process-local Queue cache.
+      const ledger = new RedisQueueLedgerStore(h.redis);
+      const messages = new RedisMessageStore(h.redis, { ttlSeconds: 0 });
+      const queue = new InvocationQueue(ledger, {
+        resolveTargets: (...args) => h.router.resolveSendTargets(...args),
+        resolvePreResolvedTargets: (...args) => h.router.resolveAdmissionTargets(...args),
+      });
+      const app = Fastify();
+      t.after(() => app.close());
+      await app.register(messagesRoutes, {
+        registry: new InvocationRegistry(),
+        router: h.router,
+        messageStore: messages,
+        threadStore: h.threads,
+        invocationQueue: queue,
+        socketManager: { broadcastAgentMessage() {}, broadcastToRoom() {}, emitToUser() {} },
+      });
+      const response = await app.inject(request);
+      assert.equal(response.statusCode, 202, `${stage}: ${response.body}`);
+      if (stage === 'first') {
+        sourceId = response.json().userMessageId;
+        entryId = response.json().entryId;
+        getRoster()['opus-5'] = { ...getRoster()['opus-5'], available: false, successor: 'codex' };
+      }
+      assert.equal(response.json().userMessageId, sourceId);
+      assert.deepEqual((await messages.getById(sourceId)).mentions, targets);
+      const expected = stage === 'partial' ? targets.slice(1) : stage === 'retired' ? [] : targets;
+      assert.deepEqual(
+        (await ledger.list(h.threadId)).flatMap((row) => row.targets),
+        expected,
+      );
+      const change =
+        format === 'bundle'
+          ? { messageBundle: { ...bundle, note: 'different note' } }
+          : format === 'confirmed'
+            ? { confirmedTargetCats: ['codex'] }
+            : {
+                contextAttachments: [
+                  { v: 1, id: 'new-context', kind: 'thread', threadId: 'other', title: 'different context' },
+                ],
+              };
+      const conflict = await app.inject({ ...request, payload: { ...request.payload, ...change } });
+      assert.notEqual(conflict.statusCode, 202, conflict.body);
+      assert.match(conflict.body, /identity conflict/);
+      if (stage === 'pending') {
+        const configs = catRegistry.getAllConfigs();
+        catRegistry.reset();
+        Object.entries(configs)
+          .filter(([id]) => id !== 'opus-5')
+          .forEach(([id, config]) => catRegistry.register(id, config));
+      }
+      if (stage === 'pending' || (stage === 'partial' && targets.length > 1)) {
+        const target = stage === 'pending' ? 'opus-5' : 'codex';
+        const claim = await ledger.claim(h.threadId, entryId, stage, 200, target);
+        assert.equal(claim.outcome, 'claimed');
+        await ledger.commit(h.threadId, entryId, stage, 'processing', 201);
+      }
+      await app.close();
     }
-    assert.equal(response.json().userMessageId, sourceId);
-    assert.deepEqual((await messages.getById(sourceId)).mentions, ['opus-5', 'codex']);
-    const expected = stage === 'partial' ? ['codex'] : stage === 'retired' ? [] : ['opus-5', 'codex'];
-    assert.deepEqual(
-      (await ledger.list(h.threadId)).flatMap((row) => row.targets),
-      expected,
-    );
-    const conflict = await app.inject({ ...request, payload: { ...request.payload, confirmedTargetCats: ['codex'] } });
-    assert.notEqual(conflict.statusCode, 202, conflict.body);
-    assert.match(conflict.body, /identity conflict/);
-    if (stage === 'pending' || stage === 'partial') {
-      const target = stage === 'pending' ? 'opus-5' : 'codex';
-      const claim = await ledger.claim(h.threadId, entryId, stage, 200, target);
-      assert.equal(claim.outcome, 'claimed');
-      await ledger.commit(h.threadId, entryId, stage, 'processing', 201);
-    }
-    await app.close();
-  }
-  assert.deepEqual(h.calls, []);
-});
+    assert.deepEqual(h.calls, []);
+  });
+}

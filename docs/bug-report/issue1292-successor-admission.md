@@ -10,7 +10,7 @@ created: 2026-11-03
 来源：[Issue #1292](https://github.com/zts212653/clowder-ai/issues/1292)、
 [接受决定](https://github.com/zts212653/clowder-ai/issues/1292#issuecomment-5176620388)、
 [旧 PR 正式审查](https://github.com/zts212653/clowder-ai/pull/1283#pullrequestreview-4845590194)。
-基线：`upstream/next@1016aa7a316566893cacef84d49792a8ced0f0c8`。
+基线：`upstream/next@ad4e3ad4fcb3125388d39165e76ed9bd2760c1be`。
 替代旧 #1283 的有效契约，不整体移植其 65 文件；旧分支和未提交现场不改动。
 
 ## 已实现与缺失
@@ -231,3 +231,12 @@ cat_disabled 证据，Web 消费既有错误路径；不放宽确认 schema、�
 迁移或平行 resolver；回退撤销本轮提交即可，保留原持久数据。
 验证先保存维护者反例的 RED，再同入口 GREEN，补当前确认、重放、private receipt、
 plugin、podcast 与 runtime catalog 回归；最终 HEAD 进入 CI 后再交非作者复审。
+
+非作者同型审计又复现 Bundle/Live 仍在 receipt 前消费当前目标，以及 wire schema 在
+catalog 移除后提前拒绝重放；另有 Bundle refs/note、Live contentBlocks 未参与冲突比较。
+修复统一为：JSON/multipart 只校验 ID 字符串形状，新接纳仍由中央 resolver 校验成员；
+已有请求消费存储身份。Bundle 保留 source ACL/selection 检查并比较既有 refs-only carrier；
+Live 先取已存 targetId，再让 Live receipt 与 Queue send 使用同一份完整 Message envelope。
+补齐 pending/partial/retired/reopen、registry 移除与 changed envelope 回归；无新增持久状态。
+工作期间 next 从 1016aa7a 合入 #1782（Windows Host media path 修复）；无本次文件重叠，
+已完整保留并 rebase 到 ad4e3ad4，后续验证与复审绑定更新后的精确 HEAD。

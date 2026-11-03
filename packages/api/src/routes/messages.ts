@@ -44,8 +44,13 @@ import type { AgentRouter } from '../domains/cats/services/index.js';
 import { messageFrom } from '../domains/cats/services/stores/message-from.js';
 import { storedMessageSource } from '../domains/cats/services/stores/message-source.js';
 import type { IDraftStore } from '../domains/cats/services/stores/ports/DraftStore.js';
-import type { IMessageStore, StoredMessage } from '../domains/cats/services/stores/ports/MessageStore.js';
-import { isTimelinePublished } from '../domains/cats/services/stores/ports/MessageStore.js';
+import {
+  type AppendMessageInput,
+  assertQueueMessageReplay,
+  type IMessageStore,
+  isTimelinePublished,
+  type StoredMessage,
+} from '../domains/cats/services/stores/ports/MessageStore.js';
 import { deriveAutoThreadTitle, type IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import {
   getTimelineOrderTime,
@@ -447,9 +452,9 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         };
       }
 
-      const resolvedTargets = await router.resolveExplicitTargets(messageBundleRequest.targetCats, resolvedThreadId, {
-        persist: false,
-      });
+      const resolvedTargets = replayedSource
+        ? (messageBundleRequest.targetCats as CatId[])
+        : await router.resolveExplicitTargets(messageBundleRequest.targetCats, resolvedThreadId, { persist: false });
       if (resolvedTargets.length !== messageBundleRequest.targetCats.length) {
         reply.status(400);
         return { error: 'Message Bundle contains an unavailable target cat', code: 'MESSAGE_BUNDLE_INVALID_TARGETS' };
@@ -542,6 +547,16 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       reply.status(400);
       return { error: 'One or more selected member identities are invalid', code: 'INVALID_EXPLICIT_TARGETS' };
     }
+    if (!replayedSource && whisperVisibility && whisperRecipients?.length) {
+      const validRecipients = await router.resolveExplicitTargets(whisperRecipients, resolvedThreadId, {
+        persist: false,
+      });
+      if (validRecipients.length !== whisperRecipients.length) {
+        return reply
+          .code(400)
+          .send({ error: 'One or more whisper recipients are invalid', code: 'INVALID_EXPLICIT_TARGETS' });
+      }
+    }
     let publicMentionTargetCats: CatId[] | undefined;
     if (!liveSessionId && !whisperVisibility && !admittedMessageBundle && !replayedSource) {
       const preview = await router.previewTargets(content, {
@@ -582,9 +597,12 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       !whisperVisibility
         ? replayedSource.mentions
         : undefined;
+    const replayedLiveTargets = replayedSource?.extra?.liveAdmission
+      ? [replayedSource.extra.liveAdmission.targetId as CatId]
+      : undefined;
     const fixedTargetCats = admittedMessageBundle
       ? bundleRoutingTargetCats
-      : (explicitRoutingTargetCats ?? publicMentionTargetCats ?? replayedProseTargets);
+      : (explicitRoutingTargetCats ?? publicMentionTargetCats ?? replayedLiveTargets ?? replayedProseTargets);
     const routingResult: Awaited<ReturnType<AgentRouter['resolveTargetsAndIntent']>> = fixedTargetCats
       ? {
           targetCats: [...fixedTargetCats],
@@ -609,6 +627,33 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         : [...sourceTargetCats];
     if (liveSessionId && targetCats.length !== 1)
       return reply.code(400).send({ error: 'Live requires one exact member', code: 'INVALID_LIVE_ADMISSION' });
+    const resolvedIdempotencyKey = idempotencyKey ?? randomUUID();
+    const sourcePayloadExtra: NonNullable<StoredMessage['extra']> = {
+      ...(routingResult.routing_warnings.length ? { routingWarnings: routingResult.routing_warnings } : {}),
+      ...(!liveSessionId && !whisperVisibility && !admittedMessageBundle
+        ? { routingTargetSource: explicitMentionTargetCats ? ('explicit' as const) : ('prose' as const) }
+        : {}),
+      ...(liveSessionId ? { liveAdmission: { sessionId: liveSessionId, targetId: targetCats[0]! } } : {}),
+      ...(admittedMessageBundle ? { messageBundle: admittedMessageBundle.carrier } : {}),
+    };
+    // Live receipt and shared Queue admission verify the same producer envelope.
+    const sourceMessageInput: AppendMessageInput = {
+      from: { kind: 'user', userId },
+      userId,
+      content,
+      // Routing fallback is server metadata, not an @mention the user wrote.
+      mentions: sourceTargetCats,
+      timestamp: Date.now(),
+      threadId: resolvedThreadId,
+      idempotencyKey: resolvedIdempotencyKey,
+      deliveryStatus: 'queued',
+      ...(contentBlocks ? { contentBlocks } : {}),
+      ...(whisperVisibility && whisperRecipients
+        ? { visibility: whisperVisibility, whisperTo: whisperRecipients }
+        : {}),
+      ...(replyTo ? { replyTo } : {}),
+      ...(Object.keys(sourcePayloadExtra).length > 0 ? { extra: sourcePayloadExtra } : {}),
+    };
     if (replayedSource && (liveSessionId || replayedSource.extra?.liveAdmission)) {
       const receipt = replayedSource.extra?.liveAdmission;
       if (
@@ -620,6 +665,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         replayedSource.userId !== userId
       )
         return reply.code(409).send({ error: 'Live admission identity conflict', code: 'LIVE_ADMISSION_CONFLICT' });
+      assertQueueMessageReplay(replayedSource, sourceMessageInput);
       // Already accepted: return the same durable receipt before touching an ephemeral handle.
       return reply.code(202).send({
         status: 'queued',
@@ -668,19 +714,6 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     // succeeds, so validation/queue-capacity failures leave no false sidebar state.
     // Participants follow the winning committed targets, including a conversation fallback.
 
-    // Server-generated idempotency key if client didn't provide one
-    const resolvedIdempotencyKey = idempotencyKey ?? randomUUID();
-    const sourcePayloadExtra: NonNullable<StoredMessage['extra']> = {
-      ...(routingResult.routing_warnings.length ? { routingWarnings: routingResult.routing_warnings } : {}),
-      ...(!liveSessionId && !whisperVisibility && !admittedMessageBundle
-        ? { routingTargetSource: explicitMentionTargetCats ? ('explicit' as const) : ('prose' as const) }
-        : {}),
-      ...(liveSessionId ? { liveAdmission: { sessionId: liveSessionId, targetId: targetCats[0]! } } : {}),
-      ...(admittedMessageBundle ? { messageBundle: admittedMessageBundle.carrier } : {}),
-    };
-    const sourcePayloadWrite: { extra: NonNullable<StoredMessage['extra']> } | Record<string, never> =
-      Object.keys(sourcePayloadExtra).length > 0 ? { extra: sourcePayloadExtra } : {};
-
     log.debug({ threadId: resolvedThreadId, targetCats, intent: intent.intent }, 'Queue ingress accepted');
 
     if (opts.invocationQueue) {
@@ -714,53 +747,31 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             intent: intent.intent,
           };
           const enqueueResult = await trace.measure('queueAdmission', () =>
-            admissionQueue
-              .send(
-                opts.messageStore,
-                {
-                  from: queueInput.from,
-                  userId,
-                  content,
-                  // Routing fallback is server-owned metadata, not an @mention the user wrote.
-                  mentions: sourceTargetCats,
-                  timestamp: Date.now(),
-                  threadId: resolvedThreadId,
-                  idempotencyKey: resolvedIdempotencyKey,
-                  deliveryStatus: 'queued',
-                  ...(contentBlocks ? { contentBlocks } : {}),
-                  ...(whisperVisibility && whisperRecipients
-                    ? { visibility: whisperVisibility, whisperTo: whisperRecipients }
-                    : {}),
-                  ...(replyTo ? { replyTo } : {}),
-                  ...sourcePayloadWrite,
-                },
-                queueInput,
-              )
-              .catch(async (error: unknown) => {
-                if (!liveSessionId) throw error;
-                // The preflight replay lookup may precede another request's atomic
-                // admission. Only the immutable committed source can prove a conflict;
-                // an unknown write/read outcome must retain its original error.
-                const committed = await opts.messageStore.getByIdempotencyKey(
-                  userId,
-                  resolvedThreadId,
-                  resolvedIdempotencyKey,
-                );
-                if (!committed) throw error;
-                const receipt = committed.extra?.liveAdmission;
-                if (
-                  !receipt ||
-                  receipt.sessionId !== liveSessionId ||
-                  receipt.targetId !== targetCats[0] ||
-                  committed.content !== content ||
-                  committed.threadId !== resolvedThreadId ||
-                  committed.userId !== userId
-                ) {
-                  reply.code(409).send({ error: 'Live admission identity conflict', code: 'LIVE_ADMISSION_CONFLICT' });
-                  return null;
-                }
-                throw error;
-              }),
+            admissionQueue.send(opts.messageStore, sourceMessageInput, queueInput).catch(async (error: unknown) => {
+              if (!liveSessionId) throw error;
+              // The preflight replay lookup may precede another request's atomic
+              // admission. Only the immutable committed source can prove a conflict;
+              // an unknown write/read outcome must retain its original error.
+              const committed = await opts.messageStore.getByIdempotencyKey(
+                userId,
+                resolvedThreadId,
+                resolvedIdempotencyKey,
+              );
+              if (!committed) throw error;
+              const receipt = committed.extra?.liveAdmission;
+              if (
+                !receipt ||
+                receipt.sessionId !== liveSessionId ||
+                receipt.targetId !== targetCats[0] ||
+                committed.content !== content ||
+                committed.threadId !== resolvedThreadId ||
+                committed.userId !== userId
+              ) {
+                reply.code(409).send({ error: 'Live admission identity conflict', code: 'LIVE_ADMISSION_CONFLICT' });
+                return null;
+              }
+              throw error;
+            }),
           );
           if (!enqueueResult) return;
 

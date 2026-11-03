@@ -8,7 +8,6 @@ import {
   CONTEXT_ATTACHMENT_COMMENT_MAX_LENGTH,
   type ContextAttachment,
   ContextAttachmentsSchema,
-  catIdSchema,
   entrustedWorkClosureSpecV1Schema,
   entrustedWorkV1Schema,
   type FileContent,
@@ -114,10 +113,10 @@ export const sendMessageSchema = z
     contextAttachments: requestContextAttachmentsSchema,
     /** Legacy fallback only; preferred identity source is X-Cat-Cafe-User header. */
     userId: z.string().min(1).max(100).optional(),
-    /** Explicit structured targets (for example the composer Steer member picker). */
-    mentions: z.array(catIdSchema()).optional(),
+    /** Wire IDs outlive catalog membership; AgentRouter validates every first admission. */
+    mentions: z.array(z.string().min(1)).optional(),
     /** Human-approved replacement recipients; public admission must not substitute them again. */
-    confirmedTargetCats: z.array(catIdSchema()).min(1).max(50).optional(),
+    confirmedTargetCats: z.array(z.string().min(1)).min(1).max(50).optional(),
     threadId: z.string().min(1).max(100).optional(),
     /** Client-provided idempotency key (UUID). Optional — server generates one if absent. */
     idempotencyKey: z.string().uuid().optional(),
@@ -129,7 +128,7 @@ export const sendMessageSchema = z
     /** F35: Message visibility. Default 'public'. 'whisper' requires whisperTo. */
     visibility: z.enum(['public', 'whisper']).optional(),
     /** F35: Whisper recipients. Required when visibility='whisper'. */
-    whisperTo: z.array(catIdSchema()).optional(),
+    whisperTo: z.array(z.string().min(1)).optional(),
     /** F264: author-declared work disposition. Missing uses the server product default. */
     messageDisposition: z.enum(['continue_current', 'next_work']).optional(),
     /** #699: ID of message being replied to (quote). */
