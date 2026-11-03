@@ -4069,11 +4069,19 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
       },
       _emitter: emitter,
     };
-    const spawnFn = createMockSpawnFn(proc);
+    let onSpawn;
+    const spawned = new Promise((resolve) => {
+      onSpawn = resolve;
+    });
+    const spawnFn = mock.fn(() => {
+      onSpawn();
+      return proc;
+    });
     const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
 
-    const startMs = Date.now();
     const promise = collect(service.invoke('test'));
+    await spawned;
+    const startMs = Date.now();
 
     proc.stdout.write(`${JSON.stringify({ type: 'thread.started', thread_id: 'thread-116' })}\n`);
     proc.stdout.write(
