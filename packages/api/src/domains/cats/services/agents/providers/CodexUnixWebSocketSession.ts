@@ -33,6 +33,7 @@ export interface CodexAppServerHostLaunch {
   args: readonly string[];
   cwd?: string;
   env?: Record<string, string | null>;
+  inheritParentEnv?: boolean;
   socketDirectory: string;
   socketPath: string;
 }
@@ -52,28 +53,23 @@ export interface PreparedCodexHostLaunch {
 export async function prepareCodexHostLaunch(options: AgentCarrierSessionOptions): Promise<PreparedCodexHostLaunch> {
   assertCodexSharedStateCarrier(options.env);
   await assertCodexManagedCarrierSupport(options.env, options.command);
-  const signatureEnv = Object.fromEntries(
-    Object.entries(options.env ?? {}).filter(([key]) => !SESSION_SCOPED_ENV_KEYS.has(key)),
-  );
-  const env: Record<string, string | null> = { ...signatureEnv };
-  // Missing keys would be inherited again by normalizeEnv(). Explicit nulls
-  // remove invocation identity from the long-lived child process.
-  for (const key of SESSION_SCOPED_ENV_KEYS) env[key] = null;
+  const env = normalizeEnv(options.env, options.cwd ?? process.cwd(), options.inheritParentEnv);
   const args = withoutTransportArgs(options.args);
   const signaturePayload = {
     command: options.command,
     args,
     cwd: options.cwd ?? null,
-    env: Object.entries(signatureEnv).sort(([left], [right]) => left.localeCompare(right)),
+    env: Object.entries(env).sort(([left], [right]) => left.localeCompare(right)),
   };
   return {
     signature: createHash('sha256').update(JSON.stringify(signaturePayload)).digest('hex'),
-    authIdentity: await readCodexHostAuthIdentity(buildChildEnv(env, { workingDirectory: options.cwd }), options.cwd),
+    authIdentity: await readCodexHostAuthIdentity(env, options.cwd),
     launch: {
       command: options.command,
       args,
       ...(options.cwd ? { cwd: options.cwd } : {}),
       env,
+      inheritParentEnv: false,
     },
   };
 }
@@ -217,8 +213,14 @@ class SpawnedCodexAppServerHost implements CodexAppServerHostProcess {
   }
 }
 
-function normalizeEnv(input: Record<string, string | null> | undefined, workingDirectory: string): NodeJS.ProcessEnv {
-  return buildChildEnv(input, { workingDirectory });
+function normalizeEnv(
+  input: Record<string, string | null> | undefined,
+  workingDirectory: string,
+  inheritParentEnv?: boolean,
+) {
+  const env = buildChildEnv(input, { workingDirectory, inheritParentEnv });
+  for (const key of SESSION_SCOPED_ENV_KEYS) delete env[key];
+  return Object.fromEntries(Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined));
 }
 
 export function createCodexSocketDirectory(): string {
@@ -241,7 +243,7 @@ export async function spawnCodexAppServerHost(launch: CodexAppServerHostLaunch):
   });
   const childCwd = launch.cwd ?? process.cwd();
   const supervised = buildUnixSupervisedSpawnPlan(launch.command, launch.args, {
-    env: normalizeEnv(launch.env, childCwd),
+    env: normalizeEnv(launch.env, childCwd, launch.inheritParentEnv),
     killGraceMs: Math.max(250, CLOSE_GRACE_MS - 500),
     socketDirectory: launch.socketDirectory,
   });
