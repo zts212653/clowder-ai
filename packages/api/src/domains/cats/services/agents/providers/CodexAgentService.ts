@@ -7,6 +7,7 @@ import { codexCliConfig } from '../../../../../config/codex-launch-config.js';
 import { codexManagedLaunchArgs } from '../../../../../config/codex-managed-launch.js';
 import { assertCodexManagedPlatformSupport } from '../../../../../config/codex-managed-support.js';
 import { assertCodexSharedStateRoots } from '../../../../../config/codex-shared-state.js';
+import { prepareCodexEnvironment } from '../../../../../utils/codex-network-environment.js';
 import { agentServiceGeneration } from '../registry/AgentRegistry.js';
 import { inspectCodexImportSession, listCodexImportSessions } from './CodexLocalSessionSource.js';
 import {
@@ -1327,7 +1328,7 @@ export class CodexAgentService implements AgentService {
     account?: RuntimeProviderProfile,
     cliConfigArgs: readonly string[] = [],
     localInspection = false,
-  ): Promise<Pick<AgentCarrierSessionOptions, 'command' | 'args' | 'cwd' | 'env'>> {
+  ): Promise<Pick<AgentCarrierSessionOptions, 'command' | 'args' | 'cwd' | 'env' | 'inheritParentEnv'>> {
     if (!localInspection && (this.carrierMode !== 'app_server' || !this.appServerHostPool))
       throw new Error('codex_native_capability_source_unsupported');
     const nativeTool = usesNativeToolConfiguration(catRegistry.tryGet(this.catId)?.config);
@@ -1398,15 +1399,19 @@ export class CodexAgentService implements AgentService {
       command: this.cliCommand,
       args,
       cwd,
+      inheritParentEnv: false,
       env: withoutSessionScopedHostEnv(
-        finalizeCodexAccountEnvironment(descriptor, {
-          env,
-          selectedApiEnv,
-          memberConfigArgs,
-          args,
-          cwd,
-          ...(executionHome ? { executionHome } : {}),
-        }),
+        await prepareCodexEnvironment(
+          finalizeCodexAccountEnvironment(descriptor, {
+            env,
+            selectedApiEnv,
+            memberConfigArgs,
+            args,
+            cwd,
+            ...(executionHome ? { executionHome } : {}),
+          }),
+          { workingDirectory: cwd },
+        ),
       ),
     };
   }
@@ -2092,7 +2097,7 @@ export class CodexAgentService implements AgentService {
         }
       }
       const homeIsolated = !!native || (authMode === 'api_key' && !!customBaseUrl);
-      const codexEnv = native
+      let codexEnv = native
         ? { ...native.env }
         : withVerdictGhGuardEnv(nativeAuthentication ? rawEnv : applyAuthMode(rawEnv, authMode));
 
@@ -2159,7 +2164,11 @@ export class CodexAgentService implements AgentService {
               ? { executionHome: apiExecutionHome ?? rawEnv.CODEX_HOME ?? `${rawEnv.HOME}/.codex` }
               : {}),
           });
-      Object.assign(codexEnv, finalAccountEnv);
+      codexEnv = await prepareCodexEnvironment(finalAccountEnv, {
+        workingDirectory: options?.workingDirectory,
+        inheritParentEnv: !native,
+        bindExecutionOwner: true,
+      });
       if (!native && authMode === 'api_key') {
         if (!finalAccountEnv.CODEX_HOME) throw new Error('Codex account home is unavailable');
         mkdirSync(finalAccountEnv.CODEX_HOME, { recursive: true, mode: 0o700 });
@@ -2213,7 +2222,7 @@ export class CodexAgentService implements AgentService {
         // invocation can never reach a CLI spawn with empty or premature bytes.
         ...(options?.workingDirectory ? { cwd: options.workingDirectory } : {}),
         env: codexEnv,
-        ...(native ? { inheritParentEnv: false } : {}),
+        inheritParentEnv: false,
         ...(options?.signal ? { signal: options.signal } : {}),
         ...(options?.invocationId ? { invocationId: options.invocationId } : {}),
         ...(options?.cliSessionId ? { cliSessionId: options.cliSessionId } : {}),
@@ -2399,6 +2408,7 @@ export class CodexAgentService implements AgentService {
               args: appServerArgs,
               ...(options?.workingDirectory ? { cwd: options.workingDirectory } : {}),
               env: appServerEnv,
+              inheritParentEnv: false,
               ...(options?.signal ? { signal: options.signal } : {}),
               invocationId: options?.invocationId ?? `codex-app-server-${Date.now()}`,
               ...(options?.sessionId ? { sessionId: options.sessionId } : {}),
