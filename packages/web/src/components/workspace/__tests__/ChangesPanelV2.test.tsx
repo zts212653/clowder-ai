@@ -330,4 +330,19 @@ describe('ChangesPanel v2', () => {
     expect(container.textContent).toContain('src/a.ts');
     expect(container.textContent).not.toContain('GitHub 请求受限');
   });
+
+  // #1809 范围边界：隐藏「选择文件」只针对 PR 读取失败，必须是 PR 专属；
+  // 本地 diff / commit 的失败仍保留原来的错误行与占位，不能被这次修复顺手改掉。
+  it.each([
+    'v2',
+    'classic',
+  ] as const)('keeps the local changes failure copy and file-picker hint for a non-PR read in %s', async (presentation) => {
+    writeShellPresentation(presentation);
+    apiFetchMock.mockImplementation(async () => new Response('nope', { status: 500 }));
+    await act(async () => {
+      root.render(<ChangesPanel worktreeId="wt-1" basisPct={40} threadId="thread-1" />);
+    });
+    expect(container.textContent).toContain(presentation === 'v2' ? '读取改动失败' : 'Failed to fetch changes');
+    expect(container.textContent).toContain(presentation === 'v2' ? '选择文件查看差异' : 'Select a file to view diff');
+  });
 });

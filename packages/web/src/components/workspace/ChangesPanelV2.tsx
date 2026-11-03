@@ -194,7 +194,7 @@ export function ChangesPanelV2({
         ) : (
           <ChangesDiffPlaceholder
             loading={loading}
-            failed={Boolean(error)}
+            failed={Boolean(pullRequestTarget && error)}
             loadingLabel={copy.loading}
             selectFileLabel={copy.selectFile}
           />

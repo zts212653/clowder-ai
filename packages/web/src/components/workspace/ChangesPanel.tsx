@@ -131,7 +131,7 @@ function ChangesPanelClassic({
         ) : (
           <ChangesDiffPlaceholder
             loading={loading}
-            failed={Boolean(error)}
+            failed={Boolean(pullRequestTarget && error)}
             loadingLabel="Loading..."
             selectFileLabel="Select a file to view diff"
           />
