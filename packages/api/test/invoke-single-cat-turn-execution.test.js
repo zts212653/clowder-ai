@@ -564,6 +564,9 @@ describe('invokeSingleCat durable child execution lifecycle', () => {
       },
       get: (invocationId) => canonicalStore.get(invocationId),
       listByParent: (parentInvocationId) => canonicalStore.listByParent(parentInvocationId),
+      listRunningByUser: (userId) => canonicalStore.listRunningByUser(userId),
+      markProviderStarted: (invocationId, at) => canonicalStore.markProviderStarted(invocationId, at),
+      recordProviderTeardown: (invocationId, at) => canonicalStore.recordProviderTeardown(invocationId, at),
       transitionTerminal: (invocationId, input) => canonicalStore.transitionTerminal(invocationId, input),
       interruptRunningBefore: (cutoff, input) => canonicalStore.interruptRunningBefore(cutoff, input),
     };

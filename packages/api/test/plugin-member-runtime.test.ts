@@ -103,6 +103,12 @@ test('stored member account remains pinned when the ordinary cat default changes
   const frame = await f.runtime.acquire(stored, f.scope);
   try {
     assert.deepEqual(frame.runtime, first);
+    assert.equal(frame.binding.sharedMcpLaunch?.transport, 'stdio');
+    assert.equal(frame.binding.frozenL0Input?.projection, 'scoped-member');
+    assert.match(frame.binding.frozenL0Input?.variables.MEMBER_IDENTITY ?? '', /@kimi31-pro/);
+    assert.equal(frame.binding.hostExecutionBoundary?.accountRef, 'selected');
+    assert.equal(frame.binding.hostExecutionBoundary?.carrier, first.carrier);
+    assert.equal(frame.binding.hostExecutionBoundary?.implementationKey, 'builtin:kimi/kimi_stream_json');
     assert.equal(frame.binding.resolvedAccount?.apiKey, 'fixture-member-secret');
     assert.ok(!JSON.stringify(first).includes('secret'));
     assert.equal(f.cat.accountRef, 'outside');

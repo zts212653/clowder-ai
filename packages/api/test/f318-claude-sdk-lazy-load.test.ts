@@ -20,13 +20,14 @@ test('importing and constructing the SDK carrier does not load the unused SDK ru
       return next(url, context);
     }});
     try {
+      const {claudeSdkRuntimeFixture} = await import(${JSON.stringify(new URL('./helpers/claude-sdk-runtime-fixture.js', import.meta.url).href)});
       const {ClaudeSdkAgentService} = await import(${JSON.stringify(entry)});
       await import(${JSON.stringify(catalog)});
       await import(${JSON.stringify(history)});
-      const service = new ClaudeSdkAgentService({model:'fixture',mcpServerPath:''});
+      const service = new ClaudeSdkAgentService({ runtimeResolver: claudeSdkRuntimeFixture,model:'fixture',mcpServerPath:''});
       if (service.contextCapability().carrier !== 'agent_sdk') throw new Error('Carrier identity changed');
       let closed = 0;
-      const injected = new ClaudeSdkAgentService({model:'fixture',mcpServerPath:'',l0CompilerFn:async ()=>'fixture identity',queryFn:({prompt})=>({
+      const injected = new ClaudeSdkAgentService({ runtimeResolver: claudeSdkRuntimeFixture,model:'fixture',mcpServerPath:'',l0CompilerFn:async ()=>'fixture identity',queryFn:({prompt})=>({
         async *[Symbol.asyncIterator]() {
           const first = await prompt[Symbol.asyncIterator]().next();
           yield {type:'system',subtype:'init',session_id:'fixture'};

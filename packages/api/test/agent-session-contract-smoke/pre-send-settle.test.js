@@ -24,12 +24,12 @@ function preflightWith(settle) {
   return { requestedRuntimeSessionId: 'native-old', settle };
 }
 
-function completedTurn(sessionId) {
+function completedTurn({ sessionId, turn }) {
   return [
     {
       scope: 'turn',
       sessionId,
-      turn: { invocationId: 'inv-1', nativeTurnId: 'turn-1' },
+      turn,
       seq: 1,
       type: 'output',
       text: 'ok',
@@ -38,7 +38,7 @@ function completedTurn(sessionId) {
     {
       scope: 'turn',
       sessionId,
-      turn: { invocationId: 'inv-1', nativeTurnId: 'turn-1' },
+      turn,
       seq: 2,
       type: 'done',
       outcome: 'completed',

@@ -51,7 +51,7 @@ import { appendLocalImagePathHints, collectImageAccessDirectories } from '../pro
 import { extractTrustedImagePaths } from '../providers/image-paths.js';
 import { findGitBashPath } from './claude-agent-win.js';
 import { composeManagedSettingsDocument } from './claude-compaction-launch-plan.js';
-import { resolveClaudeMcpConfig } from './claude-mcp-config.js';
+import { captureClaudeMcpConfig, resolveClaudeMcpConfig } from './claude-mcp-config.js';
 import { extractClaudeUsage, isResultErrorEvent, transformClaudeEvent } from './claude-ndjson-parser.js';
 import {
   applyClaudeMemberEnvironment,
@@ -137,9 +137,13 @@ export function resolveClaudeEffortLevel(
   catId: string,
   effectiveModel: string,
   override: CliEffortPreset | null | undefined,
+  preferences?: AgentServiceOptions['executionPreferences'],
 ): string {
-  const inherited = getCatEffort(catId, undefined, 'anthropic', effectiveModel);
-  if (!inherited && !override && catRegistry.tryGet(catId)?.config.configurationSource === 'native_tool') return '';
+  const inherited = preferences?.effort ?? getCatEffort(catId, undefined, 'anthropic', effectiveModel);
+  const nativeTool = preferences
+    ? preferences.configurationSource === 'native_tool'
+    : catRegistry.tryGet(catId)?.config.configurationSource === 'native_tool';
+  if (!inherited && !override && nativeTool) return '';
   return resolveCliEffortOverride('anthropic', effectiveModel, inherited, override).effective;
 }
 
@@ -398,6 +402,10 @@ export class ClaudeAgentService implements AgentService {
     return true;
   }
 
+  captureInvocationOptions(input: Parameters<NonNullable<AgentService['captureInvocationOptions']>>[0]) {
+    return captureClaudeMcpConfig({ ...input, catId: this.catId, mcpServerPath: this.mcpServerPath });
+  }
+
   supportsToolExecutionPolicy(policy: ToolExecutionPolicy): boolean {
     return policy.mode === 'read_only' || (policy.mode === 'plugin_native' && Boolean(policy.memberSession));
   }
@@ -425,7 +433,11 @@ export class ClaudeAgentService implements AgentService {
     };
   }
 
-  private async compileL0ToTempFile(userId?: string, memberModel?: string): Promise<string> {
+  private async compileL0ToTempFile(
+    userId?: string,
+    frozenInput?: AgentServiceOptions['frozenL0Input'],
+    memberModel?: string,
+  ): Promise<string> {
     const l0Dir = mkdtempSync(join(tmpdir(), 'cat-cafe-l0-'));
     const l0Path = join(l0Dir, 'system-prompt-l0.md');
     try {
@@ -433,6 +445,8 @@ export class ClaudeAgentService implements AgentService {
         catId: this.catId as string,
         userId,
         outPath: l0Path,
+        frozenInput,
+        requireFrozenInput: true,
         ...(memberModel ? { projection: 'scoped-member' as const, runtimeModel: memberModel } : {}),
       });
     } catch (err) {
@@ -461,12 +475,13 @@ export class ClaudeAgentService implements AgentService {
     // F198 B-prime refactor: model selection delegates to shared helper so
     // ClaudeBgCarrierService reuses the same rules (single source of truth).
     const { effectiveModel, useEnvModelOverride } = scoped
-      ? { effectiveModel: this.model, useEnvModelOverride: false }
+      ? { effectiveModel: options?.executionPreferences?.model ?? this.model, useEnvModelOverride: false }
       : resolveClaudeModelSelection(
           options?.callbackEnv,
-          catRegistry.tryGet(this.catId)?.config.configurationSource === 'native_tool'
-            ? getCatModel(this.catId)
-            : this.model,
+          options?.executionPreferences?.model ??
+            (catRegistry.tryGet(this.catId)?.config.configurationSource === 'native_tool'
+              ? getCatModel(this.catId)
+              : this.model),
         );
     const isApiKeyMode = options?.callbackEnv?.[ANTHROPIC_PROFILE_MODE_KEY] === 'api_key';
     // #840 R2 (砚砚 review 2026-06-02): the main prompt must NOT ride argv.
@@ -488,6 +503,7 @@ export class ClaudeAgentService implements AgentService {
       this.catId as string,
       effectiveModel,
       options?.reasoningEffortOverride,
+      options?.executionPreferences,
     );
 
     const args: string[] = [
@@ -556,6 +572,7 @@ export class ClaudeAgentService implements AgentService {
     // On Windows, Claude CLI treats inline JSON as a file path — write to temp file.
     if (!readOnly && !scoped) {
       const mcpResolution = await resolveClaudeMcpConfig({
+        frozenNativeMcpConfig: options?.frozenNativeMcpConfig,
         callbackEnv: options?.callbackEnv,
         workingDirectory: options?.workingDirectory,
         mcpServerPath: this.mcpServerPath,
@@ -591,7 +608,11 @@ export class ClaudeAgentService implements AgentService {
     let appendPromptPath: string | undefined;
     let preCompactSettingsPath: string | undefined;
     try {
-      l0Path = await this.compileL0ToTempFile(options?.callbackEnv?.CAT_CAFE_USER_ID, scoped ? this.model : undefined);
+      l0Path = await this.compileL0ToTempFile(
+        options?.callbackEnv?.CAT_CAFE_USER_ID,
+        options?.frozenL0Input,
+        scoped ? effectiveModel : undefined,
+      );
       args.push('--system-prompt-file', l0Path);
       // Route layer passes pack-only systemPrompt for native-L0 providers.
       // Keep it as an append layer, but never use it as the carrier's L0 source.

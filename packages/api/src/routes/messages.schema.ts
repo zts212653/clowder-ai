@@ -116,6 +116,8 @@ export const sendMessageSchema = z
     userId: z.string().min(1).max(100).optional(),
     /** Explicit structured targets (for example the composer Steer member picker). */
     mentions: z.array(catIdSchema()).optional(),
+    /** Human-approved replacement recipients; public admission must not substitute them again. */
+    confirmedTargetCats: z.array(catIdSchema()).min(1).max(50).optional(),
     threadId: z.string().min(1).max(100).optional(),
     /** Client-provided idempotency key (UUID). Optional — server generates one if absent. */
     idempotencyKey: z.string().uuid().optional(),
@@ -155,6 +157,13 @@ export const sendMessageSchema = z
         path: ['whisperTo'],
       });
     }
+    if (data.confirmedTargetCats && data.visibility === 'whisper') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['confirmedTargetCats'],
+        message: 'Whispers retain their own exact recipients',
+      });
+    }
     if (!data.messageBundle) return;
 
     const incompatible: Array<[boolean, keyof typeof data, string]> = [
@@ -165,6 +174,7 @@ export const sendMessageSchema = z
         'messageBundle cannot include contextAttachments',
       ],
       [(data.mentions?.length ?? 0) > 0, 'mentions', 'messageBundle routes only through targetCats'],
+      [data.confirmedTargetCats !== undefined, 'confirmedTargetCats', 'messageBundle retains its own exact recipients'],
       [data.visibility === 'whisper', 'visibility', 'messageBundle cannot be a whisper'],
       [(data.whisperTo?.length ?? 0) > 0, 'whisperTo', 'messageBundle cannot include whisperTo'],
       [data.replyTo !== undefined, 'replyTo', 'messageBundle cannot include replyTo'],

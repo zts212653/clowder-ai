@@ -171,7 +171,12 @@ export type TurnEvent = { scope: 'turn'; sessionId: HostSessionId; turn: TurnRef
     }
   | { type: 'input_read'; deliveryId: string }
   | { type: 'error'; code: string; message: string; disposition: 'transient' | 'terminal' }
-  | { type: 'done'; outcome: 'completed' | 'cancelled' | 'failed'; errorCode?: string }
+  | {
+      type: 'done';
+      outcome: 'completed' | 'cancelled' | 'failed';
+      errorCode?: string;
+      providerTeardown?: Service.AgentMessage['providerTeardown'];
+    }
 );
 
 export type AgentSessionEvent = (SessionEvent | TurnEvent) & {

@@ -1,3 +1,5 @@
+import { DEFAULT_PROFILE_USER_ID } from '@cat-cafe/shared/profile-contract';
+import { captureInvocationL0Input } from '../../cats/services/agents/providers/l0-input-capture.js';
 import type { AgentMessage, AgentServiceOptions, TokenUsage } from '../../cats/services/types.js';
 import type { CurationProvider } from '../LunaCurationClient.js';
 
@@ -12,6 +14,7 @@ export interface LunaNativeRun {
 
 /** Native carrier owns authentication and transport; each consumer owns its session. */
 export async function runLunaNative(input: {
+  userId?: string;
   provider: CurationProvider;
   prompt: string;
   instructions: string;
@@ -23,8 +26,21 @@ export async function runLunaNative(input: {
   const state: LunaNativeRun = { text: '', success: false, modelId: input.provider.model, elapsedMs: 0 };
   let failed = false;
   let observedResponse = false;
+  const userId = input.userId ?? input.provider.options?.callbackEnv?.CAT_CAFE_USER_ID ?? DEFAULT_PROFILE_USER_ID;
+  const frozenL0Input =
+    input.provider.options?.frozenL0Input ??
+    (input.provider.catConfig
+      ? captureInvocationL0Input({
+          catId: input.provider.catId,
+          catConfig: input.provider.catConfig,
+          userId,
+          model: input.provider.model,
+        })
+      : undefined);
   const options: AgentServiceOptions = {
     ...input.provider.options,
+    ...(frozenL0Input ? { frozenL0Input } : {}),
+    callbackEnv: { ...input.provider.options?.callbackEnv, CAT_CAFE_USER_ID: userId },
     workingDirectory: input.workingDirectory,
     systemPrompt: input.instructions,
     toolExecutionPolicy: { mode: 'read_only', replayDeniedToolNames: [] },

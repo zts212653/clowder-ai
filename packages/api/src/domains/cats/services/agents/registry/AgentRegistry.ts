@@ -5,8 +5,19 @@
  * AgentRouter reads from this instead of hardcoded named parameters.
  */
 
+import { randomUUID } from 'node:crypto';
 import type { AgentService } from '../../types.js';
 import { type AgentRegistrationFailure, AgentServiceUnavailableError } from './AgentServiceUnavailableError.js';
+
+const serviceGenerations = new WeakMap<AgentService, string>();
+
+/** Process-local implementation generation; invocation views inherit their concrete service's token. */
+export function agentServiceGeneration(service: AgentService, source = service): string {
+  const generation = serviceGenerations.get(source) ?? randomUUID();
+  serviceGenerations.set(source, generation);
+  serviceGenerations.set(service, generation);
+  return generation;
+}
 
 export class AgentRegistry {
   private services = new Map<string, AgentService>();

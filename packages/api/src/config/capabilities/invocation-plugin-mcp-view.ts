@@ -24,6 +24,8 @@ export interface InvocationPluginMcpEntry {
 export interface InvocationPluginMcpView {
   readonly entries: readonly InvocationPluginMcpEntry[];
   readonly localCapabilityRoot?: string;
+  /** Admission-only check owned by the activation source, including additions to an empty view. */
+  readonly isCurrent?: () => boolean;
 }
 
 const invocationView = new AsyncLocalStorage<{
@@ -46,6 +48,15 @@ export function invocationPluginMcpHttpPaths(servers: Record<string, Record<stri
     result[entry.capabilityId.replaceAll(':', '__')] = entry.sharedHttpPath;
   }
   return result;
+}
+
+/** Admission needs the same verified activation projection before a provider iterator exists. */
+export function withInvocationPluginMcpView<T>(
+  run: () => T,
+  view: InvocationPluginMcpView | undefined,
+  scope?: PluginMcpExposureScope,
+): T {
+  return invocationView.run({ view, scope: scope ? Object.freeze({ ...scope }) : undefined }, run);
 }
 
 export function invocationPluginMcpConfig(config: import('@cat-cafe/shared').CapabilitiesConfig, memberCatId: string) {

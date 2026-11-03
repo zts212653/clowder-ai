@@ -7,6 +7,7 @@ import {
 import { createModuleLogger } from '../../../infrastructure/logger.js';
 import type { ToolExecutionPolicy } from '../../cats/services/types.js';
 import { activateDeclaredMcp } from '../declared/declared-mcp-resources.js';
+import { DeclaredPluginUi } from '../declared/declared-plugin-ui.js';
 import {
   type DeclaredPluginTool,
   type DeclaredPluginWebhook,
@@ -81,6 +82,7 @@ export interface PluginRuntimeCarrier {
 }
 
 export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
+  readonly ui = new DeclaredPluginUi();
   readonly nativeActions = new NativePluginActions((id) => this.#admission(id));
   readonly #nativeMcpLaunches = new NativeMcpLaunches((id) => this.#admission(id), this.nativeActions);
   readonly #carriers: PluginRuntimeCarrier[] = [];
@@ -148,6 +150,8 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
       // External and legacy carriers may not publish a separate Host-ready state.
       // Joining the same promise preserves one admission and its original rollback boundary.
       await admitContributions();
+      // stop/stopAll invalidate this admission even after carrier readiness.
+      if (this.nativeActions.generation(pluginInstanceId) === generation) this.ui.activate(admission);
       return result;
     } catch (error) {
       if (!admitted) throw error;
@@ -156,6 +160,7 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
   }
 
   async stop(pluginInstanceId: string, reason = 'host_stop'): Promise<void> {
+    this.ui.deactivate(pluginInstanceId);
     this.#nativeMcpLaunches.deactivate(pluginInstanceId);
     this.nativeActions.deactivate(pluginInstanceId);
     const snapshot = await this.inventory.snapshot();
@@ -209,6 +214,7 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
   }
 
   async stopAll(reason = 'host_shutdown'): Promise<void> {
+    this.ui.deactivateAll();
     this.#nativeMcpLaunches.deactivateAll();
     this.nativeActions.deactivateAll();
     if (this.beforeStop) {

@@ -7,6 +7,7 @@ import { catRegistry } from '@cat-cafe/shared';
 import Fastify from 'fastify';
 import './helpers/setup-cat-registry.js';
 import { selectFakeCodexHome } from './helpers/fake-codex-home.js';
+import { readMemberRequestRevision } from './helpers/member-request-revision.js';
 
 const { catsRoutes } = await import('../dist/routes/cats.js');
 const { _resetCachedConfig, loadCatConfig, toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
@@ -83,7 +84,13 @@ async function fixture(initialProfile) {
     app,
     root,
     persisted: () => JSON.parse(readFileSync(join(root, '.cat-cafe/cat-catalog.json'), 'utf8')).breeds[0].variants[0],
-    patch: (body) => app.inject({ method: 'PATCH', url: '/api/cats/gemini38', headers, payload: body }),
+    patch: async (body) =>
+      app.inject({
+        method: 'PATCH',
+        url: '/api/cats/gemini38',
+        headers,
+        payload: { expectedRevision: await readMemberRequestRevision(app, '/api/cats/gemini38', headers), ...body },
+      }),
     close: async () => {
       await app.close();
       keys.forEach((key, i) => {

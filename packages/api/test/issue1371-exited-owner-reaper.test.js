@@ -27,7 +27,8 @@ async function nativeFixture(mode, store = new InMemoryTurnExecutionStore()) {
   };
   const tracker = new InvocationTracker({ maxSlotTtlMs: 1 });
   const controller = tracker.start(scope.threadId, scope.catId, scope.userId, [scope.catId], scope.parentInvocationId);
-  await store.createRunning({ ...scope, executionKind: 'ordinary', startedAt: 1 });
+  await store.createRunning({ ...scope, executionKind: 'ordinary', startedAt: 1, providerLifecycleTracked: true });
+  await store.markProviderStarted(scope.invocationId, 1);
   const owner = { ...scope, executionId: scope.parentInvocationId };
   const proc = new EventEmitter();
   if (mode !== 'unknown')
@@ -78,6 +79,7 @@ test('production native observer → exact fence → durable child → parent re
   assert.equal(result.releasedTerminal, 1);
   assert.equal(h.controller.signal.aborted, true);
   assert.equal(h.store.get(h.scope.invocationId).terminalReason, 'provider_exited_without_terminal');
+  assert.ok(h.store.get(h.scope.invocationId).providerTeardownAt >= 1);
   assert.deepEqual(h.calls, ['reconcile', 'release']);
 });
 
@@ -133,7 +135,8 @@ test('stale running ledger with exact confirmed process exit is retired before o
   const scope = { threadId: 't', userId: 'u', catId: 'opus5', parentInvocationId: 'p', invocationId: 'c' };
   const controller = tracker.start('t', 'opus5', 'u', ['opus5'], 'p');
   const store = new InMemoryTurnExecutionStore();
-  store.createRunning({ ...scope, executionKind: 'ordinary', startedAt: 1 });
+  store.createRunning({ ...scope, executionKind: 'ordinary', startedAt: 1, providerLifecycleTracked: true });
+  store.markProviderStarted(scope.invocationId, 1);
   const order = [];
   const reaper = new InvocationOwnerReaper({
     invocationTracker: tracker,
@@ -150,6 +153,7 @@ test('stale running ledger with exact confirmed process exit is retired before o
     },
     reconcileZombie: async () => {
       assert.equal(store.get('c').status, 'interrupted');
+      assert.equal(store.get('c').providerTeardownAt, 2);
       order.push('reconcile');
       return { reconciled: 1, alreadyTerminal: 0, errors: 0 };
     },

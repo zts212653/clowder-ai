@@ -1,0 +1,878 @@
+{
+  "acceptedObjective": "按综合重构方案实施并完成验收闭环",
+  "branch": "feat/role-agent-refactor-20261029-gpt-sol",
+  "baseCommit": "6d8d4915bcd84edfeb42edf76466cf6318cecdbd",
+  "sourceDirectory": "C:\\Users\\Administrator\\Desktop\\猫猫咖啡馆\\技术方案\\综合重构方案-20261029",
+  "documents": [
+    {
+      "name": "source-manifest.json",
+      "sha256": "c1aea2d7e2fb4be04080bb158ddcd61807439265b221c7dec9c63f166444444c"
+    },
+    {
+      "name": "交付校验.md",
+      "sha256": "85f3f7618cad0a24019e89b933f041907c5b7d935290092f7dbf4313e1abbf5f"
+    },
+    {
+      "name": "实施与验收.md",
+      "sha256": "6e2580fcefc06d0c85714d2c7f36e17c2830708fbb2bedcf3fe4780dd4bf6605"
+    },
+    {
+      "name": "客户端适配与CodeAgent扩展.md",
+      "sha256": "46d36ad13cc5ce02217e0266840f1afff348ba3e7de8fbe6bfad71e9b3e02021"
+    },
+    {
+      "name": "评审问题闭环.md",
+      "sha256": "c022bf88fb97e08366676cfa2123869ed57fc1863c360ff44b37705b4d8eaa12"
+    },
+    {
+      "name": "重构技术方案.md",
+      "sha256": "ba844e3a7030827d61deffe1c69424d631eae507f2423bcb414c4fb4f5be22c2"
+    }
+  ],
+  "userSteering": {
+    "codeagent": "用户确认本机没有 CodeAgent，授权简单 mock；区分模拟契约证据与真实企业能力",
+    "macos": "2026-10-30 用户明确确认暂无 Mac；必需实机/安装包项因环境缺失 BLOCKED，不计 N/A 或 PASS，本机工作继续"
+  },
+  "cases": [
+    {
+      "id": "C01",
+      "status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "id": "C02",
+      "status": "NOT_RUN",
+      "evidence": [
+        "README.md#2026-10-30-阶段记录尚未整体验收：局部证据，不等于该条目完整通过",
+        "README.md#W2-L0-冻结输入切片W2-尚未完成：局部契约证据和明确失败，非整条通过"
+      ]
+    },
+    {
+      "id": "C03",
+      "status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "id": "C04",
+      "status": "NOT_RUN",
+      "evidence": [
+        "README.md#2026-10-30-阶段记录尚未整体验收：局部证据，不等于该条目完整通过",
+        "README.md#W2-L0-冻结输入切片W2-尚未完成：局部契约证据和明确失败，非整条通过"
+      ]
+    },
+    {
+      "id": "C05",
+      "status": "NOT_RUN",
+      "evidence": [
+        "README.md#W2-L0-冻结输入切片W2-尚未完成：局部契约证据和明确失败，非整条通过",
+        "README.md#W2-模型与-effort-消费切片尚未完成-W2：实际消费者局部证据，整条仍未完成",
+        "README.md#W2-线程偏好消费切片尚未完成-W2：准入后晚读反例闭环，跨owner读一致性尚未完成",
+        "README.md#W2-Codex-全局启动策略切片尚未完成-W2：sandbox/approval/transport/observation实际消费者局部证据",
+        "README.md#W2-ACP-MCP-计划消费切片尚未完成-W2：描述符在实际session/new边界保持准入值；整条未完成",
+        "README.md#W2-Claude-原生-MCP-消费切片尚未完成-W2：四载体与wrapper实际配置消费局部证据；整条未完成",
+        "README.md#W2-配置捕获与账号环境顺序切片尚未完成-W2：provider捕获与invoke共用同一账号环境；整条未完成",
+        "README.md#W2-Kimi-原生-MCP-消费切片尚未完成-W2：允许计划冻结、原生层仅补拒绝、HOME与凭据实际消费局部证据",
+        "README.md#W2-OpenCode-Host-MCP-消费切片尚未完成-W2：原Host-writer计划、路径、激活视图及实际launch局部证据",
+        "README.md#W2-Codex-MCP-输入消费切片尚未完成-W2：冻结输入、真实MCP两轮消费和基线复核；整条未完成",
+        "README.md#W2-Host-shared-MCP-上下文消费切片尚未完成-W2：Host注册与callback共享准入上下文；整条未完成",
+        "README.md#W2-capabilities-写入通知切片尚未完成-W2：合法capabilities写入委托中央原子writer；通知与实际提交局部证据",
+        "README.md#W2-账号与启动策略读后核验切片尚未完成-W2：正式账号与S3写入导致准入值变更409；其他owner未完成",
+        "README.md#W2-ACP-成员-MCP-开关消费修复尚未完成-W2：实际session/new使用当前显式/缺省开关并保持冻结",
+        "README.md#W2-ACP-构建账号来源核验切片尚未完成-W2：通用ACP显式账号解析、旧池来源错配拒绝/新factory消费；完整启动计划未完成"
+      ]
+    },
+    {
+      "id": "C06",
+      "status": "NOT_RUN",
+      "evidence": [
+        "README.md#W3-静态身份前缀按实际正文与片段复用尚未完成-W3：Host 前缀缓存的正文/成功/压缩失效局部证据；非完整 L0 编译验收"
+      ]
+    },
+    {
+      "id": "C07",
+      "status": "NOT_RUN",
+      "evidence": [
+        "README.md#W3-静态身份前缀按实际正文与片段复用尚未完成-W3：头像/正文/原生片段变化的消息前缀局部证据；持久兼容键、硬边界及 Native 采用未完成"
+      ]
+    },
+    {
+      "id": "C08",
+      "status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "id": "C09",
+      "status": "NOT_RUN",
+      "evidence": ["README.md#2026-10-30-阶段记录尚未整体验收：局部证据，不等于该条目完整通过"]
+    },
+    {
+      "id": "C10",
+      "status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "id": "C11",
+      "status": "NOT_RUN",
+      "evidence": [
+        "README.md#W3-会话事件归属核验尚未完成-W3：事件与当前会话/Host turn 的局部回执核验；完整客户端与重启回读未完成"
+      ]
+    },
+    {
+      "id": "C12",
+      "status": "NOT_RUN",
+      "evidence": [
+        "README.md#W3-取消终态与迭代器清理纵向切片尚未完成-W3：局部终态/清理证据，整条未完成",
+        "README.md#W3-已知未停止的旧执行阻止新准入尚未完成-W3：现有规范执行记录的同用户/线程/成员发送前保护；非完整跨绑定或真实重启证明"
+      ]
+    },
+    {
+      "id": "C13",
+      "status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "id": "C14",
+      "status": "NOT_RUN",
+      "evidence": ["README.md#W2-L0-冻结输入切片W2-尚未完成：局部契约证据和明确失败，非整条通过"]
+    },
+    {
+      "id": "C15",
+      "status": "NOT_RUN",
+      "evidence": [
+        "README.md#W2-实现-generation-准入切片尚未完成-W2：正式准入期间注册/服务代次变更409及下一调用新代次；跨owner重解析与会话兼容仍未完成",
+        "README.md#W2-账号与启动策略读后核验切片尚未完成-W2：消费投影变化409与无关元数据控制项；非完整跨owner一致性",
+        "README.md#W2-后续成员出队服务刷新切片尚未完成-W2：真实串行路由保留活动服务、后续成员新服务/最新不可用原因；非全发布协议",
+        "README.md#W2-CodexACP-构建-client-身份切片尚未完成-W2：两个构建来源、包装器与真实factory消费错配409；其余客户端及全owner协议未完成",
+        "README.md#W2-配置冲突的有界准入重解析切片尚未完成-W2：正式串并行一次重解析与模型不重发；持续变化明确冲突",
+        "README.md#W2-线程工作区与偏好读后核验切片尚未完成-W2：真实ThreadStore写入冲突、其他成员对照与路由重解析后实际cwd/effort消费；非全owner协议",
+        "README.md#W2-ACP-成员改选账号的准入匹配尚未完成-W2：明确账号改选/取消绑定不进入旧池，新factory匹配当前来源；非完整启动协议"
+      ]
+    },
+    {
+      "id": "C16",
+      "status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "id": "C17",
+      "status": "NOT_RUN",
+      "evidence": [
+        "README.md#2026-10-30-阶段记录尚未整体验收：局部证据，不等于该条目完整通过",
+        "README.md#s1-写入前置条件收尾：S1 局部证据，仍非 C17 全量通过"
+      ]
+    },
+    {
+      "id": "C18",
+      "status": "NOT_RUN",
+      "evidence": ["README.md#2026-10-30-阶段记录尚未整体验收：局部证据，不等于该条目完整通过"]
+    },
+    {
+      "id": "C19",
+      "status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "id": "C20",
+      "status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "id": "C21",
+      "status": "NOT_RUN",
+      "evidence": [
+        "codeagent-mock.md：严格样本、非法顶层字段、显式坏引用及注册/停用的 mock 局部证据；正式发现和完整成员引用旅程尚未验收"
+      ]
+    },
+    {
+      "id": "C22",
+      "status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "id": "C23",
+      "status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "id": "C24",
+      "status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "id": "C25",
+      "status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "id": "C26",
+      "status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "id": "E01",
+      "status": "NOT_RUN",
+      "evidence": ["README.md#2026-10-30-阶段记录尚未整体验收：局部证据，不等于该条目完整通过"]
+    },
+    {
+      "id": "E02",
+      "status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "id": "E03",
+      "status": "NOT_RUN",
+      "evidence": ["README.md#2026-10-30-阶段记录尚未整体验收：局部证据，不等于该条目完整通过"]
+    },
+    {
+      "id": "E04",
+      "status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "id": "Q01",
+      "status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "id": "Q02",
+      "status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "id": "Q03",
+      "status": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "id": "Q04",
+      "status": "NOT_RUN",
+      "evidence": []
+    }
+  ],
+  "workPackages": [
+    {
+      "id": "W0",
+      "status": "IN_PROGRESS"
+    },
+    {
+      "id": "W1",
+      "status": "IN_PROGRESS"
+    },
+    {
+      "id": "W2",
+      "status": "IN_PROGRESS"
+    },
+    {
+      "id": "W3",
+      "status": "IN_PROGRESS"
+    },
+    {
+      "id": "W4",
+      "status": "NOT_STARTED"
+    },
+    {
+      "id": "W5",
+      "status": "IN_PROGRESS"
+    },
+    {
+      "id": "W6",
+      "status": "IN_PROGRESS"
+    },
+    {
+      "id": "W7",
+      "status": "NOT_STARTED"
+    }
+  ],
+  "lastProgressAt": "2026-10-29T23:46:57Z",
+  "cancelBroadcastCheckpointReview": {
+    "verdict": "approved",
+    "lastReviewedHead": "43376b8bc22d81ef663aa0bcf418ff5e64f6c205",
+    "lastVerdict": "approved",
+    "findings": [],
+    "evidence": "README.md#W3-取消请求广播与前端消费尚未完成-W3",
+    "tests": {
+      "red": "1 PASS + 2 FAIL",
+      "recoveryRed": "1 PASS + 1 FAIL",
+      "api": "161 PASS",
+      "ownedTerminalAssertions": "40 PASS",
+      "web": "19 PASS",
+      "webRecoveryRed": "2 PASS + 3 FAIL",
+      "webRecovery": "131 PASS",
+      "actualApiWebReplay": "Independent witness updated for existing idle teardown: error notification required, no idle badge required"
+    },
+    "scope": "Request projection and real existing consumers only; native unknown recovery and complete C12 remain incomplete",
+    "closedFindings": [
+      "P2 background sibling loading cleared by a single recovered child",
+      "P2 failed recovery done.errorCode projects success in current/background consumers",
+      "P2 confirmed-gone REST recovery lost its terminal projection"
+    ],
+    "independentTests": "34 PASS"
+  },
+  "cancelQuiescenceCheckpointReview": {
+    "verdict": "approved",
+    "originalReviewedHead": "cbb5124c2d48f888ebfb02127081c8f27ba9de25",
+    "originalVerdict": "changes_requested",
+    "closedFindings": [
+      "P2 next-path cleanup failure clears active",
+      "P2 unstarted concurrent return/next leaves permanent busy",
+      "P2 background sibling loading cleared by a single recovered child",
+      "P2 failed recovery done.errorCode projects success in current/background consumers",
+      "P2 confirmed-gone REST recovery lost its terminal projection"
+    ],
+    "lastReviewedHead": "43376b8bc22d81ef663aa0bcf418ff5e64f6c205",
+    "lastVerdict": "approved",
+    "findings": [],
+    "evidence": "README.md#W3-取消终态与迭代器清理纵向切片尚未完成-W3",
+    "tests": {
+      "red": "5 FAIL",
+      "reviewRed": "7 PASS + 2 FAIL",
+      "contracts": "197 PASS",
+      "authorReplay": "5 PASS",
+      "webRecoveryRed": "2 PASS + 3 FAIL",
+      "webRecovery": "131 PASS",
+      "actualApiWebReplay": "Independent witness updated for existing idle teardown: error notification required, no idle badge required"
+    },
+    "scope": "Existing bridge/ACP iterator and terminal boundary; native unknown recovery/transport terminal/full C12 remain incomplete",
+    "independentTests": "34 PASS"
+  },
+  "nativeRetirementCheckpointReview": {
+    "verdict": "approved",
+    "evidence": "README.md#W3-单飞-ACP-物理退休等待尚未完成-W3",
+    "tests": {
+      "red": "1 FAIL",
+      "regression": "65 PASS",
+      "finalNativeAndConcurrentRelease": "2 PASS"
+    },
+    "scope": "Owned single-flight retirement only; multiplex unknown/Host route timeout/full C12 remain incomplete",
+    "reviewedHead": "096223f30379b97db4a3bd4ad4c53eb33696ebf0",
+    "independentTests": "57 PASS",
+    "findings": []
+  },
+  "routeCancellationCheckpointReview": {
+    "verdict": "approved",
+    "evidence": "README.md#W3-Host-路由等待-adapter-取消清理尚未完成-W3",
+    "tests": {
+      "red": "4 FAIL",
+      "realRouting": "6 PASS inside 203 contract PASS",
+      "legacyRegression": "46 PASS",
+      "reviewRed": "1 PASS + 2 FAIL",
+      "reviewReplay": "8 PASS",
+      "finalRegression": "91 PASS",
+      "finalContracts": "208 PASS",
+      "ownedMerge": "2 PASS"
+    },
+    "scope": "Successful owned ACP stop through serial/parallel and mixed legacy sibling; unknown/restart/multiplex/full C12 remain incomplete",
+    "lastReviewedHead": "0c7bd2f86ce4231513301b519ea0a66802af86ba",
+    "lastVerdict": "approved",
+    "findings": [],
+    "remainingWitness": "cancel-routing-failure-records-red.log: 2 FAIL, native alive but child/R canceled and providerTeardownAt written; full C12 incomplete",
+    "reviewedHead": "0c7bd2f86ce4231513301b519ea0a66802af86ba",
+    "closedFindings": [
+      "P2 parallel consumer return does not await drain child cleanup",
+      "P2 per-cat signal masks batch abort for drain execution"
+    ],
+    "independentTests": "44 PASS"
+  },
+  "unknownRestartCheckpointReview": {
+    "verdict": "approved",
+    "evidence": "README.md#W3-启动恢复保留未确认停止的执行尚未完成-W3",
+    "tests": {
+      "red": "2 FAIL",
+      "regression": "27 PASS"
+    },
+    "scope": "Existing tracked-started/no-teardown record restart guard only; Redis test is controlled read boundary, live close failure/native owner recovery/full C12 incomplete",
+    "reviewedHead": "32911e9fa34e708238d32b01de229617208c9968",
+    "independentTests": "29 PASS",
+    "findings": []
+  },
+  "acpCloseProofCheckpointReview": {
+    "verdict": "approved",
+    "reviewedHead": "d695edeeda86e5d5178f039f19bc19af1374b8ec",
+    "independentTests": "60 PASS",
+    "findings": [],
+    "evidence": "README.md#W3-ACP-error-与真实-exit-区分尚未完成-W3",
+    "tests": {
+      "red": "1 PASS + 1 FAIL",
+      "targeted": "13 PASS",
+      "regression": "55 PASS"
+    },
+    "scope": "Existing client error/exit boundary only; native-tree stop, cross-process recovery, live close failure/full C12 incomplete"
+  },
+  "unconfirmedLifecycleCheckpointReview": {
+    "verdict": "approved",
+    "reviewedHead": "341e3da42d6b0ca8370239fa5383563a41bd5de9",
+    "independentTests": "29 PASS, no failures or skips",
+    "findings": [],
+    "lastReviewedHead": "341e3da42d6b0ca8370239fa5383563a41bd5de9",
+    "lastVerdict": "approved",
+    "closedByReviewer": [
+      "P2 explicit start rejection misclassified as unknown teardown",
+      "P2 batch abort swallows a confirmed healthy sibling terminal",
+      "P2 serial consumer return cleanup failure masked by final safety-net done"
+    ],
+    "additionalClosedFindings": [
+      "P2 signal acknowledgement mistaken for native stop proof",
+      "P2 late identity publication during the final OS read"
+    ],
+    "evidence": "README.md#W3-live-停止未确认贯通现有执行与队列尚未完成-W3",
+    "tests": {
+      "producerRed": "2 FAIL with nativeAliveAtTerminal=true and false providerTeardownAt",
+      "queueRed": "2 FAIL",
+      "finalNativeAndQueue": "6 PASS",
+      "queueRegression": "226 PASS",
+      "ownerRegression": "24 PASS",
+      "contractsBeforeQueueChange": "212 PASS"
+    },
+    "scope": "Existing Bridge/invoker/routes/Queue negative teardown fact only; exact recovery, durable native owner, manual/reaper terminal writers and full C12 remain incomplete"
+  },
+  "teardownWriterCheckpointReview": {
+    "verdict": "approved",
+    "lastReviewedHead": "341e3da42d6b0ca8370239fa5383563a41bd5de9",
+    "lastVerdict": "approved",
+    "independentPreviousTests": "92 PASS + 1 Redis reaper SKIP; new signal proof counterexample 1 FAIL",
+    "independentPreviousLateIdentityTests": "44 PASS + 3 FAIL; same late root/sibling manifest P2, no OS process created",
+    "independentLatestTests": "29 PASS, no failures or skips",
+    "closedByReviewer": ["P2 a same-scope identity published during the final OS read was not observed"],
+    "findings": [],
+    "evidence": "README.md#W3-停止证明约束现有终态写入与恢复尚未完成-W3",
+    "tests": {
+      "ownerRed": "2 PASS + 7 FAIL",
+      "realRedisRed": "1 PASS + 5 FAIL",
+      "regression": "389 PASS + 1 Redis reaper SKIP",
+      "realRedis": "6 PASS",
+      "independentCounterexampleReplay": "10 PASS"
+    },
+    "signalProofFix": {
+      "tests": "104 PASS + 2 existing platform SKIP; 1 unchanged POSIX-only socket test explicitly excluded on Windows",
+      "evidence": "README.md#W3-信号确认与已知进程停止证明分开尚未完成-W3"
+    },
+    "scope": "Existing memory/atomic Redis writer, controlled stop commit, empty-snapshot recovery and existing exact-exit reaper only; durable native owner/resource recovery, cross-platform/package and full C12 incomplete"
+  },
+  "httpstreamCloseProofCheckpointReview": {
+    "verdict": "approved",
+    "reviewedHead": "341e3da42d6b0ca8370239fa5383563a41bd5de9",
+    "evidence": "README.md#W3-信号确认与已知进程停止证明分开尚未完成-W3",
+    "tests": "2 PASS + 1 FAIL RED; targeted HTTP/stdio client and retirement regression included in signalProofFix",
+    "scope": "HTTP transport error versus actual carrier exit only; no OS/native-tree/platform certification"
+  },
+  "acpLaunchEnvironmentCheckpointReview": {
+    "verdict": "approved",
+    "reviewedHead": "a55db0e62a8f9fdb0250c91ed2ba7868236ebbde",
+    "independentTests": "26 PASS, no failures or skips",
+    "findings": [],
+    "evidence": "README.md#W2-ACP-基础进程环境冻结尚未完成-W2",
+    "tests": {
+      "red": "2 FAIL at actual spawn boundary",
+      "factoryAndAccount": "43 PASS",
+      "contractsAndClients": "344 PASS"
+    },
+    "scope": "Existing factory-owned sanitized base environment and private process-pool fingerprint only; command/shim selection, discovery/probe, CA file contents, persisted references and full W2 incomplete"
+  },
+  "acpLaunchCommandCheckpointReview": {
+    "verdict": "approved",
+    "reviewedHead": "871990137cdd5da27c10d15b64a64d19fe0e5a10",
+    "subject": "task:01a1881e-1a7b-78d0-9a62-ff99b0ab7a01/checkpoint-acp-launch-command",
+    "previousReviewedHead": "18cf7c4b6bf5bb94fb68ea27f9bacf17ee2f290d",
+    "previousVerdict": "changes_requested",
+    "closedByReviewer": [
+      "P2 initial startup audit and selected executable use different shim-cache generations",
+      "P2 shell:true lets Node re-read live ComSpec at spawn"
+    ],
+    "findings": [],
+    "independentTests": "20 PASS + 2 existing conditional SKIP; two argv-equivalence replays cover the same cases and are not counted again",
+    "evidence": "README.md#W2-ACP-选定程序与-Windows-shim-冻结尚未完成-W2",
+    "tests": {
+      "red": "2 FAIL for stale next selection; 2 FAIL for admitted selection after normal shared-cache invalidation",
+      "targeted": "45 PASS + 6 existing platform SKIP",
+      "windowsShim": "2 PASS",
+      "wholePlanSelectionFinal": "71 PASS after consolidating each client's single prepared-plan fallback",
+      "regression": "362 PASS, no failures or skips",
+      "auditShellRed": "4 FAIL",
+      "auditShellFixed": "17 PASS",
+      "startupPolicy": "77 PASS + 5 existing platform SKIP",
+      "auditShellRegression": "366 PASS, no failures or skips"
+    },
+    "scope": "Existing ACP factory selected executable/argv/shell only; same-path executable contents/version, discovery/probe unification, CA contents, persisted refs and full C23/W2 remain incomplete"
+  },
+  "catalogPublicationCheckpointReview": {
+    "reviewer": "checkpoint_review",
+    "verdict": "approved",
+    "reviewedHead": "1ef2f234401e51cdc8cc7697dbc5a8af33948983",
+    "subject": "task:01a1881e-1a7b-78d0-9a62-ff99b0ab7a01/checkpoint-catalog-publication",
+    "findings": [],
+    "independentTests": "42 PASS",
+    "evidence": "README.md#W2-已发布成员目录来源核验尚未完成-W2",
+    "tests": { "red": "2 PASS + 4 FAIL", "regression": "176 PASS" },
+    "scope": "Startup/reconciliation catalog publication proof; complete W2 and performance acceptance remain incomplete"
+  },
+  "reviewSamplesCheckpointReview": {
+    "reviewer": "checkpoint_review",
+    "verdict": "approved",
+    "reviewedHead": "4c91c38852737620d90ac941b0d955d6b8e2c5aa",
+    "subject": "task:01a1881e-1a7b-78d0-9a62-ff99b0ab7a01/checkpoint-review-samples",
+    "findings": [],
+    "independentTests": "9 PASS including 514 additional ASCII equivalence inputs",
+    "evidence": "quality-review-samples/README.md",
+    "calibrationTests": "4 PASS",
+    "scope": "Fixed Q02 material preparation; real candidate blind reviews remain NOT_RUN"
+  },
+  "pluginMcpCurrentnessCheckpointReview": {
+    "reviewer": "checkpoint_review",
+    "verdict": "approved",
+    "reviewedHead": "d886018ea4f2320f4fca4a553686cde181c93da4",
+    "subject": "task:01a1881e-1a7b-78d0-9a62-ff99b0ab7a01/checkpoint-plugin-mcp-currentness",
+    "findings": [],
+    "independentTests": "31 PASS",
+    "evidence": "README.md#W2-本地插件-MCP-激活准入核验尚未完成-W2",
+    "tests": { "red": "2 PASS + 4 FAIL", "green": "49 PASS", "consumers": "52 PASS" },
+    "scope": "Existing local activation views only; ordinary publication and full W2 remain incomplete"
+  },
+  "persistedPluginMcpCurrentnessCheckpointReview": {
+    "reviewer": "checkpoint_review",
+    "verdict": "approved",
+    "reviewedHead": "f7c628e836625d6ebadd76b5ead9988ebe6ac705",
+    "subject": "task:01a1881e-1a7b-78d0-9a62-ff99b0ab7a01/checkpoint-persisted-plugin-mcp-currentness",
+    "findings": [],
+    "independentTests": "31 PASS, no failures or skips",
+    "tests": { "red": "3 PASS + 3 FAIL", "targeted": "49 PASS", "regression": "237 PASS" },
+    "evidence": "README.md#W2-普通部署插件-MCP-激活冻结尚未完成-W2",
+    "scope": "Existing persistent and isolated Host activation views only; no full C05/C15/C20 or W2 acceptance"
+  },
+  "codeagentDeclarationMockCheckpointReview": {
+    "reviewer": "checkpoint_review",
+    "verdict": "approved",
+    "reviewedHead": "c99d7259159ed34d46a65991c6b5efb4f3efe857",
+    "subject": "task:01a1881e-1a7b-78d0-9a62-ff99b0ab7a01/checkpoint-codeagent-declaration-mock",
+    "findings": [],
+    "independentTests": "49 PASS, no failures or skips",
+    "tests": { "targeted": "54 PASS", "contractsAndMock": "228 PASS" },
+    "evidence": "codeagent-mock.md",
+    "scope": "Mock strict contribution and manual Host registration journey only; no discovery, enterprise, strong identity, quality or full E03 acceptance"
+  },
+  "sessionEventIdentityCheckpointReview": {
+    "verdict": "approved",
+    "reviewedHead": "1a780d4f54027ee9746879796bc5baad826fae4a",
+    "subject": "task:01a1881e-1a7b-78d0-9a62-ff99b0ab7a01/checkpoint-session-event-identity",
+    "previousReviewedHead": "9e215d214aee33c7d42c547ad611fd3ed5be659a",
+    "previousVerdict": "changes_requested",
+    "closedByReviewer": ["P2 provider-returned Host invocationId replaced the event fence"],
+    "findings": [],
+    "independentTests": "Shared collection 59 PASS + 1 prior-provider-admission failure; event identity cases pass, not double counted as another collection",
+    "evidence": "README.md#W3-会话事件归属核验尚未完成-W3",
+    "tests": {
+      "red": "1 PASS + 4 FAIL",
+      "contractsAndAppendRecovery": "351 PASS",
+      "hostAuthorityRed": "5 PASS + 2 FAIL",
+      "privateAuthorityRed": "1 PASS + 1 FAIL",
+      "combinedRegressionBeforePrivateAuthorityRefinement": "385 PASS",
+      "finalTargeted": "74 PASS"
+    },
+    "scope": "Existing Bridge event consumer only; no full C11/C24 or persisted compatibility/restart acceptance"
+  },
+  "priorProviderAdmissionCheckpointReview": {
+    "verdict": "approved",
+    "reviewedHead": "eb0f9383e4269002f98cd3b68ab289f01ad8942c",
+    "subject": "task:01a1881e-1a7b-78d0-9a62-ff99b0ab7a01/checkpoint-prior-provider-admission",
+    "previousReviewedHead": "1a780d4f54027ee9746879796bc5baad826fae4a",
+    "previousVerdict": "changes_requested",
+    "closedByReviewer": ["P2 creating an async owner read after cancellation leaves its rejection unobserved"],
+    "findings": [],
+    "independentTests": "19 PASS, no failures or skips",
+    "evidence": "README.md#W3-已知未停止的旧执行阻止新准入尚未完成-W3",
+    "tests": {
+      "red": "5 PASS + 3 FAIL",
+      "combinedRegression": "385 PASS",
+      "finalTargeted": "74 PASS",
+      "strictProcessCancelRed": "1 PASS + 1 FAIL; real child exits 1",
+      "cancelFixTargeted": "99 PASS, no failures or skips"
+    },
+    "scope": "Existing canonical running-child read and ordinary same-conversation admission only; no cross-thread binding registry, process identity recovery or full C12/C16"
+  },
+  "staticIdentityPrefixCheckpointReview": {
+    "verdict": "approved",
+    "reviewedHead": "022526e2b16915c0b474dfd183b771eb89fca68a",
+    "subject": "task:01a1881e-1a7b-78d0-9a62-ff99b0ab7a01/checkpoint-static-identity-prefix",
+    "previousReviewedHead": "c4d5f2dbaf63623caa4946c0ac0b307efb869382",
+    "previousVerdict": "changes_requested",
+    "closedByReviewer": [
+      "P2 a failed/cancelled different prefix left the previous successful prefix evidence usable",
+      "P2 an unaccepted session_init borrowed the prior resume coordinate for new prefix evidence"
+    ],
+    "findings": [],
+    "independentTests": "23 PASS, no failures or skips",
+    "independentBeforeFix": "15 PASS + 3 FAIL; two findings, no duplicate counting",
+    "evidence": "README.md#W3-静态身份前缀按实际正文与片段复用尚未完成-W3",
+    "tests": {
+      "initialRed": "1 PASS + 4 FAIL after correcting the registry reload fixture",
+      "segmentRed": "1 FAIL",
+      "compressionRed": "1 FAIL at the fourth turn after supplying the production capacity snapshot contract",
+      "finalFocused": "8 PASS",
+      "portableInvocationOwner": "181 PASS; four Windows AGY Native cases explicitly excluded, not counted as PASS",
+      "contractsBgResumeTimeout": "252 PASS",
+      "requestAudit": "15 PASS",
+      "reviewCounterexampleRed": "3 FAIL",
+      "reviewFixIdentityAndAudit": "26 PASS",
+      "reviewFixWarmOwner": "22 PASS",
+      "reviewFixContracts": "252 PASS"
+    },
+    "scope": "Existing process-local Host message-prefix cache only; not PersonaDigest, native InstructionDigest, versioned CompatKey, durable adopted identity or full C06/C07/C10"
+  },
+  "hostExecutionBoundaryCheckpointReview": {
+    "reviewer": "checkpoint_review",
+    "verdict": "approved",
+    "reviewedHead": "0cf338afa2c8e270501cec47e0863b66e7ff15fb",
+    "subject": "task:01a1881e-1a7b-78d0-9a62-ff99b0ab7a01/checkpoint-host-execution-boundary",
+    "acceptedSourceRef": "C:/Users/Administrator/Desktop/猫猫咖啡馆/技术方案/综合重构方案-20261029/重构技术方案.md",
+    "acceptedRevision": "sha256:ba844e3a7030827d61deffe1c69424d631eae507f2423bcb414c4fb4f5be22c2",
+    "findings": [],
+    "independentTests": "55 PASS; no model, Agent, Redis or resident service",
+    "authorTests": "19 PASS + 6 default Redis skips; route redaction 43 PASS",
+    "evidence": "packages/api/artifacts/role-agent-checkpoint-review/execution-boundary-0cf-final.log",
+    "scope": "Host execution boundary projection and resume fence only; not full CompatKey, native adoption, state-root proof, credential revision, W3/W4 or complete C/E/Q acceptance"
+  },
+  "hostExecutionBoundaryFollowOnReview": {
+    "reviewer": "checkpoint_review",
+    "verdict": "approved",
+    "reviewedHead": "5d4be68b7b1f2df2a7e4211b37d4b1b0ca2a99ef",
+    "subject": "task:01a1881e-1a7b-78d0-9a62-ff99b0ab7a01/checkpoint-host-execution-boundary",
+    "acceptedSourceRef": "C:/Users/Administrator/Desktop/猫猫咖啡馆/技术方案/综合重构方案-20261029/重构技术方案.md",
+    "acceptedRevision": "sha256:ba844e3a7030827d61deffe1c69424d631eae507f2423bcb414c4fb4f5be22c2",
+    "findings": [],
+    "independentTests": "17 PASS, no failures or skips",
+    "authorTests": "60 PASS; state-root focused 21 PASS + 6 existing Redis skips",
+    "evidence": "README.md#W3-Host-执行边界持久化",
+    "scope": "Codex verified state roots and private Host boundary audit references; not full CompatKey, native adoption, credential revision, W3/W4 or complete C/E/Q acceptance"
+  },
+  "clientMcpCurrentnessCheckpointReview": {
+    "reviewer": "checkpoint_review",
+    "verdict": "approved",
+    "reviewedHead": "be51e64613ce84a7b3ffee0e287e1ffcd0eb56f1",
+    "subject": "task:01a1881e-1a7b-78d0-9a62-ff99b0ab7a01/checkpoint-client-mcp-currentness",
+    "findings": [],
+    "independentTests": "34 PASS",
+    "evidence": "README.md#W2-客户端-MCP-文件版本核验尚未完成-W2",
+    "tests": { "red": "9 FAIL", "green": "9 PASS", "regression": "152 PASS" },
+    "scope": "Client MCP file reads only; complete C05/C15 and W2 remain NOT_RUN/IN_PROGRESS"
+  },
+  "checkpointReview": {
+    "reviewer": "checkpoint_review",
+    "verdict": "approved",
+    "target": "b5e517d0c3c3ec909a6509ec6c14558f10d4e5a3",
+    "evidence": "README.md#独立审查第一轮",
+    "closedFindings": [
+      "P2 identity provenance winner mismatch",
+      "P2 unknown PATCH reconciliation loses revert intent",
+      "P2 legacy versionless draft cannot recover from 428",
+      "P2 queued S2 save recreates an orphan after member deletion"
+    ]
+  },
+  "l0CheckpointReview": {
+    "reviewer": "checkpoint_review",
+    "verdict": "approved",
+    "reviewedHead": "ab03ccacb5274ec9b1e6fcd48855f54088c5664f",
+    "subject": "task:01a1881e-1a7b-78d0-9a62-ff99b0ab7a01/checkpoint-l0",
+    "fixes": "independently_verified",
+    "findings": [],
+    "evidence": "README.md#L0-独立审查修复"
+  },
+  "preferencesCheckpointReview": {
+    "reviewer": "checkpoint_review",
+    "verdict": "approved",
+    "reviewedHead": "155d932501dbbba29686b24cf0c45b0e52926f2e",
+    "subject": "task:01a1881e-1a7b-78d0-9a62-ff99b0ab7a01/checkpoint-preferences",
+    "findings": [],
+    "evidence": "README.md#W2-模型与-effort-消费切片尚未完成-W2"
+  },
+  "threadPreferencesCheckpointReview": {
+    "reviewer": "checkpoint_review",
+    "verdict": "approved",
+    "reviewedHead": "87beb72db4b11ad061314ab9e85b8db053f5a3b9",
+    "subject": "task:01a1881e-1a7b-78d0-9a62-ff99b0ab7a01/checkpoint-thread-preferences",
+    "fixes": "independently_verified",
+    "findings": [],
+    "evidence": "README.md#W2-线程偏好消费切片尚未完成-W2"
+  },
+  "codexPolicyCheckpointReview": {
+    "reviewer": "checkpoint_review",
+    "verdict": "approved",
+    "reviewedHead": "fa1a82a14b209cf7c20fe625c73d40c3b6019221",
+    "subject": "task:01a1881e-1a7b-78d0-9a62-ff99b0ab7a01/checkpoint-codex-policy",
+    "findings": [],
+    "evidence": "README.md#W2-Codex-全局启动策略切片尚未完成-W2"
+  },
+  "acpMcpCheckpointReview": {
+    "reviewer": "checkpoint_review",
+    "verdict": "approved",
+    "reviewedHead": "8f852771c1e4aeca4dd6a27675c02466254325cb",
+    "subject": "task:01a1881e-1a7b-78d0-9a62-ff99b0ab7a01/checkpoint-acp-mcp",
+    "findings": [],
+    "evidence": "README.md#W2-ACP-MCP-计划消费切片尚未完成-W2"
+  },
+  "claudeMcpCheckpointReview": {
+    "reviewer": "checkpoint_review",
+    "verdict": "approved",
+    "reviewedHead": "e241747ae71c202b7846c3516651014fea6aa299",
+    "subject": "task:01a1881e-1a7b-78d0-9a62-ff99b0ab7a01/checkpoint-claude-mcp",
+    "findings": [],
+    "evidence": "README.md#W2-Claude-原生-MCP-消费切片尚未完成-W2"
+  },
+  "accountEnvironmentCheckpointReview": {
+    "reviewer": "checkpoint_review",
+    "verdict": "approved",
+    "reviewedHead": "6c34051ee463c9dfc7b8e1cb7c1aa0bd2579378d",
+    "subject": "task:01a1881e-1a7b-78d0-9a62-ff99b0ab7a01/checkpoint-account-environment",
+    "findings": [],
+    "evidence": "README.md#W2-配置捕获与账号环境顺序切片尚未完成-W2"
+  },
+  "kimiMcpCheckpointReview": {
+    "reviewer": "checkpoint_review",
+    "verdict": "approved",
+    "reviewedHead": "5b7d3297d7819bab827fa85a1b2f88c0f53e64d7",
+    "subject": "task:01a1881e-1a7b-78d0-9a62-ff99b0ab7a01/checkpoint-kimi-mcp",
+    "closedFindings": [
+      "P2 missing own denial for a native __proto__ server in the actual Kimi 2.2 loader",
+      "P2 optional nested MCP file upgraded to a strict admission gate"
+    ],
+    "findings": [],
+    "evidence": "README.md#W2-Kimi-原生-MCP-消费切片尚未完成-W2"
+  },
+  "openCodeMcpCheckpointReview": {
+    "reviewer": "checkpoint_review",
+    "verdict": "approved",
+    "reviewedHead": "0df53ed32d973f7698b161f9c7b110eaadd7c666",
+    "subject": "task:01a1881e-1a7b-78d0-9a62-ff99b0ab7a01/checkpoint-opencode-mcp",
+    "findings": [],
+    "evidence": "README.md#W2-OpenCode-Host-MCP-消费切片尚未完成-W2"
+  },
+  "codexMcpCheckpointReview": {
+    "reviewer": "checkpoint_review",
+    "verdict": "approved",
+    "reviewedHead": "136528bcb27dc52c547f5fe52e766eed08d2ae35",
+    "subject": "task:01a1881e-1a7b-78d0-9a62-ff99b0ab7a01/checkpoint-codex-mcp",
+    "closedFindings": ["P2 serial Live admission omitted the first member's Live port"],
+    "findings": [],
+    "evidence": "README.md#W2-Codex-MCP-输入消费切片尚未完成-W2"
+  },
+  "sharedMcpCheckpointReview": {
+    "reviewer": "checkpoint_review",
+    "verdict": "approved",
+    "reviewedHead": "8f3e191c303e18283604c4d5f960a331b87de3af",
+    "subject": "task:01a1881e-1a7b-78d0-9a62-ff99b0ab7a01/checkpoint-shared-mcp",
+    "findings": [],
+    "evidence": "README.md#W2-Host-shared-MCP-上下文消费切片尚未完成-W2"
+  },
+  "capabilityNotificationCheckpointReview": {
+    "reviewer": "checkpoint_review",
+    "verdict": "approved",
+    "reviewedHead": "52ad776284536bd8eaa93d847e271d478d51c604",
+    "subject": "task:01a1881e-1a7b-78d0-9a62-ff99b0ab7a01/checkpoint-capability-notification",
+    "findings": [],
+    "remainingBoundary": "scripts/sync-skills.sh direct cross-process writer is not yet notified; no capabilities revision/cache switch is certified",
+    "evidence": "README.md#W2-capabilities-写入通知切片尚未完成-W2"
+  },
+  "implementationGenerationCheckpointReview": {
+    "reviewer": "checkpoint_review",
+    "verdict": "approved",
+    "reviewedHead": "236dc8756b1ed17a02a54e18e21a7fc122df58a0",
+    "subject": "task:01a1881e-1a7b-78d0-9a62-ff99b0ab7a01/checkpoint-implementation-generation",
+    "findings": [],
+    "evidence": "README.md#W2-实现-generation-准入切片尚未完成-W2"
+  },
+  "accountCurrentnessCheckpointReview": {
+    "reviewer": "checkpoint_review",
+    "verdict": "approved",
+    "reviewedHead": "cd81df15458fa51a00835ffdf018d42007b0b40d",
+    "subject": "task:01a1881e-1a7b-78d0-9a62-ff99b0ab7a01/checkpoint-account-currentness",
+    "findings": [],
+    "evidence": "README.md#W2-账号与启动策略读后核验切片尚未完成-W2"
+  },
+  "mcpCurrentnessCheckpointReview": {
+    "reviewer": "checkpoint_review",
+    "verdict": "approved",
+    "reviewedHead": "4456f3882acaeda8f7ee8fe60aa3e7cf7022c19a",
+    "subject": "task:01a1881e-1a7b-78d0-9a62-ff99b0ab7a01/checkpoint-mcp-currentness",
+    "findings": [],
+    "evidence": "README.md#W2-正式-MCP-文件版本核验尚未完成-W2"
+  },
+  "acpCatalogSourceCheckpointReview": {
+    "reviewer": "checkpoint_review",
+    "verdict": "approved",
+    "reviewedHead": "145bb8cd4ac1851d78afca033dc9f63d93abffe8",
+    "subject": "task:01a1881e-1a7b-78d0-9a62-ff99b0ab7a01/checkpoint-acp-catalog-source",
+    "findings": [],
+    "evidence": "README.md#W2-目录-ACP-启动配置来源核验尚未完成-W2"
+  },
+  "acpAccountSelectionCheckpointReview": {
+    "reviewer": "checkpoint_review",
+    "verdict": "approved",
+    "reviewedHead": "1f1453ee56de361f2681ae373e0e76d7a561a400",
+    "subject": "task:01a1881e-1a7b-78d0-9a62-ff99b0ab7a01/checkpoint-acp-account-selection",
+    "closedFindings": [
+      "P2 implicit app default and native/unbound share an undefined explicit ref; native whitespace resolves inconsistently"
+    ],
+    "findings": [],
+    "evidence": "README.md#W2-ACP-成员改选账号的准入匹配尚未完成-W2"
+  },
+  "qualitySamplesCheckpointReview": {
+    "reviewer": "checkpoint_review",
+    "verdict": "approved",
+    "reviewedHead": "db76cade55c431228657bbba0efaa5d03d71a770",
+    "subject": "task:01a1881e-1a7b-78d0-9a62-ff99b0ab7a01/checkpoint-quality-samples",
+    "closedFindings": [
+      "P2 view explicit false accepted incorrectly",
+      "P2 inexact adjacent safe cents accepted incorrectly",
+      "P2 execution-time file mutation absent from final scope/hash check",
+      "P2 documented wrapper command uses the wrong child cwd"
+    ],
+    "findings": [],
+    "evidence": "quality-samples.md#判断依据及职责"
+  },
+  "acpAccountSourceCheckpointReview": {
+    "reviewer": "checkpoint_review",
+    "verdict": "approved",
+    "reviewedHead": "48471628a1357a429ee7665aa8f46a9d686b37dc",
+    "subject": "task:01a1881e-1a7b-78d0-9a62-ff99b0ab7a01/checkpoint-acp-account-source",
+    "findings": [],
+    "evidence": "README.md#W2-ACP-构建账号来源核验切片尚未完成-W2"
+  },
+  "threadCurrentnessCheckpointReview": {
+    "reviewer": "checkpoint_review",
+    "verdict": "approved",
+    "reviewedHead": "b808d0232ebb77cce599ee462fe88876155ad384",
+    "subject": "task:01a1881e-1a7b-78d0-9a62-ff99b0ab7a01/checkpoint-thread-currentness",
+    "findings": [],
+    "evidence": "README.md#W2-线程工作区与偏好读后核验切片尚未完成-W2"
+  },
+  "admissionReparseCheckpointReview": {
+    "reviewer": "checkpoint_review",
+    "verdict": "approved",
+    "reviewedHead": "34743bf52d9fd5abaeccbca10b76bfa364100647",
+    "subject": "task:01a1881e-1a7b-78d0-9a62-ff99b0ab7a01/checkpoint-admission-reparse",
+    "findings": [],
+    "evidence": "README.md#W2-配置冲突的有界准入重解析切片尚未完成-W2"
+  },
+  "acpMcpSwitchCheckpointReview": {
+    "reviewer": "checkpoint_review",
+    "verdict": "approved",
+    "reviewedHead": "93f0754491ac937a6c2c3c50e35de75d996d0191",
+    "subject": "task:01a1881e-1a7b-78d0-9a62-ff99b0ab7a01/checkpoint-acp-mcp-switch",
+    "findings": [],
+    "evidence": "README.md#W2-ACP-成员-MCP-开关消费修复尚未完成-W2"
+  },
+  "clientIdentityCheckpointReview": {
+    "reviewer": "checkpoint_review",
+    "verdict": "approved",
+    "reviewedHead": "0700400b913e1a6b1b9a96ec4aa13c88a839f987",
+    "subject": "task:01a1881e-1a7b-78d0-9a62-ff99b0ab7a01/checkpoint-client-identity",
+    "findings": [],
+    "evidence": "README.md#W2-CodexACP-构建-client-身份切片尚未完成-W2"
+  },
+  "routerRefreshCheckpointReview": {
+    "reviewer": "checkpoint_review",
+    "verdict": "approved",
+    "reviewedHead": "da57a4c999b567da651ccf104203c1d268267c2b",
+    "subject": "task:01a1881e-1a7b-78d0-9a62-ff99b0ab7a01/checkpoint-router-refresh",
+    "findings": [],
+    "evidence": "README.md#W2-后续成员出队服务刷新切片尚未完成-W2"
+  }
+}

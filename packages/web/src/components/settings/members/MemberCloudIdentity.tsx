@@ -22,7 +22,7 @@ export function MemberCloudIdentity({
       const res = await apiFetch(`/api/cats/${cat.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ restoreBuiltinCloudIdentity: true }),
+        body: JSON.stringify({ restoreBuiltinCloudIdentity: true, expectedRevision: cat.configurationRevision }),
       });
       const body = (await res.json()) as { cat: CatData; error?: string };
       if (!res.ok) throw new Error(body.error || '恢复失败');

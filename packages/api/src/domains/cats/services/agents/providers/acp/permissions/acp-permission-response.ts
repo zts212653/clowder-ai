@@ -46,7 +46,10 @@ export async function respondToAcpPermission(input: {
     if (input.handler) await input.handler(input.request, respond, { signal: input.signal });
     else
       respond(
-        defaultAcpPermissionResult(input.request.params as unknown as AcpPermissionRequest, input.defaultDecision),
+        defaultAcpPermissionResult(
+          input.request.params as unknown as AcpPermissionRequest,
+          input.defaultDecision ?? 'reject',
+        ),
       );
   } catch (error) {
     if (!responded) {

@@ -5,6 +5,7 @@ import { buildClaudeEnvOverrides } from '../src/domains/cats/services/agents/pro
 import { ClaudeInteractivePtyCarrierService } from '../src/domains/cats/services/agents/providers/ClaudeInteractivePtyCarrierService.js';
 import { prepareClaudeSdkLaunch } from '../src/domains/cats/services/agents/providers/claude-sdk-launch.js';
 import type { AgentServiceOptions } from '../src/domains/cats/services/types.js';
+import { claudeSdkRuntimeFixture } from './helpers/claude-sdk-runtime-fixture.js';
 import { fakeL0Compiler } from './helpers/fake-l0-compiler.js';
 
 const callbackEnv = {
@@ -74,6 +75,7 @@ test('SDK launch and resume carry native capacity without recycling the effectiv
       },
     };
     const prepared = await prepareClaudeSdkLaunch({
+      runtime: claudeSdkRuntimeFixture(),
       catId: createCatId('opus'),
       model: 'glm-5.3-flash',
       prompt: 'fixture',
@@ -85,6 +87,7 @@ test('SDK launch and resume carry native capacity without recycling the effectiv
     assert.equal(prepared.sdkOptions.env?.CLAUDE_CODE_MAX_CONTEXT_TOKENS, native ? '1000000' : undefined);
   }
   const prepared = await prepareClaudeSdkLaunch({
+    runtime: claudeSdkRuntimeFixture(),
     catId: createCatId('opus'),
     model: 'glm-5.3-flash',
     prompt: 'fixture',

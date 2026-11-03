@@ -4,6 +4,7 @@ import type { SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import { createCatId } from '@cat-cafe/shared';
 import { ClaudeSdkAgentService } from '../src/domains/cats/services/agents/providers/ClaudeSdkAgentService.js';
 import type { AgentClientActiveRunDispatcher, AgentServiceOptions } from '../src/domains/cats/services/types.js';
+import { claudeSdkRuntimeFixture } from './helpers/claude-sdk-runtime-fixture.js';
 
 const task = { task_id: 'child', task_type: 'local_agent', description: 'research' };
 const watcher = { task_id: 'watcher', task_type: 'local_bash', description: 'watch', ambient: true };
@@ -39,6 +40,7 @@ function fixture(
 ) {
   let closes = 0;
   const service = new ClaudeSdkAgentService({
+    runtimeResolver: claudeSdkRuntimeFixture,
     catId: createCatId('opus'),
     model: 'claude-opus-4-6',
     mcpServerPath: '',

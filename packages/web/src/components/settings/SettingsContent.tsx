@@ -155,7 +155,10 @@ export function SettingsContent({ section, initialEditCatId }: SettingsContentPr
         const res = await apiFetch(`/api/cats/${cat.id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ available: cat.roster?.available === false }),
+          body: JSON.stringify({
+            available: cat.roster?.available === false,
+            expectedRevision: cat.configurationRevision,
+          }),
         });
         if (!res.ok) {
           const payload = (await res.json().catch(() => ({}))) as Record<string, unknown>;
@@ -183,7 +186,11 @@ export function SettingsContent({ section, initialEditCatId }: SettingsContentPr
       if (!ok) return false;
       setFetchError(null);
       try {
-        const res = await apiFetch(`/api/cats/${cat.id}`, { method: 'DELETE' });
+        const res = await apiFetch(`/api/cats/${cat.id}`, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ expectedRevision: cat.configurationRevision }),
+        });
         if (!res.ok) {
           const payload = (await res.json().catch(() => ({}))) as Record<string, unknown>;
           setFetchError((payload.error as string) ?? `删除失败 (${res.status})`);
