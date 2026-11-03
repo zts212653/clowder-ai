@@ -56,3 +56,29 @@ it('preserves vendor patterns, placeholder/fence policy and one finding per line
   assert.deepEqual(SecretScanner.scan('token = YOUR_AbCdEfGhIjKlMnOpQrStUvWxYz1234567890', 'x.md'), []);
   assert.equal(SecretScanner.scan(strong.map(([, token]) => token).join(' '), 'x.md').length, 1);
 });
+
+it('blocks reviewed cmd and TypeScript assignments through the real collection gate', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'issue1784-assignment-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const store = new SqliteEvidenceStore(':memory:');
+  await store.initialize();
+  t.after(() => store.close());
+  const manifest = { id: 'probe', root, reviewPolicy: { authorityCeiling: 'validated' } };
+  const builder = new CollectionIndexBuilder(store, manifest, new FlatScanner('probe'));
+  const value = 'Kj8sLq2mNp9Rt4vWx7YzAbCdEfGhIjKlMnOpQrSt';
+  for (const assignment of [
+    `SET API_TOKEN=${value}`,
+    `set "API_TOKEN=${value}"`,
+    `cfg . apiToken = "${value}"`,
+    `const API_TOKEN: (string | undefined) = "${value}"`,
+  ]) {
+    writeFileSync(join(root, 'credentials.md'), '# Clean');
+    assert.equal((await builder.rebuild()).indexed, 1);
+    writeFileSync(join(root, 'credentials.md'), assignment);
+    const result = await builder.rebuild();
+    assert.equal(result.blocked, true, assignment.split(value)[0]);
+    assert.equal(result.indexed, 0);
+    assert.equal(result.secretFindings[0]?.file, 'credentials.md');
+    assert.equal(await store.getByAnchor('probe:doc/credentials'), null);
+  }
+});

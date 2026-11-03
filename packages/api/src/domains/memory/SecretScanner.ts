@@ -45,7 +45,10 @@ const DECLARATION_MODIFIERS = new Set([
  * Prose such as "correlation key = ..." has two targets without a declaration/assignment.
  */
 function hasCredentialAssignment(line: string): boolean {
-  const text = line.replace(/^[\s>*+\-•#|]*(?:\d+[.)]\s+|\[[ xX]\]\s+)*/, '');
+  const text = line
+    .replace(/^[\s>*+\-•#|]*(?:\d+[.)]\s+|\[[ xX]\]\s+)*/, '')
+    // cmd quotes the entire NAME=value, unlike quotes belonging to a shell RHS.
+    .replace(/(^|[;|])(\s*set\s+)"([^"\r\n]*)"(?=\s*(?:$|[;|]))/gi, '$1$2$3');
   const tokens =
     /"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\\.|(?:\[[\w.]+\])?\$(?:\{[\w:.-]+\}|[\w:.-]+)|[\w.-]+:[\w.-]+(?=\s*=)|[\w.-]+|[^\s]/g;
   const valuePrefix = /\s*["']?/y;
@@ -129,7 +132,7 @@ function hasCredentialAssignment(line: string): boolean {
       continue;
     }
     if (word === ';' || word === ',' || word === '{' || word === '}' || word === '|' || word === '(' || word === ')') {
-      if (annotation && word === '|') continue;
+      if (annotation && (word === '|' || word === '(' || word === ')')) continue;
       target = '';
       validPrefix = true;
       declaration = false;
@@ -145,7 +148,12 @@ function hasCredentialAssignment(line: string): boolean {
       if (!/^[\w$<>&|.,?[\]]+$/.test(word)) annotation.validPrefix = false;
       continue;
     }
-    if (DECLARATION_MODIFIERS.has(word) || (declaration && /^--?[A-Za-z][\w-]*$/.test(word))) {
+    // Whitespace around a member dot does not start a second prose target.
+    if (target && (target.endsWith('.') || word.startsWith('.'))) {
+      target = word;
+      continue;
+    }
+    if (DECLARATION_MODIFIERS.has(word) || /^set$/i.test(word) || (declaration && /^--?[A-Za-z][\w-]*$/.test(word))) {
       if (target) validPrefix = false;
       declaration = true;
       continue;

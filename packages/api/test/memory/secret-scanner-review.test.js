@@ -7,6 +7,13 @@ import { SecretScanner } from '../../dist/domains/memory/SecretScanner.js';
 
 const value = 'Kj8sLq2mNp9Rt4vWx7YzAbCdEfGhIjKlMnOpQrSt';
 const assignments = [
+  // zts212653, #1784 review 5740204118 / discussion_r4445240560.
+  ...['SET', 'Set', 'set'].flatMap((command) => [`${command} API_TOKEN=${value}`, `${command} "API_TOKEN=${value}"`]),
+  ...['cfg . apiToken', 'cfg. apiToken', 'cfg .apiToken', 'cfg . nested . apiToken'].map(
+    (target) => `${target} = "${value}"`,
+  ),
+  ...['(string | undefined)', '((string & Brand) | undefined)'].map((type) => `const API_TOKEN: ${type} = "${value}"`),
+  `set "description=short"; SET "API_TOKEN=${value}"`,
   `FOO="hello world" API_TOKEN="${value}"`,
   ...['/tmp/path', 'abc/def', 'https://example.com', 'hello\\ world'].map(
     (prefix) => `FOO=${prefix} API_TOKEN="${value}"`,
@@ -46,6 +53,8 @@ it('does not borrow a value from another assignment or a URL', () => {
     'export API_TOKEN = ',
     `api_key = short; description = "${value}"`,
     `api_key: https://example.com/docs/credentials?description=${value}`,
+    `SET "description=${value}"`,
+    `set "API_TOKEN=short"; SET "description=${value}"`,
   ]) {
     assert.deepEqual(SecretScanner.scan(line, 'fixture.md'), []);
   }
@@ -79,5 +88,11 @@ it('bounds the historical long-line attack through SecretScanner.scan', { timeou
   assert.equal(SecretScanner.scan(`${'key='.repeat(25_000)}${value}`, 'x.md').length, 1);
   assert.equal(SecretScanner.scan(`key=xxxkey=token=${value}`, 'x.md').length, 1);
   assert.deepEqual(SecretScanner.scan(`token=${value}xxxx`, 'x.md'), []);
+  assert.deepEqual(SecretScanner.scan(`SET "${'xkeyx'.repeat(100_000)}: short`, 'x.md'), []);
+  assert.equal(SecretScanner.scan(`SET "${'xkeyx'.repeat(100_000)}: short; token=${value}`, 'x.md').length, 1);
+  assert.equal(
+    SecretScanner.scan(`const API_TOKEN: ${'('.repeat(50_000)}string${')'.repeat(50_000)} = "${value}"`, 'x.md').length,
+    1,
+  );
   assert.ok(performance.now() - start < 1500, 'two million-character lines must finish within 1.5s');
 });
