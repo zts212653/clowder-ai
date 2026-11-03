@@ -260,6 +260,11 @@ jobs:
         env:
           NODE_ENV: test
           REDIS_URL: redis://127.0.0.1:0
+      - name: Memory repository boundary regressions
+        run: >-
+          node --test --test-timeout=15000
+          packages/api/test/memory/flat-scanner-boundaries.test.js
+          packages/api/test/memory/structured-scanner.test.js
       - name: Windows-relevant tests
         run: |
           node --test packages/api/test/cli-spawn-win.test.js
