@@ -22,6 +22,8 @@ const mutations = [
   'codex -c model="fixture" login',
   'codex --config label="--help" login',
   'codex login --config label="--help"',
+  'codex login --experimental_client-id status',
+  'codex login --experimental_issuer status',
   'codex --profile fixture login --device-auth',
   'bash -c "codex login"',
   'pwsh -NoProfile -Command "codex login"',

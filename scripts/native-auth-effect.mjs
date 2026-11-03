@@ -25,6 +25,9 @@ const VALUE_OPTIONS = new Set([
   '-i',
   '--image',
   '--local-provider',
+  '--experimental_issuer',
+  '--experimental_client-id',
+  '--api-key',
 ]);
 
 export const NATIVE_AUTH_DENIAL =

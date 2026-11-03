@@ -30,7 +30,7 @@ node --test scripts/native-auth-boundary.test.mjs scripts/secret-native-hook.tes
 git diff --check
 ```
 
-依赖和 API/MCP 构建通过；后续脚本修改后重新生成包内运行时。认证与防泄密检查最终 71/71 通过。格式检查对本次 JS/MJS/TS 文件运行 `pnpm biome check <files>`，退出 0；现有大函数和有限 argv 解析仍有非阻断复杂度 warning，不把它们说成零 warning。
+依赖和 API/MCP 构建通过；后续脚本修改后重新生成包内运行时。认证与防泄密检查 71/71 通过；随后核源码补入实验性选项值 `status` 的四条 RED → GREEN 反例，最终 75/75。格式检查对本次 JS/MJS/TS 文件运行 `pnpm biome check <files>`，退出 0；现有大函数和有限 argv 解析仍有非阻断复杂度 warning，不把它们说成零 warning。
 
 在 `packages/api` 通过现有 `scripts/with-test-home.mjs` 隔离 HOME、清除运行环境，并禁用非隔离 Redis：
 
@@ -40,7 +40,7 @@ node scripts/with-test-home.mjs --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 
 node scripts/with-test-home.mjs --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 node --import tsx --import ./test/helpers/setup-cat-registry.js --test test/secret-carrier-launch.test.ts test/claude-scoped-native.test.ts test/claude-sdk-scoped-native.test.ts test/f320-login-lifecycle.test.ts
 ```
 
-CLI 行为断言 1/1 通过；SDK 与纯 fixture 64/64 通过；scoped、原生启动和 manager 生命周期合计 23 条通过。后者使用已有假 driver 和临时 fixture 凭据，不启动真实登录。scoped/member 的现有测试确认 CLI `--tools ''` / SDK `tools: []`，仅保留绑定的插件 MCP 工具，没有原生 Bash 漏口。普通 unknown、touch/write 分类保留，并另有明确断言。
+CLI 行为断言 1/1 通过；SDK 与纯 fixture 64/64 通过，实验性选项值反例加入后 68/68；scoped、原生启动和 manager 生命周期合计 23 条通过。后者使用已有假 driver 和临时 fixture 凭据，不启动真实登录。scoped/member 的现有测试确认 CLI `--tools ''` / SDK `tools: []`，仅保留绑定的插件 MCP 工具，没有原生 Bash 漏口。普通 unknown、touch/write 分类保留，并另有明确断言。
 
 在 `packages/mcp-server`：`node --import tsx --test test/secret-runtime-layout.test.ts`，两种迁移布局均通过。
 
