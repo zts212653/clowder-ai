@@ -104,9 +104,15 @@ const EMPTY_TIMELINE_MESSAGES: readonly ChatMessageType[] = [];
 const SCHEDULER_ACCENT_BADGE_CLASS =
   'inline-flex w-fit items-center gap-1.5 rounded-full border border-conn-amber-ring bg-conn-amber-bg px-2.5 py-1 text-xs font-semibold text-conn-amber-text shadow-sm';
 
+const messageTimeFormatter = new Intl.DateTimeFormat('zh-CN', {
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+});
+
 function formatTime(ts: number): string {
-  const d = new Date(ts);
-  return d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+  return messageTimeFormatter.format(new Date(ts));
 }
 
 const DELIVERED_AT_GAP_THRESHOLD = 5000;
