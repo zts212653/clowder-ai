@@ -90,7 +90,8 @@ export async function contentFileInfo(source: FileActionSource): Promise<Content
   const response = await apiFetch(url);
   if (!response.ok) throw new Error('file_info_unavailable');
   const info: ContentFileInfo = await response.json();
-  if (info.local && (typeof info.path !== 'string' || !info.path.startsWith('/'))) throw new Error('invalid_file_info');
+  if (info.local && (typeof info.path !== 'string' || !/^(?:\/|[a-z]:[/\\]|\\\\[^/\\]+[/\\][^/\\]+)/i.test(info.path)))
+    throw new Error('invalid_file_info');
   return info;
 }
 export async function runContentFileAction(source: FileActionSource, action: 'reveal' | 'open') {
