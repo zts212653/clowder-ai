@@ -36,6 +36,16 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @cat-cafe/shared build
       - run: pnpm --filter @cat-cafe/api build
+      - name: Windows multi-plugin ACP catalog and cancelled editor requests
+        run: |
+          pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs node --import tsx --test --test-timeout=60000 test/agent-client-catalog-static-read.test.ts test/agent-client-catalog-configuration.test.ts test/plugin-icon-static-read.test.ts
+          pnpm --filter @cat-cafe/web exec vitest run src/hooks/__tests__/useAgentClientLibraries-lifecycle.test.tsx src/utils/__tests__/api-client-get-coordination.test.ts src/utils/__tests__/api-client-timeout.test.ts
+      - name: Host media paths with native Windows filesystem semantics
+        run: >-
+          pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs
+          --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1
+          node --import ./test/helpers/setup-cat-registry.js --test --test-timeout=60000
+          test/host-media-paths.test.js
       - name: DSH packaged secret guard admission
         run: >-
           pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs
@@ -243,6 +253,11 @@ jobs:
         env:
           NODE_ENV: test
           REDIS_URL: redis://127.0.0.1:0
+      - name: Memory repository boundary regressions
+        run: >-
+          node --test --test-timeout=15000
+          packages/api/test/memory/flat-scanner-boundaries.test.js
+          packages/api/test/memory/structured-scanner.test.js
       - name: Windows-relevant tests
         run: |
           node --test packages/api/test/cli-spawn-win.test.js
