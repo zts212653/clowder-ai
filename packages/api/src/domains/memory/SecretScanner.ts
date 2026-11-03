@@ -48,7 +48,7 @@ function hasCredentialAssignment(line: string): boolean {
   const text = line
     .replace(/^[\s>*+\-•#|]*(?:\d+[.)]\s+|\[[ xX]\]\s+)*/, '')
     // cmd quotes the entire NAME=value, unlike quotes belonging to a shell RHS.
-    .replace(/(^|[;|])(\s*set\s+)"([^"\r\n]*)"(?=\s*(?:$|[;|]))/gi, '$1$2$3');
+    .replace(/(^|[;&|()])(\s*set\s+)"([^"\r\n]*)"(?=\s*(?:$|[;&|()]))/gi, '$1$2$3');
   const tokens =
     /"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\\.|(?:\[[\w.]+\])?\$(?:\{[\w:.-]+\}|[\w:.-]+)|[\w.-]+:[\w.-]+(?=\s*=)|[\w.-]+|[^\s]/g;
   const valuePrefix = /\s*["']?/y;
@@ -57,6 +57,7 @@ function hasCredentialAssignment(line: string): boolean {
   let validPrefix = true;
   let declaration = false;
   let annotation: { target: string; validPrefix: boolean } | undefined;
+  let annotationDepth = 0;
   let inValue = false;
   let valueStarted = false;
   let valueDepth = 0;
@@ -82,6 +83,22 @@ function hasCredentialAssignment(line: string): boolean {
       if (word === '(' || word === '[') valueDepth++;
       if (word === ')' || word === ']') valueDepth = Math.max(0, valueDepth - 1);
       valueStarted = true;
+    }
+    if (annotation) {
+      // Generic/tuple/function type punctuation belongs to the captured declaration.
+      if (word === '<' || word === '(' || word === '[') {
+        annotationDepth++;
+        continue;
+      }
+      if (annotationDepth > 0 && (word === '>' || word === ')' || word === ']')) {
+        annotationDepth--;
+        continue;
+      }
+      if (annotationDepth > 0 && (word === ',' || word === ':')) continue;
+      if (word === '=' && text[tokens.lastIndex] === '>') {
+        tokens.lastIndex++;
+        continue;
+      }
     }
     if (word === ':' || word === '=') {
       if (annotation && word === ':') {
@@ -119,6 +136,7 @@ function hasCredentialAssignment(line: string): boolean {
         if (length >= 32 && lastPlaceholder < start && shannonEntropy(counts, length) > 3.5) return true;
       }
       if (word === ':' && valueStart === tokens.lastIndex) {
+        if (!annotation) annotationDepth = 0;
         annotation ??= assignment;
       } else {
         tokens.lastIndex = valueStart;
@@ -131,8 +149,17 @@ function hasCredentialAssignment(line: string): boolean {
       }
       continue;
     }
-    if (word === ';' || word === ',' || word === '{' || word === '}' || word === '|' || word === '(' || word === ')') {
-      if (annotation && (word === '|' || word === '(' || word === ')')) continue;
+    if (
+      word === ';' ||
+      word === ',' ||
+      word === '{' ||
+      word === '}' ||
+      word === '|' ||
+      word === '&' ||
+      word === '(' ||
+      word === ')'
+    ) {
+      if (annotation && (word === '|' || word === '&' || word === '(' || word === ')')) continue;
       target = '';
       validPrefix = true;
       declaration = false;

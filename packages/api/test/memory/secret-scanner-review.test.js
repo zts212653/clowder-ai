@@ -7,6 +7,18 @@ import { SecretScanner } from '../../dist/domains/memory/SecretScanner.js';
 
 const value = 'Kj8sLq2mNp9Rt4vWx7YzAbCdEfGhIjKlMnOpQrSt';
 const assignments = [
+  // zts212653, #1784 review 5746137352: cmd boundaries and TS type context.
+  `set "API_TOKEN=${value}" && echo ready`,
+  `set "API_TOKEN=${value}" & echo ready`,
+  `echo ready && SET "API_TOKEN=${value}"`,
+  `echo ready & SET "API_TOKEN=${value}"`,
+  `(SET "API_TOKEN=${value}")`,
+  ...[
+    'string | Record<string, unknown>',
+    'string | (() => string)',
+    'Record<string, Record<string, unknown>> | string',
+    'string | ((input: string) => string)',
+  ].map((type) => `const API_TOKEN: ${type} = "${value}"`),
   // zts212653, #1784 review 5740204118 / discussion_r4445240560.
   ...['SET', 'Set', 'set'].flatMap((command) => [`${command} API_TOKEN=${value}`, `${command} "API_TOKEN=${value}"`]),
   ...['cfg . apiToken', 'cfg. apiToken', 'cfg .apiToken', 'cfg . nested . apiToken'].map(

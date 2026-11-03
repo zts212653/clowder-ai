@@ -71,6 +71,9 @@ it('blocks reviewed cmd and TypeScript assignments through the real collection g
     `set "API_TOKEN=${value}"`,
     `cfg . apiToken = "${value}"`,
     `const API_TOKEN: (string | undefined) = "${value}"`,
+    `set "API_TOKEN=${value}" && echo ready`,
+    `const API_TOKEN: string | Record<string, unknown> = "${value}"`,
+    `const API_TOKEN: string | (() => string) = "${value}"`,
   ]) {
     writeFileSync(join(root, 'credentials.md'), '# Clean');
     assert.equal((await builder.rebuild()).indexed, 1);
