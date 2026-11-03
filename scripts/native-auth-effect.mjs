@@ -25,6 +25,8 @@ const VALUE_OPTIONS = new Set([
   '-i',
   '--image',
   '--local-provider',
+  '--remote',
+  '--remote-auth-token-env',
   '--experimental_issuer',
   '--experimental_client-id',
   '--api-key',
