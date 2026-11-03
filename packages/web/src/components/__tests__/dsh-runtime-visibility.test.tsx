@@ -1,0 +1,124 @@
+import { act } from 'react';
+import { createRoot } from 'react-dom/client';
+import { expect, it, vi } from 'vitest';
+import { apiFetch } from '@/utils/api-client';
+import { initialState } from '../hub-cat-editor.model';
+import { MemberRuntimeFields } from '../settings/members/MemberRuntimeFields';
+import { useRuntimeCatalog } from '../settings/members/useRuntimeCatalog';
+
+vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
+Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+
+it('allows a slow ACP catalog to finish, ends a failed refresh and permits retry', async () => {
+  const pending: Array<{ resolve(value: Response): void; reject(reason: Error): void }> = [];
+  vi.mocked(apiFetch).mockImplementation(() => new Promise((resolve, reject) => pending.push({ resolve, reject })));
+  const host = document.createElement('div');
+  const root = createRoot(host);
+  function Catalog({ refresh = 0 }) {
+    return <output>{JSON.stringify(useRuntimeCatalog('acp:dsh', 'dsh', '', '', refresh))}</output>;
+  }
+  const snapshot = () => JSON.parse(host.textContent || '{}');
+  try {
+    await act(async () => root.render(<Catalog />));
+    expect(vi.mocked(apiFetch).mock.calls[0]?.[2]).toEqual({ mutationTimeoutMs: 60_000 });
+    await act(async () =>
+      pending[0]?.resolve(
+        new Response(
+          JSON.stringify({
+            status: 'live',
+            models: [{ value: 'opaque', label: 'Model' }],
+            defaultModel: 'opaque',
+            defaultModelLabel: 'Custom Gateway / Model',
+            defaultModelStatus: 'reported',
+          }),
+        ),
+      ),
+    );
+    expect(snapshot().loading).toBe(false);
+    await act(async () => root.render(<Catalog refresh={1} />));
+    await act(async () => pending[1]?.reject(new DOMException('Timed out', 'TimeoutError')));
+    expect(snapshot().loading).toBe(false);
+    expect(snapshot().catalog.defaultModel).toBeUndefined();
+    expect(snapshot().catalog.message).toBe('refresh_failed');
+    await act(async () => root.render(<Catalog refresh={2} />));
+    expect(snapshot().loading).toBe(true);
+    await act(async () => pending[2]?.resolve(new Response(JSON.stringify({ status: 'live', models: [] }))));
+    expect(snapshot().loading).toBe(false);
+  } finally {
+    await act(async () => root.unmount());
+    vi.resetAllMocks();
+  }
+});
+
+it('shows the reported ACP route on the inherited model choice without changing the member', async () => {
+  const patch = vi.fn();
+  vi.mocked(apiFetch).mockImplementation(async (path) =>
+    path.endsWith('/dsh-setup/inspect')
+      ? new Response(JSON.stringify({ error: 'dsh_setup_custom_startup' }), { status: 422 })
+      : new Response(
+          JSON.stringify(
+            path === '/api/cats/native-runtimes'
+              ? {
+                  runtimes: [
+                    {
+                      id: 'acp:dsh',
+                      label: 'DSH',
+                      clientId: 'acp',
+                      installed: true,
+                      models: [],
+                      command: 'dsh.cmd',
+                      acp: { command: 'dsh.cmd', startupArgs: ['--profile', 'acp'] },
+                    },
+                  ],
+                }
+              : path === '/api/agent-providers'
+                ? { libraries: [] }
+                : {
+                    status: 'live',
+                    models: [{ value: 'opaque', label: 'Model', group: 'Custom Gateway' }],
+                    defaultModel: 'opaque',
+                    defaultModelLabel: 'Custom Gateway / Model',
+                    defaultModelStatus: 'reported',
+                  },
+          ),
+        ),
+  );
+  const host = document.createElement('div');
+  const root = createRoot(host);
+  try {
+    await act(async () =>
+      root.render(
+        <MemberRuntimeFields
+          form={{
+            ...initialState(),
+            catId: 'dsh',
+            clientId: 'acp',
+            configurationSource: 'native_tool',
+            defaultModel: '',
+            carrier: 'acp',
+            acpCommand: 'dsh.cmd',
+            acpStartupArgs: '--profile acp',
+          }}
+          accounts={[]}
+          patch={patch}
+          t={(zh) => zh}
+          accountHref="/settings?s=accounts"
+          editing
+        />,
+      ),
+    );
+    const model = host.querySelectorAll('[role=combobox]')[0];
+    expect(model?.textContent).toContain('跟随 DSH 设置');
+    await act(async () => (model as HTMLButtonElement).click());
+    expect(host.querySelector('[role=option]')?.textContent).toContain('Custom Gateway / Model');
+    expect(host.textContent).toContain('客户端回报');
+    const inspect = [...host.querySelectorAll('button')].find((button) => button.textContent === '读取 DSH 配置');
+    await act(async () => inspect?.click());
+    expect(host.textContent).toContain('不支持自动复制配置');
+    expect(host.textContent).toContain('客户端回报：Custom Gateway / Model');
+    expect(patch).not.toHaveBeenCalled();
+  } finally {
+    await act(async () => root.unmount());
+    vi.resetAllMocks();
+  }
+});

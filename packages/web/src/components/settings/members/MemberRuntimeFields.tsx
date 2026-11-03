@@ -284,7 +284,7 @@ export function MemberRuntimeFields({
           <p>
             {t(`已读取 ${models.length} 个模型`, `Read ${models.length} models`)}
             {!form.defaultModel && defaultModel
-              ? ` · ${t('配置', 'Configured')}：${defaultModelLabel}${defaultEffort ? ` · ${defaultEffort}` : ''}`
+              ? ` · ${t('客户端回报', 'Reported by client')}：${defaultModelLabel}${defaultEffort ? ` · ${defaultEffort}` : ''}`
               : ''}
           </p>
         ) : (
