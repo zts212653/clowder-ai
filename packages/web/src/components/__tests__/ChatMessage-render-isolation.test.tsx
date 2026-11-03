@@ -73,6 +73,31 @@ describe('ChatMessage render isolation', () => {
     expect(getCatById).toHaveBeenCalledTimes(callsAfterInitialRender);
   });
 
+  it('continues rendering new content on the streaming bubble', () => {
+    const message: ChatMessageData = {
+      id: 'message-streaming',
+      type: 'assistant',
+      from: { kind: 'agent', catId: 'codex-sol' },
+      catId: 'codex-sol',
+      content: 'First streamed token',
+      timestamp: 1,
+      isStreaming: true,
+    };
+    const getCatById = () => undefined;
+    act(() => root.render(<ChatMessage message={message} threadId="thread-render" getCatById={getCatById} />));
+    expect(container.textContent).toContain('First streamed token');
+    act(() =>
+      root.render(
+        <ChatMessage
+          message={{ ...message, content: 'First streamed token followed by the next chunk' }}
+          threadId="thread-render"
+          getCatById={getCatById}
+        />,
+      ),
+    );
+    expect(container.textContent).toContain('First streamed token followed by the next chunk');
+  });
+
   it('keeps a delivered input routing warning attached to its History bubble', () => {
     const message: ChatMessageData = {
       id: 'message-with-routing-warning',
