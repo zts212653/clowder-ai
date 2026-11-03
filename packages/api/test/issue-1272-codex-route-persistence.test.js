@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 const CAT = 'codex';
+const SIGNATURE_SAMPLE = '请使用签名示例：`[砚砚/example-model🐾]`';
 
 function createCodexEventService(
   transformCodexEvent,
@@ -16,11 +17,16 @@ function createCodexEventService(
         canonicalSignature,
       };
       const events = [
+        ...(!canonicalSignature
+          ? [{ type: 'item.completed', item: { type: 'agent_message', text: SIGNATURE_SAMPLE } }]
+          : []),
         ...Array.from({ length: 16 }, (_, index) => ({
           type: 'item.completed',
           item: {
             type: 'agent_message',
-            text: `第 ${index + 1} 段不同进度。 \`[砚砚/gpt-5.6-sol🐾]\``,
+            text: canonicalSignature
+              ? `第 ${index + 1} 段不同进度。 \`[砚砚/gpt-5.6-sol🐾]\``
+              : `第 ${index + 1} 段不同进度。\n\n[砚砚/gpt-5.6-sol🐾]`,
           },
         })),
         { type: 'turn.completed', usage: {} },
@@ -111,9 +117,10 @@ test('#1795: inherited model retains one observed signature in live text and per
   for await (const message of routeSerial(deps, [CAT], '只保留一个签名', 'user-1795', 'thread-1795')) {
     yielded.push(message);
   }
-  const expected = `${Array.from({ length: 16 }, (_, index) => `第 ${index + 1} 段不同进度。`).join(
-    '\n\n',
-  )}\n\n[砚砚/gpt-5.6-sol🐾]`;
+  const expected = `${SIGNATURE_SAMPLE}\n\n${Array.from(
+    { length: 16 },
+    (_, index) => `第 ${index + 1} 段不同进度。`,
+  ).join('\n\n')}\n\n[砚砚/gpt-5.6-sol🐾]`;
   assert.equal(appendCalls.length, 1);
   assert.equal(appendCalls[0].content, expected);
   assert.equal(

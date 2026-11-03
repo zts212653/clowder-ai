@@ -971,6 +971,50 @@ test('#1795: unknown model without a provider signature leaves the body unsigned
   assert.equal(completeAndFinalize(state), null);
 });
 
+[
+  '请使用签名示例：`[砚砚/example-model🐾]`',
+  'Use this format: [砚砚/example-model🐾]',
+  '正文签名样例：[砚砚/example-model🐾]',
+  '- 示例签名：[砚砚/example-model🐾]',
+  '1. [砚砚/example-model🐾]',
+  '`[砚砚/example-model🐾]`',
+  '``[砚砚/example-model🐾]``',
+  '- Format:\n  [砚砚/example-model🐾]',
+].forEach((sample, index) => {
+  test(`#1795 review P1: inherited model preserves signature sample ${index}`, () => {
+    const state = { hadPriorTextTurn: false, signatureIdentity: '砚砚' };
+    const body = transformCodexEvent(
+      { type: 'item.completed', item: { type: 'agent_message', text: sample } },
+      CAT,
+      state,
+    );
+    assert.equal(body?.content, sample);
+    assert.equal(state.observedSignature, undefined);
+    assert.equal(completeAndFinalize(state), null);
+  });
+});
+
+test('#1795 review P1: real standalone alias/catId tail survives beside signature samples', () => {
+  const state = {
+    hadPriorTextTurn: false,
+    signatureIdentity: '砚砚',
+    signatureIdentityAliases: ['缅因猫'],
+  };
+  const sample = '请使用签名示例：`[砚砚/example-model🐾]`';
+  const signature = '[缅因猫/GPT-6🐾@codex]';
+  const body = transformCodexEvent(
+    { type: 'item.completed', item: { type: 'agent_message', text: `${sample}\n\n${signature}` } },
+    CAT,
+    state,
+  );
+  assert.equal(body?.content, sample);
+  assert.equal(state.observedSignature, signature);
+  const suffix = completeAndFinalize(state);
+  assert.equal(suffix?.content, `\n\n${signature}`);
+  assert.equal(suffix?.hostOutput?.basis, 'provider_observed_fallback');
+  assert.equal(finalizeCodexStream(state, CAT), null);
+});
+
 test('#1272 review P1: multiple completed turns keep the canonical signature at the real stream end', () => {
   const state = {
     hadPriorTextTurn: false,

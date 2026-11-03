@@ -196,8 +196,8 @@ function isMarkdownSignatureSampleContext(text: string, candidateIndex: number):
 
 /**
  * Remove this cat's terminal signature from one complete Codex `agent_message`.
- * A known runtime model must match; an inherited model uses the provider's own
- * signature. Quoted/fenced examples and teammate signatures remain content.
+ * A known runtime model must match; an inherited model requires a bare signature
+ * on its own unindented line. Quoted/fenced examples and teammate signatures remain content.
  */
 function stripOwnTrailingTurnSignature(
   text: string,
@@ -230,6 +230,11 @@ function stripOwnTrailingTurnSignature(
 
   if (isMarkdownSignatureSampleContext(text, match.index) || isInsideFencedCode(text, match.index)) {
     return { content: text };
+  }
+
+  if (!canonicalSignature) {
+    const lineStart = text.lastIndexOf('\n', Math.max(0, match.index - 1)) + 1;
+    if (match.index !== lineStart || match[0].trimEnd() !== match[1]) return { content: text };
   }
 
   return {
