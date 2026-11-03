@@ -69,6 +69,8 @@ CLI 负责浏览器和 OAuth；Clowder 负责账户目录、启动官方命令�
 
 本轮已完成 carrier、stdio、真实 managed probe 与策略拒绝样本。Windows 路径按 [OpenAI 官方托管配置文档](https://learn.chatgpt.com/docs/enterprise/managed-configuration) 与 0.161.0 原生 layers 核对：系统 config/requirements 位于 `%ProgramData%/OpenAI/Codex`，legacy managed 配置跟随 Codex home。默认本机 home、父进程选择的原生 home 与当前私有 home 都检查 legacy 策略；有策略时沿用既有拒绝契约，不擅自迁移或绕过。
 
+系统 `config.toml` 是可由用户/profile 覆盖的默认配置，不等同于 requirements 或 legacy managed 策略，见 [官方默认值说明](https://learn.chatgpt.com/docs/enterprise/roll-out-a-gateway#distribute-defaults-and-requirements)。保留与 macOS 一致的处理：读取并合成普通系统默认值，在 driver 打开终端之前验证有效 OAuth 配置；API-only、外部端点/提供方、无效 TOML 均拒绝。不能因存在一个普通系统默认文件就一律禁止新增账户。
+
 协作核验中曾临时写入真实 ProgramData 的探针配置，随后已还原，作者独立确认对应目录恢复不存在；该方法不符合后续的本机隔离要求，不再使用，也不能算隔离验收。实现回归只把测试子进程的 ProgramData 指向临时目录，未改用户环境或真实系统配置。
 
 ### 4.2 平台准入与 capability probe

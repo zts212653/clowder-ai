@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { readCodexLaunchProjection } from '../src/config/codex-launch-config.js';
+import { createCodexTerminalLoginDriver } from '../src/config/codex-login-driver.js';
 import { assertCodexManagedPlatformSupport } from '../src/config/codex-managed-support.js';
 
 for (const source of ['native-managed', 'attempt-managed', 'system-requirements']) {
@@ -68,3 +69,50 @@ test(
     }
   },
 );
+
+for (const [setting, expected] of [
+  ['forced_login_method="api"', /codex_oauth_configuration_conflict:forced_login_method/],
+  ['openai_base_url="https://fixture.invalid/v1"', /codex_oauth_configuration_conflict:openai_base_url/],
+  ['model_provider="foreign"', /codex_oauth_configuration_conflict:model_provider/],
+  ['invalid = [', /codex_account_config_invalid/],
+] as const) {
+  test(
+    `Windows driver rejects incompatible system defaults before terminal startup (${setting})`,
+    { skip: process.platform !== 'win32' },
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), 'f320-system-login-'));
+      const savedProgramData = process.env.ProgramData;
+      process.env.ProgramData = join(root, 'program-data');
+      const system = join(process.env.ProgramData, 'OpenAI', 'Codex');
+      mkdirSync(system, { recursive: true });
+      writeFileSync(join(system, 'config.toml'), setting);
+      let opened = false;
+      const driver = createCodexTerminalLoginDriver({
+        command: process.execPath,
+        assertSupport: () => {},
+        openTerminal: async () => {
+          opened = true;
+          throw new Error('fixture-must-not-open');
+        },
+      });
+      try {
+        await assert.rejects(
+          driver.run({
+            home: join(root, 'attempt', 'home'),
+            cwd: root,
+            signal: new AbortController().signal,
+            onReady: () => {},
+          }),
+          expected,
+        );
+        assert.equal(opened, false);
+        assert.equal(existsSync(join(root, 'attempt', 'terminal-request.json')), false);
+        assert.equal(existsSync(join(root, 'attempt', 'home', 'auth.json')), false);
+      } finally {
+        if (savedProgramData === undefined) delete process.env.ProgramData;
+        else process.env.ProgramData = savedProgramData;
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
+}

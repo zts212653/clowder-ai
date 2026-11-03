@@ -44,6 +44,14 @@ node scripts/run-with-node-env-test.mjs node node_modules/vitest/vitest.mjs run 
 - Biome：所改文件无 error；保留原有复杂度和非空断言警告，driver 的状态等待与平台分支也有复杂度 warning。未用关闭规则隐藏。
 - `git diff --check`：通过。
 
+## 独立审查提出的系统 config 边界
+
+Review 对 `344e25d2` 提出：普通系统 `config.toml` 未与 requirements/managed 文件一起按“存在即拒绝”处理，可能绕过策略。作者核对后保留不同处理：官方将该文件定义为可覆盖的系统默认值；原有 macOS 路径同样读取系统默认值、仅对 managed/requirements/MDM 整层拒绝。
+
+追加实际 driver 边界回归，未修改生产实现。以临时 ProgramData 写入 API-only、外部 base URL、外部 provider、无效 TOML 四种系统配置，四项全部在打开终端之前被现有有效配置校验拒绝；`terminal-request.json` 与私有 `auth.json` 均未创建。支持检查用 fixture 隔离，验证的是“准入后、启动登录前”的实际安全边界，不能将该测试表述为完整原生准入测试。
+
+命令：`node scripts/with-test-home.mjs --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 node --import tsx --test test/f320-windows-policy.test.ts`，结果 8 项通过，其中 4 项为追加边界证据。完整 managed 原生准入另由前述 opt-in 测量覆盖。该意见的最终采纳/撤回以独立 reviewer 的 exact-HEAD 回执为准。
+
 ## 扩大检查中的既有失败
 
 `test/f320-state-admission.test.ts` 在本分支出现 6 项失败。用同一 Windows 环境、同一隔离命令，在干净基线 `6c2021d494b7fe0f7a5423868709d4ae99c097ed` 的独立 checkout 复现相同 6 项失败，未改测试或产品源码：
