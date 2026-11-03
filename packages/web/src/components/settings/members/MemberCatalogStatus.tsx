@@ -4,6 +4,7 @@ import type { MemberCatalog } from './useRuntimeCatalog';
 
 export function MemberCatalogStatus({
   catalog,
+  notImplemented = false,
   loading,
   needsLogin,
   invalidDefault,
@@ -13,6 +14,7 @@ export function MemberCatalogStatus({
   t,
 }: {
   catalog: MemberCatalog | null;
+  notImplemented?: boolean;
   loading: boolean;
   needsLogin: boolean;
   invalidDefault: boolean;
@@ -21,6 +23,15 @@ export function MemberCatalogStatus({
   modelCount: number;
   t: MemberText;
 }) {
+  if (notImplemented)
+    return (
+      <p>
+        {t(
+          '此入口尚未接入模型与思考强度读取；已保留手动设置。',
+          'Model and effort reading is not implemented for this entry; manual settings are preserved.',
+        )}
+      </p>
+    );
   if (needsLogin)
     return (
       <p>

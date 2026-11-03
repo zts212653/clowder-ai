@@ -17,7 +17,7 @@ export function discoverAdditionalRuntimes(
       value: model.alias,
       label: model.alias,
       defaultEffort: model.defaultEffort,
-      efforts: model.efforts?.map((value) => ({ value, label: value })),
+      efforts: (model.efforts ?? []).map((value) => ({ value, label: value })),
     })) ?? [];
   const native = [
     {

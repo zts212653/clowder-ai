@@ -76,41 +76,46 @@ async function probeClaude(target: CatalogTarget): Promise<RuntimeModelCatalog> 
   }
   let session: ReturnType<typeof sdkQuery> | undefined;
   try {
-    const runtime = await captureClaudeSdkRuntime(target.command, controller.signal);
     const { query, resolveSettings } = await import('@anthropic-ai/claude-agent-sdk');
-    if (controller.signal.aborted) throw new Error('Model discovery cancelled before SDK query startup');
-    session = query({
-      prompt: noPrompts(),
-      options: {
-        cwd: target.cwd,
-        ...(await claudeSdkRuntimeOptions(
-          runtime,
-          buildChildEnv(undefined, { workingDirectory: target.cwd }),
-          controller.signal,
-        )),
-        abortController: controller,
-        settingSources: ['user', 'project', 'local'],
-        tools: [],
-        mcpServers: {},
-        strictMcpConfig: true,
-        persistSession: false,
-        permissionMode: 'plan',
-      },
-    });
-    const models = parseClaudeModels(await session.supportedModels());
-    // The alpha reader may be unavailable while native model discovery still works.
-    // It does not fetch server policy or run policyHelper; keep its source explicit.
-    const settings = controller.signal.aborted
+    // Local settings and model discovery are independent reads under one deadline.
+    // Neither read may discard the successful part of the other.
+    const settingsRead = controller.signal.aborted
       ? undefined
-      : await Promise.race([
+      : Promise.race([
           resolveSettings({ cwd: target.cwd, settingSources: ['user', 'project', 'local'] }).catch(() => undefined),
           new Promise<undefined>((resolve) =>
             controller.signal.addEventListener('abort', () => resolve(undefined), { once: true }),
           ),
         ]);
+    const models = await captureClaudeSdkRuntime(target.command, controller.signal)
+      .then(async (runtime) => {
+        if (controller.signal.aborted) throw new Error('Model discovery cancelled before SDK query startup');
+        session = query({
+          prompt: noPrompts(),
+          options: {
+            cwd: target.cwd,
+            ...(await claudeSdkRuntimeOptions(
+              runtime,
+              buildChildEnv(undefined, { workingDirectory: target.cwd }),
+              controller.signal,
+            )),
+            abortController: controller,
+            settingSources: ['user', 'project', 'local'],
+            tools: [],
+            mcpServers: {},
+            strictMcpConfig: true,
+            persistSession: false,
+            permissionMode: 'plan',
+          },
+        });
+        return parseClaudeModels(await session.supportedModels());
+      })
+      .catch(() => []);
+    const settings = await settingsRead;
     return {
       status: models.length ? 'live' : 'unavailable',
       models,
+      ...(!models.length ? { message: 'discovery_failed' } : {}),
       ...(settings ? claudeConfiguredDefaults(settings.effective, models, target.model) : {}),
     };
   } finally {

@@ -89,6 +89,28 @@ test('ACP keeps effort-only selectors and names opaque provider defaults', () =>
     ['', 'high'],
   );
 });
+
+test('ACP reports an advertised empty model default without changing missing-value semantics', () => {
+  const descriptor = {
+    id: 'model',
+    category: 'model',
+    currentValue: '',
+    options: [
+      { value: '', name: 'Provider default' },
+      { value: 'opaque/custom', name: 'Custom' },
+    ],
+  };
+  const session = { configOptions: [descriptor] };
+  const result = parseAcpCatalog(session, session);
+  assert.equal(result.defaultModelStatus, 'reported');
+  assert.equal(result.defaultModel, '');
+  assert.equal(result.defaultModelLabel, 'Provider default');
+  assert.equal(result.selectedModel, '');
+  const undeclared = { configOptions: [{ ...descriptor, options: descriptor.options.slice(1) }] };
+  assert.equal(parseAcpCatalog(undeclared, undeclared).defaultModelStatus, 'unreported');
+  const absent = { configOptions: [{ ...descriptor, currentValue: undefined }] };
+  assert.equal(parseAcpCatalog(absent, absent).defaultModelStatus, 'unreported');
+});
 test('catalog cache deduplicates, scopes targets and retains last results on failed refresh', async () => {
   let calls = 0,
     fail = false;

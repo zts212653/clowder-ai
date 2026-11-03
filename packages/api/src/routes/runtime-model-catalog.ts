@@ -61,21 +61,25 @@ export function parseAcpCatalog(session: unknown, defaults: unknown, _requested?
   const defaultEffort = text(nativeEffort?.currentValue);
   const selectedEffort = text(effort?.currentValue);
   const legacy = record(record(session).models);
-  const reportedDefault = reportedSessionModel(record(defaults));
-  const defaultChoices = acpOption(defaults, 'model')
-    ? acpChoices(acpOption(defaults, 'model')?.options).map((item) => item.value)
+  const nativeModel = acpOption(defaults, 'model');
+  const nativeModels = acpChoices(nativeModel?.options);
+  const reportedDefault =
+    nativeModel?.currentValue === '' && nativeModels.some((item) => item.value === '')
+      ? ''
+      : reportedSessionModel(record(defaults));
+  const defaultChoices = nativeModel
+    ? nativeModels.map((item) => item.value)
     : rows(record(record(defaults).models).availableModels).flatMap((item) =>
         typeof item.id === 'string' ? [item.id] : [],
       );
-  const defaultModelStatus = !reportedDefault
-    ? 'unreported'
-    : defaultChoices.length && !defaultChoices.includes(reportedDefault)
-      ? 'unavailable'
-      : 'reported';
+  const defaultModelStatus =
+    reportedDefault === undefined
+      ? 'unreported'
+      : defaultChoices.length && !defaultChoices.includes(reportedDefault)
+        ? 'unavailable'
+        : 'reported';
   const defaultModel = defaultModelStatus === 'reported' ? reportedDefault : undefined;
-  const defaultModelLabel = acpChoices(acpOption(defaults, 'model')?.options).find(
-    (item) => item.value === defaultModel,
-  )?.label;
+  const defaultModelLabel = nativeModels.find((item) => item.value === defaultModel)?.label;
   const models = model
     ? acpChoices(model.options)
     : rows(legacy.availableModels).flatMap((item) =>
@@ -91,7 +95,10 @@ export function parseAcpCatalog(session: unknown, defaults: unknown, _requested?
     defaultEffortLabel: acpChoices(nativeEffort?.options).find((item) => item.value === defaultEffort)?.label,
     defaultModelSource: defaultModel !== undefined ? 'client_report' : undefined,
     defaultEffortSource: defaultEffort !== undefined ? 'client_report' : undefined,
-    selectedModel: reportedSessionModel(record(session)),
+    selectedModel:
+      model?.currentValue === '' && models.some((item) => item.value === '')
+        ? ''
+        : reportedSessionModel(record(session)),
     selectedEffort,
     selectedEffortLabel: acpChoices(effort?.options).find((item) => item.value === selectedEffort)?.label,
     selectedEffortSource: selectedEffort !== undefined ? 'client_report' : undefined,

@@ -83,8 +83,9 @@ export function MemberRuntimeFields({
     identity = availableAccounts.find((item) => item.id === form.accountRef);
   const defaultIdentity = usesDefaultNativeIdentity(form);
   const needsLogin = defaultIdentity && selected?.readiness?.status === 'login_required';
+  const catalogNotImplemented = !!(selected?.id.startsWith('draft:') || selected?.id.startsWith('manual:'));
   const { catalog, loading: catalogLoading } = useRuntimeCatalog(
-    needsLogin || selected?.id.startsWith('draft:') || selected?.id.startsWith('manual:') ? undefined : selected?.id,
+    needsLogin || catalogNotImplemented ? undefined : selected?.id,
     editing ? form.catId : undefined,
     form.accountRef,
     form.defaultModel,
@@ -111,7 +112,9 @@ export function MemberRuntimeFields({
   const defaultEffortLabel =
     (usesSelectedEffort ? catalog.selectedEffortLabel : catalog?.defaultEffortLabel) ?? defaultEffort;
   const efforts = catalog?.effortOptions ?? activeModel?.efforts;
+  const tierlessKimi = form.clientId === 'kimi' && efforts?.length === 0;
   const invalidEffort =
+    !tierlessKimi &&
     catalog?.status !== 'unavailable' &&
     catalog?.message !== 'refresh_failed' &&
     efforts !== undefined &&
@@ -242,7 +245,9 @@ export function MemberRuntimeFields({
           options={models}
           onChange={(defaultModel) => patch({ defaultModel })}
           inheritLabel={follow}
-          inheritDetail={defaultModel ? t(`配置：${defaultModelLabel}`, `Configured: ${defaultModelLabel}`) : undefined}
+          inheritDetail={
+            defaultModel !== undefined ? t(`配置：${defaultModelLabel}`, `Configured: ${defaultModelLabel}`) : undefined
+          }
           searchable
           allowCustom
           english={t('zh', 'en') === 'en'}
@@ -269,8 +274,10 @@ export function MemberRuntimeFields({
         <MemberModelSummary
           model={form.defaultModel ? (activeModel?.label ?? form.defaultModel) : defaultModelLabel}
           effort={
-            form.cliEffort ||
-            (catalog?.thinkingEnabled === false ? t('思考已关闭', 'Thinking off') : defaultEffortLabel)
+            tierlessKimi
+              ? undefined
+              : form.cliEffort ||
+                (catalog?.thinkingEnabled === false ? t('思考已关闭', 'Thinking off') : defaultEffortLabel)
           }
           modelSource={
             form.defaultModel
@@ -287,12 +294,14 @@ export function MemberRuntimeFields({
                 : t('本地配置', 'Local configuration')
           }
           unavailable={catalog?.status === 'unavailable'}
+          notImplemented={catalogNotImplemented}
           noEffortOptions={efforts?.length === 0}
           stale={catalog?.message === 'refresh_failed'}
           t={t}
         />
         <MemberCatalogStatus
           catalog={catalog}
+          notImplemented={catalogNotImplemented}
           loading={catalogLoading}
           needsLogin={needsLogin}
           invalidDefault={invalidDefaultModel}
@@ -311,6 +320,14 @@ export function MemberRuntimeFields({
         )}
         {!catalogLoading && efforts?.length === 0 && !form.cliEffort && (
           <p>{t('此模型未提供单独的思考强度选项。', 'This model does not expose a separate effort setting.')}</p>
+        )}
+        {tierlessKimi && form.cliEffort && (
+          <p>
+            {t(
+              `已保留强度偏好 ${form.cliEffort}；此模型不采用独立强度覆盖。`,
+              `Saved effort ${form.cliEffort} is retained; this model does not apply separate effort overrides.`,
+            )}
+          </p>
         )}
         {invalidEffort && (
           <p role="alert" className="text-conn-red-text">
