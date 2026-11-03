@@ -21,6 +21,8 @@ const assignments = [
     '(() => { const localName = "ok"; return localName; })()',
   ].map((initializer) => `const description = ${initializer}, API_TOKEN:string = "${value}";`),
   `const {name} = config, API_TOKEN:string = "${value}";`,
+  `const $API_TOKEN: string = "${value}";`,
+  `const description = "ok", $API_TOKEN:string = "${value}";`,
   `const config = {const: "ok", apiToken: "${value}"};`,
   `const config = {const: {apiToken: "${value}"}};`,
   // zts212653, #1784 discussion_r4450208394: keep the declaration target through its type.

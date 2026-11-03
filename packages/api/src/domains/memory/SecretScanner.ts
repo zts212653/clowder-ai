@@ -81,7 +81,7 @@ function hasCredentialAssignment(line: string): boolean {
     if (word === ';' && declarationDepths.at(-1) === syntaxDepth) declarationDepths.pop();
     if (word === '(' || word === '[' || word === '{') syntaxDepth++;
     // In a JS/TS declaration this colon starts a type, not a shell namespace.
-    if (typedDeclaration && /^[\w.-]+:[\w.-]+$/.test(word)) {
+    if (typedDeclaration && /^[\w$.-]+:[\w$.-]*$/.test(word)) {
       const colon = word.indexOf(':');
       word = word.slice(0, colon);
       tokens.lastIndex = token.index + colon;
