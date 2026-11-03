@@ -1605,7 +1605,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
           userId: guard.userId,
           threadId,
           targetCats: eligibleTargets
-            .filter((target) => target.membershipAtOpen === 'admit')
+            .filter((target) => target.membershipAtOpen === 'admit' && pendingAfter.has(target.targetCatId))
             .map((target) => target.targetCatId as CatId),
           threadStore,
           socketManager,

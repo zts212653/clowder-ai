@@ -29,7 +29,11 @@ test('old game threads remain readable conversations; /game is ordinary queued i
     router: {
       previewTargets: async () => ({ targetCats: [], reason: { kind: 'default_cat' } }),
       async resolveTargetsAndIntent() {
-        return { targetCats: ['opus'], intent: { intent: 'execute', explicit: false, promptTags: [] } };
+        return {
+          targetCats: ['opus'],
+          intent: { intent: 'execute', explicit: false, promptTags: [] },
+          routing_warnings: [],
+        };
       },
       async ackCollectedCursors() {},
     },

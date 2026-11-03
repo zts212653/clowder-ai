@@ -209,7 +209,8 @@ const cases = [
     expected: ['gemini'],
   },
   {
-    name: 'unavailable ordinary mention has the same visible fallback',
+    name: 'unavailable explicitly mentioned provider requires confirmation of the proposed recipient',
+    pluginExpected: ['opus'],
     content: '@opus continue',
     arrange: (f) => {
       f.reply('codex');
@@ -398,7 +399,7 @@ for (const scenario of [
     const entries = f.queue.list(f.thread.id, 'owner');
     assert.equal(entries.length, 1);
     assert.deepEqual(entries[0].targets, expected);
-    assert.deepEqual(entries[0].targets, scenario.expected);
+    assert.deepEqual(entries[0].targets, scenario.pluginExpected ?? scenario.expected);
     assert.equal(entries[0].kind, 'conversation_input');
     // Exercise the real queue drain; substitute only the model invocation boundary.
     const delivered = Promise.withResolvers();
@@ -423,7 +424,14 @@ for (const scenario of [
       socketManager: { emitToUser() {}, broadcastAgentMessage() {}, broadcastToRoom() {} },
       log: { info() {}, warn() {}, error() {} },
     });
-    assert.equal((await processor.processNext(f.thread.id, 'owner')).started, true);
+    const attempt = await processor.processNext(f.thread.id, 'owner');
+    if (scenario.pluginExpected) {
+      assert.equal(attempt.started, false);
+      assert.equal(f.queue.list(f.thread.id, 'owner').length, 0);
+      assert.ok(f.messages.getByThread(f.thread.id).some((row) => row.lifecycle?.reason === 'invalid_explicit_target'));
+      return;
+    }
+    assert.equal(attempt.started, true);
     assert.deepEqual(await delivered.promise, { body: content, targets: scenario.expected });
   });
 }

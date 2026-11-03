@@ -330,6 +330,8 @@ jobs:
         run: |
           echo "commit=$env:GITHUB_SHA" | Tee-Object artifact-identity.txt
           Get-Content artifact-identity.txt
+      - name: Verify frozen runtime input inventory
+        run: node --test desktop/frozen-runtime-inputs.test.js
       - name: Package the API artifact from the source lock
         run: >-
           node desktop/scripts/frozen-runtime-deploy.mjs . ${{ runner.temp }}\clowder-deploy-root api
