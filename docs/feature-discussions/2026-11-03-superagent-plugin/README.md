@@ -83,6 +83,8 @@ Host 的 contract 依赖是 vendored candidate；插件源码另有版本。后�
 
 插件可保存自己的工作关联索引和执行关联，业务状态以 Host Task/Work 为准。避免另建一套 Ticket/Assignment/Needs Me 数据库，然后要求人同步。
 
+落地位置建议：业务插件放在 `clowder-ai-plugins` 独立工位的 `packages/superagent/`，使用现有 SDK 打包；本 Host 工位只承担通用入口、绑定与确实缺失的受控接口。公共 contract/SDK 的变化随插件仓版本发布，不在 Host 私造一份契约。首版可选择现有成员承担协调与执行，不限定 Codex/provider；Bot 外观与原成员身份分开，真实响应和执行来源始终可追溯。
+
 ## 拟议执行链
 
 ```mermaid

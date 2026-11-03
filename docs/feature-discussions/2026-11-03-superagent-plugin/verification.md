@@ -8,7 +8,7 @@ status: synthetic-preview-only
 
 # 体验稿验证与实例台账
 
-本轮交付是源码依据、架构提案和真实 Clowder 壳内的体验稿。插件包、语义判断、真实监听、任务准入、成员执行和恢复均尚未交付。以下记录只证明体验稿及其隔离边界。
+本轮交付是源码依据、架构提案和当前 Web 路由内的原生组件体验稿。插件包、语义判断、真实监听、任务准入、成员执行和恢复均尚未交付。以下记录只证明体验稿及其隔离边界。
 
 ## 工位与样例边界
 
@@ -58,21 +58,21 @@ pnpm --filter @cat-cafe/web exec vitest run src/components/ThreadSidebar/__tests
 | 数据 | 仅工位内合成样例和浏览器本地设计状态，无用户数据副本 |
 | 端口 | 5214；没有另启 API 或 Redis |
 | 托管 | `preview:process`，origin=detached；这只证明当前存活，不承诺跨 invocation 存活 |
-| 活跃记录 | `C:/Users/Administrator/.cat-cafe/preview-processes/a52fa58ab285784d.json` |
-| 日志 | 同目录 `a52fa58ab285784d.log` |
-| 源码 / 浏览器 revision | `00c697cb3400dde46eee3ebffa3d5fba6f3f87a4`；后续仅补验证记录与截图 |
-| 当前 PID | 租约 runner 47592，5214 监听进程 27776；后续以 managed status 与实际监听回读为准 |
-| 租约 | 当前登记到 `2026-11-03T18:03:55.975Z`，到期停止；最新 PID、状态以 managed status 为准 |
+| 活跃记录 | `C:/Users/Administrator/.cat-cafe/preview-processes/33eb55007dce51f6.json` |
+| 日志 | 同目录 `33eb55007dce51f6.log` |
+| 源码 / 浏览器 revision | `59d124ea86b026a48223f197091eceae480f1b2e`；后续仅补验证记录与截图 |
+| 当前 PID | 租约 runner 20248，5214 监听进程 17328；后续以 managed status 与实际监听回读为准 |
+| 租约 | 当前登记到 `2026-11-03T18:17:43.857Z`，到期停止；最新 PID、状态以 managed status 为准 |
 | 保留 | 供用户体验；不自动安装 EXE、创建快捷方式或改在线 runtime |
 
-初次从仓库根目录启动时，Next 未使用 Web 包的 Tailwind 工作目录。该尝试已停止，原 PID 45184 已退出。第二次 5212 实例的 runner 37220 也已停止，canonical status 返回 stopped；5212 已回读无监听。但 Windows managed stop 未完成 cleanup 回执，重复 canonical stop 后仍 unsettled，因此保留 `9bc6535e76fe7cfa.json`、`2bade21c746123d8.json` 诊断，未手改托管记录。完整 AppShell 尝试还暴露合成健康快照字段不足和未提供原生后台服务的问题。最终体验稿改为原生组件组合，移除这些 API 替身；不将最初失败冒充产品缺陷，也不把组件体验稿称为完整 Host 验收。
+初次从仓库根目录启动时，Next 未使用 Web 包的 Tailwind 工作目录。该尝试已停止，原 PID 45184 已退出。第二次 5212 实例的 runner 37220、第三次 5213 实例的 runner 47592 也已停止；5212、5213 已回读无监听。但 Windows managed stop 未完成 cleanup 回执，重复 canonical stop 后仍 unsettled，因此保留 `9bc6535e76fe7cfa.json`、`2bade21c746123d8.json`、`a52fa58ab285784d.json` 诊断，未手改托管记录。当前仅一个 5214 实例运行。完整 AppShell 尝试还暴露合成健康快照字段不足和未提供原生后台服务的问题。最终体验稿改为原生组件组合，移除这些 API 替身；不将最初失败冒充产品缺陷，也不把组件体验稿称为完整 Host 验收。
 
 启动时在工位根目录显式设置以下环境，再使用 managed launcher；不得省略隔离端口：
 
 ```powershell
 $env:NODE_ENV = 'development'
-$env:API_SERVER_PORT = '5214'
-$env:NEXT_PUBLIC_API_URL = 'http://127.0.0.1:5214'
+$env:API_SERVER_PORT = '3214'
+$env:NEXT_PUBLIC_API_URL = 'http://127.0.0.1:3214'
 $env:SUPERAGENT_PREVIEW_FIXTURES = '1'
 $env:REDIS_URL = 'redis://127.0.0.1:6398'
 $env:NEXT_PUBLIC_CAT_CAFE_BUILD_REVISION = (git rev-parse HEAD)
