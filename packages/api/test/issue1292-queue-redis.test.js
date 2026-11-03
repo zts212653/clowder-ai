@@ -117,7 +117,7 @@ for (const format of ['confirmed', 'bundle', 'live']) {
       },
       payload: {
         threadId: h.threadId,
-        content: format === 'bundle' ? '' : '@opus-5 work',
+        content: format === 'bundle' ? '' : format === 'live' ? 'work' : '@opus-5 work',
         idempotencyKey: randomUUID(),
         ...(format === 'bundle'
           ? { messageBundle: bundle }
@@ -154,7 +154,7 @@ for (const format of ['confirmed', 'bundle', 'live']) {
         getRoster()['opus-5'] = { ...getRoster()['opus-5'], available: false, successor: 'codex' };
       }
       assert.equal(response.json().userMessageId, sourceId);
-      assert.deepEqual((await messages.getById(sourceId)).mentions, targets);
+      assert.deepEqual((await messages.getById(sourceId)).mentions, format === 'live' ? [] : targets);
       const expected = stage === 'partial' ? targets.slice(1) : stage === 'retired' ? [] : targets;
       assert.deepEqual(
         (await ledger.list(h.threadId)).flatMap((row) => row.targets),

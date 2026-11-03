@@ -195,40 +195,48 @@ it('Bundle replay rejects a different refs-only carrier even when its summary is
   assert.equal((await h.messages.getByThread(h.threadId, 50, 'owner', { includeQueuedUserMessages: true })).length, 1);
 });
 
-for (const state of ['disabled', 'removed', 'retired']) {
-  it(`Live receipt owns its prose-selected target after it becomes ${state}`, async (t) => {
-    const h = successorFixture(t);
-    const app = await appFor(t, h);
-    const request = {
-      method: 'POST',
-      url: '/api/messages',
-      headers: { 'x-cat-cafe-user': 'owner', 'x-cat-cafe-live-session': 'receipt-call' },
-      payload: { threadId: h.threadId, content: '@opus-5 work', idempotencyKey: randomUUID() },
-    };
-    const first = await app.inject(request);
-    assert.equal(first.statusCode, 202, first.body);
-    const [entry] = await h.ledger.list(h.threadId);
-    if (state === 'retired') {
-      await h.ledger.claim(h.threadId, entry.id, 'retire', 200, 'opus-5');
-      await h.ledger.commit(h.threadId, entry.id, 'retire', 'processing', 201);
-    }
-    getRoster()['opus-5'] = { ...getRoster()['opus-5'], available: false, successor: 'codex' };
-    if (state === 'removed') removeMember('opus-5');
-    const replay = await app.inject(request);
-    assert.equal(replay.statusCode, 202, replay.body);
-    assert.equal(replay.json().userMessageId, first.json().userMessageId);
-    const changedSession = await app.inject({
-      ...request,
-      headers: { ...request.headers, 'x-cat-cafe-live-session': 'other-call' },
+for (const content of ['@opus-5 work', 'work']) {
+  for (const state of ['disabled', 'removed', 'retired']) {
+    it(`Live receipt owns its selected target after it becomes ${state}: ${content}`, async (t) => {
+      const h = successorFixture(t);
+      const app = await appFor(t, h);
+      const request = {
+        method: 'POST',
+        url: '/api/messages',
+        headers: { 'x-cat-cafe-user': 'owner', 'x-cat-cafe-live-session': 'receipt-call' },
+        payload: { threadId: h.threadId, content, idempotencyKey: randomUUID() },
+      };
+      const first = await app.inject(request);
+      assert.equal(first.statusCode, 202, first.body);
+      const [entry] = await h.ledger.list(h.threadId);
+      if (state === 'retired') {
+        await h.ledger.claim(h.threadId, entry.id, 'retire', 200, 'opus-5');
+        await h.ledger.commit(h.threadId, entry.id, 'retire', 'processing', 201);
+      }
+      getRoster()['opus-5'] = { ...getRoster()['opus-5'], available: false, successor: 'codex' };
+      if (state === 'removed') removeMember('opus-5');
+      const replay = await app.inject(request);
+      assert.equal(replay.statusCode, 202, replay.body);
+      assert.equal(replay.json().userMessageId, first.json().userMessageId);
+      assert.deepEqual(
+        (await h.messages.getById(first.json().userMessageId)).mentions,
+        content.startsWith('@') ? ['opus-5'] : [],
+      );
+      const changedSession = await app.inject({
+        ...request,
+        headers: { ...request.headers, 'x-cat-cafe-live-session': 'other-call' },
+      });
+      assert.equal(changedSession.statusCode, 409, changedSession.body);
+      const retarget = await app.inject({ ...request, payload: { ...request.payload, mentions: ['codex'] } });
+      assert.equal(retarget.statusCode, 409, retarget.body);
+      assert.deepEqual(
+        (await h.ledger.list(h.threadId)).flatMap((row) => row.targets),
+        state === 'retired' ? [] : ['opus-5'],
+      );
+      await h.processor.requestDrain(h.threadId);
+      assert.deepEqual(h.calls, []);
     });
-    assert.equal(changedSession.statusCode, 409, changedSession.body);
-    assert.deepEqual(
-      (await h.ledger.list(h.threadId)).flatMap((row) => row.targets),
-      state === 'retired' ? [] : ['opus-5'],
-    );
-    await h.processor.requestDrain(h.threadId);
-    assert.deepEqual(h.calls, []);
-  });
+  }
 }
 
 it('Live receipt verifies attachments through the same Message envelope as Queue send', async (t) => {

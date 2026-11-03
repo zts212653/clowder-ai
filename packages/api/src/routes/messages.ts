@@ -642,7 +642,8 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       userId,
       content,
       // Routing fallback is server metadata, not an @mention the user wrote.
-      mentions: sourceTargetCats,
+      mentions:
+        replayedSource?.extra?.liveAdmission && !explicitMentionTargetCats ? replayedSource.mentions : sourceTargetCats,
       timestamp: Date.now(),
       threadId: resolvedThreadId,
       idempotencyKey: resolvedIdempotencyKey,

@@ -240,3 +240,5 @@ Live 先取已存 targetId，再让 Live receipt 与 Queue send 使用同一份�
 补齐 pending/partial/retired/reopen、registry 移除与 changed envelope 回归；无新增持久状态。
 工作期间 next 从 1016aa7a 合入 #1782（Windows Host media path 修复）；无本次文件重叠，
 已完整保留并 rebase 到 ad4e3ad4，后续验证与复审绑定更新后的精确 HEAD。
+Live 的 bound target 与原 Message mentions 分开消费：默认解析的目标不能在重放时变成
+用户曾写过的 mention；原 Message envelope 保持不变，改目标仍冲突。
