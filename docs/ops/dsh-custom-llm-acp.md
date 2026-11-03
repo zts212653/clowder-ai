@@ -160,13 +160,13 @@ Windows 若在启动子进程前报 bootstrap 目录 ACL 不安全，按现有�
 ## 6. 读到 `credential_missing` 时怎么处理
 
 Clowder 在 ACP 返回的明确缺凭据错误上会给出 `credential_missing`，而不是通用的 `prompt_failure`。
-它的含义是：**路由已经解析成功，但该路由声明的凭据引用在 DSH 的凭据库里没有对应记录。**
+它的含义是：**路由已经解析成功，但该路由声明的凭据引用，在原生凭据服务与启动环境中都未能解析到值。**
 
 报文形态（脱敏）：
 
 ```text
 credential_missing: DSH 未能解析当前路由所需的凭据引用。
-⚠️ ACP agent 当前选定路由「custom-acp-route」缺少凭据：原生配置解析到的引用名称「CUSTOM_ACP_API_KEY」没有对应记录。
+⚠️ ACP agent 当前选定路由「custom-acp-route」缺少凭据：原生配置声明的引用名称「CUSTOM_ACP_API_KEY」，在原生凭据服务与启动环境中都未能解析到值。
 ```
 
 注意区分两点：

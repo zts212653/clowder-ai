@@ -1,4 +1,5 @@
 import { deploymentDefaults } from '@cat-cafe/shared';
+import { excerptSanitizedStderr } from '../../../../../../utils/sanitize-cli-stderr.js';
 import { isInvocationBoundMcpLaunch } from '../session-credential-file.js';
 import { createAcpPermissionHandler } from './permissions/acp-permission-interaction.js';
 /**
@@ -115,34 +116,30 @@ function isAgentBusyError(err: unknown): boolean {
 }
 
 /** Issue #1798. DSH reports a missing credential reference as -32603 whose only
- *  payload is prose; the real ACP envelope carries no structured `data.error`
- *  (see artifacts/dsh-acp-verification-20261103/report.json). Match the two
- *  wordings DSH actually emits, and nothing wider:
+ *  payload is prose. Source evidence for "no structured payload": fixed DSH
+ *  `packages/acp/acp/src/session.ts` calls `RequestError.internalError(undefined, detail)`,
+ *  which is only valid under the SDK 1.4.0 signature `(data?, additionalMessage?)`.
+ *  Match the two wordings DSH actually emits, and nothing wider. Both are anchored
+ *  to their plugin prefix so unrelated MCP/other errors cannot be captured:
  *    llm-pi-ai: no credential for provider route "<route>"; its profile resolves <REF>, which is not set
  *    llm-deepseek: no API key for provider route "<route>"; store <REF> through the credentials service
  *  Deliberately NOT matched: 401/403/429, timeouts, MCP server errors, or any
  *  generic mention of "key" — those keep their existing classification. */
 const CREDENTIAL_MISSING_RE =
-  /no credential for provider route\s+"([^"]+)"[\s\S]*?resolves\s+([A-Za-z_][A-Za-z0-9_]*)\s*,\s*which is not set/i;
-const MISSING_API_KEY_RE = /no API key for provider route\s+"([^"]+)"/i;
+  /llm-pi-ai:\s*no credential for provider route\s+"([^"]+)"[\s\S]*?resolves\s+([A-Za-z_][A-Za-z0-9_]*)\s*,\s*which is not set/i;
+const MISSING_API_KEY_RE =
+  /llm-deepseek:\s*no API key for provider route\s+"([^"]+)"[\s\S]*?store\s+([A-Za-z_][A-Za-z0-9_]*)\s+through the credentials service/i;
 
 /** Bounded extraction of the route and credential reference from DSH's message.
- *  Values are echoed into a user-facing string, so they are length-capped and
- *  stripped of control characters — a hostile agent must not be able to inject
- *  arbitrary multi-kilobyte or newline-bearing content into the UI. */
+ *  Values are echoed into a user-facing string, so they pass through the
+ *  repository secret sanitizer BEFORE any length bound — truncating first would
+ *  strip a token's identifying prefix and defeat redaction (F212 KD-2). */
 function extractMissingCredential(fullMsg: string): { route: string; reference?: string } | null {
-  const scrub = (value: string) =>
-    Array.from(value)
-      .slice(0, 120)
-      .map((char) => {
-        const code = char.codePointAt(0) ?? 0;
-        return code < 0x20 || code === 0x7f ? ' ' : char;
-      })
-      .join('');
+  const scrub = (value: string) => excerptSanitizedStderr(value, { edge: 'head', maxLength: 120 }).replace(/\s+$/, '');
   const detailed = CREDENTIAL_MISSING_RE.exec(fullMsg);
   if (detailed) return { route: scrub(detailed[1]), reference: scrub(detailed[2]) };
-  const plain = MISSING_API_KEY_RE.exec(fullMsg);
-  if (plain) return { route: scrub(plain[1]) };
+  const official = MISSING_API_KEY_RE.exec(fullMsg);
+  if (official) return { route: scrub(official[1]), reference: scrub(official[2]) };
   return null;
 }
 
@@ -1637,15 +1634,16 @@ function toUserFacingError(providerName: string, errorCode: string, errorMsg: st
       // native config — without ever suggesting that swapping in another key name
       // is a supported fix (that is a deliberate user decision, not a product behavior).
       //
-      // Only the bounded route/reference are echoed. The raw envelope stays in the
-      // structured log and in `errorCode`; echoing it here would let a hostile agent
-      // push unbounded or control-character content into the user-facing UI.
+      // Only the bounded route/reference are echoed, and those passed through the
+      // repository sanitizer. The raw envelope stays in the structured log;
+      // `errorCode` carries only the classification, never the raw payload.
       const found = extractMissingCredential(errorMsg);
       const route = found?.route ? `「${found.route}」` : '';
       const ref = found?.reference ? `「${found.reference}」` : '';
       return (
         `credential_missing: DSH 未能解析当前路由所需的凭据引用。\n` +
-        `⚠️ ${label} 当前选定路由${route}缺少凭据：原生配置解析到的引用名称${ref}没有对应记录。\n` +
+        `⚠️ ${label} 当前选定路由${route}缺少凭据：原生配置声明的引用名称${ref}，` +
+        '在原生凭据服务与启动环境中都未能解析到值。\n' +
         '这是凭据的**引用名称**，不是密钥正文——密钥本身可能保存在别处。\n' +
         '排查顺序：确认实际 launcher 与其设置的 DSH_HOME → 检查该 profile 及其后续 overlay 中的 provider 与 apiKeyEnv → ' +
         '在 DSH 原生配置中登记该引用名，或按你确认的账户显式修正路由引用。\n' +

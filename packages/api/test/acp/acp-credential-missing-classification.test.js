@@ -168,3 +168,65 @@ test('脱敏：超长/含换行的伪造诊断片段不被原样带出', async (
   // 用户可见说明不应把注入内容整段搬出来
   assert.ok(error.error.length < 4000, `error text too long: ${error.error.length}`);
 });
+
+// ── R1 复审反例（非作者审查，PR #1808 issuecomment-6599693656）────────────────
+// 以下三项在 R1 HEAD 上全部失败，用于钉死复审指出的同类缺陷。
+
+test('P2-1: 官方 llm-deepseek 句式必须同时捕获 route 与凭据引用名', async () => {
+  const error = await invokeWithProtocolError({ code: -32603, message: WIRE_MISSING_API_KEY });
+
+  assert.equal(error.errorCode, 'credential_missing');
+  // 必须点名路由
+  assert.match(error.error, /deepseek-official/);
+  // 必须点名引用——R1 只抓 route，UI 上引用名为空
+  assert.match(error.error, /DEEPSEEK_API_KEY/);
+});
+
+test('P2-2: 非 DSH 的 MCP 错误不得被抢成 credential_missing', async () => {
+  // 没有 llm-pi-ai / llm-deepseek 前缀，不是 DSH 的缺凭据签名
+  const error = await invokeWithProtocolError({
+    code: -32603,
+    message: 'MCP server error: no API key for provider route "search-provider"',
+  });
+
+  assert.equal(error.errorCode, 'mcp_pollution');
+  // 不得指导用户去改 DSH 配置
+  assert.doesNotMatch(error.error, /DSH_HOME|apiKeyEnv/);
+});
+
+test('P2-2b: 真正的 DSH 缺凭据且路由名含 mcp/capacity 时仍归 credential_missing', async () => {
+  // 与 P2-2 配对：收窄匹配后，必须保留"确实是 DSH"的优先级回归
+  for (const route of ['mcp-gateway', 'capacity-prod']) {
+    const message =
+      'Internal error: turn failed: llm-pi-ai: no credential for provider route ' +
+      `"${route}"; its profile resolves SOME_KEY, which is not set`;
+    const error = await invokeWithProtocolError({ code: -32603, message });
+    assert.equal(error.errorCode, 'credential_missing', `route=${route}`);
+  }
+});
+
+test('P2-3: 路由中的合成密钥不得原样回显到用户可见说明', async () => {
+  const fakeToken = `sk-proj-${'a1b2c3d4e5'.repeat(4)}`;
+  const message =
+    'Internal error: turn failed: llm-pi-ai: no credential for provider route ' +
+    `"${fakeToken}"; its profile resolves SOME_KEY, which is not set`;
+  const error = await invokeWithProtocolError({ code: -32603, message });
+
+  assert.equal(error.errorCode, 'credential_missing');
+  // 复用仓库既有 sanitizer：合成 token 必须被脱敏，不能只做长度限制
+  assert.doesNotMatch(error.error, /sk-proj-/);
+  assert.ok(!error.error.includes(fakeToken), 'fake token leaked into user-facing text');
+});
+
+test('P2-3b: 先脱敏再截断，长 token 不得因截断而绕过识别', async () => {
+  // 把 token 放得足够靠后，若先截断则前缀会被切掉、sanitizer 认不出来
+  const filler = 'x'.repeat(200);
+  const fakeToken = `sk-ant-api03-${'z9y8x7w6v5'.repeat(6)}`;
+  const message =
+    'Internal error: turn failed: llm-pi-ai: no credential for provider route ' +
+    `"${filler}${fakeToken}"; its profile resolves SOME_KEY, which is not set`;
+  const error = await invokeWithProtocolError({ code: -32603, message });
+
+  assert.equal(error.errorCode, 'credential_missing');
+  assert.doesNotMatch(error.error, /sk-ant-api03-/);
+});
