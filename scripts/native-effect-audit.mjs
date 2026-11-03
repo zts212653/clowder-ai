@@ -2,6 +2,7 @@ import { closeSync, constants, mkdirSync, openSync, writeSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { redactSecretContent } from './lib/secret-content-scan.mjs';
+import { NATIVE_AUTH_DENIAL } from './native-auth-effect.mjs';
 
 function summary(value, limit = 240) {
   try {
@@ -58,6 +59,7 @@ export function appendNativeDenial(
 }
 
 export function guardReason(verdict) {
+  if (verdict.reasonCode === 'native_auth_mutation') return NATIVE_AUTH_DENIAL;
   const target = summary(verdict.target.value, 1024);
   return `Clowder AI native guard: ${verdict.reasonCode} (${verdict.effect} → ${verdict.target.kind}: ${target})${verdict.detail ? ` — ${summary(verdict.detail, 1024)}` : ''}`;
 }
