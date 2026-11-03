@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
+import { SuperagentPreviewEntry } from '@/app/dev/superagent-preview/entry';
 import { useChatStore } from '@/stores/chatStore';
 import { useLabelStore } from '@/stores/label-store';
 import {
@@ -1766,6 +1767,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
           </>
         )}
 
+        {process.env.NODE_ENV !== 'production' && <SuperagentPreviewEntry />}
         <div
           ref={scrollContainerRef}
           data-testid="sidebar-thread-list"
