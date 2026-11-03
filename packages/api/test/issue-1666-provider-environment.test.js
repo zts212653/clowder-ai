@@ -11,6 +11,23 @@ import { writeAgentCommandFile } from '../dist/domains/terminal/tmux-command-fil
 import { installAmbientCodexAccount } from './helpers/f320-auth-environment.js';
 import { fakeL0Compiler } from './helpers/fake-l0-compiler.js';
 
+function isolateProxyExceptions(t) {
+  const aliases = Object.entries(process.env).filter(([key]) => key.toUpperCase() === 'NO_PROXY');
+  aliases.forEach(([key]) => {
+    delete process.env[key];
+  });
+  t.after(() => {
+    Object.keys(process.env)
+      .filter((key) => key.toUpperCase() === 'NO_PROXY')
+      .forEach((key) => {
+        delete process.env[key];
+      });
+    aliases.forEach(([key, value]) => {
+      process.env[key] = value;
+    });
+  });
+}
+
 // Protocol-only peer: observes production launch inputs without model calls.
 class Wire {
   values = [];
@@ -53,6 +70,7 @@ class Wire {
 for (const carrierMode of ['exec_json', 'app_server']) {
   test(`final account/callback environment reaches ${carrierMode} on first call and resume`, async (t) => {
     installAmbientCodexAccount(t);
+    isolateProxyExceptions(t);
     const root = await realpath(await mkdtemp(join(tmpdir(), 'issue1666-provider-')));
     t.after(() => rm(root, { recursive: true, force: true }));
     const account = {
@@ -128,6 +146,7 @@ for (const carrierMode of ['exec_json', 'app_server']) {
 }
 
 test('native capability launch preserves native config authority and final proxy exceptions', async (t) => {
+  isolateProxyExceptions(t);
   const root = await realpath(await mkdtemp(join(tmpdir(), 'issue1666-capability-')));
   const home = join(root, '.codex');
   await mkdir(home);
@@ -138,7 +157,6 @@ test('native capability launch preserves native config authority and final proxy
     HOME: process.env.HOME,
     USERPROFILE: process.env.USERPROFILE,
     CODEX_HOME: process.env.CODEX_HOME,
-    NO_PROXY: process.env.NO_PROXY,
   };
   Object.assign(process.env, { HOME: root, USERPROFILE: root, CODEX_HOME: home, NO_PROXY: 'native.fixture' });
   t.after(async () => {
