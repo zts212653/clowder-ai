@@ -114,6 +114,38 @@ function isAgentBusyError(err: unknown): boolean {
   return /turn\.agent_busy|another turn.*is active/i.test(err.message);
 }
 
+/** Issue #1798. DSH reports a missing credential reference as -32603 whose only
+ *  payload is prose; the real ACP envelope carries no structured `data.error`
+ *  (see artifacts/dsh-acp-verification-20261103/report.json). Match the two
+ *  wordings DSH actually emits, and nothing wider:
+ *    llm-pi-ai: no credential for provider route "<route>"; its profile resolves <REF>, which is not set
+ *    llm-deepseek: no API key for provider route "<route>"; store <REF> through the credentials service
+ *  Deliberately NOT matched: 401/403/429, timeouts, MCP server errors, or any
+ *  generic mention of "key" — those keep their existing classification. */
+const CREDENTIAL_MISSING_RE =
+  /no credential for provider route\s+"([^"]+)"[\s\S]*?resolves\s+([A-Za-z_][A-Za-z0-9_]*)\s*,\s*which is not set/i;
+const MISSING_API_KEY_RE = /no API key for provider route\s+"([^"]+)"/i;
+
+/** Bounded extraction of the route and credential reference from DSH's message.
+ *  Values are echoed into a user-facing string, so they are length-capped and
+ *  stripped of control characters — a hostile agent must not be able to inject
+ *  arbitrary multi-kilobyte or newline-bearing content into the UI. */
+function extractMissingCredential(fullMsg: string): { route: string; reference?: string } | null {
+  const scrub = (value: string) =>
+    Array.from(value)
+      .slice(0, 120)
+      .map((char) => {
+        const code = char.codePointAt(0) ?? 0;
+        return code < 0x20 || code === 0x7f ? ' ' : char;
+      })
+      .join('');
+  const detailed = CREDENTIAL_MISSING_RE.exec(fullMsg);
+  if (detailed) return { route: scrub(detailed[1]), reference: scrub(detailed[2]) };
+  const plain = MISSING_API_KEY_RE.exec(fullMsg);
+  if (plain) return { route: scrub(plain[1]) };
+  return null;
+}
+
 function sleepWithAbort(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
@@ -1533,6 +1565,13 @@ function classifyError(
       // turn.agent_busy after busy-retry exhaustion — agent-internal turn still active
       return { errorCode: 'agent_busy', errorMsg: fullMsg };
     }
+    // Issue #1798: check the credential signal BEFORE the capacity/mcp heuristics.
+    // A route named e.g. "mcp-gateway" or "capacity-prod" would otherwise be
+    // swallowed by those substring tests and never reach the credential branch.
+    const missingCredential = extractMissingCredential(fullMsg);
+    if (missingCredential) {
+      return { errorCode: 'credential_missing', errorMsg: fullMsg };
+    }
     if (err.code === -32000 || fullMsg.includes('capacity')) {
       return { errorCode: 'model_capacity', errorMsg: fullMsg };
     }
@@ -1592,6 +1631,27 @@ function toUserFacingError(providerName: string, errorCode: string, errorMsg: st
     }
     case 'mcp_pollution':
       return `${base}\n⚠️ ${label} 工具调用异常（MCP 服务端错误）。`;
+    case 'credential_missing': {
+      // Issue #1798: DSH resolved the route but could not find the referenced
+      // credential. Say which route and which *name* is missing, and point at the
+      // native config — without ever suggesting that swapping in another key name
+      // is a supported fix (that is a deliberate user decision, not a product behavior).
+      //
+      // Only the bounded route/reference are echoed. The raw envelope stays in the
+      // structured log and in `errorCode`; echoing it here would let a hostile agent
+      // push unbounded or control-character content into the user-facing UI.
+      const found = extractMissingCredential(errorMsg);
+      const route = found?.route ? `「${found.route}」` : '';
+      const ref = found?.reference ? `「${found.reference}」` : '';
+      return (
+        `credential_missing: DSH 未能解析当前路由所需的凭据引用。\n` +
+        `⚠️ ${label} 当前选定路由${route}缺少凭据：原生配置解析到的引用名称${ref}没有对应记录。\n` +
+        '这是凭据的**引用名称**，不是密钥正文——密钥本身可能保存在别处。\n' +
+        '排查顺序：确认实际 launcher 与其设置的 DSH_HOME → 检查该 profile 及其后续 overlay 中的 provider 与 apiKeyEnv → ' +
+        '在 DSH 原生配置中登记该引用名，或按你确认的账户显式修正路由引用。\n' +
+        '系统不会自动改用其他密钥，也不会替你修改原生配置。'
+      );
+    }
     case 'init_failure':
       return `${base}\n⚠️ ACP agent 启动失败（本地进程异常）。`;
     case 'prompt_failure':
