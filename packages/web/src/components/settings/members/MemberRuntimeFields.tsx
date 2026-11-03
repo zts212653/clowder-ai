@@ -310,7 +310,7 @@ export function MemberRuntimeFields({
           modelCount={models.length}
           t={t}
         />
-        {catalog?.thinkingEnabled === false && form.cliEffort && (
+        {catalog?.thinkingEnabled === false && (
           <p>
             {t(
               '工具配置已关闭思考；强度偏好不会开启思考。',

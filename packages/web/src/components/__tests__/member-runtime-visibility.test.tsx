@@ -74,9 +74,14 @@ it('shows an ACP empty native model label in both the summary and the inherited 
 });
 
 it.each([
-  '',
-  'high',
-])('preserves a saved preference without offering tiers on a known tierless Kimi model (%s)', async (saved) => {
+  { saved: '', thinkingEnabled: undefined },
+  { saved: 'high', thinkingEnabled: undefined },
+  { saved: '', thinkingEnabled: false },
+  { saved: 'high', thinkingEnabled: false },
+])('keeps tierless Kimi state and saved preferences (saved=$saved, thinking=$thinkingEnabled)', async ({
+  saved,
+  thinkingEnabled,
+}) => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   vi.mocked(apiFetch).mockImplementation(
     async (path) =>
@@ -96,6 +101,7 @@ it.each([
                   defaultModel: 'boolean-model',
                   models: [{ value: 'boolean-model', label: 'Boolean', efforts: [] }],
                   effortOptions: [],
+                  thinkingEnabled,
                 },
         ),
       ),
@@ -123,6 +129,8 @@ it.each([
     const picker = host.querySelectorAll<HTMLButtonElement>('[role=combobox]')[1];
     await act(async () => picker.click());
     expect(host.textContent).not.toContain('手动指定');
+    if (thinkingEnabled === false) expect(host.textContent).toContain('已关闭思考');
+    else expect(host.textContent).not.toContain('已关闭思考');
     if (saved) expect(host.textContent).toContain(`已保留强度偏好 ${saved}`);
     expect(valid).toHaveBeenLastCalledWith(true);
     expect(patch).not.toHaveBeenCalled();
