@@ -3,13 +3,17 @@ import { test } from 'node:test';
 
 const CAT = 'codex';
 
-function createCodexEventService(transformCodexEvent, finalizeCodexStream) {
+function createCodexEventService(
+  transformCodexEvent,
+  finalizeCodexStream,
+  canonicalSignature = '[砚砚/gpt-5.6-sol🐾]',
+) {
   return {
     async *invoke() {
       const state = {
         hadPriorTextTurn: false,
         signatureIdentity: '砚砚',
-        canonicalSignature: '[砚砚/gpt-5.6-sol🐾]',
+        canonicalSignature,
       };
       const events = [
         ...Array.from({ length: 16 }, (_, index) => ({
@@ -93,4 +97,31 @@ test('#1272: Codex live final text and refreshed persisted message contain one s
 
   const refreshed = await deps.messageStore.getById('msg-1');
   assert.equal(refreshed?.content, expected, 'F5/read path returns exactly the stored finalized content');
+});
+
+test('#1795: inherited model retains one observed signature in live text and persisted readback', async () => {
+  const { finalizeCodexStream, transformCodexEvent } = await import(
+    '../dist/domains/cats/services/agents/providers/codex-event-transform.js'
+  );
+  const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+  const appendCalls = [];
+  const service = createCodexEventService(transformCodexEvent, finalizeCodexStream, '');
+  const deps = createMockDeps(service, appendCalls);
+  const yielded = [];
+  for await (const message of routeSerial(deps, [CAT], '只保留一个签名', 'user-1795', 'thread-1795')) {
+    yielded.push(message);
+  }
+  const expected = `${Array.from({ length: 16 }, (_, index) => `第 ${index + 1} 段不同进度。`).join(
+    '\n\n',
+  )}\n\n[砚砚/gpt-5.6-sol🐾]`;
+  assert.equal(appendCalls.length, 1);
+  assert.equal(appendCalls[0].content, expected);
+  assert.equal(
+    yielded
+      .filter((message) => message.type === 'text' && message.catId === CAT)
+      .map((message) => message.content)
+      .join(''),
+    expected,
+  );
+  assert.equal((await deps.messageStore.getById('msg-1'))?.content, expected);
 });
