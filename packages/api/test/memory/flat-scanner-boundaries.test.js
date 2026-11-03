@@ -8,6 +8,8 @@ import { join } from 'node:path';
 import { it } from 'node:test';
 import { CollectionIndexBuilder } from '../../dist/domains/memory/CollectionIndexBuilder.js';
 import { FlatScanner } from '../../dist/domains/memory/FlatScanner.js';
+import { MarkerQueue } from '../../dist/domains/memory/MarkerQueue.js';
+import { MaterializationService } from '../../dist/domains/memory/MaterializationService.js';
 import { SqliteEvidenceStore } from '../../dist/domains/memory/SqliteEvidenceStore.js';
 import { StructuredScanner } from '../../dist/domains/memory/StructuredScanner.js';
 
@@ -78,4 +80,58 @@ it('does not swallow ordinary subtrees with misleading .git files or symlinks', 
   symlinkSync(target, join(linked, '.git'), process.platform === 'win32' ? 'junction' : 'dir');
   writeFileSync(join(linked, 'guide.md'), '# Keep linked');
   assert.equal(new FlatScanner('probe').discover(root).length, 3);
+});
+
+// zts212653, #1787 review 5740361916 / discussion_r4445367399.
+it('keeps link aliases out of incremental indexing and materialization into a parent collection', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'issue1787-links-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const project = join(root, 'project');
+  const child = join(project, 'child');
+  const docs = join(child, 'docs');
+  mkdirSync(docs, { recursive: true });
+  execFileSync('git', ['init', '-q', child]);
+  writeFileSync(join(project, 'root.md'), '# Root');
+  writeFileSync(join(docs, 'source.md'), '# Child');
+  symlinkSync(docs, join(project, 'research'), process.platform === 'win32' ? 'junction' : 'dir');
+  symlinkSync(join(docs, 'source.md'), join(project, 'alias.md'), 'file');
+
+  for (const Scanner of [FlatScanner, StructuredScanner]) {
+    const scanner = new Scanner('probe');
+    assert.deepEqual(
+      scanner.discover(project).map((r) => r.item.title),
+      ['Root'],
+    );
+    const store = new SqliteEvidenceStore(':memory:');
+    await store.initialize();
+    t.after(() => store.close());
+    const manifest = { id: 'probe', root: project, reviewPolicy: { authorityCeiling: 'validated' } };
+    const builder = new CollectionIndexBuilder(store, manifest, scanner);
+    assert.equal((await builder.rebuild()).indexed, 1);
+    await t.test(`${Scanner.name}: file and directory alias updates`, async () => {
+      await builder.incrementalUpdate([join(project, 'alias.md'), join(project, 'research', 'source.md')]);
+      assert.equal(store.getDb().prepare('SELECT count(*) AS n FROM evidence_docs').get().n, 1);
+    });
+    await builder.rebuild();
+
+    const queue = new MarkerQueue(join(root, `markers-${Scanner.name}`));
+    const marker = await queue.submit({
+      content: '# Materialized child',
+      source: 'fixture',
+      status: 'captured',
+      targetKind: 'research',
+    });
+    await queue.transition(marker.id, 'approved');
+    const result = await new MaterializationService(queue, project, builder).materialize(marker.id);
+    assert.equal(result.reindexed, true);
+    await t.test(`${Scanner.name}: materialization through directory alias`, () => {
+      assert.equal(store.getDb().prepare('SELECT count(*) AS n FROM evidence_docs').get().n, 1);
+      assert.equal(scanner.parseSingle(result.outputPath, project), null);
+    });
+    assert.ok(new Scanner('child').parseSingle(join(docs, 'source.md'), child));
+    assert.ok(
+      new Scanner('bound-alias').parseSingle(join(project, 'research', 'source.md'), join(project, 'research')),
+    );
+    assert.ok(new Scanner('bound-alias').discover(join(project, 'research')).some((r) => r.item.title === 'Child'));
+  }
 });
