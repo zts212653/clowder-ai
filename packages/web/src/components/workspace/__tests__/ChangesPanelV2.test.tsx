@@ -272,9 +272,7 @@ describe('ChangesPanel v2', () => {
         : new Response(`unexpected endpoint ${url}`, { status: 503 }),
     );
     await act(async () => {
-      root.render(
-        <ChangesPanel worktreeId="wt-1" basisPct={40} threadId="thread-1" pullRequestTarget={target} />,
-      );
+      root.render(<ChangesPanel worktreeId="wt-1" basisPct={40} threadId="thread-1" pullRequestTarget={target} />);
     });
     const urls = apiFetchMock.mock.calls.map(([url]) => String(url));
     expect(urls).toHaveLength(1);
@@ -305,9 +303,7 @@ describe('ChangesPanel v2', () => {
         }),
     );
     await act(async () => {
-      root.render(
-        <ChangesPanel worktreeId="wt-1" basisPct={40} threadId="thread-1" pullRequestTarget={target} />,
-      );
+      root.render(<ChangesPanel worktreeId="wt-1" basisPct={40} threadId="thread-1" pullRequestTarget={target} />);
     });
     expect(container.textContent).toContain('GitHub 请求受限');
     expect(container.textContent).not.toContain('选择文件查看差异');
