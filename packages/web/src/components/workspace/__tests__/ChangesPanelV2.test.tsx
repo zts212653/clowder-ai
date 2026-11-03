@@ -332,17 +332,42 @@ describe('ChangesPanel v2', () => {
   });
 
   // #1809 范围边界：隐藏「选择文件」只针对 PR 读取失败，必须是 PR 专属；
-  // 本地 diff / commit 的失败仍保留原来的错误行与占位，不能被这次修复顺手改掉。
+  // 本地 diff 与 commit 两条失败路径都保留原来的错误行与占位，且不出现 PR 的 retry/GitHub 出口。
   it.each([
-    'v2',
-    'classic',
-  ] as const)('keeps the local changes failure copy and file-picker hint for a non-PR read in %s', async (presentation) => {
+    ['v2', 'diff'],
+    ['v2', 'commit'],
+    ['classic', 'diff'],
+    ['classic', 'commit'],
+  ] as const)('keeps the local %s %s failure copy, placeholder and no PR actions', async (presentation, source) => {
     writeShellPresentation(presentation);
+    const commitTarget = { sha: 'a'.repeat(40), worktreeId: 'wt-1', threadId: 'thread-1' };
     apiFetchMock.mockImplementation(async () => new Response('nope', { status: 500 }));
     await act(async () => {
-      root.render(<ChangesPanel worktreeId="wt-1" basisPct={40} threadId="thread-1" />);
+      root.render(
+        <ChangesPanel
+          worktreeId="wt-1"
+          basisPct={40}
+          threadId="thread-1"
+          {...(source === 'commit' ? { commitTarget } : {})}
+        />,
+      );
     });
+
+    const url = String(apiFetchMock.mock.calls[0]?.[0]);
+    if (source === 'commit') {
+      expect(url).toBe(
+        `/api/workspace/chat-commit-changes?${new URLSearchParams({
+          sha: commitTarget.sha,
+          worktreeId: commitTarget.worktreeId,
+          threadId: commitTarget.threadId,
+        })}`,
+      );
+    } else {
+      expect(url).toBe('/api/workspace/diff?worktreeId=wt-1');
+    }
     expect(container.textContent).toContain(presentation === 'v2' ? '读取改动失败' : 'Failed to fetch changes');
     expect(container.textContent).toContain(presentation === 'v2' ? '选择文件查看差异' : 'Select a file to view diff');
+    expect(container.querySelector('[data-testid="pull-request-changes-retry"]')).toBeNull();
+    expect(container.querySelector('[data-testid="pull-request-changes-github"]')).toBeNull();
   });
 });
