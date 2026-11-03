@@ -43,6 +43,7 @@ export function useFileActionController({
     trigger = useRef<HTMLButtonElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout>>();
   const generation = useRef(0);
+  const infoRequest = useRef(0);
   const initialFocus = useRef<HTMLElement | null>(null);
   const focusOnOpen = useRef(true);
   useLayoutEffect(() => {
@@ -116,14 +117,15 @@ export function useFileActionController({
     });
   const refreshInfo = () => {
     const scope = generation.current;
+    const request = ++infoRequest.current;
     setInfo(null);
     setInfoError(false);
     return contentFileInfo(source)
       .then((value) => {
-        if (scope === generation.current) setInfo(value);
+        if (scope === generation.current && request === infoRequest.current) setInfo(value);
       })
       .catch(() => {
-        if (scope === generation.current) setInfoError(true);
+        if (scope === generation.current && request === infoRequest.current) setInfoError(true);
       });
   };
   useEffect(() => {
