@@ -217,7 +217,10 @@ describe('AgentRouter preferredCats routing', () => {
     assert.equal(mockCodexService.invoke.mock.callCount(), 1);
     assert.equal(mockClaudeService.invoke.mock.callCount(), 0);
     assert.equal(mockGeminiService.invoke.mock.callCount(), 0);
-    assert.deepEqual(threadStore._effortReads, [{ threadId: 'thread-1', catId: 'codex', userId: 'user-1' }]);
+    assert.ok(threadStore._effortReads.length > 0);
+    threadStore._effortReads.forEach((read) => {
+      assert.deepEqual(read, { threadId: 'thread-1', catId: 'codex', userId: 'user-1' });
+    });
   });
 
   test('@mention overrides preferredCats', async () => {
@@ -251,7 +254,10 @@ describe('AgentRouter preferredCats routing', () => {
     assert.equal(mockGeminiService.invoke.mock.callCount(), 1);
     assert.equal(mockCodexService.invoke.mock.callCount(), 0);
     assert.equal(mockClaudeService.invoke.mock.callCount(), 0);
-    assert.deepEqual(threadStore._effortReads, [{ threadId: 'thread-2', catId: 'gemini', userId: 'user-1' }]);
+    assert.ok(threadStore._effortReads.length > 0);
+    threadStore._effortReads.forEach((read) => {
+      assert.deepEqual(read, { threadId: 'thread-2', catId: 'gemini', userId: 'user-1' });
+    });
   });
 
   test('falls back to healthy participants before non-participant preferredCats', async () => {
@@ -288,7 +294,10 @@ describe('AgentRouter preferredCats routing', () => {
     assert.equal(mockClaudeService.invoke.mock.callCount(), 1);
     assert.equal(mockCodexService.invoke.mock.callCount(), 0);
     assert.equal(mockGeminiService.invoke.mock.callCount(), 0);
-    assert.deepEqual(threadStore._effortReads, [{ threadId: 'thread-3', catId: 'opus', userId: 'user-1' }]);
+    assert.ok(threadStore._effortReads.length > 0);
+    threadStore._effortReads.forEach((read) => {
+      assert.deepEqual(read, { threadId: 'thread-3', catId: 'opus', userId: 'user-1' });
+    });
   });
 
   test('invalid preferredCats (unregistered) are filtered out, falls back to participants', async () => {

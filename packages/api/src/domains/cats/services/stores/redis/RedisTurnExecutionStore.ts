@@ -9,6 +9,7 @@ import {
   type CreateTurnExecutionResult,
   cloneTurnExecutionRecord,
   createdOutputFence,
+  hasUnconfirmedProviderTeardown,
   type InterruptRunningTurnExecutionsInput,
   type ITurnExecutionStore,
   matchesTurnExecutionSource,
@@ -214,6 +215,7 @@ export class RedisTurnExecutionStore implements ITurnExecutionStore {
         input.providerTeardownAt === undefined ? '' : String(input.providerTeardownAt),
       ),
     );
+    if (result === -2) throw new Error('provider_teardown_unconfirmed');
     const record = await this.get(invocationId);
     if (result === -1 || !record) return { outcome: 'not_found', record: null };
     return { outcome: result === 1 ? 'transitioned' : 'already_terminal', record };
@@ -306,7 +308,8 @@ export class RedisTurnExecutionStore implements ITurnExecutionStore {
         await this.redis.srem(TurnExecutionKeys.running, invocationId);
         continue;
       }
-      if (record.startedAt >= cutoffStartedAt || excluded.has(invocationId)) continue;
+      if (record.startedAt >= cutoffStartedAt || excluded.has(invocationId) || hasUnconfirmedProviderTeardown(record))
+        continue;
       const result = await this.transitionTerminal(invocationId, {
         status: 'interrupted',
         endedAt: input.endedAt,

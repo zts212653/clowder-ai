@@ -426,7 +426,15 @@ describe('F325 one-turn native AGY carrier', () => {
       );
       assert.equal(events.at(-1).errorCode, undefined);
       assert.equal(f.service.injectsL0Natively(), true);
-      assert.deepEqual(calls, [{ catId: 'gemini38', userId: 'owner-native', projection: 'owner' }]);
+      assert.deepEqual(calls, [
+        {
+          catId: 'gemini38',
+          userId: 'owner-native',
+          projection: 'owner',
+          frozenInput: undefined,
+          requireFrozenInput: true,
+        },
+      ]);
       assert.match(prepared.nativeInstructions[0].body, /HOST-COMPILED-NATIVE-L0/);
       assert.ok(!prepared.nativeInstructions[0].body.includes('DYNAMIC-PACK'));
       assert.equal(

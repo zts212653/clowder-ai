@@ -56,6 +56,30 @@ test('registered and pinned carriers preserve the concrete member account admiss
   assert.equal(calls.startTurn.length, 0);
 });
 
+test('registered and pinned carriers resolve the native account through their concrete Host service', async () => {
+  const registry = new SessionImplementationRegistry();
+  const { provider, calls } = registerProvider(registry);
+  const account = { id: 'native-dsh', authType: 'api_key', persistedClientId: 'acp' };
+  const selection = { workingDirectory: '/fixture-project', accountRef: account.id };
+  const native = {
+    async *invoke() {
+      throw new Error('no model may start');
+    },
+    async resolveScopedNativeAccount(input) {
+      assert.equal(this, native);
+      assert.deepEqual(input, selection);
+      return account;
+    },
+  };
+  provider.hostService = () => native;
+  const registered = makeService({ registry });
+  const pinned = registered.forInvocation();
+  assert.equal(await registered.resolveScopedNativeAccount?.(selection), account);
+  assert.equal(await pinned.resolveScopedNativeAccount?.(selection), account);
+  assert.equal(calls.openSession.length, 0);
+  assert.equal(calls.startTurn.length, 0);
+});
+
 test('[38] an unregistered implementation yields session_implementation_unavailable and calls no provider', async () => {
   const registry = new SessionImplementationRegistry();
   const service = makeService({ registry });

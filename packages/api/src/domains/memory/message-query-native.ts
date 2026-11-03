@@ -12,6 +12,8 @@ import { findMonorepoRoot } from '../../utils/monorepo-root.js';
 import { ClaudeAgentService } from '../cats/services/agents/providers/ClaudeAgentService.js';
 import { hasSupportedEnvTemplate } from '../cats/services/agents/providers/env-map.js';
 import { compileL0ViaSubprocess } from '../cats/services/agents/providers/l0-compiler.js';
+import { captureInvocationL0Input } from '../cats/services/agents/providers/l0-input-capture.js';
+import { captureMemberExecutionPreferences } from '../cats/services/agents/providers/member-execution-preferences.js';
 import { prepareQualificationLaunch } from './message-query-launch.js';
 import { QUERY_QUALIFICATION_INSTRUCTIONS } from './message-query-protocol.js';
 import type { QueryBatchRunner } from './message-query-qualifier.js';
@@ -77,6 +79,14 @@ export const runNativeQueryBatch: QueryBatchRunner = async (batch, context) => {
     l0CompilerFn: (options) => compileL0ViaSubprocess({ ...options, cwd: root }),
   });
   for await (const message of service.invoke(JSON.stringify(batch), {
+    executionPreferences: captureMemberExecutionPreferences(config.id, config, config.defaultModel),
+    frozenL0Input: captureInvocationL0Input({
+      catId: config.id,
+      catConfig: config,
+      userId: context.userId,
+      model: config.defaultModel,
+      compilerCwd: root,
+    }),
     workingDirectory: root,
     systemPrompt: QUERY_QUALIFICATION_INSTRUCTIONS,
     callbackEnv: {

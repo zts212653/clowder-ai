@@ -3,7 +3,7 @@
  * Verifies that cancel_invocation produces correct catId-aware broadcasts.
  *
  * Tests the REAL production buildCancelMessages function (not a copy).
- * - Per-cat done messages to clear each cat's loading state
+ * - Per-cat pending status without clearing an execution before it stops
  * - No duplicate system row: the durable response bubble owns the terminal label
  */
 
@@ -15,7 +15,7 @@ const { InvocationTracker } = await import('../dist/domains/cats/services/agents
 const { buildCancelMessages } = await import('../dist/infrastructure/websocket/SocketManager.js');
 
 describe('buildCancelMessages (production function)', () => {
-  test('single cat cancel: only 1 done with correct catId', () => {
+  test('single cat cancel: only 1 pending status with correct catId', () => {
     const tracker = new InvocationTracker();
     // start(threadId, catId, userId, catIds)
     tracker.start('t1', 'gemini', 'user1', ['gemini']);
@@ -23,12 +23,12 @@ describe('buildCancelMessages (production function)', () => {
     const messages = buildCancelMessages(result);
 
     assert.equal(messages.length, 1);
-    assert.equal(messages[0].type, 'done');
+    assert.equal(messages[0].type, 'status');
     assert.equal(messages[0].catId, 'gemini');
-    assert.equal(messages[0].isFinal, true);
+    assert.notEqual(messages[0].isFinal, true);
   });
 
-  test('multi-cat cancel: only N done messages (no duplicate system row)', () => {
+  test('multi-cat cancel: only N pending statuses (no duplicate system row)', () => {
     const tracker = new InvocationTracker();
     // start(threadId, catId, userId, catIds) — primary cat is opus
     tracker.start('t1', 'opus', 'user1', ['opus', 'codex', 'gemini']);
@@ -39,40 +39,40 @@ describe('buildCancelMessages (production function)', () => {
     const systemInfos = messages.filter((m) => m.type === 'system_info');
     assert.equal(systemInfos.length, 0);
 
-    // Three done messages, one per cat
-    const dones = messages.filter((m) => m.type === 'done');
+    // One request status per exact target, never a terminal.
+    const dones = messages.filter((m) => m.type === 'status');
     assert.equal(dones.length, 3);
     assert.deepEqual(
       dones.map((d) => d.catId),
       ['opus', 'codex', 'gemini'],
     );
-    assert.ok(dones.every((d) => d.isFinal === true));
+    assert.ok(dones.every((d) => d.isFinal !== true));
   });
 
   // F-parallel-cancel: when SocketManager / queue.ts scope the broadcast to the requested cat,
   // a single-cat Stop on a multi-cat batch must clear ONLY that cat — not its siblings. This is
   // the most direct cause of "取消一只两只一起取消" from the real Stop button.
-  test('scoped single-cat cancel from multi-cat batch: only the requested cat gets a done', () => {
+  test('scoped single-cat cancel from multi-cat batch: only the requested cat gets a pending status', () => {
     const tracker = new InvocationTracker();
     tracker.startAll('t1', ['opus', 'codex', 'gemini'], 'user1');
     const result = tracker.cancel('t1', 'codex', 'user1');
     // result.catIds carries the whole batch [opus,codex,gemini]; SocketManager scopes to [codex].
     const scopedResult = { ...result, catIds: ['codex'] };
     const messages = buildCancelMessages(scopedResult);
-    const dones = messages.filter((m) => m.type === 'done');
-    assert.equal(dones.length, 1, 'only the cancelled cat gets a done — siblings stay alive in UI');
+    const dones = messages.filter((m) => m.type === 'status');
+    assert.equal(dones.length, 1, 'only the requested cat gets a pending status');
     assert.equal(dones[0].catId, 'codex');
   });
 
-  test('empty catIds fallback: defaults to opus', () => {
+  test('an empty tracker batch does not invent a default broadcast target', () => {
     const tracker = new InvocationTracker();
     // start(threadId, catId, userId) — no catIds
     tracker.start('t1', 'opus', 'user1');
     const result = tracker.cancel('t1', 'opus', 'user1');
     const messages = buildCancelMessages(result);
 
-    assert.equal(messages.length, 1);
-    assert.equal(messages[0].catId, 'opus');
+    assert.deepEqual(result.catIds, []);
+    assert.deepEqual(messages, []);
   });
 
   test('failed cancel: no messages', () => {
@@ -86,7 +86,7 @@ describe('buildCancelMessages (production function)', () => {
     const result = { cancelled: true, catIds: ['unknown-cat'] };
     const messages = buildCancelMessages(result);
     assert.equal(messages.length, 1);
-    assert.equal(messages[0].type, 'done');
+    assert.equal(messages[0].type, 'status');
     assert.equal(messages[0].catId, 'unknown-cat');
   });
 });

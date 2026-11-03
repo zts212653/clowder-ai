@@ -302,7 +302,15 @@ export function shouldDirectSpawnNativeExe(
   return fileExists(command);
 }
 
-export function resolveWindowsSpawnPlan(command: string, args: readonly string[]): WindowsSpawnPlan {
+export function resolveWindowsSpawnPlan(
+  command: string,
+  args: readonly string[],
+  options: { refresh?: boolean } = {},
+): WindowsSpawnPlan {
+  if (options.refresh) {
+    resolvedShimCache.delete(buildShimCacheKey(command));
+    cachedSystemNodePath = undefined;
+  }
   const shimSpawn = resolveWindowsShimSpawn(command, args);
   if (shimSpawn) {
     return {

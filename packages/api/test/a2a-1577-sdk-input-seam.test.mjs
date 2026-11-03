@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { ClaudeSdkAgentService } from '../src/domains/cats/services/agents/providers/ClaudeSdkAgentService.ts';
+import { claudeSdkRuntimeFixture } from './helpers/claude-sdk-runtime-fixture.js';
 
 test('real SDK carrier preserves accepted Append with freshness fully retired', { timeout: 5000 }, async () => {
   const calls = [];
@@ -10,6 +11,7 @@ test('real SDK carrier preserves accepted Append with freshness fully retired', 
   let launches = 0;
   let prepared = false;
   const service = new ClaudeSdkAgentService({
+    runtimeResolver: claudeSdkRuntimeFixture,
     model: 'claude-opus-4-6',
     mcpServerPath: '',
     l0CompilerFn: async () => 'identity',

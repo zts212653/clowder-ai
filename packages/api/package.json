@@ -34,6 +34,8 @@
     "rebuild-index": "node dist/scripts/rebuild-index.js",
     "project:init": "node dist/scripts/project-init.js",
     "test:redis": "node ./scripts/with-test-home.mjs node ./scripts/run-isolated-redis-tests.mjs",
+    "test:plugin-feedback": "node scripts/with-test-home.mjs --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 node --import tsx --import ./test/helpers/setup-cat-registry.js --test test/plugin-feedback-host.test.ts test/plugin-runtime-info.test.ts",
+    "test:plugin-feedback:installed": "node scripts/with-test-home.mjs --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 node --import tsx test/plugin-feedback-installed.journey.mts",
     "test:redis:repeat": "node ./scripts/with-test-home.mjs node ./scripts/run-isolated-redis-tests.mjs --repeat 2",
     "test:integration": "node ./scripts/with-test-home.mjs node --test test/integration/*.test.js",
     "test:pty": "pnpm run build && node --import ./test/helpers/setup-cat-registry.js --test --test-timeout=120000 test/f230-pty-driver.test.js",

@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
+import { catRegistry } from '@cat-cafe/shared';
 import { pluginMcpEnvironment } from '../../../../../config/capabilities/plugin-mcp-environment.js';
 import { finalizeCodexAccountEnvironment } from '../../../../../config/codex-account-environment.js';
 import { codexManagedLaunchArgs } from '../../../../../config/codex-managed-launch.js';
@@ -9,6 +10,7 @@ import type { AgentServiceOptions } from '../../types.js';
 import { normalizeToolExecutionPolicy } from '../invocation/tool-execution-policy.js';
 import { normalizeCodexMcpConfigArgs } from './codex-config-overrides.js';
 import { CODEX_LIVE_DISABLED_FEATURES } from './codex-live-policy.js';
+import { captureInvocationL0Input } from './l0-input-capture.js';
 
 const AUTH_KEYS = ['OPENAI_API_KEY', 'OPENAI_ORG_ID', 'OPENAI_ORGANIZATION', 'OPENAI_PROJECT_ID'] as const;
 const MINIMAL_PATH = `${dirname(process.execPath)}:/usr/bin:/bin`;
@@ -43,6 +45,7 @@ export function linkCodexPluginAuth(
 
 export interface PreparedCodexNativeLaunch {
   readonly kind: 'public' | 'scoped-member';
+  readonly model?: string;
   readonly options: AgentServiceOptions;
   readonly env: Record<string, string>;
   readonly args: readonly string[];
@@ -56,6 +59,8 @@ export async function prepareCodexNativeLaunch(
   options: AgentServiceOptions,
   carrier: string,
   frozenPrompt: boolean,
+  catId: string,
+  model?: string,
 ): Promise<PreparedCodexNativeLaunch> {
   const port = options.pluginNativeLaunch;
   if (
@@ -121,6 +126,14 @@ export async function prepareCodexNativeLaunch(
   }
   const captured: AgentServiceOptions = {
     ...options,
+    frozenL0Input:
+      kind === 'scoped-member' && options.frozenL0Input
+        ? options.frozenL0Input
+        : captureInvocationL0Input(
+            kind === 'scoped-member'
+              ? { catId, projection: kind, catConfig: catRegistry.getOrThrow(catId).config, model: model ?? '' }
+              : { catId, projection: 'public' },
+          ),
     signal,
     workingDirectory: canonicalWorkspace,
     callbackEnv,
@@ -237,6 +250,7 @@ export async function prepareCodexNativeLaunch(
     }
     return {
       kind,
+      model,
       options: captured,
       env,
       args: Object.freeze(normalizeCodexMcpConfigArgs(args)),

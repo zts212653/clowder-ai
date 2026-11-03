@@ -306,7 +306,13 @@ for (const scenario of cases) {
       headers: { 'x-cat-cafe-user': 'owner' },
       payload: { threadId: f.thread.id, content, idempotencyKey: randomUUID() },
     };
-    const admitted = await f.app.inject(request);
+    let admitted = await f.app.inject(request);
+    if (preview.json().requiresConfirmation) {
+      assert.equal(admitted.statusCode, 409, admitted.body);
+      assert.equal(f.queue.list(f.thread.id, 'owner').length, 0);
+      request.payload.confirmedTargetCats = preview.json().targetCats;
+      admitted = await f.app.inject(request);
+    }
     assert.equal(admitted.statusCode, 202, admitted.body);
     assert.deepEqual(
       admitted.json().entries.map((entry) => entry.targetCatId),

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -7,6 +8,38 @@ import { test } from 'node:test';
 import { readAheadApi } from './api-startup-read-ahead.mjs';
 import { profileDesktopStartup } from './scripts/profile-desktop-startup.mjs';
 import { createProfileSource } from './test-helpers/profile-source-fixture.mjs';
+
+test(
+  'the installed profile project cannot inherit the source checkout Git repository',
+  { timeout: 30000 },
+  async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'profile-git-boundary-'));
+    let trace;
+    try {
+      execFileSync('git', ['init', '--quiet', root]);
+      const frozen = path.join(root, 'frozen');
+      await fs.mkdir(path.join(frozen, 'api/dist'), { recursive: true });
+      await fs.mkdir(path.join(frozen, 'dependencies'));
+      await fs.writeFile(path.join(frozen, 'api/package.json'), '{"type":"module"}');
+      await fs.writeFile(
+        path.join(frozen, 'api/dist/index.desktop.js'),
+        `
+      import {spawnSync} from 'node:child_process'; import {createServer} from 'node:http';
+      const git=spawnSync('git',['rev-parse','--show-toplevel'],{encoding:'utf8'});
+      if(git.status===0) throw new Error('installed profile inherited the source Git repository: '+git.stdout);
+      createServer((q,r)=>r.end('ok')).listen(Number(process.env.API_SERVER_PORT),'127.0.0.1',()=>globalThis.__clowderStartupMilestone('http-listening'));
+    `,
+      );
+      const receipt = await profileDesktopStartup(await createProfileSource(root), frozen);
+      trace = receipt.profileRoot;
+      assert.ok((await fs.stat(receipt.manifest)).size > 0);
+    } finally {
+      if (trace && !trace.startsWith(root + path.sep)) await fs.rm(trace, { recursive: true, force: true });
+      // Synthetic HTTP fixture only; no persistent database or agent session.
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  },
+);
 
 test(
   'build trace uses an isolated API, produces portable program hints and releases its port',

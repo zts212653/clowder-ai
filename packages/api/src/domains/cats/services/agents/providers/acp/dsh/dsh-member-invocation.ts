@@ -66,6 +66,8 @@ export async function* invokeDshMember(input: {
       userId,
       projection: 'scoped-member',
       runtimeModel: account.model,
+      frozenInput: options.frozenL0Input,
+      requireFrozenInput: true,
     });
     await current();
     const launch = await prepareDshMemberLaunch({ native: input.native, account, identity, member });

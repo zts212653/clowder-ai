@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { parse } from 'smol-toml';
 import { buildCodexNativeEffectGuardArgs } from '../src/domains/cats/services/agents/providers/CodexNativeEffectGuard.js';
 import { prepareClaudeSdkLaunch } from '../src/domains/cats/services/agents/providers/claude-sdk-launch.js';
+import { claudeSdkRuntimeFixture } from './helpers/claude-sdk-runtime-fixture.js';
 
 test('Codex native launch installs both content pre-checks and exposure post checks', () => {
   const config = buildCodexNativeEffectGuardArgs().find((arg) => arg.startsWith('hooks=')) ?? '';
@@ -13,6 +14,7 @@ test('Codex native launch installs both content pre-checks and exposure post che
 
 test('Claude SDK managed settings keep native content hooks for external cwd', async () => {
   const launch = await prepareClaudeSdkLaunch({
+    runtime: claudeSdkRuntimeFixture(),
     catId: 'opus55',
     model: 'fixture',
     prompt: 'hello',

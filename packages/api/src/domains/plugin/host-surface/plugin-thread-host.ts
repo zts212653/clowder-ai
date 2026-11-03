@@ -1,3 +1,4 @@
+import { resolvePersistentProjectPath } from '../../../utils/persistent-project-path.js';
 import type { IThreadStore, Thread } from '../../cats/services/stores/ports/ThreadStore.js';
 import { ExternalPluginRuntimeError } from '../external-runtime/types.js';
 import {
@@ -43,6 +44,7 @@ export interface PluginThreadHost {
   create(input: {
     readonly title: string;
     readonly parentThreadId?: string;
+    readonly projectRef?: string;
     readonly participants?: readonly string[];
   }): Promise<PluginThreadSummary>;
   update(
@@ -230,18 +232,26 @@ export function createPluginThreadHost(input: PluginThreadHostDeps): PluginThrea
         !value ||
         typeof value !== 'object' ||
         Array.isArray(value) ||
-        Object.keys(value).some((key) => !['title', 'parentThreadId', 'participants'].includes(key))
+        Object.keys(value).some((key) => !['title', 'parentThreadId', 'projectRef', 'participants'].includes(key))
       )
-        throw new TypeError('thread input must contain title, parentThreadId or participants only');
+        throw new TypeError('thread input must contain title, parentThreadId, projectRef or participants only');
+      if (value.parentThreadId !== undefined && value.projectRef !== undefined)
+        throw new TypeError('Select parentThreadId or projectRef, not both');
       const requestedTitle = title(value.title);
       const participants =
         value.participants === undefined ? [] : validatePreferredCats(value.participants, input.cats);
       const parent = value.parentThreadId === undefined ? undefined : await requireThread(value.parentThreadId);
+      const project =
+        value.projectRef === undefined
+          ? undefined
+          : await resolvePersistentProjectPath(boundedString(value.projectRef, 'projectRef', 4096));
+      if (project === null)
+        throw new TypeError('projectRef must be an existing directory allowed by Host project policy');
       input.assertCurrent?.();
       const thread = await input.threadStore.create(
         input.ownerUserId,
         requestedTitle,
-        parent?.projectPath ?? input.projectPath,
+        parent?.projectPath ?? project ?? input.projectPath,
         parent?.id,
       );
       if (participants.length) await input.threadStore.addParticipants(thread.id, participants);

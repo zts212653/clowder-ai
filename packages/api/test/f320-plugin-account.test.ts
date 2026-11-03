@@ -83,11 +83,14 @@ for (const carrier of ['exec_json', 'app_server']) {
         },
       };
       if (carrier === 'app_server') {
-        await assert.rejects(prepareCodexNativeLaunch(options, carrier, true), /plugin_native_launch_unavailable/);
+        await assert.rejects(
+          prepareCodexNativeLaunch(options, carrier, true, 'codex'),
+          /plugin_native_launch_unavailable/,
+        );
         return;
       }
       const before = readFileSync(join(f.layout.credentialHome, 'auth.json'), 'utf8');
-      const prepared = await prepareCodexNativeLaunch(options, carrier, true);
+      const prepared = await prepareCodexNativeLaunch(options, carrier, true, 'codex');
       try {
         const home = prepared.env.CODEX_HOME;
         assert.notEqual(home, f.layout.credentialHome);

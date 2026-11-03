@@ -8,6 +8,7 @@ import { createCatId } from '@cat-cafe/shared';
 import { ClaudeSdkAgentService } from '../src/domains/cats/services/agents/providers/ClaudeSdkAgentService.js';
 import { prepareClaudeSdkLaunch } from '../src/domains/cats/services/agents/providers/claude-sdk-launch.js';
 import type { AgentServiceOptions } from '../src/domains/cats/services/types.js';
+import { claudeSdkRuntimeFixture } from './helpers/claude-sdk-runtime-fixture.js';
 
 async function fixture(t: import('node:test').TestContext) {
   const root = await mkdtemp(join(tmpdir(), 'sdk-scoped-'));
@@ -65,12 +66,19 @@ test('the real SDK carrier advertises the bounded member capability without chan
 
 test('SDK preparation freezes the selected account and exact admitted MCP before awaiting scoped identity', async (t) => {
   const f = await fixture(t);
+  f.options.executionPreferences = {
+    configurationSource: 'managed_account',
+    model: 'pinned-claude-model',
+    effort: 'high',
+    nativeAuthentication: false,
+  };
   let compiled: unknown;
   const launch = await prepareClaudeSdkLaunch({
     catId: createCatId('opus'),
     model: 'claude-opus-5-5',
     prompt: 'APPROVED_LOCAL_EVENT',
     abortController: new AbortController(),
+    runtime: claudeSdkRuntimeFixture(),
     options: { ...f.options, sessionId: 'home-session', cliConfigArgs: ['--tools', 'Bash'] },
     l0CompilerFn: async (input) => {
       compiled = input;
@@ -82,7 +90,8 @@ test('SDK preparation freezes the selected account and exact admitted MCP before
   });
   const sdk = launch.sdkOptions;
   assert.equal((compiled as { projection: string }).projection, 'scoped-member');
-  assert.equal(launch.model, 'claude-opus-5-5');
+  assert.equal(launch.model, 'pinned-claude-model');
+  assert.equal((compiled as { runtimeModel: string }).runtimeModel, 'pinned-claude-model');
   assert.deepEqual(sdk.tools, []);
   assert.deepEqual(sdk.allowedTools, ['mcp__scope_game__*']);
   assert.deepEqual(sdk.settingSources, []);
@@ -101,6 +110,21 @@ test('SDK preparation freezes the selected account and exact admitted MCP before
   assert.ok(sdk.extraArgs && Object.hasOwn(sdk.extraArgs, 'disable-slash-commands'));
 });
 
+test('scoped SDK admission captures its runtime without ambient MCP configuration', async (t) => {
+  const f = await fixture(t);
+  const runtime = { path: '/fixture/claude', version: '1.2.3', sha256: 'a'.repeat(64) };
+  const service = new ClaudeSdkAgentService({
+    catId: createCatId('opus'),
+    model: 'fixture-model',
+    runtimeResolver: async () => runtime,
+  });
+  const captured = await service.captureInvocationOptions({
+    toolExecutionPolicy: f.options.toolExecutionPolicy,
+    workingDirectory: f.root,
+  });
+  assert.deepEqual(captured, { claudeSdkRuntime: runtime });
+});
+
 test('revocation while recording an actual SDK launch prevents the query boundary', async (t) => {
   const f = await fixture(t);
   let revoked = false,
@@ -112,6 +136,7 @@ test('revocation while recording an actual SDK launch prevents the query boundar
   const service = new ClaudeSdkAgentService({
     catId: createCatId('opus'),
     model: 'claude-opus-5-5',
+    runtimeResolver: claudeSdkRuntimeFixture,
     l0CompilerFn: async () => 'SCOPED_IDENTITY',
     queryFn: () => {
       queries++;

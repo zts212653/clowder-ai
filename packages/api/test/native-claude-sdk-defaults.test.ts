@@ -1,3 +1,4 @@
+import { claudeSdkRuntimeFixture } from './helpers/claude-sdk-runtime-fixture.js';
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
@@ -17,6 +18,7 @@ test('native SDK inheritance records absent model and effort without invalid emp
   });
   let requested: unknown;
   const result = await prepareClaudeSdkLaunch({
+    runtime: claudeSdkRuntimeFixture(),
     catId: id,
     model: '',
     prompt: 'small goal',
