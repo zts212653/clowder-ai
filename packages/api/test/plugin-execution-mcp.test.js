@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { currentPluginCallContext, withPluginCallContext } from '../src/domains/plugin/carrier/plugin-call-context.ts';
+import { currentPluginCallContext, withPluginCallContext } from '../dist/domains/plugin/carrier/plugin-call-context.js';
 import { executionFixture } from './helpers/module-execution-fixture.js';
 
 const moduleSource = `

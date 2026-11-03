@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { setImmediate } from 'node:timers/promises';
-import { currentPluginCallContext, withPluginCallContext } from '../src/domains/plugin/carrier/plugin-call-context.ts';
+import { currentPluginCallContext, withPluginCallContext } from '../dist/domains/plugin/carrier/plugin-call-context.js';
 import {
   currentOwnerOperation,
   withOwnerOperationInvocation,
-} from '../src/domains/plugin/carrier/plugin-owner-operation-context.ts';
+} from '../dist/domains/plugin/carrier/plugin-owner-operation-context.js';
 import { executionFixture } from './helpers/module-execution-fixture.js';
 
 test('worker-supplied caller edits cannot replace the Host native invocation context', async (t) => {

@@ -223,6 +223,8 @@ export async function openProof({
           source: 'product',
         },
       };
+      if (url.pathname === '/api/plugin-ui' && request.method() === 'GET')
+        return handler.fulfill({ json: { entries: [] } });
       if (!(url.pathname in bodies)) {
         unexpected.push(request.url());
         return handler.fulfill({ status: 404, body: '{}' });

@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import {
   createPluginStorageHost,
   RedisPluginPrivateStorage,
-} from '../src/domains/plugin/host-surface/plugin-private-storage.ts';
+} from '../dist/domains/plugin/host-surface/plugin-private-storage.js';
 
 function fixture(pages) {
   const calls = [];

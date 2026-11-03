@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { RemoteValues } from '../src/domains/plugin/execution-worker/remote-values.ts';
-import { ExternalPluginRuntimeError } from '../src/domains/plugin/external-runtime/types.ts';
+import { RemoteValues } from '../dist/domains/plugin/execution-worker/remote-values.js';
+import { ExternalPluginRuntimeError } from '../dist/domains/plugin/external-runtime/types.js';
 
 function codec() {
   return new RemoteValues({

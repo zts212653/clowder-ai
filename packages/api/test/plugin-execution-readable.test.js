@@ -3,9 +3,9 @@ import { PassThrough, Readable } from 'node:stream';
 import { test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import Fastify from 'fastify';
-import { currentPluginOwnerRequestContext } from '../src/domains/plugin/carrier/plugin-owner-request-context.ts';
-import { DeclaredRuntimeContributions } from '../src/domains/plugin/declared/declared-runtime-contributions.ts';
-import { pluginWebhookForwardingRoutes } from '../src/routes/plugin/plugin-webhook-forwarding-routes.ts';
+import { currentPluginOwnerRequestContext } from '../dist/domains/plugin/carrier/plugin-owner-request-context.js';
+import { DeclaredRuntimeContributions } from '../dist/domains/plugin/declared/declared-runtime-contributions.js';
+import { pluginWebhookForwardingRoutes } from '../dist/routes/plugin/plugin-webhook-forwarding-routes.js';
 import { executionFixture } from './helpers/module-execution-fixture.js';
 
 const readHostStream = `import {Readable} from 'node:stream';

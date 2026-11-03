@@ -15,10 +15,13 @@ import {
   createPluginManagerRuntimeComposition,
 } from '../dist/domains/plugin/index.js';
 import { MemoryConnectorThreadBindingStore } from '../dist/infrastructure/connectors/ConnectorThreadBindingStore.js';
+import { workerObservation } from './helpers/worker-observation.js';
 
 const roots = [];
+const runtimes = [];
 
 afterEach(async () => {
+  for (const runtime of runtimes.splice(0)) await runtime.shutdown('test_done');
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
@@ -39,7 +42,11 @@ async function waitFor(predicate, message) {
 test('production composition delivers concurrent cat replies exactly once to an installed package action', async () => {
   const projectRoot = await tempRoot('cat-cafe-f202-production-subscription-project-');
   const packageRoot = await tempRoot('cat-cafe-f202-production-subscription-package-');
-  const marker = `__f202Subscription_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  const observation = workerObservation(join(projectRoot, 'subscription-observation.json'), {
+    calls: [],
+    lifecycleCalls: [],
+    sequence: [],
+  });
   const pluginId = 'dev.clowder.production-subscription-fixture';
   const manifest = {
     pluginId,
@@ -75,14 +82,15 @@ test('production composition delivers concurrent cat replies exactly once to an 
   await writeFile(
     join(packageRoot, 'dist/plugin.js'),
     [
-      `const state = (globalThis[${JSON.stringify(marker)}] ??= { calls: [], lifecycleCalls: [], sequence: [] });`,
+      observation.source,
       'export default { create() { return {',
       '  async start(host) {',
       '    const thread = await host.threads.create({ title: "Fixture" });',
       '    state.threadId = thread.id;',
+      '    saveState();',
       "    await host.messaging.subscribe({ threadId: thread.id, method: 'fixture.outbound' });",
       '    return {',
-      "      actions: { 'fixture.outbound': async (input) => { if(input.kind==='message') { state.calls.push(input); state.sequence.push('message'); } else { state.lifecycleCalls.push(input); state.sequence.push(input.state); } return {deliveryId:input.deliveryId}; } },",
+      "      actions: { 'fixture.outbound': async (input) => { if(input.kind==='message') { state.calls.push(input); state.sequence.push('message'); } else { state.lifecycleCalls.push(input); state.sequence.push(input.state); } saveState(); return {deliveryId:input.deliveryId}; } },",
       '      stop() {},',
       '    };',
       '  },',
@@ -115,6 +123,7 @@ test('production composition delivers concurrent cat replies exactly once to an 
     threadOwnerUserId: 'owner-1',
     contract: { manifestContractRange: '0.1.0', validateManifest },
   });
+  runtimes.push(runtime);
   scheduler.attach(runtime.subscriptionDelivery);
   const manager = createPluginManagerRuntimeComposition({
     runtime,
@@ -125,7 +134,7 @@ test('production composition delivers concurrent cat replies exactly once to an 
   const installed = await manager.install({ source: { kind: 'local-directory', path: packageRoot } });
   const beforeEnable = (await manager.get(installed.pluginId)).plugin;
   await manager.setEnabled(installed.pluginId, { enabled: true, expectedRevision: beforeEnable.lifecycleRevision });
-  const state = globalThis[marker];
+  let state = observation.read();
   assert.ok(state?.threadId, 'the installed package must reach its Host subscription surface');
 
   await Promise.all([
@@ -146,8 +155,9 @@ test('production composition delivers concurrent cat replies exactly once to an 
       timestamp: 2,
     }),
   ]);
-  await waitFor(() => state.calls.length === 2, 'installed package did not receive both cat replies');
+  await waitFor(() => observation.read().calls.length === 2, 'installed package did not receive both cat replies');
   await new Promise((resolve) => setTimeout(resolve, 20));
+  state = observation.read();
 
   assert.equal(state.calls.length, 2, 'concurrent drains must not duplicate either reply');
   assert.deepEqual(state.calls.map((call) => call.envelope.payload.elements[0].payload.text).sort(), [
@@ -169,7 +179,8 @@ test('production composition delivers concurrent cat replies exactly once to an 
     timestamp: 3,
     extra: { rich: { v: 1, blocks: [card, audio, checklist] } },
   });
-  await waitFor(() => state.calls.length === 3, 'installed package did not receive the rich reply');
+  await waitFor(() => observation.read().calls.length === 3, 'installed package did not receive the rich reply');
+  state = observation.read();
   assert.deepEqual(
     state.calls[2].envelope.payload.elements.map((element) => element.kind),
     ['text', 'rich_block', 'rich_block'],
@@ -193,6 +204,7 @@ test('production composition delivers concurrent cat replies exactly once to an 
   });
   await runtime.lifecycleDelivery.onStreamEnd(state.threadId, '', invocationId);
   await runtime.lifecycleDelivery.notifyDeliveryBatchDone(state.threadId, true, 'succeeded', invocationId);
+  state = observation.read();
   assert.deepEqual(state.sequence.slice(-4), ['started', 'catching_up', 'message', 'settled']);
   assert.equal(state.lifecycleCalls[0].threadId, state.threadId);
   assert.equal(state.lifecycleCalls[0].presentation.actor.displayName, 'Fixture Cat');
@@ -211,6 +223,6 @@ test('production composition delivers concurrent cat replies exactly once to an 
     timestamp: 3,
   });
   await new Promise((resolve) => setTimeout(resolve, 20));
+  state = observation.read();
   assert.equal(state.calls.length, 4, 'disabled packages must be absent from the live delivery set');
-  delete globalThis[marker];
 });

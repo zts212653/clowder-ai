@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { executionMcpFactory } from '../src/domains/plugin/execution-worker/shared-mcp.ts';
+import { executionMcpFactory } from '../dist/domains/plugin/execution-worker/shared-mcp.js';
 
 function factory(worker) {
   return executionMcpFactory({

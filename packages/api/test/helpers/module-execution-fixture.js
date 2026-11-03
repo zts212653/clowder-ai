@@ -2,9 +2,9 @@ import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { BundledPluginRuntimeCarrier } from '../../src/domains/plugin/builtin-runtime/carriers/bundled-runtime-carrier.ts';
-import { ModulePluginRuntime } from '../../src/domains/plugin/builtin-runtime/carriers/module-plugin-runtime.ts';
-import { MemoryPluginInventoryStore } from '../../src/domains/plugin/host-inventory/stores.ts';
+import { BundledPluginRuntimeCarrier } from '../../dist/domains/plugin/builtin-runtime/carriers/bundled-runtime-carrier.js';
+import { ModulePluginRuntime } from '../../dist/domains/plugin/builtin-runtime/carriers/module-plugin-runtime.js';
+import { MemoryPluginInventoryStore } from '../../dist/domains/plugin/host-inventory/stores.js';
 
 export async function executionFixture(t, source, options = {}) {
   const root = await mkdtemp(join(tmpdir(), 'task229-execution-authority-'));
