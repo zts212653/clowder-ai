@@ -312,6 +312,7 @@ describe('R2: delete-guard race via POST /api/messages route', () => {
       async resolveTargetsAndIntent(_msg) {
         return {
           targetCats: ['opus'],
+          routing_warnings: [],
           intent: { intent: 'execute', explicit: false, promptTags: [] },
         };
       },

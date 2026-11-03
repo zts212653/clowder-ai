@@ -80,11 +80,14 @@ test('common send retains default recipient and policy across concurrent retries
   await assert.rejects(queue.send(messages, args[0], { ...args[1], targetCats: ['codex'] }), /identity conflict/);
   assert.equal(queue.list('thread', 'owner').length, 2);
 });
-test('ordinary unavailable recipient falls back without rewriting prose; exact recipients stay exact', async () => {
+test('common send keeps an unavailable named recipient without rewriting prose or redirecting', async () => {
   const f = fixture({ unavailable: true });
   const result = await f.queue.send(f.messages, ...envelope([], '@opus hello'));
-  assert.deepEqual(result.entry.targets, ['codex']);
+  assert.deepEqual(result.entry.targets, ['opus']);
   assert.equal(result.message.content, '@opus hello');
+  const replay = await f.queue.send(f.messages, ...envelope([], '@opus hello'));
+  assert.equal(replay.message.id, result.message.id);
+  assert.deepEqual(replay.entry.targets, ['opus']);
   assert.deepEqual(await f.router.resolveSendTargets(['opus'], 'thread', '@opus hello', true), ['opus']);
   await assert.rejects(f.router.resolveSendTargets(['not-a-catalog-id'], 'thread'), /identity/);
 });
@@ -102,11 +105,11 @@ for (const [content, expected] of [
     assert.equal(result.entry.payload.routingWarnings, undefined);
   });
 }
-test('no available fallback persists the source and existing drain produces explicit failure', async () => {
+test('unavailable named recipient persists its identity and drain settles that exact target', async () => {
   const f = fixture({ noServices: true });
   const result = await f.queue.send(f.messages, ...envelope([], '@opus hello'));
   assert.equal(result.outcome, 'enqueued');
-  assert.deepEqual(result.entry.targets, []);
+  assert.deepEqual(result.entry.targets, ['opus']);
   assert.equal(f.messages.getById(result.message.id).content, '@opus hello');
   const processor = new QueueProcessor({
     queue: f.queue,
@@ -120,9 +123,9 @@ test('no available fallback persists the source and existing drain produces expl
   assert.equal(f.queue.list('thread', 'owner').length, 0);
   const failure = f.messages
     .getByThread('thread')
-    .find((message) => message.lifecycle?.reason === 'no_available_target');
+    .find((message) => message.lifecycle?.reason === 'invalid_explicit_target');
   assert.ok(failure);
-  assert.match(failure.content, /没有可用/);
+  assert.match(failure.content, /指定的接收对象当前无效/);
 });
 test('HTTP unavailable member needs confirmation and same-ID retry retains the approved target', async (t) => {
   const f = fixture({ unavailable: true });

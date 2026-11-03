@@ -236,7 +236,7 @@ describe('cats routes read runtime catalog', { concurrency: false }, () => {
       assert.equal(res.statusCode, 200, res.body);
       const body = JSON.parse(res.body);
       const runtimeCat = body.cats.find((cat) => cat.id === 'runtime-cat');
-      assert.equal(runtimeCat.isDefaultResponder, true);
+      assert.equal(runtimeCat.isDefaultResponder, false, 'catalog-only identity is not a registered runtime responder');
       assert.deepEqual(runtimeCat.messageDeliveryCapabilities, { guideReply: true });
       const other = body.cats.find((cat) => cat.id !== 'runtime-cat');
       if (other) assert.deepEqual(other.messageDeliveryCapabilities, { guideReply: false });
