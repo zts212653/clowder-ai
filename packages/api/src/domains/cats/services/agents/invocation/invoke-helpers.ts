@@ -67,6 +67,12 @@ export function classifyResumeFailure(message: string | undefined): ResumeFailur
   if (/\b(session[- _]*(was[- _]*)?interrupted|already[- _]*interrupted|session[- _]*terminated)\b/i.test(message)) {
     return 'missing_session';
   }
+  // #300: Gemini exit code 42 = "no conversation found" — treat as missing_session
+  // so retry-without-session can recover automatically.
+  // Scoped to "Gemini CLI:" prefix to avoid cross-provider false positives.
+  if (/Gemini CLI:.*CLI 异常退出 \(code:\s*42\b/i.test(message)) {
+    return 'missing_session';
+  }
   if (/CLI 异常退出 \(code:\s*(?:\d+|null)(?:,\s*signal:\s*[^)]+)?\)/i.test(message)) {
     return 'cli_exit';
   }
