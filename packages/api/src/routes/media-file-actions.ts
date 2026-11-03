@@ -68,8 +68,9 @@ export function registerMediaFileActions(app: FastifyInstance, mediaPath: string
       const info = await stat(file.path);
       if (!info.isFile() && !(deps.allowDirectoryReveal && info.isDirectory()))
         return reply.code(404).send({ error: 'not_found' });
-      const canOpen = info.isFile() && file.canOpen !== false;
-      const canReveal = file.canReveal !== false;
+      const desktopActions = process.platform === 'darwin';
+      const canOpen = desktopActions && info.isFile() && file.canOpen !== false;
+      const canReveal = desktopActions && file.canReveal !== false;
       const application = canOpen ? await defaultApp(file.mime) : {};
       const home = homedir();
       return {
