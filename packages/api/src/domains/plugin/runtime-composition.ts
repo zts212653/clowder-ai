@@ -46,6 +46,7 @@ import { StaticPluginRuntime } from './builtin-runtime/carriers/static-plugin-ru
 import { PluginRuntimeCarrierRouter } from './carrier/runtime-carrier.js';
 import { ContentEditorPluginRuntime } from './content-editor-runtime/runtime.js';
 import { ContentEditorSemanticWorker } from './content-editor-runtime/semantic-worker.js';
+import { recoverAgentClientMetadata } from './declared/agent-client-metadata.js';
 import type { CloudConversationHostRegistry } from './declared/cloud-conversation-host-registry.js';
 import type { AgentSessionProviderLifecycle } from './declared/declared-agent-session-providers.js';
 import type { DeclaredScheduleTaskRunner } from './declared/declared-runtime-contributions.js';
@@ -234,6 +235,8 @@ export interface DormantPluginRuntimeComposition {
   readonly inventoryStore: FilePluginInventoryStore;
   readonly brokerStore: FileHostBrokerStore;
   readonly inventory: HostInventoryControlPlane;
+  /** Stored values shared with execution; consumers apply manifest defaults themselves. */
+  readonly configuration: Pick<PluginRuntimeConfigurationPort, 'readConfig'>;
   readonly broker: HostBrokerControlPlane;
   readonly supervisor: PluginRuntimeCarrierRouter;
   /** The child-process carrier itself. Exposed so the Host's one pre-active budget
@@ -638,6 +641,7 @@ export function createDormantPluginRuntimeComposition(
     inventoryStore,
     brokerStore,
     inventory,
+    configuration,
     broker,
     supervisor,
     settingsInvocation: moduleRuntime.invokeSettings,
@@ -661,6 +665,11 @@ export function createDormantPluginRuntimeComposition(
     mcpConfigIO,
     ...(options.contract === undefined ? {} : { contract: options.contract }),
     async recoverAfterRestart({ desktopWindowsAfter } = {}) {
+      await recoverAgentClientMetadata({
+        inventory: inventoryStore,
+        packages,
+        onFailure: (pluginId) => moduleLogger.warn({ pluginId }, 'agent client metadata recovery failed'),
+      });
       const [inventorySnapshot] = await Promise.all([inventoryStore.snapshot(), brokerStore.snapshot()]);
       const brokerSessions = await supervisor.recoverAfterRestart();
       const isDesktopWindow = (instance: PluginInstanceRecord) => {

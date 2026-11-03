@@ -25,21 +25,35 @@ export async function resolveAgentClientLibrary(input: {
     }
     throw new Error('ACP 客户端缺少配置项声明');
   }
-  const field = input.admission.packageRecord.manifest.configuration?.find((field) => field.key === configurationKey);
-  if (!field || field.kind !== 'string') throw new Error('ACP 客户端目录必须引用声明的 string 配置项');
-  const stored = await input.configuration.readConfig(input.admission.instance.pluginInstanceId, configurationKey);
+  const { value, ownerSaved } = await readAgentClientLibraryConfiguration(input);
   if ('id' in input.declaration) {
-    const result = parseAgentProviderConfiguration(stored ?? field.default ?? '{}', input.declaration, {
+    const result = parseAgentProviderConfiguration(value, input.declaration, {
       packageRoot: input.packageRoot,
     });
     if (!result.ok) throw new Error(`ACP 客户端配置无效，请在插件配置中修复：${result.reason}`);
-    if (typeof stored !== 'string' && result.declaration.acp.permissionPolicy === 'auto_allow')
+    if (!ownerSaved && result.declaration.acp.permissionPolicy === 'auto_allow')
       throw new Error('ACP 权限自动允许需要 owner 显式保存选择，不能来自插件默认配置');
     return [result.declaration];
   }
-  const result = parseAgentClientProfiles(stored ?? field.default ?? '[]', { packageRoot: input.packageRoot });
+  const result = parseAgentClientProfiles(value, { packageRoot: input.packageRoot });
   if (!result.ok) throw new Error(`ACP 客户端配置无效，请在插件配置中修复：${result.reason}`);
-  if (typeof stored !== 'string' && result.profiles.some((profile) => profile.acp.permissionPolicy === 'auto_allow'))
+  if (!ownerSaved && result.profiles.some((profile) => profile.acp.permissionPolicy === 'auto_allow'))
     throw new Error('ACP 权限自动允许需要 owner 显式保存选择，不能来自插件默认配置');
   return result.profiles;
+}
+
+export async function readAgentClientLibraryConfiguration(input: {
+  declaration: AgentClientLibraryDeclaration | AgentProviderDeclaration;
+  admission: PluginRuntimeAdmission;
+  configuration: Pick<PluginRuntimeConfigurationPort, 'readConfig'>;
+}) {
+  const { configurationKey } = input.declaration;
+  const field = input.admission.packageRecord.manifest.configuration?.find((field) => field.key === configurationKey);
+  if (!configurationKey || !field || field.kind !== 'string')
+    throw new Error('ACP 客户端目录必须引用声明的 string 配置项');
+  const stored = await input.configuration.readConfig(input.admission.instance.pluginInstanceId, configurationKey);
+  return {
+    value: stored ?? field.default ?? ('id' in input.declaration ? '{}' : '[]'),
+    ownerSaved: typeof stored === 'string',
+  };
 }

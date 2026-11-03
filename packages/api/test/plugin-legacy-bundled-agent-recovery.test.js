@@ -92,7 +92,11 @@ test('default Agent Session discovery preserves legacy bundled Dot intent across
       assert.equal(after.instances[0].pluginInstanceId, h.before.instances[0].pluginInstanceId);
       assert.equal(after.instances[0].lifecycleRevision, h.before.instances[0].lifecycleRevision);
       assert.equal(after.instances[0].lastRuntimeError, undefined);
-      assert.deepEqual(after.packages, h.before.packages, 'immutable package admission must stay unchanged');
+      assert.deepEqual(
+        after.packages,
+        h.before.packages.map((record) => ({ ...record, agentClientMetadata: null })),
+        'only non-executable catalog metadata is backfilled; immutable package admission stays unchanged',
+      );
       assert.deepEqual(after.grants, h.before.grants);
     } finally {
       await runtime.shutdown();

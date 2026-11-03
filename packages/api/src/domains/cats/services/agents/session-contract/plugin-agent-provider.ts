@@ -1,7 +1,7 @@
 /** Internal / unstable: data only. The Host owns transport construction. */
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { z } from 'zod';
-import { isExplicitAcpBootstrapRoot } from '../providers/acp/bootstrap/acp-bootstrap-inspect.js';
+import { isExplicitAcpBootstrapRoot } from '../providers/acp/bootstrap/acp-bootstrap-root.js';
 import type { SessionImplementationRef } from './implementation-registry.js';
 export const AGENT_PROVIDER_DECLARATION_FILE = 'agent-provider.json';
 const safeText = z
@@ -41,7 +41,7 @@ export function parseAgentProviderDeclaration(
     const library = z
       .strictObject({
         configurationKey: configurationKeySchema,
-        presets: z.array(profileSchema).max(16).optional(),
+        presets: z.array(agentClientProfileSchema).max(16).optional(),
       })
       .safeParse(raw);
     if (!library.success) return invalid;
@@ -85,18 +85,22 @@ export function parseAgentProviderDeclaration(
 }
 
 /** A single client's owner configuration may override launch fields, never its identity or transport. */
+export function readAgentProviderConfiguration(raw: unknown, acp: AgentProviderDeclaration['acp']) {
+  if (typeof raw !== 'string' || Buffer.byteLength(raw) > 65536) throw new Error('客户端配置须为 64 KiB 以内的 JSON');
+  const overrides = acpSchema.partial().parse(JSON.parse(raw));
+  if (acp.permissionPolicy === 'auto_allow' && overrides.permissionPolicy === undefined)
+    throw new Error('ACP 权限自动允许需要 owner 显式保存选择，不能继承插件声明');
+  return { ...acp, ...overrides };
+}
+
 export function parseAgentProviderConfiguration(
   raw: unknown,
   declaration: AgentProviderDeclaration,
   ctx: { packageRoot: string },
 ): { ok: true; declaration: AgentProviderDeclaration } | { ok: false; reason: string } {
   try {
-    if (typeof raw !== 'string' || Buffer.byteLength(raw) > 65536) throw new Error('客户端配置须为 64 KiB 以内的 JSON');
-    const overrides = acpSchema.partial().parse(JSON.parse(raw));
-    if (declaration.acp.permissionPolicy === 'auto_allow' && overrides.permissionPolicy === undefined)
-      throw new Error('ACP 权限自动允许需要 owner 显式保存选择，不能继承插件声明');
     const parsed = parseAgentProviderDeclaration(
-      { id: declaration.id, transport: 'acp', acp: { ...declaration.acp, ...overrides } },
+      { id: declaration.id, transport: 'acp', acp: readAgentProviderConfiguration(raw, declaration.acp) },
       ctx,
     );
     if (!parsed.ok) return { ok: false, reason: parsed.reason };
@@ -107,23 +111,32 @@ export function parseAgentProviderConfiguration(
   }
 }
 
-const profileSchema = z.strictObject({
+export const agentClientProfileSchema = z.strictObject({
   id: z.string().regex(/^[a-z0-9][a-z0-9._-]{0,63}$/),
   name: safeText.min(1).max(100),
   ...acpSchema.shape,
 });
-export type AgentClientProfile = z.infer<typeof profileSchema>;
+export type AgentClientProfile = z.infer<typeof agentClientProfileSchema>;
+
+/** Shape validation shared by owner display metadata and executable admission.
+ * Callers preparing execution must still use parseAgentClientProfiles with its verified root. */
+export function readAgentClientProfileList(raw: unknown) {
+  if (typeof raw !== 'string' || Buffer.byteLength(raw) > 65536) throw new Error('客户端配置须为 64 KiB 以内的 JSON');
+  const profiles = z.array(agentClientProfileSchema).max(32).parse(JSON.parse(raw));
+  const ids = new Set<string>();
+  return profiles.map((profile) => {
+    if (ids.has(profile.id)) throw new Error(`客户端 ID 重复：${profile.id}`);
+    ids.add(profile.id);
+    return profile;
+  });
+}
 export function parseAgentClientProfiles(
   raw: unknown,
   ctx: { packageRoot: string },
 ): { ok: true; profiles: AgentProviderDeclaration[] } | { ok: false; reason: string } {
   try {
-    if (typeof raw !== 'string' || Buffer.byteLength(raw) > 65536) throw new Error('客户端配置须为 64 KiB 以内的 JSON');
-    const profiles = z.array(profileSchema).max(32).parse(JSON.parse(raw));
-    const ids = new Set<string>();
+    const profiles = readAgentClientProfileList(raw);
     const declarations = profiles.map(({ id, name, ...acp }) => {
-      if (ids.has(id)) throw new Error(`客户端 ID 重复：${id}`);
-      ids.add(id);
       const parsed = parseAgentProviderDeclaration({ id, transport: 'acp', acp }, ctx);
       if (!parsed.ok) throw new Error(parsed.reason);
       return { id, name, transport: 'acp' as const, acp };
