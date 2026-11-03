@@ -3,6 +3,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CatData } from '@/hooks/useCatData';
 import type { ChatMessage as ChatMessageType } from '@/stores/chatStore';
+import { BriefingCard } from '../rich/BriefingCard';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 vi.mock('@/hooks/useCoCreatorConfig', () => ({
@@ -64,7 +65,7 @@ describe('ChatMessage ContextBriefing projection', () => {
     vi.restoreAllMocks();
   });
 
-  it('snapshots the typed card as visible and collapsed by default', () => {
+  it('keeps the typed card visible while hiding navigation and raw details until expanded', () => {
     const summary = '看到 13 条 · 省略 8 条 · 锚点 3 条 · 记忆 5 sessions · 证据 3 条';
     act(() => {
       root.render(
@@ -102,20 +103,103 @@ describe('ChatMessage ContextBriefing projection', () => {
     });
 
     const cardButton = container.querySelector('button');
-    expect({
-      messageId: container.querySelector('[data-message-id]')?.getAttribute('data-message-id') ?? null,
-      collapsedHeader: cardButton?.textContent?.replace(/\s+/g, ' ').trim() ?? null,
-      navigationVisible: ['传球宪宪 → 砚砚', '真相源F263', '下一步恢复 typed 卡'].every((text) =>
-        container.textContent?.includes(text),
+    expect(container.querySelector('[data-message-id]')?.getAttribute('data-message-id')).toBe('context-briefing-1');
+    expect(cardButton?.textContent).toContain('上下文交接');
+    expect(container.textContent).toContain('接收猫：未记录');
+    expect(cardButton?.getAttribute('aria-expanded')).toBe('false');
+    expect(container.textContent).not.toContain('恢复 typed 卡');
+    expect(container.querySelector('[data-testid="briefing-expanded-details"]')).toBeNull();
+
+    act(() => cardButton?.click());
+    expect(cardButton?.getAttribute('aria-expanded')).toBe('true');
+    expect(container.textContent).toContain('F263');
+    expect(container.textContent).toContain('恢复 typed 卡');
+    expect(container.querySelector('[data-testid="briefing-expanded-details"]')).not.toBeNull();
+
+    act(() => cardButton?.click());
+    expect(cardButton?.getAttribute('aria-expanded')).toBe('false');
+    expect(container.textContent).not.toContain('恢复 typed 卡');
+  });
+
+  it('shows the recorded receiver and coverage while keeping raw commands and status codes out of the default view', () => {
+    act(() =>
+      root.render(
+        React.createElement(BriefingCard, {
+          block: {
+            kind: 'card',
+            v: 1,
+            id: 'modern',
+            title: '砚砚 → 你 · threadId=long-thread',
+            meta: {
+              kind: 'context_briefing',
+              receiverCatId: 'kimi',
+              receiverDisplayName: '墨墨',
+              coverageSummary: '近期消息 5 条 · 历史略过 42 条',
+            },
+            fields: [
+              { label: '传球', value: '砚砚 → 你 (15:20 UTC)' },
+              { label: '真相源', value: 'F148 spec — docs/features/F148.md' },
+              { label: '下一步', value: 'cat_cafe_search_evidence({ threadId: "long-thread" })' },
+              { label: '呈现', value: 'T0 7 · T1 0 · T2 1 · invalid 0' },
+            ],
+            bodyMarkdown: '保留的完整交接记录',
+          },
+        }),
       ),
-      expandedDetailsVisible: Boolean(container.querySelector('[data-testid="briefing-expanded-details"]')),
-    }).toMatchInlineSnapshot(`
-      {
-        "collapsedHeader": "iconContext Briefing·${summary}",
-        "expandedDetailsVisible": false,
-        "messageId": "context-briefing-1",
-        "navigationVisible": true,
-      }
-    `);
+    );
+    expect(container.textContent).toContain('接收猫：墨墨');
+    expect(container.textContent).toContain('近期消息 5 条 · 历史略过 42 条');
+    expect(container.textContent).not.toMatch(/threadId|cat_cafe_|T0|→ 你/);
+    act(() => container.querySelector('button')?.click());
+    expect(container.textContent).toContain('砚砚 → 墨墨');
+    expect(container.textContent).toContain('F148 spec');
+    const diagnostics = container.querySelector('details');
+    expect(diagnostics?.open).toBe(false);
+    expect(diagnostics?.textContent).toContain('cat_cafe_search_evidence');
+    act(() => container.querySelector('summary')?.click());
+    expect(diagnostics?.open).toBe(true);
+    expect(diagnostics?.textContent).toContain('T0 7');
+  });
+
+  it.each([
+    { meta: undefined, receiver: '未记录' },
+    { meta: { receiverCatId: 'cat-id' }, receiver: 'cat-id' },
+    { meta: { receiverCatId: {}, receiverDisplayName: 7, coverageSummary: [] }, receiver: '未记录' },
+  ])('does not guess missing identity or counts from old card text ($receiver)', ({ meta, receiver }) => {
+    act(() =>
+      root.render(
+        React.createElement(BriefingCard, {
+          contextBriefing: true,
+          block: { kind: 'card', v: 1, id: 'legacy', title: '某猫 → 你 · 看到 999 条', meta },
+        }),
+      ),
+    );
+    expect(container.textContent).toContain(`接收猫：${receiver}`);
+    expect(container.textContent).not.toContain('999');
+    expect(container.textContent).not.toContain('某猫');
+    act(() => container.querySelector('button')?.click());
+    expect(container.textContent).toContain('某猫 → 你 · 看到 999 条');
+  });
+
+  it('preserves the title and fields of other briefing cards', () => {
+    act(() =>
+      root.render(
+        React.createElement(BriefingCard, {
+          block: {
+            kind: 'card',
+            v: 1,
+            id: 'other',
+            title: '值班交接',
+            fields: [{ label: '轮次', value: '第 2 轮' }],
+            bodyMarkdown: '完整值班记录',
+          },
+        }),
+      ),
+    );
+    expect(container.querySelector('button')?.textContent).toContain('值班交接');
+    expect(container.textContent).toContain('第 2 轮');
+    expect(container.textContent).not.toContain('接收猫');
+    act(() => container.querySelector('button')?.click());
+    expect(container.textContent).toContain('完整值班记录');
   });
 });

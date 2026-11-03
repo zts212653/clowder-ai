@@ -118,6 +118,8 @@ function formatPresentationCounts(projection: ContextSurfaceProjection): string 
 
 /** Options for buildBriefingMessage */
 interface BriefingMessageOptions {
+  receiverCatId?: string;
+  receiverDisplayName?: string;
   threadMemorySummary?: string;
   anchorSummaries?: string[];
   baton?: BatonContext;
@@ -137,7 +139,7 @@ export function buildBriefingMessage(
   threadId: string,
   options?: BriefingMessageOptions,
 ): AppendMessageInput {
-  const { summary, richBlock } = formatContextBriefing(
+  const { summary } = formatContextBriefing(
     coverageMap,
     options?.threadMemorySummary,
     options?.anchorSummaries,
@@ -245,14 +247,14 @@ export function buildBriefingMessage(
           ]
         : []),
     ],
-    ...(options?.contextSurfaceProjection
-      ? {
-          meta: {
-            kind: 'context_briefing',
-            contextSurfaceProjection: options.contextSurfaceProjection,
-          },
-        }
-      : {}),
+    meta: {
+      kind: 'context_briefing',
+      ...(options?.receiverCatId ? { receiverCatId: options.receiverCatId } : {}),
+      ...(options?.receiverDisplayName ? { receiverDisplayName: options.receiverDisplayName } : {}),
+      coverageSummary: `近期消息 ${coverageMap.burst.count} 条 · 历史略过 ${coverageMap.omitted.count} 条`,
+      coverageDetails: summary,
+      ...(options?.contextSurfaceProjection ? { contextSurfaceProjection: options.contextSurfaceProjection } : {}),
+    },
   };
 
   const rich: RichMessageExtra = { v: 1, blocks: [card] };

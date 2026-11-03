@@ -982,6 +982,8 @@ async function* routeParallelPrepared(
               : undefined;
             pendingBriefingInput = buildBriefingMessage(inc.coverageMap, threadId, {
               ...inc.briefingContext,
+              receiverCatId: catId,
+              receiverDisplayName: catConfig?.displayName,
               ...(contextSurfaceProjection ? { contextSurfaceProjection } : {}),
             });
           } else {
