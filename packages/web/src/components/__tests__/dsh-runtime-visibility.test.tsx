@@ -9,13 +9,16 @@ import { useRuntimeCatalog } from '../settings/members/useRuntimeCatalog';
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
-it('allows a slow ACP catalog to finish, ends a failed refresh and permits retry', async () => {
+it.each([
+  'acp:dsh',
+  'plugin:official.codeagent/codeagent',
+])('allows slow %s discovery to finish, ends a failed refresh and permits retry', async (runtimeId) => {
   const pending: Array<{ resolve(value: Response): void; reject(reason: Error): void }> = [];
   vi.mocked(apiFetch).mockImplementation(() => new Promise((resolve, reject) => pending.push({ resolve, reject })));
   const host = document.createElement('div');
   const root = createRoot(host);
   function Catalog({ refresh = 0 }) {
-    return <output>{JSON.stringify(useRuntimeCatalog('acp:dsh', 'dsh', '', '', refresh))}</output>;
+    return <output>{JSON.stringify(useRuntimeCatalog(runtimeId, 'dsh', '', '', refresh))}</output>;
   }
   const snapshot = () => JSON.parse(host.textContent || '{}');
   try {
@@ -114,6 +117,7 @@ it('shows the reported ACP route on the inherited model choice without changing 
     expect(model?.textContent).toContain('跟随 DSH 设置');
     await act(async () => (model as HTMLButtonElement).click());
     expect(host.querySelector('[role=option]')?.textContent).toContain('Custom Gateway / Model');
+    expect(host.querySelector('[role=option]')?.textContent).toContain('客户端回报');
     expect(host.textContent).toContain('客户端回报');
     const inspect = [...host.querySelectorAll('button')].find((button) => button.textContent === '读取 DSH 配置');
     await act(async () => inspect?.click());

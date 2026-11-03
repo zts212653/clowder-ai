@@ -94,6 +94,8 @@ export function MemberRuntimeFields({
   const defaultModelLabel =
     catalog?.defaultModelLabel ?? catalog?.models.find((item) => item.value === defaultModel)?.label ?? defaultModel;
   const defaultEffort = catalog?.defaultEffort ?? (!form.accountRef ? selected?.configuredEffort : undefined);
+  const defaultModelSource =
+    catalog?.defaultModelStatus === 'reported' ? t('客户端回报', 'Reported by client') : t('配置', 'Configured');
   const models = catalog?.models.length
     ? catalog.models
     : (form.accountRef ? (identity?.models ?? []) : (selected?.models ?? [])).map((value) => ({ value, label: value }));
@@ -233,7 +235,7 @@ export function MemberRuntimeFields({
           options={models}
           onChange={(defaultModel) => patch({ defaultModel })}
           inheritLabel={follow}
-          inheritDetail={defaultModel ? t(`配置：${defaultModelLabel}`, `Configured: ${defaultModelLabel}`) : undefined}
+          inheritDetail={defaultModel ? `${defaultModelSource}：${defaultModelLabel}` : undefined}
           searchable
           allowCustom
           english={t('zh', 'en') === 'en'}
@@ -287,7 +289,7 @@ export function MemberRuntimeFields({
           <p>
             {t(`已读取 ${models.length} 个模型`, `Read ${models.length} models`)}
             {!form.defaultModel && defaultModel
-              ? ` · ${t('客户端回报', 'Reported by client')}：${defaultModelLabel}${defaultEffort ? ` · ${defaultEffort}` : ''}`
+              ? ` · ${defaultModelSource}：${defaultModelLabel}${defaultEffort ? ` · ${defaultEffort}` : ''}`
               : ''}
           </p>
         ) : (

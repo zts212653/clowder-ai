@@ -53,9 +53,9 @@ export function useRuntimeCatalog(
           refresh: force,
         }),
       },
-      !plugin && (runtimeId === 'dsh' || runtimeId === 'pi' || runtimeId.startsWith('acp:'))
-        ? { mutationTimeoutMs: 60_000 }
-        : undefined,
+      ...(plugin || runtimeId === 'dsh' || runtimeId === 'pi' || runtimeId.startsWith('acp:')
+        ? ([{ mutationTimeoutMs: 60_000 }] as const)
+        : ([] as const)),
     )
       .then(async (response) => {
         if (!response.ok) throw Error('catalog');

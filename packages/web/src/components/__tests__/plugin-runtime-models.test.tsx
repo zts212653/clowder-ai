@@ -28,7 +28,9 @@ it('discovers plugin models using the stable ref and keeps inherited model choic
   }
   try {
     await act(async () => root.render(<Catalog />));
-    expect(apiFetch).toHaveBeenCalledWith('/api/agent-providers/models', expect.anything());
+    expect(apiFetch).toHaveBeenCalledWith('/api/agent-providers/models', expect.anything(), {
+      mutationTimeoutMs: 60_000,
+    });
     const options = vi.mocked(apiFetch).mock.calls[0][1];
     expect(JSON.parse(String(options?.body))).toMatchObject({ ref });
     expect(JSON.parse(String(options?.body))).not.toHaveProperty('command');
