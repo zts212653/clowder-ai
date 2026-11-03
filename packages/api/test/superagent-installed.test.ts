@@ -32,6 +32,7 @@ import {
 } from '../src/domains/plugin/runtime-composition.js';
 import type { TaskSpec_P1 } from '../src/infrastructure/scheduler/types.js';
 import { assertRedisIsolationOrThrow } from './helpers/redis-test-helpers.js';
+import { assertSuperagentHostFailure } from './helpers/superagent-host-failure.js';
 import './helpers/setup-cat-registry.js';
 
 const archive = process.env.SUPERAGENT_ARCHIVE_PATH;
@@ -274,6 +275,14 @@ test(
     assert.notEqual(work.threadId, main.threadId);
     assert.equal(work.ownerCatId, 'opus');
     assert.ok(work.entrustedWork?.admission.sourceRefs[0].startsWith('message:'));
+    await assertSuperagentHostFailure(runtime, first.id, {
+      messages,
+      tasks,
+      work,
+      tick,
+      pause: () => operation('pause', 'pause'),
+    });
+    await operation('activity', 'enable', {}, true);
     await runtime.shutdown('host_restart');
     runtime = createRuntime();
     composition = manager();
@@ -330,6 +339,7 @@ test(
         'cross-thread-feedback',
         'original-source-delivery',
         'owner-acceptance',
+        'host-failure-message-correlation',
       ],
       notVerified: ['real-model-judgment', 'real-code-execution', 'browser', 'macOS'],
     };
