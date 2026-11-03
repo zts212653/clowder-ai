@@ -89,10 +89,10 @@ export function resolveKimiEffortLevel(
 ): string | null | undefined {
   if (declaredEfforts !== undefined) {
     if (!declaredEfforts?.length) return null;
-    const inherited =
-      preferences?.configurationSource === 'native_tool'
-        ? preferences.effort
-        : (preferences?.effort ?? getCatEffort(catId, undefined, 'kimi', effectiveModel));
+    // Frozen platform defaults are not a member choice. With declared tiers,
+    // leave their resolution to the CLI instead of validating a synthesized high.
+    const memberEffort = preferences ? preferences.effort : catRegistry.tryGet(catId)?.config.cli?.effort?.trim();
+    const inherited = preferences?.effortSource === 'platform_default' ? undefined : memberEffort;
     const selected = override && declaredEfforts.includes(override) ? override : inherited;
     if (!selected) return undefined;
     if (!declaredEfforts.includes(selected)) throw new Error(`kimi_effort_unsupported:${selected}`);

@@ -14,6 +14,9 @@ export function captureMemberExecutionPreferences(catId: string, config: CatConf
       (config.configurationSource === 'native_tool'
         ? ''
         : (normalizeCliEffortForProvider(config.clientId, undefined) ?? 'high')),
+    ...(config.clientId === 'kimi'
+      ? { effortSource: config.cli?.effort?.trim() ? ('member' as const) : ('platform_default' as const) }
+      : {}),
     nativeAuthentication: usesNativeToolConfiguration(config),
   });
 }
