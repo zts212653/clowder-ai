@@ -46,7 +46,7 @@ function getToggle(): HTMLButtonElement {
 }
 
 function getMenu(): HTMLDivElement | null {
-  return container.querySelector('.absolute');
+  return container.querySelector('[role="menu"][aria-label="导出格式"]');
 }
 
 function getMenuButtons(): HTMLButtonElement[] {
