@@ -99,8 +99,6 @@ const nextConfig = {
     return config;
   },
   async rewrites() {
-    // The isolated design server serves synthetic bootstrap locally; never proxy back to itself.
-    if (process.env.NODE_ENV !== 'production' && process.env.SUPERAGENT_PREVIEW_FIXTURES === '1') return [];
     return [
       {
         source: '/api/:path*',

@@ -2,9 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { ShellGlyph } from '@/components/shell/ShellIcons';
-import { useSidebarProjectionStore } from '@/stores/sidebarProjectionStore';
-import { useSidebarStore } from '@/stores/sidebarStore';
-import { previewRows, sampleThreads } from './fixtures';
+import { sampleThreads } from './fixtures';
 import styles from './preview.module.css';
 import { type PreviewScene, useSuperagentPreview } from './state';
 
@@ -18,11 +16,6 @@ export function SuperagentPreview() {
   const enabled = scene === 'active';
   const configured = !['uninstalled', 'setup'].includes(scene);
   const status = { uninstalled: '未安装', setup: '待设置', active: '监听中', paused: '已暂停', error: '不可用' }[scene];
-
-  useEffect(() => {
-    useSidebarStore.getState().open();
-    useSidebarProjectionStore.getState().applySidebarSnapshot(previewRows, 1);
-  }, []);
 
   useEffect(() => {
     if (scopeOpen) dialog.current?.showModal();
