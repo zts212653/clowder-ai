@@ -53,6 +53,10 @@ function hasCredentialAssignment(line: string): boolean {
     /"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\\.|(?:\[[\w.]+\])?\$(?:\{[\w:.-]+\}|[\w:.-]+)|[\w.-]+:[\w.-]+(?=\s*=)|[\w.-]+|[^\s]/g;
   const valuePrefix = /\s*["']?/y;
   const valueRun = /[A-Za-z0-9_\-/.+=]+/y;
+  const declarationStart = /\s*(?=[A-Za-z_$[{])/y;
+  const modifierStart = /\s*(?=[^\s:])/y;
+  const declarationDepths: number[] = [];
+  let syntaxDepth = 0;
   let target = '';
   let validPrefix = true;
   let declaration = false;
@@ -70,6 +74,12 @@ function hasCredentialAssignment(line: string): boolean {
 
   for (let token = tokens.exec(text); token; token = tokens.exec(text)) {
     let word = token[0];
+    if (word === ')' || word === ']' || word === '}') syntaxDepth = Math.max(0, syntaxDepth - 1);
+    while (declarationDepths.length > 0 && declarationDepths[declarationDepths.length - 1] > syntaxDepth) {
+      declarationDepths.pop();
+    }
+    if (word === ';' && declarationDepths.at(-1) === syntaxDepth) declarationDepths.pop();
+    if (word === '(' || word === '[' || word === '{') syntaxDepth++;
     // In a JS/TS declaration this colon starts a type, not a shell namespace.
     if (typedDeclaration && /^[\w.-]+:[\w.-]+$/.test(word)) {
       const colon = word.indexOf(':');
@@ -177,7 +187,7 @@ function hasCredentialAssignment(line: string): boolean {
       target = '';
       validPrefix = true;
       declaration = false;
-      typedDeclaration = false;
+      typedDeclaration = word === ',' && declarationDepths.at(-1) === syntaxDepth;
       annotation = undefined;
       if (word !== '(' && word !== ')') {
         inValue = false;
@@ -196,10 +206,17 @@ function hasCredentialAssignment(line: string): boolean {
       continue;
     }
     if (DECLARATION_MODIFIERS.has(word) || /^set$/i.test(word) || (declaration && /^--?[A-Za-z][\w-]*$/.test(word))) {
-      if (target) validPrefix = false;
-      declaration = true;
-      typedDeclaration ||= /^(?:const|let|var|declare|readonly|private|protected|public|static)$/.test(word);
-      continue;
+      modifierStart.lastIndex = tokens.lastIndex;
+      if (modifierStart.test(text)) {
+        if (target) validPrefix = false;
+        declaration = true;
+        typedDeclaration ||= /^(?:const|let|var|declare|readonly|private|protected|public|static)$/.test(word);
+        if (validPrefix && /^(?:const|let|var)$/.test(word)) {
+          declarationStart.lastIndex = tokens.lastIndex;
+          if (declarationStart.test(text)) declarationDepths.push(syntaxDepth);
+        }
+        continue;
+      }
     }
     if (target) validPrefix = false;
     target = word;

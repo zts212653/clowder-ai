@@ -7,6 +7,22 @@ import { SecretScanner } from '../../dist/domains/memory/SecretScanner.js';
 
 const value = 'Kj8sLq2mNp9Rt4vWx7YzAbCdEfGhIjKlMnOpQrSt';
 const assignments = [
+  // zts212653, #1784 discussion_r4450434575: commas separate bindings, not declarations.
+  `const description = "ok", API_TOKEN:string = "${value}";`,
+  `const description = "ok", API_TOKEN: string | {provider:string} = "${value}";`,
+  `const description: string = "ok", API_TOKEN: string | "absent" = "${value}";`,
+  ...['let', 'var'].map((keyword) => `${keyword} description = "ok", API_TOKEN:string = "${value}";`),
+  `let description: string, API_TOKEN: string = "${value}";`,
+  `const first = "ok", second = 2, API_TOKEN: string = "${value}";`,
+  ...[
+    'pick("a", "b")',
+    '["a", "b"]',
+    '{name: "public", flags: [1, 2]}',
+    '(() => { const localName = "ok"; return localName; })()',
+  ].map((initializer) => `const description = ${initializer}, API_TOKEN:string = "${value}";`),
+  `const {name} = config, API_TOKEN:string = "${value}";`,
+  `const config = {const: "ok", apiToken: "${value}"};`,
+  `const config = {const: {apiToken: "${value}"}};`,
   // zts212653, #1784 discussion_r4450208394: keep the declaration target through its type.
   `const API_TOKEN:string="${value}"`,
   ...[
@@ -85,6 +101,8 @@ it('does not borrow a value from another assignment or a URL', () => {
     `key: "label" description=${value}`,
     `declare const API_TOKEN: "${value}";`,
     'const API_TOKEN: CorrelationMessageIdTaskIdSourceToolPreviewEventId = "short"',
+    `const API_TOKEN:string = "short", description:string = "${value}";`,
+    `const description = "ok"; key: "label" description=${value}`,
   ]) {
     assert.deepEqual(SecretScanner.scan(line, 'fixture.md'), []);
   }
@@ -122,6 +140,10 @@ it('bounds the historical long-line attack through SecretScanner.scan', { timeou
   assert.equal(SecretScanner.scan(`SET "${'xkeyx'.repeat(100_000)}: short; token=${value}`, 'x.md').length, 1);
   assert.equal(
     SecretScanner.scan(`const API_TOKEN: ${'('.repeat(50_000)}string${')'.repeat(50_000)} = "${value}"`, 'x.md').length,
+    1,
+  );
+  assert.equal(
+    SecretScanner.scan(`const ${'field = "ok", '.repeat(10_000)}API_TOKEN:string = "${value}";`, 'x.md').length,
     1,
   );
   assert.ok(performance.now() - start < 1500, 'two million-character lines must finish within 1.5s');

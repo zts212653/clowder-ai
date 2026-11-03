@@ -78,6 +78,9 @@ it('blocks reviewed cmd and TypeScript assignments through the real collection g
     `const API_TOKEN: string | {provider: string} = "${value}"`,
     `const API_TOKEN: string | {readonly provider?: string} = "${value}"`,
     `const API_TOKEN: string | "absent" = "${value}"`,
+    `const description = "ok", API_TOKEN:string = "${value}";`,
+    `const description = "ok", API_TOKEN: string | {provider:string} = "${value}";`,
+    `const description: string = "ok", API_TOKEN: string | "absent" = "${value}";`,
   ]) {
     writeFileSync(join(root, 'credentials.md'), '# Clean');
     assert.equal((await builder.rebuild()).indexed, 1);
