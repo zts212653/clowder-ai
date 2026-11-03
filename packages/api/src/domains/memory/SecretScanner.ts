@@ -98,17 +98,22 @@ function hasCredentialAssignment(line: string): boolean {
         tokens.lastIndex++;
         continue;
       }
-      if (word === '<' || word === '(' || word === '[' || word === '{') {
+      if (word === '<' || word === '(' || word === '[' || (typedDeclaration && word === '{')) {
         annotationDepth++;
         continue;
       }
-      if (annotationDepth > 0 && (word === '>' || word === ')' || word === ']' || word === '}')) {
+      if (annotationDepth > 0 && (word === '>' || word === ')' || word === ']' || (typedDeclaration && word === '}'))) {
         annotationDepth--;
         continue;
       }
-      if (annotationDepth > 0) continue;
+      if (annotationDepth > 0 && (typedDeclaration || word === ',' || word === ':')) continue;
     }
     if (word === ':' || word === '=') {
+      if (word === ':' && typedDeclaration) {
+        annotation ??= { target, validPrefix };
+        annotationDepth = 0;
+        continue;
+      }
       if (annotation && word === ':') {
         annotation.validPrefix = false;
         continue;

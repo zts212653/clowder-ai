@@ -18,6 +18,8 @@ const assignments = [
   ].map((type) => `const API_TOKEN: ${type} = "${value}"`),
   `export env:API_TOKEN=${value}`,
   `local global:API_TOKEN=${value}`,
+  `outer: {apiToken: "${value}"}`,
+  `const config = {outer: {apiToken: "${value}"}}`,
   // zts212653, #1784 review 5746137352: cmd boundaries and TS type context.
   `set "API_TOKEN=${value}" && echo ready`,
   `set "API_TOKEN=${value}" & echo ready`,
@@ -81,6 +83,8 @@ it('does not borrow a value from another assignment or a URL', () => {
     `const description: "token" = "${value}"`,
     `declare const API_TOKEN: "absent"; const description = "${value}"`,
     `key: "label" description=${value}`,
+    `declare const API_TOKEN: "${value}";`,
+    'const API_TOKEN: CorrelationMessageIdTaskIdSourceToolPreviewEventId = "short"',
   ]) {
     assert.deepEqual(SecretScanner.scan(line, 'fixture.md'), []);
   }
