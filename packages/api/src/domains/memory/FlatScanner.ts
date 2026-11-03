@@ -54,11 +54,16 @@ export class FlatScanner implements RepoScanner {
     const file = resolve(filePath);
     const rel = relative(boundRoot, file);
     if (!rel || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return null;
-    // Match walkDir: neither a linked file nor a linked ancestor belongs to this scan.
-    if (!lstatSync(file, { throwIfNoEntry: false })?.isFile()) return null;
-    for (let dir = dirname(file); relative(boundRoot, dir) !== ''; dir = dirname(dir)) {
-      if (!lstatSync(dir, { throwIfNoEntry: false })?.isDirectory()) return null;
-      if (isGitRepositoryRoot(dir)) return null;
+    try {
+      // Match walkDir: neither a linked file nor a linked ancestor belongs to this scan.
+      if (!lstatSync(file, { throwIfNoEntry: false })?.isFile()) return null;
+      for (let dir = dirname(file); relative(boundRoot, dir) !== ''; dir = dirname(dir)) {
+        if (!lstatSync(dir, { throwIfNoEntry: false })?.isDirectory()) return null;
+        if (isGitRepositoryRoot(dir)) return null;
+      }
+    } catch {
+      // Stale or unreadable paths must not abort the remaining incremental batch.
+      return null;
     }
     return this.parseFile(filePath, root);
   }

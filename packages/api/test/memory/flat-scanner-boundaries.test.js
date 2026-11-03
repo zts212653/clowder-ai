@@ -2,7 +2,7 @@
 // malformed marker / symlink counterexamples in zts212653's reviews.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { it } from 'node:test';
@@ -135,3 +135,36 @@ it('keeps link aliases out of incremental indexing and materialization into a pa
     assert.ok(new Scanner('bound-alias').discover(join(project, 'research')).some((r) => r.item.title === 'Child'));
   }
 });
+
+// zts212653, #1787 discussion_r4449986179: failed FS checks must not abort a batch.
+for (const Scanner of [FlatScanner, StructuredScanner]) {
+  for (const failure of ['replaced-directory', 'cyclic-link']) {
+    it(`${Scanner.name}: continues indexing after a ${failure}`, async (t) => {
+      const root = mkdtempSync(join(tmpdir(), 'issue1787-stale-'));
+      t.after(() => rmSync(root, { recursive: true, force: true }));
+      const ancestor = join(root, 'stale');
+      const stalePath = join(ancestor, 'gone.md');
+      if (failure === 'replaced-directory') {
+        mkdirSync(ancestor);
+        writeFileSync(stalePath, '# Gone');
+        unlinkSync(stalePath);
+        rmdirSync(ancestor);
+        writeFileSync(ancestor, 'now a file');
+      } else {
+        symlinkSync(ancestor, ancestor, process.platform === 'win32' ? 'junction' : 'dir');
+      }
+      const goodPath = join(root, 'good.md');
+      writeFileSync(goodPath, '# Good');
+      const store = new SqliteEvidenceStore(':memory:');
+      await store.initialize();
+      t.after(() => store.close());
+      const scanner = new Scanner('probe');
+      const manifest = { id: 'probe', root, reviewPolicy: { authorityCeiling: 'validated' } };
+      const builder = new CollectionIndexBuilder(store, manifest, scanner);
+      await builder.incrementalUpdate([stalePath, goodPath]);
+      assert.equal((await store.getByAnchor('probe:doc/good'))?.title, 'Good');
+      assert.equal(scanner.parseSingle(stalePath, root), null);
+      assert.equal(store.getDb().prepare('SELECT count(*) AS n FROM evidence_docs').get().n, 1);
+    });
+  }
+}
