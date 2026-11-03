@@ -82,6 +82,14 @@ export function FileActions(props: FileActionsProps) {
           >
             {info?.local ? t.copyPath : t.copyLink}
           </button>
+          {infoError ? (
+            <>
+              <span role="alert">{t.fileInfoFailed}</span>
+              <button type="button" onClick={() => void refreshInfo()}>
+                {t.retry}
+              </button>
+            </>
+          ) : null}
           {info?.local && info.canReveal !== false && (
             <button
               type="button"
