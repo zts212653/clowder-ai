@@ -20,6 +20,7 @@ import {
 } from '@/utils/sidebar-thread-snapshot';
 import { BootcampListModal } from '../BootcampListModal';
 import { BootcampIcon } from '../icons/BootcampIcon';
+import { PluginConversationEntries } from '../plugins/PluginConversationEntries';
 import { resolveShellCopy, useShellCopy } from '../shell/shell-copy';
 import { readShellLanguage } from '../shell/shell-language';
 import type { ShellDestination } from '../shell/shell-navigation';
@@ -1766,6 +1767,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
           </>
         )}
 
+        <PluginConversationEntries onSelect={handleSelect} currentThreadId={currentConversationId} />
         <div
           ref={scrollContainerRef}
           data-testid="sidebar-thread-list"
