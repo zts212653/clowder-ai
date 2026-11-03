@@ -53,6 +53,49 @@ it.each([
   }
 });
 
+it.each([
+  'acp:dsh',
+  'plugin:official.codeagent/codeagent',
+])('cancels %s requests on model changes and unmount, ignoring obsolete responses', async (runtimeId) => {
+  const pending: Array<{ signal: AbortSignal | null | undefined; resolve(value: Response): void }> = [];
+  vi.mocked(apiFetch).mockImplementation(
+    (_path, init) => new Promise((resolve) => pending.push({ signal: init?.signal, resolve })),
+  );
+  const host = document.createElement('div');
+  const root = createRoot(host);
+  function Catalog({ model = 'old' }) {
+    return <output>{JSON.stringify(useRuntimeCatalog(runtimeId, 'dsh', '', model, 0))}</output>;
+  }
+  const response = (model: string) =>
+    new Response(
+      JSON.stringify({
+        status: 'live',
+        models: [{ value: model, label: model }],
+        defaultModel: model,
+        defaultModelStatus: 'reported',
+      }),
+    );
+  const snapshot = () => JSON.parse(host.textContent || '{}');
+  try {
+    await act(async () => root.render(<Catalog />));
+    await act(async () => root.render(<Catalog model="current" />));
+    expect(pending[0]?.signal?.aborted).toBe(true);
+    expect(pending[1]?.signal?.aborted).toBe(false);
+    await act(async () => pending[1]?.resolve(response('current')));
+    expect(snapshot().catalog.defaultModel).toBe('current');
+    await act(async () => pending[0]?.resolve(response('obsolete')));
+    expect(snapshot().catalog.defaultModel).toBe('current');
+    expect(snapshot().loading).toBe(false);
+    await act(async () => root.render(<Catalog model="unmounted" />));
+    await act(async () => root.unmount());
+    expect(pending[2]?.signal?.aborted).toBe(true);
+    await act(async () => pending[2]?.resolve(response('late after unmount')));
+  } finally {
+    await act(async () => root.unmount());
+    vi.resetAllMocks();
+  }
+});
+
 it('shows the reported ACP route on the inherited model choice without changing the member', async () => {
   const patch = vi.fn();
   let failCatalog = false;
