@@ -1080,6 +1080,7 @@ async function main(): Promise<void> {
     resolveCarrierCapability: (catId) => router?.freshnessCarrierCapability(catId),
     resolveTargets: (requested, threadId, content, exact) =>
       router.resolveSendTargets(requested, threadId, content, exact),
+    resolvePreResolvedTargets: (requested, implicit) => router.resolveAdmissionTargets(requested, implicit),
     onAdmitted: ({ threadId, message, entries }) => {
       if (message && entries.some((entry) => entry.sourceCategory !== 'a2a_failure'))
         queueProcessor.registerCallerDispatchInitialTargets(

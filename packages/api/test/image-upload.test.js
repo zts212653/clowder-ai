@@ -118,7 +118,7 @@ describe('extractImagePaths', () => {
 
     const dir = getDefaultUploadDir();
     assert.ok(
-      dir.endsWith('/packages/api/uploads'),
+      dir.replaceAll('\\', '/').endsWith('/packages/api/uploads'),
       `expected default upload dir to end with /packages/api/uploads, got ${dir}`,
     );
   });
@@ -321,6 +321,7 @@ describe('multipart image target routing', () => {
       async resolveTargetsAndIntent() {
         return {
           targetCats: ['opus'],
+          routing_warnings: [],
           intent: { intent: 'execute', explicit: false, promptTags: [] },
         };
       },

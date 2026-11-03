@@ -54,6 +54,7 @@ function createFaultDrillRouter(modeRef) {
     async resolveTargetsAndIntent() {
       return {
         targetCats: ['opus'],
+        routing_warnings: [],
         intent: { intent: 'execute', explicit: false, promptTags: [] },
       };
     },
