@@ -101,6 +101,7 @@ test('idle delivery timing distinguishes local admission from slow provider star
     },
   };
   const router = {
+    previewTargets: async () => ({ targetCats: [], reason: { kind: 'default_cat' } }),
     resolveExplicitTargets: async (targets) => [...targets],
     resolveTargetsAndIntent: async () => ({
       targetCats: ['opus'],

@@ -2,14 +2,14 @@ name: CI
 
 on:
   push:
-    branches: [main, next]
+    branches: [main, next, develop]
     paths-ignore:
       - 'docs/**'
       - '*.md'
       - 'designs/**'
       - 'assets/**'
   pull_request:
-    branches: [main, next]
+    branches: [main, next, develop]
     # Required checks must report for docs/assets-only PRs as well.
 
 concurrency:
@@ -44,6 +44,8 @@ jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.tmp/playwright-browsers
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -61,6 +63,87 @@ jobs:
           --script test:onboarding:production-contracts
       - run: pnpm --filter @cat-cafe/shared build
       - run: pnpm --filter @cat-cafe/api build
+      - name: DSH packaged secret guard admission
+        run: >-
+          pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs
+          node --import tsx --test test/secret-dsh.test.ts
+      - name: Named recipient confirmation before Queue admission
+        run: >-
+          pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs
+          node --test test/message-routing-confirmation.test.js
+      - name: Configurable ACP plugin lifecycle and observed model adoption
+        run: >-
+          node --test
+          packages/api/test/plugin-fixed-acp-client.test.js
+          packages/api/test/plugin-agent-model-route.test.js
+          packages/api/test/acp-model-adoption.test.js
+          packages/api/test/acp-model-probe-adoption.test.js
+          packages/api/test/acp-plugin-permission-policy.test.js
+          packages/api/test/acp/acp-native-model-identity.test.js
+          packages/api/test/agent-session-contract/fixed-client-package.test.js
+          packages/api/test/agent-session-contract/client-library-lifecycle.test.js
+          packages/api/test/acp-bootstrap-config-recovery.test.js
+      - name: ACP plugin configuration and member model UI
+        run: >-
+          pnpm --filter @cat-cafe/web exec node scripts/run-with-node-env-test.mjs pnpm exec vitest run
+          src/components/__tests__/plugin-runtime-models.test.tsx
+          src/components/__tests__/member-runtime-catalog.test.tsx
+          src/components/settings/plugin-manager/__tests__/agent-client-identity.test.tsx
+          src/hooks/__tests__/useSendMessage-routing-confirmation.test.ts
+      - name: Scoped member sessions preserve frozen execution contracts
+        run: >-
+          pnpm --filter @cat-cafe/api exec node scripts/with-test-home.mjs
+          --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1
+          node --import tsx --import ./test/helpers/setup-cat-registry.js
+          --test --test-concurrency=2
+          test/plugin-member-runtime.test.ts
+          test/scoped-member-invocation.test.ts
+          test/native-member-frozen-l0.test.js
+          test/claude-scoped-native.test.ts
+          test/claude-sdk-scoped-native.test.ts
+          test/kimi-scoped-native.test.ts
+          test/plugin-member-router.test.ts
+          test/plugin-member-execution.test.ts
+          test/plugin-member-settlement-recovery.test.ts
+          test/codex-plugin-native-launch.test.js
+      - name: Owner-confirmed plugin feedback and private-context suppression
+        run: pnpm --filter @cat-cafe/api test:plugin-feedback
+      - name: Stable implementation rebuild and verified native import resume
+        run: >-
+          pnpm --filter @cat-cafe/api exec node scripts/with-test-home.mjs
+          --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 --env DEFAULT_OWNER_USER_ID=owner
+          node --import tsx --import ./test/helpers/setup-cat-registry.js --test --test-concurrency=2
+          test/mind-pr1762-review.test.js
+          test/host-execution-boundary.test.js
+          test/agent-session-contract/persisted-execution-boundary.test.js
+          test/agent-session-contract/late-execution-boundary.test.js
+      - name: Native import admission and plugin HTTP panel lifecycle
+        run: >-
+          pnpm --filter @cat-cafe/api exec node scripts/with-test-home.mjs
+          --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1
+          node --import tsx --import ./test/helpers/setup-cat-registry.js --test --test-concurrency=2
+          test/f322-import-route.test.ts
+          test/f322-recent-sessions.test.ts
+          test/plugin-ui-resource.test.ts
+      - name: Sandboxed panels use declared HTTP business routing
+        run: >-
+          pnpm --filter @cat-cafe/web exec node scripts/run-with-node-env-test.mjs
+          pnpm exec vitest run src/components/plugins/__tests__/plugin-ui.test.tsx
+          src/components/plugins/__tests__/plugin-panel-http.test.ts
+      - name: Provider EOF and plugin UI stop preserve lifecycle fences
+        run: >-
+          pnpm --filter @cat-cafe/api exec node scripts/with-test-home.mjs
+          --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1
+          node --import tsx --import ./test/helpers/setup-cat-registry.js
+          --test --test-concurrency=2
+          test/agent-session-contract/bridge.test.js
+          test/agent-session-contract/acp-provider.test.js
+          test/agent-session-contract/eof-teardown-lifecycle.test.js
+          test/agent-session-contract/start-rejection-lifecycle.test.js
+          test/agent-session-contract/unconfirmed-prior-admission.test.js
+          test/plugin-ui-stop-publication.test.js
+          test/f202-c1-carrier-neutral-lifecycle.test.js
+          test/plugin-runtime-info.test.ts
       - name: Managed Codex layout link diagnostic
         run: >-
           pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs
@@ -112,6 +195,14 @@ jobs:
         env:
           CAT_CAFE_ONBOARDING_E2E_EVIDENCE: ${{ github.workspace }}/.tmp/native-team-setup-ci
         run: pnpm --filter @cat-cafe/web test:onboarding:production-contracts
+      - name: Plugin document direct-navigation origin isolation
+        env:
+          PLUGIN_ORIGIN_ARTIFACTS: ${{ github.workspace }}/.tmp/plugin-document-origin-ci
+        run: >-
+          pnpm --filter @cat-cafe/api exec node scripts/with-test-home.mjs
+          --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 --env DEFAULT_OWNER_USER_ID=owner
+          --env FEEDBACK_PLAYWRIGHT_MODULE=${{ github.workspace }}/packages/web/node_modules/playwright
+          node --import tsx test/plugin-html-origin.journey.mts
       - name: Preserve first-run browser evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -120,6 +211,7 @@ jobs:
           path: |
             .tmp/first-run-entry-ci
             .tmp/native-team-setup-ci
+            .tmp/plugin-document-origin-ci
           if-no-files-found: ignore
           retention-days: 7
 

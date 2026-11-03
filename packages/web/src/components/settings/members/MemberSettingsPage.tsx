@@ -278,7 +278,14 @@ export function MemberSettingsPage({
             className="sticky bottom-0 z-40 mt-5 flex w-full flex-wrap items-center justify-between gap-3 border-t border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-5 py-4"
             data-testid="member-save-bar"
           >
-            {cat && dirtyCount > 0 ? (
+            {draft.pendingWrite ? (
+              <span className="text-sm" role="status">
+                {t(
+                  '上次保存结果待核对，当前草稿已保留。',
+                  'The previous save needs reconciliation. Your draft is retained.',
+                )}
+              </span>
+            ) : cat && dirtyCount > 0 ? (
               <MemberChangeSummary draft={draft} count={dirtyCount} t={t} />
             ) : (
               <span className="text-sm" role="status">
@@ -315,7 +322,7 @@ export function MemberSettingsPage({
                       form.cliEffort !== (baseline.cli?.effort ?? '')))
                 }
                 onClick={() => {
-                  if (cat && dirtyCount === 0) {
+                  if (cat && dirtyCount === 0 && !draft.pendingWrite) {
                     setUnchangedSave(true);
                     return;
                   }
@@ -324,7 +331,13 @@ export function MemberSettingsPage({
                 }}
                 className="min-h-11 rounded-lg bg-cafe-accent px-5 text-sm font-semibold text-[var(--cafe-surface)] disabled:opacity-50"
               >
-                {saving ? t('保存中…', 'Saving…') : cat ? t('保存', 'Save') : t('添加伙伴', 'Add teammate')}
+                {saving
+                  ? t('保存中…', 'Saving…')
+                  : draft.pendingWrite
+                    ? t('核对上次保存', 'Reconcile previous save')
+                    : cat
+                      ? t('保存', 'Save')
+                      : t('添加伙伴', 'Add teammate')}
               </button>
             </div>
           </div>

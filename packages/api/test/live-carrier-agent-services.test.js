@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import { ClaudeSdkAgentService } from '../dist/domains/cats/services/agents/providers/ClaudeSdkAgentService.js';
+import { claudeSdkRuntimeFixture } from './helpers/claude-sdk-runtime-fixture.js';
 import {
   assertInheritedHostAuthorityCleared,
   directMcpContract,
@@ -60,6 +61,7 @@ describe('live member carriers', () => {
     const events = new AsyncInbox();
     const registration = activeRunRegistration();
     const service = new ClaudeSdkAgentService({
+      runtimeResolver: claudeSdkRuntimeFixture,
       catId: 'opus',
       model: 'claude-test',
       l0CompilerFn: async () => 'compiled L0',
@@ -141,6 +143,7 @@ describe('live member carriers', () => {
 
   it('Claude SDK surfaces sanitized stderr instead of replacing it with a generic process-exit message', async () => {
     const service = new ClaudeSdkAgentService({
+      runtimeResolver: claudeSdkRuntimeFixture,
       catId: 'opus',
       model: 'claude-test',
       l0CompilerFn: async () => 'compiled L0',
@@ -163,6 +166,7 @@ describe('live member carriers', () => {
   it('Claude SDK sanitizes secrets before truncating the stderr window', async () => {
     const secretBody = 'a'.repeat(30);
     const service = new ClaudeSdkAgentService({
+      runtimeResolver: claudeSdkRuntimeFixture,
       catId: 'opus',
       model: 'claude-test',
       l0CompilerFn: async () => 'compiled L0',
@@ -190,6 +194,7 @@ describe('live member carriers', () => {
     const registration = activeRunRegistration();
     let sdkInput;
     const service = new ClaudeSdkAgentService({
+      runtimeResolver: claudeSdkRuntimeFixture,
       catId: 'opus',
       model: 'claude-test',
       l0CompilerFn: async () => 'compiled L0',
@@ -239,6 +244,7 @@ describe('live member carriers', () => {
     const registration = activeRunRegistration();
     let sdkInput;
     const service = new ClaudeSdkAgentService({
+      runtimeResolver: claudeSdkRuntimeFixture,
       catId: 'opus',
       model: 'claude-test',
       l0CompilerFn: async () => 'compiled L0',
@@ -325,6 +331,7 @@ describe('live member carriers', () => {
   it('Claude SDK runs the compaction hooks it is handed in-process, and none otherwise (F117 K2)', async () => {
     const sdkOptions = [];
     const service = new ClaudeSdkAgentService({
+      runtimeResolver: claudeSdkRuntimeFixture,
       catId: 'opus',
       model: 'claude-test',
       l0CompilerFn: async () => 'compiled L0',
@@ -406,6 +413,7 @@ describe('live member carriers', () => {
     const registration = activeRunRegistration();
     let sdkInput;
     const service = new ClaudeSdkAgentService({
+      runtimeResolver: claudeSdkRuntimeFixture,
       catId: 'opus',
       model: 'claude-test',
       l0CompilerFn: async () => 'compiled L0',
@@ -482,6 +490,7 @@ describe('live member carriers', () => {
     const registration = activeRunRegistration();
     let sdkInput;
     const service = new ClaudeSdkAgentService({
+      runtimeResolver: claudeSdkRuntimeFixture,
       catId: 'opus',
       model: 'claude-test',
       l0CompilerFn: async () => 'compiled L0',
@@ -549,6 +558,7 @@ describe('live member carriers', () => {
     const registration = activeRunRegistration();
     let sdkInput;
     const service = new ClaudeSdkAgentService({
+      runtimeResolver: claudeSdkRuntimeFixture,
       catId: 'opus',
       model: 'claude-test',
       l0CompilerFn: async () => 'compiled L0',
@@ -617,6 +627,7 @@ describe('live member carriers', () => {
     const registration = activeRunRegistration();
     let sdkInput;
     const service = new ClaudeSdkAgentService({
+      runtimeResolver: claudeSdkRuntimeFixture,
       catId: 'opus',
       model: 'claude-test',
       l0CompilerFn: async () => 'compiled L0',
@@ -694,6 +705,7 @@ describe('live member carriers', () => {
       resultObserved = resolve;
     });
     const service = new ClaudeSdkAgentService({
+      runtimeResolver: claudeSdkRuntimeFixture,
       catId: 'opus',
       model: 'claude-test',
       l0CompilerFn: async () => 'compiled L0',
@@ -769,6 +781,7 @@ describe('live member carriers', () => {
     const registration = activeRunRegistration();
     let sdkInput;
     const service = new ClaudeSdkAgentService({
+      runtimeResolver: claudeSdkRuntimeFixture,
       catId: 'opus',
       model: 'claude-test',
       l0CompilerFn: async () => 'compiled L0',
@@ -829,6 +842,7 @@ describe('live member carriers', () => {
     );
     let sdkOptions;
     const service = new ClaudeSdkAgentService({
+      runtimeResolver: claudeSdkRuntimeFixture,
       catId: 'opus',
       model: 'claude-test',
       mcpServerPath: join(root, 'missing-dist', 'index.js'),
@@ -870,6 +884,7 @@ describe('live member carriers', () => {
     const events = new AsyncInbox();
     const registration = activeRunRegistration();
     const service = new ClaudeSdkAgentService({
+      runtimeResolver: claudeSdkRuntimeFixture,
       catId: 'opus',
       model: 'claude-test',
       activeRunControlTimeoutMs: 5,

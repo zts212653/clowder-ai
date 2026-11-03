@@ -11,6 +11,7 @@ import { ClaudeAgentService } from '../src/domains/cats/services/agents/provider
 import { ClaudeBgCarrierService } from '../src/domains/cats/services/agents/providers/ClaudeBgCarrierService.js';
 import { prepareClaudeSdkLaunch } from '../src/domains/cats/services/agents/providers/claude-sdk-launch.js';
 import { startTmuxSession } from '../src/domains/cats/services/agents/providers/pty/pty-session-launch.js';
+import { claudeSdkRuntimeFixture } from './helpers/claude-sdk-runtime-fixture.js';
 import { fakeL0Compiler } from './helpers/fake-l0-compiler.js';
 
 const tokenA = 'sk-ant-oat01-fixture-account-A';
@@ -37,6 +38,7 @@ test('SDK launch preserves host/session and freezes the selected token over alte
     process.env[k] = 'ambient-account';
   const prepare = () =>
     prepareClaudeSdkLaunch({
+      runtime: claudeSdkRuntimeFixture(),
       catId: createCatId('opus'),
       model: 'claude-opus-4-6',
       prompt: 'fixture',

@@ -108,7 +108,7 @@ const server = createServer(async (req, res) => {
 });
 server.listen(0, '127.0.0.1');
 await once(server, 'listening');
-let timer;
+let timer, memberFrame;
 const pools = new Map();
 try {
   await writeFile(
@@ -185,10 +185,11 @@ try {
       usesDefaultWorkspace: false,
     }),
   });
-  const actual = await runtime.snapshot(
+  memberFrame = await runtime.acquire(
     { threadId: 'fixture-thread', catId: cat.id, contributionId: 'player', identity: 'own-game', memory: [] },
     scope,
   );
+  const actual = memberFrame.runtime;
   assert.deepEqual(actual.account, {
     accountRef: snapshot.accountRef,
     authType: snapshot.authType,
@@ -213,6 +214,8 @@ try {
     compile: async (input) => {
       assert.equal(input.projection, 'scoped-member');
       assert.equal(input.runtimeModel, 'deepseek-flash');
+      assert.equal(input.frozenInput, memberFrame.binding.frozenL0Input);
+      assert.equal(input.requireFrozenInput, true);
       if (rotate)
         await writeFile(credential, originalCredential.replace('private-synthetic-key', 'rotated-synthetic-key'), {
           mode: 0o600,
@@ -224,6 +227,7 @@ try {
       workingDirectory: workspace,
       signal: controller.signal,
       executionAccount: snapshot,
+      frozenL0Input: memberFrame.binding.frozenL0Input,
       toolExecutionPolicy: {
         mode: 'plugin_native',
         pluginInstanceId: 'fixture',
@@ -327,6 +331,7 @@ try {
   console.log(JSON.stringify(proof));
 } finally {
   clearTimeout(timer);
+  await memberFrame?.release();
   if (previousNativeHome === undefined) delete process.env.DSH_HOME;
   else process.env.DSH_HOME = previousNativeHome;
   await Promise.all([...pools.values()].map((pool) => pool.closeAll()));

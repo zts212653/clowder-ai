@@ -222,6 +222,23 @@ export async function runRoute(
         transcriptReader: { readDigest: async () => null },
       });
       const yielded = [];
+      // The fixture resumes a native session created under these same Host facts.
+      // Bind the logical owner before attaching its runtime ID, as a real first turn does.
+      const { prepareInvocationExecutionBinding } = await import(
+        '../../dist/domains/cats/services/agents/invocation/invoke-single-cat.js'
+      );
+      for (const catId of targetCats) {
+        const binding = await prepareInvocationExecutionBinding(deps.invocationDeps, {
+          catId,
+          threadId,
+          userId: 'user1',
+          service: services[catId],
+        });
+        const store = deps.invocationDeps.sessionChainStore;
+        const record = store.create({ catId, threadId, userId: 'user1' });
+        assert.ok(store.bindHostExecutionBoundary(record.id, undefined, binding.hostExecutionBoundary));
+        store.bindCliSessionId(record.id, `cli-session-${catId}`);
+      }
       for await (const message of route(deps, targetCats, 'cold rebuild probe', 'user1', threadId, {
         invocationController: new AbortController(),
         trackA2ASlot: () => true,

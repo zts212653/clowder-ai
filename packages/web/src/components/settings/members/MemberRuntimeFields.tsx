@@ -83,12 +83,7 @@ export function MemberRuntimeFields({
   const defaultIdentity = usesDefaultNativeIdentity(form);
   const needsLogin = defaultIdentity && selected?.readiness?.status === 'login_required';
   const { catalog, loading: catalogLoading } = useRuntimeCatalog(
-    needsLogin ||
-      selected?.id.startsWith('draft:') ||
-      selected?.id.startsWith('manual:') ||
-      selected?.id.startsWith('plugin:')
-      ? undefined
-      : selected?.id,
+    needsLogin || selected?.id.startsWith('draft:') || selected?.id.startsWith('manual:') ? undefined : selected?.id,
     editing ? form.catId : undefined,
     form.accountRef,
     form.defaultModel,
@@ -114,9 +109,10 @@ export function MemberRuntimeFields({
     !!form.cliEffort &&
     !efforts.some((item) => item.value === form.cliEffort);
   const invalidRuntime = selected?.discoveryStatus === 'acp_profile_invalid';
+  const invalidDefaultModel = native && !form.defaultModel && catalog?.defaultModelStatus === 'unavailable';
   useEffect(
-    () => onValidityChange?.(!invalidEffort && !invalidRuntime),
-    [invalidEffort, invalidRuntime, onValidityChange],
+    () => onValidityChange?.(!invalidEffort && !invalidRuntime && !invalidDefaultModel),
+    [invalidEffort, invalidRuntime, invalidDefaultModel, onValidityChange],
   );
   const follow = t(native ? `跟随 ${tool} 设置` : '跟随连接设置', `Follow ${native ? tool : 'connection'} settings`);
   const accountOptions = [
@@ -185,8 +181,8 @@ export function MemberRuntimeFields({
       {form.acpAgentProvider && (
         <p className="text-sm text-cafe-secondary">
           {t(
-            '启动配置来自插件，认证与默认模型由 client 管理；实际连接待验证。',
-            'Launch settings come from the plugin. The client owns authentication and model defaults; connection is not yet verified.',
+            '启动配置来自插件。原生身份入口尚未验证；当前通用 ACP 路径会将系统上下文随用户任务发送。认证与真实调用仍需验证。',
+            'Launch settings come from the plugin. Native identity injection is unverified; the generic ACP path sends system context with the user task. Authentication and real invocation still need verification.',
           )}
         </p>
       )}
@@ -254,14 +250,7 @@ export function MemberRuntimeFields({
         />
       </div>
       <div className="space-y-1 text-sm text-cafe-secondary" role="status">
-        {form.acpAgentProvider ? (
-          <p>
-            {t(
-              '默认使用客户端当前模型；也可手动填写该客户端支持的模型 ID。',
-              'Uses the client model by default. You can also enter a model ID supported by that client.',
-            )}
-          </p>
-        ) : needsLogin ? (
+        {needsLogin ? (
           <p>
             {t(
               '登录后可读取模型目录；当前可以保留跟随工具设置。',
@@ -270,6 +259,27 @@ export function MemberRuntimeFields({
           </p>
         ) : catalogLoading ? (
           <p>{t(`正在读取 ${tool} 的模型…`, `Reading ${tool} models…`)}</p>
+        ) : invalidDefaultModel ? (
+          <p role="alert">
+            {t(
+              '客户端报告的默认模型不在可用清单中，请选择有效模型或修正客户端配置后刷新。',
+              'The reported default model is unavailable. Select a valid model or fix the client configuration and refresh.',
+            )}
+          </p>
+        ) : native && !form.defaultModel && catalog?.defaultModelStatus === 'unreported' ? (
+          <p>
+            {t(
+              '已读取模型信息，但默认模型尚未确认。“跟随”会保留客户端选择，不代表已验证可调用。',
+              'Model information was read, but the native default is unconfirmed. Following keeps the client choice; it does not verify an invocation.',
+            )}
+          </p>
+        ) : catalog?.message === 'custom_model' ? (
+          <p>
+            {t(
+              '当前模型尚未由客户端探测确认，已保留你的选择；实际执行时仍需校验。',
+              'The probe has not confirmed this model. Your choice is preserved and still needs validation at invocation.',
+            )}
+          </p>
         ) : catalog?.status === 'live' ? (
           <p>
             {t(`已读取 ${models.length} 个模型`, `Read ${models.length} models`)}

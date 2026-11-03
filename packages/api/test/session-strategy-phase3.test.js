@@ -4,6 +4,7 @@
  * and the GET/PATCH/DELETE API route handlers.
  */
 
+import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, test } from 'node:test';
 
@@ -380,9 +381,12 @@ describe('session-strategy Phase 3: runtime overrides', () => {
         options: { keyPrefix: '' },
         scan: async () => ['0', []],
         get: async () => null,
-        set: async (_key, raw) => {
+        eval: async (_script, count, key, before, raw) => {
+          assert.equal(count, 1);
+          assert.equal(key, 'session-strategy:override:opus');
+          assert.equal(before, '');
           stored = JSON.parse(raw);
-          return 'OK';
+          return 1;
         },
       };
 
@@ -478,18 +482,17 @@ describe('session-strategy Phase 3: runtime overrides', () => {
     });
   });
 
-  // ── Cloud P2: deleteRuntimeOverride uses Redis DEL result ──
+  // ── Cloud P2: deleteRuntimeOverride uses persisted existence ──
 
-  describe('Cloud P2: delete uses Redis DEL as existence source of truth', () => {
-    test('returns false when Redis DEL returns 0 (key not in Redis) despite stale cache', async () => {
+  describe('Cloud P2: delete uses Redis state as existence source of truth', () => {
+    test('returns false for an absent persisted key despite stale cache', async () => {
       const overridesModule = await loadOverridesModule();
       overridesModule._clearRuntimeOverrides();
 
       const stubRedis = {
         options: { keyPrefix: '' },
         scan: async () => ['0', []],
-        set: async () => 'OK',
-        del: async () => 0, // Redis says key doesn't exist
+        eval: async () => 1,
         get: async () => null,
       };
       await overridesModule.initRuntimeOverrides(stubRedis);
@@ -498,32 +501,33 @@ describe('session-strategy Phase 3: runtime overrides', () => {
       await overridesModule.setRuntimeOverride('opus', { strategy: 'compress' });
       assert.ok(overridesModule.getRuntimeOverride('opus'), 'cache should have stale entry');
 
-      // Stub del to return 0 (key already gone from Redis)
-      stubRedis.del = async () => 0;
-
       const existed = await overridesModule.deleteRuntimeOverride('opus');
-      assert.equal(existed, false, 'should return false when Redis DEL returns 0');
+      assert.equal(existed, false, 'should return false when the fenced Redis key does not exist');
       assert.equal(overridesModule.getRuntimeOverride('opus'), undefined, 'cache should be cleaned up');
 
       overridesModule._clearRuntimeOverrides();
     });
 
-    test('returns true when Redis DEL returns 1 (key existed in Redis)', async () => {
+    test('returns true when the fenced Redis key existed', async () => {
       const overridesModule = await loadOverridesModule();
       overridesModule._clearRuntimeOverrides();
 
+      let stored = null;
       const stubRedis = {
         options: { keyPrefix: '' },
         scan: async () => ['0', []],
-        set: async () => 'OK',
-        del: async () => 1, // Redis confirms key existed
-        get: async () => null,
+        eval: async (_script, _count, _key, before, next) => {
+          assert.equal(before, stored ?? '');
+          stored = next || null;
+          return 1;
+        },
+        get: async () => stored,
       };
       await overridesModule.initRuntimeOverrides(stubRedis);
       await overridesModule.setRuntimeOverride('opus', { strategy: 'compress' });
 
       const existed = await overridesModule.deleteRuntimeOverride('opus');
-      assert.equal(existed, true, 'should return true when Redis DEL returns 1');
+      assert.equal(existed, true, 'should return true when the fenced persisted key existed');
 
       overridesModule._clearRuntimeOverrides();
     });
@@ -532,14 +536,14 @@ describe('session-strategy Phase 3: runtime overrides', () => {
   // ── P1-3: Redis write failure should not update cache ──
 
   describe('P1-3: cache not updated on Redis write failure', () => {
-    test('setRuntimeOverride does not update cache if Redis.set throws', async () => {
+    test('setRuntimeOverride does not update cache if the atomic Redis write throws', async () => {
       const overridesModule = await loadOverridesModule();
       overridesModule._clearRuntimeOverrides();
 
       const stubRedis = {
         options: { keyPrefix: 'cat-cafe:' },
         scan: async () => ['0', []],
-        set: async () => {
+        eval: async () => {
           throw new Error('Redis write failure');
         },
         get: async () => null,
@@ -559,19 +563,22 @@ describe('session-strategy Phase 3: runtime overrides', () => {
       overridesModule._clearRuntimeOverrides();
     });
 
-    test('deleteRuntimeOverride does not update cache if Redis.del throws', async () => {
+    test('deleteRuntimeOverride does not update cache if the atomic Redis delete throws', async () => {
       const overridesModule = await loadOverridesModule();
       overridesModule._clearRuntimeOverrides();
 
       // Pre-seed cache via a stub that works for set
+      let stored = null;
       const stubRedis = {
         options: { keyPrefix: 'cat-cafe:' },
         scan: async () => ['0', []],
-        set: async () => 'OK',
-        del: async () => {
-          throw new Error('Redis delete failure');
+        eval: async (_script, _count, _key, before, next) => {
+          assert.equal(before, stored ?? '');
+          if (!next) throw new Error('Redis delete failure');
+          stored = next;
+          return 1;
         },
-        get: async () => null,
+        get: async () => stored,
       };
       await overridesModule.initRuntimeOverrides(stubRedis);
       await overridesModule.setRuntimeOverride('opus', { strategy: 'compress' });

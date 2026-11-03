@@ -2,13 +2,22 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import test from 'node:test';
+import { dirname, join } from 'node:path';
+import test, { after } from 'node:test';
 import { createCatId } from '@cat-cafe/shared';
 import { ClaudeAgentService } from '../src/domains/cats/services/agents/providers/ClaudeAgentService.js';
 import { captureClaudeMemberOptions } from '../src/domains/cats/services/agents/providers/claude-scoped-native.js';
 import type { AgentServiceOptions } from '../src/domains/cats/services/types.js';
+import { ensureFakeCliOnPath } from './helpers/fake-cli-path.js';
 import { createMockProcess, emitEvents } from './helpers/provider-archive-test-helpers.js';
+
+const previousPath = process.env.PATH;
+const cliDirectory = dirname(ensureFakeCliOnPath('claude'));
+assert.equal(dirname(cliDirectory), tmpdir());
+after(async () => {
+  process.env.PATH = previousPath;
+  await rm(cliDirectory, { recursive: true, force: true });
+});
 
 async function fixture(t: import('node:test').TestContext) {
   const root = await mkdtemp(join(tmpdir(), 'claude-scoped-'));
@@ -66,6 +75,12 @@ test('Claude advertises only the bounded member form of plugin native execution'
 test('the actual Claude service freezes selected identity/account and exposes only the admitted MCP', async (t) => {
   const f = await fixture(t),
     proc = createMockProcess();
+  f.options.executionPreferences = {
+    configurationSource: 'managed_account',
+    model: 'pinned-claude-model',
+    effort: 'high',
+    nativeAuthentication: false,
+  };
   f.server.name = 'scope.game';
   let compiled: unknown,
     launches = 0;
@@ -83,7 +98,7 @@ test('the actual Claude service freezes selected identity/account and exposes on
       launches++;
       const args = argv ?? [],
         value = (flag: string) => args[args.indexOf(flag) + 1];
-      assert.equal(value('--model'), 'claude-opus-5-5');
+      assert.equal(value('--model'), 'pinned-claude-model');
       assert.equal(value('--tools'), '');
       assert.equal(value('--setting-sources'), '');
       assert.equal(value('--allowedTools'), 'mcp__scope_game__*');
@@ -118,7 +133,7 @@ test('the actual Claude service freezes selected identity/account and exposes on
   await collecting;
   assert.equal(launches, 1);
   assert.equal((compiled as { projection: string }).projection, 'scoped-member');
-  assert.equal((compiled as { runtimeModel: string }).runtimeModel, 'claude-opus-5-5');
+  assert.equal((compiled as { runtimeModel: string }).runtimeModel, 'pinned-claude-model');
   assert.ok(events.length > 0);
 });
 

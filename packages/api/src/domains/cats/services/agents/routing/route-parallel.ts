@@ -107,7 +107,7 @@ import { recordTurnOutputVerdict, requireTurnOutputAllowed } from '../invocation
 import { resolveManagedSessionPolicySnapshot } from '../invocation/session-policy-snapshot.js';
 import { mergeStreams } from '../invocation/stream-merge.js';
 import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentService.js';
-import { AgentServiceUnavailableError } from '../registry/AgentServiceUnavailableError.js';
+import { AgentServiceUnavailableError, ExecutionAdmissionConflict } from '../registry/AgentServiceUnavailableError.js';
 import { parseA2AMentions } from '../routing/a2a-mentions.js';
 import { accumulateTextAggregate } from '../text-aggregation.js';
 import { commitCompletedRouteResponse, isCollectiveBoundResponse } from './commit-completed-response.js';
@@ -225,7 +225,14 @@ async function* routeParallelPrepared(
 
   let routingDispatchPreflightDecision: RoutingPreflightDecisionV1 | undefined;
   const originalTargets = [...targetCats];
-  targetCats = targetCats.filter((catId) => !(signalForCat?.(catId) ?? signal)?.aborted);
+  const executionControls = new Map(
+    targetCats.map((catId) => {
+      const controller = new AbortController();
+      const signals = [controller.signal, signalForCat?.(catId), signal].filter((value) => value !== undefined);
+      return [catId, { controller, signal: AbortSignal.any(signals) }] as const;
+    }),
+  );
+  targetCats = targetCats.filter((catId) => !executionControls.get(catId)?.signal.aborted);
   const pinnedServices = new Map<CatId, AgentService>();
   const servicePreparationErrors = new Map<CatId, unknown>();
   for (const catId of targetCats) {
@@ -236,15 +243,29 @@ async function* routeParallelPrepared(
     }
   }
   const prepared = await Promise.allSettled(
-    targetCats.map((catId) =>
-      prepareInvocationExecutionBinding(deps.invocationDeps, {
-        catId,
-        threadId,
-        userId,
-        service: pinnedServices.get(catId),
-        signal: signalForCat?.(catId) ?? signal,
-      }),
-    ),
+    targetCats.map(async (catId) => {
+      const catSignal = executionControls.get(catId)?.signal;
+      const capture = (service?: AgentService) =>
+        prepareInvocationExecutionBinding(deps.invocationDeps, {
+          catId,
+          threadId,
+          userId,
+          ownerAuthProvenance: options.ownerAuthProvenance,
+          service,
+          toolExecutionPolicy: options.toolExecutionPolicy,
+          signal: catSignal,
+        });
+      const current = pinnedServices.get(catId);
+      if (!current) return capture();
+      const admitted = await invocationServices.admit(
+        current,
+        () => getService(deps.services, catId, deps.unavailableServices),
+        capture,
+        catSignal,
+      );
+      pinnedServices.set(catId, admitted.service);
+      return admitted.executionBinding;
+    }),
   );
   const executionBindings = new Map<CatId, Awaited<ReturnType<typeof prepareInvocationExecutionBinding>>>();
   for (const [index, result] of prepared.entries()) {
@@ -255,7 +276,10 @@ async function* routeParallelPrepared(
       yield {
         type: 'error',
         catId,
-        errorCode: 'execution_binding_unavailable',
+        errorCode:
+          result.reason instanceof ExecutionAdmissionConflict
+            ? 'execution_binding_conflict'
+            : 'execution_binding_unavailable',
         error: result.reason instanceof Error ? result.reason.message : 'Execution binding is unavailable',
         timestamp: Date.now(),
       };
@@ -1086,7 +1110,7 @@ async function* routeParallelPrepared(
 
       // F-parallel-cancel: each concurrent cat listens to ITS OWN slot signal, not the
       // shared primaryController.signal — canceling one cat must not abort its siblings.
-      const catSignal = signalForCat?.(catId) ?? signal;
+      const catSignal = executionControls.get(catId)?.signal;
       // F-parallel-cancel (cloud P2): skip invoke for a cat already cancelled BEFORE this route
       // started it (tombstone aborted signal — e.g. user clicked Stop on this cat pre-invoke).
       // Otherwise invokeSingleCat turns the aborted iterator into error+done, broadcasting /
@@ -1228,6 +1252,7 @@ async function* routeParallelPrepared(
   const catOutputProjections = new Map<string, RoutingMessageOutputProjection>();
   let completedCount = 0;
   let yieldedFinalDone = false;
+  const unconfirmedProviderCats = new Set<string>();
   // F153: Accumulate total tokens across all parallel streams for route aggregate
   let routeTotalTokens = 0;
 
@@ -1270,8 +1295,19 @@ async function* routeParallelPrepared(
       log.error({ streamIndex: idx, catId: targetCats[idx], err }, 'Parallel stream error (post-recovery)');
     },
     {
-      ...(signal ? { signal } : {}),
-      ...(signalForCat ? { signalForIndex: (index: number) => signalForCat(requireTargetCat(targetCats, index)) } : {}),
+      // Adapter-owned cancellation must finish the real child iterator. Legacy
+      // streams retain the existing abort shortcut, scoped to each child.
+      signalForIndex: (index: number) => {
+        const catId = requireTargetCat(targetCats, index);
+        if (pinnedServices.get(catId)?.cancellationMode === 'drain') return undefined;
+        return executionControls.get(catId)?.signal;
+      },
+      ownedControllerForIndex: (index: number) => {
+        const catId = requireTargetCat(targetCats, index);
+        return pinnedServices.get(catId)?.cancellationMode === 'drain'
+          ? executionControls.get(catId)?.controller
+          : undefined;
+      },
       valueForAbort: (index: number): AgentMessage => ({
         type: 'done',
         catId: requireTargetCat(targetCats, index),
@@ -1280,6 +1316,11 @@ async function* routeParallelPrepared(
     },
   );
   for await (const msg of mergedStreams) {
+    if (msg.providerTeardown === 'unconfirmed') {
+      unconfirmedProviderCats.add(msg.catId);
+      yield msg;
+      continue;
+    }
     const transform = msg.catId ? getOutputTransform(msg.catId) : undefined;
     if (msg.type === 'done' && msg.catId && msg.metadata) {
       catMeta.set(msg.catId, mergeMessageMetadataSnapshots(catMeta.get(msg.catId), msg.metadata));
@@ -1405,7 +1446,7 @@ async function* routeParallelPrepared(
       if (
         effectiveMsg.type === 'error' &&
         effectiveMsg.catId &&
-        (signalForCat?.(effectiveMsg.catId) ?? signal)?.aborted
+        executionControls.get(effectiveMsg.catId)?.signal.aborted
       ) {
         continue;
       }
@@ -1414,7 +1455,7 @@ async function* routeParallelPrepared(
         // #267: errors before abort are real provider failures; errors after abort are cleanup
         // F-parallel-cancel: judge abort with THIS cat's own signal, not the shared one —
         // else canceling one concurrent cat mislabels a sibling's real error as cleanup.
-        if (!(signalForCat?.(effectiveMsg.catId) ?? signal)?.aborted) catHadProviderError.add(effectiveMsg.catId);
+        if (!executionControls.get(effectiveMsg.catId)?.signal.aborted) catHadProviderError.add(effectiveMsg.catId);
         if (effectiveMsg.error) {
           const prev = catErrorText.get(effectiveMsg.catId) ?? '';
           catErrorText.set(effectiveMsg.catId, `${prev}${prev ? '\n' : ''}${effectiveMsg.error}`);
@@ -1765,7 +1806,7 @@ async function* routeParallelPrepared(
         await requireTurnOutputAllowed(fencedTurnStore, ownInvId);
       }
       const lifecycleAdmission = catLifecycleResponse.get(msg.catId);
-      const completedSignal = signalForCat?.(msg.catId as CatId) ?? signal;
+      const completedSignal = executionControls.get(msg.catId as CatId)?.signal;
       // F117 KD-22: a member stopped by its output timeout failed, like a provider failure. Its own
       // error after the stop was dropped above, so its failure text and diagnostics come from what
       // its timer kept before stopping it.
@@ -2387,7 +2428,7 @@ async function* routeParallelPrepared(
               });
             }
           }
-        } else if (!(signalForCat?.(msg.catId) ?? signal)?.aborted && !sawUserFacingSystemInfo) {
+        } else if (!executionControls.get(msg.catId)?.signal.aborted && !sawUserFacingSystemInfo) {
           // No persisted message for fully silent turns.
           if (deps.draftStore && ownInvId) {
             deps.draftStore.delete(userId, threadId, ownInvId)?.catch?.(noop);
@@ -2669,8 +2710,8 @@ async function* routeParallelPrepared(
   // terminal, while a provider error observed before abort remains unhealthy.
   if (deps.invocationDeps.threadStore) {
     for (const catId of targetCats) {
-      const catSignal = signalForCat?.(catId) ?? signal;
-      if (!catSignal?.aborted || catActivityUpdated.has(catId)) continue;
+      const catSignal = executionControls.get(catId)?.signal;
+      if (!catSignal?.aborted || catActivityUpdated.has(catId) || unconfirmedProviderCats.has(catId)) continue;
       try {
         await deps.invocationDeps.threadStore.updateParticipantActivity(
           threadId,
@@ -2716,7 +2757,7 @@ async function* routeParallelPrepared(
   }
 
   // done-guarantee safety net: synthesize final done if loop exited without one
-  if (!yieldedFinalDone && targetCats.length > 0) {
+  if (!yieldedFinalDone && targetCats.length > 0 && unconfirmedProviderCats.size === 0) {
     yield {
       type: 'done' as AgentMessageType,
       catId: targetCats[targetCats.length - 1]!,

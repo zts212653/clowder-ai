@@ -10,7 +10,7 @@ import { resolveEnvReferences } from '../../../../../utils/env-references.js';
  * - resolveCapabilityMcpNamesSync: resolves managed MCP names for user-merge exclusion
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import {
   CAT_CAFE_SPLIT_ENTRYPOINTS,
@@ -18,7 +18,10 @@ import {
   resolveServersForCat,
 } from '../../../../../config/capabilities/capability-orchestrator.js';
 import { assertMappedCapabilitySource } from '../../../../../config/capabilities/invoke-capability-root.js';
-import { readInvocationMcpConfig } from '../../../../../config/capabilities/invoke-mcp-config.js';
+import {
+  readInvocationMcpConfig,
+  readInvocationMcpFile,
+} from '../../../../../config/capabilities/invoke-mcp-config.js';
 import {
   toOpenCodeMcpEntry,
   toOpenCodeRemoteMcpEntry,
@@ -146,7 +149,7 @@ export function resolveCapabilityMcpNamesSync(capabilitiesProjectRoot: string, c
   const names = new Set<string>();
   if (!catId) return names;
   try {
-    const raw = readFileSync(join(capabilitiesProjectRoot, '.cat-cafe', 'capabilities.json'), 'utf-8');
+    const raw = readInvocationMcpFile(join(capabilitiesProjectRoot, '.cat-cafe', 'capabilities.json'));
     const capConfig = JSON.parse(raw);
     if (capConfig?.version === 1 || capConfig?.version === 2) {
       for (const s of resolveServersForCat(capConfig, catId, { accessScope: 'global' }) as Array<{ name: string }>) {

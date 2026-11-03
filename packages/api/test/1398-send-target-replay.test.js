@@ -124,7 +124,7 @@ test('no available fallback persists the source and existing drain produces expl
   assert.ok(failure);
   assert.match(failure.content, /没有可用/);
 });
-test('HTTP unavailable member falls back and same-ID retry retains admission', async (t) => {
+test('HTTP unavailable member needs confirmation and same-ID retry retains the approved target', async (t) => {
   const f = fixture({ unavailable: true });
   const thread = f.threads.create('owner', 'owned');
   const app = Fastify();
@@ -143,6 +143,10 @@ test('HTTP unavailable member falls back and same-ID retry retains admission', a
     headers: { 'x-cat-cafe-user': 'owner' },
     payload: { threadId: thread.id, content: '@opus hello', idempotencyKey: randomUUID() },
   };
+  const proposed = await app.inject(request);
+  assert.equal(proposed.statusCode, 409, proposed.body);
+  assert.equal(f.queue.list(thread.id, 'owner').length, 0);
+  request.payload.confirmedTargetCats = ['codex'];
   const first = await app.inject(request);
   assert.equal(first.statusCode, 202, first.body);
   assert.deepEqual(

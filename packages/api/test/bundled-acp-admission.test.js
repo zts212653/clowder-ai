@@ -13,7 +13,13 @@ for (const client of clients) {
     assert.equal(result.unregistered, true);
     assert.equal(result.snapshot.packages[0].manifest.runtime, undefined);
     assert.equal(result.snapshot.packages[0].provenance.kind, 'catalog');
-    assert.equal(result.library.configurationKey, null, 'a fixed connection must not select the multi-client editor');
+    assert.equal(
+      result.library.configurationMode,
+      'single',
+      'a fixed connection must not select the multi-client editor',
+    );
+    assert.equal(result.library.configurationKey, 'connection');
+    assert.equal(result.library.defaultClient.id, client.id);
     assert.deepEqual(result.library.clients, [
       { id: client.id, name: client.id, ref: `plugin:${client.pluginId}/${client.id}`, available: true },
     ]);

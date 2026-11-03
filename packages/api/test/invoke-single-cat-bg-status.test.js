@@ -16,6 +16,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
+import { invokeKnownHostSession as invokeSingleCat } from './helpers/known-host-session-fixture.js';
 
 async function collect(iterable) {
   const msgs = [];
@@ -24,15 +25,12 @@ async function collect(iterable) {
 }
 
 let tempDir;
-let invokeSingleCat;
 let SessionChainStore;
 
 describe('F198-C P2-1: status messages treated as non-substantive', () => {
   before(async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'cat-bg-status-'));
     process.env.AUDIT_LOG_DIR = tempDir;
-    const mod = await import('../dist/domains/cats/services/agents/invocation/invoke-single-cat.js');
-    invokeSingleCat = mod.invokeSingleCat;
     ({ SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js'));
   });
 

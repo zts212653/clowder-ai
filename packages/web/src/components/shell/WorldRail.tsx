@@ -11,6 +11,7 @@ import { useCollectiveWorldDirectoryRecovery } from '../collective/use-collectiv
 import { useConciergeRailToggle } from '../concierge/ConciergeRailToggle';
 import { HubIcon } from '../hub-icons';
 import { MeowClubMark } from '../icons/MeowClubMark';
+import { PluginUiEntries } from '../plugins/PluginUiEntries';
 import { type ResolvedPin, resolvePin } from '../settings/settings-ia';
 import { CollectiveWorldRailEntries } from './CollectiveWorldRailEntries';
 import { MailboxButton } from './MailboxButton';
@@ -71,6 +72,7 @@ export function WorldRail() {
       />
 
       <div className="mt-auto flex flex-col items-center gap-1.5">
+        <PluginUiEntries />
         <Suspense fallback={null}>
           <PinnedRailItems />
         </Suspense>
