@@ -207,6 +207,31 @@ describe('cats routes read runtime catalog', { concurrency: false }, () => {
     assert.deepEqual(runtimeCat.mentionPatterns, ['@runtime-cat']);
   });
 
+  // clowder-ai#1796: an empty defaultModel in the runtime catalog is legal
+  // ("let the CLI decide"). Before the fix this 500'd the entire member list.
+  it('GET /api/cats survives a catalog member with an empty defaultModel (#1796)', async () => {
+    const projectRoot = createRuntimeCatalogProject(makeCatalog('empty-model-cat', '空模型猫', 'openai', ''));
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    try {
+      const res = await app.inject({ method: 'GET', url: '/api/cats' });
+      assert.equal(res.statusCode, 200, res.body);
+      const body = JSON.parse(res.body);
+      const emptyModelCat = body.cats.find((cat) => cat.id === 'empty-model-cat');
+      assert.ok(emptyModelCat, 'empty-model-cat should still be listed');
+      // The empty model must survive to the response, not be fabricated into
+      // a guessed name: resolveContextCapacity() reads '' as "unresolved".
+      assert.equal(emptyModelCat.defaultModel, '');
+    } finally {
+      await app.close();
+    }
+  });
+
   it('GET /api/cats advertises guide-reply for queued-internal active-invocation append', async () => {
     const projectRoot = createRuntimeCatalogProject(makeCatalog('runtime-cat', '运行时猫'));
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
