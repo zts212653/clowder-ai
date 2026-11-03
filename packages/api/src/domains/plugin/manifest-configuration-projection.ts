@@ -15,6 +15,7 @@ import { effectivePluginConfigurationValue } from './manager/plugin-configuratio
 export const HOST_PROTOCOL_ENV_PREFIX = 'CLOWDER_';
 
 export interface PluginRuntimeConfigurationPort {
+  /** Return the raw stored value, without substituting a manifest default. */
   readConfig(pluginInstanceId: string, key: string): Promise<unknown>;
   readSecret(pluginInstanceId: string, key: string): Promise<string | undefined>;
 }

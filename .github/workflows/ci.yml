@@ -72,6 +72,10 @@ jobs:
           test/f320-account-consumers.test.ts
           test/f320-api-auth-consumers.test.ts
           test/issue-1654-native-codex-launch.test.ts
+      - name: ACP catalog static discovery and cancelled editor requests
+        run: |
+          pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs node --import tsx --test --test-timeout=60000 test/agent-client-catalog-static-read.test.ts test/agent-client-catalog-configuration.test.ts test/plugin-icon-static-read.test.ts
+          pnpm --filter @cat-cafe/web exec vitest run src/hooks/__tests__/useAgentClientLibraries-lifecycle.test.tsx src/utils/__tests__/api-client-get-coordination.test.ts src/utils/__tests__/api-client-timeout.test.ts
       - name: DSH packaged secret guard admission
         run: >-
           pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs
