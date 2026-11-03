@@ -65,6 +65,13 @@ jobs:
         run: >-
           pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs
           node --import tsx --test test/secret-dsh.test.ts
+      - name: Memory credential scanner regressions
+        run: >-
+          node --test --test-timeout=15000
+          packages/api/test/memory/secret-scanner.test.js
+          packages/api/test/memory/secret-scanner-review.test.js
+          packages/api/test/memory/secret-scanner-collection.test.js
+          packages/api/test/memory/collection-index-builder-security.test.js
       - name: Managed Codex layout link diagnostic
         run: >-
           pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs
