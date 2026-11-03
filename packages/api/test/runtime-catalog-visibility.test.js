@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { catalogRpc } from '../src/routes/runtime-catalog-rpc.js';
-import { parseAcpCatalog } from '../src/routes/runtime-model-catalog.js';
+import { catalogRpc } from '../dist/routes/runtime-catalog-rpc.js';
+import { parseAcpCatalog } from '../dist/routes/runtime-model-catalog.js';
 
 test('ACP discovery can finish a 28-second handshake without sending a model prompt', async (t) => {
   const script = `
@@ -38,7 +38,7 @@ test('closing discovery rejects a pending late response and reaps the owned proc
     });`;
   const rpc = catalogRpc(process.execPath, ['-e', script], process.cwd());
   try {
-    const initialized = (await rpc.request('initialize', {})) as { pid: number };
+    const initialized = await rpc.request('initialize', {});
     const pending = assert.rejects(rpc.request('session/new', { mcpServers: [] }), {
       message: 'catalog_unavailable',
     });
