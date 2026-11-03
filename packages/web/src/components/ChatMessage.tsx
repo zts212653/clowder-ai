@@ -109,10 +109,17 @@ const messageTimeFormatter = new Intl.DateTimeFormat('zh-CN', {
   day: '2-digit',
   hour: '2-digit',
   minute: '2-digit',
+  timeZone: 'UTC',
 });
 
 function formatTime(ts: number): string {
-  return messageTimeFormatter.format(new Date(ts));
+  const local = new Date(ts);
+  // Cache the formatting rules, not the OS timezone. Read local calendar
+  // fields on each render, including after timezone changes and across DST.
+  const calendar = new Date(0);
+  calendar.setUTCFullYear(local.getFullYear(), local.getMonth(), local.getDate());
+  calendar.setUTCHours(local.getHours(), local.getMinutes());
+  return messageTimeFormatter.format(calendar);
 }
 
 const DELIVERED_AT_GAP_THRESHOLD = 5000;
