@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 import { DownloadIcon } from './icons/DownloadIcon';
+import { useAnchoredMenu } from './useAnchoredMenu';
 
 type ExportFormat = 'png' | 'md' | 'txt';
 
@@ -30,6 +31,9 @@ export function ExportButton({
   const [loading, setLoading] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const menu = useAnchoredMenu(menuOpen, triggerRef, menuRef, () => setMenuOpen(false), true);
 
   // Close menu on outside click
   useEffect(() => {
@@ -68,13 +72,21 @@ export function ExportButton({
     <div ref={containerRef} className="relative">
       <button
         type="button"
+        ref={triggerRef}
         onClick={() => setMenuOpen((v) => !v)}
+        onKeyDown={(event) => {
+          if (event.key !== 'ArrowRight') return;
+          event.preventDefault();
+          event.stopPropagation();
+          setMenuOpen(true);
+        }}
         disabled={loading}
-        className="flex w-full items-center gap-2 bg-transparent px-3 py-1.5 text-left text-xs text-cafe-secondary transition-colors hover:bg-cafe-surface-elevated hover:text-cafe-black disabled:cursor-not-allowed disabled:opacity-50"
+        className="shell-focusable flex w-full items-center gap-2 bg-transparent px-3 py-1.5 text-left text-xs text-cafe-secondary transition-colors hover:bg-cafe-surface-elevated hover:text-cafe-black disabled:cursor-not-allowed disabled:opacity-50"
         title="导出对话"
         aria-label="导出对话"
         aria-haspopup="menu"
         aria-expanded={menuOpen}
+        aria-controls={menuOpen ? menu.menuId : undefined}
         role={variant === 'thread-menu' ? 'menuitem' : undefined}
       >
         {loading ? (
@@ -97,7 +109,12 @@ export function ExportButton({
 
       {menuOpen && (
         <div
-          className="absolute right-0 top-full z-[60] mt-1 w-52 rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] py-1 shadow-lg"
+          ref={menuRef}
+          id={menu.menuId}
+          popover="manual"
+          onKeyDown={menu.onKeyDown}
+          style={{ inset: 'auto', margin: 0, visibility: 'hidden', maxWidth: 'calc(100vw - 16px)' }}
+          className="fixed z-[70] w-52 overflow-y-auto overscroll-contain rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] py-1 shadow-lg"
           role="menu"
           aria-label="导出格式"
         >
@@ -107,7 +124,7 @@ export function ExportButton({
               key={opt.format}
               onClick={() => handleExport(opt.format)}
               role="menuitem"
-              className="w-full text-left px-3 py-2 text-sm hover:bg-[var(--console-hover-bg)] transition-colors flex items-center justify-between"
+              className="shell-focusable w-full text-left px-3 py-2 text-sm hover:bg-[var(--console-hover-bg)] transition-colors flex items-center justify-between"
             >
               <span className="text-cafe-black">{opt.label}</span>
               <span className="text-xs text-cafe-muted">{opt.description}</span>
