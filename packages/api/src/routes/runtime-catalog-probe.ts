@@ -5,6 +5,7 @@ import {
   claudeSdkRuntimeOptions,
 } from '../domains/cats/services/agents/providers/claude-sdk-runtime.js';
 import { buildChildEnv } from '../utils/cli-spawn.js';
+import { claudeConfiguredDefaults } from './native-claude-defaults.js';
 import { catalogRpc } from './runtime-catalog-rpc.js';
 import { probeCodexCatalog } from './runtime-codex-discovery.js';
 import {
@@ -76,7 +77,7 @@ async function probeClaude(target: CatalogTarget): Promise<RuntimeModelCatalog> 
   let session: ReturnType<typeof sdkQuery> | undefined;
   try {
     const runtime = await captureClaudeSdkRuntime(target.command, controller.signal);
-    const { query } = await import('@anthropic-ai/claude-agent-sdk');
+    const { query, resolveSettings } = await import('@anthropic-ai/claude-agent-sdk');
     if (controller.signal.aborted) throw new Error('Model discovery cancelled before SDK query startup');
     session = query({
       prompt: noPrompts(),
@@ -97,7 +98,21 @@ async function probeClaude(target: CatalogTarget): Promise<RuntimeModelCatalog> 
       },
     });
     const models = parseClaudeModels(await session.supportedModels());
-    return { status: models.length ? 'live' : 'unavailable', models };
+    // The alpha reader may be unavailable while native model discovery still works.
+    // It does not fetch server policy or run policyHelper; keep its source explicit.
+    const settings = controller.signal.aborted
+      ? undefined
+      : await Promise.race([
+          resolveSettings({ cwd: target.cwd, settingSources: ['user', 'project', 'local'] }).catch(() => undefined),
+          new Promise<undefined>((resolve) =>
+            controller.signal.addEventListener('abort', () => resolve(undefined), { once: true }),
+          ),
+        ]);
+    return {
+      status: models.length ? 'live' : 'unavailable',
+      models,
+      ...(settings ? claudeConfiguredDefaults(settings.effective, models, target.model) : {}),
+    };
   } finally {
     clearTimeout(deadline);
     controller.abort();
