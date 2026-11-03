@@ -266,7 +266,10 @@ export function MemberRuntimeFields({
               'The reported default model is unavailable. Select a valid model or fix the client configuration and refresh.',
             )}
           </p>
-        ) : native && !form.defaultModel && catalog?.defaultModelStatus === 'unreported' ? (
+        ) : native &&
+          !form.defaultModel &&
+          catalog?.defaultModelStatus === 'unreported' &&
+          catalog.status === 'live' ? (
           <p>
             {t(
               '已读取模型信息，但默认模型尚未确认。“跟随”会保留客户端选择，不代表已验证可调用。',

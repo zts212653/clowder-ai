@@ -52,12 +52,15 @@ it('allows a slow ACP catalog to finish, ends a failed refresh and permits retry
 
 it('shows the reported ACP route on the inherited model choice without changing the member', async () => {
   const patch = vi.fn();
-  vi.mocked(apiFetch).mockImplementation(async (path) =>
-    path.endsWith('/dsh-setup/inspect')
+  let failCatalog = false;
+  vi.mocked(apiFetch).mockImplementation(async (path) => {
+    if (path === '/api/cats/runtime-models' && failCatalog)
+      return new Response(JSON.stringify({ error: 'discovery_failed' }), { status: 503 });
+    return path.endsWith('/dsh-setup/inspect')
       ? new Response(JSON.stringify({ error: 'dsh_setup_custom_startup' }), { status: 422 })
       : new Response(
           JSON.stringify(
-            path === '/api/cats/native-runtimes'
+            path.startsWith('/api/cats/native-runtimes')
               ? {
                   runtimes: [
                     {
@@ -81,8 +84,8 @@ it('shows the reported ACP route on the inherited model choice without changing 
                     defaultModelStatus: 'reported',
                   },
           ),
-        ),
-  );
+        );
+  });
   const host = document.createElement('div');
   const root = createRoot(host);
   try {
@@ -116,6 +119,11 @@ it('shows the reported ACP route on the inherited model choice without changing 
     await act(async () => inspect?.click());
     expect(host.textContent).toContain('不支持自动复制配置');
     expect(host.textContent).toContain('客户端回报：Custom Gateway / Model');
+    failCatalog = true;
+    const refresh = [...host.querySelectorAll('button')].find((button) => button.textContent === '刷新');
+    await act(async () => refresh?.click());
+    expect(host.textContent).toContain('模型目录暂不可读取');
+    expect(host.textContent).not.toContain('已读取模型信息，但默认模型尚未确认');
     expect(patch).not.toHaveBeenCalled();
   } finally {
     await act(async () => root.unmount());
