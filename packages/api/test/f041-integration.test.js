@@ -14,6 +14,7 @@ import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { directMcpContract } from './helpers/direct-mcp-contract.js';
 
 const {
@@ -195,7 +196,10 @@ describe('F041 Cloud P1-1: bootstrap feeds invocation-owned MCP', () => {
         'the proxy retains the workspace boundary alongside this invocation identity and credentials',
       );
       assert.equal(upstream.command, process.execPath);
-      assert.ok(upstream.args[0].endsWith(`/packages/mcp-server/dist/${server.name.replace('cat-cafe-', '')}.js`));
+      assert.equal(
+        upstream.args[0],
+        fileURLToPath(import.meta.resolve(`@cat-cafe/mcp-server/dist/${server.name.replace('cat-cafe-', '')}.js`)),
+      );
       assert.deepEqual(upstream.env, { ALLOWED_WORKSPACE_DIRS, ...callbackEnv });
     }
   });
