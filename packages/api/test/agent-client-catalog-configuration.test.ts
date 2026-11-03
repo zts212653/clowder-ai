@@ -29,7 +29,12 @@ const registerFromProduction = new Function(
   productionCall,
 );
 
-async function fixture(t: TestContext, permissionPolicy: 'deny' | 'auto_allow' | undefined, fixed = false) {
+async function fixture(
+  t: TestContext,
+  permissionPolicy: 'deny' | 'auto_allow' | undefined,
+  fixed = false,
+  name = 'Catalog configuration origin',
+) {
   const projectRoot = await mkdtemp(join(tmpdir(), 'catalog-config-origin-'));
   const source = join(projectRoot, 'source');
   await mkdir(source);
@@ -45,7 +50,7 @@ async function fixture(t: TestContext, permissionPolicy: 'deny' | 'auto_allow' |
       pluginId,
       version: '0.1.0',
       contractVersion: '0.1.0',
-      name: 'Catalog configuration origin',
+      name,
       features: [{ id: 'agent', name: 'Agent', resources: [], capabilities: [] }],
       configuration: [{ key: 'clients', label: 'Clients', kind: 'string', required: false, default: value }],
     }),
@@ -155,5 +160,14 @@ test('production catalog preserves the fixed-client form and live configuration 
   assert.equal(recovered.clients[0].id, 'fixed-client');
   assert.equal((await h.execute())[0]?.acp.command, 'another-client');
   assert.equal((await h.execute())[0]?.acp.permissionPolicy, 'auto_allow');
+  h.assertNoArchiveReads();
+});
+
+test('fixed-client display metadata preserves names accepted by the plugin manifest', async (t) => {
+  const name = 'Catalog '.repeat(15);
+  const h = await fixture(t, 'deny', true, name);
+  const library = (await h.read()).json().libraries[0];
+  assert.equal(library.defaultClient.name, name);
+  assert.equal(library.clients[0].name, name);
   h.assertNoArchiveReads();
 });
