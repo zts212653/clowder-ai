@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { bundleDesktopApi } from './bundle-desktop-api.mjs';
 import { bundleRuntimePackages } from './bundle-runtime-packages.mjs';
 import { exportFrozenRuntime } from './frozen-runtime-export.mjs';
+import { readFrozenRuntimeInputs } from './frozen-runtime-inputs.mjs';
 import { profileDesktopStartup } from './profile-desktop-startup.mjs';
 import { rebuildFrozenDependencies } from './rebuild-frozen-dependencies.mjs';
 
@@ -20,13 +21,8 @@ const workspace = fs.mkdtempSync(path.join(path.dirname(out), '.frozen-workspace
 for (const name of ['package.json', 'pnpm-workspace.yaml', 'pnpm-lock.yaml', '.npmrc', 'tsconfig.base.json'])
   fs.copyFileSync(path.join(source, name), path.join(workspace, name));
 // Only tracked source inputs and explicitly built dist outputs enter the artifact.
-// A prepared release snapshot may supply the same tracked-file inventory without .git.
-const inventoryFile = path.join(source, '.build-input-files.json');
-const tracked = fs.existsSync(inventoryFile)
-  ? JSON.parse(fs.readFileSync(inventoryFile, 'utf8'))
-  : execFileSync('git', ['ls-files', '-z'], { cwd: source }).toString('utf8').split('\0').filter(Boolean);
+const tracked = await readFrozenRuntimeInputs(source);
 for (const relative of tracked) {
-  if (!/^(packages|scripts|patches)\//.test(relative)) continue;
   const from = path.resolve(source, relative),
     target = path.resolve(workspace, relative);
   if (!from.startsWith(source + path.sep) || !target.startsWith(workspace + path.sep))
