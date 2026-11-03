@@ -49,11 +49,10 @@ export function useAnchoredMenu(
     panel.querySelector<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')?.focus({ preventScroll: true });
     const dismiss = () => {
       close.current();
-      trigger.focus({ preventScroll: true });
+      if (panel.contains(document.activeElement)) trigger.focus({ preventScroll: true });
     };
     const scroll = (event: Event) => {
-      if (event.target instanceof Node && panel.contains(event.target)) return;
-      dismiss();
+      if (event.target instanceof Node && event.target.contains(trigger)) dismiss();
     };
     const observer = new ResizeObserver(place);
     observer.observe(trigger.closest('[data-testid="sidebar-thread-list"]') ?? trigger);

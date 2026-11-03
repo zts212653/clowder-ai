@@ -126,6 +126,105 @@ after(async () => proof?.close());
   );
 });
 
+test('scroll and Tab respect the menu anchor and leave the whole menu hierarchy', { timeout: 90_000 }, async (t) => {
+  const context = await proof.browser.newContext({ viewport: { width: 1228, height: 700 } });
+  t.after(() => context.close());
+  await context.addInitScript(() => localStorage.setItem('cat-cafe:shell-presentation', 'v2'));
+  const page = await proof.openPage(context);
+  const list = page.getByTestId('sidebar-thread-list');
+  await list.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
+  const row = list.locator('[data-thread-id]').last();
+  const trigger = row.getByRole('button', { name: '更多操作', exact: true });
+  const menu = page.getByRole('menu', { name: '对话操作', exact: true });
+  const formats = page.getByRole('menu', { name: '导出格式', exact: true });
+  const main = page.getByRole('main');
+  await main.evaluate((element) => {
+    const content = document.createElement('div');
+    content.style.height = '2000px';
+    element.append(content);
+  });
+  await trigger.click();
+  assert.equal(
+    await menu
+      .getByRole('menuitem')
+      .first()
+      .evaluate((element) => element === document.activeElement),
+    true,
+  );
+  const anchor = await trigger.boundingBox();
+  await main.hover();
+  await page.mouse.wheel(0, 120);
+  await page.waitForFunction(() => document.querySelector('main').scrollTop > 0);
+  assert.deepEqual(await trigger.boundingBox(), anchor);
+  assert.equal(await menu.count(), 1, 'unrelated scrolling must leave the anchored menu open');
+  assert.equal(
+    await menu
+      .getByRole('menuitem')
+      .first()
+      .evaluate((element) => element === document.activeElement),
+    true,
+  );
+  await menu.getByRole('menuitem', { name: '导出对话', exact: true }).click();
+  await main.hover();
+  const previousScroll = await main.evaluate((element) => element.scrollTop);
+  await page.mouse.wheel(0, 120);
+  await page.waitForFunction((previous) => document.querySelector('main').scrollTop > previous, previousScroll);
+  await assertVisibleMenu(formats);
+  assert.equal(
+    await formats
+      .getByRole('menuitem')
+      .first()
+      .evaluate((element) => element === document.activeElement),
+    true,
+  );
+  await list.evaluate((element) => {
+    element.scrollTop -= 20;
+  });
+  await menu.waitFor({ state: 'detached' });
+  assert.equal(await formats.count(), 0);
+  assert.equal(await trigger.evaluate((element) => element === document.activeElement), true);
+
+  for (const child of [false, true]) {
+    for (const key of ['Tab', 'Shift+Tab']) {
+      await trigger.click();
+      if (child) await menu.getByRole('menuitem', { name: '导出对话', exact: true }).click();
+      await page.keyboard.press(key);
+      await menu.waitFor({ state: 'detached' });
+      assert.equal(await formats.count(), 0);
+      const destination = key === 'Tab' ? row.getByTestId('thread-quick-delete') : row.getByRole('link');
+      assert.equal(await destination.evaluate((element) => element === document.activeElement), true);
+    }
+  }
+  await trigger.click();
+  const pageControl = main.getByRole('button', { name: '个人设置', exact: true });
+  await pageControl.focus();
+  await list.evaluate((element) => {
+    element.scrollTop -= 20;
+  });
+  await menu.waitFor({ state: 'detached' });
+  assert.equal(await pageControl.evaluate((element) => element === document.activeElement), true);
+
+  await page.setViewportSize({ width: 900, height: 300 });
+  await list.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
+  await trigger.click();
+  const exportItem = menu.getByRole('menuitem', { name: '导出对话', exact: true });
+  await exportItem.click();
+  await formats.waitFor();
+  const sidebarScroll = await list.evaluate((element) => element.scrollTop);
+  await menu.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
+  await formats.waitFor({ state: 'detached' });
+  assert.equal(await menu.count(), 1, 'scrolling the parent menu closes only its anchored child');
+  assert.equal(await exportItem.evaluate((element) => element === document.activeElement), true);
+  assert.equal(await list.evaluate((element) => element.scrollTop), sidebarScroll);
+  assert.deepEqual(proof.errors, []);
+});
+
 async function assertVisibleMenu(menu) {
   await menu.waitFor();
   const visibility = await menu.evaluate((element) => {
