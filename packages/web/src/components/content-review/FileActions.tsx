@@ -37,6 +37,8 @@ export function FileActions(props: FileActionsProps) {
     position,
     setPosition,
     info,
+    infoError,
+    refreshInfo,
     notice,
     menu,
     trigger,
@@ -129,6 +131,8 @@ export function FileActions(props: FileActionsProps) {
           position={position}
           menu={menu}
           info={info}
+          infoError={infoError}
+          retryInfo={() => void refreshInfo()}
           link={link}
           filename={filename}
           mime={mime}

@@ -37,6 +37,7 @@ export function useFileActionController({
   const t = useShellCopy(artworkActionsCopy);
   const [position, setPosition] = useState<{ x: number; y: number } | null>(null);
   const [info, setInfo] = useState<ContentFileInfo | null>(null);
+  const [infoError, setInfoError] = useState(false);
   const [notice, setNotice] = useState<FileNotice | null>(null);
   const menu = useRef<HTMLDivElement>(null),
     trigger = useRef<HTMLButtonElement>(null);
@@ -69,6 +70,7 @@ export function useFileActionController({
     generation.current++;
     setPosition(null);
     setInfo(null);
+    setInfoError(false);
     return () => {
       generation.current++;
       clearTimeout(timer.current);
@@ -114,12 +116,14 @@ export function useFileActionController({
     });
   const refreshInfo = () => {
     const scope = generation.current;
+    setInfo(null);
+    setInfoError(false);
     return contentFileInfo(source)
       .then((value) => {
         if (scope === generation.current) setInfo(value);
       })
       .catch(() => {
-        if (scope === generation.current) feedback('failed');
+        if (scope === generation.current) setInfoError(true);
       });
   };
   useEffect(() => {
@@ -128,7 +132,6 @@ export function useFileActionController({
   const openMenu = (x: number, y: number, focus = true) => {
     initialFocus.current = null;
     focusOnOpen.current = focus;
-    setInfo(null);
     setPosition({
       x: Math.max(8, Math.min(x, window.innerWidth - 308)),
       y: Math.max(8, Math.min(y, window.innerHeight - 550)),
@@ -227,6 +230,8 @@ export function useFileActionController({
     position,
     setPosition,
     info,
+    infoError,
+    refreshInfo,
     notice,
     menu,
     trigger,

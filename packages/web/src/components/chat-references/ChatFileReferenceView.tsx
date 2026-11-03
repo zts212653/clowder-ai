@@ -36,8 +36,8 @@ export function ChatFileReferenceView({
     language = useShellLanguage();
   const card = layout === 'card',
     image = target.mime.startsWith('image/');
-  const absolutePath = target.absolutePath.replace(/\/+$/, '') || '/';
-  const separator = absolutePath.lastIndexOf('/');
+  const absolutePath = target.absolutePath.replace(/[/\\]+$/, '') || '/';
+  const separator = Math.max(absolutePath.lastIndexOf('/'), absolutePath.lastIndexOf('\\'));
   const filename = absolutePath.slice(separator + 1) || '/';
   const directory = absolutePath.slice(0, separator + 1);
   const raw = `${API_URL}/api/workspace/file/raw?${new URLSearchParams({ worktreeId: target.worktreeId, path: target.path })}`;
