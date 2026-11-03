@@ -222,7 +222,11 @@ describe('force-reset: releases all stuck state for a thread (escape hatch)', ()
     assert.equal(res.statusCode, 200);
     assert.deepEqual(JSON.parse(res.body), { ok: true, cancelled: true });
     assert.deepEqual(lockScopes, [{ threadId: THREAD_ID, userId: USER_ID, catId: 'codex-sol' }]);
-    assert.ok(broadcasts.some(({ m }) => m.type === 'done' && m.catId === 'codex-sol'));
+    assert.ok(broadcasts.some(({ m }) => m.type === 'status' && m.catId === 'codex-sol'));
+    assert.ok(
+      broadcasts.every(({ m }) => m.type !== 'done'),
+      'releasing a Host lock does not prove provider teardown',
+    );
     assert.ok(queueProcessor.actions.some((action) => action.op === 'releaseSlot' && action.cid === 'codex-sol'));
   });
 
@@ -244,7 +248,11 @@ describe('force-reset: releases all stuck state for a thread (escape hatch)', ()
     });
 
     assert.equal(res.statusCode, 200);
-    assert.ok(broadcasts.some(({ m }) => m.type === 'done' && m.catId === 'codex-sol'));
+    assert.ok(broadcasts.some(({ m }) => m.type === 'status' && m.catId === 'codex-sol'));
+    assert.ok(
+      broadcasts.every(({ m }) => m.type !== 'done'),
+      'force-reset requests stopping; lifecycle owns done',
+    );
     assert.ok(queueProcessor.actions.some((action) => action.op === 'releaseSlot' && action.cid === 'codex-sol'));
   });
 

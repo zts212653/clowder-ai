@@ -37,6 +37,7 @@ describe('issue #1381: Codex exec_json native/effective context window feedback 
       color: { primary: '#000', secondary: '#fff' },
       mentionPatterns: ['@issue-1381-codex-window'],
       clientId: 'openai',
+      relationshipKey: 'maine-coon',
       ...(accountRef ? { accountRef } : {}),
       provider: 'openai',
       defaultModel,
@@ -643,7 +644,7 @@ describe('issue #1381: Codex exec_json native/effective context window feedback 
     }
 
     before(async () => {
-      ({ invokeSingleCat } = await import('../dist/domains/cats/services/agents/invocation/invoke-single-cat.js'));
+      ({ invokeKnownHostSession: invokeSingleCat } = await import('./helpers/known-host-session-fixture.js'));
       ({ CodexAgentService } = await import('../dist/domains/cats/services/agents/providers/CodexAgentService.js'));
       ({ fakeL0Compiler } = await import('./helpers/fake-l0-compiler.js'));
       savedGlobalConfigRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;

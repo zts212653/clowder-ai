@@ -7,8 +7,11 @@ import { memberExecutionKey } from '../src/domains/plugin/member-sessions/valida
 import { memberExecutionFixture as fixture } from './helpers/plugin-member-execution-fixture.js';
 
 function cancelProvider(f: Awaited<ReturnType<typeof fixture>>, teardown = true) {
-  f.turns.transitionTerminal(f.claim.invocationId, { status: 'canceled', endedAt: 200, terminalReason: 'user_stop' });
-  if (teardown) f.turns.recordProviderTeardown(f.claim.invocationId, 201);
+  if (teardown) f.turns.recordProviderTeardown(f.claim.invocationId, 200);
+  const terminal = { status: 'canceled' as const, endedAt: 200, terminalReason: 'user_stop' };
+  if (teardown || f.turns.get(f.claim.invocationId)?.providerStartedAt === undefined)
+    f.turns.transitionTerminal(f.claim.invocationId, terminal);
+  else assert.throws(() => f.turns.transitionTerminal(f.claim.invocationId, terminal), /provider_teardown_unconfirmed/);
   f.messages.commitLifecycleResponseTerminal(f.response.id, {
     invocationId: f.claim.invocationId,
     status: 'canceled',
@@ -126,8 +129,8 @@ test('a late successful old child preserves the renewed generation cursor and ca
   await f.host().claim(f.claim);
   await f.owner(() => f.port.revoke(f.session.sessionId));
   const renewed = await f.owner(() => f.port.prepare(f.prepareInput), 'renew-before-late-success');
-  f.turns.transitionTerminal(f.claim.invocationId, { status: 'succeeded', endedAt: 200 });
   f.turns.recordProviderTeardown(f.claim.invocationId, 201);
+  f.turns.transitionTerminal(f.claim.invocationId, { status: 'succeeded', endedAt: 200 });
   f.messages.commitLifecycleResponseTerminal(f.response.id, {
     invocationId: f.claim.invocationId,
     status: 'completed',
@@ -187,8 +190,8 @@ test('read-only execution lookup recovers the original receipt after revoke and 
   const f = await fixture();
   await f.host().claim(f.claim);
   await f.owner(() => f.port.revoke(f.session.sessionId));
-  f.turns.transitionTerminal(f.claim.invocationId, { status: 'canceled', endedAt: 200, terminalReason: 'user_stop' });
   f.turns.recordProviderTeardown(f.claim.invocationId, 201);
+  f.turns.transitionTerminal(f.claim.invocationId, { status: 'canceled', endedAt: 200, terminalReason: 'user_stop' });
   f.messages.commitLifecycleResponseTerminal(f.response.id, {
     invocationId: f.claim.invocationId,
     status: 'canceled',
@@ -208,8 +211,8 @@ test('read-only execution lookup recovers the original receipt after revoke and 
 
 test('an unclaimed provider-started child cannot acquire a member binding through settlement', async () => {
   const f = await fixture();
-  f.turns.transitionTerminal(f.claim.invocationId, { status: 'canceled', endedAt: 200, terminalReason: 'user_stop' });
   f.turns.recordProviderTeardown(f.claim.invocationId, 201);
+  f.turns.transitionTerminal(f.claim.invocationId, { status: 'canceled', endedAt: 200, terminalReason: 'user_stop' });
   f.messages.commitLifecycleResponseTerminal(f.response.id, {
     invocationId: f.claim.invocationId,
     status: 'canceled',

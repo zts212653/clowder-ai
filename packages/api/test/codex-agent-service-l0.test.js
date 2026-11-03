@@ -16,6 +16,7 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { mock, test } from 'node:test';
 import { createCatId } from '@cat-cafe/shared';
+import { freezeL0Input, L0_COMPILER_VERSION } from '@cat-cafe/shared/l0-input';
 
 const { CodexAgentService } = await import('../dist/domains/cats/services/agents/providers/CodexAgentService.js');
 
@@ -131,6 +132,36 @@ test('Task 4: codex argv carries -c developer_instructions=<compiled L0>', async
   assert.ok(args.includes('--config'), 'argv must include --config');
   const developerInstructions = assertCompiledL0Preserved(args, 'DEV-L0-BODY');
   assert.match(developerInstructions, /do not append the cat signature to commentary\/progress messages/);
+});
+
+test('the real Codex L0 child consumes the invocation snapshot and refuses a missing snapshot before spawn', async () => {
+  const frozenL0Input = freezeL0Input({
+    schemaVersion: 1,
+    compilerVersion: L0_COMPILER_VERSION,
+    catId: 'codex',
+    projection: 'owner',
+    template: '{{IDENTITY_BLOCK}}',
+    sections: {},
+    variables: { IDENTITY_BLOCK: 'captured developer identity' },
+  });
+  const proc = createMockProcess();
+  const spawnFn = mock.fn(() => {
+    setImmediate(() => emitOk(proc));
+    return proc;
+  });
+  const service = createL0TestService({ spawnFn, catId: createCatId('codex') });
+  const messages = await collect(service.invoke('hi', { frozenL0Input }));
+  assert.equal(
+    messages.some((message) => message.type === 'error'),
+    false,
+  );
+  assert.equal(spawnFn.mock.calls.length, 1);
+  assertCompiledL0Preserved(spawnFn.mock.calls[0].arguments[1], 'captured developer identity');
+  const blockedSpawn = mock.fn();
+  const missing = createL0TestService({ spawnFn: blockedSpawn, catId: createCatId('codex') });
+  const rejected = await collect(missing.invoke('hi'));
+  assert.match(rejected.find((message) => message.type === 'error')?.error ?? '', /Frozen L0 input is required/);
+  assert.equal(blockedSpawn.mock.calls.length, 0);
 });
 
 test('P0 security: prompt 正文走 stdin 不进 argv（ps -o command= 跨进程泄露防护）', async () => {

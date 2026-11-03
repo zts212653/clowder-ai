@@ -62,7 +62,7 @@ export async function readVerifiedPackageStaticFile(input: {
   const archive = resolve(stage, 'package.tgz');
   const signal = AbortSignal.timeout(PLUGIN_ARCHIVE_BUDGET.deadlineMs);
   const env = { PATH: process.env.PATH ?? '/usr/bin:/bin', LC_ALL: 'C' };
-  const options = { cwd: stage, env, signal, timeout: PLUGIN_ARCHIVE_BUDGET.deadlineMs };
+  const options = { cwd: stage, env, signal, timeout: PLUGIN_ARCHIVE_BUDGET.deadlineMs, windowsHide: true };
   try {
     await sealArchive(resolve(input.artifactRoot, 'package.tgz'), archive, signal);
     await verifyArchiveDigest(archive, input.packageDigest);
@@ -98,7 +98,7 @@ export async function readVerifiedPackageStaticFile(input: {
     const bytes = selected === undefined ? undefined : await extract(selected);
     await verifyArchiveDigest(archive, input.packageDigest);
     if ((await archiveIdentity(archive)) !== identity) invalid('sealed static archive changed during read');
-    return { manifest: validation.manifest, bytes };
+    return { manifest: structuredClone(value) as typeof validation.manifest, bytes };
   } finally {
     await rm(stage, { recursive: true, force: true });
   }

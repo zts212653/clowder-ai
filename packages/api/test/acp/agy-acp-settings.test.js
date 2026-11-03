@@ -36,7 +36,14 @@ test('official AGY ACP settings persist the isolated profile and require matchin
   }
 });
 
-test('registry reuses the ACP pool with personal OAuth isolation and native identity policy', async () => {
+test('registry reuses the ACP pool with personal OAuth isolation and native identity policy', async (t) => {
+  const previousMode = process.env.CAT_CAFE_WINDOWS_ACP_BOOTSTRAP_MODE;
+  // Account/pool behavior does not attest inherited runner Temp ancestor ACLs.
+  if (process.platform === 'win32') process.env.CAT_CAFE_WINDOWS_ACP_BOOTSTRAP_MODE = 'trusted-host';
+  t.after(() => {
+    if (previousMode === undefined) delete process.env.CAT_CAFE_WINDOWS_ACP_BOOTSTRAP_MODE;
+    else process.env.CAT_CAFE_WINDOWS_ACP_BOOTSTRAP_MODE = previousMode;
+  });
   const root = mkdtempSync(join(tmpdir(), 'agy-acp-factory-'));
   const workspace = join(root, 'project');
   mkdirSync(workspace);

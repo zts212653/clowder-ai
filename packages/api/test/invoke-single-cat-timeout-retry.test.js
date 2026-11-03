@@ -12,6 +12,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
+import { declareKnownHostSessionFixture } from './helpers/known-host-session-fixture.js';
 
 async function collect(iterable) {
   const msgs = [];
@@ -28,7 +29,12 @@ describe('#774 CLI timeout retry on session resume', () => {
     tempDir = await mkdtemp(join(tmpdir(), 'cat-timeout-retry-'));
     process.env.AUDIT_LOG_DIR = tempDir;
     const mod = await import('../dist/domains/cats/services/agents/invocation/invoke-single-cat.js');
-    invokeSingleCat = mod.invokeSingleCat;
+    invokeSingleCat = (deps, params) =>
+      (async function* () {
+        const executionBinding = await mod.prepareInvocationExecutionBinding(deps, params);
+        await declareKnownHostSessionFixture(deps, params, executionBinding);
+        yield* mod.invokeSingleCat(deps, { ...params, executionBinding });
+      })();
     ({ SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js'));
   });
 

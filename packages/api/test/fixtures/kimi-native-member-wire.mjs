@@ -180,7 +180,7 @@ await writeFile(
   { mode: 0o600 },
 );
 const pools = new Map();
-let timer;
+let timer, memberFrame;
 try {
   const command = process.env.KIMI_MEMBER_WIRE_BINARY ?? '/opt/homebrew/bin/kimi';
   const cat = { id: 'kimi31-pro', clientId: 'kimi', carrier: 'acp', defaultModel: modelAlias, accountRef: 'existing' };
@@ -221,14 +221,15 @@ try {
   assert.equal(described.available, true);
   assert.equal(described.runtime.carrier, 'acp');
   assert.equal(described.accounts[0].accountRevision, snapshot.accountRevision);
-  const runtime = await createMemberRuntime({
+  memberFrame = await createMemberRuntime({
     config: () => cat,
     service: () => service,
     workspace: async () => ({ workingDirectory: workspace, workingProjectRoot: root, usesDefaultWorkspace: false }),
-  }).snapshot(
+  }).acquire(
     { threadId: 'fixture-thread', catId: cat.id, contributionId: 'player', identity: 'own-game', memory: [] },
     scope,
   );
+  const runtime = memberFrame.runtime;
   assert.equal(runtime.account.accountRevision, snapshot.accountRevision);
   assert.equal(runtime.carrier, 'acp');
   assert([...pools.values()].every((pool) => pool.getMetrics().coldStartCount === 0));
@@ -245,6 +246,8 @@ try {
     compile: async (input) => {
       assert.equal(input.projection, 'scoped-member');
       assert.equal(input.runtimeModel, model);
+      assert.equal(input.frozenInput, memberFrame.binding.frozenL0Input);
+      assert.equal(input.requireFrozenInput, true);
       if (rotate) await writeFile(configPath, beforeConfig + '\n# source changed during compile\n');
       if (revoke) current = false;
       // biome-ignore lint/suspicious/noTemplateCurlyInString: Native template syntax must be rejected, not interpolated here.
@@ -254,6 +257,7 @@ try {
       workingDirectory: workspace,
       signal: controller.signal,
       executionAccount: snapshot,
+      frozenL0Input: memberFrame.binding.frozenL0Input,
       accountEnv: account.accountEnv,
       toolExecutionPolicy: {
         mode: 'plugin_native',
@@ -359,6 +363,7 @@ try {
   process.stdout.write(JSON.stringify(proof) + '\n');
 } finally {
   clearTimeout(timer);
+  await memberFrame?.release();
   for (const pool of pools.values()) await pool.closeAll();
   server.closeAllConnections();
   await new Promise((resolve) => server.close(resolve));

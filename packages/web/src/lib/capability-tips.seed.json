@@ -1,5 +1,33 @@
 [
   {
+    "id": "feature-f332-matter-recall",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/guides/matter-recall.md",
+      "anchor": "查看和更正参考消息"
+    },
+    "structureSource": {
+      "path": "packages/web/src/components/reply-layers/MatterRecallLine.tsx",
+      "anchor": "MatterRecallLine"
+    },
+    "bodySource": {
+      "path": "docs/guides/matter-recall.md",
+      "anchor": "修改已经讨论过的事"
+    },
+    "contexts": ["concierge_open"],
+    "audience": ["cvo"],
+    "body": "回复开头出现「参考了…」时，点开查看原话，用「出处」回到原消息。决定变了，先在对话中写下新决定，再从「查看全部」进入事情页更换来源；旧回复会标明参考资料已更正。",
+    "action": {
+      "type": "open_source",
+      "label": "查看参考消息的用法",
+      "sourceRef": {
+        "path": "docs/guides/matter-recall.md",
+        "anchor": "查看和更正参考消息"
+      }
+    },
+    "owner": "codex-astra"
+  },
+  {
     "id": "feature-f309-html-work-versions",
     "kind": "feature",
     "sourceRef": {
@@ -3259,7 +3287,7 @@
     },
     "contexts": ["concierge_open", "pet_waiting_for_user"],
     "audience": ["all"],
-    "body": "在 Workspace 选中内容后点“请猫修改”，在同一聊天里说明想法；新版可对照后采用或拒绝，标记不会改原件。视频按 F 全屏播放；本机的“⋯”可在 Finder 中显示或用默认播放器打开原件。",
+    "body": "在 Workspace 选中内容后点“请猫修改”，在同一聊天里说明想法；新版可对照后采用或拒绝，标记不会改原件。视频按 F 全屏播放；本机的“⋯”可在 Finder 中显示或用默认播放器打开当前版本。",
     "action": {
       "type": "open_source",
       "label": "查看 Workspace 协作说明",

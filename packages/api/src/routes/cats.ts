@@ -75,7 +75,9 @@ import { configEventBus, createChangeSetId } from '../config/config-event-bus.js
 import { getConfiguredMemberWindowSetting, resolveContextCapacity } from '../config/context-capacity.js';
 import { readLocalAccountSelection } from '../config/local-account-selection.js';
 import {
+  assertMemberConfigurationRevision,
   MemberConfigurationConflict,
+  MemberConfigurationRevisionRequired,
   memberConfigurationRevision,
   updateMemberWithRevision,
 } from '../config/member-config-revision.js';
@@ -90,7 +92,12 @@ import {
   readRuntimeCatCatalog,
   withRuntimeCatMutationLock,
 } from '../config/runtime-cat-catalog.js';
-import { deleteRuntimeOverride, getRuntimeOverride, setRuntimeOverride } from '../config/session-strategy-overrides.js';
+import {
+  deleteRuntimeOverride,
+  getRuntimeOverride,
+  getRuntimeOverrideRevision,
+  setRuntimeOverride,
+} from '../config/session-strategy-overrides.js';
 import type { InvocationCapacitySnapshot } from '../domains/cats/services/agents/invocation/invocation-capacity-snapshot.js';
 import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
 import { saveSpan } from '../utils/member-save-diagnostics.js';
@@ -102,6 +109,11 @@ const colorSchema = z.object({
 });
 
 const cliEffortSchema = z.string().trim().min(1);
+const memberRevisionSchema = z
+  .string()
+  .regex(/^[a-f0-9]{64}$/)
+  .optional();
+const deleteCatSchema = z.object({ expectedRevision: memberRevisionSchema }).strict();
 const cliSchema = z.object({
   command: z.string().min(1).optional(),
   outputFormat: z.string().min(1).optional(),
@@ -229,6 +241,7 @@ const baseCatSchema = z.object({
   caution: z.string().nullable().optional(),
   strengths: z.array(z.string().min(1)).optional(),
   sessionChain: z.boolean().optional(),
+  executionApproval: z.enum(['auto', 'ask_user']).optional(),
   carrier: catCarrierSchema.optional(),
   voiceConfig: voiceConfigSchema.optional(),
 });
@@ -293,10 +306,7 @@ const updateCatSchema = z.object({
     .regex(/^plugin:[a-z0-9][a-z0-9._-]{0,127}\/[a-z0-9][a-z0-9._-]{0,63}$/)
     .nullable()
     .optional(),
-  expectedRevision: z
-    .string()
-    .regex(/^[a-f0-9]{64}$/)
-    .optional(),
+  expectedRevision: memberRevisionSchema,
   accountRef: z.string().min(1).nullable().optional(),
   accountBindingMode: z.enum(['follow', 'override']).optional(),
   contextWindow: z.number().int().positive().nullable().optional(),
@@ -308,6 +318,7 @@ const updateCatSchema = z.object({
   sessionChain: z.boolean().optional(),
   available: z.boolean().optional(),
   clientId: clientSchema.optional(),
+  executionApproval: z.enum(['auto', 'ask_user']).optional(),
   carrier: catCarrierSchema.optional(),
   defaultModel: modelSchema.optional(),
   mcpSupport: z.boolean().optional(),
@@ -847,6 +858,7 @@ async function toCatResponse(
         variantLabel: cat.variantLabel ?? undefined,
         isDefaultVariant: cat.isDefaultVariant ?? undefined,
         breedDisplayName: cat.breedDisplayName ?? undefined,
+        executionApproval: cat.executionApproval,
         mcpSupport: cat.mcpSupport,
         ...(acpConfig ? { acp: acpConfig } : {}),
         ...(cat.agyProfile ? { agyProfile: publicAgyProfile(cat.agyProfile) } : {}),
@@ -1212,6 +1224,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
           teamStrengths: body.teamStrengths,
           caution: body.caution,
           strengths: body.strengths,
+          ...(body.executionApproval ? { executionApproval: body.executionApproval } : {}),
           clientId: 'acp',
           carrier: 'acp',
           defaultModel: body.defaultModel,
@@ -1273,6 +1286,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
           teamStrengths: body.teamStrengths,
           caution: body.caution,
           strengths: body.strengths,
+          ...(body.executionApproval ? { executionApproval: body.executionApproval } : {}),
           clientId: body.clientId,
           carrier: requestedCarrier,
           defaultModel: body.defaultModel,
@@ -1438,7 +1452,10 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
         error: '这个成员不是内置云端身份，不能使用“恢复云端身份”。',
       };
     }
-    if (restoringBuiltinCloudIdentity && Object.keys(body).some((field) => field !== 'restoreBuiltinCloudIdentity')) {
+    if (
+      restoringBuiltinCloudIdentity &&
+      Object.keys(body).some((field) => field !== 'restoreBuiltinCloudIdentity' && field !== 'expectedRevision')
+    ) {
       reply.status(400);
       return {
         code: 'BUILTIN_CLOUD_IDENTITY_RESTORE_MIXED_PATCH',
@@ -1688,6 +1705,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
         ...(body.teamStrengths !== undefined ? { teamStrengths: body.teamStrengths } : {}),
         ...(body.caution !== undefined ? { caution: body.caution } : {}),
         ...(body.strengths !== undefined ? { strengths: body.strengths } : {}),
+        ...(body.executionApproval !== undefined ? { executionApproval: body.executionApproval } : {}),
         ...(body.clientId !== undefined ? { clientId: body.clientId } : {}),
         // Always write the resolved value so any legacy transport/cli.carrier
         // selection converges to the canonical field on the next edit.
@@ -1777,8 +1795,8 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      if (err instanceof MemberConfigurationConflict) {
-        reply.status(409);
+      if (err instanceof MemberConfigurationConflict || err instanceof MemberConfigurationRevisionRequired) {
+        reply.status(err.statusCode);
       } else if (/not found/i.test(message)) {
         reply.status(404);
       } else {
@@ -1809,18 +1827,22 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
           '内置云端成员 @gpt-pro 是固定云端入口，不能删除。若暂时不使用，可以停用这个成员；需要本地 Codex，请新建另一位成员。',
       };
     }
+    const parsed = deleteCatSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: 'Invalid request', details: parsed.error.issues });
     const managedIdsBefore = getManagedCatalogIds(projectRoot);
-    const overrideBackup = getRuntimeOverride(request.params.id);
     try {
-      await deleteRuntimeOverride(request.params.id);
-      try {
-        deleteRuntimeCat(projectRoot, request.params.id);
-      } catch (err) {
-        if (overrideBackup) {
-          await setRuntimeOverride(request.params.id, overrideBackup);
+      await withRuntimeCatMutationLock(projectRoot, async () => {
+        assertMemberConfigurationRevision(projectRoot, request.params.id, parsed.data.expectedRevision);
+        const overrideBackup = getRuntimeOverride(request.params.id);
+        const overrideRevision = getRuntimeOverrideRevision(request.params.id);
+        await deleteRuntimeOverride(request.params.id, overrideRevision);
+        try {
+          deleteRuntimeCat(projectRoot, request.params.id);
+        } catch (err) {
+          if (overrideBackup) await setRuntimeOverride(request.params.id, overrideBackup, 'none');
+          throw err;
         }
-        throw err;
-      }
+      });
       // #712: Remove deleted cat from blockedCats across all projects.
       // Without this, the deleted cat's ID lingers as a ghost entry in MCP
       // access control, which is harmless at runtime but confusing in the UI.
@@ -1836,7 +1858,9 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
       return { deleted: true, id: request.params.id, updatedBy: operator };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      if (/not found/i.test(message)) {
+      if (err instanceof MemberConfigurationConflict || err instanceof MemberConfigurationRevisionRequired) {
+        reply.status(err.statusCode);
+      } else if (/not found/i.test(message)) {
         reply.status(404);
       } else {
         reply.status(400);

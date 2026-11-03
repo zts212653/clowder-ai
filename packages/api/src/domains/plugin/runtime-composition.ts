@@ -46,6 +46,7 @@ import { StaticPluginRuntime } from './builtin-runtime/carriers/static-plugin-ru
 import { PluginRuntimeCarrierRouter } from './carrier/runtime-carrier.js';
 import { ContentEditorPluginRuntime } from './content-editor-runtime/runtime.js';
 import { ContentEditorSemanticWorker } from './content-editor-runtime/semantic-worker.js';
+import { recoverAgentClientMetadata } from './declared/agent-client-metadata.js';
 import type { CloudConversationHostRegistry } from './declared/cloud-conversation-host-registry.js';
 import type { AgentSessionProviderLifecycle } from './declared/declared-agent-session-providers.js';
 import type { DeclaredScheduleTaskRunner } from './declared/declared-runtime-contributions.js';
@@ -67,16 +68,15 @@ import { ExternalPluginRuntimeSupervisor } from './external-runtime/supervisor.j
 import type { ExternalPluginProcessAdapter, VerifiedPluginPackageLocator } from './external-runtime/types.js';
 import { HostBrokerControlPlane } from './host-broker/control-plane.js';
 import { createMessagingBrokerHandlers } from './host-broker/messaging-handler.js';
-import { FileHostBrokerStore } from './host-broker/stores.js';
 import { HostInventoryControlPlane } from './host-inventory/control-plane.js';
 import type { PackageAdmissionContractRuntime } from './host-inventory/manifest-verifier.js';
 import { PLUGIN_HOST_ENTRIES, pluginHostRoot } from './host-inventory/plugin-host-layout.js';
-import { FilePluginInventoryStore } from './host-inventory/stores.js';
 import type { PluginInstanceRecord, PluginInventorySnapshot } from './host-inventory/types.js';
 import { pluginDataDirectoryParent } from './host-surface/plugin-data-directory.js';
 import { PluginMediaReadService } from './host-surface/plugin-media-host.js';
 import type { PluginMembersServices } from './host-surface/plugin-members-host.js';
 import { createPluginNeutralHost } from './host-surface/plugin-neutral-host.js';
+import { createPluginOwnerChatHost } from './host-surface/plugin-owner-chat.js';
 import { type PluginPrivateStoragePort, RedisPluginPrivateStorage } from './host-surface/plugin-private-storage.js';
 import { connectorPermissionsProjection } from './manager/connector-settings.js';
 import { GitPluginPackageAdmission } from './manager/git-package-admission.js';
@@ -118,6 +118,8 @@ import { type OfficialPluginCatalogEntry, officialPluginPresentationMatches } fr
 import { OfficialPluginPackageInstaller } from './official-package-installer.js';
 import { PluginProjectOutputs } from './outputs/project-output-actions.js';
 import { readPluginConfig } from './plugin-config-store.js';
+import { PluginStateClient } from './state-worker/client.js';
+import { SqliteHostBrokerStore, SqlitePluginInventoryStore } from './state-worker/stores.js';
 
 type BuiltinPluginRuntime = Pick<BundledPluginRuntime, 'start' | 'stop'>;
 
@@ -150,6 +152,7 @@ export interface DormantPluginRuntimeCompositionOptions {
   ) => Promise<DeliveryPresentationContext>;
   readonly taskStore?: ITaskStore;
   readonly members?: PluginMembersServices;
+  readonly runtimeInfo?: () => import('./host-surface/plugin-neutral-host.js').PluginRuntimeInfo;
   readonly memberSessions?: (
     scope: import('./member-sessions/types.js').MemberSessionScope,
     signal?: AbortSignal,
@@ -230,9 +233,11 @@ export interface DormantPluginRuntimeComposition {
   readonly settingsInvocation: import('./builtin-runtime/carriers/module-plugin-settings.js').PluginSettingsInvocation;
   readonly projectRoot: string;
   readonly paths: PluginRuntimePersistencePaths;
-  readonly inventoryStore: FilePluginInventoryStore;
-  readonly brokerStore: FileHostBrokerStore;
+  readonly inventoryStore: SqlitePluginInventoryStore;
+  readonly brokerStore: SqliteHostBrokerStore;
   readonly inventory: HostInventoryControlPlane;
+  /** Stored values shared with execution; consumers apply manifest defaults themselves. */
+  readonly configuration: Pick<PluginRuntimeConfigurationPort, 'readConfig'>;
   readonly broker: HostBrokerControlPlane;
   readonly supervisor: PluginRuntimeCarrierRouter;
   /** The child-process carrier itself. Exposed so the Host's one pre-active budget
@@ -291,10 +296,12 @@ export function createDormantPluginRuntimeComposition(
   const paths = options.paths
     ? normalizePaths(options.paths)
     : resolvePluginRuntimePersistencePaths(options.projectRoot);
-  const inventoryStore = new FilePluginInventoryStore(paths.inventorySnapshotPath, {
+  const stateClient = new PluginStateClient();
+  const inventoryStore = new SqlitePluginInventoryStore(paths.inventorySnapshotPath, {
+    client: stateClient,
     ...(options.contract === undefined ? {} : { contract: options.contract }),
   });
-  const brokerStore = new FileHostBrokerStore(paths.brokerSnapshotPath);
+  const brokerStore = new SqliteHostBrokerStore(paths.brokerSnapshotPath, stateClient);
   const inventory = new HostInventoryControlPlane(inventoryStore, {
     ...(options.now === undefined ? {} : { now: options.now }),
     ...(options.contract === undefined ? {} : { contract: options.contract }),
@@ -309,10 +316,9 @@ export function createDormantPluginRuntimeComposition(
   const moduleLogger = createModuleLogger('plugin/module-runtime');
   const deliveryTarget: { current?: PluginRuntimeCarrierRouter } = {};
   const resolveInstalledManifest = async (instanceId: string): Promise<PluginManifest | undefined> => {
-    const snapshot = await inventoryStore.snapshot();
-    const instance = snapshot.instances.find((candidate) => candidate.pluginInstanceId === instanceId);
-    if (!instance || instance.lifecycleState !== 'installed') return undefined;
-    return snapshot.packages.find((item) => item.packageDigest === instance.packageDigest)?.manifest ?? undefined;
+    const authority = await inventoryStore.readAuthority(instanceId);
+    if (!authority || authority.instance.lifecycleState !== 'installed') return undefined;
+    return authority.packageRecord?.manifest ?? undefined;
   };
   const mediaImporter = new HostMediaSourceImporter({
     ledger: mediaLedger,
@@ -385,8 +391,7 @@ export function createDormantPluginRuntimeComposition(
       ...(options.contract === undefined ? {} : { validateManifest: options.contract.validateManifest }),
     });
   const readStoredConfigurationValue = async (pluginInstanceId: string, key: string) => {
-    const snapshot = await inventoryStore.snapshot();
-    const instance = snapshot.instances.find((candidate) => candidate.pluginInstanceId === pluginInstanceId);
+    const instance = await inventoryStore.read.instances.get(pluginInstanceId);
     return instance ? readPluginConfig(options.projectRoot, instance.pluginId)[key] : undefined;
   };
   const configuration: PluginRuntimeConfigurationPort = options.configuration ?? {
@@ -465,6 +470,10 @@ export function createDormantPluginRuntimeComposition(
         : { validateManifest: options.contract.validateManifest }),
     });
   const privateStorage = options.redis === undefined ? undefined : new RedisPluginPrivateStorage(options.redis);
+  const ownerChatSource =
+    options.threadStore && options.threadOwnerUserId
+      ? { threads: options.threadStore, ownerUserId: options.threadOwnerUserId }
+      : undefined;
   const moduleRuntime = new ModulePluginRuntime({
     ...(options.taskArtifactReader ? { taskArtifactReader: options.taskArtifactReader } : {}),
     ...(options.onTaskDataChanged ? { onTaskDataChanged: options.onTaskDataChanged } : {}),
@@ -488,7 +497,22 @@ export function createDormantPluginRuntimeComposition(
         packageDigest,
         assertActivation,
         inventory: inventoryStore,
+        ...(ownerChatSource
+          ? {
+              ownerChat: (assertCurrent: () => Promise<void>) =>
+                createPluginOwnerChatHost({
+                  pluginInstanceId,
+                  packageDigest,
+                  ownerUserId: ownerChatSource.ownerUserId,
+                  messages: options.messageStore,
+                  threads: ownerChatSource.threads,
+                  assertCurrent,
+                  assertWriteCurrent: assertActivation,
+                }),
+            }
+          : {}),
         ...(options.members ? { members: options.members } : {}),
+        ...(options.runtimeInfo ? { runtimeInfo: options.runtimeInfo } : {}),
         ...(options.memberSessions && options.threadOwnerUserId
           ? {
               memberSessions: (assertCurrent: () => Promise<void>) =>
@@ -602,6 +626,11 @@ export function createDormantPluginRuntimeComposition(
   supervisor.register(
     new BundledPluginRuntimeCarrier({
       inventory: inventoryStore,
+      onExecutionError: (pluginInstanceId) =>
+        moduleLogger.error(
+          { pluginInstanceId, code: 'MODULE_EXECUTION_EXIT_SETTLEMENT_FAILED' },
+          'Module execution exit cleanup could not be committed',
+        ),
       runtimes: [
         ...[...(options.builtinRuntimes ?? [])].map(
           ([pluginId, runtime]): BundledPluginRuntime => ({
@@ -636,6 +665,7 @@ export function createDormantPluginRuntimeComposition(
     inventoryStore,
     brokerStore,
     inventory,
+    configuration,
     broker,
     supervisor,
     settingsInvocation: moduleRuntime.invokeSettings,
@@ -659,7 +689,13 @@ export function createDormantPluginRuntimeComposition(
     mcpConfigIO,
     ...(options.contract === undefined ? {} : { contract: options.contract }),
     async recoverAfterRestart({ desktopWindowsAfter } = {}) {
-      const [inventorySnapshot] = await Promise.all([inventoryStore.snapshot(), brokerStore.snapshot()]);
+      await Promise.all([inventoryStore.initialize(), brokerStore.initialize()]);
+      await recoverAgentClientMetadata({
+        inventory: inventoryStore,
+        packages,
+        onFailure: (pluginId) => moduleLogger.warn({ pluginId }, 'agent client metadata recovery failed'),
+      });
+      const inventorySnapshot = await inventoryStore.snapshot({ currentOnly: true });
       const brokerSessions = await supervisor.recoverAfterRestart();
       const isDesktopWindow = (instance: PluginInstanceRecord) => {
         const record = inventorySnapshot.packages.find((pkg) => pkg.packageDigest === instance.packageDigest);
@@ -686,6 +722,7 @@ export function createDormantPluginRuntimeComposition(
         // An admitted start can acquire ownership after the first stop snapshot.
         // Recovery is now closed and drained, so this final stop has a stable set.
         await supervisor.stopAll(reason);
+        await stateClient.close();
       }
     },
   };
@@ -814,10 +851,10 @@ function inventoryCandidate(packageRecord: PluginInventorySnapshot['packages'][n
 
 /** Keeps every admitted current instance visible even when catalog discovery is offline. */
 export class InventoryPluginManagerInstalledPackages implements PluginManagerInstalledPackagesPort {
-  constructor(private readonly inventory: FilePluginInventoryStore) {}
+  constructor(private readonly inventory: Pick<SqlitePluginInventoryStore, 'snapshot'>) {}
 
   async list(): Promise<readonly PluginManagerDetail[]> {
-    const inventory = await this.inventory.snapshot();
+    const inventory = await this.inventory.snapshot({ currentOnly: true });
     const plugins: PluginManagerDetail[] = [];
     for (const instance of inventory.instances.filter((candidate) => candidate.lifecycleState === 'installed')) {
       const packageRecord = inventory.packages.find((candidate) => candidate.packageDigest === instance.packageDigest);
@@ -982,7 +1019,7 @@ export function createPluginManagerRuntimeComposition(
         if ('expectedVersion' in request) {
           if (!candidate) throw new PluginManagerServiceError('PLUGIN_NOT_FOUND', 'Catalog plugin is unavailable');
           // Capture current identity and lifecycle before preparation; all sources share the same fenced rollback.
-          const inventoryAtRequest = await options.runtime.inventoryStore.snapshot();
+          const inventoryAtRequest = await options.runtime.inventoryStore.snapshot({ pluginId: candidate.pluginId });
           const installed = await officialInstaller.install(
             request.source.catalogId,
             { version: request.expectedVersion, packageDigest: request.expectedDigest },

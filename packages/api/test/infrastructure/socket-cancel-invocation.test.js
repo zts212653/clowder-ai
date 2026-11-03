@@ -100,7 +100,7 @@ describe('SocketManager cancel_invocation', () => {
     socket.emit('cancel_invocation', explicitCancel());
     await waitFor(
       () =>
-        received.filter((msg) => msg.type === 'done').length === 2 &&
+        received.filter((msg) => msg.type === 'status').length === 2 &&
         queueProcessor.releaseSlot.mock.calls.length === 2,
     );
 
@@ -127,7 +127,7 @@ describe('SocketManager cancel_invocation', () => {
     assert.equal(received.filter((msg) => msg.type === 'system_info').length, 0);
     assert.deepEqual(
       received
-        .filter((msg) => msg.type === 'done')
+        .filter((msg) => msg.type === 'status')
         .map((msg) => msg.catId)
         .sort(),
       ['codex', 'opus'],
@@ -146,7 +146,7 @@ describe('SocketManager cancel_invocation', () => {
     socket.emit('cancel_invocation', explicitCancel({ catId: 'opus' }));
     await waitFor(
       () =>
-        received.filter((msg) => msg.type === 'done').length === 1 &&
+        received.filter((msg) => msg.type === 'status').length === 1 &&
         queueProcessor.releaseSlot.mock.calls.length === 1,
     );
 
@@ -161,7 +161,7 @@ describe('SocketManager cancel_invocation', () => {
     );
     assert.equal(received.filter((msg) => msg.type === 'system_info').length, 0);
     assert.deepEqual(
-      received.filter((msg) => msg.type === 'done').map((msg) => msg.catId),
+      received.filter((msg) => msg.type === 'status').map((msg) => msg.catId),
       ['opus'],
     );
 
@@ -177,7 +177,7 @@ describe('SocketManager cancel_invocation', () => {
     await new Promise((resolve) => setTimeout(resolve, 30));
 
     socket.emit('cancel_invocation', explicitCancel({ catId: 'opus' }));
-    await waitFor(() => received.some((msg) => msg.type === 'done' && msg.catId === 'opus'));
+    await waitFor(() => received.some((msg) => msg.type === 'status' && msg.catId === 'opus'));
 
     assert.equal(queueProcessor.releaseSlot.mock.calls.length, 0);
     assert.deepEqual(
@@ -201,7 +201,7 @@ describe('SocketManager cancel_invocation', () => {
     await new Promise((resolve) => setTimeout(resolve, 30));
 
     socket.emit('cancel_invocation', explicitCancel());
-    await waitFor(() => received.filter((msg) => msg.type === 'done').length === 2);
+    await waitFor(() => received.filter((msg) => msg.type === 'status').length === 2);
 
     assert.deepEqual(
       queueProcessor.releaseSlot.mock.calls.map((call) => call.arguments),
@@ -275,7 +275,7 @@ describe('SocketManager cancel_invocation', () => {
     socket.emit('cancel_invocation', explicitCancel({ catId: 'opus' }));
     await waitFor(
       () =>
-        received.some((msg) => msg.type === 'done' && msg.catId === 'opus') &&
+        received.some((msg) => msg.type === 'status' && msg.catId === 'opus') &&
         queueProcessor.releaseSlot.mock.calls.length === 1,
     );
 

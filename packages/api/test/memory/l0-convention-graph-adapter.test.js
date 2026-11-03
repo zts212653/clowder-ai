@@ -3,6 +3,7 @@
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 describe('L0ConventionGraphAdapter', () => {
   async function importAdapter() {
@@ -177,7 +178,7 @@ describe('L0ConventionGraphAdapter', () => {
     it('reads real L0 compiler from repo root', async () => {
       const Adapter = await importAdapter();
       // Use the actual repo root (this test runs from the worktree)
-      const repoRoot = new URL('../../../../', import.meta.url).pathname.replace(/\/$/, '');
+      const repoRoot = fileURLToPath(new URL('../../../../', import.meta.url));
       const adapter = new Adapter(repoRoot);
 
       assert.equal(adapter.isAvailable(), true, 'should be available with real compiler file');

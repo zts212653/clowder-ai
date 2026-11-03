@@ -12,7 +12,11 @@ import {
   resolveRuntimeCatTemplatePath,
   toAllCatConfigs,
 } from '../src/config/cat-config-loader.js';
-import { reconcileCatRegistry } from '../src/config/cat-registry-reconciliation.js';
+import {
+  isPublishedCatalogSnapshotCurrent,
+  reconcileCatRegistry,
+  registerCatalogSnapshot,
+} from '../src/config/cat-registry-reconciliation.js';
 
 test('an empty configured runtime template fails before bootstrap can select a directory', () => {
   const saved = process.env.CAT_TEMPLATE_PATH;
@@ -67,10 +71,13 @@ test('an ACP member keeps its loaded catalog authority across a separate capabil
     );
     process.env.CAT_CAFE_CONFIG_ROOT = alpha;
     process.env.CAT_TEMPLATE_PATH = template;
-    const member = toAllCatConfigs(loadResolvedCatConfig(template, { persistMigrations: false })).codex;
+    const members = toAllCatConfigs(loadResolvedCatConfig(template, { persistMigrations: false }));
+    const member = members.codex;
     assert.ok(member);
     catRegistry.reset();
-    catRegistry.register('codex', member, { configurationTemplatePath: template });
+    registerCatalogSnapshot(members, () => loadResolvedCatConfig(template, { persistMigrations: false }), template);
+    assert.equal(catRegistry.getOrThrow('codex').configurationTemplatePath, template);
+    assert.equal(isPublishedCatalogSnapshotCurrent(member), true);
     const sourceBytes = readFileSync(join(home, '.cat-cafe/cat-catalog.json'), 'utf8');
     assert.equal(getAcpConfig('codex', alpha), undefined, 'project reads must still reject the outside template');
     assert.equal(getRegisteredAcpConfig('codex', alpha)?.command, 'fixture-native-acp');

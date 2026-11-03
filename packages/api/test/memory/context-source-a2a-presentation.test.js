@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
+import { RECALL_OPPORTUNITY_CATALOG_VERSION } from '@cat-cafe/shared';
 import Database from 'better-sqlite3';
 import Fastify from 'fastify';
 import { createMemoryCueTools } from '../../../mcp-server/dist/tools/memory-cue-tools.js';
@@ -135,7 +136,7 @@ test('a fresh authorized Task presents and drills the same primer dismissed in t
       sourceRevision: revision,
       axis: 'consumption',
       consumptionOutcome: outcome,
-      catalogVersion: 7,
+      catalogVersion: RECALL_OPPORTUNITY_CATALOG_VERSION,
       resolverVersion: 2,
       occurredAt: Date.now(),
     });

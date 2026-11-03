@@ -2,6 +2,7 @@ import { lstat, readFile } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { fetchOfficialPackageArchive, registeredBundledArchive } from './bundled-package-source.js';
 import { staticEditorContributions } from './content-editor-runtime/admission.js';
+import { readAgentClientMetadata } from './declared/agent-client-metadata.js';
 import { desktopWindowContribution } from './desktop-window-runtime/admission.js';
 import { FilesystemVerifiedPluginPackageLocator, type VerifiedPluginPackage } from './external-runtime/index.js';
 import type { PluginManifestValidator } from './external-runtime/package-staging.js';
@@ -39,6 +40,7 @@ import {
   verifyPluginPackageDigest,
 } from './official-package-archive.js';
 import { OfficialPluginInstallError, throwDataDirectoryConflict } from './official-package-errors.js';
+import { readPackageCapabilityRejection } from './read-package-capabilities.js';
 
 export interface OfficialPluginPackageInstallerOptions {
   readonly inventory: HostInventoryControlPlane;
@@ -153,7 +155,10 @@ export class OfficialPluginPackageInstaller {
     assertExpectedRelease(entry, expectedRelease);
     const existing = await this.existingExactInstall(entry);
     if (existing) {
-      const snapshot = await this.options.inventory.store.snapshot();
+      const snapshot = await this.options.inventory.store.snapshot({
+        pluginId: entry.pluginId,
+        packageDigests: [entry.packageDigest],
+      });
       const installed = snapshot.packages.find((pkg) => pkg.packageDigest === entry.packageDigest);
       if (
         !installed?.manifest ||
@@ -199,7 +204,10 @@ export class OfficialPluginPackageInstaller {
   ) {
     const entry = await this.catalogEntry(catalogId);
     assertExpectedRelease(entry, expectedRelease);
-    const snapshot = await this.options.inventory.store.snapshot();
+    const snapshot = await this.options.inventory.store.snapshot({
+      pluginId: entry.pluginId,
+      packageDigests: [entry.packageDigest],
+    });
     const instance = snapshot.instances.find((candidate) => candidate.pluginInstanceId === pluginInstanceId);
     const current = snapshot.instances.find(
       (candidate) => candidate.pluginId === entry.pluginId && candidate.lifecycleState === 'installed',
@@ -356,12 +364,6 @@ export class OfficialPluginPackageInstaller {
       });
     }
     try {
-      if (entry.distribution === 'bundled' && located.manifest.runtime?.transport !== 'builtin') {
-        throw new OfficialPluginInstallError(
-          'UNSUPPORTED_TRANSPORT',
-          'bundled archive must retain its builtin runtime',
-        );
-      }
       if (located.manifest.pluginId !== entry.pluginId) {
         throw new OfficialPluginInstallError('PACKAGE_ID_MISMATCH', 'package manifest identity differs from catalog');
       }
@@ -377,13 +379,8 @@ export class OfficialPluginPackageInstaller {
           'package presentation metadata differs from the official catalog',
         );
       }
-      if (
-        located.manifest.runtime !== undefined &&
-        located.manifest.runtime?.transport !== 'stdio' &&
-        located.manifest.runtime?.transport !== 'builtin'
-      ) {
-        throw new OfficialPluginInstallError('UNSUPPORTED_TRANSPORT', 'official package has no supported Host runtime');
-      }
+      const rejection = await readPackageCapabilityRejection(located.manifest, located.rootDir);
+      if (rejection) throw new OfficialPluginInstallError('UNSUPPORTED_TRANSPORT', rejection);
       const staticEditors = staticEditorContributions(located.manifest);
       const declaresStaticEditor =
         located.manifest.contributions?.some((item) => item.type === 'content-editor-provider') === true ||
@@ -420,6 +417,7 @@ export class OfficialPluginPackageInstaller {
         }
       }
       const signalSchemas = await readDeclaredSignalSchemas(located.rootDir, located.manifest);
+      const agentClientMetadata = await readAgentClientMetadata(located);
       await publishPluginPackageArchive(this.packagesRoot, entry.packageDigest, bytes);
       return await accept({
         manifest: located.manifest,
@@ -427,6 +425,7 @@ export class OfficialPluginPackageInstaller {
         expectedPackageDigest: entry.packageDigest,
         packagePluginId: entry.pluginId,
         signalSchemas,
+        agentClientMetadata,
         provenance: {
           kind: 'catalog',
           catalogId: entry.catalogId,
@@ -469,12 +468,16 @@ export class OfficialPluginPackageInstaller {
       expectedPackageDigest: entry.packageDigest,
       packagePluginId: entry.pluginId,
       signalSchemas: {},
+      agentClientMetadata: null,
       provenance: { kind: 'catalog', catalogId: entry.catalogId, packageName: entry.packageName },
     });
   }
 
   private async assertNewerReplacement(entry: OfficialPluginCatalogEntry): Promise<void> {
-    const snapshot = await this.options.inventory.store.snapshot();
+    const snapshot = await this.options.inventory.store.snapshot({
+      pluginId: entry.pluginId,
+      packageDigests: [entry.packageDigest],
+    });
     const known = snapshot.packages.find((record) => record.packageDigest === entry.packageDigest);
     if (known) assertInstalledPackageVersion(entry, known.version);
     const instance = snapshot.instances.find(
@@ -492,7 +495,10 @@ export class OfficialPluginPackageInstaller {
   }
 
   private async existingExactInstall(entry: OfficialPluginCatalogEntry) {
-    const snapshot = await this.options.inventory.store.snapshot();
+    const snapshot = await this.options.inventory.store.snapshot({
+      pluginId: entry.pluginId,
+      packageDigests: [entry.packageDigest],
+    });
     const instance = snapshot.instances.find(
       (candidate) => candidate.pluginId === entry.pluginId && candidate.lifecycleState === 'installed',
     );

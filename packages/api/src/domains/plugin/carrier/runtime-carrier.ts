@@ -7,6 +7,7 @@ import {
 import { createModuleLogger } from '../../../infrastructure/logger.js';
 import type { ToolExecutionPolicy } from '../../cats/services/types.js';
 import { activateDeclaredMcp } from '../declared/declared-mcp-resources.js';
+import { DeclaredPluginUi } from '../declared/declared-plugin-ui.js';
 import {
   type DeclaredPluginTool,
   type DeclaredPluginWebhook,
@@ -81,13 +82,17 @@ export interface PluginRuntimeCarrier {
 }
 
 export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
+  readonly ui = new DeclaredPluginUi();
   readonly nativeActions = new NativePluginActions((id) => this.#admission(id));
   readonly #nativeMcpLaunches = new NativeMcpLaunches((id) => this.#admission(id), this.nativeActions);
   readonly #carriers: PluginRuntimeCarrier[] = [];
   readonly #runtimeContributions: DeclaredRuntimeContributions;
 
   constructor(
-    private readonly inventory: Pick<PluginInventoryStore, 'snapshot'>,
+    private readonly inventory: Pick<
+      PluginInventoryStore,
+      'snapshot' | 'read' | 'readAuthority' | 'readCurrentAuthority'
+    >,
     private readonly resources?: DeclaredStaticResourceHost,
     runtimeContributions?: DeclaredRuntimeContributionHost,
     private readonly beforeStop?: (instanceId: string, reason: string) => Promise<void>,
@@ -148,6 +153,8 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
       // External and legacy carriers may not publish a separate Host-ready state.
       // Joining the same promise preserves one admission and its original rollback boundary.
       await admitContributions();
+      // stop/stopAll invalidate this admission even after carrier readiness.
+      if (this.nativeActions.generation(pluginInstanceId) === generation) this.ui.activate(admission);
       return result;
     } catch (error) {
       if (!admitted) throw error;
@@ -156,11 +163,12 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
   }
 
   async stop(pluginInstanceId: string, reason = 'host_stop'): Promise<void> {
+    this.ui.deactivate(pluginInstanceId);
     this.#nativeMcpLaunches.deactivate(pluginInstanceId);
     this.nativeActions.deactivate(pluginInstanceId);
-    const snapshot = await this.inventory.snapshot();
-    const instance = snapshot.instances.find((item) => item.pluginInstanceId === pluginInstanceId);
-    const pkg = instance && snapshot.packages.find((item) => item.packageDigest === instance.packageDigest);
+    const authority = await this.inventory.readAuthority(pluginInstanceId);
+    const instance = authority?.instance;
+    const pkg = authority?.packageRecord;
     if (pkg?.manifest === null) {
       await this.beforeStop?.(pluginInstanceId, reason);
       await this.#runtimeContributions.deactivate(pluginInstanceId);
@@ -209,11 +217,12 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
   }
 
   async stopAll(reason = 'host_shutdown'): Promise<void> {
+    this.ui.deactivateAll();
     this.#nativeMcpLaunches.deactivateAll();
     this.nativeActions.deactivateAll();
     if (this.beforeStop) {
-      const inventory = await this.inventory.snapshot();
-      await Promise.all(inventory.instances.map((instance) => this.beforeStop?.(instance.pluginInstanceId, reason)));
+      const instances = await this.inventory.read.instances.list();
+      await Promise.all(instances.map((instance) => this.beforeStop?.(instance.pluginInstanceId, reason)));
     }
     await this.#runtimeContributions.deactivateAll();
     const carrierResults = await Promise.allSettled(this.#carriers.map((carrier) => carrier.stopAll(reason)));
@@ -435,11 +444,8 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
    * owns the instance, not *whether* the instance may run.
    */
   async #admission(pluginInstanceId: string): Promise<PluginRuntimeAdmission> {
-    const snapshot = await this.inventory.snapshot();
-    const instance = snapshot.instances.find((candidate) => candidate.pluginInstanceId === pluginInstanceId);
-    const packageRecord = instance
-      ? snapshot.packages.find((candidate) => candidate.packageDigest === instance.packageDigest)
-      : undefined;
+    const authority = await this.inventory.readAuthority(pluginInstanceId);
+    const { instance, packageRecord } = authority ?? {};
     if (!instance || !packageRecord) {
       throw new ExternalPluginRuntimeError(
         'INSTANCE_NOT_RUNNABLE',

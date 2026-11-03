@@ -5,6 +5,7 @@
  * of select configuration keys without server restart.
  */
 
+import { createHash } from 'node:crypto';
 import { clearBudgetCache } from './cat-budgets.js';
 import { configEventBus, createChangeSetId } from './config-event-bus.js';
 
@@ -74,6 +75,12 @@ const CONFIG_KEY_DEFINITIONS: Record<string, ConfigKeyDefinition> = {
   },
 };
 
+export class ConfigRevisionConflict extends Error {
+  constructor() {
+    super('客户端设置已在其他页面修改，请重新读取并核对后保存。');
+  }
+}
+
 class ConfigStoreImpl {
   private overlay = new Map<string, string>();
 
@@ -97,8 +104,9 @@ class ConfigStoreImpl {
   }
 
   /** Set a hot-updatable config key. Throws if key is not updatable. */
-  set(key: string, value: string | number | boolean): void {
+  set(key: string, value: string | number | boolean, expectedRevision?: string): void {
     const normalized = this.normalize(key, value);
+    if (expectedRevision !== undefined && expectedRevision !== this.revision(key)) throw new ConfigRevisionConflict();
     const definition = this.definitionFor(key);
     if (!definition) throw new Error(`Key '${key}' is not hot-updatable`);
     const oldValue = this.overlay.get(key) ?? process.env[definition.envKey];
@@ -121,6 +129,16 @@ class ConfigStoreImpl {
     const definition = this.definitionFor(key);
     if (!definition) return undefined;
     return this.overlay.get(key) ?? process.env[definition.envKey];
+  }
+
+  revision(key: string): string {
+    return createHash('sha256')
+      .update(JSON.stringify([key, this.get(key)]))
+      .digest('hex');
+  }
+
+  revisions(): Record<string, string> {
+    return Object.fromEntries(this.listUpdatableKeys().map((key) => [key, this.revision(key)]));
   }
 
   /** List all updatable keys and their current values. */

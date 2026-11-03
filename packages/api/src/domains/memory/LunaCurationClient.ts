@@ -1,3 +1,4 @@
+import type { CatConfig } from '@cat-cafe/shared';
 import type Database from 'better-sqlite3';
 import type { AgentService, AgentServiceOptions, TokenUsage } from '../cats/services/types.js';
 import { prepareAbstractiveBatch } from './abstractive-summary-input.js';
@@ -13,6 +14,7 @@ import { runLunaNative } from './curation/LunaNativeRun.js';
 import { LUNA_CURATION_PROMPT, LUNA_CURATION_PROMPT_VERSION } from './luna-curation-prompt.js';
 
 export interface CurationProvider {
+  catConfig?: CatConfig;
   catId: string;
   model: string;
   accountIdentity?: string;
@@ -116,6 +118,7 @@ export function createLunaCurationClient(deps: LunaClientDeps) {
             : safePrepared.prompts[index];
         const prompt = `${fragmentPrompt}\n\nAllowed source IDs: ${[...allowed].join(', ')}`;
         let fragment = await runLunaNative({
+          userId: owner,
           provider: resolved,
           prompt,
           instructions: LUNA_CURATION_PROMPT,
@@ -127,6 +130,7 @@ export function createLunaCurationClient(deps: LunaClientDeps) {
         // One fresh reconstruction after an invalid/overlong native session.
         if (!fragment.success && sessionId && !signal?.aborted) {
           fragment = await runLunaNative({
+            userId: owner,
             provider: resolved,
             prompt,
             instructions: LUNA_CURATION_PROMPT,

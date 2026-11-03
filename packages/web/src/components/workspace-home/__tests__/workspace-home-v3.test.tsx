@@ -6,7 +6,7 @@ import { writeShellLanguage } from '@/components/shell/shell-language';
 import { artifactObjectId } from '@/components/workbench/real-surface-adapters';
 import { useChatStore } from '@/stores/chatStore';
 import { WorkspaceHomeV2 } from '../WorkspaceHomeV2';
-import { command, live, NOW, seed } from './home-fixtures';
+import { command, hold, live, NOW, seed } from './home-fixtures';
 
 const data = vi.hoisted(() => ({
   artifacts: [] as ThreadArtifactDTO[],
@@ -115,6 +115,14 @@ describe('Workspace v3 Home content', () => {
     expect(host.querySelectorAll('[data-testid="workspace-running-object"]')).toHaveLength(20);
     expect(host.querySelector('[data-testid="workspace-running-here"]')).not.toBeNull();
     expect(host.querySelectorAll('[data-testid="workspace-running-activity"]')).toHaveLength(0);
+  });
+  it('says the current conversation’s cat is waiting when only a held ball remains', async () => {
+    seed([], [hold('codex61-sol', 'thread-here', '完整的当前对话名称')]);
+    await render();
+    const summary = host.querySelector('[data-testid="workspace-home-status-summary"]');
+    expect(summary?.textContent).toContain('在等');
+    expect(summary?.textContent).toContain('02:11 醒');
+    expect(summary?.textContent).not.toContain('当前没有执行');
   });
   it('has three content sections and moves tool search off the Home', async () => {
     await render();

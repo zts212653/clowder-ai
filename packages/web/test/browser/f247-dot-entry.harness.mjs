@@ -215,6 +215,8 @@ export async function openProof({
           ],
         },
         '/api/config/cat-order': { catOrder: [] },
+        '/api/plugins/official.collective-connector/connections': { runtimeStatus: 'active', connections: [] },
+        '/api/config/chat-background': { threads: {} },
         '/api/config/conversation-view': {
           stored: null,
           effective: { mode: 'group' },

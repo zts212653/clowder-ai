@@ -4,6 +4,7 @@ import { usesNativeToolConfiguration } from '../../../config/cat-account-binding
 import { getCatModel } from '../../../config/cat-models.js';
 import { resolveCatRuntimeAccount } from '../../../config/cat-runtime-account.js';
 import { hasSupportedEnvTemplate } from '../../../domains/cats/services/agents/providers/env-map.js';
+import { captureMemberExecutionPreferences } from '../../../domains/cats/services/agents/providers/member-execution-preferences.js';
 import type { AgentServiceOptions } from '../../../domains/cats/services/types.js';
 import { resolveCurationProvider } from '../../../domains/memory/curation-provider.js';
 
@@ -43,6 +44,7 @@ export function resolveWatcherCandidate(projectRoot: string, catId: string): Wat
     }
   }
   const options: AgentServiceOptions = {
+    executionPreferences: captureMemberExecutionPreferences(catId, config, model),
     callbackEnv,
     ...(account?.claude ? { claudeTokenAccount: true } : {}),
     ...(account

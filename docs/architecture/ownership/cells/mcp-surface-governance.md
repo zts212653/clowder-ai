@@ -38,7 +38,14 @@ code_anchors:
   - packages/mcp-server/test/server-toolsets-annotations.test.ts
   - packages/api/src/config/capabilities/mcp-constants.ts
   - packages/api/src/config/capabilities/capability-orchestrator.ts
+  - packages/api/src/config/config-event-bus.ts
   - packages/api/src/config/capabilities/invocation-plugin-mcp-view.ts
+  - packages/api/src/config/capabilities/plugin-mcp-environment.ts
+  - packages/api/src/domains/cats/services/agents/providers/provider-mcp-config.ts
+  - packages/api/src/domains/cats/services/agents/providers/kimi-mcp-surface.ts
+  - packages/api/src/domains/cats/services/agents/providers/kimi-mcp-config.ts
+  - packages/api/src/domains/cats/services/agents/providers/opencode-config-writer.ts
+  - packages/api/src/domains/cats/services/agents/providers/codex-mcp-input.ts
   - packages/api/src/config/capabilities/plugin-mcp-exposure.ts
 doc_anchors:
   - docs/decisions/044-mcp-resource-lifecycle-and-surface-budget.md
@@ -135,3 +142,39 @@ The persistent configuration owner migrates only proven first-party Codex projec
 HTTP admission, preserving full backups and an explicit stdio profile. Preview/Alpha reads cannot
 publish this migration. Six server names and tool schemas remain unchanged. Nonresident shell/
 `gh`/`curl`/pre-push checks remain; third-party MCP per-call inspection is deliberately retired.
+
+Invocation admission consumes the same verified local activation and member exposure scope before
+ACP pool waits and Claude carrier launch. It captures transport descriptors using the existing resolver; the current-turn
+credential binder remains responsible for callback authority. This introduces no new MCP identity
+or exposure tier, and does not make a deployment's stored plugin launch a fallback for a missing
+activation in an isolated Host view.
+
+Claude print, SDK, background and PTY consume the admitted native MCP plan. Ordinary plugin environment
+references resolve during capture; the existing transport binder supplies current-turn credentials
+without re-expanding that environment. Read-only admission continues to skip unused tool discovery.
+This shares the existing native resolver and credential owners, without changing native schema or launch authority.
+
+Kimi consumes that same admitted native server plan through its existing project-file lease.
+Its native HOME and member MCP switch are captured before launch. Because Kimi still discovers
+lower native layers, a later read can only deny newly unapproved names; it cannot add permissions
+or replace the admitted server settings. A changed native project root is rejected before lending
+the project file. The original credential lease and conflict-preserving restoration remain owners.
+
+OpenCode runtime configuration stays with its existing Host writer. Admission captures that
+writer's native MCP plan and binary entrypoint separately from model/auth/instruction fields;
+the writer consumes its owned copy after waits, retaining its existing configuration format,
+user-merge rules, Pencil resolution and credential guard. This does not introduce another
+provider or require native carriers to move their launch ownership into AgentService.
+
+Codex captures resolved server inputs through the same admission hook. Its native TOML renderer
+retains disabled shapes and per-launch credential binding; one-shot environment wrappers are
+created for each launch rather than cached in the admitted plan. Live and public native launches
+retain their own admitted MCP boundary, while read-only invocations skip unused tool discovery.
+
+Committed capability-registry writes notify the existing config event bus from the two atomic
+write owners, covering direct async writes, synchronous member inheritance and delegated project
+sync. The domain event identifies the resolved project root; it contains no configuration or
+credential values and does not trigger unrelated environment-key subscribers. Reads and failed
+writes do not publish commits. This adds no cache, revision service or new configuration authority.
+
+During admission, the existing invocation MCP reader records private versions of the formal global/project files it actually reads. The Host validates those versions after its last asynchronous capture and rejects a changed source before sending. Reads still resolve through the original owners; this introduces no cross-invocation configuration cache. Client-native files and plugin activation currentness keep their separate ownership boundaries.

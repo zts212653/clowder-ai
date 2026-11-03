@@ -226,7 +226,8 @@ export function FileActionMenu({
         ) : null}
       </div>
       <section className={styles.info} aria-label={t.fileInfo}>
-        <strong>{filename}</strong>
+        <strong>{info?.filename ?? filename}</strong>
+        {info?.reason && <p role="status">{info.reason}</p>}
         {copyName && (
           <button type="button" onClick={copyName}>
             {t.copyFilename}

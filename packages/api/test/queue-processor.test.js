@@ -1934,7 +1934,7 @@ describe('QueueProcessor over the source-row pending Queue', () => {
 
   it('removes a public head and publishes failure when explicit routing resolves no target', async () => {
     const harness = createHarness();
-    harness.router.resolveConversationTargetsAtAdmission.mock.mockImplementation(async () => []);
+    harness.router.resolveExplicitTargets.mock.mockImplementation(async () => []);
     const admitted = await admitMessage(harness);
 
     const result = await harness.processor.processNext('thread-1', 'user-1');
@@ -2038,7 +2038,7 @@ describe('QueueProcessor over the source-row pending Queue', () => {
         yield { type: 'done', catId: targetCats[0], isFinal: true, timestamp: Date.now() };
       },
     });
-    harness.router.resolveConversationTargetsAtAdmission.mock.mockImplementation(async () => []);
+    harness.router.resolveExplicitTargets.mock.mockImplementation(async () => []);
     const outbound = await admitMessage(harness, {
       from: { kind: 'agent', catId: 'caller' },
       targetCats: ['missing'],
@@ -2046,7 +2046,7 @@ describe('QueueProcessor over the source-row pending Queue', () => {
     assert.equal((await harness.processor.processNext('thread-1', 'user-1')).started, false);
     assert.equal(harness.queue.list('thread-1', 'user-1').length, 0, 'terminal observation must not enqueue caller');
 
-    harness.router.resolveConversationTargetsAtAdmission.mock.mockImplementation(async (targets) => [...targets]);
+    harness.router.resolveExplicitTargets.mock.mockImplementation(async (targets) => [...targets]);
     const callerWake = await admitMessage(harness, { targetCats: ['caller'] });
     assert.equal((await harness.processor.processNext('thread-1', 'user-1')).started, true);
     await waitFor(() => harness.queue.getEntrySnapshot('thread-1', 'user-1', callerWake.entry.id) === null);
@@ -2525,7 +2525,7 @@ describe('F117 soak: a waiting entry does not stop its thread’s queue', () => 
       markResolutionStarted = resolve;
     });
     let paused = false;
-    harness.router.resolveConversationTargetsAtAdmission = async (targetCats) => {
+    harness.router.resolveExplicitTargets = async (targetCats) => {
       if (!paused) {
         paused = true;
         markResolutionStarted();

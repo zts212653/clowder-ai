@@ -47,7 +47,7 @@ function fixture(stores, available = false) {
     log: { info() {}, warn() {}, error() {} },
   });
   const from = { kind: 'user', userId: 'owner' };
-  const source = { from, userId: 'owner', threadId: 'thread', content: '@opus hello' };
+  const source = { from, userId: 'owner', threadId: 'thread', content: 'hello' };
   const send = () =>
     queue.send(
       stores.messages,
@@ -86,7 +86,7 @@ for (const storage of ['memory', 'redis']) {
       const historyBefore = await f.messages.getByThread('thread');
       const failureBefore = historyBefore.find((message) => message.lifecycle?.reason === 'no_available_target');
       assert.ok(failureBefore);
-      assert.equal((await f.messages.getById(sent.message.id)).content, '@opus hello');
+      assert.equal((await f.messages.getById(sent.message.id)).content, 'hello');
 
       // Reopen Redis clients/stores as well as the process-local Queue; no cached receipt supplies recovery.
       const restarted = restart ? fixture(reopen(), available) : f;
@@ -137,6 +137,6 @@ for (const storage of ['memory', 'redis']) {
     assert.equal(current.claimId, replacement.claimId);
     assert.deepEqual(current.targets, ['opus']);
     assert.deepEqual(f.queue.list('thread', 'owner')[0].targets, ['opus']);
-    assert.equal((await f.messages.getById(sent.message.id)).content, '@opus hello');
+    assert.equal((await f.messages.getById(sent.message.id)).content, 'hello');
   });
 }

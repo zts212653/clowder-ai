@@ -30,6 +30,52 @@ export interface RuntimeStrategyOverride {
 }
 
 const _cache = new Map<string, RuntimeStrategyOverride>();
+const pendingWrites = new Map<string, Promise<void>>();
+
+export class SessionStrategyRevisionConflict extends Error {
+  readonly statusCode = 409;
+  constructor() {
+    super('会话策略已在其他页面修改，请重新读取并核对后保存。');
+  }
+}
+
+export function getRuntimeOverrideRevision(catId: string): string {
+  return _cache.get(catId)?.revision ?? 'none';
+}
+
+const compareAndWrite = `
+if (redis.call('GET', KEYS[1]) or '') ~= ARGV[1] then return 0 end
+if ARGV[2] == '' then redis.call('DEL', KEYS[1])
+else redis.call('SET', KEYS[1], ARGV[2]) end
+return 1`;
+
+/** Serialize the local owner and fence Redis writers at the same persisted value. */
+function writeRuntimeOverride(catId: string, next: RuntimeStrategyOverride | undefined, expectedRevision?: string) {
+  const run = async () => {
+    const key = SessionStrategyKeys.override(catId);
+    const raw = _redis ? await _redis.get(key) : null;
+    const current = _redis ? (raw ? normalizeStoredOverride(JSON.parse(raw)) : undefined) : _cache.get(catId);
+    if (current) _cache.set(catId, current);
+    else _cache.delete(catId);
+    if (expectedRevision !== undefined && expectedRevision !== getRuntimeOverrideRevision(catId))
+      throw new SessionStrategyRevisionConflict();
+    if (_redis && (await _redis.eval(compareAndWrite, 1, key, raw ?? '', next ? JSON.stringify(next) : '')) !== 1)
+      throw new SessionStrategyRevisionConflict();
+    if (next) _cache.set(catId, next);
+    else _cache.delete(catId);
+    return current !== undefined;
+  };
+  const operation = (pendingWrites.get(catId) ?? Promise.resolve()).then(run);
+  const settled = operation.then(
+    () => {},
+    () => {},
+  );
+  pendingWrites.set(catId, settled);
+  void settled.then(() => {
+    if (pendingWrites.get(catId) === settled) pendingWrites.delete(catId);
+  });
+  return operation;
+}
 
 function stableLegacyRevision(config: Partial<SessionStrategyConfig>): string {
   const input = JSON.stringify(config);
@@ -85,16 +131,14 @@ export function getAllRuntimeOverrides(): ReadonlyMap<string, Partial<SessionStr
 export async function setRuntimeOverride(
   catId: string,
   override: Partial<SessionStrategyConfig>,
+  expectedRevision?: string,
 ): Promise<RuntimeStrategyOverride> {
   const entry: RuntimeStrategyOverride = {
     config: override,
     revision: randomUUID(),
     changedAt: Date.now(),
   };
-  if (_redis) {
-    await _redis.set(SessionStrategyKeys.override(catId), JSON.stringify(entry));
-  }
-  _cache.set(catId, entry);
+  await writeRuntimeOverride(catId, entry, expectedRevision);
   return entry;
 }
 
@@ -103,16 +147,8 @@ export async function setRuntimeOverride(
  * Redis DEL result is the source of truth for existence (not cache).
  * Falls back to cache check only when Redis is unavailable.
  */
-export async function deleteRuntimeOverride(catId: string): Promise<boolean> {
-  let existed: boolean;
-  if (_redis) {
-    const deleted = await _redis.del(SessionStrategyKeys.override(catId));
-    existed = deleted > 0;
-  } else {
-    existed = _cache.has(catId);
-  }
-  _cache.delete(catId);
-  return existed;
+export async function deleteRuntimeOverride(catId: string, expectedRevision?: string): Promise<boolean> {
+  return writeRuntimeOverride(catId, undefined, expectedRevision);
 }
 
 /** @internal Test-only: clear cache without touching Redis. */

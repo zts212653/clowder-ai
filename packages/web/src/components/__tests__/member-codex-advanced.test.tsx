@@ -53,6 +53,15 @@ const member: CatData = {
 };
 let rejectApproval = false;
 let rejectConfigRead = false;
+let currentSandbox = 'workspace-write';
+let currentApproval = 'on-request';
+let currentAuth = 'oauth';
+let loseSandboxResponse = false;
+const revisions = () => ({
+  'cli.codexSandboxMode': `sandbox:${currentSandbox}`,
+  'cli.codexApprovalPolicy': `approval:${currentApproval}`,
+  'codex.execution.authMode': `auth:${currentAuth}`,
+});
 const writes: Array<{ path: string; body: Record<string, unknown> }> = [];
 function response(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status });
@@ -63,14 +72,27 @@ beforeEach(() => {
   writes.length = 0;
   rejectApproval = false;
   rejectConfigRead = false;
+  currentSandbox = 'workspace-write';
+  currentApproval = 'on-request';
+  currentAuth = 'oauth';
+  loseSandboxResponse = false;
   vi.mocked(apiFetch).mockImplementation(async (path, init) => {
     if (init?.method === 'PATCH') {
       const body = JSON.parse(String(init.body));
       writes.push({ path, body });
       if (path === '/api/config' && rejectApproval && body.key === 'cli.codexApprovalPolicy')
         return response({ error: 'approval rejected' }, 503);
+      if (path === '/api/config') {
+        const revision = revisions()[body.key as keyof ReturnType<typeof revisions>];
+        if (body.expectedRevision === undefined) return response({ error: 'expectedRevision required' }, 428);
+        if (body.expectedRevision !== revision) return response({ error: 'concurrent edit' }, 409);
+        if (body.key === 'cli.codexSandboxMode') currentSandbox = body.value;
+        if (body.key === 'cli.codexApprovalPolicy') currentApproval = body.value;
+        if (body.key === 'codex.execution.authMode') currentAuth = body.value;
+        if (body.key === 'cli.codexSandboxMode' && loseSandboxResponse) throw new TypeError('response lost');
+      }
       return path === '/api/config'
-        ? response({ ok: true })
+        ? response({ revisions: revisions() })
         : response({ cat: { ...member, ...body, cli: { ...member.cli, ...body.cli } } });
     }
     if (path === '/api/config')
@@ -78,9 +100,10 @@ beforeEach(() => {
         ? response({ error: 'cannot read config' }, 503)
         : response({
             config: {
-              cli: { codexSandboxMode: 'workspace-write', codexApprovalPolicy: 'on-request' },
-              codexExecution: { authMode: 'oauth' },
+              cli: { codexSandboxMode: currentSandbox, codexApprovalPolicy: currentApproval },
+              codexExecution: { authMode: currentAuth },
             },
+            revisions: revisions(),
           });
     if (path === '/api/accounts')
       return response({
@@ -105,6 +128,40 @@ async function openAdvanced() {
   await click('高级接入');
 }
 describe('member Codex advanced configuration', () => {
+  it('reconciles a lost global-write response as a successful save in diagnostics too', async () => {
+    await openAdvanced();
+    await change('Codex Sandbox', 'read-only');
+    loseSandboxResponse = true;
+    await click('保存');
+    expect(container.textContent).toContain('已保存。');
+    const traces: Array<{ events: Array<{ phase: string; state: string }> }> = JSON.parse(
+      sessionStorage.getItem('member-save-diagnostics:v1') ?? '[]',
+    );
+    expect(
+      traces
+        .at(-1)
+        ?.events.filter((event) => event.phase === 'save')
+        .at(-1)?.state,
+    ).toBe('finish');
+    expect(writes.filter((entry) => entry.path === '/api/config')).toHaveLength(1);
+  });
+  it('carries the resource revision from a fresh read to the saved global setting', async () => {
+    await openAdvanced();
+    await change('Codex Sandbox', 'read-only');
+    await click('保存');
+    expect(container.textContent).toContain('已保存。');
+    expect(writes.find((entry) => entry.path === '/api/config')?.body.expectedRevision).toBe('sandbox:workspace-write');
+  });
+  it('keeps a concurrent global edit and the local draft instead of overwriting it', async () => {
+    await openAdvanced();
+    await change('Codex Sandbox', 'read-only');
+    currentSandbox = 'danger-full-access';
+    await click('保存');
+    expect(writes.filter((entry) => entry.path === '/api/config')).toHaveLength(0);
+    expect(currentSandbox).toBe('danger-full-access');
+    expect(control('Codex Sandbox').value).toBe('read-only');
+    expect(container.textContent).toContain('其他页面');
+  });
   it('keeps speed editable and writes only the changed member field', async () => {
     await openAdvanced();
     expect(control('速度档位').value).toBe('fast');

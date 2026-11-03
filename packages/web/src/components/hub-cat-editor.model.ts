@@ -60,6 +60,7 @@ export interface HubCatEditorFormState {
   acpStartupArgs: string;
   acpMaxLiveProcesses: string;
   acpIdleTtlMinutes: string;
+  executionApproval?: 'auto' | 'ask_user';
   mcpSupport: boolean;
   sessionChain: SessionChainValue;
   /** clowder-ai#1208: single context window cap; empty = Auto. */
@@ -432,6 +433,7 @@ export function initialState(cat?: CatData | null, draft?: HubCatEditorDraft | n
     acpMaxLiveProcesses: acpConfig?.pool?.maxLiveProcesses !== undefined ? String(acpConfig.pool.maxLiveProcesses) : '',
     acpIdleTtlMinutes:
       acpConfig?.pool?.idleTtlMs !== undefined ? String(Math.round(acpConfig.pool.idleTtlMs / 60_000)) : '',
+    executionApproval: cat?.executionApproval ?? 'auto',
     mcpSupport: cat?.mcpSupport ?? defaultMcpSupportForClient(clientId),
     sessionChain: String(cat?.sessionChain ?? true) as SessionChainValue,
     contextWindow: cat?.contextWindow ? String(cat.contextWindow) : '',

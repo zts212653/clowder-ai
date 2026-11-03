@@ -8,7 +8,7 @@ import { isSameCapabilityRoot } from '../../../../../config/capabilities/invoke-
 import { resolveKimiRuntimePaths } from '../../../../../utils/kimi-cli-runtime.js';
 import { pathsEqual } from '../../../../../utils/project-path.js';
 import { prepareKimiMcpCredentialLease } from './kimi-mcp-credential-lease.js';
-import { resolveKimiMcpSurface } from './kimi-mcp-surface.js';
+import { captureKimiMcpSurface, type KimiMcpConfigPlan, resolveKimiMcpSurface } from './kimi-mcp-surface.js';
 
 export interface KimiMcpLease {
   env: Record<string, string>;
@@ -33,21 +33,41 @@ function isNativeHomeDirectory(directory: string, nativeDirectory: string): bool
  * Keep the original file intact under a recoverable name until the client exits.
  * A second invocation must not replace the first invocation's capability surface.
  */
+export async function captureKimiMcpConfig(input: {
+  callbackEnv: Record<string, string>;
+  workingDirectory?: string;
+  mcpServerPath?: string;
+  mcpSupport?: boolean;
+}): Promise<KimiMcpConfigPlan> {
+  const mcpSupport = input.mcpSupport ?? catRegistry.tryGet(input.callbackEnv.CAT_CAFE_CAT_ID)?.config.mcpSupport;
+  const nativeDirectory = resolveKimiRuntimePaths(input.callbackEnv).shareDir;
+  if (input.mcpServerPath === '' && mcpSupport !== false) return { nativeDirectory, denialLayers: [] };
+  if (!input.workingDirectory) throw new Error('Kimi MCP injection requires an explicit working directory');
+  const binaryRoot = resolveBinaryRoot(resolve(dirname(fileURLToPath(import.meta.url)), '../../../../../../../..'));
+  return captureKimiMcpSurface({
+    ...input,
+    workingDirectory: input.workingDirectory,
+    nativeDirectory,
+    mcpSupport,
+    mcpServerPath: input.mcpServerPath ?? join(binaryRoot, 'packages/mcp-server/dist/index.js'),
+  });
+}
+
 export async function prepareKimiMcpConfig(input: {
   callbackEnv?: Record<string, string>;
   workingDirectory?: string;
   mcpServerPath?: string;
+  frozenKimiMcpConfig?: KimiMcpConfigPlan;
 }): Promise<KimiMcpLease> {
   const noop: KimiMcpLease = { env: {}, dispose: async () => {} };
   if (!input.callbackEnv?.CAT_CAFE_CAT_ID) return noop;
-  const mcpSupport = catRegistry.tryGet(input.callbackEnv.CAT_CAFE_CAT_ID)?.config.mcpSupport;
-  // Disabling host injection must not bypass the member's native MCP off switch.
-  if (input.mcpServerPath === '' && mcpSupport !== false) return noop;
+  const plan = input.frozenKimiMcpConfig ?? (await captureKimiMcpConfig({ ...input, callbackEnv: input.callbackEnv }));
+  const nativeEnvironment = { KIMI_CODE_HOME: plan.nativeDirectory };
+  if (!plan.mcpConfig) return { ...noop, env: nativeEnvironment };
   if (!input.workingDirectory) throw new Error('Kimi MCP injection requires an explicit working directory');
-  const binaryRoot = resolveBinaryRoot(resolve(dirname(fileURLToPath(import.meta.url)), '../../../../../../../..'));
   // Project entries shadow native HOME entries. Explicitly block native-only
   // servers so the managed invocation cannot bypass the capability registry.
-  const nativeDirectory = resolveKimiRuntimePaths(input.callbackEnv).shareDir;
+  const nativeDirectory = plan.nativeDirectory;
   const directory = join(input.workingDirectory, '.kimi-code');
   // Compare existing parents too: first use may not have created either leaf yet.
   if (isNativeHomeDirectory(directory, nativeDirectory)) {
@@ -58,9 +78,9 @@ export async function prepareKimiMcpConfig(input: {
     const servers = await resolveKimiMcpSurface({
       workingDirectory: input.workingDirectory,
       callbackEnv: { ...input.callbackEnv, ...credentials.env },
-      mcpServerPath: input.mcpServerPath ?? join(binaryRoot, 'packages/mcp-server/dist/index.js'),
+      mcpServerPath: input.mcpServerPath ?? '',
       nativeDirectory,
-      mcpSupport,
+      frozenKimiMcpConfig: plan,
       credentialFile: credentials.path,
     });
     await mkdir(directory, { recursive: true });
@@ -104,7 +124,7 @@ export async function prepareKimiMcpConfig(input: {
     return {
       // Only the capability set resolved by Clowder is written to this project file.
       // This trust applies to the managed child process, never to the user's native HOME.
-      env: { KIMI_CODE_TRUST_WORKSPACE: '1', ...credentials.env },
+      env: { ...nativeEnvironment, KIMI_CODE_TRUST_WORKSPACE: '1', ...credentials.env },
       async dispose() {
         try {
           if (disposed) return;

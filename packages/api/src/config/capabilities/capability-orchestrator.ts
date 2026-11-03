@@ -23,6 +23,7 @@ import type {
 } from '@cat-cafe/shared';
 import { catRegistry } from '@cat-cafe/shared';
 import { resolveCatCafeSkillsSource } from '../../utils/skill-source.js';
+import { configEventBus, createChangeSetId } from '../config-event-bus.js';
 import { migrateCapabilitiesV1ToV2 } from '../governance/capabilities-migration.js';
 import { invocationPluginMcpConfig, projectInvocationPluginMcp } from './invocation-plugin-mcp-view.js';
 import {
@@ -673,6 +674,16 @@ export async function migrateAndPersistCapabilities(projectRoot: string): Promis
   }
 }
 
+function notifyCapabilitiesConfigChanged(projectRoot: string): void {
+  configEventBus.emitChange({
+    source: 'capabilities',
+    scope: 'domain',
+    changedKeys: [resolve(projectRoot)],
+    changeSetId: createChangeSetId(),
+    timestamp: Date.now(),
+  });
+}
+
 export async function writeCapabilitiesConfig(projectRoot: string, config: CapabilitiesConfig): Promise<void> {
   const dir = safePath(projectRoot, CONFIG_SUBDIR);
   await mkdir(dir, { recursive: true });
@@ -683,6 +694,7 @@ export async function writeCapabilitiesConfig(projectRoot: string, config: Capab
   const tmpPath = `${filePath}.${process.pid}.${randomUUID().slice(0, 8)}.tmp`;
   await writeFile(tmpPath, `${JSON.stringify(config, null, 2)}\n`, 'utf-8');
   await rename(tmpPath, filePath);
+  notifyCapabilitiesConfigChanged(projectRoot);
 }
 
 function writeCapabilitiesConfigSync(projectRoot: string, config: CapabilitiesConfig): void {
@@ -701,6 +713,7 @@ function writeCapabilitiesConfigSync(projectRoot: string, config: CapabilitiesCo
     }
     throw err;
   }
+  notifyCapabilitiesConfigChanged(projectRoot);
 }
 
 export function inheritFullyBlockedMcpCapabilitiesForNewCatInConfig(

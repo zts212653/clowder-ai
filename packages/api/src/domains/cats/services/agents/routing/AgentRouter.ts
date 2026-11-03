@@ -27,7 +27,7 @@ import type {
 } from '@cat-cafe/shared/routing-preview';
 import type { SessionStore } from '@cat-cafe/shared/utils';
 import { context as ctxApi, SpanStatusCode, trace } from '@opentelemetry/api';
-import { getDefaultCatId, isCatAvailable } from '../../../../../config/cat-config-loader.js';
+import { getDefaultCatId, isCatAvailable, resolveCatSuccessor } from '../../../../../config/cat-config-loader.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import {
   ROUTING_INTENT,
@@ -71,6 +71,7 @@ import type { AgentRegistrationFailure } from '../registry/AgentServiceUnavailab
 import type { RouteExecutionOptions, RouteOptions, RouteStrategyDeps } from '../routing/route-helpers.js';
 import { routeParallel } from '../routing/route-parallel.js';
 import { routeSerial } from '../routing/route-serial.js';
+import { resolveCatTarget } from './cat-target-resolver.js';
 import { appendContextAttachmentsToPrompt } from './context-attachment-prompt.js';
 import { findLastUserMentions } from './last-user-mentions.js';
 
@@ -550,6 +551,7 @@ export interface AgentRouterOptions {
   personMemoryProposalStatusContextResolver?: import('../../../../memory/people/PersonMemoryProposalStatusContextResolver.js').PersonMemoryProposalStatusContextResolver;
   /** F287: invocation-bound Cue Plane adapter. */
   memoryCuePromptService?: import('../../../../memory/cue/MemoryCueInvocationPromptService.js').MemoryCueInvocationPromptResolver;
+  matterMemoryService?: import('../invocation/invoke-single-cat.js').InvocationDeps['matterMemoryService'];
   contextSourceAdmission?: import('../../../../memory/cue/ContextSourceAdmission.js').ContextSourceAdmission;
   profileCueOpportunitySource?: import('../../../../memory/cue/sources/ProfileMemoryCueSource.js').ProfileMemoryCueSource;
   threadOverviewOpportunitySource?: import('../../../../memory/cue/sources/ThreadOverviewMemoryCueSource.js').ThreadOverviewMemoryCueSource;
@@ -564,8 +566,8 @@ export interface AgentRouterOptions {
  */
 export class AgentRouter {
   private scopedMemberRouting?: AgentRouterOptions['scopedMemberRouting'];
-  private services: Record<string, AgentService>;
-  private unavailableServices: ReadonlyMap<string, AgentRegistrationFailure> = new Map();
+  private readonly services: Record<string, AgentService>;
+  private readonly unavailableServices = new Map<string, AgentRegistrationFailure>();
   private registry: InvocationRegistry;
   private messageStore: IMessageStore;
   private messageSearchAnswerService?: import('../../../../memory/MessageSearchAnswerPublicationService.js').MessageSearchAnswerPublicationService;
@@ -649,6 +651,7 @@ export class AgentRouter {
   private personMemoryProposalStatusContextResolver?: import('../../../../memory/people/PersonMemoryProposalStatusContextResolver.js').PersonMemoryProposalStatusContextResolver;
   /** F287 */
   private memoryCuePromptService?: import('../../../../memory/cue/MemoryCueInvocationPromptService.js').MemoryCueInvocationPromptResolver;
+  private matterMemoryService?: import('../invocation/invoke-single-cat.js').InvocationDeps['matterMemoryService'];
   private contextSourceAdmission?: import('../../../../memory/cue/ContextSourceAdmission.js').ContextSourceAdmission;
   private profileCueOpportunitySource?: import('../../../../memory/cue/sources/ProfileMemoryCueSource.js').ProfileMemoryCueSource;
   private threadOverviewOpportunitySource?: import('../../../../memory/cue/sources/ThreadOverviewMemoryCueSource.js').ThreadOverviewMemoryCueSource;
@@ -657,8 +660,10 @@ export class AgentRouter {
   private speechMentionRe: RegExp;
 
   private rebuildRuntimeCaches(agentRegistry: AgentRegistry): void {
-    this.unavailableServices = agentRegistry.getAllUnavailableEntries();
-    this.services = {};
+    // Retained route deps see the next member's current service; pinned invocations keep their own reference.
+    this.unavailableServices.clear();
+    agentRegistry.getAllUnavailableEntries().forEach((reason, catId) => this.unavailableServices.set(catId, reason));
+    Object.keys(this.services).forEach((catId) => delete this.services[catId]);
     for (const [catId, service] of agentRegistry.getAllEntries()) {
       this.services[catId] = service;
     }
@@ -739,6 +744,7 @@ export class AgentRouter {
     this.injectionTraceStore = options.injectionTraceStore;
     this.personMemoryProposalStatusContextResolver = options.personMemoryProposalStatusContextResolver;
     this.memoryCuePromptService = options.memoryCuePromptService;
+    this.matterMemoryService = options.matterMemoryService;
     this.contextSourceAdmission = options.contextSourceAdmission;
     this.profileCueOpportunitySource = options.profileCueOpportunitySource;
     this.eventCueOpportunitySource = options.eventCueOpportunitySource;
@@ -791,19 +797,19 @@ export class AgentRouter {
   }
 
   private isRoutableCat(catId: string | null | undefined): catId is CatId {
-    return typeof catId === 'string' && Object.hasOwn(this.services, catId) && isCatAvailable(catId);
+    return (
+      typeof catId === 'string' &&
+      catId !== '__none__' &&
+      catRegistry.has(catId) &&
+      Object.hasOwn(this.services, catId) &&
+      isCatAvailable(catId)
+    );
   }
 
   private filterRoutableCats(catIds: Iterable<string | null | undefined>): CatId[] {
-    const filtered: CatId[] = [];
-    const seen = new Set<string>();
-    for (const catId of catIds) {
-      if (!this.isRoutableCat(catId)) continue;
-      if (seen.has(catId)) continue;
-      seen.add(catId);
-      filtered.push(catId);
-    }
-    return filtered;
+    return [...new Set([...catIds].flatMap((id) => (id ? (resolveCatSuccessor(id) ?? []) : [])))].filter((id) =>
+      this.isRoutableCat(id),
+    );
   }
 
   private filterKnownCats(catIds: Iterable<string | null | undefined>): CatId[] {
@@ -811,6 +817,15 @@ export class AgentRouter {
     return [...new Set(catIds)].filter(
       (catId): catId is CatId => typeof catId === 'string' && Object.hasOwn(configs, catId),
     );
+  }
+
+  /** Validate before first persistence; bound/explicit recipients never follow successors. */
+  resolveAdmissionTargets(requested: readonly string[], implicit = false): CatId[] {
+    const targets = requested.map((id) => {
+      if (implicit) return resolveCatSuccessor(id);
+      return id !== '__none__' && catRegistry.has(id) && isCatAvailable(id) ? (id as CatId) : null;
+    });
+    return targets.every((id): id is CatId => id !== null) ? [...new Set(targets)] : [];
   }
 
   /**
@@ -821,10 +836,14 @@ export class AgentRouter {
   async resolveExplicitTargets(
     requestedCatIds: readonly string[],
     threadId: string,
-    options?: { persist?: boolean },
+    options?: { persist?: boolean; bound?: boolean },
   ): Promise<CatId[]> {
-    const resolved = this.filterKnownCats(requestedCatIds);
-    if (resolved.length !== requestedCatIds.length) return [];
+    // First admission validates the whole explicit request. A bound Queue row
+    // instead settles each recipient, so an invalid sibling cannot cancel healthy work.
+    const resolved = options?.bound
+      ? requestedCatIds.flatMap((id) => this.resolveAdmissionTargets([id])).filter((id) => this.isRoutableCat(id))
+      : this.resolveAdmissionTargets(requestedCatIds);
+    if (!options?.bound && resolved.length !== requestedCatIds.length) return [];
     if (options?.persist && this.threadStore) {
       await this.threadStore.addParticipants(threadId, resolved);
     }
@@ -846,8 +865,10 @@ export class AgentRouter {
     threadId: string,
     content = '',
   ): Promise<CatId[]> {
-    const explicit = this.filterRoutableCats(requestedCatIds);
-    if (explicit.length > 0) return explicit;
+    const explicit = await this.parseAllMentions(content, threadId, { allowGroupFallback: false });
+    if (explicit.mentions.length > 0 || explicit.routing_warnings.length > 0) return explicit.mentions;
+    const hinted = this.filterRoutableCats(requestedCatIds);
+    if (hinted.length > 0) return hinted;
     return (await this.resolveImplicitTargetPreview(content, threadId)).targetCats;
   }
 
@@ -861,12 +882,10 @@ export class AgentRouter {
     if (requested.length > 0 && (await this.resolveExplicitTargets(requested, threadId)).length !== requested.length) {
       throw new Error('Invalid explicit member identity');
     }
-    if (exact) return this.resolveExplicitTargets(requested, threadId);
-    const targets =
-      requested.length > 0
-        ? requested
-        : (await this.resolveTargetsAndIntent(content, threadId, { persist: false, allowFallback: false })).targetCats;
-    return this.resolveConversationTargetsAtAdmission(targets, threadId, content);
+    if (exact || requested.length > 0) return this.resolveExplicitTargets(requested, threadId);
+    const parsed = await this.resolveTargetsAndIntent(content, threadId, { persist: false, allowFallback: false });
+    if (parsed.hasMentions) return parsed.targetCats;
+    return this.resolveConversationTargetsAtAdmission([], threadId, content);
   }
 
   /** Pick a deterministic fallback cat when policy filters out all candidates. */
@@ -874,9 +893,6 @@ export class AgentRouter {
     const def = getDefaultCatId() as string;
     if (!exclude.has(def) && this.isRoutableCat(def)) return def as CatId;
 
-    for (const id of Object.keys(this.services).sort()) {
-      if (!exclude.has(id) && this.isRoutableCat(id)) return id as CatId;
-    }
     return null;
   }
 
@@ -916,8 +932,8 @@ export class AgentRouter {
     // Defensive guard: data might be malformed from external persistence.
     const avoidList = Array.isArray(rule.avoidCats) ? rule.avoidCats : [];
     const preferList = Array.isArray(rule.preferCats) ? rule.preferCats : [];
-    const avoid = new Set(avoidList.map((id) => String(id)));
-    const prefer = preferList.map((id) => String(id)).filter((id) => !avoid.has(id));
+    const avoid = new Set<string>(this.filterRoutableCats(avoidList));
+    const prefer = this.filterRoutableCats(preferList).filter((id) => !avoid.has(id));
 
     const filtered = routableCandidates.filter((id) => !avoid.has(id as string));
     const out: CatId[] = [];
@@ -940,7 +956,7 @@ export class AgentRouter {
     if (out.length > 0) return out;
 
     const fallback = this.pickFallbackCat(avoid);
-    return fallback ? [fallback] : routableCandidates;
+    return fallback ? [fallback] : [];
   }
 
   /** Normalize speech patterns like "at 布偶" → "@布偶" */
@@ -991,7 +1007,15 @@ export class AgentRouter {
     }
 
     mentions.sort((a, b) => a.position - b.position);
-    return { mentions, routing_warnings };
+    return {
+      mentions: mentions.filter(({ catId }) => {
+        const target = resolveCatTarget(catId);
+        if ('ok' in target) return true;
+        routing_warnings.push(target.error);
+        return false;
+      }),
+      routing_warnings,
+    };
   }
 
   private buildGroupMentionKeywordPatterns(): string[] {
@@ -1163,7 +1187,7 @@ export class AgentRouter {
 
       return {
         mentions: [...before, ...groupResult.cats, ...after],
-        routing_warnings: [],
+        routing_warnings: individual.routing_warnings,
       };
     }
     return this.parseMentions(message);
@@ -1192,28 +1216,47 @@ export class AgentRouter {
   private async resolveTargetPreview(
     message: string,
     threadId: string,
-    options?: { prospectivePreferredCats?: readonly CatId[]; publicConversation?: boolean },
+    options?: {
+      prospectivePreferredCats?: readonly CatId[];
+      publicConversation?: boolean;
+      explicitTargetCats?: readonly CatId[];
+    },
   ): Promise<RoutingPreviewResponse> {
-    const { mentions: mentionedCats } = await this.parseAllMentions(message, threadId, {
-      allowGroupFallback: !options?.publicConversation,
-    });
-    // Common conversation admission can select an available recipient. Exact
-    // callers retain named identities so an unavailable member reports its cause.
-    const targets = options?.publicConversation ? this.filterRoutableCats(mentionedCats) : mentionedCats;
-    if (targets.length > 0) {
+    const { mentions: mentionedCats, routing_warnings } = options?.explicitTargetCats
+      ? { mentions: [...options.explicitTargetCats], routing_warnings: [] }
+      : await this.parseAllMentions(message, threadId, {
+          allowGroupFallback: !options?.publicConversation,
+        });
+    const targets = options?.publicConversation ? this.filterRoutableCats(mentionedCats) : [...mentionedCats];
+    if (targets.length > 0 || routing_warnings.length > 0) {
       const unavailableTargets = options?.publicConversation
-        ? this.filterKnownCats(mentionedCats).filter((id) => !this.isRoutableCat(id))
+        ? [
+            ...this.filterKnownCats(mentionedCats).filter((id) => !this.isRoutableCat(id)),
+            ...routing_warnings.flatMap((warning) => (warning.kind === 'cat_disabled' ? [warning.catId] : [])),
+          ]
+        : [];
+      // A disabled explicit identity may propose its configured successor, but
+      // public admission still requires confirmation before either identity is written.
+      const suggestions = options?.publicConversation
+        ? this.filterRoutableCats(
+            routing_warnings.flatMap((warning) => (warning.kind === 'cat_disabled' ? [warning.catId] : [])),
+          )
         : [];
       return {
-        targetCats: targets,
+        targetCats: [...new Set([...targets, ...suggestions])],
+        ...(routing_warnings.length ? { routingWarnings: routing_warnings } : {}),
         reason: { kind: 'current_message_mentions' },
-        ...(unavailableTargets.length ? { unavailableTargets } : {}),
+        ...(unavailableTargets.length ? { unavailableTargets, requiresConfirmation: true } : {}),
       };
     }
     const result = await this.resolveImplicitTargetPreview(message, threadId, options);
     const unavailableTargets = this.filterKnownCats(mentionedCats).filter((id) => !this.isRoutableCat(id));
     return unavailableTargets.length
-      ? { ...result, unavailableTargets: [...new Set([...unavailableTargets, ...(result.unavailableTargets ?? [])])] }
+      ? {
+          ...result,
+          unavailableTargets: [...new Set([...unavailableTargets, ...(result.unavailableTargets ?? [])])],
+          requiresConfirmation: true,
+        }
       : result;
   }
 
@@ -1227,7 +1270,7 @@ export class AgentRouter {
     if (!prospective && !this.threadStore) {
       // Preserve the pre-existing no-store fallback used by narrow tests and
       // compatibility callers; production routing always has a ThreadStore.
-      return { targetCats: [getDefaultCatId()], reason: { kind: 'default_cat' } };
+      return { targetCats: this.filterRoutableCats([getDefaultCatId()]), reason: { kind: 'default_cat' } };
     }
     const thread:
       | {
@@ -1262,11 +1305,14 @@ export class AgentRouter {
     if (!prospective && this.threadStore) {
       const mentions = await findLastUserMentions(this.messageStore, threadId);
       for (const catId of this.filterKnownCats(mentions)) {
-        if (this.isRoutableCat(catId)) return project([catId], 'previous_user_mentions');
+        const resolved = this.filterRoutableCats([catId]);
+        if (resolved.length > 0) return project(resolved, 'previous_user_mentions');
         unavailableTargets.push(catId);
       }
 
-      const participantsWithActivity = await this.threadStore.getParticipantsWithActivity(threadId);
+      const participantsWithActivity = (await this.threadStore.getParticipantsWithActivity(threadId)).flatMap(
+        (participant) => this.filterRoutableCats([participant.catId]).map((catId) => ({ ...participant, catId })),
+      );
       const isRoutable = (participant: { catId: CatId }) => this.isRoutableCat(participant.catId);
       const isHealthy = (participant: { lastResponseHealthy?: boolean }) => participant.lastResponseHealthy !== false;
       const healthyReplier = participantsWithActivity.find(
@@ -1300,10 +1346,11 @@ export class AgentRouter {
   /** Read-only projection for the v2 composer; never mutates participants. */
   async previewTargets(
     message: string,
-    options: { threadId: string; prospectivePreferredCats?: readonly CatId[] },
+    options: { threadId: string; prospectivePreferredCats?: readonly CatId[]; explicitTargetCats?: readonly CatId[] },
   ): Promise<RoutingPreviewResponse> {
     return this.resolveTargetPreview(message, options.threadId, {
       publicConversation: true,
+      ...(options.explicitTargetCats ? { explicitTargetCats: options.explicitTargetCats } : {}),
       ...(options.prospectivePreferredCats === undefined
         ? {}
         : { prospectivePreferredCats: options.prospectivePreferredCats }),
@@ -1381,6 +1428,7 @@ export class AgentRouter {
         ...(this.freshnessStateStore ? { freshnessStateStore: this.freshnessStateStore } : {}),
         ...(this.runtimeInteractionPort ? { runtimeInteractionPort: this.runtimeInteractionPort } : {}),
         ...(this.memoryCuePromptService ? { memoryCuePromptService: this.memoryCuePromptService } : {}),
+        ...(this.matterMemoryService ? { matterMemoryService: this.matterMemoryService } : {}),
         ...(this.contextSourceAdmission ? { contextSourceAdmission: this.contextSourceAdmission } : {}),
         ...(this.profileCueOpportunitySource ? { profileCueOpportunitySource: this.profileCueOpportunitySource } : {}),
         ...(this.threadOverviewOpportunitySource
@@ -1444,7 +1492,7 @@ export class AgentRouter {
     const allMentions = await this.parseAllMentions(message, resolvedThreadId, {
       allowGroupFallback: options?.allowFallback !== false,
     });
-    const hasMentions = allMentions.mentions.length > 0;
+    const hasMentions = allMentions.mentions.length > 0 || allMentions.routing_warnings.length > 0;
     const routing_warnings = allMentions.routing_warnings;
     let targetCats: CatId[];
     if (options?.allowFallback === false) {
@@ -1572,6 +1620,16 @@ export class AgentRouter {
     intent: IntentResult,
     options: RouteExecutionOptions,
   ): AsyncIterable<AgentMessage> {
+    const admitted = this.resolveAdmissionTargets(targetCats);
+    if (admitted.length !== targetCats.length) {
+      yield {
+        type: 'error',
+        catId: targetCats[0] ?? getDefaultCatId(),
+        error: 'Routing target is unavailable',
+        timestamp: Date.now(),
+      };
+      return;
+    }
     if (this.scopedMemberRouting) {
       const controlled = await this.scopedMemberRouting.resolve({
         userId,

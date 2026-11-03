@@ -10,6 +10,8 @@ import {
   type InvocationParams,
   invokeSingleCat,
 } from '../src/domains/cats/services/agents/invocation/invoke-single-cat.js';
+import { compileL0ViaSubprocess } from '../src/domains/cats/services/agents/providers/l0-compiler.js';
+import { captureInvocationL0Input } from '../src/domains/cats/services/agents/providers/l0-input-capture.js';
 import { ContextEpochOwner } from '../src/domains/cats/services/session/context/ContextEpochOwner.js';
 import { InMemoryContextEpochStore } from '../src/domains/cats/services/stores/ports/ContextEpochStore.js';
 import type { AgentServiceOptions } from '../src/domains/cats/services/types.js';
@@ -80,6 +82,13 @@ async function fixture(t: TestContext) {
     scopedMemberLaunch: native,
     executionBinding: {
       catConfig: { ...config, mcpSupport: false },
+      sharedMcpLaunch: { transport: 'stdio' },
+      frozenL0Input: captureInvocationL0Input({
+        catId,
+        catConfig: config,
+        model: config.defaultModel,
+        projection: 'scoped-member',
+      }),
       workspace: {
         thread,
         workingDirectory: directory,
@@ -129,6 +138,16 @@ test('a scoped member reaches the existing invocation kernel with only its appro
   assert.equal(f.captured.length, 1, JSON.stringify(events.filter((event) => event.type === 'error')));
   assert.equal(f.captured[0]?.prompt, 'APPROVED_MEMORY_AND_LOCAL_EVENT');
   assert.equal(f.captured[0]?.options?.pluginNativeLaunch?.sandbox.kind, 'scoped-member');
+  const frozenInput = f.captured[0]?.options?.frozenL0Input;
+  assert.equal(frozenInput?.projection, 'scoped-member');
+  const l0 = await compileL0ViaSubprocess({
+    catId: f.params.catId,
+    frozenInput,
+    projection: 'scoped-member',
+    requireFrozenInput: true,
+  });
+  assert.match(l0, /Identity constant/);
+  assert.doesNotMatch(l0, /PRIVATE_ENGINEERING|PRIVATE_HOME/);
   assert.ok(f.checks() >= 2, 'currentness is checked before admission and immediately before provider execution');
 });
 

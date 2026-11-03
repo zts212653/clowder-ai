@@ -10,7 +10,8 @@
  */
 
 import { join } from 'node:path';
-import type { CatId } from '@cat-cafe/shared';
+import { type CatId, resolveMemberIdentity } from '@cat-cafe/shared';
+import { loadDossierProfiles } from '@cat-cafe/shared/dossier';
 import type { FastifyPluginAsync } from 'fastify';
 import { loadCatConfig, toAllCatConfigs } from '../config/cat-config-loader.js';
 import { resolveDefaultClaudeMcpServerPath } from '../domains/cats/services/agents/providers/ClaudeAgentService.js';
@@ -194,6 +195,9 @@ export const promptInjectionPreviewRoutes: FastifyPluginAsync = async (app) => {
 
       return {
         catId,
+        identityResolution: catConfig
+          ? resolveMemberIdentity(catConfig, loadDossierProfiles(findMonorepoRoot()).get(catId))
+          : undefined,
         systemPrompt: systemPromptContent,
         dynamicContext,
         bootstrapContext,

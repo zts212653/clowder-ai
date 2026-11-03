@@ -4,7 +4,14 @@ import { saveSpan } from '../utils/member-save-diagnostics.js';
 
 // ── Types ──
 
-export type ConfigChangeSource = 'env' | 'config-store' | 'cat-config' | 'provider-profile' | 'secrets' | 'accounts';
+export type ConfigChangeSource =
+  | 'env'
+  | 'config-store'
+  | 'cat-config'
+  | 'provider-profile'
+  | 'secrets'
+  | 'accounts'
+  | 'capabilities';
 
 export type ConfigChangeScope = 'key' | 'domain' | 'file';
 

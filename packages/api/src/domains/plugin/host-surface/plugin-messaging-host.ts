@@ -76,6 +76,8 @@ export interface PluginMessagingHost extends PluginMessagingSubscriptionHost {
   get(messageId: string): Promise<PluginMessage | null>;
   findSent(input: PluginSentMessageLookup): Promise<PluginSentMessage | null>;
   send(input: PluginMessagingSendInput): Promise<SendReceipt>;
+  /** Additional synchronous rejection fence; never grants identity or bypasses Host checks. */
+  sendWithAdmission?(input: PluginMessagingSendInput, assertCurrent: () => void): Promise<SendReceipt>;
 }
 
 export interface PluginMessagingHostDeps extends PluginSentMessageReadServices {
@@ -162,6 +164,23 @@ export function createPluginMessagingHost(input: PluginMessagingHostDeps): Plugi
   return {
     findSent: createPluginSentMessageReader(input),
     ...(input.subscriptions ?? createUnavailablePluginMessagingSubscriptionHost().host),
+    async sendWithAdmission(value, assertCurrent) {
+      if (typeof assertCurrent !== 'function')
+        throw new MessagingError('VALIDATION', 'send admission requires a synchronous assertion');
+      return createPluginMessagingHost({
+        ...input,
+        async assertAdmissionCurrent() {
+          await input.assertAdmissionCurrent?.();
+          input.assertCurrent?.();
+          const result: unknown = assertCurrent();
+          if (result !== undefined) {
+            // Drain a mistakenly async callback without treating its result as authority.
+            void Promise.resolve(result).catch(() => undefined);
+            throw new MessagingError('VALIDATION', 'send admission assertion must return void synchronously');
+          }
+        },
+      }).send(value);
+    },
     async get(value) {
       input.assertCurrent?.();
 

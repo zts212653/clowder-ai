@@ -31,14 +31,14 @@ export function manifestOperation(
   );
 }
 
-function currentPackage(
+async function currentPackage(
   pluginId: string,
-  instances: { getCurrent(pluginId: string): PluginInstanceRecord | undefined },
-  packages: { get(packageDigest: string): PluginPackageRecord | undefined },
-): { readonly instance: PluginInstanceRecord; readonly packageRecord: PluginPackageRecord } | undefined {
-  const instance = instances.getCurrent(pluginId);
+  instances: PluginInventoryTransaction['instances'],
+  packages: PluginInventoryTransaction['packages'],
+): Promise<{ readonly instance: PluginInstanceRecord; readonly packageRecord: PluginPackageRecord } | undefined> {
+  const instance = await instances.getCurrent(pluginId);
   if (!instance) return undefined;
-  const packageRecord = packages.get(instance.packageDigest);
+  const packageRecord = await packages.get(instance.packageDigest);
   if (!packageRecord) {
     throw new PluginManagerServiceError('CONFIGURATION_UNAVAILABLE', 'Installed plugin package is unavailable');
   }
@@ -110,12 +110,12 @@ export function manifestConfigurationReady(
   return requiredFieldsReady(manifestConfiguration(record), stored);
 }
 
-export function requireConfigurationTarget(
+export async function requireConfigurationTarget(
   transaction: PluginInventoryTransaction,
   pluginId: string,
   pluginInstanceId: string,
-): { readonly instance: PluginInstanceRecord; readonly packageRecord: PluginPackageRecord } {
-  const current = currentPackage(pluginId, transaction.instances, transaction.packages);
+): Promise<{ readonly instance: PluginInstanceRecord; readonly packageRecord: PluginPackageRecord }> {
+  const current = await currentPackage(pluginId, transaction.instances, transaction.packages);
   if (!current || current.instance.pluginInstanceId !== pluginInstanceId) {
     throw new PluginManagerServiceError('ACTION_NOT_ALLOWED', 'Plugin is not the current installed instance');
   }
@@ -170,7 +170,7 @@ function updatedValues(
   return next;
 }
 
-export function configureTransaction(input: {
+export async function configureTransaction(input: {
   readonly transaction: PluginInventoryTransaction;
   readonly projectRoot: string;
   readonly pluginId: string;
@@ -179,10 +179,10 @@ export function configureTransaction(input: {
   readonly now: number;
   readonly allowEmpty?: boolean;
   readonly liveRefresh?: boolean;
-  readonly beforeWrite?: (transaction: PluginInventoryTransaction) => void;
+  readonly beforeWrite?: (transaction: PluginInventoryTransaction) => void | Promise<void>;
   readonly afterConfigWrite?: () => void;
-}): void {
-  const current = requireConfigurationTarget(input.transaction, input.pluginId, input.pluginInstanceId);
+}): Promise<void> {
+  const current = await requireConfigurationTarget(input.transaction, input.pluginId, input.pluginInstanceId);
   assertConfigurationFence(current.instance, input.request.expectedRevision);
   if (current.instance.runtimeState !== 'stopped' && !input.liveRefresh) {
     throw new PluginManagerServiceError('ACTION_NOT_ALLOWED', 'Configuration requires the runtime to be suspended');
@@ -196,14 +196,14 @@ export function configureTransaction(input: {
   }
   validateUpdates(fields, input.request.updates, input.allowEmpty);
   const next = updatedValues(readPluginConfig(input.projectRoot, input.pluginId), input.request.updates);
-  input.beforeWrite?.(input.transaction);
+  await input.beforeWrite?.(input.transaction);
   writePluginConfig(
     input.projectRoot,
     input.pluginId,
     input.request.updates.map((update) => ({ name: update.key, value: update.value })),
   );
   input.afterConfigWrite?.();
-  input.transaction.instances.put({
+  await input.transaction.instances.put({
     ...current.instance,
     configReadiness: manifestConfigurationReady(current.packageRecord, next) ? 'ready' : 'incomplete',
     lifecycleRevision: current.instance.lifecycleRevision + 1,

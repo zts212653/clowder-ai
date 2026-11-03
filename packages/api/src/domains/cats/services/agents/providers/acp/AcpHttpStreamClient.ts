@@ -31,6 +31,7 @@ import { buildUnixSupervisedSpawnPlan } from '../../../../../../utils/cli-superv
 import {
   type AcpCapacitySignal,
   type AcpClientConfig,
+  type AcpPermissionHandler,
   AcpProtocolError,
   AcpSessionCancelledError,
   AcpStreamIdleError,
@@ -41,13 +42,13 @@ import { AcpCwdIdentityTracker } from './acp-cwd-identity.js';
 import { type AcpPromptInput, toAcpPromptContent } from './acp-prompt-content.js';
 import { AcpSessionBindingError, ActiveSessionCache } from './active-session-cache.js';
 import { shutdownAcpChild } from './lifecycle/acp-child-shutdown.js';
+import { respondToAcpPermission } from './permissions/acp-permission-response.js';
 import type {
   AcpAgentRequest,
   AcpInitializeResult,
   AcpMcpServer,
   AcpNewSessionResult,
   AcpNotification,
-  AcpPermissionRequest,
   AcpPromptCapabilities,
   AcpPromptResult,
   AcpResponse,
@@ -84,6 +85,7 @@ interface AgentResponseOptions {
 
 export class AcpHttpStreamClient {
   private readonly liveSessions = new ActiveSessionCache();
+  private readonly sessionPermissionHandlers = new Map<string, AcpPermissionHandler>();
   private child: ChildProcess | null = null;
   private closed = false;
   private closing?: Promise<void>;
@@ -105,15 +107,27 @@ export class AcpHttpStreamClient {
     this.cwdIdentityTracker = new AcpCwdIdentityTracker(this.config.cwd);
   }
 
+  setSessionPermissionHandler(sessionId: string, handler?: AcpPermissionHandler): void {
+    if (handler) this.sessionPermissionHandlers.set(sessionId, handler);
+    else this.sessionPermissionHandlers.delete(sessionId);
+  }
+
   // ── Lifecycle ────────────────────────────────────────────────
 
   async initialize(): Promise<AcpInitializeResult> {
     this.liveSessions.clear();
+    this.sessionPermissionHandlers.clear();
     // Phase 1: spawn the process
     const doSpawn = this.config.spawnFn ?? nodeSpawn;
-    let command = resolveCliCommandOrBare(this.config.command);
-    let args = [...this.config.args];
-    const childEnv = buildChildEnv(this.config.env, { workingDirectory: this.config.cwd });
+    const selectedSpawn = this.config.preparedSpawn ?? {
+      command: resolveCliCommandOrBare(this.config.command),
+      args: this.config.args,
+    };
+    let { command } = selectedSpawn;
+    let args = [...selectedSpawn.args];
+    const childEnv = this.config.preparedEnv
+      ? { ...this.config.preparedEnv }
+      : buildChildEnv(this.config.env, { workingDirectory: this.config.cwd });
     if (!IS_WINDOWS && isAbsolute(command)) {
       const binDir = dirname(command);
       childEnv.PATH = childEnv.PATH ? `${binDir}:${childEnv.PATH}` : binDir;
@@ -131,8 +145,9 @@ export class AcpHttpStreamClient {
       cwd: this.config.cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
       env: childEnv,
+      ...(this.config.preparedSpawn?.shell !== undefined ? { shell: this.config.preparedSpawn.shell } : {}),
     };
-    if (IS_WINDOWS && !this.config.spawnFn) {
+    if (IS_WINDOWS && !this.config.spawnFn && !this.config.preparedSpawn) {
       const spawnPlan = resolveWindowsSpawnPlan(command, args);
       command = spawnPlan.command;
       args = spawnPlan.args;
@@ -168,7 +183,7 @@ export class AcpHttpStreamClient {
 
     this.child.on('error', (err) => {
       log.error('ACP HTTP process error: %s', err.message);
-      this.exited = true;
+      this.closed = true;
     });
 
     this.child.on('exit', (code, signal) => {
@@ -632,8 +647,9 @@ export class AcpHttpStreamClient {
 
   private async closeOwnedProcess(): Promise<void> {
     this.liveSessions.clear();
+    this.sessionPermissionHandlers.clear();
     this.closed = true;
-    if (this.child && !this.exited) await shutdownAcpChild(this.child, KILL_GRACE_MS, false);
+    if (this.child?.pid !== undefined && !this.exited) await shutdownAcpChild(this.child, KILL_GRACE_MS, false);
   }
 
   get pid(): number | undefined {
@@ -782,45 +798,14 @@ export class AcpHttpStreamClient {
     };
 
     if (req.method === ACP_METHODS.requestPermission) {
-      const respond = (result: { optionId: string } | { cancelled: true }) => {
-        const acpResult = {
-          outcome:
-            'cancelled' in result
-              ? { outcome: 'cancelled' as const }
-              : { outcome: 'selected' as const, optionId: result.optionId },
-        };
-        return this.sendAgentResponse({ jsonrpc: '2.0', id: req.id, result: acpResult }, responseOptions);
-      };
-
-      if (this.config.permissionHandler) {
-        let responsePromise: Promise<void> | null = null;
-        try {
-          await this.config.permissionHandler(req, (result) => {
-            responsePromise = respond(result);
-          });
-        } catch (err) {
-          log.error('HTTP permissionHandler threw: %s', (err as Error).message);
-          await this.sendAgentResponse(
-            {
-              jsonrpc: '2.0',
-              id: req.id,
-              error: { code: -32603, message: `Permission handler error: ${(err as Error).message}` },
-            },
-            responseOptions,
-          );
-          return;
-        }
-        if (responsePromise) await responsePromise;
-      } else {
-        // Prefer allow_always (session-wide) over allow_once to avoid repeated permission
-        // prompts for every MCP tool call. Kimi sends optionId "approve_for_session" for this.
-        const params = req.params as unknown as AcpPermissionRequest;
-        const allowOption =
-          params.options?.find((o) => o.kind === 'allow_always') ??
-          params.options?.find((o) => o.kind === 'allow_once') ??
-          params.options?.[0];
-        await respond({ optionId: allowOption?.optionId ?? 'allow_once' });
-      }
+      const sessionId = typeof req.params.sessionId === 'string' ? req.params.sessionId : '';
+      await respondToAcpPermission({
+        request: req,
+        handler: this.sessionPermissionHandlers.get(sessionId) ?? this.config.permissionHandler,
+        defaultDecision: this.config.defaultPermissionDecision,
+        signal: options.signal,
+        write: (response) => this.sendAgentResponse(response, responseOptions),
+      });
       return;
     }
 

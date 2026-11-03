@@ -392,7 +392,7 @@ describe('cat-catalog-store', () => {
       roles: ['owner'],
       lead: false,
       available: true,
-      evaluation: 'co-creator / 大当家',
+      evaluation: 'co-creator',
     });
     assert.deepEqual(
       Object.keys(runtimeCatalog.roster ?? {}).sort(),
