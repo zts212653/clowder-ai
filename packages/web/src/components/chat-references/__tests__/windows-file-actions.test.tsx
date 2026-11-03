@@ -95,3 +95,21 @@ it('stops loading after a metadata failure and retries in the same shared menu',
   expect(menu.textContent).toContain(windowsPath);
   expect(menu.textContent).toContain('Copy path');
 });
+
+it('shows a persistent metadata error and retries directly in the classic file toolbar', async () => {
+  transport.fetch.mockRejectedValueOnce(new Error('offline'));
+  await act(async () => root.render(<FileActions source={source} filename="report.md" appearance="classic" />));
+  expect(host.querySelector('[role="menu"]')).toBeNull();
+  expect(host.querySelector('[role="alert"]')).not.toBeNull();
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain('Could not read file information');
+  const retry = [...host.querySelectorAll('button')].find((button) => button.textContent === 'Retry')!;
+  expect(retry).toBeDefined();
+  await act(async () => retry.click());
+  expect(transport.fetch).toHaveBeenCalledTimes(2);
+  expect(host.querySelector('[role="alert"]')).toBeNull();
+  expect(host.querySelector('[role="menu"]')).toBeNull();
+  const copy = [...host.querySelectorAll('button')].find((button) => button.textContent === 'Copy path')!;
+  expect(copy.disabled).toBe(false);
+  await act(async () => copy.click());
+  expect(transport.copy).toHaveBeenCalledWith(windowsPath);
+});

@@ -98,6 +98,16 @@ for (const width of [360, 1280]) {
     await menu.getByRole('menuitem', { name: 'Copy path', exact: true }).waitFor();
     await menu.getByRole('menuitem', { name: 'Copy path', exact: true }).click();
     assert.equal(await page.evaluate(() => navigator.clipboard.readText()), absolutePath);
+    reads = 0;
+    await page.goto(`${origin}/?classic=1`);
+    const classic = page.getByRole('region', { name: 'Classic file toolbar' });
+    await classic.getByRole('alert').waitFor();
+    assert.match(await classic.getByRole('alert').textContent(), /Could not read file information/);
+    assert.equal(await page.getByRole('menu').count(), 0);
+    await classic.getByRole('button', { name: 'Retry', exact: true }).click();
+    await classic.getByRole('button', { name: 'Copy path', exact: true }).click();
+    assert.equal(await classic.getByRole('alert').count(), 0);
+    assert.equal(await page.evaluate(() => navigator.clipboard.readText()), absolutePath);
     assert.deepEqual(errors, []);
     await context.close();
   });

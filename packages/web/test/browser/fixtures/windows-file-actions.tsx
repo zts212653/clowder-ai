@@ -8,6 +8,16 @@ writeShellLanguage('en');
 const absolutePath = `C:\\demo\\${'long directory with spaces\\'.repeat(4)}${'a'.repeat(180)}\\report.md`;
 function Surface() {
   const anchor = useRef<HTMLSpanElement>(null);
+  if (new URLSearchParams(window.location.search).has('classic'))
+    return (
+      <section aria-label="Classic file toolbar">
+        <FileActions
+          source={{ kind: 'workspace', worktreeId: 'fixture', path: 'docs/report.md' }}
+          filename="report.md"
+          appearance="classic"
+        />
+      </section>
+    );
   return (
     <main>
       <ChatFileReferenceView
