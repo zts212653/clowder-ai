@@ -3,7 +3,7 @@ feature_ids: []
 topics: [superagent, plugins, ongoing-work, attention]
 doc_kind: design-proposal
 created: 2026-11-03
-status: draft-awaiting-experience-review
+status: accepted-implementation-in-progress
 source_thread: thread_owned_34a481c439af853090de4631ce78a76c9b70e049
 source_message: 0001793720577737-000605-9aed72f9
 host_commit: 0fb68bc03455507836a0a35a706985a1ccc66058
@@ -17,7 +17,7 @@ host_commit: 0fb68bc03455507836a0a35a706985a1ccc66058
 
 建议采用 **可安装的协调插件 + 现有成员执行 + Host 管理工作和权限**。用户向一个长期在场的 Bot 交代责任；它从获准范围发现新工作，持续维护已有工作，把执行分给现有成员，反馈续接原事项；只把需要人判断的问题和可使用结果送到人面前。
 
-这份材料是实施前的体验与架构提案，配套 `/dev/superagent-preview?shell=v2` 在当前 Web 产品路由内组合原生导航组件、共享 frame 和 token，使用合成样例验证新交互。它不挂载完整 Host 运行态。**尚未实现安装包、真实模型判断、消息监听或后台执行。** 不把体验稿当作产品交付，也不把已有底层接口当成端到端验收。
+用户已确认体验方向，独立插件包与 Host 通用顶部入口已实现。隔离 Windows Host 已实跑 TGZ 安装、范围设置、两项真实文件执行、原 Work 跨会话续接、原处回流、人类接受，以及暂停和重启恢复；独立审查、macOS 与合并后验收尚未完成。`/dev/superagent-preview?shell=v2` 保留为合成体验稿。最新实现见 [implementation.md](implementation.md)，实际证据与失败边界见 [implementation-verification.md](implementation-verification.md)。
 
 ## 已确认的首版范围
 
@@ -25,9 +25,9 @@ host_commit: 0fb68bc03455507836a0a35a706985a1ccc66058
 
 多人 Channel 保留来源适配路径，不作为首版交付依赖。当前先验证「两个已选会话里的两件事 + 旧反馈 + 必要决策 + 原处结果」；未来接入 Channel 时，另行验证多人的来源身份、权限和结果回流，不能以个人会话验收替代。
 
-这条回答确认了监听范围；顶部入口、主对话、多事项跟进和暂停等体验仍以当前体验稿供确认，未将范围选择记录成整套 UX 已通过。
+枫哥随后选择「按现稿落地」（`message:0001793723766392-000695-f7ccadc0`，2026-11-03 16:36 UTC），确认顶部一个常驻 Bot 入口、主对话多事项跟进、原会话反馈/结果和暂停的体验方向。正式实现沿用该方向，见 [implementation.md](implementation.md)。
 
-范围确定后的接口组合验证见 [contract-slice.md](contract-slice.md)：同一激活内的订阅与协调入队已用隔离探针走通；已确认跨激活授权、完整工作执行和顶部入口仍有实现缺口。
+范围确定后的早期接口探针见 [contract-slice.md](contract-slice.md)。正式实现改用已有普通 A2A/Queue 唤醒；该路径与早期受控 memberSessions 不同，不需要新增长期 member-session 授权。
 
 ## Before / After
 
@@ -173,7 +173,7 @@ in_context_observability:
 
 ## 当前未完成
 
-- 真实壳体验方向确认；首版监听范围已按上述用户回答锁定。
+- 体验方向已确认；仍需在完整 Host 中实现并验收。
 - 体验稿当前只覆盖 v2；classic 顶部入口和完整 Host 内的集成验证仍待正式实现。
 - 发布 SDK 与 Host exact bytes 的组合验证；完整 Dot 服务源码定位仍未确认。
 - 真正插件包、自动识别/准入/执行/结果回流、重启恢复和非作者审查。
