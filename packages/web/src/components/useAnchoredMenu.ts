@@ -67,6 +67,8 @@ export function useAnchoredMenu(
   }, [open, anchor, menu, submenu]);
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    // Tab exits the whole hierarchy through its root menu.
+    if (submenu && event.key === 'Tab') return;
     if (event.key === 'Escape' || (submenu && event.key === 'ArrowLeft') || event.key === 'Tab') {
       close.current();
       anchor.current?.focus({ preventScroll: true });
