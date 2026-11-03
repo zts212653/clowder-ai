@@ -7,6 +7,17 @@ import { SecretScanner } from '../../dist/domains/memory/SecretScanner.js';
 
 const value = 'Kj8sLq2mNp9Rt4vWx7YzAbCdEfGhIjKlMnOpQrSt';
 const assignments = [
+  // zts212653, #1784 discussion_r4450208394: keep the declaration target through its type.
+  `const API_TOKEN:string="${value}"`,
+  ...[
+    'string | {provider: string}',
+    'string | {readonly provider?: string}',
+    'string | "absent"',
+    "string | 'absent'",
+    'string | {provider: {name: string; token?: string}}',
+  ].map((type) => `const API_TOKEN: ${type} = "${value}"`),
+  `export env:API_TOKEN=${value}`,
+  `local global:API_TOKEN=${value}`,
   // zts212653, #1784 review 5746137352: cmd boundaries and TS type context.
   `set "API_TOKEN=${value}" && echo ready`,
   `set "API_TOKEN=${value}" & echo ready`,
@@ -67,6 +78,9 @@ it('does not borrow a value from another assignment or a URL', () => {
     `api_key: https://example.com/docs/credentials?description=${value}`,
     `SET "description=${value}"`,
     `set "API_TOKEN=short"; SET "description=${value}"`,
+    `const description: "token" = "${value}"`,
+    `declare const API_TOKEN: "absent"; const description = "${value}"`,
+    `key: "label" description=${value}`,
   ]) {
     assert.deepEqual(SecretScanner.scan(line, 'fixture.md'), []);
   }

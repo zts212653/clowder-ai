@@ -56,6 +56,7 @@ function hasCredentialAssignment(line: string): boolean {
   let target = '';
   let validPrefix = true;
   let declaration = false;
+  let typedDeclaration = false;
   let annotation: { target: string; validPrefix: boolean } | undefined;
   let annotationDepth = 0;
   let inValue = false;
@@ -68,13 +69,20 @@ function hasCredentialAssignment(line: string): boolean {
   const counts = new Map<string, number>();
 
   for (let token = tokens.exec(text); token; token = tokens.exec(text)) {
-    const word = token[0];
+    let word = token[0];
+    // In a JS/TS declaration this colon starts a type, not a shell namespace.
+    if (typedDeclaration && /^[\w.-]+:[\w.-]+$/.test(word)) {
+      const colon = word.indexOf(':');
+      word = word.slice(0, colon);
+      tokens.lastIndex = token.index + colon;
+    }
     // A completed RHS followed by whitespace permits the next shell assignment.
     // Keep operators visible for chained JS assignments; do not skip arbitrary RHS spans.
     if (inValue && valueStarted && valueDepth === 0 && token.index > previousEnd && word !== ':' && word !== '=') {
       target = '';
       validPrefix = true;
       declaration = false;
+      typedDeclaration = false;
       annotation = undefined;
       inValue = false;
     }
@@ -85,20 +93,20 @@ function hasCredentialAssignment(line: string): boolean {
       valueStarted = true;
     }
     if (annotation) {
-      // Generic/tuple/function type punctuation belongs to the captured declaration.
-      if (word === '<' || word === '(' || word === '[') {
-        annotationDepth++;
-        continue;
-      }
-      if (annotationDepth > 0 && (word === '>' || word === ')' || word === ']')) {
-        annotationDepth--;
-        continue;
-      }
-      if (annotationDepth > 0 && (word === ',' || word === ':')) continue;
+      // Nested type bodies and arrows cannot end the captured declaration.
       if (word === '=' && text[tokens.lastIndex] === '>') {
         tokens.lastIndex++;
         continue;
       }
+      if (word === '<' || word === '(' || word === '[' || word === '{') {
+        annotationDepth++;
+        continue;
+      }
+      if (annotationDepth > 0 && (word === '>' || word === ')' || word === ']' || word === '}')) {
+        annotationDepth--;
+        continue;
+      }
+      if (annotationDepth > 0) continue;
     }
     if (word === ':' || word === '=') {
       if (annotation && word === ':') {
@@ -143,6 +151,7 @@ function hasCredentialAssignment(line: string): boolean {
         target = '';
         validPrefix = true;
         declaration = false;
+        typedDeclaration = false;
         annotation = undefined;
         inValue = true;
         valueStarted = false;
@@ -163,6 +172,7 @@ function hasCredentialAssignment(line: string): boolean {
       target = '';
       validPrefix = true;
       declaration = false;
+      typedDeclaration = false;
       annotation = undefined;
       if (word !== '(' && word !== ')') {
         inValue = false;
@@ -172,7 +182,7 @@ function hasCredentialAssignment(line: string): boolean {
     }
     if (annotation) {
       // A URL/path is not a TS type and must not borrow a later '=' value.
-      if (!/^[\w$<>&|.,?[\]]+$/.test(word)) annotation.validPrefix = false;
+      if (!typedDeclaration && !/^[\w$<>&|.,?[\]]+$/.test(word)) annotation.validPrefix = false;
       continue;
     }
     // Whitespace around a member dot does not start a second prose target.
@@ -183,6 +193,7 @@ function hasCredentialAssignment(line: string): boolean {
     if (DECLARATION_MODIFIERS.has(word) || /^set$/i.test(word) || (declaration && /^--?[A-Za-z][\w-]*$/.test(word))) {
       if (target) validPrefix = false;
       declaration = true;
+      typedDeclaration ||= /^(?:const|let|var|declare|readonly|private|protected|public|static)$/.test(word);
       continue;
     }
     if (target) validPrefix = false;
