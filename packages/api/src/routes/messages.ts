@@ -534,7 +534,9 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     log.debug({ threadId: resolvedThreadId, contentLen: content.length }, 'Resolving targets and intent');
     const bundleRoutingTargetCats = explicitBundleTargetCats ?? [];
     const explicitRoutingTargetCats = explicitMentionTargetCats
-      ? await router.resolveExplicitTargets(explicitMentionTargetCats, resolvedThreadId, { persist: false })
+      ? replayedSource
+        ? [...explicitMentionTargetCats]
+        : await router.resolveExplicitTargets(explicitMentionTargetCats, resolvedThreadId, { persist: false })
       : undefined;
     if (explicitMentionTargetCats && explicitRoutingTargetCats?.length !== explicitMentionTargetCats.length) {
       reply.status(400);
@@ -547,15 +549,20 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         ...(explicitRoutingTargetCats ? { explicitTargetCats: explicitRoutingTargetCats } : {}),
       });
       if (preview.requiresConfirmation) {
+        if (preview.targetCats.length === 0) {
+          return reply.code(409).send({
+            code: 'ROUTING_TARGET_UNAVAILABLE',
+            error: '指定角色当前不可用，且没有有效接替成员，请选择可用角色后再发送。',
+            ...(preview.routingWarnings ? { routingWarnings: preview.routingWarnings } : {}),
+          });
+        }
         const present = (catId: CatId) => ({
           catId,
           displayName: formatRosterLabel(catRegistry.getOrThrow(catId).config),
         });
         return reply.code(409).send({
           code: 'ROUTING_CONFIRMATION_REQUIRED',
-          error: preview.targetCats.length
-            ? '指定角色当前不可用，请确认实际接收者后再发送。'
-            : '指定角色当前不可用，且没有有效接替成员，请选择可用角色后再发送。',
+          error: '指定角色当前不可用，请确认实际接收者后再发送。',
           ...(preview.routingWarnings ? { routingWarnings: preview.routingWarnings } : {}),
           unavailable: (preview.unavailableTargets ?? []).map(present),
           targets: preview.targetCats.map(present),

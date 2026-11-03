@@ -854,15 +854,14 @@ export class InvocationQueue {
     if (!committedRow && !exactTargets && input.from.kind === 'system') input = this.resolveAdmissionInput(input);
     input = {
       ...input,
-      targetCats:
-        committedRow && !exactTargets
-          ? [...committedRow.targets]
-          : await this.resolveSendTargets(
-              input.targetCats,
-              input.threadId,
-              input.content,
-              exactTargets || input.allowConversationFallback === false,
-            ),
+      targetCats: committedRow
+        ? [...committedRow.targets]
+        : await this.resolveSendTargets(
+            input.targetCats,
+            input.threadId,
+            input.content,
+            exactTargets || input.allowConversationFallback === false,
+          ),
     };
     const enqueuedAt = this.nextEnqueuedAt();
     const result = await messageStore.appendWithQueueLedgerAdmission(
@@ -872,15 +871,19 @@ export class InvocationQueue {
         // Only an unchanged prose request may reuse its derived expansion and intent.
         const reuseProse = replaySource && reusesProseRouting(replaySource, message);
         const replay = reuseProse ? replayEntries?.find((entry) => entry.id === queueEntryId(messageId)) : undefined;
+        // Async policy already selected canonical recipients. Validate those identities
+        // at commit without interpreting a newly disabled successor as another predecessor.
+        const admissionInput =
+          committed || replaySource ? input : this.resolveAdmissionInput({ ...input, exactTargets: true });
         return this.createLedgerRows(
-          replay ? { ...input, intent: replay.execution.intent } : input,
+          replay ? { ...admissionInput, intent: replay.execution.intent } : admissionInput,
           messageId,
           enqueuedAt,
           messageId,
           replayEntries,
           reuseResolvedTargets,
           reuseProse ? (replay?.payload.requestedTargetCats ?? replaySource.mentions) : requestedTargetCats,
-          !replaySource,
+          false,
         );
       },
       this.ledgerStore,

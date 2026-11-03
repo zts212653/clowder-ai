@@ -212,3 +212,22 @@ fixture 改用无 mention 的普通正文，仍原样验证 Memory/Redis 的退�
 数据不能还原旧 hint/exact 模式；保持 Host 的同 source 首份 receipt 语义，不新增完整指纹
 冲突保证。没有首次接纳事实的已发布插件消息仍走首次解析。无新增持久字段、Store、缓存、
 迁移或路由系统；回退只撤销这段消费与聚焦测试。
+
+## 维护者 review：首次解析、canonical 校验与 receipt 重放
+
+来源：[精确 HEAD 4bf297962 的维护者审查](https://github.com/zts212653/clowder-ai/pull/1786#pullrequestreview-5743303109)。
+两项 P1 分别是 system send 在异步 policy 后再次投影 successor，以及已确认 HTTP 请求在
+重放核验前检查当前 availability；P2 是 no-target 返回不符合共享 schema 的空改发确认。
+
+实施边界：原请求仅消费一次一跳关系；async policy 返回的 canonical targets 在 atomic
+append callback 内只做 exact 校验，无效即零写入拒绝，不能再成为 predecessor。
+已提交 source 的 explicit targets 原样交存储核验，Queue 使用原 bound targets，完整
+Message envelope 和 requestedTargetCats 仍参与冲突检查；partial 不补回已消费目标，
+retired 不重建执行。无 successor 返回普通 ROUTING_TARGET_UNAVAILABLE 拒绝，保留
+cat_disabled 证据，Web 消费既有错误路径；不放宽确认 schema、不增加空集合确认。
+
+复用与最小范围：InvocationQueue.send、messages 的既有 preflight/拒绝出口，以及
+真实 Queue/HTTP、Memory/Redis 重开和 Web consumer 回归。无新持久字段、缓存、Store、
+迁移或平行 resolver；回退撤销本轮提交即可，保留原持久数据。
+验证先保存维护者反例的 RED，再同入口 GREEN，补当前确认、重放、private receipt、
+plugin、podcast 与 runtime catalog 回归；最终 HEAD 进入 CI 后再交非作者复审。
