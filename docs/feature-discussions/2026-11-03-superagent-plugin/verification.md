@@ -16,7 +16,7 @@ status: synthetic-preview-only
 - 分支：`feat/superagent-plugin-20261103`
 - 基线：`upstream/next@0fb68bc03455507836a0a35a706985a1ccc66058`
 - 保留原因：等待本线程的体验方向确认，后续沿同一任务实现；生命周期已登记 owner=codex。
-- 体验路径：`http://127.0.0.1:5212/dev/superagent-preview?shell=v2`；classic 将参数改为 `shell=classic`。
+- 体验路径：`http://127.0.0.1:5213/dev/superagent-preview?shell=v2`；classic 将参数改为 `shell=classic`。
 - UI 来自实际 AppShell、ThreadSidebar、WorldRail 和产品 token。顶部行只在 development 的此体验路由插入；生产路由为 notFound。
 - 三个会话、两个工作和所有消息均为固定合成样例。状态转移由显式样例操作驱动，没有调用模型或外部服务。
 - `SUPERAGENT_PREVIEW_FIXTURES=1` 只在当前 development 实例提供合成 `/api/session`，并关闭本地 API rewrites，防止预览自代理；其他 API 不伪造成功响应。
@@ -56,7 +56,7 @@ pnpm --filter @cat-cafe/web exec vitest run src/components/ThreadSidebar/__tests
 | 用途 | 供本线程确认新增交互方向，非功能验收环境 |
 | 程序目录 | 当前工位 `packages/web` |
 | 数据 | 仅工位内合成样例和浏览器本地设计状态，无用户数据副本 |
-| 端口 | 5212；没有另启 API 或 Redis |
+| 端口 | 5213；没有另启 API 或 Redis |
 | 托管 | `preview:process`，origin=detached；这只证明当前存活，不承诺跨 invocation 存活 |
 | 活跃记录 | `C:/Users/Administrator/.cat-cafe/preview-processes/2bade21c746123d8.json` |
 | 日志 | 同目录 `2bade21c746123d8.log` |
@@ -69,19 +69,19 @@ pnpm --filter @cat-cafe/web exec vitest run src/components/ThreadSidebar/__tests
 
 ```powershell
 $env:NODE_ENV = 'development'
-$env:API_SERVER_PORT = '5212'
-$env:NEXT_PUBLIC_API_URL = 'http://127.0.0.1:5212'
+$env:API_SERVER_PORT = '5213'
+$env:NEXT_PUBLIC_API_URL = 'http://127.0.0.1:5213'
 $env:SUPERAGENT_PREVIEW_FIXTURES = '1'
 $env:REDIS_URL = 'redis://127.0.0.1:6398'
 $env:NEXT_PUBLIC_CAT_CAFE_BUILD_REVISION = (git rev-parse HEAD)
-node scripts/preview-process.mjs start --port 5212 --cwd G:/AIwork/clowder-ai/worktrees/feat-superagent-plugin-20261103/packages/web --lifetime-seconds 7200 -- node node_modules/next/dist/bin/next dev --hostname 127.0.0.1 --port 5212
+node scripts/preview-process.mjs start --port 5213 --cwd G:/AIwork/clowder-ai/worktrees/feat-superagent-plugin-20261103/packages/web --lifetime-seconds 7200 -- node node_modules/next/dist/bin/next dev --hostname 127.0.0.1 --port 5213
 ```
 
 状态与停止使用同一 target cwd：
 
 ```powershell
-node scripts/preview-process.mjs status --port 5212 --cwd G:/AIwork/clowder-ai/worktrees/feat-superagent-plugin-20261103/packages/web --json
-node scripts/preview-process.mjs stop --port 5212 --cwd G:/AIwork/clowder-ai/worktrees/feat-superagent-plugin-20261103/packages/web --json
+node scripts/preview-process.mjs status --port 5213 --cwd G:/AIwork/clowder-ai/worktrees/feat-superagent-plugin-20261103/packages/web --json
+node scripts/preview-process.mjs stop --port 5213 --cwd G:/AIwork/clowder-ai/worktrees/feat-superagent-plugin-20261103/packages/web --json
 ```
 
 没有构建安装包，不存在版本号/EXE 哈希或真实插件发布证明。未做非作者产品审查、macOS 实跑、真实账户/模型执行、消息恢复或多人 Channel 验收。

@@ -13,7 +13,7 @@ page.on('pageerror', (error) => pageErrors.push(error.message));
 page.on('request', (request) => {
   if (request.url().includes('/api/')) apiRequests.add(request.url());
 });
-await page.goto('http://127.0.0.1:5212/dev/superagent-preview?shell=v2', {
+await page.goto('http://127.0.0.1:5213/dev/superagent-preview?shell=v2', {
   waitUntil: 'domcontentloaded',
   timeout: 90_000,
 });
@@ -72,13 +72,13 @@ assert.equal(await scope.evaluate((element) => element.getBoundingClientRect().w
 await page.screenshot({ path: `${evidence}/scope-mobile.png`, fullPage: true });
 await page.keyboard.press('Escape');
 await page.setViewportSize({ width: 1440, height: 1000 });
-await page.goto('http://127.0.0.1:5212/dev/superagent-preview?shell=classic', { waitUntil: 'domcontentloaded' });
+await page.goto('http://127.0.0.1:5213/dev/superagent-preview?shell=classic', { waitUntil: 'domcontentloaded' });
 await page.getByRole('heading', { name: '我的助手', exact: true }).waitFor();
 await page.getByRole('link', { name: /我的助手/ }).waitFor();
 await page.screenshot({ path: `${evidence}/classic.png`, fullPage: true });
 assert.deepEqual(pageErrors, []);
 assert.equal(
-  [...apiRequests].every((url) => new URL(url).port === '5212'),
+  [...apiRequests].every((url) => new URL(url).port === '5213'),
   true,
 );
 await writeFile(
