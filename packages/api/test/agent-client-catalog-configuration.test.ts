@@ -18,7 +18,7 @@ import { registerAgentClientLibraryRoutes } from '../src/routes/agent-client-lib
 
 // Run the actual production DI call, without executing index's service startup.
 const index = readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8').replaceAll('\r\n', '\n');
-const productionCall = index.match(/registerAgentClientLibraryRoutes\(app, \{[\s\S]*?\n  \}\);/)?.[0];
+const productionCall = index.match(/registerAgentClientLibraryRoutes\(app, \{[\s\S]*?\n {2}\}\);/)?.[0];
 assert.ok(productionCall, 'production must compose the member catalog route');
 const registerFromProduction = new Function(
   'registerAgentClientLibraryRoutes',
@@ -84,11 +84,11 @@ async function fixture(t: TestContext, permissionPolicy: 'deny' | 'auto_allow' |
     effective: () => manager.configuration.readActionInput(pluginId),
     execute: () =>
       resolveAgentClientLibrary({ declaration, admission, packageRoot: source, configuration: runtime.configuration }),
-    save: async () => {
+    save: async (saved = value) => {
       const current = (await runtime.inventoryStore.snapshot()).instances[0]!;
       await manager.configuration.configure(pluginId, current.pluginInstanceId, {
         expectedRevision: current.lifecycleRevision,
-        updates: [{ key: 'clients', value }],
+        updates: [{ key: 'clients', value: saved }],
       });
     },
     assertNoArchiveReads: () => {
@@ -127,13 +127,33 @@ for (const policy of [undefined, 'deny'] as const) {
   });
 }
 
-test('production catalog keeps a fixed client in its ordinary configuration form', async (t) => {
+test('production catalog preserves the fixed-client form and live configuration without archive reads', async (t) => {
   const h = await fixture(t, 'deny', true);
   assert.deepEqual(h.stored(), {});
   const library = (await h.read()).json().libraries[0];
-  assert.equal(library.configurationKey, null);
+  assert.equal(library.configurationKey, 'clients');
+  assert.equal(library.configurationMode, 'single');
+  assert.deepEqual(library.defaultClient, {
+    id: 'fixed-client',
+    name: 'Catalog configuration origin',
+    command: 'node',
+    startupArgs: [],
+    permissionPolicy: 'deny',
+  });
   assert.equal(library.clients[0].id, 'fixed-client');
   assert.equal(library.error, undefined);
   assert.equal((await h.execute())[0]?.acp.permissionPolicy, 'deny');
+  await h.save(JSON.stringify({ id: 'must-not-change' }));
+  const broken = (await h.read()).json().libraries[0];
+  assert.match(broken.error, /配置/);
+  assert.equal(broken.configurationMode, 'single');
+  assert.deepEqual(broken.defaultClient, library.defaultClient);
+  assert.deepEqual(broken.clients, []);
+  await h.save(JSON.stringify({ command: 'another-client', startupArgs: ['--acp'], permissionPolicy: 'auto_allow' }));
+  const recovered = (await h.read()).json().libraries[0];
+  assert.equal(recovered.error, undefined);
+  assert.equal(recovered.clients[0].id, 'fixed-client');
+  assert.equal((await h.execute())[0]?.acp.command, 'another-client');
+  assert.equal((await h.execute())[0]?.acp.permissionPolicy, 'auto_allow');
   h.assertNoArchiveReads();
 });

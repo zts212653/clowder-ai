@@ -209,6 +209,7 @@ test('EOF without done supplies a terminal errorCode', async () => {
     ['status', 'done'],
   );
   assert.equal(messages[1].errorCode, 'provider_stream_ended_without_done');
+  assert.equal(messages[1].providerTeardown, 'unconfirmed');
 });
 
 test('allowlisted DTOs, resume once, default fields, credentials are not logged', async () => {

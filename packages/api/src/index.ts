@@ -35,7 +35,7 @@ import { catRegistryMentionPatterns } from './infrastructure/connectors/mention-
 // 必须最先 import：Node 24.16 undici setTypeOfService EINVAL 崩溃防护（见文件头注释）
 import './settos-guard.js';
 import { createHash, randomUUID } from 'node:crypto';
-import { homedir, tmpdir } from 'node:os';
+import { arch, homedir, platform, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
@@ -65,11 +65,12 @@ import {
   getDefaultCatId,
   getRegisteredAcpConfig,
   isCatAvailable,
+  loadResolvedCatConfig,
   resolveRuntimeCatTemplatePath,
   toAllCatConfigs,
 } from './config/cat-config-loader.js';
 import { getCatModel } from './config/cat-models.js';
-import { reconcileCatRegistry } from './config/cat-registry-reconciliation.js';
+import { reconcileCatRegistry, registerCatalogSnapshot } from './config/cat-registry-reconciliation.js';
 import { resolveCatRuntimeAccount } from './config/cat-runtime-account.js';
 import { configEventBus } from './config/config-event-bus.js';
 import {
@@ -1837,10 +1838,11 @@ async function main(): Promise<void> {
   try {
     const templatePath = resolveRuntimeCatTemplatePath();
     const catConfig = bootstrapDefaultCatCatalog(templatePath);
-    const allConfigs = toAllCatConfigs(catConfig);
-    for (const [id, config] of Object.entries(allConfigs)) {
-      catRegistry.register(id, config, { configurationTemplatePath: templatePath });
-    }
+    registerCatalogSnapshot(
+      toAllCatConfigs(catConfig),
+      () => loadResolvedCatConfig(templatePath, { persistMigrations: false }),
+      templatePath,
+    );
     app.log.info(`[api] CatRegistry initialized: ${catRegistry.getAllIds().join(', ')}`);
   } catch (err) {
     app.log.error(`[api] Failed to load cat catalog — .cat-cafe/cat-catalog.json is required: ${String(err)}`);
@@ -2145,6 +2147,7 @@ async function main(): Promise<void> {
                       config,
                       effectiveModel: getCatModel(id),
                       acpConfig,
+                      resolveCurrentAcpConfig: () => getRegisteredAcpConfig(id, projectRoot),
                       poolRegistry: acpPoolRegistry,
                       log: app.log,
                       onUnavailable: (reason) => agentRegistry.markUnavailable(id, reason),
@@ -5363,6 +5366,14 @@ async function main(): Promise<void> {
       isCatAvailable,
     },
     threadDeepLinkUrl: createThreadDeepLinkUrl(frontendBaseUrl),
+    runtimeInfo: () => ({
+      version: runtimeDeploymentRevision ?? 'unknown',
+      platform: platform(),
+      architecture: arch(),
+      nodeVersion: process.versions.node,
+      projectRoot: resolveActiveProjectRoot(),
+      logDirectory: LOG_DIR_PATH,
+    }),
     threadProjections: {
       backlogStore,
       cats: {
@@ -5380,7 +5391,17 @@ async function main(): Promise<void> {
   const { registerConciergeDesktopRoutes } = await import('./routes/concierge-desktop.js');
   registerConciergeDesktopRoutes(app, { ownerUserId: privateUserId, desktop: pluginRuntime.ownerDesktop });
   const { registerPluginRuntimeShutdown } = await import('./routes/plugin-runtime-shutdown.js');
-  registerPluginRuntimeShutdown(app, pluginRuntime);
+  const initialPluginController = new AbortController();
+  let initialPluginInstallation = Promise.resolve();
+  registerPluginRuntimeShutdown(app, pluginRuntime, async () => {
+    initialPluginController.abort();
+    const results = await Promise.allSettled([
+      pluginRuntime.supervisor.stopAll('api_shutdown'),
+      initialPluginInstallation,
+    ]);
+    const failures = results.filter((result) => result.status === 'rejected').map((result) => result.reason);
+    if (failures.length) throw new AggregateError(failures, 'Initial plugin shutdown failed');
+  });
   const { OFFICIAL_BUNDLED_MANIFESTS } = await import('./domains/plugin/official-catalog.js');
   const { createHostOfficialPluginCatalog } = await import('./domains/plugin/manager/host-official-catalog.js');
   const { GitMarketplaceRepository } = await import(
@@ -5492,31 +5513,32 @@ async function main(): Promise<void> {
     deploymentId: sharedMcpDeploymentId(`http://127.0.0.1:${PORT}`),
   });
   const { prepareHostInitialPlugins } = await import('./domains/plugin/manager/initial-plugin-installation.js');
-  let initialPlugins: Awaited<ReturnType<typeof prepareHostInitialPlugins>> | undefined;
-  try {
-    initialPlugins = await prepareHostInitialPlugins({
-      runtime: pluginRuntime,
-      managerRuntime: pluginManagerRuntime,
-      catalog: pluginManagerCatalog,
-      onFailure: (pluginId, error) => app.log.warn({ pluginId, err: error }, '[api] Initial plugin setup pending'),
-    });
-  } catch (error) {
-    // Offline discovery must not prevent the Host from opening. The durable journal retries
-    // unfinished entries on restart; completed entries (including user uninstalls) stay completed.
-    app.log.warn({ err: error }, '[api] Initial plugin installation deferred until next startup');
-  }
-  // Released once app.listen resolves. A resumed desktop window's bridge calls
-  // app.inject; before Fastify has booted that breaks the remaining app.register
-  // calls (AVV_ERR_ROOT_PLG_BOOTED). Other plugins resume immediately.
+  // Discovery/downloads are optional startup work. Like desktop window
+  // recovery, they must wait for listening rather than hold HTTP readiness.
   let releaseHostListening = () => {};
   const hostListening = new Promise<void>((resolve) => {
     releaseHostListening = resolve;
   });
+  initialPluginInstallation = prepareHostInitialPlugins({
+    hostListening,
+    signal: initialPluginController.signal,
+    runtime: pluginRuntime,
+    managerRuntime: pluginManagerRuntime,
+    catalog: pluginManagerCatalog,
+    onFailure: (pluginId, error) => app.log.warn({ pluginId, err: error }, '[api] Initial plugin setup pending'),
+  })
+    .then((prepared) => prepared.activate())
+    .catch((error: unknown) => {
+      if (initialPluginController.signal.aborted) return;
+      // The existing journal retries interrupted installation on restart.
+      app.log.warn({ err: error }, '[api] Initial plugin installation deferred until next startup');
+    });
   const { pluginManagerUploadRoutes, registerPluginManagerRoutes } = await import('./routes/plugin-manager-routes.js');
   const { registerPluginMarketplaceRoutes } = await import('./routes/plugin-marketplace-routes.js');
   const { registerAgentClientLibraryRoutes } = await import('./routes/agent-client-library-routes.js');
   registerAgentClientLibraryRoutes(app, {
     inventory: pluginRuntime.inventoryStore,
+    packages: pluginRuntime.packages,
     registry: sessionImplementations,
     configuration: pluginRuntime.configuration,
   });
@@ -5766,7 +5788,12 @@ async function main(): Promise<void> {
     mediaDir: getDefaultConnectorMediaDir(process.env.CONNECTOR_MEDIA_DIR),
   });
   const { pluginWebhookForwardingRoutes } = await import('./routes/plugin/plugin-webhook-forwarding-routes.js');
-  await app.register(pluginWebhookForwardingRoutes, { webhooks: pluginRuntime.supervisor });
+  await app.register(pluginWebhookForwardingRoutes, {
+    webhooks: pluginRuntime.supervisor,
+    ui: pluginRuntime.supervisor.ui,
+  });
+  const { pluginUiRoutes } = await import('./routes/plugin/plugin-ui-routes.js');
+  await app.register(pluginUiRoutes, { ui: pluginRuntime.supervisor.ui });
 
   // F246/F313: one registry and one renderer projection. The F266 writer stays
   // fenced until an owner-backed resolver/dispatcher and a v1_active epoch are
@@ -6981,6 +7008,15 @@ async function main(): Promise<void> {
   // Session chain (F24)
   await app.register(sessionChainRoutes, {
     inspectLocalSession,
+    resolveImportExecutionBoundary: async (input) => {
+      const { captureImportedSessionBoundary } = await import(
+        './domains/cats/services/agents/invocation/import-execution-boundary.js'
+      );
+      return captureImportedSessionBoundary(router.getStrategyDeps().invocationDeps, {
+        ...input,
+        service: agentRegistry.get(input.catId),
+      });
+    },
     listLocalSessions,
     sessionChainStore,
     threadStore,
@@ -7536,7 +7572,6 @@ async function main(): Promise<void> {
           logger: app.log,
         });
         releaseHostListening();
-        await initialPlugins?.activate();
         return listening;
       },
       recover: async () => {

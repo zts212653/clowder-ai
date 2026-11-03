@@ -151,6 +151,7 @@ export interface DormantPluginRuntimeCompositionOptions {
   ) => Promise<DeliveryPresentationContext>;
   readonly taskStore?: ITaskStore;
   readonly members?: PluginMembersServices;
+  readonly runtimeInfo?: () => import('./host-surface/plugin-neutral-host.js').PluginRuntimeInfo;
   readonly memberSessions?: (
     scope: import('./member-sessions/types.js').MemberSessionScope,
     signal?: AbortSignal,
@@ -492,6 +493,7 @@ export function createDormantPluginRuntimeComposition(
         assertActivation,
         inventory: inventoryStore,
         ...(options.members ? { members: options.members } : {}),
+        ...(options.runtimeInfo ? { runtimeInfo: options.runtimeInfo } : {}),
         ...(options.memberSessions && options.threadOwnerUserId
           ? {
               memberSessions: (assertCurrent: () => Promise<void>) =>

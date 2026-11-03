@@ -12,6 +12,7 @@ export const agentClientMetadataSchema = z
           .nullable(),
         presets: z.array(agentClientProfileSchema).max(16),
         clients: z.array(agentClientProfileSchema.pick({ id: true, name: true }).partial({ name: true })).max(32),
+        defaultClient: agentClientProfileSchema.optional(),
       }),
     }),
     z.strictObject({ error: z.string().min(1).max(512) }),

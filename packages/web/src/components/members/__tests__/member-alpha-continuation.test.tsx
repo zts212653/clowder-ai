@@ -142,6 +142,7 @@ it.each([
 ] as const)('requires a selected account for page creation with %s', (clientId) => {
   const form = {
     ...initialState(null, null),
+    configurationSource: 'managed_account' as const,
     clientId,
     name: 'Member',
     roleDescription: 'Role',

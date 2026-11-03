@@ -2,12 +2,23 @@
 import { useEffect, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 
+export interface AgentClientProfile {
+  id: string;
+  name: string;
+  command: string;
+  startupArgs: string[];
+  bootstrapRoot?: string;
+  mcpWhitelist?: string[];
+  permissionPolicy?: 'deny' | 'auto_allow';
+}
 export interface AgentClientLibrary {
   pluginId: string;
   configurationKey: string | null;
+  configurationMode?: 'single';
+  defaultClient?: AgentClientProfile;
   clients: { id: string; name: string; ref: string; available: boolean }[];
   error?: string;
-  presets?: { id: string; name: string; command: string; startupArgs: string[] }[];
+  presets?: AgentClientProfile[];
 }
 export function useAgentClientLibraries(revision?: string, enabled = true) {
   const [libraries, setLibraries] = useState<AgentClientLibrary[]>([]);

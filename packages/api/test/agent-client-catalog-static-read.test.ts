@@ -80,6 +80,7 @@ async function fixture(t: TestContext, { count = 1, files = 0, declaration = fal
   const registry = new SessionImplementationRegistry();
   registerAgentClientLibraryRoutes(app, {
     inventory: store,
+    packages,
     registry,
     configuration: { readConfig: async () => JSON.stringify(fixed ? { permissionPolicy: 'deny' } : clients) },
   });
@@ -137,9 +138,10 @@ test('a fixed connection keeps its identity and ordinary config editor without r
   const scanned = t.mock.method(FilesystemVerifiedPluginPackageLocator.prototype, 'readInstalledStaticFile');
   for (const _read of [0, 1]) {
     const library = (await h.read()).json().libraries[0];
-    assert.equal(library.configurationKey, null, JSON.stringify(library));
+    assert.equal(library.configurationKey, 'clients', JSON.stringify(library));
+    assert.equal(library.configurationMode, 'single');
     assert.deepEqual(library.clients, [
-      { id: 'codeagent', name: 'codeagent', ref: 'plugin:local.catalog-0/codeagent', available: false },
+      { id: 'codeagent', name: 'Catalog 0', ref: 'plugin:local.catalog-0/codeagent', available: false },
     ]);
     assert.equal(library.error, undefined);
   }

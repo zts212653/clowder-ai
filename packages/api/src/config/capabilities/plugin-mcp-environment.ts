@@ -16,6 +16,15 @@ export function pluginMcpEnvironment(
 ): Record<string, string> | undefined {
   const env = server.env ? resolveEnvReferences(server.env) : undefined;
   if (server.source !== 'plugin' || !env?.CLOWDER_PLUGIN_ACTION_TOKEN) return env;
+  return bindPluginMcpEnvironment(env, invocationEnvironment);
+}
+
+/** Bind current transport credentials without re-expanding an admitted environment. */
+export function bindPluginMcpEnvironment(
+  environment: Record<string, string>,
+  invocationEnvironment: Readonly<Record<string, string>>,
+): Record<string, string> {
+  const env = { ...environment };
   for (const key of TRANSPORT_KEYS) {
     delete env[key];
     const value = invocationEnvironment[key];

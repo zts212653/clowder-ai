@@ -190,6 +190,8 @@ test('native control passes only the owner-bound durable binding and user identi
   assert.equal(res.statusCode, 200);
   assert.deepEqual(calls[0].nativeSessionBinding, binding);
   assert.equal(calls[0].userId, 'owner-1');
+  assert.equal(calls[0].frozenL0Input.catId, 'codex');
+  assert.equal(Object.isFrozen(calls[0].frozenL0Input), true);
 });
 
 test('a proven boundary remains cold when the control transport later fails', async (t) => {

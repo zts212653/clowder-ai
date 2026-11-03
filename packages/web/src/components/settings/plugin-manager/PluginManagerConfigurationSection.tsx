@@ -189,7 +189,7 @@ export function PluginManagerConfigurationSection({
         .flatMap((field) => {
           const value = validationValueOf(field);
           if (clientLibrary?.configurationKey === field.key) {
-            const error = agentClientConfigurationError(value);
+            const error = agentClientConfigurationError(value, clientLibrary.defaultClient);
             if (error) return [[field.key, error]];
           }
           if (fieldRequired(field) && !hasConfiguredValue(field)) {
@@ -219,6 +219,7 @@ export function PluginManagerConfigurationSection({
     variantProjection,
     variantActiveKeys,
     clientLibrary?.configurationKey,
+    clientLibrary?.defaultClient,
   ]);
 
   useEffect(() => {
@@ -286,6 +287,7 @@ export function PluginManagerConfigurationSection({
                       <PluginAgentClientsField
                         key={field.key}
                         presets={clientLibrary.presets}
+                        fixedClient={clientLibrary.defaultClient}
                         value={effectiveFieldValue(field, fieldValues)}
                         onChange={(value) => changeField(field.key, value)}
                       />

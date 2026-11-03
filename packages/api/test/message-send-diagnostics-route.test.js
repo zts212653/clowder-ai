@@ -47,7 +47,10 @@ for (const stage of ['participants', 'projectImport']) {
       messageStore: store,
       invocationQueue: new InvocationQueue(undefined, { resolveTargets: async () => ['opus'] }),
       socketManager: { emitToUser() {}, broadcastToRoom() {} },
-      router: { resolveTargetsAndIntent: async () => ({ targetCats: ['opus'], intent: { intent: 'execute' } }) },
+      router: {
+        previewTargets: async () => ({ targetCats: [], reason: { kind: 'default_cat' } }),
+        resolveTargetsAndIntent: async () => ({ targetCats: ['opus'], intent: { intent: 'execute' } }),
+      },
       threadStore: {
         get: async () => ({ id: 'diagnostic-thread', title: 'Diagnostic', createdBy: 'default-user', participants }),
         ...(stage === 'participants'

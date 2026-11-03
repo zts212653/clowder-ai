@@ -130,6 +130,29 @@ ${DEFAULT_TTL_SECONDS > 0 ? `redis.call('SET', KEYS[2], ARGV[1], 'EX', ${DEFAULT
 return 1
 `;
 
+const BIND_HOST_EXECUTION_BOUNDARY_LUA = `
+if redis.call('HGET', KEYS[1], 'status') ~= 'active' then return 0 end
+if redis.call('HEXISTS', KEYS[1], 'scopedInvocation') == 1 then return 0 end
+if redis.call('GET', KEYS[2]) ~= ARGV[1] then return 0 end
+local cli = redis.call('HGET', KEYS[1], 'cliSessionId') or ''
+if cli ~= ARGV[2] then return 0 end
+local previous = redis.call('HGET', KEYS[1], 'hostExecutionBoundary')
+if previous then
+  local old = cjson.decode(previous)
+  local next = cjson.decode(ARGV[3])
+  local oldCount = 0
+  local nextCount = 0
+  for _ in pairs(old) do oldCount = oldCount + 1 end
+  for _ in pairs(next) do nextCount = nextCount + 1 end
+  if oldCount ~= nextCount then return 0 end
+  for key, value in pairs(next) do if old[key] ~= value then return 0 end end
+else
+  if cli ~= '' then return 0 end
+  redis.call('HSET', KEYS[1], 'hostExecutionBoundary', ARGV[3], 'updatedAt', ARGV[4])
+end
+return 1
+`;
+
 const COMPARE_DELETE_LUA = `
 if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end
 return 0
@@ -469,6 +492,26 @@ export class RedisSessionChainStore implements ISessionChainStore {
       await this.redis.eval(COMPARE_DELETE_LUA, 1, SessionChainKeys.byCli(oldCli), id);
     }
     return this.get(id);
+  }
+
+  async bindHostExecutionBoundary(
+    id: string,
+    expectedCliSessionId: string | undefined,
+    boundary: NonNullable<SessionRecord['hostExecutionBoundary']>,
+  ): Promise<SessionRecord | null> {
+    const record = await this.get(id);
+    if (!record) return null;
+    const result = await this.redis.eval(
+      BIND_HOST_EXECUTION_BOUNDARY_LUA,
+      2,
+      SessionChainKeys.detail(id),
+      SessionChainKeys.activeOwner(record.userId, record.catId, record.threadId),
+      id,
+      expectedCliSessionId ?? '',
+      JSON.stringify(boundary),
+      String(Date.now()),
+    );
+    return Number(result) === 1 ? this.get(id) : null;
   }
 
   async bindCliSessionIdIfUnbound(id: string, cliSessionId: string): Promise<SessionRecord | null> {
@@ -1063,6 +1106,9 @@ export class RedisSessionChainStore implements ISessionChainStore {
       id: data.id!,
       ...(scopedInvocation ? { scopedInvocation: Object.freeze(scopedInvocation) } : {}),
       ...(data.cliSessionId ? { cliSessionId: data.cliSessionId } : {}),
+      ...(data.hostExecutionBoundary
+        ? { hostExecutionBoundary: JSON.parse(data.hostExecutionBoundary) as SessionRecord['hostExecutionBoundary'] }
+        : {}),
       ...(data.externalImport
         ? { externalImport: JSON.parse(data.externalImport) as SessionRecord['externalImport'] }
         : {}),

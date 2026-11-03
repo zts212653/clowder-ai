@@ -12,6 +12,7 @@ export interface InitialPluginSelection {
   readonly plugins: readonly { readonly pluginId: string; readonly enabled: boolean }[];
 }
 export interface InitialPluginInstallationOptions {
+  readonly signal?: AbortSignal;
   readonly statePath: string;
   readonly inventory: PluginInventoryStore;
   readonly catalog: OfficialPluginCatalogProvider;
@@ -45,6 +46,22 @@ interface Journal {
 interface InitialPluginPlan {
   readonly journal: Journal;
   readonly catalogSnapshot?: OfficialPluginCatalogSnapshot;
+}
+
+/** Only read-only waits may be abandoned; writes keep their receipt before shutdown drains them. */
+async function initialRead<T>(read: () => Promise<T>, signal?: AbortSignal) {
+  if (!signal) return read();
+  signal.throwIfAborted();
+  let onAbort = () => {};
+  const aborted = new Promise<never>((_resolve, reject) => {
+    onAbort = () => reject(signal.reason);
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+  try {
+    return await Promise.race([read(), aborted]);
+  } finally {
+    signal.removeEventListener('abort', onAbort);
+  }
 }
 
 export function parseInitialPluginSelection(value: unknown): InitialPluginSelection {
@@ -95,17 +112,19 @@ async function saveJournal(statePath: string, journal: Journal): Promise<void> {
   await rename(temporary, statePath);
 }
 async function begin(options: InitialPluginInstallationOptions): Promise<InitialPluginPlan> {
+  options.signal?.throwIfAborted();
   const existing = await loadJournal(options.statePath);
   if (existing) return { journal: existing };
   const inventory = await options.inventory.snapshot();
   // Includes uninstall tombstones: existing users are never treated as a fresh Host.
   if (inventory.instances.length || inventory.packages.length) {
+    options.signal?.throwIfAborted();
     const journal: Journal = { schemaVersion: 1, plugins: [] };
     await saveJournal(options.statePath, journal);
     return { journal };
   }
-  const selection = parseInitialPluginSelection(await options.loadSelection());
-  const catalog = await options.catalog.snapshot();
+  const selection = parseInitialPluginSelection(await initialRead(options.loadSelection, options.signal));
+  const catalog = await initialRead(() => options.catalog.snapshot(), options.signal);
   if (catalog.status !== 'fresh') throw new Error('Initial installation requires a current catalog');
   const plugins = selection.plugins.map((p) => {
     const e = catalog.entries.find((e) => e.pluginId === p.pluginId);
@@ -120,6 +139,7 @@ async function begin(options: InitialPluginInstallationOptions): Promise<Initial
     };
   });
   const journal: Journal = { schemaVersion: 1, plugins };
+  options.signal?.throwIfAborted();
   await saveJournal(options.statePath, journal);
   return { journal, catalogSnapshot: catalog };
 }
@@ -129,14 +149,17 @@ async function prepareInstance(
   p: InitialPluginRecord,
   catalogSnapshot?: OfficialPluginCatalogSnapshot,
 ): Promise<void> {
+  options.signal?.throwIfAborted();
   if (!p.instanceId) {
     const history = (await options.inventory.snapshot()).instances.filter((i) => i.pluginId === p.pluginId);
     // A user install/uninstall (or admission interrupted before its receipt was saved) wins.
     if (history.length) {
+      options.signal?.throwIfAborted();
       p.done = true;
       await saveJournal(options.statePath, journal);
       return;
     }
+    options.signal?.throwIfAborted();
     const installed = await installInitialRelease(options, p, catalogSnapshot);
     const instance = (await options.inventory.snapshot()).instances.find(
       (i) => i.pluginInstanceId === installed.pluginInstanceId,
@@ -148,6 +171,7 @@ async function prepareInstance(
     await saveJournal(options.statePath, journal);
   }
   const before = (await options.inventory.snapshot()).instances.find((i) => i.pluginInstanceId === p.instanceId);
+  options.signal?.throwIfAborted();
   if (before?.lifecycleState !== 'installed' || before.lifecycleRevision !== p.revision) {
     p.done = true;
   } else {
@@ -188,6 +212,7 @@ async function installPending(options: InitialPluginInstallationOptions, plan: I
     try {
       await prepareInstance(options, journal, p, catalogSnapshot);
     } catch (error) {
+      options.signal?.throwIfAborted();
       options.onFailure(p.pluginId, error);
     }
   }
@@ -198,12 +223,14 @@ async function operationCatalogSnapshot(
 ): Promise<OfficialPluginCatalogSnapshot> {
   if (plan.catalogSnapshot) return plan.catalogSnapshot;
   try {
-    return await options.catalog.snapshot();
+    return await initialRead(() => options.catalog.snapshot(), options.signal);
   } catch {
+    options.signal?.throwIfAborted();
     return { entries: [], status: 'degraded', checkedAt: null, errorCode: 'CATALOG_FETCH_FAILED' };
   }
 }
 async function activateInstalled(options: InitialPluginInstallationOptions, plan: InitialPluginPlan): Promise<void> {
+  options.signal?.throwIfAborted();
   const { journal } = plan;
   if (!journal.plugins.some((p) => !p.done && p.prepared && p.instanceId && p.revision !== undefined)) return;
   const catalogSnapshot = await operationCatalogSnapshot(options, plan);
@@ -211,12 +238,14 @@ async function activateInstalled(options: InitialPluginInstallationOptions, plan
     if (p.done || !p.prepared || !p.instanceId || p.revision === undefined) continue;
     try {
       const instance = (await options.inventory.snapshot()).instances.find((i) => i.pluginInstanceId === p.instanceId);
+      options.signal?.throwIfAborted();
       // Any user/lifecycle change wins over the initial default, including uninstall.
       if (instance?.lifecycleState === 'installed' && instance.lifecycleRevision === p.revision)
         await options.activate(p.pluginId, p.instanceId, p.revision, catalogSnapshot);
       p.done = true;
       await saveJournal(options.statePath, journal);
     } catch (error) {
+      options.signal?.throwIfAborted();
       options.onFailure(p.pluginId, error);
     }
   }
@@ -233,16 +262,20 @@ export async function prepareInitialPluginInstallation(options: InitialPluginIns
 }
 
 /** The same Manager installation/configuration/lifecycle used by explicit owner operations. */
-export function prepareHostInitialPlugins(options: {
+export async function prepareHostInitialPlugins(options: {
+  readonly hostListening: Promise<void>;
+  readonly signal: AbortSignal;
   readonly runtime: DormantPluginRuntimeComposition;
   readonly managerRuntime: PluginManagerRuntimeComposition;
   readonly catalog: OfficialPluginCatalogProvider;
   readonly loadSelection?: () => Promise<unknown>;
   readonly onFailure: InitialPluginInstallationOptions['onFailure'];
 }) {
+  await initialRead(() => options.hostListening, options.signal);
   const { runtime, managerRuntime } = options;
   let managerCatalogSnapshot: ReturnType<typeof managerRuntime.officialCatalog.projectSnapshot> | undefined;
   return prepareInitialPluginInstallation({
+    signal: options.signal,
     statePath: join(dirname(runtime.paths.inventorySnapshotPath), PLUGIN_HOST_ENTRIES.initialInstallation),
     inventory: runtime.inventoryStore,
     catalog: options.catalog,

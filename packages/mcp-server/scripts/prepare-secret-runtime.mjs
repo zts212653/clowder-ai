@@ -49,6 +49,8 @@ function collect(file) {
   if (!inside(resolve(repository, 'scripts'), path) && !sharedDefaults.has(file))
     throw new Error(`Secret runtime input is outside its declared source closure: ${file}`);
   let code = readFileSync(path, 'utf8');
+  // DSH admission pins the reviewed LF bytes, including in an existing CRLF checkout.
+  if (file === 'scripts/secret-dsh-plugin.mjs') code = code.replaceAll('\r\n', '\n');
   const imports = file.endsWith('.json') ? [] : ts.preProcessFile(code, true, true).importedFiles;
   inputs.set(file, code);
   for (const dependency of imports) {

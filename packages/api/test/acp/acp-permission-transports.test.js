@@ -16,7 +16,13 @@ const request = (sessionId = 'session-a', choices = options) => ({
 
 // Exercise the real wire handlers without launching a process or HTTP listener.
 function wire(Client, config = {}) {
-  const client = new Client({ command: 'unused', args: [], cwd: process.cwd(), ...config });
+  const client = new Client({
+    command: 'unused',
+    args: [],
+    cwd: process.cwd(),
+    defaultPermissionDecision: 'allow',
+    ...config,
+  });
   const replies = [];
   if (Client === AcpClient) client.child = { stdin: { write: (line) => replies.push(JSON.parse(line)) } };
   else
@@ -35,6 +41,10 @@ function wire(Client, config = {}) {
 }
 
 for (const Client of [AcpClient, AcpHttpStreamClient]) {
+  test(`${Client.name}: no configured permission policy rejects the offered operation`, async () => {
+    const f = wire(Client, { defaultPermissionDecision: undefined });
+    assert.deepEqual((await f.send()).result, { outcome: { outcome: 'selected', optionId: 'no' } });
+  });
   test(`${Client.name}: explicit reject selects the offered reject option`, async () => {
     const f = wire(Client, { defaultPermissionDecision: 'reject' });
     assert.deepEqual((await f.send()).result, { outcome: { outcome: 'selected', optionId: 'no' } });

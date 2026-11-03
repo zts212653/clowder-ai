@@ -33,6 +33,7 @@ function fixture(events, expected) {
   const completions = [];
   const targetCats = [...new Set(events.map((event) => event.catId))];
   const router = {
+    previewTargets: async () => ({ targetCats: [], reason: { kind: 'default_cat' } }),
     resolveTargetsAndIntent: async () => ({ targetCats, intent: { intent: 'execute' } }),
     resolveExplicitTargets: async (targets) => [...targets],
     resolveConversationTargetsAtAdmission: async (targets) => (targets.length ? [...targets] : targetCats),

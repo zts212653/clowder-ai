@@ -81,6 +81,8 @@ export async function* invokeKimiMember(input: {
       userId,
       projection: 'scoped-member',
       runtimeModel: account.model,
+      frozenInput: options.frozenL0Input,
+      requireFrozenInput: true,
     });
     await assertSource();
     const launch = await prepareKimiMemberLaunch({ native: input.native, account, identity, member });

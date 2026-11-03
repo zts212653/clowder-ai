@@ -40,6 +40,8 @@ export interface RoutingPreviewResponse {
   reason: RoutingPreviewReason;
   /** Known recipients skipped because they cannot run, never because they are busy. */
   unavailableTargets?: CatId[];
+  /** A named recipient is unavailable; public admission requires human approval of the replacement. */
+  requiresConfirmation?: boolean;
 }
 
 export const routingPreviewResponseSchema: z.ZodType<RoutingPreviewResponse, z.ZodTypeDef, unknown> = z
@@ -54,5 +56,17 @@ export const routingPreviewResponseSchema: z.ZodType<RoutingPreviewResponse, z.Z
       .max(50)
       .transform((ids) => ids as CatId[])
       .optional(),
+    requiresConfirmation: z.boolean().optional(),
+  })
+  .strict();
+
+const routingConfirmationMemberSchema = z.object({ catId: z.string().min(1), displayName: z.string().min(1) }).strict();
+
+export const routingConfirmationRequiredSchema = z
+  .object({
+    code: z.literal('ROUTING_CONFIRMATION_REQUIRED'),
+    error: z.string(),
+    unavailable: z.array(routingConfirmationMemberSchema).min(1).max(50),
+    targets: z.array(routingConfirmationMemberSchema).min(1).max(50),
   })
   .strict();

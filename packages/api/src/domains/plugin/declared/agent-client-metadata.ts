@@ -31,7 +31,12 @@ export async function readAgentClientMetadata(located: VerifiedPluginPackage): P
   return {
     catalog:
       'id' in declaration
-        ? { configurationKey: null, presets: [], clients: [{ id: declaration.id }] }
+        ? {
+            configurationKey: declaration.configurationKey ?? null,
+            presets: [],
+            clients: [{ id: declaration.id }],
+            defaultClient: { id: declaration.id, name: located.manifest.name, ...declaration.acp },
+          }
         : { configurationKey: declaration.configurationKey, presets: declaration.presets ?? [], clients: [] },
   };
 }

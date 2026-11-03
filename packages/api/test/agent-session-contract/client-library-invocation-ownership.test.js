@@ -3,7 +3,11 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { invokeSingleCat } from '../../dist/domains/cats/services/agents/invocation/invoke-single-cat.js';
+import { catRegistry } from '@cat-cafe/shared';
+import {
+  invokeSingleCat,
+  prepareInvocationExecutionBinding,
+} from '../../dist/domains/cats/services/agents/invocation/invoke-single-cat.js';
 import { AgentRegistry } from '../../dist/domains/cats/services/agents/registry/AgentRegistry.js';
 import { poolFactory } from './client-library-home-fixture.js';
 
@@ -42,6 +46,29 @@ function protocol(pool) {
   });
   return state;
 }
+function declareMemberClient(t, clientId) {
+  const all = catRegistry.getAllConfigs();
+  catRegistry.reset();
+  Object.entries(all).forEach(([id, config]) =>
+    catRegistry.register(id, {
+      ...config,
+      ...(id === 'codex'
+        ? {
+            clientId,
+            configurationSource: 'native_tool',
+            accountRef: undefined,
+            mcpSupport: false,
+            defaultModel: 'fixture',
+          }
+        : {}),
+    }),
+  );
+  t.after(() => {
+    catRegistry.reset();
+    Object.entries(all).forEach(([id, config]) => catRegistry.register(id, config));
+  });
+}
+
 async function fixture(t) {
   const root = await mkdtemp(join(tmpdir(), 'home-invocation-pin-'));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -70,6 +97,7 @@ for (const replacement of [false, true]) {
     assert.equal(
       messages.some((message) => message.type === 'error'),
       false,
+      messages.find((message) => message.type === 'error')?.error,
     );
     assert.ok(messages.some((message) => message.type === 'text' && message.content === 'pinned old generation'));
     assert.equal(client.launches, 1);
@@ -105,6 +133,7 @@ test('returning a pinned iterator before its first next releases without launchi
 });
 
 test('actual invokeSingleCat policy refusal releases a preflight pin before any provider iterator', async (t) => {
+  declareMemberClient(t, 'acp');
   const h = await fixture(t);
   const view = h.service.forInvocation?.() ?? h.service;
   await h.agents.reset();
@@ -123,4 +152,17 @@ test('actual invokeSingleCat policy refusal releases a preflight pin before any 
     }
   }, /read.only|policy/i);
   assert.equal(h.pool.healthTimer, null);
+});
+
+test('the production ACP factory identity rejects a stale member client before invocation', async (t) => {
+  declareMemberClient(t, 'openai');
+  const h = await fixture(t);
+  await assert.rejects(
+    prepareInvocationExecutionBinding(
+      { threadStore: null, apiUrl: 'http://127.0.0.1:13004' },
+      { catId: 'codex', threadId: 'factory-identity', userId: 'owner', service: h.service },
+    ),
+    (error) => error.statusCode === 409 && /execution_client_changed/.test(error.message),
+  );
+  await h.agents.reset();
 });

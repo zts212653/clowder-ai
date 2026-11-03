@@ -16,6 +16,7 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { L0_SECTION_TEMPLATES } from '@cat-cafe/shared/l0-input-capture';
 import type { ConventionGraphAdapter } from './CoverageSearchService.js';
 
 // ── L0 Compiler Parsing (aligned with l0-prompt-builder extractor) ──
@@ -70,9 +71,22 @@ function parseL0CompilerForAdapter(content: string): L0ParseResult | null {
     }
   }
 
+  // The invocation CLI now delegates input capture to the shared owner.
+  const sharedCapture = /\bfrom\s+['"]@cat-cafe\/shared\/l0-input-capture['"]/.test(content);
+  if (!foundSections && sharedCapture) {
+    sections.push(
+      ...Object.entries(L0_SECTION_TEMPLATES).map(([templateVar, name]) => ({
+        name,
+        kind: 'l0_section',
+        templateVar,
+      })),
+    );
+    foundSections = true;
+  }
+
   // The shared dossier module is the stable carrier. Individual helpers may
   // narrow as L0 projections evolve (for example RosterSummary → RoutingNote).
-  if (/\bfrom\s+['"]@cat-cafe\/shared\/dossier['"]/.test(content)) {
+  if (sharedCapture || /\bfrom\s+['"]@cat-cafe\/shared\/dossier['"]/.test(content)) {
     dataSources.push({
       name: 'cat-dossier',
       kind: 'l0_data_source',

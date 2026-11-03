@@ -60,6 +60,7 @@ async function fixture({ reject = false, beforeAppend, strict = true, queue = fa
     invocationRecordStore: new InvocationRecordStore(),
     socketManager: { broadcastAgentMessage() {}, broadcastToRoom() {}, emitToUser() {} },
     router: {
+      previewTargets: async () => ({ targetCats: [], reason: { kind: 'default_cat' } }),
       resolveTargetsAndIntent: async () => ({ targetCats: reject ? [] : ['opus'], intent: { intent: 'execute' } }),
       routeExecution: async function* (...args) {
         dispatches.push(args);

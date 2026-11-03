@@ -85,18 +85,22 @@ export function parseAgentProviderDeclaration(
 }
 
 /** A single client's owner configuration may override launch fields, never its identity or transport. */
+export function readAgentProviderConfiguration(raw: unknown, acp: AgentProviderDeclaration['acp']) {
+  if (typeof raw !== 'string' || Buffer.byteLength(raw) > 65536) throw new Error('客户端配置须为 64 KiB 以内的 JSON');
+  const overrides = acpSchema.partial().parse(JSON.parse(raw));
+  if (acp.permissionPolicy === 'auto_allow' && overrides.permissionPolicy === undefined)
+    throw new Error('ACP 权限自动允许需要 owner 显式保存选择，不能继承插件声明');
+  return { ...acp, ...overrides };
+}
+
 export function parseAgentProviderConfiguration(
   raw: unknown,
   declaration: AgentProviderDeclaration,
   ctx: { packageRoot: string },
 ): { ok: true; declaration: AgentProviderDeclaration } | { ok: false; reason: string } {
   try {
-    if (typeof raw !== 'string' || Buffer.byteLength(raw) > 65536) throw new Error('客户端配置须为 64 KiB 以内的 JSON');
-    const overrides = acpSchema.partial().parse(JSON.parse(raw));
-    if (declaration.acp.permissionPolicy === 'auto_allow' && overrides.permissionPolicy === undefined)
-      throw new Error('ACP 权限自动允许需要 owner 显式保存选择，不能继承插件声明');
     const parsed = parseAgentProviderDeclaration(
-      { id: declaration.id, transport: 'acp', acp: { ...declaration.acp, ...overrides } },
+      { id: declaration.id, transport: 'acp', acp: readAgentProviderConfiguration(raw, declaration.acp) },
       ctx,
     );
     if (!parsed.ok) return { ok: false, reason: parsed.reason };
