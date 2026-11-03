@@ -231,7 +231,10 @@ describe('thread quick deletion and confirmation preference', () => {
     expect(button('确认删除').disabled).toBe(false);
     await act(async () => button('确认删除').click());
     await harness.flush();
-    expect(mockApiFetch).toHaveBeenCalledWith('/api/threads/system?force=true', { method: 'DELETE' });
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/threads/system?force=true', {
+      method: 'DELETE',
+      signal: expect.any(AbortSignal),
+    });
   });
 
   it('reports a successful deletion separately from a failed remember write', async () => {

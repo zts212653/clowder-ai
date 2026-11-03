@@ -129,4 +129,37 @@ describe('thread deletion identity boundary', () => {
     expect(mockPush).not.toHaveBeenCalled();
     expect(addToastMock).not.toHaveBeenCalled();
   });
+
+  it.each([
+    'sidebar',
+    'trash',
+  ])('does not continue old UI effects after identity changes during %s refresh', async (stage) => {
+    await harness.render();
+    act(() => harness.container.querySelector<HTMLButtonElement>('[data-testid="trash-bin-toggle"]')!.click());
+    await harness.flush();
+    const originalFetch = mockApiFetch.getMockImplementation()!;
+    const captured = Promise.withResolvers<void>();
+    const delivery = Promise.withResolvers<Response>();
+    const blockedPath = stage === 'sidebar' ? '/api/threads?view=sidebar' : '/api/threads?deleted=true';
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === blockedPath) {
+        captured.resolve();
+        return delivery.promise;
+      }
+      return originalFetch(path, init);
+    });
+    act(() => quickDelete().click());
+    await act(async () => confirm().click());
+    await captured.promise;
+    const trashReadsBeforeChange = mockApiFetch.mock.calls.filter(
+      ([path]) => path === '/api/threads?deleted=true',
+    ).length;
+    act(() => observeApiSessionOwner('another-user'));
+    await act(async () => delivery.resolve(Response.json({ threads: [] })));
+    await harness.flush();
+    expect(addToastMock).not.toHaveBeenCalled();
+    expect(mockApiFetch.mock.calls.filter(([path]) => path === '/api/threads?deleted=true')).toHaveLength(
+      trashReadsBeforeChange,
+    );
+  });
 });

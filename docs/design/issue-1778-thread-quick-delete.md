@@ -3,6 +3,7 @@ feature_ids: []
 topics: [thread-sidebar, deletion-confirmation, windows-desktop, user-journey]
 doc_kind: design
 created: 2026-11-02
+updated: 2026-11-03
 tips_exempt: 行尾入口、确认复选框和个人设置开关均在原操作位置自解释，不新增需要单独提示才能发现的能力入口。
 ---
 
@@ -10,9 +11,9 @@ tips_exempt: 行尾入口、确认复选框和个人设置开关均在原操作�
 
 来源：[Issue #1778](https://github.com/zts212653/clowder-ai/issues/1778) 及当前聊天中的三张现状/参考截图。用户要求先看基于项目现有界面的效果图、用户旅程及技术方案。
 
-状态：用户已接受设计并授权实现；这表示需求方确认，不代表维护者已正式接纳。产品实现与初轮验证已完成，维护者随后要求修复确认草稿跨身份延续的 P1，本次补充修复及回归；正式复审、triage 与合入结论以 [PR #1780](https://github.com/zts212653/clowder-ai/pull/1780) 为准，目标为 `next`，尚未合入或发布。早期原型与产品验证分别记录。
+状态：用户已接受设计并授权实现；这表示需求方确认，不代表维护者已正式接纳。初次草稿隔离修复后，维护者又复现了认证等待时跨身份发送 DELETE 的 P1，以及读取完成后显示旧提示的 P2；本轮补充修复及回归，仍待维护者复审。Issue 已有 `triaged`，仍带 `needs-maintainer-decision`；正式接纳与合入结论以 [PR #1780](https://github.com/zts212653/clowder-ai/pull/1780) 为准，尚未合入或发布。早期原型与产品验证分别记录。
 
-设计与实施起始基线：`zts212653/clowder-ai` 的远端 `next@b926134a02dec551d857d378fc0519ebe66dc090`。维护者 P1 修复后同步了 `next@917120d55bb5bf618a3cc49c0749d5f5172ace46`。实施分支 `feat/issue-1778-quick-delete`，复用原设计工位。runtime 仍保持原检出与构建。
+设计与实施起始基线：`zts212653/clowder-ai` 的远端 `next@b926134a02dec551d857d378fc0519ebe66dc090`。后续同步了 `next@917120d55bb5bf618a3cc49c0749d5f5172ace46`，本轮复审修复又同步至 `next@1016aa7a3`。实施分支 `feat/issue-1778-quick-delete`，复用原设计工位。runtime 仍保持原检出与构建。
 
 ## 1. 设计判断与复用依据
 
@@ -125,6 +126,8 @@ tips_exempt: 行尾入口、确认复选框和个人设置开关均在原操作�
 - 不写 `.env`、实例共享配置或其他用户的偏好，不提供跨设备同步。若桌面实例地址发生迁移，首版回退为默认确认；该迁移不承诺自动继承“不再提醒”。
 - 弹窗的勾选状态只是本次局部草稿。普通会话软删除成功后才写入持久偏好；设置页开关则独立保存并即时通知侧栏。
 - 草稿与偏好写入回调绑定现有认证身份快照。身份变化会关闭旧确认框；即使切回原用户，旧草稿也不复活。请求过程中身份变化时，旧响应不保存偏好或导航当前用户。
+- 每次删除订阅同一身份源，变化时取消该操作的 `AbortSignal`；信号传给现有 `apiFetch`，覆盖认证等待、401 重试与实际发送。正常的同用户刷新仍允许继续。身份变为未知或变化后，用户需在新身份下重新发起操作；不自动重放旧确认。
+- 身份约束持续到列表和回收站读取完成；每次 await 后检查取消状态，旧操作不能继续发起回收站刷新或显示旧标题提示。不改写全局 Sidebar 数据体系。
 
 原型里的偏好仅保存在组件内存，用于评审旅程，不构成这部分持久化实现的证据。
 
@@ -136,6 +139,7 @@ tips_exempt: 行尾入口、确认复选框和个人设置开关均在原操作�
 | `deleteDraft` | 现有侧栏 | 请求确认时捕获目标与身份；取消、确认或身份变化后失效 |
 | 本次“不再提醒”勾选 | 确认框 | 打开时为 false；随本次弹窗销毁 |
 | 请求中会话 ID | 删除执行逻辑 | 请求开始到结果处理结束；只供按钮处理中使用 |
+| 操作身份订阅 / AbortController | 删除执行逻辑 | 发请求前创建；身份变化同步取消；请求及结果处理结束后在 finally 解除订阅 |
 | 软删除标记与回收站 | 现有后端 ThreadStore | 原有删除/恢复流程；不在客户端另存一份会话事实 |
 
 ### 4.4 建议改动文件
@@ -189,11 +193,11 @@ pnpm biome check <本次修改文件列表>
 ### 可重复检查
 
 ```powershell
-# 组件行为、身份边界、原确认流程、行操作、设置语言、文案、GET 协调与快照：55/55
+# 组件行为、身份边界、原确认流程、行操作、设置语言、文案、GET 协调与快照：57/57
 pnpm --filter @cat-cafe/web exec vitest run src/components/ThreadSidebar/__tests__/thread-delete-identity.test.tsx src/components/ThreadSidebar/__tests__/thread-quick-delete.test.tsx src/components/ThreadSidebar/__tests__/thread-delete-confirm.test.ts src/components/__tests__/thread-item-actions.test.tsx src/components/settings/__tests__/settings-shell-v2-language.test.tsx src/components/shell/__tests__/shell-copy-namespaces.test.ts src/utils/__tests__/api-client-get-coordination.test.ts src/utils/__tests__/sidebar-thread-snapshot-generation.test.ts --maxWorkers=2
 
-# 浏览器完整组合旅程：1/1
-pnpm --filter @cat-cafe/api exec node --import tsx --test --test-concurrency=1 ../web/test/browser/thread-quick-delete.test.mjs
+# packages/api 下执行；浏览器完整旅程及认证边界：4/4
+node ../web/scripts/run-with-node-env-test.mjs node --import tsx --test --test-concurrency=1 ../web/test/browser/thread-quick-delete.test.mjs
 
 # packages/api 下执行；既有软删除/恢复/运行中保护：19/19
 node scripts/with-test-home.mjs --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 node --import ./test/helpers/setup-cat-registry.js --test --test-concurrency=1 --test-name-pattern='DELETE|restore|deleted=true|soft-delet' test/threads-endpoint.test.js
@@ -216,6 +220,15 @@ node scripts/with-test-home.mjs --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 
 初轮非作者 `review_quick_delete` 审查覆盖同一实现提交，发现的 P2 已修复，当轮未发现其他 P1/P2；独立行为检查 24/24、协调/快照检查 12/12 通过。该实现提交的远端 CI 为 19 项成功、1 项条件跳过。之后维护者在 `5e8d703` 上补充复现身份草稿 P1，因此初轮结论不代表最终批准。
 
 维护者 P1 修复：新增 5 项生产侧栏/删除 hook 回归，先观察到草稿未关闭、旧回调仍发送 DELETE、旧请求保存偏好的 RED，再验证 GREEN。覆盖换用户、身份暂未确定、A→B→A、保留旧确认回调、请求中换用户；相关前端检查合计 55/55。浏览器组合旅程同时通过真实 `refreshApiSession()` 切换认证身份，核对弹窗关闭、未发送删除/未保存偏好、切回原用户后重新勾选才能记住。当前修复尚待维护者复审；没有为此重建或重跑 Windows 安装程序。
+
+### 复审补充（2026-11-03）
+
+上一轮只在 hook 入口和 DELETE 响应后核验，遗漏了认证等待与后续读取两个异步边界。现有共享认证流程已有 AbortSignal 取消支持，本次在操作侧复用它，不新增 API 选项、后端接口或身份状态源。
+
+- 生产浏览器 RED：暂缓新身份 `/api/session` 响应，在身份仍显示旧用户时确认；观察到 1 次新身份 DELETE。401 场景观察到第 2 次 DELETE 被新身份执行；同用户刷新对照保持通过。
+- 组件 RED：DELETE 成功后分别暂停列表 / 回收站 GET，换用户再交付当前用户列表，均观察到含旧会话标题的成功提示。
+- GREEN：相关组件检查 57/57；生产浏览器 4/4，包含完整清理恢复旅程、认证等待时换用户、同用户刷新、401 重试。换用户后零跨身份 DELETE、无旧偏好写入，原历史恢复仍可读。测试夹具的启动与真实 routes 接线提为共享 fixture，避免增加场景后单文件超过 350 行。
+- 边界：仍需维护者对新 HEAD 复审与当前 CI；本轮没有重建 Windows 包、运行安装器、改动 runtime 或连接用户数据。旧包记录保持原提交范围。
 
 早期设计原型有独立的 13 项演示检查，不能替代产品证据。
 

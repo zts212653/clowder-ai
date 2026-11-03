@@ -42,11 +42,15 @@ export function useThreadDeletion({
       pending.current.add(thread.id);
       setDeletingIds(new Set(pending.current));
       setDeleteDraft(null);
+      const controller = new AbortController();
+      const unsubscribeIdentity = apiSessionIdentity.subscribe(() => {
+        if (preference.identity !== apiSessionIdentity.getSnapshot()) controller.abort();
+      });
       const isSystem = thread.isHubThread || !!thread.systemKind;
       const url = `/api/threads/${thread.id}${isSystem ? '?force=true' : ''}`;
-      void apiFetch(url, { method: 'DELETE' })
+      void apiFetch(url, { method: 'DELETE', signal: controller.signal })
         .then(async (response) => {
-          if (preference.identity !== apiSessionIdentity.getSnapshot()) return;
+          if (controller.signal.aborted) return;
           if (!response.ok) {
             const message = response.status === 409 ? copy.workingMessage : copy.failedMessage;
             useToastStore.getState().addToast({ type: 'error', title: copy.failedTitle, message, duration: 5000 });
@@ -55,7 +59,9 @@ export function useThreadDeletion({
           const saved = !remember || isSystem || preference.setConfirmBeforeDelete(false);
           if (thread.id === currentConversation.current) navigateToThread('default');
           await invalidateSidebarProjection();
+          if (controller.signal.aborted) return;
           if (showTrash) await loadTrash(true);
+          if (controller.signal.aborted) return;
           useToastStore.getState().addToast({
             type: saved ? 'success' : 'info',
             title: copy.deletedTitle,
@@ -64,13 +70,14 @@ export function useThreadDeletion({
           });
         })
         .catch(() => {
-          if (preference.identity !== apiSessionIdentity.getSnapshot()) return;
+          if (controller.signal.aborted) return;
           useToastStore
             .getState()
             .addToast({ type: 'error', title: copy.failedTitle, message: copy.uncertainMessage, duration: 5000 });
           void invalidateSidebarProjection();
         })
         .finally(() => {
+          unsubscribeIdentity();
           pending.current.delete(thread.id);
           setDeletingIds(new Set(pending.current));
         });
