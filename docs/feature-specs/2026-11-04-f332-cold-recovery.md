@@ -9,9 +9,11 @@ updated: 2026-11-04
 
 # F332 Phase B：冷恢复首包需求与交付方案
 
-> **Status**: spec / authorized for isolated implementation; not implemented | **Implementation**: 宪宪（claude-opus-5-5） | **Review / submission**: 砚砚（gpt-6.1-sol）
+> **Status**: M1a/M1b implemented in this PR; native recovery acceptance pending; not merged or deployed | **Implementation**: 宪宪（claude-opus-5-5） | **Review / submission**: 砚砚（gpt-6.1-sol）
 
 本文件是 [F332](../features/F332-experience-informed-memory.md) Phase B 下的详细实施切片，承接 AC-B5 的同线程连续性要求及本切片新增验收；不替代 F332 的其他阶段，也不结算其既有 Task。
+
+当前 PR 包含停点及省略区间的定位入口，代码提交 `3c94abdababc66873a02b584930489394ba38635` 已由非作者独立复审，受影响的 137 项测试及 3 项隔离 Redis 测试通过。实际 callback reader 已在合成隔离数据中读回来源；尚未执行真实模型的 A/B 恢复、动作及完整成本验收，因此下列 AC 保持未勾选，PR 保持草稿。范围、剩余读取成本与已知基线失败见[复审证据](../features/assets/F332/cold-recovery-review-2026-11-04.md)。
 
 ## Cold Recovery Delivery
 
