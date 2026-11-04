@@ -68,4 +68,19 @@ describe('Task state semantics at the real MCP boundary', () => {
       assert.ok(!(schema.required ?? []).includes('why'), 'why stays optional');
     }
   });
+
+  // F332 S9 (next 821e72a2b, attempt 15, finding P1): a generic resume over several unfinished works wrote to one of
+  // them without asking. The reader contract now states this branch beside the ended-work branch (spec AC-5 / AC-B10).
+  test('list_tasks states the several-unfinished-works branch of a generic resume and keeps the direct branches', () => {
+    const description = tool('cat_cafe_list_tasks').description;
+    for (const anchor of [
+      'If a generic resume could mean more than one unfinished work',
+      'neither the current input nor the owner records settle which one this turn is for',
+      'ask which to continue by work name before any write',
+      'an explicitly named or the only matching work proceeds under its current state and authorization',
+      'todo/doing/blocked record unfinished work',
+      'If a generic resume only identifies ended work',
+      'an explicit redo or extension request already authorizes new work within its scope',
+    ]) assert.ok(description.includes(anchor), anchor);
+  });
 });
