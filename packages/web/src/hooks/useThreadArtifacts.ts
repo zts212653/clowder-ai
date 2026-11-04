@@ -50,7 +50,7 @@ export function useWorksSourceRefresh(threadId: string | undefined, enabled: boo
         hasActive,
         messages.map((message) => [
           message.id,
-          message.timestamp,
+          // Stream activity advances timestamp on every token; it does not change works.
           message.isStreaming,
           message.extra?.rich,
           message.contentBlocks?.filter((block) => block.type !== 'text'),
