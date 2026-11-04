@@ -45,6 +45,8 @@ export function useExecutionRow(threadId: string) {
   const { catInvocations, catStatuses } = useThreadLiveness(threadId);
   const executionsByKey = useActiveExecutionStore((state) => state.executionsByKey);
   const cancelPendingByKey = useActiveExecutionStore((state) => state.cancelPendingByKey);
+  const allWaits = useActiveExecutionStore((state) => state.waits);
+  const waits = useMemo(() => allWaits.filter((wait) => wait.threadId === threadId), [allWaits, threadId]);
   // The ONE shared answer to "is what this thread shows still verified?": the project-wide snapshot covers this thread
   // when it is anchored here OR belongs to the same project, so a failed re-read is stale for a same-project thread
   // that is not the anchor too. (An anchor-only test here missed that case; the classic composer already gets it right.)
@@ -88,6 +90,7 @@ export function useExecutionRow(threadId: string) {
       deriveExecutionRow({
         now,
         executions,
+        waits,
         cancelPendingKeys,
         silent,
         hydrationStale: canonicalProjectionStale,
@@ -109,6 +112,7 @@ export function useExecutionRow(threadId: string) {
       now,
       silent,
       view,
+      waits,
     ],
   );
 
@@ -119,7 +123,7 @@ export function useExecutionRow(threadId: string) {
         .getState()
         .addToast({ type: 'info', title: words.actions.locate, message: words.actions.unavailable, duration: 5000 });
   };
-  return { model, executions, now, silent, view, convergence, commands, forceReset, resolveCatName, locate };
+  return { model, executions, waits, now, silent, view, convergence, commands, forceReset, resolveCatName, locate };
 }
 
 export type ExecutionRowController = ReturnType<typeof useExecutionRow>;

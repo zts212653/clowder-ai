@@ -93,6 +93,7 @@ export interface InviteResult {
 
 export interface SessionResult {
   readonly sessionToken: string;
+  readonly collectiveId?: string;
 }
 
 export type PairingIntentResult = CollectivePairingIntent;

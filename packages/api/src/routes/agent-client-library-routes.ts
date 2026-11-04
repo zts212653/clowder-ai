@@ -143,7 +143,7 @@ export function registerAgentClientLibraryRoutes(
   app.get('/api/agent-providers', async (request, reply) => {
     const access = requirePluginOwnerLocalAccess(request, 'read');
     if ('error' in access) return pluginAccessError(reply, access);
-    const snapshot = await input.inventory.snapshot();
+    const snapshot = await input.inventory.snapshot({ currentOnly: true });
     const libraries = [];
     for (const instance of snapshot.instances.filter((instance) => instance.lifecycleState === 'installed')) {
       const record = snapshot.packages.find((record) => record.packageDigest === instance.packageDigest);

@@ -115,14 +115,12 @@ export function mergeUnregisteredDynamicTasks(
   templateRegistry: ScheduleRoutesOptions['templateRegistry'],
 ): ScheduleTaskSummary[] {
   if (!dynamicTaskStore) return summaries;
-  const dynamicDefs = dynamicTaskStore.getAll();
-  const hiddenDynamicIds = new Set(
-    dynamicDefs.filter((def): boolean => !isVisibleDynamicTaskDef(def)).map((def) => def.id),
-  );
-  const visibleDynamicDefs = dynamicDefs.filter((def) => !hiddenDynamicIds.has(def.id));
+  const visibleDynamicDefs = dynamicTaskStore.getScheduleTasks().filter(isVisibleDynamicTaskDef);
   const defsById = new Map(visibleDynamicDefs.map((def) => [def.id, def]));
   const summariesWithDynamicScope = summaries
-    .filter((summary) => !hiddenDynamicIds.has(summary.dynamicTaskId ?? summary.id))
+    .filter((summary) =>
+      summary.source === 'dynamic' || summary.dynamicTaskId ? defsById.has(summary.dynamicTaskId ?? summary.id) : true,
+    )
     .map((summary) => {
       const def = summary.dynamicTaskId ? defsById.get(summary.dynamicTaskId) : defsById.get(summary.id);
       if (!def) return summary;

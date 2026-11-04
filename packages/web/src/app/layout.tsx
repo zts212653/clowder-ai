@@ -4,6 +4,7 @@
 import { deploymentDefaults } from '@cat-cafe/shared';
 import type { Metadata, Viewport } from 'next';
 import { AppShell } from '@/components/AppShell';
+import { WorkCoverLayer } from '@/components/artifacts/WorkCoverLayer';
 import { BrakeModal } from '@/components/BrakeModal';
 import { CatHueInjector } from '@/components/CatHueInjector';
 import { CoCreatorHueInjector } from '@/components/CoCreatorHueInjector';
@@ -88,6 +89,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <BrakeModal />
           <GuideOverlay />
           <ToastContainer />
+          <WorkCoverLayer />
         </ThemeProvider>
       </body>
     </html>

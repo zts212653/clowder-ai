@@ -114,6 +114,17 @@ describe('Collective Human auth flow', () => {
         authWindow,
       ),
     ).toBeUndefined();
+    expect(
+      trustedHumanAuthResult(
+        {
+          origin: 'http://localhost:5201',
+          source: authWindow,
+          data: { ...completion, collectiveId: 'not-a-collective' },
+        },
+        'http://localhost:5201',
+        authWindow,
+      ),
+    ).toBeUndefined();
   });
 
   it('accepts only a bounded auth error from the exact popup and maps it to product copy', () => {

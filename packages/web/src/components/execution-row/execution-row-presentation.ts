@@ -10,6 +10,7 @@ const TONE_BY_STATUS: Record<RowStatus, ExecutionRowTone> = {
   confirming: 'neutral',
   unverified: 'warning',
   waiting: 'neutral',
+  holding: 'neutral',
 };
 
 export const executionRowTone = (status: RowStatus): ExecutionRowTone => TONE_BY_STATUS[status];

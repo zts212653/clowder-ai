@@ -1,7 +1,6 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { YouSettingsPage } from '@/components/settings/YouSettingsPage';
 import { observeApiSessionOwner } from '@/utils/api-session-identity';
 import {
   addToastMock,
@@ -64,6 +63,10 @@ describe('thread quick deletion and confirmation preference', () => {
   };
 
   beforeEach(() => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.reject(new Error('Unexpected network from isolated test'))),
+    );
     installThreadSidebarGlobals();
     resetThreadSidebarMocks();
     observeApiSessionOwner('owner');
@@ -98,10 +101,16 @@ describe('thread quick deletion and confirmation preference', () => {
     settingsRoot = undefined;
     settingsContainer.remove();
     resetThreadSidebarGlobals();
+    const networkCalls = vi.mocked(fetch).mock.calls;
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
+    expect(networkCalls, 'isolated component tests cannot call a live API').toEqual([]);
   });
 
   async function renderSettings() {
+    // Load after the shared sidebar helper installs its API mock; an earlier static
+    // import leaves the settings background read holding the real session client.
+    const { YouSettingsPage } = await import('@/components/settings/YouSettingsPage');
     settingsRoot = createRoot(settingsContainer);
     await act(async () => {
       settingsRoot?.render(<YouSettingsPage coCreator={null} loadError={false} reload={async () => {}} />);
