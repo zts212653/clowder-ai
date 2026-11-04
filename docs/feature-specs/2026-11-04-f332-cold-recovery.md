@@ -9,11 +9,11 @@ updated: 2026-11-04
 
 # F332 Phase B：冷恢复首包需求与交付方案
 
-> **Status**: M1a/M1b and conditional Task pointer implemented; prior M1-only safety experiment failed; revised native acceptance pending; not merged or deployed | **Implementation**: 宪宪（claude-opus-5-5） | **Review / submission**: 砚砚（gpt-6.1-sol）
+> **Status**: M1a/M1b and conditional Task pointer implemented; M1+D S3 safety observation failed after reading done Task; not merged or deployed | **Implementation**: 宪宪（claude-opus-5-5） | **Review / submission**: 砚砚（gpt-6.1-sol）
 
 本文件是 [F332](../features/F332-experience-informed-memory.md) Phase B 下的详细实施切片，承接 AC-B5 的同线程连续性要求及本切片新增验收；不替代 F332 的其他阶段，也不结算其既有 Task。
 
-当前 PR 包含 M1 定位入口及由实测状态缺口触发的 D 条件 Task 只读投影。M1 代码 `3c94abdababc66873a02b584930489394ba38635` 已独立复审，原 137 项测试及 3 项隔离 Redis 测试通过。受限模型实验中 M1-only 的 S3-B 与预注册 R1 的 S3-A 都重做已完成工作，AC-3 未满足；该结果保持不变。按“调整”结论追加的 D 代码 `c650db92d8f3c9fc70703c12584d181818906f9e` 已独立复审，构建、150 项聚焦测试及原两条 reader 饱和反例通过，真实 callback 接线已核；D 尚无模型行为或收益证据。下列 AC 保持未勾选，PR 保持草稿。范围、逐场裁定、成本及已知基线失败见[复审证据](../features/assets/F332/cold-recovery-review-2026-11-04.md)。
+当前 PR 包含 M1 定位入口及由实测状态缺口触发的 D 条件 Task 只读投影。M1 代码 `3c94abdababc66873a02b584930489394ba38635` 已独立复审，原 137 项测试及 3 项隔离 Redis 测试通过。M1-only 的 S3-A/B 都重做已完成工作；D 代码 `c650db92d8f3c9fc70703c12584d181818906f9e` 的构建、150 项聚焦及两条 reader 饱和回归通过，但第 9 次 M1+D 的 S3 中，模型实际读到未截断的 done Task 后仍改写文件，独立裁定 P1。信息送达和读取均已观察到，正确行动未满足；AC-3 / AC-B8 继续未通过，本批停止，PR 保持草稿。范围、逐场裁定、成本及已知基线失败见[复审证据](../features/assets/F332/cold-recovery-review-2026-11-04.md)。
 
 ## Cold Recovery Delivery
 
@@ -114,6 +114,8 @@ flowchart LR
 
 后续受限筛查中，S5-B 遵循了更新后的排序要求；S3-B 已完成任务被误续，因此按预注册规则停止筛查，仅用 R1 补跑 S3-A。审核方独立确认 A 也误续；AC-3 / F332 AC-B8 未满足。S4 撤回、S9 多工作及 S8 私语来源未启动，S5 的单场通过不结算它们。总账 8/12；R1 已执行，互斥的 R2 不启动，剩余 4 个名额不自动授权新试验。
 
+修订后的 M1+D 单臂计划通过独立无模型核验后，仅运行 S3 第 9 次：首包 D 块送达，模型实际读回 status=done 及原 why，随后仍 Update 写入并回读，最终独立裁定 finding/P1。新批在第一场停止，S4/S9/S8 未启动，总账 9/12，剩余 3 槽不自动使用。单次不能证明 D 促成读取，也不能把冲突措辞认作已证原因；原 fixture/oracle 和所有旧结果保持不变。
+
 首批约 10–20 个隔离场景，覆盖：S1a 少量未读恢复、S1b 大量未读恢复、重复保守 cold、完成／撤回、记录更新、语义降级、不可读／无材料、多工作／同名／无 Task。两种 S1 都在同一条真实路径上验证。区分真实摩擦样本与合成边界，报告逐项分母；这不是全体任务的统计保证。合成回归可以证明确定合同，不能单独证明自然恢复有效。
 
 新增导航先以每轮约 300 tokens、找到首个正确依据争取不超过 2 次调用作为试验起点；同时统计完整过程成本，不能拿这两个局部数替代总成本。不预设百分比门槛，也不宣称已有收益。
@@ -125,6 +127,8 @@ flowchart LR
 若 A 已正确恢复、增量未改善实际结果或恢复成本，就删去或延期该增量；若出现误续任务、伪造依据或越权，先修正再评估，不用召回数量抵消错误。Task 指针只有对应缺口的证据才能启用；不能靠“也许有用”变成常驻材料。
 
 **截至第二批与 R1（2026-11-04），具名结论：调整（砚砚 / gpt-6.1-sol）。** A 在 S1a/S1b 已正确恢复，增益仍未证明；M1-only 的 S3-A/B 都误续已完成工作，原组合不能放行。A 同样失败，不能把 B 的失败直接归因于新增导航；一对结果也不能证明 B 没有影响、建立因果或估计比率。D 修订已按这一调整方向完成代码审查和无模型回归，原实验继续冻结；未经修订版真实行为验证，PR 仍不放行合入。任何新的真实实验须另行预注册和独立审核，本结论不自动使用剩余名额，也不是机制收益或完整验收通过的声明。
+
+**D 首场后的判断（砚砚）：继续调整，当前版本不放行。** 第 9 次已证明“送达并实际读取当前状态”仍可伴随误续，不能以接线成功替代行动验收。下一步回原 Task owner/reader 合同核对状态、历史理由与本轮授权的关系，给出最小修订及反例；不通过删改冲突 fixture 或反复加导航来制造通过。任何再试仍须新计划和独立审核，不重开已停止的批次。
 
 现场反馈仍在原对话：恢复成功直接做事；有关键缺口时简短说明或澄清。详细轨迹留原诊断／验收记录，重复保守 cold 不向用户反复播报恢复流程。
 
