@@ -4,7 +4,7 @@ related_features: [F152, F200, F221, F227, F231, F243, F256, F260, F263, F271, F
 topics: [memory, experience, generalization, continuity]
 doc_kind: spec
 created: 2026-10-23
-updated: 2026-10-29
+updated: 2026-11-04
 tips_exempt: "Renewed 2026-10-25 for KD-4 through KD-8, OQ-3, delivery roadmap v1 and status records: this documentation records capsule approval before opening delivery, a pluggable per-user capsule that every owner can see and edit through one shared entry, stable-persona relationships versus model-specific capabilities, owner-controlled per-thread watcher design and trials, and delivery sequencing. These decisions extend the architecture discussion without delivering or enabling a new user entry, memory injection or watcher configuration; the existing F321/Luna obligations remain."
 description: 让共同经历在未见情境中帮助猫自主联想、核证与修正判断，并让人看见和纠正记忆。
 description_source: human
@@ -167,6 +167,19 @@ health/ready 与三个构建戳一致，实际项目索引版本16，抽核两�
 F321 Luna 继续按原批准合同交付与检验，不能提前启用，也不能被新设计无声替换。
 独立联想助手、领域候选或更大关系索引是待比较方案，尚非必需组件。
 
+#### 冷恢复首包（2026-11-04）
+
+用户在同一 thread 的工作做到一半、猫失去上一轮原生上下文后，只说“接着做”，猫自行找回当前依据并完成正确下一步；用户无需消息编号、文件路径或“先搜”暗号。完整需求、功能/架构设计、分步交付和验收合同见[冷恢复详细 Feature 方案](../feature-specs/2026-11-04-f332-cold-recovery.md#cold-recovery-delivery)，不再以长 Issue 评论承载实施范围。
+
+本切片接续本 Phase 的同线程连续性方向，新增 AC-B6–B12；不替代 AC-B1–B5、原 F324 自然验收或其他阶段。提出需求的实例 operator 已于 2026-11-04 授权宪宪交付代码、砚砚独立审核和提交；上游采用/合入与本实例隔离实施授权分开记录，原 F332 整体 owner 和既有 Task 责任不变。
+
+1. 先冻结同模型、同路径的普通 pull 基线；分别覆盖 S1a 少量未读、只有“接着做”，以及 S1b 大量未读并触发省略。`contextMode=cold` 不单独作为原生上下文已丢失的证明。
+2. M1b 在既有导航中提供本猫上次执行来源及对应回复的合法停点坐标；M1a 复用既有 `selectAnchors`，仅给坐标及省略区间首尾，不重发锚点正文。两者都是读取线索，不提供当前任务或授权的权威。
+3. 真实 reader 验证本包发出及实际消费的指针，确证坏指针回原生成 owner 修正。只有精确入口仍补不上的状态缺口，才接已有 Task 的只读指针，不自动生成新状态。
+4. 完成一条真实接入路径的改前/改后结果与完整成本比较；扩展接入兼容性按风险补验。未合入在独立 feature checkout 测，合入后走隔离 acceptance；不包含日常运行环境部署、重启或生产数据操作。
+
+代码作者为宪宪（claude-opus-5-5），独立审核/提交由砚砚（gpt-6.1-sol）负责。文档和代码分别提交可审阅变更，不把文档已落盘或实现已合入计为功能验收通过。关联 [#1087](https://github.com/zts212653/clowder-ai/issues/1087)；本包不等待 #1781 的接入能力讨论先完成。
+
 ### Phase C: 值得留下的经历能留下、能被看见与纠正
 
 保留经历的原由、过程、结果、适用条件、来源；合适时提出人物/关系/品味记忆，沿原批准渠道发布。
@@ -268,6 +281,7 @@ dot 本轮只是带题面提示、不额外搜索的一次回答；Q1–3 为“
 | S3 | workspace | 猫 | 进入已授权外仓 → 知道可读资料与缺口 → 查到该项目约定 → 完成任务 | 项目绑定、隔离及自然读取，不回退搜家里冒充 |
 | S4 | conversation | You | 看对话回顾 → 点回原消息 → 回到对话；未开整理时看到真实空态 | 原 RC1/RC2，默认/窄屏实物 |
 | S5 | conversation → task | You 与猫 | 闲聊长出灵感 → 猫接上相关旧决定 → 明确托付后进入工作，继续保留对话关系 | 中途转向新例，不要求用户切模式；灵感不冒充授权 |
+| S6 | thread / entrusted work | 用户与猫 | 原工作中途失去上下文 → 用户只说“接着做” → 猫按内部停点/省略区间入口读源 → 核当前状态 → 完成下一步或说明完成/撤回/具体缺口 | 冷恢复 spec 的 S1a/S1b、真实会话替换证据、实际产物与完整成本；不向用户索要编号 |
 
 ## Acceptance Criteria
 
@@ -284,6 +298,13 @@ dot 本轮只是带题面提示、不额外搜索的一次回答；Q1–3 为“
 - [ ] AC-B3: 相似但不适用、真实需要新授权、无关往事、多个同名主体等反例不发生强行迁移；待证联系不升格为事实或批准。
 - [ ] AC-B4: F321 AC-L1..L5 的完整原合同继续，已过 Alpha 证据复用，自由开场自然效用/延迟未验仍为未完成；不因本立项自动开开关。
 - [ ] AC-B5: 同一 thread 从闲聊转为灵感/工作时能接上当前相关决定与来历；用户不须切模式或提示“先搜”，也不把未成托付的想法自动开工。
+- [ ] AC-B6: 冷恢复 spec 的 S1a/S1b 在一条真实路径、同模型下分别验证；无上一轮原生上下文、仅给自然续接请求，恢复入口确实送达模型并读到当前依据，仍应继续的工作有正确下一步产物。
+- [ ] AC-B7: M1b 停点及 M1a 省略区间/既有锚点坐标仅从合法记录取得，真实 reader 可读正确主体/版本；不发锚点旧正文，不将候选/预览当当前事实或指令，不泄露不可读来源。
+- [ ] AC-B8: 已完成/撤回、当前记录已更新或授权已失效时，不按旧 handoff 重启工作；保留实际状态和动作证据。
+- [ ] AC-B9: 无资料、检索降级、指针失效/无权限如实区分；语义降级但原件可读时保留精确读源路径，不将空结果直接当记录不存在。
+- [ ] AC-B10: 多工作/同名材料不按最近文件强选当前权威；必要澄清使用工作名称/内容，回复不用内部编号当说明，无 Task 闲聊不强制任务化。
+- [ ] AC-B11: 保留全部既有合法工具的 A 基线，先单测 M1 增量、仅剩余缺口需要时单测 Task 指针；报告正确结果、错误动作、人操、完整输入/读取、耗时和重复材料，真冷与重复 unknown→cold 分开计，不预设百分比收益。
+- [ ] AC-B12: 原持久化、消息可见性、已读/队列 exposure、continuity 及授权合同不变；Feature checkout 和合入后的隔离验收证据分开，不能以 helper 输出、测试通过或 merge 代替真实恢复/加载。
 
 ### Phase C
 - [ ] AC-C1: 重要经历及有用联系能沿正确归属保留并在后续找到；写入、提案、批准、发布各有真实状态；人物主张区分提及/考虑、行为和明确偏好，推断、设定与来源缺口不升级成已证事实；单次情境不被无依据归纳为通用规矩，不以摘要改写历史或每轮产垃圾。
@@ -309,6 +330,7 @@ dot 本轮只是带题面提示、不额外搜索的一次回答；Q1–3 为“
 | 猫是有判断的伙伴，不是逐条 hook API | B1–B3、D1–D2；不预设新后台模型 |
 | 共同经历保留、关系连续、冲突可纠正 | C1/C3/C4/C5 |
 | 不切模式也接得上，记忆可以只是让人开心 | B5/C6 |
+| 失去上下文后自然说“接着做”，无需编号且能正确续接 | B6–B12；[冷恢复详细方案](../feature-specs/2026-11-04-f332-cold-recovery.md) |
 | 人能看见、纠正、自然打开回顾 | C2，原 F321 UI/Luna 合同 |
 | 所有旧痛点有交代，旧项目收拢不掉球 | D3/D4、承接表及原 Task |
 
