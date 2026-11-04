@@ -70,7 +70,9 @@ test('real ACP Host classifies empty turns, recovers final text, accepts tool-on
     const service = serviceFor(client, root);
     for (const prompt of ['empty', 'empty-string', 'thinking-only']) {
       const messages = await collect(service, prompt, { workingDirectory: root });
-      assert.equal(messages.find((m) => m.type === 'error')?.errorCode, 'empty_response');
+      const failure = messages.find((m) => m.type === 'error');
+      assert.equal(failure?.errorCode, 'prompt_failure');
+      assert.match(failure.error, /Pi.*without usable assistant text or tool calls/);
     }
     for (const prompt of ['empty-delta-final', 'tool-only']) {
       const messages = await collect(service, prompt, { workingDirectory: root });
@@ -86,6 +88,26 @@ test('real ACP Host classifies empty turns, recovers final text, accepts tool-on
     assert.equal(failure.errorCode, 'prompt_failure');
     assert.match(failure.error, /model is unavailable/);
     assert.doesNotMatch(failure.error, /secret-fixture-token/);
+  }));
+
+test('empty Pi turns report sanitized CLI diagnostics through the real ACP Host and allow retry', () =>
+  fixture(async ({ root, make }) => {
+    const client = make();
+    await client.initialize();
+    const sessionId = (await client.newSession(root, [])).sessionId;
+    const service = serviceFor(client, root);
+    const failure = (await collect(service, 'empty-diagnostic', { workingDirectory: root, sessionId })).find(
+      (message) => message.type === 'error',
+    );
+    assert.equal(failure?.errorCode, 'prompt_failure');
+    assert.match(failure.error, /provider quota exhausted/);
+    assert.doesNotMatch(failure.error, /secret-empty-response-token/);
+    const retry = await collect(service, 'normal', { workingDirectory: root, sessionId });
+    assert.equal(
+      retry.some((message) => message.type === 'error'),
+      false,
+    );
+    assert.ok(retry.some((message) => message.type === 'text'));
   }));
 
 test('actual ACP pool evicts the bridge and restores the same Pi history in a new process', () =>
