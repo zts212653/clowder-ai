@@ -77,6 +77,7 @@ import type { CoverageMap, ScoredMessage } from './context-transport.js';
 import {
   buildCoverageMap,
   buildTombstone,
+  buildTombstoneCoordinates,
   detectRecentBurst,
   formatAnchors,
   formatRecallPointer,
@@ -89,6 +90,7 @@ import {
 import { legacyBatonHasSucceededReply, recoverableDeliveryBoundary } from './delivery-boundary-recovery.js';
 import type { HumanDispositionInvocationOrigin } from './human-disposition-invocation-origin.js';
 import { extractBatonContext, formatNavigationHeader, summarizeActiveTasks } from './navigation-context.js';
+import { resolveResumeStopPoint } from './resume-stop-point.js';
 import { isSameUserWaveSiblingReply } from './same-user-wave-sibling.js';
 import { projectRankedSource, rankArtifactSources, selectDirectiveSources } from './source-ranking.js';
 import { resolveReachableArtifactRefs } from './source-reachability.js';
@@ -2004,6 +2006,14 @@ async function assembleIncrementalContextInternal(
     threadStore && options?.contextProjection?.contextMode !== 'hot'
       ? await readNavigationRoadmap(threadStore, userId, threadId)
       : undefined;
+  // F332 / #1087: a canonical cold turn cannot prove the provider still holds
+  // this cat's own prior turn, and ordinary own output is excluded from the
+  // unread delta. When only “接着做” is unread, point back to where this cat
+  // stopped — coordinates from the original lifecycle record, never its body.
+  const resumeStopPoint =
+    options?.contextProjection?.contextMode === 'cold'
+      ? await resolveResumeStopPoint({ messageStore: deps.messageStore, threadId, userId, catId, viewer })
+      : undefined;
   const navigationHeader = formatNavigationHeader({
     threadId,
     currentCatId: catId,
@@ -2017,6 +2027,7 @@ async function assembleIncrementalContextInternal(
     artifacts: options?.contextProjection ? [] : recentArtifacts,
     truthSource: topSource ? { label: topSource.label, ref: topSource.ref, provenance: topSource.provenance } : null,
     bestNextSource,
+    ...(resumeStopPoint ? { resumeStopPoint } : {}),
   });
 
   log.info({
@@ -2350,7 +2361,6 @@ async function assembleSmartWindowContext(
 
   // 3.1 Tombstone (uses sanitized content for keyword extraction)
   const tombstone = buildTombstone(sanitizedOmitted, threadTitle, hcConfig, threadId);
-  const tombstoneText = tombstone ? formatTombstone(tombstone) : '';
 
   // 3.5 Phase C: Anchor extraction from omitted messages
   // F263: strip structural envelope before slicing to ensure semantic content is captured
@@ -2383,6 +2393,18 @@ async function assembleSmartWindowContext(
     };
   });
   const anchorLines = formatAnchors(promptAnchors, truncateLimit);
+  // F332 / #1087: canonical cold keeps anchor bodies out (F296 A4), but must not
+  // leave the omitted range with only a keyword search. The already-selected
+  // anchor IDs and the range bounds become exact read coordinates on the
+  // tombstone line itself — an entry, not a historical section.
+  const tombstoneCoordinates = isCanonicalCold
+    ? buildTombstoneCoordinates(
+        sanitizedOmitted,
+        anchors.map((anchor) => anchor.message.id),
+        threadId,
+      )
+    : null;
+  const tombstoneText = tombstone ? formatTombstone(tombstone, { coordinates: tombstoneCoordinates }) : '';
 
   // 3.7 Phase D: Fetch thread memory (fail-open)
   let threadMemorySummary = '';

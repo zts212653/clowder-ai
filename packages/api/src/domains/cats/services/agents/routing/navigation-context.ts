@@ -6,7 +6,8 @@ import { renderSegment } from '../../context/prompt-template-loader.js';
 import { formatPromptTime } from '../../format-time.js';
 import { messageFrom } from '../../stores/message-from.js';
 import type { ThreadExecutionSituation } from '../invocation/thread-execution-situation.js';
-import { formatThreadContextDrill } from './thread-drill-pointer.js';
+import type { ResumeStopPointLookup, ResumeStopPointStatus } from './resume-stop-point.js';
+import { formatThreadContextDrill, formatThreadMessageDrill } from './thread-drill-pointer.js';
 
 export interface BatonContext {
   fromMessageId: string;
@@ -113,6 +114,41 @@ export interface NavigationContext {
   recentWorkDirectory?: boolean;
   /** Explicit original roadmap pointer; never a directive or custody grant. */
   roadmapPointer?: string;
+  /**
+   * F332 / #1087: canonical-cold pointer to this cat's own last terminal reply
+   * in the thread. A locating clue only — not current work, authority or text.
+   */
+  resumeStopPoint?: ResumeStopPointLookup;
+}
+
+const STOP_POINT_STATUS_LABEL: Record<ResumeStopPointStatus, string> = {
+  completed: '已完成',
+  failed: '失败',
+  canceled: '已取消',
+  interrupted: '已中断',
+};
+
+function buildResumeStopPointLines(ctx: NavigationContext, timeZone: string | undefined): string[] {
+  const lookup = ctx.resumeStopPoint;
+  if (!lookup || lookup.kind === 'none') return [];
+  if (lookup.kind === 'unavailable') return ['上次停点: 当前无法读取（不按最近发言推断）'];
+  if (lookup.kind === 'not_in_window') {
+    return [`上次停点: 最近 ${lookup.scannedCount} 条消息内未找到你的回复记录（更早历史需翻页读取，不按最近发言推断）`];
+  }
+  const { stopPoint } = lookup;
+  const time = formatPromptTime(stopPoint.at, { timeZone });
+  const withheld = stopPoint.unreadableSourceCount;
+  const sources =
+    stopPoint.sourceMessageIds.length > 0
+      ? `来源 ${stopPoint.sourceMessageIds.join(', ')}${withheld > 0 ? `（另有 ${withheld} 条未列出：不可读或系统内部）` : ''}`
+      : withheld > 0
+        ? `来源未列出（${withheld} 条不可读或系统内部）`
+        : '来源未记录';
+  const lines = [
+    `上次停点（仅定位，非当前指令）: 你在本线程的上一条回复 ${stopPoint.responseMessageId}（${time}，${STOP_POINT_STATUS_LABEL[stopPoint.status]}）← ${sources}`,
+  ];
+  if (ctx.threadId) lines.push(`读原文: ${formatThreadMessageDrill(ctx.threadId, stopPoint.responseMessageId)}`);
+  return lines;
 }
 
 export interface NavigationFormatOptions {
@@ -164,6 +200,8 @@ function buildNavigationInner(ctx: NavigationContext, options?: NavigationFormat
       lines.push(`⚠️ ${ctx.baton.fromSpeakerDisplay} 之前说过"别动/等等"，但已传球给你——以传球为准`);
     }
   }
+
+  lines.push(...buildResumeStopPointLines(ctx, coCreatorTimeZone));
 
   if (ctx.tasks.length > 0) {
     lines.push('活跃毛线球:');
