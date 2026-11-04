@@ -87,7 +87,7 @@ async function writeStorageFixture(pluginId, capabilities = ['plugin.state.get',
   return root;
 }
 
-test('module plugins receive isolated persistent storage with revision-fenced compare-and-set', async () => {
+test('module plugins receive isolated persistent storage with revision-fenced compare-and-set', async (t) => {
   const projectRoot = await tempRoot('cat-cafe-f202-storage-project-');
   const redis = new FakeStorageRedis();
   const runtime = createDormantPluginRuntimeComposition({
@@ -96,6 +96,7 @@ test('module plugins receive isolated persistent storage with revision-fenced co
     redis,
     contract: { manifestContractRange: '0.1.0', validateManifest },
   });
+  t.after(() => runtime.shutdown('test-cleanup'));
   const composition = createPluginManagerRuntimeComposition({
     runtime,
     catalogProvider: { snapshot: async () => ({ entries: [], status: 'fresh', checkedAt: 1 }) },
@@ -257,6 +258,25 @@ test(
         Object.keys(values).length + 1,
         'deleted fields must be physically released; only live values and one revision counter remain',
       );
+
+      const selectedKey = 'literal[*?].root';
+      const selected = await storage.set('dev.clowder.redis-fixture', selectedKey, { selected: true });
+      await storage.set('dev.clowder.redis-fixture', 'literalX.root', { unrelatedPrefix: true });
+      await storage.set('dev.clowder.redis-fixture', 'literal[*?].history', { unrelatedSuffix: true });
+      let cursor = '0';
+      const pages = {};
+      do {
+        const page = await storage.scan('dev.clowder.redis-fixture', {
+          prefix: 'literal[*?]',
+          suffix: '.root',
+          cursor,
+          count: 1,
+        });
+        Object.assign(pages, page.entries);
+        cursor = page.cursor;
+      } while (cursor !== '0');
+      assert.deepEqual(pages, { [selectedKey]: { revision: selected.revision, value: { selected: true } } });
+      assert.equal(await redis.ttl(physicalHash), -1, 'paged reads must preserve persistent storage');
     } finally {
       await cleanupClientKeyspace(redis);
       await redis.quit();

@@ -2,6 +2,7 @@ import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { BundledPluginRuntimeCarrier } from '../dist/domains/plugin/builtin-runtime/carriers/bundled-runtime-carrier.js';
+import { snapshotInventoryFixture } from './helpers/snapshot-inventory-fixture.js';
 
 function deferred() {
   let resolve;
@@ -28,11 +29,11 @@ function fixture(runtime) {
     ],
   };
   return new BundledPluginRuntimeCarrier({
-    inventory: {
+    inventory: snapshotInventoryFixture({
       snapshot: async () => structuredClone(state),
       transaction: async (work) =>
         work({ instances: { get: () => instance, put: (next) => Object.assign(instance, next) } }),
-    },
+    }),
     runtimes: [{ claims: () => true, start: async () => {}, invoke: async () => 'ok', ...runtime }],
   });
 }

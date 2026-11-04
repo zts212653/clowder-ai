@@ -6,6 +6,7 @@ import {
   withOwnerOperationRequest,
 } from '../dist/domains/plugin/carrier/plugin-owner-operation-context.js';
 import { InstalledPluginOperations } from '../dist/domains/plugin/operations/plugin-operation-routes.js';
+import { snapshotInventoryFixture } from './helpers/snapshot-inventory-fixture.js';
 
 test('declared operation transports a raw import envelope and a no-PII receipt without a dedicated Host API', async () => {
   const manifest = {
@@ -57,7 +58,7 @@ test('declared operation transports a raw import envelope and a no-PII receipt w
   const saved = [];
   let fail = false;
   const operations = new InstalledPluginOperations({
-    inventory: {
+    inventory: snapshotInventoryFixture({
       snapshot: async () => ({
         schemaVersion: 1,
         grants: [],
@@ -74,7 +75,7 @@ test('declared operation transports a raw import envelope and a no-PII receipt w
           },
         ],
       }),
-    },
+    }),
     configuration: {
       readActionInput: async () => ({ existingConfig: 'config stays in action input' }),
       readOperationState: async () => undefined,

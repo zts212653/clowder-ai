@@ -1,6 +1,7 @@
 'use client';
 
 import './chat-background/chat-background.css';
+import './suggestions/suggestions.css';
 
 import { usePathname, useSearchParams } from 'next/navigation';
 import { Suspense, useCallback, useEffect, useLayoutEffect, useState, useSyncExternalStore } from 'react';

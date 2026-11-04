@@ -28,6 +28,9 @@ HTTP callback route 是 MCP tool 的底层实现和维护者调试面，不是 s
 | 搜证据 | `cat_cafe_search_evidence` | `GET /api/callbacks/search-evidence` |
 | 写长期记忆 | `cat_cafe_retain_memory_callback` | `POST /api/callbacks/retain-memory` |
 | 创建 rich block | `cat_cafe_create_rich_block` | `POST /api/callbacks/create-rich-block` |
+| 回话下面挂一键提议（F335） | `cat_cafe_offer_suggestion` | `POST /api/callbacks/suggestions` |
+| 消息下面挂一行回执 | `cat_cafe_post_action_receipt` | `POST /api/callbacks/suggestion-receipts` |
+| 读提议按种类的事实 / 不再提某类 | `cat_cafe_suggestion_facts` | `POST /api/callbacks/suggestion-facts` |
 | 更新 workflow 告示牌 | `cat_cafe_update_workflow` | `POST /api/callbacks/update-workflow-sop` |
 | 开多猫 vote | `cat_cafe_start_vote` | `POST /api/callbacks/start-vote` |
 
