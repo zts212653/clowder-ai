@@ -72,7 +72,10 @@ export function resolveUserCapsule(profileDir: string, relationshipKey: string) 
     }
   });
   const pointers = entries.length
-    ? [...entries, '读源走本轮绑定的 Clowder AI 连接；勿用独立 App 的同名工具替代。'].join('\n')
+    ? [
+        ...entries,
+        `读源走本轮绑定的 ${resolvePromptTemplateVariables().PRODUCT_DISPLAY_NAME} 连接；勿用独立 App 的同名工具替代。`,
+      ].join('\n')
     : '';
   let raw: string;
   try {

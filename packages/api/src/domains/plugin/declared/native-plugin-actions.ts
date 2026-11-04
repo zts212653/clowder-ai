@@ -149,10 +149,19 @@ export class NativePluginActions {
       await checkCaller();
       await assertInvocationCurrent();
     };
+    const checkWrite = caller.assertWriteCurrent?.bind(caller);
     const context = Object.freeze({
       ...caller,
       assertCurrent,
       assertInvocationCurrent,
+      ...(checkWrite
+        ? {
+            assertWriteCurrent: () => {
+              assertActiveInvocation();
+              checkWrite();
+            },
+          }
+        : {}),
       nativeAction: Object.freeze({ id: randomUUID(), contributionId: connection.contributionId, method }),
     });
     await assertCurrent();

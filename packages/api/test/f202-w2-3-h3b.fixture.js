@@ -8,6 +8,7 @@
  * a value, or a function of the input (which may return a promise or throw — a throw there is a
  * throw inside the package's action).
  */
+import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -29,9 +30,24 @@ export const METHODS = Object.freeze({
 });
 
 const FIXTURE = '__f202H3bFixture';
+const RESPONSE_KEY = 'fixtureResponse';
 const roots = [];
+const runtimes = [];
+
+/** Worker errors retain their meaning and origin, not main-thread object identity. */
+export function assertWorkerError(actual, expected) {
+  assert.ok(actual instanceof Error);
+  assert.notEqual(actual, expected);
+  assert.equal(actual.name, expected.name);
+  assert.equal(actual.message, expected.message);
+  assert.equal(actual.code, expected.code);
+  assert.match(actual.stack, /[/\\]dist[/\\]plugin\.js:/);
+}
 
 export async function cleanup() {
+  for (const { runtime, instances } of runtimes.splice(0)) {
+    for (const id of instances) await runtime.stop(id, 'test_done');
+  }
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
 }
 
@@ -48,6 +64,7 @@ export function hostManifest({ pluginId = 'dev.clowder.h3b-host', runtime } = {}
     version: '0.1.0',
     contractVersion: '0.1.0',
     name: 'H3b conversation host',
+    configuration: [{ key: RESPONSE_KEY, label: 'Fixture response', kind: 'string', required: false }],
     features: [
       {
         id: 'main',
@@ -86,26 +103,30 @@ export const validDiagnostic = Object.freeze({
 
 function moduleSource(pluginId, methods) {
   return `
-const fixture = globalThis[${JSON.stringify(FIXTURE)}];
 const pluginId = ${JSON.stringify(pluginId)};
 export default {
   create() {
     return {
-      async start() {
-        fixture.calls.push({ pluginId, method: 'start' });
+      async start(host) {
+        await host.log('debug', ${JSON.stringify(FIXTURE)}, { pluginId, method: 'start' });
         const actions = {};
         for (const method of ${JSON.stringify(methods)}) {
-          actions[method] = (input) => {
-            fixture.calls.push({ pluginId, method, input });
-            const step = fixture.script[method];
-            return typeof step === 'function' ? step(input, pluginId) : step;
+          actions[method] = async (input) => {
+            await host.log('debug', ${JSON.stringify(FIXTURE)}, { pluginId, method, input });
+            const response = JSON.parse(await host.config.get(${JSON.stringify(RESPONSE_KEY)}));
+            if (response.kind === 'threw') {
+              const error = new Error(response.error.message);
+              error.name = response.error.name;
+              Object.assign(error, response.error.fields);
+              throw error;
+            }
+            return response.value;
           };
         }
         return {
           actions,
           async stop({ reason }) {
-            fixture.calls.push({ pluginId, method: 'stop', reason });
-            if (typeof fixture.script.stop === 'function') fixture.script.stop(reason, pluginId);
+            await host.log('debug', ${JSON.stringify(FIXTURE)}, { pluginId, method: 'stop', reason });
           },
         };
       },
@@ -126,13 +147,13 @@ const digestOf = (seed) => `sha512-${createHash('sha512').update(seed).digest('b
 export async function conversationHostHarness({ packages, withRegistry = true, registryOptions } = {}) {
   const fixture = {
     calls: [],
+    responses: new Map(),
     script: {
       [METHODS.append]: { status: 'appended', providerMessageId: 'provider-1' },
       [METHODS.list]: { returns: [] },
       [METHODS.ack]: { status: 'acknowledged' },
     },
   };
-  globalThis[FIXTURE] = fixture;
   let now = 1_000;
   let nextInstance = 0;
   const store = new MemoryPluginInventoryStore();
@@ -141,6 +162,7 @@ export async function conversationHostHarness({ packages, withRegistry = true, r
     now: () => now++,
   });
   const located = new Map();
+  const instanceByPlugin = new Map();
   const instances = [];
   for (const spec of packages ?? [{ manifest: hostManifest() }]) {
     const rootDir = await tempRoot('f202-h3b-package-');
@@ -158,6 +180,7 @@ export async function conversationHostHarness({ packages, withRegistry = true, r
       packagePluginId: spec.manifest.pluginId,
     });
     instances.push(installed.pluginInstanceId);
+    instanceByPlugin.set(spec.manifest.pluginId, installed.pluginInstanceId);
   }
   const packageLocator = {
     resolveInstalledPackage: async (digest) => ({
@@ -166,14 +189,42 @@ export async function conversationHostHarness({ packages, withRegistry = true, r
       release: async () => {},
     }),
   };
-  const configuration = { readConfig: async () => undefined, readSecret: async () => undefined };
+  const configuration = {
+    readConfig: async (instanceId, key) => {
+      if (key !== RESPONSE_KEY || !fixture.responses.has(instanceId)) return undefined;
+      return JSON.stringify(await fixture.responses.get(instanceId));
+    },
+    readSecret: async () => undefined,
+  };
   const registry = new CloudConversationHostRegistry(registryOptions);
   const moduleRuntime = new ModulePluginRuntime({
     dataDirectoryParent: await tempRoot('f202-h3b-data-'),
     packages: packageLocator,
     configuration,
-    log: () => {},
+    // Only the actual worker can emit these action-entry observations. Scripted replies
+    // cross back as data; package errors are created and thrown inside that worker.
+    log: async (_level, message, call) => {
+      if (message !== FIXTURE) return;
+      fixture.calls.push(call);
+      if (call.method === 'start') return;
+      if (call.method === 'stop') {
+        if (typeof fixture.script.stop === 'function') await fixture.script.stop(call.reason, call.pluginId);
+        return;
+      }
+      const step = fixture.script[call.method];
+      const response = Promise.resolve()
+        .then(() => (typeof step === 'function' ? step(call.input, call.pluginId) : step))
+        .then(
+          (value) => ({ kind: 'returned', value }),
+          (error) => ({
+            kind: 'threw',
+            error: { name: error.name, message: error.message, fields: { ...error } },
+          }),
+        );
+      fixture.responses.set(instanceByPlugin.get(call.pluginId), response);
+    },
   });
+  runtimes.push({ runtime: moduleRuntime, instances });
   const router = new PluginRuntimeCarrierRouter(store, undefined, {
     packages: packageLocator,
     configuration,

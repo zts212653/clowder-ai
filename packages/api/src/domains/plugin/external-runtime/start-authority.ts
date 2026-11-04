@@ -44,18 +44,8 @@ export async function resolveRunnableAuthority(
   deps: StartAuthorityDeps,
   pluginInstanceId: string,
 ): Promise<RunnableAuthority> {
-  const snapshot = await deps.inventory.snapshot();
-  const instance = snapshot.instances.find((candidate) => candidate.pluginInstanceId === pluginInstanceId);
-  const current = instance
-    ? snapshot.instances.find(
-        (candidate) => candidate.pluginId === instance.pluginId && candidate.lifecycleState === 'installed',
-      )
-    : undefined;
-  const packageRecord = instance
-    ? snapshot.packages.find(
-        (candidate) => candidate.packageDigest === instance.packageDigest && candidate.packageState === 'installed',
-      )
-    : undefined;
+  const authority = await deps.inventory.readAuthority(pluginInstanceId);
+  const { instance, current, packageRecord } = authority ?? {};
   if (
     !instance ||
     current?.pluginInstanceId !== pluginInstanceId ||
@@ -63,7 +53,8 @@ export async function resolveRunnableAuthority(
     instance.configReadiness !== 'ready' ||
     instance.activationState !== 'enabled' ||
     (instance.runtimeState !== 'stopped' && instance.runtimeState !== 'crashed') ||
-    !packageRecord
+    !packageRecord ||
+    packageRecord.packageState !== 'installed'
   ) {
     throw new ExternalPluginRuntimeError('INSTANCE_NOT_RUNNABLE', `${pluginInstanceId} is not a runnable instance`);
   }
@@ -81,9 +72,8 @@ export async function assertAuthorityUnchanged(
   authority: RunnableAuthority,
   runtimeState: RuntimeState,
 ): Promise<void> {
-  const snapshot = await deps.inventory.snapshot();
   const pluginInstanceId = authority.instance.pluginInstanceId;
-  const instance = snapshot.instances.find((candidate) => candidate.pluginInstanceId === pluginInstanceId);
+  const instance = await deps.inventory.read.instances.get(pluginInstanceId);
   if (
     !instance ||
     instance.lifecycleState !== 'installed' ||

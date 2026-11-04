@@ -358,7 +358,11 @@ export class PluginManagerService {
         'Plugin catalog changed after the installation was selected',
       );
     }
-    const inventory = await this.options.inventory.snapshot();
+    const inventory = await this.options.inventory.snapshot({
+      currentOnly: true,
+      pluginId: candidate.pluginId,
+      packageDigests: typeof candidate.packageDigest === 'string' ? [candidate.packageDigest] : [],
+    });
     const projected = projectPluginManagerCatalogCandidate(
       candidate,
       inventory,
@@ -553,9 +557,14 @@ export class PluginManagerService {
     readonly response: PluginManagerListResponse;
     readonly entries: readonly { readonly plugin: PluginManagerListItem; readonly detail?: PluginManagerDetail }[];
   }> {
-    const [catalog, inventory, installedPackages, quarantines] = await Promise.all([
-      fixedCatalog ?? this.readCatalog(),
-      this.options.inventory.snapshot(),
+    const catalog = fixedCatalog ?? (await this.readCatalog());
+    const [inventory, installedPackages, quarantines] = await Promise.all([
+      this.options.inventory.snapshot({
+        currentOnly: true,
+        packageDigests: catalog.candidates
+          .map((r) => r.packageDigest)
+          .filter((v): v is string => typeof v === 'string'),
+      }),
       this.options.installedPackages?.list() ?? Promise.resolve([]),
       this.options.quarantine?.list() ?? Promise.resolve([]),
     ]);

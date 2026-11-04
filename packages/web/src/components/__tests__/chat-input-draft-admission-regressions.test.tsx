@@ -300,6 +300,37 @@ it.each([
   act(() => finish(true));
 });
 
+it('resumes autosave after admission consumes a same-content conflict recovery', async () => {
+  await render();
+  let firstWrite = true;
+  write = (body, method) => {
+    expect(body.expectedRevision).toBe(revision);
+    if (firstWrite) {
+      firstWrite = false;
+      owner = { text: body.text ?? '' };
+      revision = 6;
+      return response({ code: 'DRAFT_REVISION_MISMATCH' }, 409);
+    }
+    owner = method === 'DELETE' ? null : { text: body.text ?? '' };
+    revision += 1;
+    return response({ draft: owner, revision });
+  };
+  act(() => typeText('same-content draft'));
+  await act(async () => vi.advanceTimersByTimeAsync(400));
+  expect(writes).toEqual([{ expectedRevision: 5, text: 'same-content draft' }]);
+  act(() => beginAndClear());
+  expect(await admissionResult()).toEqual({ threadId: THREAD, expectedRevision: 6 });
+  // A failed transport restores the admitted draft; later edits still need durable autosave.
+  act(() => finish(false));
+  act(() => typeText('next unsent edit'));
+  await act(async () => vi.advanceTimersByTimeAsync(400));
+  expect(writes).toEqual([
+    { expectedRevision: 5, text: 'same-content draft' },
+    { expectedRevision: 6, text: 'next unsent edit' },
+  ]);
+  expect(owner?.text).toBe('next unsent edit');
+});
+
 it('still requires confirmation and displays both drafts when hydration arrives after the click', async () => {
   let releaseRead: (value: Response) => void;
   const read = new Promise<Response>((resolve) => {

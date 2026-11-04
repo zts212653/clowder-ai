@@ -27,6 +27,10 @@ for (const width of [1440, 390])
       viewport: { width, height: 1000 },
       api: ({ request, url }) => {
         const dot = managerDot(installed, enabled, tested, paired);
+        if (url.pathname === '/api/plugin-manager/plugins/_local')
+          return { body: { plugins: installed ? [dot] : [], catalog: { status: 'unavailable', refreshedAt: null } } };
+        if (url.pathname === '/api/plugin-manager/marketplaces/refresh')
+          return { body: { sources: [{ status: 'ready' }] } };
         if (url.pathname === '/api/plugin-manager/plugins/install') {
           installed = true;
           return { body: { pluginId: dot.pluginId } };
@@ -37,7 +41,10 @@ for (const width of [1440, 390])
         }
         if (url.pathname === '/api/plugin-manager/plugins' || url.pathname.endsWith('/plugins/search'))
           return { body: { plugins: [dot], catalog } };
-        if (url.pathname === '/api/plugin-manager/plugins/official.chatgpt-dot')
+        if (
+          url.pathname === '/api/plugin-manager/plugins/official.chatgpt-dot' ||
+          url.pathname === '/api/plugin-manager/plugins/_local/official.chatgpt-dot'
+        )
           return { body: { plugin: { ...dot, configFields: [], capabilities: [], contributions: [] }, catalog } };
         if (url.pathname.endsWith('/documentation')) return { body: {} };
         if (url.pathname.endsWith('/contributions/tools')) return { body: { pluginId: dot.pluginId, tools: [] } };
@@ -75,20 +82,28 @@ for (const width of [1440, 390])
     const { page } = proof;
     try {
       await page.getByTestId('settings-button').click();
+      if (width === 390) await page.locator('button[aria-controls="settings-mobile-navigation"]').click();
       await page.getByTestId('settings-entry-connect').click();
       await page.getByTestId('settings-tab-plugins').click();
       assert.equal(new URL(page.url()).searchParams.has('pluginManagerLive'), false);
       const row = page.locator('[data-plugin-id="official.chatgpt-dot"]');
       await row.waitFor();
       assert.equal(await row.count(), 1);
-      assert.equal(await page.locator('[data-plugin-id="personal-chrome-host"]').count(), 1);
-      await row.getByRole('button', { name: '开启 dot 协作', exact: true }).click();
+      assert.equal(
+        await page.locator('[data-plugin-id="personal-chrome-host"]').count(),
+        0,
+        'retired Host row stays absent',
+      );
+      await row.getByRole('button', { name: '安装', exact: true }).click();
+      assert.equal(installed, true, 'the current catalog install action must run before the intent toggle');
       await row.getByRole('button', { name: '启用dot协作', exact: true }).click();
       assert.equal(
         proof.requests.some((request) => request.endsWith('/set-enabled')),
         false,
         'blocked toggle opens setup without changing Host intent',
       );
+      // Mobile opens the detail only after a row action; verify its retained Pro recovery entry there.
+      await page.locator('a[href*="plugin=official.companion.personal-chrome"]').waitFor();
       await page.getByRole('button', { name: '准备订阅说明', exact: true }).waitFor();
       await page.getByRole('button', { name: '准备订阅说明', exact: true }).click();
       await page.getByRole('button', { name: '复制订阅说明', exact: true }).waitFor();

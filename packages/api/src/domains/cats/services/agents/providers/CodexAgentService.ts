@@ -180,6 +180,7 @@ import {
 import { buildCodexCapacityRecoveryCardMessage } from './codex-capacity-recovery-card.js';
 import { CodexErrorEvidence } from './codex-error-evidence.js';
 import { CODEX_LIVE_POLICY_ARGS } from './codex-live-policy.js';
+import { codexLoopbackProxyEnvironment } from './codex-loopback-proxy-env.js';
 import { type PreparedCodexNativeLaunch, prepareCodexNativeLaunch } from './codex-plugin-native-launch.js';
 import {
   buildCodexServedModelMismatchEvent,
@@ -2164,15 +2165,22 @@ export class CodexAgentService implements AgentService {
               ? { executionHome: apiExecutionHome ?? rawEnv.CODEX_HOME ?? `${rawEnv.HOME}/.codex` }
               : {}),
           });
-      codexEnv = await prepareCodexEnvironment(finalAccountEnv, {
-        workingDirectory: options?.workingDirectory,
-        inheritParentEnv: !native,
-        bindExecutionOwner: true,
-      });
+      codexEnv = { ...finalAccountEnv };
+      if (!native && !readOnly && !live && privateMcpRpc) {
+        Object.assign(codexEnv, codexLoopbackProxyEnvironment(codexEnv));
+      }
       if (!native && authMode === 'api_key') {
         if (!finalAccountEnv.CODEX_HOME) throw new Error('Codex account home is unavailable');
         mkdirSync(finalAccountEnv.CODEX_HOME, { recursive: true, mode: 0o700 });
       }
+
+      // Freeze only after account and local-connection policy. All carriers consume
+      // this snapshot without inheriting keys that the finalizer removed.
+      codexEnv = await prepareCodexEnvironment(codexEnv, {
+        workingDirectory: options?.workingDirectory,
+        inheritParentEnv: !native,
+        bindExecutionOwner: true,
+      });
 
       const semanticCompletionController = new AbortController();
 

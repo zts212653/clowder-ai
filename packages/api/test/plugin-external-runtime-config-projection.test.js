@@ -88,9 +88,9 @@ async function fixture(configuration, { store = true, onVerifyIntegrity } = {}) 
     });
   }
   await service.reconcile(EXTERNAL_PLUGIN_ID, installed.pluginInstanceId);
-  await runtime.inventoryStore.transaction((transaction) => {
-    const instance = transaction.instances.get(installed.pluginInstanceId);
-    transaction.instances.put({
+  await runtime.inventoryStore.transaction(async (transaction) => {
+    const instance = await transaction.instances.get(installed.pluginInstanceId);
+    await transaction.instances.put({
       ...instance,
       configReadiness: 'ready',
       activationState: 'enabled',

@@ -9,13 +9,19 @@
  * Through the bridge, the dispatch mapping (d) is the one F247 already has.
  */
 import assert from 'node:assert/strict';
-import { after, test } from 'node:test';
+import { afterEach, test } from 'node:test';
 import { CloudInvokeBridge } from '../dist/domains/cats/services/cloud-bridge/cloud-invoke-bridge.js';
 import { PluginConversationHostAdapter } from '../dist/domains/cats/services/cloud-bridge/plugin-conversation-host/plugin-conversation-host-adapter.js';
 import { ExternalPluginRuntimeError } from '../dist/domains/plugin/external-runtime/types.js';
-import { cleanup, conversationHostHarness, METHODS, validDiagnostic } from './f202-w2-3-h3b.fixture.js';
+import {
+  assertWorkerError,
+  cleanup,
+  conversationHostHarness,
+  METHODS,
+  validDiagnostic,
+} from './f202-w2-3-h3b.fixture.js';
 
-after(cleanup);
+afterEach(cleanup);
 
 const invalidDiagnostic = { ...validDiagnostic, errorCode: ['STALE_EXTENSION'] };
 
@@ -77,7 +83,10 @@ test('once the action ran, a failure is AMBIGUOUS_EFFECT, whatever code it carri
     };
     await assert.rejects(
       append(h),
-      coded('AMBIGUOUS_EFFECT', (error) => error.cause === thrown && !error.message.includes(thrown.message)),
+      coded('AMBIGUOUS_EFFECT', (error) => {
+        assertWorkerError(error.cause, thrown);
+        return !error.message.includes(thrown.message);
+      }),
     );
   }
   assert.equal(h.calls(METHODS.append).length, 2);

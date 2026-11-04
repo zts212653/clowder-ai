@@ -1,5 +1,5 @@
 const plugin = require('tailwindcss/plugin');
-const roles = require('./surface-roles.json');
+const roles = require('../../src/components/chat-background/surface-roles.json');
 
 // Accessibility roles do not decide the paint of a non-modal working drawer.
 // A true nested dialog still establishes its own opaque boundary.
