@@ -108,3 +108,17 @@ it('re-reads the new thread and ignores streamed activity from the previous thre
   });
   expect(apiFetch).toHaveBeenCalledTimes(2);
 });
+
+it('still refreshes for non-text material and invocation activation changes', async () => {
+  await act(async () => root.render(<ThreadWorksButton threadId={target.threadId} />));
+  await act(async () => {
+    useChatStore.getState().patchThreadMessage(target.threadId, target.messageId, {
+      contentBlocks: [{ type: 'image', url: '/uploads/fixture.png' }],
+    });
+  });
+  expect(apiFetch).toHaveBeenCalledTimes(2);
+  await act(async () => useChatStore.getState().setThreadHasActiveInvocation(target.threadId, true));
+  expect(apiFetch).toHaveBeenCalledTimes(3);
+  await act(async () => useChatStore.getState().setThreadHasActiveInvocation(target.threadId, false));
+  expect(apiFetch).toHaveBeenCalledTimes(4);
+});
