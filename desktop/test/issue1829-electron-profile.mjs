@@ -237,6 +237,7 @@ try {
   await page.getByText('Desktop test cat', { exact: false }).first().waitFor();
   await landing.locator('textarea').fill('New conversation local draft');
   assert.equal(await landing.locator('textarea').inputValue(), 'New conversation local draft');
+  await landing.getByText('Desktop test cat', { exact: false }).first().waitFor();
   assert.ok((await landing.locator('[data-testid="chat-input-composer-row"] svg').count()) > 0);
   journeys.push({ action: 'new page composer, member and icons', elapsedMs: Date.now() - startNew });
   await page.screenshot({ path: path.join(output, 'new-page.png') });
