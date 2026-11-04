@@ -594,6 +594,7 @@ import { registerWaitTerminationRoutes } from './routes/wait-termination-routes.
 import { ApiInstanceLease, type ApiInstanceLeaseInvalidation } from './services/ApiInstanceLease.js';
 import { resolveActiveProjectRoot } from './utils/active-project-root.js';
 import { createCliExecutionOwnerService } from './utils/cli-process-ownership.js';
+import { resolveWindowsStopEvidence } from './utils/windows-cli-child-owner.js';
 import { resolveMemoryRepoPaths } from './utils/memory-root.js';
 import { findMonorepoRoot } from './utils/monorepo-root.js';
 import { emitQueueUpdated } from './utils/queue-enrichment.js';
@@ -7674,6 +7675,18 @@ async function main(): Promise<void> {
         if (!redis) return;
         const authRecovery = await turnExecutionStore.reconcileStartup({ processStartedAt: PROCESS_START_AT });
         const liveExecutionOwners = await cliExecutionOwnerService.listLive();
+        // #1838: Windows providers have no supervisor manifest, so their durable
+        // Windows child-owner records plus a native identity probe are the stop evidence.
+        // Only a verified stop releases an execution; alive/unknown keep the protection.
+        const windowsStopEvidence = await resolveWindowsStopEvidence({ dataDir: process.env.CAT_CAFE_DATA_DIR });
+        for (const invocationId of windowsStopEvidence.verifiedStoppedInvocationIds) {
+          await turnExecutionStore.recordProviderTeardown?.(invocationId, Date.now());
+        }        if (windowsStopEvidence.unresolved.length > 0) {
+          app.log.warn(
+            { windowsStopEvidence: windowsStopEvidence.unresolved },
+            '[api] Preserved Windows provider executions whose stop could not be verified',
+          );
+        }
         const childReconciler = new TurnExecutionStartupReconciler({
           store: turnExecutionStore,
           settleEndedTurnResponse: (turn) => settleTurnResponse(turn, responseOutcomeForEndedTurn(turn)),
