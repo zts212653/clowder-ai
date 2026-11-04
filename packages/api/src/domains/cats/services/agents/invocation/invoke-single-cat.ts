@@ -3007,17 +3007,24 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
         'turnExecutionStore.priorProviderStop',
         signal,
       );
-      if (
-        running.some(
-          (record) =>
-            record.invocationId !== invocationId &&
-            record.threadId === threadId &&
-            record.catId === catId &&
-            hasUnconfirmedProviderTeardown(record),
-        )
-      ) {
+      const blockingChild = running.find(
+        (record) =>
+          record.invocationId !== invocationId &&
+          record.threadId === threadId &&
+          record.catId === catId &&
+          hasUnconfirmedProviderTeardown(record),
+      );
+      if (blockingChild) {
         turnExecutionFailureReason = 'prior_provider_teardown_unconfirmed';
-        throw new Error('同一角色的上一轮执行尚未确认停止，暂不能开始新任务。请先核对或受控停止原执行。');
+        // #1838: name the exact blocking child so the user can locate and stop it, instead of
+        // reading a generic refusal while the active list shows nothing.
+        const priorStart = blockingChild.providerStartedAt;
+        throw new Error(
+          `同一角色的上一轮执行尚未确认停止，暂不能开始新任务。阻塞执行 invocationId=${blockingChild.invocationId}` +
+            `（parent=${blockingChild.parentInvocationId ?? 'unknown'}，provider 启动于 ${
+              priorStart === undefined ? 'unknown' : new Date(priorStart).toISOString()
+            }）。请先核对或受控停止原执行。`,
+        );
       }
     }
 
