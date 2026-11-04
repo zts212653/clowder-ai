@@ -1,7 +1,6 @@
 import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { observeCliExecutionProcess } from '../../../../../utils/CliExecutionObservation.js';
-import { readWindowsProcessTable, recordWindowsChildOwner } from '../../../../../utils/windows-cli-child-owner.js';
 import { CliExitOutputDrain } from '../../../../../utils/CliExitOutputDrain.js';
 import type { CliExecutionOwnerRef } from '../../../../../utils/cli-process-ownership.js';
 import { buildChildEnv } from '../../../../../utils/cli-spawn.js';
@@ -79,33 +78,6 @@ class DirectAgentCarrierSession implements AgentCarrierSession {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     observeCliExecutionProcess(this.child, deps.executionOwner);
-    // #1838: on Windows there is no supervisor manifest to fall back on, so the provider's exact
-    // native identity is written durably as soon as the process exists. Without this a forced API
-    // kill leaves a `running` child that no later process can ever prove stopped.
-    // The record is NOT deleted on exit: a crash between this exit and the durable teardown write
-    // would otherwise destroy the only proof that the provider stopped. Startup recovery clears it
-    // after it settles the execution.
-    // Residual window: the record lands one probe after spawn, not before it.
-    if (process.platform === 'win32' && deps.executionOwner) {
-      const executionOwner = deps.executionOwner;
-      this.child.once('spawn', () => {
-        const rootPid = this.child.pid;
-        if (rootPid === undefined) return;
-        void readWindowsProcessTable([rootPid])
-          .then((table) => {
-            const identity = table?.get(rootPid);
-            if (!identity) return;
-            recordWindowsChildOwner({
-              execution: executionOwner,
-              root: { pid: identity.pid, creationDate: identity.creationDate },
-            });
-          })
-          .catch(() => {
-            // Recording is best effort only for the *live* path; the durable ledger keeps its
-            // protection, so a miss degrades to the old unknown behaviour rather than unlocking.
-          });
-      });
-    }
     this.stdoutDrain = new CliExitOutputDrain(this.child.stdout);
     this.stdioClosed = new Promise((resolve) => this.child.once('close', () => resolve()));
     let completeDrain: () => void;
