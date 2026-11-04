@@ -19,7 +19,9 @@ Why: 只修正现有作品投影的刷新依据，不改变投影来源或桌面
 `touchStreamActivity` 以及批量流写入会更新消息的活动 `timestamp`；该字段原先进入作品的 `materialKey`，导致每个文本片段取消旧读、重新读取作品。
 #1820 处理历史消息行渲染及日期格式器分配，没有修改这条作品刷新路径。
 
-砚砚与宪宪讨论后采用的改动：仅从 `materialKey` 移除 `timestamp`，保留消息 ID、`isStreaming`、`hasActive`、rich 材料和非文本块。
+砚砚与宪宪讨论后采用的改动：从 `materialKey` 移除 `timestamp`，保留消息 ID、`isStreaming`、`hasActive`、rich 材料和非文本块。
+补充反例发现，`useThreadMessages` 还按显示时间排序：两个尚无 lifecycle 快照的并发回复交替更新活动时间，会交换 ID 顺序，间接改变 key。
+因此作品刷新改用现成的 `selectThreadMessagesRaw`，排除活动时钟造成的显示重排；UI 仍使用原有显示排序。
 不修改消息时间或游标，不添加防抖，不关闭页头作品计数。
 `materialKey` 比较序列化后的内容，rich 对象重新分配但内容相同本身不会触发刷新。
 
@@ -29,6 +31,7 @@ Why: 只修正现有作品投影的刷新依据，不改变投影来源或桌面
 
 - 修复前：期望 1 次作品读取，实际 21 次，测试失败；其他两项既有语义回归通过。
 - 修复后：20 个片段只保留首次读取；消息文本、活动时间和时间线游标均继续更新。
+- 并发反例：只移除时间戳时，两个无 lifecycle 快照的回复交替 20 个片段，仍是期望 1 次、实际 21 次；改读原始线程快照后为 1 次。
 - 补充验证：rich、新消息、非文本材料、流结束、调用激活/结束、显式投影失效仍刷新；切换线程重新读取，旧线程继续产出不会刷新新线程作品。
 
 命令（工作目录 `packages/web`）：
@@ -37,7 +40,8 @@ Why: 只修正现有作品投影的刷新依据，不改变投影来源或桌面
 pnpm exec vitest run src/components/shell/__tests__/header-works-streaming.test.tsx src/hooks/__tests__/useThreadArtifacts-scope.test.tsx src/hooks/__tests__/useGlobalArtifacts-loading.test.tsx src/hooks/__tests__/usePagedGlobalWorks.test.tsx --maxWorkers=1
 ```
 
-结果：4 个文件，20 项通过。完整 Web 类型检查先需要构建 API：测试引用其 `dist`；缺失产物时的 TS2307 不代表产品源码失败。
+结果：4 个文件，21 项通过。现有 scope 测试的 selector mock 随读取边界调整，覆盖原来的失败撤回与跨线程读隔离。
+完整 Web 类型检查先需要构建 API：测试引用其 `dist`；缺失产物时的 TS2307 不代表产品源码失败。
 
 ## Windows Electron 对照
 
@@ -46,15 +50,17 @@ pnpm exec vitest run src/components/shell/__tests__/header-works-streaming.test.
 保留 PWA、IndexedDB、context isolation 和默认 Node 隔离；使用独立 profile、回环随机端口、synthetic HTTP/Socket.IO API。
 没有访问当前运行态业务 API、Redis、用户数据或真实模型。
 
-| 40 个文本片段（间隔 30ms） | 旧安装包前端 | 修复前端 |
+| 文本片段（间隔 30ms） | 旧安装包前端 | 修复前端 |
 | --- | ---: | ---: |
 | 浏览器作品请求 | 40 | 1 |
-| 作品请求取消 | 39 | 0 |
-| 服务端收到的作品请求（本次样本） | 40 | 1 |
+| 单猫 40 片段作品请求取消（多次采样） | 38–39 | 0 |
+| 双猫再交替 40 片段的作品请求 | 40 | 0（已有消息） |
+| 双猫交替的作品请求取消 | 39 | 0 |
 | pageerror / console warning | 0 / 0 | 0 / 0 |
 
 旧组：安装包 `.build-commit=faaa1b000ebe0dc6da2aa4c7c09fa80c5be5da43`，BUILD_ID=`uYY9fMzghPPducJ5UgUyR`，已包含 #1820。
-修复组：`.build-commit=a33d8c8988c9832166f00fe96ffbb413afc2c199`，BUILD_ID=`tTBgY5iA1QvyDkqd0YXhp`。
+首次单猫修复组：`.build-commit=a33d8c8988c9832166f00fe96ffbb413afc2c199`，BUILD_ID=`tTBgY5iA1QvyDkqd0YXhp`。
+补齐并发反例后的产品构建提交为 `0733d506e536d138cb69c3821d42342c85aad388`；最终构建身份及实际端口写入对应 `result.json`。
 该提交后的变更只有回归测试、验收工具与本文档，产品代码与采样构建保持一致。
 
 完整隔离旅程：首次新对话初始化 → 点击 A 并显示 A 的历史 → 接收流式输出 → A 持续后台输出时点击 B → B 历史取代 A → 在 B 输入草稿 → A/B 往返并恢复 B 草稿 → 点击新对话 → 输入 `@` 显示成员 → 正常输入，composer SVG 图标和成员头像资源可用。
@@ -79,6 +85,8 @@ node desktop/test/issue1829-electron-profile.mjs baseline
 输出默认进入系统临时目录 `cat-cafe-evidence/issue1829/`；可用 `ISSUE1829_EVIDENCE_DIR` 指定证据目录。
 每次保留 `result.json`、`observations.json`、renderer CPU profile、截图、服务器日志及隔离 profile。
 profile 为纯测试数据；测试退出会关闭自身 Electron、网关、Socket.IO 和 API。
+
+fallback 检查只命中测试工具：CORS 头默认值、fixture 默认响应和三个独立 CLI/env 默认值，不是产品多层恢复链；产品没有新增 fallback。
 
 ## 自检与剩余边界
 
