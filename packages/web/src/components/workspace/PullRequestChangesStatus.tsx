@@ -2,12 +2,15 @@
 
 import type { PullRequestChangesTarget } from '@cat-cafe/shared';
 import { defineShellCopy, useShellCopy } from '@/components/shell/shell-copy';
+import { prRefToUrl } from '../artifacts/artifact-view';
 import type { ChangesDiffData, ChangesDiffError } from './useChangesDiff';
 
 const copy = defineShellCopy(
   {
     zh: {
       back: '返回来源',
+      retry: '重试',
+      openOnGithub: '在 GitHub 打开',
       version: (sha: string) => `读取版本 ${sha.slice(0, 8)}`,
       empty: '这次 PR 读取没有可显示的文件',
       partial: '仅显示部分变更',
@@ -29,6 +32,8 @@ const copy = defineShellCopy(
     },
     en: {
       back: 'Back to source',
+      retry: 'Retry',
+      openOnGithub: 'Open on GitHub',
       version: (sha: string) => `Read revision ${sha.slice(0, 8)}`,
       empty: 'No displayable files in this PR read',
       partial: 'Showing partial changes',
@@ -61,13 +66,16 @@ export function PullRequestChangesStatus({
   data,
   error,
   onBack,
+  onRetry,
 }: {
   target: PullRequestChangesTarget;
   data: ChangesDiffData | null;
   error: ChangesDiffError | null;
   onBack?: () => void;
+  onRetry?: () => void;
 }) {
   const t = useShellCopy(copy);
+  const githubUrl = prRefToUrl(`${target.repoFullName}#${target.prNumber}`);
   return (
     <div
       className="shrink-0 border-b border-cafe-subtle px-3 py-2 text-xs text-cafe-secondary"
@@ -90,9 +98,34 @@ export function PullRequestChangesStatus({
         </p>
       )}
       {error && (
-        <p className="mt-1 text-conn-red-text" role="alert">
-          {t[error]}
-        </p>
+        <div className="mt-1">
+          <p className="text-conn-red-text" role="alert">
+            {t[error]}
+          </p>
+          <div className="mt-1 flex items-center gap-3">
+            {onRetry && (
+              <button
+                type="button"
+                data-testid="pull-request-changes-retry"
+                onClick={onRetry}
+                className="text-cafe-accent"
+              >
+                {t.retry}
+              </button>
+            )}
+            {githubUrl && (
+              <a
+                data-testid="pull-request-changes-github"
+                href={githubUrl}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="text-cafe-accent"
+              >
+                {t.openOnGithub}
+              </a>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );
