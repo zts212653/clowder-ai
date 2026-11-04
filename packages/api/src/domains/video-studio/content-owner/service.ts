@@ -9,6 +9,7 @@ import {
 
 export { ContentOwnerConflictError, ContentOwnerIdempotencyError, ContentOwnerNotFoundError } from './errors.js';
 
+import { join } from 'node:path';
 import {
   collectiveContentScopeRef,
   validateCollectiveContentScope,
@@ -34,11 +35,13 @@ export interface ProjectContentOwnerServiceOptions {
 }
 
 export class ProjectContentOwnerService {
+  readonly localExportDirectory: string;
   readonly collectiveCustody: CollectiveContentCustody;
   private readonly store: ProjectContentOwnerStore;
   private readonly now: () => string;
 
   constructor(options: ProjectContentOwnerServiceOptions) {
+    this.localExportDirectory = join(options.dataDir, 'open-exports');
     this.store = new ProjectContentOwnerStore(options.dataDir);
     this.collectiveCustody = new CollectiveContentCustody(this.store);
     this.now = options.now ?? (() => new Date().toISOString());

@@ -1,3 +1,4 @@
+import { agentClientMetadataSchema } from './agent-client-metadata.js';
 import { DEFAULT_PLUGIN_CONTRACT_RUNTIME, isManifestContractSupported } from './contract-policy.js';
 import type { PackageAdmissionContractRuntime } from './manifest-verifier.js';
 import { storedManifest } from './stored-manifest.js';
@@ -187,13 +188,20 @@ export function isCanonicalPackageDigest(value: string): boolean {
   return bytes.length === 64 && bytes.toString('base64') === encoded;
 }
 
-function parsePackage(value: unknown, index: number, contract: PackageAdmissionContractRuntime): PluginPackageRecord {
+export function parsePackage(
+  value: unknown,
+  index: number,
+  contract: PackageAdmissionContractRuntime,
+): PluginPackageRecord {
   const raw = object(value, `packages[${index}]`);
   const persistedManifest = raw.manifest === null ? raw.incompatibleManifest : raw.manifest;
   const stored = storedManifest(persistedManifest, `packages[${index}].manifest`);
   const validation = contract.validateManifest(persistedManifest);
   const compatible =
     validation.valid && isManifestContractSupported(stored.contractVersion, contract.manifestContractRange);
+  const clientMetadata =
+    raw.agentClientMetadata === undefined ? undefined : agentClientMetadataSchema.safeParse(raw.agentClientMetadata);
+  if (clientMetadata && !clientMetadata.success) corrupt(`packages[${index}].agentClientMetadata is invalid`);
   const record: PluginPackageRecord = {
     packageDigest: string(raw.packageDigest, `packages[${index}].packageDigest`),
     pluginId: string(raw.pluginId, `packages[${index}].pluginId`),
@@ -203,6 +211,7 @@ function parsePackage(value: unknown, index: number, contract: PackageAdmissionC
       compatible && validation.valid ? (structuredClone(persistedManifest) as PluginPackageRecord['manifest']) : null,
     ...(!compatible ? { incompatibleManifest: stored } : {}),
     signalSchemas: signalSchemaCatalog(raw.signalSchemas ?? {}, `packages[${index}].signalSchemas`),
+    ...(clientMetadata?.success ? { agentClientMetadata: clientMetadata.data } : {}),
     ...(raw.provenance === undefined
       ? {}
       : { provenance: packageProvenance(raw.provenance, `packages[${index}].provenance`) }),
@@ -226,7 +235,7 @@ function parsePackage(value: unknown, index: number, contract: PackageAdmissionC
   return record;
 }
 
-function parseInstance(value: unknown, index: number): PluginInstanceRecord {
+export function parseInstance(value: unknown, index: number): PluginInstanceRecord {
   const raw = object(value, `instances[${index}]`);
   const record: PluginInstanceRecord = {
     pluginInstanceId: string(raw.pluginInstanceId, `instances[${index}].pluginInstanceId`),

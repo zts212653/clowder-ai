@@ -21,6 +21,18 @@ export class InMemoryQueueLedgerStore implements QueueLedgerStore {
 
   private readonly privateAdmissions = new InMemoryQueueLedgerPrivateAdmissions();
 
+  replayPrivateAdmissionNow(entry: QueueLedgerEntry): QueueLedgerEnqueueResult | null {
+    const verdict = this.privateAdmissions.verdict(entry.threadId, entry);
+    if (verdict === 'unseen') return null;
+    if (verdict === 'conflict') return { outcome: 'conflict', entries: [] };
+    const current = this.getNow(entry.threadId, entry.id);
+    return { outcome: 'replayed', entries: current ? [current] : [] };
+  }
+
+  async replayPrivateAdmission(entry: QueueLedgerEntry): Promise<QueueLedgerEnqueueResult | null> {
+    return this.replayPrivateAdmissionNow(entry);
+  }
+
   enqueueNow(entries: readonly QueueLedgerEntry[], maxQueuedUserEntries?: number): QueueLedgerEnqueueResult {
     if (entries.length === 0) throw new Error('queue ledger enqueue requires at least one row');
     for (const entry of entries) assertQueueLedgerEntry(entry);

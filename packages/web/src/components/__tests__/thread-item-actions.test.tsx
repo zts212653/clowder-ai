@@ -124,8 +124,8 @@ describe('ThreadItem actions', () => {
     const allPinSvgs = container.querySelectorAll('[data-testid="thread-pin-button"]');
     expect(allPinSvgs.length).toBe(1);
 
-    // Delete stays in the menu
-    expect(buttonByTitle('删除对话')).toBeNull();
+    // Quick deletion follows More; the menu retains its existing delete entry.
+    expect(container.querySelector('[data-testid="thread-quick-delete"]')).not.toBeNull();
     expect(buttonByTitle('更多操作')).not.toBeNull();
   });
 

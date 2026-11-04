@@ -1,15 +1,19 @@
 import type { CatAlternative, CatId, CatRoutingError } from '@cat-cafe/shared';
 import { catRegistry } from '@cat-cafe/shared';
-import { getRoster } from '../../../../../config/cat-config-loader.js';
+import { getRoster, resolveCatSuccessor } from '../../../../../config/cat-config-loader.js';
 
 function buildAlts(excludeId: string | null, preferFamily?: string): CatAlternative[] {
   const roster = getRoster();
   const configs = catRegistry.getAllConfigs();
+  const successor = excludeId ? resolveCatSuccessor(excludeId) : null;
   return Object.entries(roster)
-    .filter(([id, e]) => id !== excludeId && e.available && catRegistry.has(id))
+    .filter(([id, e]) => id !== '__none__' && id !== excludeId && e.available && catRegistry.has(id))
     .map(([id, e]) => ({
       catId: id as CatId,
-      mention: configs[id]?.mentionPatterns[0] ?? `@${id}`,
+      mention:
+        configs[id]?.mentionPatterns.find((pattern) => pattern === `@${id}`) ??
+        configs[id]?.mentionPatterns[0] ??
+        `@${id}`,
       displayName: configs[id]?.displayName ?? id,
       family: e.family,
     }))
@@ -17,7 +21,7 @@ function buildAlts(excludeId: string | null, preferFamily?: string): CatAlternat
       const fd = +(a.family !== preferFamily) - +(b.family !== preferFamily);
       const la = roster[a.catId]?.lead ? 0 : 1;
       const lb = roster[b.catId]?.lead ? 0 : 1;
-      return fd || la - lb || a.catId.localeCompare(b.catId);
+      return +(b.catId === successor) - +(a.catId === successor) || fd || la - lb || a.catId.localeCompare(b.catId);
     });
 }
 
@@ -35,7 +39,8 @@ export function resolveCatTarget(mentionOrId: string): { ok: CatId } | { error: 
       }
     }
   }
-  if (!catId) return { error: { kind: 'cat_not_found', mention: mentionOrId, alternatives: buildAlts(null) } };
+  if (!catId || catId === '__none__')
+    return { error: { kind: 'cat_not_found', mention: mentionOrId, alternatives: buildAlts(null) } };
   // KD-9: two-step check — isCatAvailable not used (it returns true for not-in-roster)
   // cats not in roster = available (backward compat); only explicit available:false = disabled
   const entry = getRoster()[catId];

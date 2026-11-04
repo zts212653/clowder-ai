@@ -1,3 +1,4 @@
+import { readMemberRequestRevision } from './helpers/member-request-revision.js';
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
@@ -103,7 +104,11 @@ it('POST and PATCH /api/cats preserve synthetic API-key inheritance for a compat
     method: 'PATCH',
     url: '/api/cats/key-inheritance',
     headers,
-    payload: { accountRef: 'claude', defaultModel: 'claude-sonnet-4-6' },
+    payload: {
+      expectedRevision: await readMemberRequestRevision(app, '/api/cats/key-inheritance', headers),
+      accountRef: 'claude',
+      defaultModel: 'claude-sonnet-4-6',
+    },
   });
   assert.equal(updated.statusCode, 200, updated.body);
   assert.equal(resolveByAccountRef(root, 'claude').apiKey, key);

@@ -99,6 +99,7 @@ export interface CatData {
   strengths?: string[];
   sessionChain?: boolean;
   /** #712: MCP support toggle — when false, disables all MCP for this cat. */
+  executionApproval?: 'auto' | 'ask_user';
   mcpSupport?: boolean;
   /** F247: immutable transport identity for the built-in ChatGPT Pro cloud member. */
   identityProtection?: BuiltinCloudIdentityProtection;

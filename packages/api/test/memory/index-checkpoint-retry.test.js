@@ -14,19 +14,20 @@ async function fixture(t) {
   mkdirSync(join(docs, 'features'), { recursive: true });
   const path = join(root, 'evidence.sqlite');
   const store = new SqliteEvidenceStore(path);
+  const stores = [store];
   await store.initialize();
   const reader = new Database(path, { readonly: true });
   t.after(() => {
     reader.close();
-    store.close();
+    stores.forEach((openStore) => openStore.close());
     rmSync(root, { recursive: true, force: true });
   });
-  return { docs, path, store, db: store.getDb(), reader };
+  return { docs, path, store, stores, db: store.getDb(), reader };
 }
 
 for (const reopen of [false, true]) {
   test(`message retry repairs passage mentions after checkpoint backpressure (reopen=${reopen})`, async (t) => {
-    const { docs, path, store, db, reader } = await fixture(t);
+    const { docs, path, store, stores, db, reader } = await fixture(t);
     await store.upsertEntities([
       {
         entityId: 'concept:alias',
@@ -69,7 +70,7 @@ for (const reopen of [false, true]) {
     if (reopen) {
       store.close();
       await retryStore.initialize();
-      t.after(() => retryStore.close());
+      stores.push(retryStore);
     } else await builder.refreshThreadIndex();
     const mentions = retryStore
       .getDb()
@@ -84,16 +85,26 @@ for (const reopen of [false, true]) {
 for (const entry of ['rebuild', 'incremental']) {
   for (const reopen of [false, true]) {
     test(`document retry repairs remaining passages after ${entry} backpressure (reopen=${reopen})`, async (t) => {
-      const { docs, path, store, db, reader } = await fixture(t);
+      const { docs, path, store, stores, db, reader } = await fixture(t);
       const first = join(docs, 'features', 'F001-a.md');
-      const second = join(docs, 'features', 'F002-b.md');
+      const second = join(docs, 'features', 'F017-b.md');
+      const between = Array.from({ length: 15 }, (_, i) => {
+        const id = `F${String(i + 2).padStart(3, '0')}`;
+        return { id, path: join(docs, 'features', `${id}-between.md`) };
+      });
       const write = (path, id, text) => writeFileSync(path, `---\nfeature_ids: [${id}]\n---\n# Fixture\n\n${text}`);
       write(first, 'F001', 'oldfirst');
-      write(second, 'F002', 'oldsecond');
+      write(second, 'F017', 'oldsecond');
+      between.forEach(({ path, id }) => {
+        write(path, id, 'oldbetween');
+      });
       const builder = new IndexBuilder(store, docs);
       await builder.rebuild({ deferThreadIndexing: true });
       write(first, 'F001', 'newfirst');
-      write(second, 'F002', 'newsecond');
+      write(second, 'F017', 'newsecond');
+      between.forEach(({ path, id }) => {
+        write(path, id, 'newbetween');
+      });
       const run = store.runCheckpointedBatch.bind(store);
       let once = true;
       const hook = t.mock.method(store, 'runCheckpointedBatch', (fn) => {
@@ -107,18 +118,18 @@ for (const entry of ['rebuild', 'incremental']) {
       await assert.rejects(
         entry === 'rebuild'
           ? builder.rebuild({ deferThreadIndexing: true })
-          : builder.incrementalUpdate([first, second]),
+          : builder.incrementalUpdate([first, ...between.map(({ path }) => path), second]),
         ProjectionCheckpointBackpressureError,
       );
       hook.mock.restore();
       assert.ok(db.prepare("SELECT source_hash FROM evidence_docs WHERE anchor='F001'").get().source_hash);
-      assert.equal(db.prepare("SELECT source_hash FROM evidence_docs WHERE anchor='F002'").get().source_hash, null);
+      assert.equal(db.prepare("SELECT source_hash FROM evidence_docs WHERE anchor='F017'").get().source_hash, null);
       reader.exec('ROLLBACK');
       const retryStore = reopen ? new SqliteEvidenceStore(path) : store;
       if (reopen) {
         store.close();
         await retryStore.initialize();
-        t.after(() => retryStore.close());
+        stores.push(retryStore);
       }
       const retryBuilder = reopen ? new IndexBuilder(retryStore, docs) : builder;
       const result = await retryBuilder.rebuild({ deferThreadIndexing: true });
@@ -129,7 +140,7 @@ for (const entry of ['rebuild', 'incremental']) {
       t.diagnostic(JSON.stringify({ result, passagesAfterSuccessfulRetry: rows }));
       assert.ok(rows.some((row) => row.doc_anchor === 'F001' && row.content.includes('newfirst')));
       assert.ok(
-        rows.some((row) => row.doc_anchor === 'F002' && row.content.includes('newsecond')),
+        rows.some((row) => row.doc_anchor === 'F017' && row.content.includes('newsecond')),
         'successful retry must finish the second document',
       );
     });

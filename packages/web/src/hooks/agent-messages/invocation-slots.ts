@@ -202,15 +202,16 @@ export function markThreadInvocationComplete(
   options: HandleBackgroundMessageOptions,
 ): void {
   const { store } = options;
-  store.setThreadLoading(msg.threadId, false);
   if (msg.invocationId) {
     clearTerminalInvocationIdentity(msg.threadId, msg.catId, msg.invocationId, msg.turnInvocationId);
   }
   const before = store.getThreadState(msg.threadId);
   const slotsBefore = Object.keys(before.activeInvocations ?? {}).length;
   removeBackgroundCatSlots(msg, options, before);
+  const slotsAfter = Object.keys(store.getThreadState(msg.threadId).activeInvocations ?? {}).length;
+  if (slotsAfter === 0) store.setThreadLoading(msg.threadId, false);
   // Only a real >0 → 0 transition: stale cats otherwise accumulate via merge semantics.
-  if (slotsBefore > 0 && Object.keys(store.getThreadState(msg.threadId).activeInvocations ?? {}).length === 0) {
+  if (slotsBefore > 0 && slotsAfter === 0) {
     store.replaceThreadTargetCats(msg.threadId, []);
   }
 }

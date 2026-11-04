@@ -7,6 +7,10 @@
  */
 
 import type { SchedulerAwaitStateV1 } from '@cat-cafe/shared';
+import {
+  type HoldLifecycleStatus,
+  isTerminalHoldLifecycleStatus,
+} from '../domains/ball-custody/hold-lifecycle-status.js';
 import { readManagedCommandWakeProjection } from '../domains/ball-custody/ManagedCommandWakeRecoverySweep.js';
 import { resolveManagedCommandJob } from '../domains/ball-custody/managed-command-job-reference.js';
 import {
@@ -31,17 +35,7 @@ export type HoldExpectedSignalKey =
   | 'managed_command_complete'
   | 'user_message';
 
-export type HoldLifecycleStatus =
-  | 'not_started'
-  | 'active'
-  | 'retired_by_event'
-  | 'retired_by_replacement'
-  | 'retired_expired'
-  | 'retired_invalid'
-  | 'cancel_requested'
-  | 'cancelled_by_user'
-  | 'escalated'
-  | 'fired';
+export type { HoldLifecycleStatus } from '../domains/ball-custody/hold-lifecycle-status.js';
 
 export interface HoldLifecycleProjection {
   readonly mode: 'timer' | 'wake_when';
@@ -119,7 +113,7 @@ export function isCancelableHoldBallTask(task: DynamicTaskDef): boolean {
 }
 
 export function isRetiredHoldBallTombstone(task: DynamicTaskDef): boolean {
-  return isHoldBallTask(task) && readHoldLifecycle(task)?.status === 'retired_by_event';
+  return isHoldBallTask(task) && isTerminalHoldLifecycleStatus(readHoldLifecycle(task)?.status);
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {

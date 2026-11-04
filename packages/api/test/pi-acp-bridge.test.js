@@ -282,6 +282,7 @@ test('Pi local bridge failures remain prompt failures through the real ACP host 
       onCapacity() {},
       offCapacity() {},
       clearRecentCapacitySignal() {},
+      cancelSession() {},
       async newSession() {
         return { sessionId: 'host-pi' };
       },

@@ -256,7 +256,7 @@ function buildOwnerRosterEntry(): RosterEntry {
     roles: ['owner'],
     lead: false,
     available: true,
-    evaluation: 'co-creator / 大当家',
+    evaluation: 'co-creator',
   };
 }
 

@@ -54,6 +54,7 @@ for (const [setting, expected] of [
     const controller = new AbortController();
     t.after(() => controller.abort());
     const prepared = await prepareClaudeSdkLaunch({
+      runtime: claudeSdkRuntimeFixture(),
       catId: createCatId('opus'),
       model: 'claude-opus-4-6',
       prompt: 'normal task',
@@ -90,6 +91,7 @@ test('SDK entrypoint rejects unsupported labels before starting the provider', a
     process.env[settingKey] = label;
     await assert.rejects(
       prepareClaudeSdkLaunch({
+        runtime: claudeSdkRuntimeFixture(),
         catId: createCatId('opus'),
         model: 'claude-opus-4-6',
         prompt: 'normal task',
@@ -100,3 +102,5 @@ test('SDK entrypoint rejects unsupported labels before starting the provider', a
     );
   }
 });
+
+import { claudeSdkRuntimeFixture } from './helpers/claude-sdk-runtime-fixture.js';

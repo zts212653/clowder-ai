@@ -11,6 +11,7 @@ import Fastify from 'fastify';
 import { SessionChainStore } from '../src/domains/cats/services/stores/ports/SessionChainStore.js';
 import { ThreadStore } from '../src/domains/cats/services/stores/ports/ThreadStore.js';
 import { sessionChainRoutes } from '../src/routes/session-chain.js';
+import { importExecutionBoundary } from './helpers/import-execution-boundary.js';
 
 // Native import fixtures use local single-user mode. Owner-gate denial and
 // configured-owner success are covered in f322-recent-sessions.test.ts.
@@ -25,6 +26,7 @@ async function fixture(locked = false) {
   await app.register(sessionChainRoutes, {
     threadStore: threads,
     sessionChainStore: sessions,
+    resolveImportExecutionBoundary: importExecutionBoundary('/project'),
     inspectLocalSession: async () => {
       if (locked) throw Object.assign(new Error('active writer'), { code: 'SESSION_ACTIVE_WRITER' });
       return {

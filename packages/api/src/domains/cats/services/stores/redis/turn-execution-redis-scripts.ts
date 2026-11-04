@@ -33,6 +33,12 @@ local current = redis.call('HGET', KEYS[1], 'status')
 if not current then return -1 end
 if current ~= 'running' then return 0 end
 
+local tracked = redis.call('HGET', KEYS[1], 'providerLifecycleTracked')
+local dispatched = redis.call('HGET', KEYS[1], 'providerStartedAt')
+local teardown = redis.call('HGET', KEYS[1], 'providerTeardownAt')
+if tracked == '1' and dispatched and dispatched ~= '' and
+  (not teardown or teardown == '') and (not ARGV[5] or ARGV[5] == '') then return -2 end
+
 redis.call('HSET', KEYS[1],
   'status', ARGV[1],
   'endedAt', ARGV[2],

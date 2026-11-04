@@ -12,6 +12,30 @@ code_anchors:
   - packages/api/src/domains/cats/services/cloud-bridge/dot/dot-identity.ts
   - cat-config.json
   - packages/api/src/config/cat-config-loader.ts
+  - packages/api/src/config/member-identity-sources.ts
+  - packages/shared/src/member-profiles.ts
+  - packages/shared/src/member-identity.ts
+  - packages/shared/src/l0-input.ts
+  - packages/shared/src/l0-input-capture.ts
+  - packages/api/src/domains/cats/services/agents/providers/l0-input-capture.ts
+  - packages/api/src/domains/cats/services/agents/providers/member-execution-preferences.ts
+  - packages/api/src/domains/cats/services/agents/invocation/execution-account-binding.ts
+  - packages/api/src/domains/cats/services/agents/invocation/host-execution-boundary.ts
+  - packages/api/src/domains/cats/services/agents/invocation/execution-workspace.ts
+  - packages/api/src/domains/cats/services/agents/invocation/invocation-service-scope.ts
+  - packages/api/src/domains/cats/services/agents/registry/AgentRegistry.ts
+  - packages/api/src/domains/cats/services/agents/routing/AgentRouter.ts
+  - packages/api/src/domains/cats/services/agents/session-contract/implementation-registry.ts
+  - packages/api/src/domains/cats/services/agents/session-contract/registered-session-agent-service.ts
+  - packages/api/src/domains/cats/services/agents/invocation/shared-mcp-launch.ts
+  - packages/api/src/config/codex-cli.ts
+  - packages/api/src/domains/cats/services/agents/providers/acp/AcpAgentService.ts
+  - packages/api/src/domains/cats/services/agents/providers/acp/AcpServiceFactory.ts
+  - packages/api/src/domains/cats/services/agents/providers/claude-mcp-config.ts
+  - packages/api/src/domains/cats/services/agents/providers/kimi-mcp-config.ts
+  - packages/api/src/domains/cats/services/agents/providers/opencode-config-writer.ts
+  - packages/web/src/components/settings/members/member-save-record.ts
+  - packages/web/src/components/settings/members/member-save-extras.ts
   - packages/api/src/config/account-resolver.ts
   - packages/api/src/config/account-store-snapshot.ts
   - packages/api/src/config/account-routing-capacity.ts
@@ -144,6 +168,10 @@ cited_by:
 
 # Identity / Session
 
+## Member identity and execution projections
+
+The member catalog remains the identity owner. RoleProfile and ExecutionProfile are read-time views of its existing resolved member; field provenance comes from the same template/catalog read and is carried into the frozen binding. L0, teammate routing and the existing compiled preview share one dossier suppression decision. Explicit complete-config input remains authoritative; template-only legacy members retain a labelled dossier fallback. The official member page reconciles uncertain member writes by the original catId before retry, and saves strategy overrides and global Codex keys independently through their resource revisions. This adds no member database, approval authority or session store. Completing the admission/compiler consumer snapshot and native session compatibility remains a separate implementation step.
+
 Architecture cell: identity-session
 
 ## Canonical Owner
@@ -181,10 +209,18 @@ F209's entity registry is adjacent but not canonical for agent identity. Its `en
 
 - For agent identity, update roster/config/schema contracts and keep CatId runtime-dynamic.
 - For provider accounts, resolve through the existing account store, pass one launch snapshot into the existing execution boundary, and finalize authentication env after all overlays. Control and reconnect reuse the accepted launch options and validate the same initialized connection before business RPC. API/custom probes and calls share a stable account/config/private execution root; Collective remains separately isolated. Collective keeps its isolated instructions, skills, history and SQLite root while projecting only the selected existing file login. Managed account layout is not enabled by P2a; its remaining continuity/configuration checks are in the F320 plan and fixture evidence.
-- For thread-scoped agent runtime config, persist only raw intent and project it through the current roster/provider/model capability after actual-cat routing; keep typed invocation options and provider argv validation as the execution boundary.
+- For thread-scoped agent runtime config, persist only raw intent and project it through the current roster/provider/model capability after actual-cat routing; keep typed invocation options and provider argv validation as the execution boundary. Existing execution admission captures member model/effort and thread effort/speed before leases; the provider consumes that snapshot while adopted values remain separate observations. Workspace capture copies the ThreadStore record rather than retaining a mutable in-memory store reference.
+- ACP admission consumes the existing MCP resolver through the concrete pinned service and stores owned descriptors in the execution binding. Session ownership still materializes the current turn's callback credentials; descriptor capture does not move credential or tool authority.
+- Host admission also captures the existing shared MCP context and transport in that binding. Invocation creation and callback materialization consume the same immutable deployment, data/workspace roots and admitted families; they do not repeat discovery after admission. This does not replace the MCP request authority or its revocation checks.
+- Implementation registration and concrete service generations remain process-local to their existing registry owners. Invocation pins inherit the concrete service token; registered views validate their captured registration and service again before admission completes. The binding carries only the owned key/generation pair. This is neither a persistent client version nor proof of cross-restart session compatibility, and it does not replace the existing launch fence or lease lifecycle.
+- Admission rechecks the same existing account/execution projection after asynchronous provider discovery. Changed consumed account or launch-policy values reject that admission; unrelated account metadata excluded by the existing runtime resolver does not become a new execution input. This adds no account store, credential hash or global revision service, and is not the remaining multi-owner reparse protocol.
+- Router refresh updates its owned service and unavailability tables in place. Retained strategy dependencies therefore resolve later members against the current registry at dequeue, while an invocation already holding a concrete service keeps that reference. Registry publication remains synchronous; no polling, event bus or new execution authority is introduced.
+- Codex native declares its construction client; the ACP factory captures the member clientId before asynchronous preparation and passes that provenance into its concrete service. Registered views preserve the child's declared client and generation. Admission rejects a declared client mismatch before discovery, independently of model, display name or command spelling. This does not authenticate a remote executable or imply unported native-client coverage.
 - For connector binding, use `ConnectorThreadBindingStore` and connector binding keys instead of ad hoc thread maps.
 - For bubble identity, follow ADR-033 and route through `bubble-pipeline` contracts and tests.
 - For runtime session binding, use Session Chain / runtime-session metadata keyed by Clowder AI session id and runtime session id. IDE-direct registration belongs behind the external runtime registration contract and agent-key authorization, not ad hoc JSON maps.
+- Managed invocation records selected Host client/carrier, process-local implementation generation, account reference and normalized workspace/project in the existing SessionRecord before provider entry. SessionChainStore owns write-once/CAS comparison; a changed or unknown native binding uses the existing seal/rebuild flow, while an unproven explicit import fails in place. These facts are not native adoption evidence, a stable implementation version, native state-root proof, credential revision or the complete CompatKey. AGY Native binding checks remain independent.
+- Codex contributes adapter-provided `accountStateRoot` and `accountOwnerRoot` when its selected launch descriptor proves them; generic adapters omit these fields until they expose equivalent verified facts. The projection never derives a state root from arbitrary environment variables or persists credentials.
 - For context continuity, extend `session/context/` and preserve its separation from transcript persistence, Session lifecycle and F299 request-generation evidence. Source domains retain body/revision/invalidator truth; provider receipt is the only delivery-commit authority.
 - For session-backed thread reads, call `thread-access-policy`; a user index grants current-user-scoped reads, never access to every user's records under that thread id.
 - For request-generation evidence, append to the generation's active Session and join through the exact child invocation. Keep source bodies behind their existing owner resolvers; typed `unknown` is the safe result when no owner resolver exists.
@@ -227,6 +263,30 @@ Native uses the existing SessionManager/SessionChainStore for durable resume bin
 
 Official CLI init is verified before stdin delivery; only then does the existing F296 preflight settle the final generation and F299 record its bytes. A prior unsupported scope adopts a newly observed runtime through one unconsumed cold epoch; it becomes hot only after actual generation consumption and another verified resume. Compaction checkpoints advance the existing epoch owner. The raw cumulative result/error and transport diagnostics remain separate from current-turn completion evidence.
 
+## Frozen L0 Input
+
+L0 input capture remains with the existing invocation/compiler owner. Shared Node-only capture and pure rendering are used by the diagnostic CLI and API without bootstrapping a second registry in the invocation child. The admission binding carries private immutable input in memory; the child receives it through its existing stdin pipe and caches by content digest plus compiler version. Native provider and AGY control consumers must receive that input, while standalone live diagnostics label their revision. This does not create another identity store or session authority; complete execution/MCP/policy/implementation freezing is a separate remaining boundary.
+
+The existing invocation scope owns failed admission pins. Serial and parallel routes release a failed pin and resolve one fresh view only for an owned configuration conflict before provider invocation; a second conflict is terminal for this admission. Provider sends and opaque status codes do not enter that retry. This does not establish persistent session compatibility or a new retry owner.
+
+Generic ACP's explicit account reference is resolved by the existing account owner at admission. The existing ACP factory checks its private construction-time account source around MCP capture; stale pool inputs reject new admission, while an admitted invocation keeps its captured service. No private account body is added to session compatibility or durable audit by this guard.
+
+Catalog ACP construction retains owned launch settings and its existing catalog accessor. Invocation capture validates that source before and after MCP capture; admitted plans and the L0 child do not call the accessor. Plugin lifecycle remains with implementation registration rather than a new launch registry.
+
+## 会话取消与终态边界
+
+现有 session bridge 在取消时关闭补充输入，但继续收束原 provider 事件；取消回包不作为终态。ACP session provider 在原源迭代器清理完成之后才发布终态和解除 active；清理失败不被本地 cancelled 覆盖，也不能经包装器二次 return 清除 busy。该边界复用现有 session/iterator owner，不新增取消状态库。传输层提前 done、未知执行恢复、原生停机证明与完整 C12 仍须在各自 owner 闭环。
+
 ## Canon Member Avatar Consumer
 
 F326 Phase D resolves the existing member id, then projects its one member-avatar slot from collaborative-content-plane. The direct Human selects it with its own receipt; mixed avatar/profile PATCH is rejected before either write. Linked members keep the canon projection after profile-only saves, clear remains linked, and unreadable bound bytes never fall back to catalog or another image. This consumer does not move roster or member authority.
+
+单飞 ACP 的 lease.release 由既有 retirement barrier 证明实际进程关闭，service finally 必须等待；重复或过代 lease 仍观察该关闭结果。排队退休与移除 pool entry 不等于原生已停止，关闭失败不能由 Bridge 转成成功取消。本切片未改变 multiplexed carrier 的 session sealing 或 Host 路由的有界清理策略。
+
+Host 通过现有 AgentService 的内部 cancellationMode:drain 声明识别 adapter 对取消及清理的所有权，不用 vendor 名推断。invocation 对该流等待清理，parallel merge 不提前合成其终态；声明固定在 Registered invocation view。未声明的 legacy 继续原有有界退出。该声明不是对未知/失败停止或全部平台的认证。
+
+并行 invocation 的局部 AbortController 合入 batch/per-cat 信号；merger 对声明 drain 的 child 拥有退出取消与等待责任，所有受控 child 清理结束后再报告错误。原生 ACP 提前 return 时必须先在仍有活动请求的内层边界取消，再关闭 promptStream，不能把移除本地监听误认成上游停止。关闭失败的 unknown/恢复仍由既有执行 owner 待闭环。
+
+启动恢复的原 interruptRunningBefore 不以 Host 年龄证明 native 停止：providerLifecycleTracked 且已有 providerStartedAt、没有 providerTeardownAt 的 child 继续 running，不进入 response 终态收尾。停止证明由原执行 owner 写回原字段之后，才可沿已有恢复收敛；这是原记录的判断，不是新的取消状态权威。
+
+ACP 进程 error 仅标记连接不可复用；真实 exit 才能设置 exited。close 对已经取得 PID 的原生进程继续受控停止并等待，不能因更早的 error 跳过；启动失败从未取得 PID 则无进程可发信号。连接 closed 与进程退出仍是不同事实。

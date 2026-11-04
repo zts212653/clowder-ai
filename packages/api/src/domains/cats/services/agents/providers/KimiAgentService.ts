@@ -18,6 +18,7 @@ import { formatCliNotFoundError } from '../../../../../utils/cli-resolve.js';
 import { isCliError, isCliTimeout, isLivenessWarning, spawnCli } from '../../../../../utils/cli-spawn.js';
 import type { SpawnFn } from '../../../../../utils/cli-types.js';
 import { resolveKimiCliRuntime, resolveKimiRuntimePaths } from '../../../../../utils/kimi-cli-runtime.js';
+import { readKimiModelMetadata } from '../../../../../utils/kimi-model-metadata.js';
 import { CliRawArchive } from '../../session/CliRawArchive.js';
 import type {
   AgentFreshnessCarrierCapability,
@@ -63,7 +64,7 @@ import {
   lookupKimiL0Fingerprint,
   recordKimiL0Fingerprint,
 } from './kimi-l0-session-fingerprint.js';
-import { type KimiMcpLease, prepareKimiMcpConfig } from './kimi-mcp-config.js';
+import { captureKimiMcpConfig, type KimiMcpLease, prepareKimiMcpConfig } from './kimi-mcp-config.js';
 import { assertKimiMemberAccount, captureKimiMemberOptions, prepareKimiMemberProfile } from './kimi-scoped-native.js';
 import { ensureKimiSecretHooks } from './kimi-secret-hooks.js';
 import { compileL0ViaSubprocess } from './l0-compiler.js';
@@ -76,17 +77,29 @@ const log = createModuleLogger('kimi-agent');
  * CLI's operational effort channel; bypasses support_efforts but cannot
  * re-enable thinking the user turned off).
  *
- * Returns null for boolean-thinking Kimi models (no support_efforts metadata,
- * e.g. kimi-for-coding): the harness must not invent tiers the model does not
- * have, so the CLI keeps its own thinking config and no env is injected.
+ * Declared model tiers take precedence over legacy name-based compatibility.
+ * Null means no tier control; undefined leaves the native configuration alone.
  */
 export function resolveKimiEffortLevel(
   catId: string,
   effectiveModel: string | null | undefined,
   override: CliEffortPreset | null | undefined,
-): string | null {
+  preferences?: AgentServiceOptions['executionPreferences'],
+  declaredEfforts?: readonly string[] | null,
+): string | null | undefined {
+  if (declaredEfforts !== undefined) {
+    if (!declaredEfforts?.length) return null;
+    // Frozen platform defaults are not a member choice. With declared tiers,
+    // leave their resolution to the CLI instead of validating a synthesized high.
+    const memberEffort = preferences ? preferences.effort : catRegistry.tryGet(catId)?.config.cli?.effort?.trim();
+    const inherited = preferences?.effortSource === 'platform_default' ? undefined : memberEffort;
+    const selected = override && declaredEfforts.includes(override) ? override : inherited;
+    if (!selected) return undefined;
+    if (!declaredEfforts.includes(selected)) throw new Error(`kimi_effort_unsupported:${selected}`);
+    return selected;
+  }
   if (!getCliEffortOptionsForProvider('kimi', effectiveModel)) return null;
-  const inherited = getCatEffort(catId, undefined, 'kimi', effectiveModel);
+  const inherited = preferences?.effort ?? getCatEffort(catId, undefined, 'kimi', effectiveModel);
   return resolveCliEffortOverride('kimi', effectiveModel, inherited, override).effective;
 }
 
@@ -122,6 +135,17 @@ export class KimiAgentService implements AgentService {
   /** Kimi Code carries identity through its native --agent-file channel. */
   injectsL0Natively(): boolean {
     return isKimiNativeL0ChannelAvailable();
+  }
+
+  async captureInvocationOptions(input: Parameters<NonNullable<AgentService['captureInvocationOptions']>>[0]) {
+    return {
+      frozenKimiMcpConfig: await captureKimiMcpConfig({
+        callbackEnv: { CAT_CAFE_CAT_ID: this.catId, ...input.accountEnv },
+        workingDirectory: input.workingDirectory,
+        mcpServerPath: this.mcpServerPath,
+        mcpSupport: input.mcpSupport,
+      }),
+    };
   }
 
   freshnessCarrierCapability(): AgentFreshnessCarrierCapability {
@@ -161,11 +185,20 @@ export class KimiAgentService implements AgentService {
     // account's overrides. Identity and MCP callback authorization stay scoped
     // to callbackEnv; only path/model readers use this merged environment.
     const runtime = resolveKimiCliRuntime();
-    const toolEnv = { ...options?.callbackEnv, ...options?.accountEnv };
+    const toolEnv = {
+      ...options?.callbackEnv,
+      ...options?.accountEnv,
+    };
+    if (options?.frozenKimiMcpConfig) toolEnv.KIMI_CODE_HOME = options.frozenKimiMcpConfig.nativeDirectory;
     const runtimePaths = resolveKimiRuntimePaths(toolEnv);
-    const requestedModel = options?.callbackEnv?.CAT_CAFE_KIMI_MODEL_OVERRIDE ?? this.model;
+    const requestedModel =
+      options?.callbackEnv?.CAT_CAFE_KIMI_MODEL_OVERRIDE ?? options?.executionPreferences?.model ?? this.model;
     // Empty native selection means omit --model and let the CLI resolve its own config.
-    const followsNativeConfig = !scoped && catRegistry.tryGet(this.catId)?.config.configurationSource === 'native_tool';
+    const followsNativeConfig =
+      !scoped &&
+      (options?.executionPreferences
+        ? options.executionPreferences.configurationSource === 'native_tool'
+        : catRegistry.tryGet(this.catId)?.config.configurationSource === 'native_tool');
     const effectiveModel = scoped
       ? toolEnv.KIMI_MODEL_NAME || requestedModel
       : requestedModel && !followsNativeConfig
@@ -180,7 +213,15 @@ export class KimiAgentService implements AgentService {
     const observedModel =
       followsNativeConfig && !effectiveModel ? readKimiConfiguredModel(toolEnv, runtimePaths) : undefined;
     const identityModel = effectiveModel || observedModel || '';
-    const effortLevel = resolveKimiEffortLevel(this.catId as string, identityModel, options?.reasoningEffortOverride);
+    const nativeMetadata = scoped ? undefined : readKimiModelMetadata(runtimePaths.configPath);
+    const nativeModel = nativeMetadata?.models.find((model) => model.alias === identityModel);
+    const effortLevel = resolveKimiEffortLevel(
+      this.catId as string,
+      identityModel,
+      options?.reasoningEffortOverride,
+      options?.executionPreferences,
+      nativeMetadata?.thinkingEnabled === false ? null : nativeModel ? (nativeModel.efforts ?? null) : undefined,
+    );
     const metadata: MessageMetadata = { provider: 'kimi', model: identityModel };
     const imagePaths = await extractTrustedImagePaths(
       options?.contentBlocks,
@@ -239,6 +280,8 @@ export class KimiAgentService implements AgentService {
     let rejectedResumeSessionId: string | undefined;
     try {
       const l0 = await this.l0CompilerFn({
+        frozenInput: options?.frozenL0Input,
+        requireFrozenInput: true,
         catId: this.catId as string,
         userId: options?.callbackEnv?.CAT_CAFE_USER_ID,
         ...(scoped ? { projection: 'scoped-member' as const, runtimeModel: identityModel } : {}),
@@ -360,9 +403,10 @@ export class KimiAgentService implements AgentService {
       if (scopedProfile) {
         mcpLease = { env: scopedProfile.env, dispose: scopedProfile.dispose };
       } else {
-        await ensureKimiSecretHooks({ ...(options?.callbackEnv ?? {}), ...(options?.accountEnv ?? {}) });
+        await ensureKimiSecretHooks(toolEnv);
         mcpLease = await prepareKimiMcpConfig({
-          callbackEnv: { ...(options?.callbackEnv ?? {}), ...(options?.accountEnv ?? {}) },
+          callbackEnv: toolEnv,
+          frozenKimiMcpConfig: options?.frozenKimiMcpConfig,
           workingDirectory: options?.workingDirectory,
           mcpServerPath: this.mcpServerPath,
         });
@@ -446,7 +490,7 @@ export class KimiAgentService implements AgentService {
           ...(scoped
             ? { KIMI_MODEL_NAME: options?.accountEnv?.KIMI_MODEL_NAME || apiKeyEnv?.KIMI_MODEL_NAME || identityModel }
             : {}),
-          KIMI_MODEL_THINKING_EFFORT: effortLevel,
+          ...(effortLevel !== undefined ? { KIMI_MODEL_THINKING_EFFORT: effortLevel } : {}),
           // Native mode requires the kimi-code v2 engine for --agent-file.
           [KIMI_V2_ENGINE_ENV_KEY]: '1',
         },

@@ -115,7 +115,8 @@ export class NativeMcpLaunches {
   /** Ordinary members keep canonical access policy while resolving this Host's local activation. */
   async memberView(localCapabilityRoot?: string): Promise<InvocationPluginMcpView> {
     const entries: InvocationPluginMcpEntry[] = [];
-    for (const [instanceId, activation] of [...this.#activations]) {
+    const activations = [...this.#activations];
+    for (const [instanceId, activation] of activations) {
       let admitted = false;
       try {
         admitted = (await this.currentActivation(instanceId)).activation === activation;
@@ -161,9 +162,14 @@ export class NativeMcpLaunches {
         );
       }
     }
+    const availability = entries.map((entry) => entry.isCurrent());
     return Object.freeze({
       entries: Object.freeze(entries),
       ...(localCapabilityRoot ? { localCapabilityRoot } : {}),
+      isCurrent: () =>
+        this.#activations.size === activations.length &&
+        activations.every(([id, activation]) => this.#activations.get(id) === activation) &&
+        entries.every((entry, index) => entry.isCurrent() === availability[index]),
     });
   }
 

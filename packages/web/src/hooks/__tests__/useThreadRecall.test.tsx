@@ -34,6 +34,51 @@ describe('F321 scoped recall reads', () => {
     await act(async () => root.unmount());
     container.remove();
   });
+  it('keeps an actual matter read as pull and carries its current, permission-checked summary', async () => {
+    useChatStore.setState({
+      messages: [
+        {
+          id: 'reply-matter',
+          type: 'assistant',
+          catId: 'sonnet',
+          content: 'Reply',
+          timestamp: 1,
+          extra: { stream: { turnInvocationId: 'inv-matter' } },
+        },
+      ],
+    });
+    api.mockImplementation(
+      async (path) =>
+        new Response(
+          JSON.stringify(
+            path.includes('memory-cues')
+              ? {
+                  cues: [
+                    {
+                      cueId: 'matter-read',
+                      consumerCatId: 'sonnet',
+                      sourceAnchor: 'matter:one',
+                      sourceRevision: 'revision:1',
+                      resolverFamily: 'matter',
+                      status: 'drilled',
+                      presentedAt: 2,
+                      source: 'pull',
+                      matterRead: { status: 'current', matterId: 'one', title: 'Settings', messageCount: 2 },
+                    },
+                  ],
+                }
+              : { events: [], sourceViews: [] },
+          ),
+        ),
+    );
+    function MatterProbe() {
+      return <pre>{JSON.stringify(useThreadRecall().events)}</pre>;
+    }
+    await act(async () => root.render(<MatterProbe />));
+    const events = JSON.parse(container.textContent || '[]');
+    expect(events[0].source).toBe('pull');
+    expect(events[0].matterRead).toEqual({ status: 'current', matterId: 'one', title: 'Settings', messageCount: 2 });
+  });
   it('keeps history failure observable while retaining message-bound live recalls', async () => {
     api.mockRejectedValue(new Error('unavailable'));
     useChatStore.setState({

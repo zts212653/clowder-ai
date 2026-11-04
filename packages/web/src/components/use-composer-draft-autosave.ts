@@ -9,13 +9,19 @@ interface DraftAutosaveOptions {
   threadId?: string;
   hydratedRef: MutableRefObject<boolean>;
   hydrationGenerationRef: MutableRefObject<number>;
+  ownerIdRef: MutableRefObject<number>;
   admissionsPendingRef: MutableRefObject<number>;
   admissionEpoch: number;
   input: string;
   images: File[];
   contextAttachments: ContextAttachment[];
   captureCurrentDraft: () => DurableDraftSnapshot;
-  persistDraftSnapshot: (snapshot: DurableDraftSnapshot) => Promise<boolean>;
+  persistDraftSnapshot: (
+    snapshot: DurableDraftSnapshot,
+    allowPendingAdmission?: boolean,
+    boundOwnerId?: number,
+    boundThreadId?: string | null,
+  ) => Promise<boolean>;
   persistCurrentDraft: () => Promise<boolean>;
 }
 
@@ -25,6 +31,7 @@ export function useComposerDraftAutosave(options: DraftAutosaveOptions) {
     threadId,
     hydratedRef,
     hydrationGenerationRef,
+    ownerIdRef,
     admissionsPendingRef,
     admissionEpoch,
     input,
@@ -32,21 +39,23 @@ export function useComposerDraftAutosave(options: DraftAutosaveOptions) {
     contextAttachments,
     captureCurrentDraft,
     persistDraftSnapshot,
-    persistCurrentDraft,
   } = options;
   useEffect(() => {
     if (!threadId) return;
     const flush = () => {
       if (!hydratedRef.current || admissionsPendingRef.current > 0) return;
+      // P1 R7: Capture owner identity (not revision), let revision advance in queue
+      const ownerId = ownerIdRef.current;
+      const capturedThreadId = threadId;
       const snapshot = captureCurrentDraft();
-      void enqueueComposerDraftSave(threadId, () => persistDraftSnapshot(snapshot));
+      void enqueueComposerDraftSave(threadId, () => persistDraftSnapshot(snapshot, false, ownerId, capturedThreadId));
     };
     window.addEventListener('pagehide', flush);
     return () => {
       window.removeEventListener('pagehide', flush);
       flush();
     };
-  }, [admissionsPendingRef, captureCurrentDraft, hydratedRef, persistDraftSnapshot, threadId]);
+  }, [admissionsPendingRef, captureCurrentDraft, hydratedRef, ownerIdRef, persistDraftSnapshot, threadId]);
 
   useEffect(() => {
     if (!threadId || !hydratedRef.current || admissionsPendingRef.current > 0) return;
@@ -55,26 +64,36 @@ export function useComposerDraftAutosave(options: DraftAutosaveOptions) {
     void contextAttachments;
     void input;
     const timer = window.setTimeout(() => {
-      void enqueueComposerDraftSave(threadId, persistCurrentDraft);
+      // P1 R7: Capture owner identity, let revision advance in queue
+      const ownerId = ownerIdRef.current;
+      const capturedThreadId = threadId;
+      const snapshot = captureCurrentDraft();
+      void enqueueComposerDraftSave(threadId, () => persistDraftSnapshot(snapshot, false, ownerId, capturedThreadId));
     }, 400);
     return () => window.clearTimeout(timer);
   }, [
     admissionEpoch,
     admissionsPendingRef,
+    captureCurrentDraft,
     contextAttachments,
     hydratedRef,
     images,
     input,
-    persistCurrentDraft,
+    ownerIdRef,
+    persistDraftSnapshot,
     threadId,
   ]);
 
   const persistSettledDraft = useCallback(
     (generation: number) => {
       if (!threadId || admissionsPendingRef.current > 0 || hydrationGenerationRef.current !== generation) return;
-      void enqueueComposerDraftSave(threadId, persistCurrentDraft);
+      // P1 R7: Capture owner identity, let revision advance
+      const ownerId = ownerIdRef.current;
+      const capturedThreadId = threadId;
+      const snapshot = captureCurrentDraft();
+      void enqueueComposerDraftSave(threadId, () => persistDraftSnapshot(snapshot, false, ownerId, capturedThreadId));
     },
-    [admissionsPendingRef, hydrationGenerationRef, persistCurrentDraft, threadId],
+    [admissionsPendingRef, captureCurrentDraft, hydrationGenerationRef, ownerIdRef, persistDraftSnapshot, threadId],
   );
   return { persistSettledDraft };
 }

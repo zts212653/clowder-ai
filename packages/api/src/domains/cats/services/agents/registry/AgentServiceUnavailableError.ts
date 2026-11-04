@@ -4,6 +4,11 @@ export interface AgentRegistrationFailure {
   readonly message: string;
 }
 
+/** Only owned configuration conflicts are eligible for admission reparse, before any model turn. */
+export class ExecutionAdmissionConflict extends Error {
+  readonly statusCode = 409;
+}
+
 export class AgentServiceUnavailableError extends Error {
   readonly reason: AgentRegistrationFailure;
 

@@ -112,7 +112,13 @@ export function handleActiveDone(msg: AgentMsg, threadId: string, ctx: ActiveCon
   // duplicates it — an empty one must not wipe what streamed.
   const target = namedTarget(msg, threadId);
   if (target) finishNamedMessage(target);
-  if (!stale) markCatDone(msg, actions);
+  if (!stale) {
+    if (msg.errorCode && msg.errorCode !== 'cancelled') {
+      markCatFailed({ ...msg, error: msg.error ?? msg.errorCode }, actions);
+    } else {
+      markCatDone(msg, actions);
+    }
+  }
   // Terminal events clean up the exact invocation identity without creating another message.
   if (msg.invocationId) {
     clearTerminalInvocationIdentity(threadId, msg.catId, msg.invocationId, msg.turnInvocationId);

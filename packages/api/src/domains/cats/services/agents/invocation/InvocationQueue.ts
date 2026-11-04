@@ -95,6 +95,8 @@ type LifecycleTargetRetirementResult =
 export interface QueueEnqueueInput {
   /** Server-owned deliberate repeat keeps the originally selected recipient. */
   exactTargets?: boolean;
+  /** A public named recipient passed preflight; later unavailability must not choose another member. */
+  allowConversationFallback?: false;
   /** Consumer observers register after commit and before the shared drain notification. Not persisted. */
   onQueueEntriesAdmitted?: (entries: readonly QueueEntry[], message?: StoredMessage) => void | Promise<void>;
   threadId: string;
@@ -403,6 +405,34 @@ export class InvocationQueue {
     );
   }
 
+  private resolveAdmissionInput(input: QueueEnqueueInput): QueueEnqueueInput {
+    if (!this.admissionPolicy.resolvePreResolvedTargets) return input;
+    const implicit =
+      input.from.kind === 'system' &&
+      (input.kind === 'private_input' || input.kind === 'conversation_input') &&
+      !input.exactTargets &&
+      input.allowConversationFallback !== false &&
+      !input.executionScope &&
+      !input.actionSuccessorFence &&
+      !input.waitContinuationCarrier &&
+      !input.cloudDispatchProvenance &&
+      !input.requiresExactCloudDispatchProvenance &&
+      !input.liveSessionId &&
+      !input.a2aParentInvocationId &&
+      Object.keys(input.authorIntentByCatId ?? {}).length === 0 &&
+      input.sourceCategory !== 'a2a_failure';
+    const targetCats = this.admissionPolicy.resolvePreResolvedTargets(input.targetCats, implicit);
+    if (input.targetCats.length > 0 && targetCats.length === 0) throw new Error('Queue admission has no valid target');
+    return { ...input, targetCats };
+  }
+
+  /** A receipt probe carries the immutable producer request, before any current routing choice. */
+  private privateAdmissionProbe(input: QueueEnqueueInput, sourceId: string, enqueuedAt: number) {
+    return input.kind === 'private_input'
+      ? this.createLedgerRows(input, sourceId, enqueuedAt, undefined, undefined, false, undefined, false)[0]!
+      : null;
+  }
+
   private createLedgerRows(
     input: QueueEnqueueInput,
     sourceId: string,
@@ -411,11 +441,20 @@ export class InvocationQueue {
     replayEntries?: readonly QueueLedgerEntry[],
     reuseResolvedTargets = false,
     requestedTargetCats?: readonly string[],
+    resolveTargets = true,
   ): QueueLedgerEntry[] {
     InvocationQueue.requireAdmissionContract({ ...input, messageId: messageId ?? input.messageId });
     // A stable source reuses its winning policy, including an exact parent or
     // fallback. Only genuinely new admissions consult the current defaults.
     const replay = replayEntries?.find((entry) => entry.id === queueEntryId(sourceId));
+    if (this.admissionPolicy.resolvePreResolvedTargets) {
+      requestedTargetCats ??= input.targetCats;
+      if (replay && !isDeepStrictEqual(replay.payload.requestedTargetCats ?? replay.targets, requestedTargetCats)) {
+        throw new Error(`Queue admission identity conflict: ${sourceId}`);
+      }
+      if (resolveTargets)
+        input = replay ? { ...input, targetCats: [...replay.targets] } : this.resolveAdmissionInput(input);
+    }
     if (
       requestedTargetCats &&
       replay?.payload.requestedTargetCats &&
@@ -455,7 +494,9 @@ export class InvocationQueue {
         : {}),
       content: input.content,
       ...(messageId ? { messageId } : {}),
-      ...(input.routingWarnings ? { routingWarnings: input.routingWarnings } : {}),
+      ...((replay ? replay.payload.routingWarnings : input.routingWarnings)
+        ? { routingWarnings: replay ? replay.payload.routingWarnings : input.routingWarnings }
+        : {}),
       ...(authorIntentByCatId ? { authorIntentByCatId } : {}),
       intent: input.intent,
       ownerAuthProvenance: input.ownerAuthProvenance,
@@ -602,14 +643,19 @@ export class InvocationQueue {
     const sourceId = InvocationQueue.persistentSourceId(input);
     const enqueuedAt = this.nextEnqueuedAt();
     const existing = await this.ledgerStore.get(input.threadId, queueEntryId(sourceId));
-    const rows = this.createLedgerRows(
-      input,
-      sourceId,
-      enqueuedAt,
-      input.messageId ?? undefined,
-      existing ? [existing] : undefined,
-    );
-    const result = await this.ledgerStore.enqueue(rows, input.from.kind === 'user' ? MAX_QUEUE_DEPTH : undefined);
+    const probe = this.privateAdmissionProbe(input, sourceId, enqueuedAt);
+    const replay = probe ? await this.ledgerStore.replayPrivateAdmission(probe) : null;
+    const rows = replay
+      ? []
+      : this.createLedgerRows(
+          input,
+          sourceId,
+          enqueuedAt,
+          input.messageId ?? undefined,
+          existing ? [existing] : undefined,
+        );
+    const result =
+      replay ?? (await this.ledgerStore.enqueue(rows, input.from.kind === 'user' ? MAX_QUEUE_DEPTH : undefined));
     if (result.outcome === 'full') return { outcome: 'full' };
     if (result.outcome === 'conflict') throw new Error(`Queue admission identity conflict: ${sourceId}`);
     const entries = this.cacheLedgerEntries(result.entries);
@@ -641,7 +687,15 @@ export class InvocationQueue {
     messageStore: IMessageStore,
   ): Promise<EnqueueResult & { entries?: QueueEntry[]; notice?: StoredMessage }> {
     const sourceId = InvocationQueue.persistentSourceId(input);
-    const rows = this.createLedgerRows(input, sourceId, this.nextEnqueuedAt(), undefined);
+    const enqueuedAt = this.nextEnqueuedAt();
+    const probe = this.privateAdmissionProbe(input, sourceId, enqueuedAt);
+    const replay = probe ? await this.ledgerStore.replayPrivateAdmission(probe) : null;
+    if (replay?.outcome === 'conflict') throw new Error(`Queue admission identity conflict: ${sourceId}`);
+    const existing = await this.ledgerStore.get(input.threadId, queueEntryId(sourceId));
+    const rows =
+      replay && probe
+        ? [probe]
+        : this.createLedgerRows(input, sourceId, enqueuedAt, undefined, existing ? [existing] : undefined);
     const result = await messageStore.appendNoticeWithPrivateQueueAdmission(notice, rows, this.ledgerStore);
     if (result.outcome === 'full') return { outcome: 'full' };
     const entries = this.cacheLedgerEntries(result.entries);
@@ -662,15 +716,21 @@ export class InvocationQueue {
       throw new Error('synchronous durable Queue admission requires the in-memory ledger');
     }
     const sourceId = InvocationQueue.persistentSourceId(input);
+    const enqueuedAt = this.nextEnqueuedAt();
+    const probe = this.privateAdmissionProbe(input, sourceId, enqueuedAt);
+    const replay = probe ? this.ledgerStore.replayPrivateAdmissionNow(probe) : null;
     const existing = this.ledgerStore.getNow(input.threadId, queueEntryId(sourceId));
-    const rows = this.createLedgerRows(
-      input,
-      sourceId,
-      this.nextEnqueuedAt(),
-      input.messageId ?? undefined,
-      existing ? [existing] : undefined,
-    );
-    const result = this.ledgerStore.enqueueNow(rows, input.from.kind === 'user' ? MAX_QUEUE_DEPTH : undefined);
+    const rows = replay
+      ? []
+      : this.createLedgerRows(
+          input,
+          sourceId,
+          enqueuedAt,
+          input.messageId ?? undefined,
+          existing ? [existing] : undefined,
+        );
+    const result =
+      replay ?? this.ledgerStore.enqueueNow(rows, input.from.kind === 'user' ? MAX_QUEUE_DEPTH : undefined);
     if (result.outcome === 'full') return { outcome: 'full' };
     if (result.outcome === 'conflict') throw new Error(`Queue admission identity conflict: ${sourceId}`);
     const entries = this.cacheLedgerEntries(result.entries);
@@ -791,12 +851,17 @@ export class InvocationQueue {
       assertQueueMessageReplay(committed, message);
       return { outcome: 'enqueued', message: committed, entries: [], deduped: true };
     }
+    if (!committedRow && !exactTargets && input.from.kind === 'system') input = this.resolveAdmissionInput(input);
     input = {
       ...input,
-      targetCats:
-        committedRow && !exactTargets
-          ? [...committedRow.targets]
-          : await this.resolveSendTargets(input.targetCats, input.threadId, input.content, exactTargets),
+      targetCats: committedRow
+        ? [...committedRow.targets]
+        : await this.resolveSendTargets(
+            input.targetCats,
+            input.threadId,
+            input.content,
+            exactTargets || input.allowConversationFallback === false,
+          ),
     };
     const enqueuedAt = this.nextEnqueuedAt();
     const result = await messageStore.appendWithQueueLedgerAdmission(
@@ -806,14 +871,19 @@ export class InvocationQueue {
         // Only an unchanged prose request may reuse its derived expansion and intent.
         const reuseProse = replaySource && reusesProseRouting(replaySource, message);
         const replay = reuseProse ? replayEntries?.find((entry) => entry.id === queueEntryId(messageId)) : undefined;
+        // Async policy already selected canonical recipients. Validate those identities
+        // at commit without interpreting a newly disabled successor as another predecessor.
+        const admissionInput =
+          committed || replaySource ? input : this.resolveAdmissionInput({ ...input, exactTargets: true });
         return this.createLedgerRows(
-          replay ? { ...input, intent: replay.execution.intent } : input,
+          replay ? { ...admissionInput, intent: replay.execution.intent } : admissionInput,
           messageId,
           enqueuedAt,
           messageId,
           replayEntries,
           reuseResolvedTargets,
           reuseProse ? (replay?.payload.requestedTargetCats ?? replaySource.mentions) : requestedTargetCats,
+          false,
         );
       },
       this.ledgerStore,
@@ -963,6 +1033,12 @@ export class InvocationQueue {
     }
     const anchor = await this.ledgerStore.get(input.threadId, entryId);
     if (!anchor) return { outcome: 'not_found' as const, entries: [] };
+    if (
+      this.admissionPolicy.resolvePreResolvedTargets &&
+      !this.admissionPolicy.resolvePreResolvedTargets([bindTargetCatId], false).includes(bindTargetCatId)
+    ) {
+      throw new Error('Queue target expansion has no valid target');
+    }
     const siblingInput: QueueEnqueueInput = { ...input, sourceId: messageId, messageId };
     const siblingRows =
       siblingInput.targetCats.length > 0
@@ -1001,12 +1077,21 @@ export class InvocationQueue {
     if (current && queueEntryOwnerId(current) !== userId) {
       throw new Error('Queue target reconciliation owner mismatch');
     }
+    const resolveTargets = this.admissionPolicy.resolvePreResolvedTargets;
+    const validAdditions = resolveTargets
+      ? addTargetIds.filter((id) => resolveTargets([id], false).includes(id))
+      : addTargetIds;
+    const validIntent = Object.fromEntries(
+      Object.entries(authorIntentByTarget).filter(
+        ([id]) => validAdditions.includes(id) || current?.targets.includes(id),
+      ),
+    );
     const result = await this.ledgerStore.reconcileTargets(
       threadId,
       entryId,
-      addTargetIds,
+      validAdditions,
       removeTargetIds,
-      authorIntentByTarget,
+      validIntent,
     );
     if (result.outcome === 'updated' || result.outcome === 'replayed') {
       this.removeCachedEntry(threadId, entryId);

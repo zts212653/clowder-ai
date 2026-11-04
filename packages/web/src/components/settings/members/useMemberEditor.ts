@@ -7,9 +7,7 @@ import type { MemberSaveTrace } from '@/utils/member-save-trace';
 import type { TemplateCard } from '../../first-run-quest/TemplateStep';
 import type { AccountsResponse, ProfileItem } from '../../hub-accounts.types';
 import {
-  buildCatPayload,
   buildCodexConfigPatches,
-  buildStrategyPayload,
   type CodexRuntimeSettings,
   type HubCatEditorFormState,
   initialState,
@@ -17,7 +15,6 @@ import {
   toCodexRuntimeSettings,
   toStrategyForm,
 } from '../../hub-cat-editor.model';
-import { buildMemberPatchPayload } from '../../hub-cat-editor.payload';
 import type { CatStrategyEntry } from '../../hub-strategy-types';
 import { commitMemberAvatar } from './member-avatar-draft';
 import {
@@ -29,13 +26,10 @@ import {
   templateForm,
 } from './member-editor-state';
 import { patchMemberRuntime, type RuntimeChoice, switchMemberRuntime } from './member-runtime-draft';
+import { readMemberResponse as readResponse, saveMemberExtras } from './member-save-extras';
+import { saveMemberRecord } from './member-save-record';
 import { useMemberSaveTrace } from './useMemberSaveTrace';
 
-async function readResponse<T>(response: Response): Promise<T> {
-  const body = await response.json();
-  if (!response.ok) throw new Error(typeof body.error === 'string' ? body.error : `请求失败 (${response.status})`);
-  return body as T;
-}
 export function useMemberEditor(
   cat: CatData | null,
   cats: CatData[],
@@ -80,7 +74,8 @@ export function useMemberEditor(
         const stored = readMemberDraft(storageKey.current);
         setDraft(
           stored &&
-            (changedFields(stored.form, stored.baseline) > 0 ||
+            (stored.pendingWrite ||
+              changedFields(stored.form, stored.baseline) > 0 ||
               JSON.stringify(stored.strategy) !== JSON.stringify(stored.strategyBaseline) ||
               JSON.stringify(stored.codexSettings) !== JSON.stringify(stored.codexBaseline))
             ? stored
@@ -174,14 +169,14 @@ export function useMemberEditor(
     setStorageWarning(!ok);
   }, [draft, dirtyCount, ready]);
   useEffect(() => {
-    if (!dirtyCount) return;
+    if (!dirtyCount && !draft.pendingWrite) return;
     const guard = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       event.returnValue = '';
     };
     window.addEventListener('beforeunload', guard);
     return () => window.removeEventListener('beforeunload', guard);
-  }, [dirtyCount]);
+  }, [dirtyCount, draft.pendingWrite]);
 
   const patch = useCallback((change: Partial<HubCatEditorFormState>) => {
     setNotice(null);
@@ -232,7 +227,7 @@ export function useMemberEditor(
   };
   const save = async () => {
     const snapshot = stateRef.current;
-    const { baseline, strategy } = snapshot;
+    const { baseline } = snapshot;
     const form = baseline
       ? snapshot.form
       : { ...snapshot.form, roleDescription: snapshot.form.roleDescription.trim() || '团队伙伴' };
@@ -253,66 +248,26 @@ export function useMemberEditor(
     try {
       const account = accounts.find((item) => item.id === form.accountRef);
       const context = { accountAuthType: account?.authType ?? null };
-      const payload = baseline
-        ? buildMemberPatchPayload(form, baseline, context)
-        : buildCatPayload(form, null, context);
-      const memberChanged = !baseline || Object.keys(payload).length > 0;
-      if (baseline?.configurationRevision) Object.assign(payload, { expectedRevision: baseline.configurationRevision });
-      if (!baseline && onBeforeCreate) await trace.phase('onboarding.entry', onBeforeCreate);
-      const result = memberChanged
-        ? await trace.phase('member.write', () =>
-            apiFetch(baseline ? `/api/cats/${baseline.id}` : '/api/cats', {
-              method: baseline ? 'PATCH' : 'POST',
-              headers: { 'Content-Type': 'application/json', ...trace.headers() },
-              body: JSON.stringify(payload),
-            }).then((response) => {
-              if (response.status === 409) setConflicted(true);
-              return readResponse<{ cat: CatData }>(response);
-            }),
-          )
-        : { cat: baseline };
-      persisted = result.cat;
-      // A later strategy failure must not roll back a successful account/member write.
-      let next = { ...snapshot, baseline: persisted, form: initialState(persisted), runtimeDrafts: undefined };
-      setDraft(next);
-      persistMemberDraft(storageKey.current, next);
-      if (strategy && JSON.stringify(strategy) !== JSON.stringify(snapshot.strategyBaseline)) {
-        await trace.phase('strategy.write', () =>
-          apiFetch(`/api/config/session-strategy/${result.cat.id}`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json', ...trace.headers() },
-            body: JSON.stringify(buildStrategyPayload(strategy)),
-          }).then(readResponse<unknown>),
-        );
-        next = { ...next, strategyBaseline: snapshot.strategy };
-        setDraft(next);
-        persistMemberDraft(storageKey.current, next);
-      }
-      if (snapshot.codexSettings && snapshot.codexBaseline) {
-        for (const configPatch of buildCodexConfigPatches(snapshot.codexSettings, snapshot.codexBaseline)) {
-          await trace.phase('codex.write', () =>
-            apiFetch('/api/config', {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json', ...trace.headers() },
-              body: JSON.stringify(configPatch),
-            }).then(readResponse<unknown>),
-          );
-          const field =
-            configPatch.key === 'cli.codexSandboxMode'
-              ? 'sandboxMode'
-              : configPatch.key === 'cli.codexApprovalPolicy'
-                ? 'approvalPolicy'
-                : 'authMode';
-          next = { ...next, codexBaseline: { ...next.codexBaseline!, [field]: snapshot.codexSettings[field] } };
-          setDraft(next);
-          persistMemberDraft(storageKey.current, next);
-        }
-      }
+      const commit = (committed: MemberDraft) => {
+        setDraft(committed);
+        persistMemberDraft(storageKey.current, committed);
+      };
+      const member = await saveMemberRecord({
+        snapshot,
+        form,
+        context,
+        trace,
+        commit,
+        onBeforeCreate,
+        conflict: () => setConflicted(true),
+      });
+      persisted = member;
+      const next = await saveMemberExtras(snapshot, member, trace, commit);
       persistMemberDraft(storageKey.current, null);
       setDraft({ ...next, strategyBaseline: next.strategy });
       setNotice('已保存。正在运行的回合不变，后续调用使用新设置。');
       await trace
-        .phase('refresh', () => onSaved(result.cat, trace))
+        .phase('refresh', () => onSaved(member, trace))
         .catch(() => setNotice('配置已保存，成员列表刷新失败，请重新打开列表。'));
     } catch (err) {
       trace.fail();

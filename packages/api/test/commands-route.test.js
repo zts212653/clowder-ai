@@ -2,6 +2,7 @@
  * Commands API route tests
  */
 
+import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { catRegistry } from '@cat-cafe/shared';
@@ -27,6 +28,7 @@ const mockSocketManager = {
 };
 
 const TEST_MESSAGE_TIMESTAMP = Date.now();
+const opusConfig = catRegistry.getOrThrow('opus').config;
 
 describe('Commands Routes', () => {
   let app;
@@ -38,7 +40,7 @@ describe('Commands Routes', () => {
 
   beforeEach(async () => {
     catRegistry.reset();
-    catRegistry.register('opus', { id: 'opus', name: 'Opus', client: 'anthropic' });
+    catRegistry.register('opus', opusConfig);
     app = Fastify();
     messageStore = new MessageStore();
     taskStore = new TaskStore();

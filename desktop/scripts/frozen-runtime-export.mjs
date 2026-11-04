@@ -20,10 +20,13 @@ export function materialize(from, to, workspace, ancestors = new Set(), include 
   }
   if (ancestors.has(real)) throw new Error(`Cyclic packaging link: ${from}`);
   const next = new Set(ancestors).add(real);
-  fs.mkdirSync(to, { recursive: true });
   const manifest = path.join(real, 'package.json');
-  const omitSendTests =
-    fs.existsSync(manifest) && JSON.parse(fs.readFileSync(manifest, 'utf8')).name === '@fastify/send';
+  const packageName = fs.existsSync(manifest) ? JSON.parse(fs.readFileSync(manifest, 'utf8')).name : undefined;
+  // The SDK library drives an explicitly selected external Claude installation.
+  // Do not ship its optional native engine, including nested/private copies.
+  if (/^@anthropic-ai\/claude-agent-sdk-(?:win32|darwin|linux)-/.test(packageName ?? '')) return;
+  fs.mkdirSync(to, { recursive: true });
+  const omitSendTests = packageName === '@fastify/send';
   for (const name of fs.readdirSync(real)) {
     // Hoisted layout contains no virtual store; its .bin symlinks are not runtime inputs.
     if (name === '.bin' || name === '.pnpm') continue;
