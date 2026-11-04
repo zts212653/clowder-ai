@@ -1,11 +1,43 @@
 'use client';
 
+import type { ActiveHoldWaitProjection } from '@cat-cafe/shared';
+import { useState } from 'react';
+import { cancelHoldWait } from '@/hooks/useActiveExecutionProjection';
 import { AppTooltip } from '../AppTooltip';
 import { ExecutionCancelButton } from '../ExecutionCancelButton';
 import styles from './ExecutionRow.module.css';
 import { ExecutionRowActionIcon } from './ExecutionRowActionIcon';
 import type { ExecutionRowWords } from './execution-row.shell-copy';
 import type { ExecutionRowController } from './useExecutionRow';
+
+/** Cancel the one hold the row is about: the same DELETE as the hold card's 取消持球. */
+function CancelHoldButton({ hold, words }: { hold: ActiveHoldWaitProjection; words: ExecutionRowWords }) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <AppTooltip label={words.actions.cancelHold} side="top">
+      <button
+        type="button"
+        data-testid="execution-row-cancel-hold"
+        aria-label={words.actions.cancelHold}
+        disabled={busy}
+        onClick={() => {
+          setBusy(true);
+          void cancelHoldWait(hold)
+            .catch(() => false)
+            .finally(() => setBusy(false));
+        }}
+        className="shell-focusable inline-flex flex-none items-center gap-1 rounded-md border border-[var(--shell-hairline-strong)] bg-[var(--shell-paper)] px-2 py-1 font-medium text-[var(--shell-body)] hover:text-[var(--semantic-critical)] disabled:opacity-50"
+      >
+        <ExecutionRowActionIcon
+          kind="stop"
+          className={`${styles.actionIcon} h-4 w-4`}
+          testId="execution-row-cancel-hold-icon"
+        />
+        <span className={styles.actionLabel}>{busy ? words.actions.cancellingHold : words.actions.cancelHold}</span>
+      </button>
+    </AppTooltip>
+  );
+}
 
 export function ExecutionRowActions({
   controller,
@@ -61,6 +93,7 @@ export function ExecutionRowActions({
           </button>
         </AppTooltip>
       ) : null}
+      {model.hold?.cancelability.state === 'cancelable' ? <CancelHoldButton hold={model.hold} words={words} /> : null}
       {model.stop.kind === 'button' ? (
         <AppTooltip label={words.actions.stop} side="top">
           <span data-testid="execution-row-stop" className="flex-none">

@@ -12,7 +12,7 @@ import { RecallMetricsReader } from '../domains/memory/RecallMetricsReader.js';
 import { SqliteSignalSources } from '../domains/memory/SqliteSignalSources.js';
 import { type SignalMessageStore, ThreadAwareSignalSources } from '../domains/memory/ThreadAwareSignalSources.js';
 import { TrajectoryQueryService } from '../domains/memory/TrajectoryQueryService.js';
-import { resolveHeaderUserId } from '../utils/request-identity.js';
+import { resolveHeaderUserId, resolveSessionUserId } from '../utils/request-identity.js';
 import { type RecallSourceReaders, readRecallSourceViews } from './recall-candidate-view.js';
 import { withRecallMetricsSignal } from './recall-metrics-request.js';
 import {
@@ -203,7 +203,7 @@ export const recallMetricsRoutes: FastifyPluginAsync<RecallMetricsRoutesOptions>
       return reply.status(503).send({ error: 'Thread store unavailable' });
     }
     const thread = await opts.threadStore.get(threadId);
-    if (!thread) return reply.status(404).send({ error: 'Thread not found' });
+    if (!thread || thread.deletedAt) return reply.status(404).send({ error: 'Thread not found' });
     const canReadRecallEvents =
       canAccessThread(thread, userId) ||
       (thread.createdBy === 'system' && (await isThreadIndexedForUser(opts.threadStore, thread.id, userId)));
@@ -258,15 +258,25 @@ export const recallMetricsRoutes: FastifyPluginAsync<RecallMetricsRoutesOptions>
           ? await opts.messageStore.getByThreadBefore(threadId, cursor.timestamp, 500, cursor.messageId, userId)
           : await opts.messageStore.getByThread(threadId, 500, userId);
     const replies = projectRecallReplies(replyMessages);
+    const includeMatter = resolveSessionUserId(request) !== null;
     const cueInvocationIds = (
       opts.evidenceDb
         .prepare(
           `SELECT invocation_id FROM memory_cue_events WHERE owner_user_id = ? AND thread_id = ?
+       AND (? = 1 OR resolver_family != 'matter')
        GROUP BY invocation_id ORDER BY MAX(occurred_at) DESC LIMIT 100`,
         )
-        .all(userId, threadId) as Array<{ invocation_id: string }>
+        .all(userId, threadId, includeMatter ? 1 : 0) as Array<{ invocation_id: string }>
     ).map((row) => row.invocation_id);
-    const sourceViews = await readRecallSourceViews(opts.evidenceDb, userId, threadId, rows, cueInvocationIds, opts);
+    const sourceViews = await readRecallSourceViews(
+      opts.evidenceDb,
+      userId,
+      threadId,
+      rows,
+      cueInvocationIds,
+      opts,
+      includeMatter,
+    );
     const views = new Map(sourceViews.filter((view) => !view.cueId).map((view) => [view.anchor, view]));
     return {
       replies,

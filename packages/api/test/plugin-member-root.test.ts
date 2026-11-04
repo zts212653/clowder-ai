@@ -68,19 +68,20 @@ test('production Root creates a protected thread using canonical profiles and ex
   };
   const runtime = {
     inventoryStore: {
-      snapshot: async () => ({
-        instances: [
-          {
-            pluginInstanceId: 'installed',
+      readAuthority: async (pluginInstanceId: string) => {
+        assert.equal(pluginInstanceId, 'installed');
+        return {
+          instance: {
+            pluginInstanceId,
             pluginId: 'fixture.member',
             packageDigest: pkg.packageDigest,
             lifecycleState: 'installed',
             activationState: 'enabled',
             configReadiness: 'ready',
           },
-        ],
-        packages: [pkg],
-      }),
+          packageRecord: pkg,
+        };
+      },
     },
     supervisor: {
       resolveNativeMcpLaunch: async () => ({

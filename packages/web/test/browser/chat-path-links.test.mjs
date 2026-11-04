@@ -425,12 +425,31 @@ for (const language of ['zh', 'en'])
       .waitFor();
     assert.equal(commitReads(), 1, 'Reentry reuses the loaded canonical commit surface');
     await page.screenshot({ path: path.join(evidence, 'commit-changes.png'), fullPage: true, animations: 'disabled' });
+    const githubLink = pr.getByRole('link');
+    const githubUrl = await githubLink.getAttribute('href');
+    assert.equal(githubUrl, 'https://github.com/zts212653/clowder-ai/pull/5963');
+    const prReadsBeforeLink = reads.filter((url) => url.startsWith('/api/workspace/chat-pull-request-changes?')).length;
+    // Verify native popup navigation without depending on GitHub availability or login.
+    await context.route(githubUrl, (route) =>
+      route.fulfill({ contentType: 'text/html', body: '<title>GitHub original destination</title>' }),
+    );
+    const popupPromise = page.waitForEvent('popup');
+    await githubLink.click();
+    const popup = await popupPromise;
+    await popup.waitForURL(githubUrl);
+    assert.equal(await popup.title(), 'GitHub original destination');
+    await popup.close();
+    assert.equal(
+      reads.filter((url) => url.startsWith('/api/workspace/chat-pull-request-changes?')).length,
+      prReadsBeforeLink,
+      'Opening the original PR does not read an internal diff',
+    );
     await Promise.all([
       page.waitForResponse(
         (response) =>
           new URL(response.url()).pathname === '/api/workspace/chat-pull-request-changes' && response.status() === 200,
       ),
-      pr.locator('button').click(),
+      pr.getByRole('button', { name: /查看变更|View changes/ }).click(),
     ]);
     await page
       .locator('[data-testid="f307-owner-surface-host"]:visible')

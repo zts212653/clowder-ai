@@ -83,6 +83,7 @@ export type {
   ActiveExecutionListResponse,
   ActiveExecutionNonCancelableReason,
   ActiveExecutionProjection,
+  ActiveHoldWaitProjection,
   LiveInvocationCancelTarget,
   ManagedCommandActivity,
   ManagedCommandCancelTarget,
@@ -1687,6 +1688,8 @@ export type {
   StudyMeta,
   StudyThreadLink,
 } from './study.js';
+// F335 交付二：回话下面那一排（一键提议 + 原地回执）
+export * from './suggestion.js';
 // Summary types (拍立得照片墙)
 export type {
   CreateSummaryInput,

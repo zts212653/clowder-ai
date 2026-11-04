@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { globSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -31,20 +32,36 @@ function extractDirectScriptRef(command) {
   return match ? match[1].replace(/^\.\//, '') : null;
 }
 
-test('root package scripts do not reference missing script files', () => {
-  const scripts = readRootScripts();
+function missingScriptRefs(scripts, root) {
   const missing = [];
-
   for (const [scriptName, command] of Object.entries(scripts)) {
     for (const ref of extractScriptRefs(String(command))) {
-      const scriptPath = path.join(repoRoot, ref);
-      if (!existsSync(scriptPath)) {
+      if (!globSync(ref, { cwd: root }).some((match) => statSync(path.join(root, match)).isFile())) {
         missing.push(`${scriptName} -> ${ref}`);
       }
     }
   }
+  return missing;
+}
 
+test('root package scripts do not reference missing script files', () => {
+  const missing = missingScriptRefs(readRootScripts(), repoRoot);
   assert.deepEqual(missing, [], `Missing script targets:\n${missing.join('\n')}`);
+});
+
+test('script target validation expands shell globs and rejects unmatched globs and missing literals', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'root-script-targets-'));
+  try {
+    mkdirSync(path.join(root, 'scripts'));
+    writeFileSync(path.join(root, 'scripts/pre-push-fixture.test.mjs'), '');
+    assert.deepEqual(missingScriptRefs({ hooks: 'node --test scripts/pre-push-*.test.mjs' }, root), []);
+    assert.deepEqual(missingScriptRefs({ hooks: 'node --test scripts/missing-*.test.mjs scripts/missing.mjs' }, root), [
+      'hooks -> scripts/missing-*.test.mjs',
+      'hooks -> scripts/missing.mjs',
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('alpha worktree manager exposes help output', () => {

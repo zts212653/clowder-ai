@@ -1075,12 +1075,12 @@ async function main(): Promise<void> {
 
   const queueLedgerStore = redis ? new RedisQueueLedgerStore(redis) : new InMemoryQueueLedgerStore();
   const invocationQueue = new InvocationQueue(queueLedgerStore, {
+    resolvePreResolvedTargets: (requested, implicit) => router.resolveAdmissionTargets(requested, implicit),
     projectRoot: resolveActiveProjectRoot(),
     invocationTracker,
     resolveCarrierCapability: (catId) => router?.freshnessCarrierCapability(catId),
     resolveTargets: (requested, threadId, content, exact) =>
       router.resolveSendTargets(requested, threadId, content, exact),
-    resolvePreResolvedTargets: (requested, implicit) => router.resolveAdmissionTargets(requested, implicit),
     onAdmitted: ({ threadId, message, entries }) => {
       if (message && entries.some((entry) => entry.sourceCategory !== 'a2a_failure'))
         queueProcessor.registerCallerDispatchInitialTargets(
@@ -1553,6 +1553,14 @@ async function main(): Promise<void> {
     './domains/memory/cue/MemoryCueDrillHandleService.js'
   );
   const memoryCueEpisodeStore = new MemoryCueEpisodeStore(memoryServices.store.getDb());
+  const { MatterMemoryService } = await import('./domains/memory/matters/MatterMemoryService.js');
+  const matterMemoryService = new MatterMemoryService({
+    db: memoryServices.store.getDb(),
+    messageStore,
+    threadStore,
+    runWrite: (operation) => memoryServices.store.runExclusive(operation),
+    onChanged: (ownerUserId) => socketManager?.emitToUser(ownerUserId, 'memory_matter_changed', {}),
+  });
   const memoryCueHandles = new MemoryCueDrillHandleService(createProcessMemoryCueDrillSecret(), memoryCueEpisodeStore);
   const memoryCueDeps: CallbackMemoryCueDeps = {
     episodeStore: memoryCueEpisodeStore,
@@ -2654,6 +2662,7 @@ async function main(): Promise<void> {
     logger: app.log,
   });
   const memoryCueRuntime = createMemoryCueRuntime({
+    matterMemoryService,
     ...(memoryServices.catalog && memoryServices.collectionStores && memoryServices.knowledgeResolver
       ? {
           contextProjectDiscovery: {
@@ -2848,6 +2857,7 @@ async function main(): Promise<void> {
     ),
     contextSourceAdmission: memoryCueRuntime.contextSourceAdmission,
     memoryCuePromptService: memoryCueRuntime.promptService,
+    matterMemoryService,
     profileCueOpportunitySource: memoryCueRuntime.profileOpportunitySource,
     eventCueOpportunitySource: memoryCueRuntime.eventOpportunitySource,
     threadOverviewOpportunitySource: memoryCueRuntime.threadOverviewOpportunitySource,
@@ -3523,14 +3533,17 @@ async function main(): Promise<void> {
     ...recallOwnerMessageSources,
   });
   const { memoryCueInvocationReadRoutes } = await import('./routes/memory-cue-invocation-read.js');
+  const { memoryMatterRoutes } = await import('./routes/memory-matter-routes.js');
+  await app.register(memoryMatterRoutes, { service: matterMemoryService });
   await app.register(memoryCueInvocationReadRoutes, {
+    matterMemoryService,
     evidenceDb: memoryServices.store.getDb(),
     threadStore,
     invocationRecordStore,
     turnExecutionStore,
   });
   const { memoryCueSourceSummaryRoutes } = await import('./routes/memory-cue-source-summary.js');
-  await app.register(memoryCueSourceSummaryRoutes, { evidenceDb: memoryServices.store.getDb() });
+  await app.register(memoryCueSourceSummaryRoutes, { evidenceDb: memoryServices.store.getDb(), matterMemoryService });
   const { tasteObservatoryRoutes } = await import('./routes/taste-observatory.js');
   await app.register(tasteObservatoryRoutes, {
     evidenceDb: memoryServices.store.getDb(),
@@ -4838,6 +4851,7 @@ async function main(): Promise<void> {
         }
       : {}),
     memoryCueDeps,
+    matterMemoryService,
     skillConsumptionDeps: {
       receipts: skillConsumptionReceipts,
       ...(requestReviewUseReceipts ? { requestReviewReceipts: requestReviewUseReceipts } : {}),
@@ -5641,10 +5655,7 @@ async function main(): Promise<void> {
       }
     },
     authority: async () => {
-      const inventory = await pluginRuntime.inventoryStore.snapshot();
-      const instance = inventory.instances.find(
-        (candidate) => candidate.pluginId === 'official.chatgpt-dot' && candidate.lifecycleState === 'installed',
-      );
+      const instance = await pluginRuntime.inventoryStore.read.instances.getCurrent('official.chatgpt-dot');
       return instance ? { ownerUserId: privateUserId, pluginInstanceId: instance.pluginInstanceId } : null;
     },
   });
@@ -5673,12 +5684,8 @@ async function main(): Promise<void> {
     );
   };
   const dotEnabled = async () =>
-    (await pluginRuntime.inventoryStore.snapshot()).instances.some(
-      (instance) =>
-        instance.pluginId === 'official.chatgpt-dot' &&
-        instance.lifecycleState === 'installed' &&
-        instance.activationState === 'enabled',
-    );
+    (await pluginRuntime.inventoryStore.read.instances.getCurrent('official.chatgpt-dot'))?.activationState ===
+    'enabled';
   const { DotAskService } = await import('./domains/cats/services/cloud-bridge/dot/DotAskService.js');
   dotAskService = new DotAskService({
     connection: dotConnectionService,
@@ -6157,12 +6164,66 @@ async function main(): Promise<void> {
     },
   });
   memberCanonService = new MemberCanonService(assetCanonService, privateUserId);
+  const { WorkCoverService } = await import('./domains/collaborative-content/works/cover/cover-service.js');
+  const { locateUploadedFile } = await import('./domains/collaborative-content/works/cover/cover-upload-locator.js');
+  const { readPublishedMessageItem } = await import('./domains/video-studio/content-owner/published-message-media.js');
+  const { listWorktrees: listCoverRoots } = await import('./domains/workspace/workspace-security.js');
+  // A person's card has no thread of its own; the owner checks the work's original thread instead.
+  type CoverPrincipal = import('./domains/collaborative-content/works/types.js').WorkPrincipal;
+  const coverPrincipal = (
+    reference: { contentRef: string; ownerRevision: number },
+    principal: CoverPrincipal,
+  ): CoverPrincipal =>
+    principal.actor.kind === 'human' && !principal.threadId
+      ? {
+          ...principal,
+          threadId:
+            artifactReview.store.works.get(principal.userId, reference.contentRef, reference.ownerRevision)?.threadId ??
+            '',
+        }
+      : principal;
+  const coverLocator = (locator: { rootId: string; path: string }, principal: CoverPrincipal) =>
+    workspaceContentReviews.source.resolveFileLocator({
+      principal: { userId: principal.userId },
+      locator: { worktreeId: locator.rootId, path: locator.path },
+    });
+  const workCovers = new WorkCoverService({
+    store: artifactReview.store.works.covers,
+    authorize: (reference, principal, permission) =>
+      livingWorks.authorizeVersion(reference, coverPrincipal(reference, principal), permission),
+    mediaType: async (reference, principal) =>
+      (await livingWorks.read(reference, coverPrincipal(reference, principal))).description.mediaType,
+    readContext: (reference, principal, metadataRevision) => workContexts.read(reference, principal, metadataRevision),
+    authorizeThread: (threadId, principal) =>
+      artifactReview.media.access.authorizeThread(threadId, workMediaPrincipal(principal)),
+    readMessageItem: (source, principal) =>
+      readPublishedMessageItem(messageStore, source, workMediaPrincipal(principal)),
+    locateUpload: (fileName, principal) =>
+      locateUploadedFile(fileName, {
+        uploadDir: getDefaultUploadDir(process.env.UPLOAD_DIR),
+        roots: () => listCoverRoots(process.env.CAT_CAFE_WORKSPACE_ROOT),
+        resolve: (locator) =>
+          workspaceContentReviews.source.resolveFileLocator({ principal: { userId: principal.userId }, locator }),
+      }),
+    inspect: async (locator, principal) => {
+      const current = await coverLocator(locator, principal);
+      return canonAssetIndex.inspect({ kind: 'workspace', rootId: current.worktreeId, path: current.path });
+    },
+    open: (version) => canonAssetIndex.open(version),
+    threadOf: (reference, principal) => coverPrincipal(reference, principal).threadId,
+    changed: (ownerUserId) =>
+      socketManager?.emitToUser(ownerUserId, 'entrusted_work_projection_invalidated', { ownerUserId }),
+  });
+  livingWorks.attachCovers(workCovers);
   await registerLivingWorkRoutes(app, {
     service: livingWorks,
     registry,
     contexts: workContexts,
     assets: assetCanonService,
+    covers: workCovers,
   });
+  const { registerWorkCoverRoutes } = await import('./routes/work-cover-routes.js');
+  await registerWorkCoverRoutes(app, { covers: workCovers });
   registerWorkVideoAssetRoutes(app, { contexts: workContexts, assets: canonAssetIndex });
   const { registerAssetCanonRoutes } = await import('./routes/asset-canon-routes.js');
   registerAssetCanonRoutes(app, assetCanonService, canonAssetIndex);
@@ -6178,6 +6239,40 @@ async function main(): Promise<void> {
     reviews: artifactReview.ledgers,
     namespace: 'publication',
     changed: (ownerUserId, reviewId) => socketManager?.emitToUser(ownerUserId, 'artifact_review_changed', { reviewId }),
+  });
+  // F335 交付二：回话下面那一排（一键提议 + 原地回执）。动作表 `suggestionActions` 也给线 1 登记暂停 / 关闭的撤销。
+  const { createSuggestionIntegration } = await import('./domains/suggestions/composition.js');
+  const { createScheduledTaskSuggestionAction } = await import(
+    './domains/suggestions/actions/scheduled-task-action.js'
+  );
+  const { createVideoCommentsSuggestionAction } = await import(
+    './domains/suggestions/actions/video-comments-action.js'
+  );
+  const { registerSuggestionRoutes } = await import('./routes/suggestion-routes.js');
+  const suggestions = createSuggestionIntegration({ redis, messageStore, invocationTracker, socketManager });
+  suggestions.registry.register(
+    createVideoCommentsSuggestionAction({
+      reviews: artifactReview.ledgers,
+      publications: artifactReview.publicationReads.media,
+      changed: (ownerUserId, reviewId) =>
+        socketManager?.emitToUser(ownerUserId, 'artifact_review_changed', { reviewId }),
+    }),
+  );
+  suggestions.registry.register(
+    createScheduledTaskSuggestionAction({
+      ownerUserId: privateUserId,
+      templateRegistry,
+      packTemplateStore,
+      dynamicTaskStore,
+      commit: { taskRunner: taskRunnerV2, scheduleMutationProposalStore, notifyLifecycle: schedulerLifecycleToast },
+    }),
+  );
+  await app.register(async (scope) => {
+    registerSuggestionRoutes(scope, {
+      service: suggestions.service,
+      callbackRegistry: registry,
+      agentKeyRegistry,
+    });
   });
   const { createContentModificationIntegration } = await import(
     './domains/collaborative-content/modification/composition.js'

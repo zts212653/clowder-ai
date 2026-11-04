@@ -7,12 +7,13 @@ import type { ProfileItem } from '../../hub-accounts.types';
 import { usesAgyAcp, usesAgyNative } from '../../hub-cat-editor.agy';
 import { builtinAccountIdForClient, filterAccounts, type HubCatEditorFormState } from '../../hub-cat-editor.model';
 import { SelectField } from '../../hub-cat-editor-fields';
+import { MemberCatalogStatus } from './MemberCatalogStatus';
 import { MemberChoicePicker } from './MemberChoicePicker';
 import { MemberConfigurationDetails } from './MemberConfigurationDetails';
 import { MemberDshProviderSetup } from './MemberDshProviderSetup';
+import { MemberModelSummary } from './MemberModelSummary';
 import { matchesRuntime, type RuntimeChoice, type RuntimeDrafts, runtimeDefaults } from './member-runtime-draft';
 import { memberRuntimeOptions, memberRuntimeTools } from './member-runtime-tools';
-import { nativeAcpProfileMessage } from './native-acp-profile-status';
 import { usesDefaultNativeIdentity } from './native-login-state';
 import { useRuntimeCatalog } from './useRuntimeCatalog';
 export type MemberText = (zh: string, en: string) => string;
@@ -82,8 +83,9 @@ export function MemberRuntimeFields({
     identity = availableAccounts.find((item) => item.id === form.accountRef);
   const defaultIdentity = usesDefaultNativeIdentity(form);
   const needsLogin = defaultIdentity && selected?.readiness?.status === 'login_required';
+  const catalogNotImplemented = !!(selected?.id.startsWith('draft:') || selected?.id.startsWith('manual:'));
   const { catalog, loading: catalogLoading } = useRuntimeCatalog(
-    needsLogin || selected?.id.startsWith('draft:') || selected?.id.startsWith('manual:') ? undefined : selected?.id,
+    needsLogin || catalogNotImplemented ? undefined : selected?.id,
     editing ? form.catId : undefined,
     form.accountRef,
     form.defaultModel,
@@ -93,7 +95,10 @@ export function MemberRuntimeFields({
   const defaultModel = catalog?.defaultModel ?? (!form.accountRef ? selected?.configuredModel : undefined);
   const defaultModelLabel =
     catalog?.defaultModelLabel ?? catalog?.models.find((item) => item.value === defaultModel)?.label ?? defaultModel;
-  const defaultEffort = catalog?.defaultEffort ?? (!form.accountRef ? selected?.configuredEffort : undefined);
+  const defaultModelSource =
+    catalog?.defaultModelSource === 'client_report'
+      ? t('客户端回报', 'Client report')
+      : t('本地配置', 'Local configuration');
   const models = catalog?.models.length
     ? catalog.models
     : (form.accountRef ? (identity?.models ?? []) : (selected?.models ?? [])).map((value) => ({ value, label: value }));
@@ -101,10 +106,21 @@ export function MemberRuntimeFields({
   const capabilityModel = form.clientId === 'anthropic' ? (model || 'default').replace(/\[1m\]$/, '') : model;
   const activeModel =
     catalog?.models.find((item) => item.value === model) ??
-    catalog?.models.find((item) => item.value === capabilityModel);
+    catalog?.models.find((item) => item.value === capabilityModel || item.resolvedModel === capabilityModel);
+  const usesSelectedEffort = catalog?.selectedEffort !== undefined && catalog.selectedModel === model;
+  const defaultEffort = usesSelectedEffort
+    ? catalog.selectedEffort
+    : !form.defaultModel || form.defaultModel === defaultModel
+      ? (catalog?.defaultEffort ?? (!form.accountRef ? selected?.configuredEffort : undefined))
+      : undefined;
+  const defaultEffortLabel =
+    (usesSelectedEffort ? catalog.selectedEffortLabel : catalog?.defaultEffortLabel) ?? defaultEffort;
   const efforts = catalog?.effortOptions ?? activeModel?.efforts;
+  const tierlessKimi = form.clientId === 'kimi' && efforts?.length === 0;
   const invalidEffort =
-    catalog?.status === 'live' &&
+    !tierlessKimi &&
+    catalog?.status !== 'unavailable' &&
+    catalog?.message !== 'refresh_failed' &&
     efforts !== undefined &&
     !!form.cliEffort &&
     !efforts.some((item) => item.value === form.cliEffort);
@@ -233,7 +249,7 @@ export function MemberRuntimeFields({
           options={models}
           onChange={(defaultModel) => patch({ defaultModel })}
           inheritLabel={follow}
-          inheritDetail={defaultModel ? t(`配置：${defaultModelLabel}`, `Configured: ${defaultModelLabel}`) : undefined}
+          inheritDetail={defaultModel !== undefined ? `${defaultModelSource}：${defaultModelLabel}` : undefined}
           searchable
           allowCustom
           english={t('zh', 'en') === 'en'}
@@ -245,71 +261,69 @@ export function MemberRuntimeFields({
           options={efforts ?? []}
           onChange={(cliEffort) => patch({ cliEffort })}
           inheritLabel={follow}
-          inheritDetail={defaultEffort ? t(`配置：${defaultEffort}`, `Configured: ${defaultEffort}`) : undefined}
+          inheritDetail={
+            defaultEffort !== undefined
+              ? t(
+                  `配置：${defaultEffortLabel || '客户端默认'}`,
+                  `Configured: ${defaultEffortLabel || 'Client default'}`,
+                )
+              : undefined
+          }
           english={t('zh', 'en') === 'en'}
         />
       </div>
       <div className="space-y-1 text-sm text-cafe-secondary" role="status">
-        {needsLogin ? (
+        <MemberModelSummary
+          model={form.defaultModel ? (activeModel?.label ?? form.defaultModel) : defaultModelLabel}
+          effort={
+            tierlessKimi
+              ? undefined
+              : form.cliEffort ||
+                (catalog?.thinkingEnabled === false ? t('思考已关闭', 'Thinking off') : defaultEffortLabel)
+          }
+          modelSource={form.defaultModel ? t('成员设置', 'Member preference') : defaultModelSource}
+          effortSource={
+            form.cliEffort
+              ? t('成员设置', 'Member preference')
+              : (usesSelectedEffort ? catalog?.selectedEffortSource : catalog?.defaultEffortSource) === 'client_report'
+                ? t('客户端回报', 'Client report')
+                : t('本地配置', 'Local configuration')
+          }
+          unavailable={catalog?.status === 'unavailable'}
+          notImplemented={catalogNotImplemented}
+          noEffortOptions={efforts?.length === 0}
+          stale={catalog?.message === 'refresh_failed'}
+          t={t}
+        />
+        <MemberCatalogStatus
+          catalog={catalog}
+          notImplemented={catalogNotImplemented}
+          loading={catalogLoading}
+          needsLogin={needsLogin}
+          invalidDefault={invalidDefaultModel}
+          inheritsModel={native && !form.defaultModel}
+          tool={tool}
+          modelCount={models.length}
+          t={t}
+        />
+        {catalog?.thinkingEnabled === false && (
           <p>
             {t(
-              '登录后可读取模型目录；当前可以保留跟随工具设置。',
-              'Sign in to read the model catalog; inherited settings can be kept for now.',
+              '工具配置已关闭思考；强度偏好不会开启思考。',
+              'Thinking is off in the tool configuration; an effort preference does not enable it.',
             )}
-          </p>
-        ) : catalogLoading ? (
-          <p>{t(`正在读取 ${tool} 的模型…`, `Reading ${tool} models…`)}</p>
-        ) : invalidDefaultModel ? (
-          <p role="alert">
-            {t(
-              '客户端报告的默认模型不在可用清单中，请选择有效模型或修正客户端配置后刷新。',
-              'The reported default model is unavailable. Select a valid model or fix the client configuration and refresh.',
-            )}
-          </p>
-        ) : native && !form.defaultModel && catalog?.defaultModelStatus === 'unreported' ? (
-          <p>
-            {t(
-              '已读取模型信息，但默认模型尚未确认。“跟随”会保留客户端选择，不代表已验证可调用。',
-              'Model information was read, but the native default is unconfirmed. Following keeps the client choice; it does not verify an invocation.',
-            )}
-          </p>
-        ) : catalog?.message === 'custom_model' ? (
-          <p>
-            {t(
-              '当前模型尚未由客户端探测确认，已保留你的选择；实际执行时仍需校验。',
-              'The probe has not confirmed this model. Your choice is preserved and still needs validation at invocation.',
-            )}
-          </p>
-        ) : catalog?.status === 'live' ? (
-          <p>
-            {t(`已读取 ${models.length} 个模型`, `Read ${models.length} models`)}
-            {!form.defaultModel && defaultModel
-              ? ` · ${t('配置', 'Configured')}：${defaultModelLabel}${defaultEffort ? ` · ${defaultEffort}` : ''}`
-              : ''}
-          </p>
-        ) : (
-          <p>
-            {nativeAcpProfileMessage(catalog?.message, t) ||
-              (catalog?.message === 'account_unavailable'
-                ? t(
-                    '此连接暂不可读取。已保留当前选择，请在“管理连接”中检查。',
-                    'This connection is unavailable. Your selection is preserved; check Manage connections.',
-                  )
-                : catalog?.message === 'account_catalog'
-                  ? t('使用此连接保存的模型清单。', 'Using the model list saved with this connection.')
-                  : catalog?.message === 'custom_startup'
-                    ? t(
-                        '此成员使用自定义启动配置，请按工具支持的模型选择或手动指定。',
-                        'This teammate uses a custom launch configuration; select or specify a supported model.',
-                      )
-                    : t(
-                        '模型目录暂不可读取。可以继续跟随工具，或保留已有模型；稍后刷新重试。',
-                        'Model catalog unavailable. Keep inherited or saved settings, or retry with Refresh.',
-                      ))}
           </p>
         )}
         {!catalogLoading && efforts?.length === 0 && !form.cliEffort && (
           <p>{t('此模型未提供单独的思考强度选项。', 'This model does not expose a separate effort setting.')}</p>
+        )}
+        {tierlessKimi && form.cliEffort && (
+          <p>
+            {t(
+              `已保留强度偏好 ${form.cliEffort}；此模型不采用独立强度覆盖。`,
+              `Saved effort ${form.cliEffort} is retained; this model does not apply separate effort overrides.`,
+            )}
+          </p>
         )}
         {invalidEffort && (
           <p role="alert" className="text-conn-red-text">

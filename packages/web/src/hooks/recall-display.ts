@@ -12,6 +12,7 @@ export const RESOLVER_LABELS: Record<RecallResolverFamily, string> = {
   project_knowledge: '功能',
   cat_owned_seed: '猫自己的种子',
   thread_overview: '线程概况',
+  matter: '事情',
 };
 const TYPE_LABELS: Record<string, string> = {
   ...RESOLVER_LABELS,
@@ -62,7 +63,9 @@ export function recallResultHref(item: RecallResultItem): string | null {
   return null;
 }
 export function recallDeliveryLabel(event: RecallEvent): string | undefined {
-  return event.cueStatus ? `点名递送 · ${recallTypeLabel(event.resolverFamily)}` : undefined;
+  return event.cueStatus
+    ? `${event.source === 'pull' ? '主动读取' : '点名递送'} · ${recallTypeLabel(event.resolverFamily)}`
+    : undefined;
 }
 export function recallReplyTimeLabel(group: RecallGroup, earlierRepliesPending: boolean, now = new Date()): string {
   if (group.timestamp == null) {

@@ -10,7 +10,15 @@ const MEMORY_CUE_PREFIX = 'memory-cue:v1:';
 export const CAT_CAFE_SYSTEM_PROMPT_SOURCE_REF = 'registry:cat-cafe-owned';
 
 type MemoryCueSourceCoordinate = {
-  readonly family: 'person_memory' | 'evidence' | 'taste' | 'profile' | 'event' | 'owned_seed' | 'thread_overview';
+  readonly family:
+    | 'person_memory'
+    | 'evidence'
+    | 'taste'
+    | 'profile'
+    | 'event'
+    | 'owned_seed'
+    | 'thread_overview'
+    | 'matter';
   readonly anchor: string;
   readonly revision: string;
 };
@@ -34,7 +42,8 @@ function decodeMemoryCueSourceRef(value: string): MemoryCueSourceCoordinate | nu
         parsed.family !== 'profile' &&
         parsed.family !== 'event' &&
         parsed.family !== 'owned_seed' &&
-        parsed.family !== 'thread_overview') ||
+        parsed.family !== 'thread_overview' &&
+        parsed.family !== 'matter') ||
       typeof parsed.anchor !== 'string' ||
       !parsed.anchor ||
       typeof parsed.revision !== 'string' ||

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -16,7 +16,7 @@ test(
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'profile-git-boundary-'));
     let trace;
     try {
-      execFileSync('git', ['init', '--quiet', root]);
+      execFileSync('git', ['init', '--quiet', root], { timeout: 5000 });
       const frozen = path.join(root, 'frozen');
       await fs.mkdir(path.join(frozen, 'api/dist'), { recursive: true });
       await fs.mkdir(path.join(frozen, 'dependencies'));
@@ -24,15 +24,29 @@ test(
       await fs.writeFile(
         path.join(frozen, 'api/dist/index.desktop.js'),
         `
-      import {spawnSync} from 'node:child_process'; import {createServer} from 'node:http';
-      const git=spawnSync('git',['rev-parse','--show-toplevel'],{encoding:'utf8'});
-      if(git.status===0) throw new Error('installed profile inherited the source Git repository: '+git.stdout);
+      import fs from 'node:fs'; import {createServer} from 'node:http';
+      fs.writeFileSync('git-boundary.json',JSON.stringify({cwd:process.cwd(),gitEnvKeys:Object.keys(process.env).filter(key=>key.startsWith('GIT_'))}));
       createServer((q,r)=>r.end('ok')).listen(Number(process.env.API_SERVER_PORT),'127.0.0.1',()=>globalThis.__clowderStartupMilestone('http-listening'));
     `,
       );
       const receipt = await profileDesktopStartup(await createProfileSource(root), frozen);
       trace = receipt.profileRoot;
       assert.ok((await fs.stat(receipt.manifest)).size > 0);
+      const project = path.join(trace, 'instance/project');
+      const boundary = JSON.parse(await fs.readFile(path.join(project, 'git-boundary.json'), 'utf8'));
+      assert.equal(await fs.realpath(boundary.cwd), await fs.realpath(project));
+      assert.deepEqual(boundary.gitEnvKeys, [], 'profile API must not inherit a Git environment override');
+      // Probe the actual API cwd after startup: an unrelated Git process must not
+      // block the synthetic API's readiness milestone or outlive the test budget.
+      const git = spawnSync('git', ['rev-parse', '--show-toplevel'], {
+        cwd: boundary.cwd,
+        env: Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_'))),
+        encoding: 'utf8',
+        timeout: 5000,
+      });
+      assert.equal(git.error, undefined, 'bounded Git discovery must execute successfully');
+      assert.equal(git.status, 128, 'installed profile inherited a Git repository');
+      assert.match(git.stderr, /not a git repository/i);
     } finally {
       if (trace && !trace.startsWith(root + path.sep)) await fs.rm(trace, { recursive: true, force: true });
       // Synthetic HTTP fixture only; no persistent database or agent session.

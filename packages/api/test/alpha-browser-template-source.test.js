@@ -19,7 +19,8 @@ test('production default readers enforce the actual dossier and current roster b
   });
   for (const [ownerCatId, available, expected] of [
     ['fable-5', true, 'codex-astra'],
-    ['opus55', true, 'codex-astra'],
+    // Dossier v0.12 (2026-10-23) removed this member's quota restriction.
+    ['opus55', true, 'opus55'],
     ['codex-sol', true, 'codex-sol'],
     ['codex-sol', false, 'codex-astra'],
   ]) {

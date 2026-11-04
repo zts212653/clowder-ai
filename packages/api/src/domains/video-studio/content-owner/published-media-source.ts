@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import { open, realpath } from 'node:fs/promises';
 import { basename, join, resolve, sep } from 'node:path';
@@ -13,6 +12,7 @@ import type { IMessageStore } from '../../cats/services/stores/ports/MessageStor
 import { isDurableOwnerReadEvidence, resolveVisibleReplyParent } from '../../cats/services/stores/visibility.js';
 import type { EvolutionMediaReadPort } from '../../collaborative-content/workspace-review/evolution-review-source.js';
 import type { PreparedArtifactReader } from '../../growing/EntrustedWorkOwnerReadService.js';
+import { LocalMediaFileDigest } from './local-media-file-digest.js';
 import { MediaOwnerError } from './media-errors.js';
 import { publishedMediaContentRef, workPublicationContentRef, workspaceSnapshotSourceRef } from './publication.js';
 import {
@@ -21,6 +21,7 @@ import {
   resolveEvolutionSnapshot,
 } from './published-evolution-media.js';
 import type { MediaReviewPrincipal, PublishedMediaAccess } from './published-media-access.js';
+import { mediaFileExtensionMatches } from './published-media-file-exports.js';
 import { publishedUploadMediaType, readPublishedMessageItem } from './published-message-media.js';
 import {
   assertWorkspaceSnapshotVisible,
@@ -39,6 +40,7 @@ import {
 
 export class PublishedMediaSource {
   private readonly uploadDir: string;
+  private readonly localDigests = new LocalMediaFileDigest();
   constructor(
     private readonly deps: {
       artifacts: PreparedArtifactReader;
@@ -53,20 +55,47 @@ export class PublishedMediaSource {
     this.uploadDir = resolve(deps.uploadDir);
   }
 
-  /** Only called after publication authorization; retain the original upload when its bytes still match. */
-  async localOriginalFile(publication: ContentSourcePublicationV1 | undefined, digest: string): Promise<string | null> {
-    const ref = publication?.artifactRef;
-    if (!ref?.startsWith('/uploads/')) return null;
+  /** Only exact recorded sources in registered roots may become a local original. */
+  async localOriginalFile(
+    publication: ContentSourcePublicationV1 | undefined,
+    digest: string,
+    principal?: MediaReviewPrincipal,
+    mime?: string,
+  ): Promise<string | null> {
+    if (!publication) return null;
     try {
-      const name = decodeURIComponent(ref.slice('/uploads/'.length));
-      if (!name || name !== basename(name) || name.includes('\\') || name.includes('\0')) return null;
-      const [root, path] = await Promise.all([realpath(this.uploadDir), realpath(join(this.uploadDir, name))]);
-      if (!path.startsWith(root + sep)) return null;
-      const bytes = await readBoundedFile(path, 256 * 1024 * 1024);
-      return `sha256:${createHash('sha256').update(bytes).digest('hex')}` === digest ? path : null;
+      const path = await this.originalPath(publication, digest, principal);
+      if (!path || (mime && !mediaFileExtensionMatches(path, mime))) return null;
+      return (await this.localDigests.matches(path, digest)) ? path : null;
     } catch {
       return null;
     }
+  }
+
+  private async originalPath(
+    publication: ContentSourcePublicationV1,
+    digest: string,
+    principal?: MediaReviewPrincipal,
+  ) {
+    if (publication.sourceRef.startsWith('workspace:')) {
+      const workspace = /^workspace:([^:]+):([^:]+)$/.exec(publication.sourceRef);
+      const root = workspace?.[1],
+        path = workspace?.[2];
+      if (!root || !path || !principal || !this.deps.workspace?.describeFileReference) return null;
+      const description = await this.deps.workspace.describeFileReference({
+        principal: { userId: principal.userId },
+        locator: { worktreeId: decodeURIComponent(root), path: decodeURIComponent(path) },
+      });
+      return description.contentRef === publication.artifactRef && description.revision === digest
+        ? description.absolutePath
+        : null;
+    }
+    const ref = publication.artifactRef;
+    if (!ref.startsWith('/uploads/')) return null;
+    const name = decodeURIComponent(ref.slice('/uploads/'.length));
+    if (!name || name !== basename(name) || name.includes('\\') || name.includes('\0')) return null;
+    const [root, path] = await Promise.all([realpath(this.uploadDir), realpath(join(this.uploadDir, name))]);
+    return path.startsWith(root + sep) ? path : null;
   }
 
   messageIdentity(source: import('@cat-cafe/shared').MessageMediaPublicationSource, principal: MediaReviewPrincipal) {

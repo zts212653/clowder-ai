@@ -5,8 +5,8 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { ThreadChatHistoryAdmissionProvider } from '@/components/thread-chat/ThreadChatRuntimeProvider';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
-import { MessageStore } from '../../../../api/src/domains/cats/services/stores/ports/MessageStore.js';
-import { LiveSubexecutionLog } from '../../../../api/src/domains/concierge/live/live-subexecution-log.js';
+import { MessageStore } from '../../../../api/dist/domains/cats/services/stores/ports/MessageStore.js';
+import { LiveSubexecutionLog } from '../../../../api/dist/domains/concierge/live/live-subexecution-log.js';
 import { useChatHistory } from '../useChatHistory';
 
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));

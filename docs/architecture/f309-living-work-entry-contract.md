@@ -30,6 +30,8 @@ mcp_admission_claims:
 | list | 从当前 owner manifests 投影可访问作品；分页带 catalogue snapshot，头变化拒绝拼页，未发布到聊天的已保存作品也能找回 |
 | set-context / read-context | 对精确作品版保存／读取格式注释；视频上下文使用 Phase A asset schema、原文段落和实际媒体 PTS，独立 metadataRevision CAS 与 operationId。更新索引不产生新影片版本，指定旧 metadataRevision 仍可读 |
 | import-context | 同一视频 metadata owner，消费受权 F063 JSON locator＋expectedSourceRevision，完整 UTF-8 视频索引最多 2 MiB。先核作品写权，再核源根、稳定读与 digest；媒体／来源验证后重核源及作品授权。命令体仍为 32 KiB，重放从保留回执恢复，不因源文件已移除而重复写入。这是视频索引格式入口，不是 HTML 正文准入 |
+| set-cover / read-cover | 精确视频作品版的已采用封面，F309 原库 `work_version_covers` 只追加保存，独立 coverRevision CAS 与 operationId 幂等，TTL=0。choice 为 image（pick：同作品某固定版上下文里的素材 / 本对话已持久消息的媒体项 / 本人上传）、frame（清除，回到真实画面）或 restore（按本版旧修订原文件撤销）。pick 在 owner 端解析成精确文件版本（规范 locator + sha256）与出处，不信 URL、文件名或目录；人沿本人入口（`/api/works/cover`，作品线程由 owner 推出），猫沿 callback 与作品写权一致的授权。read-cover 返回 none/frame/image/unavailable，源丢失或撤权为 unavailable，保留选择、不换别的图；新采用、restore 与重放在写入前复核来源权限，读不到即拒绝。封面字节按 `private, no-store` 返回，打开快照后交付前再核一次来源。换封面不改影片字节或 ownerRevision；set-context/import-context 不会擦掉它 |
+| submit.cover | 可选 inherit（默认）/ frame / image。决定在 owner 写影片之前冻结在 `work_cover_submissions`，新版注释投影时写第一条封面修订；显式 frame 与继承已清除的选择都持久为 frame，旧版从未选择时新版仍为 none。同 operationId 重试只用冻结结果，不读之后才改的旧版封面；重试中显式指定的图片仍按当前来源权限复核 |
 
 可选来源 binding 在保存、重放和读取时经过原 video-project owner 核权限及精确 revision/digest；若带 screening，必须同属该输入且冻结成片 digest 等于作品版。原 reviewId 通过原项目意见服务及其受众投影核验，不直接读原账、不复制批注，也不把来源绑定当成新读写授权。旧意见在视频工位的呈现仍需消费这条已核关联，不能仅凭注释落盘声明已接通。
 

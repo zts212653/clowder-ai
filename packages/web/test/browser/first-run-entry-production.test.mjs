@@ -207,6 +207,9 @@ async function fixture(shell, scenario) {
       case '/api/cats':
         assert.equal(method, 'GET');
         return reply({ cats: [cats[0]] });
+      case '/api/threads/default/suggestions':
+        assert.equal(method, 'GET');
+        return reply({ threadId: 'default', suggestions: [] });
       case '/api/guide-flows/first-run-entry': {
         const response = await entryApi.request(url.pathname);
         return reply(response.json(), response.statusCode);
