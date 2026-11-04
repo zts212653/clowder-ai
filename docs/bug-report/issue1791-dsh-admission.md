@@ -27,6 +27,10 @@ created: 2026-11-04
 2. 确定的 `ExecutionAdmissionConflict` 在 provider 启动前经原 `syncAgentRegistry` writer 刷新，再重新取服务捕获一次。串行、并行策略都接同一入口；失败仍上报，不增加 provider 重放。
 3. `QueueProcessor` 对已发布 A2A 来源的重试，以原 InvocationRecord 的精确身份、source 归属和目标 `dispatchRefs` 为依据。没有该目标 receiver 的失败记录可重试；已有 receiver 的 sibling 不重放。
 
+A2A 来源既可为已完成 response，也可为没有 `deliveryStatus` 的已发布 agent input。Redis 的 `preservePublishedAgent` 不会把正常已发布发言改为 queued；旧 `pendingInputReplay` 因要求 `deliveryStatus === 'queued'` 而拒绝这些来源。重试实际已进入 `executeEntry` 和 InvocationRecord duplicate 分支，只是在此被返回 succeeded 短路。不能将“已有幂等记录”或“输入的 lifecycle kind”单独当作跳过依据。
+
+恢复以每个仍 pending 的原 entry 为单位；新发一条消息成功不能代替原 entry 重试验证。旧 skip 分支可能已将历史 entry 退役，升级不会自动重建这些工作；部署验收须逐项回读原失败交接并明确处置，不自动复活或改写生产历史。
+
 选择理由：自动重建所有插件相关进程会无谓打断复用；直接删除一致性检查则丢失真实配置变化保护。这里将 Host 连接环境与 provider 启动环境分开，并复用现有 registry writer，不新增平行配置源或重试账本。
 
 架构归属：现有 ACP factory/pool、registry writer、routing admission 和 Queue/History；ownership map 无新增 cell。
@@ -50,6 +54,7 @@ created: 2026-11-04
 - Windows / Node 24.16.0：基线依赖构建与修复后 API TypeScript 编译通过。
 - RED：stdio/httpstream 在真实 NativePluginActions 激活后均报原环境准入错误；两个路由策略均未调用 writer；已发布 A2A 来源重试只路由一次。先出现的测试目录 ACL 错误经独立 bootstrap 目录校正后才计入有效 RED。
 - 核心回归 108 项通过。随后将 writer-refresh 场景加强为真实 AgentRouter → AgentRegistry.refresh → router cache 更新，再运行准入、运行中刷新、并行 A2A 失败报告共 22 项，全部通过；两批有重叠。
+- 宪宪的条件级分析指出已发布 agent input 也须覆盖；新增回归先以“只路由一次”失败，补齐后 Queue 全套 78 项通过，包含 input/response 两种发布来源、已 dispatched sibling 不重放、receiver 已落库而 provider 尚未启动时失败仍不重放。相应 TypeScript 编译通过；ACP 部分未变，保留此前真实调用证据。
 - 真实 DSH：从当前 factory 创建服务后激活三个合成 MCP contribution，新增六个 Host 环境字段，服务仍可准入。使用当前成员选择的 `deepseek-official / deepseek-flash`，观察到 initialize=1、newSession=1、promptStream=1，最终回复 `DSH_ADMISSION_OK`，工具调用为零。
 - 真实探针使用独立 workspace、session、storage 和 attachment 目录；五份原配置/凭据/成员存档前后哈希相同。探针在关闭子进程后立即删空 bootstrap 目录时遇到 EBUSY，后续复核自有 DSH 进程为零，空目录已移除，测试历史保留。
 - 真实调用证明 factory → 正常插件激活 → ACP 准入 → DSH 模型回复；没有覆盖真实插件 MCP 工具调用、桌面完整交接、原三条失败交接补送或部署升级，不据此声称已安装桌面版恢复。

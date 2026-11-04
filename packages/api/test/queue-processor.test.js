@@ -363,68 +363,110 @@ describe('QueueProcessor over the source-row pending Queue', () => {
     assert.deepEqual(remaining.targets, ['codex']);
   });
 
-  it('retries an undelivered A2A target from a published response without replaying its delivered sibling', async () => {
-    let attempts = 0;
-    const harness = createHarness({
-      processorOptions: { retryDeferral: { baseDelayMs: 50 } },
-      routeExecution: async function* (...args) {
-        attempts++;
-        assert.deepEqual(args[4], ['codex']);
-        if (attempts === 1) throw new Error('ACP admission failed before receiver');
-        await startLifecycle(args, 'recovered-a2a');
-        yield { type: 'done', catId: 'codex', isFinal: true, timestamp: Date.now() };
-      },
-    });
-    const originalCreate = harness.invocationRecordStore.create;
-    harness.invocationRecordStore.create = mock.fn(async (input) => {
-      const existing = [...harness.invocationRecordStore.records.values()].find(
-        (record) => record.idempotencyKey === input.idempotencyKey,
-      );
-      return existing ? { outcome: 'duplicate', invocationId: existing.id } : originalCreate(input);
-    });
-    const source = harness.messageStore.append({
-      from: { kind: 'agent', catId: 'caller' },
-      userId: 'user-1',
-      threadId: 'thread-1',
-      content: 'published handoff',
-      mentions: ['opus', 'codex'],
-      origin: 'stream',
-      timestamp: 10,
-      lifecycle: {
-        kind: 'response',
-        orderKey: '10:caller',
-        invocationId: 'caller',
-        targetId: 'caller',
-        inputEntryIds: ['caller-entry'],
-        inputMessageIds: ['caller-input'],
-        status: 'completed',
-        startedAt: 9,
-        completedAt: 10,
-        dispatchRefs: [{ targetId: 'opus', phase: 'settled', statusMessageId: 'opus-response', dispatchedAt: 10 }],
-      },
-    });
-    const queued = await harness.queue.enqueueDurable(
-      canonicalTestQueueInput({
-        threadId: 'thread-1',
+  for (const sourceKind of ['input', 'response'])
+    it(`retries an undelivered A2A target from a published ${sourceKind} without replaying its dispatched sibling`, async () => {
+      let attempts = 0;
+      const harness = createHarness({
+        processorOptions: { retryDeferral: { baseDelayMs: 50 } },
+        routeExecution: async function* (...args) {
+          attempts++;
+          assert.deepEqual(args[4], ['codex']);
+          if (attempts === 1) throw new Error('ACP admission failed before receiver');
+          await startLifecycle(args, 'recovered-a2a');
+          yield { type: 'done', catId: 'codex', isFinal: true, timestamp: Date.now() };
+        },
+      });
+      const originalCreate = harness.invocationRecordStore.create;
+      harness.invocationRecordStore.create = mock.fn(async (input) => {
+        const existing = [...harness.invocationRecordStore.records.values()].find(
+          (record) => record.idempotencyKey === input.idempotencyKey,
+        );
+        return existing ? { outcome: 'duplicate', invocationId: existing.id } : originalCreate(input);
+      });
+      const source = harness.messageStore.append({
+        from: { kind: 'agent', catId: 'caller' },
         userId: 'user-1',
-        kind: 'message_wake',
-        sourceCategory: 'a2a',
-        ownerAuthProvenance: 'strict',
-        sourceId: source.id,
-        messageId: source.id,
-        content: source.content,
-        from: source.from,
-        targetCats: ['opus', 'codex'],
-        intent: 'execute',
-      }),
-    );
+        threadId: 'thread-1',
+        content: 'published handoff',
+        mentions: ['opus', 'codex'],
+        origin: 'stream',
+        timestamp: 10,
+        lifecycle: {
+          kind: sourceKind,
+          orderKey: '10:caller',
+          ...(sourceKind === 'response'
+            ? {
+                invocationId: 'caller',
+                targetId: 'caller',
+                inputEntryIds: ['caller-entry'],
+                inputMessageIds: ['caller-input'],
+                status: 'completed',
+                startedAt: 9,
+                completedAt: 10,
+              }
+            : {}),
+          dispatchRefs: [{ targetId: 'opus', phase: 'dispatched', statusMessageId: 'opus-response', dispatchedAt: 10 }],
+        },
+      });
+      const queued = await harness.queue.enqueueDurable(
+        canonicalTestQueueInput({
+          threadId: 'thread-1',
+          userId: 'user-1',
+          kind: 'message_wake',
+          sourceCategory: 'a2a',
+          ownerAuthProvenance: 'strict',
+          sourceId: source.id,
+          messageId: source.id,
+          content: source.content,
+          from: source.from,
+          targetCats: ['opus', 'codex'],
+          intent: 'execute',
+        }),
+      );
+      assert.equal(
+        harness.messageStore.getById(source.id).deliveryStatus,
+        undefined,
+        'published agent speech stays published',
+      );
+      await harness.processor.requestDrain('thread-1');
+      await waitFor(() => harness.invocationRecordStore.records.get('inv-1')?.status === 'failed');
+      await waitFor(() => harness.queue.getEntrySnapshot('thread-1', 'user-1', queued.entry.id) === null);
+      assert.equal(attempts, 2, 'the failed target reaches the router again after the backoff');
+      const refs = harness.messageStore.getById(source.id).lifecycle.dispatchRefs;
+      assert.equal(refs.filter((ref) => ref.targetId === 'opus').length, 1);
+      assert.equal(refs.find((ref) => ref.targetId === 'opus').phase, 'dispatched');
+      assert.equal(refs.filter((ref) => ref.targetId === 'codex').length, 1);
+    });
+
+  it('does not redispatch failed A2A work after its receiver is committed', async () => {
+    const harness = createHarness({
+      processorOptions: { retryDeferral: { baseDelayMs: 10 } },
+      routeExecution: async function* (...args) {
+        const catId = args[4][0];
+        await startLifecycle(args, `receiver-before-provider-${catId}`);
+        if (catId === 'opus') throw new Error('failure after receiver admission but before provider startup');
+        yield { type: 'done', catId, isFinal: true, timestamp: Date.now() };
+      },
+    });
+    const admitted = await admitMessage(harness, {
+      from: { kind: 'agent', catId: 'caller' },
+      kind: 'message_wake',
+      sourceCategory: 'a2a',
+    });
     await harness.processor.requestDrain('thread-1');
     await waitFor(() => harness.invocationRecordStore.records.get('inv-1')?.status === 'failed');
-    await waitFor(() => harness.queue.getEntrySnapshot('thread-1', 'user-1', queued.entry.id) === null);
-    assert.equal(attempts, 2, 'the failed target reaches the router again after the backoff');
-    const refs = harness.messageStore.getById(source.id).lifecycle.dispatchRefs;
-    assert.equal(refs.filter((ref) => ref.targetId === 'opus').length, 1);
-    assert.equal(refs.filter((ref) => ref.targetId === 'codex').length, 1);
+    const source = harness.messageStore.getById(admitted.message.id);
+    assert.equal(source.lifecycle.dispatchRefs.length, 1, 'receiver ownership is durable even without a provider call');
+    const receiver = harness.messageStore.getById(source.lifecycle.dispatchRefs[0].statusMessageId);
+    assert.equal(receiver.lifecycle.invocationId, 'receiver-before-provider-opus');
+    assert.equal(receiver.lifecycle.status, 'failed');
+    await waitFor(() => harness.queue.getEntrySnapshot('thread-1', 'user-1', admitted.entry.id) === null);
+    await harness.processor.requestDrain('thread-1');
+    await harness.processor.processNext('thread-1', 'user-1');
+    assert.equal(
+      harness.router.routeExecution.mock.calls.filter((call) => call.arguments[4].includes('opus')).length,
+      1,
+    );
   });
 
   it('claims and removes admitted work from Queue without leaving a terminal tombstone', async () => {
