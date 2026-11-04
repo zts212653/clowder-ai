@@ -552,6 +552,9 @@ const { InvocationRegistry } = await import('../dist/domains/cats/services/agent
 const S3_WHY = '两批合成数据合并工作，沿原请求继续；当前状态以本记录为准。';
 const ENDED_HEADER = '你在本线程已结束的工作（Task 当前状态；停点和旧回复只是历史）:';
 const ENDED_UNAVAILABLE = '你在本线程的工作状态: 当前无法读取 Task（不按旧回复推断）';
+/** The reader entry carries the projection's exact selection, so the canonical 50-row bound cannot drop a listed Task. */
+const endedEntry = (threadId) =>
+  `读当前状态: cat_cafe_list_tasks({ threadId: "${threadId}", catId: "${CAT}", kind: "work", status: "done" })`;
 
 async function seedTask(
   taskStore,
@@ -620,11 +623,7 @@ describe('D: a canonical cold packet shows the current state of the cat’s own 
   test('S3 shape: a done Task is visible beside the stop point, with the original reader as its entry', async () => {
     const seed = await seedS3();
     const text = await packet(seed, COLD());
-    assert.equal(
-      endedBlock(text),
-      `${ENDED_HEADER}\n  - [done] 整理合成库存表\n读当前状态: cat_cafe_list_tasks({ threadId: "${THREAD}", catId: "${CAT}" })`,
-      text,
-    );
+    assert.equal(endedBlock(text), `${ENDED_HEADER}\n  - [done] 整理合成库存表\n${endedEntry(THREAD)}`, text);
     assert.match(
       text,
       new RegExp(`上次停点（仅定位，非当前指令）: 你在本线程的上一条回复 ${seed.reply.id}`),
@@ -726,10 +725,7 @@ describe('D: a canonical cold packet shows the current state of the cat’s own 
         omittedCount: 0,
       },
     });
-    assert.equal(
-      endedBlock(found),
-      `${ENDED_HEADER}\n  - [done] 整理合成库存表\n读当前状态: cat_cafe_list_tasks({ threadId: "${THREAD}", catId: "${CAT}" })`,
-    );
+    assert.equal(endedBlock(found), `${ENDED_HEADER}\n  - [done] 整理合成库存表\n${endedEntry(THREAD)}`);
     assert.ok(!found.includes('TASK-ID-SENTINEL'), 'the reader entry does not need the internal Task id');
     assert.ok(formatNavigationHeader({ ...base, resumeWork: { kind: 'unavailable' } }).includes(ENDED_UNAVAILABLE));
     const none = formatNavigationHeader({ ...base, resumeWork: { kind: 'none' } });
@@ -738,94 +734,136 @@ describe('D: a canonical cold packet shows the current state of the cat’s own 
   });
 });
 
+/**
+ * The real cold packet for `tasks` (seeded in order, so later entries are newer under the reader's
+ * ordering: updatedAt, createdAt, id), plus what its own reader entry returns through the real
+ * list-tasks callback route when called with exactly the arguments the packet advertises.
+ */
+async function readBackThroughPointer(tasks) {
+  const Fastify = (await import('fastify')).default;
+  const { callbacksRoutes } = await import('../dist/routes/callbacks.js');
+  const threadStore = new ThreadStore();
+  const thread = await threadStore.create(USER, '合成工作恢复');
+  const messageStore = adaptMessageStore(new MessageStore());
+  const cursors = new DeliveryCursorStore();
+  const taskStore = new TaskStore();
+  const request = userMessage(messageStore, '@opus 请合并两批合成库存数据', 10, {
+    mentions: ['opus'],
+    threadId: thread.id,
+  });
+  const reply = catResponse(messageStore, {
+    inputMessageIds: [request.id],
+    timestamp: 11,
+    content: '第一批已处理，第二批还未合并，请继续完成最终result.json。',
+    invocationId: 'inv-s3-wiring',
+    threadId: thread.id,
+  });
+  await cursors.ackCursor(USER, CAT, thread.id, cursorFor(reply));
+  const resume = userMessage(messageStore, '接着做', 20, { threadId: thread.id });
+  for (const input of tasks) await seedTask(taskStore, { ...input, threadId: thread.id });
+
+  const assembled = await assembleIncrementalContext(
+    { services: {}, invocationDeps: { threadStore }, messageStore, deliveryCursorStore: cursors, taskStore },
+    USER,
+    thread.id,
+    CAT,
+    resume.id,
+    'play',
+    COLD(),
+  );
+  const text = assembled.contextText;
+  const block = endedBlock(text);
+  assert.ok(block, text);
+  const listed = [...block.matchAll(/^ {2}- \[(\w+)\] (.+)$/gmu)].map((match) => ({
+    status: match[1],
+    title: match[2],
+  }));
+  const call = /^读当前状态: cat_cafe_list_tasks\(\{ (.+) \}\)$/mu.exec(block);
+  assert.ok(call, block);
+  const args = Object.fromEntries(
+    [...call[1].matchAll(/(\w+): ("[^"]*")/gu)].map((match) => [match[1], JSON.parse(match[2])]),
+  );
+
+  const registry = new InvocationRegistry();
+  const app = Fastify();
+  await app.register(callbacksRoutes, {
+    registry,
+    messageStore,
+    threadStore,
+    taskStore,
+    socketManager: { broadcastAgentMessage() {}, broadcastToRoom() {}, emitToUser() {} },
+    evidenceStore: {
+      search: async () => [],
+      health: async () => true,
+      initialize: async () => {},
+      upsert: async () => {},
+      deleteByAnchor: async () => {},
+      getByAnchor: async () => null,
+    },
+    reflectionService: { reflect: async () => '' },
+    markerQueue: {
+      submit: async (marker) => ({ id: 'mk-1', ...marker }),
+      list: async () => [],
+      transition: async () => {},
+    },
+  });
+  try {
+    const { invocationId, callbackToken } = await registry.create(USER, CAT, thread.id);
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/list-tasks?${new URLSearchParams(args)}`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+    assert.equal(response.statusCode, 200, response.body);
+    return { text, listed, args, threadId: thread.id, reader: JSON.parse(response.body) };
+  } finally {
+    await app.close();
+  }
+}
+
+const readAs = (reader) => reader.tasks.map(({ status, title }) => ({ status, title }));
+
 describe('D: the pointer is the original Task reader (actual wiring)', () => {
-  test('list_tasks with the pointer’s own arguments returns the listed ended work via the callback route', async () => {
-    const Fastify = (await import('fastify')).default;
-    const { callbacksRoutes } = await import('../dist/routes/callbacks.js');
-    const threadStore = new ThreadStore();
-    const thread = await threadStore.create(USER, '合成工作恢复');
-    const messageStore = adaptMessageStore(new MessageStore());
-    const cursors = new DeliveryCursorStore();
-    const taskStore = new TaskStore();
-    const request = userMessage(messageStore, '@opus 请合并两批合成库存数据', 10, {
-      mentions: ['opus'],
-      threadId: thread.id,
-    });
-    const reply = catResponse(messageStore, {
-      inputMessageIds: [request.id],
-      timestamp: 11,
-      content: '第一批已处理，第二批还未合并，请继续完成最终result.json。',
-      invocationId: 'inv-s3-wiring',
-      threadId: thread.id,
-    });
-    await cursors.ackCursor(USER, CAT, thread.id, cursorFor(reply));
-    const resume = userMessage(messageStore, '接着做', 20, { threadId: thread.id });
-    await seedTask(taskStore, { title: '整理合成库存表', status: 'done', threadId: thread.id });
-    await seedTask(taskStore, { title: '进行中的工作', status: 'doing', threadId: thread.id });
-    await seedTask(taskStore, { title: '别的猫的工作', status: 'done', ownerCatId: 'codex', threadId: thread.id });
-
-    const assembled = await assembleIncrementalContext(
-      { services: {}, invocationDeps: { threadStore }, messageStore, deliveryCursorStore: cursors, taskStore },
-      USER,
-      thread.id,
-      CAT,
-      resume.id,
-      'play',
-      COLD(),
-    );
-    const block = endedBlock(assembled.contextText);
-    assert.ok(block, assembled.contextText);
-    const listed = [...block.matchAll(/^ {2}- \[(\w+)\] (.+)$/gmu)].map((match) => ({
-      status: match[1],
-      title: match[2],
-    }));
+  test('the pointer’s own arguments read back exactly the listed ended work through the callback route', async () => {
+    const { text, listed, args, threadId, reader } = await readBackThroughPointer([
+      { title: '整理合成库存表', status: 'done' },
+      { title: '进行中的工作', status: 'doing' },
+      { title: '别的猫的工作', status: 'done', ownerCatId: 'codex' },
+    ]);
     assert.deepEqual(listed, [{ status: 'done', title: '整理合成库存表' }]);
-    const pointer = /读当前状态: cat_cafe_list_tasks\(\{ threadId: ("[^"]*"), catId: ("[^"]*") \}\)$/u.exec(block);
-    assert.ok(pointer, block);
-    const [threadId, catId] = [JSON.parse(pointer[1]), JSON.parse(pointer[2])];
-    assert.deepEqual([threadId, catId], [thread.id, CAT]);
+    assert.deepEqual(args, { threadId, catId: CAT, kind: 'work', status: 'done' }, 'the entry is the exact selection');
+    assert.deepEqual(readAs(reader), listed);
+    assert.equal(reader.truncated, false);
+    assert.match(text, /活跃毛线球:\n {2}- \[doing\] 进行中的工作 \(@opus\)/, 'active work keeps its existing entry');
+  });
 
-    const registry = new InvocationRegistry();
-    const app = Fastify();
-    await app.register(callbacksRoutes, {
-      registry,
-      messageStore,
-      threadStore,
-      taskStore,
-      socketManager: { broadcastAgentMessage() {}, broadcastToRoom() {}, emitToUser() {} },
-      evidenceStore: {
-        search: async () => [],
-        health: async () => true,
-        initialize: async () => {},
-        upsert: async () => {},
-        deleteByAnchor: async () => {},
-        getByAnchor: async () => null,
-      },
-      reflectionService: { reflect: async () => '' },
-      markerQueue: {
-        submit: async (marker) => ({ id: 'mk-1', ...marker }),
-        list: async () => [],
-        transition: async () => {},
-      },
+  for (const blocker of [
+    { kind: 'work', status: 'doing' },
+    { kind: 'pr_tracking', status: 'done' },
+  ]) {
+    test(`listed ended work stays readable behind 51 newer ${blocker.status}/${blocker.kind} Tasks (reader bound 50)`, async () => {
+      const newer = Array.from({ length: 51 }, (_, i) => ({
+        title: `较新的记录 ${i}`,
+        status: blocker.status,
+        ...(blocker.kind === 'pr_tracking' ? { kind: 'pr_tracking', subjectKey: `pr:synthetic/repo#${i + 1}` } : {}),
+      }));
+      const { listed, reader } = await readBackThroughPointer([
+        { title: '较早已结束的库存工作', status: 'done' },
+        ...newer,
+      ]);
+      assert.deepEqual(listed, [{ status: 'done', title: '较早已结束的库存工作' }]);
+      assert.deepEqual(readAs(reader), listed, 'the listed Task is inside what its entry reads');
+      assert.equal(reader.totalMatched, 1);
+      assert.equal(reader.truncated, false);
     });
-    try {
-      const { invocationId, callbackToken } = await registry.create(USER, CAT, thread.id);
-      const response = await app.inject({
-        method: 'GET',
-        url: `/api/callbacks/list-tasks?threadId=${encodeURIComponent(threadId)}&catId=${encodeURIComponent(catId)}`,
-        headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
-      });
-      assert.equal(response.statusCode, 200, response.body);
-      const statusByTitle = new Map(JSON.parse(response.body).tasks.map((task) => [task.title, task.status]));
-      for (const { title, status } of listed) assert.equal(statusByTitle.get(title), status, `${title} reads back`);
-      assert.equal(
-        statusByTitle.get('进行中的工作'),
-        'doing',
-        'the same read shows the cat’s active work for identity',
-      );
-      assert.ok(!statusByTitle.has('别的猫的工作'), 'another cat’s Task is outside the pointer’s read');
-    } finally {
-      await app.close();
-    }
+  }
+
+  test('the listed ended work is the top of its entry’s own read, in the same order; the rest is counted', async () => {
+    const titles = ['工作一', '工作二', '工作三', '工作四', '工作五'];
+    const { text, listed, reader } = await readBackThroughPointer(titles.map((title) => ({ title, status: 'done' })));
+    assert.equal(listed.length, 3);
+    assert.deepEqual(readAs(reader).slice(0, 3), listed);
+    assert.equal(reader.totalMatched, 5);
+    assert.match(text, /\n {2}（另有 2 项未列出）\n读当前状态: /);
   });
 });

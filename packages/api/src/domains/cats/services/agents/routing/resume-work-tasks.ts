@@ -8,17 +8,28 @@
  * state of the cat's own ended work Tasks in the thread.
  *
  * Authority stays with the Task owner. Selection is the canonical Task query
- * behind `cat_cafe_list_tasks` (same thread, same owner user, this cat, kind
- * `work`), applied to the rows this packet already read: no second store read
- * and no new state, cache or authority. Only status and title are projected;
+ * behind `cat_cafe_list_tasks` (same thread, same owner user, this cat, plus
+ * ENDED_OWN_WORK_SELECTION), applied to the rows this packet already read: no
+ * second store read and no new state, cache or authority. The advertised reader
+ * entry carries the same selection, so its canonical 50-row bound always
+ * includes every listed Task. Only status and title are projected;
  * the free-text `why`, progress text and artifact refs stay behind that reader,
  * so stale “continue” wording is never replayed as a current instruction.
  * Ordering only bounds the list — it never picks “the current work” — and a
  * thread without such a Task keeps the plain conversation path.
  */
 import type { TaskItem } from '@cat-cafe/shared';
-import { queryTaskItems } from '../../stores/ports/TaskQuery.js';
+import { queryTaskItems, type TaskQueryFilters } from '../../stores/ports/TaskQuery.js';
 import type { TaskSummary } from './navigation-context.js';
+
+/**
+ * The one selection both the projection query and its reader entry are built
+ * from. Called with the same filters, `cat_cafe_list_tasks` returns the same set
+ * in the same order, so the listed Tasks are the top of what the entry reads.
+ */
+export const ENDED_OWN_WORK_SELECTION = { kind: 'work', status: 'done' } as const satisfies Required<
+  Pick<TaskQueryFilters, 'kind' | 'status'>
+>;
 
 /** Ended own work listed per cold turn; the rest is counted and stays one read away. */
 export const RESUME_WORK_MAX_LISTED = 3;
@@ -50,7 +61,7 @@ export async function resolveEndedOwnWork(input: {
     // `listByThread(threadId)` already returned for this packet.
     const result = await queryTaskItems(
       { listByThread: () => [...threadTasks] },
-      { threadIds: [input.threadId], ownerUserId: input.userId, catId: input.catId, kind: 'work', status: 'done' },
+      { threadIds: [input.threadId], ownerUserId: input.userId, catId: input.catId, ...ENDED_OWN_WORK_SELECTION },
     );
     if (result.totalMatched === 0) return { kind: 'none' };
     const tasks = result.tasks

@@ -7,7 +7,7 @@ import { formatPromptTime } from '../../format-time.js';
 import { messageFrom } from '../../stores/message-from.js';
 import type { ThreadExecutionSituation } from '../invocation/thread-execution-situation.js';
 import type { ResumeStopPointLookup, ResumeStopPointStatus } from './resume-stop-point.js';
-import type { ResumeWorkLookup } from './resume-work-tasks.js';
+import { ENDED_OWN_WORK_SELECTION, type ResumeWorkLookup } from './resume-work-tasks.js';
 import { formatThreadContextDrill, formatThreadMessageDrill, formatThreadTasksDrill } from './thread-drill-pointer.js';
 
 export interface BatonContext {
@@ -141,7 +141,7 @@ function buildResumeWorkLines(ctx: NavigationContext): string[] {
   for (const task of lookup.tasks) lines.push(`  - [${task.status}] ${navigationTaskTitle(task.title)}`);
   if (lookup.omittedCount > 0) lines.push(`  （另有 ${lookup.omittedCount} 项未列出）`);
   if (ctx.threadId && ctx.currentCatId) {
-    lines.push(`读当前状态: ${formatThreadTasksDrill(ctx.threadId, ctx.currentCatId)}`);
+    lines.push(`读当前状态: ${formatThreadTasksDrill(ctx.threadId, ctx.currentCatId, ENDED_OWN_WORK_SELECTION)}`);
   }
   return lines;
 }
