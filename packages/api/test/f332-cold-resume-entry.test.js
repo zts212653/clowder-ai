@@ -272,6 +272,90 @@ describe('M1b: resolveResumeStopPoint reads the original lifecycle records', () 
     assert.equal(windowed.scannedCount, 10);
   });
 
+  test('a quiet thread keeps its stop point while other threads are busy (review P2)', async () => {
+    const store = adaptMessageStore(new MessageStore());
+    const request = userMessage(store, '@opus 帮我整理冷恢复需求', 10);
+    const reply = catResponse(store, {
+      inputMessageIds: [request.id],
+      timestamp: 11,
+      content: 'reply',
+      invocationId: 'inv-q',
+    });
+    for (let i = 0; i < 150; i++) {
+      store.append({
+        threadId: 'thread-busy-neighbour',
+        userId: USER,
+        catId: null,
+        content: `neighbour ${i}`,
+        mentions: [],
+        timestamp: 100 + i,
+      });
+    }
+    const result = await resolveResumeStopPoint({
+      messageStore: store,
+      threadId: THREAD,
+      userId: USER,
+      catId: CAT,
+      viewer: VIEWER,
+    });
+    assert.equal(result.kind, 'found', 'neighbour activity must not push a quiet thread out of the window');
+    assert.equal(result.stopPoint.responseMessageId, reply.id);
+    assert.deepEqual(result.stopPoint.sourceMessageIds, [request.id]);
+  });
+
+  test('the main scan requests the thread-index artifact projection and needs no bodies', async () => {
+    const calls = [];
+    const projectedReply = {
+      id: 'resp-projected',
+      threadId: THREAD,
+      userId: USER,
+      from: { kind: 'agent', catId: CAT },
+      catId: CAT,
+      timestamp: 11,
+      deliveryStatus: 'delivered',
+      lifecycle: {
+        kind: 'response',
+        orderKey: '11:inv',
+        invocationId: 'inv',
+        targetId: CAT,
+        inputEntryIds: ['entry-src'],
+        inputMessageIds: ['src-projected'],
+        status: 'completed',
+        startedAt: 11,
+        completedAt: 11,
+      },
+    };
+    const source = {
+      id: 'src-projected',
+      threadId: THREAD,
+      userId: USER,
+      from: { kind: 'user', userId: USER },
+      catId: null,
+      content: 'request',
+      timestamp: 10,
+      deliveryStatus: 'delivered',
+    };
+    const result = await resolveResumeStopPoint({
+      messageStore: {
+        getByThreadBeforeBounded: (...args) => {
+          calls.push(args);
+          return { messages: [projectedReply], scannedCount: 1, storageRoundTrips: 1, exhausted: true };
+        },
+        getById: (id) => (id === source.id ? source : null),
+      },
+      threadId: THREAD,
+      userId: USER,
+      catId: CAT,
+      viewer: VIEWER,
+    });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0][0], THREAD);
+    assert.deepEqual(calls[0][6], { artifactProjection: true }, 'main scan must use the narrow thread-index read');
+    assert.equal('content' in projectedReply, false, 'resolution depends on metadata only');
+    assert.equal(result.kind, 'found');
+    assert.deepEqual(result.stopPoint.sourceMessageIds, ['src-projected']);
+  });
+
   test('a failing read is reported as unavailable instead of guessed', async () => {
     const result = await resolveResumeStopPoint({
       messageStore: {

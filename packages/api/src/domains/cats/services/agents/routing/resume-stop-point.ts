@@ -92,6 +92,11 @@ export async function resolveResumeStopPoint(input: {
   const scanLimit = input.scanLimit ?? RESUME_STOP_POINT_SCAN_LIMIT;
   const eligibility: StopPointEligibility = { threadId: input.threadId, viewer: input.viewer };
   try {
+    // Only lifecycle / identity / visibility / time are needed. The artifact
+    // projection reads the thread's own timeline index in both stores (the
+    // default in-memory path windows the global log, so busy neighbouring
+    // threads would evict a quiet thread's stop point) and, in Redis, HMGETs
+    // MESSAGE_ARTIFACT_FIELDS instead of HGETALL — no body/thinking/toolEvents.
     const page = await input.messageStore.getByThreadBeforeBounded(
       input.threadId,
       Number.MAX_SAFE_INTEGER,
@@ -99,6 +104,7 @@ export async function resolveResumeStopPoint(input: {
       undefined,
       input.userId,
       scanLimit,
+      { artifactProjection: true },
     );
     for (const message of [...page.messages].reverse()) {
       const lifecycle = terminalOwnResponse(message, input.catId, eligibility);
