@@ -3,12 +3,12 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
-import { MemoryCueEpisodeStore } from '../../src/domains/memory/cue/MemoryCueEpisodeStore.ts';
-import { projectInvocationCues } from '../../src/domains/memory/cue/project-invocation-cues.ts';
-import { IndexBuilder } from '../../src/domains/memory/IndexBuilder.ts';
-import { MatterMemoryService } from '../../src/domains/memory/matters/MatterMemoryService.ts';
-import { matterOpeningDirectory } from '../../src/domains/memory/matters/matter-opening-directory.ts';
-import { SqliteEvidenceStore } from '../../src/domains/memory/SqliteEvidenceStore.ts';
+import { MemoryCueEpisodeStore } from '../../dist/domains/memory/cue/MemoryCueEpisodeStore.js';
+import { projectInvocationCues } from '../../dist/domains/memory/cue/project-invocation-cues.js';
+import { IndexBuilder } from '../../dist/domains/memory/IndexBuilder.js';
+import { MatterMemoryService } from '../../dist/domains/memory/matters/MatterMemoryService.js';
+import { matterOpeningDirectory } from '../../dist/domains/memory/matters/matter-opening-directory.js';
+import { SqliteEvidenceStore } from '../../dist/domains/memory/SqliteEvidenceStore.js';
 
 const astra = { userId: 'owner-a', viewer: { type: 'cat', catId: 'codex-astra' } };
 const sol = { userId: 'owner-a', viewer: { type: 'cat', catId: 'codex61-sol' } };

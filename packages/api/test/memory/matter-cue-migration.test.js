@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
 import Database from 'better-sqlite3';
-import { MemoryCueEpisodeStore } from '../../src/domains/memory/cue/MemoryCueEpisodeStore.ts';
-import { admitThreadOverviewCueFamily } from '../../src/domains/memory/curation/thread-cue-schema-migration.ts';
-import { admitMatterCueFamily } from '../../src/domains/memory/matters/matter-cue-schema.ts';
+import { MemoryCueEpisodeStore } from '../../dist/domains/memory/cue/MemoryCueEpisodeStore.js';
+import { admitThreadOverviewCueFamily } from '../../dist/domains/memory/curation/thread-cue-schema-migration.js';
+import { admitMatterCueFamily } from '../../dist/domains/memory/matters/matter-cue-schema.js';
 import { installV43CueLedgerSchemaFixture } from '../helpers/v43-memory-cue-ledger-fixture.js';
 
 it('upgrades an occupied legacy ledger losslessly and rejects cross-family or prose-bearing read details in SQL', () => {

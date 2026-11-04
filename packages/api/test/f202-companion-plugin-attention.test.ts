@@ -4,6 +4,7 @@ import {
   createCollectiveAccountabilitySource,
   readCollectiveAccountabilityAttentionSource,
 } from '../src/routes/companion-collective-accountability-source.js';
+import { snapshotInventoryFixture } from './helpers/snapshot-inventory-fixture.js';
 
 const data = {
   items: [],
@@ -127,7 +128,7 @@ test('Dot → Manager declaration → module owner context remains fenced to the
     },
   };
   const operations = new InstalledPluginOperations({
-    inventory: { snapshot: async () => snapshot as any },
+    inventory: snapshotInventoryFixture({ snapshot: async () => snapshot }),
     invocation: createModuleHostInvocation({ runtime: { actions: () => actions } }),
     configuration: {
       readActionInput: async () => ({}),

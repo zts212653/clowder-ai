@@ -2598,6 +2598,7 @@ export class CodexAgentService implements AgentService {
       const nickname = catConfig?.nickname?.trim();
       const displayName = catConfig?.displayName?.trim();
       const signatureIdentity = nickname || displayName;
+      const signatureModel = effectiveModel.trim();
       const signatureIdentityAliases = [...new Set([nickname, displayName])].filter((identity): identity is string =>
         Boolean(identity && identity !== signatureIdentity),
       );
@@ -2607,7 +2608,7 @@ export class CodexAgentService implements AgentService {
           ? {
               signatureIdentity,
               ...(signatureIdentityAliases.length > 0 ? { signatureIdentityAliases } : {}),
-              canonicalSignature: `[${signatureIdentity}/${effectiveModel}🐾]`,
+              ...(signatureModel ? { canonicalSignature: `[${signatureIdentity}/${signatureModel}🐾]` } : {}),
             }
           : {}),
       };

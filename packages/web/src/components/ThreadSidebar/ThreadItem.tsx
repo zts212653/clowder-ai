@@ -17,6 +17,7 @@ import { PawIcon } from '../icons/PawIcon';
 import { useShellCopy } from '../shell/shell-copy';
 import { useShellPresentation } from '../shell/shell-presentation';
 import { ThreadCatStatus } from '../ThreadCatStatus';
+import { useAnchoredMenu } from '../useAnchoredMenu';
 import { useSidebarDraftDecoration } from './sidebar-draft-decoration';
 import { ThreadPinV2 } from './ThreadPinV2';
 import { ThreadRowSignals } from './ThreadRowSignals';
@@ -107,6 +108,7 @@ function ThreadItemComponent({
   const inputRef = useRef<HTMLInputElement>(null);
   const moreButtonRef = useRef<HTMLButtonElement>(null);
   const moreMenuRef = useRef<HTMLDivElement>(null);
+  const menu = useAnchoredMenu(isMoreOpen, moreButtonRef, moreMenuRef, () => setIsMoreOpen(false));
   const ime = useIMEGuard();
   const [, refreshWorkingClock] = useState(0);
 
@@ -370,6 +372,12 @@ function ThreadItemComponent({
                   aria-label="更多操作"
                   aria-haspopup="menu"
                   aria-expanded={isMoreOpen}
+                  aria-controls={isMoreOpen ? menu.menuId : undefined}
+                  onKeyDown={(event) => {
+                    if (event.key !== 'ArrowDown') return;
+                    event.preventDefault();
+                    setIsMoreOpen(true);
+                  }}
                 >
                   <MoreVerticalIcon />
                 </button>
@@ -377,9 +385,13 @@ function ThreadItemComponent({
               {isMoreOpen && (
                 <div
                   ref={moreMenuRef}
+                  id={menu.menuId}
                   role="menu"
                   aria-label="对话操作"
-                  className="absolute right-0 top-5 z-50 min-w-[144px] rounded-lg border border-cafe bg-cafe-surface py-1 shadow-lg"
+                  popover="manual"
+                  onKeyDown={menu.onKeyDown}
+                  style={{ inset: 'auto', margin: 0, visibility: 'hidden', maxWidth: 'calc(100vw - 16px)' }}
+                  className="fixed z-[70] min-w-[144px] overflow-y-auto overscroll-contain rounded-lg border border-cafe bg-cafe-surface py-1 shadow-lg"
                 >
                   <ThreadActionMenuItem icon={<SettingsIcon />} onClick={startThreadSettings}>
                     对话设置
@@ -672,7 +684,7 @@ function ThreadActionMenuItem({
       role="menuitem"
       onClick={onClick}
       disabled={disabled}
-      className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors disabled:cursor-wait disabled:opacity-40 ${
+      className={`shell-focusable flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors disabled:cursor-wait disabled:opacity-40 ${
         danger ? 'text-conn-red-text hover:bg-conn-red-bg' : 'text-cafe-secondary hover:bg-cafe-surface-elevated'
       }`}
     >

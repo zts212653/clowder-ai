@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
-import { MessageStore } from '../src/domains/cats/services/stores/ports/MessageStore.ts';
-import { ThreadStore } from '../src/domains/cats/services/stores/ports/ThreadStore.ts';
-import { MatterMemoryService } from '../src/domains/memory/matters/MatterMemoryService.ts';
-import { SqliteEvidenceStore } from '../src/domains/memory/SqliteEvidenceStore.ts';
-import { registerCallbackAuthHook } from '../src/routes/callback-auth-prehandler.ts';
-import { registerCallbackMemoryRoutes } from '../src/routes/callback-memory-routes.ts';
-import { memoryCueInvocationReadRoutes } from '../src/routes/memory-cue-invocation-read.ts';
-import { memoryMatterRoutes } from '../src/routes/memory-matter-routes.ts';
+import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
+import { ThreadStore } from '../dist/domains/cats/services/stores/ports/ThreadStore.js';
+import { MatterMemoryService } from '../dist/domains/memory/matters/MatterMemoryService.js';
+import { SqliteEvidenceStore } from '../dist/domains/memory/SqliteEvidenceStore.js';
+import { registerCallbackAuthHook } from '../dist/routes/callback-auth-prehandler.js';
+import { registerCallbackMemoryRoutes } from '../dist/routes/callback-memory-routes.js';
+import { memoryCueInvocationReadRoutes } from '../dist/routes/memory-cue-invocation-read.js';
+import { memoryMatterRoutes } from '../dist/routes/memory-matter-routes.js';
 
 describe('F332 shared matter memory through the authenticated callback', () => {
   let app;

@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
-import { beforeEach, describe, it } from 'node:test';
+import { afterEach, beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
 import './helpers/setup-cat-registry.js';
 import { InvocationRegistry } from '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js';
 import { createSuggestionIntegration } from '../dist/domains/suggestions/composition.js';
 import { registerSuggestionRoutes } from '../dist/routes/suggestion-routes.js';
 
-/** Deciding a row is the configured owner's; the test registry configures this one. */
+/** Each case explicitly configures the owner whose decision boundary it exercises. */
 const USER = process.env.DEFAULT_OWNER_USER_ID ?? 'default-user';
 const THREAD = 'thread_watch';
 
@@ -25,8 +25,11 @@ describe('F335 suggestion routes', () => {
   let app;
   let auth;
   let broadcasts;
+  let originalOwner;
 
   beforeEach(async () => {
+    originalOwner = process.env.DEFAULT_OWNER_USER_ID;
+    process.env.DEFAULT_OWNER_USER_ID = USER;
     broadcasts = [];
     const registry = new InvocationRegistry();
     auth = await registry.create(USER, 'codex61-sol', THREAD);
@@ -53,6 +56,12 @@ describe('F335 suggestion routes', () => {
         resolveByline: (actor) => (actor.catId === 'codex61-sol' ? 'watcher' : 'cat'),
       });
     });
+  });
+
+  afterEach(async () => {
+    if (originalOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+    else process.env.DEFAULT_OWNER_USER_ID = originalOwner;
+    await app?.close();
   });
 
   const cat = () => ({ 'x-invocation-id': auth.invocationId, 'x-callback-token': auth.callbackToken });

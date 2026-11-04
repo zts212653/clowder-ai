@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import './helpers/setup-cat-registry.js';
-import { invokeSingleCat } from '../src/domains/cats/services/agents/invocation/invoke-single-cat.ts';
-import { ContextEpochOwner } from '../src/domains/cats/services/session/context/ContextEpochOwner.ts';
-import { InMemoryContextEpochStore } from '../src/domains/cats/services/stores/ports/ContextEpochStore.ts';
+import { invokeSingleCat } from '../dist/domains/cats/services/agents/invocation/invoke-single-cat.js';
+import { ContextEpochOwner } from '../dist/domains/cats/services/session/context/ContextEpochOwner.js';
+import { InMemoryContextEpochStore } from '../dist/domains/cats/services/stores/ports/ContextEpochStore.js';
 
 for (const mode of ['cold', 'hot', 'rebuilt']) {
   test(`F332 ${mode}: the actual provider request receives a fresh directory independently of cold-only cues`, async () => {
