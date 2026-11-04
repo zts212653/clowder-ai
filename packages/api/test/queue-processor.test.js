@@ -363,8 +363,10 @@ describe('QueueProcessor over the source-row pending Queue', () => {
     assert.deepEqual(remaining.targets, ['codex']);
   });
 
-  for (const sourceKind of ['input', 'response'])
-    it(`retries an undelivered A2A target from a published ${sourceKind} without replaying its dispatched sibling`, async () => {
+  for (const [sourceCategory, sourceKind] of ['a2a', 'a2a_failure'].flatMap((sourceCategory) =>
+    ['input', 'response'].map((sourceKind) => [sourceCategory, sourceKind]),
+  ))
+    it(`retries an undelivered A2A target from a published ${sourceKind} without replaying its dispatched sibling (${sourceCategory})`, async () => {
       let attempts = 0;
       const harness = createHarness({
         processorOptions: { retryDeferral: { baseDelayMs: 50 } },
@@ -413,7 +415,7 @@ describe('QueueProcessor over the source-row pending Queue', () => {
           threadId: 'thread-1',
           userId: 'user-1',
           kind: 'message_wake',
-          sourceCategory: 'a2a',
+          sourceCategory,
           ownerAuthProvenance: 'strict',
           sourceId: source.id,
           messageId: source.id,

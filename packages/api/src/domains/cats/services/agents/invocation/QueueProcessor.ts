@@ -5079,8 +5079,7 @@ export class QueueProcessor {
         const pendingSourceReplay =
           pendingSource !== null &&
           ((pendingSource.lifecycle?.kind === 'input' && pendingSource.deliveryStatus === 'queued') ||
-            (entry.sourceCategory === 'a2a' &&
-              pendingSource.from?.kind === 'agent' &&
+            (pendingSource.from?.kind === 'agent' &&
               (pendingSource.lifecycle?.kind === 'input' || pendingSource.lifecycle?.kind === 'response'))) &&
           pendingSource.userId === userId &&
           pendingSource.threadId === threadId &&
