@@ -6,8 +6,9 @@
 
 import { projectThreadWorks, type ThreadArtifactDTO, type ThreadArtifactsResponse } from '@cat-cafe/shared';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useChatStore } from '../stores/chatStore';
 import { apiFetch } from '../utils/api-client';
-import { useThreadLiveness, useThreadMessages } from './useThreadScopedSelectors';
+import { selectThreadMessagesRaw, useThreadLiveness } from './useThreadScopedSelectors';
 
 const EMPTY_ARTIFACTS: ThreadArtifactDTO[] = [];
 
@@ -42,7 +43,8 @@ function sourceCoverage(result: ThreadArtifactsResponse, view?: 'works') {
 
 /** Refresh original source projections on material/completion and owner changes, never streamed text tokens. */
 export function useWorksSourceRefresh(threadId: string | undefined, enabled: boolean, refetch: () => void) {
-  const messages = useThreadMessages(enabled ? (threadId ?? null) : null);
+  // Display ordering can also change with the activity clock before lifecycle hydration.
+  const messages = useChatStore((state) => selectThreadMessagesRaw(state, enabled ? (threadId ?? null) : null));
   const { hasActive } = useThreadLiveness(enabled ? (threadId ?? null) : null);
   const materialKey = useMemo(
     () =>

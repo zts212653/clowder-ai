@@ -162,8 +162,51 @@ try {
     assert.equal(streamAborts.length, 0);
   } else assert.ok(streamAborts.length >= 20, 'the desktop baseline must reproduce token-driven cancellation');
   await page.screenshot({ path: path.join(output, 'stream.png') });
+  api.io.emit('agent_message', {
+    type: 'text',
+    catId: 'opus',
+    messageId: 'parallel-response',
+    threadId: 'probe-a',
+    seq: 41,
+    seqEpoch: 'probe-epoch',
+    content: 'parallel-start ',
+  });
+  await page.getByText('parallel-start', { exact: false }).first().waitFor();
+  await page.waitForTimeout(300);
+  const parallelBefore = browserRequests.length;
+  const abortsBefore = failed.length;
+  for (let i = 0; i < 40; i++) {
+    api.io.emit('agent_message', {
+      type: 'text',
+      catId: i % 2 ? 'opus' : 'codex',
+      messageId: i % 2 ? 'parallel-response' : 'stream-response',
+      threadId: 'probe-a',
+      seq: 42 + i,
+      seqEpoch: 'probe-epoch',
+      content: `parallel-${i} `,
+    });
+    await page.waitForTimeout(30);
+  }
+  await page.getByText('parallel-39', { exact: false }).first().waitFor();
+  await page.waitForTimeout(300);
+  const parallelReads = browserRequests
+    .slice(parallelBefore)
+    .filter((request) => request.url.includes('/threads/probe-a/artifacts'));
+  const parallelAborts = failed
+    .slice(abortsBefore)
+    .filter((request) => request.url.includes('/threads/probe-a/artifacts'));
+  journeys.push({
+    action: '40 interleaved text events without lifecycle snapshots',
+    artifactAttempts: parallelReads.length,
+    aborted: parallelAborts.length,
+  });
+  if (variant === 'fixed') {
+    assert.equal(parallelReads.length, 0);
+    assert.equal(parallelAborts.length, 0);
+  } else
+    assert.ok(parallelReads.length >= 20, 'the desktop baseline must reproduce activity-driven display reordering');
   // Keep A producing while the user clicks B; exercise the background writer as well.
-  let next = 40;
+  let next = 81;
   const background = setInterval(
     () =>
       api.io.emit('agent_message', {

@@ -122,3 +122,25 @@ it('still refreshes for non-text material and invocation activation changes', as
   await act(async () => useChatStore.getState().setThreadHasActiveInvocation(target.threadId, false));
   expect(apiFetch).toHaveBeenCalledTimes(4);
 });
+
+it('ignores activity-driven display reordering of concurrent replies without lifecycle snapshots', async () => {
+  const other = { ...target, messageId: 'response-b', catId: 'opus' };
+  useChatStore.getState().addMessageToThread(target.threadId, {
+    id: other.messageId,
+    type: 'assistant',
+    catId: other.catId,
+    origin: 'stream',
+    content: '',
+    isStreaming: true,
+    timestamp: 1001,
+  });
+  await act(async () => root.render(<ThreadWorksButton threadId={target.threadId} />));
+  for (const index of Array.from({ length: 20 }, (_, value) => value + 1)) {
+    await act(async () => {
+      const reply = index % 2 ? target : other;
+      writeStreamText(reply, { content: `token-${index} ` });
+      touchStreamActivity(useChatStore.getState(), reply.threadId, reply.messageId, 2000 + index);
+    });
+  }
+  expect(apiFetch).toHaveBeenCalledTimes(1);
+});
