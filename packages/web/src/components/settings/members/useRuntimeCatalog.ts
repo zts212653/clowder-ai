@@ -53,18 +53,24 @@ export function useRuntimeCatalog(
     setLoading(true);
     const force = refresh !== lastRefresh.current;
     lastRefresh.current = refresh;
-    apiFetch(plugin ? '/api/agent-providers/models' : '/api/cats/runtime-models', {
-      method: 'POST',
-      signal: controller.signal,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        ...(plugin ? { ref: runtimeId } : { runtimeId, catId }),
-        accountRef: accountRef || undefined,
-        model: requestedModel || undefined,
-        customStartup,
-        refresh: force,
-      }),
-    })
+    apiFetch(
+      plugin ? '/api/agent-providers/models' : '/api/cats/runtime-models',
+      {
+        method: 'POST',
+        signal: controller.signal,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...(plugin ? { ref: runtimeId } : { runtimeId, catId }),
+          accountRef: accountRef || undefined,
+          model: requestedModel || undefined,
+          customStartup,
+          refresh: force,
+        }),
+      },
+      ...(plugin || runtimeId === 'dsh' || runtimeId === 'pi' || runtimeId.startsWith('acp:')
+        ? ([{ mutationTimeoutMs: 60_000 }] as const)
+        : ([] as const)),
+    )
       .then(async (response) => {
         if (!response.ok) throw Error('catalog');
         return (await response.json()) as MemberCatalog;

@@ -26,8 +26,8 @@ const errors: Record<string, [string, string]> = {
     'Choose an existing complete DSH profile. Configure it in DSH first.',
   ],
   dsh_setup_custom_startup: [
-    '此启动入口需要手动配置。请按 DSH 自定义 LLM 指南检查实际 HOME、profile 和 --patch。',
-    'This launcher needs manual configuration. Check HOME, profile and --patch using the DSH guide.',
+    '此启动入口暂不支持自动复制配置。当前模型请查看下方客户端回报；修改配置请按指南检查实际 HOME、profile 和 --patch。',
+    'This launcher does not support automatic configuration copying. See the client-reported model below; follow the guide to check the actual HOME, profile and --patch before making changes.',
   ],
   dsh_inline_credential: [
     '配置包含内联认证。请先在 DSH 改用 apiKeyEnv 凭据引用，再重试。',
@@ -132,8 +132,8 @@ export function DshProviderSetup({
     <>
       <p className="text-sm text-cafe-secondary">
         {t(
-          '首次使用自定义接口时，请在下方选择路由并保存成员。检测到 DSH 不代表 ACP 已切换到该接口。',
-          'Before first use, choose your custom provider below and save the teammate. Detecting DSH does not switch its ACP provider.',
+          '此处用于复用其他配置，当前模型以客户端回报为准。首次使用自定义接口时，请在下方选择路由并保存成员。检测到 DSH 不代表 ACP 已切换到该接口。',
+          'This section copies another configuration; the current model is reported by the client. Before first use, choose your custom provider below and save the teammate. Detecting DSH does not switch its ACP provider.',
         )}
       </p>
       <details className="rounded-xl border border-[var(--console-border-soft)] p-4 text-sm">
