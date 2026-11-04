@@ -150,12 +150,42 @@ Windows 可用 `Get-Command dsh -All` 检查入口。若它是包装脚本，还
 | --- | --- |
 | ACP 仍广告或选择官方 provider | 核对真实配置根，以及 bundle、profile、共享 home 和全部 `--patch` 的加载顺序；修正实际生效的覆盖层 |
 | profile 中声明的目标路由在最终配置中消失 | 检查 home/overlay 是否用完整 `llm-pi-ai.config` 替换了 profile 的 provider 字典，合并所需条目并保留共享配置 |
-| ACP 选择自定义 provider，但缺对应引用 | 在该原生配置根或进程环境中提供目标引用，不用官方 key 替代 |
+| ACP 选择自定义 provider，但缺对应引用 | 报 `credential_missing`；按第 6 节定位实际配置根并补齐引用，不用官方 key 替代 |
 | 原生 ACP 成功，Clowder 选择不同模型 | 检查角色模型覆盖、client 启动参数和当前会话回执，再定位 Host 的具体偏差 |
 | 路由正确，出现协议或接口错误 | 核对 DSH provider 的 `api`、`baseURL`、模型和兼容选项；必要时向 DSH 上游报告 |
 
 Windows 若在启动子进程前报 bootstrap 目录 ACL 不安全，按现有指南配置独立的安全目录；
 它属于进程启动隔离检查，不能作为自定义 LLM 鉴权失败的证据。
+
+## 6. 读到 `credential_missing` 时怎么处理
+
+Clowder 在 ACP 返回的明确缺凭据错误上会给出 `credential_missing`，而不是通用的 `prompt_failure`。
+它的含义是：**路由已经解析成功，但该路由声明的凭据引用，在原生凭据服务与启动环境中都未能解析到值。**
+
+报文形态（脱敏）：
+
+```text
+credential_missing: DSH 未能解析当前路由所需的凭据引用。
+⚠️ ACP agent 当前选定路由「custom-acp-route」缺少凭据：原生配置声明的引用名称「CUSTOM_ACP_API_KEY」，在原生凭据服务与启动环境中都未能解析到值。
+```
+
+注意区分两点：
+
+- `「CUSTOM_ACP_API_KEY」` 是**引用名称**，不是密钥正文。DSH 按名称精确查找，
+  不会因为两个名字都含 `CUSTOM` 就共用同一把密钥。
+- 这只是**本地解析失败**：请求尚未发到网关，所以网关侧通常看不到任何记录。
+
+恢复顺序：
+
+1. 确认**实际生效的入口**：自定义 wrapper 可能自己设置 `DSH_HOME`，
+  不要假定 Host 默认的 `~/.dsh` 就是真实配置根。
+2. 在该配置根下核对 profile 与全部 `--patch` overlay，找到最终生效的 provider 及其 `apiKeyEnv`。
+3. 二选一：在 DSH 原生配置中登记这个引用名对应的密钥；或**在确认账户归属后**，
+   显式把路由的引用改指向你已经保存的另一个名称。后者是用户决定，不是系统行为。
+4. 改动后用第 4 节的 `--dump-config` 与一次最小真实请求复验。
+
+系统不会自动改用其他密钥、不会按相似名称猜测关联、也不会替你修改原生配置或凭据文件。
+用 `credential_missing` 作为线索检索时，它同时也是结构化的 `errorCode`，便于在日志与测试中稳定匹配。
 
 配置回退只恢复本次实际修改的 profile/home/overlay patch 及角色模型选择；不清空凭据或历史。
 若在原生 ACP 与 Clowder 中均成功，配置修复即可闭合该调用问题，无需新增通用凭据状态或派发机制。
