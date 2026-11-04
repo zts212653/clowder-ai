@@ -835,7 +835,10 @@ export async function* routeSerial(
         if (pinnedService) {
           const admitted = await invocationServices.admit(
             pinnedService,
-            () => getService(deps.services, catId, deps.unavailableServices),
+            async () => {
+              await deps.refreshServices?.();
+              return getService(deps.services, catId, deps.unavailableServices);
+            },
             capture,
             catSignal,
           );

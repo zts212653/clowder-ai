@@ -259,7 +259,10 @@ async function* routeParallelPrepared(
       if (!current) return capture();
       const admitted = await invocationServices.admit(
         current,
-        () => getService(deps.services, catId, deps.unavailableServices),
+        async () => {
+          await deps.refreshServices?.();
+          return getService(deps.services, catId, deps.unavailableServices);
+        },
         capture,
         catSignal,
       );

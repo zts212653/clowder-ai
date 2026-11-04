@@ -5076,17 +5076,18 @@ export class QueueProcessor {
           lifecycleAdmissionUnknown = true;
           throw error;
         }
-        const pendingInputReplay =
-          pendingSource?.lifecycle?.kind === 'input' &&
+        const pendingSourceReplay =
+          pendingSource !== null &&
+          ((pendingSource.lifecycle?.kind === 'input' && pendingSource.deliveryStatus === 'queued') ||
+            (entry.sourceCategory === 'a2a' && pendingSource.lifecycle?.kind === 'response')) &&
           pendingSource.userId === userId &&
           pendingSource.threadId === threadId &&
-          pendingSource.deliveryStatus === 'queued' &&
           existing?.userMessageId === messageId &&
           !pendingSource.lifecycle.dispatchRefs?.some((ref) => targetCats.includes(ref.targetId as CatId));
         const replayEligible =
           (connectorReplayCarrier && Boolean(messageId)) ||
           Boolean(entry.execution.actionSuccessorFence) ||
-          pendingInputReplay;
+          pendingSourceReplay;
         if (
           !replayEligible ||
           !isExactReplayableQueueRecord(existing, {

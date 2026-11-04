@@ -456,6 +456,9 @@ export async function createAcpServiceForConfig(
         }),
       )
         .filter((entry): entry is [string, string] => entry[1] !== undefined)
+        // Host lookup references are projected into invocation-scoped MCP config,
+        // not inherited as part of the long-lived provider process identity.
+        .filter(([key]) => !/^CLOWDER_PLUGIN_[0-9A-F]{64}_ACTION_(TOKEN|PATH)$/.test(key))
         .sort(([left], [right]) => left.localeCompare(right)),
     );
   const preparedEnv = Object.freeze(prepareEnvironment());

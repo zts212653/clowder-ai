@@ -363,6 +363,70 @@ describe('QueueProcessor over the source-row pending Queue', () => {
     assert.deepEqual(remaining.targets, ['codex']);
   });
 
+  it('retries an undelivered A2A target from a published response without replaying its delivered sibling', async () => {
+    let attempts = 0;
+    const harness = createHarness({
+      processorOptions: { retryDeferral: { baseDelayMs: 50 } },
+      routeExecution: async function* (...args) {
+        attempts++;
+        assert.deepEqual(args[4], ['codex']);
+        if (attempts === 1) throw new Error('ACP admission failed before receiver');
+        await startLifecycle(args, 'recovered-a2a');
+        yield { type: 'done', catId: 'codex', isFinal: true, timestamp: Date.now() };
+      },
+    });
+    const originalCreate = harness.invocationRecordStore.create;
+    harness.invocationRecordStore.create = mock.fn(async (input) => {
+      const existing = [...harness.invocationRecordStore.records.values()].find(
+        (record) => record.idempotencyKey === input.idempotencyKey,
+      );
+      return existing ? { outcome: 'duplicate', invocationId: existing.id } : originalCreate(input);
+    });
+    const source = harness.messageStore.append({
+      from: { kind: 'agent', catId: 'caller' },
+      userId: 'user-1',
+      threadId: 'thread-1',
+      content: 'published handoff',
+      mentions: ['opus', 'codex'],
+      origin: 'stream',
+      timestamp: 10,
+      lifecycle: {
+        kind: 'response',
+        orderKey: '10:caller',
+        invocationId: 'caller',
+        targetId: 'caller',
+        inputEntryIds: ['caller-entry'],
+        inputMessageIds: ['caller-input'],
+        status: 'completed',
+        startedAt: 9,
+        completedAt: 10,
+        dispatchRefs: [{ targetId: 'opus', phase: 'settled', statusMessageId: 'opus-response', dispatchedAt: 10 }],
+      },
+    });
+    const queued = await harness.queue.enqueueDurable(
+      canonicalTestQueueInput({
+        threadId: 'thread-1',
+        userId: 'user-1',
+        kind: 'message_wake',
+        sourceCategory: 'a2a',
+        ownerAuthProvenance: 'strict',
+        sourceId: source.id,
+        messageId: source.id,
+        content: source.content,
+        from: source.from,
+        targetCats: ['opus', 'codex'],
+        intent: 'execute',
+      }),
+    );
+    await harness.processor.requestDrain('thread-1');
+    await waitFor(() => harness.invocationRecordStore.records.get('inv-1')?.status === 'failed');
+    await waitFor(() => harness.queue.getEntrySnapshot('thread-1', 'user-1', queued.entry.id) === null);
+    assert.equal(attempts, 2, 'the failed target reaches the router again after the backoff');
+    const refs = harness.messageStore.getById(source.id).lifecycle.dispatchRefs;
+    assert.equal(refs.filter((ref) => ref.targetId === 'opus').length, 1);
+    assert.equal(refs.filter((ref) => ref.targetId === 'codex').length, 1);
+  });
+
   it('claims and removes admitted work from Queue without leaving a terminal tombstone', async () => {
     const harness = createHarness();
     const admitted = await admitMessage(harness);

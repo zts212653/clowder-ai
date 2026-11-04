@@ -441,6 +441,7 @@ export interface AgentRouterOptions {
   resolveTrustedImagePath?: (hmrId: string) => Promise<string | undefined>;
   resolveInvocationPluginMcpView?: import('../invocation/invoke-single-cat.js').InvocationDeps['resolveInvocationPluginMcpView'];
   agentRegistry: AgentRegistry;
+  refreshServices?: () => Promise<void>;
   registry: InvocationRegistry;
   dotReplyTarget?: (
     source: import('../../cloud-bridge/dot/dot-reply-authority.js').DotReplyCandidate,
@@ -567,6 +568,7 @@ export interface AgentRouterOptions {
 export class AgentRouter {
   private scopedMemberRouting?: AgentRouterOptions['scopedMemberRouting'];
   private readonly services: Record<string, AgentService>;
+  private readonly refreshServices?: () => Promise<void>;
   private readonly unavailableServices = new Map<string, AgentRegistrationFailure>();
   private registry: InvocationRegistry;
   private messageStore: IMessageStore;
@@ -675,6 +677,7 @@ export class AgentRouter {
   constructor(options: AgentRouterOptions) {
     this.scopedMemberRouting = options.scopedMemberRouting;
     this.services = {};
+    this.refreshServices = options.refreshServices;
     this.speechMentionRe = /$^/;
     this.rebuildRuntimeCaches(options.agentRegistry);
 
@@ -1377,6 +1380,7 @@ export class AgentRouter {
     return {
       ...(this.messageSearchAnswerService ? { messageSearchAnswerService: this.messageSearchAnswerService } : {}),
       services: this.services,
+      refreshServices: this.refreshServices,
       unavailableServices: this.unavailableServices,
       ...(this.routingDispatchPreflight ? { routingDispatchPreflight: this.routingDispatchPreflight } : {}),
       invocationDeps: {

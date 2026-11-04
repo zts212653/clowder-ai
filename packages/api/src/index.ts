@@ -2795,6 +2795,7 @@ async function main(): Promise<void> {
       })
     : undefined;
   router = new AgentRouter({
+    refreshServices: () => syncAgentRegistry(catRegistry.getAllConfigs(), false),
     ...(rootMemberSessions ? { scopedMemberRouting: rootMemberSessions.routing } : {}),
     ordinaryTaskHandoffs,
     messageSearchAnswerService,

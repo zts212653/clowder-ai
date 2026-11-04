@@ -6,6 +6,9 @@ import { test } from 'node:test';
 import { catRegistry } from '@cat-cafe/shared';
 import { configStore } from '../dist/config/ConfigStore.js';
 import { CodexAgentService } from '../dist/domains/cats/services/agents/providers/CodexAgentService.js';
+import { AgentRegistry } from '../dist/domains/cats/services/agents/registry/AgentRegistry.js';
+import { ExecutionAdmissionConflict } from '../dist/domains/cats/services/agents/registry/AgentServiceUnavailableError.js';
+import { AgentRouter } from '../dist/domains/cats/services/agents/routing/AgentRouter.js';
 import { routeParallel } from '../dist/domains/cats/services/agents/routing/route-parallel.js';
 import { routeSerial } from '../dist/domains/cats/services/agents/routing/route-serial.js';
 import { ContextEpochOwner } from '../dist/domains/cats/services/session/context/ContextEpochOwner.js';
@@ -28,6 +31,7 @@ for (const [strategy, route] of [
     'once',
     'continuous',
     'replacement',
+    'writer-refresh',
     'removed',
     'opaque-error',
     'cancel',
@@ -98,6 +102,8 @@ for (const [strategy, route] of [
         const capture = service.captureInvocationOptions.bind(service);
         service.captureInvocationOptions = async (input) => {
           captures++;
+          if (change === 'writer-refresh' && label === 'old')
+            throw new ExecutionAdmissionConflict('stale construction requires the registry writer');
           if (change === 'opaque-error') throw Object.assign(new Error('owned unknown discovery'), { statusCode: 409 });
           if (!threadChange && (change === 'continuous' || captures === 1))
             configStore.set(
@@ -126,6 +132,29 @@ for (const [strategy, route] of [
       ({ deps } = routingJourneyDeps(undefined, undefined, service));
       deps.services = { [catId]: service };
       deps.unavailableServices = new Map();
+      let refreshes = 0;
+      deps.refreshServices = async () => {
+        refreshes++;
+      };
+      if (change === 'writer-refresh') {
+        const agents = new AgentRegistry();
+        agents.register(catId, service);
+        t.after(() => agents.reset());
+        const router = new AgentRouter({
+          ...deps.invocationDeps,
+          agentRegistry: agents,
+          messageStore: deps.messageStore,
+          socketManager: { broadcastToRoom() {} },
+          refreshServices: async () => {
+            refreshes++;
+            await agents.refresh(async () => {
+              agents.register(catId, createService('new'));
+            });
+            router.refreshFromRegistry(agents);
+          },
+        });
+        deps = router.getStrategyDeps();
+      }
       deps.invocationDeps.contextEpochOwner = new ContextEpochOwner(new InMemoryContextEpochStore());
       if (threadChange) {
         mkdirSync(before);
@@ -143,11 +172,18 @@ for (const [strategy, route] of [
           signal: controller.signal,
         }),
       );
-      assert.equal(captures, threadChange || ['once', 'continuous', 'replacement'].includes(change) ? 2 : 1);
-      const success = threadChange || ['once', 'replacement'].includes(change);
+      assert.equal(
+        captures,
+        threadChange || ['once', 'continuous', 'replacement', 'writer-refresh'].includes(change) ? 2 : 1,
+      );
+      assert.equal(
+        refreshes,
+        threadChange || ['once', 'continuous', 'replacement', 'removed', 'writer-refresh'].includes(change) ? 1 : 0,
+      );
+      const success = threadChange || ['once', 'replacement', 'writer-refresh'].includes(change);
       assert.equal(launches.length, success ? 1 : 0);
       if (success) {
-        const label = change === 'replacement' ? 'new' : 'old';
+        const label = ['replacement', 'writer-refresh'].includes(change) ? 'new' : 'old';
         assert.deepEqual(
           messages.filter((message) => message.type === 'error'),
           [],
@@ -156,7 +192,7 @@ for (const [strategy, route] of [
         assert.equal(launches[0].label, label);
         assert.equal(
           launches[0].args[launches[0].args.indexOf('--sandbox') + 1],
-          threadChange ? 'read-only' : 'workspace-write',
+          threadChange || change === 'writer-refresh' ? 'read-only' : 'workspace-write',
         );
         if (change === 'thread-workspace') assert.equal(launches[0].cwd, after);
         if (change === 'thread-effort') assert.ok(launches[0].args.includes('model_reasoning_effort="high"'));

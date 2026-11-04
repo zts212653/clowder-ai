@@ -1,13 +1,14 @@
 import '../helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { mkdirSync, mkdtempSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { mkdirSync, mkdtempSync, readdirSync, rmdirSync } from 'node:fs';
+import { basename, join, resolve } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { test } from 'node:test';
 import { catRegistry } from '@cat-cafe/shared';
 import { createAcpServiceForConfig } from '../../dist/domains/cats/services/agents/providers/acp/AcpServiceFactory.js';
 import { ExecutionAdmissionConflict } from '../../dist/domains/cats/services/agents/registry/AgentServiceUnavailableError.js';
+import { NativePluginActions } from '../../dist/domains/plugin/declared/native-plugin-actions.js';
 
 for (const transport of ['stdio', 'httpstream'])
   test(`factory ${transport} cold spawn keeps admitted environment and refreshes the next pool`, async (t) => {
@@ -18,6 +19,10 @@ for (const transport of ['stdio', 'httpstream'])
     const parent = resolve('artifacts/role-agent-refactor/acp-launch-environment');
     mkdirSync(parent, { recursive: true });
     const root = mkdtempSync(join(parent, 'owned-'));
+    const bootstrapRoot =
+      process.platform === 'win32'
+        ? join(process.env.ProgramData ?? 'C:/ProgramData', 'ClowderAI', 'acp-bootstrap', `issue1791-${basename(root)}`)
+        : join(root, 'bootstrap');
     const pools = new Map(),
       services = [],
       clients = [];
@@ -25,6 +30,10 @@ for (const transport of ['stdio', 'httpstream'])
       await Promise.allSettled(clients.map((client) => client.close()));
       await Promise.allSettled(services.map((service) => service.disposeHostService()));
       await Promise.allSettled([...pools.values()].map((pool) => pool.closeAll()));
+      readdirSync(bootstrapRoot).forEach((leaf) => {
+        rmdirSync(join(bootstrapRoot, leaf));
+      });
+      rmdirSync(bootstrapRoot);
       if (previous === undefined) delete process.env[marker];
       else process.env[marker] = previous;
       if (previousLifecycle === undefined) delete process.env[lifecycleKey];
@@ -42,7 +51,7 @@ for (const transport of ['stdio', 'httpstream'])
     const create = async () => {
       const service = await createAcpServiceForConfig({
         projectRoot: root,
-        bootstrapRoot: join(root, 'bootstrap'),
+        bootstrapRoot,
         profileId,
         config,
         effectiveModel: 'fixture-model',
@@ -78,6 +87,11 @@ for (const transport of ['stdio', 'httpstream'])
       });
       client.config.spawnFn = (_command, _args, options) => {
         observed = options.env?.[marker];
+        assert.equal(
+          Object.keys(options.env ?? {}).some((key) => /^CLOWDER_PLUGIN_[0-9A-F]{64}_ACTION_(TOKEN|PATH)$/.test(key)),
+          false,
+          'Host plugin lookup credentials stay outside the provider process',
+        );
         return child;
       };
       if (transport === 'httpstream') {
@@ -96,6 +110,25 @@ for (const transport of ['stdio', 'httpstream'])
     process.env[marker] = 'admitted';
     await first.captureInvocationOptions({ workingDirectory: root, mcpSupport: false });
     const firstPool = pools.get(profileId);
+    const admission = {
+      instance: { pluginInstanceId: `launch-environment-${transport}`, activationState: 'enabled' },
+      packageRecord: { manifest: { contributions: [{ type: 'mcp', id: 'native-action' }] } },
+    };
+    const actions = new NativePluginActions(async () => admission);
+    const originalKeys = new Set(Object.keys(process.env));
+    t.after(() => {
+      actions.deactivateAll();
+      Object.keys(process.env)
+        .filter((key) => !originalKeys.has(key) && key.startsWith('CLOWDER_PLUGIN_'))
+        .forEach((key) => {
+          delete process.env[key];
+        });
+    });
+    actions.activate(admission, actions.generation(admission.instance.pluginInstanceId), async () => ({}));
+    await first.captureInvocationOptions({ workingDirectory: root, mcpSupport: false });
+    const afterActivation = await create();
+    await afterActivation.captureInvocationOptions({ workingDirectory: root, mcpSupport: false });
+    assert.equal(pools.get(profileId), firstPool, 'Host MCP activation does not change provider process identity');
     assert.equal(
       firstPool.spawnSignature.includes('admitted'),
       false,

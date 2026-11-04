@@ -19,7 +19,7 @@ export class InvocationServiceScope {
   /** Retry one configuration-only capture with a fresh pin; provider invocation is outside this scope. */
   async admit(
     view: AgentService,
-    resolve: () => AgentService,
+    resolve: () => AgentService | Promise<AgentService>,
     capture: (service: AgentService) => Promise<FrozenExecutionBinding>,
     signal?: AbortSignal,
   ) {
@@ -38,7 +38,9 @@ export class InvocationServiceScope {
     if (first.status === 'fulfilled') return first.value;
     if (!(first.reason instanceof ExecutionAdmissionConflict)) throw first.reason;
     signal?.throwIfAborted();
-    return attempt(this.pin(resolve()));
+    const current = await resolve();
+    signal?.throwIfAborted();
+    return attempt(this.pin(current));
   }
 
   async dispose(): Promise<void> {
