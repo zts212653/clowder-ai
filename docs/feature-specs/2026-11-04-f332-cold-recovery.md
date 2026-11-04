@@ -9,11 +9,13 @@ updated: 2026-11-04
 
 # F332 Phase B：冷恢复首包需求与交付方案
 
-> **Status**: M1a/M1b and conditional Task pointer implemented; M1+D S3 safety observation failed after reading done Task; not merged or deployed | **Implementation**: 宪宪（claude-opus-5-5） | **Review / submission**: 砚砚（gpt-6.1-sol）
+> **Status**: M1a/M1b and conditional Task pointer implemented; Task tool contract revision code-reviewed, model validation pending; prior M1+D S3 failed; not merged or deployed | **Implementation**: 宪宪（claude-opus-5-5） | **Review / submission**: 砚砚（gpt-6.1-sol）
 
 本文件是 [F332](../features/F332-experience-informed-memory.md) Phase B 下的详细实施切片，承接 AC-B5 的同线程连续性要求及本切片新增验收；不替代 F332 的其他阶段，也不结算其既有 Task。
 
 当前 PR 包含 M1 定位入口及由实测状态缺口触发的 D 条件 Task 只读投影。M1 代码 `3c94abdababc66873a02b584930489394ba38635` 已独立复审，原 137 项测试及 3 项隔离 Redis 测试通过。M1-only 的 S3-A/B 都重做已完成工作；D 代码 `c650db92d8f3c9fc70703c12584d181818906f9e` 的构建、150 项聚焦及两条 reader 饱和回归通过，但第 9 次 M1+D 的 S3 中，模型实际读到未截断的 done Task 后仍改写文件，独立裁定 P1。信息送达和读取均已观察到，正确行动未满足；AC-3 / AC-B8 继续未通过，本批停止，PR 保持草稿。范围、逐场裁定、成本及已知基线失败见[复审证据](../features/assets/F332/cold-recovery-review-2026-11-04.md)。
+
+随后按该失败核对 Task owner/reader 合同，作者提交 `69063db306b36c60a992efbe82ac6237e6d2cdad`（本分支为 `7b8402216`）：只修订三处 MCP 工具文字、相应治理基线与接口测试。`done` 表示记录已结束而不证明产物完整；`why` 是可能保留旧值的任务语境，不是新的授权或保证最新的指令。泛指续接与明确重做/追加分开解释，保留既有 typed closure 和 tracking 生命周期。Reviewer 独立重建、44 项聚焦及治理检查通过，真实 MCP tools/list 导出字节已核；**本修订尚无模型实际接收/消费或行动验证**，不据此声称 S3 已修复。API 树仍与 c650db92 一致，fixture/oracle 与旧结果不变，总账仍 9/12。
 
 ## Cold Recovery Delivery
 
@@ -53,7 +55,7 @@ Issue #1087 已记录恢复性 drilldown、大工具返回与旧导航造成的�
 5. 多件工作无法区分时，用可读名称问“继续记忆方案，还是游戏测试？”；需要区分的是工作内容，用户仍不填编号。
 6. 真实进展沿原 Task／会话保存，不强制每轮生成一份恢复摘要。
 
-对仍应继续的工作，成功恢复必须有实际下一步的结果。只复述状态、说“我想起来了”或诚实表示不知道，都不能计作成功恢复；已完成／撤回工作的正确结果则是说明当前状态并停止。最新输入与 owner 的当前状态决定是否继续；历史内容只提供依据，不能恢复已经失效的授权。
+对仍应继续的工作，成功恢复必须有实际下一步的结果。只复述状态、说“我想起来了”或诚实表示不知道，都不能计作成功恢复；已完成／撤回工作的正确结果则是说明当前状态并停止。本轮仅为泛指续接、且对应工作已由 owner 结束时，产物或旧回复看似未完成只构成需说明的不一致，不自动恢复授权：说明记录的结束状态、已有结果入口和经核实的不一致；缺少覆盖后续改动的当前明确请求时，先取得必要授权再写。已有明确重做／扩展请求时，按其范围和既有工作生命周期承接，不重复索权。最新输入与 owner 的当前状态决定是否继续；历史内容只提供依据，不能恢复已经失效的授权。
 
 ## 3. 架构设计：小导航，按需回原件
 
