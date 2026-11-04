@@ -15,6 +15,9 @@ function fixture() {
   const root = mkdtempSync(join(tmpdir(), "f320 Windows 中文 '-"));
   const home = join(root, 'home');
   mkdirSync(home);
+  const savedProgramData = process.env.ProgramData;
+  process.env.ProgramData = join(root, 'program-data');
+  mkdirSync(process.env.ProgramData);
   const command = join(root, 'codex.CMD');
   writeFileSync(command, '@echo off\r\nnode "%~dp0\\fake.js" %*\r\n');
   writeFileSync(
@@ -34,7 +37,16 @@ fs.writeFileSync(path.join(process.env.CODEX_HOME,'auth.json'),JSON.stringify({t
 }
 `,
   );
-  return { root, home, command, close: () => rmSync(root, { recursive: true, force: true, maxRetries: 5 }) };
+  return {
+    root,
+    home,
+    command,
+    close: () => {
+      if (savedProgramData === undefined) delete process.env.ProgramData;
+      else process.env.ProgramData = savedProgramData;
+      rmSync(root, { recursive: true, force: true, maxRetries: 5 });
+    },
+  };
 }
 
 test('Windows version admission executes the selected npm CMD carrier', windows, async () => {
