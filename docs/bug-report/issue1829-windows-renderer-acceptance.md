@@ -60,13 +60,15 @@ pnpm exec vitest run src/components/shell/__tests__/header-works-streaming.test.
 
 旧组：安装包 `.build-commit=faaa1b000ebe0dc6da2aa4c7c09fa80c5be5da43`，BUILD_ID=`uYY9fMzghPPducJ5UgUyR`，已包含 #1820。
 首次单猫修复组：`.build-commit=a33d8c8988c9832166f00fe96ffbb413afc2c199`，BUILD_ID=`tTBgY5iA1QvyDkqd0YXhp`。
-补齐并发反例后的产品构建提交为 `0733d506e536d138cb69c3821d42342c85aad388`；最终构建身份及实际端口写入对应 `result.json`。
+补齐并发反例后，以 `CAT_CAFE_WEB_BUILD_REVISION=170fed6e1e3c4a7df5edc7a3ca15dcf9db53c11c` 固定提交完整重建；嵌入配置和 `.build-commit` 一致，桌面加载器校验通过。
+最终对照产物为 `baseline-1793778416030` / `fixed-1793778889498`，构建身份及实际端口写入各自 `result.json`。
 该提交后的变更只有回归测试、验收工具与本文档，产品代码与采样构建保持一致。
 
 完整隔离旅程：首次新对话初始化 → 点击 A 并显示 A 的历史 → 接收流式输出 → A 持续后台输出时点击 B → B 历史取代 A → 在 B 输入草稿 → A/B 往返并恢复 B 草稿 → 点击新对话 → 输入 `@` 显示成员 → 正常输入，composer SVG 图标和成员头像资源可用。
 fixture 成员含必需 `carrier`，未替换顶层 AppShell、页头或新对话组件。
 
-初次完整对照的最大 long task 为旧组 199ms、修复组 190ms；补充后台流切换对照也没有复现秒级 long task。
+初次完整对照的最大 long task 为旧组 199ms、修复组 190ms；最终双猫及后台切换对照为旧组 142ms、修复组 147ms，也没有复现秒级 long task。
+最终修复组 A/B 点击到目标历史显示约 469–576ms，新页完成输入及接收成员解析为 1337ms；旧组 A/B 为 923–1906ms，新页 511ms。构建/测试负载、冷缓存及新页成员等待均影响单次数字，不将它们视为性能提升证据。
 这些合成数据及单机时延不能证明现场数秒冻结已消失。CPU profile 保留供审阅，不据此宣称完整性能改善比例。
 
 复现命令（先按锁文件安装工作区依赖）：
