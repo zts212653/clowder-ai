@@ -2837,6 +2837,39 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     );
   });
 
+  test('#1795: inherited empty model keeps one observed signature without selecting a model', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      model: '',
+      carrierMode: 'exec_json',
+    });
+
+    const promise = collect(service.invoke('Signed reply with an inherited model'));
+    emitCodexEvents(proc, [
+      { type: 'thread.started', thread_id: 'thread-1795-empty-model' },
+      {
+        type: 'item.completed',
+        item: { id: 'progress', type: 'agent_message', text: '第一段。\n\n[砚砚/GPT-6🐾]' },
+      },
+      {
+        type: 'item.completed',
+        item: { id: 'answer', type: 'agent_message', text: '第二段。\n\n[砚砚/GPT-6🐾]' },
+      },
+      { type: 'turn.completed', usage: { input_tokens: 10, output_tokens: 20 } },
+    ]);
+
+    const messages = await promise;
+    const text = messages
+      .filter((message) => message.type === 'text')
+      .map((message) => message.content)
+      .join('');
+    assert.equal(text, '第一段。\n\n第二段。\n\n[砚砚/GPT-6🐾]');
+    assert.equal(spawnFn.mock.calls[0].arguments[1].includes('--model'), false);
+  });
+
   test('#1398: service treats the configured display name as a canonical signature alias', async () => {
     const savedConfigs = catRegistry.getAllConfigs();
     const catId = 'cat-signature-alias-test';
