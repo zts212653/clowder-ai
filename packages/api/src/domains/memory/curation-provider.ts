@@ -4,12 +4,14 @@ import { usesNativeToolConfiguration } from '../../config/cat-account-binding.js
 import { getCatModel } from '../../config/cat-models.js';
 import { resolveCatRuntimeAccount } from '../../config/cat-runtime-account.js';
 import { resolveCodexAccountLaunch } from '../../config/codex-account-launch.js';
+import { captureCodexLaunchPolicy } from '../../config/codex-cli.js';
 import { CodexAgentService } from '../cats/services/agents/providers/CodexAgentService.js';
 import {
   extractUserEnvTemplates,
   hasSupportedEnvTemplate,
   resolveEnvMap,
 } from '../cats/services/agents/providers/env-map.js';
+import { captureMemberExecutionPreferences } from '../cats/services/agents/providers/member-execution-preferences.js';
 import type { AgentServiceOptions } from '../cats/services/types.js';
 
 /** Same member account/model resolution as ordinary native invocations; no new account layer. */
@@ -22,7 +24,11 @@ export function resolveCurationProvider(projectRoot: string, catId: string) {
   const callbackEnv: Record<string, string> = {
     CAT_CAFE_OPENAI_MODEL_OVERRIDE: model,
   };
-  const options: AgentServiceOptions = { callbackEnv };
+  const options: AgentServiceOptions = {
+    codexLaunchPolicy: captureCodexLaunchPolicy(),
+    callbackEnv,
+    executionPreferences: captureMemberExecutionPreferences(catId, config, model),
+  };
   if (account) {
     const incompatibility = validateRuntimeProviderBinding('openai', account, model);
     if (incompatibility) throw new Error(incompatibility);
@@ -47,6 +53,7 @@ export function resolveCurationProvider(projectRoot: string, catId: string) {
     options.codexAccountLaunch = resolveCodexAccountLaunch(account, { cwd: projectRoot });
   }
   return {
+    catConfig: config,
     catId,
     model,
     accountIdentity: options.codexAccountLaunch?.accountRevision ?? account?.id ?? 'native_tool',

@@ -497,6 +497,7 @@ export function MessageActions({
       <div
         data-quote-exclude
         data-testid="message-actions-toolbar"
+        data-chat-background-layer="opaque"
         role="toolbar"
         aria-label="消息操作"
         className={`${toolbarVisibilityClass} ${compactPresentation ? 'relative' : actionSlot ? actionSlotPositionClass : `absolute ${toolbarPositionClass}`} z-30 flex transition-opacity bg-cafe-surface/90 rounded-lg shadow-sm border border-cafe ${

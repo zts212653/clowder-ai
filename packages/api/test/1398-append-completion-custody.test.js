@@ -121,7 +121,7 @@ for (const completed of [true, false]) {
   });
 }
 
-test('restart recovery broadcasts restoration of the original unfinished input', async () => {
+test('restart recovery broadcasts the original read input as uncertain', async () => {
   const f = await fixture();
   await f.append();
   await f.input().onInputRead();
@@ -133,5 +133,5 @@ test('restart recovery broadcasts restoration of the original unfinished input',
   assert.ok(
     events.some((call) => call.arguments[2].queue[0]?.appendFailures?.length || call.arguments[2].queue.length === 1),
   );
-  assert.equal(f.queue.list('thread', 'owner')[0].delivery.appendRecoveryByTarget.opus.acceptance, 'incomplete');
+  assert.equal(f.queue.list('thread', 'owner')[0].delivery.appendRecoveryByTarget.opus.acceptance, 'unknown');
 });

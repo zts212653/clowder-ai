@@ -44,7 +44,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleAckMentions",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_act_artifact_review",
@@ -1259,7 +1259,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleAdmitEntrustedWork",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_advance_evolution_program_change",
@@ -1595,7 +1595,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleAmendPersonInteraction",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_audio_capture_start",
@@ -2344,7 +2344,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleBootcampEnvCheck",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_capabilities_snapshot",
@@ -3025,7 +3025,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCloseEntrustedWork",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_constitute_evolution_program",
@@ -3243,7 +3243,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleContinueApprovedTask",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_correct_person_claim",
@@ -3371,7 +3371,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCorrectPersonClaim",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_create_rich_block",
@@ -3501,7 +3501,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCreateRichBlock",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_create_task",
@@ -3595,7 +3595,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCreateTask",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_cross_post_message",
@@ -3931,7 +3931,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCrossPostMessage",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_defer_person_memory_delta",
@@ -4111,7 +4111,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleDeferPersonMemoryDelta",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_development_return",
@@ -4782,7 +4782,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleDisposeDeferredPersonMemory",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_drill_memory_cue",
@@ -4851,7 +4851,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleDrillMemoryCue",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_drill_person_memory",
@@ -4948,7 +4948,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleDrillPersonMemory",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_edit_office_document",
@@ -5138,7 +5138,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleFeatIndex",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_finance_query",
@@ -5278,7 +5278,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleForgetDeferredPersonMemory",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_forget_person",
@@ -5328,7 +5328,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleForgetPerson",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_forget_person_memory_proposal",
@@ -5378,7 +5378,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleForgetPersonMemoryProposal",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_generate_document",
@@ -5438,7 +5438,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGenerateDocument",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_get_available_guides",
@@ -5474,7 +5474,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetAvailableGuides",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_get_custody_events",
@@ -5525,7 +5525,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetCustodyEvents",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_get_evolution_program",
@@ -5664,7 +5664,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetHoldStatus",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_get_message",
@@ -5730,7 +5730,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetMessage",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_get_pending_decisions",
@@ -5779,7 +5779,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetPendingDecisions",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_get_pending_mentions",
@@ -5826,7 +5826,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetPendingMentions",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_get_person_memory_proposal_status",
@@ -5877,7 +5877,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetPersonMemoryProposalStatus",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_get_recall_metrics",
@@ -6003,7 +6003,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetRunningWork",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_get_thread_cats",
@@ -6060,7 +6060,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetThreadCats",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_get_thread_context",
@@ -6166,7 +6166,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetThreadContext",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_get_thread_metadata",
@@ -6200,7 +6200,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetThreadMetadata",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_get_workflow_sop",
@@ -6249,7 +6249,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetWorkflowSop",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_graph_resolve",
@@ -6363,7 +6363,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGuideControl",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_hold_ball",
@@ -6511,7 +6511,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleHoldBall",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_home_action",
@@ -7593,7 +7593,58 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleListLabels",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
+    },
+    {
+      "name": "cat_cafe_list_memory_matters",
+      "serverFamily": "memory",
+      "resourceFamily": "memory-matter",
+      "actions": [
+        "list"
+      ],
+      "activeState": "canonical",
+      "description": "Find shared memory pages about a matter (事情/跨线原话). Use when opening or resuming work, finding what was already discussed or decided, or continuing a paged directory. NOT for reading source messages or proving that a cat has read them; use read_memory_matter. Output: currently readable page titles, IDs, revisions, entry counts and nextCursor; no read receipt. The optional query matches page titles/descriptions; empty does not prove no relevant past conversation exists.",
+      "descriptionDigest": "sha256:4946985527885ed7405b11ba6f44ed099f16557aa1d79b7699257a6241422f9a",
+      "descriptionCharacters": 472,
+      "descriptionTokensCl100kBase": 101,
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "description": "Opaque nextCursor returned by the same catalogue or page.",
+            "maxLength": 2000,
+            "type": "string"
+          },
+          "limit": {
+            "description": "Maximum entries per page; default 12, maximum 30.",
+            "maximum": 30,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "query": {
+            "description": "Literal title/description clue, e.g. 守望猫; omit to browse.",
+            "maxLength": 200,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "inputSchemaDigest": "sha256:df1b6ca1450e7f0cc48fbde498723e5445ac9cb8d76a2a40f0fc4ae331169d4a",
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "runtimeProfiles": [
+        "full"
+      ],
+      "schemaDelivery": {
+        "evidenceRef": "file:packages/mcp-server/src/tools/matter-memory-tools.ts",
+        "policy": "host-default"
+      },
+      "implementationRef": "module:./tools/matter-memory-tools.js#handleListMemoryMatters",
+      "protectedImplementationDigest": "sha256:25500e798005901281d1399089f9d9ca5e21a1d682de148a0c3d6d3d6fd5779d"
     },
     {
       "name": "cat_cafe_list_paw_feel_inbox",
@@ -7943,7 +7994,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleListTasks",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_list_threads",
@@ -8015,7 +8066,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleListThreads",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_manage_conversation_decision",
@@ -8623,7 +8674,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleMultiMention",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_nominate_for_global",
@@ -8740,7 +8791,84 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleOfferCustody",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
+    },
+    {
+      "name": "cat_cafe_offer_suggestion",
+      "serverFamily": "collab",
+      "resourceFamily": "artifact-surface",
+      "actions": [
+        "create"
+      ],
+      "activeState": "canonical",
+      "description": "Put one prepared, reversible action under a message as a button the person taps once (「一键提议」). Use when: there is one small thing nobody asked for that the person may want, it only touches their own things, and you can prepare it completely now — e.g. their screenshots of a film turned into timed video comments, a recurring request turned into a scheduled task. Not for: decisions, spending, starting new conversations, changing how a cat works, or touching someone else’s things (use a proposal card); repeating what the reply already offers. Output: the row; tapping runs the action, shows an undoable receipt in place, × dismisses. It never enters Needs Me. GOTCHA: one row per message. Before offering a kind again, read cat_cafe_suggestion_facts and weigh how the person treated it; there is no fixed limit.",
+      "descriptionDigest": "sha256:2ddc56634302791537aa86a34806781f0826993a02d4d87bd378cc2f577a635a",
+      "descriptionCharacters": 814,
+      "descriptionTokensCl100kBase": 179,
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "additionalProperties": false,
+            "description": "The prepared action. It runs only when the person taps.",
+            "properties": {
+              "kind": {
+                "description": "video-comments | scheduled-task",
+                "type": "string"
+              },
+              "params": {
+                "additionalProperties": {},
+                "description": "video-comments: {contentRef, ownerRevision, title, comments:[{atSeconds, endSeconds?, text}] (1–12)} on a Works video. scheduled-task: {templateId, trigger, params?, label?, category?, description?} — the same fields as register_scheduled_task, as objects; it delivers to this conversation.",
+                "type": "object"
+              }
+            },
+            "required": [
+              "kind",
+              "params"
+            ],
+            "type": "object"
+          },
+          "expiresInMinutes": {
+            "description": "Default 24h. Unanswered by then, the row leaves and counts as 不理.",
+            "maximum": 10080,
+            "minimum": 5,
+            "type": "integer"
+          },
+          "label": {
+            "description": "The button text: verb + object, e.g. 「添加 7 条视频批注」「创建定时任务 · 每周一 9:00」.",
+            "maxLength": 40,
+            "minLength": 1,
+            "type": "string"
+          },
+          "messageId": {
+            "description": "The message the row hangs under, in this conversation. Omit to hang it under your own reply in this turn.",
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "action"
+        ],
+        "type": "object"
+      },
+      "inputSchemaDigest": "sha256:c5bc94e27671f09b7ba7495bdbafc238d1dae273ddf2a3e96c23540c1824bbd7",
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "runtimeProfiles": [
+        "full"
+      ],
+      "schemaDelivery": {
+        "evidenceRef": "file:packages/mcp-server/src/tools/suggestion-tools.ts",
+        "policy": "host-default"
+      },
+      "implementationRef": "module:./tools/suggestion-tools.js#handleOfferSuggestion",
+      "protectedImplementationDigest": "sha256:2656742a7ea15b478a6f41369b5584c09133629416c26fb11e8cb5fa503f85ba"
     },
     {
       "name": "cat_cafe_open_evolution_round",
@@ -8967,6 +9095,76 @@
       },
       "implementationRef": "module:./tools/page-action-tools.js#handlePageActionStatus",
       "protectedImplementationDigest": "sha256:0fc084064a0da229b87f1ed217909a9e16b3ad90f3e6c7f5d67c8f90d8825c3a"
+    },
+    {
+      "name": "cat_cafe_post_action_receipt",
+      "serverFamily": "collab",
+      "resourceFamily": "artifact-surface",
+      "actions": [
+        "create"
+      ],
+      "activeState": "canonical",
+      "description": "Leave one receipt line under a message for something you already did (「已向小星星补了一条先例」), optionally undoable. Use when: you acted without being asked in this turn and the person should see it where it happened. Not for: progress reports, asking for anything, or actions you have not done. Output: the row, right under that message. GOTCHA: one row per message; undo only for a scheduled task you registered in this conversation.",
+      "descriptionDigest": "sha256:393b3882473e5b7aab935f5733e478e4895791e961cf71c0dd8d6cb2826b541e",
+      "descriptionCharacters": 425,
+      "descriptionTokensCl100kBase": 100,
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "additionalProperties": false,
+            "description": "Give the row an undo. Omit for a receipt that cannot be undone.",
+            "properties": {
+              "appliedRef": {
+                "additionalProperties": {},
+                "description": "scheduled-task: {taskId} of a task you registered here.",
+                "type": "object"
+              },
+              "kind": {
+                "description": "scheduled-task",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "appliedRef"
+            ],
+            "type": "object"
+          },
+          "messageId": {
+            "description": "The message the row hangs under, in this conversation. Omit to hang it under your own reply in this turn.",
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "text": {
+            "description": "What was done, as a receipt: 「已向小星星补了一条先例」.",
+            "maxLength": 60,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "type": "object"
+      },
+      "inputSchemaDigest": "sha256:214b98069401e10a557c45b6b14fd2fae7b11ad60dc79cf3869f1a20eb6ca035",
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "runtimeProfiles": [
+        "full"
+      ],
+      "schemaDelivery": {
+        "evidenceRef": "file:packages/mcp-server/src/tools/suggestion-tools.ts",
+        "policy": "host-default"
+      },
+      "implementationRef": "module:./tools/suggestion-tools.js#handlePostActionReceipt",
+      "protectedImplementationDigest": "sha256:2656742a7ea15b478a6f41369b5584c09133629416c26fb11e8cb5fa503f85ba"
     },
     {
       "name": "cat_cafe_post_message",
@@ -10574,7 +10772,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handlePostMessage",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_prepare_artifact_review",
@@ -11396,7 +11594,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposeEntity",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_propose_eval_repair",
@@ -11572,7 +11770,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposeEventMemoryCorrection",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_propose_person_memory",
@@ -12482,7 +12680,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposePersonMemory",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_propose_profile_update",
@@ -12562,7 +12760,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposeProfileUpdate",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_propose_session_handoff",
@@ -12639,7 +12837,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposeSessionHandoff",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_propose_taste",
@@ -12827,7 +13025,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposeTaste",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_propose_thread",
@@ -12953,7 +13151,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposeThread",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_publish_harness_history",
@@ -14607,6 +14805,65 @@
       "protectedImplementationDigest": "sha256:19513169bbfebc419d454a71be2e7f03a751eaf31be037cefa561199578c9730"
     },
     {
+      "name": "cat_cafe_read_memory_matter",
+      "serverFamily": "memory",
+      "resourceFamily": "memory-matter",
+      "actions": [
+        "read"
+      ],
+      "activeState": "canonical",
+      "description": "Read current original messages linked to one shared matter page. Use when a matter is relevant to this turn, including after resume or a correction; reread even if an older version is in context. NOT for granting execution authority or reporting adoption. Output: raw quotes, separate authors/quoted speakers, source coordinates, page/source revisions and pagination; changed sources are marked without substituting new text. A successful nonempty read records a durable explicit-read receipt for this authenticated invocation/cat. Directory, empty and failed reads do not count.",
+      "descriptionDigest": "sha256:b5072141c1ea5d70fbe5fa8992e0c61c01633f7bc3c8376e53f1a6b4bd16466c",
+      "descriptionCharacters": 579,
+      "descriptionTokensCl100kBase": 106,
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "description": "Opaque nextCursor returned by the same catalogue or page.",
+            "maxLength": 2000,
+            "type": "string"
+          },
+          "history": {
+            "description": "Include superseded/retired entries, still subject to current source permissions.",
+            "type": "boolean"
+          },
+          "limit": {
+            "description": "Maximum entries per page; default 12, maximum 30.",
+            "maximum": 30,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "matterId": {
+            "description": "Stable matterId from the directory or an earlier page.",
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "matterId"
+        ],
+        "type": "object"
+      },
+      "inputSchemaDigest": "sha256:d660847d0ffb6a8d5d9742e6a5f91ad91d10a226ad0a5cacb8ac96d5e676ba2f",
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "runtimeProfiles": [
+        "full"
+      ],
+      "schemaDelivery": {
+        "evidenceRef": "file:packages/mcp-server/src/tools/matter-memory-tools.ts",
+        "policy": "host-default"
+      },
+      "implementationRef": "module:./tools/matter-memory-tools.js#handleReadMemoryMatter",
+      "protectedImplementationDigest": "sha256:25500e798005901281d1399089f9d9ca5e21a1d682de148a0c3d6d3d6fd5779d"
+    },
+    {
       "name": "cat_cafe_read_profile",
       "serverFamily": "collab",
       "resourceFamily": "identity-proposal",
@@ -14668,7 +14925,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleReadProfile",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_read_session_digest",
@@ -15075,7 +15332,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRecallPersonRelationship",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_record_eval_lifecycle",
@@ -15599,7 +15856,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRecordMemoryCueOutcome",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_record_proactive_memory_abstention",
@@ -15673,7 +15930,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRecordProactiveMemoryAbstention",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_record_request_review_consumption",
@@ -16131,7 +16388,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRedactPersonMemoryItem",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_register_deployment_wait",
@@ -16243,7 +16500,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRegisterDeploymentWait",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_register_external_runtime_session",
@@ -17243,7 +17500,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRetirePersonClaim",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_retry_custody_admission",
@@ -17386,7 +17643,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRetryCustodyAdmission",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_review_distillation",
@@ -17763,7 +18020,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleSetReadMode",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_set_thread_metadata",
@@ -18008,7 +18265,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleSetThreadMetadata",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_settle_present_loop",
@@ -18710,7 +18967,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleStartGuide",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_start_vote",
@@ -18788,7 +19045,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleStartVote",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_submit_evolution_preparation",
@@ -19857,6 +20114,49 @@
       "protectedImplementationDigest": "sha256:01d5f2bf141c6850aebbf8a19e6caa24bc3ccf7e33b059bb26b7005652333e59"
     },
     {
+      "name": "cat_cafe_suggestion_facts",
+      "serverFamily": "collab",
+      "resourceFamily": "artifact-surface",
+      "actions": [
+        "read"
+      ],
+      "activeState": "canonical",
+      "description": "Read how the person has treated each kind of one-tap suggestion: offered, used, changed afterwards, undone, dismissed, ignored, still open, and the latest few. Use when: deciding whether to offer a kind again, or deciding to stop offering one (stopOffering). Output: facts per kind; counts are facts, never a rule. GOTCHA: a stopped kind cannot be offered by you until the person restores it.",
+      "descriptionDigest": "sha256:57652582881c94aee2b98551cc0dd4dfa33186123fe7c139d1d704ac386dfb78",
+      "descriptionCharacters": 392,
+      "descriptionTokensCl100kBase": 88,
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "description": "One kind; omit for every kind.",
+            "type": "string"
+          },
+          "stopOffering": {
+            "description": "A kind you decide not to offer again. The person can restore it in 设置 › 你 › 已隐藏的建议.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "inputSchemaDigest": "sha256:02dc620a4031e61781bf295b223c9f76ccab247a5a4bfe09c1b1397bae3d0174",
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "runtimeProfiles": [
+        "full"
+      ],
+      "schemaDelivery": {
+        "evidenceRef": "file:packages/mcp-server/src/tools/suggestion-tools.ts",
+        "policy": "host-default"
+      },
+      "implementationRef": "module:./tools/suggestion-tools.js#handleSuggestionFacts",
+      "protectedImplementationDigest": "sha256:2656742a7ea15b478a6f41369b5584c09133629416c26fb11e8cb5fa503f85ba"
+    },
+    {
       "name": "cat_cafe_take_over_content_modification",
       "serverFamily": "collab",
       "resourceFamily": "collaborative-content",
@@ -20483,7 +20783,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateBootcampState",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_update_entrusted_work",
@@ -20662,7 +20962,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateEntrustedWork",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_update_evolution_program",
@@ -21009,7 +21309,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateGuideState",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_update_task",
@@ -21102,7 +21402,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateTask",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_update_workflow",
@@ -21252,7 +21552,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateWorkflow",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_video_project_command",
@@ -21925,7 +22225,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleWithdrawDeferredPersonMemory",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_withdraw_thread_proposal",
@@ -21969,7 +22269,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleWithdrawThreadProposal",
-      "protectedImplementationDigest": "sha256:8e6814fab19a4f96ff2895ed70547e9e4efa08b84cc9278b7c9b1a89d71656e5"
+      "protectedImplementationDigest": "sha256:22d3cc53e6daa2d66201d735c5b540c7bb8b1ae0c690cc4c1cd614d50b6562a7"
     },
     {
       "name": "cat_cafe_work",
@@ -22915,6 +23215,199 @@
                         "minLength": 1,
                         "type": "string"
                       },
+                      "cover": {
+                        "anyOf": [
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "mode": {
+                                "const": "inherit",
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "mode"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "mode": {
+                                "const": "frame",
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "mode"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "mode": {
+                                "const": "image",
+                                "type": "string"
+                              },
+                              "pick": {
+                                "anyOf": [
+                                  {
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "assetId": {
+                                        "maxLength": 256,
+                                        "minLength": 1,
+                                        "type": "string"
+                                      },
+                                      "kind": {
+                                        "const": "work-asset",
+                                        "type": "string"
+                                      },
+                                      "metadataRevision": {
+                                        "$ref": "#/properties/command/anyOf/1/anyOf/1/properties/cover/anyOf/2/properties/pick/anyOf/0/properties/ownerRevision"
+                                      },
+                                      "ownerRevision": {
+                                        "exclusiveMinimum": 0,
+                                        "maximum": 9007199254740991,
+                                        "minimum": -9007199254740991,
+                                        "type": "integer"
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "ownerRevision",
+                                      "metadataRevision",
+                                      "assetId"
+                                    ],
+                                    "type": "object"
+                                  },
+                                  {
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "expectedUrl": {
+                                        "maxLength": 2048,
+                                        "minLength": 1,
+                                        "type": "string"
+                                      },
+                                      "item": {
+                                        "anyOf": [
+                                          {
+                                            "additionalProperties": false,
+                                            "properties": {
+                                              "blockId": {
+                                                "maxLength": 256,
+                                                "minLength": 1,
+                                                "type": "string"
+                                              },
+                                              "itemIndex": {
+                                                "maximum": 10000,
+                                                "minimum": 0,
+                                                "type": "integer"
+                                              },
+                                              "kind": {
+                                                "const": "media-gallery",
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": [
+                                              "kind",
+                                              "blockId",
+                                              "itemIndex"
+                                            ],
+                                            "type": "object"
+                                          },
+                                          {
+                                            "additionalProperties": false,
+                                            "properties": {
+                                              "blockId": {
+                                                "$ref": "#/properties/command/anyOf/1/anyOf/1/properties/cover/anyOf/2/properties/pick/anyOf/1/properties/item/anyOf/0/properties/blockId"
+                                              },
+                                              "kind": {
+                                                "const": "rich-file",
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": [
+                                              "kind",
+                                              "blockId"
+                                            ],
+                                            "type": "object"
+                                          },
+                                          {
+                                            "additionalProperties": false,
+                                            "properties": {
+                                              "index": {
+                                                "$ref": "#/properties/command/anyOf/1/anyOf/1/properties/cover/anyOf/2/properties/pick/anyOf/1/properties/item/anyOf/0/properties/itemIndex"
+                                              },
+                                              "kind": {
+                                                "const": "content-block",
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": [
+                                              "kind",
+                                              "index"
+                                            ],
+                                            "type": "object"
+                                          }
+                                        ]
+                                      },
+                                      "kind": {
+                                        "const": "thread-image",
+                                        "type": "string"
+                                      },
+                                      "messageId": {
+                                        "$ref": "#/properties/command/anyOf/1/anyOf/1/properties/cover/anyOf/2/properties/pick/anyOf/0/properties/assetId"
+                                      },
+                                      "messageRevision": {
+                                        "maxLength": 64,
+                                        "pattern": "^\\d+$",
+                                        "type": "string"
+                                      },
+                                      "threadId": {
+                                        "$ref": "#/properties/command/anyOf/1/anyOf/1/properties/cover/anyOf/2/properties/pick/anyOf/0/properties/assetId"
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "threadId",
+                                      "messageId",
+                                      "messageRevision",
+                                      "item",
+                                      "expectedUrl"
+                                    ],
+                                    "type": "object"
+                                  },
+                                  {
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "kind": {
+                                        "const": "upload",
+                                        "type": "string"
+                                      },
+                                      "uploadUrl": {
+                                        "pattern": "^\\/uploads\\/work-cover-[0-9]+-[a-f0-9]{8}\\.(png|jpg|webp)$",
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "uploadUrl"
+                                    ],
+                                    "type": "object"
+                                  }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "mode",
+                              "pick"
+                            ],
+                            "type": "object"
+                          }
+                        ]
+                      },
                       "expectedOwnerRevision": {
                         "exclusiveMinimum": 0,
                         "maximum": 9007199254740991,
@@ -23539,6 +24032,105 @@
                 "additionalProperties": false,
                 "properties": {
                   "action": {
+                    "const": "set-cover",
+                    "type": "string"
+                  },
+                  "choice": {
+                    "anyOf": [
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "mode": {
+                            "const": "image",
+                            "type": "string"
+                          },
+                          "pick": {
+                            "$ref": "#/properties/command/anyOf/1/anyOf/1/properties/cover/anyOf/2/properties/pick"
+                          }
+                        },
+                        "required": [
+                          "mode",
+                          "pick"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "mode": {
+                            "const": "frame",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "mode"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "coverRevision": {
+                            "$ref": "#/properties/command/anyOf/1/anyOf/1/properties/cover/anyOf/2/properties/pick/anyOf/0/properties/ownerRevision"
+                          },
+                          "mode": {
+                            "const": "restore",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "mode",
+                          "coverRevision"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "expectedCoverRevision": {
+                    "maximum": 9007199254740991,
+                    "minimum": -9007199254740991,
+                    "type": "integer"
+                  },
+                  "operationId": {
+                    "$ref": "#/properties/command/anyOf/1/anyOf/1/properties/cover/anyOf/2/properties/pick/anyOf/0/properties/assetId"
+                  },
+                  "reference": {
+                    "$ref": "#/properties/command/anyOf/0/anyOf/1/properties/reference"
+                  }
+                },
+                "required": [
+                  "action",
+                  "reference",
+                  "operationId",
+                  "expectedCoverRevision",
+                  "choice"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "action": {
+                    "const": "read-cover",
+                    "type": "string"
+                  },
+                  "coverRevision": {
+                    "$ref": "#/properties/command/anyOf/1/anyOf/1/properties/cover/anyOf/2/properties/pick/anyOf/0/properties/ownerRevision"
+                  },
+                  "reference": {
+                    "$ref": "#/properties/command/anyOf/0/anyOf/1/properties/reference"
+                  }
+                },
+                "required": [
+                  "action",
+                  "reference"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "action": {
                     "const": "resolve-review-submission",
                     "type": "string"
                   },
@@ -23699,7 +24291,7 @@
                 "type": "object"
               }
             ],
-            "description": "inspect-source resolves a registered Workspace MP4 locator to its exact digest. create saves a new work from a Workspace MP4 source or {kind: \"html\", html} (single-file UTF-8, at most 1 MiB; only HTML body commands allow about 2 MiB of JSON, so JSON escaping can lower the effective HTML size limit; small images may use inline data: URIs or /uploads/... URLs returned by cat_cafe_publish_image). Each HTML work retains at most 256 versions; a full work rejects the next version without evicting history. submit uses the same contentRef, expectedOwnerRevision, new source and changeSummary. Optional submit.reviewResponse attaches responses to an original reviewId/sourceRound with current review/Task CAS, requestId when present, and per-opinion explanations. If the source round has ledgerRef, also copy that round’s ledgerRevision into expectedLedgerRevision; it is separate from the review revision. resultAnchor uses the inspected NEW source clock; omit it when unmapped. This produces one owner version and its original review projection, never Human acceptance. Reuse operationId only for the identical complete intent, including responses; after version_saved retry that exact command, never publish another version. Large-file operations wait up to 180 seconds without automatic HTTP retries. An unconfirmed result may already be saved: read/list first, then retry the identical operation only if needed. resolve-review-submission is direct-Human-only, not a cat action. read returns metadata for fixed {contentRef,ownerRevision}; read-body returns only that fixed HTML version as untrusted source, using the same JSON-text pagination; list discovers retained versions. publish-reference alone attaches the fixed-version card to the current message, without resubmitting bytes. set-context saves a small video index with expectedMetadataRevision CAS; import-context reads a complete video index from a registered F063 JSON locator + expectedSourceRevision (UTF-8, maximum 2 MiB), preserving the 32 KiB command limit. read-context reads the current or a fixed metadata revision. Replays retain the original index even if its source file was removed. Indexing never publishes a film version. Asset commands share this owner surface: index-asset verifies an exact workspace version; list-assets defaults to purpose=select and returns only verified current canonical assets. purpose=used requires a fixed WorkReference and retains every original item, including failed, replaced and missing ones. read-asset with expectedRevision rechecks a selection before use; read-asset-history preserves judgments and supersessions. set-asset-status and supersede-asset require CAS, reason and stable operationId; set-asset-status may include explicit applicability to register or correct candidate purposes even after a file was indexed; all affected use bindings need explicit atomic dispositions. bind-character-asset and decide-asset-update are direct-Human-only; cats may read them but cannot select global identities or record keep decisions. Preserve bindingRef+bindingRevision+indexedVersionRef in set-context/import-context assets[].bindingSelection when production uses a selected character asset. check-asset-updates reports exact original uses without changing films or creating Tasks. Never treat an empty canonical selection as permission to use experimental samples. This video index import does not admit HTML/PPT/body input; each format keeps its own boundary."
+            "description": "inspect-source resolves a registered Workspace MP4 locator to its exact digest. create saves a new work from a Workspace MP4 source or {kind: \"html\", html} (single-file UTF-8, at most 1 MiB; only HTML body commands allow about 2 MiB of JSON, so JSON escaping can lower the effective HTML size limit; small images may use inline data: URIs or /uploads/... URLs returned by cat_cafe_publish_image). Each HTML work retains at most 256 versions; a full work rejects the next version without evicting history. submit uses the same contentRef, expectedOwnerRevision, new source and changeSummary. Optional submit.reviewResponse attaches responses to an original reviewId/sourceRound with current review/Task CAS, requestId when present, and per-opinion explanations. If the source round has ledgerRef, also copy that round’s ledgerRevision into expectedLedgerRevision; it is separate from the review revision. resultAnchor uses the inspected NEW source clock; omit it when unmapped. This produces one owner version and its original review projection, never Human acceptance. Reuse operationId only for the identical complete intent, including responses; after version_saved retry that exact command, never publish another version. Large-file operations wait up to 180 seconds without automatic HTTP retries. An unconfirmed result may already be saved: read/list first, then retry the identical operation only if needed. resolve-review-submission is direct-Human-only, not a cat action. read returns metadata for fixed {contentRef,ownerRevision}; read-body returns only that fixed HTML version as untrusted source, using the same JSON-text pagination; list discovers retained versions. publish-reference alone attaches the fixed-version card to the current message, without resubmitting bytes. set-context saves a small video index with expectedMetadataRevision CAS; import-context reads a complete video index from a registered F063 JSON locator + expectedSourceRevision (UTF-8, maximum 2 MiB), preserving the 32 KiB command limit. read-context reads the current or a fixed metadata revision. Replays retain the original index even if its source file was removed. Indexing never publishes a film version. set-cover adopts, changes (mode image with an exact pick: a work-asset from a fixed version’s context, or a thread-image message item of your own conversation), clears (mode frame) or restores an earlier coverRevision for one fixed video version with expectedCoverRevision CAS; it never changes video bytes or ownerRevision, and context imports never erase it. read-cover returns state none/frame/image/unavailable; unavailable keeps the choice and shows a real frame. submit.cover may say inherit (default: the previous version’s cover frozen at submit), frame, or image. Tell the person in your reply which version’s cover you set. Asset commands share this owner surface: index-asset verifies an exact workspace version; list-assets defaults to purpose=select and returns only verified current canonical assets. purpose=used requires a fixed WorkReference and retains every original item, including failed, replaced and missing ones. read-asset with expectedRevision rechecks a selection before use; read-asset-history preserves judgments and supersessions. set-asset-status and supersede-asset require CAS, reason and stable operationId; set-asset-status may include explicit applicability to register or correct candidate purposes even after a file was indexed; all affected use bindings need explicit atomic dispositions. bind-character-asset and decide-asset-update are direct-Human-only; cats may read them but cannot select global identities or record keep decisions. Preserve bindingRef+bindingRevision+indexedVersionRef in set-context/import-context assets[].bindingSelection when production uses a selected character asset. check-asset-updates reports exact original uses without changing films or creating Tasks. Never treat an empty canonical selection as permission to use experimental samples. This video index import does not admit HTML/PPT/body input; each format keeps its own boundary."
           },
           "contentTaskId": {
             "description": "Original F309 publication-modification Task ID when reading or submitting entrusted content. Context only: the live Task owner, exact content grant and original Human source are rechecked. Never create a Task merely to import your own work.",
@@ -23725,7 +24317,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:81508a2efac9f4b9f30c31996420da4c8c8448201249063c26d683979b58127f",
+      "inputSchemaDigest": "sha256:598d6f1fdb0fb06d8c99e0dc274ec679500bb7c3f8d8303606d71b90976efc2a",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
@@ -23739,7 +24331,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/work-tools.js#handleWorkCommand",
-      "protectedImplementationDigest": "sha256:f4ceb8f0fca105987f32d480a5b3c86dabe53677cbf70449258085801b650404"
+      "protectedImplementationDigest": "sha256:eec63609b4dbb7866ff8ebd8c238c6d0e5e87c02e0849fa6728c4cd0b51b5530"
     },
     {
       "name": "cat_cafe_workspace_navigate",
@@ -23818,6 +24410,303 @@
       },
       "implementationRef": "module:./tools/hub-action-tools.js#handleWorkspaceNavigate",
       "protectedImplementationDigest": "sha256:9b47c56bc3660825ed764bfc5a77b125c1ac37bf2050665bd0b2c630959b8a4a"
+    },
+    {
+      "name": "cat_cafe_write_memory_matter",
+      "serverFamily": "memory",
+      "resourceFamily": "memory-matter",
+      "actions": [
+        "write"
+      ],
+      "activeState": "canonical",
+      "description": "Create, append to, correct or retire a shared matter page using exact original message selections. Use when related statements/decisions in different threads should remain findable together, or when a new sourced correction replaces an entry. NOT for personal profiles, people or tastes (use their proposal tools), editing source messages, or authorizing work. Output: durable matterId/revision receipt. Reuse requestId only for the exact same change; updates require expectedRevision from a fresh read. Source selections use raw UTF-16 start/end (end exclusive), segment body/quote_comment/quote_text, and quote attachments require contentBlockIndex and attachmentId. Titles/descriptions are cat-written interpretation, not original speech; owner forgetting is in the memory UI.",
+      "descriptionDigest": "sha256:12f039a960e647749e57781fb917c052c8db2a199ff83c22064137dcd6dad16a",
+      "descriptionCharacters": 779,
+      "descriptionTokensCl100kBase": 149,
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "change": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "description": {
+                    "default": "",
+                    "maxLength": 4000,
+                    "type": "string"
+                  },
+                  "operation": {
+                    "const": "create",
+                    "type": "string"
+                  },
+                  "requestId": {
+                    "maxLength": 200,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "sources": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "attachmentId": {
+                          "$ref": "#/properties/change/anyOf/0/properties/requestId",
+                          "description": "Exact quote attachment ID; required for quote segments."
+                        },
+                        "contentBlockIndex": {
+                          "description": "Zero-based contentBlocks index; required for quote segments or multiple text blocks.",
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        "end": {
+                          "description": "Exclusive raw UTF-16 offset, greater than start.",
+                          "exclusiveMinimum": 0,
+                          "type": "integer"
+                        },
+                        "messageId": {
+                          "description": "Exact source message ID in that thread.",
+                          "maxLength": 200,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "quote": {
+                          "description": "Exact selected original text, preserving whitespace; maximum 8000 UTF-16 units.",
+                          "maxLength": 8000,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "segment": {
+                          "description": "Raw message body, the quoting author comment, or quoted text; never normalized search text.",
+                          "enum": [
+                            "body",
+                            "quote_comment",
+                            "quote_text"
+                          ],
+                          "type": "string"
+                        },
+                        "start": {
+                          "description": "Inclusive raw UTF-16 offset within the selected segment.",
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        "threadId": {
+                          "description": "Exact source thread ID.",
+                          "maxLength": 200,
+                          "minLength": 1,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "threadId",
+                        "messageId",
+                        "segment",
+                        "start",
+                        "end",
+                        "quote"
+                      ],
+                      "type": "object"
+                    },
+                    "maxItems": 30,
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "title": {
+                    "maxLength": 160,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "requestId",
+                  "operation",
+                  "title",
+                  "sources"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "expectedRevision": {
+                    "exclusiveMinimum": 0,
+                    "type": "integer"
+                  },
+                  "matterId": {
+                    "$ref": "#/properties/change/anyOf/0/properties/requestId"
+                  },
+                  "operation": {
+                    "const": "append",
+                    "type": "string"
+                  },
+                  "requestId": {
+                    "$ref": "#/properties/change/anyOf/0/properties/requestId"
+                  },
+                  "sources": {
+                    "items": {
+                      "$ref": "#/properties/change/anyOf/0/properties/sources/items"
+                    },
+                    "maxItems": 30,
+                    "minItems": 1,
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "requestId",
+                  "matterId",
+                  "expectedRevision",
+                  "operation",
+                  "sources"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "description": {
+                    "maxLength": 4000,
+                    "type": "string"
+                  },
+                  "expectedRevision": {
+                    "$ref": "#/properties/change/anyOf/1/properties/expectedRevision"
+                  },
+                  "matterId": {
+                    "$ref": "#/properties/change/anyOf/0/properties/requestId"
+                  },
+                  "operation": {
+                    "const": "edit",
+                    "type": "string"
+                  },
+                  "requestId": {
+                    "$ref": "#/properties/change/anyOf/0/properties/requestId"
+                  },
+                  "title": {
+                    "maxLength": 160,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "requestId",
+                  "matterId",
+                  "expectedRevision",
+                  "operation",
+                  "title",
+                  "description"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "entryId": {
+                    "$ref": "#/properties/change/anyOf/0/properties/requestId"
+                  },
+                  "expectedRevision": {
+                    "$ref": "#/properties/change/anyOf/1/properties/expectedRevision"
+                  },
+                  "matterId": {
+                    "$ref": "#/properties/change/anyOf/0/properties/requestId"
+                  },
+                  "operation": {
+                    "const": "correct",
+                    "type": "string"
+                  },
+                  "requestId": {
+                    "$ref": "#/properties/change/anyOf/0/properties/requestId"
+                  },
+                  "source": {
+                    "$ref": "#/properties/change/anyOf/0/properties/sources/items"
+                  }
+                },
+                "required": [
+                  "requestId",
+                  "matterId",
+                  "expectedRevision",
+                  "operation",
+                  "entryId",
+                  "source"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "entryId": {
+                    "$ref": "#/properties/change/anyOf/0/properties/requestId"
+                  },
+                  "expectedRevision": {
+                    "$ref": "#/properties/change/anyOf/1/properties/expectedRevision"
+                  },
+                  "matterId": {
+                    "$ref": "#/properties/change/anyOf/0/properties/requestId"
+                  },
+                  "operation": {
+                    "const": "retire_entry",
+                    "type": "string"
+                  },
+                  "requestId": {
+                    "$ref": "#/properties/change/anyOf/0/properties/requestId"
+                  }
+                },
+                "required": [
+                  "requestId",
+                  "matterId",
+                  "expectedRevision",
+                  "operation",
+                  "entryId"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "expectedRevision": {
+                    "$ref": "#/properties/change/anyOf/1/properties/expectedRevision"
+                  },
+                  "matterId": {
+                    "$ref": "#/properties/change/anyOf/0/properties/requestId"
+                  },
+                  "operation": {
+                    "const": "retire",
+                    "type": "string"
+                  },
+                  "requestId": {
+                    "$ref": "#/properties/change/anyOf/0/properties/requestId"
+                  }
+                },
+                "required": [
+                  "requestId",
+                  "matterId",
+                  "expectedRevision",
+                  "operation"
+                ],
+                "type": "object"
+              }
+            ],
+            "description": "One exact change. Sources include threadId/messageId, segment, raw start/end and the exact selected quote."
+          }
+        },
+        "required": [
+          "change"
+        ],
+        "type": "object"
+      },
+      "inputSchemaDigest": "sha256:0849271e9072c45e07ad725b7905325f182edf7c17ac9b72fcc00f62ab694a6b",
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "runtimeProfiles": [
+        "full"
+      ],
+      "schemaDelivery": {
+        "evidenceRef": "file:packages/mcp-server/src/tools/matter-memory-tools.ts",
+        "policy": "host-default"
+      },
+      "implementationRef": "module:./tools/matter-memory-tools.js#handleWriteMemoryMatter",
+      "protectedImplementationDigest": "sha256:25500e798005901281d1399089f9d9ca5e21a1d682de148a0c3d6d3d6fd5779d"
     },
     {
       "name": "limb_bind_embodiment",

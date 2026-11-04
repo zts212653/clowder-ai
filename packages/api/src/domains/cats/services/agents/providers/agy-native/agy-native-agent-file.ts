@@ -88,8 +88,12 @@ export function materializeAgyNativeAgentFile(input: AgyNativeAgentFileInput): {
     'subagent: false',
     ...(autoApprove || input.tools?.includes('run_command') ? [] : ['commandExecutionPolicy: off']),
     'inheritMcp: true',
-    'tools:',
-    ...(input.tools ?? (autoApprove ? AGY_NATIVE_TOOLS : AGY_NATIVE_READ_TOOLS)).map((tool) => `  - ${tool}`),
+    ...(input.tools?.length === 0
+      ? ['tools: []']
+      : [
+          'tools:',
+          ...(input.tools ?? (autoApprove ? AGY_NATIVE_TOOLS : AGY_NATIVE_READ_TOOLS)).map((tool) => `  - ${tool}`),
+        ]),
     '---',
     input.systemPrompt,
   ].join('\n');

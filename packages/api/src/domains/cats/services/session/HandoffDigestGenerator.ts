@@ -7,6 +7,7 @@
  */
 
 import { buildProviderEndpoint } from '../../../../config/provider-endpoint.js';
+import { sliceUnicodeSafe } from '../../../../utils/unicode-safe-slice.js';
 import type { HandoffInvocationSummary } from './TranscriptFormatter.js';
 
 const HAIKU_MODEL = 'claude-haiku-4-5-20251001';
@@ -131,7 +132,7 @@ export function buildPromptContent(
   if (tail.length > 0) {
     parts.push('\n## Recent Chat Messages');
     for (const m of tail) {
-      parts.push(`[${m.role}]: ${m.content.slice(0, 200)}`);
+      parts.push(`[${m.role}]: ${sliceUnicodeSafe(m.content, 0, 200)}`);
     }
   }
 
@@ -139,7 +140,7 @@ export function buildPromptContent(
 
   // Truncate if over input cap
   if (result.length > MAX_INPUT_CHARS) {
-    return `${result.slice(0, MAX_INPUT_CHARS)}\n\n[... truncated due to input size limit]`;
+    return `${sliceUnicodeSafe(result, 0, MAX_INPUT_CHARS)}\n\n[... truncated due to input size limit]`;
   }
   return result;
 }

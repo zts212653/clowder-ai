@@ -6,7 +6,7 @@ import { createServer } from 'node:net';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
 import { createCardSelectionApiFixture } from './card-selection-api-fixture.mjs';
 import { createNextDevTestEnvironment } from './next-dev-test-environment.mjs';
 

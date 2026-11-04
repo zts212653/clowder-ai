@@ -4,7 +4,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
 import { canonicalWorktreeId } from './f307-real-surface-fixtures.mjs';
 import { createOpeningFileServer } from './f309-opening-actions-file-server.mjs';
 import {

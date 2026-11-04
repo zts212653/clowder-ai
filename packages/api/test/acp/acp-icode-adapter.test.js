@@ -532,7 +532,7 @@ describe('AcpServiceFactory protocolAdapter wiring', () => {
     }
   });
 
-  it('keeps default members unchanged: no fail-closed default, no adapter field', async () => {
+  it('preserves automatic permissions for default members without an adapter field', async () => {
     const projectRoot = mkdtempSync(join(tmpdir(), 'acp-default-factory-'));
     const profileId = 'acp-default-factory';
     const poolRegistry = new Map();
@@ -547,7 +547,7 @@ describe('AcpServiceFactory protocolAdapter wiring', () => {
       assert.ok(service);
       assert.equal(service.protocolAdapter, undefined);
       const client = poolRegistry.get(profileId).clientFactory();
-      assert.equal(client.config.defaultPermissionDecision, undefined);
+      assert.equal(client.config.defaultPermissionDecision, 'allow');
     } finally {
       await Promise.all([...poolRegistry.values()].map((pool) => pool.closeAll?.()));
       rmSync(projectRoot, { recursive: true, force: true });

@@ -30,11 +30,12 @@ export async function freezeExecutionWorkspace(input: {
   let thread: Thread | null | undefined;
   let failure: string | undefined;
   try {
-    thread = await preflightRace(
+    const resolved = await preflightRace(
       Promise.resolve(input.threadStore?.get(input.threadId)),
       'threadStore.get:execution-binding',
       input.signal,
     );
+    thread = resolved ? structuredClone(resolved) : resolved;
   } catch {
     failure = `Unable to resolve thread workspace for ${input.threadId}. Retry this invocation.`;
   }

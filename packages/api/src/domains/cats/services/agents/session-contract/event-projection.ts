@@ -82,6 +82,7 @@ export function projectSessionEvent(
       message = {
         type: 'done',
         ...(event.outcome !== 'completed' ? { errorCode: event.errorCode ?? event.outcome } : {}),
+        ...(event.providerTeardown ? { providerTeardown: event.providerTeardown } : {}),
       };
       break;
   }

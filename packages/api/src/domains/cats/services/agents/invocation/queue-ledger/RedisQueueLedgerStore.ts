@@ -35,6 +35,7 @@ import {
   listAllRedisQueueLedgerEntries,
   listRedisQueueLedgerEntries,
   listRedisQueueLedgerThreadIds,
+  replayRedisPrivateAdmission,
   verifyRedisQueueLedgerReplay,
 } from './RedisQueueLedgerReader.js';
 
@@ -47,6 +48,11 @@ export class RedisQueueLedgerStore implements QueueLedgerStore {
 
   usesRedisClient(redis: RedisClient): boolean {
     return this.redis === redis;
+  }
+
+  async replayPrivateAdmission(entry: QueueLedgerEntry): Promise<QueueLedgerEnqueueResult | null> {
+    await this.ensureThreadMigrated(entry.threadId);
+    return replayRedisPrivateAdmission(this.redis, entry);
   }
 
   private get keyPrefix(): string {

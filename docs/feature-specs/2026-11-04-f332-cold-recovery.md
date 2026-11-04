@@ -4,12 +4,14 @@ related_features: [F148, F236, F296, F324]
 topics: [memory, cold-recovery, continuity, context-engineering]
 doc_kind: implementation-plan
 created: 2026-11-04
-updated: 2026-11-04
+updated: 2026-11-05
 ---
 
 # F332 Phase B：冷恢复首包需求与交付方案
 
 > **Status**: Task contract revision S3/S5/C2 single observations passed; batch ended at 12/12; full acceptance pending; prior M1+D findings retained; not merged or deployed | **Implementation**: 宪宪（claude-opus-5-5） | **Review / submission**: 砚砚（gpt-6.1-sol）
+
+**代码目标：`zts212653/clowder-ai:next`。** 依据2026-11-05的operator指示，PR #1832目标已改为next，并在现有提交分支整合冻结的next `440fa0377ae54a51320306217088209ae7b11e68`。下文69063db3及第1–12次真实调用均为原版本历史证据，不能当作本次next集成版本的真实模型验收；本批12次上限保持不变。
 
 本文件是 [F332](../features/F332-experience-informed-memory.md) Phase B 下的详细实施切片，承接 AC-B5 的同线程连续性要求及本切片新增验收；不替代 F332 的其他阶段，也不结算其既有 Task。
 

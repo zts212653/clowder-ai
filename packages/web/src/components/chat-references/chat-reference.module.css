@@ -7,6 +7,7 @@
   color: var(--shell-ink);
   border: 1px solid var(--shell-hairline);
   background: #fff;
+  --chat-background-role: white;
   text-decoration: none;
   font-family: var(--font-sans);
   font-weight: 400;
@@ -14,6 +15,7 @@
 }
 :global([data-theme="dark"]) .reference {
   background: var(--shell-paper);
+  --chat-background-role: paper;
 }
 .chip {
   display: inline-flex;
@@ -263,6 +265,24 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.inlineChanges {
+  flex: none;
+  align-self: stretch;
+  border: 0;
+  border-inline-start: 1px solid var(--shell-hairline);
+  padding: 0 0 0 7px;
+  background: transparent;
+  color: var(--shell-muted);
+  font: inherit;
+  cursor: pointer;
+}
+.prTitle {
+  color: inherit;
+  text-decoration: none;
+}
+.prTitle:hover {
+  text-decoration: underline;
 }
 .prCard {
   align-items: flex-start;

@@ -11,6 +11,7 @@ const configResponse = z.object({
     coCreator: z.object({
       name: z.string().min(1),
       nickname: z.string().optional(),
+      nicknameSource: z.literal('user').optional(),
       mentionPatterns: z.array(z.string()),
     }),
   }),

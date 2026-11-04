@@ -18,6 +18,7 @@ import { appendFile, mkdir, readFile, unlink, writeFile } from 'node:fs/promises
 import { join } from 'node:path';
 import { createModuleLogger } from '../../../../infrastructure/logger.js';
 import { createTranscriptReadDiagnostics } from '../../../../infrastructure/transcript-read-diagnostics.js';
+import { sliceUnicodeSafe } from '../../../../utils/unicode-safe-slice.js';
 import {
   type CollaborationContinuityCapsuleV1,
   extractContinuityCapsuleFromSystemInfo,
@@ -561,7 +562,7 @@ export class TranscriptWriter {
           order: entry.eventNo,
           at: entry.timestamp,
           ...(entry.invocationId !== undefined ? { invocationId: entry.invocationId } : {}),
-          message: message.slice(0, 500),
+          message: sliceUnicodeSafe(message, 0, 500),
         });
       }
       if (evtType === 'error' && typeof evt.error === 'string') {
@@ -569,7 +570,7 @@ export class TranscriptWriter {
           order: entry.eventNo,
           at: entry.timestamp,
           ...(entry.invocationId !== undefined ? { invocationId: entry.invocationId } : {}),
-          message: (evt.error as string).slice(0, 500),
+          message: sliceUnicodeSafe(evt.error as string, 0, 500),
         });
       }
       if (evtType === 'system_info' && typeof evt.content === 'string') {
@@ -590,7 +591,7 @@ export class TranscriptWriter {
               trim: false,
             });
             if (content) {
-              existing.content = content.slice(0, 1200);
+              existing.content = sliceUnicodeSafe(content, 0, 1200);
               moveToEnd(recentMessages, existing);
             } else {
               removeItem(recentMessages, existing);
@@ -600,7 +601,7 @@ export class TranscriptWriter {
             const message = {
               role: 'assistant' as const,
               ...(entry.invocationId !== undefined ? { invocationId: entry.invocationId } : {}),
-              content: visibleText.slice(0, 1200),
+              content: sliceUnicodeSafe(visibleText, 0, 1200),
             };
             recentMessages.push(message);
             recentMessageByStream.set(streamKey, message);
@@ -609,7 +610,7 @@ export class TranscriptWriter {
           recentMessages.push({
             role: 'assistant',
             ...(entry.invocationId !== undefined ? { invocationId: entry.invocationId } : {}),
-            content: visibleText.slice(0, 1200),
+            content: sliceUnicodeSafe(visibleText, 0, 1200),
           });
         }
       }

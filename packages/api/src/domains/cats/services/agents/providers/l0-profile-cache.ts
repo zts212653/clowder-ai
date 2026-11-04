@@ -8,7 +8,7 @@ export interface L0CacheGeneration {
   cat: number;
 }
 
-export type L0Projection = 'owner' | 'public';
+export type L0Projection = 'owner' | 'public' | 'scoped-member';
 
 function computeProfileContentSignature(profileDir: string): string | null {
   if (!existsSync(profileDir)) return 'missing';
@@ -77,8 +77,8 @@ export class L0ProfileCache {
   private readonly profileSignatures = new Map<string, string>();
   private globalGeneration = 0;
 
-  key(userId: string, catId: string, projection: L0Projection = 'owner'): string {
-    return `${userId}\0${catId}\0${projection}`;
+  key(userId: string, catId: string, projection: L0Projection = 'owner', frozenKey?: string): string {
+    return `${userId}\0${catId}\0${projection}${frozenKey ? `\0${frozenKey}` : ''}`;
   }
 
   get(cacheKey: string): string | undefined {

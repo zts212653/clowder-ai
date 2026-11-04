@@ -55,7 +55,9 @@ function page(items: unknown[] = [runtimeItem()]) {
       approvals: { ...source, coverage: 'all_registered_F246_producers' },
       needsMe: { ...source, coverage: 'current_linked_F310_five_producers' },
       structuredChoices: { ...source, coverage: 'pending_f306_structured_choices' },
+      personalPreferences: { ...source, coverage: 'owner_personal_ignored_items' },
     },
+    personalView: { mode: 'visible', preferenceRevision: 1 },
     readWindow: { startedAt: 1, endedAt: 2, consistency: 'independent_source_reads' },
     consistency: { state: 'verified', reasons: [] },
     items,
@@ -71,8 +73,9 @@ async function fixture(t: { after(fn: () => Promise<void>): void }) {
   await app.register(sessionAuthPlugin);
   await app.register(sessionRoute, { ownerUserId: 'owner' });
   let current: unknown = page();
+  let sourceRead: ((url: string) => unknown) | undefined;
   const opened: object[] = [];
-  app.get('/api/concierge/work/decisions', async () => current);
+  app.get('/api/concierge/work/decisions', async (request) => (sourceRead ? sourceRead(request.url) : current));
   const bridge = new CompanionHostBridge({
     app,
     ownerUserId: 'owner',
@@ -89,6 +92,9 @@ async function fixture(t: { after(fn: () => Promise<void>): void }) {
   });
   return {
     opened,
+    readSource: (read: (url: string) => unknown) => {
+      sourceRead = read;
+    },
     set: (value: unknown) => {
       current = value;
     },
@@ -96,6 +102,53 @@ async function fixture(t: { after(fn: () => Promise<void>): void }) {
     open: (variantRef: string) => bridge.request({ kind: 'decision.open', variantRef, target: 'action' }),
   };
 }
+
+test('desktop reads the same visible personal decisions as the mailbox and cannot reopen an ignored card', async (t) => {
+  const f = await fixture(t);
+  let ignored = true;
+  f.readSource((url) =>
+    new URL(url, 'http://localhost').searchParams.get('personalView') === 'visible' && ignored ? page([]) : page(),
+  );
+  const empty = await f.read();
+  assert.ok('totalCount' in empty);
+  assert.equal(empty.totalCount, 0, 'an ignored decision cannot reappear in the desktop badge');
+  ignored = false;
+  const restored = await f.read();
+  assert.ok('items' in restored);
+  const ref = restored.items[0]?.variantRef;
+  assert.ok(ref);
+  ignored = true;
+  assert.deepEqual(await f.open(ref), { kind: 'navigation', delivery: 'unconfirmed' });
+  assert.deepEqual(f.opened, []);
+});
+
+test('an unread personal filter stays unknown and never falls back to the unfiltered inbox', async (t) => {
+  const f = await fixture(t);
+  const value = page([]);
+  const unavailable = {
+    ...value,
+    status: 'partial',
+    totalCount: undefined,
+    personalView: { mode: 'visible' },
+    sources: {
+      ...value.sources,
+      personalPreferences: { ...value.sources.personalPreferences, status: 'unavailable', exhaustiveness: 'unknown' },
+    },
+  };
+  f.set(unavailable);
+  const partial = await f.read();
+  assert.ok('items' in partial);
+  assert.equal('totalCount' in partial, false);
+  assert.deepEqual(partial.sources.needsMe, { status: 'unavailable', coverage: 'unknown' });
+  for (const invalid of [
+    { ...unavailable, items: [runtimeItem()] },
+    { ...page(), personalView: undefined },
+    { ...page(), personalView: { mode: 'ignored' } },
+  ]) {
+    f.set(invalid);
+    assert.deepEqual(await f.read(), { kind: 'error', code: 'unavailable' });
+  }
+});
 
 test('pending runtime cards update the desktop count and open only their current original card', async (t) => {
   const f = await fixture(t);

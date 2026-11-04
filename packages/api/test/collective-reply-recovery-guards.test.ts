@@ -14,10 +14,93 @@ import {
 } from './helpers/collective-reply-recovery-fixture.js';
 
 const recall = { version: 1, exposure: 'none', recalledAt: 4 } as const;
+
+function useTopLevelPresentation(source: StoredMessage, from: NonNullable<StoredMessage['from']>): void {
+  const presentation = source.extra?.pluginMessage?.presentation;
+  assert.ok(presentation);
+  source.from = from;
+  source.source = presentation;
+  source.extra = undefined;
+}
+
 const guardCases: ReadonlyArray<{
   name: string;
   mutate: (value: ReturnType<typeof recoveryFixture>) => void;
 }> = [
+  {
+    name: 'a plugin source whose strict payload instance disagrees with its sender',
+    mutate: ({ source }) => {
+      const pluginMessage = source.extra?.pluginMessage;
+      assert.ok(pluginMessage);
+      Object.assign(pluginMessage, { instanceId: 'pi_other' });
+    },
+  },
+  {
+    name: 'a plugin source whose canonical sender instance disagrees with its payload',
+    mutate: ({ source }) => {
+      source.from = { kind: 'plugin', instanceId: 'pi_other' };
+    },
+  },
+  {
+    name: 'a plugin source whose canonical provenance names another instance',
+    mutate: ({ source }) => {
+      const pluginMessage = source.extra?.pluginMessage;
+      assert.ok(pluginMessage);
+      pluginMessage.provenance = {
+        origin: { kind: 'plugin', instanceId: 'pi_other' },
+        epistemicStatus: 'observation',
+      };
+    },
+  },
+  {
+    name: 'a plugin source whose canonical provenance is not plugin-owned',
+    mutate: ({ source }) => {
+      const pluginMessage = source.extra?.pluginMessage;
+      assert.ok(pluginMessage);
+      pluginMessage.provenance = {
+        origin: { kind: 'host' },
+        epistemicStatus: 'observation',
+      };
+    },
+  },
+  {
+    name: 'a plugin source whose presentation names another connector',
+    mutate: ({ source }) => {
+      const presentation = source.extra?.pluginMessage?.presentation;
+      assert.ok(presentation);
+      presentation.connector = 'other';
+    },
+  },
+  {
+    name: 'a user-authored source carrying top-level Collective presentation',
+    mutate: ({ source }) => useTopLevelPresentation(source, { kind: 'user', userId: OWNER }),
+  },
+  {
+    name: 'an agent-authored source carrying top-level Collective presentation',
+    mutate: ({ source }) => useTopLevelPresentation(source, { kind: 'agent', catId: CAT }),
+  },
+  {
+    name: 'a system-authored source carrying top-level Collective presentation',
+    mutate: ({ source }) => useTopLevelPresentation(source, { kind: 'system', service: 'test' }),
+  },
+  {
+    name: 'an external source from another connector',
+    mutate: ({ source }) => useTopLevelPresentation(source, { kind: 'external', connectorId: 'other' }),
+  },
+  {
+    name: 'a source attributed to an agent instead of the owner input',
+    mutate: ({ source }) => {
+      source.catId = CAT;
+    },
+  },
+  {
+    name: 'a plugin source with a malformed strict payload',
+    mutate: ({ source }) => {
+      const pluginMessage = source.extra?.pluginMessage;
+      assert.ok(pluginMessage);
+      Object.assign(pluginMessage, { revision: 0 });
+    },
+  },
   { name: 'a soft-deleted source', mutate: ({ source }) => Object.assign(source, { deletedAt: 4 }) },
   { name: 'a recalled source', mutate: ({ source }) => Object.assign(source, { recall }) },
   { name: 'a canceled source', mutate: ({ source }) => Object.assign(source, { deliveryStatus: 'canceled' }) },
@@ -96,17 +179,32 @@ const guardCases: ReadonlyArray<{
 
 describe('Collective reply recovery trust boundary', () => {
   for (const guardCase of guardCases) {
-    it(`rejects ${guardCase.name} before queue effects`, async () => {
+    it(`rejects ${guardCase.name} from both readback and write admission`, async () => {
       const harness = await openRecoveryHarness({ mutate: guardCase.mutate });
       try {
-        const result = await harness.post();
-        assert.ok([404, 409].includes(result.statusCode), result.body);
+        const probe = await harness.probe();
+        assert.ok([404, 409].includes(probe.statusCode), probe.body);
+        const post = await harness.post();
+        assert.ok([404, 409].includes(post.statusCode), post.body);
         assert.equal(harness.queue.list(THREAD, OWNER).length, 0);
+        assert.equal(harness.requestDrain.mock.callCount(), 0);
       } finally {
         await harness.app.close();
       }
     });
   }
+
+  it('returns not found to another owner without exposing recoverability', async () => {
+    const harness = await openRecoveryHarness();
+    try {
+      const result = await harness.probe({ owner: 'other' });
+      assert.equal(result.statusCode, 404, result.body);
+      assert.equal(harness.queue.list(THREAD, OWNER).length, 0);
+      assert.equal(harness.requestDrain.mock.callCount(), 0);
+    } finally {
+      await harness.app.close();
+    }
+  });
 
   it('rejects an unavailable target before queue effects', async () => {
     const harness = await openRecoveryHarness({ catAvailable: false });

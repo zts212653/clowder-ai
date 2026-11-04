@@ -80,7 +80,7 @@ export function ImageArtworkControls({
     <>
       {!unifiedActions ? (
         <div className={styles.viewOptions}>
-          <details className={styles.menu}>
+          <details className={styles.menu} data-chat-background-layer="opaque">
             <summary aria-label={t.viewport}>
               <span role="status" aria-label={t.scale}>
                 {Math.round(viewport.renderedScale * 100)}%

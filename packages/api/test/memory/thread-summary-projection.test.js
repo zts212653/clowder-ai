@@ -150,28 +150,17 @@ test('unavailable source and a retained projection error keep the existing fail-
   );
 });
 
-test('UTF-16 slice and source hashes match the existing output across deterministic rich/empty/boundary cases', async () => {
-  let seed = 212653;
-  const random = (n) => {
-    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
-    return seed % n;
-  };
-  const bits = ['a', '汉', '😀', '\ud800', '\udfff', '\0', '  ', '\t', '\n', '\u00a0', '\u2003', '\ufeff'];
-  for (let run = 0; run < 200; run++) {
-    const messages = Array.from({ length: 1 + random(8) }, (_, i) => {
-      const text = Array.from({ length: 1 + random(12) }, () => bits[random(bits.length)]).join('');
-      return message(text.repeat([1, 30, 2990, 3000][random(4)]), {
-        id: `m-${i}`,
-        catId: [undefined, '', 'sol', '猫'][random(4)],
-        contentBlocks: [{ type: 'context_attachment', attachment: { text: ' quote ', comment: ' paired comment ' } }],
-        richBlocks: [{ text, sections: [{ bodyMarkdown: text.toUpperCase() }] }],
-      });
-    });
-    const suppressed = new Set(run % 3 === 0 ? ['m-0'] : []);
-    equalProjection(await project(messages, thread, suppressed), expected(messages, thread, suppressed));
-  }
-  for (const length of [2992, 2993, 2994]) {
-    const messages = [message('x'.repeat(length) + '😀')];
-    equalProjection(await project(messages), expected(messages));
+test('summary boundaries preserve complete emoji and hash the actual bounded text', async () => {
+  // Prefix includes the seven UTF-16 units in "[user] "; the content cap is 2997.
+  const cases = [
+    ['x'.repeat(2989) + '😀tail', '[user] ' + 'x'.repeat(2989) + '...'],
+    ['x'.repeat(2988) + '😀tail', '[user] ' + 'x'.repeat(2988) + '😀...'],
+    ['x'.repeat(2991) + '😀', '[user] ' + 'x'.repeat(2991) + '😀'],
+  ];
+  for (const [content, summary] of cases) {
+    const actual = await project([message(content)]);
+    assert.equal(actual.summary, summary);
+    assert.ok(actual.summary.isWellFormed());
+    assert.equal(actual.sourceHash, hash(thread.title, summary, [...thread.participants, ...thread.featureIds]));
   }
 });

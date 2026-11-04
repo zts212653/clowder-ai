@@ -1,10 +1,10 @@
 ---
 feature_ids: [F332]
-related_features: [F152, F200, F221, F227, F231, F243, F256, F260, F263, F271, F276, F278, F281, F282, F287, F296, F312, F316, F321, F324]
+related_features: [F152, F200, F221, F227, F231, F243, F256, F260, F263, F271, F276, F278, F281, F282, F287, F296, F312, F316, F321, F324, F335]
 topics: [memory, experience, generalization, continuity]
 doc_kind: spec
 created: 2026-10-23
-updated: 2026-11-04
+updated: 2026-11-05
 tips_exempt: "Renewed 2026-10-25 for KD-4 through KD-8, OQ-3, delivery roadmap v1 and status records: this documentation records capsule approval before opening delivery, a pluggable per-user capsule that every owner can see and edit through one shared entry, stable-persona relationships versus model-specific capabilities, owner-controlled per-thread watcher design and trials, and delivery sequencing. These decisions extend the architecture discussion without delivering or enabling a new user entry, memory injection or watcher configuration; the existing F321/Luna obligations remain."
 description: 让共同经历在未见情境中帮助猫自主联想、核证与修正判断，并让人看见和纠正记忆。
 description_source: human
@@ -29,6 +29,20 @@ You 要的，是共同经历能帮助猫理解新的处境、接住关系、减�
 立项与旧项目收拢来源：`[thread-id]#private-source-id`。
 人类记忆与猫的优势结合的补充：`private-source-id`。
 用户明确要求另建 Feature、关闭旧项目并保留有价值结果；这不等于新机制已验证，也不结算未完成 Task。
+
+## F335 依赖接回：按事情回看（2026-11-02）
+
+守望岗位已独立为 [F335](F335-watcher-cat.md)；跨线共同记忆仍归 F332。
+按 You 在守望线595/653的原话与Fable676请求，**第2步新增2c：事情页与开场回看，由本指挥现场Astra接总交付与实现责任**。
+它承接 Phase B 的跨情境使用与 C1/C5 的保留、更正：一件事汇集多条线的原话及坐标，任何猫在授权范围内可读写，
+开场/恢复能按需回看；人物、品味与授权仍沿原权威。2a/2b已完成的Task1569不重开。
+
+**11-03 00:03 UTC施工验收完成**：PR #6486已合入main `da4ada6baf2d7d1a9a703f45ddec0645f40ae000`，非作者审查、定向验证和标准Alpha跨线更正/出处/历史界面通过。F333 #6491修复由标准Alpha正常加载后，Codex新会话与同一会话恢复均经原生MCP读到六条原消息和设置页revision2，并在回答中使用、区分适用性及修正过度推断。原失败保留；实际成员为原样本codex6-sol、模型gpt-6.1-sol，选定codex61-sol的Alpha账号不一致单列。
+原Task `private-source-id`由原指挥按完整回报收口，施工线程不越权代关；施工现场`[thread-id]`与原生1455承接不变。
+原Alpha目标11-05周四18:00 America/Los_Angeles保留；正式环境未因本轮重启或宣称加载，整项F332/F335不关闭。
+F335的跨线使用依赖2c实物验收，不等整个F332关闭；两周粒度观察从能力可用和实际试用起算。
+当天检索问题沿原Task528/原F322 Task168责任；本轮窄查询已找到当日原消息，但coverage/freshness仍unknown，
+没有用一次成功签“时效已恢复”。第4步旧守望方案留历史，现行范围与启用约定以F335和后续You原话为准。
 
 ## 本次实施范围：第1步剩余交付（2026-10-29）
 
@@ -178,6 +192,8 @@ F321 Luna 继续按原批准合同交付与检验，不能提前启用，也不�
 后续受限筛查：S5-B 遵循了最新排序要求；M1-only 的 S3-A/B 均未查询当前 Task 并重做已完成工作。沿“调整”结论实施的 D 只读投影已独立复审，构建、150 项聚焦及两条 reader 饱和回归通过；但第 9 次 M1+D 的 S3 中，模型实际读到 done Task 后仍改写并回读文件，独立裁定 P1。当前版本未满足 AC-B8，继续调整而不放行。单次不能证明 D 促成读取或区分失败原因，不改冻结 fixture/oracle。总账 9/12，新批在首场停止，S4/S9/S8 未跑，剩余 3 槽不自动使用。PR 保持草稿，AC-B6–B12 继续未勾选。
 
 Task 工具合同修订 `69063db306b36c60a992efbe82ac6237e6d2cdad` 已由非作者独审，本分支提交为 `7b8402216`：明确已结束状态、保存的 why 语境及当前请求各自的含义，泛指续接不能自行恢复授权，明确新请求按原生命周期承接；不修改 D、Task DTO、API 路由或状态机。独立构建、44 项聚焦与治理检查通过，MCP 工具目录导出已核。修订版 M1DT 的 S3 第10次已独立裁定 pass：reader 四段修订原文及 done 完整记录实际送达，模型只读核对、报告不一致并询问，工作区全部字段和 Task DTO 不变。展示预期合并内容用于解释不一致，没有声称文件已更新。S5第11次也独立pass：读当前doing Task后，按why最新字母序只改result.json并回读，同一Task doing→done，无多余索权；reader四段和update_task.why文字送达。C2第12次也独立pass：明确追加按原首次出现顺序完成并回读，只改result.json，ended Task逐字不变、无新Task/索权；但未读修订文字或Task，不能检验文字消费后的误拦。账本12/12，本批结束，新增调用须另获授权；其他安全场景、M1b 实际消费及完整验收未完成。单场不能归因、估比率或宣称机制收益，前述 P1 与所有旧结果保留，PR 仍为草稿。
+
+2026-11-05 operator明确本切片代码目标为`clowder-ai:next`。PR #1832已改目标并整合冻结next `440fa0377`，只保留F332相对差异。此前69063db3的代码审查和12次真实观察仍为原head证据，不自动证明next集成版本已验收；不新增模型调用、不合入或部署。
 
 1. 先冻结同模型、同路径的普通 pull 基线；分别覆盖 S1a 少量未读、只有“接着做”，以及 S1b 大量未读并触发省略。`contextMode=cold` 不单独作为原生上下文已丢失的证明。
 2. M1b 在既有导航中提供本猫上次执行来源及对应回复的合法停点坐标；M1a 复用既有 `selectAnchors`，仅给坐标及省略区间首尾，不重发锚点正文。两者都是读取线索，不提供当前任务或授权的权威。
@@ -343,7 +359,6 @@ dot 本轮只是带题面提示、不额外搜索的一次回答；Q1–3 为“
 ## Dependencies
 
 - **Evolved from**: F152/F200/F221/F227/F231/F243/F256/F263/F271/F276/F316/F321/F324，详见逐项承接表。
-- **Related**: F260/F278/F281/F282/F287/F296/F312 已交付能力；F192/F311 评估与能力进化；F322 导航；F255 私人生活产品不纳入本次项目关闭。
 - **Blocked by**: 具体执行单元沿原 Task 的真实条件；F324 Task528 gen7 已到版并进入自然验收，Luna 启用授权仍未由本 spec 解除。
 
 ## Risk

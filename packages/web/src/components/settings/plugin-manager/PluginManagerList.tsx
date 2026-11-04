@@ -108,6 +108,7 @@ export function PluginListRow({
       className={`${modern ? '' : `${settingsResourceCardClass} min-h-[88px]`} group/plugin-row [container-type:inline-size] transition-colors ${
         selected ? '' : 'hover:bg-[var(--console-hover-bg)]'
       }`}
+      data-chat-background-surface={selected ? (modern ? 'selected' : 'console-active') : undefined}
       style={selected ? { backgroundColor: modern ? 'var(--shell-selected)' : 'var(--console-active-bg)' } : undefined}
     >
       <div

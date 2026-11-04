@@ -15,6 +15,7 @@
  */
 [data-shell="v2"] .home-v2 {
   background: var(--shell-work);
+  --chat-background-role: work;
   container-type: inline-size;
   container-name: home;
 }
@@ -33,6 +34,7 @@
   padding: 12px 14px 6px;
   border-radius: 12px;
   background: var(--shell-paper);
+  --chat-background-role: paper;
   box-shadow: inset 0 0 0 1px var(--shell-hairline-strong);
 }
 
@@ -113,6 +115,7 @@
 
 [data-shell="v2"] .home-btn:hover {
   background: color-mix(in srgb, var(--shell-selected) 55%, transparent);
+  --chat-background-role: navigation-hover;
 }
 
 [data-shell="v2"] .home-stop {
@@ -205,6 +208,7 @@
   border-radius: 4px;
   padding: 1px 3px;
   background: var(--shell-selected);
+  --chat-background-role: selected;
   color: var(--shell-body);
 }
 [data-shell="v2"] .home-live-main {

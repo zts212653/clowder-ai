@@ -3,8 +3,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { chromium } from 'playwright';
 import { build } from 'vite';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
 
 /**
  * F322 original-B COMPONENT PREVIEW journey — the one-row execution/queue surface in a real browser.
@@ -626,6 +626,63 @@ test('mounted, new shell: recipient preview follows visible @ text and preferred
   }
   finish(session);
   await page.close();
+});
+
+test('a long single-recipient name stays visible and selects its registered mention', async () => {
+  const nickname = '鲸鲸 deepseek-flash-1017 · high';
+  const catalog = [...cats, { ...cats[2], id: 'dsh', displayName: '小鲸鱼', nickname, mentionPatterns: ['@dsh'] }];
+  for (const width of [900, 462]) {
+    const session = await open('working', {
+      mount: true,
+      ready: '[data-testid="composer-routing-preview"]',
+      width,
+      catalog,
+      respond: (call) => {
+        if (call.key === `GET /api/config/conversation-view?threadId=${THREAD}`) {
+          return { status: 200, body: { stored: null, effective: { mode: 'group' }, source: 'product' } };
+        }
+        if (call.key === 'POST /api/routing/preview') {
+          return { status: 200, body: { targetCats: ['dsh'], reason: { kind: 'recent_replier' } } };
+        }
+        return null;
+      },
+    });
+    const { page } = session;
+    const trigger = page.getByTestId('composer-routing-preview');
+    await page.waitForFunction(
+      (name) =>
+        document.querySelector('[data-testid="composer-routing-preview"]')?.getAttribute('aria-label')?.includes(name),
+      nickname,
+    );
+    const layout = await page.getByTestId('composer-routing-name').evaluate((name) => ({
+      visible: getComputedStyle(name).visibility !== 'hidden' && getComputedStyle(name).display !== 'none',
+      available: name.clientWidth,
+      required: name.scrollWidth,
+      overflow: getComputedStyle(name).textOverflow,
+      text: name.textContent,
+      composerFits:
+        document.querySelector('[data-testid="chat-input-composer-row"]').scrollWidth <=
+        document.querySelector('[data-testid="chat-input-composer-row"]').clientWidth,
+    }));
+    measurements.push({ scene: 'long-single-recipient', width, ...layout });
+    await shot(page, `long-single-recipient-${width}`);
+    assert.equal(layout.visible, true, `${width}px: the name must remain readable`);
+    assert.ok(layout.available > 20 && layout.required > layout.available, 'the actual long name overflows its slot');
+    assert.equal(layout.overflow, 'ellipsis');
+    assert.equal(layout.text, nickname);
+    assert.equal(layout.composerFits, true);
+    assert.match(await trigger.getAttribute('aria-label'), /鲸鲸 deepseek-flash-1017 · high/);
+    await trigger.hover();
+    const tooltip = page.getByTestId('app-tooltip');
+    await tooltip.waitFor();
+    assert.match(await tooltip.textContent(), /鲸鲸 deepseek-flash-1017 · high/);
+    await trigger.click();
+    const recipient = page.getByTestId('composer-recipient-dsh');
+    await recipient.click();
+    assert.equal(await page.locator('textarea').inputValue(), '@dsh ');
+    finish(session);
+    await page.close();
+  }
 });
 
 test('the complete multi-recipient identity is measured and hidden atomically when it does not fit', async () => {

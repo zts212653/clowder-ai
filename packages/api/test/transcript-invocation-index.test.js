@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
-import { appendFile, chmod, mkdtemp, rename, rm, writeFile } from 'node:fs/promises';
+import { appendFile, chmod, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import Database from 'better-sqlite3';
 import { projectInvocationTrajectories } from '../dist/domains/cats/services/session/InvocationTrajectoryProjector.js';
 import { InvocationSummaryAccumulator } from '../dist/domains/cats/services/session/transcript-index/InvocationSummaryAccumulator.js';
 import { compactTranscriptEvent } from '../dist/domains/cats/services/session/transcript-index/transcript-invocation-compact-event.js';
+import { TRANSCRIPT_INVOCATION_PROJECTION_VERSION } from '../dist/domains/cats/services/session/transcript-index/transcript-invocation-index-schema.js';
 import { readTranscriptInvocationIndex } from '../dist/domains/cats/services/session/transcript-index/transcript-invocation-index-worker.js';
 
 const session = { id: 'session', threadId: 'thread', catId: 'cat', seq: 2, status: 'active' };
@@ -76,6 +78,46 @@ test('persistent summaries survive a new reader and warm reads never hydrate or 
   assert.equal(detail.diagnostics.sourceBytesScanned, 0);
   assert.ok(detail.diagnostics.hydratedBytes < 500);
   assert.deepEqual(detail.pages[0].events, [{ event: events[1] }]);
+});
+
+test('legacy Unicode-clipped index caches rebuild from unchanged canonical transcript records', async (t) => {
+  const f = await fixture(t);
+  const content = `${'a'.repeat(139)}😼tail`;
+  const source = jsonl([event('unicode', 0, { type: 'text', content })]);
+  const path = join(f.directory, 'events.jsonl');
+  await writeFile(path, source);
+  const initial = await f.read();
+  const legacyClip = `${'a'.repeat(139)}\uD83D`;
+  const db = new Database(join(f.directory, 'invocations.v1.sqlite'));
+  try {
+    const staleVersion = (value) => value.replaceAll(TRANSCRIPT_INVOCATION_PROJECTION_VERSION, 'output-evidence-v3');
+    for (const table of ['source_events', 'canonical']) {
+      const rows = db.prepare(`SELECT rowid, projection FROM ${table}`).all();
+      for (const row of rows) {
+        if (!row.projection) continue;
+        const projection = JSON.parse(row.projection);
+        projection.event.content = legacyClip;
+        db.prepare(`UPDATE ${table} SET projection = ? WHERE rowid = ?`).run(JSON.stringify(projection), row.rowid);
+      }
+    }
+    const summary = { ...initial.invocations[0], keyMessages: [legacyClip] };
+    db.prepare('UPDATE summaries SET projection = ? WHERE invocation_id = ?').run(JSON.stringify(summary), 'unicode');
+    for (const row of db.prepare('SELECT source, signature FROM sources').all()) {
+      db.prepare('UPDATE sources SET signature = ? WHERE source = ?').run(staleVersion(row.signature), row.source);
+    }
+    // A summary-cache miss alone cannot recover source text lost by the old projection.
+    db.prepare('UPDATE cache SET key = ? WHERE id = 1').run('pre-unicode-derived-cache');
+  } finally {
+    db.close();
+  }
+  const rebuilt = await f.read();
+  assert.ok(rebuilt.invocations[0].keyMessages[0].isWellFormed());
+  assert.equal(rebuilt.invocations[0].keyMessages[0], 'a'.repeat(139));
+  assert.ok(rebuilt.diagnostics.sourceBytesScanned > 0, 'a stale derived projection must be re-read');
+  assert.equal(await readFile(path, 'utf8'), source, 'canonical transcript bytes must stay unchanged');
+  const warm = await f.read();
+  assert.deepEqual(warm.invocations, rebuilt.invocations);
+  assert.equal(warm.diagnostics.sourceBytesScanned, 0, 'the rebuilt projection must remain reusable');
 });
 
 test('live appends scan only the suffix and a partial final line is correctly revisited', async (t) => {

@@ -22,6 +22,7 @@
   padding: 14px 18px;
   border: 1px solid var(--cafe-border);
   background: var(--cafe-surface-sunken);
+  --chat-background-role: cafe-sunken;
   border-radius: 10px;
   margin-bottom: 20px;
 }
@@ -34,6 +35,7 @@
 .duck-controls button {
   padding: 5px 8px;
   background: var(--console-card-bg);
+  --chat-background-role: console-card;
   border: 1px solid var(--cafe-border);
 }
 .duck-chapters {
@@ -67,6 +69,7 @@
   padding: 12px;
   border: 1px solid var(--cafe-border);
   background: var(--console-card-bg);
+  --chat-background-role: console-card;
 }
 .duck-lineage [data-version="V1"] {
   grid-column: 1;
@@ -126,6 +129,7 @@
   flex-direction: column;
   padding: 10px 14px;
   background: var(--cafe-surface-sunken);
+  --chat-background-role: cafe-sunken;
   border-top: 3px solid var(--content-category-object);
   border-radius: 6px;
 }
@@ -153,6 +157,7 @@
 .duck-details select {
   max-width: 100%;
   background: var(--console-card-bg);
+  --chat-background-role: console-card;
   padding: 4px;
   border: 1px solid var(--cafe-border);
 }
@@ -170,6 +175,7 @@
   overflow-wrap: anywhere;
   padding: 12px;
   background: var(--cafe-surface-sunken);
+  --chat-background-role: cafe-sunken;
 }
 .duck-members {
   list-style: none;
@@ -256,6 +262,7 @@
   border-left: 3px solid var(--content-category-object);
   padding: 12px 18px;
   background: var(--cafe-surface-sunken);
+  --chat-background-role: cafe-sunken;
 }
 .duck-footer {
   margin-top: 28px;

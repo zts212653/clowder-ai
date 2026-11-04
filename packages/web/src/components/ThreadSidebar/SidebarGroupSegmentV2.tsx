@@ -17,6 +17,7 @@ export function SidebarGroupSegmentV2({
     >
       <div
         className={`min-w-0 border-x ${first ? 'rounded-t-[10px] border-t' : ''} ${last ? 'rounded-b-[10px] border-b' : ''}`}
+        data-chat-background-surface="group"
         style={{
           background: 'var(--shell-group)',
           borderColor: 'var(--shell-hairline)',

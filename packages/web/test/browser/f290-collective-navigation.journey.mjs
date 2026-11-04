@@ -146,7 +146,7 @@ test(
     const hostUrl = `http://127.0.0.1:${host.address().port}`;
     const f = await collectiveArtifactOwnerFixture(t, { additionalHostOrigins: [hostUrl] });
     frameUrl = `${f.server.url}/?collectiveId=${f.coordinates.collectiveId}&hostOrigin=${encodeURIComponent(hostUrl)}`;
-    const { chromium } = await import('../../../ppt-forge/node_modules/playwright/index.mjs');
+    const { chromium } = await import('playwright');
     const browser = await chromium.launch({ headless: true });
     const shots = process.env.F290_SCREENSHOTS;
     if (shots) await mkdir(shots, { recursive: true });

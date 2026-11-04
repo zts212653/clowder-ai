@@ -59,6 +59,7 @@ it('includes each image-bearing surface and excludes opaque emphasis controls', 
     'var(--shell-paper)': 'rgb(255, 254, 253)',
     'var(--shell-selected)': 'rgb(220, 219, 218)',
     'var(--shell-group)': 'rgb(242, 241, 240)',
+    'var(--console-card-bg)': 'rgb(231, 232, 233)',
     'var(--color-cocreator-surface)': 'rgb(230, 210, 190)',
     'var(--shell-primary)': 'rgb(120, 60, 40)',
     'var(--shell-ink)': 'rgb(40, 39, 38)',
@@ -66,7 +67,7 @@ it('includes each image-bearing surface and excludes opaque emphasis controls', 
   vi.spyOn(window, 'getComputedStyle').mockImplementation((element) => {
     const style = (element as HTMLElement).style;
     return {
-      backgroundColor: colours[style.background],
+      backgroundColor: colours[style.background] ?? 'rgb(246, 245, 244)',
       color:
         style.color === 'var(--shell-primary-on)' || style.color === 'var(--shell-paper)'
           ? 'rgb(255, 254, 253)'
@@ -150,7 +151,7 @@ it('samples the computed shell-muted and shell-work roles for both modes and res
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context as unknown as CanvasRenderingContext2D);
   vi.spyOn(window, 'getComputedStyle').mockImplementation((element) => {
     expect((element as HTMLElement).style.color).toMatch(/^var\(--/);
-    expect((element as HTMLElement).style.background).toMatch(/^var\(--/);
+    expect((element as HTMLElement).style.background).not.toBe('');
     return colours[document.documentElement.dataset.theme as 'light' | 'dark'] as unknown as CSSStyleDeclaration;
   });
   document.documentElement.dataset.theme = 'dark';

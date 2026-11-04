@@ -1,10 +1,29 @@
-import type { AgentService, PluginNativeActionTarget, ToolExecutionPolicy } from '../../types.js';
+import type {
+  AgentService,
+  MemberSessionExecutionScope,
+  PluginNativeActionTarget,
+  ToolExecutionPolicy,
+} from '../../types.js';
 
 const MAX_REPLAY_DENIED_TOOL_NAMES = 32;
 const MAX_ALLOWED_CALLBACK_ROUTES = 32;
 
 function nativeCoordinate(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 && value.length <= 256 && value.trim() === value;
+}
+
+function memberScope(value: MemberSessionExecutionScope): MemberSessionExecutionScope {
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    Object.keys(value).some((key) => !['sessionId', 'generation', 'executionId'].includes(key)) ||
+    !nativeCoordinate(value.sessionId) ||
+    !nativeCoordinate(value.executionId) ||
+    !Number.isSafeInteger(value.generation) ||
+    value.generation < 1
+  )
+    throw new Error('invalid member native policy');
+  return { sessionId: value.sessionId, generation: value.generation, executionId: value.executionId };
 }
 
 export class ToolExecutionPolicyUnavailableError extends Error {
@@ -48,6 +67,7 @@ export function normalizeToolExecutionPolicy(policy: ToolExecutionPolicy): ToolE
       mode: 'plugin_native',
       pluginInstanceId: policy.pluginInstanceId,
       contributionId: policy.contributionId,
+      ...(policy.memberSession === undefined ? {} : { memberSession: memberScope(policy.memberSession) }),
     };
   }
   if (policy.mode === 'callback_allowlist') {

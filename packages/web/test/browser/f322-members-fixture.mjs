@@ -2,8 +2,8 @@ import { mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { after, before } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { chromium } from 'playwright';
 import { build } from 'vite';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
 
 // Production SettingsShell, SettingsContent, editor and API client. Next compiler/router
 // boundaries and the network are fixtures. No user's configuration or Redis is touched.
@@ -167,18 +167,31 @@ export async function scene(width = 1440, dark = false, classic = false, protect
     if (p.startsWith('/api/')) {
       if (request.method() !== 'GET')
         state.writes.push({ path: p, method: request.method(), body: request.postDataJSON() });
-      if (options.catsProducer && (p === '/api/cats' || p.startsWith('/api/cats/'))) {
+      const producer =
+        p === '/api/cats' || p.startsWith('/api/cats/')
+          ? options.catsProducer
+          : p === '/api/config' || p.startsWith('/api/config/session-strategy')
+            ? options.settingsProducer
+            : undefined;
+      if (producer) {
+        if (p === '/api/cats' && request.method() === 'GET' && state.rejectMemberRead)
+          return json(route, { error: 'Fixture member read unavailable' }, 503);
         if (request.method() === 'PATCH' && state.rejectSave)
           return json(route, { error: 'Fixture save rejected' }, 403);
-        const response = await options.catsProducer.app.inject({
+        const response = await producer.app.inject({
           method: request.method(),
           url: p,
           headers: { 'x-cat-cafe-user': 'default-user', 'content-type': 'application/json' },
           ...(request.postData() ? { payload: request.postData() } : {}),
         });
+        if (state.loseMemberResponse && request.method() === 'PATCH' && /^\/api\/cats\/[^/]+$/.test(p)) {
+          state.loseMemberResponse = false;
+          return route.abort('failed');
+        }
         return route.fulfill({ status: response.statusCode, contentType: 'application/json', body: response.body });
       }
       if (p === '/api/auth/session') return json(route, { userId: 'fixture-owner' });
+      if (p === '/api/cats/native-runtimes') return json(route, { runtimes: [] });
       if (p === '/api/cats' && request.method() === 'GET') return json(route, { cats: state.cats });
       if (p === '/api/config' && request.method() === 'GET')
         return state.rejectConfig

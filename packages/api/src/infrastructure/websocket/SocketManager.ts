@@ -48,28 +48,20 @@ function validateRoomJoin(roomInput: unknown, userId: string): RoomJoinAck {
 }
 
 /**
- * Build the sequence of AgentMessages to broadcast after a successful cancel.
+ * Broadcast the cancellation request, without claiming provider termination.
  * Pure function — extracted for testability (avoids duplicating logic in tests).
  */
 export function buildCancelMessages(result: CancelResult): AgentMessage[] {
   if (!result.cancelled) return [];
-  const catIds = result.catIds.length > 0 ? result.catIds : ['opus'];
   const now = Date.now();
-  const messages: AgentMessage[] = [];
-
-  // The durable response message owns the visible canceled terminal. This
-  // broadcast is transport cleanup only, so a second centered system row would
-  // duplicate the same fact in History.
-  for (const catId of catIds) {
-    messages.push({
-      type: 'done',
-      catId: createCatId(catId),
-      isFinal: true,
-      timestamp: now,
-    });
-  }
-
-  return messages;
+  // Only the execution/lifecycle owner may publish done. An empty target set
+  // cannot be attributed to an invented default member.
+  return result.catIds.map((catId) => ({
+    type: 'status' as const,
+    catId: createCatId(catId),
+    content: '正在停止，等待执行状态确认',
+    timestamp: now,
+  }));
 }
 
 export class SocketManager {
@@ -315,9 +307,8 @@ export class SocketManager {
               // only. result.catIds carries the whole startAll batch (per-slot stores all catIds),
               // so broadcasting it cleared sibling cats in the UI — this is the most direct cause of
               // "取消一只两只一起取消" from the real Stop button. Mirrors queue.ts:568-575 scoped fix.
-              // A recovered mutex is itself a successful terminal action even when the tracker
-              // entry has already vanished. Preserve that outcome for buildCancelMessages so the
-              // client receives the same done signal as the REST lock-only recovery path.
+              // Releasing a Host mutex does not prove the native execution stopped.
+              // Both tracker and recovery paths report the request; lifecycle owns done.
               const scopedResult = { ...result, cancelled: true, catIds: [data.catId] };
               log.info({ threadId: data.threadId, catId: data.catId }, 'Cancelled slot (scoped)');
               for (const msg of buildCancelMessages(scopedResult)) {

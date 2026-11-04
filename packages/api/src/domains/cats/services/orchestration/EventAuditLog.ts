@@ -248,6 +248,8 @@ export const AuditEventTypes = {
   SESSION_BIND: 'session_bind',
   /** F211 Phase B: External IDE-direct runtime session registration */
   EXTERNAL_RUNTIME_SESSION_REGISTERED: 'external_runtime_session_registered',
+  /** Managed Host execution boundary reference recorded before provider entry. */
+  SESSION_EXECUTION_BOUNDARY_RECORDED: 'session_execution_boundary_recorded',
 
   // === Push Delivery Diagnostics ===
 

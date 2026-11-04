@@ -35,7 +35,7 @@ import { catRegistryMentionPatterns } from './infrastructure/connectors/mention-
 // 必须最先 import：Node 24.16 undici setTypeOfService EINVAL 崩溃防护（见文件头注释）
 import './settos-guard.js';
 import { createHash, randomUUID } from 'node:crypto';
-import { homedir, tmpdir } from 'node:os';
+import { arch, homedir, platform, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
@@ -60,15 +60,17 @@ import { migrateStartupCodexMcpConfig, regenerateStartupCliConfigs } from './con
 import { resolveBoundAccountRefForCat, usesNativeToolConfiguration } from './config/cat-account-binding.js';
 import {
   bootstrapDefaultCatCatalog,
-  getAcpConfig,
   getCoCreatorConfig,
   getConfigSessionStrategy,
   getDefaultCatId,
+  getRegisteredAcpConfig,
   isCatAvailable,
+  loadResolvedCatConfig,
+  resolveRuntimeCatTemplatePath,
   toAllCatConfigs,
 } from './config/cat-config-loader.js';
 import { getCatModel } from './config/cat-models.js';
-import { reconcileCatRegistry } from './config/cat-registry-reconciliation.js';
+import { reconcileCatRegistry, registerCatalogSnapshot } from './config/cat-registry-reconciliation.js';
 import { resolveCatRuntimeAccount } from './config/cat-runtime-account.js';
 import { configEventBus } from './config/config-event-bus.js';
 import {
@@ -1073,6 +1075,7 @@ async function main(): Promise<void> {
 
   const queueLedgerStore = redis ? new RedisQueueLedgerStore(redis) : new InMemoryQueueLedgerStore();
   const invocationQueue = new InvocationQueue(queueLedgerStore, {
+    resolvePreResolvedTargets: (requested, implicit) => router.resolveAdmissionTargets(requested, implicit),
     projectRoot: resolveActiveProjectRoot(),
     invocationTracker,
     resolveCarrierCapability: (catId) => router?.freshnessCarrierCapability(catId),
@@ -1550,6 +1553,14 @@ async function main(): Promise<void> {
     './domains/memory/cue/MemoryCueDrillHandleService.js'
   );
   const memoryCueEpisodeStore = new MemoryCueEpisodeStore(memoryServices.store.getDb());
+  const { MatterMemoryService } = await import('./domains/memory/matters/MatterMemoryService.js');
+  const matterMemoryService = new MatterMemoryService({
+    db: memoryServices.store.getDb(),
+    messageStore,
+    threadStore,
+    runWrite: (operation) => memoryServices.store.runExclusive(operation),
+    onChanged: (ownerUserId) => socketManager?.emitToUser(ownerUserId, 'memory_matter_changed', {}),
+  });
   const memoryCueHandles = new MemoryCueDrillHandleService(createProcessMemoryCueDrillSecret(), memoryCueEpisodeStore);
   const memoryCueDeps: CallbackMemoryCueDeps = {
     episodeStore: memoryCueEpisodeStore,
@@ -1791,6 +1802,7 @@ async function main(): Promise<void> {
   });
   const schedulerDeliver = createDeliverFn({ messageStore, socketManager, persistedQueueDelivery });
   const { WorktreeNoticeService } = await import('./infrastructure/worktrees/WorktreeNoticeService.js');
+  const { WorktreeNoticeStartGuard } = await import('./infrastructure/worktrees/WorktreeNoticeStartGuard.js');
   const worktreeNotices = new WorktreeNoticeService({
     repoRoot,
     scriptRoot: runtimeEntrypointRoot,
@@ -1833,11 +1845,13 @@ async function main(): Promise<void> {
   // F255 startup reconciliation resolves every persisted cat-life projection immediately,
   // so registry population must precede auto-dream bootstrap as well as AgentRouter construction.
   try {
-    const catConfig = bootstrapDefaultCatCatalog();
-    const allConfigs = toAllCatConfigs(catConfig);
-    for (const [id, config] of Object.entries(allConfigs)) {
-      catRegistry.register(id, config);
-    }
+    const templatePath = resolveRuntimeCatTemplatePath();
+    const catConfig = bootstrapDefaultCatCatalog(templatePath);
+    registerCatalogSnapshot(
+      toAllCatConfigs(catConfig),
+      () => loadResolvedCatConfig(templatePath, { persistMigrations: false }),
+      templatePath,
+    );
     app.log.info(`[api] CatRegistry initialized: ${catRegistry.getAllIds().join(', ')}`);
   } catch (err) {
     app.log.error(`[api] Failed to load cat catalog — .cat-cafe/cat-catalog.json is required: ${String(err)}`);
@@ -2090,7 +2104,7 @@ async function main(): Promise<void> {
               resolveMemberSessionRef(
                 config.agentProvider,
                 sessionContractSettings.bindings.get(id),
-                config.carrier === 'acp' ? getAcpConfig(id, projectRoot)?.agentProvider : undefined,
+                config.carrier === 'acp' ? getRegisteredAcpConfig(id, projectRoot)?.agentProvider : undefined,
               ),
               async (sessionRef) => {
                 activeAcpProfileIds.add(id);
@@ -2125,7 +2139,7 @@ async function main(): Promise<void> {
                 // ── F161: Generic ACP transport path (provider-agnostic) ──
                 // Carrier selection is resolved once by cat-config-loader. The ACP block
                 // below contains only launch details; its mere presence is not routing truth.
-                const acpConfig = config.carrier === 'acp' ? getAcpConfig(id, projectRoot) : undefined;
+                const acpConfig = config.carrier === 'acp' ? getRegisteredAcpConfig(id, projectRoot) : undefined;
                 if (config.carrier === 'acp') {
                   if (!acpConfig) {
                     app.log.warn(
@@ -2142,6 +2156,7 @@ async function main(): Promise<void> {
                       config,
                       effectiveModel: getCatModel(id),
                       acpConfig,
+                      resolveCurrentAcpConfig: () => getRegisteredAcpConfig(id, projectRoot),
                       poolRegistry: acpPoolRegistry,
                       log: app.log,
                       onUnavailable: (reason) => agentRegistry.markUnavailable(id, reason),
@@ -2647,6 +2662,7 @@ async function main(): Promise<void> {
     logger: app.log,
   });
   const memoryCueRuntime = createMemoryCueRuntime({
+    matterMemoryService,
     ...(memoryServices.catalog && memoryServices.collectionStores && memoryServices.knowledgeResolver
       ? {
           contextProjectDiscovery: {
@@ -2758,7 +2774,28 @@ async function main(): Promise<void> {
       queueProcessor.requestDrain(threadId);
     },
   });
+  const { createRootMemberSessions } = await import('./domains/plugin/member-sessions/root.js');
+  const readMessageTargets = async (threadId: string, messageId: string): Promise<readonly string[]> => {
+    const rows = await invocationQueue.getDurableEntriesForMessages(threadId, [messageId]);
+    return [...new Set((rows.get(messageId) ?? []).flatMap((row) => row.targets))];
+  };
+  const rootMemberSessions = redis
+    ? createRootMemberSessions({
+        redis,
+        ownerUserId: privateUserId,
+        projectRoot: resolveActiveProjectRoot(),
+        agents: agentRegistry,
+        threads: threadStore,
+        messages: messageStore,
+        readMessageTargets,
+        turns: turnExecutionStore,
+        profiles: profileRepository,
+        pluginRuntime: () => pluginRuntime,
+        invocationDeps: () => router.getStrategyDeps().invocationDeps,
+      })
+    : undefined;
   router = new AgentRouter({
+    ...(rootMemberSessions ? { scopedMemberRouting: rootMemberSessions.routing } : {}),
     ordinaryTaskHandoffs,
     messageSearchAnswerService,
     ownedWaitStatusReader,
@@ -2820,6 +2857,7 @@ async function main(): Promise<void> {
     ),
     contextSourceAdmission: memoryCueRuntime.contextSourceAdmission,
     memoryCuePromptService: memoryCueRuntime.promptService,
+    matterMemoryService,
     profileCueOpportunitySource: memoryCueRuntime.profileOpportunitySource,
     eventCueOpportunitySource: memoryCueRuntime.eventOpportunitySource,
     threadOverviewOpportunitySource: memoryCueRuntime.threadOverviewOpportunitySource,
@@ -2869,6 +2907,12 @@ async function main(): Promise<void> {
       liveCompanionSessions,
       invocationTracker,
       deploymentWaitStartGuard,
+      worktreeNoticeStartGuard: new WorktreeNoticeStartGuard({
+        repoRoot,
+        scriptRoot: runtimeEntrypointRoot,
+        messageStore,
+        getThread: async (id) => threadStore.get(id),
+      }),
       invocationRecordStore: invocationRecordStore as unknown as InvocationRecordStoreLike,
       router: router as unknown as RouterLike,
       socketManager,
@@ -3489,14 +3533,17 @@ async function main(): Promise<void> {
     ...recallOwnerMessageSources,
   });
   const { memoryCueInvocationReadRoutes } = await import('./routes/memory-cue-invocation-read.js');
+  const { memoryMatterRoutes } = await import('./routes/memory-matter-routes.js');
+  await app.register(memoryMatterRoutes, { service: matterMemoryService });
   await app.register(memoryCueInvocationReadRoutes, {
+    matterMemoryService,
     evidenceDb: memoryServices.store.getDb(),
     threadStore,
     invocationRecordStore,
     turnExecutionStore,
   });
   const { memoryCueSourceSummaryRoutes } = await import('./routes/memory-cue-source-summary.js');
-  await app.register(memoryCueSourceSummaryRoutes, { evidenceDb: memoryServices.store.getDb() });
+  await app.register(memoryCueSourceSummaryRoutes, { evidenceDb: memoryServices.store.getDb(), matterMemoryService });
   const { tasteObservatoryRoutes } = await import('./routes/taste-observatory.js');
   await app.register(tasteObservatoryRoutes, {
     evidenceDb: memoryServices.store.getDb(),
@@ -4804,6 +4851,7 @@ async function main(): Promise<void> {
         }
       : {}),
     memoryCueDeps,
+    matterMemoryService,
     skillConsumptionDeps: {
       receipts: skillConsumptionReceipts,
       ...(requestReviewUseReceipts ? { requestReviewReceipts: requestReviewUseReceipts } : {}),
@@ -5292,6 +5340,7 @@ async function main(): Promise<void> {
     },
     messageStore,
     lifecyclePresentation: (threadId, catId) => deliveryPresentation(threadId, { kind: 'cat', id: catId }),
+    readMessageTargets,
     // P1.3: a v2 subscription's started names the message the invocation answers (origin, else A2A).
     lifecycleTriggerMessageId: async (invocationId) => {
       const record = await registry.getRecord(invocationId);
@@ -5303,6 +5352,7 @@ async function main(): Promise<void> {
     taskStore,
     ...(redis ? { redis } : {}),
     invokeTrigger: createPluginConversationDelivery({ messageStore, queue: invocationQueue, router }),
+    ...(rootMemberSessions ? { memberSessions: rootMemberSessions.forInstance } : {}),
     socketManager: { broadcastToRoom: (room, event, data) => socketManager?.broadcastToRoom(room, event, data) },
     threadStore,
     threadBindingStore: connectorBindingStore,
@@ -5331,6 +5381,14 @@ async function main(): Promise<void> {
       isCatAvailable,
     },
     threadDeepLinkUrl: createThreadDeepLinkUrl(frontendBaseUrl),
+    runtimeInfo: () => ({
+      version: runtimeDeploymentRevision ?? 'unknown',
+      platform: platform(),
+      architecture: arch(),
+      nodeVersion: process.versions.node,
+      projectRoot: resolveActiveProjectRoot(),
+      logDirectory: LOG_DIR_PATH,
+    }),
     threadProjections: {
       backlogStore,
       cats: {
@@ -5348,7 +5406,17 @@ async function main(): Promise<void> {
   const { registerConciergeDesktopRoutes } = await import('./routes/concierge-desktop.js');
   registerConciergeDesktopRoutes(app, { ownerUserId: privateUserId, desktop: pluginRuntime.ownerDesktop });
   const { registerPluginRuntimeShutdown } = await import('./routes/plugin-runtime-shutdown.js');
-  registerPluginRuntimeShutdown(app, pluginRuntime);
+  const initialPluginController = new AbortController();
+  let initialPluginInstallation = Promise.resolve();
+  registerPluginRuntimeShutdown(app, pluginRuntime, async () => {
+    initialPluginController.abort();
+    const results = await Promise.allSettled([
+      pluginRuntime.supervisor.stopAll('api_shutdown'),
+      initialPluginInstallation,
+    ]);
+    const failures = results.filter((result) => result.status === 'rejected').map((result) => result.reason);
+    if (failures.length) throw new AggregateError(failures, 'Initial plugin shutdown failed');
+  });
   const { OFFICIAL_BUNDLED_MANIFESTS } = await import('./domains/plugin/official-catalog.js');
   const { createHostOfficialPluginCatalog } = await import('./domains/plugin/manager/host-official-catalog.js');
   const { GitMarketplaceRepository } = await import(
@@ -5443,6 +5511,7 @@ async function main(): Promise<void> {
   );
   const { pluginNativeActionRoutes } = await import('./routes/plugin-native-action-routes.js');
   await app.register(pluginNativeActionRoutes, {
+    ...(rootMemberSessions ? { assertMemberSessionCurrent: rootMemberSessions.assertCallback } : {}),
     actions: pluginRuntime.supervisor.nativeActions,
     registry,
     threadStore,
@@ -5459,26 +5528,26 @@ async function main(): Promise<void> {
     deploymentId: sharedMcpDeploymentId(`http://127.0.0.1:${PORT}`),
   });
   const { prepareHostInitialPlugins } = await import('./domains/plugin/manager/initial-plugin-installation.js');
-  let initialPlugins: Awaited<ReturnType<typeof prepareHostInitialPlugins>> | undefined;
-  try {
-    initialPlugins = await prepareHostInitialPlugins({
-      runtime: pluginRuntime,
-      managerRuntime: pluginManagerRuntime,
-      catalog: pluginManagerCatalog,
-      onFailure: (pluginId, error) => app.log.warn({ pluginId, err: error }, '[api] Initial plugin setup pending'),
-    });
-  } catch (error) {
-    // Offline discovery must not prevent the Host from opening. The durable journal retries
-    // unfinished entries on restart; completed entries (including user uninstalls) stay completed.
-    app.log.warn({ err: error }, '[api] Initial plugin installation deferred until next startup');
-  }
-  // Released once app.listen resolves. A resumed desktop window's bridge calls
-  // app.inject; before Fastify has booted that breaks the remaining app.register
-  // calls (AVV_ERR_ROOT_PLG_BOOTED). Other plugins resume immediately.
+  // Discovery/downloads are optional startup work. Like desktop window
+  // recovery, they must wait for listening rather than hold HTTP readiness.
   let releaseHostListening = () => {};
   const hostListening = new Promise<void>((resolve) => {
     releaseHostListening = resolve;
   });
+  initialPluginInstallation = prepareHostInitialPlugins({
+    hostListening,
+    signal: initialPluginController.signal,
+    runtime: pluginRuntime,
+    managerRuntime: pluginManagerRuntime,
+    catalog: pluginManagerCatalog,
+    onFailure: (pluginId, error) => app.log.warn({ pluginId, err: error }, '[api] Initial plugin setup pending'),
+  })
+    .then((prepared) => prepared.activate())
+    .catch((error: unknown) => {
+      if (initialPluginController.signal.aborted) return;
+      // The existing journal retries interrupted installation on restart.
+      app.log.warn({ err: error }, '[api] Initial plugin installation deferred until next startup');
+    });
   const { pluginManagerUploadRoutes, registerPluginManagerRoutes } = await import('./routes/plugin-manager-routes.js');
   const { registerPluginMarketplaceRoutes } = await import('./routes/plugin-marketplace-routes.js');
   const { registerAgentClientLibraryRoutes } = await import('./routes/agent-client-library-routes.js');
@@ -5486,14 +5555,7 @@ async function main(): Promise<void> {
     inventory: pluginRuntime.inventoryStore,
     packages: pluginRuntime.packages,
     registry: sessionImplementations,
-    configuration: {
-      readConfig: async (instanceId, key) => {
-        const snapshot = await pluginRuntime.inventoryStore.snapshot();
-        const instance = snapshot.instances.find((instance) => instance.pluginInstanceId === instanceId);
-        if (!instance) return undefined;
-        return (await pluginManagerRuntime.configuration.readActionInput(instance.pluginId))[key];
-      },
-    },
+    configuration: pluginRuntime.configuration,
   });
   registerPluginMarketplaceRoutes(app, marketplaceSources);
   const { PluginManagerBindings } = await import('./domains/plugin/manager/plugin-manager-bindings.js');
@@ -5505,6 +5567,7 @@ async function main(): Promise<void> {
       asset: pluginManagerRuntime.assets,
       documentation: pluginManagerRuntime.assets,
       callbackRegistry: registry,
+      threadStore,
     });
   });
   await app.register(pluginManagerUploadRoutes, { manager: pluginManagerRuntime.manager });
@@ -5592,10 +5655,7 @@ async function main(): Promise<void> {
       }
     },
     authority: async () => {
-      const inventory = await pluginRuntime.inventoryStore.snapshot();
-      const instance = inventory.instances.find(
-        (candidate) => candidate.pluginId === 'official.chatgpt-dot' && candidate.lifecycleState === 'installed',
-      );
+      const instance = await pluginRuntime.inventoryStore.read.instances.getCurrent('official.chatgpt-dot');
       return instance ? { ownerUserId: privateUserId, pluginInstanceId: instance.pluginInstanceId } : null;
     },
   });
@@ -5624,12 +5684,8 @@ async function main(): Promise<void> {
     );
   };
   const dotEnabled = async () =>
-    (await pluginRuntime.inventoryStore.snapshot()).instances.some(
-      (instance) =>
-        instance.pluginId === 'official.chatgpt-dot' &&
-        instance.lifecycleState === 'installed' &&
-        instance.activationState === 'enabled',
-    );
+    (await pluginRuntime.inventoryStore.read.instances.getCurrent('official.chatgpt-dot'))?.activationState ===
+    'enabled';
   const { DotAskService } = await import('./domains/cats/services/cloud-bridge/dot/DotAskService.js');
   dotAskService = new DotAskService({
     connection: dotConnectionService,
@@ -5740,7 +5796,12 @@ async function main(): Promise<void> {
     mediaDir: getDefaultConnectorMediaDir(process.env.CONNECTOR_MEDIA_DIR),
   });
   const { pluginWebhookForwardingRoutes } = await import('./routes/plugin/plugin-webhook-forwarding-routes.js');
-  await app.register(pluginWebhookForwardingRoutes, { webhooks: pluginRuntime.supervisor });
+  await app.register(pluginWebhookForwardingRoutes, {
+    webhooks: pluginRuntime.supervisor,
+    ui: pluginRuntime.supervisor.ui,
+  });
+  const { pluginUiRoutes } = await import('./routes/plugin/plugin-ui-routes.js');
+  await app.register(pluginUiRoutes, { ui: pluginRuntime.supervisor.ui });
 
   // F246/F313: one registry and one renderer projection. The F266 writer stays
   // fenced until an owner-backed resolver/dispatcher and a v1_active epoch are
@@ -6103,12 +6164,66 @@ async function main(): Promise<void> {
     },
   });
   memberCanonService = new MemberCanonService(assetCanonService, privateUserId);
+  const { WorkCoverService } = await import('./domains/collaborative-content/works/cover/cover-service.js');
+  const { locateUploadedFile } = await import('./domains/collaborative-content/works/cover/cover-upload-locator.js');
+  const { readPublishedMessageItem } = await import('./domains/video-studio/content-owner/published-message-media.js');
+  const { listWorktrees: listCoverRoots } = await import('./domains/workspace/workspace-security.js');
+  // A person's card has no thread of its own; the owner checks the work's original thread instead.
+  type CoverPrincipal = import('./domains/collaborative-content/works/types.js').WorkPrincipal;
+  const coverPrincipal = (
+    reference: { contentRef: string; ownerRevision: number },
+    principal: CoverPrincipal,
+  ): CoverPrincipal =>
+    principal.actor.kind === 'human' && !principal.threadId
+      ? {
+          ...principal,
+          threadId:
+            artifactReview.store.works.get(principal.userId, reference.contentRef, reference.ownerRevision)?.threadId ??
+            '',
+        }
+      : principal;
+  const coverLocator = (locator: { rootId: string; path: string }, principal: CoverPrincipal) =>
+    workspaceContentReviews.source.resolveFileLocator({
+      principal: { userId: principal.userId },
+      locator: { worktreeId: locator.rootId, path: locator.path },
+    });
+  const workCovers = new WorkCoverService({
+    store: artifactReview.store.works.covers,
+    authorize: (reference, principal, permission) =>
+      livingWorks.authorizeVersion(reference, coverPrincipal(reference, principal), permission),
+    mediaType: async (reference, principal) =>
+      (await livingWorks.read(reference, coverPrincipal(reference, principal))).description.mediaType,
+    readContext: (reference, principal, metadataRevision) => workContexts.read(reference, principal, metadataRevision),
+    authorizeThread: (threadId, principal) =>
+      artifactReview.media.access.authorizeThread(threadId, workMediaPrincipal(principal)),
+    readMessageItem: (source, principal) =>
+      readPublishedMessageItem(messageStore, source, workMediaPrincipal(principal)),
+    locateUpload: (fileName, principal) =>
+      locateUploadedFile(fileName, {
+        uploadDir: getDefaultUploadDir(process.env.UPLOAD_DIR),
+        roots: () => listCoverRoots(process.env.CAT_CAFE_WORKSPACE_ROOT),
+        resolve: (locator) =>
+          workspaceContentReviews.source.resolveFileLocator({ principal: { userId: principal.userId }, locator }),
+      }),
+    inspect: async (locator, principal) => {
+      const current = await coverLocator(locator, principal);
+      return canonAssetIndex.inspect({ kind: 'workspace', rootId: current.worktreeId, path: current.path });
+    },
+    open: (version) => canonAssetIndex.open(version),
+    threadOf: (reference, principal) => coverPrincipal(reference, principal).threadId,
+    changed: (ownerUserId) =>
+      socketManager?.emitToUser(ownerUserId, 'entrusted_work_projection_invalidated', { ownerUserId }),
+  });
+  livingWorks.attachCovers(workCovers);
   await registerLivingWorkRoutes(app, {
     service: livingWorks,
     registry,
     contexts: workContexts,
     assets: assetCanonService,
+    covers: workCovers,
   });
+  const { registerWorkCoverRoutes } = await import('./routes/work-cover-routes.js');
+  await registerWorkCoverRoutes(app, { covers: workCovers });
   registerWorkVideoAssetRoutes(app, { contexts: workContexts, assets: canonAssetIndex });
   const { registerAssetCanonRoutes } = await import('./routes/asset-canon-routes.js');
   registerAssetCanonRoutes(app, assetCanonService, canonAssetIndex);
@@ -6124,6 +6239,40 @@ async function main(): Promise<void> {
     reviews: artifactReview.ledgers,
     namespace: 'publication',
     changed: (ownerUserId, reviewId) => socketManager?.emitToUser(ownerUserId, 'artifact_review_changed', { reviewId }),
+  });
+  // F335 交付二：回话下面那一排（一键提议 + 原地回执）。动作表 `suggestionActions` 也给线 1 登记暂停 / 关闭的撤销。
+  const { createSuggestionIntegration } = await import('./domains/suggestions/composition.js');
+  const { createScheduledTaskSuggestionAction } = await import(
+    './domains/suggestions/actions/scheduled-task-action.js'
+  );
+  const { createVideoCommentsSuggestionAction } = await import(
+    './domains/suggestions/actions/video-comments-action.js'
+  );
+  const { registerSuggestionRoutes } = await import('./routes/suggestion-routes.js');
+  const suggestions = createSuggestionIntegration({ redis, messageStore, invocationTracker, socketManager });
+  suggestions.registry.register(
+    createVideoCommentsSuggestionAction({
+      reviews: artifactReview.ledgers,
+      publications: artifactReview.publicationReads.media,
+      changed: (ownerUserId, reviewId) =>
+        socketManager?.emitToUser(ownerUserId, 'artifact_review_changed', { reviewId }),
+    }),
+  );
+  suggestions.registry.register(
+    createScheduledTaskSuggestionAction({
+      ownerUserId: privateUserId,
+      templateRegistry,
+      packTemplateStore,
+      dynamicTaskStore,
+      commit: { taskRunner: taskRunnerV2, scheduleMutationProposalStore, notifyLifecycle: schedulerLifecycleToast },
+    }),
+  );
+  await app.register(async (scope) => {
+    registerSuggestionRoutes(scope, {
+      service: suggestions.service,
+      callbackRegistry: registry,
+      agentKeyRegistry,
+    });
   });
   const { createContentModificationIntegration } = await import(
     './domains/collaborative-content/modification/composition.js'
@@ -6955,6 +7104,15 @@ async function main(): Promise<void> {
   // Session chain (F24)
   await app.register(sessionChainRoutes, {
     inspectLocalSession,
+    resolveImportExecutionBoundary: async (input) => {
+      const { captureImportedSessionBoundary } = await import(
+        './domains/cats/services/agents/invocation/import-execution-boundary.js'
+      );
+      return captureImportedSessionBoundary(router.getStrategyDeps().invocationDeps, {
+        ...input,
+        service: agentRegistry.get(input.catId),
+      });
+    },
     listLocalSessions,
     sessionChainStore,
     threadStore,
@@ -7510,7 +7668,6 @@ async function main(): Promise<void> {
           logger: app.log,
         });
         releaseHostListening();
-        await initialPlugins?.activate();
         return listening;
       },
       recover: async () => {

@@ -53,13 +53,13 @@ const { renderSegment } = await import('./packages/api/dist/domains/cats/service
 const { assembleForSession } = await import('./packages/api/dist/domains/prompt-hooks/assemble-bridge.js');
 const scratch = mkdtempSync(join(tmpdir(), 'l0-equivalence-'));
 try {
-  const compiled = await compileL0({ catId: 'codex', profileDir: scratch, dossierRoot: scratch });
+  const compiled = (await compileL0({ catId: 'codex', profileDir: scratch, dossierRoot: scratch })).replace(/\r\n/g, '\n');
   const registry = new HookRegistry(join(root, 'assets/prompt-hooks'), join(root, 'assets/prompt-templates'));
   registry.scan();
   const pipeline = new HookPipeline(registry, RESOLVER_MAP, renderSegment);
   const result = pipeline.executeStage('session-init', assembleForSession('codex', { mcpAvailable: true }));
   const patches = Object.fromEntries(result.patches
-    .filter(patch => /^L[1-7]$/.test(patch.hookId)).map(patch => [patch.hookId, patch.content]));
+    .filter(patch => /^L[1-7]$/.test(patch.hookId)).map(patch => [patch.hookId, patch.content.replace(/\r\n/g, '\n')]));
   assert.deepEqual(Object.keys(patches).sort(), ['L1', 'L2', 'L3', 'L4', 'L5', 'L6', 'L7']);
 
   // Observe complete blocks in the native compiler's final output. Its public

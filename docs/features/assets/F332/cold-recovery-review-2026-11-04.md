@@ -4,7 +4,7 @@ related_features: [F148, F232, F296]
 topics: [cold-recovery, review, test-evidence]
 doc_kind: review-evidence
 created: 2026-11-04
-updated: 2026-11-04
+updated: 2026-11-05
 ---
 
 # 冷恢复定位入口：代码复审与验收缺口
@@ -205,6 +205,16 @@ Reviewer核原生53行、HTTP7条、metadata/prompt/L0、全部初核附件及�
 原始metadata SHA256 `f82c9a9e18497740c139db4069e3dcd3dcf070fdee49e57725c6a104b0894c7e`，native trace `0043078846c5baa3b4ab581f7b023cee2d96686a280cfbddf6c2263864eed2d8`，HTTP `f243f37c873e9c35d8e486ec645d29f45d91d8db64fc3a6d5dcdcb639dc722b4`。原件、逐场裁定和保留文件仍在私有隔离目录。
 
 本批S3/S5/C2各一次通过，总账12/12，本批结束，不再运行或重试/resume。没有配对对照，不建立因果、比率、成本收益或整体安全保证。前版P1和全部旧结果继续保留；后续先形成必要的剩余验收/预算提案，新增真实调用须另获授权。
+
+## 目标分支改为 next（2026-11-05）
+
+operator明确要求本切片代码提交到`zts212653/clowder-ai:next`。PR #1832的base已从main改为next，保持OPEN/draft。整合基线冻结为next `440fa0377ae54a51320306217088209ae7b11e68`；沿原提交分支追加整合commit，不重写旧历史。
+
+以原F332分支起点42017e0ce至6db6f8819的16文件diff为范围，合并next后将无关差异恢复为next原件。12个源代码/测试文件的新增和删除行与已审补丁逐字一致；仅因上游上下文变化而移动行号。文档日期冲突保留最新记录；MCP基线以next原件通过canonical治理工具重新生成，保留上游工具变化，不套回旧整树摘要。
+
+新集成版本已独立通过API构建、canonical MCP基线write/check、138项API聚焦、44项MCP聚焦及2项隔离Redis测试，全部0失败、0跳过。新基线保留next的208个工具，权限/动作/选择器/profile/schema投递与参数结构不变；只有已审list_tasks/create_task顶层文字及update_task.why参数文字变化，65项摘要均为callback-tools.ts同模块更新，已按源文件独立重算。
+
+此前代码审查、真实三场pass及前版P1仍各自绑定原head。不能把上述确定性检查或原head的真实观察称为next集成版的真实行为验收；本次没有新增模型调用，总账12/12保持。完整验收缺口与草稿状态继续保留。
 
 ## 尚未验收
 

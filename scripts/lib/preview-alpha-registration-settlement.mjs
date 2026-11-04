@@ -17,7 +17,7 @@ import {
   assertRecoveryQuiescence,
   recoveryListeners,
 } from './preview-alpha-recovery-observation.mjs';
-
+import { capturePreviewDiagnosticLog } from './preview-diagnostic-log.mjs';
 import { publishRegistrationResult } from './preview-registration-receipts.mjs';
 
 export {
@@ -127,25 +127,30 @@ export async function settleStoppedNamedAlphaRegistration(config, record, deps =
   const evidence = readAlphaCompletionEvidence(config, record);
   if (portLeases(evidence.coordinates, deps).length) return null;
   assertStopped(config, record, evidence, deps);
-  if (record.logPath) {
-    if (record.logPath !== (config.logPath ?? join(config.stateDir, `${config.id}.log`)))
-      throw new Error('settlement log coordinate changed');
-    evidence.sources.log = recoverySnapshot(record.logPath, { maxBytes: 16 * 1024 * 1024 });
-  }
+  const log = capturePreviewDiagnosticLog(config, record, evidence);
   if (record.origin === 'launchd') evidence.sources.plist = recoverySnapshot(config.plistPath);
   const snapshots = snapshotData(evidence);
-  const journal = preserveRegistrationJournal(record, evidence, snapshots);
+  const journal = preserveRegistrationJournal(
+    record,
+    evidence,
+    snapshots,
+    'named-alpha-registration-settlement',
+    log.details,
+  );
   assertRegistrationSources(evidence, snapshots);
+  log.assertCurrent();
   assertStopped(config, record, evidence, deps);
   const summary = publishRegistrationResult(config, record, evidence, journal);
   await deps.afterSettlementJournal?.();
   assertRegistrationSources(evidence, snapshots);
+  log.assertCurrent();
   assertStopped(config, record, evidence, deps);
   return {
     record: evidence.sources.record,
     summary,
     assertReadyToRelease: () => {
       assertRegistrationSources(evidence, snapshots);
+      log.assertCurrent();
       assertStopped(config, record, evidence, deps);
     },
   };

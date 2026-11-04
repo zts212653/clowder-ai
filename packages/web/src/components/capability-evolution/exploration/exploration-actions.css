@@ -27,6 +27,7 @@
   min-height: 96px;
   padding: 12px;
   background: var(--cafe-surface);
+  --chat-background-role: cafe;
   border: 1px solid var(--cafe-border);
   border-radius: 8px;
   resize: vertical;

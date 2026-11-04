@@ -10,7 +10,7 @@ name: Windows Smoke
 
 on:
   pull_request:
-    branches: [main, next]
+    branches: [main, next, develop]
     paths-ignore:
       - 'docs/**'
       - '*.md'
@@ -36,6 +36,42 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @cat-cafe/shared build
       - run: pnpm --filter @cat-cafe/api build
+      - name: Windows multi-plugin ACP catalog and cancelled editor requests
+        run: |
+          pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs node --import tsx --test --test-timeout=60000 test/agent-client-catalog-static-read.test.ts test/agent-client-catalog-configuration.test.ts test/plugin-icon-static-read.test.ts
+          pnpm --filter @cat-cafe/web exec vitest run src/hooks/__tests__/useAgentClientLibraries-lifecycle.test.tsx src/utils/__tests__/api-client-get-coordination.test.ts src/utils/__tests__/api-client-timeout.test.ts
+      - name: Host media paths with native Windows filesystem semantics
+        run: >-
+          pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs
+          --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1
+          node --import ./test/helpers/setup-cat-registry.js --test --test-timeout=60000
+          test/host-media-paths.test.js
+      - name: Codex final environment regressions
+        run: >-
+          pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs
+          --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1
+          node --import ./test/helpers/setup-cat-registry.js --test --test-timeout=60000
+          test/issue-1666-carrier-environment.test.js
+          test/issue-1666-network-environment.test.js
+          test/issue-1666-provider-environment.test.js
+      - name: Codex semantic completion after asynchronous launch preparation
+        run: >-
+          pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs
+          --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1
+          node --import ./test/helpers/setup-cat-registry.js --test --test-timeout=60000
+          --test-name-pattern="Issue #116: turn.completed unblocks done even when process exit is delayed"
+          test/codex-agent-service.test.js
+      - name: DSH packaged secret guard admission
+        run: >-
+          pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs
+          node --import tsx --test test/secret-dsh.test.ts
+      - name: Memory credential scanner regressions
+        run: >-
+          node --test --test-timeout=15000
+          packages/api/test/memory/secret-scanner.test.js
+          packages/api/test/memory/secret-scanner-review.test.js
+          packages/api/test/memory/secret-scanner-collection.test.js
+          packages/api/test/memory/collection-index-builder-security.test.js
       - name: Managed Codex layout link diagnostic
         run: >-
           pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs
@@ -239,6 +275,11 @@ jobs:
         env:
           NODE_ENV: test
           REDIS_URL: redis://127.0.0.1:0
+      - name: Memory repository boundary regressions
+        run: >-
+          node --test --test-timeout=15000
+          packages/api/test/memory/flat-scanner-boundaries.test.js
+          packages/api/test/memory/structured-scanner.test.js
       - name: Windows-relevant tests
         run: |
           node --test packages/api/test/cli-spawn-win.test.js
@@ -289,6 +330,8 @@ jobs:
         run: |
           echo "commit=$env:GITHUB_SHA" | Tee-Object artifact-identity.txt
           Get-Content artifact-identity.txt
+      - name: Verify frozen runtime input inventory
+        run: node --test desktop/frozen-runtime-inputs.test.js
       - name: Package the API artifact from the source lock
         run: >-
           node desktop/scripts/frozen-runtime-deploy.mjs . ${{ runner.temp }}\clowder-deploy-root api
@@ -307,11 +350,15 @@ jobs:
         env:
           CAT_CAFE_INSTALLED_LAYOUT_ROOT: ${{ runner.temp }}\clowder-install
         run: node --test packages/api/test/f296-installed-layout.test.js
+      - name: Locate isolated frozen-startup logs
+        if: always()
+        shell: pwsh
+        run: Add-Content $env:GITHUB_ENV "STARTUP_PROFILE_TEMP=$([System.IO.Path]::GetTempPath())"
       - name: Retain isolated frozen-startup failure logs
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: windows-frozen-startup-logs-${{ github.sha }}
-          path: ${{ runner.temp }}/.startup-profile-*/build.log
+          path: ${{ env.STARTUP_PROFILE_TEMP }}/clowder-startup-profile-*/build.log
           include-hidden-files: true
           if-no-files-found: warn

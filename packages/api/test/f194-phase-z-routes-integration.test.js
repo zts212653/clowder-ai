@@ -27,6 +27,7 @@ const USER_ID = 'user-z';
 
 function makeStubRouter() {
   return {
+    previewTargets: async () => ({ targetCats: [], reason: { kind: 'default_cat' } }),
     resolveTargetsAndIntent: async () => ({
       targetCats: ['opus'],
       intent: { intent: 'execute', promptTags: [], targets: ['opus'] },

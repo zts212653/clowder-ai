@@ -44,6 +44,8 @@ export interface RuntimeProviderProfile {
   kind?: ProviderProfileKind;
   /** Fresh-install CLI-owned identity; its active provider is selected by the CLI config. */
   syntheticNative?: boolean;
+  /** Native carrier configuration revision; credentials remain in their owning store. */
+  nativeSourceRevision?: string;
   client?: BuiltinAccountClient;
   /** Preserve explicit non-family identities (e.g. ACP), which must not fall back to an ID alias. */
   persistedClientId?: string;

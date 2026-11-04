@@ -32,6 +32,7 @@ export async function retireExitedChildExecutions(
     return false;
   const running = children.filter((child) => child.status === 'running');
   if (!running.length) return false;
+  const exits = new Map<string, number>();
   for (const child of running) {
     const exit = deps.getChildProcessExit(child);
     if (
@@ -41,6 +42,7 @@ export async function retireExitedChildExecutions(
       now - exit.exitedAt < FINALIZATION_GRACE_MS
     )
       return false;
+    exits.set(child.invocationId, exit.exitedAt);
   }
   // Fence continued actor work before durable retirement. A fresh process observed since the read vetoes this.
   if (!deps.fenceExitedExecution(candidate, running)) return false;
@@ -49,6 +51,7 @@ export async function retireExitedChildExecutions(
       status: 'interrupted',
       endedAt: now,
       terminalReason: 'provider_exited_without_terminal',
+      providerTeardownAt: exits.get(child.invocationId),
     });
     if (!outcome.record || outcome.record.status === 'running') throw new Error('exited_child_terminal_not_committed');
   }

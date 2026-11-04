@@ -60,6 +60,7 @@ vi.mock('@/utils/api-client', () => ({
 
 vi.mock('@/utils/compressImage', () => ({ compressImage: (f: File) => Promise.resolve(f) }));
 vi.mock('@/hooks/useCoCreatorConfig', () => ({
+  useCoCreatorDisplay: () => ({ name: 'ME', nickname: 'co-creator', role: 'operator', mention: '@co-creator' }),
   useCoCreatorConfig: () => ({
     name: 'ME',
     aliases: [],

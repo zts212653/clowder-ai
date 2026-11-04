@@ -1,9 +1,11 @@
+import type { CatId } from '@cat-cafe/shared';
 import type { AutoDreamStore } from '../../auto-dream/AutoDreamStore.js';
 import type { IMessageStore } from '../../cats/services/stores/ports/MessageStore.js';
 import type { TasteRepository } from '../../taste/services/TasteRepository.js';
 import type { EntityRegistryStore } from '../EntityRegistry.js';
 import type { IEventMemoryStore } from '../EventMemoryStore.js';
 import type { IEvidenceStore } from '../interfaces.js';
+import type { MatterMemoryService } from '../matters/MatterMemoryService.js';
 import type { PersonMemoryRecallService } from '../people/PersonMemoryRecallService.js';
 import { recordNativeProfileOpening } from '../profile/native-profile-opening.js';
 import type { TasteMemoryLifecycleStore } from '../taste/TasteMemoryLifecycleStore.js';
@@ -15,6 +17,7 @@ import { MemoryCueInvocationPromptService } from './MemoryCueInvocationPromptSer
 import { MemoryCuePlaneService } from './MemoryCuePlaneService.js';
 import { MemoryCueResolverRegistry } from './MemoryCueResolverRegistry.js';
 import type { MemoryCueSourceReader } from './MemoryCueSourceReader.js';
+import { projectInvocationCues } from './project-invocation-cues.js';
 import { CatOwnedSeedCueResolver } from './resolvers/CatOwnedSeedCueResolver.js';
 import { DecisionCueResolver } from './resolvers/DecisionCueResolver.js';
 import { EventCueResolver } from './resolvers/EventCueResolver.js';
@@ -46,6 +49,7 @@ export interface MemoryCueRuntime {
 
 /** Composition root for the source-backed read-only canonical lanes. */
 export function createMemoryCueRuntime(input: {
+  matterMemoryService?: MatterMemoryService;
   threadOverviewSource?: ThreadOverviewMemoryCueSource;
   contextProjectDiscovery?: ConstructorParameters<typeof ContextProjectCueSource>[0];
   contextSourceOpportunityStore?: ContextSourceOpportunityStore;
@@ -138,6 +142,35 @@ export function createMemoryCueRuntime(input: {
     ...(input.threadOverviewSource ? { threadOverviewOpportunitySource: input.threadOverviewSource } : {}),
     sourceReader: {
       async read(request) {
+        if (request.family === 'matter') {
+          const cue = projectInvocationCues(
+            input.episodeStore.listByInvocation(
+              request.scope.ownerUserId,
+              request.scope.threadId,
+              request.scope.invocationId,
+            ),
+          ).find(
+            (entry) =>
+              entry.resolverFamily === 'matter' &&
+              entry.consumerCatId === request.consumerCatId &&
+              entry.sourceAnchor === request.anchor &&
+              entry.sourceRevision === request.expectedRevision,
+          );
+          if (!cue?.readDetails || !request.consumerCatId || !input.matterMemoryService)
+            return { status: 'not_available' };
+          const read = await input.matterMemoryService.readReceipt(
+            request.scope.ownerUserId,
+            request.consumerCatId as CatId,
+            cue.readDetails,
+            true,
+          );
+          return read.status === 'current'
+            ? { status: 'ok', payload: read.page }
+            : {
+                status: 'not_available',
+                invalidationReason: read.status === 'changed' ? 'source_corrected' : 'scope_revoked',
+              };
+        }
         if (
           request.anchor.startsWith('project-collection:') ||
           request.anchor.startsWith('profile:primer:') ||

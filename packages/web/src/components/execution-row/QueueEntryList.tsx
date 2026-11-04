@@ -8,7 +8,7 @@ import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { useCatData } from '@/hooks/useCatData';
 import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
 import { useThreadMessages } from '@/hooks/useThreadScopedSelectors';
-import { deliveredTargetIdsFromHistory, SortableQueueEntryRow } from '../QueueEntryRow';
+import { queueTargetLabelsFromHistory, SortableQueueEntryRow } from '../QueueEntryRow';
 import type { useQueueActionConvergence } from '../useQueueActionConvergence';
 import type { useQueueCommands } from './useQueueCommands';
 import type { QueueView } from './useQueueView';
@@ -44,9 +44,7 @@ export function QueueEntryList({ view, commands, convergence, resolveCatName, cl
                 imageCount={imageCount}
                 ownerName={coCreator.name}
                 ownerAvatar={coCreator.avatar}
-                deliveredTargetIds={
-                  entry.messageId ? deliveredTargetIdsFromHistory(entry.messageId, timelineMessages) : []
-                }
+                deliveryLabels={entry.messageId ? queueTargetLabelsFromHistory(entry.messageId, timelineMessages) : {}}
                 resolveCatName={resolveCatName}
                 resolveCatAvatar={(id) => cats.find((cat) => cat.id === id)?.avatar}
                 onRemove={commands.handleRemove}

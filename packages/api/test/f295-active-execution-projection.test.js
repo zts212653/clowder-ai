@@ -235,7 +235,7 @@ function buildDeps() {
       listLive: mock.fn(async () => ({ owners: processOwners, complete: true })),
       terminateExact: mock.fn(async (execution) => {
         processOwnerCancelCalls.push(execution);
-        return { matched: 1, signaled: 1, complete: true };
+        return { matched: 1, signaled: 1, complete: true, stopped: true };
       }),
     },
     turnExecutionStore: {
@@ -325,7 +325,7 @@ describe('F295 active execution projection', () => {
       headers: { 'x-cat-cafe-user': 'empty-user' },
     });
     assert.equal(empty.statusCode, 200);
-    assert.deepEqual(empty.json(), { scope: 'all', executions: [] });
+    assert.deepEqual(empty.json(), { scope: 'all', executions: [], waits: [] });
     const anonymous = await app.inject({ method: 'GET', url: '/api/executions/active?scope=all' });
     assert.equal(anonymous.statusCode, 401);
     const mixed = await app.inject({
@@ -401,6 +401,8 @@ describe('F295 active execution projection', () => {
           },
         },
       ],
+      // A running command hold is an execution, never repeated as a wait.
+      waits: [],
     });
   });
 
@@ -645,6 +647,7 @@ describe('F295 active execution projection', () => {
         terminal: {
           status: 'canceled',
           endedAt: deps._turnTerminalCalls[0]?.terminal.endedAt,
+          providerTeardownAt: deps._turnTerminalCalls[0]?.terminal.endedAt,
           terminalReason: 'user_cancel',
         },
       },
@@ -799,7 +802,7 @@ describe('F295 active execution projection', () => {
     });
     deps.cliExecutionOwnerService.terminateExact.mock.mockImplementationOnce(async (execution) => {
       deps._processOwnerCancelCalls.push(execution);
-      return { matched: 1, signaled: 0, complete: true };
+      return { matched: 1, signaled: 0, complete: true, stopped: true };
     });
 
     const cancel = await app.inject({
@@ -812,9 +815,16 @@ describe('F295 active execution projection', () => {
     assert.equal(cancel.statusCode, 200);
     assert.equal(cancel.json().cancelled, true);
     assert.equal(deps._turnTerminalCalls.at(-1)?.invocationId, 'turn-natural-exit');
+    const terminals = deps.socketManager.broadcastAgentMessage.mock.calls
+      .map((call) => call.arguments[0])
+      .filter((message) => message.type === 'done');
+    assert.equal(terminals.length, 1);
+    assert.equal(terminals[0].invocationId, 'inv-natural-exit');
+    assert.equal(terminals[0].turnInvocationId, 'turn-natural-exit');
+    assert.equal(terminals[0].errorCode, 'cancelled');
   });
 
-  it('keeps process cancellation successful when tracker-less terminalization needs recovery', async () => {
+  it('retains ownership when a controlled stop cannot commit its child terminal', async () => {
     deps._processOwners.push({
       executionId: 'inv-terminal-write-fails',
       invocationId: 'turn-terminal-write-fails',
@@ -834,8 +844,13 @@ describe('F295 active execution projection', () => {
       payload: { catId: 'opus5' },
     });
 
-    assert.equal(cancel.statusCode, 200);
-    assert.equal(cancel.json().cancelled, true);
+    assert.equal(cancel.statusCode, 503);
+    assert.equal(cancel.json().code, 'EXECUTION_CONTROL_UNAVAILABLE');
+    assert.equal(
+      deps.socketManager.broadcastAgentMessage.mock.calls.some((call) => call.arguments[0].type === 'done'),
+      false,
+    );
+    assert.equal(deps.agentSessionMutex.forceReleaseByScope.mock.callCount(), 0);
   });
 
   it('keeps a process-owner-only execution inside a complete sparse project snapshot', async () => {
@@ -1293,6 +1308,7 @@ describe('F295 active execution projection', () => {
       matched: 0,
       signaled: 0,
       complete: false,
+      stopped: false,
     }));
 
     const cancel = await app.inject({
@@ -1307,6 +1323,13 @@ describe('F295 active execution projection', () => {
     assert.equal(deps.cliExecutionOwnerService.terminateExact.mock.callCount(), 3);
     assert.equal(deps._turnTerminalCalls.at(-1)?.terminal.status, 'failed');
     assert.equal(deps._turnTerminalCalls.at(-1)?.terminal.terminalReason, 'control_plane_unavailable');
+    const terminals = deps.socketManager.broadcastAgentMessage.mock.calls
+      .map((call) => call.arguments[0])
+      .filter((message) => message.type === 'done');
+    assert.equal(terminals.length, 1);
+    assert.equal(terminals[0].invocationId, 'inv-terminate-degraded');
+    assert.equal(terminals[0].turnInvocationId, 'turn-terminate-degraded');
+    assert.equal(terminals[0].errorCode, 'control_plane_unavailable');
   });
 
   it('persists control-plane failure through the ordinary response and input settlement chain', async () => {

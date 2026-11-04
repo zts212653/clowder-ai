@@ -619,7 +619,7 @@ describe('AgentRouter', () => {
     );
 
     const { targetCats } = await router.resolveTargetsAndIntent('帮我 review 一下', 'thread-policy');
-    assert.equal(targetCats[0], 'codex', 'Should pick deterministic non-opus fallback (codex) when opus is avoided');
+    assert.deepEqual(targetCats, [], 'Avoiding the configured default must not select an unrelated member');
   });
 
   test('routingPolicy(review) does not trigger on words containing "pr" like "prompt"', async () => {
@@ -1931,7 +1931,7 @@ describe('AgentRouter', () => {
       'static provider/identity line MUST be in user-message prompt for non-native-L0 provider',
     );
     assert.ok(
-      opusReceivedPrompt.includes('## 协作\n'),
+      opusReceivedPrompt.replaceAll('\r\n', '\n').includes('## 协作\n'),
       'static A2A collaboration section MUST be present for non-native-L0 provider',
     );
     assert.ok(
@@ -2548,7 +2548,7 @@ describe('F078: Default to last replier', () => {
     });
   });
 
-  test('no participants falls back away from an unavailable default cat', async () => {
+  test('no participants and unavailable default without successor produce no target', async () => {
     await withAvailabilityConfig({ opus: false }, async () => {
       const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
 
@@ -2567,8 +2567,8 @@ describe('F078: Default to last replier', () => {
       const { targetCats } = await router.resolveTargetsAndIntent('hello', 't1');
       assert.deepStrictEqual(
         targetCats,
-        ['codex'],
-        'should skip unavailable default cat and pick an available fallback',
+        [],
+        'unavailable default without an explicit successor must not pick an unrelated member',
       );
     });
   });

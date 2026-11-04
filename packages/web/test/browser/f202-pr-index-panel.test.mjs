@@ -8,9 +8,7 @@ import { fileURLToPath } from 'node:url';
 import Fastify from 'fastify';
 import { build } from 'vite';
 
-const { chromium } = await import(
-  process.env.F202_PLAYWRIGHT_MODULE ?? '../../../ppt-forge/node_modules/playwright/index.mjs'
-);
+const { chromium } = await import(process.env.F202_PLAYWRIGHT_MODULE ?? 'playwright');
 
 const webRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const require = createRequire(path.join(webRoot, 'package.json'));

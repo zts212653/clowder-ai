@@ -34,6 +34,7 @@ const log = createModuleLogger('context-transport');
 const PROMPT_MESSAGE_SAFETY_CHAR_LIMIT = 100_000;
 
 import { estimateTokens } from '../../../../../utils/token-counter.js';
+import { sliceUnicodeSafe } from '../../../../../utils/unicode-safe-slice.js';
 import { matchExplicitApprovedTasteTrigger } from '../../../../memory/cue/ExplicitApprovedTasteTriggerCatalog.js';
 import type { MemoryCueOpportunitySeed } from '../../../../memory/cue/MemoryCueInvocationPromptService.js';
 import type { NudgeProcessResult } from '../../../../memory/EntityNudgeService.js';
@@ -2449,7 +2450,7 @@ async function assembleSmartWindowContext(
             if (estimateTokens(summary.slice(0, mid)) <= hcConfig.maxThreadMemoryTokens) lo = mid;
             else hi = mid - 1;
           }
-          summary = `${summary.slice(0, lo)}…`;
+          summary = `${sliceUnicodeSafe(summary, 0, lo)}…`;
         }
         threadMemorySummary = summary;
         // storedFileArtifacts already pre-read via preReadStoredArtifacts (G1→G2 bridge)

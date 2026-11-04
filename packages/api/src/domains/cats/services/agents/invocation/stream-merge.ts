@@ -30,6 +30,8 @@ type TaggedOutcome<T> =
   | { kind: 'batch-abort' };
 
 export interface MergeStreamsOptions<T = never> {
+  /** Abort controlled children on consumer exit and await their actual iterator cleanup. */
+  ownedControllerForIndex?: (index: number) => AbortController | undefined;
   /** Abort the whole merge, including children whose next() never settles. */
   signal?: AbortSignal;
   /** Abort one child without cancelling healthy sibling streams. */
@@ -191,8 +193,20 @@ export async function* mergeStreams<T>(
     }
   } finally {
     for (const cleanup of abortCleanups) cleanup();
-    for (let index = 0; index < iterators.length; index++) {
-      closeIterator(index, iterators, pending, terminal, onError);
-    }
+    const closed = await Promise.allSettled(
+      iterators.map((iterator, index) => {
+        const controller = options.ownedControllerForIndex?.(index);
+        if (controller && !terminal.has(index)) {
+          controller.abort();
+          terminal.add(index);
+          pending.delete(index);
+          return Promise.resolve().then(() => iterator.return?.());
+        }
+        closeIterator(index, iterators, pending, terminal, onError);
+        return undefined;
+      }),
+    );
+    const failure = closed.find((result) => result.status === 'rejected');
+    if (failure?.status === 'rejected') throw failure.reason;
   }
 }

@@ -48,8 +48,10 @@ function createDependencies(overrides = {}) {
       emitToUser: mock.fn(),
     },
     router: {
+      previewTargets: async () => ({ targetCats: [], reason: { kind: 'default_cat' } }),
       resolveTargetsAndIntent: mock.fn(async () => ({
         targetCats: ['opus'],
+        routing_warnings: [],
         intent: { intent: 'execute' },
       })),
       resolveExplicitTargets: mock.fn(async (cats) => cats),
@@ -575,6 +577,7 @@ describe('canonical message lifecycle ingress', () => {
   it('keeps whisper visibility while routing an idle target through the same Queue', async () => {
     dependencies.router.resolveTargetsAndIntent.mock.mockImplementation(async () => ({
       targetCats: ['codex'],
+      routing_warnings: [],
       intent: { intent: 'execute' },
     }));
 
@@ -599,6 +602,7 @@ describe('canonical message lifecycle ingress', () => {
   it('keeps an all-idle multi-target input in one source Queue row', async () => {
     dependencies.router.resolveTargetsAndIntent.mock.mockImplementation(async () => ({
       targetCats: ['opus', 'codex'],
+      routing_warnings: [],
       intent: { intent: 'execute' },
       hasMentions: true,
     }));

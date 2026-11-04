@@ -693,6 +693,24 @@ After text`;
     assert.deepStrictEqual(parsed.threadMemory, { available: true, sessionsIncorporated: 1 });
   });
 
+  test('legacy memory token clipping does not split emoji in the assembled prompt', async () => {
+    const messageStore = adaptMessageStore(new MessageStore());
+    seedMessages(messageStore, 30);
+    const deps = buildDeps(messageStore, new DeliveryCursorStore(), {
+      threadStore: mockThreadStore('Test Thread', {
+        v: 1,
+        summary: `a${'😼'.repeat(1000)}`,
+        sessionsIncorporated: 1,
+        updatedAt: Date.now(),
+      }),
+    });
+    const result = await assembleIncrementalContext(deps, 'user-1', 'thread-1', 'opus');
+    assert.ok(result.contextText.includes('[Thread Memory:'), 'the memory section must survive this budget');
+    assert.ok(result.contextText.isWellFormed(), 'the memory read-side cap must not poison a valid prompt');
+    assert.ok(result.contextText.includes('😼'), 'clipping must retain complete source characters');
+    assert.ok(!result.contextText.includes('\uFFFD'));
+  });
+
   test('P2-2: threadMemory exceeding maxThreadMemoryTokens is trimmed', async () => {
     const messageStore = adaptMessageStore(new MessageStore());
     const deliveryCursorStore = new DeliveryCursorStore();

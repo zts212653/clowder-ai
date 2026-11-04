@@ -58,6 +58,7 @@ function NavRow({
       data-testid={testId}
       data-guide-id={guideId}
       className="shell-nav-row shell-focusable flex h-8 w-full items-center gap-2.5 rounded-lg px-2 text-left text-sm disabled:opacity-50"
+      data-chat-background-surface={current ? 'selected' : undefined}
       style={{
         background: current ? 'var(--shell-selected)' : undefined,
         color: current ? 'var(--shell-ink)' : 'var(--shell-body)',
@@ -234,6 +235,7 @@ export function ThreadSidebarV2Header({
               role="menu"
               aria-label={copy.moreActions}
               className="absolute right-0 top-[34px] z-[60] w-[240px] rounded-xl p-1.5"
+              data-chat-background-surface="paper"
               style={{
                 background: 'var(--shell-paper)',
                 border: '1px solid var(--shell-hairline-strong)',
@@ -278,6 +280,7 @@ export function ThreadSidebarV2Header({
       {bindWarning && (
         <div
           className="mx-2.5 mb-2 rounded-lg px-2.5 py-1.5 text-xs"
+          data-chat-background-surface="paper"
           style={{
             background: 'var(--shell-paper)',
             color: 'var(--shell-body)',
@@ -301,6 +304,7 @@ export function ThreadSidebarV2Header({
             aria-label={copy.search}
             data-testid="sidebar-search-input"
             className="shell-focusable h-8 w-full rounded-lg px-2.5 text-sm"
+            data-chat-background-surface="paper"
             style={{
               background: 'var(--shell-paper)',
               border: '1px solid var(--shell-hairline-strong)',

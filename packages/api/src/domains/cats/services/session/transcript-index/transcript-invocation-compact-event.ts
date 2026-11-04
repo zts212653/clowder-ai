@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { sliceUnicodeSafe } from '../../../../../utils/unicode-safe-slice.js';
 import { compactAssistantOutput } from '../FirstAssistantOutputAccumulator.js';
 import { projectInvocationTerminalEvidence } from '../InvocationTrajectoryProjector.js';
 import { transcriptEventFingerprint } from '../TranscriptEventEnvelope.js';
@@ -34,7 +35,7 @@ export function compactTranscriptEvent(envelope: TranscriptEvent): CompactTransc
               })
               .join('\n')
           : undefined;
-    if (content) projected.content = content.slice(0, 140);
+    if (content) projected.content = sliceUnicodeSafe(content, 0, 140);
   }
   const usage = record(record(event.metadata)?.usage);
   if (usage)

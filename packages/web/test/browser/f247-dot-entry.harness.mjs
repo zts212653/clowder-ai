@@ -3,8 +3,8 @@ import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { after, before } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { chromium } from 'playwright';
 import { build } from 'vite';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
 import { visibleAttentionFixture } from './f322-visible-attention.fixture.mjs';
 
 // Real rail, mailbox, tooltip, settings shell, preference/pin stores and navigation hooks.
@@ -215,12 +215,16 @@ export async function openProof({
           ],
         },
         '/api/config/cat-order': { catOrder: [] },
+        '/api/plugins/official.collective-connector/connections': { runtimeStatus: 'active', connections: [] },
+        '/api/config/chat-background': { threads: {} },
         '/api/config/conversation-view': {
           stored: null,
           effective: { mode: 'group' },
           source: 'product',
         },
       };
+      if (url.pathname === '/api/plugin-ui' && request.method() === 'GET')
+        return handler.fulfill({ json: { entries: [] } });
       if (!(url.pathname in bodies)) {
         unexpected.push(request.url());
         return handler.fulfill({ status: 404, body: '{}' });

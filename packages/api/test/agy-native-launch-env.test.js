@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { isolatedOAuthEnv } from '../dist/domains/cats/services/agents/providers/agy-native/agy-native-launch-env.js';
+import { isolatedOAuthEnv } from '../dist/domains/cats/services/agents/providers/agy-native/launch/agy-native-launch-env.js';
 
 const proxies = {
   HTTP_PROXY: 'http://proxy.example:8080',

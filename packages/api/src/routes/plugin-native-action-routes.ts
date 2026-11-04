@@ -1,8 +1,8 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
-import type { PluginRuntimeCarrierRouter } from '../domains/plugin/carrier/runtime-carrier.js';
 import { NativePluginActionError, type NativePluginActions } from '../domains/plugin/declared/native-plugin-actions.js';
+import type { MemberCallbackIdentity } from '../domains/plugin/member-sessions/callback.js';
 import { registerCallbackAuthHook } from './callback-auth-prehandler.js';
 import { getDeletedCallbackThreadGuard } from './callback-scope-helpers.js';
 import { captureTypedWaitSource } from './callback-typed-wait-source.js';
@@ -13,6 +13,8 @@ export interface PluginNativeActionRouteOptions {
   readonly registry: Pick<InvocationRegistry, 'verify' | 'verifyLatest' | 'isStartupRecoveryComplete'>;
   readonly sources: Parameters<typeof captureTypedWaitSource>[1];
   readonly threadStore?: Parameters<typeof getDeletedCallbackThreadGuard>[0];
+  /** Required for an invocation carrying a scoped member lease. No missing-guard fallback. */
+  readonly assertMemberSessionCurrent?: (caller: MemberCallbackIdentity) => Promise<void>;
 }
 
 const bodySchema = z.object({ method: z.string().min(1).max(256), input: z.unknown() }).strict();
@@ -92,6 +94,7 @@ export const pluginNativeActionRoutes: FastifyPluginAsync<PluginNativeActionRout
         ...(source ? { source: Object.freeze(source) } : {}),
         assertCurrent: fence.assertCurrent,
         assertInvocationCurrent: fence.assertInvocationCurrent,
+        assertWriteCurrent: fence.assertWriteCurrent,
       });
       request.log.info({ event: 'plugin_native_auth', stage: 'completed' }, 'Native plugin action completed');
       return { result };

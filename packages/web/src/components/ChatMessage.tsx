@@ -68,6 +68,7 @@ import { isLastOfOwnRun } from './own-message-run';
 import { PawFeelDispositionDock } from './paw-feel/PawFeelDispositionDock';
 import { ReplyPill } from './ReplyPill';
 import { RoutingWarningNotice } from './RoutingWarningNotice';
+import { MatterRecallLine } from './reply-layers/MatterRecallLine';
 import { ReplyLayers } from './reply-layers/ReplyLayers';
 import { ReplyOutputBody } from './reply-layers/ReplyOutputBody';
 import { useReplyRecallProjection } from './reply-layers/ReplyRecallContext';
@@ -87,6 +88,7 @@ import { SummaryCard } from './SummaryCard';
 import { SystemNoticeBar } from './SystemNoticeBar';
 import { useShellCopy } from './shell/shell-copy';
 import { useShellPresentation } from './shell/shell-presentation';
+import { SuggestionRow } from './suggestions/SuggestionRow';
 import { NativeFailureDiagnostics, TerminalDiagnosticsPanel } from './TerminalDiagnosticsPanel';
 import { ThinkingContent } from './ThinkingContent';
 import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
@@ -104,9 +106,22 @@ const EMPTY_TIMELINE_MESSAGES: readonly ChatMessageType[] = [];
 const SCHEDULER_ACCENT_BADGE_CLASS =
   'inline-flex w-fit items-center gap-1.5 rounded-full border border-conn-amber-ring bg-conn-amber-bg px-2.5 py-1 text-xs font-semibold text-conn-amber-text shadow-sm';
 
+const messageTimeFormatter = new Intl.DateTimeFormat('zh-CN', {
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  timeZone: 'UTC',
+});
+
 function formatTime(ts: number): string {
-  const d = new Date(ts);
-  return d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+  const local = new Date(ts);
+  // Cache the formatting rules, not the OS timezone. Read local calendar
+  // fields on each render, including after timezone changes and across DST.
+  const calendar = new Date(0);
+  calendar.setUTCFullYear(local.getFullYear(), local.getMonth(), local.getDate());
+  calendar.setUTCHours(local.getHours(), local.getMinutes());
+  return messageTimeFormatter.format(calendar);
 }
 
 const DELIVERED_AT_GAP_THRESHOLD = 5000;
@@ -716,6 +731,7 @@ function ChatMessageContent({
         header={userHeader}
         footer={
           <>
+            {renderThreadId ? <SuggestionRow threadId={renderThreadId} messageId={message.id} align="end" /> : null}
             {humanTime}
             {!humanTime ? dispatchLine : null}
             <RoutingWarningNotice warnings={message.extra?.routingWarnings} />
@@ -1042,7 +1058,13 @@ function ChatMessageContent({
   ) : null;
 
   const assistantBody = isLayeredReply ? (
-    replyBody
+    <>
+      {renderThreadId &&
+        replyRecall?.events
+          .filter((event) => event.resolverFamily === 'matter')
+          .map((event) => <MatterRecallLine key={event.id} event={event} threadId={renderThreadId} />)}
+      {replyBody}
+    </>
   ) : hasCliBlock && isStreamOrigin ? null : !isStreamOrigin && hasBlocks ? (
     <ContentBlocks
       blocks={message.contentBlocks!}
@@ -1225,6 +1247,8 @@ function ChatMessageContent({
       {message.isStreaming && !isStreamOrigin && (
         <span className="inline-block w-1.5 h-4 bg-current animate-pulse ml-0.5 rounded-full opacity-50" />
       )}
+      {/* F335 交付二：回话下面那一排，紧挨「召回 · 工具调用 · 轨迹」那一层之前（北极星稿同一位置）。 */}
+      {renderThreadId ? <SuggestionRow threadId={renderThreadId} messageId={message.id} /> : null}
       {isLayeredReply && renderThreadId ? (
         <ReplyLayers
           message={message}

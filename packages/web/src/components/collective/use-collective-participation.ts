@@ -2,6 +2,7 @@
 import type { CollectiveEventEnvelope } from '@cat-cafe/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
+import { projectReplyRecovery } from './collective-reply-recovery-projection';
 
 export interface ParticipationView {
   revision: number;
@@ -66,6 +67,7 @@ export interface ParticipationView {
     failure?: { code: string };
     privateThread?: { id: string; title?: string };
     execution?: { stage: 'queued' | 'started' | 'ended' | 'failed'; invocationId?: string };
+    recovery?: { status: 'recoverable' };
     attention?:
       | { request: 'response_requested'; state: 'unclaimed' }
       | {
@@ -119,8 +121,12 @@ export function useCollectiveParticipation(connectionId: string) {
         if (signal?.aborted || revision !== readRevision.current) return;
         setView(data);
         setError(undefined);
+        releaseCurrentRead(reading, revision);
+        const projected = await projectReplyRecovery(data, signal);
+        if (signal?.aborted || revision !== readRevision.current) return;
+        setView(projected);
       } finally {
-        if (reading.current === revision) reading.current = undefined;
+        releaseCurrentRead(reading, revision);
       }
     },
     [base],
@@ -221,6 +227,10 @@ export function useCollectiveParticipation(connectionId: string) {
     recoverReply,
     reload: () => load().catch((cause) => setError(cause.message)),
   };
+}
+
+function releaseCurrentRead(reading: { current: number | undefined }, revision: number): void {
+  if (reading.current === revision) reading.current = undefined;
 }
 
 function resumeOperationKey(path: string, connectionId: string, body: Record<string, unknown>) {

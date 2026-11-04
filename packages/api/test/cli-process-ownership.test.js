@@ -351,6 +351,7 @@ test('execution owner service preserves process-table degradation for projection
       matched: 0,
       signaled: 0,
       complete: false,
+      stopped: false,
     });
 
     await writeFile(join(ownerDirectory, 'invalid.json'), '{not-json');
@@ -370,6 +371,7 @@ test('execution owner service preserves process-table degradation for projection
       matched: 1,
       signaled: 1,
       complete: true,
+      stopped: false,
     });
     assert.deepEqual(signals, [{ pid: 10, signal: 'SIGTERM' }]);
     assert.deepEqual(await readdir(ownerDirectory), [`${OWNER_ID}.json`]);
@@ -387,6 +389,7 @@ test('execution owner service preserves process-table degradation for projection
       matched: 1,
       signaled: 0,
       complete: false,
+      stopped: false,
     });
   } finally {
     await rm(dataDir, { recursive: true, force: true });
@@ -428,7 +431,12 @@ test('owner service keeps valid rows non-destructive when malformed manifest qua
       owners: [{ ...execution, startedAt: 1_000 }],
       complete: false,
     });
-    assert.deepEqual(await service.terminateExact(execution), { matched: 0, signaled: 0, complete: false });
+    assert.deepEqual(await service.terminateExact(execution), {
+      matched: 0,
+      signaled: 0,
+      complete: false,
+      stopped: false,
+    });
     assert.deepEqual(signals, []);
   } finally {
     await rm(dataDir, { recursive: true, force: true });
@@ -454,7 +462,7 @@ test('owner service converts non-ENOENT manifest directory failures into control
         catId: 'codex-sol',
         userId: 'scheduler',
       }),
-      { matched: 0, signaled: 0, complete: false },
+      { matched: 0, signaled: 0, complete: false, stopped: false },
     );
     assert.equal(warnings.length, 2);
   } finally {

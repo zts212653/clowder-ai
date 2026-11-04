@@ -1,4 +1,4 @@
-import type { MessageSearchInput, MessageSearchResponse } from '@cat-cafe/shared';
+import { type MessageSearchInput, type MessageSearchResponse, messageSearchNotice } from '@cat-cafe/shared';
 import type { MessagePassageSearchExecution } from './message-passage-search-types.js';
 
 export const MESSAGE_SEARCH_RESPONSE_BUDGET = 24_000;
@@ -11,6 +11,7 @@ export function boundMessageSearchResponse(
   if (!Number.isInteger(budgetChars) || budgetChars < 2000 || budgetChars > MESSAGE_SEARCH_RESPONSE_BUDGET)
     throw new Error('Invalid message response budget');
   const out = {
+    notice: messageSearchNotice(response),
     ...response,
     results: [...response.results],
     meta: {
@@ -24,6 +25,8 @@ export function boundMessageSearchResponse(
     },
   };
   for (;;) {
+    // Recompute after whole-row truncation: omitted rows are not readable next steps.
+    out.notice = messageSearchNotice(out);
     let length = JSON.stringify(out).length;
     while (out.meta.response.serializedChars !== length) {
       out.meta.response.serializedChars = length;

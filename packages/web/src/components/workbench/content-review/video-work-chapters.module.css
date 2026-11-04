@@ -73,6 +73,7 @@
   border: 1px solid var(--cafe-border-subtle);
   border-radius: 6px;
   background: var(--cafe-surface-canvas);
+  --chat-background-role: cafe-canvas;
   color: var(--cafe-text);
   box-shadow: var(--shadow-elevation-1);
   overflow-wrap: anywhere;

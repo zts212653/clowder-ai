@@ -16,7 +16,7 @@
         "tagline": "Your AI team collaboration space"
       },
       "repositoryFullName": "zts212653/clowder-ai",
-      "l0Projections": ["owner", "public"],
+      "l0Projections": ["owner", "public", "scoped-member"],
       "promptPolicy": {
         "coCreatorRole": "co-creator",
         "decisionRole": "operator",

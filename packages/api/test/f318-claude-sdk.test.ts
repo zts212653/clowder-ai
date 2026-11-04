@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createCatId } from '@cat-cafe/shared';
 import { ClaudeSdkAgentService } from '../src/domains/cats/services/agents/providers/ClaudeSdkAgentService.js';
+import { claudeSdkRuntimeFixture } from './helpers/claude-sdk-runtime-fixture.js';
 
 const completed = {
   type: 'user',
@@ -78,6 +79,7 @@ async function run(
     },
   };
   const service = new ClaudeSdkAgentService({
+    runtimeResolver: claudeSdkRuntimeFixture,
     catId: createCatId('opus'),
     model: 'claude-opus-4-6',
     queryFn,
@@ -132,6 +134,7 @@ test('local launch validation remains visible without blaming Claude or starting
   ]) {
     let launches = 0;
     const service = new ClaudeSdkAgentService({
+      runtimeResolver: claudeSdkRuntimeFixture,
       model: 'claude-opus-4-6',
       mcpServerPath: '',
       l0CompilerFn: async () => 'identity',
@@ -188,6 +191,7 @@ test('SDK cancellation closes streaming input, yields done, and does not restart
   const abort = new AbortController();
   let launches = 0;
   const service = new ClaudeSdkAgentService({
+    runtimeResolver: claudeSdkRuntimeFixture,
     model: 'claude-opus-4-6',
     mcpServerPath: '',
     l0CompilerFn: async () => 'identity',
@@ -216,6 +220,7 @@ test('SDK cancellation closes streaming input, yields done, and does not restart
 test('one upstream API failure emitted as assistant and result surfaces one terminal error', async () => {
   for (const text of ['API Error: 400 version too old', 'Provider refused this development request']) {
     const service = new ClaudeSdkAgentService({
+      runtimeResolver: claudeSdkRuntimeFixture,
       model: 'claude-opus-4-6',
       mcpServerPath: '',
       l0CompilerFn: async () => 'identity',
@@ -254,6 +259,7 @@ test('a long silent SDK tool has no freshness timer or auxiliary input', async (
   const calls: string[] = [];
   let pendingInput: Promise<IteratorResult<unknown>> | undefined;
   const service = new ClaudeSdkAgentService({
+    runtimeResolver: claudeSdkRuntimeFixture,
     model: 'claude-opus-4-6',
     mcpServerPath: '',
     l0CompilerFn: async () => 'identity',

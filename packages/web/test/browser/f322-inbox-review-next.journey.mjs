@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
 import { availablePort, stopChild, waitForHttp } from './f290-runtime-journey.harness.mjs';
 import { createNextReviewFixture } from './f322-inbox-review-next.fixture.mjs';
 import { mediaFixture } from './fixtures/f309-artifact-review-media.mjs';

@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
 import { availablePort, stopChild, waitForHttp } from './f290-runtime-journey.harness.mjs';
 import { createInboxConversationFixture } from './f322-inbox-conversation.fixture.mjs';
 import { createNextDevTestEnvironment } from './next-dev-test-environment.mjs';

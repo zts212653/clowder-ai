@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
 import { registerDefaultEntryJourney } from './default-entry-journey.harness.mjs';
 import { registerChatFileTabJourneys } from './f307-chat-file-tabs.journey.mjs';
 import { registerHomeSearchReturnJourneys } from './f307-home-search-return.journey.mjs';

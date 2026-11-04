@@ -37,6 +37,15 @@ export function projectTurnExecutionMessage(record: TurnExecutionRecord): TurnEx
   };
 }
 
+/** A previous Host ending is not proof that its dispatched native execution stopped. */
+export function hasUnconfirmedProviderTeardown(record: TurnExecutionRecord): boolean {
+  return (
+    record.providerLifecycleTracked === true &&
+    record.providerStartedAt !== undefined &&
+    record.providerTeardownAt === undefined
+  );
+}
+
 export interface TurnExecutionSourceQuery {
   userId: string;
   threadId: string;
@@ -86,6 +95,7 @@ export interface ITurnExecutionStore {
     invocationId: string,
     input: TurnExecutionTerminalInput,
   ): TransitionTurnExecutionResult | Promise<TransitionTurnExecutionResult>;
+  /** Restart age cannot retire a dispatched provider until this record carries teardown proof. */
   interruptRunningBefore(
     cutoffStartedAt: number,
     input: InterruptRunningTurnExecutionsInput,

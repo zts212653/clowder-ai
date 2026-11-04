@@ -22,7 +22,32 @@ function homeLease(route, url, leases) {
 export async function installSetupHttpBoundary(context, evidence, unmodeled) {
   const common = createChatProofApi();
   const leases = new Map();
+  const observedAt = Date.now();
   const baseline = {
+    '/api/config': {
+      config: {
+        cats: {},
+        perCatCapacities: {},
+        a2a: { enabled: false, maxDepth: 0 },
+        memory: { enabled: false, maxKeysPerThread: 0 },
+        governance: { degradationEnabled: false, doneTimeoutMs: 30000, heartbeatIntervalMs: 10000 },
+      },
+    },
+    '/api/config/default-cat': { catId: '' },
+    '/api/routing-context/snapshot': {
+      v: 1,
+      ownerId: 'fixture-user',
+      observedAt,
+      catalogRevision: 'setup-fixture',
+      signalEvents: [],
+      preferenceRevisions: [],
+      resolution: {
+        state: 'fresh',
+        inputRevisionRef: 'setup-fixture',
+        sourceRefs: { signalEventIds: [], preferenceRevisionIds: [], dossierRevisions: [] },
+        snapshot: { v: 1, ownerId: 'fixture-user', observedAt, catalogRevision: 'setup-fixture', candidates: [] },
+      },
+    },
     '/api/config/cat-order': { catOrder: [] },
     '/api/accounts': { projectPath: '/author-native-fixture', providers: [] },
     '/api/debug/callback-auth': {

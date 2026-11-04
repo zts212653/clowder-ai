@@ -46,12 +46,12 @@ export class MemberCanonService {
     try {
       const record = this.canon.deps.store.get(this.ownerUserId, binding.indexedVersionRef);
       if (!record) return base;
-      const item = await this.canon.access.item(record, principal);
+      const fileState = await this.canon.access.availability(record, principal);
       return {
         avatar,
         visualAssets: {
           ...base.visualAssets,
-          state: item.fileState === 'available' ? 'selected' : 'unavailable',
+          state: fileState === 'available' ? 'selected' : 'unavailable',
           indexedVersionRef: record.indexedVersionRef,
         },
       };

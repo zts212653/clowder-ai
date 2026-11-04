@@ -9,7 +9,7 @@ export async function coverPublishedMessageReads(
     invocationQueue?: InvocationQueue;
     messageStore: IMessageStore;
     turnExecutionStore?: Pick<ITurnExecutionStore, 'get'>;
-    queueProcessor?: Partial<Pick<QueueProcessor, 'adoptExposedQueuedEntries'>>;
+    queueProcessor?: Partial<Pick<QueueProcessor, 'adoptExposedQueuedEntries' | 'observeExposedAppendedInputs'>>;
   },
   input: {
     threadId: string;
@@ -21,14 +21,6 @@ export async function coverPublishedMessageReads(
   },
 ): Promise<string[]> {
   if (!deps.invocationQueue || !deps.turnExecutionStore || !deps.queueProcessor?.adoptExposedQueuedEntries) return [];
-  const entries = await deps.invocationQueue.projectedWakeCandidates(
-    input.threadId,
-    input.userId,
-    input.catId,
-    input.messageIds,
-    deps.messageStore,
-  );
-  if (!entries.length) return [];
   const execution = await deps.turnExecutionStore.get(input.invocationId);
   if (
     !execution ||
@@ -40,6 +32,16 @@ export async function coverPublishedMessageReads(
     execution.status !== 'running'
   )
     return [];
+  // Native-owned inputs remain completion-pending, but this exact full-body exposure is still a read.
+  await deps.queueProcessor.observeExposedAppendedInputs?.(input);
+  const entries = await deps.invocationQueue.projectedWakeCandidates(
+    input.threadId,
+    input.userId,
+    input.catId,
+    input.messageIds,
+    deps.messageStore,
+  );
+  if (!entries.length) return [];
   const covered = await deps.queueProcessor.adoptExposedQueuedEntries({ ...input, entries, seenAt: Date.now() });
   if (covered.outcome === 'rejected') {
     if (covered.reason === 'active_run_missing') return [];

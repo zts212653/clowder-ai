@@ -38,6 +38,38 @@ test('root-only recovery validates on the server, preserves the old reference an
   assert.ok(checked.includes('D:/NewACP'));
 });
 
+test(
+  'standalone client root recovery retains fixed identity, argv and explicit permission policy',
+  windows,
+  async () => {
+    const { id, name: _name, ...connection } = profile;
+    connection.permissionPolicy = 'auto_allow';
+    const f = await rootRecoveryFixture({
+      declaration: { id, transport: 'acp', configurationKey: 'clients', acp: connection },
+    });
+    writePluginConfig(f.projectRoot, 'test.acp-library', [{ name: 'clients', value: JSON.stringify(connection) }]);
+    await f.save(f.request({ ...connection, bootstrapRoot: 'D:/NewACP' }));
+    assert.deepEqual(JSON.parse(f.read().clients), { ...connection, bootstrapRoot: 'D:/NewACP' });
+  },
+);
+
+test(
+  'standalone root recovery cannot smuggle command, permission or identity changes past audit',
+  windows,
+  async () => {
+    const { id, name: _name, ...connection } = profile;
+    for (const change of [{ command: 'different' }, { permissionPolicy: 'auto_allow' }, { id: 'different' }]) {
+      const f = await rootRecoveryFixture({
+        declaration: { id, transport: 'acp', configurationKey: 'clients', acp: connection },
+      });
+      writePluginConfig(f.projectRoot, 'test.acp-library', [{ name: 'clients', value: JSON.stringify(connection) }]);
+      const before = f.read();
+      await assert.rejects(f.save(f.request({ ...connection, bootstrapRoot: 'D:/NewACP', ...change })));
+      assert.deepEqual(f.read(), before);
+    }
+  },
+);
+
 for (const [label, transform] of [
   ['command', (p) => [{ ...p, command: 'another-client' }]],
   ['args', (p) => [{ ...p, startupArgs: ['--acp'] }]],

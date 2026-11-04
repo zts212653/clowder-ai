@@ -180,6 +180,7 @@ export function V2WorkspaceMenu({
               ref={panel}
               hidden={!open}
               data-v2-workspace-menu=""
+              data-chat-background-layer="opaque"
               style={{ ...position, pointerEvents: 'auto', display: open ? undefined : 'none' }}
               className={`fixed z-[70] overflow-auto overscroll-contain rounded-lg border border-cafe-subtle bg-cafe-surface p-1 text-cafe-black shadow-lg ${panelClassName}`}
             >

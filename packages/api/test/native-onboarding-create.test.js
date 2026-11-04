@@ -1,3 +1,4 @@
+import { readMemberRequestRevision } from './helpers/member-request-revision.js';
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -174,14 +175,22 @@ export { buildNativeCreationPayload } from './components/first-run-quest/native-
         method: 'PATCH',
         url: `/api/cats/${createdId}`,
         headers,
-        payload: { nickname: 'custom native nickname', defaultModel: 'fixture/override' },
+        payload: {
+          expectedRevision: await readMemberRequestRevision(app, `/api/cats/${createdId}`, headers),
+          nickname: 'custom native nickname',
+          defaultModel: 'fixture/override',
+        },
       });
       assert.equal(updated.statusCode, 200, updated.body);
       const reset = await app.inject({
         method: 'PATCH',
         url: `/api/cats/${createdId}`,
         headers,
-        payload: { defaultModel: '', cli: { effort: null } },
+        payload: {
+          expectedRevision: await readMemberRequestRevision(app, `/api/cats/${createdId}`, headers),
+          defaultModel: '',
+          cli: { effort: null },
+        },
       });
       assert.equal(reset.statusCode, 200, reset.body);
     }

@@ -338,7 +338,7 @@ it('exposes full GitHub titles and missing-file explanations through focusable a
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
   });
-  const github = container.querySelector('[data-chat-reference-kind=github] button');
+  const github = container.querySelector('[data-chat-reference-kind=github] a');
   expect(github?.getAttribute('aria-label')).toContain('too long to fit the inline chip');
   const missing = container.querySelector<HTMLElement>('[data-chat-reference-kind=missing]');
   expect(missing?.tabIndex).toBe(0);

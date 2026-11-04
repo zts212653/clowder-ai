@@ -9,12 +9,12 @@
  * exactly that return; ASSISTANT_RETURN_NOT_FOUND settles it.
  */
 import assert from 'node:assert/strict';
-import { after, test } from 'node:test';
+import { afterEach, test } from 'node:test';
 import { CloudConversationHostRegistry } from '../dist/domains/plugin/declared/cloud-conversation-host-registry.js';
 import { cleanup, conversationHostHarness, METHODS, settle } from './f202-w2-3-h3b.fixture.js';
 import { CURSOR, fakePackage, methodsOf, pollerFor, RETURN } from './helpers/f202-return-poller-harness.js';
 
-after(cleanup);
+afterEach(cleanup);
 
 test('nothing before start(); no package means no timer and no log; a package is polled at once, and only while held', async () => {
   const registry = new CloudConversationHostRegistry();
@@ -230,15 +230,26 @@ test('stop() cancels the pending round and follows nothing until started again',
   assert.deepEqual(p.scheduler.pending(), [0]);
 });
 
-test('through the real chain, polling starts when the package is enabled and stops when it is disabled', async () => {
+test('through the real chain, polling starts when the package is enabled and stops when it is disabled', async (t) => {
   const h = await conversationHostHarness();
   const p = pollerFor(h.registry);
+  t.after(() => p.poller.stop());
   p.poller.start();
   assert.deepEqual(p.scheduler.pending(), []);
 
   await h.enable();
   h.script[METHODS.list] = { returns: [RETURN] };
+  // A worker round includes actual IO; its next scheduled round proves list/ingest/ack settled.
+  const rescheduled = Promise.withResolvers();
+  const schedule = p.scheduler.schedule;
+  p.scheduler.schedule = (run, delay) => {
+    const handle = schedule(run, delay);
+    rescheduled.resolve();
+    return handle;
+  };
   await p.scheduler.fire();
+  await rescheduled.promise;
+  assert.deepEqual(p.scheduler.pending(), [1_000]);
   assert.deepEqual(
     h
       .calls()

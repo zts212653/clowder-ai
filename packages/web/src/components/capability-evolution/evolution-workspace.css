@@ -2,6 +2,7 @@
   container: evolution / inline-size;
   color: var(--cafe-text);
   background: var(--console-panel-bg);
+  --chat-background-role: console-panel;
   min-width: 0;
 }
 .evolution-content {
@@ -47,6 +48,7 @@
   border: 1px solid var(--cafe-border);
   border-radius: 16px;
   background: var(--console-card-bg);
+  --chat-background-role: console-card;
   padding: 24px;
 }
 .evolution-journey {
@@ -80,6 +82,7 @@
 }
 .evolution-journey-steps button:hover {
   background: var(--cafe-surface-sunken);
+  --chat-background-role: cafe-sunken;
 }
 .evolution-journey-steps button:focus-visible {
   outline: 2px solid var(--evolution-focus);
@@ -128,6 +131,7 @@
   padding: 16px;
   border-radius: 12px;
   background: var(--cafe-surface-sunken);
+  --chat-background-role: cafe-sunken;
 }
 .evolution-branch-row {
   display: flex;
@@ -173,12 +177,14 @@
   border: 1px solid var(--cafe-border);
   border-radius: 12px;
   background: var(--console-card-bg);
+  --chat-background-role: console-card;
   padding: 16px;
 }
 .evolution-material-status {
   border-radius: 5px;
   padding: 3px 7px;
   background: var(--cafe-surface-sunken);
+  --chat-background-role: cafe-sunken;
   color: var(--cafe-text-secondary);
   font-size: var(--console-font-label);
 }
@@ -216,6 +222,7 @@
   min-width: 0;
   border-radius: 9px;
   background: var(--cafe-surface-sunken);
+  --chat-background-role: cafe-sunken;
   padding: 10px;
 }
 .evolution-preparation-video-player {

@@ -234,6 +234,7 @@ html[data-shell="v2"] {
   border: 1px solid var(--shell-hairline, var(--cafe-border-subtle));
   border-radius: 8px;
   background: var(--shell-work, var(--cafe-surface-elevated));
+  --chat-background-role: work;
   color: inherit;
   font: inherit;
   font-size: 12px;
@@ -244,6 +245,7 @@ html[data-shell="v2"] {
 .composer-rich-editor button:hover,
 .composer-rich-preview button:hover {
   background: var(--shell-selected, var(--cafe-surface-sunken));
+  --chat-background-role: selected;
 }
 .composer-rich-tools button:focus-visible,
 .composer-rich-editor button:focus-visible,
@@ -282,6 +284,7 @@ html[data-shell="v2"] {
   min-width: 0;
   color: inherit;
   background: var(--shell-paper);
+  --chat-background-role: paper;
   border: 1px solid var(--shell-hairline);
   border-radius: 6px;
   padding: 8px;
@@ -375,6 +378,7 @@ html[data-shell="v2"] {
   gap: 6px;
   padding: 10px 0 12px;
   background: var(--shell-frame);
+  --chat-background-role: frame;
   border-right: 1px solid var(--shell-hairline);
 }
 .cafe-header {
@@ -387,6 +391,7 @@ html[data-shell="v2"] {
   gap: 12px;
   padding: 0 16px;
   background: var(--shell-work);
+  --chat-background-role: work;
   border-bottom: 1px solid var(--shell-hairline);
   color: var(--shell-ink);
 }
@@ -444,6 +449,7 @@ html[data-shell="v2"] {
   border: 1px solid var(--shell-hairline-strong);
   border-radius: 16px;
   background: var(--shell-paper);
+  --chat-background-role: paper;
 }
 
 .cafe-composer-control {

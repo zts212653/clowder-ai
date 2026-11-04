@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
 import { createChatProofHarness } from './f322-chat-proof-harness.mjs';
 import { buildChatProof } from './fixtures/f322-chat-real-page-build.mjs';
 import { CURRENT_THREAD } from './fixtures/f322-chat-real-page-data.mjs';

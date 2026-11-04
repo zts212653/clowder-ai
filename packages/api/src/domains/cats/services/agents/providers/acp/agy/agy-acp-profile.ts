@@ -1,8 +1,8 @@
 import { lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AgyProfileConfig } from '@cat-cafe/shared';
-import { isolatedOAuthEnv } from '../../agy-native/agy-native-launch-env.js';
 import { materializeAgyNativeSkills } from '../../agy-native/agy-native-skills.js';
+import { isolatedOAuthEnv } from '../../agy-native/launch/agy-native-launch-env.js';
 import { resolveAgyProfile } from '../../agy-profile-manager.js';
 import type { AgyAcpConfig } from './agy-acp-session.js';
 

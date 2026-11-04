@@ -40,12 +40,15 @@ function commandOverwrite(name, args, command, cwd) {
 
 function profileControlPath(path, profileHome) {
   if (!profileHome) return false;
-  const roots = [resolve(profileHome), kernelPath(profileHome)].filter(Boolean).map((root) => root.toLowerCase());
-  if (roots.includes(path)) return true;
-  const root = roots.find((root) => path.startsWith(`${root}/`));
+  const normalized = path.replaceAll('\\', '/');
+  const roots = [resolve(profileHome), kernelPath(profileHome)]
+    .filter(Boolean)
+    .map((root) => root.toLowerCase().replaceAll('\\', '/'));
+  if (roots.includes(normalized)) return true;
+  const root = roots.find((root) => normalized.startsWith(`${root}/`));
   // The run's data alias is the account's native storage. Keep ordinary brain
   // artifacts writable there; configuration and the alias directory itself stay protected.
-  const suffix = (root ? path.slice(root.length + 1) : '').replace(
+  const suffix = (root ? normalized.slice(root.length + 1) : '').replace(
     /^\.cat-cafe-native-runs\/run-[a-z0-9]+\/(?=\.gemini\/antigravity-cli\/)/,
     '',
   );
@@ -102,6 +105,15 @@ export function decideAgyNativeHookPayload(payload, options = {}) {
   const { name, args } = payload.toolCall;
   if (typeof name !== 'string' || !args || typeof args !== 'object' || Array.isArray(args))
     return deny('invalid AGY tool arguments');
+  if (options.pluginServerName !== undefined) {
+    return /^[A-Za-z0-9_.-]+$/.test(options.pluginServerName) &&
+      name === 'call_mcp_tool' &&
+      args.ServerName === options.pluginServerName &&
+      typeof args.ToolName === 'string' &&
+      args.ToolName.length > 0
+      ? { decision: 'allow' }
+      : deny('member invocation permits only its issued MCP server');
+  }
   const pinDirectory = COMMANDS.has(name) && options.workspaceRoot !== undefined;
   // A terminal may have changed cwd after launch; model-supplied Cwd is not
   // evidence of its current execution coordinate. This carrier has no binding.
@@ -194,6 +206,7 @@ async function main() {
       toolHome,
       ...(process.argv[5] !== undefined ? { workspaceRoot: process.argv[5] } : {}),
       readOnly: process.argv[3] === 'read-only',
+      ...(process.argv[3] === 'plugin-native' ? { pluginServerName: process.argv[6] ?? '' } : {}),
       selfHost: () => readSelfHostFacet({ ...(hostHome ? { homeDir: hostHome } : {}) }),
       onTargetDecision: (payload, verdict) =>
         appendNativeDenial(

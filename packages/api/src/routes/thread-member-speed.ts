@@ -11,7 +11,7 @@ import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { resolveByAccountRef } from '../config/account-resolver.js';
 import { resolveBoundAccountRefForCat } from '../config/cat-account-binding.js';
-import { getAcpConfig, isCatAvailable } from '../config/cat-config-loader.js';
+import { getRegisteredAcpConfig, isCatAvailable } from '../config/cat-config-loader.js';
 import { getCatModel } from '../config/cat-models.js';
 import type { IThreadStore, Thread } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { canAccessThread, isSharedDefaultThread } from '../domains/guides/guide-state-access.js';
@@ -41,7 +41,7 @@ function buildSpeedRow(
   if (!config?.cli || config.clientId !== 'openai' || !isCatAvailable(catId)) return null;
 
   const projectRoot = resolveActiveProjectRoot();
-  if (getAcpConfig(catId, projectRoot)) return null;
+  if (getRegisteredAcpConfig(catId, projectRoot)) return null;
   const accountRef = resolveBoundAccountRefForCat(projectRoot, catId, config);
   const account = accountRef ? resolveByAccountRef(projectRoot, accountRef) : null;
   const resolution = resolveCodexSpeed({

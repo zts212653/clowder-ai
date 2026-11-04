@@ -1,4 +1,4 @@
-import { createHash, createHmac, randomBytes } from 'node:crypto';
+import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import type { PluginNativeActionTarget } from '../../cats/services/types.js';
 import { type PluginCallContext, withPluginCallContext } from '../carrier/plugin-call-context.js';
 import type { PluginRuntimeAdmission } from '../carrier/runtime-carrier.js';
@@ -149,7 +149,21 @@ export class NativePluginActions {
       await checkCaller();
       await assertInvocationCurrent();
     };
-    const context = Object.freeze({ ...caller, assertCurrent, assertInvocationCurrent });
+    const checkWrite = caller.assertWriteCurrent?.bind(caller);
+    const context = Object.freeze({
+      ...caller,
+      assertCurrent,
+      assertInvocationCurrent,
+      ...(checkWrite
+        ? {
+            assertWriteCurrent: () => {
+              assertActiveInvocation();
+              checkWrite();
+            },
+          }
+        : {}),
+      nativeAction: Object.freeze({ id: randomUUID(), contributionId: connection.contributionId, method }),
+    });
     await assertCurrent();
     try {
       const result = await withPluginCallContext(binding.instanceId, context, () => binding.invoke(method, input));

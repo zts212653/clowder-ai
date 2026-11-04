@@ -268,6 +268,7 @@ function RulePreviewModal({ label, file, onClose }: { label: string; file: RuleF
         role="dialog"
         aria-modal="true"
         className="relative z-10 flex max-h-[calc(100vh-32px)] w-full max-w-[620px] flex-col overflow-hidden"
+        data-chat-background-surface="console-card"
         style={{
           borderRadius: '1rem',
           backgroundColor: 'var(--console-card-bg)',
@@ -278,6 +279,7 @@ function RulePreviewModal({ label, file, onClose }: { label: string; file: RuleF
         <div className="flex shrink-0 items-center gap-[14px]">
           <div
             className="flex h-11 w-11 shrink-0 items-center justify-center font-bold"
+            data-chat-background-surface="console-active"
             style={{
               borderRadius: '0.75rem',
               backgroundColor: 'var(--console-active-bg)',
@@ -313,6 +315,7 @@ function RulePreviewModal({ label, file, onClose }: { label: string; file: RuleF
         </div>
         <div
           className="mt-4 min-h-0 flex-1 overflow-y-auto"
+          data-chat-background-surface="console-panel"
           style={{ borderRadius: '1rem', backgroundColor: 'var(--console-panel-bg)', padding: '1rem' }}
         >
           <pre

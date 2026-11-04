@@ -4,7 +4,9 @@ import type { PluginManagerConfigureRequest } from '@cat-cafe/shared';
 import { allowsAcpBootstrapConfigAuditWarning } from '../../../../config/acp-bootstrap-config-audit-policy.js';
 import { inspectAcpBootstrapDirectory } from '../../../cats/services/agents/providers/acp/bootstrap/acp-bootstrap-inspect.js';
 import {
+  type AgentProviderDeclaration,
   parseAgentClientProfiles,
+  parseAgentProviderConfiguration,
   parseAgentProviderDeclaration,
 } from '../../../cats/services/agents/session-contract/plugin-agent-provider.js';
 import { readDeclaration } from '../../declared/declared-agent-session-providers.js';
@@ -22,9 +24,19 @@ function refused(): never {
   );
 }
 
-function changedBootstrapRoots(previous: string, nextValue: unknown, packageRoot: string): Map<string, Set<string>> {
-  const oldProfiles = parseAgentClientProfiles(previous, { packageRoot });
-  const newProfiles = parseAgentClientProfiles(nextValue, { packageRoot });
+function changedBootstrapRoots(
+  previous: string,
+  nextValue: unknown,
+  packageRoot: string,
+  fixedClient?: AgentProviderDeclaration,
+): Map<string, Set<string>> {
+  const parse = (value: unknown) => {
+    if (!fixedClient) return parseAgentClientProfiles(value, { packageRoot });
+    const parsed = parseAgentProviderConfiguration(value, fixedClient, { packageRoot });
+    return parsed.ok ? { ok: true as const, profiles: [parsed.declaration] } : parsed;
+  };
+  const oldProfiles = parse(previous);
+  const newProfiles = parse(nextValue);
   if (!oldProfiles.ok || !newProfiles.ok || oldProfiles.profiles.length !== newProfiles.profiles.length)
     return refused();
   const roots = new Map<string, Set<string>>();
@@ -60,7 +72,7 @@ function changedBootstrapRoots(previous: string, nextValue: unknown, packageRoot
 
 export interface AcpBootstrapConfigRecovery {
   verify(): Promise<void>;
-  assertCurrent(transaction: PluginInventoryTransaction): void;
+  assertCurrent(transaction: PluginInventoryTransaction): Promise<void>;
   release(): Promise<void>;
 }
 
@@ -76,9 +88,9 @@ export async function prepareAcpBootstrapConfigRecovery(input: {
   request: PluginManagerConfigureRequest;
 }): Promise<AcpBootstrapConfigRecovery> {
   if (!allowsAcpBootstrapConfigAuditWarning() || !input.packages) return refused();
-  const captured = await input.inventory.transaction((tx) => {
-    const instance = tx.instances.getCurrent(input.pluginId);
-    const record = instance && tx.packages.get(instance.packageDigest);
+  const captured = await input.inventory.transaction(async (tx) => {
+    const instance = await tx.instances.getCurrent(input.pluginId);
+    const record = instance && (await tx.packages.get(instance.packageDigest));
     if (
       instance?.pluginInstanceId === input.pluginInstanceId &&
       instance.lifecycleRevision !== input.request.expectedRevision
@@ -109,15 +121,16 @@ export async function prepareAcpBootstrapConfigRecovery(input: {
       { packageRoot: located.rootDir },
     );
     await located.verifyIntegrity();
-    if (!declaration.ok || !('configurationKey' in declaration.declaration)) return refused();
+    if (!declaration.ok || !declaration.declaration.configurationKey) return refused();
     const key = declaration.declaration.configurationKey;
     const field = located.manifest.configuration?.find((field) => field.key === key);
     if (field?.kind !== 'string' || input.request.updates.length !== 1 || input.request.updates[0]?.key !== key)
       return refused();
     const roots = changedBootstrapRoots(
-      captured.stored[key] ?? field.default ?? '[]',
+      captured.stored[key] ?? field.default ?? ('id' in declaration.declaration ? '{}' : '[]'),
       input.request.updates[0].value,
       located.rootDir,
+      'id' in declaration.declaration ? declaration.declaration : undefined,
     );
     const identities = new Map<string, string>();
     const identity = input.bootstrapDirectoryIdentity ?? acpBootstrapDirectoryIdentity;
@@ -146,8 +159,8 @@ export async function prepareAcpBootstrapConfigRecovery(input: {
           identities.set(root, current);
         }
       },
-      assertCurrent(tx) {
-        const instance = tx.instances.getCurrent(input.pluginId);
+      async assertCurrent(tx) {
+        const instance = await tx.instances.getCurrent(input.pluginId);
         // The lifecycle service alone supplies any internal suspend revision. The normal
         // configuration fence independently checks it immediately before this assertion.
         if (
@@ -156,7 +169,7 @@ export async function prepareAcpBootstrapConfigRecovery(input: {
           instance.lifecycleState !== 'installed' ||
           instance.packageDigest !== captured.instance.packageDigest ||
           instance.activationState !== captured.instance.activationState ||
-          !isDeepStrictEqual(tx.packages.get(instance.packageDigest), captured.record) ||
+          !isDeepStrictEqual(await tx.packages.get(instance.packageDigest), captured.record) ||
           readPluginConfigText(input.projectRoot, input.pluginId) !== captured.text ||
           !isDeepStrictEqual(readPluginConfig(input.projectRoot, input.pluginId), captured.stored)
         )

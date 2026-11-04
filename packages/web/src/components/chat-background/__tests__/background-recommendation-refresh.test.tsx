@@ -19,9 +19,10 @@ const room = vi.hoisted(() => ({ cats: [] as { h: number; c: number }[] }));
 vi.mock('@/hooks/useActualColours', () => ({
   useActualColours: () => ({ cats: room.cats, human: { h: human.color.primary === '#6b5443' ? 58 : 250, c: 0.04 } }),
 }));
+const nav = vi.hoisted(() => ({ pathname: '/settings', search: 's=you' }));
 vi.mock('next/navigation', () => ({
-  usePathname: () => '/settings',
-  useSearchParams: () => new URLSearchParams('s=you'),
+  usePathname: () => nav.pathname,
+  useSearchParams: () => new URLSearchParams(nav.search),
 }));
 const image = {
   kind: 'image' as const,
@@ -47,6 +48,8 @@ beforeEach(() => {
   (globalThis as { React?: typeof React }).React = React;
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   vi.resetAllMocks();
+  nav.pathname = '/settings';
+  nav.search = 's=you';
   human.name = 'ME';
   human.color.primary = '#6b5443';
   room.cats = [];
@@ -193,4 +196,24 @@ it('remembers a legacy manual 20% after migration makes it equal to the new auto
   vi.mocked(sampleBackgroundOpacity).mockResolvedValue({ light: 0.15, dark: 0.1 });
   await act(async () => changedThemes());
   expect(JSON.parse(String(writes()[1][1]?.body)).background.opacity).toEqual({ light: 0.2, dark: 0.1 });
+});
+
+it('does not resample the same image when only the open thread changes', async () => {
+  nav.pathname = '/thread/thread_a';
+  nav.search = '';
+  await mount();
+  expect(sampleBackgroundOpacity).toHaveBeenCalledTimes(1);
+  nav.pathname = '/thread/thread_b';
+  await mount();
+  expect(sampleBackgroundOpacity).toHaveBeenCalledTimes(1);
+});
+
+it('still resamples when the readable surface layout changes to a settings section', async () => {
+  nav.pathname = '/thread/thread_a';
+  nav.search = '';
+  await mount();
+  nav.pathname = '/settings';
+  nav.search = 's=you';
+  await mount();
+  expect(sampleBackgroundOpacity).toHaveBeenCalledTimes(2);
 });

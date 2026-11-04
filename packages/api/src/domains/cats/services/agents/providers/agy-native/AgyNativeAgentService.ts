@@ -17,6 +17,7 @@ import { compileL0ViaSubprocess } from '../l0-compiler.js';
 import { createAgyNativeContinuityInput } from './agy-native-continuity.js';
 import { AgyNativeResumeMismatchError, AgyNativeStartupError } from './agy-native-errors.js';
 import { prepareAgyNativeLaunch } from './agy-native-launch.js';
+import { assertAgyMemberAccount, captureAgyMemberOptions } from './agy-native-member.js';
 import { preflightAgyNativeWorkspace } from './agy-native-policy.js';
 import { AgyNativeProfileBusyError } from './agy-native-profile-turn.js';
 import { runAgyNativeInvocation } from './run/agy-native-invocation.js';
@@ -39,7 +40,9 @@ function hasUnsupportedNativeOverrides(
     !model ||
     !profile.enabled ||
     Boolean(options?.cliConfigArgs?.length) ||
-    (options?.toolExecutionPolicy !== undefined && options.toolExecutionPolicy.mode !== 'read_only') ||
+    (options?.toolExecutionPolicy !== undefined &&
+      options.toolExecutionPolicy.mode !== 'read_only' &&
+      !(options.toolExecutionPolicy.mode === 'plugin_native' && options.pluginNativeLaunch)) ||
     Object.keys(options?.accountEnv ?? {}).length > 0
   );
 }
@@ -69,8 +72,10 @@ export class AgyNativeAgentService implements AgentService {
   }
 
   supportsToolExecutionPolicy(policy: ToolExecutionPolicy): boolean {
-    return policy.mode === 'read_only';
+    return policy.mode === 'read_only' || (policy.mode === 'plugin_native' && Boolean(policy.memberSession));
   }
+
+  assertScopedMemberAccount = assertAgyMemberAccount;
 
   freshnessCarrierCapability(): AgentFreshnessCarrierCapability {
     return {
@@ -109,6 +114,7 @@ export class AgyNativeAgentService implements AgentService {
       metadata,
       {
         sessionId: input.sessionId,
+        frozenL0Input: input.frozenL0Input,
         nativeSessionBinding: binding,
         requireExactResume: true,
         workingDirectory: binding.workspaceRoot,
@@ -178,6 +184,9 @@ export class AgyNativeAgentService implements AgentService {
     ];
     let disposeCredentials: (() => void | Promise<void>) | undefined;
     try {
+      const member = captureAgyMemberOptions(options);
+      options = member ?? options;
+      await member?.pluginNativeLaunch?.assertCurrent();
       if (hasUnsupportedNativeOverrides(this.model, this.profile, options)) {
         throw new Error('AGY native requires an explicit profile/model and refuses CLI or account env overrides');
       }
@@ -192,10 +201,14 @@ export class AgyNativeAgentService implements AgentService {
         return;
       }
       const body = await this.l0CompilerFn({
+        frozenInput: options?.frozenL0Input,
+        requireFrozenInput: true,
         catId: this.catId as string,
         userId: compactionControl?.userId ?? options?.callbackEnv?.CAT_CAFE_USER_ID,
-        projection: 'owner',
+        projection: member ? 'scoped-member' : 'owner',
+        ...(member ? { runtimeModel: this.model } : {}),
       });
+      await member?.pluginNativeLaunch?.assertCurrent();
       const launch = await prepareAgyNativeLaunch({
         catId: this.catId,
         model: this.model,
@@ -212,6 +225,7 @@ export class AgyNativeAgentService implements AgentService {
       if (rawArchivePath) metadata.diagnostics = { agyNative: { rawArchivePath } };
       const continuityInput = preflight ? createAgyNativeContinuityInput(launch, preflight, options) : undefined;
       if (!continuityInput) await options?.beforeProviderLaunch?.(launch.preparedRequest);
+      await member?.pluginNativeLaunch?.assertCurrent();
       yield* runAgyNativeInvocation({
         catId: this.catId,
         model: this.model,
