@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { AcpAgentService } from '../dist/domains/cats/services/agents/providers/acp/AcpAgentService.js';
 import { assertInheritedHostAuthorityCleared, directMcpContract } from './helpers/direct-mcp-contract.js';
 import { capabilityFile, fixture, managed, memberIds, providers, putConfig } from './helpers/invoke-mcp-workspace.js';
@@ -41,14 +42,14 @@ function transport(provider, server, _name) {
 }
 
 for (const [provider, invoke] of Object.entries(providers)) {
-  test(`${provider}: default Alpha capabilities come from workspace; binaries remain in Alpha`, async (t) => {
+  test(`${provider}: Alpha capabilities come from workspace; binaries use the API-imported package`, async (t) => {
     const f = fixture(t);
     const before = f.sentinelPaths.map((p) => readFileSync(p));
     const mcp = await invoke(f);
     assert.deepEqual(Object.keys(mcp), ['cat-cafe-collab']);
     const collab = transport(provider, mcp['cat-cafe-collab'], 'cat-cafe-collab');
     assert.equal(collab.command, process.execPath);
-    assert.deepEqual(collab.args, [join(f.dist, 'collab.js')]);
+    assert.deepEqual(collab.args, [fileURLToPath(import.meta.resolve('@cat-cafe/mcp-server/dist/collab.js'))]);
     const workspace = provider === 'opencode' ? f.main : process.env.ALLOWED_WORKSPACE_DIRS?.trim() || f.main;
     assert.equal(collab.env.ALLOWED_WORKSPACE_DIRS, workspace);
     assert.deepEqual(
