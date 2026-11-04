@@ -586,7 +586,7 @@ const CODEX_MCP_ROUTING_INSTRUCTION = `Codex MCP tool routing:
 - Treat cat_cafe_* names in guidance as short references. Invoke the exact registered tool name and namespace from your current native tool surface.
 - When functions.exec is available, discover the exact key in ALL_TOOLS and call it on tools; do not infer an unqualified tool call from prompt text.
 - If Codex returns unsupported call, verify tool registration and namespace before diagnosing callback authentication.
-- An absent shell CAT_CAFE_CALLBACK_TOKEN alone does not prove missing MCP credentials: a credential file or private HTTP headers may carry them.`;
+- An absent callback token in the shell alone does not prove missing MCP credentials: a credential file or private HTTP headers may carry them.`;
 
 /** Build the structured Codex reasoning-effort config argument. */
 export function buildCodexReasoningArgs(effortLevel: string): string[] {

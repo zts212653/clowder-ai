@@ -55,16 +55,27 @@ code mode 中先查 `ALL_TOOLS`，使用 `tools` 上的完整 key；
 [PR #1824](https://github.com/zts212653/clowder-ai/pull/1824) 处理安装双副本下的 MCP 入口身份，
 与此处已经证明的分发失败分开承接，本 PR 不复制其入口修复。
 
+宪宪在本线程消息 `0001793766924860-000061-7168a53f` 认可最小方案，并要求补验并行路径。
+`route-parallel.ts` 为每只猫创建独立的 `invokeSingleCat` 流，随后用 `mergeStreams` 合并
+已经产出的 `AgentMessage`；这层不转发模型生成的工具调用给 MCP dispatcher。
+新增的并发 fixture 同时启动两个真实 Codex app-server，各自使用不同的凭证与线程身份：
+完整 namespace 的调用都成功，每侧只收到自己的回调凭证及线程结果。
+这覆盖本轮 Windows 并发 native carrier，不等同于真实模型在产品并行入口的端到端验收。
+
 ## 验证与剩余缺口
 
 - `codex-agent-service-l0.test.js`：从实际 launch 的 developer instructions 核对路由说明；
   新断言在修复前按预期失败，而不是因环境或语法错误失败。
 - `codex-mcp-dispatch.native.test.ts`：真实 app-server 与 MCP 子进程对照，证明有凭证文件时
   裸短名失败、正确 namespace 成功，code mode 也能通过 `ALL_TOOLS` 找到并执行完整 key；
-  无 Codex CLI 的环境显式 skip。本机 3 项实际执行通过，未 skip。
+  两路并发也保持 namespace 与回调身份。无 Codex CLI 的环境显式 skip。
+  本机 4 项实际执行通过，未 skip。
 - 普通启动、app-server 新建/续接与既有交互回归共 29 项通过。
   `pnpm --filter @cat-cafe/api build`、最终 `tsc`、6 个改动代码/测试文件的 Biome、
   `git diff --check` 与 capability-tips 检查通过。
+- 首次 CI 的 pooling 回归指出：新增指引包含 callback token 的环境变量字面量，
+  触发了现有 RPC 内容隔离断言。指引已改用普通语言，原有断言、凭证交付及授权保持不变；
+  修正结果由后续精确 HEAD 的 CI 验证，不将前一提交的红灯记为通过。
 - 公开 native launch 的 Windows 测试在更早的 `plugin_native_workspace_not_private` 处失败，
   未到达新增的隔离断言，不能记为通过。该检查所在 `codex-plugin-native-launch.ts` 与
   `upstream/next` 无差异；真实 Windows 临时目录即使 `chmod(0700)`，`stat.mode & 0777`

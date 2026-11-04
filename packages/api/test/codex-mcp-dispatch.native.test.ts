@@ -70,3 +70,46 @@ test(
     assert.doesNotMatch(result.stderr, /unsupported call/);
   },
 );
+
+test(
+  'parallel Codex carriers preserve namespace dispatch and callback identity',
+  { skip: !available, timeout: 55_000 },
+  async () => {
+    const identities = ['a', 'b'].map((suffix) => ({
+      invocationId: `parallel-invocation-${suffix}`,
+      callbackToken: `parallel-token-${suffix}`,
+      threadId: `parallel-thread-${suffix}`,
+    }));
+    const results = await Promise.all(
+      identities.map((identity) =>
+        probeCodexNativePolicy({
+          carrier: 'app_server',
+          credentialFile: true,
+          identity,
+          requestedCall: ({ ordinal }: { ordinal: number }) =>
+            ordinal === 1
+              ? {
+                  type: 'function_call',
+                  id: 'fc_parallel_mcp',
+                  call_id: 'call_parallel_mcp',
+                  namespace: 'mcp__cat_cafe_collab',
+                  name: 'cat_cafe_get_thread_context',
+                  arguments: '{}',
+                }
+              : undefined,
+        }),
+      ),
+    );
+    results.forEach((result, index) => {
+      assert.equal(result.timedOut, false);
+      assert.equal(result.exitCode, 0, result.stderr);
+      assert.equal(result.callbacks.length, 1);
+      assert.equal(result.callbacks[0].headers['x-invocation-id'], identities[index].invocationId);
+      assert.equal(result.callbacks[0].headers['x-callback-token'], identities[index].callbackToken);
+      const outputs = JSON.stringify(result.requests.slice(1));
+      assert.match(outputs, new RegExp(identities[index].threadId));
+      assert.doesNotMatch(outputs, new RegExp(identities[1 - index].threadId));
+      assert.doesNotMatch(result.stderr, /unsupported call/);
+    });
+  },
+);
