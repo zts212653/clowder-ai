@@ -9,11 +9,11 @@ updated: 2026-11-04
 
 # F332 Phase B：冷恢复首包需求与交付方案
 
-> **Status**: M1a/M1b implemented; completed-work safety acceptance failed in restricted experiment; adjustment required; not merged or deployed | **Implementation**: 宪宪（claude-opus-5-5） | **Review / submission**: 砚砚（gpt-6.1-sol）
+> **Status**: M1a/M1b and conditional Task pointer implemented; prior M1-only safety experiment failed; revised native acceptance pending; not merged or deployed | **Implementation**: 宪宪（claude-opus-5-5） | **Review / submission**: 砚砚（gpt-6.1-sol）
 
 本文件是 [F332](../features/F332-experience-informed-memory.md) Phase B 下的详细实施切片，承接 AC-B5 的同线程连续性要求及本切片新增验收；不替代 F332 的其他阶段，也不结算其既有 Task。
 
-当前 PR 包含停点及省略区间的定位入口，代码提交 `3c94abdababc66873a02b584930489394ba38635` 已由非作者独立复审，受影响的 137 项测试及 3 项隔离 Redis 测试通过。实际 callback reader 已在合成隔离数据中读回来源。受限真实模型首批未证明增益；后续 S3-B 和预注册 R1 的 S3-A 都重做了已完成的工作，未满足 AC-3。审核方结论为“调整”，暂缓现有 M1 组合合入；下列 AC 保持未勾选，PR 保持草稿。范围、逐场裁定、成本及已知基线失败见[复审证据](../features/assets/F332/cold-recovery-review-2026-11-04.md)。
+当前 PR 包含 M1 定位入口及由实测状态缺口触发的 D 条件 Task 只读投影。M1 代码 `3c94abdababc66873a02b584930489394ba38635` 已独立复审，原 137 项测试及 3 项隔离 Redis 测试通过。受限模型实验中 M1-only 的 S3-B 与预注册 R1 的 S3-A 都重做已完成工作，AC-3 未满足；该结果保持不变。按“调整”结论追加的 D 代码 `c650db92d8f3c9fc70703c12584d181818906f9e` 已独立复审，构建、150 项聚焦测试及原两条 reader 饱和反例通过，真实 callback 接线已核；D 尚无模型行为或收益证据。下列 AC 保持未勾选，PR 保持草稿。范围、逐场裁定、成本及已知基线失败见[复审证据](../features/assets/F332/cold-recovery-review-2026-11-04.md)。
 
 ## Cold Recovery Delivery
 
@@ -82,7 +82,7 @@ flowchart LR
 
 **条件增量：已有 Task 指针。** 若基线暴露状态缺口，且消息导航仍补不上，再单独试只读原 Task 已有的标题、状态、owner、progress.summary／nextStep／sourceRef 与合法产物入口。沿原 Task 呈现 owner 和共享映射器接入，不在产物排名器另造状态权威。缺项保持“未记录”，有 artifactRef 不等于正文已成为当前事实或指令。没有 Task 的闲聊继续用会话记录。
 
-2026-11-04 的 S3-A/B 已暴露这一条件缺口：两组都能通过原工具读到 `done` Task，却都跳过了当前状态核对并按旧对话写入。该证据允许原计划 D 进入接线设计与独立验证，不表示 Task 增量已实现或有效。下一切片复用现有权威与 reader，单独区分 Task 与 M1 的增量；不能把最近文件或无关 Task 自动认作当前工作，也不新增状态存储、缓存或授权来源。
+2026-11-04 的 S3-A/B 已暴露这一条件缺口：两组都能通过原工具读到 `done` Task，却都跳过了当前状态核对并按旧对话写入。原计划 D 据此实施：仅 canonical cold 时，复用本包已有的一次 Task 读取，以规范查询筛选同用户、同线程、本猫的 `work` / `done` Task，最多显示 3 项标题及状态，其余计数。它们是已结束工作列表，不按“最近”指定当前工作。指针使用相同的 `kind: "work", status: "done"`，经原 `list_tasks` reader 回读；`why`、progress 和产物详情不内联，撤回原因仍须读源。没有 Task 不新增该块，读取失败显示未知，活跃任务保留原入口。未新增存储、缓存、权限或额外 store 读取。代码及接线验证已通过，仍须把 Task 与 M1 的行为增量单独验证，不能宣称已修复模型误续。
 
 **导航可信度。** 沿 F296 已有的来源资格核验；非 canonical 候选只能是历史／建议入口。若基线仍复现Issue #1087 的旧锚点问题，针对当前实际呈现入口修正 provenance 表达并补负例；不恢复已被取消的启发式自动注入，也不为消除“未定位”空态抬高材料权威。
 
@@ -124,7 +124,7 @@ flowchart LR
 
 若 A 已正确恢复、增量未改善实际结果或恢复成本，就删去或延期该增量；若出现误续任务、伪造依据或越权，先修正再评估，不用召回数量抵消错误。Task 指针只有对应缺口的证据才能启用；不能靠“也许有用”变成常驻材料。
 
-**截至第二批与 R1（2026-11-04），具名结论：调整（砚砚 / gpt-6.1-sol）。** A 在 S1a/S1b 已正确恢复，增益仍未证明；S3-A/B 都误续已完成工作，当前版本不能放行。A 同样失败，不能把 B 的失败直接归因于新增导航；一对结果也不能证明 B 没有影响、建立因果或估计比率。暂缓现有 M1 组合合入，沿原计划 D 处理已经证实的当前状态缺口，先审核最小接线与无模型回归，保持新修订与本批冻结证据分开。任何新的真实实验须另行预注册和独立审核，本结论不自动使用剩余名额，也不是机制收益或原生完整验收通过的声明。
+**截至第二批与 R1（2026-11-04），具名结论：调整（砚砚 / gpt-6.1-sol）。** A 在 S1a/S1b 已正确恢复，增益仍未证明；M1-only 的 S3-A/B 都误续已完成工作，原组合不能放行。A 同样失败，不能把 B 的失败直接归因于新增导航；一对结果也不能证明 B 没有影响、建立因果或估计比率。D 修订已按这一调整方向完成代码审查和无模型回归，原实验继续冻结；未经修订版真实行为验证，PR 仍不放行合入。任何新的真实实验须另行预注册和独立审核，本结论不自动使用剩余名额，也不是机制收益或完整验收通过的声明。
 
 现场反馈仍在原对话：恢复成功直接做事；有关键缺口时简短说明或澄清。详细轨迹留原诊断／验收记录，重复保守 cold 不向用户反复播报恢复流程。
 

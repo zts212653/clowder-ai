@@ -11,7 +11,7 @@ updated: 2026-11-04
 
 实现作者：宪宪 / claude-opus-5-5。独立 reviewer：砚砚 / gpt-6.1-sol。
 
-代码审查对象：`3c94abdababc66873a02b584930489394ba38635`；实施合同：`9c79d069e0a382cf1359084cb77df75bf6085605` 的[冷恢复 spec](../../../feature-specs/2026-11-04-f332-cold-recovery.md)。审查结论仅覆盖本 PR 的代码正确性，不代表真实恢复验收、部署或 Phase 完成。
+M1 代码审查对象：`3c94abdababc66873a02b584930489394ba38635`；D 修订审查对象：`c650db92d8f3c9fc70703c12584d181818906f9e`。初始实施合同为 `9c79d069e0a382cf1359084cb77df75bf6085605` 的[冷恢复 spec](../../../feature-specs/2026-11-04-f332-cold-recovery.md)，D 条件切片按 `39ba6bf4a55e9b762ec1f6e36aeefbc6838453d7` 的状态缺口与调整判断续作。代码正确性审查不代表真实恢复验收、部署或 Phase 完成。
 
 ## 实现与审查结论
 
@@ -106,6 +106,18 @@ S3 两场 Task 在运行前后都为 `done`，DTO 完全不变；当前状态可
 | S3-B | `a1c924fa1e887f0d51431e68a11c8303333fb2decc01df1eecab6fba11b0f965` | `098b6365ff8b026756a100c6f0e6ccbd9de131f494c2e36a1c7477b5e8bfb464` | `e93959bf10cad23ca6cecfbcf4905765447b19987a3cef6d81c7be7834dd71dc` | `596ece11f87ece9a7ffa73aedc115c035e4aa5fb696533108fcea63ee26baf44` |
 | S3-A | `ad026f8b9414c743cc6464eafe96f3da85c8506861edfb35fb393f28be1858e4` | `1967611afff850f177e578ecd086b691c0a9c2d3877dd1337f292e56283736d2` | `e85c0e601811beaf9b4c6bf3b3347b83459fb21d48593d8c21269349aeb1925f` | `43f6dad38cba117fea83ae8a875ec07f5dc41da3c4f43989ae2efe75773a4b86` |
 
+## D 条件 Task 只读修订：代码复审通过，模型效果待验
+
+作者在原实现工位追加 `123cc69789d714b5f1c482ecd0dff41bbb07f98a`，并用 `c650db92d8f3c9fc70703c12584d181818906f9e` 修复独审发现的 reader 条件不一致。两个提交在本 PR 分支分别为 `61958ea79`、`45ac1fe1b`；最终 API 代码与已审 c650db92 保持逐字一致。它们没有改写前述 8 次实验、fixture、oracle 或 v6 工装。
+
+canonical cold 首包现在显示同一用户、同线程、本猫已结束的 work Task，最多 3 项标题及状态，超出计数；活跃工作保留原入口，无 Task 不显示，store 失败如实显示无法读取。状态从本包原有的那次 Task 读取取得，复用规范查询，无额外 store 调用。仅提供导航，why/progress/产物留原 reader；不进产物真相源，不以最近记录指定当前工作。标题在两处 Task 列表均渲染为单行，防止换行伪造新导航行。
+
+原 `123cc697` 的 reader 只有 threadId/catId，和导航的 done/work 筛选不一致。Reviewer 用真实首包→callback 路由复现：旧 done/work 前有 51 条较新 doing/work 或 done/pr_tracking 时，导航列出目标，reader 却只返回前 50 项，目标缺失（P2）。修复后，查询与指针共享 `ENDED_OWN_WORK_SELECTION`；MCP 与 callback 均透传 `kind: "work", status: "done"`，原 50 条边界保持。两类反例均读回目标；列出的 3 项是同一规范排序的读取结果前缀，没有新增分页或回退。
+
+Reviewer 在 c650db92 独立构建 API，**150/150 聚焦测试通过（0 skip），原两条独立红例 2/2 转绿**。接线测试实际组装首包，从生成指针解析参数并调用真实 callback；覆盖精确集合、两类饱和与顺序/省略计数。作者修复证据清单 SHA256 为 `bb7bf96f3baa7baaef79d6325a43288a7f8440a9a54de18eef08760720d4ab7e`。
+
+**复审结论：D-P2-1 已解决，代码可提交供评审；修订版真实验收仍待执行。** D 没有调用模型，不能把提示已生成、reader 已读回或测试通过算成误续已修复。原 S3-A/B 的 finding 继续保留，AC-B8 / spec AC-3 不勾选，PR 保持草稿；撤回在该薄投影仍只显示 done，原因要读 why。后续实验须单独预注册并独立审核，不自动使用剩余 4 个名额。
+
 ## 尚未验收
 
 AC-B6–B12 均未完成。仍待：
@@ -115,6 +127,6 @@ AC-B6–B12 均未完成。仍待：
 - 重复 unknown→cold 与 native resume（S2，本计划因 R1/R2 互斥未执行）；
 - 保留全部既有合法工具的 A 基线与完整成本（AC-B11）、semantic-ready、自然使用。
 
-Task 只读增量未实现；其条件缺口已有 S3-A/B 证据，进入原计划 D 的独立切片设计与验证。
+Task 只读增量已实现并通过代码/接线复审；其模型行为与成本效用尚未验证。
 
-按 spec 第 6 节，审核方已作“调整”的具名判断，PR 保持草稿。既有代码正确性审查不等于恢复安全验收通过；在当前状态缺口修正及必要复验之前，不放行当前 M1 组合，也不把剩余名额自动用于继续筛查。
+按 spec 第 6 节，审核方已作“调整”的具名判断，D 是该调整的代码修订，PR 保持草稿。代码/接线审查不等于模型恢复安全验收通过；必要行为复验前不放行修订版，也不把剩余名额自动用于继续筛查。
