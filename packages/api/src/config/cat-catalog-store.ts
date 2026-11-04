@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, relative, resolve, sep } from 'node:path';
 import type { CatCafeConfig, ClientId, RosterEntry } from '@cat-cafe/shared';
 import { type NativeToolIdentity, nativeToolIdentityFor } from '@cat-cafe/shared';
@@ -21,6 +21,7 @@ import {
 } from './template-variant-backfill.js';
 import { isTemplateVariantTombstoned } from './template-variant-tombstones.js';
 import { readRepairedVoiceRefTexts } from './voice-ref-text-repair.js';
+import { writeFileAtomic } from './write-file-atomic.js';
 
 const CONFIG_SUBDIR = '.cat-cafe';
 const CAT_CATALOG_FILENAME = 'cat-catalog.json';
@@ -34,21 +35,6 @@ function safePath(projectRoot: string, ...segments: string[]): string {
     throw new Error(`Path escapes project root: ${normalized}`);
   }
   return normalized;
-}
-
-function writeFileAtomic(filePath: string, content: string): void {
-  const tempPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
-  writeFileSync(tempPath, content, 'utf-8');
-  try {
-    renameSync(tempPath, filePath);
-  } catch (error) {
-    try {
-      unlinkSync(tempPath);
-    } catch {
-      // Ignore cleanup failures.
-    }
-    throw error;
-  }
 }
 
 /** clowder-ai#340 P5: ClientId values — used to detect old `provider` field holding a clientId. */

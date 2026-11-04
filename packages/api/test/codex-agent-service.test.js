@@ -9,6 +9,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { basename, dirname, join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { describe, mock, test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { catRegistry } from '@cat-cafe/shared';
 import { upstreamMcpServersFromArgs } from './helpers/direct-mcp-contract.js';
 import { assertSelectedApiAccount, installAmbientCodexAccount } from './helpers/f320-auth-environment.js';
@@ -505,7 +506,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     assert.ok(!args.includes('approval_policy=\\"on-request\\"'), 'argv should not contain literal backslash escapes');
   });
 
-  test('injects cat-cafe MCP config from runtime root, not thread workingDirectory', async () => {
+  test('launches cat-cafe MCP from the API package, with the thread workspace boundary', async () => {
     const runtimeRoot = makeTempDir('.tmp-mcp-runtime-root-');
     const threadWorkspace = makeTempDir('.tmp-mcp-thread-workspace-');
     const previousAllowedWorkspaceDirs = process.env.ALLOWED_WORKSPACE_DIRS;
@@ -569,8 +570,8 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
         assert.equal(server.command, process.execPath, `${serverId} uses runtime Node`);
         assert.deepEqual(
           server.args,
-          [join(mcpDistDir, entrypoint)],
-          'upstream binary belongs to runtime, not thread cwd',
+          [fileURLToPath(import.meta.resolve(`@cat-cafe/mcp-server/dist/${entrypoint}`))],
+          'upstream binary belongs to the API-imported package, not thread cwd',
         );
         assert.equal(server.enabled, true);
         assert.equal(server.default_tools_approval_mode, 'approve');
@@ -791,11 +792,11 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     }
   });
 
-  test('Codex MCP config resolves runtime binary + managed env for same-repo external split', async () => {
+  test('Codex MCP config resolves API package binary + managed env for same-repo external split', async () => {
     // #1072 regression test: ensureCatCafeMainServer migration can leave a
     // split entry with source='external' but binary pointing to our own repo
     // dist (isSameRepoExternalSplit). These entries must:
-    //   1. Resolve binary from current mcpDistDir (not the entry's stale args[0])
+    //   1. Resolve binary from the API-imported package (not the entry's stale args[0])
     //   2. Receive managed env injection (callback env, workspace dirs, approval mode)
     const runtimeRoot = makeTempDir('.tmp-codex-same-repo-ext-');
     const projectDir = makeTempDir('.tmp-codex-same-repo-ext-project-');
@@ -816,7 +817,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
       // Same-repo external shape: source='external', args[0] ends with
       // packages/mcp-server/dist/limb.js but uses a STALE worktree path
       // (different from current runtimeRoot). The code must resolve from
-      // current mcpDistDir, not trust the stale absolute path.
+      // the API-imported package, not trust the stale absolute path.
       const staleLimbPath = '/old/worktree/packages/mcp-server/dist/limb.js';
       writeCapabilitiesConfig(runtimeRoot, [
         {
@@ -828,7 +829,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
         },
       ]);
 
-      const currentLimbPath = join(runtimeRoot, 'packages', 'mcp-server', 'dist', 'limb.js');
+      const currentLimbPath = fileURLToPath(import.meta.resolve('@cat-cafe/mcp-server/dist/limb.js'));
       await withWorkspaceEnv({ ALLOWED_WORKSPACE_DIRS: undefined, CAT_CAFE_WORKSPACE_ROOT: undefined }, async () => {
         await withRuntimeRootEnv(runtimeRoot, async () => {
           const promise = collect(
@@ -848,11 +849,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
           const args = spawnFn.mock.calls[0].arguments[1];
           const server = upstreamMcpServersFromArgs(args)['cat-cafe-limb'];
           assert.equal(server.enabled, true);
-          assert.deepEqual(
-            server.args,
-            [currentLimbPath],
-            'managed upstream must resolve to the current runtime binary',
-          );
+          assert.deepEqual(server.args, [currentLimbPath], 'managed upstream must resolve to the API-imported package');
           assert.ok(!args.some((a) => a.includes('/old/worktree/')), 'stale worktree path must not appear in CLI args');
           assert.equal(server.default_tools_approval_mode, 'approve');
           assert.equal(server.env.ALLOWED_WORKSPACE_DIRS, projectDir);

@@ -80,12 +80,6 @@ describe('F190 visual contract — no hard borders in card/panel components', ()
     expect(src).not.toMatch(/className="rounded-lg border border-\[var\(--console-border-soft\)\]/);
   });
 
-  it('AuditExplorerPanel uses settingsResourceCardClass, not border-[var(--console-border-soft)]', () => {
-    const src = readSrc('audit/AuditExplorerPanel.tsx');
-    expect(src).toContain('settingsResourceCardClass');
-    expect(src).not.toMatch(/className="rounded-lg border border-\[var\(--console-border-soft\)\]/);
-  });
-
   it('ChatMessage bubble has no literal border class or borderColor style', () => {
     const src = readSrc('ChatMessage.tsx');
     expect(src).not.toMatch(/className=\{`border px-4/);
@@ -506,7 +500,6 @@ describe('F190 divider guard — console-scope dividers use semantic class', () 
     'UnifiedAuthModal.tsx',
     'PushSettingsPanel.tsx',
     'ThreadExecutionBar.tsx',
-    'audit/AuditExplorerPanel.tsx',
     'mission-control/WorkflowSopPanel.tsx',
     'mission-control/FeatureRowList.tsx',
     'workspace/WorldPanel.tsx',

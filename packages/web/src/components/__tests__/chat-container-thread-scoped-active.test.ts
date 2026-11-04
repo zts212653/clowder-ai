@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F173 Phase C Task 2 — pin ChatContainer's `hasActiveInvocation` source-
  * of-truth migration.

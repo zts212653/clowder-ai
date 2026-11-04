@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * Connector bubble theming — OKLCH pipeline
  * Tests that ConnectorBubble renders with correct theme colors and icons

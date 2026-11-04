@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * Regression test: mobile sidebar auto-closes after creating a new conversation.
  * Verifies that createInProject success path calls onClose on narrow viewports.

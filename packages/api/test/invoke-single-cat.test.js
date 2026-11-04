@@ -9332,10 +9332,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
 
     assert.equal(upstream.command, process.execPath, 'the original split server retains the runtime Node binary');
     assert.equal(upstream.args.length, 1);
-    assert.ok(
-      upstream.args[0].replaceAll('\\', '/').endsWith('/packages/mcp-server/dist/collab.js'),
-      `MCP upstream must point to split entrypoint: ${upstream.args[0]}`,
-    );
+    assert.equal(upstream.args[0], fileURLToPath(import.meta.resolve('@cat-cafe/mcp-server/dist/collab.js')));
     for (const env of [launchEnv, upstream.env])
       for (const key of ['CAT_CAFE_API_URL', 'CAT_CAFE_INVOCATION_ID', 'CAT_CAFE_CALLBACK_TOKEN'])
         assert.equal(env[key], undefined, `the disk config must defer ${key} to the native config hook`);
@@ -9453,7 +9450,11 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       const { upstream, launchEnv } = openCodeDirectMcpContract(mcpCollab);
 
       assert.equal(upstream.command, process.execPath);
-      assert.deepEqual(upstream.args, [join(externalMcpDir, 'collab.js')], 'preserve the explicit MCP binary root');
+      assert.deepEqual(
+        upstream.args,
+        [fileURLToPath(import.meta.resolve('@cat-cafe/mcp-server/dist/collab.js'))],
+        'managed execution uses the API package even with an explicit MCP discovery path',
+      );
       for (const env of [launchEnv, upstream.env])
         for (const key of ['CAT_CAFE_API_URL', 'CAT_CAFE_INVOCATION_ID', 'CAT_CAFE_CALLBACK_TOKEN'])
           assert.equal(env[key], undefined, `the disk config must defer ${key} to the native config hook`);

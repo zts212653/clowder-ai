@@ -9,7 +9,7 @@ import { build } from 'vite';
 import './reply-navigation-owner.cases.mjs';
 
 test(
-  'real Append region exposes exact read status in text at desktop and mobile widths',
+  'real Append region exposes exact read status and source eligibility at desktop and mobile widths',
   { timeout: 60000 },
   async () => {
     const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -63,10 +63,21 @@ test(
       const page = await browser.newPage({ viewport: { width: 1100, height: 650 } });
       const errors = [];
       let retryPosts = 0;
+      let checks = 0;
       page.on('pageerror', (err) => errors.push(err.message));
       await page.route('**/*', async (route) => {
         const url = new URL(route.request().url());
         assert.equal(url.origin, origin);
+        if (url.pathname.endsWith('/reconcile')) {
+          assert.equal(route.request().method(), 'POST');
+          assert.deepEqual(route.request().postDataJSON(), {
+            expectedResponseMessageId: 'r',
+            expectedInvocationId: 'inv',
+          });
+          checks++;
+          await route.fulfill({ status: 200, contentType: 'application/json', body: '{"status":"checked"}' });
+          return;
+        }
         if (url.pathname.endsWith('/repeat')) {
           assert.equal(url.pathname, '/api/threads/thread/messages/supported/routing-targets/opus/repeat');
           assert.equal(route.request().method(), 'POST');
@@ -99,7 +110,7 @@ test(
             status: 200,
             contentType: 'application/json',
             body: JSON.stringify({
-              queue: [original, { ...original, id: 'q-new', messageId: 'new-input', createdAt: 24 }],
+              queue: [{ ...original, id: 'q-new', messageId: 'new-input', createdAt: 24 }],
             }),
           });
           return;
@@ -203,6 +214,20 @@ test(
         assert.ok(Math.abs(refolded.visible / refolded.row - 3.5) < 0.05, 'collapse restores the partial-row cue');
       }
       assert.deepEqual(errors, []);
+      const historyActions = page.getByRole('article', { name: '原消息收件进度' });
+      await page.getByRole('button', { name: 'unknown-external', exact: true }).click();
+      await historyActions.getByRole('button', { name: '核对状态', exact: true }).waitFor();
+      assert.equal(await historyActions.getByRole('button', { name: '再发一次', exact: true }).count(), 0);
+      await page.getByRole('button', { name: 'not-accepted', exact: true }).click();
+      await historyActions.getByRole('button', { name: '重新发送', exact: true }).waitFor();
+      assert.equal(await historyActions.getByRole('button', { name: '核对状态', exact: true }).count(), 0);
+      await page.getByRole('button', { name: 'incomplete', exact: true }).click();
+      await historyActions.getByRole('button', { name: '再发一次', exact: true }).waitFor();
+      assert.equal(await historyActions.getByRole('button', { name: '核对状态', exact: true }).count(), 0);
+      assert.match(await historyActions.innerText(), /上次可能已执行一部分，再发可能重复执行/);
+      await page.getByRole('button', { name: 'awaiting-completion', exact: true }).click();
+      assert.match(await historyActions.innerText(), /本条补充消息还未确认完成/);
+      assert.doesNotMatch(await historyActions.innerText(), /已回复|再发一次/);
       await page.getByRole('button', { name: 'unknown-checking', exact: true }).click();
       const receipts = page.getByRole('article', { name: '原消息收件进度' });
       assert.match(await receipts.innerText(), /正在核对 砚砚 收到没…/);
@@ -211,7 +236,7 @@ test(
       await receipts.getByRole('button', { name: '再发一次', exact: true }).waitFor();
       assert.match(await receipts.innerText(), /已送出，没确认收到/);
       assert.doesNotMatch(await receipts.innerText(), /Agent Client|收到，正在回|没送到/);
-      assert.match(await receipts.innerText(), /会作为新消息再次发送，可能重复执行/);
+      assert.match(await receipts.innerText(), /如果它其实收到了，会再回一遍/);
       assert.match(await page.locator('[data-appended-input-id="supported"]').innerText(), /已送出，没确认收到/);
       for (const width of [1100, 360]) {
         await page.setViewportSize({ width, height: 650 });
@@ -222,6 +247,10 @@ test(
             fullPage: true,
           });
       }
+      await receipts.getByRole('button', { name: '核对状态', exact: true }).click();
+      await page.waitForFunction(() => !document.querySelector('button[disabled]'));
+      assert.equal(checks, 1);
+      assert.equal(retryPosts, 0, 'checking never sends the input again');
       await page.reload();
       await receipts.getByRole('button', { name: '再发一次', exact: true }).waitFor();
       assert.equal(retryPosts, 0, 'hydration never resends uncertain input');

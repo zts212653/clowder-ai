@@ -3,6 +3,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiFetch } from '@/utils/api-client';
+import { observeApiSessionOwner } from '@/utils/api-session-identity';
 import { RichBlocks } from '../RichBlocks';
 import { RuntimeInteractionQuestionForm } from '../RuntimeInteractionQuestionForm';
 import {
@@ -27,6 +28,7 @@ describe('RuntimeInteractionQuestionForm', () => {
   beforeAll(() => ((globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true));
   afterAll(() => delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT);
   beforeEach(() => {
+    observeApiSessionOwner('user-1');
     vi.mocked(apiFetch).mockReset();
     container = document.createElement('div');
     document.body.appendChild(container);

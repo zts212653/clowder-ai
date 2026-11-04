@@ -119,8 +119,9 @@ it('recognizes a whole code span, prose and a Markdown path link in one batch ac
     kind: 'file',
     path: 'docs/报告.md',
     worktreeId: 'project',
-    scrollToLine: 7,
+    line: 7,
   });
+  expect(useChatStore.getState().workspaceOpenRequest?.disposition).toBe('permanent');
 });
 it('explains a confirmed missing file without navigation and styles a standalone existing path as a card', async () => {
   await act(async () => {

@@ -50,7 +50,11 @@ async function addChildCandidates(
   candidates: Map<string, TaskExecutionCandidate>,
 ): Promise<CandidateFailure | null> {
   const sameThreadChildren = runningChildren.filter(
-    (child) => child.threadId === lease.holderThreadId && child.userId === userId && child.status === 'running',
+    (child) =>
+      child.executionKind !== 'watcher' &&
+      child.threadId === lease.holderThreadId &&
+      child.userId === userId &&
+      child.status === 'running',
   );
   const parentIds = [...new Set(sameThreadChildren.map((child) => child.parentInvocationId))];
   let parentRecords: Array<InvocationRecord | null>;

@@ -21,7 +21,7 @@ import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { type MountRules, STANDARD_MOUNT_POINT_IDS } from '@cat-cafe/shared';
 import { pathsEqual } from '../utils/project-path.js';
 import {
-  buildSkillMountTargets,
+  buildProjectSkillMountTargets,
   isManagedDirectoryLevelSkillsSymlink,
   SHARED_SKILL_REFS_ALIAS,
 } from '../utils/skill-mount.js';
@@ -277,22 +277,9 @@ function canonicalMountPolicy(mountRules: MountRules): object {
 }
 
 function buildDriftMountTargets(projectRoot: string, mountRules: MountRules): DriftMountTarget[] {
-  const standardTargets = STANDARD_MOUNT_POINT_IDS.flatMap((id) => {
-    const rule = mountRules.mountPoints[id];
-    if (!rule.enabled) return [];
-    const dir = join(projectRoot, rule.path);
-    return [{ key: `standard:${id}:${dir}`, mountPointId: id, dir }];
-  });
-  const customTargets = buildSkillMountTargets(projectRoot, homedir(), mountRules)
-    .filter((target) => target.kind === 'custom')
-    .flatMap((target) =>
-      target.candidates.map((dir) => ({
-        key: `custom:${target.id}:${dir}`,
-        mountPointId: target.id,
-        dir,
-      })),
-    );
-  return [...standardTargets, ...customTargets];
+  return buildProjectSkillMountTargets(projectRoot, homedir(), mountRules).flatMap((target) =>
+    target.dirs.map((dir) => ({ key: `${target.kind}:${target.id}:${dir}`, mountPointId: target.id, dir })),
+  );
 }
 
 function computeDriftHash(

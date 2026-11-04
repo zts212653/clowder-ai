@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import DOMPurify from 'dompurify';
 import { describe, expect, it } from 'vitest';
 import { sanitizeWidgetHtml } from '../sanitize-widget-html';

@@ -4,6 +4,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import type { RichCardBlock } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
+import { observeApiSessionOwner } from '@/utils/api-session-identity';
 import { CardBlock } from '../CardBlock';
 
 vi.mock('@/utils/api-client', () => ({
@@ -75,6 +76,8 @@ describe('CardBlock — F231 profile-update decision dispatch', () => {
     document.body.appendChild(container);
     root = createRoot(container);
     vi.mocked(apiFetch).mockReset();
+    observeApiSessionOwner('owner-1');
+    vi.mocked(apiFetch).mockResolvedValue(Response.json({ proposalId: 'p1', status: 'pending' }));
   });
   afterEach(() => {
     act(() => root.unmount());
@@ -221,6 +224,7 @@ describe('CardBlock — F231 profile-update decision dispatch', () => {
     await act(async () => {
       root.render(<CardBlock block={profileUpdateBlock('profile-update:approve')} messageId="m1" />);
     });
+    vi.mocked(apiFetch).mockResolvedValue(Response.json({ proposalId: 'p1', status: 'approved' }));
 
     await act(async () => {
       window.dispatchEvent(
@@ -253,7 +257,11 @@ describe('CardBlock — F231 profile-update decision dispatch', () => {
     });
     await act(async () => {});
 
-    expect(apiFetch).toHaveBeenCalledWith('/api/profile-updates/p1');
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/api/profile-updates/p1',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      { afterCurrentGet: true },
+    );
     expect(updateRichBlock).toHaveBeenCalledWith(
       'm1',
       'profile-update-p1',

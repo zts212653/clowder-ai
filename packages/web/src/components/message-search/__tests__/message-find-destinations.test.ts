@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { beforeEach, expect, it, vi } from 'vitest';
 import { assignDocumentRoute } from '@/components/ThreadSidebar/thread-navigation';
 import { useF307ExperienceWorkbenchStore } from '@/components/workbench/experience-workbench-store';

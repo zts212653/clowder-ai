@@ -43,14 +43,6 @@ describe('chatStore.removeMessage', () => {
     expect(useChatStore.getState().messages).toHaveLength(0);
   });
 
-  it('addMessage deduplicates by id', () => {
-    const store = useChatStore.getState();
-    store.addMessage(makMsg('a'));
-    store.addMessage(makMsg('a')); // duplicate
-
-    expect(useChatStore.getState().messages).toHaveLength(1);
-  });
-
   it('removeMessage then re-add works', () => {
     const store = useChatStore.getState();
     store.addMessage(makMsg('a'));

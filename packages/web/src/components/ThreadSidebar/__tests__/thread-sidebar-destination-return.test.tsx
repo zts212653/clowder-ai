@@ -122,9 +122,7 @@ describe('F322 sidebar while a Café destination (记忆) is the current page', 
     await harness.flush();
     const expand = harness.container.querySelector<HTMLButtonElement>('[data-testid="expand-all-btn"]');
     if (expand) act(() => expand.click());
-    const header = Array.from(harness.container.querySelectorAll<HTMLButtonElement>('button[title="更多操作"]')).find(
-      (b) => b.closest('[data-thread-id]') === null,
-    );
+    const header = harness.container.querySelector<HTMLButtonElement>('[data-testid="project-menu-btn"]');
     if (!header) throw new Error('no project header menu');
     act(() => header.click());
     const archive = Array.from(harness.container.querySelectorAll('button, [role="menuitem"], div')).find(

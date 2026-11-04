@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F117 contract: every event of a turn is written into the message it names. The server stores
  * the turn's response R empty at admission and stamps `messageId: R` on every event of the turn;

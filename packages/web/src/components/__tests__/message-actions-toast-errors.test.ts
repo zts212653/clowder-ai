@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F109 Phase A — Toast error tests for MessageActions UI paths.
  *

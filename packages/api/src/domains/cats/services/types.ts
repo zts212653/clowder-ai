@@ -997,6 +997,12 @@ export interface MemberSessionExecutionScope {
 
 export type ToolExecutionPolicy =
   | {
+      readonly mode: 'watcher';
+      readonly allowedToolNames: readonly string[];
+      readonly allowedCallbackRoutes: readonly string[];
+      readonly maxToolCalls: 6;
+    }
+  | {
       readonly mode: 'read_only';
       readonly replayDeniedToolNames: readonly string[];
     }
@@ -1064,6 +1070,8 @@ export interface LocalSessionReadInput {
 }
 
 export interface AgentServiceOptions {
+  /** Host-only bounded observer lifecycle, distinct from the ordinary work and Live roles. */
+  boundedWatcher?: import('./agents/providers/BoundedWatcherRunPort.js').BoundedWatcherRunPort;
   /** Host-selected external Claude program; never fall back to the SDK's bundled engine. */
   claudeSdkRuntime?: import('./agents/providers/claude-sdk-runtime.js').ClaudeSdkRuntime;
   /** Admission-owned MCP descriptors; callback credentials are materialized for the current turn. */
@@ -1258,6 +1266,8 @@ export interface ProviderRequestGenerationCommitV1 {
  * Interface that all agent services must implement
  */
 export interface AgentService {
+  prepareWatcherSession?(): Promise<void>;
+  boundedWatcherSessionCapability?(): import('@cat-cafe/shared').WatcherCapability;
   /** The adapter handles AbortSignal and owns teardown; Host must drain it before terminalizing. */
   readonly cancellationMode?: 'drain';
   /** Host-owned implementation identity; a pinned registered view rejects a replaced generation. */

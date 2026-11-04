@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F194 Phase Z11 — ChatMessage CLI Output stdout consistency (co-creator R15).
  *

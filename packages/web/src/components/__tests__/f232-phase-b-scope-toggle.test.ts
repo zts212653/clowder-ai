@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F232 Phase B: scope toggle [当前对话] [全局] + global artifacts display.
  * Verifies AC-B1 (global search UI) and thread badge in global scope.
@@ -67,6 +68,7 @@ vi.mock('@/hooks/useCatData', () => ({
 }));
 
 import { useChatStore } from '@/stores/chatStore';
+import { apiFetch } from '@/utils/api-client';
 import { ArtifactsPanel } from '../ArtifactsPanel';
 
 describe('F232 Phase B scope toggle', () => {
@@ -82,7 +84,7 @@ describe('F232 Phase B scope toggle', () => {
   });
 
   beforeEach(() => {
-    useChatStore.setState({ currentThreadId: 'T-current', workspaceWorktreeId: 'main' });
+    useChatStore.setState({ currentThreadId: 'T-current', workspaceWorktreeId: 'main', workspaceOpenRequest: null });
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -147,7 +149,7 @@ describe('F232 Phase B scope toggle', () => {
     expect(input?.placeholder).toContain('所有对话');
   });
 
-  it('P1 fix: cross-thread artifact detail passes null worktreeId to prevent wrong-file preview', () => {
+  it('keeps a global artifact in its original thread without borrowing the host worktree', () => {
     render();
 
     // Switch to global scope
@@ -165,11 +167,19 @@ describe('F232 Phase B scope toggle', () => {
       (row as HTMLElement)?.click();
     });
 
-    // The detail view should render (we see the artifact name in detail header)
-    expect(container.textContent).toContain('readme.md');
-    // The "返回" button should exist (we're in detail view)
-    const backBtn = container.querySelector('button[aria-label="返回"]');
-    expect(backBtn).toBeTruthy();
+    const target = useChatStore.getState().workspaceOpenRequest?.target;
+    expect(target).toEqual({
+      kind: 'artifact',
+      artifact: GLOBAL_ARTIFACTS[0],
+      navigationOrigin: {
+        kind: 'artifact-list',
+        threadId: 'T-current',
+        view: { scope: 'global', filter: 'all', query: '', grouping: 'time', catFilter: null, collapsed: [] },
+      },
+    });
+    // A source without a worktree is not permission to read an identically named host file.
+    expect(apiFetch).not.toHaveBeenCalled();
+    expect(container.querySelector('input')).not.toBeNull();
   });
 
   it('switches back to thread scope when clicking 当前对话', () => {

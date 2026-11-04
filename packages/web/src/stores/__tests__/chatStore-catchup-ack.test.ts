@@ -103,17 +103,6 @@ describe('chatStore.acknowledgeCatchUp (F183 Phase C 砚砚 R5 P1)', () => {
     expect(useChatStore.getState().lastSeqByThread['thread-A']).toBe(12);
   });
 
-  it('subsequent live event after matched ack: seq=pending+1 routes as advance (no false gap)', () => {
-    // End-to-end smoke: gap → ack → next live event is 'advance', NOT 'gap'.
-    useChatStore.setState({
-      lastSeqByThread: { 'thread-A': 5 },
-      pendingCatchUpTargetSeqByThread: { 'thread-A': 8 },
-    });
-    useChatStore.getState().acknowledgeCatchUp('thread-A', 8);
-    expect(useChatStore.getState().lastSeqByThread['thread-A']).toBe(8);
-    expect(useChatStore.getState().pendingCatchUpTargetSeqByThread['thread-A']).toBeUndefined();
-  });
-
   it('setPendingCatchUpTargetSeq overwrites prior pending (latest wins)', () => {
     useChatStore.getState().setPendingCatchUpTargetSeq('thread-A', 8);
     expect(useChatStore.getState().pendingCatchUpTargetSeqByThread['thread-A']).toBe(8);

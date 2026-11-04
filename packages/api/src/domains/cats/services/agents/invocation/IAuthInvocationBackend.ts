@@ -17,6 +17,7 @@ import type {
   InvocationRecord,
   VerifyResult,
 } from './InvocationRegistry.js';
+import type { WatcherTicketClaim, WatcherToolTicket } from './WatcherToolTicket.js';
 
 /** Active-record input; lifecycle fields are backend-owned. */
 export type AuthInvocationInput = Omit<
@@ -25,6 +26,24 @@ export type AuthInvocationInput = Omit<
 >;
 
 export interface IAuthInvocationBackend {
+  isWatcherToolCallAdmitted(invocationId: string, callId: string): Promise<boolean>;
+  consumeWatcherToolCall(
+    invocationId: string,
+    callId: string,
+    toolName: string,
+  ): Promise<'accepted' | 'replayed' | 'exhausted'>;
+  watcherToolCallCount(invocationId: string): Promise<number>;
+  claimWatcherToolCallback(
+    invocationId: string,
+    callId: string,
+    route: string,
+    requestHash: string,
+  ): Promise<WatcherTicketClaim>;
+  completeWatcherToolCallback(
+    invocationId: string,
+    callId: string,
+    response: NonNullable<WatcherToolTicket['response']>,
+  ): Promise<void>;
   /** Persist a new active invocation record. Active principals never carry a TTL. */
   create(input: AuthInvocationInput): Promise<void>;
 

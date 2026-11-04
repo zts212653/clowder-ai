@@ -17,7 +17,11 @@ const themes = vi.hoisted(() => ({
 vi.mock('@/stores/themeStore', () => ({ useThemeStore: () => themes.state }));
 vi.mock('../../dev/OklchTuner', () => ({ OklchTuner: () => <div data-testid="tuner" /> }));
 
-import { readShellPresentation, writeShellPresentation } from '../../shell/shell-presentation';
+import {
+  readShellPresentation,
+  SHELL_PRESENTATION_STORAGE_KEY,
+  writeShellPresentation,
+} from '../../shell/shell-presentation';
 import { ThemeSettingsPanel } from '../ThemeSettingsPanel';
 
 describe('F322 主题 in 设置与管理', () => {
@@ -81,5 +85,18 @@ describe('F322 主题 in 设置与管理', () => {
     expect(readShellPresentation()).toBe('classic');
     click('[data-testid="shell-presentation-v2"]');
     expect(readShellPresentation()).toBe('v2');
+  });
+
+  it('selects v2 by default and keeps an explicit classic choice after remounting', () => {
+    window.localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
+    render();
+    expect(host.querySelector('[data-testid="shell-presentation-v2"]')?.getAttribute('aria-checked')).toBe('true');
+    click('[data-testid="shell-presentation-classic"]');
+    expect(window.localStorage.getItem(SHELL_PRESENTATION_STORAGE_KEY)).toBe('classic');
+    act(() => root.render(null));
+    render();
+    expect(host.querySelector('[data-testid="shell-presentation-classic"]')?.getAttribute('aria-checked')).toBe('true');
+    click('[data-testid="shell-presentation-v2"]');
+    expect(window.localStorage.getItem(SHELL_PRESENTATION_STORAGE_KEY)).toBe('v2');
   });
 });

@@ -680,6 +680,29 @@ describe('generateOpenCodeRuntimeConfig', () => {
     }
   });
 
+  test('F314-6: resolveWorkspaceRoot puts the thread working directory between the two env overrides', () => {
+    const originalAwd = process.env.ALLOWED_WORKSPACE_DIRS;
+    const originalWorkspace = process.env.CAT_CAFE_WORKSPACE_ROOT;
+    try {
+      process.env.ALLOWED_WORKSPACE_DIRS = '/tmp/allowed';
+      process.env.CAT_CAFE_WORKSPACE_ROOT = '/tmp/workspace';
+      assert.equal(resolveWorkspaceRoot('/tmp/thread'), '/tmp/allowed');
+
+      delete process.env.ALLOWED_WORKSPACE_DIRS;
+      assert.equal(resolveWorkspaceRoot('/tmp/thread/../thread'), '/tmp/thread');
+      assert.equal(resolveWorkspaceRoot('  '), '/tmp/workspace');
+      assert.equal(resolveWorkspaceRoot(), '/tmp/workspace');
+
+      delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+      assert.equal(resolveWorkspaceRoot(), process.cwd());
+    } finally {
+      if (originalAwd === undefined) delete process.env.ALLOWED_WORKSPACE_DIRS;
+      else process.env.ALLOWED_WORKSPACE_DIRS = originalAwd;
+      if (originalWorkspace === undefined) delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+      else process.env.CAT_CAFE_WORKSPACE_ROOT = originalWorkspace;
+    }
+  });
+
   test('resolveWorkspaceRoot reads ALLOWED_WORKSPACE_DIRS from environment', () => {
     const originalAwd = process.env.ALLOWED_WORKSPACE_DIRS;
     const originalWorkspace = process.env.CAT_CAFE_WORKSPACE_ROOT;

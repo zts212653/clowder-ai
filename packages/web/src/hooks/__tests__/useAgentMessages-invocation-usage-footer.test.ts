@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F230 footer-parity: invocation_usage with model/provider populates the response's metadata.
  *

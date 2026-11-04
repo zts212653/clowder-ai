@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F24: SessionChainPanel tests.
  * Verifies session chain visualization: active sessions with health bar,

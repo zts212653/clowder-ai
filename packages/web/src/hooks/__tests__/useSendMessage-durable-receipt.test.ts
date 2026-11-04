@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F309 through the canonical Queue/History boundary: HTTP admission owns no bubble.
  * The message lifecycle snapshot supplies the durable media URL, id and revision.

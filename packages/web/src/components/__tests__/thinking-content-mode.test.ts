@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F097: Thinking UI behavior — updated for CliOutputBlock architecture
  * - 🧠 Thinking: independent collapsible (ThinkingContent)

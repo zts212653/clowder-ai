@@ -14,7 +14,10 @@ import { catRegistry } from '@cat-cafe/shared';
 
 const REPO_ROOT_TEMPLATE = resolve(dirname(fileURLToPath(import.meta.url)), '../../..', 'cat-template.json');
 const CAT_TEMPLATE_PATH = REPO_ROOT_TEMPLATE;
-const FULL_RUNTIME_PROMPT_CHAR_BUDGET = 7050; // 6500→6700→7050: gemini35 + gpt-pro roster growth
+// 6500→6700→7050: gemini35 + gpt-pro roster growth.
+// →7450 (2026-11-03): main had already grown to 7134 after the roster-description intake (#6487),
+// plus ~265 for the L0 meta-method words altitude/range/depth/self-efficacy (#6529).
+const FULL_RUNTIME_PROMPT_CHAR_BUDGET = 7450;
 
 function assertWithinFullRuntimePromptBudget(prompt) {
   assert.ok(

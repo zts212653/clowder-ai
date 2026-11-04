@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
 import type { CatData } from '@/hooks/useCatData';
 import { initialState } from '../hub-cat-editor.model';

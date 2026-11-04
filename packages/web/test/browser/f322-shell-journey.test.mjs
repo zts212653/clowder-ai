@@ -197,7 +197,7 @@ async function openProof({
   page.on('pageerror', (error) => errors.push(error.message));
   await page.addInitScript(
     ({ pins, shell, language, participantCount, retainedApproval }) => {
-      localStorage.setItem('cat-cafe:shell-presentation', shell);
+      if (shell !== null) localStorage.setItem('cat-cafe:shell-presentation', shell);
       localStorage.setItem('cat-cafe:shell-language', language);
       localStorage.setItem('cat-cafe:pinned-settings-sections', JSON.stringify(pins));
       window.__F322_PARTICIPANT_COUNT__ = participantCount;
@@ -284,6 +284,8 @@ async function openProof({
       }
       const bodies = {
         '/api/session': session,
+        '/api/plugin-ui': { entries: [] },
+        '/api/config/process-talk': { ownerUserId: session.userId, mode: 'whole' },
         '/api/plugins/official.collective-connector/connections': { runtimeStatus: 'active', connections: [] },
         '/api/config/chat-background': { threads: {} },
         '/api/config/ignored-items': { ownerUserId: session.userId, revision: 0, entries: [] },
@@ -1095,6 +1097,38 @@ test('settings sections remain pinnable and saved Workspace team/eval pins keep 
       'team',
       'the pin must open the same Workspace team owner',
     );
+  } finally {
+    await closeProof(proof);
+  }
+});
+
+test('new visits default to v2 and retain either interface after reload', async () => {
+  const proof = await openProof({ shell: null, route: '/settings?s=theme&from=thread-return' });
+  const { page } = proof;
+  const evidenceDir = process.env.F322_SHELL_DEFAULT_EVIDENCE_DIR;
+  try {
+    await page.getByTestId('shell-presentation-v2').waitFor();
+    assert.equal(await page.getByTestId('shell-presentation-v2').getAttribute('aria-checked'), 'true');
+    assert.equal(await page.getByTestId('world-rail').count(), 1);
+    assert.equal(await page.evaluate(() => localStorage.getItem('cat-cafe:shell-presentation')), null);
+    if (evidenceDir) {
+      mkdirSync(evidenceDir, { recursive: true });
+      await page.screenshot({ path: path.join(evidenceDir, 'default-v2.png'), fullPage: true });
+    }
+    await page.getByTestId('shell-presentation-classic').click();
+    await page.waitForFunction(() => document.documentElement.dataset.shell === undefined);
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.getByTestId('shell-presentation-classic').waitFor();
+    assert.equal(await page.getByTestId('shell-presentation-classic').getAttribute('aria-checked'), 'true');
+    assert.equal(await page.getByTestId('world-rail').count(), 0);
+    assert.equal(await page.evaluate(() => localStorage.getItem('cat-cafe:shell-presentation')), 'classic');
+    if (evidenceDir) await page.screenshot({ path: path.join(evidenceDir, 'remembered-v1.png'), fullPage: true });
+    await page.getByTestId('shell-presentation-v2').click();
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.getByTestId('shell-presentation-v2').waitFor();
+    assert.equal(await page.getByTestId('shell-presentation-v2').getAttribute('aria-checked'), 'true');
+    assert.equal(await page.getByTestId('world-rail').count(), 1);
+    assert.equal(await page.evaluate(() => localStorage.getItem('cat-cafe:shell-presentation')), 'v2');
   } finally {
     await closeProof(proof);
   }

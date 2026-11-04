@@ -21,7 +21,9 @@ import {
 import {
   bindManagedMcpStdioConfig,
   materializeNativeMcpHttp,
+  resolveManagedMcpEntrypoint,
 } from '../../../../../config/capabilities/managed-mcp-config.js';
+import { resolveWorkspaceRoot } from '../../../../../config/capabilities/mcp-config-adapters.js';
 import { isManagedCatCafeSplit } from '../../../../../config/capabilities/mcp-constants.js';
 import {
   resolveMcpArgs,
@@ -36,15 +38,6 @@ import { isRetiredGithubMcpConfigEntry } from '../../../../../config/capabilitie
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 
 const log = createModuleLogger('provider-mcp-config');
-function resolveMcpWorkspaceRoot(workingDirectory?: string): string {
-  const explicitAllowed = process.env.ALLOWED_WORKSPACE_DIRS?.trim();
-  if (explicitAllowed) return explicitAllowed;
-  const threadWorkspace = workingDirectory?.trim();
-  if (threadWorkspace) return resolve(threadWorkspace);
-  const explicitWorkspace = process.env.CAT_CAFE_WORKSPACE_ROOT?.trim();
-  if (explicitWorkspace) return explicitWorkspace;
-  return process.cwd();
-}
 
 export interface ProviderMcpConfigPlan {
   readonly servers: Record<string, Record<string, unknown>>;
@@ -86,7 +79,7 @@ export async function captureProviderMcpConfig(input: {
   const catId = input.callbackEnv.CAT_CAFE_CAT_ID;
 
   const catCafeEnvEntries = catCafeEnvironment(input, {
-    ALLOWED_WORKSPACE_DIRS: resolveMcpWorkspaceRoot(input.workingDirectory),
+    ALLOWED_WORKSPACE_DIRS: resolveWorkspaceRoot(input.workingDirectory),
   });
 
   const mcpServers: Record<string, Record<string, unknown>> = {};
@@ -115,7 +108,7 @@ export async function captureProviderMcpConfig(input: {
         if (!s.enabled) continue;
         if (isManagedCatCafeSplit(s)) {
           const ep = CAT_CAFE_SPLIT_ENTRYPOINTS.get(s.name)!;
-          const epPath = join(distDir, ep);
+          const epPath = resolveManagedMcpEntrypoint(ep);
           if (existsSync(epPath)) {
             catCafeMcpServerNames.push(s.name);
             mcpServers[s.name] = {
@@ -152,7 +145,7 @@ export async function captureProviderMcpConfig(input: {
   assertMappedCapabilitySource(resolved, binaryProjectRoot, capabilitiesProjectRoot);
   if (!resolved) {
     for (const [name, ep] of CAT_CAFE_SPLIT_ENTRYPOINTS) {
-      const epPath = join(distDir, ep);
+      const epPath = resolveManagedMcpEntrypoint(ep);
       if (existsSync(epPath)) {
         catCafeMcpServerNames.push(name);
         mcpServers[name] = {

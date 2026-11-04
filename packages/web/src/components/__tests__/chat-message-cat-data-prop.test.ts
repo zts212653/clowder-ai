@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F32-b Phase 4 R24 P2-1: Regression test — ChatMessage must receive getCatById
  * as a prop, NOT call useCatData() internally.

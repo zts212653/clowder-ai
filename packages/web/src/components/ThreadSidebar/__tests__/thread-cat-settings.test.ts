@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F32-b Phase 3: ThreadCatSettings — settings popover for existing thread preferredCats.
  * Tests the "open → select cat → save → onSave called" path.

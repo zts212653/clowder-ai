@@ -32,8 +32,8 @@ describe('F293 Phase B ownership guard', () => {
     // F309 split the F307 shell: workspace destinations (Team included) render in their own owner file.
     const f307 = source('src/components/workbench/F307OwnerSurfaceRenderer.tsx');
     const f307Destination = source('src/components/workbench/F307WorkspaceDestinationOwnerSurface.tsx');
-    expect(f284).toContain("workspaceMode === 'team'");
-    expect(f284).toContain('workspaceOpenRequest={workspaceOpenRequest}');
+    expect(f284).toContain('f284WorkspaceState={readF284WorkspaceSnapshot(');
+    expect(f284).toContain('teamWorkspaceSubject,');
     expect(f284).not.toContain('<TeamWorkspacePanel');
     expect(f307).toContain('<WorkspaceDestinationOwnerSurface');
     expect(f307).not.toContain('<TeamWorkspacePanel');

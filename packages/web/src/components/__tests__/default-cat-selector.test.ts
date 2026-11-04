@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F154 Phase B — DefaultCatSelector: dropdown for choosing the global default cat.
  * AC-B2: Member overview has global default cat selector.

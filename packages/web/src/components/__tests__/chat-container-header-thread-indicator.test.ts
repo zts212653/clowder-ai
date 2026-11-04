@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * Thread indicator in ChatContainerHeader.
  * Verifies that the header shows the current thread title (not just "Clowder AI").

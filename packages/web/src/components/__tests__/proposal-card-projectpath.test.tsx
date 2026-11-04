@@ -12,6 +12,7 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { observeApiSessionOwner } from '@/utils/api-session-identity';
 
 vi.mock('@/components/MarkdownContent', () => ({
   MarkdownContent: ({ content }: { content: string }) => React.createElement('p', null, content),
@@ -85,6 +86,7 @@ describe('ProposalCard — projectPath ownership', () => {
   });
 
   beforeEach(() => {
+    observeApiSessionOwner('owner-1');
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);

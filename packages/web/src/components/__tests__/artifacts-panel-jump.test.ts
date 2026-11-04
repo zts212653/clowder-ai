@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F232 P2 (cloud review round 3): ArtifactsPanel「跳转」必须走 teleport（jump-with-load），
  * 而非裸 scrollToMessage。后端聚合全量产物后，老产物的 source message 常在已加载的 50 条

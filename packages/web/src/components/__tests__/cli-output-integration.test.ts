@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F097: Integration — ChatMessage renders CliOutputBlock instead of ToolEventsPanel + 💭心里话
  */

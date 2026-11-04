@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * Thinking UI behavior (2026-03-01):
  * - Default is COLLAPSED
@@ -36,7 +37,6 @@ vi.mock('@/components/SummaryCard', () => ({ SummaryCard: () => null }));
 vi.mock('@/components/rich/RichBlocks', () => ({ RichBlocks: () => null }));
 vi.mock('@/components/PlanBoardPanel', () => ({ PlanBoardPanel: () => null }));
 vi.mock('@/components/SessionChainPanel', () => ({ SessionChainPanel: () => null }));
-vi.mock('@/components/audit/AuditExplorerPanel', () => ({ AuditExplorerPanel: () => null }));
 
 const THINKING_TEXT =
   'I am thinking about the meaning of cats and coffee, and why a refresh should still respect thread-specific bubble preferences.';

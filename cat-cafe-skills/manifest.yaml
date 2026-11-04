@@ -136,16 +136,22 @@ skills:
     category: "引导与协作"
     description: >
       单人或多猫的创意探索、独立思考、讨论收敛。
-      Use when: 有目标但不知道怎么做、已有方向反复不满意、brainstorm、多猫独立思考、讨论收敛或方向性问题需要多视角。
+      Use when: 有目标但不知道怎么做、已有方向反复不满意、头脑风暴 / brainstorm、多猫独立思考、讨论收敛或方向性问题需要多视角。
       Not for: 已有明确 spec 直接写代码、单猫执行已定方案。
       Output: 共同理解、反例、取舍或结论；需要留存且已获授权时形成设计或讨论记录。
     triggers:
       - "不知道怎么做"
       - "怎么改都不满意"
       - "brainstorm"
+      - "头脑风暴"
       - "讨论"
       - "多猫独立思考"
+      - "专家辩论"
+      - "多猫分析"
+      - "三猫讨论"
       - "收敛"
+      - "高度深度广度"
+      - "Altitude Range Depth"
       - "讨论结束"
       - "总结一下"
     not_for:
@@ -183,34 +189,6 @@ skills:
     output: "带来源的阅读稿/口播稿、共同探索与按需同步的学习记录"
     next: ["collaborative-thinking", "source-audit", "workspace-navigator", "rich-messaging"]
     sop_step: null
-
-  # ── 专家辩论团 ──
-  expert-panel:
-    category: "引导与协作"
-    description: >
-      多猫专家辩论团：独立分析→挑战→收敛→风险预演→语音汇报→文档交付。
-      Use when: 用户明确要求 expert panel、专家辩论、多猫分析或三猫讨论。
-      Not for: 普通“帮我分析一下”、单猫能搞定的问题、代码实现、bug fix、日常聊天。
-      Output: 洞察卡片(rich block) + 语音总结 + 会议纪要 + 正式报告(DOCX/PDF)。
-    triggers:
-      - "专家辩论"
-      - "expert panel"
-      - "技术参谋"
-      - "竞品分析"
-      - "行业分析"
-      - "趋势判断"
-      - "多猫分析"
-      - "三猫讨论"
-      - "showcase"
-    not_for:
-      - "单猫能搞定的问题"
-      - "代码实现"
-      - "bug fix"
-      - "日常聊天"
-    output: "Insight card + voice summary + meeting notes + formal report (DOCX/PDF)"
-    next: ["feat-lifecycle", "deep-research", "collaborative-thinking"]
-    sop_step: null
-    merged_from: null
 
   # ── 计划编写 ──
   writing-plans:
@@ -350,6 +328,28 @@ skills:
       - "一次性新任务"
     output: "重复未确认不强制 block；重复已确认后按 operator 决策需要产出 interactive 或行动后 card"
     next: ["debugging", "deep-research", "writing-skills", "self-evolution"]
+    sop_step: null
+
+  paw-feel-daily:
+    category: "治理"
+    description: >
+      每天把前一天全家报的爪感差按「该谁修」分类、合并成问题，挑出值得修的交给负责线程或开修复线程。
+      Use when: 爪感差每日分拣的定时唤醒、You 要看最近猫猫用着哪里不顺。
+      Not for: 当场撞到的单条摩擦（原 turn 自己处理）、F278 旧值班的逐条签字与 blocker（已停，不重启）、
+      已确认重复后的根因修复本身（修复线程用 code-as-harness / debugging）。
+      Output: 每日分拣日报一条 + 0–3 个修复去向（向已有负责线程投证据坐标，或提修复线程卡给 You 批）。
+    triggers:
+      - "爪感差分拣"
+      - "爪感差日报"
+      - "每日爪感差"
+      - "爪感差分类"
+      - "paw-feel daily"
+    not_for:
+      - "当场单条摩擦"
+      - "F278 逐条签字"
+      - "根因修复本身"
+    output: "每日分拣日报 + 0–3 个修复去向"
+    next: ["code-as-harness", "cross-thread-sync"]
     sop_step: null
 
   # ── 质量门禁 ──
@@ -632,7 +632,6 @@ skills:
       - "不值得继续"
       - "保守路径"
       - "实际价值变了"
-      - "收口"
       - "vision rescue"
     not_for:
       - "未出现绝境信号的常规 debugging"
