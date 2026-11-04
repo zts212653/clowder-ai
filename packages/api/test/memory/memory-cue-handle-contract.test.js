@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { cueEnvelopeV1Schema } from '@cat-cafe/shared';
+import { cueEnvelopeV1Schema, RECALL_OPPORTUNITY_CATALOG_VERSION } from '@cat-cafe/shared';
 import Database from 'better-sqlite3';
 import Fastify from 'fastify';
 import { createMemoryCueTools } from '../../../mcp-server/dist/tools/memory-cue-tools.js';
@@ -32,7 +32,7 @@ for (const [renderer, family] of [
     const coordinate = {
       cueId: 'cue',
       opportunityId: 'opportunity',
-      catalogVersion: 7,
+      catalogVersion: RECALL_OPPORTUNITY_CATALOG_VERSION,
       resolverFamily: family,
       resolverVersion: 1,
       family,
@@ -54,7 +54,7 @@ for (const [renderer, family] of [
       sourceRevision: coordinate.revision,
       axis: 'consumption',
       consumptionOutcome: 'presented',
-      catalogVersion: 7,
+      catalogVersion: RECALL_OPPORTUNITY_CATALOG_VERSION,
       resolverVersion: 1,
       occurredAt: 1_000,
     });
@@ -63,7 +63,7 @@ for (const [renderer, family] of [
       v: 1,
       cueId: coordinate.cueId,
       opportunityId: coordinate.opportunityId,
-      catalogVersion: 7,
+      catalogVersion: RECALL_OPPORTUNITY_CATALOG_VERSION,
       resolverFamily: family,
       resolverVersion: 1,
       whyNow: 'private reason',

@@ -26,11 +26,17 @@ export function HomeLiveProject({
   const t = useShellCopy(homeCopy).live;
   const name = group.path === 'default' ? t.uncategorized : group.label;
   const count = group.executions.length;
-  const status = group.unavailable
+  const waiting = group.waits.length;
+  const running = group.unavailable
     ? t.confirmedCount(count)
-    : collapsed
+    : collapsed && count > 0
       ? t.projectRunning(count, formatElapsed(now - group.executions[0].startedAt))
       : t.projectCount(count);
+  // A project that only waits says so instead of "0 件".
+  const status =
+    count === 0 && waiting > 0 && !group.unavailable
+      ? t.projectWaiting(waiting)
+      : `${running}${waiting > 0 ? t.waitingTail(waiting) : ''}`;
   return (
     <HomeProjectGroup
       path={group.path}
@@ -40,7 +46,7 @@ export function HomeLiveProject({
       busy={busy}
       status={status}
       ariaLabel={group.unavailable ? `${name}: ${t.projectUnavailable}` : t.projectLabel(name, count, collapsed)}
-      cats={group.executions.map((e) => e.catId)}
+      cats={[...group.executions, ...group.waits].map((item) => item.catId)}
       toggle={toggle}
       notice={
         group.unavailable && (

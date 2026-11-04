@@ -76,3 +76,23 @@ test('unsupported ownership and invalid environment input fail before producing 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('a complete command environment does not reintroduce deleted parent variables', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'catcafe-command-snapshot-'));
+  const previous = process.env.COMMAND_PARENT_ONLY;
+  process.env.COMMAND_PARENT_ONLY = 'must-stay-deleted';
+  t.after(() => {
+    if (previous === undefined) delete process.env.COMMAND_PARENT_ONLY;
+    else process.env.COMMAND_PARENT_ONLY = previous;
+    rmSync(dir, { recursive: true, force: true });
+  });
+  const js =
+    'console.log(JSON.stringify({deleted:process.env.COMMAND_PARENT_ONLY??null,kept:process.env.SNAPSHOT_VALUE}))';
+  const launch = await writeAgentCommandFile(
+    dir,
+    { cwd: dir, env: { SNAPSHOT_VALUE: 'kept' }, inheritParentEnv: false },
+    `${shellEscape(process.execPath)} -e ${shellEscape(js)}`,
+  );
+  const observed = JSON.parse(execFileSync(launch[0], launch.slice(1), { cwd: dir, encoding: 'utf8' }));
+  assert.deepEqual(observed, { deleted: null, kept: 'kept' });
+});

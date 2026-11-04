@@ -171,6 +171,7 @@ export * from './types/index.js';
 export * from './types/living-work.js';
 // F314: one accepted-source contract shared by API persistence and MCP producers.
 export * from './types/local-review.js';
+export * from './types/matter-memory.js';
 export * from './types/media-publication-source.js';
 // F287 bounded opportunity/cue contract (kept explicit for API/MCP consumers).
 export * from './types/memory-cue.js';
@@ -181,6 +182,7 @@ export * from './types/output-message.js';
 export type { CardAction, OptionAction } from './types/rich.js';
 export * from './types/video-project.js';
 export * from './types/video-project-review.js';
+export * from './types/work-cover.js';
 export * from './types/work-video.js';
 export * from './types/workspace-content-review.js';
 export * from './utils/local-session-import.js';

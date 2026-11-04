@@ -87,9 +87,9 @@ test('composition recovers both durable stores and resumes enabled owner intent 
       },
     },
   });
-  await first.runtime.inventoryStore.transaction((transaction) => {
-    const instance = transaction.instances.get(installed.pluginInstanceId);
-    transaction.instances.put({
+  await first.runtime.inventoryStore.transaction(async (transaction) => {
+    const instance = await transaction.instances.get(installed.pluginInstanceId);
+    await transaction.instances.put({
       ...instance,
       configReadiness: 'ready',
       activationState: 'enabled',
@@ -142,9 +142,9 @@ test('dormant composition binds messaging routes to its single K-1 domain', asyn
       },
     },
   });
-  await runtime.inventoryStore.transaction((transaction) => {
-    const instance = transaction.instances.get(installed.pluginInstanceId);
-    transaction.instances.put({
+  await runtime.inventoryStore.transaction(async (transaction) => {
+    const instance = await transaction.instances.get(installed.pluginInstanceId);
+    await transaction.instances.put({
       ...instance,
       configReadiness: 'ready',
       activationState: 'enabled',
@@ -198,9 +198,9 @@ test('production handshake policy covers verified external source readiness with
       },
     },
   });
-  await runtime.inventoryStore.transaction((transaction) => {
-    const instance = transaction.instances.get(installed.pluginInstanceId);
-    transaction.instances.put({
+  await runtime.inventoryStore.transaction(async (transaction) => {
+    const instance = await transaction.instances.get(installed.pluginInstanceId);
+    await transaction.instances.put({
       ...instance,
       configReadiness: 'ready',
       activationState: 'enabled',

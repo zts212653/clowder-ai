@@ -5,8 +5,8 @@ import { type ApprovalEnvelope, type ApprovalPublication, createCatId } from '@c
 import React, { act, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import type { ApprovalPublishDraft } from '../../../../api/src/domains/approval-hub/ApprovalIngress';
-import type { ApprovalPublicationStore } from '../../../../api/src/domains/approval-hub/ports/ApprovalPublicationStore';
+import type { ApprovalPublishDraft } from '../../../../api/dist/domains/approval-hub/ApprovalIngress';
+import type { ApprovalPublicationStore } from '../../../../api/dist/domains/approval-hub/ports/ApprovalPublicationStore';
 
 const THREAD_ID = 'source-thread';
 const OTHER_THREAD_ID = 'other-thread';
@@ -39,9 +39,9 @@ class FakePublicationStore implements ApprovalPublicationStore {
 
 describe('F128 proposal card realtime socket journey', () => {
   let httpServer: HttpServer;
-  let socketManager: import('../../../../api/src/infrastructure/websocket/SocketManager').SocketManager;
-  let messageStore: import('../../../../api/src/domains/cats/services/stores/ports/MessageStore').MessageStore;
-  let ingress: import('../../../../api/src/domains/approval-hub/ApprovalIngress').ApprovalIngress;
+  let socketManager: import('../../../../api/dist/infrastructure/websocket/SocketManager').SocketManager;
+  let messageStore: import('../../../../api/dist/domains/cats/services/stores/ports/MessageStore').MessageStore;
+  let ingress: import('../../../../api/dist/domains/approval-hub/ApprovalIngress').ApprovalIngress;
   let useSocket: typeof import('../useSocket').useSocket;
   let useThreadMessages: typeof import('../useThreadScopedSelectors').useThreadMessages;
   let mergeReplaceHydrationMessages: typeof import('../useChatHistory').mergeReplaceHydrationMessages;
@@ -82,9 +82,9 @@ describe('F128 proposal card realtime socket journey', () => {
   async function setUpJourney(activeThreadId = THREAD_ID): Promise<void> {
     vi.resetModules();
     canonicalStatus = 'pending';
-    const { SocketManager } = await import('../../../../api/src/infrastructure/websocket/SocketManager');
-    const { MessageStore } = await import('../../../../api/src/domains/cats/services/stores/ports/MessageStore');
-    const { ApprovalIngress } = await import('../../../../api/src/domains/approval-hub/ApprovalIngress');
+    const { SocketManager } = await import('../../../../api/dist/infrastructure/websocket/SocketManager');
+    const { MessageStore } = await import('../../../../api/dist/domains/cats/services/stores/ports/MessageStore');
+    const { ApprovalIngress } = await import('../../../../api/dist/domains/approval-hub/ApprovalIngress');
 
     messageStore = new MessageStore();
     httpServer = createServer((request, response) => {

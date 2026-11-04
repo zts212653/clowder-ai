@@ -288,6 +288,9 @@ describe('MCP Server Tool Registration', () => {
       'cat_cafe_update_task',
       'cat_cafe_create_task',
       'cat_cafe_create_rich_block',
+      'cat_cafe_offer_suggestion',
+      'cat_cafe_post_action_receipt',
+      'cat_cafe_suggestion_facts',
       'cat_cafe_generate_document',
       'cat_cafe_register_deployment_wait',
       'cat_cafe_register_pr_tracking', // mcp-cutover-negative-reference: absence

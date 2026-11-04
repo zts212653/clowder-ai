@@ -73,6 +73,7 @@
     "zustand": "^4.5.0"
   },
   "devDependencies": {
+    "@cat-cafe/api": "workspace:*",
     "@types/mdast": "4.0.4",
     "@types/node": "^20.11.0",
     "@types/react": "^18.2.0",

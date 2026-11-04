@@ -1,6 +1,7 @@
 'use client';
 import type { ArtifactReviewAnchor, ReviewedMediaAsset } from '@cat-cafe/shared';
 import { type ReactNode, useEffect, useState } from 'react';
+import { useVersionCoverLabels } from '@/components/artifacts/useVersionCoverLabels';
 import { browserTimeToTick, tickToBrowserTime } from '@/components/content-review/review-geometry';
 import { useShellLanguage } from '@/components/shell/shell-language';
 import type { WorkspaceFileNavigationOrigin } from '@/stores/chat-types';
@@ -51,6 +52,7 @@ export function VideoWorkReview({
   const [seconds, setSeconds] = useState(0);
   const [mark, setMark] = useState(0);
   const [selection, setSelection] = useState<{ id: number; anchor: ArtifactReviewAnchor }>();
+  const coverLabel = useVersionCoverLabels(asset.contentRef, latest);
   const versionControl = (
     <>
       {context.error ? (
@@ -67,6 +69,7 @@ export function VideoWorkReview({
         {Array.from({ length: latest }, (_, index) => index + 1).map((revision) => (
           <option key={revision} value={revision}>
             第 {revision} 版 · {revision === latest ? '当前' : '历史'}
+            {coverLabel(revision) ? ` · ${coverLabel(revision)}` : ''}
           </option>
         ))}
       </select>

@@ -36,14 +36,10 @@ export class OwnerDesktop {
   private async showCurrentOrRepair(): Promise<void> {
     const { desktop, inventory, lifecycle } = this.options;
     if (!(await desktop.presence())) {
-      const snapshot = await inventory.snapshot();
-      const candidates = snapshot.instances.filter(
-        (instance) => instance.pluginId === 'official.companion' && instance.lifecycleState === 'installed',
-      );
-      const instance = candidates[0];
-      const pkg = instance && snapshot.packages.find((record) => record.packageDigest === instance.packageDigest);
+      const authority = await inventory.readCurrentAuthority('official.companion');
+      const instance = authority?.instance;
+      const pkg = authority?.packageRecord;
       if (
-        candidates.length !== 1 ||
         !instance ||
         instance.activationState !== 'enabled' ||
         instance.configReadiness !== 'ready' ||
