@@ -9,8 +9,8 @@ tips_exempt: "Internal Codex tool-routing guidance and diagnostic regression; no
 # #1833：区分工具分发失败与 MCP 回调认证失败
 
 来源：[issue #1833](https://github.com/zts212653/clowder-ai/issues/1833)。
-授权：thread `thread_owned_41e2953a8b91b9e6f169f1c58b6fc7d3705bd912`，
-用户消息 `0001793765225939-000048-0eb270ab`：分析、与宪宪讨论方案、由砚砚实现并提交目标 `next` 的 PR。
+修复与验证：[PR #1836](https://github.com/zts212653/clowder-ai/pull/1836)；
+架构复盘：[issue #1846](https://github.com/zts212653/clowder-ai/issues/1846)。
 基线：`upstream/next@faaa1b000ebe0dc6da2aa4c7c09fa80c5be5da43`。
 
 ## 已证实的机制
@@ -55,7 +55,6 @@ code mode 中先查 `ALL_TOOLS`，使用 `tools` 上的完整 key；
 [PR #1824](https://github.com/zts212653/clowder-ai/pull/1824) 处理安装双副本下的 MCP 入口身份，
 与此处已经证明的分发失败分开承接，本 PR 不复制其入口修复。
 
-宪宪在本线程消息 `0001793766924860-000061-7168a53f` 认可最小方案，并要求补验并行路径。
 `route-parallel.ts` 为每只猫创建独立的 `invokeSingleCat` 流，随后用 `mergeStreams` 合并
 已经产出的 `AgentMessage`；这层不转发模型生成的工具调用给 MCP dispatcher。
 新增的并发 fixture 同时启动两个真实 Codex app-server，各自使用不同的凭证与线程身份：
