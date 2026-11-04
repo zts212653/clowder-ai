@@ -38,6 +38,7 @@ vi.mock('@/components/SummaryCard', () => ({ SummaryCard: () => null }));
 vi.mock('@/components/rich/RichBlocks', () => ({ RichBlocks: () => null }));
 
 describe('ChatMessage dual timestamp (deliveredAt)', () => {
+  const initialTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   let container: HTMLDivElement;
   let root: Root;
   let ChatMessage: React.FC<{ message: ChatMessageType; getCatById: (id: string) => CatData | undefined }>;
@@ -55,6 +56,7 @@ describe('ChatMessage dual timestamp (deliveredAt)', () => {
   });
 
   beforeEach(() => {
+    vi.stubEnv('TZ', initialTimeZone);
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -64,6 +66,39 @@ describe('ChatMessage dual timestamp (deliveredAt)', () => {
     act(() => root.unmount());
     container.remove();
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it('uses the current local timezone when a message rerenders after a timezone change', () => {
+    const timestamp = Date.UTC(2026, 10, 3, 20, 0);
+    const deliveredAt = timestamp + 7 * 60_000;
+    const options = { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' } as const;
+    const before = new Date(timestamp).toLocaleString('zh-CN', options);
+    const getCatById = () => undefined;
+    const message: ChatMessageType = {
+      id: 'timezone-message',
+      type: 'user',
+      from: { kind: 'user', userId: 'test-user' },
+      content: 'Before timezone change',
+      timestamp,
+      deliveredAt,
+    };
+    act(() => root.render(React.createElement(ChatMessage, { getCatById, message })));
+    expect(container.textContent).toContain(before);
+
+    vi.stubEnv('TZ', new Date(timestamp).getTimezoneOffset() === 0 ? 'Asia/Shanghai' : 'UTC');
+    const after = new Date(timestamp).toLocaleString('zh-CN', options);
+    expect(after).not.toBe(before);
+    act(() =>
+      root.render(
+        React.createElement(ChatMessage, {
+          getCatById,
+          message: { ...message, content: 'After timezone change' },
+        }),
+      ),
+    );
+    expect(container.textContent).toContain(after);
+    expect(container.textContent).toContain(new Date(deliveredAt).toLocaleString('zh-CN', options));
   });
 
   it('shows dual timestamp when deliveredAt gap > 5s on user message', () => {
