@@ -14,6 +14,7 @@ export default function MemoryPage({ searchParams }: { searchParams: Record<stri
       profileSource={readProfileSourceTarget(searchParams)}
       initialQuery={query}
       findSessionId={findSessionId}
+      matterId={typeof searchParams.matter === 'string' ? searchParams.matter : undefined}
     />
   );
 }

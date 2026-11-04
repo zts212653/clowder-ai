@@ -188,7 +188,11 @@ export function isCanonicalPackageDigest(value: string): boolean {
   return bytes.length === 64 && bytes.toString('base64') === encoded;
 }
 
-function parsePackage(value: unknown, index: number, contract: PackageAdmissionContractRuntime): PluginPackageRecord {
+export function parsePackage(
+  value: unknown,
+  index: number,
+  contract: PackageAdmissionContractRuntime,
+): PluginPackageRecord {
   const raw = object(value, `packages[${index}]`);
   const persistedManifest = raw.manifest === null ? raw.incompatibleManifest : raw.manifest;
   const stored = storedManifest(persistedManifest, `packages[${index}].manifest`);
@@ -231,7 +235,7 @@ function parsePackage(value: unknown, index: number, contract: PackageAdmissionC
   return record;
 }
 
-function parseInstance(value: unknown, index: number): PluginInstanceRecord {
+export function parseInstance(value: unknown, index: number): PluginInstanceRecord {
   const raw = object(value, `instances[${index}]`);
   const record: PluginInstanceRecord = {
     pluginInstanceId: string(raw.pluginInstanceId, `instances[${index}].pluginInstanceId`),

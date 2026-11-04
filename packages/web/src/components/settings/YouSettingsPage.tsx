@@ -3,6 +3,7 @@
 import { ChatBackgroundPicker } from '../chat-background/ChatBackgroundPicker';
 import type { CoCreatorConfig } from '../config-viewer-types';
 import { useShellCopy } from '../shell/shell-copy';
+import { HiddenSuggestionsCard } from '../suggestions/HiddenSuggestionsCard';
 import { ThreadDeletePreferences } from './ThreadDeletePreferences';
 import { YouProfileCard } from './YouProfileCard';
 import { youSettingsCopy } from './you-settings-copy';
@@ -29,6 +30,7 @@ export function YouSettingsPage({
         </div>
         <ChatBackgroundPicker />
       </section>
+      <HiddenSuggestionsCard />
     </div>
   );
 }

@@ -37,7 +37,7 @@ export function ThreadDeleteConfirmDialog({
   return (
     <div
       role="presentation"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--console-overlay-medium)] backdrop-blur-sm"
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-[var(--console-overlay-medium)] backdrop-blur-sm"
       onClick={onCancel}
     >
       <div

@@ -60,7 +60,12 @@ function retainedExecution(
       throw new Error('member_execution_terminal_conflict');
     return existing;
   }
-  return { ...existing, ...next };
+  return {
+    ...existing,
+    ...next,
+    // A stale grant archive must never erase an already-started dispatch.
+    ...(existing.dispatchStarted === true ? { dispatchStarted: true } : {}),
+  };
 }
 
 /** Durable entries have independent bounded values. They are never a second

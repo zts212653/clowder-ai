@@ -144,7 +144,10 @@ test(
     await preference.waitFor();
     assert.equal(await preference.isChecked(), false);
     await preference.check();
-    await page.screenshot({ path: path.join(evidence, '03-preference-restored.png') });
+    await page.waitForFunction(
+      () => document.querySelector('[role="switch"]')?.getAttribute('aria-checked') === 'true',
+    );
+    await page.screenshot({ path: path.join(evidence, '03-preference-restored.png'), animations: 'disabled' });
     await first.hover();
     await first.getByTestId('thread-quick-delete').click();
     await dialog.waitFor();
@@ -158,6 +161,24 @@ test(
     await first.getByTestId('thread-quick-delete').click();
     await dialog.waitFor();
     await page.screenshot({ path: path.join(evidence, '05-narrow-confirm.png') });
+    for (const button of await dialog.getByRole('button').all()) {
+      assert.equal(
+        await button.evaluate((element) => {
+          const box = element.getBoundingClientRect();
+          const middleX = (box.left + box.right) / 2;
+          const middleY = (box.top + box.bottom) / 2;
+          return [
+            [middleX, middleY],
+            [box.left + 2, middleY],
+            [box.right - 2, middleY],
+            [middleX, box.top + 2],
+            [middleX, box.bottom - 2],
+          ].every(([x, y]) => element.contains(document.elementFromPoint(x, y)));
+        }),
+        true,
+        'the whole confirmation action remains reachable while deletion notifications are visible',
+      );
+    }
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
     await page.keyboard.press('Escape');
     const storageState = await context.storageState();

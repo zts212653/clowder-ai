@@ -1,15 +1,15 @@
 const { readFileSync } = require('node:fs');
 const { resolve } = require('node:path');
 const postcss = require('postcss');
-const files = require('../../../scripts/app-global-styles.json');
-const roles = require('./surface-roles.json');
+const files = require('../app-global-styles.json');
+const roles = require('../../src/components/chat-background/surface-roles.json');
 
 /** Standard CSS role declarations decorate existing paint. Native app links keep
  * their ordinary CSS; their decorations join globals.css, while modules compile in place. */
 module.exports = () => ({
   postcssPlugin: 'cafe-surface-declarations',
   Once(root, { result }) {
-    const webRoot = resolve(__dirname, '../../..');
+    const webRoot = resolve(__dirname, '../..');
     if (root.source?.input.file === resolve(webRoot, 'src/app/globals.css')) {
       result.messages.push({
         type: 'dependency',
