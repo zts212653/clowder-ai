@@ -25,7 +25,7 @@ async function fixture(
   return { root, directory };
 }
 
-test('uses the Host-adjacent Corepack with the repository exact pnpm version for install and build', async (t) => {
+test('uses the Host-adjacent Corepack and pins lifecycle pnpm resolution for install and build', async (t) => {
   const f = await fixture(t);
   const calls = [];
 
@@ -44,6 +44,10 @@ test('uses the Host-adjacent Corepack with the repository exact pnpm version for
     [
       {
         command: '/opt/clowder/node/bin/corepack',
+        args: ['enable', 'pnpm', '--install-directory', calls[0].args[3]],
+      },
+      {
+        command: '/opt/clowder/node/bin/corepack',
         args: ['pnpm@9.15.4', 'install', '--frozen-lockfile'],
       },
       {
@@ -52,7 +56,11 @@ test('uses the Host-adjacent Corepack with the repository exact pnpm version for
       },
     ],
   );
-  const env = calls[0].options.env;
+  const shimDirectory = calls[0].args[3];
+  assert.equal(typeof shimDirectory, 'string');
+  assert.equal(calls[1].options.env.PATH.split(':')[0], shimDirectory);
+  assert.equal(calls[2].options.env.PATH.split(':')[0], shimDirectory);
+  const env = calls[1].options.env;
   assert.equal(env.CI, 'true');
   assert.equal(env.COREPACK_ENABLE_DOWNLOAD_PROMPT, '0');
   assert.equal(env.COREPACK_ENABLE_PROJECT_SPEC, '1');
@@ -73,12 +81,16 @@ test('resolves the Windows Corepack shim adjacent to the Host Node before spawni
       return { command: 'C:\\Clowder\\runtime\\node.exe', args: ['corepack.js', ...args], shell: undefined };
     },
     exec: async (command, args, options) => {
-      calls.push({ command, args, shell: options.shell });
+      calls.push({ command, args, shell: options.shell, envPath: options.env.PATH });
       return { stdout: '', stderr: '' };
     },
   });
 
   assert.deepEqual(plans, [
+    {
+      command: 'C:\\Clowder\\runtime\\corepack.cmd',
+      args: ['enable', 'pnpm', '--install-directory', plans[0].args[3]],
+    },
     {
       command: 'C:\\Clowder\\runtime\\corepack.cmd',
       args: ['pnpm@9.15.4', 'install', '--frozen-lockfile'],
@@ -87,8 +99,15 @@ test('resolves the Windows Corepack shim adjacent to the Host Node before spawni
   assert.deepEqual(calls, [
     {
       command: 'C:\\Clowder\\runtime\\node.exe',
+      args: ['corepack.js', 'enable', 'pnpm', '--install-directory', plans[0].args[3]],
+      shell: undefined,
+      envPath: process.env.PATH,
+    },
+    {
+      command: 'C:\\Clowder\\runtime\\node.exe',
       args: ['corepack.js', 'pnpm@9.15.4', 'install', '--frozen-lockfile'],
       shell: undefined,
+      envPath: process.env.PATH ? `${plans[0].args[3]};${process.env.PATH}` : plans[0].args[3],
     },
   ]);
 });
@@ -157,6 +176,36 @@ test('reports bounded sanitized child diagnostics without leaking credentials or
       assert.doesNotMatch(error.diagnostic.stderrExcerpt, /github_pat_|alice/);
       assert.ok(error.diagnostic.stderrExcerpt.length <= 1_000);
       assert.doesNotMatch(error.message, /github_pat_|alice/);
+      return true;
+    },
+  );
+});
+
+test('uses sanitized stdout when pnpm fails without stderr output', async (t) => {
+  const f = await fixture(t, undefined, { name: '@example/demo' });
+  const token = `github_pat_${'B'.repeat(82)}`;
+  let invocation = 0;
+
+  await assert.rejects(
+    prepareMarketplaceDirectory(f.directory, f.root, {
+      platform: 'linux',
+      execPath: '/opt/clowder/node/bin/node',
+      exists: () => true,
+      exec: async () => {
+        invocation += 1;
+        if (invocation === 1) return { stdout: '', stderr: '' };
+        throw Object.assign(new Error('raw command failure'), {
+          code: 1,
+          stderr: '',
+          stdout: `ERR_PNPM_OUTDATED_LOCKFILE token=${token}`,
+        });
+      },
+    }),
+    (error) => {
+      assert.ok(error instanceof MarketplacePreparationError);
+      assert.match(error.diagnostic.stderrExcerpt, /ERR_PNPM_OUTDATED_LOCKFILE/);
+      assert.match(error.diagnostic.stderrExcerpt, /\[TOKEN_REDACTED\]/);
+      assert.doesNotMatch(error.diagnostic.stderrExcerpt, /github_pat_/);
       return true;
     },
   );

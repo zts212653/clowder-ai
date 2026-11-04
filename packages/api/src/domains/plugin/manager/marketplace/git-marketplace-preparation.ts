@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join, posix, win32 } from 'node:path';
 import { promisify } from 'node:util';
 import { resolveWindowsSpawnPlan } from '../../../../utils/cli-spawn-win.js';
@@ -60,21 +61,23 @@ function hostCorepackPath(platform: NodeJS.Platform, execPath: string): string {
   return path.join(path.dirname(execPath), platform === 'win32' ? 'corepack.cmd' : 'corepack');
 }
 
+function outputText(value: unknown): string {
+  if (typeof value === 'string') return value;
+  return Buffer.isBuffer(value) ? value.toString('utf8') : '';
+}
+
 function childFailure(
   error: unknown,
   packageManager: string,
   phase: MarketplacePreparationDiagnostic['phase'],
   root: string,
 ): MarketplacePreparationError {
-  const record = error && typeof error === 'object' ? (error as { code?: unknown; stderr?: unknown }) : undefined;
+  const record =
+    error && typeof error === 'object' ? (error as { code?: unknown; stderr?: unknown; stdout?: unknown }) : undefined;
   const exitCode = typeof record?.code === 'number' ? record.code : null;
-  const rawStderr =
-    typeof record?.stderr === 'string'
-      ? record.stderr
-      : Buffer.isBuffer(record?.stderr)
-        ? record.stderr.toString('utf8')
-        : '';
-  const stderrExcerpt = excerptSanitizedStderr(rawStderr, {
+  const rawStderr = outputText(record?.stderr);
+  const rawDiagnostic = rawStderr.trim() ? rawStderr : outputText(record?.stdout);
+  const stderrExcerpt = excerptSanitizedStderr(rawDiagnostic, {
     edge: 'head',
     maxLength: 1_000,
     additionalHomePaths: [root],
@@ -110,37 +113,66 @@ export async function prepareMarketplaceDirectory(
   }
   const packageManager = exactPnpmPackageManager(rootPkg?.packageManager);
   const corepack = hostCorepackPath(platform, deps.execPath ?? process.execPath);
-  if (!(deps.exists ?? existsSync)(corepack)) {
+  const path = platform === 'win32' ? win32 : posix;
+  const pathExists = deps.exists ?? existsSync;
+  if (!pathExists(corepack)) {
     throw new Error('Marketplace preparation requires the Host-bundled Corepack executable');
   }
-  const options = {
+  const baseEnv = {
+    ...process.env,
+    CI: 'true',
+    COREPACK_ENABLE_DOWNLOAD_PROMPT: '0',
+    COREPACK_ENABLE_PROJECT_SPEC: '1',
+    COREPACK_ENABLE_STRICT: '1',
+  };
+  const baseOptions = {
     cwd: root,
-    env: {
-      ...process.env,
-      CI: 'true',
-      COREPACK_ENABLE_DOWNLOAD_PROMPT: '0',
-      COREPACK_ENABLE_PROJECT_SPEC: '1',
-      COREPACK_ENABLE_STRICT: '1',
-    },
+    env: baseEnv,
     encoding: 'utf8',
     timeout: 180_000,
     maxBuffer: 4 * 1024 * 1024,
     windowsHide: true,
   };
   const runExec = deps.exec ?? exec;
-  // This is the repository's existing pnpm workspace preparation. In particular,
-  // its postinstall restores retained SDK graphs before directory admission.
-  const run = async (phase: MarketplacePreparationDiagnostic['phase'], args: string[]) => {
-    const corepackArgs = [packageManager, ...args];
+  const runCorepack = async (
+    phase: MarketplacePreparationDiagnostic['phase'],
+    args: string[],
+    options: Record<string, unknown>,
+  ) => {
     try {
       if (platform === 'win32') {
-        const plan = (deps.windowsSpawnPlan ?? resolveWindowsSpawnPlan)(corepack, corepackArgs);
+        const plan = (deps.windowsSpawnPlan ?? resolveWindowsSpawnPlan)(corepack, args);
         await runExec(plan.command, plan.args, { ...options, ...(plan.shell ? { shell: plan.shell } : {}) });
-      } else await runExec(corepack, corepackArgs, options);
+      } else await runExec(corepack, args, options);
     } catch (error) {
       throw childFailure(error, packageManager, phase, root);
     }
   };
-  await run('install', ['install', '--frozen-lockfile']);
-  if (pkg.scripts?.build) await run('build', ['--filter', `${pkg.name}...`, 'build']);
+
+  const shimDirectory = await mkdtemp(join(tmpdir(), 'clowder-marketplace-pnpm-'));
+  try {
+    await runCorepack('install', ['enable', 'pnpm', '--install-directory', shimDirectory], baseOptions);
+    const pnpmShim = path.join(shimDirectory, platform === 'win32' ? 'pnpm.cmd' : 'pnpm');
+    if (!pathExists(pnpmShim)) {
+      throw new Error('Host Corepack did not create the isolated pnpm shim');
+    }
+    const inheritedPath = process.env.PATH;
+    const lifecycleEnv = Object.fromEntries(Object.entries(baseEnv).filter(([key]) => key.toUpperCase() !== 'PATH'));
+    const options = {
+      ...baseOptions,
+      env: {
+        ...lifecycleEnv,
+        PATH: inheritedPath ? `${shimDirectory}${path.delimiter}${inheritedPath}` : shimDirectory,
+      },
+    };
+    // This is the repository's existing pnpm workspace preparation. In particular,
+    // its postinstall restores retained SDK graphs before directory admission. The
+    // isolated shim also pins bare pnpm invocations made by lifecycle subprocesses.
+    await runCorepack('install', [packageManager, 'install', '--frozen-lockfile'], options);
+    if (pkg.scripts?.build) {
+      await runCorepack('build', [packageManager, '--filter', `${pkg.name}...`, 'build'], options);
+    }
+  } finally {
+    await rm(shimDirectory, { recursive: true, force: true });
+  }
 }
