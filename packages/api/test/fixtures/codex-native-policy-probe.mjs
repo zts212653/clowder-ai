@@ -10,6 +10,7 @@ const MCP_ENV_KEYS = [
   'CAT_CAFE_API_URL',
   'CAT_CAFE_INVOCATION_ID',
   'CAT_CAFE_CALLBACK_TOKEN',
+  'CAT_CAFE_CREDENTIAL_FILE',
   'CAT_CAFE_USER_ID',
   'CAT_CAFE_CAT_ID',
   'CAT_CAFE_THREAD_ID',
@@ -22,6 +23,7 @@ export async function probeCodexNativePolicy({
   codeMode = false,
   nativeSubtask = false,
   carrier = 'exec_json',
+  credentialFile = false,
   requestedCall,
   prepare,
 } = {}) {
@@ -238,6 +240,17 @@ export async function probeCodexNativePolicy({
     CAT_CAFE_CAT_ID: 'codex-astra',
     CAT_CAFE_THREAD_ID: 'probe-thread',
   };
+  if (credentialFile) {
+    env.CAT_CAFE_CREDENTIAL_FILE = join(root, 'mcp-credentials.json');
+    await writeFile(
+      env.CAT_CAFE_CREDENTIAL_FILE,
+      JSON.stringify({
+        invocationId: env.CAT_CAFE_INVOCATION_ID,
+        callbackToken: env.CAT_CAFE_CALLBACK_TOKEN,
+      }),
+    );
+    delete env.CAT_CAFE_CALLBACK_TOKEN;
+  }
   const mcp = [
     '--config',
     'mcp_servers.cat-cafe-collab.command=' + JSON.stringify(process.execPath),
