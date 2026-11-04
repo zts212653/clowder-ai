@@ -3560,7 +3560,9 @@ export class MessageStore {
       !message.deletedAt &&
       isVisible(message) &&
       (!userId || message.userId === userId || isSystemUserMessage(message));
-    if (options?.artifactProjection) {
+    // Redis serves both projections from the thread index and differs only in
+    // the selected hash fields; mirror that window here for either projection.
+    if (options?.artifactProjection || options?.recipientProjection) {
       const page = this.threadTimeline.readBefore(threadId, timestamp, beforeId, rawLimit);
       return { ...page, messages: page.messages.filter(visible) };
     }

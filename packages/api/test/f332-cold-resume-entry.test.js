@@ -24,6 +24,9 @@ const { buildTombstone, formatTombstone, buildTombstoneCoordinates } = await imp
 );
 const { formatNavigationHeader } = await import('../dist/domains/cats/services/agents/routing/navigation-context.js');
 const { resolveResumeStopPoint } = await import('../dist/domains/cats/services/agents/routing/resume-stop-point.js');
+const { MESSAGE_RECIPIENT_FIELDS } = await import(
+  '../dist/domains/cats/services/stores/redis/redis-message-recipient-fields.js'
+);
 
 const THREAD = 'thread-cold-resume';
 const USER = 'user-cold-resume';
@@ -303,14 +306,20 @@ describe('M1b: resolveResumeStopPoint reads the original lifecycle records', () 
     assert.deepEqual(result.stopPoint.sourceMessageIds, [request.id]);
   });
 
-  test('the main scan requests the thread-index artifact projection and needs no bodies', async () => {
+  test('the main scan requests only the recipient projection and resolves from recipient fields alone', async () => {
     const calls = [];
-    const projectedReply = {
+    const fullReply = {
       id: 'resp-projected',
       threadId: THREAD,
       userId: USER,
       from: { kind: 'agent', catId: CAT },
       catId: CAT,
+      content: 'reply body',
+      contentBlocks: [{ type: 'text', text: 'block body' }],
+      thinking: 'thinking',
+      metadata: { provider: 'test' },
+      toolEvents: [{ type: 'tool_use', label: 'tool payload' }],
+      replyTo: 'src-projected',
       timestamp: 11,
       deliveryStatus: 'delivered',
       lifecycle: {
@@ -325,6 +334,12 @@ describe('M1b: resolveResumeStopPoint reads the original lifecycle records', () 
         completedAt: 11,
       },
     };
+    // Exactly the row shape Redis returns for recipientProjection (HMGET MESSAGE_RECIPIENT_FIELDS).
+    const projectedReply = Object.fromEntries(
+      MESSAGE_RECIPIENT_FIELDS.filter((field) => field in fullReply).map((field) => [field, fullReply[field]]),
+    );
+    for (const field of ['content', 'contentBlocks', 'thinking', 'metadata', 'toolEvents', 'replyTo'])
+      assert.equal(field in projectedReply, false, `recipient rows carry no ${field}`);
     const source = {
       id: 'src-projected',
       threadId: THREAD,
@@ -350,9 +365,13 @@ describe('M1b: resolveResumeStopPoint reads the original lifecycle records', () 
     });
     assert.equal(calls.length, 1);
     assert.equal(calls[0][0], THREAD);
-    assert.deepEqual(calls[0][6], { artifactProjection: true }, 'main scan must use the narrow thread-index read');
-    assert.equal('content' in projectedReply, false, 'resolution depends on metadata only');
+    assert.deepEqual(
+      calls[0][6],
+      { recipientProjection: true },
+      'main scan must use the recipient thread-index read: no bodies, no contentBlocks, not both projections',
+    );
     assert.equal(result.kind, 'found');
+    assert.equal(result.stopPoint.responseMessageId, 'resp-projected');
     assert.deepEqual(result.stopPoint.sourceMessageIds, ['src-projected']);
   });
 
