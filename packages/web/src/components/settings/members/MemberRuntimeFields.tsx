@@ -95,6 +95,10 @@ export function MemberRuntimeFields({
   const defaultModel = catalog?.defaultModel ?? (!form.accountRef ? selected?.configuredModel : undefined);
   const defaultModelLabel =
     catalog?.defaultModelLabel ?? catalog?.models.find((item) => item.value === defaultModel)?.label ?? defaultModel;
+  const defaultModelSource =
+    catalog?.defaultModelSource === 'client_report'
+      ? t('客户端回报', 'Client report')
+      : t('本地配置', 'Local configuration');
   const models = catalog?.models.length
     ? catalog.models
     : (form.accountRef ? (identity?.models ?? []) : (selected?.models ?? [])).map((value) => ({ value, label: value }));
@@ -245,9 +249,7 @@ export function MemberRuntimeFields({
           options={models}
           onChange={(defaultModel) => patch({ defaultModel })}
           inheritLabel={follow}
-          inheritDetail={
-            defaultModel !== undefined ? t(`配置：${defaultModelLabel}`, `Configured: ${defaultModelLabel}`) : undefined
-          }
+          inheritDetail={defaultModel !== undefined ? `${defaultModelSource}：${defaultModelLabel}` : undefined}
           searchable
           allowCustom
           english={t('zh', 'en') === 'en'}
@@ -279,13 +281,7 @@ export function MemberRuntimeFields({
               : form.cliEffort ||
                 (catalog?.thinkingEnabled === false ? t('思考已关闭', 'Thinking off') : defaultEffortLabel)
           }
-          modelSource={
-            form.defaultModel
-              ? t('成员设置', 'Member preference')
-              : catalog?.defaultModelSource === 'client_report'
-                ? t('客户端回报', 'Client report')
-                : t('本地配置', 'Local configuration')
-          }
+          modelSource={form.defaultModel ? t('成员设置', 'Member preference') : defaultModelSource}
           effortSource={
             form.cliEffort
               ? t('成员设置', 'Member preference')

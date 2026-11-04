@@ -79,7 +79,10 @@ export function parseAcpCatalog(session: unknown, defaults: unknown, _requested?
         ? 'unavailable'
         : 'reported';
   const defaultModel = defaultModelStatus === 'reported' ? reportedDefault : undefined;
-  const defaultModelLabel = nativeModels.find((item) => item.value === defaultModel)?.label;
+  const defaultChoice = nativeModels.find((item) => item.value === defaultModel);
+  const defaultModelLabel = defaultChoice
+    ? [defaultChoice.group, defaultChoice.label].filter(Boolean).join(' / ')
+    : undefined;
   const models = model
     ? acpChoices(model.options)
     : rows(legacy.availableModels).flatMap((item) =>
