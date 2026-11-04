@@ -8,6 +8,11 @@ import {
   prepareMarketplaceDirectory,
 } from '../dist/domains/plugin/manager/marketplace/git-marketplace-preparation.js';
 
+function readPath(env) {
+  const key = Object.keys(env).find((candidate) => candidate.toUpperCase() === 'PATH');
+  return key ? env[key] : undefined;
+}
+
 async function fixture(
   t,
   rootManifest = { name: 'marketplace', packageManager: 'pnpm@9.15.4' },
@@ -58,8 +63,9 @@ test('uses the Host-adjacent Corepack and pins lifecycle pnpm resolution for ins
   );
   const shimDirectory = calls[0].args[3];
   assert.equal(typeof shimDirectory, 'string');
-  assert.equal(calls[1].options.env.PATH.split(':')[0], shimDirectory);
-  assert.equal(calls[2].options.env.PATH.split(':')[0], shimDirectory);
+  const expectedPath = process.env.PATH ? `${shimDirectory}:${process.env.PATH}` : shimDirectory;
+  assert.equal(readPath(calls[1].options.env), expectedPath);
+  assert.equal(readPath(calls[2].options.env), expectedPath);
   const env = calls[1].options.env;
   assert.equal(env.CI, 'true');
   assert.equal(env.COREPACK_ENABLE_DOWNLOAD_PROMPT, '0');
@@ -81,7 +87,7 @@ test('resolves the Windows Corepack shim adjacent to the Host Node before spawni
       return { command: 'C:\\Clowder\\runtime\\node.exe', args: ['corepack.js', ...args], shell: undefined };
     },
     exec: async (command, args, options) => {
-      calls.push({ command, args, shell: options.shell, envPath: options.env.PATH });
+      calls.push({ command, args, shell: options.shell, envPath: readPath(options.env) });
       return { stdout: '', stderr: '' };
     },
   });
@@ -206,6 +212,39 @@ test('uses sanitized stdout when pnpm fails without stderr output', async (t) =>
       assert.match(error.diagnostic.stderrExcerpt, /ERR_PNPM_OUTDATED_LOCKFILE/);
       assert.match(error.diagnostic.stderrExcerpt, /\[TOKEN_REDACTED\]/);
       assert.doesNotMatch(error.diagnostic.stderrExcerpt, /github_pat_/);
+      return true;
+    },
+  );
+});
+
+test('preserves both output streams and redacts basic-auth URLs before bounding diagnostics', async (t) => {
+  const f = await fixture(t, undefined, { name: '@example/demo' });
+  let invocation = 0;
+
+  await assert.rejects(
+    prepareMarketplaceDirectory(f.directory, f.root, {
+      platform: 'linux',
+      execPath: '/opt/clowder/node/bin/node',
+      exists: () => true,
+      exec: async () => {
+        invocation += 1;
+        if (invocation === 1) return { stdout: '', stderr: '' };
+        throw Object.assign(new Error('raw command failure'), {
+          code: 7,
+          stderr: 'Warning: deprecated SDK helper',
+          stdout: 'ERR_ACTUAL_BUILD_FAILURE https://alice:review-password@registry.example.test/private.tgz',
+        });
+      },
+    }),
+    (error) => {
+      assert.ok(error instanceof MarketplacePreparationError);
+      assert.equal(error.diagnostic.exitCode, 7);
+      assert.match(error.diagnostic.stderrExcerpt, /Warning: deprecated SDK helper/);
+      assert.match(error.diagnostic.stderrExcerpt, /ERR_ACTUAL_BUILD_FAILURE/);
+      assert.match(error.diagnostic.stderrExcerpt, /\[CREDENTIALS_REDACTED\]/);
+      assert.doesNotMatch(error.diagnostic.stderrExcerpt, /alice|review-password/);
+      assert.doesNotMatch(error.message, /alice|review-password/);
+      assert.ok(error.diagnostic.stderrExcerpt.length <= 1_000);
       return true;
     },
   );

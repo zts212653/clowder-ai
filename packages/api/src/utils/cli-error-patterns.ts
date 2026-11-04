@@ -34,6 +34,7 @@ const JWT = /eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g;
 const PEM = /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g;
 
 // URL query — everything after ? until whitespace or closing quote/paren
+const URL_USERINFO = /(\b[a-z][a-z0-9+.-]*:\/\/)[^/\s'"<>@]+@/gi;
 const URL_QUERY = /(\?)([^\s'"<>)]+)/g;
 // URL fragment — OAuth implicit/callback flows often place access_token/state after #.
 // Redact only fragments carrying sensitive keys so ordinary issue anchors remain readable.
@@ -69,6 +70,7 @@ export const SANITIZER_PATTERNS = {
   osc: OSC,
   jwt: JWT,
   pem: PEM,
+  urlUserinfo: URL_USERINFO,
   urlQuery: URL_QUERY,
   urlFragment: URL_FRAGMENT,
   cookieHeader: COOKIE_HEADER,

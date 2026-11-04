@@ -66,6 +66,26 @@ function outputText(value: unknown): string {
   return Buffer.isBuffer(value) ? value.toString('utf8') : '';
 }
 
+function boundedChildOutput(stderr: string, stdout: string, root: string): string {
+  const sanitizerOptions = { edge: 'head' as const, additionalHomePaths: [root] };
+  if (!stderr.trim()) {
+    return excerptSanitizedStderr(stdout, { ...sanitizerOptions, maxLength: 1_000 });
+  }
+  if (!stdout.trim()) {
+    return excerptSanitizedStderr(stderr, { ...sanitizerOptions, maxLength: 1_000 });
+  }
+
+  const stderrLabel = 'stderr: ';
+  const stdoutLabel = 'stdout: ';
+  const separator = '\n';
+  const outputBudget = 1_000 - stderrLabel.length - stdoutLabel.length - separator.length;
+  const stderrBudget = Math.floor(outputBudget / 2);
+  const stdoutBudget = outputBudget - stderrBudget;
+  const stderrExcerpt = excerptSanitizedStderr(stderr, { ...sanitizerOptions, maxLength: stderrBudget });
+  const stdoutExcerpt = excerptSanitizedStderr(stdout, { ...sanitizerOptions, maxLength: stdoutBudget });
+  return `${stderrLabel}${stderrExcerpt}${separator}${stdoutLabel}${stdoutExcerpt}`;
+}
+
 function childFailure(
   error: unknown,
   packageManager: string,
@@ -76,12 +96,7 @@ function childFailure(
     error && typeof error === 'object' ? (error as { code?: unknown; stderr?: unknown; stdout?: unknown }) : undefined;
   const exitCode = typeof record?.code === 'number' ? record.code : null;
   const rawStderr = outputText(record?.stderr);
-  const rawDiagnostic = rawStderr.trim() ? rawStderr : outputText(record?.stdout);
-  const stderrExcerpt = excerptSanitizedStderr(rawDiagnostic, {
-    edge: 'head',
-    maxLength: 1_000,
-    additionalHomePaths: [root],
-  });
+  const stderrExcerpt = boundedChildOutput(rawStderr, outputText(record?.stdout), root);
   const diagnostic: MarketplacePreparationDiagnostic = {
     packageManager,
     phase,

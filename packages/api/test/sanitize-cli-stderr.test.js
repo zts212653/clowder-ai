@@ -92,6 +92,14 @@ test('redacts URL query string entirely', () => {
   assert.ok(!out.includes('sk-abc123def456ghijklmnop'), `token leaked via query: ${out}`);
 });
 
+test('redacts URL userinfo credentials while retaining the destination host', () => {
+  const input = 'ERR_PNPM_NO_OFFLINE_TARBALL https://alice:review-password@registry.example.test/pkg.tgz';
+  const out = sanitizeCliStderr(input);
+  assert.ok(out.includes('https://[CREDENTIALS_REDACTED]@registry.example.test/pkg.tgz'), out);
+  assert.ok(!out.includes('alice'), `URL username leaked: ${out}`);
+  assert.ok(!out.includes('review-password'), `URL password leaked: ${out}`);
+});
+
 test('redacts URL fragment string entirely', () => {
   const input =
     'Open https://accounts.google.com/o/oauth2/auth#state=very-secret-state&access_token=ya29.AGYAccessToken';
