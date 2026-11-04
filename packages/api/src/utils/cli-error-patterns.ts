@@ -33,8 +33,10 @@ const JWT = /eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g;
 // PEM block: -----BEGIN ... PRIVATE KEY----- to matching END
 const PEM = /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g;
 
+// URL userinfo. Anchoring the scheme after a non-scheme character prevents the
+// engine from retrying an unbounded scheme prefix at every word boundary.
+const URL_USERINFO = /(^|[^a-z0-9+.-])([a-z][a-z0-9+.-]*:\/\/)[^/\s'"<>@]+@/gi;
 // URL query — everything after ? until whitespace or closing quote/paren
-const URL_USERINFO = /(\b[a-z][a-z0-9+.-]*:\/\/)[^/\s'"<>@]+@/gi;
 const URL_QUERY = /(\?)([^\s'"<>)]+)/g;
 // URL fragment — OAuth implicit/callback flows often place access_token/state after #.
 // Redact only fragments carrying sensitive keys so ordinary issue anchors remain readable.
