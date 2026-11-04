@@ -7,7 +7,8 @@ import { formatPromptTime } from '../../format-time.js';
 import { messageFrom } from '../../stores/message-from.js';
 import type { ThreadExecutionSituation } from '../invocation/thread-execution-situation.js';
 import type { ResumeStopPointLookup, ResumeStopPointStatus } from './resume-stop-point.js';
-import { formatThreadContextDrill, formatThreadMessageDrill } from './thread-drill-pointer.js';
+import type { ResumeWorkLookup } from './resume-work-tasks.js';
+import { formatThreadContextDrill, formatThreadMessageDrill, formatThreadTasksDrill } from './thread-drill-pointer.js';
 
 export interface BatonContext {
   fromMessageId: string;
@@ -119,6 +120,30 @@ export interface NavigationContext {
    * in the thread. A locating clue only — not current work, authority or text.
    */
   resumeStopPoint?: ResumeStopPointLookup;
+  /**
+   * F332 Phase B, plan step D: on a canonical cold turn, the current state of
+   * this cat's own ended work Tasks, which the active list hides. Read-only
+   * Task owner state with that owner's reader as the entry — not an instruction.
+   */
+  resumeWork?: ResumeWorkLookup;
+}
+
+/** A Task title is free text (1–200 chars, line breaks allowed); render it as one line. */
+function navigationTaskTitle(title: string): string {
+  return title.replace(/\s+/gu, ' ').trim();
+}
+
+function buildResumeWorkLines(ctx: NavigationContext): string[] {
+  const lookup = ctx.resumeWork;
+  if (!lookup || lookup.kind === 'none') return [];
+  if (lookup.kind === 'unavailable') return ['你在本线程的工作状态: 当前无法读取 Task（不按旧回复推断）'];
+  const lines = ['你在本线程已结束的工作（Task 当前状态；停点和旧回复只是历史）:'];
+  for (const task of lookup.tasks) lines.push(`  - [${task.status}] ${navigationTaskTitle(task.title)}`);
+  if (lookup.omittedCount > 0) lines.push(`  （另有 ${lookup.omittedCount} 项未列出）`);
+  if (ctx.threadId && ctx.currentCatId) {
+    lines.push(`读当前状态: ${formatThreadTasksDrill(ctx.threadId, ctx.currentCatId)}`);
+  }
+  return lines;
 }
 
 const STOP_POINT_STATUS_LABEL: Record<ResumeStopPointStatus, string> = {
@@ -202,6 +227,7 @@ function buildNavigationInner(ctx: NavigationContext, options?: NavigationFormat
   }
 
   lines.push(...buildResumeStopPointLines(ctx, coCreatorTimeZone));
+  lines.push(...buildResumeWorkLines(ctx));
 
   if (ctx.tasks.length > 0) {
     lines.push('活跃毛线球:');
@@ -209,7 +235,7 @@ function buildNavigationInner(ctx: NavigationContext, options?: NavigationFormat
       const owner = t.ownerCatId ? `@${t.ownerCatId}` : '未分配';
       const waitFact =
         t.ownerCatId === ctx.currentCatId && t.status !== 'done' && t.hasActiveWait === false ? ' [未挂等待]' : '';
-      lines.push(`  - [${t.status}] ${t.title} (${owner})${waitFact}`);
+      lines.push(`  - [${t.status}] ${navigationTaskTitle(t.title)} (${owner})${waitFact}`);
     }
   }
 

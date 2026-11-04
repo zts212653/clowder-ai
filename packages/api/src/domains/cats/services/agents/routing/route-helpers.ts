@@ -91,6 +91,7 @@ import { legacyBatonHasSucceededReply, recoverableDeliveryBoundary } from './del
 import type { HumanDispositionInvocationOrigin } from './human-disposition-invocation-origin.js';
 import { extractBatonContext, formatNavigationHeader, summarizeActiveTasks } from './navigation-context.js';
 import { resolveResumeStopPoint } from './resume-stop-point.js';
+import { resolveEndedOwnWork } from './resume-work-tasks.js';
 import { isSameUserWaveSiblingReply } from './same-user-wave-sibling.js';
 import { projectRankedSource, rankArtifactSources, selectDirectiveSources } from './source-ranking.js';
 import { resolveReachableArtifactRefs } from './source-reachability.js';
@@ -1924,9 +1925,12 @@ async function assembleIncrementalContextInternal(
   if (baton?.fromSpeaker === 'user' && baton.fromMessageId === currentUserMessageId) baton = null;
   let activeTasks: import('./navigation-context.js').TaskSummary[] = [];
   let allThreadTasks: import('./artifact-tracking.js').ArtifactExtractionInput['prTasks'] = [];
+  /** This packet's read of the thread's Tasks; undefined when there is no store or the read failed. */
+  let threadTasks: readonly import('@cat-cafe/shared').TaskItem[] | undefined;
   if (deps.taskStore) {
     try {
       const tasks = await Promise.resolve(deps.taskStore.listByThread(threadId));
+      threadTasks = tasks;
       activeTasks = summarizeActiveTasks(tasks);
       allThreadTasks = tasks;
       if (deps.ownedWaitStatusReader) {
@@ -2014,6 +2018,14 @@ async function assembleIncrementalContextInternal(
     options?.contextProjection?.contextMode === 'cold'
       ? await resolveResumeStopPoint({ messageStore: deps.messageStore, threadId, userId, catId, viewer })
       : undefined;
+  // F332 Phase B, plan step D: the active list hides ended Tasks, and S3-A/B
+  // both restarted `done` work after a cold “接着做”. Show the current state of
+  // this cat's own ended work from the rows read above, through the canonical
+  // Task query; independent of the stop point so the two increments stay apart.
+  const resumeWork =
+    options?.contextProjection?.contextMode === 'cold' && deps.taskStore
+      ? await resolveEndedOwnWork({ threadTasks, threadId, userId, catId })
+      : undefined;
   const navigationHeader = formatNavigationHeader({
     threadId,
     currentCatId: catId,
@@ -2028,6 +2040,7 @@ async function assembleIncrementalContextInternal(
     truthSource: topSource ? { label: topSource.label, ref: topSource.ref, provenance: topSource.provenance } : null,
     bestNextSource,
     ...(resumeStopPoint ? { resumeStopPoint } : {}),
+    ...(resumeWork ? { resumeWork } : {}),
   });
 
   log.info({
@@ -2037,6 +2050,7 @@ async function assembleIncrementalContextInternal(
     hasBaton: baton !== null,
     batonFrom: baton?.fromSpeakerDisplay ?? null,
     taskCount: activeTasks.length,
+    resumeWork: resumeWork?.kind ?? null,
     artifactCount: recentArtifacts.length,
     headerLength: navigationHeader.length,
     unseenCount: unseen.length,

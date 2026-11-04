@@ -7,6 +7,11 @@ export function formatThreadMessageDrill(threadId: string, messageId: string): s
   return `cat_cafe_get_thread_context({ threadId: ${JSON.stringify(threadId)}, messageId: ${JSON.stringify(messageId)}, responseMode: "full" })`;
 }
 
+/** The original Task reader for one owner cat's work in one thread (F332 Phase B, plan step D). */
+export function formatThreadTasksDrill(threadId: string, catId: string): string {
+  return `cat_cafe_list_tasks({ threadId: ${JSON.stringify(threadId)}, catId: ${JSON.stringify(catId)} })`;
+}
+
 export function formatThreadDrill(threadId: string, semanticSearchTerms?: readonly string[]): string {
   const query = semanticSearchTerms
     ?.map((term) => term.trim())
