@@ -33,6 +33,7 @@ it.each([
             defaultModel: 'opaque',
             defaultModelLabel: 'Custom Gateway / Model',
             defaultModelStatus: 'reported',
+            defaultModelSource: 'client_report',
           }),
         ),
       ),
@@ -73,6 +74,7 @@ it.each([
         models: [{ value: model, label: model }],
         defaultModel: model,
         defaultModelStatus: 'reported',
+        defaultModelSource: 'client_report',
       }),
     );
   const snapshot = () => JSON.parse(host.textContent || '{}');
@@ -128,6 +130,7 @@ it('shows the reported ACP route on the inherited model choice without changing 
                     defaultModel: 'opaque',
                     defaultModelLabel: 'Custom Gateway / Model',
                     defaultModelStatus: 'reported',
+                    defaultModelSource: 'client_report',
                   },
           ),
         );
@@ -165,7 +168,9 @@ it('shows the reported ACP route on the inherited model choice without changing 
     const inspect = [...host.querySelectorAll('button')].find((button) => button.textContent === '读取 DSH 配置');
     await act(async () => inspect?.click());
     expect(host.textContent).toContain('不支持自动复制配置');
-    expect(host.textContent).toContain('客户端回报：Custom Gateway / Model');
+    const summary = host.querySelector('[data-testid=member-model-summary]');
+    expect(summary?.textContent).toContain('Custom Gateway / Model');
+    expect(summary?.textContent).toContain('客户端回报');
     failCatalog = true;
     const refresh = [...host.querySelectorAll('button')].find((button) => button.textContent === '刷新');
     await act(async () => refresh?.click());
