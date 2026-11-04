@@ -61,12 +61,21 @@ export type MemberGatewayVerifyResult =
   | { ok: true; context: MemberGatewayCredentialContext }
   | { ok: false; reason: string };
 
+/** Both high-level McpServer and package-owned protocol Server implement this ABI. */
+export type GatewayMcpServer = Pick<McpServer, 'connect' | 'close'>;
+
 export interface MemberGatewayDeps {
   verify(input: { invocationId: string; callbackToken: string }): Promise<MemberGatewayVerifyResult>;
   resolveFamilies(input: {
     catId: string;
     sharedContext?: SharedInvocationContext;
   }): Promise<readonly MemberToolFamily[]> | readonly MemberToolFamily[];
+  /** Trusted Host adapter; package tool registration remains entirely inside the package. */
+  createMcpServer?(input: {
+    context: MemberGatewayCredentialContext;
+    url: URL;
+    signal: AbortSignal;
+  }): Promise<GatewayMcpServer>;
   log?: { warn(payload: Record<string, unknown>, message: string): void };
 }
 
@@ -226,7 +235,8 @@ export function createMemberGatewayHandler(
     const body = parsedBody && typeof parsedBody === 'object' ? (parsedBody as Record<string, unknown>) : undefined;
     const params =
       body?.params && typeof body.params === 'object' ? (body.params as Record<string, unknown>) : undefined;
-    const keyFor = (id: string | number) => JSON.stringify([invocationId, connectionId, id]);
+    const keyFor = (id: string | number) =>
+      JSON.stringify([invocationId, connectionId, url.pathname, url.searchParams.get('activation'), id]);
     if (shared && body?.method === 'notifications/cancelled') {
       const id = params?.requestId;
       if (typeof id !== 'string' && typeof id !== 'number') {
@@ -245,6 +255,13 @@ export function createMemberGatewayHandler(
       return;
     }
     const controller = new AbortController();
+    const onAbort = () => controller.abort();
+    const onClose = () => {
+      if (!res.writableEnded) controller.abort();
+    };
+    req.on('aborted', onAbort);
+    res.on('close', onClose);
+    if (req.aborted) controller.abort();
     if (requestKey) activeRequests.set(requestKey, controller);
     try {
       let families: readonly MemberToolFamily[];
@@ -273,8 +290,9 @@ export function createMemberGatewayHandler(
       const schemaOptions = shared
         ? { jsonSchemaValidator: (sharedSchemaValidator ??= new AjvJsonSchemaValidator()) }
         : {};
-      const server =
-        shared && requested
+      const server = deps.createMcpServer
+        ? await deps.createMcpServer({ context, url, signal: controller.signal })
+        : shared && requested
           ? new McpServer(
               { name: `cat-cafe-${requested}-mcp`, version: '0.1.0' },
               { ...schemaOptions, instructions: SERVER_INSTRUCTIONS[requested] },
@@ -310,7 +328,7 @@ export function createMemberGatewayHandler(
           },
           async () => {
             for (const family of new Set(families)) {
-              FAMILY_REGISTRARS[family]?.(server, context.toolsetEnv);
+              if (!deps.createMcpServer) FAMILY_REGISTRARS[family]?.(server as McpServer, context.toolsetEnv);
             }
             await server.connect(transport);
             await transport.handleRequest(req, res, parsedBody);
@@ -318,15 +336,23 @@ export function createMemberGatewayHandler(
         );
       } catch (err) {
         log.warn(
-          { catId: context.catId, err: err instanceof Error ? err.message : String(err) },
+          {
+            catId: context.catId,
+            ...(deps.createMcpServer ? {} : { err: err instanceof Error ? err.message : String(err) }),
+          },
           'member gateway request failed',
         );
         sendJson(res, 500, { error: 'internal_error' });
       } finally {
         await server.close().catch(() => {});
       }
+    } catch {
+      // Factory loading/creation may fail with provider secrets in the exception.
+      sendJson(res, 500, { error: 'surface_unavailable' });
     } finally {
       if (requestKey) activeRequests.delete(requestKey);
+      req.off('aborted', onAbort);
+      res.off('close', onClose);
     }
   };
 }

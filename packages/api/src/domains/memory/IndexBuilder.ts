@@ -1603,17 +1603,20 @@ export class IndexBuilder implements IIndexBuilder {
     const docs = sources.filter((source) => isMarkdownSourcePath(source.item.sourcePath));
     if (docs.length === 0) return;
 
-    // A document is the atomic replacement unit. A corpus-sized transaction
-    // blocks both the API loop and unrelated writers sharing evidence.sqlite.
+    // Keep document transactions atomic, but amortize maintenance over bounded
+    // groups: a checkpoint per small file makes cold Windows startup disk-bound.
     const db = this.store.getDb();
     const complete = db.prepare('UPDATE evidence_docs SET source_hash = ? WHERE anchor = ?');
-    for (const source of docs) {
-      await this.store.runCheckpointedBatch(() =>
-        db.transaction(() => {
-          replaceDocumentPassages(db, [source], createVectorInvalidator(db, 'passage_vectors'));
-          complete.run(source.item.sourceHash ?? null, source.item.anchor);
-        })(),
-      );
+    for (let offset = 0; offset < docs.length; offset += 16) {
+      await this.store.runCheckpointedBatch(async () => {
+        for (const source of docs.slice(offset, offset + 16)) {
+          await yieldToIo();
+          db.transaction(() => {
+            replaceDocumentPassages(db, [source], createVectorInvalidator(db, 'passage_vectors'));
+            complete.run(source.item.sourceHash ?? null, source.item.anchor);
+          })();
+        }
+      });
     }
     for (const doc of docs) this.pendingMentionDocAnchors.add(doc.item.anchor);
   }

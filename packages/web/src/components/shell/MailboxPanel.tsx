@@ -191,7 +191,9 @@ function MailboxPanelContent({
       aria-label={t.title}
       tabIndex={-1}
       data-testid="mailbox-panel"
+      data-chat-background-layer="work"
       className="shell-slide-in fixed bottom-0 top-0 z-[90] flex flex-col outline-none"
+      data-chat-background-surface="work"
       style={{
         left: left ?? RAIL_WIDTH_FALLBACK,
         width: `min(${PANEL_WIDTH}px, calc(100vw - ${left ?? RAIL_WIDTH_FALLBACK}px))`,

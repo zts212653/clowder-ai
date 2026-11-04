@@ -10,12 +10,10 @@
 
 import type { CatId } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
-import type { TokenUsage } from '../../types.js';
 import {
   type CreateInvocationInput,
   type CreateResult,
   type IInvocationRecordStore,
-  type InvocationActionLeaseRef,
   type InvocationRecord,
   type InvocationStatus,
   normalizeSuccessfulCatIds,
@@ -25,6 +23,12 @@ import {
 } from '../ports/InvocationRecordStore.js';
 import { InvocationKeys } from '../redis-keys/invocation-keys.js';
 import { decodeInvocationHash } from './invocation-record-redis-codec.js';
+import {
+  pruneEmptyRunningThreads,
+  pruneUnchangedRunningMembers,
+  type StaleRunningMember,
+} from './invocation-running-index-cleanup.js';
+import { readAuthoritativeHash } from './redis-pipeline-reply.js';
 
 /**
  * SCAN MATCH `invoc:*` 命中记录 hash 之外，还命中两类 running 索引 SET——对它们发 HGETALL
@@ -247,13 +251,10 @@ return 1
 
 export class RedisInvocationRecordStore implements IInvocationRecordStore {
   private readonly redis: RedisClient;
-  // F194 Phase B (cloud R13 P1): per-process lazy backfill flag for the running index Set.
-  // Records that existed in `running` BEFORE this build deployed (or written via paths that
-  // bypass update()'s ATOMIC_UPDATE_LUA) won't be in `invoc:running:{tid}:{uid}`. On first
-  // first call of EITHER read API (listRunningByThread / listRunningThreadIds), scan all
-  // invoc:* hashes once, populate both the per-thread Set and the per-user candidate index
-  // (F297 cloud R7 P2), then flip the flag. SADDs are idempotent so multi-process startup
-  // races at worst do duplicate work.
+  // Process-local fast path for the durable completion proof. Legacy records still
+  // require one complete backfill; process replacement must not repeat that migration.
+  // Canonical transitions/reassignments maintain both indexes atomically, and read
+  // cleanup only removes members whose original stale observation still holds.
   private runningIndexBackfilled = false;
   private runningIndexBackfillPromise: Promise<void> | null = null;
 
@@ -482,8 +483,9 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
       if (size > 0) live.push(threadId);
       else stale.push(threadId);
     }
-    // 与既有 listRunningByThread 的 stale 清理同模式：观测路径不阻塞，清理 fire-and-forget。
-    if (stale.length > 0) this.redis.srem(indexKey, ...stale).catch(() => {});
+    // Recheck emptiness atomically with removal: a new running transition may have
+    // populated the set after SCARD. Optional cleanup never blocks this observation.
+    if (stale.length > 0) void pruneEmptyRunningThreads(this.redis, userId, stale).catch(() => {});
     return live;
   }
 
@@ -498,31 +500,30 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
     const results = await pipeline.exec();
 
     const out: InvocationRecord[] = [];
-    const staleIds: string[] = [];
-    for (let i = 0; i < ids.length; i++) {
+    const staleMembers: StaleRunningMember[] = [];
+    for (const [i, id] of ids.entries()) {
       // audit（cloud R9 P1 同类）：本方法喂给 `resolveActiveInvocationsStrict`。若在 store 层
       // 静默吞掉读错误，strict 路径永远拿不到异常，整条 fail-closed 链就是假的 ——
       // 少报 running record 会让 live 面报空却仍标 complete，进而 false terminal。
-      const id = ids[i]!;
       // R12 P1：判据整体收口到 domain codec —— transport validity ≠ record validity。
       // envelope 未知与 record 未知（缺 owner 字段 / 非法 status / 坏 targetCats / NaN 时间戳）
       // 一律抛出，禁止降成 stale（stale 会连带 SREM，把一次异常固化成持久漏报）。
       const decoded = decodeInvocationHash(results?.[i], id, `invocation record ${id}`);
       // 权威空：记录已删 ⇒ 索引里的 stale 成员。
       if (decoded.kind === 'absent') {
-        staleIds.push(id);
+        staleMembers.push({ id, observed: null });
         continue;
       }
       // 完整合法记录才有资格被判定：权威非 running / scope 不符 = 可证明非 live ⇒ stale。
       const record = decoded.record;
       if (decoded.kind === 'not_running' || record.threadId !== threadId || record.userId !== userId) {
-        staleIds.push(id);
+        staleMembers.push({ id, observed: readAuthoritativeHash(results?.[i], `invocation cleanup ${id}`) });
         continue;
       }
       out.push(record);
     }
-    if (staleIds.length > 0) {
-      this.redis.srem(setKey, ...staleIds).catch(() => {}); // fire-and-forget cleanup
+    if (staleMembers.length > 0) {
+      void pruneUnchangedRunningMembers(this.redis, setKey, staleMembers).catch(() => {});
     }
     return out;
   }
@@ -564,32 +565,40 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
   }
 
   /**
-   * F194 Phase B (cloud R13 P1): one-time per-process backfill of the running index.
+   * F194 Phase B: complete legacy backfill of both running indexes.
    *
    * `update()` maintains `invoc:running:{tid}:{uid}` Sets atomically inside ATOMIC_UPDATE_LUA,
    * but records that existed in `running` BEFORE this build deployed are absent from those Sets.
    * Without backfill, listRunningByThread (now SMEMBERS-only) returns [] for orphaned records,
    * which makes /messages drop live drafts and /queue show no active slot.
    *
-   * This method scans all invoc:* hashes once per process, SADDs each `running` record into
-   * its (threadId, userId) Set, then flips a flag so subsequent reads are pure SMEMBERS.
-   * SADDs are idempotent — concurrent multi-process startup at worst does duplicate work.
+   * Only a complete scan with every SADD acknowledged writes the durable proof. A
+   * new process can reuse it because all canonical writers maintain both indexes
+   * atomically and cleanup cannot erase a newer live member. SADD is idempotent;
+   * concurrent migrations may repeat work but cannot certify a partial pipeline.
    *
    * On scan error: clears the in-flight promise so the next call retries; the original error
    * propagates so the caller can decide whether to fail-open. Read-path correctness depends
-   * on backfill completing at least once per process.
+   * on a complete backfill, not on an existing nonempty subset of either index.
    */
   private async ensureRunningIndexBackfilled(): Promise<void> {
     if (this.runningIndexBackfilled) return;
     if (!this.runningIndexBackfillPromise) {
-      this.runningIndexBackfillPromise = this.scanAndPopulateRunningIndex();
+      this.runningIndexBackfillPromise = this.ensureDurableRunningIndex();
     }
+    const pending = this.runningIndexBackfillPromise;
     try {
-      await this.runningIndexBackfillPromise;
+      await pending;
       this.runningIndexBackfilled = true;
     } finally {
-      this.runningIndexBackfillPromise = null;
+      if (this.runningIndexBackfillPromise === pending) this.runningIndexBackfillPromise = null;
     }
+  }
+
+  private async ensureDurableRunningIndex(): Promise<void> {
+    if ((await this.redis.get(InvocationKeys.runningIndexComplete())) === '1') return;
+    await this.scanAndPopulateRunningIndex();
+    await this.redis.set(InvocationKeys.runningIndexComplete(), '1');
   }
 
   private async scanAndPopulateRunningIndex(): Promise<void> {
@@ -612,32 +621,36 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
         return !RUNNING_SET_PREFIXES.some((prefix) => bare.startsWith(prefix));
       });
       if (recordKeys.length === 0) continue;
-
-      const hgetalls = this.redis.pipeline();
-      for (const key of recordKeys) hgetalls.hgetall(this.stripPrefix(key));
-      const results = await hgetalls.exec();
-
-      const sadds = this.redis.pipeline();
-      let count = 0;
-      for (let index = 0; index < recordKeys.length; index += 1) {
-        // cloud R12 P1 + local R12 P1：backfill 以前手写 `if (err || !data ...) continue`，
-        // 后来又手写 `if (d.id && d.status === 'running' && ...)` —— record-invalid 的 hash
-        // （status=banana / 缺 owner 字段）被静默 skip 后 flag 仍置位，pre-deploy running
-        // thread 被**永久**漏报。收口到 domain codec：未知抛出 → abort 本轮 → flag 不置位
-        // → 下次读 API 自动重试；只有权威 running 才 seed 索引。
-        const bareKey = this.stripPrefix(recordKeys[index]!);
-        const expectedId = bareKey.slice(DETAIL_KEY_PREFIX.length);
-        const decoded = decodeInvocationHash(results?.[index], expectedId, `running index backfill ${bareKey}`);
-        if (decoded.kind !== 'running') continue; // absent（已删）/ 权威非 running：不 seed
-        const record = decoded.record;
-        sadds.sadd(InvocationKeys.runningByThread(record.threadId, record.userId), record.id);
-        // F297 (cloud R7 P2): seed the per-user candidate index in the same backfill pass,
-        // otherwise pre-deploy running records would be invisible to the sidebar (漏报).
-        sadds.sadd(InvocationKeys.runningThreadsByUser(record.userId), record.threadId);
-        count++;
-      }
-      if (count > 0) await sadds.exec();
+      await this.populateRunningIndexBatch(recordKeys);
     } while (cursor !== '0');
+  }
+
+  private async populateRunningIndexBatch(recordKeys: readonly string[]): Promise<void> {
+    const hgetalls = this.redis.pipeline();
+    for (const key of recordKeys) hgetalls.hgetall(this.stripPrefix(key));
+    const results = await hgetalls.exec();
+
+    const sadds = this.redis.pipeline();
+    let count = 0;
+    for (const [index, key] of recordKeys.entries()) {
+      // The shared codec rejects unknown/corrupt records before any completion
+      // proof. Only authoritative running records seed both derived indexes.
+      const bareKey = this.stripPrefix(key);
+      const expectedId = bareKey.slice(DETAIL_KEY_PREFIX.length);
+      const decoded = decodeInvocationHash(results?.[index], expectedId, `running index backfill ${bareKey}`);
+      if (decoded.kind !== 'running') continue;
+      const record = decoded.record;
+      sadds.sadd(InvocationKeys.runningByThread(record.threadId, record.userId), record.id);
+      sadds.sadd(InvocationKeys.runningThreadsByUser(record.userId), record.threadId);
+      count += 2;
+    }
+    if (count === 0) return;
+    const replies = await sadds.exec();
+    if (!replies || replies.length !== count) throw new Error('Incomplete running index backfill reply');
+    for (const [error, inserted] of replies) {
+      if (error) throw error;
+      if (inserted !== 0 && inserted !== 1) throw new Error('Invalid running index backfill SADD reply');
+    }
   }
 
   /**

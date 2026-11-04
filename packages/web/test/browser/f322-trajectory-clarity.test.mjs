@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
 import { realSurfaceApiResponse, THREAD_ID } from './f307-real-surface-fixtures.mjs';
 import { openWorkspaceTools } from './f307-workspace-open.mjs';
 import { cats, detail, exactInput, firstSentence, generations, summary } from './f322-trajectory-data.mjs';

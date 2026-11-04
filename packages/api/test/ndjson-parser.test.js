@@ -4,7 +4,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { PassThrough } from 'node:stream';
+import { PassThrough, Readable } from 'node:stream';
 import { test } from 'node:test';
 
 const { parseNDJSON, isParseError } = await import('../dist/utils/ndjson-parser.js');
@@ -115,4 +115,31 @@ test('parseNDJSON frames only on LF and preserves Unicode line separators', asyn
   stream.end(bytes.subarray(emojiOffset + 1));
 
   assert.deepEqual(await promise, [first, second]);
+});
+
+test('parseNDJSON rejects an oversized UTF-8 record before parsing or accepting a truncated prefix', async () => {
+  const record = JSON.stringify({ text: '猫'.repeat(20) });
+  const stream = Readable.from([record.slice(0, 10), record.slice(10)]);
+  await assert.rejects(collect(parseNDJSON(stream, { maxRecordBytes: 40 })), (error) => {
+    assert.equal(error.code, 'NDJSON_RECORD_TOO_LARGE');
+    assert.equal(error.maxRecordBytes, 40);
+    assert.ok(error.recordBytes > 40);
+    assert.ok(!error.message.includes('猫'), 'the resource error must not copy private payload');
+    return true;
+  });
+});
+
+test('parseNDJSON budgets each complete record, including CRLF and a split multibyte character', async () => {
+  const record = JSON.stringify({ text: '猫😺' });
+  const bytes = Buffer.from(`${record}\r\n${record}\n${record}`);
+  const offset = bytes.indexOf(Buffer.from('😺')) + 1;
+  const results = await collect(
+    parseNDJSON(Readable.from([bytes.subarray(0, offset), bytes.subarray(offset)]), {
+      maxRecordBytes: Buffer.byteLength(record) + 1,
+    }),
+  );
+  assert.deepEqual(
+    results,
+    Array.from({ length: 3 }, () => ({ text: '猫😺' })),
+  );
 });

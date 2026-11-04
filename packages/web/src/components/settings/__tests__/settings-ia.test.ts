@@ -16,18 +16,14 @@ describe('F322 设置与管理 information architecture', () => {
     expect(SETTINGS_IA.map((entry) => entry.label)).toEqual([
       '你',
       '猫猫团队',
-      '调度',
-      '能力进化',
-      '评估',
       '连接与扩展',
       '系统',
       '主题',
-      '社区',
       '猫猫星球',
       '功能看板',
       '信号',
     ]);
-    expect(SETTINGS_IA.map((entry) => entry.group)).toEqual([1, 1, 1, 1, 1, 2, 2, 2, 3, 3, 3, 3]);
+    expect(SETTINGS_IA.map((entry) => entry.group)).toEqual([1, 1, 2, 2, 2, 3, 3, 3]);
     expect(new Set(SETTINGS_IA.map((entry) => entry.id)).size).toBe(SETTINGS_IA.length);
   });
 
@@ -72,14 +68,20 @@ describe('F322 设置与管理 information architecture', () => {
     expect(findEntry('starry')?.destination).toEqual({ kind: 'route', path: '/starry' });
     expect(findEntry('mission')?.destination).toEqual({ kind: 'route', path: '/mission-hub' });
     expect(findEntry('signals')?.destination).toEqual({ kind: 'route', path: '/signals' });
-    expect(findEntry('schedule')?.destination).toEqual({ kind: 'workspace-mode', mode: 'schedule' });
-    expect(findEntry('evolution')?.destination).toEqual({ kind: 'evolution-home' });
-    expect(findEntry('eval')?.destination).toEqual({ kind: 'workspace-mode', mode: 'eval' });
-    expect(findEntry('community')?.destination).toEqual({ kind: 'workspace-mode', mode: 'community' });
   });
 });
 
 describe('F322 pins above the mailbox', () => {
+  it.each([
+    ['schedule', '调度', { kind: 'workspace-mode', mode: 'schedule' }],
+    ['evolution', '能力进化', { kind: 'evolution-home' }],
+    ['eval', '评估', { kind: 'workspace-mode', mode: 'eval' }],
+    ['community', '社区', { kind: 'workspace-mode', mode: 'community' }],
+  ])('keeps the saved %s shortcut usable after removing its settings entry', (id, label, destination) => {
+    expect(findEntry(id)).toBeUndefined();
+    expect(resolvePin(destPinId(id))).toMatchObject({ kind: 'entry', label, entry: { destination } });
+  });
+
   it('old pins (bare settings section ids) keep resolving so nobody loses a pin', () => {
     const pin = resolvePin('notify');
     expect(pin).toMatchObject({ kind: 'section', id: 'notify', label: '通知' });
@@ -98,6 +100,10 @@ describe('F322 pins above the mailbox', () => {
   });
 
   it('the Workspace team panel has its own pin identity and never resolves to the settings members section', () => {
+    const team = findEntry('team');
+    expect(team?.destination.kind).toBe('sections');
+    if (team?.destination.kind !== 'sections') throw new Error('team must be a sections entry');
+    expect(team.destination.items.every((item) => item.kind === 'section')).toBe(true);
     expect(TEAM_WORKSPACE_PIN_ID).not.toBe(destPinId('team'));
     expect(resolvePin(TEAM_WORKSPACE_PIN_ID)).toMatchObject({
       kind: 'workspace-team',

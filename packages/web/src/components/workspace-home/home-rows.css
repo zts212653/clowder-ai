@@ -28,6 +28,7 @@
 }
 [data-shell="v2"] .home-live-row[data-execution-jump-focus="true"] {
   background: var(--shell-selected);
+  --chat-background-role: selected;
 }
 [data-shell="v2"] .home-execution-detail {
   flex: 0 0 100%;

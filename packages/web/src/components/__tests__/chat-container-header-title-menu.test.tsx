@@ -120,7 +120,7 @@ describe('ChatContainerHeader: the title ⌄ menu', () => {
     expect(toggle(container)).toBeNull();
   });
 
-  it('opens the complete conversation settings from the v2 header, without a pin checkbox', async () => {
+  it('opens the complete current conversation settings, including the personal background and pin row', async () => {
     act(() => writeShellPresentation('v2'));
     renderHeader();
     const settings = container.querySelector<HTMLButtonElement>('button[aria-label="对话设置"]');
@@ -130,7 +130,11 @@ describe('ChatContainerHeader: the title ⌄ menu', () => {
     expect(panel).not.toBeNull();
     expect(panel?.textContent).toContain('对话目标');
     expect(panel?.textContent).toContain('关联 Feature');
-    expect(panel?.querySelector('input[type="checkbox"]')).toBeNull();
+    expect(panel?.querySelector('[data-testid="thread-background-entry"]')).not.toBeNull();
+    const pin = panel?.querySelector<HTMLInputElement>('.thread-background-settings input[type="checkbox"]');
+    expect(pin).not.toBeNull();
+    expect(pin?.closest('label')?.textContent).toContain('置顶');
+    expect(pin?.checked).toBe(false);
   });
 
   it('closes settings when the header changes conversation and never revives the previous selection', async () => {

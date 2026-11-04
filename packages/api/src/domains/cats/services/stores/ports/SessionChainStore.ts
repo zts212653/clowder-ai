@@ -31,7 +31,7 @@ export function upsertCapacityPinRecoveryNote(provenance: string, note: string):
 import { randomUUID } from 'node:crypto';
 import type { CatId, HybridProgress, SessionCapacityPin, SessionPolicySnapshot, SessionRecord } from '@cat-cafe/shared';
 import { isHomeSession } from '../../session/session-scope.js';
-import type { StoreReadOptions } from './StoreReadOptions.js';
+import type { SessionChainReadOptions } from './SessionChainReadOptions.js';
 import { throwIfStoreReadAborted } from './StoreReadOptions.js';
 
 export interface CreateSessionInput {
@@ -139,6 +139,12 @@ export interface ISessionChainStore {
   create(input: CreateSessionInput): SessionRecord | Promise<SessionRecord>;
   /** Atomically return the existing active record or create one logical unbound node. */
   getOrCreateActive(input: CreateSessionInput): SessionRecord | Promise<SessionRecord>;
+  /** Write once on an unbound active owner; otherwise compare the exact recorded Host facts and runtime ID. */
+  bindHostExecutionBoundary(
+    id: string,
+    expectedCliSessionId: string | undefined,
+    boundary: NonNullable<SessionRecord['hostExecutionBoundary']>,
+  ): SessionRecord | null | Promise<SessionRecord | null>;
   /** Bind a provider runtime ID to an existing logical node without creating a new node. */
   bindCliSessionId(id: string, cliSessionId: string): SessionRecord | null | Promise<SessionRecord | null>;
   /** CAS bind used by provider forks: succeeds only while the logical target remains unbound. */
@@ -171,7 +177,7 @@ export interface ISessionChainStore {
   /** Get full session chain (sorted by seq) */
   getChain(catId: CatId, threadId: string, userId?: string): SessionRecord[] | Promise<SessionRecord[]>;
   /** Get all cats' sessions for a thread */
-  getChainByThread(threadId: string, options?: StoreReadOptions): SessionRecord[] | Promise<SessionRecord[]>;
+  getChainByThread(threadId: string, options?: SessionChainReadOptions): SessionRecord[] | Promise<SessionRecord[]>;
   /** Update partial fields */
   update(id: string, patch: SessionRecordPatch): SessionRecord | null | Promise<SessionRecord | null>;
   /** Look up by CLI session ID */
@@ -345,6 +351,37 @@ export class SessionChainStore implements ISessionChainStore {
     return record;
   }
 
+  bindHostExecutionBoundary(
+    id: string,
+    expectedCliSessionId: string | undefined,
+    boundary: NonNullable<SessionRecord['hostExecutionBoundary']>,
+  ): SessionRecord | null {
+    const record = this.records.get(id);
+    if (
+      !record ||
+      record.status !== 'active' ||
+      record.scopedInvocation ||
+      this.getActive(record.catId, record.threadId, record.userId)?.id !== id ||
+      record.cliSessionId !== expectedCliSessionId
+    )
+      return null;
+    if (record.hostExecutionBoundary) {
+      const previousEntries = Object.entries(record.hostExecutionBoundary);
+      const nextEntries = Object.entries(boundary);
+      if (
+        previousEntries.length !== nextEntries.length ||
+        !nextEntries.every(([key, value]) => record.hostExecutionBoundary?.[key as keyof typeof boundary] === value)
+      )
+        return null;
+    } else {
+      // An existing native history cannot be certified by merely writing today's expectation.
+      if (record.cliSessionId) return null;
+      record.hostExecutionBoundary = Object.freeze({ ...boundary });
+      record.updatedAt = Date.now();
+    }
+    return record;
+  }
+
   bindCliSessionIdIfUnbound(id: string, cliSessionId: string): SessionRecord | null {
     const record = this.records.get(id);
     if (!record || record.status !== 'active' || record.cliSessionId) return null;
@@ -509,7 +546,7 @@ export class SessionChainStore implements ISessionChainStore {
       .sort((a, b) => a.seq - b.seq);
   }
 
-  getChainByThread(threadId: string, options?: StoreReadOptions): SessionRecord[] {
+  getChainByThread(threadId: string, options?: SessionChainReadOptions): SessionRecord[] {
     throwIfStoreReadAborted(options);
     const results: SessionRecord[] = [];
     for (const record of this.records.values()) {

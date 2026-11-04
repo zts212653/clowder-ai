@@ -61,6 +61,34 @@ describe('callback read-profile route', () => {
     assert.ok(body.revision?.startsWith('sha256:'), 'revision included in primer read');
   });
 
+  for (const layer of ['capsule', 'corpus', 'primer']) {
+    it(`${layer}: a requested receipt fails without the evidence database, while an old client still reads`, async () => {
+      const path =
+        layer === 'capsule'
+          ? repository.capsulePath('alice')
+          : layer === 'corpus'
+            ? repository.corpusPath('alice')
+            : repository.primerPath(repository.scope('alice', 'codex-sol'));
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, 'PRIVATE RECEIPT REQUIRED');
+      const auth = await registry.create('alice', 'codex-sol', 'thread_1');
+      const headers = { 'x-invocation-id': auth.invocationId, 'x-callback-token': auth.callbackToken };
+      const recorded = await app.inject({
+        method: 'GET',
+        url: `/api/callbacks/profile?layer=${layer}&requestId=record-me`,
+        headers,
+      });
+      assert.equal(recorded.statusCode, 503);
+      assert.equal(recorded.json().error, 'profile_read_recording_unavailable');
+      assert.equal(recorded.json().readRequestId, 'record-me');
+      assert.doesNotMatch(recorded.body, /PRIVATE RECEIPT REQUIRED/);
+      const legacy = await app.inject({ method: 'GET', url: `/api/callbacks/profile?layer=${layer}`, headers });
+      assert.equal(legacy.statusCode, 200);
+      assert.equal(legacy.json().usageRecorded, false);
+      assert.equal(legacy.json().content, 'PRIVATE RECEIPT REQUIRED');
+    });
+  }
+
   it('F321 rejects a stale relationship handle after correction without returning either body', async () => {
     const path = repository.primerPath(repository.scope('alice', 'codex-sol'));
     mkdirSync(dirname(path), { recursive: true });

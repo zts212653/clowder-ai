@@ -1,3 +1,4 @@
+import { resolve } from 'node:path';
 import {
   type LocalSessionImportOptions,
   localSessionConflict,
@@ -47,6 +48,7 @@ import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadS
 import { canAccessThread, isSharedDefaultThread } from '../domains/guides/guide-state-access.js';
 import { resolveOwnerGate } from '../utils/owner-gate.js';
 import { resolveUserId } from '../utils/request-identity.js';
+import { createSessionListReadDiagnostics } from './session-list-read-diagnostics.js';
 
 const bindSessionSchema = z.object({
   cliSessionId: z.string().min(1).max(500),
@@ -73,6 +75,11 @@ interface RestoreRouteResponse {
 }
 
 interface SessionChainRouteOptions extends FastifyPluginOptions, LocalSessionImportOptions {
+  resolveImportExecutionBoundary?: (input: {
+    catId: CatId;
+    threadId: string;
+    userId: string;
+  }) => Promise<NonNullable<SessionRecord['hostExecutionBoundary']>>;
   sessionChainStore: ISessionChainStore;
   threadStore: IThreadStore;
   messageStore?: IMessageStore;
@@ -178,12 +185,15 @@ function formatRuntimeSessionSummary(metadata: RuntimeSessionMetadata): RuntimeS
 async function attachRuntimeSessionSummary<T extends { id: string }>(
   session: T,
   runtimeSessionStore?: IRuntimeSessionStore,
-): Promise<T & { runtimeSession?: RuntimeSessionSummary }> {
-  if (!runtimeSessionStore) return session;
+): Promise<Omit<T, 'hostExecutionBoundary'> & { runtimeSession?: RuntimeSessionSummary }> {
+  const { hostExecutionBoundary: _privateBoundary, ...publicSession } = session as T & {
+    hostExecutionBoundary?: unknown;
+  };
+  if (!runtimeSessionStore) return publicSession;
   const metadata = await runtimeSessionStore.getBySessionId(session.id);
-  if (!metadata) return session;
+  if (!metadata) return publicSession;
   return {
-    ...session,
+    ...publicSession,
     runtimeSession: formatRuntimeSessionSummary(metadata),
   };
 }
@@ -191,8 +201,7 @@ async function attachRuntimeSessionSummary<T extends { id: string }>(
 async function attachRuntimeSessionSummaries<T extends { id: string }>(
   sessions: T[],
   runtimeSessionStore?: IRuntimeSessionStore,
-): Promise<Array<T & { runtimeSession?: RuntimeSessionSummary }>> {
-  if (!runtimeSessionStore) return sessions;
+): Promise<Array<Omit<T, 'hostExecutionBoundary'> & { runtimeSession?: RuntimeSessionSummary }>> {
   return Promise.all(sessions.map((session) => attachRuntimeSessionSummary(session, runtimeSessionStore)));
 }
 
@@ -337,7 +346,9 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
     }
 
     const { threadId } = request.params;
+    const diagnostic = createSessionListReadDiagnostics(request);
     const thread = await threadStore.get(threadId);
+    diagnostic.phase('access_check');
     const access = await resolveThreadAccess({
       threadStore,
       thread,
@@ -356,10 +367,13 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
     // When caller identifies as a specific cat (MCP tool), restrict to own sessions only.
     // Query param `catId` is ignored when it differs from caller — prevents cross-cat enumeration.
     const effectiveCatId = callerCatId ?? catId;
+    diagnostic.scope(effectiveCatId ? 'cat' : 'thread');
     if (callerCatId && catId && catId !== callerCatId) {
       return reply.status(403).send({ error: `Cannot query sessions for cat '${catId}' — you are '${callerCatId}'` });
     }
     if (parsedPage.data.view === 'import') {
+      diagnostic.scope('import');
+      diagnostic.phase('import_record');
       const coordinate = thread?.sessionImport;
       const session =
         coordinate && (!effectiveCatId || coordinate.catId === effectiveCatId)
@@ -377,32 +391,41 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
       return reply.send({ importedSession: imported ? { catId: imported.catId, ...imported.externalImport } : null });
     }
     const sendSessions = async (visibleSessions: SessionRecord[]) => {
+      diagnostic.phase('runtime_metadata');
       if (limit === undefined && offset === undefined) {
-        return reply.send({ sessions: await attachRuntimeSessionSummaries(visibleSessions, runtimeSessionStore) });
+        const sessions = await attachRuntimeSessionSummaries(visibleSessions, runtimeSessionStore);
+        diagnostic.phase('response');
+        return reply.send({ sessions });
       }
       const pageLimit = limit ?? 20;
       const pageOffset = offset ?? 0;
       const selected = visibleSessions.slice(pageOffset, pageOffset + pageLimit);
       const hasMore = pageOffset + selected.length < visibleSessions.length;
+      const sessions = await attachRuntimeSessionSummaries(selected, runtimeSessionStore);
+      diagnostic.phase('response');
       return reply.send({
-        sessions: await attachRuntimeSessionSummaries(selected, runtimeSessionStore),
+        sessions,
         hasMore,
         ...(hasMore ? { nextOffset: pageOffset + selected.length } : {}),
       });
     };
 
     if (effectiveCatId) {
+      diagnostic.phase('chain_read');
       const sessions = await sessionChainStore.getChain(
         effectiveCatId as CatId,
         threadId,
         access.scope === 'user' ? userId : undefined,
       );
+      diagnostic.phase('visibility_filter');
       const visibleSessions = filterThreadRecords(access, sessions);
       return sendSessions(visibleSessions);
     }
 
     // No catId filter at all (hub UI god-view) — shared system threads stay user-scoped.
-    const sessions = await sessionChainStore.getChainByThread(threadId);
+    diagnostic.phase('chain_read');
+    const sessions = await sessionChainStore.getChainByThread(threadId, diagnostic.chainOptions);
+    diagnostic.phase('visibility_filter');
     const visibleSessions = filterThreadRecords(access, sessions);
     return sendSessions(visibleSessions);
   });
@@ -664,6 +687,7 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
     }
 
     let importMetadata: Awaited<ReturnType<NonNullable<LocalSessionImportOptions['inspectLocalSession']>>> | undefined;
+    let importBoundary: SessionRecord['hostExecutionBoundary'];
     if (parseResult.data.externalImport) {
       const member = catRegistry.tryGet(catId)?.config;
       if (!member || !localSessionImportTool(member) || !isLocalSessionId(member.clientId, cliSessionId))
@@ -692,10 +716,25 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
           .status(409)
           .send({ code: 'SESSION_PROJECT_MISMATCH', error: 'The project must follow the original session' });
       }
+      if (!opts.resolveImportExecutionBoundary)
+        return reply.status(503).send({ error: 'Session execution boundary verification is unavailable' });
+      try {
+        importBoundary = await opts.resolveImportExecutionBoundary({ catId: catId as CatId, threadId, userId });
+        const project = resolve(importMetadata.projectPath);
+        const expectedRoot = process.platform === 'win32' ? project.toLowerCase() : project;
+        if (importBoundary.clientId !== importMetadata.clientId || importBoundary.workspaceRoot !== expectedRoot)
+          throw new Error('Imported session execution boundary does not match the inspected client and project');
+      } catch (error) {
+        return reply.status(409).send(localSessionFailure(error));
+      }
     }
-    const persistImport = async (sessionId: string) => {
-      if (!importMetadata) return;
-      await sessionChainStore.update(sessionId, {
+    const persistImport = async (record: SessionRecord) => {
+      if (!importMetadata || !importBoundary) return true;
+      // Establish the selected boundary while the new logical owner is still
+      // unbound. Existing unknown histories retain the store's refusal rule.
+      const bound = await sessionChainStore.bindHostExecutionBoundary(record.id, record.cliSessionId, importBoundary);
+      if (!bound) return false;
+      await sessionChainStore.update(record.id, {
         externalImport: {
           cliSessionId,
           clientId: importMetadata.clientId,
@@ -706,6 +745,7 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
         },
         workingDirectory: importMetadata.projectPath,
       });
+      return true;
     };
 
     let session;
@@ -714,7 +754,8 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
     if (active) {
       // Late-bind through the store's atomic CLI-ID claim path. A generic
       // update can race another logical node and steal its runtime identity.
-      await persistImport(active.id);
+      if (!(await persistImport(active)))
+        return reply.status(409).send({ error: 'The existing session has no proven execution boundary' });
       const updated = await sessionChainStore.bindCliSessionId(active.id, cliSessionId);
       if (!updated) {
         reply.status(409);
@@ -736,7 +777,8 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
         catId: catId as CatId,
         userId,
       });
-      await persistImport(logical.id);
+      if (!(await persistImport(logical)))
+        return reply.status(409).send({ error: 'The session changed before its import boundary was verified' });
       const bound = await sessionChainStore.bindCliSessionId(logical.id, cliSessionId);
       if (!bound) {
         reply.status(409);
@@ -746,7 +788,13 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
       mode = 'created';
     }
 
-    if (importMetadata) await threadStore.setSessionImport(threadId, { sessionId: session.id, catId });
+    if (importMetadata && importBoundary) {
+      const bound = await sessionChainStore.bindHostExecutionBoundary(session.id, cliSessionId, importBoundary);
+      if (!bound)
+        return reply.status(409).send({ error: 'Imported session changed before its execution boundary was bound' });
+      session = bound;
+      await threadStore.setSessionImport(threadId, { sessionId: session.id, catId });
+    }
 
     // Audit trail (best-effort, fire-and-forget)
     getEventAuditLog()

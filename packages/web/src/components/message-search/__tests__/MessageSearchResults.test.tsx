@@ -229,7 +229,7 @@ describe('shared message results', () => {
     expect(host.textContent).toContain('正在搜索');
     expect(host.querySelector('[data-message-search-result]')).toBeNull();
     await open({ response: answer([]) });
-    expect(host.textContent).toContain('本次检索未找到');
+    expect(host.textContent).toContain('本次资格核对情况未知');
     const retry = vi.fn();
     await open({ status: 'error', onRetry: retry });
     expect(host.textContent).toContain('检索暂不可用');
@@ -264,6 +264,48 @@ describe('shared message results', () => {
       unassessed: 5,
     };
     await open({ response });
-    expect(host.textContent).toContain('6 条候选尚未核对出结论');
+    expect(host.textContent).toContain('尚未评估 5');
+    expect(host.textContent).toContain('无法确定 1');
+  });
+
+  it('puts partial assessment and counts before readable results rather than below the list', async () => {
+    const response = answer();
+    response.meta.qualification = {
+      status: 'partial',
+      examined: 51,
+      supported: 4,
+      rejected: 0,
+      indeterminate: 4,
+      unassessed: 43,
+    };
+    await open({ response, journey6: true });
+    const notice = host.querySelector('[aria-label="本次检索说明"]');
+    const first = host.querySelector('[data-message-search-result]');
+    expect(notice).not.toBeNull();
+    if (!notice || !first) throw new Error('Expected a notice before a readable result');
+    expect(notice.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(notice?.textContent).toContain('已核对 8');
+    expect(notice?.textContent).toContain('尚未评估 43');
+    expect(notice?.textContent).toContain('无法确定 4');
+    expect(notice?.textContent).toContain('已显示的原文');
+    expect(notice?.textContent).not.toContain('已经找全');
+  });
+
+  it('explains all-unassessed empty results before any empty-state conclusion without inventing readable rows', async () => {
+    const response = answer([]);
+    response.meta.qualification = {
+      status: 'partial',
+      examined: 1651,
+      supported: 0,
+      rejected: 0,
+      indeterminate: 0,
+      unassessed: 1651,
+    };
+    await open({ response });
+    const notice = host.querySelector('[aria-label="本次检索说明"]');
+    expect(notice?.textContent).toContain('全部尚未评估');
+    expect(notice?.textContent).toContain('不能据此判断历史没有');
+    expect(notice?.textContent).not.toContain('打开');
+    expect(host.querySelector('[data-message-search-result]')).toBeNull();
   });
 });

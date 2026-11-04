@@ -9,6 +9,7 @@ import {
 
 export { ContentOwnerConflictError, ContentOwnerIdempotencyError, ContentOwnerNotFoundError } from './errors.js';
 
+import { join } from 'node:path';
 import {
   collectiveContentScopeRef,
   validateCollectiveContentScope,
@@ -34,11 +35,13 @@ export interface ProjectContentOwnerServiceOptions {
 }
 
 export class ProjectContentOwnerService {
+  readonly localExportDirectory: string;
   readonly collectiveCustody: CollectiveContentCustody;
   private readonly store: ProjectContentOwnerStore;
   private readonly now: () => string;
 
   constructor(options: ProjectContentOwnerServiceOptions) {
+    this.localExportDirectory = join(options.dataDir, 'open-exports');
     this.store = new ProjectContentOwnerStore(options.dataDir);
     this.collectiveCustody = new CollectiveContentCustody(this.store);
     this.now = options.now ?? (() => new Date().toISOString());
@@ -57,7 +60,7 @@ export class ProjectContentOwnerService {
     validateIdentity(input.operationId, 'operationId');
     validateIdentity(input.mediaType, 'mediaType');
     validateActor(input.actor);
-    validateContentPublication(input.publicationScope, input.sourcePublication);
+    validateContentPublication(input.publicationScope, input.sourcePublication, input.mediaType);
     validateVideoProjectScope(input.projectScope, input.contentRef, input.mediaType, input.publicationScope);
     validateCollectiveContentScope(input.collectiveScope, input);
     validateContentOperationContext(input.operationContext, input.projectScope, input.collectiveScope);
@@ -132,7 +135,7 @@ export class ProjectContentOwnerService {
       const state = await this.store.readState(input.contentRef);
       if (!state) throw new ContentOwnerNotFoundError(input.contentRef);
       if (state.projectMediaScope) throw new TypeError('Project screening media is immutable');
-      validateContentPublication(state.publicationScope, input.sourcePublication);
+      validateContentPublication(state.publicationScope, input.sourcePublication, state.mediaType);
       validateContentOperationContext(input.operationContext, state.projectScope, state.collectiveScope);
       validateCollectiveContentWrite({
         scope: state.collectiveScope,
@@ -290,15 +293,15 @@ export class ProjectContentOwnerService {
     return this.store.listVideoProjects(ownerUserId);
   }
 
-  listRetainedMedia(ownerUserId: string, after?: string) {
+  listRetainedMedia(ownerUserId: string, after?: string, includeHtmlWorks = false) {
     validateIdentity(ownerUserId, 'ownerUserId');
-    return this.store.listRetainedMedia(ownerUserId, after);
+    return this.store.listRetainedMedia(ownerUserId, after, 30, includeHtmlWorks);
   }
 
   /** Canonical read projection, never a persisted catalogue or an authorization grant. */
-  retainedMediaHeads(ownerUserId: string) {
+  retainedMediaHeads(ownerUserId: string, includeHtmlWorks = false) {
     validateIdentity(ownerUserId, 'ownerUserId');
-    return this.store.retainedMediaHeads(ownerUserId);
+    return this.store.retainedMediaHeads(ownerUserId, includeHtmlWorks);
   }
 
   /** Internal batch lookup; read projections must freshly authorize each resulting coordinate. */

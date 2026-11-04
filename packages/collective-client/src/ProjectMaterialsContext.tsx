@@ -30,10 +30,12 @@ export function useProjectMaterials(roadmapId: string) {
     sequence = useRef(0);
   epochRef.current = epoch;
   const [state, setState] = useState({ epoch, feed: empty, loading: false, error: false });
+  const pending = useRef<number>();
   const reload = useCallback(async () => {
     const port = current.current,
       generation = ++sequence.current;
     if (!port) return;
+    pending.current = generation;
     setState({ epoch, feed: empty, loading: true, error: false });
     try {
       const feed = await port.list(roadmapId);
@@ -42,6 +44,8 @@ export function useProjectMaterials(roadmapId: string) {
     } catch {
       if (epochRef.current === epoch && generation === sequence.current)
         setState({ epoch, feed: empty, loading: false, error: true });
+    } finally {
+      if (pending.current === generation) pending.current = undefined;
     }
   }, [epoch, roadmapId]);
   useEffect(() => {
@@ -49,7 +53,9 @@ export function useProjectMaterials(roadmapId: string) {
     const refresh = () => {
       if (document.visibilityState !== 'hidden') void reload();
     };
-    const timer = window.setInterval(refresh, 30_000);
+    const timer = window.setInterval(() => {
+      if (pending.current === undefined) refresh();
+    }, 30_000);
     window.addEventListener('focus', refresh);
     window.addEventListener('collective:material-changed', refresh);
     document.addEventListener('visibilitychange', refresh);

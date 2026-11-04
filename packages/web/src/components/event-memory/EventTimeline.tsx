@@ -79,7 +79,11 @@ export function EventTimeline() {
   if (error) return <div className="px-5 py-4 text-xs text-[var(--semantic-critical)]">加载失败，请稍后重试</div>;
 
   return (
-    <div className="flex flex-col h-full overflow-y-auto" style={{ background: 'var(--cafe-surface)' }}>
+    <div
+      className="flex flex-col h-full overflow-y-auto"
+      data-chat-background-surface="cafe"
+      style={{ background: 'var(--cafe-surface)' }}
+    >
       {/* Header */}
       <div className="px-5 pt-4 pb-3 border-b border-cafe-subtle" style={{ background: 'var(--accent-50)' }}>
         <div className="flex items-center gap-2">

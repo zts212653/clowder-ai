@@ -7,18 +7,14 @@ import { useActionSurfaceRef } from '../message-v2/message-action-ownership';
 /** A path label projects the same server-authorized file operations as the reader. */
 export function ChatFileActions({
   target,
-  visible = false,
   inline = false,
   hideTrigger = false,
   anchorRef,
-  onInteract,
 }: {
   target: ChatFileReference;
-  visible?: boolean;
   inline?: boolean;
   hideTrigger?: boolean;
   anchorRef?: RefObject<HTMLElement | null>;
-  onInteract?: (inside: boolean) => void;
 }) {
   const ref = useRef<HTMLSpanElement>(null);
   const owned = useActionSurfaceRef<HTMLSpanElement>(undefined, undefined, ref);
@@ -26,11 +22,15 @@ export function ChatFileActions({
     <span ref={owned} className="relative inline-flex text-xs">
       <FileActions
         source={{ kind: 'workspace', worktreeId: target.worktreeId, path: target.path }}
-        filename={target.absolutePath.split('/').filter(Boolean).at(-1) ?? '/'}
-        initiallyOpen={visible}
+        filename={
+          target.absolutePath
+            .split(target.absolutePath.startsWith('/') ? '/' : /[/\\]/)
+            .filter(Boolean)
+            .at(-1) ?? '/'
+        }
+        openOnHover
         contextRef={anchorRef ?? ref}
         hideTrigger={hideTrigger && !inline}
-        onOpenChange={onInteract}
       />
     </span>
   );

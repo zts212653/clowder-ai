@@ -101,6 +101,7 @@ const READ_OPERATIONS = new Set([
   'run:download',
   'repo:view',
   'repo:list',
+  'repo:clone',
   'release:view',
   'release:list',
   'release:download',

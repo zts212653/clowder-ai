@@ -7,6 +7,9 @@ export interface InvocationPluginMcpEntry {
   readonly pluginId: string;
   readonly installationPolicy?: Omit<CapabilityEntry, 'mcpServer' | 'mcpServerOverride'>;
   readonly policySourceRef?: string;
+  /** Host-only projection; never persisted or accepted as package-supplied caller authority. */
+  readonly sharedHttpPath?: string;
+  readonly sharedHttpUnavailableReason?: string;
   readonly server: {
     readonly command: string;
     readonly args: readonly string[];
@@ -21,12 +24,40 @@ export interface InvocationPluginMcpEntry {
 export interface InvocationPluginMcpView {
   readonly entries: readonly InvocationPluginMcpEntry[];
   readonly localCapabilityRoot?: string;
+  /** Admission-only check owned by the activation source, including additions to an empty view. */
+  readonly isCurrent?: () => boolean;
 }
 
 const invocationView = new AsyncLocalStorage<{
   readonly view: InvocationPluginMcpView | undefined;
   readonly scope: PluginMcpExposureScope | undefined;
 }>();
+
+export function invocationPluginMcpHttpPaths(servers: Record<string, Record<string, unknown>>): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const entry of invocationView.getStore()?.view?.entries ?? []) {
+    const server = servers[entry.capabilityId.replaceAll(':', '__')];
+    if (!server || !entry.sharedHttpPath || !entry.isCurrent()) continue;
+    const env = server.env as Record<string, unknown> | undefined;
+    if (
+      server.command !== entry.server.command ||
+      JSON.stringify(server.args) !== JSON.stringify(entry.server.args) ||
+      env?.CLOWDER_PLUGIN_ACTION_TOKEN !== entry.server.env.CLOWDER_PLUGIN_ACTION_TOKEN
+    )
+      continue;
+    result[entry.capabilityId.replaceAll(':', '__')] = entry.sharedHttpPath;
+  }
+  return result;
+}
+
+/** Admission needs the same verified activation projection before a provider iterator exists. */
+export function withInvocationPluginMcpView<T>(
+  run: () => T,
+  view: InvocationPluginMcpView | undefined,
+  scope?: PluginMcpExposureScope,
+): T {
+  return invocationView.run({ view, scope: scope ? Object.freeze({ ...scope }) : undefined }, run);
+}
 
 export function invocationPluginMcpConfig(config: import('@cat-cafe/shared').CapabilitiesConfig, memberCatId: string) {
   const context = invocationView.getStore();

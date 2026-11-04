@@ -207,6 +207,7 @@ export function SliceLadder({ projectId, slices, onUpdate }: SliceLadderProps) {
       {/* Add Slice form */}
       {showForm && (
         <div
+          data-chat-background-surface="console-card"
           style={{
             background: 'var(--console-card-bg)',
             borderRadius: 10,
@@ -221,6 +222,7 @@ export function SliceLadder({ projectId, slices, onUpdate }: SliceLadderProps) {
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Slice name"
+            data-chat-background-surface="console-field"
             style={{
               border: '1px solid transparent',
               borderRadius: 10,
@@ -249,6 +251,7 @@ export function SliceLadder({ projectId, slices, onUpdate }: SliceLadderProps) {
             onChange={(e) => setDescription(e.target.value)}
             placeholder="Description"
             rows={2}
+            data-chat-background-surface="console-field"
             style={{
               border: '1px solid transparent',
               borderRadius: 10,
@@ -262,6 +265,7 @@ export function SliceLadder({ projectId, slices, onUpdate }: SliceLadderProps) {
             value={actor}
             onChange={(e) => setActor(e.target.value)}
             placeholder="Actor"
+            data-chat-background-surface="console-field"
             style={{
               border: '1px solid transparent',
               borderRadius: 10,
@@ -274,6 +278,7 @@ export function SliceLadder({ projectId, slices, onUpdate }: SliceLadderProps) {
             value={workflow}
             onChange={(e) => setWorkflow(e.target.value)}
             placeholder="Workflow"
+            data-chat-background-surface="console-field"
             style={{
               border: '1px solid transparent',
               borderRadius: 10,
@@ -287,6 +292,7 @@ export function SliceLadder({ projectId, slices, onUpdate }: SliceLadderProps) {
             onChange={(e) => setVerifiableOutcome(e.target.value)}
             placeholder="Verifiable outcome"
             rows={2}
+            data-chat-background-surface="console-field"
             style={{
               border: '1px solid transparent',
               borderRadius: 10,

@@ -321,6 +321,36 @@ test('Native deduplicates deliveryId within this live process', async () => {
   assert.deepEqual(completed, [true]);
 });
 
+test('Native preserves the interrupted provider reason when queued supplements lack results', async () => {
+  const completed = [];
+  const reason = 'The stream was interrupted. Please continue the task you were working on.';
+  const state = await runNative(async function* (s) {
+    yield input(41);
+    await append(s, 'B', { onInputCompleted: async (ok) => completed.push(ok) });
+    yield {
+      event: 'step_update',
+      step_update: {
+        conversation_id: session,
+        step_index: 186,
+        step_type: 'unknown',
+        state: 'DONE',
+        duration_seconds: 0.5,
+      },
+    };
+    yield answer(188, 'A produced its answer.', 20);
+    const failure = result('A produced its answer.', 3, 'ERROR');
+    failure.result.error = reason;
+    yield failure;
+  });
+  assert.deepEqual(completed, [false], 'A cannot sign a completion receipt for B');
+  assert.equal(state.messages.at(-1).errorCode, 'AGY_NATIVE_FAILED');
+  assert.match(state.messages.find((message) => message.type === 'error').error, /stream was interrupted/);
+  assert.equal(
+    state.messages.some((message) => message.error?.includes('process ended before an accepted input completed')),
+    false,
+  );
+});
+
 test('Native completes a recovered turn and the next appended turn without replaying text', async () => {
   const recovered = readFileSync(
     new URL('./fixtures/agy-stream-json/recovered-retry-turn.ndjson', import.meta.url),

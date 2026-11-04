@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import type { Dirent } from 'node:fs';
 import { opendir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { type ProjectContentStateV1, parseProjectContentState } from './state/manifest.js';
+import { type ProjectContentStateV1, validateProjectContentState } from './state/manifest.js';
 
 const MANIFEST_READ_WINDOW = 4;
 
@@ -58,7 +58,7 @@ async function readOwnerManifest(rootDir: string, entry: Dirent): Promise<Projec
     contentKey(identity.contentRef) !== entry.name
   )
     throw new Error('Invalid content owner manifest identity');
-  return parseProjectContentState(raw, identity.contentRef);
+  return validateProjectContentState(identity, identity.contentRef);
 }
 
 export function contentKey(contentRef: string): string {

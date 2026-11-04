@@ -78,6 +78,7 @@ function createHarness({
   actionSuccessorLeaseStore,
   taskStore,
   deploymentWaitStartGuard,
+  worktreeNoticeStartGuard,
   autoDrain = false,
   ledgerStore,
   liveCompanionSessions,
@@ -139,6 +140,7 @@ function createHarness({
     ...(actionSuccessorLeaseStore ? { actionSuccessorLeaseStore } : {}),
     ...(taskStore ? { taskStore } : {}),
     ...(deploymentWaitStartGuard ? { deploymentWaitStartGuard } : {}),
+    ...(worktreeNoticeStartGuard ? { worktreeNoticeStartGuard } : {}),
     ...(liveCompanionSessions ? { liveCompanionSessions } : {}),
   };
   processor = new QueueProcessor(deps, processorOptions);
@@ -1063,17 +1065,18 @@ describe('QueueProcessor over the source-row pending Queue', () => {
     await waitFor(() => pendingTurnIds(turns).length === 0);
   });
 
-  it('keeps an exact target set queued when one sibling is busy', async () => {
+  it('processNext starts an idle recipient while its sibling remains queued', async () => {
     const harness = createHarness();
     bindActiveRun(harness, { catId: 'opus', invocationId: 'turn-busy-opus' });
     const admitted = await admitMessage(harness, { targetCats: ['opus', 'codex'] });
-    const before = structuredClone(harness.queue.getEntrySnapshot('thread-1', 'user-1', admitted.entry.id));
-
     const started = await harness.processor.processNext('thread-1', 'user-1');
 
-    assert.equal(started.started, false);
-    assert.equal(harness.router.routeExecution.mock.calls.length, 0);
-    assert.deepEqual(harness.queue.getEntrySnapshot('thread-1', 'user-1', admitted.entry.id), before);
+    assert.equal(started.started, true);
+    await waitFor(() => harness.routeCalls.length === 1);
+    assert.deepEqual(harness.routeCalls[0][4], ['codex']);
+    await waitFor(() => harness.queue.getEntrySnapshot('thread-1', 'user-1', admitted.entry.id)?.targets.length === 1);
+    assert.deepEqual(harness.queue.getEntrySnapshot('thread-1', 'user-1', admitted.entry.id).targets, ['opus']);
+    assert.equal(harness.invocationTracker.getExecutionId('thread-1', 'opus'), 'parent-active');
   });
 
   it('starts the next source only after the prior source completes durable target handoff', async () => {
@@ -1931,7 +1934,7 @@ describe('QueueProcessor over the source-row pending Queue', () => {
 
   it('removes a public head and publishes failure when explicit routing resolves no target', async () => {
     const harness = createHarness();
-    harness.router.resolveConversationTargetsAtAdmission.mock.mockImplementation(async () => []);
+    harness.router.resolveExplicitTargets.mock.mockImplementation(async () => []);
     const admitted = await admitMessage(harness);
 
     const result = await harness.processor.processNext('thread-1', 'user-1');
@@ -2035,7 +2038,7 @@ describe('QueueProcessor over the source-row pending Queue', () => {
         yield { type: 'done', catId: targetCats[0], isFinal: true, timestamp: Date.now() };
       },
     });
-    harness.router.resolveConversationTargetsAtAdmission.mock.mockImplementation(async () => []);
+    harness.router.resolveExplicitTargets.mock.mockImplementation(async () => []);
     const outbound = await admitMessage(harness, {
       from: { kind: 'agent', catId: 'caller' },
       targetCats: ['missing'],
@@ -2043,7 +2046,7 @@ describe('QueueProcessor over the source-row pending Queue', () => {
     assert.equal((await harness.processor.processNext('thread-1', 'user-1')).started, false);
     assert.equal(harness.queue.list('thread-1', 'user-1').length, 0, 'terminal observation must not enqueue caller');
 
-    harness.router.resolveConversationTargetsAtAdmission.mock.mockImplementation(async (targets) => [...targets]);
+    harness.router.resolveExplicitTargets.mock.mockImplementation(async (targets) => [...targets]);
     const callerWake = await admitMessage(harness, { targetCats: ['caller'] });
     assert.equal((await harness.processor.processNext('thread-1', 'user-1')).started, true);
     await waitFor(() => harness.queue.getEntrySnapshot('thread-1', 'user-1', callerWake.entry.id) === null);
@@ -2240,19 +2243,54 @@ describe('F117 soak: a waiting entry does not stop its thread’s queue', () => 
     assert.deepEqual(queuedIds(harness), [first.entry.id, second.entry.id]);
   });
 
-  it('holds back a later source for the idle member of a source that waits on its busy member', async () => {
-    const harness = createHarness();
+  it('drains a shared source per recipient without delaying the idle member or reordering its follow-up', async () => {
+    const calls = [];
+    let finishIdle;
+    const idleReply = new Promise((resolve) => {
+      finishIdle = resolve;
+    });
+    const harness = createHarness({
+      routeExecution: async function* (...args) {
+        const [, content, , , targets] = args;
+        calls.push({ content, targets });
+        await startLifecycle(args, `partial-child-${calls.length}`);
+        if (content === 'shared' && targets[0] === 'codex') await idleReply;
+        yield { type: 'done', catId: targets[0], isFinal: true, timestamp: Date.now() };
+      },
+    });
     bindActiveRun(harness, { catId: 'opus', invocationId: 'turn-busy-opus' });
-    const pair = await admitMessage(harness, { targetCats: ['opus', 'codex'] });
-    const codexOnly = await admitMessage(harness, { targetCats: ['codex'] });
-    await admitMessage(harness, { targetCats: ['gemini'] });
+    const pair = await admitMessage(harness, { content: 'shared', targetCats: ['opus', 'codex'] });
+    const codexOnly = await admitMessage(harness, { content: 'follow-up', targetCats: ['codex'] });
+    await admitMessage(harness, { content: 'unrelated', targetCats: ['gemini'] });
 
+    try {
+      await harness.processor.requestDrain('thread-1');
+      await waitFor(() => calls.length === 2);
+      assert.deepEqual(calls, [
+        { content: 'shared', targets: ['codex'] },
+        { content: 'unrelated', targets: ['gemini'] },
+      ]);
+      assert.deepEqual(harness.queue.getEntrySnapshot('thread-1', 'user-1', pair.entry.id).targets, ['opus']);
+      assert.equal(harness.queue.getEntrySnapshot('thread-1', 'user-1', codexOnly.entry.id).status, 'queued');
+      assert.equal(harness.invocationTracker.getExecutionId('thread-1', 'opus'), 'parent-active');
+    } finally {
+      finishIdle();
+    }
+
+    await waitFor(() => calls.some((call) => call.content === 'follow-up'));
+    assert.deepEqual(
+      calls.filter((call) => call.targets.includes('codex')).map((call) => call.content),
+      ['shared', 'follow-up'],
+    );
+    harness.invocationTracker.complete('thread-1', 'opus');
     await harness.processor.requestDrain('thread-1');
-    await waitFor(() => harness.routeCalls.length === 1);
-    await new Promise((resolve) => setTimeout(resolve, 25));
-
-    assert.deepEqual(routedTargets(harness), [['gemini']], 'codex keeps its order behind the waiting pair');
-    assert.deepEqual(queuedIds(harness), [pair.entry.id, codexOnly.entry.id]);
+    await waitFor(() => harness.queue.getEntrySnapshot('thread-1', 'user-1', pair.entry.id) === null);
+    const source = harness.messageStore.getById(pair.message.id);
+    assert.deepEqual(
+      source.lifecycle.dispatchRefs.map((ref) => ref.targetId),
+      ['codex', 'opus'],
+    );
+    assert.equal(calls.filter((call) => call.content === 'shared').length, 2, 'one delivery per recipient');
   });
 
   it('keeps draining past an attempt that failed before handoff, and retries it after its wait', async () => {
@@ -2487,7 +2525,7 @@ describe('F117 soak: a waiting entry does not stop its thread’s queue', () => 
       markResolutionStarted = resolve;
     });
     let paused = false;
-    harness.router.resolveConversationTargetsAtAdmission = async (targetCats) => {
+    harness.router.resolveExplicitTargets = async (targetCats) => {
       if (!paused) {
         paused = true;
         markResolutionStarted();
@@ -2512,6 +2550,57 @@ describe('F117 soak: a waiting entry does not stop its thread’s queue', () => 
       ['later', 'earlier'],
       'codex receives its sources in the order the owner set',
     );
+  });
+});
+
+describe('retention reminders at the canonical Queue boundary', () => {
+  const privateReminder = {
+    threadId: 'thread-1',
+    userId: 'user-1',
+    sourceId: `worktree:${'a'.repeat(64)}:owner-queued-v1:private`,
+    kind: 'private_input',
+    from: { kind: 'system', service: 'worktree-lifecycle' },
+    ownerAuthProvenance: 'unknown',
+    sourceCategory: 'scheduled',
+    content: 'old retention reminder',
+    targetCats: ['opus'],
+    intent: 'execute',
+  };
+
+  it('retires an old reminder without an invocation when its retention was renewed while queued', async () => {
+    let current = true;
+    const check = mock.fn(async () => (current ? { ok: true } : { ok: false, reason: 'notice_stale' }));
+    const h = createHarness({ worktreeNoticeStartGuard: { check } });
+    const admitted = await h.queue.enqueueDurable(privateReminder);
+    current = false;
+    await h.processor.processNext('thread-1', 'user-1');
+    await waitFor(() => h.queue.getEntrySnapshot('thread-1', 'user-1', admitted.entry.id) === null);
+    assert.equal(h.router.routeExecution.mock.calls.length, 0, 'renewed retention must not wake the owner again');
+    assert.equal(h.invocationRecordStore.create.mock.calls.length, 0);
+    assert.equal(check.mock.calls.length, 1);
+  });
+
+  it('preserves the exact private input when current retention cannot be read', async () => {
+    const h = createHarness({
+      worktreeNoticeStartGuard: { check: async () => ({ ok: false, reason: 'evidence_unavailable' }) },
+    });
+    const admitted = await h.queue.enqueueDurable(privateReminder);
+    await h.processor.processNext('thread-1', 'user-1');
+    const row = await h.queue.getDurableEntry('thread-1', admitted.entry.id);
+    assert.equal(row?.status, 'queued');
+    assert.deepEqual(row.targets, ['opus']);
+    assert.equal(h.router.routeExecution.mock.calls.length, 0);
+  });
+
+  it('checks again after asynchronous route preparation, before exposing private input', async () => {
+    let checks = 0;
+    const check = mock.fn(async () => (++checks === 1 ? { ok: true } : { ok: false, reason: 'notice_stale' }));
+    const h = createHarness({ worktreeNoticeStartGuard: { check } });
+    const admitted = await h.queue.enqueueDurable(privateReminder);
+    await h.processor.processNext('thread-1', 'user-1');
+    await waitFor(() => h.queue.getEntrySnapshot('thread-1', 'user-1', admitted.entry.id) === null);
+    assert.equal(h.router.routeExecution.mock.calls.length, 0);
+    assert.equal(check.mock.calls.length, 2);
   });
 });
 

@@ -49,8 +49,10 @@ for (const operation of ['withdraw', 'clear', 'message-withdraw']) {
       assert.equal(response.statusCode, 409, response.body);
     } else {
       const response = await request('DELETE', 'queue');
-      assert.equal(response.statusCode, 200, response.body);
+      assert.equal(response.statusCode, 409, response.body);
+      assert.equal(response.json().code, 'QUEUE_WITHDRAWAL_FAILED');
       assert.equal(response.json().cleared.length, 0);
+      assert.equal(response.json().queue[0].id, f.admission.entry.id);
     }
     assert.ok(await f.queue.getDurableEntry('thread', f.admission.entry.id));
     await f.input().onInputCompleted(false);
@@ -119,7 +121,7 @@ for (const completed of [true, false]) {
   });
 }
 
-test('restart recovery broadcasts restoration of the original unfinished input', async () => {
+test('restart recovery broadcasts the original read input as uncertain', async () => {
   const f = await fixture();
   await f.append();
   await f.input().onInputRead();
@@ -131,5 +133,5 @@ test('restart recovery broadcasts restoration of the original unfinished input',
   assert.ok(
     events.some((call) => call.arguments[2].queue[0]?.appendFailures?.length || call.arguments[2].queue.length === 1),
   );
-  assert.equal(f.queue.list('thread', 'owner')[0].delivery.appendRecoveryByTarget.opus.acceptance, 'incomplete');
+  assert.equal(f.queue.list('thread', 'owner')[0].delivery.appendRecoveryByTarget.opus.acceptance, 'unknown');
 });

@@ -12,6 +12,7 @@
   border: 1px solid var(--shell-hairline);
   border-radius: 12px;
   background: var(--shell-paper);
+  --chat-background-role: paper;
   color: var(--shell-body);
 }
 .v2-works-panel {
@@ -21,6 +22,7 @@
   min-width: 0;
   min-height: 0;
   background: var(--shell-work);
+  --chat-background-role: work;
   color: var(--shell-ink);
 }
 .v2-works-header {
@@ -36,6 +38,7 @@
   border: 1px solid var(--shell-hairline);
   border-radius: 8px;
   background: var(--shell-paper);
+  --chat-background-role: paper;
 }
 .v2-works-scroll {
   flex: 1;
@@ -61,6 +64,7 @@
   max-height: 340px;
   object-fit: contain;
   background: var(--shell-work);
+  --chat-background-role: work;
 }
 .home-work-label,
 .home-work-meta {
@@ -113,6 +117,7 @@
   white-space: pre-wrap;
   overflow: hidden;
   background: var(--shell-paper);
+  --chat-background-role: paper;
   border: 1px solid var(--shell-hairline);
   color: var(--shell-body);
 }
@@ -136,6 +141,7 @@
   border-radius: 12px;
   overflow: hidden;
   background: var(--shell-paper);
+  --chat-background-role: paper;
   color: var(--shell-ink);
   box-shadow: 0 12px 48px color-mix(in srgb, var(--shell-ink) 20%, transparent);
 }
@@ -224,6 +230,7 @@
   border-radius: 4px;
   padding: 2px 6px;
   background: var(--console-panel-bg);
+  --chat-background-role: console-panel;
 }
 [data-shell="v2"] .home-work-menu summary::-webkit-details-marker {
   display: none;
@@ -232,6 +239,7 @@
   display: block;
   padding: 6px 10px;
   background: var(--console-panel-bg);
+  --chat-background-role: console-panel;
   border: 1px solid var(--shell-hairline);
   border-radius: 4px;
 }

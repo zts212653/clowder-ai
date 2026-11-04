@@ -18,9 +18,16 @@ const hasSourceStagingContent = existsSync(
 
 import { afterEach, before, beforeEach, describe, it } from 'node:test';
 import { catRegistry } from '@cat-cafe/shared';
+import {
+  CODEX_ACTIVE_WORK_CONTEXT_DECISION,
+  CODEX_COMPACTION_CONTINUATION_TRIGGER,
+  codexActiveWorkContext,
+} from '../dist/domains/cats/services/agents/providers/codex-active-work-context.js';
+import { agentServiceGeneration } from '../dist/domains/cats/services/agents/registry/AgentRegistry.js';
 import { ContextEpochOwner } from '../dist/domains/cats/services/session/context/ContextEpochOwner.js';
 import { InMemoryContextEpochStore } from '../dist/domains/cats/services/stores/ports/ContextEpochStore.js';
 import { openCodeDirectMcpContract } from './helpers/direct-mcp-contract.js';
+import { declareKnownHostSessionFixture } from './helpers/known-host-session-fixture.js';
 
 function assertStagingPromptContract(prompt, mode) {
   if (hasSourceStagingContent) {
@@ -40,6 +47,21 @@ async function collect(iterable) {
   const msgs = [];
   for await (const msg of iterable) msgs.push(msg);
   return msgs;
+}
+
+async function seedStaticIdentity(invoke, deps, identity) {
+  await collect(
+    invoke(deps, {
+      ...identity,
+      prompt: 'earlier successful identity delivery',
+      isLastCat: true,
+      service: {
+        async *invoke() {
+          yield { type: 'done', catId: identity.catId, timestamp: Date.now() };
+        },
+      },
+    }),
+  );
 }
 
 function installNextActiveRecordLookupBarrier(sessionChainStore) {
@@ -242,6 +264,8 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
                 reason: 'invoke-single-cat test double',
               }),
             };
+        // A wrapper is a view of this same fake implementation, not a new generation.
+        agentServiceGeneration(service, params.service);
         const capacitySnapshot =
           params.capacitySnapshot ??
           (await resolveInvocationCapacitySnapshot({
@@ -250,7 +274,11 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
             service,
             sessionChainStore: deps.sessionChainStore,
           }));
-        yield* invokeSingleCatRaw(deps, { ...params, service, capacitySnapshot });
+        const executionBinding = deps.sessionChainStore
+          ? (params.executionBinding ?? (await mod.prepareInvocationExecutionBinding(deps, { ...params, service })))
+          : params.executionBinding;
+        if (executionBinding) await declareKnownHostSessionFixture(deps, params, executionBinding);
+        yield* invokeSingleCatRaw(deps, { ...params, service, capacitySnapshot, executionBinding });
       })();
   });
 
@@ -593,10 +621,14 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       }),
     );
 
-    assert.deepEqual(reads, [
-      { threadId: 'thread-effort-runtime', catId: 'codex', userId: 'user-thread-effort' },
-      { threadId: 'thread-effort-runtime', catId: 'codex', userId: 'user-thread-effort' },
-    ]);
+    assert.ok(reads.length >= 2, 'both invocations must read their current effort; admission may revalidate it');
+    reads.forEach((read) =>
+      assert.deepEqual(read, {
+        threadId: 'thread-effort-runtime',
+        catId: 'codex',
+        userId: 'user-thread-effort',
+      }),
+    );
     assert.equal(optionsSeen[0]?.reasoningEffortOverride, 'max');
     assert.equal(optionsSeen[1]?.reasoningEffortOverride, 'low');
   });
@@ -683,7 +715,14 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       else base.cli.serviceTier = previous;
     }
 
-    assert.deepEqual(reads, [{ threadId: 'thread-speed-runtime', catId: 'codex-sol', userId: 'user-thread-speed' }]);
+    assert.ok(reads.length > 0);
+    reads.forEach((read) =>
+      assert.deepEqual(read, {
+        threadId: 'thread-speed-runtime',
+        catId: 'codex-sol',
+        userId: 'user-thread-speed',
+      }),
+    );
     assert.equal(optionsSeen[0]?.requestedServiceTier, 'fast');
   });
 
@@ -6110,6 +6149,12 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
     const { SessionSealer } = await import('../dist/domains/cats/services/session/SessionSealer.js');
     const sessionChainStore = new SessionChainStore();
+    sessionChainStore.create({
+      cliSessionId: 'old-sess',
+      catId: 'opus',
+      threadId: 'thread-seal-race',
+      userId: 'user-seal',
+    });
     // Create a sealer whose finalize is slow (simulates async flush)
     let finalizeResolved = false;
     const realSealer = new SessionSealer(sessionChainStore);
@@ -6195,6 +6240,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
     const { SessionSealer } = await import('../dist/domains/cats/services/session/SessionSealer.js');
     const sessionChainStore = new SessionChainStore();
+    sessionChainStore.create({ cliSessionId: 'old-sess', catId: 'opus', threadId: 'thread-seal-clean', userId: 'u1' });
     const sealer = new SessionSealer(sessionChainStore);
 
     // After delete, sessionManager.get returns undefined
@@ -6293,6 +6339,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
     const { SessionSealer } = await import('../dist/domains/cats/services/session/SessionSealer.js');
     const sessionChainStore = new SessionChainStore();
+    sessionChainStore.create({ cliSessionId: 'old-sess', catId: 'opus', threadId: 'thread-slow-delete', userId: 'u1' });
     const sealer = new SessionSealer(sessionChainStore);
 
     // sessionManager.delete is intentionally slow — simulates Redis latency
@@ -6407,18 +6454,20 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
 
     // The chain read fails, but creating the mandatory replacement logical
     // node remains available after the stale resume identity is discarded.
+    let active;
     const failingChainStore = {
       getChain() {
         throw new Error('Redis connection lost');
       },
       getActive() {
-        return null;
+        return active ?? null;
       },
       get() {
         return null;
       },
       create() {
-        return { id: 'x', seq: 0, status: 'active' };
+        active = { id: 'x', seq: 0, status: 'active' };
+        return active;
       },
       update() {
         return {};
@@ -6795,94 +6844,113 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     );
   });
 
-  it('capacity-recovery prepared requests skip the entity-nudge exact check and never re-confirm delivery', async () => {
-    // A capacity-recovery request carries an empty body by design (turn/start
-    // sends input: []), so it can never contain the nudge promptContext. Before
-    // the dedicated boundary, recovery generations were tagged provider_fallback
-    // and died on entity_nudge_prepared_prompt_not_exact — the exact failure
-    // seen live on invocation 0d676739-4949-4b8c-8fa4-afd362b90110.
-    const activeRecord = {
-      id: 'sr-capacity-recovery-nudge',
-      seq: 0,
-      status: 'active',
-      catId: 'opus',
-      threadId: 'thread-capacity-recovery-nudge',
-      userId: 'u1',
-    };
-    const durable = [];
-    let confirmations = 0;
-    const prepared = (body, boundaryReason) => ({
-      v: 1,
-      ...(boundaryReason ? { boundaryReason } : {}),
-      message: { body },
-      nativeInstructions: [],
-      runtime: { provider: 'openai', carrier: 'app_server' },
-      tools: { finalSurface: 'unknown' },
-      providerNativeVisibility: 'unknown',
+  for (const contextOnly of ['capacity recovery', 'native compaction']) {
+    it(`${contextOnly} skips already-delivered nudges and records the exact continuation`, async () => {
+      // A capacity-recovery request carries an empty body by design (turn/start
+      // sends input: []), so it can never contain the nudge promptContext. Before
+      // the dedicated boundary, recovery generations were tagged provider_fallback
+      // and died on entity_nudge_prepared_prompt_not_exact — the exact failure
+      // seen live on invocation 0d676739-4949-4b8c-8fa4-afd362b90110.
+      const activeRecord = {
+        id: 'sr-capacity-recovery-nudge',
+        seq: 0,
+        status: 'active',
+        catId: 'opus',
+        threadId: 'thread-capacity-recovery-nudge',
+        userId: 'u1',
+      };
+      const durable = [];
+      let confirmations = 0;
+      const prepared = (body, boundaryReason) => ({
+        v: 1,
+        ...(boundaryReason ? { boundaryReason } : {}),
+        message: { body },
+        nativeInstructions: [],
+        runtime: { provider: 'openai', carrier: 'app_server' },
+        tools: { finalSurface: 'unknown' },
+        providerNativeVisibility: 'unknown',
+      });
+      const service = {
+        l0CompilerFn: dummyL0CompilerFn,
+        async *invoke(prompt, options) {
+          await options.beforeProviderLaunch(prepared(prompt));
+          const continuation =
+            contextOnly === 'capacity recovery'
+              ? prepared('', 'provider_capacity_recovery')
+              : {
+                  ...prepared(CODEX_COMPACTION_CONTINUATION_TRIGGER, 'provider_continuation'),
+                  message: {
+                    body: CODEX_COMPACTION_CONTINUATION_TRIGGER,
+                    injectionDecision: CODEX_ACTIVE_WORK_CONTEXT_DECISION,
+                  },
+                  nativeInstructions: [
+                    codexActiveWorkContext({
+                      threadId: activeRecord.threadId,
+                      invocationId: 'active-invocation',
+                      promptMessageIds: ['source'],
+                    }),
+                  ],
+                };
+          await options.beforeProviderLaunch(continuation);
+          yield { type: 'text', catId: 'opus', content: 'recovered', timestamp: Date.now() };
+          yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+        },
+      };
+      const messages = await collect(
+        invokeSingleCat(
+          {
+            ...makeDeps(),
+            sessionChainStore: {
+              getChain: async () => [activeRecord],
+              getActive: async () => activeRecord,
+              get: async () => activeRecord,
+              create: async () => activeRecord,
+              update: async () => activeRecord,
+            },
+            transcriptWriter: {
+              appendEvent() {},
+              appendDurableEvent: async (_session, event) => {
+                durable.push(event);
+              },
+              keyedContentDigest: async () => `hmac-sha256:${'a'.repeat(64)}`,
+            },
+          },
+          {
+            catId: 'opus',
+            service,
+            prompt: 'test',
+            userId: 'u1',
+            threadId: activeRecord.threadId,
+            isLastCat: true,
+            entityNudgePresentation: {
+              sourceMessageId: 'source',
+              candidates: {},
+              service: {
+                preparePresentation: () => ({
+                  promptContext: '[entity-nudge]known source[/entity-nudge]',
+                  confirmAssembled: () => {
+                    confirmations++;
+                  },
+                }),
+              },
+            },
+          },
+        ),
+      );
+      assert.equal(
+        messages.some((message) => message.type === 'error'),
+        false,
+        JSON.stringify(messages.filter((message) => message.type === 'error')),
+      );
+      assert.equal(confirmations, 1, 'the recovery generation must not re-confirm an already-delivered nudge');
+      const firstTerminal = durable.find((event) => event.type === 'request_generation_terminal');
+      assert.equal(
+        firstTerminal?.reason,
+        contextOnly === 'capacity recovery' ? 'provider_capacity_recovery' : 'provider_continuation',
+        'the previous generation records the actual context-only continuation boundary',
+      );
     });
-    const service = {
-      l0CompilerFn: dummyL0CompilerFn,
-      async *invoke(prompt, options) {
-        await options.beforeProviderLaunch(prepared(prompt));
-        await options.beforeProviderLaunch(prepared('', 'provider_capacity_recovery'));
-        yield { type: 'text', catId: 'opus', content: 'recovered', timestamp: Date.now() };
-        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
-      },
-    };
-    const messages = await collect(
-      invokeSingleCat(
-        {
-          ...makeDeps(),
-          sessionChainStore: {
-            getChain: async () => [activeRecord],
-            getActive: async () => activeRecord,
-            get: async () => activeRecord,
-            create: async () => activeRecord,
-            update: async () => activeRecord,
-          },
-          transcriptWriter: {
-            appendEvent() {},
-            appendDurableEvent: async (_session, event) => {
-              durable.push(event);
-            },
-            keyedContentDigest: async () => `hmac-sha256:${'a'.repeat(64)}`,
-          },
-        },
-        {
-          catId: 'opus',
-          service,
-          prompt: 'test',
-          userId: 'u1',
-          threadId: activeRecord.threadId,
-          isLastCat: true,
-          entityNudgePresentation: {
-            sourceMessageId: 'source',
-            candidates: {},
-            service: {
-              preparePresentation: () => ({
-                promptContext: '[entity-nudge]known source[/entity-nudge]',
-                confirmAssembled: () => {
-                  confirmations++;
-                },
-              }),
-            },
-          },
-        },
-      ),
-    );
-    assert.equal(
-      messages.some((message) => message.type === 'error'),
-      false,
-      JSON.stringify(messages.filter((message) => message.type === 'error')),
-    );
-    assert.equal(confirmations, 1, 'the recovery generation must not re-confirm an already-delivered nudge');
-    const firstTerminal = durable.find((event) => event.type === 'request_generation_terminal');
-    assert.equal(
-      firstTerminal?.reason,
-      'provider_capacity_recovery',
-      'the replaced prompt generation must record the dedicated recovery boundary, not a generic fallback',
-    );
-  });
+  }
 
   it('non-recovery prepared requests that drop the entity nudge stay fail-closed', async () => {
     // The exemption is scoped to provider_capacity_recovery only: Claude carrier
@@ -7107,6 +7175,13 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       delete: async () => {},
     };
 
+    await seedStaticIdentity(invokeSingleCat, deps, {
+      catId: 'opus',
+      userId: 'u1',
+      threadId: 'thread-bloat-resume',
+      systemPrompt: 'You are a cat',
+    });
+
     await collect(
       invokeSingleCat(deps, {
         catId: 'opus',
@@ -7184,6 +7259,13 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       store: async () => {},
       delete: async () => {},
     };
+    await seedStaticIdentity(invokeSingleCat, deps, {
+      catId: 'opus',
+      userId: 'u1',
+      threadId: 'thread-staging-resume',
+      systemPrompt: 'static identity here',
+    });
+
     await collect(
       invokeSingleCat(deps, {
         catId: 'opus',
@@ -7252,6 +7334,13 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       store: async () => {},
       delete: async () => {},
     };
+    await seedStaticIdentity(invokeSingleCat, deps, {
+      catId: 'opus',
+      userId: 'owner-f293',
+      threadId: 'thread-routing-context-resume',
+      systemPrompt: 'static identity here',
+    });
+
     deps.routingContextPromptProjection = {
       async resolve(input) {
         resolutions.push(input);
@@ -7335,6 +7424,13 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       store: async () => {},
       delete: async () => {},
     };
+
+    await seedStaticIdentity(invokeSingleCat, deps, {
+      catId: 'gemini',
+      userId: 'u1',
+      threadId: 'thread-bloat-gemini',
+      systemPrompt: 'You are a Siamese cat',
+    });
 
     await collect(
       invokeSingleCat(deps, {
@@ -7538,6 +7634,13 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     };
 
     // Turn 1: 60k tokens — establishes baseline
+    await seedStaticIdentity(invokeSingleCat, deps, {
+      catId: 'codex',
+      userId: 'u1',
+      threadId: 'thread-compress',
+      systemPrompt: 'Identity prompt',
+    });
+
     await collect(
       invokeSingleCat(deps, {
         catId: 'codex',
@@ -9230,7 +9333,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(upstream.command, process.execPath, 'the original split server retains the runtime Node binary');
     assert.equal(upstream.args.length, 1);
     assert.ok(
-      upstream.args[0].endsWith('/packages/mcp-server/dist/collab.js'),
+      upstream.args[0].replaceAll('\\', '/').endsWith('/packages/mcp-server/dist/collab.js'),
       `MCP upstream must point to split entrypoint: ${upstream.args[0]}`,
     );
     for (const env of [launchEnv, upstream.env])
@@ -10886,6 +10989,10 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     const previousConfigRoot = process.env.CAT_CAFE_CONFIG_ROOT;
     await mkdir(join(testGlobalConfigRoot, '.cat-cafe'), { recursive: true });
     await writeFile(
+      join(testGlobalConfigRoot, 'cat-template.json'),
+      await readFile(join(workspaceRoot, 'cat-template.json')),
+    );
+    await writeFile(
       join(testGlobalConfigRoot, '.cat-cafe/capabilities.json'),
       JSON.stringify({ version: 1, capabilities: [] }),
     );
@@ -10903,17 +11010,21 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       },
     };
     const threadId = 'thread-legacy-runtime-root';
+    let threadProjectPath = runtimeRoot;
     const deps = {
       ...makeDeps(),
       threadStore: {
-        get: async () => ({ projectPath: runtimeRoot, createdBy: 'user1' }),
-        updateProjectPath: async (...args) => migrations.push(args),
+        get: async () => ({ projectPath: threadProjectPath, createdBy: 'user1' }),
+        updateProjectPath: async (id, path) => {
+          migrations.push([id, path]);
+          threadProjectPath = path;
+        },
         updateParticipantActivity: async () => {},
       },
     };
 
     try {
-      const msgs = await collect(
+      const invoke = () =>
         invokeSingleCat(deps, {
           catId: 'opencode',
           service,
@@ -10921,11 +11032,14 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
           userId: 'user1',
           threadId,
           isLastCat: true,
-        }),
-      );
+        });
+      const firstAdmission = await collect(invoke());
+      assert.ok(firstAdmission.some((message) => message.errorCode === 'execution_binding_conflict'));
+      assert.equal(optionsSeen.length, 0, 'the migrated source must be reparsed before any provider call');
+      const msgs = await collect(invoke());
 
       assert.ok(msgs.some((m) => m.type === 'done'));
-      assert.equal(optionsSeen[0]?.workingDirectory, workspaceRoot);
+      assert.equal(optionsSeen[0]?.workingDirectory, workspaceRoot, JSON.stringify(msgs));
       assert.deepEqual(migrations, [[threadId, workspaceRoot]]);
     } finally {
       if (previousRuntimeRoot === undefined) delete process.env.CAT_CAFE_RUNTIME_ROOT;

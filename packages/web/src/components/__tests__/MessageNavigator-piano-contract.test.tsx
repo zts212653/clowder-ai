@@ -4,8 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatMessage } from '@/stores/chat-types';
 import { MessageNavigator } from '../MessageNavigator';
 
-vi.mock('@/hooks/useCatData', () => ({ useCatData: () => ({ getCatById: () => undefined }) }));
-vi.mock('@/hooks/useCoCreatorConfig', () => ({ useCoCreatorConfig: () => ({ name: 'Owner' }) }));
+const ownerData = vi.hoisted(() => ({ getCatById: () => undefined, coCreator: { name: 'Owner' } }));
+vi.mock('@/hooks/useCatData', () => ({ useCatData: () => ({ getCatById: ownerData.getCatById }) }));
+vi.mock('@/hooks/useCoCreatorConfig', () => ({ useCoCreatorConfig: () => ownerData.coCreator }));
 vi.mock('../shell/shell-presentation', () => ({ useShellPresentation: () => 'v2' }));
 
 function rectangle(top: number, height: number): DOMRect {
@@ -108,6 +109,36 @@ describe('v2 piano uses every visible loaded row', () => {
     expect(viewport.querySelector('[data-message-viewport-id="row-7"]')).not.toBeNull();
     expect(host.querySelectorAll('[role="option"], button[aria-label^="跳转到"]')).toHaveLength(23);
     expect(host.querySelector('[data-message-piano-key="row-7"]')).toBeNull();
+  });
+
+  it('scrolls a long history without measuring every row or reformatting every label', () => {
+    let scheduled: FrameRequestCallback | undefined;
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      scheduled = callback;
+      return 1;
+    });
+    let rowMeasurements = 0;
+    const labels = vi.spyOn(Date.prototype, 'toLocaleString');
+    renderRows(240, -1, (_message, row) => {
+      const measure = row.getBoundingClientRect;
+      row.getBoundingClientRect = () => {
+        rowMeasurements += 1;
+        return measure();
+      };
+    });
+    const thumb = host.querySelector<HTMLElement>('[data-message-piano-thumb]');
+    const initialTop = Number.parseFloat(thumb?.style.top ?? '0');
+    rowMeasurements = 0;
+    labels.mockClear();
+    act(() => {
+      viewport.scrollTop = 600;
+      viewport.dispatchEvent(new Event('scroll'));
+      scheduled?.(1);
+    });
+    expect(Number.parseFloat(thumb?.style.top ?? '0')).toBeGreaterThan(initialTop);
+    expect(host.querySelectorAll('[data-message-piano-key]')).toHaveLength(240);
+    expect(rowMeasurements, 'unchanged content positions are independent of the scroll offset').toBe(0);
+    expect(labels, 'static accessible labels do not change when the thumb moves').not.toHaveBeenCalled();
   });
 
   it('redraws late layout geometry without scrolling or mounting deferred message bodies', () => {

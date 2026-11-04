@@ -71,6 +71,8 @@ export interface CatVariant {
   /** Canonical member access mode. Config reads default to `cli`. */
   readonly carrier?: CatCarrier;
   readonly defaultModel: string;
+  /** Host-owned ACP confirmation mode. Omitted retains automatic approval. */
+  readonly executionApproval?: 'auto' | 'ask_user';
   readonly mcpSupport: boolean;
   readonly cli: CliConfig;
   /** F210 Phase G: optional isolated Antigravity CLI profile binding. */
@@ -198,6 +200,8 @@ export interface RosterEntry {
   readonly lead: boolean;
   /** Whether this cat is available (has quota). co-creator 40 美刀教训！ */
   readonly available: boolean;
+  /** Explicit one-hop replacement for implicit targets; never inherits roles or lead. */
+  readonly successor?: string;
   /** co-creator's evaluation of this cat */
   readonly evaluation: string;
 }
@@ -275,8 +279,10 @@ export interface CatCafeConfigV1 {
 export interface CoCreatorConfig {
   /** Primary display name (e.g. "You") */
   readonly name: string;
-  /** Optional familiar form of address, already present in the install template. */
+  /** Optional familiar form of address, prefilled as co-creator for new house installations. */
   readonly nickname?: string;
+  /** An explicit nickname choice, including clearing it; never inferred from an unrelated edit. */
+  readonly nicknameSource?: 'user';
   /** Alternative names cats may use (e.g. ["L.S.", "you"]) */
   readonly aliases: readonly string[];
   /** Line-start mention patterns for routing detection (e.g. ["@co-creator", "@co-creator"]) */

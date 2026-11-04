@@ -29,6 +29,7 @@ export function ChannelScene(props: ChannelSceneProps) {
     humanId,
     humanName,
     channelId,
+    channel,
     content,
     focusEventId,
     onCloseContext,
@@ -93,6 +94,7 @@ export function ChannelScene(props: ChannelSceneProps) {
   const [mention, setMention] = useState<MentionSelection>();
   const [selectionError, setSelectionError] = useState<string>();
   const [highlightedId, setHighlightedId] = useState(focusEventId);
+  const appliedChannelFocus = useRef<string>();
   const focusedHostEvent = useRef<string>();
   const flowRef = useRef<HTMLDivElement>(null);
   const readSurface = useRef<HTMLDivElement>(null);
@@ -165,18 +167,23 @@ export function ChannelScene(props: ChannelSceneProps) {
     // While the work is open, its exact original Topic owns this pane; a channel focus cannot close it.
     if (shared?.selected) return;
     if (!focusEventId) {
+      appliedChannelFocus.current = undefined;
       focusedHostEvent.current = undefined;
       return;
     }
     const focused = events.find((event) => event.eventId === focusEventId);
-    const rootEventId = focused?.location?.rootEventId ?? focused?.replyToEventId;
-    if (rootEventId) {
-      setTopicRootId(rootEventId);
-      setReplyRequest(undefined);
-    } else {
-      setTopicRootId(undefined);
+    // This focus is a one-shot navigation request; event polling must not replay it over Human-owned Topic state.
+    if (focused && appliedChannelFocus.current !== focusEventId) {
+      const rootEventId = focused.location?.rootEventId ?? focused.replyToEventId;
+      if (rootEventId) {
+        setTopicRootId(rootEventId);
+        setReplyRequest(undefined);
+      } else {
+        setTopicRootId(undefined);
+      }
+      setHighlightedId(focusEventId);
+      appliedChannelFocus.current = focusEventId;
     }
-    setHighlightedId(focusEventId);
     const frame = requestAnimationFrame(() => {
       if (focusedHostEvent.current === focusEventId) return;
       const target = document.getElementById(`collective-event-${focusEventId}`);
@@ -351,6 +358,8 @@ export function ChannelScene(props: ChannelSceneProps) {
               legacy={legacy}
               search={Boolean(search)}
               humanName={humanName}
+              channel={channel}
+              collectiveName={collective.name}
               channelWorks={channelWorks}
               channelVotes={channelVotes}
               channelReactions={channelReactions}

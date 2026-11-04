@@ -664,7 +664,7 @@ export function useChatHistory(threadId: string) {
       isOfflineSnapshot: s.isOfflineSnapshot,
     })),
   );
-  const { setTasks } = useTaskStore();
+  const { setTasks } = useTaskStore(useShallow((state) => ({ setTasks: state.setTasks })));
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);

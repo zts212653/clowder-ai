@@ -1,6 +1,6 @@
 import { applySessionConfiguration, type SessionConfigurationClient } from './session-configuration.js';
 
-type Session = { sessionId: string; configOptions?: unknown };
+type Session = { sessionId: string; configOptions?: unknown; models?: unknown };
 type Preferences = { model?: string; effort?: string };
 // A concrete client belongs to one spawn generation (account + profile). Cwd and
 // requested model are separate cache keys; no defaults cross identities/workspaces.
@@ -17,6 +17,11 @@ function cache(client: SessionConfigurationClient) {
   }
   return result;
 }
+/**
+ * An empty/opaque native default is still a replayable sentinel: ACP clients
+ * advertise `''` as the "native default" config value and it must be sent back
+ * to restore that default. Only `unknown` evidence is not a preference.
+ */
 function isUnknownModelPreference(value: string): boolean {
   try {
     const parsed: unknown = JSON.parse(value);
@@ -27,6 +32,8 @@ function isUnknownModelPreference(value: string): boolean {
 }
 function currentPreferences(session: Session): Preferences {
   const result: Preferences = {};
+  // Only configOptions advertise a preference that can be replayed on resume.
+  // Legacy `models.currentModelId` is observation-only and never replayed.
   if (!Array.isArray(session.configOptions)) return result;
   for (const option of session.configOptions) {
     if (!option || typeof option !== 'object' || typeof option.currentValue !== 'string') continue;

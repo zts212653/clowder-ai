@@ -144,11 +144,18 @@ export class MessageQueryQualifier {
     const counts = { supported: 0, rejected: 0, indeterminate: 0 };
     for (const decision of decisions.values()) counts[decision]++;
     const unassessed = candidates.length - decisions.size;
+    const lifecycle = observation.snapshot();
     const meta: QualificationMeta = {
       status: unassessed || counts.indeterminate ? 'partial' : 'complete',
       examined: candidates.length,
       ...counts,
       unassessed,
+      batches: {
+        started: lifecycle.runnerCalls,
+        completed: lifecycle.batches.filter((batch) => batch.outcome === 'completed').length,
+        cancelled: lifecycle.batches.filter((batch) => batch.outcome === 'aborted').length,
+        failed: lifecycle.batches.filter((batch) => batch.outcome === 'failed').length,
+      },
     };
     context.onTrace?.({ phase: 'qualification', nativeCalls, bodyChars: chars, ...meta, ...observation.snapshot() });
     return { decisions, evidence, meta, nativeCalls };

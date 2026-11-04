@@ -16,20 +16,19 @@ NC='\033[0m'
 
 # ── 路径 ──
 SOURCE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-TARGET_DIR="$SOURCE_DIR/../clowder-ai"
+TARGET_DIR="${CLOWDER_AI_DIR:-$SOURCE_DIR/../clowder-ai}"
 INTAKE_LEDGER="$SOURCE_DIR/docs/ops/opensource-intake-ledger.json"
 
-resolve_target_main_head() {
+resolve_target_integration_head() {
   if git -C "$TARGET_DIR" remote get-url origin >/dev/null 2>&1; then
-    if git -C "$TARGET_DIR" fetch origin main --quiet >/dev/null 2>&1; then
-      if git -C "$TARGET_DIR" rev-parse --verify refs/remotes/origin/main >/dev/null 2>&1; then
-        git -C "$TARGET_DIR" rev-parse refs/remotes/origin/main 2>/dev/null
-        return 0
-      fi
+    if ! git -C "$TARGET_DIR" fetch origin "$PUBLIC_INTEGRATION_BRANCH" --quiet; then
+      echo "Failed to refresh public $PUBLIC_INTEGRATION_BRANCH; refusing stale watermark" >&2
+      return 1
     fi
+    git -C "$TARGET_DIR" rev-parse --verify "refs/remotes/origin/$PUBLIC_INTEGRATION_BRANCH"
+  else
+    git -C "$TARGET_DIR" rev-parse --verify "refs/heads/$PUBLIC_INTEGRATION_BRANCH"
   fi
-
-  git -C "$TARGET_DIR" rev-parse HEAD 2>/dev/null
 }
 
 # ── 参数 ──
@@ -1572,16 +1571,18 @@ fi
 
 # ── Advance ledger ──
 if [ "$ADVANCE_LEDGER" = true ]; then
-  if [ ! -d "$TARGET_DIR/.git" ]; then
+  if ! git -C "$TARGET_DIR" rev-parse --git-dir >/dev/null 2>&1; then
     echo -e "${RED}✗ Target repo not found at $TARGET_DIR${NC}"
     exit 1
   fi
-  CURRENT_HEAD=$(resolve_target_main_head)
+  PUBLIC_INTEGRATION_BRANCH=$(node "$SOURCE_DIR/scripts/lib/publication-branches.mjs" "$SOURCE_DIR" integrationBranch)
+  CURRENT_HEAD=$(resolve_target_integration_head)
   if [ ! -f "$INTAKE_LEDGER" ]; then
     echo -e "${RED}✗ Intake ledger not found at $INTAKE_LEDGER${NC}"
     exit 1
   fi
   OLD_HEAD=$(node -e "const l=JSON.parse(require('fs').readFileSync('$INTAKE_LEDGER','utf-8')); console.log(l.last_reviewed_target_head || '')" 2>/dev/null || true)
+  node "$SOURCE_DIR/scripts/lib/intake-target-lineage.mjs" "$TARGET_DIR" "$INTAKE_LEDGER" "$CURRENT_HEAD" "$PUBLIC_INTEGRATION_BRANCH"
   if [ "$OLD_HEAD" = "$CURRENT_HEAD" ]; then
     echo -e "${GREEN}✓ Ledger already at target HEAD ($CURRENT_HEAD)${NC}"
     exit 0
@@ -1882,7 +1883,7 @@ echo ""
 # merge so a 1224-class change can be stopped while it is still cheap to split.
 if [ "$PR_STATE" != "MERGED" ] && [ "$MODE" != "risk-check" ]; then
   echo -e "${RED}✗ PR #$PR_NUMBER is $PR_STATE, not MERGED.${NC}"
-  echo "  Intake operates on PRs that have landed in clowder-ai main."
+  echo "  Intake operates on merged public PRs; the ledger tracks the configured integration branch."
   echo "  Merge the PR first, then re-run intake."
   exit 1
 fi

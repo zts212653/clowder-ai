@@ -151,7 +151,7 @@ test('ordinary ACP discovery consumes the same new local installation policy', a
     member(root),
   );
   const servers = (await iterator.next()).value;
-  assert.deepEqual(servers.find((entry) => entry.name === id)?.args, ['/local/mcp.js']);
+  assert.deepEqual(servers.find((entry) => entry.name === id.replaceAll(':', '__'))?.args, ['/local/mcp.js']);
   await iterator.return();
 });
 

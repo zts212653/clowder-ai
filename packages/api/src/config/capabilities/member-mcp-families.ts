@@ -5,7 +5,7 @@ import {
   resolveDisabledServerIds,
 } from '../../domains/cats/services/agents/providers/acp/acp-mcp-resolver.js';
 import { resolveActiveProjectRoot } from '../../utils/active-project-root.js';
-import { getAcpConfig } from '../cat-config-loader.js';
+import { getRegisteredAcpConfig } from '../cat-config-loader.js';
 import { resolveBinaryRoot, resolveServersForCat } from './capability-orchestrator.js';
 import { assertMappedCapabilitySource } from './invoke-capability-root.js';
 import { readInvocationMcpConfig } from './invoke-mcp-config.js';
@@ -22,7 +22,7 @@ export async function resolveConfiguredMemberMcpFamilies(
   const member = catRegistry.tryGet(catId)?.config;
   if (member?.mcpSupport !== true) return [];
   const memberRoot = resolveActiveProjectRoot();
-  const acp = member.carrier === 'acp' ? getAcpConfig(catId, memberRoot) : undefined;
+  const acp = member.carrier === 'acp' ? getRegisteredAcpConfig(catId, memberRoot) : undefined;
   if (member.carrier === 'acp' && !acp) return [];
   const { config, configSourceRoot, accessScope } = readInvocationMcpConfig(capabilityRoot, workingDirectory);
   assertMappedCapabilitySource(config !== null, resolveBinaryRoot(capabilityRoot), capabilityRoot);
@@ -34,7 +34,8 @@ export async function resolveConfiguredMemberMcpFamilies(
       catId,
       capabilitiesConfig: config,
       configSourceRoot,
-      disabledServerIds: resolveDisabledServerIds(memberRoot, catId, config),
+      accessScope,
+      disabledServerIds: resolveDisabledServerIds(memberRoot, catId, config, { accessScope }),
     });
     names = servers.map((server) => server.name);
   } else {

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -320,4 +320,47 @@ test('allows an owner source to install a locked dependency closure from its con
   assert.equal(installs[0].env.npm_config_registry, process.env.npm_config_registry);
   assert.equal(installs[0].env.npm_config_ignore_scripts, 'true');
   await materialized.release();
+});
+
+test('the real dependency installer runs an npm JS entrypoint with Node, preserving its locked ci contract', async () => {
+  const packagesRoot = await mkdtemp(join(tmpdir(), 'cat-cafe-f330-npm entry-'));
+  roots.push(packagesRoot);
+  const cli = join(packagesRoot, 'npm-cli.cjs');
+  // A CLI JavaScript file is deliberately not executable. It must be passed to
+  // Node as argv, never handed to execFile as a launcher or interpreted by a shell.
+  await writeFile(
+    cli,
+    `const fs = require('node:fs');
+const path = require('node:path');
+fs.mkdirSync(path.join(process.cwd(), 'node_modules/zod'), {recursive:true});
+fs.writeFileSync(path.join(process.cwd(), 'node_modules/zod/package.json'), '{"version":"4.4.3"}');
+fs.writeFileSync('.ci-invocation.json', JSON.stringify({
+  args:process.argv.slice(2), ignoreScripts:process.env.npm_config_ignore_scripts,
+  registry:process.env.npm_config_registry, cwd:process.cwd()
+}));
+`,
+    { mode: 0o600 },
+  );
+  const archive = await archivedPackage();
+  await publishPluginPackageArchive(packagesRoot, archive.digest, archive.bytes);
+  const materializer = new FilesystemBuiltinPluginPackageMaterializer({ packagesRoot, npmBin: cli });
+  const materialized = await materializer.resolve({
+    pluginInstanceId: 'pi_npm_cli',
+    pluginId: 'dev.clowder.video-analysis',
+    packageDigest: archive.digest,
+    packageName: '@clowder-ai/video-analysis',
+    sourceKind: 'catalog',
+  });
+  try {
+    const root = join(materialized.dependencyRoot, '..');
+    const invocation = JSON.parse(await readFile(join(root, '.ci-invocation.json'), 'utf8'));
+    assert.deepEqual(invocation.args, ['ci', '--ignore-scripts', '--omit=dev', '--no-audit', '--no-fund']);
+    assert.equal(invocation.ignoreScripts, 'true');
+    assert.equal(invocation.registry, 'https://registry.npmjs.org/');
+    assert.equal(await realpath(invocation.cwd), await realpath(root));
+    assert.equal((await stat(join(materialized.dependencyRoot, 'zod/package.json'))).isFile(), true);
+    await materialized.verifyIntegrity();
+  } finally {
+    await materialized.release();
+  }
 });

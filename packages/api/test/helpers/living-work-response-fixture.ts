@@ -75,6 +75,9 @@ export async function workResponseFixture(t: { after(callback: () => Promise<voi
       if (!allowed) throw new Error('revoked production caller');
     },
     source: {
+      openCurrent: async () => {
+        throw new Error('response fixture does not resolve file locators');
+      },
       inspect: async () => ({ source: source('v4'), mediaType: 'video/mp4', media: clock, byteLength: 2 }),
       open: async ({ source: input }) => {
         opens++;

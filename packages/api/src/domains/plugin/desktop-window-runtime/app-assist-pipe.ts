@@ -17,7 +17,13 @@ export function createAppAssistPipe(owner: DesktopAppAssistOwner | undefined, wr
       const parsed = frame.safeParse(input);
       if (!parsed.success) return false;
       const value = parsed.data;
-      if (!owner || closed || pending.has(value.id) || pending.size >= 4) throw new Error('Invalid app-assist pipe');
+      if (!owner || closed || pending.has(value.id)) throw new Error('Invalid app-assist pipe');
+      // Native deadlines can retire their caller before its Host work drains.
+      // A new valid id needs backpressure, not termination of the private pipe.
+      if (pending.size >= 4) {
+        write(`${JSON.stringify({ v: 1, type: 'app_assist', id: value.id, reply: 'unavailable' })}\n`);
+        return true;
+      }
       pending.add(value.id);
       void owner
         .request(value.command)

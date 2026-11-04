@@ -45,9 +45,11 @@ export class CodexStartupWire implements AgentCarrierSession {
             ? { account: { type: 'chatgpt' } }
             : message.method === 'thread/start' || message.method === 'thread/resume'
               ? { thread: { id: 'same-native-thread', turns: [] } }
-              : message.method === 'turn/start'
-                ? { turn: { id: 'same-turn', status: 'inProgress' } }
-                : {};
+              : message.method === 'thread/turns/list'
+                ? { data: [], nextCursor: null }
+                : message.method === 'turn/start'
+                  ? { turn: { id: 'same-turn', status: 'inProgress' } }
+                  : {};
     this.push({ id: message.id, result });
     if (message.method === 'turn/start' && !this.turnFailure)
       this.push({

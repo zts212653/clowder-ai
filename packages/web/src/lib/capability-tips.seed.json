@@ -1,28 +1,109 @@
 [
   {
+    "id": "feature-f332-matter-recall",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/guides/matter-recall.md",
+      "anchor": "查看和更正参考消息"
+    },
+    "structureSource": {
+      "path": "packages/web/src/components/reply-layers/MatterRecallLine.tsx",
+      "anchor": "MatterRecallLine"
+    },
+    "bodySource": {
+      "path": "docs/guides/matter-recall.md",
+      "anchor": "修改已经讨论过的事"
+    },
+    "contexts": ["concierge_open"],
+    "audience": ["cvo"],
+    "body": "回复开头出现「参考了…」时，点开查看原话，用「出处」回到原消息。决定变了，先在对话中写下新决定，再从「查看全部」进入事情页更换来源；旧回复会标明参考资料已更正。",
+    "action": {
+      "type": "open_source",
+      "label": "查看参考消息的用法",
+      "sourceRef": {
+        "path": "docs/guides/matter-recall.md",
+        "anchor": "查看和更正参考消息"
+      }
+    },
+    "owner": "codex-astra"
+  },
+  {
+    "id": "feature-f309-html-work-versions",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/guides/html-works.md",
+      "anchor": "保存和继续修改 HTML 作品"
+    },
+    "structureSource": {
+      "path": "packages/web/src/components/artifacts/WorkContentBoundary.tsx",
+      "anchor": "WorkContentBoundary"
+    },
+    "bodySource": {
+      "path": "docs/guides/html-works.md",
+      "anchor": "接着改，并保留原版"
+    },
+    "contexts": ["concierge_open"],
+    "audience": ["cvo"],
+    "body": "想把 HTML 图解或小工具留着继续改？让猫“保存成可续改的作品，发一张固定版本卡片”。以后在同一件作品上续版，原卡片仍保留原版本；打开作品后用“作品版本”回看历史。",
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "保存这份 HTML 作品",
+      "draftPrompt": "把这份 HTML 图解保存成可续改的作品，保留完整源码，发一张固定版本卡片；以后继续修改时沿同一件作品续版。"
+    },
+    "owner": "codex61-sol"
+  },
+  {
+    "id": "feature-f322-plugin-maintenance",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/features/F322-everyday-work-experience.md",
+      "anchor": "插件维护：检查更新与一起处理"
+    },
+    "structureSource": {
+      "path": "packages/web/src/components/settings/plugin-manager/PluginBrowserPanel.tsx",
+      "anchor": "PluginBrowserPanel"
+    },
+    "bodySource": {
+      "path": "docs/features/F322-everyday-work-experience.md",
+      "anchor": "插件维护：检查更新与一起处理"
+    },
+    "contexts": ["concierge_open"],
+    "audience": ["cvo"],
+    "body": "在「设置与管理 → 连接与扩展 → 插件集成」，用搜索框旁的下拉查看所有可以安装的插件；点「检查更新」只查目录，不会替你更新。需要处理多个插件时，在「需要处理」组头点「一起处理…」，先核对每项动作再开始；离开页面会停止后续项，回到列表按实际状态确认结果。",
+    "action": {
+      "type": "open_source",
+      "label": "查看插件检查和一起处理的用法",
+      "sourceRef": {
+        "path": "docs/features/F322-everyday-work-experience.md",
+        "anchor": "插件维护：检查更新与一起处理"
+      }
+    },
+    "owner": "codex61-sol"
+  },
+  {
     "id": "feature-f327-generate-music",
     "kind": "feature",
     "sourceRef": {
-      "path": "docs/architecture/f327-music-generation.md",
-      "anchor": "给片子和游戏配乐"
+      "path": "docs/features/F327-google-family-suite.md",
+      "anchor": "音乐插件：先检查，再生成"
     },
     "structureSource": {
       "path": "packages/api/src/domains/plugin/outputs/project-output-actions.ts",
       "anchor": "PluginProjectOutputs"
     },
     "bodySource": {
-      "path": "docs/architecture/f327-music-generation.md",
-      "anchor": "给片子和游戏配乐"
+      "path": "docs/features/F327-google-family-suite.md",
+      "anchor": "音乐插件：先检查，再生成"
     },
     "contexts": ["concierge_open", "feature_dev"],
     "audience": ["cvo", "developer"],
-    "body": "Google Cloud 配乐插件候选正在完善：在 Plugin Manager 配置已有授权和 Cloud 项目、明确启用后，由猫生成 MP3 并交付来源回执。完整插件真实生成尚待验收，实际扣费及赠金抵扣仍须核实。",
+    "body": "需要配乐时，先查当前 Host 的 Google Cloud 音乐插件是否已安装、配置就绪、启用且运行正常，再让获准的猫用 generate_music，交付项目 MP3 和来源回执。未就绪按插件页提示处理；已有状态无需逐线程重装或重登。扣费与赠金抵扣仍须核实。",
     "action": {
       "type": "open_source",
-      "label": "查看配乐用法与账户条件",
+      "label": "查看音乐插件使用流程",
       "sourceRef": {
-        "path": "docs/architecture/f327-music-generation.md",
-        "anchor": "给片子和游戏配乐"
+        "path": "docs/features/F327-google-family-suite.md",
+        "anchor": "音乐插件：先检查，再生成"
       }
     },
     "owner": "codex61-sol"
@@ -212,7 +293,7 @@
     },
     "contexts": ["concierge_open", "feature_dev"],
     "audience": ["cvo", "developer"],
-    "body": "聊天里的文件标签可以直接点开：文档在右边继续读，图片点开看大图，PR 和提交号点开看改动。想复制完整路径或在 Finder 中显示，悬停或右键点文件标签；不用再手动复制到右边输入。",
+    "body": "聊天里的文件标签可以直接点开：文档在右边继续读，图片点开看大图，提交号点开看改动。PR 标题打开 GitHub 原页，旁边的「查看变更」在右边看改动。想复制完整路径或在 Finder 中显示，悬停或右键点文件标签。",
     "action": {
       "type": "open_source",
       "label": "查看路径标签的用法",
@@ -3206,7 +3287,7 @@
     },
     "contexts": ["concierge_open", "pet_waiting_for_user"],
     "audience": ["all"],
-    "body": "在 Workspace 选中内容后点“请猫修改”，在同一聊天里说明想法；新版可对照后采用或拒绝，标记不会改原件。视频按 F 全屏播放；本机的“⋯”可在 Finder 中显示或用默认播放器打开原件。",
+    "body": "在 Workspace 选中内容后点“请猫修改”，在同一聊天里说明想法；新版可对照后采用或拒绝，标记不会改原件。视频按 F 全屏播放；本机的“⋯”可在 Finder 中显示或用默认播放器打开当前版本。",
     "action": {
       "type": "open_source",
       "label": "查看 Workspace 协作说明",
@@ -3566,6 +3647,31 @@
       "draftPrompt": "请带我打开动画作品的修改回应，对照原版和新版位置，说明如何确认已改或重新指出还不对。"
     },
     "owner": "codex61-sol"
+  },
+  {
+    "id": "feature-f332-profile-usage",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/features/F332-experience-informed-memory.md",
+      "anchor": "本次实施范围：第1步剩余交付（2026-10-29）"
+    },
+    "structureSource": {
+      "path": "packages/web/src/components/memory/page/MemoryProfileUsage.tsx",
+      "anchor": "MemoryProfileUsage"
+    },
+    "bodySource": {
+      "path": "docs/features/F332-experience-informed-memory.md",
+      "anchor": "逐画像使用次数"
+    },
+    "contexts": ["concierge_open", "long_running"],
+    "audience": ["all"],
+    "body": "想知道一份画像被带上或翻到过几次？在「记忆 → 画像」打开它，再展开「统计范围与原使用记录」。次数按版本区分，只表示已记录的递送或读取，不代表猫实际采用。",
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "带我看画像次数",
+      "draftPrompt": "请带我在记忆的画像详情里查看当前版本的使用次数、统计起点与原使用记录，说明哪些历史仍未知。"
+    },
+    "owner": "codex-astra"
   },
   {
     "id": "feature-f332-opening-brief",

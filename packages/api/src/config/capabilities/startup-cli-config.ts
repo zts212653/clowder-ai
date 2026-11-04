@@ -13,6 +13,7 @@ import {
 } from './capability-orchestrator.js';
 import { migrateOwnedCodexProjectMcp } from './codex-managed-mcp-migration.js';
 import { isSameCapabilityRoot, resolveDeclaredCapabilityRoot } from './invoke-capability-root.js';
+import { migrateOwnedRetiredProbes } from './retired-probe-migration.js';
 
 const log = createModuleLogger('startup-cli-config');
 
@@ -69,9 +70,14 @@ export async function migrateStartupCodexMcpConfig(
   if (!allowsImplicitCapabilityWrites(env, binaryRoot)) return [];
   const { projectRoot } = resolveStartupCliConfigContext(start, env);
   try {
-    return await withCapabilityLock(projectRoot, () =>
-      migrateOwnedCodexProjectMcp(projectRoot, [projectRoot, env.CAT_CAFE_RUNTIME_ROOT?.trim() || binaryRoot]),
-    );
+    return await withCapabilityLock(projectRoot, async () => {
+      const retiredProbes = await migrateOwnedRetiredProbes(projectRoot);
+      const selfMcp = await migrateOwnedCodexProjectMcp(projectRoot, [
+        projectRoot,
+        env.CAT_CAFE_RUNTIME_ROOT?.trim() || binaryRoot,
+      ]);
+      return [...new Set([...retiredProbes, ...selfMcp])];
+    });
   } catch {
     // Parser diagnostics can quote private TOML contents. Report only the path.
     log.warn(

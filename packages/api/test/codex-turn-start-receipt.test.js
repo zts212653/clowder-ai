@@ -32,7 +32,14 @@ class ReceiptWire {
     } else if (message.method === 'thread/start' || message.method === 'thread/resume') {
       this.inbox.push({
         id: message.id,
-        result: { thread: { id: 'thread-1', turns: this.previousTurns } },
+        result: { thread: { id: 'thread-1', turns: message.params.excludeTurns ? [] : this.previousTurns } },
+      });
+    } else if (message.method === 'thread/turns/list') {
+      this.inbox.push({
+        id: message.id,
+        result: message.params.cursor
+          ? { data: this.previousTurns.slice(1), nextCursor: null }
+          : { data: this.previousTurns.slice(0, 1), nextCursor: this.previousTurns.length > 1 ? 'older' : null },
       });
     }
   }
@@ -87,6 +94,62 @@ function observeRun(t, wire, source) {
 }
 
 const input = { prompt: { kind: 'frozen', prompt: 'work' }, thread: { kind: 'start' }, timeoutMs: 0 };
+
+test('metadata-only resume pages historical ids before accepting a notification-only new turn receipt', async (t) => {
+  const wire = new ReceiptWire();
+  wire.previousTurns = [
+    { id: 'previous-1', status: 'completed' },
+    { id: 'previous-2', status: 'completed' },
+  ];
+  const client = new CodexAppServerClient({ wire });
+  const { state, result } = observeRun(
+    t,
+    wire,
+    client.run({ ...input, thread: { kind: 'resume', threadId: 'thread-1' } }),
+  );
+  await flushProtocol();
+  const resume = wire.writes.find((message) => message.method === 'thread/resume');
+  assert.equal(resume.params.excludeTurns, true);
+  assert.equal(resume.params.initialTurnsPage, undefined);
+  const pageIndex = wire.writes.findIndex((message) => message.method === 'thread/turns/list');
+  assert.ok(pageIndex >= 0 && pageIndex < wire.writes.indexOf(wire.turnStart));
+  assert.equal(wire.writes[pageIndex].params.itemsView, 'notLoaded');
+  wire.started('thread-1', 'previous-1');
+  wire.started('thread-1', 'previous-2');
+  await flushProtocol();
+  assert.equal(
+    state.values.some((event) => event.type === 'app_server.lifecycle' && event.lifecycle.turnAccepted),
+    false,
+  );
+  wire.started();
+  await flushProtocol();
+  assert.ok(state.values.some((event) => event.type === 'app_server.lifecycle' && event.lifecycle.turnAccepted));
+  wire.complete();
+  await result;
+  assert.equal(state.error, null);
+});
+
+test('a resume without a valid metadata page fails before submitting the next turn', async (t) => {
+  const wire = new ReceiptWire();
+  const write = wire.write.bind(wire);
+  wire.write = async (message) => {
+    if (message.method !== 'thread/turns/list') return write(message);
+    wire.writes.push(message);
+    wire.inbox.push({ id: message.id, result: {} });
+  };
+  const { state, result } = observeRun(
+    t,
+    wire,
+    new CodexAppServerClient({ wire }).run({ ...input, thread: { kind: 'resume', threadId: 'thread-1' } }),
+  );
+  await result;
+  assert.equal(
+    state.values.some((event) => event.type === 'app_server.lifecycle' && event.lifecycle.turnAccepted),
+    false,
+  );
+  assert.match(state.error?.message ?? '', /metadata page is invalid/);
+  assert.equal(wire.turnStart, undefined);
+});
 
 test('turn/start without a receipt fails at 120 seconds despite unrelated notifications and is never replayed', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });

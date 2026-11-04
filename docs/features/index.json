@@ -1821,7 +1821,7 @@
     {
       "id": "F309",
       "name": "产物协作 — Artifact Collaboration / Collaborative Content Plane",
-      "status": "in-progress / Phase R、Studio 297 历史有界交付保留；Phase U 归一四项补漏、#6264 prepared、#6275 卡片与 #6277 raw缩略/目录阅读器均已过父 Alpha；Human829工具栏修复#6292已过父Alpha与正式boot59五宽度；原讨论稿Chat/Works/Home全部路径正式往返通过，共同Markdown卡片YAML问题已由#6296审合并过父Alpha三入口，原Task414同一到版链g22待正式6e0c5e13，完整正式体验、Phase U、Office/video Admission Gate与未勾AC仍开放",
+      "status": "in-progress / Phase R、Studio 297 历史有界交付保留；Phase U 归一四项补漏、#6264 prepared、#6275 卡片与 #6277 raw缩略/目录阅读器均已过父 Alpha；Human829工具栏修复#6292已过父Alpha与正式boot59五宽度；原讨论稿Chat/Works/Home全部路径正式往返通过，共同Markdown卡片YAML问题已由#6296审合并过父Alpha及正式boot60三入口，原Task414/g22这处正式验收闭合；菜单叠留#6314已过父Alpha与正式boot64原消息六阶段，完整正式体验、Phase U、Office/video Admission Gate与未勾AC仍开放",
       "file": "F309-collaborative-content-plane.md"
     },
     {
@@ -1845,7 +1845,7 @@
     {
       "id": "F314",
       "name": "Development Episode Alignment Experiment｜开发交付对齐自进化实验",
-      "status": "in-progress / Phase B accepted with recorded exceptions; operator B accepts insufficient anchor evidence; method #5788 and published history v10 delivered, content/map design accepted; overall acceptance open, 18-cluster code refactor deferred | **Owner**: 小星星·Maine Coon（@codex-astra, GPT-6 Astra；方向与整体结果） | **Execution**: 小太阳·Maine Coon（@codex-sol, GPT-5.6 Sol；Task197；Task143 已完成） | **Priority**: P0",
+      "status": "in-progress / Phase B accepted with recorded exceptions; operator B accepts insufficient anchor evidence; method #5788 and published history v10 delivered, content/map design accepted; overall acceptance open; cloud refactor brief ready, execution unconfirmed | **Owner**: 小星星·Maine Coon（@codex-astra, GPT-6 Astra；方向与整体结果） | **Execution**: 小太阳·Maine Coon（@codex-sol, GPT-5.6 Sol；原实验Task197；Task143 已完成）；18簇执行安排为云端Ragdoll（任务稿已备，接手待核） | **Priority**: P0",
       "file": "F314-development-episode-alignment-experiment.md"
     },
     {
@@ -1935,7 +1935,7 @@
     {
       "id": "F330",
       "name": "团队仓当上游",
-      "status": "in-progress | **Owner**: Ragdoll (@opus55，指挥 Phase A/B) · 小星星 (@codex-astra，指挥 Phase C–E) | **Priority**: P1",
+      "status": "done（operator 确认当前批准范围完成；A/B 与 052 的 next 往返、发布、skills 已交付，未把旧 D–F 规划算成已实现） | **Completed**: 2026-11-02 | **Owner**: Ragdoll (@opus55，Phase A/B) · 小星星 (@codex-astra，052 发布层交付与本次状态同步) | **Priority**: P1",
       "file": "F330-team-repo-upstream.md"
     },
     {
@@ -1947,13 +1947,13 @@
     {
       "id": "F332",
       "name": "经历参与判断 — 从共同经历到新情境的记忆",
-      "status": "in-progress (A1/A2/A3 读源修复已合入并通过 Alpha；其余设计/继承工作按原范围) | **Owner**: 小星星·Maine Coon (@codex-astra) | **Priority**: P1",
+      "status": "in-progress（第1步画像次数、文案和更正读取路径已完成独审、合入、Alpha及正式验收；自然使用与完整开场成本证据仍待补齐） | **Owner**: 小星星·Maine Coon (@codex-astra) | **Priority**: P1",
       "file": "F332-experience-informed-memory.md"
     },
     {
       "id": "F333",
       "name": "Shared MCP Process Lifecycle｜多猫共用 MCP 运行资源",
-      "status": "in-progress | **Owner**: 小星星·Maine Coon (@codex-astra, gpt-6-astra；整体与验收)；实现：Sol6.1；审核：Sonnet | **Priority**: P1",
+      "status": "in-progress | **Owner**: 小星星·Maine Coon (@codex-astra, gpt-6-astra；整体与验收)；Phase B 实现：Sol6.1；审核：Sol5.6（Phase A 历史审核：Sonnet） | **Priority**: P1",
       "file": "F333-shared-mcp-process-lifecycle.md"
     },
     {
@@ -1961,6 +1961,12 @@
       "name": "Multi-Machine Cat Hosting｜分身不分家：猫在别的机器上干活，还是家里那只",
       "status": "spec | **Owner**: Ragdoll (@opus55, claude-opus-5-5) | **Priority**: P2",
       "file": "F334-multi-machine-cat-hosting.md"
+    },
+    {
+      "id": "F335",
+      "name": "守望猫（别每次都靠你来想起来）",
+      "status": "in-progress | **Owner**: Ragdoll (@fable-5) 判断席 · 架构稿 小星星 (@codex-astra) · 北极星稿与施工指挥 Ragdoll (@opus55) · 施工：交付一 小太阳 6.1 (@codex61-sol)，交付二、三 Ragdoll (@opus55) | **Priority**: P1",
+      "file": "F335-watcher-cat.md"
     }
   ]
 }

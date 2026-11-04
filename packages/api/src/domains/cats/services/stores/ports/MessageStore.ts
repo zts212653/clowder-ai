@@ -922,8 +922,9 @@ export function reusesProseRouting(existing: StoredMessage, incoming: AppendMess
 export function assertQueueMessageReplay(existing: StoredMessage, incoming: AppendMessageInput): void {
   const canonical = canonicalizeAppendMessageInput(incoming);
   if (
-    existing.extra?.routingTargetSource &&
-    existing.extra.routingTargetSource !== canonical.extra?.routingTargetSource
+    (existing.extra?.routingTargetSource &&
+      existing.extra.routingTargetSource !== canonical.extra?.routingTargetSource) ||
+    !isDeepStrictEqual(existing.extra?.messageBundle, canonical.extra?.messageBundle)
   ) {
     throw new Error(`Queue admission identity conflict for replayed message ${existing.id}`);
   }

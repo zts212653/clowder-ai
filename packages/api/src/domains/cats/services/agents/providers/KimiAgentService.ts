@@ -18,6 +18,7 @@ import { formatCliNotFoundError } from '../../../../../utils/cli-resolve.js';
 import { isCliError, isCliTimeout, isLivenessWarning, spawnCli } from '../../../../../utils/cli-spawn.js';
 import type { SpawnFn } from '../../../../../utils/cli-types.js';
 import { resolveKimiCliRuntime, resolveKimiRuntimePaths } from '../../../../../utils/kimi-cli-runtime.js';
+import { readKimiModelMetadata } from '../../../../../utils/kimi-model-metadata.js';
 import { CliRawArchive } from '../../session/CliRawArchive.js';
 import type {
   AgentFreshnessCarrierCapability,
@@ -26,6 +27,7 @@ import type {
   AgentServiceOptions,
   MessageMetadata,
   PreparedProviderRequestV1,
+  ToolExecutionPolicy,
 } from '../../types.js';
 import type { RawArchiveSink } from '../providers/codex-audit-hooks.js';
 import { sanitizeRawEvent } from '../providers/codex-audit-hooks.js';
@@ -62,7 +64,8 @@ import {
   lookupKimiL0Fingerprint,
   recordKimiL0Fingerprint,
 } from './kimi-l0-session-fingerprint.js';
-import { type KimiMcpLease, prepareKimiMcpConfig } from './kimi-mcp-config.js';
+import { captureKimiMcpConfig, type KimiMcpLease, prepareKimiMcpConfig } from './kimi-mcp-config.js';
+import { assertKimiMemberAccount, captureKimiMemberOptions, prepareKimiMemberProfile } from './kimi-scoped-native.js';
 import { ensureKimiSecretHooks } from './kimi-secret-hooks.js';
 import { compileL0ViaSubprocess } from './l0-compiler.js';
 
@@ -74,17 +77,29 @@ const log = createModuleLogger('kimi-agent');
  * CLI's operational effort channel; bypasses support_efforts but cannot
  * re-enable thinking the user turned off).
  *
- * Returns null for boolean-thinking Kimi models (no support_efforts metadata,
- * e.g. kimi-for-coding): the harness must not invent tiers the model does not
- * have, so the CLI keeps its own thinking config and no env is injected.
+ * Declared model tiers take precedence over legacy name-based compatibility.
+ * Null means no tier control; undefined leaves the native configuration alone.
  */
 export function resolveKimiEffortLevel(
   catId: string,
   effectiveModel: string | null | undefined,
   override: CliEffortPreset | null | undefined,
-): string | null {
+  preferences?: AgentServiceOptions['executionPreferences'],
+  declaredEfforts?: readonly string[] | null,
+): string | null | undefined {
+  if (declaredEfforts !== undefined) {
+    if (!declaredEfforts?.length) return null;
+    // Frozen platform defaults are not a member choice. With declared tiers,
+    // leave their resolution to the CLI instead of validating a synthesized high.
+    const memberEffort = preferences ? preferences.effort : catRegistry.tryGet(catId)?.config.cli?.effort?.trim();
+    const inherited = preferences?.effortSource === 'platform_default' ? undefined : memberEffort;
+    const selected = override && declaredEfforts.includes(override) ? override : inherited;
+    if (!selected) return undefined;
+    if (!declaredEfforts.includes(selected)) throw new Error(`kimi_effort_unsupported:${selected}`);
+    return selected;
+  }
   if (!getCliEffortOptionsForProvider('kimi', effectiveModel)) return null;
-  const inherited = getCatEffort(catId, undefined, 'kimi', effectiveModel);
+  const inherited = preferences?.effort ?? getCatEffort(catId, undefined, 'kimi', effectiveModel);
   return resolveCliEffortOverride('kimi', effectiveModel, inherited, override).effective;
 }
 
@@ -122,6 +137,17 @@ export class KimiAgentService implements AgentService {
     return isKimiNativeL0ChannelAvailable();
   }
 
+  async captureInvocationOptions(input: Parameters<NonNullable<AgentService['captureInvocationOptions']>>[0]) {
+    return {
+      frozenKimiMcpConfig: await captureKimiMcpConfig({
+        callbackEnv: { CAT_CAFE_CAT_ID: this.catId, ...input.accountEnv },
+        workingDirectory: input.workingDirectory,
+        mcpServerPath: this.mcpServerPath,
+        mcpSupport: input.mcpSupport,
+      }),
+    };
+  }
+
   freshnessCarrierCapability(): AgentFreshnessCarrierCapability {
     return {
       provider: 'kimi',
@@ -130,6 +156,12 @@ export class KimiAgentService implements AgentService {
       activeInvocationGuidance: 'unsupported',
     };
   }
+
+  supportsToolExecutionPolicy(policy: ToolExecutionPolicy): boolean {
+    return policy.mode === 'plugin_native' && Boolean(policy.memberSession) && isKimiNativeL0ChannelAvailable();
+  }
+
+  assertScopedMemberAccount = assertKimiMemberAccount;
 
   contextCapability(): import('../../types.js').AgentContextCapability {
     return {
@@ -146,17 +178,30 @@ export class KimiAgentService implements AgentService {
   }
 
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
+    const scoped = captureKimiMemberOptions(options);
+    options = scoped ?? options;
+    await scoped?.pluginNativeLaunch?.assertCurrent();
     // Match the native tool's path/config environment, including the selected
     // account's overrides. Identity and MCP callback authorization stay scoped
     // to callbackEnv; only path/model readers use this merged environment.
     const runtime = resolveKimiCliRuntime();
-    const toolEnv = { ...options?.callbackEnv, ...options?.accountEnv };
+    const toolEnv = {
+      ...options?.callbackEnv,
+      ...options?.accountEnv,
+    };
+    if (options?.frozenKimiMcpConfig) toolEnv.KIMI_CODE_HOME = options.frozenKimiMcpConfig.nativeDirectory;
     const runtimePaths = resolveKimiRuntimePaths(toolEnv);
-    const requestedModel = options?.callbackEnv?.CAT_CAFE_KIMI_MODEL_OVERRIDE ?? this.model;
+    const requestedModel =
+      options?.callbackEnv?.CAT_CAFE_KIMI_MODEL_OVERRIDE ?? options?.executionPreferences?.model ?? this.model;
     // Empty native selection means omit --model and let the CLI resolve its own config.
-    const followsNativeConfig = catRegistry.tryGet(this.catId)?.config.configurationSource === 'native_tool';
-    const effectiveModel =
-      requestedModel && !followsNativeConfig
+    const followsNativeConfig =
+      !scoped &&
+      (options?.executionPreferences
+        ? options.executionPreferences.configurationSource === 'native_tool'
+        : catRegistry.tryGet(this.catId)?.config.configurationSource === 'native_tool');
+    const effectiveModel = scoped
+      ? toolEnv.KIMI_MODEL_NAME || requestedModel
+      : requestedModel && !followsNativeConfig
         ? resolveKimiModelAlias(requestedModel, toolEnv, runtimePaths)
         : requestedModel;
     // P2-2: a native_tool member without an explicit model follows the local CLI
@@ -168,7 +213,15 @@ export class KimiAgentService implements AgentService {
     const observedModel =
       followsNativeConfig && !effectiveModel ? readKimiConfiguredModel(toolEnv, runtimePaths) : undefined;
     const identityModel = effectiveModel || observedModel || '';
-    const effortLevel = resolveKimiEffortLevel(this.catId as string, identityModel, options?.reasoningEffortOverride);
+    const nativeMetadata = scoped ? undefined : readKimiModelMetadata(runtimePaths.configPath);
+    const nativeModel = nativeMetadata?.models.find((model) => model.alias === identityModel);
+    const effortLevel = resolveKimiEffortLevel(
+      this.catId as string,
+      identityModel,
+      options?.reasoningEffortOverride,
+      options?.executionPreferences,
+      nativeMetadata?.thinkingEnabled === false ? null : nativeModel ? (nativeModel.efforts ?? null) : undefined,
+    );
     const metadata: MessageMetadata = { provider: 'kimi', model: identityModel };
     const imagePaths = await extractTrustedImagePaths(
       options?.contentBlocks,
@@ -180,7 +233,14 @@ export class KimiAgentService implements AgentService {
     const effectivePrompt = buildKimiPrompt(prompt, imagePaths);
     const workingDirectory = options?.workingDirectory ?? process.cwd();
     const kimiShareDir = resolveKimiShareDir(toolEnv, runtimePaths);
-    const apiKeyEnv = buildApiKeyEnv(identityModel, options?.callbackEnv);
+    const apiKeyEnv = buildApiKeyEnv(identityModel, scoped ? toolEnv : options?.callbackEnv);
+    if (
+      scoped &&
+      (!(options?.accountEnv?.KIMI_MODEL_API_KEY || apiKeyEnv?.KIMI_MODEL_API_KEY) ||
+        !(options?.accountEnv?.KIMI_MODEL_BASE_URL || apiKeyEnv?.KIMI_MODEL_BASE_URL) ||
+        !identityModel)
+    )
+      throw new Error('kimi_scoped_api_projection_unavailable');
     const kimiCommand = runtime?.command;
     if (!kimiCommand) {
       yield {
@@ -193,7 +253,9 @@ export class KimiAgentService implements AgentService {
       yield { type: 'done' as const, catId: this.catId, metadata, timestamp: Date.now() };
       return;
     }
-    const modelConfig = readKimiModelConfigInfo(identityModel, toolEnv, runtimePaths);
+    const modelConfig: ReturnType<typeof readKimiModelConfigInfo> = scoped
+      ? { capabilities: [], defaultThinking: false }
+      : readKimiModelConfigInfo(identityModel, toolEnv, runtimePaths);
     const supportsImageInput =
       modelConfig.capabilities.includes('image_in') ||
       apiKeyEnv?.KIMI_MODEL_CAPABILITIES?.includes('image_in') === true;
@@ -209,6 +271,7 @@ export class KimiAgentService implements AgentService {
     // (unverifiable, incl. pre-F274 sessions) → fresh session + explicit
     // `l0_resume_fresh_start` notice.
     let l0AgentFilePath: string | undefined;
+    let scopedProfile: Awaited<ReturnType<typeof prepareKimiMemberProfile>> | undefined;
     let l0Fingerprint: string | undefined;
     let effectiveResumeSessionId: string | undefined;
     // Fresh-start 时被拒绝的旧 session id：之后任何 session 发现点都不得把
@@ -217,57 +280,65 @@ export class KimiAgentService implements AgentService {
     let rejectedResumeSessionId: string | undefined;
     try {
       const l0 = await this.l0CompilerFn({
+        frozenInput: options?.frozenL0Input,
+        requireFrozenInput: true,
         catId: this.catId as string,
         userId: options?.callbackEnv?.CAT_CAFE_USER_ID,
+        ...(scoped ? { projection: 'scoped-member' as const, runtimeModel: identityModel } : {}),
       });
-      l0Fingerprint = computeKimiL0Fingerprint(l0);
-      let freshStartReason: 'stale' | 'unverifiable' | undefined;
-      if (options?.sessionId) {
-        const stored = lookupKimiL0Fingerprint(kimiShareDir, this.catId as string, options.sessionId);
-        if (stored === l0Fingerprint) {
-          effectiveResumeSessionId = options.sessionId;
-        } else {
-          if (options.requireExactResume)
-            throw new Error(
-              'Exact Kimi resume requires the original verified current identity; refusing a fresh session',
-            );
-          freshStartReason = stored === undefined ? 'unverifiable' : 'stale';
-          rejectedResumeSessionId = options.sessionId;
+      if (scoped) {
+        scopedProfile = await prepareKimiMemberProfile({ options: scoped, catId: this.catId as string, l0 });
+        l0AgentFilePath = scopedProfile.agentFile;
+      } else {
+        l0Fingerprint = computeKimiL0Fingerprint(l0);
+        let freshStartReason: 'stale' | 'unverifiable' | undefined;
+        if (options?.sessionId) {
+          const stored = lookupKimiL0Fingerprint(kimiShareDir, this.catId as string, options.sessionId);
+          if (stored === l0Fingerprint) {
+            effectiveResumeSessionId = options.sessionId;
+          } else {
+            if (options.requireExactResume)
+              throw new Error(
+                'Exact Kimi resume requires the original verified current identity; refusing a fresh session',
+              );
+            freshStartReason = stored === undefined ? 'unverifiable' : 'stale';
+            rejectedResumeSessionId = options.sessionId;
+          }
         }
-      }
-      if (freshStartReason) {
-        yield {
-          type: 'system_info' as const,
-          catId: this.catId,
-          content: JSON.stringify({
-            type: 'l0_resume_fresh_start',
-            reason: freshStartReason,
-            previousSessionId: options?.sessionId,
-            detail:
-              'kimi-code 在 session 首 bind 冻结 agent prompt；检测到 L0 漂移/不可验证，改用 fresh session 绑定新 L0，旧会话上下文不再延续',
-          }),
-          metadata,
-          timestamp: Date.now(),
-        };
-      }
-      // kimi-code >=0.30 hard-rejects `--agent-file` alongside `--session`
-      // ("the agent is bound at session creation and the bound agent is
-      // restored automatically on resume") — exit 1 before any turn runs.
-      // The flag only ever selected the agent for a *new* session, so on a
-      // resume it was already a silent no-op; the fingerprint gate above has
-      // just proven the bound agent IS this exact L0, so dropping the file
-      // is the honest expression of the CLI's own semantics, not a downgrade.
-      // The L0 stays compiled either way — the gate depends on it.
-      if (!effectiveResumeSessionId) {
-        l0AgentFilePath = writeKimiL0AgentFile(
-          buildKimiL0AgentFileContent({
-            catId: this.catId as string,
-            l0,
-            packSystemPrompt: freshStartReason
-              ? (options?.resumeFallbackSystemPrompt ?? options?.systemPrompt)
-              : options?.systemPrompt,
-          }),
-        );
+        if (freshStartReason) {
+          yield {
+            type: 'system_info' as const,
+            catId: this.catId,
+            content: JSON.stringify({
+              type: 'l0_resume_fresh_start',
+              reason: freshStartReason,
+              previousSessionId: options?.sessionId,
+              detail:
+                'kimi-code 在 session 首 bind 冻结 agent prompt；检测到 L0 漂移/不可验证，改用 fresh session 绑定新 L0，旧会话上下文不再延续',
+            }),
+            metadata,
+            timestamp: Date.now(),
+          };
+        }
+        // kimi-code >=0.30 hard-rejects `--agent-file` alongside `--session`
+        // ("the agent is bound at session creation and the bound agent is
+        // restored automatically on resume") — exit 1 before any turn runs.
+        // The flag only ever selected the agent for a *new* session, so on a
+        // resume it was already a silent no-op; the fingerprint gate above has
+        // just proven the bound agent IS this exact L0, so dropping the file
+        // is the honest expression of the CLI's own semantics, not a downgrade.
+        // The L0 stays compiled either way — the gate depends on it.
+        if (!effectiveResumeSessionId) {
+          l0AgentFilePath = writeKimiL0AgentFile(
+            buildKimiL0AgentFileContent({
+              catId: this.catId as string,
+              l0,
+              packSystemPrompt: freshStartReason
+                ? (options?.resumeFallbackSystemPrompt ?? options?.systemPrompt)
+                : options?.systemPrompt,
+            }),
+          );
+        }
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -283,6 +354,7 @@ export class KimiAgentService implements AgentService {
     }
 
     const args: string[] = ['--output-format', 'stream-json'];
+    if (scopedProfile) args.push('--skills-dir', scopedProfile.skillsDirectory);
     const managedArgvFlags: string[] = [];
     if (effectiveResumeSessionId) {
       args.push('--session', effectiveResumeSessionId);
@@ -296,7 +368,7 @@ export class KimiAgentService implements AgentService {
       };
     }
     for (const dir of imageAccessDirs) args.push('--add-dir', dir);
-    if (!apiKeyEnv && effectiveModel) {
+    if (!scoped && !apiKeyEnv && effectiveModel) {
       args.push('--model', effectiveModel);
     }
     if (l0AgentFilePath) {
@@ -308,9 +380,9 @@ export class KimiAgentService implements AgentService {
     // User-defined CLI args from the member editor (#567).
     // `--agent-file` / `--agent` are reserved (they carry the compression-immune
     // L0) and stripped from user parts before the dedup pass.
-    const userParts: string[] = stripReservedKimiSystemArgs(
-      options?.cliConfigArgs?.flatMap((arg) => arg.trim().split(/\s+/)) ?? [],
-    );
+    const userParts: string[] = scoped
+      ? []
+      : stripReservedKimiSystemArgs(options?.cliConfigArgs?.flatMap((arg) => arg.trim().split(/\s+/)) ?? []);
     if (userParts.length > 0) {
       const accumulativeFlags = new Set(['--add-dir']);
       const userFlags = new Set(userParts.filter((p) => p.startsWith('-')));
@@ -328,12 +400,17 @@ export class KimiAgentService implements AgentService {
 
     let mcpLease: KimiMcpLease | undefined;
     try {
-      await ensureKimiSecretHooks({ ...(options?.callbackEnv ?? {}), ...(options?.accountEnv ?? {}) });
-      mcpLease = await prepareKimiMcpConfig({
-        callbackEnv: { ...(options?.callbackEnv ?? {}), ...(options?.accountEnv ?? {}) },
-        workingDirectory: options?.workingDirectory,
-        mcpServerPath: this.mcpServerPath,
-      });
+      if (scopedProfile) {
+        mcpLease = { env: scopedProfile.env, dispose: scopedProfile.dispose };
+      } else {
+        await ensureKimiSecretHooks(toolEnv);
+        mcpLease = await prepareKimiMcpConfig({
+          callbackEnv: toolEnv,
+          frozenKimiMcpConfig: options?.frozenKimiMcpConfig,
+          workingDirectory: options?.workingDirectory,
+          mcpServerPath: this.mcpServerPath,
+        });
+      }
       let emittedSessionInit = Boolean(effectiveResumeSessionId);
       let sawModelOutput = false;
       let emittedImageCapability = false;
@@ -378,6 +455,7 @@ export class KimiAgentService implements AgentService {
       args[promptIndex + 1] = preparedRequest.message.body;
       const cliOpts = {
         command: kimiCommand,
+        ...(scoped ? { inheritParentEnv: false } : {}),
         args,
         ...(managedArgvFlags.length > 0 ? { managedArgvFlags } : {}),
         ...(options?.workingDirectory ? { cwd: options.workingDirectory } : {}),
@@ -389,11 +467,30 @@ export class KimiAgentService implements AgentService {
         // that bypasses support_efforts, not a harmless leftover).
         // Configured effort wins over account/callback env.
         env: {
+          ...(scoped
+            ? Object.fromEntries(
+                [
+                  'PATH',
+                  'HOME',
+                  'USERPROFILE',
+                  'TMPDIR',
+                  'TMP',
+                  'TEMP',
+                  'LANG',
+                  'LC_ALL',
+                  'SYSTEMROOT',
+                  'WINDIR',
+                ].flatMap((key) => (process.env[key] ? [[key, process.env[key]!]] : [])),
+              )
+            : {}),
           ...(options?.callbackEnv ?? {}),
           ...(apiKeyEnv ?? {}),
           ...(options?.accountEnv ?? {}),
           ...mcpLease.env,
-          KIMI_MODEL_THINKING_EFFORT: effortLevel,
+          ...(scoped
+            ? { KIMI_MODEL_NAME: options?.accountEnv?.KIMI_MODEL_NAME || apiKeyEnv?.KIMI_MODEL_NAME || identityModel }
+            : {}),
+          ...(effortLevel !== undefined ? { KIMI_MODEL_THINKING_EFFORT: effortLevel } : {}),
           // Native mode requires the kimi-code v2 engine for --agent-file.
           [KIMI_V2_ENGINE_ENV_KEY]: '1',
         },
@@ -406,6 +503,7 @@ export class KimiAgentService implements AgentService {
           ? { rawArchivePath: this.rawArchive.getPath(options.invocationId) }
           : {}),
       };
+      await scoped?.pluginNativeLaunch?.assertCurrent();
       const events = options?.spawnCliOverride
         ? options.spawnCliOverride(cliOpts)
         : spawnCli(cliOpts, this.spawnFn ? { spawnFn: this.spawnFn } : undefined);
@@ -637,7 +735,7 @@ export class KimiAgentService implements AgentService {
       }
 
       if (!emittedSessionInit) {
-        const inferredSessionId = readKimiSessionId(workingDirectory, toolEnv, runtimePaths);
+        const inferredSessionId = scoped ? undefined : readKimiSessionId(workingDirectory, toolEnv, runtimePaths);
         if (inferredSessionId && inferredSessionId !== rejectedResumeSessionId) {
           metadata.sessionId = inferredSessionId;
           emittedSessionInit = true;
@@ -656,7 +754,9 @@ export class KimiAgentService implements AgentService {
 
       if (metadata.sessionId && modelConfig.maxContextSize != null) {
         try {
-          const contextUsedTokens = await readKimiContextUsedTokens(metadata.sessionId, toolEnv, runtimePaths);
+          const contextUsedTokens = scoped
+            ? undefined
+            : await readKimiContextUsedTokens(metadata.sessionId, toolEnv, runtimePaths);
           if (contextUsedTokens != null) {
             metadata.usage = {
               ...(metadata.usage ?? {}),
@@ -725,7 +825,7 @@ export class KimiAgentService implements AgentService {
       };
       yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
     } finally {
-      removeKimiL0AgentFileDir(l0AgentFilePath);
+      if (!scopedProfile) removeKimiL0AgentFileDir(l0AgentFilePath);
       await mcpLease?.dispose();
     }
   }

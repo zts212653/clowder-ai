@@ -60,7 +60,7 @@ describe('message lookup panel interaction', () => {
     const url = new URL(vi.mocked(apiFetch).mock.calls[0][0], 'https://example.test');
     expect(url.searchParams.get('threadId')).toBe('current');
     expect(navigate).not.toHaveBeenCalled();
-    expect(host.textContent).toContain('本次检索未找到');
+    expect(host.textContent).toContain('本次资格核对情况未知');
   });
   it('scope change reuses the entered query with the canonical service', async () => {
     const { input } = await mount();

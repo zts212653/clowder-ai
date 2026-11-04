@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { homedir } from 'node:os';
+import { probeRecordedApiPort } from './lib/daemon-health-probe.mjs';
 
 import {
   DaemonStateError,
@@ -179,6 +180,16 @@ async function main(argv) {
     console.log(`  root: ${inspection.state.projectRoot}`);
     console.log(`  log: ${inspection.state.logFile}`);
     console.log(`  ports: ${JSON.stringify(inspection.state.ports)}`);
+    const probeOptions = { incarnationPid: inspection.state.pid };
+    const alive = await probeRecordedApiPort(inspection.state, probeOptions);
+    if (!alive?.ok) {
+      console.log(`  API: ${alive === undefined ? 'unknown' : 'unavailable'} (deployment degraded)`);
+      process.exitCode = 1;
+      return;
+    }
+    const ready = await probeRecordedApiPort(inspection.state, { ...probeOptions, readiness: true });
+    console.log(`  API: alive; readiness: ${ready?.ok ? 'ready' : 'not ready (deployment degraded)'}`);
+    if (!ready?.ok) process.exitCode = 1;
     return;
   }
   throw new DaemonStateError('invalid-command', `Unknown command: ${command}`);

@@ -83,6 +83,7 @@ export type {
   ActiveExecutionListResponse,
   ActiveExecutionNonCancelableReason,
   ActiveExecutionProjection,
+  ActiveHoldWaitProjection,
   LiveInvocationCancelTarget,
   ManagedCommandActivity,
   ManagedCommandCancelTarget,
@@ -337,6 +338,7 @@ export {
 } from './cloud-bridge-outbound-receipt.js';
 export { type CloudBridgeReturnV1, isCloudBridgeReturnV1 } from './cloud-bridge-return.js';
 export * from './collective.js';
+export * from './collective-channel.js';
 export * from './collective-collaboration.js';
 export * from './collective-decision-vote.js';
 export * from './collective-reaction.js';
@@ -1410,6 +1412,7 @@ export {
   isAllowedCollectionSignal,
   PROFILE_UPDATE_TARGET_LAYERS,
 } from './profile-update.js';
+export * from './profile-usage.js';
 export type {
   ActiveParticipantInput,
   AssemblerInput,
@@ -1685,6 +1688,8 @@ export type {
   StudyMeta,
   StudyThreadLink,
 } from './study.js';
+// F335 交付二：回话下面那一排（一键提议 + 原地回执）
+export * from './suggestion.js';
 // Summary types (拍立得照片墙)
 export type {
   CreateSummaryInput,

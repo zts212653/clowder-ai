@@ -8,6 +8,7 @@ import type { FastifyInstance, FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { type EventAuditLog, getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
 import type { PluginRuntimeCarrierRouter } from '../domains/plugin/carrier/runtime-carrier.js';
+import { NativePluginActionError } from '../domains/plugin/declared/native-plugin-actions.js';
 import {
   type PluginManagerPackageAssetPort,
   type PluginManagerPackageDocumentationPort,
@@ -16,7 +17,9 @@ import {
 import type { PluginManagerBindings } from '../domains/plugin/manager/plugin-manager-bindings.js';
 import { MAX_PLUGIN_PACKAGE_BYTES } from '../domains/plugin/official-package-archive.js';
 import { type CallbackAuthRegistry, registerCallbackAuthHook } from './callback-auth-prehandler.js';
+import type { getDeletedCallbackThreadGuard } from './callback-scope-helpers.js';
 import { pluginAccessError, requirePluginWriteAccess } from './plugin-access-guards.js';
+import { captureDirectToolCaller } from './plugin-direct-tool-caller.js';
 import { registerPluginManagerConfigurationRoute } from './plugin-manager-configuration-route.js';
 import { registerPluginManagerReadRoutes } from './plugin-manager-read-routes.js';
 import {
@@ -34,6 +37,7 @@ import {
   uninstallSchema,
 } from './plugin-manager-route-contract.js';
 import { installPluginUpload, PluginManagerUploadError, readPluginUpload } from './plugin-manager-upload.js';
+import { warnPluginPackageFailure } from './plugin-package-diagnostics.js';
 
 type PluginManagerRouteService = Pick<
   PluginManagerService,
@@ -58,7 +62,8 @@ export interface PluginManagerRouteOptions {
   readonly asset?: PluginManagerPackageAssetPort;
   readonly documentation?: PluginManagerPackageDocumentationPort;
   readonly auditLog?: Pick<EventAuditLog, 'append'>;
-  readonly callbackRegistry?: CallbackAuthRegistry;
+  readonly callbackRegistry?: CallbackAuthRegistry & { verifyLatest?: CallbackAuthRegistry['verify'] };
+  readonly threadStore?: Parameters<typeof getDeletedCallbackThreadGuard>[0];
 }
 
 export function registerPluginManagerRoutes(app: FastifyInstance, options: PluginManagerRouteOptions): void {
@@ -85,25 +90,48 @@ export function registerPluginManagerRoutes(app: FastifyInstance, options: Plugi
           .status(503)
           .send({ error: 'Plugin contributions are unavailable', code: 'CONTRIBUTION_UNAVAILABLE' });
       }
+      let caller: ReturnType<typeof captureDirectToolCaller>;
+      const onAbort = () => caller?.close();
+      const onClose = () => {
+        if (!reply.raw.writableEnded) onAbort();
+      };
       try {
-        await appendContributionCallAudit(auditLog, {
-          operator: access.operator,
-          pluginId: parsedId.data,
-          contributionId: parsed.data.contributionId,
-          toolName: parsed.data.toolName,
-        });
-      } catch {
-        return reply.status(503).send({ error: 'Plugin audit log is unavailable', code: 'AUDIT_UNAVAILABLE' });
-      }
-      try {
+        caller = captureDirectToolCaller(request, options);
+        request.raw.on('aborted', onAbort);
+        reply.raw.on('close', onClose);
+        if (request.raw.aborted) onAbort();
+        try {
+          await appendContributionCallAudit(auditLog, {
+            operator: access.operator,
+            pluginId: parsedId.data,
+            contributionId: parsed.data.contributionId,
+            toolName: parsed.data.toolName,
+          });
+        } catch {
+          return reply.status(503).send({ error: 'Plugin audit log is unavailable', code: 'AUDIT_UNAVAILABLE' });
+        }
+        await caller?.assertCurrent();
         return await options.contributions.callPluginTool(
           parsedId.data,
           parsed.data.contributionId,
           parsed.data.toolName,
           parsed.data.arguments,
+          caller
+            ? {
+                ...caller.identity,
+                assertCurrent: caller.assertCurrent,
+                assertInvocationCurrent: caller.assertInvocationCurrent,
+              }
+            : undefined,
         );
       } catch (error) {
+        if (error instanceof NativePluginActionError)
+          return reply.status(error.statusCode).send({ error: error.message });
         return sendContributionError(reply, error);
+      } finally {
+        caller?.close();
+        request.raw.off('aborted', onAbort);
+        reply.raw.off('close', onClose);
       }
     },
   );
@@ -152,6 +180,15 @@ export function registerPluginManagerRoutes(app: FastifyInstance, options: Plugi
       const result = await options.manager.install(installRequest);
       return reply.status(201).send(result);
     } catch (error) {
+      warnPluginPackageFailure(
+        request,
+        {
+          operation: 'install',
+          sourceKind: installRequest.source.kind,
+          ...(installRequest.source.kind === 'catalog' ? { catalogId: installRequest.source.catalogId } : {}),
+        },
+        error,
+      );
       return sendManagerError(reply, error);
     }
   });
@@ -180,6 +217,7 @@ export function registerPluginManagerRoutes(app: FastifyInstance, options: Plugi
     try {
       return await options.manager.update(parsedId.data, parsed.data);
     } catch (error) {
+      warnPluginPackageFailure(request, { operation: 'update', pluginId: parsedId.data }, error);
       return sendManagerError(reply, error);
     }
   });
@@ -281,6 +319,7 @@ export const pluginManagerUploadRoutes: FastifyPluginAsync<PluginManagerRouteOpt
       );
       return reply.status(201).send(installed);
     } catch (error) {
+      warnPluginPackageFailure(request, { operation: 'install', sourceKind: 'local-archive' }, error);
       if (error instanceof PluginManagerUploadError) {
         return reply.status(error.status).send({ error: error.message, code: error.code });
       }

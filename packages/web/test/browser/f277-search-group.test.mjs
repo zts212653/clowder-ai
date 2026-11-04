@@ -3,7 +3,7 @@ import { mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
 import { verifyGroupSorting } from './f277-group-sort-journey.mjs';
 import { registerProposalV2Cases } from './f277-proposal-v2.cases.mjs';
 import { startSearchGroupBrowserFixture } from './f277-search-group-browser.harness.mjs';

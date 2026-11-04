@@ -58,6 +58,49 @@ describe('resolveAcpMcpServers', () => {
     assert.deepStrictEqual(result, []);
   });
 
+  it('projects plugin capability IDs to the same native server name used by HTTP nomination', async () => {
+    const id = 'plugin:fixture:forwarder';
+    const config = toCapabilities({ [id]: { command: 'node', args: ['fixture.js'] } });
+    Object.assign(config.capabilities[0], { source: 'plugin', pluginId: 'fixture' });
+    const root = makeTempRoot({ capabilities: config });
+    for (const source of ['plugin', 'cat-cafe']) {
+      config.capabilities[0].source = source;
+      const servers = await resolveAcpMcpServers(root, [id], undefined, { catId: 'codex', capabilitiesConfig: config });
+      assert.equal(servers[0].name, 'plugin__fixture__forwarder');
+      assert.equal(servers[0].hostSource, 'plugin', 'legacy installed policies retain their trusted plugin ownership');
+    }
+  });
+
+  it('uses explicit project grants and blockedCats consistently with ordinary member discovery', async () => {
+    const config = toCapabilities({ forwarder: { command: 'node', args: ['fixture.js'] } });
+    config.capabilities[0].globalEnabled = false;
+    config.capabilities[0].blockedCats = [];
+    const root = makeTempRoot({ capabilities: config });
+    const options = { accessScope: 'project' };
+    const disabled = resolveDisabledServerIds(root, 'codex', config, options);
+    assert.equal(disabled.has('forwarder'), false, 'an explicit project grant survives the global board toggle');
+    const servers = await resolveAcpMcpServers(root, ['forwarder'], undefined, {
+      ...options,
+      catId: 'codex',
+      capabilitiesConfig: config,
+      disabledServerIds: disabled,
+    });
+    assert.equal(servers.length, 1);
+    config.capabilities[0].blockedCats = ['codex'];
+    const revoked = resolveDisabledServerIds(root, 'codex', config, options);
+    assert.equal(revoked.has('forwarder'), true);
+    assert.deepEqual(
+      await resolveAcpMcpServers(root, ['forwarder'], undefined, {
+        ...options,
+        catId: 'codex',
+        capabilitiesConfig: config,
+        disabledServerIds: revoked,
+      }),
+      [],
+    );
+    assert.equal(resolveDisabledServerIds(root, 'codex', config).has('forwarder'), true);
+  });
+
   it('#712: resolves external whitelist entries from capabilities.json', async () => {
     const root = makeTempRoot({
       capabilities: toCapabilities({

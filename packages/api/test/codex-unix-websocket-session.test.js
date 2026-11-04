@@ -9,13 +9,14 @@ import {
   removeCodexSocketDirectory,
   spawnCodexAppServerHost,
 } from '../dist/domains/cats/services/agents/providers/CodexUnixWebSocketSession.js';
+import { DEFAULT_MAX_NDJSON_RECORD_BYTES } from '../dist/utils/ndjson-parser.js';
 
 async function withClosingUnixWebSocket(reason, run) {
   const directory = createCodexSocketDirectory();
   const socketPath = join(directory, 'app-server.sock');
   const server = createServer();
   const webSockets = new WebSocketServer({ server });
-  webSockets.on('connection', (socket) => socket.close(1009, reason));
+  webSockets.on('connection', (socket) => (typeof reason === 'function' ? reason(socket) : socket.close(1009, reason)));
   await new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(socketPath, resolve);
@@ -33,6 +34,29 @@ async function withClosingUnixWebSocket(reason, run) {
     await removeCodexSocketDirectory(directory);
   }
 }
+
+test('a local websocket record limit is not a provider resume-replacement verdict', async () => {
+  await withClosingUnixWebSocket(
+    (socket) => {
+      // Declare a large frame without allocating or transmitting a 64MiB body.
+      const header = Buffer.alloc(10);
+      header[0] = 0x82;
+      header[1] = 127;
+      header.writeBigUInt64BE(BigInt(DEFAULT_MAX_NDJSON_RECORD_BYTES + 1), 2);
+      socket._socket.write(header);
+    },
+    async (session) => {
+      await assert.rejects(
+        async () => {
+          for await (const _message of session.read()) {
+            /* no record can be admitted */
+          }
+        },
+        (error) => error.code === 'NDJSON_RECORD_TOO_LARGE' && error.message !== 'Max payload size exceeded',
+      );
+    },
+  );
+});
 
 test('unix host allows native cold initialization beyond ten seconds', { timeout: 20_000 }, async () => {
   const directory = createCodexSocketDirectory();

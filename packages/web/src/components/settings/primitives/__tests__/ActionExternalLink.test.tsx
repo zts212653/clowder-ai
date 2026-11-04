@@ -49,3 +49,37 @@ it('restored polling can show its recovered link, while unsafe URL schemes never
   ])
     expect(render(value).querySelector('a')).toBeNull();
 });
+
+it('renders owner-local viewers and same-origin thread links without accepting remote HTTP or disguised origins', () => {
+  for (const value of [
+    'http://127.0.0.1:5189/watch#observer=fixture',
+    'http://localhost:5189/watch#observer=fixture',
+    'http://[::1]:5189/watch',
+    '/thread/original-game?view=messages',
+  ]) {
+    const link = render(value).querySelector('a');
+    expect(link?.getAttribute('href')).toBe(value);
+    expect(link?.getAttribute('referrerpolicy')).toBe('no-referrer');
+  }
+  for (const value of [
+    '//other.example/thread',
+    '//operation.invalid/thread',
+    '/\\other.example/thread',
+    'http://localhost.example/watch',
+    'http://127.0.0.1@other.example/watch',
+    'http://user:secret@127.0.0.1/watch',
+    'file:///private/credentials',
+  ])
+    expect(render(value).querySelector('a')).toBeNull();
+});
+
+it('rejects paths whose normalized href would become an external authority', () => {
+  for (const value of [
+    '/.//remote.example/watch',
+    '/.//user:secret@remote.example/watch',
+    '/local/..//remote.example/watch',
+    '/%2e//remote.example/watch',
+  ])
+    expect(render(value).querySelector('a')).toBeNull();
+  expect(render('/folder/../thread/own').querySelector('a')?.getAttribute('href')).toBe('/thread/own');
+});

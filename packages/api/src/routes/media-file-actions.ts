@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import { basename } from 'node:path';
 import { promisify } from 'node:util';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { LocalMediaFileUnavailable } from '../domains/video-studio/content-owner/published-media-file-exports.js';
 import { isDirectLoopbackRequest, isTrustedLocalApiRequest } from '../utils/loopback-request.js';
 
 const exec = promisify(execFile);
@@ -68,8 +69,9 @@ export function registerMediaFileActions(app: FastifyInstance, mediaPath: string
       const info = await stat(file.path);
       if (!info.isFile() && !(deps.allowDirectoryReveal && info.isDirectory()))
         return reply.code(404).send({ error: 'not_found' });
-      const canOpen = info.isFile() && file.canOpen !== false;
-      const canReveal = file.canReveal !== false;
+      const desktopActions = process.platform === 'darwin';
+      const canOpen = desktopActions && info.isFile() && file.canOpen !== false;
+      const canReveal = desktopActions && file.canReveal !== false;
       const application = canOpen ? await defaultApp(file.mime) : {};
       const home = homedir();
       return {
@@ -84,6 +86,8 @@ export function registerMediaFileActions(app: FastifyInstance, mediaPath: string
         defaultApplicationBundleId: application.bundleId,
       };
     } catch (error) {
+      if (error instanceof LocalMediaFileUnavailable)
+        return { local: false, canOpen: false, canReveal: false, reason: error.message };
       return deps.onError(reply, error);
     }
   });
@@ -115,6 +119,8 @@ export function registerMediaFileActions(app: FastifyInstance, mediaPath: string
         }
         return { ok: true };
       } catch (error) {
+        if (error instanceof LocalMediaFileUnavailable)
+          return reply.code(403).send({ error: 'local_file_unavailable', reason: error.message });
         return deps.onError(reply, error);
       }
     });

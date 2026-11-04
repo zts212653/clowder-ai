@@ -92,6 +92,8 @@ class PoolWire {
     } else if (message.method === 'thread/start' || message.method === 'thread/resume') {
       const threadId = message.method === 'thread/resume' ? message.params.threadId : this.threadId;
       this.inbox.push({ id: message.id, result: { thread: { id: threadId, turns: [] } } });
+    } else if (message.method === 'thread/turns/list') {
+      this.inbox.push({ id: message.id, result: { data: [], nextCursor: null } });
     } else if (message.method === 'turn/start') {
       this.inbox.push({ id: message.id, result: { turn: { id: 'turn-1', status: 'inProgress', items: [] } } });
       setImmediate(() => {
@@ -123,6 +125,15 @@ class ActiveWriterWire extends PoolWire {
   }
 
   async write(message) {
+    if (message.method === 'thread/turns/list') {
+      assert.equal(message.params.itemsView, 'notLoaded');
+      this.writes.push(message);
+      this.inbox.push({
+        id: message.id,
+        result: { data: [{ id: 'turn-old', status: 'inProgress', startedAt: 1_786_630_000 }], nextCursor: null },
+      });
+      return;
+    }
     if (message.method === 'thread/resume') {
       this.writes.push(message);
       this.inbox.push({

@@ -37,6 +37,8 @@ export function FileActions(props: FileActionsProps) {
     position,
     setPosition,
     info,
+    infoError,
+    refreshInfo,
     notice,
     menu,
     trigger,
@@ -80,6 +82,14 @@ export function FileActions(props: FileActionsProps) {
           >
             {info?.local ? t.copyPath : t.copyLink}
           </button>
+          {infoError ? (
+            <>
+              <span role="alert">{t.fileInfoFailed}</span>
+              <button type="button" onClick={() => void refreshInfo()}>
+                {t.retry}
+              </button>
+            </>
+          ) : null}
           {info?.local && info.canReveal !== false && (
             <button
               type="button"
@@ -128,8 +138,9 @@ export function FileActions(props: FileActionsProps) {
         <FileActionMenu
           position={position}
           menu={menu}
-          trigger={trigger}
           info={info}
+          infoError={infoError}
+          retryInfo={() => void refreshInfo()}
           link={link}
           filename={filename}
           mime={mime}

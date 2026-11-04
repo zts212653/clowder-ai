@@ -67,7 +67,7 @@ export function createCodexStartupRouteHarness({
               run.launchSnapshots.push(launch);
               const fail = scenario !== 'recover' || run.wires.length < 2;
               const wire = new CodexStartupWire(
-                fail ? { code: -32603, message: 'workspace routing discovery failed' } : undefined,
+                fail ? { code: -32603, message: 'workspace routing discovery timed out' } : undefined,
                 { model_provider: 'openai', sqlite_home: descriptor.sqliteHome },
               );
               run.wires.push(wire);

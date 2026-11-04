@@ -78,6 +78,25 @@ describe('outbound sync runtime closure', { skip: !isHomeRepo && 'sync manifest 
     return [...managedRoots].some((root) => repoPath === root || repoPath.startsWith(`${root}/`));
   }
 
+  it('exports every pnpm dependency patch required by frozen installation as an exact file', () => {
+    const packageJson = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf8'));
+    const coverage = loadPublicExportCoverage(ROOT);
+    assert.ok(!managedRoots.has('patches'), 'dependency patches must not expose the whole patches directory');
+    for (const [dependency, path] of Object.entries(packageJson.pnpm?.patchedDependencies ?? {})) {
+      assert.equal(typeof path, 'string', `${dependency} must name its patch file`);
+      assert.ok(existsSync(resolve(ROOT, path)), `${dependency} patch is missing: ${path}`);
+      assert.ok(managedFiles.has(path), `${dependency} patch needs an exact managed_files entry: ${path}`);
+      assert.ok(isCoveredByPublicExport(path, coverage), `${dependency} patch is omitted by public export: ${path}`);
+    }
+  });
+
+  it('keeps source-only docs sync assertions with their private home-script inputs', () => {
+    const coverage = loadPublicExportCoverage(ROOT);
+    for (const path of ['scripts/check-sync-docs-runtime-assets.test.mjs', 'scripts/home-package-scripts.mjs']) {
+      assert.ok(!isCoveredByPublicExport(path, coverage), `${path} is a private sync input`);
+    }
+  });
+
   it('owns the revision template and its Git archive attributes in the source-only manifest', () => {
     for (const path of ['.cat-cafe-runtime-revision', '.gitattributes']) {
       assert.ok(managedFiles.has(path), `${path} must be exported`);

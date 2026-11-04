@@ -7,9 +7,11 @@
 
 import { PROFILE_UPDATE_TARGET_LAYERS } from '@cat-cafe/shared';
 import { CURRENT_CAPSULE_PROFILE_URI } from '@cat-cafe/shared/profile-contract';
+import type Database from 'better-sqlite3';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { FileProfileRepository } from '../domains/cats/services/profile/ProfileRepository.js';
+import { ProfileReadConflict, recordProfileRead } from '../domains/memory/profile/ProfileReadEvidence.js';
 import { profilePointerMissing, profilePointerResolved } from '../infrastructure/telemetry/instruments.js';
 import { requireCallbackPrincipal } from './callback-auth-prehandler.js';
 
@@ -17,6 +19,7 @@ const READABLE_LAYERS = new Set<string>(PROFILE_UPDATE_TARGET_LAYERS);
 
 export interface CallbackReadProfileDeps {
   repository: FileProfileRepository;
+  evidenceDb?: Database.Database;
 }
 
 export function registerCallbackReadProfileRoutes(app: FastifyInstance, deps: CallbackReadProfileDeps): void {
@@ -27,6 +30,7 @@ export function registerCallbackReadProfileRoutes(app: FastifyInstance, deps: Ca
     const query = z
       .object({
         layer: z.string().optional(),
+        requestId: z.string().trim().min(1).max(200).optional(),
         expectedRevision: z
           .string()
           .regex(/^sha256:[a-f0-9]{64}$/)
@@ -35,6 +39,22 @@ export function registerCallbackReadProfileRoutes(app: FastifyInstance, deps: Ca
       .safeParse(request.query);
     if (!query.success) return reply.status(400).send({ error: 'invalid_profile_query' });
     const expectedRevision = query.data.expectedRevision;
+    reply.header('Cache-Control', 'private, no-store');
+    const finishRead = <T extends { revision: string }>(memoryId: string, snapshot: T) => {
+      const requestId = query.data.requestId;
+      if (!requestId) return { ...snapshot, usageRecorded: false };
+      if (!deps.evidenceDb)
+        return reply.status(503).send({ error: 'profile_read_recording_unavailable', readRequestId: requestId });
+      try {
+        recordProfileRead(deps.evidenceDb, { principal, requestId, memoryId, revision: snapshot.revision });
+        return { ...snapshot, readRequestId: requestId, usageRecorded: true };
+      } catch (error) {
+        if (error instanceof ProfileReadConflict)
+          return reply.status(409).send({ error: error.message, readRequestId: requestId });
+        request.log.warn({ err: error }, 'Profile read evidence could not be persisted');
+        return reply.status(503).send({ error: 'profile_read_recording_unavailable', readRequestId: requestId });
+      }
+    };
 
     // Phase E: layer query param — auth resolved BEFORE layer dispatch (INV-6).
     const layer = query.data.layer ?? 'primer';
@@ -62,12 +82,12 @@ export function registerCallbackReadProfileRoutes(app: FastifyInstance, deps: Ca
           return reply.status(409).send({ error: 'profile_revision_changed' });
         }
         profilePointerResolved.add(1, { 'profile.layer': layer });
-        return {
+        return finishRead(layer, {
           layer,
           uri,
           content: corpus.content,
           revision: corpus.revision,
-        };
+        });
       } catch {
         reply.status(503);
         return { error: `${layer}_target_unavailable`, uri };
@@ -75,7 +95,7 @@ export function registerCallbackReadProfileRoutes(app: FastifyInstance, deps: Ca
     }
 
     // Default: primer — existing flow.
-    let scope;
+    let scope: ReturnType<FileProfileRepository['scope']>;
     try {
       scope = deps.repository.scope(principal.userId, principal.catId as string);
     } catch {
@@ -96,12 +116,12 @@ export function registerCallbackReadProfileRoutes(app: FastifyInstance, deps: Ca
     }
     profilePointerResolved.add(1, { 'profile.layer': 'primer' });
 
-    return {
+    return finishRead(`primer:${scope.relationshipKey}`, {
       layer: 'primer',
       uri: deps.repository.currentRelationshipUri(),
       relationshipKey: scope.relationshipKey,
       content: primer.content,
       revision: primer.revision,
-    };
+    });
   });
 }

@@ -1,6 +1,7 @@
 // @ts-check
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
+import { prepareInvocationExecutionBinding } from '../dist/domains/cats/services/agents/invocation/invoke-single-cat.js';
 import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 const { buildSessionBootstrap } = await import('../dist/domains/cats/services/session/SessionBootstrap.js');
@@ -390,20 +391,31 @@ describe('F296 B3b-4: real routes publish the final generation projection', () =
     test(`${routeName}: replacement rebuilds bootstrap and briefing from the second epoch decision`, async () => {
       const captured = [];
       const deps = createRouteFixture(captured);
+      const sessionStore = deps.invocationDeps.sessionChainStore;
+      const active = sessionStore.getActive('opus', 'thread-b3b4', 'user-1');
+      const binding = await prepareInvocationExecutionBinding(deps.invocationDeps, {
+        catId: 'opus',
+        threadId: 'thread-b3b4',
+        userId: 'user-1',
+        service: deps.services.opus,
+      });
+      assert.ok(await sessionStore.bindHostExecutionBoundary(active.id, undefined, binding.hostExecutionBoundary));
+      sessionStore.update(active.id, { cliSessionId: 'stale-runtime-session' });
       const originalFetch = globalThis.fetch;
       globalThis.fetch = async () => ({ ok: true, json: async () => ({ results: [] }) });
+      const events = [];
       try {
         const route = await loadRoute();
-        for await (const _ of route(deps, ['opus'], '@opus continue', 'user-1', 'thread-b3b4', {
+        for await (const event of route(deps, ['opus'], '@opus continue', 'user-1', 'thread-b3b4', {
           currentUserMessageId: deps.currentUserMessageId,
         })) {
-          // drain
+          events.push(event);
         }
       } finally {
         globalThis.fetch = originalFetch;
       }
 
-      assert.equal(captured.length, 2, 'fixture must exercise provider replacement');
+      assert.equal(captured.length, 2, `fixture must exercise provider replacement: ${JSON.stringify(events)}`);
       for (const prompt of captured) {
         assert.match(prompt, /\[Cat Handoff Note/);
         assert.match(prompt, /\[Session Recall Pointer\]/);

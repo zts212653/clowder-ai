@@ -50,9 +50,11 @@ function createFaultDrillRouter(modeRef) {
   const ackCalls = [];
 
   return {
+    previewTargets: async () => ({ targetCats: [], reason: { kind: 'default_cat' } }),
     async resolveTargetsAndIntent() {
       return {
         targetCats: ['opus'],
+        routing_warnings: [],
         intent: { intent: 'execute', explicit: false, promptTags: [] },
       };
     },

@@ -1,4 +1,3 @@
-import { join } from 'node:path';
 import { readPreviewCompletionEvidence, recoverySnapshot } from './preview-alpha-recovery-evidence.mjs';
 import {
   assertPreviewProcessQuiescence,
@@ -10,6 +9,7 @@ import {
   preserveRegistrationJournal,
   publishRegistrationResult,
 } from './preview-alpha-registration-settlement.mjs';
+import { capturePreviewDiagnosticLog } from './preview-diagnostic-log.mjs';
 
 /** Retire an explicitly completed ordinary preview. No resource ownership or SAVE is inferred. */
 export function settleCompletedPreviewRegistration(config, record, deps = {}) {
@@ -35,15 +35,18 @@ export function settleCompletedPreviewRegistration(config, record, deps = {}) {
       throw new Error('ordinary preview port remains occupied');
   };
   assertStopped();
-  if (record.logPath) {
-    if (record.logPath !== (config.logPath ?? join(config.stateDir, `${config.id}.log`)))
-      throw new Error('preview log coordinate changed');
-    evidence.sources.log = recoverySnapshot(record.logPath, { maxBytes: 16 * 1024 * 1024 });
-  }
+  const log = capturePreviewDiagnosticLog(config, record, evidence);
   if (record.origin === 'launchd') evidence.sources.plist = recoverySnapshot(config.plistPath);
-  const journal = preserveRegistrationJournal(record, evidence, [], 'completed-preview-registration-settlement');
+  const journal = preserveRegistrationJournal(
+    record,
+    evidence,
+    [],
+    'completed-preview-registration-settlement',
+    log.details,
+  );
   const assertReadyToRelease = () => {
     assertRegistrationSources(evidence, []);
+    log.assertCurrent();
     assertStopped();
   };
   assertReadyToRelease();

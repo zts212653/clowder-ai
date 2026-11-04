@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { test } from 'node:test';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
 import { ensureWorkspaceOpen } from './f307-workspace-open.mjs';
 import { readAuthorDraft } from './f326-real-works-composer.journey.mjs';
 import { decodedSeek } from './f326-screening-journey.harness.mjs';

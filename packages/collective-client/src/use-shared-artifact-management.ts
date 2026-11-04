@@ -13,6 +13,7 @@ export function useSharedArtifactManagement(artifact: SharedArtifact) {
   const mounted = useRef(true);
   const matches = () => mounted.current && current.current.fence === fence && current.current.api === api;
   const generation = useRef(0);
+  const reading = useRef<number>();
   const busy = useRef(false);
   const [state, setState] = useState<{
     fence: string;
@@ -25,6 +26,7 @@ export function useSharedArtifactManagement(artifact: SharedArtifact) {
   const refresh = useCallback(async () => {
     if (!api || shared?.status !== 'ready') return;
     const token = ++generation.current;
+    reading.current = token;
     try {
       const result = await api.read(artifact);
       if (!matches() || token !== generation.current) return;
@@ -37,6 +39,8 @@ export function useSharedArtifactManagement(artifact: SharedArtifact) {
       if (!matches() || token !== generation.current) return;
       const denied = error instanceof CollectiveClientRequestError && [401, 403, 404].includes(error.status);
       setState({ fence, error: denied ? '你已无法管理这件作品。' : '暂时无法核对权限与保管，请重新读取。' });
+    } finally {
+      if (reading.current === token) reading.current = undefined;
     }
   }, [api, fence, shared?.status]);
   useEffect(() => {
@@ -44,7 +48,7 @@ export function useSharedArtifactManagement(artifact: SharedArtifact) {
     busy.current = false;
     void refresh();
     const timer = window.setInterval(() => {
-      if (!busy.current) void refresh();
+      if (!busy.current && reading.current === undefined) void refresh();
     }, 1800);
     return () => {
       mounted.current = false;

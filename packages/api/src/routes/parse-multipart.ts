@@ -21,6 +21,7 @@ export type ParsedMultipart =
       visibility?: string;
       whisperTo?: string[];
       mentions?: string[];
+      confirmedTargetCats?: string[];
       messageDisposition?: 'continue_current' | 'next_work';
       /** #699: ID of message being replied to (quote). */
       replyTo?: string;
@@ -66,6 +67,9 @@ export async function parseMultipart(
   }
   if (fields.mentions !== undefined && !Array.isArray(fields.mentions)) {
     fields.mentions = [fields.mentions];
+  }
+  if (fields.confirmedTargetCats !== undefined && !Array.isArray(fields.confirmedTargetCats)) {
+    fields.confirmedTargetCats = [fields.confirmedTargetCats];
   }
 
   // F294 v1 deliberately admits Bundle carriers only through JSON. Detect the
@@ -117,6 +121,9 @@ export async function parseMultipart(
     ...(parseResult.data.visibility ? { visibility: parseResult.data.visibility } : {}),
     ...(parseResult.data.whisperTo ? { whisperTo: parseResult.data.whisperTo as string[] } : {}),
     ...(parseResult.data.mentions ? { mentions: parseResult.data.mentions as string[] } : {}),
+    ...(parseResult.data.confirmedTargetCats
+      ? { confirmedTargetCats: parseResult.data.confirmedTargetCats as string[] }
+      : {}),
     ...(parseResult.data.messageDisposition ? { messageDisposition: parseResult.data.messageDisposition } : {}),
     ...(parseResult.data.replyTo ? { replyTo: parseResult.data.replyTo } : {}),
     contentBlocks: buildMessageContentBlocks(content, contextAttachments, uploadedContent),

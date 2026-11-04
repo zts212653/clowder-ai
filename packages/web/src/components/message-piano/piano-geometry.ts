@@ -57,6 +57,16 @@ export function projectPianoGeometry(
       trackHeight: ((bottom - top) / contentHeight) * trackHeight,
     };
   });
+  return {
+    contentHeight,
+    viewportHeight,
+    trackHeight,
+    keys,
+    ...projectPianoScroll(contentHeight, viewportHeight, scrollTop, trackHeight),
+  };
+}
+
+function projectPianoScroll(contentHeight: number, viewportHeight: number, scrollTop: number, trackHeight: number) {
   const boundedScroll = Math.max(0, Math.min(scrollTop, contentHeight - viewportHeight));
   const thumbHeight = Math.min(trackHeight, Math.max(3, (viewportHeight / contentHeight) * trackHeight));
   const center = ((boundedScroll + viewportHeight / 2) / contentHeight) * trackHeight;
@@ -64,16 +74,19 @@ export function projectPianoGeometry(
   const grabHeight = Math.min(trackHeight, Math.max(16, thumbHeight));
   const grabTop = Math.max(0, Math.min(center - grabHeight / 2, trackHeight - grabHeight));
   return {
-    contentHeight,
-    viewportHeight,
     scrollTop: boundedScroll,
-    trackHeight,
-    keys,
     thumbTop,
     thumbHeight,
     grabTop,
     grabHeight,
   };
+}
+
+/** A scroll offset changes only the viewport thumb, never the content ruler or message keys. */
+export function scrollPianoGeometry(geometry: PianoGeometry, scrollTop: number): PianoGeometry {
+  if (!Number.isFinite(scrollTop)) return geometry;
+  const viewport = projectPianoScroll(geometry.contentHeight, geometry.viewportHeight, scrollTop, geometry.trackHeight);
+  return viewport.scrollTop === geometry.scrollTop ? geometry : { ...geometry, ...viewport };
 }
 
 export function pianoKeyAtOffset(keys: readonly PianoKey[], offset: number): number {

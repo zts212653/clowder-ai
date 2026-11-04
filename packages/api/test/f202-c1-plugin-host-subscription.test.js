@@ -158,6 +158,22 @@ describe('F202 C1 — caller-bound Host messaging subscriptions', () => {
     }
   });
 
+  test('cleanup after Host stop is idempotent and cannot withdraw a replacement session', async () => {
+    const h = createFixture();
+    const thread = await h.threads.create(OWNER, 'Stop cleanup');
+    const first = h.createSession();
+    await first.host.subscribe({ threadId: thread.id, method: 'fixture.outbound' });
+    await first.stop('owner_disabled');
+    const replacement = h.createSession();
+    await replacement.host.subscribe({ threadId: thread.id, method: 'fixture.outbound' });
+    await first.host.unsubscribe({ threadId: thread.id });
+    await assert.rejects(first.host.subscribe({ threadId: thread.id, method: 'fixture.outbound' }), /stopped/);
+    await publish(h.messaging, thread.id, 'replacement remains active');
+    await h.delivery.drain(thread.id);
+    assert.equal(h.calls.length, 1);
+    await replacement.stop('owner_disabled');
+  });
+
   test('delivers through the package-declared action without exposing a handle', async () => {
     const h = createFixture();
     const thread = await h.threads.create(OWNER, 'Subscribed');

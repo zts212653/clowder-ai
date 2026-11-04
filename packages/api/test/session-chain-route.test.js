@@ -140,6 +140,33 @@ describe('Session Chain Routes', () => {
     assert.equal(body.sessions.length, 1);
   });
 
+  it('GET /api/threads/:threadId/sessions omits private Host execution boundary facts', async () => {
+    const store = await setup();
+    const record = store.create({
+      cliSessionId: 'private-boundary',
+      threadId: 'thread-1',
+      catId: 'opus',
+      userId: 'user-1',
+    });
+    record.hostExecutionBoundary = {
+      v: 1,
+      clientId: 'acp',
+      carrier: 'stdio',
+      implementationKey: 'test:private',
+      implementationGeneration: 'generation-1',
+      accountRef: 'private-account',
+      workspaceRoot: 'C:/private/workspace',
+      projectRoot: 'C:/private/project',
+    };
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/threads/thread-1/sessions',
+      headers: { 'x-cat-cafe-user': 'user-1' },
+    });
+    assert.equal(res.statusCode, 200);
+    assert.equal(JSON.parse(res.payload).sessions[0].hostExecutionBoundary, undefined);
+  });
+
   it('GET /api/threads/default/sessions filters default-thread sessions to the caller', async () => {
     const store = await setup(
       mockThreadStore({

@@ -7,13 +7,22 @@ export function workCardArtifact(item: WorkReadResult, production?: WorkVideoCon
   const createdAt = Date.parse(item.revision.committedAt);
   if (!Number.isFinite(createdAt)) throw new MediaOwnerError('media_unavailable');
   return {
-    type: item.description.mediaType === 'video/mp4' ? 'video' : 'file',
+    type:
+      item.description.mediaType === 'text/html'
+        ? 'widget'
+        : item.description.mediaType === 'video/mp4'
+          ? 'video'
+          : 'file',
     name: item.version.title,
     catId: item.revision.committedBy.kind === 'cat' ? item.revision.committedBy.actorId : null,
     createdAt,
     sourceMessageId: null,
     ref: item.reference.contentRef,
-    url: `/api/content-publications/${encodeURIComponent(item.reference.contentRef)}/media/${item.reference.ownerRevision}`,
+    ...(item.description.mediaType === 'text/html'
+      ? {}
+      : {
+          url: `/api/content-publications/${encodeURIComponent(item.reference.contentRef)}/media/${item.reference.ownerRevision}`,
+        }),
     work: {
       ...item.reference,
       currentOwnerRevision: item.currentOwnerRevision,

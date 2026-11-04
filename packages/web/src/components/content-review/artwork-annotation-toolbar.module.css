@@ -25,6 +25,7 @@
 .tool[aria-expanded="true"],
 .more summary:hover {
   background: var(--cafe-surface);
+  --chat-background-role: cafe;
   color: var(--cafe-accent);
 }
 .tool:disabled,
@@ -85,6 +86,7 @@
 }
 .menu button:hover {
   background: var(--cafe-surface);
+  --chat-background-role: cafe;
 }
 .placement {
   display: flex;

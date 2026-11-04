@@ -67,7 +67,28 @@ test('bundled carrier starts and stops the bundled Connector without external pr
     'a package no bundled runtime implements is declined, not delegated',
   );
 
-  await supervisor.start(installed.pluginInstanceId);
+  let releaseHost;
+  let hostEntered;
+  const hostReady = new Promise((resolve) => {
+    hostEntered = resolve;
+  });
+  const hostAdmission = new Promise((resolve) => {
+    releaseHost = resolve;
+  });
+  const starting = supervisor.start(installed.pluginInstanceId, async () => {
+    hostEntered();
+    await hostAdmission;
+  });
+  try {
+    await Promise.race([
+      hostReady,
+      starting.then(() => assert.fail('runtime must not become healthy before Host contributions are admitted')),
+    ]);
+    assert.equal((await store.snapshot()).instances[0].runtimeState, 'starting');
+  } finally {
+    releaseHost();
+  }
+  await starting;
   let instance = (await store.snapshot()).instances[0];
   assert.equal(instance.runtimeState, 'healthy');
   assert.equal(instance.lifecycleRevision, 1, 'runtime health must not advance owner lifecycle fences');

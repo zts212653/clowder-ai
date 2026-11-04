@@ -3,6 +3,12 @@ import { z } from 'zod';
 import type { WorkspaceFileNavigationOrigin } from '@/stores/chat-types';
 import type { WorkspaceSurfaceDescriptor } from './workbench-contract';
 
+export const htmlWorkSourceThreadIdSchema = z
+  .string()
+  .min(1)
+  .max(128)
+  .refine((value) => value === value.trim() && !value.includes('\0'));
+
 export const publicationContentRefSchema = z.string().regex(/^(?:prepared-media|work):[a-f0-9]{64}$/);
 const coordinate = z
   .object({
@@ -49,9 +55,16 @@ export function createPublicationSurface(
     title: string;
     navigationOrigin?: WorkspaceFileNavigationOrigin;
     messagePublicationSource?: MessageMediaPublicationSource;
+    htmlWorkSourceThreadId?: string;
   },
 ): WorkspaceSurfaceDescriptor {
   const target = coordinate.parse(coordinateInput(input));
+  const sourceThread =
+    input.htmlWorkSourceThreadId === undefined
+      ? undefined
+      : htmlWorkSourceThreadIdSchema.parse(input.htmlWorkSourceThreadId);
+  if (sourceThread && !target.contentRef.startsWith('work:'))
+    throw new Error('Work context requires its original Work reference');
   return {
     id: `publication:${target.contentRef}`,
     type: 'artifact',
@@ -61,6 +74,7 @@ export function createPublicationSurface(
     objectRef: { kind: 'artifact', id: target.contentRef },
     ownerStateRef: { owner: 'f138-publication', key: JSON.stringify(target) },
     resultTargetRef: { owner: 'f138-publication', key: target.contentRef },
+    ...(sourceThread ? { htmlWorkSourceThreadId: sourceThread } : {}),
     ...(input.navigationOrigin ? { navigationOrigin: input.navigationOrigin } : {}),
     ...(input.messagePublicationSource
       ? { messagePublicationSource: messageMediaPublicationSourceSchema.parse(input.messagePublicationSource) }

@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/store.js';
 import { WorkCatalogue } from '../src/domains/collaborative-content/works/catalogue.js';
 import { inspectWorkResult } from '../src/domains/collaborative-content/works/inspection.js';
-import { LivingWorkService } from '../src/domains/collaborative-content/works/service.js';
+import { LivingWorkService, type OpenWorkSource } from '../src/domains/collaborative-content/works/service.js';
 import { ProjectContentOwnerService } from '../src/domains/video-studio/content-owner/service.js';
 
 const actor = { kind: 'cat' as const, actorId: 'director' };
@@ -45,6 +45,8 @@ async function fixture(t: { after: (callback: () => Promise<void>) => void }) {
     },
     source: {
       inspect: async () => ({ source: source('first'), mediaType: 'video/mp4', byteLength: 5 }),
+      openCurrent: async (input: { locator: { worktreeId: string; path: string } }): Promise<OpenWorkSource> =>
+        deps.source.open({ source: source(input.locator.path.replace('.mp4', '')) }),
       open: async (input: { source: ReturnType<typeof source> }) => {
         opens++;
         const name = input.source.path.replace('.mp4', '');
@@ -311,17 +313,7 @@ test('Works displays the frozen version production time without changing catalog
 
 test('file landing reuses the exact registered version, refuses ambiguity and creates no work on a miss', async (t) => {
   const f = await fixture(t);
-  const service = new LivingWorkService({
-    ...f.deps,
-    source: {
-      ...f.deps.source,
-      inspect: async ({ locator }) => ({
-        source: { ...locator, expectedSourceRevision: digest(locator.path.replace('.mp4', '')) },
-        mediaType: 'video/mp4',
-        byteLength: 5,
-      }),
-    },
-  });
+  const service = f.service;
   const first = await service.commit(create, principal);
   const second = await service.commit(
     {

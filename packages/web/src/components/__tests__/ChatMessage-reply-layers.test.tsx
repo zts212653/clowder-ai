@@ -96,6 +96,23 @@ describe('F322 B §1.16 — a cat reply in three layers (new shell only)', () =>
   describe('v2', () => {
     beforeEach(() => harness.enableV2());
 
+    it('keeps an active reply body and record stable while its cat catalog loads', () => {
+      const reply = streamReply({ isStreaming: true });
+      harness.setCatCatalogLoaded(false);
+      render(reply);
+
+      const paragraph = q('message-bubble')?.querySelector('.markdown-content p');
+      expect(paragraph?.textContent).toBe(reply.content);
+      expect(harness.container.textContent).not.toContain('CLI Output');
+      expect(q('reply-record')).toBeNull();
+
+      harness.setCatCatalogLoaded(true);
+      render(reply);
+
+      expect(q('message-bubble')?.querySelector('.markdown-content p')).toBe(paragraph);
+      expect(q('reply-record')).toBeNull();
+    });
+
     it('layer 1: what the cat said is body text under the nameplate, with no CLI block around it', () => {
       render(streamReply());
 

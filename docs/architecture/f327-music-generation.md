@@ -3,13 +3,16 @@ feature_ids: [F327, F202]
 topics: [music, plugins, project-output, action-plane]
 doc_kind: architecture
 created: 2026-10-26
-updated: 2026-10-27
+updated: 2026-10-29
 ---
 
-# F327 Cloud music plugin candidate
+# F327 Cloud music plugin
 
-Status: paired, unpublished implementation candidate. The new ordinary-plugin
-`project.output.create` permission still requires scope adoption and independent review.
+Status: integrated and verified in Alpha, then installed and enabled on the formal Host.
+operator `private-source-id` adopted bounded project delivery. The music package
+`0.1.0-alpha.1` remains unpublished to npm/catalog; this is distribution status, not a thread restriction.
+Contract 0.3 uses the declared output and current installation/caller authority; no separate
+`project.output.create` API grant table is restored.
 The old built-in `cat_cafe_generate_music`, callback route, shared music schema and Host
 Google business implementation have been removed from this candidate. Existing code approvals
 for those earlier revisions remain historical evidence only.
@@ -33,15 +36,15 @@ A cache, attachment, source directory or service-level sample alone does not sat
 - The public `packages/music-generation` module owns Google Cloud OAuth, project and billing
   checks, the single Lyria request, and retained provider media. It uses the published SDK
   `0.2.0-beta.24`; its locked dependencies must materialize outside the workspace.
-- Host owns installation, grants, current caller/thread/project authorization, the operation
+- Host owns installation, current caller/thread/project authorization, the operation
   journal, exclusive target reservation, existing media ledger, and final file delivery.
-- The paired Contract `0.2.1-candidate.0` declares the new bounded output action. SDK
-  `0.2.0-beta.25-candidate.0` documents the separately injected operation context. Neither
-  candidate is published or adopted by the installed runtime.
+- The paired Contract `0.3.1-candidate.0` declares the bounded output action. SDK
+  `0.3.0-beta.2-candidate.0` documents the separately injected operation context. Both
+  previews were published and their bytes verified; the music package retains its own locked SDK dependency.
 - Google owns model execution, quota and billing. List-price estimates do not establish an
   actual charge or Ultra credit deduction.
 
-Architecture cell: plugin. Map delta: update required; the paired candidate boundary is recorded in
+Architecture cell: plugin. Map delta: integrated; the paired boundary is recorded in
 `docs/architecture/ownership/cells/plugin.md`. Why: Host owns local output authorization and
 delivery while the plugin owns provider generation. The Host extension is vendor neutral; no Google service or credential
 parser is added to Host. A caller supplies `{requestId, outputPath, parameters}` to the plugin's
@@ -71,16 +74,16 @@ not generate, enable an API, recharge or imply a verified credit deduction. Enab
 
 ## 给片子和游戏配乐
 
-在插件 Manager 安装后，确认复用已有 Cloud 授权或完成卡片内的连接，核对项目并明确启用。
-告诉猫音乐风格、情绪、配器和新的相对 MP3 路径，例如 `score/cafe.mp3`。猫保留同一
-请求标识等待结果；生成后 Host 交付音频和旁边的来源 JSON。Clip 是默认选项，Pro 需要
-明确选择；BPM 和时长只表达目标。失败或结果未知不会静默重新付费。此候选仍待正式插件
-真实验收，不能把早期服务样张当作插件已可用。
+正式 Host 已安装并启用 Google Cloud 配乐插件，其他线程已用它交付六条配乐。
+同一 Host 的猫先用 `plugin_get` 核对已有状态，再发现原生 MCP 的 `generate_music`，
+不需要为每个线程重新安装或登录。告诉猫音乐风格、情绪、配器和项目内新的相对 MP3
+路径，例如 `score/cafe.mp3`；Host 自动交付音频与来源 JSON。Clip 默认，结果未知不自动
+重付费。完整示例、权限边界和同请求恢复见音乐插件使用指南 (internal)。
 
 ## Generation and project delivery
 
-Before producer dispatch, Host checks installation, enablement, configuration, the granted output
-capability, strict current caller ownership and the thread's trusted project. It exclusively reserves
+Before producer dispatch, Host checks installation, enablement, configuration, declared output
+ownership, strict current caller ownership and the thread's trusted project. It exclusively reserves
 both the audio and `<outputPath>.provenance.json`. Paths are relative new MP3 names; existing files,
 symlink parents and paths outside the authorized project are refused. The operation and dispatch
 intent persist before any provider work. Concurrent operations contend on actual target files.

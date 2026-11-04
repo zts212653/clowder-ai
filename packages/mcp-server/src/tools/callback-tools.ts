@@ -70,6 +70,7 @@ import { formatSuggestedCrossPostActionLines } from './cross-post-suggestion-for
 import { withDegradation } from './degradation.js';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
+import { appendHintToSuccess, htmlWidgetInlineHandlerHint } from './html-widget-publish-hint.js';
 import {
   getInvocationAuthSignal,
   hasInvocationCredentialScope,
@@ -83,6 +84,7 @@ import {
   createDeferredPersonMemoryTool,
   createProactiveMemoryAbstentionTool,
 } from './proactive-memory-opportunity-tool.js';
+import { withProfileReadRecovery } from './profile-read-recovery.js';
 import { projectRoutingCallbackResponse } from './routing-preflight-response.js';
 
 /**
@@ -1938,6 +1940,7 @@ export async function handleCreateRichBlock(input: {
     return errorResult('Invalid rich block: block does not match required fields for its kind');
   }
   const block = parsed;
+  const inlineHandlerHint = htmlWidgetInlineHandlerHint(block);
   const hasInvocationCreds = getInvocationAuthSignal().hasFullCredentials;
   const hasAgentKeyCreds = hasUsableAgentKeyCredentials(process.env);
 
@@ -1945,7 +1948,7 @@ export async function handleCreateRichBlock(input: {
     if (!hasInvocationCreds) {
       return errorResult('awaitResponseV1 requires the current authenticated invocation; no text fallback is allowed.');
     }
-    return callbackPost(
+    const result = await callbackPost(
       '/api/callbacks/create-rich-block',
       {
         block,
@@ -1954,6 +1957,7 @@ export async function handleCreateRichBlock(input: {
       },
       { enableOutbox: true, agentKeyCatId: input.agentKeyCatId },
     );
+    return appendHintToSuccess(result, inlineHandlerHint);
   }
 
   const ccRichText = `\`\`\`cc_rich\n${JSON.stringify({ v: 1, blocks: [block] })}\n\`\`\``;
@@ -1995,7 +1999,7 @@ export async function handleCreateRichBlock(input: {
     if (!input.threadId) {
       return errorResult('threadId is required for create_rich_block when using agent-key auth.');
     }
-    return runRouteB({ route: 'B_agent_key', degraded: false });
+    return appendHintToSuccess(await runRouteB({ route: 'B_agent_key', degraded: false }), inlineHandlerHint);
   }
 
   // Phase E: framework handles primary call + auth-degradable fallback.
@@ -2003,7 +2007,7 @@ export async function handleCreateRichBlock(input: {
   // returned error text and route to Route B explicitly — preserves the
   // existing behavior without widening the framework's degradable set
   // (AC-E3: framework triggers only on 401-degradable reasons).
-  return withDegradation({
+  const published = await withDegradation({
     toolName: 'create_rich_block',
     primary: async () => {
       const result = await callbackPost(
@@ -2023,6 +2027,7 @@ export async function handleCreateRichBlock(input: {
     },
     policy: { kind: 'custom', degrade: async () => runRouteB({ route: 'B_fallback', degraded: true }) },
   });
+  return appendHintToSuccess(published, inlineHandlerHint);
 }
 
 /** F088 Phase J2: Generate a document (PDF/DOCX/MD) from Markdown content */
@@ -2737,6 +2742,15 @@ export async function handleProposeSessionHandoff(input: {
 // ============ F231 Phase C: Propose Profile Update ============
 
 export const readProfileInputSchema = {
+  requestId: z
+    .string()
+    .trim()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe(
+      'Stable ID for this read. Reuse on retry to avoid counting twice; omit to generate one. A successful response includes readRequestId. Use a new ID for a new read or a changed profile.',
+    ),
   agentKeyCatId: agentKeyCatIdSchema,
   expectedRevision: z
     .string()
@@ -2754,18 +2768,17 @@ export const readProfileInputSchema = {
 };
 
 export async function handleReadProfile(input: {
+  requestId?: string | undefined;
   expectedRevision?: string | undefined;
   layer?: ProfileUpdateTargetLayer | undefined;
   agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
-  const params: Record<string, string> = {};
+  const requestId = input.requestId ?? randomUUID();
+  const params: Record<string, string> = { requestId };
   if (input.layer) params.layer = input.layer;
   if (input.expectedRevision) params.expectedRevision = input.expectedRevision;
-  return callbackGet(
-    '/api/callbacks/profile',
-    Object.keys(params).length > 0 ? params : undefined,
-    agentKeyOptions(input),
-  );
+  const result = await callbackGet('/api/callbacks/profile', params, agentKeyOptions(input));
+  return withProfileReadRecovery(result, requestId);
 }
 
 export const proposeProfileUpdateInputSchema = {
@@ -4359,7 +4372,7 @@ export const callbackTools = [
       'Supports primer (default, per-persona relationship), corpus (owner-wide shared facts), and capsule (the current opening portrait). ' +
       'Use when: L0 shows the profile URI, you are starting a session and need relationship or owner context, or you need to verify the currently effective content before proposing an update. ' +
       'NOT for: searching project knowledge or old threads (use search_evidence), reading arbitrary workspace files (use read_file_slice), or reading another user/cat/persona. ' +
-      'Output: the current content + revision (sha256 hash); expectedRevision rejects changed snapshots without returning content. Read-only, no profile change. ' +
+      'Output: the current content + revision (sha256 hash); expectedRevision rejects changed snapshots without returning content. No profile change; successful reads retain content-free owner-scoped usage evidence. Reuse requestId when retrying. ' +
       `GOTCHA: for a runtime invocation, use the ${deploymentDefaults.brand.displayName} MCP bound to that invocation; a separately installed App with the same tool name is not a substitute. A missing profile on another connection does not establish absence here. The primer is approved current context, not proof of a historical first occurrence. For original message coordinates use cat_cafe_get_message(mode="full", messageId=the bare ID after #), not graph_resolve. A revision mismatch requires a fresh read. An unavailable current layer is not permission to reconstruct a current agreement from old messages; describe history as history instead. Identity comes from authentication, never userId, catId, path or relationshipKey input.`,
     inputSchema: readProfileInputSchema,
     handler: handleReadProfile,

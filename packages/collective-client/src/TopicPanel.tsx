@@ -136,7 +136,7 @@ export function TopicPanel({
                 : `${thread.replies.length} 条回复`}
             </h2>
           </div>
-          <button type="button" onClick={onClose} aria-label={t('关闭话题')}>
+          <button type="button" className="topic-close" onClick={onClose} aria-label={t('关闭话题')}>
             ×
           </button>
         </header>

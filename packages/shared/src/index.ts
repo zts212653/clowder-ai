@@ -60,20 +60,25 @@ export * from './eval-metric-ref.js';
 // First-party WebSocket Stop intent contract (API + Web single source).
 export * from './explicit-stop-intent.js';
 export * from './feature-demos.js';
+export * from './html-inline-event-handlers.js';
 export * from './ignored-item-preference.js';
 export * from './markdown-link-safety.js';
 // Export shared text helpers
 export * from './markdown-readable-text.js';
+export * from './member-identity.js';
+export * from './member-profiles.js';
 export * from './message-bundle-projection.js';
 export * from './message-output-layout.js';
 export type {
   MessageNavigationAdmission,
   MessageNavigationReference,
   MessageSearchInput,
+  MessageSearchNotice,
   MessageSearchResponse,
   MessageSearchResult,
 } from './message-search.js';
 export * from './message-search-answer.js';
+export * from './message-search-notice.js';
 // First-party host-tool identities shared by onboarding discovery and catalog repair.
 export * from './native-tool-identities.js';
 export * from './plugin-archive-replacement.js';
@@ -121,6 +126,7 @@ export * from './types/collective-artifact-media-read.js';
 export * from './types/collective-artifact-operations.js';
 export * from './types/collective-artifact-publication.js';
 export * from './types/collective-artifact-relay.js';
+export * from './types/collective-channel.js';
 export * from './types/collective-collaboration.js';
 export * from './types/collective-content-modification.js';
 export * from './types/collective-context-bridge.js';
@@ -165,6 +171,7 @@ export * from './types/index.js';
 export * from './types/living-work.js';
 // F314: one accepted-source contract shared by API persistence and MCP producers.
 export * from './types/local-review.js';
+export * from './types/matter-memory.js';
 export * from './types/media-publication-source.js';
 // F287 bounded opportunity/cue contract (kept explicit for API/MCP consumers).
 export * from './types/memory-cue.js';
@@ -175,6 +182,7 @@ export * from './types/output-message.js';
 export type { CardAction, OptionAction } from './types/rich.js';
 export * from './types/video-project.js';
 export * from './types/video-project-review.js';
+export * from './types/work-cover.js';
 export * from './types/work-video.js';
 export * from './types/workspace-content-review.js';
 export * from './utils/local-session-import.js';

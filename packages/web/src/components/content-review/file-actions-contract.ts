@@ -18,9 +18,8 @@ export type FileActionsProps = {
   text?: string;
   copyName?: boolean;
   showDownload?: boolean;
-  initiallyOpen?: boolean;
+  openOnHover?: boolean;
   hideTrigger?: boolean;
-  onOpenChange?: (open: boolean) => void;
   appearance?: 'menu' | 'classic' | 'copy' | 'toolbar';
   viewport?: Pick<ReturnType<typeof useArtworkViewport>, 'renderedScale' | 'fit' | 'actual'>;
   wholeWorkAction?: ReactNode;

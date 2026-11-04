@@ -69,6 +69,7 @@
   border-radius: 12px;
   padding: 20px;
   background: var(--console-card-bg);
+  --chat-background-role: console-card;
   color: var(--cafe-text);
 }
 .exploration-lineage-dialog::backdrop {
@@ -83,6 +84,7 @@
 .exploration-lineage-dialog > header button {
   padding: 6px 10px;
   background: var(--cafe-surface-elevated);
+  --chat-background-role: cafe-elevated;
   border-radius: 6px;
 }
 

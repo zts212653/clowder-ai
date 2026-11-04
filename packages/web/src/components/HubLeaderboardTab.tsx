@@ -52,6 +52,7 @@ export function HubLeaderboardTab() {
   return (
     <div
       className="flex flex-col gap-6 p-6 rounded-xl overflow-y-auto"
+      data-chat-background-surface="console-pill"
       style={{ background: 'var(--console-pill-bg)', fontFamily: plusJakartaSans.style.fontFamily }}
     >
       {/* Header + Range Filter */}

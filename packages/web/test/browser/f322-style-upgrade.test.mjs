@@ -7,10 +7,10 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { chromium } from 'playwright';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { tsImport } from 'tsx/esm/api';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
 import { appGlobalCssFiles, syncStylesheets } from '../../scripts/vendor-stylesheets.mjs';
 
 const webRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');

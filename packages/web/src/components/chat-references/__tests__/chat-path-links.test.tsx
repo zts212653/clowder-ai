@@ -156,7 +156,6 @@ it('keeps the file action menu inside a 390px viewport and closes it with Escape
   await act(async () =>
     root.render(
       <ChatFileActions
-        visible
         target={{
           kind: 'file',
           entryType: 'file',
@@ -171,6 +170,7 @@ it('keeps the file action menu inside a 390px viewport and closes it with Escape
       />,
     ),
   );
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-haspopup="menu"]')?.click());
   const menu = document.body.querySelector<HTMLElement>('[role=menu]');
   expect(menu).not.toBeNull();
   expect(menu?.style.position).toBe('fixed');
@@ -338,7 +338,7 @@ it('exposes full GitHub titles and missing-file explanations through focusable a
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
   });
-  const github = container.querySelector('[data-chat-reference-kind=github] button');
+  const github = container.querySelector('[data-chat-reference-kind=github] a');
   expect(github?.getAttribute('aria-label')).toContain('too long to fit the inline chip');
   const missing = container.querySelector<HTMLElement>('[data-chat-reference-kind=missing]');
   expect(missing?.tabIndex).toBe(0);

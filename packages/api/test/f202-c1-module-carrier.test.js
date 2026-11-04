@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
-import { test } from 'node:test';
+import { after, afterEach, test } from 'node:test';
 import { createThreadDeepLinkUrl } from '../dist/config/frontend-origin.js';
 import './helpers/setup-cat-registry.js';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
@@ -18,6 +19,7 @@ import { ModulePluginRuntime } from '../dist/domains/plugin/builtin-runtime/carr
 import { PluginRuntimeCarrierRouter } from '../dist/domains/plugin/carrier/runtime-carrier.js';
 import { PluginMediaReadService } from '../dist/domains/plugin/host-surface/plugin-media-host.js';
 import { MemoryConnectorThreadBindingStore } from '../dist/infrastructure/connectors/ConnectorThreadBindingStore.js';
+import { snapshotInventoryFixture } from './helpers/snapshot-inventory-fixture.js';
 
 /**
  * F202 Train C1 — §8.6 steps 1 / 2 / 5 of the carrier-neutral adapter
@@ -33,6 +35,22 @@ import { MemoryConnectorThreadBindingStore } from '../dist/infrastructure/connec
  */
 
 const MODULE_LOG = '__f202C1ModuleCarrierLog';
+const observationRoot = await mkdtemp(join(tmpdir(), 'f202-c1-observation-'));
+const observationFile = join(observationRoot, 'events.jsonl');
+const fixtureCleanups = [];
+afterEach(async () => {
+  for (const cleanup of fixtureCleanups.splice(0)) await cleanup();
+});
+after(() => rm(observationRoot, { recursive: true, force: true }));
+
+// Observe real package execution through an independent file, across both loader modes.
+// Package globals belong to its worker and are never imported into the API test process.
+function observedSource(source) {
+  return `import { appendFileSync as recordFixtureEvent } from 'node:fs';
+globalThis[${JSON.stringify(MODULE_LOG)}] = { push(...events) {
+  for (const event of events) recordFixtureEvent(${JSON.stringify(observationFile)}, JSON.stringify(event)+'\\n');
+} };\n${source}`;
+}
 
 function manifest(overrides = {}) {
   return {
@@ -50,7 +68,8 @@ function manifest(overrides = {}) {
 async function writePackage(source) {
   const rootDir = await mkdtemp(join(tmpdir(), 'f202-c1-module-'));
   await mkdir(join(rootDir, 'dist'), { recursive: true });
-  await writeFile(join(rootDir, 'dist/plugin.js'), source, 'utf8');
+  await writeFile(join(rootDir, 'dist/plugin.js'), observedSource(source), 'utf8');
+  fixtureCleanups.push(() => rm(rootDir, { recursive: true, force: true }));
   return rootDir;
 }
 
@@ -275,7 +294,7 @@ function inventoryOf(records) {
     updatedAt: 0,
   }));
   const live = new Map(instances.map((instance) => [instance.pluginInstanceId, instance]));
-  return {
+  return snapshotInventoryFixture({
     live,
     snapshot: async () => ({ packages, instances: [...live.values()] }),
     transaction: async (apply) =>
@@ -285,7 +304,7 @@ function inventoryOf(records) {
           put: (value) => live.set(value.pluginInstanceId, value),
         },
       }),
-  };
+  });
 }
 
 /**
@@ -332,6 +351,9 @@ function hostOf(records, options = {}) {
   });
   const router = new PluginRuntimeCarrierRouter(inventory);
   router.register(new BundledPluginRuntimeCarrier({ inventory, runtimes: [moduleRuntime], now: () => 5_000 }));
+  fixtureCleanups.unshift(async () => {
+    for (let index = 0; index < records.length; index++) await moduleRuntime.stop(`instance-${index}`, 'test_cleanup');
+  });
   return { inventory, router, released, moduleRuntime };
 }
 
@@ -351,7 +373,7 @@ test('loads dependency-bearing catalog modules through the verified builtin mate
   );
   await writeFile(
     join(rootDir, 'dist/plugin.js'),
-    `
+    observedSource(`
 import { dependencyValue } from 'fixture-dependency';
 const log = (globalThis[${JSON.stringify(MODULE_LOG)}] ??= []);
 export default {
@@ -359,7 +381,7 @@ export default {
     return { start() { log.push({ call: 'dependency', value: dependencyValue }); return { actions: {}, stop() {} }; } };
   },
 };
-`,
+`),
   );
   const admitted = manifest();
   let released = 0;
@@ -401,14 +423,14 @@ test('loads local archive modules through package metadata and the verified buil
   await mkdir(join(rootDir, 'dist'), { recursive: true });
   await writeFile(
     join(rootDir, 'dist/plugin.js'),
-    `
+    observedSource(`
 const log = (globalThis[${JSON.stringify(MODULE_LOG)}] ??= []);
 export default {
   create() {
     return { start() { log.push({ call: 'local-materialized' }); return { actions: {}, stop() {} }; } };
   },
 };
-`,
+`),
   );
   const admitted = manifest();
   let materializerCalls = 0;
@@ -444,14 +466,18 @@ export default {
 });
 
 function moduleLog() {
-  return globalThis[MODULE_LOG] ?? [];
+  return readFileSync(observationFile, 'utf8')
+    .trim()
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
 }
 
 function resetModuleLog() {
-  globalThis[MODULE_LOG] = [];
+  writeFileSync(observationFile, '');
 }
 
-test('takes the default export of runtime.entrypoint and runs it in the Host process', async () => {
+test('takes the default export of runtime.entrypoint and runs the admitted module', async () => {
   resetModuleLog();
   const rootDir = await writePackage(wellFormedModule);
   const host = hostOf([{ manifest: manifest(), rootDir }]);
@@ -619,7 +645,8 @@ export default {
   create() {
     return {
       async start(host) {
-        const chunks = []; for await (const bytes of host.streams.read(globalThis.__f202MediaRef)) chunks.push(Buffer.from(bytes));
+        const reference = await host.config.get('MEDIA_REFERENCE');
+        const chunks = []; for await (const bytes of host.streams.read(reference)) chunks.push(Buffer.from(bytes));
         log.push({call:'stream', bytes:Buffer.concat(chunks).toString()});
         return { actions: {}, stop() {} };
       },
@@ -630,7 +657,6 @@ export default {
   const ledger = new FileMessagingMediaLedger(join(rootDir, 'private-media'));
   const entitlements = new MediaEntitlementLedger(new MemoryMediaEntitlementPort());
   const reference = await ledger.register(Buffer.from('abc'), { ownerInstanceId: 'instance-0' });
-  globalThis.__f202MediaRef = reference;
   const grant = await entitlements.grant({
     instanceId: 'instance-0',
     scope: { kind: 'delivery', deliveryId: 'delivery-1' },
@@ -640,8 +666,12 @@ export default {
   const media = new PluginMediaReadService({ ledger, entitlements });
   const admitted = manifest({
     features: [{ id: 'main', name: 'Main', resources: [], capabilities: ['streams.read'] }],
+    configuration: [{ key: 'MEDIA_REFERENCE', label: 'Media reference', kind: 'string', required: false }],
   });
-  const host = hostOf([{ manifest: admitted, rootDir }], { media });
+  const host = hostOf([{ manifest: admitted, rootDir }], {
+    media,
+    configuration: { readConfig: async () => reference, readSecret: async () => undefined },
+  });
   try {
     await host.router.start('instance-0');
     assert.deepEqual(moduleLog(), [{ call: 'stream', bytes: 'abc' }]);
@@ -655,7 +685,6 @@ export default {
     );
   } finally {
     await host.router.stop('instance-0', 'host_stop');
-    delete globalThis.__f202MediaRef;
   }
 });
 

@@ -43,6 +43,9 @@ export async function workCatalogueFixture(t, options = {}) {
     versions: store.works,
     authorize: (input) => authorize(input),
     source: {
+      openCurrent: async () => {
+        throw new Error('catalogue must not open current workspace files');
+      },
       open: async ({ source }) => {
         const bytes = Buffer.from(source.path);
         return {

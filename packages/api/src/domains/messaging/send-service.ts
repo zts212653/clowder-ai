@@ -69,7 +69,9 @@ export interface HostSendOptions {
   readonly source: ConnectorSource;
   readonly contentBlocks?: readonly MessageContent[];
   readonly sender?: { readonly id: string; readonly name?: string };
-  readonly wake?: 'auto' | { readonly catId: string };
+  readonly wake?: import('./ingress-wake.js').PluginMessageWake;
+  /** Execution-local authority for immediate Host messages; never serialized into a draft. */
+  readonly assertAdmissionCurrent?: () => Promise<void>;
 }
 
 /** D-4: validate the declared origin against handle-derived truth; return the stamped provenance. */
@@ -194,7 +196,14 @@ export class SendService {
           : undefined);
       const ingress: ResolvedIngress | undefined =
         source && this.deps.ingressWake && audience.kind !== 'whisper'
-          ? { deps: this.deps.ingressWake, source, ...(wake === undefined ? {} : { wake }) }
+          ? {
+              deps: this.deps.ingressWake,
+              source,
+              ...(wake === undefined ? {} : { wake }),
+              ...(hostOptions?.assertAdmissionCurrent
+                ? { assertAdmissionCurrent: hostOptions.assertAdmissionCurrent }
+                : {}),
+            }
           : undefined;
 
       if (draft.replyTo !== undefined) {
@@ -256,6 +265,7 @@ export class SendService {
       const accepted = await this.acceptPendingMedia({ ctx, draft, handle, appendInput, hostOptions, wake, timestamp });
       if (accepted) return await this.settleReceipt(ctx, draft, claim.claimToken, accepted);
 
+      await hostOptions?.assertAdmissionCurrent?.();
       const stored = await this.deps.messageStore.append(appendInput);
 
       const msgHandle = await this.deps.handles.ensureMessageHandle(handle, stored.id);
@@ -353,6 +363,10 @@ export class SendService {
         element.kind === 'media_ref' && element.payload.reference.startsWith('pmr_'),
     );
     if (pendingMedia.length === 0) return null;
+    // A process-local lease cannot authorize a publication after restart. Member
+    // inputs are immediate text; deferred media retains its existing durable path.
+    if (hostOptions?.assertAdmissionCurrent)
+      throw new MessagingError('VALIDATION', 'Deferred messages require durable admission authority');
     const sourceEventId = draft.sourceEventId;
     if (!sourceEventId || !this.deps.mediaPending || !this.deps.mediaSources) {
       throw new MessagingError('VALIDATION', 'media-source is unavailable');

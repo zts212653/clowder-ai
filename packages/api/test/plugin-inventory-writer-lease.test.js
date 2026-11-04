@@ -51,15 +51,21 @@ for (const kind of ['pending publication', 'reused live PID']) {
 test('OS releases a writer lock when its exact child process crashes', async () => {
   const path = join(mkdtempSync(join(tmpdir(), 'inventory-crash-')), 'inventory.json');
   const module = new URL('../dist/domains/plugin/host-inventory/stores.js', import.meta.url).href;
+  // Keep the suspended transaction reachable while GC runs before the contention check.
   const child = spawn(
     process.execPath,
     [
+      '--expose-gc',
       '--input-type=module',
       '-e',
-      `const{FilePluginInventoryStore}=await import(${JSON.stringify(module)});await new FilePluginInventoryStore(process.argv[1]).transaction(async()=>{console.log('READY');await new Promise(()=>{setInterval(()=>{},1000)});});`,
+      `const{FilePluginInventoryStore}=await import(${JSON.stringify(module)});
+      await new FilePluginInventoryStore(process.argv[1]).transaction(async()=>{
+        setImmediate(()=>{global.gc();setImmediate(()=>console.log('READY'));});
+        await new Promise(resolve=>process.once('message',resolve));
+      });`,
       path,
     ],
-    { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] },
+    { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] },
   );
   try {
     const [ready] = await once(child.stdout, 'data');

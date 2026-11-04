@@ -18,12 +18,14 @@ it.each([
 ])('keeps the existing source coordinate for local media %s', (source, endpoint) => {
   expect(artworkFileActionUrl(source, 'file-info')).toBe(endpoint);
 });
-it('does not offer machine actions or request file paths in a narrow desktop browser', async () => {
-  const width = vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(390);
+it.each([390, 1440])('uses the same authoritative local file facts at a %spx reading width', async (pixels) => {
+  const width = vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(pixels);
   const fetch = vi.mocked(apiFetch);
   fetch.mockClear();
-  expect(await artworkFileInfo('/api/content-publications/content%3Avideo/media/1')).toEqual({ local: false });
-  expect(fetch).not.toHaveBeenCalled();
+  const facts = { local: true, path: '/original/local-video.mp4', canReveal: true };
+  fetch.mockResolvedValueOnce(Response.json(facts));
+  expect(await artworkFileInfo('/api/content-publications/content%3Avideo/media/1')).toEqual(facts);
+  expect(fetch).toHaveBeenCalledExactlyOnceWith('/api/content-publications/content%3Avideo/media/1/file-info');
   width.mockRestore();
 });
 it('does not reinterpret a remote media URL as a local file action', () => {

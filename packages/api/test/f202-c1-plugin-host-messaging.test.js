@@ -134,6 +134,7 @@ async function fixture(options = {}) {
     socketManager: {
       broadcastToRoom(...args) {
         broadcasts.push(args);
+        options.afterPublish?.();
       },
     },
     isKnownCatId: (catId) => ['codex', 'opus', 'disabled-cat'].includes(catId),
@@ -144,15 +145,137 @@ async function fixture(options = {}) {
     ownerUserId: OWNER,
     manifest: options.manifest ?? manifest(),
     assertCurrent: options.assertCurrent,
+    assertAdmissionCurrent: options.assertAdmissionCurrent,
     threadStore: threads,
     messageStore: messages,
     bindingStore: bindings,
+    readMessageTargets: async (threadId, messageId) => {
+      const rows = await queue.getDurableEntriesForMessages(threadId, [messageId]);
+      return (rows.get(messageId) ?? []).flatMap((row) => row.targets);
+    },
     messaging,
   });
   return { host, messages, threads, bindings, messaging, wakes, broadcasts, router, queue, agents };
 }
 
 describe('F202 C1 — plugin Host messaging.send', () => {
+  test('a module can narrow its send admission after handle preparation without granting a new identity', async () => {
+    const { host, messages, threads, messaging, wakes } = await fixture();
+    const thread = await threads.create(OWNER, 'Bounded operator request');
+    let active = true;
+    const ensure = messaging.ensureThreadHandle.bind(messaging);
+    messaging.ensureThreadHandle = async (...args) => {
+      const value = await ensure(...args);
+      active = false;
+      return value;
+    };
+    assert.equal(typeof host.sendWithAdmission, 'function');
+    await assert.rejects(
+      host.sendWithAdmission(draft(thread.id, { wake: { catId: 'opus', exact: true } }), () => {
+        if (!active) throw new Error('operator_window_closed');
+      }),
+      /operator_window_closed/,
+    );
+    assert.equal((await messages.getByThread(thread.id)).length, 0);
+    assert.equal(wakes.length, 0);
+  });
+
+  test('a module admission expiring during publication preserves the original message but never wakes', async () => {
+    let active = true;
+    const { host, messages, threads, wakes } = await fixture({
+      afterPublish() {
+        active = false;
+      },
+    });
+    const thread = await threads.create(OWNER, 'Published bounded request');
+    assert.equal(typeof host.sendWithAdmission, 'function');
+    await assert.rejects(
+      host.sendWithAdmission(draft(thread.id, { wake: { catId: 'opus', exact: true } }), () => {
+        if (!active) throw new Error('operator_window_closed');
+      }),
+      /operator_window_closed/,
+    );
+    assert.equal((await messages.getByThread(thread.id)).length, 1);
+    assert.equal(wakes.length, 0);
+  });
+
+  test('a false module predicate is a rejection, never a successful authorization check', async () => {
+    const { host, messages, threads, wakes } = await fixture();
+    const thread = await threads.create(OWNER, 'Invalid module predicate');
+    assert.equal(typeof host.sendWithAdmission, 'function');
+    await assert.rejects(
+      host.sendWithAdmission(draft(thread.id), () => false),
+      /admission/,
+    );
+    await assert.rejects(
+      host.sendWithAdmission(draft(thread.id), async () => {}),
+      /synchronously/,
+    );
+    assert.equal((await messages.getByThread(thread.id)).length, 0);
+    assert.equal(wakes.length, 0);
+  });
+
+  test('module admission preserves the original Host execution lease and activation checks', async () => {
+    const { host, messages, threads, wakes } = await fixture({
+      assertAdmissionCurrent: async () => {
+        throw new Error('member_lease_expired');
+      },
+    });
+    const thread = await threads.create(OWNER, 'Expired original lease');
+    await assert.rejects(
+      host.sendWithAdmission(draft(thread.id), () => {}),
+      /member_lease_expired/,
+    );
+    assert.equal((await messages.getByThread(thread.id)).length, 0);
+    assert.equal(wakes.length, 0);
+  });
+
+  test('settled receipts remain read-only when the additional admission has expired', async () => {
+    const { host, messages, threads, wakes } = await fixture();
+    const thread = await threads.create(OWNER, 'Settled bounded request');
+    const input = draft(thread.id, { wake: { catId: 'opus', exact: true } });
+    const receipt = await host.sendWithAdmission(input, () => {});
+    assert.deepEqual(
+      await host.sendWithAdmission(input, () => {
+        throw new Error('operator_window_closed');
+      }),
+      receipt,
+    );
+    assert.equal(messages.messages.length, 1, 'Queue admission hides its original input from timeline reads');
+    assert.equal(wakes.length, 1);
+  });
+
+  test('exact wake holds the chosen recipient and durable lookup survives temporary ledger expiry', async () => {
+    const { host, messages, threads, wakes, queue, agents, router } = await fixture();
+    const thread = await threads.create(OWNER, 'Exact game request');
+    agents.markUnavailable('opus', { code: 'rejected-account-binding', message: 'unavailable fixture' });
+    router.refreshFromRegistry(agents);
+    const input = draft(thread.id, { wake: { catId: 'opus', exact: true } });
+    await assert.rejects(() => host.send(input), /explicit plugin recipient/);
+    assert.equal(wakes.length, 0);
+    assert.equal(queue.size(thread.id, OWNER), 0);
+    agents.register('opus', {
+      async *invoke() {
+        throw new Error('no provider IO');
+      },
+    });
+    router.refreshFromRegistry(agents);
+    const sent = await host.send(input);
+    assert.equal(wakes.length, 1);
+    assert.equal(wakes[0][1], 'opus');
+    assert.equal(messages.messages.length, 1);
+    const now = Date.now;
+    try {
+      Date.now = () => now() + 8 * 24 * 3600 * 1000;
+      const found = await host.findSent({ threadId: thread.id, idempotencyKey: input.idempotencyKey });
+      assert.equal(found.messageId, sent.messageId);
+      assert.deepEqual(found.routedCatIds, ['opus']);
+      assert.equal(found.content, 'hello');
+      assert.equal(wakes.length, 1);
+    } finally {
+      Date.now = now;
+    }
+  });
   for (const target of ['unknown-cat', 'removed-cat', 'disabled-cat']) {
     test(`${target} uses ordinary conversation routing to the recent healthy member`, async () => {
       const { host, messages, threads, wakes, broadcasts } = await fixture();
@@ -591,6 +714,7 @@ test('stopped plugin client cannot send or read through retained messaging metho
   const thread = await h.threads.create(OWNER, 'ordinary thread');
   active = false;
   await assert.rejects(() => h.host.send(draft(thread.id)), /activation stopped/);
+  await assert.rejects(() => h.host.sendWithAdmission(draft(thread.id), () => {}), /activation stopped/);
   await assert.rejects(() => h.host.get('missing'), /activation stopped/);
   assert.equal(h.messages.getByThread(thread.id, 100, OWNER).length, 0);
 });

@@ -30,6 +30,7 @@
   border: 1px solid var(--shell-hairline);
   border-radius: 6px 6px 0 0;
   background: var(--shell-paper);
+  --chat-background-role: paper;
 }
 .work-cover-paper-back {
   inset: 11% 18% -12px;
@@ -150,13 +151,6 @@
   height: 100%;
   object-fit: cover;
 }
-.work-cover-poster {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
 .work-cover-frame-pending {
   opacity: 0;
 }
@@ -200,4 +194,31 @@
   flex: 1;
   border-radius: 2px;
   background: color-mix(in oklch, var(--shell-ink) 30%, transparent);
+}
+.work-cover-picture {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+.work-cover-picture-main,
+.work-cover-picture-backdrop {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.work-cover-picture-main {
+  object-fit: cover;
+}
+.work-cover-picture[data-cover-fit="contain"] .work-cover-picture-main {
+  object-fit: contain;
+}
+.work-cover-picture[data-cover-fit="pending"] .work-cover-picture-main {
+  opacity: 0;
+}
+/* Same picture, enlarged, blurred and darkened under a portrait/square/very wide cover. */
+.work-cover-picture-backdrop {
+  object-fit: cover;
+  filter: blur(18px) brightness(0.62) saturate(1.1);
+  transform: scale(1.18);
 }

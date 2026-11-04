@@ -130,6 +130,7 @@ describe('F322 new-shell Workspace home · 工具清单', () => {
         'action:theater',
         'mode:schedule',
         'mode:eval',
+        'mode:tasks',
         'surface:files',
         'surface:changes',
         'surface:git',

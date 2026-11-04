@@ -53,6 +53,7 @@
 
 .stage {
   background: #fff;
+  --chat-background-role: white;
   border: 1px solid #e4d9d0;
   border-radius: 12px;
   padding: 24px;

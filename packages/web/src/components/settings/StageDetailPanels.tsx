@@ -191,6 +191,7 @@ function SubStageGroup({ subStage, segments }: { subStage: SubStage; segments: M
   return (
     <div
       className="space-y-2 rounded-xl p-3"
+      data-chat-background-surface="console-card"
       style={{ backgroundColor: 'var(--console-card-bg)', boxShadow: '0 8px 22px rgba(43,33,26,0.04)' }}
     >
       <div className="flex items-center gap-2">
@@ -238,6 +239,7 @@ function SegmentRow({ segment: s }: { segment: ManifestSegment }) {
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: card click is supplementary to the text button */}
       <div
         className="flex items-start gap-3 rounded-lg px-3 py-2 cursor-pointer transition-colors hover:brightness-95"
+        data-chat-background-surface="console-elevated"
         style={{
           backgroundColor: 'var(--console-elevated-bg)',
           boxShadow: '0 1px 4px rgba(43,33,26,0.08)',
@@ -285,6 +287,7 @@ function SegmentRow({ segment: s }: { segment: ManifestSegment }) {
       {!isViewable && infoOpen && (
         <div
           className="ml-11 mt-1 space-y-1.5 rounded-lg px-3 py-2"
+          data-chat-background-surface="console-soft"
           style={{ backgroundColor: 'var(--console-card-soft-bg)' }}
         >
           <SegmentInfoRow label="来源类型" value={SOURCE_TYPE_LABELS[s.sourceType] ?? s.sourceType} />

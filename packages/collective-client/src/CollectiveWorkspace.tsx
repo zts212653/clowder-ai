@@ -22,6 +22,7 @@ import { collectiveClientNamespace } from './human-send-custody.js';
 import { LeaveCollectiveDialog } from './LeaveCollectiveDialog.js';
 import type { LeaveReadinessArtifact, LeaveReadinessProject, LeaveReadinessWork } from './leave-readiness.js';
 import type { MemberSelection } from './MemberPanel.js';
+import { NewChannelDialog } from './NewChannelDialog.js';
 import { ProductShell } from './ProductShell.js';
 import { defaultRoadmapView, type RoadmapViewState } from './roadmap-view-model.js';
 import { SharedArtifactLibrary } from './SharedArtifactLibrary.js';
@@ -58,8 +59,9 @@ export function CollectiveWorkspace({
   const [navigationOpen, setNavigationOpen] = useState(false);
   const [selectedMember, setSelectedMember] = useState<MemberSelection | 'members'>();
   const [leaveDialogOpen, setLeaveDialogOpen] = useState(false);
+  const [newChannelOpen, setNewChannelOpen] = useState(false);
   const participants = snapshot.participants ?? [];
-  const channels = channelDestinations(snapshot.events, participants);
+  const channels = channelDestinations(snapshot.events, participants, snapshot.channels);
   const mediaArtifact = client.artifacts?.catalogue.find(
     (item) => item.artifactId === client.artifacts?.selected?.artifactId,
   );
@@ -282,6 +284,7 @@ export function CollectiveWorkspace({
     setSelectedMember(undefined);
     setNavigationOpen(false);
     setLeaveDialogOpen(false);
+    setNewChannelOpen(false);
     host.hide();
   }, [namespace]);
   if (!snapshot.collective || !snapshot.me) return null;
@@ -457,6 +460,11 @@ export function CollectiveWorkspace({
                   writeChannelTarget(channelId);
                 }}
                 onSelect={selectChannel}
+                onCreateChannel={
+                  snapshot.collective.role === 'steward' && snapshot.meta?.capabilities?.channels === 1
+                    ? () => setNewChannelOpen(true)
+                    : undefined
+                }
                 libraryActive={destination === 'library'}
                 onLibrary={client.artifacts?.api ? () => showLibrary() : undefined}
                 roadmapActive={content === 'roadmap'}
@@ -547,6 +555,19 @@ export function CollectiveWorkspace({
               onOpenProject={openReadinessProject}
               onOpenArtifact={openReadinessArtifact}
               onOpenMembers={showMembers}
+            />
+          )}
+          {newChannelOpen && (
+            <NewChannelDialog
+              collectiveName={snapshot.collective.name}
+              channels={channels.map((channel) => channel.id)}
+              create={client.createChannel}
+              onCreated={(createdChannelId) => {
+                setNewChannelOpen(false);
+                selectChannel(createdChannelId);
+              }}
+              onSelect={selectChannel}
+              onClose={() => setNewChannelOpen(false)}
             />
           )}
           <FirstEntryOverlays

@@ -119,11 +119,12 @@ async function readAcp(selected, policy = config()) {
 
 test('ordinary ACP discovery selects the same local activation without changing its canonical policy', async () => {
   const servers = await readAcp(view('alpha'));
-  const plugin = servers.find((server) => server.name === capabilityId);
+  const nativeName = capabilityId.replaceAll(':', '__');
+  const plugin = servers.find((server) => server.name === nativeName);
   assert.deepEqual(plugin.args, ['/alpha/mcp.js']);
   assert.equal(plugin.env.find((entry) => entry.name === 'FIXTURE_OWNER').value, 'alpha');
   assert.ok(
-    (await readAcp(view('alpha'), config({ blockedCats: ['codex'] }))).every((server) => server.name !== capabilityId),
+    (await readAcp(view('alpha'), config({ blockedCats: ['codex'] }))).every((server) => server.name !== nativeName),
   );
 });
 

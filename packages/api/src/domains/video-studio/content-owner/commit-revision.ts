@@ -1,5 +1,6 @@
+import { MAX_HTML_WORK_BYTES, MAX_HTML_WORK_VERSIONS } from '@cat-cafe/shared';
 import { type CollectiveContentScopeV1, requireCollectiveContentCapacity } from './collective-scope.js';
-import { ContentOwnerIdempotencyError } from './errors.js';
+import { ContentOwnerCapacityError, ContentOwnerIdempotencyError } from './errors.js';
 import { createReceiptId } from './operation-identity.js';
 import type { ProjectContentOwnerStore, ProjectContentStateV1 } from './store.js';
 import type { ContentStream } from './stream-content.js';
@@ -40,6 +41,11 @@ export async function commitContentRevision(
   const previousOwnerRevision = input.previousState?.currentOwnerRevision ?? 0;
   const ownerRevision = previousOwnerRevision + 1;
   requireCollectiveContentCapacity(input.collectiveScope, ownerRevision);
+  if (
+    input.mediaType === 'text/html' &&
+    (input.bytes.byteLength > MAX_HTML_WORK_BYTES || ownerRevision > MAX_HTML_WORK_VERSIONS)
+  )
+    throw new ContentOwnerCapacityError();
   const outboxSequence = (input.previousState?.receipts.length ?? 0) + 1;
   const revision: ProjectContentRevisionV1 = {
     contentRef: input.contentRef,

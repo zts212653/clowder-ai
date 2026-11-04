@@ -87,9 +87,9 @@ test('composition recovers both durable stores and resumes enabled owner intent 
       },
     },
   });
-  await first.runtime.inventoryStore.transaction((transaction) => {
-    const instance = transaction.instances.get(installed.pluginInstanceId);
-    transaction.instances.put({
+  await first.runtime.inventoryStore.transaction(async (transaction) => {
+    const instance = await transaction.instances.get(installed.pluginInstanceId);
+    await transaction.instances.put({
       ...instance,
       configReadiness: 'ready',
       activationState: 'enabled',
@@ -142,9 +142,9 @@ test('dormant composition binds messaging routes to its single K-1 domain', asyn
       },
     },
   });
-  await runtime.inventoryStore.transaction((transaction) => {
-    const instance = transaction.instances.get(installed.pluginInstanceId);
-    transaction.instances.put({
+  await runtime.inventoryStore.transaction(async (transaction) => {
+    const instance = await transaction.instances.get(installed.pluginInstanceId);
+    await transaction.instances.put({
       ...instance,
       configReadiness: 'ready',
       activationState: 'enabled',
@@ -198,9 +198,9 @@ test('production handshake policy covers verified external source readiness with
       },
     },
   });
-  await runtime.inventoryStore.transaction((transaction) => {
-    const instance = transaction.instances.get(installed.pluginInstanceId);
-    transaction.instances.put({
+  await runtime.inventoryStore.transaction(async (transaction) => {
+    const instance = await transaction.instances.get(installed.pluginInstanceId);
+    await transaction.instances.put({
       ...instance,
       configReadiness: 'ready',
       activationState: 'enabled',
@@ -268,10 +268,14 @@ test('production composition constructs and recovers K-2D but exposes no startup
     managerCompositionIndex >= 0 && managerCompositionIndex < recoveryIndex,
     'Plugin Manager state projection must be composed before durable instances resume',
   );
+  assert.match(source, new RegExp(`registerPluginRuntimeShutdown\\(app, ${runtimeName}, async \\(\\) =>`));
+  assert.match(source, /initialPluginController\.abort\(\)/);
   assert.match(
     source,
-    new RegExp(`app\\.addHook\\('onClose', async \\(\\) => ${runtimeName}\\.shutdown\\('api_shutdown'\\)\\)`),
+    /initialPluginInstallation = prepareHostInitialPlugins\(\{\s*hostListening,\s*signal: initialPluginController\.signal/,
   );
+  assert.match(source, /\.then\(\(prepared\) => prepared\.activate\(\)\)/);
+  assert.match(source, /import\('\.\/routes\/plugin-runtime-shutdown\.js'\)/);
   assert.match(source, /createPluginManagerRuntimeComposition\(\{/);
   assert.match(source, /const pluginManagerCatalog = createHostOfficialPluginCatalog\(\)/);
   assert.match(catalogSource, /new MachineOfficialPluginCatalog\(\{/);

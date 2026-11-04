@@ -76,7 +76,7 @@ export function SettingsShellV2({
   fixedLayout: boolean;
   onSelect: (selection: string) => void;
 }) {
-  const { openEntry, openTeam } = useOpenDestination();
+  const { openEntry } = useOpenDestination();
   const owner = useCoCreatorConfig();
   const [mobileNavigation, setMobileNavigation] = useState(false);
   const { isPinned, pin, unpin } = usePinnedSections();
@@ -97,12 +97,14 @@ export function SettingsShellV2({
   return (
     <div
       className="flex h-full min-h-0 flex-col overflow-hidden md:flex-row"
+      data-chat-background-surface="work"
       style={{ background: 'var(--shell-work)' }}
       data-testid="settings-v2"
       data-settings-section={selection}
     >
       <aside
         className="flex max-h-[42vh] w-full flex-shrink-0 flex-col overflow-hidden md:max-h-none md:w-[232px]"
+        data-chat-background-surface="frame"
         style={{ background: 'var(--shell-frame)', borderRight: '1px solid var(--shell-hairline)' }}
         data-console-panel="settings-nav"
       >
@@ -148,6 +150,7 @@ export function SettingsShellV2({
                     data-testid={`settings-entry-${entry.id}`}
                     className="shell-nav-row shell-focusable flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-sm"
                     data-selected={isActive ? 'true' : undefined}
+                    data-chat-background-surface={isActive ? 'selected' : undefined}
                     style={{
                       background: isActive ? 'var(--shell-selected)' : undefined,
                       color: isActive ? 'var(--shell-ink)' : 'var(--shell-body)',
@@ -208,7 +211,6 @@ export function SettingsShellV2({
               entry={active}
               selection={selection}
               onSelect={onSelect}
-              onOpenTeam={openTeam}
               isPinned={isPinned}
               onTogglePin={togglePin}
             >

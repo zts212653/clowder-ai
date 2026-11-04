@@ -21,7 +21,7 @@ L0 §8 trigger 写了 ≠ 猫真用。判断"为什么 miss + 怎么修"必须�
 - 教训（2026-05-27）：opus-47 断言"terminal 调不了 workspace-navigator"——纯脑补没 verify（未核验工具可达性）。当时底层 API 可由 Bash 直调；F223 Phase B 后主路径升级为 `cat_cafe_workspace_navigate` typed MCP。**一个你以为够不着的能力，miss 不是因为懒，是从没进考虑**——独立于"偷懒"的失败域，药方相反（补可达性 ≠ 上 forcing function）。
 
 **筛子 1 — Enforcement Tier（过了筛子 0 才分）**
-- **Tier A · episodic**：需要时自然想起，无零摩擦偷懒竞品。L0 advisory 够。例：`start_vote` / `expert-panel` / `deep-research`
+- **Tier A · episodic**：需要时自然想起，无零摩擦偷懒竞品。L0 advisory 够。例：`start_vote` / `collaborative-thinking` / `deep-research`
 - **Tier B · habit-resistant**：有零摩擦默认（纯文字 / 报路径）抢活，赶活时偷懒默认必赢。L0 advisory 必输，需 forcing function（hook：偷懒瞬间主动拦）。例：`rich-messaging` / `browser-preview` / `workspace-navigator`（补完可达性后仍是 B）
   - hook 守 KD-8：只给数据（"你提了 3 个路径 workspace 开了 0"），不替猫判断开哪个
 
@@ -126,16 +126,16 @@ opus-47 原把 `workspace-navigator` / `rich-messaging` / `browser-preview` 一�
 
 **用法**：分步走动 + 视觉提示，配合 Guide Engine
 
-### 8. `expert-panel` / `collaborative-thinking` — 多猫辩论
+### 8. `collaborative-thinking` / `expert-panel` — 探索与多视角判断
 
-**坏直觉**：单猫死磕 / 一个视角硬上
+**坏直觉**：在同一个方向反复改 / 等人先把答案说清
 **场景 trigger**：
+- 有目标但不知道怎么做，或改了几版仍不满意
 - 架构决定（需要多视角校验）
-- bug 死磕无解
-- 技术趋势 / 竞品 / 行业分析
-- operator说"帮我分析一下"
+- 讨论中需要探索不同解释、方法或方向
+- operator明确要求专家团
 
-**用法**：`expert-panel` 多猫专家辩论 / `collaborative-thinking` 单猫独立思考
+**用法**：普通探索用 `collaborative-thinking`，它支持单猫与多猫思考，不自动召集队友。用户明确要求专家团时才用 `expert-panel`；普通“帮我分析一下”可以直接回答，需继续探索时走前者。已确定的实现与日常 bug 定位沿原工作路径，不为多视角重开讨论。
 
 ### 9. `cat_cafe_propose_thread` — 提议创建新 thread（F128）
 

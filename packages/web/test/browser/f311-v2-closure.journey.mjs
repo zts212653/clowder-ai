@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { openWorkspaceTools } from './f307-workspace-open.mjs';
 import {
   approvalItem,
   assetReview,
@@ -121,9 +122,7 @@ export async function verifyV2ClosureJourney({ fixture, browser, capture }) {
   try {
     await page.goto(`${fixture.apiUrl}/api/session`);
     await page.goto(`${fixture.webUrl}/thread/${CONTRACT_THREAD_ID}?shell=v2`);
-    await page.getByTestId('settings-button').click();
-    await page.getByTestId('settings-v2').waitFor();
-    await page.getByTestId('settings-entry-evolution').click();
+    await (await openWorkspaceTools(page)).getByTestId('workspace-launcher-capability-evolution').click();
     const home = page.getByTestId('capability-evolution-workspace');
     await home.getByText('待判断 1', { exact: true }).waitFor();
     await capture(page, 's6-home-pending');

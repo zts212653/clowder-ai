@@ -3,6 +3,29 @@ import { readFileSync } from 'node:fs';
 import { parse } from 'yaml';
 
 const workflow = parse(readFileSync(new URL('../workflows/ci.yml', import.meta.url), 'utf8'));
+assert.ok(
+  !Object.hasOwn(workflow.on.pull_request, 'paths') && !Object.hasOwn(workflow.on.pull_request, 'paths-ignore'),
+  'required public CI must start for every PR, including docs/assets-only changes; workflow-level path filters leave required checks pending',
+);
+for (const event of ['push', 'pull_request']) {
+  assert.deepEqual(
+    [...workflow.on[event].branches].sort(),
+    ['develop', 'main', 'next'],
+    `public CI must cover the stable, integration, and legacy development branches on ${event}`,
+  );
+}
+for (const filename of ['windows-smoke.yml', 'macos-preview-smoke.yml']) {
+  const nativeWorkflow = parse(readFileSync(new URL(`../workflows/${filename}`, import.meta.url), 'utf8'));
+  assert.deepEqual(
+    [...nativeWorkflow.on.pull_request.branches].sort(),
+    ['develop', 'main', 'next'],
+    `${filename} must validate PRs for all branch roles`,
+  );
+  assert.ok(
+    Object.hasOwn(nativeWorkflow.on, 'workflow_dispatch'),
+    `${filename} must support checking the restored next head before ordinary PRs move there`,
+  );
+}
 const lintCheckout = workflow.jobs.lint.steps.find((step) => step.uses === 'actions/checkout@v4');
 assert.equal(
   lintCheckout?.with?.['fetch-depth'],

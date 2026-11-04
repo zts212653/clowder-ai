@@ -6,6 +6,7 @@ import { packageDirectoryName } from '../../external-runtime/filesystem-package-
 import type { PluginManifestValidator } from '../../external-runtime/package-staging.js';
 import { stageVerifiedPackageArchive } from '../../external-runtime/package-staging.js';
 import type { PluginPackageProvenance } from '../../host-inventory/types.js';
+import { resolveNpmInvocation } from '../npm-invocation.js';
 
 import type {
   BuiltinPluginPackageMaterializer,
@@ -289,12 +290,17 @@ function installEnvironment(root: string, registryOnly: boolean): Record<string,
 function defaultDependencyInstaller(npmBin: string, timeoutMs: number): BuiltinDependencyInstaller {
   return async ({ cwd, env }) => {
     try {
-      await execFileAsync(npmBin, ['ci', '--ignore-scripts', '--omit=dev', '--no-audit', '--no-fund'], {
-        cwd,
-        env: { ...env },
-        timeout: timeoutMs,
-        maxBuffer: 8 * 1024 * 1024,
-      });
+      const npm = resolveNpmInvocation(npmBin);
+      await execFileAsync(
+        npm.command,
+        [...npm.prefixArgs, 'ci', '--ignore-scripts', '--omit=dev', '--no-audit', '--no-fund'],
+        {
+          cwd,
+          env: { ...env },
+          timeout: timeoutMs,
+          maxBuffer: 8 * 1024 * 1024,
+        },
+      );
     } catch (error) {
       throw new BuiltinPluginPackageMaterializationError(
         'DEPENDENCY_INSTALL_FAILED',

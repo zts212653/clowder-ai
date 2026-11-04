@@ -166,6 +166,7 @@ export function AttentionClusterHeaderV2({
             role="menu"
             aria-label={copy.more}
             className="absolute right-0 top-8 z-50 min-w-40 rounded-lg border p-1 shadow-md"
+            data-chat-background-surface="paper"
             style={{ background: 'var(--shell-paper)', borderColor: 'var(--shell-hairline)' }}
             onKeyDown={(event) => {
               if (event.key === 'Escape') {
@@ -256,6 +257,7 @@ export function AttentionClusterHeaderV2({
         {editing && (
           <form
             className="absolute inset-x-0 top-0 z-50 flex flex-wrap gap-1 rounded-lg border p-2 shadow-md"
+            data-chat-background-surface="paper"
             style={{ background: 'var(--shell-paper)', borderColor: 'var(--shell-hairline)' }}
             onKeyDown={(event) => {
               if (event.key === 'Escape') {

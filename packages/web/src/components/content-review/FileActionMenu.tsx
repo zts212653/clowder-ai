@@ -21,8 +21,9 @@ export function fileMenuItems(menu: HTMLDivElement | null) {
 export function FileActionMenu({
   position,
   menu,
-  trigger,
   info,
+  infoError,
+  retryInfo,
   link,
   filename,
   mime,
@@ -47,8 +48,9 @@ export function FileActionMenu({
 }: {
   position: { x: number; y: number };
   menu: RefObject<HTMLDivElement>;
-  trigger: RefObject<HTMLButtonElement>;
   info: ContentFileInfo | null;
+  infoError: boolean;
+  retryInfo: () => void;
   link: string;
   filename: string;
   mime?: string;
@@ -82,7 +84,7 @@ export function FileActionMenu({
   const nativeMedia = ['image', 'video', 'audio'].includes(fileContentKind(filename, info?.mime ?? mime));
   const nativeLink = nativeMedia ? link : fileDownloadUrl(link);
   const date = artworkFileDate(info?.createdAt ?? info?.modifiedAt, language);
-  const location = info === null ? t.loading : info.local ? (info.displayPath ?? info.path) : link;
+  const location = info?.local ? (info.displayPath ?? info.path) : link;
   const bytes = info?.byteLength ?? byteLength;
   const fileSize = fileByteLengthLabel(bytes);
   return (
@@ -99,7 +101,6 @@ export function FileActionMenu({
           event.preventDefault();
           event.stopPropagation();
           close();
-          trigger.current?.focus();
         }
         if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
           event.preventDefault();
@@ -131,7 +132,7 @@ export function FileActionMenu({
         ) : null}
         <button role="menuitem" type="button" disabled={info === null} onClick={copyLocation}>
           <ReviewToolbarIcon name="copy" />
-          {info === null ? t.loading : info.local ? t.copyPath : t.copyLink}
+          {info === null && !infoError ? t.loading : info?.local ? t.copyPath : t.copyLink}
         </button>
         {src && !directory ? (
           <button role="menuitem" type="button" disabled={!src} onClick={copyPixels}>
@@ -229,7 +230,9 @@ export function FileActionMenu({
         ) : null}
       </div>
       <section className={styles.info} aria-label={t.fileInfo}>
-        <strong>{filename}</strong>
+        <strong>{info?.filename ?? filename}</strong>
+        {info?.reason && <p role="status">{info.reason}</p>}
+        {info?.local && info.canOpen === false && info.canReveal === false ? <p>{t.localActionsUnavailable}</p> : null}
         {copyName && (
           <button type="button" onClick={copyName}>
             {t.copyFilename}
@@ -242,9 +245,18 @@ export function FileActionMenu({
           {` · ${info?.author ?? t.unknownAuthor}`}
           {date ? ` · ${date}` : ''}
         </p>
-        <button type="button" className={styles.path} disabled={info === null} onClick={copyLocation}>
-          {location}
-        </button>
+        {infoError ? (
+          <>
+            <p role="alert">{t.fileInfoFailed}</p>
+            <button type="button" onClick={retryInfo}>
+              {t.retry}
+            </button>
+          </>
+        ) : (
+          <button type="button" className={styles.path} disabled={info === null} onClick={copyLocation}>
+            {info === null ? t.loading : location}
+          </button>
+        )}
       </section>
     </div>
   );

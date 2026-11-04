@@ -59,7 +59,9 @@ describe('recoverable first-message admission preserves canonical send', () => {
         await send('hello', undefined, 'created-thread', undefined, 'reply-1', undefined, ['codex'], options),
       ).toBe(true);
     });
-    const bodies = apiFetch.mock.calls.map((call) => JSON.parse(call[1].body));
+    const bodies = apiFetch.mock.calls
+      .filter((call) => call[0] === '/api/messages')
+      .map((call) => JSON.parse(call[1].body));
     expect(bodies[0]).toEqual(bodies[1]);
     expect(bodies[0]).toMatchObject({
       threadId: 'created-thread',

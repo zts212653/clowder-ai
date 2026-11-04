@@ -55,6 +55,26 @@ const fixture = () => {
   return { actions, authority };
 };
 
+test('each admitted action receives a Host call identity that overrides claimed metadata and expires with the call', async () => {
+  const { actions, authority } = fixture();
+  let check: (() => Promise<void>) | undefined;
+  actions.activate(authority as never, 0, async () => {
+    const context = currentPluginCallContext('instance')!;
+    check = context.assertCurrent;
+    return context.nativeAction;
+  });
+  const token = actions.environment('instance', 'example').CLOWDER_PLUGIN_ACTION_TOKEN!;
+  const claimed = { ...caller(), nativeAction: { id: 'forged', contributionId: 'other', method: 'other.run' } };
+  const first = await actions.call(token, 'example.run', {}, claimed);
+  const second = await actions.call(token, 'example.run', {}, claimed);
+  assert.ok(first && typeof first === 'object' && 'id' in first);
+  assert.ok(second && typeof second === 'object' && 'id' in second);
+  assert.notEqual(first.id, 'forged');
+  assert.notEqual(first.id, second.id);
+  assert.deepEqual({ ...first, id: 'ignored' }, { id: 'ignored', contributionId: 'example', method: 'example.run' });
+  await assert.rejects(check!(), /no longer current/);
+});
+
 test('MCP dispatch reaches the current plugin handlers and retains contribution identity', async () => {
   const authority = admission();
   authority.packageRecord.manifest.features.push({

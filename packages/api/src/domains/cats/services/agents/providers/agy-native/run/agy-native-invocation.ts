@@ -135,10 +135,7 @@ export async function* runAgyNativeInvocation(input: {
           await runInput.result(runOutput.successful);
           if (!runOutput.successful) {
             processLifetime.abort();
-            observed = {
-              ...observation.observed,
-              transportError: observation.observed.transportError ?? 'AGY native internal turn did not succeed',
-            };
+            observed = observation.observed;
             yield* messages;
             break;
           }
@@ -165,12 +162,20 @@ export async function* runAgyNativeInvocation(input: {
     }
     if (!observed) throw new Error('AGY native stream ended without a terminal observation');
     if (runInput && runOutput) {
-      if (runInput.hasUnfinishedInput)
+      if (runInput.hasUnfinishedInput) {
+        log.warn(
+          { catId, invocationId: options?.invocationId, upstreamOutcome: observed.turn.outcome },
+          'Native run ended with unfinished supplemental inputs',
+        );
         observed = {
           ...observed,
-          transportError: observed.transportError ?? 'AGY native process ended before an accepted input completed',
+          // A missing supplemental result cannot replace the failed turn's actual provider diagnosis.
+          transportError:
+            observed.transportError ??
+            (runOutput.successful ? 'AGY native process ended before an accepted input completed' : null),
           cancelledBeforeTerminal: options?.signal?.aborted === true || observed.cancelledBeforeTerminal,
         };
+      }
       await runInput.dispose();
       yield* runOutput.finish(observed);
       return;

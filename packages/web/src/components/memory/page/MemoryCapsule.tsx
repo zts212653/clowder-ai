@@ -13,6 +13,7 @@ import {
   type ProfileMemoryBrowseRead,
   type ProfileMemoryRead,
 } from './owner-memory-read';
+import { profileText } from './profile-presentation';
 import { useMemoryOwnerAction } from './use-memory-owner-action';
 import { formatMemoryDate, useMemoryRead } from './use-memory-read';
 import { useProfileProposalRefresh } from './use-profile-proposal-refresh';
@@ -40,11 +41,11 @@ export function MemoryCapsuleCard({
         >
           关于你
         </button>
-        <span className="rounded-full bg-cafe-surface-sunken px-2 py-0.5 text-xs">每场新对话带上</span>
+        <span className="rounded-full bg-cafe-surface-sunken px-2 py-0.5 text-xs">每场新对话自动带上</span>
       </div>
       {pending?.[0] && <CapsulePendingLabel proposal={pending[0]} />}
       <p className="mt-2 line-clamp-3 break-words text-compact text-cafe-muted">
-        {entry ? splitUserCapsule(entry.content).body : setup ? '还没有填写' : '暂时读不到关于你'}
+        {entry ? profileText(splitUserCapsule(entry.content).body) : setup ? '还没有填写' : '暂时读不到关于你'}
       </p>
       {entry && (
         <p className="mt-2 text-xs text-cafe-muted">

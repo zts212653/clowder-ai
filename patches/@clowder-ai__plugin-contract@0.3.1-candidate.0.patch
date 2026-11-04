@@ -1,0 +1,43 @@
+diff --git a/dist/validation/manifest.js b/dist/validation/manifest.js
+index 51d7e6b41d4e0c8f281f8e473479c331ddf4a50f..b72da9660ad479bd57b45ffd0c1071e41553e3f7 100644
+--- a/dist/validation/manifest.js
++++ b/dist/validation/manifest.js
+@@ -168,6 +168,7 @@ export function validateManifest(value) {
+             const optionValues = (discriminator.options ?? []).map((option) => option.value);
+             const optionSet = new Set(optionValues);
+             const branchIds = new Set();
++            const branchMatches = new Map();
+             for (const [branchIndex, branch] of variants.branches.entries()) {
+                 if (branchIds.has(branch.id)) {
+                     return semanticError(`/configurationVariants/branches/${branchIndex}/id`, '#/$defs/ConfigurationVariantBranch/uniqueBranchIds', 'uniqueBranchIds', 'configurationVariants branch id must be declared at most once per manifest');
+@@ -211,6 +212,9 @@ export function validateManifest(value) {
+                 if (new Set(declaredValues).size !== declaredValues.length) {
+                     return semanticError(`/configurationVariants/branches/${branchIndex}/when/properties/${variants.discriminator}`, '#/$defs/ConfigurationVariantBranch/whenUniqueOptions', 'whenUniqueOptions', 'configurationVariants branch enum values must be unique');
+                 }
++                for (const value of declaredValues) {
++                    branchMatches.set(value, (branchMatches.get(value) ?? 0) + 1);
++                }
+                 for (const [fieldIndex, key] of branch.fields.entries()) {
+                     if (key === variants.discriminator) {
+                         return semanticError(`/configurationVariants/branches/${branchIndex}/fields/${fieldIndex}`, '#/$defs/ConfigurationVariantBranch/discriminatorNotBranchField', 'discriminatorNotBranchField', 'configurationVariants branch fields must not include the discriminator itself');
+@@ -220,17 +224,10 @@ export function validateManifest(value) {
+                     }
+                 }
+             }
+-            const branchValidators = variants.branches.map((branch) => ajv.compile({
+-                type: 'object',
+-                properties: structuredClone(branch.when['properties']),
+-                required: [variants.discriminator],
+-            }));
++            // Branches have already been restricted to declared string const/enum values.
++            // Counting those values avoids retaining fresh schemas in the global Ajv cache.
+             for (const optionValue of optionValues) {
+-                let matched = 0;
+-                for (const trial of branchValidators) {
+-                    if (trial({ [variants.discriminator]: optionValue }))
+-                        matched += 1;
+-                }
++                const matched = branchMatches.get(optionValue) ?? 0;
+                 if (matched !== 1) {
+                     return semanticError('/configurationVariants/branches', '#/$defs/ConfigurationVariants/completeExclusiveBranches', 'completeExclusiveBranches', `each discriminator option value must be matched by exactly one branch; option ${JSON.stringify(optionValue)} matched ${matched}`);
+                 }

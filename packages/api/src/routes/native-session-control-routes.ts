@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import type { CatId, NativeSessionBinding } from '@cat-cafe/shared';
+import { type CatId, catRegistry, type NativeSessionBinding } from '@cat-cafe/shared';
 import type { FastifyInstance, FastifyPluginOptions, FastifyReply, FastifyRequest } from 'fastify';
+import { captureInvocationL0Input } from '../domains/cats/services/agents/providers/l0-input-capture.js';
 import type { AgentRegistry } from '../domains/cats/services/agents/registry/AgentRegistry.js';
 import type { ContextEpochOwner } from '../domains/cats/services/session/context/ContextEpochOwner.js';
 import type { DeliveryCursorStore } from '../domains/cats/services/stores/ports/DeliveryCursorStore.js';
@@ -49,6 +50,13 @@ async function handleNativeCompaction(
   const target = await resolveNativeCompactionTarget(request, reply, options);
   if (!target) return;
   try {
+    const frozenL0Input = target.nativeSessionBinding
+      ? captureInvocationL0Input({
+          catId: target.catId,
+          userId: target.userId,
+          catConfig: catRegistry.getOrThrow(target.catId).config,
+        })
+      : undefined;
     // Evidence canary, not a transactional guard: observeCompaction commits the
     // epoch transition before the second snapshot. A mismatch fails this UAT
     // journey but cannot roll the provider event back, and concurrent delivery
@@ -68,6 +76,7 @@ async function handleNativeCompaction(
       observedEventId = event.eventId;
     };
     const event = await target.service.requestNativeCompaction?.({
+      ...(frozenL0Input ? { frozenL0Input } : {}),
       sessionId: target.sessionId,
       invocationId: `native-compact-${randomUUID()}`,
       timeoutMs: 120_000,

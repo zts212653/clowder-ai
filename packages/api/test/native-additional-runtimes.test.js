@@ -5,6 +5,25 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { discoverAdditionalRuntimes } from '../dist/routes/native-additional-runtimes.js';
 
+test('a known Kimi boolean model advertises no tiers instead of an unknown capability', () => {
+  const root = mkdtempSync(join(tmpdir(), 'kimi-no-tiers-'));
+  const previous = process.env.KIMI_CODE_HOME;
+  process.env.KIMI_CODE_HOME = root;
+  try {
+    writeFileSync(
+      join(root, 'config.toml'),
+      'default_model="boolean-model"\n[models.boolean-model]\nmodel="kimi-for-coding"\n',
+    );
+    const [runtime] = discoverAdditionalRuntimes(root, () => null);
+    assert.deepEqual(runtime.modelCatalog[0].efforts, []);
+    assert.equal(runtime.configuredEffort, undefined);
+  } finally {
+    if (previous === undefined) delete process.env.KIMI_CODE_HOME;
+    else process.env.KIMI_CODE_HOME = previous;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('detects Kimi and bridged Pi without disclosing authentication or probing OpenCode', () => {
   const root = mkdtempSync(join(tmpdir(), 'additional-runtime-'));
   const keys = ['KIMI_CODE_HOME', 'KIMI_SHARE_DIR', 'KIMI_CONFIG_FILE', 'PI_CODING_AGENT_DIR'];
@@ -14,7 +33,7 @@ test('detects Kimi and bridged Pi without disclosing authentication or probing O
     mkdirSync(join(root, '.kimi-code'), { recursive: true });
     writeFileSync(
       join(root, '.kimi-code/config.toml'),
-      'default_model="kimi-code/k3"\n[models."kimi-code/k3"]\nprovider="native"\n[providers.native]\napi_key="sensitive-sentinel"\n',
+      'default_model="kimi-code/k3.1-pro"\n[thinking]\nenabled=true\neffort="high"\n[models."kimi-code/k3.1-pro"]\nprovider="native"\nsupport_efforts=["low","high","max"]\ndefault_effort="low"\n[providers.native]\napi_key="sensitive-sentinel"\n',
     );
     const bridge = join(root, 'pi-acp-bridge.js');
     writeFileSync(bridge, '// owned bundled adapter');
@@ -26,7 +45,12 @@ test('detects Kimi and bridged Pi without disclosing authentication or probing O
     );
     assert.deepEqual(
       found.slice(0, 1).map((r) => r.configuredModel),
-      ['kimi-code/k3'],
+      ['kimi-code/k3.1-pro'],
+    );
+    assert.equal(found[0].configuredEffort, 'high');
+    assert.deepEqual(
+      found[0].modelCatalog[0].efforts.map((item) => item.value),
+      ['low', 'high', 'max'],
     );
     assert.equal(found[1].installed, true);
     assert.equal(found[1].discoveryStatus, 'configured');

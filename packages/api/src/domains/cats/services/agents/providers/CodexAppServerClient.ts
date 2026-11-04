@@ -43,6 +43,7 @@ import {
   createCodexRuntimeInteractionRunState,
 } from './CodexRuntimeInteractionRun.js';
 import { createCodexSubexecutionTracker, isExactCodexRootTurnCompletion } from './CodexSubexecutionTracker.js';
+import { continueCodexWorkAfterCompaction } from './codex-active-work-context.js';
 import { classifyCodexAppServerToolSurface, classifyCodexSafeBoundary } from './codex-app-server-boundary.js';
 import {
   buildCodexAppServerThreadParams,
@@ -54,6 +55,7 @@ import {
   CodexAppServerRpcError,
   CodexAppServerTurnStartTimeoutError,
 } from './codex-app-server-rpc-error.js';
+import { inspectCodexInput, readCodexTurnMetadata } from './codex-history-reader.js';
 
 export type {
   CodexAppServerLifecycleEvent,
@@ -153,6 +155,8 @@ export interface CodexAppServerRunInput {
   ) => PreparedProviderRequestV1;
   /** F299: recovery has no user message, but its application context is still model-visible input. */
   prepareRecoveryRequest?: (recoveryInstruction: string) => PreparedProviderRequestV1;
+  /** Source-only continuation after a completed native context-window change. */
+  prepareCompactionRequest?: () => PreparedProviderRequestV1 | undefined;
   prepareLiveRequest?: (input: LiveProviderInput) => PreparedProviderRequestV1;
   onLiveInputOutcome?: (receipt: LiveProviderInputOutcome) => Promise<void>;
   beforeProviderLaunch?: (request: PreparedProviderRequestV1) => Promise<ProviderRequestGenerationCommitV1>;
@@ -217,6 +221,7 @@ export function continuityEvidenceFromVerdict(verdict: CodexAppServerThreadVerdi
 export class CodexAppServerClient {
   private readonly pending = new Map<RequestId, PendingRequest>();
   private readonly observedTurnIds = new Map<string, Set<string>>();
+  private readonly completeTurnBaselines = new Set<string>();
   private readonly notifications = new CodexAppServerNotificationQueue();
   private nextRequestId = 1;
   private pumpPromise: Promise<void> | null = null;
@@ -335,7 +340,10 @@ export class CodexAppServerClient {
         });
       await preflightRequest('initialize', {
         clientInfo: { name: 'cat-cafe', title: `${deploymentDefaults.brand.displayName}`, version: '1' },
-        capabilities: recoveryInstruction || input.collaborationMode || input.live ? { experimentalApi: true } : {},
+        capabilities:
+          recoveryInstruction || input.prepareCompactionRequest || input.collaborationMode || input.live
+            ? { experimentalApi: true }
+            : {},
       });
       await this.write({ method: 'initialized' });
       yield this.lifecycle.event(this.lifecycle.transition('initialized'));
@@ -387,11 +395,12 @@ export class CodexAppServerClient {
         };
       }
 
+      if (input.thread.kind === 'resume') this.completeTurnBaselines.delete(input.thread.threadId);
       const verdict = await resolveCodexAppServerThread({
         thread: input.thread,
         params: buildCodexAppServerThreadParams(
           input,
-          input.thread.kind === 'resume' ? { threadId: input.thread.threadId } : undefined,
+          input.thread.kind === 'resume' ? { threadId: input.thread.threadId, excludeTurns: true } : undefined,
         ),
         startParams: buildCodexAppServerThreadParams(input),
         requireExactResume: input.requireExactResume || Boolean(recoveryInstruction),
@@ -402,8 +411,17 @@ export class CodexAppServerClient {
         localLiveLease: false,
         request: (method, params) => this.request(method, params),
         now: this.deps.now ?? Date.now,
+        onResumeMetadata: async (threadId) => {
+          // The standalone pagination RPC is non-experimental. A resume's
+          // initialTurnsPage would require broadening the session capability set.
+          for await (const turn of readCodexTurnMetadata((method, params) => this.request(method, params), threadId)) {
+            this.rememberTurn(threadId, turn.id);
+          }
+          this.completeTurnBaselines.add(threadId);
+        },
       });
       const threadId = verdict.threadId;
+      if (verdict.kind === 'started' || verdict.kind === 'replaced') this.completeTurnBaselines.add(threadId);
       activeThreadId = threadId;
       if (input.collaborationMode) {
         const adopted = asCodexAppServerRecord(verdict.raw);
@@ -626,19 +644,8 @@ export class CodexAppServerClient {
               };
             }
           },
-          inspectInput: async (deliveryId) => {
-            const result = asCodexAppServerRecord(await this.request('thread/read', { threadId, includeTurns: true }));
-            const thread = asCodexAppServerRecord(result?.thread);
-            if (thread?.id !== threadId || !Array.isArray(thread.turns)) return 'unknown';
-            const turn = thread.turns.map(asCodexAppServerRecord).find((candidate) => candidate?.id === handle.turnId);
-            if (!Array.isArray(turn?.items)) return 'unknown';
-            return turn.items.some((value) => {
-              const item = asCodexAppServerRecord(value);
-              return item?.type === 'userMessage' && item.clientId === deliveryId;
-            })
-              ? 'accepted'
-              : 'unknown';
-          },
+          inspectInput: (deliveryId) =>
+            inspectCodexInput((method, params) => this.request(method, params), threadId, handle.turnId, deliveryId),
         });
         if (typeof release === 'function') releaseActiveRunDispatch = release;
       }
@@ -669,6 +676,7 @@ export class CodexAppServerClient {
         void this.lifecycle.interrupt(threadId, activeTurnId, 'user_cancel', interruptGraceMs);
       }
 
+      const continuedCompactions = new Set<string>();
       for (;;) {
         if (this.pumpFailure instanceof CodexAppServerTurnStartTimeoutError) throw this.pumpFailure;
         const next = await this.notifications.next();
@@ -771,6 +779,31 @@ export class CodexAppServerClient {
         const midTurnCompaction = mapCodexAppServerCompactionObservation(envelope);
         if (midTurnCompaction && midTurnCompaction.runtimeSessionId === threadId) {
           yield { type: 'app_server.context_compaction', observation: midTurnCompaction };
+          if (
+            !input.live &&
+            input.prepareCompactionRequest &&
+            record?.method === 'item/completed' &&
+            activeTurnId &&
+            params?.turnId === activeTurnId &&
+            !continuedCompactions.has(midTurnCompaction.eventId)
+          ) {
+            continuedCompactions.add(midTurnCompaction.eventId);
+            try {
+              await continueCodexWorkAfterCompaction({
+                threadId,
+                turnId: activeTurnId,
+                signal: input.signal,
+                prepare: input.prepareCompactionRequest,
+                commit: input.beforeProviderLaunch,
+                request: (method, value) => this.request(method, value),
+              });
+            } catch (error) {
+              // No authoritative terminal was consumed. A failed continuation
+              // must not return a possibly active native turn to the warm pool.
+              transportDisposition = 'evict';
+              throw error;
+            }
+          }
         }
 
         const mapped = mapCodexAppServerNotification(envelope);
@@ -942,7 +975,7 @@ export class CodexAppServerClient {
     if (typeof params?.threadId !== 'string' || typeof turn?.id !== 'string' || !turn.id) return;
     const alreadyObserved = this.observedTurnIds.get(params.threadId)?.has(turn.id);
     this.rememberTurn(params.threadId, turn.id);
-    if (alreadyObserved || turn.status !== 'inProgress') return;
+    if (alreadyObserved || turn.status !== 'inProgress' || !this.completeTurnBaselines.has(params.threadId)) return;
     const candidates = [...this.pending.values()].filter(
       (pending) => pending.method === 'turn/start' && pending.sent && pending.params.threadId === params.threadId,
     );

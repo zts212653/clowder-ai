@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
 import { catRegistry } from '@cat-cafe/shared';
 import { parse } from 'smol-toml';
-import { getAcpConfig } from '../config/cat-config-loader.js';
+import { getRegisteredAcpConfig } from '../config/cat-config-loader.js';
 import { resolveCliCommand } from '../utils/cli-resolve.js';
 import { discoverAdditionalRuntimes } from './native-additional-runtimes.js';
 import { discoverDshRuntime } from './native-dsh-discovery.js';
@@ -33,6 +33,8 @@ export function discoverNativeRuntimes(projectRoot: string, commandFor = resolve
   const home = homedir();
   const codex = metadata(join(process.env.CODEX_HOME || join(home, '.codex'), 'config.toml'), true);
   const claude = metadata(join(process.env.CLAUDE_CONFIG_DIR || join(home, '.claude'), 'settings.json'));
+  const claudeEnv =
+    claude.env !== null && typeof claude.env === 'object' ? (claude.env as Record<string, unknown>) : {};
   const builtins = (
     [
       ['codex', 'Codex', 'openai'],
@@ -40,8 +42,10 @@ export function discoverNativeRuntimes(projectRoot: string, commandFor = resolve
     ] as const
   ).map(([id, label, clientId]) => {
     const command = commandFor(id);
-    const configuredModel = text(id === 'codex' ? codex.model : claude.model);
-    const configuredEffort = text(id === 'codex' ? codex.model_reasoning_effort : claude.effortLevel);
+    const configuredModel = text(id === 'codex' ? codex.model : (claudeEnv.ANTHROPIC_MODEL ?? claude.model));
+    const configuredEffort = text(
+      id === 'codex' ? codex.model_reasoning_effort : (claudeEnv.CLAUDE_CODE_EFFORT_LEVEL ?? claude.effortLevel),
+    );
     const models = new Set<string>();
     if (configuredModel) models.add(configuredModel);
     for (const entry of Object.values(catRegistry.getAllConfigs())) {
@@ -61,7 +65,7 @@ export function discoverNativeRuntimes(projectRoot: string, commandFor = resolve
     };
   });
   const acp = Object.values(catRegistry.getAllConfigs()).flatMap((cat) => {
-    const config = getAcpConfig(cat.id, projectRoot);
+    const config = getRegisteredAcpConfig(cat.id, projectRoot);
     if (!config || (cat.agentProvider !== undefined ? cat.agentProvider : config.agentProvider)) return [];
     const command = isAbsolute(config.command) ? config.command : commandFor(config.command);
     const agy = cat.clientId === 'google' && cat.agyProfile?.carrier === 'acp';

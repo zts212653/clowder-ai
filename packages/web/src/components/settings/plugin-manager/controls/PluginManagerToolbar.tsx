@@ -13,11 +13,13 @@ export function PluginManagerToolbar({
   onDirectoryInstall,
   onArchiveInstalled,
   locale,
+  autoSynchronize = true,
 }: {
   onMarketplaceChange?: (() => Promise<void>) | undefined;
   onDirectoryInstall?: ((path: string) => Promise<void>) | undefined;
   onArchiveInstalled?: (() => void | Promise<void>) | undefined;
   locale: string;
+  autoSynchronize?: boolean;
 }) {
   const t = pluginManagerText(locale);
   const [installTarget, setInstallTarget] = useState<HTMLDivElement | null>(null);
@@ -72,7 +74,7 @@ export function PluginManagerToolbar({
           renderTrigger={(open, disabled) => installEntry(t.archive, open, disabled)}
         />
       )}
-      <PluginMarketplaceSettings onChange={onMarketplaceChange} />
+      <PluginMarketplaceSettings autoSynchronize={autoSynchronize} onChange={onMarketplaceChange} />
     </div>
   );
 }

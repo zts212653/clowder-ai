@@ -15,6 +15,7 @@ import './styles/leave-responsibilities.css';
 import './styles/channel.css';
 import './styles/channel-message.css';
 import './styles/message-reactions.css';
+import './styles/new-channel.css';
 import './styles/message-expression.css';
 import './styles/collaboration.css';
 import './styles/roadmap.css';

@@ -69,6 +69,9 @@ class InteractionWire {
         result: { model: 'native-effective', reasoningEffort: 'high', thread: { id: message.params.threadId } },
       });
     }
+    if (message.method === 'thread/turns/list') {
+      this.inbox.push({ id: message.id, result: { data: [], nextCursor: null } });
+    }
     if (message.method === 'turn/start') {
       setImmediate(() =>
         this.inbox.push({

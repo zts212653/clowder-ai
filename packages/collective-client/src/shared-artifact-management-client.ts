@@ -4,7 +4,7 @@ import {
   updateCollectiveArtifactAccessSchema,
 } from '@cat-cafe/shared';
 import { z } from 'zod';
-import { type ClientRequest, CollectiveClientRequestError } from './client-request.js';
+import { type ClientReadPolicy, type ClientRequest, CollectiveClientRequestError } from './client-request.js';
 import type { SharedArtifact } from './collective-artifact-client.js';
 
 const pendingSchema = z.discriminatedUnion('action', [
@@ -17,13 +17,15 @@ export function sharedArtifactManagementClient(
   coordinates: { serviceInstanceId: string; collectiveId: string },
   namespace: string,
 ) {
-  const post = (path: string, input: unknown) =>
-    request<unknown>(`/api/artifacts/${path}`, { method: 'POST', body: JSON.stringify(input) });
+  const post = (path: string, input: unknown, policy?: ClientReadPolicy) =>
+    request<unknown>(`/api/artifacts/${path}`, { method: 'POST', body: JSON.stringify(input) }, policy);
   const key = (artifact: SharedArtifact) => `collective-management:${namespace}:${artifact.artifactId}`;
   const read = async (artifact: SharedArtifact, page: { offset?: number; snapshot?: string } = {}) => {
     const result = z
       .object({ management: collectiveArtifactManagementSchema })
-      .parse(await post('management/read', { ...coordinates, artifactId: artifact.artifactId, ...page })).management;
+      .parse(
+        await post('management/read', { ...coordinates, artifactId: artifact.artifactId, ...page }, { readOnly: true }),
+      ).management;
     if (
       result.artifactId !== artifact.artifactId ||
       result.serviceInstanceId !== coordinates.serviceInstanceId ||

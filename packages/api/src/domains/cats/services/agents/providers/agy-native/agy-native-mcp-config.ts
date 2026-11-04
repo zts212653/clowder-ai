@@ -6,6 +6,7 @@ import {
   CAT_CAFE_SPLIT_ENTRYPOINTS,
   resolveCatCafeNodeCommand,
 } from '../../../../../../config/capabilities/mcp-constants.js';
+import type { NativeMcpServer } from '../../../../../plugin/declared/native-mcp-types.js';
 import { validateAgyNativeConfigReceipt, writeAgyNativeConfigReceipt } from './agy-native-config-receipt.js';
 import { AGY_NATIVE_CREDENTIAL_DIR, isLocalAgyCallbackUrl } from './agy-native-credential-file.js';
 import {
@@ -21,6 +22,8 @@ export interface AgyNativeMcpConfigInput {
   /** Already resolved through canonical per-cat/project capability discovery. */
   readonly resolvedServers?: Readonly<Record<string, Record<string, unknown>>>;
   readonly callback?: { readonly apiUrl: string; readonly credentialFile: string };
+  /** Captured Host-issued member descriptor; never mixed with project/global discovery. */
+  readonly memberServer?: NativeMcpServer;
 }
 
 interface StdioServerConfig {
@@ -119,25 +122,32 @@ export function materializeAgyNativeMcpConfig(input: AgyNativeMcpConfigInput): s
   requireDirectory(join(home, '.gemini'));
   requireDirectory(configDir);
   const runtimeRoot = realpathSync(input.runtimeRoot);
+  const member = input.memberServer;
+  if (member && (input.serverNames.length || input.resolvedServers || input.callback))
+    throw new Error('AGY member MCP cannot inherit ordinary servers');
   const callback = input.serverNames.length ? requireCallbackBinding(input.callback) : undefined;
   const credential = callback ? realpathSync(callback.credentialFile) : undefined;
   if (input.serverNames.length) requireDirectory(join(configDir, AGY_NATIVE_CREDENTIAL_DIR));
-  const servers = input.resolvedServers
-    ? Object.fromEntries(
-        Object.entries(input.resolvedServers).map(([name, entry]) => {
-          // The upstream remote transport uses serverUrl, not Claude's type/url envelope.
-          if (entry.type === 'http' && typeof entry.url === 'string') {
-            const { type: _type, url, ...rest } = entry;
-            return [name, { ...rest, serverUrl: url }];
-          }
-          return [name, entry];
-        }),
-      )
-    : Object.fromEntries(
-        [...new Set(input.serverNames)]
-          .sort()
-          .map((name) => [name, expectedServer(runtimeRoot, name, requireCallbackBinding(callback), home)]),
-      );
+  const servers = member
+    ? {
+        [member.name]: { command: member.command, args: member.args, cwd: member.workingDirectory, env: member.env },
+      }
+    : input.resolvedServers
+      ? Object.fromEntries(
+          Object.entries(input.resolvedServers).map(([name, entry]) => {
+            // The upstream remote transport uses serverUrl, not Claude's type/url envelope.
+            if (entry.type === 'http' && typeof entry.url === 'string') {
+              const { type: _type, url, ...rest } = entry;
+              return [name, { ...rest, serverUrl: url }];
+            }
+            return [name, entry];
+          }),
+        )
+      : Object.fromEntries(
+          [...new Set(input.serverNames)]
+            .sort()
+            .map((name) => [name, expectedServer(runtimeRoot, name, requireCallbackBinding(callback), home)]),
+        );
   const path = join(configDir, 'mcp_config.json');
   const lock = join(configDir, '.cat-cafe-mcp-config.lock');
   writeFileSync(lock, '', { flag: 'wx', mode: 0o600 });

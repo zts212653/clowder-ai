@@ -2,6 +2,7 @@
 
 import type { MessageSearchResponse, MessageSearchResult } from '@cat-cafe/shared';
 import { MessageDecisionSummary } from './MessageDecisionSummary';
+import { MessageSearchNotice } from './MessageSearchNotice';
 import { searchButtonClass as buttonClass, MessageSearchResultRow } from './MessageSearchResultRow';
 
 export interface MessageSearchResultsProps {
@@ -27,8 +28,6 @@ function Coverage({ response, journey6 }: { response: MessageSearchResponse; jou
       {journey6 ? (
         <p>
           {partial ? '这里只列出部分结果' : '可能还有没搜到的'}，最近消息和所选范围是否已经找全还不能确认。
-          {meta.qualification?.status === 'partial' &&
-            `另有${meta.qualification.unassessed + meta.qualification.indeterminate}条候选还没核对完。`}
           {meta.degraded &&
             (meta.effectiveMode === 'lexical' ? '按意思查找暂不可用，现用关键词查找。' : '部分查找暂不可用。')}
         </p>
@@ -39,9 +38,6 @@ function Coverage({ response, journey6 }: { response: MessageSearchResponse; jou
             索引覆盖范围尚未确认。
           </p>
           <p>最近消息可能尚未入索引，延迟暂无法确认。</p>
-          {meta.qualification?.status === 'partial' && (
-            <p>{meta.qualification.unassessed + meta.qualification.indeterminate} 条候选尚未核对出结论，未作为匹配。</p>
-          )}
           {partial && <p>仅列出部分命中，不能据此判断没有其他消息。</p>}
           {meta.degraded && (
             <p>{meta.effectiveMode === 'lexical' ? '当前使用关键词检索，按意思检索暂不可用。' : '检索仅部分可用。'}</p>
@@ -94,6 +90,7 @@ export function MessageSearchResults({
         </div>
       ) : (
         <>
+          <MessageSearchNotice response={response} />
           <div className="flex items-center justify-between gap-3 border-b border-[var(--console-border-soft)] px-3 py-2 text-xs text-cafe-muted">
             <div className="flex gap-3" role="group" aria-label="结果排序">
               {(['time', 'relevance'] as const).map((sort) =>
@@ -114,13 +111,6 @@ export function MessageSearchResults({
             </div>
             <span>{response.results.length} 处</span>
           </div>
-          {response.results.length === 0 && (
-            <p className="p-3 text-sm text-cafe-secondary" role="status">
-              {response.meta.qualification?.status === 'partial'
-                ? '部分候选尚未核对完，暂不能判断是否有匹配。'
-                : '本次检索未找到相关消息。'}
-            </p>
-          )}
           {journey6 && !readonly && (
             <MessageDecisionSummary response={response} threadId={currentThreadId} resolveSpeaker={resolveSpeaker} />
           )}

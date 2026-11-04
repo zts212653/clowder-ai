@@ -18,7 +18,13 @@ interface Source {
   error?: string;
 }
 
-export function PluginMarketplaceSettings({ onChange }: { onChange?: () => Promise<void> }) {
+export function PluginMarketplaceSettings({
+  onChange,
+  autoSynchronize = true,
+}: {
+  onChange?: () => Promise<void>;
+  autoSynchronize?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const [sources, setSources] = useState<Source[]>([]);
   const [url, setUrl] = useState('');
@@ -56,7 +62,7 @@ export function PluginMarketplaceSettings({ onChange }: { onChange?: () => Promi
   useEffect(() => {
     mounted.current = true;
     let cancelled = false;
-    if (onChange)
+    if (onChange && autoSynchronize)
       void request('')
         .then(() => {
           if (!cancelled) return synchronize();
@@ -68,7 +74,7 @@ export function PluginMarketplaceSettings({ onChange }: { onChange?: () => Promi
       cancelled = true;
       mounted.current = false;
     };
-  }, [onChange, request, synchronize]);
+  }, [onChange, request, synchronize, autoSynchronize]);
 
   useEffect(() => {
     if (!open) return;

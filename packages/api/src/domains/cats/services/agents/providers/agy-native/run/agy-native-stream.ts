@@ -56,6 +56,12 @@ export async function* observeAgyNativeTurn(
   let resultCount = 0;
   let resultSeenBeforeCancellation = false;
   let streamChars = 0;
+  const debugRef = (): CliDiagnostics['debugRef'] => ({
+    command: expected.command ?? 'agy',
+    signal: transportExit?.signal ?? null,
+    ...(transportExit ? { exitCode: transportExit.code } : {}),
+    ...(expected.invocationId ? { invocationId: expected.invocationId } : {}),
+  });
   for await (const raw of stream) {
     if (isCliError(raw) || isCliTimeout(raw)) {
       cliDiagnostics = raw.cliDiagnostics;
@@ -105,26 +111,25 @@ export async function* observeAgyNativeTurn(
       yield { kind: 'step', event };
     }
     if (record.event === 'result' && sessionId) {
+      const turn = verifiedNativeTerminal(lines, sessionId, resultCount);
+      // An internal consumer can stop on this result, before process teardown.
+      // Preserve stdout policy diagnostics without inventing exit/auth evidence.
+      const resultDiagnostics = agyNativePolicyDiagnostics(turn, cliDiagnostics, debugRef());
       yield {
         kind: 'result',
         observed: {
           sessionId,
-          turn: verifiedNativeTerminal(lines, sessionId, resultCount),
+          turn,
           transportError,
+          ...(resultDiagnostics ? { cliDiagnostics: resultDiagnostics } : {}),
           cancelledBeforeTerminal: signal?.aborted === true && !resultSeenBeforeCancellation,
         },
       };
     }
   }
-  const debugRef = {
-    command: expected.command ?? 'agy',
-    signal: transportExit?.signal ?? null,
-    ...(transportExit ? { exitCode: transportExit.code } : {}),
-    ...(expected.invocationId ? { invocationId: expected.invocationId } : {}),
-  };
-  if (!sessionId) throw missingAgyNativeInitError(lines, transportError, cliDiagnostics, debugRef);
+  if (!sessionId) throw missingAgyNativeInitError(lines, transportError, cliDiagnostics, debugRef());
   const turn = verifiedNativeTerminal(lines, sessionId, resultCount);
-  cliDiagnostics = agyNativePolicyDiagnostics(turn, cliDiagnostics, debugRef);
+  cliDiagnostics = agyNativePolicyDiagnostics(turn, cliDiagnostics, debugRef());
   yield {
     kind: 'complete',
     observed: {

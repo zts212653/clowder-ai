@@ -186,19 +186,41 @@ Review every PR against these four criteria:
 - [ ] **Direction** — Changes match the issue description / Feature Doc AC
 - [ ] **Scope** — PR only changes what it claims to change (no unrelated files)
 
-### 4.3 Patch vs Feature Merge Authority
+### 4.3 Review and Merge Authority
 
-**Patch PRs — maintainer can merge independently** when ALL four conditions are met:
+**Ordinary PRs to `next` — trusted maintainers may review each other's work and merge** when all conditions hold:
 
-1. Has an accepted issue
-2. Only touches safe paths (source code bug fixes, documentation, tests)
-3. CI / tests pass
-4. Doesn't touch tooling, security, or sync infrastructure
+1. The issue is accepted and the change stays within its approved scope.
+2. The author and their agents have completed self-checks and supplied verification evidence.
+3. A different trusted maintainer has reviewed the current change and submitted **Approve** using
+   their own GitHub account. Agents may help, but an agent's comment is not an approval, and another
+   agent using the author's account cannot approve the author's PR.
+4. Required CI is green on an up-to-date branch, all blocking findings are fixed, and review
+   conversations are resolved. Recheck approval after new commits; stale approvals are dismissed.
+5. The change does not require additional senior approval under the sensitive-change rules below.
 
-**Feature PRs — require senior maintainer approval:**
-- New capabilities or behavior changes
-- Changes to build tooling, CI, or project infrastructure
-- Any PR where you're unsure
+The authorized maintainer accounts are `zts212653` (repository owner), `mindfn`, `whutzefengxie-ops`,
+`EdgarR1170`, `YukinaXSer`, `bkkzz`, `zlzfun`, `liu-zhengdong`, and `LeslieKuo`.
+New invitees must accept the repository invitation and have current Write access before their
+approval can satisfy the code-owner requirement. A pending invitation does not grant that authority.
+[CODEOWNERS](CODEOWNERS) is the authoritative path-to-reviewer list. `next` requires one eligible
+non-author code-owner approval. Other contributors may provide feedback, but their approval does
+not replace this requirement. Any current maintainer with Write or higher access may then merge,
+including the author after independent approval. Write access does **not** bypass review or CI.
+
+**Sensitive changes — owner or explicitly designated senior maintainer approval is required:**
+
+- New capabilities or behavior changes need approval of the direction before implementation.
+- Architecture, authorization/security, persistence or data migration, public contracts, build/CI,
+  release/sync infrastructure, and governance changes need senior review of the actual change.
+- CODEOWNERS reserves the listed sensitive paths for `zts212653`; a future domain-owner delegation
+  must be explicitly authorized and reflected in CODEOWNERS before it can satisfy the GitHub gate.
+- Path matching cannot classify intent. A security or architecture change outside a reserved path
+  still needs senior approval; escalate when unsure.
+
+**`main` promotion and releases require explicit repository-owner authorization.** This `next`
+delegation does not change those boundaries. The owner's existing PR-only bypass is an exceptional,
+documented action with independent review evidence, not the normal merge route.
 
 ### 4.4 When Direction Is Right but Quality Isn't
 
@@ -466,19 +488,36 @@ PR 必须对应一个 **accepted issue**。"accepted" 的条件：
 - [ ] **方向** — 改动和 issue 描述 / Feature Doc AC 一致
 - [ ] **Scope** — PR 只改了它声称要改的东西（没有无关文件）
 
-### 4.3 Patch vs Feature 合入权限
+### 4.3 审查与合入权限
 
-**Patch PR — maintainer 可自主合入**，需 4 条件同时满足：
+**普通 PR 进入 `next` — 受信任维护者可以互审并自主合入**，须同时满足：
 
-1. 有 accepted issue
-2. 只改安全路径（代码 bug 修复、文档、测试）
-3. CI / 测试通过
-4. 不涉及工具链、安全、sync 基础设施
+1. issue 已接受，改动没有超出已批准范围。
+2. 作者和自己的猫完成自检，并提供验证证据。
+3. 另一位受信任维护者审查当前改动，使用自己的 GitHub 账号正式 **Approve**。
+   可以借助自己的猫，但“猫已审”的评论不等于批准，另一只猫使用作者账号也不能自批。
+4. 分支已跟上目标分支，必需 CI 全绿，阻塞意见修完，review 讨论全部解决。
+   新提交会撤销过时批准，合入前须重新核对。
+5. 没有下列需要额外高级审查的敏感变更。
 
-**Feature PR — 需要高级 maintainer 批准：**
-- 新能力或行为变更
-- 改动涉及构建工具、CI、项目基础设施
-- 拿不准的 PR
+已授权的维护者账号为 `zts212653`（仓库所有者）、`mindfn`、`whutzefengxie-ops`、
+`EdgarR1170`、`YukinaXSer`、`bkkzz`、`zlzfun`、`liu-zhengdong`、`LeslieKuo`。
+新成员须先接受仓库邀请、取得当前有效的 Write 权限，才能用其批准满足代码负责人门禁；
+待接受邀请本身不授予这项资格。
+具体路径对应的审查者以 [CODEOWNERS](CODEOWNERS) 为准；`next` 要求至少一位非作者的代码负责人批准。
+其他贡献者可以提意见，但其批准不能替代这道要求。条件满足后，当前有 Write 或以上权限的维护者即可合入，
+也包括已经取得独立批准的作者本人。Write 权限不绕过 review 和 CI。
+
+**敏感改动 — 须由仓库所有者或其明确指定的高级维护者批准：**
+
+- 新能力或行为变更，在实现前先确认方向。
+- 架构、鉴权／安全、持久化或数据迁移、公开契约、构建／CI、发布／同步基础设施和治理变更，须审查实际改动。
+- CODEOWNERS 列出的敏感路径目前保留给 `zts212653`；以后若委托领域负责人，须明确授权并更新 CODEOWNERS，
+  才能由该负责人满足 GitHub 门禁。
+- 路径无法判断全部意图。受保护路径之外的安全或架构改动同样需要高级批准；不确定时升级判断。
+
+**晋升 `main` 和正式发版须仓库所有者明确授权。** 此次 `next` 自治不改变这两条边界。
+所有者现有的“仅限 PR”例外权限只用于有独立审查证据并留痕的特殊处理，不是日常合入方式。
 
 ### 4.4 方向对但质量不够
 

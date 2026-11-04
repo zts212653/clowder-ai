@@ -10,6 +10,9 @@ export function materializeAgyNativeEffectGuard(input: {
   accountHome?: string;
   runtimeRoot: string;
   readOnly: boolean;
+  /** Host-admitted command directory; legacy hook callers can omit it. */
+  workspaceRoot?: string;
+  pluginServerName?: string;
 }): string {
   const script = realpathSync(secretRuntimeScript('agy-native-effect-guard.mjs'));
   const quote = (value: string) => `'${value.replaceAll("'", `'"'"'`)}'`;
@@ -19,8 +22,10 @@ export function materializeAgyNativeEffectGuard(input: {
     process.execPath,
     script,
     homedir(),
-    input.readOnly ? 'read-only' : 'normal',
+    input.pluginServerName !== undefined ? 'plugin-native' : input.readOnly ? 'read-only' : 'normal',
     input.accountHome ?? input.profileHome,
+    ...(input.workspaceRoot !== undefined ? [realpathSync(input.workspaceRoot)] : []),
+    ...(input.pluginServerName !== undefined ? [input.pluginServerName] : []),
   ]
     .map(quote)
     .join(' ');

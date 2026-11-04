@@ -11,6 +11,7 @@ import { useCollectiveWorldDirectoryRecovery } from '../collective/use-collectiv
 import { useConciergeRailToggle } from '../concierge/ConciergeRailToggle';
 import { HubIcon } from '../hub-icons';
 import { MeowClubMark } from '../icons/MeowClubMark';
+import { PluginUiEntries } from '../plugins/PluginUiEntries';
 import { type ResolvedPin, resolvePin } from '../settings/settings-ia';
 import { CollectiveWorldRailEntries } from './CollectiveWorldRailEntries';
 import { MailboxButton } from './MailboxButton';
@@ -43,7 +44,7 @@ export function WorldRail() {
   useEffect(() => rememberCafeReturnTarget(pathname), [pathname]);
   const go = useCallback(
     (path: string) => {
-      if (isSettingsRoute(path)) captureSettingsOrigin();
+      if (isSettingsRoute(path.split('?')[0])) captureSettingsOrigin();
       router.push(resolveShellNavTarget(path, pathname));
     },
     [router, pathname, captureSettingsOrigin],
@@ -71,6 +72,7 @@ export function WorldRail() {
       />
 
       <div className="mt-auto flex flex-col items-center gap-1.5">
+        <PluginUiEntries />
         <Suspense fallback={null}>
           <PinnedRailItems />
         </Suspense>

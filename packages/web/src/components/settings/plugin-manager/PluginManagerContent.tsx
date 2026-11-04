@@ -1,34 +1,25 @@
 'use client';
 
-import { pluginDescriptionVariants } from '@cat-cafe/shared';
 import type { ReactNode } from 'react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { HubIcon } from '../../hub-icons';
 import { settingsResourceCardClass } from '../../SettingsResourceCard';
 import { useShellLanguage } from '../../shell/shell-language';
 import { SettingsText } from '../primitives/SettingsText';
 import { SettingsPageHeader, type SettingsPageHeaderProps } from '../SettingsPageHeader';
 import { PluginManagerToolbar } from './controls/PluginManagerToolbar';
-import { pluginManagerText } from './controls/plugin-manager.shell-copy';
+import { PluginBatchPanel } from './PluginBatchPanel';
+import { PluginBrowserPanel } from './PluginBrowserPanel';
 import { PluginManagerDetailCard } from './PluginManagerDetailCard';
-import { PluginListRow, PluginListSection } from './PluginManagerList';
+import { PluginListRow } from './PluginManagerList';
 import { PluginManagerNotices } from './PluginManagerNotices';
-import {
-  installedPluginGroups,
-  type PluginManagerPresentation,
-  pluginBlockedEnableReason,
-} from './plugin-manager-attention';
+import type { PluginScope } from './PluginScopeMenu';
+import { type PluginBatchEntry, pluginBatchEntry } from './plugin-batch-model';
+import { pluginBrowserModel } from './plugin-browser-model';
+import { type PluginManagerPresentation, pluginBlockedEnableReason } from './plugin-manager-attention';
 import type { PluginManagerDesignFixture } from './plugin-manager-fixtures';
-
-function matchesSearch(plugin: PluginManagerDesignFixture, query: string): boolean {
-  const normalized = query.trim().toLocaleLowerCase();
-  if (normalized.length === 0) return true;
-  return `${plugin.id} ${plugin.displayName} ${pluginDescriptionVariants(plugin.description).join(' ')} ${plugin.packageName} ${plugin.publisher} ${plugin.capabilities
-    .map((capability) => `${capability.name} ${capability.description}`)
-    .join(' ')}`
-    .toLocaleLowerCase()
-    .includes(normalized);
-}
+import { usePluginBatch } from './usePluginBatch';
+import type { PluginCatalogCheckState } from './usePluginCatalogCheck';
 
 function usePluginSelection(
   visible: readonly PluginManagerDesignFixture[],
@@ -62,7 +53,10 @@ export function PluginManagerContent({
   pageHeader,
   catalogStatus = 'fresh',
   catalogMessage,
+  catalogCheck,
+  onCheckCatalog,
   loading = false,
+  inventoryKnown = !loading,
   error,
   warning,
   busyPluginId = null,
@@ -90,7 +84,10 @@ export function PluginManagerContent({
   pageHeader?: Omit<SettingsPageHeaderProps, 'children'>;
   catalogStatus?: 'loading' | 'fresh' | 'stale' | 'degraded' | 'unavailable';
   catalogMessage?: string;
+  catalogCheck?: PluginCatalogCheckState;
+  onCheckCatalog?: () => void;
   loading?: boolean;
+  inventoryKnown?: boolean;
   error?: string | null;
   warning?: string | null;
   busyPluginId?: string | null;
@@ -116,24 +113,41 @@ export function PluginManagerContent({
 }) {
   const language = useShellLanguage();
   const locale = requestedLocale ?? (presentation === 'v2' && language === 'en' ? 'en' : 'zh-CN');
-  const t = pluginManagerText(locale);
   const initialDetailOpened = useRef(false);
   const [query, setQuery] = useState('');
+  const [scope, setScope] = useState<PluginScope>('all');
+  const batch = usePluginBatch(onStateChanged);
+  const [batchEntries, setBatchEntries] = useState<PluginBatchEntry[]>([]);
+  const [batchFixtures, setBatchFixtures] = useState<readonly PluginManagerDesignFixture[]>([]);
   const [availableLimit, setAvailableLimit] = useState(5);
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
   const [configurationValidation, setConfigurationValidation] = useState({ pluginId: '', request: 0 });
 
-  const filtered = useMemo(() => fixtures.filter((plugin) => matchesSearch(plugin, query)), [fixtures, query]);
-  const leadingGroups = installedPluginGroups(filtered, presentation, locale);
-  const recommendationPool = filtered.filter(
-    (plugin) => plugin.artifact === 'absent' && (presentation === 'v2' || plugin.source === 'catalog'),
-  );
-  const recommendedPlugins = query.trim() ? recommendationPool : recommendationPool.slice(0, availableLimit);
-  const hasMore = !query.trim() && recommendedPlugins.length < recommendationPool.length;
-  const otherPlugins = filtered.filter(
-    (plugin) => presentation === 'v1' && plugin.artifact === 'absent' && plugin.source !== 'catalog',
-  );
-  const visible = [...leadingGroups.flatMap((group) => group.plugins), ...recommendationPool, ...otherPlugins];
+  const modern = presentation === 'v2';
+  const unavailable = catalogCheck?.unavailable || catalogStatus === 'unavailable';
+  const {
+    known,
+    attention,
+    counts,
+    filtered,
+    leadingGroups,
+    recommendationPool,
+    recommendedPlugins,
+    hasMore,
+    otherPlugins,
+    visible,
+  } = pluginBrowserModel({
+    fixtures: batch.open ? batchFixtures : fixtures,
+    presentation,
+    locale,
+    unavailable: !!unavailable,
+    hasCatalogHistory:
+      fixtures.some((p) => p.artifact === 'absent') ||
+      (catalogCheck?.hasCatalogSnapshot ?? !!catalogCheck?.lastSuccessfulAt),
+    scope,
+    query,
+    availableLimit,
+  });
   const selection = usePluginSelection(visible, selectedPluginId, onPluginSelect);
   const selected = selection.selected;
   const requestEnable = (plugin: PluginManagerDesignFixture) => {
@@ -159,15 +173,33 @@ export function PluginManagerContent({
         selected={plugin.id === selected?.id}
         locale={locale}
         onSelect={() => {
+          batch.close();
           selection.select(plugin.id);
           setMobileDetailOpen(true);
         }}
+        progress={batch.open ? batch.results.find((r) => r.id === plugin.id) : undefined}
+        onConfigure={
+          modern
+            ? () => {
+                batch.close();
+                selection.select(plugin.id);
+                setMobileDetailOpen(true);
+                setConfigurationValidation((current) => ({ pluginId: plugin.id, request: current.request + 1 }));
+              }
+            : undefined
+        }
         onInstall={() => onInstall?.(plugin.id)}
         onRepair={onRepair ? () => onRepair(plugin.id) : undefined}
         onSetEnabled={(enabled) => onSetEnabled?.(plugin.id, enabled)}
         onBlockedToggle={() => requestEnable(plugin)}
         onUninstall={() => onUninstall?.(plugin.id)}
-        busy={busyPluginId === plugin.id}
+        locked={batch.open}
+        busy={
+          busyPluginId === plugin.id ||
+          (batch.open &&
+            batch.phase === 'running' &&
+            batch.results.some((r) => r.id === plugin.id && r.state === 'working'))
+        }
         enableBlockedReason={
           configurationValidation.pluginId === plugin.id && plugin.actions?.setEnabled === false
             ? pluginBlockedEnableReason(plugin, locale, presentation)
@@ -177,112 +209,75 @@ export function PluginManagerContent({
     ));
 
   return (
-    <section data-testid="plugin-manager" className="flex h-full min-h-0 flex-1 flex-col gap-3.5 overflow-hidden">
-      {pageHeader ? (
-        <SettingsPageHeader {...pageHeader}>
+    <section
+      data-testid="plugin-manager"
+      className={`flex h-full min-h-0 flex-1 flex-col gap-3.5 overflow-hidden ${batch.open ? 'fixed inset-0 z-50 bg-[var(--console-shell-bg)] p-4 lg:static lg:z-auto lg:bg-transparent lg:p-0' : ''}`}
+    >
+      <div className={batch.open ? 'hidden lg:block' : undefined}>
+        {pageHeader ? (
+          <SettingsPageHeader {...pageHeader}>
+            <PluginManagerToolbar
+              locale={locale}
+              autoSynchronize={!modern}
+              onMarketplaceChange={onMarketplaceChange}
+              onDirectoryInstall={onDirectoryInstall}
+              onArchiveInstalled={onStateChanged}
+            />
+          </SettingsPageHeader>
+        ) : (
           <PluginManagerToolbar
             locale={locale}
+            autoSynchronize={!modern}
             onMarketplaceChange={onMarketplaceChange}
             onDirectoryInstall={onDirectoryInstall}
             onArchiveInstalled={onStateChanged}
           />
-        </SettingsPageHeader>
-      ) : (
-        <PluginManagerToolbar
-          locale={locale}
-          onMarketplaceChange={onMarketplaceChange}
-          onDirectoryInstall={onDirectoryInstall}
-          onArchiveInstalled={onStateChanged}
-        />
-      )}
-
+        )}
+      </div>
       <PluginManagerNotices
-        catalogStatus={catalogStatus}
+        catalogStatus={modern ? 'fresh' : catalogStatus}
         catalogMessage={catalogMessage}
         error={error}
         warning={warning}
       />
 
       <div className="grid min-h-0 flex-1 gap-3.5 overflow-hidden lg:grid-cols-[minmax(17rem,0.82fr)_minmax(0,1.5fr)]">
-        <div
-          data-mobile-panel="list"
-          className={`${mobileDetailOpen ? 'hidden' : 'flex'} min-h-0 min-w-0 flex-col gap-2 lg:flex`}
-        >
-          <div>
-            <label className={`${settingsResourceCardClass} flex min-w-0 items-center gap-2 px-3 py-2.5`}>
-              <HubIcon name="search" className="h-4 w-4 shrink-0 text-cafe-muted" />
-              <input
-                aria-label={t.search}
-                value={query}
-                onChange={(event) => {
-                  setQuery(event.target.value);
-                  setAvailableLimit(5);
-                  onSearchChange?.(event.target.value);
-                }}
-                placeholder={t.search}
-                className="min-w-0 flex-1 bg-transparent text-sm text-cafe outline-none placeholder:text-cafe-muted"
-              />
-            </label>
-          </div>
-          {/* Keep absolute accessibility labels inside this scroll container's containing block. */}
-          <div
-            data-plugin-scroll-region="list"
-            className="relative min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain pr-1"
-            onScroll={(event) => {
-              const list = event.currentTarget;
-              if (hasMore && list.scrollHeight - list.scrollTop - list.clientHeight < 96)
-                setAvailableLimit((limit) => limit + 5);
-            }}
-          >
-            {loading && (
-              <div data-testid="plugin-manager-loading" className="space-y-2">
-                {[0, 1, 2].map((item) => (
-                  <div key={item} className={`${settingsResourceCardClass} h-[88px] animate-pulse`} />
-                ))}
-              </div>
-            )}
-            {!loading && filtered.length === 0 && (
-              <div className={`${settingsResourceCardClass} px-4 py-10 text-center`}>
-                <SettingsText as="p" variant="sm" tone="muted">
-                  没有符合条件的插件
-                </SettingsText>
-              </div>
-            )}
-            {!loading && (
-              <>
-                {leadingGroups.map(({ kind, title, ariaLabel, plugins }) => (
-                  <PluginListSection
-                    key={kind}
-                    kind={kind}
-                    title={title}
-                    ariaLabel={ariaLabel}
-                    rows={renderRows(plugins)}
-                    count={presentation === 'v2' ? plugins.length : undefined}
-                  />
-                ))}
-                <PluginListSection
-                  kind={presentation === 'v2' ? 'available' : 'recommended'}
-                  title={presentation === 'v2' ? t.availableGroup : locale.startsWith('en') ? t.recommended : '推荐'}
-                  ariaLabel={presentation === 'v2' ? t.availableGroup : t.recommended}
-                  rows={renderRows(recommendedPlugins)}
-                  count={presentation === 'v2' ? recommendationPool.length : undefined}
-                />
-                {hasMore && (
-                  <button
-                    type="button"
-                    onClick={() => setAvailableLimit((limit) => limit + 5)}
-                    className="console-inline-link w-full py-2 text-sm"
-                  >
-                    {t.viewMore}
-                  </button>
-                )}
-                {presentation === 'v1' && (
-                  <PluginListSection kind="other" title="其他" ariaLabel="其他插件" rows={renderRows(otherPlugins)} />
-                )}
-              </>
-            )}
-          </div>
-        </div>
+        <PluginBrowserPanel
+          presentation={presentation}
+          locale={locale}
+          mobileDetailOpen={mobileDetailOpen}
+          query={query}
+          onQueryChange={(value) => {
+            setQuery(value);
+            setAvailableLimit(5);
+            onSearchChange?.(value);
+          }}
+          scope={scope}
+          onScopeChange={setScope}
+          counts={counts}
+          known={known}
+          filtered={filtered}
+          leadingGroups={leadingGroups}
+          recommendedPlugins={recommendedPlugins}
+          recommendationPool={recommendationPool}
+          otherPlugins={otherPlugins}
+          renderRows={renderRows}
+          catalogCheck={catalogCheck}
+          catalogStatus={catalogStatus}
+          onCheckCatalog={onCheckCatalog}
+          unavailable={!!unavailable}
+          loading={loading}
+          inventoryKnown={inventoryKnown}
+          hasMore={hasMore}
+          onMore={() => setAvailableLimit((limit) => limit + 5)}
+          batchRunning={batch.phase === 'running'}
+          onBatch={() => {
+            setBatchFixtures(fixtures);
+            setBatchEntries(attention.map((p) => pluginBatchEntry(p, unavailable)));
+            batch.show();
+            setMobileDetailOpen(true);
+          }}
+        />
 
         <div
           data-mobile-panel="detail"
@@ -290,7 +285,10 @@ export function PluginManagerContent({
         >
           <button
             type="button"
-            onClick={() => setMobileDetailOpen(false)}
+            onClick={() => {
+              batch.close();
+              setMobileDetailOpen(false);
+            }}
             className="flex items-center gap-2 px-1 text-xs font-semibold text-cafe-secondary transition hover:text-cafe lg:hidden"
           >
             <HubIcon name="arrow-left" className="h-4 w-4" />
@@ -300,7 +298,26 @@ export function PluginManagerContent({
             data-plugin-scroll-region="detail"
             className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1"
           >
-            {selected ? (
+            {batch.open ? (
+              <PluginBatchPanel
+                entries={batchEntries}
+                controller={{
+                  ...batch,
+                  close: () => {
+                    batch.close();
+                    setMobileDetailOpen(false);
+                  },
+                }}
+                onRetry={onCheckCatalog}
+                onRepair={onRepair}
+                onDetail={(id) => {
+                  batch.close();
+                  selection.select(id);
+                  setMobileDetailOpen(true);
+                  setConfigurationValidation((current) => ({ pluginId: id, request: current.request + 1 }));
+                }}
+              />
+            ) : selected ? (
               (renderCompatibilityDetail?.(selected.id, selected) ?? (
                 <PluginManagerDetailCard
                   key={selected.id}

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { after, before, test } from 'node:test';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
 import { ensureWorkspaceOpen } from './f307-workspace-open.mjs';
 import { verifyV2EvolutionJourney } from './f311-v2-journey.mjs';
 import { CONTRACT_THREAD_ID, startEvolutionWorkspaceBrowserFixture } from './f311-workspace-browser.harness.mjs';
@@ -117,7 +117,7 @@ async function assertContained(locator) {
   assert(sizes.scroll <= sizes.client + 1, `horizontal overflow: ${JSON.stringify(sizes)}`);
 }
 test(
-  'v2 Settings opens the F314 and duck projects, summary and exact main reading',
+  'v2 Workspace tools opens the F314 and duck projects, summary and exact main reading',
   { timeout: 120_000, skip: liveAlpha },
   async () => {
     await verifyV2EvolutionJourney({ fixture, browser, capture });
@@ -182,7 +182,7 @@ test(
         capture,
       });
       report.claims.push(
-        'The real v2 Settings entry shows zero pending approvals without calling constitution a user decision; typed 422 owner gaps settle instead of polling every two seconds.',
+        'The real v2 Workspace tools entry shows zero pending approvals without calling constitution a user decision; typed 422 owner gaps settle instead of polling every two seconds.',
       );
     } catch (error) {
       await capture(page, 'v2-home-truth-failure');

@@ -141,6 +141,7 @@
 .evolution-preparation-source-status[data-source-status="submitted"],
 .evolution-preparation-dual-status span[data-validity-state="bounded"] {
   background: var(--cafe-surface-sunken);
+  --chat-background-role: cafe-sunken;
   color: var(--cafe-text-secondary);
 }
 .evolution-preparation-submission {

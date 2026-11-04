@@ -1,6 +1,7 @@
 // F148: Hierarchical Context Transport — pure functions for smart window assembly.
 
 import type { HierarchicalContextConfig } from '../../../../../config/hierarchical-context-config.js';
+import { sliceUnicodeSafe } from '../../../../../utils/unicode-safe-slice.js';
 import type { PushRecallPresentation } from '../../../../memory/f200-types.js';
 import { getMessageDisplayName } from '../../context/ContextAssembler.js';
 import { formatPromptTimeRange } from '../../format-time.js';
@@ -439,7 +440,9 @@ export function formatAnchors(anchors: ScoredMessage[], truncateLimit: number): 
   if (anchors.length === 0) return [];
   return anchors.map((a, i) => {
     const content =
-      a.message.content.length > truncateLimit ? `${a.message.content.slice(0, truncateLimit)}...` : a.message.content;
+      a.message.content.length > truncateLimit
+        ? `${sliceUnicodeSafe(a.message.content, 0, truncateLimit)}...`
+        : a.message.content;
     const speaker = getMessageDisplayName(a.message);
     const label = a.isPrimacy ? 'Thread opener' : `Anchor ${i + 1}/${anchors.length}`;
     return `[${label} @${speaker}: ${a.message.id}] ${content}`;
@@ -553,9 +556,13 @@ export async function recallEvidenceWithProvenance(
     const recentContent = recentMessages
       .filter((m) => m.content.length > 0)
       .slice(-2)
-      .map((m) => stripStructuralEnvelope(m.content).slice(0, 200))
+      .map((m) => sliceUnicodeSafe(stripStructuralEnvelope(m.content), 0, 200))
       .join(' ');
-    const compositeQuery = [threadTitle, stripStructuralEnvelope(currentUserMessage).slice(0, 300), recentContent]
+    const compositeQuery = [
+      threadTitle,
+      sliceUnicodeSafe(stripStructuralEnvelope(currentUserMessage), 0, 300),
+      recentContent,
+    ]
       .filter(Boolean)
       .join(' ')
       .trim();

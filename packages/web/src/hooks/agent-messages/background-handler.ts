@@ -222,13 +222,20 @@ function handleDone(msg: BackgroundAgentMessage, options: Options): void {
     return;
   // An error already reported this turn: done keeps it and shows no success toast.
   if (options.store.getThreadState(msg.threadId).catStatuses[msg.catId] !== 'error') {
-    options.store.updateThreadCatStatus(msg.threadId, msg.catId, 'done');
+    const failure = msg.errorCode === 'cancelled' ? undefined : msg.errorCode;
+    options.store.updateThreadCatStatus(msg.threadId, msg.catId, failure ? 'error' : 'done');
+    const notification = failure
+      ? { type: 'error' as const, title: '出错', message: msg.error ?? failure, duration: 8000 }
+      : {
+          type: 'success' as const,
+          title: '完成',
+          message: `${catName(options, msg.catId)} 已完成处理`,
+          duration: 5000,
+        };
     options.addToast({
-      type: 'success',
-      title: `${catName(options, msg.catId)} 完成`,
-      message: `${catName(options, msg.catId)} 已完成处理`,
+      ...notification,
+      title: `${catName(options, msg.catId)} ${notification.title}`,
       threadId: msg.threadId,
-      duration: 5000,
     });
   }
   if (msg.isFinal) {

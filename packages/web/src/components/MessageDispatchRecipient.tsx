@@ -93,27 +93,33 @@ export function MessageDispatchRecipient({
         ? undefined
         : projection.statusMessageId;
   const failedDelivery = linked?.kind === 'delivery_failure';
+  const notSent =
+    cloud?.receipt?.status === 'failed' &&
+    cloud.receipt.transport === 'none' &&
+    cloud.receipt.idempotency.disposition === 'not_attempted';
   const outcome = response && response.status !== 'processing' ? responseOutcome[response.status] : undefined;
   const progress =
     logical.state === 'replied'
       ? '收到，已回复'
       : logical.state === 'source_replied'
         ? '这条消息已有回信'
-        : awaitingCloudReply
-          ? '收到，回复状态待核对'
-          : uncertain
-            ? checking
-              ? `正在核对 ${label} 收到没…`
-              : '已送出，没确认收到'
-            : failedDelivery
-              ? '没送到'
-              : appended
-                ? `收到，并进了${running ? '正在回' : '已结束'}的这一轮${outcome ? ` · ${outcome}` : ''} · ${dispatchReadText(receipt)}`
-                : processing
-                  ? '收到，正在回…'
-                  : outcome
-                    ? `收到，${outcome}`
-                    : '收到，回复状态待核对';
+        : notSent
+          ? '尚未发送'
+          : awaitingCloudReply
+            ? '收到，回复状态待核对'
+            : uncertain
+              ? checking
+                ? `正在核对 ${label} 收到没…`
+                : '已送出，没确认收到'
+              : failedDelivery
+                ? '没送到'
+                : appended
+                  ? `收到，并进了${running ? '正在回' : '已结束'}的这一轮${outcome ? ` · ${outcome}` : ''} · ${dispatchReadText(receipt)}`
+                  : processing
+                    ? '收到，正在回…'
+                    : outcome
+                      ? `收到，${outcome}`
+                      : '收到，回复状态待核对';
   const late = projection.dispatchedAt !== undefined && projection.dispatchedAt - message.timestamp > 60_000;
   return (
     <li

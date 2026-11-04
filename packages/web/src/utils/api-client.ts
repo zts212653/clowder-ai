@@ -80,6 +80,8 @@ interface GetGeneration {
   path: string;
   init: RequestInit | undefined;
   ifNoneMatch: string | null | undefined;
+  controller: AbortController;
+  waiters: number;
 }
 
 interface GetCoordinationState {
@@ -237,13 +239,6 @@ function exactGetKey(path: string, init?: RequestInit): string {
   });
 }
 
-function withoutCallerSignal(init?: RequestInit): RequestInit | undefined {
-  if (!init) return undefined;
-  const physicalInit = { ...init };
-  delete physicalInit.signal;
-  return physicalInit;
-}
-
 async function performApiFetch(
   path: string,
   init?: RequestInit,
@@ -319,14 +314,17 @@ function createGetGeneration(
     resolve = resolvePromise;
     reject = rejectPromise;
   });
+  const controller = new AbortController();
   return {
     id: ++nextGetGeneration,
     promise,
     resolve,
     reject,
     path,
-    init: withoutCallerSignal(init),
+    init: { ...init, signal: controller.signal },
     ifNoneMatch,
+    controller,
+    waiters: 0,
   };
 }
 
@@ -341,17 +339,19 @@ function physicalGetInit(generation: GetGeneration): RequestInit | undefined {
 function startGetGeneration(key: string, state: GetCoordinationState, generation: GetGeneration): void {
   void performApiFetch(generation.path, physicalGetInit(generation))
     .then(generation.resolve, generation.reject)
-    .finally(() => {
-      if (state.active !== generation) return;
-      const trailing = state.trailing;
-      if (!trailing) {
-        coordinatedGets.delete(key);
-        return;
-      }
-      state.active = trailing;
-      state.trailing = null;
-      startGetGeneration(key, state, trailing);
-    });
+    .finally(() => finishGetGeneration(key, state, generation));
+}
+
+function finishGetGeneration(key: string, state: GetCoordinationState, generation: GetGeneration): void {
+  if (coordinatedGets.get(key) !== state || state.active !== generation) return;
+  const trailing = state.trailing;
+  if (!trailing) {
+    coordinatedGets.delete(key);
+    return;
+  }
+  state.active = trailing;
+  state.trailing = null;
+  startGetGeneration(key, state, trailing);
 }
 
 async function coordinatedGet(
@@ -376,10 +376,29 @@ async function coordinatedGet(
     generation = state.active;
   }
 
-  const response = await waitForPromiseWithSignal(generation.promise, init?.signal);
-  const clone = response.clone();
-  markApiGetGeneration(clone, generation.id);
-  return clone;
+  generation.waiters += 1;
+  let waiting = true;
+  const release = () => {
+    if (!waiting) return;
+    waiting = false;
+    generation.waiters -= 1;
+    if (generation.waiters === 0 && init?.signal?.aborted) {
+      generation.controller.abort();
+      if (state.trailing === generation) state.trailing = null;
+      else finishGetGeneration(key, state, generation);
+    }
+  };
+  // Detach synchronously: a remount in this turn must join a fresh generation.
+  init?.signal?.addEventListener('abort', release, { once: true });
+  try {
+    const response = await waitForPromiseWithSignal(generation.promise, init?.signal);
+    const clone = response.clone();
+    markApiGetGeneration(clone, generation.id);
+    return clone;
+  } finally {
+    init?.signal?.removeEventListener('abort', release);
+    release();
+  }
 }
 
 /**

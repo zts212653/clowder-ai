@@ -1,6 +1,19 @@
 /** Human-readable model name — strip vendor prefix for display. */
-export function formatModelName(model: string): string {
+export function formatModelName(
+  model: string,
+  registry: readonly { defaultModel: string; variantLabel?: string }[] = [],
+): string {
   if (!model || model === 'unknown') return '未知模型';
+  // Exact historical model only: a member's replacement model cannot rename an old record.
+  const registered = [
+    ...new Set(
+      registry
+        .filter((item) => item.defaultModel === model)
+        .map((item) => item.variantLabel?.trim())
+        .filter((label): label is string => Boolean(label)),
+    ),
+  ];
+  if (registered.length === 1 && registered[0]) return registered[0];
   // e.g. "claude-opus-4-6" → "Claude Opus 4.6", "claude-fable-5" → "Claude Fable 5"
   if (model.startsWith('claude-')) {
     const parts = model.replace('claude-', '').split('-');

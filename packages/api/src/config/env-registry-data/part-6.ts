@@ -20,6 +20,18 @@ export const ENV_DEFINITIONS_6: readonly EnvDefinition[] = [
     allowedValues: ['print_sdk', 'agent_sdk', 'interactive_pty', 'bg_daemon', 'api_key'],
   },
   {
+    name: 'CAT_CAFE_CLAUDE_SDK_ENTRYPOINT',
+    defaultValue: 'sdk-ts',
+    description:
+      'Claude SDK 客户端来源名实验；cat-cafe 会改变原生客户端分类，额度收益尚未验证。sdk-ts 恢复 SDK 默认；修改后重启 API 生效',
+    category: 'cli',
+    sensitive: false,
+    runtimeEditable: false,
+    restartRequired: true,
+    exampleRecommended: true,
+    allowedValues: ['sdk-ts', 'cat-cafe'],
+  },
+  {
     name: 'CAT_CAFE_CODEX_CARRIER',
     defaultValue: 'cli',
     description:

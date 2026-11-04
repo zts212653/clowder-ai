@@ -431,6 +431,77 @@ describe('Collective owner participation interactions', () => {
     expect(container.querySelector('a[href="/thread/private"]')?.textContent).toContain('在家里查看');
   });
 
+  it('does not offer reply recovery while the original cat execution is still active', async () => {
+    fetchMock.mockImplementation(async () =>
+      response({
+        ...view,
+        requests: [
+          {
+            ...view.requests[0],
+            privateThread: { id: 'private', title: 'Collective #general 公共参与' },
+            execution: { stage: 'started' as const, invocationId: 'active-invocation' },
+            event: {
+              ...view.requests[0]?.event,
+              recipient: {
+                kind: 'agent' as const,
+                humanId: 'owner-human',
+                agentId: 'codex61-sol',
+                connectionId: 'connection-A',
+                participationRevision: 2,
+              },
+            },
+          },
+        ],
+      }),
+    );
+    await open();
+    expect(container.textContent).not.toContain('补交原回复');
+  });
+
+  it('queues an idempotent same-source recovery from the finished request row', async () => {
+    const finished = {
+      ...view,
+      requests: [
+        {
+          ...view.requests[0],
+          privateThread: { id: 'private', title: 'Collective #general 公共参与' },
+          execution: { stage: 'ended' as const },
+          event: {
+            ...view.requests[0]?.event,
+            target: {
+              kind: 'agent' as const,
+              humanId: 'owner-human',
+              agentId: 'codex61-sol',
+            },
+            recipient: {
+              kind: 'agent' as const,
+              humanId: 'owner-human',
+              agentId: 'codex61-sol',
+              connectionId: 'connection-A',
+              participationRevision: 2,
+            },
+          },
+        },
+      ],
+    };
+    let recoveryBody: Record<string, unknown> | undefined;
+    fetchMock.mockImplementation(async (url, init) => {
+      if (String(url).includes('/collective-reply-recovery/')) {
+        recoveryBody = JSON.parse(String(init?.body));
+        return response({ status: 'queued' }, 202);
+      }
+      return response(finished);
+    });
+    await open();
+    await click('补交原回复');
+    const recovery = fetchMock.mock.calls.find(([url]) => String(url).includes('/collective-reply-recovery/'));
+    expect(String(recovery?.[0])).toBe('/api/threads/private/messages/request/collective-reply-recovery/codex61-sol');
+    expect(recovery?.[1]?.method).toBe('POST');
+    expect(recoveryBody?.requestId).toMatch(/^[0-9a-f-]{36}$/u);
+    expect(localStorage.getItem('collective-reply-recovery:connection-A:event')).toBeNull();
+    expect(container.textContent).toContain('已排入同源恢复');
+  });
+
   it('does not mix the retired private-standing grant form into the collective roster', async () => {
     fetchMock.mockImplementation(async (_url, init) => response(init?.method ? {} : view));
     await open();

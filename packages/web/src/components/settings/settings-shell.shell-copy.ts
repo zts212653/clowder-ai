@@ -28,19 +28,14 @@ export const settingsShellCopy = defineShellCopy(
     zh: {
       title: '设置与管理',
       navigation: '设置导航',
-      teamWorkspace: '成员能力与路由状态',
       sections: Object.fromEntries(SETTINGS_SECTIONS.map(({ id, label }) => [id, label] as const)),
       sectionGroup: (label: string) => `${label}的分区`,
       entries: {
         you: '你',
         team: '猫猫团队',
-        schedule: '调度',
-        evolution: '能力进化',
-        eval: '评估',
         connect: '连接与扩展',
         system: '系统',
         theme: '主题',
-        community: '社区',
         starry: '猫猫星球',
         mission: '功能看板',
         signals: '信号',
@@ -52,7 +47,6 @@ export const settingsShellCopy = defineShellCopy(
     en: {
       title: 'Settings',
       navigation: 'Settings navigation',
-      teamWorkspace: 'Member capabilities & routing',
       sections: {
         members: settingsDetailCopy.en.members.title,
         profiles: settingsDetailCopy.en.profiles.title,
@@ -72,13 +66,9 @@ export const settingsShellCopy = defineShellCopy(
       entries: {
         you: 'You',
         team: 'Cat team',
-        schedule: 'Scheduling',
-        evolution: 'Capability evolution',
-        eval: 'Evaluation',
         connect: 'Integrations',
         system: 'System',
         theme: 'Theme',
-        community: 'Community',
         starry: 'Cat Planet',
         mission: 'Mission Hub',
         signals: 'Signals',

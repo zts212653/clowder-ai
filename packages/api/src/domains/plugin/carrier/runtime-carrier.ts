@@ -4,8 +4,10 @@ import {
   type PluginDeliveryInput,
   type PluginDeliveryReceipt,
 } from '@clowder-ai/plugin-contract';
+import { createModuleLogger } from '../../../infrastructure/logger.js';
 import type { ToolExecutionPolicy } from '../../cats/services/types.js';
 import { activateDeclaredMcp } from '../declared/declared-mcp-resources.js';
+import { DeclaredPluginUi } from '../declared/declared-plugin-ui.js';
 import {
   type DeclaredPluginTool,
   type DeclaredPluginWebhook,
@@ -21,6 +23,7 @@ import {
 } from '../declared/declared-static-resources.js';
 import { NativeMcpLaunches, type NativeMcpServer } from '../declared/native-mcp-launches.js';
 import { NativePluginActions } from '../declared/native-plugin-actions.js';
+import type { SharedMcpFactory } from '../declared/shared-mcp-factory.js';
 import { type PluginRuntimeLifecyclePort, removesPluginOwnedResources } from '../external-plugin-lifecycle-types.js';
 import { ExternalPluginRuntimeError, type VerifiedPluginPackageLocator } from '../external-runtime/types.js';
 import type { PluginInventoryStore } from '../host-inventory/ports.js';
@@ -34,6 +37,7 @@ import {
   reportedPluginInvocation,
   settlePluginInvocation,
 } from './host-invocation.js';
+import type { PluginCallContext } from './plugin-call-context.js';
 
 /**
  * F202 Train C1 — the Host's single runtime-carrier boundary.
@@ -51,9 +55,11 @@ export interface PluginRuntimeAdmission {
 }
 
 export interface PluginRuntimeCarrier {
+  resolveMcpFactory?(pluginInstanceId: string, contributionId: string): Promise<SharedMcpFactory | undefined>;
   /** Derived from the admitted package alone. Carrier selection has no other input. */
   claims(admission: PluginRuntimeAdmission): boolean;
-  start(pluginInstanceId: string): Promise<unknown>;
+  /** In-process carriers join Host contribution admission before publishing runtime health. */
+  start(pluginInstanceId: string, admitContributions?: () => Promise<void>): Promise<unknown>;
   stop(pluginInstanceId: string, reason: string): Promise<void>;
   readStream?(
     pluginInstanceId: string,
@@ -76,13 +82,17 @@ export interface PluginRuntimeCarrier {
 }
 
 export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
+  readonly ui = new DeclaredPluginUi();
   readonly nativeActions = new NativePluginActions((id) => this.#admission(id));
   readonly #nativeMcpLaunches = new NativeMcpLaunches((id) => this.#admission(id), this.nativeActions);
   readonly #carriers: PluginRuntimeCarrier[] = [];
   readonly #runtimeContributions: DeclaredRuntimeContributions;
 
   constructor(
-    private readonly inventory: Pick<PluginInventoryStore, 'snapshot'>,
+    private readonly inventory: Pick<
+      PluginInventoryStore,
+      'snapshot' | 'read' | 'readAuthority' | 'readCurrentAuthority'
+    >,
     private readonly resources?: DeclaredStaticResourceHost,
     runtimeContributions?: DeclaredRuntimeContributionHost,
     private readonly beforeStop?: (instanceId: string, reason: string) => Promise<void>,
@@ -93,6 +103,7 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
         packages: resources?.packages ?? unsupportedPackageLocator,
         configuration: resources?.configuration ?? unsupportedConfiguration,
       },
+      (id) => this.#admission(id),
     );
   }
 
@@ -111,40 +122,53 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
     const admission = await this.#admission(pluginInstanceId);
     const carrier = this.#selectAdmission(admission);
     const previousSkillPolicy = await captureDeclaredSkillPolicy(admission.packageRecord.pluginId, this.resources);
-    const result = await carrier.start(pluginInstanceId);
+    let admitted: Promise<void> | undefined;
+    const admitContributions = () =>
+      (admitted ??= (async () => {
+        this.nativeActions.activate(admission, generation, (method, input) =>
+          this.invoke(pluginInstanceId, method, input),
+        );
+        const launches = await activateDeclaredStaticResources(
+          admission,
+          this.resources && {
+            ...this.resources,
+            nativeActionEnvironment: (contributionId) =>
+              this.nativeActions.environment(pluginInstanceId, contributionId),
+            nativeActionEnvironmentReferences: (id) => this.nativeActions.environmentReferences(pluginInstanceId, id),
+          },
+        );
+        await this.#runtimeContributions.activate(
+          admission,
+          (instanceId, method, params) => this.invoke(instanceId, method, params),
+          {
+            attempt: (instanceId, method, params) => this.attemptInvoke(instanceId, method, params),
+            exposes: (instanceId, method) => this.exposesAction(instanceId, method),
+          },
+        );
+        const shared = await this.#sharedFactories(admission, carrier);
+        this.#nativeMcpLaunches.activate(admission, generation, launches, shared.factories, shared.unavailable);
+      })());
     try {
-      this.nativeActions.activate(admission, generation, (method, input) =>
-        this.invoke(pluginInstanceId, method, input),
-      );
-      const launches = await activateDeclaredStaticResources(
-        admission,
-        this.resources && {
-          ...this.resources,
-          nativeActionEnvironment: (contributionId) => this.nativeActions.environment(pluginInstanceId, contributionId),
-          nativeActionEnvironmentReferences: (id) => this.nativeActions.environmentReferences(pluginInstanceId, id),
-        },
-      );
-      await this.#runtimeContributions.activate(
-        admission,
-        (instanceId, method, params) => this.invoke(instanceId, method, params),
-        {
-          attempt: (instanceId, method, params) => this.attemptInvoke(instanceId, method, params),
-          exposes: (instanceId, method) => this.exposesAction(instanceId, method),
-        },
-      );
-      this.#nativeMcpLaunches.activate(admission, generation, launches);
+      const result = await carrier.start(pluginInstanceId, admitContributions);
+      // External and legacy carriers may not publish a separate Host-ready state.
+      // Joining the same promise preserves one admission and its original rollback boundary.
+      await admitContributions();
+      // stop/stopAll invalidate this admission even after carrier readiness.
+      if (this.nativeActions.generation(pluginInstanceId) === generation) this.ui.activate(admission);
       return result;
     } catch (error) {
+      if (!admitted) throw error;
       await this.#rollbackStartedRuntime(error, carrier, admission, previousSkillPolicy);
     }
   }
 
   async stop(pluginInstanceId: string, reason = 'host_stop'): Promise<void> {
+    this.ui.deactivate(pluginInstanceId);
     this.#nativeMcpLaunches.deactivate(pluginInstanceId);
     this.nativeActions.deactivate(pluginInstanceId);
-    const snapshot = await this.inventory.snapshot();
-    const instance = snapshot.instances.find((item) => item.pluginInstanceId === pluginInstanceId);
-    const pkg = instance && snapshot.packages.find((item) => item.packageDigest === instance.packageDigest);
+    const authority = await this.inventory.readAuthority(pluginInstanceId);
+    const instance = authority?.instance;
+    const pkg = authority?.packageRecord;
     if (pkg?.manifest === null) {
       await this.beforeStop?.(pluginInstanceId, reason);
       await this.#runtimeContributions.deactivate(pluginInstanceId);
@@ -187,16 +211,18 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
         nativeActionEnvironmentReferences: (id) => this.nativeActions.environmentReferences(pluginInstanceId, id),
       },
     );
-    this.#nativeMcpLaunches.activate(admission, generation, launches);
+    const shared = await this.#sharedFactories(admission, carrier);
+    this.#nativeMcpLaunches.activate(admission, generation, launches, shared.factories, shared.unavailable);
     await this.#runtimeContributions.refreshAgentSessionProviders(admission);
   }
 
   async stopAll(reason = 'host_shutdown'): Promise<void> {
+    this.ui.deactivateAll();
     this.#nativeMcpLaunches.deactivateAll();
     this.nativeActions.deactivateAll();
     if (this.beforeStop) {
-      const inventory = await this.inventory.snapshot();
-      await Promise.all(inventory.instances.map((instance) => this.beforeStop?.(instance.pluginInstanceId, reason)));
+      const instances = await this.inventory.read.instances.list();
+      await Promise.all(instances.map((instance) => this.beforeStop?.(instance.pluginInstanceId, reason)));
     }
     await this.#runtimeContributions.deactivateAll();
     const carrierResults = await Promise.allSettled(this.#carriers.map((carrier) => carrier.stopAll(reason)));
@@ -219,12 +245,37 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
     return this.#nativeMcpLaunches.resolve(policy);
   }
 
-  /** Isolated deployments read local launches without publishing into the persistent capability root. */
+  resolveSharedMcp(instanceId: string, contributionId: string, revision: string) {
+    return this.#nativeMcpLaunches.resolveShared(instanceId, contributionId, revision);
+  }
+
+  async #sharedFactories(admission: PluginRuntimeAdmission, carrier: PluginRuntimeCarrier) {
+    const factories = new Map<string, SharedMcpFactory>();
+    const unavailable = new Map<string, string>();
+    for (const contribution of admission.packageRecord.manifest.contributions ?? []) {
+      if (contribution.type !== 'mcp' || !contribution.sharedFactory) continue;
+      try {
+        const factory = await carrier.resolveMcpFactory?.(admission.instance.pluginInstanceId, contribution.id);
+        if (factory) factories.set(contribution.id, factory);
+        else unavailable.set(contribution.id, 'shared_factory_carrier_unavailable');
+      } catch {
+        // Keep the original stdio path usable, without exposing package exceptions/secrets.
+        unavailable.set(contribution.id, 'shared_factory_load_failed');
+      }
+    }
+    for (const [contributionId, reason] of unavailable)
+      createModuleLogger('plugin-native-mcp').warn(
+        { instanceId: admission.instance.pluginInstanceId, contributionId, reason },
+        'Shared MCP unavailable; using original stdio',
+      );
+    return { factories, unavailable };
+  }
+
+  /** Every deployment projects its own activation; isolated Hosts never publish into shared configuration. */
   async resolveMemberMcpView(): Promise<
     import('../../../config/capabilities/invocation-plugin-mcp-view.js').InvocationPluginMcpView | undefined
   > {
-    if (this.resources?.persistCapabilities !== false) return undefined;
-    return this.#nativeMcpLaunches.memberView(this.resources.projectRoot);
+    return this.#nativeMcpLaunches.memberView(this.resources?.projectRoot);
   }
 
   async deliver(pluginInstanceId: string, input: PluginDeliveryInput): Promise<PluginDeliveryReceipt> {
@@ -318,8 +369,9 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
     contributionId: string,
     toolName: string,
     args: Readonly<Record<string, unknown>>,
+    caller?: PluginCallContext,
   ): Promise<unknown> {
-    const direct = await this.#runtimeContributions.callPluginTool(pluginId, contributionId, toolName, args);
+    const direct = await this.#runtimeContributions.callPluginTool(pluginId, contributionId, toolName, args, caller);
     if (direct.handled) return direct.value;
     throw new ExternalPluginRuntimeError('DELIVERY_REJECTED', `${pluginId} is not active`);
   }
@@ -392,11 +444,8 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
    * owns the instance, not *whether* the instance may run.
    */
   async #admission(pluginInstanceId: string): Promise<PluginRuntimeAdmission> {
-    const snapshot = await this.inventory.snapshot();
-    const instance = snapshot.instances.find((candidate) => candidate.pluginInstanceId === pluginInstanceId);
-    const packageRecord = instance
-      ? snapshot.packages.find((candidate) => candidate.packageDigest === instance.packageDigest)
-      : undefined;
+    const authority = await this.inventory.readAuthority(pluginInstanceId);
+    const { instance, packageRecord } = authority ?? {};
     if (!instance || !packageRecord) {
       throw new ExternalPluginRuntimeError(
         'INSTANCE_NOT_RUNNABLE',

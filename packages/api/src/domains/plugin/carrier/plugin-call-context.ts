@@ -12,6 +12,8 @@ export interface PluginCallContext {
   readonly threadId: string;
   readonly userId: string;
   readonly invocationId: string;
+  /** Issued per admitted native action by Host; never accepted from tool input. */
+  readonly nativeAction?: { readonly id: string; readonly contributionId: string; readonly method: string };
   /** Set only inside the Host's admitted project-output dispatcher. */
   readonly outputOperation?: { readonly id: string };
   /** Host-only authenticated lookup; never serialized into package identity or action input. */
@@ -27,6 +29,8 @@ export interface PluginCallContext {
   };
   /** Recheck the local activation and invoking turn after asynchronous provider work. */
   assertCurrent(): Promise<void>;
+  /** Immediate request/native-action lifetime fence, issued only by Host. */
+  assertWriteCurrent?(): void;
   /** Host-only turn/activation fence; never reads inventory or crosses the package ABI. */
   assertInvocationCurrent?(): Promise<void>;
 }

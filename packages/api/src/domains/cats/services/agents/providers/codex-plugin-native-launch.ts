@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
+import { catRegistry } from '@cat-cafe/shared';
 import { pluginMcpEnvironment } from '../../../../../config/capabilities/plugin-mcp-environment.js';
 import { finalizeCodexAccountEnvironment } from '../../../../../config/codex-account-environment.js';
 import { codexManagedLaunchArgs } from '../../../../../config/codex-managed-launch.js';
@@ -9,6 +10,7 @@ import type { AgentServiceOptions } from '../../types.js';
 import { normalizeToolExecutionPolicy } from '../invocation/tool-execution-policy.js';
 import { normalizeCodexMcpConfigArgs } from './codex-config-overrides.js';
 import { CODEX_LIVE_DISABLED_FEATURES } from './codex-live-policy.js';
+import { captureInvocationL0Input } from './l0-input-capture.js';
 
 const AUTH_KEYS = ['OPENAI_API_KEY', 'OPENAI_ORG_ID', 'OPENAI_ORGANIZATION', 'OPENAI_PROJECT_ID'] as const;
 const MINIMAL_PATH = `${dirname(process.execPath)}:/usr/bin:/bin`;
@@ -42,7 +44,8 @@ export function linkCodexPluginAuth(
 }
 
 export interface PreparedCodexNativeLaunch {
-  readonly kind: 'public';
+  readonly kind: 'public' | 'scoped-member';
+  readonly model?: string;
   readonly options: AgentServiceOptions;
   readonly env: Record<string, string>;
   readonly args: readonly string[];
@@ -56,12 +59,14 @@ export async function prepareCodexNativeLaunch(
   options: AgentServiceOptions,
   carrier: string,
   frozenPrompt: boolean,
+  catId: string,
+  model?: string,
 ): Promise<PreparedCodexNativeLaunch> {
   const port = options.pluginNativeLaunch;
   if (
     !port ||
     typeof port.assertCurrent !== 'function' ||
-    port.sandbox?.kind !== 'public' ||
+    !['public', 'scoped-member'].includes(port.sandbox?.kind) ||
     options.toolExecutionPolicy?.mode !== 'plugin_native' ||
     carrier !== 'exec_json' ||
     !frozenPrompt ||
@@ -77,6 +82,7 @@ export async function prepareCodexNativeLaunch(
     throw new Error('plugin_native_launch_unavailable');
 
   const policy = normalizeToolExecutionPolicy(options.toolExecutionPolicy);
+  const kind = port.sandbox.kind;
   const attempt = new AbortController();
   const server = snapshotServer(port.server);
   const workspace = port.sandbox.workspaceRoot;
@@ -120,6 +126,14 @@ export async function prepareCodexNativeLaunch(
   }
   const captured: AgentServiceOptions = {
     ...options,
+    frozenL0Input:
+      kind === 'scoped-member' && options.frozenL0Input
+        ? options.frozenL0Input
+        : captureInvocationL0Input(
+            kind === 'scoped-member'
+              ? { catId, projection: kind, catConfig: catRegistry.getOrThrow(catId).config, model: model ?? '' }
+              : { catId, projection: 'public' },
+          ),
     signal,
     workingDirectory: canonicalWorkspace,
     callbackEnv,
@@ -182,7 +196,7 @@ export async function prepareCodexNativeLaunch(
     )
       .filter((key) => !['HOME', 'PATH', 'TMPDIR', 'CODEX_HOME'].includes(key))
       .map((value) => JSON.stringify(value))
-      .join(',')}],enabled=true}}`;
+      .join(',')}],enabled=true,default_tools_approval_mode="approve"}}`;
     const args = [
       '--ignore-user-config',
       '--ignore-rules',
@@ -235,7 +249,8 @@ export async function prepareCodexNativeLaunch(
       }
     }
     return {
-      kind: 'public',
+      kind,
+      model,
       options: captured,
       env,
       args: Object.freeze(normalizeCodexMcpConfigArgs(args)),

@@ -7,6 +7,7 @@ import {
   initialState,
   type StrategyFormState,
 } from '../../hub-cat-editor.model';
+import type { CatPayloadContext } from '../../hub-cat-editor.payload';
 import { normalizeMemberDraftBaseline, normalizeMemberDraftForm } from './member-carrier-compat';
 import type { RuntimeDrafts } from './member-runtime-draft';
 
@@ -21,6 +22,13 @@ export interface MemberDraft {
   strategyBaseline?: StrategyFormState | null;
   codexSettings?: CodexRuntimeSettings;
   codexBaseline?: CodexRuntimeSettings;
+  pendingWrite?: {
+    catId: string;
+    create: boolean;
+    form: HubCatEditorFormState;
+    payload: Record<string, unknown>;
+    context: CatPayloadContext;
+  };
 }
 
 export function changedFields(form: HubCatEditorFormState, baseline: CatData | null): number {
@@ -32,8 +40,11 @@ export function changedFields(form: HubCatEditorFormState, baseline: CatData | n
 }
 
 /** Preserve only local edits; concurrent changes to untouched fields come from the server. */
-export function rebaseMemberDraft(draft: MemberDraft, latest: CatData): MemberDraft {
-  const before = initialState(draft.baseline);
+export function rebaseMemberDraft(
+  draft: MemberDraft,
+  latest: CatData,
+  before = initialState(draft.baseline),
+): MemberDraft {
   const form = initialState(latest);
   for (const key of Object.keys(draft.form) as (keyof HubCatEditorFormState)[]) {
     if (JSON.stringify(draft.form[key]) !== JSON.stringify(before[key])) {
@@ -50,7 +61,14 @@ export function readMemberDraft(key: string): MemberDraft | null {
       return null;
     const draft = data as MemberDraft;
     return typeof draft.form?.name === 'string' && typeof draft.form?.clientId === 'string'
-      ? { ...draft, baseline: normalizeMemberDraftBaseline(draft.baseline), form: normalizeMemberDraftForm(draft.form) }
+      ? {
+          ...draft,
+          baseline: normalizeMemberDraftBaseline(draft.baseline),
+          form: normalizeMemberDraftForm(draft.form),
+          ...(draft.pendingWrite
+            ? { pendingWrite: { ...draft.pendingWrite, form: normalizeMemberDraftForm(draft.pendingWrite.form) } }
+            : {}),
+        }
       : null;
   } catch {
     return null;

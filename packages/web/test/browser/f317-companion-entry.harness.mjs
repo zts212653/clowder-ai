@@ -4,7 +4,7 @@ import { once } from 'node:events';
 import { createServer } from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
 import { COMPANION_THREAD, createEntryFixture, OTHER_THREAD, PNG } from './f317-companion-entry.fixture.mjs';
 import { createNextDevTestEnvironment } from './next-dev-test-environment.mjs';
 

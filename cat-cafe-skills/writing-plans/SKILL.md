@@ -1,6 +1,6 @@
 ---
 name: writing-plans
-tips_exempt: "Renewed 2026-10-02: clarify whether an accepted goal is implementable and whether the plan preserves its intended result; internal planning guidance adds no end-user capability."
+tips_exempt: "Renewed 2026-10-30: accepted planning guidance now states resource, waiting and false-block costs against the real loss a safeguard prevents; this remains internal planning guidance with no new end-user entry or action."
 description: >
   把已接受的愿景与需求转成接手者可实施、可验收的计划。
   Use when: 跨组件、状态对象、依赖或实施顺序需要先理清，且没有足够的现成计划。
@@ -23,6 +23,7 @@ triggers:
 - 回读已接受的原始需求、feature/spec 与相关决定，写清本计划的目标、覆盖范围、验收要求和来源。计划分步不等于缩减愿景或把未完成包装成已完成。
 - 关键依赖、契约和改动位置足够明确，让接手者知道从哪里开始、哪些决定已定、什么仍需查证；无需重复抄写已有真相源全文。
 - 每个工作单元有可观察的结果与适用验证。涉及行为/回归风险按 `tdd`；现有精准检查可以提供 RED，纯文档/机械改动走对应检查。
+- 写清这个方案**让谁多付出什么、换来什么**：新增的常驻进程与内存、拦截和前置、人要等的时间、可能误拦的正常工作，对照它防住的真实损失。说不出一层防住了哪个真问题，就不加这一层。来源：F314 汉弗莱喵案，密钥防线方案只问漏没漏、没算代价，上线后每只猫每个 MCP 各挂一个代理进程（10-27 整层撤除）；You 10-29 批注认可（`[thread-id]#private-source-id`）。
 - 关键未决问题可见：技术问题由猫在职责内解决，真正的价值取舍附 Decision Packet；已接受范围内的可逆细节不重复询问 operator。
 - 计划需要跨 session/跨猫消费时，保存在可追溯载体并持久化。通常使用 `feature-specs/YYYY-MM-DD-<topic>.md`；Git 载体按当前工作现场与仓库风险规则选择，不为写计划专门切回 main。
 
@@ -56,6 +57,7 @@ triggers:
 目标与范围：<本计划兑现什么，哪些要求属于已接受的其他范围>
 验收：<可验证要求，或准确引用已有 AC>
 关键契约与依赖：<已定约束、相关状态/接口、先后关系>
+代价：<让谁多付出什么（常驻进程/内存/人的等待/可能误拦），换来什么>
 未决问题：<技术 / 价值，以及解决路径>
 
 ## 工作单元：<可观察结果>

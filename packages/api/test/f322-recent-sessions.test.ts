@@ -11,6 +11,7 @@ import Fastify from 'fastify';
 import { SessionChainStore } from '../src/domains/cats/services/stores/ports/SessionChainStore.js';
 import { ThreadStore } from '../src/domains/cats/services/stores/ports/ThreadStore.js';
 import { sessionChainRoutes } from '../src/routes/session-chain.js';
+import { importExecutionBoundary } from './helpers/import-execution-boundary.js';
 
 // These fixtures model local single-user mode; dedicated owner cases below
 // explicitly exercise configured ownership without inheriting runtime identity.
@@ -112,6 +113,7 @@ test('listing rejects cloud members and invalid limits before calling a provider
       listings++;
       throw new Error('native index unavailable');
     },
+    resolveImportExecutionBoundary: importExecutionBoundary(metadata(1).projectPath),
     inspectLocalSession: async () => metadata(1),
   };
   const app = Fastify();
@@ -183,6 +185,7 @@ test('known Cafe sessions are removed before the public limit while imported ext
       sessions: Array.from({ length: 50 }, (_, i) => ({ ...metadata(i + 1), lastActivityAt: 50 - i })),
       limited: false,
     }),
+    resolveImportExecutionBoundary: importExecutionBoundary(metadata(1).projectPath),
     inspectLocalSession: async () => metadata(1),
   });
   try {
@@ -230,6 +233,7 @@ for (const path of ['list', 'inspect', 'externalBind'] as const) {
             nativeReads++;
             return { sessions: [metadata(1)], limited: false };
           },
+          resolveImportExecutionBoundary: importExecutionBoundary(metadata(1).projectPath),
           inspectLocalSession: async () => {
             nativeReads++;
             return metadata(1);

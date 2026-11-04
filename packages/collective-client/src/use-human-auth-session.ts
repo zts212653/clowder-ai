@@ -1,122 +1,26 @@
+import { collectiveIdSchema } from '@cat-cafe/shared';
 import { type Dispatch, type SetStateAction, useCallback, useEffect, useMemo, useRef } from 'react';
-import { type ClientRequest, CollectiveClientRequestError, collectiveClientErrorMessage } from './client-request.js';
-import type {
-  ClientSnapshot,
-  CollectiveMe,
-  CollectiveMeta,
-  HumanAuthBeginResult,
-  HumanAuthProviderStatus,
-  SessionResult,
-} from './client-types.js';
+import {
+  type ClientReadPolicy,
+  CollectiveClientRequestError,
+  collectiveClientErrorMessage,
+  fetchClientJson,
+} from './client-request.js';
+import type { ClientSnapshot, CollectiveMe, HumanAuthBeginResult, SessionResult } from './client-types.js';
 import { closeCollectiveScope, currentCollectiveScope, missingMembershipScope } from './collective-scope-recovery.js';
+import { initializeHumanSession, selectedCollective } from './human-auth-boot.js';
 import {
   entryModeFromHash,
   HUMAN_AUTH_WINDOW_NAME,
   humanAuthErrorMessage,
-  parseHumanAuthErrorCode,
   phaseForHuman,
   trustedHumanAuthResult,
 } from './human-auth-flow.js';
-import { finishProviderSetupCallback, useProviderSetup } from './use-provider-setup.js';
+import { useProviderSetup } from './use-provider-setup.js';
 
 export const SESSION_KEY = 'collective-session';
 
-function selectedCollective(me?: CollectiveMe) {
-  const id = new URLSearchParams(location.search).get('collectiveId');
-  return id
-    ? me?.collectives.find((item) => item.collectiveId === id)
-    : me?.collectives.length === 1
-      ? me.collectives[0]
-      : undefined;
-}
-
-type SnapshotSetter = Dispatch<SetStateAction<ClientSnapshot>>;
 type EntryMode = ReturnType<typeof entryModeFromHash>;
-
-interface AuthBootContext {
-  readonly request: ClientRequest;
-  readonly enterSession: (sessionToken: string) => Promise<void>;
-  readonly restoreSavedSession: () => Promise<CollectiveMe | undefined>;
-  readonly invitationMode: EntryMode;
-  readonly setSnapshot: SnapshotSetter;
-  readonly isCancelled: () => boolean;
-}
-
-async function finishAuthCompletion(context: AuthBootContext): Promise<void> {
-  const completed = await context.request<SessionResult>('/api/auth/completions/exchange', {
-    method: 'POST',
-    body: '{}',
-  });
-  if (window.name === HUMAN_AUTH_WINDOW_NAME && window.opener) {
-    window.opener.postMessage(
-      { type: 'collective:human-auth-completion', serviceUrl: location.origin, sessionToken: completed.sessionToken },
-      location.origin,
-    );
-    if (!context.isCancelled()) {
-      context.setSnapshot((current) => ({
-        ...current,
-        phase: 'loading',
-        notice: '身份验证完成，正在回到 Collective…',
-      }));
-    }
-    window.setTimeout(() => window.close(), 100);
-    return;
-  }
-  if (!context.isCancelled()) await context.enterSession(completed.sessionToken);
-}
-
-function finishAuthError(errorCode: ReturnType<typeof parseHumanAuthErrorCode>, context: AuthBootContext): boolean {
-  if (!errorCode) return false;
-  const error = humanAuthErrorMessage(errorCode);
-  if (window.name === HUMAN_AUTH_WINDOW_NAME && window.opener) {
-    window.opener.postMessage(
-      { type: 'collective:human-auth-error', serviceUrl: location.origin, errorCode },
-      location.origin,
-    );
-    if (!context.isCancelled()) context.setSnapshot((current) => ({ ...current, phase: 'entry', error }));
-    window.setTimeout(() => window.close(), 100);
-    return true;
-  }
-  const cleanUrl = new URL(location.href);
-  cleanUrl.searchParams.delete('authError');
-  history.replaceState(null, '', cleanUrl.pathname + cleanUrl.search + cleanUrl.hash);
-  return false;
-}
-
-async function initializeHumanSession(context: AuthBootContext): Promise<void> {
-  const meta = await context.request<CollectiveMeta>('/api/meta');
-  if (context.isCancelled()) return;
-  const authProviders = await context.request<{ readonly providers: readonly HumanAuthProviderStatus[] }>(
-    '/api/auth/providers',
-  );
-  if (context.isCancelled()) return;
-  context.setSnapshot((current) => ({ ...current, meta, providers: authProviders.providers }));
-  if (finishProviderSetupCallback(context)) return;
-  const callbackSearch = new URLSearchParams(location.search);
-  if (callbackSearch.get('authCompleted') === '1') return finishAuthCompletion(context);
-  const authErrorCode = parseHumanAuthErrorCode(callbackSearch.get('authError'));
-  if (finishAuthError(authErrorCode, context)) return;
-  const authError = authErrorCode ? humanAuthErrorMessage(authErrorCode) : undefined;
-  if (context.invitationMode === 'invite' || (context.invitationMode === 'bootstrap' && meta.bootstrapNeeded)) {
-    if (!context.isCancelled()) context.setSnapshot((current) => ({ ...current, phase: 'entry', error: authError }));
-    return;
-  }
-  const me = await context.restoreSavedSession();
-  if (context.isCancelled()) return;
-  context.setSnapshot((current) => ({
-    ...current,
-    meta,
-    me,
-    collective: selectedCollective(me),
-    restrictedScope: me ? missingMembershipScope(meta.serviceInstanceId, me) : undefined,
-    phase: me ? phaseForHuman(me) : 'entry',
-    events: [],
-    collaboration: undefined,
-    participants: undefined,
-    members: undefined,
-    error: authError,
-  }));
-}
 
 function resolveHumanAuthIntent(phase: ClientSnapshot['phase'], invitationMode: EntryMode) {
   if (phase === 'bind-identity') return { intent: 'bind' as const };
@@ -152,47 +56,51 @@ export function useHumanAuthSession(snapshot: ClientSnapshot, setSnapshot: Dispa
       throw new Error('身份已变化');
     }
     if (!response.ok) {
-      const result = (await response.json()) as { error?: { message?: string } };
+      const result = (await response.json()) as { error?: { code?: string; message?: string } };
       throw new CollectiveClientRequestError(
         response.status,
         result.error?.message ?? `请求失败（${response.status}）`,
+        result.error?.code,
       );
     }
     return response;
   }, []);
-  const request = useCallback(<Result>(path: string, init?: RequestInit): Promise<Result> => {
-    const generation = sessionGeneration.current;
-    const options: RequestInit = {
-      ...init,
-      credentials: 'same-origin',
-      headers: {
-        'content-type': 'application/json',
-        'x-collective-message-content': '2',
-        ...(token.current ? { authorization: `Bearer ${token.current}` } : {}),
-        ...init?.headers,
-      },
-    };
-    const result = requestTail.current.then(async () => {
-      options.signal?.throwIfAborted();
-      if (generation !== sessionGeneration.current) throw new Error('身份已变化');
-      const response = await fetch(path, options);
-      const payload = (await response.json()) as Result & { error?: { message?: string } };
-      if (generation !== sessionGeneration.current) throw new Error('身份已变化');
-      if (!response.ok) {
-        throw new CollectiveClientRequestError(
-          response.status,
-          payload.error?.message ?? `请求失败（${response.status}）`,
-        );
-      }
-      return payload;
-    });
-    // Settle the lane after either outcome, without retrying or hiding this request's failure.
-    requestTail.current = result.then(
-      () => undefined,
-      () => undefined,
-    );
-    return result;
-  }, []);
+  const request = useCallback(
+    <Result>(path: string, init?: RequestInit, policy?: ClientReadPolicy): Promise<Result> => {
+      const generation = sessionGeneration.current;
+      const options: RequestInit = {
+        ...init,
+        credentials: 'same-origin',
+        headers: {
+          'content-type': 'application/json',
+          'x-collective-message-content': '2',
+          ...(token.current ? { authorization: `Bearer ${token.current}` } : {}),
+          ...init?.headers,
+        },
+      };
+      const result = requestTail.current.then(async () => {
+        options.signal?.throwIfAborted();
+        if (generation !== sessionGeneration.current) throw new Error('身份已变化');
+        const { response, payload } = await fetchClientJson<Result>(path, options, policy);
+        if (generation !== sessionGeneration.current) throw new Error('身份已变化');
+        if (!response.ok) {
+          throw new CollectiveClientRequestError(
+            response.status,
+            payload.error?.message ?? `请求失败（${response.status}）`,
+            payload.error?.code,
+          );
+        }
+        return payload;
+      });
+      // Settle the lane after either outcome, without retrying or hiding this request's failure.
+      requestTail.current = result.then(
+        () => undefined,
+        () => undefined,
+      );
+      return result;
+    },
+    [],
+  );
 
   const loadMe = useCallback(async () => {
     const credential = token.current;
@@ -212,6 +120,7 @@ export function useHumanAuthSession(snapshot: ClientSnapshot, setSnapshot: Dispa
             me: undefined,
             collective: undefined,
             events: [],
+            channels: undefined,
             collaboration: undefined,
             participants: undefined,
             members: undefined,
@@ -223,16 +132,48 @@ export function useHumanAuthSession(snapshot: ClientSnapshot, setSnapshot: Dispa
   }, [request, setSnapshot]);
 
   const enterSession = useCallback(
-    async (sessionToken: string) => {
+    async (sessionToken: string, collectiveId?: string) => {
       ++sessionGeneration.current;
       token.current = sessionToken;
       sessionStorage.setItem(`${SESSION_KEY}:${location.origin}`, sessionToken);
       const cleanUrl = new URL(location.href);
       cleanUrl.searchParams.delete('authCompleted');
       cleanUrl.searchParams.delete('authError');
+      const parsedTarget = collectiveId !== undefined ? collectiveIdSchema.safeParse(collectiveId) : undefined;
+      if (parsedTarget?.success) {
+        cleanUrl.searchParams.set('collectiveId', parsedTarget.data);
+        cleanUrl.searchParams.set('channelId', 'general');
+        cleanUrl.searchParams.delete('view');
+      }
       cleanUrl.hash = '';
+      // The completion credential is one-time. Clear the callback before the profile read, while
+      // retaining the target so a reload can resume after an offline/temporary failure.
       history.replaceState(null, '', cleanUrl.pathname + cleanUrl.search);
       const me = await loadMe();
+      if (collectiveId !== undefined) {
+        if (!parsedTarget?.success || !me.collectives.some((item) => item.collectiveId === parsedTarget.data)) {
+          ++sessionGeneration.current;
+          token.current = null;
+          sessionStorage.removeItem(`${SESSION_KEY}:${location.origin}`);
+          cleanUrl.searchParams.delete('collectiveId');
+          cleanUrl.searchParams.delete('channelId');
+          history.replaceState(null, '', cleanUrl.pathname + cleanUrl.search);
+          setSnapshot((current) => ({
+            ...current,
+            phase: 'entry',
+            me: undefined,
+            collective: undefined,
+            restrictedScope: undefined,
+            events: [],
+            channels: undefined,
+            participants: undefined,
+            members: undefined,
+            collaboration: undefined,
+            error: '邀请的共同体暂时不可用，请联系邀请人。',
+          }));
+          return;
+        }
+      }
       setSnapshot((current) => ({
         ...current,
         phase: phaseForHuman(me),
@@ -240,6 +181,7 @@ export function useHumanAuthSession(snapshot: ClientSnapshot, setSnapshot: Dispa
         collective: selectedCollective(me),
         restrictedScope: current.meta ? missingMembershipScope(current.meta.serviceInstanceId, me) : undefined,
         events: [],
+        channels: undefined,
         collaboration: undefined,
         participants: undefined,
         members: undefined,
@@ -303,7 +245,7 @@ export function useHumanAuthSession(snapshot: ClientSnapshot, setSnapshot: Dispa
         return;
       }
       try {
-        await enterSession(result.sessionToken);
+        await enterSession(result.sessionToken, result.collectiveId);
         completedWindow?.close();
       } catch (error) {
         setSnapshot((current) => ({ ...current, error: collectiveClientErrorMessage(error) }));
@@ -364,6 +306,7 @@ export function useHumanAuthSession(snapshot: ClientSnapshot, setSnapshot: Dispa
       collective: undefined,
       restrictedScope: undefined,
       events: [],
+      channels: undefined,
       collaboration: undefined,
       participants: undefined,
       members: undefined,

@@ -87,6 +87,7 @@ export function TextInput({
         if (e.key === 'Enter') commit();
       }}
       className="w-full max-w-md border focus:outline-none focus:ring-1 disabled:opacity-50"
+      data-chat-background-surface="console-card"
       style={{
         borderRadius: '0.5rem',
         borderColor: 'var(--cafe-border)',

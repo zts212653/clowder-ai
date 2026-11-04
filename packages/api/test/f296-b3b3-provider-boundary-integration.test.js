@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { invokeSingleCat } from '../dist/domains/cats/services/agents/invocation/invoke-single-cat.js';
+import { invokeKnownHostSession as invokeSingleCat } from './helpers/known-host-session-fixture.js';
 
 const CLAUDE_PRINT = {
   provider: 'anthropic',

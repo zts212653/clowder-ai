@@ -1,3 +1,12 @@
+param(
+  [Parameter(Mandatory = $true)]
+  [ValidateSet('installer', 'portable')]
+  [string]$Distribution,
+  [Parameter(Mandatory = $true)]
+  [ValidatePattern('^[a-f0-9-]{36}$')]
+  [string]$AttemptId,
+  [switch]$ObservePrivatePath
+)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $root = [IO.Path]::GetFullPath($env:CANDIDATE_ROOT)
@@ -9,6 +18,7 @@ $evidence = Join-Path $root 'evidence'
 $browser = Join-Path $PSScriptRoot 'browser.mjs'
 $node = (Get-Command node.exe).Source
 $records = [Collections.Generic.List[object]]::new()
+if ($ObservePrivatePath -and $Distribution -ne 'installer') { throw 'Private-path diagnostic is restricted to the installer restore' }
 
 function Expand-OwnedZip([string]$Zip, [string]$Destination, [bool]$SingleFile) {
   Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -80,24 +90,26 @@ function Quit-Owned([string]$Exe, [string]$Install, [string]$State, [int[]]$Port
   throw 'Normal application exit did not release its owned processes'
 }
 
-foreach ($kind in @('installer', 'portable')) {
+foreach ($kind in @($Distribution)) {
   $install = Join-Path $root "$kind-install"
   $state = Join-Path $root "$kind-state"
   $output = Join-Path $evidence $kind
   [IO.Directory]::CreateDirectory($output) | Out-Null
   $ports = if ($kind -eq 'installer') { @(35471,35472,36471,35473) } else { @(35481,35482,36481,35483) }
+  if ($ObservePrivatePath) { $ports += 35474 }
   Assert-Free $ports
   $wrapper = Join-Path $root "$kind-distribution"
   Expand-OwnedZip (Join-Path $root "$kind-artifact.zip") $wrapper $true
-  $distribution = @(Get-ChildItem -LiteralPath $wrapper -File)
-  if ($distribution.Count -ne 1 -or $distribution[0].Extension -ne $(if ($kind -eq 'installer') { '.exe' } else { '.zip' })) { throw 'Unexpected distribution content' }
-  Get-FileHash -LiteralPath $distribution[0].FullName -Algorithm SHA256 | ConvertTo-Json | Set-Content (Join-Path $output 'distribution-sha256.json')
+  $distributionFiles = @(Get-ChildItem -LiteralPath $wrapper -File)
+  if ($distributionFiles.Count -ne 1 -or $distributionFiles[0].Extension -ne $(if ($kind -eq 'installer') { '.exe' } else { '.zip' })) { throw 'Unexpected distribution content' }
+  Get-FileHash -LiteralPath $distributionFiles[0].FullName -Algorithm SHA256 | ConvertTo-Json | Set-Content (Join-Path $output 'distribution-sha256.json')
+  $logsComplete = $true
   try {
     if ($kind -eq 'installer') {
       $arguments = @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-','/NOICONS','/NoAutoStart=1',"/DIR=$install","/LOG=$(Join-Path $output 'setup.log')","/DesktopInstanceRoot=$state","/FrontendPort=$($ports[0])","/ApiPort=$($ports[1])","/RedisPort=$($ports[2])")
-      Wait-Success (Start-Owned $distribution[0].FullName $arguments $root $state $ports 'install') 600
+      Wait-Success (Start-Owned $distributionFiles[0].FullName $arguments $root $state $ports 'install') 600
     } else {
-      Expand-OwnedZip $distribution[0].FullName $install $false
+      Expand-OwnedZip $distributionFiles[0].FullName $install $false
       # Exercise the shipped first-run entrypoint, including its real offline configuration.
       $null = Start-Owned "$env:SystemRoot\System32\cmd.exe" @('/d','/c','start.bat') $install $state $ports 'portable-first-run'
       Wait-Ready $ports[1]
@@ -110,13 +122,41 @@ foreach ($kind in @('installer', 'portable')) {
     $launchArgs = @("--remote-debugging-port=$($ports[3])", '--remote-debugging-address=127.0.0.1')
     foreach ($phase in @('create','restore')) {
       Assert-Free $ports
-      $null = Start-Owned $exe $launchArgs $install $state $ports "app-$phase"
+      $observeRestore = $ObservePrivatePath -and $phase -eq 'restore'
+      $phaseArgs = if ($observeRestore) { $launchArgs + @('--inspect-brk=127.0.0.1:35474') } else { $launchArgs }
+      $appProcess = Start-Owned $exe $phaseArgs $install $state $ports "app-$phase"
+      if ($observeRestore) {
+        $observer = Join-Path $PSScriptRoot 'collective-windows-private-observer.cjs'
+        $baseline = Join-Path $PSScriptRoot 'collective-windows-private-observer-baseline.cjs'
+        $desktopEntry = Join-Path $install 'packages/api/dist/index.desktop.js'
+        $apiEntry = if (Test-Path -LiteralPath $desktopEntry) { $desktopEntry } else { Join-Path $install 'packages/api/dist/index.js' }
+        $config = @{
+          expectedPid=$appProcess.Id; inspectorPort=35474; executable=$exe; install=$install; state=$state; evidence=$output
+          nativeNode=(Join-Path $install 'node/node.exe'); apiEntry=$apiEntry; preload=$observer
+          sources=@(
+            @{ path=$observer; sha256='fbe306c505654290d12c2664446aa1c3cce59664f700e359029b5eb53d89c15c' },
+            @{ path=$baseline; sha256='530fa3e2ad1b3cc6dfb2c4461f4bbb0f44736f860cfdef50518b3233a3049bf0' }
+          )
+          output=(Join-Path $output 'private-observer.jsonl'); receipt=(Join-Path $output 'observer-bridge.json')
+        }
+        $configPath = Join-Path $output 'observer-config.json'
+        $config | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $configPath
+        @{ diagnosticOnly=$true; distribution='installer'; observedPhase='restore'; installedBytesChanged=$false; wholeCandidateAcceptance=$false } | ConvertTo-Json | Set-Content (Join-Path $output 'diagnostic-scope.json')
+        & $node (Join-Path $PSScriptRoot 'attach-installed-api-observer.mjs') $configPath
+        if ($LASTEXITCODE -ne 0) { throw 'Owned main-to-API observer admission failed' }
+      }
       Wait-Ready $ports[1]
       & $node $browser $phase $output $ports[0] $ports[1] $ports[3] $version
-      if ($LASTEXITCODE -ne 0) { throw "Real renderer $phase verification failed" }
+      $browserExit = $LASTEXITCODE
+      $observerExit = 0
+      if ($observeRestore) {
+        & $node (Join-Path $PSScriptRoot 'wait-private-observer.mjs') $output
+        $observerExit = $LASTEXITCODE
+      }
+      if ($browserExit -ne 0) { throw "Real renderer $phase verification failed" }
+      if ($observerExit -ne 0) { throw 'Private-path diagnostic did not produce both authenticated records' }
       Quit-Owned $exe $install $state $ports
     }
-    @{ status='passed'; distribution=$kind; instanceRoot=$state; ports=$ports; normalExit=$true; actualInstallAndRestore=$true; scope='fresh runner; no paid model, real account import or non-elevated installation claim' } | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $output 'result.json')
   } finally {
     # Includes this Setup's temporary child. Every matching executable is inside our unique root.
     $remaining = @(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase) })
@@ -129,10 +169,30 @@ foreach ($kind in @('installer', 'portable')) {
     if (Test-Path (Join-Path $install '.installer-logs')) { Copy-Item (Join-Path $install '.installer-logs') (Join-Path $output 'installer-logs') -Recurse }
     foreach ($record in $records) {
       foreach ($stream in @('stdout','stderr')) {
-        if ($record[$stream].IsCompletedSuccessfully) { $text=$record[$stream].Result; $text.Substring(0,[Math]::Min($text.Length,2097152)) | Set-Content (Join-Path $output "$($record.phase)-$($record.process.Id)-$stream.log") }
+        $task = $record[$stream]
+        try { $complete = $task.Wait(5000) } catch { $complete = $false }
+        if (-not $complete -or -not $task.IsCompletedSuccessfully) { $logsComplete = $false; continue }
+        $text = $task.Result
+        if ($text.Length -gt 2097152) { $logsComplete = $false }
+        $text.Substring(0,[Math]::Min($text.Length,2097152)) | Set-Content (Join-Path $output "$($record.phase)-$($record.process.Id)-$stream.log")
       }
     }
+    @{ allStreamsCapturedWithinBudget=$logsComplete } | ConvertTo-Json | Set-Content (Join-Path $output 'log-capture.json')
     $records.Clear()
+    $cleanupDeadline = [DateTime]::UtcNow.AddSeconds(5)
+    do {
+      $left = @(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase) })
+      if ($left.Count -eq 0) { break }
+      Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $cleanupDeadline)
+    $listeners = @()
+    foreach ($port in $ports) { $listeners += @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) }
+    @{ distribution=$kind; attemptId=$AttemptId; ownedProcessesAbsent=($left.Count -eq 0); portsFree=($listeners.Count -eq 0) } | ConvertTo-Json | Set-Content (Join-Path $output 'cleanup-confirmed.json')
+    if ($left.Count -ne 0) { throw 'Owned process cleanup was not confirmed' }
     Assert-Free $ports
   }
+  if (-not $logsComplete) { throw 'Actual startup logs exceed the evidence budget; cannot certify absence of plugin errors' }
+  & $node (Join-Path $PSScriptRoot 'initial-plugins.mjs') --logs $output
+  if ($LASTEXITCODE -ne 0) { throw 'Actual distribution logs contain initial plugin setup failures' }
+  @{ status='passed'; distribution=$kind; attemptId=$AttemptId; instanceRoot=$state; ports=$ports; normalExit=$true; actualInstallAndRestore=$true; defaultInitialPluginsReady=$true; actualStartupLogsChecked=$true; scope='fresh runner; no paid model, real account import or non-elevated installation claim' } | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $output 'result.json')
 }
