@@ -5,10 +5,11 @@ import {
   PluginLifecycleError,
   PluginManagerServiceError,
 } from '../domains/plugin/index.js';
+import { MarketplacePreparationError } from '../domains/plugin/manager/marketplace/git-marketplace-preparation.js';
 import { OfficialPluginInstallError } from '../domains/plugin/official-package-errors.js';
 import { PluginManagerUploadError } from './plugin-manager-upload.js';
 
-/** Emit only public error codes and already-validated identities, never the error/cause or request body. */
+/** Emit public codes/identities and explicitly sanitized preparation diagnostics, never raw errors. */
 export function warnPluginPackageFailure(
   request: FastifyRequest,
   context: {
@@ -28,5 +29,12 @@ export function warnPluginPackageFailure(
     error instanceof PluginManagerUploadError
       ? error.code
       : 'PLUGIN_MANAGER_FAILED';
-  request.log.warn({ reqId: request.id, ...context, code }, 'Plugin package operation failed');
+  const preparation =
+    error instanceof PluginManagerServiceError && error.cause instanceof MarketplacePreparationError
+      ? error.cause.diagnostic
+      : undefined;
+  request.log.warn(
+    { reqId: request.id, ...context, code, ...(preparation ? { preparation } : {}) },
+    'Plugin package operation failed',
+  );
 }

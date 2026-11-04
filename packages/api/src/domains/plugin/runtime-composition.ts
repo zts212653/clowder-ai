@@ -1010,6 +1010,7 @@ export function createPluginManagerRuntimeComposition(
             throw new PluginManagerServiceError(
               'INSTALL_UNAVAILABLE',
               error instanceof Error ? error.message : 'Repository installation failed',
+              { cause: error },
             );
           }
         }
