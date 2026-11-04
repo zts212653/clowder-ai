@@ -241,7 +241,24 @@ S9的v3扫描仍记Task输出为partial-needs-review；人工逐行解析带说�
 
 **本批停止在15/16**：S3/S4的pass保留，S9为finding，S8未启动，剩余1次未放行；无重试/resume，所有旧证据和失败结果保留。最终账本SHA为`70844e45e2a4895cda79e2584e8799d96ca2a3ac4c6a2647283c8f795e03fa58`，无锁或sidecar。S9原生轨迹SHA为`b7e329eb1cc2bc29df3ca1f6657debf2d00f0238f0bbf2237c14f898235bf0cc`，HTTP轨迹SHA为`592aca9ff482b6e6398a4ab9ff481a16cd082358aa5f4be825073eecb982d67f`。
 
-**根因边界与后续方向**：可确认的是产品文字缺少多工歧义的澄清规则；该缺口是否导致本次选择，以及自主行动家规是否被泛化，均未证明。S9没有A基线，不能将失败归因为本slice引入的回归。建议优先在原Task reader合同中补明：多件未结束工作（包括doing与todo）且最新请求/owner记录未确定本轮对象时，先按工作名称澄清；明确点名一项或确实只有一件合法工作时，仍按原状态与授权承接。不新增导航层或状态机，不据单次观察修改家规。此修复尚未实施，不能把建议写成已生效保证。后续需另行审查与预注册，覆盖歧义、单件继续、明确追加及多件中明确点名等反例；不沿本批余量自动执行。
+**根因边界与后续方向**：可确认的是受测产品文字缺少多工歧义的澄清规则；该缺口是否导致本次选择，以及自主行动家规是否被泛化，均未证明。S9没有A基线，不能将失败归因为本slice引入的回归。优先修复方向是在原Task reader合同中补明：多件未结束工作（包括doing与todo）且最新请求/owner记录未确定本轮对象时，先按工作名称澄清；明确点名一项或确实只有一件合法工作时，仍按原状态与授权承接。不新增导航层或状态机，不据单次观察修改家规。受测版本中没有这项修复；后续代码审查见下节，不能把文字导出写成行为保证。行为复验需另行审查与预注册，覆盖歧义、单件继续、明确追加及多件中明确点名等反例；不沿本批余量自动执行。
+
+<a id="multi-work-reader-repair"></a>
+
+## 多工歧义的 Task reader 文字修复：代码复审通过，行为未复验
+
+作者宪宪的修复提交为`a14f85b9f57f68a6030a2d15bb5dad46195a80a3`，父提交为文档同步版`d70c91fbe6fafe29e26a49b9ec76a383a90259a6`。API树仍是`6a45781ccba73f9d787dfff8981499b2fbb42349`，MCP树为`63be42ccc8553f52183d0cedd4b7b1650336bbc5`。只有callback-tools.ts的一句描述、实际tools/list边界测试和治理基线变化；无新handler、schema、DTO、权限、导航或状态机。
+
+新增句子放在原续接段落之后，原有六段修订文字保持连续、逐字不变。条件是“泛指续接可能对应多件未结束工作，并且当前输入和owner记录都没有确定本轮对象”，不是有两个Task就一律询问；unfinished沿已有todo/doing/blocked定义。先按工作名称澄清后再写；明确点名或唯一匹配仍须遵守其当前状态与授权，不覆盖已结束分支的必要授权条件。位置与语义经非作者独立复审，0项新增P1/P2。
+
+独立验证：
+
+- 重新构建MCP server；45/45聚焦测试通过，0跳过，涵盖真实tools/list语义投递、canonical registry、implementation binding、protected base及governance。作者RED为2通过/新增1失败，GREEN为3/3；这些测试检查协议边界的文字和结构，不模拟或裁定模型行为。
+- 以冻结next基底`440fa0377ae54a51320306217088209ae7b11e68`独立运行canonical治理check，工具名、resource action、closed selector、profile和schema delivery差异为空。
+- 审核方用无HTTP、无模型的内存MCP transport独立导出旧冻结检出和新构建的完整tools/list，均为208项，与作者两份目录逐字节相同。只有`cat_cafe_list_tasks.description`变化，1698→1997字符，增加299字符/55个cl100k token；删除新增句子可逐字恢复旧描述，所有参数说明及schema、annotations不变。
+- 基线中另有65项protectedImplementationDigest随同一个callback-tools.ts源文件摘要变化；逐项重算均为`d09186283d87a3ce472fdc2c6bd8c4a453e6d91e4311f2efb3ef9c96e6673794`，handler源码未改。新构建callback-tools.js的SHA为`237761cfb8cd535fd051a702b7260de0507b961a421971509e09ba3cacb75dc9`。
+
+**代码可提交供评审，PR仍为草稿。** 本轮真实模型调用为0，原候选S9 finding和全部历史结果保留，冻结账本15/16、原验收工位与S8未运行状态不变。不能将新文字或确定性测试作为S9已修复的行为证据；也未检验明确点名、唯一匹配和已结束分支在新文字下的模型表现。后续行为复验需绑定新候选和独立计划/调用授权，不重开已停止批次，不自动使用剩余1次。
 
 ## 尚未验收
 
