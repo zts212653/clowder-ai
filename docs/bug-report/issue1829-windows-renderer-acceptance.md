@@ -4,9 +4,8 @@ tips_exempt: "Performance correction to existing work counters; no new user oper
 
 # Windows 桌面作品刷新风暴：修复与验收
 
-原始委托：`thread_owned_f1f09a79df7341724a9321128dd6b1d7c2e8efe8#0001793776783825-000094-1a319ff3`。
-用户要求确认 Windows 桌面适用性，与宪宪讨论方案，由砚砚实施并向 `next` 提 PR。
-关联：[缺陷 #1829](https://github.com/zts212653/clowder-ai/issues/1829)、[现场问题 #1813](https://github.com/zts212653/clowder-ai/issues/1813)、[先前修复 #1820](https://github.com/zts212653/clowder-ai/pull/1820)。
+公开来源：[缺陷 #1829](https://github.com/zts212653/clowder-ai/issues/1829)、[现场问题 #1813](https://github.com/zts212653/clowder-ai/issues/1813)、[本修复 PR #1839](https://github.com/zts212653/clowder-ai/pull/1839)、[先前修复 #1820](https://github.com/zts212653/clowder-ai/pull/1820)。
+本报告记录 Windows 桌面作品刷新缺陷的修复与验证，目标分支为 `next`。
 
 Architecture cell: hub-action-surface
 Map delta: none
