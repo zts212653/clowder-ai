@@ -11,14 +11,14 @@
  * other than the in-process module.
  */
 import assert from 'node:assert/strict';
-import { after, test } from 'node:test';
+import { afterEach, test } from 'node:test';
 import { validateManifest } from '@clowder-ai/plugin-contract';
 import { CloudConversationHostRegistry } from '../dist/domains/plugin/declared/cloud-conversation-host-registry.js';
 import { DeclaredRuntimeContributions } from '../dist/domains/plugin/declared/declared-runtime-contributions.js';
 import { PluginLifecycleError } from '../dist/domains/plugin/index.js';
 import { cleanup, conversationHostHarness, hostManifest, METHODS } from './f202-w2-3-h3b.fixture.js';
 
-after(cleanup);
+afterEach(cleanup);
 
 const startFailed = (error) => error instanceof PluginLifecycleError && error.code === 'START_FAILED';
 

@@ -575,6 +575,9 @@ importers:
         specifier: ^4.5.0
         version: 4.5.7(@types/react@18.3.27)(react@18.3.1)
     devDependencies:
+      '@cat-cafe/api':
+        specifier: workspace:*
+        version: link:../api
       '@types/mdast':
         specifier: 4.0.4
         version: 4.0.4

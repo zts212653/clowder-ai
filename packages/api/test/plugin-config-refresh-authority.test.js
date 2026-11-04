@@ -19,9 +19,9 @@ async function fixture(t, options = {}) {
     ...options,
   });
   // Direct fixture startup needs the same successful-runtime projection as enable.
-  await f.runtime.inventoryStore.transaction((tx) => {
-    const i = tx.instances.get(f.installed.pluginInstanceId);
-    tx.instances.put({ ...i, runtimeState: 'healthy' });
+  await f.runtime.inventoryStore.transaction(async (tx) => {
+    const i = await tx.instances.get(f.installed.pluginInstanceId);
+    await tx.instances.put({ ...i, runtimeState: 'healthy' });
   });
   const pkg = (await f.runtime.inventoryStore.snapshot()).packages[0];
   const entry = catalogEntry(pkg.packageDigest, {
@@ -45,15 +45,19 @@ async function fixture(t, options = {}) {
     assert.equal(f.events.filter((x) => x === 'start').length, 1, 'refresh must not recreate the client');
     assert.equal(f.events.includes('stop'), false);
   };
-  return { ...f, save, manager };
+  return {
+    ...f,
+    save,
+    manager,
+    get events() {
+      return f.events;
+    },
+  };
 }
 
 test('real configure keeps members live on the same activation', async (t) => {
-  let duringRefresh;
   const f = await fixture(t, {
-    onRefresh: async (host) => {
-      duringRefresh = await host.members.list();
-    },
+    observeRefreshMembers: true,
   });
   const host = f.host();
   const check = async () => {
@@ -69,10 +73,10 @@ test('real configure keeps members live on the same activation', async (t) => {
   await check();
   await f.save('updated');
   await check();
-  assert.equal(duringRefresh[0].catId, 'codex');
+  assert.equal((await f.refreshMembers())[0].catId, 'codex');
   assert.equal(f.host(), host);
   await f.runtime.shutdown('test_stop');
-  await assert.rejects(host.members.list(), /current/);
+  await assert.rejects(host.members.list(), /current|Execution lease closed/);
 });
 
 test('real configure keeps entrusted Task data mutations live and stop revokes retained client', async (t) => {
@@ -153,7 +157,7 @@ test('real configure keeps entrusted Task data mutations live and stop revokes r
   });
   assert.equal(updated.entrustedWork.time.businessDeadline.value, 1900000100000);
   await f.runtime.shutdown('test_stop');
-  await assert.rejects(host.tasks.create(input, { onConflict: 'update' }), /current/);
+  await assert.rejects(host.tasks.create(input, { onConflict: 'update' }), /current|Execution lease closed/);
 });
 
 for (const surface of ['action', 'launch']) {

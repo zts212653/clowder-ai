@@ -75,5 +75,11 @@ export function captureNativeCallbackCurrentness(
       throw expired();
     }
   };
-  return { identity, assertCurrent: assertRegistryCurrent, assertInvocationCurrent: assertRegistryCurrent, close };
+  return {
+    identity,
+    assertCurrent: assertRegistryCurrent,
+    assertInvocationCurrent: assertRegistryCurrent,
+    assertWriteCurrent: assertLive,
+    close,
+  };
 }

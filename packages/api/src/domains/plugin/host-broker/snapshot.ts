@@ -114,7 +114,7 @@ function assertSessionPhase(
   }
 }
 
-function parseSession(value: unknown, index: number): BrokerSessionRecord {
+export function parseSession(value: unknown, index: number): BrokerSessionRecord {
   const label = `sessions[${index}]`;
   const raw = object(value, label);
   const identity = sessionIdentity(raw, label);
@@ -152,7 +152,7 @@ function parseSession(value: unknown, index: number): BrokerSessionRecord {
   };
 }
 
-function parseLease(value: unknown, index: number): BrokerRuntimeLeaseRecord {
+export function parseLease(value: unknown, index: number): BrokerRuntimeLeaseRecord {
   const label = `runtimeLeases[${index}]`;
   const raw = object(value, label);
   const packageDigest = string(raw.packageDigest, `${label}.packageDigest`);
@@ -186,7 +186,7 @@ function parseCallOutcome(raw: Record<string, unknown>, phase: BrokerCallPhase, 
   };
 }
 
-function parseCall(value: unknown, index: number): BrokerCallRecord {
+export function parseCall(value: unknown, index: number): BrokerCallRecord {
   const label = `calls[${index}]`;
   const raw = object(value, label);
   const method = string(raw.method, `${label}.method`);

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   type CollectiveAccountabilitySource,
   readCollectiveAccountabilityAttentionSource,
-} from '../../../../../../api/src/routes/companion-collective-accountability-source';
+} from '../../../../../../api/dist/routes/companion-collective-accountability-source';
 import { parseUnifiedAttentionRead } from '../../parse-unified-attention';
 import { personalSourceRefusal } from '../personal-action-eligibility';
 import boot58Sources from './mailbox-boot58-source-state.json';
