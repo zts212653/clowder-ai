@@ -104,9 +104,22 @@ const EMPTY_TIMELINE_MESSAGES: readonly ChatMessageType[] = [];
 const SCHEDULER_ACCENT_BADGE_CLASS =
   'inline-flex w-fit items-center gap-1.5 rounded-full border border-conn-amber-ring bg-conn-amber-bg px-2.5 py-1 text-xs font-semibold text-conn-amber-text shadow-sm';
 
+const messageTimeFormatter = new Intl.DateTimeFormat('zh-CN', {
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  timeZone: 'UTC',
+});
+
 function formatTime(ts: number): string {
-  const d = new Date(ts);
-  return d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+  const local = new Date(ts);
+  // Cache the formatting rules, not the OS timezone. Read local calendar
+  // fields on each render, including after timezone changes and across DST.
+  const calendar = new Date(0);
+  calendar.setUTCFullYear(local.getFullYear(), local.getMonth(), local.getDate());
+  calendar.setUTCHours(local.getHours(), local.getMinutes());
+  return messageTimeFormatter.format(calendar);
 }
 
 const DELIVERED_AT_GAP_THRESHOLD = 5000;

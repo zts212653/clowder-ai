@@ -1,7 +1,7 @@
 'use client';
 
 import type { MessageBundleSelectionItem } from '@cat-cafe/shared';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ChatMessage } from '@/stores/chat-types';
 import {
   isWholeMessageSelected,
@@ -13,6 +13,12 @@ import {
 import { isMessageSelectableForBundle, MAX_SELECTED_MESSAGES, normalizeSelectedMessageIds } from '../message-selection';
 
 export function useThreadChatSelection(messages: readonly ChatMessage[]) {
+  const messagesRef = useRef(messages);
+  // Selection runs on interaction, using the last committed surface. Stable
+  // callbacks let historical rows keep their memo boundary during streaming.
+  useLayoutEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
   const [selectionMode, setSelectionMode] = useState(false);
   const [partSelections, setPartSelections] = useState<Map<string, MessagePartSelection>>(() => new Map());
   const [selectionForwardOpen, setSelectionForwardOpen] = useState(false);
@@ -35,55 +41,46 @@ export function useThreadChatSelection(messages: readonly ChatMessage[]) {
     setSelectionError(null);
     setSelectedBundleItems([]);
   }, []);
-  const enterMessageSelection = useCallback(
-    (messageId: string) => {
-      const message = messages.find((candidate) => candidate.id === messageId);
-      if (!message || !isMessageSelectableForBundle(message)) return;
-      setPartSelections(new Map([[messageId, wholeMessageSelection(message)]]));
-      setSelectionError(null);
-      setSelectionMode(true);
-    },
-    [messages],
-  );
-  const toggleMessageSelection = useCallback(
-    (messageId: string) => {
-      const message = messages.find((candidate) => candidate.id === messageId);
-      if (!message || !isMessageSelectableForBundle(message)) return;
-      setSelectionError(null);
-      setPartSelections((current) => {
-        const next = new Map(current);
-        if (isWholeMessageSelected(message, current.get(messageId))) next.delete(messageId);
-        else if (next.has(messageId) || next.size < MAX_SELECTED_MESSAGES)
-          next.set(messageId, wholeMessageSelection(message));
-        return next;
-      });
-    },
-    [messages],
-  );
-  const toggleRichBlockSelection = useCallback(
-    (messageId: string, blockId: string) => {
-      const message = messages.find((candidate) => candidate.id === messageId);
-      if (
-        !message ||
-        !isMessageSelectableForBundle(message) ||
-        !message.extra?.rich?.blocks.some((block) => block.id === blockId)
-      )
-        return;
-      setSelectionError(null);
-      setPartSelections((current) => {
-        if (!current.has(messageId) && current.size >= MAX_SELECTED_MESSAGES) return current;
-        const previous = current.get(messageId);
-        const blockIds = new Set(previous?.blockIds);
-        if (blockIds.has(blockId)) blockIds.delete(blockId);
-        else blockIds.add(blockId);
-        const next = new Map(current);
-        if (!previous?.includeText && blockIds.size === 0) next.delete(messageId);
-        else next.set(messageId, { includeText: previous?.includeText ?? false, blockIds });
-        return next;
-      });
-    },
-    [messages],
-  );
+  const enterMessageSelection = useCallback((messageId: string) => {
+    const message = messagesRef.current.find((candidate) => candidate.id === messageId);
+    if (!message || !isMessageSelectableForBundle(message)) return;
+    setPartSelections(new Map([[messageId, wholeMessageSelection(message)]]));
+    setSelectionError(null);
+    setSelectionMode(true);
+  }, []);
+  const toggleMessageSelection = useCallback((messageId: string) => {
+    const message = messagesRef.current.find((candidate) => candidate.id === messageId);
+    if (!message || !isMessageSelectableForBundle(message)) return;
+    setSelectionError(null);
+    setPartSelections((current) => {
+      const next = new Map(current);
+      if (isWholeMessageSelected(message, current.get(messageId))) next.delete(messageId);
+      else if (next.has(messageId) || next.size < MAX_SELECTED_MESSAGES)
+        next.set(messageId, wholeMessageSelection(message));
+      return next;
+    });
+  }, []);
+  const toggleRichBlockSelection = useCallback((messageId: string, blockId: string) => {
+    const message = messagesRef.current.find((candidate) => candidate.id === messageId);
+    if (
+      !message ||
+      !isMessageSelectableForBundle(message) ||
+      !message.extra?.rich?.blocks.some((block) => block.id === blockId)
+    )
+      return;
+    setSelectionError(null);
+    setPartSelections((current) => {
+      if (!current.has(messageId) && current.size >= MAX_SELECTED_MESSAGES) return current;
+      const previous = current.get(messageId);
+      const blockIds = new Set(previous?.blockIds);
+      if (blockIds.has(blockId)) blockIds.delete(blockId);
+      else blockIds.add(blockId);
+      const next = new Map(current);
+      if (!previous?.includeText && blockIds.size === 0) next.delete(messageId);
+      else next.set(messageId, { includeText: previous?.includeText ?? false, blockIds });
+      return next;
+    });
+  }, []);
   // Decide before scheduling updates: streaming siblings must not cause a no-op setState chain.
   useEffect(() => {
     const selectable = new Set(messages.filter(isMessageSelectableForBundle).map((message) => message.id));
