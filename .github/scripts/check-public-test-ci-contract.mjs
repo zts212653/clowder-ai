@@ -28,6 +28,11 @@ for (const filename of ['windows-smoke.yml', 'macos-preview-smoke.yml']) {
 }
 const lintCheckout = workflow.jobs.lint.steps.find((step) => step.uses === 'actions/checkout@v4');
 assert.equal(
+  workflow.jobs.lint.env?.CAT_CAFE_GATE_BASE_SHA,
+  `\${{ github.event.pull_request.base.sha || (github.event.before != '0000000000000000000000000000000000000000' && github.event.before) || github.sha }}`,
+  'lint governance must use the immutable PR/push baseline, with the initial commit only when a branch has no predecessor',
+);
+assert.equal(
   lintCheckout?.with?.['fetch-depth'],
   0,
   'the lint job runs MCP lineage checks and must fetch complete Git history',
