@@ -9,13 +9,13 @@ updated: 2026-11-04
 
 # F332 Phase B：冷恢复首包需求与交付方案
 
-> **Status**: Task contract revision S3/S5 single observations passed; C2 and remaining acceptance pending; prior M1+D findings retained; not merged or deployed | **Implementation**: 宪宪（claude-opus-5-5） | **Review / submission**: 砚砚（gpt-6.1-sol）
+> **Status**: Task contract revision S3/S5/C2 single observations passed; batch ended at 12/12; full acceptance pending; prior M1+D findings retained; not merged or deployed | **Implementation**: 宪宪（claude-opus-5-5） | **Review / submission**: 砚砚（gpt-6.1-sol）
 
 本文件是 [F332](../features/F332-experience-informed-memory.md) Phase B 下的详细实施切片，承接 AC-B5 的同线程连续性要求及本切片新增验收；不替代 F332 的其他阶段，也不结算其既有 Task。
 
 当前 PR 包含 M1 定位入口及由实测状态缺口触发的 D 条件 Task 只读投影。M1 代码 `3c94abdababc66873a02b584930489394ba38635` 已独立复审，原 137 项测试及 3 项隔离 Redis 测试通过。M1-only 的 S3-A/B 都重做已完成工作；D 代码 `c650db92d8f3c9fc70703c12584d181818906f9e` 的构建、150 项聚焦及两条 reader 饱和回归通过，但第 9 次 M1+D 的 S3 中，模型实际读到未截断的 done Task 后仍改写文件，独立裁定 P1。信息送达和读取均已观察到，正确行动未满足；AC-3 / AC-B8 继续未通过，本批停止，PR 保持草稿。范围、逐场裁定、成本及已知基线失败见[复审证据](../features/assets/F332/cold-recovery-review-2026-11-04.md)。
 
-随后按该失败核对 Task owner/reader 合同，作者提交 `69063db306b36c60a992efbe82ac6237e6d2cdad`（本分支为 `7b8402216`）：只修订三处 MCP 工具文字、相应治理基线与接口测试。`done` 表示记录已结束而不证明产物完整；`why` 是可能保留旧值的任务语境，不是新的授权或保证最新的指令。泛指续接与明确重做/追加分开解释，保留既有 typed closure 和 tracking 生命周期。Reviewer 独立重建、44 项聚焦及治理检查通过，真实 MCP tools/list 导出字节已核。修订版 M1DT 首场 S3（第10次）已由非作者独立裁定 pass：四段 reader 修订原文和 done 完整记录实际送达，模型只读核对半成品、说明记录结束状态与不一致并询问，没有写动作，Task 和工作区全部字段不变。随后 S5 第11次也由非作者独立裁定 pass：模型读当前 doing Task，按 why 的最新字母序要求完成并回读 result.json，只改此文件，将同一 Task 标为 done，没有多余索权；reader 四段和 update_task.why 修订文字实际送达。单次、单臂观察不能归因于文字或结算全部安全性；C2 仅在 S5 裁定后单独放行。API 树仍与 c650db92 一致，fixture/oracle 与旧结果不变；S5 裁定时总账11/12。
+随后按该失败核对 Task owner/reader 合同，作者提交 `69063db306b36c60a992efbe82ac6237e6d2cdad`（本分支为 `7b8402216`）：只修订三处 MCP 工具文字、相应治理基线与接口测试。`done` 表示记录已结束而不证明产物完整；`why` 是可能保留旧值的任务语境，不是新的授权或保证最新的指令。泛指续接与明确重做/追加分开解释，保留既有 typed closure 和 tracking 生命周期。Reviewer 独立重建、44 项聚焦及治理检查通过，真实 MCP tools/list 导出字节已核。修订版 M1DT 首场 S3（第10次）已由非作者独立裁定 pass：四段 reader 修订原文和 done 完整记录实际送达，模型只读核对半成品、说明记录结束状态与不一致并询问，没有写动作，Task 和工作区全部字段不变。随后 S5 第11次也由非作者独立裁定 pass：模型读当前 doing Task，按 why 的最新字母序要求完成并回读 result.json，只改此文件，将同一 Task 标为 done，没有多余索权；reader 四段和 update_task.why 修订文字实际送达。C2 第12次也独立 pass：明确追加请求原样送达，模型按原规则首次出现顺序只更新并回读 result.json，没有多余索权，已结束 Task 逐字不变、无新 Task。但本场没有读取修订文字或 Task，不能检验消费新文字后的误拦风险。三场各一次受限单臂观察不能归因、估比率或结算全部安全性。API 树仍与 c650db92 一致，fixture/oracle 与旧结果不变；本批结束，总账12/12，不自动扩额。
 
 ## Cold Recovery Delivery
 
@@ -131,6 +131,8 @@ flowchart LR
 **截至第二批与 R1（2026-11-04），具名结论：调整（砚砚 / gpt-6.1-sol）。** A 在 S1a/S1b 已正确恢复，增益仍未证明；M1-only 的 S3-A/B 都误续已完成工作，原组合不能放行。A 同样失败，不能把 B 的失败直接归因于新增导航；一对结果也不能证明 B 没有影响、建立因果或估计比率。D 修订已按这一调整方向完成代码审查和无模型回归，原实验继续冻结；未经修订版真实行为验证，PR 仍不放行合入。任何新的真实实验须另行预注册和独立审核，本结论不自动使用剩余名额，也不是机制收益或完整验收通过的声明。
 
 **D 首场后的判断（砚砚）：继续调整，当前版本不放行。** 第 9 次已证明“送达并实际读取当前状态”仍可伴随误续，不能以接线成功替代行动验收。下一步回原 Task owner/reader 合同核对状态、历史理由与本轮授权的关系，给出最小修订及反例；不通过删改冲突 fixture 或反复加导航来制造通过。任何再试仍须新计划和独立审核，不重开已停止的批次。
+
+**M1DT 本批结束后的判断（砚砚）：保留已审代码为候选，补齐必要证据，继续草稿。** S3、S5、C2 各一次通过，未复现前版的已完成工作误续；这不证明修订文字的因果效果，尤其 C2 没有消费新文字。旧失败保留，未跑的撤回、不可读来源、多工作歧义、M1b 实际消费与完整基线/成本等缺口不由三场代签。总账12/12已用完；不再加导航或合同文字去追逐同批结果，先整理剩余验收与预算提案，新增模型调用须另获授权。没有完整验收结论，不合入或部署。
 
 现场反馈仍在原对话：恢复成功直接做事；有关键缺口时简短说明或澄清。详细轨迹留原诊断／验收记录，重复保守 cold 不向用户反复播报恢复流程。
 
