@@ -42,7 +42,33 @@ Windows 上信号不触发 Node handler，**只有 IPC 能可靠通知对端**�
 1. **正常停止（主路径）**：desktop 先通过 IPC 请 API 结算（关准入 → 停 provider 树 → 写终态/teardown → 关连接），有界等待；超时才强杀。收尾由既有 shutdown 复用，不复制流程。
 2. **强杀兜底**：`taskkill /T /F` **不能**作为停止证明。实测反例（砚砚探针，我已独立复跑）：root→launcher→detached writer，launcher 先退出后，`taskkill root /T /F` 退出码 0、root 已死，而 **writer 仍存活**（`writerSurvivesSuccessfulTaskkillTree: true`）。taskkill 同样依赖 PPID 链，断链处即断。
 
-### ⛔ 定案方案被实测推翻（2026-11-05，宪宪）
+### ✅ 我的「NO-SPAWN」结论已被推翻——根因是我自己的 helper bug（2026-11-05）
+
+**我错在哪**：我观察到「投靠 Job 后 spawn 不出任何子进程」，据此推断 libuv 不支持 Job 嵌套、Job 方向不可行。这个归因是**错的**。
+
+**真正根因**（由砚砚的单变量 A/B 定位，我独立复现）：PowerShell 把裸字面量 `0xFFFFFFFF` 推断为 `Int32 = -1`，传给 `WaitForSingleObject(UInt32)` 直接抛类型转换异常；异常落进 `finally` → 关闭 Job handle → `KILL_ON_JOB_CLOSE` **把宿主自己杀了**。宿主已死，后续 spawn 自然「没有 error、没有 exit」——那是我自己的 bug 制造的现象，不是平台限制。
+
+我的独立复现：
+```
+[T]::Echo(0xFFFFFFFF)        -> THROWS「无法将值 -1 转换为 UInt32」
+[T]::Echo([uint32]::MaxValue) -> 4294967295
+(0xFFFFFFFF).GetType().Name   -> Int32
+```
+
+**仅修这一处后的端到端复测（产品形态 `stdio:['pipe','pipe','pipe']`）**：
+
+| 观察 | 结果 |
+| --- | --- |
+| adoption | `adopted: true` |
+| provider spawn（pipes 形态） | 成功，`spawn-error: (none)`，`tree.json` 生成 |
+| 中间 launcher | 退出（`launcher-exit: code=0`）→ 断链 |
+| 断链 detached writer | `alive: true` |
+| **只杀 host 后** | `writer alive: false`（Job 回收成功） |
+| 外部查询 Job | `{verdict:"absent", nativeError:2}` |
+
+→ **Job 方向成立**，与砚砚 A/B 结论一致。我此前的「事实 1/3/4」作废，第三路线探索停止。
+
+**教训**：我把「观测到的现象」当成了「平台语义」，没有先排除自家代码的异常路径；`finally` 里关 handle 会让 bug 表现成完全不同的故障。后续遇到「机制看起来不可行」先做单变量 A/B，再下结论。
 
 砚砚探针在**它自己的 fixture** 上 PASS，我复跑同样 PASS。但把同一机制接到**产品 spawn 语义**上时，实测到两个阻塞事实，两者都独立复现：
 
