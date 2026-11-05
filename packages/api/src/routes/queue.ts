@@ -495,7 +495,12 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       reason?: ExecutionFailureReason;
     },
     retirePending = snapshotPendingPrivateStop(input.threadId, input.userId, [input.catId]),
-  ): Promise<{ reconciled: boolean; error?: string; code?: 'PROVIDER_LIVE_OWNER' }> => {
+  ): Promise<{
+    reconciled: boolean;
+    controlPlaneUnavailable?: boolean;
+    error?: string;
+    code?: 'PROVIDER_LIVE_OWNER';
+  }> => {
     if (!messageStore || !opts.invocationRecordStore) {
       throw new Error('durable execution failure stores are unavailable');
     }
@@ -515,6 +520,8 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     if (liveOwner)
       return {
         reconciled: false,
+        // The existing refusal contract: the Stop routes answer 503 with this exact reason.
+        controlPlaneUnavailable: true,
         error: `原执行仍有存活的 owner，保留执行占用（invocationId=${liveOwner.invocationId}）`,
         code: 'PROVIDER_LIVE_OWNER',
       };
@@ -659,7 +666,13 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     invocationId: string;
     ownerUserId?: string;
     request: FastifyRequest;
-  }): Promise<{ cancelled: boolean; reconciled?: boolean; controlPlaneUnavailable?: boolean }> => {
+  }): Promise<{
+    cancelled: boolean;
+    reconciled?: boolean;
+    controlPlaneUnavailable?: boolean;
+    error?: string;
+    code?: string;
+  }> => {
     const executionOwner = {
       executionId: input.executionId,
       invocationId: input.invocationId,
@@ -931,6 +944,8 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
         reconciled: result.cancelled || result.reconciled === true,
         ...(processOwner.executionId !== input.executionId ? { replacement: true } : {}),
         ...(result.controlPlaneUnavailable ? { controlPlaneUnavailable: true } : {}),
+        ...(result.error ? { error: result.error } : {}),
+        ...(result.code ? { code: result.code } : {}),
       };
     }
 
