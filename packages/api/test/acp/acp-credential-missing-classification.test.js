@@ -89,6 +89,25 @@ async function invokeWithProtocolError({ code, message, data, providerName = 'AC
   }
 }
 
+test('display-only ACP diagnostics cannot replace genuine credential, capacity or MCP failure causes', async () => {
+  for (const [message, expected] of [
+    [WIRE_MISSING_API_KEY, 'credential_missing'],
+    ['Provider capacity exhausted', 'model_capacity'],
+    ['MCP server request failed', 'mcp_pollution'],
+  ]) {
+    const error = await invokeWithProtocolError({
+      code: -32603,
+      message,
+      data: { diagnostics: 'recent Pi CLI diagnostics: benign mcp capacity status; api_key=secret-diagnostic-token' },
+    });
+    assert.equal(error.errorCode, expected);
+    assert.doesNotMatch(error.error, /recent Pi CLI diagnostics|secret-diagnostic-token/);
+    assert.match(error.metadata.cliDiagnostics.safeExcerpt, /recent Pi CLI diagnostics/);
+    assert.doesNotMatch(error.metadata.cliDiagnostics.safeExcerpt, /secret-diagnostic-token/);
+    assert.equal(error.metadata.cliDiagnostics.reasonCode, undefined);
+  }
+});
+
 test('DSH 缺凭据引用被识别为 credential_missing 并给出可操作说明', async () => {
   const error = await invokeWithProtocolError({ code: -32603, message: WIRE_MISSING_CREDENTIAL_REF });
 

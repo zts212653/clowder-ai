@@ -78,7 +78,7 @@ export class LivingWorkService {
       versions: WorkVersionStore;
       source: WorkSourcePort;
       responses?: WorkReviewResponseService;
-      changed?(ownerUserId: string): void;
+      changed?(ownerUserId: string, threadId: string): void;
       authorize(input: WorkAuthorizationInput): Promise<void>;
     },
   ) {}
@@ -91,7 +91,7 @@ export class LivingWorkService {
   async commit(raw: unknown, principal: WorkPrincipal) {
     const result = await this.commitVersion(raw, principal);
     try {
-      this.deps.changed?.(principal.userId);
+      this.deps.changed?.(principal.userId, principal.threadId);
     } catch {
       /* Projection invalidation never changes the canonical save result. */
     }

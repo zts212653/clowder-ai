@@ -4,6 +4,7 @@
 // AC-A3: 先 sanitize 再截断 — token 中间截尾不能绕过黑名单
 
 import assert from 'node:assert';
+import { performance } from 'node:perf_hooks';
 import test from 'node:test';
 import { sanitizeCliStderr } from '../dist/utils/sanitize-cli-stderr.js';
 
@@ -85,11 +86,40 @@ test('redacts PEM private key block', () => {
   assert.ok(!out.includes('MIIEpAIBAAK'));
 });
 
+test('redacts short-wrapped PEM through EOF when the end marker is absent or truncated', () => {
+  const body = 'AbCdEfGhIjKlMnOp\nQrStUvWxYz012345';
+  for (const [label, tail] of [
+    ['PRIVATE KEY', ''],
+    ['RSA PRIVATE KEY', '\n-----END RSA PRIVATE KEY---'],
+    ['OPENSSH PRIVATE KEY', '\r\n-----END OPENSSH'],
+  ]) {
+    const out = sanitizeCliStderr(`ordinary context\n-----BEGIN ${label}-----\n${body}${tail}`);
+    assert.equal(out, 'ordinary context\n[PEM_REDACTED]', label);
+  }
+});
+
 test('redacts URL query string entirely', () => {
   const input = 'GET https://api.example.com/v1/foo?api_key=sk-abc123def456ghijklmnop&user=bob HTTP/1.1';
   const out = sanitizeCliStderr(input);
   assert.ok(out.includes('[QUERY_REDACTED]'), `expected QUERY_REDACTED, got: ${out}`);
   assert.ok(!out.includes('sk-abc123def456ghijklmnop'), `token leaked via query: ${out}`);
+});
+
+test('redacts URL userinfo credentials while retaining the destination host', () => {
+  const input = 'ERR_PNPM_NO_OFFLINE_TARBALL https://alice:review-password@registry.example.test/pkg.tgz';
+  const out = sanitizeCliStderr(input);
+  assert.ok(out.includes('https://[CREDENTIALS_REDACTED]@registry.example.test/pkg.tgz'), out);
+  assert.ok(!out.includes('alice'), `URL username leaked: ${out}`);
+  assert.ok(!out.includes('review-password'), `URL password leaked: ${out}`);
+});
+
+test('URL userinfo scanning stays bounded on long dotted non-URL output', () => {
+  const input = 'a.'.repeat(32_768);
+  const startedAt = performance.now();
+  const out = sanitizeCliStderr(input);
+  const elapsedMs = performance.now() - startedAt;
+  assert.strictEqual(out, input);
+  assert.ok(elapsedMs < 500, `64 KiB non-URL sanitization took ${elapsedMs.toFixed(1)}ms`);
 });
 
 test('redacts URL fragment string entirely', () => {

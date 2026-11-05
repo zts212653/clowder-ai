@@ -1,6 +1,7 @@
 import type { DragEvent as ReactDragEvent, ReactNode } from 'react';
 import { type CatData, formatCatName } from '@/hooks/useCatData';
 import { CO_CREATOR_COLOR } from '@/lib/color-defaults';
+import { useIsDshMember, useMemberModelLabel } from '@/lib/member-model-display';
 import { readableInkOn } from '@/lib/readable-ink';
 import { AvatarImageWithFallback } from './AvatarImageWithFallback';
 import type { CatConfig, CoCreatorConfig } from './config-viewer-types';
@@ -31,9 +32,8 @@ function humanizeClientId(clientId: string) {
   return clientId;
 }
 
-function clientRuntimeLabel(cat: CatData, configCat?: CatConfig) {
-  if (cat.configurationSource === 'native_tool' && cat.acp)
-    return /dsh|deepseek/i.test(JSON.stringify(cat.acp)) ? 'DSH' : 'ACP 工具';
+function clientRuntimeLabel(cat: CatData, configCat: CatConfig | undefined, dsh: boolean) {
+  if (cat.configurationSource === 'native_tool' && cat.acp) return dsh ? 'DSH' : 'ACP 工具';
   if (cat.configurationSource === 'native_tool' && cat.clientId === 'kimi') return 'Kimi';
   if (cat.configurationSource === 'native_tool' && cat.clientId === 'opencode') return 'OpenCode';
   if (cat.configurationSource === 'native_tool')
@@ -41,7 +41,7 @@ function clientRuntimeLabel(cat: CatData, configCat?: CatConfig) {
       ? 'Codex'
       : cat.clientId === 'anthropic'
         ? 'Claude Code'
-        : /dsh|deepseek/i.test(JSON.stringify(cat.acp))
+        : dsh
           ? 'DSH'
           : 'ACP 工具';
   const accountRef = (cat.accountRef ?? '').toLowerCase();
@@ -71,26 +71,15 @@ function accountSummary(cat: CatData) {
   return `CLI（配置） · ${accountRef}`;
 }
 
-function getMetaSummary(cat: CatData, configCat?: CatConfig) {
-  let modelLabel = cat.defaultModel;
-  // DSH's [provider, model] wire value stays intact; the overview needs only the model name.
-  if (cat.acp && /dsh|deepseek/i.test(JSON.stringify(cat.acp))) {
-    try {
-      const value: unknown = JSON.parse(cat.defaultModel);
-      if (Array.isArray(value) && value.length === 2 && value.every((v) => typeof v === 'string'))
-        modelLabel = value[1];
-    } catch {
-      /* Legacy plain model names remain readable. */
-    }
-  }
-  if (cat.configurationSource === 'native_tool')
-    return [clientRuntimeLabel(cat, configCat), modelLabel || '跟随工具模型', accountSummary(cat)]
+function getMetaSummary(cat: CatData, configCat: CatConfig | undefined, modelLabel: string, dsh: boolean) {
+  if (cat.configurationSource === 'native_tool' || dsh)
+    return [clientRuntimeLabel(cat, configCat, dsh), modelLabel || '跟随工具模型', accountSummary(cat)]
       .filter(Boolean)
       .join(' · ');
   if (cat.clientId === 'antigravity') {
     return `Antigravity · ${configCat?.model ?? cat.defaultModel} · CLI Bridge`;
   }
-  return `${clientRuntimeLabel(cat, configCat)} · ${configCat?.model ?? cat.defaultModel} · ${accountSummary(cat)}`;
+  return `${clientRuntimeLabel(cat, configCat, dsh)} · ${configCat?.model ?? cat.defaultModel} · ${accountSummary(cat)}`;
 }
 
 function getStatusBadge(cat: CatData): { enabled: boolean; label: string; tone: 'emerald' | 'slate' } {
@@ -201,10 +190,12 @@ export function HubOverviewToolbar({
 }
 
 function MemberMeta({ cat, configCat }: { cat: CatData; configCat?: CatConfig }) {
+  const modelLabel = useMemberModelLabel();
+  const dshMember = useIsDshMember();
   return (
     <>
       <span>
-        {getMetaSummary(cat, configCat)}
+        {getMetaSummary(cat, configCat, modelLabel(cat, '跟随工具模型'), dshMember(cat))}
         {cat.carrier && cat.configurationSource !== 'native_tool' && (
           <SettingsBadge tone={cat.carrier === 'cli' ? 'slate' : 'emerald'} size="xxs" className="ml-1.5 inline-block">
             {cat.carrier.replace('_', ' ').toUpperCase()}

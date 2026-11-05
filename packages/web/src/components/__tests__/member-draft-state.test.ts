@@ -184,3 +184,41 @@ it('commits the separately saved canon avatar without dropping other unsaved mem
   expect(patch.nickname).toBe('还没保存的昵称');
   expect(patch).not.toHaveProperty('avatar');
 });
+
+it('restores exact prepared display evidence with the draft without adding it to the member payload', () => {
+  const runtime: RuntimeChoice = {
+    id: 'acp:draft',
+    label: 'DSH',
+    clientId: 'acp',
+    installed: true,
+    dshSetupSupported: true,
+    models: [],
+    acp: {
+      command: 'node',
+      startupArgs: ['/fixture/installed/dsh/lib/bin.js', '--profile', 'acp', '--patch', '/fixture/prepared.yml'],
+      transport: 'stdio',
+    },
+  };
+  const baseline = {
+    ...original,
+    clientId: 'acp',
+    carrier: 'acp',
+    accountRef: '',
+    acp: { ...runtime.acp, startupArgs: runtime.acp!.startupArgs.slice(0, 3) },
+  } as CatData;
+  const draft: MemberDraft = {
+    version: 1,
+    baseline,
+    form: { ...initialState(baseline), acpStartupArgs: runtime.acp!.startupArgs.join(' ') },
+    section: 'identity',
+    templateId: null,
+    preparedRuntime: runtime,
+  };
+  expect(persistMemberDraft('prepared-draft-owner', draft)).toBe(true);
+  const restored = readMemberDraft('prepared-draft-owner')!;
+  expect(restored.preparedRuntime).toEqual(runtime);
+  const payload = buildMemberPatchPayload(restored.form, baseline);
+  expect(payload.acp).toEqual({ ...baseline.acp, startupArgs: runtime.acp!.startupArgs, transport: undefined });
+  expect(JSON.stringify(payload)).not.toContain('preparedRuntime');
+  expect(JSON.stringify(payload)).not.toContain('dshSetupSupported');
+});

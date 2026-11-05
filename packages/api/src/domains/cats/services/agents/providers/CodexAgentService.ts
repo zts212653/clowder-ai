@@ -6,7 +6,7 @@ import { resolveCodexAccountLaunch, resolveCodexApiExecutionHome } from '../../.
 import { codexCliConfig } from '../../../../../config/codex-launch-config.js';
 import { codexManagedLaunchArgs } from '../../../../../config/codex-managed-launch.js';
 import { assertCodexManagedPlatformSupport } from '../../../../../config/codex-managed-support.js';
-import { assertCodexSharedStateRoots } from '../../../../../config/codex-shared-state.js';
+import { assertCodexSharedStateRoots, codexUsesSharedState } from '../../../../../config/codex-shared-state.js';
 import { prepareCodexEnvironment } from '../../../../../utils/codex-network-environment.js';
 import { agentServiceGeneration } from '../registry/AgentRegistry.js';
 import { inspectCodexImportSession, listCodexImportSessions } from './CodexLocalSessionSource.js';
@@ -1382,7 +1382,7 @@ export class CodexAgentService implements AgentService {
       ),
     );
     const descriptor = resolveCodexAccountLaunch(selected, { cwd, env });
-    if (descriptor.managed || (descriptor.accountRef === 'codex' && descriptor.authMode === 'oauth'))
+    if (codexUsesSharedState(descriptor))
       assertCodexSharedStateRoots(descriptor.accountOwnerRoot, { launch: descriptor });
     if (descriptor.managed) await assertCodexManagedPlatformSupport(descriptor.credentialHome, this.cliCommand);
     const args = ['app-server', '--stdio'];
@@ -2107,7 +2107,7 @@ export class CodexAgentService implements AgentService {
           { id: 'codex', authType: authMode === 'api_key' ? 'api_key' : 'oauth', envVars: options?.accountEnv },
           { cwd: options?.workingDirectory, authMode },
         );
-      if (accountLaunch.managed || (accountLaunch.accountRef === 'codex' && accountLaunch.authMode === 'oauth'))
+      if (codexUsesSharedState(accountLaunch))
         assertCodexSharedStateRoots(accountLaunch.accountOwnerRoot, { launch: accountLaunch });
       if (!native) {
         const managedArgs = codexManagedLaunchArgs(accountLaunch, userConfigArgs);

@@ -115,5 +115,5 @@ test('an empty target Work catalogue attributes initial authorization without se
     1200,
     'initial authority wait must not disappear from the measured subphases',
   );
-  assert.deepEqual(reports[0].counts, { pages: 1, heads: 1, selectedVersions: 0, returned: 0 });
+  assert.deepEqual(reports[0].counts, { pages: 1, heads: 0, selectedVersions: 0, returned: 0 });
 });

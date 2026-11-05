@@ -6239,8 +6239,8 @@ async function main(): Promise<void> {
     }),
   );
   const livingWorks = new LivingWorkService({
-    changed: (ownerUserId) =>
-      socketManager?.emitToUser(ownerUserId, 'entrusted_work_projection_invalidated', { ownerUserId }),
+    changed: (ownerUserId, threadId) =>
+      socketManager?.emitToUser(ownerUserId, 'entrusted_work_projection_invalidated', { ownerUserId, threadId }),
     responses: workResponses,
     owner: collaborativeContent.owner,
     versions: artifactReview.store.works,
