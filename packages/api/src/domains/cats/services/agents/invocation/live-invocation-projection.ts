@@ -244,6 +244,7 @@ export async function resolveActiveInvocationsStrict(
     | undefined,
   /** F117 KD-23: the caller's CLI owner snapshot; without a complete one, running members stay listed unverified. */
   ownerSnapshot?: OwnerSnapshot,
+  options: { verifiedOnly?: boolean } = {},
 ): Promise<ActiveInvocationProjection[]> {
   if (!recordStore) {
     return projectActiveInvocations(threadId, trackerProjectionCandidates(threadId, userId, invocationTracker));
@@ -268,7 +269,10 @@ export async function resolveActiveInvocationsStrict(
       : {}),
     ...(ownerSnapshot ? { ownerSnapshot } : {}),
   });
-  const active = responseStatus ? await withoutTerminalResponses(result.active, responseStatus) : result.active;
+  const evidence = options.verifiedOnly
+    ? result.active.filter((live) => EVIDENCE_RANK[live.source] > 0)
+    : result.active;
+  const active = responseStatus ? await withoutTerminalResponses(evidence, responseStatus) : evidence;
   // Read the dynamic Active Run only after the asynchronous canonical liveness
   // snapshot. Child admission can bind the run while record/child stores are
   // being read; taking this map before the await returns a torn `/queue`

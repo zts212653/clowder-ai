@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import React from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -24,7 +25,8 @@ vi.mock('next/navigation', () => ({
   }),
 }));
 
-vi.mock('@/components/ThreadSidebar/thread-navigation', () => ({
+vi.mock('@/components/ThreadSidebar/thread-navigation', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../ThreadSidebar/thread-navigation')>()),
   getThreadIdFromPathname,
 }));
 
@@ -152,9 +154,9 @@ describe('ActivityBar referrer forwarding (P2 fix)', () => {
     });
   });
 
-  it('encodes existing ?from= when routing back to a thread from the home button', () => {
+  it('returns to the valid source thread in ?from= from the home button', () => {
     const originalSearch = window.location.search;
-    const threadId = 'thread/with space?x#frag';
+    const threadId = 'thread_source-1';
     Object.defineProperty(window, 'location', {
       value: { ...window.location, search: `?from=${encodeURIComponent(threadId)}` },
       writable: true,
@@ -179,5 +181,23 @@ describe('ActivityBar referrer forwarding (P2 fix)', () => {
       writable: true,
       configurable: true,
     });
+  });
+
+  it('does not treat route delimiters inside a referrer as a thread identity', () => {
+    const original = window.location;
+    Object.defineProperty(window, 'location', {
+      value: { ...original, search: `?from=${encodeURIComponent('thread/with space?x#frag')}` },
+      configurable: true,
+    });
+    window.sessionStorage.clear();
+    try {
+      React.act(() => root.render(React.createElement(ActivityBar)));
+      const home = container.querySelector<HTMLButtonElement>('button[title="对话"]');
+      expect(home).not.toBeNull();
+      React.act(() => home?.click());
+      expect(mockPush).toHaveBeenCalledWith('/');
+    } finally {
+      Object.defineProperty(window, 'location', { value: original, configurable: true });
+    }
   });
 });

@@ -31,6 +31,8 @@ const panelKinds = new Set([
   'transcript',
   'settings',
   'app-assist',
+  // F335 交付三：the desk bubble / list. Only a desk-line archive's command schema lets this panel through.
+  'desk',
 ]);
 const validDimension = (value, minimum, maximum) => Number.isInteger(value) && value >= minimum && value <= maximum;
 function validLayoutCommand(command) {

@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F108 P1: Cancelling one cat during concurrent execution must NOT clear other cats' state.
  *

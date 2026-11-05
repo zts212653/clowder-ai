@@ -1,6 +1,7 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { SHELL_PRESENTATION_STORAGE_KEY, writeShellPresentation } from '@/components/shell/shell-presentation';
 import { openFileMenu } from '@/test-utils/open-file-menu';
 
 const LONG_ARTIFACT_NAME = 'docs/features/assets/F269/一份非常长而且必须能够复制完整值的产物审计报告-final-reviewed.md';
@@ -65,7 +66,7 @@ function measuredValue(container: ParentNode, value: string): HTMLElement {
   return match;
 }
 
-describe('F269 artifact compact-label recovery', () => {
+describe('F269 classic artifact compact-label recovery', () => {
   let roots: Root[] = [];
   let writeText: ReturnType<typeof vi.fn>;
 
@@ -78,6 +79,7 @@ describe('F269 artifact compact-label recovery', () => {
   });
 
   beforeEach(() => {
+    writeShellPresentation('classic');
     useChatStore.setState({ currentThreadId: 'T-current', workspaceWorktreeId: null });
     state.threadArtifacts = [];
     state.globalArtifacts = [];
@@ -89,6 +91,7 @@ describe('F269 artifact compact-label recovery', () => {
   afterEach(() => {
     for (const root of roots) act(() => root.unmount());
     document.body.innerHTML = '';
+    localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
     vi.restoreAllMocks();
   });
 

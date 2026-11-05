@@ -108,7 +108,11 @@ describe('TurnExecutionStartupReconciler', () => {
       settleEndedTurnResponse: async (turn) => {
         settled.push({ invocationId: turn.invocationId, status: turn.status, terminalReason: turn.terminalReason });
         if (turn.invocationId === 'ordinary-a') throw new Error('commit rejected');
-        await store.clearResponsePending(turn.invocationId);
+        await store.markResponseSettled(turn.invocationId, {
+          kind: 'no_response',
+          reason: 'recovered_no_response',
+          settledAt: 200,
+        });
       },
     });
 
@@ -143,7 +147,11 @@ describe('TurnExecutionStartupReconciler', () => {
       store,
       settleEndedTurnResponse: async (turn) => {
         settled.push(turn.invocationId);
-        await store.clearResponsePending(turn.invocationId);
+        await store.markResponseSettled(turn.invocationId, {
+          kind: 'no_response',
+          reason: 'recovered_no_response',
+          settledAt: 200,
+        });
       },
     });
 

@@ -1,12 +1,23 @@
-import { createCatId } from '@cat-cafe/shared';
+import { createCatId, getLifecycleAppendOutcome } from '@cat-cafe/shared';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { z } from 'zod';
 import { queueEntryOwnerId } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
 import { queueEntryId } from '../domains/cats/services/agents/invocation/queue-ledger/QueueLedger.js';
-import { isOwnerRecoverableRoutingTarget } from '../domains/cats/services/agents/invocation/queue-routing-recovery-policy.js';
+import {
+  isOwnerRecoverableRoutingTarget,
+  isOwnerRepeatableAppendTarget,
+} from '../domains/cats/services/agents/invocation/queue-routing-recovery-policy.js';
 import { repeatUncertainAppend } from '../domains/cats/services/agents/invocation/repeat-uncertain-append.js';
 import { emitQueueUpdated } from '../utils/queue-enrichment.js';
 import { resolveStrictUserId } from '../utils/request-identity.js';
 import type { QueueRoutesOptions } from './queue.js';
+
+const expectedAppend = z
+  .object({
+    expectedResponseMessageId: z.string().min(1).max(256),
+    expectedInvocationId: z.string().min(1).max(256).optional(),
+  })
+  .strict();
 
 type Params = { threadId: string; sourceMessageId: string; targetCatId: string };
 type Authorize = (request: FastifyRequest, reply: FastifyReply, threadId: string) => Promise<{ userId: string } | null>;
@@ -40,27 +51,62 @@ export function registerQueueRoutingRecovery(
     const response = dispatch?.statusMessageId ? await deps.messageStore?.getById(dispatch.statusMessageId) : undefined;
     const pending =
       entry && queueEntryOwnerId(entry) === owner.userId && isOwnerRecoverableRoutingTarget(entry, source, targetCatId);
-    const status = pending
-      ? entry.status === 'claimed'
-        ? 'running'
-        : entry.delivery.routingHeldTargetIds?.includes(targetCatId)
-          ? 'failed'
-          : 'running'
-      : response?.lifecycle?.kind === 'response'
-        ? response.lifecycle.status === 'completed'
-          ? 'succeeded'
-          : response.lifecycle.status === 'processing'
-            ? 'running'
-            : 'unavailable'
-        : 'unavailable';
-    return { userId: owner.userId, threadId, entryId, targetCatId, source, status };
+    const failure = source.lifecycle?.appendFailures?.find(
+      (item) => item.targetId === targetCatId && item.responseMessageId === dispatch?.statusMessageId,
+    );
+    const appendOutcome = getLifecycleAppendOutcome(dispatch, source.lifecycle);
+    const status = appendOutcome
+      ? appendOutcome === 'not_accepted'
+        ? 'not_received'
+        : appendOutcome === 'incomplete'
+          ? 'incomplete'
+          : 'unconfirmed'
+      : pending
+        ? entry.status === 'claimed'
+          ? 'running'
+          : entry.delivery.routingHeldTargetIds?.includes(targetCatId)
+            ? 'failed'
+            : 'running'
+        : response?.lifecycle?.kind === 'response'
+          ? response.lifecycle.status === 'completed'
+            ? 'succeeded'
+            : response.lifecycle.status === 'processing'
+              ? 'running'
+              : 'unavailable'
+          : 'unavailable';
+    return { userId: owner.userId, threadId, entryId, targetCatId, source, status, dispatch, response, failure };
   };
 
   app.get<{ Params: Params }>(
     '/api/threads/:threadId/messages/:sourceMessageId/routing-targets/:targetCatId',
     async (request, reply) => {
       const current = await resolve(request, reply);
-      if (current) return { status: current.status };
+      if (current)
+        return {
+          status: current.status,
+          canRepeat: isOwnerRepeatableAppendTarget(current.source, current.targetCatId, current.response),
+        };
+    },
+  );
+  app.post<{ Params: Params }>(
+    '/api/threads/:threadId/messages/:sourceMessageId/routing-targets/:targetCatId/reconcile',
+    async (request, reply) => {
+      const userId = resolveStrictUserId(request);
+      if (!userId) return reply.code(401).send({ error: '请登录后核对投递', code: 'AUTH_REQUIRED' });
+      const current = await resolve(request, reply);
+      if (!current) return;
+      const expected = expectedAppend.safeParse(request.body);
+      if (!expected.success) return reply.code(400).send({ error: '缺少原投递身份，请刷新状态' });
+      if (
+        !current.dispatch ||
+        current.dispatch.statusMessageId !== expected.data.expectedResponseMessageId ||
+        (expected.data.expectedInvocationId &&
+          (current.response?.lifecycle?.kind !== 'response' ||
+            current.response.lifecycle.invocationId !== expected.data.expectedInvocationId))
+      )
+        return reply.code(409).send({ error: '原投递状态已变化，请刷新状态', code: 'APPEND_RECONCILE_STALE' });
+      await deps.queueProcessor.reconcileAppendDelivery(current.threadId, current.source.id, current.targetCatId);
+      return { status: 'checked' };
     },
   );
   app.post<{ Params: Params }>(
@@ -73,6 +119,13 @@ export function registerQueueRoutingRecovery(
       if (userId !== current.userId) return reply.code(401).send({ error: '请登录后再发一次', code: 'AUTH_REQUIRED' });
       if (!deps.messageStore || deps.isCatAvailable?.(createCatId(current.targetCatId)) === false)
         return reply.code(409).send({ error: '这只猫目前无法接收，请稍后再试', code: 'APPEND_REPEAT_UNAVAILABLE' });
+      const expected = expectedAppend.safeParse(request.body);
+      if (!expected.success) return reply.code(400).send({ error: '缺少原投递身份，请刷新状态' });
+      if (
+        current.dispatch?.statusMessageId !== expected.data.expectedResponseMessageId ||
+        (expected.data.expectedInvocationId && current.failure?.invocationId !== expected.data.expectedInvocationId)
+      )
+        return reply.code(409).send({ error: '原投递状态已变化，请刷新状态', code: 'APPEND_REPEAT_STALE' });
       const result = await repeatUncertainAppend(
         deps.invocationQueue,
         deps.messageStore,

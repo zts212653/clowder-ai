@@ -9,6 +9,9 @@ export class ExecutionAdmissionConflict extends Error {
   readonly statusCode = 409;
 }
 
+/** The constructed service source must be rebuilt; ordinary capture races only need a fresh pin. */
+export class StaleServiceSourceConflict extends ExecutionAdmissionConflict {}
+
 export class AgentServiceUnavailableError extends Error {
   readonly reason: AgentRegistrationFailure;
 

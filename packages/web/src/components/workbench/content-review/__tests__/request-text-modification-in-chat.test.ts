@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { addWorkspaceFileQuoteToChat } from '@/components/workspace/workspace-file-quote';
 import { useChatStore } from '@/stores/chatStore';

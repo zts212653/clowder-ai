@@ -256,6 +256,14 @@ describe('F297 terminal presence semantics (C10 lifecycle witness)', () => {
       executionKind: 'ordinary',
       startedAt: 2000,
     });
+    deps.cliOwners.push({
+      executionId: 'parent_absent',
+      invocationId: 'child_e2e',
+      threadId: thread.id,
+      userId: 'alice',
+      catId: 'sonnet',
+      startedAt: 2000,
+    });
     const { source } = await realPresenceSource(deps);
 
     const rows = await sidebarRows({ presenceSource: source });

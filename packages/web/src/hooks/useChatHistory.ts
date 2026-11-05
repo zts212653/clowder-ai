@@ -435,6 +435,7 @@ function mergeMessageExtra(
     // No fallback inheritance: this layout belongs to the selected full body.
     outputLayout: preferred?.outputLayout,
     liveCompanion: pick('liveCompanion'),
+    watcher: pick('watcher'),
     custodyOfferV1: pick('custodyOfferV1'),
     evolutionUseSourceV1: pick('evolutionUseSourceV1'),
     runtimeInteractionCard: pick('runtimeInteractionCard'),

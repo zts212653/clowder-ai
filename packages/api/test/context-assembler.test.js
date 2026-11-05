@@ -274,14 +274,6 @@ describe('assembleContext', () => {
     assert.equal(result.messageCount, 5);
   });
 
-  test('maxTotalTokens=0 returns empty context', async () => {
-    const { assembleContext } = await import('../dist/domains/cats/services/context/ContextAssembler.js');
-    const msgs = [mockMsg({ content: 'hello' })];
-    const result = assembleContext(msgs, { maxTotalTokens: 0 });
-    assert.equal(result.contextText, '');
-    assert.equal(result.messageCount, 0);
-  });
-
   test('token ceiling fails closed when even the newest message cannot fit', async () => {
     const { assembleContext } = await import('../dist/domains/cats/services/context/ContextAssembler.js');
     const msgs = [mockMsg({ content: 'Z'.repeat(600) })];

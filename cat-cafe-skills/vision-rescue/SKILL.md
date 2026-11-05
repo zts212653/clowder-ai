@@ -1,5 +1,6 @@
 ---
 name: vision-rescue
+tips_exempt: "2026-11-03: method for a cat stuck on its own task (check the environment and precedent before declaring defeat); it is triggered by the cat's own wording, not a capability the user opens, so it has no tip."
 description: >
   绝境反转方法论：当任务似乎没有希望、反复摆动、准备放弃愿景时的五步突破框架。
   Use when: 任务看起来无解、多次尝试失败后想放弃、输出投降修辞（"现状最优"/"没救了"/"接受现实"）、连续 3+ 轮在希望与绝望间摆动。
@@ -19,7 +20,6 @@ triggers:
   - "不值得继续"
   - "保守路径"
   - "实际价值变了"
-  - "收口"
   - "vision rescue"
 ---
 
@@ -54,9 +54,9 @@ triggers:
 
 **任一 yes → 承认绝境，执行 Step 2-5。**
 
-### Step 2: 回到第一真相源
+### Step 2: 回到第一真相源，查清环境
 
-代码 > 文档 > 博客 > 推测。工具优先级（shared-rules §16b）：
+代码任务：代码 > 文档 > 博客 > 推测。工具优先级（shared-rules §16b）：
 
 1. `strings <binary>` / 反编译 — 找真实判定代码
 2. `grep` / 读源码 — 开源或自有代码
@@ -64,9 +64,15 @@ triggers:
 4. 读官方文档
 5. WebFetch — **最低优先级，不是入口**
 
+不是代码的任务（片子、设计、文章），第一真相源是成品本身、原始素材和operator experience。
+
 **分离事实和推断**：列出所有"我观察到的"和"所以我认为的"。推断链跳跃最大的那步最可能错。
 
 > F198：`entrypoint=sdk-cli`（事实）→ `billing=SDK 桶`（推断，**错的**）。中间缺了连接层代码证据。
+
+**再查环境**：除了"信息在哪"，还要问"环境能让我做什么"：手上有哪些工具和权限，这块归哪只猫，缺的能力能不能提需求。能补的自己补，比如写个探针、搭最小复现、要一份真实样本；补不了的，写清缺什么、该找谁。别把"现在没有"说成"做不到"。
+
+> 2026-10-30：一只猫汇报"3D 小镇里现在还不能自由摆弄东西"，像在说改不了的规定；operator回"你们可以提需求啊"（`[thread-id]#private-source-id`）。不到十分钟，指挥中心的猫对照小镇代码列出了已有什么、缺什么、谁来做。
 
 ### Step 3: 找外部声音
 
@@ -75,6 +81,7 @@ triggers:
 - **社区**：Reddit / GitHub Issues / HN — 别人遇到同样问题了吗？
 - **开源**：有没有项目已经在 production 解决了？
 - **换关键词**：你的搜索关键词暴露了你的假设。换一组 = 换一个假设
+- **先例**：有人做成过同类的事吗？先例本身就是证据，说明这件事做得成。班尼斯特跑进四分钟后，只过了 46 天就有第二个人跑进去
 
 > F198：搜 Reddit 30 秒找到 3 个开源项目已在 production 用 tmux + interactive session。信息一直在那里。
 
@@ -84,7 +91,7 @@ triggers:
 
 - **卡 3 轮 → 必须喊人**（硬触发器，不需要"准备好了再喊"）
 - 求助格式：`我卡在 X，试过 A/B/C，你能从 Y 角度看看吗？`
-- 不是拉人来用同一种方法重试，是拉**不同方法论**的人
+- 不是拉人来用同一种方法重试，是拉**不同方法论**的人（L0 元方法的广度：哪些行当也办这事、请谁同看）
 
 > F198：两只猫整晚在 WebFetch + telemetry 打转。第三只猫上来直接 `strings binary` 一刀到底。operator手动拉人才打破回声室。
 
@@ -102,9 +109,9 @@ triggers:
 
 宣布"当前无路"前必须全部回答：
 
-1. **第一真相源读了吗？** 代码 / binary 级别，不是文档和博客
+1. **第一真相源读了吗、环境查清了吗？** 按任务类型核原始材料：代码任务到代码 / binary 级别，片子、设计、文章看成品、素材和operator experience，不停在文档、博客和二手转述；缺的工具、权限、样本能不能补，归谁
 2. **搜索角度换过吗？** 至少用过 2 组不同关键词或假设
-3. **社区/开源查过吗？** Reddit + GitHub 至少各搜一轮
+3. **同行、社区、先例查过吗？** 技术问题至少 GitHub 和一个社区各搜一轮；别的任务找做成过同类事的人或作品
 4. **不同视角伙伴喊过吗？** 不是同方法论的人
 5. **事实和推断分离了吗？** 推断链哪步跳跃最大？
 6. **operator 需要接受什么成本？** 明确写出"如果真没路，代价是什么"
@@ -118,7 +125,7 @@ triggers:
 | 错误 | 后果 | 修正 |
 |------|------|------|
 | 投降包装成"理性收口" | 愿景失败无人察觉 | Step 1 修辞自检 |
-| WebFetch 当主入口 | 被二手信息误导反复摆动 | Step 2 代码优先 |
+| WebFetch 当主入口 | 被二手信息误导反复摆动 | Step 2 第一手材料优先 |
 | 只跟同思路伙伴讨论 | 回声室放大绝望 | Step 4 找不同方法论的人 |
 | "等有结论再喊人" | 永远不喊 | Step 4 不需要准备好 |
 | 把观察当结论 | 跨层推断出错 | Step 2 事实/推断分离 |
@@ -132,6 +139,7 @@ triggers:
 | `deep-research` | deep-research = 调研方法。vision-rescue 在绝境时可以调度 deep-research |
 | `collaborative-thinking` | Step 4 可以加载 collaborative-thinking 做多猫独立思考 |
 | `self-evolution` | vision-rescue 的案例通过 self-evolution 沉淀为 method/eval |
+| L0 纠偏词「自我效能」 | operator点名时，先按 L0 元方法那句查环境就够；出现摆动、投降信号才进本 skill |
 
 ## 教学案例
 

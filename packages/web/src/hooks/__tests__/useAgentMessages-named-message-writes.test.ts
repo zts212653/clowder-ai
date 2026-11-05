@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F117 contract: every event of a turn is written into the message it names. The server stores
  * the turn's response R empty at admission and stamps `messageId: R` on every event of the turn;
@@ -529,6 +530,29 @@ describe('F117 named-message writes', () => {
       });
       expect(systemRows(threadId)).toEqual([]);
       expect(messageIn(threadId, R)?.extra?.cliDiagnostics).toEqual(cliDiagnostics);
+    });
+
+    it('keeps display-only Pi diagnostics on the named failed response for live delivery', () => {
+      publishResponse(threadId);
+      const cliDiagnostics = {
+        publicSummary: '近期 CLI 诊断（仅供排查）',
+        publicHint: '可能来自先前回合。',
+        safeExcerpt: 'Previous unrelated lookup: Session not found',
+        excerptSource: 'unknown_raw' as const,
+        debugRef: { command: 'Pi', signal: null },
+      };
+      send(
+        event(threadId, {
+          type: 'error',
+          messageId: R,
+          error: 'prompt_failure: no usable Pi output',
+          isFinal: true,
+          metadata: { provider: 'Pi', model: 'fixture', cliDiagnostics },
+        }),
+      );
+      expect(messageIn(threadId, R)?.extra?.cliDiagnostics).toEqual(cliDiagnostics);
+      expect(messageIn(threadId, R)?.content).not.toContain('Session not found');
+      expect(systemRows(threadId)).toEqual([]);
     });
 
     it('an unnamed completion diagnostic cannot create a second result or guess a response', () => {

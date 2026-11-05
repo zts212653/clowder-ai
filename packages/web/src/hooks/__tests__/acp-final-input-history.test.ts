@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
 import { toCliEvents } from '@/components/cli-output/toCliEvents';
 import { summarizeReplyRecord } from '@/components/reply-layers/reply-record';
