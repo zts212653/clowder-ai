@@ -39,6 +39,7 @@ export function SidebarFilterMenuV2({
       aria-label={label}
       data-testid={testId}
       className="absolute left-3 top-full z-[60] max-h-[min(400px,60vh)] w-[calc(100%-24px)] max-w-[200px] overflow-y-auto rounded-xl border p-1.5 shadow-sm"
+      data-chat-background-surface="paper"
       style={{ background: 'var(--shell-paper)', borderColor: 'var(--shell-hairline)' }}
       onKeyDown={(event) => {
         if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;

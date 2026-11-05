@@ -50,7 +50,6 @@ describe('useChatHistory author precedence (cross-thread)', () => {
       targetCats: [],
       catStatuses: {},
       catInvocations: {},
-      currentGame: null,
 
       threadStates: {},
       currentThreadId: 'thread-author',

@@ -18,6 +18,7 @@ vi.mock('@/utils/api-client', () => ({
 }));
 
 const { CatOverviewTab } = await import('../config-viewer-tabs');
+const { apiFetch } = await import('@/utils/api-client');
 
 function minimalCat(id: string, sessionChain?: boolean): import('@/hooks/useCatData').CatData {
   return {
@@ -61,7 +62,111 @@ afterEach(() => {
 });
 
 describe('CatOverviewTab drag & drop (F166)', () => {
-  it('shows always-visible Session Chain state regardless of the legacy byte', async () => {
+  for (const staleFailure of [false, true])
+    it(`keeps confirmed preference after an interleaved GET (failure=${staleFailure})`, async () => {
+      const mock = vi.mocked(apiFetch);
+      const original = mock.getMockImplementation();
+      let finishPut: ((response: Response) => void) | undefined;
+      let finishRead: ((response: Response) => void) | undefined;
+      let reads = 0;
+      mock.mockImplementation(async (url, init) => {
+        if (String(url) !== '/api/config/default-cat') return new Response('{}');
+        if (init?.method === 'PUT')
+          return new Promise<Response>((resolve) => {
+            finishPut = resolve;
+          });
+        if (++reads === 1) return new Response(JSON.stringify({ catId: 'A' }));
+        return new Promise<Response>((resolve) => {
+          finishRead = resolve;
+        });
+      });
+      try {
+        const config = { coCreator: null, cats: {} } as unknown as import('../config-viewer-types').ConfigData;
+        const cats = [minimalCat('A'), minimalCat('B')];
+        await act(async () => root.render(React.createElement(CatOverviewTab, { config, cats })));
+        const select = container.querySelector('[data-testid="default-cat-select"]') as HTMLSelectElement;
+        await act(async () => {
+          select.value = 'B';
+          select.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+        await act(async () => root.render(React.createElement(CatOverviewTab, { config, cats: [...cats] })));
+        await act(async () => finishPut?.(new Response('{}')));
+        expect(select.value).toBe('B');
+        await act(async () =>
+          finishRead?.(new Response(staleFailure ? 'invalid-json' : JSON.stringify({ catId: 'A' }))),
+        );
+        expect(select.value).toBe('B');
+        expect(container.textContent).not.toContain('加载失败，当前默认猫未知');
+      } finally {
+        if (original) mock.mockImplementation(original);
+      }
+    });
+
+  it('ignores an older default response that arrives after the first registered roster', async () => {
+    const mock = vi.mocked(apiFetch);
+    const original = mock.getMockImplementation();
+    let completeFirst: ((response: Response) => void) | undefined;
+    let calls = 0;
+    mock.mockImplementation(async (url) => {
+      if (String(url) !== '/api/config/default-cat') return new Response('{}');
+      if (++calls === 1)
+        return new Promise<Response>((resolve) => {
+          completeFirst = resolve;
+        });
+      return new Response(JSON.stringify({ catId: 'A' }));
+    });
+    try {
+      const config = { coCreator: null, cats: {} } as unknown as import('../config-viewer-types').ConfigData;
+      await act(async () => root.render(React.createElement(CatOverviewTab, { config, cats: [] })));
+      await act(async () => root.render(React.createElement(CatOverviewTab, { config, cats: [minimalCat('A')] })));
+      await act(async () => completeFirst?.(new Response(JSON.stringify({ catId: 'legacy-default' }))));
+      expect((container.querySelector('[data-testid="default-cat-select"]') as HTMLSelectElement).value).toBe('A');
+    } finally {
+      if (original) mock.mockImplementation(original);
+    }
+  });
+
+  it('refreshes the resolved default after the first members are registered without changing the preference', async () => {
+    const mock = vi.mocked(apiFetch);
+    const original = mock.getMockImplementation();
+    let registered = false;
+    const requests: string[] = [];
+    mock.mockImplementation(async (url, init) => {
+      requests.push(`${init?.method ?? 'GET'} ${url}`);
+      return new Response(
+        JSON.stringify(String(url) === '/api/config/default-cat' ? { catId: registered ? 'A' : 'legacy-default' } : {}),
+      );
+    });
+    try {
+      const config = { coCreator: null, cats: {} } as unknown as import('../config-viewer-types').ConfigData;
+      await act(async () => root.render(React.createElement(CatOverviewTab, { config, cats: [] })));
+      registered = true;
+      await act(async () => root.render(React.createElement(CatOverviewTab, { config, cats: [minimalCat('A')] })));
+      expect((container.querySelector('[data-testid="default-cat-select"]') as HTMLSelectElement).value).toBe('A');
+      expect(requests.filter((request) => request === 'GET /api/config/default-cat')).toHaveLength(2);
+      expect(requests.some((request) => request.startsWith('PUT '))).toBe(false);
+    } finally {
+      if (original) mock.mockImplementation(original);
+    }
+  });
+
+  it('keeps the selected account visible when model preferences inherit from the tool', async () => {
+    const cats = [
+      {
+        ...minimalCat('A'),
+        configurationSource: 'native_tool' as const,
+        accountRef: 'company-codex',
+        clientId: 'openai',
+        defaultModel: '',
+      },
+    ];
+    const config = { coCreator: null, cats: {} } as unknown as import('../config-viewer-types').ConfigData;
+    await act(async () => {
+      root.render(React.createElement(CatOverviewTab, { config, cats }));
+    });
+    expect(container.querySelector('[data-testid="cat-card-A"]')?.textContent).toContain('company-codex');
+  });
+  it('omits repetitive session-chain implementation badges regardless of the legacy byte', async () => {
     const cats = [minimalCat('A', true), minimalCat('B', false)];
     const config = { coCreator: null, cats: {} } as unknown as import('../config-viewer-types').ConfigData;
 
@@ -69,8 +174,8 @@ describe('CatOverviewTab drag & drop (F166)', () => {
       root.render(React.createElement(CatOverviewTab, { config, cats }));
     });
 
-    expect(container.querySelector('[data-testid="cat-card-A"]')?.textContent).toContain('Session Chain 始终可见');
-    expect(container.querySelector('[data-testid="cat-card-B"]')?.textContent).toContain('Session Chain 始终可见');
+    expect(container.querySelector('[data-testid="cat-card-A"]')?.textContent).not.toContain('Session Chain 始终可见');
+    expect(container.querySelector('[data-testid="cat-card-B"]')?.textContent).not.toContain('Session Chain 始终可见');
   });
 
   it('rolls back local order and shows error when saveCatOrder rejects', async () => {

@@ -15,7 +15,11 @@ interface MessageReadResult {
 function compactBody(value: string): string {
   const compact = value.replace(/\s+/g, ' ').trim();
   if (compact.length <= MAX_BODY_CHARS) return compact;
-  return `${compact.slice(0, MAX_BODY_CHARS - 1)}…`;
+  let end = MAX_BODY_CHARS - 1;
+  const last = compact.charCodeAt(end - 1);
+  // String.slice counts UTF-16 units; keep a non-BMP character out of the cut.
+  if (last >= 0xd800 && last <= 0xdbff) end--;
+  return `${compact.slice(0, end)}…`;
 }
 
 function sourceOwnsPointer(source: StoredMessage, pointer: CallerDispatchObservationPointer): boolean {
@@ -58,9 +62,9 @@ function isReadableObservationResponse(response: StoredMessage, pointer: CallerD
   );
 }
 
-function unknownLine(pointer: CallerDispatchObservationPointer, reason: string): ObservationLine {
+function unknownLine(pointer: CallerDispatchObservationPointer, reason: string, responseId?: string): ObservationLine {
   return {
-    line: `- ${pointer.sourceMessageId} → ${pointer.targetId}: unknown（${reason}，保留待观察）`,
+    line: `- ${pointer.sourceMessageId} → ${pointer.targetId}: unknown（${reason}，保留待观察）${responseId ? `; response=${responseId}` : ''}`,
     terminal: false,
     fingerprint: `unknown:${reason}`,
   };
@@ -103,8 +107,7 @@ function terminalObservationLine(
   pointer: CallerDispatchObservationPointer,
 ): ObservationLine | null {
   const readable = projectMessageBundleReadableContentWithCoverage(response);
-  if (!readable.fullyRepresented) return unknownLine(pointer, 'terminal payload 无法完整投影');
-  const body = compactBody(readable.content) || '(empty)';
+  if (!readable.fullyRepresented) return unknownLine(pointer, 'terminal payload 无法完整投影', response.id);
   if (
     response.lifecycle?.kind === 'response' &&
     response.userId === pointer.ownerId &&
@@ -112,10 +115,10 @@ function terminalObservationLine(
     response.lifecycle.inputMessageIds.includes(pointer.sourceMessageId)
   ) {
     if (response.lifecycle.status === 'processing') {
-      return unknownLine(pointer, 'settled ref 指向 processing response');
+      return unknownLine(pointer, 'settled ref 指向 processing response', response.id);
     }
     return {
-      line: `- ${pointer.sourceMessageId} → ${pointer.targetId}: ${response.lifecycle.status}; response=${response.id}; body=${body}`,
+      line: `- ${pointer.sourceMessageId} → ${pointer.targetId}: ${response.lifecycle.status}; response=${response.id}`,
       terminal: true,
       fingerprint: `response:${response.id}:${response.lifecycle.status}`,
     };
@@ -127,6 +130,7 @@ function terminalObservationLine(
   ) {
     return null;
   }
+  const body = compactBody(readable.content) || '(empty)';
   return {
     line: `- ${pointer.sourceMessageId} → ${pointer.targetId}: delivery_failure(${response.lifecycle.reason}); response=${response.id}; body=${body}`,
     terminal: true,
@@ -162,10 +166,10 @@ export async function readCallerDispatchObservationLine(
   }
 
   const responseRead = await readMessage(messageStore, ref.statusMessageId);
-  if (responseRead.failed) return unknownLine(pointer, 'terminal response 读取失败');
+  if (responseRead.failed) return unknownLine(pointer, 'terminal response 读取失败', ref.statusMessageId);
   const response = responseRead.message;
   if (!response || !isReadableObservationResponse(response, pointer)) {
-    return unknownLine(pointer, 'terminal response 不可验证');
+    return unknownLine(pointer, 'terminal response 不可验证', ref.statusMessageId);
   }
-  return terminalObservationLine(response, pointer) ?? unknownLine(pointer, 'response lifecycle 不匹配');
+  return terminalObservationLine(response, pointer) ?? unknownLine(pointer, 'response lifecycle 不匹配', response.id);
 }

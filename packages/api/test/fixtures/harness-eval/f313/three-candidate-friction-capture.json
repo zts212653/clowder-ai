@@ -5,8 +5,8 @@
     {
       "verdictId": "f313-three-candidate-fixture-finding-evidence-reader-drilldow-097e017475576856",
       "findingKey": "evidence-reader-drilldown-path",
-      "findingArtifactSha256": "67fd677a0cb404630843117c0f90d5adbc67a5a193d17a59f126e442070b0a7c",
-      "lifecycleRootSha256": "c8403cea9b6be5c4ad39c748768fecf4621ff604a0042e6105aed4c66c492aa9"
+      "findingArtifactSha256": "91729c7f8e76a628bd6331cba0077cc3fae68e834226c56c0499aabb8bdccc85",
+      "lifecycleRootSha256": "67c671a2288de00b2ebc46623c3e61244abd0f1ca0a1b1337ff778b122f55f95"
     },
     {
       "verdictId": "f313-three-candidate-fixture-finding-default-mode-tool-availa-ba207781ae2f18b7",

@@ -24,7 +24,7 @@ function parseTopLevelList(manifestText, key) {
       continue;
     }
     if (/^[^\s#-]/.test(rawLine)) break;
-    const match = rawLine.match(/^\s{2}-\s+([^:]+?)\s*$/);
+    const match = rawLine.match(/^\s{2}-\s+(.+?)\s*$/);
     if (!match) continue;
     const value = parseYamlPath(match[1]);
     if (value) values.push(value);

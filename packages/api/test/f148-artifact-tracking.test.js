@@ -40,8 +40,8 @@ describe('extractRecentArtifacts', () => {
       {
         id: 't1',
         kind: 'pr_tracking',
-        subjectKey: 'pr:zts212653/cat-cafe#1292',
-        title: 'PR tracking: zts212653/cat-cafe#1292',
+        subjectKey: 'pr:zts212653/clowder-ai#1292',
+        title: 'PR tracking: zts212653/clowder-ai#1292',
         ownerCatId: 'opus',
         status: 'todo',
         updatedAt: Date.now(),
@@ -76,7 +76,7 @@ describe('extractRecentArtifacts', () => {
       {
         id: 't1',
         kind: 'pr_tracking',
-        subjectKey: 'pr:zts212653/cat-cafe#1292',
+        subjectKey: 'pr:zts212653/clowder-ai#1292',
         title: 'PR #1292',
         ownerCatId: 'opus',
         status: 'todo',
@@ -93,7 +93,7 @@ describe('extractRecentArtifacts', () => {
       {
         id: 't1',
         kind: 'pr_tracking',
-        subjectKey: 'pr:zts212653/cat-cafe#100',
+        subjectKey: 'pr:zts212653/clowder-ai#100',
         title: 'PR #100',
         ownerCatId: 'opus',
         status: 'todo',
@@ -102,7 +102,7 @@ describe('extractRecentArtifacts', () => {
       {
         id: 't2',
         kind: 'pr_tracking',
-        subjectKey: 'pr:zts212653/cat-cafe#200',
+        subjectKey: 'pr:zts212653/clowder-ai#200',
         title: 'PR #200',
         ownerCatId: 'opus',
         status: 'todo',
@@ -111,7 +111,7 @@ describe('extractRecentArtifacts', () => {
       {
         id: 't3',
         kind: 'pr_tracking',
-        subjectKey: 'pr:zts212653/cat-cafe#150',
+        subjectKey: 'pr:zts212653/clowder-ai#150',
         title: 'PR #150',
         ownerCatId: 'opus',
         status: 'todo',
@@ -148,7 +148,7 @@ describe('formatNavigationHeader with artifacts', () => {
       baton: null,
       tasks: [],
       artifacts: [
-        { type: 'pr', ref: 'zts212653/cat-cafe#1292', label: 'PR #1292', updatedBy: 'opus' },
+        { type: 'pr', ref: 'zts212653/clowder-ai#1292', label: 'PR #1292', updatedBy: 'opus' },
         { type: 'file', ref: 'packages/api/src/routes/callbacks.ts', label: 'callbacks.ts', updatedBy: 'codex' },
       ],
     });
@@ -211,7 +211,7 @@ describe('buildBriefingMessage with artifacts (AC-H4)', () => {
   it('includes artifact section in bodyMarkdown when recentArtifacts provided', () => {
     const msg = buildBriefingMessage(baseCoverage, 'thread-1', {
       recentArtifacts: [
-        { type: 'pr', ref: 'zts212653/cat-cafe#1293', label: 'PR #1293', updatedAt: Date.now(), updatedBy: 'opus' },
+        { type: 'pr', ref: 'zts212653/clowder-ai#1293', label: 'PR #1293', updatedAt: Date.now(), updatedBy: 'opus' },
         {
           type: 'file',
           ref: 'src/index.ts',

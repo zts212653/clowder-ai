@@ -37,9 +37,9 @@ description_updated_at: 2026-08-15T13:04:00Z
 | opportunity / reflex | 某个机械事实是否值得把一次判断机会送给猫 | F287 RecallOpportunity、目标 WriteOpportunity | **是候选**；必须有 owner、consumer、预算、失效和 terminal disposition |
 
 不把普通工具 schema、猫主动调用后返回的一般 tool result、当前用户原文、模型自己先前的普通
-回复算作 standing reflex。provider-native freshness notice 是例外：它虽经 tool/event carrier 到达，
-却由系统主动生成，故纳入。图片路径和 `<context_attachments>` 记为 evidence transport，不获得
-独立认知权力。
+回复算作 standing reflex。历史上的 provider-native freshness notice 曾因系统主动生成而纳入；
+#1615 已将普通调用与 Live 的 native／SDK／idle／MCP 通知全部退役，不再是当前 reflex。
+图片路径和 `<context_attachments>` 记为 evidence transport，不获得独立认知权力。
 
 ## 2. 真实组装顺序
 
@@ -49,7 +49,7 @@ description_updated_at: 2026-08-15T13:04:00Z
 ```text
 provider / harness plane
   native developer/system instructions · AGENTS/skills · external hooks
-  provider-native freshness / continuity carrier
+  provider continuity carrier（不含已退役 freshness 通知）
                     │
                     ▼
 invoke-single-cat effectivePrompt（外 → 内）
@@ -155,7 +155,7 @@ reflex 条目强塞进同一权力模型，也不得绕过 F237 先例重建第�
 | F282 proactive candidate | write-side candidate；公开 workspace 机械重复命中 | detector+registry resolve → 猫做 lane judgment；频率不等于重要性 | per-turn cap 来自 config；window receipt；2min claim lease；window-end suppression | receipt/window + registry state；F282 | 有坐标、去重和 telemetry；**还没有全局 WriteOpportunity/disposition contract** |
 | F281 disposition feedback | state/correction；direct-owner input 可证明 exact subject | disposition ledger → 当前 subject；只能定向纠偏 | 最多 3 roots；每 root 100 entries / scan 500；无显式 token cap | source supersession + exact subject proof；F281 | fail-closed、权力窄；route trace 看不到 |
 | F167 structured stop gate | control gate；typed hold/dispatch custody 尚无状态迁移 | custody projection → holder；强制结构化 terminal action | 每个 protocol wake；由 projection state 去重 | verified transition / projection close；F167 | 确定契约，合理强权；只在 serial route 拼入，不能被误归为一般 reflex |
-| F254 freshness notice | event attention；invoke 中出现 unseen frontier | broker/tool-response service → running cat；只说“有未读” | provider frontier/dedup key；tool notice 每 invocation 最多 3；content-free | seen cursor / delivered event；F254 | carrier 与去重成熟；消费行为另靠 staging 常驻规则，形成“双层合同” |
+| F254 freshness notice（历史，已退役） | 不再因 unseen frontier 生成事件或补读要求 | native／SDK／idle／MCP／Live notifier 均已删除 | 无现役通知预算或消费者 | 历史事件仅可读取；实际投递归 Queue | 旧 staging／来信提示补读契约一并退役，不得恢复为 reflex |
 | F296 presentation target | context presentation；cold/hot/compaction/版本变化 | 各 producer typed state → current epoch | 目标：subject+version+epoch dedupe；能力待 W0-E | source invalidator + context epoch；F296 | spec/Design Gate；尚未拥有所有 producer 的统一 mapper |
 
 ## 5. 旧项中最需要治理的四个现状面
@@ -175,7 +175,7 @@ reflex 条目强塞进同一权力模型，也不得绕过 F237 先例重建第�
 - static identity 在 provider session resume 时可跳过；ADR-038 staging 与 F225 hint 独立于该判断，
   因而仍能每轮到达。
 - native L0、AGENTS/skills、Claude external hooks、Antigravity/Codex 等 carrier 自己生成的
-  continuity/auto-resume/freshness 内容不归 route builder。W0-E 已逐 carrier 写出
+  continuity/auto-resume 内容不归 route builder；freshness 通知已退役。W0-E 已逐 carrier 写出
   `proven | conditional | unsupported | unimplemented`；除 Claude print 的 typed boundary 与部分
   hook 外，Codex/Gemini/Kimi/ACP 等没有可路由的 authoritative compact event。`unsupported` 是
   终态能力判定，不能让中央 Clowder AI manifest 或 token-drop heuristic 冒充 provider 真相。
@@ -257,7 +257,7 @@ W0-B 不因后续合同存在而升级为 runtime migration 完成；未登记 e
 - opportunity / state：`RecallOpportunityCatalog.ts`、`MemoryCuePlaneService.ts`、
   `MemoryCueInvocationPromptService.ts`、`EntityNudgeService.ts`、`ProactiveMemoryNudgeService.ts`、
   `HumanDispositionFeedbackContextService.ts`、`PersonMemoryProposalStatusContextResolver.ts`
-- event/control：`FreshnessNoticeService.ts`、`FreshnessNoticeBroker.ts`、F167 route stop-gate；
+- event/control：F167 route stop-gate；F254 的 notice service／broker 已删除，不再列作 canonical source；
   target boundary 见 `docs/features/F296-continuity-aware-context-injection.md`
 
 [小太阳·Maine Coon/GPT-5.6 Sol🐾]

@@ -53,8 +53,15 @@ const STATES = [
   },
 ];
 
-const HUMAN = { id: 'human-source', type: 'user', content: '请把第二段改得更短。', timestamp: 1 };
+const HUMAN = {
+  from: { kind: 'user', userId: 'operator' },
+  id: 'human-source',
+  type: 'user',
+  content: '请把第二段改得更短。',
+  timestamp: 1,
+};
 const receiptMessages = STATES.map(({ state }, index) => ({
+  from: { kind: 'system', service: 'content-modification' },
   id: `host-receipt-${state}`,
   type: 'system',
   catId: null,

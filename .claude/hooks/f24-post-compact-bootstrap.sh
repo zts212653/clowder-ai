@@ -15,10 +15,6 @@
 INPUT=$(cat)
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id')
 
-API_PORT="${API_SERVER_PORT:-3004}"
-INVOCATION_ID="${CAT_CAFE_INVOCATION_ID:-}"
-CALLBACK_TOKEN="${CAT_CAFE_CALLBACK_TOKEN:-}"
-
 STATE_FILE="/tmp/cat-cafe-opus-compact-state-${SESSION_ID}.json"
 
 # No state file = not a post-compact resume (or already consumed)
@@ -48,14 +44,13 @@ if [ "$AGE" -gt 1800 ]; then
 fi
 
 # Fetch latest sealed session digest (best-effort)
-DIGEST=$(curl -sf --max-time 5 \
-  -H "X-Invocation-Id: ${INVOCATION_ID}" \
-  -H "X-Callback-Token: ${CALLBACK_TOKEN}" \
-  "http://localhost:${API_PORT}/api/sessions/latest-digest?cliSessionId=$SESSION_ID" 2>/dev/null)
+SCRIPT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd) || exit 1
+DIGEST=$(echo "$INPUT" | node "$SCRIPT_ROOT/.claude/hooks/f24-compaction.mjs" legacy-digest 2>/dev/null)
 DIGEST_STATUS=$?
 
 if [ "$DIGEST_STATUS" -ne 0 ] || [ -z "$DIGEST" ]; then
-  CONTEXT_PACKET="[F296 post-compact unsupported: Clowder AI projection unavailable]"
+  PRODUCT_NAME=$(node "$SCRIPT_ROOT/scripts/read-deployment-default.mjs" brand.name) || exit 1
+  CONTEXT_PACKET="[F296 post-compact unsupported: ${PRODUCT_NAME} projection unavailable]"
 else
   PROJECTION_STATUS=$(echo "$DIGEST" | jq -r '.postCompact.status // "unsupported"')
   if [ "$PROJECTION_STATUS" = "projected" ]; then
@@ -72,10 +67,7 @@ STATE_CONTENT=$(cat "$STATE_FILE")
 SOP_SKILL=""
 SOP_STAGE=""
 SOP_TIME=""
-SOP_BOOKMARK=$(curl -sf --max-time 3 \
-  -H "X-Invocation-Id: ${INVOCATION_ID}" \
-  -H "X-Callback-Token: ${CALLBACK_TOKEN}" \
-  "http://localhost:${API_PORT}/api/sessions/sop-bookmark?cliSessionId=$SESSION_ID" 2>/dev/null)
+SOP_BOOKMARK=$(echo "$INPUT" | node "$SCRIPT_ROOT/.claude/hooks/f24-compaction.mjs" sop-get 2>/dev/null)
 if [ $? -eq 0 ] && [ -n "$SOP_BOOKMARK" ]; then
   SOP_SKILL=$(echo "$SOP_BOOKMARK" | jq -r '.skill // empty')
   SOP_STAGE=$(echo "$SOP_BOOKMARK" | jq -r '.sopStage // empty')

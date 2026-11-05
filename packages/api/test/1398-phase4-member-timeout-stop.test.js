@@ -16,6 +16,9 @@ const { routeSerial } = await import('../dist/domains/cats/services/agents/routi
 const { InvocationTracker } = await import('../dist/domains/cats/services/agents/invocation/InvocationTracker.js');
 const { A2AAgentService } = await import('../dist/domains/cats/services/agents/providers/A2AAgentService.js');
 const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+const { InMemoryTurnExecutionStore } = await import(
+  '../dist/domains/cats/services/stores/memory/InMemoryTurnExecutionStore.js'
+);
 const { createMemberTimeoutStop, MEMBER_TIMEOUT_REASON } = await import(
   '../dist/domains/cats/services/agents/invocation/member-output-timeout.js'
 );
@@ -49,29 +52,6 @@ function answeringService(catId, delayMs) {
         yield { type: 'text', catId, content: '.', timestamp: Date.now() };
       }
       yield { type: 'done', catId, timestamp: Date.now() };
-    },
-  };
-}
-
-function turnExecutionStore() {
-  const records = new Map();
-  return {
-    records,
-    async createRunning(input) {
-      const record = { ...input, status: 'running' };
-      records.set(input.invocationId, record);
-      return { outcome: 'created', record };
-    },
-    async transitionTerminal(invocationId, terminal) {
-      const record = { ...records.get(invocationId), ...terminal };
-      records.set(invocationId, record);
-      return { outcome: 'transitioned', record };
-    },
-    async get(invocationId) {
-      return records.get(invocationId) ?? null;
-    },
-    async bindCoveredMessageIds() {
-      return { outcome: 'bound' };
     },
   };
 }
@@ -127,7 +107,7 @@ async function dispatch(route, targets, services, { canonical = false, onTracker
   const tracker = new InvocationTracker();
   const executionId = 'parent-exec-1';
   tracker.startAll('t1', targets, 'user1', executionId);
-  const turnStore = turnExecutionStore();
+  const turnStore = new InMemoryTurnExecutionStore();
   const events = [];
   const deps = routeDeps(services, turnStore);
   const store = canonical ? new MessageStore() : undefined;
@@ -185,7 +165,7 @@ async function dispatch(route, targets, services, { canonical = false, onTracker
   })) {
     events.push(event);
   }
-  const terminalOf = (catId) => [...turnStore.records.values()].find((record) => record.catId === catId);
+  const terminalOf = (catId) => turnStore.listByParent(executionId).find((record) => record.catId === catId);
   return { tracker, events, terminalOf, store, responses };
 }
 
@@ -242,7 +222,7 @@ describe('F117 J4: a timed-out member is stopped like Stop, alone', () => {
       opus: remoteService,
       codex: answeringService('codex', MEMBER_TIMEOUT_MS + 600),
     });
-    assert.equal(remoteWaitAborted, true);
+    assert.equal(remoteWaitAborted, true, JSON.stringify(result.events));
     assertTimedOutMember(result, 'opus');
     assertFinishedMember(result, 'codex');
     assert.match(JSON.stringify(result.events), /远端任务是否已停止尚未确认/);

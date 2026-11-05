@@ -1,0 +1,272 @@
+.project-plan {
+  margin-top: 10px;
+}
+
+.project-plan-columns,
+.project-plan-row {
+  display: grid;
+  grid-template-columns:
+    minmax(135px, 1.35fr) minmax(120px, 1fr) minmax(115px, 0.95fr) minmax(135px, 1.2fr)
+    minmax(90px, 0.8fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.project-plan-columns {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--console-border-soft);
+  color: var(--cafe-text-muted);
+  font-size: 10px;
+}
+
+.project-plan-completed {
+  border-bottom: 1px solid var(--console-border-soft);
+}
+
+.project-plan-completed > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--semantic-success-surface);
+  color: var(--semantic-success);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 650;
+  list-style: none;
+}
+
+.project-plan-completed > summary small {
+  overflow: hidden;
+  color: var(--cafe-text-muted);
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-plan-row {
+  position: relative;
+  padding: 12px;
+  border-bottom: 1px solid var(--console-border-soft);
+  background: transparent;
+}
+
+.project-plan-row[data-blocked="true"] {
+  margin-left: 18px;
+  border-left: 2px solid var(--semantic-critical);
+}
+
+.project-plan-row[data-selected="true"] {
+  background: var(--console-active-bg);
+}
+
+.project-plan-task {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--cafe-text-primary);
+  text-align: left;
+}
+
+.project-plan-task strong {
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.project-plan-status {
+  color: var(--cafe-text-muted);
+  font-size: 10px;
+}
+
+.project-plan-status[data-work-status-label="blocked"] {
+  color: var(--semantic-critical);
+}
+
+.project-plan-status[data-work-status-label="result_ready"] {
+  color: var(--semantic-warning);
+}
+
+.project-plan-execution {
+  display: grid;
+  gap: 7px;
+}
+
+.project-plan-execution .project-work-identities,
+.project-plan-execution .project-responsibility-inline {
+  padding: 0;
+}
+
+.project-plan-dependencies,
+.project-plan-recent {
+  display: grid;
+  gap: 3px;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.project-plan-dependencies span,
+.project-plan-dependencies small,
+.project-plan-recent span,
+.project-plan-delivery {
+  color: var(--cafe-text-muted);
+}
+
+.project-plan-delivery {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.project-plan-empty {
+  margin: 0;
+  padding: 22px 12px;
+  color: var(--cafe-text-muted);
+  font-size: 12px;
+}
+
+.project-context {
+  position: sticky;
+  top: 80px;
+  min-width: 0;
+  padding-left: 18px;
+  border-left: 1px solid var(--console-border-soft);
+}
+
+.project-context > header {
+  display: grid;
+  gap: 4px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--console-border-soft);
+}
+
+.project-context > header strong {
+  font-size: 13px;
+}
+
+.project-context > header span,
+.project-context dd,
+.project-context-sources small,
+.project-context-activity p,
+.project-context-activity li > span {
+  color: var(--cafe-text-muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.project-context-facts {
+  display: grid;
+  gap: 0;
+  margin: 0;
+}
+
+.project-context-facts > div {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr);
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--console-border-soft);
+}
+
+.project-context dt,
+.project-context dd {
+  margin: 0;
+}
+
+.project-context dt {
+  color: var(--cafe-text-muted);
+  font-size: 10px;
+}
+
+.project-context-sources {
+  border-bottom: 1px solid var(--console-border-soft);
+}
+
+.project-context-sources > summary {
+  padding: 10px 0;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.project-context-sources > button {
+  display: flex;
+  width: 100%;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 0;
+  border: 0;
+  background: transparent;
+  color: var(--cafe-text-primary);
+  font-size: 10px;
+  text-align: left;
+}
+
+.project-context-activity {
+  padding-top: 14px;
+}
+
+.project-context-activity h3 {
+  margin: 0 0 10px;
+  font-size: 12px;
+}
+
+.project-context-activity ol {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0 0 0 14px;
+  list-style: none;
+}
+
+.project-context-activity li {
+  position: relative;
+  display: grid;
+  gap: 2px;
+}
+
+.project-context-activity li::before {
+  position: absolute;
+  top: 4px;
+  left: -13px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--semantic-info);
+  content: "";
+}
+
+.project-context-activity strong,
+.project-context-activity p {
+  margin: 0;
+  font-size: 10px;
+}
+
+@media (max-width: 980px) {
+  .project-context {
+    position: static;
+    padding: 18px 0 0;
+    border-top: 1px solid var(--console-border-soft);
+    border-left: 0;
+  }
+}
+
+@media (max-width: 820px) {
+  .project-plan-columns {
+    display: none;
+  }
+
+  .project-plan-row {
+    grid-template-columns: 1fr;
+    gap: 9px;
+    padding: 14px 4px;
+  }
+
+  .project-plan-row[data-blocked="true"] {
+    margin-left: 8px;
+    padding-left: 10px;
+  }
+}

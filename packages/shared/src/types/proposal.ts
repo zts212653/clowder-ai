@@ -9,6 +9,7 @@
 import type { ApprovalPublication } from './approval-hub.js';
 import type { DevelopmentScopeV1 } from './growing-development.js';
 import type { CatId } from './ids.js';
+import type { ApprovedTaskContractV1, TaskContractContinuationV1 } from './proposal-task-contract.js';
 
 /**
  * Status lifecycle:
@@ -73,6 +74,23 @@ export interface ThreadProposal {
   /** F277: user-editable placement role, immutable after approval creates the Thread. */
   declaredWorkMode?: DeclaredWorkMode;
   projectPath: string;
+  /** A suggestion only. Membership is written exclusively by owner approval. */
+  suggestedGroupId?: string;
+  suggestedPinned?: boolean;
+  groupSuggestionReason?: 'source-thread' | 'feature-title' | 'explicit' | 'none';
+  /** Owner's final approval-time choice, checkpointed for crash recovery. */
+  attentionGroupId?: string | null;
+  /** Exact owner message that asks the proposer to issue a replacement. */
+  revisionRequest?: {
+    messageId: string;
+    instruction: string;
+    requestedBy: string;
+    requestedAt: number;
+    queuedAt?: number;
+    choices?: { suggestedGroupId?: string | null; projectPath?: string; pinned?: boolean };
+  };
+  supersedesProposalId?: string;
+  supersededByProposalId?: string;
 
   // Audit — creation
   createdBy: string;
@@ -109,10 +127,16 @@ export interface ThreadProposal {
    * F167 R5: Immutable snapshot of the task's `entrustedWork.developmentScope` at
    * proposal creation time. At claim time, the provider compares this against the
    * task's current scope — if workUnitRef, acceptedSourceRef, or acceptedRevision
-   * changed, the delegation is invalidated (scope drift). Tasks without a
-   * developmentScope at creation time get no delegate authority (fail closed).
+   * changed, the delegation is invalidated (scope drift). Generic Tasks require
+   * a server-derived full-contract continuation; two absent scopes never grant authority.
    */
   approvedDevelopmentScope?: DevelopmentScopeV1;
+  /** Full generic contract frozen at approval; old approvals remain unchanged. */
+  approvedTaskContract?: ApprovedTaskContractV1;
+  /** One permanent, owner-requested continuation of this exact approved contract. */
+  taskContractContinuation?: TaskContractContinuationV1;
+  /** Read-side corruption marker. Invalid scope/contract data must never become generic authority. */
+  approvalContractInvalid?: true;
 
   // Audit — approval outcome
   approvedBy?: string;
@@ -142,6 +166,7 @@ export interface ThreadProposal {
  * `undefined` means "keep the proposal's prefilled value".
  */
 export interface ProposalApproveOverrides {
+  attentionGroupId?: string | null;
   title?: string;
   parentThreadId?: string;
   preferredCats?: CatId[];

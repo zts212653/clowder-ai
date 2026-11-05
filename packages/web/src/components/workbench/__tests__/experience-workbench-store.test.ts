@@ -22,7 +22,7 @@ const REVIEW_SURFACE = createArtifactSurface({
     catId: 'codex-terra',
     createdAt: 1787880000000,
     sourceMessageId: 'message-review',
-    ref: 'zts212653/cat-cafe#4030',
+    ref: 'zts212653/clowder-ai#4030',
   },
 });
 

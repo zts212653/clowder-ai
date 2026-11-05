@@ -8,6 +8,7 @@ import type {
   PawFeelReconciliationCoverage,
   PawFeelResponsibilityProjection,
 } from '@cat-cafe/shared';
+import { pawFeelRepairBinding } from '@cat-cafe/shared';
 import { PawFeelBundleSnapshotSigner } from './bundle-snapshot.js';
 import type { PawFeelFixResolver } from './command-context.js';
 import { PawFeelContinuingResponsibilityResolver } from './continuation/follow-up-resolver.js';
@@ -15,6 +16,7 @@ import type { IPawFeelReconciliationCoverageStore } from './coverage-store.js';
 import type { PawFeelDutySignalSummary } from './duty-notice.js';
 import type { IPawFeelDispositionEventLog } from './event-log.js';
 import { awaitPawFeelRead, mapPawFeelReads } from './projection/bounded-reads.js';
+import { type PawFeelInboxAuditEntry, readPawFeelAuditSignals } from './projection/read-model-audit.js';
 import { loadPawFeelEventMap } from './projection/read-model-events.js';
 import { countPawFeelIssues, emptyPawFeelIssueCounts } from './projection/read-model-issue.js';
 import { buildPawFeelInboxItem } from './projection/read-model-item.js';
@@ -81,7 +83,6 @@ export class PawFeelDispositionReadModel {
     this.bundleSnapshotSigner = options.bundleSnapshotSigner ?? new PawFeelBundleSnapshotSigner();
     this.followUpResolver = options.followUpResolver ?? new PawFeelContinuingResponsibilityResolver();
   }
-
   async list(query: PawFeelInboxQuery = {}): Promise<PawFeelInboxPage> {
     query.signal?.throwIfAborted();
     const generatedAt = this.now();
@@ -226,6 +227,9 @@ export class PawFeelDispositionReadModel {
       })),
     );
   }
+  readAuditSignals(signalIds: readonly string[], signal?: AbortSignal): Promise<PawFeelInboxAuditEntry[]> {
+    return readPawFeelAuditSignals({ ...this.options, signalIds, signal });
+  }
 
   private async loadProjections(signal?: AbortSignal): Promise<PawFeelDispositionProjection[]> {
     const signalIds = await awaitPawFeelRead(this.options.eventLog.listSignalIds(signal), signal);
@@ -309,17 +313,27 @@ export class PawFeelDispositionReadModel {
     projection: PawFeelDispositionProjection,
   ): Promise<PawFeelResponsibilityProjection> {
     if (projection.state === 'fix') {
-      const leaseRef = projection.actionLeaseRef;
-      if (!leaseRef) return derivePawFeelResponsibility(projection);
+      const binding = pawFeelRepairBinding(projection);
+      if (!binding) return derivePawFeelResponsibility(projection);
       try {
-        const current = await this.options.repairBindingResolver?.resolve(leaseRef.leaseId);
+        const resolver = this.options.repairBindingResolver;
+        const current = resolver?.resolveCurrent
+          ? await resolver.resolveCurrent(projection)
+          : binding.kind === 'action_lease'
+            ? await resolver?.resolve(binding.leaseId)
+            : undefined;
+        const currentBinding = current && pawFeelRepairBinding(current);
         const matches = Boolean(
           current &&
             current.ownerCatId === projection.ownerCatId &&
             current.taskId === projection.taskId &&
-            current.leaseId === leaseRef.leaseId &&
-            current.leaseGeneration === leaseRef.generation &&
-            current.custodyEvidenceRef === projection.custodyEvidenceRef,
+            current.custodyEvidenceRef === projection.custodyEvidenceRef &&
+            currentBinding?.kind === binding.kind &&
+            (binding.kind === 'task_assignment'
+              ? JSON.stringify(currentBinding) === JSON.stringify(binding)
+              : currentBinding.kind === 'action_lease' &&
+                currentBinding.leaseId === binding.leaseId &&
+                currentBinding.generation === binding.generation),
         );
         return derivePawFeelResponsibility(projection, { repairBindingIsActive: matches });
       } catch {

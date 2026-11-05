@@ -54,6 +54,19 @@
       "teamStrengths": "编码、文档、验收"
     },
     {
+      "id": "dsh",
+      "name": "小鲸鱼",
+      "nickname": "鲸鲸",
+      "avatar": "/avatars/family/dsh.png",
+      "color": {
+        "primary": "#3B7EA1",
+        "secondary": "#DCEBF2"
+      },
+      "roleDescription": "共创与推理伙伴，负责分析问题、编码实现和交叉验证",
+      "personality": "细心务实，先理清问题，再用可验证的结果交付",
+      "teamStrengths": "问题分析、编码、交叉验证"
+    },
+    {
       "id": "dragon-li",
       "name": "狸花猫",
       "nickname": "小狸花",
@@ -122,7 +135,7 @@
   },
   "coCreator": {
     "name": "co-creator",
-    "nickname": "大当家",
+    "nickname": "co-creator",
     "avatar": "/avatars/keeper.png",
     "timeZone": "America/Los_Angeles",
     "aliases": ["You", "Owner"],
@@ -545,7 +558,7 @@
           "provider": "openai-chatgpt-pro",
           "personality": "云端高阶推理，跨族 review，方向收敛",
           "teamStrengths": "云端高阶判断席位，远端 push 模式",
-          "caution": "F247 B1a：云端 Remote MCP，token 防线唯一；不 spawn 本地 CLI；onboarding 需 ChatGPT Pro 订阅 + ChatGPT Pro 插件（Personal Chrome Host）+ Custom Instructions（Phase F 一键化）",
+          "caution": "F247 B1a：云端 Remote MCP，token 防线唯一；不 spawn 本地 CLI",
           "strengths": ["reasoning", "code-review", "design-gate"]
         }
       ]

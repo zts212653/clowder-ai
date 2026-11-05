@@ -1,5 +1,5 @@
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
-import { requireConnectorWriteNetworkGuard } from '../config/connector-secret-write-guards.js';
+import { requireOwnerWriteNetworkGuard } from '../config/owner-write-guards.js';
 import {
   type IPawFeelDutyConfigStore,
   PawFeelDutyConfigStoreError,
@@ -136,6 +136,7 @@ async function triage(
     const results: PawFeelBulkCommandResult[] = await service.executeMany(
       { kind: 'cat', id: principal.catId },
       parsed.data.commands,
+      { userId: principal.userId },
     );
     return { results, ...(await reconcileDutyReceipt(receiptService, principal.catId)) };
   } catch (error) {
@@ -156,7 +157,11 @@ async function linkRepairOutcome(
     return reply.status(400).send({ error: 'invalid paw-feel repair outcome', details: parsed.error.issues });
   }
   try {
-    return { results: await service.executeMany({ kind: 'cat', id: principal.catId }, [parsed.data]) };
+    return {
+      results: await service.executeMany({ kind: 'cat', id: principal.catId }, [parsed.data], {
+        userId: principal.userId,
+      }),
+    };
   } catch (error) {
     return mapServiceError(error, reply);
   }
@@ -165,7 +170,7 @@ async function linkRepairOutcome(
 function requireCvo(request: FastifyRequest, reply: FastifyReply): string | undefined {
   const userId = requireSession(request, reply);
   if (!userId) return undefined;
-  const networkError = requireConnectorWriteNetworkGuard(request);
+  const networkError = requireOwnerWriteNetworkGuard(request);
   if (networkError) {
     reply.status(networkError.status).send({ error: networkError.error });
     return undefined;
@@ -310,7 +315,9 @@ export const pawFeelDispositionRoutes: FastifyPluginAsync<PawFeelDispositionRout
       return reply.status(400).send({ error: 'invalid paw-feel bundle action', details: parsed.error.issues });
     }
     try {
-      const result = await opts.dispositionService.executeBundle({ kind: 'cat', id: principal.catId }, parsed.data);
+      const result = await opts.dispositionService.executeBundle({ kind: 'cat', id: principal.catId }, parsed.data, {
+        userId: principal.userId,
+      });
       return { ...result, ...(await reconcileDutyReceipt(opts.dutyReceiptService, principal.catId)) };
     } catch (error) {
       return mapServiceError(error, reply);

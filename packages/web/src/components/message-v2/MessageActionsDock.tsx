@@ -12,7 +12,6 @@ const paths = {
   trajectory: 'M5 6v8a4 4 0 004 4h8M3 3h4v4H3zM17 17h4v4h-4z',
   read: 'm7 4 13 8L7 20z',
   stop: 'M7 4v16M17 4v16',
-  branch: 'm14 5 5 5M5 19h4L20 8l-4-4L5 15z',
   remove: 'M4 7h16M7 7l1 14h8l1-14M9 7V3h6v4',
   more: 'M5 11v2M12 11v2M19 11v2',
 };
@@ -70,7 +69,6 @@ interface Props {
   onSelect?: () => void;
   onReply: () => void;
   onTrajectory?: () => void;
-  onBranch: () => void;
   onDelete: () => void;
   onMore: () => void;
   overflowOpen: boolean;
@@ -115,7 +113,6 @@ export function MessageActionsDock({
   onSelect,
   onReply,
   onTrajectory,
-  onBranch,
   onDelete,
   onMore,
   overflowOpen,
@@ -151,7 +148,6 @@ export function MessageActionsDock({
         )}
         {canAct && (
           <>
-            <DockAction label={t.branch} icon="branch" onClick={onBranch} />
             <DockAction label={t.remove} icon="remove" onClick={onDelete} />
             <div className="relative">
               <DockAction label={t.more} icon="more" onClick={onMore} expanded={overflowOpen} />

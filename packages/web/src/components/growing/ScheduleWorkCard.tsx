@@ -1,4 +1,5 @@
 import type { ArtifactReviewView, EntrustedWorkOwnerReadV1 } from '@cat-cafe/shared';
+import { collectiveWorkDatesActionRef } from '@cat-cafe/shared';
 import Link from 'next/link';
 import type { Ref } from 'react';
 import { CatAvatar } from '@/components/CatAvatar';
@@ -111,6 +112,9 @@ export function ScheduleWorkCard({
         ) : null}
         {completed && ownerRead.completion?.recordedAt === undefined ? <span>{t.completedTimeUnknown}</span> : null}
       </div>
+      {ownerRead.publicTime?.state === 'unavailable' ? (
+        <p className="mt-2 text-xs text-cafe-muted">{t.collectiveDatesUnavailable}</p>
+      ) : null}
       <OwnerProgress ownerRead={ownerRead} blocked={blocked} />
       {needsMe ? <p className="mt-2 text-xs font-semibold text-cafe-accent">{t.needsJudgment}</p> : null}
       <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -123,6 +127,19 @@ export function ScheduleWorkCard({
           onOpenArtifact={onOpenArtifact}
           onOpenReview={onOpenReview}
         />
+        {ownerRead.publicTime?.state === 'current' ? (
+          <Link
+            className="rounded-lg border border-cafe-subtle px-3 py-2 text-xs text-cafe-secondary"
+            href={collectiveWorkDatesActionRef({
+              connectionId: ownerRead.publicTime.connectionId,
+              channelId: ownerRead.publicTime.location.channelId,
+              workId: ownerRead.publicTime.workId,
+              workRevision: ownerRead.publicTime.workRevision,
+            })}
+          >
+            {t.collectiveDatesOrigin}
+          </Link>
+        ) : null}
         {work ? (
           <Link
             href={`/thread/${encodeURIComponent(work.threadId)}`}

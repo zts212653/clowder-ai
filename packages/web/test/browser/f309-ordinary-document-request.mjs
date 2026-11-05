@@ -43,7 +43,7 @@ export async function createDocumentRequest({ executionSource = 'carrier' } = {}
     const message = owner.messages.append({
       userId: 'operator',
       threadId: owner.thread.id,
-      catId: null,
+      from: { kind: 'user', userId: 'operator' },
       mentions: [owner.catId],
       timestamp: Date.now(),
       content: body,
@@ -83,7 +83,7 @@ export async function createDocumentRequest({ executionSource = 'carrier' } = {}
     const queuedCatMessage = owner.messages.append({
       userId: 'operator',
       threadId: owner.thread.id,
-      catId: owner.catId,
+      from: { kind: 'agent', catId: owner.catId },
       mentions: [],
       timestamp: Date.now(),
       deliveryStatus: 'queued',
@@ -124,8 +124,8 @@ export async function createDocumentRequest({ executionSource = 'carrier' } = {}
         .getByThread(owner.thread.id, 200)
         .find((item) => item.extra?.contentModificationReceiptV1?.candidateRef === returned.proposalRef);
       assert.ok(receipt);
-      assert.equal(receipt.userId, 'system');
-      assert.equal(receipt.catId, null);
+      assert.equal(receipt.userId, owner.thread.createdBy);
+      assert.deepEqual(receipt.from, { kind: 'system', service: 'content-modification' });
       assert.equal(receipt.extra.contentModificationReceiptV1.taskId, taskId);
       assert.equal(receipt.extra.contentModificationReceiptV1.sourceMessageId, message.id);
       return { returned, receipt };
@@ -135,7 +135,7 @@ export async function createDocumentRequest({ executionSource = 'carrier' } = {}
       const followUp = owner.messages.append({
         userId: 'operator',
         threadId: owner.thread.id,
-        catId: null,
+        from: { kind: 'user', userId: 'operator' },
         mentions: [owner.catId],
         timestamp: Date.now(),
         content: body,

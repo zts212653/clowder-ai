@@ -23,7 +23,6 @@ function threadState(partial: Partial<ThreadState>): ThreadState {
     catStatuses: {},
     catStatusDetails: {},
     catInvocations: {},
-    currentGame: null,
     unreadCount: 0,
     hasUserMention: false,
     lastActivity: 0,

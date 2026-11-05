@@ -1,6 +1,11 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  primeCoCreatorConfigCache,
+  resetCoCreatorConfigCacheForTest,
+  useCoCreatorDisplay,
+} from '@/hooks/useCoCreatorConfig';
 import { apiFetch } from '@/utils/api-client';
 
 vi.mock('@/utils/api-client', () => ({
@@ -52,6 +57,7 @@ describe('HubCoCreatorEditor', () => {
     document.body.appendChild(container);
     root = createRoot(container);
     mockApiFetch.mockReset();
+    resetCoCreatorConfigCacheForTest();
   });
 
   afterEach(() => {
@@ -61,7 +67,18 @@ describe('HubCoCreatorEditor', () => {
   });
 
   it('keeps uploaded avatar path out of the form UI while preserving it in the save payload', async () => {
-    mockApiFetch.mockResolvedValue(jsonResponse({ ok: true }));
+    mockApiFetch.mockResolvedValue(
+      jsonResponse({
+        config: {
+          coCreator: {
+            name: 'Co-worker',
+            aliases: ['共创伙伴'],
+            mentionPatterns: ['@co-worker', '@owner'],
+            avatar: '/uploads/owner-lang.png',
+          },
+        },
+      }),
+    );
     const onSaved = vi.fn(() => Promise.resolve());
     const onClose = vi.fn();
 
@@ -97,5 +114,64 @@ describe('HubCoCreatorEditor', () => {
     expect(payload.avatar).toBe('/uploads/owner-lang.png');
     expect(onSaved).toHaveBeenCalledTimes(1);
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the configured familiar address visible after saving through the existing editor', async () => {
+    const coCreator = { name: 'Mina', nickname: '小明', aliases: [], mentionPatterns: ['@mina'] };
+    primeCoCreatorConfigCache(coCreator);
+    mockApiFetch.mockResolvedValue(jsonResponse({ config: { coCreator } }));
+    function FamiliarAddress() {
+      return <output data-testid="familiar-address">{useCoCreatorDisplay().nickname}</output>;
+    }
+    await act(async () => {
+      root.render(
+        <>
+          <HubCoCreatorEditor open coCreator={coCreator} onClose={() => {}} onSaved={() => {}} />
+          <FamiliarAddress />
+        </>,
+      );
+    });
+    expect(container.querySelector('output')?.textContent).toBe('小明');
+    await act(async () => {
+      queryButton(container, '保存').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+    expect(container.querySelector('output')?.textContent).toBe('小明');
+  });
+
+  it('does not activate an untouched ambiguous old value and permits explicit selection and clearing', async () => {
+    const coCreator = { name: 'co-creator', nickname: '大当家', aliases: [], mentionPatterns: ['@co-creator'] };
+    mockApiFetch.mockImplementation(async (_url, init) => {
+      const patch = JSON.parse(String(init?.body));
+      return jsonResponse({
+        config: {
+          coCreator: {
+            ...coCreator,
+            ...patch,
+            ...(Object.hasOwn(patch, 'nickname')
+              ? { nickname: patch.nickname ?? undefined, nicknameSource: 'user' }
+              : {}),
+          },
+        },
+      });
+    });
+    await act(async () => {
+      root.render(<HubCoCreatorEditor open coCreator={coCreator} onClose={() => {}} onSaved={() => {}} />);
+    });
+    const input = document.body.querySelector<HTMLInputElement>('input[aria-label="Owner Nickname"]');
+    expect(input).not.toBeNull();
+    expect(input!.value).toBe('');
+    // An unrelated save preserves the current nickname through the canonical writer.
+    await act(async () => queryButton(container, '保存').click());
+    expect(JSON.parse(String(mockApiFetch.mock.calls.at(-1)?.[1]?.body))).not.toHaveProperty('nickname');
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+    for (const value of ['大当家', '']) {
+      await act(async () => {
+        setValue.call(input, value);
+        input!.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      await act(async () => queryButton(container, '保存').click());
+      expect(JSON.parse(String(mockApiFetch.mock.calls.at(-1)?.[1]?.body)).nickname).toBe(value || null);
+    }
   });
 });

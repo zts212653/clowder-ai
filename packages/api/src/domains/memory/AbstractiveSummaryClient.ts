@@ -2,7 +2,7 @@
 import { buildProviderEndpoint } from '../../config/provider-endpoint.js';
 import { prepareAbstractiveBatch } from './abstractive-summary-input.js';
 import { MAX_CANDIDATES_PER_SEGMENT, parseNaturalLanguageOutput } from './abstractive-summary-output.js';
-import { SYSTEM_PROMPT } from './abstractive-summary-prompt.js';
+import { buildAbstractiveSummaryPrompt } from './abstractive-summary-prompt.js';
 import type { AbstractiveInput, AbstractiveResult } from './abstractive-summary-types.js';
 
 export {
@@ -70,7 +70,7 @@ async function generateSummaryFragment(
     body: JSON.stringify({
       model: 'claude-opus-4-6',
       max_tokens: 8192,
-      system: SYSTEM_PROMPT,
+      system: buildAbstractiveSummaryPrompt(),
       messages: [{ role: 'user', content: userContent }],
     }),
   });

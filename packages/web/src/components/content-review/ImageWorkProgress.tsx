@@ -4,7 +4,7 @@ import { useChatStore } from '@/stores/chatStore';
 import { ModificationProgressLine } from './ModificationProgressLine';
 import { ModificationProgressRow } from './ModificationProgressRow';
 import { type MediaChatTarget, sameMediaSource } from './media-chat-selection';
-import { mediaAttachmentOf, mediaRequestsForMessage } from './media-message-request';
+import { mediaAttachmentsOf, mediaRequestsForMessage } from './media-message-request';
 import { sameMediaContentWithAdvancedReview } from './media-work-identity';
 import { describeModificationReadFailure } from './modification-progress-copy';
 import { useMediaMessageRequests } from './useMediaMessageRequests';
@@ -15,11 +15,10 @@ export function ImageWorkProgress({ target }: { target: MediaChatTarget | null }
   const candidates = target
     ? messages.filter((item) => {
         if (item.type !== 'user' || item.extra?.contentModificationRequestV1) return false;
-        const attachment = mediaAttachmentOf(item.contentBlocks);
-        return (
-          attachment !== null &&
-          attachment.mediaType === target.mediaType &&
-          (sameMediaSource(attachment, target) || sameMediaContentWithAdvancedReview(attachment, target))
+        return mediaAttachmentsOf(item.contentBlocks).some(
+          (attachment) =>
+            attachment.mediaType === target.mediaType &&
+            (sameMediaSource(attachment, target) || sameMediaContentWithAdvancedReview(attachment, target)),
         );
       })
     : [];
@@ -37,10 +36,11 @@ function ImageWorkRequests({ target, messages }: { target: MediaChatTarget; mess
   });
   const joined = catalogue
     ? messages.flatMap((message) => {
-        const attachment = mediaAttachmentOf(message.contentBlocks);
-        return attachment
-          ? mediaRequestsForMessage(catalogue, message.id, attachment, (id) => getCatById(id)?.displayName)
-          : [];
+        return mediaAttachmentsOf(message.contentBlocks).flatMap((attachment) =>
+          sameMediaSource(attachment, target) || sameMediaContentWithAdvancedReview(attachment, target)
+            ? mediaRequestsForMessage(catalogue, message.id, attachment, (id) => getCatById(id)?.displayName)
+            : [],
+        );
       })
     : [];
   if (!joined.length && !failed) return null;

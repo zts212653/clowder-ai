@@ -58,7 +58,7 @@ export function ReviewCanvasPopover({
       style={position}
       data-testid="review-comment-popover"
       onKeyDown={(event) => {
-        if (event.key === 'Escape') {
+        if (event.key === 'Escape' && !event.nativeEvent.isComposing) {
           event.preventDefault();
           event.stopPropagation();
           onClose();

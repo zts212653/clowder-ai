@@ -38,9 +38,9 @@ async function fixture(t: Parameters<Parameters<typeof test>[1]>[0]) {
   };
   const append = (text: string) =>
     messages.append({
+      from: { kind: 'user', userId: scope.userId },
       userId: scope.userId,
       threadId: thread.id,
-      catId: null,
       content: text,
       mentions: [],
       timestamp: Date.now(),

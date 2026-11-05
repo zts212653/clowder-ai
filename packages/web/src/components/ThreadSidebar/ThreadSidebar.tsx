@@ -11,6 +11,7 @@ import {
 } from '@/stores/sidebarProjectionStore';
 import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
+import { notifyHandledMentionRead } from '@/utils/mention-read-receipt';
 import { executeSidebarFieldCommand } from '@/utils/sidebar-commands';
 import {
   bootstrapSidebarThreadSnapshot,
@@ -58,12 +59,17 @@ import {
   sidebarTabReducer,
   writeBrowserSidebarTabPreference,
 } from './sidebar-tab-state';
+import { ThreadDeleteConfirmDialog } from './ThreadDeleteConfirmDialog';
 import { ThreadItem } from './ThreadItem';
 import { ThreadOrganizerModal } from './ThreadOrganizerModal';
 import { ThreadSidebarV2Header } from './ThreadSidebarV2Header';
 import { openTheaterReplay } from './theater-navigation';
 import { pushThreadRouteWithHistory } from './thread-navigation';
 import { isGroupableThread, matchesThreadSearch } from './thread-search';
+import {
+  saveThreadLabels as handleUpdateLabels,
+  saveThreadPreferredCats as handleUpdatePreferredCats,
+} from './thread-settings-commands';
 import { threadSignalsCopy } from './thread-signals.shell-copy';
 import {
   buildSidebarTabContent,
@@ -81,6 +87,7 @@ import { useCollapseState } from './use-collapse-state';
 import { useGroupDecisions } from './use-group-decisions';
 import { useProjectPins } from './use-project-pins';
 import { useScrollAnchor } from './use-scroll-anchor';
+import { useThreadDeletion } from './use-thread-deletion';
 import { VirtualAttentionList } from './VirtualAttentionList';
 import { VIRTUAL_THREAD_LIST_THRESHOLD, VirtualThreadList, type VirtualThreadListHandle } from './VirtualThreadList';
 
@@ -182,8 +189,6 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
   const bindWarning = bindFailure
     ? (isV2 ? sidebarCopy : sidebarHeaderCopy.zh).sessionBindWarning(bindFailure.failed, bindFailure.total)
     : null;
-  // I-1: Thread to confirm deletion (null = no dialog)
-  const [deleteTarget, setDeleteTarget] = useState<SidebarSnapshotRow | null>(null);
   // F095 Phase D: Trash bin state
   const [showTrash, setShowTrash] = useState(false);
   const [trashedThreads, setTrashedThreads] = useState<TrashedThread[]>([]);
@@ -362,10 +367,10 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
   );
 
   // F095 Phase D: Load trashed threads
-  const loadTrash = useCallback(async () => {
+  const loadTrash = useCallback(async (afterCurrentGet = false) => {
     setIsLoadingTrash(true);
     try {
-      const res = await apiFetch('/api/threads?deleted=true');
+      const res = await apiFetch('/api/threads?deleted=true', undefined, { afterCurrentGet });
       if (!res.ok) return;
       const data = await res.json();
       setTrashedThreads(data.threads ?? []);
@@ -389,44 +394,28 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
       try {
         const res = await apiFetch(`/api/threads/${threadId}/restore`, { method: 'POST' });
         if (!res.ok) return;
-        await loadThreads();
-        await loadTrash();
+        await invalidateSidebarProjection();
+        await loadTrash(true);
       } catch {
         // Silently ignore
       }
     },
-    [loadThreads, loadTrash],
+    [loadTrash],
   );
 
-  // I-1: Show confirmation dialog instead of deleting immediately
-  const handleDeleteRequest = useCallback(
-    (threadId: string) => {
-      const thread = threads.find((t) => t.id === threadId);
-      if (thread) setDeleteTarget(thread);
-    },
-    [threads],
-  );
-
-  const handleDeleteConfirm = useCallback(async () => {
-    if (!deleteTarget) return;
-    const threadId = deleteTarget.id;
-    const isSystem = deleteTarget.isHubThread || !!deleteTarget.systemKind;
-    setDeleteTarget(null);
-    try {
-      // P1-2: System threads require ?force=true (backend enforced)
-      const url = isSystem ? `/api/threads/${threadId}?force=true` : `/api/threads/${threadId}`;
-      const res = await apiFetch(url, { method: 'DELETE' });
-      if (!res.ok && res.status !== 204) return;
-      if (threadId === currentConversationId) {
-        navigateToThread('default');
-      }
-      await loadThreads();
-      // F095 Phase D: Refresh trash bin if visible
-      if (showTrash) void loadTrash();
-    } catch {
-      // Silently ignore
-    }
-  }, [deleteTarget, currentConversationId, navigateToThread, loadThreads, showTrash, loadTrash]);
+  const {
+    deleteTarget,
+    deletingIds,
+    requestDelete: handleDeleteRequest,
+    confirmDelete: handleDeleteConfirm,
+    cancelDelete,
+    canRemember,
+  } = useThreadDeletion({
+    currentThreadId: currentConversationId,
+    navigateToThread,
+    showTrash,
+    loadTrash,
+  });
 
   const handleRename = useCallback(async (threadId: string, title: string) => {
     const nextTitle = title.trim();
@@ -482,38 +471,6 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
     });
   }, []);
 
-  const handleUpdatePreferredCats = useCallback(async (threadId: string, cats: string[]) => {
-    const ok = await executeSidebarFieldCommand({
-      threadId,
-      field: 'preferredCats',
-      value: cats,
-      request: (signal) =>
-        apiFetch(`/api/threads/${threadId}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ preferredCats: cats }),
-          signal,
-        }),
-    });
-    if (!ok) throw new Error('保存失败');
-  }, []);
-
-  const handleUpdateLabels = useCallback(async (threadId: string, labels: string[]) => {
-    const ok = await executeSidebarFieldCommand({
-      threadId,
-      field: 'labels',
-      value: labels,
-      request: (signal) =>
-        apiFetch(`/api/threads/${threadId}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ labels }),
-          signal,
-        }),
-    });
-    if (!ok) throw new Error('保存失败');
-  }, []);
-
   // F252 Phase E: route replay to the always-mounted AppShell host.
   const handleReplay = useCallback((threadId: string) => openTheaterReplay(threadId), []);
 
@@ -525,7 +482,11 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
         hasUserMention: false,
       });
       useChatStore.getState().clearUnread(threadId);
-      if (threadId === currentConversationId) return;
+      // Read selection at the action boundary so changing it does not replace
+      // every memoized row's onSelect handler. A Café destination still needs
+      // navigation back to the remembered conversation.
+      const selectedConversationId = activeDestination === null ? useChatStore.getState().currentThreadId : null;
+      if (threadId === selectedConversationId) return;
       // Let the new thread restore projectPath after the route switch.
       // Pre-navigation global store writes can stall SPA thread navigation.
       navigateToThread(threadId);
@@ -534,7 +495,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
         onClose?.();
       }
     },
-    [currentConversationId, navigateToThread, onClose],
+    [activeDestination, navigateToThread, onClose],
   );
 
   // F095 Phase F: Project action handlers
@@ -593,6 +554,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
     titleFor: attentionClusterTitle,
     rename: renameAttentionCluster,
     savedGroups: attentionSavedGroups,
+    recentGroupIds: attentionRecentGroupIds,
     mutateGroup: mutateAttentionGroup,
     preferenceError: attentionPreferenceError,
     groupLoadState: attentionLoadState,
@@ -606,7 +568,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
     collapsedPeek: attentionCollapsedPeek,
     toggleCollapsedPeek: toggleAttentionCollapsedPeek,
   } = useAttentionClusters(liveThreads, currentThreadId, normalizedQuery);
-  const groupDecisions = useGroupDecisions(isV2 && attentionClusters.length > 0);
+  const groupDecisions = useGroupDecisions(isV2);
   const [attentionArrangeMode, setAttentionArrangeMode] = useState(false);
   const [searchGroupRequest, setSearchGroupRequest] = useState<SearchGroupRequest | null>(null);
   const searchGroupOperation = useRef(0);
@@ -617,6 +579,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
     setAttentionArrangeMode(false);
     setSearchGroupRequest(request);
   }, []);
+  const organizeThread = useCallback((threadId: string) => openSearchGroup({ query: '', threadId }), [openSearchGroup]);
   const searchGroupMatches = useMemo(
     () =>
       normalizedQuery
@@ -962,7 +925,9 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
     try {
       const res = await apiFetch('/api/threads/read/mark-all', { method: 'POST' });
       if (res.ok) {
+        const receipt: unknown = await res.json().catch(() => null);
         useChatStore.getState().clearAllUnread();
+        notifyHandledMentionRead(receipt);
         await invalidateSidebarProjection();
       } else {
         for (const commandId of commandIds) useSidebarProjectionStore.getState().failSidebarCommand(commandId);
@@ -1095,7 +1060,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
       })),
     [activeTabContent.threads],
   );
-  const threadRowHeight = useSidebarRowHeight(liveThreads, currentConversationId, isV2);
+  const threadRowHeight = useSidebarRowHeight(liveThreads, currentConversationId, isV2, groupDecisions);
   const attentionRowHeight = useCallback(
     (row: AttentionListRow) => {
       if (!isV2) return 80;
@@ -1445,22 +1410,20 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
             isActive={currentConversationId === thread.id}
             onSelect={handleSelect}
             onDelete={handleDeleteRequest}
+            isDeleting={deletingIds.has(thread.id)}
             onRename={handleRename}
             onTogglePin={handleTogglePin}
             onToggleFavorite={handleToggleFavorite}
             onUpdatePreferredCats={handleUpdatePreferredCats}
             onUpdateLabels={handleUpdateLabels}
-            onOrganize={
-              groupable && attentionLoadState === 'ready'
-                ? () => openSearchGroup({ query: '', threadId: thread.id })
-                : undefined
-            }
+            onOrganize={groupable && attentionLoadState === 'ready' ? organizeThread : undefined}
             onReplay={handleReplay}
             isPinned={thread.pinned}
             isFavorited={thread.favorited}
             presence={thread.presence}
             unreadCount={thread.unreadCount}
             hasUserMention={thread.hasUserMention}
+            hasPendingDecision={groupDecisions.status === 'ready' && groupDecisions.threadIds.has(thread.id)}
             projectPath={thread.projectPath}
             indented={indented}
             preferredCats={thread.preferredCats}
@@ -1474,18 +1437,18 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
     [
       attentionArrangeMode,
       attentionLoadState,
-      openSearchGroup,
+      organizeThread,
       commitAttentionThreadDrop,
       currentConversationId,
+      deletingIds,
       draggedAttentionThreadId,
+      groupDecisions,
       handleDeleteRequest,
       handleRename,
       handleReplay,
       handleSelect,
       handleToggleFavorite,
       handleTogglePin,
-      handleUpdateLabels,
-      handleUpdatePreferredCats,
     ],
   );
 
@@ -1602,6 +1565,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
       revealAttentionPreview,
       attentionArrangeMode,
       attentionMemberSort,
+      isV2,
       attentionPendingSort,
       attentionLoadState,
       changeAttentionMemberSort,
@@ -1706,6 +1670,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
         className={`${sidebarWidthClass} flex flex-col h-full ${isV2 ? '' : 'bg-[var(--console-panel-bg)]'}`}
         style={isV2 ? { background: 'var(--shell-frame)', borderRight: '1px solid var(--shell-hairline)' } : undefined}
         data-shell-sidebar={isV2 ? 'v2' : undefined}
+        data-chat-background-surface={isV2 ? 'frame' : undefined}
       >
         {isV2 ? (
           <ThreadSidebarV2Header
@@ -1926,6 +1891,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
                 request={searchGroupRequest}
                 threads={liveThreads}
                 groups={attentionSavedGroups}
+                recentGroupIds={attentionRecentGroupIds}
                 renderThread={renderThreadItem}
                 onCommand={mutateAttentionGroup}
                 onReload={reloadAttentionGroups}
@@ -2176,9 +2142,11 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
 
       {/* I-1: Delete confirmation dialog (F095-G: typed confirmation for system threads) */}
       {deleteTarget && (
-        <DeleteConfirmDialog
+        <ThreadDeleteConfirmDialog
+          key={deleteTarget.id}
           thread={deleteTarget}
-          onCancel={() => setDeleteTarget(null)}
+          canRemember={canRemember}
+          onCancel={cancelDelete}
           onConfirm={handleDeleteConfirm}
         />
       )}
@@ -2274,82 +2242,5 @@ function GridIcon() {
       <rect x="3" y="14" width="7" height="7" rx="1" />
       <rect x="14" y="14" width="7" height="7" rx="1" />
     </svg>
-  );
-}
-
-/**
- * F095 Phase G: Delete confirmation dialog.
- * System threads (IM Hub) require typed confirmation (like GitHub repo deletion).
- * Regular threads show a simple confirm/cancel.
- */
-function DeleteConfirmDialog({
-  thread,
-  onCancel,
-  onConfirm,
-}: {
-  thread: SidebarSnapshotRow;
-  onCancel: () => void;
-  onConfirm: () => void;
-}) {
-  const isSystem = thread.isHubThread || !!thread.systemKind;
-  const title = thread.title ?? '未命名对话';
-  const [typedName, setTypedName] = useState('');
-  const confirmed = !isSystem || typedName === title;
-  const confirmInputRef = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    if (isSystem) confirmInputRef.current?.focus();
-  }, [isSystem]);
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--console-overlay-medium)] backdrop-blur-sm"
-      onClick={onCancel}
-    >
-      <div
-        className="bg-cafe-surface rounded-xl shadow-2xl p-5 max-w-sm w-full mx-4"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h3 className="text-base font-bold text-cafe mb-2">{isSystem ? '删除系统对话' : '确认删除对话'}</h3>
-        <p className="text-sm text-cafe-secondary mb-1">即将删除「{title}」</p>
-        {isSystem ? (
-          <>
-            <p className="text-xs text-conn-red-text mb-2">
-              这是系统级对话。删除可能影响平台功能（连接器路由、定时评估或猫的私人空间）。
-            </p>
-            <p className="text-xs text-cafe-secondary mb-2">请输入对话名称以确认删除：</p>
-            <input
-              ref={confirmInputRef}
-              value={typedName}
-              onChange={(e) => setTypedName(e.target.value)}
-              placeholder={title}
-              className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-cafe focus:outline-none focus:border-conn-red-ring mb-4"
-            />
-          </>
-        ) : (
-          <p className="text-xs text-cafe-secondary mb-4">
-            对话将移入回收站，30 天后自动清理。你可以随时从回收站恢复。
-          </p>
-        )}
-        <div className="flex gap-2 justify-end">
-          <button
-            onClick={onCancel}
-            className="px-3 py-1.5 text-sm rounded-lg border border-cafe hover:bg-cafe-surface-elevated transition-colors"
-          >
-            取消
-          </button>
-          <button
-            onClick={onConfirm}
-            disabled={!confirmed}
-            className={`px-3 py-1.5 text-sm rounded-lg text-[var(--cafe-surface)] transition-colors ${
-              isSystem
-                ? 'bg-conn-red-text hover:bg-conn-red-hover disabled:bg-conn-red-ring disabled:cursor-not-allowed'
-                : 'bg-conn-amber-text hover:bg-conn-amber-hover'
-            }`}
-          >
-            {isSystem ? '确认删除' : '移入回收站'}
-          </button>
-        </div>
-      </div>
-    </div>
   );
 }

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { createWakeCatFn } from '../dist/domains/cats/services/game/wakeCatImpl.js';
+import { createWakeCatFn } from '../dist/domains/cats/services/agents/invocation/wake-cat.js';
 
 function createMockDeps() {
   const enqueuedEntries = [];

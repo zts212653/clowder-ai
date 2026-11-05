@@ -68,7 +68,7 @@ export function resolveCodexAccountLaunch(
       (typeof config.sqlite_home === 'string' ? config.sqlite_home : env.CODEX_SQLITE_HOME?.trim() || credentialHome),
     cwd,
   );
-  const authMode = input.authMode ?? account.authType;
+  const authMode = input.authMode ?? (account.syntheticNative ? 'auto' : account.authType);
   const identity = {
     accountRef: account.id,
     authMode,

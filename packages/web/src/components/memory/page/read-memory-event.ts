@@ -3,10 +3,10 @@ import { apiFetch } from '@/utils/api-client';
 import { eventCorrectionProjection, hasValidEventCorrections } from './event-correction-read';
 import { isMemoryEvent, type MemoryEvent, memoryObject } from './owner-memory-read';
 
-export async function readEvent(id: string, signal: AbortSignal): Promise<MemoryEvent> {
+export async function readEvent(id: string, signal: AbortSignal, afterCurrentGet = false): Promise<MemoryEvent> {
   signal.throwIfAborted();
   const path = `/api/memory/events/${encodeURIComponent(id)}`;
-  const response = await apiFetch(path, { signal });
+  const response = await apiFetch(path, { signal }, { afterCurrentGet });
   if (!response.ok) throw new Error('Event unavailable');
   const body: unknown = await response.json();
   signal.throwIfAborted();
@@ -27,9 +27,11 @@ export async function readEvent(id: string, signal: AbortSignal): Promise<Memory
   let serialized = '';
   while (offset < body.eventChars) {
     signal.throwIfAborted();
-    const part = await apiFetch(`${path}?charOffset=${offset}&revision=${encodeURIComponent(String(body.revision))}`, {
-      signal,
-    });
+    const part = await apiFetch(
+      `${path}?charOffset=${offset}&revision=${encodeURIComponent(String(body.revision))}`,
+      { signal },
+      { afterCurrentGet },
+    );
     if (!part.ok) throw new Error('Event unavailable');
     const slice: unknown = await part.json();
     signal.throwIfAborted();

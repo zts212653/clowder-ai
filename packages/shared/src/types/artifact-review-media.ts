@@ -30,12 +30,16 @@ export const immutableMediaSchema = z.discriminatedUnion('kind', [
 ]);
 export type ImmutableMedia = z.infer<typeof immutableMediaSchema>;
 
+/** Still images use their decoded EXIF display coordinates; immutable bytes keep their original MIME. */
+export const reviewedMediaTypeSchema = z.enum(['image/png', 'image/jpeg', 'image/webp', 'video/mp4']);
+export type ReviewedMediaType = z.infer<typeof reviewedMediaTypeSchema>;
+
 export const reviewedMediaAssetSchema = z
   .object({
     contentRef: ref,
     ownerRevision: positive,
     blobDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
-    mediaType: z.enum(['image/png', 'video/mp4']),
+    mediaType: reviewedMediaTypeSchema,
     media: immutableMediaSchema,
     sourcePublication: z.object({ artifactRef: ref, sourceRef: ref, revision: ref, threadId: ref.optional() }).strict(),
     ownerReceiptRef: ref,
@@ -60,6 +64,15 @@ export const artifactReviewAnchorSchema = z
         streamId: id,
         startTick: tick,
         endTick: tick,
+        /** A quoted paragraph belongs to this exact media version and retained metadata revision. */
+        storyEvidence: z
+          .object({
+            paragraphId: z.string().min(1).max(256),
+            metadataRevision: positive,
+            quote: z.string().min(1).max(12000),
+          })
+          .strict()
+          .optional(),
         frameRegion: z
           .object({ tick, ...region })
           .strict()

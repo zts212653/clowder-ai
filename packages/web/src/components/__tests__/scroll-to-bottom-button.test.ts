@@ -1,6 +1,7 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, type Mock, vi } from 'vitest';
+import { writeShellLanguage } from '../shell/shell-language';
 
 beforeAll(() => {
   (globalThis as { React?: typeof React }).React = React;
@@ -24,6 +25,7 @@ describe('ScrollToBottomButton', () => {
   let onJumpToLatest: Mock<() => void>;
 
   beforeEach(() => {
+    writeShellLanguage('zh');
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -44,6 +46,27 @@ describe('ScrollToBottomButton', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    writeShellLanguage('zh');
+  });
+
+  it('offers the existing resume action in English when English is selected', async () => {
+    const { ScrollToBottomButton } = await import('@/components/ScrollToBottomButton');
+    writeShellLanguage('en');
+    defineNumberProp(scrollEl, 'scrollTop', 0);
+    act(() =>
+      root.render(
+        React.createElement(ScrollToBottomButton, {
+          scrollContainerRef: { current: scrollEl },
+          messagesEndRef: { current: endEl },
+          onJumpToLatest,
+          placement: 'rail',
+        }),
+      ),
+    );
+    const button = container.querySelector<HTMLButtonElement>('button[aria-label="Back to latest"]');
+    expect(button).not.toBeNull();
+    act(() => button?.click());
+    expect(onJumpToLatest).toHaveBeenCalledOnce();
   });
 
   it('hidden when already at bottom; shows when scrolled up; click scrolls to bottom', async () => {
@@ -79,6 +102,31 @@ describe('ScrollToBottomButton', () => {
 
     expect(onJumpToLatest).toHaveBeenCalledTimes(1);
     expect(endEl.scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it('renders the v2 rail control as a compact icon without a native tooltip', async () => {
+    const { ScrollToBottomButton } = await import('@/components/ScrollToBottomButton');
+
+    defineNumberProp(scrollEl, 'scrollTop', 0);
+    act(() => {
+      root.render(
+        React.createElement(ScrollToBottomButton, {
+          scrollContainerRef: { current: scrollEl },
+          messagesEndRef: { current: endEl },
+          onJumpToLatest,
+          placement: 'rail',
+        }),
+      );
+    });
+
+    const button = container.querySelector('button[aria-label="到最新"]');
+    expect(button).toBeTruthy();
+    expect(button?.classList.contains('absolute')).toBe(true);
+    expect(button?.classList.contains('h-7')).toBe(true);
+    expect(button?.classList.contains('w-7')).toBe(true);
+    expect(button?.querySelector('svg[aria-hidden="true"]')).toBeTruthy();
+    expect(button?.getAttribute('title')).toBeNull();
+    expect(button?.textContent?.trim()).toBe('');
   });
 
   it('recomputes visibility when thread/content changes without scroll events (cloud P2)', async () => {

@@ -191,7 +191,7 @@ test('explicit owner consent uses one direct source, verifies the page effect, a
   const next = f.store.appendIdempotent({
     userId: scope.userId,
     threadId: scope.threadId,
-    catId: null,
+    from: { kind: 'user', userId: scope.userId },
     content: '新的独立请求',
     mentions: [],
     timestamp: Date.now(),
@@ -226,7 +226,7 @@ test('cancel consumes the preview and a later owner correction cannot authorize 
   f.store.appendIdempotent({
     userId: scope.userId,
     threadId: scope.threadId,
-    catId: null,
+    from: { kind: 'user', userId: scope.userId },
     content: 'I changed my mind',
     mentions: [],
     timestamp: Date.now(),

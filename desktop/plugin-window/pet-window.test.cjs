@@ -1,16 +1,34 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { createPetWindow } = require('./pet-window.cjs');
-function fixture() {
-  let bounds = { x: 400, y: 400, width: 300, height: 270 };
+function fixture(options = {}) {
+  let bounds = options.bounds ?? { x: 400, y: 400, width: 300, height: 270 };
   let cursor = { x: 550, y: 580 },
     time = 0,
     hidden = false;
   const events = [],
     ignores = [];
   const area = { x: 0, y: 0, width: 1280, height: 800 };
+  const areas = options.areas ?? [area];
+  const nearestArea = (point) =>
+    areas.find(
+      (candidate) =>
+        point.x >= candidate.x &&
+        point.x < candidate.x + candidate.width &&
+        point.y >= candidate.y &&
+        point.y < candidate.y + candidate.height,
+    ) ??
+    areas
+      .map((candidate) => ({
+        candidate,
+        distance:
+          (point.x - Math.max(candidate.x, Math.min(point.x, candidate.x + candidate.width))) ** 2 +
+          (point.y - Math.max(candidate.y, Math.min(point.y, candidate.y + candidate.height))) ** 2,
+      }))
+      .sort((a, b) => a.distance - b.distance)[0].candidate;
   const host = createPetWindow({
     win: {
+      webContents: options.webContents,
       getBounds: () => bounds,
       setBounds: (value) => {
         bounds = value;
@@ -22,8 +40,13 @@ function fixture() {
       },
     },
     screen: {
-      getDisplayMatching: () => ({ workArea: area }),
-      getDisplayNearestPoint: () => ({ workArea: area }),
+      getDisplayMatching: (rectangle) => ({
+        workArea: nearestArea({
+          x: rectangle.x + rectangle.width / 2,
+          y: rectangle.y + rectangle.height / 2,
+        }),
+      }),
+      getDisplayNearestPoint: (point) => ({ workArea: nearestArea(point) }),
       getCursorScreenPoint: () => cursor,
     },
     publish: (event) => events.push(event),
@@ -43,6 +66,60 @@ function fixture() {
     },
   };
 }
+
+test('chat occupies only its real rectangle while blank pixels pass through across negative-origin displays', (t) => {
+  const left = { x: -1440, y: -180, width: 1440, height: 900 };
+  const right = { x: 0, y: 0, width: 1280, height: 800 };
+  const f = fixture({
+    bounds: { x: -420, y: 380, width: 300, height: 270 },
+    areas: [left, right],
+  });
+  t.after(() => f.host.close());
+  let reply = f.host.request({ kind: 'view.layout', panel: 'chat', width: 340, height: 500 });
+  let native = f.bounds();
+  assert.ok(native.x >= left.x && native.y >= left.y);
+  assert.ok(native.x + native.width <= left.x + left.width);
+  assert.ok(native.y + native.height <= left.y + left.height);
+
+  const blank = (() => {
+    for (let y = 1; y < native.height - 1; y += 2) {
+      for (let x = 1; x < native.width - 1; x += 2) {
+        const inPet = x >= reply.pet.x && x <= reply.pet.x + 120 && y >= reply.pet.y && y <= reply.pet.y + 130;
+        const inPanel =
+          x >= reply.panel.x &&
+          x <= reply.panel.x + reply.panel.width &&
+          y >= reply.panel.y &&
+          y <= reply.panel.y + reply.panel.height;
+        if (!inPet && !inPanel) return { x: native.x + x, y: native.y + y };
+      }
+    }
+    return null;
+  })();
+  assert.ok(blank, 'the native union retains transparent pixels outside cat and chat');
+  f.cursor(blank);
+  f.host.tick();
+  assert.equal(f.ignores.at(-1), true, 'transparent union pixels must pass through');
+  f.cursor({
+    x: native.x + reply.panel.x + reply.panel.width / 2,
+    y: native.y + reply.panel.y + reply.panel.height / 2,
+  });
+  f.host.tick();
+  assert.equal(f.ignores.at(-1), false, 'the real chat rectangle must receive input');
+
+  f.cursor({ x: native.x + reply.pet.x + 30, y: native.y + reply.pet.y + 30 });
+  assert.equal(f.host.request({ kind: 'view.drag', phase: 'start' }, true).kind, 'ok');
+  f.cursor({ x: 800, y: 500 });
+  f.host.tick();
+  f.host.request({ kind: 'view.drag', phase: 'end' }, true);
+  reply = f.host.request({ kind: 'view.layout', panel: 'chat', width: 340, height: 500 });
+  native = f.bounds();
+  assert.ok(native.x >= right.x && native.y >= right.y);
+  assert.ok(native.x + native.width <= right.x + right.width);
+  assert.ok(native.y + native.height <= right.y + right.height);
+  f.cursor({ x: native.x + reply.panel.x + 4, y: native.y + reply.panel.y + 4 });
+  f.host.tick();
+  assert.equal(f.ignores.at(-1), false, 'chat remains interactive after crossing displays');
+});
 
 test('trusted ball size changes resize the native pet and keep settings inside one occupied surface', (t) => {
   const f = fixture();
@@ -79,6 +156,26 @@ test('compact geometry keeps the whole top-corner badge inside the native hit ta
   f.host.tick();
   assert.equal(f.ignores.at(-1), false, 'the badge corner must receive clicks instead of passing through');
   assert.equal(f.host.setBallSize(42), false);
+});
+
+test('page zoom cannot shrink the renderer viewport behind native badge coordinates', (t) => {
+  let zoom = 1.25;
+  const f = fixture({
+    webContents: {
+      getZoomFactor: () => zoom,
+      setZoomFactor: (value) => {
+        zoom = value;
+      },
+    },
+  });
+  t.after(() => f.host.close());
+  f.host.setBallSize(89);
+  const reply = f.host.request({ kind: 'view.layout', panel: 'none', width: 120, height: 130 });
+  assert.equal(zoom, 1, 'layout uses the same CSS and native coordinate scale');
+  zoom = 1.25;
+  f.host.tick();
+  assert.equal(zoom, 1, 'a later menu/keyboard zoom cannot leave the badge clipped');
+  assert.ok(reply.pet.x + (120 * 89) / 72 <= f.bounds().width / zoom);
 });
 
 test('reset position moves the whole current layout without changing panel-relative geometry', (t) => {
@@ -151,6 +248,69 @@ test('living companion bubble is passive and the pending panel stays interactive
   f.cursor({ x: f.bounds().x + decisions.panel.x + 3, y: f.bounds().y + decisions.panel.y + 3 });
   f.host.tick();
   assert.equal(f.ignores.at(-1), false, 'the pending panel remains clickable');
+});
+
+test('split call layout returns a passive bubble without making the interactive controls click-through', (t) => {
+  const f = fixture();
+  t.after(() => f.host.close());
+  const reply = f.host.request({
+    kind: 'view.layout',
+    panel: 'actions',
+    width: 412,
+    height: 116,
+    call: { presentation: 'controls', bubble: { width: 320, height: 62 } },
+  });
+  assert.equal(reply.kind, 'layout');
+  assert.ok(reply.bubble);
+  const native = f.bounds();
+  for (const rect of [reply.panel, reply.bubble]) {
+    assert.ok(rect.x >= 0 && rect.y >= 0);
+    assert.ok(rect.x + rect.width <= native.width && rect.y + rect.height <= native.height);
+  }
+
+  f.cursor({ x: native.x + reply.bubble.x + 3, y: native.y + reply.bubble.y + 3 });
+  f.host.tick();
+  assert.equal(f.ignores.at(-1), true, 'speech remains passive over the foreground application');
+  f.cursor({ x: native.x + reply.panel.x + 3, y: native.y + reply.panel.y + 3 });
+  f.host.tick();
+  assert.equal(f.ignores.at(-1), false, 'call controls remain interactive');
+});
+
+test('application assistance uses the ordinary bounded interactive panel lane', (t) => {
+  const f = fixture();
+  t.after(() => f.host.close());
+  const reply = f.host.request({ kind: 'view.layout', panel: 'app-assist', width: 320, height: 92 });
+  assert.equal(reply.kind, 'layout');
+  f.cursor({ x: f.bounds().x - 4, y: f.bounds().y - 4 });
+  f.host.tick();
+  assert.equal(f.ignores.at(-1), true);
+  f.cursor({ x: f.bounds().x + reply.panel.x + 3, y: f.bounds().y + reply.panel.y + 3 });
+  f.host.tick();
+  assert.equal(f.ignores.at(-1), false);
+});
+
+test('native split-call validation rejects authority-shaped or unbounded layout additions', (t) => {
+  const f = fixture();
+  t.after(() => f.host.close());
+  const invalid = [
+    { kind: 'view.layout', panel: 'menu', width: 320, height: 92, call: { presentation: 'lite' } },
+    { kind: 'view.layout', panel: 'actions', width: 320, height: 92, call: { presentation: 'expanded' } },
+    {
+      kind: 'view.layout',
+      panel: 'actions',
+      width: 320,
+      height: 92,
+      call: { presentation: 'controls', bubble: { width: 421, height: 62 } },
+    },
+    {
+      kind: 'view.layout',
+      panel: 'actions',
+      width: 320,
+      height: 92,
+      call: { presentation: 'controls', bubble: { width: 320, height: 62 }, activated: true },
+    },
+  ];
+  for (const command of invalid) assert.deepEqual(f.host.request(command), { kind: 'error', code: 'invalid_request' });
 });
 
 test('drag keeps the native window aligned with ambient history and reopened controls', (t) => {

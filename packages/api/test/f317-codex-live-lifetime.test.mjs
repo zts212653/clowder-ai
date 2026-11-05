@@ -36,11 +36,7 @@ test('a live call accepts subsequent root turns and ends the Host stream only on
   }))
     events.push(event);
   assert.equal(ready, true);
-  assert.deepEqual(
-    terminalFreshness,
-    [],
-    'a continuing Live call must preserve unread notices across child completions',
-  );
+  assert.deepEqual(terminalFreshness, [], 'retired freshness hooks stay unused across Live child completions');
   const config = f.writes.find((message) => message.method === 'thread/start').params.config;
   assert.deepEqual(config.mcp_servers.unapproved, { enabled: false });
   assert.equal(config['features.shell_tool'], false);
@@ -140,46 +136,7 @@ test(
   },
 );
 
-test(
-  'idle Live checks unread through application context with a real native turn receipt',
-  { timeout: 2000 },
-  async (t) => {
-    t.mock.timers.enable({ apis: ['setInterval'] });
-    const f = wireFixture();
-    const delivered = [];
-    let finish;
-    let prepared = false;
-    const finished = new Promise((resolve) => {
-      finish = resolve;
-    });
-    const idle = {
-      prepare: async () =>
-        prepared ? null : ((prepared = true), { text: 'read current thread full', noticeId: 'notice' }),
-      commitDelivered: async (_notice, receipt) => delivered.push(receipt),
-      defer: () => assert.fail('unexpected defer'),
-      markMissed: async () => assert.fail('unexpected miss'),
-    };
-    for await (const event of new CodexAppServerClient({ wire: f.wire, freshnessController: { idle } }).run({
-      thread: { kind: 'start' },
-      prompt: { kind: 'frozen', prompt: 'voice bootstrap' },
-      live: {
-        finished,
-        ready: async () => {},
-        observe: async (row) => {
-          if (row.method === 'turn/completed' && row.params.turn.id === 'turn-2') finish();
-        },
-      },
-    }))
-      if (event.type === 'app_server.live_turn_completed' && event.turnId === 'first')
-        setImmediate(() => t.mock.timers.tick(1000));
-    const idleStart = f.writes.filter((row) => row.method === 'turn/start')[1];
-    assert.deepEqual(idleStart.params.input, []);
-    assert.equal(idleStart.params.additionalContext['cat-cafe.live-freshness'].kind, 'application');
-    assert.deepEqual(delivered, [{ acceptedTurnId: 'turn-2' }]);
-  },
-);
-
-test('a Host inbox boundary accepts context inline on the exact native loop', { timeout: 2000 }, async () => {
+test('a Host recovery boundary accepts context inline on the exact native loop', { timeout: 2000 }, async () => {
   const f = wireFixture();
   let finish;
   const finished = new Promise((resolve) => {
@@ -209,7 +166,7 @@ test('a Host inbox boundary accepts context inline on the exact native loop', { 
           port.submitContextAtBoundary(
             'premature',
             ['source'],
-            'inbox_notice',
+            'recovery_context',
             new AbortController().signal,
             async () => true,
           ),
@@ -224,7 +181,7 @@ test('a Host inbox boundary accepts context inline on the exact native loop', { 
           await port.submitContextAtBoundary(
             'Read exact queued source',
             ['thread_home#message-1'],
-            'inbox_notice',
+            'recovery_context',
             new AbortController().signal,
             async () => true,
           ),
@@ -257,14 +214,14 @@ test('ordinary calls keep the original first-turn completion boundary', async ()
   }))
     events.push(event);
   assert.equal(events.filter((event) => event.type === 'turn.completed').length, 1);
-  assert.deepEqual(terminalFreshness, ['first']);
+  assert.deepEqual(terminalFreshness, []);
   assert.equal(
     events.some((event) => event.type === 'app_server.live_turn_completed'),
     false,
   );
 });
 
-test('voice-only Live does not poll household freshness without its read grant', { timeout: 2000 }, async (t) => {
+test('Live never polls household freshness, even when a legacy read grant is present', { timeout: 2000 }, async (t) => {
   t.mock.timers.enable({ apis: ['setInterval'] });
   const f = wireFixture();
   let finish;
@@ -285,7 +242,7 @@ test('voice-only Live does not poll household freshness without its read grant',
   }).run({
     thread: { kind: 'start' },
     prompt: { kind: 'frozen', prompt: 'voice only' },
-    live: { finished, acceptsFreshness: () => false, ready: async () => {}, observe: async () => {} },
+    live: { finished, acceptsFreshness: () => true, ready: async () => {}, observe: async () => {} },
   }))
     if (event.type === 'app_server.live_turn_completed')
       setImmediate(() => {

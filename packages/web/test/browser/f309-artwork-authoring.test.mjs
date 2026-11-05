@@ -5,12 +5,13 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
 import { startReviewHost } from './fixtures/f309-artifact-review-host.mjs';
 import { mediaFixture } from './fixtures/f309-artifact-review-media.mjs';
 import {
   openAnnotationSave,
   openReviewPanel,
+  seedRetainedImageAnnotation,
   selectMarkupTool,
   selectReviewMode,
 } from './fixtures/f309-artwork-controls.mjs';
@@ -194,8 +195,9 @@ test(
     await selectReviewMode(page, 'comment');
     const point = await at(page, 0.6, 0.4);
     await page.mouse.click(point.x, point.y);
-    await page.getByLabel('评论内容').fill('灯光只调整这一处 sentinel-point');
-    await (await openAnnotationSave(page)).click();
+    await page.getByTestId('review-pending-chat-mark').waitFor();
+    await page.getByLabel('消息输入框').fill('灯光只调整这一处 sentinel-point');
+    await seedRetainedImageAnnotation(page, host, reviewId, '灯光只调整这一处 sentinel-point');
     await openReviewPanel(page, 'comments');
     await page.getByTestId('review-comment').filter({ hasText: 'sentinel-point' }).waitFor();
     view = await read();
@@ -208,8 +210,13 @@ test(
     await page.evaluate(() => {
       document.body.style.zoom = '1';
     });
+    await page
+      .locator('[data-testid="context-attachment-list"] [data-context-kind="media"]')
+      .getByRole('button', { name: /移除上下文/ })
+      .click();
+    assert.equal(await page.getByLabel('消息输入框').inputValue(), '灯光只调整这一处 sentinel-point');
     await selectReviewMode(page, 'view');
-    await page.getByRole('button', { name: '圈选区域', exact: true }).click();
+    await selectReviewMode(page, 'comment');
     await drag(page, [0.7, 0.25], [0.85, 0.45]);
     view = await read();
     const region = {
@@ -228,7 +235,7 @@ test(
     await page.getByTestId('content-modification-panel').waitFor();
     assert.equal(await page.getByRole('button', { name: '请猫修改', exact: true }).count(), 0);
     assert.equal(await page.getByTestId('content-modification-submit').count(), 0);
-    await page.getByTestId('review-return-state').filter({ hasText: '已交还原任务队列' }).waitFor();
+    await page.getByTestId('review-return-state').filter({ hasText: '意见已交还负责的猫' }).waitFor();
     view = await read();
     assert.equal(view.review.rounds[0].annotations[1].imageEdit.kind, 'erase-region');
     assert.equal(view.review.rounds[0].annotations[1].author.actorId, 'operator');
@@ -258,7 +265,7 @@ test(
     await page.getByTestId('review-saved-mark').waitFor({ state: 'hidden' });
     await page.getByLabel('审阅版本').selectOption('1');
     await page.getByTestId('review-saved-mark').waitFor();
-    assert.equal(await page.getByRole('button', { name: '标注', exact: true }).isDisabled(), true);
+    assert.equal(await page.getByRole('button', { name: '画笔', exact: true }).isDisabled(), true);
     assert.deepEqual(errors, []);
   },
 );
@@ -280,7 +287,7 @@ test(
     assert.ok(box && box.x >= 0 && box.x + box.width <= 390);
     assert.equal(await page.getByLabel('请求图片比例', { exact: true }).count(), 0);
     assert.equal(await page.getByTestId('content-modification-submit').count(), 0);
-    await page.getByTestId('review-return-state').filter({ hasText: '已交还原任务队列' }).waitFor();
+    await page.getByTestId('review-return-state').filter({ hasText: '意见已交还负责的猫' }).waitFor();
     let view = await read();
     assert.deepEqual(view.review.rounds[0].asset, previous);
     assert.deepEqual(view.review.rounds[0].annotations[0].imageEdit, { kind: 'aspect-ratio', ratio: '9:16' });

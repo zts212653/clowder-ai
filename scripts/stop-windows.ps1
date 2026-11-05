@@ -25,10 +25,14 @@ $RunDir = if ($ProjectRoot) { Join-Path $ProjectRoot ".cat-cafe/run/windows" } e
 Write-Host "Clowder AI - Stopping services" -ForegroundColor Cyan
 Write-Host "============================="
 
+$deploymentJson = & (Get-Command node -ErrorAction Stop) (Join-Path $ProjectRoot "scripts/read-deployment-default.mjs") --json
+if ($LASTEXITCODE -ne 0) { throw "Could not read deployment defaults" }
+$deploymentDefaults = $deploymentJson | ConvertFrom-Json -ErrorAction Stop
+
 # Load .env for port config
 $envFile = Join-Path (Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)) ".env"
-$ApiPort = 3004
-$WebPort = 3003
+$ApiPort = $deploymentDefaults.apiPort
+$WebPort = $deploymentDefaults.webPort
 $RedisPort = 6399
 
 if (Test-Path $envFile) {

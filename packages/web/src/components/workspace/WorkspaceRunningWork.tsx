@@ -34,10 +34,12 @@ function ExecutionActions({ execution, onSelectExecution }: ExecutionActionsProp
 export function WorkspaceRunningWork({
   work,
   catName,
+  project,
   onSelectExecution,
 }: {
   work: RunningWork;
   catName: string;
+  project?: { path: string; label: string };
   onSelectExecution?: (execution: ActiveExecutionProjection) => void;
 }) {
   const single = work.executions.length === 1 ? work.executions[0] : undefined;
@@ -63,6 +65,15 @@ export function WorkspaceRunningWork({
         </span>
         <div className="min-w-0 flex-1">
           <div className="truncate text-xs font-semibold text-cafe-black">{catName}</div>
+          {project && (
+            <div
+              data-testid="workspace-running-project"
+              title={project.path}
+              className="mt-0.5 truncate text-micro text-cafe-muted"
+            >
+              {project.label}
+            </div>
+          )}
           <div className="mt-0.5 truncate text-micro text-cafe-secondary">{work.threadTitle ?? work.threadId}</div>
           <div className="mt-0.5 text-micro text-cafe-muted">
             {status}

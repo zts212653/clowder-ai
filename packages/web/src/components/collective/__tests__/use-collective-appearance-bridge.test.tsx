@@ -54,7 +54,10 @@ describe('useCollectiveAppearanceBridge', () => {
   const render = (frameGeneration?: ObservedFrameGeneration) =>
     act(async () => root.render(<Harness iframe={iframe} frameGeneration={frameGeneration} />));
   const settle = () => act(async () => new Promise<void>((done) => setTimeout(done, 0)));
-  const messages = () => post.mock.calls.map(([message]) => collectiveHostAppearanceSchema.parse(message));
+  const messages = () =>
+    post.mock.calls
+      .filter(([message]) => message.type === 'collective:host-appearance')
+      .map(([message]) => collectiveHostAppearanceSchema.parse(message));
 
   beforeEach(() => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -92,8 +95,9 @@ describe('useCollectiveAppearanceBridge', () => {
   it('says the look once to that frame and that Service origin when the generation exists', async () => {
     await render(generation('bridge_aaaaaaaa'));
 
-    expect(post).toHaveBeenCalledTimes(1);
-    expect(post.mock.calls[0][1]).toBe(ORIGIN);
+    expect(messages()).toHaveLength(1);
+    expect(post.mock.calls.every(([, origin]) => origin === ORIGIN)).toBe(true);
+    expect(post.mock.calls.filter(([message]) => message.type === 'collective:host-shell-appearance')).toHaveLength(1);
     expect(messages()[0]).toMatchObject({
       bridgeId: 'bridge_aaaaaaaa',
       appearanceRevision: 1,
@@ -141,7 +145,7 @@ describe('useCollectiveAppearanceBridge', () => {
     document.documentElement.setAttribute('class', 'something-else');
     await settle();
 
-    expect(post).toHaveBeenCalledTimes(1);
+    expect(messages()).toHaveLength(1);
   });
 
   it('follows the interface version without a reload', async () => {
@@ -189,6 +193,6 @@ describe('useCollectiveAppearanceBridge', () => {
     document.documentElement.setAttribute('data-theme', 'dark');
     await settle();
 
-    expect(post).toHaveBeenCalledTimes(1);
+    expect(messages()).toHaveLength(1);
   });
 });

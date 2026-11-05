@@ -42,14 +42,14 @@ describe('RedisInvocationRecordStore', { skip: redisIsolationSkipReason(REDIS_UR
 
   after(async () => {
     if (redis && connected) {
-      await cleanupPrefixedRedisKeys(redis, ['invoc:*', 'invoc-terminal:*', 'idemp:*']);
+      await cleanupPrefixedRedisKeys(redis, ['invoc:*', 'invoc-index:*', 'invoc-terminal:*', 'idemp:*']);
       await redis.quit();
     }
   });
 
   beforeEach(async (t) => {
     if (!connected) return t.skip('Redis not connected');
-    await cleanupPrefixedRedisKeys(redis, ['invoc:*', 'invoc-terminal:*', 'idemp:*']);
+    await cleanupPrefixedRedisKeys(redis, ['invoc:*', 'invoc-index:*', 'invoc-terminal:*', 'idemp:*']);
   });
 
   it('rejects an unclassified action-lease carrier before writing Redis state', async () => {
@@ -1757,7 +1757,7 @@ describe('RedisInvocationRecordStore', { skip: redisIsolationSkipReason(REDIS_UR
       ['missing threadId', { threadId: undefined }],
     ];
     for (const [label, patch] of corruptShapes) {
-      await cleanupPrefixedRedisKeys(redis, ['invoc:*', 'idemp:*']);
+      await cleanupPrefixedRedisKeys(redis, ['invoc:*', 'invoc-index:*', 'idemp:*']);
       const corruptId = 'r12-bf-corrupt';
       const goodId = 'r12-bf-good';
       const hash = (id, overrides) => {
@@ -1802,7 +1802,7 @@ describe('RedisInvocationRecordStore', { skip: redisIsolationSkipReason(REDIS_UR
 
     // scanAll 喂 zombie recovery 与 duty briefing 的 liveness 判断（filter running）。
     // 静默 skip 损坏记录 = zombie 永不恢复。上层各有 catch/degraded 语义，抛出是安全的。
-    await cleanupPrefixedRedisKeys(redis, ['invoc:*', 'idemp:*']);
+    await cleanupPrefixedRedisKeys(redis, ['invoc:*', 'invoc-index:*', 'idemp:*']);
     const rec = await store.create({
       threadId: 'thread-sa',
       userId: 'sa-user',

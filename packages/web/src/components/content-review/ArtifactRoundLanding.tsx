@@ -1,6 +1,7 @@
 'use client';
 import type { ArtifactReviewAnnotation, ArtifactReviewRound, ArtifactReviewView } from '@cat-cafe/shared';
 import { type ReactNode, useCallback, useRef, useState } from 'react';
+import { useShellCopy } from '@/components/shell/shell-copy';
 import { useShellPresentation } from '@/components/shell/shell-presentation';
 import { ContentReviewSurface } from '@/components/workbench/content-review/ContentReviewSurface';
 import type { ContentReviewController } from '@/components/workbench/content-review/content-review-contract';
@@ -9,11 +10,13 @@ import type { WorkspaceFileNavigationOrigin } from '@/stores/chat-types';
 import { ArtifactModificationEntry } from './ArtifactModificationEntry';
 import { artifactRoundChatTarget } from './artifact-modification-source';
 import { artifactLandingCapabilities, artifactReviewProjection } from './artifact-review-adapter';
+import { artworkActionsCopy } from './artwork-actions.shell-copy';
 import { artworkTitle } from './artwork-title';
 import { ArtifactMediaCompare } from './media-compare/ArtifactMediaCompare';
 import { reviewAuthorityMessages } from './media-compare/review-authority-messages';
 import { ReviewComments } from './ReviewComments';
 import { ReviewDiscussionPanel } from './ReviewDiscussionPanel';
+import { ReviewResponseJudgments } from './ReviewResponseJudgments';
 import { ReviewRoundDecision } from './ReviewRoundDecision';
 import { ReviewVersionDetails } from './ReviewVersionDetails';
 import { useArtifactChatDiscussion } from './useArtifactChatDiscussion';
@@ -21,6 +24,7 @@ import type { useArtifactReview } from './useArtifactReview';
 import { useArtifactRoundComparison } from './useArtifactRoundComparison';
 import { useReviewDraft } from './useReviewDraft';
 import { useReviewMediaSource } from './useReviewMediaSource';
+import { WorkSubmissionRecovery } from './WorkSubmissionRecovery';
 
 export type ArtifactRoundProps = {
   view: ArtifactReviewView;
@@ -57,11 +61,17 @@ export function ArtifactRoundLanding({
 }: ArtifactRoundProps & { linked?: ReturnType<typeof useWorkspaceContentReview> }) {
   const draft = useReviewDraft(`${prefix}round:${round.number}:annotation`);
   const isV2 = useShellPresentation() === 'v2';
+  const artworkCopy = useShellCopy(artworkActionsCopy);
   const workTitle = isV2
-    ? artworkTitle(title ?? view.review.title, round.asset.mediaType === 'image/png' ? '图片' : '作品')
+    ? artworkTitle(title ?? view.review.title, round.asset.media.kind === 'image' ? '图片' : '作品')
     : view.review.title;
   const discussion = useArtifactChatDiscussion(view, round, workTitle);
-  const source = useReviewMediaSource(view.review.reviewId, round.number, controller.revokeAccess);
+  const source = useReviewMediaSource(
+    view.review.reviewId,
+    round.number,
+    controller.revokeAccess,
+    round.asset.mediaType,
+  );
   const [active, setActive] = useState<string | null>(null);
   const [panel, setPanel] = useState<'decision' | 'details' | null>(null);
   const originalSurface = useRef<HTMLDivElement>(null);
@@ -167,7 +177,7 @@ export function ArtifactRoundLanding({
           capabilities={capabilities}
           versionControl={
             <>
-              {view.review.rounds.some((item) => item.number < round.number) ? (
+              {!isV2 && view.review.rounds.some((item) => item.number < round.number) ? (
                 <button
                   type="button"
                   aria-label="对比版本"
@@ -178,16 +188,27 @@ export function ArtifactRoundLanding({
                 </button>
               ) : null}
               <select
-                aria-label="审阅版本"
+                aria-label={isV2 ? artworkCopy.versionLabel : '审阅版本'}
                 value={round.number}
-                onChange={(event) => onVersion(Number(event.target.value))}
+                onChange={(event) => {
+                  if (event.target.value === 'details') setPanel(panel === 'details' ? null : 'details');
+                  else if (event.target.value === 'compare') comparison.open();
+                  else onVersion(Number(event.target.value));
+                }}
                 className="max-w-28 rounded bg-transparent text-xs"
               >
                 {view.review.rounds.map((item) => (
                   <option key={item.number} value={item.number}>
-                    第 {item.number} 版{item.number === view.review.rounds.at(-1)?.number ? ' · 当前' : ' · 历史'}
+                    {artworkCopy.versionNumber(item.number)} ·{' '}
+                    {item.number === view.review.rounds.at(-1)?.number
+                      ? artworkCopy.current
+                      : artworkCopy.historyVersion}
                   </option>
                 ))}
+                {isV2 && view.review.rounds.some((item) => item.number < round.number) ? (
+                  <option value="compare">{artworkCopy.compare}</option>
+                ) : null}
+                {isV2 ? <option value="details">{artworkCopy.details}</option> : null}
               </select>
               {!isV2 ? (
                 <button
@@ -199,14 +220,16 @@ export function ArtifactRoundLanding({
                   审阅
                 </button>
               ) : null}
-              <button
-                type="button"
-                aria-label="审阅详情"
-                onClick={() => setPanel(panel === 'details' ? null : 'details')}
-                className="shrink-0 text-xs text-cafe-muted"
-              >
-                详情
-              </button>
+              {!isV2 ? (
+                <button
+                  type="button"
+                  aria-label="审阅详情"
+                  onClick={() => setPanel(panel === 'details' ? null : 'details')}
+                  className="shrink-0 text-xs text-cafe-muted"
+                >
+                  详情
+                </button>
+              ) : null}
               {!isV2 ? (
                 <button
                   type="button"
@@ -220,7 +243,10 @@ export function ArtifactRoundLanding({
             </>
           }
           workflow={{
-            mediaSource: source,
+            mediaSource: {
+              ...source,
+              downloadSrc: `/api/artifact-reviews/${encodeURIComponent(view.review.reviewId)}/media/${round.number}`,
+            },
             canvasDraftKey: linked ? undefined : `${prefix}round:${round.number}:markup`,
             annotationMaxLength: 8000,
             // 「引用到聊天」 names the same round (or ledger) and Task a modification request does.
@@ -231,7 +257,7 @@ export function ArtifactRoundLanding({
                 round={round}
                 draft={selectedDraft}
                 disabled={!projection.canWrite || !canWrite}
-                allowNewRequest={round.asset.mediaType !== 'image/png'}
+                allowNewRequest={!isV2 && round.asset.media.kind !== 'image'}
                 onRegionHandedOff={() => effective.setTarget(null)}
               />
             ),
@@ -242,6 +268,13 @@ export function ArtifactRoundLanding({
                   <p role="status">{reviewAuthorityMessages[view.authority.state]}</p>
                 ) : null}
                 {view.pendingVersion ? <p role="status">新版正在保存和恢复，旧版讨论仍然完整保留。</p> : null}
+                {view.pendingSubmission ? (
+                  <WorkSubmissionRecovery
+                    key={view.pendingSubmission.operationId}
+                    view={view}
+                    onRecovered={controller.refresh}
+                  />
+                ) : null}
                 {history ? (
                   <p>
                     第 {round.number} 版 ·{' '}
@@ -306,14 +339,30 @@ export function ArtifactRoundLanding({
               ) : panel === 'details' ? (
                 <ReviewVersionDetails
                   contextControl={isV2 ? contextControl : undefined}
-                  round={round}
+                  responseControl={
+                    round.responses.length ? (
+                      <ReviewResponseJudgments
+                        review={view.review}
+                        round={round}
+                        canJudge={
+                          !controller.saving &&
+                          !controller.pending &&
+                          !view.pendingVersion &&
+                          (view.authority.state === 'current' || view.authority.state === 'asset_changed')
+                        }
+                        onJudge={async (action, number) => {
+                          const saved = await controller.act(action, number);
+                          if (saved) await linked?.refreshSource();
+                          return saved;
+                        }}
+                        onSource={onVersion}
+                      />
+                    ) : null
+                  }
                   reviewId={view.review.reviewId}
                   revision={view.review.revision}
                   ownerUserId={view.review.task.ownerUserId}
                   onClose={() => setPanel(null)}
-                  onPreviousRound={() => {
-                    onVersion(round.number - 1);
-                  }}
                 />
               ) : null,
           }}

@@ -1,15 +1,24 @@
 'use client';
 
-import type { LifecycleActiveRun } from '@cat-cafe/shared';
+import type { LifecycleActiveRun, ResolvedMessageSelectionItem } from '@cat-cafe/shared';
 import { useEffect, useMemo, useState } from 'react';
 import { useCatData } from '@/hooks/useCatData';
 import { useChatHistory } from '@/hooks/useChatHistory';
 import { useThreadLiveness, useThreadMessages } from '@/hooks/useThreadScopedSelectors';
 import { computeCliDiagnosticsDedup } from '@/utils/cli-diagnostics-dedup';
 import { ChatMessage } from '../ChatMessage';
+import { projectMessagePartsForImage } from '../message-export-parts';
 import { loadExportThreadTitle, selectMessagesForExport } from '../message-export-selection';
 
-export function ThreadChatExport({ threadId, messageIds }: { threadId: string; messageIds: string[] }) {
+export function ThreadChatExport({
+  threadId,
+  messageIds,
+  selectionItems,
+}: {
+  threadId: string;
+  messageIds: string[];
+  selectionItems?: readonly ResolvedMessageSelectionItem[];
+}) {
   const messages = useThreadMessages(threadId);
   const { isLoadingHistory } = useChatHistory(threadId);
   const { catInvocations } = useThreadLiveness(threadId);
@@ -57,7 +66,7 @@ export function ThreadChatExport({ threadId, messageIds }: { threadId: string; m
           return (
             <ChatMessage
               key={message.id}
-              message={message}
+              message={selectionItems ? projectMessagePartsForImage(message, selectionItems) : message}
               threadId={threadId}
               timelineMessages={messages}
               activeRuns={lifecycleActiveRuns}

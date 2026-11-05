@@ -38,7 +38,7 @@ export function eventWaitWake(waitContinuationCarrier, { holderCatId, subjectKey
 }
 
 /** The event_wait wake that a real wait outcome with this reason produces. */
-export function realWaitOutcome(reason, subjectRef = 'pr:zts212653/cat-cafe#3300') {
+export function realWaitOutcome(reason, subjectRef = 'pr:zts212653/clowder-ai#3300') {
   const result = transitionWaitState({ await: activeAwait(subjectRef) }, TRANSITIONS[reason]);
   assert.equal(result.applied, true, `${reason} must be a real applied transition`);
   return result.state.waitOutcome;

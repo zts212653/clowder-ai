@@ -1,12 +1,12 @@
-import type { SignalSchemaCatalog } from '@clowder-ai/plugin-contract';
-import { DEFAULT_PLUGIN_CONTRACT_RUNTIME, requestedCapabilitiesForManifest } from './contract-policy.js';
+import { agentClientMetadataSchema } from './agent-client-metadata.js';
+import { DEFAULT_PLUGIN_CONTRACT_RUNTIME, isManifestContractSupported } from './contract-policy.js';
 import type { PackageAdmissionContractRuntime } from './manifest-verifier.js';
+import { storedManifest } from './stored-manifest.js';
 import type {
   ActivationState,
   ConfigReadiness,
   InstanceLifecycleState,
   PackageState,
-  PluginGrantRecord,
   PluginInstanceRecord,
   PluginInventorySnapshot,
   PluginPackageRecord,
@@ -30,6 +30,7 @@ const RUNTIME_ERROR_CODES = new Set<PluginRuntimeErrorCode>([
   'UNAVAILABLE',
   'UPDATE_RESUME_FAILED',
   'UPDATE_ROLLBACK_RESUME_FAILED',
+  'CONFIGURATION_RESUME_FAILED',
   'CATCH_UP_RESUME_FAILED',
   'UNEXPECTED_RUNTIME_FAILURE',
 ]);
@@ -86,18 +87,11 @@ function enumValue<T extends string>(value: unknown, values: ReadonlySet<T>, lab
   return value as T;
 }
 
-function stringArray(value: unknown, label: string): string[] {
-  if (!Array.isArray(value) || !value.every((item) => typeof item === 'string')) {
-    corrupt(`${label} must be a string array`);
-  }
-  return [...value];
-}
-
 function equalStrings(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
-function signalSchemaCatalog(value: unknown, label: string): SignalSchemaCatalog {
+function signalSchemaCatalog(value: unknown, label: string): PluginPackageRecord['signalSchemas'] {
   const raw = object(value, label);
   return Object.fromEntries(
     Object.entries(raw).map(([key, schema]) => [key, structuredClone(object(schema, `${label}.${key}`))]),
@@ -108,7 +102,12 @@ function packageProvenance(value: unknown, label: string): PluginPackageRecord['
   const raw = object(value, label);
   const kind = enumValue(
     raw.kind,
-    new Set<'catalog' | 'local-directory' | 'local-archive'>(['catalog', 'local-directory', 'local-archive']),
+    new Set<'catalog' | 'local-directory' | 'local-archive' | 'git'>([
+      'catalog',
+      'local-directory',
+      'local-archive',
+      'git',
+    ]),
     `${label}.kind`,
   );
   if (kind === 'catalog') {
@@ -121,9 +120,34 @@ function packageProvenance(value: unknown, label: string): PluginPackageRecord['
         : { ownerAuthRequired: boolean(raw.ownerAuthRequired, `${label}.ownerAuthRequired`) }),
     };
   }
+  if (kind === 'git') {
+    return {
+      kind,
+      url: string(raw.url, `${label}.url`),
+      ...(raw.packageName === undefined ? {} : { packageName: string(raw.packageName, `${label}.packageName`) }),
+      ...(raw.dependencyClosure === undefined
+        ? {}
+        : {
+            dependencyClosure: enumValue(
+              raw.dependencyClosure,
+              new Set(['shipped', 'materialized'] as const),
+              `${label}.dependencyClosure`,
+            ),
+          }),
+    };
+  }
   return {
     kind,
     ...(raw.packageName === undefined ? {} : { packageName: string(raw.packageName, `${label}.packageName`) }),
+    ...(raw.dependencyClosure === undefined
+      ? {}
+      : {
+          dependencyClosure: enumValue(
+            raw.dependencyClosure,
+            new Set(['shipped', 'materialized'] as const),
+            `${label}.dependencyClosure`,
+          ),
+        }),
   };
 }
 
@@ -164,17 +188,30 @@ export function isCanonicalPackageDigest(value: string): boolean {
   return bytes.length === 64 && bytes.toString('base64') === encoded;
 }
 
-function parsePackage(value: unknown, index: number, contract: PackageAdmissionContractRuntime): PluginPackageRecord {
+export function parsePackage(
+  value: unknown,
+  index: number,
+  contract: PackageAdmissionContractRuntime,
+): PluginPackageRecord {
   const raw = object(value, `packages[${index}]`);
-  const validation = contract.validateManifest(raw.manifest);
-  if (!validation.valid) corrupt(`packages[${index}].manifest is invalid`);
+  const persistedManifest = raw.manifest === null ? raw.incompatibleManifest : raw.manifest;
+  const stored = storedManifest(persistedManifest, `packages[${index}].manifest`);
+  const validation = contract.validateManifest(persistedManifest);
+  const compatible =
+    validation.valid && isManifestContractSupported(stored.contractVersion, contract.manifestContractRange);
+  const clientMetadata =
+    raw.agentClientMetadata === undefined ? undefined : agentClientMetadataSchema.safeParse(raw.agentClientMetadata);
+  if (clientMetadata && !clientMetadata.success) corrupt(`packages[${index}].agentClientMetadata is invalid`);
   const record: PluginPackageRecord = {
     packageDigest: string(raw.packageDigest, `packages[${index}].packageDigest`),
     pluginId: string(raw.pluginId, `packages[${index}].pluginId`),
     version: string(raw.version, `packages[${index}].version`),
     contractVersion: string(raw.contractVersion, `packages[${index}].contractVersion`),
-    manifest: structuredClone(validation.manifest),
+    manifest:
+      compatible && validation.valid ? (structuredClone(persistedManifest) as PluginPackageRecord['manifest']) : null,
+    ...(!compatible ? { incompatibleManifest: stored } : {}),
     signalSchemas: signalSchemaCatalog(raw.signalSchemas ?? {}, `packages[${index}].signalSchemas`),
+    ...(clientMetadata?.success ? { agentClientMetadata: clientMetadata.data } : {}),
     ...(raw.provenance === undefined
       ? {}
       : { provenance: packageProvenance(raw.provenance, `packages[${index}].provenance`) }),
@@ -184,16 +221,13 @@ function parsePackage(value: unknown, index: number, contract: PackageAdmissionC
   };
   if (!isCanonicalPackageDigest(record.packageDigest)) corrupt(`packages[${index}].packageDigest is not canonical`);
   if (
-    record.pluginId !== record.manifest.pluginId ||
-    record.version !== record.manifest.version ||
-    record.contractVersion !== record.manifest.contractVersion
+    record.pluginId !== stored.pluginId ||
+    record.version !== stored.version ||
+    record.contractVersion !== stored.contractVersion
   ) {
     corrupt(`packages[${index}] identity does not match its manifest`);
   }
-  if (!contract.manifestContractVersions.includes(record.contractVersion)) {
-    corrupt(`packages[${index}] contract version is not supported by this Host`);
-  }
-  for (const declaration of record.manifest.signals?.provides ?? []) {
+  for (const declaration of record.manifest?.signals?.provides ?? []) {
     if (!Object.hasOwn(record.signalSchemas, declaration.schemaRef)) {
       corrupt(`packages[${index}] is missing declared signal schema ${declaration.schemaRef}`);
     }
@@ -201,7 +235,7 @@ function parsePackage(value: unknown, index: number, contract: PackageAdmissionC
   return record;
 }
 
-function parseInstance(value: unknown, index: number): PluginInstanceRecord {
+export function parseInstance(value: unknown, index: number): PluginInstanceRecord {
   const raw = object(value, `instances[${index}]`);
   const record: PluginInstanceRecord = {
     pluginInstanceId: string(raw.pluginInstanceId, `instances[${index}].pluginInstanceId`),
@@ -227,31 +261,8 @@ function parseInstance(value: unknown, index: number): PluginInstanceRecord {
   return record;
 }
 
-function parseGrant(value: unknown, index: number, contract: PackageAdmissionContractRuntime): PluginGrantRecord {
-  const raw = object(value, `grants[${index}]`);
-  const requestedCapabilities = stringArray(raw.requestedCapabilities, `grants[${index}].requestedCapabilities`);
-  const effectiveGrants = stringArray(raw.effectiveGrants, `grants[${index}].effectiveGrants`);
-  const grantRevision = raw.grantRevision;
-  if (!contract.validateEffectiveGrants(requestedCapabilities) || !contract.validateEffectiveGrants(effectiveGrants)) {
-    corrupt(`grants[${index}] contains invalid or duplicate capabilities`);
-  }
-  if (effectiveGrants.some((capability) => !requestedCapabilities.includes(capability))) {
-    corrupt(`grants[${index}] effective grants exceed requested capabilities`);
-  }
-  if (typeof grantRevision !== 'number' || !Number.isSafeInteger(grantRevision) || grantRevision < 1) {
-    corrupt(`grants[${index}].grantRevision must be a positive safe integer`);
-  }
-  return {
-    pluginInstanceId: string(raw.pluginInstanceId, `grants[${index}].pluginInstanceId`),
-    requestedCapabilities,
-    effectiveGrants,
-    grantRevision,
-    updatedAt: timestamp(raw.updatedAt, `grants[${index}].updatedAt`),
-  } as PluginGrantRecord;
-}
-
 export function emptyPluginInventorySnapshot(): PluginInventorySnapshot {
-  return { schemaVersion: 1, packages: [], instances: [], grants: [] };
+  return { schemaVersion: 1, packages: [], instances: [] };
 }
 
 export function clonePluginInventorySnapshot(snapshot: PluginInventorySnapshot): PluginInventorySnapshot {
@@ -261,7 +272,6 @@ export function clonePluginInventorySnapshot(snapshot: PluginInventorySnapshot):
 function requireSupportedCollections(raw: Record<string, unknown>): asserts raw is Record<string, unknown> & {
   packages: unknown[];
   instances: unknown[];
-  grants: unknown[];
 } {
   if (raw.schemaVersion !== 1) {
     if (typeof raw.schemaVersion === 'number') {
@@ -269,7 +279,7 @@ function requireSupportedCollections(raw: Record<string, unknown>): asserts raw 
     }
     corrupt('inventory.schemaVersion must be 1');
   }
-  if (!Array.isArray(raw.packages) || !Array.isArray(raw.instances) || !Array.isArray(raw.grants)) {
+  if (!Array.isArray(raw.packages) || !Array.isArray(raw.instances)) {
     corrupt('inventory collections must be arrays');
   }
 }
@@ -317,35 +327,6 @@ function indexInstances(
   return instanceById;
 }
 
-function validateGrantReferences(
-  grants: PluginGrantRecord[],
-  instances: PluginInstanceRecord[],
-  instanceById: ReadonlyMap<string, PluginInstanceRecord>,
-  packageByDigest: ReadonlyMap<string, PluginPackageRecord>,
-): void {
-  const grantByInstance = new Set<string>();
-  for (const record of grants) {
-    const instance = instanceById.get(record.pluginInstanceId);
-    if (!instance) corrupt(`grant ${record.pluginInstanceId} has no instance`);
-    if (grantByInstance.has(record.pluginInstanceId)) corrupt(`duplicate grant record ${record.pluginInstanceId}`);
-    const packageRecord = packageByDigest.get(instance.packageDigest);
-    if (!packageRecord) corrupt(`grant ${record.pluginInstanceId} has no package`);
-    const requestedCapabilities = requestedCapabilitiesForManifest(packageRecord.manifest);
-    if (!equalStrings(record.requestedCapabilities, requestedCapabilities)) {
-      corrupt(`grant ${record.pluginInstanceId} requests do not match its package manifest`);
-    }
-    if (record.effectiveGrants.some((capability) => !requestedCapabilities.includes(capability))) {
-      corrupt(`grant ${record.pluginInstanceId} exceeds its package manifest requests`);
-    }
-    grantByInstance.add(record.pluginInstanceId);
-  }
-  for (const instance of instances) {
-    if (!grantByInstance.has(instance.pluginInstanceId)) {
-      corrupt(`instance ${instance.pluginInstanceId} has no grant record`);
-    }
-  }
-}
-
 export function parsePluginInventorySnapshot(
   value: unknown,
   contract: PackageAdmissionContractRuntime = DEFAULT_PLUGIN_CONTRACT_RUNTIME,
@@ -353,10 +334,8 @@ export function parsePluginInventorySnapshot(
   const raw = object(value, 'inventory');
   requireSupportedCollections(raw);
   const packages = raw.packages.map((entry, index) => parsePackage(entry, index, contract));
-  const instances = raw.instances.map(parseInstance);
-  const grants = raw.grants.map((entry, index) => parseGrant(entry, index, contract));
   const packageByDigest = indexPackages(packages);
-  const instanceById = indexInstances(instances, packageByDigest);
-  validateGrantReferences(grants, instances, instanceById, packageByDigest);
-  return { schemaVersion: 1, packages, instances, grants };
+  const instances = raw.instances.map((entry, index) => parseInstance(entry, index));
+  indexInstances(instances, packageByDigest);
+  return { schemaVersion: 1, packages, instances };
 }

@@ -14,6 +14,7 @@ const errors: Record<string, string> = {
   not_available: '这条记忆已不可用，请重读列表。',
   invalid_action: '无法确认操作权限，请重新打开页面。',
   invalid_request: '填写内容不符合要求，请检查后重读。',
+  invalid_content: '关于你需要有内容，正文不能超过 300 字。',
 };
 function appliedReceipt(body: unknown, memoryId: string, action: string): body is MemoryOwnerActionReceipt {
   if (

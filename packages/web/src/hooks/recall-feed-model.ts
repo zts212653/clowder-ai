@@ -2,7 +2,7 @@ import type { ChatMessage } from '@/stores/chat-types';
 import { recallResultTitle, recallTypeLabel } from './recall-display';
 import type { RecallEvent } from './recall-types';
 
-export type RecallKind = 'search' | 'graph' | 'delivery';
+export type RecallKind = 'search' | 'graph' | 'delivery' | 'read';
 export interface RecallGroup {
   id: string;
   catId?: string;
@@ -11,7 +11,14 @@ export interface RecallGroup {
   timestamp?: number;
   events: RecallEvent[];
 }
+/** Incoming posts carry their producer's stream coordinates, not a local reply's. */
+export function recallReplyInvocationId(message: ChatMessage): string | undefined {
+  if (message.type !== 'assistant' || !message.catId || message.extra?.crossPost) return undefined;
+  if (message.lifecycle) return message.lifecycle.kind === 'response' ? message.lifecycle.invocationId : undefined;
+  return message.extra?.stream?.turnInvocationId ?? message.extra?.stream?.invocationId;
+}
 export function recallKind(event: RecallEvent): RecallKind {
+  if (event.cueStatus && event.source === 'pull') return 'read';
   return event.source === 'push' || event.cueStatus
     ? 'delivery'
     : event.toolName === 'graph_resolve'
@@ -33,6 +40,7 @@ export function recallEventDisplayTitle(event: RecallEvent): string {
   );
 }
 export function recallEventResultLabel(event: RecallEvent): string {
+  if (event.cueStatus === 'drilled' && event.source === 'pull') return '已读取';
   if (event.cueStatus) {
     return {
       presented_unreported: '已递送·未回报',
@@ -105,14 +113,11 @@ export function deduplicateRecallEvents(live: RecallEvent[], history: RecallEven
   return [...merged, ...history.filter((event) => !used.has(event))].sort((a, b) => a.timestamp - b.timestamp);
 }
 export function findRecallReply(event: RecallEvent, messages: readonly ChatMessage[]): ChatMessage | undefined {
-  if (event.messageId) return messages.find((message) => message.id === event.messageId);
+  const replies = messages.filter((message) => recallReplyInvocationId(message));
+  if (event.messageId) return replies.find((message) => message.id === event.messageId);
   if (!event.catId || !event.invocationId) return undefined;
-  const exact = messages.filter(
-    (message) =>
-      message.catId === event.catId &&
-      (message.lifecycle?.kind === 'response'
-        ? message.lifecycle.invocationId
-        : (message.extra?.stream?.turnInvocationId ?? message.extra?.stream?.invocationId)) === event.invocationId,
+  const exact = replies.filter(
+    (message) => message.catId === event.catId && recallReplyInvocationId(message) === event.invocationId,
   );
   if (exact.length === 1) return exact[0];
   return undefined;
@@ -121,11 +126,7 @@ export function groupRecallEvents(events: RecallEvent[], messages: readonly Chat
   const groups = new Map<string, RecallGroup>();
   for (const event of events) {
     const reply = findRecallReply(event, messages);
-    const invocationId = reply
-      ? ((reply.lifecycle?.kind === 'response'
-          ? reply.lifecycle.invocationId
-          : (reply.extra?.stream?.turnInvocationId ?? reply.extra?.stream?.invocationId)) ?? event.invocationId)
-      : event.invocationId;
+    const invocationId = (reply && recallReplyInvocationId(reply)) ?? event.invocationId;
     const id = invocationId ? JSON.stringify([event.catId, invocationId]) : `message:${event.messageId ?? event.id}`;
     let group = groups.get(id);
     if (!group) {
@@ -152,6 +153,7 @@ export function recallCounts(events: RecallEvent[]): string {
     counts.search && `检索 ${counts.search}`,
     counts.graph && `关系查询 ${counts.graph}`,
     counts.delivery && `递送 ${counts.delivery}`,
+    counts.read && `读取 ${counts.read}`,
   ]
     .filter(Boolean)
     .join(' · ');
@@ -162,11 +164,13 @@ export function countRecallEvents(events: RecallEvent[]): {
   search: number;
   graph: number;
   delivery: number;
+  read?: number;
   total: number;
 } {
   const kinds = events.map(recallKind);
   const search = kinds.filter((kind) => kind === 'search').length;
   const graph = kinds.filter((kind) => kind === 'graph').length;
   const delivery = kinds.filter((kind) => kind === 'delivery').length;
-  return { search, graph, delivery, total: search + graph + delivery };
+  const read = kinds.filter((kind) => kind === 'read').length;
+  return { search, graph, delivery, ...(read ? { read } : {}), total: search + graph + delivery + read };
 }

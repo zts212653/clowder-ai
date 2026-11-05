@@ -1,0 +1,298 @@
+.project-list-owner-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--cafe-text-muted);
+  font-size: 11px;
+}
+
+.project-list-display-settings {
+  position: relative;
+}
+
+.project-list-display-settings > summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.project-list-display-settings > label {
+  position: absolute;
+  z-index: 6;
+  top: calc(100% + 5px);
+  right: 0;
+  display: flex;
+  min-width: 180px;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--console-border-soft);
+  border-radius: 9px;
+  background: var(--console-card-bg);
+  box-shadow: var(--shadow-elevation-2);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.project-list-columns,
+.project-list-row {
+  display: grid;
+  grid-template-columns:
+    minmax(210px, 1.35fr) minmax(185px, 1.05fr) minmax(115px, 0.65fr) minmax(175px, 1fr)
+    minmax(145px, 0.8fr);
+  gap: 16px;
+  align-items: center;
+}
+
+.project-list-columns {
+  padding: 8px 12px;
+  color: var(--cafe-text-muted);
+  font-size: 10px;
+}
+
+.project-list-row {
+  width: 100%;
+  border-top: 1px solid var(--console-border-soft);
+  background: transparent;
+  color: var(--cafe-text-primary);
+}
+
+.project-list-open {
+  display: grid;
+  grid-column: 1 / span 4;
+  grid-template-columns: minmax(210px, 1.35fr) minmax(185px, 1.05fr) minmax(115px, 0.65fr) minmax(175px, 1fr);
+  gap: 16px;
+  align-items: center;
+  min-width: 0;
+  padding: 14px 0 14px 12px;
+  border: 0;
+  background: transparent;
+  color: var(--cafe-text-primary);
+  text-align: left;
+}
+
+.project-list-open:hover,
+.project-list-open:focus-visible,
+.project-list-artifact:hover,
+.project-list-artifact:focus-visible {
+  background: var(--console-card-soft-bg);
+  outline: 2px solid var(--cafe-accent);
+  outline-offset: -2px;
+}
+
+.project-list-row strong,
+.project-list-row small {
+  display: block;
+}
+
+.project-list-row small {
+  margin-top: 3px;
+  color: var(--cafe-text-muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.project-list-identity > strong {
+  font-size: 14px;
+}
+
+.project-list-people {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.project-progress-segments {
+  display: flex;
+  height: 5px;
+  gap: 2px;
+  margin-bottom: 7px;
+}
+
+.project-progress-segments i {
+  min-width: 8px;
+  flex: 1;
+  border-radius: 999px;
+  background: var(--console-border-soft);
+}
+
+.project-progress-segments i[data-project-progress="in_progress"] {
+  background: var(--semantic-info);
+}
+
+.project-progress-segments i[data-project-progress="result_ready"] {
+  background: var(--semantic-warning);
+}
+
+.project-progress-segments i[data-project-progress="completed"] {
+  background: var(--semantic-success);
+}
+
+.project-list-next[data-critical="true"] strong {
+  color: var(--semantic-critical);
+}
+
+.project-list-artifact-cell {
+  min-width: 0;
+  padding: 10px 12px 10px 0;
+}
+
+.project-list-artifact {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid var(--console-border-soft);
+  border-radius: 8px;
+  background: var(--console-card-bg);
+  color: var(--cafe-text-primary);
+  text-align: left;
+}
+
+.project-list-artifact strong,
+.project-list-artifact small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-list-artifact-empty {
+  margin: 0;
+  color: var(--cafe-text-muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.project-list-completed {
+  margin-top: 12px;
+  border-top: 1px solid var(--console-border-soft);
+}
+
+.project-list-completed > summary {
+  padding: 12px;
+  color: var(--semantic-success);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.project-artifacts {
+  margin: 18px auto 0;
+  padding: 18px;
+  border: 1px solid var(--console-border-soft);
+  border-radius: 12px;
+  background: var(--console-card-bg);
+}
+
+.project-artifacts > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--console-border-soft);
+}
+
+.project-artifacts > header div,
+.project-artifact-card > span:nth-child(2) {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.project-artifacts > header span,
+.project-artifacts > header small,
+.project-artifact-card small {
+  color: var(--cafe-text-muted);
+  font-size: 10px;
+}
+
+.project-artifact-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding-top: 12px;
+}
+
+.project-artifact-card {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--console-border-soft);
+  border-radius: 10px;
+  background: var(--console-card-bg);
+  color: var(--cafe-text-primary);
+  text-align: left;
+}
+
+.project-artifact-card:hover,
+.project-artifact-card:focus-visible {
+  border-color: var(--cafe-accent);
+  outline: 2px solid var(--cafe-accent);
+  outline-offset: 1px;
+}
+
+.project-artifact-card strong,
+.project-artifact-card small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-artifact-icon {
+  display: grid;
+  width: 34px;
+  height: 38px;
+  place-items: center;
+  color: var(--cafe-accent);
+}
+
+.project-artifact-icon svg {
+  width: 26px;
+  height: 30px;
+}
+
+.project-artifact-empty,
+.project-list-empty {
+  margin: 0;
+  padding: 22px 14px;
+  color: var(--cafe-text-muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+@media (max-width: 820px) {
+  .project-list-toolbar > div {
+    justify-content: space-between;
+  }
+
+  .project-list {
+    padding-inline: 14px;
+  }
+
+  .project-list-columns {
+    display: none;
+  }
+
+  .project-list-row {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+
+  .project-list-open {
+    grid-column: auto;
+    grid-template-columns: 1fr;
+    gap: 10px;
+    padding: 14px;
+  }
+
+  .project-list-artifact-cell {
+    padding: 0 14px 14px;
+  }
+
+  .project-artifact-grid {
+    grid-template-columns: 1fr;
+  }
+}

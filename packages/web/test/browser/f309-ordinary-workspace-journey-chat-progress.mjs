@@ -10,6 +10,7 @@ const REQUEST_ID = `f309-modification-${'c'.repeat(64)}`;
 export const EVIDENCE =
   process.env.F309_CHAT_PROGRESS_EVIDENCE ?? '/tmp/cat-cafe-evidence/f309-chat-modification-progress';
 const SOURCE_MESSAGE = {
+  from: { kind: 'user', userId: 'operator' },
   id: 'human-source',
   type: 'user',
   content: '请把角落的标志移除，其余保持不变。',

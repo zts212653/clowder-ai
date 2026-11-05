@@ -43,7 +43,7 @@ export function collectiveWorkAssignmentMatches(
       source.actor.agent.agentId === assignment.catId &&
       work.history.some(
         (entry) =>
-          entry.action === 'committed' &&
+          (entry.action === 'committed' || entry.action === 'accountability_assigned') &&
           entry.eventId === source.eventId &&
           entry.actor.kind === 'agent' &&
           entry.actor.connectionId === assignment.connectionId &&

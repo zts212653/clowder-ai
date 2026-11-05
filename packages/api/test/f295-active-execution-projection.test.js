@@ -235,7 +235,7 @@ function buildDeps() {
       listLive: mock.fn(async () => ({ owners: processOwners, complete: true })),
       terminateExact: mock.fn(async (execution) => {
         processOwnerCancelCalls.push(execution);
-        return { matched: 1, signaled: 1, complete: true };
+        return { matched: 1, signaled: 1, complete: true, stopped: true };
       }),
     },
     turnExecutionStore: {
@@ -271,6 +271,69 @@ describe('F295 active execution projection', () => {
 
   afterEach(async () => {
     await app?.close();
+  });
+
+  it('discovers all visible projects and unassigned work without widening thread access', async () => {
+    deps._threads.get('thread-b').projectPath = '/project/planet';
+    for (const [id, createdBy, projectPath] of [
+      ['unassigned', USER_ID, 'default'],
+      ['hidden-system', 'system', '/project/planet'],
+      ['foreign-user', 'other-user', '/project/planet'],
+    ]) {
+      deps._threads.set(id, { id, title: id, createdBy, projectPath });
+      deps._executions.set(`${id}:kimi`, {
+        executionId: `inv-${id}`,
+        startedAt: 400,
+        activeRun: fixtureActiveRun(id, 'kimi', `inv-${id}`, 400),
+      });
+    }
+    // A foreign-owned hash cannot become readable through candidate enumeration.
+    deps._indexedThreadIds.add('foreign-user');
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/executions/active?scope=all',
+      headers: { 'x-cat-cafe-user': USER_ID },
+    });
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().scope, 'all');
+    assert.deepEqual(
+      response.json().executions.map(({ threadId, projectPath }) => [threadId, projectPath]),
+      [
+        ['thread-a', '/project/cafe'],
+        ['thread-b', '/project/planet'],
+        ['thread-b', '/project/planet'],
+        ['unassigned', 'default'],
+      ],
+    );
+    const crossProject = response.json().executions.find((row) => row.executionId === 'inv-b');
+    const canceled = await app.inject({
+      method: 'POST',
+      url: `/api/threads/thread-b/executions/live/${crossProject.executionId}/cancel`,
+      headers: { 'x-cat-cafe-user': USER_ID },
+      payload: { catId: 'kimi' },
+    });
+    assert.equal(canceled.statusCode, 200);
+    assert.equal(deps._executions.has('thread-a:kimi'), true);
+    assert.equal(deps._executions.has('thread-b:kimi'), false);
+    assert.equal(deps._managedTasks[0].params.holdLifecycle.managedCommand.state, 'command_running');
+  });
+
+  it('returns an honest empty global snapshot for an unknown user and requires identity', async () => {
+    const empty = await app.inject({
+      method: 'GET',
+      url: '/api/executions/active?scope=all',
+      headers: { 'x-cat-cafe-user': 'empty-user' },
+    });
+    assert.equal(empty.statusCode, 200);
+    assert.deepEqual(empty.json(), { scope: 'all', executions: [], waits: [] });
+    const anonymous = await app.inject({ method: 'GET', url: '/api/executions/active?scope=all' });
+    assert.equal(anonymous.statusCode, 401);
+    const mixed = await app.inject({
+      method: 'GET',
+      url: '/api/executions/active?scope=all&projectPath=%2Fproject%2Fcafe',
+      headers: { 'x-cat-cafe-user': USER_ID },
+    });
+    assert.equal(mixed.statusCode, 400);
   });
 
   it('keeps one production execution-owner service wired into queue routes', () => {
@@ -338,6 +401,8 @@ describe('F295 active execution projection', () => {
           },
         },
       ],
+      // A running command hold is an execution, never repeated as a wait.
+      waits: [],
     });
   });
 
@@ -582,6 +647,7 @@ describe('F295 active execution projection', () => {
         terminal: {
           status: 'canceled',
           endedAt: deps._turnTerminalCalls[0]?.terminal.endedAt,
+          providerTeardownAt: deps._turnTerminalCalls[0]?.terminal.endedAt,
           terminalReason: 'user_cancel',
         },
       },
@@ -736,7 +802,7 @@ describe('F295 active execution projection', () => {
     });
     deps.cliExecutionOwnerService.terminateExact.mock.mockImplementationOnce(async (execution) => {
       deps._processOwnerCancelCalls.push(execution);
-      return { matched: 1, signaled: 0, complete: true };
+      return { matched: 1, signaled: 0, complete: true, stopped: true };
     });
 
     const cancel = await app.inject({
@@ -749,9 +815,16 @@ describe('F295 active execution projection', () => {
     assert.equal(cancel.statusCode, 200);
     assert.equal(cancel.json().cancelled, true);
     assert.equal(deps._turnTerminalCalls.at(-1)?.invocationId, 'turn-natural-exit');
+    const terminals = deps.socketManager.broadcastAgentMessage.mock.calls
+      .map((call) => call.arguments[0])
+      .filter((message) => message.type === 'done');
+    assert.equal(terminals.length, 1);
+    assert.equal(terminals[0].invocationId, 'inv-natural-exit');
+    assert.equal(terminals[0].turnInvocationId, 'turn-natural-exit');
+    assert.equal(terminals[0].errorCode, 'cancelled');
   });
 
-  it('keeps process cancellation successful when tracker-less terminalization needs recovery', async () => {
+  it('retains ownership when a controlled stop cannot commit its child terminal', async () => {
     deps._processOwners.push({
       executionId: 'inv-terminal-write-fails',
       invocationId: 'turn-terminal-write-fails',
@@ -771,8 +844,13 @@ describe('F295 active execution projection', () => {
       payload: { catId: 'opus5' },
     });
 
-    assert.equal(cancel.statusCode, 200);
-    assert.equal(cancel.json().cancelled, true);
+    assert.equal(cancel.statusCode, 503);
+    assert.equal(cancel.json().code, 'EXECUTION_CONTROL_UNAVAILABLE');
+    assert.equal(
+      deps.socketManager.broadcastAgentMessage.mock.calls.some((call) => call.arguments[0].type === 'done'),
+      false,
+    );
+    assert.equal(deps.agentSessionMutex.forceReleaseByScope.mock.callCount(), 0);
   });
 
   it('keeps a process-owner-only execution inside a complete sparse project snapshot', async () => {
@@ -1230,6 +1308,7 @@ describe('F295 active execution projection', () => {
       matched: 0,
       signaled: 0,
       complete: false,
+      stopped: false,
     }));
 
     const cancel = await app.inject({
@@ -1244,6 +1323,13 @@ describe('F295 active execution projection', () => {
     assert.equal(deps.cliExecutionOwnerService.terminateExact.mock.callCount(), 3);
     assert.equal(deps._turnTerminalCalls.at(-1)?.terminal.status, 'failed');
     assert.equal(deps._turnTerminalCalls.at(-1)?.terminal.terminalReason, 'control_plane_unavailable');
+    const terminals = deps.socketManager.broadcastAgentMessage.mock.calls
+      .map((call) => call.arguments[0])
+      .filter((message) => message.type === 'done');
+    assert.equal(terminals.length, 1);
+    assert.equal(terminals[0].invocationId, 'inv-terminate-degraded');
+    assert.equal(terminals[0].turnInvocationId, 'turn-terminate-degraded');
+    assert.equal(terminals[0].errorCode, 'control_plane_unavailable');
   });
 
   it('persists control-plane failure through the ordinary response and input settlement chain', async () => {

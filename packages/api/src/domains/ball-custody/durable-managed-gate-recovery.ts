@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { sameUnixProcess, type UnixProcessIdentity } from '../../utils/cli-process-ownership.js';
+import { validAlphaRevisionConsumer } from '../managed-job/managed-job-admission.js';
 import type { DurableManagedGateJob } from './durable-managed-gate-job.js';
 import {
   appendDurableGateRecoveryEvent,
@@ -17,7 +18,7 @@ export {
 
 export const DURABLE_MANAGED_GATE_RECOVERY_PROTOCOL_VERSION = 2;
 
-export interface DurableGateFrozenIdentity {
+interface DurableGateFrozenFields {
   readonly headSha: string;
   readonly treeSha: string;
   readonly baseSha: string;
@@ -29,6 +30,12 @@ export interface DurableGateFrozenIdentity {
   readonly runnerFingerprint: string;
   readonly toolchainFingerprint: string;
 }
+
+export type DurableGateFrozenIdentity = DurableGateFrozenFields &
+  (
+    | { readonly kind?: 'full_gate_v2' }
+    | { readonly kind: 'alpha_revision_v1'; readonly subscriptionId: string; readonly s3JobId: string }
+  );
 
 export interface DurableGateRecoverySnapshot {
   readonly state: 'running' | 'reconciling_clock' | 'reconciling_owner' | 'blocked' | 'terminal_intent';
@@ -43,7 +50,7 @@ export interface DurableGateRecoverySnapshot {
 }
 
 function recoveryConfig(job: DurableManagedGateJob) {
-  if (job.kind !== 'resumable_full_gate_v2' || job.recovery?.protocolVersion !== 2) {
+  if (!['resumable_full_gate_v2', 'alpha_revision_v1'].includes(job.kind) || job.recovery?.protocolVersion !== 2) {
     throw new Error(`durable gate recovery is not admitted for job ${job.jobId}`);
   }
   return job.recovery;
@@ -87,6 +94,9 @@ function parseFrozenIdentity(value: unknown): DurableGateFrozenIdentity | null {
   const sha40 = /^[0-9a-f]{40}$/u;
   const sha64 = /^[0-9a-f]{64}$/u;
   if (
+    (record.kind !== undefined && record.kind !== 'full_gate_v2' && record.kind !== 'alpha_revision_v1') ||
+    (record.kind === 'alpha_revision_v1' &&
+      (!validAlphaRevisionConsumer(record) || record.verificationScope !== undefined)) ||
     (record.protocolVersion !== undefined &&
       record.protocolVersion !== DURABLE_MANAGED_GATE_RECOVERY_PROTOCOL_VERSION) ||
     typeof record.headSha !== 'string' ||
@@ -114,6 +124,15 @@ function parseFrozenIdentity(value: unknown): DurableGateFrozenIdentity | null {
   )
     return null;
   return {
+    ...(record.kind === 'alpha_revision_v1'
+      ? {
+          kind: 'alpha_revision_v1' as const,
+          subscriptionId: record.subscriptionId as string,
+          s3JobId: record.s3JobId as string,
+        }
+      : record.kind === 'full_gate_v2'
+        ? { kind: 'full_gate_v2' as const }
+        : {}),
     headSha: record.headSha,
     treeSha: record.treeSha,
     baseSha: record.baseSha,
@@ -144,6 +163,17 @@ export function synchronizeDurableGateFrozenIdentity(
   if (recoveryRecord.protocolVersion !== 2) return null;
   const frozenIdentity = parseFrozenIdentity(recoveryRecord.frozenIdentity);
   if (!frozenIdentity || receipt.jobId !== job.jobId) return null;
+  if (job.kind === 'alpha_revision_v1') {
+    if (
+      frozenIdentity.kind !== 'alpha_revision_v1' ||
+      !validAlphaRevisionConsumer(job.consumer) ||
+      frozenIdentity.subscriptionId !== job.consumer.subscriptionId ||
+      frozenIdentity.s3JobId !== job.consumer.s3JobId ||
+      frozenIdentity.headSha !== job.consumer.headSha ||
+      frozenIdentity.baseSha !== job.consumer.baseSha
+    )
+      return null;
+  } else if (frozenIdentity.kind === 'alpha_revision_v1') return null;
   const serialized = JSON.stringify(frozenIdentity);
   const database = openDurableGateRecoveryStore(job);
   try {

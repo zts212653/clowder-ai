@@ -1,9 +1,14 @@
 'use client';
 
-import type { ContextAttachment } from '@cat-cafe/shared';
+import { type ContextAttachment, deploymentDefaults } from '@cat-cafe/shared';
 import { useCallback, useMemo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { type UploadStatus, useSendMessage, type WhisperOptions } from '@/hooks/useSendMessage';
+import {
+  type SendMessageAdmissionOptions,
+  type UploadStatus,
+  useSendMessage,
+  type WhisperOptions,
+} from '@/hooks/useSendMessage';
 import { type Thread, useChatStore } from '@/stores/chatStore';
 import { ChatInput } from './ChatInput';
 import { PawIcon } from './icons/PawIcon';
@@ -20,6 +25,7 @@ interface SplitPaneViewProps {
     replyToId?: string,
     contextAttachments?: ContextAttachment[],
     explicitTargetCats?: string[],
+    options?: SendMessageAdmissionOptions,
   ) => void | boolean | Promise<void | boolean>;
   uploadStatus?: UploadStatus;
   uploadError?: string | null;
@@ -107,7 +113,7 @@ export function SplitPaneView({
       <header className="border-b border-cafe-subtle px-5 py-3 bg-cafe-surface flex items-center gap-2 flex-shrink-0">
         <PawIcon className="text-2xl" />
         <div className="flex-1 min-w-0">
-          <h1 className="text-lg font-bold text-cafe-black">Clowder AI</h1>
+          <h1 className="text-lg font-bold text-cafe-black">{deploymentDefaults.brand.name}</h1>
           <p className="text-xs text-cafe-secondary">分屏模式</p>
         </div>
         <span className="text-micro text-cafe-muted hidden sm:inline mr-1">⌘\ 切换</span>
@@ -160,8 +166,16 @@ export function SplitPaneView({
             <ChatInput
               key={splitPaneTargetId ?? 'no-target'}
               threadId={splitPaneTargetId ?? undefined}
-              onSend={(content, images, whisper, replyToId, contextAttachments, explicitTargetCats) =>
-                contextAttachments?.length
+              onSend={(
+                content,
+                images,
+                whisper,
+                replyToId,
+                contextAttachments,
+                explicitTargetCats,
+                messageDisposition,
+              ) =>
+                messageDisposition
                   ? onSend(
                       content,
                       images,
@@ -170,16 +184,27 @@ export function SplitPaneView({
                       replyToId,
                       contextAttachments,
                       explicitTargetCats,
+                      { messageDisposition },
                     )
-                  : onSend(
-                      content,
-                      images,
-                      splitPaneTargetId ?? undefined,
-                      whisper,
-                      replyToId,
-                      undefined,
-                      explicitTargetCats,
-                    )
+                  : contextAttachments?.length
+                    ? onSend(
+                        content,
+                        images,
+                        splitPaneTargetId ?? undefined,
+                        whisper,
+                        replyToId,
+                        contextAttachments,
+                        explicitTargetCats,
+                      )
+                    : onSend(
+                        content,
+                        images,
+                        splitPaneTargetId ?? undefined,
+                        whisper,
+                        replyToId,
+                        undefined,
+                        explicitTargetCats,
+                      )
               }
               disabled={!splitPaneTargetId || isReadonly}
               uploadStatus={uploadStatus}

@@ -18,7 +18,7 @@ import {
 import type { DecisionStoreSlice, SliceUpdate } from './approval-decision-types';
 
 export interface PersonMemoryDecisionActions {
-  approvePersonMemory: (proposalId: string, selectedDraftIds: string[]) => Promise<void>;
+  approvePersonMemory: (proposalId: string, selectedDraftIds: string[], undoReceiptRequestId?: string) => Promise<void>;
   notNowPersonMemory: (proposalId: string) => Promise<void>;
   withdrawPersonMemory: (proposalId: string) => Promise<void>;
 }
@@ -41,7 +41,7 @@ export function createPersonMemoryDecisionActions(
   };
 
   return {
-    approvePersonMemory: async (proposalId, selectedDraftIds) => {
+    approvePersonMemory: async (proposalId, selectedDraftIds, undoReceiptRequestId) => {
       const item = findItem(proposalId);
       if (item?.sourceFeatureId !== 'F276' || item.decisionMode !== 'claim-select' || selectedDraftIds.length === 0) {
         refuse(
@@ -71,7 +71,7 @@ export function createPersonMemoryDecisionActions(
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             selectedDraftIds: exactSelection,
-            decisionId: stablePersonMemoryDecisionId(proposalId, 'approve', exactSelection),
+            decisionId: stablePersonMemoryDecisionId(proposalId, 'approve', exactSelection, undoReceiptRequestId),
           }),
         });
         if (!res.ok) {

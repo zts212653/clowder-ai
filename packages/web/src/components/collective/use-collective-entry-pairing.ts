@@ -1,6 +1,7 @@
 'use client';
 
 import type { CollectivePairingIntentMessage } from '@cat-cafe/shared';
+import { deploymentDefaults } from '@cat-cafe/shared';
 import { useCallback, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 
@@ -23,12 +24,12 @@ export function useCollectiveEntryPairing(onPaired: (connectionId: string) => Pr
       setBusy(true);
       setError(undefined);
       try {
-        const response = await apiFetch('/api/plugins/collective-connector/pair', {
+        const response = await apiFetch('/api/plugins/official.collective-connector/pair', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
             serviceUrl: pending.serviceUrl,
-            endpointLabel: `Clowder AI on ${window.location.host}`,
+            endpointLabel: `${deploymentDefaults.brand.displayName} on ${window.location.host}`,
             intent: pending.intent,
             ...selection,
           }),

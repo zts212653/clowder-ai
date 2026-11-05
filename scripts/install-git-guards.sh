@@ -15,7 +15,8 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
+COMMON_GIT_DIR="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
+REPO_ROOT="$(dirname "$COMMON_GIT_DIR")"
 if [ -z "$REPO_ROOT" ]; then
   echo "错误: 不在 git 仓库中" >&2
   exit 1
@@ -24,15 +25,15 @@ fi
 echo "🛡️  Clowder AI Git Guards 安装"
 echo "==========================="
 
-# 1. 设置 core.hooksPath → .githooks（版本化目录）
+# 1. Pin the shared primary hook source: old review HEADs must not load stale/absent hooks.
 HOOKS_DIR="$REPO_ROOT/.githooks"
 CURRENT_HOOKS_PATH="$(git config --local core.hooksPath 2>/dev/null || echo "")"
 if [ -d "$HOOKS_DIR" ]; then
-  if [ "$CURRENT_HOOKS_PATH" = ".githooks" ]; then
+  if [ "$CURRENT_HOOKS_PATH" = "$HOOKS_DIR" ]; then
     echo -e "${GREEN}✓ core.hooksPath 已指向 .githooks${NC}"
   else
-    git config --local core.hooksPath .githooks
-    echo -e "${GREEN}✓ core.hooksPath → .githooks（原值: ${CURRENT_HOOKS_PATH:-未设置}）${NC}"
+    git config --local core.hooksPath "$HOOKS_DIR"
+    echo -e "${GREEN}✓ core.hooksPath → $HOOKS_DIR（原值: ${CURRENT_HOOKS_PATH:-未设置}）${NC}"
   fi
 else
   if [ "$CURRENT_HOOKS_PATH" = ".githooks" ]; then

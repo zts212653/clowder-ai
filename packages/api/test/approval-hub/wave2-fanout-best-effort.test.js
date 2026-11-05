@@ -2,7 +2,7 @@ import '../helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import Fastify from 'fastify';
-import { proposedReviewAction } from './helpers.js';
+import { proposedTaskAction } from './helpers.js';
 
 // ── R3 P1-2: Fanout best-effort — broadcastToRoom/emitToUser errors swallowed ──
 // Envelope is committed → fanout is fire-and-forget.  If broadcastToRoom or
@@ -182,6 +182,7 @@ describe('P1-2 R3: fanout best-effort — post-commit errors do not trigger comp
 
     const app = Fastify();
     await app.register(callbacksRoutes, {
+      actionSuccessorAdmissionService: { async preflightStructuredTransferStanding() {} },
       registry,
       messageStore,
       threadStore,
@@ -214,7 +215,7 @@ describe('P1-2 R3: fanout best-effort — post-commit errors do not trigger comp
           content: '@sonnet\nOriginal dispatch',
           targetCats: ['sonnet'],
           effectClass: 'assign_work',
-          proposedAction: proposedReviewAction(),
+          proposedAction: proposedTaskAction(),
           clientMessageId: 'dispatch-fanout-a',
         },
       });
@@ -231,7 +232,7 @@ describe('P1-2 R3: fanout best-effort — post-commit errors do not trigger comp
           content: '@sonnet\nUpdated dispatch',
           targetCats: ['sonnet'],
           effectClass: 'assign_work',
-          proposedAction: proposedReviewAction(),
+          proposedAction: proposedTaskAction(),
           clientMessageId: 'dispatch-fanout-b',
         },
       });

@@ -6,25 +6,27 @@ import { apiFetch } from '@/utils/api-client';
 
 type RetryState = 'loading' | 'failed' | 'running' | 'succeeded' | 'canceled' | 'unavailable' | 'submitted';
 
-export function RoutingPreflightActions({ payload }: { payload: Record<string, unknown> }) {
+export function RoutingPreflightActions({ payload, threadId }: { payload: Record<string, unknown>; threadId: string }) {
   const openTeamSubject = useChatStore((state) => state.openTeamSubject);
-  const target = payload.target as { disposition?: unknown } | undefined;
-  const invocationId =
-    target?.disposition === 'rejected' && typeof payload.retryInvocationId === 'string'
-      ? payload.retryInvocationId
+  const target = payload.target as { disposition?: unknown; targetCatId?: unknown } | undefined;
+  const recoveryUrl =
+    target?.disposition === 'rejected' &&
+    typeof payload.sourceMessageId === 'string' &&
+    typeof target.targetCatId === 'string'
+      ? `/api/threads/${encodeURIComponent(threadId)}/messages/${encodeURIComponent(payload.sourceMessageId)}/routing-targets/${encodeURIComponent(target.targetCatId)}`
       : undefined;
   const [state, setState] = useState<RetryState>('loading');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refresh, setRefresh] = useState(0);
   useEffect(() => {
-    if (!invocationId) return;
+    if (!recoveryUrl) return;
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     setState('loading');
     setError(null);
     const read = () =>
-      void apiFetch(`/api/invocations/${encodeURIComponent(invocationId)}`, { signal: controller.signal })
+      void apiFetch(recoveryUrl, { signal: controller.signal })
         .then(async (response) => {
           if (!response.ok) throw new Error('暂时无法读取这条消息的状态');
           const record = (await response.json()) as { status?: unknown };
@@ -50,7 +52,7 @@ export function RoutingPreflightActions({ payload }: { payload: Record<string, u
       controller.abort();
       clearTimeout(timer);
     };
-  }, [invocationId, refresh]);
+  }, [recoveryUrl, refresh]);
 
   useEffect(() => {
     if (state !== 'submitted') return;
@@ -59,11 +61,11 @@ export function RoutingPreflightActions({ payload }: { payload: Record<string, u
   }, [state]);
 
   const retry = async () => {
-    if (!invocationId || busy || state !== 'failed') return;
+    if (!recoveryUrl || busy || state !== 'failed') return;
     setBusy(true);
     setError(null);
     try {
-      const response = await apiFetch(`/api/invocations/${encodeURIComponent(invocationId)}/retry`, { method: 'POST' });
+      const response = await apiFetch(`${recoveryUrl}/retry`, { method: 'POST' });
       if (!response.ok) {
         const body = (await response.json().catch(() => null)) as { error?: string } | null;
         throw new Error(body?.error ?? '重试未能提交');
@@ -78,7 +80,7 @@ export function RoutingPreflightActions({ payload }: { payload: Record<string, u
 
   return (
     <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-      {invocationId && state === 'failed' && (
+      {recoveryUrl && state === 'failed' && (
         <button
           type="button"
           disabled={busy}
@@ -88,10 +90,10 @@ export function RoutingPreflightActions({ payload }: { payload: Record<string, u
           {busy ? '正在提交…' : '重试这条'}
         </button>
       )}
-      {invocationId && state === 'submitted' && <span role="status">已提交重试</span>}
-      {invocationId && state === 'succeeded' && <span>这条已执行</span>}
-      {invocationId && state === 'running' && <span>这条正在执行</span>}
-      {invocationId && state === 'unavailable' && (
+      {recoveryUrl && state === 'submitted' && <span role="status">已提交重试</span>}
+      {recoveryUrl && state === 'succeeded' && <span>这条已执行</span>}
+      {recoveryUrl && state === 'running' && <span>这条正在执行</span>}
+      {recoveryUrl && state === 'unavailable' && (
         <button type="button" className="underline" onClick={() => setRefresh((value) => value + 1)}>
           重新读取状态
         </button>

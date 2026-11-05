@@ -49,7 +49,11 @@ export async function resolveWorkspaceAnnotationTarget(
     if (resolved.status !== 'attached' || !resolved.anchor) throw new WorkspaceContentReviewError('source_changed');
     return { kind: 'text_quote', baseRevision: input.review.source.revision, ...resolved.anchor };
   }
-  if (input.review.source.kind === 'text' || input.review.source.kind === 'video-project')
+  if (
+    input.review.source.kind === 'text' ||
+    input.review.source.kind === 'video-project' ||
+    input.review.source.kind === 'collective-artifact'
+  )
     throw new WorkspaceContentReviewError('unsupported_content');
   const anchor = artifactReviewAnchorSchema.parse(input.target.anchor);
   assertWorkspaceMediaAnchor(input.review.source, anchor);

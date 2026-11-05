@@ -14,6 +14,7 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { resolvePromptTemplateVariables } from '@cat-cafe/shared';
 import YAML from 'yaml';
 import { findMonorepoRoot } from '../../../../utils/monorepo-root.js';
 
@@ -49,8 +50,9 @@ function resolveWithOverlay(base: string, localSuffix: string): { path: string; 
  * Unresolved placeholders are left as-is (loud failure in prompt).
  */
 export function renderTemplate(template: string, vars: Record<string, string>): string {
+  const values = { ...resolvePromptTemplateVariables(), ...vars };
   return template.replace(/\{\{(\w+)\}\}/g, (match, key: string) => {
-    return key in vars ? vars[key] : match;
+    return Object.hasOwn(values, key) ? values[key] : match;
   });
 }
 
@@ -109,7 +111,7 @@ export function loadWorkflowTriggers(): Record<string, string> {
   const result: Record<string, string> = {};
   for (const [breed, content] of Object.entries(parsed as Record<string, unknown>)) {
     if (typeof content === 'string') {
-      result[breed] = content.trimEnd();
+      result[breed] = renderTemplate(content.trimEnd(), {});
     }
   }
   return result;

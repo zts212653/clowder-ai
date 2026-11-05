@@ -9,6 +9,7 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { primeCoCreatorConfigCache, resetCoCreatorConfigCacheForTest } from '@/hooks/useCoCreatorConfig';
 import { useBrakeStore } from '@/stores/brakeStore';
 
 const mockApiFetch = vi.fn();
@@ -16,9 +17,10 @@ vi.mock('@/utils/api-client', () => ({
   apiFetch: (...args: unknown[]) => mockApiFetch(...args),
 }));
 
-// TTS touches audio/network — irrelevant to the mode branch
+const { tts } = vi.hoisted(() => ({ tts: { synthesize: vi.fn(), state: 'idle' } }));
+// Exercise speech text without audio or network.
 vi.mock('@/hooks/useTts', () => ({
-  useTts: () => ({ synthesize: vi.fn(), state: 'idle' }),
+  useTts: () => tts,
 }));
 
 // Cat name resolution pulls in the member registry — irrelevant to the branch
@@ -63,6 +65,9 @@ describe('BrakeModal mode branch', () => {
   beforeEach(() => {
     useBrakeStore.setState(INITIAL, true);
     mockApiFetch.mockReset();
+    tts.synthesize.mockReset();
+    tts.state = 'idle';
+    resetCoCreatorConfigCacheForTest();
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -71,6 +76,7 @@ describe('BrakeModal mode branch', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    vi.restoreAllMocks();
   });
 
   const render = () => {
@@ -125,5 +131,25 @@ describe('BrakeModal mode branch', () => {
     const body = JSON.parse((checkinCall?.[1] as { body: string }).body);
     expect(body.choice).toBe('rest');
     expect(useBrakeStore.getState().visible).toBe(false);
+  });
+
+  it('uses the latest configured familiar address when retrying speech after a settings change', () => {
+    const owner = { name: 'Mina', nickname: '小明', aliases: [], mentionPatterns: ['@mina'] };
+    primeCoCreatorConfigCache(owner);
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    tts.state = 'error';
+    act(() => showTrigger('gentle'));
+    render();
+    act(() => primeCoCreatorConfigCache({ ...owner, nickname: '晓晓' }));
+    expect(container.textContent).toContain('晓晓，你忙很久啦');
+    const retry = Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('点击播放'),
+    );
+    act(() => retry?.click());
+    expect(tts.synthesize).toHaveBeenLastCalledWith(
+      expect.any(String),
+      '晓晓，你忙很久啦，要不要喝口水呀？喵~',
+      'opus',
+    );
   });
 });

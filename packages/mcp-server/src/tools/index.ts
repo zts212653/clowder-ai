@@ -61,7 +61,6 @@ export {
   handleOfferCustody,
   handlePostMessage,
   handleRecordMemoryCueOutcome,
-  handleRegisterPrTracking,
   handleRetryCustodyAdmission,
   handleUpdateEntrustedWork,
   handleUpdateTask,
@@ -69,7 +68,6 @@ export {
   listThreadsInputSchema,
   offerCustodyInputSchema,
   postMessageInputSchema,
-  registerPrTrackingInputSchema,
   retryCustodyAdmissionInputSchema,
   updateEntrustedWorkInputSchema,
   updateTaskInputSchema,
@@ -105,12 +103,6 @@ export {
   startEvolutionProgramInputSchema,
   updateEvolutionProgramInputSchema,
 } from './capability-evolution-tools.js';
-export { collectiveParticipationTools } from './collective-participation-tools.js';
-export {
-  communityRouteAcceptanceInputSchema,
-  communityRouteAcceptanceTools,
-  handleCommunityRouteAcceptance,
-} from './community-route-acceptance-tool.js';
 export {
   contentEditorTools,
   editOfficeDocumentInputSchema,
@@ -161,11 +153,6 @@ export {
   searchEvidenceInputSchema,
 } from './evidence-tools.js';
 export {
-  externalReviewVerdictInputSchema,
-  externalReviewVerdictTools,
-  handleExternalReviewVerdict,
-} from './external-review-verdict-tool.js';
-export {
   externalRuntimeSessionCallbackTools,
   externalRuntimeSessionReadTools,
   externalRuntimeSessionTools,
@@ -188,15 +175,11 @@ export {
   handleFinanceQuery,
 } from './finance-tools.js';
 export {
-  gameActionTools,
-  handleSubmitGameAction,
-  submitGameActionInputSchema,
-} from './game-action-tools.js';
-export {
   graphResolveInputSchema,
   graphTools,
   handleGraphResolve,
 } from './graph-tools.js';
+export { handleGetHarnessHistory, handlePublishHarnessHistory, harnessHistoryTools } from './harness-history-tools.js';
 export {
   capabilitiesSnapshotInputSchema,
   handleCapabilitiesSnapshot,
@@ -236,10 +219,11 @@ export {
   limbTools,
 } from './limb-tools.js';
 export {
-  handleReadMeetingArtifact,
-  meetingArtifactTools,
-  readMeetingArtifactInputSchema,
-} from './meeting-artifact-tools.js';
+  handleListMemoryMatters,
+  handleReadMemoryMatter,
+  handleWriteMemoryMatter,
+  matterMemoryTools,
+} from './matter-memory-tools.js';
 export {
   createMemoryCueTools,
   drillMemoryCueInputSchema,
@@ -252,6 +236,11 @@ export {
   pawFeelDispositionTools,
   triagePawFeelInputSchema,
 } from './paw-feel-disposition-tools.js';
+export {
+  handleScanPawFeelInbox,
+  pawFeelInboxAuditScanTools,
+  scanPawFeelInboxInputSchema,
+} from './paw-feel-inbox-audit-scan-tool.js';
 export {
   handleRunPerspective,
   perspectiveTools,
@@ -376,3 +365,13 @@ export {
   recordRequestReviewOwnerFactInputSchema,
   skillConsumptionTools,
 } from './skill-consumption-tools.js';
+export {
+  handleOfferSuggestion,
+  handlePostActionReceipt,
+  handleSuggestionFacts,
+  offerSuggestionInputSchema,
+  postActionReceiptInputSchema,
+  suggestionFactsInputSchema,
+  suggestionTools,
+} from './suggestion-tools.js';
+export { workTools } from './work-tools.js';

@@ -5,8 +5,8 @@
  * invocation boundaries must fail loudly instead of being mistaken for
  * equality by compareCursors().
  *
- * A4 exercises the three user-visible sinks against the real cursor stores:
- * Context Briefing tail-only continuation, Freshness no-new/thread isolation,
+ * A4 exercises the surviving user-visible sinks against the real cursor stores:
+ * Context Briefing tail-only continuation,
  * and /read/latest caughtUp truth under visibility inversion.
  */
 
@@ -23,7 +23,6 @@ import {
 const { assembleIncrementalContext, upsertMaxBoundary } = await import(
   '../dist/domains/cats/services/agents/routing/route-helpers.js'
 );
-const { ThreadUnseenChecker } = await import('../dist/domains/cats/services/freshness/ThreadUnseenChecker.js');
 const { cursorFor } = await import('../dist/domains/cats/services/stores/cursor.js');
 const { DeliveryCursorStore } = await import('../dist/domains/cats/services/stores/ports/DeliveryCursorStore.js');
 const { visibilityCursorUnresolvedMutation } = await import('../dist/infrastructure/telemetry/instruments.js');
@@ -287,58 +286,6 @@ return { seq or -1, id }
 
     const second = await assembleIncrementalContext(deps, USER_ID, threadId, CAT_ID);
     assert.deepEqual(second.exposedMessageIds, [], 'accepted tail must not replay after evidence repair');
-  });
-
-  it('Freshness: full read leaves no notice for A and does not consume B', async (t) => {
-    if (!redisAvailable) {
-      t.skip('Redis not available');
-      return;
-    }
-    const restore = withActivation(undefined);
-    t.after(restore);
-
-    const messageStore = new RedisMessageStore(redis);
-    const cursorStore = makeCursorStore(messageStore);
-    const threadA = `freshness-a-${Date.now()}`;
-    const threadB = `freshness-b-${Date.now()}`;
-    const base = Date.now() - 10_000;
-    const a1 = await appendUserMessage(messageStore, threadA, 'A initial', base + 1);
-    const b1 = await appendUserMessage(messageStore, threadB, 'B initial', base + 2);
-    await cursorStore.ackSeenCursor(USER_ID, CAT_ID, threadA, cursorFor(a1));
-    await cursorStore.ackSeenCursor(USER_ID, CAT_ID, threadB, cursorFor(b1));
-
-    const a2 = await appendUserMessage(messageStore, threadA, 'A unread then fully read', base + 3);
-    const b2 = await appendUserMessage(messageStore, threadB, 'B remains unread', base + 4);
-
-    // Model a complete, unfiltered thread read: consume the full delivered tail
-    // and persist canonical seen evidence at its final visibility boundary.
-    const fullA = await messageStore.getByThreadAfter(
-      threadA,
-      await cursorStore.getSeenCursor(USER_ID, CAT_ID, threadA),
-      undefined,
-      USER_ID,
-    );
-    assert.deepEqual(
-      fullA.map((message) => message.id),
-      [a2.id],
-    );
-    await cursorStore.ackSeenCursor(USER_ID, CAT_ID, threadA, cursorFor(fullA.at(-1)));
-
-    const checker = new ThreadUnseenChecker({
-      userId: USER_ID,
-      cursorStore,
-      messageStore,
-      queueChecker: { getQueuedForThread: () => [] },
-    });
-
-    assert.equal(
-      await checker.checkUnseen({ threadId: threadA, catId: CAT_ID }),
-      null,
-      'no newer A message means no freshness notice',
-    );
-    const unseenB = await checker.checkUnseen({ threadId: threadB, catId: CAT_ID });
-    assert.equal(unseenB?.count, 1, 'reading A must not consume B');
-    assert.ok(unseenB?.maxMessageId.includes(b2.id));
   });
 
   it('/read/latest reports caughtUp=true after a gate-OFF visibility inversion ACK', async (t) => {

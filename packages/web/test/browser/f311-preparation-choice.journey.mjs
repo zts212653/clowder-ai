@@ -14,7 +14,7 @@ export async function createSubmittedChoiceProjection(preparationFixture, author
   const input = messageStore.append({
     userId: 'default-user',
     threadId: thread.id,
-    catId: null,
+    from: { kind: 'user', userId: 'default-user' },
     content: 'Europa 晨会材料路由：本轮保持固定，先核清失败分母。',
     mentions: [],
     timestamp: Date.parse('2026-09-14T08:00:00.000Z'),

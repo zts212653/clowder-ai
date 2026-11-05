@@ -1,12 +1,87 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync } from 'node:fs';
+import fs, { existsSync, mkdirSync, readFileSync, renameSync, rmSync } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { basename, join } from 'node:path';
-import { it } from 'node:test';
+import { it, mock } from 'node:test';
 import { directReleaseReceipt, removeFinishedWorktree } from './lib/worktree-direct-release.mjs';
 import { fixture, git, NOW, SOURCE } from './lib/worktree-finish-fixture.mjs';
 import { moveToQuarantine, quarantineRoot, readQuarantineRecords } from './lib/worktree-quarantine.mjs';
 import { lifecycleConfig } from './lib/worktree-reaper-probes.mjs';
+
+function releaseInput(fx, path) {
+  return {
+    repo: fx.repo,
+    root: quarantineRoot(fx.root),
+    actor: 'codex61-sol',
+    authorizationRef: SOURCE,
+    entry: {
+      path,
+      name: basename(path),
+      head: git(path, 'rev-parse', 'HEAD').trim(),
+      lifecycle: lifecycleConfig(path, '--worktree'),
+      finishSourceRef: SOURCE,
+    },
+  };
+}
+
+it('rechecks occupancy after archive/source hashing and the disk observation, immediately before removal', () => {
+  const fx = fixture();
+  const original = fs.statfsSync;
+  try {
+    const path = fx.make();
+    let busy = false;
+    mock.method(fs, 'statfsSync', (...args) => {
+      const result = original(...args);
+      busy = true;
+      return result;
+    });
+    syncBuiltinESMExports();
+    assert.throws(
+      () =>
+        removeFinishedWorktree({
+          ...releaseInput(fx, path),
+          validate() {
+            if (busy) throw new Error('late consumer');
+          },
+        }),
+      /late consumer/,
+    );
+    assert.equal(existsSync(path), true);
+  } finally {
+    mock.restoreAll();
+    syncBuiltinESMExports();
+    rmSync(fx.root, { recursive: true, force: true });
+  }
+});
+
+it('returns restore evidence when the post-removal free-space observation fails', () => {
+  const fx = fixture();
+  const original = fs.statfsSync;
+  try {
+    const path = fx.make();
+    let calls = 0;
+    mock.method(fs, 'statfsSync', (...args) => {
+      if (++calls === 2) throw new Error('disk observation failed');
+      return original(...args);
+    });
+    syncBuiltinESMExports();
+    let failure;
+    try {
+      removeFinishedWorktree({ ...releaseInput(fx, path), validate() {} });
+    } catch (error) {
+      failure = error;
+    }
+    assert.equal(existsSync(path), false);
+    assert.equal(failure?.recovery?.state, 'pending');
+    execFileSync('/bin/sh', ['-c', failure.recovery.restore], { stdio: 'pipe' });
+    assert.equal(readFileSync(join(path, 'README.md'), 'utf8'), 'original\n');
+  } finally {
+    mock.restoreAll();
+    syncBuiltinESMExports();
+    rmSync(fx.root, { recursive: true, force: true });
+  }
+});
 
 it('returns pending transaction recovery when completion recording fails after the move', () => {
   const fx = fixture();

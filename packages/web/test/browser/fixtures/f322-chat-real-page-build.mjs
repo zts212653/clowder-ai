@@ -7,7 +7,7 @@ export const webRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url))
 export const origin = 'https://f322-chat-real-page.test';
 
 // Reusable compile-only entry: importing/running this never starts a browser or server.
-export async function buildChatProof() {
+export async function buildChatProof(entryFile = 'f322-chat-real-page.tsx') {
   const previousCwd = process.cwd();
   process.chdir(webRoot); // Tailwind v3 content globs resolve against cwd.
   try {
@@ -29,7 +29,7 @@ export async function buildChatProof() {
         write: false,
         minify: false,
         rollupOptions: {
-          input: path.join(fixtureRoot, 'f322-chat-real-page.tsx'),
+          input: path.join(fixtureRoot, entryFile),
           output: { format: 'es', inlineDynamicImports: true },
         },
       },

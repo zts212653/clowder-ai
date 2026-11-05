@@ -11,49 +11,64 @@ const objectRef = { ownerFeatureId: 'microduck-owner', ownerStateRef: 'simulator
 const sourceRef = { ...objectRef, ownerStateRef: 'owner:publication' };
 const versionRef = { ...objectRef, assetKind: 'code', assetId: 'walking', version: 'v2' };
 
-export function verifyExplorationProjectionRecovery(mode) {
+function ownerReview(withdrawnParent, defect) {
+  return evolutionAssetReviewV1Schema.parse({
+    schemaVersion: 1,
+    status: 'resolved',
+    programRef,
+    objectRef,
+    sourceRef,
+    currentProofRef: sourceRef,
+    readAt: '2026-09-09T14:00:00.000Z',
+    versions: [
+      { versionRef: { ...versionRef, version: 'v0' }, title: 'independent version', parentEdges: [] },
+      {
+        versionRef,
+        title: 'walking v2',
+        parentEdges: withdrawnParent
+          ? [
+              {
+                parentVersionRef: { ...versionRef, version: defect === 'cycle' ? 'v3' : 'v1' },
+                edgeRef: sourceRef,
+              },
+            ]
+          : [],
+      },
+      {
+        versionRef: { ...versionRef, version: 'v3' },
+        title: 'dependent version',
+        parentEdges: [{ parentVersionRef: versionRef, edgeRef: sourceRef }],
+      },
+    ],
+    currentVersionRefs: [],
+    blockers: [{ code: 'owner_note', ownerRef: objectRef }],
+  });
+}
+
+async function archiveRootFor(t, createFixture) {
+  if (!createFixture) return repoRoot;
+  const fixture = await createFixture();
+  t.after(fixture.cleanup);
+  return fixture.repoRoot;
+}
+
+export function verifyExplorationProjectionRecovery(mode, options = {}) {
+  const archiveNodeCount = mode === 'legacy' ? 0 : (options.archiveNodeCount ?? 9);
+  const experimentCount = options.experimentCount ?? 12;
   for (const defect of ['withdrawn-parent', 'cycle'])
-    test(`${mode} retains independent nodes while ${defect} awaits owner correction`, async () => {
+    test(`${mode} retains independent nodes while ${defect} awaits owner correction`, async (t) => {
+      const archiveRoot = await archiveRootFor(t, options.createArchiveFixture);
       let withdrawnParent = true;
-      const versionReview = async () =>
-        evolutionAssetReviewV1Schema.parse({
-          schemaVersion: 1,
-          status: 'resolved',
-          programRef,
-          objectRef,
-          sourceRef,
-          currentProofRef: sourceRef,
-          readAt: '2026-09-09T14:00:00.000Z',
-          versions: [
-            { versionRef: { ...versionRef, version: 'v0' }, title: 'independent version', parentEdges: [] },
-            {
-              versionRef,
-              title: 'walking v2',
-              parentEdges: withdrawnParent
-                ? [
-                    {
-                      parentVersionRef: { ...versionRef, version: defect === 'cycle' ? 'v3' : 'v1' },
-                      edgeRef: sourceRef,
-                    },
-                  ]
-                : [],
-            },
-            {
-              versionRef: { ...versionRef, version: 'v3' },
-              title: 'dependent version',
-              parentEdges: [{ parentVersionRef: versionRef, edgeRef: sourceRef }],
-            },
-          ],
-          currentVersionRefs: [],
-          blockers: [{ code: 'owner_note', ownerRef: objectRef }],
-        });
+      const versionReview = async () => ownerReview(withdrawnParent, defect);
       assert.equal(
         (await versionReview()).status,
         'resolved',
         'the owner response itself satisfies its accepted contract',
       );
       const adapter =
-        mode === 'legacy' ? { versionReview } : createMicroduckExplorationBindings({ repoRoot, versionReview });
+        mode === 'legacy'
+          ? { versionReview }
+          : createMicroduckExplorationBindings({ repoRoot: archiveRoot, versionReview });
       const broken = await readExplorationOwner(adapter, { programRef, objectRef });
       assert.equal(broken.code, 200, JSON.stringify({ status: broken.body.status, blockers: broken.body.blockers }));
       assert.equal(broken.body.status, 'resolved');
@@ -64,7 +79,7 @@ export function verifyExplorationProjectionRecovery(mode) {
         broken.body.nodes.filter((n) => n.kind === 'owner_version').map((n) => n.versionRef.version),
         ['v0'],
       );
-      assert.equal(broken.body.nodes.filter((n) => n.kind === 'public_archive').length, mode === 'legacy' ? 0 : 9);
+      assert.equal(broken.body.nodes.filter((n) => n.kind === 'public_archive').length, archiveNodeCount);
       const withheldSelection = await readExplorationOwner(adapter, {
         programRef,
         objectRef,
@@ -73,7 +88,7 @@ export function verifyExplorationProjectionRecovery(mode) {
       assert.equal(withheldSelection.code, 422);
       assert(withheldSelection.body.blockers.some((b) => b.code === 'owner_exploration_lineage_withheld'));
       if (mode === 'public-federation') {
-        assert.equal(broken.body.experiments.length, 12);
+        assert.equal(broken.body.experiments.length, experimentCount);
         const run = broken.body.experiments[0];
         const detail = await readExplorationOwner(adapter, {
           programRef,
@@ -87,7 +102,7 @@ export function verifyExplorationProjectionRecovery(mode) {
       withdrawnParent = false;
       const healed = await readExplorationOwner(adapter, { programRef, objectRef });
       assert.equal(healed.code, 200, JSON.stringify(healed.body));
-      assert.equal(healed.body.nodes.filter((n) => n.kind === 'public_archive').length, mode === 'legacy' ? 0 : 9);
+      assert.equal(healed.body.nodes.filter((n) => n.kind === 'public_archive').length, archiveNodeCount);
       assert.equal(healed.body.nodes.filter((n) => n.kind === 'owner_version').length, 3);
       assert(!healed.body.blockers.some((b) => b.code === 'owner_exploration_lineage_withheld'));
     });

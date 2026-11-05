@@ -2,6 +2,7 @@
 
 import type { TaskItem } from '@cat-cafe/shared';
 import { useState } from 'react';
+import { useCoCreatorDisplay } from '@/hooks/useCoCreatorConfig';
 import { CatAvatar } from './CatAvatar';
 
 type TaskStatus = 'todo' | 'doing' | 'blocked' | 'done';
@@ -61,6 +62,7 @@ export function TaskCard({
   task: TaskItem;
   onStatusChange: (taskId: string, newStatus: string) => void;
 }) {
+  const owner = useCoCreatorDisplay();
   const [expanded, setExpanded] = useState(false);
   const status = task.status as TaskStatus;
   const style = STATUS_STYLES[status] ?? STATUS_STYLES.todo;
@@ -97,7 +99,7 @@ export function TaskCard({
         <div className="mt-2 pt-2 border-t border-cafe">
           {task.why && <p className="text-xs text-cafe-muted leading-relaxed">{task.why}</p>}
           <p className="text-micro text-cafe-muted mt-1">
-            {formatRelativeTime(task.createdAt)} · {task.createdBy === 'user' ? 'co-creator' : task.createdBy}
+            {formatRelativeTime(task.createdAt)} · {task.createdBy === 'user' ? owner.nickname : task.createdBy}
           </p>
         </div>
       )}

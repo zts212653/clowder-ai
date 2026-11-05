@@ -13,6 +13,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { describe, it } from 'node:test';
+import { parseVars } from './lib/env-registry-parser.mjs';
+import { loadEnvRegistrySource } from './lib/env-registry-source.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
 
@@ -32,20 +34,6 @@ const EXAMPLE_ALLOWLIST = new Map([
   ['ASR_ENABLED', 'Voice service toggle consumed by Python sidecar, not TypeScript API'],
   ['TTS_ENABLED', 'Voice service toggle consumed by Python sidecar, not TypeScript API'],
   ['LLM_POSTPROCESS_ENABLED', 'Voice service toggle consumed by Python sidecar, not TypeScript API'],
-  ['TELEGRAM_BOT_TOKEN', 'F240 connector manifest/preconfigured gateway env, not global env registry'],
-  ['FEISHU_APP_ID', 'F240 connector manifest/preconfigured gateway env, not global env registry'],
-  ['FEISHU_APP_SECRET', 'F240 connector manifest/preconfigured gateway env, not global env registry'],
-  ['FEISHU_VERIFICATION_TOKEN', 'F240 connector manifest/preconfigured gateway env, not global env registry'],
-  ['FEISHU_GROUP_BOT_MENTIONS_JSON', 'F240 connector-scoped power-user env (#1035), not global env registry'],
-  ['DINGTALK_APP_KEY', 'F240 connector manifest/preconfigured gateway env, not global env registry'],
-  ['DINGTALK_APP_SECRET', 'F240 connector manifest/preconfigured gateway env, not global env registry'],
-  ['WECOM_BOT_ID', 'F240 connector manifest/preconfigured gateway env, not global env registry'],
-  ['WECOM_BOT_SECRET', 'F240 connector manifest/preconfigured gateway env, not global env registry'],
-  ['WECOM_CORP_ID', 'F240 connector manifest/preconfigured gateway env, not global env registry'],
-  ['WECOM_AGENT_ID', 'F240 connector manifest/preconfigured gateway env, not global env registry'],
-  ['WECOM_AGENT_SECRET', 'F240 connector manifest/preconfigured gateway env, not global env registry'],
-  ['WECOM_TOKEN', 'F240 connector manifest/preconfigured gateway env, not global env registry'],
-  ['WECOM_ENCODING_AES_KEY', 'F240 connector manifest/preconfigured gateway env, not global env registry'],
 ]);
 
 // ── Parse .env.example keys ──
@@ -70,21 +58,13 @@ function parseExampleKeys() {
 
 // ── Extract registered names + exampleRecommended from env-registry.ts ──
 function loadRegistryInfo() {
-  const src = readFileSync(join(ROOT, 'packages/api/src/config/env-registry.ts'), 'utf-8');
+  const src = loadEnvRegistrySource(join(ROOT, 'packages/api/src/config/env-registry.ts'));
   const allNames = new Set();
   const recommended = new Set();
 
-  // Parse each { ... } object in ENV_VARS (both single-line and multi-line)
-  const objPattern = /\{([^}]+)\}/gs;
-  for (const block of src.matchAll(objPattern)) {
-    const body = block[1];
-    const nameMatch = body.match(/name:\s*['"]([A-Z_][A-Z0-9_]*)['"]/);
-    if (!nameMatch) continue;
-    const name = nameMatch[1];
+  for (const { name, exampleRecommended } of parseVars(src)) {
     allNames.add(name);
-    if (/exampleRecommended:\s*true/.test(body)) {
-      recommended.add(name);
-    }
+    if (exampleRecommended) recommended.add(name);
   }
 
   return { allNames, recommended };

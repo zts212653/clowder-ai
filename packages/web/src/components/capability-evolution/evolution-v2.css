@@ -1,5 +1,6 @@
 .evolution-workspace[data-evolution-presentation="v2"] {
   background: var(--console-panel-bg);
+  --chat-background-role: console-panel;
 }
 .evolution-v2-home-tabs {
   display: flex;
@@ -15,6 +16,7 @@
 .evolution-v2-home-tabs button[aria-selected="true"] {
   color: var(--cafe-text);
   background: var(--cafe-surface-sunken);
+  --chat-background-role: cafe-sunken;
   font-weight: 600;
 }
 .evolution-v2-home-heading {
@@ -60,11 +62,28 @@
   font-weight: 400;
   margin-left: 6px;
 }
+.evolution-v2-pending {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--cafe-border);
+  border-radius: 10px;
+  background: var(--console-card-bg);
+  --chat-background-role: console-card;
+  color: var(--cafe-text-secondary);
+  font-size: var(--console-font-compact);
+}
+.evolution-v2-pending .evolution-v2-section-title {
+  margin: 0;
+}
 .evolution-v2-projects {
   overflow: hidden;
   border: 1px solid var(--cafe-border);
   border-radius: 12px;
   background: var(--console-card-bg);
+  --chat-background-role: console-card;
 }
 .evolution-v2-projects:empty {
   display: none;
@@ -85,6 +104,7 @@
 }
 .evolution-v2-project:hover {
   background: var(--cafe-surface);
+  --chat-background-role: cafe;
 }
 .evolution-v2-project > span {
   min-width: 0;
@@ -103,6 +123,7 @@
   padding: 18px 20px;
   color: var(--cafe-text-muted);
   background: var(--console-card-bg);
+  --chat-background-role: console-card;
   font-size: var(--console-font-body);
   line-height: 1.6;
 }
@@ -133,6 +154,7 @@
   border: 1px solid var(--cafe-border);
   border-radius: 12px;
   background: var(--console-card-bg);
+  --chat-background-role: console-card;
   text-align: left;
   font-size: var(--console-font-compact);
   line-height: 1.65;
@@ -169,6 +191,7 @@
   margin-top: 10px;
   border-radius: 8px;
   background: var(--cafe-surface-sunken);
+  --chat-background-role: cafe-sunken;
   color: var(--cafe-text-secondary);
   font-size: var(--console-font-compact);
   line-height: 1.65;

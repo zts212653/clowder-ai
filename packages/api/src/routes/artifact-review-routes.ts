@@ -5,6 +5,7 @@ import type { ArtifactReviewService } from '../domains/collaborative-content/art
 import type { MediaReviewPrincipal } from '../domains/video-studio/content-owner/published-media-access.js';
 import { resolveStrictUserId } from '../utils/request-identity.js';
 import { replyArtifactReviewError } from './artifact-review-route-errors.js';
+import { registerMediaFileActions } from './media-file-actions.js';
 import { sendPublishedMedia } from './published-media-response.js';
 
 const paramsSchema = z.object({ reviewId: z.string().min(1).max(128) }).strict();
@@ -21,6 +22,28 @@ export function registerArtifactReviewRoutes(app: FastifyInstance, deps: Artifac
   app.addHook('onRequest', async (request, reply) => {
     reply.header('Cache-Control', 'private, no-store');
     if (!humanPrincipal(request)) return reply.code(401).send({ error: 'identity_required' });
+  });
+  registerMediaFileActions(app, '/api/artifact-reviews/:reviewId/media/:round', {
+    onError: replyArtifactReviewError,
+    authorize: async (request) => {
+      const principal = humanPrincipal(request);
+      if (!principal) return null;
+      const { reviewId, round } = paramsSchema
+        .extend({ round: z.coerce.number().int().positive() })
+        .parse(request.params);
+      const media = await deps.reviews.openMedia(reviewId, round, principal, true);
+      try {
+        return {
+          path: media.path,
+          mime: media.mediaType,
+          byteLength: media.byteLength,
+          author: media.fileAuthor,
+          createdAt: media.fileCreatedAt,
+        };
+      } finally {
+        await media.handle.close();
+      }
+    },
   });
   app.post('/api/artifact-reviews/prepare', async (request, reply) => {
     try {

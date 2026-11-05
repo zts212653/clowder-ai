@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
 import { readableChoiceBodies } from './f311-readable-choices.bodies.mjs';
 
 const directory = process.env.F311_EVIDENCE_DIR ?? '/tmp/cat-cafe-evidence/f311-readable-choices';

@@ -119,6 +119,7 @@ export function MessageBubble({
           {header}
           <div
             data-testid="message-bubble"
+            data-chat-background-surface="human"
             className={`rounded-xl px-3.5 py-2 text-left min-w-0 max-w-full overflow-hidden ${bubbleClassName}`.trim()}
             style={bubbleStyle}
           >

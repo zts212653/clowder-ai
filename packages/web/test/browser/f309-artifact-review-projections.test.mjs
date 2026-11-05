@@ -3,11 +3,12 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
 import { startReviewHost } from './fixtures/f309-artifact-review-host.mjs';
 import { mediaFixture } from './fixtures/f309-artifact-review-media.mjs';
 import { openReviewPanel } from './fixtures/f309-artwork-controls.mjs';
 import './f309-publication-display.journey.mjs';
+import './f326-work-response.journey.mjs';
 
 async function setup(t, name, kind = 'png') {
   const root = await mkdtemp(path.join(tmpdir(), `f309-passive-${name}-`));
@@ -18,6 +19,8 @@ async function setup(t, name, kind = 'png') {
   const browser = await chromium.launch({ headless: true });
   const pages = [];
   const errors = [];
+  const authorityReads = [];
+  const browserEvents = [];
   t.after(async () => {
     for (const [index, page] of pages.entries()) {
       await page.screenshot({ path: path.join(evidence, `${name}-${index}.png`) });
@@ -25,7 +28,11 @@ async function setup(t, name, kind = 'png') {
     }
     await writeFile(
       path.join(evidence, `${name}-result.json`),
-      JSON.stringify({ errors, task: host.tasks.get(host.taskId), review: host.store.get(reviewId) }, null, 2),
+      JSON.stringify(
+        { errors, authorityReads, browserEvents, task: host.tasks.get(host.taskId), review: host.store.get(reviewId) },
+        null,
+        2,
+      ),
     );
     await browser.close();
     await host.close();
@@ -45,6 +52,31 @@ async function setup(t, name, kind = 'png') {
     const context = await browser.newContext({ viewport: { width: 1280, height: 1000 } });
     const page = await context.newPage();
     pages.push(page);
+    page.on('response', async (response) => {
+      if (new URL(response.url()).pathname === `/api/artifact-reviews/${reviewId}`) {
+        authorityReads.push({
+          page: pages.indexOf(page),
+          at: Date.now(),
+          status: response.status(),
+          body: await response.json().catch(() => null),
+        });
+      }
+    });
+    await page.exposeFunction('recordReviewDiagnostic', (event) =>
+      browserEvents.push({ page: pages.indexOf(page), ...event }),
+    );
+    await page.addInitScript(() => {
+      for (const type of ['cat-cafe:entrusted-work-projection-invalidated', 'cat-cafe:artifact-review-changed']) {
+        window.addEventListener(type, (event) =>
+          window.recordReviewDiagnostic({
+            type,
+            detail: event.detail,
+            at: Date.now(),
+            visibility: document.visibilityState,
+          }),
+        );
+      }
+    });
     page.on('pageerror', (error) => errors.push(error.message));
     page.setDefaultTimeout(8000);
     await page.goto(`${host.origin}?mode=${mode}`);
@@ -214,7 +246,12 @@ for (const kind of ['png', 'mp4']) {
       await page.getByText(retainedComment, { exact: true }).waitFor();
       assert.equal(await page.getByRole('textbox', { name: '评论内容', exact: true }).count(), 0);
       // The composer only exists in comment mode, so also prove the closed history offers no way into it.
-      assert.equal(await page.getByRole('button', { name: '评论', exact: true, disabled: false }).count(), 0);
+      assert.equal(
+        await page
+          .getByRole('button', { name: kind === 'png' ? '圈选' : '评论', exact: true, disabled: false })
+          .count(),
+        0,
+      );
       await page.reload();
       await page.getByText('原任务已收口，讨论与历史版本继续保留。', { exact: true }).waitFor();
       await page.getByRole('combobox', { name: '审阅版本' }).selectOption('1');

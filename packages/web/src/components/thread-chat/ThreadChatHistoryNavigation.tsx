@@ -17,7 +17,11 @@ export function ThreadChatHistoryNavigation({
   if (!visible) return null;
   return (
     <>
-      <ScrollToBottomButton {...bottomProps} />
+      {presentation === 'v2' ? (
+        <ScrollToBottomButton {...bottomProps} placement="rail" />
+      ) : (
+        <ScrollToBottomButton {...bottomProps} />
+      )}
       {(presentation === 'v2' || navigatorProps.messages.length > 5) && <MessageNavigator {...navigatorProps} />}
     </>
   );

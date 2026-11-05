@@ -1,61 +1,12 @@
 /**
  * Built-in (compile-time) connector definitions.
  * Split from connector.ts so registry types and lookup stay under the file-size
- * budget; entries and their order are unchanged.
+ * budget; only Host-owned notice identities are defined here. Plugins declare their own identity.
  */
+import { deploymentDefaults } from '../deployment-defaults.js';
 import type { ConnectorDefinition } from './connector.js';
 
 export const CONNECTOR_DEFINITIONS: readonly ConnectorDefinition[] = [
-  // ── GitHub connectors ──
-  {
-    id: 'github-review',
-    displayName: 'GitHub Review',
-    icon: { type: 'svg', iconId: 'github' },
-    themeColor: '#778899',
-    description: 'GitHub PR review 邮件通知',
-  },
-  {
-    id: 'github-ci',
-    displayName: 'GitHub CI/CD',
-    icon: { type: 'svg', iconId: 'github' },
-    themeColor: '#778899',
-    description: 'GitHub CI/CD 状态通知',
-  },
-  {
-    id: 'github-conflict',
-    displayName: 'PR Conflict',
-    icon: { type: 'svg', iconId: 'github' },
-    themeColor: '#475569',
-    description: 'GitHub PR 冲突状态通知',
-  },
-  {
-    id: 'github-review-feedback',
-    displayName: 'Review Feedback',
-    icon: { type: 'svg', iconId: 'github' },
-    themeColor: '#64748B',
-    description: 'GitHub PR review feedback 通知',
-  },
-  {
-    id: 'github-issue-comment',
-    displayName: 'Issue Comment',
-    icon: { type: 'svg', iconId: 'github' },
-    themeColor: '#778899',
-    description: 'GitHub issue comment 通知',
-  },
-  {
-    id: 'github-repo-event',
-    displayName: 'Repo Inbox',
-    icon: { type: 'svg', iconId: 'github' },
-    themeColor: '#94A3B8',
-    description: 'GitHub 仓库事件通知（新 PR / 新 Issue）',
-  },
-  {
-    id: 'github-wait',
-    displayName: 'GitHub Wait',
-    icon: { type: 'svg', iconId: 'github' },
-    themeColor: '#778899',
-    description: 'GitHub PR 等待条件满足通知',
-  },
   // ── System connectors ──
   {
     id: 'vote-result',
@@ -94,7 +45,7 @@ export const CONNECTOR_DEFINITIONS: readonly ConnectorDefinition[] = [
   },
   {
     id: 'system-command',
-    displayName: 'Clowder AI',
+    displayName: `${deploymentDefaults.brand.displayName}`,
     icon: { type: 'svg', iconId: 'settings' },
     themeColor: '#6B7280',
     description: '系统命令响应',
@@ -128,60 +79,17 @@ export const CONNECTOR_DEFINITIONS: readonly ConnectorDefinition[] = [
     description: '部署条件满足后接回原任务',
   },
   {
+    id: 'worktree-lifecycle',
+    displayName: '工位通知',
+    icon: { type: 'svg', iconId: 'settings' },
+    themeColor: '#6B7280',
+    description: '工位保留、清理及恢复结果',
+  },
+  {
     id: 'physical-limb.stackchan',
     displayName: 'StackChan',
     icon: { type: 'svg', iconId: 'robot' },
     themeColor: '#0F766E',
     description: '物理 Limb 转写通知',
-  },
-  // ── IM connectors (PNG icons) ──
-  {
-    id: 'feishu',
-    displayName: '飞书',
-    icon: { type: 'png', src: '/images/connectors/feishu.png' },
-    themeColor: '#3370FF',
-    description: '飞书机器人',
-  },
-  {
-    id: 'telegram',
-    displayName: 'Telegram',
-    icon: { type: 'png', src: '/images/connectors/telegram.png' },
-    themeColor: '#0088CC',
-    description: 'Telegram Bot',
-  },
-  {
-    id: 'dingtalk',
-    displayName: '钉钉',
-    icon: { type: 'png', src: '/images/connectors/dingtalk.png' },
-    themeColor: '#3296FA',
-    description: '钉钉企业内部应用',
-  },
-  {
-    id: 'xiaoyi',
-    displayName: '小艺 APP',
-    icon: { type: 'png', src: '/images/connectors/xiaoyi.png' },
-    themeColor: '#CF0A2C',
-    description: '华为小艺 OpenClaw 模式',
-  },
-  {
-    id: 'wecom-bot',
-    displayName: '企业微信',
-    icon: { type: 'png', src: '/images/connectors/wecom-bot.png' },
-    themeColor: '#4F46E5',
-    description: '企业微信智能机器人 (WebSocket)',
-  },
-  {
-    id: 'wecom-agent',
-    displayName: '企微自建应用',
-    icon: { type: 'png', src: '/images/connectors/wecom-agent.png' },
-    themeColor: '#7C3AED',
-    description: '企业微信自建应用 (HTTP 回调)',
-  },
-  {
-    id: 'weixin',
-    displayName: '微信',
-    icon: { type: 'png', src: '/images/connectors/weixin.png' },
-    themeColor: '#07C160',
-    description: '微信个人号 iLink Bot',
   },
 ] as const;

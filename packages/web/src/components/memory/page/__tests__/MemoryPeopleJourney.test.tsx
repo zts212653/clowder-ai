@@ -1,3 +1,4 @@
+import { personForgetRequestIdSchema } from '@cat-cafe/shared';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -233,13 +234,62 @@ it('requires explicit permanent-forget confirmation and keeps stale data unchang
   apiFetch.mockResolvedValue(response({ error: 'stale_revision' }, 409));
   await click('确认永久遗忘');
   const call = apiFetch.mock.calls.find(([, init]) => init?.method === 'POST');
-  expect(JSON.parse(call?.[1].body)).toEqual(
+  const body = JSON.parse(call?.[1].body);
+  expect(body).toEqual(
     expect.objectContaining({
       action: 'hard_forget_person',
       expectedPersonRevision: 'person-revision-1',
       confirmed: true,
     }),
   );
+  expect(personForgetRequestIdSchema.safeParse(body.requestId).success).toBe(true);
+  expect(body.requestId.length).toBeGreaterThanOrEqual(32);
   expect(host.textContent).toContain('版本已变化');
   expect(host.textContent).toContain('小林');
+  expect(button('确认永久遗忘')?.disabled).toBe(true);
+});
+it('keeps the original forget command after a lost response even when the owner clicks the original confirmation again', async () => {
+  await openPerson();
+  await click('忘掉这个人');
+  await act(async () => host.querySelector<HTMLInputElement>('input[type="checkbox"]')?.click());
+  let appliedRequestId: string | null = null;
+  const original = apiFetch.getMockImplementation();
+  apiFetch.mockImplementation(async (path: string, init?: RequestInit) => {
+    if (init?.method === 'POST') {
+      const body = JSON.parse(String(init.body));
+      if (!appliedRequestId) {
+        appliedRequestId = body.requestId;
+        throw new TypeError('Response lost after the server applied the forget');
+      }
+      return body.requestId === appliedRequestId
+        ? response({ action: 'hard_forget_person', outcome: 'replayed' })
+        : response({ error: 'not_available' }, 404);
+    }
+    return path.startsWith('/api/memory/people?') && appliedRequestId
+      ? response({ readStatus: 'ready', entries: [], meta: { count: 0, limit: 20, offset: 0, hasMore: false } })
+      : original?.(path);
+  });
+  await click('确认永久遗忘');
+  expect(host.textContent).toContain('暂时无法修改');
+  await click('确认永久遗忘');
+  expect(apiFetch.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
+  expect(button('确认永久遗忘')?.disabled).toBe(true);
+  expect(button('忘掉这个人')?.disabled).toBe(true);
+  await click('重试这次操作');
+  const bodies = apiFetch.mock.calls
+    .filter(([, init]) => init?.method === 'POST')
+    .map(([, init]) => JSON.parse(init.body));
+  expect(bodies).toHaveLength(2);
+  expect(bodies[0]).toEqual(
+    expect.objectContaining({
+      action: 'hard_forget_person',
+      expectedPersonRevision: 'person-revision-1',
+      confirmed: true,
+    }),
+  );
+  expect(personForgetRequestIdSchema.safeParse(bodies[0].requestId).success).toBe(true);
+  expect(bodies[0].requestId.length).toBeGreaterThanOrEqual(32);
+  expect(bodies[1]).toEqual(bodies[0]);
+  expect(host.querySelector('aside[aria-label="人物详情"]')).toBeNull();
+  expect(button('小林')).toBeUndefined();
 });

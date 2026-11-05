@@ -1,12 +1,17 @@
 'use client';
 
 import { type CloudBridgeOutboundReceiptV1, isCloudBridgeOutboundReceiptV1 } from '@cat-cafe/shared';
+import type { ReactNode } from 'react';
 import { getCachedCats } from '@/hooks/useCatData';
 import type { ChatMessage as ChatMessageType } from '@/stores/chatStore';
+import { ChatApprovalDecisionReceipt } from './approval-receipt/ChatApprovalDecisionReceipt';
+import { isChatApprovalReceipt } from './approval-receipt/receipt-source';
 import { CloudDotReceipt } from './CloudDotReceipt';
+import { CloudReplyStatus } from './CloudReplyStatus';
 import { HubIcon } from './hub-icons';
 import { MarkdownContent } from './MarkdownContent';
 import { ReplyPill } from './ReplyPill';
+import { useCloudReply } from './useCloudReply';
 
 function formatTime(ts: number): string {
   const d = new Date(ts);
@@ -34,6 +39,9 @@ function NoticeIcon({ icon }: { icon?: string }) {
 
 interface SystemNoticeBarProps {
   message: ChatMessageType;
+  footer?: ReactNode;
+  threadId?: string;
+  timelineMessages?: readonly ChatMessageType[];
 }
 
 const RECEIPT_STATUS_LABEL: Record<CloudBridgeOutboundReceiptV1['status'], string> = {
@@ -80,14 +88,25 @@ function CloudOutboundAudit({ message, receipt }: { message: ChatMessageType; re
   );
 }
 
-export function SystemNoticeBar({ message }: SystemNoticeBarProps) {
+export function SystemNoticeBar({ message, footer, threadId, timelineMessages }: SystemNoticeBarProps) {
+  const receipt = message.source?.meta?.cloudBridgeOutboundReceipt;
+  const outboundReceipt = isCloudBridgeOutboundReceiptV1(receipt) ? receipt : undefined;
+  const logical = useCloudReply(
+    outboundReceipt?.targetCatId === 'gpt-dot' ? undefined : outboundReceipt,
+    threadId,
+    timelineMessages,
+  );
   const source = message.source;
   if (!source) return null;
+  if (isChatApprovalReceipt(message))
+    return (
+      <>
+        <ChatApprovalDecisionReceipt message={message} threadId={threadId} timelineMessages={timelineMessages} />
+        {footer}
+      </>
+    );
 
-  const tone = getNoticeTone(source.meta);
-  const outboundReceipt = isCloudBridgeOutboundReceiptV1(source.meta?.cloudBridgeOutboundReceipt)
-    ? source.meta.cloudBridgeOutboundReceipt
-    : undefined;
+  const tone = logical.state !== 'unverified' ? 'info' : getNoticeTone(source.meta);
 
   return (
     <div data-message-id={message.id} data-notice-tone={tone} className="flex justify-center mb-3">
@@ -104,7 +123,15 @@ export function SystemNoticeBar({ message }: SystemNoticeBarProps) {
               <NoticeIcon icon={source.icon} />
             </span>
             <div className="min-w-0 flex-1 text-sm leading-6">
-              <MarkdownContent content={message.content} />
+              {logical.state !== 'unverified' && outboundReceipt ? (
+                <CloudReplyStatus
+                  result={logical}
+                  targetCatId={outboundReceipt.targetCatId}
+                  hostUnconfirmed={outboundReceipt.transport === 'host' && outboundReceipt.status === 'unknown'}
+                />
+              ) : (
+                <MarkdownContent content={message.content} />
+              )}
               {outboundReceipt?.targetCatId === 'gpt-dot' ? (
                 <CloudDotReceipt eventId={outboundReceipt.hostMessageId} />
               ) : (
@@ -113,6 +140,7 @@ export function SystemNoticeBar({ message }: SystemNoticeBarProps) {
             </div>
           </div>
         </div>
+        {footer}
       </div>
     </div>
   );

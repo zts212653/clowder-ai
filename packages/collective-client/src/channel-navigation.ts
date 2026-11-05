@@ -1,4 +1,4 @@
-import type { CollectiveEventEnvelope, CollectiveParticipant } from './client-types.js';
+import type { CollectiveChannelProjection, CollectiveEventEnvelope, CollectiveParticipant } from './client-types.js';
 
 export function eventChannelId(event: CollectiveEventEnvelope): string | undefined {
   return event.location?.channelId ?? (event.target.kind === 'channel' ? event.target.channelId : undefined);
@@ -7,9 +7,11 @@ export function eventChannelId(event: CollectiveEventEnvelope): string | undefin
 export function channelDestinations(
   events: readonly CollectiveEventEnvelope[],
   participants: readonly CollectiveParticipant[],
+  channels: readonly CollectiveChannelProjection[] = [],
 ) {
   const ids = new Set([
     'general',
+    ...channels.map((channel) => channel.channelId),
     ...events.flatMap((event) => eventChannelId(event) ?? []),
     ...participants.flatMap((member) => member.channelIds),
   ]);
@@ -20,13 +22,17 @@ export function channelDestinations(
   });
 }
 
-export function readChannelPosition(namespace: string): string {
+export function readSavedChannelPosition(namespace: string): string | undefined {
   try {
     const saved = window.localStorage.getItem(`collective-channel:${namespace}`);
-    return saved?.trim() && saved.length <= 160 ? saved : 'general';
+    return saved?.trim() && saved.length <= 160 ? saved : undefined;
   } catch {
-    return 'general';
+    return undefined;
   }
+}
+
+export function readChannelPosition(namespace: string): string {
+  return readSavedChannelPosition(namespace) ?? 'general';
 }
 
 export function readChannelTarget(search?: string) {
@@ -43,17 +49,28 @@ export function readChannelTarget(search?: string) {
 
 export function readChannelEntry(namespace: string) {
   const target = readChannelTarget();
+  const library =
+    typeof window !== 'undefined' && new URLSearchParams(window.location?.search).get('view') === 'artifacts';
   return {
     channelId: target ? target : readChannelPosition(namespace),
-    destination: target ? ('channel' as const) : ('home' as const),
+    destination: library ? ('library' as const) : target ? ('channel' as const) : ('home' as const),
   };
 }
 
 export function writeChannelTarget(channelId?: string) {
   if (typeof window === 'undefined') return;
   const url = new URL(window.location.href);
+  url.searchParams.delete('view');
   if (channelId) url.searchParams.set('channelId', channelId);
   else url.searchParams.delete('channelId');
+  window.history.replaceState(window.history.state, '', url);
+}
+
+export function writeLibraryTarget() {
+  if (typeof window === 'undefined') return;
+  const url = new URL(window.location.href);
+  url.searchParams.delete('channelId');
+  url.searchParams.set('view', 'artifacts');
   window.history.replaceState(window.history.state, '', url);
 }
 
@@ -65,10 +82,20 @@ export function saveChannelPosition(namespace: string, channelId: string) {
   }
 }
 
-export function eventDayLabel(value: string) {
+export function clearChannelPosition(namespace: string) {
+  try {
+    window.localStorage.removeItem(`collective-channel:${namespace}`);
+  } catch {
+    /* Navigation still works when browser storage is unavailable. */
+  }
+}
+
+export function eventDayLabel(value: string, language: 'zh' | 'en' = 'zh') {
   const date = new Date(value);
   const now = new Date();
   return date.toDateString() === now.toDateString()
-    ? '今天'
-    : new Intl.DateTimeFormat('zh-CN', { month: 'long', day: 'numeric' }).format(date);
+    ? language === 'en'
+      ? 'Today'
+      : '今天'
+    : new Intl.DateTimeFormat(language === 'en' ? 'en-US' : 'zh-CN', { month: 'long', day: 'numeric' }).format(date);
 }

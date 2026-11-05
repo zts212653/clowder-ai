@@ -22,8 +22,9 @@ export function commitInMemoryQueueLedgerEntry(input: {
   if (!current || index < 0) return { outcome: 'not_found' };
   const entry = current[index];
   if (!entry) return { outcome: 'not_found' };
-  if (input.mode === 'processing') return commitClaimedTarget(input, current, index, entry);
-  if (input.mode === 'queued') return commitClaimedState(input, current, index, entry);
+  if (input.mode === 'processing' || (input.mode === 'withdrawn' && input.retiredTargetIds))
+    return commitClaimedTarget(input, current, index, entry);
+  if (input.mode === 'queued' || input.mode === 'claimed') return commitClaimedState(input, current, index, entry);
   return commitWithdrawn(input, current, index, entry);
 }
 
@@ -43,12 +44,14 @@ function commitClaimedState(
 ): QueueLedgerTransitionResult {
   if (entry.status !== 'claimed' || entry.claimId !== input.claimId) return { outcome: 'state_changed' };
   const next = replacementFor(entry, input.replacement);
-  next.status = 'queued';
-  delete next.claimId;
-  delete next.claimedAt;
-  delete next.claimedTargetIds;
-  delete next.claimedFromTargetless;
-  delete next.processingStartedAt;
+  next.status = input.mode === 'claimed' ? 'claimed' : 'queued';
+  if (input.mode !== 'claimed') {
+    delete next.claimId;
+    delete next.claimedAt;
+    delete next.claimedTargetIds;
+    delete next.claimedFromTargetless;
+    delete next.processingStartedAt;
+  }
   assertQueueLedgerEntry(next);
   current[index] = next;
   return { outcome: 'updated', entry: cloneQueueLedgerEntry(next) };
@@ -75,13 +78,18 @@ function commitClaimedTarget(
   const source = replacementFor(entry, input.replacement);
   const attempted = cloneQueueLedgerEntry(source);
   attempted.targets = claimedTargets;
-  attempted.status = 'processing';
-  attempted.processingStartedAt = input.at;
+  attempted.status = input.mode === 'withdrawn' ? 'terminal' : 'processing';
+  if (input.mode === 'withdrawn') {
+    attempted.terminalAt = input.at;
+    delete attempted.processingStartedAt;
+  } else {
+    attempted.processingStartedAt = input.at;
+    delete attempted.terminalAt;
+  }
   delete attempted.claimId;
   delete attempted.claimedAt;
   delete attempted.claimedTargetIds;
   delete attempted.claimedFromTargetless;
-  delete attempted.terminalAt;
 
   const claimedSet = new Set(claimedTargets);
   const remainingTargets = entry.targets.filter((targetId) => !claimedSet.has(targetId));
@@ -93,6 +101,15 @@ function commitClaimedTarget(
   } else {
     const remaining = cloneQueueLedgerEntry(entry);
     remaining.targets = remainingTargets;
+    for (const key of ['appendPendingByTarget', 'appendRecoveryByTarget'] as const) {
+      const map = remaining.delivery[key];
+      if (map) for (const target of Object.keys(map)) if (!remainingTargets.includes(target)) delete map[target];
+    }
+    if (remaining.delivery.routingHeldTargetIds) {
+      remaining.delivery.routingHeldTargetIds = remaining.delivery.routingHeldTargetIds.filter((target) =>
+        remainingTargets.includes(target),
+      );
+    }
     if (remainingClaimedTargets.length > 0) {
       remaining.status = 'claimed';
       remaining.claimedTargetIds = remainingClaimedTargets;

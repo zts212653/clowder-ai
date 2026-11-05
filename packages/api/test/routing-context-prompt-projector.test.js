@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { getCoCreatorConfig } from '../dist/config/cat-config-loader.js';
 import { createRoutingDossierFixture } from './helpers/routing-dossier-fixture.js';
 
 const repositoryRoot = fileURLToPath(new URL('../../../', import.meta.url));
@@ -105,7 +106,10 @@ describe('F293 RoutingContextPromptProjector', () => {
     );
     assert.equal(payload.scarceSeats[0].quotaPoolType, 'weekly_subscription_scarce');
     assert.equal(payload.scarceSeatColdStartObservation.catId, 'fable-5');
-    assert.match(payload.scarceSeatColdStartObservation.note, /长线程冷启动约占周额度 2%（operator 10-06 观测）/);
+    assert.equal(
+      payload.scarceSeatColdStartObservation.note,
+      `长线程冷启动约占周额度 2%（${getCoCreatorConfig().nickname ?? 'operator'} 10-06 观测）`,
+    );
     assert.match(payload.scarceSeatColdStartObservation.sourceRef, /thread_msl9i0iius52mpkh/);
     assert.ok(projection.length <= ROUTING_CONTEXT_PROMPT_MAX_CHARS);
   });

@@ -1,5 +1,6 @@
 import { refIdentity } from '@cat-cafe/shared';
 import { EvolutionSource } from '../EvolutionVersionEvidence';
+import { ExplorationCover } from './ExplorationCover';
 import { ExplorationIcon } from './ExplorationIcon';
 import type { useExplorationWorkspace } from './use-exploration-workspace';
 
@@ -11,7 +12,7 @@ export function ExplorationVersionCards({
   workspace: ReturnType<typeof useExplorationWorkspace>;
   notes: ReadonlyMap<string, string>;
 }) {
-  const { catalog, selectedNodeKey, currentKeys, selectNode } = workspace;
+  const { catalog, selectedNodeKey, currentKeys, adoptedKeys, selectNode } = workspace;
   if (!catalog) return null;
   const titles = new Map(catalog.nodes.map((node) => [refIdentity(node.nodeRef), node.title]));
   const counts = new Map<string, number>();
@@ -31,6 +32,9 @@ export function ExplorationVersionCards({
               <ExplorationIcon kind={kind === 'owner_version' ? 'branch' : 'evidence'} />
               {label} · {nodes.length}
             </h3>
+            {nodes.some((node) => node.parentEdges.length === 0) && (
+              <p className="exploration-caption">目录没登记部分版本是从哪版改来的，所以不连线。</p>
+            )}
             <ol className="exploration-version-card-list">
               {nodes.map((node) => {
                 const key = refIdentity(node.nodeRef);
@@ -47,13 +51,16 @@ export function ExplorationVersionCards({
                     >
                       <strong>{node.title}</strong>
                       <span className="exploration-version-card-state">
-                        {currentKeys.has(key) && <span>当前生效</span>}
+                        {currentKeys.has(key) && <span>来源当前版本</span>}
+                        {adoptedKeys.has(key) && <span>当前采用</span>}
                         {selectedNodeKey === key && <span>正在读</span>}
                       </span>
                       <span>{counts.has(key) ? `${counts.get(key)} 次实验` : '尚无实验'}</span>
                       {notes.has(key) && <span>{notes.get(key)}</span>}
                     </button>
-                    <p>{parents.length ? `派生自：${parents.join('、')}` : '未登记父边'}</p>
+                    <ExplorationCover key={node.preview?.media.mediaRef.version} programId={workspace.id} node={node} />
+                    <p>改了什么：{node.changes[0]?.detail ?? node.summary}</p>
+                    {parents.length > 0 && <p>派生自：{parents.join('、')}</p>}
                     <details>
                       <summary>改动与来源 · {node.changes.length} 项</summary>
                       <p>{node.summary}</p>
@@ -61,7 +68,7 @@ export function ExplorationVersionCards({
                         <div key={`${change.label}:${index}`}>
                           <h4>{change.label}</h4>
                           <p>{change.detail}</p>
-                          <EvolutionSource label="改动依据" source={change.sourceRef} />
+                          <EvolutionSource label="改动依据" source={change.sourceRef} href={change.ownerHref} />
                         </div>
                       ))}
                       <EvolutionSource label="原件来源" source={node.sourceRef} />

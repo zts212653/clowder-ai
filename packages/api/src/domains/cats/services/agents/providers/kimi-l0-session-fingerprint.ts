@@ -14,10 +14,10 @@
  *
  * 隔离（愿景守护 Terra 护栏①）：store key 为 `catId:sessionId`——同一
  * sessionId 在不同猫之间永不匹配（L0 不同则指纹不同，必然 fresh start，
- * key 隔离只是把这个安全方向显式化）；用户级隔离由 KIMI_SHARE_DIR 本身
+ * key 隔离只是把这个安全方向显式化）；用户级隔离由 KIMI_CODE_HOME 本身
  * （per-user home 或 callbackEnv override）承担。
  *
- * Store：`<KIMI_SHARE_DIR>/cat-cafe-l0-session-fingerprints.json`，
+ * Store：`<KIMI_CODE_HOME>/cat-cafe-l0-session-fingerprints.json`，
  * tmp+rename 原子写，last-writer-wins（同一 sessionId 不应并发调用）。
  */
 

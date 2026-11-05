@@ -76,3 +76,36 @@ describe('terminal host tail wire ownership', () => {
       expect(readMessageOutputLayout({ ...signed, ...patch })).toBeUndefined();
     });
 });
+
+describe('successful-turn boundary wire evidence', () => {
+  const boundary = {
+    ...layout,
+    basis: 'successful_turn_last_tool',
+    runs: [
+      { id: 'early', channel: 'commentary', start: 0, end: 3, gluePrefixLength: 0 },
+      { id: 'answer', channel: 'final', start: 3, end: 8, gluePrefixLength: 2 },
+    ],
+    order: [
+      { kind: 'run', runId: 'early' },
+      { kind: 'tool', toolEventId: 'read', executionRef: 'child' },
+      { kind: 'run', runId: 'answer' },
+    ],
+  };
+  it('round-trips terminal ranges without inventing native identities', () => {
+    expect(readMessageOutputLayout(JSON.parse(JSON.stringify(boundary)))).toEqual(boundary);
+  });
+  it('rejects a native identity on an inferred boundary and a final range before the last tool', () => {
+    expect(
+      readMessageOutputLayout({ ...boundary, runs: [{ ...boundary.runs[0], identity }, boundary.runs[1]] }),
+    ).toBeUndefined();
+    expect(
+      readMessageOutputLayout({ ...boundary, runs: [{ ...boundary.runs[0], channel: 'final' }, boundary.runs[1]] }),
+    ).toBeUndefined();
+    expect(
+      readMessageOutputLayout({
+        ...boundary,
+        order: [...boundary.order, { kind: 'tool', toolEventId: 'later', executionRef: 'child' }],
+      }),
+    ).toBeUndefined();
+  });
+});

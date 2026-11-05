@@ -1,14 +1,8 @@
 'use client';
 
-import type {
-  ApprovalHubItem,
-  EntityConflictContext,
-  EntityConflictResolutionRequest,
-  HumanDispositionFeedbackInput,
-} from '@cat-cafe/shared';
-import { useCallback, useMemo, useState } from 'react';
+import type { ApprovalHubItem } from '@cat-cafe/shared';
+import { useMemo } from 'react';
 import { useCatNameResolver } from '@/hooks/useCatNameResolver';
-import { approvalFeatureMeta } from '@/lib/approval-features';
 import { approvalOriginThreadId } from '@/lib/approval-navigation';
 import {
   approvalDisplayTitle,
@@ -21,12 +15,11 @@ import type { Thread } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { ApprovalDecisionCard, type ApprovalDecisionDetails } from './ApprovalDecisionCard';
 import { ApprovalFeatureBadge } from './ApprovalFeatureBadge';
-import { useApprovalHost, useGuardedWrite, useReportEditing } from './ApprovalHost';
 import { ApprovalTechnicalDetailContent } from './ApprovalTechnicalDetails';
 import { GenericApprovalDecisionActions } from './GenericApprovalDecisionActions';
 import { GenericApprovalRecommendation } from './GenericApprovalRecommendation';
-import { HumanDispositionFeedbackDialog } from './HumanDispositionFeedbackDialog';
 import { MailboxApprovalExplanation } from './shell/mailbox/MailboxApprovalExplanation';
+import { useApprovalItemActions } from './useApprovalItemActions';
 
 export function GenericApprovalItemCard({ item }: { item: ApprovalHubItem }) {
   const close = useApprovalHubStore((state) => state.close);
@@ -47,67 +40,17 @@ export function GenericApprovalItemCard({ item }: { item: ApprovalHubItem }) {
     [threads, f193TargetThreadId],
   );
 
-  const isStale = useMemo(() => item.expiresAt != null && item.expiresAt < Date.now(), [item.expiresAt]);
-  const isPersonMemoryClaimSelect = item.sourceFeatureId === 'F276' && item.decisionMode === 'claim-select';
-  const approveProposal = useApprovalHubStore((state) => state.approveProposal);
-  const rejectProposal = useApprovalHubStore((state) => state.rejectProposal);
-  const decisionError = useApprovalHubStore((state) => state.error);
-  const resolveEntityConflict = useApprovalHubStore((state) => state.resolveEntityConflict);
-  const decidingState = useApprovalHubStore((state) => state.deciding[item.proposalId]);
-  const entityConflict =
-    item.sourceFeatureId === 'F260' && isEntityConflictContext(item.detail.conflict) ? item.detail.conflict : undefined;
-  const featureMeta = approvalFeatureMeta(item.sourceFeatureId);
-  const feedbackReasonCodes = featureMeta.humanDispositionReasonCodes;
-  const usesFeedbackDialog = !isStale && feedbackReasonCodes !== null;
-
-  const [feedbackDialogOpen, setFeedbackDialogOpen] = useState(false);
-  const [feedbackDialogError, setFeedbackDialogError] = useState<string | null>(null);
-  const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
-
-  const guardedWrite = useGuardedWrite();
-  const { writesLocked, presentation } = useApprovalHost();
-  // A feedback dialog that is open is a decision in progress, whether or not a word has been typed yet.
-  useReportEditing('feedback-dialog', feedbackDialogOpen);
-
-  const handleApprove = useCallback(() => {
-    void guardedWrite('approve', () => approveProposal(item.proposalId));
-  }, [approveProposal, guardedWrite, item.proposalId]);
-
-  const handleReject = useCallback(() => {
-    if (usesFeedbackDialog) {
-      setFeedbackDialogError(null);
-      setFeedbackSubmitted(false);
-      setFeedbackDialogOpen(true);
-      return;
-    }
-    void guardedWrite('reject', () => rejectProposal(item.proposalId));
-  }, [guardedWrite, item.proposalId, rejectProposal, usesFeedbackDialog]);
-
-  const handleEntityResolution = useCallback(
-    (resolution: EntityConflictResolutionRequest) => {
-      void guardedWrite('entity-resolve', () => resolveEntityConflict(item.proposalId, resolution));
-    },
-    [guardedWrite, item.proposalId, resolveEntityConflict],
-  );
-
-  const submitReject = useCallback(
-    async (feedback: HumanDispositionFeedbackInput | undefined) => {
-      // Refused by the host (writes are locked): nothing was sent, so the dialog stays as the user left it.
-      const written = await guardedWrite('reject-feedback', async () => {
-        setFeedbackSubmitted(true);
-        setFeedbackDialogError(null);
-        return rejectProposal(item.proposalId, feedback);
-      });
-      if (!written.sent) return;
-      if (written.value) {
-        setFeedbackDialogOpen(false);
-        setFeedbackSubmitted(false);
-        return;
-      }
-      setFeedbackDialogError('拒绝失败，请检查提案状态后重试。');
-    },
-    [guardedWrite, item.proposalId, rejectProposal],
-  );
+  const {
+    isStale,
+    isPersonMemoryClaimSelect,
+    decidingState,
+    entityConflict,
+    handleApprove,
+    handleReject,
+    handleEntityResolution,
+    presentation,
+    feedbackDialog,
+  } = useApprovalItemActions(item);
 
   const f225HandoffDetails =
     item.sourceFeatureId === 'F225'
@@ -167,6 +110,7 @@ export function GenericApprovalItemCard({ item }: { item: ApprovalHubItem }) {
     <>
       <ApprovalDecisionCard
         testId={`approval-item-${item.proposalId}`}
+        embedded={presentation === 'mailbox'}
         header={header}
         title={approvalDisplayTitle(item, { resolveCatName })}
         actionReason={
@@ -180,22 +124,7 @@ export function GenericApprovalItemCard({ item }: { item: ApprovalHubItem }) {
         currentDecision={currentDecision}
         details={approvalDetailDisclosure(item.detail)}
       />
-      {feedbackReasonCodes && (
-        <HumanDispositionFeedbackDialog
-          open={feedbackDialogOpen}
-          reasonCodes={feedbackReasonCodes}
-          subjectLabel={item.summary}
-          submitting={decidingState === 'rejecting'}
-          submitLocked={writesLocked}
-          error={feedbackSubmitted ? (feedbackDialogError ?? decisionError) : null}
-          onCancel={() => {
-            setFeedbackDialogOpen(false);
-            setFeedbackDialogError(null);
-            setFeedbackSubmitted(false);
-          }}
-          onSubmit={(feedback) => void submitReject(feedback)}
-        />
-      )}
+      {feedbackDialog}
     </>
   );
 }
@@ -229,17 +158,4 @@ function StatusBadge({ children, testId }: { children: string; testId?: string }
 function formatDetailLines(entries: ReadonlyArray<readonly [label: string, value: unknown]>): string | undefined {
   const lines = entries.flatMap(([label, value]) => (value == null ? [] : [`${label}: ${String(value)}`]));
   return lines.length > 0 ? lines.join('\n') : undefined;
-}
-
-function isEntityConflictContext(value: unknown): value is EntityConflictContext {
-  if (typeof value !== 'object' || value === null) return false;
-  const candidate = value as Partial<EntityConflictContext>;
-  return (
-    candidate.version === 1 &&
-    (candidate.reason === 'existing-entity-change' || candidate.reason === 'surface-collision') &&
-    typeof candidate.fingerprint === 'string' &&
-    typeof candidate.incoming === 'object' &&
-    Array.isArray(candidate.candidates) &&
-    Array.isArray(candidate.allowedActions)
-  );
 }

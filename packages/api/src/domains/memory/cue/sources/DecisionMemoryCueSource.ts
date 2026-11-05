@@ -1,3 +1,4 @@
+import type { MemoryCueDocumentWindowRequest } from '@cat-cafe/shared';
 import type { EvidenceItem, IEvidenceStore } from '../../interfaces.js';
 import type { MemoryCueEpisodeStore } from '../MemoryCueEpisodeStore.js';
 import type { MemoryCueSourceProjection } from '../MemoryCueResolverRegistry.js';
@@ -66,7 +67,11 @@ export class DecisionMemoryCueSource {
     };
   }
 
-  async read(input: { anchor: string; expectedRevision: string }): Promise<DecisionMemoryCueReadResult> {
+  async read(input: {
+    anchor: string;
+    expectedRevision: string;
+    window?: MemoryCueDocumentWindowRequest;
+  }): Promise<DecisionMemoryCueReadResult> {
     if (!DECISION_ANCHOR.test(input.anchor)) {
       return { status: 'not_available', invalidationReason: 'source_forgotten' };
     }
@@ -98,7 +103,7 @@ export class DecisionMemoryCueSource {
         summary: item.summary,
         sourcePath: document.sourcePath,
         sourceRevision: document.revision,
-        ...canonicalProjectDocumentWindow(document.content),
+        ...canonicalProjectDocumentWindow(document.content, input.window),
       },
     };
   }

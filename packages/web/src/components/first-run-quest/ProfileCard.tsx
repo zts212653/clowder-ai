@@ -16,6 +16,7 @@ interface ProfileCardProps {
   onTest: () => void;
   onProfileRefresh: () => void;
   onEdit: () => void;
+  readOnly?: boolean;
 }
 
 const PROVIDER_DEFAULT_HOST: Record<string, string> = {
@@ -36,6 +37,7 @@ export function ProfileCard({
   onTest,
   onProfileRefresh,
   onEdit,
+  readOnly = false,
 }: ProfileCardProps) {
   const [addingModel, setAddingModel] = useState(false);
   const [newModel, setNewModel] = useState('');
@@ -117,16 +119,18 @@ export function ProfileCard({
                 </>
               )}
             </div>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onEdit();
-              }}
-              className="shrink-0 text-xs text-conn-amber-text hover:text-conn-amber-text"
-            >
-              编辑
-            </button>
+            {!readOnly && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onEdit();
+                }}
+                className="shrink-0 text-xs text-conn-amber-text hover:text-conn-amber-text"
+              >
+                编辑
+              </button>
+            )}
           </div>
 
           {/* Model chips with add/delete */}
@@ -145,23 +149,25 @@ export function ProfileCard({
                   }`}
                 >
                   {m}
-                  <span
-                    role="button"
-                    tabIndex={0}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleRemove(m);
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
+                  {!readOnly && (
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      onClick={(e) => {
                         e.stopPropagation();
                         handleRemove(m);
-                      }
-                    }}
-                    className="hidden text-cafe-muted hover:text-conn-red-text group-hover:inline"
-                  >
-                    ×
-                  </span>
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.stopPropagation();
+                          handleRemove(m);
+                        }
+                      }}
+                      className="hidden text-cafe-muted hover:text-conn-red-text group-hover:inline"
+                    >
+                      ×
+                    </span>
+                  )}
                 </button>
               ))}
               {addingModel ? (
@@ -191,7 +197,7 @@ export function ProfileCard({
                     ✕
                   </button>
                 </span>
-              ) : (
+              ) : !readOnly ? (
                 <button
                   type="button"
                   onClick={() => setAddingModel(true)}
@@ -199,10 +205,12 @@ export function ProfileCard({
                 >
                   + 添加
                 </button>
-              )}
+              ) : null}
             </div>
             {models.length === 0 && !addingModel && (
-              <p className="mt-1 text-xs text-cafe-muted">{'暂无模型，请点击"+ 添加"后测试'}</p>
+              <p className="mt-1 text-xs text-cafe-muted">
+                {profile.authType === 'oauth' ? '未指定模型，将使用 CLI 默认模型' : '暂无模型，请点击"+ 添加"后测试'}
+              </p>
             )}
             {modelError && <p className="mt-1 text-xs text-conn-red-text">{modelError}</p>}
           </div>
@@ -212,7 +220,8 @@ export function ProfileCard({
             <button
               type="button"
               onClick={onTest}
-              disabled={testing || !selectedModel}
+              data-testid="first-run-connect-test"
+              disabled={testing || (!selectedModel && profile.authType !== 'oauth' && !profile.syntheticNative)}
               className={`flex items-center gap-1.5 rounded border px-2.5 py-1 text-xs font-medium transition-all ${
                 testing
                   ? 'cursor-wait border-conn-amber-ring bg-conn-amber-bg text-conn-amber-text'

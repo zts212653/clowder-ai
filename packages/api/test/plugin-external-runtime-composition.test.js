@@ -4,13 +4,16 @@ import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { test } from 'node:test';
+import Fastify from 'fastify';
+import { InvocationRegistry } from '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import {
   createDormantPluginRuntimeComposition,
   EXTERNAL_PLUGIN_PRE_ACTIVE_TIMEOUT_MS,
   resolvePluginRuntimePersistencePaths,
 } from '../dist/domains/plugin/index.js';
-import { MemoryMeetingIntakeStore, MemorySignalRouteStore } from '../dist/domains/signal-intake/index.js';
+import { callbacksRoutes } from '../dist/routes/callbacks.js';
+import { assertHostListenLifecycle } from './helpers/plugin-host-listen-contract.js';
 import {
   completeExternalHandshake,
   EXTERNAL_PACKAGE_DIGEST,
@@ -24,8 +27,6 @@ async function composition(projectRoot, processes = new FakePluginProcessAdapter
     processes,
     runtime: createDormantPluginRuntimeComposition({
       projectRoot,
-      routes: new MemorySignalRouteStore(),
-      intakes: new MemoryMeetingIntakeStore(),
       messageStore: new MessageStore(),
       processes,
       ...(packages === undefined ? {} : { packages }),
@@ -34,7 +35,7 @@ async function composition(projectRoot, processes = new FakePluginProcessAdapter
   };
 }
 
-test('current-main compatibility paths are explicit, project-scoped, and replaceable at one seam', async () => {
+test('installed runtime persistence paths are explicit, project-scoped, and replaceable at one seam', async () => {
   const projectRoot = await mkdtemp(resolve(tmpdir(), 'cat-cafe-k2d-composition-paths-'));
 
   assert.deepEqual(resolvePluginRuntimePersistencePaths(projectRoot), {
@@ -51,8 +52,6 @@ test('current-main compatibility paths are explicit, project-scoped, and replace
   const runtime = createDormantPluginRuntimeComposition({
     projectRoot,
     paths: injected,
-    routes: new MemorySignalRouteStore(),
-    intakes: new MemoryMeetingIntakeStore(),
     messageStore: new MessageStore(),
   });
   assert.deepEqual(runtime.paths, injected);
@@ -80,7 +79,6 @@ test('composition recovers both durable stores and resumes enabled owner intent 
     computedPackageDigest: EXTERNAL_PACKAGE_DIGEST,
     expectedPackageDigest: EXTERNAL_PACKAGE_DIGEST,
     packagePluginId: externalCandidate().pluginId,
-    effectiveGrants: ['events.publish'],
     signalSchemas: {
       'schemas/external.signal.v1.schema.json': {
         type: 'object',
@@ -89,9 +87,9 @@ test('composition recovers both durable stores and resumes enabled owner intent 
       },
     },
   });
-  await first.runtime.inventoryStore.transaction((transaction) => {
-    const instance = transaction.instances.get(installed.pluginInstanceId);
-    transaction.instances.put({
+  await first.runtime.inventoryStore.transaction(async (transaction) => {
+    const instance = await transaction.instances.get(installed.pluginInstanceId);
+    await transaction.instances.put({
       ...instance,
       configReadiness: 'ready',
       activationState: 'enabled',
@@ -126,12 +124,8 @@ test('composition recovers both durable stores and resumes enabled owner intent 
 test('dormant composition binds messaging routes to its single K-1 domain', async () => {
   const projectRoot = await mkdtemp(resolve(tmpdir(), 'cat-cafe-m0-composition-messaging-'));
   const manifest = externalManifest();
-  const grants = ['messaging.send', 'messaging.appendElements', 'message.event.subscribe'];
-  manifest.features[0].capabilities = grants;
   const runtime = createDormantPluginRuntimeComposition({
     projectRoot,
-    routes: new MemorySignalRouteStore(),
-    intakes: new MemoryMeetingIntakeStore(),
     messageStore: new MessageStore(),
     now: () => 5_000,
   });
@@ -140,7 +134,6 @@ test('dormant composition binds messaging routes to its single K-1 domain', asyn
     computedPackageDigest: EXTERNAL_PACKAGE_DIGEST,
     expectedPackageDigest: EXTERNAL_PACKAGE_DIGEST,
     packagePluginId: externalCandidate().pluginId,
-    effectiveGrants: grants,
     signalSchemas: {
       'schemas/external.signal.v1.schema.json': {
         type: 'object',
@@ -149,9 +142,9 @@ test('dormant composition binds messaging routes to its single K-1 domain', asyn
       },
     },
   });
-  await runtime.inventoryStore.transaction((transaction) => {
-    const instance = transaction.instances.get(installed.pluginInstanceId);
-    transaction.instances.put({
+  await runtime.inventoryStore.transaction(async (transaction) => {
+    const instance = await transaction.instances.get(installed.pluginInstanceId);
+    await transaction.instances.put({
       ...instance,
       configReadiness: 'ready',
       activationState: 'enabled',
@@ -188,8 +181,6 @@ test('production handshake policy covers verified external source readiness with
   let now = 5_000;
   const runtime = createDormantPluginRuntimeComposition({
     projectRoot,
-    routes: new MemorySignalRouteStore(),
-    intakes: new MemoryMeetingIntakeStore(),
     messageStore: new MessageStore(),
     processes: new FakePluginProcessAdapter(),
     now: () => now,
@@ -199,7 +190,6 @@ test('production handshake policy covers verified external source readiness with
     computedPackageDigest: EXTERNAL_PACKAGE_DIGEST,
     expectedPackageDigest: EXTERNAL_PACKAGE_DIGEST,
     packagePluginId: externalCandidate().pluginId,
-    effectiveGrants: ['events.publish'],
     signalSchemas: {
       'schemas/external.signal.v1.schema.json': {
         type: 'object',
@@ -208,9 +198,9 @@ test('production handshake policy covers verified external source readiness with
       },
     },
   });
-  await runtime.inventoryStore.transaction((transaction) => {
-    const instance = transaction.instances.get(installed.pluginInstanceId);
-    transaction.instances.put({
+  await runtime.inventoryStore.transaction(async (transaction) => {
+    const instance = await transaction.instances.get(installed.pluginInstanceId);
+    await transaction.instances.put({
       ...instance,
       configReadiness: 'ready',
       activationState: 'enabled',
@@ -226,26 +216,37 @@ test('production handshake policy covers verified external source readiness with
   assert.equal(await connection.ready({ bindingNonce: binding.bindingNonce }), null);
   assert.equal(EXTERNAL_PLUGIN_PRE_ACTIVE_TIMEOUT_MS, 4 * 60_000);
   assert.equal(runtime.broker.preActiveTimeoutMs, EXTERNAL_PLUGIN_PRE_ACTIVE_TIMEOUT_MS);
-  assert.equal(runtime.supervisor.handshakeTimeoutMs, EXTERNAL_PLUGIN_PRE_ACTIVE_TIMEOUT_MS);
+  assert.equal(runtime.externalRuntime.handshakeTimeoutMs, EXTERNAL_PLUGIN_PRE_ACTIVE_TIMEOUT_MS);
   assert.ok(runtime.messaging, 'composition must expose the single K-1 messaging domain used by Broker routes');
 });
 
-test('production composition constructs and recovers K-2D but exposes no startup activation', () => {
+test('production composition constructs and recovers K-2D but exposes no startup activation', async () => {
   const source = readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8');
+  const catalogSource = readFileSync(
+    new URL('../src/domains/plugin/manager/host-official-catalog.ts', import.meta.url),
+    'utf8',
+  );
 
-  const routeBootstrapIndex = source.indexOf('await ensureOfficialPluginSignalRoutes({');
-  const runtimeCompositionIndex = source.indexOf('createDormantPluginRuntimeComposition({');
+  const cloudBinding = source.match(/const\s+([A-Za-z_$][\w$]*)\s*=\s*createCloudConversationComposition\(\{/);
+  assert.ok(cloudBinding, 'production must own one cloud conversation composition');
+  const runtimeFactory = `${cloudBinding[1]}.createRuntime`;
+  const runtimeCompositionIndex = source.indexOf(`${runtimeFactory}({`);
   const managerCompositionIndex = source.indexOf('createPluginManagerRuntimeComposition({');
 
-  assert.match(source, /createDormantPluginRuntimeComposition/);
-  assert.match(source, /messageStore,\s*\.\.\.\(redis \? \{ redis \} : \{\}\)/);
-  assert.match(source, /routes: signalRouteStore,\s*ownerId: privateUserId/);
-  assert.ok(routeBootstrapIndex >= 0, 'production must provision official Host signal routes');
-  assert.ok(
-    routeBootstrapIndex < runtimeCompositionIndex,
-    'Host signal routes must exist before the external runtime can accept owner activation',
+  assert.ok(runtimeCompositionIndex >= 0, 'runtime must be created by the shared cloud composition');
+  const compositionSource = source.slice(runtimeCompositionIndex, managerCompositionIndex);
+  for (const seam of [
+    /messageStore,/,
+    /messagingStores,/,
+    /onMessagePublished: subscriptionDrainScheduler\.schedule,/,
+    /taskStore,/,
+    /\.\.\.\(redis \? \{ redis \} : \{\}\)/,
+  ]) {
+    assert.match(compositionSource, seam, 'production must share the publishing stores and subscription drain seam');
+  }
+  const runtimeBinding = source.match(
+    new RegExp(`const\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*${cloudBinding[1]}\\.createRuntime\\(\\{`),
   );
-  const runtimeBinding = source.match(/const\s+([A-Za-z_$][\w$]*)\s*=\s*createDormantPluginRuntimeComposition\(\{/);
   assert.ok(runtimeBinding, 'production must bind the dormant plugin runtime composition');
   const runtimeName = runtimeBinding[1];
   const recoveryCall = source.match(
@@ -261,47 +262,57 @@ test('production composition constructs and recovers K-2D but exposes no startup
     ),
   );
   assert.ok(gate, 'the desktop resume gate must be a Host-owned deferred promise');
-  assert.match(
-    source,
-    new RegExp(
-      `listen:\\s*async\\s*\\(\\)\\s*=>\\s*\\{\\s*const\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*await app\\.listen\\(\\{ port: PORT, host: HOST \\}\\);\\s*${gate[1]}\\(\\);\\s*return\\s+\\1;\\s*\\}`,
-    ),
-    'desktop windows may app.inject; the gate opens only once app.listen has booted Fastify',
-  );
+  await assertHostListenLifecycle(source, gate[1]);
   assert.equal(source.split(`${gate[1]}()`).length - 1, 1, 'the gate has a single release point');
-  assert.match(source, /new FilesystemBuiltinPluginPackageMaterializer\(\{/);
-  assert.match(source, /builtinContributions:\s*\{/);
   assert.ok(
     managerCompositionIndex >= 0 && managerCompositionIndex < recoveryIndex,
-    'builtin contribution routing must be registered before durable instances resume',
+    'Plugin Manager state projection must be composed before durable instances resume',
   );
-  assert.match(source, new RegExp(`await ${runtimeName}\\.shutdown\\('api_shutdown'\\)`));
-  assert.match(source, /OfficialPluginHistoryImportService/);
-  assert.match(source, /createLarkCliFeishuArtifactInspector/);
-  assert.match(source, /historyImport:/);
-  assert.match(source, /createPluginManagerRuntimeComposition\(\{/);
-  assert.match(source, /new MachineOfficialPluginCatalog\(\{/);
-  assert.match(source, /validateCatalog: validatePluginCatalog/);
-  assert.match(source, /loadMachinePluginCatalog\(OFFICIAL_PLUGIN_CATALOG_URL\)/);
-  assert.match(source, /replacesRepositoryPluginId:\s*'video-analysis'/);
-  const managerCompatibilityIndex = source.indexOf('const repositoryPluginManagerCompatibility =');
-  const managerComposition = source.slice(managerCompatibilityIndex, recoveryIndex);
-  assert.ok(managerCompatibilityIndex >= 0, 'repository compatibility must be composed after catalog policy exists');
+  assert.match(source, new RegExp(`registerPluginRuntimeShutdown\\(app, ${runtimeName}, async \\(\\) =>`));
+  assert.match(source, /initialPluginController\.abort\(\)/);
   assert.match(
-    managerComposition,
-    /compatibility:\s*repositoryPluginManagerCompatibility/,
-    'Train B Manager must project real repository plugins through its read-only compatibility boundary',
+    source,
+    /initialPluginInstallation = prepareHostInitialPlugins\(\{\s*hostListening,\s*signal: initialPluginController\.signal/,
   );
-  assert.match(managerComposition, /loadSuppressedPluginIds:/);
-  assert.match(managerComposition, /resolveRepositoryReplacementPluginIds\(/);
-  assert.match(managerComposition, /pluginRuntime\.inventoryStore\.snapshot\(\)/);
-  assert.match(managerComposition, /instance\.lifecycleState === 'installed'/);
+  assert.match(source, /\.then\(\(prepared\) => prepared\.activate\(\)\)/);
+  assert.match(source, /import\('\.\/routes\/plugin-runtime-shutdown\.js'\)/);
+  assert.match(source, /createPluginManagerRuntimeComposition\(\{/);
+  assert.match(source, /const pluginManagerCatalog = createHostOfficialPluginCatalog\(\)/);
+  assert.match(catalogSource, /new MachineOfficialPluginCatalog\(\{/);
+  assert.match(catalogSource, /validateCatalog: validatePluginCatalog/);
+  assert.match(catalogSource, /loadMachinePluginCatalog\(OFFICIAL_PLUGIN_CATALOG_URL\)/);
+  assert.doesNotMatch(source, /weixinMpHandlers/);
+  assert.doesNotMatch(source, /limbAdapterRegistry/);
+  const callbackRoutes = readFileSync(new URL('../src/routes/callbacks.ts', import.meta.url), 'utf8');
+  assert.doesNotMatch(callbackRoutes, /registerCallback(?:WeCom|Lark)ActionRoutes/);
+  assert.doesNotMatch(source, /repositoryPluginManagerCompatibility|resolveRepositoryReplacementPluginIds/);
+  assert.doesNotMatch(source, /ensureOfficialPluginSignalRoutes|OfficialPluginHistoryImportService/);
   assert.match(source, /registerPluginManagerRoutes\(managerApp/);
-  assert.match(source, /contributions: pluginManagerRuntime\.builtinSupervisor/);
+  assert.match(source, /contributions: pluginRuntime\.supervisor/);
   assert.match(source, /register\(pluginManagerUploadRoutes/);
-  assert.match(source, /officialRouteCatalogProvider:\s*officialPluginCatalog/);
-  assert.match(source, /installer: pluginManagerRuntime\.officialRouteInstaller/);
   assert.doesNotMatch(source, /new OfficialPluginPackageInstaller\(/);
-  assert.match(source, /registerOfficialPluginRoutes\(app/);
   assert.doesNotMatch(source, new RegExp(`${runtimeName}\\.supervisor\\.start\\(`));
+});
+
+test('enterprise actions have no legacy callback route after moving to package tools', async () => {
+  const app = Fastify();
+  try {
+    await app.register(callbacksRoutes, {
+      registry: new InvocationRegistry(),
+      messageStore: new MessageStore(),
+      socketManager: {
+        broadcastAgentMessage() {},
+        getMessages() {
+          return [];
+        },
+      },
+    });
+    for (const provider of ['wecom', 'lark']) {
+      const url = `/api/callbacks/${provider}-action`;
+      assert.equal(app.hasRoute({ method: 'POST', url }), false);
+      assert.equal((await app.inject({ method: 'POST', url, payload: { action: 'create_doc' } })).statusCode, 404);
+    }
+  } finally {
+    await app.close();
+  }
 });

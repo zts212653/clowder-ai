@@ -1,4 +1,5 @@
 .account-directory {
+  container-type: inline-size;
   color: var(--shell-body, var(--cafe-text-secondary));
   font-size: var(--console-font-sm);
 }
@@ -104,26 +105,29 @@
   font-weight: 400;
 }
 .account-directory th:first-child {
-  width: 12%;
+  width: 100px;
   border-radius: 12px 0 0;
 }
 .account-directory th:nth-child(2) {
-  width: 30%;
+  width: 180px;
 }
 .account-directory th:nth-child(3) {
-  width: 23%;
+  width: 136px;
 }
 .account-directory th:nth-child(4) {
-  width: 22%;
+  width: auto;
+}
+.account-directory th:nth-child(5) {
+  width: 228px;
 }
 .account-directory th:last-child {
-  width: 13%;
+  width: 156px;
   border-radius: 0 12px 0 0;
 }
 .account-directory :is(th, td) {
-  padding: 12px 16px;
+  padding: 12px 10px;
   vertical-align: middle;
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
 }
 .account-directory td {
   border-top: 1px solid var(--shell-hairline, var(--console-border-soft));
@@ -131,6 +135,18 @@
 .account-directory td small {
   display: block;
   margin-top: 4px;
+}
+.account-name,
+.account-cell-text {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.account-state {
+  white-space: nowrap;
 }
 .account-name {
   color: var(--shell-ink, var(--cafe-text));
@@ -141,6 +157,9 @@
   text-align: left;
 }
 .account-provider {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--shell-ink, var(--cafe-text));
   font-weight: 600;
 }
@@ -159,13 +178,27 @@
 .account-followers {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  white-space: nowrap;
+  font-size: var(--console-font-xs);
   gap: 5px;
 }
+.account-followers > * {
+  flex-shrink: 0;
+}
+.account-followers > .account-binding {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.account-avatar + .account-avatar {
+  margin-left: -15px;
+}
 .account-avatar {
-  width: 24px;
-  height: 24px;
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
+  border: 2px solid var(--shell-work, var(--console-card-bg));
 }
 .account-used {
   padding: 2px 8px;
@@ -183,11 +216,16 @@
   margin-right: 5px;
   background: var(--conn-green-text);
 }
+.account-row-actions > .account-button {
+  padding: 5px 6px;
+  font-size: var(--console-font-xs);
+}
 .account-row-actions {
+  font-size: var(--console-font-xs);
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 6px;
+  gap: 4px;
 }
 .account-expand {
   border: 0;
@@ -289,7 +327,7 @@
     flex-wrap: wrap;
   }
 }
-@media (max-width: 600px) {
+@container (max-width: 1079px) {
   .account-directory table,
   .account-directory tbody {
     display: block;
@@ -299,16 +337,24 @@
   }
   .account-directory tr {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: minmax(0, 1fr) minmax(136px, 1fr);
     padding: 10px;
     border-top: 1px solid var(--shell-hairline, var(--console-border-soft));
   }
   .account-directory td {
+    min-width: 0;
     border: 0;
   }
   .account-directory td:nth-child(2) {
     grid-column: 1 / -1;
     grid-row: 1;
+  }
+  .account-directory td:nth-child(5) {
+    grid-column: 1 / -1;
+  }
+  .account-directory td:nth-child(4) {
+    grid-column: 1 / -1;
+    min-width: 0;
   }
   .account-directory td:last-child {
     grid-column: 1 / -1;

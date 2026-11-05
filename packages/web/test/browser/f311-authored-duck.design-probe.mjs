@@ -13,7 +13,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { after, before, test } from 'node:test';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
 import { createSubmittedChoiceProjection } from './f311-preparation-choice.journey.mjs';
 import { createPmPreparationProgramFixture } from './f311-preparation-workspace.journey.mjs';
 import { waitForResponsiveWorkspaceLayout } from './f311-responsive-workspace-layout.mjs';

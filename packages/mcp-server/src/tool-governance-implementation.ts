@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { dirname, relative, resolve } from 'node:path';
+import { dirname, relative, resolve, sep } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import ts from 'typescript';
 import type {
   McpImplementationBinding,
@@ -81,7 +82,7 @@ function compilerSymbolId(repoRoot: string, sourceFile: ts.SourceFile, symbol: t
   const declaration = symbol.declarations?.[0];
   const position = declaration ? sourceFile.getLineAndCharacterOfPosition(declaration.getStart(sourceFile)) : undefined;
   const coordinate = position ? `${position.line + 1}:${position.character + 1}` : 'export';
-  return `${relative(repoRoot, sourceFile.fileName)}#${symbol.getName()}@${coordinate}`;
+  return `${relative(repoRoot, sourceFile.fileName).split(sep).join('/')}#${symbol.getName()}@${coordinate}`;
 }
 
 function defaultRuntimeLoader(repoRoot: string): RuntimeModuleLoader {
@@ -92,7 +93,7 @@ function defaultRuntimeLoader(repoRoot: string): RuntimeModuleLoader {
     }
     const relativeModule = moduleSpecifier.slice(2);
     const modulePath = resolve(repoRoot, 'packages/mcp-server/dist', relativeModule);
-    return import(modulePath) as Promise<Readonly<Record<string, unknown>>>;
+    return import(pathToFileURL(modulePath).href) as Promise<Readonly<Record<string, unknown>>>;
   };
 }
 
@@ -120,7 +121,7 @@ export async function resolveMcpImplementationCatalog(
         throw new Error(`MCP implementation identity mismatch: ${definition.name} -> ${parsed.ref}`);
       }
       const moduleDigest = `sha256:${createHash('sha256')
-        .update(await readFile(sourceFile.fileName))
+        .update((await readFile(sourceFile.fileName, 'utf8')).replace(/\r\n/g, '\n'))
         .digest('hex')}`;
       catalog.set(parsed.ref, {
         moduleDigest,

@@ -61,8 +61,6 @@ const baseStore = () => ({
   clearCatStatuses: vi.fn(),
   setCurrentThread: vi.fn(),
   updateThreadTitle: vi.fn(),
-  setCurrentGame: vi.fn(),
-  currentGame: null,
 
   viewMode: 'single' as const,
   setViewMode: vi.fn(),
@@ -409,6 +407,23 @@ describe('F069-R5: read ack via POST /read/latest', () => {
     });
 
     expect(settleUnreadAckSpy).toHaveBeenCalledWith('thread-A', true);
+  });
+
+  it.each([
+    ['a durable closure', { caughtUp: true, handledMention: true }, 1],
+    ['an unchanged mention', { caughtUp: true, handledMention: false }, 0],
+    ['a legacy receipt', { caughtUp: true }, 0],
+    ['an unconfirmed read', { caughtUp: false, handledMention: true }, 0],
+  ] as const)('invalidates the inbox only for %s', async (_case, receipt, expected) => {
+    const changed = vi.fn();
+    window.addEventListener('cat-cafe:user-mention-updated', changed);
+    mockApiFetch.mockResolvedValue({ ok: true, json: async () => receipt });
+    try {
+      await act(async () => root.render(renderChatContainer('thread-A')));
+      expect(changed).toHaveBeenCalledTimes(expected);
+    } finally {
+      window.removeEventListener('cat-cafe:user-mention-updated', changed);
+    }
   });
 
   it('settles as unconfirmed on a non-2xx response', async () => {

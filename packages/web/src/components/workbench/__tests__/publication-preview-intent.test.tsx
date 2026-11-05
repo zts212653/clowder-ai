@@ -17,7 +17,8 @@ vi.mock('@/utils/api-client', () => ({
   apiFetch: (...args: unknown[]) => mocks.apiFetch(...args),
 }));
 vi.mock('../ContentPublicationNavigator', () => ({
-  ContentPublicationNavigator: ({ children }: { children: ReactNode }) => children,
+  ContentPublicationNavigator: ({ children }: { children: ReactNode | ((leadingAction?: ReactNode) => ReactNode) }) =>
+    typeof children === 'function' ? children() : children,
 }));
 vi.mock('../PublicationLandingResolver', () => ({
   PublicationLandingResolver: ({ children }: { children: ReactNode }) => children,

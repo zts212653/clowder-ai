@@ -13,6 +13,9 @@ const { describe, test, beforeEach, afterEach } = require('node:test');
 
 const UpdateManager = require('./update-manager');
 const dl = require('./update-downloader');
+const { createShutdownController } = require('./shutdown-controller');
+const { createWindowRecoveryController } = require('./window-recovery');
+const { isInstallationShutdownRequest } = require('./installation-lifecycle');
 
 // ── Mock spawn ────────────────────────────────────────────────────────
 
@@ -1266,10 +1269,51 @@ describe('overlapping update checks', () => {
 });
 
 describe('main process update-schedule lifecycle', () => {
+  function createShutdownHarness() {
+    const events = [];
+    const state = {
+      services: {
+        stopAll: async () => events.push('stopAll'),
+      },
+      tray: { destroy: () => events.push('tray.destroy') },
+      updater: { stopSchedule: () => events.push('schedule.stop') },
+      updatePrompt: { dispose: () => events.push('prompt.dispose') },
+      isQuitting: false,
+      phase: 'ready',
+    };
+    const controller = createShutdownController({
+      app: { quit: () => events.push('app.quit') },
+      startupController: { abort: () => events.push('startup.abort') },
+      getServices: () => state.services,
+      setServices: (value) => {
+        state.services = value;
+      },
+      getTray: () => state.tray,
+      setTray: (value) => {
+        state.tray = value;
+      },
+      getUpdater: () => state.updater,
+      getUpdatePrompt: () => state.updatePrompt,
+      setUpdatePrompt: (value) => {
+        state.updatePrompt = value;
+      },
+      setQuitting: (value) => {
+        state.isQuitting = value;
+      },
+      setPhase: (value) => {
+        state.phase = value;
+      },
+      dbg: () => {},
+    });
+    return { controller, events, state };
+  }
+
   test('wires the rendered prompt and default session into the packaged main window', () => {
     const mainSource = readFileSync(path.join(__dirname, 'main.js'), 'utf8');
     const runtimeSource = readFileSync(path.join(__dirname, 'desktop-update-runtime.js'), 'utf8');
     const source = `${mainSource}\n${runtimeSource}`;
+    const navigationSource = readFileSync(path.join(__dirname, 'renderer-navigation.js'), 'utf8');
+    const visibleSource = readFileSync(path.join(__dirname, 'visible-renderer.js'), 'utf8');
     const controllerSource = readFileSync(path.join(__dirname, 'update-prompt-controller.js'), 'utf8');
     const preloadSource = readFileSync(path.join(__dirname, 'preload.js'), 'utf8');
 
@@ -1277,18 +1321,28 @@ describe('main process update-schedule lifecycle', () => {
     assert.match(source, /new UpdatePromptController/);
     assert.match(source, /showUpdatePrompt:\s*\(prompt, options\)\s*=>\s*updatePrompt\.show\(prompt, options\)/);
     assert.match(source, /netSession:\s*session\.defaultSession/);
-    assert.match(source, /setWindowOpenHandler/);
-    assert.match(source, /isAllowedRendererLink/);
+    assert.match(mainSource, /const \{ installRendererNavigation \} = require\('\.\/renderer-navigation'\)/);
+    assert.match(
+      mainSource,
+      /installRendererNavigation\(\{\s*window: mainWindow,\s*appOrigin: APP_ORIGIN,\s*apiOrigin: API_ORIGIN,\s*getLinkOrigins: \(\) => rendererLinkOrigins,\s*shell,\s*dbg,\s*\}\)/,
+      'the actual main window must use the current app, API and runtime preview-origin policy',
+    );
+    assert.match(navigationSource, /setWindowOpenHandler/);
+    assert.match(navigationSource, /isAllowedRendererLink/);
     assert.match(
       source,
-      /mainWindow\.loadURL\(createVersionedRendererUrl\(APP_URL,\s*app\.getVersion\(\)\)\)/,
+      /showVisibleRenderer\(\{\s*window: mainWindow,\s*url: createVersionedRendererUrl\(APP_URL,\s*app\.getVersion\(\)\),/,
       "desktop startup must bypass another package version's service-worker document cache",
     );
+    assert.match(mainSource, /const \{ showVisibleRenderer \} = require\('\.\/visible-renderer'\)/);
+    assert.match(visibleSource, /window\.loadURL\(url\)/);
     assert.match(source, /rendererLinkOrigins\s*=\s*createBaseRendererLinkOrigins\(\)/);
     assert.match(source, /resolveRendererLinkOrigins/);
     assert.match(source, /net\.fetch\(`\$\{API_ORIGIN\}\/api\/preview\/status`/);
     assert.equal(
-      mainSource.match(/await refreshRendererLinkOrigins\(\)/g)?.length,
+      mainSource.match(
+        /(?:await refreshRendererLinkOrigins\(\)|await startupTimeline\.runPhase\('preview-origin', \(\) => refreshRendererLinkOrigins\(\)\))/g,
+      )?.length,
       2,
       'both initial startup and installer-recovery restart must refresh the runtime preview origin',
     );
@@ -1302,22 +1356,22 @@ describe('main process update-schedule lifecycle', () => {
       /stopServices:[\s\S]*?services = null;[\s\S]*?rendererLinkOrigins = createBaseRendererLinkOrigins\(\);/,
       'stopping services must revoke the no-longer-owned preview origin',
     );
-    assert.match(source, /isAllowedRendererLink\(parsed\.href,\s*rendererLinkOrigins\)/);
+    assert.match(navigationSource, /isAllowedRendererLink\(parsed\.href,\s*getLinkOrigins\(\)\)/);
     assert.doesNotMatch(
-      source,
+      [source, navigationSource].join('\n'),
       /process\.env\.PREVIEW_GATEWAY_PORT/,
       'popup admission must use the API runtime port rather than configured intent',
     );
     assert.match(
-      source,
-      /const guardAppNavigation = \(event\) => \{\s*if \(event\.isMainFrame === false\) return;\s*if \(isExpectedOrigin\(event\.url, APP_ORIGIN\)\) return;/,
+      navigationSource,
+      /const guardAppNavigation = \(event\) => \{\s*if \(event\.isMainFrame === false \|\| isExpectedOrigin\(event\.url, appOrigin\)\) return;/,
       'subframe redirects must remain under the iframe/gateway policy',
     );
-    assert.match(source, /webContents\.on\('will-navigate',\s*\(event\)\s*=>/);
-    assert.match(source, /webContents\.on\('will-redirect',\s*guardAppNavigation\)/);
+    assert.match(navigationSource, /webContents\.on\('will-navigate',\s*\(event\)\s*=>/);
+    assert.match(navigationSource, /webContents\.on\('will-redirect',\s*guardAppNavigation\)/);
     assert.match(
-      source,
-      /webContents\.on\('will-navigate',[\s\S]*?isAllowedRendererDownload\(event\.url,\s*API_ORIGIN\)[\s\S]*?webContents\.downloadURL\(event\.url\)/,
+      navigationSource,
+      /webContents\.on\('will-navigate',[\s\S]*?event\.isMainFrame !== false && isAllowedRendererDownload\(event\.url,\s*apiOrigin\)[\s\S]*?webContents\.downloadURL\(event\.url\)/,
       'trusted API /uploads navigation must become a download without admitting API top-level navigation',
     );
     assert.match(source, /trustedOrigin:\s*APP_ORIGIN/);
@@ -1341,7 +1395,8 @@ describe('main process update-schedule lifecycle', () => {
       /desktop-update:register|document-capability/,
       'renderer documents must not be able to request or replace readiness authority',
     );
-    assert.match(source, /webContents\.on\('render-process-gone'[\s\S]*markRendererUnavailable/);
+    // Actual main-window wiring and renderer crash invalidation are exercised
+    // by main-renderer-lifecycle.test.js, including the extracted helper.
   });
 
   test('uses one runtime-safe Windows AppUserModelID in the process and installed shortcuts', () => {
@@ -1363,6 +1418,9 @@ describe('main process update-schedule lifecycle', () => {
       'desktop-update-menu.js',
       'desktop-update-runtime.js',
       'mac-install-location.js',
+      'memory-fallback-consent.js',
+      'shutdown-controller.js',
+      'startup-failure-handler.js',
       'update-install-flow.js',
     ]) {
       assert.ok(pkg.build.files.includes(runtimeModule), `${runtimeModule} must be packaged`);
@@ -1393,47 +1451,125 @@ describe('main process update-schedule lifecycle', () => {
     assert.match(progressCallback, /updatePrompt\.setProgress/);
   });
 
-  test('stops the schedule before service shutdown on every quit path', () => {
-    const source = readFileSync(path.join(__dirname, 'main.js'), 'utf8');
-    const quitStart = source.indexOf('async function quitApp() {');
-    const quitEnd = source.indexOf('\nfunction sendSplashStatus', quitStart);
-    const quitBody = source.slice(quitStart, quitEnd);
-    const beforeQuitStart = source.indexOf("app.on('before-quit'");
-    const beforeQuitBody = source.slice(beforeQuitStart);
+  test('quitApp stops the update schedule before draining services and is idempotent', async () => {
+    const { controller, events, state } = createShutdownHarness();
 
-    assert.ok(quitStart >= 0 && quitEnd > quitStart, 'quitApp lifecycle must be present');
-    assert.ok(beforeQuitStart >= 0, 'before-quit lifecycle must be present');
+    const first = controller.quitApp();
+    const second = controller.quitApp();
+    assert.equal(first, second, 'every quit caller shares the one shutdown');
+    await first;
 
-    for (const [name, body] of [
-      ['quitApp', quitBody],
-      ['before-quit', beforeQuitBody],
-    ]) {
-      const stopScheduleAt = body.indexOf('updater?.stopSchedule()');
-      const stopServicesAt = body.indexOf('services.stopAll()');
-      assert.ok(stopScheduleAt >= 0, `${name} must stop the update schedule`);
-      assert.ok(
-        stopServicesAt < 0 || stopScheduleAt < stopServicesAt,
-        `${name} must stop the schedule before stopping services`,
-      );
-    }
+    assert.deepEqual(events, [
+      'startup.abort',
+      'schedule.stop',
+      'prompt.dispose',
+      'stopAll',
+      'tray.destroy',
+      'app.quit',
+    ]);
+    assert.equal(state.isQuitting, true);
+    assert.equal(state.phase, 'quitting');
+    assert.equal(state.services, null);
+    assert.equal(state.tray, null);
+    assert.equal(state.updatePrompt, null);
   });
 
-  test('installer-requested quit reaches the same service shutdown lifecycle', () => {
+  test('before-quit blocks exit only while services still need draining', async () => {
+    const { controller, events, state } = createShutdownHarness();
+    let prevented = 0;
+    const event = {
+      preventDefault: () => {
+        prevented += 1;
+      },
+    };
+
+    const cleanup = controller.handleBeforeQuit(event);
+    assert.equal(prevented, 1);
+    await cleanup;
+    assert.deepEqual(events, [
+      'startup.abort',
+      'schedule.stop',
+      'prompt.dispose',
+      'stopAll',
+      'tray.destroy',
+      'app.quit',
+    ]);
+
+    // The re-issued app.quit() must pass through without blocking again.
+    const settledEvents = events.length;
+    controller.handleBeforeQuit(event);
+    const repeatedEvents = events.slice(settledEvents);
+    assert.equal(prevented, 1);
+    assert.ok(!repeatedEvents.includes('stopAll'), 'drained services must not be stopped twice');
+    assert.ok(!repeatedEvents.includes('app.quit'), 'the second before-quit must not re-issue app.quit');
+    assert.equal(state.services, null);
+  });
+
+  test('installer-requested quit drains services once through the shared shutdown controller', async () => {
     const mainSource = readFileSync(path.join(__dirname, 'main.js'), 'utf8');
-    const installerSource = readFileSync(path.join(__dirname, 'installer', 'cat-cafe.iss'), 'utf8');
     const secondInstanceStart = mainSource.indexOf("app.on('second-instance'");
     const secondInstanceEnd = mainSource.indexOf("\napp.on('ready'", secondInstanceStart);
-    const secondInstanceBody = mainSource.slice(secondInstanceStart, secondInstanceEnd);
 
-    assert.match(mainSource, /QUIT_FOR_UPDATE_ARG\s*=\s*'--quit-for-update'/);
-    assert.match(secondInstanceBody, /commandLine\.includes\(QUIT_FOR_UPDATE_ARG\)/);
-    assert.match(secondInstanceBody, /quitApp\(\)/);
-    assert.match(installerSource, /ExecAsOriginalUser[\s\S]*--quit-for-update[\s\S]*ewNoWait/);
-    assert.doesNotMatch(installerSource, /CloseMainWindow/);
-    assert.ok(
-      installerSource.indexOf('--quit-for-update') < installerSource.indexOf('Stop-Process -Force'),
-      'coordinated app quit must precede the bounded force-cleanup fallback',
+    assert.match(mainSource, /QUIT_FOR_UPDATE_ARG\s*=\s*'--quit-owned-installation'/);
+    assert.match(
+      mainSource.slice(secondInstanceStart, secondInstanceEnd),
+      /windowRecovery\.handleSecondInstance\(commandLine, identity\)/,
+      'the installer request must stay wired to window recovery',
     );
+
+    const { controller, events, state } = createShutdownHarness();
+    const base = mkdtempSync(path.join(tmpdir(), 'installer-quit-'));
+    try {
+      const root = path.join(base, 'install');
+      const userData = path.join(base, 'instance');
+      mkdirSync(root);
+      mkdirSync(userData);
+      const recovery = createWindowRecoveryController({
+        getState: () => ({
+          phase: 'ready',
+          mainWindow: null,
+          splashWindow: null,
+          services: state.services,
+          isQuitting: state.isQuitting,
+        }),
+        createMainWindow: async () => {},
+        quitArg: '--quit-owned-installation',
+        isShutdownRequest: isInstallationShutdownRequest,
+        projectRoot: root,
+        getUserDataRoot: () => userData,
+        quitApp: controller.quitApp,
+        dbg: () => {},
+      });
+
+      recovery.handleSecondInstance(['clowder-ai.exe', '--quit-owned-installation'], {
+        installRoot: path.join(base, 'foreign-install'),
+        userDataRoot: userData,
+      });
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.deepEqual(events, [], 'a foreign installation identity cannot shut this instance down');
+
+      recovery.handleSecondInstance(['clowder-ai.exe', '--quit-owned-installation'], {
+        installRoot: root,
+        userDataRoot: userData,
+      });
+      recovery.handleSecondInstance(['clowder-ai.exe', '--quit-owned-installation'], {
+        installRoot: root,
+        userDataRoot: userData,
+      });
+      await new Promise((resolve) => setImmediate(resolve));
+
+      assert.deepEqual(events, [
+        'startup.abort',
+        'schedule.stop',
+        'prompt.dispose',
+        'stopAll',
+        'tray.destroy',
+        'app.quit',
+      ]);
+      assert.equal(state.services, null);
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
   });
 
   test('macOS application menu retains standard editing roles', () => {

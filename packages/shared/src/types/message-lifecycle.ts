@@ -83,7 +83,11 @@ export function isLifecycleInputReadReceipt(value: unknown): value is LifecycleI
     : receipt.status === 'read' && isFiniteTimestamp(receipt.at);
 }
 
-export type LifecycleDispatchRef = { readonly inputRead?: LifecycleInputReadReceipt } & (
+export type LifecycleDispatchRef = {
+  readonly inputRead?: LifecycleInputReadReceipt;
+  /** pending = unknown write; written = native stdin ACK awaiting its own turn result; accepted = custody can retire. */
+  readonly appendAcceptance?: 'pending' | 'written' | 'accepted';
+} & (
   | {
       readonly targetId: string;
       readonly phase: 'dispatched';
@@ -104,6 +108,41 @@ export interface LifecycleMessageMetadata {
   readonly orderKey: string;
   readonly dispatchRefs?: readonly LifecycleDispatchRef[];
   readonly producerInvocationId?: string;
+  /** Exact Append outcomes; a transport exception is not proof of non-acceptance. */
+  readonly appendFailures?: readonly LifecycleAppendFailure[];
+}
+
+export interface LifecycleAppendFailure {
+  readonly targetId: string;
+  readonly invocationId: string;
+  readonly responseMessageId: string;
+  readonly reason: 'active_run_mismatch' | 'active_run_closed' | 'invalid_input' | 'provider_rejected' | 'exception';
+  /** incomplete = the queued internal turn ended without its own successful result. */
+  readonly acceptance: 'not_accepted' | 'unknown' | 'incomplete';
+  readonly at: number;
+  /** Missing while the system checks the original handoff; absence is never a resend grant. */
+  readonly checkedAt?: number;
+}
+
+export function isLifecycleAppendFailure(value: unknown): value is LifecycleAppendFailure {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    isNonEmptyString(candidate.targetId) &&
+    isNonEmptyString(candidate.invocationId) &&
+    isNonEmptyString(candidate.responseMessageId) &&
+    isFiniteTimestamp(candidate.at) &&
+    (candidate.checkedAt === undefined ||
+      (isFiniteTimestamp(candidate.checkedAt) && (candidate.checkedAt as number) >= (candidate.at as number))) &&
+    isOneOf(candidate.acceptance, ['not_accepted', 'unknown', 'incomplete']) &&
+    isOneOf(candidate.reason, [
+      'active_run_mismatch',
+      'active_run_closed',
+      'invalid_input',
+      'provider_rejected',
+      'exception',
+    ])
+  );
 }
 
 export type LifecycleDeliveryFailureReason =
@@ -237,6 +276,8 @@ function isDispatchRef(value: unknown): value is LifecycleDispatchRef {
     (candidate.phase === 'dispatched' || candidate.phase === 'settled') &&
     isNonEmptyString(candidate.statusMessageId) &&
     (candidate.dispatchedAt === undefined || isFiniteTimestamp(candidate.dispatchedAt)) &&
+    (candidate.appendAcceptance === undefined ||
+      isOneOf(candidate.appendAcceptance, ['pending', 'written', 'accepted'])) &&
     (candidate.inputRead === undefined ||
       (isLifecycleInputReadReceipt(candidate.inputRead) &&
         (candidate.inputRead.status !== 'read' ||
@@ -256,6 +297,8 @@ export function isLifecycleStoredMessageMetadata(value: unknown): value is Lifec
     (candidate.from !== undefined && !isMessageFrom(candidate.from)) ||
     (candidate.dispatchRefs !== undefined &&
       (!Array.isArray(candidate.dispatchRefs) || !candidate.dispatchRefs.every(isDispatchRef))) ||
+    (candidate.appendFailures !== undefined &&
+      (!Array.isArray(candidate.appendFailures) || !candidate.appendFailures.every(isLifecycleAppendFailure))) ||
     (candidate.producerInvocationId !== undefined && !isNonEmptyString(candidate.producerInvocationId))
   ) {
     return false;
@@ -344,6 +387,11 @@ export interface LifecycleActiveRun {
   readonly inputEntryIds: readonly string[];
   readonly inputMessageIds: readonly string[];
   readonly privateInputEntryIds: readonly string[];
+  /** Only the original, approved-handoff Queue producer may supply this private source reference. */
+  readonly sessionHandoff?: {
+    readonly proposalId: string;
+    readonly continuationEntryId: string;
+  };
   readonly startedAt: number;
 }
 

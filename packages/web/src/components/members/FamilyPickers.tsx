@@ -5,6 +5,7 @@ import catalog from '../../../public/avatars/family/catalog.json';
 import { AvatarImageWithFallback } from '../AvatarImageWithFallback';
 import type { TemplateCard } from '../first-run-quest/TemplateStep';
 import { useMembersCopy, useMemberText } from './editor-presentation';
+import { MemberOperationFeedback } from './MemberOperationFeedback';
 
 export function FamilyTemplatePicker({
   templates,
@@ -111,6 +112,7 @@ export function FamilyAvatarPicker({
           }}
         />
       </div>
+      <MemberOperationFeedback source="avatar" />
     </section>
   );
 }

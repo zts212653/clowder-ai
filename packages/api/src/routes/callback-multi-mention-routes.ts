@@ -114,7 +114,9 @@ async function resolveCloudDispatchProvenance(input: {
   try {
     source = await resolveVisibleReplyParent(input.messageStore, sourceMessageId, {
       threadId: input.record.threadId,
-      viewer: { type: 'cat', catId: createCatId('gpt-pro') },
+      // A public reply can quote only a public or revealed message, which every cat can see; the
+      // caller is the viewer whose sight matters (F202 h3c-2: no cloud cat id is fixed here).
+      viewer: { type: 'cat', catId: input.record.catId },
       publicReply: true,
     });
   } catch (err) {
@@ -133,8 +135,7 @@ async function resolveCloudDispatchProvenance(input: {
     !isDelivered(source) ||
     source.userId === 'system' ||
     source.catId === 'system' ||
-    source.origin === 'briefing' ||
-    !canViewMessage(source, { type: 'cat', catId: input.record.catId })
+    source.origin === 'briefing'
   ) {
     input.log.warn(
       { invocationId: input.record.invocationId, sourceMessageId },
@@ -225,6 +226,7 @@ const multiMentionStatusSchema = z.object({
 
 // ── Deps ─────────────────────────────────────────────────────────────
 export interface MultiMentionRouteDeps {
+  routingDispatchPreflight?: A2ATriggerDeps['routingDispatchPreflight'];
   messageStore: IMessageStore;
   socketManager: SocketManager;
   router: AgentRouter;
@@ -401,7 +403,7 @@ async function dispatchViaQueue(
   parentInvocationId: string,
   actionFence?: ActionSuccessorFence,
   actionCarrierDisposition?: ActionSuccessorCarrierDisposition,
-): Promise<void> {
+): Promise<Awaited<ReturnType<typeof enqueueA2ATargets>>['routingAdmission']> {
   const { invocationQueue, queueProcessor } = deps;
   if (!invocationQueue || !queueProcessor) return;
 
@@ -465,6 +467,7 @@ async function dispatchViaQueue(
   );
   const result = await enqueueA2ATargets(
     {
+      routingDispatchPreflight: deps.routingDispatchPreflight,
       socketManager: deps.socketManager,
       invocationTracker: deps.invocationTracker,
       queueProcessor,
@@ -514,6 +517,7 @@ async function dispatchViaQueue(
     orch.recordResponse(requestId, catId, '[dispatch unavailable: target was not admitted to the queue]');
   }
   if (rejected.length > 0) settleGroupIfComplete(deps, requestId, threadId, userId, log);
+  return result.routingAdmission;
 }
 
 // ── Result flush ─────────────────────────────────────────────────────
@@ -843,7 +847,7 @@ export function registerMultiMentionRoutes(app: FastifyInstance, deps: MultiMent
         : undefined,
     );
 
-    await dispatchViaQueue(
+    const routingAdmission = await dispatchViaQueue(
       deps,
       mmRequest.id,
       targetCatIds,
@@ -877,6 +881,7 @@ export function registerMultiMentionRoutes(app: FastifyInstance, deps: MultiMent
     return reply.send({
       requestId: mmRequest.id,
       status: mmRequest.status,
+      ...(routingAdmission ? { routing_admission: routingAdmission } : {}),
       ...(actionFence && actionAdmissionOutcome
         ? {
             actionLease: {

@@ -52,20 +52,14 @@ test('F306 uses updated version witness; same Task does not collapse a different
   assert.equal(result.items[0].linkedNeedsMe?.length, 1);
 });
 
-test('F292 canonical meeting aliases deduplicate only producer-issued exact revision witnesses', () => {
-  const row = {
-    ...approval('minute', 'F292'),
-    needsMeDecisionRefs: [
-      { producerId: 'f292.repair', subjectRef: 'minute', revision: 5 },
-      { producerId: 'f292.repair', subjectRef: 'note', revision: 8 },
-    ],
-  };
-  const result = project([row], [work([receipt('minute', 'f292.repair', 5), receipt('note', 'f292.repair', 8)])]);
+test('retired Host meeting approval is rejected while historical repair receipts stay readable', () => {
+  assert.throws(() => project([{ ...approval('minute'), sourceFeatureId: 'F292' }], []));
+  const result = project([], [work([receipt('minute', 'f292.repair', 5)])]);
   assert.equal(result.totalCount, 1);
-  assert.equal(result.items[0].linkedNeedsMe?.length, 2);
+  assert.equal(result.items[0].decisionRef, 'f292.repair:minute');
 });
 
-test('missing or conflicting F292/F306 versions remain separate and withhold exact count', () => {
+test('missing or conflicting F306 versions remain separate and withhold exact count', () => {
   for (const row of [
     approval('a', 'F306'),
     {
@@ -125,7 +119,15 @@ test('real F260 source reads all pending proposals before unified paging', async
   const { F260ApprovalAdapter } = await import('../../src/domains/approval-hub/adapters/F260ApprovalAdapter.js');
   const { approvalHubRoutes } = await import('../../src/routes/approval-hub-routes.js');
   const { readCompanionDecisionProjection } = await import('../../src/routes/companion-decision-read-service.js');
-  const { createTestApprovalRegistry, anchorApproval } = await import('../approval-hub/helpers.js');
+  const { createTestApprovalRegistry } = await import('../approval-hub/helpers.js');
+  const { ApprovalIngress } = await import('../../src/domains/approval-hub/ApprovalIngress.js');
+  const { MessageStore } = await import('../../src/domains/cats/services/stores/ports/MessageStore.js');
+  const { buildEntityProposalCardBlock } = await import('../../src/routes/entity-proposal-card-block.js');
+  const messages = new MessageStore();
+  const ingress = new ApprovalIngress({
+    messageStore: messages,
+    socketManager: { broadcastToRoom() {}, emitToUser() {} },
+  });
   const store = new InMemoryEntityProposalStore();
   for (let index = 0; index < 125; index++) {
     const p = store.create({
@@ -141,14 +143,25 @@ test('real F260 source reads all pending proposals before unified paging', async
       sourceCatId: 'codex61-sol',
       ownerUserId: 'owner',
     });
-    await anchorApproval(store, {
-      proposalId: p.proposalId,
-      sourceFeatureId: 'F260',
-      ownerUserId: 'owner',
-      requesterCatId: 'codex61-sol',
-      threadId: 'source-thread',
-      createdAt: p.createdAt,
-    });
+    await ingress.publish(
+      {
+        canonicalProposalId: p.proposalId,
+        producerId: 'F260',
+        ownerUserId: 'owner',
+        requesterCatId: 'codex61-sol',
+        cardThreadId: 'source-thread',
+        originRef: {
+          kind: 'event',
+          threadId: 'source-thread',
+          anchor: `proposal:${p.proposalId}`,
+          summary: 'Entity proposal',
+        },
+        cardBlock: buildEntityProposalCardBlock(p),
+        cardContent: 'Entity proposal',
+        createdAt: p.createdAt,
+      },
+      store,
+    );
   }
   const app = Fastify();
   t.after(() => app.close());
@@ -156,11 +169,11 @@ test('real F260 source reads all pending proposals before unified paging', async
     registry: await createTestApprovalRegistry([new F260ApprovalAdapter(store)]),
   });
   app.get('/api/entrusted-work/needs-me', async () => ({ ownerReads: [], coverage: { state: 'complete' } }));
-  const page = await readCompanionDecisionProjection(app, 'owner', { offset: 100, limit: 20 });
+  const page = await readCompanionDecisionProjection(app, 'owner', { offset: 100, limit: 20 }, messages);
   assert.equal(page.totalCount, 125);
   assert.equal(page.items.length, 20);
   assert.equal(page.page.hasMore, true);
-  const end = await readCompanionDecisionProjection(app, 'owner', { offset: 120, limit: 20 });
+  const end = await readCompanionDecisionProjection(app, 'owner', { offset: 120, limit: 20 }, messages);
   assert.equal(end.items.length, 5);
   assert.equal(end.page.hasMore, false);
 });

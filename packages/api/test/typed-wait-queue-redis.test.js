@@ -164,9 +164,10 @@ describe('typed wait Task authority stays independent of canonical Redis Queue d
       source: h.receipt.source,
     });
     assert.ok(
-      await h.taskStore.replaceAutomationStateIfGeneration(h.task.id, {
+      await h.taskStore.replaceDeploymentWaitIfGeneration(h.task.id, {
+        expectedDeploymentWait: (await h.taskStore.get(h.task.id)).deploymentWait,
         expectedGeneration: 1,
-        automationState: { await: active },
+        deploymentWait: { await: active },
         waitRegistration: receipt,
       }),
     );
@@ -198,18 +199,20 @@ describe('typed wait Task authority stays independent of canonical Redis Queue d
       source: h.receipt.source,
     });
     assert.equal(
-      await h.taskStore.replaceAutomationStateIfGeneration(h.task.id, {
+      await h.taskStore.replaceDeploymentWaitIfGeneration(h.task.id, {
+        expectedDeploymentWait: (await h.taskStore.get(h.task.id)).deploymentWait,
         expectedGeneration: 0,
-        automationState: { await: active },
+        deploymentWait: { await: active },
         waitRegistration: receipt,
       }),
       null,
     );
     assert.deepEqual((await h.taskStore.getWaitRegistration(h.task.id)).receipt, h.receipt);
     assert.ok(
-      await h.taskStore.replaceAutomationStateIfGeneration(h.task.id, {
+      await h.taskStore.replaceDeploymentWaitIfGeneration(h.task.id, {
+        expectedDeploymentWait: (await h.taskStore.get(h.task.id)).deploymentWait,
         expectedGeneration: 1,
-        automationState: { await: active },
+        deploymentWait: { await: active },
         waitRegistration: receipt,
       }),
     );
@@ -220,12 +223,12 @@ describe('typed wait Task authority stays independent of canonical Redis Queue d
     assert.deepEqual(await h.taskStore.getWaitRegistration(h.task.id), winner);
   });
 
-  test('current routing read rejects an expired receipt even when delivery and Task hash are unchanged', async (t) => {
+  test('persistent deployment authority survives elapsed time after delivery', async (t) => {
     const h = await harness(t);
     assert.equal((await h.deliver()).exit.kind, 'bypass');
     await h.assertDelivered();
     const before = await h.redis.hgetall(TaskKeys.detail(h.task.id));
-    assert.equal((await h.resolve({ now: h.active.expiresAt })).kind, 'reject');
+    assert.equal((await h.resolve({ now: Number.MAX_SAFE_INTEGER })).kind, 'bypass');
     assert.deepEqual(await h.redis.hgetall(TaskKeys.detail(h.task.id)), before);
     await h.assertDelivered();
   });
@@ -265,8 +268,8 @@ describe('typed wait Task authority stays independent of canonical Redis Queue d
     await h.assertDelivered();
   });
 
-  for (const persistent of [false, true]) {
-    for (const race of ['matched', 'expired', 'superseded', 'owner', 'missing']) {
+  for (const persistent of [true]) {
+    for (const race of ['matched', 'superseded', 'owner', 'missing']) {
       test(`${persistent ? 'persistent' : 'bounded'}: ${race} at native Queue retirement cannot reuse old Task authority`, async (t) => {
         let h = await harness(t);
         if (persistent) h = await withoutDeadline(h);
@@ -283,15 +286,36 @@ describe('typed wait Task authority stays independent of canonical Redis Queue d
               const active =
                 race === 'superseded'
                   ? { ...h.active, generation: 2, ownerFence: { kind: 'containing_task', generation: 2 } }
-                  : race === 'expired'
-                    ? { ...h.active, expiresAt: Date.now() - 1 }
-                    : h.active;
+                  : h.active;
               assert.ok(
-                await h.taskStore.replaceAutomationStateIfGeneration(h.task.id, {
+                await h.taskStore.replaceDeploymentWaitIfGeneration(h.task.id, {
+                  expectedDeploymentWait: (await h.taskStore.get(h.task.id)).deploymentWait,
                   expectedGeneration: 1,
-                  automationState: {
+                  deploymentWait: {
                     await: active,
-                    ...(race === 'matched' ? { waitOutcome: { generation: 1, reason: 'matched' } } : {}),
+                    ...(race === 'matched'
+                      ? {
+                          waitOutcome: {
+                            v: 1,
+                            domain: 'deployment',
+                            outcomeId: 'matched-at-retirement',
+                            generation: 1,
+                            subjectRef: active.subjectRef,
+                            ownerFence: active.ownerFence,
+                            reason: 'matched',
+                            at: Date.now(),
+                            delivery: 'pending',
+                            deploymentMatch: {
+                              kind: 'new_ready_boot',
+                              services: ['api'],
+                              bootId: 'boot-2',
+                              bootSequence: 2,
+                              runningRevision: null,
+                              observedAt: Date.now(),
+                            },
+                          },
+                        }
+                      : {}),
                   },
                 }),
               );

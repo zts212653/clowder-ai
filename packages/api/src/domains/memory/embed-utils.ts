@@ -2,9 +2,9 @@ import type { EvidenceItem, IEmbeddingService } from './interfaces.js';
 import { type PassageVectorStore, passageVectorKey } from './PassageVectorStore.js';
 import type { VectorStore } from './VectorStore.js';
 
-const EMBED_BATCH_SIZE = 64;
-// Passage contents are much longer than doc summaries; keep warmup calls below the 3s client timeout.
-const PASSAGE_EMBED_BATCH_SIZE = 8;
+// Background indexing uses the existing small warmup batch, not the transport's
+// 64-input maximum. Long document summaries also share the unchanged 3s deadline.
+export const INDEX_EMBED_BATCH_SIZE = 8;
 
 export interface EmbedPipelineContext {
   items: EvidenceItem[];
@@ -30,8 +30,8 @@ export async function embedIndexedItems(ctx: EmbedPipelineContext): Promise<void
     }
   }
 
-  for (let offset = 0; offset < toEmbed.length; offset += EMBED_BATCH_SIZE) {
-    const batch = toEmbed.slice(offset, offset + EMBED_BATCH_SIZE);
+  for (let offset = 0; offset < toEmbed.length; offset += INDEX_EMBED_BATCH_SIZE) {
+    const batch = toEmbed.slice(offset, offset + INDEX_EMBED_BATCH_SIZE);
     const texts = batch.map((i) => `${i.title} ${i.summary ?? ''}`);
     const vectors = await ctx.embedding.embed(texts);
     for (let i = 0; i < batch.length; i++) {
@@ -61,8 +61,8 @@ export async function embedPassages(ctx: PassageEmbedPipelineContext): Promise<v
   await ctx.embedding.reprobeIfNeeded();
   if (!ctx.embedding.isReady()) return;
 
-  for (let offset = 0; offset < ctx.passages.length; offset += PASSAGE_EMBED_BATCH_SIZE) {
-    const batch = ctx.passages.slice(offset, offset + PASSAGE_EMBED_BATCH_SIZE);
+  for (let offset = 0; offset < ctx.passages.length; offset += INDEX_EMBED_BATCH_SIZE) {
+    const batch = ctx.passages.slice(offset, offset + INDEX_EMBED_BATCH_SIZE);
     const vectors = await ctx.embedding.embed(batch.map((p) => p.content));
     if (ctx.commitBatch) {
       await ctx.commitBatch(batch, vectors);

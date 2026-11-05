@@ -1,4 +1,5 @@
 import type { UnifiedAttentionItemV1 } from '@cat-cafe/shared';
+import { readAttentionSystemRecommendation } from '@/components/growing/needs-me-recommendation';
 import { preparedArtifactPresentation } from '@/components/growing/prepared-artifact-presentation';
 
 /**
@@ -69,6 +70,14 @@ export function eligibleReceiptOf(
     if (receipt.eligible === true && receipt.kind === item.kind) return { receipt, ownerRead };
   }
   return null;
+}
+
+/** System-authored copy is localized at the shell boundary; arbitrary producer or Human recommendations stay untouched. */
+export function readWorkSystemRecommendation(item: UnifiedAttentionItemV1): 'collective_result_ready' | null {
+  const found = eligibleReceiptOf(item);
+  if (!found) return null;
+  const system = readAttentionSystemRecommendation(found.receipt);
+  return system && item.decisionRef === `${system.producerId}:${system.subjectRef}` ? system.key : null;
 }
 
 export function readWorkDetail(item: UnifiedAttentionItemV1): WorkDetail {

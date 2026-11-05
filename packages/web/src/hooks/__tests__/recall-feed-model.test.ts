@@ -21,6 +21,15 @@ const message = (extra: Partial<ChatMessage> = {}): ChatMessage => ({
   ...extra,
 });
 describe('F321 reply attribution', () => {
+  it('never uses an incoming cross-post as the reply of its producer invocation', () => {
+    const incoming = message({
+      extra: {
+        crossPost: { sourceThreadId: 'other-thread', sourceInvocationId: 'turn-one' },
+        stream: { turnInvocationId: 'turn-one' },
+      },
+    });
+    expect(groupRecallEvents([event()], [incoming])[0].messageId).toBeUndefined();
+  });
   it('uses the exact invocation and reply timestamp even when correlation is late', () => {
     const groups = groupRecallEvents(
       [event()],

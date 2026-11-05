@@ -27,7 +27,6 @@ async function createHarness({ bytes = Buffer.from('base-docx'), maxContentBytes
             installationInstanceId,
             providerVersion: '0.8.1039',
             packageDigest: 'sha512-package-1',
-            grantRevision: 3,
             lifecycleRevision: 7,
             activationState: 'enabled',
             runtimeState: 'healthy',

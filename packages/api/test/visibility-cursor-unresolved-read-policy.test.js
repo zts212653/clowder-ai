@@ -31,9 +31,7 @@ describe('#3444 unresolved visibility read-anchor policy', { skip: redisIsolatio
   let RedisThreadReadStateStore;
   let DeliveryCursorStore;
   let SessionStore;
-  let ThreadUnseenChecker;
   let ThreadStore;
-  let collectDutyBriefingInput;
   let cursorFor;
   let threadsRoutes;
 
@@ -45,11 +43,7 @@ describe('#3444 unresolved visibility read-anchor policy', { skip: redisIsolatio
       '../dist/domains/cats/services/stores/redis/RedisThreadReadStateStore.js'
     ));
     ({ DeliveryCursorStore } = await import('../dist/domains/cats/services/stores/ports/DeliveryCursorStore.js'));
-    ({ ThreadUnseenChecker } = await import('../dist/domains/cats/services/freshness/ThreadUnseenChecker.js'));
     ({ ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js'));
-    ({ collectDutyBriefingInput } = await import(
-      '../dist/domains/cats/services/duty-briefing/collectDutyBriefingInput.js'
-    ));
     ({ cursorFor } = await import('../dist/domains/cats/services/stores/cursor.js'));
     ({ threadsRoutes } = await import('../dist/routes/threads.js'));
     SessionStore = redisUtils.SessionStore;
@@ -175,79 +169,6 @@ describe('#3444 unresolved visibility read-anchor policy', { skip: redisIsolatio
     ]);
   });
 
-  it('Freshness: an unresolvable persisted seen anchor does not replay history as unseen', async () => {
-    const threadId = `freshness-unresolved-${Date.now()}`;
-    await appendMessage({ threadId, catId: null, content: 'old human message A', timestamp: Date.now() - 2_000 });
-    await appendMessage({ threadId, catId: null, content: 'old human message B', timestamp: Date.now() - 1_000 });
-
-    const sessionStore = new SessionStore(redis);
-    assert.equal(await sessionStore.setSeenCursor(USER_ID, CAT_ID, threadId, UNRESOLVABLE_V1), true);
-    const cursorStore = new DeliveryCursorStore(new SessionStore(redis), (messageId, tid) =>
-      messageStore.canonicalizeCursor(messageId, tid),
-    );
-    const checker = new ThreadUnseenChecker({
-      userId: USER_ID,
-      cursorStore,
-      messageStore,
-      queueChecker: { getQueuedForThread: () => [] },
-    });
-
-    assert.equal(await checker.checkUnseen({ threadId, catId: CAT_ID }), null);
-  });
-
-  it('Freshness: a malformed persisted seen token is bounded as unresolved instead of throwing or replaying', async () => {
-    const threadId = `freshness-malformed-${Date.now()}`;
-    await appendMessage({ threadId, catId: null, content: 'old human history', timestamp: Date.now() - 1_000 });
-
-    const sessionStore = new SessionStore(redis);
-    assert.equal(await sessionStore.setSeenCursor(USER_ID, CAT_ID, threadId, MALFORMED_V2), true);
-    const cursorStore = new DeliveryCursorStore(sessionStore, (messageId, tid) =>
-      messageStore.canonicalizeCursor(messageId, tid),
-    );
-    const checker = new ThreadUnseenChecker({
-      userId: USER_ID,
-      cursorStore,
-      messageStore,
-      queueChecker: { getQueuedForThread: () => [] },
-    });
-
-    assert.equal(await checker.checkUnseen({ threadId, catId: CAT_ID }), null);
-  });
-
-  it('Freshness: new canonical read evidence repairs an unresolvable seen slot and exposes the next tail', async () => {
-    const threadId = `freshness-repair-${Date.now()}`;
-    const sessionStore = new SessionStore(redis);
-    assert.equal(await sessionStore.setSeenCursor(USER_ID, CAT_ID, threadId, UNRESOLVABLE_V1), true);
-    const cursorStore = new DeliveryCursorStore(sessionStore, (messageId, tid) =>
-      messageStore.canonicalizeCursor(messageId, tid),
-    );
-    const readNow = await appendMessage({
-      threadId,
-      catId: null,
-      content: 'canonical full-read frontier',
-      timestamp: Date.now() - 1_000,
-    });
-
-    await cursorStore.ackSeenCursor(USER_ID, CAT_ID, threadId, cursorFor(readNow));
-
-    const nextTail = await appendMessage({
-      threadId,
-      catId: null,
-      content: 'new tail after repair',
-      timestamp: Date.now(),
-    });
-    const checker = new ThreadUnseenChecker({
-      userId: USER_ID,
-      cursorStore,
-      messageStore,
-      queueChecker: { getQueuedForThread: () => [] },
-    });
-    const unseen = await checker.checkUnseen({ threadId, catId: CAT_ID });
-
-    assert.equal(unseen?.count, 1);
-    assert.equal(unseen?.maxMessageId, cursorFor(nextTail));
-  });
-
   it('Unread: a new explicit read ACK atomically supersedes an unresolvable stored anchor', async () => {
     const threadStore = new ThreadStore();
     const thread = threadStore.create(USER_ID, 'Unread repair');
@@ -274,6 +195,7 @@ describe('#3444 unresolved visibility read-anchor policy', { skip: redisIsolatio
       assert.deepEqual(response.json(), {
         advanced: true,
         caughtUp: true,
+        handledMention: false,
         messageId: readNow.id,
         cursor: cursorFor(readNow),
       });
@@ -305,53 +227,6 @@ describe('#3444 unresolved visibility read-anchor policy', { skip: redisIsolatio
 
     assert.notEqual(await sessionStore.getMentionAckCursor(USER_ID, CAT_ID, threadId), MALFORMED_V2);
     assert.equal(await cursorStore.getMentionAckCursor(USER_ID, CAT_ID, threadId), cursorFor(mention));
-  });
-
-  it('Duty Briefing: a pruned mention anchor does not let older operator history suppress the candidate', async () => {
-    const now = Date.now();
-    const threadId = `duty-unresolved-${now}`;
-    await appendMessage({ threadId, catId: null, content: 'an older operator reply', timestamp: now - 2_000 });
-    const mention = await appendMessage({
-      threadId,
-      catId: 'opus',
-      content: '@co-creator pending decision',
-      mentionsUser: true,
-      timestamp: now - 1_000,
-    });
-
-    let pruned = false;
-    const raceStore = {
-      getByThread: async (...args) => {
-        const tail = await messageStore.getByThread(...args);
-        if (!pruned) {
-          pruned = true;
-          await redis.del(`msg:${mention.id}`);
-          await redis.zrem(`msg:visibility:${threadId}`, mention.id);
-        }
-        return tail;
-      },
-      getByThreadAfter: messageStore.getByThreadAfter.bind(messageStore),
-    };
-
-    const input = await collectDutyBriefingInput({
-      taskStore: { listByKind: async () => [] },
-      invocationRecordStore: { scanAll: async () => [] },
-      draftStore: { getByThread: async () => [] },
-      dynamicTaskStore: { getAll: () => [] },
-      threadStore: {
-        list: async () => [{ id: threadId, title: 'Unresolved duty anchor', lastActiveAt: now - 500 }],
-      },
-      messageStore: raceStore,
-      f167SnapshotProvider: async () => null,
-      userId: USER_ID,
-      now,
-      bindingStatus: 'degraded',
-    });
-
-    assert.deepEqual(
-      input.mentionCandidates.map((candidate) => candidate.messageId),
-      [mention.id],
-    );
   });
 
   it('Generic pagination keeps the FM-3 rescan default for an unresolvable v1 anchor', async () => {

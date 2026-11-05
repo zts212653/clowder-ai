@@ -1,13 +1,12 @@
 ---
 name: video-forge
-tips_exempt: "Cut 2026-10-14: removed the house method, taste rules, director layer and film statistics; what remains is home facts, You's decided preferences and real pitfalls. No new user-facing entry or command."
 description: >
   家里用 Remotion 做视频要知道的事：工程在哪、本机配音和回听怎么调、You 定过的片子规矩、真踩过的坑、怎么在 Console 里交片。
   Use when: 要做或改一支视频（宣传片、产品界面演示、讲解片、动态排版、录屏剪辑），包括主角是家里的猫、片里有剧情的产品宣传片；
   或给片子配音、对时间轴、交片。
   Not for: 只查某个 Remotion API 怎么写（读官方 remotion-best-practices skill 的 rules/）；
   目的就是讲角色自己故事的动画短片（用 anime-forge）；PPT（用 ppt-forge）。
-  Output: Remotion 工程 + Console 里能直接播的片子。
+  Output: Remotion 工程 + Works 中的视频作品与确定版本的交片卡；修改沿原作品续版、回应原意见。
   GOTCHA: 本 skill 不教怎么拍得好看，那靠你自己看片的眼光；2026-10-14 前的长版方法和审美条文把猫带成了「走流程」，已删。
 ---
 
@@ -34,6 +33,11 @@ description: >
 | 跨镜头的长句压到下一句（EP0） | 两层字幕叠在一起 | 渲染前跑 `scripts/timeline-check.py timeline.json` |
 | 只看截帧拼图、统计数字就说「看过了」（《AI-native builder 的一天》10-12 冷读、10-14 粗剪） | 气泡直接蹦出来、角色不动、转场没东西带着，静帧上都看不出来 | 动作和声音只有连续看、带声听才知道；没连续看过就写「没看过」 |
 | 先交静帧平移的全片粗片，动效和后期留到后面（同片 10-14，5:38） | 人和猫全是静图平移、8 处 18 帧溶解、配乐占位，交出去的片子像半成品 | 「先粗后精」只适合画面要靠 AI 生成或画师画、重画很贵的片子（anime-forge）。Remotion 里让角色动起来和让它平移费的工夫差不多：交出去的每一段都按成片做 |
+| 给外人看的片子，交片前只查了事实、ASR、响度（10-19 起五次，最近一次是 11-02 的《怎样对 AI 更有野心》） | You：「我能看懂，外人未必能」；还有「什么叫往旁边借啊！有人这么说话吗！」。片里有家里的词（纠偏口令、AI 猫），有为了顺口自己编的比喻和四字口号，开头的例子到结尾也没收回来 | 配音前，把旁白和画面上的字交给一个没有上下文、只许读这一个文件的子代理，让它扮演用过豆包、ChatGPT 的观众，列出跟丢的地方、别扭的词、在哪会划走。家里的猫（包括写稿的）对这些说法太熟，冷读不出来。原文有现成术语（Altitude、Depth）就保留英文，后面跟一句白话 |
+
+## 取家里的素材
+
+用 `cat_cafe_work` 的 `list-assets` 找素材，默认只选经当前文件核验的正典；没有就照实说没有，不拿实验/失败样本补位。角色按成员或系列、形态、风格和用途选，头像不能顶替走路动作。已入旧索引的文件需要补登记用途时，由原登记猫或 Human 用 `set-asset-status` 带 `applicability`、CAS 和来源理由改判；这不会替 Human 绑定角色。取用前用 `read-asset` 带选中项的 `expectedRevision` 再核一次；使用了用途绑定，就把返回的 `{bindingRef, bindingRevision, indexedVersionRef}` 写进交片索引的 `assets[].bindingSelection`。旧片查看用 `purpose: used` 和固定 WorkReference，看全当时原件，不重新选材。
 
 ## 工程
 
@@ -52,7 +56,9 @@ description: >
 
 ## 交片
 
-Console 里要能直接播，别只贴路径：mp4 放主仓 `.cat-cafe/evidence/<主题>/`，发 `kind: "file"`、`mimeType: "video/mp4"`、`url: "/api/workspace/file/raw?worktreeId=cat-cafe&path=.cat-cafe/evidence/<主题>/<文件>.mp4"` 的 rich block，发之前 curl 一遍确认返回 200。聊天里的上限约 10MB，压法见 `../.cat-cafe-shared-refs/video-voice-and-timeline.md` §5。附一句：这一版改了什么、要他看哪里（时间码）、还有什么没做完。
+用 `cat_cafe_work` 保存作品，再发布它的固定版本卡，让 You 从 Works 或聊天直接进剪辑台批注。具体调用见 [视频作品交付](../.cat-cafe-shared-refs/video-work-delivery.md)。原文件留在实际制作仓，不要求搬到主仓、先写脚本或补 Remotion 合同；高清母版可直接登记，10MB 是另行发送聊天附件的限制，不是作品版本的上限。
+
+改片前读同一份原意见，交新版用原 `contentRef` 和读取到的 `expectedOwnerRevision`，附「改了什么」。按原回报命令回应逐条意见及可核的新位置；猫说已调整后，仍等 You 在片上选「已改／还不对」。不要把续版当作意见自动通过，也不要让 You 回聊天手写时间点。
 
 ## 和别的 skill 的区别
 

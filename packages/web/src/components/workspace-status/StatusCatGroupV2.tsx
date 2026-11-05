@@ -9,9 +9,12 @@ import { CatNameplate } from '../CatNameplate';
 import type { RightStatusPanelProps } from '../RightStatusPanel';
 import { SessionIdTag } from '../SessionChainInputs';
 import type { SessionChainProjection, SessionSummary } from '../SessionChainPanel';
+import { sessionChainCopy } from '../session-chain.shell-copy';
+import { useShellCopy } from '../shell/shell-copy';
 import { useF307ExperienceWorkbenchStore } from '../workbench/experience-workbench-store';
 import { createAgentRunSurface } from '../workbench/real-surface-adapters';
 import { SessionRowV2 } from './SessionRowV2';
+import { statusPageCopy } from './status-page.shell-copy';
 import type { StatusLastRun } from './status-run-history';
 
 export function StatusCatGroupV2({
@@ -27,6 +30,8 @@ export function StatusCatGroupV2({
   lastRun?: StatusLastRun;
   onView: (session: SessionSummary) => void;
 }) {
+  const t = useShellCopy(statusPageCopy);
+  const chain = useShellCopy(sessionChainCopy);
   const { getCatById } = useCatData();
   const cat = getCatById(catId);
   const running = owner.runningCatIds.has(catId);
@@ -60,16 +65,16 @@ export function StatusCatGroupV2({
   const status = props.catStatuses[catId];
   const label =
     status === 'error'
-      ? '异常'
+      ? t.error
       : running
         ? status === 'spawning'
-          ? '启动中'
+          ? t.starting
           : status === 'alive_but_silent'
-            ? '静默等待'
+            ? t.silent
             : status === 'suspected_stall'
-              ? '疑似卡住'
-              : '运行中'
-        : '空闲';
+              ? t.stalled
+              : t.running
+        : t.idle;
   const dot =
     status === 'error' ? 'var(--semantic-critical)' : running ? 'var(--semantic-success)' : 'var(--cafe-text-muted)';
   const lastRunAt =
@@ -98,7 +103,7 @@ export function StatusCatGroupV2({
               ? ` · ${duration}`
               : ''
             : lastRunAt
-              ? ` · 上次运行 ${new Date(lastRunAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })}`
+              ? ` · ${t.lastRun(new Date(lastRunAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }))}`
               : ''}
         </span>
         {trajectoryId && (
@@ -116,14 +121,14 @@ export function StatusCatGroupV2({
               useChatStore.getState().setRightPanelOpen(true);
             }}
           >
-            {running ? '查看运行' : '查看上次运行'} ›
+            {running ? t.viewRun : t.viewLastRun} ›
           </button>
         )}
       </div>
       {invocationId && (
         <div className="status-v2-runtime status-v2-muted">
-          <span>{running ? '运行 ID' : '上次运行 ID'}</span>
-          <SessionIdTag id={invocationId} label="运行 ID" />
+          <span>{running ? t.runId : t.lastRunId}</span>
+          <SessionIdTag id={invocationId} label={t.runId} />
         </div>
       )}
       {current.map((session) => (
@@ -138,7 +143,7 @@ export function StatusCatGroupV2({
       ))}
       {current.length === 0 && (
         <p className="status-v2-muted">
-          {owner.loading ? '正在读取会话…' : owner.loadError ? '会话记录暂不可用' : '没有未封存的会话'}
+          {owner.loading ? t.loading : owner.loadError ? t.sessionsUnavailable : t.noUnarchived}
         </p>
       )}
       {archived.length > 0 && (
@@ -149,10 +154,10 @@ export function StatusCatGroupV2({
             data-testid={`sealed-toggle-${catId}`}
             onClick={() => setHistoryOpen((value) => !value)}
           >
-            {historyOpen ? '▾' : '›'} 已封存的会话 {archived.length}
+            {historyOpen ? '▾' : '›'} {t.archived(archived.length)}
           </button>
           {historyOpen && collapsedRetries > 0 && (
-            <p className="status-v2-muted">{collapsedRetries} 次重试片段（已折叠 · 各 0 条消息）</p>
+            <p className="status-v2-muted">{chain.retryFragments(collapsedRetries)}</p>
           )}
           {historyOpen &&
             visibleArchived.map((session) => (

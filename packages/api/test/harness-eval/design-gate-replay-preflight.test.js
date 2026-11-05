@@ -189,6 +189,11 @@ describe('designGateReplayPreflight — R6 main-first authority', () => {
         now: () => new Date('2026-06-05T11:00:01.000Z'),
         checkStoredSourceEquivalence: designGateSourceEquivalenceCheck,
         mainReader: mockMainReader,
+        gitPublisher: {
+          async publishOnIsolatedWorktree() {
+            throw new Error('exact canonical replay must not publish');
+          },
+        },
         generator: async () => {
           throw new Error('generator must not be called — exact replay via Layer 1a');
         },

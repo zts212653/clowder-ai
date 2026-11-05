@@ -102,8 +102,8 @@ export async function projectTakeoverFixture() {
   };
   const message = messages.append({
     userId: f.principal.userId,
+    from: { kind: 'user', userId: f.principal.userId },
     threadId: thread.id,
-    catId: null,
     mentions: ['codex-astra'],
     content: 'Please fix the opening',
     timestamp: Date.now(),

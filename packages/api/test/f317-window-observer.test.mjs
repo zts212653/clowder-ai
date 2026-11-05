@@ -124,3 +124,39 @@ test('lease renewal denial publishes no fresh observation and never invokes old 
   assert.equal(probe.observation, undefined);
   assert.equal(probe.diagnostic()?.phase, 'lease-renew');
 });
+
+test('failure evidence omits open text and unknown codes even from cyclic error causes', async () => {
+  const secret = 'TEST_SECRET_TOKEN';
+  const error = Object.assign(new Error(`owner-content ${secret}`), { code: 'ESECRET_TOKEN' });
+  error.name = `${secret}Error`;
+  error.cause = error;
+  const probe = observer(async () => {
+    throw error;
+  });
+  await assert.rejects(probe.observe(), (thrown) => thrown === error);
+  const diagnostic = probe.diagnostic(error);
+  assert.equal(diagnostic.error.origin, 'unverified');
+  assert.equal(diagnostic.error.code, undefined);
+  assert.equal(diagnostic.error.type, undefined);
+  const encoded = JSON.stringify(diagnostic);
+  assert.equal(encoded.includes(secret), false);
+  assert.equal(encoded.includes('owner-content'), false);
+  assert.ok(encoded.length < 1_024);
+});
+
+test('unreadable exception properties cannot replace the original poll failure or block diagnostics', async () => {
+  const error = new Error();
+  for (const property of ['message', 'code', 'cause', 'stack']) {
+    Object.defineProperty(error, property, {
+      get: () => {
+        throw new Error('private getter');
+      },
+    });
+  }
+  const probe = observer(async () => {
+    throw error;
+  });
+  await assert.rejects(probe.observe(), (thrown) => thrown === error);
+  assert.equal(probe.diagnostic(error).stages[0].status, 'failed');
+  assert.equal(JSON.stringify(probe.diagnostic(error)).includes('private getter'), false);
+});

@@ -4,6 +4,7 @@ export const messageReadingCopy = defineShellCopy(
   {
     zh: {
       selected: (count: number) => `已选 ${count} 条`,
+      cardsNotSelected: (count: number) => `${count} 张卡没勾`,
       exportAs: '导出为',
       document: '文档',
       text: '文本',
@@ -19,6 +20,7 @@ export const messageReadingCopy = defineShellCopy(
       forwardedBy: (name: string) => `由 ${name} 转发`,
       note: '转发留言',
       showAll: (count: number) => `展开全部 ${count} 条`,
+      showAllParts: (count: number) => `展开全部 ${count} 项内容`,
       collapse: '收起',
       sourceUnavailable: '来源不可用',
       sourceChanged: '原文已变更，无法安全显示',
@@ -31,6 +33,7 @@ export const messageReadingCopy = defineShellCopy(
     },
     en: {
       selected: (count: number) => `${count} selected`,
+      cardsNotSelected: (count: number) => `${count} cards not selected`,
       exportAs: 'Export as',
       document: 'Document',
       text: 'Text',
@@ -46,6 +49,7 @@ export const messageReadingCopy = defineShellCopy(
       forwardedBy: (name: string) => `Forwarded by ${name}`,
       note: 'Forwarding note',
       showAll: (count: number) => `Show all ${count}`,
+      showAllParts: (count: number) => `Show all ${count} parts`,
       collapse: 'Collapse',
       sourceUnavailable: 'Source unavailable',
       sourceChanged: 'The source changed and cannot be safely shown',
@@ -60,10 +64,12 @@ export const messageReadingCopy = defineShellCopy(
   {
     samples: {
       selected: [[0], [2]],
+      cardsNotSelected: [[1]],
       from: [['Source Thread']],
       count: [[1], [3]],
       forwardedBy: [['You']],
       showAll: [[3]],
+      showAllParts: [[3]],
       sourceMessage: [[1]],
       commentBy: [['You']],
     },

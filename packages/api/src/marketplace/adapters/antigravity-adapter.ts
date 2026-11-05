@@ -4,6 +4,7 @@ import type {
   MarketplaceSearchQuery,
   MarketplaceSearchResult,
 } from '@cat-cafe/shared';
+import { deploymentDefaults } from '@cat-cafe/shared';
 
 export interface AntigravityCatalogEntry {
   id: string;
@@ -48,9 +49,9 @@ export class AntigravityMarketplaceAdapter implements MarketplaceAdapter {
       return {
         mode: 'manual_file',
         manualSteps: [
-          `This extension uses resolver "${entry.resolver}" — it's managed by the Clowder AI capability system.`,
+          `This extension uses resolver "${entry.resolver}" — it's managed by the ${deploymentDefaults.brand.name} capability system.`,
           'If not already installed, check Antigravity Extensions marketplace.',
-          `After installing the extension, Clowder AI will auto-detect it via the "${entry.resolver}" resolver.`,
+          `After installing the extension, ${deploymentDefaults.brand.name} will auto-detect it via the "${entry.resolver}" resolver.`,
         ],
         metadata: { versionRef: entry.versionRef, publisherIdentity: entry.publisher },
       };

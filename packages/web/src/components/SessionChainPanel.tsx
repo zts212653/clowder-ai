@@ -471,8 +471,9 @@ export function SessionChainPanel({
       retryFragmentIds: retryCorpseIds,
       loading,
       isStale,
-      loadError,
-      actionError,
+      loadError:
+        loadError && isV2 ? { ...loadError, message: translateSessionMessage(loadError.message, t) } : loadError,
+      actionError: actionFailure && isV2 ? sessionActionErrorCopy(actionFailure, t) : actionError,
       runningCatIds,
       unsealedCountByCat,
       hasRecentCompact,

@@ -145,7 +145,7 @@ describe('ExecutionRow (F322 original-B)', () => {
     expect($('execution-row')).toBeNull();
   });
 
-  it('exposes unverified legacy recovery from canonical state without a client delay state', async () => {
+  it('shows a neutral confirmation while loading, then exposes recovery after timeout', async () => {
     vi.useFakeTimers();
     useActiveExecutionStore.getState().beginHydration(THREAD, null);
     useChatStore.setState({
@@ -161,10 +161,10 @@ describe('ExecutionRow (F322 original-B)', () => {
     } as never);
 
     await render();
-    expect($('execution-row')?.getAttribute('data-status')).toBe('unverified');
-    expect($('execution-row')?.getAttribute('data-tone')).toBe('warning');
-    expect($('execution-row-text')?.textContent).toBe('运行状态待确认');
-    expect($('execution-row-force-reset')).not.toBeNull();
+    expect($('execution-row')?.getAttribute('data-status')).toBe('confirming');
+    expect($('execution-row')?.getAttribute('data-tone')).toBe('neutral');
+    expect($('execution-row-text')?.textContent).toBe('正在确认运行状态…');
+    expect($('execution-row-force-reset')).toBeNull();
 
     await act(async () => vi.advanceTimersByTimeAsync(30_000));
     expect($('execution-row')?.getAttribute('data-status')).toBe('unverified');
@@ -175,7 +175,7 @@ describe('ExecutionRow (F322 original-B)', () => {
   it('1  ■ stops the single live run through the same cancel endpoint and body, then re-reads executions', async () => {
     seed({ executions: [run('opus')] });
     await render();
-    expect($('execution-row-text')?.textContent).toMatch(/^opus 正在回话 \d+:\d{2}$/);
+    expect($('execution-row-text')?.textContent).toMatch(/^opus 处理中 \d+:\d{2}$/);
     expect($('execution-row')?.getAttribute('data-tone')).toBe('info');
     expect($('execution-row-surface')?.style.background).toBe('var(--semantic-info-surface)');
     expect($('execution-row-avatars')).not.toBeNull();
@@ -184,7 +184,7 @@ describe('ExecutionRow (F322 original-B)', () => {
     const cancel = mocks.apiFetch.mock.calls.find((c) => String(c[0]).endsWith('/cancel'));
     expect(cancel?.[0]).toBe(`/api/threads/${THREAD}/executions/live/exec-opus/cancel`);
     expect(cancel?.[1]).toMatchObject({ method: 'POST', body: JSON.stringify({ catId: 'opus' }) });
-    expect(calls()).toContain('GET /api/executions/active?projectPath=%2Fproject%2Fcafe');
+    expect(calls()).toContain('GET /api/executions/active?scope=all');
   });
 
   it('2  ■ on a managed command deletes the hold-ball task', async () => {
@@ -385,7 +385,7 @@ describe('ExecutionRow (F322 original-B)', () => {
     const row = $('execution-row');
     act(() => writeShellLanguage('en'));
     expect($('execution-row')).toBe(row);
-    expect($('execution-row-text')?.textContent).toMatch(/^opus replying \d+:\d{2}$/);
+    expect($('execution-row-text')?.textContent).toMatch(/^opus working \d+:\d{2}$/);
     expect($('execution-row-stop')?.textContent).toContain('Stop');
   });
 });

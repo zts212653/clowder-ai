@@ -67,6 +67,7 @@ export function SettingsResourceToggleSwitch({
       aria-label={ariaLabel}
       aria-pressed={ariaPressed}
       aria-describedby={ariaDescribedBy}
+      data-enabled={enabled}
       title={title ?? (enabled ? '禁用' : '启用')}
       className={joinClasses(
         'settings-resource-toggle relative inline-flex h-[22px] w-10 shrink-0 rounded-full transition-colors disabled:cursor-default',
@@ -80,7 +81,7 @@ export function SettingsResourceToggleSwitch({
     >
       <span
         className={joinClasses(
-          'pointer-events-none absolute top-[3px] h-4 w-4 rounded-full bg-[var(--console-card-bg)] transition-[left]',
+          'settings-resource-toggle-thumb pointer-events-none absolute top-[3px] h-4 w-4 rounded-full bg-[var(--console-card-bg)] transition-[left]',
           enabled ? 'left-[21px]' : 'left-[3px]',
         )}
       />

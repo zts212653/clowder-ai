@@ -196,35 +196,29 @@ describe('counterexample 3: capacity counts active declared worktrees and has a 
         now: T0 + 20 * DAY,
         ...o,
       });
-    assert.throws(attempt({ max: 2 }), (err) => err.exitCode === 2 && /cat-cafe-bob/.test(err.message));
     assert.throws(attempt({ max: 5, base: 'does-not-exist' }), /base/);
+    assert.doesNotThrow(attempt({ max: 2 }));
     for (const kept of [bob, carol]) assert.equal(existsSync(join(kept, 'README.md')), true, kept);
     assert.equal(existsSync(quarantineRoot(fx.parent)), false, 'no quarantine happened');
-    assert.equal(existsSync(join(fx.parent, 'cat-cafe-new')), false);
+    assert.equal(existsSync(join(fx.parent, 'cat-cafe-new')), true);
   });
 
-  it('at the cap, the refusal names what holds the slots, by owner', () => {
+  it('an advisory count never blocks new work or removes another checkout', () => {
     const active = fx.make('cat-cafe-busy-a');
     commitFile(active, 'wip.txt', 'wip\n');
     const other = fx.make('cat-cafe-busy-b', { policy: 'never' });
-    assert.throws(
-      () =>
-        createWorktree({
-          repo: fx.repo,
-          path: join(fx.parent, 'cat-cafe-refused'),
-          branch: 'feat/refused',
-          owner: 'opus5',
-          policy: 'merged',
-          max: 2,
-          now: T0 + 20 * DAY,
-        }),
-      (err) =>
-        err.exitCode === 2 &&
-        /2\/2/.test(err.message) &&
-        /opus5: 2/.test(err.message) &&
-        /cat-cafe-busy-a/.test(err.message),
+    assert.doesNotThrow(() =>
+      createWorktree({
+        repo: fx.repo,
+        path: join(fx.parent, 'cat-cafe-refused'),
+        branch: 'feat/refused',
+        owner: 'opus5',
+        policy: 'merged',
+        max: 2,
+        now: T0 + 20 * DAY,
+      }),
     );
-    assert.equal(existsSync(join(fx.parent, 'cat-cafe-refused')), false);
+    assert.equal(existsSync(join(fx.parent, 'cat-cafe-refused')), true);
     assert.equal(existsSync(other), true);
   });
 });

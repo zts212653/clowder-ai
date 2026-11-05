@@ -1,3 +1,4 @@
+import { coCreatorDisplay } from '@cat-cafe/shared';
 /**
  * Export Route Tests
  * 测试聊天记录导出为 Markdown / 纯文本
@@ -5,6 +6,7 @@
 
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
+import { getCoCreatorConfig } from '../dist/config/cat-config-loader.js';
 import './helpers/setup-cat-registry.js';
 import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
@@ -58,7 +60,8 @@ describe('formatThreadAsMarkdown', () => {
     assert.ok(md.includes('布偶猫'));
     assert.ok(md.includes('你好布偶猫'));
     assert.ok(md.includes('你好co-creator！'));
-    assert.ok(md.includes('co-creator'));
+    const coCreator = getCoCreatorConfig();
+    assert.ok(md.includes(` ${coCreator.nickname ?? coCreatorDisplay(coCreator).nickname}]`));
   });
 
   test('uses consistent timezone basis across header and message body', () => {
@@ -110,7 +113,8 @@ describe('formatThreadAsMarkdown', () => {
 
     const md = formatThreadAsMarkdown(thread, messages);
 
-    assert.ok(md.includes('co-creator'));
+    const coCreator = getCoCreatorConfig();
+    assert.ok(md.includes(` ${coCreator.nickname ?? coCreatorDisplay(coCreator).nickname}]`));
     assert.ok(md.includes('布偶猫'));
     assert.ok(md.includes('缅因猫'));
     assert.ok(md.includes('请问一下'));

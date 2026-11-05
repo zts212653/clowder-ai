@@ -1,38 +1,25 @@
 import { z } from 'zod';
+import { assetWorkCoordinateSchema, indexedVersionRefSchema } from '../types/asset-canon.js';
 import { MediaContextAttachmentSchema } from '../types/media-context-attachment.js';
-import { messageMediaItemSelectorSchema } from '../types/media-publication-source.js';
 import { projectScreeningContextAttachmentSchema } from '../types/video-project-message.js';
 
 export { MediaContextAttachmentSchema } from '../types/media-context-attachment.js';
 
 import {
-  CONTEXT_ATTACHMENT_COMMENT_MAX_LENGTH,
   CONTEXT_ATTACHMENT_MAX_COUNT,
   CONTEXT_ATTACHMENT_PROMPT_MAX_CHARS,
-  CONTEXT_ATTACHMENT_QUOTE_MAX_LENGTH,
   CONTEXT_ATTACHMENT_VERSION,
   serializeContextAttachmentsPrompt,
 } from '../types/context-attachment.js';
 
-const boundedId = z.string().trim().min(1).max(128);
-const boundedPath = z.string().trim().min(1).max(4096);
-const boundedMetadata = z.string().trim().min(1).max(512);
-const ownerRevision = z.string().regex(/^sha256:[a-f0-9]{64}$/) as z.ZodType<`sha256:${string}`>;
-const lineNumber = z.number().int().positive().max(10_000_000);
-const characterOffset = z.number().int().nonnegative().max(10_000_000);
-
-function withValidLineRange<T extends z.ZodRawShape>(shape: T) {
-  return z
-    .object(shape)
-    .strict()
-    .refine(
-      (value) => value.lineStart === undefined || value.lineEnd === undefined || value.lineEnd >= value.lineStart,
-      {
-        message: 'lineEnd must be greater than or equal to lineStart',
-        path: ['lineEnd'],
-      },
-    );
-}
+import {
+  boundedId,
+  boundedMetadata,
+  boundedPath,
+  lineNumber,
+  ownerRevision,
+  withValidLineRange,
+} from './context-attachment-primitives.js';
 
 export const ThreadContextAttachmentSchema = z
   .object({
@@ -56,104 +43,23 @@ export const WorkspaceFileContextAttachmentSchema = withValidLineRange({
   lineEnd: lineNumber.optional(),
 });
 
-export const MessageQuoteSourceSchema = z
-  .object({
-    kind: z.literal('message'),
-    threadId: boundedId,
-    messageId: boundedId,
-    senderCatId: boundedId.optional(),
-    artifactFile: z
-      .object({
-        item: messageMediaItemSelectorSchema,
-        url: z.string().min(1).max(2048),
-        fileName: boundedMetadata,
-        messageRevision: z.string().max(64).regex(/^\d+$/),
-        displayDigest: ownerRevision,
-      })
-      .strict()
-      .optional(),
-  })
-  .strict();
+export * from './quote-context-attachment.schema.js';
 
-export const CliOutputQuoteSourceSchema = z
-  .object({
-    kind: z.literal('cli_output'),
-    threadId: boundedId,
-    messageId: boundedId,
-    segmentId: boundedMetadata.optional(),
-  })
-  .strict();
-
-export const WorkspaceFileQuoteSourceSchema = withValidLineRange({
-  kind: z.literal('workspace_file'),
-  path: boundedPath,
-  worktreeId: boundedMetadata.optional(),
-  branch: boundedMetadata.optional(),
-  revision: ownerRevision.optional(),
-  language: z.string().trim().min(1).max(100).optional(),
-  lineStart: lineNumber.optional(),
-  lineEnd: lineNumber.optional(),
-});
-
-export const QuoteContextSourceSchema = z.union([
-  MessageQuoteSourceSchema,
-  CliOutputQuoteSourceSchema,
-  WorkspaceFileQuoteSourceSchema,
-]);
-
-export const QuoteContextAttachmentSchema = z
-  .object({
-    v: z.literal(CONTEXT_ATTACHMENT_VERSION),
-    id: boundedId,
-    kind: z.literal('quote'),
-    text: z.string().min(1).max(CONTEXT_ATTACHMENT_QUOTE_MAX_LENGTH),
-    comment: z.string().trim().min(1).max(CONTEXT_ATTACHMENT_COMMENT_MAX_LENGTH).optional(),
-    selectionStart: characterOffset.optional(),
-    selectionEnd: characterOffset.optional(),
-    source: QuoteContextSourceSchema,
-  })
-  .strict()
-  .superRefine((value, ctx) => {
-    const hasStart = value.selectionStart !== undefined;
-    const hasEnd = value.selectionEnd !== undefined;
-    if (hasStart !== hasEnd) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'selectionStart and selectionEnd must be provided together',
-        path: hasStart ? ['selectionEnd'] : ['selectionStart'],
-      });
-      return;
-    }
-    if (
-      value.selectionStart !== undefined &&
-      value.selectionEnd !== undefined &&
-      value.selectionEnd <= value.selectionStart
-    ) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'selectionEnd must be greater than selectionStart',
-        path: ['selectionEnd'],
-      });
-    }
-    if (value.source.kind === 'cli_output') {
-      const hasSegment = value.source.segmentId !== undefined;
-      if (hasStart && !hasSegment) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: 'CLI Output selection coordinates require a stable segmentId',
-          path: ['source', 'segmentId'],
-        });
-      } else if (!hasStart && hasSegment) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: 'CLI Output segmentId requires selection coordinates',
-          path: ['selectionStart'],
-        });
-      }
-    }
-  });
+import { QuoteContextAttachmentSchema } from './quote-context-attachment.schema.js';
 
 export const ContextAttachmentSchema = z.union([
+  z
+    .object({
+      v: z.literal(1),
+      id: z.string().min(1).max(128),
+      kind: z.literal('asset'),
+      workTitle: z.string().trim().min(1).max(300).optional(),
+      name: z.string().min(1).max(1000),
+      mediaType: z.string().min(1).max(256),
+      indexedVersionRef: indexedVersionRefSchema,
+      work: assetWorkCoordinateSchema,
+    })
+    .strict(),
   ThreadContextAttachmentSchema,
   WorkspaceFileContextAttachmentSchema,
   QuoteContextAttachmentSchema,

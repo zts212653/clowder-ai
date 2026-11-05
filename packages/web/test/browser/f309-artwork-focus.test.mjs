@@ -3,10 +3,15 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
+import { registerNativeArtworkLightboxJourneys } from './f309-artwork-lightbox-native.mjs';
+import { registerF326C7ArtworkToolsJourney } from './f326-c7-artwork-tools.mjs';
 import { startReviewHost } from './fixtures/f309-artifact-review-host.mjs';
 import { mediaFixture } from './fixtures/f309-artifact-review-media.mjs';
-import { openAnnotationSave } from './fixtures/f309-artwork-controls.mjs';
+import { seedRetainedImageAnnotation, selectReviewMode } from './fixtures/f309-artwork-controls.mjs';
+
+registerNativeArtworkLightboxJourneys();
+registerF326C7ArtworkToolsJourney();
 
 const evidenceRoot = process.env.F309_BROWSER_EVIDENCE_DIR ? path.resolve(process.env.F309_BROWSER_EVIDENCE_DIR) : null;
 async function capture(page, name) {
@@ -29,7 +34,7 @@ async function mediaPoint(page, x, y) {
 }
 
 test(
-  'F309 artwork focus: default sidecar and explicit large canvas share one editable surface',
+  'F309 artwork focus: artwork and explicit full window share one editable surface',
   { timeout: 90000 },
   async (t) => {
     const root = await mkdtemp(path.join(tmpdir(), 'f309-artwork-focus-'));
@@ -59,24 +64,32 @@ test(
       sidecarImage && sidecarImage.width >= 220 && sidecarImage.height >= 145,
       `Default sidecar artwork must be legible: ${JSON.stringify(sidecarImage)}`,
     );
-    await page.getByRole('button', { name: '评论', exact: true }).click();
+    await selectReviewMode(page, 'comment');
     const quickPoint = await mediaPoint(page, 0.3, 0.45);
     await page.mouse.click(quickPoint.x, quickPoint.y);
-    await page.getByRole('textbox', { name: '评论内容' }).fill('右栏的点位短评 sentinel-sidecar');
-    await (await openAnnotationSave(page)).click();
-    await page.getByRole('button', { name: '退出评论', exact: true }).click();
+    const reviewId = host.store.listReviewIds('operator')[0];
+    await page.getByLabel('消息输入框').fill('右栏的点位短评 sentinel-sidecar');
+    await page.getByTestId('review-pending-chat-mark').waitFor();
+    await seedRetainedImageAnnotation(page, host, reviewId, '右栏的点位短评 sentinel-sidecar');
+    await selectReviewMode(page, 'view');
     await page.getByRole('button', { name: '修改记录', exact: true }).click();
     await page.getByTestId('content-modification-panel').waitFor();
     assert.equal(await page.getByTestId('content-modification-submit').count(), 0);
     assert.equal(await page.getByLabel('修改说明', { exact: true }).count(), 0);
     await page.getByRole('button', { name: '收起修改面板' }).click();
-    await page.getByRole('button', { name: '放大圈选', exact: true }).click();
-    assert.notEqual(await workbench.getAttribute('data-main-area-attention'), '');
-    await page.getByRole('button', { name: '取消圈选', exact: true }).waitFor();
-    await page.getByTestId('f307-return-from-main-area').click();
+    await page.getByTestId('artifact-review-surface').getByTestId('f307-artifact-enter-full-window').click();
+    await selectReviewMode(page, 'comment');
+    assert.equal(await workbench.getAttribute('data-main-area-attention'), '');
+    assert.equal(await page.getByTestId('review-host-chat').isVisible(), false);
+    await page.getByTestId('artifact-review-surface').getByTestId('f307-artifact-exit-full-window').click();
 
-    await page.getByRole('button', { name: '放大标注', exact: true }).click();
-    assert.notEqual(await workbench.getAttribute('data-main-area-attention'), '');
+    await page.getByTestId('artifact-review-surface').getByTestId('f307-artifact-enter-full-window').click();
+    await selectReviewMode(page, 'markup');
+    const retainedStage = page.getByTestId('review-media-stage');
+    await retainedStage.evaluate((element) => {
+      element.dataset.focusContinuity = 'original-stage';
+    });
+    assert.equal(await workbench.getAttribute('data-main-area-attention'), '');
     await page.getByRole('button', { name: '文字', exact: true }).click();
     const stage = page.getByTestId('review-media-stage');
     const box = await stage.boundingBox();
@@ -99,10 +112,13 @@ test(
     await page.mouse.click(box.x + box.width * 0.6, box.y + box.height * 0.6);
     assert.equal(await editor.inputValue(), '');
     await page.getByRole('button', { name: '完成文字', exact: true }).click();
-    await page.getByTestId('f307-return-from-main-area').click();
+    await page.getByTestId('artifact-review-surface').getByTestId('f307-artifact-exit-full-window').click();
     assert.equal(await workbench.getAttribute('data-main-area-attention'), '');
+    assert.equal(await retainedStage.getAttribute('data-focus-continuity'), 'original-stage');
+    assert.equal(await page.getByLabel('消息输入框').inputValue(), '右栏的点位短评 sentinel-sidecar');
     assert.equal(await page.getByTestId('review-local-mark').count(), 1, 'Returning keeps the unsaved text.');
-    await page.getByRole('button', { name: '放大标注', exact: true }).click();
+    await page.getByTestId('artifact-review-surface').getByTestId('f307-artifact-enter-full-window').click();
+    await selectReviewMode(page, 'markup');
     await page.getByRole('button', { name: '完成并保存', exact: true }).click();
     await page.getByTestId('review-saved-mark').waitFor();
     await capture(page, '03-saved-and-readback.png');
@@ -113,7 +129,7 @@ test(
       1,
     );
     assert.equal(host.starts.length, 0, 'Saving marks or comments does not entrust a Task.');
-    await page.getByTestId('f307-return-from-main-area').click();
+    await page.getByTestId('artifact-review-surface').getByTestId('f307-artifact-exit-full-window').click();
     assert.equal(await workbench.getAttribute('data-main-area-attention'), '');
     await page.getByTestId('review-saved-mark').waitFor();
     assert.deepEqual(errors, []);
@@ -135,7 +151,7 @@ test('F309 artwork focus: 390px keeps the same canvas and save action reachable'
   });
   await page.goto(host.origin);
   await page.getByTestId('open-artifact-review').click();
-  await page.getByRole('button', { name: '放大标注', exact: true }).click();
+  await selectReviewMode(page, 'markup');
   await page.getByRole('button', { name: '文字', exact: true }).click();
   const at = await mediaPoint(page, 0.32, 0.4);
   await page.mouse.click(at.x, at.y);
@@ -164,7 +180,7 @@ test('F309 artwork focus: a late save receipt preserves marks drawn while saving
   });
   await page.goto(host.origin);
   await page.getByTestId('open-artifact-review').click();
-  await page.getByRole('button', { name: '放大标注', exact: true }).click();
+  await selectReviewMode(page, 'markup');
   await page.getByRole('button', { name: '画笔', exact: true }).click();
   const draw = async (x) => {
     const from = await mediaPoint(page, x, 0.3),
@@ -228,7 +244,7 @@ test(
     });
     await page.goto(host.origin);
     await page.getByTestId('open-artifact-review').click();
-    await page.getByRole('button', { name: '放大标注', exact: true }).click();
+    await selectReviewMode(page, 'markup');
     await page.getByRole('button', { name: '文字', exact: true }).click();
     const at = await mediaPoint(page, 0.42, 0.4);
     await page.mouse.click(at.x, at.y);
@@ -301,7 +317,7 @@ test(
     });
     await page.goto(host.origin);
     await page.getByTestId('open-artifact-review').click();
-    await page.getByRole('button', { name: '放大标注', exact: true }).click();
+    await selectReviewMode(page, 'markup');
     await page.getByRole('button', { name: '文字', exact: true }).click();
     const at = await mediaPoint(page, 0.42, 0.4);
     await page.mouse.click(at.x, at.y);
@@ -330,7 +346,7 @@ test(
     assert.equal(await editor.inputValue(), '回执到达时仍在编辑');
     await page.reload();
     await page.getByTestId('open-artifact-review').click();
-    await page.getByRole('button', { name: '放大标注', exact: true }).click();
+    await selectReviewMode(page, 'markup');
     assert.equal(await editor.inputValue(), '回执到达时仍在编辑', 'The open editor recovers after a reload.');
     await page.getByRole('button', { name: '完成文字', exact: true }).click();
     assert.equal(await page.getByTestId('review-local-mark').count(), 1, 'Later text remains a visible local draft.');

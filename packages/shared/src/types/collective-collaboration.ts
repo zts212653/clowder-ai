@@ -7,8 +7,22 @@ import {
   collectiveHumanIdSchema,
   collectiveLocationSchema,
 } from './collective.js';
+import { collectiveCollaborationActorSchema } from './collective-collaboration-actor.js';
+import { collectiveRoadmapIdSchema, collectiveWorkIdSchema } from './collective-collaboration-identifiers.js';
 import { collectiveBindingVoteProjectionSchema, collectiveDecisionRecordSchema } from './collective-decision-vote.js';
+import { collectiveMaterialLinkSchema } from './collective-material.js';
+import {
+  collectiveProjectWorkSuggestionSchema,
+  collectiveProjectWorkSuggestionTargetSchema,
+  collectiveWorkAccountabilityRequestSchema,
+} from './collective-project-authoring.js';
 import { collectiveReactionSummarySchema } from './collective-reaction.js';
+import {
+  collectiveTimeChangeSchema,
+  collectiveTimeFactSchema,
+  collectiveTimeSuggestionSchema,
+  collectiveWorkTimeSchema,
+} from './collective-time.js';
 import { collectiveVoteProjectionSchema } from './collective-vote.js';
 import {
   collectiveWorkAcceptanceSchema,
@@ -16,15 +30,7 @@ import {
   collectiveWorkExecutionStatusSchema,
 } from './collective-work-acceptance.js';
 
-const publicObjectId = (prefix: string) =>
-  z
-    .string()
-    .min(prefix.length + 8)
-    .max(160)
-    .regex(new RegExp(`^${prefix}[A-Za-z0-9_-]+$`));
-
-export const collectiveWorkIdSchema = publicObjectId('work_');
-export const collectiveRoadmapIdSchema = publicObjectId('roadmap_');
+export { collectiveRoadmapIdSchema, collectiveWorkIdSchema } from './collective-collaboration-identifiers.js';
 
 export const collectiveAssignedWorkReadRequestSchema = collectiveConnectionCoordinatesSchema
   .extend({ workId: collectiveWorkIdSchema })
@@ -43,25 +49,7 @@ export const collectiveAcceptedWorkResultSchema = collectiveAssignedWorkReadRequ
   })
   .strict();
 
-export const collectiveCollaborationActorSchema = z.discriminatedUnion('kind', [
-  z
-    .object({
-      kind: z.literal('human'),
-      humanId: collectiveHumanIdSchema,
-      displayName: z.string().trim().min(1).max(120),
-    })
-    .strict(),
-  z
-    .object({
-      kind: z.literal('agent'),
-      humanId: collectiveHumanIdSchema,
-      humanDisplayName: z.string().trim().min(1).max(120),
-      connectionId: collectiveConnectionIdSchema,
-      catId: z.string().trim().min(1).max(120),
-      displayName: z.string().trim().min(1).max(120),
-    })
-    .strict(),
-]);
+export { collectiveCollaborationActorSchema } from './collective-collaboration-actor.js';
 
 export const collectiveWorkAssignmentSchema = z
   .object({
@@ -85,6 +73,7 @@ export const collectiveWorkLifecycleSchema = z.enum([
 ]);
 export const collectiveWorkStatusSchema = z.enum([
   'proposed',
+  'unassigned',
   'ready',
   'blocked',
   'in_progress',
@@ -98,8 +87,16 @@ export const collectiveWorkHistoryEntrySchema = z
   .object({
     revision: z.number().int().positive(),
     action: z.enum([
+      'material_linked',
+      'time_changed',
+      'time_suggested',
+      'time_suggestion_resolved',
       'proposed',
       'committed',
+      'accountability_assigned',
+      'accountability_requested',
+      'accountability_request_accepted',
+      'accountability_request_declined',
       'dependencies_changed',
       'progress_started',
       'progress_reported',
@@ -111,6 +108,7 @@ export const collectiveWorkHistoryEntrySchema = z
       'declined',
       'cancelled',
     ]),
+    timeChange: collectiveTimeChangeSchema.optional(),
     actor: collectiveCollaborationActorSchema,
     at: z.string().datetime(),
     eventId: collectiveEventIdSchema.optional(),
@@ -129,7 +127,12 @@ export const collectiveWorkRecordSchema = collectiveCoordinatesSchema
     intendedOutcome: z.string().trim().min(1).max(32_000),
     proposedBy: collectiveCollaborationActorSchema,
     proposedRequestKind: z.string().trim().min(1).max(240).optional(),
+    projectSuggestion: collectiveProjectWorkSuggestionSchema.optional(),
     accountableHumanId: collectiveHumanIdSchema.optional(),
+    materialLinks: z.array(collectiveMaterialLinkSchema).optional(),
+    time: collectiveWorkTimeSchema.optional(),
+    timeSuggestions: z.array(collectiveTimeSuggestionSchema).optional(),
+    accountabilityRequests: z.array(collectiveWorkAccountabilityRequestSchema).max(100).optional(),
     assignment: collectiveWorkAssignmentSchema.optional(),
     assignmentEventId: collectiveEventIdSchema.optional(),
     acceptance: collectiveWorkAcceptanceSchema.optional(),
@@ -153,7 +156,11 @@ export const collectiveWorkProjectionSchema = collectiveWorkRecordSchema
 export const collectiveRoadmapHistoryEntrySchema = z
   .object({
     revision: z.number().int().positive(),
-    action: z.enum(['created', 'works_changed', 'completed', 'reopened']),
+    action: z.enum(['created', 'works_changed', 'completed', 'reopened', 'target_date_changed']),
+    targetDateChange: z
+      .object({ previous: collectiveTimeFactSchema.nullable(), current: collectiveTimeFactSchema.nullable() })
+      .strict()
+      .optional(),
     actor: collectiveCollaborationActorSchema,
     at: z.string().datetime(),
     note: z.string().trim().min(1).max(1000).optional(),
@@ -168,6 +175,7 @@ export const collectiveRoadmapRecordSchema = collectiveCoordinatesSchema
     sourceLocation: collectiveLocationSchema,
     title: z.string().trim().min(1).max(200),
     purpose: z.string().trim().min(1).max(4000),
+    targetDate: collectiveTimeFactSchema.optional(),
     accountableHumanId: collectiveHumanIdSchema,
     workIds: z.array(collectiveWorkIdSchema).max(200),
     status: z.enum(['active', 'completed']),
@@ -213,9 +221,19 @@ export const commitCollectiveWorkRequestSchema = humanCommandBase
   .extend({
     workId: collectiveWorkIdSchema,
     expectedRevision: z.number().int().positive(),
+    accountability: z.enum(['self', 'unassigned']).optional(),
     assignment: collectiveWorkAssignmentRequestSchema.optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, context) => {
+    if (value.accountability === 'unassigned' && value.assignment) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['assignment'],
+        message: 'Unassigned Work cannot also name a Cat assignment',
+      });
+    }
+  });
 
 export const setCollectiveWorkDependenciesRequestSchema = humanCommandBase
   .extend({
@@ -318,6 +336,7 @@ export const collectiveAgentWorkProposalRequestSchema = collectiveConnectionCoor
     requestKind: z.string().trim().min(1).max(240).optional(),
     title: z.string().trim().min(1).max(200).optional(),
     intendedOutcome: z.string().trim().min(1).max(32_000).optional(),
+    projectSuggestion: collectiveProjectWorkSuggestionTargetSchema.optional(),
   })
   .strict();
 export type CollectiveAgentWorkProposalRequest = z.infer<typeof collectiveAgentWorkProposalRequestSchema>;

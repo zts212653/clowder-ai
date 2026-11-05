@@ -66,6 +66,7 @@ describe('GET /api/debug/callback-auth — session-only (F174-D1)', () => {
       'agent_key_scope_mismatch',
       'agent_key_unknown',
       'canceled',
+      'cloud_principal_not_configured',
       'completed',
       'failed',
       'interrupted',

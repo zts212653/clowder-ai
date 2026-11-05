@@ -2,6 +2,7 @@ import type {
   CollectiveAttentionRequest,
   CollectiveBindingVoteChoice,
   CollectiveBindingVoteProjection,
+  CollectiveChannelProjection,
   CollectiveCollaborationProjection,
   CollectiveDecisionRecord,
   CollectiveEventEnvelope,
@@ -25,6 +26,10 @@ export interface CollectiveMeta {
   readonly bootstrapNeeded: boolean;
   readonly onboardingComplete: boolean;
   readonly clientBuildId: string;
+  readonly capabilities?: {
+    readonly workResultFiles?: 1;
+    readonly channels?: 1;
+  };
 }
 
 export interface CollectiveHuman {
@@ -65,6 +70,10 @@ export interface HumanAuthBeginResult {
 }
 
 export interface ClientTarget {
+  readonly draftReceipt?: { revision: number; rootEventId?: string };
+  readonly attachments?: import('@cat-cafe/shared').CollectiveMessageAttachment[];
+  readonly contextAttachments?: import('@cat-cafe/shared').CollectiveMessageQuote[];
+  readonly richBlocks?: import('@cat-cafe/shared').CollectiveMessageRichBlock[];
   readonly target?: CollectiveTarget;
   readonly location?: CollectiveLocation;
   readonly recipient?: CollectiveRecipient;
@@ -84,11 +93,20 @@ export interface InviteResult {
 
 export interface SessionResult {
   readonly sessionToken: string;
+  readonly collectiveId?: string;
 }
 
 export type PairingIntentResult = CollectivePairingIntent;
 
 export type ClientPhase = 'loading' | 'entry' | 'bind-identity' | 'create-collective' | 'ready' | 'unavailable';
+
+/** Recovery coordinates, never membership or permission authority. */
+export interface RestrictedCollectiveScope {
+  readonly serviceInstanceId: string;
+  readonly collectiveId: string;
+  readonly humanId: string;
+  readonly reason: 'checking' | 'membership_lost' | 'unavailable' | 'session_expired';
+}
 
 export type DeliveryState =
   | { readonly kind: 'idle' }
@@ -103,6 +121,7 @@ export interface ClientSnapshot {
   readonly collective?: CollectiveMembership;
   readonly providers: readonly HumanAuthProviderStatus[];
   readonly events: readonly CollectiveEventEnvelope[];
+  readonly channels?: readonly CollectiveChannelProjection[];
   readonly collaboration?: CollectiveCollaborationProjection;
   readonly participants?: readonly CollectiveParticipant[];
   readonly members?: CollectiveMemberDirectory;
@@ -110,12 +129,14 @@ export interface ClientSnapshot {
   readonly delivery: DeliveryState;
   readonly notice?: string;
   readonly error?: string;
+  readonly restrictedScope?: RestrictedCollectiveScope;
 }
 
 export type {
   CollectiveAttentionRequest,
   CollectiveBindingVoteChoice,
   CollectiveBindingVoteProjection,
+  CollectiveChannelProjection,
   CollectiveCollaborationProjection,
   CollectiveDecisionRecord,
   CollectiveEventEnvelope,

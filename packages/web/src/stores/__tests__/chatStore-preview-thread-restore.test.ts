@@ -20,7 +20,6 @@ describe('browser preview per-thread restore (F120 × F284)', () => {
       targetCats: [],
       catStatuses: {},
       catInvocations: {},
-      currentGame: null,
       threadStates: {},
       currentThreadId: 'thread-a',
       currentProjectPath: 'default',
@@ -212,6 +211,31 @@ describe('browser preview per-thread restore (F120 × F284)', () => {
     useChatStore.getState().setCurrentThread('thread-b');
     expect(useChatStore.getState().workspacePreview).toEqual({ port: 7002, path: '/queued-newer' });
   });
+
+  it.each([
+    'before-close',
+    'after-close',
+  ])('keeps an explicit closed panel when the cold read starts %s', (readStarts) => {
+    const threadId = `cold-discussion-${readStarts}`;
+    useChatStore.getState().setCurrentThread(threadId);
+    const before = captureThreadWorkspaceState(useChatStore.getState(), threadId);
+    const storedOpen = {
+      ...before,
+      revision: Date.now() - 1000,
+      rightPanelMode: 'workspace' as const,
+      rightPanelOpen: true,
+    };
+    // The target has not hydrated yet: folding an already-closed in-memory view still expresses user intent.
+    useChatStore.getState().closeRightPanel();
+    const expected =
+      readStarts === 'before-close' ? before : captureThreadWorkspaceState(useChatStore.getState(), threadId);
+    expect(hydrateThreadWorkspaceState(threadId, storedOpen, expected)).toBe(false);
+    expect(useChatStore.getState()).toMatchObject({
+      currentThreadId: threadId,
+      rightPanelMode: 'status',
+      rightPanelOpen: false,
+    });
+  });
 });
 
 describe('panel visibility per thread (F284 review P1-2)', () => {
@@ -226,7 +250,6 @@ describe('panel visibility per thread (F284 review P1-2)', () => {
       targetCats: [],
       catStatuses: {},
       catInvocations: {},
-      currentGame: null,
       threadStates: {},
       currentThreadId: 'thread-a',
       currentProjectPath: 'default',

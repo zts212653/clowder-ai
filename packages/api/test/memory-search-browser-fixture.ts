@@ -65,7 +65,7 @@ try {
   const message = messageStore.append({
     userId: 'owner',
     threadId: own.id,
-    catId: null,
+    from: { kind: 'user', userId: 'owner' },
     mentions: [],
     content: '搜索设计要显示原话和出处。',
     timestamp: Date.parse('2026-09-25T12:00:00Z'),
@@ -73,7 +73,7 @@ try {
   messageStore.append({
     userId: 'foreign',
     threadId: foreign.id,
-    catId: null,
+    from: { kind: 'user', userId: 'foreign' },
     mentions: [],
     content: '搜索设计不能泄露这段私有原话。',
     timestamp: Date.parse('2026-09-25T13:00:00Z'),

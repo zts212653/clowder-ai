@@ -1,10 +1,17 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { type ExactAssetVersionRefV1, ownerTruthRefV1Schema, refIdentity } from '@cat-cafe/shared';
+import {
+  type EvolutionUseSourceV1,
+  type ExactAssetVersionRefV1,
+  evolutionUseSourceV1Schema,
+  ownerTruthRefV1Schema,
+  refIdentity,
+} from '@cat-cafe/shared';
 import type { InvocationRecord } from '../../../../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import { readDurableLocalReviewFact } from '../../../../domains/cats/services/local-review-artifact.js';
 import type { IMessageStore } from '../../../../domains/cats/services/stores/ports/MessageStore.js';
 import {
   isRequestReviewAssetVersionRef,
+  REQUEST_REVIEW_EVOLUTION_PROGRAM_ID,
   REQUEST_REVIEW_LOCAL_REVIEW_CONSUMER_REF,
 } from './request-review-owner-identity.js';
 import type {
@@ -27,7 +34,7 @@ export interface RequestReviewUseScope {
 
 interface ServiceOptions {
   ledger: RequestReviewOwnerLedger;
-  messageStore: Pick<IMessageStore, 'getById'>;
+  messageStore: Pick<IMessageStore, 'getById' | 'updateExtra'>;
   invocationRegistry: { peekRecord(invocationId: string): Promise<InvocationRecord | null> };
   versionAttestor: {
     deliver(
@@ -90,6 +97,23 @@ export class RequestReviewUseReceiptService {
   constructor(private readonly options: ServiceOptions) {
     this.now = options.now ?? (() => new Date().toISOString());
     this.randomToken = options.randomToken ?? (() => randomBytes(32).toString('base64url'));
+  }
+
+  private async attachUseSource(
+    reviewMessageId: string,
+    receipt: ReturnType<typeof receiptFrom>,
+  ): Promise<EvolutionUseSourceV1> {
+    const source = evolutionUseSourceV1Schema.parse({
+      schemaVersion: 1,
+      programId: REQUEST_REVIEW_EVOLUTION_PROGRAM_ID,
+      assetVersionRef: receipt.assetVersionRef,
+      receiptRef: receipt.receiptRef,
+      use: receipt.use,
+      recordedAt: receipt.occurredAt,
+    });
+    const updated = await this.options.messageStore.updateExtra(reviewMessageId, { evolutionUseSourceV1: source });
+    if (!updated) throw new Error('request-review use source message disappeared before attachment');
+    return source;
   }
 
   async prepare(input: {
@@ -238,9 +262,12 @@ export class RequestReviewUseReceiptService {
     if (!binding) return { ok: false as const, reason: 'reviewer_invocation_unbound' as const };
     const existing = terminalFor(events, id);
     if (existing) {
-      return existing.reviewMessageId === input.reviewMessageId
-        ? { ok: true as const, outcome: 'duplicate' as const, receipt: receiptFrom(reservation, binding, existing) }
-        : { ok: false as const, reason: 'idempotency_collision' as const };
+      if (existing.reviewMessageId !== input.reviewMessageId) {
+        return { ok: false as const, reason: 'idempotency_collision' as const };
+      }
+      const receipt = receiptFrom(reservation, binding, existing);
+      await this.attachUseSource(input.reviewMessageId, receipt);
+      return { ok: true as const, outcome: 'duplicate' as const, receipt };
     }
     const message = await this.options.messageStore.getById(input.reviewMessageId);
     if (!matchesLocalReview(message, reservation, binding.reviewerInvocationId)) {
@@ -270,10 +297,12 @@ export class RequestReviewUseReceiptService {
     }
     const terminal = appended.outcome === 'duplicate' ? terminalFor(await this.options.ledger.read(), id) : event;
     if (!terminal) throw new Error('request-review use receipt disappeared after append');
+    const receipt = receiptFrom(reservation, binding, terminal);
+    await this.attachUseSource(input.reviewMessageId, receipt);
     return {
       ok: true as const,
       outcome: appended.outcome === 'duplicate' ? ('duplicate' as const) : ('recorded' as const),
-      receipt: receiptFrom(reservation, binding, terminal),
+      receipt,
     };
   }
 

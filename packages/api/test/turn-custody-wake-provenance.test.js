@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { TurnCustodyProjectionService } from '../dist/domains/ball-custody/TurnCustodyProjectionService.js';
 import {
   resolveQueueTurnCustodyWake,
   retargetTurnCustodyWake,
@@ -59,6 +60,23 @@ function entry(overrides = {}) {
 const noMessage = { getById: async () => null };
 
 describe('F167 Phase T queue wake provenance', () => {
+  it('ordinary plugin conversation is user chat without a custody stop obligation', async () => {
+    const wake = await resolveQueueTurnCustodyWake(
+      entry({
+        kind: 'conversation_input',
+        from: { kind: 'plugin', instanceId: 'pi-weixin' },
+        sourceCategory: undefined,
+        a2aTriggerMessageId: undefined,
+      }),
+      noMessage,
+    );
+    assert.deepEqual(wake, { kind: 'unstructured', source: 'user_chat' });
+    const projection = new TurnCustodyProjectionService({});
+    const opened = await projection.open(wake);
+    assert.equal(opened.state, 'covered_empty');
+    assert.equal((await projection.close(opened)).shouldBlock, false);
+  });
+
   it('binds an exact action successor while managed-hold wakes remain lifecycle-owned', async () => {
     assert.deepEqual(
       await resolveQueueTurnCustodyWake(

@@ -18,8 +18,8 @@
  * 虽然参数可选（兼容测试），但生产代码必须显式传入。
  */
 
-import type { CatId, CatRoutingError, MessageContent, MessageFrom } from '@cat-cafe/shared';
-import { catRegistry, escapeRegExp } from '@cat-cafe/shared';
+import type { CatId, CatRoutingError, MessageContent } from '@cat-cafe/shared';
+import { catRegistry, deploymentDefaults, escapeRegExp } from '@cat-cafe/shared';
 import type {
   RoutingPreviewReason,
   RoutingPreviewReasonKind,
@@ -27,7 +27,7 @@ import type {
 } from '@cat-cafe/shared/routing-preview';
 import type { SessionStore } from '@cat-cafe/shared/utils';
 import { context as ctxApi, SpanStatusCode, trace } from '@opentelemetry/api';
-import { getDefaultCatId, isCatAvailable } from '../../../../../config/cat-config-loader.js';
+import { getDefaultCatId, isCatAvailable, resolveCatSuccessor } from '../../../../../config/cat-config-loader.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import {
   ROUTING_INTENT,
@@ -44,17 +44,22 @@ import { SessionManager } from '../../session/SessionManager.js';
 import type { ISessionSealer } from '../../session/SessionSealer.js';
 import type { TranscriptReader } from '../../session/TranscriptReader.js';
 import type { TranscriptWriter } from '../../session/TranscriptWriter.js';
-import { messageFrom } from '../../stores/message-from.js';
 import { DeliveryCursorStore } from '../../stores/ports/DeliveryCursorStore.js';
 import type { IDraftStore } from '../../stores/ports/DraftStore.js';
-import type { IMessageStore, StoredMessage } from '../../stores/ports/MessageStore.js';
+import type { IMessageStore } from '../../stores/ports/MessageStore.js';
 import type { ISessionChainStore } from '../../stores/ports/SessionChainStore.js';
 import type { ITaskStore } from '../../stores/ports/TaskStore.js';
 import type { IThreadStore, ThreadRoutingPolicyV1 } from '../../stores/ports/ThreadStore.js';
 import { DEFAULT_THREAD_ID } from '../../stores/ports/ThreadStore.js';
 import type { IWorkflowSopStore } from '../../stores/ports/WorkflowSopStore.js';
 import { getTimelineOrderTime } from '../../stores/visibility.js';
-import type { AgentMessage, AgentRouteIntent, AgentService, ClaudeCompactionHooksFactory } from '../../types.js';
+import type {
+  AgentMessage,
+  AgentRouteIntent,
+  AgentService,
+  ClaudeCompactionHooksFactory,
+  ToolExecutionPolicy,
+} from '../../types.js';
 import type { InvocationRegistry } from '../invocation/InvocationRegistry.js';
 import {
   type InvocationCapacitySnapshot,
@@ -66,33 +71,13 @@ import type { AgentRegistrationFailure } from '../registry/AgentServiceUnavailab
 import type { RouteExecutionOptions, RouteOptions, RouteStrategyDeps } from '../routing/route-helpers.js';
 import { routeParallel } from '../routing/route-parallel.js';
 import { routeSerial } from '../routing/route-serial.js';
+import { resolveCatTarget } from './cat-target-resolver.js';
 import { appendContextAttachmentsToPrompt } from './context-attachment-prompt.js';
+import { findLastUserMentions } from './last-user-mentions.js';
 
 const log = createModuleLogger('agent-router');
 const routeTracer = trace.getTracer('cat-cafe-api', '0.1.0');
 
-/**
- * F194 Phase Z5 AC-Z16: 无 @ fallback 回看最近 thread messages 找上一条 user message
- * 的 mentions。
- *
- * Spec 窗口 = N=5 USER messages OR 时间窗口 1h（防远古 mentions 主导 fallback）。
- *
- * 实现 = 以 USER message 为停止条件分页扫 thread messages（不是固定 thread message
- * 窗口）：cat-to-cat handoff / vision guard / cross-post 等 cat 消息不消耗 user count
- * 也不能挤掉远一点的 user mention。
- *
- * 砚砚 review 历程：
- *   R1 P1：原实现 `getByThread(threadId, 5)` 取最近 5 条 thread messages，user @ 后
- *     只要 5 条 cat/vision-guard 就把 user mention 挤出窗口 → Bug D 复活。
- *   R2 P1：R2 改成 `getByThread(threadId, 50)` + 反向数 N=5 user msgs + 1h cutoff，
- *     但仍然是单页 thread window — 51+ 条 cat 消息夹中间就退化回原 bug。
- *   R3 P1（当前）：改成分页 loop（getByThread 拉首页 → 不够再 getByThreadBefore
- *     拿历史页），停在 N=5 USER msgs / 1h cutoff / 没有更多消息。
- *     defensive 上限 = Z5_PAGE_SIZE * Z5_MAX_PAGES = 250 条 thread messages。
- */
-const Z5_PAGE_SIZE = 50;
-const Z5_USER_MESSAGE_COUNT_LIMIT = 5;
-const Z5_TIME_WINDOW_MS = 60 * 60 * 1000; // 1h
 const MENTION_TOKEN_BOUNDARY_RE = /[\s,.:;!?()[\]{}<>，。！？、：；（）【】《》「」『』〈〉]/;
 const HANDLE_CONTINUATION_RE = /[a-z0-9_.-]/;
 const QUOTE_BEFORE_MENTION_RE = /["'“”‘’]/;
@@ -451,7 +436,10 @@ function buildMentionData(configs: Record<string, import('@cat-cafe/shared').Cat
  * Options for AgentRouter constructor
  */
 export interface AgentRouterOptions {
-  collectiveContext?: import('../invocation/invoke-single-cat.js').InvocationDeps['collectiveContext'];
+  scopedMemberRouting?: import('./scoped-member-routing.js').ScopedMemberRoutingPort;
+  messageSearchAnswerService?: import('../../../../memory/MessageSearchAnswerPublicationService.js').MessageSearchAnswerPublicationService;
+  resolveTrustedImagePath?: (hmrId: string) => Promise<string | undefined>;
+  resolveInvocationPluginMcpView?: import('../invocation/invoke-single-cat.js').InvocationDeps['resolveInvocationPluginMcpView'];
   agentRegistry: AgentRegistry;
   registry: InvocationRegistry;
   dotReplyTarget?: (
@@ -475,6 +463,12 @@ export interface AgentRouterOptions {
   claudeCompactionHooks?: ClaudeCompactionHooksFactory;
   /** F296 B3b-2: shared provider-presentation delivery ledger. */
   presentationLedger?: PresentationLedger;
+  /** F293: owner-scoped sparse routing projection consumed by provider generation. */
+  routingContextPromptProjection?: import('../../../../routing-context/RoutingContextPromptProjector.js').RoutingContextPromptProjectionPort;
+  /** F293: shared actual-send preflight over the same resolver/catalog graph. */
+  routingDispatchPreflight?: import('../../../../routing-context/RoutingDispatchPreflightPort.js').RoutingDispatchPreflightPort;
+  /** F293: durable dispatch terminal observer over the same routing signal graph. */
+  routingDispatchSignalObserver?: import('../../../../routing-context/RoutingDispatchSignalContract.js').RoutingDispatchTerminalObserver;
   /** F276: terminal disposition authority for person-memory write opportunities. */
   writeOpportunityTerminalLedger?: import('../invocation/invoke-single-cat.js').InvocationDeps['writeOpportunityTerminalLedger'];
   /** F276: reservation and delivery authority for person-memory write opportunities. */
@@ -491,6 +485,8 @@ export interface AgentRouterOptions {
   draftStore?: IDraftStore;
   /** F065: Task store for bootstrap task snapshot injection */
   taskStore?: ITaskStore;
+  ordinaryTaskHandoffs?: import('../../../../ball-custody/OrdinaryTaskHandoffService.js').OrdinaryTaskHandoffService;
+  ownedWaitStatusReader?: import('../../../../ball-custody/OwnedWaitStatus.js').OwnedWaitStatusReader;
   /** RFC A79: canonical exact-run situation projection for agent context. */
   threadExecutionSituationSource?: import('../invocation/thread-execution-situation.js').ThreadExecutionSituationSource;
   /** F073 P4: Workflow SOP store for stage hint injection */
@@ -543,8 +539,6 @@ export interface AgentRouterOptions {
   turnExecutionStore?: import('../../stores/ports/TurnExecutionStore.js').ITurnExecutionStore;
   /** F254 Phase C: Freshness state store for carrier tier persistence */
   freshnessStateStore?: import('../../freshness/FreshnessInvocationStateStore.js').FreshnessInvocationStateStore;
-  /** F254 D2: invocation-scoped provider-native freshness broker factory. */
-  providerNativeFreshnessFactory?: import('../invocation/invoke-single-cat.js').InvocationDeps['providerNativeFreshnessFactory'];
   /** F306: canonical cross-provider request/response surface. */
   runtimeInteractionPort?: import('../../../../runtime-interaction/ports/RuntimeInteractionPort.js').RuntimeInteractionPort;
   /** F254 Phase D (AC-D4): Freshness event log for stream output audit trail */
@@ -557,6 +551,8 @@ export interface AgentRouterOptions {
   personMemoryProposalStatusContextResolver?: import('../../../../memory/people/PersonMemoryProposalStatusContextResolver.js').PersonMemoryProposalStatusContextResolver;
   /** F287: invocation-bound Cue Plane adapter. */
   memoryCuePromptService?: import('../../../../memory/cue/MemoryCueInvocationPromptService.js').MemoryCueInvocationPromptResolver;
+  matterMemoryService?: import('../invocation/invoke-single-cat.js').InvocationDeps['matterMemoryService'];
+  contextSourceAdmission?: import('../../../../memory/cue/ContextSourceAdmission.js').ContextSourceAdmission;
   profileCueOpportunitySource?: import('../../../../memory/cue/sources/ProfileMemoryCueSource.js').ProfileMemoryCueSource;
   threadOverviewOpportunitySource?: import('../../../../memory/cue/sources/ThreadOverviewMemoryCueSource.js').ThreadOverviewMemoryCueSource;
   eventCueOpportunitySource?: import('../../../../memory/cue/sources/EventMemoryCueSource.js').EventMemoryCueSource;
@@ -569,11 +565,14 @@ export interface AgentRouterOptions {
  * Router that parses @ mentions and routes to appropriate agent services
  */
 export class AgentRouter {
-  private services: Record<string, AgentService>;
-  private unavailableServices: ReadonlyMap<string, AgentRegistrationFailure> = new Map();
+  private scopedMemberRouting?: AgentRouterOptions['scopedMemberRouting'];
+  private readonly services: Record<string, AgentService>;
+  private readonly unavailableServices = new Map<string, AgentRegistrationFailure>();
   private registry: InvocationRegistry;
   private messageStore: IMessageStore;
-  private collectiveContext: import('../invocation/invoke-single-cat.js').InvocationDeps['collectiveContext'];
+  private messageSearchAnswerService?: import('../../../../memory/MessageSearchAnswerPublicationService.js').MessageSearchAnswerPublicationService;
+  private resolveTrustedImagePath?: (hmrId: string) => Promise<string | undefined>;
+  private resolveInvocationPluginMcpView?: AgentRouterOptions['resolveInvocationPluginMcpView'];
   private sessionManager: SessionManager;
   private deliveryCursorStore: DeliveryCursorStore;
   private threadStore: IThreadStore | null;
@@ -583,6 +582,9 @@ export class AgentRouter {
   private claudeProjectHookCarrierReady: boolean | ((projectRoot: string) => boolean);
   private claudeCompactionHooks: ClaudeCompactionHooksFactory | undefined;
   private presentationLedger: PresentationLedger | undefined;
+  private routingContextPromptProjection?: import('../../../../routing-context/RoutingContextPromptProjector.js').RoutingContextPromptProjectionPort;
+  private routingDispatchPreflight?: import('../../../../routing-context/RoutingDispatchPreflightPort.js').RoutingDispatchPreflightPort;
+  private routingDispatchSignalObserver?: import('../../../../routing-context/RoutingDispatchSignalContract.js').RoutingDispatchTerminalObserver;
   private writeOpportunityTerminalLedger?: import('../invocation/invoke-single-cat.js').InvocationDeps['writeOpportunityTerminalLedger'];
   private writeOpportunityDeliveryStore?: import('../invocation/invoke-single-cat.js').InvocationDeps['writeOpportunityDeliveryStore'];
   private runtimeSessionStore: IRuntimeSessionStore | undefined;
@@ -592,6 +594,10 @@ export class AgentRouter {
   private draftStore: IDraftStore | undefined;
   private taskProgressStore: TaskProgressStore | undefined;
   private taskStore: ITaskStore | undefined;
+  private ordinaryTaskHandoffs?: AgentRouterOptions['ordinaryTaskHandoffs'];
+  private ownedWaitStatusReader:
+    | import('../../../../ball-custody/OwnedWaitStatus.js').OwnedWaitStatusReader
+    | undefined;
   private threadExecutionSituationSource?: import('../invocation/thread-execution-situation.js').ThreadExecutionSituationSource;
   private workflowSopStore: IWorkflowSopStore | undefined;
   private executionDigestStore:
@@ -633,7 +639,6 @@ export class AgentRouter {
   /** F254 Phase C */
   private freshnessStateStore?: import('../../freshness/FreshnessInvocationStateStore.js').FreshnessInvocationStateStore;
   /** F254 D2 */
-  private providerNativeFreshnessFactory?: import('../invocation/invoke-single-cat.js').InvocationDeps['providerNativeFreshnessFactory'];
   /** F306 */
   private runtimeInteractionPort?: import('../../../../runtime-interaction/ports/RuntimeInteractionPort.js').RuntimeInteractionPort;
   /** F254 Phase D (AC-D4) */
@@ -646,6 +651,8 @@ export class AgentRouter {
   private personMemoryProposalStatusContextResolver?: import('../../../../memory/people/PersonMemoryProposalStatusContextResolver.js').PersonMemoryProposalStatusContextResolver;
   /** F287 */
   private memoryCuePromptService?: import('../../../../memory/cue/MemoryCueInvocationPromptService.js').MemoryCueInvocationPromptResolver;
+  private matterMemoryService?: import('../invocation/invoke-single-cat.js').InvocationDeps['matterMemoryService'];
+  private contextSourceAdmission?: import('../../../../memory/cue/ContextSourceAdmission.js').ContextSourceAdmission;
   private profileCueOpportunitySource?: import('../../../../memory/cue/sources/ProfileMemoryCueSource.js').ProfileMemoryCueSource;
   private threadOverviewOpportunitySource?: import('../../../../memory/cue/sources/ThreadOverviewMemoryCueSource.js').ThreadOverviewMemoryCueSource;
   private eventCueOpportunitySource?: import('../../../../memory/cue/sources/EventMemoryCueSource.js').EventMemoryCueSource;
@@ -653,8 +660,10 @@ export class AgentRouter {
   private speechMentionRe: RegExp;
 
   private rebuildRuntimeCaches(agentRegistry: AgentRegistry): void {
-    this.unavailableServices = agentRegistry.getAllUnavailableEntries();
-    this.services = {};
+    // Retained route deps see the next member's current service; pinned invocations keep their own reference.
+    this.unavailableServices.clear();
+    agentRegistry.getAllUnavailableEntries().forEach((reason, catId) => this.unavailableServices.set(catId, reason));
+    Object.keys(this.services).forEach((catId) => delete this.services[catId]);
     for (const [catId, service] of agentRegistry.getAllEntries()) {
       this.services[catId] = service;
     }
@@ -664,13 +673,16 @@ export class AgentRouter {
   }
 
   constructor(options: AgentRouterOptions) {
+    this.scopedMemberRouting = options.scopedMemberRouting;
     this.services = {};
     this.speechMentionRe = /$^/;
     this.rebuildRuntimeCaches(options.agentRegistry);
 
     this.registry = options.registry;
     this.messageStore = options.messageStore;
-    this.collectiveContext = options.collectiveContext;
+    this.messageSearchAnswerService = options.messageSearchAnswerService;
+    this.resolveTrustedImagePath = options.resolveTrustedImagePath;
+    this.resolveInvocationPluginMcpView = options.resolveInvocationPluginMcpView;
     this.sessionManager = new SessionManager(options.sessionStore);
     // #1200 P2-3: wire cursor canonicalizer for v1→v2 async resolution
     const canonicalizer = options.messageStore.canonicalizeCursor
@@ -685,6 +697,9 @@ export class AgentRouter {
     this.claudeProjectHookCarrierReady = options.claudeProjectHookCarrierReady ?? false;
     this.claudeCompactionHooks = options.claudeCompactionHooks;
     this.presentationLedger = options.presentationLedger;
+    this.routingContextPromptProjection = options.routingContextPromptProjection;
+    this.routingDispatchPreflight = options.routingDispatchPreflight;
+    this.routingDispatchSignalObserver = options.routingDispatchSignalObserver;
     this.writeOpportunityTerminalLedger = options.writeOpportunityTerminalLedger;
     this.writeOpportunityDeliveryStore = options.writeOpportunityDeliveryStore;
     this.runtimeSessionStore = options.runtimeSessionStore;
@@ -694,6 +709,8 @@ export class AgentRouter {
     this.draftStore = options.draftStore;
     this.taskProgressStore = options.taskProgressStore;
     this.taskStore = options.taskStore;
+    this.ordinaryTaskHandoffs = options.ordinaryTaskHandoffs;
+    this.ownedWaitStatusReader = options.ownedWaitStatusReader;
     this.threadExecutionSituationSource = options.threadExecutionSituationSource;
     this.workflowSopStore = options.workflowSopStore;
     this.executionDigestStore = options.executionDigestStore;
@@ -721,13 +738,14 @@ export class AgentRouter {
     this.cloudReturnGrantStore = options.cloudReturnGrantStore;
     this.turnExecutionStore = options.turnExecutionStore;
     this.freshnessStateStore = options.freshnessStateStore;
-    this.providerNativeFreshnessFactory = options.providerNativeFreshnessFactory;
     this.runtimeInteractionPort = options.runtimeInteractionPort;
     this.freshnessEventLog = options.freshnessEventLog;
     this.freshnessOutputCommitCoordinator = options.freshnessOutputCommitCoordinator;
     this.injectionTraceStore = options.injectionTraceStore;
     this.personMemoryProposalStatusContextResolver = options.personMemoryProposalStatusContextResolver;
     this.memoryCuePromptService = options.memoryCuePromptService;
+    this.matterMemoryService = options.matterMemoryService;
+    this.contextSourceAdmission = options.contextSourceAdmission;
     this.profileCueOpportunitySource = options.profileCueOpportunitySource;
     this.eventCueOpportunitySource = options.eventCueOpportunitySource;
     this.threadOverviewOpportunitySource = options.threadOverviewOpportunitySource;
@@ -773,27 +791,25 @@ export class AgentRouter {
     return service ? resolveInvocationCapacitySnapshot({ catId, service }) : undefined;
   }
 
-  supportsCollectiveParticipation(catId: string): boolean {
-    return (
-      this.isRoutableCat(catId) &&
-      this.services[catId]?.supportsToolExecutionPolicy?.({ mode: 'collective_participation' }) === true
-    );
+  /** Capability of the actual routable service; does not admit any particular invocation. */
+  supportsToolExecutionPolicy(catId: string, policy: ToolExecutionPolicy): boolean {
+    return this.isRoutableCat(catId) && this.services[catId]?.supportsToolExecutionPolicy?.(policy) === true;
   }
 
   private isRoutableCat(catId: string | null | undefined): catId is CatId {
-    return typeof catId === 'string' && Object.hasOwn(this.services, catId) && isCatAvailable(catId);
+    return (
+      typeof catId === 'string' &&
+      catId !== '__none__' &&
+      catRegistry.has(catId) &&
+      Object.hasOwn(this.services, catId) &&
+      isCatAvailable(catId)
+    );
   }
 
   private filterRoutableCats(catIds: Iterable<string | null | undefined>): CatId[] {
-    const filtered: CatId[] = [];
-    const seen = new Set<string>();
-    for (const catId of catIds) {
-      if (!this.isRoutableCat(catId)) continue;
-      if (seen.has(catId)) continue;
-      seen.add(catId);
-      filtered.push(catId);
-    }
-    return filtered;
+    return [...new Set([...catIds].flatMap((id) => (id ? (resolveCatSuccessor(id) ?? []) : [])))].filter((id) =>
+      this.isRoutableCat(id),
+    );
   }
 
   private filterKnownCats(catIds: Iterable<string | null | undefined>): CatId[] {
@@ -801,6 +817,15 @@ export class AgentRouter {
     return [...new Set(catIds)].filter(
       (catId): catId is CatId => typeof catId === 'string' && Object.hasOwn(configs, catId),
     );
+  }
+
+  /** Validate before first persistence; bound/explicit recipients never follow successors. */
+  resolveAdmissionTargets(requested: readonly string[], implicit = false): CatId[] {
+    const targets = requested.map((id) => {
+      if (implicit) return resolveCatSuccessor(id);
+      return id !== '__none__' && catRegistry.has(id) && isCatAvailable(id) ? (id as CatId) : null;
+    });
+    return targets.every((id): id is CatId => id !== null) ? [...new Set(targets)] : [];
   }
 
   /**
@@ -811,10 +836,14 @@ export class AgentRouter {
   async resolveExplicitTargets(
     requestedCatIds: readonly string[],
     threadId: string,
-    options?: { persist?: boolean },
+    options?: { persist?: boolean; bound?: boolean },
   ): Promise<CatId[]> {
-    const resolved = this.filterKnownCats(requestedCatIds);
-    if (resolved.length !== requestedCatIds.length) return [];
+    // First admission validates the whole explicit request. A bound Queue row
+    // instead settles each recipient, so an invalid sibling cannot cancel healthy work.
+    const resolved = options?.bound
+      ? requestedCatIds.flatMap((id) => this.resolveAdmissionTargets([id])).filter((id) => this.isRoutableCat(id))
+      : this.resolveAdmissionTargets(requestedCatIds);
+    if (!options?.bound && resolved.length !== requestedCatIds.length) return [];
     if (options?.persist && this.threadStore) {
       await this.threadStore.addParticipants(threadId, resolved);
     }
@@ -824,31 +853,23 @@ export class AgentRouter {
   /**
    * Canonical target resolution for public conversation work.
    *
-   * Common send resolves before atomic Message + Queue admission. Drain uses
-   * the same resolver to handle targets that have since become unavailable.
-   * Still-routable explicit
-   * members are preserved in their original order. If none remain, the most
-   * recent completed lifecycle response is the only history-derived fallback;
-   * non-terminal and non-completed bubbles are deliberately ignored. The
-   * configured default is consulted only after that history lookup.
+   * Common send resolves before atomic Message + Queue admission. Drain may
+   * reuse the policy, but must keep any already-bound Queue recipient set.
+   * Still-routable explicit members keep their original order. Otherwise use
+   * the same conversation policy shown by the composer, including historical
+   * user mentions, healthy repliers and preferences. Existing history does not
+   * need newly introduced response lifecycle metadata to retain its recipient.
    */
-  async resolveConversationTargetsAtAdmission(requestedCatIds: readonly string[], threadId: string): Promise<CatId[]> {
-    const explicit = this.filterRoutableCats(requestedCatIds);
-    if (explicit.length > 0) return explicit;
-
-    if (this.messageStore) {
-      const recent = await Promise.resolve(this.messageStore.getByThread(threadId, 100));
-      for (let index = recent.length - 1; index >= 0; index -= 1) {
-        const lifecycle = recent[index]?.lifecycle;
-        if (lifecycle?.kind !== 'response' || lifecycle.status !== 'completed') continue;
-        const target = this.filterRoutableCats([lifecycle.targetId]);
-        if (target.length > 0) return target;
-        break;
-      }
-    }
-
-    const fallback = this.pickFallbackCat(new Set());
-    return fallback ? [fallback] : [];
+  async resolveConversationTargetsAtAdmission(
+    requestedCatIds: readonly string[],
+    threadId: string,
+    content = '',
+  ): Promise<CatId[]> {
+    const explicit = await this.parseAllMentions(content, threadId, { allowGroupFallback: false });
+    if (explicit.mentions.length > 0 || explicit.routing_warnings.length > 0) return explicit.mentions;
+    const hinted = this.filterRoutableCats(requestedCatIds);
+    if (hinted.length > 0) return hinted;
+    return (await this.resolveImplicitTargetPreview(content, threadId)).targetCats;
   }
 
   /** Public send parses prose once, then shares the existing conversation fallback. */
@@ -861,94 +882,10 @@ export class AgentRouter {
     if (requested.length > 0 && (await this.resolveExplicitTargets(requested, threadId)).length !== requested.length) {
       throw new Error('Invalid explicit member identity');
     }
-    if (exact) return this.resolveExplicitTargets(requested, threadId);
-    const targets =
-      requested.length > 0
-        ? requested
-        : (await this.resolveTargetsAndIntent(content, threadId, { persist: false, allowFallback: false })).targetCats;
-    return this.resolveConversationTargetsAtAdmission(targets, threadId);
-  }
-
-  /**
-   * F194 Phase Z5 AC-Z16: 无 @ fallback 优先用上一条 user message 的 mentions，
-   * 不让 thread 里其他猫的发言（如 vision guard cross-post）抢路由 fallback。
-   *
-   * 用户心智模型："no @ = 继续刚才 @ 的猫里的一只"，不是"thread 里最近发言的猫"，
-   * 也不是把上一轮 parallel mentions 全量延续成新一轮并发。
-   *
-   * user message 严格定义：`from.kind === 'user'`。
-   *   - cat-to-cat handoff (A2A) 有 catId → NOT a user message
-   *   - vision guard cross-post 有 catId → NOT a user message
-   *   - system/external/plugin sender → NOT a user message
-   *
-   * 时间窗口：回看最近 N=5 条 user messages，防止远古 mentions 主导 fallback。
-   * 在 N 条窗口内找到的最近一条 user message 后，取第一个 routable mention
-   * 作为 deterministic single-cat fallback。
-   */
-  private async findRecentUserMentionFallback(threadId: string): Promise<CatId[] | null> {
-    if (!this.messageStore) return null;
-    // F194 Phase Z5 R2 (砚砚 R1 P1#1): MessageStore interface 允许 sync 数组 OR async Promise
-    // (memory mock 是同步，Redis 生产是 async)。必须 await 才能拿到 Redis 实际数据。
-    // F194 Phase Z5 R4 (砚砚 R3 P1): 改为分页扫 — 以 USER message 数 / 时间窗口为
-    // 停止条件，而不是固定 thread message 窗口。
-    //   首页 = getByThread(threadId, PAGE_SIZE) — 最近 PAGE_SIZE 条 (ascending by score)
-    //   历史页 = getByThreadBefore(threadId, oldest.score, PAGE_SIZE, oldest.id) — 再往前
-    //   每页内反向扫，遇 user msg 计 user count，遇有 mentions 直接 return。
-    // F194 Phase Z5 R10 (cloud Codex round-6 P2): 去掉固定 page cap，仅靠 spec stop conditions
-    //   (5 user msgs / 1h cutoff / no more history) 收敛。固定 page cap 在高流量 thread
-    //   (vision-guard / handoff > 250) 仍可能漏掉真正的 user @ → 退化回 participantsWithActivity。
-    //   1h cutoff 通过 effective score 时间维度天然 bound 扫描深度（cat msg score 最终 < cutoff
-    //   时整页都比 cutoff 老，user msg cutoff 触发 return null），不会无限循环。
-    // Cursor + cutoff use the same publication-order score as Redis. Real-cat
-    // speech stays at authoring time; ordinary queued user work uses delivery.
-    const effectiveOrderTime = (message: StoredMessage): number => getTimelineOrderTime(message);
-    const cutoffTimestamp = Date.now() - Z5_TIME_WINDOW_MS;
-    let userMessagesSeen = 0;
-    let cursorScore: number | undefined;
-    let cursorId: string | undefined;
-
-    for (let pageIdx = 0; ; pageIdx += 1) {
-      const pageResult =
-        pageIdx === 0
-          ? this.messageStore.getByThread(threadId, Z5_PAGE_SIZE)
-          : this.messageStore.getByThreadBefore(threadId, cursorScore ?? 0, Z5_PAGE_SIZE, cursorId);
-      const page = await Promise.resolve(pageResult);
-      if (!page || !Array.isArray(page) || page.length === 0) break;
-
-      for (let i = page.length - 1; i >= 0; i -= 1) {
-        const m = page[i] as StoredMessage;
-        // MessageFrom keeps scheduler/system notices out of the user count.
-        // 否则一串 system/scheduler notice 会塞满 USER count limit，把真正的 user @ 挤出窗口外。
-        const isUserMessage = messageFrom(m).kind === 'user';
-        if (!isUserMessage) continue;
-        // F194 Phase Z5 R8 (cloud Codex round-4 P1) + R9 (砚砚 R8 P1): 1h cutoff 在 isUserMessage 之后
-        // 判断，且用 effectiveOrderTime（与 cursor 同口径）。Redis markDelivered 把 thread zset score
-        // 改成 deliveredAt，对一条 send-time 老但刚 re-delivered 的 user msg，cutoff 应按 deliveredAt
-        // 算（与 Redis 排序对齐）。非 user msg 已 continue 跳过，cutoff 不会误 trip return null。
-        const score = effectiveOrderTime(m);
-        if (score > 0 && score < cutoffTimestamp) return null;
-        userMessagesSeen += 1;
-        if (userMessagesSeen > Z5_USER_MESSAGE_COUNT_LIMIT) return null;
-        const mentions = Array.isArray(m.mentions) ? (m.mentions as string[]) : [];
-        if (mentions.length === 0) continue; // user msg without @ → skip, keep looking earlier
-        const routable = this.filterRoutableCats(mentions as CatId[]);
-        return routable.length > 0 ? [routable[0]] : null;
-      }
-
-      // 页内没找到，准备下一页 cursor = 当前页最旧消息（ascending → page[0]）。
-      // R9: cursor.score = effectiveOrderTime(page[0]) 与 Redis zset score 一致。
-      const oldest = page[0] as StoredMessage;
-      if (typeof oldest?.id !== 'string') break;
-      const oldestScore = effectiveOrderTime(oldest);
-      if (oldestScore <= 0) break;
-      // F194 Phase Z5 R11 (砚砚 R10 P2): page-level cutoff — page[0] 是当前页最旧 effective score，
-      // 如果它已经早于 cutoff，下一页只会更老（pages 按 effective score asc），无须再翻。
-      // 防止高流量 thread (无 user msg in 1h) 把 unbounded loop 拖成全量历史扫描。
-      if (oldestScore < cutoffTimestamp) return null;
-      cursorScore = oldestScore;
-      cursorId = oldest.id;
-    }
-    return null;
+    if (exact || requested.length > 0) return this.resolveExplicitTargets(requested, threadId);
+    const parsed = await this.resolveTargetsAndIntent(content, threadId, { persist: false, allowFallback: false });
+    if (parsed.hasMentions) return parsed.targetCats;
+    return this.resolveConversationTargetsAtAdmission([], threadId, content);
   }
 
   /** Pick a deterministic fallback cat when policy filters out all candidates. */
@@ -956,9 +893,6 @@ export class AgentRouter {
     const def = getDefaultCatId() as string;
     if (!exclude.has(def) && this.isRoutableCat(def)) return def as CatId;
 
-    for (const id of Object.keys(this.services).sort()) {
-      if (!exclude.has(id) && this.isRoutableCat(id)) return id as CatId;
-    }
     return null;
   }
 
@@ -998,8 +932,8 @@ export class AgentRouter {
     // Defensive guard: data might be malformed from external persistence.
     const avoidList = Array.isArray(rule.avoidCats) ? rule.avoidCats : [];
     const preferList = Array.isArray(rule.preferCats) ? rule.preferCats : [];
-    const avoid = new Set(avoidList.map((id) => String(id)));
-    const prefer = preferList.map((id) => String(id)).filter((id) => !avoid.has(id));
+    const avoid = new Set<string>(this.filterRoutableCats(avoidList));
+    const prefer = this.filterRoutableCats(preferList).filter((id) => !avoid.has(id));
 
     const filtered = routableCandidates.filter((id) => !avoid.has(id as string));
     const out: CatId[] = [];
@@ -1022,7 +956,7 @@ export class AgentRouter {
     if (out.length > 0) return out;
 
     const fallback = this.pickFallbackCat(avoid);
-    return fallback ? [fallback] : routableCandidates;
+    return fallback ? [fallback] : [];
   }
 
   /** Normalize speech patterns like "at 布偶" → "@布偶" */
@@ -1073,7 +1007,15 @@ export class AgentRouter {
     }
 
     mentions.sort((a, b) => a.position - b.position);
-    return { mentions, routing_warnings };
+    return {
+      mentions: mentions.filter(({ catId }) => {
+        const target = resolveCatTarget(catId);
+        if ('ok' in target) return true;
+        routing_warnings.push(target.error);
+        return false;
+      }),
+      routing_warnings,
+    };
   }
 
   private buildGroupMentionKeywordPatterns(): string[] {
@@ -1245,7 +1187,7 @@ export class AgentRouter {
 
       return {
         mentions: [...before, ...groupResult.cats, ...after],
-        routing_warnings: [],
+        routing_warnings: individual.routing_warnings,
       };
     }
     return this.parseMentions(message);
@@ -1274,18 +1216,61 @@ export class AgentRouter {
   private async resolveTargetPreview(
     message: string,
     threadId: string,
+    options?: {
+      prospectivePreferredCats?: readonly CatId[];
+      publicConversation?: boolean;
+      explicitTargetCats?: readonly CatId[];
+    },
+  ): Promise<RoutingPreviewResponse> {
+    const { mentions: mentionedCats, routing_warnings } = options?.explicitTargetCats
+      ? { mentions: [...options.explicitTargetCats], routing_warnings: [] }
+      : await this.parseAllMentions(message, threadId, {
+          allowGroupFallback: !options?.publicConversation,
+        });
+    const targets = options?.publicConversation ? this.filterRoutableCats(mentionedCats) : [...mentionedCats];
+    if (targets.length > 0 || routing_warnings.length > 0) {
+      const unavailableTargets = options?.publicConversation
+        ? [
+            ...this.filterKnownCats(mentionedCats).filter((id) => !this.isRoutableCat(id)),
+            ...routing_warnings.flatMap((warning) => (warning.kind === 'cat_disabled' ? [warning.catId] : [])),
+          ]
+        : [];
+      // A disabled explicit identity may propose its configured successor, but
+      // public admission still requires confirmation before either identity is written.
+      const suggestions = options?.publicConversation
+        ? this.filterRoutableCats(
+            routing_warnings.flatMap((warning) => (warning.kind === 'cat_disabled' ? [warning.catId] : [])),
+          )
+        : [];
+      return {
+        targetCats: [...new Set([...targets, ...suggestions])],
+        ...(routing_warnings.length ? { routingWarnings: routing_warnings } : {}),
+        reason: { kind: 'current_message_mentions' },
+        ...(unavailableTargets.length ? { unavailableTargets, requiresConfirmation: true } : {}),
+      };
+    }
+    const result = await this.resolveImplicitTargetPreview(message, threadId, options);
+    const unavailableTargets = this.filterKnownCats(mentionedCats).filter((id) => !this.isRoutableCat(id));
+    return unavailableTargets.length
+      ? {
+          ...result,
+          unavailableTargets: [...new Set([...unavailableTargets, ...(result.unavailableTargets ?? [])])],
+          requiresConfirmation: true,
+        }
+      : result;
+  }
+
+  /** One policy owner for implicit preview, common send and queued public recovery. */
+  private async resolveImplicitTargetPreview(
+    message: string,
+    threadId: string,
     options?: { prospectivePreferredCats?: readonly CatId[] },
   ): Promise<RoutingPreviewResponse> {
-    const { mentions: mentionedCats } = await this.parseAllMentions(message, threadId);
-    if (mentionedCats.length > 0) {
-      return { targetCats: mentionedCats, reason: { kind: 'current_message_mentions' } };
-    }
-
     const prospective = options?.prospectivePreferredCats !== undefined;
     if (!prospective && !this.threadStore) {
       // Preserve the pre-existing no-store fallback used by narrow tests and
       // compatibility callers; production routing always has a ThreadStore.
-      return { targetCats: [getDefaultCatId()], reason: { kind: 'default_cat' } };
+      return { targetCats: this.filterRoutableCats([getDefaultCatId()]), reason: { kind: 'default_cat' } };
     }
     const thread:
       | {
@@ -1297,64 +1282,75 @@ export class AgentRouter {
       | undefined = prospective
       ? { preferredCats: [...(options?.prospectivePreferredCats ?? [])] }
       : await this.threadStore?.get(threadId);
+    const unavailableTargets: CatId[] = [];
+    const project = (candidates: CatId[], kind: Exclude<RoutingPreviewReasonKind, 'thread_policy'>) => ({
+      ...this.applyRoutingPolicyForPreview(thread, message, candidates, kind),
+      ...(unavailableTargets.length ? { unavailableTargets: [...new Set(unavailableTargets)] } : {}),
+    });
     const rawPref = Array.isArray(thread?.preferredCats) ? thread.preferredCats : [];
     const validPreferred = this.filterRoutableCats(rawPref);
     const preferredSet = new Set(validPreferred.map(String));
 
     // #58: explicit #ideate with multiple preferred cats → dispatch all.
     if (/#ideate\b/i.test(message) && validPreferred.length > 1) {
-      return this.applyRoutingPolicyForPreview(thread, message, validPreferred, 'preferred_parallel');
+      return project(validPreferred, 'preferred_parallel');
     }
 
     // F229: a concierge duty cat overrides implicit history, while an explicit
     // mention in the current message still won above.
     if (!prospective && thread?.threadKind === 'concierge' && validPreferred.length > 0) {
-      return this.applyRoutingPolicyForPreview(thread, message, validPreferred, 'concierge_preferred');
+      return project(validPreferred, 'concierge_preferred');
     }
 
     if (!prospective && this.threadStore) {
-      const userMentionFallback = await this.findRecentUserMentionFallback(threadId);
-      if (userMentionFallback && userMentionFallback.length > 0) {
-        return this.applyRoutingPolicyForPreview(thread, message, userMentionFallback, 'previous_user_mentions');
+      const mentions = await findLastUserMentions(this.messageStore, threadId);
+      for (const catId of this.filterKnownCats(mentions)) {
+        const resolved = this.filterRoutableCats([catId]);
+        if (resolved.length > 0) return project(resolved, 'previous_user_mentions');
+        unavailableTargets.push(catId);
       }
 
-      const participantsWithActivity = await this.threadStore.getParticipantsWithActivity(threadId);
+      const participantsWithActivity = (await this.threadStore.getParticipantsWithActivity(threadId)).flatMap(
+        (participant) => this.filterRoutableCats([participant.catId]).map((catId) => ({ ...participant, catId })),
+      );
       const isRoutable = (participant: { catId: CatId }) => this.isRoutableCat(participant.catId);
       const isHealthy = (participant: { lastResponseHealthy?: boolean }) => participant.lastResponseHealthy !== false;
       const healthyReplier = participantsWithActivity.find(
         (participant) => participant.messageCount > 0 && isHealthy(participant) && isRoutable(participant),
       );
       if (healthyReplier) {
-        return this.applyRoutingPolicyForPreview(thread, message, [healthyReplier.catId], 'recent_replier');
+        return project([healthyReplier.catId], 'recent_replier');
       }
       const preferredFallback = participantsWithActivity.find(
         (participant) =>
           isHealthy(participant) && isRoutable(participant) && preferredSet.has(participant.catId as string),
       );
       if (preferredFallback) {
-        return this.applyRoutingPolicyForPreview(thread, message, [preferredFallback.catId], 'preferred_cat');
+        return project([preferredFallback.catId], 'preferred_cat');
       }
       const anyFallback = participantsWithActivity.find(
         (participant) => isHealthy(participant) && isRoutable(participant),
       );
       if (anyFallback) {
-        return this.applyRoutingPolicyForPreview(thread, message, [anyFallback.catId], 'available_participant');
+        return project([anyFallback.catId], 'available_participant');
       }
     }
 
     if (validPreferred.length > 0) {
-      return this.applyRoutingPolicyForPreview(thread, message, [validPreferred[0]], 'preferred_cat');
+      return project([validPreferred[0]], 'preferred_cat');
     }
 
-    return this.applyRoutingPolicyForPreview(thread, message, [getDefaultCatId()], 'default_cat');
+    return project([getDefaultCatId()], 'default_cat');
   }
 
   /** Read-only projection for the v2 composer; never mutates participants. */
   async previewTargets(
     message: string,
-    options: { threadId: string; prospectivePreferredCats?: readonly CatId[] },
+    options: { threadId: string; prospectivePreferredCats?: readonly CatId[]; explicitTargetCats?: readonly CatId[] },
   ): Promise<RoutingPreviewResponse> {
     return this.resolveTargetPreview(message, options.threadId, {
+      publicConversation: true,
+      ...(options.explicitTargetCats ? { explicitTargetCats: options.explicitTargetCats } : {}),
       ...(options.prospectivePreferredCats === undefined
         ? {}
         : { prospectivePreferredCats: options.prospectivePreferredCats }),
@@ -1377,13 +1373,18 @@ export class AgentRouter {
 
   /** Build shared strategy dependencies (public for ModeOrchestrator) */
   getStrategyDeps(): RouteStrategyDeps {
-    const apiPort = process.env.API_SERVER_PORT ?? '3004';
+    const apiPort = process.env.API_SERVER_PORT ?? String(deploymentDefaults.apiPort);
     return {
+      ...(this.messageSearchAnswerService ? { messageSearchAnswerService: this.messageSearchAnswerService } : {}),
       services: this.services,
       unavailableServices: this.unavailableServices,
+      ...(this.routingDispatchPreflight ? { routingDispatchPreflight: this.routingDispatchPreflight } : {}),
       invocationDeps: {
+        ...(this.resolveTrustedImagePath ? { resolveTrustedImagePath: this.resolveTrustedImagePath } : {}),
+        ...(this.resolveInvocationPluginMcpView
+          ? { resolveInvocationPluginMcpView: this.resolveInvocationPluginMcpView }
+          : {}),
         messageStore: this.messageStore,
-        ...(this.collectiveContext ? { collectiveContext: this.collectiveContext } : {}),
         registry: this.registry,
         sessionManager: this.sessionManager,
         threadStore: this.threadStore,
@@ -1396,6 +1397,12 @@ export class AgentRouter {
         claudeProjectHookCarrierReady: this.claudeProjectHookCarrierReady,
         ...(this.claudeCompactionHooks ? { claudeCompactionHooks: this.claudeCompactionHooks } : {}),
         ...(this.presentationLedger ? { presentationLedger: this.presentationLedger } : {}),
+        ...(this.routingContextPromptProjection
+          ? { routingContextPromptProjection: this.routingContextPromptProjection }
+          : {}),
+        ...(this.routingDispatchSignalObserver
+          ? { routingDispatchSignalObserver: this.routingDispatchSignalObserver }
+          : {}),
         ...(this.writeOpportunityTerminalLedger
           ? { writeOpportunityTerminalLedger: this.writeOpportunityTerminalLedger }
           : {}),
@@ -1407,6 +1414,7 @@ export class AgentRouter {
         ...(this.transcriptReader ? { transcriptReader: this.transcriptReader } : {}),
         ...(this.sessionSealer ? { sessionSealer: this.sessionSealer } : {}),
         ...(this.taskStore ? { taskStore: this.taskStore } : {}),
+        ...(this.ordinaryTaskHandoffs ? { ordinaryTaskHandoffs: this.ordinaryTaskHandoffs } : {}),
         ...(this.workflowSopStore ? { workflowSopStore: this.workflowSopStore } : {}),
         ...(this.executionDigestStore ? { executionDigestStore: this.executionDigestStore } : {}),
         ...(this.tmuxGateway ? { tmuxGateway: this.tmuxGateway } : {}),
@@ -1415,15 +1423,13 @@ export class AgentRouter {
         ...(this.dismissTracker ? { dismissTracker: this.dismissTracker } : {}),
         ...(this.conciergeConfigStore ? { conciergeConfigStore: this.conciergeConfigStore } : {}),
         ...(this.conciergeTriagePlanStore ? { conciergeTriagePlanStore: this.conciergeTriagePlanStore } : {}),
-        ...(this.dotReplyTarget ? { dotReplyTarget: this.dotReplyTarget } : {}),
         ...(this.cloudInvokeBridge ? { cloudInvokeBridge: this.cloudInvokeBridge } : {}),
         ...(this.cloudReturnGrantStore ? { cloudReturnGrantStore: this.cloudReturnGrantStore } : {}),
         ...(this.freshnessStateStore ? { freshnessStateStore: this.freshnessStateStore } : {}),
-        ...(this.providerNativeFreshnessFactory
-          ? { providerNativeFreshnessFactory: this.providerNativeFreshnessFactory }
-          : {}),
         ...(this.runtimeInteractionPort ? { runtimeInteractionPort: this.runtimeInteractionPort } : {}),
         ...(this.memoryCuePromptService ? { memoryCuePromptService: this.memoryCuePromptService } : {}),
+        ...(this.matterMemoryService ? { matterMemoryService: this.matterMemoryService } : {}),
+        ...(this.contextSourceAdmission ? { contextSourceAdmission: this.contextSourceAdmission } : {}),
         ...(this.profileCueOpportunitySource ? { profileCueOpportunitySource: this.profileCueOpportunitySource } : {}),
         ...(this.threadOverviewOpportunitySource
           ? { threadOverviewOpportunitySource: this.threadOverviewOpportunitySource }
@@ -1432,8 +1438,10 @@ export class AgentRouter {
         ...(this.profileRepository ? { profileRepository: this.profileRepository } : {}),
       },
       messageStore: this.messageStore,
+      ...(this.dotReplyTarget ? { dotReplyTarget: this.dotReplyTarget } : {}),
       deliveryCursorStore: this.deliveryCursorStore,
       ...(this.taskStore ? { taskStore: this.taskStore } : {}),
+      ...(this.ownedWaitStatusReader ? { ownedWaitStatusReader: this.ownedWaitStatusReader } : {}),
       ...(this.threadExecutionSituationSource
         ? { threadExecutionSituationSource: this.threadExecutionSituationSource }
         : {}),
@@ -1484,7 +1492,7 @@ export class AgentRouter {
     const allMentions = await this.parseAllMentions(message, resolvedThreadId, {
       allowGroupFallback: options?.allowFallback !== false,
     });
-    const hasMentions = allMentions.mentions.length > 0;
+    const hasMentions = allMentions.mentions.length > 0 || allMentions.routing_warnings.length > 0;
     const routing_warnings = allMentions.routing_warnings;
     let targetCats: CatId[];
     if (options?.allowFallback === false) {
@@ -1551,8 +1559,10 @@ export class AgentRouter {
     });
 
     const strategyDeps = this.getStrategyDeps();
+    const routingContextIntent = inferRoutingContextIntent(cleanMessage);
     const routeOptions = {
       routeIntent: projectAgentRouteIntent(intent),
+      ...(routingContextIntent ? { routingContextIntent } : {}),
       contentBlocks,
       uploadDir,
       signal,
@@ -1564,6 +1574,21 @@ export class AgentRouter {
     };
 
     try {
+      if (this.scopedMemberRouting) {
+        const controlled = await this.scopedMemberRouting.resolve({
+          userId,
+          threadId: resolvedThreadId,
+          sourceMessageId: storedUserMessage.id,
+          targetCats,
+          options: routeOptions,
+        });
+        if (controlled.kind === 'controlled') {
+          yield* controlled.stream;
+          routeSpan.setStatus({ code: SpanStatusCode.OK });
+          return;
+        }
+        if (controlled.kind !== 'ordinary') throw new Error('controlled_member_not_ready');
+      }
       if (strategy === 'parallel') {
         yield* routeParallel(strategyDeps, targetCats, cleanMessage, userId, resolvedThreadId, routeOptions);
       } else {
@@ -1595,6 +1620,30 @@ export class AgentRouter {
     intent: IntentResult,
     options: RouteExecutionOptions,
   ): AsyncIterable<AgentMessage> {
+    const admitted = this.resolveAdmissionTargets(targetCats);
+    if (admitted.length !== targetCats.length) {
+      yield {
+        type: 'error',
+        catId: targetCats[0] ?? getDefaultCatId(),
+        error: 'Routing target is unavailable',
+        timestamp: Date.now(),
+      };
+      return;
+    }
+    if (this.scopedMemberRouting) {
+      const controlled = await this.scopedMemberRouting.resolve({
+        userId,
+        threadId,
+        sourceMessageId: userMessageId,
+        targetCats,
+        options,
+      });
+      if (controlled.kind === 'controlled') {
+        yield* controlled.stream;
+        return;
+      }
+      if (controlled.kind !== 'ordinary') throw new Error('controlled_member_not_ready');
+    }
     const cleanMessage = appendContextAttachmentsToPrompt(stripIntentTags(message), options.contentBlocks);
     const strategy =
       options.targetDispatchMode ?? (intent.intent === 'ideate' && targetCats.length > 1 ? 'parallel' : 'serial');
@@ -1633,10 +1682,12 @@ export class AgentRouter {
     }
 
     const strategyDeps = this.getStrategyDeps();
+    const routingContextIntent = inferRoutingContextIntent(cleanMessage);
     const { callerTraceContext: _callerTraceContext, ...strategyInputOptions } = options;
     const routeOptions: RouteOptions = {
       ...strategyInputOptions,
       routeIntent: projectAgentRouteIntent(intent),
+      ...(routingContextIntent ? { routingContextIntent } : {}),
       promptTags: intent.promptTags,
       currentUserMessageId: userMessageId,
       persistedPromptMessages: options?.persistedPromptMessages?.map((persisted) => ({

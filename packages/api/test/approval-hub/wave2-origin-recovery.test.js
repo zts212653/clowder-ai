@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
 import { canonicalTestMessageInput } from '../helpers/message-from-fixtures.js';
-import { proposedReviewAction } from './helpers.js';
+import { proposedTaskAction } from './helpers.js';
 
 function createSucceedingIngress() {
   return {
@@ -117,6 +117,7 @@ describe('staged recovery origin preservation', () => {
     };
 
     await app.register(callbacksRoutes, {
+      actionSuccessorAdmissionService: { async preflightStructuredTransferStanding() {} },
       registry,
       messageStore,
       threadStore,
@@ -146,7 +147,7 @@ describe('staged recovery origin preservation', () => {
       content: '@sonnet\nPlease fix the bug',
       targetCats: ['sonnet'],
       effectClass: 'assign_work',
-      proposedAction: proposedReviewAction(),
+      proposedAction: proposedTaskAction(),
       clientMessageId: 'dispatch-origin-preserve',
     };
 

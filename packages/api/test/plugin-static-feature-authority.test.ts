@@ -9,7 +9,7 @@ import { FileHostBrokerStore, MemoryHostBrokerStore } from '../src/domains/plugi
 import { candidateHello, INSTANCE_ID, PACKAGE_DIGEST, readyInventory } from './plugin-host-broker-helpers.js';
 
 async function fixture(store = new MemoryHostBrokerStore()) {
-  const inventory = await readyInventory({ effectiveGrants: [] });
+  const inventory = await readyInventory({});
   await inventory.transaction((tx) => {
     const pkg = tx.packages.get(PACKAGE_DIGEST)!;
     tx.packages.put({

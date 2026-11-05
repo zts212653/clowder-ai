@@ -1,7 +1,9 @@
 'use client';
 import type { ArtifactReviewAction, ArtifactReviewRound } from '@cat-cafe/shared';
+import { useShellCopy } from '@/components/shell/shell-copy';
 import { useShellPresentation } from '@/components/shell/shell-presentation';
 import { ReviewActor } from './ReviewActor';
+import { reviewDecisionCopy } from './review-decision.shell-copy';
 import { useReviewDraft } from './useReviewDraft';
 
 type DecisionProps = {
@@ -13,20 +15,27 @@ type DecisionProps = {
   act: (action: ArtifactReviewAction, round: number) => Promise<boolean>;
   compact?: boolean;
   onDiscuss?: (body?: string) => boolean;
+  placement?: 'inbox';
 };
 
 export function ReviewRoundDecision(props: DecisionProps) {
-  return useShellPresentation() === 'v2' ? <ChatRoundDecision {...props} /> : <ClassicRoundDecision {...props} />;
+  const presentation = useShellPresentation();
+  if (props.placement === 'inbox') return <ReviewDecisionForm {...props} compact />;
+  return presentation === 'v2' ? <ChatRoundDecision {...props} /> : <ReviewDecisionForm {...props} />;
 }
 
 function ChatRoundDecision({ round, canWrite, saving, act, onDiscuss, draftKey }: DecisionProps) {
+  const t = useShellCopy(reviewDecisionCopy);
   const saved = useReviewDraft(draftKey);
   const needed = round.state === 'awaiting_human' && !round.attentionRetiredReason;
   return (
-    <section aria-label="这一轮的结论" className="flex flex-wrap items-center justify-end gap-2 text-xs">
+    <section aria-label={t.heading} className="flex flex-wrap items-center justify-end gap-2 text-xs">
       {saved.draft.body ? (
         <div className="w-full text-cafe-secondary">
-          <p className="line-clamp-3 whitespace-pre-wrap">之前未发出的说明：{saved.draft.body}</p>
+          <p className="line-clamp-3 whitespace-pre-wrap">
+            {t.unsent}
+            {saved.draft.body}
+          </p>
           {onDiscuss ? (
             <button
               type="button"
@@ -35,22 +44,22 @@ function ChatRoundDecision({ round, canWrite, saving, act, onDiscuss, draftKey }
                 if (onDiscuss(saved.draft.body)) saved.clear();
               }}
             >
-              放到聊天
+              {t.moveToChat}
             </button>
           ) : null}
         </div>
       ) : null}
-      {round.decision ? <span>{round.decision.outcome === 'approved' ? '这版通过' : '需要修改'}</span> : null}
+      {round.decision ? <span>{round.decision.outcome === 'approved' ? t.approved : t.changes}</span> : null}
       {round.decision?.explanation ? <p>{round.decision.explanation}</p> : null}
       {onDiscuss ? (
         <button
           type="button"
           disabled={saving}
           className="rounded-lg border border-cafe-subtle px-3 py-2 font-semibold hover:bg-cafe-surface"
-          title={canWrite ? '在原聊天中说明需要怎样修改' : '在原聊天中讨论这一版'}
+          title={canWrite ? t.discussChanges : t.discussVersion}
           onClick={() => onDiscuss()}
         >
-          {canWrite ? '要求修改' : '讨论此版本'}
+          {canWrite ? t.requestChanges : t.discuss}
         </button>
       ) : null}
       {canWrite && needed ? (
@@ -60,28 +69,38 @@ function ChatRoundDecision({ round, canWrite, saving, act, onDiscuss, draftKey }
           className="rounded-lg bg-cafe-accent px-3 py-2 font-semibold text-[var(--cafe-accent-foreground)] disabled:opacity-40"
           onClick={() => void act({ kind: 'decide', outcome: 'approved', explanation: '' }, round.number)}
         >
-          通过此版本
+          {t.approve}
         </button>
       ) : null}
     </section>
   );
 }
 
-function ClassicRoundDecision({ round, ownerUserId, canWrite, saving, draftKey, act, compact = false }: DecisionProps) {
+function ReviewDecisionForm({
+  round,
+  ownerUserId,
+  canWrite,
+  saving,
+  draftKey,
+  act,
+  compact = false,
+  placement,
+}: DecisionProps) {
+  const localized = useShellCopy(reviewDecisionCopy);
+  const inbox = placement === 'inbox';
+  const t = inbox ? localized : reviewDecisionCopy.zh;
   const { draft, update, clear, storageError } = useReviewDraft(draftKey);
   const decided = round.state === 'approved' || round.state === 'changes_requested';
   const needed = round.state === 'awaiting_human' && !round.attentionRetiredReason;
   async function submit(action: ArtifactReviewAction) {
-    if (await act(action, round.number)) clear();
+    if (await act(action, round.number)) clear(draft);
   }
   return (
     <section
       className={compact ? 'space-y-2' : 'rounded-xl border border-cafe-accent/25 bg-cafe-accent/5 p-4'}
-      aria-label="这一轮的结论"
+      aria-label={t.heading}
     >
-      <h3 className="text-sm font-semibold text-cafe-black">
-        {needed ? '猫已准备好，需要你判断' : decided ? '这一轮的结论' : '把意见交给负责的猫'}
-      </h3>
+      <h3 className="text-sm font-semibold text-cafe-black">{needed ? t.needed : decided ? t.heading : t.feedback}</h3>
       {round.judgmentRequest ? (
         <div className="mt-3 space-y-2 text-sm leading-6 text-cafe-secondary">
           <ReviewActor actor={round.judgmentRequest.requestedBy} ownerUserId={ownerUserId} />
@@ -94,7 +113,7 @@ function ClassicRoundDecision({ round, ownerUserId, canWrite, saving, draftKey, 
       {round.decision ? (
         <div className="mt-3 space-y-2" data-testid="review-round-decision">
           <span className="rounded-full bg-cafe-surface px-3 py-1 text-xs font-semibold text-cafe-accent">
-            {round.decision.outcome === 'approved' ? '这版通过' : '需要修改'}
+            {round.decision.outcome === 'approved' ? t.approved : t.changes}
           </span>
           <p className="whitespace-pre-wrap break-words text-sm leading-6 text-cafe-black">
             {round.decision.explanation}
@@ -105,15 +124,15 @@ function ClassicRoundDecision({ round, ownerUserId, canWrite, saving, draftKey, 
       {canWrite ? (
         <div className="mt-3 space-y-2">
           <label className="block text-xs text-cafe-secondary">
-            {decided ? '重新打开的原因' : '你的判断与下一步'}
+            {decided ? t.reopenReason : t.reason}
             <textarea
               value={draft.body}
               onChange={(event) => update({ ...draft, body: event.target.value })}
-              aria-label="审阅结论说明"
+              aria-label={t.explanation}
               disabled={saving}
               maxLength={8000}
               className="mt-2 min-h-20 w-full resize-y rounded-lg border border-cafe-subtle bg-cafe-surface p-3 text-sm text-cafe-black"
-              placeholder={decided ? '还有需要一起确认的地方…' : '把需要调整的地方或批准理由说给猫听…'}
+              placeholder={decided ? t.reopenPlaceholder : t.placeholder}
             />
           </label>
           <div className="flex flex-wrap gap-2">
@@ -124,7 +143,7 @@ function ClassicRoundDecision({ round, ownerUserId, canWrite, saving, draftKey, 
                 className="rounded-lg border border-cafe-accent/30 px-3 py-2 text-xs font-semibold text-cafe-accent disabled:opacity-40"
                 onClick={() => void submit({ kind: 'reopen', explanation: draft.body })}
               >
-                重新打开这一轮
+                {t.reopen}
               </button>
             ) : (
               <>
@@ -140,16 +159,16 @@ function ClassicRoundDecision({ round, ownerUserId, canWrite, saving, draftKey, 
                     )
                   }
                 >
-                  要求修改
+                  {t.requestChanges}
                 </button>
                 {needed ? (
                   <button
                     type="button"
-                    disabled={saving || !draft.body.trim()}
+                    disabled={saving || (!inbox && !draft.body.trim())}
                     className="rounded-lg bg-cafe-accent px-3 py-2 text-xs font-semibold text-[var(--cafe-accent-foreground)] disabled:opacity-40"
                     onClick={() => void submit({ kind: 'decide', outcome: 'approved', explanation: draft.body })}
                   >
-                    通过此版本
+                    {t.approve}
                   </button>
                 ) : null}
               </>
@@ -157,12 +176,10 @@ function ClassicRoundDecision({ round, ownerUserId, canWrite, saving, draftKey, 
           </div>
           {storageError ? (
             <p role="alert" className="text-xs text-cafe-error">
-              这段说明尚未保存到浏览器，请保留页面。
+              {t.storageError}
             </p>
           ) : null}
-          <p className="text-micro leading-5 text-cafe-secondary">
-            结论会连同这一版的讨论交还原任务；后续工作继续由原来的猫完成。
-          </p>
+          <p className="text-micro leading-5 text-cafe-secondary">{t.returnNote}</p>
         </div>
       ) : null}
     </section>

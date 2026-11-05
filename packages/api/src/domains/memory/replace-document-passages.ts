@@ -3,7 +3,7 @@ import type { EvidenceItem } from './interfaces.js';
 import { MARKDOWN_DOC_PASSAGE_PREFIX } from './MarkdownPassageIndexer.js';
 
 export type DocumentPassageSource = {
-  item: Pick<EvidenceItem, 'anchor' | 'sourcePath' | 'updatedAt'>;
+  item: Pick<EvidenceItem, 'anchor' | 'sourcePath' | 'sourceHash' | 'updatedAt'>;
   passages: string[];
 };
 

@@ -42,7 +42,7 @@ function canGuide(target: SteerTargetOption): boolean {
 }
 
 function guideUnavailableReason(target: SteerTargetOption): string | null {
-  if (!target.canGuideReply) return '当前成员的接入方式不支持引导回复';
+  if (!target.canGuideReply) return '这只猫目前不支持把消息接进正在进行的回复';
   return null;
 }
 
@@ -202,7 +202,7 @@ export function SteerQueuedEntryModal({
       >
         <div className="px-5 pt-4">
           <h2 id={titleId} className="text-base font-semibold text-cafe-primary">
-            Steer
+            处理这条排队消息
           </h2>
         </div>
 
@@ -274,7 +274,7 @@ export function SteerQueuedEntryModal({
                 }`}
               >
                 <StrategyIndicator selected={focusedStrategy === 'guide_reply'} />
-                立即发送，引导回复
+                接进当前回复
               </button>
               {focusedGuideUnavailableReason ? (
                 <span
@@ -298,7 +298,7 @@ export function SteerQueuedEntryModal({
               }`}
             >
               <StrategyIndicator selected={focusedStrategy === 'interrupt_reply'} danger />
-              立即发送，中断回复
+              停下并处理这条
             </button>
           </fieldset>
           {selectedActionableTargets.length > actions.length ? (

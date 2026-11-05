@@ -1,3 +1,5 @@
+import { getCoCreatorConfig } from '../../../config/cat-config-loader.js';
+
 export type EvalHubVerdictValue = 'delete_sunset' | 'build' | 'fix' | 'keep_observe';
 export type EvalEvidenceQuality = 'insufficient' | 'usable';
 
@@ -110,7 +112,7 @@ function buildAction(
   evidenceQuality: EvalEvidenceQuality,
   findingCount: number,
 ): string {
-  if (verdict === 'delete_sunset') return '需要 You 决定是否停用这项评估。';
+  if (verdict === 'delete_sunset') return `需要 ${getCoCreatorConfig().name} 决定是否停用这项评估。`;
   if (verdict === 'build') return `请负责 ${featureId} 的猫补上缺失能力；完成后再复评。`;
   if (verdict === 'fix') return `请负责 ${featureId} 的猫修复现有问题；修完后再复评。`;
   if (evidenceQuality === 'insufficient') return '现在不用改代码；先补足样本。';
@@ -124,7 +126,7 @@ export function synthesizeEvalHubNextCheck(
   evidenceQuality: EvalEvidenceQuality,
 ): string {
   if (stale) return '已经超过原定复评时间，需要补跑一次评估。';
-  if (verdict === 'delete_sunset') return 'You 拍板后，再决定停用或继续保留。';
+  if (verdict === 'delete_sunset') return `${getCoCreatorConfig().name} 拍板后，再决定停用或继续保留。`;
   if (verdict === 'fix' || verdict === 'build') return '改动完成后，用同一组指标确认问题是否消失。';
   if (evidenceQuality === 'insufficient') return '等下一轮积累到足够样本，再判断是否需要改动。';
   return '按现有频率继续观察；下一轮确认同类信号是否再次出现。';

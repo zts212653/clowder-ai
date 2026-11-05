@@ -4,8 +4,8 @@ import { useEffect, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 
 /**
- * How many files the 变更 page will list for this worktree — the same request and the same `changedFiles` array that
- * page reads, so the number on the tool row and the list behind it cannot disagree.
+ * How many files the 变更 page will list for this worktree — the same `changedFiles` projection that page reads,
+ * without generating the patch bodies that a count does not consume.
  *
  * `null` means "not known" (no worktree yet, the read is still in flight, or it failed). That is a third state, not zero:
  * the row writes nothing for it ("读不到就不写"), where it would write a count for a known number.
@@ -24,7 +24,7 @@ export function useChangedFileCount(worktreeId: string | null): number | null {
     const controller = new AbortController();
     void (async () => {
       try {
-        const response = await apiFetch(`/api/workspace/diff?worktreeId=${encodeURIComponent(worktreeId)}`, {
+        const response = await apiFetch(`/api/workspace/diff?worktreeId=${encodeURIComponent(worktreeId)}&view=files`, {
           signal: controller.signal,
         });
         if (!response.ok) return;

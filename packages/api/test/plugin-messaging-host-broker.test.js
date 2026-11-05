@@ -11,8 +11,6 @@ import {
   externalManifest,
 } from './plugin-external-runtime-helpers.js';
 
-const GRANTS = ['messaging.send', 'messaging.appendElements', 'message.event.subscribe'];
-
 test('six plugin-to-Host messaging rows dispatch through K-1 without a second Broker call ledger', async () => {
   const [{ MessageStore }, { createMessagingDomain }, { createMessagingBrokerHandlers }] = await Promise.all([
     import('../dist/domains/cats/services/stores/ports/MessageStore.js'),
@@ -22,11 +20,9 @@ test('six plugin-to-Host messaging rows dispatch through K-1 without a second Br
   const messaging = createMessagingDomain({ messageStore: new MessageStore() });
   const rootDir = await mkdtemp(join(tmpdir(), 'cat-cafe-m0-host-broker-'));
   const manifest = externalManifest();
-  manifest.features[0].capabilities = GRANTS;
   const harness = await createExternalRuntimeHarness({
     rootDir,
     manifest,
-    effectiveGrants: GRANTS,
     methods: createMessagingBrokerHandlers({ messaging }),
   });
   const connection = await harness.broker.openExternalConnection(EXTERNAL_INSTANCE_ID);

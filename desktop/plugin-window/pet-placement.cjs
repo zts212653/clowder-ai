@@ -27,6 +27,77 @@ function petMetrics(value) {
   };
 }
 
+function placeRequestedPanel({ area, pet, occupiedPet, requested, pointer, padding }) {
+  const width = Math.min(requested.width, area.width - 2 * padding);
+  let height = Math.min(requested.height, area.height - 2 * padding);
+  const fit = (x, y) => ({
+    x: clamp(x, area.x + padding, area.x + area.width - width - padding),
+    y: clamp(y, area.y + padding, area.y + area.height - height - padding),
+    width,
+    height,
+  });
+  const above = fit(occupiedPet.x + (occupiedPet.width - width) / 2, occupiedPet.y - height - 12);
+  const below = fit(occupiedPet.x + (occupiedPet.width - width) / 2, occupiedPet.y + occupiedPet.height + 12);
+  const sideY = (pointer?.y ?? pet.y) - height / 2;
+  const left = fit(occupiedPet.x - width - 12, sideY);
+  const right = fit(occupiedPet.x + occupiedPet.width + 12, sideY);
+  const opensRight = pet.x + pet.width / 2 < area.x + area.width / 2;
+  const inward = opensRight ? [right, left] : [left, right];
+  const call = requested.kind === 'actions' ? requested.call : undefined;
+  const controlsY = occupiedPet.y + occupiedPet.height - height;
+  const controlsLeft = fit(occupiedPet.x - width - 12, controlsY);
+  const controlsRight = fit(occupiedPet.x + occupiedPet.width + 12, controlsY);
+  const controlsInward = opensRight ? [controlsRight, controlsLeft] : [controlsLeft, controlsRight];
+  let candidates = [above, below, ...inward];
+  if (call?.presentation === 'lite') candidates = [below, above, ...inward];
+  else if (call?.presentation === 'controls') candidates = [...controlsInward, below, above];
+  else if (requested.kind === 'menu') candidates = [...inward, above, below];
+  let panel = candidates.find((candidate) => separated(candidate, occupiedPet));
+  if (!panel) {
+    const aboveSpace = occupiedPet.y - area.y - padding - 12;
+    const belowSpace = area.y + area.height - padding - occupiedPet.y - occupiedPet.height - 12;
+    height = Math.max(1, Math.min(height, Math.max(aboveSpace, belowSpace)));
+    panel = fit(
+      occupiedPet.x + (occupiedPet.width - width) / 2,
+      aboveSpace >= belowSpace ? occupiedPet.y - height - 12 : occupiedPet.y + occupiedPet.height + 12,
+    );
+  }
+  return { call, panel };
+}
+
+function placeCallBubble({ area, pet, occupiedPet, panel, requested, padding }) {
+  if (!requested) return null;
+  const size = {
+    width: Math.min(requested.width, area.width - 2 * padding),
+    height: Math.min(requested.height, area.height - 2 * padding),
+  };
+  const fit = (x, y) => ({
+    x: clamp(x, area.x + padding, area.x + area.width - size.width - padding),
+    y: clamp(y, area.y + padding, area.y + area.height - size.height - padding),
+    ...size,
+  });
+  const abovePet = fit(occupiedPet.x + (occupiedPet.width - size.width) / 2, occupiedPet.y - size.height - 12);
+  const abovePanel = fit(panel.x + (panel.width - size.width) / 2, panel.y - size.height - 8);
+  const belowPanel = fit(panel.x + (panel.width - size.width) / 2, panel.y + panel.height + 8);
+  const left = fit(occupiedPet.x - size.width - 12, occupiedPet.y + (occupiedPet.height - size.height) / 2);
+  const right = fit(occupiedPet.x + occupiedPet.width + 12, occupiedPet.y + (occupiedPet.height - size.height) / 2);
+  const inward = pet.x + pet.width / 2 < area.x + area.width / 2 ? [right, left] : [left, right];
+  const candidates =
+    panel.y + panel.height <= occupiedPet.y
+      ? [abovePanel, ...inward, belowPanel, abovePet]
+      : [abovePet, ...inward, abovePanel, belowPanel];
+  const clear = (candidate) => separated(candidate, occupiedPet) && separated(candidate, panel);
+  const placed = candidates.find(clear);
+  if (placed) return placed;
+  const corners = [
+    [area.x + padding, area.y + padding],
+    [area.x + area.width - size.width - padding, area.y + padding],
+    [area.x + padding, area.y + area.height - size.height - padding],
+    [area.x + area.width - size.width - padding, area.y + area.height - size.height - padding],
+  ];
+  return corners.map(([x, y]) => fit(x, y)).find(clear) ?? null;
+}
+
 /** Native screen coordinates, including negative-origin monitors. The cat is the
  * stable anchor; only the transient panel moves to fit the available work area. */
 function placePetPanel({ area, pet: anchor, panel: requested, pointer, ballSize = defaultBallSize }) {
@@ -53,42 +124,30 @@ function placePetPanel({ area, pet: anchor, panel: requested, pointer, ballSize 
     height: pet.height + livingArt.top + livingArt.bottom,
   };
   let panel = null;
+  let bubble = null;
   if (requested) {
-    const width = Math.min(requested.width, area.width - 2 * padding);
-    let height = Math.min(requested.height, area.height - 2 * padding);
-    const fit = (x, y) => ({
-      x: clamp(x, area.x + padding, area.x + area.width - width - padding),
-      y: clamp(y, area.y + padding, area.y + area.height - height - padding),
-      width,
-      height,
-    });
-    const above = fit(occupiedPet.x + (occupiedPet.width - width) / 2, occupiedPet.y - height - 12);
-    const below = fit(occupiedPet.x + (occupiedPet.width - width) / 2, occupiedPet.y + occupiedPet.height + 12);
-    const y = pointer ? pointer.y : pet.y;
-    const left = fit(occupiedPet.x - width - 12, y - height / 2);
-    const right = fit(occupiedPet.x + occupiedPet.width + 12, y - height / 2);
-    const inward = pet.x + pet.width / 2 < area.x + area.width / 2 ? [right, left] : [left, right];
-    const candidates = requested.kind === 'menu' ? [...inward, above, below] : [above, below, ...inward];
-    panel = candidates.find((candidate) => separated(candidate, occupiedPet));
-    if (!panel) {
-      const aboveSpace = occupiedPet.y - area.y - padding - 12;
-      const belowSpace = area.y + area.height - padding - occupiedPet.y - occupiedPet.height - 12;
-      height = Math.max(1, Math.min(height, Math.max(aboveSpace, belowSpace)));
-      panel = fit(
-        occupiedPet.x + (occupiedPet.width - width) / 2,
-        aboveSpace >= belowSpace ? occupiedPet.y - height - 12 : occupiedPet.y + occupiedPet.height + 12,
-      );
-    }
+    const placed = placeRequestedPanel({ area, pet, occupiedPet, requested, pointer, padding });
+    panel = placed.panel;
+    bubble = placeCallBubble({ area, pet, occupiedPet, panel, requested: placed.call?.bubble, padding });
   }
-  const x = Math.min(pet.x - livingArt.left, panel?.x ?? pet.x) - padding;
-  const y = Math.min(pet.y - livingArt.top, panel?.y ?? pet.y) - padding;
+  const x = Math.min(pet.x - livingArt.left, panel?.x ?? pet.x, bubble?.x ?? pet.x) - padding;
+  const y = Math.min(pet.y - livingArt.top, panel?.y ?? pet.y, bubble?.y ?? pet.y) - padding;
   const right =
-    Math.max(pet.x + pet.width + livingArt.right, panel ? panel.x + panel.width : pet.x + pet.width) + padding;
+    Math.max(
+      pet.x + pet.width + livingArt.right,
+      panel ? panel.x + panel.width : pet.x + pet.width,
+      bubble ? bubble.x + bubble.width : pet.x + pet.width,
+    ) + padding;
   const bottom =
-    Math.max(pet.y + pet.height + livingArt.bottom, panel ? panel.y + panel.height : pet.y + pet.height) + padding;
+    Math.max(
+      pet.y + pet.height + livingArt.bottom,
+      panel ? panel.y + panel.height : pet.y + pet.height,
+      bubble ? bubble.y + bubble.height : pet.y + pet.height,
+    ) + padding;
   return {
     pet,
     panel,
+    ...(bubble ? { bubble } : {}),
     bounds: { x: Math.round(x), y: Math.round(y), width: Math.ceil(right - x), height: Math.ceil(bottom - y) },
   };
 }

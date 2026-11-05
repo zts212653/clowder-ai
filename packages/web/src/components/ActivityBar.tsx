@@ -8,6 +8,7 @@ import { AttentionRailButtons } from './attention/AttentionRailButtons';
 import { ConciergeRailToggle } from './concierge/ConciergeRailToggle';
 import { HubIcon } from './hub-icons';
 import { MemoryIcon } from './icons/MemoryIcon';
+import { PluginUiEntries } from './plugins/PluginUiEntries';
 import { SETTINGS_SECTIONS } from './settings/settings-nav-config';
 import { resolveShellNavTarget } from './shell/shell-navigation';
 import { usePresentationRail } from './shell/use-presentation-rail';
@@ -137,6 +138,7 @@ function PinnedSections({ pinned, onNav }: { pinned: readonly string[]; onNav: (
         return (
           <button
             key={sec.id}
+            data-guide-id={`rail.${sec.id}`}
             type="button"
             onClick={() => onNav(`/settings?s=${sec.id}&standalone=1`)}
             className={`flex h-10 w-10 items-center justify-center rounded-lg transition-all ${
@@ -266,6 +268,7 @@ export function ActivityBar({ className }: ActivityBarProps) {
       </Suspense>
 
       <div className="mt-auto flex flex-col items-center gap-1.5">
+        <PluginUiEntries />
         {/* F246 remains the approval bell; F310 Needs Me is a sibling Workspace destination. */}
         <AttentionRailButtons />
         {/* F229: concierge re-entry —唤回入口，muted 时是唯一入口 (INV-3) */}

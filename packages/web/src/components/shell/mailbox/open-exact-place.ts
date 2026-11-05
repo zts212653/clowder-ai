@@ -1,4 +1,7 @@
 import { getThreadIdFromPathname, pushThreadRouteWithHistory } from '@/components/ThreadSidebar/thread-navigation';
+import { reviewSurfaceFromPreparedRef } from '@/components/workbench/artifact-review-surface';
+import { useF307ExperienceWorkbenchStore } from '@/components/workbench/experience-workbench-store';
+import { rememberWorkspaceForeground } from '@/components/workbench/workspace-presentation-lock';
 import { navigateToEntrustedWorkAction, resolveEntrustedWorkActionTarget } from '@/hooks/useWorkspaceNavigate';
 import { useChatStore } from '@/stores/chatStore';
 
@@ -16,6 +19,18 @@ const isChatRoute = (pathname: string) => pathname === '/' || pathname.startsWit
  * same navigation), and inside the right conversation it is only a scroll.
  */
 export function openExactPlace(actionRef: string, pathname: string): void {
+  const review = reviewSurfaceFromPreparedRef(actionRef);
+  if (review) {
+    useChatStore.getState().setWorkspaceMode('dev');
+    useF307ExperienceWorkbenchStore.getState().dispatch({
+      type: 'open-surface',
+      surface: review,
+      entitlement: { kind: 'user', reason: 'open-from-chat' },
+    });
+    // Explicit navigation also leaves Home when the tab is already active or its host has not mounted yet.
+    rememberWorkspaceForeground();
+    return;
+  }
   const target = resolveEntrustedWorkActionTarget(actionRef);
   const rememberedThreadId = useChatStore.getState().currentThreadId;
   navigateToEntrustedWorkAction(actionRef);

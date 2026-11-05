@@ -7,6 +7,9 @@ import {
   approvalMaterializationSchema,
   approvalResolutionSchema,
 } from './approval-lifecycle.js';
+import type { CollectiveAccountabilityAttentionItem } from './collective-accountability-attention.js';
+import type { CollectiveProjectAttentionItem } from './collective-project-attention.js';
+import { producerAttentionCoverageV1Schema } from './growing.js';
 import { preparedArtifactSnapshotV1Schema } from './growing-artifact.js';
 import type { RichCardBlock, RichInteractiveBlock } from './rich.js';
 import {
@@ -48,7 +51,7 @@ const approvalSourceItemSchema: z.ZodType<UnifiedAttentionApproval> = z
     detail: z.record(z.string(), z.unknown()),
     navigation: approvalNavigationSchema,
     inlineApprovable: z.boolean(),
-    decisionMode: z.enum(['approve-reject', 'claim-select', 'meeting-intake']).optional(),
+    decisionMode: z.enum(['approve-reject', 'claim-select']).optional(),
     resolution: approvalResolutionSchema,
     materialization: approvalMaterializationSchema,
     createdAt: z.number(),
@@ -71,7 +74,7 @@ export const unifiedAttentionApprovalsSourceSchema = z.object({
 });
 
 export const unifiedAttentionWorkSourceSchema = z.object({
-  coverage: sourceCoverageSchema.optional(),
+  coverage: producerAttentionCoverageV1Schema.optional(),
   ownerReads: z.array(
     z
       .object({
@@ -125,6 +128,8 @@ export type UnifiedAttentionSourceRead = {
   coverage:
     | 'all_registered_F246_producers'
     | 'current_linked_F310_five_producers'
+    | 'pending_f290_collective_accountability_requests'
+    | 'pending_f290_project_materials_and_dates'
     | 'pending_f306_structured_choices'
     | 'explicit_user_mentions'
     | 'owner_personal_ignored_items';
@@ -147,6 +152,11 @@ export const unifiedAttentionChoiceRequestSchema = z
         threadId: z.string().trim().min(1),
         messageId: z.string().trim().min(1),
         blockId: z.string().trim().min(1),
+        blockDigest: z
+          .string()
+          .regex(/^[a-f0-9]{64}$/)
+          .optional(),
+        publishedAt: z.number().int().nonnegative().safe().optional(),
       })
       .strict(),
   })
@@ -215,6 +225,9 @@ export interface UnifiedAttentionItemV1 {
   /** Present for every canonical pending F306 approval, question or elicitation. */
   runtimeInteraction?: UnifiedAttentionRuntimeInteraction;
   approval?: UnifiedAttentionVisibleApproval;
+  /** One Service-authorized, still-operable named-Human responsibility request. */
+  collectiveProjectAttention?: CollectiveProjectAttentionItem;
+  collectiveAccountabilityRequest?: CollectiveAccountabilityAttentionItem;
   /** Present only after the canonical live F225/F231 source message passes its closed producer validator. */
   originalApprovalCard?: UnifiedAttentionOriginalApprovalCard;
   linkedNeedsMe: { ownerRead: UnifiedAttentionWork; receipt: UnifiedAttentionReceipt }[];
@@ -224,7 +237,7 @@ export interface UnifiedAttentionItemV1 {
 
 /** Exact groups from the full selected response vector, before offset/limit is applied. */
 export interface UnifiedAttentionItemGroupCountsV1 {
-  /** Open approvals, canonical pending runtime interactions and exact named content reviews. */
+  /** Open approvals, canonical pending runtime interactions, exact named content reviews and current Collective results. */
   decisions: number;
   userMentions: number;
   /** Repairs, non-question judgments and every other non-mention item. */
@@ -260,6 +273,8 @@ export interface UnifiedAttentionReadV1 {
   sources: {
     approvals: UnifiedAttentionSourceRead;
     needsMe: UnifiedAttentionSourceRead;
+    collectiveAccountabilityRequests?: UnifiedAttentionSourceRead;
+    collectiveProjectAttention?: UnifiedAttentionSourceRead;
     structuredChoices?: UnifiedAttentionSourceRead;
     userMentions?: UnifiedAttentionSourceRead;
     personalPreferences?: UnifiedAttentionSourceRead;
@@ -272,7 +287,7 @@ export interface UnifiedAttentionReadV1 {
   /** Exact open approvals + canonical pending F306 interactions + named content reviews. */
   attentionCount?: number;
   mentionCounts?: { today: number; week: number; earlier: number; handled: number };
-  mentionPeriod?: 'recent' | 'today' | 'week' | 'earlier' | 'handled';
+  mentionPeriod?: 'recent' | 'today' | 'week' | 'earlier' | 'handled' | 'all';
   /** Present only when the caller explicitly requests an owner-personal visible or ignored view. */
   personalView?: UnifiedAttentionPersonalViewV1;
   /** hasMore describes only the known rows from this independent-source read. */

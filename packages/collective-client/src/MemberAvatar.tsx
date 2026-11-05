@@ -26,13 +26,14 @@ export function MemberAvatar({
   const [failedUrl, setFailedUrl] = useState<string>();
   const url = publicAvatarUrl(avatarUrl);
   return (
-    <span className={compact ? 'avatar avatar-compact' : 'avatar'} data-actor-kind={kind}>
-      {url && failedUrl !== url ? (
-        <img src={url} alt="" referrerPolicy="no-referrer" onError={() => setFailedUrl(url)} />
-      ) : kind === 'agent' ? (
+    <span className={compact ? 'avatar avatar-compact' : 'avatar'} data-actor-kind={kind} aria-hidden="true">
+      {kind === 'agent' ? (
         <CollectiveIcon kind="cat" />
       ) : (
-        name.slice(0, 1)
+        <span className="avatar-fallback">{name.trim().slice(0, 1)}</span>
+      )}
+      {url && failedUrl !== url && (
+        <img src={url} alt="" referrerPolicy="no-referrer" onError={() => setFailedUrl(url)} />
       )}
     </span>
   );

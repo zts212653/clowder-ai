@@ -1,9 +1,23 @@
 import { z } from 'zod';
 import { artifactReviewDrawingSchema, artifactReviewImageEditSchema } from './artifact-review-drawing.js';
-import { artifactReviewAnchorSchema, reviewedMediaAssetSchema } from './artifact-review-media.js';
+import {
+  artifactReviewAnchorSchema,
+  reviewedMediaAssetSchema,
+  reviewedMediaTypeSchema,
+} from './artifact-review-media.js';
 
-export type { ArtifactReviewAnchor, ImmutableMedia, ReviewedMediaAsset } from './artifact-review-media.js';
-export { artifactReviewAnchorSchema, immutableMediaSchema, reviewedMediaAssetSchema } from './artifact-review-media.js';
+export type {
+  ArtifactReviewAnchor,
+  ImmutableMedia,
+  ReviewedMediaAsset,
+  ReviewedMediaType,
+} from './artifact-review-media.js';
+export {
+  artifactReviewAnchorSchema,
+  immutableMediaSchema,
+  reviewedMediaAssetSchema,
+  reviewedMediaTypeSchema,
+} from './artifact-review-media.js';
 
 const ref = z.string().trim().min(1).max(2048);
 const id = z.string().trim().min(1).max(128);
@@ -52,6 +66,22 @@ export const artifactReviewResponseSchema = z
   .strict();
 export type ArtifactReviewResponse = z.infer<typeof artifactReviewResponseSchema>;
 
+/** Stored verified mapping. Public legacy responses still use the smaller strict input schema above. */
+export const artifactReviewResponseRecordSchema = artifactReviewResponseSchema.extend({
+  resultAnchor: artifactReviewAnchorSchema.optional(),
+  /** Direct Human judgment of this exact result response; the original operation audit retains earlier choices. */
+  judgment: z
+    .object({
+      outcome: z.enum(['accepted', 'reopened']),
+      actor: z.object({ kind: z.literal('human'), actorId: id }).strict(),
+      decidedAt: timestamp,
+      receiptRef: ref,
+    })
+    .strict()
+    .optional(),
+});
+export type ArtifactReviewResponseRecord = z.infer<typeof artifactReviewResponseRecordSchema>;
+
 export const artifactReviewVisualMarkSchema = z
   .object({
     drawing: artifactReviewDrawingSchema,
@@ -75,7 +105,18 @@ export const artifactReviewRoundSchema = z
     state: z.enum(['draft', 'awaiting_human', 'approved', 'changes_requested', 'superseded']),
     annotations: z.array(artifactReviewAnnotationSchema).max(500),
     visualMarks: z.array(artifactReviewVisualMarkSchema).max(500).optional(),
-    responses: z.array(artifactReviewResponseSchema).max(500),
+    responses: z.array(artifactReviewResponseRecordSchema).max(500),
+    responseSource: z
+      .object({
+        round: positive,
+        ownerRevision: positive,
+        reviewRevision: positive,
+        requestId: id.optional(),
+        ledgerRef: id.optional(),
+        ledgerRevision: positive.optional(),
+      })
+      .strict()
+      .optional(),
     responseAuthor: artifactReviewActorSchema.optional(),
     judgmentRequest: z
       .object({ summary: text, judgmentNeeded: text, requestedBy: artifactReviewActorSchema, requestedAt: timestamp })
@@ -131,6 +172,22 @@ export const artifactReviewSchema = z
   .refine(
     (review) => review.version === 3 || review.rounds.every((round) => !round.ledgerRef),
     'Linked ledgers require record version 3',
+  )
+  .refine(
+    (review) =>
+      review.rounds.every((round) => {
+        const reference = round.responseSource;
+        if (!reference) return true;
+        const source = review.rounds.find((item) => item.number === reference.round);
+        return (
+          source !== undefined &&
+          source.number < round.number &&
+          source.asset.ownerRevision === reference.ownerRevision &&
+          source.ledgerRef === reference.ledgerRef &&
+          reference.reviewRevision < review.revision
+        );
+      }),
+    'Response source must name its retained original round',
   );
 export type ArtifactReview = z.infer<typeof artifactReviewSchema>;
 
@@ -139,7 +196,7 @@ export const artifactReviewActionSchema = z
     z
       .object({
         kind: z.literal('request_media_edit'),
-        mediaType: z.enum(['image/png', 'video/mp4']),
+        mediaType: reviewedMediaTypeSchema,
         annotationId: id,
         body: text,
         anchor: artifactReviewAnchorSchema.optional(),
@@ -184,6 +241,15 @@ export const artifactReviewActionSchema = z
     z.object({ kind: z.literal('edit'), annotationId: id, replyId: id.optional(), body: text }).strict(),
     z
       .object({ kind: z.literal('set_annotation_state'), annotationId: id, state: z.enum(['open', 'resolved']) })
+      .strict(),
+    z
+      .object({
+        kind: z.literal('judge_response'),
+        sourceRound: positive,
+        annotationId: id,
+        resultOwnerRevision: positive,
+        outcome: z.enum(['accepted', 'reopened']),
+      })
       .strict(),
     z.object({ kind: z.literal('request_judgment'), summary: text, judgmentNeeded: text }).strict(),
     z.object({ kind: z.literal('submit_feedback'), explanation: text }).strict(),
@@ -262,6 +328,13 @@ export interface ArtifactReviewView {
   /** Exact current request, derived from the atomic journal binding and canonical review audit. */
   modificationRequest?: { requestId: string; receiptRef: string };
   pendingVersion: boolean;
+  /** Authorized, locator-free coordinates for the direct Human recovery action. */
+  pendingSubmission?: {
+    kind: 'work-submit-response';
+    operationId: string;
+    sourceRound: number;
+    expectedReviewRevision: number;
+  };
   authority: {
     state: 'current' | 'task_changed' | 'task_closed' | 'asset_changed';
     taskRevision: number;
@@ -284,6 +357,7 @@ export interface ArtifactReviewView {
         | 'reopen'
         | 'request_image_edit'
         | 'request_media_edit'
+        | 'judge_response'
         | 'supersede_request';
     };
   };

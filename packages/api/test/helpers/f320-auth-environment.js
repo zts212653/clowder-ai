@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { parse } from 'smol-toml';
 
 // Pinned 0.159.0 alternative authentication/transport inputs; never real credentials.
@@ -49,15 +49,16 @@ export function installAmbientCodexAccount(t) {
 }
 
 export function assertSelectedApiAccount(childEnv, selectedKey, selectedRouting = {}) {
-  assert.ok(childEnv.CODEX_HOME.startsWith(`${process.env.CAT_CAFE_DATA_DIR}/codex-api-execution/`));
+  assert.ok(childEnv.CODEX_HOME.startsWith(`${join(process.env.CAT_CAFE_DATA_DIR, 'codex-api-execution')}${sep}`));
   for (const key of ALTERNATIVE_CODEX_AUTH_INPUTS)
     assert.equal(childEnv[key], undefined, `${key} must not select ambient account A`);
   assert.equal(childEnv.OPENAI_API_KEY, selectedKey);
   for (const key of ['OPENAI_ORGANIZATION', 'OPENAI_PROJECT', 'OPENAI_ORG_ID', 'OPENAI_BASE_URL', 'OPENAI_API_BASE'])
     assert.equal(childEnv[key], selectedRouting[key], `${key} must come from the selected account only`);
   assert.equal(childEnv.F320_MCP_TOKEN, 'unrelated-mcp-fixture');
+  const childPath = Object.entries(childEnv).find(([key]) => key.toLowerCase() === 'path')?.[1];
   assert.ok(
-    childEnv.PATH.endsWith(process.env.PATH),
+    childPath?.endsWith(process.env.PATH ?? process.env.Path ?? ''),
     'runtime search path is retained after the existing guard prefix',
   );
 }

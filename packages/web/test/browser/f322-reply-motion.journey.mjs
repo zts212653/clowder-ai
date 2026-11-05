@@ -61,6 +61,7 @@ export async function runNativeReplyMotionJourney(browser, evidenceDir) {
       threadId: THREAD_ID,
       invocationId: parent,
       turnInvocationId: turn,
+      messageId: 'motion-response',
       timestamp: Date.now(),
       ...fields,
     };

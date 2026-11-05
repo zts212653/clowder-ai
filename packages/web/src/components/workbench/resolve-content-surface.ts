@@ -4,6 +4,24 @@ import { resolvePublicationTarget } from './publication-surface';
 import { resolveFileTarget } from './real-surface-adapters';
 import type { WorkbenchLayoutState, WorkspaceSurfaceDescriptor } from './workbench-contract';
 
+/** Resolution changes the content coordinate; its original message/list return remains owned by the source. */
+export function inheritContentSurfaceOrigin(
+  source: WorkspaceSurfaceDescriptor,
+  target: WorkspaceSurfaceDescriptor,
+): WorkspaceSurfaceDescriptor {
+  const messagePublicationSource =
+    target.messagePublicationSource ?? resolveMessagePublicationSource(source) ?? source.messagePublicationSource;
+  return {
+    ...target,
+    ...(messagePublicationSource ? { messagePublicationSource } : {}),
+    ...(source.navigationOrigin ? { navigationOrigin: source.navigationOrigin } : {}),
+    ...(source.returnTargetRef ? { returnTargetRef: source.returnTargetRef } : {}),
+    ...(!target.artifactFileSource && source.artifactFileSource
+      ? { artifactFileSource: source.artifactFileSource }
+      : {}),
+  };
+}
+
 export function resolveContentSurfaceIdentity(
   state: WorkbenchLayoutState,
   sourceId: string,
@@ -27,21 +45,13 @@ export function resolveContentSurfaceIdentity(
     state.surfaces.find((item) => item.id !== sourceId && matchesTarget(item)) ??
     (state.sidecar && state.sidecar.id !== sourceId && matchesTarget(state.sidecar) ? state.sidecar : null);
   const resolvedId = retained?.id ?? target.id;
-  const messagePublicationSource =
-    target.messagePublicationSource ?? resolveMessagePublicationSource(source) ?? source.messagePublicationSource;
   const resolved =
     retained && state.activeSurfaceId !== sourceId
       ? retained
-      : {
+      : inheritContentSurfaceOrigin(source, {
           ...target,
           ...(retained && fileTarget ? { id: retained.id, objectRef: retained.objectRef } : {}),
-          ...(messagePublicationSource ? { messagePublicationSource } : {}),
-          ...(source.navigationOrigin ? { navigationOrigin: source.navigationOrigin } : {}),
-          ...(source.returnTargetRef ? { returnTargetRef: source.returnTargetRef } : {}),
-          ...(!target.artifactFileSource && source.artifactFileSource
-            ? { artifactFileSource: source.artifactFileSource }
-            : {}),
-        };
+        });
   const alreadyOpen = state.surfaces.some((item) => item.id === resolvedId && item.id !== sourceId);
   const surfaces = state.surfaces.flatMap((item) =>
     item.id === sourceId ? (alreadyOpen ? [] : [resolved]) : item.id === resolvedId ? [resolved] : [item],

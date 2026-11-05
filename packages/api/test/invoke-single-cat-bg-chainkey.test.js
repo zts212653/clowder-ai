@@ -78,6 +78,7 @@ describe('F198 Bug #3: bg carrier chainKey consumer', () => {
   function makeBgService(daemonShortId, resumeSessionId, { emitDone = true, emitText = true } = {}) {
     const captured = {};
     const service = {
+      implementationSnapshot: () => ({ key: 'test:claude-bg', generation: 'same-bg-implementation' }),
       usesChainKeyResume: () => true,
       async *invoke(_prompt, options) {
         captured.sessionId = options?.sessionId;

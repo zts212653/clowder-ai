@@ -111,7 +111,7 @@ const TIER1_HOOKS = [
     transparencyTier: 'visible-by-default',
     governanceTier: 'immutable',
     inputs: [],
-    userExplanation: '代码哲学：愿景驱动 + 质量门禁 + TDD，不是最小改动',
+    userExplanation: '代码哲学：愿景驱动 + 质量门禁 + TDD，改动围绕结果；同根因一起改，说不出失败路径的防护不加',
   },
   {
     id: 'S1',
@@ -139,7 +139,7 @@ const TIER1_HOOKS = [
     transparencyTier: 'visible-by-default',
     governanceTier: 'immutable',
     inputs: ['restrictions'],
-    userExplanation: '猫不能做什么（如暹罗猫禁止写代码）',
+    userExplanation: '成员配置中明确声明的任务限制',
   },
   {
     id: 'S3',

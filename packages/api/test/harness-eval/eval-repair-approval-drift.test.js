@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { F266ApprovalAdapter } from '../../dist/domains/approval-hub/adapters/F266ApprovalAdapter.js';
 
 import {
   actionRef,
@@ -30,6 +31,29 @@ class AckLossEventLog extends MemoryEventLog {
 }
 
 describe('F313/F266 Approval snapshot drift', () => {
+  it('projects a system supersession with its closure time, not the prior human decision actor/time', async () => {
+    const eventLog = new MemoryEventLog();
+    const append = eventLog.append.bind(eventLog);
+    eventLog.append = (event, sequence) =>
+      append(
+        event.type === 'approval_superseded' ? { ...event, occurredAt: '2026-09-02T00:11:00.000Z' } : event,
+        sequence,
+      );
+    const ctx = fixture({ eventLog });
+    const original = await proposeAndAccept(ctx);
+    ctx.setOwner({
+      status: 'resolved',
+      ownerRef,
+      ownerAuthorizationRef: ref('F188', 'authorization:changed'),
+      targetVersionRef,
+      dispatchRef,
+    });
+    await ctx.service.materialize(original.proposalId);
+    const [row] = await new F266ApprovalAdapter(eventLog).listSettled('owner-user');
+    assert.equal(row.status, 'superseded');
+    assert.equal(row.decidedBy, '');
+    assert.equal(row.decidedAt, Date.parse('2026-09-02T00:11:00.000Z'));
+  });
   it('supersedes an open proposal before creating its linked replacement', async () => {
     const ctx = fixture();
     const original = await ctx.service.propose({ caseActionRef: actionRef, clientMessageId: 'client-1', principal });

@@ -3,6 +3,8 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { runAnnotationIncomingContinuity } from './annotation-incoming-continuity.journey.mjs';
+import { runChatFlicker } from './f322-chat-flicker.journey.mjs';
+import { runChatHistoryControls } from './f322-chat-history-controls.journey.mjs';
 import { createChatProofHarness } from './f322-chat-proof-harness.mjs';
 import { runChatReadingColumnJourney } from './f322-chat-reading-column.mjs';
 import { buildChatProof, origin } from './fixtures/f322-chat-real-page-build.mjs';
@@ -28,6 +30,12 @@ const evidenceDir = process.env.F322_CHAT_EVIDENCE_DIR ?? path.join(os.tmpdir(),
 export async function runChatRealPageJourney(t, browser) {
   mkdirSync(evidenceDir, { recursive: true });
   const built = await buildChatProof();
+  await t.test('confirmed counts and bottom geometry stay stable across refresh, late media and typing', () =>
+    runChatFlicker(browser, built, path.join(evidenceDir, 'flicker')),
+  );
+  await t.test('latest control stays clear of message records and shares the works total', () =>
+    runChatHistoryControls(browser, built, path.join(evidenceDir, 'history-controls')),
+  );
   await t.test('annotation survives incoming messages while typing', () =>
     runAnnotationIncomingContinuity(browser, built, path.join(evidenceDir, 'annotation-continuity')),
   );
@@ -100,6 +108,145 @@ export async function runChatRealPageJourney(t, browser) {
         });
       }
     }
+
+    await t.test(
+      'single-cat view projects proven bodies, keeps the group reading anchor, and shares one preference',
+      async () => {
+        const proof = await openProof({ width: 1440, base: 'light', language: 'zh', sidebar: true, surface: true });
+        const { page, api } = proof;
+        const visibleMessageIds = () =>
+          page
+            .locator('[data-thread-chat-reading-column] [data-message-id]')
+            .evaluateAll((nodes) => [
+              ...new Set(nodes.map((node) => node.getAttribute('data-message-id')).filter(Boolean)),
+            ]);
+        try {
+          await page.locator('[data-message-id="reading-cat"]').waitFor();
+          const scroll = page.locator('[data-chat-container]');
+          await scroll.dispatchEvent('wheel', { deltaY: -120 });
+          const groupTop = await scroll.evaluate((element) => {
+            element.scrollTop = Math.max(0, element.scrollHeight - element.clientHeight - 180);
+            element.dispatchEvent(new Event('scroll'));
+            return element.scrollTop;
+          });
+          assert.ok(groupTop > 0, 'the controlled long conversation must provide a non-bottom group reading position');
+
+          const toggle = page.getByTestId('conversation-view-menu-toggle');
+          await toggle.click();
+          const menu = page.getByTestId('conversation-view-menu');
+          await menu.waitFor();
+          assert.equal(await menu.locator('[data-conversation-cat]').count(), 3);
+          assert.equal(await menu.locator('[data-conversation-cat="codex-astra"]').isDisabled(), false);
+          assert.equal(await menu.locator('[data-conversation-cat="codex61-sol"]').isDisabled(), false);
+          assert.equal(await menu.locator('[data-conversation-cat="codex6-luna"]').isDisabled(), true);
+          assert.match(await menu.locator('[data-conversation-cat="codex-astra"]').textContent(), /发给它的和它说的/);
+          assert.match(
+            await menu.locator('[data-conversation-cat="codex6-luna"]').textContent(),
+            /还没有可确认的对话记录/,
+          );
+
+          await menu.locator('[data-conversation-cat="codex-astra"]').click();
+          await page.locator('[data-single-cat-conversation-timeline]').waitFor();
+          assert.deepEqual(await visibleMessageIds(), ['reading-human', 'reading-whisper', 'reading-cat']);
+          assert.equal(await page.locator('[data-conversation-execution="reading-cat"]').count(), 1);
+          assert.equal(await page.locator('[data-conversation-input-evidence="read"]').count(), 2);
+          assert.equal(await page.locator('[data-conversation-read-receipt]').count(), 2);
+          assert.equal(await page.locator('[data-message-id="sol-response"]').count(), 0);
+          await page.locator('[data-conversation-read-receipt]').first().scrollIntoViewIfNeeded();
+          await capture(page, '1440-single-cat-astra-read-receipts');
+
+          await scroll.evaluate((element) => {
+            element.scrollTop = element.scrollHeight;
+            element.dispatchEvent(new Event('scroll'));
+          });
+          await toggle.click();
+          await page.locator('[data-conversation-cat="codex61-sol"]').click();
+          await page.locator('[data-conversation-pending]').waitFor();
+          assert.deepEqual(await visibleMessageIds(), ['sol-human', 'sol-response', 'sol-queued']);
+          assert.match(
+            await page.locator('[data-conversation-unconfirmed-divider]').first().textContent(),
+            /未确认读到/,
+          );
+          assert.match(await page.locator('[data-conversation-pending]').textContent(), /还在排队/);
+          assert.equal(await page.locator('[data-message-id="reading-cat"]').count(), 0);
+
+          await page.evaluate(() => window.__f322Chat.language('en'));
+          assert.match(
+            await page.locator('[data-conversation-unconfirmed-divider]').first().textContent(),
+            /Read not confirmed/,
+          );
+          assert.equal(await page.locator('textarea').inputValue(), DRAFT);
+          await capture(page, '1440-single-cat-sol-en');
+
+          await toggle.click();
+          await page.locator('[data-conversation-view="group"]').click();
+          await page.waitForFunction(
+            (top) => Math.abs(document.querySelector('[data-chat-container]')?.scrollTop - top) <= 2,
+            groupTop,
+          );
+          assert.deepEqual(await visibleMessageIds(), [
+            'reading-human',
+            'reading-whisper',
+            'reading-cat',
+            'sol-human',
+            'sol-response',
+            'sol-queued',
+          ]);
+          assert.equal(await page.locator('textarea').inputValue(), DRAFT);
+          assert.equal(
+            await page.locator('[data-message-id="reading-cat"]').count(),
+            1,
+            'streaming body returns whole',
+          );
+
+          assert.deepEqual(
+            api.requests
+              .filter((request) => request.method === 'PUT' && request.path === '/api/config/conversation-view')
+              .map((request) => request.body.view),
+            [{ mode: 'cat', catId: 'codex-astra' }, { mode: 'cat', catId: 'codex61-sol' }, { mode: 'group' }],
+          );
+
+          await page.evaluate(() => window.__f322Chat.presentation('classic'));
+          assert.equal(await page.getByTestId('conversation-view-menu-toggle').count(), 0);
+          assert.deepEqual(await visibleMessageIds(), [
+            'reading-human',
+            'reading-whisper',
+            'reading-cat',
+            'sol-human',
+            'sol-response',
+            'sol-queued',
+          ]);
+        } finally {
+          await closeProof(proof);
+        }
+      },
+    );
+
+    await t.test('single-cat view remains readable at 390px in dark English', async () => {
+      const proof = await openProof({ width: 390, base: 'dark', language: 'en', sidebar: false, surface: true });
+      const { page } = proof;
+      try {
+        await page.locator('[data-message-id="reading-cat"]').waitFor();
+        await page.getByTestId('conversation-view-menu-toggle').click();
+        const menu = page.getByTestId('conversation-view-menu');
+        const box = await menu.boundingBox();
+        assert.ok(box && box.x >= 0 && box.x + box.width <= 390);
+        assert.match(await menu.locator('[data-conversation-cat="codex-astra"]').textContent(), /Messages sent/);
+        await menu.locator('[data-conversation-cat="codex61-sol"]').click();
+        await page.locator('[data-conversation-pending]').waitFor();
+        assert.match(
+          await page.locator('[data-conversation-unconfirmed-divider]').first().textContent(),
+          /Read not confirmed/,
+        );
+        assert.equal(
+          await page.locator('[data-chat-container]').evaluate((element) => element.scrollWidth <= element.clientWidth),
+          true,
+        );
+        await capture(page, '390-dark-single-cat-sol-en');
+      } finally {
+        await closeProof(proof);
+      }
+    });
 
     await t.test(
       'twelve busy cats, elapsed time, draft, mention and capped unread remain distinct in 300px',

@@ -62,6 +62,14 @@ const partialSyncHealth: AgentHookStatusResponse = {
 };
 
 describe('AgentHookHealthNotice', () => {
+  it('separates optional project configuration drift from native teammate connectivity', () => {
+    const html = renderToStaticMarkup(
+      <AgentHookHealthNotice health={{ ...missingHealth, status: 'error' }} configurationOnly onSync={() => {}} />,
+    );
+    expect(html).toContain('项目协作配置待检查');
+    expect(html).not.toContain('Agent 运行环境检测失败');
+    expect(html).toContain('不代表模型无法回复');
+  });
   let container: HTMLDivElement;
   let root: Root;
 

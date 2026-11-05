@@ -43,7 +43,7 @@ export interface AuthenticatedCompressionObservation {
 /** Host-verified Native launch identity; persisted with the canonical session, never the private L0 body. */
 export interface NativeSessionBinding {
   readonly v: 1;
-  readonly carrier: 'agy_stream_json';
+  readonly carrier: 'agy_stream_json' | 'agy_acp';
   readonly cliSessionId: string;
   readonly l0Hash: string;
   readonly workspaceRoot: string;
@@ -51,6 +51,22 @@ export interface NativeSessionBinding {
   readonly model: string;
   readonly permissionMode: 'request-review' | 'always-proceed';
   readonly agentName: string;
+}
+
+/** Selected Host launch boundary, NOT native adoption evidence or a complete compatibility key. */
+export interface HostExecutionBoundary {
+  readonly v: 1;
+  readonly clientId: string;
+  readonly carrier: string;
+  readonly implementationKey: string;
+  /** Stable implementation compatibility revision; never a process-local execution token. */
+  readonly implementationGeneration: string;
+  readonly accountRef: string | null;
+  /** Adapter-provided native state root; absent when the adapter has no verified fact. */
+  readonly accountStateRoot?: string;
+  readonly accountOwnerRoot?: string;
+  readonly workspaceRoot: string;
+  readonly projectRoot: string;
 }
 
 export interface SessionRecord {
@@ -74,10 +90,12 @@ export interface SessionRecord {
   /** CLI-reported session ID (from session_init event) */
   cliSessionId?: string;
   nativeSessionBinding?: NativeSessionBinding;
+  /** Write-once Host facts recorded before provider entry; no credentials or instruction body. */
+  hostExecutionBoundary?: HostExecutionBoundary;
   /** User-requested adoption of an existing native history; persisted across reloads. */
   externalImport?: {
     cliSessionId: string;
-    clientId: 'openai' | 'anthropic';
+    clientId: import('../utils/local-session-import.js').LocalSessionClientId;
     firstPrompt: string;
     projectPath: string;
     lastActivityAt: number;

@@ -1,11 +1,15 @@
 import { type ArtifactReviewCommand, artifactReviewCommandSchema } from '@cat-cafe/shared';
 
-export function clearReviewRetryRecord(key: string): boolean {
+export function clearReviewRetryRecord(
+  key: string,
+  command?: ArtifactReviewCommand,
+): 'cleared' | 'replaced' | 'unavailable' {
   try {
+    if (command && localStorage.getItem(key) !== JSON.stringify(command)) return 'replaced';
     localStorage.removeItem(key);
-    return true;
+    return 'cleared';
   } catch {
-    return false;
+    return 'unavailable';
   }
 }
 

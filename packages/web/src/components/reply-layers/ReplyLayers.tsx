@@ -103,7 +103,7 @@ export function ReplyLayers({
     rowCount: record.rows.length + (nativeOutput?.processCount ?? 0) + subexecutions.total,
     thinking: message.thinking,
     workingText,
-    metadata: Boolean(message.metadata),
+    metadata: Boolean(message.metadata) || (message.extra?.startupRecovery?.attempt ?? 0) > 1,
     recall: terminalRecall,
   });
 
@@ -192,6 +192,7 @@ export function ReplyLayers({
           nativeOutput={nativeOutput}
           subexecutions={subexecutions}
           catId={message.catId ?? undefined}
+          startupRecovery={message.extra?.startupRecovery}
         />
       ) : null}
     </div>

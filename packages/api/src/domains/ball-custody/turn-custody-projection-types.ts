@@ -39,12 +39,6 @@ export type TurnCustodyWakeProvenance =
     }
   | {
       readonly kind: 'structured';
-      readonly protocol: 'assign_work' | 'coordination' | 'callback';
-      readonly subjectKey: string;
-      readonly holderCatId: string;
-    }
-  | {
-      readonly kind: 'structured';
       readonly protocol: 'hold';
       readonly subjectKey: string;
       readonly holderCatId: string;

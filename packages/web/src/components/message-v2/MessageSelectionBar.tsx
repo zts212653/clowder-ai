@@ -3,6 +3,7 @@ import { messageReadingCopy } from './message-reading-copy';
 
 interface MessageSelectionBarProps {
   count: number;
+  unselectedCardCount?: number;
   pendingFormat: 'md' | 'txt' | 'png' | null;
   error: string | null;
   forwardingDisabled: boolean;
@@ -14,6 +15,7 @@ interface MessageSelectionBarProps {
 /** Presentation of the existing selection/export owner at the composer position. */
 export function MessageSelectionBar({
   count,
+  unselectedCardCount = 0,
   pendingFormat,
   error,
   forwardingDisabled,
@@ -37,7 +39,14 @@ export function MessageSelectionBar({
           </p>
         )}
         <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 text-compact">
-          <span className="mr-auto shrink-0 font-semibold tabular-nums text-cafe-primary">{t.selected(count)}</span>
+          <span className="mr-auto flex flex-wrap items-baseline gap-x-1.5 text-[13.5px] font-semibold tabular-nums text-cafe-primary">
+            {t.selected(count)}
+            {unselectedCardCount > 0 && (
+              <span className="text-[12.5px] font-normal text-cafe-muted">
+                {t.cardsNotSelected(unselectedCardCount)}
+              </span>
+            )}
+          </span>
           <div role="group" aria-label={t.exportAs} className="flex min-w-0 flex-wrap items-center gap-1">
             <span className="mr-1 text-cafe-muted">{t.exportAs}</span>
             {(['md', 'txt', 'png'] as const).map((format) => (

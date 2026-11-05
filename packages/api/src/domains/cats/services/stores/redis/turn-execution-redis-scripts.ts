@@ -18,6 +18,7 @@ redis.call('HSET', KEYS[1],
   'startedAt', ARGV[8],
   'causal', ARGV[9],
   'queueCompletionPolicy', ARGV[11] or '',
+  'providerLifecycleTracked', ARGV[12] or '',
   'status', 'running',
   'endedAt', '',
   'terminalReason', '',
@@ -32,10 +33,17 @@ local current = redis.call('HGET', KEYS[1], 'status')
 if not current then return -1 end
 if current ~= 'running' then return 0 end
 
+local tracked = redis.call('HGET', KEYS[1], 'providerLifecycleTracked')
+local dispatched = redis.call('HGET', KEYS[1], 'providerStartedAt')
+local teardown = redis.call('HGET', KEYS[1], 'providerTeardownAt')
+if tracked == '1' and dispatched and dispatched ~= '' and
+  (not teardown or teardown == '') and (not ARGV[5] or ARGV[5] == '') then return -2 end
+
 redis.call('HSET', KEYS[1],
   'status', ARGV[1],
   'endedAt', ARGV[2],
   'terminalReason', ARGV[3])
+if ARGV[5] and ARGV[5] ~= '' then redis.call('HSET', KEYS[1], 'providerTeardownAt', ARGV[5]) end
 redis.call('SREM', KEYS[2], ARGV[4])
 redis.call('SADD', KEYS[3], ARGV[4])
 return 1
@@ -73,4 +81,14 @@ if rank[ARGV[1]] > rank[current] then
   return 1
 end
 return 2
+`;
+
+export const ADVANCE_TURN_PROVIDER_LUA = `
+local started = redis.call('HGET', KEYS[1], 'startedAt')
+if not started or tonumber(ARGV[2]) < tonumber(started) then return 0 end
+if ARGV[1] == 'providerStartedAt' then
+  if redis.call('HGET', KEYS[1], 'status') ~= 'running' or redis.call('HGET', KEYS[1], 'providerLifecycleTracked') ~= '1' then return 0 end
+end
+redis.call('HSETNX', KEYS[1], ARGV[1], ARGV[2])
+return 1
 `;

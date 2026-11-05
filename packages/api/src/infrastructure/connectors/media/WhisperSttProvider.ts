@@ -8,7 +8,7 @@ import { getServiceManifest, resolveServiceEndpoint } from '../../../domains/ser
 export interface WhisperSttProviderOptions {
   baseUrl?: string;
   model?: string;
-  /** @internal test injection */
+  /** @internal Scoped Host transport or test injection. */
   _fetchFn?: typeof fetch;
 }
 
@@ -51,6 +51,7 @@ export class WhisperSttProvider implements ISttProvider {
     const response = await this.fetchFn(`${this.resolveBaseUrl()}/v1/audio/transcriptions`, {
       method: 'POST',
       body: formData,
+      ...(request.signal ? { signal: request.signal } : {}),
     });
 
     if (!response.ok) {

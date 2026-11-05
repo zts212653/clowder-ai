@@ -1,5 +1,6 @@
 import type { CodexLiveNativeClient } from '../../../cats/services/agents/providers/CodexLiveRunPort.js';
 import { isCodexAppServerRpcError } from '../../../cats/services/agents/providers/codex-app-server-rpc-error.js';
+import { companionTextDigest } from '../../../cats/services/stores/companion-submission-state.js';
 import { bounded } from '../live-call-async.js';
 import type { LiveCompanionCallOptions } from '../live-call-options.js';
 import { liveMessageDigest, persistLiveUserText } from '../live-transcript.js';
@@ -38,7 +39,16 @@ export async function sendLiveText(input: {
   if (!input.isAvailable()) throw new Error('Live stopped before text delivery');
   const receipt = input.client
     .submitText(input.text, stored.message.id)
-    .then(() => {
+    .then(async () => {
+      const accepted = await input.options.messageStore.recordCompanionDeliveryAcceptance(stored.message.id, {
+        ownerUserId: input.options.binding.userId,
+        threadId: input.options.binding.threadId,
+        clientMessageId: input.clientMessageId,
+        callId: input.options.binding.callId,
+        contentDigest: companionTextDigest(input.text),
+        acceptedAt: Date.now(),
+      });
+      if (!accepted) throw new Error('Live text acceptance history unavailable');
       input.exposedMessages.set(stored.message.id, { kind: 'text', digest: liveMessageDigest(stored.message) });
       return { messageId: stored.message.id, delivery: 'accepted' as const };
     })

@@ -3,6 +3,7 @@ import type {
   MessageMediaPublicationSource,
   WorkspaceMediaSnapshotSource,
 } from '@cat-cafe/shared';
+import type { CollectiveContentOperationContextV1, CollectiveContentScopeV1 } from './collective-scope.js';
 
 export type ContentActorV1 =
   | { readonly kind: 'human'; readonly actorId: string }
@@ -36,7 +37,7 @@ export interface VideoProjectMediaScopeV1 {
 }
 
 /** Optional domain request provenance lives on the existing owner receipt, not a second operation journal. */
-export interface ContentOperationContextV1 {
+export interface VideoContentOperationContextV1 {
   readonly kind:
     | 'video-project:create'
     | 'video-project:save'
@@ -46,6 +47,14 @@ export interface ContentOperationContextV1 {
     | 'video-project:self-review';
   readonly requestDigest: `sha256:${string}`;
 }
+export interface WorkContentOperationContextV1 {
+  readonly kind: 'work:create' | 'work:submit';
+  readonly requestDigest: `sha256:${string}`;
+}
+export type ContentOperationContextV1 =
+  | VideoContentOperationContextV1
+  | CollectiveContentOperationContextV1
+  | WorkContentOperationContextV1;
 
 /** Immutable authority coordinates established by an explicit prepared-publication import. */
 export interface TaskContentPublicationScopeV1 {
@@ -75,7 +84,17 @@ export type ContentPublicationScopeV1 =
   | TaskContentPublicationScopeV1
   | MessageContentPublicationScopeV1
   | WorkspaceSnapshotPublicationScopeV1
-  | EvolutionSnapshotPublicationScopeV1;
+  | EvolutionSnapshotPublicationScopeV1
+  | WorkPublicationScopeV1;
+
+/** Independent works retain their original production authority, not a mutable source path or message. */
+export interface WorkPublicationScopeV1 {
+  readonly kind: 'work';
+  readonly ownerUserId: string;
+  readonly threadId: string;
+  readonly creationOperationId: string;
+  readonly createdBy: ContentActorV1;
+}
 
 export interface EvolutionSnapshotPublicationScopeV1 {
   readonly kind: 'evolution-snapshot';
@@ -88,6 +107,10 @@ export interface EvolutionSnapshotPublicationScopeV1 {
 
 export function isTaskPublicationScope(scope: ContentPublicationScopeV1): scope is TaskContentPublicationScopeV1 {
   return !('kind' in scope);
+}
+
+export function isWorkPublicationScope(scope: ContentPublicationScopeV1 | undefined): scope is WorkPublicationScopeV1 {
+  return scope !== undefined && 'kind' in scope && scope.kind === 'work';
 }
 
 export interface ContentSourcePublicationV1 {
@@ -124,6 +147,7 @@ export interface ContentSettlementReceiptV1 {
 }
 
 export interface LoadedProjectContentV1 {
+  readonly collectiveScope?: CollectiveContentScopeV1;
   readonly byteLength: number;
   readonly contentRef: string;
   readonly ownerRevision: number;
@@ -138,6 +162,8 @@ export interface LoadedProjectContentV1 {
 }
 
 export interface ImportProjectContentInputV1 {
+  readonly collectiveScope?: CollectiveContentScopeV1;
+  readonly authorizeEffect?: () => Promise<void>;
   readonly contentRef: string;
   readonly bytes: Uint8Array;
   readonly mediaType: string;
@@ -151,6 +177,7 @@ export interface ImportProjectContentInputV1 {
 }
 
 export interface SettleProjectContentInputV1 {
+  readonly authorizeEffect?: () => Promise<void>;
   readonly contentRef: string;
   readonly expectedOwnerRevision: number;
   readonly bytes: Uint8Array;

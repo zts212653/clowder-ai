@@ -1,21 +1,32 @@
 import { imageArtworkCopy } from '@/components/content-review/image-artwork.shell-copy';
+import { ReviewToolbarIcon } from '@/components/content-review/ReviewToolbarIcon';
 import { ADD_TO_CHAT_LABEL } from '@/components/SelectionAnnotationAction';
 import { useShellCopy } from '@/components/shell/shell-copy';
 import type { useWorkspaceMediaChat } from './useWorkspaceMediaChat';
 
 type MediaChat = ReturnType<typeof useWorkspaceMediaChat>;
 
-export function WholeWorkChatButton({ chat }: { readonly chat: Pick<MediaChat, 'wholeWorkOffered' | 'addWork'> }) {
+export function WholeWorkChatButton({
+  chat,
+  label,
+  menuItem = false,
+}: {
+  readonly chat: Pick<MediaChat, 'wholeWorkOffered' | 'addWork'>;
+  readonly label?: string;
+  readonly menuItem?: boolean;
+}) {
   const t = useShellCopy(imageArtworkCopy);
   if (!chat.wholeWorkOffered) return null;
   return (
     <button
       type="button"
+      role={menuItem ? 'menuitem' : undefined}
       data-testid="workspace-media-chat-whole-work"
       onClick={chat.addWork}
       className="rounded-md border border-cafe-subtle px-3 py-1.5 text-xs font-semibold text-cafe-accent"
     >
-      {t.wholeWork}
+      {menuItem ? <ReviewToolbarIcon name="comment" /> : null}
+      {label ?? t.wholeWork}
     </button>
   );
 }

@@ -31,7 +31,7 @@ export class NamedCatContentService {
       readonly sessions: EditorSessionService;
       readonly owner: Pick<ProjectContentOwnerService, 'load'>;
       readonly patches: Pick<CollaborativePatchService, 'submit'>;
-      readonly inspector: ContentInspectionPort;
+      readonly inspector?: ContentInspectionPort;
       readonly workspace?: Pick<WorkspaceEditorService, 'resolveExisting'>;
     },
   ) {}
@@ -62,6 +62,8 @@ export class NamedCatContentService {
       if (current.mediaType !== DOCX_MEDIA_TYPE)
         throw new EditorSessionError('PROVIDER_UNAVAILABLE', 'Unsupported document type');
       const { sessionToken: _bearer, ...authority } = session;
+      if (!this.options.inspector)
+        throw new EditorSessionError('PROVIDER_UNAVAILABLE', 'Content inspector unavailable');
       const result = await this.options.inspector.inspect({
         authority,
         bytes: current.bytes,

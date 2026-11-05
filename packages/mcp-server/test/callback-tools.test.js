@@ -55,6 +55,44 @@ describe('MCP Callback Tools', () => {
     }
   });
 
+  test('handleSetThreadMetadata forwards roadmap coordinates and revision without cross-thread selectors', async () => {
+    const { handleSetThreadMetadata } = await import('../dist/tools/callback-tools.js');
+    const roadmap = {
+      state: 'active',
+      projectPath: '/authorized/project',
+      path: 'docs/roadmap.md',
+      sourceRef: 'thread:current#source',
+      expectedRevision: null,
+    };
+    let body;
+    globalThis.fetch = async (_url, options) => {
+      body = JSON.parse(options.body);
+      return { ok: true, json: async () => ({ roadmapBinding: { revision: 1 } }) };
+    };
+    const result = await handleSetThreadMetadata({ roadmap });
+    assert.notEqual(result.isError, true);
+    assert.deepEqual(body, { roadmap });
+  });
+
+  test('propose_thread forwards explicit empty fields when clearing an owner revision', async () => {
+    const { handleProposeThread } = await import('../dist/tools/callback-tools.js');
+    let body;
+    globalThis.fetch = async (_url, options) => {
+      body = JSON.parse(options.body);
+      return { ok: true, json: async () => ({ proposalId: 'replacement', status: 'pending' }) };
+    };
+    const result = await handleProposeThread({
+      title: 'same work',
+      reason: 'clear assignments and body',
+      supersedesProposalId: 'original',
+      preferredCats: [],
+      initialMessage: '',
+    });
+    assert.notEqual(result.isError, true);
+    assert.deepEqual(body.preferredCats, []);
+    assert.equal(body.initialMessage, '');
+  });
+
   test('propose_taste forwards an optional takeaway hypothesis with the approval request', async () => {
     const { handleProposeTaste, proposeTasteInputSchema } = await import('../dist/tools/callback-tools.js');
     assert.equal(proposeTasteInputSchema.takeaway.safeParse('我们以为 You 喜欢清楚的来源。').success, true);
@@ -209,7 +247,7 @@ describe('MCP Callback Tools', () => {
       targetCats: ['codex'],
       clientMessageId: 'invalid-subject-ref',
       action: {
-        subjectRef: 'github:zts212653/cat-cafe#3677@181099d2',
+        subjectRef: 'github:zts212653/clowder-ai#3677@181099d2',
         actionFamily: 'implement',
         successorSlot: 'implementer',
         mode: 'single',
@@ -218,8 +256,8 @@ describe('MCP Callback Tools', () => {
     });
 
     assert.equal(result.isError, true);
-    assert.match(result.content[0].text, /pr:<owner>\/<repo>#<positive-number>/);
-    assert.match(result.content[0].text, /subject:<namespace>:<opaque-id>/);
+    assert.match(result.content[0].text, /subject:task:<taskId>/);
+    assert.match(result.content[0].text, /existing Task/);
     assert.equal(attempts, 0, 'invalid metadata must not reach the callback transport');
     assert.deepEqual(
       readdirSync(outboxDir).filter((name) => name.endsWith('.json')),
@@ -421,7 +459,7 @@ describe('MCP Callback Tools', () => {
       clientMessageId: 'typed-local-review-agent-key',
       localReviewVerdict: 'approved',
       reviewedHeadSha: 'b'.repeat(40),
-      reviewSubjectRef: 'pr:zts212653/cat-cafe#4255',
+      reviewSubjectRef: 'pr:zts212653/clowder-ai#4255',
       acceptedSourceRef,
       acceptedRevision,
     });
@@ -435,7 +473,7 @@ describe('MCP Callback Tools', () => {
       targetCats: ['codex'],
       localReviewVerdict: 'approved',
       reviewedHeadSha: 'b'.repeat(40),
-      reviewSubjectRef: 'pr:zts212653/cat-cafe#4255',
+      reviewSubjectRef: 'pr:zts212653/clowder-ai#4255',
       acceptedSourceRef,
       acceptedRevision,
     });
@@ -627,46 +665,57 @@ describe('MCP Callback Tools', () => {
     assert.ok(result.content[0].text.includes('NOT delivered'));
   });
 
-  test('handleCrossPostMessage preserves pagination reason and gives executable target-thread catch-up', async () => {
-    const { handleCrossPostMessage } = await import('../dist/tools/callback-tools.js');
-
+  test('held routing mismatch reports unsent targets without freshness catch-up or a bypass', async () => {
+    const { handlePostMessage, handleCrossPostMessage } = await import('../dist/tools/callback-tools.js');
     globalThis.fetch = async () => ({
       ok: true,
       json: async () => ({
         status: 'held',
-        reason: 'newer_messages_available',
-        freshnessReason: 'pagination_limit_uncertain',
-        unseenCount: 0,
-        unseenCountKnown: false,
-        previews: [],
-        omittedCount: 0,
-        actions: ['read_latest', 'revise', 'send_with_acknowledge'],
-        catchUp: {
-          tool: 'cat_cafe_get_thread_context',
-          arguments: { threadId: 'thread-target', readIntent: 'unread', responseMode: 'full' },
-          continuation: { cursorArgument: 'cursor', cursorFrom: 'nextCursor', completeWhen: 'hasMore=false' },
-        },
+        reason: 'routing_mismatch',
+        declaredTargets: ['opus'],
+        parsedTargets: ['codex'],
+        unexpectedTargets: ['codex'],
+        actions: ['revise_content', 'expand_target_cats'],
       }),
     });
+    for (const send of [handlePostMessage, (input) => handleCrossPostMessage({ ...input, threadId: 'target' })]) {
+      const result = await send({ targetCats: ['opus'], content: '@codex\nDeliver only to the intended target' });
+      assert.equal(result.isError, true);
+      const text = result.content[0].text;
+      assert.match(text, /NOT sent/);
+      assert.match(text, /routing_mismatch/);
+      assert.match(text, /targetCats/);
+      assert.match(text, /codex/);
+      assert.match(text, /content/);
+      assert.doesNotMatch(text, /freshness|cat_cafe_get_thread_context|readIntent|acknowledgeHeld/i);
+    }
+  });
 
-    const result = await handleCrossPostMessage({
-      threadId: 'thread-target',
-      targetCats: ['codex'],
-      content: 'Recover this delivery',
-    });
-
-    assert.equal(result.isError, true);
-    const text = result.content[0].text;
-    assert.match(text, /pagination_limit_uncertain/);
-    assert.match(text, /unseen count is unknown/i);
-    assert.doesNotMatch(text, /You have 0 unseen message/);
-    assert.match(text, /cat_cafe_get_thread_context/);
-    assert.match(text, /thread-target/);
-    assert.match(text, /readIntent.*unread/);
-    assert.match(text, /responseMode.*full/);
-    assert.match(text, /nextCursor/);
-    assert.match(text, /hasMore=false/);
-    assert.match(text, /cat_cafe_cross_post_message.*acknowledgeHeld: true/s);
+  test('an unknown or obsolete held response remains unsent without reviving retired catch-up', async () => {
+    const { handleCrossPostMessage } = await import('../dist/tools/callback-tools.js');
+    for (const reason of ['newer_messages_available', 'unknown_policy']) {
+      globalThis.fetch = async () => ({
+        ok: true,
+        json: async () => ({
+          status: 'held',
+          reason,
+          unseenCount: 1,
+          catchUp: { tool: 'cat_cafe_get_thread_context', arguments: { readIntent: 'unread', responseMode: 'full' } },
+          actions: ['send_with_acknowledge'],
+        }),
+      });
+      const result = await handleCrossPostMessage({
+        threadId: 'target',
+        targetCats: ['codex'],
+        content: 'not accepted',
+      });
+      assert.equal(result.isError, true);
+      assert.match(result.content[0].text, new RegExp(reason));
+      assert.doesNotMatch(
+        result.content[0].text,
+        /cat_cafe_get_thread_context|readIntent|acknowledgeHeld|Freshness reason/i,
+      );
+    }
   });
 
   test('handlePostMessage treats normal success as success (not stale)', async () => {
@@ -680,6 +729,23 @@ describe('MCP Callback Tools', () => {
     const result = await handlePostMessage({ content: 'Hello' });
 
     assert.equal(result.isError, undefined);
+  });
+
+  test('handleContinueApprovedTask forwards only exact coordinates and never treats a stale invocation as success', async () => {
+    const { handleContinueApprovedTask } = await import('../dist/tools/callback-tools.js');
+    let captured;
+    globalThis.fetch = async (url, options) => {
+      captured = { url, options };
+      return { ok: true, json: async () => ({ outcome: 'continued', receipt: { receiptId: 'receipt-1' } }) };
+    };
+    const input = { proposalId: 'proposal-1', taskId: 'task-1', clientRequestId: 'stable-retry' };
+    assert.equal((await handleContinueApprovedTask(input)).isError, undefined);
+    assert.match(captured.url, /\/api\/callbacks\/continue-approved-task$/);
+    assert.deepEqual(JSON.parse(captured.options.body), input);
+    assert.equal(captured.options.headers['x-invocation-id'], 'test-invocation');
+    assert.equal(captured.options.headers['x-callback-token'], 'test-token');
+    globalThis.fetch = async () => ({ ok: true, json: async () => ({ status: 'stale_ignored' }) });
+    assert.equal((await handleContinueApprovedTask(input)).isError, true);
   });
 
   test('handleWithdrawThreadProposal forwards the exact proposalId with invocation auth', async () => {
@@ -900,6 +966,8 @@ describe('MCP Callback Tools', () => {
       limit: 15,
       activeSince: 1234567890,
       keyword: 'design review',
+      includeWork: true,
+      cursor: 'opaque-next',
     });
 
     assert.equal(result.isError, undefined);
@@ -907,6 +975,8 @@ describe('MCP Callback Tools', () => {
     assert.ok(capturedUrl.includes('limit=15'));
     assert.ok(capturedUrl.includes('activeSince=1234567890'));
     assert.ok(capturedUrl.includes('keyword=design+review'));
+    assert.ok(capturedUrl.includes('includeWork=true'));
+    assert.ok(capturedUrl.includes('cursor=opaque-next'));
   });
 
   test('handleCrossPostMessage calls post-message with threadId', async () => {
@@ -973,7 +1043,7 @@ describe('MCP Callback Tools', () => {
       clientMessageId: 'typed-cross-thread-local-review',
       localReviewVerdict: 'approved',
       reviewedHeadSha: 'b'.repeat(40),
-      reviewSubjectRef: 'pr:zts212653/cat-cafe#4255',
+      reviewSubjectRef: 'pr:zts212653/clowder-ai#4255',
       acceptedSourceRef: 'docs/features/F314-development-episode-alignment-experiment.md',
       acceptedRevision: 'a'.repeat(40),
     });
@@ -981,7 +1051,7 @@ describe('MCP Callback Tools', () => {
     assert.equal(result.isError, undefined);
     assert.equal(JSON.parse(capturedOptions.body).localReviewVerdict, 'approved');
     assert.equal(JSON.parse(capturedOptions.body).reviewedHeadSha, 'b'.repeat(40));
-    assert.equal(JSON.parse(capturedOptions.body).reviewSubjectRef, 'pr:zts212653/cat-cafe#4255');
+    assert.equal(JSON.parse(capturedOptions.body).reviewSubjectRef, 'pr:zts212653/clowder-ai#4255');
     assert.equal(
       JSON.parse(capturedOptions.body).acceptedSourceRef,
       'docs/features/F314-development-episode-alignment-experiment.md',
@@ -2297,7 +2367,7 @@ describe('MCP Callback Tools', () => {
       idempotencyKey: 'invalid-multi-subject-ref',
       searchEvidenceRefs: ['message:incident-f167'],
       action: {
-        subjectRef: 'github:zts212653/cat-cafe#3677@181099d2',
+        subjectRef: 'github:zts212653/clowder-ai#3677@181099d2',
         actionFamily: 'implement',
         successorSlot: 'implementer',
         mode: 'single',
@@ -2306,8 +2376,8 @@ describe('MCP Callback Tools', () => {
     });
 
     assert.equal(result.isError, true);
-    assert.match(result.content[0].text, /pr:<owner>\/<repo>#<positive-number>/);
-    assert.match(result.content[0].text, /subject:<namespace>:<opaque-id>/);
+    assert.match(result.content[0].text, /subject:task:<taskId>/);
+    assert.match(result.content[0].text, /existing Task/);
     assert.equal(attempts, 0);
     assert.deepEqual(
       readdirSync(outboxDir).filter((name) => name.endsWith('.json')),
@@ -2446,55 +2516,11 @@ describe('MCP Callback Tools', () => {
     assert.match(result.content[0].text, /parallelIntent/);
   });
 
-  // ---- handleRegisterPrTracking payload semantics ----
-
-  test('handleRegisterPrTracking omits catId from body when not provided', async () => {
-    const { handleRegisterPrTracking } = await import('../dist/tools/callback-tools.js');
-
-    let capturedOptions;
-    globalThis.fetch = async (_url, options) => {
-      capturedOptions = options;
-      return { ok: true, json: async () => ({ status: 'ok' }) };
-    };
-
-    await handleRegisterPrTracking({
-      repoFullName: 'zts212653/cat-cafe',
-      prNumber: 832,
-      when: [{ kind: 'pr_head_changed' }],
-      nextStep: 'Inspect the new HEAD.',
-      expiresAt: Date.now() + 60_000,
-    });
-
-    const body = JSON.parse(capturedOptions.body);
-    assert.equal(body.repoFullName, 'zts212653/cat-cafe');
-    assert.equal(body.prNumber, 832);
-    assert.equal(body.catId, undefined, 'catId must not appear in body when omitted');
-    assert.equal(capturedOptions.headers['x-invocation-id'], 'test-invocation');
-    assert.equal(capturedOptions.headers['x-callback-token'], 'test-token');
-  });
-
-  test('handleRegisterPrTracking never trusts caller-supplied catId in the body', async () => {
-    const { handleRegisterPrTracking } = await import('../dist/tools/callback-tools.js');
-
-    let capturedOptions;
-    globalThis.fetch = async (_url, options) => {
-      capturedOptions = options;
-      return { ok: true, json: async () => ({ status: 'ok' }) };
-    };
-
-    await handleRegisterPrTracking({
-      repoFullName: 'zts212653/cat-cafe',
-      prNumber: 100,
-      when: [{ kind: 'pr_ci_terminal' }],
-      nextStep: 'Continue merge-gate.',
-      expiresAt: Date.now() + 60_000,
-      catId: 'opus',
-    });
-
-    const body = JSON.parse(capturedOptions.body);
-    assert.equal(body.catId, undefined, 'cat identity must come from callback authentication');
-    assert.equal(body.repoFullName, 'zts212653/cat-cafe');
-    assert.equal(body.prNumber, 100);
+  test('Host callback tools do not expose plugin-owned tracking registration', async () => {
+    const tools = await import('../dist/tools/callback-tools.js');
+    assert.equal(Object.hasOwn(tools, 'handleRegisterPrTracking'), false);
+    assert.equal(Object.hasOwn(tools, 'handleRegisterIssueTracking'), false);
+    assert.equal(Object.hasOwn(tools, 'handleUnregisterTracking'), false);
   });
 
   // ── F182 KD-6: formatCatRoutingErrorPrefix unit tests ──────────────────────

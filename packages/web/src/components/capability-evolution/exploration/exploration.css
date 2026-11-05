@@ -8,6 +8,7 @@
 @import "./exploration-navigation.css";
 @import "./exploration-decision.css";
 @import "./exploration-v2.css";
+@import "./exploration-history.css";
 
 .exploration-workspace {
   min-width: 0;
@@ -134,6 +135,7 @@
   color: var(--cafe-text-secondary);
   padding: 3px 7px;
   background: var(--cafe-surface-elevated);
+  --chat-background-role: cafe-elevated;
   border-radius: 4px;
 }
 .exploration-selection-heading h3 svg {
@@ -149,6 +151,7 @@
   border: 1px solid var(--cafe-border-subtle);
   border-radius: 16px;
   background: var(--console-card-bg);
+  --chat-background-role: console-card;
 }
 .exploration-navigation > * {
   min-width: 0;
@@ -210,6 +213,7 @@
   border: 1px solid var(--cafe-border);
   border-radius: 6px;
   background: var(--cafe-surface);
+  --chat-background-role: cafe;
   color: var(--cafe-text);
   font-size: var(--console-font-sm);
 }
@@ -222,6 +226,21 @@
 }
 .exploration-link {
   margin: 8px 12px 0 0;
+}
+.exploration-history-recovery {
+  margin: 12px 0;
+  padding: 12px 14px;
+  border-left: 2px solid var(--semantic-info);
+  border-radius: 0 6px 6px 0;
+  background: var(--semantic-info-surface);
+  color: var(--cafe-text-secondary);
+  font-size: var(--console-font-xs);
+}
+.exploration-history-recovery strong {
+  color: var(--cafe-text);
+}
+.exploration-history-recovery p {
+  margin: 6px 0 0;
 }
 .exploration-notice {
   margin: 12px 0;
@@ -261,6 +280,7 @@
   padding: 14px 16px;
   border-radius: 12px;
   background: var(--console-card-bg);
+  --chat-background-role: console-card;
   color: var(--cafe-text);
   font-size: var(--console-font-sm);
   overflow-wrap: anywhere;
@@ -285,6 +305,7 @@
   padding: 8px;
   color: var(--cafe-text);
   background: var(--console-field-bg);
+  --chat-background-role: console-field;
   font: inherit;
   border: 1px solid var(--cafe-border);
   border-radius: 6px;

@@ -3,7 +3,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useChatStore } from '@/stores/chatStore';
 import { F307FilesOwnerSurface } from '../F307FilesOwnerSurface';
-import { createFilesSurface, resolveFilesTarget, resolveFileTarget } from '../real-surface-adapters';
+import { createFileSurface, createFilesSurface, resolveFilesTarget, resolveFileTarget } from '../real-surface-adapters';
 
 const mocks = vi.hoisted(() => ({ apiFetch: vi.fn() }));
 vi.mock('@/utils/api-client', () => ({ API_URL: 'http://localhost:3102', apiFetch: mocks.apiFetch }));
@@ -51,6 +51,8 @@ describe('F307 Files owner surface: worktree identity through the coordinate tha
   beforeEach(() => {
     listings = {};
     mocks.apiFetch.mockReset().mockImplementation(async (url: string) => {
+      if (url.startsWith('/api/workspace/file?'))
+        return Response.json({ path: 'packages/api/uploads/a.png', mime: 'image/png' });
       if (url.startsWith('/api/workspace/tree?')) return { ok: true, json: async () => ({ tree: [] }) };
       const queue = listings[url];
       const next = queue && queue.length > 1 ? queue.shift() : queue?.[0];
@@ -105,13 +107,17 @@ describe('F307 Files owner surface: worktree identity through the coordinate tha
     listings[alphaListing] = [
       { ok: true, worktrees: [{ ...alphaEntry, rootIdentity: rootId, resolvedRoot: ALPHA_ROOT, rootEpoch: 0 }] },
     ];
-    const onOpen = await render(vi.fn(), createFilesSurface(rootId));
+    await render(vi.fn(), createFilesSurface(rootId));
     expect(select()?.value).toBe(ALPHA_ID);
     expect(header()).toContain('69c41632');
     expect(status()).toBeNull();
     expect(mocks.apiFetch.mock.calls.some(([url]) => String(url).includes(`worktreeId=${rootId}`))).toBe(true);
     await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="select-owner-file"]')?.click());
-    expect(resolveFileTarget(onOpen.mock.calls[0][0])?.worktreeId).toBe(rootId);
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    await act(async () =>
+      document.querySelector<HTMLButtonElement>('[data-testid="lightbox-open-workspace"]')?.click(),
+    );
+    expect(useChatStore.getState().workspaceOpenRequest?.target).toMatchObject({ kind: 'file', worktreeId: rootId });
   });
 
   it('does not accept malformed root identity metadata as a known current root', async () => {
@@ -265,8 +271,13 @@ describe('F307 Files owner surface: worktree identity through the coordinate tha
     const onOpenSurface = await render();
 
     await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="select-owner-file"]')?.click());
-    const opened = onOpenSurface.mock.calls[0]?.[0];
-    expect(resolveFileTarget(opened)?.path).toBe('packages/api/uploads/a.png');
+    await act(async () =>
+      document.querySelector<HTMLButtonElement>('[data-testid="lightbox-open-workspace"]')?.click(),
+    );
+    const openedTarget = useChatStore.getState().workspaceOpenRequest?.target;
+    expect(openedTarget?.kind).toBe('file');
+    const opened = openedTarget?.kind === 'file' ? createFileSurface(openedTarget) : undefined;
+    expect(opened && resolveFileTarget(opened)?.path).toBe('packages/api/uploads/a.png');
     expect(opened?.navigationOrigin).toEqual({ kind: 'file-tree', worktreeId: ALPHA_ID, repoRoot: ALPHA_ROOT });
 
     const select = container.querySelector<HTMLSelectElement>('[data-testid="f307-files-worktree-select"]');
@@ -275,7 +286,7 @@ describe('F307 Files owner surface: worktree identity through the coordinate tha
       Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set?.call(select, sibling.id);
       select.dispatchEvent(new Event('change', { bubbles: true }));
     });
-    expect(resolveFilesTarget(onOpenSurface.mock.calls[1]?.[0])).toEqual({
+    expect(resolveFilesTarget(onOpenSurface.mock.calls[0]?.[0])).toEqual({
       worktreeId: sibling.id,
       repoRoot: ALPHA_ROOT,
     });

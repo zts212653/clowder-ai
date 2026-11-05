@@ -3,7 +3,9 @@ import {
   type CollectiveAppearanceRole,
   type CollectiveAppearanceRoles,
   type CollectiveHostAppearance,
+  type CollectiveHostShellAppearance,
   collectiveHostAppearanceSchema,
+  collectiveHostShellAppearanceSchema,
 } from '@cat-cafe/shared';
 
 /**
@@ -33,6 +35,8 @@ export interface HostAppearance {
   readonly presentation: 'classic' | 'v2';
   readonly resolvedScheme: 'light' | 'dark';
   readonly roles: CollectiveAppearanceRoles;
+  readonly language?: 'zh' | 'en';
+  readonly shell?: CollectiveHostShellAppearance['shell'];
 }
 
 const OPAQUE_HEX = /^#[0-9a-f]{6}$/;
@@ -40,6 +44,7 @@ const OPAQUE_HEX = /^#[0-9a-f]{6}$/;
 export function readHostAppearance(input: {
   readonly presentation: 'classic' | 'v2';
   readonly scheme: 'light' | 'dark';
+  readonly language?: 'zh' | 'en';
   readonly resolveColor: ResolveHostColor;
 }): HostAppearance | undefined {
   const roles: Partial<Record<CollectiveAppearanceRole, string>> = {};
@@ -48,7 +53,27 @@ export function readHostAppearance(input: {
     if (value === undefined || !OPAQUE_HEX.test(value)) return undefined;
     roles[role] = value;
   }
+  const shellSources = {
+    paper: '--shell-paper',
+    work: '--shell-work',
+    frame: '--shell-frame',
+    selected: '--shell-selected',
+    ink: '--shell-ink',
+    body: '--shell-body',
+    muted: '--shell-muted',
+    hairline: '--shell-hairline',
+    hairlineStrong: '--shell-hairline-strong',
+    primaryText: '--shell-primary-text',
+  } as const;
+  const shellEntries = Object.entries(shellSources).map(
+    ([key, variable]) => [key, input.resolveColor(variable)] as const,
+  );
+  const shell = Object.fromEntries(shellEntries);
   return {
+    ...(input.language ? { language: input.language } : {}),
+    ...(shellEntries.every(([, color]) => color && OPAQUE_HEX.test(color))
+      ? { shell: shell as NonNullable<CollectiveHostShellAppearance['shell']> }
+      : {}),
     presentation: input.presentation,
     resolvedScheme: input.scheme,
     roles: roles as CollectiveAppearanceRoles,
@@ -123,7 +148,12 @@ export function createAppearanceSequencer() {
         revision = 0;
         lastKey = undefined;
       }
-      const key = JSON.stringify(appearance);
+      const base = {
+        presentation: appearance.presentation,
+        resolvedScheme: appearance.resolvedScheme,
+        roles: appearance.roles,
+      };
+      const key = JSON.stringify(base);
       if (key === lastKey) return undefined;
       lastKey = key;
       revision += 1;
@@ -132,6 +162,34 @@ export function createAppearanceSequencer() {
         v: 1,
         bridgeId: nextBridgeId,
         appearanceRevision: revision,
+        ...base,
+      });
+    },
+  };
+}
+
+export function createShellAppearanceSequencer() {
+  let bridgeId: string | undefined,
+    revision = 0,
+    lastKey: string | undefined;
+  return {
+    next(
+      nextBridgeId: string,
+      appearance: Pick<CollectiveHostShellAppearance, 'language' | 'shell'>,
+    ): CollectiveHostShellAppearance | undefined {
+      if (bridgeId !== nextBridgeId) {
+        bridgeId = nextBridgeId;
+        revision = 0;
+        lastKey = undefined;
+      }
+      const key = JSON.stringify(appearance);
+      if (key === lastKey) return undefined;
+      lastKey = key;
+      return collectiveHostShellAppearanceSchema.parse({
+        type: 'collective:host-shell-appearance',
+        v: 1,
+        bridgeId,
+        shellRevision: ++revision,
         ...appearance,
       });
     },

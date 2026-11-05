@@ -68,7 +68,7 @@ export function createWorkspaceV3Fixture() {
       catId: 'codex61-sol',
       createdAt: 1791710900000,
       sourceMessageId: null,
-      ref: 'zts212653/cat-cafe#5385',
+      ref: 'zts212653/clowder-ai#5385',
     },
     {
       type: 'file',
@@ -96,6 +96,7 @@ export function createWorkspaceV3Fixture() {
       executionId,
       threadId,
       threadTitle: `受控样本 · ${index < 2 ? '当前对话' : `其他对话 ${index}`}`,
+      projectPath: '/project/cat-cafe',
       ...(index % 2 ? {} : { turnInvocationId: index === 0 ? base.live.turnInvocationId : `controlled-turn-${index}` }),
       cancelability: {
         state: 'cancelable',
@@ -238,7 +239,11 @@ export function createWorkspaceV3Fixture() {
             : [],
           hasMore: false,
         };
-      } else if (pathname === '/api/executions/active') body = { projectPath: thread.projectPath, executions };
+      } else if (pathname === '/api/executions/active')
+        body =
+          url.searchParams.get('scope') === 'all'
+            ? { scope: 'all', projectPath: null, executions, unavailableProjectPaths: [] }
+            : { projectPath: thread.projectPath, executions };
       else if (pathname.endsWith('/queue'))
         body = {
           queue: [],
@@ -307,7 +312,10 @@ export function createWorkspaceV3Fixture() {
       else if (pathname === '/api/video-projects') body = { projects: [] };
       else if (pathname === '/api/agent-hooks/status') body = { status: 'ready', targets: [] };
       else if (pathname === '/api/runtime-deployment/waits')
-        body = { projectPath: thread.projectPath, items: [], candidate: null };
+        body =
+          url.searchParams.get('scope') === 'all'
+            ? { scope: 'all', projectPath: null, items: [], candidate: null }
+            : { projectPath: thread.projectPath, items: [], candidate: null };
       else if (pathname === '/api/content-publications/resolve')
         body = { status: 'resolved', ownerUserId: 'f322-sample-user', asset };
       else if (pathname === '/api/content-reviews/resolve') body = { ownerUserId: 'f322-sample-user', contexts: [] };

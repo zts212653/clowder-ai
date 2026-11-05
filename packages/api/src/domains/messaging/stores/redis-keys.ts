@@ -28,6 +28,8 @@ export const MessagingKeys = {
   eventSeq: (threadId: string): string => `plugmsg:evseq:${threadId}`,
   /** HASH: encodedEventKey → sequence (window-bounded dedupe, trimmed with events). */
   eventDedupe: (threadId: string): string => `plugmsg:evdedup:${threadId}`,
+  /** Durable publication fence for one key (W2-5b); outlives the trimmed dedupe hash entry. */
+  eventFence: (threadId: string, encodedKey: string): string => `plugmsg:evfence:${threadId}:${encodedKey}`,
   /** String: SubscriptionRecord identity JSON (immutable fields + revokedAt). */
   subscription: (instanceId: string, subscriptionId: string): string =>
     `${MessagingKeyPrefixes.subscription}${enc(instanceId)}:${enc(subscriptionId)}`,

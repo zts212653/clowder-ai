@@ -61,6 +61,52 @@ describe('callback read-profile route', () => {
     assert.ok(body.revision?.startsWith('sha256:'), 'revision included in primer read');
   });
 
+  for (const layer of ['capsule', 'corpus', 'primer']) {
+    it(`${layer}: a requested receipt fails without the evidence database, while an old client still reads`, async () => {
+      const path =
+        layer === 'capsule'
+          ? repository.capsulePath('alice')
+          : layer === 'corpus'
+            ? repository.corpusPath('alice')
+            : repository.primerPath(repository.scope('alice', 'codex-sol'));
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, 'PRIVATE RECEIPT REQUIRED');
+      const auth = await registry.create('alice', 'codex-sol', 'thread_1');
+      const headers = { 'x-invocation-id': auth.invocationId, 'x-callback-token': auth.callbackToken };
+      const recorded = await app.inject({
+        method: 'GET',
+        url: `/api/callbacks/profile?layer=${layer}&requestId=record-me`,
+        headers,
+      });
+      assert.equal(recorded.statusCode, 503);
+      assert.equal(recorded.json().error, 'profile_read_recording_unavailable');
+      assert.equal(recorded.json().readRequestId, 'record-me');
+      assert.doesNotMatch(recorded.body, /PRIVATE RECEIPT REQUIRED/);
+      const legacy = await app.inject({ method: 'GET', url: `/api/callbacks/profile?layer=${layer}`, headers });
+      assert.equal(legacy.statusCode, 200);
+      assert.equal(legacy.json().usageRecorded, false);
+      assert.equal(legacy.json().content, 'PRIVATE RECEIPT REQUIRED');
+    });
+  }
+
+  it('F321 rejects a stale relationship handle after correction without returning either body', async () => {
+    const path = repository.primerPath(repository.scope('alice', 'codex-sol'));
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, 'OLD PRIVATE NAME', 'utf8');
+    const first = await getProfile('alice', 'codex-sol');
+    const { revision } = first.json();
+    writeFileSync(path, 'NEW PRIVATE NAME', 'utf8');
+    const { invocationId, callbackToken } = await registry.create('alice', 'codex-sol', 'thread_1');
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/profile?expectedRevision=${encodeURIComponent(revision)}`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+    assert.equal(response.statusCode, 409);
+    assert.equal(response.json().error, 'profile_revision_changed');
+    assert.doesNotMatch(response.body, /OLD PRIVATE NAME|NEW PRIVATE NAME/);
+  });
+
   it('does not cross user roots for the same cat', async () => {
     const alice = repository.scope('alice', 'codex');
     const path = repository.primerPath(alice);
@@ -128,6 +174,30 @@ describe('callback read-profile route', () => {
     assert.doesNotMatch(response.body, /primer/);
   });
 
+  it('capsule reads are owner-bound and reject an old revision without returning content', async () => {
+    mkdirSync(repository.profileDir('alice'), { recursive: true });
+    writeFileSync(repository.capsulePath('alice'), 'PRIVATE_CAPSULE_FIRST');
+    const getCapsule = async (owner, revision) => {
+      const auth = await registry.create(owner, 'opus', 'thread_1');
+      return app.inject({
+        method: 'GET',
+        url: `/api/callbacks/profile?layer=capsule${revision ? `&expectedRevision=${encodeURIComponent(revision)}` : ''}`,
+        headers: { 'x-invocation-id': auth.invocationId, 'x-callback-token': auth.callbackToken },
+      });
+    };
+    const initial = await getCapsule('alice');
+    assert.equal(initial.statusCode, 200, initial.body);
+    assert.equal(initial.json().uri, 'cat-cafe-profile://capsule/current');
+    assert.equal(initial.json().content, 'PRIVATE_CAPSULE_FIRST');
+    const other = await getCapsule('bob');
+    assert.equal(other.statusCode, 404);
+    assert.doesNotMatch(other.body, /PRIVATE_CAPSULE/);
+    writeFileSync(repository.capsulePath('alice'), 'PRIVATE_CAPSULE_REPLACEMENT');
+    const stale = await getCapsule('alice', initial.json().revision);
+    assert.equal(stale.statusCode, 409);
+    assert.doesNotMatch(stale.body, /PRIVATE_CAPSULE/);
+  });
+
   it('primer 404 returns typed no_primer error with uri', async () => {
     // No primer written for alice/opus → 404 with typed error
     const response = await getProfile('alice', 'opus');
@@ -141,7 +211,7 @@ describe('callback read-profile route', () => {
     const { invocationId, callbackToken } = await registry.create('alice', 'opus', 'thread_1');
     const response = await app.inject({
       method: 'GET',
-      url: '/api/callbacks/profile?layer=capsule',
+      url: '/api/callbacks/profile?layer=unknown',
       headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
     assert.equal(response.statusCode, 400);

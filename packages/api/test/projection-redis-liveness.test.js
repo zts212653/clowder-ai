@@ -71,6 +71,39 @@ describe('isolated Redis projection liveness', { skip: redisIsolationSkipReason(
       await redis.quit();
     }
   });
+  test('global candidates retain the durable visibility boundary across projects', async () => {
+    assertRedisIsolationOrThrow(process.env.REDIS_URL, 'global execution candidates');
+    const redis = createRedisClient({ url: process.env.REDIS_URL });
+    try {
+      const store = new RedisThreadStore(redis);
+      const owner = 'global-candidates-owner';
+      const cafe = await store.create(owner, 'cafe', '/cafe');
+      const planet = await store.create(owner, 'planet', '/planet');
+      const foreign = await store.create('other-owner', 'foreign', '/planet');
+      const hidden = await store.ensureThread('global-hidden-system', 'hidden');
+      const shared = await store.ensureThread('global-shared-system', 'shared');
+      await store.indexForUser(shared.id, owner);
+      const candidates = [cafe.id, planet.id, foreign.id, hidden.id, shared.id, cafe.id];
+      assert.deepEqual(
+        (await store.listCandidates(owner, candidates)).map((row) => row.id).sort(),
+        [cafe.id, planet.id, shared.id].sort(),
+      );
+      assert.deepEqual(
+        (await store.listProjectCandidates(owner, '/planet', candidates)).map((row) => row.id),
+        [planet.id],
+      );
+      const original = redis.pipeline.bind(redis);
+      redis.pipeline = (...args) => {
+        const pipeline = original(...args);
+        pipeline.exec = async () => [[new Error('visibility unavailable'), null]];
+        return pipeline;
+      };
+      await assert.rejects(store.listCandidates(owner, [cafe.id]), /visibility unavailable/);
+    } finally {
+      await redis.quit();
+    }
+  });
+
   test('deployment wait projection indexes legacy and newly armed work without hydrating settled history', async () => {
     assertRedisIsolationOrThrow(process.env.REDIS_URL, 'deployment projection liveness');
     const { RedisTaskStore } = await import('../dist/domains/cats/services/stores/redis/RedisTaskStore.js');

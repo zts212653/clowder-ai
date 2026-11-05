@@ -1,5 +1,6 @@
 // Manual author preview: the actual Next thread/ChatContainer/Workspace owners, isolated fixture HTTP.
 // No Redis, account credentials, Message writes, or production permission claims.
+
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -7,6 +8,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { CLIENT_REQUEST_DIAGNOSTIC_HEADER } from '@cat-cafe/shared';
 import { OTHER_THREAD_ID, realSurfaceApiResponse, THREAD_ID, WORKTREE_ID } from '../f307-real-surface-fixtures.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../..');
@@ -55,7 +57,7 @@ function composerDraftResponse(threadId, method, body) {
 const api = createServer(async (request, response) => {
   response.setHeader('Access-Control-Allow-Origin', `http://127.0.0.1:${port}`);
   response.setHeader('Access-Control-Allow-Credentials', 'true');
-  response.setHeader('Access-Control-Allow-Headers', 'content-type');
+  response.setHeader('Access-Control-Allow-Headers', `content-type,${CLIENT_REQUEST_DIAGNOSTIC_HEADER}`);
   response.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
   if (request.method === 'OPTIONS') {
     response.writeHead(204);

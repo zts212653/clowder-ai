@@ -10,6 +10,7 @@ import {
   buildPacket,
   markMeasurementCensusDomainCertifiedUsable,
   seedCanonicalMeasurementCensusState,
+  unreachablePublisher,
 } from './publish-verdict-fixtures.js';
 
 /**
@@ -390,7 +391,7 @@ describe('handlePublishVerdict end-to-end with eval:memory generator', () => {
     const memGenerator = createMemoryGeneratorAdapter(provider);
 
     const result = await handlePublishVerdict(
-      { harnessFeedbackRoot: root, generator: memGenerator },
+      { gitPublisher: unreachablePublisher, harnessFeedbackRoot: root, generator: memGenerator },
       {
         packet: buildMemoryPacket({ id: 'vhp-mem-kindmismatch' }),
         domain: 'eval:memory',
@@ -417,7 +418,7 @@ describe('handlePublishVerdict end-to-end with eval:memory generator', () => {
     const memGenerator = createMemoryGeneratorAdapter(provider);
 
     const result = await handlePublishVerdict(
-      { harnessFeedbackRoot: root, generator: memGenerator },
+      { gitPublisher: unreachablePublisher, harnessFeedbackRoot: root, generator: memGenerator },
       {
         packet: buildMemoryPacket({ id: 'vhp-mem-kindmismatch-cw' }),
         domain: 'eval:memory',
@@ -448,7 +449,7 @@ describe('handlePublishVerdict end-to-end with eval:memory generator', () => {
 
     // memory kind on wrong domain — handler must reject before reaching adapter
     const result = await handlePublishVerdict(
-      { harnessFeedbackRoot: root, generator: memGenerator },
+      { gitPublisher: unreachablePublisher, harnessFeedbackRoot: root, generator: memGenerator },
       {
         packet: buildPacket({ id: 'vhp-mem-wrong-domain', domainId: 'eval:a2a' }),
         domain: 'eval:a2a',
@@ -507,7 +508,7 @@ describe('handlePublishVerdict end-to-end with eval:memory generator', () => {
 
   it('returns 501 when no memory generator wired (route-layer SoT)', async () => {
     const result = await handlePublishVerdict(
-      { harnessFeedbackRoot: root /* generator omitted */ },
+      { gitPublisher: unreachablePublisher, harnessFeedbackRoot: root /* generator omitted */ },
       {
         packet: buildMemoryPacket({ id: 'vhp-mem-no-gen' }),
         domain: 'eval:memory',

@@ -117,7 +117,6 @@ end
 local raw = redis.call('HGET', KEYS[1], id)
 if not raw then return {-1, ''} end
 local row = cjson.decode(raw)
-if row.status ~= 'queued' then return {0, raw} end
 if type(row.targets) ~= 'table' then return redis.error_reply('QUEUE_TARGET_RECONCILE_INVALID_ROW') end
 
 local removeSet = {}
@@ -135,6 +134,15 @@ for i = 1, #addTargets do
     return redis.error_reply('QUEUE_TARGET_RECONCILE_INVALID')
   end
   addSet[targetId] = true
+end
+
+-- Retire only unclaimed recipients; preserve a sibling's live claim exactly.
+if row.status ~= 'queued' then
+  if row.status ~= 'claimed' or #addTargets > 0 or next(intentByTarget) ~= nil or
+     not row.claimedTargetIds or #row.claimedTargetIds == 0 then return {0, raw} end
+  for i = 1, #row.claimedTargetIds do
+    if removeSet[row.claimedTargetIds[i]] then return {0, raw} end
+  end
 end
 
 local nextTargets = {}
@@ -166,6 +174,23 @@ for i = 1, #nextTargets do
   elseif existingIntent[targetId] then nextIntent[targetId] = existingIntent[targetId] end
 end
 row.targets = nextTargets
+local pendingTargets = {}
+for i = 1, #nextTargets do pendingTargets[nextTargets[i]] = true end
+for _, field in ipairs({'appendPendingByTarget', 'appendRecoveryByTarget'}) do
+  if row.delivery[field] then
+    for target, _ in pairs(row.delivery[field]) do if not pendingTargets[target] then row.delivery[field][target] = nil end end
+  end
+end
+if row.delivery and row.delivery.routingHeldTargetIds then
+  local pending = {}
+  for i = 1, #nextTargets do pending[nextTargets[i]] = true end
+  local remainingHolds = {}
+  for i = 1, #row.delivery.routingHeldTargetIds do
+    local target = row.delivery.routingHeldTargetIds[i]
+    if pending[target] then remainingHolds[#remainingHolds + 1] = target end
+  end
+  row.delivery.routingHeldTargetIds = remainingHolds
+end
 row.delivery.authorIntentByTarget = nextIntent
 local next = encodeRow(row)
 if next == raw then return {2, raw} end

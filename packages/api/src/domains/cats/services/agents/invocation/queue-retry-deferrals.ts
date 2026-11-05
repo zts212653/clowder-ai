@@ -1,10 +1,9 @@
 /**
- * F117 soak: an attempt can leave its entry in the Queue: it failed before its handoff (actual-send
- * routing refused its target, or its admission failed), or routing refused some of its targets while
- * the others were handed off. Retrying that entry at once would loop on the same failure, so it
- * waits: until the retry time routing named for a target it refused in that attempt, and at least a
- * backoff that doubles with each consecutive failed attempt. Only that entry waits; the drain passes
- * over it, and a timer drains its thread when the wait ends.
+ * F117 soak: a transient backend/admission failure can leave its entry in the Queue.
+ * Retrying immediately would loop on the same failure, so the bounded backoff doubles with each
+ * consecutive failed attempt. Only that entry waits; the drain passes over it, and a timer drains
+ * its thread when the wait ends. F293 policy refusals instead persist an exact target hold in Queue
+ * and need an explicit owner attempt; this process-local timer cannot release those holds.
  *
  * Process-local by design: a restart retries every queued entry at its startup drain.
  */

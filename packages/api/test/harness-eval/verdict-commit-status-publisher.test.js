@@ -11,7 +11,7 @@ describe('verdict commit status publisher', () => {
     const calls = [];
     await publishVerdictCommitStatuses(
       {
-        repoFullName: 'zts212653/cat-cafe',
+        repoFullName: 'fixture-owner/fixture-repo',
         headSha: 'a'.repeat(40),
         statuses: [
           {
@@ -30,7 +30,7 @@ describe('verdict commit status publisher', () => {
         'api',
         '--method',
         'POST',
-        `repos/zts212653/cat-cafe/statuses/${'a'.repeat(40)}`,
+        `repos/fixture-owner/fixture-repo/statuses/${'a'.repeat(40)}`,
         '--raw-field',
         'state=success',
         '--raw-field',
@@ -45,7 +45,7 @@ describe('verdict commit status publisher', () => {
     const calls = [];
     const runner = async (args) => calls.push(args);
     const valid = {
-      repoFullName: 'zts212653/cat-cafe',
+      repoFullName: 'fixture-owner/fixture-repo',
       headSha: 'a'.repeat(40),
       statuses: [
         {
@@ -56,7 +56,7 @@ describe('verdict commit status publisher', () => {
       ],
     };
     const invalidInputs = [
-      { ...valid, repoFullName: 'zts212653/cat-cafe\n--hostname=evil' },
+      { ...valid, repoFullName: 'fixture-owner/fixture-repo\n--hostname=evil' },
       { ...valid, headSha: 'HEAD' },
       { ...valid, statuses: [{ ...valid.statuses[0], context: 'bad\ncontext' }] },
       { ...valid, statuses: [{ ...valid.statuses[0], context: 'x'.repeat(101) }] },

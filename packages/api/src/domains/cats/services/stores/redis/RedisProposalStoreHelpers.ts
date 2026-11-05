@@ -3,17 +3,17 @@
  * Split out of RedisProposalStore.ts to keep both files under the 350-line hard limit (AC-X1).
  */
 
-import type {
-  CatId,
-  DeclaredWorkMode,
-  ProposalApproveOverrides,
-  ProposalStatus,
-  ReportingMode,
-  ThreadProposal,
-} from '@cat-cafe/shared';
+import type { CatId, DeclaredWorkMode, ProposalStatus, ReportingMode, ThreadProposal } from '@cat-cafe/shared';
 import { developmentScopeV1Schema } from '@cat-cafe/shared';
+import {
+  approvedTaskContractSchema,
+  freezeApprovedTaskContract,
+  taskContractContinuationSchema,
+} from '../../../../ball-custody/approved-task-contract.js';
+import { applyProposalOverrides } from '../ports/ProposalSnapshot.js';
 import type { FinalizeApprovalInput } from '../ports/ProposalStore.js';
 import { hydrateApprovalPublication, serializeApprovalPublication } from './RedisApprovalPublication.js';
+import { hydrateProposalRevision, serializeProposalRevision } from './RedisProposalRevisionFields.js';
 
 /**
  * CAS Lua: atomically check current status matches expected → HSET fields + ZREM/ZADD pending index.
@@ -30,6 +30,10 @@ local current = redis.call('HGET', KEYS[1], 'status')
 if current ~= ARGV[2] then
   return 0
 end
+if KEYS[3] then
+  local t = redis.call('TYPE', KEYS[3]).ok
+  if t ~= 'none' and t ~= 'zset' then return redis.error_reply('proposal history index type conflict') end
+end
 local fields = {}
 for i = 5, #ARGV do
   fields[#fields + 1] = ARGV[i]
@@ -41,6 +45,11 @@ if ARGV[3] == 'zrem' then
   redis.call('ZREM', KEYS[2], ARGV[1])
 elseif ARGV[3] == 'zadd' then
   redis.call('ZADD', KEYS[2], ARGV[4], ARGV[1])
+end
+if KEYS[3] then
+  local status = redis.call('HGET', KEYS[1], 'status')
+  local field = status == 'rejected' and 'rejectedAt' or status == 'withdrawn' and 'withdrawnAt' or nil
+  if field then redis.call('ZADD', KEYS[3], tonumber(redis.call('HGET', KEYS[1], field)), ARGV[1]) end
 end
 return 1
 `;
@@ -91,6 +100,7 @@ export function serializeProposal(proposal: ThreadProposal): string[] {
     String(proposal.createdAt),
   ];
   if (proposal.initialMessage) fields.push('initialMessage', proposal.initialMessage);
+  fields.push(...serializeProposalRevision(proposal));
   if (proposal.sourceMessageId) fields.push('sourceMessageId', proposal.sourceMessageId);
   if (proposal.cardMessageId) fields.push('cardMessageId', proposal.cardMessageId);
   if (proposal.reportingMode) fields.push('reportingMode', proposal.reportingMode);
@@ -98,6 +108,9 @@ export function serializeProposal(proposal: ThreadProposal): string[] {
   if (proposal.publication) fields.push('publication', serializeApprovalPublication(proposal.publication));
   if (proposal.withdrawnBy) fields.push('withdrawnBy', proposal.withdrawnBy);
   if (proposal.withdrawnAt) fields.push('withdrawnAt', String(proposal.withdrawnAt));
+  if (proposal.approvedTaskContract) fields.push('approvedTaskContract', JSON.stringify(proposal.approvedTaskContract));
+  if (proposal.taskContractContinuation)
+    fields.push('taskContractContinuation', JSON.stringify(proposal.taskContractContinuation));
   if (proposal.subjectTaskId) fields.push('subjectTaskId', proposal.subjectTaskId);
   if (proposal.subjectTaskTitle) fields.push('subjectTaskTitle', proposal.subjectTaskTitle);
   if (proposal.approvedDevelopmentScope)
@@ -124,6 +137,7 @@ export function hydrateProposal(data: Record<string, string>): ThreadProposal {
     ...optionalSourceMessage(data.sourceMessageId),
   };
   if (initialMessage) proposal.initialMessage = initialMessage;
+  hydrateProposalRevision(proposal, data);
   if (data.reportingMode) proposal.reportingMode = data.reportingMode as ReportingMode;
   if (data.declaredWorkMode) proposal.declaredWorkMode = data.declaredWorkMode as DeclaredWorkMode;
   if (data.approvedBy) proposal.approvedBy = data.approvedBy;
@@ -137,15 +151,37 @@ export function hydrateProposal(data: Record<string, string>): ThreadProposal {
   if (data.cardMessageId) proposal.cardMessageId = data.cardMessageId;
   const publication = hydrateApprovalPublication(data.publication);
   if (publication) proposal.publication = publication;
+  try {
+    const targets: unknown = JSON.parse(data.preferredCats ?? '[]');
+    if (!Array.isArray(targets) || targets.some((target) => typeof target !== 'string' || target.length === 0))
+      proposal.approvalContractInvalid = true;
+  } catch {
+    proposal.approvalContractInvalid = true;
+  }
   if (data.subjectTaskId) proposal.subjectTaskId = data.subjectTaskId;
   if (data.subjectTaskTitle) proposal.subjectTaskTitle = data.subjectTaskTitle;
-  if (data.approvedDevelopmentScope) {
+  if (data.approvedDevelopmentScope !== undefined) {
     try {
       const parsed = developmentScopeV1Schema.safeParse(JSON.parse(data.approvedDevelopmentScope));
       if (parsed.success) proposal.approvedDevelopmentScope = parsed.data;
+      else proposal.approvalContractInvalid = true;
       // Invalid JSON or schema mismatch → fail closed (no delegate authority)
     } catch {
-      /* corrupted JSON → fail closed (no delegate authority) */
+      proposal.approvalContractInvalid = true;
+    }
+  }
+  for (const [field, schema] of [
+    ['approvedTaskContract', approvedTaskContractSchema],
+    ['taskContractContinuation', taskContractContinuationSchema],
+  ] as const) {
+    const encoded = data[field];
+    if (encoded === undefined) continue;
+    try {
+      const parsed = schema.safeParse(JSON.parse(encoded));
+      if (!parsed.success) proposal.approvalContractInvalid = true;
+      else Object.assign(proposal, { [field]: parsed.data });
+    } catch {
+      proposal.approvalContractInvalid = true;
     }
   }
   const claimedAt = parseInt(data.claimedAt ?? '0', 10);
@@ -164,20 +200,9 @@ export function applyFinalize(proposal: ThreadProposal, input: FinalizeApprovalI
     approvedAt: now,
     createdThreadId: input.createdThreadId,
   };
-  applyOverrides(updated, input.overrides);
+  applyProposalOverrides(updated, input.overrides);
+  freezeApprovedTaskContract(updated);
   return updated;
-}
-
-export function applyOverrides(proposal: ThreadProposal, overrides: ProposalApproveOverrides | undefined): void {
-  if (!overrides) return;
-  if (overrides.title !== undefined) proposal.title = overrides.title;
-  if (overrides.parentThreadId !== undefined) proposal.parentThreadId = overrides.parentThreadId;
-  if (overrides.preferredCats !== undefined) proposal.preferredCats = [...overrides.preferredCats];
-  if (overrides.projectPath !== undefined) proposal.projectPath = overrides.projectPath;
-  if (overrides.reportingMode !== undefined) proposal.reportingMode = overrides.reportingMode;
-  if (overrides.declaredWorkMode !== undefined) proposal.declaredWorkMode = overrides.declaredWorkMode;
-  if (overrides.initialMessage === null) delete proposal.initialMessage;
-  else if (typeof overrides.initialMessage === 'string') proposal.initialMessage = overrides.initialMessage;
 }
 
 function parseCatArray(raw: string | undefined): CatId[] {

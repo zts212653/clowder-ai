@@ -13,12 +13,12 @@ import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
 import { composerInsertFromRecall, requestTrueRecall, TrueRecallRequestError } from '@/utils/true-recall';
 import { scopedQueue } from './execution-row/thread-queue';
-import { deliveredTargetIdsFromHistory, SortableQueueEntryRow } from './QueueEntryRow';
+import { queueTargetLabelsFromHistory, SortableQueueEntryRow } from './QueueEntryRow';
 import { QueueSteerDialog } from './QueueSteerDialog';
 import { useQueueActionConvergence } from './useQueueActionConvergence';
 
 const COLLAPSE_THRESHOLD = 4;
-const EMPTY_TARGET_IDS: readonly string[] = [];
+const EMPTY_DELIVERY_LABELS: Readonly<Record<string, string>> = {};
 
 const PRIORITY_RANK: Record<string, number> = { urgent: 0, normal: 1 };
 
@@ -369,10 +369,10 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
           <button
             type="button"
             onClick={handleClear}
-            title="全部停止后续处理（保留原消息）"
+            title="停止正在运行的回复，并清空排队；保留原消息"
             className="text-xs text-cafe-muted hover:text-conn-red-text transition-colors"
           >
-            全部停止
+            停止回复并清空排队
           </button>
         </div>
       </div>
@@ -397,9 +397,9 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
               {visibleEntries.map((entry, idx) => {
                 // #706: Compute image count from server-enriched messagePreview
                 const imageCount = entry.messagePreview?.contentBlocks?.filter((b) => b.type === 'image').length ?? 0;
-                const deliveredTargetIds = entry.messageId
-                  ? deliveredTargetIdsFromHistory(entry.messageId, timelineMessages)
-                  : EMPTY_TARGET_IDS;
+                const deliveryLabels = entry.messageId
+                  ? queueTargetLabelsFromHistory(entry.messageId, timelineMessages)
+                  : EMPTY_DELIVERY_LABELS;
                 return (
                   <SortableQueueEntryRow
                     key={entry.id}
@@ -408,7 +408,7 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
                     imageCount={imageCount}
                     ownerName={coCreator.name}
                     ownerAvatar={coCreator.avatar}
-                    deliveredTargetIds={deliveredTargetIds}
+                    deliveryLabels={deliveryLabels}
                     resolveCatName={resolveCatName}
                     resolveCatAvatar={(catId) => catAvatarById.get(catId)}
                     onRemove={handleRemove}

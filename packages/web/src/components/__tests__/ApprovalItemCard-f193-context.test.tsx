@@ -156,15 +156,15 @@ describe('F246 Bug 1: F193 card context + jump button', () => {
     expect(container.textContent).toContain('请帮忙调研 F246 下一步方向');
   });
 
-  it('F193 card shows source thread ID as fallback when not in chatStore', async () => {
+  it('F193 card keeps unreadable thread names explicit without exposing opaque IDs', async () => {
     await act(async () => {
       root.render(React.createElement(ApprovalItemCard, { item: F193_ITEM_NO_THREAD_IN_STORE }));
     });
 
     const card = container.querySelector('[data-testid="approval-item-ctx-f193-2"]');
     expect(card).not.toBeNull();
-    // Should show the raw ID or a truncated version as fallback
-    expect(card!.textContent).toMatch(/thread-unknown-src|unknown-src/);
+    expect(card?.textContent).toContain('对话名称暂不可读');
+    expect(card?.textContent).not.toMatch(/thread-unknown-src|thread-unknown-tgt/);
   });
 
   it('F193 card has both provenance anchors alongside approve/reject buttons', async () => {

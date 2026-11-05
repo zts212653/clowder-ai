@@ -47,7 +47,11 @@ describe('F310 entrusted-work MCP owner actions', () => {
     assert.equal(admitTool.handler.name, 'handleAdmitEntrustedWork');
     assert.equal(closeTool.handler.name, 'handleCloseEntrustedWork');
     assert.equal(updateTool.handler.name, 'handleUpdateEntrustedWork');
-    assert.deepEqual(updateTool.policy.runtimeProfiles, ['collective-work', 'full', 'desktop:live-companion']);
+    assert.deepEqual(
+      updateTool.policy.runtimeProfiles,
+      ['full', 'desktop:live-companion'],
+      'private Work cannot update owner responsibility',
+    );
     assert.deepEqual(
       admitTool.policy.runtimeProfiles,
       ['full', 'desktop:live-companion'],

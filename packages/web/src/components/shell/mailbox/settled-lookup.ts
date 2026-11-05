@@ -1,6 +1,11 @@
+import { approvalResultRead } from '@/lib/approval-result-read';
+import { canonicalDomainEffect } from '@/stores/approval-domain-effect';
 import { apiFetch } from '@/utils/api-client';
+import { apiSessionIdentity } from '@/utils/api-session-identity';
 import type { SettledLookup, Terminal } from './approval-reconcile';
 import { lookupCreatedThread } from './created-thread-lookup';
+import type { SettledResultItem } from './settled-results-source';
+import { readSharedSettledWindow } from './shared-settled-window';
 
 /**
  * F322 S3-2b-1c: the exact settled lookup the reconciler asks for.
@@ -25,13 +30,25 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function terminalOf(row: Record<string, unknown>): Terminal | null {
+export function settledTerminal(row: Record<string, unknown>): Terminal | null {
   const resolution = TERMINAL_RESOLUTIONS.find((candidate) => candidate === row.resolution);
   if (!resolution) return null;
   const decidedBy = typeof row.decidedBy === 'string' ? row.decidedBy.trim() : '';
+  const domainEffect = canonicalDomainEffect(row);
   return {
     resolution,
-    ...(typeof row.decidedAt === 'number' && Number.isFinite(row.decidedAt) ? { decidedAt: row.decidedAt } : {}),
+    ...(domainEffect ? { domainEffect } : {}),
+    ...(resolution === 'accepted' && (row.sourceFeatureId === 'F193' || row.sourceFeatureId === 'F260') && !domainEffect
+      ? { effectUnknown: true }
+      : {}),
+    ...(resolution === 'closed_without_decision' && (row.closedReason === 'expired' || row.closedReason === 'withdrawn')
+      ? { closedReason: row.closedReason }
+      : {}),
+    ...(!(isRecord(row.detail) && row.detail.closureTimeUnknown === true) &&
+    typeof row.decidedAt === 'number' &&
+    Number.isFinite(row.decidedAt)
+      ? { decidedAt: row.decidedAt }
+      : {}),
     ...(decidedBy ? { decidedBy } : {}),
   };
 }
@@ -45,6 +62,8 @@ export interface SettledLookupInput {
   ownerUserId: string;
   sourceFeatureId: string;
   proposalId: string;
+  /** An original Chat card additionally binds the result to its canonical publication. */
+  approvalCardRef?: { threadId: string; messageId: string };
   signal?: AbortSignal;
 }
 
@@ -60,6 +79,28 @@ export async function lookupSettled(input: SettledLookupInput): Promise<SettledL
   if (!response.ok) return unavailable;
 
   const body: unknown = await response.json().catch(() => null);
+  return lookupSettledBody(body, input);
+}
+
+/** Shared display evidence never replaces a fresh action/decision confirmation. */
+export async function lookupDisplayedSettled(input: SettledLookupInput): Promise<SettledLookup> {
+  const key = { owner: input.ownerUserId, producer: input.sourceFeatureId, proposalId: input.proposalId };
+  if (apiSessionIdentity.getSnapshot().ownerUserId !== input.ownerUserId) return { kind: 'unavailable' };
+  const retained = approvalResultRead.isCurrent(key, 'settled')
+    ? approvalResultRead.snapshot<SettledResultItem>(key, 'settled').value
+    : undefined;
+  try {
+    const rows = retained ? [retained] : await readSharedSettledWindow(input.ownerUserId, input.signal);
+    if (!Array.isArray(rows) || apiSessionIdentity.getSnapshot().ownerUserId !== input.ownerUserId)
+      return { kind: 'unavailable' };
+    return lookupSettledBody({ items: rows }, input, true);
+  } catch {
+    return { kind: 'unavailable' };
+  }
+}
+
+async function lookupSettledBody(body: unknown, input: SettledLookupInput, display = false): Promise<SettledLookup> {
+  const unavailable: SettledLookup = { kind: 'unavailable' };
   if (!isRecord(body) || !Array.isArray(body.items)) return unavailable;
   const rows = body.items.filter(isRecord);
 
@@ -73,11 +114,21 @@ export async function lookupSettled(input: SettledLookupInput): Promise<SettledL
     .sort((a, b) => decidedAtOf(b) - decidedAtOf(a));
 
   if (matching.length > 0) {
+    if (input.approvalCardRef) {
+      const navigation = matching[0].navigation;
+      const ref = isRecord(navigation) && navigation.state === 'anchored' ? navigation.approvalCardRef : null;
+      if (
+        !isRecord(ref) ||
+        ref.threadId !== input.approvalCardRef.threadId ||
+        ref.messageId !== input.approvalCardRef.messageId
+      )
+        return unavailable;
+    }
     // The newest row for this exact proposal; one that does not say a terminal resolution is not a decision we can state.
-    const terminal = terminalOf(matching[0]);
+    const terminal = settledTerminal(matching[0]);
     if (!terminal) return unavailable;
     if (input.sourceFeatureId === 'F128' && terminal.resolution === 'accepted') {
-      const threadId = await lookupCreatedThread(input);
+      const threadId = await lookupCreatedThread(input, { reuseProducerForDisplay: display });
       return { kind: 'found', terminal: { ...terminal, ...(threadId ? { threadId } : { effectUnknown: true }) } };
     }
     return { kind: 'found', terminal };

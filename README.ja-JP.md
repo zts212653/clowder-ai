@@ -28,6 +28,73 @@ Clowder AI は、孤立した AI エージェントを本物のチームに変�
 
 > 📹 **[プラットフォーム全体デモ (3:45)](https://github.com/user-attachments/assets/8e470aba-8fe6-4aa5-a476-c2cd81d1630f)**
 
+### 30 秒でわかる、ひとつの機能
+
+どのデモも、Clowder AI を作っているチームで実際に交わされた会話の再現です。見たら、同じことをあなたの猫に話しかけてみてください。
+
+<details>
+<summary><b>新しい会話の提案</b> — 大きな仕事を猫のチームに任せる · 0:48</summary>
+
+[![新しい会話の提案デモ：5 枚の提案カードが承認され、作業が始まる](site/assets/demos/conversation-proposals.jpg)](https://zts212653.github.io/clowder-ai/#demos)
+
+猫が大きな仕事をいくつかの流れに分け、それぞれに「何を・なぜ・誰が」を書いたカードを作ります。承認すれば新しい会話が開き、断れば猫が直して出し直します。[デモを見る（英語字幕）](https://zts212653.github.io/clowder-ai/#demos) · コミュニティの issue [#82](https://github.com/zts212653/clowder-ai/issues/82) から生まれた機能です
+
+</details>
+
+<details>
+<summary><b>同じバグ、ふたつの結末</b> — Claude Code のセッションをカフェに持ち込む · 0:48</summary>
+
+[![同じバグ、ふたつの結末：Claude Code だけでは作業が止まり、カフェでは続く](site/assets/demos/same-bug.jpg)](https://zts212653.github.io/clowder-ai/#demos)
+
+Claude Code だけで作業していると、利用上限に達したら何時間も待つしかありません。そのセッションを Clowder AI に持ち込めば（新しい会話 → Connect an existing local session）、猫はそれまでの経緯をすべて覚えていて、別の猫も呼べます。また上限に達しても、作業は別の猫に引き継がれて止まりません。[デモを見る（英語字幕）](https://zts212653.github.io/clowder-ai/#demos) · 引き継ぎ機能はコミュニティ貢献者 [@mindfn](https://github.com/mindfn) の [#1398](https://github.com/zts212653/clowder-ai/pull/1398) から
+
+</details>
+
+<details>
+<summary><b>終わるまで待たなくていい</b> — 返答中の猫に追加の指示を出す · 0:36</summary>
+
+[![終わるまで待たなくていい：作業中の猫に丸で囲んでひとこと、旧版と新版を並べて比較](site/assets/demos/steer.jpg)](https://zts212653.github.io/clowder-ai/#demos)
+
+猫が修正している最中に、もう一か所気づいたら：入力欄の + メニューで今の返答を誘導するよう切り替え、画面の該当箇所を丸で囲み、ひとこと添えて送ります。猫は同じターンの中で受け取り、旧版と新版を並べて見せてくれます。[デモを見る（英語字幕）](https://zts212653.github.io/clowder-ai/#demos)
+
+</details>
+
+<details>
+<summary><b>決めきれないなら、まず別々に考えて投票</b> — expert panel、unknown-first、/vote · 0:47</summary>
+
+[![決めきれないなら、まず別々に考えて投票：3 匹の猫がそれぞれ考え、最後に投票。あなたの案も候補に入る](site/assets/demos/panel-vote.jpg)](https://zts212653.github.io/clowder-ai/#demos)
+
+迷ったら「expert panel」と言えば、猫たちはまずそれぞれ別々に考え、あなたの案もひとつとして並べます。それでも意見が割れたら「unknown-first」と言うと、結論をいちばんひっくり返しそうな未知から確かめます。まだ決まらなければ /vote で猫に投票してもらいます。あなたの案も候補に入りますが、勝つとは限りません。[デモを見る（英語字幕）](https://zts212653.github.io/clowder-ai/#demos)
+
+</details>
+
+<details>
+<summary><b>私たちが眠っていた 10 時間</b> — 定期タスクと GitHub イベント · 0:55</summary>
+
+[![私たちが眠っていた 10 時間：チームは眠り、2 匹の猫が引き継ぎながら作業を続ける](site/assets/demos/while-we-slept.jpg)](https://zts212653.github.io/clowder-ai/#demos)
+
+10 月 22 日の実際の一晩：チームは全員眠っていました。定期タスクが 2 時間ごとに 1 匹の猫を起こしてオープンソース版への同期を進め、コミュニティの PR に新しいコミットが来たり CI が失敗したりすると、GitHub がもう 1 匹を起こしてレビューや修正に向かわせます。2 匹は互いに引き継ぎ、朝には 37 件の PR がマージされていました。[デモを見る（英語字幕）](https://zts212653.github.io/clowder-ai/#demos) · その夜のコミュニティ貢献者 [mindfn](https://github.com/mindfn), [amazing-fish](https://github.com/amazing-fish), [EdgarR1170](https://github.com/EdgarR1170), [whutzefengxie-ops](https://github.com/whutzefengxie-ops) に感謝
+
+</details>
+
+<details>
+<summary><b>一夜で、一枚の布に</b> — 9 匹の猫、49 の会話、ひと晩 · 0:53</summary>
+
+[![一夜で、一枚の布に：会話ごとに灯る 49 の窓と、窓どうしをつなぐ糸](site/assets/demos/woven-night.jpg)](https://zts212653.github.io/clowder-ai/#demos)
+
+10 月 22 日の実際の一晩：あなたが眠っているあいだに、4 系統 9 匹の猫が 49 の会話で作業し、262 回仕事を引き継ぎました。窓ひとつが会話ひとつ、引き継ぐたびに糸が一本伸びます。朝には一晩の糸が一枚の布になり、布の上の 37 個の結び目が、マージされた 37 件の PR です。[デモを見る（英語字幕）](https://zts212653.github.io/clowder-ai/#demos)
+
+</details>
+
+<details>
+<summary><b>数件選んで、どこへでも</b> — 複数選択・エクスポート・転送 · 0:49</summary>
+
+[![数件選んで、どこへでも：選んだ 3 件のメッセージから「ドキュメント」「長い画像」「転送」の線がそれぞれの行き先へ伸びる](site/assets/demos/bundles.jpg)](https://zts212653.github.io/clowder-ai/#demos)
+
+メッセージを一度選べば、行き先ごとに持っていけます。同僚に見せるなら長い画像、自分で残すなら Markdown ドキュメント（メールに貼るならテキスト）。別の猫に任せるなら相手の会話へ転送：猫を選んでひとこと添えると、まとめカードが届き、猫が起こされて続きを始めます。[デモを見る（英語字幕）](https://zts212653.github.io/clowder-ai/#demos)
+
+</details>
+
 ## クイックスタート
 
 ### デスクトップインストーラー

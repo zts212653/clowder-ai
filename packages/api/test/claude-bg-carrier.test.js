@@ -72,6 +72,33 @@ test('parses short id from successful claude --bg stdout', async () => {
   assert.equal(shortId, 'abcd1234');
 });
 
+test('background launch and resume propagate only the member native window', async () => {
+  for (const native of [1_000_000, null, undefined]) {
+    const fakeSpawn = buildFakeSpawn({ stdout: 'backgrounded · abcd1234\n' });
+    const service = new ClaudeBgCarrierService({
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn: fakeSpawn,
+      model: 'claude-test-model',
+      enableJobOwnership: false,
+    });
+    await service.startJob('fixture', {
+      callbackEnv: {
+        CAT_CAFE_ANTHROPIC_PROFILE_MODE: 'api_key',
+        CAT_CAFE_ANTHROPIC_API_KEY: 'fixture-not-a-real-key',
+        CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE: 'glm-5.3-flash',
+      },
+      sessionId: '11111111-1111-4111-8111-111111111111',
+      contextNativeWindowTokens: native,
+      contextCapacity: { windowTokens: 258_400 },
+    });
+    assert.equal(fakeSpawn.lastEnv.CLAUDE_CODE_MAX_CONTEXT_TOKENS, native ? '1000000' : undefined);
+    assert.equal(
+      fakeSpawn.lastArgs[fakeSpawn.lastArgs.indexOf('--resume') + 1],
+      '11111111-1111-4111-8111-111111111111',
+    );
+  }
+});
+
 test('throws CarrierError when claude --bg exits non-zero', async () => {
   const fakeSpawn = buildFakeSpawn({ exitCode: 1, stderr: 'auth required' });
   const service = new ClaudeBgCarrierService({

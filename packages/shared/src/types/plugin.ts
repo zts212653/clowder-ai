@@ -146,6 +146,12 @@ export type PluginManagerLiveState = 'stopped' | 'starting' | 'handshaking' | 'r
 
 export type PluginManagerPackageSource =
   | {
+      /** Older installed records may not have recorded their admission origin. This is read metadata, not install input. */
+      kind: 'unknown';
+      packageName: null;
+      trust: 'unknown';
+    }
+  | {
       kind: 'catalog';
       catalogId: string;
       packageName: string;
@@ -154,32 +160,21 @@ export type PluginManagerPackageSource =
   | {
       kind: 'local-directory' | 'local-archive';
       packageName: string | null;
-      trust: 'local-trusted';
+      trust: 'unverified';
+      dependencyClosure?: 'shipped' | 'materialized';
+    }
+  | {
+      kind: 'git';
+      url: string;
+      packageName: string | null;
+      trust: 'unverified';
+      dependencyClosure?: 'shipped' | 'materialized';
+      marketplace?: PluginMarketplaceSelection;
     }
   | {
       kind: 'bundled';
       packageName: string;
       trust: 'first-party';
-    }
-  | {
-      /** Train B read-only bridge. Train C replaces this row with Host inventory provenance. */
-      kind: 'compatibility';
-      adapter: 'repository-local';
-      packageName: string;
-      trust: 'first-party';
-    }
-  | {
-      /** Connector bridges are locally admitted, but they are not bundled first-party code. */
-      kind: 'compatibility';
-      adapter: 'connector';
-      packageName: string;
-      trust: 'local-trusted';
-    }
-  | {
-      /** Pre-provenance inventory retained for safe disable/uninstall only. */
-      kind: 'legacy';
-      packageName: string | null;
-      trust: 'unknown';
     };
 
 export type PluginManagerCapabilityKind =
@@ -196,6 +191,8 @@ export type PluginManagerCapabilityKind =
   | 'service'
   | 'ui'
   | 'content-editor-provider'
+  | 'media-source'
+  | 'cloud-conversation-host'
   | 'desktop-window';
 
 export interface PluginManagerCapability {
@@ -230,25 +227,55 @@ export interface PluginManagerContributionToolsResponse {
 
 export interface PluginManagerDiagnostic {
   code: string;
+  /** F202 W2-6b: with `CAPABILITY_NOT_GRANTED`, the capability the Host refused. */
+  capability?: string;
   message: string;
   occurredAt: number;
   revision: number | null;
 }
 
 export interface PluginManagerActions {
+  /** Explicit retry of a failed activation through the existing lifecycle authority. */
+  repair?: boolean;
   install: boolean;
   setEnabled: boolean;
   uninstall: boolean;
   blockingReasons: string[];
 }
 
-export type PluginManagerConfigFieldKind = 'string' | 'secret' | 'select' | 'boolean' | 'number' | 'url' | 'list';
+export type PluginManagerConfigFieldKind =
+  | 'string'
+  | 'secret'
+  | 'select'
+  | 'boolean'
+  | 'number'
+  | 'url'
+  | 'list'
+  | 'operation';
 
 export interface PluginManagerConfigOption {
   value: string;
   label: string;
   hint?: string;
   docsUrl?: string;
+}
+
+/**
+ * Console-safe projection of a manifest's `configurationVariants`
+ * (configurationVariants, design §3.1). The declaration's discriminator is
+ * always a plain (non-secret) select, so the constrained `when` fragments and
+ * branch field lists are safe to expose. The web form feeds this plus the
+ * current draft through the contract package's pure functions — the same
+ * implementation the server uses — so a mode switch re-derives the active
+ * field set instantly, without saving and without a server round-trip.
+ */
+export interface PluginManagerConfigurationVariants {
+  discriminator: string;
+  branches: ReadonlyArray<{
+    id: string;
+    when: Readonly<Record<string, unknown>>;
+    fields: readonly string[];
+  }>;
 }
 
 /** Console/Agent-safe projection of a typed configuration contribution. */
@@ -258,11 +285,83 @@ export interface PluginManagerConfigField {
   description?: string;
   kind: PluginManagerConfigFieldKind;
   required: boolean;
+  hidden?: boolean;
+  requiredWhen?: {
+    key: string;
+    value: string | number | boolean | readonly (string | number | boolean)[];
+  };
+  /**
+   * Present on every projected field when the manifest declares configuration
+   * variants; identical across the fields of one plugin. Absent for pre-0.2.0
+   * manifests, whose form keeps the legacy behavior.
+   */
+  configurationVariants?: PluginManagerConfigurationVariants;
+  /** Server-evaluated condition for a masked secret selector whose value cannot be projected. */
+  requiredNow?: boolean;
   default?: string | number | boolean | string[];
   options?: PluginManagerConfigOption[];
   /** Secret fields expose only the fixed mask or null, never the stored value. */
   currentValue: string | null;
   sensitive: boolean;
+  /** Operation-only projection. Callback method names stay Host-private. */
+  target?: string[];
+  /** True when all declared operation target fields have effective values; absent without targets. */
+  configured?: boolean;
+  actions?: Array<{
+    id: string;
+    label: string;
+    render: 'button' | 'polling' | 'status';
+    resultRender?: string;
+    next?: string;
+    rollback?: string;
+    timeout?: number;
+    /** Plain text; when present the owner must confirm before every invocation. */
+    confirm?: string;
+  }>;
+  /**
+   * Actions callable only from one row of this operation's `rows` result, with that row's input
+   * (F202 W2-3 h1). Never rendered as standalone buttons.
+   */
+  rowActions?: Array<{
+    id: string;
+    label: string;
+    /** Plain text; a row's own `confirm` may replace the wording but never skips the step. */
+    confirm?: string;
+    next?: string;
+  }>;
+  operationState?: {
+    currentAction: string;
+    updatedAt?: number;
+  };
+}
+
+/**
+ * The data of a `rows` operation result, as the Host passes it on after validating it against the
+ * declaring operation (F202 W2-3 h1). Mirrors the contract's OperationRows.
+ */
+export interface PluginOperationRows {
+  /** At most 200; keys are unique within the result. */
+  rows: PluginOperationRow[];
+  /** Plain text shown when there are no rows. */
+  empty?: string;
+}
+
+export interface PluginOperationRow {
+  key: string;
+  label: string;
+  detail?: string;
+  /** At most 4. */
+  actions?: PluginOperationRowAction[];
+}
+
+export interface PluginOperationRowAction {
+  /** The id of one of the operation's `rowActions`. */
+  action: string;
+  label?: string;
+  /** Sent as the action's input when the owner invokes it from this row. */
+  input: Record<string, string | number | boolean>;
+  /** Plain text; replaces the declared confirmation wording, or asks where none is declared. */
+  confirm?: string;
 }
 
 /** Compact list/search projection. All lifecycle axes remain independent. */
@@ -283,6 +382,8 @@ export interface PluginManagerListItem {
   auth: PluginManagerAuthState;
   intent: PluginManagerIntentState;
   live: PluginManagerLiveState;
+  /** Current Host activation error, independent of desired intent and historical diagnostics. */
+  activationFailed?: boolean;
   lifecycleRevision: number | null;
   capabilitySummary: Array<Pick<PluginManagerCapability, 'id' | 'kind' | 'name' | 'active'>>;
   actions: PluginManagerActions;
@@ -290,16 +391,22 @@ export interface PluginManagerListItem {
 }
 
 export interface PluginManagerDetail extends PluginManagerListItem {
+  /** Owner-scoped Host bindings; absent when this projection is unavailable. */
+  bindings?: Array<{ key: string; threadId: string; threadTitle: string | null; createdAt: number }>;
   capabilities: PluginManagerCapability[];
   /** Absent only when legacy/catalog metadata cannot yet expose a verified manifest. */
   contributions?: PluginManagerContribution[];
   docsUrl?: string;
   setupSteps?: string[];
+  /** Package-contract setup guidance. Kept distinct from legacy repository setupSteps. */
+  steps?: Array<string | { text: string; mode?: string }>;
+  permissions?: { label: string };
+  testable?: boolean;
   configFields: PluginManagerConfigField[];
 }
 
 export interface PluginManagerCatalogProjection {
-  status: 'fresh' | 'stale' | 'degraded' | 'unavailable';
+  status: 'loading' | 'fresh' | 'stale' | 'degraded' | 'unavailable';
   refreshedAt: number | null;
   message?: string;
 }
@@ -326,8 +433,24 @@ export type PluginManagerInstallRequest =
       expectedDigest: string;
     }
   | {
-      source: { kind: 'local-directory' | 'local-archive'; path: string };
+      source: { kind: 'local-directory'; path: string };
+    }
+  | {
+      source: { kind: 'local-archive'; path: string };
+      replacement?: import('../plugin-archive-replacement.js').PluginArchiveReplacementConfirmation;
+    }
+  | {
+      source: { kind: 'git'; url: string; marketplace?: PluginMarketplaceSelection };
     };
+
+/** A discovered directory selection, not an archive digest or execution grant. */
+export interface PluginMarketplaceSelection {
+  sourceId: string;
+  commit: string;
+  path: string;
+  pluginId: string;
+  version: string;
+}
 
 export interface PluginManagerSetEnabledRequest {
   enabled: boolean;

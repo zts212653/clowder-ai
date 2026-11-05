@@ -5,7 +5,7 @@
  * setting cannot clobber another. Writes are crash-safe temp+rename and no-TTL.
  */
 
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type {
   MessageDispositionPreferenceSnapshot,
@@ -13,57 +13,53 @@ import type {
   MessageWorkDisposition,
   UserPreferences,
 } from '@cat-cafe/shared';
+import { userPreferencesPath } from './chat-background-file-generation.js';
+import type { BackgroundMetadataWrite } from './chat-background-metadata-lifecycle.js';
+import { writeUserPreferencesAtomic } from './user-preferences-atomic-write.js';
 
 type BubbleDefaultPreferences = NonNullable<UserPreferences['bubbleDefaults']>;
 type BubbleDisplayDefaultPreference = NonNullable<BubbleDefaultPreferences['cliOutput']>;
 
 export const MESSAGE_DISPOSITION_PRODUCT_DEFAULT: MessageWorkDisposition = 'next_work';
 
-function preferencesPath(projectRoot: string): string {
-  return resolve(projectRoot, '.cat-cafe', 'user-preferences.json');
+/** Only a genuinely missing file is a writable empty profile. */
+export function readUserPreferencesStrict(projectRoot: string): UserPreferences {
+  const path = userPreferencesPath(projectRoot);
+  let text: string;
+  try {
+    text = readFileSync(path, 'utf-8');
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return {};
+    throw error;
+  }
+  const parsed: unknown = JSON.parse(text);
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error('User preferences must be a JSON object');
+  }
+  return parsed as UserPreferences;
 }
 
+/** Historical display callers may fall back; admission and writers must use strict reads. */
 export function readUserPreferences(projectRoot: string): UserPreferences {
-  const path = preferencesPath(projectRoot);
-  if (!existsSync(path)) return {};
   try {
-    const parsed: unknown = JSON.parse(readFileSync(path, 'utf-8'));
-    return typeof parsed === 'object' && parsed !== null ? (parsed as UserPreferences) : {};
+    return readUserPreferencesStrict(projectRoot);
   } catch {
     return {};
   }
 }
 
-/** New durable lanes fail visibly on unreadable data rather than overwriting sibling preferences. */
-export function readUserPreferencesStrict(projectRoot: string): UserPreferences {
-  const path = preferencesPath(projectRoot);
-  if (!existsSync(path)) return {};
-  const parsed: unknown = JSON.parse(readFileSync(path, 'utf-8'));
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-    throw new Error('Preference file must contain an object');
-  }
-  return parsed as UserPreferences;
-}
-
 export function updateUserPreferences(
   projectRoot: string,
   update: (current: UserPreferences) => UserPreferences,
-  options: { strictRead?: boolean } = {},
+  options: { strictRead?: boolean; backgroundMetadataWrite?: BackgroundMetadataWrite } = {},
 ): UserPreferences {
   // The single API owner cannot yield between read and atomic rename, so same-process
   // writers cannot interleave. Cross-process writers are outside runtime ownership.
   const directory = resolve(projectRoot, '.cat-cafe');
-  const path = preferencesPath(projectRoot);
-  const tempPath = `${path}.${process.pid}.${Date.now()}.tmp`;
   mkdirSync(directory, { recursive: true });
-  const next = update(options.strictRead ? readUserPreferencesStrict(projectRoot) : readUserPreferences(projectRoot));
-  try {
-    writeFileSync(tempPath, `${JSON.stringify(next, null, 2)}\n`, 'utf-8');
-    renameSync(tempPath, path);
-  } finally {
-    if (existsSync(tempPath)) unlinkSync(tempPath);
-  }
-  return next;
+  const current = readUserPreferencesStrict(projectRoot);
+  const previousBackgrounds = { chatBackgrounds: structuredClone(current.chatBackgrounds) };
+  return writeUserPreferencesAtomic(projectRoot, previousBackgrounds, update(current), options.backgroundMetadataWrite);
 }
 
 function isBubbleDisplayDefault(value: unknown): value is BubbleDisplayDefaultPreference {

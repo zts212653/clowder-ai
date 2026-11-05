@@ -1,3 +1,7 @@
+import { getCoCreatorDisplay } from '../config/co-creator-display.js';
+import { cloudPrincipalStanding } from '../domains/cats/services/cloud-bridge/cloud-conversation-identity.js';
+import { cloudReturnProof } from '../domains/cats/services/cloud-bridge/cloud-return-proof.js';
+import { makeCallbackAuthError } from './callback-errors.js';
 /**
  * Callback API Routes — MCP 回传端点
  * 安全: 每个请求都需要 invocationId + callbackToken 验证。
@@ -9,14 +13,8 @@ import type {
   CatId,
   CatRoutingError,
   CrossThreadCoordination,
-  GitHubIssueAwaitStateV1,
-  GitHubPrAwaitStateV1,
-  GitHubPrWaitPredicate,
-  GitHubTrackingIdentityV1,
-  IssueWaitAutomationState,
   LocalReviewVerdict,
   MessageContent,
-  PrAutomationState,
   RichBlock,
   SuggestedCrossPostAction,
 } from '@cat-cafe/shared';
@@ -26,22 +24,18 @@ import {
   actionSuccessorMetadataSchema,
   catRegistry,
   createCatId,
-  DEFAULT_GITHUB_TRACKING_NEXT_STEP,
-  describeGitHubNotificationCoverage,
-  expandGitHubIssueTracking,
-  expandGitHubPrTrackingGoal,
-  isTrackingKind,
   isValidAcceptedSource,
   isValidReviewSubjectRef,
   localReviewVerdictSchema,
+  messageSearchAnswerAttachmentSchema,
   normalizeRichBlock,
   normalizeSopDefinitionId,
-  resolveGitHubIssueNotificationPerspective,
-  resolveGitHubNotificationPerspective,
   resolveWorkflowSopSkill,
   reviewSubjectRefSchema,
   runtimeConversationResponseSchema,
+  richBlockSchema as sharedRichBlockSchema,
   VersionBoundContextAttachmentsSchema,
+  workReferenceCardSchema,
 } from '@cat-cafe/shared';
 import type { FastifyBaseLogger, FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
@@ -68,15 +62,17 @@ import {
   ActionTerminalPredicateError,
   getActionTerminalCapabilityForPredicateKind,
 } from '../domains/ball-custody/ActionTerminalPredicateCatalog.js';
-import { isCarrierRefreshGeneration } from '../domains/ball-custody/action-successor-state-machine.js';
+import {
+  currentOrphanCarrierRecovery,
+  isCarrierRefreshGeneration,
+} from '../domains/ball-custody/action-successor-state-machine.js';
+import { OrdinaryTaskHandoffError } from '../domains/ball-custody/OrdinaryTaskHandoffContract.js';
 import {
   type ActionSuccessorCarrierAdmissionOutcome,
   type ActionSuccessorCarrierDisposition,
   actionSuccessorFencesMatch,
   reconcileActionSuccessorEnqueue,
 } from '../domains/ball-custody/reconcile-action-successor-enqueue.js';
-import { createTypedWaitRegistration } from '../domains/ball-custody/TypedWaitRegistration.js';
-import { transitionWaitState } from '../domains/ball-custody/wait-state-machine.js';
 import {
   type InvocationQueue,
   type QueueEntry,
@@ -89,8 +85,9 @@ import type { QueueLedgerEntry } from '../domains/cats/services/agents/invocatio
 import { getRichBlockBuffer } from '../domains/cats/services/agents/invocation/RichBlockBuffer.js';
 import type { ThreadExecutionSituationSource } from '../domains/cats/services/agents/invocation/thread-execution-situation.js';
 import { stampVisibleTurn } from '../domains/cats/services/agents/invocation/visible-turn.js';
-import { extractImagePaths, extractImageUrls } from '../domains/cats/services/agents/providers/image-paths.js';
+import { extractImageUrls, extractTrustedImagePaths } from '../domains/cats/services/agents/providers/image-paths.js';
 import { analyzeA2AMentions } from '../domains/cats/services/agents/routing/a2a-mentions.js';
+import { buildCallbackPostMessageIdempotencyKey } from '../domains/cats/services/agents/routing/callback-message-idempotency.js';
 import { resolveCatTarget } from '../domains/cats/services/agents/routing/cat-target-resolver.js';
 import { extractRichFromText } from '../domains/cats/services/agents/routing/rich-block-extract.js';
 import { resolveRichMediaBlocks } from '../domains/cats/services/agents/routing/rich-media-urls.js';
@@ -100,6 +97,8 @@ import {
   type DotAskAdmission,
   hasCompleteDotAskFanout,
 } from '../domains/cats/services/cloud-bridge/dot/DotAskService.js';
+import { resolveDotCallbackReplySource } from '../domains/cats/services/cloud-bridge/dot/dot-callback-reply-source.js';
+import { DOT_CAT_ID } from '../domains/cats/services/cloud-bridge/dot/dot-connection-state.js';
 import type { DotReplyCandidate } from '../domains/cats/services/cloud-bridge/dot/dot-reply-authority.js';
 import { getMessageSpeakerName, getSenderName } from '../domains/cats/services/context/ContextAssembler.js';
 import { FreshnessAttentionEventLog } from '../domains/cats/services/freshness/FreshnessAttentionEventLog.js';
@@ -124,11 +123,8 @@ import {
   isDelivered,
   type StoredMessage,
 } from '../domains/cats/services/stores/ports/MessageStore.js';
-import { isManagedWorkBindingConflictError } from '../domains/cats/services/stores/ports/TaskManagedWorkBinding.js';
-import { type ITaskStore, isSubjectOwnershipConflictError } from '../domains/cats/services/stores/ports/TaskStore.js';
-import { TASK_SUBJECT_ALREADY_EXISTS } from '../domains/cats/services/stores/ports/TaskStoreContract.js';
-import { assertSubjectUpdateOwnership } from '../domains/cats/services/stores/ports/TaskSubjectOwnership.js';
-import { isTrackingRegistrationConflict } from '../domains/cats/services/stores/ports/TaskWaitReplacement.js';
+import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
+import { roadmapInputSchema, ThreadRoadmapConflict } from '../domains/cats/services/stores/ports/ThreadRoadmap.js';
 import type { IThreadStore, VotingStateV1 } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import {
   type ITurnExecutionStore,
@@ -146,46 +142,31 @@ import {
   type Viewer,
 } from '../domains/cats/services/stores/visibility.js';
 import { getVoiceBlockSynthesizer } from '../domains/cats/services/tts/VoiceBlockSynthesizer.js';
-import {
-  ExternalReviewVerdictError,
-  type ExternalReviewVerdictService,
-} from '../domains/community/external-review/ExternalReviewVerdictService.js';
 import type { IConciergeConfigStore } from '../domains/concierge/ConciergeConfigStore.js';
 import {
   hasConciergeNavigationMarker,
   projectConciergeStoredContent,
 } from '../domains/concierge/concierge-reply-validator.js';
-import type { InitialIssueWaitSnapshot } from '../domains/github-signals/GitHubIssueWaitBaselineReader.js';
-import type { InitialPrWaitSnapshot } from '../domains/github-signals/GitHubWaitBaselineReader.js';
-import type { GitHubWaitLifecycleService } from '../domains/github-signals/GitHubWaitLifecycleService.js';
-import {
-  githubIssueWaitPredicatesSchema,
-  githubWaitPredicatesSchema,
-} from '../domains/github-signals/GitHubWaitPredicateCatalog.js';
 import type { IEvidenceStore, IMarkerQueue, IReflectionService } from '../domains/memory/interfaces.js';
-import { projectCollectiveWorkDelegation } from '../domains/plugin/builtin-runtime/collective-work/collective-work-delegation.js';
 import {
   type EngagementPolicyReader,
   notificationDeliveryReceipt,
   partitionNotificationTargets,
   readEngagementPolicy,
 } from '../domains/routing-context/ScarceSeatNotificationPolicy.js';
-import { buildThreadDeepLink } from '../infrastructure/connectors/connector-command-helpers.js';
-import { extractIssueTrackingClaims, extractPrTrackingClaims } from '../infrastructure/grounding/claim-extractors.js';
-import { checkGrounding } from '../infrastructure/grounding/grounding-checker.js';
-import { groundingSampleStore } from '../infrastructure/grounding/grounding-sample-singleton.js';
+import { readThreadRoadmap } from '../domains/workspace/thread-roadmap-source.js';
 import { createModuleLogger } from '../infrastructure/logger.js';
 import {
   coordinationActiveDispatchCount,
   coordinationTerminalAckSuppressedCount,
   coordinationTerminalDispatchCount,
-  externalCaseVerdictReadyWithoutDelivery,
   protocolActionWithoutCustodyTotal,
   successorActionFenceUnavailable,
   successorAgentKeyActionRejected,
 } from '../infrastructure/telemetry/instruments.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { scoreKeywordRelevance, tokenizeKeyword } from '../utils/keyword-relevance.js';
+import { buildThreadDeepLink } from '../utils/thread-deep-link.js';
 import { getDefaultUploadDir } from '../utils/upload-paths.js';
 import { recordAnchorDrillEvent, recordAnchorPreviewEvent } from './anchor-event-log.js';
 import { recordAnchorFullDrill, recordAnchorReturned } from './anchor-telemetry.js';
@@ -212,29 +193,25 @@ import { CallbackAuthSystemMessageNotifier } from './callback-auth-system-messag
 import { recordCallbackAuthFailure } from './callback-auth-telemetry.js';
 import { registerCallbackBootcampRoutes } from './callback-bootcamp-routes.js';
 import { type NamedCatContentHolder, registerCallbackContentEditorRoutes } from './callback-content-editor-routes.js';
+import { registerCallbackContinueApprovedTaskRoutes } from './callback-continue-approved-task-routes.js';
 import { registerCallbackDeferPersonMemoryRoutes } from './callback-defer-person-memory-routes.js';
 import {
   type DeploymentObservationProvider,
   registerCallbackDeploymentWaitRoutes,
 } from './callback-deployment-wait-routes.js';
 import { registerCallbackDocumentRoutes } from './callback-document-routes.js';
-import { registerCallbackExternalReviewRecoveryRoutes } from './callback-external-review-recovery-route.js';
-import { registerCallbackExternalReviewTransferRoute } from './callback-external-review-transfer-route.js';
-import { registerCallbackGameRoutes } from './callback-game-routes.js';
-import { resolveGitHubValidation } from './callback-github-validation.js';
 import { registerCallbackGuideRoutes } from './callback-guide-routes.js';
 import { type HoldBallRouteDeps, registerCallbackHoldBallRoutes } from './callback-hold-ball-routes.js';
 import { registerCallbackImageRoutes } from './callback-image-routes.js';
-import { registerCallbackLarkActionRoutes } from './callback-lark-action-routes.js';
 import { registerCallbackLimbRoutes } from './callback-limb-routes.js';
-import {
-  type MeetingArtifactReaderHolder,
-  registerCallbackMeetingArtifactRoutes,
-} from './callback-meeting-artifact-routes.js';
 import { type CallbackMemoryCueDeps, registerCallbackMemoryCueRoutes } from './callback-memory-cue-routes.js';
 import { registerCallbackMemoryRoutes } from './callback-memory-routes.js';
 import { projectCallbackMessageBody, projectQueuedCallbackMessageBody } from './callback-message-body.js';
 import { registerCallbackMessageReadRoutes } from './callback-message-read-routes.js';
+import {
+  prepareCallbackSearchAnswer,
+  publishCallbackSearchAnswer,
+} from './callback-message-search-answer-publication.js';
 import { getMultiMentionOrchestrator, registerMultiMentionRoutes } from './callback-multi-mention-routes.js';
 import { registerNativeTurnAdmissionRoute } from './callback-native-turn-admission.js';
 import {
@@ -247,6 +224,7 @@ import { registerCallbackProposePersonMemoryRoutes } from './callback-propose-pe
 import { registerCallbackProposeProfileUpdateRoutes } from './callback-propose-profile-update-routes.js';
 import { registerCallbackProposeSessionHandoffRoutes } from './callback-propose-session-handoff-routes.js';
 import { registerCallbackProposeThreadRoutes } from './callback-propose-thread-routes.js';
+import { coverPublishedMessageReads } from './callback-published-wake-coverage.js';
 import { registerCallbackQuestRoutes } from './callback-quest-routes.js';
 import { registerCallbackReadProfileRoutes } from './callback-read-profile-routes.js';
 import { registerCallbackRecordProactiveMemoryAbstentionRoutes } from './callback-record-proactive-memory-abstention-routes.js';
@@ -267,18 +245,15 @@ import {
   type CallbackSkillConsumptionDeps,
   registerCallbackSkillConsumptionRoutes,
 } from './callback-skill-consumption-routes.js';
+import { prepareCallbackTaskHandoff } from './callback-task-handoff.js';
 import { registerCallbackTaskRoutes } from './callback-task-routes.js';
 import { registerCallbackThreadCatsRoutes } from './callback-thread-cats-routes.js';
-import { captureTypedWaitSource } from './callback-typed-wait-source.js';
-import { registerCallbackWeComActionRoutes } from './callback-wecom-action-routes.js';
 import { registerCallbackWithdrawThreadProposalRoutes } from './callback-withdraw-thread-proposal-routes.js';
 import { registerCallbackWorkflowSopRoutes } from './callback-workflow-sop-routes.js';
 import { registerCompanionWorkReadRoutes } from './companion-work-read.js';
 import { resolveCrossThreadCoordination } from './cross-thread-coordination.js';
 import { type FeatIndexEntry, readFeatIndexEntries } from './feat-index-doc-import.js';
 import { buildThreadIdsByFeatId, normalizeFeatId } from './feature-thread-resolver.js';
-import { verifyKeeperOwnership } from './gate-keeping-cross-store.js';
-import { checkGateKeepingGuard } from './gate-keeping-guard.js';
 import { guardLiveCarrierRead } from './live-carrier-read-guard.js';
 import {
   decodeThreadContextCursor,
@@ -289,6 +264,7 @@ import {
   type ThreadContextSelection,
 } from './thread-context-envelope.js';
 import { type KeywordScanTiming, scanRankedThreadContext } from './thread-context-keyword-scan.js';
+import { prepareRoadmapMutation } from './thread-roadmap-binding.js';
 import { detectUserMention } from './user-mention.js';
 import { clearVoteTimer, closeVoteInternal, voteTimers } from './votes.js';
 import { publishDispatchProposal } from './wave2-proposal-publication.js';
@@ -660,12 +636,6 @@ function hasAnyLocalReviewAnchor(input: LocalReviewAnchorInput): boolean {
   return Boolean(input.reviewSubjectRef || input.acceptedSourceRef || input.acceptedRevision);
 }
 
-/** Message identity is scoped by the authenticated sender; text never identifies a retry. */
-function buildCallbackMessageIdempotencyKey(catId: string, clientMessageId: string): string {
-  const digest = createHash('sha256').update(clientMessageId).digest('hex');
-  return `callback:post:${catId}:${digest}`;
-}
-
 function buildLocalReviewFactMessageIdempotencyKey(catId: string, clientMessageId: string): string {
   const digest = createHash('sha256').update(clientMessageId).digest('hex');
   return `callback:local-review:${catId}:${digest}`;
@@ -847,11 +817,14 @@ async function ensureDuplicateCallbackWake(input: {
 }
 
 export interface CallbackRoutesOptions {
+  proposalProjectRoot?: string;
+  resolveTrustedImagePath?: (hmrId: string) => Promise<string | undefined>;
   liveTaskAuthority?: import('./live-task-authority.js').LiveTaskAuthority;
   /** F293: applied scarcity policy; defaults to the active project dossier. */
   getEngagementPolicy?: EngagementPolicyReader;
   /** Host-selected single project for the Live companion; never a model selector. */
   companionProjectPath?: string;
+  companionCollectiveAccountability?: import('./companion-collective-accountability-source.js').CollectiveAccountabilitySource;
   companionRuntimeInteractionStore?: import('../domains/runtime-interaction/ports/RuntimeInteractionStore.js').RuntimeInteractionPendingReadSource;
   runtimeInteractionService?: import('../domains/runtime-interaction/RuntimeInteractionService.js').RuntimeInteractionService;
   withLiveCarrierOperation?: <T>(
@@ -909,6 +882,7 @@ export interface CallbackRoutesOptions {
     threadId: string,
   ) => Promise<{ memberCardCount: number }> | { memberCardCount: number };
   taskStore?: ITaskStore;
+  ownedWaitStatusReader?: import('../domains/ball-custody/OwnedWaitStatus.js').OwnedWaitStatusReader;
   backlogStore?: IBacklogStore;
   /** For thinking mode filtering in thread-context + thread-cats discovery */
   threadStore?: IThreadStore;
@@ -934,8 +908,6 @@ export interface CallbackRoutesOptions {
   proactiveCandidateRegistryResolver?: import('../domains/memory/ProactiveCandidateRegistryResolver.js').ProactiveCandidateRegistryResolver;
   /** F276 KD-12: read-only workspace person identity root resolver. */
   workspacePersonResolver?: import('../domains/memory/people/WorkspacePersonResolver.js').WorkspacePersonResolver;
-  /** F292: late-bound, source-authoritative, version-fenced meeting artifact reader. */
-  meetingArtifactReaderHolder?: MeetingArtifactReaderHolder;
   /** F202: late-bound named-cat content editor shared with the human surface. */
   namedCatContentHolder?: NamedCatContentHolder;
   /** F287 Phase C: owner-scoped opaque cue drill and content-free outcome callbacks. */
@@ -947,11 +919,18 @@ export interface CallbackRoutesOptions {
   /** F246 Phase I: canonical runtime ingress for all approval producers. */
   approvalIngress?: ApprovalIngress;
   /** F231 KD-19: canonical user/persona profile repository. */
+  profileReadEvidenceDb?: import('better-sqlite3').Database;
   profileRepository?: import('../domains/cats/services/profile/ProfileRepository.js').FileProfileRepository;
   /** F155 B-4: Independent guide session store */
   guideSessionStore?: import('../domains/guides/GuideSessionRepository.js').IGuideSessionStore;
   /** AgentRegistry for thread-cats MCP callback */
   agentRegistry?: { getAllEntries(): Map<string, unknown> };
+  /** Read-only F293 annotation; Queue preserves all accepted target rows. */
+  routingDispatchPreflight?: import('../domains/routing-context/RoutingDispatchPreflightPort.js').RoutingDispatchPreflightPort;
+  routingSelection?: Pick<
+    import('../domains/routing-context/selection/RoutingSelectionService.js').RoutingSelectionService,
+    'read'
+  >;
   /** For post_message @mention → invocation triggering */
   router?: AgentRouter;
   invocationRecordStore?: IInvocationRecordStore;
@@ -960,45 +939,6 @@ export interface CallbackRoutesOptions {
   invocationTracker?: InvocationTracker;
   /** For mention ack cursor tracking (#77) */
   deliveryCursorStore?: DeliveryCursorStore;
-  /** Phase D: validates GitHub repo exists before PR tracking registration */
-  validateRepo?: (repoFullName: string) => Promise<boolean>;
-  /** F202 Phase 2 follow-up: validates specific PR exists (number-level validation) */
-  validatePr?: (repoFullName: string, prNumber: number) => Promise<boolean>;
-  /** F202 Phase 2 follow-up: validates specific issue exists (number-level validation) */
-  validateIssue?: (repoFullName: string, issueNumber: number) => Promise<boolean>;
-  /**
-   * #1392 AC-7: authoritative GitHub identity for a tracking subject, resolved server-side.
-   *
-   * The normal entry no longer asks the caller who they are waiting on, so the server has to know
-   * who *we* are and who opened the subject before it can arm an audience. Every field is optional
-   * because an unresolved one is a state the owner is told about, never an error that closes
-   * tracking (#1392 AC-7).
-   */
-  resolveGitHubPrTrackingIdentity?: (repoFullName: string, prNumber: number) => Promise<GitHubTrackingIdentityV1>;
-  /** #1392 AC-7: the authenticated GitHub login every cat posts as; `undefined` when unresolvable. */
-  resolveGitHubSelfLogin?: () => Promise<string | undefined>;
-  /** F280: server-owned baseline and collector frontier for a typed PR wait. */
-  fetchPrWaitBaseline?: (
-    repoFullName: string,
-    prNumber: number,
-    when: readonly GitHubPrWaitPredicate[],
-  ) => Promise<InitialPrWaitSnapshot>;
-  /** F177 Phase J: server-side proof that the cloud review callback owns the current wait. */
-  verifyPrReviewEventWaitCoverage?: (input: {
-    repoFullName: string;
-    prNumber: number;
-    triggerCommentId: number;
-  }) => Promise<
-    | { covered: true; triggerCommentId: number; observedAt: number }
-    | {
-        covered: false;
-        reason: 'subject_mismatch' | 'not_review_trigger' | 'review_not_accepted' | 'feedback_already_posted';
-        triggerCommentId: number;
-        observedAt: number;
-      }
-  >;
-  /** Late-bound so callback registration and boot migration share the lifecycle owner. */
-  waitLifecycleHolder?: { current?: Pick<GitHubWaitLifecycleService, 'recordOutcomeEvent'> };
   /** F323: server-owned deployment evidence and late-bound one-shot delivery lifecycle. */
   deploymentObservationProvider?: DeploymentObservationProvider;
   deploymentWaitLifecycleHolder?: {
@@ -1007,15 +947,6 @@ export interface CallbackRoutesOptions {
       'observe' | 'releaseCurrentExecutionClaim'
     >;
   };
-  /** F168 F-Step3: invocation-bound atomic verdict + delivery-custody recorder. */
-  externalReviewVerdictService?: Pick<ExternalReviewVerdictService, 'record'>;
-  externalReviewTransferService?: import('../domains/community/external-review/ExternalReviewTransferService.js').ExternalReviewTransferService;
-  /** F167: settle stale external-review lease when GitHub HEAD has advanced. */
-  externalReviewRecoveryService?: import('../domains/ball-custody/ExternalReviewRecoveryService.js').ExternalReviewRecoveryService;
-  /** F202-2D: seeds issue tracking from the current highest issue comment ID. */
-  fetchIssueCommentCursor?: (repoFullName: string, issueNumber: number) => Promise<number>;
-  /** F280 Phase C: server-owned issue baseline; author/cursor never come from the caller. */
-  fetchIssueWaitBaseline?: (repoFullName: string, issueNumber: number) => Promise<InitialIssueWaitSnapshot>;
   /** F043 P1: feat_index provider override for tests */
   featIndexProvider?: () => Promise<FeatIndexEntry[]>;
   /** F073 P1: workflow SOP store for bulletin board */
@@ -1024,6 +955,10 @@ export interface CallbackRoutesOptions {
   indexBuilder?: { markThreadDirty(threadId: string): void; flushDirtyThreads?(): number | Promise<number> };
   /** F102: DI memory services — SQLite-backed evidence store */
   evidenceStore: IEvidenceStore;
+  /** Optional shared publisher; caller authentication remains in callback routes. */
+  messageSearchService?: import('../domains/memory/MessageSearchService.js').MessageSearchService;
+  matterMemoryService?: import('../domains/memory/matters/MatterMemoryService.js').MatterMemoryService;
+  messageSearchAnswerService?: import('../domains/memory/MessageSearchAnswerPublicationService.js').MessageSearchAnswerPublicationService;
   markerQueue: IMarkerQueue;
   reflectionService: IReflectionService;
   /** F254 Phase B: Raw Redis client for freshness notice event log + state store */
@@ -1070,6 +1005,9 @@ export interface CallbackRoutesOptions {
   invocationQueue?: import('../domains/cats/services/agents/invocation/InvocationQueue.js').InvocationQueue;
   /** F167 Phase S: durable subject/action/slot admission for A2A successor dispatch. */
   actionSuccessorAdmissionService?: import('../domains/ball-custody/ActionSuccessorAdmissionService.js').ActionSuccessorAdmissionService;
+  ordinaryTaskHandoffs?: import('../domains/ball-custody/OrdinaryTaskHandoffService.js').OrdinaryTaskHandoffService;
+  /** Exact Task/Message/Queue recovery for pre-atomic direct carriers with no execution. */
+  taskActionSuccessorOrphanRecovery?: import('../domains/ball-custody/TaskActionSuccessorOrphanRecovery.js').TaskActionSuccessorOrphanRecovery;
   /**
    * F167 carrier refresh: the same lease store the admission service commits through. Without it a
    * handled carrier keeps its old answer (no new execution) instead of being refreshed, and an explicit
@@ -1104,6 +1042,7 @@ export interface CallbackRoutesOptions {
 }
 
 const postMessageSchema = z.object({
+  searchAnswer: messageSearchAnswerAttachmentSchema.optional(),
   content: z.string().min(1).max(50000),
   contextAttachments: VersionBoundContextAttachmentsSchema.optional(),
   threadId: z.string().min(1).optional(),
@@ -1164,6 +1103,8 @@ const listThreadsQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).optional(),
   activeSince: z.coerce.number().int().min(0).optional(),
   keyword: z.string().trim().min(1).max(200).optional(),
+  includeWork: z.enum(['true', 'false']).optional(),
+  cursor: z.string().min(1).max(2000).optional(),
 });
 
 const listLabelsQuerySchema = z.object({
@@ -1174,6 +1115,7 @@ const refItemSchema = z.object({ repo: z.string().min(1).max(200), number: z.num
 const SET_THREAD_METADATA_EMPTY_UPDATE_MESSAGE = 'At least one thread metadata update field is required';
 const setThreadMetadataSchema = z
   .object({
+    roadmap: roadmapInputSchema.optional(),
     // P2: match PATCH /api/threads/:id invariants — trim + min(1) + max
     title: z.string().trim().min(1).max(200).optional(),
     labels: z.array(z.string().trim().min(1).max(50)).max(20).optional(),
@@ -1211,113 +1153,11 @@ const ackMentionsSchema = z.object({
   upToMessageId: z.string().min(1),
 });
 
-/** F22: Rich block creation schema — validates shape + kind-specific fields (cloud Codex P1) */
-const richChecklistItemSchema = z.object({ id: z.string(), text: z.string(), checked: z.boolean().optional() });
-const richMediaItemSchema = z.object({ url: z.string(), alt: z.string().optional(), caption: z.string().optional() });
+/** Shared F22 language; private work-reference metadata keeps its original authority guard. */
+const [sharedRichCardSchema, ...sharedRichOtherSchemas] = sharedRichBlockSchema.options;
 const richBlockSchema = z.discriminatedUnion('kind', [
-  z.object({
-    id: z.string().min(1),
-    kind: z.literal('card'),
-    v: z.literal(1),
-    title: z.string(),
-    bodyMarkdown: z.string().optional(),
-    tone: z.enum(['info', 'success', 'warning', 'danger']).optional(),
-    fields: z.array(z.object({ label: z.string(), value: z.string() })).optional(),
-  }),
-  z.object({
-    id: z.string().min(1),
-    kind: z.literal('diff'),
-    v: z.literal(1),
-    filePath: z.string(),
-    diff: z.string(),
-    languageHint: z.string().optional(),
-  }),
-  z.object({
-    id: z.string().min(1),
-    kind: z.literal('checklist'),
-    v: z.literal(1),
-    title: z.string().optional(),
-    items: z.array(richChecklistItemSchema).min(1),
-  }),
-  z.object({
-    id: z.string().min(1),
-    kind: z.literal('media_gallery'),
-    v: z.literal(1),
-    title: z.string().optional(),
-    items: z.array(richMediaItemSchema).min(1),
-  }),
-  z.object({
-    id: z.string().min(1),
-    kind: z.literal('audio'),
-    v: z.literal(1),
-    url: z.string().optional().default(''),
-    text: z.string().optional(),
-    title: z.string().optional(),
-    durationSec: z.number().optional(),
-    mimeType: z.string().optional(),
-  }),
-  z.object({
-    id: z.string().min(1),
-    kind: z.literal('interactive'),
-    v: z.literal(1),
-    interactiveType: z.enum(['select', 'multi-select', 'card-grid', 'confirm']),
-    title: z.string().optional(),
-    description: z.string().optional(),
-    options: z
-      .array(
-        z.object({
-          id: z.string().min(1),
-          label: z.string().min(1),
-          emoji: z.string().optional(),
-          icon: z.string().optional(),
-          description: z.string().optional(),
-          level: z.number().optional(),
-          group: z.string().optional(),
-          customInput: z.boolean().optional(),
-          customInputPlaceholder: z.string().optional(),
-          action: z
-            .object({
-              type: z.literal('callback'),
-              endpoint: z.string().min(1),
-              payload: z.record(z.unknown()).optional(),
-            })
-            .optional(),
-        }),
-      )
-      .min(1),
-    maxSelect: z.number().int().min(1).optional(),
-    allowRandom: z.boolean().optional(),
-    messageTemplate: z.string().optional(),
-    disabled: z.boolean().optional(),
-    selectedIds: z.array(z.string()).optional(),
-    autoGroup: z.boolean().optional(),
-    groupId: z.string().min(1).optional(),
-  }),
-  // F088 Phase J: file attachment block
-  z.object({
-    id: z.string().min(1),
-    kind: z.literal('file'),
-    v: z.literal(1),
-    url: z
-      .string()
-      .min(1)
-      .refine(
-        (u) => !u.includes('..') && (/^\/uploads\//.test(u) || /^\/api\//.test(u) || /^https:\/\//.test(u)),
-        'file url must start with /uploads/, /api/, or https://',
-      ),
-    fileName: z.string().min(1),
-    mimeType: z.string().optional(),
-    fileSize: z.number().int().min(0).optional(),
-  }),
-  // F120 Phase C: html_widget — inline sandboxed HTML/JS visualization
-  z.object({
-    id: z.string().min(1),
-    kind: z.literal('html_widget'),
-    v: z.literal(1),
-    html: z.string().min(1).max(500_000),
-    title: z.string().optional(),
-    height: z.number().int().min(50).max(2000).optional(),
-  }),
+  sharedRichCardSchema.extend({ meta: workReferenceCardSchema.shape.meta.optional() }),
+  ...sharedRichOtherSchemas,
 ]);
 const createRichBlockSchema = z.object({
   block: richBlockSchema,
@@ -1342,47 +1182,6 @@ function conversationDecisionInteractionId(invocationId: string, blockId: string
   return `conversation:${digest}`;
 }
 
-function canUnregisterTrackingTask(
-  task: { readonly userId?: string; readonly threadId: string },
-  record: { readonly userId?: string; readonly threadId?: string },
-): boolean {
-  if (task.userId) {
-    return Boolean(record.userId && task.userId === record.userId);
-  }
-  return Boolean(record.threadId && task.threadId === record.threadId);
-}
-
-const externalReviewVerdictSchema = z
-  .object({
-    repoFullName: z
-      .string()
-      .min(1)
-      .regex(/^[^/]+\/[^/]+$/, 'Must be owner/repo format'),
-    prNumber: z.number().int().positive(),
-    reviewedHeadSha: z.string().min(7).max(64),
-    verdict: z.enum(['approved', 'changes_requested', 'commented']),
-    summary: z.string().trim().min(1).max(4000),
-    userNudgeRequired: z.boolean().optional(),
-    delivery: z.discriminatedUnion('kind', [
-      z.object({ kind: z.literal('delivered'), githubUrl: z.string().url() }).strict(),
-      z.object({ kind: z.literal('pending_delivery'), reason: z.string().trim().min(1).max(2000) }).strict(),
-    ]),
-    actionLeaseRef: z
-      .object({ leaseId: z.string().min(1), generation: z.number().int().positive() })
-      .strict()
-      .optional(),
-  })
-  .strict();
-
-function externalReviewVerdictErrorStatus(code: ExternalReviewVerdictError['code']): number {
-  if (code === 'observe_only' || code === 'wrong_principal') return 403;
-  if (code === 'invalid_delivery_proof' || code === 'invalid_pending_reason') return 422;
-  if (code === 'projection_unavailable' || code === 'action_lease_preflight_unavailable' || code === 'not_configured') {
-    return 503;
-  }
-  return 409;
-}
-
 /**
  * Derive an ApprovalOriginRef from a callback invocation record.
  * Prefers the verified message trigger; falls back to a stable event anchor.
@@ -1403,45 +1202,6 @@ function deriveCallbackOriginRef(
   };
 }
 
-/**
- * #1392 AC-7: identity lookup never decides whether tracking exists.
- *
- * A missing resolver or a GitHub call that throws both come back as "nothing known", which the
- * perspective turns into the unresolved arm: the registration still installs, both comment surfaces
- * are still armed, and every comment is delivered flagged. Turning this into a non-2xx was the
- * earlier plan and was explicitly corrected — an error left in a return value is a silence to the
- * one party structurally unable to notice it (#1392 AC-7, issue comment 5747771227).
- */
-async function resolvePrTrackingIdentity(
-  resolve: ((repoFullName: string, prNumber: number) => Promise<GitHubTrackingIdentityV1>) | undefined,
-  repoFullName: string,
-  prNumber: number,
-  log: FastifyBaseLogger,
-): Promise<GitHubTrackingIdentityV1> {
-  if (!resolve) return {};
-  try {
-    return await resolve(repoFullName, prNumber);
-  } catch (err) {
-    log.warn({ err, repoFullName, prNumber }, '#1392 AC-7: PR tracking identity unresolved; arming the flagged path');
-    return {};
-  }
-}
-
-/** #1392 AC-7: the issue default needs only our own login, and the same failure shape applies. */
-async function resolveTrackingSelfLogin(
-  resolve: (() => Promise<string | undefined>) | undefined,
-  log: FastifyBaseLogger,
-): Promise<GitHubTrackingIdentityV1> {
-  if (!resolve) return {};
-  try {
-    const selfLogin = await resolve();
-    return selfLogin ? { selfLogin } : {};
-  } catch (err) {
-    log.warn({ err }, '#1392 AC-7: GitHub self login unresolved; arming the flagged path');
-    return {};
-  }
-}
-
 export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async (app, opts) => {
   const engagementPolicyReader = opts.getEngagementPolicy ?? readEngagementPolicy;
   const {
@@ -1457,13 +1217,6 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     invocationRecordStore,
     invocationTracker,
     deliveryCursorStore,
-    validateRepo,
-    validatePr,
-    validateIssue,
-    fetchPrWaitBaseline,
-    fetchIssueWaitBaseline,
-    resolveGitHubPrTrackingIdentity,
-    resolveGitHubSelfLogin,
     featIndexProvider,
     queueProcessor,
   } = opts;
@@ -1479,6 +1232,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       opts.companionProjectPath,
       opts.companionRuntimeInteractionStore,
       messageStore,
+      opts.companionCollectiveAccountability,
     );
   }
   if (taskStore && opts.deploymentObservationProvider && opts.deploymentWaitLifecycleHolder) {
@@ -1488,16 +1242,12 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       registry,
       observationProvider: opts.deploymentObservationProvider,
       lifecycleHolder: opts.deploymentWaitLifecycleHolder,
+      ...(opts.handoffProposalStore ? { handoffProposalStore: opts.handoffProposalStore } : {}),
+      ...(opts.sessionChainStore ? { sessionChainStore: opts.sessionChainStore } : {}),
       ...(opts.invocationTracker ? { invocationTracker: opts.invocationTracker } : {}),
     });
   }
   registerNativeTurnAdmissionRoute(app);
-  if (opts.meetingArtifactReaderHolder) {
-    registerCallbackMeetingArtifactRoutes(app, {
-      readerHolder: opts.meetingArtifactReaderHolder,
-      ...(threadStore ? { threadStore } : {}),
-    });
-  }
   if (opts.namedCatContentHolder) {
     registerCallbackContentEditorRoutes(app, {
       holder: opts.namedCatContentHolder,
@@ -1521,11 +1271,12 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     if (!principal) return;
     if (
       principal.kind !== 'agent_key' ||
-      principal.catId !== createCatId('gpt-pro') ||
+      !principal.cloudBoundary ||
+      cloudPrincipalStanding(catRegistry, principal) !== 'cloud' ||
       principal.userId !== getOwnerUserId()
     ) {
       reply.status(403);
-      return { ok: false, reason: 'gpt_pro_principal_required' };
+      return { ok: false, reason: 'cloud_principal_required' };
     }
     return { ok: true };
   });
@@ -1644,7 +1395,11 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       // F247 source-bound returns remain exact and fail closed, but the normal
       // path keeps the authorization in server custody. A legacy binding is
       // accepted only for rolling compatibility with already-open conversations.
-      const isGptPro = principal.catId === createCatId('gpt-pro');
+      if (cloudPrincipalStanding(catRegistry, principal) !== (principal.cloudBoundary ? 'cloud' : 'ordinary')) {
+        recordCallbackAuthFailure({ reason: 'cloud_principal_not_configured', tool: 'post-message' });
+        return reply.code(403).send(makeCallbackAuthError('cloud_principal_not_configured'));
+      }
+      const isGptPro = principal.cloudBoundary;
       const isDot = principal.catId === createCatId('gpt-dot');
       let dotDispatchInvocationId: string | undefined;
       let dotAskAdmission: DotAskAdmission | undefined;
@@ -1682,6 +1437,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       }
       const isCloudReturnAttempt = (isDot && !dotAskAdmission) || (isGptPro && Boolean(replyTo || cloudReturnBinding));
       const usesServerGrant = (isDot || isGptPro) && Boolean(replyTo) && !cloudReturnBinding;
+      let verifiedLegacyReturn: import('@cat-cafe/shared').CloudBridgeReturnV1 | undefined;
       if (isGptPro && cloudReturnBinding) {
         if (!replyTo) {
           reply.status(400);
@@ -1711,6 +1467,13 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
             message: 'Cloud return binding does not authorize this source, thread, user, or cloud cat.',
           };
         }
+        verifiedLegacyReturn = cloudReturnProof({
+          threadId: effectiveThreadId,
+          userId: principal.userId,
+          sourceMessageId: replyTo,
+          targetCatId: String(principal.catId),
+          dispatchInvocationId: bindingVerdict.dispatchInvocationId,
+        });
       }
 
       const { cleanText: storedContent, blocks: extractedBlocks } = extractRichFromText(content);
@@ -1788,6 +1551,26 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         return mediaResolution;
       }
       let richBlocks = mediaResolution.blocks;
+      const preparedAnswer = await prepareCallbackSearchAnswer(
+        opts.messageSearchAnswerService,
+        parsed.data.searchAnswer,
+        principal,
+        effectiveThreadId,
+        clientMessageId,
+        durableMediaDuplicate?.id ??
+          (clientMessageId
+            ? (
+                await messageStore.getByIdempotencyKey(
+                  principal.userId,
+                  effectiveThreadId,
+                  buildCallbackPostMessageIdempotencyKey(principal.catId, clientMessageId),
+                )
+              )?.id
+            : undefined),
+      );
+      if (!preparedAnswer.ok) return reply.status(preparedAnswer.status).send({ error: preparedAnswer.error });
+      if (preparedAnswer.block && !richBlocks.some((block) => block.id === preparedAnswer.block?.id))
+        richBlocks.push(preparedAnswer.block);
       const synthesizer = getVoiceBlockSynthesizer();
       if (!durableMediaDuplicate && synthesizer && richBlocks.some((b) => b.kind === 'audio' && 'text' in b)) {
         try {
@@ -1990,7 +1773,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         dotAskAdmission?.idempotencyKey ??
         notificationMessageIdempotencyKey ??
         (clientMessageId && !usesServerGrant && !localReviewVerdict
-          ? buildCallbackMessageIdempotencyKey(principal.catId, clientMessageId)
+          ? buildCallbackPostMessageIdempotencyKey(principal.catId, clientMessageId)
           : undefined);
       const durableCallbackDuplicate = callbackMessageIdempotencyKey
         ? await messageStore.getByIdempotencyKey(
@@ -2005,6 +1788,12 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         durableLocalReviewDuplicate ??
         durableCallbackDuplicate;
       const recoverPersistedCallbackMessage = async (persisted: StoredMessage) => {
+        persisted = await publishCallbackSearchAnswer(
+          opts.messageSearchAnswerService,
+          parsed.data.searchAnswer,
+          principal,
+          persisted,
+        );
         const persistedMentions = persisted.mentions.filter(
           (catId) => !persisted.extra?.notificationDelivery?.withoutWakeCatIds.includes(catId),
         );
@@ -2032,6 +1821,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           enqueueA2A: () =>
             enqueueA2ATargets(
               {
+                ...(opts.routingDispatchPreflight ? { routingDispatchPreflight: opts.routingDispatchPreflight } : {}),
                 socketManager,
                 messageStore,
                 ...(invocationTracker ? { invocationTracker } : {}),
@@ -2115,6 +1905,11 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         );
       }
 
+      const admittedCloudReturn = !isDot
+        ? cloudReturnGrantClaim
+          ? cloudReturnProof(cloudReturnGrantClaim)
+          : verifiedLegacyReturn
+        : undefined;
       const appendInput: AppendMessageInput = {
         from: { kind: 'agent', catId: principal.catId },
         threadId: effectiveThreadId,
@@ -2125,7 +1920,9 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         ...(mentionsUser ? { mentionsUser } : {}),
         origin: 'callback',
         timestamp: now,
-        ...(extra ? { extra } : {}),
+        ...(extra || admittedCloudReturn
+          ? { extra: { ...extra, ...(admittedCloudReturn ? { cloudBridgeReturn: admittedCloudReturn } : {}) } }
+          : {}),
         ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
         ...(cloudReturnMessageIdempotencyKey || localReviewFactMessageIdempotencyKey || callbackMessageIdempotencyKey
           ? {
@@ -2183,7 +1980,13 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         }
         throw error;
       }
-      const storedMsg = atomicAdmission.message;
+      let storedMsg = atomicAdmission.message;
+      storedMsg = await publishCallbackSearchAnswer(
+        opts.messageSearchAnswerService,
+        parsed.data.searchAnswer,
+        principal,
+        storedMsg,
+      );
       if (!dotAskMatches(storedMsg)) return reply.code(409).send({ kind: 'dot_ask_idempotency_conflict' });
       if (persistedReplay || atomicAdmission.preAdmittedReplayed) {
         return recoverPersistedCallbackMessage(storedMsg);
@@ -2215,6 +2018,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         enqueueA2A: () =>
           enqueueA2ATargets(
             {
+              ...(opts.routingDispatchPreflight ? { routingDispatchPreflight: opts.routingDispatchPreflight } : {}),
               socketManager,
               messageStore,
               ...(invocationTracker ? { invocationTracker } : {}),
@@ -2267,6 +2071,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           // #814: Always include isExplicitPost in broadcast so frontend TD112 dedup skips merge
           extra: {
             isExplicitPost: true,
+            ...(storedMsg.extra?.cloudBridgeReturn ? { cloudBridgeReturn: storedMsg.extra.cloudBridgeReturn } : {}),
             ...(validExplicitTargets.length ? { targetCats: validExplicitTargets } : {}),
           },
           ...(mentionsUser ? { mentionsUser } : {}),
@@ -2340,6 +2145,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         threadId: effectiveThreadId,
         messageId: storedMsg.id,
         routed: routingOutcome.routed,
+        ...(deliveryDecision.routingAdmission ? { routing_admission: deliveryDecision.routingAdmission } : {}),
         ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
         ...(clientMessageId ? { clientMessageId } : {}),
         ...(routing_warnings.length > 0 ? { routing_warnings } : {}),
@@ -2377,9 +2183,10 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       reviewSubjectRef,
       acceptedSourceRef,
       acceptedRevision,
-      action,
+      action: requestedAction,
       proposedAction,
     } = parsed.data;
+    let action = requestedAction;
     const contentBlocks: MessageContent[] | undefined = contextAttachments?.map((attachment) => ({
       type: 'context_attachment',
       attachment,
@@ -2517,6 +2324,31 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // handles still fall through to the existing routing_warnings /
     // allExplicitFailed path (Codex P2 round 1 close).
     const isCrossThread = effectiveThreadId !== actor.threadId;
+    let taskHandoff:
+      | import('../domains/ball-custody/OrdinaryTaskHandoffContract.js').OrdinaryTaskHandoffRequest
+      | undefined;
+    try {
+      if (action && proposedAction) throw new OrdinaryTaskHandoffError('ambiguous_task_action');
+      taskHandoff = await prepareCallbackTaskHandoff({
+        action: action ?? (effectClass === 'assign_work' ? proposedAction : undefined),
+        tasks: taskStore,
+        service: opts.ordinaryTaskHandoffs,
+        messages: messageStore,
+        actor,
+        targets: explicitTargetCats ?? [],
+        targetThreadId: effectiveThreadId,
+        actorCreatedAt: record.createdAt,
+        idempotencyKey: clientMessageId
+          ? buildCallbackPostMessageIdempotencyKey(actor.catId, clientMessageId)
+          : undefined,
+      });
+      if (taskHandoff && !action) action = proposedAction;
+    } catch (error) {
+      if (!(error instanceof OrdinaryTaskHandoffError)) throw error;
+      return reply
+        .code(error.code === 'task_handoff_unavailable' ? 503 : 409)
+        .send({ status: 'task_handoff_refused', reason: error.code });
+    }
     if (isCrossThread) {
       const hasRawLineStartMention = hasPlausibleLineStartMention(content);
       const hasRawTargetCats = (explicitTargetCats?.length ?? 0) > 0;
@@ -2535,7 +2367,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
 
     // F246 Phase B: assign_work on same-thread is invalid — assign_work only makes
     // sense for cross-thread dispatch (per plan Task 3 test matrix).
-    if (!isCrossThread && effectClass === 'assign_work') {
+    if (!isCrossThread && effectClass === 'assign_work' && !taskHandoff) {
       reply.status(400);
       return {
         kind: 'assign_work_same_thread',
@@ -2549,7 +2381,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         message: 'post_message carries one same-thread successor; use multi_mention for deliberate parallel fan-out.',
       };
     }
-    if (action && effectClass === 'assign_work') {
+    if (action && effectClass === 'assign_work' && !taskHandoff) {
       reply.status(400);
       return {
         kind: 'action_with_assign_work',
@@ -2684,7 +2516,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         message: 'parallel rejected-ownership disposition requires exactly one predecessor target cat.',
       };
     }
-    if (isCrossThread && effectClass === 'assign_work' && explicitCoordination) {
+    if (isCrossThread && effectClass === 'assign_work' && explicitCoordination && !taskHandoff) {
       reply.status(400);
       return {
         kind: 'coordination_with_assign_work',
@@ -2694,7 +2526,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
 
     // F246 Phase B: assign_work effect-class intercept — hold as DispatchProposal
     // instead of auto-delivering. Only applies to cross-thread posts.
-    if (isCrossThread && effectClass === 'assign_work' && opts.dispatchProposalStore) {
+    if (isCrossThread && effectClass === 'assign_work' && opts.dispatchProposalStore && !taskHandoff) {
       if (!opts.approvalIngress) {
         throw new Error('[F246] approvalIngress is required for dispatch proposal creation');
       }
@@ -2917,13 +2749,13 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           senderCatId: actor.catId,
           effectClass,
         },
-        '[F246/dispatch-proposal] assign_work intercepted — held for operator approval',
+        `[F246/dispatch-proposal] assign_work intercepted — held for ${getCoCreatorDisplay().role} approval`,
       );
 
       return {
         status: 'proposal_created',
         proposalId: proposal.proposalId,
-        message: 'Work assignment held for operator approval in the Approval Hub.',
+        message: `Work assignment held for ${getCoCreatorDisplay().role} approval in the Approval Hub.`,
         ...(clientMessageId ? { clientMessageId } : {}),
       };
     }
@@ -2982,6 +2814,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // full-key canonical authority can deny a genuinely new claim.
     const atomicCanonicalAdmissionStore =
       action &&
+      !taskHandoff &&
       isCrossThread &&
       opts.dispatchProposalStore instanceof RedisDispatchProposalStore &&
       !isPersistedActionSuccessorTransition(action)
@@ -3001,7 +2834,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       action,
       coordinationSubjectRef: coordinationResult.coordination?.subjectRef,
       suppressRouting: coordinationResult.suppressRouting,
-      effectClass,
+      effectClass: taskHandoff ? 'coordinate' : effectClass,
       clientMessageId,
       dispatchProposalStore: opts.dispatchProposalStore,
       deferStructuredActionAdmissionToAtomicClaim: useAtomicCanonicalActionAdmission,
@@ -3022,7 +2855,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         : 'successor_dispatch'
       : undefined;
     let actionHolderCatIds: CatId[] = [];
-    if (action) {
+    if (action && !taskHandoff) {
       if (!opts.actionSuccessorAdmissionService || !opts.invocationQueue || !queueProcessor) {
         successorActionFenceUnavailable.add(1);
         protocolActionWithoutCustodyTotal.add(1);
@@ -3109,6 +2942,11 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
               invocationRecordStore,
               turnExecutionStore: opts.turnExecutionStore,
               leaseStore: opts.actionSuccessorLeaseStore,
+              ...(opts.taskActionSuccessorOrphanRecovery
+                ? { orphanRecovery: opts.taskActionSuccessorOrphanRecovery }
+                : {}),
+              ownerAuthProvenance: record.ownerAuthProvenance,
+              ...(record.parentInvocationId ? { parentInvocationId: record.parentInvocationId } : {}),
               lease: admission.lease,
               admissionInput,
               clientMessageId,
@@ -3125,6 +2963,30 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           } else {
             actionAdmissionOutcome = 'replayed';
             actionFence = buildActionSuccessorFence(admission.lease, dispatchId);
+            if (currentOrphanCarrierRecovery(admission.lease)) {
+              const resolution = await resolveSafeWaitCarrier({
+                invocationQueue: opts.invocationQueue!,
+                messageStore,
+                invocationRecordStore,
+                turnExecutionStore: opts.turnExecutionStore,
+                leaseStore: opts.actionSuccessorLeaseStore,
+                ...(opts.taskActionSuccessorOrphanRecovery
+                  ? { orphanRecovery: opts.taskActionSuccessorOrphanRecovery }
+                  : {}),
+                ownerAuthProvenance: record.ownerAuthProvenance,
+                ...(record.parentInvocationId ? { parentInvocationId: record.parentInvocationId } : {}),
+                lease: admission.lease,
+                admissionInput,
+                clientMessageId,
+              });
+              if (resolution.kind === 'respond') {
+                if (resolution.statusCode) reply.status(resolution.statusCode);
+                return resolution.body;
+              }
+              actionAdmissionOutcome = resolution.admissionOutcome;
+              actionFence = resolution.fence;
+              interruptedActionCarrierRecoveryKey = resolution.recoveryKey;
+            }
             // A retry of a carrier refresh must converge on the one replacement message, even if the
             // first attempt died between committing the generation and appending the carrier.
             if (isCarrierRefreshGeneration(admission.lease)) {
@@ -3229,6 +3091,25 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // F34-b: Resolve voice blocks (audio with text, no url) before storing
     const synthesizer = getVoiceBlockSynthesizer();
     let richBlocks = [...mediaResolution.blocks, ...bufferedBlocks];
+    const preparedAnswer = await prepareCallbackSearchAnswer(
+      opts.messageSearchAnswerService,
+      parsed.data.searchAnswer,
+      principal,
+      effectiveThreadId,
+      clientMessageId,
+      clientMessageId
+        ? (
+            await messageStore.getByIdempotencyKey(
+              actor.userId,
+              effectiveThreadId,
+              buildCallbackPostMessageIdempotencyKey(actor.catId, clientMessageId),
+            )
+          )?.id
+        : undefined,
+    );
+    if (!preparedAnswer.ok) return reply.status(preparedAnswer.status).send({ error: preparedAnswer.error });
+    if (preparedAnswer.block && !richBlocks.some((block) => block.id === preparedAnswer.block?.id))
+      richBlocks.push(preparedAnswer.block);
     if (!durableLocalRichRecovery && synthesizer && richBlocks.some((b) => b.kind === 'audio' && 'text' in b)) {
       try {
         richBlocks = await synthesizer.resolveVoiceBlocks(richBlocks, actor.catId as string);
@@ -3319,7 +3200,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         );
       }
     }
-    const dotReplyTriggerId = record.a2aTriggerMessageId ?? turnExecution?.causal?.triggerMessageId;
+    const originalDotReplyTriggerId =
+      record.originTriggerMessageId ?? record.a2aTriggerMessageId ?? turnExecution?.causal?.triggerMessageId;
     // Callback posts are independent speech, not the execution's terminal answer.
     // Explicit @dot remains supported; automatic consultation return is attached
     // to the canonical completed response in routeSerial.
@@ -3387,29 +3269,6 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     const richExtra = richBlocks.length > 0 ? { rich: { v: 1 as const, blocks: richBlocks } } : {};
     const targetCatsExtra =
       !suppressTerminalRouting && validExplicitTargets.length ? { targetCats: validExplicitTargets } : {};
-    const collectiveWorkDelegation = projectCollectiveWorkDelegation({
-      record,
-      originMessage: record.originTriggerMessageId
-        ? await messageStore.getById(record.originTriggerMessageId)
-        : undefined,
-      targetThreadId: effectiveThreadId,
-      targetCatIds: mentions,
-      crossThread: isCrossThread,
-    });
-    if (
-      mentions.length > 0 &&
-      (record.collectiveWorkBinding || record.toolExecutionPolicy?.mode === 'collective_work') &&
-      !collectiveWorkDelegation
-    ) {
-      reply.status(403);
-      return {
-        error: 'collective_work_delegation_unavailable',
-        message: 'Named relay requires a verifiable current Work delegation.',
-      };
-    }
-    const collectiveWorkDelegationExtra = collectiveWorkDelegation
-      ? { collectiveWorkDelegationV1: collectiveWorkDelegation }
-      : {};
     const extraParts = {
       ...standaloneExplicitPostExtra,
       ...(deliveredWithoutWake.length
@@ -3428,7 +3287,6 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       ...localReviewVerdictExtra,
       ...callbackDedupExtra,
       ...targetCatsExtra,
-      ...collectiveWorkDelegationExtra,
     };
     const extra = Object.keys(extraParts).length > 0 ? extraParts : undefined;
 
@@ -3474,6 +3332,23 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       }
     }
 
+    const dotReplyTriggerId =
+      mentions.some((catId) => catId === DOT_CAT_ID) &&
+      !isCrossThread &&
+      !action &&
+      !localReviewVerdict &&
+      !coordinationResult.suppressRouting &&
+      opts.dotReplyTarget
+        ? await resolveDotCallbackReplySource({
+            triggerMessageId: originalDotReplyTriggerId,
+            replyTo: validatedReplyTo,
+            execution: turnExecution,
+            messages: messageStore,
+          })
+        : originalDotReplyTriggerId;
+
+    const causalTriggerMessage = dotReplyTriggerId ? await messageStore.getById(dotReplyTriggerId) : null;
+
     // Store the message (scoped to the effective thread)
     // AC-B6-P1: When A2A mentions will be enqueued (invocationQueue available),
     // store with deliveryStatus:'queued' so ContextAssembler excludes this message
@@ -3487,6 +3362,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // identity never falls back to parent (which would collapse multi-turn same-cat).
     const persistedExtra = {
       ...(extra ?? {}),
+      ...(taskHandoff ? { taskHandoff } : {}),
       stream: {
         invocationId: effectiveInvId,
         turnInvocationId: invocationId ?? effectiveInvId,
@@ -3496,6 +3372,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
             causal: {
               kind: 'invocation_reply' as const,
               triggerMessageId: dotReplyTriggerId,
+              ...(causalTriggerMessage?.threadId === effectiveThreadId ? { triggerThreadId: effectiveThreadId } : {}),
             },
           }
         : {}),
@@ -3562,13 +3439,25 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     const callbackMessageIdempotencyKey =
       notificationMessageIdempotencyKey ??
       (clientMessageId && !localReviewVerdict && !interruptedActionCarrierRecoveryKey
-        ? buildCallbackMessageIdempotencyKey(actor.catId, clientMessageId)
+        ? buildCallbackPostMessageIdempotencyKey(actor.catId, clientMessageId)
         : undefined);
     const durableCallbackDuplicate = callbackMessageIdempotencyKey
       ? await messageStore.getByIdempotencyKey(actor.userId, effectiveThreadId, callbackMessageIdempotencyKey)
       : null;
     const duplicateMsg = durableLocalReviewDuplicate ?? durableActionCarrierDuplicate ?? durableCallbackDuplicate;
     const recoverPersistedCallbackMessage = async (duplicateMsg: StoredMessage) => {
+      if (duplicateMsg.extra?.taskHandoff) {
+        if (!taskHandoff) return reply.code(409).send({ status: 'task_handoff_idempotency_conflict' });
+        const resumed = await opts.ordinaryTaskHandoffs!.apply(duplicateMsg.id);
+        if (resumed.kind === 'refused')
+          return reply.code(409).send({ status: 'task_handoff_refused', reason: resumed.reason });
+      }
+      duplicateMsg = await publishCallbackSearchAnswer(
+        opts.messageSearchAnswerService,
+        parsed.data.searchAnswer,
+        principal,
+        duplicateMsg,
+      );
       const persistedWakeTargets = duplicateMsg.mentions.filter(
         (catId) => !duplicateMsg.extra?.notificationDelivery?.withoutWakeCatIds.includes(catId),
       );
@@ -3586,6 +3475,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           enqueueA2A: () =>
             enqueueA2ATargets(
               {
+                ...(opts.routingDispatchPreflight ? { routingDispatchPreflight: opts.routingDispatchPreflight } : {}),
                 socketManager,
                 messageStore,
                 ...(invocationTracker ? { invocationTracker } : {}),
@@ -3775,7 +3665,22 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       }
       throw error;
     }
-    const storedMsg = atomicAdmission.message;
+    let storedMsg = atomicAdmission.message;
+    if (taskHandoff) {
+      const applied = await opts.ordinaryTaskHandoffs!.apply(storedMsg.id);
+      if (applied.kind === 'refused')
+        return reply.code(409).send({
+          status: 'task_handoff_refused',
+          reason: applied.reason,
+          messageId: storedMsg.id,
+        });
+    }
+    storedMsg = await publishCallbackSearchAnswer(
+      opts.messageSearchAnswerService,
+      parsed.data.searchAnswer,
+      principal,
+      storedMsg,
+    );
     if (persistedReplay || atomicAdmission.preAdmittedReplayed) {
       if (localReviewVerdict && !localReviewDuplicateMatches(storedMsg)) {
         reply.status(409);
@@ -3808,6 +3713,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       enqueueA2A: () =>
         enqueueA2ATargets(
           {
+            ...(opts.routingDispatchPreflight ? { routingDispatchPreflight: opts.routingDispatchPreflight } : {}),
             socketManager,
             messageStore,
             ...(invocationTracker ? { invocationTracker } : {}),
@@ -3977,6 +3883,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       threadId: effectiveThreadId,
       messageId: storedMsg.id,
       routed: routingOutcome.routed,
+      ...(deliveryDecision.routingAdmission ? { routing_admission: deliveryDecision.routingAdmission } : {}),
       ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
       ...(clientMessageId ? { clientMessageId } : {}),
       ...(routing_warnings.length > 0 ? { routing_warnings } : {}),
@@ -4678,82 +4585,84 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           filtered.map((message) => message.id),
         )
       : new Map();
-    const publishedCandidates: ThreadContextEnvelopeCandidate<Record<string, unknown>>[] = filtered.map((item) => {
-      const imagePaths = extractImagePaths(item.contentBlocks, uploadDir);
-      const imageUrls = extractImageUrls(item.contentBlocks);
-      const queueEntry = publishedQueueEntries
-        .get(item.id)
-        ?.find(
-          (entry) =>
-            entry.status !== 'terminal' && (entry.targets.length === 0 || entry.targets.includes(principalCatId)),
-        );
-      const queuedProjection = queueEntry ? { deliveryStatus: 'queued' as const, queueEntryId: queueEntry.id } : {};
-      const anchored = anchorThreadMessage(item, {
-        effectiveThreadId,
-        speaker: getMessageSpeakerName(item),
-        keywordTerms,
-        agentKeyCatId: principal.kind === 'agent_key' ? principal.catId : undefined,
-        imagePaths,
-        imageUrls,
-      });
-      const localReviewFact = readDurableLocalReviewFact(item);
-      const localReviewProjection = localReviewFact
-        ? {
-            localReviewFact,
-            localReviewLoopBrakeOnArrival: classifyLocalReviewLoopBrake(
-              durableLocalReviewHistory
-                ?.filter(({ message }) => compareChronological(message, item) <= 0)
-                .map(({ fact }) => fact) ?? null,
-              [item.id],
-              localReviewFact.reviewSubjectRef,
-              item.mentions.length === 1 && item.mentions[0] ? item.mentions[0] : principalCatId,
-            ),
-          }
-        : {};
-      const projectedBody = projectCallbackMessageBody(item);
-      const anchorProjection: Record<string, unknown> = {
-        ...anchored,
-        from: messageFrom(item),
-        ...queuedProjection,
-        ...localReviewProjection,
-        ...(keywordTerms.length > 0 ? { relevanceScore: getKeywordScore(item) } : {}),
-      };
-      const fullProjection: Record<string, unknown> = {
-        id: item.id,
-        from: messageFrom(item),
-        threadId: effectiveThreadId,
-        timestamp: item.timestamp,
-        speaker: getMessageSpeakerName(item),
-        ...projectedBody,
-        truncated: false,
-        ...queuedProjection,
-        ...localReviewProjection,
-        ...(imagePaths.length > 0 ? { imagePaths } : {}),
-        ...(imageUrls.length > 0 ? { imageUrls } : {}),
-        ...(keywordTerms.length > 0 ? { relevanceScore: getKeywordScore(item) } : {}),
-      };
-      const oversizedProjection: Record<string, unknown> = {
-        id: item.id,
-        from: messageFrom(item),
-        threadId: effectiveThreadId,
-        timestamp: item.timestamp,
-        speaker: getMessageSpeakerName(item),
-        contentLength: projectedBody.contentLength,
-        truncated: true,
-        oversized: true,
-        drillDown: anchored.drillDown,
-        ...queuedProjection,
-        ...localReviewProjection,
-        ...(keywordTerms.length > 0 ? { relevanceScore: getKeywordScore(item) } : {}),
-      };
-      return {
-        id: item.id,
-        projection: isFullMode ? fullProjection : anchorProjection,
-        oversizedProjection: isFullMode ? oversizedProjection : anchorProjection,
-        originalChars: projectedBody.contentLength,
-        source: 'published',
-      };
-    });
+    const publishedCandidates: ThreadContextEnvelopeCandidate<Record<string, unknown>>[] = await Promise.all(
+      filtered.map(async (item) => {
+        const imagePaths = await extractTrustedImagePaths(item.contentBlocks, uploadDir, opts.resolveTrustedImagePath);
+        const imageUrls = extractImageUrls(item.contentBlocks);
+        const queueEntry = publishedQueueEntries
+          .get(item.id)
+          ?.find(
+            (entry) =>
+              entry.status !== 'terminal' && (entry.targets.length === 0 || entry.targets.includes(principalCatId)),
+          );
+        const queuedProjection = queueEntry ? { deliveryStatus: 'queued' as const, queueEntryId: queueEntry.id } : {};
+        const anchored = anchorThreadMessage(item, {
+          effectiveThreadId,
+          speaker: getMessageSpeakerName(item),
+          keywordTerms,
+          agentKeyCatId: principal.kind === 'agent_key' ? principal.catId : undefined,
+          imagePaths,
+          imageUrls,
+        });
+        const localReviewFact = readDurableLocalReviewFact(item);
+        const localReviewProjection = localReviewFact
+          ? {
+              localReviewFact,
+              localReviewLoopBrakeOnArrival: classifyLocalReviewLoopBrake(
+                durableLocalReviewHistory
+                  ?.filter(({ message }) => compareChronological(message, item) <= 0)
+                  .map(({ fact }) => fact) ?? null,
+                [item.id],
+                localReviewFact.reviewSubjectRef,
+                item.mentions.length === 1 && item.mentions[0] ? item.mentions[0] : principalCatId,
+              ),
+            }
+          : {};
+        const projectedBody = projectCallbackMessageBody(item);
+        const anchorProjection: Record<string, unknown> = {
+          ...anchored,
+          from: messageFrom(item),
+          ...queuedProjection,
+          ...localReviewProjection,
+          ...(keywordTerms.length > 0 ? { relevanceScore: getKeywordScore(item) } : {}),
+        };
+        const fullProjection: Record<string, unknown> = {
+          id: item.id,
+          from: messageFrom(item),
+          threadId: effectiveThreadId,
+          timestamp: item.timestamp,
+          speaker: getMessageSpeakerName(item),
+          ...projectedBody,
+          truncated: false,
+          ...queuedProjection,
+          ...localReviewProjection,
+          ...(imagePaths.length > 0 ? { imagePaths } : {}),
+          ...(imageUrls.length > 0 ? { imageUrls } : {}),
+          ...(keywordTerms.length > 0 ? { relevanceScore: getKeywordScore(item) } : {}),
+        };
+        const oversizedProjection: Record<string, unknown> = {
+          id: item.id,
+          from: messageFrom(item),
+          threadId: effectiveThreadId,
+          timestamp: item.timestamp,
+          speaker: getMessageSpeakerName(item),
+          contentLength: projectedBody.contentLength,
+          truncated: true,
+          oversized: true,
+          drillDown: anchored.drillDown,
+          ...queuedProjection,
+          ...localReviewProjection,
+          ...(keywordTerms.length > 0 ? { relevanceScore: getKeywordScore(item) } : {}),
+        };
+        return {
+          id: item.id,
+          projection: isFullMode ? fullProjection : anchorProjection,
+          oversizedProjection: isFullMode ? oversizedProjection : anchorProjection,
+          originalChars: projectedBody.contentLength,
+          source: 'published',
+        };
+      }),
+    );
     const queuedCandidates: ThreadContextEnvelopeCandidate<Record<string, unknown>>[] = queuedFullMessages.map(
       (message) => {
         const anchored = anchorThreadMessage(
@@ -4893,7 +4802,12 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       if (typeof entry.messageId === 'string') suppressedQueuedMessageIds.add(entry.messageId);
     };
 
-    if (fullyReturnedQueuedEntries.length > 0 && opts.invocationQueue && principal.kind === 'invocation') {
+    if (
+      fullyReturnedQueuedEntries.length > 0 &&
+      opts.invocationQueue &&
+      canExposeQueuedBodies &&
+      principal.kind === 'invocation'
+    ) {
       const queuedSeenInvocationId = principal.invocationId;
       const seenAt = Date.now();
       const adoptExposedQueuedEntries = queueProcessor?.adoptExposedQueuedEntries?.bind(queueProcessor);
@@ -5014,6 +4928,25 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       };
       returnedFiltered = returnedFiltered.filter((message) => !suppressedQueuedMessageIds.has(message.id));
       fullyReturnedFiltered = fullyReturnedFiltered.filter((message) => !suppressedQueuedMessageIds.has(message.id));
+    }
+    if (isFullMode && canExposeQueuedBodies && principal.kind === 'invocation') {
+      try {
+        await coverPublishedMessageReads(opts, {
+          threadId: effectiveThreadId,
+          userId: principalUserId,
+          catId: principalCatId,
+          invocationId: principal.invocationId,
+          parentInvocationId: expectedParentInvocationId!,
+          messageIds: fullyReturnedFiltered.map((message) => message.id),
+        });
+      } catch (err) {
+        app.log.error(
+          { err, invocationId: principal.invocationId },
+          'Published wake coverage failed before full-body return',
+        );
+        reply.status(503);
+        return { error: 'Public wake coverage unavailable', code: 'QUEUE_ADOPTION_UNAVAILABLE' };
+      }
     }
     // F236 AC-A1 (R1/砚砚 P1): emit returnedChars so the eval layer can compute payload shrink (省).
     const serializedPayload = JSON.stringify(payload);
@@ -5216,13 +5149,41 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       return { error: 'Invalid request query', details: parsed.error.issues };
     }
 
-    const { limit, activeSince, keyword } = parsed.data;
+    const { limit, activeSince, keyword, includeWork, cursor } = parsed.data;
 
     if (!threadStore) {
       reply.status(503);
       return { error: 'Thread store not configured' };
     }
 
+    if (includeWork === 'true') {
+      const { readRecentWorkDirectory, DirectoryCursorError } = await import('./recent-work-directory.js');
+      try {
+        return await readRecentWorkDirectory({
+          userId: principal.userId,
+          threadStore,
+          taskStore: opts.taskStore,
+          invocationAuthority: request.callbackAuth,
+          readRunningWork: async () => {
+            const response = await app.inject({
+              method: 'GET',
+              url: '/api/callbacks/companion/running-work',
+              headers: request.headers,
+            });
+            return { statusCode: response.statusCode, body: response.json() };
+          },
+          limit,
+          activeSince,
+          keyword,
+          cursor,
+        });
+      } catch (error) {
+        return reply.code(error instanceof DirectoryCursorError ? 400 : 503).send({
+          error: error instanceof DirectoryCursorError ? error.message : 'Work directory unavailable',
+        });
+      }
+    }
+    if (cursor) return reply.code(400).send({ error: 'cursor requires includeWork=true' });
     const requestedLimit = limit ?? 20;
     let threads = await threadStore.list(principal.userId);
     if (activeSince !== undefined) {
@@ -5305,6 +5266,12 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       threadId: effectiveThreadId,
       title: thread.title,
       labels: thread.labels ?? [],
+      ...(meta?.roadmap
+        ? {
+            roadmap: await readThreadRoadmap({ thread, threadStore, userId: principal.userId }),
+            roadmapBinding: meta.roadmap,
+          }
+        : {}),
       ...(meta?.worktrees ? { worktrees: meta.worktrees } : {}),
       ...(meta?.prs ? { prs: meta.prs } : {}),
       ...(meta?.issues ? { issues: meta.issues } : {}),
@@ -5344,7 +5311,23 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       return { error: 'Thread not found' };
     }
 
-    const { title, labels, ...metadataFields } = parsed.data;
+    const { title, labels, roadmap, ...metadataFields } = parsed.data;
+    let roadmapMutation: Awaited<ReturnType<typeof prepareRoadmapMutation>> | undefined;
+    if (roadmap) {
+      try {
+        roadmapMutation = await prepareRoadmapMutation({
+          roadmap,
+          record: principal,
+          thread,
+          threadStore,
+          messageStore,
+        });
+      } catch (error) {
+        return reply
+          .code(error instanceof ThreadRoadmapConflict ? 409 : 400)
+          .send({ error: error instanceof Error ? error.message : 'Invalid roadmap binding' });
+      }
+    }
 
     // #872 cloud-review P2: validate all rejectable inputs BEFORE applying any mutations.
     // Without this gate, a request with valid title + invalid labels would commit the title
@@ -5369,12 +5352,16 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // #872 cloud-review P2 (R3): failable operations first. atomicMergeThreadMetadata can
     // throw on CAS exhaustion or unparseable stored data; run it before title/labels so
     // a throw doesn't leave visible fields partially committed.
-    const hasMetadataUpdate = Object.keys(metadataFields).length > 0;
+    const hasMetadataUpdate = Object.keys(metadataFields).length > 0 || roadmapMutation !== undefined;
     if (hasMetadataUpdate) {
       try {
-        await threadStore.atomicMergeThreadMetadata(effectiveThreadId, metadataFields);
+        await threadStore.atomicMergeThreadMetadata(effectiveThreadId, {
+          ...metadataFields,
+          ...(roadmapMutation ? { roadmap: roadmapMutation } : {}),
+        });
       } catch (err) {
         // #872: total-limits rejection is a client error (deterministic, not retryable).
+        if (err instanceof ThreadRoadmapConflict) return reply.code(409).send({ error: err.message });
         // Surface as 422 so MCP retry helpers don't retry a request that can never succeed.
         const msg = err instanceof Error ? err.message : String(err);
         if (msg.includes('total limits exceeded')) {
@@ -5414,6 +5401,12 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         ? { titleApplied, titleSource: updated?.titleSource ?? (thread.title ? 'user' : 'temporary') }
         : {}),
       labels: updated?.labels ?? thread.labels ?? [],
+      ...(updated?.threadMetadata?.roadmap
+        ? {
+            roadmap: await readThreadRoadmap({ thread: updated, threadStore, userId: principal.userId }),
+            roadmapBinding: updated.threadMetadata.roadmap,
+          }
+        : {}),
       ...(meta?.worktrees ? { worktrees: meta.worktrees } : {}),
       ...(meta?.prs ? { prs: meta.prs } : {}),
       ...(meta?.issues ? { issues: meta.issues } : {}),
@@ -5468,745 +5461,6 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         };
       }),
     };
-  });
-
-  app.post('/api/callbacks/record-external-review-verdict', async (request, reply) => {
-    if (!opts.externalReviewVerdictService) {
-      reply.status(503);
-      return { error: 'External review verdict service not configured' };
-    }
-    const record = requireCallbackAuth(request, reply);
-    if (!record) return;
-    const parsed = externalReviewVerdictSchema.safeParse(request.body);
-    if (!parsed.success) {
-      if (
-        request.body &&
-        typeof request.body === 'object' &&
-        'verdict' in request.body &&
-        !('delivery' in request.body)
-      ) {
-        externalCaseVerdictReadyWithoutDelivery.add(1);
-      }
-      reply.status(400);
-      return { error: 'Invalid request body', details: parsed.error.issues };
-    }
-    if (!record.invocationId) {
-      reply.status(403);
-      return { error: 'External review verdict requires invocation-bound callback authentication' };
-    }
-    const deletedThreadGuard = await getDeletedCallbackThreadGuard(threadStore, record.threadId);
-    if (deletedThreadGuard) {
-      reply.status(deletedThreadGuard.statusCode);
-      return deletedThreadGuard.body;
-    }
-
-    try {
-      let actionLeaseRef = parsed.data.actionLeaseRef;
-      if (record.parentInvocationId) {
-        if (!invocationRecordStore) {
-          throw new ExternalReviewVerdictError(
-            'action_lease_preflight_unavailable',
-            'Invocation carrier read surface is unavailable',
-          );
-        }
-        const parentRecord = await invocationRecordStore.get(record.parentInvocationId);
-        if (!parentRecord) {
-          throw new ExternalReviewVerdictError('action_lease_required', 'Parent invocation carrier is unavailable');
-        }
-        if (
-          parentRecord.threadId !== record.threadId ||
-          parentRecord.userId !== record.userId ||
-          !parentRecord.targetCats.includes(record.catId)
-        ) {
-          throw new ExternalReviewVerdictError(
-            'wrong_principal',
-            'Invocation carrier is outside the callback principal scope',
-          );
-        }
-        const carrier = parentRecord.actionLeaseCarrier;
-        if (!carrier) {
-          throw new ExternalReviewVerdictError(
-            'action_lease_required',
-            'Parent invocation carrier classification is unavailable',
-          );
-        }
-        if (carrier.kind === 'action_successor') {
-          if (
-            actionLeaseRef &&
-            (actionLeaseRef.leaseId !== carrier.leaseId || actionLeaseRef.generation !== carrier.generation)
-          ) {
-            throw new ExternalReviewVerdictError(
-              'action_lease_mismatch',
-              'Provided action lease does not match the invocation carrier',
-            );
-          }
-          actionLeaseRef = { leaseId: carrier.leaseId, generation: carrier.generation };
-        } else if (actionLeaseRef) {
-          throw new ExternalReviewVerdictError(
-            'action_lease_mismatch',
-            'Invocation is explicitly classified as not carrying an action lease',
-          );
-        }
-      }
-      return await opts.externalReviewVerdictService.record({
-        ...parsed.data,
-        ...(actionLeaseRef ? { actionLeaseRef } : {}),
-        principal: { catId: record.catId, threadId: record.threadId },
-      });
-    } catch (error) {
-      if (error instanceof ExternalReviewVerdictError) {
-        reply.status(externalReviewVerdictErrorStatus(error.code));
-        return { error: error.message, code: error.code };
-      }
-      throw error;
-    }
-  });
-
-  registerCallbackExternalReviewRecoveryRoutes(app, {
-    externalReviewRecoveryService: opts.externalReviewRecoveryService,
-    threadStore,
-  });
-
-  registerCallbackExternalReviewTransferRoute(app, opts.externalReviewTransferService);
-
-  const registerPrTrackingSchema = z
-    .object({
-      repoFullName: z
-        .string()
-        .min(1)
-        .regex(/^[^/]+\/[^/]+$/, 'Must be owner/repo format'),
-      prNumber: z.number().int().positive(),
-      /**
-       * #1392 AC-7: normal registration supplies neither. `when` is the advanced path, unchanged, for a
-       * caller who needs a precise wait. `goal` names who is being waited on so the server can arm the
-       * comment conditions with a real audience. Both together would let a caller state a goal and then
-       * quietly contradict it, which is the class of silent mismatch this issue exists to remove.
-       */
-      when: githubWaitPredicatesSchema.optional(),
-      goal: z
-        .object({
-          kind: z.literal('await_reply_from'),
-          authorLogins: z.array(z.string().trim().min(1)).min(1).max(20),
-        })
-        .strict()
-        .optional(),
-      /** #1392 AC-7: display-only, so it is never a precondition for registering. */
-      nextStep: z.string().trim().min(1).max(500).optional(),
-      /** #1392 AC-2: optional. Omitted = no time-based termination; supplied = a real, visible deadline. */
-      expiresAt: z.number().int().positive().optional(),
-      /** #1392 AC-1: renewal is the default; `false` is the explicit single-fire opt-in. */
-      autoRenew: z.boolean().optional(),
-    })
-    .strict()
-    .superRefine((value, ctx) => {
-      if (value.when && value.goal) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['goal'],
-          message: 'provide at most one of `when` (a precise wait) or `goal` (who you are waiting on)',
-        });
-      }
-    });
-
-  app.post('/api/callbacks/register-pr-tracking', async (request, reply) => {
-    // #320: Unified model — write to TaskStore instead of PrTrackingStore
-    if (!taskStore) {
-      reply.status(503);
-      return { error: 'Task store not configured' };
-    }
-
-    const parsed = registerPrTrackingSchema.safeParse(request.body);
-    if (!parsed.success) {
-      reply.status(400);
-      return { error: 'Invalid request body', details: parsed.error.issues };
-    }
-
-    const record = requireCallbackAuth(request, reply);
-    if (!record) return;
-    const waitSourcePromise = captureTypedWaitSource(record, {
-      messageStore,
-      ...(invocationTracker ? { invocationTracker } : {}),
-    });
-
-    const deletedThreadGuard = await getDeletedCallbackThreadGuard(threadStore, record.threadId);
-    if (deletedThreadGuard) {
-      reply.status(deletedThreadGuard.statusCode);
-      return deletedThreadGuard.body;
-    }
-
-    const { repoFullName, prNumber, goal, expiresAt, autoRenew } = parsed.data;
-    const nextStep = parsed.data.nextStep ?? DEFAULT_GITHUB_TRACKING_NEXT_STEP;
-    // #1392 AC-7: role is resolved here, before the conditions are built, because the normal entry
-    // arms both comment surfaces and their audience *is* the role. A lookup that fails is not an
-    // error the caller has to handle: it produces the unresolved perspective, which delivers every
-    // comment flagged rather than quietly applying a rule we could not justify.
-    const perspective = resolveGitHubNotificationPerspective(
-      await resolvePrTrackingIdentity(resolveGitHubPrTrackingIdentity, repoFullName, prNumber, log),
-    );
-    // A caller who names no precise wait gets the expansion, from the one definition the MCP entry
-    // also reads, so the same registration cannot mean two things depending on which door it came
-    // through. The expansion is returned to the caller in `await.continuation.when`.
-    const expansion = parsed.data.when ? undefined : expandGitHubPrTrackingGoal(perspective, goal);
-    if (expansion && !expansion.ok) {
-      reply.status(400);
-      return { error: expansion.error };
-    }
-    const when = parsed.data.when ?? (expansion?.ok ? expansion.when : undefined);
-    if (!when) {
-      reply.status(400);
-      return { error: 'could not resolve any wait conditions for this registration' };
-    }
-    if (expiresAt !== undefined && expiresAt <= Date.now()) {
-      reply.status(400);
-      return { error: 'expiresAt must be in the future' };
-    }
-
-    // Use authoritative catId from invocation record, not caller payload.
-    const catId = record.catId;
-
-    // F167 Phase O PR-O2b: shadow grounding telemetry with real claim extraction.
-    // Runs BEFORE gate-keeping guard so blocked calls are still observable in shadow mode.
-    void checkGrounding({
-      invocationId: record.invocationId ?? 'unknown',
-      catId: catId as string,
-      threadId: record.threadId,
-      tool: 'register_pr_tracking',
-      actionFamily: 'register_tracking',
-      actionRisk: 'register_tracking',
-      claims: extractPrTrackingClaims({ repoFullName, prNumber }),
-    })
-      .then(async (result) => {
-        for (const event of result.events) {
-          await groundingSampleStore.record(event, result.wouldBlock);
-        }
-        log.debug(
-          { threadId: record.threadId, catId, verdict: result.overallVerdict, wouldBlock: result.wouldBlock },
-          'F167 Phase O: shadow grounding check completed (register_pr_tracking)',
-        );
-      })
-      .catch((err: unknown) => {
-        log.warn({ err, catId }, 'F167 grounding shadow telemetry failed (register_pr_tracking, non-blocking)');
-      });
-
-    // F167: gate-keeping thread guard (hard-block 守门 thread 调用，避免 SKILL 文字层
-    // 100%/trigger-time 0 enforcement 的事故复发。无 override 通道——必须传球到下游 thread)
-    const guardResult = await checkGateKeepingGuard({
-      threadStore: opts.threadStore,
-      threadId: record.threadId,
-      tool: 'register_pr_tracking',
-      log,
-      context: { catId, repoFullName, prNumber },
-    });
-    if (guardResult.outcome === 'blocked' && guardResult.blockedResponse) {
-      reply.status(400);
-      return guardResult.blockedResponse;
-    }
-
-    // Phase D: validate repo exists and is accessible (AC-D1)
-    if (validateRepo) {
-      const validation = await resolveGitHubValidation(() => validateRepo(repoFullName), 'Repository', log, {
-        repoFullName,
-      });
-      if (!validation.ok) {
-        reply.status(validation.statusCode);
-        return validation.body;
-      }
-      if (!validation.value) {
-        reply.status(422);
-        return { error: `Repository ${repoFullName} does not exist or is not accessible` };
-      }
-    }
-
-    // F202 Phase 2 follow-up: validate specific PR exists (number-level, not just repo)
-    if (validatePr) {
-      const validation = await resolveGitHubValidation(() => validatePr(repoFullName, prNumber), 'PR', log, {
-        repoFullName,
-        prNumber,
-      });
-      if (!validation.ok) {
-        reply.status(validation.statusCode);
-        return validation.body;
-      }
-      if (!validation.value) {
-        reply.status(422);
-        return { error: `PR ${repoFullName}#${prNumber} does not exist or is not accessible` };
-      }
-    }
-
-    // PR-O4 R5: normalize repo to lowercase (GitHub repos are case-insensitive)
-    const subjectKey = `pr:${repoFullName.toLowerCase()}#${prNumber}` as const;
-    try {
-      if (!fetchPrWaitBaseline) {
-        reply.status(503);
-        return { error: 'PR wait baseline reader not configured' };
-      }
-      let snapshot: InitialPrWaitSnapshot;
-      try {
-        snapshot = await fetchPrWaitBaseline(repoFullName, prNumber, when);
-      } catch {
-        reply.status(503);
-        return { error: 'PR wait baseline unavailable — try again later' };
-      }
-
-      const triggerCommentIds = when.flatMap((predicate) =>
-        predicate.kind === 'pr_review_result_available' && predicate.triggerCommentId !== undefined
-          ? [predicate.triggerCommentId]
-          : [],
-      );
-      if (triggerCommentIds.length > 0) {
-        if (!record.invocationId || !opts.verifyPrReviewEventWaitCoverage) {
-          reply.status(503);
-          return { error: 'Exact review-result coverage verifier not configured' };
-        }
-        try {
-          for (const triggerCommentId of triggerCommentIds) {
-            const coverage = await opts.verifyPrReviewEventWaitCoverage({
-              repoFullName,
-              prNumber,
-              triggerCommentId,
-            });
-            if (!coverage.covered) {
-              reply.status(422);
-              return { error: 'Review-result trigger is not covered', reason: coverage.reason };
-            }
-          }
-        } catch {
-          reply.status(503);
-          return { error: 'Review-result coverage unavailable — try again later' };
-        }
-      }
-
-      const taskInput = {
-        kind: 'pr_tracking',
-        subjectKey,
-        threadId: record.threadId,
-        title: `PR tracking: ${repoFullName}#${prNumber}`,
-        ownerCatId: catId,
-        why: `Waiting on typed GitHub predicates for ${repoFullName}#${prNumber}.`,
-        createdBy: catId,
-        userId: record.userId,
-      } as const;
-      // Existing registrations are read-only until the generation/metadata CAS succeeds.
-      const task = (await taskStore.getBySubject(subjectKey)) ?? (await taskStore.create(taskInput));
-      assertSubjectUpdateOwnership(subjectKey, task, taskInput);
-      const previousState = task.automationState as PrAutomationState | undefined;
-      const previousGeneration = previousState?.await?.generation ?? previousState?.waitOutcome?.generation ?? 0;
-      const generation = previousGeneration + 1;
-      const awaitState: GitHubPrAwaitStateV1 = {
-        v: 1,
-        generation,
-        subjectRef: subjectKey,
-        ownerFence: { kind: 'containing_task', generation },
-        baseline: snapshot.baseline,
-        continuation: {
-          when,
-          // biome-ignore lint/suspicious/noThenProperty: F280's frozen wait contract names this field `then`.
-          then: nextStep,
-        },
-        ...(expiresAt !== undefined ? { expiresAt } : {}),
-        ...(autoRenew !== undefined ? { autoRenew } : {}),
-        createdAt: Date.now(),
-        provenance: 'explicit_registration',
-      };
-      const superseded = previousState?.await
-        ? transitionWaitState(previousState, {
-            type: 'superseded',
-            generation: previousState.await.generation,
-            at: Date.now(),
-          })
-        : undefined;
-      const supersededOutcome =
-        superseded?.applied === true ? (superseded.state as PrAutomationState).waitOutcome : undefined;
-      // A new wait does not revoke a result already owed to its owner. Preserve the outbox
-      // in the same CAS, including after a single-fire wait has consumed its active generation.
-      const pendingOutcome = previousState?.waitOutcome?.delivery === 'pending' ? previousState.waitOutcome : undefined;
-      if (pendingOutcome && supersededOutcome?.delivery === 'pending') {
-        // A passed deadline produced a second deliverable result; one slot cannot retain both.
-        reply.status(409);
-        return { error: 'PR wait has a pending delivery — retry registration after recovery' };
-      }
-      const retainedOutcome = pendingOutcome ?? supersededOutcome;
-      const replacement: PrAutomationState = {
-        ...(previousState?.review ? { review: previousState.review } : {}),
-        ...(previousState?.ci ? { ci: previousState.ci } : {}),
-        ...(previousState?.conflict ? { conflict: previousState.conflict } : {}),
-        ...snapshot.collectorState,
-        await: awaitState,
-        ...(retainedOutcome ? { waitOutcome: retainedOutcome } : {}),
-      };
-      const waitSource = await waitSourcePromise;
-      if (!(await registry.isLatest(record.invocationId))) {
-        reply.status(409);
-        return { error: 'Wait registration invocation is no longer current' };
-      }
-      const waitRegistration = waitSource
-        ? createTypedWaitRegistration({
-            task: { ...task, ...taskInput, status: task.status === 'done' ? 'todo' : task.status },
-            active: awaitState,
-            invocationId: record.invocationId,
-            source: waitSource,
-          })
-        : null;
-      const installed = await taskStore.replaceAutomationStateIfGeneration(task.id, {
-        expectedGeneration: previousGeneration === 0 ? null : previousGeneration,
-        expectedUpdatedAt: task.updatedAt,
-        automationState: replacement,
-        trackingRegistration: {
-          ...taskInput,
-          ...(record.managedWorkBinding ? { managedWorkBinding: record.managedWorkBinding } : {}),
-        },
-        ...(waitRegistration ? { waitRegistration } : {}),
-      });
-      if (!installed) {
-        reply.status(409);
-        return { error: 'PR wait changed concurrently — retry registration' };
-      }
-      if (supersededOutcome) {
-        await opts.waitLifecycleHolder?.current?.recordOutcomeEvent(installed, supersededOutcome);
-      }
-
-      return {
-        status: 'ok',
-        threadId: record.threadId,
-        task: installed,
-        await: awaitState,
-        // #1392 AC-7: the caller named nothing, so the answer says what was armed and what is filtered.
-        notification: describeGitHubNotificationCoverage(perspective, when),
-      };
-    } catch (error) {
-      if (
-        isTrackingRegistrationConflict(error) ||
-        (error instanceof Error && 'code' in error && error.code === TASK_SUBJECT_ALREADY_EXISTS)
-      ) {
-        reply.status(409);
-        return { error: error.message };
-      }
-      if (isSubjectOwnershipConflictError(error)) {
-        reply.status(409);
-        return { error: `PR ${repoFullName}#${prNumber} already registered by another user` };
-      }
-      if (isManagedWorkBindingConflictError(error)) {
-        reply.status(409);
-        return { error: 'PR tracking task is already bound to different managed work' };
-      }
-      throw error;
-    }
-  });
-
-  // F280 Phase C: typed, one-shot issue wait registration.
-  const registerIssueTrackingSchema = z
-    .object({
-      repoFullName: z
-        .string()
-        .min(1)
-        .regex(/^[^/]+\/[^/]+$/, 'Must be owner/repo format'),
-      issueNumber: z.number().int().positive(),
-      /**
-       * #1392 AC-7: the advanced path, and no longer required. Omit it and the server arms the one
-       * accepted issue default — every comment that is not our own. An issue registration that
-       * succeeded while listening to nothing was the same silent failure as the PR one.
-       */
-      when: githubIssueWaitPredicatesSchema.optional(),
-      /** #1392 AC-7: display-only, so it is never a precondition for registering. */
-      nextStep: z.string().min(1).max(500).optional(),
-      /** #1392 AC-2: optional. Omitted = no time-based termination; supplied = a real, visible deadline. */
-      expiresAt: z.number().int().positive().optional(),
-      /** #1392 AC-1: renewal is the default; `false` is the explicit single-fire opt-in. */
-      autoRenew: z.boolean().optional(),
-    })
-    .strict();
-
-  app.post('/api/callbacks/register-issue-tracking', async (request, reply) => {
-    if (!taskStore) {
-      reply.status(503);
-      return { error: 'Task store not configured' };
-    }
-
-    const parsed = registerIssueTrackingSchema.safeParse(request.body);
-    if (!parsed.success) {
-      reply.status(400);
-      return { error: 'Invalid request body', details: parsed.error.issues };
-    }
-
-    const record = requireCallbackAuth(request, reply);
-    if (!record) return;
-    const waitSourcePromise = captureTypedWaitSource(record, {
-      messageStore,
-      ...(invocationTracker ? { invocationTracker } : {}),
-    });
-
-    const deletedThreadGuard = await getDeletedCallbackThreadGuard(threadStore, record.threadId);
-    if (deletedThreadGuard) {
-      reply.status(deletedThreadGuard.statusCode);
-      return deletedThreadGuard.body;
-    }
-
-    const { repoFullName, issueNumber, expiresAt, autoRenew } = parsed.data;
-    const nextStep = parsed.data.nextStep ?? DEFAULT_GITHUB_TRACKING_NEXT_STEP;
-    // #1392 AC-7: one identity lookup, one expansion, shared with the PR entry's shape. An issue has
-    // a single accepted default and needs no role split, so only our own login has to be known.
-    const issueIdentity = await resolveTrackingSelfLogin(resolveGitHubSelfLogin, log);
-    const when = parsed.data.when ?? expandGitHubIssueTracking(issueIdentity);
-    // #1392 R4: the issue resolver, not the PR one. The PR resolver reports a missing
-    // `subject_author` the issue default never reads, so a fully resolved registration came back
-    // claiming an identity gap while printing the correct filter next to it.
-    const issuePerspective = resolveGitHubIssueNotificationPerspective(issueIdentity);
-    if (expiresAt !== undefined && expiresAt <= Date.now()) {
-      reply.status(400);
-      return { error: 'expiresAt must be in the future' };
-    }
-    const catId = record.catId;
-
-    // F167 Phase O PR-O2b: shadow grounding telemetry with real claim extraction.
-    // Runs BEFORE gate-keeping guard so blocked calls are still observable in shadow mode.
-    void checkGrounding({
-      invocationId: record.invocationId ?? 'unknown',
-      catId: catId as string,
-      threadId: record.threadId,
-      tool: 'register_issue_tracking',
-      actionFamily: 'register_tracking',
-      actionRisk: 'register_tracking',
-      claims: extractIssueTrackingClaims({ repoFullName, issueNumber }),
-    })
-      .then(async (result) => {
-        for (const event of result.events) {
-          await groundingSampleStore.record(event, result.wouldBlock);
-        }
-        log.debug(
-          { threadId: record.threadId, catId, verdict: result.overallVerdict, wouldBlock: result.wouldBlock },
-          'F167 Phase O: shadow grounding check completed (register_issue_tracking)',
-        );
-      })
-      .catch((err: unknown) => {
-        log.warn({ err, catId }, 'F167 grounding shadow telemetry failed (register_issue_tracking, non-blocking)');
-      });
-
-    // F167: gate-keeping thread guard (PR-O4: cross-store ownership verification).
-    // PR-O3 left issueOwnership as caller-declared (trust hole).
-    // PR-O4 wires cross-store verification: query TaskStore to check if this
-    // issue is already tracked in a different thread (= distributed, not keeper).
-    // PR-O4 R5: normalize repo to lowercase (GitHub repos are case-insensitive)
-    const issueSubjectKey = `issue:${repoFullName.toLowerCase()}#${issueNumber}`;
-    const issueOwnership = taskStore
-      ? await verifyKeeperOwnership(taskStore, record.threadId, issueSubjectKey, log)
-      : undefined; // no taskStore → no verification → Phase N blanket block
-    const guardResult = await checkGateKeepingGuard({
-      threadStore: opts.threadStore,
-      threadId: record.threadId,
-      tool: 'register_issue_tracking',
-      log,
-      context: { catId, repoFullName, issueNumber },
-      policyContext: issueOwnership ? { issueOwnership } : undefined,
-    });
-    if (guardResult.outcome === 'blocked' && guardResult.blockedResponse) {
-      reply.status(400);
-      return guardResult.blockedResponse;
-    }
-
-    // F202 Phase 2D P2-fix: validate repo exists and is accessible (mirrors PR tracking at L1975)
-    if (validateRepo) {
-      const validation = await resolveGitHubValidation(() => validateRepo(repoFullName), 'Repository', log, {
-        repoFullName,
-      });
-      if (!validation.ok) {
-        reply.status(validation.statusCode);
-        return validation.body;
-      }
-      if (!validation.value) {
-        reply.status(422);
-        return { error: `Repository ${repoFullName} does not exist or is not accessible` };
-      }
-    }
-
-    // F202 Phase 2 follow-up: validate specific issue exists (number-level, not just repo)
-    if (validateIssue) {
-      const validation = await resolveGitHubValidation(() => validateIssue(repoFullName, issueNumber), 'Issue', log, {
-        repoFullName,
-        issueNumber,
-      });
-      if (!validation.ok) {
-        reply.status(validation.statusCode);
-        return validation.body;
-      }
-      if (!validation.value) {
-        reply.status(422);
-        return { error: `Issue ${repoFullName}#${issueNumber} does not exist or is not accessible` };
-      }
-    }
-
-    const subjectKey = `issue:${repoFullName.toLowerCase()}#${issueNumber}` as const;
-    try {
-      if (!fetchIssueWaitBaseline) {
-        reply.status(503);
-        return { error: 'Issue wait baseline reader not configured' };
-      }
-      let snapshot: InitialIssueWaitSnapshot;
-      try {
-        snapshot = await fetchIssueWaitBaseline(repoFullName, issueNumber);
-      } catch {
-        reply.status(503);
-        return { error: 'Issue wait baseline unavailable — try again later' };
-      }
-
-      const taskInput = {
-        kind: 'issue_tracking',
-        subjectKey,
-        threadId: record.threadId,
-        title: `Issue tracking: ${repoFullName}#${issueNumber}`,
-        ownerCatId: catId,
-        why: `Waiting on typed GitHub issue predicates for ${repoFullName}#${issueNumber}.`,
-        createdBy: catId,
-        userId: record.userId,
-      } as const;
-      const task = (await taskStore.getBySubject(subjectKey)) ?? (await taskStore.create(taskInput));
-      assertSubjectUpdateOwnership(subjectKey, task, taskInput);
-      const previousState = task.automationState as IssueWaitAutomationState | undefined;
-      const previousGeneration = previousState?.await?.generation ?? previousState?.waitOutcome?.generation ?? 0;
-      const generation = previousGeneration + 1;
-      const awaitState: GitHubIssueAwaitStateV1 = {
-        v: 1,
-        generation,
-        subjectRef: subjectKey,
-        ownerFence: { kind: 'containing_task', generation },
-        baseline: snapshot.baseline,
-        continuation: {
-          when,
-          // biome-ignore lint/suspicious/noThenProperty: F280's frozen wait contract names this field `then`.
-          then: nextStep,
-        },
-        ...(expiresAt !== undefined ? { expiresAt } : {}),
-        ...(autoRenew !== undefined ? { autoRenew } : {}),
-        createdAt: Date.now(),
-        provenance: 'explicit_registration',
-      };
-      const superseded = previousState?.await
-        ? transitionWaitState(previousState, {
-            type: 'superseded',
-            generation: previousState.await.generation,
-            at: Date.now(),
-          })
-        : undefined;
-      const supersededOutcome =
-        superseded?.applied === true ? (superseded.state as IssueWaitAutomationState).waitOutcome : undefined;
-      // Match the PR path: explicit registration must not erase the previous delivery outbox.
-      const pendingOutcome = previousState?.waitOutcome?.delivery === 'pending' ? previousState.waitOutcome : undefined;
-      if (pendingOutcome && supersededOutcome?.delivery === 'pending') {
-        reply.status(409);
-        return { error: 'Issue wait has a pending delivery — retry registration after recovery' };
-      }
-      const retainedOutcome = pendingOutcome ?? supersededOutcome;
-      const replacement: IssueWaitAutomationState = {
-        ...snapshot.collectorState,
-        await: awaitState,
-        ...(retainedOutcome ? { waitOutcome: retainedOutcome } : {}),
-      };
-      const waitSource = await waitSourcePromise;
-      if (!(await registry.isLatest(record.invocationId))) {
-        reply.status(409);
-        return { error: 'Wait registration invocation is no longer current' };
-      }
-      const waitRegistration = waitSource
-        ? createTypedWaitRegistration({
-            task: { ...task, ...taskInput, status: task.status === 'done' ? 'todo' : task.status },
-            active: awaitState,
-            invocationId: record.invocationId,
-            source: waitSource,
-          })
-        : null;
-      const installed = await taskStore.replaceAutomationStateIfGeneration(task.id, {
-        expectedGeneration: previousGeneration === 0 ? null : previousGeneration,
-        expectedUpdatedAt: task.updatedAt,
-        automationState: replacement,
-        trackingRegistration: {
-          ...taskInput,
-          ...(record.managedWorkBinding ? { managedWorkBinding: record.managedWorkBinding } : {}),
-        },
-        ...(waitRegistration ? { waitRegistration } : {}),
-      });
-      if (!installed) {
-        reply.status(409);
-        return { error: 'Issue wait changed concurrently — retry registration' };
-      }
-      if (supersededOutcome) {
-        await opts.waitLifecycleHolder?.current?.recordOutcomeEvent(installed, supersededOutcome);
-      }
-
-      return {
-        status: 'ok',
-        threadId: record.threadId,
-        task: installed,
-        await: awaitState,
-        // #1392 AC-7: the same answer the PR entry gives — armed conditions and the audience applied.
-        notification: describeGitHubNotificationCoverage(issuePerspective, when),
-      };
-    } catch (error) {
-      if (
-        isTrackingRegistrationConflict(error) ||
-        (error instanceof Error && 'code' in error && error.code === TASK_SUBJECT_ALREADY_EXISTS)
-      ) {
-        reply.status(409);
-        return { error: error.message };
-      }
-      if (isSubjectOwnershipConflictError(error)) {
-        reply.status(409);
-        return { error: `Issue ${repoFullName}#${issueNumber} already registered by another user` };
-      }
-      if (isManagedWorkBindingConflictError(error)) {
-        reply.status(409);
-        return { error: 'Issue tracking task is already bound to different managed work' };
-      }
-      throw error;
-    }
-  });
-
-  // F202 Phase 2C (AC-C3): Unregister tracking task by subjectKey
-  const unregisterTrackingSchema = z.object({
-    subjectKey: z.string().min(1),
-  });
-
-  app.post('/api/callbacks/unregister-tracking', async (request, reply) => {
-    if (!taskStore) {
-      reply.status(503);
-      return { error: 'Task store not configured' };
-    }
-
-    const parsed = unregisterTrackingSchema.safeParse(request.body);
-    if (!parsed.success) {
-      reply.status(400);
-      return { error: 'Invalid request body', details: parsed.error.issues };
-    }
-
-    const record = requireCallbackAuth(request, reply);
-    if (!record) return;
-
-    const deletedThreadGuard = await getDeletedCallbackThreadGuard(threadStore, record.threadId);
-    if (deletedThreadGuard) {
-      reply.status(deletedThreadGuard.statusCode);
-      return deletedThreadGuard.body;
-    }
-
-    const task = await taskStore.getBySubject(parsed.data.subjectKey);
-    if (!task) {
-      reply.status(404);
-      return { error: `No tracking task for subject: ${parsed.data.subjectKey}` };
-    }
-
-    // Kind guard: only tracking tasks can be unregistered via this endpoint
-    if (!isTrackingKind(task.kind)) {
-      reply.status(400);
-      return { error: `Task is not a tracking task (kind: ${task.kind}), cannot unregister via this endpoint` };
-    }
-
-    // Ownership check: only the registering user can unregister. Legacy/backfilled
-    // tracking tasks may not have userId, so fail closed unless the callback is
-    // scoped to the same thread that owns the task.
-    if (!canUnregisterTrackingTask(task, record)) {
-      reply.status(403);
-      return { error: 'Not authorized to unregister this tracking task' };
-    }
-
-    await taskStore.delete(task.id);
-    return { status: 'ok', deleted: { id: task.id, subjectKey: parsed.data.subjectKey } };
   });
 
   // F174 Phase C compatibility endpoint. Active credentials no longer expire
@@ -6604,6 +5858,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // Dispatch voter cats through the canonical A2A Queue so they receive the notification and can vote.
     if (notificationMsg && router && invocationRecordStore) {
       const a2aDeps = {
+        ...(opts.routingDispatchPreflight ? { routingDispatchPreflight: opts.routingDispatchPreflight } : {}),
         router,
         invocationRecordStore,
         socketManager,
@@ -6652,6 +5907,9 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
   if (taskStore) {
     registerCallbackTaskRoutes(app, {
       taskStore,
+      registry,
+      ...(opts.ordinaryTaskHandoffs ? { ordinaryTaskHandoffs: opts.ordinaryTaskHandoffs } : {}),
+      ...(opts.ownedWaitStatusReader ? { ownedWaitStatusReader: opts.ownedWaitStatusReader } : {}),
       messageStore: opts.messageStore,
       socketManager,
       ...(threadStore ? { threadStore } : {}),
@@ -6687,12 +5945,14 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     registerCallbackThreadCatsRoutes(app, {
       threadStore: opts.threadStore,
       agentRegistry: opts.agentRegistry,
+      ...(opts.routingSelection ? { routingSelection: opts.routingSelection } : {}),
     });
   }
 
   // F128: Cat-side thread proposal callback
   if (opts.proposalStore && opts.threadStore) {
     registerCallbackProposeThreadRoutes(app, {
+      projectRoot: opts.proposalProjectRoot,
       registry,
       proposalStore: opts.proposalStore,
       threadStore: opts.threadStore,
@@ -6701,6 +5961,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       ...(opts.approvalIngress ? { approvalIngress: opts.approvalIngress } : {}),
       ...(taskStore ? { taskLookup: taskStore } : {}),
     });
+    registerCallbackContinueApprovedTaskRoutes(app, { registry, proposalStore: opts.proposalStore });
     registerCallbackWithdrawThreadProposalRoutes(app, { registry, proposalStore: opts.proposalStore, socketManager });
   }
 
@@ -6793,7 +6054,10 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
   }
 
   if (opts.profileRepository) {
-    registerCallbackReadProfileRoutes(app, { repository: opts.profileRepository });
+    registerCallbackReadProfileRoutes(app, {
+      repository: opts.profileRepository,
+      evidenceDb: opts.profileReadEvidenceDb,
+    });
   }
 
   // F225: Cat-initiated session handoff propose callback
@@ -6809,7 +6073,12 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
   }
 
   await registerCallbackMemoryRoutes(app, {
+    cloudReturnGrantStore: opts.cloudReturnGrantStore,
+    registry,
+    messageSearchAnswerService: opts.messageSearchAnswerService,
     evidenceStore: opts.evidenceStore,
+    messageSearchService: opts.messageSearchService,
+    matterMemoryService: opts.matterMemoryService,
     messageStore: opts.messageStore,
     ...(opts.threadStore ? { threadStore: opts.threadStore } : {}),
     markerQueue: opts.markerQueue,
@@ -6830,6 +6099,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
   // F086: Multi-mention orchestration routes
   if (router && invocationRecordStore) {
     registerMultiMentionRoutes(app, {
+      ...(opts.routingDispatchPreflight ? { routingDispatchPreflight: opts.routingDispatchPreflight } : {}),
       messageStore,
       socketManager,
       router,
@@ -6857,15 +6127,6 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     ...(invocationTracker ? { invocationTracker } : {}),
   });
   registerCallbackImageRoutes(app, { registry, socketManager, threadStore, messageStore });
-
-  // F162: WeChat Work enterprise action callback routes
-  registerCallbackWeComActionRoutes(app, { registry });
-
-  // F162 Phase B: Lark/Feishu enterprise action callback routes
-  registerCallbackLarkActionRoutes(app, { registry });
-
-  // F101: Game action callback for non-Claude cats (OpenCode/Codex/Gemini)
-  registerCallbackGameRoutes(app);
 
   // F155: Guide engine — state-validated routes with ThreadStore authority
   if (opts.threadStore) {

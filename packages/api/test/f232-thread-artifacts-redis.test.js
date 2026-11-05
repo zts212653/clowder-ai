@@ -219,7 +219,7 @@ describe('F232 thread artifacts — Redis-backed (AC-A6)', { skip: redisIsolatio
     for (let index = 0; index < 70; index += 1) {
       await store.append({
         userId: 'u',
-        catId: 'codex-sol',
+        from: { kind: 'agent', catId: 'codex-sol' },
         content: `non-work-${index}`,
         mentions: [],
         timestamp: base + index,
@@ -235,7 +235,7 @@ describe('F232 thread artifacts — Redis-backed (AC-A6)', { skip: redisIsolatio
     ]) {
       await store.append({
         userId: 'u',
-        catId: 'opus-48',
+        from: { kind: 'agent', catId: 'opus-48' },
         content: fileName,
         mentions: [],
         timestamp: base + offset,
@@ -250,7 +250,7 @@ describe('F232 thread artifacts — Redis-backed (AC-A6)', { skip: redisIsolatio
     }
     await store.append({
       userId: 'other-owner',
-      catId: 'opus-48',
+      from: { kind: 'agent', catId: 'opus-48' },
       content: 'private work',
       mentions: [],
       timestamp: base + 102,

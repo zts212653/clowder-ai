@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
+const { getCoCreatorConfig } = await import('../dist/config/cat-config-loader.js');
+const coCreator = getCoCreatorConfig();
+const userLabel = coCreator.nickname ?? coCreator.name;
+
 // ─── Bug: timezone-inconsistent prompt timestamps ────────────────────
 //
 // Symptom: timestamps injected into agent prompts used three inconsistent
@@ -27,7 +31,7 @@ describe('format-time — formatPromptTime (UTC-consistent prompt timestamps)', 
     const { formatPromptTime } = await load();
     assert.equal(
       formatPromptTime(Date.UTC(2026, 5, 1, 6, 20, 0, 0), { timeZone: 'America/Los_Angeles' }),
-      'co-creator本地 2026-05-31 23:20 America/Los_Angeles / 2026-06-01 06:20 UTC',
+      `${userLabel}本地 2026-05-31 23:20 America/Los_Angeles / 2026-06-01 06:20 UTC`,
     );
   });
 
@@ -57,7 +61,7 @@ describe('format-time — formatPromptTime (UTC-consistent prompt timestamps)', 
     const { formatPromptTime } = await load();
     assert.equal(
       formatPromptTime(Date.UTC(2026, 6, 6, 3, 14, 0, 0), { timeZone: 'America/Los_Angeles' }),
-      'co-creator本地 2026-07-05 20:14 America/Los_Angeles / 2026-07-06 03:14 UTC',
+      `${userLabel}本地 2026-07-05 20:14 America/Los_Angeles / 2026-07-06 03:14 UTC`,
     );
   });
 
@@ -99,7 +103,7 @@ describe('format-time — formatPromptTimeRange', () => {
     const to = Date.UTC(2026, 5, 1, 7, 5, 0, 0);
     assert.equal(
       formatPromptTimeRange(from, to, { timeZone: 'America/Los_Angeles' }),
-      'co-creator本地 2026-05-31 23:20 — 2026-06-01 00:05 America/Los_Angeles / 2026-06-01 06:20 — 2026-06-01 07:05 UTC',
+      `${userLabel}本地 2026-05-31 23:20 — 2026-06-01 00:05 America/Los_Angeles / 2026-06-01 06:20 — 2026-06-01 07:05 UTC`,
     );
   });
 

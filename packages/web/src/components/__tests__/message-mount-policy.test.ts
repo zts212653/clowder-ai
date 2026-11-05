@@ -17,4 +17,13 @@ describe('messageMountPolicy', () => {
     expect(nearestDeferred.backgroundMountDelayMs).toBeGreaterThan(0);
     expect(oldestDeferred.backgroundMountDelayMs).toBeGreaterThan(nearestDeferred.backgroundMountDelayMs ?? 0);
   });
+
+  it('renders the saved reading window immediately without mounting the whole history', () => {
+    const policies = Array.from({ length: 50 }, (_, index) => messageMountPolicy(index, 50, 20));
+
+    expect(policies.slice(19, 28).every((policy) => policy.eager)).toBe(true);
+    expect(policies.filter((policy) => policy.eager)).toHaveLength(17);
+    expect(policies[0].eager).toBe(false);
+    expect(policies[30].eager).toBe(false);
+  });
 });

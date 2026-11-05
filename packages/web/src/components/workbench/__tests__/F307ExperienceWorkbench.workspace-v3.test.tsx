@@ -2,6 +2,7 @@ import type { ThreadArtifactDTO } from '@cat-cafe/shared';
 import { act, type ComponentProps, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { MAILBOX_NAVIGATE_EVENT } from '@/components/shell/mailbox/mailbox-navigation';
 import { writeShellPresentation } from '@/components/shell/shell-presentation';
 import type { OpenHomeArtifact } from '@/components/workspace-home/HomeWorksSummary';
 import type { WorkspaceToolsContentProps } from '@/components/workspace-home/WorkspaceToolsContent';
@@ -13,9 +14,13 @@ import type { F307WorkbenchTabsProps } from '../F307WorkbenchTabs';
 import {
   artifactObjectId,
   createArtifactSurface,
+  createFileSurface,
+  createWorkspaceDestinationSurface,
   createWorkspaceModeSurface,
+  resolveFileTarget,
   resolvePullRequestChangesTarget,
 } from '../real-surface-adapters';
+import type { WorkspaceSurfaceDescriptor } from '../workbench-contract';
 import { createInitialWorkbenchState } from '../workbench-model';
 
 const probes = vi.hoisted(() => ({
@@ -24,6 +29,7 @@ const probes = vi.hoisted(() => ({
   openArtifact: vi.fn(),
   homeArtifact: null as ThreadArtifactDTO | null,
   homeOrigin: null as Parameters<OpenHomeArtifact>[1] | null,
+  homeSurface: null as WorkspaceSurfaceDescriptor | null,
 }));
 const artifact: ThreadArtifactDTO = {
   type: 'image',
@@ -99,7 +105,17 @@ vi.mock('@/components/workspace-home/WorkspaceHomeV2', () => ({
         type="button"
         data-testid="annotate-probe"
         onClick={() => {
-          if (probes.homeArtifact && probes.homeOrigin) onOpenArtifact?.(probes.homeArtifact, probes.homeOrigin);
+          if (probes.homeArtifact && probes.homeOrigin)
+            onOpenArtifact?.(
+              probes.homeArtifact,
+              probes.homeOrigin,
+              probes.homeSurface ??
+                createArtifactSurface({
+                  threadId: probes.homeOrigin.threadId,
+                  artifact: probes.homeArtifact,
+                  navigationOrigin: probes.homeOrigin,
+                }),
+            );
         }}
       >
         批注
@@ -132,6 +148,7 @@ beforeEach(() => {
   probes.openArtifact.mockClear();
   probes.homeArtifact = artifact;
   probes.homeOrigin = origin;
+  probes.homeSurface = null;
   container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
@@ -159,6 +176,49 @@ async function renderHost(foregroundSurfaceId: string | null = null) {
     ),
   );
 }
+
+it.each(['now', 'needs-me'] as const)('retires a selected persisted %s tab through its current entry', async (id) => {
+  const legacy =
+    id === 'now'
+      ? createWorkspaceDestinationSurface(
+          { kind: 'host', id: 'now', label: '正在发生', description: 'Persisted legacy destination', searchTerms: '' },
+          'thread-a',
+        )
+      : createWorkspaceModeSurface('needs-me', 'thread-a');
+  const other = createWorkspaceModeSurface('schedule', 'thread-a');
+  if (!legacy) throw new Error('Missing persisted legacy destination');
+  useF307ExperienceWorkbenchStore.setState({
+    layout: {
+      ...createInitialWorkbenchState([legacy, other]),
+      activeSurfaceId: legacy.id,
+    },
+  });
+  const mailbox = vi.fn();
+  window.addEventListener(MAILBOX_NAVIGATE_EVENT, mailbox);
+  try {
+    await renderHost(legacy.id);
+    expect(useF307ExperienceWorkbenchStore.getState().layout.surfaces.map((s) => s.id)).toEqual([other.id]);
+    expect(container.querySelector('[data-testid="home-probe"]')).not.toBeNull();
+    expect(mailbox).toHaveBeenCalledTimes(id === 'needs-me' ? 1 : 0);
+    expect(probes.recent).not.toContain(legacy.id);
+  } finally {
+    window.removeEventListener(MAILBOX_NAVIGATE_EVENT, mailbox);
+  }
+});
+
+it('keeps latent legacy tabs until explicitly selected and does not steal another foreground', async () => {
+  const legacy = createWorkspaceModeSurface('needs-me', 'thread-a');
+  const other = createWorkspaceModeSurface('schedule', 'thread-a');
+  useF307ExperienceWorkbenchStore.setState({
+    layout: {
+      ...createInitialWorkbenchState([legacy, other]),
+      activeSurfaceId: legacy.id,
+    },
+  });
+  await renderHost(other.id);
+  expect(useF307ExperienceWorkbenchStore.getState().layout.surfaces.map((s) => s.id)).toContain(legacy.id);
+  expect(container.querySelector('[data-testid="home-probe"]')).toBeNull();
+});
 
 it('supplies the canonical current-host MRU in visit order, without taking tab order or another thread', async () => {
   const a = createWorkspaceModeSurface('artifacts', 'thread-a');
@@ -197,7 +257,22 @@ it('restores a recent closed owner through its original action and records only 
 it('passes the full publication item and signed Home origin to the existing artifact owner', async () => {
   await renderHost();
   await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="annotate-probe"]')?.click());
-  expect(probes.openArtifact).toHaveBeenCalledExactlyOnceWith('thread-a', artifact, origin);
+  expect(useF307ExperienceWorkbenchStore.getState().layout.surfaces).toContainEqual(
+    createArtifactSurface({ threadId: 'thread-a', artifact, navigationOrigin: origin }),
+  );
+  expect(probes.openArtifact).not.toHaveBeenCalled();
+});
+
+it('attaches the already resolved Home file and keeps its original path instead of rebuilding an artifact', async () => {
+  const path = '.cat-cafe/uploads/中文讨论稿.md';
+  probes.homeSurface = createFileSurface({ worktreeId: 'upload-root', path, navigationOrigin: origin });
+  await renderHost();
+  await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="annotate-probe"]')?.click());
+  const state = useF307ExperienceWorkbenchStore.getState().layout;
+  const selected = state.surfaces.find((surface) => surface.id === state.activeSurfaceId);
+  expect(selected).toEqual(probes.homeSurface);
+  expect(resolveFileTarget(selected!)).toMatchObject({ worktreeId: 'upload-root', path });
+  expect(probes.openArtifact).not.toHaveBeenCalled();
 });
 
 it('opens a Home PR in exact Changes and returns to its same canonical card through ordinary Back', async () => {
@@ -274,4 +349,68 @@ it('restores the original Home card identity from a publication without requirin
     origin.artifactId,
   );
   expect(useF307ExperienceWorkbenchStore.getState().layout.surfaces.map((item) => item.id)).toEqual([surface.id]);
+});
+
+function legacyNow() {
+  const surface = createWorkspaceDestinationSurface(
+    {
+      kind: 'host',
+      id: 'now',
+      label: 'Happening now',
+      description: 'Old standalone page',
+      searchTerms: '',
+    },
+    'thread-a',
+  );
+  if (!surface) throw new Error('Expected persisted legacy destination');
+  return surface;
+}
+it('closes the selected persisted now tab and returns to Home while retaining the other tabs', async () => {
+  const old = legacyNow(),
+    other = createWorkspaceModeSurface('schedule', 'thread-a');
+  const layout = createInitialWorkbenchState([other, old]);
+  useF307ExperienceWorkbenchStore.setState({ layout: { ...layout, activeSurfaceId: old.id } });
+  await renderHost(old.id);
+  expect(container.querySelector('[data-testid="home-probe"]')).not.toBeNull();
+  expect(useF307ExperienceWorkbenchStore.getState().layout.surfaces.map((s) => s.id)).toEqual([other.id]);
+});
+it('retains an inactive old now tab until it is selected and does not offer it in recent tools', async () => {
+  const old = legacyNow(),
+    other = createWorkspaceModeSurface('schedule', 'thread-a');
+  useF307ExperienceWorkbenchStore.setState({
+    layout: {
+      ...createInitialWorkbenchState([other, old]),
+      activeSurfaceId: other.id,
+      recentSurfaceIdsByThread: { 'thread-a': [old.id, other.id] },
+    },
+  });
+  await renderHost(other.id);
+  expect(useF307ExperienceWorkbenchStore.getState().layout.surfaces.map((s) => s.id)).toContain(old.id);
+  expect(probes.recent).toEqual([other.id]);
+  await act(async () =>
+    useF307ExperienceWorkbenchStore.getState().dispatch({
+      type: 'activate-surface',
+      surfaceId: old.id,
+      entitlement: { kind: 'user', reason: 'surface-tab' },
+    }),
+  );
+  await renderHost(old.id);
+  expect(container.querySelector('[data-testid="home-probe"]')).not.toBeNull();
+  expect(useF307ExperienceWorkbenchStore.getState().layout.surfaces.map((s) => s.id)).toEqual([other.id]);
+});
+
+it('does not retire an old active-layout hint when the host has restored a different foreground', async () => {
+  const old = legacyNow(),
+    other = createWorkspaceModeSurface('schedule', 'thread-a');
+  useF307ExperienceWorkbenchStore.setState({
+    layout: {
+      ...createInitialWorkbenchState([other, old]),
+      activeSurfaceId: old.id,
+    },
+  });
+  await renderHost(other.id);
+  expect(useF307ExperienceWorkbenchStore.getState().layout.surfaces.map((surface) => surface.id)).toEqual([
+    other.id,
+    old.id,
+  ]);
 });

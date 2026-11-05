@@ -43,7 +43,7 @@ describe('McpPromptInjector', () => {
     const instructions = buildMcpCallbackInstructions({});
 
     assert.ok(instructions.includes('post-message'), 'should list post-message');
-    assert.ok(instructions.includes('register-pr-tracking'), 'should list register-pr-tracking');
+    assert.ok(!instructions.includes('register-pr-tracking'), 'tracking is provided by the installed native MCP');
     assert.ok(instructions.includes('thread-context'), 'should list thread-context');
     assert.ok(instructions.includes('list-threads'), 'should list list-threads');
     assert.ok(instructions.includes('feat-index'), 'should list feat-index');

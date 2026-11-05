@@ -30,19 +30,8 @@ test('F324: final guard preserves successful writes and exact exposure evidence'
   assert.equal(protectToolResponse('cat_cafe_get_thread_context', exposure, true), exposure);
 });
 
-test('F324: final guard keeps multimodal blocks and skips a notice that cannot fit', async () => {
-  const { protectToolResponse, appendFreshnessNoticeWithinBudget, canRequestFreshnessNotice } = await import(
-    '../dist/tool-response-budget.js'
-  );
+test('F324: final guard keeps multimodal blocks without auxiliary notice mutation', async () => {
+  const { protectToolResponse } = await import('../dist/tool-response-budget.js');
   const image = { content: [{ type: 'image', data: 'a'.repeat(50_000), mimeType: 'image/png' }] };
   assert.equal(protectToolResponse('cat_cafe_list_events', image, true), image);
-  const initial = { content: [{ type: 'text', text: 'x'.repeat(23_990) }] };
-  const appended = appendFreshnessNoticeWithinBudget(initial, 'new unread message');
-  assert.equal(appended.appended, false);
-  assert.equal(appended.result, initial);
-  assert.equal(
-    canRequestFreshnessNotice(initial),
-    false,
-    'do not call an API that records notice delivery when the result has no reserved room',
-  );
 });

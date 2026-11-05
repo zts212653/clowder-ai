@@ -41,7 +41,6 @@ export class ExternalStdioBehaviorAdapter {
     this.#roots.push(packageRoot, hostRoot);
     const packagesRoot = join(packageRoot, 'packages');
     const manifest = externalManifest();
-    manifest.features[0].capabilities = [...this.behaviorCase.given.grants];
     const [
       { NodeExternalPluginProcessAdapter, FilesystemVerifiedPluginPackageLocator, packageDirectoryName },
       handlers,
@@ -60,7 +59,6 @@ export class ExternalStdioBehaviorAdapter {
     const harness = await createExternalRuntimeHarness({
       rootDir: hostRoot,
       manifest,
-      effectiveGrants: this.behaviorCase.given.grants,
       packageDigest,
       methods: handlers.createMessagingBrokerHandlers({ messaging: this.#owner.messaging }),
     });

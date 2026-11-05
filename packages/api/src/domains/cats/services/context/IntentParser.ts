@@ -12,6 +12,7 @@
  * - 托付或获准开发/续做信号 → skill:custody-recognition (只唤醒政策，不拥有 Task/时间真相)
  */
 
+import { getCoCreatorConfig } from '../../../../config/cat-config-loader.js';
 import { classifyEntrustedWorkSourceTime } from '../../../growing/EntrustedWorkSourceSignals.js';
 
 export type Intent = 'ideate' | 'execute';
@@ -75,7 +76,16 @@ const DEVELOPMENT_CONDITION_RELEASE =
   /(?:不(?:用|必|需要|要)?|无(?:需|须)|先别|别)\s*等(?:待|到)?(?:方案|批准|确认|评估)?(?:通过|完成)?(?:了)?/u;
 const DEVELOPMENT_CONDITIONAL =
   /(?:如果|假如|要是|除非|等(?:到|方案|批准|确认|评估)|待(?:方案|批准|确认)|(?:通过|批准|确认)后)/u;
-const DEVELOPMENT_REPORTED = /^(?:他|她|用户|文档|记录|笔记|日志|You).{0,12}(?:说过|说|提过|提到|写着|写道|记着)/u;
+const DEVELOPMENT_REPORTED = /^(?:他|她|用户|文档|记录|笔记|日志).{0,12}(?:说过|说|提过|提到|写着|写道|记着)/u;
+const REPORTED_AFTER_NAME = /^.{0,12}(?:说过|说|提过|提到|写着|写道|记着)/u;
+
+function isReportedDevelopment(text: string): boolean {
+  if (DEVELOPMENT_REPORTED.test(text)) return true;
+  const owner = getCoCreatorConfig();
+  return [owner.name, ...owner.aliases].some(
+    (name) => name.length > 0 && text.startsWith(name) && REPORTED_AFTER_NAME.test(text.slice(name.length)),
+  );
+}
 const LEADING_CONTROL_PREFIX = /^\s*(?:(?:@[\p{L}\p{N}_.-]+|#(?:ideate|execute|critique))\s+)+/iu;
 const DEVELOPMENT_SIGNALS = [
   DEVELOPMENT_ACTION,
@@ -109,7 +119,7 @@ function hasActionableDevelopmentSentence(sentence: string): boolean {
   let reported = false;
   for (const clause of sentence.split(/[，,]/u)) {
     const text = clause.replace(/[。！!；;]+$/u, '').trim();
-    if (DEVELOPMENT_REPORTED.test(text)) reported = true;
+    if (isReportedDevelopment(text)) reported = true;
     if (reported) continue;
     const condition = resolveDevelopmentCondition(text, conditional);
     conditional = condition.pending;

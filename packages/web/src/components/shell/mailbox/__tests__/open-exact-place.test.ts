@@ -5,6 +5,9 @@ const calls = vi.hoisted(() => ({
   remembered: 'thread-return' as string | null,
   navigate: vi.fn(),
   push: vi.fn(),
+  mode: vi.fn(),
+  dispatch: vi.fn(),
+  foreground: vi.fn(),
 }));
 
 vi.mock('@/hooks/useWorkspaceNavigate', async (importOriginal) => ({
@@ -24,7 +27,14 @@ vi.mock('@/components/ThreadSidebar/thread-navigation', async (importOriginal) =
   },
 }));
 vi.mock('@/stores/chatStore', () => ({
-  useChatStore: { getState: () => ({ currentThreadId: calls.remembered }) },
+  useChatStore: { getState: () => ({ currentThreadId: calls.remembered, setWorkspaceMode: calls.mode }) },
+}));
+
+vi.mock('@/components/workbench/experience-workbench-store', () => ({
+  useF307ExperienceWorkbenchStore: { getState: () => ({ dispatch: calls.dispatch }) },
+}));
+vi.mock('@/components/workbench/workspace-presentation-lock', () => ({
+  rememberWorkspaceForeground: calls.foreground,
 }));
 
 import { openExactPlace } from '../open-exact-place';
@@ -36,6 +46,24 @@ describe('opening an exact source from wherever the user is', () => {
     calls.order.length = 0;
     calls.remembered = 'thread-return';
     vi.clearAllMocks();
+  });
+
+  it('opens an exact review in the existing F307 owner instead of sending it to a retired list', () => {
+    const reviewId = `review-${'a'.repeat(64)}`;
+    openExactPlace(`workspace:content-review:review-thread:${reviewId}`, '/thread/current');
+    expect(calls.mode).toHaveBeenCalledWith('dev');
+    expect(calls.dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'open-surface',
+        surface: expect.objectContaining({
+          id: `content-review:${reviewId}`,
+          ownerStateRef: { owner: 'f309-content-review', key: reviewId },
+        }),
+      }),
+    );
+    expect(calls.navigate).not.toHaveBeenCalled();
+    expect(calls.push).not.toHaveBeenCalled();
+    expect(calls.foreground).toHaveBeenCalledOnce();
   });
 
   it.each([

@@ -124,7 +124,7 @@ describe('ChatInput context picker', () => {
     expect(menu?.textContent).toContain('引用 Thread 或文件');
     expect(menu?.textContent).toContain('上传附件');
     expect(menu?.textContent).toContain('悄悄话');
-    expect(menu?.textContent).toContain('游戏');
+    expect(menu?.textContent).not.toContain('游戏');
   });
 
   it('opens context from the unified add menu and adds a selected thread attachment', () => {

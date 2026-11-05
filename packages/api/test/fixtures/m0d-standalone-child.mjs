@@ -82,9 +82,6 @@ function hostRequest(value) {
   if (value.method === 'host.lifecycle.ping') {
     return { jsonrpc: '2.0', id: value.id, result: { nonce: input.nonce } };
   }
-  if (value.method === 'host.lifecycle.drain') {
-    return { jsonrpc: '2.0', id: value.id, result: null };
-  }
   if (value.method === 'host.messaging.deliver') {
     const deliveryId = input.deliveryId;
     if (typeof deliveryId !== 'string' || deliveryId.length === 0) throw new Error('Host delivery omitted deliveryId');

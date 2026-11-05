@@ -1,3 +1,28 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/*
+ * Docs content: keep badge rows horizontal.
+ *
+ * Tailwind preflight sets `img { display: block }`. A README that puts several
+ * badges on consecutive lines renders them as one <p> full of <a><img></a>, so
+ * every badge becomes a block and the row stacks vertically — six badges turn
+ * into six lines. README is the default document in the docs viewer, so this
+ * is the first thing a visitor sees.
+ *
+ * Scoped to the docs article: the homepage positions its own images and must
+ * keep preflight's block behavior.
+ */
+#doc-content img {
+  display: inline-block;
+  vertical-align: middle;
+}
+
+/*
+ * Badge rows need explicit spacing: preflight zeroes vertical margins and
+ * inline images sit flush against each other without it.
+ */
+#doc-content p > a > img {
+  margin: 0.125rem 0.375rem 0.125rem 0;
+}

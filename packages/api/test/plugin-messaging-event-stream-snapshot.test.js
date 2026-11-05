@@ -178,10 +178,61 @@ describe('EventStreamService — stale + snapshot (INV-9)', () => {
     );
   });
 
-  test('snapshot excludes host messages outside the plugin event domain', async () => {
+  test('historical presentation metadata cannot invalidate snapshot or append', async () => {
     const handleId = await issueHandle();
     const { subscriptionId } = await stream.subscribe(CTX, handleId);
-    // Insert host-only messages that have no corresponding plugin event.
+    const sent = await sendService.send(CTX, {
+      address: { kind: 'thread_handle', handle: handleId },
+      idempotencyKey: 'snapshot-historical-presentation',
+      payload: {
+        provenance: { epistemicStatus: 'inference' },
+        elements: [{ elementId: 'el-1', kind: 'text', payload: { text: 'historical body' } }],
+      },
+    });
+    const stored = messageStore.getById(sent.messageId);
+    stored.extra.pluginMessage = {
+      ...stored.extra.pluginMessage,
+      presentation: {
+        connector: 'github-operations',
+        label: 'GitHub',
+        icon: 'github',
+        url: 'https://github.com/owner/repo/pull/42',
+      },
+    };
+
+    const append = new appendMod.AppendService({
+      messageStore,
+      handles,
+      ledger: new ledgerMod.MessagingLedger(new memory.MemoryLedgerStore()),
+      events,
+      appendLock: new memory.MemoryAppendLock(),
+    });
+    await append.appendElements(CTX, {
+      handle: sent.messageHandle,
+      operationId: 'append-after-historical-presentation',
+      elements: [{ elementId: 'el-2', kind: 'text', payload: { text: 'still appendable' } }],
+    });
+
+    const result = await stream.snapshot(CTX, subscriptionId);
+    assert.equal(result.envelopes.length, 1);
+    assert.equal(result.envelopes[0].revision, 2);
+    assert.deepEqual(
+      result.envelopes[0].payload.elements.map((element) => element.payload.text),
+      ['historical body', 'still appendable'],
+    );
+    assert.deepEqual(messageStore.getById(sent.messageId).extra.pluginMessage.presentation, {
+      connector: 'github-operations',
+      label: 'GitHub',
+      icon: 'github',
+    });
+  });
+
+  // W2-5b-0: Host messages are on the stream since G5 (the publishing seam), so the catch-up
+  // snapshot carries them too. The old exclusion ("host mutations are not represented by the plugin
+  // event log") predates G5 and left a catching-up subscriber without any cat or user message.
+  test('snapshot carries host messages alongside plugin messages', async () => {
+    const handleId = await issueHandle();
+    const { subscriptionId } = await stream.subscribe(CTX, handleId);
     for (let index = 0; index < 205; index += 1) {
       messageStore.append(
         canonicalTestMessageInput({
@@ -204,10 +255,16 @@ describe('EventStreamService — stale + snapshot (INV-9)', () => {
       },
     });
     const result = await stream.snapshot(CTX, subscriptionId);
-    // Only the plugin message appears; all 205 host messages are excluded
-    // because their mutations are not represented by the plugin event log.
-    assert.equal(result.envelopes.length, 1);
-    assert.equal(result.envelopes[0].payload.elements[0].payload.text, 'plugin only');
+    assert.equal(result.envelopes.length, 206);
+    assert.deepEqual(
+      result.envelopes.slice(0, 3).map((envelope) => [envelope.actor.kind, envelope.payload.elements[0].payload.text]),
+      [
+        ['user', 'host message 0'],
+        ['user', 'host message 1'],
+        ['user', 'host message 2'],
+      ],
+    );
+    assert.equal(result.envelopes[205].payload.elements[0].payload.text, 'plugin only');
     assert.equal(result.resumeSequence, 1);
   });
 
@@ -350,7 +407,7 @@ describe('EventStreamService — stale + snapshot (INV-9)', () => {
     });
     const snap = await stream.snapshot(CTX, subscriptionId);
     const texts = snap.envelopes.map((envelope) => envelope.payload.elements[0]?.payload.text);
-    assert.deepEqual(texts, ['plugin visible']);
+    assert.deepEqual(texts, ['public user content', 'plugin visible']);
   });
 
   test('race regression: host message injected during scan does not leak into plugin snapshot', async () => {

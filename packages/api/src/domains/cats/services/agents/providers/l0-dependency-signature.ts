@@ -1,4 +1,5 @@
-import { existsSync, readdirSync, statSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { SHARED_RULES_RELPATH } from '../../context/governance-l0.js';
 
@@ -17,11 +18,13 @@ function findWorkspaceRoot(start: string): string {
   return resolve(start);
 }
 
-function addStatFingerprint(filePath: string, label: string, entries: string[]): boolean {
+function addDependencyFingerprint(filePath: string, label: string, entries: string[]): boolean {
   try {
     const stat = statSync(filePath);
+    // Rapid equal-length edits and timestamp-preserving copies can retain both size and mtime.
+    const contentHash = stat.isFile() ? createHash('sha256').update(readFileSync(filePath)).digest('hex') : '';
     entries.push(
-      `${label}\t${stat.isDirectory() ? 'dir' : stat.isFile() ? 'file' : 'other'}\t${stat.size}\t${stat.mtimeMs}`,
+      `${label}\t${stat.isDirectory() ? 'dir' : stat.isFile() ? 'file' : 'other'}\t${stat.size}\t${stat.mtimeMs}\t${contentHash}`,
     );
     return true;
   } catch (error) {
@@ -34,7 +37,7 @@ function addStatFingerprint(filePath: string, label: string, entries: string[]):
 }
 
 function collectDirectoryFingerprints(dirPath: string, label: string, entries: string[]): boolean {
-  if (!addStatFingerprint(dirPath, label, entries)) return false;
+  if (!addDependencyFingerprint(dirPath, label, entries)) return false;
   if (!existsSync(dirPath)) return true;
 
   let dirents: Array<{ name: string; isDirectory(): boolean }>;
@@ -50,7 +53,7 @@ function collectDirectoryFingerprints(dirPath: string, label: string, entries: s
     const childLabel = `${label}/${dirent.name}`;
     if (dirent.isDirectory()) {
       if (!collectDirectoryFingerprints(childPath, childLabel, entries)) return false;
-    } else if (!addStatFingerprint(childPath, childLabel, entries)) return false;
+    } else if (!addDependencyFingerprint(childPath, childLabel, entries)) return false;
   }
   return true;
 }
@@ -60,7 +63,7 @@ function computeSignature(cwd: string, scriptPath: string): string | null {
   const workspaceRoot = findWorkspaceRoot(cwd);
   const entries: string[] = [];
   if (
-    !addStatFingerprint(
+    !addDependencyFingerprint(
       resolve(repoRoot, 'assets/system-prompts/system-prompt-l0.md'),
       'assets/system-prompts/system-prompt-l0.md',
       entries,
@@ -69,10 +72,10 @@ function computeSignature(cwd: string, scriptPath: string): string | null {
   ) {
     return null;
   }
-  if (!addStatFingerprint(resolve(repoRoot, 'docs/team/cat-dossier.md'), 'docs/team/cat-dossier.md', entries))
+  if (!addDependencyFingerprint(resolve(repoRoot, 'docs/team/cat-dossier.md'), 'docs/team/cat-dossier.md', entries))
     return null;
   for (const relPath of GOVERNANCE_RULES_RELPATHS) {
-    if (!addStatFingerprint(resolve(repoRoot, relPath), relPath, entries)) return null;
+    if (!addDependencyFingerprint(resolve(repoRoot, relPath), relPath, entries)) return null;
   }
   if (
     !collectDirectoryFingerprints(

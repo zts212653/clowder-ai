@@ -101,7 +101,7 @@ function dropLocalVerdictBranch(repo) {
 
 function createTestRefresher(deps) {
   return createGitVerdictPrRefresher({
-    expectedRepoFullName: 'zts212653/cat-cafe',
+    expectedRepoFullName: 'zts212653/clowder-ai',
     identityRunner: async () => {},
     contractRunner: async () => {},
     commitStatusPublisher: async () => {},
@@ -116,7 +116,7 @@ describe('git verdict PR refresher', () => {
     try {
       const refresh = createGitVerdictPrRefresher({
         repoRoot: repo,
-        expectedRepoFullName: 'zts212653/cat-cafe',
+        expectedRepoFullName: 'zts212653/clowder-ai',
         identityRunner: async () => {
           throw new Error('effective push target mismatch');
         },
@@ -188,7 +188,7 @@ describe('git verdict PR refresher', () => {
       assert.equal(publicationEvents[0].input.sourceRef, 'HEAD');
       assert.equal(publicationEvents[0].input.baseRef, 'origin/main');
       assert.deepEqual(publicationEvents[1].input, {
-        repoFullName: 'zts212653/cat-cafe',
+        repoFullName: 'zts212653/clowder-ai',
         headSha: newHead,
         statuses: [
           {

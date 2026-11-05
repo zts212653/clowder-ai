@@ -1,4 +1,5 @@
 'use client';
+import { LOCAL_SESSION_IMPORT_TOOLS, type LocalSessionClientId } from '@cat-cafe/shared';
 import { useEffect, useState } from 'react';
 import { useCatData } from '@/hooks/useCatData';
 import { useChatStore } from '@/stores/chatStore';
@@ -12,7 +13,7 @@ import { sessionActivity, sessionActivityDetail } from './session-import-present
 interface ImportedSession {
   catId: string;
   cliSessionId: string;
-  clientId: 'openai' | 'anthropic';
+  clientId: LocalSessionClientId;
   lastActivityAt: number;
 }
 
@@ -44,7 +45,8 @@ export function ImportedSessionNotice({ threadId }: { threadId: string }) {
       aria-label={copy.connected}
     >
       <p className="leading-relaxed">
-        {copy.connectedPrefix} {imported.clientId === 'openai' ? 'Codex' : 'Claude Code'} {copy.connectedSuffix}
+        {copy.connectedPrefix} {LOCAL_SESSION_IMPORT_TOOLS.find((tool) => tool.clientId === imported.clientId)?.label}{' '}
+        {copy.connectedSuffix}
         {' · '}
         {copy.lastActivity}
         {copy.separator}
@@ -52,7 +54,9 @@ export function ImportedSessionNotice({ threadId }: { threadId: string }) {
           {sessionActivity(imported.lastActivityAt, language, copy.unknownTime)}
         </span>
         {' · '}
-        {name} {copy.continuation}
+        {name}
+        {language === 'zh' ? '' : ' '}
+        {copy.continuation}
       </p>
     </aside>
   );

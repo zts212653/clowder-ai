@@ -15,6 +15,8 @@ interface ScrollAnchor {
   threadId: string;
   /** Distance from container top to the anchor element top (px) */
   offsetFromTop: number;
+  /** Scroll-independent position: a viewport move alone is not a row reorder. */
+  contentTop: number;
 }
 
 interface SelectedThreadState {
@@ -140,6 +142,7 @@ export function useScrollAnchor(
         anchorRef.current = {
           threadId,
           offsetFromTop: rect.top - visibleTop,
+          contentTop: rect.top - container.getBoundingClientRect().top + container.scrollTop,
         };
         return;
       }
@@ -151,6 +154,30 @@ export function useScrollAnchor(
     persistScrollTop();
     captureAnchor();
   }, [captureAnchor, persistScrollTop]);
+
+  // A previous route's position may remain unreachable after groups collapse
+  // or rows are removed. Once the user browses, that old restore must not keep
+  // retrying on every live snapshot and pull them back to the list's boundary.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const takeControl = () => {
+      pendingRestoreRef.current = null;
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) takeControl();
+    };
+    container.addEventListener('wheel', takeControl, { passive: true });
+    container.addEventListener('touchstart', takeControl, { passive: true });
+    container.addEventListener('pointerdown', takeControl, { passive: true });
+    container.addEventListener('keydown', onKeyDown);
+    return () => {
+      container.removeEventListener('wheel', takeControl);
+      container.removeEventListener('touchstart', takeControl);
+      container.removeEventListener('pointerdown', takeControl);
+      container.removeEventListener('keydown', onKeyDown);
+    };
+  }, [containerRef]);
 
   /** Preserve the latest position even if the sidebar unmounts immediately after a click.
    *  Writes from lastScrollTopRef — NOT from containerRef which may be detached. */
@@ -208,6 +235,14 @@ export function useScrollAnchor(
 
     const visibleTop = getVisibleTop(container);
     const elTop = el.getBoundingClientRect().top;
+    const contentTop = elTop - container.getBoundingClientRect().top + container.scrollTop;
+    if (Math.abs(contentTop - anchor.contentTop) <= DRIFT_TOLERANCE_PX) {
+      // Native scrolling can precede its coalesced scroll event. A status-only
+      // snapshot must adopt that position rather than restore a stale offset.
+      captureAnchor();
+      persistScrollTop();
+      return;
+    }
     const drift = elTop - visibleTop - anchor.offsetFromTop;
 
     if (Math.abs(drift) > DRIFT_TOLERANCE_PX) {
@@ -221,9 +256,10 @@ export function useScrollAnchor(
     anchorRef.current = {
       ...anchor,
       offsetFromTop: el.getBoundingClientRect().top - getVisibleTop(container),
+      contentTop,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- containerRef is a live ref, not a dependency
-  }, [persistScrollTop, reorderProjection]);
+  }, [captureAnchor, persistScrollTop, reorderProjection]);
 
   const selectedThread = options.selectedThread;
   const selectedThreadId = selectedThread ? selectedThread.threadId : null;

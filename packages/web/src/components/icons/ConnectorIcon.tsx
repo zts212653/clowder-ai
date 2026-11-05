@@ -1,5 +1,6 @@
 import type { ConnectorIconSpec } from '@cat-cafe/shared';
 import type { ComponentType } from 'react';
+import { HubIcon } from '../hub-icons';
 import {
   AuthKeyIcon,
   ConnectorImage,
@@ -49,6 +50,7 @@ export function ConnectorIcon({
   if (fallbackIcon?.startsWith('/') || fallbackIcon?.startsWith('http')) {
     return <ConnectorImage src={fallbackIcon} alt="connector" className={className} />;
   }
+  if (fallbackIcon === 'message') return <HubIcon name="message-circle" className={className} />;
   if (fallbackIcon) return <span className={className}>{fallbackIcon}</span>;
   return <RobotIcon className={className} />;
 }

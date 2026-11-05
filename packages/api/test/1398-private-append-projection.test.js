@@ -12,7 +12,7 @@ const owned = ownedRedisFixture('f117-private-append');
 
 for (const backend of ['memory', 'Redis']) {
   for (const mixed of [false, true]) {
-    test(`${backend} ${mixed ? 'mixed' : 'private'} Append keeps private IDs out of durable public response, including replay/rejection/reopen`, async () => {
+    test(`${backend} ${mixed ? 'mixed' : 'private'} Append keeps private IDs out of durable public response, including replay/reopen`, async () => {
       const client = backend === 'Redis' ? owned.client(`private-append:${randomUUID()}:`) : undefined;
       const store = client ? new RedisMessageStore(client, { ttlSeconds: 0 }) : new MessageStore();
       try {
@@ -91,35 +91,6 @@ for (const backend of ['memory', 'Redis']) {
         assert.equal((await store.commitLifecycleAppendAdmission(admission)).kind, 'replayed');
         const reopened = client ? new RedisMessageStore(client, { ttlSeconds: 0 }) : store;
         assert.deepEqual((await reopened.getById(response.id)).lifecycle.inputMessageIds, expectedIds);
-        const failures = await Promise.all(
-          inputs.map((m) =>
-            store.append({
-              userId: 'owner',
-              threadId: 'thread',
-              from: { kind: 'system', service: 'message-delivery' },
-              content: 'carrier rejected',
-              mentions: [],
-              timestamp: 30,
-              ...(m.visibility === 'whisper' ? { visibility: 'whisper', whisperTo: m.whisperTo } : {}),
-              lifecycle: {
-                kind: 'delivery_failure',
-                orderKey: `30:failure:${m.id}`,
-                status: 'failed',
-                sourceEntryId: 'append-entry',
-                inputMessageId: m.id,
-                requestedTargets: ['opus'],
-                reason: 'control_carrier_replaced',
-                createdAt: 30,
-              },
-            }),
-          ),
-        );
-        const rejection = { ...admission, run: admission.runs[0], failureMessageIds: failures.map((m) => m.id) };
-        assert.equal((await store.commitLifecycleAppendRejection(rejection)).kind, 'applied');
-        assert.deepEqual((await reopened.getById(response.id)).lifecycle.inputMessageIds, [original.id]);
-        assert.deepEqual((await reopened.getById(response.id)).lifecycle.inputEntryIds, ['original-entry']);
-        assert.equal((await store.getById(secret.id)).lifecycle.dispatchRefs[0].statusMessageId, failures[0].id);
-        assert.equal((await store.commitLifecycleAppendRejection(rejection)).kind, 'replayed');
         if (client) assert.equal(await client.ttl(`msg:${response.id}`), -1);
       } finally {
         client?.disconnect();

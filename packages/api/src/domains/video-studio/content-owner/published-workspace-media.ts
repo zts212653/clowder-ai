@@ -8,7 +8,8 @@ import { workspaceSnapshotSourceRef } from './publication.js';
 import type { MediaReviewPrincipal } from './published-media-access.js';
 import type { WorkspaceSnapshotPublicationScopeV1 } from './types.js';
 
-export type WorkspaceMediaSourcePort = Pick<WorkspaceContentSourceService, 'describe' | 'openMedia'>;
+export type WorkspaceMediaSourcePort = Pick<WorkspaceContentSourceService, 'describe' | 'openMedia'> &
+  Partial<Pick<WorkspaceContentSourceService, 'describeFileReference'>>;
 
 export async function assertWorkspaceSnapshotVisible(
   workspace: WorkspaceMediaSourcePort | undefined,
@@ -55,6 +56,22 @@ export async function resolveWorkspaceSnapshot(
   return {
     scope,
     publication,
+    ...(current.mime === 'video/mp4'
+      ? {
+          openVideo: async () => {
+            const opened = await workspace.openMedia({
+              principal: { userId: principal.userId },
+              locator: current.locator,
+              expectedRevision: source.expectedSourceRevision,
+            });
+            if (opened.contentRef !== current.contentRef) {
+              opened.stream.destroy();
+              throw new MediaOwnerError('publication_changed');
+            }
+            return opened;
+          },
+        }
+      : {}),
     load: async () => {
       const opened = await workspace.openMedia({
         principal: { userId: principal.userId },

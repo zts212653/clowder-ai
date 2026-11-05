@@ -437,4 +437,48 @@ describe('runtime interaction contract', () => {
     expect(JSON.stringify(redacted)).not.toContain('ordinary-value');
     expect(JSON.stringify(redacted)).not.toContain('super-secret-value');
   });
+
+  it('retains only indexes of predefined non-secret choices, never secret or free-text answers', () => {
+    const question = parseRuntimeInteractionRequest({
+      version: 1,
+      interactionId: 'choice-receipt',
+      kind: 'question',
+      owner,
+      provider,
+      createdAt: 1000,
+      title: 'Choose the environment',
+      questions: [
+        {
+          id: 'environment',
+          header: 'Environment',
+          question: 'Where?',
+          options: [{ label: 'Alpha' }, { label: 'Production' }],
+        },
+        {
+          id: 'secret',
+          header: 'Secret',
+          question: 'Private choice?',
+          isSecret: true,
+          options: [{ label: 'private-a' }, { label: 'private-b' }],
+        },
+        { id: 'custom', header: 'Other', question: 'Other environment?', isOther: true, options: [{ label: 'Alpha' }] },
+      ],
+    });
+    const answer = parseRuntimeInteractionResponse(question, {
+      kind: 'answers',
+      answers: {
+        environment: ['Production'],
+        secret: ['private-b'],
+        custom: ['unlisted-private-value'],
+      },
+    });
+    const redacted = redactRuntimeInteractionResponse(question, answer);
+    expect(redacted).toEqual({
+      kind: 'answers',
+      answeredQuestionIds: ['environment', 'secret', 'custom'],
+      secretQuestionIds: ['secret'],
+      selectedOptionIndexes: { environment: [1] },
+    });
+    expect(JSON.stringify(redacted)).not.toMatch(/Production|private-b|unlisted-private-value/);
+  });
 });

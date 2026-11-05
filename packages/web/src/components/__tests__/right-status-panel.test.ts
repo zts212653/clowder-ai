@@ -90,7 +90,7 @@ describe('RightStatusPanel', () => {
     expect(html).toContain('运行日志');
     expect(html).toContain('对话 ID：');
     expect(html).toContain('test-thread');
-    expect(html).toContain('ChatGPT 对话');
+    expect(html).toContain('ChatGPT 会话');
     expect(html.indexOf('data-testid="cloud-conversation-link"')).toBeLessThan(html.indexOf('对话信息'));
     expect(html).toContain('布偶猫');
     expect(html).toContain('缅因猫');

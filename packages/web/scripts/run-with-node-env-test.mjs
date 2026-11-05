@@ -5,9 +5,29 @@ import { fileURLToPath } from 'node:url';
 import { acquireBrowserTestResourceLease, commandRunsBrowserTests } from './browser-test-resource-lease.mjs';
 
 const commandArgs = process.argv.slice(2);
-const coreSmoke = commandArgs[0] === '--core-smoke';
-if (coreSmoke) commandArgs.shift();
+const envOverrides = {};
+let coreSmoke = false;
+while (commandArgs.length > 0) {
+  if (commandArgs[0] === '--core-smoke') {
+    coreSmoke = true;
+    commandArgs.shift();
+    continue;
+  }
+  if (commandArgs[0] === '--env') {
+    const assignment = commandArgs[1];
+    const separator = assignment?.indexOf('=') ?? -1;
+    if (!assignment || separator <= 0 || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(assignment.slice(0, separator))) {
+      console.error('Usage: --env requires NAME=value');
+      process.exit(2);
+    }
+    envOverrides[assignment.slice(0, separator)] = assignment.slice(separator + 1);
+    commandArgs.splice(0, 2);
+    continue;
+  }
+  break;
+}
 const [cmd, ...args] = commandArgs;
+const baseEnv = { ...process.env, ...envOverrides };
 const scriptPath = fileURLToPath(import.meta.url);
 const gateResourceRunnerPath = resolve(dirname(scriptPath), '../../../scripts/run-with-gate-resource-permit.mjs');
 const BROWSER_RESOURCE_STAGES = new Set(['standalone-web-browser', 'test-web-browser']);
@@ -125,7 +145,7 @@ if (coreSmoke && browserPermitState(process.env) !== 'absent') {
   );
   process.exit(1);
 }
-const admissionEnv = coreSmoke ? { ...process.env, CAT_CAFE_GATE_EXECUTION_SLA_MS: '300000' } : process.env;
+const admissionEnv = coreSmoke ? { ...baseEnv, CAT_CAFE_GATE_EXECUTION_SLA_MS: '300000' } : baseEnv;
 if (runsBrowserTests && existsSync(gateResourceRunnerPath)) {
   const permitState = browserPermitState(process.env);
   if (permitState === 'invalid') {
@@ -171,7 +191,7 @@ if (coreSmoke && browserTestLease) {
 
 await spawnAndRelay(
   cmd,
-  addNodeTimingReporters(cmd, args, process.env),
+  addNodeTimingReporters(cmd, args, baseEnv),
   {
     ...admissionEnv,
     CAT_CAFE_DEPLOYMENT_ID: 'test',

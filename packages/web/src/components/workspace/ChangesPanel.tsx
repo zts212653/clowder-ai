@@ -4,6 +4,8 @@ import type { PullRequestChangesTarget } from '@cat-cafe/shared';
 import { useLayoutEffect, useState } from 'react';
 import { useShellPresentation } from '@/components/shell/shell-presentation';
 import { ThreadNativeReviewSettingsContent } from '@/components/ThreadSidebar/ThreadNativeReviewSettings';
+import type { CommitChangesTarget } from '../workbench/commit-changes-surface';
+import { ChangesDiffPlaceholder } from './ChangesDiffPlaceholder';
 import { ChangesPanelV2 } from './ChangesPanelV2';
 import { DiffViewer } from './DiffViewer';
 import { FileIcon } from './FileIcons';
@@ -29,11 +31,19 @@ interface ChangesPanelProps {
   threadId?: string | null;
   onOpenFile?: (path: string) => void;
   pullRequestTarget?: PullRequestChangesTarget;
+  commitTarget?: CommitChangesTarget;
   onBack?: () => void;
 }
 
-function ChangesPanelClassic({ worktreeId, basisPct, threadId, pullRequestTarget, onBack }: ChangesPanelProps) {
-  const { data, loading, error, refresh, targetKey } = useChangesDiff(worktreeId, pullRequestTarget);
+function ChangesPanelClassic({
+  worktreeId,
+  basisPct,
+  threadId,
+  pullRequestTarget,
+  commitTarget,
+  onBack,
+}: ChangesPanelProps) {
+  const { data, loading, error, refresh, targetKey } = useChangesDiff(worktreeId, pullRequestTarget, commitTarget);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   useLayoutEffect(() => setSelectedFile(null), [targetKey]);
 
@@ -44,7 +54,13 @@ function ChangesPanelClassic({ worktreeId, basisPct, threadId, pullRequestTarget
   return (
     <div className="flex flex-col min-h-0 flex-1">
       {pullRequestTarget && (
-        <PullRequestChangesStatus target={pullRequestTarget} data={data} error={error} onBack={onBack} />
+        <PullRequestChangesStatus
+          target={pullRequestTarget}
+          data={data}
+          error={error}
+          onBack={onBack}
+          onRetry={() => void refresh()}
+        />
       )}
       {threadId && !pullRequestTarget && (
         <details
@@ -113,9 +129,12 @@ function ChangesPanelClassic({ worktreeId, basisPct, threadId, pullRequestTarget
         {data?.diff ? (
           <DiffViewer diff={data.diff} filePath={selectedFile ?? undefined} />
         ) : (
-          <div className="p-4 text-center text-cafe-secondary text-xs">
-            {loading ? 'Loading...' : 'Select a file to view diff'}
-          </div>
+          <ChangesDiffPlaceholder
+            loading={loading}
+            failed={Boolean(pullRequestTarget && error)}
+            loadingLabel="Loading..."
+            selectFileLabel="Select a file to view diff"
+          />
         )}
       </div>
     </div>

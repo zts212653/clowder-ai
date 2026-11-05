@@ -15,6 +15,7 @@
  */
 [data-shell="v2"] .home-v2 {
   background: var(--shell-work);
+  --chat-background-role: work;
   container-type: inline-size;
   container-name: home;
 }
@@ -33,6 +34,7 @@
   padding: 12px 14px 6px;
   border-radius: 12px;
   background: var(--shell-paper);
+  --chat-background-role: paper;
   box-shadow: inset 0 0 0 1px var(--shell-hairline-strong);
 }
 
@@ -56,7 +58,7 @@
 }
 
 [data-shell="v2"] .home-dot[data-tone="wait"] {
-  background: var(--shell-critical);
+  background: var(--semantic-warning);
 }
 
 [data-shell="v2"] .home-card-title {
@@ -113,6 +115,7 @@
 
 [data-shell="v2"] .home-btn:hover {
   background: color-mix(in srgb, var(--shell-selected) 55%, transparent);
+  --chat-background-role: navigation-hover;
 }
 
 [data-shell="v2"] .home-stop {
@@ -205,6 +208,7 @@
   border-radius: 4px;
   padding: 1px 3px;
   background: var(--shell-selected);
+  --chat-background-role: selected;
   color: var(--shell-body);
 }
 [data-shell="v2"] .home-live-main {
@@ -222,24 +226,6 @@
 }
 
 /* 等待与接回 */
-[data-shell="v2"] .home-wait-row {
-  padding: 8px 0;
-  border-top: 1px solid var(--shell-hairline);
-}
-
-[data-shell="v2"] .home-wait-main {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-[data-shell="v2"] .home-wait-title {
-  flex: 1;
-  min-width: 0;
-  font-weight: 600;
-  color: var(--shell-ink);
-}
-
 [data-shell="v2"] .home-wait-line {
   display: block;
   margin-top: 2px;

@@ -28,6 +28,21 @@ function queueInput(overrides = {}) {
 }
 
 describe('InvocationQueue ADR-043 adapter', () => {
+  it('does not let a stale full-body read adopt an owner-held routing target', async () => {
+    const queue = new InvocationQueue();
+    const { entry } = await queue.enqueueDurable(queueInput());
+    await queue.markProcessingByIdDurable('thread-1', entry.id, 'opus');
+    await queue.holdClaimedRoutingTarget('thread-1', [entry.id], 'opus', {
+      getById: async () => ({ id: entry.payload.messageId, threadId: 'thread-1', userId: 'user-1' }),
+    });
+    await queue.restoreClaimedEntries('thread-1', [entry.id]);
+    assert.deepEqual(queue.getQueuedBodyMessagesForCat('thread-1', 'user-1', 'opus'), []);
+    assert.equal(
+      await queue.claimExactExposureDurable('thread-1', 'user-1', entry.id, 'opus', entry.payload.messageId),
+      null,
+    );
+    assert.equal((await queue.getDurableEntry('thread-1', entry.id)).status, 'queued');
+  });
   it('rejects admissions without a durable producer identity or canonical source contract', async () => {
     const queue = new InvocationQueue();
     await assert.rejects(

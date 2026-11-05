@@ -1,6 +1,8 @@
 /**
  * Callback HTTP retry helpers
  */
+import { setTimeout as delay } from 'node:timers/promises';
+import { invocationFetch, resolveInvocationRequestSignal } from './invocation-auth.js';
 
 const DEFAULT_RETRY_DELAYS_MS = [1000, 2000, 4000];
 
@@ -18,6 +20,8 @@ const TERMINAL_CALLBACK_CODES = new Set(['github_authentication_required', 'gith
 export interface CallbackPostFailure {
   error: string;
   retryable: boolean;
+  /** Cancellation stops this request, without retiring previously queued writes. */
+  cancelled?: boolean;
 }
 
 export type CallbackPostResult = { ok: true; data: unknown } | { ok: false; failure: CallbackPostFailure };
@@ -87,10 +91,6 @@ export function extractReasonTag(text: string): string {
   return '';
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 export async function postJsonWithRetry(
   url: string,
   payload: string,
@@ -101,10 +101,16 @@ export async function postJsonWithRetry(
   let lastError = 'Callback failed';
   let retryable = true;
   const fetchTimeoutMs = options?.fetchTimeoutMs ?? getFetchTimeoutMs();
+  const signal = resolveInvocationRequestSignal();
+  const cancelled = (): CallbackPostResult => ({
+    ok: false,
+    failure: { error: 'Callback request cancelled', retryable: false, cancelled: true },
+  });
 
   for (let attempt = 0; attempt <= retryDelaysMs.length; attempt += 1) {
+    if (signal?.aborted) return cancelled();
     try {
-      const response = await fetch(url, {
+      const response = await invocationFetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...extraHeaders },
         body: payload,
@@ -118,6 +124,7 @@ export async function postJsonWithRetry(
       }
 
       const text = await response.text();
+      if (signal?.aborted) return cancelled();
       // F174 Phase A: extract structured `reason` from 401 callback_auth_failed body
       // and tag it into the error message ([reason=X]) so downstream routing can
       // branch on a typed marker instead of regex-matching prose.
@@ -128,6 +135,7 @@ export async function postJsonWithRetry(
         return { ok: false, failure: { error: lastError, retryable } };
       }
     } catch (err) {
+      if (signal?.aborted) return cancelled();
       const message = err instanceof Error ? err.message : String(err);
       lastError = `Callback request failed: ${message}`;
       retryable = true;
@@ -136,7 +144,12 @@ export async function postJsonWithRetry(
       }
     }
 
-    await sleep(retryDelaysMs[attempt]!);
+    try {
+      await delay(retryDelaysMs[attempt]!, undefined, { signal });
+    } catch {
+      if (signal?.aborted) return cancelled();
+      throw new Error('Callback retry delay failed');
+    }
   }
 
   return { ok: false, failure: { error: lastError, retryable } };

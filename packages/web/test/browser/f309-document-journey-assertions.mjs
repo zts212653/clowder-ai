@@ -127,8 +127,8 @@ export async function assertDocumentReceipt(page, fixture, state, screenshotPath
     .getByThread(fixture.owner.thread.id, 200)
     .find((item) => item.extra?.contentModificationReceiptV1?.state === state);
   assert.ok(message, `the owner persisted its ${state} receipt`);
-  assert.equal(message.userId, 'system');
-  assert.equal(message.catId, null);
+  assert.equal(message.userId, fixture.owner.thread.createdBy);
+  assert.deepEqual(message.from, { kind: 'system', service: 'content-modification' });
   assert.equal(message.extra.contentModificationReceiptV1.sourceMessageId, fixture.message.id);
   // This isolated owner has no Socket.IO delivery fixture. The GET history remains the production route.
   await page.reload({ waitUntil: 'domcontentloaded' });

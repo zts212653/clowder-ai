@@ -4,6 +4,7 @@ import {
   PAW_FEEL_INBOX_SORTS,
   PAW_FEEL_ISSUE_RESOLUTIONS,
   PAW_FEEL_NO_ACTION_REASONS,
+  pawFeelRepairRequestSchema,
 } from '@cat-cafe/shared';
 import { z } from 'zod';
 import { defineMcpCanonicalFactory } from '../tool-governance-migration.js';
@@ -59,8 +60,8 @@ const terminalActionSchema = z.discriminatedUnion('type', [
   z
     .object({
       type: z.literal('fix'),
-      leaseId: nonEmpty.describe(
-        'Active F167 implement/task_done lease whose owner, task, and custody are authoritative.',
+      repairBinding: pawFeelRepairRequestSchema.describe(
+        'Exact responsibility reference: ordinary work uses task_assignment with taskId and expectedOwnerRevision; governed work uses action_lease with leaseId. Owner, tenant, thread and evidence are server-resolved.',
       ),
       actionRef: nonEmpty.describe(
         'Opaque action identity consumed only by the provider selected from the verified source tool route.',
@@ -310,7 +311,7 @@ export const pawFeelDispositionTools = [
       'Use when: you reviewed the bundle source evidence and can choose a terminal action, a verified repair binding, an independent-signature request, or an explicit blocker. ' +
       'NOT for: routine owner-thread discovery, old routed/closed commands, guessing an owner, or signing your own report terminal. ' +
       'Output: ordered appended/duplicate/conflict/rejected/continuation results plus duty-receipt status; authority-required fixes append no fix event and return the existing F266 case continuation. ' +
-      'GOTCHA: Task/F167 proves custody, not authority; fix also needs an opaque actionRef validated only by the source-selected provider. Member IDs, sequences, and membershipToken form the exact list snapshot.',
+      'GOTCHA: Task assignment or a governed lease proves responsibility, not action authority; fix also needs an opaque actionRef validated only by the source-selected provider. Member IDs, sequences, and membershipToken form the exact list snapshot.',
     inputSchema: triagePawFeelInputSchema,
     handler: handleTriagePawFeel,
     governance: {
@@ -324,7 +325,7 @@ export const pawFeelDispositionTools = [
     name: 'cat_cafe_link_paw_feel_repair_outcome',
     description:
       'Link a direct paw-feel repair to its canonical owner-verified outcome. ' +
-      'Use when: you are the bound repair owner, the exact Task and F167 lease are terminal, and your source-tool provider has a canonical outcome ref. ' +
+      'Use when: you are the bound repair owner, the exact Task is done under the bound assignment, or the governed Task/lease have verified terminals, and your source-tool provider has a canonical outcome ref. ' +
       'NOT for: sending result payloads, using merge/chat/task-done alone, or substituting a new binding. ' +
       'Output: one refs-only repair_outcome_linked event or a typed rejection; the source resolves only after the server reselects the same provider and verifies terminal truth. ' +
       'GOTCHA: provider route/version drift, a non-owner callback, or a mismatched outcome appends zero events.',

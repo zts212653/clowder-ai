@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { RuntimeInteractionRecord, RuntimeInteractionRequest } from '@cat-cafe/shared';
+import {
+  type RuntimeInteractionRecord,
+  type RuntimeInteractionRequest,
+  unifiedAttentionChoiceRequestSchema,
+} from '@cat-cafe/shared';
 import Fastify from 'fastify';
 import { InMemoryRuntimeInteractionStore } from '../../src/domains/runtime-interaction/stores/InMemoryRuntimeInteractionStore.js';
 import { RedisRuntimeInteractionStore } from '../../src/domains/runtime-interaction/stores/RedisRuntimeInteractionStore.js';
@@ -73,6 +77,7 @@ async function populatedStore(): Promise<InMemoryRuntimeInteractionStore> {
         threadId: request.owner.threadId,
         messageId: `message-${request.interactionId}`,
         blockId: `card-${request.interactionId}`,
+        ...(request.kind === 'question' ? { blockDigest: 'a'.repeat(64), publishedAt: request.createdAt } : {}),
       },
       request.interactionId === question.interactionId ? 20 : request.createdAt + 1,
     );
@@ -125,6 +130,9 @@ test('the owner pending index projects approval, question and elicitation exactl
   const projectedQuestion = pending.items.find((item) => item.decisionRef === 'f306.runtime_interaction:choice-1');
   assert.equal(projectedQuestion?.choiceRequest?.interactionId, 'choice-1');
   assert.equal(projectedQuestion?.choiceRequest?.questions[0]?.question, 'Where should I run this?');
+  assert.equal(unifiedAttentionChoiceRequestSchema.safeParse(projectedQuestion?.choiceRequest).success, true);
+  assert.deepEqual(projectedQuestion?.choiceRequest?.cardRef, projectedQuestion?.runtimeInteraction?.cardRef);
+  assert.equal(projectedQuestion?.choiceRequest?.cardRef.blockDigest, 'a'.repeat(64));
   assert.equal(projectedQuestion?.linkedNeedsMe.length, 1);
 
   await store.settle({
@@ -377,7 +385,7 @@ test('decision-qualified count includes open approvals and native questions, but
   const app = Fastify();
   t.after(() => app.close());
   app.get('/api/approval-hub/pending', async () => ({
-    items: [approval('approve-me')],
+    items: [approval('approve-me', 'F139')],
     coverage: { state: 'complete' },
   }));
   app.get('/api/entrusted-work/needs-me', async () => ({

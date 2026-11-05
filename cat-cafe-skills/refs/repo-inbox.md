@@ -184,15 +184,7 @@ handoff 中写明原因。
 
 WELCOME 只建立 owner/case 真相，不自动订阅 PR activity。只有当前工作确实被一个外部条件阻塞时，owner 才注册 typed wait。例如，等 external author push：
 
-```
-cat_cafe_register_pr_tracking(
-  repoFullName,
-  prNumber,
-  when=[{ kind: "pr_head_changed" }],
-  nextStep="Re-lock exact HEAD and review the delta.",
-  expiresAt=<future unix ms>  # 可选；省略则没有时间到期
-)
-```
+先用 `tool_search` 查找已安装 GitHub 插件的 PR 跟踪工具，按其 schema 提交 `repoFullName`、`prNumber` 和唯一 `registrationId`；未知响应后重试时复用该 ID 与参数。普通跟踪省略 `when`；仅等 CI、冲突、HEAD 或 review 时，显式选择对应 predicate。等待已登记成功才进入事件驱动。
 
 | 参数 | 来源 |
 |------|------|
@@ -269,7 +261,7 @@ cat_cafe_register_pr_tracking(
 | 变量 | 说明 | 示例 |
 |------|------|------|
 | `GITHUB_WEBHOOK_SECRET` | webhook secret（同 GitHub 配置页的 Secret） | `whsec_xxx` |
-| `GITHUB_REPO_ALLOWLIST` | 逗号分隔的授权仓库列表 | `zts212653/cat-cafe,zts212653/clowder-ai` |
+| `GITHUB_REPO_ALLOWLIST` | 逗号分隔的授权仓库列表 | `zts212653/clowder-ai,zts212653/clowder-ai` |
 | `GITHUB_REPO_INBOX_CAT_ID` | 启动必填；仅在 repo 未登记时作为 fallback，正常路由以 Community Repo `guardCatId` 为准 | `cat-maine-coon` |
 
 三个变量 + Redis 全部配置后，`GitHubRepoWebhookHandler` 才注册到 webhook 路由。

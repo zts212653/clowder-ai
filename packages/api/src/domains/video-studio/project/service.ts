@@ -6,7 +6,7 @@ import {
   ContentOwnerNotFoundError,
   type ProjectContentOwnerService,
 } from '../content-owner/service.js';
-import type { ContentOperationContextV1, ContentSettlementReceiptV1 } from '../content-owner/types.js';
+import type { ContentSettlementReceiptV1, VideoContentOperationContextV1 } from '../content-owner/types.js';
 import {
   type AuthorizeVideoProjectCat,
   VideoProjectAccess,
@@ -224,7 +224,7 @@ export class VideoProjectService implements VideoProjectReadPort {
     input: SaveVideoProjectInput,
     transitionDecisionId?: string,
     archiveCommand = false,
-    context?: ContentOperationContextV1,
+    context?: VideoContentOperationContextV1,
     registrationCommand?: 'screening' | 'self-review',
   ) {
     await this.authorize({ ...input, permission: 'write' });
@@ -284,6 +284,9 @@ function encodeDocument(document: VideoProjectDocumentV1): Buffer {
   return bytes;
 }
 
-function operationContext(kind: ContentOperationContextV1['kind'], request: unknown): ContentOperationContextV1 {
+function operationContext(
+  kind: VideoContentOperationContextV1['kind'],
+  request: unknown,
+): VideoContentOperationContextV1 {
   return { kind, requestDigest: projectValueDigest(request) };
 }

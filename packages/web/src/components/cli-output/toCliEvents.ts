@@ -1,4 +1,4 @@
-import { cleanCliToolLabel, projectCliToolUseLabel } from '@cat-cafe/shared';
+import { cleanCliToolLabel, projectCliToolUseLabel, withFinalizedCliToolInputs } from '@cat-cafe/shared';
 import type { CliEvent, ToolEvent } from '@/stores/chat-types';
 
 interface ToolProjectionState {
@@ -42,7 +42,7 @@ export function toCliEvents(toolEvents: ToolEvent[] | undefined, streamContent: 
     // CliOutputBlock pairs toolUses[i] with toolResults[i] by position, so skipping a use
     // without its result would mis-pair all subsequent rows.
     const state: ToolProjectionState = { events, skipNextResult: false };
-    for (const te of toolEvents) {
+    for (const te of withFinalizedCliToolInputs(toolEvents)) {
       appendToolEvent(te, state);
     }
   }

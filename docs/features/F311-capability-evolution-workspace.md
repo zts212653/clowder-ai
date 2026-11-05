@@ -77,7 +77,8 @@ mcp_admission_claims:
 
 > **Status**: in-progress (v6 product-experience contract; v5 final-vision phases; Gate 0A + Phase 1–3 landed; Phase 4 implementation landed; roadshow retained as Phase 1 regression; operator-selected F314/F100 full-loop AC-41–44 and AC-UX4 remain open on owner-backed asset/evidence/outcome truth) | **Product phase owner**: Maine Coon (@codex-sol, gpt-5.6-sol)（本轮 operator 指定执行） | **Architecture co-creator/reviewer**: Ragdoll (@fable5, claude-fable-5) | **Priority**: P0
 >
-> **2026-10-14 v2 用户旅程**：operator 要求在新版界面尽快走通 F311 旅程，并用 F314 事故档案建立第一条真实进化谱系。计划见 [v2 用户旅程开发计划](#v2-用户旅程开发计划2026-10-14-起)，新增 AC-UX6；S1 已合入 #5532，独立 Alpha 样本复验通过，设计确认形状并要求在 S2 补首页内容。消费者登记补丁 #5537 已独立审合；S2 准备主区及首页遗漏已合入 #5541，设计已接受内容保留、两处修正并入 S3；隔离 Alpha 两样本准备旅程已通过，S3–S6 与 AC-UX6 仍开放。
+> **2026-10-15 v2 用户旅程**：operator 要求在新版界面尽快走通 F311 旅程，并用 F314 事故档案建立第一条真实进化谱系。计划见 [v2 用户旅程开发计划](#v2-用户旅程开发计划2026-10-14-起)，新增 AC-UX6；S1 已合入 #5532，消费者登记补丁 #5537 已独立审合，S2 准备主区及首页遗漏已合入 #5541。S3–S6 的实现已随 #5550、#5560 与 #5569 合入，最终独立复审确认无 open P1/P2；post-merge Alpha 与正式 runtime 激活均已通过，真实候选采用与 You 从本人入口完成 AC-UX6 验收仍开放。
+>
 >
 >
 > **operator signoff**: 2026-08-28 [thread-id] `0001787926983474`（今年双旗舰之一，与 F310 Growing 并列）。
@@ -456,6 +457,8 @@ Meta Evolution 的正式定义为：**能力对象与改进机制的协同演进
 
 **S3 第二份原件跳转修复待完整复验（10-14）**：第二轮 `b49b6b45ee` 仍14/15，托管 exit1、176秒，receipt `29088-3497d9e0…` released；失败诊断显示 Cortex 两原片在拖动后回到0秒，说明上一处程序化 seek 反馈修复没有解释完整失败。同一120秒真实原片的 Chromium HTTP 对比实验确认：旧完整响应的 seekable 为0–0，拖到9.8秒被夹回0；支持 Range 的响应暴露0–120并成功跳转。checkpoint `57d60d6b48` 复用现有字节范围解析器，先授权和核完整 SHA，再切片；补齐206/416、开放/尾部范围、越权/撤回/篡改回归。17条相关API、API构建及本次200条消费者/policy/catalog检查通过；完整证据在原作者目录 `seek-http-probe.json`、`media-range-{red,green,metadata}.log`，探针receipt `29101-069750da…` released。完整两canonical browser仍需复验；10秒暂停断言保留并新增真实 seekable 断言，第二份PR/review/Alpha和AC-UX6未完成。
 
+**S3–S6 实现收口合入，等待 post-merge Alpha 与 AC-UX6（10-15）**：[#5569](https://github.com/zts212653/clowder-ai/pull/5569) squash merge `fc27ed80aa09e0e3dbb07df3daff115f777d99cc`。实现补齐 F314 真实事故谱系与 exact 来源、F266 拍板说明、后续 Chat 来源/回退入口及 canonical Settings→准备→探索→Mailbox→Chat 旅程；最终修复读取不完整时把未知误报成「待判断 0」的问题。作者 exact-head browser 1/1 与 503 失败态实跑均无 page error，非作者 `codex61-sol` typed approved 覆盖 `c8d42854822cee686a0ec71d37f6110fe94a84bc`，无 open P1/P2。该 merge 只结算 S3–S6 实现，不代 post-merge Alpha、真实候选采用、operator 本人验收或 AC-UX6。
+
 **鸭鸭来源核验（10-14）**：Microduck 原 owner 在执行线程 `…001015-94918a97` 只读核实，真实 `352afab6` 的 target 仍是 `F311/capability:%E7%8C%AB%E7%8C%AB%E5%B8%A6%E9%B8%AD%E9%B8%AD%E5%8D%8F%E5%90%8C%E8%B8%A2%E7%90%83%E8%B5%9B`，正式 adapter/exploration/asset/preparation GET 均为对应 owner missing/unavailable；不能把对象 alias 到旧夹具的 `microduck-owner/simulator:walking`。两场 Cortex 的可用原件根是 git `35dfed114be3ca292aac304a888d4a9519d0dbea` 下 `pipeline/cortex/evidence/20260910/manifest.json` 与两个 bundle manifest，作者回读三个 SHA-256 均与 owner 回执一致。总索引与 bundle 是归档包含关系，两场是不同实验，原件未发布版本派生；父边保留未知，不画 live1→live2，不按时序挂到 v0–v8。上述来源可以作为后续只读 adapter 的原件输入，不能反推已存在绑定、正式采用或实施权限；新版实现继续，真实 capability 的版本与探索读取仍待产出。
 
 **S1 设计反馈并入 S2**（执行线程 `…000532-1942018f`）：恢复首页「新建目标」与聊天图标，沿用 `StartEvolution` 把目标草稿带到原对话、不自动发送，并修正不存在的「下方」指向；标题旁「?」收纳概念说明。项目行补「谁在做」的头像与小名（只消费可靠的 origin / 准备活动事实，无法核实则未知，不编当前执行猫）和来自 Program `updatedAt` 的「最近」。首页只显示待判断件数并跳待办的接线仍归 S5。北极星整页首页改为右侧 Workspace、聊天留左的偏差已由设计接受，不重画这项。
@@ -504,7 +507,6 @@ Meta Evolution 的正式定义为：**能力对象与改进机制的协同演进
 - **S4 的案例—版本清单**：Ragdoll起草。
 - **S1–S3、S5、S6 实现，以及 S4 的适配器扩展**：一个新的执行线程，由小太阳·Maine Coon（@codex61-sol）负责。
 - **审阅**：非作者的Maine Coon或墨墨。
-- **测试**：S1–S4 合入后，在 Alpha 上请 F314 负责猫（小星星）以真实使用者身份走一遍 F314 这条旅程，核对版本和案例有没有挂对。他手头的工作做完再约。
 - **最后**：You 从自己的入口走一遍。
 
 ## Acceptance Criteria

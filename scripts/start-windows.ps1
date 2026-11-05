@@ -59,9 +59,12 @@ $ScriptDir = Split-Path -Parent $ScriptPath
 $ProjectRoot = Split-Path -Parent $ScriptDir
 Set-Location $ProjectRoot
 
+$deploymentJson = & (Get-Command node -ErrorAction Stop) (Join-Path $ProjectRoot "scripts/read-deployment-default.mjs") --json
+if ($LASTEXITCODE -ne 0) { throw "Could not read deployment defaults" }
+$deploymentDefaults = $deploymentJson | ConvertFrom-Json -ErrorAction Stop
+
 $Profile_ = $env:CAT_CAFE_PROFILE  # set by start-entry.mjs when --profile=* is given
-$connectorGatewayAutostartOverride = [System.Environment]::GetEnvironmentVariable("CONNECTOR_GATEWAY_AUTOSTART", "Process")
-Write-Host "Clowder AI - Windows Startup" -ForegroundColor Cyan
+Write-Host "$($deploymentDefaults.brand.name) - Windows Startup" -ForegroundColor Cyan
 Write-Host "=========================="
 if ($Profile_) { Write-Host "  Profile: $Profile_" -ForegroundColor Cyan }
 
@@ -100,14 +103,6 @@ if (Test-Path $envFile) {
     Write-Warn ".env not found - using defaults"
 }
 
-# -- Restore connector launcher authority after dotenv -------
-# Project dotenv is configuration, not permission to attach real IM connectors.
-if ([string]::IsNullOrEmpty($connectorGatewayAutostartOverride)) {
-    [System.Environment]::SetEnvironmentVariable("CONNECTOR_GATEWAY_AUTOSTART", $null, "Process")
-} else {
-    [System.Environment]::SetEnvironmentVariable("CONNECTOR_GATEWAY_AUTOSTART", $connectorGatewayAutostartOverride, "Process")
-}
-
 function Preserve-ServiceFlagForApiLifecycle {
     param([string]$SourceName, [string]$TargetName)
     $value = [System.Environment]::GetEnvironmentVariable($SourceName, "Process")
@@ -125,40 +120,12 @@ Preserve-ServiceFlagForApiLifecycle -SourceName "AUDIO_SERVICE_ENABLED" -TargetN
 # -- Apply profile defaults (mirrors start-dev.sh apply_profile_defaults) --
 # Profile defaults are fallbacks: .env value wins if set, otherwise profile default applies.
 $profileDefaults = @{}
-switch ($Profile_) {
-    'opensource' {
-        $profileDefaults = @{
-            ANTHROPIC_PROXY_ENABLED = '0'; ASR_ENABLED = '0'
-            TTS_ENABLED = '0'; LLM_POSTPROCESS_ENABLED = '0'
-            MESSAGE_TTL_SECONDS = '0'; THREAD_TTL_SECONDS = '0'
-            TASK_TTL_SECONDS = '0'; SUMMARY_TTL_SECONDS = '0'
-            REDIS_PROFILE = 'opensource'
-        }
-    }
-    'production' {
-        $profileDefaults = @{
-            ANTHROPIC_PROXY_ENABLED = '0'; ASR_ENABLED = '0'
-            TTS_ENABLED = '0'; LLM_POSTPROCESS_ENABLED = '0'
-            MESSAGE_TTL_SECONDS = '0'; THREAD_TTL_SECONDS = '0'
-            TASK_TTL_SECONDS = '0'; SUMMARY_TTL_SECONDS = '0'
-            REDIS_PROFILE = 'opensource'
-        }
-    }
-    'dev' {
-        $profileDefaults = @{
-            ANTHROPIC_PROXY_ENABLED = '1'; ASR_ENABLED = '1'
-            TTS_ENABLED = '1'; LLM_POSTPROCESS_ENABLED = '1'
-            MESSAGE_TTL_SECONDS = '0'; THREAD_TTL_SECONDS = '0'
-            TASK_TTL_SECONDS = '0'; SUMMARY_TTL_SECONDS = '0'
-            REDIS_PROFILE = 'dev'
-        }
-    }
-    default {
-        if ($Profile_) {
-            Write-Err "Unknown profile '$Profile_'. Valid: dev, production, opensource"
-            exit 1
-        }
-    }
+$startupProfile = if ($Profile_) { $Profile_ } else { "unprofiled" }
+$startupJson = & (Get-Command node -ErrorAction Stop) (Join-Path $ProjectRoot "scripts/read-deployment-default.mjs") --startup-profile $startupProfile win32
+if ($LASTEXITCODE -ne 0) { throw "Could not read startup profile defaults" }
+$startupDefaults = $startupJson | ConvertFrom-Json -ErrorAction Stop
+foreach ($property in $startupDefaults.PSObject.Properties) {
+    $profileDefaults[$property.Name] = [string]$property.Value
 }
 # resolve_config: env override > profile default
 foreach ($entry in $profileDefaults.GetEnumerator()) {
@@ -179,8 +146,8 @@ if (-not $pnpmCommand) {
 Write-Ok "pnpm: $pnpmCommand"
 
 # -- Ports ---------------------------------------------------
-$ApiPort = if ($env:API_SERVER_PORT) { $env:API_SERVER_PORT } else { "3004" }
-$WebPort = if ($env:FRONTEND_PORT) { $env:FRONTEND_PORT } else { "3003" }
+$ApiPort = if ($env:API_SERVER_PORT) { $env:API_SERVER_PORT } else { [string]$deploymentDefaults.apiPort }
+$WebPort = if ($env:FRONTEND_PORT) { $env:FRONTEND_PORT } else { [string]$deploymentDefaults.webPort }
 $RedisPort = if ($env:REDIS_PORT) { $env:REDIS_PORT } else { "6399" }
 $RunDir = Join-Path $ProjectRoot ".cat-cafe/run/windows"
 $ApiPidFile = Join-Path $RunDir "api-$ApiPort.pid"
@@ -516,13 +483,6 @@ try {
     # -Dev controls whether the API runs in development or production mode.
     $apiNodeEnv = if ($Dev) { 'development' } else { 'production' }
     $globalSidecarOwner = if ($useRedis -and -not $Dev) { "1" } else { $null }
-    $connectorGatewayAutostart = if ($env:CONNECTOR_GATEWAY_AUTOSTART) {
-        $env:CONNECTOR_GATEWAY_AUTOSTART
-    } elseif (-not $Dev) {
-        "1"
-    } else {
-        "0"
-    }
     $runtimeRootMarker = if (-not $Dev) { $ProjectRoot } else { $null }
     $workspaceRootMarker = if (-not $Dev) {
         if ($env:CAT_CAFE_WORKSPACE_ROOT) { $env:CAT_CAFE_WORKSPACE_ROOT } else { $ProjectRoot }
@@ -546,7 +506,6 @@ try {
         CAT_CAFE_SERVICE_EMBED_ENABLED = $env:CAT_CAFE_SERVICE_EMBED_ENABLED
         CAT_CAFE_SERVICE_AUDIO_ENABLED = $env:CAT_CAFE_SERVICE_AUDIO_ENABLED
         CAT_CAFE_PROVISION_GLOBAL_SIDECAR = $globalSidecarOwner
-        CONNECTOR_GATEWAY_AUTOSTART = $connectorGatewayAutostart
         CAT_CAFE_RUNTIME_ROOT = $runtimeRootMarker
         CAT_CAFE_WORKSPACE_ROOT = $workspaceRootMarker
     }
@@ -653,7 +612,7 @@ try {
 
     Write-Host ""
     Write-Host "  ========================================" -ForegroundColor Green
-    Write-Host "  Clowder AI started!" -ForegroundColor Green
+    Write-Host "  $($deploymentDefaults.brand.name) started!" -ForegroundColor Green
     Write-Host "  ========================================" -ForegroundColor Green
     Write-Host ""
     Write-Host "  Frontend: http://localhost:$WebPort"

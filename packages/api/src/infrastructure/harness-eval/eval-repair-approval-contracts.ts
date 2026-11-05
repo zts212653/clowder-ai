@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import {
   type ApprovalEnvelope,
+  type EvalRepairDecisionExplanationV1,
   type ExactAssetVersionRefV1,
   exactAssetVersionRefV1Schema,
   type OwnerTruthRefV1,
@@ -42,6 +43,7 @@ export interface EvalRepairCaseAction {
   expectedChange: string;
   costAndRollback: string;
   withdrawalCondition: string;
+  decisionExplanation?: EvalRepairDecisionExplanationV1;
   supersedesProposalId?: string;
 }
 

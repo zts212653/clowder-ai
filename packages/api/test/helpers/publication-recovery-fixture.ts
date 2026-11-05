@@ -3,13 +3,40 @@ import { randomUUID } from 'node:crypto';
 import { respondWithMediaVersionSchema } from '@cat-cafe/shared';
 import { mediaPublicationFixture } from './media-publication-fixture.js';
 
+export function publicationResponseRecord(
+  fixture: Pick<Awaited<ReturnType<typeof mediaPublicationFixture>>, 'messages' | 'dispatch'>,
+  invocationId: string,
+) {
+  const start = fixture.dispatch.starts.find((item) => item.invocationId === invocationId);
+  assert.ok(start);
+  const message = fixture.messages.getByIdempotencyKey(
+    start.userId,
+    start.threadId,
+    `message-lifecycle-response:${invocationId}`,
+  );
+  assert.ok(message?.lifecycle?.kind === 'response');
+  assert.equal(message.lifecycle.invocationId, invocationId);
+  return { message, response: message.lifecycle };
+}
+
 /** Observe the real Queue finalizer before taking an immutable-history baseline. */
 export async function waitForRecoveryCarrierTerminal(
-  fixture: Pick<Awaited<ReturnType<typeof mediaPublicationFixture>>, 'messages'>,
+  fixture: Pick<Awaited<ReturnType<typeof mediaPublicationFixture>>, 'messages' | 'dispatch'>,
   messageId: string,
 ) {
   for (let attempt = 0; attempt < 100; attempt += 1) {
-    if (fixture.messages.getById(messageId)?.queueCustody?.status === 'terminal') return;
+    const start = fixture.dispatch.starts.find((item) => item.messageIds.includes(messageId));
+    const response =
+      start &&
+      fixture.messages.getByIdempotencyKey(
+        start.userId,
+        start.threadId,
+        `message-lifecycle-response:${start.invocationId}`,
+      );
+    if (start && response?.lifecycle?.kind === 'response' && response.lifecycle.status === 'completed') {
+      assert.equal(response.lifecycle.invocationId, start.invocationId);
+      return;
+    }
     await new Promise<void>((resolve) => setTimeout(resolve, 5));
   }
   assert.fail('The released recovery provider did not finish its persisted carrier');
@@ -47,9 +74,8 @@ export async function publicationRecoveryFixture(t: Parameters<typeof mediaPubli
       endedAt: Date.now(),
     });
     await f.dispatch.releaseProvider(id);
-    const carrier = f
-      .carriers()
-      .find((item) => item.queueCustody?.awakenedInvocationIdByCatId?.[intent.targetCatId] === id);
+    const start = f.dispatch.starts.find((item) => item.invocationId === id);
+    const carrier = f.carriers().find((item) => start?.messageIds.includes(item.id));
     assert.ok(carrier);
     await waitForRecoveryCarrierTerminal(f, carrier.id);
   }

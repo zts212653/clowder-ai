@@ -1,4 +1,5 @@
 import { createEntrustedReturnFromRef, resolveFileTarget } from './real-surface-adapters';
+import { retiredWorkspaceDestination } from './retired-workspace-destinations';
 import type { WorkbenchAction, WorkbenchLayoutState, WorkspaceSurfaceDescriptor } from './workbench-contract';
 
 const RECENT_LIMIT = 3;
@@ -51,6 +52,7 @@ export function restoreRecentSurfaceIds(value: unknown, layout: WorkbenchLayoutS
 export function selectRecentSurfaces(
   layout: WorkbenchLayoutState,
   hostThreadId: string | undefined,
+  retireLegacy = false,
 ): readonly WorkspaceSurfaceDescriptor[] {
   if (!validThreadId(hostThreadId)) return [];
   const available = availableSurfaces(layout);
@@ -58,7 +60,7 @@ export function selectRecentSurfaces(
   const ids = Object.hasOwn(index, hostThreadId) ? index[hostThreadId] : [];
   return ids.flatMap((id) => {
     const surface = available.get(id);
-    return surface ? [surface] : [];
+    return surface && (!retireLegacy || !retiredWorkspaceDestination(surface)) ? [surface] : [];
   });
 }
 

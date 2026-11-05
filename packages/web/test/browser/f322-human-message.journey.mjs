@@ -3,8 +3,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { chromium } from 'playwright';
 import { build } from 'vite';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
 
 /**
  * F322 B segment 1 probe — your own message in the new presentation, in a real browser.
@@ -37,6 +37,7 @@ const cats = [
   avatar: `/avatars/${id}.png`,
   color: { primary, secondary: '#eeeeee' },
   mentionPatterns: [`@${id}`],
+  carrier: 'cli',
   clientId: 'fixture',
   defaultModel: 'fixture',
 }));

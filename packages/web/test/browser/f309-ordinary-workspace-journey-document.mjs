@@ -124,7 +124,7 @@ export function registerOrdinaryDocumentJourney(suite) {
         const later = f.owner.messages.append({
           userId: 'operator',
           threadId: f.owner.thread.id,
-          catId: null,
+          from: { kind: 'user', userId: 'operator' },
           mentions: [],
           timestamp: Date.now(),
           content: '同一文件的另一个尚未接手的想法',
@@ -303,8 +303,8 @@ export function registerOrdinaryDocumentJourney(suite) {
             .getByThread(f.owner.thread.id, 200)
             .find((message) => message.extra?.contentModificationReceiptV1?.state === 'applied');
           assert.ok(applied);
-          assert.equal(applied.userId, 'system');
-          assert.equal(applied.catId, null);
+          assert.equal(applied.userId, f.owner.thread.createdBy);
+          assert.deepEqual(applied.from, { kind: 'system', service: 'content-modification' });
           assert.equal(applied.extra.contentModificationReceiptV1.sourceMessageId, f.message.id);
           await recordDocumentJourney(`${EVIDENCE}/document-owner-${slug}.json`, page, f, returned.proposalRef);
           await page.screenshot({ path: `${EVIDENCE}/document-written-${slug}.png` });
@@ -374,7 +374,7 @@ export function registerOrdinaryDocumentJourney(suite) {
           f.owner.messages.append({
             userId: 'operator',
             threadId: f.owner.thread.id,
-            catId: null,
+            from: { kind: 'user', userId: 'operator' },
             mentions: [],
             timestamp: Date.now(),
             content: `Unquoted history ${index}`,
@@ -405,7 +405,7 @@ export function registerOrdinaryDocumentJourney(suite) {
         assert.equal((await drift).status(), 409);
         await page
           .locator('section[aria-label^="引用消息"] output')
-          .filter({ hasText: '原文已改，请刷新文件后重新读取引用消息。' })
+          .filter({ hasText: '原文已改，旧版引用仍保留。' })
           .waitFor();
         assert.equal(await page.locator('[data-file-quote-mark]').count(), 0);
         assert.deepEqual(f.owner.tasks.get(f.taskId), task, 'reading and rechecking references writes no Task state');

@@ -18,19 +18,23 @@ const { canonicalizeActionTerminalPredicate } = await import(
 );
 const { parseActionSuccessorLease } = await import('../dist/domains/ball-custody/action-successor-redis-codecs.js');
 
-const reviewPredicate = (headSha) =>
-  canonicalizeActionTerminalPredicate({
-    actionFamily: 'review',
-    subjectRef: 'pr:owner/repo#2868',
-    predicate: { kind: 'review_delivered', headSha },
-  });
+// Exercise revision CAS independently of the production Task resolver.
+const frozenPredicate = (revision) => ({
+  ...canonicalizeActionTerminalPredicate({
+    actionFamily: 'implement',
+    subjectRef: 'subject:task:work-2868',
+    predicate: { kind: 'task_done' },
+  }),
+  freshnessKey: `test-revision:${revision}`,
+  digest: `test-predicate:${revision}`,
+});
 
 const baseClaim = (overrides = {}) => ({
   leaseId: 'lease-1',
   tenantScope: 'user-1',
-  subjectRef: 'pr:owner/repo#2868',
-  actionFamily: 'merge',
-  successorSlot: 'reviewer',
+  subjectRef: 'subject:task:work-2868',
+  actionFamily: 'implement',
+  successorSlot: 'implementer',
   mode: 'single',
   holderCatIds: ['codex-terra'],
   dispatchId: 'dispatch-1',
@@ -40,7 +44,7 @@ const baseClaim = (overrides = {}) => ({
   predecessorThreadId: 'thread-source',
   issuerStandingEvidenceRef: 'message:request-1',
   evidenceRefs: ['message:request-1'],
-  terminalPredicate: reviewPredicate('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
+  terminalPredicate: frozenPredicate('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
   now: 100,
   ...overrides,
 });
@@ -60,7 +64,7 @@ const verifiedCompletionVerdict = (lease, catId, evidenceRef, predicate = lease.
 describe('F167 Phase S action successor state machine', () => {
   it('rejects a new predicate-free lease instead of manufacturing a legacy generation', () => {
     assert.throws(
-      () => claimActionSuccessor(null, baseClaim({ actionFamily: 'review', terminalPredicate: undefined })),
+      () => claimActionSuccessor(null, baseClaim({ actionFamily: 'implement', terminalPredicate: undefined })),
       /terminal predicate is required for a new action successor generation/,
     );
   });
@@ -69,8 +73,8 @@ describe('F167 Phase S action successor state machine', () => {
     const lease = claimActionSuccessor(
       null,
       baseClaim({
-        actionFamily: 'review',
-        terminalPredicate: reviewPredicate('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
+        actionFamily: 'implement',
+        terminalPredicate: frozenPredicate('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
       }),
     ).lease;
 
@@ -88,12 +92,12 @@ describe('F167 Phase S action successor state machine', () => {
     const candidate = recordActionCompletionCandidate(lease, {
       generation: 1,
       catId: 'codex-terra',
-      evidenceRefs: ['community:pr:owner/repo#2868:review:g1'],
+      evidenceRefs: ['community:subject:task:work-2868:review:g1'],
       now: 111,
     });
     assert.equal(candidate.status, 'active');
     assert.deepEqual(candidate.completionCandidates['codex-terra'].evidenceRefs, [
-      'community:pr:owner/repo#2868:review:g1',
+      'community:subject:task:work-2868:review:g1',
     ]);
 
     assert.throws(
@@ -110,7 +114,7 @@ describe('F167 Phase S action successor state machine', () => {
     const completed = commitActionCompletionVerdict(candidate, {
       generation: 1,
       catId: 'codex-terra',
-      verdict: verifiedCompletionVerdict(candidate, 'codex-terra', 'community:pr:owner/repo#2868:review:g1'),
+      verdict: verifiedCompletionVerdict(candidate, 'codex-terra', 'community:subject:task:work-2868:review:g1'),
       now: 113,
     });
     assert.equal(completed.status, 'completed');
@@ -118,24 +122,24 @@ describe('F167 Phase S action successor state machine', () => {
   });
 
   it('unions holder evidence canonically and fences verdicts to the exact candidate snapshot', () => {
-    const predicate = reviewPredicate('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
+    const predicate = frozenPredicate('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
     const claimed = claimActionSuccessor(
       null,
-      baseClaim({ actionFamily: 'review', terminalPredicate: predicate }),
+      baseClaim({ actionFamily: 'implement', terminalPredicate: predicate }),
     ).lease;
     const first = recordActionCompletionCandidate(claimed, {
       generation: 1,
       catId: 'codex-terra',
       evidenceRefs: [
         'github:https://github.com/owner/repo/pull/2868#discussion_r2',
-        'community:pr:owner/repo#2868:review:g1',
+        'community:subject:task:work-2868:review:g1',
       ],
       now: 110,
     });
     const firstSnapshot = first.completionCandidates['codex-terra'];
 
     assert.deepEqual(firstSnapshot.evidenceRefs, [
-      'community:pr:owner/repo#2868:review:g1',
+      'community:subject:task:work-2868:review:g1',
       'github:https://github.com/owner/repo/pull/2868#discussion_r2',
     ]);
     assert.equal(firstSnapshot.candidateRevision, 1);
@@ -152,13 +156,13 @@ describe('F167 Phase S action successor state machine', () => {
     const expanded = recordActionCompletionCandidate(replay, {
       generation: 1,
       catId: 'codex-terra',
-      evidenceRefs: ['community:pr:owner/repo#2868:review:g2'],
+      evidenceRefs: ['community:subject:task:work-2868:review:g2'],
       now: 112,
     });
     const expandedSnapshot = expanded.completionCandidates['codex-terra'];
     assert.deepEqual(expandedSnapshot.evidenceRefs, [
-      'community:pr:owner/repo#2868:review:g1',
-      'community:pr:owner/repo#2868:review:g2',
+      'community:subject:task:work-2868:review:g1',
+      'community:subject:task:work-2868:review:g2',
       'github:https://github.com/owner/repo/pull/2868#discussion_r2',
     ]);
     assert.equal(expandedSnapshot.candidateRevision, 2);
@@ -199,11 +203,11 @@ describe('F167 Phase S action successor state machine', () => {
   });
 
   it('isolates completion candidates and commits per holder in parallel mode', () => {
-    const predicate = reviewPredicate('cccccccccccccccccccccccccccccccccccccccc');
+    const predicate = frozenPredicate('cccccccccccccccccccccccccccccccccccccccc');
     const claimed = claimActionSuccessor(
       null,
       baseClaim({
-        actionFamily: 'review',
+        actionFamily: 'implement',
         mode: 'parallel',
         holderCatIds: ['codex-terra', 'opus'],
         parallelIntent: 'independent_review',
@@ -213,13 +217,13 @@ describe('F167 Phase S action successor state machine', () => {
     const terraCandidate = recordActionCompletionCandidate(claimed, {
       generation: 1,
       catId: 'codex-terra',
-      evidenceRefs: ['community:pr:owner/repo#2868:review:terra'],
+      evidenceRefs: ['community:subject:task:work-2868:review:terra'],
       now: 110,
     });
     const bothCandidates = recordActionCompletionCandidate(terraCandidate, {
       generation: 1,
       catId: 'opus',
-      evidenceRefs: ['community:pr:owner/repo#2868:review:opus'],
+      evidenceRefs: ['community:subject:task:work-2868:review:opus'],
       now: 111,
     });
 
@@ -231,7 +235,7 @@ describe('F167 Phase S action successor state machine', () => {
       verdict: verifiedCompletionVerdict(
         bothCandidates,
         'codex-terra',
-        'community:pr:owner/repo#2868:review:terra',
+        'community:subject:task:work-2868:review:terra',
         predicate,
       ),
       now: 112,
@@ -239,13 +243,18 @@ describe('F167 Phase S action successor state machine', () => {
     assert.equal(terraCommitted.status, 'active');
     assert.equal(terraCommitted.completionCandidates['codex-terra'], undefined);
     assert.deepEqual(terraCommitted.completionCandidates.opus.evidenceRefs, [
-      'community:pr:owner/repo#2868:review:opus',
+      'community:subject:task:work-2868:review:opus',
     ]);
 
     const completed = commitActionCompletionVerdict(terraCommitted, {
       generation: 1,
       catId: 'opus',
-      verdict: verifiedCompletionVerdict(terraCommitted, 'opus', 'community:pr:owner/repo#2868:review:opus', predicate),
+      verdict: verifiedCompletionVerdict(
+        terraCommitted,
+        'opus',
+        'community:subject:task:work-2868:review:opus',
+        predicate,
+      ),
       now: 113,
     });
     assert.equal(completed.status, 'completed');
@@ -255,11 +264,11 @@ describe('F167 Phase S action successor state machine', () => {
   });
 
   it('retires only the failed holder candidate and rejects a late verified verdict', () => {
-    const predicate = reviewPredicate('dddddddddddddddddddddddddddddddddddddddd');
+    const predicate = frozenPredicate('dddddddddddddddddddddddddddddddddddddddd');
     const claimed = claimActionSuccessor(
       null,
       baseClaim({
-        actionFamily: 'review',
+        actionFamily: 'implement',
         mode: 'parallel',
         holderCatIds: ['codex-terra', 'opus'],
         parallelIntent: 'independent_review',
@@ -269,13 +278,13 @@ describe('F167 Phase S action successor state machine', () => {
     const terraCandidate = recordActionCompletionCandidate(claimed, {
       generation: 1,
       catId: 'codex-terra',
-      evidenceRefs: ['community:pr:owner/repo#2868:review:terra'],
+      evidenceRefs: ['community:subject:task:work-2868:review:terra'],
       now: 110,
     });
     const bothCandidates = recordActionCompletionCandidate(terraCandidate, {
       generation: 1,
       catId: 'opus',
-      evidenceRefs: ['community:pr:owner/repo#2868:review:opus'],
+      evidenceRefs: ['community:subject:task:work-2868:review:opus'],
       now: 111,
     });
     const terraFailed = recordActionSuccessorOutcome(bothCandidates, {
@@ -296,7 +305,7 @@ describe('F167 Phase S action successor state machine', () => {
           verdict: verifiedCompletionVerdict(
             bothCandidates,
             'codex-terra',
-            'community:pr:owner/repo#2868:review:terra',
+            'community:subject:task:work-2868:review:terra',
             predicate,
           ),
           now: 113,
@@ -306,15 +315,15 @@ describe('F167 Phase S action successor state machine', () => {
   });
 
   it('continues a completed lease on a server-verified fresh HEAD without changing its canonical key', () => {
-    const oldPredicate = reviewPredicate('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+    const oldPredicate = frozenPredicate('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
     const claimed = claimActionSuccessor(
       null,
-      baseClaim({ actionFamily: 'review', terminalPredicate: oldPredicate }),
+      baseClaim({ actionFamily: 'implement', terminalPredicate: oldPredicate }),
     ).lease;
     const candidate = recordActionCompletionCandidate(claimed, {
       generation: 1,
       catId: 'codex-terra',
-      evidenceRefs: ['community:pr:owner/repo#2868:review:g1'],
+      evidenceRefs: ['community:subject:task:work-2868:review:g1'],
       now: 110,
     });
     const completed = commitActionCompletionVerdict(candidate, {
@@ -323,12 +332,12 @@ describe('F167 Phase S action successor state machine', () => {
       verdict: verifiedCompletionVerdict(
         candidate,
         'codex-terra',
-        'community:pr:owner/repo#2868:review:g1',
+        'community:subject:task:work-2868:review:g1',
         oldPredicate,
       ),
       now: 111,
     });
-    const newPredicate = reviewPredicate('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
+    const newPredicate = frozenPredicate('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
     const continued = continueActionSuccessorFreshRevision(completed, {
       successorLeaseId: 'lease-fresh-head-b',
       expectedGeneration: 1,
@@ -340,7 +349,7 @@ describe('F167 Phase S action successor state machine', () => {
       predecessorThreadId: 'thread-source',
       dispatchId: 'dispatch-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
       issuerStandingEvidenceRef: 'message:request-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
-      evidenceRef: 'community:pr:owner/repo#2868:head:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      evidenceRef: 'community:subject:task:work-2868:head:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
       now: 120,
     });
 
@@ -352,10 +361,13 @@ describe('F167 Phase S action successor state machine', () => {
     assert.equal(continued.lease.status, 'active');
     assert.deepEqual(continued.lease.holderOutcomes, {});
     assert.deepEqual(continued.lease.completionCandidates, {});
-    assert.equal(continued.lease.terminalPredicate.freshnessKey, 'head:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
+    assert.equal(
+      continued.lease.terminalPredicate.freshnessKey,
+      'test-revision:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+    );
     assert.deepEqual(continued.lease.evidenceRefs, [
       'message:request-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
-      'community:pr:owner/repo#2868:head:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      'community:subject:task:work-2868:head:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
     ]);
     assert.deepEqual(preflightActionSuccessor(completed, { generation: 1, subjectTerminal: false }), {
       ok: false,
@@ -368,7 +380,7 @@ describe('F167 Phase S action successor state machine', () => {
   });
 
   it('upgrades a completed legacy lease to a predicate-backed fresh generation', () => {
-    const predicateBacked = claimActionSuccessor(null, baseClaim({ actionFamily: 'review' })).lease;
+    const predicateBacked = claimActionSuccessor(null, baseClaim({ actionFamily: 'implement' })).lease;
     const {
       terminalPredicate: _terminalPredicate,
       terminalPredicateState: _terminalPredicateState,
@@ -384,7 +396,7 @@ describe('F167 Phase S action successor state machine', () => {
       evidenceRef: 'queue:legacy-dispatch:codex-terra:succeeded',
       now: 110,
     });
-    const newPredicate = reviewPredicate('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
+    const newPredicate = frozenPredicate('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
 
     const continued = continueActionSuccessorFreshRevision(completed, {
       successorLeaseId: 'lease-fresh-head-legacy',
@@ -397,7 +409,7 @@ describe('F167 Phase S action successor state machine', () => {
       predecessorThreadId: 'thread-source',
       dispatchId: 'dispatch-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
       issuerStandingEvidenceRef: 'message:request-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
-      evidenceRef: 'community:pr:owner/repo#2868:head:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      evidenceRef: 'community:subject:task:work-2868:head:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
       now: 120,
     });
 
@@ -411,21 +423,26 @@ describe('F167 Phase S action successor state machine', () => {
 
   it('rebuilds claim provenance from the incoming fresh revision in both directions', () => {
     const complete = (claimOverrides, holderCatId) => {
-      const predicate = reviewPredicate('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+      const predicate = frozenPredicate('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
       const claimed = claimActionSuccessor(
         null,
-        baseClaim({ actionFamily: 'review', terminalPredicate: predicate, ...claimOverrides }),
+        baseClaim({ actionFamily: 'implement', terminalPredicate: predicate, ...claimOverrides }),
       ).lease;
       const candidate = recordActionCompletionCandidate(claimed, {
         generation: 1,
         catId: holderCatId,
-        evidenceRefs: ['community:pr:owner/repo#2868:review:g1'],
+        evidenceRefs: ['community:subject:task:work-2868:review:g1'],
         now: 110,
       });
       return commitActionCompletionVerdict(candidate, {
         generation: 1,
         catId: holderCatId,
-        verdict: verifiedCompletionVerdict(candidate, holderCatId, 'community:pr:owner/repo#2868:review:g1', predicate),
+        verdict: verifiedCompletionVerdict(
+          candidate,
+          holderCatId,
+          'community:subject:task:work-2868:review:g1',
+          predicate,
+        ),
         now: 111,
       });
     };
@@ -444,7 +461,7 @@ describe('F167 Phase S action successor state machine', () => {
     const transferred = continueActionSuccessorFreshRevision(selfClaimed, {
       successorLeaseId: 'lease-transferred-fresh-head',
       expectedGeneration: 1,
-      terminalPredicate: reviewPredicate('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'),
+      terminalPredicate: frozenPredicate('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'),
       holderCatIds: ['codex-terra'],
       holderThreadId: 'thread-target',
       claimOrigin: 'structured_transfer',
@@ -452,7 +469,7 @@ describe('F167 Phase S action successor state machine', () => {
       predecessorThreadId: 'thread-source',
       dispatchId: 'dispatch-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
       issuerStandingEvidenceRef: 'message:request-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
-      evidenceRef: 'community:pr:owner/repo#2868:head:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      evidenceRef: 'community:subject:task:work-2868:head:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
       now: 120,
     });
 
@@ -465,13 +482,13 @@ describe('F167 Phase S action successor state machine', () => {
     const selfContinued = continueActionSuccessorFreshRevision(transferredClaim, {
       successorLeaseId: 'lease-self-fresh-head',
       expectedGeneration: 1,
-      terminalPredicate: reviewPredicate('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'),
+      terminalPredicate: frozenPredicate('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'),
       holderCatIds: ['codex-sol'],
       holderThreadId: 'thread-source',
       claimOrigin: 'existing_standing',
       dispatchId: 'dispatch-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-self',
       issuerStandingEvidenceRef: 'grounding:verified-owner',
-      evidenceRef: 'community:pr:owner/repo#2868:head:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      evidenceRef: 'community:subject:task:work-2868:head:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
       now: 121,
     });
 
@@ -653,7 +670,7 @@ describe('F167 Phase S action successor state machine', () => {
       groundingEvidenceRef: 'message:grounding-mismatch',
       now: 120,
     }).lease;
-    const freshPredicate = reviewPredicate('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
+    const freshPredicate = frozenPredicate('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
 
     const reattached = replaceActionSuccessor(returned, {
       expectedGeneration: 2,
@@ -664,7 +681,7 @@ describe('F167 Phase S action successor state machine', () => {
       dispatchId: 'dispatch-fresh-head',
       terminalPredicate: freshPredicate,
       evidenceRef: 'callback:returned-holder:dispatch-fresh-head',
-      freshnessEvidenceRef: 'community:pr:owner/repo#2868:head:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      freshnessEvidenceRef: 'community:subject:task:work-2868:head:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
       returnedHolderCatId: 'codex-sol',
       returnedHolderThreadId: 'thread-source',
       returnProof: { kind: 'returned_fence', leaseId: returned.leaseId, generation: 2 },
@@ -691,7 +708,7 @@ describe('F167 Phase S action successor state machine', () => {
     assert.ok(reattached.lease.evidenceRefs.includes('callback:returned-holder:dispatch-fresh-head'));
     assert.ok(
       reattached.lease.evidenceRefs.includes(
-        'community:pr:owner/repo#2868:head:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+        'community:subject:task:work-2868:head:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
       ),
     );
 
@@ -723,7 +740,7 @@ describe('F167 Phase S action successor state machine', () => {
       groundingEvidenceRef: 'message:grounding-mismatch',
       now: 120,
     }).lease;
-    const freshPredicate = reviewPredicate('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
+    const freshPredicate = frozenPredicate('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
     const replacement = (overrides = {}) => ({
       expectedGeneration: 2,
       holderCatIds: ['gpt52'],
@@ -935,11 +952,11 @@ describe('F167 Phase S action successor state machine', () => {
   });
 
   it('refreshes the terminal predicate when replacing a replaceable generation', () => {
-    const oldPredicate = reviewPredicate('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
-    const newPredicate = reviewPredicate('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
+    const oldPredicate = frozenPredicate('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+    const newPredicate = frozenPredicate('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
     const first = claimActionSuccessor(
       null,
-      baseClaim({ actionFamily: 'review', terminalPredicate: oldPredicate }),
+      baseClaim({ actionFamily: 'implement', terminalPredicate: oldPredicate }),
     ).lease;
     const replaceable = recordActionSuccessorOutcome(first, {
       generation: 1,
@@ -1127,7 +1144,7 @@ describe('F167 explicit replace of a generation interrupted after a holder read 
     predecessorCatId: 'codex-sol',
     predecessorThreadId: 'thread-source',
     dispatchId: 'dispatch-recovery',
-    terminalPredicate: reviewPredicate('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
+    terminalPredicate: frozenPredicate('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
     evidenceRef: 'callback:predecessor:dispatch-recovery',
     now: 200,
     ...overrides,

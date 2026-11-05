@@ -7,6 +7,9 @@ const { join } = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { createManagedWindow } = require('./window.cjs');
 const { createCompanionPipe } = require('./companion-pipe.cjs');
+const { createAppAssistOwnerPipe } = require('./app-assist-pipe.cjs');
+const { createAppAssistHost } = require('./app-assist-host.cjs');
+const { createNativeAppAssistSource } = require('./app-assist-source.cjs');
 const { prepareWindowResources } = require('./preload-bundle.cjs');
 const { configureCompanionAppIdentity } = require('./app-identity.cjs');
 const { createExecutorStdio } = require('./executor-stdio.cjs');
@@ -15,6 +18,9 @@ let window;
 let opening = false;
 let ended = false;
 let companion;
+let appAssist;
+let appAssistOwner;
+let appAssistClosed = Promise.resolve();
 const stdio = createExecutorStdio(process.stdout, process.stderr, quit);
 const stage = (value) => {
   if (!ended) stdio.diagnostic(`[desktop-stage] ${value}\n`);
@@ -33,21 +39,24 @@ process.once('exit', () => rmSync(profile, { recursive: true, force: true }));
 let buffer = Buffer.alloc(0);
 let queue = Promise.resolve();
 companion = createCompanionPipe((frame, callback) => stdio.write(frame, callback));
+appAssistOwner = createAppAssistOwnerPipe((frame, callback) => stdio.write(frame, callback));
 function finish() {
   if (ended) return false;
   ended = true;
   stdio.close();
   companion?.close();
+  appAssistOwner?.close();
+  appAssistClosed = appAssist?.close() ?? Promise.resolve();
   window?.close();
   return true;
 }
 function quit() {
-  if (finish()) app.quit();
+  if (finish()) void appAssistClosed.finally(() => app.quit());
 }
 function fatal() {
   if (!finish()) return;
   stdio.diagnostic('[desktop-executor] invalid_or_unavailable_window\n');
-  app.exit(1);
+  void appAssistClosed.finally(() => app.exit(1));
 }
 async function handle(message) {
   if (
@@ -72,8 +81,17 @@ async function handle(message) {
     if (ended) return;
     if (!loadedContract) throw new Error('Contract unavailable');
     const validateCompanionCommand = loadedContract.companionCommandValidator(message.params.companionContract);
+    if (message.params.appAssist === true)
+      appAssist = createAppAssistHost({
+        owner: appAssistOwner,
+        sourceFactory: createNativeAppAssistSource,
+        validateReply: loadedContract.appAssistReplyValidator(message.params.companionContract),
+        selfBundleIds: ['ai.clowderai.desktop', 'com.github.Electron'],
+      });
     stage('contract-ready');
-    const opened = await createManagedWindow(electron, message.params, {
+    const { appAssist: _appAssistCapability, ...windowInput } = message.params;
+    const opened = await createManagedWindow(electron, windowInput, {
+      ...(appAssist ? { appAssist } : {}),
       voiceResources: prepareWindowResources(profile),
       onFailure: (reason) => {
         if (!ended) stdio.diagnostic(`[desktop-runtime] ${reason}\n`);
@@ -102,14 +120,24 @@ async function handle(message) {
   } else {
     if (
       !window ||
-      !['poll', 'show', 'close', 'navigate', 'revoke-media'].includes(message.method) ||
-      (message.method !== 'navigate' && message.params !== null)
+      !['poll', 'show', 'close', 'navigate', 'revoke-media', 'app-assist-policy'].includes(message.method) ||
+      (!['navigate', 'app-assist-policy'].includes(message.method) && message.params !== null)
     )
       throw new Error('Protocol');
     if (message.method === 'poll') value = window.poll();
     if (message.method === 'show') window.show();
     if (message.method === 'revoke-media') await window.revokeMedia();
     if (message.method === 'navigate') await window.navigate(message.params);
+    if (message.method === 'app-assist-policy') {
+      if (
+        !appAssist ||
+        !message.params ||
+        Object.keys(message.params).join(',') !== 'allowed' ||
+        ![true, false, null].includes(message.params.allowed)
+      )
+        throw new Error('Protocol');
+      await appAssist.policyChanged(message.params.allowed);
+    }
   }
   if (ended) return;
   await new Promise((resolve, reject) =>
@@ -133,6 +161,10 @@ process.stdin.on('data', (chunk) => {
     buffer = buffer.subarray(newline + 1);
     try {
       const message = JSON.parse(line.toString('utf8'));
+      if (message.type === 'app_assist') {
+        appAssistOwner.accept(message);
+        continue;
+      }
       if (message.type === 'companion') {
         companion.accept(message);
         continue;
@@ -148,5 +180,9 @@ process.stdin.on('data', (chunk) => {
 process.stdin.on('end', quit);
 process.stdin.on('error', quit);
 process.on('SIGTERM', quit);
-app.on('before-quit', finish);
+app.on('before-quit', (event) => {
+  if (!finish() || !appAssist) return;
+  event.preventDefault();
+  void appAssistClosed.finally(() => app.quit());
+});
 app.on('window-all-closed', quit);

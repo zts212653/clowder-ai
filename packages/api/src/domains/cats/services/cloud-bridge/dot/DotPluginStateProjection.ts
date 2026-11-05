@@ -1,7 +1,7 @@
 import type {
   PluginManagerCatalogCandidate,
   PluginManagerProjectionOverrides,
-} from '../../../../plugin/plugin-manager-projection.js';
+} from '../../../../plugin/manager/plugin-manager-projection.js';
 import type { DotConnectionService } from './DotConnectionService.js';
 
 /** Business auth/setup facts decorate the existing Host inventory projection. */

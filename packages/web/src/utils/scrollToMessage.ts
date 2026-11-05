@@ -145,21 +145,36 @@ export function resolveMessageElements(messageIds: Iterable<string>, root: Paren
 
 /** The existing scroll writer accepts the browser's one-pixel quantization; confirmation uses the same contract. */
 export function matchesMessageScrollAnchor(container: HTMLElement, anchor: MessageScrollAnchor): boolean {
-  const current = captureMessageScrollAnchorForMessage(container, anchor.messageId);
-  return current !== undefined && Math.abs(current.viewportOffsetPx - anchor.viewportOffsetPx) <= 1;
+  const target = resolveReadingAnchor(container, anchor);
+  return (
+    target !== undefined &&
+    Math.abs(target.node.getBoundingClientRect().top - container.getBoundingClientRect().top - target.offset) <= 1
+  );
+}
+
+/** Both restoration and its receipt must measure the same surviving paragraph or message boundary. */
+function resolveReadingAnchor(container: HTMLElement, anchor: MessageScrollAnchor) {
+  const target = resolveMessageElements([anchor.messageId], container)[0];
+  if (!target) return;
+  const boundary = target.closest<HTMLElement>('[data-message-viewport-id]') ?? target;
+  const block = resolveReadingBlock(boundary, anchor);
+  return {
+    node: block ?? boundary,
+    offset: block ? (anchor.blockViewportOffsetPx ?? anchor.viewportOffsetPx) : anchor.viewportOffsetPx,
+  };
 }
 
 /** Reapply a saved message anchor after placeholder or content geometry changes. */
 export function restoreMessageScrollAnchor(container: HTMLElement, anchor: MessageScrollAnchor): boolean {
-  const target = resolveMessageElements([anchor.messageId], container)[0];
+  const target = resolveReadingAnchor(container, anchor);
   if (!target) return false;
-  const boundary = target.closest<HTMLElement>('[data-message-viewport-id]') ?? target;
-  const block = resolveReadingBlock(boundary, anchor);
-  const anchorNode = block ?? boundary;
-  const desiredOffset = block ? (anchor.blockViewportOffsetPx ?? anchor.viewportOffsetPx) : anchor.viewportOffsetPx;
+  const anchorNode = target.node;
+  const desiredOffset = target.offset;
   const currentOffset = anchorNode.getBoundingClientRect().top - container.getBoundingClientRect().top;
   const targetTop = Math.max(0, container.scrollTop + currentOffset - desiredOffset);
-  container.scrollTop = targetTop;
+  // Even an unchanged scrollTop assignment can cancel an ongoing native
+  // keyboard/wheel animation. An aligned anchor needs no new scroll operation.
+  if (Math.abs(container.scrollTop - targetTop) > 1) container.scrollTop = targetTop;
   // A mounted row can still sit behind a temporarily short layout. Do not
   // declare restoration complete when the browser clamps the requested offset.
   const restoredOffset = anchorNode.getBoundingClientRect().top - container.getBoundingClientRect().top;
@@ -215,6 +230,8 @@ export function scrollToMessage(
   if (!el) return false;
 
   revealFoldedSourceAnchor(el);
+  const enclosingDetails = el.closest('details');
+  if (enclosingDetails) enclosingDetails.open = true;
   // The owner passes its reading viewport. Default-document callers use the
   // nearest scrolling ancestor, so a tall reply never hides its author header.
   let viewport = root instanceof HTMLElement ? root : el.parentElement;

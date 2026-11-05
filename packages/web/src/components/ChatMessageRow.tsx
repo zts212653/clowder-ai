@@ -7,6 +7,7 @@ import type { ChatMessage as ChatMessageData } from '@/stores/chat-types';
 import { ChatMessage } from './ChatMessage';
 import { MessageActions } from './MessageActions';
 import { MessageViewportBoundary } from './MessageViewportBoundary';
+import type { MessagePartSelection } from './message-part-selection';
 import type { CardConfirmationEntry } from './rich/CardBlock';
 
 interface ChatMessageRowProps {
@@ -22,6 +23,9 @@ interface ChatMessageRowProps {
   dedupCount?: number;
   selectionMode: boolean;
   selected: boolean;
+  partiallySelected?: boolean;
+  partSelection?: MessagePartSelection;
+  onToggleRichBlock?: (messageId: string, blockId: string) => void;
   selectionEligible: boolean;
   onEnterSelection: (messageId: string) => void;
   onToggleSelection: (messageId: string) => void;
@@ -53,6 +57,9 @@ export const ChatMessageRow = memo(function ChatMessageRow({
   dedupCount,
   selectionMode,
   selected,
+  partiallySelected,
+  partSelection,
+  onToggleRichBlock,
   selectionEligible,
   onEnterSelection,
   onToggleSelection,
@@ -76,6 +83,9 @@ export const ChatMessageRow = memo(function ChatMessageRow({
         threadId={threadId}
         selectionMode={selectionMode}
         selected={selected}
+        partiallySelected={partiallySelected}
+        partSelection={partSelection}
+        onToggleRichBlock={onToggleRichBlock}
         selectionEligible={selectionEligible}
         onEnterSelection={onEnterSelection}
         onToggleSelection={onToggleSelection}

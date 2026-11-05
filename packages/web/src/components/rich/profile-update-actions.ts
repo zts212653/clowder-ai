@@ -1,7 +1,10 @@
-import { type Dispatch, type SetStateAction, useEffect } from 'react';
+import { type Dispatch, type SetStateAction, useEffect, useState } from 'react';
+import type { GuardedWrite } from '@/components/ApprovalHost';
+import { approvalResultRead } from '@/lib/approval-result-read';
 import type { RichCardBlock } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
+import { useApprovalStatus } from './use-approval-status';
 
 type ProfileUpdateDecision = 'approve' | 'reject';
 type ProfileUpdateTerminalStatus = 'approved' | 'rejected';
@@ -10,6 +13,9 @@ interface ProfileUpdateDecisionArgs {
   action: string;
   block: RichCardBlock;
   copiedAction: string | null;
+  guardedWrite?: GuardedWrite;
+  onSettled?: (status: ProfileUpdateTerminalStatus) => void;
+  preserveDetails?: boolean;
   messageId?: string;
   payload?: Record<string, unknown>;
   setCopiedAction: Dispatch<SetStateAction<string | null>>;
@@ -21,31 +27,69 @@ export function isProfileUpdateDecisionAction(action: string): boolean {
   return action === 'profile-update:approve' || action === 'profile-update:reject';
 }
 
-export function useProfileUpdateTerminalSync({ block, messageId }: { block: RichCardBlock; messageId?: string }): void {
+export function isProfileUpdateCardBlock(block: RichCardBlock): boolean {
+  return Boolean(
+    block.actions?.some((action) => isProfileUpdateDecisionAction(action.action)) || stampedProposalId(block),
+  );
+}
+
+function stampedProposalId(block: RichCardBlock): string {
+  const value = block.meta?.approval;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return '';
+  const stamp = value as Record<string, unknown>;
+  return stamp.producerId === 'F231' &&
+    typeof stamp.canonicalProposalId === 'string' &&
+    Object.keys(stamp).length === 2 &&
+    block.id === `profile-update-${stamp.canonicalProposalId}`
+    ? stamp.canonicalProposalId
+    : '';
+}
+
+export function useProfileUpdateTerminalSync({
+  block,
+  messageId,
+  preserveDetails = false,
+}: {
+  block: RichCardBlock;
+  messageId?: string;
+  preserveDetails?: boolean;
+}): unknown {
   const proposalId = getProfileUpdateProposalId(block);
+  const native = useApprovalStatus(
+    'F231',
+    proposalId || null,
+    `/api/profile-updates/${encodeURIComponent(proposalId)}`,
+    !!messageId,
+  );
+  const [eventStatus, setStatus] = useState<unknown>(undefined);
+  const status = native.status ?? eventStatus;
+  useEffect(() => {
+    if (messageId && native.status && !preserveDetails)
+      collapseProfileUpdateCardForStatus(native.status, block, messageId);
+  }, [native.status, messageId, block, preserveDetails]);
   useEffect(() => {
     if (!messageId || !proposalId || typeof window === 'undefined') return;
-    let cancelled = false;
     const handler = (ev: Event) => {
       const detail = (ev as CustomEvent<{ proposalId?: unknown; status?: unknown }>).detail;
       if (!detail || detail.proposalId !== proposalId) return;
-      collapseProfileUpdateCardForStatus(detail.status, block, messageId);
+      setStatus(detail.status);
+      if (!preserveDetails) collapseProfileUpdateCardForStatus(detail.status, block, messageId);
     };
     window.addEventListener('cat-cafe:proposal-updated', handler);
-    void hydrateProfileUpdateStatus(proposalId).then((status) => {
-      if (!cancelled) collapseProfileUpdateCardForStatus(status, block, messageId);
-    });
     return () => {
-      cancelled = true;
       window.removeEventListener('cat-cafe:proposal-updated', handler);
     };
-  }, [block, messageId, proposalId]);
+  }, [block, messageId, proposalId, preserveDetails]);
+  return status;
 }
 
 export async function handleProfileUpdateDecisionAction({
   action,
   block,
   copiedAction,
+  guardedWrite,
+  onSettled,
+  preserveDetails,
   messageId,
   payload,
   setCopiedAction,
@@ -64,9 +108,17 @@ export async function handleProfileUpdateDecisionAction({
   setLoading(true);
   setError(null);
   try {
-    const terminalStatus = await postProfileUpdateDecision(proposalId, decision);
+    const attempt = guardedWrite
+      ? await guardedWrite('producer-card', async (reportEvidence) =>
+          postProfileUpdateDecision(proposalId, decision, reportEvidence),
+        )
+      : { sent: true as const, value: await postProfileUpdateDecision(proposalId, decision) };
+    if (!attempt.sent) return;
+    const terminalStatus = attempt.value;
+    if (terminalStatus) onSettled?.(terminalStatus);
     setCopiedAction(`profile-update:${decision}`);
-    collapseProfileUpdateCardForStatus(terminalStatus ?? statusForDecision(decision), block, messageId);
+    if (!preserveDetails)
+      collapseProfileUpdateCardForStatus(terminalStatus ?? statusForDecision(decision), block, messageId);
   } catch (err) {
     setError(err instanceof Error ? err.message : '操作失败');
   } finally {
@@ -86,29 +138,21 @@ function getProfileUpdateProposalId(block: RichCardBlock): string {
     const proposalId = action.payload?.proposalId;
     if (typeof proposalId === 'string') return proposalId;
   }
-  return '';
-}
-
-async function hydrateProfileUpdateStatus(proposalId: string): Promise<unknown> {
-  try {
-    const res = await apiFetch(`/api/profile-updates/${encodeURIComponent(proposalId)}`);
-    if (!res.ok) return undefined;
-    const body = (await res.json()) as { proposalId?: unknown; status?: unknown };
-    return body.proposalId === proposalId ? body.status : undefined;
-  } catch {
-    return undefined;
-  }
+  return stampedProposalId(block);
 }
 
 async function postProfileUpdateDecision(
   proposalId: string,
   decision: ProfileUpdateDecision,
+  reportEvidence?: (evidence: { outcome: 'settled' | 'http-error'; status: number }) => void,
 ): Promise<ProfileUpdateTerminalStatus | undefined> {
   const res = await apiFetch(`/api/profile-updates/${encodeURIComponent(proposalId)}/${decision}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({}),
   });
+  approvalResultRead.invalidate({ producer: 'F231', proposalId });
+  reportEvidence?.({ outcome: res.ok ? 'settled' : 'http-error', status: res.status });
   const body = (await res.json().catch(() => ({}))) as { error?: string; status?: unknown };
   if (res.ok) {
     return isTerminalStatus(body.status) ? body.status : undefined;
@@ -142,10 +186,13 @@ function collapseProfileUpdateCard({
   messageId?: string;
 }): void {
   if (!messageId) return;
+  const tone = approved ? 'success' : 'info';
+  const bodyMarkdown = approved ? '✓ 已批准并写入 primer' : '已驳回该提议';
+  if (!block.actions?.length && block.tone === tone && block.bodyMarkdown === bodyMarkdown) return;
   useChatStore.getState().updateRichBlock(messageId, block.id, {
     ...block,
-    tone: approved ? 'success' : 'info',
-    bodyMarkdown: approved ? '✓ 已批准并写入 primer' : '已驳回该提议',
+    tone,
+    bodyMarkdown,
     actions: undefined,
   });
 }

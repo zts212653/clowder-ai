@@ -11,13 +11,13 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import Fastify from 'fastify';
 
-function proposedReviewAction(overrides = {}) {
+function proposedTaskAction(overrides = {}) {
   return {
-    subjectRef: 'pr:owner/repo#42',
-    actionFamily: 'review',
-    successorSlot: 'reviewer',
+    subjectRef: 'subject:task:work-42',
+    actionFamily: 'implement',
+    successorSlot: 'implementer',
     mode: 'single',
-    terminalPredicate: { kind: 'review_delivered', headSha: 'a'.repeat(40) },
+    terminalPredicate: { kind: 'task_done' },
     ...overrides,
   };
 }
@@ -35,7 +35,7 @@ function proposedImplementAction(overrides = {}) {
 
 function proposedInvestigationAction() {
   return {
-    subjectRef: 'pr:owner/repo#42',
+    subjectRef: 'subject:task:work-42',
     actionFamily: 'investigate',
     successorSlot: 'investigator',
     mode: 'single',
@@ -174,14 +174,14 @@ function post(fixture, auth, payload) {
 async function createPendingReviewProposal(fixture) {
   const response = await post(fixture, fixture.auth, {
     effectClass: 'assign_work',
-    proposedAction: proposedReviewAction(),
+    proposedAction: proposedTaskAction(),
     clientMessageId: 'pending-review-proposal',
   });
   assert.equal(response.statusCode, 200, response.body);
   assert.equal(response.json().status, 'proposal_created');
   const [proposal] = await fixture.dispatchProposalStore.listPendingByUser('user-1');
   assert.ok(proposal, 'assign_work must create a pending proposal');
-  assert.deepEqual(proposal.proposedAction, proposedReviewAction());
+  assert.deepEqual(proposal.proposedAction, proposedTaskAction());
   return proposal;
 }
 
@@ -327,7 +327,7 @@ test('unrelated communication with a different subject remains legal while a rev
   const response = await post(fixture, freshAuth, {
     content: '@sonnet\nFYI: a separate subject needs no work custody.',
     effectClass: 'coordinate',
-    coordination: { phase: 'active', subjectRef: 'pr:owner/repo#43' },
+    coordination: { phase: 'active', subjectRef: 'subject:task:work-43' },
     clientMessageId: 'unrelated-communication',
   });
 

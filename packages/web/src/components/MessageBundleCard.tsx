@@ -1,25 +1,21 @@
 'use client';
 
+import {
+  type MessageSelectionProjectedItem as BundleItem,
+  type HydratedMessageBundle,
+  isHydratedMessageBundle,
+} from '@cat-cafe/shared';
 import { useCallback, useEffect, useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { scrollToMessage } from '@/utils/scrollToMessage';
 import { kickTeleportResolve, planTeleport } from '@/utils/teleport';
 import { HubIcon } from './hub-icons';
-import { type BundleItem, MessageBundleItemView } from './MessageBundleItemView';
+import { MessageBundleItemView } from './MessageBundleItemView';
+import { messageBundleSenderLabel } from './message-bundle-sender';
 import { MessageBundlePaperCard } from './message-v2/MessageBundlePaperCard';
 import { useShellPresentation } from './shell/shell-presentation';
 import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
-
-export interface HydratedMessageBundle {
-  messageBundleId: string;
-  targetThreadId: string;
-  createdBy: string;
-  createdAt: number;
-  note?: string;
-  sourceThread: { id: string; title: string } | null;
-  items: BundleItem[];
-}
 
 interface MessageBundleCardProps {
   messageId: string;
@@ -27,7 +23,12 @@ interface MessageBundleCardProps {
   getCatLabel: (catId: string) => string;
 }
 
-export function MessageBundleCard({ messageId, forwarderName, getCatLabel }: MessageBundleCardProps) {
+export function MessageBundleCard(props: MessageBundleCardProps) {
+  // A different carrier starts a different read, including its fold and error state.
+  return <MessageBundleRead key={props.messageId} {...props} />;
+}
+
+function MessageBundleRead({ messageId, forwarderName, getCatLabel }: MessageBundleCardProps) {
   const presentation = useShellPresentation();
   const currentThreadId = useChatStore((state) => state.currentThreadId);
   const [data, setData] = useState<HydratedMessageBundle | null>(null);
@@ -36,23 +37,40 @@ export function MessageBundleCard({ messageId, forwarderName, getCatLabel }: Mes
   const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
-    void requestVersion;
     const controller = new AbortController();
     setError(false);
-    void apiFetch(`/api/message-bundles/${encodeURIComponent(messageId)}`, { signal: controller.signal })
+    void apiFetch(
+      `/api/message-bundles/${encodeURIComponent(messageId)}`,
+      { signal: controller.signal },
+      { afterCurrentGet: requestVersion > 0 },
+    )
       .then(async (response) => {
         if (!response.ok) throw new Error(`Message Bundle hydration failed (${response.status})`);
-        const body = (await response.json()) as HydratedMessageBundle;
-        if (!body || body.messageBundleId !== messageId || !Array.isArray(body.items)) {
+        const body: unknown = await response.json();
+        if (!isHydratedMessageBundle(body) || body.messageBundleId !== messageId) {
           throw new Error('Invalid Message Bundle response');
         }
         if (!controller.signal.aborted) setData(body);
       })
-      .catch((cause) => {
-        if ((cause as { name?: string }).name !== 'AbortError') setError(true);
+      .catch(() => {
+        if (!controller.signal.aborted) {
+          setData(null);
+          setError(true);
+        }
       });
     return () => controller.abort();
   }, [messageId, requestVersion]);
+
+  const reload = () => {
+    setData(null);
+    setError(false);
+    setRequestVersion((version) => version + 1);
+  };
+  const toggle = () => {
+    setExpanded(!expanded);
+    // Both presentations reauthorize before revealing the full source.
+    if (!expanded) reload();
+  };
 
   const jumpToSource = useCallback(
     (threadId: string, sourceMessageId?: string) => {
@@ -75,21 +93,14 @@ export function MessageBundleCard({ messageId, forwarderName, getCatLabel }: Mes
     return (
       <MessageBundlePaperCard
         messageId={messageId}
-        data={data?.messageBundleId === messageId ? data : null}
+        data={data}
         error={error}
         expanded={expanded}
         forwarderName={forwarderName}
         getCatLabel={getCatLabel}
         onJump={jumpToSource}
-        onRetry={() => setRequestVersion((version) => version + 1)}
-        onToggle={() => {
-          setExpanded(!expanded);
-          if (!expanded) {
-            // Expansion reads the authorized source again, never displays the old compact read as a full snapshot.
-            setData(null);
-            setRequestVersion((version) => version + 1);
-          }
-        }}
+        onRetry={reload}
+        onToggle={toggle}
       />
     );
 
@@ -100,7 +111,7 @@ export function MessageBundleCard({ messageId, forwarderName, getCatLabel }: Mes
         <button
           type="button"
           className="mt-2 rounded-md border border-cafe px-2 py-1 text-xs text-cafe-interactive hover:bg-cafe-surface"
-          onClick={() => setRequestVersion((version) => version + 1)}
+          onClick={reload}
         >
           重试
         </button>
@@ -118,15 +129,10 @@ export function MessageBundleCard({ messageId, forwarderName, getCatLabel }: Mes
 
   const availableItems = data.items.filter((item) => item.status === 'available');
   const singleItem = data.items.length === 1 ? data.items[0] : undefined;
+  const messageCount = new Set(data.items.map((item) => item.messageId)).size;
   const participants = [
     ...new Set(
-      availableItems.map((item) =>
-        item.author.kind === 'cat'
-          ? getCatLabel(item.author.catId)
-          : item.author.userId === data.createdBy
-            ? forwarderName
-            : item.author.userId,
-      ),
+      availableItems.map((item) => messageBundleSenderLabel(item.from, data.createdBy, forwarderName, getCatLabel)),
     ),
   ];
   const sourceTitle = data.sourceThread?.title ?? '来源不可用';
@@ -163,7 +169,7 @@ export function MessageBundleCard({ messageId, forwarderName, getCatLabel }: Mes
           <span className="truncate">来自「{sourceTitle}」</span>
           <HubIcon name="external-link" className="h-3 w-3 shrink-0" />
         </button>
-        {!singleItem ? <span className="shrink-0 text-xs text-cafe-muted">{data.items.length} 条聊天记录</span> : null}
+        {!singleItem ? <span className="shrink-0 text-xs text-cafe-muted">{messageCount} 条聊天记录</span> : null}
       </div>
       {data.note ? (
         <div data-message-bundle-note className="mt-3 rounded-lg bg-cafe-surface-sunken px-3 py-2 text-sm">
@@ -183,9 +189,9 @@ export function MessageBundleCard({ messageId, forwarderName, getCatLabel }: Mes
             type="button"
             className="mt-3 w-full rounded-lg border border-cafe px-3 py-2 text-left text-sm font-medium text-cafe-secondary hover:bg-cafe-surface-sunken"
             aria-expanded={expanded}
-            onClick={() => setExpanded((value) => !value)}
+            onClick={toggle}
           >
-            {expanded ? '收起聊天记录' : `展开 ${data.items.length} 条聊天记录`}
+            {expanded ? '收起聊天记录' : `展开 ${messageCount} 条聊天记录`}
           </button>
           {expanded ? <div className="mt-3 space-y-3">{data.items.map(renderItem)}</div> : null}
         </>

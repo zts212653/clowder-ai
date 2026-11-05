@@ -118,4 +118,40 @@ describe('PawFeelInboxRow responsibility truth', () => {
 
     act(() => root.unmount());
   });
+
+  it('renders a valid ordinary Task repair without claiming any action lease or second approval', () => {
+    const root = createRoot(container);
+    const repairBinding = {
+      kind: 'task_assignment' as const,
+      taskId: 'task-repair',
+      ownerRevision: 3,
+      taskThreadId: 'home',
+    };
+    const native: PawFeelInboxItem = {
+      ...staleRepair,
+      disposition: { ...staleRepair.disposition, repairBinding, actionLeaseRef: undefined },
+      responsibility: {
+        ...staleRepair.responsibility,
+        state: 'bound_in_repair',
+        validExit: true,
+        repairBinding,
+        leaseId: undefined,
+      },
+      issue: {
+        ...staleRepair.issue,
+        continuation: {
+          kind: 'repair_active',
+          taskId: 'task-repair',
+          repairBinding,
+          evidenceRefs: ['task:task-repair:assignment:3'],
+        },
+      },
+    };
+    act(() => root.render(<PawFeelInboxRow item={native} />));
+    expect(container.textContent).toContain('当前任务分配');
+    expect(container.textContent).not.toContain('F167 lease');
+    expect(container.textContent).not.toContain('active lease');
+    expect(container.textContent).not.toContain('Approval');
+    act(() => root.unmount());
+  });
 });

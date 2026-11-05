@@ -32,6 +32,7 @@ export function registerChatFileTabJourneys(getSuite) {
                     body: {
                       messages: [
                         {
+                          from: { kind: 'agent', catId: 'codex-sol' },
                           id: 'file-tab-source',
                           type: 'assistant',
                           catId: 'codex-sol',

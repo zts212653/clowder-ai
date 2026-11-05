@@ -241,6 +241,7 @@ test('native MCP calls reach host custody and memory consumers under their canon
   });
   const event = {
     kind: 'step',
+    conversationId: 'native-session',
     stepIndex: 88,
     stepType: 'tool',
     toolName: 'call_mcp_tool',

@@ -1,6 +1,6 @@
+import type { MessageSelectionProjectedItem as BundleItem } from '@cat-cafe/shared';
 import { catColorVar } from '@/lib/cat-slug';
 import { CatAvatar } from '../CatAvatar';
-import type { BundleItem } from '../MessageBundleItemView';
 import { useShellCopy } from '../shell/shell-copy';
 import { messageReadingCopy } from './message-reading-copy';
 
@@ -23,15 +23,17 @@ export function MessageBundlePreviewItem({ item, authorName }: { item: BundleIte
         <span
           className="inline-flex min-w-0 items-center gap-1.5 rounded-t-md px-1.5 py-0.5 font-semibold"
           style={
-            item.author.kind === 'cat'
+            item.from.kind === 'agent'
               ? {
-                  background: `linear-gradient(${catColorVar(item.author.catId, 'surface')}, transparent)`,
-                  color: catColorVar(item.author.catId, 'text'),
+                  background: `linear-gradient(${catColorVar(item.from.catId, 'surface')}, transparent)`,
+                  color: catColorVar(item.from.catId, 'text'),
                 }
-              : { color: 'var(--color-cocreator-text)' }
+              : item.from.kind === 'user'
+                ? { color: 'var(--color-cocreator-text)' }
+                : { color: 'var(--color-cafe-muted)' }
           }
         >
-          {item.author.kind === 'cat' && <CatAvatar catId={item.author.catId} size={16} ring="none" />}
+          {item.from.kind === 'agent' && <CatAvatar catId={item.from.catId} size={16} ring="none" />}
           <span className="truncate">{authorName}</span>
         </span>
         <time className="shrink-0 text-cafe-muted" dateTime={new Date(item.timestamp).toISOString()}>

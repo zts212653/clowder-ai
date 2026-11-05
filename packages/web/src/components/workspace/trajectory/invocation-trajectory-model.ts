@@ -3,7 +3,9 @@ import {
   type OutputMessageChannel,
   type ProviderSubexecutionSemanticEvent,
 } from '@cat-cafe/shared';
+import { transcriptToolCallKey, transcriptToolScope } from '@/lib/transcript-tool-identity';
 import { appendNativeMessage, type NativeMessageCursor } from './invocation-native-messages';
+import { toolChannel, toolResultStatus, toolSource } from './invocation-tool-values';
 import { boundTimelineRows } from './invocation-trajectory-bounds';
 
 export { rankInvocationSummariesForRecall, reconcileInvocationSummary } from './invocation-trajectory-summary';
@@ -67,6 +69,7 @@ interface TimelineBuildState {
   rows: InvocationTimelineRow[];
   toolRowsById: Map<string, ToolTimelineRow>;
   unmatchedTools: ToolTimelineRow[];
+  toolScopes: Map<ToolTimelineRow, string>;
   foldedTypes: Record<string, number>;
   foldedTimestamp?: number;
   nativeMessages?: boolean;
@@ -115,22 +118,6 @@ function eventType(envelope: RawTranscriptEvent): string {
   return typeof envelope.event.type === 'string' ? envelope.event.type : 'unknown';
 }
 
-function toolSource(value: unknown): ToolTimelineRow['source'] {
-  return value === 'host_cli' || value === 'mcp' || value === 'plugin_connector' ? value : 'unknown';
-}
-
-function toolChannel(value: unknown): ToolTimelineRow['channel'] {
-  return value === 'analysis' || value === 'commentary' || value === 'final' ? value : 'unknown';
-}
-
-function toolResultStatus(event: Record<string, unknown>): NonNullable<ToolTimelineRow['resultStatus']> {
-  if (event.toolResultStatus === 'ok' || event.toolResultStatus === 'error' || event.toolResultStatus === 'unknown') {
-    return event.toolResultStatus;
-  }
-  if (typeof event.is_error === 'boolean') return event.is_error ? 'error' : 'ok';
-  return 'unknown';
-}
-
 function appendToolUse(state: TimelineBuildState, envelope: RawTranscriptEvent): void {
   const toolName = envelope.event.toolName ?? envelope.event.name;
   const toolUseId = envelope.event.toolUseId ?? envelope.event.id;
@@ -150,19 +137,27 @@ function appendToolUse(state: TimelineBuildState, envelope: RawTranscriptEvent):
   };
   state.rows.push(row);
   state.unmatchedTools.push(row);
-  if (row.toolUseId) state.toolRowsById.set(row.toolUseId, row);
+  state.toolScopes.set(row, transcriptToolScope(envelope));
+  const key = transcriptToolCallKey(envelope, toolUseId);
+  if (key) state.toolRowsById.set(key, row);
 }
 
 function findUnmatchedTool(
   state: TimelineBuildState,
+  envelope: RawTranscriptEvent,
   toolUseId: unknown,
   toolName: unknown,
 ): ToolTimelineRow | undefined {
-  const exact = typeof toolUseId === 'string' ? state.toolRowsById.get(toolUseId) : undefined;
-  if (exact) return exact;
+  const key = transcriptToolCallKey(envelope, toolUseId);
+  if (key) return state.toolRowsById.get(key);
   for (let index = state.unmatchedTools.length - 1; index >= 0; index -= 1) {
     const candidate = state.unmatchedTools[index];
-    if (candidate && (typeof toolName !== 'string' || candidate.toolName === toolName)) return candidate;
+    if (
+      candidate &&
+      state.toolScopes.get(candidate) === transcriptToolScope(envelope) &&
+      (typeof toolName !== 'string' || candidate.toolName === toolName)
+    )
+      return candidate;
   }
   return undefined;
 }
@@ -170,7 +165,7 @@ function findUnmatchedTool(
 function consumeToolResult(state: TimelineBuildState, envelope: RawTranscriptEvent): void {
   const toolUseId = envelope.event.toolUseId ?? envelope.event.tool_use_id;
   const toolName = envelope.event.toolName ?? envelope.event.name;
-  const row = findUnmatchedTool(state, toolUseId, toolName);
+  const row = findUnmatchedTool(state, envelope, toolUseId, toolName);
   if (!row) {
     state.rows.push({
       id: `tool-result-${envelope.eventNo}`,
@@ -186,8 +181,11 @@ function consumeToolResult(state: TimelineBuildState, envelope: RawTranscriptEve
   }
   const unmatchedIndex = state.unmatchedTools.indexOf(row);
   if (unmatchedIndex >= 0) state.unmatchedTools.splice(unmatchedIndex, 1);
-  if (row.toolUseId) state.toolRowsById.delete(row.toolUseId);
+  const key = transcriptToolCallKey(envelope, row.toolUseId);
+  if (key) state.toolRowsById.delete(key);
+  state.toolScopes.delete(row);
   row.result = toolResultText(envelope.event);
+  if (envelope.event.toolInput !== undefined) row.input = envelope.event.toolInput;
   row.resultStatus = toolResultStatus(envelope.event);
   if (row.toolName === 'unknown' && typeof toolName === 'string' && toolName.length > 0) row.toolName = toolName;
   if (row.source === 'unknown') row.source = toolSource(envelope.event.toolSource);
@@ -321,6 +319,7 @@ export function buildInvocationTimelineRows(
     rows: [],
     toolRowsById: new Map(),
     unmatchedTools: [],
+    toolScopes: new Map(),
     foldedTypes: {},
     nativeMessages: options.nativeMessages,
   };

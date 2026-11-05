@@ -1,4 +1,6 @@
 'use client';
+
+import { deploymentDefaults } from '@cat-cafe/shared';
 import { useEffect, useRef, useState } from 'react';
 import { z } from 'zod';
 import { apiFetch } from '@/utils/api-client';
@@ -74,8 +76,11 @@ export function WorkspaceRootConnectionPanel({
       } catch {
         /* A confirmed owner receipt remains true if local cleanup fails. */
       }
-      if (open) await callback.current();
-      else setKnownConnected(true);
+      if (open) {
+        await callback.current();
+        return true;
+      }
+      setKnownConnected(true);
     } else {
       setFresh(true);
       setEpoch(receipt.currentEpoch);
@@ -87,6 +92,7 @@ export function WorkspaceRootConnectionPanel({
           : '此前的连接已移除。再次连接需确认下方的共享范围。',
       );
     }
+    return false;
   }
   useEffect(() => {
     const controller = new AbortController();
@@ -111,8 +117,11 @@ export function WorkspaceRootConnectionPanel({
             { signal: controller.signal },
           );
           if (controller.signal.aborted) return;
-          if (response.ok) await consume(await response.json(), prior, resumeOnOpen);
-          else if (response.status !== 404) throw new Error('暂时无法核对原连接请求，请重试。');
+          if (response.ok) {
+            // A confirmed automatic resume hands back to the original resolver;
+            // it never becomes a consent prompt while that owner is still loading.
+            if (await consume(await response.json(), prior, resumeOnOpen)) return;
+          } else if (response.status !== 404) throw new Error('暂时无法核对原连接请求，请重试。');
         }
         if (!controller.signal.aborted) setReady(true);
       } catch (cause) {
@@ -184,9 +193,14 @@ export function WorkspaceRootConnectionPanel({
   }
 
   return (
-    <div data-testid="workspace-root-connection" className="space-y-3 p-4 text-sm">
+    <div
+      data-testid="workspace-root-connection"
+      data-content-opening-state={ready || error ? 'blocked' : undefined}
+      className="space-y-3 p-4 text-sm"
+    >
       <p>
-        连接后，该目录（包含其中其他文件）将加入当前 Clowder AI 的 Workspace 共享目录列表，可跨对话使用；可移除连接。
+        连接后，该目录（包含其中其他文件）将加入当前 {deploymentDefaults.brand.displayName} 的 Workspace
+        共享目录列表，可跨对话使用；可移除连接。
       </p>
       <p>
         {connection.name} · {connection.path}

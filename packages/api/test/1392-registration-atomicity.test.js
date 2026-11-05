@@ -1,15 +1,14 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { describe, it } from 'node:test';
-import { createTypedWaitRegistration } from '../dist/domains/ball-custody/TypedWaitRegistration.js';
+import { isLiveTypedWaitRegistration } from '../dist/domains/ball-custody/TypedWaitRegistration.js';
 import { TaskStore } from '../dist/domains/cats/services/stores/ports/TaskStore.js';
 import { RedisTaskStore } from '../dist/domains/cats/services/stores/redis/RedisTaskStore.js';
 import { TaskKeys } from '../dist/domains/cats/services/stores/redis-keys/task-keys.js';
 import { ownedRedisFixture } from './helpers/owned-redis-fixture.js';
-import { createTypedWaitCustodyFixture } from './helpers/typed-wait-custody-fixture.js';
 
 for (const backend of ['memory', 'redis']) {
-  describe(`tracking registration commits one aggregate (${backend})`, () => {
+  describe(`historical tracking storage commits one aggregate without live continuation authority (${backend})`, () => {
     const owned = backend === 'redis' ? ownedRedisFixture('a2a-registration-atomicity') : null;
     async function fixture(t) {
       let taskStore = new TaskStore();
@@ -22,7 +21,34 @@ for (const backend of ['memory', 'redis']) {
         });
         taskStore = new RedisTaskStore(redis);
       }
-      const h = await createTypedWaitCustodyFixture({ taskStore });
+      // The plugin owns live PR waits. Keep the retained Task storage CAS/index contract,
+      // without minting the retired Host PR continuation receipt.
+      const task = await taskStore.create({
+        kind: 'pr_tracking',
+        subjectKey: 'pr:owner/repo#4513',
+        threadId: 'thread-wait',
+        title: 'Historical CI',
+        userId: 'user-1',
+        ownerCatId: 'opus',
+        createdBy: 'opus',
+      });
+      const active = {
+        v: 1,
+        generation: 1,
+        subjectRef: task.subjectKey,
+        ownerFence: { kind: 'containing_task', generation: 1 },
+        baseline: { capturedAt: Date.now(), headSha: 'head-1' },
+        // biome-ignore lint/suspicious/noThenProperty: persisted historical field.
+        continuation: { when: [{ kind: 'pr_ci_terminal' }], then: 'Historical continuation' },
+        createdAt: Date.now(),
+        expiresAt: Date.now() + 60000,
+      };
+      await taskStore.replaceAutomationStateIfGeneration(task.id, {
+        expectedGeneration: null,
+        automationState: { await: active },
+      });
+      const h = { task, taskStore, active, receipt: null };
+      assert.equal(isLiveTypedWaitRegistration(await taskStore.getWaitRegistration(task.id), {}, Date.now()), false);
       const original = await taskStore.get(h.task.id);
       const candidate = (suffix) => {
         const active = { ...h.active, generation: 2, ownerFence: { kind: 'containing_task', generation: 2 } };
@@ -39,12 +65,6 @@ for (const backend of ['memory', 'redis']) {
           expectedUpdatedAt: original.updatedAt,
           automationState: { await: active },
           trackingRegistration,
-          waitRegistration: createTypedWaitRegistration({
-            task: { ...original, ...trackingRegistration },
-            active,
-            invocationId: `invocation-${suffix}`,
-            source: h.receipt.source,
-          }),
         };
       };
       const assertUnchanged = async (binding = null) => {
@@ -84,10 +104,7 @@ for (const backend of ['memory', 'redis']) {
         assert.equal(await h.taskStore.replaceAutomationStateIfGeneration(h.task.id, h.candidate('two')), null);
         assert.equal(injected, true);
         assert.deepEqual(await h.taskStore.get(h.task.id), winner);
-        assert.deepEqual(
-          (await h.taskStore.getWaitRegistration(h.task.id)).receipt,
-          h.candidate('one').waitRegistration,
-        );
+        assert.deepEqual((await h.taskStore.getWaitRegistration(h.task.id)).receipt, null);
         assert.deepEqual(
           await h.taskStore.getManagedWorkBinding(h.task.id),
           h.candidate('one').trackingRegistration.managedWorkBinding,
@@ -112,7 +129,12 @@ for (const backend of ['memory', 'redis']) {
     it('invalid private receipt cannot leave a managed-work binding or owner change', async (t) => {
       const h = await fixture(t);
       const input = h.candidate('new');
-      input.waitRegistration.catId = 'wrong-owner';
+      input.waitRegistration = {
+        proofKind: 'typed_predicates',
+        subjectRef: h.task.subjectKey,
+        catId: 'wrong-owner',
+        source: {},
+      };
       await assert.rejects(async () => h.taskStore.replaceAutomationStateIfGeneration(h.task.id, input));
       await h.assertUnchanged();
     });
@@ -151,7 +173,7 @@ for (const backend of ['memory', 'redis']) {
       assert.equal(winner.threadId, input.trackingRegistration.threadId);
       assert.equal(winner.ownerCatId, input.trackingRegistration.ownerCatId);
       assert.deepEqual(winner.automationState, input.automationState);
-      assert.deepEqual((await h.taskStore.getWaitRegistration(h.task.id)).receipt, input.waitRegistration);
+      assert.deepEqual((await h.taskStore.getWaitRegistration(h.task.id)).receipt, null);
       assert.deepEqual(
         await h.taskStore.getManagedWorkBinding(h.task.id),
         input.trackingRegistration.managedWorkBinding,

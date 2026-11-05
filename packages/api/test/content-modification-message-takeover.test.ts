@@ -80,8 +80,8 @@ test('a real human message has one authenticated cat takeover with version-bound
   const version = unopened.revision;
   const sourceMessage = f.messages.append({
     userId: 'operator',
+    from: { kind: 'user', userId: 'operator' },
     threadId: f.thread.id,
-    catId: null,
     mentions: ['codex-astra', secondCatId],
     visibility: 'whisper',
     whisperTo: [createCatId('codex-astra'), createCatId(secondCatId)],
@@ -179,8 +179,8 @@ test('a real human message has one authenticated cat takeover with version-bound
 
   const followUpSource = f.messages.append({
     userId: 'operator',
+    from: { kind: 'user', userId: 'operator' },
     threadId: f.thread.id,
-    catId: null,
     mentions: [winner],
     timestamp: Date.now() + 1,
     content: 'Please refine the same file in the responsibility you already own.',
@@ -203,8 +203,8 @@ test('a real human message has one authenticated cat takeover with version-bound
 
   const lateRecall = f.messages.append({
     userId: 'operator',
+    from: { kind: 'user', userId: 'operator' },
     threadId: f.thread.id,
-    catId: null,
     mentions: [winner],
     timestamp: Date.now() + 2,
     content: 'Recall this while the server is still resolving the selection.',
@@ -235,8 +235,8 @@ test('a real human message has one authenticated cat takeover with version-bound
 
   const recalled = f.messages.append({
     userId: 'operator',
+    from: { kind: 'user', userId: 'operator' },
     threadId: f.thread.id,
-    catId: null,
     mentions: ['codex-astra'],
     timestamp: Date.now() + 3,
     content: 'Please change the heading.',
@@ -253,8 +253,8 @@ test('a real human message has one authenticated cat takeover with version-bound
 
   const legacy = f.messages.append({
     userId: 'operator',
+    from: { kind: 'user', userId: 'operator' },
     threadId: f.thread.id,
-    catId: null,
     mentions: ['codex-astra'],
     timestamp: Date.now() + 4,
     content: 'Please change the heading.',
@@ -271,8 +271,8 @@ test('a real human message has one authenticated cat takeover with version-bound
 
   const mixedRevision = f.messages.append({
     userId: 'operator',
+    from: { kind: 'user', userId: 'operator' },
     threadId: f.thread.id,
-    catId: null,
     mentions: [winner],
     timestamp: Date.now() + 5,
     content: 'Do not combine references from different source revisions.',
@@ -292,8 +292,8 @@ test('a real human message has one authenticated cat takeover with version-bound
 
   const duplicateText = f.messages.append({
     userId: 'operator',
+    from: { kind: 'user', userId: 'operator' },
     threadId: f.thread.id,
-    catId: null,
     mentions: [winner],
     timestamp: Date.now() + 6,
     content: 'This rendered quote is ambiguous in the raw source.',
@@ -325,8 +325,8 @@ test('a real human message has one authenticated cat takeover with version-bound
   assert.equal(stableReplay.json().record.requestId, left.json().record.requestId);
   const ambiguousSource = f.messages.append({
     userId: 'operator',
+    from: { kind: 'user', userId: 'operator' },
     threadId: f.thread.id,
-    catId: null,
     mentions: [winner],
     timestamp: Date.now() + 7,
     content: 'Continue whichever responsibility applies.',

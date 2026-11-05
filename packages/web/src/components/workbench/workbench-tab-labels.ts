@@ -23,9 +23,11 @@ function modeTitle(
   surface: WorkspaceSurfaceDescriptor,
   modeLabels?: Readonly<Record<WorkspaceMode, string>>,
   voiceLabel?: string,
+  statusLabel?: string,
 ): string {
   const target = resolveWorkspaceDestinationTarget(surface);
   if (voiceLabel && target?.destinationRef === 'host:voice') return voiceLabel;
+  if (statusLabel && target?.destinationRef === 'host:status') return statusLabel;
   if (!modeLabels || surface.type !== 'workspace' || surface.renderer !== 'workspace-destination') return surface.title;
   if (resolveTeamWorkspaceTarget(surface)) return modeLabels.team;
   const mode = target?.destinationRef.startsWith('mode:') ? target.destinationRef.slice(5) : null;
@@ -43,8 +45,11 @@ export function workbenchTabLabels(
   surfaces: readonly WorkspaceSurfaceDescriptor[],
   modeLabels?: Readonly<Record<WorkspaceMode, string>>,
   voiceLabel?: string,
+  statusLabel?: string,
 ): ReadonlyMap<string, string> {
-  const labels = new Map(surfaces.map((surface) => [surface.id, modeTitle(surface, modeLabels, voiceLabel)]));
+  const labels = new Map(
+    surfaces.map((surface) => [surface.id, modeTitle(surface, modeLabels, voiceLabel, statusLabel)]),
+  );
   const duplicates = () => {
     const groups = new Map<string, WorkspaceSurfaceDescriptor[]>();
     for (const surface of surfaces) {

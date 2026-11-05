@@ -22,7 +22,7 @@ function deferred() {
 
 async function waitFor(predicate) {
   const deadline = Date.now() + 3000;
-  while (!predicate()) {
+  while (!(await predicate())) {
     assert.ok(Date.now() < deadline, 'timed out waiting for the delivery boundary');
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
@@ -58,7 +58,11 @@ for (const useSteer of [false, true]) {
     const preparation = deferred();
     const running = deferred();
     const initialRead = deferred();
-    const dispatch = mock.fn(async () => ({ accepted: true, handle: {} }));
+    const acceptance = deferred();
+    const dispatch = mock.fn(async () => {
+      await acceptance.promise;
+      return { accepted: true, handle: {} };
+    });
     const errors = [];
     let started = false;
     let processor;
@@ -183,6 +187,28 @@ for (const useSteer of [false, true]) {
       }
       preparation.resolve();
       await waitFor(() => dispatch.mock.calls.length === 1);
+      const reloaded = new RedisMessageStore(redis, { ttlSeconds: 0 });
+      const reloadedLedger = new RedisQueueLedgerStore(redis);
+      const guidanceRef = async () =>
+        (await reloaded.getById(guidance.message.id)).lifecycle.dispatchRefs.find((ref) => ref.targetId === 'opus');
+      const pendingEntry = await reloadedLedger.get('thread', guidance.entry.id);
+      assert.deepEqual(pendingEntry.payload, guidance.entry.payload, 'original input survives until acceptance');
+      assert.deepEqual(pendingEntry.targets, ['opus']);
+      assert.equal(pendingEntry.delivery.appendPendingByTarget.opus.dispatchStarted, true);
+      const pendingRef = await guidanceRef();
+      assert.equal(pendingRef.appendAcceptance, 'pending', 'dispatch start is not durable acceptance');
+      assert.deepEqual(dispatch.mock.calls[0].arguments[0].messageIds, [guidance.message.id]);
+      await processor.requestDrain('thread');
+      assert.equal(dispatch.mock.calls.length, 1, 'repeated drain before ACK must not append again');
+
+      acceptance.resolve();
+      await waitFor(async () => (await guidanceRef()).appendAcceptance === 'accepted');
+      await waitFor(
+        async () =>
+          (await reloadedLedger.get('thread', guidance.entry.id)) === null &&
+          queue.getEntrySnapshot('thread', 'owner', guidance.entry.id) === null,
+      );
+      assert.equal((await guidanceRef()).statusMessageId, pendingRef.statusMessageId);
       assert.equal(queue.getEntrySnapshot('thread', 'owner', guidance.entry.id), null);
       assert.equal(router.routeExecution.mock.calls.length, 1, 'guidance must not start another turn');
       await processor.requestDrain('thread');
@@ -208,7 +234,6 @@ for (const useSteer of [false, true]) {
         storedFirst = await messageStore.getById(first.message.id);
         await new Promise((resolve) => setTimeout(resolve, 5));
       }
-      const reloaded = new RedisMessageStore(redis, { ttlSeconds: 0 });
       assert.deepEqual(receiptFor(await reloaded.getById(first.message.id)), { status: 'read', at: readAt });
       initialRead.resolve(readAt + 1000);
       await processor.requestDrain('thread');
@@ -216,6 +241,7 @@ for (const useSteer of [false, true]) {
       assert.deepEqual(errors, []);
     } finally {
       preparation.resolve();
+      acceptance.resolve();
       running.resolve();
       await app.close();
     }

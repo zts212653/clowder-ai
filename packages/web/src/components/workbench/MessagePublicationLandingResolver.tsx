@@ -25,13 +25,20 @@ export function MessagePublicationLandingResolver({
   forceChoice?: boolean;
 }) {
   const sourceKey = JSON.stringify(source);
-  const [landing, setLanding] = useState<{ sourceKey: string; value: MessagePublicationLanding } | null>(null);
+  const [landing, setLanding] = useState<{
+    sourceKey: string;
+    selectionKey: string;
+    value: MessagePublicationLanding;
+  } | null>(null);
   const [selection, setSelection] = useState<{ contentRef: string; ownerRevision: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [missingSelection, setMissingSelection] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
   const [busy, setBusy] = useState(false);
-  const current = landing?.sourceKey === sourceKey ? landing.value : null;
+  // A remembered choice is revalidated by the owner. Its previous chooser is
+  // not a user-action state while that follow-up read is still progressing.
+  const current =
+    landing?.sourceKey === sourceKey && landing.selectionKey === JSON.stringify(selection) ? landing.value : null;
   const choiceReviews = useChoiceReviews(current);
   useEffect(() => {
     const abort = new AbortController();
@@ -65,7 +72,7 @@ export function MessagePublicationLandingResolver({
             (asset) => JSON.stringify({ contentRef: asset.contentRef, ownerRevision: asset.ownerRevision }) === saved,
           );
           if (prior) {
-            setLanding({ sourceKey, value: result });
+            setLanding({ sourceKey, selectionKey: JSON.stringify(selection), value: result });
             setSelection({ contentRef: prior.contentRef, ownerRevision: prior.ownerRevision });
             return;
           }
@@ -81,7 +88,7 @@ export function MessagePublicationLandingResolver({
         }
         setMissingSelection(null);
       }
-      setLanding({ sourceKey, value: result });
+      setLanding({ sourceKey, selectionKey: JSON.stringify(selection), value: result });
     };
     void read()
       .catch((failure) => {
@@ -121,7 +128,7 @@ export function MessagePublicationLandingResolver({
       </button>
       <h2 className="text-sm font-semibold">{surface.title}</h2>
       {error ? (
-        <div role="alert" className="my-2 text-sm text-cafe-error">
+        <div data-content-opening-state="blocked" role="alert" className="my-2 text-sm text-cafe-error">
           {error}
           <button type="button" disabled={busy} onClick={() => setRetry((n) => n + 1)}>
             重新读取
@@ -147,7 +154,7 @@ export function MessagePublicationLandingResolver({
         </div>
       ) : null}
       {current?.status === 'resolved' && forceChoice && !selection ? (
-        <div className="space-y-3 py-3 text-sm">
+        <div data-content-opening-state="blocked" className="space-y-3 py-3 text-sm">
           <p>当前只有这一份可访问的作品。</p>
           <button
             type="button"
@@ -166,7 +173,9 @@ export function MessagePublicationLandingResolver({
               还有历史作品当前无法访问。请选择当前可用的作品，或返回原对话核对权限。
             </p>
           ) : null}
-          <p className="my-3 text-sm">{choiceIntro(current.choices)}</p>
+          <p data-content-opening-state="blocked" className="my-3 text-sm">
+            {choiceIntro(current.choices)}
+          </p>
           <ul className="space-y-2">
             {namedChoices(current.choices, choiceReviews).map(({ choice, heading, detail }) => (
               <li key={`${choice.asset.contentRef}:${choice.asset.ownerRevision}`}>

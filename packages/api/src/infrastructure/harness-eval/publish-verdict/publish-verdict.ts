@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { parse as parseYaml } from 'yaml';
+import { getCoCreatorDisplay } from '../../../config/co-creator-display.js';
 import { assertMeasurementVerdictActionAllowed } from '../measurement/measurement-bundle-census.js';
 import {
   ensureMeasurementBundleCensusFile,
@@ -18,7 +19,6 @@ import { resolvePostPublishCollision, resolvePrePublishReplay } from './replay-o
 import type {
   GeneratedFindingArtifact,
   GeneratedVerdictArtifact,
-  GitPublisher,
   HandlerError,
   PublishedVerdictChildArtifact,
   PublishVerdictDeps,
@@ -35,12 +35,6 @@ import { validatePublishInput } from './validate-publish-input.js';
  * runs INSIDE isolated worktree (砚砚 R1 P1 #1 + R7 cloud: live tree NEVER touched)
  * → GitPublisher commits + pushes + opens auto-PR. Replaces PR #2091.
  */
-
-const defaultGitPublisher: GitPublisher = {
-  async publishOnIsolatedWorktree() {
-    throw new Error('GitPublisher not injected (must wire real isolated-worktree impl at route layer)');
-  },
-};
 
 /**
  * AC-H1: Validate VerdictHandoffPacket schema (server NEVER 造 evidence).
@@ -62,6 +56,10 @@ export async function handlePublishVerdict(
   const validated = await validatePublishInput(deps, input);
   if ('status' in validated) return validated;
   const { packet, analysisFindings, publicationTime } = validated;
+  const gitPublisher = deps.gitPublisher;
+  if (!gitPublisher) {
+    return { status: 503, error: 'publication_provider_unavailable', detail: 'No publication provider is installed.' };
+  }
 
   // --- Replay detection (R7: centralized canonical authority) ---
   //
@@ -118,7 +116,6 @@ export async function handlePublishVerdict(
   // Generator runs inside the isolated worktree; live harnessFeedbackRoot is never mutated.
   // Branch uniqueness/race protection is delegated to git worktree add -b.
   // PR-2: stage callback stays domain-agnostic; adapters resolve their own sources.
-  const gitPublisher = deps.gitPublisher ?? defaultGitPublisher;
   const generator: VerdictGenerator = deps.generator; // checked above (501 if missing)
   const domainSlug = packet.domainId.replace(/:/g, '-');
   const branchName = `verdict/auto/${domainSlug}/${packet.id}`;
@@ -195,9 +192,9 @@ export async function handlePublishVerdict(
         const policy = computePublishPolicy(packet, attribution);
         const policyFooter =
           policy.mode === 'evidence_only_interim_pr'
-            ? `\n\n---\n**Cat-owned artifact gate — No operator merge needed.**\n(Interim: keep_observe + no actionable findings. Rollup mechanism deferred to future Phase. See docs/SOP.md § artifact-only-pr-merge-gate for cat merge contract.)`
+            ? `\n\n---\n**Cat-owned artifact gate — No ${getCoCreatorDisplay().role} merge needed.**\n(Interim: keep_observe + no actionable findings. Rollup mechanism deferred to future Phase. See docs/SOP.md § artifact-only-pr-merge-gate for cat merge contract.)`
             : policy.labels.includes('evidence-only')
-              ? `\n\n---\n**Cat-owned artifact gate — No operator merge needed.**\n(Actionable findings present; eval domain owner cat merges per docs/SOP.md § artifact-only-pr-merge-gate.)`
+              ? `\n\n---\n**Cat-owned artifact gate — No ${getCoCreatorDisplay().role} merge needed.**\n(Actionable findings present; eval domain owner cat merges per docs/SOP.md § artifact-only-pr-merge-gate.)`
               : '';
         return {
           // PR-2 R3 P1 (cloud): stage extra paths the generator wrote (cw raw inputs)

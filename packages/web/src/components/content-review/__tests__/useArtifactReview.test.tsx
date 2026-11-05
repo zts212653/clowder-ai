@@ -1,4 +1,3 @@
-import type { ArtifactReviewCommand, ArtifactReviewView } from '@cat-cafe/shared';
 import { act, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -9,6 +8,7 @@ import { ArtifactReviewEntry } from '../ReviewArtifactButton';
 import { ReviewHistory } from '../ReviewHistory';
 import { reviewDraftPrefix, useArtifactReview } from '../useArtifactReview';
 import { useReviewDraft } from '../useReviewDraft';
+import { appliedResult, command, draftKey, initial, prefix, REVIEW_ID } from './review-command.fixture';
 
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
 vi.mock('@/hooks/useGlobalArtifacts', () => ({
@@ -26,61 +26,6 @@ vi.mock('@/components/growing/NeedsMePanel', () => ({
       '打开',
     ),
 }));
-const REVIEW_ID = `review-${'a'.repeat(64)}`;
-const prefix = reviewDraftPrefix('operator', REVIEW_ID);
-const draftKey = `${prefix}round:1:annotation`;
-const command: ArtifactReviewCommand = {
-  reviewId: REVIEW_ID,
-  expectedRevision: 1,
-  expectedTaskRevision: 1,
-  round: 1,
-  operationId: 'stable-save',
-  action: {
-    kind: 'annotate',
-    annotationId: 'mark',
-    anchor: { kind: 'image-region', x: 1, y: 1, width: 5, height: 5 },
-    body: '同一个人的草稿',
-  },
-};
-const initial: ArtifactReviewView = {
-  review: {
-    version: 1,
-    reviewId: REVIEW_ID,
-    revision: 1,
-    title: '封面',
-    contentRef: 'content-one',
-    task: { taskId: 'task-one', threadId: 'thread-one', ownerUserId: 'operator', observedRevision: 1 },
-    createdAt: '2026-09-07T14:00:00Z',
-    updatedAt: '2026-09-07T14:00:00Z',
-    rounds: [
-      {
-        number: 1,
-        openedAt: '2026-09-07T14:00:00Z',
-        state: 'draft',
-        annotations: [],
-        responses: [],
-        asset: {
-          contentRef: 'content-one',
-          ownerRevision: 1,
-          blobDigest: `sha256:${'a'.repeat(64)}`,
-          mediaType: 'image/png',
-          media: { kind: 'image', width: 100, height: 100 },
-          ownerReceiptRef: 'receipt:one',
-          sourcePublication: { artifactRef: '/uploads/one.png', sourceRef: 'message:thread-one:one', revision: '1' },
-        },
-      },
-    ],
-  },
-  pendingVersion: false,
-  authority: { state: 'current', taskRevision: 1, ownerCatId: 'codex-astra', canWrite: true },
-  continuation: {
-    taskId: 'task-one',
-    expectedRevision: 1,
-    artifactRef: 'content:content-one',
-    reviewEvidenceRef: 'review:one',
-    ownerCatId: 'codex-astra',
-  },
-};
 let controller: ReturnType<typeof useArtifactReview>;
 let draftBody = '';
 let root: ReturnType<typeof createRoot>;
@@ -131,7 +76,9 @@ it('a successful replay clears the already committed draft in storage and mounte
   );
   vi.mocked(apiFetch).mockImplementation(async (_path, init) =>
     init?.method === 'POST'
-      ? response({ view: { ...initial, review: { ...initial.review, revision: 2 } } })
+      ? response(
+          appliedResult({ ...initial, review: { ...initial.review, revision: 2 } }, JSON.parse(String(init?.body))),
+        )
       : response(initial),
   );
   await act(async () => {
@@ -158,7 +105,9 @@ it('a late read cannot overwrite the newer revision acknowledged by a successful
   let resolveRead: (response: Response) => void = () => undefined;
   vi.mocked(apiFetch).mockImplementation(async (_path, init) =>
     init?.method === 'POST'
-      ? response({ view: { ...initial, review: { ...initial.review, revision: 2 } } })
+      ? response(
+          appliedResult({ ...initial, review: { ...initial.review, revision: 2 } }, JSON.parse(String(init?.body))),
+        )
       : new Promise<Response>((resolve) => {
           resolveRead = resolve;
         }),

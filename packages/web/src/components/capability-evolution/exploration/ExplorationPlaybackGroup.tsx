@@ -10,8 +10,20 @@ const PlaybackContext = createContext<Playback | null>(null);
 export const useExplorationPlayback = () => useContext(PlaybackContext);
 
 /** A linked pair owns playback only; exact record/media requests remain in ExplorationMedia. */
-export function ExplorationPlaybackGroup({ children, enabled = false }: { children: ReactNode; enabled?: boolean }) {
+export function ExplorationPlaybackGroup({
+  children,
+  enabled = false,
+  expectedPlayers = 2,
+  stopAtSeconds,
+}: {
+  children: ReactNode;
+  enabled?: boolean;
+  expectedPlayers?: 2 | 4;
+  stopAtSeconds?: number;
+}) {
+  const countLabel = expectedPlayers === 4 ? '四段' : '两段';
   const players = useRef(new Map<string, Player>());
+  const programmaticTargets = useRef(new WeakMap<HTMLVideoElement, number>());
   const [revision, setRevision] = useState(0);
   const [mode, setMode] = useState<'idle' | 'loading' | 'playing' | 'failed'>('idle');
   const modeRef = useRef(mode);
@@ -21,6 +33,7 @@ export function ExplorationPlaybackGroup({ children, enabled = false }: { childr
   }, []);
   const stop = useCallback(() => {
     request.current = null;
+    programmaticTargets.current = new WeakMap();
     modeRef.current = 'idle';
     setMode('idle');
     pause();
@@ -61,7 +74,7 @@ export function ExplorationPlaybackGroup({ children, enabled = false }: { childr
   // biome-ignore lint/correctness/useExhaustiveDependencies: native metadata updates the mutable player registry; revision is the readiness notification.
   useEffect(() => {
     const active = request.current;
-    if (mode !== 'loading' || !active || active.started || players.current.size !== 2) return;
+    if (mode !== 'loading' || !active || active.started || players.current.size !== expectedPlayers) return;
     const videos = [...players.current.values()].map((player) => player.video);
     if (!videos.every((video): video is HTMLVideoElement => Boolean(video && video.readyState >= 1))) return;
     active.started = true;
@@ -75,22 +88,27 @@ export function ExplorationPlaybackGroup({ children, enabled = false }: { childr
       .catch(() => {
         if (request.current === active) fail();
       });
-  }, [mode, revision, fail]);
+  }, [mode, revision, fail, expectedPlayers]);
   const align = useCallback((source: HTMLVideoElement) => {
     if (modeRef.current !== 'playing') return;
     for (const { video } of players.current.values()) {
-      if (video && video !== source && Math.abs(video.currentTime - source.currentTime) > 0.1)
+      if (video && video !== source && !video.seeking && Math.abs(video.currentTime - source.currentTime) > 0.1) {
+        programmaticTargets.current.set(video, source.currentTime);
         video.currentTime = source.currentTime;
+      }
     }
   }, []);
   useEffect(() => {
     if (mode !== 'playing') return;
     const timer = window.setInterval(() => {
       const first = players.current.values().next().value?.video;
-      if (first) align(first);
+      if (first && stopAtSeconds !== undefined && first.currentTime >= stopAtSeconds) {
+        for (const { video } of players.current.values()) if (video) video.currentTime = stopAtSeconds;
+        stop();
+      } else if (first) align(first);
     }, 150);
     return () => window.clearInterval(timer);
-  }, [mode, align]);
+  }, [mode, align, stop, stopAtSeconds]);
   useEffect(
     () => () => {
       request.current = null;
@@ -102,7 +120,8 @@ export function ExplorationPlaybackGroup({ children, enabled = false }: { childr
     [pause],
   );
   const begin = () => {
-    if (players.current.size !== 2) return;
+    if (players.current.size !== expectedPlayers) return;
+    programmaticTargets.current = new WeakMap();
     request.current = { started: false };
     modeRef.current = 'loading';
     setMode('loading');
@@ -113,7 +132,14 @@ export function ExplorationPlaybackGroup({ children, enabled = false }: { childr
       <div
         className="exploration-playback-group"
         onSeekingCapture={(event) => {
-          if (event.target instanceof HTMLVideoElement) align(event.target);
+          if (!(event.target instanceof HTMLVideoElement)) return;
+          const target = programmaticTargets.current.get(event.target);
+          if (target !== undefined && Math.abs(event.target.currentTime - target) < 0.25) return;
+          programmaticTargets.current.delete(event.target);
+          align(event.target);
+        }}
+        onSeekedCapture={(event) => {
+          if (event.target instanceof HTMLVideoElement) programmaticTargets.current.delete(event.target);
         }}
         onPauseCapture={() => {
           if (modeRef.current === 'playing') stop();
@@ -121,18 +147,22 @@ export function ExplorationPlaybackGroup({ children, enabled = false }: { childr
         onEndedCapture={stop}
       >
         {enabled && (
-          <div className="exploration-playback-controls" role="group" aria-label="两段录像联播">
-            <button type="button" disabled={players.current.size !== 2 || mode === 'loading'} onClick={begin}>
-              两段同步播放
+          <div className="exploration-playback-controls" role="group" aria-label={`${countLabel}录像联播`}>
+            <button
+              type="button"
+              disabled={players.current.size !== expectedPlayers || mode === 'loading'}
+              onClick={begin}
+            >
+              {countLabel}同步播放
             </button>
             {(mode === 'playing' || mode === 'loading') && (
               <button type="button" onClick={stop}>
                 {mode === 'loading' ? '取消联播' : '暂停联播'}
               </button>
             )}
-            {mode === 'loading' && <span role="status">正在读取两段原始录像…</span>}
+            {mode === 'loading' && <span role="status">正在读取{countLabel}原始录像…</span>}
             {mode === 'failed' && <span role="status">联播暂未开始，可重试或分别播放。</span>}
-            {players.current.size !== 2 && <span>选择两边的录像后，可以同步播放。</span>}
+            {players.current.size !== expectedPlayers && <span>选择{countLabel}录像后，可以同步播放。</span>}
           </div>
         )}
         <div className="exploration-pair">{children}</div>

@@ -1,7 +1,12 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { expect, it } from 'vitest';
+import { checkShellCopyParity } from '../../shell/__tests__/shell-copy-parity-check';
 import { membersCopy } from '../members.shell-copy';
+
+it('keeps the complete member dictionary in bilingual parity', () => {
+  expect(checkShellCopyParity(membersCopy)).toEqual([]);
+});
 
 interface NamingEntry {
   n: number;
@@ -10,23 +15,26 @@ interface NamingEntry {
   zh: string;
   en: string;
 }
-const disposition = JSON.parse(
-  readFileSync(
-    resolve(__dirname, '../../../../../../docs/evidence/2026-10-03-f322-v2-members/naming-disposition.json'),
-    'utf8',
-  ),
-) as { entries: NamingEntry[] };
+const dispositionPath = resolve(
+  __dirname,
+  '../../../../../../docs/evidence/2026-10-03-f322-v2-members/naming-disposition.json',
+);
 
-it('consumes every resolved static Chinese and English naming target', () => {
-  expect(disposition.entries).toHaveLength(211);
-  for (const entry of disposition.entries.filter((item) => item.n !== 3 && !item.zh_draft.includes('=>'))) {
-    for (const language of ['zh', 'en'] as const) {
-      expect((membersCopy[language] as Record<string, unknown>)[entry.key], `${entry.n}:${language}`).toBe(
-        entry[language],
-      );
+it.skipIf(!existsSync(dispositionPath))(
+  'consumes every resolved static Chinese and English naming target (private naming evidence)',
+  () => {
+    const disposition = JSON.parse(readFileSync(dispositionPath, 'utf8')) as { entries: NamingEntry[] };
+    expect(disposition.entries).toHaveLength(211);
+    for (const entry of disposition.entries.filter((item) => item.n !== 3 && !item.zh_draft.includes('=>'))) {
+      for (const language of ['zh', 'en'] as const) {
+        // The October 26 design correction supersedes the older plural title only.
+        // thread_mvhxkneo3xa8opl1#0001793016199881-002178-de6debdb
+        const expected = entry.key === '成员与运行时' && language === 'en' ? 'Members & runtime' : entry[language];
+        expect((membersCopy[language] as Record<string, unknown>)[entry.key], `${entry.n}:${language}`).toBe(expected);
+      }
     }
-  }
-});
+  },
+);
 it('uses the approved mention name term and keeps names verbatim', () => {
   expect(membersCopy.en['@ 名字']).toBe('Mention names');
   expect(membersCopy.en.aliasTaken('@somebody')).toBe('Mention name “@somebody” is already used by another member');

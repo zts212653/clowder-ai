@@ -4,11 +4,10 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { ensureWorkspaceOpen } from './f307-workspace-open.mjs';
 import { routeThroughRealOwner, startRealWorkspaceOwner } from './f309-ordinary-workspace-real-owner.mjs';
-import { openAnnotationSave } from './fixtures/f309-artwork-controls.mjs';
 
 export function registerOrdinaryOwnerJourney(suite) {
   test(
-    'ordinary PNG saves through its real owner and reopens in an independent narrow browser',
+    'ordinary PNG saves native markup and reopens retained discussion in an independent narrow browser',
     { timeout: 90_000 },
     async () => {
       const evidence = await mkdtemp('/tmp/f309-artwork-owner-');
@@ -19,10 +18,16 @@ export function registerOrdinaryOwnerJourney(suite) {
       const receipts = [];
       const errors = [];
       const contexts = [];
+      let receiveSave;
       async function openImage(viewport) {
         const context = await suite().browser.newContext({ viewport });
         contexts.push(context);
-        await routeThroughRealOwner(context, owner, { onReviewPost: (receipt) => receipts.push(receipt) });
+        await routeThroughRealOwner(context, owner, {
+          onReviewPost: (receipt) => {
+            receipts.push(receipt);
+            if (receipt.path.endsWith('/actions')) receiveSave?.(receipt);
+          },
+        });
         const page = await context.newPage();
         page.on('pageerror', (error) => errors.push(error.message));
         await page.goto(suite().baseUrl, { waitUntil: 'domcontentloaded' });
@@ -41,7 +46,6 @@ export function registerOrdinaryOwnerJourney(suite) {
         const surface = page.getByTestId('workspace-content-review-surface');
         assert.equal(await surface.locator('textarea').count(), 0);
         await surface.screenshot({ path: `${evidence}/01-default.png` });
-        await page.getByRole('button', { name: '标注', exact: true }).click();
         await page.getByRole('button', { name: '画笔', exact: true }).click();
         const box = await page.getByTestId('review-markup-layer').boundingBox();
         assert.ok(box);
@@ -50,21 +54,42 @@ export function registerOrdinaryOwnerJourney(suite) {
         await page.mouse.move(box.x + box.width * 0.6, box.y + box.height * 0.55, { steps: 8 });
         await page.mouse.up();
         await surface.screenshot({ path: `${evidence}/02-markup.png` });
+        // Observe the real owner's complete response through the existing proxy.
+        // Reading a routed Playwright Response body can wait past page teardown.
+        const saved = new Promise((resolve) => {
+          receiveSave = resolve;
+        });
         await page.getByRole('button', { name: '完成并保存', exact: true }).click();
+        const savedReceipt = await saved;
+        assert.equal(savedReceipt.status, 200);
+        const marked = savedReceipt.response.review;
         await page.getByTestId('review-saved-markup-layer').waitFor();
-        await page.getByRole('button', { name: '评论', exact: true }).click();
-        const image = await page.getByTestId('workspace-content-review-media').boundingBox();
-        assert.ok(image);
-        await page.mouse.click(image.x + image.width * 0.45, image.y + image.height * 0.4);
-        await page.getByPlaceholder('写下这条批注…').fill('普通 PNG：这处评论保留在作品现场。');
-        await surface.screenshot({ path: `${evidence}/03-comment.png` });
-        await (await openAnnotationSave(page)).click();
+        // New image discussion goes through Chat. This is retained historical
+        // discussion, created through its real owner before testing readback.
+        const historical = await page.request.post(
+          `${api}/api/workspace/content-reviews/${marked.reviewId}/annotations`,
+          {
+            data: {
+              expectedRevision: marked.revision,
+              operationId: 'retained-image-discussion',
+              body: '普通 PNG：这处评论保留在作品现场。',
+              target: { kind: 'media_anchor', anchor: { kind: 'image-point', x: 32, y: 48 } },
+            },
+          },
+        );
+        const historicalBody = await historical.json();
+        assert.equal(historical.status(), 200, JSON.stringify({ expectedRevision: marked.revision, historicalBody }));
+        receipts.push({
+          path: 'historical-annotation-fixture',
+          status: historical.status(),
+          response: historicalBody,
+        });
+        await page.reload({ waitUntil: 'domcontentloaded' });
         await page.getByTestId('review-canvas-annotation-mark').waitFor();
         await page.getByTestId('review-canvas-annotation-mark').click();
         await page.getByText('普通 PNG：这处评论保留在作品现场。', { exact: true }).waitFor();
         await surface.screenshot({ path: `${evidence}/04-discussion.png` });
         await page.keyboard.press('Escape');
-        await page.getByRole('button', { name: '退出评论', exact: true }).click();
         const mobile = await openImage({ width: 390, height: 844 });
         assert.equal(await mobile.getByTestId('review-saved-markup-layer').count(), 1);
         assert.equal(await mobile.getByTestId('review-canvas-annotation-mark').count(), 1);
@@ -86,7 +111,8 @@ export function registerOrdinaryOwnerJourney(suite) {
           JSON.stringify(
             {
               outcome: 'pass',
-              scope: 'real owner routes/SQLite/bytes, test session and ancillary thread shell',
+              scope:
+                'native markup save plus real owner HTTP/SQLite historical discussion readback; test session and ancillary thread shell',
               api,
               errors,
               receipts,
@@ -105,9 +131,19 @@ export function registerOrdinaryOwnerJourney(suite) {
       } finally {
         // The collaboration landing opens at once, so a media read can still be proxied when the
         // journey ends; stop proxying before disposal instead of rejecting after the test.
-        await Promise.all(contexts.map((context) => context.unrouteAll({ behavior: 'ignoreErrors' })));
-        await Promise.all(contexts.map((context) => context.close()));
-        await owner.close();
+        try {
+          await Promise.all(
+            contexts.map(async (context) => {
+              try {
+                await context.unrouteAll({ behavior: 'ignoreErrors' });
+              } finally {
+                await context.close();
+              }
+            }),
+          );
+        } finally {
+          await owner.close();
+        }
       }
     },
   );

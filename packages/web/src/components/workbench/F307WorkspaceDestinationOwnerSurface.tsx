@@ -19,10 +19,12 @@ import { SchedulePanel } from '@/components/workspace/SchedulePanel';
 import { TrajectoryPanel } from '@/components/workspace/trajectory/TrajectoryPanel';
 import { useChatStore } from '@/stores/chatStore';
 import { useToastStore } from '@/stores/toastStore';
+import { DEFAULT_ARTIFACT_WORK_CHAT_BASIS } from './artifact-work-presentation';
 import {
   isCapabilityEvolutionWorkspaceSurface,
   resolveCapabilityEvolutionTargetThreadId,
 } from './capability-evolution-workspace-adapter';
+import { resolveCommitChangesTarget } from './commit-changes-surface';
 import { useF307ExperienceWorkbenchStore } from './experience-workbench-store';
 import { F307FilesOwnerSurface } from './F307FilesOwnerSurface';
 import { F307OwnerUnavailable as OwnerUnavailable } from './F307OwnerUnavailable';
@@ -33,7 +35,6 @@ import {
   resolvePullRequestChangesTarget,
 } from './pull-request-changes-surface';
 import {
-  createArtifactSurface,
   createEvolutionProgramSurface,
   createFileSurface,
   createTeamWorkspaceSurface,
@@ -142,7 +143,7 @@ function WorkspaceModeOwnerSurface({
         key={JSON.stringify([threadId, surface.artifactListView])}
         threadId={threadId}
         initialView={surface.artifactListView}
-        onSelectArtifact={(artifact, navigationOrigin) => {
+        onSelectArtifact={(artifact, navigationOrigin, resolvedSurface) => {
           if (artifact.type === 'pr') {
             const target = createPullRequestChangesSurface({
               artifact,
@@ -160,13 +161,7 @@ function WorkspaceModeOwnerSurface({
               });
             return;
           }
-          onOpenSurface(
-            createArtifactSurface({
-              threadId: 'threadId' in artifact ? artifact.threadId : threadId,
-              artifact,
-              navigationOrigin,
-            }),
-          );
+          onOpenSurface(resolvedSurface);
         }}
       />
     );
@@ -199,6 +194,16 @@ export function WorkspaceDestinationOwnerSurface({
   hostWorktreeId?: string | null;
   hostThreadId?: string | null;
 }) {
+  const commitTarget = resolveCommitChangesTarget(surface);
+  if (commitTarget)
+    return (
+      <ChangesPanel
+        worktreeId={commitTarget.worktreeId}
+        commitTarget={commitTarget}
+        basisPct={40}
+        onBack={onReturnToNavigationOrigin}
+      />
+    );
   if (isPullRequestChangesSurfaceCandidate(surface)) {
     const target = resolvePullRequestChangesTarget(surface);
     return target ? (
@@ -226,7 +231,13 @@ export function WorkspaceDestinationOwnerSurface({
         onOpenProgram={(programId, displayName, origin) => {
           const programSurface = createEvolutionProgramSurface(programId, displayName, origin);
           onOpenSurface(programSurface);
-          useF307ExperienceWorkbenchStore.getState().enterMainAreaAttention(programSurface.id);
+          const threadId = resolveCapabilityEvolutionTargetThreadId(surface) ?? useChatStore.getState().currentThreadId;
+          useF307ExperienceWorkbenchStore
+            .getState()
+            .enterMainAreaAttention(
+              programSurface.id,
+              threadId ? { kind: 'chat-workspace', threadId, chatBasis: DEFAULT_ARTIFACT_WORK_CHAT_BASIS } : undefined,
+            );
         }}
       />
     );

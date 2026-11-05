@@ -68,6 +68,58 @@ const base = {
   hasCoCreatorLineStartMention: false,
 };
 
+describe('next-step declarations without a wake', () => {
+  for (const [text, trigger] of [
+    ['今天不回也没关系，我先把缺的分母补上。', 'cn_no_reply_self_act'],
+    ['等监控结果出来就提交。', 'cn_wait_external_then_act'],
+    ['等 gate 跑完我再汇报。', 'cn_wait_external_then_act'],
+  ]) {
+    test(`records an unbacked declaration: ${text}`, () => {
+      assert.deepEqual(evaluateVoidHold({ ...base, text }), { shouldEmit: true, matchedPattern: trigger });
+    });
+  }
+
+  test('a human question does not discharge a separate no-reply commitment', () => {
+    assert.equal(
+      evaluateVoidHold({
+        ...base,
+        hasCoCreatorLineStartMention: true,
+        text: '@co-creator\n名单请你决定。\n\n今天不回也没关系，我先补分母。',
+      }).shouldEmit,
+      true,
+    );
+  });
+
+  for (const exit of [
+    { toolNames: ['mcp__cat_cafe__cat_cafe_hold_ball'] },
+    { lineStartMentions: ['codex'] },
+    { structuredTargetCats: ['codex'] },
+    { hasVerifiedEventBackedRoutingExit: true },
+  ]) {
+    test(`accepts a real continuation exit ${JSON.stringify(exit)}`, () => {
+      assert.equal(evaluateVoidHold({ ...base, ...exit, text: '今天不回也没关系，我先补分母。' }).shouldEmit, false);
+    });
+  }
+
+  for (const text of [
+    '接下来我继续画旅程六。',
+    '接下来你可以点击保存。',
+    '等你完成 review 我再继续。',
+    '等烁烁完成 review 我再继续。',
+    '今天不回也没关系，我先补分母，可以吗？',
+    '等 gate 跑完我再汇报，可以吗？',
+    '示例：「今天不回也没关系，我先补分母」。',
+    '示例：`等 gate 跑完我再汇报`。',
+    '> 今天不回也没关系，我先补分母。',
+    '```\n等 gate 跑完我再汇报。\n```',
+    '今天不回也没关系，我先补分母。\n\n已经完成。',
+  ]) {
+    test(`does not police plans, questions, human waits or quotations: ${text}`, () => {
+      assert.equal(evaluateVoidHold({ ...base, text }).shouldEmit, false);
+    });
+  }
+});
+
 describe('F167 Phase I AC-I1: shouldWarnVoidHold', () => {
   test('warns when text says hold but no tool call and no exit', () => {
     assert.equal(

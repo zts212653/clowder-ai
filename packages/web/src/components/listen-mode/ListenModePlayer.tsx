@@ -104,23 +104,28 @@ export function ListenModePlayer({ variant = 'workspace', workspaceVisible = fal
   const detailText = session.phase === 'error' ? session.error : currentSentence?.text;
   const currentPosition = session.currentIndex + 1;
   const progress = session.duration > 0 ? Math.min(100, (session.currentTime / session.duration) * 100) : 0;
+  const returnTarget = session.returnTarget;
+  const documentPath = returnTarget?.kind === 'workspace' ? returnTarget.path : session.identity.relativePath;
   const away =
-    (hostHydrated &&
-      (!activeSurface ||
-        resolveFileTarget(activeSurface)?.path !== session.identity.relativePath ||
-        resolveFileTarget(activeSurface)?.worktreeId !== session.worktreeId)) ||
-    currentProjectPath !== session.identity.projectPath ||
-    openFilePath !== session.identity.relativePath ||
-    openWorktreeId !== session.worktreeId ||
-    workspaceSurface !== 'files' ||
-    rightPanelMode !== 'workspace';
+    returnTarget?.kind === 'artifact'
+      ? true
+      : (hostHydrated &&
+          (!activeSurface ||
+            resolveFileTarget(activeSurface)?.path !== documentPath ||
+            resolveFileTarget(activeSurface)?.worktreeId !== session.worktreeId)) ||
+        currentProjectPath !== session.identity.projectPath ||
+        openFilePath !== documentPath ||
+        openWorktreeId !== session.worktreeId ||
+        workspaceSurface !== 'files' ||
+        rightPanelMode !== 'workspace';
   const waiting = session.phase === 'loading' || session.phase === 'buffering';
   const paused = session.phase === 'paused' || session.phase === 'idle' || session.phase === 'error';
 
   const returnToDocument = () => {
     const store = useChatStore.getState();
     store.setCurrentProject(session.identity.projectPath);
-    store.setWorkspaceOpenFile(session.identity.relativePath, null, session.worktreeId);
+    if (returnTarget?.kind === 'artifact') store.openPublishedArtifact(returnTarget.threadId, returnTarget.artifact);
+    else store.setWorkspaceOpenFile(documentPath, null, session.worktreeId);
     window.dispatchEvent(
       new CustomEvent(LISTEN_RETURN_DOCUMENT_EVENT, {
         detail: {

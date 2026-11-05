@@ -137,7 +137,7 @@ export class CatAgentService implements AgentService {
     const now = Date.now();
     let model: string;
     try {
-      model = getCatModel(this.catId as string);
+      model = options?.executionPreferences?.model ?? getCatModel(this.catId as string);
     } catch {
       yield* emitError('Model resolution failed — no configured model', this.catId, 'unknown', now);
       return;

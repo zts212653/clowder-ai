@@ -107,6 +107,8 @@ return 'ANCHORED'
  * replacement and original candidate respectively.
  */
 export const COMMIT_REPLACEMENT_ENVELOPE_LUA = `
+local settledType = redis.call('TYPE', KEYS[6]).ok
+if settledType ~= 'none' and settledType ~= 'zset' then return 'TYPE_CONFLICT' end
 if KEYS[4] ~= '' and redis.call('EXISTS', KEYS[4]) == 1 then return 'NOT_AVAILABLE' end
 if KEYS[5] ~= '' and redis.call('EXISTS', KEYS[5]) == 1 then return 'NOT_AVAILABLE' end
 local newRaw = redis.call('GET', KEYS[1])
@@ -125,11 +127,15 @@ redis.call('SET', KEYS[1], ARGV[1])
 redis.call('SET', KEYS[3], ARGV[4])
 redis.call('ZREM', KEYS[2], ARGV[5])
 redis.call('ZADD', KEYS[2], tonumber(ARGV[2]), ARGV[3])
+redis.call('ZADD', KEYS[6], tonumber(ARGV[2]), ARGV[5])
 return 'ANCHORED'
 `;
 
 /** Withdraw one unmaterialized owner proposal without creating suppression. */
 export const WITHDRAW_CANDIDATE_LUA = `
+local settledType = redis.call('TYPE', KEYS[5]).ok
+if settledType ~= 'none' and settledType ~= 'zset' then return 'TYPE_CONFLICT' end
+if not tonumber(ARGV[6]) then return 'INVALID_ARGUMENTS' end
 if ARGV[5] == '1' and redis.call('EXISTS', KEYS[3]) == 1 then return 'NOT_AVAILABLE' end
 local raw = redis.call('GET', KEYS[1])
 if not raw then return 'NOT_AVAILABLE' end
@@ -142,6 +148,7 @@ if not current.publication or current.publication.state ~= 'anchored' then
 end
 redis.call('SET', KEYS[1], ARGV[1])
 redis.call('ZREM', KEYS[2], ARGV[2])
+redis.call('ZADD', KEYS[5], tonumber(ARGV[6]), ARGV[2])
 if ARGV[4] == '1' and redis.call('GET', KEYS[4]) == ARGV[3] then redis.call('DEL', KEYS[4]) end
 return 'UPDATED'
 `;

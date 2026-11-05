@@ -19,7 +19,6 @@ describe('chatStore multi-slot activeInvocations (F108)', () => {
       targetCats: [],
       catStatuses: {},
       catInvocations: {},
-      currentGame: null,
 
       threadStates: {},
       viewMode: 'single',

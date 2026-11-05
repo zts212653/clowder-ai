@@ -1,6 +1,7 @@
 import { dirname, isAbsolute } from 'node:path';
 import { z } from 'zod';
 import { NodeExternalPluginProcessAdapter } from '../external-runtime/node-process-adapter.js';
+import { createAppAssistPipe } from './app-assist-pipe.js';
 import {
   type HostCompanionReply as CompanionReply,
   hostTextSubmission,
@@ -101,6 +102,15 @@ export class ElectronDesktopWindowExecutor implements DesktopWindowExecutor {
     let ended: Error | undefined;
     let buffer = Buffer.alloc(0);
     let shutdown: Promise<void> | undefined;
+    let stopAppAssistPolicy: (() => Promise<void>) | undefined;
+    let appAssistOpened = false;
+    let appAssistPolicy: boolean | null | undefined;
+    const appAssist = createAppAssistPipe(launch.appAssist, (line) => {
+      if (!ended)
+        child.stdin.write(line, (error) => {
+          if (error) fail(new Error('desktop connection ended'));
+        });
+    });
     const bridgeRequests = new Set<string>();
     const pending = new Map<
       number,
@@ -114,6 +124,8 @@ export class ElectronDesktopWindowExecutor implements DesktopWindowExecutor {
     const finish = (error: Error, cause?: DesktopWindowFailure) => {
       if (ended) return;
       ended = error;
+      appAssist.close();
+      void stopAppAssistPolicy?.();
       launch.signal.removeEventListener('abort', onAbort);
       for (const call of pending.values()) {
         clearTimeout(call.timer);
@@ -153,9 +165,23 @@ export class ElectronDesktopWindowExecutor implements DesktopWindowExecutor {
     const bridgeFrame = z
       .object({ v: z.literal(1), type: z.literal('companion'), id: z.string().uuid(), command: z.unknown() })
       .strict();
+    const replyToBridge = (id: string, result: CompanionReply) => {
+      if (ended) return;
+      const safeReply = validateCompanionReply(result, launch.companionContract)
+        ? result
+        : { kind: 'error', code: 'unavailable' };
+      child.stdin.write(`${JSON.stringify({ v: 1, type: 'companion', id, reply: safeReply })}\n`, (error) => {
+        if (error) fail(new Error('desktop connection ended'));
+      });
+    };
     const handleBridge = (frame: z.infer<typeof bridgeFrame>) => {
-      if (bridgeRequests.has(frame.id) || bridgeRequests.size >= 16)
-        throw new Error('desktop bridge request budget exceeded');
+      if (bridgeRequests.has(frame.id)) throw new Error('desktop bridge request budget exceeded');
+      // The child may have expired its request while the original Host effect
+      // is still pending. Keep the effect bound without killing a valid child.
+      if (bridgeRequests.size >= 16) {
+        replyToBridge(frame.id, { kind: 'error', code: 'unavailable' });
+        return;
+      }
       bridgeRequests.add(frame.id);
       const operation: Promise<CompanionReply> =
         validateCompanionCommand(frame.command, launch.companionContract) && launch.request
@@ -165,16 +191,7 @@ export class ElectronDesktopWindowExecutor implements DesktopWindowExecutor {
         .catch(() => ({ kind: 'error', code: 'unavailable' }) as const)
         .then((result) => {
           bridgeRequests.delete(frame.id);
-          if (ended) return;
-          const safeReply = validateCompanionReply(result, launch.companionContract)
-            ? result
-            : { kind: 'error', code: 'unavailable' };
-          child.stdin.write(
-            `${JSON.stringify({ v: 1, type: 'companion', id: frame.id, reply: safeReply })}\n`,
-            (error) => {
-              if (error) fail(new Error('desktop connection ended'));
-            },
-          );
+          replyToBridge(frame.id, result);
         });
     };
     child.stdout.on('data', (chunk: Buffer) => {
@@ -191,6 +208,7 @@ export class ElectronDesktopWindowExecutor implements DesktopWindowExecutor {
         buffer = buffer.subarray(newline + 1);
         try {
           const value: unknown = JSON.parse(line.toString('utf8'));
+          if (appAssist.accept(value)) continue;
           const submission = z
             .object({ v: z.literal(1), type: z.literal('text_submission'), value: hostTextSubmission })
             .strict()
@@ -265,12 +283,25 @@ export class ElectronDesktopWindowExecutor implements DesktopWindowExecutor {
       return shutdown;
     };
     try {
+      if (launch.appAssist) {
+        stopAppAssistPolicy = await launch.appAssist.watch(async (allowed) => {
+          appAssistPolicy = allowed;
+          if (appAssistOpened) await request('app-assist-policy', { allowed });
+        });
+        if (ended) {
+          await stopAppAssistPolicy();
+          throw ended;
+        }
+      }
       await request('open', {
         url: launch.url,
         presentation: launch.presentation,
         ...(launch.publicCompanionV2 ? { publicCompanionV2: true } : {}),
         ...(launch.companionContract ? { companionContract: launch.companionContract } : {}),
+        ...(launch.appAssist ? { appAssist: true } : {}),
       });
+      appAssistOpened = true;
+      if (appAssistPolicy !== undefined) await request('app-assist-policy', { allowed: appAssistPolicy });
       return {
         poll: async () => {
           const state = await request('poll');

@@ -17,7 +17,7 @@ describe('annotation draft during incoming-message layout changes', () => {
   let owner: MessageActionOwnership;
   const save = vi.fn();
 
-  function Harness({ selectionPresent = true, incomingCount = 0 }) {
+  function Harness({ selectionPresent = true, incomingCount = 0, direct = false }) {
     owner = useMessageActionOwnership('source-message');
     return (
       <MessageActionOwnershipProvider value={owner}>
@@ -28,6 +28,7 @@ describe('annotation draft during incoming-message layout changes', () => {
           positionMode="fixed"
           actionTestId="selection-trigger"
           onSave={save}
+          collectComment={!direct}
         />
       </MessageActionOwnershipProvider>
     );
@@ -73,7 +74,7 @@ describe('annotation draft during incoming-message layout changes', () => {
     const textarea = await openDraft();
     for (let incomingCount = 1; incomingCount <= 3; incomingCount++) {
       await act(async () => {
-        owner.pending();
+        owner.pending(() => false);
         root.render(<Harness selectionPresent={false} incomingCount={incomingCount} />);
       });
       expect(editor()).toBe(textarea);
@@ -92,12 +93,20 @@ describe('annotation draft during incoming-message layout changes', () => {
     expect(editor()).toBeNull();
   });
 
+  it('hands an owner selection to its existing composer without opening a second comment draft', async () => {
+    await act(async () => root.render(<Harness direct />));
+    await act(async () => owner.settle(true, true));
+    await act(async () => document.querySelector<HTMLButtonElement>('[data-testid="selection-trigger"]')?.click());
+    expect(save).toHaveBeenCalledWith(selection, '');
+    expect(editor()).toBeNull();
+  });
+
   it('keeps an unavailable source trigger gated before the editor is opened', async () => {
     const trigger = document.querySelector('[data-testid="selection-trigger"]')!;
     expect(trigger.hasAttribute('inert')).toBe(true);
     await act(async () => owner.settle(true, true));
     expect(trigger.hasAttribute('inert')).toBe(false);
-    await act(async () => owner.pending());
+    await act(async () => owner.pending(() => false));
     expect(trigger.hasAttribute('inert')).toBe(true);
   });
 

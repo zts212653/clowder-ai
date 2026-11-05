@@ -1,3 +1,8 @@
+// Component interaction fixtures; direct transport is covered by community-direct-api.test.tsx.
+vi.mock('@/utils/api-client', () => ({
+  apiFetch: (path: string, init?: RequestInit) => globalThis.fetch(path, init),
+}));
+
 /**
  * F168 Phase E — E-PR2 Decision Queue UX (RED tests)
  *
@@ -82,19 +87,19 @@ const URGENT_FINDING_ITEM = {
     {
       kind: 'acknowledge-finding',
       label: 'Acknowledge',
-      endpoint: '/api/community-findings/find-urgent/acknowledge',
+      endpoint: '/api/plugins/official.github-operations/github/community-findings/find-urgent/acknowledge',
       method: 'POST',
     },
     {
       kind: 'resolve-finding',
       label: 'Resolve',
-      endpoint: '/api/community-findings/find-urgent/resolve',
+      endpoint: '/api/plugins/official.github-operations/github/community-findings/find-urgent/resolve',
       method: 'POST',
     },
     {
       kind: 'waive-finding',
       label: 'Waive',
-      endpoint: '/api/community-findings/find-urgent/waive',
+      endpoint: '/api/plugins/official.github-operations/github/community-findings/find-urgent/waive',
       method: 'POST',
       requiresAuditForm: true,
     },
@@ -133,7 +138,7 @@ const DIRECTION_ITEM = {
     {
       kind: 'resolve-direction',
       label: 'Resolve direction',
-      endpoint: '/api/community-issues/iss-direction/resolve',
+      endpoint: '/api/plugins/official.github-operations/github/community-issues/iss-direction/resolve',
       method: 'POST',
     },
   ],
@@ -196,7 +201,7 @@ const REPORT_CLOSURE_ITEM = {
     {
       kind: 'mark-reported',
       label: 'Mark reported',
-      endpoint: '/api/community-issues/iss-ready/report',
+      endpoint: '/api/plugins/official.github-operations/github/community-issues/iss-ready/report',
       method: 'POST',
       requiresAuditForm: true,
     },
@@ -221,13 +226,18 @@ function installFetchMock(
   const queueRepo = opts.queueRepo ?? board.repo;
   return vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
     const url = String(input);
-    if (url.startsWith('/api/community-board')) return jsonResponse(board);
-    if (url.startsWith('/api/community-decision-queue')) {
+    if (url.startsWith('/api/plugins/official.github-operations/github/community-board')) return jsonResponse(board);
+    if (url.startsWith('/api/plugins/official.github-operations/github/community-decision-queue')) {
       return jsonResponse({ repo: queueRepo, items: queueItems, warnings: [] });
     }
-    if (url.startsWith('/api/community-findings?')) return jsonResponse({ findings: [] });
-    if (url.startsWith('/api/community-repos')) return jsonResponse({ repos });
-    if (url === '/api/community-findings/find-urgent/acknowledge' && init?.method === 'POST') {
+    if (url.startsWith('/api/plugins/official.github-operations/github/community-findings?'))
+      return jsonResponse({ findings: [] });
+    if (url.startsWith('/api/plugins/official.github-operations/github/community-repos'))
+      return jsonResponse({ repos });
+    if (
+      url === '/api/plugins/official.github-operations/github/community-findings/find-urgent/acknowledge' &&
+      init?.method === 'POST'
+    ) {
       return jsonResponse({ finding: { findingId: 'find-urgent', status: 'acknowledged' } });
     }
     return jsonResponse({});
@@ -321,7 +331,8 @@ describe('CommunityPanel decision queue (E-PR2)', () => {
     });
 
     const actionCall = fetchSpy.mock.calls.find(
-      (call: unknown[]) => call[0] === '/api/community-issues/iss-direction/resolve',
+      (call: unknown[]) =>
+        call[0] === '/api/plugins/official.github-operations/github/community-issues/iss-direction/resolve',
     );
     if (!actionCall) throw new Error('Expected resolve-direction POST call');
     expect(JSON.parse(String((actionCall[1] as RequestInit).body))).toEqual({
@@ -378,7 +389,8 @@ describe('CommunityPanel decision queue (E-PR2)', () => {
     });
 
     const actionCall = fetchSpy.mock.calls.find(
-      (call: unknown[]) => call[0] === '/api/community-findings/find-urgent/acknowledge',
+      (call: unknown[]) =>
+        call[0] === '/api/plugins/official.github-operations/github/community-findings/find-urgent/acknowledge',
     );
     if (!actionCall) throw new Error('Expected acknowledge-finding POST call');
     expect((actionCall[1] as RequestInit).method).toBe('POST');
@@ -417,7 +429,8 @@ describe('CommunityPanel decision queue (E-PR2)', () => {
     });
 
     const actionCall = fetchSpy.mock.calls.find(
-      (call: unknown[]) => call[0] === '/api/community-issues/iss-ready/report',
+      (call: unknown[]) =>
+        call[0] === '/api/plugins/official.github-operations/github/community-issues/iss-ready/report',
     );
     if (!actionCall) throw new Error('Expected mark-reported POST call');
     expect(JSON.parse(String((actionCall[1] as RequestInit).body)).actor).toBe('codex');
@@ -442,7 +455,7 @@ describe('CommunityPanel decision queue (E-PR2)', () => {
     const legacyPatch = fetchSpy.mock.calls.find(
       (call: unknown[]) =>
         typeof call[0] === 'string' &&
-        call[0].includes('/api/community-issues/iss-ready') &&
+        call[0].includes('/api/plugins/official.github-operations/github/community-issues/iss-ready') &&
         (call[1] as RequestInit | undefined)?.method === 'PATCH',
     );
     expect(legacyPatch).toBeUndefined();

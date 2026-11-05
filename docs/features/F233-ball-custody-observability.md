@@ -4,8 +4,8 @@ related_features: [F167, F153, F117, F064, F081, F232, F192, F055, F052, F193, F
 topics: [observability, a2a, ball-custody, cvo-experience, harness-engineering]
 doc_kind: spec
 created: 2026-06-12
-updated: 2026-09-10
-tips_exempt: 2026-09-18 F117 lifecycle cutover remains harness-internal observability — ball custody events/projections are backend plumbing, no user-facing tip needed
+updated: 2026-10-19
+tips_exempt: "2026-10-19: documents the already approved briefing retirement and retained audit/history readers; no new user action or discovery surface is introduced. Instance-specific authorization and activation records remain internal."
 user_journey_exempt: harness-internal observability — ball custody events/projections/admin panel have no user-perceivable UX changes for operator
 ---
 
@@ -19,7 +19,7 @@ Map delta: new cell required — Phase B 新增 append-only event log + projecto
 
 > **2026-09-10 lifecycle cutover**：F233 Ball event log继续保留历史审计与真正独立责任对象，
 > 但不再承接 ordinary A2A 或 managed-hold message completion。新写入由 F117 Phase G 的
-> `source → Queue admission → response terminal` 唯一表达；等待中/唤醒/终局对 operator 与所有成员共用
+> `source → Queue admission → response terminal` 唯一表达；等待中/唤醒/终局对operator与所有成员共用
 > History 投影。旧 `ball.handed` / dispatch/hold disposition events 只读兼容，不参与新执行裁决。
 
 ## Why
@@ -192,14 +192,18 @@ Phase A + Phase B + Phase C 各 AC 大部分已 ✅（甚至 Phase C 通过 11+1
 
 | Phase | 处置 | 理由 |
 |-------|------|------|
-| **Phase A：值班简报 (duty briefing)** | 🟡 **产品面 sunset，backend 代码保留** | 简报 2026-06-13 上线至 2026-08-17（65 天），operator 记不得 = 触发 doc line 141 sunset signal（"30 天内 operator 介入次数 = 0 → sunset 或重构形态"）。数据源（Phase B custody event log）保留；`duty-briefing` route + cron 短期保留观察，未来由新 Self-Sensing feat 决定是否重塑为 typed-projection 消费面。 |
+| **Phase A：值班简报 (duty briefing)** | ✅ **产品面与 backend 全部退役**（2026-10-18） | 保留 2026-08-17 failed-close 历史；本次结束 backend 的“短期观察”，删除 daily cron/startup、按需生成/绑定路由、专用 services/DTO 与测试。历史简报消息、Phase B 账本、Story 历史投影不删除；F299 invocation 轨迹继续保留。 |
 | **Phase B：球权事件账本**（`BallCustodyEventLog` / `Projector` / `ProjectionStore` / state-machine / 13 event kinds） | ✅ **代码全保 + 移交新 feat 作 canonical 事实源** | Phase B 是本 feat 唯一有**一手 canonical 账本**的对象——即将成为新 Self-Sensing feat 的核心事实源之一（custody snapshot 的一手账本）。INV-2 rebuild-safe / INV-10 8×16 全枚举 / Lua 幂等 append / 13 event kinds contract 全部保留。 |
-| **Phase C：feat trajectory 全链**（`TrajectoryPanel` + `FeatTrajectoryProjector` + collectors + backfill 脚本 + `feat-trajectory` routes + `feat-trajectory:*` Redis keys） | 🔴 **方向失败；F304 退役 production cron，历史投影冻结可读** | 拼装 feat 轨迹是**给没有 canonical 账本的对象拼轨迹**——结构性失败（详见 [LL-099](../public-lessons.md#ll-099-给没有-canonical-账本的对象拼轨迹是结构性失败)）。F304 删除周期 TaskSpec 与 startup wiring，停止继续制造投影和 `gh` 子进程负载；`TrajectoryPanel`、store/routes、`/story/feat:*` 与手动 backfill 兼容实现继续保留，避免破坏 F252。 |
+| **Phase C：feat trajectory 历史兼容链**（`FeatTrajectoryProjector` + collectors + backfill 脚本 + `feat-trajectory` routes + `feat-trajectory:*` Redis keys） | 🔴 **方向失败；F304 退役 production cron，历史投影冻结可读** | 拼装 feat 轨迹是**给没有 canonical 账本的对象拼轨迹**——结构性失败（详见 [LL-099](../public-lessons.md#ll-099-给没有-canonical-账本的对象拼轨迹是结构性失败)）。F304 删除周期 TaskSpec 与 startup wiring，停止继续制造投影和 `gh` 子进程负载；store/routes、`/story/feat:*` 与手动 backfill 兼容实现继续保留，避免破坏 F252；旧 Workspace 展示已由 F299 invocation/session 面替换。 |
 | **Phase C pending：C1b/C1c（安乐死 MCP/UI surface）** | ❌ **撤销（不再实现）** | 依赖的 Phase C 方向已标记失败；C1a 安乐死事件 schema（`BallEuthanasiaKind` + 3 builders + state machine +3 rules）保留在 Phase B 账本一侧不做 UI 出口。AC-C1 撤销。 |
+
+### 2026-10-18 退役补完与保留归属
+
+Phase B 仍属 `ball-custody` 的 canonical 任务审计/责任账本，F300 按原引用契约消费；F252 Story 的历史读取与 F304 冻结投影兼容边界不变。Workspace 当前 TrajectoryPanel 已由 F299 承载 invocation/session 轨迹，旧 F233 入口已被替换，本次不撤 F299。
 
 ### Phase B 移交清单（给新 Self-Sensing feat）
 
-- **代码**：`packages/api/src/domains/cats/services/ball-custody/`（EventLog / Projector / ProjectionStore / state-machine）
+- **代码**：`packages/api/src/domains/ball-custody/`（EventLog / Projector / ProjectionStore / state-machine）
 - **types**：`packages/shared/src/types/ball-custody.ts`（含 INV-10 8×16 grid）
 - **Redis keys**：`ball-custody:*`
 - **13 event kinds**：8 ball-shaped（handed / held / hold_expired / handed_cvo / wake_sent / void_pass / idle_long / …）+ 3 euthanasia（frozen / degraded / abandoned）+ 2 lifecycle（task / invocation）

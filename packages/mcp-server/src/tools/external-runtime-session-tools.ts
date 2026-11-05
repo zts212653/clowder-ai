@@ -1,23 +1,26 @@
+import { deploymentDefaults } from '@cat-cafe/shared';
 import { z } from 'zod';
 import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
-
 import { callbackPost } from './callback-tools.js';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
+import { invocationFetch, resolveInvocationEnv } from './invocation-auth.js';
 
 const defineTool = defineMcpMigrationFactory('external-runtime-session-tools.ts', undefined, {
   resourceFamily: 'runtime-session',
   authority: 'callback-owner',
 });
 
-const API_URL = process.env['CAT_CAFE_API_URL'] ?? 'http://localhost:3004';
+function resolveApiUrl(): string {
+  return resolveInvocationEnv('CAT_CAFE_API_URL') ?? deploymentDefaults.apiBaseUrl;
+}
 
 function resolveToolUserId(): string {
-  return process.env['CAT_CAFE_USER_ID'] ?? 'default-user';
+  return resolveInvocationEnv('CAT_CAFE_USER_ID') ?? 'default-user';
 }
 
 function resolveToolCatId(): string | undefined {
-  return process.env['CAT_CAFE_CAT_ID'];
+  return resolveInvocationEnv('CAT_CAFE_CAT_ID');
 }
 
 function buildUserAuthHeaders(): Record<string, string> {
@@ -69,7 +72,7 @@ export const listExternalRuntimeSessionsInputSchema = {
 };
 
 export const readExternalRuntimeSessionInputSchema = {
-  sessionId: z.string().min(1).describe('Clowder AI SessionRecord id'),
+  sessionId: z.string().min(1).describe(`${deploymentDefaults.brand.name} SessionRecord id`),
 };
 
 export async function handleRegisterExternalRuntimeSession(input: {
@@ -111,18 +114,18 @@ export async function handleListExternalRuntimeSessions(input: {
   if (input.catId) params.set('catId', input.catId);
   if (input.limit !== undefined) params.set('limit', String(input.limit));
   const qs = params.toString();
-  const url = `${API_URL}/api/external-runtime-sessions${qs ? `?${qs}` : ''}`;
+  const url = `${resolveApiUrl()}/api/external-runtime-sessions${qs ? `?${qs}` : ''}`;
   return fetchExternalRuntimeSessionJson(url, 'List external runtime sessions failed');
 }
 
 export async function handleReadExternalRuntimeSession(input: { sessionId: string }): Promise<ToolResult> {
-  const url = `${API_URL}/api/external-runtime-sessions/${encodeURIComponent(input.sessionId)}`;
+  const url = `${resolveApiUrl()}/api/external-runtime-sessions/${encodeURIComponent(input.sessionId)}`;
   return fetchExternalRuntimeSessionJson(url, 'Read external runtime session failed');
 }
 
 async function fetchExternalRuntimeSessionJson(url: string, failurePrefix: string): Promise<ToolResult> {
   try {
-    const res = await fetch(url, { headers: buildUserAuthHeaders() });
+    const res = await invocationFetch(url, { headers: buildUserAuthHeaders() });
     if (!res.ok) {
       return errorResult(`${failurePrefix} (${res.status}): ${await res.text()}`);
     }
@@ -142,7 +145,7 @@ export const externalRuntimeSessionCallbackTools = [
     name: 'cat_cafe_register_external_runtime_session',
     description:
       'Register an Antigravity IDE-direct runtime session using persistent agent-key auth. ' +
-      'Use when an IDE-direct conversation needs Clowder AI session-chain evidence without invocation callback credentials. ' +
+      `Use when an IDE-direct conversation needs ${deploymentDefaults.brand.name} session-chain evidence without invocation callback credentials. ` +
       'Shared Antigravity MCP GOTCHA: pass agentKeyCatId so the right sidecar key is selected.',
     inputSchema: registerExternalRuntimeSessionInputSchema,
     handler: handleRegisterExternalRuntimeSession,
@@ -162,7 +165,7 @@ export const externalRuntimeSessionReadTools = [
     description:
       'List orphan, dispatched, or IDE-direct external runtime sessions by runtime, cat, and recent activity. ' +
       'Use when an external runtime session looks lost, detached from the current thread, or needs cross-runtime drilldown. ' +
-      'Use before reading digest/events when there is no normal Clowder AI thread yet.',
+      `Use before reading digest/events when there is no normal ${deploymentDefaults.brand.name} thread yet.`,
     inputSchema: listExternalRuntimeSessionsInputSchema,
     handler: handleListExternalRuntimeSessions,
     governance: {

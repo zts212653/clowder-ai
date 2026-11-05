@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { constants, homedir } from 'node:os';
 import { join } from 'node:path';
 
 import { daemonStatePaths } from './daemon-state.mjs';
@@ -72,6 +72,12 @@ export function createHostProcessObserver(self, { run = execFileSync, observerPi
       listeners ??= readHostListeners(self, read);
       return listeners;
     },
+    patternTargets(program, operands) {
+      const args = patternQuery(program, operands);
+      if (!args) return { pids: [], complete: false };
+      const selected = readProcessSelection('pgrep', args, read);
+      return program === 'killall' && selected.complete ? exactProcessNames(selected, operands, read) : selected;
+    },
     isHostDescendant(pid, ancestor) {
       if (pid === ancestor) return true;
       if (!parentsRead) {
@@ -90,17 +96,66 @@ function readHostListeners(self, read) {
   const unknown = { pids: [], complete: false };
   if (ports.length > 64 || ports.some((p) => !Number.isSafeInteger(p) || p < 1 || p > 65535)) return unknown;
   if (ports.length === 0) return { pids: [], complete: true };
+  return readProcessSelection('lsof', ['-nP', ...ports.map((p) => `-iTCP:${p}`), '-sTCP:LISTEN', '-t'], read);
+}
+
+function readProcessSelection(program, args, read) {
+  const unknown = { pids: [], complete: false };
+  let output;
   try {
-    const output = read('lsof', ['-nP', ...ports.map((p) => `-iTCP:${p}`), '-sTCP:LISTEN', '-t']);
-    const lines = output.trim().split('\n');
-    if (lines.some((line) => !/^\d+$/.test(line) || Number(line) <= 1 || !Number.isSafeInteger(Number(line))))
-      return unknown;
-    return { pids: [...new Set(lines.map(Number))], complete: true };
+    output = read(program, args);
   } catch (error) {
-    // Exit 1 and no diagnostics means a complete search with no listeners.
-    return error?.status === 1 && !error?.stdout?.length && !error?.stderr?.length
-      ? { pids: [], complete: true }
-      : unknown;
+    if (error?.status !== 1 || error?.signal || error?.stderr?.length) return unknown;
+    if (!error?.stdout?.length) return { pids: [], complete: true };
+    // lsof exits 1 when any requested port is absent, even while returning
+    // the complete matches for other ports. pgrep has no such partial-match exit.
+    if (program !== 'lsof') return unknown;
+    output = error.stdout;
+  }
+  if (typeof output !== 'string') return unknown;
+  const lines = output.trim().split('\n');
+  if (lines.some((line) => !/^\d+$/.test(line) || Number(line) <= 1 || !Number.isSafeInteger(Number(line))))
+    return unknown;
+  return { pids: [...new Set(lines.map(Number))], complete: true };
+}
+
+function patternQuery(program, operands) {
+  const args = [...operands];
+  const first = args[0] ?? '';
+  if (
+    /^-\d+$/.test(first) ||
+    (first.startsWith('-') && Object.hasOwn(constants.signals, `SIG${first.slice(1).replace(/^SIG/, '')}`))
+  )
+    args.shift();
+  else if (first === '--signal') args.splice(0, 2);
+  else if (first.startsWith('--signal=')) args.shift();
+  if (!args.length || args.join(' ').length > 4096) return undefined;
+  if (program === 'pkill') return args;
+  if (program !== 'killall' || args.some((arg) => arg.startsWith('-'))) return undefined;
+  const literalNames = args.map((name) => name.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&'));
+  return [literalNames.join('|')];
+}
+
+// Darwin's pgrep name includes a mutable process title (e.g. Redis's address),
+// while killall compares the executable name. Observe ucomm rather than treating
+// a failed exact-title search as proof that the signal has no target.
+function exactProcessNames(selected, operands, read) {
+  if (!selected.pids.length) return selected;
+  const unknown = { pids: [], complete: false };
+  if (selected.pids.length > 2048) return unknown;
+  try {
+    const names = new Map();
+    for (const line of read('ps', ['-p', selected.pids.join(','), '-o', 'pid=,ucomm='])
+      .trim()
+      .split('\n')) {
+      const match = /^\s*(\d+)\s+(.+?)\s*$/.exec(line);
+      if (!match || names.has(Number(match[1]))) return unknown;
+      names.set(Number(match[1]), match[2]);
+    }
+    if (selected.pids.some((pid) => !names.has(pid))) return unknown;
+    return { pids: selected.pids.filter((pid) => operands.includes(names.get(pid))), complete: true };
+  } catch {
+    return unknown;
   }
 }
 

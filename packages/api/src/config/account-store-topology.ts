@@ -13,7 +13,9 @@ export interface AccountStoreTopology {
 
 function directory(path: string): string {
   try {
-    const canonical = realpathSync(path);
+    // Match fs.promises.realpath at the HTTP boundary, including Windows 8.3
+    // aliases. The JS sync walker can retain an alias and lose the legacy root.
+    const canonical = realpathSync.native(path);
     if (statSync(canonical).isDirectory()) return canonical;
   } catch {
     // Only the configuration path is included; no account or credential payload.

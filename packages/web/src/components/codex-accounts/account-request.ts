@@ -1,6 +1,15 @@
 import { apiFetch } from '@/utils/api-client';
 import type { ProfileItem } from '../hub-accounts.types';
 
+export class AccountRequestError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
+
 export async function accountRequest<T = unknown>(
   path: string,
   body: Record<string, unknown>,
@@ -14,7 +23,8 @@ export async function accountRequest<T = unknown>(
   const result: unknown = await response.json();
   const error =
     result && typeof result === 'object' && 'error' in result ? (result as { error?: unknown }).error : undefined;
-  if (!response.ok) throw new Error(typeof error === 'string' ? error : '账号操作失败，请重试');
+  if (!response.ok)
+    throw new AccountRequestError(typeof error === 'string' ? error : '账号操作失败，请重试', response.status);
   return result as T;
 }
 

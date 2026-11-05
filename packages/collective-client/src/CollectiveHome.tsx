@@ -5,6 +5,8 @@ import type {
   CollectiveMembership,
 } from './client-types.js';
 import { projectCollectiveHome } from './collective-home-model.js';
+import { SharedArtifactLibrary } from './SharedArtifactLibrary.js';
+import { useSharedArtifacts } from './use-collective-artifacts.js';
 
 export function CollectiveHome({
   collective,
@@ -23,6 +25,7 @@ export function CollectiveHome({
   readonly onOpenNavigation: () => void;
   readonly onOpenEvent: (channelId: string, eventId: string) => void;
 }) {
+  const shared = useSharedArtifacts();
   const projection = useMemo(() => projectCollectiveHome(events, collaboration), [collaboration, events]);
   const loading = collaboration === undefined && !error;
   const unavailable = Boolean(error || connection === 'offline');
@@ -64,7 +67,7 @@ export function CollectiveHome({
         {projection.partial && (
           <output className="collective-home-notice">部分内容暂不可读，只显示当前有权打开的公共记录。</output>
         )}
-        <HomeSection title="最近动态" state={activityState} empty="这里还没有公共工作动态。">
+        <HomeSection title="最近动态" state={activityState} empty="这里还没有公共任务动态。">
           {projection.activities.map((activity) => (
             <button
               key={activity.id}
@@ -83,7 +86,11 @@ export function CollectiveHome({
             </button>
           ))}
         </HomeSection>
-        <HomeSection title="最近作品" state={worksState} empty="这里还没有公开作品。" />
+        {shared?.api ? (
+          <SharedArtifactLibrary title="最近作品" />
+        ) : (
+          <HomeSection title="最近作品" state={worksState} empty="这里还没有公开作品。" />
+        )}
       </div>
     </section>
   );

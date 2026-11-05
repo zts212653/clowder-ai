@@ -19,7 +19,7 @@ const API_VALUES = new Map([
 ]);
 const API_FLAGS = new Set(['--include', '-i', '--paginate', '--silent', '--slurp', '--verbose']);
 
-export function constrainedGhApiOperation(raw) {
+export function constrainedGhApiOperation(raw, { payloadFree = false } = {}) {
   const parsed = shellInvocation(raw);
   if (!parsed.complete || parsed.redirections.length) return null;
   const tokens = parsed.words.map(({ value }) => value);
@@ -40,6 +40,7 @@ export function constrainedGhApiOperation(raw) {
     const flag = attached ? token.slice(0, 2) : equals < 0 ? token : token.slice(0, equals);
     const role = API_VALUES.get(flag);
     if (!role) return null;
+    if (payloadFree && ['field', 'header'].includes(role)) return null;
     const value = attached ? token.slice(2) : equals < 0 ? tokens[++index] : token.slice(equals + 1);
     if (value === undefined) return null;
     if (role === 'method') method = value.toUpperCase();

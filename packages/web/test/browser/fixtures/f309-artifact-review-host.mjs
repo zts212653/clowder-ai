@@ -17,11 +17,13 @@ import { registerArtifactReviewRoutes } from '../../../../api/src/routes/artifac
 import { registerCallbackArtifactReviewRoutes } from '../../../../api/src/routes/callback-artifact-review-routes.ts';
 import { registerCallbackAuthHook } from '../../../../api/src/routes/callback-auth-prehandler.ts';
 import { registerCallbackTaskRoutes } from '../../../../api/src/routes/callback-task-routes.ts';
+import { composerDraftRecallRoutes } from '../../../../api/src/routes/composer-draft-recall.ts';
 import { registerContentModificationRoutes } from '../../../../api/src/routes/content-modification-routes.ts';
 import { registerEntrustedWorkReadRoutes } from '../../../../api/src/routes/entrusted-work-read-routes.ts';
 import { registerPublishedContentRoutes } from '../../../../api/src/routes/published-content-routes.ts';
 import { registerWorkspaceContentReviewRoutes } from '../../../../api/src/routes/workspace-content-review-routes.ts';
 import { createLiveReviewFixture } from '../../../../api/test/helpers/artifact-review-live-fixture.ts';
+import { registerReviewWorkFixture } from './f326-review-work-host.mjs';
 
 const WEB_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const apiRequire = createRequire(path.resolve(WEB_ROOT, '../api/package.json'));
@@ -35,7 +37,7 @@ const tailwind = webRequire('tailwindcss'),
 export async function startReviewHost(
   root,
   mediaType,
-  { port = 0, clientRevision, entryPath, workspaceComparison = false } = {},
+  { port = 0, clientRevision, entryPath, workspaceComparison = false, workSubmissions = false } = {},
 ) {
   assert.ok(Number.isInteger(port) && port >= 0 && port <= 65535);
   if (clientRevision !== undefined) assert.match(clientRevision, /^[a-f0-9]{40}$/);
@@ -80,7 +82,7 @@ export async function startReviewHost(
     }
     res.setHeader('content-type', 'text/html');
     res.end(
-      `<!doctype html><html lang="zh-CN"${revisionAttribute}><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/host.css"><style>body{margin:0}</style><div id="root"></div><script>window.__F309_FIXTURE__=${JSON.stringify({ threadId: f.thread.id })}</script><script type="module" src="/host.js"></script></html>`,
+      `<!doctype html><html lang="zh-CN"${revisionAttribute}><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/host.css"><style>body{margin:0}</style><div id="root"></div><script>window.__F309_FIXTURE__=${JSON.stringify({ threadId: f.thread.id, mediaType })}</script><script type="module" src="/host.js"></script></html>`,
     );
   });
   await new Promise((resolve, reject) => {
@@ -109,6 +111,10 @@ export async function startReviewHost(
     cats: catRegistry.getAllIds().map((id) => ({ ...catRegistry.getOrThrow(id).config, id })),
   }));
   app.get('/api/config/cat-order', async () => ({ catOrder: ['codex-astra'] }));
+  await app.register(composerDraftRecallRoutes, {
+    messageStore: f.messages,
+    socketManager: { emitToUser, broadcastAgentMessage() {}, broadcastToRoom() {} },
+  });
   const artifacts = () =>
     aggregateThreadArtifacts({ messages: f.messages.getByThread(f.thread.id), prTasks: [], fileLedger: [] });
   app.get('/api/artifacts', async () => {
@@ -126,7 +132,17 @@ export async function startReviewHost(
     return reply.type(name.endsWith('.png') ? 'image/png' : 'video/mp4').send(await readFile(path.join(root, name)));
   });
   const registry = new InvocationRegistry();
-  const credentials = await registry.create('operator', 'codex-astra', f.thread.id);
+  const credentials = await registry.create(
+    'operator',
+    'codex-astra',
+    f.thread.id,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    workSubmissions ? 'strict' : 'unknown',
+  );
+  if (workSubmissions) await registerReviewWorkFixture({ app, fixture: f, workspace, registry });
   await app.register(async (scope) => {
     registerCallbackAuthHook(scope, registry);
     registerCallbackTaskRoutes(scope, {

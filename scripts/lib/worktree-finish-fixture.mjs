@@ -40,6 +40,15 @@ export function fixture() {
     return path;
   };
   const finish = (path, overrides = {}) =>
-    finishWorktree({ repo, path, owner: 'codex61-sol', sourceRef: SOURCE, now: NOW, cwdProbe: idle, ...overrides });
+    finishWorktree({
+      repo,
+      path,
+      owner: 'codex61-sol',
+      sourceRef: SOURCE,
+      now: NOW,
+      cwdProbe: idle,
+      dataRoot: join(root, 'data'),
+      ...overrides,
+    });
   return { root, repo, make, finish };
 }

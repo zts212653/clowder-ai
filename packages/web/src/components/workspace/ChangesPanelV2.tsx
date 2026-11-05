@@ -5,6 +5,8 @@ import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useShellCopy } from '@/components/shell/shell-copy';
 import { ThreadNativeReviewSettingsContent } from '@/components/ThreadSidebar/ThreadNativeReviewSettings';
 import { useWorkspaceSurfaceVisibility } from '@/components/workbench/WorkspaceSurfaceVisibility';
+import type { CommitChangesTarget } from '../workbench/commit-changes-surface';
+import { ChangesDiffPlaceholder } from './ChangesDiffPlaceholder';
 import { codeToolsCopy } from './code-tools.shell-copy';
 import { DiffViewer, parseUnifiedDiff } from './DiffViewer';
 import { FileIcon } from './FileIcons';
@@ -30,6 +32,7 @@ interface ChangesPanelV2Props {
   threadId?: string | null;
   onOpenFile?: (path: string) => void;
   pullRequestTarget?: PullRequestChangesTarget;
+  commitTarget?: CommitChangesTarget;
   onBack?: () => void;
 }
 
@@ -45,10 +48,11 @@ export function ChangesPanelV2({
   threadId,
   onOpenFile,
   pullRequestTarget,
+  commitTarget,
   onBack,
 }: ChangesPanelV2Props) {
   const copy = useShellCopy(codeToolsCopy).changes;
-  const { data, loading, error, refresh, targetKey } = useChangesDiff(worktreeId, pullRequestTarget);
+  const { data, loading, error, refresh, targetKey } = useChangesDiff(worktreeId, pullRequestTarget, commitTarget);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const visible = useWorkspaceSurfaceVisibility();
   const diffViewport = useRef<HTMLDivElement>(null);
@@ -86,7 +90,13 @@ export function ChangesPanelV2({
   return (
     <div className="flex flex-col min-h-0 flex-1">
       {pullRequestTarget && (
-        <PullRequestChangesStatus target={pullRequestTarget} data={data} error={error} onBack={onBack} />
+        <PullRequestChangesStatus
+          target={pullRequestTarget}
+          data={data}
+          error={error}
+          onBack={onBack}
+          onRetry={() => void refresh()}
+        />
       )}
       {threadId && !pullRequestTarget && (
         <details
@@ -182,7 +192,12 @@ export function ChangesPanelV2({
             openFileLabel={copy.openFile}
           />
         ) : (
-          <div className="p-4 text-center text-cafe-secondary text-xs">{loading ? copy.loading : copy.selectFile}</div>
+          <ChangesDiffPlaceholder
+            loading={loading}
+            failed={Boolean(pullRequestTarget && error)}
+            loadingLabel={copy.loading}
+            selectFileLabel={copy.selectFile}
+          />
         )}
       </div>
     </div>

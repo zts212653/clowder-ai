@@ -1,6 +1,7 @@
 import { open } from 'node:fs/promises';
 import { join } from 'node:path';
 import { setImmediate } from 'node:timers/promises';
+import { humanSessionFirstLine, isCatCafeSessionInput, LOCAL_SESSION_CANDIDATE_LIMIT } from '@cat-cafe/shared';
 import type { LocalSessionList, LocalSessionMetadata } from '../../types.js';
 
 const MAX_INDEX_BYTES = 2 * 1024 * 1024;
@@ -36,10 +37,12 @@ async function readIndexTail(path: string): Promise<{ text: string; complete: bo
 }
 
 export async function readClaudeRecentSessionIndex(limit: number, configRoot: string): Promise<LocalSessionList> {
-  if (!Number.isInteger(limit) || limit < 1 || limit > 20) throw new Error('Invalid recent-session limit');
+  if (!Number.isInteger(limit) || limit < 1 || limit > LOCAL_SESSION_CANDIDATE_LIMIT)
+    throw new Error('Invalid recent-session limit');
   const index = await readIndexTail(join(configRoot, 'history.jsonl'));
   const sessions = new Map<string, LocalSessionMetadata & { recentPrompt?: string }>();
   let complete = index.complete;
+  const cafeOrigins = new Set<string>();
   let parsed = 0;
   for (const line of index.text.split('\n')) {
     if (++parsed % 128 === 0) await setImmediate();
@@ -70,9 +73,10 @@ export async function readClaudeRecentSessionIndex(limit: number, configRoot: st
       entry.display.trim().startsWith('/')
     )
       continue;
-    const prompt = entry.display.trim().slice(0, 500);
+    const prompt = humanSessionFirstLine(entry.display);
     const prior = sessions.get(entry.sessionId);
     if (!prior) {
+      if (isCatCafeSessionInput(entry.display)) cafeOrigins.add(entry.sessionId);
       sessions.set(entry.sessionId, {
         sessionId: entry.sessionId,
         clientId: 'anthropic',
@@ -83,12 +87,17 @@ export async function readClaudeRecentSessionIndex(limit: number, configRoot: st
         turnCount: null,
       });
     } else if (entry.timestamp >= prior.lastActivityAt) {
+      if (!prior.firstPrompt && prompt) prior.firstPrompt = prompt;
       prior.recentPrompt = prompt;
       prior.lastActivityAt = entry.timestamp;
       prior.projectPath = entry.project;
     }
   }
-  const ordered = [...sessions.values()].sort((a, b) => b.lastActivityAt - a.lastActivityAt);
+  // A bounded tail cannot prove which input started a session. Use first-input
+  // evidence only with a complete index; the claim filter still covers known records.
+  const ordered = [...sessions.values()]
+    .filter((s) => !complete || !cafeOrigins.has(s.sessionId))
+    .sort((a, b) => b.lastActivityAt - a.lastActivityAt);
   return {
     sessions: ordered.slice(0, limit).map((s) => ({ ...s, firstPrompt: complete ? s.firstPrompt : '' })),
     limited: !complete || ordered.length > limit,

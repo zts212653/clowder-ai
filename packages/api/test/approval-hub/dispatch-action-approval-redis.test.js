@@ -8,7 +8,6 @@ import {
 } from '../helpers/redis-test-helpers.js';
 
 const REDIS_URL = process.env.REDIS_URL;
-const HEAD_SHA = 'a'.repeat(40);
 
 describe('F246 approval atomically acquires F167 custody', { skip: redisIsolationSkipReason(REDIS_URL) }, () => {
   let redis;
@@ -51,12 +50,12 @@ describe('F246 approval atomically acquires F167 custody', { skip: redisIsolatio
     leaseStore = new RedisActionSuccessorLeaseStore(redis);
     truthResolver = {
       async resolve() {
-        return { terminal: false, source: 'community_projection', state: 'active' };
+        return { terminal: false, source: 'task_store', state: 'active' };
       },
       async resolveFreshness(predicate) {
         return {
           status: 'verified',
-          evidenceRef: `community:${predicate.subjectRef}:head:${HEAD_SHA}`,
+          evidenceRef: `task:${predicate.subjectRef}:active`,
           freshnessKey: predicate.freshnessKey,
         };
       },
@@ -95,11 +94,11 @@ describe('F246 approval atomically acquires F167 custody', { skip: redisIsolatio
 
   async function createProposal(overrides = {}) {
     const proposedAction = {
-      subjectRef: 'pr:owner/repo#42',
-      actionFamily: 'review',
-      successorSlot: 'reviewer',
+      subjectRef: 'subject:task:work-42',
+      actionFamily: 'implement',
+      successorSlot: 'implementer',
       mode: 'single',
-      terminalPredicate: { kind: 'review_delivered', headSha: HEAD_SHA },
+      terminalPredicate: { kind: 'task_done' },
     };
     const { validateDispatchProposedAction } = await import(
       '../../dist/domains/approval-hub/DispatchProposedAction.js'
@@ -111,7 +110,7 @@ describe('F246 approval atomically acquires F167 custody', { skip: redisIsolatio
       targetThreadId: 'thread-target',
       senderCatId: 'codex-sol',
       ownerUserId: 'user-1',
-      content: 'Review exact HEAD.',
+      content: 'Complete the assigned Task.',
       targetCats: ['codex-terra'],
       clientMessageId: 'retry-atomic-001',
       proposedAction: validated.action,
@@ -281,7 +280,7 @@ describe('F246 approval atomically acquires F167 custody', { skip: redisIsolatio
     await leaseStore.markSubjectTerminal({
       subjectRef: actionLease.subjectRef,
       state: 'merged',
-      evidenceRef: 'community:pr:owner/repo#42:merged',
+      evidenceRef: 'community:subject:task:work-42:merged',
       now: 10_001,
     });
 
@@ -326,7 +325,7 @@ describe('F246 approval atomically acquires F167 custody', { skip: redisIsolatio
       expectedGeneration: actionFence.generation,
       expectedRevision: actionLease.revision,
       expectedPredicateDigest: actionLease.terminalPredicate.digest,
-      freshnessEvidenceRef: `community:${actionLease.subjectRef}:head:${HEAD_SHA}`,
+      freshnessEvidenceRef: `task:${actionLease.subjectRef}:active`,
       now: 10_001,
     });
     assert.equal(attempt.outcome, 'recorded');
@@ -334,7 +333,7 @@ describe('F246 approval atomically acquires F167 custody', { skip: redisIsolatio
       expectedGeneration: actionFence.generation,
       expectedRevision: attempt.lease.revision,
       expectedPredicateDigest: actionLease.terminalPredicate.digest,
-      freshnessEvidenceRef: `community:${actionLease.subjectRef}:head:${HEAD_SHA}`,
+      freshnessEvidenceRef: `task:${actionLease.subjectRef}:active`,
       now: 10_002,
     });
     assert.equal(reservation.outcome, 'reserved');
@@ -342,7 +341,7 @@ describe('F246 approval atomically acquires F167 custody', { skip: redisIsolatio
       expectedGeneration: actionFence.generation,
       expectedRevision: reservation.lease.revision,
       expectedPredicateDigest: actionLease.terminalPredicate.digest,
-      freshnessEvidenceRef: `community:${actionLease.subjectRef}:head:${HEAD_SHA}`,
+      freshnessEvidenceRef: `task:${actionLease.subjectRef}:active`,
       deliveredMessageId: 'msg-action-carrier',
       evidenceRef: 'message:msg-action-carrier',
       now: 10_003,
@@ -367,7 +366,7 @@ describe('F246 approval atomically acquires F167 custody', { skip: redisIsolatio
       leaseId: actionFence.leaseId,
       generation: actionFence.generation,
       catId: 'codex-terra',
-      evidenceRefs: ['community:pr:owner/repo#42:review:terra'],
+      evidenceRefs: ['community:subject:task:work-42:review:terra'],
       now: 10_004,
     });
 

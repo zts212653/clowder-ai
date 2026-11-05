@@ -36,6 +36,7 @@ vi.mock('@/components/icons/AttachIcon', () => ({
 vi.mock('@/utils/compressImage', () => ({ compressImage: (f: File) => Promise.resolve(f) }));
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
 vi.mock('@/hooks/useCoCreatorConfig', () => ({
+  useCoCreatorDisplay: () => ({ nickname: 'ME' }),
   useCoCreatorConfig: () => ({
     name: 'ME',
     aliases: [],

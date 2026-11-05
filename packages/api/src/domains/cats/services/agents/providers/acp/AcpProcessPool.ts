@@ -9,6 +9,8 @@
  */
 
 import { createModuleLogger } from '../../../../../../infrastructure/logger.js';
+import { AcpRetirementBarrier } from './lifecycle/acp-retirement-barrier.js';
+import type { AcpInitializeResult } from './types.js';
 
 const log = createModuleLogger('acp-pool');
 
@@ -43,7 +45,10 @@ export interface AcpLease {
   readonly poolKey: PoolKey;
   /** False when the requested persisted session was sealed and must be replaced with session/new. */
   readonly canResumeRequestedSession?: boolean;
-  release(): void;
+  /** End only this turn's MCP instances; retire an exclusive carrier without session/close. */
+  closeTurn(sessionId: string): Promise<void>;
+  /** Resolve only after any retirement caused by this lease has actually completed. */
+  release(): Promise<void>;
 }
 
 export interface AcpAcquireOptions {
@@ -71,6 +76,8 @@ export interface AcpPoolClient {
   readonly isSafeForSingleFlightReuse?: boolean;
   /** Session-scoped counterpart used to seal only the cancelled logical session on multiplexed carriers. */
   isSessionSafeForReuse?(sessionId: string): boolean;
+  closeSession?(sessionId: string): Promise<void>;
+  readonly agentCapabilities?: AcpInitializeResult['agentCapabilities'];
   initialize(): Promise<unknown>;
   close(): Promise<void>;
 }
@@ -83,6 +90,7 @@ export type AcpClientFactory = () => AcpPoolClient; // eslint-disable-line @type
 
 interface AcpPoolVariantConfig {
   supportsMultiplexing?: boolean;
+  rejectActiveSessionLease?: boolean;
 }
 
 interface PoolEntry {
@@ -93,6 +101,8 @@ interface PoolEntry {
   leaseGeneration: number;
   lastUsedAt: number;
   state: 'initializing' | 'ready' | 'closing';
+  /** Stop admission after failed session cleanup; existing peers drain before retirement. */
+  turnCloseFailed?: boolean;
   idleTimer: ReturnType<typeof setTimeout> | null;
 }
 
@@ -115,15 +125,21 @@ export class AcpProcessPool {
   readonly spawnSignature?: string;
   private readonly config: AcpPoolConfig;
   private readonly supportsMultiplexing: boolean;
+  private readonly rejectActiveSessionLease: boolean;
   private readonly entries = new Map<string, PoolEntry[]>();
   private readonly sessionOwners = new Map<string, PoolEntry>();
   /** Persisted session ids that must never be loaded again after unacknowledged local termination. */
   private readonly sealedSessions = new Set<string>();
   private readonly clientFactory: AcpClientFactory;
   private readonly pendingSpawns = new Map<string, Promise<PoolEntry>>();
+  private readonly inFlightSpawns = new Set<Promise<PoolEntry>>();
+  private readonly retirements = new AcpRetirementBarrier();
   private healthTimer: ReturnType<typeof setInterval> | null = null;
   private retiring = false;
   private closed = false;
+  private closing?: Promise<void>;
+  private retirementCompletion?: Promise<void>;
+  private resolveRetirement?: () => void;
 
   private readonly _metrics: AcpPoolMetrics = {
     liveProcessCount: 0,
@@ -140,7 +156,10 @@ export class AcpProcessPool {
     variantConfig: unknown,
     clientFactory: AcpClientFactory,
     spawnSignature?: string,
+    private readonly previousGeneration?: Promise<void>,
   ) {
+    // Retain a failed predecessor as an admission failure even before the first acquire.
+    void previousGeneration?.catch(() => {});
     this.spawnSignature = spawnSignature;
     this.config = {
       maxLiveProcesses: config.maxLiveProcesses,
@@ -149,6 +168,11 @@ export class AcpProcessPool {
       healthCheckIntervalMs: config.healthCheckIntervalMs ?? 30_000,
     };
     this.supportsMultiplexing = resolveSupportsMultiplexing(variantConfig);
+    this.rejectActiveSessionLease = Boolean(
+      variantConfig &&
+        typeof variantConfig === 'object' &&
+        (variantConfig as AcpPoolVariantConfig).rejectActiveSessionLease === true,
+    );
     this.clientFactory = clientFactory;
     this.startHealthCheck();
   }
@@ -160,7 +184,8 @@ export class AcpProcessPool {
     if (this.retiring) throw new Error('Pool is retired');
 
     const key = serializeKey(poolKey);
-    const entries = this.entries.get(key) ?? [];
+    await this.waitForRetirement(key);
+    let entries = this.entries.get(key) ?? [];
     const sessionId = options.sessionId?.trim();
     let canResumeRequestedSession = true;
 
@@ -174,6 +199,8 @@ export class AcpProcessPool {
         this.retireEntry(entry, poolKey, 'bootstrap cwd missing');
       }
     }
+    await this.waitForRetirement(key);
+    entries = this.entries.get(key) ?? [];
 
     if (sessionId) {
       const sessionKey = serializeSessionKey(poolKey, sessionId);
@@ -183,11 +210,15 @@ export class AcpProcessPool {
         log.warn({ poolKey, sessionId }, 'ACP session is sealed; acquiring carrier for a fresh replacement session');
       } else {
         const owner = this.sessionOwners.get(sessionKey);
-        if (owner && owner.state === 'ready' && owner.client.isAlive) {
+        if (owner && !owner.turnCloseFailed && owner.state === 'ready' && owner.client.isAlive) {
+          if (this.rejectActiveSessionLease && owner.leaseCount > 0)
+            throw new Error('ACP session has an active lease; refusing concurrent ownership');
           if (!this.supportsMultiplexing && owner.client.isSafeForSingleFlightReuse === false) {
             this.sealSession(poolKey, sessionId);
             canResumeRequestedSession = false;
             this.retireEntry(owner, poolKey, 'cancelled prompt still unquiesced');
+            await this.waitForRetirement(key);
+            entries = this.entries.get(key) ?? [];
           } else {
             if (this.supportsMultiplexing || owner.leaseCount === 0) {
               return this.leaseReadyEntry(owner, poolKey, canResumeRequestedSession);
@@ -216,7 +247,11 @@ export class AcpProcessPool {
 
     // 1. Try warm reuse. Single-flight carriers may reuse only idle processes.
     const warm = entries.find(
-      (e) => e.state === 'ready' && e.client.isAlive && (this.supportsMultiplexing || e.leaseCount === 0),
+      (e) =>
+        !e.turnCloseFailed &&
+        e.state === 'ready' &&
+        e.client.isAlive &&
+        (this.supportsMultiplexing || e.leaseCount === 0),
     );
     if (warm) {
       return this.leaseReadyEntry(warm, poolKey, canResumeRequestedSession);
@@ -236,8 +271,10 @@ export class AcpProcessPool {
     }
 
     // 3. Cold start — check capacity, reject if full and nothing to evict
+    let retirement: Promise<void> | null = null;
     if (this._metrics.liveProcessCount >= this.config.maxLiveProcesses) {
-      if (!this.evictOne()) {
+      retirement = this.evictOne();
+      if (!retirement) {
         throw new Error('Pool at capacity — all processes have active leases');
       }
     }
@@ -245,11 +282,31 @@ export class AcpProcessPool {
     // 4. Reserve slot atomically (sync) before async spawn
     this._metrics.liveProcessCount++;
 
-    const spawnPromise = this.doSpawn(poolKey, key, this.supportsMultiplexing ? key : undefined);
+    const spawnPromise = this.doSpawn(poolKey, key, this.supportsMultiplexing ? key : undefined, retirement);
+    this.inFlightSpawns.add(spawnPromise);
+    const completed = () => {
+      this.inFlightSpawns.delete(spawnPromise);
+      this.checkRetirementDrained();
+    };
+    void spawnPromise.then(completed, completed);
     if (this.supportsMultiplexing) this.pendingSpawns.set(key, spawnPromise);
 
     const entry = await spawnPromise;
     return this.createLease(entry, poolKey, canResumeRequestedSession);
+  }
+
+  private async waitForRetirement(key: string): Promise<void> {
+    await this.previousGeneration;
+    await this.retirements.wait(key);
+    if (this.closed) throw new Error('Pool is closed');
+    if (this.retiring) throw new Error('Pool is retired');
+  }
+
+  async releaseSession(poolKey: PoolKey, sessionId: string): Promise<void> {
+    const key = serializeSessionKey(poolKey, sessionId);
+    const owner = this.sessionOwners.get(key);
+    this.sessionOwners.delete(key);
+    await owner?.client.closeSession?.(sessionId);
   }
 
   /** Seal a logical session after local termination without provider quiescence. */
@@ -281,9 +338,20 @@ export class AcpProcessPool {
     this.sessionOwners.set(sessionKey, entry);
   }
 
-  private async doSpawn(poolKey: PoolKey, key: string, pendingKey?: string): Promise<PoolEntry> {
+  private async doSpawn(
+    poolKey: PoolKey,
+    key: string,
+    pendingKey?: string,
+    retirement?: Promise<void> | null,
+  ): Promise<PoolEntry> {
     try {
+      if (retirement) await retirement;
+      if (this.closed) throw new Error('Pool is closed');
       const entry = await this.spawnEntry(poolKey);
+      if (this.closed) {
+        await entry.client.close();
+        throw new Error('Pool is closed');
+      }
       // The acquire that reserved this process owns its first lease before the
       // entry becomes visible to retirement/eviction. Publishing a ready entry
       // with leaseCount=0 creates a microtask-sized window where
@@ -317,24 +385,35 @@ export class AcpProcessPool {
     return pids;
   }
 
-  async closeAll(): Promise<void> {
+  closeAll(): Promise<void> {
+    this.closing ??= this.closeOwnedEntries();
+    return this.closing;
+  }
+
+  private async closeOwnedEntries(): Promise<void> {
     this.closed = true;
     this.stopHealthCheck();
+    const failures: unknown[] = [];
 
     for (const [key, entries] of this.entries) {
       for (const entry of entries) {
         this.clearIdleTimer(entry);
         entry.state = 'closing';
-        await entry.client.close().catch(() => {});
+        await entry.client.close().catch((error: unknown) => failures.push(error));
       }
       entries.length = 0;
     }
     this.entries.clear();
+    await this.retirements.drain().catch((error: unknown) => failures.push(error));
+    await Promise.allSettled(this.inFlightSpawns);
     this.sessionOwners.clear();
     this.sealedSessions.clear();
     this._metrics.liveProcessCount = 0;
     this._metrics.activeLeaseCount = 0;
     this._metrics.idleProcessCount = 0;
+    this.checkRetirementDrained();
+    await this.previousGeneration?.catch((error: unknown) => failures.push(error));
+    if (failures.length) throw failures[0];
   }
 
   /**
@@ -342,8 +421,14 @@ export class AcpProcessPool {
    * Idle processes close immediately; leased processes close when their final
    * invocation releases them.
    */
-  retireWhenIdle(): void {
-    if (this.closed || this.retiring) return;
+  retireWhenIdle(): Promise<void> {
+    if (this.retirementCompletion) return this.retirementCompletion;
+    const drained = new Promise<void>((resolve) => {
+      this.resolveRetirement = resolve;
+    });
+    // Even an unused intermediate generation must carry its predecessor's exit fence forward.
+    this.retirementCompletion = Promise.all([this.previousGeneration, drained]).then(() => this.retirements.drain());
+    void this.retirementCompletion.catch(() => {});
     this.retiring = true;
     this.stopHealthCheck();
 
@@ -353,6 +438,13 @@ export class AcpProcessPool {
         this.closeRetiredEntry(entry, entry.poolKey, true);
       }
     }
+    this.checkRetirementDrained();
+    return this.retirementCompletion;
+  }
+
+  private checkRetirementDrained(): void {
+    if (this.retiring && this._metrics.liveProcessCount === 0 && this.inFlightSpawns.size === 0)
+      this.resolveRetirement?.();
   }
 
   // ── Internal ────────────────────────────────────────────────
@@ -379,12 +471,26 @@ export class AcpProcessPool {
       client: entry.client,
       poolKey,
       canResumeRequestedSession,
+      closeTurn: async (sessionId: string) => {
+        try {
+          if (entry.client.agentCapabilities?.sessionCapabilities?.close && entry.client.closeSession) {
+            await entry.client.closeSession(sessionId);
+            return;
+          }
+          if (entry.leaseCount > 1) throw new Error('Shared MCP requires session/close on a multiplexed ACP carrier');
+          this.retireEntry(entry, poolKey, 'turn-bound MCP connection completed');
+          await this.retirements.wait(serializeKey(poolKey));
+        } catch (error) {
+          entry.turnCloseFailed = true;
+          throw error;
+        }
+      },
       release: () => {
-        if (released) return;
+        if (released) return this.retirements.wait(serializeKey(poolKey));
         released = true;
         // Stale lease guard: generation mismatch means this lease was force-released
         // and a new lease has been issued on the same entry. The old release is a no-op.
-        if (entry.leaseGeneration !== creationGeneration) return;
+        if (entry.leaseGeneration !== creationGeneration) return this.retirements.wait(serializeKey(poolKey));
         // Persist session-scoped poison before either returning a multiplexed
         // carrier to the pool or retiring a single-flight carrier.
         this.sealUnsafeSessionsForEntry(entry, poolKey);
@@ -394,19 +500,20 @@ export class AcpProcessPool {
         // while the lease is still counted active, then let the next acquire spawn.
         if (!this.supportsMultiplexing && entry.client.isSafeForSingleFlightReuse === false) {
           this.retireEntry(entry, poolKey, 'cancelled prompt still unquiesced');
-          return;
+          return this.retirements.wait(serializeKey(poolKey));
         }
         entry.leaseCount--;
         this._metrics.activeLeaseCount--;
         if (entry.leaseCount <= 0) {
           entry.leaseCount = 0;
-          if (this.retiring) {
+          if (this.retiring || entry.turnCloseFailed) {
             this.closeRetiredEntry(entry, poolKey, false);
           } else {
             this._metrics.idleProcessCount++;
             this.startIdleTimer(entry, poolKey);
           }
         }
+        return this.retirements.wait(serializeKey(poolKey));
       },
     };
   }
@@ -424,7 +531,8 @@ export class AcpProcessPool {
     if (entries.length === 0) this.entries.delete(key);
     this._metrics.liveProcessCount--;
     if (idleWasCounted) this._metrics.idleProcessCount--;
-    entry.client.close().catch(() => {});
+    this.retirements.track(key, () => entry.client.close());
+    this.checkRetirementDrained();
   }
 
   private retireEntry(entry: PoolEntry, poolKey: PoolKey, reason: string): void {
@@ -451,7 +559,8 @@ export class AcpProcessPool {
     if (entries.length === 0) this.entries.delete(key);
     this._metrics.liveProcessCount--;
     this._metrics.evictionCount++;
-    entry.client.close().catch(() => {});
+    this.retirements.track(key, () => entry.client.close());
+    this.checkRetirementDrained();
     log.warn({ poolKey, reason }, 'Retired unsafe ACP process');
   }
 
@@ -489,7 +598,7 @@ export class AcpProcessPool {
     return entry;
   }
 
-  private evictOne(): boolean {
+  private evictOne(): Promise<void> | null {
     // Find globally oldest idle entry (LRU)
     let oldest: { key: string; entry: PoolEntry; idx: number } | null = null;
     for (const [key, entries] of this.entries) {
@@ -504,13 +613,13 @@ export class AcpProcessPool {
 
     if (!oldest) {
       log.warn('Cannot evict — all processes have active leases');
-      return false;
+      return null;
     }
 
     this.clearIdleTimer(oldest.entry);
     this.forgetSessionsForEntry(oldest.entry);
     oldest.entry.state = 'closing';
-    oldest.entry.client.close().catch(() => {});
+    const retirement = this.retirements.track(oldest.key, () => oldest.entry.client.close());
     const entries = this.entries.get(oldest.key)!;
     entries.splice(oldest.idx, 1);
     if (entries.length === 0) this.entries.delete(oldest.key);
@@ -518,7 +627,7 @@ export class AcpProcessPool {
     this._metrics.idleProcessCount--;
     this._metrics.evictionCount++;
     log.info({ key: oldest.key }, 'Evicted LRU idle process');
-    return true;
+    return retirement;
   }
 
   private startIdleTimer(entry: PoolEntry, poolKey: PoolKey): void {
@@ -533,7 +642,7 @@ export class AcpProcessPool {
 
       entry.state = 'closing';
       this.forgetSessionsForEntry(entry);
-      entry.client.close().catch(() => {});
+      this.retirements.track(key, () => entry.client.close());
       entries.splice(idx, 1);
       if (entries.length === 0) this.entries.delete(key);
       this._metrics.liveProcessCount--;
@@ -558,11 +667,14 @@ export class AcpProcessPool {
           if (entry.state === 'closing') continue;
           if (!entry.client.isAlive) {
             this.clearIdleTimer(entry);
+            this.retirements.track(key, () => entry.client.close());
             this.forgetSessionsForEntry(entry);
             entries.splice(i, 1);
             this._metrics.liveProcessCount--;
             if (entry.leaseCount > 0) {
               this._metrics.activeLeaseCount -= entry.leaseCount;
+              entry.leaseCount = 0;
+              entry.leaseGeneration++;
             } else {
               this._metrics.idleProcessCount--;
             }

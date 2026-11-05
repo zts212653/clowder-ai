@@ -170,7 +170,7 @@ describe('F24: mid-invocation message injection', () => {
     expect(container.querySelector('[role="dialog"]')?.className).toContain('rounded-2xl');
     const tooltip = container.querySelector('[data-testid="steer-guide-unavailable-tooltip"]');
     expect(tooltip?.getAttribute('role')).toBe('tooltip');
-    expect(tooltip?.textContent).toBe('当前成员的接入方式不支持引导回复');
+    expect(tooltip?.textContent).toBe('这只猫目前不支持把消息接进正在进行的回复');
     expect(tooltip?.className).toContain('bg-[var(--cafe-text)]');
     expect(tooltip?.className).toContain('text-[var(--cafe-surface-canvas)]');
   });

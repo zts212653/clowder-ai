@@ -100,7 +100,7 @@ function carrier(current, catId, state) {
   return { source, response, child, parent };
 }
 
-function resolve({ observed, messages, leaseStore }) {
+function resolve({ observed, messages, leaseStore, orphanRecovery }) {
   const byId = new Map(
     messages.flatMap((value) =>
       value.response
@@ -126,6 +126,7 @@ function resolve({ observed, messages, leaseStore }) {
     invocationRecordStore: { get: async (id) => parents.get(id) ?? null },
     turnExecutionStore: { get: async (id) => children.get(id) ?? null },
     leaseStore,
+    ...(orphanRecovery ? { orphanRecovery, ownerAuthProvenance: 'strict', parentInvocationId: 'owner-parent' } : {}),
     lease: observed,
     admissionInput: request(observed),
     clientMessageId: 'client-message-1',
@@ -279,3 +280,106 @@ describe('F167 restart resumes the same carrier independently of reading evidenc
     });
   }
 });
+
+test('a proven Task orphan returns one typed recovery receipt instead of carrier_missing', async () => {
+  const observed = lease();
+  const recovered = lease({
+    generation: 2,
+    revision: observed.revision + 1,
+    dispatchId: 'post:refresh-dispatch',
+    orphanCarrierRecoveryTransitions: [
+      {
+        kind: 'orphan_carrier_recovery',
+        fromGeneration: 1,
+        toGeneration: 2,
+        taskId: 'task-4058',
+        taskRevision: 2,
+        sourceMessageId: 'message-orphan',
+        predecessorCatId: 'codex-astra',
+        predecessorThreadId: 'thread-holder',
+        holderCatId: HOLDER,
+        holderThreadId: 'thread-holder',
+        fromDispatchId: observed.dispatchId,
+        toDispatchId: 'post:refresh-dispatch',
+        evidenceRef: 'callback:new-invocation:refresh-dispatch',
+        at: 300,
+      },
+    ],
+  });
+  let calls = 0;
+  const resolution = await resolve({
+    observed,
+    messages: [],
+    leaseStore: scriptedLeaseStore(),
+    orphanRecovery: {
+      async recover(input) {
+        calls++;
+        assert.equal(input.lease, observed);
+        assert.equal(input.ownerAuthProvenance, 'strict');
+        return { outcome: 'recovered', lease: recovered, messageId: 'message-orphan' };
+      },
+    },
+  });
+
+  assert.equal(calls, 1);
+  assert.equal(resolution.kind, 'respond');
+  assert.deepEqual(resolution.body.actionLease, {
+    leaseId: observed.leaseId,
+    generation: 2,
+    outcome: 'orphan_carrier_recovery',
+  });
+  assert.equal(resolution.body.status, 'orphan_carrier_recovered');
+  assert.deepEqual(resolution.body.routed, [HOLDER]);
+});
+
+for (const state of ['queued', 'handled']) {
+  test(`the same recovery request replays its ${state} orphan carrier without a second writer`, async () => {
+    const observed = lease({
+      generation: 2,
+      revision: 8,
+      dispatchId: 'post:refresh-dispatch',
+      orphanCarrierRecoveryTransitions: [
+        {
+          kind: 'orphan_carrier_recovery',
+          fromGeneration: 1,
+          toGeneration: 2,
+          taskId: 'task-4058',
+          taskRevision: 2,
+          sourceMessageId: 'message-orphan',
+          predecessorCatId: 'codex-astra',
+          predecessorThreadId: 'thread-holder',
+          holderCatId: HOLDER,
+          holderThreadId: 'thread-holder',
+          fromDispatchId: 'post:original-dispatch',
+          toDispatchId: 'post:refresh-dispatch',
+          evidenceRef: 'callback:new-invocation:refresh-dispatch',
+          at: 300,
+        },
+      ],
+    });
+    const leaseStore = scriptedLeaseStore();
+    let adoptionCalls = 0;
+    const resolution = await resolve({
+      observed,
+      messages: [carrier(observed, HOLDER, state)],
+      leaseStore,
+      ...(state === 'queued'
+        ? {
+            orphanRecovery: {
+              async recover(input) {
+                adoptionCalls++;
+                assert.equal(input.lease, observed);
+                return { outcome: 'replayed', lease: observed, messageId: 'message-orphan' };
+              },
+            },
+          }
+        : {}),
+    });
+
+    assert.equal(resolution.kind, 'respond');
+    assert.equal(resolution.body.status, 'orphan_carrier_recovered');
+    assert.equal(resolution.body.messageId, 'message-orphan');
+    assert.equal(adoptionCalls, state === 'queued' ? 1 : 0);
+    assert.equal(leaseStore.calls.length, 0, 'a replay never advances another generation');
+  });
+}

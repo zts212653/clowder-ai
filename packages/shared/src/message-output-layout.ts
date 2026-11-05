@@ -3,9 +3,9 @@ import {
   type HostSignatureOutput,
   MAX_MESSAGE_OUTPUT_REFS,
   MAX_MESSAGE_OUTPUT_RUNS,
+  type MessageOutputBoundaryRun,
   type MessageOutputHostTail,
   type MessageOutputLayoutV1,
-  type MessageOutputRun,
 } from './types/message-output-layout.js';
 
 const id = z
@@ -14,17 +14,15 @@ const id = z
   .max(256)
   .refine((value) => value.trim() === value);
 const identity = z.object({ provider: id, runtimeSessionId: id, turnId: id, nativeId: id }).strict();
-const run = z
-  .object({
-    id,
-    identity,
-    channel: z.enum(['commentary', 'final']),
-    complete: z.literal(true),
-    start: z.number().int().nonnegative(),
-    end: z.number().int().positive(),
-    gluePrefixLength: z.union([z.literal(0), z.literal(1), z.literal(2)]),
-  })
-  .strict();
+const range = {
+  id,
+  channel: z.enum(['commentary', 'final']),
+  start: z.number().int().nonnegative(),
+  end: z.number().int().positive(),
+  gluePrefixLength: z.union([z.literal(0), z.literal(1), z.literal(2)]),
+};
+const run = z.object({ ...range, identity, complete: z.literal(true) }).strict();
+const boundaryRun = z.object(range).strict();
 const ref = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('run'), runId: id }).strict(),
   z.object({ kind: z.literal('tool'), toolEventId: id, executionRef: id }).strict(),
@@ -60,7 +58,7 @@ const common = {
     .object({ length: z.number().int().nonnegative(), sha256: z.string().regex(/^[a-f0-9]{64}$/) })
     .strict(),
 };
-const schema = z.discriminatedUnion('status', [
+const schema = z.union([
   z
     .object({
       ...common,
@@ -68,6 +66,15 @@ const schema = z.discriminatedUnion('status', [
       runs: z.array(run).min(1).max(MAX_MESSAGE_OUTPUT_RUNS),
       order: z.array(ref).min(1).max(MAX_MESSAGE_OUTPUT_REFS),
       hostTail: hostTail.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      ...common,
+      status: z.literal('available'),
+      basis: z.literal('successful_turn_last_tool'),
+      runs: z.array(boundaryRun).min(1).max(MAX_MESSAGE_OUTPUT_RUNS),
+      order: z.array(ref).min(1).max(MAX_MESSAGE_OUTPUT_REFS),
     })
     .strict(),
   z
@@ -88,7 +95,11 @@ const schema = z.discriminatedUnion('status', [
     .strict(),
 ]);
 
-function completeRanges(runs: readonly MessageOutputRun[], length: number, tail?: MessageOutputHostTail): boolean {
+function completeRanges(
+  runs: readonly MessageOutputBoundaryRun[],
+  length: number,
+  tail?: MessageOutputHostTail,
+): boolean {
   let cursor = 0;
   const ids = new Set<string>();
   for (const entry of runs) {
@@ -124,6 +135,20 @@ function completeOrder(layout: Extract<MessageOutputLayoutV1, { status: 'availab
   return cursor === layout.runs.length;
 }
 
+function validBoundary(layout: Extract<MessageOutputLayoutV1, { status: 'available' }>): boolean {
+  if (layout.basis !== 'successful_turn_last_tool') return true;
+  let lastTool = -1;
+  layout.order.forEach((entry, index) => {
+    if (entry.kind === 'tool') lastTool = index;
+  });
+  if (lastTool < 0) return false;
+  const byId = new Map(layout.runs.map((entry) => [entry.id, entry]));
+  return layout.order.every(
+    (entry, index) =>
+      entry.kind === 'tool' || byId.get(entry.runId)?.channel === (index > lastTool ? 'final' : 'commentary'),
+  );
+}
+
 /** Structural wire guard; content hash, actual owner and tool membership are checked by each consumer. */
 export function readMessageOutputLayout(value: unknown): MessageOutputLayoutV1 | undefined {
   const result = schema.safeParse(value);
@@ -131,7 +156,9 @@ export function readMessageOutputLayout(value: unknown): MessageOutputLayoutV1 |
   const layout = result.data as MessageOutputLayoutV1;
   if (
     layout.status === 'available' &&
-    (!completeRanges(layout.runs, layout.contentRevision.length, layout.hostTail) || !completeOrder(layout))
+    (!completeRanges(layout.runs, layout.contentRevision.length, layout.hostTail) ||
+      !completeOrder(layout) ||
+      !validBoundary(layout))
   )
     return undefined;
   return layout;

@@ -230,83 +230,6 @@ describe('post_message A2A mention invocation', () => {
     assert.equal(mockRouter.getExecutions().length, 0);
   });
 
-  test('an admitted private Work owner stamps an exact same-thread home delegation on the A2A source', async () => {
-    const app = await createApp();
-    registry.setCollectiveWorkAuthorityValidator(async (record) => {
-      assert.equal(record.ownerAuthProvenance, 'unknown');
-      assert.equal(record.collectiveWorkBinding.taskId, 'task-private');
-      assert.equal(record.collectiveWorkBinding.executionRevision, 2);
-    });
-    const workTrigger = messageStore.append({
-      from: { kind: 'system', service: 'collective-work' },
-      userId: 'user-1',
-      threadId: 't1',
-      content: 'Run admitted private Work',
-      mentions: [],
-      timestamp: 1,
-      extra: {
-        collectiveWorkInvocationV1: {
-          v: 1,
-          taskId: 'task-private',
-          observedRevision: 4,
-          resultRevision: 1,
-          executionRevision: 2,
-          executionRef: 'message:owner-admission',
-        },
-      },
-    });
-    const { invocationId, callbackToken } = await registry.create(
-      'user-1',
-      'opus',
-      't1',
-      undefined,
-      undefined,
-      {
-        mode: 'collective_work',
-        taskId: 'task-private',
-        threadId: 't1',
-        executionRevision: 2,
-        executionRef: 'message:owner-admission',
-        workspaceRoot: '/tmp/task-private-workspace',
-        readOnlyRoots: [],
-      },
-      workTrigger.id,
-      'unknown',
-      undefined,
-      undefined,
-      {
-        v: 1,
-        taskId: 'task-private',
-        observedRevision: 4,
-        resultRevision: 1,
-        executionRevision: 2,
-        executionRef: 'message:owner-admission',
-        sourceRef: 'message:collective-source',
-        authorityRef: 'message:owner-admission',
-      },
-    );
-
-    const response = await app.inject({
-      method: 'POST',
-      url: '/api/callbacks/post-message',
-      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
-      payload: { content: '@缅因猫\n请在家内接住这个已准入的工作。' },
-    });
-
-    assert.equal(response.statusCode, 200, response.payload);
-    const delegated = messageStore.getRecent(10).find((message) => message.catId === 'opus');
-    assert.deepEqual(delegated.extra.collectiveWorkDelegationV1, {
-      v: 1,
-      taskId: 'task-private',
-      observedRevision: 4,
-      resultRevision: 1,
-      executionRevision: 2,
-      executionRef: 'message:owner-admission',
-      ownerCatId: 'opus',
-      targetCatIds: ['codex'],
-    });
-  });
-
   test('post-message preserves separate source identity for an already-queued target', async () => {
     const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
     const drainCalls = [];
@@ -664,13 +587,17 @@ describe('F052: cross-thread A2A mention routing', () => {
     assert.ok(crossMsg.mentions.includes('codex'), 'cross-thread @codex should be in mentions');
   });
 
-  test('cross-thread same-member source enters durable Queue without consulting availability', async () => {
+  test('cross-thread same-member source enters durable Queue before advisory availability is read', async () => {
     const retryAt = Date.now() + 300_000;
     let availabilityChecks = 0;
+    let targetThreadId;
     const app = await createAppWithThreadStore({
       routingDispatchPreflight: {
         async preflight(input) {
           availabilityChecks++;
+          const admitted = invocationQueue.list(targetThreadId, 'user-1');
+          assert.equal(admitted.length, 1, 'availability is read only after durable admission');
+          assert.deepEqual(admitted[0].targets, ['codex']);
           return {
             v: 1,
             ownerId: input.ownerId,
@@ -691,6 +618,7 @@ describe('F052: cross-thread A2A mention routing', () => {
     });
     const source = await threadStore.create('user-1', 'Source');
     const target = await threadStore.create('user-1', 'Target');
+    targetThreadId = target.id;
     const { invocationId, callbackToken } = await registry.create('user-1', 'codex', source.id);
     const request = {
       method: 'POST',
@@ -708,7 +636,11 @@ describe('F052: cross-thread A2A mention routing', () => {
     assert.equal(response.statusCode, 200);
     const body = response.json();
     assert.deepEqual(body.routed, ['codex'], 'requested recipient owns the durable wake');
-    assert.equal(availabilityChecks, 0, 'message sending does not resolve availability');
+    assert.equal(availabilityChecks, 1, 'availability annotates the admitted source');
+    assert.equal(body.routing_preflight, undefined);
+    assert.equal(body.routing_admission.stage, 'queue_admitted');
+    assert.equal(body.routing_admission.executionPreflight, 'pending');
+    assert.equal(body.routing_admission.targets[0].availabilityObservation, 'unavailable');
     const entries = invocationQueue.list(target.id, 'user-1');
     assert.equal(entries.length, 1);
     assert.deepEqual(entries[0].targets, ['codex']);

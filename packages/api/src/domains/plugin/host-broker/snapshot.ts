@@ -1,13 +1,10 @@
 import {
-  type Capability,
   validateBindingNonce,
   validateCandidateHello,
   validateContractVersion,
-  validateEffectiveGrants,
   validatePackageDigest,
   validatePluginId,
   validateWireVersion,
-  WIRE_METHOD_NAMES,
 } from '@clowder-ai/plugin-contract';
 import { parseStaticFeatureLedger } from './static-feature-ledger.js';
 import type {
@@ -30,7 +27,6 @@ const SESSION_PHASES = new Set<BrokerSessionPhase>([
 ]);
 const LEASE_STATES = new Set<BrokerRuntimeLeaseState>(['pending', 'live', 'expired', 'revoked', 'closed']);
 const CALL_PHASES = new Set<BrokerCallPhase>(['claimed', 'dispatched', 'settled_success', 'settled_error']);
-const METHODS = new Set<string>(WIRE_METHOD_NAMES);
 
 function corrupt(message: string): never {
   throw new HostBrokerError('CORRUPT_SNAPSHOT', message);
@@ -95,70 +91,38 @@ function sessionIdentity(raw: Record<string, unknown>, label: string) {
   return { pluginId, packageDigest, contractVersion, wireVersion, candidate };
 }
 
-function sessionEffectiveGrants(value: unknown, label: string): Capability[] | undefined {
-  if (value === undefined) return undefined;
-  if (!Array.isArray(value) || !value.every((grant) => typeof grant === 'string') || !validateEffectiveGrants(value)) {
-    corrupt(`${label}.effectiveGrants is invalid`);
-  }
-  return [...value] as Capability[];
-}
-
 function assertSessionPhase(
   phase: BrokerSessionPhase,
   authority: {
     readonly candidate: unknown;
-    readonly grantRevision?: number;
-    readonly effectiveGrants?: readonly Capability[];
     readonly bindingNonce?: string;
     readonly activeLeaseExpiresAt?: number;
   },
   label: string,
 ): void {
-  if (
-    phase === 'transport_connected' &&
-    (authority.candidate !== undefined ||
-      authority.grantRevision !== undefined ||
-      authority.effectiveGrants !== undefined)
-  ) {
+  if (phase === 'transport_connected' && authority.candidate !== undefined) {
     corrupt(`${label} transport-connected state already contains Host binding authority`);
   }
-  if (
-    phase === 'host_bound' &&
-    (!authority.candidate ||
-      authority.grantRevision === undefined ||
-      !authority.effectiveGrants ||
-      !authority.bindingNonce)
-  ) {
+  if (phase === 'host_bound' && (!authority.candidate || !authority.bindingNonce)) {
     corrupt(`${label} host-bound state is incomplete`);
   }
   if (
     phase === 'active' &&
-    (!authority.candidate ||
-      authority.grantRevision === undefined ||
-      !authority.effectiveGrants ||
-      authority.bindingNonce ||
-      authority.activeLeaseExpiresAt === undefined)
+    (!authority.candidate || authority.bindingNonce || authority.activeLeaseExpiresAt === undefined)
   ) {
     corrupt(`${label} active state is incomplete`);
   }
 }
 
-function parseSession(value: unknown, index: number): BrokerSessionRecord {
+export function parseSession(value: unknown, index: number): BrokerSessionRecord {
   const label = `sessions[${index}]`;
   const raw = object(value, label);
   const identity = sessionIdentity(raw, label);
-  const grantRevision =
-    raw.grantRevision === undefined ? undefined : positiveRevision(raw.grantRevision, `${label}.grantRevision`);
-  const effectiveGrants = sessionEffectiveGrants(raw.effectiveGrants, label);
   const bindingNonce = raw.bindingNonce;
   if (bindingNonce !== undefined && !validateBindingNonce(bindingNonce)) corrupt(`${label}.bindingNonce is invalid`);
   const phase = enumValue(raw.phase, SESSION_PHASES, `${label}.phase`);
   const activeLeaseExpiresAt = optionalTimestamp(raw.activeLeaseExpiresAt, `${label}.activeLeaseExpiresAt`);
-  assertSessionPhase(
-    phase,
-    { candidate: identity.candidate, grantRevision, effectiveGrants, bindingNonce, activeLeaseExpiresAt },
-    label,
-  );
+  assertSessionPhase(phase, { candidate: identity.candidate, bindingNonce, activeLeaseExpiresAt }, label);
   const createdAt = timestamp(raw.createdAt, `${label}.createdAt`);
   const updatedAt = timestamp(raw.updatedAt, `${label}.updatedAt`);
   if (updatedAt < createdAt) corrupt(`${label}.updatedAt precedes creation`);
@@ -178,8 +142,6 @@ function parseSession(value: unknown, index: number): BrokerSessionRecord {
     wireVersion: identity.wireVersion,
     phase,
     ...(identity.candidate === undefined ? {} : { candidate: structuredClone(identity.candidate) }),
-    ...(grantRevision === undefined ? {} : { grantRevision }),
-    ...(effectiveGrants === undefined ? {} : { effectiveGrants }),
     ...(bindingNonce === undefined ? {} : { bindingNonce }),
     preActiveDeadlineAt: timestamp(raw.preActiveDeadlineAt, `${label}.preActiveDeadlineAt`),
     ...(activeLeaseExpiresAt === undefined ? {} : { activeLeaseExpiresAt }),
@@ -190,7 +152,7 @@ function parseSession(value: unknown, index: number): BrokerSessionRecord {
   };
 }
 
-function parseLease(value: unknown, index: number): BrokerRuntimeLeaseRecord {
+export function parseLease(value: unknown, index: number): BrokerRuntimeLeaseRecord {
   const label = `runtimeLeases[${index}]`;
   const raw = object(value, label);
   const packageDigest = string(raw.packageDigest, `${label}.packageDigest`);
@@ -200,7 +162,6 @@ function parseLease(value: unknown, index: number): BrokerRuntimeLeaseRecord {
     brokerSessionId: string(raw.brokerSessionId, `${label}.brokerSessionId`),
     pluginInstanceId: string(raw.pluginInstanceId, `${label}.pluginInstanceId`),
     packageDigest,
-    grantRevision: positiveRevision(raw.grantRevision, `${label}.grantRevision`),
     state: enumValue(raw.state, LEASE_STATES, `${label}.state`),
     expiresAt: timestamp(raw.expiresAt, `${label}.expiresAt`),
     updatedAt: timestamp(raw.updatedAt, `${label}.updatedAt`),
@@ -225,11 +186,11 @@ function parseCallOutcome(raw: Record<string, unknown>, phase: BrokerCallPhase, 
   };
 }
 
-function parseCall(value: unknown, index: number): BrokerCallRecord {
+export function parseCall(value: unknown, index: number): BrokerCallRecord {
   const label = `calls[${index}]`;
   const raw = object(value, label);
   const method = string(raw.method, `${label}.method`);
-  if (!METHODS.has(method)) corrupt(`${label}.method is not in the public registry`);
+  // This is a historical receipt, not registration of a callable method.
   const packageDigest = string(raw.packageDigest, `${label}.packageDigest`);
   if (!validatePackageDigest(packageDigest)) corrupt(`${label}.packageDigest is invalid`);
   const phase = enumValue(raw.phase, CALL_PHASES, `${label}.phase`);
@@ -243,8 +204,7 @@ function parseCall(value: unknown, index: number): BrokerCallRecord {
     runtimeLeaseId: string(raw.runtimeLeaseId, `${label}.runtimeLeaseId`),
     pluginInstanceId: string(raw.pluginInstanceId, `${label}.pluginInstanceId`),
     packageDigest,
-    grantRevision: positiveRevision(raw.grantRevision, `${label}.grantRevision`),
-    method: method as BrokerCallRecord['method'],
+    method,
     settlementKey: string(raw.settlementKey, `${label}.settlementKey`),
     inputDigest: string(raw.inputDigest, `${label}.inputDigest`),
     phase,
@@ -283,8 +243,7 @@ function indexLeases(
       !session ||
       session.runtimeLeaseId !== lease.runtimeLeaseId ||
       session.pluginInstanceId !== lease.pluginInstanceId ||
-      session.packageDigest !== lease.packageDigest ||
-      session.grantRevision !== lease.grantRevision
+      session.packageDigest !== lease.packageDigest
     ) {
       corrupt(`runtime lease ${lease.runtimeLeaseId} does not match its session authority`);
     }

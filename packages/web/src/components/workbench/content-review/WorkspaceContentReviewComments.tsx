@@ -1,5 +1,5 @@
 import type { WorkspaceContentAnnotationResolution } from '@cat-cafe/shared';
-import { useEffect, useRef } from 'react';
+import { type ReactNode, useEffect, useRef } from 'react';
 import { ReviewActor } from '@/components/content-review/ReviewActor';
 import { useReviewDraft } from '@/components/content-review/useReviewDraft';
 import type { ContentReviewAnnotation } from './content-review-contract';
@@ -7,6 +7,10 @@ import type { ContentReviewAnnotation } from './content-review-contract';
 export function WorkspaceContentReviewComments({
   reviewId,
   ownerUserId,
+  renderActor,
+  renderAnnotationActions,
+  renderReplyActions,
+  draftPrefix,
   annotations,
   resolutions,
   activeAnnotationId = null,
@@ -19,7 +23,14 @@ export function WorkspaceContentReviewComments({
   onSetState,
 }: {
   readonly reviewId: string;
-  readonly ownerUserId: string;
+  readonly ownerUserId?: string;
+  readonly renderActor?: (actor: ContentReviewAnnotation['author']) => ReactNode;
+  readonly renderAnnotationActions?: (annotation: ContentReviewAnnotation) => ReactNode;
+  readonly renderReplyActions?: (
+    annotation: ContentReviewAnnotation,
+    reply: NonNullable<ContentReviewAnnotation['replies']>[number],
+  ) => ReactNode;
+  readonly draftPrefix?: string;
   readonly annotations: readonly ContentReviewAnnotation[];
   readonly resolutions: readonly WorkspaceContentAnnotationResolution[];
   readonly activeAnnotationId?: string | null;
@@ -41,12 +52,15 @@ export function WorkspaceContentReviewComments({
           key={annotation.id}
           annotation={annotation}
           ownerUserId={ownerUserId}
+          renderActor={renderActor}
+          renderAnnotationActions={renderAnnotationActions}
+          renderReplyActions={renderReplyActions}
           status={resolutionById.get(annotation.id) ?? 'orphaned'}
           active={activeAnnotationId === annotation.id}
           focusRequest={focusRequest}
           canWrite={canWrite}
           canReply={canReply}
-          draftKey={`workspace-content-review:${reviewId}:reply:${annotation.id}`}
+          draftKey={`${draftPrefix ?? `workspace-content-review:${reviewId}`}:reply:${annotation.id}`}
           onActive={onActive}
           onReturnToCanvas={onReturnToCanvas}
           onReply={onReply}
@@ -60,6 +74,9 @@ export function WorkspaceContentReviewComments({
 function WorkspaceCommentThread({
   annotation,
   ownerUserId,
+  renderActor,
+  renderAnnotationActions,
+  renderReplyActions,
   status,
   active,
   focusRequest,
@@ -72,7 +89,13 @@ function WorkspaceCommentThread({
   onSetState,
 }: {
   readonly annotation: ContentReviewAnnotation;
-  readonly ownerUserId: string;
+  readonly ownerUserId?: string;
+  readonly renderActor?: (actor: ContentReviewAnnotation['author']) => ReactNode;
+  readonly renderAnnotationActions?: (annotation: ContentReviewAnnotation) => ReactNode;
+  readonly renderReplyActions?: (
+    annotation: ContentReviewAnnotation,
+    reply: NonNullable<ContentReviewAnnotation['replies']>[number],
+  ) => ReactNode;
   readonly status: WorkspaceContentAnnotationResolution['status'];
   readonly active: boolean;
   readonly focusRequest?: { readonly annotationId: string; readonly requestId: number } | null;
@@ -92,6 +115,14 @@ function WorkspaceCommentThread({
     article.current?.focus();
   }, [annotation.id, focusRequest]);
   const quote = anchorLabel(annotation.anchor);
+  const actor = (value: ContentReviewAnnotation['author']) =>
+    renderActor ? (
+      renderActor(value)
+    ) : ownerUserId ? (
+      <ReviewActor actor={value} ownerUserId={ownerUserId} />
+    ) : (
+      <span>{value.actorId}</span>
+    );
   return (
     <li
       ref={article}
@@ -111,7 +142,7 @@ function WorkspaceCommentThread({
       }}
     >
       <div className="flex items-center justify-between gap-2 text-micro text-cafe-muted">
-        <ReviewActor actor={annotation.author} ownerUserId={ownerUserId} />
+        {actor(annotation.author)}
         <button
           type="button"
           data-resolution={status}
@@ -122,6 +153,7 @@ function WorkspaceCommentThread({
         </button>
       </div>
       <p className="mt-1 whitespace-pre-wrap text-xs text-cafe">{annotation.body}</p>
+      {renderAnnotationActions?.(annotation)}
       <p className="mt-1 truncate text-micro text-cafe-muted" title={quote}>
         {quote}
       </p>
@@ -141,8 +173,9 @@ function WorkspaceCommentThread({
         <ol className="mt-3 space-y-2 border-l-2 border-cafe-subtle pl-3">
           {(annotation.replies ?? []).map((item) => (
             <li key={item.id} className="text-xs text-cafe">
-              <ReviewActor actor={item.author} ownerUserId={ownerUserId} />
+              {actor(item.author)}
               {item.body}
+              {renderReplyActions?.(annotation, item)}
             </li>
           ))}
         </ol>

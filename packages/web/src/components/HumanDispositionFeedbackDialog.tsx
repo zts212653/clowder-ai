@@ -2,7 +2,8 @@
 
 import type { HumanDispositionFeedbackInput, HumanDispositionReasonCode } from '@cat-cafe/shared';
 import { useEffect, useId, useRef, useState } from 'react';
-import { HUMAN_DISPOSITION_REASON_COPY } from '../lib/human-disposition-feedback';
+import { humanDispositionCopy } from './human-disposition.shell-copy';
+import { useShellCopy } from './shell/shell-copy';
 
 const MAX_DETAIL_LENGTH = 500;
 
@@ -31,6 +32,7 @@ export function HumanDispositionFeedbackDialog({
   onCancel,
   onSubmit,
 }: HumanDispositionFeedbackDialogProps) {
+  const t = useShellCopy(humanDispositionCopy);
   const titleId = useId();
   const descriptionId = useId();
   const firstReasonRef = useRef<HTMLInputElement>(null);
@@ -100,7 +102,7 @@ export function HumanDispositionFeedbackDialog({
       >
         <header className="border-b border-cafe px-5 py-4">
           <h2 id={titleId} className="text-base font-semibold text-cafe-primary">
-            为什么不采纳？
+            {t.title}
           </h2>
           <p id={descriptionId} className="mt-1 text-sm text-cafe-secondary">
             {subjectLabel}
@@ -109,9 +111,9 @@ export function HumanDispositionFeedbackDialog({
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
           <fieldset className="space-y-2">
-            <legend className="mb-2 text-sm font-medium text-cafe-primary">请选择最贴近的原因</legend>
+            <legend className="mb-2 text-sm font-medium text-cafe-primary">{t.choose}</legend>
             {reasonCodes.map((reasonCode, index) => {
-              const copy = HUMAN_DISPOSITION_REASON_COPY[reasonCode];
+              const copy = t.reasons[reasonCode];
               return (
                 <label
                   key={reasonCode}
@@ -139,7 +141,7 @@ export function HumanDispositionFeedbackDialog({
           {selectedReason === 'other' && (
             <div className="mt-4">
               <label htmlFor={`${descriptionId}-detail`} className="text-sm font-medium text-cafe-primary">
-                补充原因
+                {t.detail}
               </label>
               <textarea
                 id={`${descriptionId}-detail`}
@@ -149,7 +151,7 @@ export function HumanDispositionFeedbackDialog({
                 disabled={submitting}
                 rows={4}
                 onChange={(event) => setDetail(event.target.value)}
-                placeholder="请用一句话说明"
+                placeholder={t.placeholder}
                 className="mt-2 w-full resize-y rounded-lg border border-cafe bg-cafe-surface px-3 py-2 text-sm text-cafe-primary outline-none focus:ring-2 focus:ring-[var(--semantic-info)] disabled:cursor-not-allowed disabled:opacity-60"
               />
               <p
@@ -168,7 +170,7 @@ export function HumanDispositionFeedbackDialog({
               data-testid="feedback-dialog-locked"
               className="mt-4 rounded-lg border border-cafe px-3 py-2 text-sm text-cafe-secondary"
             >
-              正在确认这一件现在的状态，稍候再提交。已填的内容会保留。
+              {t.locked}
             </p>
           )}
 
@@ -192,7 +194,7 @@ export function HumanDispositionFeedbackDialog({
             }}
             className="mr-auto rounded-lg px-3 py-2 text-sm text-cafe-secondary transition-colors hover:bg-cafe-surface-elevated disabled:cursor-not-allowed disabled:opacity-50"
           >
-            跳过原因
+            {t.skip}
           </button>
           <button
             type="button"
@@ -201,7 +203,7 @@ export function HumanDispositionFeedbackDialog({
             onClick={onCancel}
             className="rounded-lg px-3 py-2 text-sm text-cafe-secondary transition-colors hover:bg-cafe-surface-elevated disabled:cursor-not-allowed disabled:opacity-50"
           >
-            取消
+            {t.cancel}
           </button>
           <button
             type="button"
@@ -210,7 +212,7 @@ export function HumanDispositionFeedbackDialog({
             onClick={submitFeedback}
             className="rounded-lg bg-semantic-critical px-4 py-2 text-sm font-medium text-[var(--cafe-surface)] transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            {submitting ? '提交中…' : '提交并拒绝'}
+            {submitting ? t.submitting : t.submit}
           </button>
         </footer>
       </section>

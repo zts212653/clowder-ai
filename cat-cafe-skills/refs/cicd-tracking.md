@@ -20,21 +20,7 @@ GitHub checks
 
 ## 等 CI 的注册方式
 
-```text
-# 普通：跟踪这个 PR，CI 终态与冲突都在默认条件里
-cat_cafe_register_pr_tracking(repoFullName="<owner>/repo", prNumber=<N>)
-
-# 高级：只想被 CI 与冲突叫醒，不要其它条件
-cat_cafe_register_pr_tracking(
-  repoFullName="<owner>/repo",
-  prNumber=<N>,
-  when=[
-    { kind: "pr_ci_terminal" },
-    { kind: "pr_became_conflicting" }
-  ],
-  expiresAt=<future unix ms>  # 可选；省略则没有时间到期
-)
-```
+先用 `tool_search` 查找已安装 GitHub 插件的 PR 跟踪工具，按其 schema 提交 `repoFullName`、`prNumber` 和唯一 `registrationId`；未知响应后重试时复用该 ID 与参数。普通跟踪省略 `when`；仅等 CI、冲突、HEAD 或 review 时，显式选择对应 predicate。等待已登记成功才进入事件驱动。
 
 服务端在注册时读取 live CI baseline：
 

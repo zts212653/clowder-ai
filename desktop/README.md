@@ -137,7 +137,7 @@ pnpm desktop:pack
 | 步骤 | 内容 | 产物 |
 |------|------|------|
 | 1/6 | `pnpm install && pnpm build` 构建 Web 应用 | `packages/web/.next/` |
-| 2/6 | `pnpm deploy` 导出 api/web/mcp-server 运行时包 | `bundled/deploy/{api,web,mcp-server}/` |
+| 2/6 | 冻结生产依赖导出 导出 api/web/mcp-server 运行时包 | `bundled/deploy/{api,web,mcp-server}/` |
 | 3/6 | 下载 Node.js 便携版（匹配构建机 ABI 版本） | `bundled/node-darwin-{arm64,x64}/` |
 | 4/6 | 从源码编译 Redis（~30s/架构） | `bundled/redis-darwin-{arm64,x64}/` |
 | 5/6 | 跳过（macOS DMG 无 post-install 阶段，不捆绑 CLI 工具；用户自行安装） | — |
@@ -183,7 +183,7 @@ pnpm desktop:installer
 
 构建流程（`desktop/scripts/build-desktop.ps1`）：
 1. 构建 Web 应用（`pnpm build`）
-2. `pnpm deploy` 导出 api / web / mcp-server 运行时包（扁平化 node_modules，无 Windows junction）
+2. 冻结生产依赖导出 导出 api / web / mcp-server 运行时包（扁平化 node_modules，无 Windows junction）
 3. 下载 Node.js 便携版（ABI 版本与构建机一致，确保 native 模块兼容）
 4. 下载/复制 Windows 便携版 Redis
 5. 构建 Electron 壳（`electron-builder --win --dir`）
@@ -200,7 +200,7 @@ pnpm desktop:installer
 
 | 特性 | 状态 | 说明 |
 |------|------|------|
-| 零网络安装 | ✅ | 运行时包（pnpm deploy）+ Node.js + Redis + 构建产物全部预打包 |
+| 零网络安装 | ✅ | 运行时包（冻结依赖导出）+ Node.js + Redis + 构建产物全部预打包 |
 | 长路径支持 | ✅ | 安装时自动启用 Windows LongPathsEnabled |
 | 单实例运行 | ✅ | 重复启动会聚焦已有窗口 |
 | 系统托盘 | ✅ | 最小化到托盘，右键菜单 |
@@ -227,7 +227,7 @@ pnpm desktop:installer
    npm install -g @anthropic-ai/claude-code        # Claude
    npm install -g @openai/codex                     # Codex
    irm https://antigravity.google/cli/install.cmd | iex  # Antigravity CLI / Gemini 默认
-   pip install --user --upgrade kimi-cli            # Kimi（Python）
+   npm install -g @moonshot-ai/kimi-code             # Kimi Code
    ```
    > 安装包内已 bundle 便携 Node.js，安装过程中会自动使用。手动补装时需确保系统 PATH 中有 Node.js 或 Python。
 
@@ -246,7 +246,7 @@ pnpm desktop:installer
 | API 启动失败（Redis PING failed） | Redis 未找到且环境变量冲突 | 检查 `cat-cafe-desktop.log`，确认 `MEMORY_STORE=1` 已正确设置 |
 | Next.js 启动超时 | `.cmd` 批处理在 spawn 中静默失败 | `service-manager.js` 已自动绕过 `.cmd`，直接调用 `node next/dist/bin/next` |
 | 找不到 `node` | PATH 未包含 Node.js | 安装包已 bundle 便携版 Node.js；开发模式确保 Node.js 在系统 PATH 中 |
-| 安装包过大 | 包含完整运行时环境 | 正常，`pnpm deploy` 扁平化包 + Electron + Node.js + Redis |
+| 安装包过大 | 包含完整运行时环境 | 正常，冻结生产依赖导出 扁平化包 + Electron + Node.js + Redis |
 
 ## 平台支持
 

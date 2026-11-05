@@ -106,6 +106,7 @@ export function openGateResourcePool(databasePath) {
     ensureColumn(database, 'gate_resource_requests', 'aging_started_at', 'INTEGER NOT NULL DEFAULT 0');
     ensureColumn(database, 'gate_resource_requests', 'drain_started_at', 'INTEGER');
     ensureColumn(database, 'gate_resource_requests', 'pressure_blocked_at', 'INTEGER');
+    ensureColumn(database, 'gate_resource_requests', 'pressure_observation_json', 'TEXT');
     ensureColumn(database, 'gate_resource_requests', 'job_token', 'TEXT');
     ensureColumn(database, 'gate_resource_requests', 'logical_request_key', 'TEXT');
     ensureColumn(database, 'gate_resource_requests', 'request_generation', 'INTEGER');

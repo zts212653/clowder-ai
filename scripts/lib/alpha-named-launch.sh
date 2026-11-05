@@ -19,7 +19,7 @@ select_named_alpha() {
 read_named_alpha_selection() {
   local selected
   selected="$(node -e 'const c=JSON.parse(process.argv[1]); console.log([c.alphaRoot,c.branch,...Object.values(c.ports)].join("\t"))' "$NAMED_ALPHA_COORDINATES")" || die "invalid Alpha selection"
-  IFS=$'\t' read -r ALPHA_DIR ALPHA_BRANCH ALPHA_FRONTEND_PORT ALPHA_API_PORT ALPHA_PREVIEW_GATEWAY_PORT ALPHA_COLLECTIVE_SERVICE_PORT ALPHA_REDIS_PORT <<< "$selected"
+  IFS=$'\t' read -r ALPHA_DIR ALPHA_BRANCH ALPHA_FRONTEND_PORT ALPHA_API_PORT ALPHA_PREVIEW_GATEWAY_PORT ALPHA_REDIS_PORT <<< "$selected"
 }
 
 apply_named_alpha_environment() {
@@ -28,7 +28,6 @@ apply_named_alpha_environment() {
   while IFS=$'\t' read -r key value; do
     export "$key=$value"
   done <<< "$exports"
-  unset COLLECTIVE_GITHUB_CLIENT_ID COLLECTIVE_GITHUB_CLIENT_SECRET
 }
 
 assert_named_alpha_prepared() {
@@ -36,7 +35,13 @@ assert_named_alpha_prepared() {
   named_alpha_coordinates not-serving --record "$NAMED_ALPHA_COORDINATES" >/dev/null || die "named Alpha may not mutate a serving tree"
 }
 
+hold_named_alpha_lifecycle() {
+  node "$SCRIPT_DIR/lib/alpha-lifecycle-lock.mjs" acquire "$NAMED_ALPHA_COORDINATES" "$$" || die "named Alpha lifecycle already active or unproven"
+  trap 'node "$SCRIPT_DIR/lib/alpha-lifecycle-lock.mjs" release "$NAMED_ALPHA_COORDINATES" "$$"' EXIT
+}
+
 init_named_alpha_worktree() {
+  hold_named_alpha_lifecycle
   require_git_repo
   ensure_remote_exists
   if worktree_exists; then
@@ -49,7 +54,8 @@ init_named_alpha_worktree() {
   git -C "$PROJECT_DIR" fetch origin main
   local target
   target="$(git -C "$PROJECT_DIR" rev-parse --verify 'refs/remotes/origin/main^{commit}')"
-  git -C "$PROJECT_DIR" worktree add "$ALPHA_DIR" -b "$ALPHA_BRANCH" "$target"
+  (cd "$PROJECT_DIR" && node "$SCRIPT_DIR/worktree-new.mjs" "$ALPHA_DIR" \
+    --branch "$ALPHA_BRANCH" --base "$target" --policy merged --role alpha --full)
   assert_named_alpha_prepared
   if [ "$RUN_INSTALL" = true ]; then install_alpha_dependencies; fi
   info "named alpha worktree ready: $ALPHA_DIR"
@@ -68,7 +74,7 @@ sync_named_alpha_worktree() {
 assert_named_alpha_ports_idle() {
   command -v lsof >/dev/null 2>&1 || die "named Alpha requires a listener ownership probe"
   local port rc
-  for port in "$ALPHA_FRONTEND_PORT" "$ALPHA_API_PORT" "$ALPHA_PREVIEW_GATEWAY_PORT" "$ALPHA_COLLECTIVE_SERVICE_PORT" "$ALPHA_REDIS_PORT"; do
+  for port in "$ALPHA_FRONTEND_PORT" "$ALPHA_API_PORT" "$ALPHA_PREVIEW_GATEWAY_PORT" "$ALPHA_REDIS_PORT"; do
     rc=0
     lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1 || rc=$?
     [ "$rc" -eq 1 ] || die "named Alpha port $port is occupied or unreadable; no process will be replaced"
@@ -78,6 +84,9 @@ assert_named_alpha_ports_idle() {
 start_named_alpha_worktree() {
   umask 077
   worktree_exists || die "named Alpha must be initialized as a registered checkout before start"
+  # Hold admission across sync/build and exec into start-dev. A dead launcher
+  # leaves a stale lease which only a proven-absent PID permits reclaiming.
+  hold_named_alpha_lifecycle
   assert_named_alpha_ports_idle
   sync_named_alpha_worktree
   ensure_alpha_dependencies

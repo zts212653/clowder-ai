@@ -11,31 +11,38 @@ import {
 } from '../RightStatusPanel';
 import { SessionIdTag } from '../SessionChainInputs';
 import type { SessionChainProjection } from '../SessionChainPanel';
-import { modeLabel } from '../status-helpers';
+import { useShellCopy } from '../shell/shell-copy';
 import { ActivityRecordToggle } from './ActivityRecordToggle';
+import { statusPageCopy } from './status-page.shell-copy';
 
 export function StatusDetailsV2({ props, owner }: { props: RightStatusPanelProps; owner: SessionChainProjection }) {
+  const t = useShellCopy(statusPageCopy);
   const { threadId, messageSummary } = props;
   return (
     <div className="status-v2-details">
       <section className="status-v2-section">
-        <h3>对话信息</h3>
+        <h3>{t.info}</h3>
         <dl>
           <div>
-            <dt>对话 ID</dt>
+            <dt>{t.threadId}</dt>
             <dd>
-              <SessionIdTag id={threadId} label="对话 ID" />
+              <SessionIdTag id={threadId} label={t.threadId} />
             </dd>
           </div>
           <div>
-            <dt>模式</dt>
-            <dd>{modeLabel(props.intentMode)}</dd>
+            <dt>{t.mode}</dt>
+            <dd>{props.intentMode ? t.modes[props.intentMode] : t.modes.idle}</dd>
           </div>
           <div>
-            <dt>消息</dt>
+            <dt>{t.messages}</dt>
             <dd>
-              共 {messageSummary.total} · 猫猫 {messageSummary.assistant} · 系统 {messageSummary.system} · 证据{' '}
-              {messageSummary.evidence} · 跟进 {messageSummary.followup}
+              {t.messageCounts(
+                messageSummary.total,
+                messageSummary.assistant,
+                messageSummary.system,
+                messageSummary.evidence,
+                messageSummary.followup,
+              )}
             </dd>
           </div>
         </dl>
@@ -56,14 +63,14 @@ export function StatusDetailsV2({ props, owner }: { props: RightStatusPanelProps
       </section>
       <section className="status-v2-section status-v2-controls">
         <h3>
-          显示 <span>仅影响本对话的显示，不影响猫猫收到的内容</span>
+          {t.display} <span>{t.displayHint}</span>
         </h3>
         {/* 思考过程 is gone here: in the new shell the thinking is a row inside each reply's execution record. */}
         <ActivityRecordToggle threadId={threadId} />
       </section>
       <section className="status-v2-section status-v2-controls">
         <h3>
-          可见性 <span>影响猫猫之间能看到的内容</span>
+          {t.visibility} <span>{t.visibilityHint}</span>
         </h3>
         <ThinkingModeToggle threadId={threadId} v2 />
         <RevealWhispersButton threadId={threadId} v2 />

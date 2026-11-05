@@ -50,7 +50,12 @@ test('the same canonical Chat sends text and an image and restores the original 
       .locator('input[type="file"]')
       .setInputFiles({ name: 'synthetic.png', mimeType: 'image/png', buffer: PNG });
     await f.page.getByRole('button', { name: '发送消息', exact: true }).click();
-    await f.page.waitForFunction(() => document.querySelector('[data-message-id^="saved-send-"]') !== null);
+    await f.page.waitForFunction(() => document.querySelector('textarea[aria-label="消息输入框"]')?.value === '');
+    assert.equal(
+      await f.page.locator('[data-message-id^="saved-send-"]').count(),
+      0,
+      'admission clears the composer without creating an optimistic History message',
+    );
     const sent = f.fixture.calls.find((x) => x.path === '/api/messages' && x.method === 'POST');
     assert.ok(sent);
     assert.ok(sent.body.includes(COMPANION_THREAD));

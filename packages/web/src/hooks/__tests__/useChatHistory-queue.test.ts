@@ -16,8 +16,14 @@ vi.mock('@/utils/api-client', () => ({
 }));
 
 function HookProbe({ threadId }: { threadId: string }) {
-  useChatHistory(threadId);
-  return null;
+  const { messages } = useChatHistory(threadId);
+  return React.createElement(
+    'div',
+    { 'data-testid': 'history-preview' },
+    messages.map((message) =>
+      React.createElement('span', { key: message.id, 'data-preview-message': message.id }, message.content),
+    ),
+  );
 }
 
 function QueueHydrationPanelProbe({ threadId }: { threadId: string }) {
@@ -67,7 +73,6 @@ describe('useChatHistory queue hydration (F39 Bug 1)', () => {
       targetCats: [],
       catStatuses: {},
       catInvocations: {},
-      currentGame: null,
 
       threadStates: {},
       currentThreadId: 'thread-q',
@@ -129,6 +134,18 @@ describe('useChatHistory queue hydration (F39 Bug 1)', () => {
     const state = useChatStore.getState();
     expect(state.queue).toHaveLength(1);
     expect(state.queue[0].id).toBe('q1');
+    expect(container.textContent).toContain('queued msg');
+    expect(state.messages).toEqual([]);
+    await act(async () => {
+      state.addMessageToThread('thread-q', {
+        id: 'm1',
+        type: 'user',
+        content: 'queued msg',
+        timestamp: queueEntries[0].createdAt,
+      });
+      state.setQueue('thread-q', []);
+    });
+    expect(container.querySelectorAll('[data-preview-message="m1"]')).toHaveLength(1);
   });
 
   it('clears a stale queue when server returns empty (Cloud R1 P1)', async () => {

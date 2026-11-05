@@ -5,7 +5,6 @@ import type { PageActionResult } from '../../action/PageActionLoop.js';
 import type { F317LiveCallObservation, F317MeetingGrant } from '../../meeting/f317-meeting-admission.js';
 import type { LiveCompanionCallOptions } from '../live-call-options.js';
 import { type LiveContextGate, whileNotAborted } from './live-controlled-context.js';
-import { bindLiveInboxHost, type LiveInboxHost } from './live-inbox-host.js';
 import { type LiveMeetingDependencies, LiveMeetingHost } from './live-meeting-host.js';
 import { bindLiveRecoveryHost } from './live-recovery-binding.js';
 import type { LiveRecoveryHost } from './live-recovery-host.js';
@@ -22,7 +21,6 @@ import { ownerVoiceScope } from './voice/live-owner-voice-source.js';
 
 /** One native boundary admits at most one independent source-backed context. */
 export class LiveBoundaryContexts {
-  private inbox?: LiveInboxHost;
   private recovery?: LiveRecoveryHost;
   private pendingMeeting?: LiveMeetingHost;
   private meeting?: LiveMeetingHost;
@@ -69,7 +67,6 @@ export class LiveBoundaryContexts {
       wakeNative: this.wakeNative,
       isSameCallExposure: this.isSameCallExposure,
     };
-    this.inbox ??= bindLiveInboxHost(input);
     this.recovery ??= bindLiveRecoveryHost(input);
     this.callbackInvocationId = callbackEnv.CAT_CAFE_INVOCATION_ID;
     const pageAction = this.options.pageAction;
@@ -241,21 +238,16 @@ export class LiveBoundaryContexts {
     );
   }
 
-  signalInbox(): void {
-    this.inbox?.signal();
-  }
-
   hasPendingWake(): boolean {
     return Boolean(
       this.pageResults.hasPendingWake() ||
         this.ownerVoice.hasPendingWake() ||
         this.meeting?.hasPendingWake() ||
-        this.inbox?.hasPendingWake() ||
         this.recovery?.hasPendingWake(),
     );
   }
 
-  async atBoundary(kind: 'idle' | 'tool_complete' | 'turn_complete'): Promise<void> {
+  async atBoundary(_kind: 'idle' | 'tool_complete' | 'turn_complete'): Promise<void> {
     try {
       const voice = await this.ownerVoice.atBoundary();
       if (voice !== 'idle') {
@@ -266,13 +258,6 @@ export class LiveBoundaryContexts {
       if (pageResult !== 'idle') return;
       const meeting = await this.meeting?.atBoundary();
       if (meeting === 'accepted' || meeting === 'busy') return;
-      const inbox = await this.inbox?.atBoundary(kind);
-      if (inbox && inbox !== 'idle') {
-        // Only an accepted notice generated a native turn; busy or cancelled attempts
-        // must leave the current recovery ticket available at a later safe boundary.
-        if (inbox === 'accepted') this.recovery?.cancel('inbox_precedence');
-        return;
-      }
       await this.recovery?.atBoundary();
     } catch (error) {
       this.options.reportInboxFailure?.(error);
@@ -280,7 +265,6 @@ export class LiveBoundaryContexts {
   }
 
   observe(message: CodexAppServerJsonObject): number | undefined {
-    this.inbox?.observe(message);
     const params = message.params as Record<string, unknown> | undefined;
     const turn = params?.turn as Record<string, unknown> | undefined;
     this.ownerVoice.observeTurn(message.method, turn?.id);
@@ -342,7 +326,6 @@ export class LiveBoundaryContexts {
     this.pendingMeeting = undefined;
     this.meeting?.close();
     this.meeting = undefined;
-    this.inbox?.close();
     this.recovery?.close();
   }
 }

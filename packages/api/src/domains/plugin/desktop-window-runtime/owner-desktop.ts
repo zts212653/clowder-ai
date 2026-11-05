@@ -36,25 +36,26 @@ export class OwnerDesktop {
   private async showCurrentOrRepair(): Promise<void> {
     const { desktop, inventory, lifecycle } = this.options;
     if (!(await desktop.presence())) {
-      const snapshot = await inventory.snapshot();
-      const candidates = snapshot.instances.filter(
-        (instance) => instance.pluginId === 'official.companion' && instance.lifecycleState === 'installed',
-      );
-      const instance = candidates[0];
-      const pkg = instance && snapshot.packages.find((record) => record.packageDigest === instance.packageDigest);
+      const authority = await inventory.readCurrentAuthority('official.companion');
+      const instance = authority?.instance;
+      const pkg = authority?.packageRecord;
       if (
-        candidates.length !== 1 ||
         !instance ||
         instance.activationState !== 'enabled' ||
         instance.configReadiness !== 'ready' ||
-        (instance.runtimeState !== 'crashed' && !hasRetainedDesktopLoss(instance)) ||
+        (instance.runtimeState !== 'healthy' &&
+          instance.runtimeState !== 'crashed' &&
+          !hasRetainedDesktopLoss(instance)) ||
         pkg?.packageState !== 'installed' ||
+        pkg.manifest === null ||
         !desktopWindowContribution(pkg.manifest)
       )
         throw new Error('desktop recovery unavailable');
-      // Repair owns the revision CAS, durable close, fresh grant/package checks
-      // and new Broker/feature generation. No call or media is restored here.
-      await lifecycle.repair(instance.pluginInstanceId, instance.lifecycleRevision);
+      // A healthy body can have an observation still pending behind Host IO;
+      // show waits for it under current authority. Only retained loss repairs.
+      // Repair retains its revision CAS and fresh package/activation checks.
+      if (instance.runtimeState !== 'healthy')
+        await lifecycle.repair(instance.pluginInstanceId, instance.lifecycleRevision);
     }
     await desktop.show();
   }

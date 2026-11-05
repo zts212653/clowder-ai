@@ -22,7 +22,7 @@ vi.mock('@/hooks/useCatData', () => ({
 vi.mock('@/components/CatAvatar', () => ({
   CatAvatar: ({ catId }: { catId: string }) => <span data-testid="avatar" data-cat={catId} />,
 }));
-vi.mock('@/hooks/useActiveExecutionProjection', () => ({ cancelProjectedExecution: vi.fn() }));
+vi.mock('@/hooks/useActiveExecutionProjection', () => ({ cancelProjectedExecution: vi.fn(), cancelHoldWait: vi.fn() }));
 vi.mock('@/hooks/useDeploymentWaitProjection', () => ({
   useDeploymentWaitProjection: () => ({
     projection: mocks.projection,
@@ -40,9 +40,9 @@ vi.mock('@/components/ChatVoiceFeatureControls', () => ({
   ChatVoiceFeatureControls: () => <div data-testid="voice-controls">语音控件</div>,
 }));
 
-import { cancelProjectedExecution } from '@/hooks/useActiveExecutionProjection';
+import { cancelHoldWait, cancelProjectedExecution } from '@/hooks/useActiveExecutionProjection';
 import { HomeLiveCard } from '../HomeLiveCard';
-import { command, live, NOW, seed } from './home-fixtures';
+import { command, hold, live, NOW, seed } from './home-fixtures';
 
 describe('F322 new-shell Workspace home · 正在发生', () => {
   let container: HTMLDivElement;
@@ -62,7 +62,17 @@ describe('F322 new-shell Workspace home · 正在发生', () => {
     mocks.hydration = 'idle';
     mocks.retry.mockReset();
     mocks.apiFetch.mockReset();
-    mocks.apiFetch.mockResolvedValue({ ok: false });
+    const storedFolds: Record<string, boolean> = {};
+    mocks.apiFetch.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/api/config/live-projects') {
+        if (init?.method === 'PUT') {
+          const { projectPath, collapsed } = JSON.parse(String(init.body));
+          storedFolds[projectPath] = collapsed;
+        }
+        return Response.json({ collapsed: { ...storedFolds } });
+      }
+      return { ok: false };
+    });
     mocks.setWorkspaceMode.mockReset();
     mocks.openTeamSubject.mockReset();
     onSelectDestination.mockReset();
@@ -89,6 +99,69 @@ describe('F322 new-shell Workspace home · 正在发生', () => {
   const qa = (selector: string) => Array.from(container.querySelectorAll<HTMLElement>(selector));
 
   describe('正在发生', () => {
+    it('shows a held ball as 在等 with its wake time, counted apart from running work, and cancels that hold', async () => {
+      const held = hold('codex-sol', 'thread-hold', '修复 GitHub 登录');
+      seed([live('opus', 'thread-other', 'F322 第1段', 'e1')], [held]);
+      await renderHome();
+      expect(q('[data-testid="workspace-developing"]')?.textContent).toContain('所有对话 · 1 件在跑 · 1 件在等');
+      expect(qa('[data-testid="workspace-running-object"]')).toHaveLength(1);
+      const row = q('[data-testid="workspace-holding-object"]')!;
+      expect(row.textContent).toContain('小太阳');
+      expect(row.textContent).toContain('在等');
+      expect(row.textContent).toContain('02:11 醒');
+      expect(row.textContent).toContain('修复 GitHub 登录');
+      expect(row.querySelector('a')?.getAttribute('href')).toBe('/thread/thread-hold');
+      await act(async () => row.querySelector<HTMLButtonElement>('[data-testid="home-cancel-hold"]')!.click());
+      expect(vi.mocked(cancelHoldWait)).toHaveBeenCalledWith(held);
+    });
+
+    it('a card with only held balls is not empty and offers no cancel for another principal’s hold', async () => {
+      seed(
+        [],
+        [
+          hold('codex-sol', 'thread-hold', '修复 GitHub 登录', {
+            waitId: 'occupied:thread-hold:codex-sol:1',
+            cancelability: { state: 'not_cancelable', reason: 'foreign_principal' },
+          }),
+        ],
+      );
+      await renderHome();
+      expect(q('[data-testid="workspace-developing"]')?.textContent).toContain('所有对话 · 0 件在跑 · 1 件在等');
+      expect(q('[data-testid="workspace-developing-status"]')).toBeNull();
+      expect(q('[data-testid="workspace-holding-object"]')).not.toBeNull();
+      expect(q('[data-testid="home-cancel-hold"]')).toBeNull();
+    });
+
+    it('keeps every project visible and folds only the selected project without losing exact work', async () => {
+      seed([
+        { ...live('codex-sol', 'thread-here', 'Current cafe work', 'cafe-1'), projectPath: '/work/cat-cafe' },
+        { ...live('codex-sol', 'planet-a', 'F329 Tripo work', 'planet-1'), projectPath: '/work/cat-planet' },
+        { ...live('opus', 'planet-b', 'F329 sandbox work', 'planet-2'), projectPath: '/work/cat-planet' },
+      ]);
+      await renderHome();
+      const projects = qa('[data-testid="home-live-project"]');
+      expect(projects).toHaveLength(2);
+      const planet = projects.find((group) => group.textContent?.includes('cat-planet'))!;
+      const toggle = planet.querySelector<HTMLButtonElement>('button[aria-expanded]')!;
+      expect(toggle.getAttribute('aria-expanded')).toBe('true');
+      expect(planet.querySelectorAll('[data-testid="workspace-running-object"]')).toHaveLength(2);
+      await act(async () => toggle.click());
+      expect(toggle.getAttribute('aria-expanded')).toBe('false');
+      expect(Object.keys(useActiveExecutionStore.getState().executionsByKey)).toHaveLength(3);
+      expect(q('[data-execution-id="cafe-1"]')).not.toBeNull();
+      await act(async () => root.render(null));
+      await renderHome();
+      const restoredPlanet = qa('[data-testid="home-live-project"]').find((group) =>
+        group.textContent?.includes('cat-planet'),
+      )!;
+      const restoredToggle = restoredPlanet.querySelector<HTMLButtonElement>('button[aria-expanded]')!;
+      expect(restoredToggle.getAttribute('aria-expanded')).toBe('false');
+      await act(async () => restoredToggle.click());
+      expect(restoredPlanet.querySelector('[data-execution-id="planet-1"] a')?.getAttribute('href')).toBe(
+        '/thread/planet-a',
+      );
+    });
+
     it('writes one row per cat and conversation and makes both current and other conversation text reachable', async () => {
       seed([live('codex-sol', 'thread-here', '改窄屏设计稿', 'e1'), live('opus', 'thread-other', 'F322 第1段', 'e2')]);
       await renderHome();
@@ -101,7 +174,7 @@ describe('F322 new-shell Workspace home · 正在发生', () => {
       expect(rows[0]?.textContent).toContain('小太阳');
       expect(rows[0]?.textContent).toContain('当前对话');
       expect(rows[0]?.querySelector('.home-live-sub')?.textContent).toBe('当前对话 · 改窄屏设计稿');
-      expect(rows[0]?.querySelector('.home-live-status')?.textContent).toBe('正在回话');
+      expect(rows[0]?.querySelector('.home-live-status')?.textContent).toBe('处理中');
       expect(rows[0]?.querySelector('button')?.disabled).toBe(false);
 
       expect(rows[1]?.textContent).toContain('opus');
@@ -166,16 +239,14 @@ describe('F322 new-shell Workspace home · 正在发生', () => {
     it('says what it cannot verify instead of staying silent', async () => {
       useActiveExecutionStore.getState().beginHydration('thread-here', '/project');
       await renderHome();
-      expect(q('[data-testid="workspace-developing-status"]')?.textContent).toBe('正在同步项目里的运行状态…');
+      expect(q('[data-testid="workspace-developing-status"]')?.textContent).toBe('正在同步所有对话的运行状态…');
 
       await act(async () => {
         useActiveExecutionStore.getState().reset();
         const store = useActiveExecutionStore.getState();
         store.failHydration('thread-here', store.beginHydration('thread-here', '/project'), new Error('offline'));
       });
-      expect(q('[data-testid="workspace-developing-status"]')?.textContent).toBe(
-        '当前无法验证项目里的运行状态，请稍后重试。',
-      );
+      expect(q('[data-testid="workspace-developing-status"]')?.textContent).toBe('当前无法验证运行状态，请稍后重试。');
     });
 
     it('keeps the last verified rows and says the refresh failed', async () => {

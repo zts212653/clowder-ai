@@ -472,7 +472,8 @@ ensure_runtime_clean() {
       git -C "$RUNTIME_DIR" stash push -m "lock-drift-pre-sync-stash" -- pnpm-lock.yaml
       return 0
     fi
-    die "runtime worktree has local changes: tracked content does not exactly match frozen target '$EXPECTED_TARGET_SHA'; commit/stash first"
+    printf '%s\n' "$dirty" >&2
+    die "runtime worktree has local changes relative to its current HEAD (before sync to frozen target '$EXPECTED_TARGET_SHA'); commit/stash first"
   fi
 }
 
@@ -875,9 +876,12 @@ inspect_runtime_daemon() {
 active_runtime_application_ports() {
   local api_port frontend_port preview_port entry label port active=""
   api_port="$(runtime_env_value API_SERVER_PORT 2>/dev/null || true)"
-  api_port="${api_port:-${API_SERVER_PORT:-3004}}"
+  local default_api_port default_frontend_port
+  default_api_port="$(node "$(dirname "${BASH_SOURCE[0]}")/read-deployment-default.mjs" apiPort)"
+  default_frontend_port="$(node "$(dirname "${BASH_SOURCE[0]}")/read-deployment-default.mjs" webPort)"
+  api_port="${api_port:-${API_SERVER_PORT:-$default_api_port}}"
   frontend_port="$(runtime_env_value FRONTEND_PORT 2>/dev/null || true)"
-  frontend_port="${frontend_port:-${FRONTEND_PORT:-3003}}"
+  frontend_port="${frontend_port:-${FRONTEND_PORT:-$default_frontend_port}}"
   preview_port="$(runtime_env_value PREVIEW_GATEWAY_PORT 2>/dev/null || true)"
   preview_port="${preview_port:-${PREVIEW_GATEWAY_PORT:-4100}}"
 
@@ -934,10 +938,10 @@ stop_runtime_daemon() {
 }
 
 status_runtime_daemon() {
-  local root
+  local root status_rc=0
   export CAT_CAFE_DEPLOYMENT_ID=runtime
   migrate_legacy_runtime_daemon_state
-  runtime_daemon_state status
+  runtime_daemon_state status || status_rc=$?
   root="$(runtime_daemon_root)"
   if [ -f "$root/scripts/f247-cloud-services.mjs" ]; then
     if node "$root/scripts/f247-cloud-services.mjs" status --summary >/dev/null 2>&1; then
@@ -947,6 +951,7 @@ status_runtime_daemon() {
     fi
   fi
   echo "  stop: pnpm runtime:stop"
+  return "$status_rc"
 }
 
 start_runtime_worktree() {
@@ -984,7 +989,6 @@ start_runtime_worktree() {
     export CAT_CAFE_WORKSPACE_ROOT="${CAT_CAFE_WORKSPACE_ROOT:-$PROJECT_DIR}"
     export CAT_CAFE_DEPLOYMENT_ID=runtime
     export CAT_CAFE_PROVISION_GLOBAL_SIDECAR=1
-    export CONNECTOR_GATEWAY_AUTOSTART="${CONNECTOR_GATEWAY_AUTOSTART:-1}"
     # Runtime contract: passive frozen — no tsx watch auto-restart on src changes.
     export CAT_CAFE_DIRECT_NO_WATCH="${CAT_CAFE_DIRECT_NO_WATCH:-1}"
     export CAT_CAFE_RUNTIME_ARTIFACTS_VERIFIED=1
@@ -1019,7 +1023,6 @@ start_runtime_worktree() {
   export CAT_CAFE_WORKSPACE_ROOT="${CAT_CAFE_WORKSPACE_ROOT:-$PROJECT_DIR}"
   export CAT_CAFE_DEPLOYMENT_ID=runtime
   export CAT_CAFE_PROVISION_GLOBAL_SIDECAR=1
-  export CONNECTOR_GATEWAY_AUTOSTART="${CONNECTOR_GATEWAY_AUTOSTART:-1}"
   # Runtime contract: passive frozen — no tsx watch auto-restart on src changes.
   # Restart only happens on explicit `pnpm start` (which runs build invariant first).
   # See docs/decisions/039-runtime-passive-freeze.md for design rationale.
@@ -1028,7 +1031,6 @@ start_runtime_worktree() {
   info "exporting CAT_CAFE_RUNTIME_ROOT=$CAT_CAFE_RUNTIME_ROOT"
   info "exporting CAT_CAFE_WORKSPACE_ROOT=$CAT_CAFE_WORKSPACE_ROOT"
   info "exporting CAT_CAFE_PROVISION_GLOBAL_SIDECAR=$CAT_CAFE_PROVISION_GLOBAL_SIDECAR"
-  info "exporting CONNECTOR_GATEWAY_AUTOSTART=$CONNECTOR_GATEWAY_AUTOSTART (official runtime opt-in)"
   info "exporting CAT_CAFE_DIRECT_NO_WATCH=$CAT_CAFE_DIRECT_NO_WATCH (runtime passive-freeze)"
   # Runtime = production: auto-inject --prod-web for PWA + Tailscale support.
   # Bash 3.2 + set -u: empty-array expansion can throw "unbound variable".

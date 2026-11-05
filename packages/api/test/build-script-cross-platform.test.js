@@ -14,18 +14,32 @@ const desktopPostInstallScriptPath = path.resolve(
 );
 const desktopInstallerScriptPath = path.resolve(import.meta.dirname, '../../../desktop/installer/cat-cafe.iss');
 
-test('api build uses the public native command without the prepared-artifact wrapper', async () => {
+test('api build keeps native copy and packaging behind the selected edition entry', async () => {
   const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf8'));
+  const { activeProfile } = JSON.parse(
+    await readFile(new URL('../../shared/src/deployment-profiles.json', import.meta.url), 'utf8'),
+  );
   const buildScript = packageJson.scripts?.build;
+  let actualBuildScript;
 
   assert.equal(typeof buildScript, 'string');
-  assert.doesNotMatch(buildScript, /gate-prepared-artifacts/);
-  assert.match(buildScript, /pnpm --dir \.\.\/shared build/);
-  assert.match(buildScript, /pnpm --dir \.\.\/collective-service build/);
-  assert.match(buildScript, /node \.\/scripts\/copy-marketplace-catalog-data\.mjs/);
-  assert.doesNotMatch(buildScript, /\bmkdir -p\b/);
-  assert.doesNotMatch(buildScript, /\bcp\s+src\/marketplace\/catalog-data/);
-  assert.equal(packageJson.scripts?.['build:actual'], undefined);
+  assert.ok(['home', 'opensource'].includes(activeProfile), 'build contract requires a known edition');
+  if (activeProfile === 'home') {
+    assert.match(buildScript, /node \.\.\/\.\.\/desktop\/scripts\/build-app-assist\.cjs/);
+    assert.match(buildScript, /gate-prepared-artifacts\.mjs run --artifact api -- pnpm run build:actual/);
+    actualBuildScript = packageJson.scripts?.['build:actual'];
+  } else {
+    assert.doesNotMatch(buildScript, /gate-prepared-artifacts/);
+    assert.equal(packageJson.scripts?.['build:actual'], undefined);
+    actualBuildScript = buildScript;
+  }
+  assert.equal(typeof actualBuildScript, 'string');
+  assert.match(actualBuildScript, /pnpm --dir \.\.\/shared build/);
+  assert.doesNotMatch(actualBuildScript, /collective-service|collective-connector/);
+  assert.match(actualBuildScript, /node \.\/scripts\/copy-bundled-plugin-packages\.mjs/);
+  assert.match(actualBuildScript, /node \.\/scripts\/copy-marketplace-catalog-data\.mjs/);
+  assert.doesNotMatch(actualBuildScript, /\bmkdir -p\b/);
+  assert.doesNotMatch(actualBuildScript, /\bcp\s+src\/marketplace\/catalog-data/);
 });
 
 test('api test script builds mcp-server with workspace dependencies first', async () => {
@@ -79,20 +93,19 @@ test('desktop package includes the full main process local require dependency gr
   assert.deepEqual([...new Set(missing)].sort(), []);
 });
 
-test('windows desktop build script cleans up temporary Defender exclusions', async () => {
+test('windows desktop packaging uses frozen export without changing Defender settings', async () => {
   const buildScript = await readFile(desktopBuildScriptPath, 'utf8');
-
-  assert.match(buildScript, /Add-MpPreference -ExclusionPath \$deployRoot/);
-  assert.match(buildScript, /Remove-MpPreference -ExclusionPath \$deployRoot/);
-  assert.match(buildScript, /finally\s*\{[\s\S]*Remove-MpPreference -ExclusionPath \$deployRoot[\s\S]*\}/);
+  assert.match(buildScript, /frozen-runtime-deploy\.mjs/);
+  assert.doesNotMatch(buildScript, /Add-MpPreference|Remove-MpPreference/);
 });
 
-test('windows desktop build script retries pnpm deploy on EPERM', async () => {
+test('desktop packaging retains the previous deployment on a new frozen export', async () => {
   const buildScript = await readFile(desktopBuildScriptPath, 'utf8');
-
-  assert.match(buildScript, /for \(\$attempt = 1; \$attempt -le 3/);
-  assert.match(buildScript, /Start-Sleep -Seconds 10/);
-  assert.match(buildScript, /Remove-Item \$out -Recurse -Force/);
+  assert.match(buildScript, /Move-Item -LiteralPath \$deployRoot -Destination/);
+  assert.match(buildScript, /deploy-before-/);
+  assert.ok(
+    buildScript.indexOf('Frozen runtime export failed') < buildScript.indexOf('Move-Item -LiteralPath $deployRoot'),
+  );
 });
 
 test('windows desktop build script downloads official Inno Setup ChineseSimplified language file', async () => {
@@ -109,12 +122,14 @@ test('windows desktop build script downloads official Inno Setup ChineseSimplifi
   );
 });
 
-test('windows desktop build script Defender cleanup runs in finally block', async () => {
-  const buildScript = await readFile(desktopBuildScriptPath, 'utf8');
-
-  const finallyMatch = buildScript.match(/finally\s*\{([\s\S]*?)\}\s*\n\s*if \(\$deployFailed\)/);
-  assert.ok(finallyMatch, 'finally block with cleanup must exist');
-  assert.match(finallyMatch[1], /Remove-MpPreference -ExclusionPath \$deployRoot/);
+test('desktop build fails closed when source locks do not match', async () => {
+  for (const file of [desktopBuildScriptPath, desktopMacBuildScriptPath]) {
+    const buildScript = await readFile(file, 'utf8');
+    assert.match(buildScript, /pnpm install --frozen-lockfile/);
+    assert.match(buildScript, /Frozen dependency installation failed/);
+    assert.doesNotMatch(buildScript, /if.*LASTEXITCODE.*pnpm install/);
+    assert.doesNotMatch(buildScript, /retrying with pnpm install/);
+  }
 });
 
 test('F210 desktop packaging does not bundle Gemini CLI as AGY replacement', async () => {

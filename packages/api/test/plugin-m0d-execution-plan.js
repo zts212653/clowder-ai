@@ -1,6 +1,8 @@
 import { INVALID_PARAMS_CODE, WIRE_METHOD_REGISTRY } from '@clowder-ai/plugin-contract';
 import { M0C_BEHAVIOR_CASE_IDS } from '@clowder-ai/plugin-contract/conformance';
 
+export const M0D_PROTOCOL_CASE_IDS = M0C_BEHAVIOR_CASE_IDS;
+
 export class M0dExecutionPlanError extends Error {
   constructor(message) {
     super(message);
@@ -88,7 +90,7 @@ function validateExecution(caseId, value) {
   return Object.freeze({ ...structuredClone(execution), verdictOracle });
 }
 
-export function loadM0dExecutionPlan(fixture, expectedIds = M0C_BEHAVIOR_CASE_IDS) {
+export function loadM0dExecutionPlan(fixture, expectedIds = M0D_PROTOCOL_CASE_IDS) {
   const published = record(fixture, 'M0-D behavior fixture');
   if (!Array.isArray(published.cases)) planError('M0-D behavior fixture cases must be an array');
   const seen = new Set();

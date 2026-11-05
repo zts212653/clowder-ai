@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
-import { rmSync, writeFileSync } from 'node:fs';
+import { readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 
 import { handlePublishVerdict } from '../../dist/infrastructure/harness-eval/publish-verdict/publish-verdict.js';
 import { setupHarnessFeedback } from './eval-manual-trigger-fixtures.js';
-import { buildPacket } from './publish-verdict-fixtures.js';
+import { buildPacket, unreachablePublisher } from './publish-verdict-fixtures.js';
 
 /**
  * F192 Phase H — Verdict Publishing Pipeline (砚砚 R0 Path B narrowed).
@@ -25,11 +25,47 @@ describe('handlePublishVerdict', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
+  it('returns 503 without a publisher before source replay, generation, or artifact writes', async () => {
+    const beforeArtifacts = ['verdicts', 'bundles'].map((directory) => readdirSync(join(root, directory)));
+    const calls = [];
+    const unreachable = (operation) => async () => {
+      calls.push(operation);
+      assert.fail(`${operation} must not run without a publication provider`);
+    };
+    const result = await handlePublishVerdict(
+      {
+        harnessFeedbackRoot: root,
+        generator: unreachable('generation'),
+        createFreshMainReader: unreachable('fresh source read'),
+        mainReader: {
+          listBundleEntries: unreachable('source listing'),
+          readFile: unreachable('source read'),
+        },
+        replayPreflight: unreachable('replay'),
+        checkStoredSourceEquivalence: unreachable('source comparison'),
+      },
+      {
+        packet: buildPacket({ id: 'missing-publication-provider' }),
+        domain: 'eval:a2a',
+        catId: 'codex',
+        sourceRefs: { snapshotName: 'absent.yaml', attributionName: 'absent.yaml' },
+      },
+    );
+
+    assert.equal(result.status, 503);
+    assert.equal(result.error, 'publication_provider_unavailable');
+    assert.deepEqual(calls, []);
+    assert.deepEqual(
+      ['verdicts', 'bundles'].map((directory) => readdirSync(join(root, directory))),
+      beforeArtifacts,
+    );
+  });
+
   // AC-H1: packet validation
   describe('AC-H1 — packet validation', () => {
     it('returns 400 invalid_packet when packet missing required fields', async () => {
       const result = await handlePublishVerdict(
-        { harnessFeedbackRoot: '/tmp/phase-h-test' },
+        { gitPublisher: unreachablePublisher, harnessFeedbackRoot: '/tmp/phase-h-test' },
         { packet: { id: 'incomplete' }, domain: 'eval:a2a', catId: 'codex' },
       );
       assert.ok('error' in result);
@@ -40,7 +76,7 @@ describe('handlePublishVerdict', () => {
     it('returns 400 invalid_packet for non-object inputs', async () => {
       for (const bad of [null, 'str', 42, []]) {
         const result = await handlePublishVerdict(
-          { harnessFeedbackRoot: '/tmp/phase-h-test' },
+          { gitPublisher: unreachablePublisher, harnessFeedbackRoot: '/tmp/phase-h-test' },
           { packet: bad, domain: 'eval:a2a', catId: 'codex' },
         );
         assert.ok('error' in result, `${JSON.stringify(bad)} should reject`);
@@ -50,7 +86,7 @@ describe('handlePublishVerdict', () => {
 
     it('returns 400 when delete_sunset lacks operator accept gate', async () => {
       const result = await handlePublishVerdict(
-        { harnessFeedbackRoot: '/tmp/phase-h-test' },
+        { gitPublisher: unreachablePublisher, harnessFeedbackRoot: '/tmp/phase-h-test' },
         { packet: buildPacket({ verdict: 'delete_sunset' }), domain: 'eval:a2a', catId: 'codex' },
       );
       assert.ok('error' in result);
@@ -63,7 +99,7 @@ describe('handlePublishVerdict', () => {
   describe('AC-H7 — domain validation', () => {
     it('returns 400 domain_mismatch when input.domain ≠ packet.domainId', async () => {
       const result = await handlePublishVerdict(
-        { harnessFeedbackRoot: '/tmp/phase-h-test' },
+        { gitPublisher: unreachablePublisher, harnessFeedbackRoot: '/tmp/phase-h-test' },
         { packet: buildPacket({ domainId: 'eval:a2a' }), domain: 'eval:memory', catId: 'codex' },
       );
       assert.ok('error' in result);
@@ -81,7 +117,7 @@ describe('handlePublishVerdict', () => {
         // For non-a2a/non-cw domains, provide a2a-shaped refs (kind omitted = a2a default)
         // so handler passes pre-validation and reaches generator presence check.
         const result = await handlePublishVerdict(
-          { harnessFeedbackRoot: root /* generator omitted */, redis: undefined },
+          { gitPublisher: unreachablePublisher, harnessFeedbackRoot: root /* generator omitted */, redis: undefined },
           {
             packet: buildPacket({ domainId: domain }),
             domain,
@@ -98,7 +134,7 @@ describe('handlePublishVerdict', () => {
 
     it('returns 400 sourceRefs_kind_mismatch when task-outcome domain receives a2a refs', async () => {
       const result = await handlePublishVerdict(
-        { harnessFeedbackRoot: root },
+        { gitPublisher: unreachablePublisher, harnessFeedbackRoot: root },
         {
           packet: buildPacket({ domainId: 'eval:task-outcome' }),
           domain: 'eval:task-outcome',
@@ -114,7 +150,7 @@ describe('handlePublishVerdict', () => {
 
     it('returns 501 unsupported_generator when task-outcome receives valid task-outcome-snapshot refs', async () => {
       const result = await handlePublishVerdict(
-        { harnessFeedbackRoot: root },
+        { gitPublisher: unreachablePublisher, harnessFeedbackRoot: root },
         {
           packet: buildPacket({ domainId: 'eval:task-outcome' }),
           domain: 'eval:task-outcome',
@@ -162,7 +198,7 @@ fixtures: []
       );
 
       const result = await handlePublishVerdict(
-        { harnessFeedbackRoot: root },
+        { gitPublisher: unreachablePublisher, harnessFeedbackRoot: root },
         {
           packet: buildPacket({ domainId: 'eval:anchor-first' }),
           domain: 'eval:anchor-first',
@@ -179,7 +215,7 @@ fixtures: []
     it('returns 400 invalid_source_ref when task-outcome databasePath is absolute or escapes repo root', async () => {
       for (const databasePath of ['/tmp/task-outcome-episodes.sqlite', '../task-outcome-episodes.sqlite']) {
         const result = await handlePublishVerdict(
-          { harnessFeedbackRoot: root },
+          { gitPublisher: unreachablePublisher, harnessFeedbackRoot: root },
           {
             packet: buildPacket({ domainId: 'eval:task-outcome' }),
             domain: 'eval:task-outcome',
@@ -207,7 +243,7 @@ fixtures: []
     it('returns 400 invalid_packet_id when id exceeds 128 chars', async () => {
       const big = 'a'.repeat(129);
       const result = await handlePublishVerdict(
-        { harnessFeedbackRoot: root },
+        { gitPublisher: unreachablePublisher, harnessFeedbackRoot: root },
         { packet: buildPacket({ id: big, domainId: 'eval:a2a' }), domain: 'eval:a2a', catId: 'codex' },
       );
       assert.ok('error' in result);
@@ -219,7 +255,7 @@ fixtures: []
     it('returns 400 invalid_packet_id for slug violations (uppercase, underscore, etc.)', async () => {
       for (const bad of ['Test-Foo', 'test_foo', '-leading', 'foo.bar', 'foo bar', 'foo/bar']) {
         const result = await handlePublishVerdict(
-          { harnessFeedbackRoot: root },
+          { gitPublisher: unreachablePublisher, harnessFeedbackRoot: root },
           { packet: buildPacket({ id: bad, domainId: 'eval:a2a' }), domain: 'eval:a2a', catId: 'codex' },
         );
         assert.ok('error' in result, `'${bad}' should be rejected`);
@@ -230,7 +266,7 @@ fixtures: []
 
     it('returns 400 invalid_packet when phenomenon exceeds 2048 chars', async () => {
       const result = await handlePublishVerdict(
-        { harnessFeedbackRoot: root },
+        { gitPublisher: unreachablePublisher, harnessFeedbackRoot: root },
         {
           packet: buildPacket({ id: 'ok-id', domainId: 'eval:a2a', phenomenon: 'x'.repeat(2049) }),
           domain: 'eval:a2a',
@@ -250,7 +286,7 @@ fixtures: []
       writeFileSync(resolve(root, 'verdicts', `${dupId}.md`), '# Existing verdict\n');
 
       const result = await handlePublishVerdict(
-        { harnessFeedbackRoot: root },
+        { gitPublisher: unreachablePublisher, harnessFeedbackRoot: root },
         {
           packet: buildPacket({ id: dupId, domainId: 'eval:a2a' }),
           domain: 'eval:a2a',

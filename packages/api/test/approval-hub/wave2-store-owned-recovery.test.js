@@ -2,7 +2,7 @@ import '../helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import Fastify from 'fastify';
-import { proposedReviewAction } from './helpers.js';
+import { proposedTaskAction } from './helpers.js';
 
 function succeedingIngress() {
   return {
@@ -79,6 +79,7 @@ describe('Wave 2 store-owned recovery boundaries', () => {
 
     const app = Fastify();
     await app.register(callbacks.callbacksRoutes, {
+      actionSuccessorAdmissionService: { async preflightStructuredTransferStanding() {} },
       registry,
       messageStore,
       threadStore,
@@ -103,7 +104,7 @@ describe('Wave 2 store-owned recovery boundaries', () => {
         content: '@sonnet\nPlease fix the bug',
         targetCats: ['sonnet'],
         effectClass: 'assign_work',
-        proposedAction: proposedReviewAction(),
+        proposedAction: proposedTaskAction(),
         clientMessageId,
       },
     });

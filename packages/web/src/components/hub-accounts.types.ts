@@ -10,7 +10,11 @@ export interface ProfileItem {
   quota?: AccountQuotaObservation;
   /** Read-only canonical default-home readiness; this does not make the default managed. */
   codexLoginStatus?: 'ready' | 'not_logged_in' | 'unreadable';
-  nativeLogin?: { home: string; officialDefault: boolean; identity?: { email?: string; workspaceId: string } };
+  nativeLogin?: {
+    home: string;
+    officialDefault: boolean;
+    identity?: { email?: string; workspaceId: string; userId?: string };
+  };
   claude?: { kind: 'long_lived_token' };
   claudeTokenStatus?: 'saved' | 'missing' | 'expired';
   codex?: CodexManagedAccount & { status: 'not_prepared' | 'not_logged_in' | 'ready' | 'identity_changed' };
@@ -20,6 +24,8 @@ export interface ProfileItem {
   authType: ProfileAuthType;
   kind: ProfileKind;
   builtin: boolean;
+  /** First-run view of a detected CLI login; no stored account record exists. */
+  syntheticNative?: true;
   mode: ProfileMode;
   clientId?: BuiltinAccountClient;
   baseUrl?: string;

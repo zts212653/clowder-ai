@@ -61,22 +61,30 @@ export function MailboxRuntimeCard({
     );
   }
   return (
-    <>
-      <RuntimeInteractionCard
-        messageId={source.cardRef.messageId}
-        block={{
-          kind: 'card',
-          v: 1,
-          id: source.cardRef.blockId,
-          title: source.title,
-          meta: { kind: 'runtime_interaction', interactionId: source.interactionId },
-        }}
-        host={{ ownerUserId, revision: source.revision, cardRef: source.cardRef, readCurrent }}
-        copy={copy}
-      />
-      {secondaryActions ? (
-        <div className="flex flex-wrap items-center justify-end gap-2">{secondaryActions}</div>
-      ) : null}
-    </>
+    <RuntimeInteractionCard
+      messageId={source.cardRef.messageId}
+      block={{
+        kind: 'card',
+        v: 1,
+        id: source.cardRef.blockId,
+        title: source.title,
+        meta: { kind: 'runtime_interaction', interactionId: source.interactionId },
+      }}
+      host={{
+        ownerUserId,
+        revision: source.revision,
+        cardRef: source.cardRef,
+        readCurrent,
+        verifyCurrentRead: () => {
+          const current = sessions.currentItem?.(ownerUserId, `f306.runtime_interaction:${source.interactionId}`);
+          return Boolean(
+            current?.runtimeInteraction && JSON.stringify(current.runtimeInteraction) === JSON.stringify(source),
+          );
+        },
+      }}
+      copy={copy}
+      presentation="mailbox"
+      secondaryActions={secondaryActions}
+    />
   );
 }

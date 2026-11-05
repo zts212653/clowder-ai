@@ -211,7 +211,7 @@ export async function verifyMicroduckPreparationReading({
   });
   await selectedHeading.waitFor();
   await program.locator('.exploration-owner-diff > summary').click();
-  await program.getByText('与最新采用版的内容对照尚待来源确认。', { exact: true }).waitFor();
+  await program.getByText('与来源当前版本的内容对照尚待确认。', { exact: true }).waitFor();
   await program.locator('.exploration-owner-evidence > summary').click();
   await program.getByText('暂时无法确认此版本的候选独立验证证据。', { exact: true }).waitFor();
   assert.equal(await program.getByText('后续任务已实际使用这个版本', { exact: true }).count(), 0);
@@ -219,7 +219,7 @@ export async function verifyMicroduckPreparationReading({
   await exploration.getByRole('button', { name: '改动与依据', exact: true }).click();
   await exploration.locator('.exploration-adoption > summary').click();
   assert.match(
-    await program.getByRole('status', { name: '当前沿用', exact: true }).innerText(),
+    await program.getByRole('status', { name: '当前采用', exact: true }).innerText(),
     /官方 walking ONNX baseline/,
   );
   await assertContained(program);

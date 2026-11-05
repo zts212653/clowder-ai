@@ -26,6 +26,9 @@ import {
   isApprovedDevelopmentProposalForTask,
 } from './approved-development-proposal.js';
 
+import { approvedGenericTaskContinuation } from './approved-generic-task-proposal.js';
+import { continuationEvidenceRef } from './approved-task-contract.js';
+
 /**
  * Maps a task to a proposal that grants delegation for it, along with
  * the ownerCatId that was current when the delegation was approved.
@@ -90,6 +93,7 @@ export class ProposalStoreDelegateProvider implements TaskApprovedDelegateProvid
     currentOwnerCatId: string,
     tenantScope: string,
     currentDevelopmentScope?: DevelopmentScopeSnapshot,
+    currentTaskTitle?: string,
   ): Promise<ReadonlyArray<ApprovedDelegate>> {
     // Step 1: Find every independently approved delegation binding for this
     // specific task. Thread proposals are durable approvals and the current
@@ -107,16 +111,16 @@ export class ProposalStoreDelegateProvider implements TaskApprovedDelegateProvid
         if (!proposal) return [];
         const createdThreadId = proposal.createdThreadId;
         if (!createdThreadId || createdThreadId !== binding.approvedChildThreadId) return [];
-        if (
-          !isApprovedDevelopmentProposalForTask(proposal, {
-            id: taskId,
-            threadId: taskThreadId,
-            ownerCatId: currentOwnerCatId,
-            userId: tenantScope,
-            developmentScope: currentDevelopmentScope,
-          })
-        )
-          return [];
+        const task = {
+          id: taskId,
+          title: currentTaskTitle,
+          threadId: taskThreadId,
+          ownerCatId: currentOwnerCatId,
+          userId: tenantScope,
+          developmentScope: currentDevelopmentScope,
+        };
+        const continuation = approvedGenericTaskContinuation(proposal, task);
+        if (!isApprovedDevelopmentProposalForTask(proposal, task) && !continuation) return [];
 
         // Step 8: preferredCats are the exact approved execution targets.
         const authorizedCats = proposal.preferredCats;
@@ -125,7 +129,9 @@ export class ProposalStoreDelegateProvider implements TaskApprovedDelegateProvid
         return authorizedCats.map((catId) => ({
           catId,
           threadId: createdThreadId,
-          evidenceRef: `proposal:${binding.proposalId}:approved:thread:${createdThreadId}:cat:${catId}`,
+          evidenceRef: continuation
+            ? `${continuationEvidenceRef(continuation)}:thread:${createdThreadId}:cat:${catId}`
+            : `proposal:${binding.proposalId}:approved:thread:${createdThreadId}:cat:${catId}`,
         }));
       }),
     );
@@ -139,6 +145,8 @@ export class ProposalStoreDelegateProvider implements TaskApprovedDelegateProvid
  * binding resolution — not the full ThreadProposal.
  */
 export interface ProposalListItem {
+  readonly projectPath?: string;
+  readonly taskContractContinuation?: unknown;
   readonly proposalId: string;
   readonly status: string;
   readonly createdThreadId?: string;
@@ -151,6 +159,7 @@ export interface ProposalListItem {
 }
 
 export interface DelegateChildThreadSnapshot {
+  readonly projectPath?: string;
   readonly id: string;
   readonly parentThreadId?: string;
   readonly createdBy: string;
@@ -209,6 +218,11 @@ export class TaskThreadProposalLister {
         ) {
           return null;
         }
+        if (
+          proposal.taskContractContinuation &&
+          (child.parentThreadId !== proposal.parentThreadId || child.projectPath !== proposal.projectPath)
+        )
+          return null;
         const legacySourceRelation = proposal.sourceThreadId === taskThreadId;
         const parentRelation = proposal.parentThreadId === taskThreadId && child.parentThreadId === taskThreadId;
         return legacySourceRelation || parentRelation ? proposal : null;

@@ -8,6 +8,8 @@ import {
   evolutionPreparationReviewV1Schema,
   type OwnerTruthRefV1,
 } from '@cat-cafe/shared';
+import { getCoCreatorDisplay } from '../../../../config/co-creator-display.js';
+import { ARCHIVE_SOURCE_REPOSITORY_URL } from '../archive-source-repository.js';
 import { isMeasuredControlEvaluation, selectedPublicControlSubject } from '../microduck-control-candidate-selection.js';
 import {
   MICRODUCK_CONTROL_CANDIDATE_ORDER,
@@ -57,6 +59,21 @@ const versionRef = (subject: MicroduckControlExperiment['subjects'][number]): Ex
 });
 const fixed = (value: number): string => value.toFixed(6);
 
+export function footballSmokeSources(reportHash: string) {
+  return [
+    {
+      label: '环境 smoke 原文',
+      sourceRef: ownerRef(`repo-material:sha256:${reportHash}`, reportHash),
+      ownerHref: `${ARCHIVE_SOURCE_REPOSITORY_URL}/blob/${FOOTBALL_SOURCE_COMMIT}/${FOOTBALL_SMOKE_PATH}`,
+    },
+    {
+      label: '真实环境截图',
+      sourceRef: ownerRef(`image:sha256:${FOOTBALL_IMAGE_SHA256}`, FOOTBALL_IMAGE_SHA256),
+      ownerHref: `${ARCHIVE_SOURCE_REPOSITORY_URL}/blob/${FOOTBALL_SOURCE_COMMIT}/${FOOTBALL_IMAGE_PATH}`,
+    },
+  ];
+}
+
 async function readFootballMaterial(readBytes: ReadBytes) {
   try {
     const [report, image] = await Promise.all([readBytes(FOOTBALL_SMOKE_PATH), readBytes(FOOTBALL_IMAGE_PATH)]);
@@ -80,18 +97,7 @@ async function readFootballMaterial(readBytes: ReadBytes) {
         { label: '还缺什么', value: 'F311 足球环境绑定、球位姿/接触/位移 capture、控制候选与足球评估' },
         { label: '负责角色', value: 'Microduck 环境 owner 与 F311 总交付' },
       ],
-      resources: [
-        {
-          label: '环境 smoke 原文',
-          sourceRef: ownerRef(`repo-material:sha256:${reportHash}`, reportHash),
-          ownerHref: `https://github.com/zts212653/clowder-ai/blob/${FOOTBALL_SOURCE_COMMIT}/${FOOTBALL_SMOKE_PATH}`,
-        },
-        {
-          label: '真实环境截图',
-          sourceRef: ownerRef(`image:sha256:${FOOTBALL_IMAGE_SHA256}`, FOOTBALL_IMAGE_SHA256),
-          ownerHref: `https://github.com/zts212653/clowder-ai/blob/${FOOTBALL_SOURCE_COMMIT}/${FOOTBALL_IMAGE_PATH}`,
-        },
-      ],
+      resources: footballSmokeSources(reportHash),
     };
   } catch {
     return undefined;
@@ -242,7 +248,10 @@ export async function readMicroduckPreparationPublication(
               facts: [
                 { label: '已有产物', value: '5 个 subject × 8 个公开 seed 的 metrics 与 content-addressed captures' },
                 { label: '还缺什么', value: '独立密封 holdout、采用决定、加载后的 fresh outcome 与 rollback outcome' },
-                { label: '负责角色', value: 'Microduck evaluation owner；采用仍由 F246/operator 决定' },
+                {
+                  label: '负责角色',
+                  value: `Microduck evaluation owner；采用仍由 F246/${getCoCreatorDisplay().role} 决定`,
+                },
               ],
               resources: [
                 { label: '公开评估 receipt', sourceRef: publicEvaluationRef },

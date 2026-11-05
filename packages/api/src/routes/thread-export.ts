@@ -108,7 +108,8 @@ export const threadExportRoutes: FastifyPluginAsync<ThreadExportRoutesOptions> =
         const url = `${frontendUrl}/thread/${threadId}`;
         const exporter = sharedExporter ?? (sharedExporter = new ImageExporter());
         const imageBuffer = await exporter.capture(url, userId, {
-          selectionMessageIds: resolution.carrier.items.map((item) => item.messageId),
+          selectionMessageIds: [...new Set(resolution.carrier.items.map((item) => item.messageId))],
+          ...(resolution.items.some((item) => item.kind !== 'message') ? { selectionItems: resolution.items } : {}),
         });
         reply.type('image/png').send(imageBuffer);
       } catch (error) {

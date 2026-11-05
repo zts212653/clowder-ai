@@ -1,5 +1,7 @@
 import type { ArtifactReviewRound, ArtifactReviewView } from '@cat-cafe/shared';
 import { useState } from 'react';
+import { useShellPresentation } from '@/components/shell/shell-presentation';
+import { useArtworkChrome, useRegisterArtworkHistory } from './ArtworkChrome';
 import { artifactRoundRequestSource } from './artifact-modification-source';
 import { ContentModificationLanding } from './ContentModificationLanding';
 import { modificationSourceVersion } from './modification-draft';
@@ -23,6 +25,9 @@ export function ArtifactModificationEntry({
   onRegionHandedOff?: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  useRegisterArtworkHistory(() => setOpen(true));
+  const chrome = useArtworkChrome();
+  const unifiedHistory = useShellPresentation() === 'v2' && !!chrome && !allowNewRequest;
   const named = artifactRoundRequestSource(view, round);
   if (!named)
     return (
@@ -33,16 +38,18 @@ export function ArtifactModificationEntry({
   const { source, taskContext } = named;
   return (
     <>
-      <div className="flex justify-end px-3 py-2">
-        <button
-          type="button"
-          data-testid="content-modification-entry"
-          onClick={() => setOpen(true)}
-          className="rounded-md border border-cafe-subtle px-3 py-1.5 text-xs font-semibold text-cafe-accent"
-        >
-          {disabled || !allowNewRequest ? '修改记录' : '请猫修改'}
-        </button>
-      </div>
+      {!unifiedHistory ? (
+        <div className="flex justify-end px-3 py-2">
+          <button
+            type="button"
+            data-testid="content-modification-entry"
+            onClick={() => setOpen(true)}
+            className="rounded-md border border-cafe-subtle px-3 py-1.5 text-xs font-semibold text-cafe-accent"
+          >
+            {disabled || !allowNewRequest ? '修改记录' : '请猫修改'}
+          </button>
+        </div>
+      ) : null}
       {open ? (
         <ContentModificationLanding
           title={view.review.title}

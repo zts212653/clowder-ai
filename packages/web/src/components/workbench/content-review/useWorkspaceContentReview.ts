@@ -27,17 +27,38 @@ function openFailureMessage(error: unknown): string {
 }
 
 type Target =
-  | { worktreeId: string; path: string; publication?: never; evolution?: never }
-  | { publication: { contentRef: string; ownerRevision: number }; worktreeId?: never; path?: never; evolution?: never }
-  | { evolution: EvolutionMediaLocator; worktreeId?: never; path?: never; publication?: never };
+  | {
+      worktreeId: string;
+      path: string;
+      publication?: never;
+      evolution?: never;
+      retained?: { reviewId: string; revision: string };
+    }
+  | {
+      publication: { contentRef: string; ownerRevision: number };
+      worktreeId?: never;
+      path?: never;
+      evolution?: never;
+      retained?: never;
+    }
+  | { evolution: EvolutionMediaLocator; worktreeId?: never; path?: never; publication?: never; retained?: never };
 
-export function useWorkspaceContentReview({ worktreeId, path, publication, evolution }: Target) {
+export function useWorkspaceContentReview({ worktreeId, path, publication, evolution, retained }: Target) {
   const contentRef = publication?.contentRef,
     ownerRevision = publication?.ownerRevision;
+  const retainedId = retained?.reviewId,
+    retainedRevision = retained?.revision;
   const evolutionKey = evolution ? JSON.stringify(evolution) : undefined;
+  const opinionRequests = useRef(
+    new Map<
+      string,
+      { operationId: string; expectedRevision: number; body: string; target: WorkspaceAnnotationTarget }
+    >(),
+  );
   const base = publication || evolution ? '/api/content-reviews' : '/api/workspace/content-reviews';
   const [view, setView] = useState<WorkspaceContentReviewView | null>(null),
     [error, setError] = useState<string | null>(null),
+    [openingRefusal, setOpeningRefusal] = useState<string | null>(null),
     [busy, setBusy] = useState(false);
   const state = useWorkspaceReviewDraft();
   const { activate, reset, confirmAnnotation } = state;
@@ -46,7 +67,7 @@ export function useWorkspaceContentReview({ worktreeId, path, publication, evolu
   const readSequence = useRef(0);
 
   const load = useCallback(
-    async (reviewId?: string) => {
+    async (reviewId = retainedId) => {
       const stamp = generation.current;
       const readTicket = ++readSequence.current;
       const operationId = reviewId ? null : (prepareOperationId.current ?? crypto.randomUUID());
@@ -76,25 +97,55 @@ export function useWorkspaceContentReview({ worktreeId, path, publication, evolu
       const next = (await response.json()) as WorkspaceContentReviewView;
       if (stamp !== generation.current || readTicket !== readSequence.current) throw new Error('obsolete_content_read');
       if (operationId) prepareOperationId.current = null;
+      if (
+        retainedId &&
+        (next.review.reviewId !== retainedId ||
+          next.review.source.kind !== 'media' ||
+          next.review.source.revision !== retainedRevision ||
+          next.review.source.locator.worktreeId !== worktreeId ||
+          next.review.source.locator.path !== path ||
+          next.sourceState !== 'current')
+      ) {
+        setView(null);
+        reset();
+        throw new Error('原版文件已变化，原圈选仍然保留。');
+      }
       activate(next);
       for (const annotation of next.review.annotations)
         if (annotation.operationId) confirmAnnotation(annotation.operationId);
       setView(next);
       setError(null);
+      setOpeningRefusal(null);
       return next;
     },
-    [base, path, worktreeId, contentRef, ownerRevision, evolutionKey, activate, confirmAnnotation, reset],
+    [
+      base,
+      path,
+      worktreeId,
+      contentRef,
+      ownerRevision,
+      evolutionKey,
+      retainedId,
+      retainedRevision,
+      activate,
+      confirmAnnotation,
+      reset,
+    ],
   );
 
   useEffect(() => {
     const stamp = ++generation.current;
     setView(null);
     setError(null);
+    setOpeningRefusal(null);
     setBusy(false);
     reset();
     prepareOperationId.current = null;
     void load().catch((failure) => {
-      if (stamp === generation.current) setError(openFailureMessage(failure));
+      if (stamp === generation.current) {
+        setError(openFailureMessage(failure));
+        setOpeningRefusal(failure instanceof ModificationHttpError ? failure.code : null);
+      }
     });
     return () => {
       generation.current++;
@@ -256,6 +307,7 @@ export function useWorkspaceContentReview({ worktreeId, path, publication, evolu
   };
   return {
     view,
+    openingRefusal,
     error: state.storageError ? '浏览器暂时无法保存草稿或重试记录。请恢复存储后重试；当前输入仍保留。' : error,
     draft: state.snapshot.body,
     target: state.snapshot.target,
@@ -278,6 +330,23 @@ export function useWorkspaceContentReview({ worktreeId, path, publication, evolu
       state.save({ activeAnnotationId });
     },
     submitAnnotation,
+    addOpinion: async (body: string, target: WorkspaceAnnotationTarget) => {
+      if (!view || busy || !(view.canReply ?? view.canWrite)) return false;
+      const key = JSON.stringify([view.review.reviewId, body, target]);
+      let request = opinionRequests.current.get(key);
+      if (!request) {
+        request = { operationId: crypto.randomUUID(), expectedRevision: view.review.revision, body, target };
+        opinionRequests.current.set(key, request);
+      }
+      const response = await apiFetch(`${base}/${encodeURIComponent(view.review.reviewId)}/annotations`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(request),
+      });
+      if (!response.ok) return false;
+      await load();
+      return true;
+    },
     refreshSource,
     act,
   };

@@ -1,6 +1,7 @@
 import { resolve, sep } from 'node:path';
 import { resolveCatCafeDataRoot } from '../../utils/cli-process-ownership.js';
 import type { DurableManagedGateJob } from './durable-managed-gate-job.js';
+import { validManagedJobSource } from './managed-job-admission.js';
 
 function validRecoveryConfig(job: DurableManagedGateJob, dataRoot: string): boolean {
   if (job.kind === 'full_gate' || job.kind === 'command') return job.recovery === undefined;
@@ -34,7 +35,8 @@ export function validateDurableManagedGateJob(
 ): boolean {
   if (
     !job ||
-    !['command', 'full_gate', 'resumable_full_gate_v2'].includes(job.kind) ||
+    !['command', 'full_gate', 'resumable_full_gate_v2', 'alpha_revision_v1'].includes(job.kind) ||
+    (job.kind === 'alpha_revision_v1') !== (job.consumer?.kind === 'alpha_revision_v1') ||
     typeof job.jobId !== 'string' ||
     !job.jobId ||
     typeof job.originTaskId !== 'string' ||
@@ -63,7 +65,7 @@ export function validateDurableManagedGateJob(
       !job.definition.command ||
       !job.definition.cwd ||
       !job.definition.idempotencyKey ||
-      !job.definition.originInvocationId ||
+      !validManagedJobSource(job.definition, job.consumer, job.originTaskId) ||
       job.definition.principal.userId !== job.wakeTarget.userId ||
       job.definition.principal.threadId !== job.wakeTarget.threadId ||
       job.definition.principal.catId !== job.wakeTarget.catId)

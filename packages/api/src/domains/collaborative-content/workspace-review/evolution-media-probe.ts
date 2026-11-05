@@ -1,19 +1,12 @@
 import { spawn } from 'node:child_process';
-import { type ImmutableMedia, immutableMediaSchema } from '@cat-cafe/shared';
-import sharp from 'sharp';
+import { type ImmutableMedia, immutableMediaSchema, reviewedMediaTypeSchema } from '@cat-cafe/shared';
 import { z } from 'zod';
 import { MediaOwnerError } from '../../video-studio/content-owner/media-errors.js';
 import { probeImmutableMedia } from '../../video-studio/content-owner/published-media-probe.js';
 
 export async function probeEvolutionMedia(bytes: Buffer, mime: string): Promise<ImmutableMedia> {
-  if (mime === 'image/png' || mime === 'video/mp4') return probeImmutableMedia(bytes, mime);
-  if (mime === 'image/jpeg' || mime === 'image/webp') {
-    const decoder = sharp(bytes, { limitInputPixels: 40_000_000, failOn: 'error' });
-    const metadata = await decoder.metadata();
-    if (metadata.format !== mime.slice(6) || (metadata.pages ?? 1) !== 1) throw new MediaOwnerError('invalid_media');
-    const { info } = await decoder.rotate().png().toBuffer({ resolveWithObject: true });
-    return immutableMediaSchema.parse({ kind: 'image', width: info.width, height: info.height });
-  }
+  const admitted = reviewedMediaTypeSchema.safeParse(mime);
+  if (admitted.success) return probeImmutableMedia(bytes, admitted.data);
   if (mime !== 'video/webm') throw new MediaOwnerError('invalid_media');
   return parseWebmClock(await readWebmProbe(bytes));
 }

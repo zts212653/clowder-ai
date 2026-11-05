@@ -121,9 +121,9 @@ describe('F232 AC-A7 classifyArtifactView — 产物 → 内容查看策略', ()
     expect(classifyArtifactView({ type: 'video', name: 'missing.mp4' })).toBe('fallback');
   });
 
-  // F232 polish: widget type support
-  it('widget → fallback (跳回原消息看内容)', () => {
-    expect(classifyArtifactView({ type: 'widget', name: '架构图' })).toBe('fallback');
+  // F232 PR-A: 有坐标的 html_widget 在面板内沙盒预览；无坐标的由详情页回退到原消息。
+  it('widget → widget view (面板内预览，坐标缺失由详情页回退)', () => {
+    expect(classifyArtifactView({ type: 'widget', name: '架构图' })).toBe('widget');
   });
 });
 
@@ -159,7 +159,7 @@ describe('F232 polish: artifactActionLabel — 类型化按钮文案', () => {
 
 describe('F232 AC-A7 prRefToUrl — PR ref → GitHub url', () => {
   it('org/repo#123 → github pull url', () => {
-    expect(prRefToUrl('zts212653/clowder-ai#2247')).toBe('https://github.com/zts212653/clowder-ai/pull/2247');
+    expect(prRefToUrl('example/project#2247')).toBe('https://github.com/example/project/pull/2247');
   });
 
   it('malformed ref → undefined', () => {

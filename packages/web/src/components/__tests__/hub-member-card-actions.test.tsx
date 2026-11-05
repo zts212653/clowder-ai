@@ -37,8 +37,10 @@ describe('Hub member actions and effective transport', () => {
     const onToggleAvailability = vi.fn();
     const onDelete = vi.fn();
     act(() => root.render(<HubMemberOverviewCard {...{ cat, onEdit, onToggleAvailability, onDelete }} />));
-    const toggle = host.querySelector<HTMLButtonElement>('button[aria-label="停用成员：Test Codex"]');
-    const remove = host.querySelector<HTMLButtonElement>('button[aria-label="删除成员"]');
+    const toggle = host.querySelector<HTMLButtonElement>(
+      'button[role="switch"][aria-label="成员启用状态：Test Codex"]',
+    );
+    const remove = host.querySelector<HTMLButtonElement>('button[aria-label="删除成员：Test Codex"]');
     expect(toggle).not.toBeNull();
     expect(remove).not.toBeNull();
     act(() => {
@@ -58,5 +60,17 @@ describe('Hub member actions and effective transport', () => {
     act(() => root.render(<HubMemberOverviewCard cat={{ ...cat, carrier: 'acp' }} />));
     expect(host.textContent).toContain('ACP');
     expect(host.textContent).not.toContain('APP SERVER');
+  });
+
+  it.each(['kimi', 'opencode'] as const)('identifies native %s by its actual tool', (clientId) => {
+    act(() =>
+      root.render(
+        <HubMemberOverviewCard
+          cat={{ ...cat, clientId, configurationSource: 'native_tool', carrier: 'cli', defaultModel: '' }}
+        />,
+      ),
+    );
+    expect(host.textContent).toContain(clientId === 'kimi' ? 'Kimi · 跟随工具模型' : 'OpenCode · 跟随工具模型');
+    expect(host.textContent).not.toContain('ACP 工具');
   });
 });

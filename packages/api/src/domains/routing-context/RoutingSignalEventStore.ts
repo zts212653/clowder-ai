@@ -1,4 +1,5 @@
 import type { RoutingSignalEventV1, RoutingSubjectRefV1 } from '@cat-cafe/shared';
+import type { RoutingSignalDecisionProjectionV1 } from './preflight/RoutingSignalDecisionProjection.js';
 
 export type RoutingSignalEventAppendOutcome = 'appended' | 'replayed';
 
@@ -12,6 +13,7 @@ export interface IRoutingSignalEventStore {
   get(ownerId: string, eventId: string): Promise<RoutingSignalEventV1 | null>;
   getByCommand(ownerId: string, commandId: string): Promise<RoutingSignalEventV1 | null>;
   getOwnerRevision(ownerId: string): Promise<number>;
+  readDecisionProjection(ownerId: string): Promise<RoutingSignalDecisionProjectionV1>;
   listByOwner(ownerId: string): Promise<RoutingSignalEventV1[]>;
   listBySubject(ownerId: string, subjectRef: RoutingSubjectRefV1): Promise<RoutingSignalEventV1[]>;
 }

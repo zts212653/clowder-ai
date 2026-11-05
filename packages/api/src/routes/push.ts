@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import webpush from 'web-push';
-import { requireConnectorWriteOwner, resolveConnectorSessionUserId } from '../config/connector-secret-write-guards.js';
+import { requireOwnerWrite, resolveSessionUserId } from '../config/owner-write-guards.js';
 import { AuditEventTypes, getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
 import type { PushNotificationService } from '../domains/cats/services/push/PushNotificationService.js';
 import type { IPushSubscriptionStore } from '../domains/cats/services/stores/ports/PushSubscriptionStore.js';
@@ -122,13 +122,13 @@ export const pushRoutes: FastifyPluginAsync<PushRoutesOptions> = async (app, opt
       return { error: 'VAPID key generation endpoint is loopback-only' };
     }
 
-    const operator = resolveConnectorSessionUserId(request);
+    const operator = resolveSessionUserId(request);
     if (!operator) {
       reply.status(401);
       return { error: 'Identity required (session cookie)' };
     }
 
-    const ownerError = requireConnectorWriteOwner(operator);
+    const ownerError = requireOwnerWrite(operator);
     if (ownerError) {
       reply.status(ownerError.status);
       return { error: ownerError.error };

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { useApprovalHost, useGuardedWrite, useWriteBlocked } from '@/components/ApprovalHost';
 import { InvestigationProgress } from '@/components/concierge/InvestigationProgress';
 import { MarkdownContent } from '@/components/MarkdownContent';
 import { pushThreadRouteWithHistory } from '@/components/ThreadSidebar/thread-navigation';
@@ -11,8 +12,13 @@ import { useConciergeStore } from '@/stores/conciergeStore';
 import { apiFetch } from '@/utils/api-client';
 import { scrollToMessage } from '@/utils/scrollToMessage';
 import { kickTeleportResolve, planTeleport } from '@/utils/teleport';
+import { originalApprovalCopy } from '../shell/mailbox/original-approval.shell-copy';
+import { useShellCopy } from '../shell/shell-copy';
+import { useShellPresentation } from '../shell/shell-presentation';
+import { ProfileUpdateCardContent, ProfileUpdateResult } from './ProfileUpdateCardContent';
 import {
   handleProfileUpdateDecisionAction,
+  isProfileUpdateCardBlock,
   isProfileUpdateDecisionAction,
   useProfileUpdateTerminalSync,
 } from './profile-update-actions';
@@ -83,6 +89,12 @@ export function CardBlock({
   messageId?: string;
   confirmations?: CardConfirmationEntry[];
 }) {
+  const host = useApprovalHost();
+  const guardedWrite = useGuardedWrite();
+  const shell = useShellPresentation();
+  const profileCompact = (host.presentation === 'mailbox' || shell === 'v2') && isProfileUpdateCardBlock(block);
+  const originalCopy = useShellCopy(originalApprovalCopy);
+  const [profileStatus, setProfileStatus] = useState<'approved' | 'rejected' | null>(null);
   const resolveCatName = useCatNameResolver();
   const toneStyle = TONE_STYLES[block.tone ?? 'info'] ?? TONE_STYLES.info;
   const [loading, setLoading] = useState(false);
@@ -90,7 +102,16 @@ export function CardBlock({
   const [copiedAction, setCopiedAction] = useState<string | null>(null);
   // F229 AC-B2: investigation job tracking after triage confirm with intent=investigate
   const [investigationJobId, setInvestigationJobId] = useState<string | null>(null);
-  useProfileUpdateTerminalSync({ block, messageId });
+  const originalProfileStatus = useProfileUpdateTerminalSync({ block, messageId, preserveDetails: profileCompact });
+  const profileMailbox =
+    host.presentation === 'mailbox' && block.actions?.some((a) => isProfileUpdateDecisionAction(a.action));
+  const writeBlocked = useWriteBlocked(
+    loading || Boolean(profileMailbox && !['pending', 'approved', 'rejected'].includes(String(originalProfileStatus))),
+  );
+  useEffect(() => {
+    if (profileCompact && (originalProfileStatus === 'approved' || originalProfileStatus === 'rejected'))
+      setProfileStatus(originalProfileStatus);
+  }, [profileCompact, originalProfileStatus]);
 
   // P1-1 fix: restore investigationJobId from persisted confirmations on mount/re-render.
   // When panel reopens, confirmations include investigationJobId for investigate intents.
@@ -488,6 +509,9 @@ export function CardBlock({
           action,
           block,
           copiedAction,
+          guardedWrite,
+          onSettled: setProfileStatus,
+          preserveDetails: profileCompact,
           messageId,
           payload,
           setCopiedAction,
@@ -514,77 +538,118 @@ export function CardBlock({
       handleTriageConfirm,
       handleTriageCancel,
       block,
+      guardedWrite,
+      profileCompact,
       copiedAction,
       messageId,
     ],
   );
 
+  if (profileCompact && profileStatus)
+    return (
+      <ProfileUpdateResult block={block} status={profileStatus} actions={host.originalPlaceAction} error={error} />
+    );
+
   return (
     <div className={`border-l-4 rounded-r-lg p-3 ${toneStyle}`}>
-      <div className="font-medium text-sm">{block.title}</div>
-      {block.bodyMarkdown && (
-        <div className="mt-1 text-xs text-cafe-secondary [&_.markdown-content]:text-xs [&_p]:mb-1 [&_p:last-child]:mb-0">
-          <MarkdownContent content={block.bodyMarkdown} className="!text-xs" disableCommandPrefix />
-        </div>
-      )}
-      {block.fields && block.fields.length > 0 && (
-        <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-1">
-          {block.fields.map((f, i) => (
-            <div key={`${f.label}:${f.value}:${i}`} className="text-xs">
-              <span className="text-cafe-secondary">{f.label}:</span>{' '}
-              <span className="font-mono break-all">{f.value}</span>
+      <div className="font-medium text-sm">
+        {profileCompact &&
+        (block.title === '提议更新共享事实档案（corpus）' || /^提议更新 .+ 的关系档案（primer）$/.test(block.title))
+          ? originalCopy.profileTitle
+          : block.title}
+      </div>
+      {profileCompact ? (
+        <ProfileUpdateCardContent block={block} settled={Boolean(profileStatus)} />
+      ) : (
+        <>
+          {block.bodyMarkdown && (
+            <div className="mt-1 text-xs text-cafe-secondary [&_.markdown-content]:text-xs [&_p]:mb-1 [&_p:last-child]:mb-0">
+              <MarkdownContent content={block.bodyMarkdown} className="!text-xs" disableCommandPrefix />
             </div>
-          ))}
-        </div>
+          )}
+          {block.fields && block.fields.length > 0 && (
+            <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-1">
+              {block.fields.map((f, i) => (
+                <div key={`${f.label}:${f.value}:${i}`} className="text-xs">
+                  <span className="text-cafe-secondary">{f.label}:</span>{' '}
+                  <span className="font-mono break-all">{f.value}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
       )}
-      {block.actions && block.actions.length > 0 && (
-        <div className="mt-2 flex flex-wrap gap-2">
-          {block.actions.map((a, i) => {
-            const restoredTriageStatus =
-              a.action === 'concierge_triage_confirm' || a.action === 'concierge_triage_cancel'
-                ? findRestoredTriageStatus(confirmations, a.payload)
-                : null;
-            const actionCompleted =
-              copiedAction === a.action ||
-              (a.action === 'concierge_triage_confirm' && restoredTriageStatus === 'confirmed') ||
-              (a.action === 'concierge_triage_cancel' && restoredTriageStatus === 'cancelled');
-            const triageTerminal =
-              restoredTriageStatus === 'confirmed' ||
-              restoredTriageStatus === 'cancelled' ||
-              copiedAction === 'concierge_triage_confirm' ||
-              copiedAction === 'concierge_triage_cancel';
-            const disabled =
-              loading ||
-              (a.action === 'concierge_relay' && copiedAction === 'concierge_relay') ||
-              ((a.action === 'concierge_triage_confirm' || a.action === 'concierge_triage_cancel') && triageTerminal);
-            const label = loading
-              ? a.action === 'tts-resynthesize'
-                ? '合成中...'
-                : '处理中...'
-              : actionCompleted
-                ? a.action === 'concierge_triage_confirm'
-                  ? '已确认'
-                  : a.action === 'concierge_triage_cancel'
-                    ? '已取消'
-                    : '已复制'
-                : a.action === 'concierge_peek'
-                  ? a.label.replace('原地看', '跳过去')
-                  : a.label;
+      {profileCompact && profileStatus ? (
+        <output data-testid="original-approval-terminal" className="mt-3 block text-sm">
+          {profileStatus === 'approved' ? originalCopy.approvedProfile : originalCopy.rejectedProfile}
+        </output>
+      ) : (
+        block.actions &&
+        block.actions.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-2">
+            {block.actions.map((a, i) => {
+              const restoredTriageStatus =
+                a.action === 'concierge_triage_confirm' || a.action === 'concierge_triage_cancel'
+                  ? findRestoredTriageStatus(confirmations, a.payload)
+                  : null;
+              const actionCompleted =
+                copiedAction === a.action ||
+                (a.action === 'concierge_triage_confirm' && restoredTriageStatus === 'confirmed') ||
+                (a.action === 'concierge_triage_cancel' && restoredTriageStatus === 'cancelled');
+              const triageTerminal =
+                restoredTriageStatus === 'confirmed' ||
+                restoredTriageStatus === 'cancelled' ||
+                copiedAction === 'concierge_triage_confirm' ||
+                copiedAction === 'concierge_triage_cancel';
+              const disabled =
+                writeBlocked ||
+                (a.action === 'concierge_relay' && copiedAction === 'concierge_relay') ||
+                ((a.action === 'concierge_triage_confirm' || a.action === 'concierge_triage_cancel') && triageTerminal);
+              const label = loading
+                ? a.action === 'tts-resynthesize'
+                  ? '合成中...'
+                  : '处理中...'
+                : actionCompleted
+                  ? a.action === 'concierge_triage_confirm'
+                    ? '已确认'
+                    : a.action === 'concierge_triage_cancel'
+                      ? '已取消'
+                      : '已复制'
+                  : a.action === 'concierge_peek'
+                    ? a.label.replace('原地看', '跳过去')
+                    : a.label;
 
-            return (
-              <button
-                key={`${a.action}:${a.label}:${i}`}
-                type="button"
-                disabled={disabled}
-                onClick={() => handleAction(a.action, a.payload)}
-                className="max-w-full break-words text-left text-xs leading-5 px-2 py-1 rounded bg-[var(--semantic-warning-surface)] hover:bg-[var(--semantic-warning-surface)] text-conn-amber-text border border-conn-amber-ring disabled:opacity-50 transition-colors"
-              >
-                {label}
-              </button>
-            );
-          })}
-        </div>
+              return (
+                <button
+                  key={`${a.action}:${a.label}:${i}`}
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => handleAction(a.action, a.payload)}
+                  className="max-w-full break-words text-left text-xs leading-5 px-2 py-1 rounded bg-[var(--semantic-warning-surface)] hover:bg-[var(--semantic-warning-surface)] text-conn-amber-text border border-conn-amber-ring disabled:opacity-50 transition-colors"
+                  style={
+                    profileCompact && a.action === 'profile-update:approve'
+                      ? {
+                          background: 'var(--shell-primary)',
+                          color: 'var(--shell-primary-on)',
+                          borderColor: 'var(--shell-primary)',
+                        }
+                      : undefined
+                  }
+                >
+                  {profileCompact && isProfileUpdateDecisionAction(a.action)
+                    ? a.action === 'profile-update:approve'
+                      ? originalCopy.approveProfile
+                      : originalCopy.reject
+                    : label}
+                </button>
+              );
+            })}
+          </div>
+        )
       )}
+      {host.originalPlaceAction ? (
+        <div className="mt-3 flex flex-wrap justify-end gap-2">{host.originalPlaceAction}</div>
+      ) : null}
       {error && <div className="mt-1 text-xs text-conn-red-text">{error}</div>}
       {/* F229 AC-B2: Investigation progress/report after triage confirm with intent=investigate */}
       {investigationJobId && <InvestigationProgress jobId={investigationJobId} />}

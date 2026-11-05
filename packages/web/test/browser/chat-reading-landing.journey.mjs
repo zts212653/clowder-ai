@@ -12,6 +12,7 @@ export function registerReadingLandingJourneys(context) {
   async function open(state, deleted = true, short = false) {
     const page = await context.browser().newPage({ viewport: { width: 1440, height: 900 } });
     let records = Array.from({ length: 80 }, (_, index) => ({
+      from: { kind: 'agent', catId: 'codex-astra' },
       id: `scroll-${index + 1}`,
       type: 'assistant',
       catId: 'codex-astra',

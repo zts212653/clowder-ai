@@ -272,7 +272,12 @@ function isValidMediaItem(value: unknown): boolean {
 }
 
 function isValidInteractiveOption(value: unknown): boolean {
-  return isRecord(value) && isNonEmptyString(value.id) && isNonEmptyString(value.label);
+  return (
+    isRecord(value) &&
+    isNonEmptyString(value.id) &&
+    isNonEmptyString(value.label) &&
+    hasOptionalString(value, 'description')
+  );
 }
 
 function isValidCardBlock(obj: Record<string, unknown>): boolean {
@@ -307,6 +312,9 @@ function isValidAudioBlock(obj: Record<string, unknown>): boolean {
   const hasUrlOrText = isTrimmedNonEmptyString(obj.url) || isTrimmedNonEmptyString(obj.text);
   return (
     hasUrlOrText &&
+    hasOptionalString(obj, 'url') &&
+    hasOptionalString(obj, 'text') &&
+    hasOptionalString(obj, 'speaker') &&
     hasOptionalString(obj, 'title') &&
     hasOptionalNumber(obj, 'durationSec') &&
     hasOptionalString(obj, 'mimeType')

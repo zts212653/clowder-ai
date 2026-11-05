@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import type {
   MessageNavigationAdmission,
   MessageNavigationReference,
@@ -12,7 +12,6 @@ import type { IThreadStore, Thread } from '../cats/services/stores/ports/ThreadS
 import {
   canQuoteInPublicReply,
   canViewMessage,
-  getTimelineOrderTime,
   isAgentReadableManagedHoldMessage,
   isEligibleReplyParent,
   isInternalNonQuotableParent,
@@ -21,14 +20,25 @@ import {
   type Viewer,
 } from '../cats/services/stores/visibility.js';
 import type { IEvidenceStore, SearchOptions } from './interfaces.js';
-import type { MessagePassageCandidate, MessagePassageSearchExecution } from './message-passage-search-types.js';
-import { boundMessageSearchResponse, MESSAGE_SEARCH_RESPONSE_BUDGET } from './message-search-budget.js';
-import { buildSearchableMessageContent } from './message-search-content.js';
 import {
-  projectMessageSearchHighlights,
-  projectMessageSearchSnippet,
-  projectMessageSearchSpeaker,
-} from './message-search-projection.js';
+  attachDecisionSources,
+  boundDecisionSearchResponse,
+  GitMessageDecisionIndex,
+  hasDecisionSourceCoordinate,
+  type MessageDecisionIndex,
+} from './message-decision-index.js';
+import type { MessagePassageCandidate } from './message-passage-search-types.js';
+import { runNativeQueryBatch } from './message-query-native.js';
+import { candidateKey } from './message-query-protocol.js';
+import { MessageQueryQualifier } from './message-query-qualifier.js';
+import { readMessageSearchAnswerSnapshot } from './message-search-answer-snapshot.js';
+import { boundMessageSearchResponse, messageSearchMeta } from './message-search-budget.js';
+import { type CanonicalSearchCandidate, collectMessageSearchCandidates } from './message-search-candidates.js';
+import { buildSearchableMessageContent } from './message-search-content.js';
+import { MessageSearchDiagnostics } from './message-search-diagnostics.js';
+import { observeMessageSearchExecution } from './message-search-execution.js';
+import { projectCanonicalSearchMessage } from './message-search-projection.js';
+import { readMessageSourceContext } from './message-source-context.js';
 
 export interface MessageSearchPrincipal {
   userId: string;
@@ -41,11 +51,16 @@ export interface MessageSearchPrincipal {
 
 interface MessageSearchServiceDeps {
   evidenceStore: Pick<IEvidenceStore, 'searchMessagePassages' | 'readMessagePassageState'>;
-  messageStore: Pick<IMessageStore, 'getById'>;
+  messageStore: Pick<IMessageStore, 'getById'> & Partial<Pick<IMessageStore, 'getByThreadAfter'>>;
   threadStore: Pick<IThreadStore, 'get' | 'list'>;
+  qualifier?: MessageQueryQualifier;
+  onTrace?: (trace: Record<string, unknown>) => void;
+  decisionIndex?: MessageDecisionIndex;
 }
 
-type MessageSearchExecutionContext = Pick<SearchOptions, 'signal' | 'deadlineAt'>;
+type MessageSearchExecutionContext = Pick<SearchOptions, 'signal' | 'deadlineAt'> & {
+  onTrace?: (trace: Record<string, unknown>) => void;
+};
 
 function checkSearchExecution(context: MessageSearchExecutionContext): void {
   context.signal?.throwIfAborted();
@@ -57,38 +72,14 @@ export class MessageSearchAccessError extends Error {
   readonly statusCode = 403;
 }
 
-function searchMeta(
-  input: MessageSearchInput,
-  execution: MessagePassageSearchExecution,
-  count: number,
-  limit: number,
-): MessageSearchResponse['meta'] {
-  return {
-    scope: input.threadId ? 'thread' : 'global',
-    ...(input.threadId ? { threadId: input.threadId } : {}),
-    sort: input.sort ?? 'time',
-    requestedMode: input.mode ?? 'hybrid',
-    effectiveMode: execution.meta.effectiveMode,
-    degraded: execution.meta.degraded,
-    ...(execution.meta.degradeReason ? { degradeReason: execution.meta.degradeReason } : {}),
-    hasMore: count > limit,
-    partial: true,
-    candidateLimit: execution.meta.candidateLimit,
-    semanticCandidatesLimited: execution.meta.semanticCandidatesLimited,
-    sourceCoverage: 'unknown',
-    freshness: 'unknown',
-    response: {
-      budgetChars: MESSAGE_SEARCH_RESPONSE_BUDGET,
-      serializedChars: 0,
-      truncated: false,
-      continuation: 'unavailable',
-    },
-  };
-}
-
 /** Only this projection may turn indexed message candidates into readable results. */
 export class MessageSearchService {
-  constructor(private readonly deps: MessageSearchServiceDeps) {}
+  private readonly qualifier: MessageQueryQualifier;
+  private readonly decisionIndex: MessageDecisionIndex;
+  constructor(private readonly deps: MessageSearchServiceDeps) {
+    this.qualifier = deps.qualifier ?? new MessageQueryQualifier(runNativeQueryBatch);
+    this.decisionIndex = deps.decisionIndex ?? new GitMessageDecisionIndex();
+  }
 
   private async readableThreads(
     input: MessageSearchInput,
@@ -126,6 +117,7 @@ export class MessageSearchService {
       !message ||
       message.id !== ref.messageId ||
       message.threadId !== ref.threadId ||
+      message.recall ||
       message._tombstone ||
       message.deletedAt
     )
@@ -147,47 +139,30 @@ export class MessageSearchService {
     principal: MessageSearchPrincipal,
     query: string,
     authority: Pick<IThreadStore, 'list'> = this.deps.threadStore,
-  ): Promise<MessageSearchResult | null> {
-    const message = await this.readableMessage(candidate, principal);
+    evidence?: string,
+    diagnostics?: MessageSearchDiagnostics,
+  ): Promise<CanonicalSearchCandidate | null> {
+    const source = () => this.readableMessage(candidate, principal);
+    const message = await (diagnostics ? diagnostics.measure('source', source) : source());
     if (!message || !Number.isFinite(message.timestamp)) return null;
     // Recheck current thread authority after retrieval/embedding, as grants can change.
-    const thread = await this.deps.threadStore.get(candidate.threadId);
+    const readThread = () => this.deps.threadStore.get(candidate.threadId);
+    const thread = await (diagnostics ? diagnostics.measure('thread', readThread) : readThread());
     if (!thread || thread.deletedAt) return null;
-    const access = await resolveThreadAccess({
-      threadStore: authority,
-      thread,
-      userId: principal.userId,
-      request: { resource: 'transcript', action: 'search' },
-    });
+    const readAccess = () =>
+      resolveThreadAccess({
+        threadStore: authority,
+        thread,
+        userId: principal.userId,
+        request: { resource: 'transcript', action: 'search' },
+      });
+    const access = await (diagnostics ? diagnostics.measure('access', readAccess) : readAccess());
     if (access.status !== 200) return null;
-    const indexState = this.deps.evidenceStore.readMessagePassageState?.(candidate);
+    const readState = () => this.deps.evidenceStore.readMessagePassageState?.(candidate);
+    const indexState = diagnostics ? diagnostics.sync('state', readState) : readState();
     if (!indexState?.current) return null;
-    const canonical = buildSearchableMessageContent({
-      content: message.content,
-      contentBlocks: message.contentBlocks,
-      richBlocks: message.extra?.rich?.blocks,
-    });
-    if (candidate.content !== canonical) return null;
-    const bodyMatches = query.trim() && message.content.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase());
-    const attachmentMatches =
-      !bodyMatches && query.trim() && canonical.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase());
-    const useBody = message.content.trim() && !attachmentMatches;
-    const excerpt = useBody
-      ? projectMessageSearchSnippet(message.content, 'body', query)
-      : projectMessageSearchSnippet(canonical, 'attachment-text', query);
-    return {
-      threadId: thread.id,
-      messageId: message.id,
-      threadTitle: indexState.suppressThreadTitle ? `原对话 (${thread.id})` : (thread.title ?? thread.id),
-      ...projectMessageSearchSpeaker(message),
-      timestamp: message.timestamp,
-      timelineOrderAt: getTimelineOrderTime(message),
-      snippet: excerpt,
-      highlights: projectMessageSearchHighlights(excerpt.text, query),
-      match: candidate.match,
-      contentRevision: createHash('sha256').update(canonical).digest('hex'),
-      publiclyQuotable: canQuoteInPublicReply(message),
-    };
+    const projectBody = () => projectCanonicalSearchMessage(message, thread, indexState, candidate, query, evidence);
+    return diagnostics ? diagnostics.sync('projection', projectBody) : projectBody();
   }
 
   private async requireSource(input: MessageSearchInput, principal: MessageSearchPrincipal): Promise<void> {
@@ -217,62 +192,19 @@ export class MessageSearchService {
       throw new MessageSearchAccessError('Invocation source is not accessible');
   }
 
-  private async projectCandidates(
-    input: MessageSearchInput,
-    principal: MessageSearchPrincipal,
-    threads: Map<string, Thread>,
-    candidates: MessagePassageCandidate[],
-    execution: MessageSearchExecutionContext,
-  ): Promise<MessageSearchResult[]> {
-    const results: MessageSearchResult[] = [];
-    const seen = new Set<string>();
-    const from = input.dateFrom ? Date.parse(input.dateFrom) : -Infinity;
-    const to = input.dateTo
-      ? Date.parse(input.dateTo.length === 10 ? `${input.dateTo}T23:59:59.999Z` : input.dateTo)
-      : Infinity;
-    const limit = input.limit ?? 20;
-    // A new snapshot after retrieval preserves grant revocation checks. It is
-    // read lazily only if current candidates need the user-index authority.
-    let currentVisibility: Promise<Thread[]> | undefined;
-    const authority = {
-      list: (userId: string) => (currentVisibility ??= Promise.resolve(this.deps.threadStore.list(userId))),
-    };
-    for (const candidate of candidates) {
-      checkSearchExecution(execution);
-      if (
-        candidate.docAnchor !== `thread-${candidate.threadId}` ||
-        candidate.passageId !== `msg-${candidate.messageId}`
-      )
-        continue;
-      if (!threads.has(candidate.threadId)) continue;
-      if (principal.source?.threadId === candidate.threadId && principal.source.messageId === candidate.messageId)
-        continue;
-      const key = JSON.stringify([candidate.threadId, candidate.messageId]);
-      if (seen.has(key)) continue;
-      const result = await this.project(candidate, principal, input.query, authority);
-      checkSearchExecution(execution);
-      if (!result) continue;
-      seen.add(key);
-      if (!(result.timestamp >= from && result.timestamp <= to)) continue;
-      results.push(result);
-      // Relevance order is already fixed by retrieval. One additional verified
-      // result proves hasMore; unreadable or out-of-window rows never count.
-      // Time order still requires the complete canonical timestamp projection.
-      if (input.sort === 'relevance' && results.length > limit) break;
-    }
-    if (input.sort !== 'relevance')
-      results.sort(
-        (a, b) =>
-          a.timestamp - b.timestamp || a.threadId.localeCompare(b.threadId) || a.messageId.localeCompare(b.messageId),
-      );
-    return results;
-  }
-
   /** Re-admit exact coordinates at click time without reranking a saved result collection. */
   async resolveNavigationReference(
     ref: MessageNavigationReference,
     principal: MessageSearchPrincipal,
+    contextCount?: number,
+    signal?: AbortSignal,
   ): Promise<MessageNavigationAdmission | null> {
+    signal?.throwIfAborted();
+    if (
+      contextCount !== undefined &&
+      (!ref.messageId || !Number.isInteger(contextCount) || contextCount < 0 || contextCount > 3)
+    )
+      throw new Error('Invalid source context request');
     if (!principal.userId) throw new MessageSearchAccessError('Search identity is not accessible');
     await this.readableThreads({ query: 'navigation', threadId: ref.threadId }, principal);
     await this.requireSource({ query: 'navigation' }, principal);
@@ -299,11 +231,39 @@ export class MessageSearchService {
       '',
     );
     if (!projected) return null;
-    return {
+    const admission: MessageNavigationAdmission = {
       status: 'available',
-      target: { ...exactRef, contentRevision: projected.contentRevision },
-      updated: ref.contentRevision !== undefined && ref.contentRevision !== projected.contentRevision,
+      target: { ...exactRef, contentRevision: projected.result.contentRevision },
+      updated: ref.contentRevision !== undefined && ref.contentRevision !== projected.result.contentRevision,
     };
+    if (contextCount === undefined) return admission;
+    const after = this.deps.messageStore.getByThreadAfter;
+    if (!after) throw new Error('Source context reader unavailable');
+    return readMessageSourceContext({
+      admission,
+      message,
+      count: contextCount,
+      signal,
+      after: async (threadId, messageId, limit) =>
+        after.call(this.deps.messageStore, threadId, messageId, limit, principal.userId),
+      readable: (coordinate) => this.readableMessage(coordinate, principal),
+      revalidate: () => this.resolveNavigationReference(ref, principal, undefined, signal),
+    });
+  }
+
+  /** Re-admit an existing answer snapshot without retrieval, qualification or provider work. */
+  readAnswerSnapshot(response: MessageSearchResponse, principal: MessageSearchPrincipal, signal?: AbortSignal) {
+    return readMessageSearchAnswerSnapshot(response, {
+      signal,
+      decisionIndex: this.decisionIndex,
+      admit: async (result) => {
+        const admitted = await this.resolveNavigationReference(result, principal, undefined, signal).catch((error) => {
+          if (error instanceof MessageSearchAccessError) return null;
+          throw error;
+        });
+        return !!admitted && !admitted.updated;
+      },
+    });
   }
 
   async search(
@@ -311,34 +271,123 @@ export class MessageSearchService {
     principal: MessageSearchPrincipal,
     context: MessageSearchExecutionContext = {},
   ): Promise<MessageSearchResponse> {
-    checkSearchExecution(context);
+    const deadlineAt = Math.min(context.deadlineAt ?? Infinity, Date.now() + 15_000);
+    context = { ...context, deadlineAt };
+    const diagnostics = new MessageSearchDiagnostics(context.onTrace ?? this.deps.onTrace);
+    const onTrace = diagnostics.trace;
+    const observe = observeMessageSearchExecution(onTrace, diagnostics);
+    try {
+      checkSearchExecution(context);
 
-    const limit = input.limit ?? 20;
-    if (!principal.userId) throw new MessageSearchAccessError('Search identity is not accessible');
-    if (!input.query.trim() || input.query.length > 2000) throw new Error('Invalid message search query');
-    if (!Number.isInteger(limit) || limit < 1 || limit > 20) throw new Error('Invalid message search limit');
-    const threads = await this.readableThreads(input, principal, context);
-    await this.requireSource(input, principal);
-    checkSearchExecution(context);
-    const reader = this.deps.evidenceStore.searchMessagePassages;
-    if (!reader || !this.deps.evidenceStore.readMessagePassageState)
-      throw new Error('Message passage retrieval unavailable');
-    const execution = await reader.call(this.deps.evidenceStore, input.query, {
-      ...context,
-      visibleThreadIds: [...threads.keys()],
-      threadId: input.threadId,
-      sort: input.sort ?? 'time',
-      mode: input.mode ?? 'hybrid',
-      excludeSource: principal.source,
-      dateFrom: input.dateFrom,
-      dateTo: input.dateTo,
-    });
-    const results = await this.projectCandidates(input, principal, threads, execution.passages, context);
-    return boundMessageSearchResponse({
-      searchId: randomUUID(),
-      query: input.query,
-      results: results.slice(0, limit),
-      meta: searchMeta(input, execution, results.length, limit),
-    });
+      const limit = input.limit ?? 20;
+      if (!principal.userId) throw new MessageSearchAccessError('Search identity is not accessible');
+      if (!input.query.trim() || input.query.length > 2000) throw new Error('Invalid message search query');
+      if (!Number.isInteger(limit) || limit < 1 || limit > 20) throw new Error('Invalid message search limit');
+      const threads = await observe(
+        'visibility',
+        () => this.readableThreads(input, principal, context),
+        () => checkSearchExecution(context),
+      );
+      await observe(
+        'source-admission',
+        () => this.requireSource(input, principal),
+        () => checkSearchExecution(context),
+      );
+      const reader = this.deps.evidenceStore.searchMessagePassages;
+      if (!reader || !this.deps.evidenceStore.readMessagePassageState)
+        throw new Error('Message passage retrieval unavailable');
+      const execution = await observe('retrieval', () =>
+        reader.call(this.deps.evidenceStore, input.query, {
+          signal: context.signal,
+          deadlineAt,
+          onReadSnapshot: diagnostics.worker,
+          visibleThreadIds: [...threads.keys()],
+          threadId: input.threadId,
+          sort: input.sort ?? 'time',
+          mode: input.mode ?? 'hybrid',
+          excludeSource: principal.source,
+          dateFrom: input.dateFrom,
+          dateTo: input.dateTo,
+        }),
+      );
+      let currentVisibility: Promise<Thread[]> | undefined;
+      const authority = {
+        list: () => (currentVisibility ??= Promise.resolve(this.deps.threadStore.list(principal.userId))),
+      };
+      const canonical = await observe('canonical-projection', () =>
+        collectMessageSearchCandidates({
+          search: input,
+          candidates: execution.passages,
+          threadIds: new Set(threads.keys()),
+          source: principal.source,
+          project: (candidate) => this.project(candidate, principal, input.query, authority, undefined, diagnostics),
+          diagnostics,
+          check: () => checkSearchExecution(context),
+        }),
+      );
+      const qualification = await observe('qualification', () =>
+        this.qualifier.qualify(input.query, canonical, {
+          userId: principal.userId,
+          resultLimit: limit,
+          deadlineAt,
+          signal: context.signal,
+          onTrace,
+        }),
+      );
+      const approved = canonical.filter((row) => qualification.decisions.get(candidateKey(row)) === 'supported');
+      const ledgerNeedsRead =
+        this.deps.decisionIndex !== undefined ||
+        approved.slice(0, limit + 1).some((row) => hasDecisionSourceCoordinate(row.result));
+      const decisionIndex = await attachDecisionSources(
+        approved.slice(0, limit + 1).map((row) => row.result),
+        this.decisionIndex,
+        context,
+      );
+      const results: MessageSearchResult[] = [];
+      await observe('final-revalidation', async () => {
+        if (qualification.nativeCalls || ledgerNeedsRead) await this.requireSource(input, principal);
+        // Refresh the authority snapshot after external inference; the original one
+        // cannot keep a revoked grant alive. Only rows needed for the page/witness are reread.
+        currentVisibility = undefined;
+        for (const row of approved) {
+          checkSearchExecution(context);
+          // The document lookup is asynchronous too: re-admit after it, even for literal results.
+          const fresh =
+            qualification.nativeCalls || ledgerNeedsRead
+              ? await this.project(
+                  row.candidate,
+                  principal,
+                  input.query,
+                  authority,
+                  qualification.evidence.get(candidateKey(row)),
+                )
+              : row;
+          if (fresh && fresh.contentRevision === row.contentRevision) {
+            if (row.result.decisionSources) fresh.result.decisionSources = row.result.decisionSources;
+            results.push(fresh.result);
+          } else {
+            qualification.meta.supported--;
+            qualification.meta.unassessed++;
+            qualification.meta.status = 'partial';
+          }
+          if (results.length > limit) break;
+        }
+        checkSearchExecution(context);
+      });
+      const page = results.slice(0, limit);
+      checkSearchExecution(context);
+      return boundDecisionSearchResponse({
+        searchId: randomUUID(),
+        query: input.query,
+        results: page,
+        meta: {
+          ...messageSearchMeta(input, execution, results.length, limit),
+          qualification: qualification.meta,
+          decisionIndex,
+        },
+      });
+    } finally {
+      diagnostics.close();
+    }
   }
 }

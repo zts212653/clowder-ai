@@ -46,21 +46,21 @@ describe('F275 managed-work outcome attribution', () => {
 
     const mergeA = appendPrLifecycleEvidenceToEpisode(store, {
       type: 'merge',
-      ref: 'pr:zts212653/cat-cafe#42',
+      ref: 'pr:zts212653/clowder-ai#42',
       outcome: 'success',
       threadId,
       managedWorkBinding: workA,
     });
     const duplicateMergeA = appendPrLifecycleEvidenceToEpisode(store, {
       type: 'merge',
-      ref: 'pr:zts212653/cat-cafe#42',
+      ref: 'pr:zts212653/clowder-ai#42',
       outcome: 'success',
       threadId,
       managedWorkBinding: workA,
     });
     const missing = appendPrLifecycleEvidenceToEpisode(store, {
       type: 'merge',
-      ref: 'pr:zts212653/cat-cafe#43',
+      ref: 'pr:zts212653/clowder-ai#43',
       outcome: 'success',
       threadId,
     });

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { IBallCustodyIngest } from '../../domains/ball-custody/BallCustodyIngest.js';
 import type { EmissionStore } from './EmissionStore.js';
 import type { GlobalControlStore } from './GlobalControlStore.js';
@@ -233,6 +234,14 @@ export async function executeTaskPipeline(ctx: PipelineContext): Promise<void> {
 
     // Phase 1b: Actor resolution — resolve once per task tick, not per workItem
     const assignedCatId = task.actor && actorResolver ? actorResolver(task.actor.role, task.actor.costTier) : null;
+    // A planned slot survives re-entry; interval/manual executions are distinct
+    // fires. Mint once here, never once per deliver() retry inside a template.
+    const occurrenceId =
+      !isManualTrigger && schedule?.scheduledAt
+        ? `${schedule.triggerKind}:${schedule.scheduledAt}`
+        : !isManualTrigger && task.trigger.type === 'once'
+          ? `once:${task.trigger.fireAt}`
+          : randomUUID();
 
     // Step 4 + 5: Execute per workItem → ledger per subject
     for (const item of gateResult.workItems) {
@@ -294,6 +303,7 @@ export async function executeTaskPipeline(ctx: PipelineContext): Promise<void> {
       const rawExecute = Promise.resolve().then(async () => {
         try {
           await task.run.execute(item.signal, item.subjectKey, {
+            occurrenceId,
             signal: executeController.signal,
             assignedCatId,
             context: task.context,

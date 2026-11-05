@@ -25,7 +25,6 @@ export function externalManifest(runtime = { transport: 'stdio', entrypoint: 'di
         id: 'source',
         name: 'Source',
         resources: [],
-        capabilities: ['events.publish'],
       },
     ],
     signals: {
@@ -53,17 +52,7 @@ export function externalCandidate(overrides = {}) {
   };
 }
 
-export function externalPublishInput(overrides = {}) {
-  return {
-    signalType: 'external.signal.v1',
-    eventId: 'event-1',
-    idempotencyKey: 'publish-1',
-    occurredAt: '2026-08-10T12:00:00Z',
-    payload: { artifactId: 'artifact-1' },
-    source: { handle: 'external://artifact/1' },
-    ...overrides,
-  };
-}
+export { messageSendInput as externalSendInput } from './plugin-host-broker-helpers.js';
 
 export async function createExternalRuntimeHarness({
   rootDir,
@@ -73,15 +62,17 @@ export async function createExternalRuntimeHarness({
   activeLeaseTtlMs,
   brokerStore = new MemoryHostBrokerStore(),
   now = Date.now,
-  effectiveGrants = ['events.publish'],
+  // Injectable so a test can admit this package into an inventory that already holds
+  // another carrier's package — carrier-neutral claims need more than one instance.
+  inventory = new MemoryPluginInventoryStore(),
+  instanceId = EXTERNAL_INSTANCE_ID,
 } = {}) {
   if (!rootDir) throw new TypeError('rootDir is required');
   await mkdir(join(rootDir, 'dist'), { recursive: true });
   await writeFile(join(rootDir, 'dist/plugin.js'), '// fixture entrypoint\n', 'utf8');
 
-  const inventory = new MemoryPluginInventoryStore();
   const inventoryControl = new HostInventoryControlPlane(inventory, {
-    createInstanceId: () => EXTERNAL_INSTANCE_ID,
+    createInstanceId: () => instanceId,
     now: () => 1_000,
   });
   await inventoryControl.installPackage({
@@ -89,7 +80,6 @@ export async function createExternalRuntimeHarness({
     computedPackageDigest: packageDigest,
     expectedPackageDigest: packageDigest,
     packagePluginId: EXTERNAL_PLUGIN_ID,
-    effectiveGrants,
     signalSchemas: {
       'schemas/external.signal.v1.schema.json': {
         type: 'object',
@@ -99,7 +89,7 @@ export async function createExternalRuntimeHarness({
     },
   });
   await inventory.transaction((transaction) => {
-    const instance = transaction.instances.get(EXTERNAL_INSTANCE_ID);
+    const instance = transaction.instances.get(instanceId);
     transaction.instances.put({
       ...instance,
       configReadiness: 'ready',
@@ -126,7 +116,7 @@ export async function createExternalRuntimeHarness({
     ...(activeLeaseTtlMs === undefined ? {} : { activeLeaseTtlMs }),
   });
 
-  return { inventory, brokerStore, broker, manifest, rootDir };
+  return { inventory, brokerStore, broker, manifest, rootDir, instanceId };
 }
 
 function deferred() {

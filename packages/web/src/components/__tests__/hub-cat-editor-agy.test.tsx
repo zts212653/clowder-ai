@@ -36,6 +36,69 @@ afterEach(() => {
 });
 
 describe('AGY Native member settings', () => {
+  it('offers official ACP and round trips its isolated personal profile without CLI startup arguments', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const onChange = vi.fn();
+    unmount = () => {
+      act(() => root.unmount());
+      container.remove();
+    };
+    await act(async () =>
+      root.render(
+        <AccountSection
+          form={initialState(cat)}
+          modelOptions={[]}
+          availableProfiles={[]}
+          loadingProfiles={false}
+          onChange={onChange}
+        />,
+      ),
+    );
+    const transport = container.querySelector<HTMLSelectElement>('select[aria-label="接入方式"]');
+    expect(container.querySelector('option[value="agy-acp"]')).not.toBeNull();
+    await act(async () => {
+      if (!transport) throw new Error('Transport missing');
+      transport.value = 'agy-acp';
+      transport.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        carrier: 'acp',
+        agyAcpEnabled: true,
+        agyNativeEnabled: false,
+        acpCommand: 'agy_acp_server.par',
+        acpStartupArgs: '',
+      }),
+    );
+    const acpProfile = { ...profile, carrier: 'acp' as const };
+    const member = {
+      ...cat,
+      carrier: 'acp' as const,
+      agyProfile: acpProfile,
+      acp: { command: '/installed/agy_acp_server.par', startupArgs: [] },
+    };
+    const form = initialState(member);
+    expect(form.agyAcpEnabled).toBe(true);
+    await act(async () =>
+      root.render(
+        <AccountSection
+          form={form}
+          modelOptions={[]}
+          availableProfiles={[]}
+          loadingProfiles={false}
+          onChange={onChange}
+        />,
+      ),
+    );
+    expect(container.querySelector('select[aria-label="插件 ACP client"]')).toBeNull();
+    expect(container.querySelector('input[aria-label="ACP Command"]')).not.toBeNull();
+    const payload = buildCatPatchPayload(form, member, { accountAuthType: 'oauth' });
+    expect(payload.agyProfile).toEqual(acpProfile);
+    expect(payload.acp).toEqual(member.acp);
+    expect(payload.carrier).toBe('acp');
+  });
   it('offers Native for Gemini and binds profile fields to the transport choice', async () => {
     const container = document.createElement('div');
     document.body.append(container);

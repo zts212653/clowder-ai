@@ -9,7 +9,6 @@ import type { ChatMessage as ChatMessageType } from '@/stores/chatStore';
 // Dynamic backing for the chatStore.messages mock so tests can populate companion messages.
 let storeMessages: ChatMessageType[] = [];
 let globalCliOutputDefault: 'expanded' | 'collapsed' = 'collapsed';
-let richBlocksForwardingEnabled: boolean | undefined;
 let richBlocksConfirmations: CardConfirmationEntry[] | undefined;
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
@@ -51,14 +50,7 @@ vi.mock('@/components/MarkdownContent', () => ({
 vi.mock('@/components/MetadataBadge', () => ({ MetadataBadge: () => null }));
 vi.mock('@/components/SummaryCard', () => ({ SummaryCard: () => null }));
 vi.mock('@/components/rich/RichBlocks', () => ({
-  RichBlocks: ({
-    forwardingEnabled,
-    confirmations,
-  }: {
-    forwardingEnabled?: boolean;
-    confirmations?: CardConfirmationEntry[];
-  }) => {
-    richBlocksForwardingEnabled = forwardingEnabled;
+  RichBlocks: ({ confirmations }: { confirmations?: CardConfirmationEntry[] }) => {
     richBlocksConfirmations = confirmations;
     return null;
   },
@@ -131,7 +123,6 @@ describe('ChatMessage stream presentation contracts', () => {
   beforeEach(() => {
     storeMessages = [];
     globalCliOutputDefault = 'collapsed';
-    richBlocksForwardingEnabled = undefined;
     richBlocksConfirmations = undefined;
     resetCoCreatorConfigCacheForTest();
     primeCoCreatorConfigCache({
@@ -151,7 +142,6 @@ describe('ChatMessage stream presentation contracts', () => {
     container.remove();
     resetCoCreatorConfigCacheForTest();
     storeMessages = [];
-    richBlocksForwardingEnabled = undefined;
     richBlocksConfirmations = undefined;
   });
 
@@ -263,22 +253,6 @@ describe('ChatMessage stream presentation contracts', () => {
     expect(container.textContent).toContain('CLI Output');
     const cliBody = container.querySelector('[data-testid="cli-output-body"]');
     expect(cliBody).toBeNull();
-  });
-
-  it('gates Rich Block forwarding on the projected source bubble terminal state', () => {
-    const rich = {
-      rich: { v: 1 as const, blocks: [{ id: 'card-live', kind: 'card' as const, v: 1 as const, title: 'Live' }] },
-      stream: { invocationId: INVOCATION_ID },
-    };
-
-    renderMessage(makeStreamMessage({ isStreaming: true, extra: rich }));
-    expect(richBlocksForwardingEnabled).toBe(false);
-
-    renderMessage(makeStreamMessage({ isStreaming: false, extra: rich }));
-    expect(richBlocksForwardingEnabled).toBe(true);
-
-    renderMessage(makeStreamMessage({ isStreaming: false, extra: rich }), true);
-    expect(richBlocksForwardingEnabled).toBe(false);
   });
 
   it('forwards restored confirmation state to the canonical rich renderer', () => {

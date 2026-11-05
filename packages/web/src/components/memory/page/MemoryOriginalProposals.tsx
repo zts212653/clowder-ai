@@ -25,7 +25,7 @@ const pending = new Set<Proposal['status']>([
   'partially_materialized',
 ]);
 
-function ProposalCard({ proposal, children }: { proposal: Proposal; children: ReactNode }) {
+export function ProposalCard({ proposal, children }: { proposal: Proposal; children: ReactNode }) {
   const { getCatById } = useCatData();
   const cat = getCatById(proposal.sourceCatId);
   const router = useRouter();
@@ -70,27 +70,6 @@ function ProposalSection({ proposals, children }: { proposals: Proposal[] | unde
         children
       )}
     </section>
-  );
-}
-export function MemoryProfileProposals({
-  proposals,
-  revision,
-}: {
-  proposals?: ProfileMemoryProposalView[];
-  revision: string;
-}) {
-  return (
-    <ProposalSection proposals={proposals}>
-      {proposals?.map((proposal) => (
-        <ProposalCard key={proposal.proposalId} proposal={proposal}>
-          <p className="whitespace-pre-wrap break-words text-sm">{proposal.suggestedContent}</p>
-          <p className="text-compact text-cafe-muted">{proposal.rationale}</p>
-          {pending.has(proposal.status) && proposal.expectedRevision !== revision && (
-            <p className="text-compact text-cafe-muted">画像后来有了变更，请在原审批记录核对这条提案。</p>
-          )}
-        </ProposalCard>
-      ))}
-    </ProposalSection>
   );
 }
 export function MemoryEntityProposals({ proposals }: { proposals?: EntityMemoryProposalView[] }) {

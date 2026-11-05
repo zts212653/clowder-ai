@@ -1,6 +1,7 @@
 import type { MessageSearchResponse } from '@cat-cafe/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
+import type { MessageFindState } from './message-find-state';
 
 type SearchScope = 'thread' | 'global';
 type SearchSort = 'time' | 'relevance';
@@ -19,22 +20,28 @@ async function requestMessages(
   }
 }
 
-export function useMessageSearch(threadId: string) {
-  const [status, setStatus] = useState<SearchStatus>('idle');
-  const [response, setResponse] = useState<MessageSearchResponse>();
+export function useMessageSearch(threadId: string, initialState?: MessageFindState) {
+  const [status, setStatus] = useState<SearchStatus>(initialState?.status ?? 'idle');
+  const [response, setResponse] = useState<MessageSearchResponse | undefined>(initialState?.response);
   const generation = useRef(0);
   const controller = useRef<AbortController>();
-  const lastQuery = useRef<{ query: string; scope: SearchScope; sort: SearchSort }>();
+  const lastQuery = useRef<{ query: string; scope: SearchScope; sort: SearchSort } | undefined>(
+    initialState ? { query: initialState.query, scope: initialState.scope, sort: initialState.sort } : undefined,
+  );
+  const previousThread = useRef(threadId);
   const currentThread = useRef(threadId);
   currentThread.current = threadId;
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: the thread owns the request lifetime even before a query exists.
   useEffect(() => {
-    generation.current += 1;
-    controller.current?.abort();
-    lastQuery.current = undefined;
-    setStatus('idle');
-    setResponse(undefined);
+    if (previousThread.current !== threadId) {
+      generation.current += 1;
+      controller.current?.abort();
+      lastQuery.current = undefined;
+      setStatus('idle');
+      setResponse(undefined);
+      previousThread.current = threadId;
+    }
     return () => {
       generation.current += 1;
       controller.current?.abort();

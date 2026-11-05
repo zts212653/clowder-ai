@@ -249,7 +249,11 @@ async function commitFailedTerminal(
     }
     const triggerId = response.extra?.a2aFailureReturn?.triggerMessageId ?? response.replyTo;
     const trigger = triggerId ? await deps.messageStore.getById(triggerId) : null;
-    if (response.extra?.a2aFailureReturn || trigger?.from?.kind === 'agent') {
+    if (
+      response.extra?.a2aFailureReturn ||
+      response.extra?.coveredA2AFailureReturns?.length ||
+      trigger?.from?.kind === 'agent'
+    ) {
       throw new Error('failed response settlement requires the caller-wake transaction');
     }
   }

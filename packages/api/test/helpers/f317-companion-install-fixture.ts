@@ -16,8 +16,6 @@ import type { DesktopWindowLaunch } from '../../src/domains/plugin/desktop-windo
 import { OFFICIAL_PLUGIN_CATALOG } from '../../src/domains/plugin/official-catalog.js';
 import { OfficialPluginPackageInstaller } from '../../src/domains/plugin/official-package-installer.js';
 import { createDormantPluginRuntimeComposition } from '../../src/domains/plugin/runtime-composition.js';
-import { MemoryMeetingIntakeStore } from '../../src/domains/signal-intake/MeetingIntakeStore.js';
-import { MemorySignalRouteStore } from '../../src/domains/signal-intake/SignalRouteStore.js';
 import { sessionAuthPlugin, sessionRoute } from '../../src/infrastructure/session-auth.js';
 import {
   companionDecisionWireResponse,
@@ -35,7 +33,8 @@ export async function modernCompanionInstallFixture(
     | '0.1.0-alpha.15'
     | '0.1.0-alpha.19'
     | '0.1.0-alpha.20'
-    | '0.1.0-alpha.24',
+    | '0.1.0-alpha.24'
+    | '0.1.0-alpha.25',
   alterArchive?: (bytes: Buffer) => Buffer,
   observePresentation?: (
     receipt: LivePresentationObservation,
@@ -43,29 +42,33 @@ export async function modernCompanionInstallFixture(
   ) => Promise<LivePresentationReply>,
 ) {
   const contract =
-    version === '0.1.0-alpha.24'
-      ? '0.1.0-beta.27'
-      : version === '0.1.0-alpha.15' || version === '0.1.0-alpha.19' || version === '0.1.0-alpha.20'
-        ? '0.1.0-beta.24'
-        : version === '0.1.0-alpha.14'
-          ? '0.1.0-beta.23'
-          : '0.1.0-beta.21';
+    version === '0.1.0-alpha.25'
+      ? '0.1.0-beta.28'
+      : version === '0.1.0-alpha.24'
+        ? '0.1.0-beta.27'
+        : version === '0.1.0-alpha.15' || version === '0.1.0-alpha.19' || version === '0.1.0-alpha.20'
+          ? '0.1.0-beta.24'
+          : version === '0.1.0-alpha.14'
+            ? '0.1.0-beta.23'
+            : '0.1.0-beta.21';
   const f = await staticEditorFixture(
     { ...desktopWindowManifest(windowHtml, '1.3.0'), pluginId: 'official.companion', version },
     windowHtml,
   );
   const actualArchive =
-    version === '0.1.0-alpha.24'
-      ? process.env.F317_VERIFIED_PRESENTATION_ARCHIVE
-      : version === '0.1.0-alpha.20'
-        ? process.env.F317_VERIFIED_LIVE_TAIL_ARCHIVE
-        : version === '0.1.0-alpha.19'
-          ? process.env.F317_VERIFIED_SUBTITLE_RETURN_ARCHIVE
-          : version === '0.1.0-alpha.15'
-            ? process.env.F317_VERIFIED_UNIFIED_ARCHIVE
-            : version === '0.1.0-alpha.14'
-              ? process.env.F317_VERIFIED_MODERN_ARCHIVE
-              : undefined;
+    version === '0.1.0-alpha.25'
+      ? process.env.F317_VERIFIED_LETTER_ARCHIVE
+      : version === '0.1.0-alpha.24'
+        ? process.env.F317_VERIFIED_PRESENTATION_ARCHIVE
+        : version === '0.1.0-alpha.20'
+          ? process.env.F317_VERIFIED_LIVE_TAIL_ARCHIVE
+          : version === '0.1.0-alpha.19'
+            ? process.env.F317_VERIFIED_SUBTITLE_RETURN_ARCHIVE
+            : version === '0.1.0-alpha.15'
+              ? process.env.F317_VERIFIED_UNIFIED_ARCHIVE
+              : version === '0.1.0-alpha.14'
+                ? process.env.F317_VERIFIED_MODERN_ARCHIVE
+                : undefined;
   const originalBytes = actualArchive ? await readFile(actualArchive) : f.bytes;
   const bytes = alterArchive ? alterArchive(originalBytes) : originalBytes;
   const entry = actualArchive
@@ -75,7 +78,7 @@ export async function modernCompanionInstallFixture(
         packageDigest: `sha512-${createHash('sha512').update(originalBytes).digest('base64')}`,
         archiveUrl: `https://registry.npmjs.org/@clowder-ai/companion/-/companion-${version}.tgz`,
       }
-    : { ...f.entry, effectiveGrants: ['windows.create' as const] };
+    : { ...f.entry };
   const owner = 'modern-composition-owner';
   const priorOwner = process.env.DEFAULT_OWNER_USER_ID;
   process.env.DEFAULT_OWNER_USER_ID = owner;
@@ -92,7 +95,9 @@ export async function modernCompanionInstallFixture(
   }));
   let needsMeAvailable = true;
   app.get('/api/approval-hub/pending', async () => ({
-    items: [{ ...approval('composition'), ownerUserId: owner }],
+    // This complete-count fixture has an unanchored canonical F128 proposal.
+    // F221 needs a live original-card proof and would honestly withhold exact counts here.
+    items: [{ ...approval('composition', 'F128'), ownerUserId: owner }],
     coverage: { state: 'complete' },
   }));
   app.get('/api/entrusted-work/needs-me', async (_request, reply) =>
@@ -115,7 +120,7 @@ export async function modernCompanionInstallFixture(
   const saved = messages.append({
     userId: owner,
     threadId: 'home',
-    catId: null,
+    from: { kind: 'user', userId: owner },
     content: 'preserved',
     mentions: [],
     timestamp: 1,
@@ -126,8 +131,6 @@ export async function modernCompanionInstallFixture(
   let denyClose = false;
   const runtime = createDormantPluginRuntimeComposition({
     projectRoot: f.root,
-    routes: new MemorySignalRouteStore(),
-    intakes: new MemoryMeetingIntakeStore(),
     messageStore: messages,
     // Normal deterministic tests use an explicitly trusted fixture catalog. The
     // opt-in registry journey uses the production digest catalog without overrides.
@@ -138,6 +141,8 @@ export async function modernCompanionInstallFixture(
         ...context,
         app,
         ownerUserId: owner,
+        messages,
+        verifyConversationThread: async (threadId) => threadId === 'home',
         origin: 'http://localhost:5102',
         openConversation: async () => true,
         ...(observePresentation ? { observePresentation } : {}),

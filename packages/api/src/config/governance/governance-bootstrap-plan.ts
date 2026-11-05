@@ -1,3 +1,4 @@
+import { deploymentDefaults } from '@cat-cafe/shared';
 /** Pure filesystem planning for F302 install/undo previews. */
 
 import { createHash } from 'node:crypto';
@@ -13,7 +14,7 @@ const PROVIDER_SKILLS_DIRS: Record<GovernanceProvider, string> = {
   claude: '.claude/skills',
   codex: '.codex/skills',
   gemini: '.gemini/skills',
-  kimi: '.kimi/skills',
+  kimi: '.kimi-code/skills',
 };
 const SHARED_REFS_ALIAS = '.cat-cafe-shared-refs';
 export const LEGACY_GOVERNANCE_REPORT = '.cat-cafe/governance-bootstrap-report.json';
@@ -295,7 +296,7 @@ async function planProjectSkills(
               file,
               action: 'skipped',
               group: 'project-skills',
-              reason: 'selected Skill is not installed in Clowder AI',
+              reason: `selected Skill is not installed in ${deploymentDefaults.brand.displayName}`,
             },
       );
     }

@@ -22,6 +22,7 @@ import type {
   AdmitEntrustedWorkStoreInput,
   EntrustedWorkTerminalClosure,
   ITaskStore,
+  TaskMutationWriteFence,
 } from '../cats/services/stores/ports/TaskStoreContract.js';
 import { captureCompletionArtifact } from './EntrustedWorkCompletion.js';
 import type { PreparedArtifactReader } from './EntrustedWorkOwnerReadService.js';
@@ -69,6 +70,7 @@ export type EntrustedWorkLifecycleErrorCode =
   | 'ENTRUSTED_WORK_SOURCE_CUSTODY_MISMATCH'
   | 'ENTRUSTED_WORK_NOT_FOUND'
   | 'ENTRUSTED_WORK_CONTRACT_MISSING'
+  | 'ENTRUSTED_WORK_THREAD_CONFLICT'
   | 'ENTRUSTED_WORK_REVISION_CONFLICT'
   | 'ENTRUSTED_WORK_ALREADY_CLOSED'
   | 'ENTRUSTED_WORK_NO_OP';
@@ -84,10 +86,13 @@ export class EntrustedWorkLifecycleError extends Error {
 }
 
 export interface EntrustedWorkLifecycleOptions {
+  readonly expectedThreadId?: string;
   readonly now?: () => number;
   readonly custodyGrantRegistry?: F310CustodyGrantRegistryV1;
   readonly onChanged?: (ownerUserId: string) => void;
   readonly artifactReader?: PreparedArtifactReader;
+  /** Checked by the Task store at the aggregate's actual write boundary. */
+  readonly writeFence?: TaskMutationWriteFence;
 }
 
 export interface EntrustedWorkAdmissionSourceContext {
@@ -96,18 +101,22 @@ export interface EntrustedWorkAdmissionSourceContext {
 }
 
 export class EntrustedWorkLifecycleService {
+  private readonly expectedThreadId: string | undefined;
   private readonly now: () => number;
   private readonly custodyGrantRegistry: F310CustodyGrantRegistryV1;
   private readonly onChanged: EntrustedWorkLifecycleOptions['onChanged'];
   private readonly artifactReader: PreparedArtifactReader | undefined;
+  private readonly writeFence: TaskMutationWriteFence | undefined;
 
   constructor(
     private readonly tasks: ITaskStore,
     options: EntrustedWorkLifecycleOptions = {},
   ) {
+    this.expectedThreadId = options.expectedThreadId;
     this.now = options.now ?? Date.now;
     this.onChanged = options.onChanged;
     this.artifactReader = options.artifactReader;
+    this.writeFence = options.writeFence;
     const registry = options.custodyGrantRegistry ?? PHASE_B_INITIAL_CUSTODY_GRANT_REGISTRY;
     this.custodyGrantRegistry = Object.fromEntries(
       Object.entries(registry).map(([grantRef, grant]) => [grantRef, registeredCustodyGrantV1Schema.parse(grant)]),
@@ -218,11 +227,16 @@ export class EntrustedWorkLifecycleService {
     const command = closeEntrustedWorkCommandV1Schema.parse(input);
     const artifactSnapshot = await captureCompletionArtifact(this.tasks, this.artifactReader, command);
     await beforeWrite?.();
-    const result = await this.tasks.closeEntrustedWork(command.taskId, {
-      expectedRevision: command.expectedRevision,
-      closure: command.closure as EntrustedWorkTerminalClosure,
-      ...(artifactSnapshot ? { artifactSnapshot } : {}),
-    });
+    const result = await this.tasks.closeEntrustedWork(
+      command.taskId,
+      {
+        expectedRevision: command.expectedRevision,
+        ...(this.expectedThreadId === undefined ? {} : { expectedThreadId: this.expectedThreadId }),
+        closure: command.closure as EntrustedWorkTerminalClosure,
+        ...(artifactSnapshot ? { artifactSnapshot } : {}),
+      },
+      this.writeFence,
+    );
     switch (result.kind) {
       case 'closed':
         this.notifyChanged(result.task);
@@ -234,6 +248,8 @@ export class EntrustedWorkLifecycleService {
           'ENTRUSTED_WORK_CONTRACT_MISSING',
           'Task does not own an entrusted-work contract',
         );
+      case 'thread_conflict':
+        throw new EntrustedWorkLifecycleError('ENTRUSTED_WORK_THREAD_CONFLICT', 'Task thread is no longer current');
       case 'revision_conflict':
         throw new EntrustedWorkLifecycleError(
           'ENTRUSTED_WORK_REVISION_CONFLICT',
@@ -255,13 +271,18 @@ export class EntrustedWorkLifecycleService {
     ) {
       throw new EntrustedWorkLifecycleError('ENTRUSTED_WORK_NO_OP', 'Entrusted-work update has no mutation');
     }
-    const result = await this.tasks.updateEntrustedWork(command.taskId, {
-      expectedRevision: command.expectedRevision,
-      ...(command.status !== undefined ? { status: command.status } : {}),
-      ...(command.time !== undefined ? { time: command.time } : {}),
-      ...(command.artifactRefs !== undefined ? { artifactRefs: command.artifactRefs } : {}),
-      ...(command.progress !== undefined ? { progress: command.progress } : {}),
-    });
+    const result = await this.tasks.updateEntrustedWork(
+      command.taskId,
+      {
+        expectedRevision: command.expectedRevision,
+        ...(this.expectedThreadId === undefined ? {} : { expectedThreadId: this.expectedThreadId }),
+        ...(command.status !== undefined ? { status: command.status } : {}),
+        ...(command.time !== undefined ? { time: command.time } : {}),
+        ...(command.artifactRefs !== undefined ? { artifactRefs: command.artifactRefs } : {}),
+        ...(command.progress !== undefined ? { progress: command.progress } : {}),
+      },
+      this.writeFence,
+    );
     switch (result.kind) {
       case 'updated':
         this.notifyChanged(result.task);
@@ -273,6 +294,8 @@ export class EntrustedWorkLifecycleService {
           'ENTRUSTED_WORK_CONTRACT_MISSING',
           'Task does not own an entrusted-work contract',
         );
+      case 'thread_conflict':
+        throw new EntrustedWorkLifecycleError('ENTRUSTED_WORK_THREAD_CONFLICT', 'Task thread is no longer current');
       case 'revision_conflict':
         throw new EntrustedWorkLifecycleError(
           'ENTRUSTED_WORK_REVISION_CONFLICT',

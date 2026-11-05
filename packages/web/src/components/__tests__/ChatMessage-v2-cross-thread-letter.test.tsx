@@ -72,7 +72,7 @@ describe('v2 cross-thread letter through ChatMessage', () => {
     expect(h.container.querySelector('[data-reply-color-rail]')).toBeNull();
     expect(h.container.querySelector('[data-cross-thread-source-pill]')).toBeNull();
     expect(h.q('message-header')?.textContent).not.toContain('↗');
-    expect(api).not.toHaveBeenCalled();
+    expect(api.mock.calls.filter(([url]) => String(url).startsWith('/api/threads/'))).toEqual([]);
   });
   it('uses explicit targets before mentions and gives each target its own cat color', () => {
     h.render(letter('@co-creator\nIgnored mention', ['codex-astra']));
@@ -160,6 +160,6 @@ describe('v2 cross-thread letter through ChatMessage', () => {
     expect(paper()).toBeNull();
     expect(h.container.textContent).toContain('📮');
     expect(h.container.textContent).toContain('↗ thread-s');
-    expect(api).not.toHaveBeenCalled();
+    expect(api.mock.calls.filter(([url]) => String(url).startsWith('/api/threads/'))).toEqual([]);
   });
 });

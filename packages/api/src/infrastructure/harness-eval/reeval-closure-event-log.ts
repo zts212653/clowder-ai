@@ -1,4 +1,8 @@
 import type { RedisClient } from '@cat-cafe/shared/utils';
+import type { SettledHistoryPageOptions, SettledHistorySourcePage } from '../../utils/settled-history-page.js';
+import type { EvalRepairApprovalRecord } from './eval-repair-approval-projection.js';
+import { EvalRepairHistoryKeys } from './eval-repair-history-keys.js';
+import { pageEvalRepairHistory } from './eval-repair-history-page.js';
 import { type EvalLifecycleEvent, EvalLifecycleEventSchema } from './reeval-closure-schema.js';
 
 const KEYSPACE = 'eval:verdict-lifecycle';
@@ -19,6 +23,10 @@ export interface IReevalClosureEventLog {
   read(subjectId: string, fromSequence?: number): Promise<EvalLifecycleEvent[]>;
   listVerdictIds(): Promise<string[]>;
   listSubjectIds(): Promise<string[]>;
+  listApprovalHistoryPage?(
+    owner: string,
+    options: SettledHistoryPageOptions,
+  ): Promise<SettledHistorySourcePage<EvalRepairApprovalRecord>>;
 }
 
 function lifecycleSubjectId(event: EvalLifecycleEvent): string {
@@ -26,7 +34,7 @@ function lifecycleSubjectId(event: EvalLifecycleEvent): string {
 }
 
 /**
- * KEYS: subject log, global seen set, verdict index.
+ * KEYS: subject log, global seen set, subject index, derived dirty-subject set and read version.
  * ARGV: event id, expected LLEN, encoded event, verdict id.
  *
  * Duplicate detection intentionally precedes the sequence comparison so a
@@ -43,9 +51,17 @@ if current ~= tonumber(ARGV[2]) then
   return {-1, current}
 end
 
+local dirtyType=redis.call('TYPE',KEYS[4]).ok
+local versionType=redis.call('TYPE',KEYS[5]).ok
+if (dirtyType~='none' and dirtyType~='set') or (versionType~='none' and versionType~='string') then
+  return redis.error_reply('F266 history invalidation type conflict')
+end
+
 redis.call('SADD', KEYS[2], ARGV[1])
 redis.call('SADD', KEYS[3], ARGV[4])
 redis.call('RPUSH', KEYS[1], ARGV[3])
+redis.call('SADD',KEYS[4],ARGV[4])
+redis.call('SET',KEYS[5],ARGV[1])
 return {1, current}
 `;
 
@@ -64,10 +80,12 @@ export class RedisReevalClosureEventLog implements IReevalClosureEventLog {
     const subjectId = lifecycleSubjectId(validated);
     const result = (await this.redis.eval(
       APPEND_LUA,
-      3,
+      5,
       ReevalClosureKeys.eventLog(subjectId),
       ReevalClosureKeys.eventsSeen,
       ReevalClosureKeys.verdicts,
+      EvalRepairHistoryKeys.dirty,
+      EvalRepairHistoryKeys.version,
       validated.eventId,
       expectedSequence.toString(),
       JSON.stringify(validated),
@@ -91,5 +109,9 @@ export class RedisReevalClosureEventLog implements IReevalClosureEventLog {
 
   async listSubjectIds(): Promise<string[]> {
     return this.listVerdictIds();
+  }
+
+  async listApprovalHistoryPage(owner: string, options: SettledHistoryPageOptions) {
+    return pageEvalRepairHistory(this.redis, owner, options);
   }
 }

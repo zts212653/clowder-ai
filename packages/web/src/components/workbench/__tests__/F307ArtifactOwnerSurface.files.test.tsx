@@ -349,3 +349,69 @@ it('shows an unavailable original with retry and return, never a guessed file pr
   act(() => buttons.find((button) => button.textContent?.includes('返回'))!.click());
   expect(back).toHaveBeenCalledOnce();
 });
+
+it('resolves the exact html_widget named by source message + block id when a same-name sibling exists', async () => {
+  const first: ThreadArtifactDTO = {
+    type: 'widget',
+    name: '同名',
+    catId: 'opus48',
+    createdAt: 100,
+    sourceMessageId: 'msg-1',
+    widgetBlockId: 'block-a',
+  };
+  const second: ThreadArtifactDTO = { ...first, widgetBlockId: 'block-b' };
+  fixture.artifacts = [first, second];
+  const surface = createArtifactSurface({ threadId: 'thread-1', artifact: second });
+  await act(async () =>
+    root.render(
+      <F307ArtifactOwnerSurface surface={surface} onRequestDetach={() => undefined} onOpenSurface={() => undefined} />,
+    ),
+  );
+  expect(container.querySelector('[data-testid="weak-preview"]')).toBeTruthy();
+  expect(container.textContent).not.toContain('无法唯一确定');
+});
+
+it('does not auto-pick when an old coordinate matches two same-name widgets; it asks with block ids', async () => {
+  const first: ThreadArtifactDTO = {
+    type: 'widget',
+    name: '同名',
+    catId: 'opus48',
+    createdAt: 100,
+    sourceMessageId: 'msg-1',
+    widgetBlockId: 'block-a',
+  };
+  const second: ThreadArtifactDTO = { ...first, widgetBlockId: 'block-b' };
+  fixture.artifacts = [first, second];
+  // 旧入口没有块坐标，两份 DTO 的 legacy id 相同。
+  const legacyTarget: ThreadArtifactDTO = { ...first, widgetBlockId: undefined };
+  const surface = createArtifactSurface({ threadId: 'thread-1', artifact: legacyTarget });
+  await act(async () =>
+    root.render(
+      <F307ArtifactOwnerSurface surface={surface} onRequestDetach={() => undefined} onOpenSurface={() => undefined} />,
+    ),
+  );
+  expect(container.textContent).toContain('无法唯一确定');
+  expect(container.textContent).toContain('block-a');
+  expect(container.textContent).toContain('block-b');
+  expect(container.querySelector('[data-testid="weak-preview"]')).toBeNull();
+});
+
+it('restores an old coordinate when it matches exactly one widget', async () => {
+  const only: ThreadArtifactDTO = {
+    type: 'widget',
+    name: '落单',
+    catId: 'opus48',
+    createdAt: 100,
+    sourceMessageId: 'msg-2',
+    widgetBlockId: 'block-only',
+  };
+  fixture.artifacts = [only];
+  const legacyTarget: ThreadArtifactDTO = { ...only, widgetBlockId: undefined };
+  const surface = createArtifactSurface({ threadId: 'thread-1', artifact: legacyTarget });
+  await act(async () =>
+    root.render(
+      <F307ArtifactOwnerSurface surface={surface} onRequestDetach={() => undefined} onOpenSurface={() => undefined} />,
+    ),
+  );
+  expect(container.querySelector('[data-testid="weak-preview"]')).toBeTruthy();
+});

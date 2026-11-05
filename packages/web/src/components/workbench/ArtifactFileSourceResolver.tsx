@@ -115,7 +115,7 @@ export function ArtifactFileSourceResolver({
           }}
         />
       ) : error ? (
-        <div className="space-y-3 p-4">
+        <div data-content-opening-state="blocked" className="space-y-3 p-4">
           <p role="alert" className="text-sm text-cafe-error">
             {error}
           </p>

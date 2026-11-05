@@ -19,7 +19,7 @@ export interface SlashCommandDefinition {
   readonly surface: CommandSurface;
   /** Who registered it */
   readonly source: CommandSource;
-  /** Multi-word subcommands, e.g. ['status', 'end'] for /game status */
+  /** Multi-word subcommands, e.g. ['status', 'end'] for /vote status */
   readonly subcommands?: readonly string[];
   /** Owning skill ID (only when source='skill') */
   readonly skillId?: string;

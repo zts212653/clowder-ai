@@ -7,6 +7,8 @@
  * (thread-navigation cell), NOT repo file reveal — so it does NOT extend
  * cat_cafe_workspace_navigate (design gate).
  */
+
+import { deploymentDefaults } from '@cat-cafe/shared';
 import { z } from 'zod';
 import { defineMcpCanonicalFactory, defineMcpMigrationFactory } from '../tool-governance-migration.js';
 
@@ -17,7 +19,7 @@ const defineTool = defineMcpMigrationFactory('event-memory-tools.ts');
 const defineCanonicalTool = defineMcpCanonicalFactory('event-memory-tools.ts');
 
 export const teleportInputSchema = {
-  threadId: z.string().min(1).describe('Target Clowder AI thread id to teleport into.'),
+  threadId: z.string().min(1).describe(`Target ${deploymentDefaults.brand.name} thread id to teleport into.`),
   messageId: z
     .string()
     .min(1)

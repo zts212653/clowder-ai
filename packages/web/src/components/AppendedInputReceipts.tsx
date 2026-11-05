@@ -5,14 +5,19 @@ import { AppTooltip } from '@/components/AppTooltip';
 import { useMeasuredOverflow } from '@/components/content-overflow/useMeasuredOverflow';
 import { ChevronIcon } from '@/components/hub-icons';
 import { useShellPresentation } from '@/components/shell/shell-presentation';
+import { useMessageNavigation } from '@/components/thread-chat/MessageNavigationContext';
 import type { CatData } from '@/hooks/useCatData';
 import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
-import { dispatchReceiptDisplay, dispatchReceiptLabel } from '@/lib/dispatch-receipt-display';
+import {
+  dispatchReadSummary,
+  dispatchReadText,
+  dispatchReceiptDisplay,
+  dispatchReceiptLabel,
+} from '@/lib/dispatch-receipt-display';
 import { messageSenderThemeColor, resolveMessageSender } from '@/lib/resolve-sender';
 import type { ChatMessage } from '@/stores/chat-types';
-import { focusLineageMessage } from '@/utils/focusLineageMessage';
+import styles from './AppendedInputReceipts.module.css';
 
-const RECEIPT_ROW_HEIGHT_PX = 28;
 const COLLAPSED_VISIBLE_ROWS = 3.5;
 const COLLAPSED_FULL_ROWS = Math.floor(COLLAPSED_VISIBLE_ROWS);
 
@@ -54,7 +59,11 @@ export function appendedInputReadDisplay(source: ChatMessage, response: ChatMess
         ) ?? [])
       : [];
   const ref = refs.length === 1 ? refs[0] : undefined;
-  return dispatchReceiptDisplay(ref, lifecycle?.kind === 'response' && lifecycle.status === 'processing');
+  return dispatchReceiptDisplay(
+    ref,
+    lifecycle?.kind === 'response' && lifecycle.status === 'processing',
+    source.lifecycle,
+  );
 }
 
 /**
@@ -62,6 +71,7 @@ export function appendedInputReadDisplay(source: ChatMessage, response: ChatMess
  * overflow rule shared with ExpandableProse), and a separate jump back to the original message.
  */
 function AppendedInputRow({ source, label, expanded, onToggle, response, color }: AppendedInputRowProps) {
+  const navigateToMessage = useMessageNavigation();
   const contentId = useId();
   const { ref, overflowing } = useMeasuredOverflow<HTMLSpanElement>({ axis: 'inline', active: !expanded });
   const content = source.content.trim() || '（无文字内容）';
@@ -69,11 +79,7 @@ function AppendedInputRow({ source, label, expanded, onToggle, response, color }
   const receiptLabel = dispatchReceiptLabel(read, label, 'appended_source');
   const canToggle = overflowing || expanded;
   return (
-    <li
-      data-appended-input-id={source.id}
-      data-expanded={expanded ? 'true' : 'false'}
-      className={expanded ? 'flex min-w-0 items-start gap-1.5 py-1' : 'flex h-7 min-w-0 items-center gap-1.5'}
-    >
+    <li data-appended-input-id={source.id} data-expanded={expanded ? 'true' : 'false'} className={styles.row}>
       <AppTooltip
         label={receiptLabel}
         detail={<span className="block max-h-[45vh] overflow-y-auto">{content}</span>}
@@ -87,31 +93,42 @@ function AppendedInputRow({ source, label, expanded, onToggle, response, color }
           aria-expanded={canToggle ? expanded : undefined}
           aria-controls={canToggle ? contentId : undefined}
           data-append-delivery-state={read.state}
-          className={`flex min-w-0 gap-1.5 rounded text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-current ${expanded ? 'flex-1 items-start' : 'h-7 items-center'} ${canToggle ? 'cursor-pointer' : 'cursor-default'}`}
+          className={`flex min-w-0 flex-1 gap-1.5 rounded text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-current ${expanded ? 'items-start' : 'h-7 items-center'} ${canToggle ? 'cursor-pointer' : 'cursor-default'}`}
           onClick={canToggle ? onToggle : undefined}
         >
           <span
             aria-hidden="true"
             style={{ backgroundColor: color }}
-            className={`mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full ${expanded ? 'mt-1.5' : ''} ${read.pulse ? 'animate-pulse motion-reduce:animate-none' : ''}`}
+            className={`mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full ${expanded ? 'mt-1.5' : ''}`}
           />
-          <span className="shrink-0 font-medium">{label}:</span>
+          <span className="max-w-16 shrink-0 truncate font-medium sm:max-w-none">{label}:</span>
           <span
             id={contentId}
             ref={ref}
             data-overflow-measure="inline"
-            className={
-              expanded ? 'min-w-0 flex-1 whitespace-pre-wrap break-words' : 'w-72 max-w-[35vw] shrink truncate'
-            }
+            className={expanded ? 'min-w-0 flex-1 whitespace-pre-wrap break-words' : 'min-w-0 flex-1 truncate'}
           >
             {content}
           </span>
         </button>
       </AppTooltip>
+      <span
+        data-append-read-status={read.state}
+        className={`w-32 shrink-0 text-right text-label tabular-nums sm:w-36 ${read.state === 'unconfirmed' || read.state === 'unconfirmed_delivery' || read.state === 'unknown' ? 'text-conn-amber-text' : 'text-cafe-muted'}`}
+      >
+        {read.state === 'read' ? (
+          <span aria-hidden="true" className="text-semantic-success">
+            ✓{' '}
+          </span>
+        ) : read.state === 'pending' ? (
+          <span aria-hidden="true">· </span>
+        ) : null}
+        {dispatchReadText(read, true)}
+      </span>
       <button
         type="button"
         className="shrink-0 font-medium text-[var(--color-cocreator-primary)] hover:underline"
-        onClick={() => focusLineageMessage(source.id)}
+        onClick={() => navigateToMessage(source.id)}
       >
         跳到原文
       </button>
@@ -151,26 +168,31 @@ export function AppendedInputReceipts({ response, timelineMessages, getCatById }
     setListExpanded(false);
     setExpandedRowIds(new Set());
   };
-  const collapsedHeight = RECEIPT_ROW_HEIGHT_PX * COLLAPSED_VISIBLE_ROWS;
-  const fadeStart = RECEIPT_ROW_HEIGHT_PX * Math.floor(COLLAPSED_VISIBLE_ROWS);
+  const collapsedHeight = `calc(var(--receipt-row-height) * ${COLLAPSED_VISIBLE_ROWS})`;
+  const fadeStart = `calc(var(--receipt-row-height) * ${Math.floor(COLLAPSED_VISIBLE_ROWS)})`;
 
   return (
     <section
       data-testid="appended-input-receipts"
       aria-label="补充消息"
-      className="mt-2 border-t border-cafe px-1 pt-2 text-xs text-cafe-secondary"
+      className={`${styles.root} mt-2 border-t border-cafe px-1 pt-2 text-xs text-cafe-secondary`}
     >
-      <div className="font-semibold text-cafe-muted">补充消息</div>
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-cafe-muted">
+        <span className="font-semibold">补充消息 · {appendedInputs.length} 条</span>
+        <span className="text-label">
+          {dispatchReadSummary(appendedInputs.map((source) => appendedInputReadDisplay(source, response)))}
+        </span>
+      </div>
       <ol
         data-testid="appended-input-list"
         data-collapsed={collapsed ? 'true' : 'false'}
-        className="mt-1 overflow-hidden"
+        className={`${styles.list} mt-1 overflow-hidden`}
         style={
           collapsed
             ? {
-                maxHeight: `${collapsedHeight}px`,
-                WebkitMaskImage: `linear-gradient(to bottom, black 0, black ${fadeStart}px, transparent ${collapsedHeight}px)`,
-                maskImage: `linear-gradient(to bottom, black 0, black ${fadeStart}px, transparent ${collapsedHeight}px)`,
+                maxHeight: collapsedHeight,
+                WebkitMaskImage: `linear-gradient(to bottom, black 0, black ${fadeStart}, transparent ${collapsedHeight})`,
+                maskImage: `linear-gradient(to bottom, black 0, black ${fadeStart}, transparent ${collapsedHeight})`,
               }
             : undefined
         }

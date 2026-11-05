@@ -63,3 +63,30 @@ export const collectiveHostAppearanceSchema = z
 export type CollectiveAppearanceRole = (typeof COLLECTIVE_APPEARANCE_ROLES)[number];
 export type CollectiveAppearanceRoles = z.infer<typeof collectiveAppearanceRolesSchema>;
 export type CollectiveHostAppearance = z.infer<typeof collectiveHostAppearanceSchema>;
+
+/** Additive display-only message: old Clients ignore it and continue consuming strict appearance v1 unchanged. */
+export const collectiveHostShellAppearanceSchema = z
+  .object({
+    type: z.literal('collective:host-shell-appearance'),
+    v: z.literal(1),
+    bridgeId: z.string().min(8).max(120),
+    shellRevision: z.number().int().positive(),
+    language: z.enum(['zh', 'en']),
+    shell: z
+      .object({
+        paper: resolvedColor,
+        work: resolvedColor,
+        frame: resolvedColor,
+        selected: resolvedColor,
+        ink: resolvedColor,
+        body: resolvedColor,
+        muted: resolvedColor,
+        hairline: resolvedColor,
+        hairlineStrong: resolvedColor,
+        primaryText: resolvedColor,
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type CollectiveHostShellAppearance = z.infer<typeof collectiveHostShellAppearanceSchema>;

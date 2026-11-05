@@ -1,5 +1,7 @@
 'use client';
 
+import { AudioElement } from '@cat-cafe/ui';
+
 import { useEffect, useId, useRef, useState } from 'react';
 import { peekPlaybackManager } from '@/services/playbackRuntime';
 import type { RichAudioBlock } from '@/stores/chat-types';
@@ -211,7 +213,7 @@ export function AudioBlock({ block, catId }: { block: RichAudioBlock; catId?: st
           <div className="pl-1 text-micro text-cafe-secondary">听读中未自动播放 · 点此会先暂停正文</div>
         )}
 
-        {blobSrc && <audio ref={audioRef} src={blobSrc} preload="metadata" />}
+        {blobSrc && <AudioElement ref={audioRef} src={blobSrc} preload="metadata" />}
       </div>
     );
   }
@@ -251,7 +253,7 @@ export function AudioBlock({ block, catId }: { block: RichAudioBlock; catId?: st
         <span className="text-micro text-cafe-muted flex-shrink-0 tabular-nums">{formatDuration(audioDuration)}</span>
       )}
 
-      {blobSrc && <audio ref={audioRef} src={blobSrc} preload="none" />}
+      {blobSrc && <AudioElement ref={audioRef} src={blobSrc} preload="none" />}
     </div>
   );
 }

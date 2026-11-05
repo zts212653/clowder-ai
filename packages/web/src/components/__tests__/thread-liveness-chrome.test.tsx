@@ -38,7 +38,6 @@ function resetStore() {
     catStatuses: {},
     catInvocations: {},
     activeInvocations: {},
-    currentGame: null,
     threadStates: {},
     viewMode: 'single',
     splitPaneThreadIds: [],

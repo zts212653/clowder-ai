@@ -112,7 +112,7 @@ export const externalProjectRoutes: FastifyPluginAsync<ExternalProjectRoutesOpti
       return reply.status(400).send({ error: `Cannot read ${backlogFullPath}` });
     }
 
-    const rows = parseActiveFeaturesFromBacklog(markdown);
+    const rows = parseActiveFeaturesFromBacklog(markdown, project.backlogPath);
     const existingItems = await backlogStore.listByUser(userId);
 
     let created = 0;

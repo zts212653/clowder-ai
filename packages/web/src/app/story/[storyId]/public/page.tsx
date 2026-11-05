@@ -9,6 +9,7 @@
 
 'use client';
 
+import { deploymentDefaults } from '@cat-cafe/shared';
 import { useParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { decodeStoryParam } from '../parseStoryId';
@@ -140,7 +141,10 @@ export default function PublicStoryViewerPage() {
 
       {/* Footer */}
       <div style={styles.footer}>
-        <p>Exported from Clowder AI Story Player • Export ID: {pack.manifest.exportId.slice(0, 8)}</p>
+        <p>
+          Exported from {deploymentDefaults.brand.displayName} Story Player • Export ID:{' '}
+          {pack.manifest.exportId.slice(0, 8)}
+        </p>
       </div>
     </div>
   );

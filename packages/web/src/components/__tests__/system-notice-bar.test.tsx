@@ -7,8 +7,12 @@ import { SystemNoticeBar } from '../SystemNoticeBar';
 vi.mock('@/components/MarkdownContent', () => ({
   MarkdownContent: ({ content }: { content: string }) => React.createElement('p', null, content),
 }));
+vi.mock('@/components/thread-chat/MessageNavigationContext', () => ({ useMessageNavigation: () => vi.fn() }));
 
-function renderNotice(message: Partial<ChatMessageType> & Pick<ChatMessageType, 'content' | 'timestamp' | 'source'>) {
+function renderNotice(
+  message: Partial<ChatMessageType> & Pick<ChatMessageType, 'content' | 'timestamp' | 'source'>,
+  timelineMessages: readonly ChatMessageType[] = [],
+) {
   return renderToStaticMarkup(
     <SystemNoticeBar
       message={
@@ -18,11 +22,110 @@ function renderNotice(message: Partial<ChatMessageType> & Pick<ChatMessageType, 
           ...message,
         } as ChatMessageType
       }
+      threadId="thread-pro"
+      timelineMessages={timelineMessages}
     />,
   );
 }
 
 describe('SystemNoticeBar', () => {
+  it('shows the exact authenticated reply while retaining an unknown browser receipt', () => {
+    const outbound = {
+      v: 1,
+      sourceMessageId: 'source119',
+      sourceSender: { kind: 'cat', id: 'codex61-sol' },
+      dispatchInvocationId: 'dispatch119',
+      targetCatId: 'gpt-pro',
+      status: 'unknown',
+      transport: 'host',
+      idempotency: { keyKind: 'source_message_id', disposition: 'unknown' },
+    };
+    const source = { id: 'source119', type: 'assistant', catId: 'codex61-sol', content: 'new source', timestamp: 1 };
+    const answer = {
+      id: 'reply122',
+      type: 'assistant',
+      from: { kind: 'agent', catId: 'gpt-pro' },
+      catId: 'gpt-pro',
+      content: '收到 Sol',
+      timestamp: 3,
+      replyTo: 'source119',
+      origin: 'callback',
+      extra: {
+        isExplicitPost: true,
+        cloudBridgeReturn: {
+          v: 1,
+          threadId: 'thread-pro',
+          sourceMessageId: 'source119',
+          targetCatId: 'gpt-pro',
+          dispatchInvocationId: 'dispatch119',
+        },
+      },
+    };
+    const html = renderNotice(
+      {
+        content: '投递给 Pro 的结果未知',
+        timestamp: 2,
+        replyTo: 'source119',
+        source: {
+          connector: 'cloud-bridge-status',
+          label: '云端猫投递',
+          icon: 'info',
+          meta: { noticeTone: 'warning', cloudBridgeOutboundReceipt: outbound },
+        },
+      },
+      [source, answer] as ChatMessageType[],
+    );
+    expect(html).toContain('已收到 Pro 回复');
+    expect(html).toContain('本次浏览器 Host 回执未确认');
+    expect(html).toContain('data-cloud-outbound-status="unknown"');
+    expect(html).not.toContain('投递给 Pro 的结果未知');
+    expect(html).not.toContain('已确认投递');
+  });
+
+  const receipt = {
+    v: 1,
+    kind: 'approval_decision_receipt',
+    producerId: 'F128',
+    canonicalProposalId: 'proposal_receipt_example',
+    resolution: 'accepted',
+    approvalCardRef: { threadId: 'thread_example', messageId: 'original-card' },
+    requesterCatId: 'codex61-sol',
+    decidedAt: 1793030000000,
+    decidedBy: 'default-user',
+  };
+
+  it('keeps an approval receipt out of the centered system box and never exposes its machine body', () => {
+    const html = renderNotice({
+      content: '审批结果：线程提案 proposal_receipt_example 已批准。',
+      timestamp: receipt.decidedAt,
+      source: {
+        connector: 'approval-hub',
+        label: 'Host 审批结果回执',
+        icon: 'info',
+        meta: { approvalDecisionReceipt: receipt },
+      },
+    });
+    expect(html).toContain('chat-approval-receipt');
+    expect(html).toContain('justify-end');
+    expect(html).not.toContain('system-notice-bar');
+    expect(html).not.toContain('proposal_receipt_example');
+  });
+
+  it('does not expose the machine body when an approval receipt metadata record is malformed', () => {
+    const html = renderNotice({
+      content: '审批结果：线程提案 proposal_receipt_example 已批准。',
+      timestamp: receipt.decidedAt,
+      source: {
+        connector: 'approval-hub',
+        label: 'Host 审批结果回执',
+        icon: 'info',
+        meta: { approvalDecisionReceipt: { ...receipt, resolution: 'expired' } },
+      },
+    });
+    expect(html).not.toContain('proposal_receipt_example');
+    expect(html).toContain('chat-approval-receipt');
+  });
+
   it('uses Clowder cafe surface styling for info notices instead of a generic blue card', () => {
     const html = renderNotice({
       content: '想交接给 @codex？把它单独放到新起一行开头，才能触发交接。',

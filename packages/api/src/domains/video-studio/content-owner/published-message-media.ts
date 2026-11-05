@@ -1,5 +1,10 @@
 import { createHash } from 'node:crypto';
-import { createCatId, type MessageMediaPublicationSource, messageMediaItemKey } from '@cat-cafe/shared';
+import {
+  createCatId,
+  type MessageMediaPublicationSource,
+  messageMediaItemKey,
+  type ReviewedMediaType,
+} from '@cat-cafe/shared';
 import { aggregateThreadArtifacts } from '../../cats/services/agents/routing/thread-artifacts-aggregator.js';
 import type { IMessageStore, StoredMessage } from '../../cats/services/stores/ports/MessageStore.js';
 import { isDurableOwnerReadEvidence, resolveVisibleReplyParent } from '../../cats/services/stores/visibility.js';
@@ -22,17 +27,21 @@ function messageItemUrl(message: StoredMessage, source: MessageMediaPublicationS
 
 /** Resolve an exact published item; no Task or artifact-title matching participates. */
 export async function readPublishedMessageItem(
-  messages: Pick<IMessageStore, 'getById'>,
+  messages: Pick<IMessageStore, 'getById' | 'getArtifactById'>,
   source: MessageMediaPublicationSource,
   principal: MediaReviewPrincipal,
 ) {
-  const message = await resolveVisibleReplyParent(messages, source.messageId, {
-    threadId: source.threadId,
-    viewer:
-      principal.actor.kind === 'human'
-        ? { type: 'user' }
-        : { type: 'cat', catId: createCatId(principal.actor.actorId) },
-  });
+  const message = await resolveVisibleReplyParent(
+    { getById: (id) => (messages.getArtifactById ? messages.getArtifactById(id) : messages.getById(id)) },
+    source.messageId,
+    {
+      threadId: source.threadId,
+      viewer:
+        principal.actor.kind === 'human'
+          ? { type: 'user' }
+          : { type: 'cat', catId: createCatId(principal.actor.actorId) },
+    },
+  );
   if (
     !message ||
     message.userId !== principal.userId ||
@@ -47,10 +56,10 @@ export async function readPublishedMessageItem(
     throw new MediaOwnerError('publication_changed');
   const privateImage = /^\/api\/plugins\/chatgpt-dot\/images\/(dot_img_[a-f0-9]{64})\.png$/.exec(url);
   const file =
-    /^\/uploads\/([a-zA-Z0-9][a-zA-Z0-9._-]*\.(png|mp4))$/i.exec(url) ??
+    /^\/uploads\/([a-zA-Z0-9][a-zA-Z0-9._-]*\.(png|jpe?g|webp|mp4))$/i.exec(url) ??
     (privateImage ? [url, `${privateImage[1]}.png`, 'png'] : null);
   if (!file?.[1] || !file[2]) throw new MediaOwnerError('invalid_media');
-  const mediaType = file[2].toLowerCase() === 'png' ? ('image/png' as const) : ('video/mp4' as const);
+  const mediaType = publishedUploadMediaType(file[2]);
   return {
     matchingItemCount: aggregateThreadArtifacts({ messages: [message], prTasks: [], fileLedger: [] }).filter(
       (artifact) => artifact.url === url,
@@ -67,4 +76,21 @@ export async function readPublishedMessageItem(
         .digest('hex')}`,
     },
   };
+}
+
+/** A filename is a candidate MIME only; the bounded decoder still verifies the actual original bytes. */
+export function publishedUploadMediaType(extension: string): ReviewedMediaType {
+  switch (extension.toLowerCase()) {
+    case 'png':
+      return 'image/png';
+    case 'jpg':
+    case 'jpeg':
+      return 'image/jpeg';
+    case 'webp':
+      return 'image/webp';
+    case 'mp4':
+      return 'video/mp4';
+    default:
+      throw new MediaOwnerError('invalid_media');
+  }
 }

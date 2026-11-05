@@ -37,7 +37,8 @@ cat_cafe_redis_start_daemon() {
       {
         PATH: `${bin}:${process.env.PATH}`,
         ALPHA_TEST_READINESS_TRACE: trace,
-        ALPHA_TEST_UNREADABLE_AT: String(observation),
+        // Exhaust the current full-scope reobservation before expecting refusal.
+        ALPHA_TEST_UNREADABLE_AT: `${observation}+${observation + 1}`,
         ALPHA_TEST_PROTOCOL_TRACE: protocol,
         ALPHA_TEST_REAL_REDIS_CLI: execFileSync('which', ['redis-cli'], { encoding: 'utf8' }).trim(),
       },
@@ -59,7 +60,7 @@ cat_cafe_redis_start_daemon() {
   });
 }
 
-for (const unavailable of ['2', '2+6']) {
+for (const unavailable of ['2+3', '2+3+6+7']) {
   test(`RDB-first unreadable DBSIZE at ${unavailable} preserves an unloaded snapshot through cleanup`, async (t) => {
     const f = await storageFixture(t, { unreadableAfterBoot: true });
     f.seedRdb();
@@ -121,6 +122,37 @@ test('actual RDB-first startup proves ownership before PING/AOF and recovers its
   assert.equal(existsSync(f.pidFile), false, 'normal cleanup must leave no owned listener');
   assert.ok(existsSync(join(f.directory, 'recovered-marker')));
   assert.equal(readFileSync(join(f.directory, 'recovered-marker'), 'utf8').trim().length, 4096);
+});
+
+test('readiness exhaustion preserves a nonempty RDB without AOF or saving EXIT cleanup', async (t) => {
+  const f = await storageFixture(t);
+  f.seedRdb();
+  const snapshot = readFileSync(join(f.directory, 'dump.rdb'));
+  const result = f.storage(
+    `
+eval "$(declare -f redis-cli | sed '1s/redis-cli/original_guarded_cli/')"
+redis-cli() {
+  case "$*" in
+    *" ping")
+      # Still execute the real per-call identity verifier and native Redis PING.
+      original_guarded_cli "$@" >/dev/null || return 1
+      echo 'LOADING Redis is loading the dataset in memory'
+      ;;
+    *) original_guarded_cli "$@" ;;
+  esac
+}
+sleep() { SECONDS=$((SECONDS + 15)); }
+`,
+    {},
+    { expectRetainedRedis: true },
+  );
+  assert.equal(result.status, 1, result.stdout);
+  assert.match(result.stderr, /readiness.*budget exhausted/);
+  assert.doesNotMatch(result.stdout, /STORAGE_PROOF=/);
+  assert.equal(f.redis('dbsize'), '1', 'nonempty memory is not permission to save after readiness failed');
+  assert.equal(existsSync(join(f.directory, 'appendonlydir')), false);
+  assert.deepEqual(readFileSync(join(f.directory, 'dump.rdb')), snapshot);
+  assert.equal(existsSync(f.pidFile), true, 'keep its ownership for explicit non-saving teardown');
 });
 
 test('RDB-first protocol failure after native ownership capture cleans the own listener', async (t) => {

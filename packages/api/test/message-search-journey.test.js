@@ -19,6 +19,7 @@ import {
 } from '../dist/domains/concierge/concierge-search-context.js';
 import { IndexBuilder } from '../dist/domains/memory/IndexBuilder.js';
 import { MessageSearchService } from '../dist/domains/memory/MessageSearchService.js';
+import { MessageQueryQualifier } from '../dist/domains/memory/message-query-qualifier.js';
 import { SqliteEvidenceStore } from '../dist/domains/memory/SqliteEvidenceStore.js';
 import { callbacksRoutes } from '../dist/routes/callbacks.js';
 import { evidenceRoutes } from '../dist/routes/evidence.js';
@@ -53,7 +54,7 @@ async function runMessageSearchJourney() {
       messageStore.append({
         userId: thread.createdBy,
         threadId: thread.id,
-        catId: 'codex61-sol',
+        from: { kind: 'agent', catId: 'codex61-sol' },
         mentions: [],
         content,
         timestamp,
@@ -64,10 +65,15 @@ async function runMessageSearchJourney() {
     const again = await append(original, content, Date.parse('2026-09-02T00:00:00Z'));
     const retold = await append(foreground, content, Date.parse('2026-09-03T00:00:00Z'));
     const question = await append(foreground, content, Date.parse('2026-10-01T00:00:00Z'), {
-      catId: null,
+      from: { kind: 'user', userId: foreground.createdBy },
       deliveryStatus: 'queued',
     });
     await append(privateThread, content, Date.parse('2026-08-01T00:00:00Z'));
+    assert.deepEqual((await messageStore.getById(first.id))?.from, { kind: 'agent', catId: 'codex61-sol' });
+    assert.deepEqual((await messageStore.getById(question.id))?.from, {
+      kind: 'user',
+      userId: foreground.createdBy,
+    });
     builder = new IndexBuilder(
       evidenceStore,
       directory,
@@ -78,9 +84,19 @@ async function runMessageSearchJourney() {
     );
     for (const thread of threads) builder.markThreadDirty(thread.id);
     await builder.flushDirtyThreads();
-    const service = new MessageSearchService({ evidenceStore, messageStore, threadStore });
+    const service = new MessageSearchService({
+      evidenceStore,
+      messageStore,
+      threadStore,
+      // Redis/index/reader continuity uses a deterministic qualified source;
+      // native judgment has its own real bounded validation window.
+      qualifier: new MessageQueryQualifier(async (batch) =>
+        JSON.stringify({ requestId: batch.requestId, rows: batch.rows.map((row) => [row.id, 'supported', row.body]) }),
+      ),
+    });
     await app.register(evidenceRoutes, { evidenceStore, messageSearchService: service });
     await app.register(callbacksRoutes, {
+      messageSearchService: service,
       registry,
       agentKeyRegistry,
       messageStore,
@@ -115,6 +131,10 @@ async function runMessageSearchJourney() {
     assert.deepEqual(
       cat.results.map((hit) => hit.messageId),
       ids,
+    );
+    assert.deepEqual(
+      cat.results.map((hit) => hit.speaker),
+      ['codex61-sol', 'codex61-sol', 'codex61-sol'],
     );
     assert.equal(cat.meta.scope, 'global');
     assert.equal(cat.meta.effectiveMode, 'lexical');
@@ -167,7 +187,9 @@ async function runMessageSearchJourney() {
     });
     assert.equal(originalRead.isError, undefined, originalRead.content[0].text);
     const envelope = JSON.parse(originalRead.content[0].text);
-    assert.equal(envelope.messages.find((message) => message.id === first.id)?.content, content);
+    const originalMessage = envelope.messages.find((message) => message.id === first.id);
+    assert.equal(originalMessage?.content, content);
+    assert.deepEqual(originalMessage?.from, { kind: 'agent', catId: 'codex61-sol' });
     const concierge = await buildConciergeSearchContext({
       userMessage: query,
       threadId: foreground.id,
@@ -202,7 +224,7 @@ async function runMessageSearchJourney() {
         exactOriginalRead: true,
         sourceExcluded: !cat.results.some((hit) => hit.messageId === question.id),
         privateThreadExcluded: !cat.results.some((hit) => hit.threadId === privateThread.id),
-        providerLatency: 'unknown; no provider invoked',
+        providerLatency: 'unknown; no native provider, deterministic qualification control',
         liveUserHistory: false,
       }),
     );
@@ -244,10 +266,11 @@ async function runMessageSearchJourney() {
       responseMode: 'full',
     });
     assert.equal(agentOriginalRead.isError, undefined, agentOriginalRead.content[0].text);
-    assert.equal(
-      JSON.parse(agentOriginalRead.content[0].text).messages.find((message) => message.id === first.id)?.content,
-      content,
+    const agentOriginalMessage = JSON.parse(agentOriginalRead.content[0].text).messages.find(
+      (message) => message.id === first.id,
     );
+    assert.equal(agentOriginalMessage?.content, content);
+    assert.deepEqual(agentOriginalMessage?.from, { kind: 'agent', catId: 'codex61-sol' });
     const crossOwner = await fetch(
       `${address}/api/callbacks/search-evidence?q=${query}&resultUnit=message&threadId=${privateThread.id}&userId=other-owner`,
       { headers: { 'x-agent-key-secret': key.secret } },

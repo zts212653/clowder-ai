@@ -49,6 +49,8 @@ export const defaultDirectoryBrowserCopy: DirectoryBrowserCopy = {
 };
 
 export interface DirectoryBrowserProps {
+  onNavigationStart?: () => void;
+  allowCreateDirectory?: boolean;
   /** Initially browsed path — defaults to home via API */
   initialPath?: string;
   /** Path of the currently active project (highlighted in listing) */

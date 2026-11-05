@@ -113,7 +113,7 @@ export function registerTaskPublicationHeaderJourneys(suite) {
             handleApi: async (request, url) => {
               if (requestChange && url.pathname === '/api/messages' && request.method() === 'POST') {
                 sent.push(request.postDataJSON());
-                return { body: { userMessageId: `controlled-${label}` } };
+                return { body: { status: 'queued', userMessageId: `controlled-${label}` } };
               }
               const thread = composer ? { ...owner.thread, projectPath: composer.root } : owner.thread;
               if (url.pathname === '/api/threads') return { body: { threads: [thread] } };

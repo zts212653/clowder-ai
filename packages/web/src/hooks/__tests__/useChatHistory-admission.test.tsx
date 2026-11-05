@@ -52,7 +52,6 @@ describe('useChatHistory runtime admission', () => {
       targetCats: [],
       catStatuses: {},
       catInvocations: {},
-      currentGame: null,
       threadStates: {},
       currentThreadId: THREAD_ID,
       viewMode: 'single',

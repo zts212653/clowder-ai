@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { apiFetch } from '@/utils/api-client';
 import { AlertOctagonIcon, CheckCircleIcon, FileTextIcon, HashIcon } from './community-icons';
 import type {
   CommunityDecisionAction,
@@ -73,7 +74,7 @@ function resolveDirectionAcceptBody(item: CommunityDecisionQueueItemModel): Reco
 
 async function postAction(action: CommunityDecisionAction, body?: Record<string, unknown>): Promise<void> {
   if (!action.endpoint) throw new Error('Action endpoint is missing');
-  const res = await fetch(action.endpoint, {
+  const res = await apiFetch(action.endpoint, {
     method: action.method === 'GET' ? 'GET' : 'POST',
     headers: body ? { 'Content-Type': 'application/json' } : undefined,
     body: body ? JSON.stringify(body) : undefined,

@@ -167,6 +167,7 @@ describe('B6: multi_mention queue dispatch', () => {
   let actionAdmissionCalls, actionUnavailableCalls, actionReturnedDeliveredCalls, actionAdmissionResult;
   let actionSuccessorAdmissionService;
   let creds;
+  let routingDecision;
 
   beforeEach(async () => {
     resetMultiMentionOrchestrator();
@@ -221,6 +222,23 @@ describe('B6: multi_mention queue dispatch', () => {
       invocationQueue,
       queueProcessor: mockQueueProcessor,
       actionSuccessorAdmissionService,
+      routingDispatchPreflight: {
+        async preflight(input) {
+          routingDecision = {
+            v: 1,
+            ownerId: input.ownerId,
+            observedAt: Date.now(),
+            resolverState: 'fresh',
+            targets: input.targetCatIds.map((targetCatId) => ({
+              targetCatId,
+              disposition: 'rejected',
+              reasons: [{ code: 'quota_exhausted', summary: 'Temporarily unavailable', sourceRefs: ['quota:1'] }],
+              alternatives: [],
+            })),
+          };
+          return routingDecision;
+        },
+      },
     });
     await app.ready();
   });
@@ -244,6 +262,12 @@ describe('B6: multi_mention queue dispatch', () => {
     assert.equal(res.statusCode, 200, res.body);
     const body = res.json();
     assert.ok(body.requestId);
+    assert.equal(body.routing_preflight, undefined);
+    assert.equal(body.routing_admission.stage, 'queue_admitted');
+    assert.equal(body.routing_admission.executionPreflight, 'pending');
+    assert.equal(body.routing_admission.targets[0].availabilityObservation, 'unavailable');
+    assert.deepEqual(body.routing_admission.targets[0].reasons, routingDecision.targets[0].reasons);
+    assert.deepEqual(invocationQueue.list('thread-1', 'user-1')[0].targets, ['codex']);
 
     // Router should NOT have been called directly (queue path used)
     assert.equal(mockRouter.getExecutions().length, 0);

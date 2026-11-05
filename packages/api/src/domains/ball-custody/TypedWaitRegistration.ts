@@ -1,25 +1,52 @@
 import { createHash } from 'node:crypto';
-import {
-  type AwaitStateV1,
-  type DeploymentAwaitStateV1,
-  deploymentWaitPredicateSchema,
-  type TaskItem,
-} from '@cat-cafe/shared';
+import { isDeepStrictEqual } from 'node:util';
+import { type DeploymentAwaitStateV1, deploymentWaitPredicateSchema, type TaskItem } from '@cat-cafe/shared';
 import { z } from 'zod';
+import { parseToolExecutionPolicy } from '../cats/services/agents/invocation/tool-execution-policy.js';
+import { receiptOwnsOutcome } from '../runtime-deployment/DeploymentWaitAuthority.js';
+import { isLivePluginWait } from './PluginWaitContinuation.js';
 
 const nonEmpty = z.string().min(1);
 const generation = z.number().int().positive().safe();
 export const TYPED_WAIT_REGISTRATION_FIELD = 'typedWaitRegistration';
 
+const authorizationSchema = z
+  .object({
+    ownerAuthProvenance: z.enum(['strict', 'compatibility_fallback', 'unknown']),
+    toolExecutionPolicy: z
+      .unknown()
+      .transform((value, context) => {
+        try {
+          return parseToolExecutionPolicy(JSON.stringify(value));
+        } catch {
+          context.addIssue({ code: 'custom', message: 'invalid continuation tool policy' });
+          return z.NEVER;
+        }
+      })
+      .optional(),
+  })
+  .strict();
+
+// Decode historical stored receipts without deleting data; only deployment/plugin waits confer live authority.
 const receiptSchema = z
   .object({
     v: z.literal(1),
     invocationId: nonEmpty,
+    /** Server-authenticated facts, sealed atomically with the Task wait; never callback payload. */
+    authorization: authorizationSchema.optional(),
     source: z
       .object({
         kind: z.enum(['primary', 'adopted_hold']),
         sourceMessageId: nonEmpty,
         holdTaskId: nonEmpty.optional(),
+        sessionHandoff: z
+          .object({
+            proposalId: nonEmpty,
+            continuationEntryId: nonEmpty,
+            sourceSessionId: nonEmpty,
+          })
+          .strict()
+          .optional(),
       })
       .strict()
       .refine((source) => source.kind !== 'adopted_hold' || source.holdTaskId !== undefined),
@@ -54,10 +81,18 @@ const receiptSchema = z
     if (deployment && receipt.expiresAt !== undefined) {
       context.addIssue({ code: 'custom', path: ['expiresAt'], message: 'deployment waits are persistent' });
     }
+    if (receipt.source.sessionHandoff && (!deployment || receipt.source.kind !== 'primary' || !receipt.authorization)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['source'],
+        message: 'handoff waits require a deployment authorization snapshot',
+      });
+    }
   });
 
 /** Private Task aggregate field, atomically installed with its await generation. */
 export type TypedWaitRegistration = z.infer<typeof receiptSchema>;
+export type TypedWaitAuthorization = z.infer<typeof authorizationSchema>;
 export type TypedWaitSource = TypedWaitRegistration['source'];
 export interface TypedWaitRegistrationSnapshot {
   readonly task: TaskItem;
@@ -89,22 +124,10 @@ function canonical(value: unknown): string {
   return JSON.stringify(value);
 }
 
-type SupportedAwaitState = AwaitStateV1 | DeploymentAwaitStateV1;
-
-const PR_PREDICATE_KINDS = new Set([
-  'pr_head_changed',
-  'pr_review_result_available',
-  'pr_review_decision_changed',
-  'pr_review_thread_changed',
-  'pr_ci_terminal',
-  'pr_became_conflicting',
-  'pr_conversation_comment_added',
-  'pr_inline_comment_added',
-]);
-const ISSUE_PREDICATE_KINDS = new Set(['issue_comment_added', 'issue_author_commented']);
+type SupportedAwaitState = DeploymentAwaitStateV1;
 
 export function typedWaitPredicateDigest(active: SupportedAwaitState): string {
-  // A predicate is relative to its registered baseline (including the covered review HEAD).
+  // A deployment predicate is relative to its registered runtime baseline.
   return createHash('sha256')
     .update(canonical({ when: active.continuation.when, baseline: active.baseline }))
     .digest('hex');
@@ -118,28 +141,6 @@ function deploymentProofKind(active: SupportedAwaitState): TypedWaitRegistration
     : null;
 }
 
-function githubProofKind(active: SupportedAwaitState): TypedWaitRegistration['proofKind'] | null {
-  let review = false;
-  const kinds = active.subjectRef.startsWith('pr:')
-    ? PR_PREDICATE_KINDS
-    : active.subjectRef.startsWith('issue:')
-      ? ISSUE_PREDICATE_KINDS
-      : new Set<string>();
-  for (const predicate of active.continuation.when) {
-    if (!kinds.has(predicate.kind)) return null;
-    if (predicate.kind === 'pr_review_result_available') {
-      if (!Number.isSafeInteger(predicate.triggerCommentId) || (predicate.triggerCommentId ?? 0) <= 0) return null;
-      review = true;
-    }
-  }
-  return review ? 'anchored_review' : 'typed_predicates';
-}
-
-function proofKind(active: SupportedAwaitState): TypedWaitRegistration['proofKind'] | null {
-  if (active.continuation.when.length === 0) return null;
-  return active.subjectRef.startsWith('deployment:') ? deploymentProofKind(active) : githubProofKind(active);
-}
-
 export function parseTypedWaitRegistration(raw: unknown): TypedWaitRegistration | null {
   try {
     const parsed = receiptSchema.safeParse(typeof raw === 'string' ? JSON.parse(raw) : raw);
@@ -149,21 +150,22 @@ export function parseTypedWaitRegistration(raw: unknown): TypedWaitRegistration 
   }
 }
 
-/** Called only after the registration producer has verified every anchored review trigger. */
+/** Deployment receipts are minted only for the Host-owned deployment continuation. */
 export function createTypedWaitRegistration(input: {
   readonly task: TaskItem;
   readonly active: SupportedAwaitState;
   readonly invocationId: string;
   readonly source: TypedWaitSource;
+  readonly authorization?: TypedWaitAuthorization;
 }): TypedWaitRegistration | null {
   const { task, active, source, invocationId } = input;
-  const kind = proofKind(active);
+  if (!active.subjectRef.startsWith('deployment:') || task.kind !== 'work') return null;
+  const kind = deploymentProofKind(active);
   if (!kind) return null;
-  const isDeployment = active.subjectRef.startsWith('deployment:');
-  if ((isDeployment && task.kind !== 'work') || (!isDeployment && task.kind === 'work')) return null;
   return parseTypedWaitRegistration({
     v: 1,
     invocationId,
+    ...(input.authorization ? { authorization: input.authorization } : {}),
     source,
     taskId: task.id,
     taskKind: task.kind,
@@ -186,24 +188,24 @@ export function isLiveTypedWaitRegistration(
   now: number,
   reference?: TypedWaitReference,
 ): boolean {
+  if (snapshot?.task.pluginWait) return isLivePluginWait(snapshot.task, identity, now, reference);
   if (!snapshot?.receipt) return false;
   const { task, receipt } = snapshot;
-  const isDeployment = receipt.subjectRef.startsWith('deployment:');
-  const active = isDeployment ? task.deploymentWait?.await : task.automationState?.await;
-  const terminal = isDeployment ? task.deploymentWait?.waitOutcome : task.automationState?.waitOutcome;
+  if (receipt.proofKind !== 'deployment_predicate' || !receipt.subjectRef.startsWith('deployment:')) return false;
+  const active = task.deploymentWait?.await;
+  const terminal = task.deploymentWait?.waitOutcome;
   return (
     !!active &&
     task.status !== 'done' &&
     task.id === receipt.taskId &&
     task.kind === receipt.taskKind &&
-    task.kind === (isDeployment ? 'work' : receipt.subjectRef.startsWith('pr:') ? 'pr_tracking' : 'issue_tracking') &&
+    task.kind === 'work' &&
     task.userId === receipt.userId &&
     receipt.userId === identity.userId &&
     task.ownerCatId === receipt.catId &&
     receipt.catId === identity.catId &&
     task.threadId === receipt.threadId &&
     receipt.threadId === identity.threadId &&
-    (isDeployment || task.subjectKey === receipt.subjectRef) &&
     active.subjectRef === receipt.subjectRef &&
     receipt.invocationId === identity.invocationId &&
     receipt.source.sourceMessageId === identity.sourceMessageId &&
@@ -217,13 +219,32 @@ export function isLiveTypedWaitRegistration(
     (receipt.expiresAt === undefined || receipt.expiresAt > now) &&
     receipt.registeredAt <= now &&
     (!terminal || terminal.generation !== receipt.generation) &&
-    receipt.proofKind === proofKind(active) &&
+    receipt.proofKind === deploymentProofKind(active) &&
     receipt.predicateDigest === typedWaitPredicateDigest(active) &&
     (!reference || (reference.taskId === task.id && reference.generation === receipt.generation))
   );
 }
 
-export function assertTypedWaitRegistrationInstallation(task: TaskItem, receipt: TypedWaitRegistration): void {
+export function assertTypedWaitRegistrationInstallation(
+  task: TaskItem,
+  receipt: TypedWaitRegistration,
+  previousReceipt?: TypedWaitRegistration | null,
+): void {
+  const outcome = task.deploymentWait?.waitOutcome;
+  // A verified legacy publication may seal only the missing auth snapshot, never replace the
+  // original receipt/source after its await was consumed. Stores read previousReceipt in the same CAS.
+  if (
+    outcome &&
+    !task.deploymentWait?.await &&
+    previousReceipt &&
+    !previousReceipt.authorization &&
+    receipt.authorization &&
+    parseTypedWaitRegistration(receipt) &&
+    outcome.registeredAt === previousReceipt.registeredAt &&
+    receiptOwnsOutcome(task, outcome, previousReceipt, true) &&
+    isDeepStrictEqual({ ...receipt, authorization: undefined }, { ...previousReceipt, authorization: undefined })
+  )
+    return;
   if (
     !isLiveTypedWaitRegistration(
       { task, receipt },

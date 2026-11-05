@@ -5,6 +5,7 @@
 
 import { resolve } from 'node:path';
 import type { CreateExternalProjectInput, ExternalProject } from '@cat-cafe/shared';
+import { deploymentDefaults } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { generateSortableId } from '../cats/services/stores/ports/MessageStore.js';
 import { ExternalProjectKeys } from '../cats/services/stores/redis-keys/community/external-project-keys.js';
@@ -22,7 +23,7 @@ export class ExternalProjectStore {
       throw new Error('sourcePath is required');
     }
     // P2-1: Prevent path traversal — resolved backlogPath must stay within sourcePath
-    const backlogPath = input.backlogPath ?? 'docs/ROADMAP.md';
+    const backlogPath = input.backlogPath ?? deploymentDefaults.roadmapPath;
     const resolvedBacklog = resolve(input.sourcePath, backlogPath);
     const resolvedSource = resolve(input.sourcePath);
     if (!resolvedBacklog.startsWith(`${resolvedSource}/`) && resolvedBacklog !== resolvedSource) {
@@ -138,6 +139,7 @@ export class ExternalProjectStore {
       name: data.name ?? '',
       description: data.description ?? '',
       sourcePath: data.sourcePath ?? '',
+      // Preserve the historical missing-field migration value for already stored records.
       backlogPath: data.backlogPath ?? 'docs/ROADMAP.md',
       createdAt: Number.parseInt(data.createdAt ?? '0', 10),
       updatedAt: Number.parseInt(data.updatedAt ?? '0', 10),

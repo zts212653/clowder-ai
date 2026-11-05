@@ -170,6 +170,18 @@ export class EntityRegistryStore {
     return resolveEntityConflict(this.db, incoming, resolution, context);
   }
 
+  /** Trusted writer context is committed atomically with the entity, unlike proposal-supplied provenance. */
+  proposalEffectProof(entityId: string, proposalId: string, ownerUserId: string): string | null {
+    const row = this.db
+      .prepare(`
+      SELECT revision_id FROM entity_revision_events
+      WHERE entity_id = ? AND source = 'proposal-approval' AND actor_id = ? AND proposal_id = ?
+      ORDER BY revision_id DESC LIMIT 1
+    `)
+      .get(entityId, ownerUserId, proposalId) as { revision_id: number } | undefined;
+    return row ? `entity-revision:${row.revision_id}` : null;
+  }
+
   get(entityId: string): StoredEntityRecord | null {
     const row = this.db.prepare('SELECT * FROM entity_registry WHERE entity_id = ?').get(entityId) as
       | EntityRow

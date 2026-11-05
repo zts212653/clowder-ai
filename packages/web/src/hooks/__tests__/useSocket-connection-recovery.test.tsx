@@ -26,7 +26,6 @@ vi.mock('@/utils/api-client', () => ({
   })),
 }));
 vi.mock('@/utils/sidebar-thread-snapshot', () => ({ invalidateSidebarProjection: vi.fn() }));
-vi.mock('../useGameReconnect', () => ({ reconnectGame: vi.fn(async () => {}) }));
 vi.mock('@/utils/offline-store', () => ({ saveThreadActiveState: vi.fn(async () => {}) }));
 vi.mock('@/stores/chatStore', () => {
   const thread = {
@@ -125,6 +124,21 @@ describe('chat connection recovery without a page reload', () => {
     // No later connect event arrives: the connection manager lost its retry.
     // `active` remains true, so application ownership still requests a connection.
   }
+
+  it('does not request retired game endpoints on initial connection or recovery', async () => {
+    const fetch = vi.fn(async (input: RequestInfo | URL) => {
+      void input;
+      return Response.json({});
+    });
+    vi.stubGlobal('fetch', fetch);
+    mount();
+    loseAutomaticRetry();
+    await act(async () => vi.advanceTimersByTimeAsync(5_000));
+    const gameRequests = fetch.mock.calls
+      .map(([input]) => new URL(String(input)).pathname)
+      .filter((path) => /^\/api\/(?:games?(?:\/|$)|threads\/[^/]+\/game(?:\/|$))/.test(path));
+    expect(gameRequests).toEqual([]);
+  });
 
   it('establishes the HTTP cookie before opening the initial physical Socket', async () => {
     let release!: () => void;

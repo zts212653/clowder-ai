@@ -1,14 +1,16 @@
 'use client';
 
-import { buildPreviewGatewayUrl } from '@cat-cafe/shared';
+import { buildPreviewGatewayUrl, deploymentDefaults } from '@cat-cafe/shared';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useShellCopy } from '@/components/shell/shell-copy';
 import { useShellPresentation } from '@/components/shell/shell-presentation';
 import { useWorkspaceSurfaceVisibility } from '@/components/workbench/WorkspaceSurfaceVisibility';
 import { previewVisiblePageAdmissionController } from '@/lib/preview-visible-page-admission-controller';
 import { apiFetch } from '@/utils/api-client';
+import type { DemoPreviewStage } from '../onboarding-demo/demo-story';
 import { BrowserTabBar } from './BrowserTabBar';
 import { BrowserToolbar } from './BrowserToolbar';
+import { BundledDemoBrowser } from './BundledDemoBrowser';
 import { ConsolePanel } from './ConsolePanel';
 import { type CodeToolsCopy, codeToolsCopy } from './code-tools.shell-copy';
 import { parsePreviewUrl } from './preview-url-utils';
@@ -28,8 +30,7 @@ const CLASSIC_COPY: PreviewCopy = {
   newTabTitle: 'New Tab',
   gatewayUnavailable: 'Preview gateway not available',
   invalidUrl: 'Enter a valid localhost URL (e.g. localhost:5173)',
-  hubPageWarning:
-    'This URL looks like a Clowder AI Hub page, not a dev server. Preview is designed for dev servers (Vite, Next.js, etc.).',
+  hubPageWarning: `This URL looks like a ${deploymentDefaults.brand.displayName} Hub page, not a dev server. Preview is designed for dev servers (Vite, Next.js, etc.).`,
   portNotAllowed: 'Port not allowed',
   hmrConnected: (port: number) => `HMR connected · localhost:${port}`,
   hmrDisconnected: 'HMR disconnected.',
@@ -55,6 +56,10 @@ export interface BrowserTab {
 }
 
 interface BrowserPanelProps {
+  /** Fixed, packaged onboarding deliverable. Does not start or probe a runtime. */
+  bundledPage?: 'onboarding-todo';
+  bundledStage?: DemoPreviewStage;
+  onBundledReady?: () => void;
   /** Initial port to preview (e.g. from port discovery toast) */
   initialPort?: number;
   /** Initial path for deep-linking (e.g. "/dashboard" from auto-open) */
@@ -95,6 +100,8 @@ function previewIssueText(issue: PreviewIssue, copy: PreviewCopy): string {
 
 export function BrowserPanel(props: BrowserPanelProps) {
   const presentation = useShellPresentation();
+  if (props.bundledPage === 'onboarding-todo')
+    return <BundledDemoBrowser stage={props.bundledStage} onReady={props.onBundledReady} />;
   return presentation === 'v2' ? <BrowserPanelV2 {...props} /> : <BrowserPanelCore {...props} copy={CLASSIC_COPY} />;
 }
 

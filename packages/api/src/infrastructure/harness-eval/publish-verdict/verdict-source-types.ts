@@ -29,6 +29,15 @@ export interface A2aSnapshotAttributionRefs {
   snapshotName?: string;
   /** Basename of sanitized attribution YAML inside `<harnessFeedbackRoot>/attributions/`. */
   attributionName?: string;
+  /** Opt-in to the server-resolved, declared sibling evaluator; never a caller-supplied path. */
+  source?: A2aEvaluatorSource;
+}
+
+export interface A2aEvaluatorSource {
+  kind: 'designated-a2a-evaluator';
+  checkoutHeadSha: string;
+  snapshotSha256: string;
+  attributionSha256: string;
 }
 
 /**

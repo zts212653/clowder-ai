@@ -35,9 +35,13 @@ function textColor(tone: DotTone): string {
   return 'var(--shell-body)';
 }
 
-function Separator({ className = '' }: { className?: string }) {
+function Separator() {
   return (
-    <span aria-hidden="true" className={`flex-none ${className}`} style={{ color: 'var(--shell-muted)', opacity: 0.6 }}>
+    <span
+      aria-hidden="true"
+      className={`flex-none ${styles.separator}`}
+      style={{ color: 'var(--shell-muted)', opacity: 0.6 }}
+    >
       ·
     </span>
   );
@@ -204,7 +208,7 @@ export function ReplyLastLine(props: ReplyLastLineProps) {
       {status ? <ReplyStatusLine status={status} event={props.activityEvent} /> : null}
       {elapsedMs !== null ? (
         <>
-          <Separator className={styles.elapsedSeparator} />
+          <Separator />
           <span className={activityStyles.duration}>
             <span data-testid="reply-working-duration" className={activityStyles.durationFull}>
               {t.record.runningDuration(elapsedMs)}

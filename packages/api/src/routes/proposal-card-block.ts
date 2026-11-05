@@ -62,6 +62,8 @@ export function buildProposalCardBlock(proposal: ThreadProposal): RichCardBlock 
         label: '执行范围',
         value: `${s.workUnitRef} · source: ${s.acceptedSourceRef}@${s.acceptedRevision.slice(0, 8)}`,
       });
+    } else {
+      fields.push({ label: '执行范围', value: '本提案完整合同（标题、原因、首条消息、关联任务、执行成员与回报约定）' });
     }
   }
   if (proposal.initialMessage) fields.push({ label: '首条消息', value: proposal.initialMessage });

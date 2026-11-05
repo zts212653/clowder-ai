@@ -35,6 +35,38 @@ async function expectCode(promise, code) {
 }
 
 describe('HandleService — issuance & resolution', () => {
+  test('internal thread handles are deterministic across Host restarts', async () => {
+    const handleStore = new memory.MemoryHandleStore();
+    const cursorStore = new memory.MemoryCursorStore();
+    const firstService = new handlesMod.HandleService(handleStore, cursorStore);
+    const restartedService = new handlesMod.HandleService(handleStore, cursorStore);
+    const input = {
+      pluginInstanceId: 'inst-a',
+      threadId: 'thread-1',
+      userId: 'user-1',
+      scope: SCOPE,
+    };
+
+    const first = await firstService.ensureThreadHandle(input);
+    const second = await restartedService.ensureThreadHandle(input);
+
+    assert.equal(first.handleId, second.handleId);
+    assert.match(first.handleId, /^ih_/);
+  });
+
+  test('ensuring an internal handle never revives a revoked record', async () => {
+    const input = {
+      pluginInstanceId: 'inst-a',
+      threadId: 'thread-1',
+      userId: 'user-1',
+      scope: SCOPE,
+    };
+    const created = await service.ensureThreadHandle(input);
+    await service.revoke(created.handleId);
+
+    await expectCode(service.ensureThreadHandle(input), 'PERMISSION');
+  });
+
   test('issueThreadHandle returns a resolvable th_ handle bound to instance/thread/user', async () => {
     const { handleId } = await service.issueThreadHandle({
       pluginInstanceId: 'inst-a',

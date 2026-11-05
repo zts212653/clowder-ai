@@ -18,7 +18,8 @@ import {
   OpenTelemetryRoutingSignalObservationSink,
   RoutingSignalObservationTelemetry,
 } from './RoutingSignalObservationTelemetry.js';
-import { RuntimeRoutingCandidateCatalogSource } from './RuntimeRoutingCandidateCatalogSource.js';
+import { RoutingSelectionService } from './selection/RoutingSelectionService.js';
+import { RuntimeRoutingCandidateCatalogSource } from './selection/RuntimeRoutingCandidateCatalogSource.js';
 
 export interface CreateRoutingContextRuntimeOptions {
   redis: RedisClient;
@@ -48,7 +49,10 @@ export function createRoutingContextRuntime(options: CreateRoutingContextRuntime
     telemetry: signalObservationTelemetry,
   });
   const preferenceStore = new RedisRoutingPreferenceStore(options.redis);
-  const catalogSource = new RuntimeRoutingCandidateCatalogSource({ getConfigs: options.getConfigs });
+  const catalogSource = new RuntimeRoutingCandidateCatalogSource({
+    getConfigs: options.getConfigs,
+    projectRoot: options.projectRoot,
+  });
   const resolver = new RoutingContextResolver({
     signalStore,
     preferenceStore,
@@ -58,6 +62,7 @@ export function createRoutingContextRuntime(options: CreateRoutingContextRuntime
     }),
   });
   const readService = new RoutingContextReadService({ catalogSource, resolver });
+  const selectionService = new RoutingSelectionService({ readService });
   const promptProjector = new RoutingContextPromptProjector({
     getEngagementPolicy: (catId) => loadDossierProfiles(options.projectRoot).get(catId)?.engagementPolicy,
   });
@@ -87,6 +92,7 @@ export function createRoutingContextRuntime(options: CreateRoutingContextRuntime
     catalogSource,
     resolver,
     readService,
+    selectionService,
     promptProjector,
     promptProjection,
     preflightService,

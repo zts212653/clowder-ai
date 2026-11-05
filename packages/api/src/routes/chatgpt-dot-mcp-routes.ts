@@ -1,4 +1,5 @@
 import {
+  deploymentDefaults,
   dotAskArguments,
   dotImageArguments as imageArguments,
   dotReplyArguments as replyArguments,
@@ -106,7 +107,7 @@ export function registerDotMcpRoutes(
             return response({
               protocolVersion: '2026-07-28',
               capabilities: { tools: {}, events: {} },
-              serverInfo: { name: 'Clowder AI dot', version: '0.1.0' },
+              serverInfo: { name: `${deploymentDefaults.brand.displayName} dot`, version: '0.1.0' },
             });
           if (method === 'ping') return response({});
           if (method === 'events/list') return response({ events: [DOT_EVENT_DEFINITION] });

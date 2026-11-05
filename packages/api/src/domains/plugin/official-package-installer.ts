@@ -1,14 +1,28 @@
 import { lstat, readFile } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
-import type { SignalSchemaCatalog } from '@clowder-ai/plugin-contract';
+import { fetchOfficialPackageArchive, registeredBundledArchive } from './bundled-package-source.js';
 import { staticEditorContributions } from './content-editor-runtime/admission.js';
+import { readAgentClientMetadata } from './declared/agent-client-metadata.js';
 import { desktopWindowContribution } from './desktop-window-runtime/admission.js';
 import { FilesystemVerifiedPluginPackageLocator, type VerifiedPluginPackage } from './external-runtime/index.js';
 import type { PluginManifestValidator } from './external-runtime/package-staging.js';
 import { reportPackageArchiveFailure } from './external-runtime/package-staging-diagnostics.js';
 import { snapshotPluginSurfaceAssets } from './external-runtime/package-surface-assets.js';
 import type { HostInventoryControlPlane } from './host-inventory/control-plane.js';
-import { type PackageAdmissionCandidate, PluginInventoryError } from './host-inventory/types.js';
+import { requireExecutableManifest } from './host-inventory/stored-manifest.js';
+import {
+  type InventoryMutationResult,
+  type PackageAdmissionCandidate,
+  PluginInventoryError,
+  type PluginPackageRecord,
+} from './host-inventory/types.js';
+import { LEGACY_BUNDLED_MANIFESTS } from './legacy-bundled-manifests.js';
+import {
+  compareOfficialPluginVersions,
+  type OfficialPluginCatalogProvider,
+  type OfficialPluginCatalogSnapshot,
+  StaticOfficialPluginCatalog,
+} from './manager/official-catalog-provider.js';
 import {
   type PluginPackageQuarantineFailureCode,
   type PluginPackageQuarantineRecorder,
@@ -16,23 +30,17 @@ import {
 } from './manager/plugin-package-quarantine.js';
 import {
   bundledManifestDigest,
-  OFFICIAL_BUNDLED_MANIFESTS,
   OFFICIAL_PLUGIN_CATALOG,
   type OfficialPluginCatalogEntry,
   officialPluginPresentationMatches,
 } from './official-catalog.js';
 import {
-  compareOfficialPluginVersions,
-  type OfficialPluginCatalogProvider,
-  StaticOfficialPluginCatalog,
-} from './official-catalog-provider.js';
-import {
-  downloadCatalogArchive,
   MAX_OFFICIAL_PACKAGE_BYTES,
   publishPluginPackageArchive,
   verifyPluginPackageDigest,
 } from './official-package-archive.js';
-import { OfficialPluginInstallError } from './official-package-errors.js';
+import { OfficialPluginInstallError, throwDataDirectoryConflict } from './official-package-errors.js';
+import { readPackageCapabilityRejection } from './read-package-capabilities.js';
 
 export interface OfficialPluginPackageInstallerOptions {
   readonly inventory: HostInventoryControlPlane;
@@ -73,7 +81,7 @@ function pathInside(root: string, candidate: string): boolean {
 async function readDeclaredSignalSchemas(
   rootDir: string,
   manifest: { readonly signals?: { readonly provides?: readonly { readonly schemaRef: string }[] } },
-): Promise<SignalSchemaCatalog> {
+): Promise<PluginPackageRecord['signalSchemas']> {
   const catalog: Record<string, Readonly<Record<string, unknown>>> = {};
   for (const declaration of manifest.signals?.provides ?? []) {
     const schemaPath = resolve(rootDir, declaration.schemaRef);
@@ -109,26 +117,66 @@ export class OfficialPluginPackageInstaller {
   constructor(private readonly options: OfficialPluginPackageInstallerOptions) {
     this.catalogProvider =
       options.catalogProvider ?? new StaticOfficialPluginCatalog(options.catalog ?? OFFICIAL_PLUGIN_CATALOG);
-    this.fetchArchive = options.fetchArchive ?? downloadCatalogArchive;
+    this.fetchArchive = options.fetchArchive ?? fetchOfficialPackageArchive;
     this.packagesRoot = resolve(options.packagesRoot);
   }
 
-  async install(catalogId: string, expectedRelease: OfficialPluginReleaseFence) {
+  async install(
+    catalogId: string,
+    expectedRelease: OfficialPluginReleaseFence,
+    admitVerified?: (candidate: PackageAdmissionCandidate) => Promise<InventoryMutationResult>,
+  ) {
     const entry = await this.catalogEntry(catalogId);
+    return this.installEntry(entry, expectedRelease, admitVerified);
+  }
+
+  /** Keeps one already-validated catalog operation on the snapshot that selected its release. */
+  async installFromSnapshot(
+    snapshot: OfficialPluginCatalogSnapshot,
+    catalogId: string,
+    expectedRelease: OfficialPluginReleaseFence,
+    admitVerified?: (candidate: PackageAdmissionCandidate) => Promise<InventoryMutationResult>,
+  ) {
+    if (snapshot.status !== 'fresh') {
+      throw new OfficialPluginInstallError('STALE_CATALOG', 'official catalog snapshot is not current');
+    }
+    const entry = snapshot.entries.find((candidate) => candidate.catalogId === catalogId);
+    if (!entry) {
+      throw new OfficialPluginInstallError('UNKNOWN_CATALOG_ID', `unknown official plugin ${catalogId}`);
+    }
+    return this.installEntry(entry, expectedRelease, admitVerified);
+  }
+
+  private async installEntry(
+    entry: OfficialPluginCatalogEntry,
+    expectedRelease: OfficialPluginReleaseFence,
+    admitVerified?: (candidate: PackageAdmissionCandidate) => Promise<InventoryMutationResult>,
+  ) {
     assertExpectedRelease(entry, expectedRelease);
     const existing = await this.existingExactInstall(entry);
     if (existing) {
-      const snapshot = await this.options.inventory.store.snapshot();
+      const snapshot = await this.options.inventory.store.snapshot({
+        pluginId: entry.pluginId,
+        packageDigests: [entry.packageDigest],
+      });
       const installed = snapshot.packages.find((pkg) => pkg.packageDigest === entry.packageDigest);
-      if (!installed || !desktopWindowContribution(installed.manifest) || !this.options.prepareDesktopComponent)
+      if (
+        !installed?.manifest ||
+        !desktopWindowContribution(installed.manifest) ||
+        !this.options.prepareDesktopComponent
+      )
         return existing;
       // Explicit reinstall also repairs an absent Host desktop component, using
-      // the same verified archive and current catalog grant fence.
+      // the same verified archive and current catalog release fence.
       return this.withVerifiedPackage(entry, async () => existing);
     }
 
+    // The Manager's replacement callback shares rollback with local admission, but
+    // official releases still obey inventory-backed continuity after Host restart.
+    if (admitVerified) await this.assertNewerReplacement(entry);
     try {
       return await this.withVerifiedPackage(entry, async (candidate) => {
+        if (admitVerified) return admitVerified(candidate);
         try {
           return await this.options.inventory.installPackage(candidate);
         } catch (error) {
@@ -136,6 +184,7 @@ export class OfficialPluginPackageInstaller {
             const raced = await this.existingExactInstall(entry);
             if (raced) return raced;
           }
+          throwDataDirectoryConflict(error);
           throw new OfficialPluginInstallError('INVENTORY_REJECTED', 'official package inventory admission failed', {
             cause: error,
           });
@@ -155,7 +204,10 @@ export class OfficialPluginPackageInstaller {
   ) {
     const entry = await this.catalogEntry(catalogId);
     assertExpectedRelease(entry, expectedRelease);
-    const snapshot = await this.options.inventory.store.snapshot();
+    const snapshot = await this.options.inventory.store.snapshot({
+      pluginId: entry.pluginId,
+      packageDigests: [entry.packageDigest],
+    });
     const instance = snapshot.instances.find((candidate) => candidate.pluginInstanceId === pluginInstanceId);
     const current = snapshot.instances.find(
       (candidate) => candidate.pluginId === entry.pluginId && candidate.lifecycleState === 'installed',
@@ -169,17 +221,13 @@ export class OfficialPluginPackageInstaller {
         `expected lifecycle revision ${expectedLifecycleRevision}, current ${instance.lifecycleRevision}`,
       );
     }
-    const grants = snapshot.grants.find((candidate) => candidate.pluginInstanceId === pluginInstanceId);
-    if (!grants) {
-      throw new OfficialPluginInstallError('INVENTORY_REJECTED', 'official plugin grant record is unavailable');
-    }
     const installedPackage = snapshot.packages.find((candidate) => candidate.packageDigest === instance.packageDigest);
     if (instance.packageDigest === entry.packageDigest) {
       assertInstalledPackageVersion(entry, installedPackage?.version);
+      if (installedPackage) requireExecutableManifest(installedPackage);
       return {
         pluginInstanceId,
         packageDigest: instance.packageDigest,
-        grantRevision: grants.grantRevision,
       };
     }
     const versionComparison = installedPackage
@@ -209,17 +257,17 @@ export class OfficialPluginPackageInstaller {
             ...candidate,
             pluginInstanceId,
             expectedLifecycleRevision,
-            expectedGrantRevision: grants.grantRevision,
           });
         } catch (error) {
           if (
             error instanceof PluginInventoryError &&
-            ['STALE_INSTANCE', 'STALE_LIFECYCLE_REVISION', 'STALE_GRANT_REVISION'].includes(error.code)
+            ['STALE_INSTANCE', 'STALE_LIFECYCLE_REVISION'].includes(error.code)
           ) {
             throw new OfficialPluginInstallError('STALE_REVISION', 'official plugin state changed during update', {
               cause: error,
             });
           }
+          throwDataDirectoryConflict(error);
           throw new OfficialPluginInstallError('INVENTORY_REJECTED', 'official package inventory update failed', {
             cause: error,
           });
@@ -293,8 +341,11 @@ export class OfficialPluginPackageInstaller {
     entry: OfficialPluginCatalogEntry,
     accept: (candidate: PackageAdmissionCandidate) => Promise<T>,
   ): Promise<T> {
-    if (entry.distribution === 'bundled') {
+    if (entry.distribution === 'bundled' && entry.bundledFormat !== 'archive') {
       return this.withBundledPackage(entry, accept);
+    }
+    if (entry.distribution === 'bundled' && !registeredBundledArchive(entry)) {
+      throw new OfficialPluginInstallError('INVALID_PACKAGE_SCHEMA', 'bundled archive is not registered by the Host');
     }
     const bytes = await this.fetchArchive(entry);
     if (bytes.byteLength > MAX_OFFICIAL_PACKAGE_BYTES) {
@@ -328,9 +379,8 @@ export class OfficialPluginPackageInstaller {
           'package presentation metadata differs from the official catalog',
         );
       }
-      if (located.manifest.runtime.transport !== 'stdio' && located.manifest.runtime.transport !== 'builtin') {
-        throw new OfficialPluginInstallError('UNSUPPORTED_TRANSPORT', 'official package has no supported Host runtime');
-      }
+      const rejection = await readPackageCapabilityRejection(located.manifest, located.rootDir);
+      if (rejection) throw new OfficialPluginInstallError('UNSUPPORTED_TRANSPORT', rejection);
       const staticEditors = staticEditorContributions(located.manifest);
       const declaresStaticEditor =
         located.manifest.contributions?.some((item) => item.type === 'content-editor-provider') === true ||
@@ -344,9 +394,7 @@ export class OfficialPluginPackageInstaller {
           (feature) => feature.contributions?.some((item) => item.type === 'desktop-window') === true,
         );
       if (declaresStaticEditor || declaresDesktopWindow) {
-        const admitted = declaresDesktopWindow
-          ? desktopWindow !== undefined && entry.effectiveGrants.every((grant) => grant === 'windows.create')
-          : staticEditors.length > 0 && entry.effectiveGrants.length === 0;
+        const admitted = declaresDesktopWindow ? desktopWindow !== undefined : staticEditors.length > 0;
         if (!admitted) {
           throw new OfficialPluginInstallError(
             'UNSUPPORTED_TRANSPORT',
@@ -356,7 +404,7 @@ export class OfficialPluginPackageInstaller {
         // Static builtin admission still consumes the exact archive and public
         // manifest. Validate renderer bytes now; admission never starts a server.
         await snapshotPluginSurfaceAssets(located, desktopWindow ? [desktopWindow] : staticEditors);
-        if (desktopWindow && entry.effectiveGrants.includes('windows.create')) {
+        if (desktopWindow) {
           try {
             await this.options.prepareDesktopComponent?.();
           } catch (error) {
@@ -369,19 +417,19 @@ export class OfficialPluginPackageInstaller {
         }
       }
       const signalSchemas = await readDeclaredSignalSchemas(located.rootDir, located.manifest);
+      const agentClientMetadata = await readAgentClientMetadata(located);
       await publishPluginPackageArchive(this.packagesRoot, entry.packageDigest, bytes);
       return await accept({
         manifest: located.manifest,
         computedPackageDigest: entry.packageDigest,
         expectedPackageDigest: entry.packageDigest,
         packagePluginId: entry.pluginId,
-        effectiveGrants: entry.effectiveGrants,
         signalSchemas,
+        agentClientMetadata,
         provenance: {
           kind: 'catalog',
           catalogId: entry.catalogId,
           packageName: entry.packageName,
-          ownerAuthRequired: entry.ownerAuth !== undefined,
         },
       });
     } finally {
@@ -393,7 +441,9 @@ export class OfficialPluginPackageInstaller {
     entry: OfficialPluginCatalogEntry,
     accept: (candidate: PackageAdmissionCandidate) => Promise<T>,
   ): Promise<T> {
-    const manifest = OFFICIAL_BUNDLED_MANIFESTS.find((candidate) => candidate.pluginId === entry.pluginId);
+    const manifest = LEGACY_BUNDLED_MANIFESTS.find(
+      (candidate) => candidate.pluginId === entry.pluginId && candidate.version === entry.version,
+    );
     if (!manifest) {
       throw new OfficialPluginInstallError(
         'INVALID_PACKAGE_SCHEMA',
@@ -406,7 +456,7 @@ export class OfficialPluginPackageInstaller {
         'bundled manifest identity differs from catalog',
       );
     }
-    if (manifest.runtime.transport !== 'builtin') {
+    if (manifest.runtime?.transport !== 'builtin') {
       throw new OfficialPluginInstallError('UNSUPPORTED_TRANSPORT', 'bundled package is not a builtin runtime');
     }
     if (bundledManifestDigest(manifest) !== entry.packageDigest) {
@@ -417,25 +467,48 @@ export class OfficialPluginPackageInstaller {
       computedPackageDigest: entry.packageDigest,
       expectedPackageDigest: entry.packageDigest,
       packagePluginId: entry.pluginId,
-      effectiveGrants: entry.effectiveGrants,
       signalSchemas: {},
+      agentClientMetadata: null,
+      provenance: { kind: 'catalog', catalogId: entry.catalogId, packageName: entry.packageName },
     });
   }
 
+  private async assertNewerReplacement(entry: OfficialPluginCatalogEntry): Promise<void> {
+    const snapshot = await this.options.inventory.store.snapshot({
+      pluginId: entry.pluginId,
+      packageDigests: [entry.packageDigest],
+    });
+    const known = snapshot.packages.find((record) => record.packageDigest === entry.packageDigest);
+    if (known) assertInstalledPackageVersion(entry, known.version);
+    const instance = snapshot.instances.find(
+      (candidate) => candidate.pluginId === entry.pluginId && candidate.lifecycleState === 'installed',
+    );
+    if (!instance) return;
+    const installed = snapshot.packages.find((record) => record.packageDigest === instance.packageDigest);
+    const comparison = installed ? compareOfficialPluginVersions(entry.version, installed.version) : undefined;
+    if (comparison === undefined || comparison <= 0) {
+      throw new OfficialPluginInstallError(
+        'UPDATE_NOT_NEWER',
+        'official catalog release is not newer than the installed package',
+      );
+    }
+  }
+
   private async existingExactInstall(entry: OfficialPluginCatalogEntry) {
-    const snapshot = await this.options.inventory.store.snapshot();
+    const snapshot = await this.options.inventory.store.snapshot({
+      pluginId: entry.pluginId,
+      packageDigests: [entry.packageDigest],
+    });
     const instance = snapshot.instances.find(
       (candidate) => candidate.pluginId === entry.pluginId && candidate.lifecycleState === 'installed',
     );
     if (!instance || instance.packageDigest !== entry.packageDigest) return undefined;
     const installedPackage = snapshot.packages.find((candidate) => candidate.packageDigest === instance.packageDigest);
     assertInstalledPackageVersion(entry, installedPackage?.version);
-    const grants = snapshot.grants.find((candidate) => candidate.pluginInstanceId === instance.pluginInstanceId);
-    if (!grants) return undefined;
+    if (installedPackage) requireExecutableManifest(installedPackage);
     return {
       pluginInstanceId: instance.pluginInstanceId,
       packageDigest: instance.packageDigest,
-      grantRevision: grants.grantRevision,
     };
   }
 }

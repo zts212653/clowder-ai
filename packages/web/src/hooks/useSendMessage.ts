@@ -1,15 +1,18 @@
 'use client';
 
 import type { ContextAttachment, MessageWorkDisposition } from '@cat-cafe/shared';
+import { routingConfirmationRequiredSchema } from '@cat-cafe/shared/routing-preview';
 import { useCallback, useState } from 'react';
 import {
   acknowledgeSendComposerDraftConsumption,
   type ComposerDraftConsumption,
 } from '@/components/composer-draft-consumption';
 import { observeComposerDraft } from '@/components/composer-draft-flush-registry';
+import { useOptionalConfirm } from '@/components/useConfirm';
 import { useChatCommands } from '@/hooks/useChatCommands';
 import { type ChatMessage as ChatMessageData, useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
+import { reconcileThreadWithServer } from './queue-reconciliation';
 
 export type UploadStatus = 'idle' | 'uploading' | 'failed';
 
@@ -38,6 +41,7 @@ interface MessageAdmissionResponse {
  * an optimistic History bubble or a client-owned invocation.
  */
 export function useSendMessage(activeThreadId?: string) {
+  const confirm = useOptionalConfirm();
   const addMessageToThread = useChatStore((state) => state.addMessageToThread);
   const { processCommand } = useChatCommands();
   const [uploadStatus, setUploadStatus] = useState<UploadStatus>('idle');
@@ -97,46 +101,73 @@ export function useSendMessage(activeThreadId?: string) {
       const clientMessageId = admissionOptions?.idempotencyKey ?? createClientId();
 
       try {
-        let response: Response;
-        if (hasImages) {
-          const formData = new FormData();
-          formData.append('content', content);
-          formData.append('threadId', threadId);
-          formData.append('idempotencyKey', clientMessageId);
-          if (admissionOptions?.messageDisposition) {
-            formData.append('messageDisposition', admissionOptions.messageDisposition);
+        const submit = (confirmedTargetCats?: string[]) => {
+          if (hasImages) {
+            const formData = new FormData();
+            formData.append('content', content);
+            formData.append('threadId', threadId);
+            formData.append('idempotencyKey', clientMessageId);
+            if (admissionOptions?.messageDisposition) {
+              formData.append('messageDisposition', admissionOptions.messageDisposition);
+            }
+            for (const catId of explicitTargetCats ?? []) formData.append('mentions', catId);
+            for (const catId of confirmedTargetCats ?? []) formData.append('confirmedTargetCats', catId);
+            if (composerDraftRevision !== undefined)
+              formData.append('composerDraftRevision', String(composerDraftRevision));
+            if (whisper) {
+              formData.append('visibility', whisper.visibility);
+              for (const catId of whisper.whisperTo) formData.append('whisperTo', catId);
+            }
+            if (replyToId) formData.append('replyTo', replyToId);
+            if (contextAttachments?.length) {
+              formData.append('contextAttachments', JSON.stringify(contextAttachments));
+            }
+            for (const image of images ?? []) formData.append('images', image);
+            return apiFetch('/api/messages', { method: 'POST', body: formData });
+          } else {
+            return apiFetch('/api/messages', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                content,
+                threadId,
+                idempotencyKey: clientMessageId,
+                ...(admissionOptions?.messageDisposition
+                  ? { messageDisposition: admissionOptions.messageDisposition }
+                  : {}),
+                ...(composerDraftRevision !== undefined ? { composerDraftRevision } : {}),
+                ...(whisper ? { visibility: whisper.visibility, whisperTo: whisper.whisperTo } : {}),
+                ...(replyToId ? { replyTo: replyToId } : {}),
+                ...(explicitTargetCats?.length ? { mentions: explicitTargetCats } : {}),
+                ...(confirmedTargetCats ? { confirmedTargetCats } : {}),
+                ...(contextAttachments?.length ? { contextAttachments } : {}),
+              }),
+            });
           }
-          for (const catId of explicitTargetCats ?? []) formData.append('mentions', catId);
-          if (composerDraftRevision !== undefined)
-            formData.append('composerDraftRevision', String(composerDraftRevision));
-          if (whisper) {
-            formData.append('visibility', whisper.visibility);
-            for (const catId of whisper.whisperTo) formData.append('whisperTo', catId);
+        };
+        let response = await submit();
+        if (response.status === 409) {
+          const payload: unknown = await response
+            .clone()
+            .json()
+            .catch(() => null);
+          const redirect = routingConfirmationRequiredSchema.safeParse(payload);
+          if (redirect.success) {
+            if (!confirm) throw new Error('需要在聊天页面确认实际接收者后才能改发。');
+            const unavailable = redirect.data.unavailable.map((member) => member.displayName).join('、');
+            const targets = redirect.data.targets.map((member) => member.displayName).join('、');
+            const accepted = await confirm({
+              title: '确认改发角色',
+              message: `${unavailable}当前不可用。是否将这条消息改发给${targets}？`,
+              confirmLabel: `改发给${targets}`,
+              cancelLabel: '取消发送',
+            });
+            if (!accepted) {
+              setUploadStatus('idle');
+              return false;
+            }
+            response = await submit(redirect.data.targets.map((member) => member.catId));
           }
-          if (replyToId) formData.append('replyTo', replyToId);
-          if (contextAttachments?.length) {
-            formData.append('contextAttachments', JSON.stringify(contextAttachments));
-          }
-          for (const image of images ?? []) formData.append('images', image);
-          response = await apiFetch('/api/messages', { method: 'POST', body: formData });
-        } else {
-          response = await apiFetch('/api/messages', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              content,
-              threadId,
-              idempotencyKey: clientMessageId,
-              ...(admissionOptions?.messageDisposition
-                ? { messageDisposition: admissionOptions.messageDisposition }
-                : {}),
-              ...(composerDraftRevision !== undefined ? { composerDraftRevision } : {}),
-              ...(whisper ? { visibility: whisper.visibility, whisperTo: whisper.whisperTo } : {}),
-              ...(replyToId ? { replyTo: replyToId } : {}),
-              ...(explicitTargetCats?.length ? { mentions: explicitTargetCats } : {}),
-              ...(contextAttachments?.length ? { contextAttachments } : {}),
-            }),
-          });
         }
 
         if (!response.ok) {
@@ -149,6 +180,9 @@ export function useSendMessage(activeThreadId?: string) {
           throw new Error('Server did not return a canonical Queue admission');
         }
         acknowledgeSendComposerDraftConsumption(threadId, admission);
+        // A successful send must remain visible even if its Queue socket event was
+        // missed. Reuse the same fenced server snapshot as reconnect, not a local bubble.
+        if (admission.status === 'queued') void reconcileThreadWithServer(threadId, () => false, 'SendAdmission');
         setUploadStatus('idle');
         setUploadError(null);
         window.dispatchEvent(new CustomEvent('guide:confirm', { detail: { target: 'chat.input' } }));
@@ -165,7 +199,7 @@ export function useSendMessage(activeThreadId?: string) {
         return false;
       }
     },
-    [activeThreadId, createClientId, processCommand, publishError],
+    [activeThreadId, confirm, createClientId, processCommand, publishError],
   );
 
   return { handleSend, uploadStatus, uploadError };

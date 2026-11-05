@@ -7,6 +7,7 @@ import { catRegistry } from '@cat-cafe/shared';
 import Fastify from 'fastify';
 import './helpers/setup-cat-registry.js';
 import { selectFakeCodexHome } from './helpers/fake-codex-home.js';
+import { readMemberRequestRevision } from './helpers/member-request-revision.js';
 
 const { catsRoutes } = await import('../dist/routes/cats.js');
 const { _resetCachedConfig, loadCatConfig, toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
@@ -83,7 +84,13 @@ async function fixture(initialProfile) {
     app,
     root,
     persisted: () => JSON.parse(readFileSync(join(root, '.cat-cafe/cat-catalog.json'), 'utf8')).breeds[0].variants[0],
-    patch: (body) => app.inject({ method: 'PATCH', url: '/api/cats/gemini38', headers, payload: body }),
+    patch: async (body) =>
+      app.inject({
+        method: 'PATCH',
+        url: '/api/cats/gemini38',
+        headers,
+        payload: { expectedRevision: await readMemberRequestRevision(app, '/api/cats/gemini38', headers), ...body },
+      }),
     close: async () => {
       await app.close();
       keys.forEach((key, i) => {
@@ -113,6 +120,27 @@ test('member PATCH persists, exposes and reconciles an explicit AGY Native profi
     assert.equal(reverted.statusCode, 200, reverted.body);
     assert.equal(reverted.json().cat.agyProfile, undefined);
     assert.equal(catRegistry.tryGet('gemini38').config.agyProfile, undefined);
+  } finally {
+    await f.close();
+  }
+});
+
+test('member PATCH persists official ACP, returns it after refresh and preserves identity on explicit Native return', async () => {
+  const f = await fixture(profile);
+  const acpProfile = { ...profile, carrier: 'acp' };
+  const acp = { command: '/installed/agy_acp_server.par', startupArgs: [] };
+  try {
+    const response = await f.patch({ carrier: 'acp', acp, defaultModel: profile.model, agyProfile: acpProfile });
+    assert.equal(response.statusCode, 200, response.body);
+    assert.deepEqual(f.persisted().agyProfile, acpProfile);
+    const refreshed = await f.app.inject({ method: 'GET', url: '/api/cats' });
+    const cat = refreshed.json().cats.find((cat) => cat.id === 'gemini38');
+    assert.equal(cat.carrier, 'acp');
+    assert.deepEqual(cat.agyProfile, acpProfile);
+    assert.equal(cat.id, 'gemini38');
+    const returned = await f.patch({ carrier: 'cli', acp: null, defaultModel: profile.model, agyProfile: profile });
+    assert.equal(returned.statusCode, 200, returned.body);
+    assert.deepEqual(returned.json().cat.agyProfile, profile);
   } finally {
     await f.close();
   }

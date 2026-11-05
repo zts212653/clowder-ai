@@ -4,10 +4,14 @@
   gap: 7px;
   margin-top: 11px;
   padding: 12px 13px;
-  border: 1px solid var(--console-border-soft);
-  border-left: 3px solid var(--cafe-accent);
-  border-radius: 9px;
-  background: var(--console-card-soft-bg);
+  border: 0;
+  border-left: 1px solid var(--console-border-soft);
+  border-radius: 0;
+  background: var(--console-card-bg);
+}
+.collective-work-card[data-work-lifecycle="proposed"] {
+  border-left-style: dashed;
+  background: var(--shell-work);
 }
 .collective-work-card > header {
   display: flex;

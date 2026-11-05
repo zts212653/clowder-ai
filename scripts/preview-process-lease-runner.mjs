@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { renameSync, writeFileSync } from 'node:fs';
 import {
   cleanupOwnerResultPath,
   previewCleanupExitCode,
   readCleanupOwnerResult,
 } from './lib/preview-cleanup-result.mjs';
+import { previewCommandGroupStatus, recordPreviewCommand } from './lib/preview-command-identity.mjs';
 import { processGroupExists, waitForProcessGroupExit } from './lib/preview-process-runtime.mjs';
 
 // start-dev drains application children for eight seconds before saving Redis.
@@ -14,24 +15,42 @@ const TERM_GRACE_MS = 30_000;
 
 function parseArgs(argv) {
   const separator = argv.indexOf('--');
+  const encoded = argv[4] === '--command-base64' && argv.length === 6;
   if (
     argv[0] !== '--expires-at' ||
     !argv[1] ||
-    ![2, 4].includes(separator) ||
+    (!encoded && ![2, 4].includes(separator)) ||
+    (encoded && argv[2] !== '--completion-path') ||
     (separator === 4 && argv[2] !== '--completion-path')
   ) {
     throw new Error('usage: preview-process-lease-runner --expires-at ISO -- COMMAND [ARGS...]');
   }
   const expiresAt = Date.parse(argv[1]);
-  const command = argv.slice(separator + 1);
-  if (!Number.isFinite(expiresAt) || command.length === 0) throw new Error('invalid expiry or empty command');
-  return { command, expiresAt, completionPath: separator === 4 ? argv[3] : undefined };
+  let command = argv.slice(separator + 1);
+  if (encoded) {
+    try {
+      if (!/^[a-zA-Z0-9_-]+$/.test(argv[5])) throw new Error();
+      const bytes = Buffer.from(argv[5], 'base64url');
+      if (bytes.toString('base64url') !== argv[5]) throw new Error();
+      command = JSON.parse(bytes.toString('utf8'));
+      if (!Array.isArray(command) || !command.every((value) => typeof value === 'string')) throw new Error();
+    } catch {
+      throw new Error('invalid encoded preview command');
+    }
+  }
+  if (!Number.isFinite(expiresAt) || command.length === 0 || !command[0])
+    throw new Error('invalid expiry or empty command');
+  return { command, expiresAt, completionPath: encoded || separator === 4 ? argv[3] : undefined };
 }
 
 function signalOwnedChild(child, signal) {
   // pnpm/shell wrappers can exit while their process group is still draining.
   if (!child.pid) return;
   try {
+    if (process.platform === 'win32') {
+      spawnSync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+      return;
+    }
     process.kill(process.platform === 'win32' ? child.pid : -child.pid, signal);
   } catch (error) {
     if (error?.code !== 'ESRCH') throw error;
@@ -54,6 +73,7 @@ async function main() {
   const ownerResultPath = cleanupOwnerResultPath(completionPath);
   const child = spawn(command[0], command.slice(1), {
     detached: process.platform !== 'win32',
+    windowsHide: true,
     stdio: 'inherit',
     env: {
       ...process.env,
@@ -62,6 +82,8 @@ async function main() {
     },
   });
   let shutdownPromise;
+  let commandIdentity;
+  let identityError;
   const shutdown = (reason) => (shutdownPromise ??= terminate(child, reason));
   for (const signal of ['SIGINT', 'SIGTERM']) {
     process.on(signal, () => {
@@ -75,8 +97,22 @@ async function main() {
     Math.max(0, expiresAt - Date.now()),
   );
   const outcome = await new Promise((resolveExit) => {
+    // Install exit/error listeners before synchronous identity observation.
     child.once('exit', (exitCode, exitSignal) => resolveExit({ code: exitCode, signal: exitSignal }));
     child.once('error', (error) => resolveExit({ error }));
+    if (completionPath && process.platform !== 'win32') {
+      try {
+        commandIdentity = recordPreviewCommand({
+          completionPath,
+          expiresAt: new Date(expiresAt).toISOString(),
+          command,
+          childPid: child.pid,
+        });
+      } catch (error) {
+        identityError = error;
+        void shutdown('command identity could not be persisted');
+      }
+    }
   });
   clearTimeout(expiryTimer);
   if (outcome.error) {
@@ -89,24 +125,32 @@ async function main() {
   if (!shutdownPromise && descendantsRemain) shutdown('preview command exited');
   const graceful = shutdownPromise ? await shutdownPromise : true;
   const owner = readCleanupOwnerResult(ownerResultPath, child.pid);
-  const exitCode = previewCleanupExitCode({
-    outcome,
-    graceful,
-    owner,
-    descendantsRemain,
-    shutdownRequested,
-    requireOwnerResult: Boolean(completionPath),
-  });
+  const exitCode = identityError
+    ? 1
+    : previewCleanupExitCode({
+        outcome,
+        graceful,
+        owner,
+        descendantsRemain,
+        shutdownRequested,
+        requireOwnerResult: Boolean(completionPath),
+      });
   if (completionPath) {
     const temporaryPath = `${completionPath}.${process.pid}.tmp`;
     writeFileSync(
       temporaryPath,
       JSON.stringify({
+        version: 2,
         pid: process.pid,
         expiresAt: new Date(expiresAt).toISOString(),
         exitCode,
+        commandExitCode: owner.version === 2 ? owner.commandExitCode : (outcome.code ?? null),
+        runnerExitCode: outcome.code ?? null,
+        cleanupExitCode: graceful && owner.status === 'complete' ? owner.cleanupExitCode : null,
         forced: !graceful,
         cleanupOwnerStatus: owner.status,
+        commandIdentity: commandIdentity ? { path: commandIdentity.path, sha256: commandIdentity.sha256 } : null,
+        commandGroupStatus: previewCommandGroupStatus(commandIdentity),
         completedAt: new Date().toISOString(),
       }),
       { mode: 0o600 },

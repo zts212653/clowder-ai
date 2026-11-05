@@ -152,6 +152,20 @@ export function resolveThreadMessageVisibility(
 }
 
 /**
+ * One message, judged by exactly the same admission as a thread timeline read.
+ *
+ * Mirrors `RedisMessageStore.getByThread(threadId, n, userId, { includeQueuedCatMessages: true })`:
+ * the catalogue's `collectAllThreadMessages` scans that read, so a block it lists must be
+ * readable here, and a block it cannot list must not be.
+ */
+export function isThreadMessageVisibleToViewer(message: StoredMessage, viewerUserId: string): boolean {
+  // The store skips tombstones during hydration (`hydrateMessages`, includeDeleted=false).
+  if (message.deletedAt) return false;
+  if (message.userId !== viewerUserId && !isSystemUserMessage(message)) return false;
+  return resolveThreadMessageVisibility({ includeQueuedCatMessages: true }, viewerUserId)(message);
+}
+
+/**
  * Delivery time and publication order are distinct for real-cat speech: it is
  * published when authored, even if recipient execution custody ends later.
  */

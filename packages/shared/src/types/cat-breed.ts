@@ -59,13 +59,20 @@ export interface CatVariant {
   readonly mentionPatterns?: readonly string[];
   /** F127: member-side binding to a concrete account config (built-in or API key). */
   readonly accountRef?: string;
+  /** Native tools own authentication and omitted model/effort defaults. */
+  readonly configurationSource?: 'native_tool' | 'managed_account';
+  readonly agentProvider?: string | null;
   /** A local tool's selection, or an explicit per-member exception. */
   readonly accountBindingMode?: 'follow' | 'override';
+  /** Internal creation ownership; not part of the public member projection. */
+  readonly creationReceipt?: { readonly requestHash: string; readonly payloadHash: string };
   /** clowder-ai#340 P5: CLI client identity (renamed from `provider`). */
   readonly clientId: ClientId;
   /** Canonical member access mode. Config reads default to `cli`. */
   readonly carrier?: CatCarrier;
   readonly defaultModel: string;
+  /** Host-owned ACP confirmation mode. Omitted retains automatic approval. */
+  readonly executionApproval?: 'auto' | 'ask_user';
   readonly mcpSupport: boolean;
   readonly cli: CliConfig;
   /** F210 Phase G: optional isolated Antigravity CLI profile binding. */
@@ -79,6 +86,8 @@ export interface CatVariant {
   readonly strengths?: readonly string[];
   /** F32-b P4c: Override breed-level avatar for this variant */
   readonly avatar?: string;
+  /** Member-only banner. Null explicitly removes a template value; siblings never inherit it. */
+  readonly banner?: string | null;
   /** F32-b P4c: Override breed-level color for this variant */
   readonly color?: CatColor;
   /**
@@ -191,6 +200,8 @@ export interface RosterEntry {
   readonly lead: boolean;
   /** Whether this cat is available (has quota). co-creator 40 美刀教训！ */
   readonly available: boolean;
+  /** Explicit one-hop replacement for implicit targets; never inherits roles or lead. */
+  readonly successor?: string;
   /** co-creator's evaluation of this cat */
   readonly evaluation: string;
 }
@@ -256,6 +267,8 @@ export interface CredentialEntry {
  */
 export interface CatCafeConfigV1 {
   readonly version: 1;
+  /** Persisted enrollment policy; retain it when parsing or writing a catalog. */
+  readonly memberInitialization?: string;
   readonly breeds: readonly CatBreed[];
   readonly selectedAccountRefs?: Readonly<Record<string, string>>;
 }
@@ -266,6 +279,10 @@ export interface CatCafeConfigV1 {
 export interface CoCreatorConfig {
   /** Primary display name (e.g. "You") */
   readonly name: string;
+  /** Optional familiar form of address, prefilled as co-creator for new house installations. */
+  readonly nickname?: string;
+  /** An explicit nickname choice, including clearing it; never inferred from an unrelated edit. */
+  readonly nicknameSource?: 'user';
   /** Alternative names cats may use (e.g. ["L.S.", "you"]) */
   readonly aliases: readonly string[];
   /** Line-start mention patterns for routing detection (e.g. ["@co-creator", "@co-creator"]) */
@@ -283,6 +300,8 @@ export interface CoCreatorConfig {
  */
 export interface CatCafeConfigV2 {
   readonly version: 2;
+  /** Persisted enrollment policy; retain it when parsing or writing a catalog. */
+  readonly memberInitialization?: string;
   readonly breeds: readonly CatBreed[];
   readonly selectedAccountRefs?: Readonly<Record<string, string>>;
   readonly roster: Roster;

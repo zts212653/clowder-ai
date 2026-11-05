@@ -1,7 +1,11 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { ArtworkActions } from '@/components/content-review/ArtworkActions';
+import { ArtworkGalleryArrows } from '@/components/content-review/ArtworkGalleryNavigation';
+import { useArtworkGallery } from '@/components/content-review/ArtworkGalleryScope';
 import { ArtworkMediaFooter } from '@/components/content-review/ArtworkMediaFooter';
+import videoStyles from '@/components/content-review/artwork-video-fullscreen.module.css';
 import { ImageArtworkControls } from '@/components/content-review/ImageArtworkControls';
 import { ReviewCanvasPopover } from '@/components/content-review/ReviewCanvasPopover';
 import { type ReviewCanvasMode } from '@/components/content-review/ReviewCanvasToolbar';
@@ -18,9 +22,12 @@ import { useArtworkSave } from '@/components/content-review/useArtworkSave';
 import { useArtworkViewport } from '@/components/content-review/useArtworkViewport';
 import { usePresentedVideoFrame } from '@/components/content-review/usePresentedVideoFrame';
 import { useReviewMediaSelection } from '@/components/content-review/useReviewMediaSelection';
+import { VideoArtworkControls } from '@/components/content-review/VideoArtworkControls';
 import { useShellPresentation } from '@/components/shell/shell-presentation';
 import { useF307ExperienceWorkbenchStore } from '@/components/workbench/experience-workbench-store';
 import { useWorkspacePreviewIntent } from '../WorkspacePreviewIntent';
+import { useWorkspaceSurfaceVisibility } from '../WorkspaceSurfaceVisibility';
+import { useVideoWorkRequests } from './useVideoWorkRequests';
 import { WorkspaceReviewMarkupToolbar } from './WorkspaceReviewMarkupToolbar';
 import { WorkspaceReviewMediaElement } from './WorkspaceReviewMediaElement';
 import { workspaceFrameAnchor } from './workspace-content-review-anchors';
@@ -28,9 +35,16 @@ import { useCanvasFocus, useDiscussionVideoSeek } from './workspace-review-media
 import type { WorkspaceReviewMediaProps } from './workspace-review-media-props';
 
 export function WorkspaceContentReviewMedia({
+  seekRequest,
+  markRequest = 0,
+  selectionRequest,
+  playbackHidden = false,
+  onPlaybackTime,
+  chapterNavigation,
   reviewId,
   sourceRevision,
   src,
+  download,
   media,
   annotations,
   annotationResolutions,
@@ -49,6 +63,7 @@ export function WorkspaceContentReviewMedia({
   selected,
   restoreComment = false,
   composer,
+  chatPlaceEditor,
   onOpenDiscussion,
   draftKey,
   canMarkup = true,
@@ -56,10 +71,16 @@ export function WorkspaceContentReviewMedia({
   pendingChatMarks,
   imageChatPrimary = false,
   wholeWorkAction,
+  originalUrl,
+  filename,
+  mime,
+  byteLength,
 }: WorkspaceReviewMediaProps) {
   const draftStarted = useWorkspacePreviewIntent();
+  const visible = useWorkspaceSurfaceVisibility();
   const isV2 = useShellPresentation() === 'v2';
-  const chatSelection = imageChatPrimary && isV2;
+  const gallery = useArtworkGallery();
+  const chatSelection = imageChatPrimary && (isV2 || media.kind === 'video');
   const artwork = useRef<HTMLDivElement>(null);
   const video = useRef<HTMLVideoElement>(null);
   const stage = useRef<HTMLDivElement>(null);
@@ -95,7 +116,26 @@ export function WorkspaceContentReviewMedia({
   const [textEditing, setTextEditing] = useState(false);
   const activeSurfaceId = useF307ExperienceWorkbenchStore((state) => state.layout.activeSurfaceId);
   const enterMainAreaAttention = useF307ExperienceWorkbenchStore((state) => state.enterMainAreaAttention);
-  const { frameTime, onSeeking, onSeeked, seekTo } = usePresentedVideoFrame(video, src);
+  const { frameTime, onSeeking, onSeeked, seekTo } = usePresentedVideoFrame(
+    video,
+    src,
+    media.kind === 'video' ? JSON.stringify([reviewId, sourceRevision, media.streamId]) : undefined,
+  );
+  const markQueued = useVideoWorkRequests({
+    video,
+    media,
+    frameTime,
+    visible,
+    selectable,
+    markRequest,
+    selectionRequest,
+    playbackHidden,
+    seekRequest,
+    seekTo,
+    setSeconds,
+    setMode,
+    onSelect: onAnchorSelected,
+  });
   const frame =
     media.kind === 'video' && frameTime !== null
       ? { streamId: media.streamId, tick: browserTimeToTick(frameTime, media) }
@@ -116,14 +156,27 @@ export function WorkspaceContentReviewMedia({
   }, [visualMarkResolutions, visualMarks]);
   useDiscussionVideoSeek({
     media,
-    annotations: attachedAnnotations,
-    activeAnnotationId,
+    annotations: [
+      ...attachedAnnotations,
+      ...(pendingChatMarks ?? []).map((item) => ({ id: `pending:${item.id}`, anchor: item.anchor })),
+    ],
+    activeAnnotationId: pendingChatMarks?.find((item) => item.active)
+      ? `pending:${pendingChatMarks.find((item) => item.active)!.id}`
+      : activeAnnotationId,
     discussionFocusRequest,
     src: src ?? '',
     seekTo,
     setSeconds,
   });
   useCanvasFocus(stage, canvasFocusRequest);
+  const focusedPlace = pendingChatMarks?.find((item) => item.active)?.id;
+  useEffect(() => {
+    if (!focusedPlace) return;
+    const mark = [...(stage.current?.querySelectorAll<SVGGElement>('[data-selection-id]') ?? [])].find(
+      (item) => item.dataset.selectionId === focusedPlace,
+    );
+    mark?.focus();
+  }, [focusedPlace, src]);
   const markup = useReviewMarkupDraft(
     draftKey ?? `workspace-content-review:${reviewId}:${sourceRevision}:markup`,
     media,
@@ -140,6 +193,7 @@ export function WorkspaceContentReviewMedia({
     media,
     imageChatPrimary ? 1 : Number.POSITIVE_INFINITY,
     imageChatPrimary,
+    (gallery?.items.length ?? 0) > 1,
   );
   const selection = useReviewMediaSelection({
     media,
@@ -264,10 +318,16 @@ export function WorkspaceContentReviewMedia({
   return (
     <div
       ref={artwork}
-      className={`${styles.artwork} ${imageChatPrimary ? styles.imageArtwork : ''}`}
+      className={`${styles.artwork} ${imageChatPrimary ? styles.imageArtwork : ''} ${media.kind === 'video' ? videoStyles.player : ''}`}
       data-testid="workspace-review-artwork"
+      data-chat-background-layer="opaque"
+      data-content-opening-state={error ? 'blocked' : undefined}
+      data-artwork-video-player={media.kind === 'video' ? '' : undefined}
     >
       {saveNotice ? <output className="px-3 text-xs text-cafe-muted">{saveNotice}</output> : null}
+      {markQueued && selectable && frameTime === null ? (
+        <output className="px-3 text-xs text-cafe-muted">等待当前画面解码后标记…</output>
+      ) : null}
       {markup.readError || markup.storageError ? (
         <p role="alert" className={`${styles.artworkNotice} px-3 text-xs text-cafe-error`}>
           {markup.readError ? (
@@ -282,8 +342,30 @@ export function WorkspaceContentReviewMedia({
           )}
         </p>
       ) : null}
+      {originalUrl || download?.src || src ? (
+        <ArtworkActions
+          src={src}
+          originalUrl={originalUrl ?? download?.src ?? src!}
+          filename={filename ?? download?.filename ?? '作品'}
+          mime={mime}
+          byteLength={byteLength}
+          width={media.width}
+          height={media.height}
+          root={viewportRef}
+          viewport={viewport}
+          wholeWorkAction={
+            <>
+              {wholeWorkAction}
+              <button type="button" role="menuitem" aria-label="打开作品讨论" onClick={onOpenDiscussion}>
+                讨论{annotations.length ? ` · ${annotations.length}` : ''}
+              </button>
+            </>
+          }
+        />
+      ) : null}
       <section
         ref={viewportRef}
+        data-artwork-video-viewport={media.kind === 'video' ? '' : undefined}
         className={styles.media}
         aria-label="作品画面"
         {...viewport.handlers}
@@ -292,23 +374,55 @@ export function WorkspaceContentReviewMedia({
           alignItems: imageChatPrimary && viewport.fitsVertically ? 'start' : undefined,
         }}
       >
-        <div ref={stage} data-testid="review-media-stage" className={styles.stage} style={viewport.stageStyle}>
+        <div
+          ref={stage}
+          data-testid="review-media-stage"
+          data-artwork-video-stage={media.kind === 'video' ? '' : undefined}
+          className={styles.stage}
+          style={viewport.stageStyle}
+        >
           <WorkspaceReviewMediaElement
             src={src}
             error={error}
             media={media}
             video={video}
             selectionActive={selection.selectionActive}
+            customControls={imageChatPrimary}
             onSeeking={onSeeking}
             onSeeked={onSeeked}
-            onSeconds={setSeconds}
+            onSeconds={(next) => {
+              setSeconds(next);
+              onPlaybackTime?.(next);
+            }}
             onError={setLoadError}
           />
           {src && !error ? overlay : null}
         </div>
+        {gallery ? <ArtworkGalleryArrows gallery={gallery} /> : null}
       </section>
-      {imageChatPrimary ? (
+      {imageChatPrimary && media.kind === 'video' ? (
+        <VideoArtworkControls
+          media={media}
+          video={video}
+          player={artwork}
+          seconds={seconds}
+          frameReady={frame !== null}
+          mode={mode}
+          canAnnotate={selectable}
+          canMarkup={writable && canMarkup && markup.canEdit}
+          onModeChange={onModeChange}
+          onRange={onAnchorSelected}
+          onFrame={() => selection.setSelecting(true)}
+          seekTo={seekTo}
+          annotations={attachedAnnotations}
+          pendingMarks={pendingChatMarks}
+          onAnnotationActive={onAnnotationActive}
+        >
+          {toolbar}
+        </VideoArtworkControls>
+      ) : imageChatPrimary ? (
         <ImageArtworkControls
+          unifiedActions={!!(originalUrl || download?.src || src)}
           mode={mode}
           canAnnotate={selectable}
           canMarkup={writable && canMarkup && markup.canEdit}
@@ -318,6 +432,7 @@ export function WorkspaceContentReviewMedia({
           }}
           viewport={viewport}
           src={src}
+          download={download}
           discussionCount={annotations.length}
           onOpenDiscussion={onOpenDiscussion}
           wholeWorkAction={wholeWorkAction}
@@ -327,6 +442,7 @@ export function WorkspaceContentReviewMedia({
       ) : (
         toolbar
       )}
+      {chapterNavigation}
       {error && src ? (
         <p role="alert" className="px-3 text-xs text-cafe-error">
           {error}
@@ -344,6 +460,7 @@ export function WorkspaceContentReviewMedia({
             selected,
             canAnnotate: writable,
             src,
+            download,
             error,
             selectionActive: selection.selectionActive,
             selecting: selection.selecting,
@@ -359,7 +476,18 @@ export function WorkspaceContentReviewMedia({
           }}
         />
       ) : null}
-      {!imageChatPrimary && writable && mode === 'comment' && selected ? (
+      {chatPlaceEditor ? (
+        <ReviewCanvasPopover
+          anchor={chatPlaceEditor.anchor}
+          media={media}
+          canvasRef={stage}
+          containerRef={artwork}
+          viewKey={`${viewport.renderedScale}:${viewport.offset.x}:${viewport.offset.y}`}
+          onClose={chatPlaceEditor.cancel}
+        >
+          {chatPlaceEditor.content}
+        </ReviewCanvasPopover>
+      ) : !imageChatPrimary && writable && mode === 'comment' && selected ? (
         <ReviewCanvasPopover
           anchor={selected}
           media={media}

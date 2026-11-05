@@ -77,7 +77,8 @@ export function EvolutionVersionHistory({
                   onClick={() => onSelect(version.ref)}
                 >
                   <span className="text-sm font-semibold text-cafe">{owner?.title ?? version.ref.version}</span>
-                  {version.current && <span className="evolution-version-badge ml-3">当前采用</span>}
+                  {version.sourceCurrent && <span className="evolution-version-badge ml-3">来源当前版本</span>}
+                  {version.adopted && <span className="evolution-version-badge ml-3">当前采用</span>}
                   {owner?.title && (
                     <span className="mt-1 block break-all font-mono text-xs text-cafe-muted">
                       {version.ref.version}
@@ -86,7 +87,7 @@ export function EvolutionVersionHistory({
                   <span className="mt-1 block break-words text-xs text-cafe-muted">{version.ref.assetId}</span>
                 </button>
                 {diff && (
-                  <p className="mt-3 text-xs text-cafe-muted">相对当前采用 {diff.comparedToVersionRef.version}</p>
+                  <p className="mt-3 text-xs text-cafe-muted">相对来源当前版本 {diff.comparedToVersionRef.version}</p>
                 )}
                 <p className="mt-2 text-sm leading-6 text-cafe-secondary">{versionSummary(version, diff)}</p>
                 {diff?.status === 'available' && (
@@ -111,7 +112,8 @@ export function EvolutionVersionHistory({
                   <button type="button" className="evolution-link" onClick={() => onSelect(version.ref)}>
                     {version.ref.version}
                   </button>
-                  {version.current && <span className="evolution-version-badge">当前采用</span>}
+                  {version.sourceCurrent && <span className="evolution-version-badge">来源当前版本</span>}
+                  {version.adopted && <span className="evolution-version-badge">当前采用</span>}
                 </div>
               ))}
           </section>

@@ -1,6 +1,6 @@
 'use client';
 import { type ReactNode, useRef, useState } from 'react';
-import { useF307ExperienceWorkbenchStore } from './experience-workbench-store';
+import { useResolveContentSurface } from './ContentSurfaceResolution';
 import { LegacyArtifactFileResolver } from './LegacyArtifactFileResolver';
 import { useWorkspaceSurfaceVisibility, WorkspaceSurfaceVisibilityProvider } from './WorkspaceSurfaceVisibility';
 import type { WorkspaceSurfaceDescriptor } from './workbench-contract';
@@ -13,6 +13,7 @@ export function ArtifactFileNavigator({
   readonly surface: WorkspaceSurfaceDescriptor;
   readonly children: ReactNode;
 }) {
+  const resolveSurface = useResolveContentSurface(surface.id);
   const [choosing, setChoosing] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const visible = useWorkspaceSurfaceVisibility();
@@ -49,9 +50,7 @@ export function ArtifactFileNavigator({
             requestAnimationFrame(() => trigger.current?.focus());
           }}
           onResolved={(next) => {
-            useF307ExperienceWorkbenchStore
-              .getState()
-              .dispatch({ type: 'resolve-content-surface', sourceSurfaceId: surface.id, surface: next });
+            resolveSurface(next);
             setChoosing(false);
           }}
         />

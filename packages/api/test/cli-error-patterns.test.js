@@ -18,6 +18,7 @@ const fixtures = [
   ['401 Unauthorized', 'auth_failed'],
   ['Error: invalid api key sk-xxx', 'auth_failed'],
   ['Authentication failed: token expired', 'auth_failed'],
+  ['Not logged in · Please run /login', 'auth_failed'],
   ['429 Too Many Requests', 'quota_exceeded'],
   ['rate limit exceeded for org foo', 'quota_exceeded'],
   ['You have hit the usage limit', 'quota_exceeded'],

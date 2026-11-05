@@ -4,7 +4,7 @@ import { once } from 'node:events';
 import { createServer } from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
 import { createNextDevTestEnvironment } from './next-dev-test-environment.mjs';
 
 const WEB_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -19,6 +19,7 @@ const CAT = {
   variantLabel: 'GPT-5.6 Sol',
   color: { primary: '#6b8f34', secondary: '#c8d8b5' },
   mentionPatterns: ['codex-sol'],
+  carrier: 'cli',
   clientId: 'openai',
   defaultModel: 'gpt-5.6-sol',
   avatar: '/avatars/codex.png',

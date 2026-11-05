@@ -29,15 +29,23 @@ for (const [language, width] of [
   ['en', 390],
 ])
   test(`normal account keeps long-form keyboard Save and real reopened configuration (${language}/${width})`, async () => {
-    // AGY CLI has its own known-Gemini model migration; ordinary CLI is a separate path.
-    const producer = await nativeMemberProducer(undefined, { cliCommand: 'gemini' });
-    const { context, page, state } = await scene(width, false, false, false, { catsProducer: producer, accounts });
+    // F325 retired Google CLI. Exercise the supported ordinary account path with Claude.
+    const producer = await nativeMemberProducer(undefined, {
+      cliCommand: 'claude',
+      clientId: 'anthropic',
+      accountRef: 'claude',
+      initialModel: 'claude-baseline',
+    });
+    const { context, page, state } = await scene(width, false, false, false, {
+      catsProducer: producer,
+      accounts: [{ ...accounts[0], id: 'claude', clientId: 'anthropic', displayName: 'Claude (OAuth)' }],
+    });
     try {
       await page.setViewportSize({ width, height: 621 });
       await languageOn(page, language);
       await openMember(page);
-      assert.equal(await page.locator('select[aria-label="Transport"]').inputValue(), 'cli');
-      await page.locator('input[aria-label="Model"]').fill('gemini-normal-account');
+      assert.equal(await page.locator('select[aria-label="Client"]').inputValue(), 'anthropic');
+      await page.locator('input[aria-label="Model"]').fill('claude-normal-account');
       const editor = page.getByTestId('member-detail-page');
       const lastField = editor.locator('input:not([disabled]),select:not([disabled]),textarea:not([disabled])').last();
       await lastField.scrollIntoViewIfNeeded();
@@ -62,18 +70,23 @@ for (const [language, width] of [
       if (screenshots)
         await page.screenshot({ path: path.join(screenshots, `normal-${language}-${width}-keyboard.png`) });
       await page.keyboard.press('Enter');
-      await page.getByTestId('member-list-page').waitFor();
+      await page
+        .locator('.member-save-bar [role="status"]')
+        .filter({ hasText: language === 'en' ? 'Saved' : '已保存' })
+        .waitFor();
       assert.equal(state.writes.length, 1);
-      assert.equal(state.writes[0].body.defaultModel, 'gemini-normal-account');
-      assert.equal(producer.persisted().defaultModel, 'gemini-normal-account');
+      assert.equal(state.writes[0].body.defaultModel, 'claude-normal-account');
+      assert.equal(producer.persisted().defaultModel, 'claude-normal-account');
       assert.equal(producer.persisted().agyProfile, undefined);
-      assert.equal(producer.persisted().accountRef, 'gemini');
+      assert.equal(producer.persisted().accountRef, 'claude');
+      assert.equal(producer.persisted().cli.command, 'claude');
       await page.reload();
       await languageOn(page, language);
       await openMember(page);
-      assert.equal(await page.locator('input[aria-label="Model"]').inputValue(), 'gemini-normal-account');
-      assert.equal(await page.locator('select[aria-label="Transport"]').inputValue(), 'cli');
-      assert.equal(await save.count(), 0);
+      assert.equal(await page.locator('input[aria-label="Model"]').inputValue(), 'claude-normal-account');
+      assert.equal(await page.locator('select[aria-label="Client"]').inputValue(), 'anthropic');
+      assert.equal(await save.isVisible(), true);
+      assert.equal(await save.isEnabled(), true, 'Reopened configuration keeps the same primary Save action');
       if (screenshots)
         await page.screenshot({ path: path.join(screenshots, `normal-${language}-${width}-readback.png`) });
       if (screenshots)
@@ -102,7 +115,7 @@ test('Native explicit automatic mode persists, and returning to restricted mode 
     await permission.selectOption('auto');
     assert.equal(await page.getByRole('textbox', { name: 'Approved workspaces', exact: true }).count(), 0);
     await saveButton(page, 'en').click();
-    await page.getByTestId('member-list-page').waitFor();
+    await page.locator('.member-save-bar [role="status"]').filter({ hasText: 'Saved' }).waitFor();
     assert.equal(producer.persisted().agyProfile.autoApprove, true);
     assert.deepEqual(producer.persisted().agyProfile.trustedWorkspaces, []);
     assert.equal(producer.persisted().agyProfile.nativeCodingGrant, undefined);

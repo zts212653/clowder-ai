@@ -188,7 +188,7 @@ export async function readGeminiMcpConfig(filePath: string): Promise<McpServerDe
   );
 }
 
-/** Read Kimi .kimi/mcp.json → McpServerDescriptor[] */
+/** Read Kimi .kimi-code/mcp.json → McpServerDescriptor[] */
 export async function readKimiMcpConfig(filePath: string): Promise<McpServerDescriptor[]> {
   const raw = await safeReadFile(filePath);
   if (!raw) return [];
@@ -274,7 +274,7 @@ export async function cleanStaleClaudeProjectOverrides(
   return cleaned;
 }
 
-/** Write McpServerDescriptor[] → Kimi .kimi/mcp.json (merge: preserves user's non-managed servers) */
+/** Write McpServerDescriptor[] → Kimi .kimi-code/mcp.json (merge: preserves user's non-managed servers) */
 export async function writeKimiMcpConfig(filePath: string, servers: McpServerDescriptor[]): Promise<void> {
   const raw = await safeReadFile(filePath);
   let existing: Record<string, unknown> = {};

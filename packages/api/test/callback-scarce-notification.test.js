@@ -228,7 +228,7 @@ describe('F293 Phase O: scarce notification delivery', () => {
       clientMessageId: 'review-fact',
       localReviewVerdict: 'approved',
       reviewedHeadSha: 'a'.repeat(40),
-      reviewSubjectRef: 'pr:zts212653/cat-cafe#4268',
+      reviewSubjectRef: 'pr:zts212653/clowder-ai#4268',
       acceptedSourceRef: 'docs/features/F293-live-routing-context.md',
       acceptedRevision: 'b'.repeat(40),
     });

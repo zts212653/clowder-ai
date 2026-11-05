@@ -101,7 +101,7 @@ export async function projectReviewHttpFixture() {
   const append = (extra: Partial<AppendMessageInput> = {}) =>
     messages.append({
       userId: f.principal.userId,
-      catId: null,
+      from: { kind: 'user', userId: f.principal.userId },
       content: 'Human disagrees with this actual selected range',
       mentions: [],
       threadId: thread.id,

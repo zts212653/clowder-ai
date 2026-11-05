@@ -10,6 +10,7 @@ describe('TaskActionSuccessorLifecycle recovery isolation', () => {
     const taskStore = new TaskStore();
     const orphanTask = await taskStore.create({
       threadId: 'thread-orphan',
+      subjectKey: 'eval-case:orphan',
       title: 'Orphaned recovery candidate',
       ownerCatId: 'opus',
       userId: 'user-1',
@@ -17,6 +18,7 @@ describe('TaskActionSuccessorLifecycle recovery isolation', () => {
     });
     const validTask = await taskStore.create({
       threadId: 'thread-valid',
+      subjectKey: 'eval-case:valid',
       title: 'Valid recovery candidate',
       ownerCatId: 'sonnet',
       userId: 'user-1',

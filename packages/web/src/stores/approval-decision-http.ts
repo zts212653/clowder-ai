@@ -59,8 +59,9 @@ export function stablePersonMemoryDecisionId(
   proposalId: string,
   action: 'approve' | 'not-now' | 'reject' | 'withdraw',
   selectedDraftIds: string[] = [],
+  undoReceiptRequestId?: string,
 ): string {
-  const input = `${proposalId}\0${action}\0${[...selectedDraftIds].sort().join('\0')}`;
+  const input = `${proposalId}\0${action}\0${[...selectedDraftIds].sort().join('\0')}${undoReceiptRequestId ? `\0undo:${undoReceiptRequestId}` : ''}`;
   let hash = 0x811c9dc5;
   for (let index = 0; index < input.length; index += 1) {
     hash ^= input.charCodeAt(index);

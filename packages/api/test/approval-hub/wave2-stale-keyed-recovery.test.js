@@ -2,7 +2,7 @@ import '../helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import Fastify from 'fastify';
-import { proposedReviewAction } from './helpers.js';
+import { proposedTaskAction } from './helpers.js';
 
 describe('Wave 2 stale keyed recovery', () => {
   it('F193 rejects the replaced attempt while a newer attempt can recover its staged dispatch proposal', async () => {
@@ -36,6 +36,7 @@ describe('Wave 2 stale keyed recovery', () => {
 
     const app = Fastify();
     await app.register(callbacksRoutes, {
+      actionSuccessorAdmissionService: { async preflightStructuredTransferStanding() {} },
       registry,
       messageStore,
       threadStore,
@@ -56,7 +57,7 @@ describe('Wave 2 stale keyed recovery', () => {
       content: '@sonnet\nPlease recover this staged dispatch proposal',
       targetCats: ['sonnet'],
       effectClass: 'assign_work',
-      proposedAction: proposedReviewAction(),
+      proposedAction: proposedTaskAction(),
       clientMessageId: 'dispatch-stale-keyed-recovery',
     };
 

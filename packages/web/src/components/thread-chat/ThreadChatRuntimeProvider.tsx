@@ -15,8 +15,6 @@ import { useAgentMessages } from '@/hooks/useAgentMessages';
 import { useChatSocketCallbacks } from '@/hooks/useChatSocketCallbacks';
 import { type SocketCallbacks, useSocket } from '@/hooks/useSocket';
 import { useChatStore } from '@/stores/chatStore';
-import { getUserId } from '@/utils/userId';
-import { pushThreadRouteWithHistory } from '../ThreadSidebar/thread-navigation';
 import { createThreadChatHistoryAdmission, type ThreadChatHistoryAdmission } from './thread-chat-history-admission';
 import { createThreadChatRuntimeRegistry, normalizeThreadIds } from './thread-chat-runtime-registry';
 
@@ -67,17 +65,12 @@ export function ThreadChatRuntimeProvider({ children, routeThreadId }: ThreadCha
     };
   }, []);
 
-  const navigateToThread = useCallback((threadId: string) => {
-    pushThreadRouteWithHistory(threadId, typeof window === 'undefined' ? undefined : window);
-  }, []);
   const dispatchIndexEvent = useCallback<IndexEventHandler>((event, data) => {
     for (const handler of [...indexEventHandlersRef.current.values()]) handler(event, data);
   }, []);
   const socketCallbacks = useChatSocketCallbacks({
     threadId: activeThreadId,
-    userId: getUserId(),
     handleAgentMessage,
-    onNavigateToThread: navigateToThread,
     onIndexEvent: dispatchIndexEvent,
   });
   const foregroundThreadIds = registryRef.current.snapshot();

@@ -12,7 +12,7 @@ async function setup(recipients: string[] = ['astra']) {
   const messages = new MessageStore();
   const source = messages.append({
     userId: 'operator',
-    catId: null,
+    from: { kind: 'user', userId: 'operator' },
     content: 'A private issue',
     mentions: [],
     threadId: 'thread-1',

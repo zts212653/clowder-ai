@@ -1,4 +1,5 @@
-import puppeteer, { type Browser } from 'puppeteer-core';
+import type { Browser } from 'puppeteer-core';
+import { loadPuppeteer } from '../../../../utils/lazy-puppeteer.js';
 import { whileNotAborted } from '../../live/host/live-controlled-context.js';
 import type { OwnerPageConnector } from '../../live/host/owner-page-action-contract.js';
 import { readBoundedJson } from './bounded-response.js';
@@ -44,6 +45,7 @@ export function createOwnerCdpConnector(raw: ConfiguredPage): OwnerPageConnector
         throw new Error('Configured page authority unavailable');
       let browser: Browser | undefined;
       const endpoint = await configuredBrowserEndpoint(config, signal);
+      const puppeteer = await whileNotAborted(signal, loadPuppeteer());
       if (signal.aborted) throw new Error('Configured page connection cancelled');
       const connecting = puppeteer.connect({
         browserWSEndpoint: endpoint,

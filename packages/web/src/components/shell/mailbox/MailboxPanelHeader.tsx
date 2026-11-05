@@ -1,4 +1,5 @@
 import { useShellCopy } from '../shell-copy';
+import { handledHistoryCopy } from './handled-history.shell-copy';
 import { mailboxEntryCopy } from './mailbox-entry.shell-copy';
 import type { MailboxSection } from './mailbox-navigation';
 
@@ -16,16 +17,12 @@ export function MailboxPanelHeader({
   onOpenSchedule?: () => void;
 }) {
   const t = useShellCopy(mailboxEntryCopy);
-  const title =
-    section === 'history'
-      ? t.history
-      : section === 'ignored'
-        ? t.ignored
-        : section === 'records'
-          ? t.records
-          : section === 'tools'
-            ? t.approvalTools
-            : t.title;
+  const history = useShellCopy(handledHistoryCopy);
+  const title = ['history', 'records', 'ignored'].includes(section)
+    ? history.title
+    : section === 'tools'
+      ? t.approvalTools
+      : t.title;
   return (
     <header className="flex-none px-[22px] pb-3 pt-3">
       <div className="flex items-center justify-between gap-2">
@@ -46,6 +43,7 @@ export function MailboxPanelHeader({
         <nav
           aria-label={t.sections}
           className="mt-3 flex items-center gap-1 rounded-lg p-1"
+          data-chat-background-surface="frame"
           style={{ background: 'var(--shell-frame)' }}
         >
           <button
@@ -54,6 +52,7 @@ export function MailboxPanelHeader({
             onClick={onBack}
             id="mailbox-tab-needs-me"
             className="shell-focusable flex min-w-0 flex-1 items-center justify-center gap-2 rounded-md border px-3 py-1.5 text-sm font-medium"
+            data-chat-background-surface="selected"
             style={{
               background: 'var(--shell-selected)',
               borderColor: 'var(--shell-hairline-strong)',

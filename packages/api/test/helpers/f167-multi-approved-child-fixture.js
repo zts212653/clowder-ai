@@ -10,7 +10,6 @@ import {
   makeProposalListItem,
   makeProposalStore,
   makeTask,
-  mockCommunityStore,
   mockTruthLeaseStore,
   OWNER_CAT,
   OWNER_THREAD,
@@ -204,10 +203,7 @@ export function fixture({
   );
   const truthResolver = new ActionSubjectTruthResolver(
     mockTruthLeaseStore(),
-    mockCommunityStore(),
-    undefined,
     { get: async (id) => (id === task.id ? task : null) },
-    undefined,
     delegateProvider,
   );
   return {

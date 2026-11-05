@@ -6,6 +6,7 @@ import type {
   EvolutionExplorationMediaRequestV1,
   EvolutionExplorationRequestV1,
   EvolutionExplorationReviewV1,
+  OwnerTruthRefV1,
 } from '@cat-cafe/shared';
 import { evolutionExplorationSelectionMatches, refIdentity } from '@cat-cafe/shared';
 import {
@@ -23,9 +24,10 @@ import {
   type FootballArchiveRun,
   readFootballArchiveCatalog,
 } from './archive-reader.js';
+import { projectFootballCovers } from './cover-frames.js';
 import { readArchiveMedia } from './media.js';
 import { readFootballRecord, recordIdentity } from './observation.js';
-import { projectFootballExperiment, projectFootballNodes } from './projection.js';
+import { projectFootballExperiment } from './projection.js';
 
 const inScope = (input: EvolutionExplorationRequestV1) =>
   input.programRef.ownerFeatureId === 'F311' &&
@@ -70,13 +72,20 @@ export function createMicroduckExplorationBindings(
   options: MicroduckLocalEvidenceOptions & {
     now?: () => string;
     versionReview?: (input: EvolutionAssetReviewRequestV1) => Promise<EvolutionAssetReviewV1>;
+    /** Explicit read consumer binding; never rewrites a Program's target to walking. */
+    sourceScope?: { programRef: OwnerTruthRefV1; objectRef: OwnerTruthRefV1 };
   },
 ): MicroduckExplorationBindings {
   const now = options.now ?? (() => new Date().toISOString());
   const reader = createArchiveReader(options);
+  const matchesScope = (input: EvolutionExplorationRequestV1) =>
+    options.sourceScope
+      ? refIdentity(input.programRef) === refIdentity(options.sourceScope.programRef) &&
+        refIdentity(input.objectRef) === refIdentity(options.sourceScope.objectRef)
+      : inScope(input);
   return {
     async explorationReview(input) {
-      if (!inScope(input)) return failedExploration(input, 'invalid', 'owner_exploration_scope_mismatch');
+      if (!matchesScope(input)) return failedExploration(input, 'invalid', 'owner_exploration_scope_mismatch');
       let archive:
         | { status: 'resolved'; catalog: Awaited<ReturnType<typeof readFootballArchiveCatalog>> }
         | ReturnType<typeof failedExploration>;
@@ -120,7 +129,7 @@ export function createMicroduckExplorationBindings(
         readAt: now(),
         nodes: [
           ...(owners.status === 'resolved' ? projectOwnerExplorationNodes(owners.catalog) : []),
-          ...projectFootballNodes(catalog),
+          ...(await projectFootballCovers(reader, catalog)),
         ],
         experiments: catalog.runs.map(projectFootballExperiment),
         details,
@@ -131,7 +140,7 @@ export function createMicroduckExplorationBindings(
       });
     },
     async explorationMedia(input) {
-      if (!inScope(input)) return { status: 'invalid', reason: '请求与公开归档来源不一致。' };
+      if (!matchesScope(input)) return { status: 'invalid', reason: '请求与公开归档来源不一致。' };
       try {
         const catalog = await readFootballArchiveCatalog(reader);
         const run = catalog.runs.find((run) => refIdentity(run.experimentRef) === refIdentity(input.experimentRef));

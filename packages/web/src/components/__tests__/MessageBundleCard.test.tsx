@@ -73,7 +73,7 @@ describe('MessageBundleCard', () => {
               kind: 'quote',
               messageId: 'source-1',
               sourceThreadId: 'source-thread',
-              author: { kind: 'cat', catId: 'opus' },
+              from: { kind: 'agent', catId: 'opus' },
               timestamp: 100,
               readableContent: 'quoted source text',
               comment: 'forwarder comment',
@@ -105,7 +105,7 @@ describe('MessageBundleCard', () => {
               kind: 'message',
               messageId: 'source-1',
               sourceThreadId: 'source-thread',
-              author: { kind: 'cat', catId: 'opus' },
+              from: { kind: 'agent', catId: 'opus' },
               timestamp: 100,
               readableContent: 'one whole source message',
             },
@@ -132,7 +132,7 @@ describe('MessageBundleCard', () => {
                 kind: 'quote',
                 messageId: 'source-1',
                 sourceThreadId: 'source-thread',
-                author: { kind: 'cat', catId: 'opus' },
+                from: { kind: 'agent', catId: 'opus' },
                 timestamp: 100,
                 readableContent: 'source',
                 comment: 'why this exact quote matters',
@@ -165,7 +165,7 @@ describe('MessageBundleCard', () => {
               kind: 'rich_block',
               messageId: 'source-1',
               sourceThreadId: 'source-thread',
-              author: { kind: 'cat', catId: 'opus' },
+              from: { kind: 'agent', catId: 'opus' },
               timestamp: 100,
               readableContent: 'Approval\nApprove now',
               richBlock: {
@@ -193,24 +193,25 @@ describe('MessageBundleCard', () => {
   });
 
   it('folds multiple messages, summarizes participants, and expands a shared tombstone state', async () => {
-    mocks.apiFetch.mockResolvedValue(
-      new Response(
-        JSON.stringify(
-          response([
-            {
-              status: 'available',
-              kind: 'message',
-              messageId: 'source-1',
-              sourceThreadId: 'source-thread',
-              author: { kind: 'cat', catId: 'opus' },
-              timestamp: 100,
-              readableContent: 'visible source',
-            },
-            { status: 'tombstone', messageId: 'source-2', reason: 'source_unavailable' },
-          ]),
+    mocks.apiFetch.mockImplementation(
+      async () =>
+        new Response(
+          JSON.stringify(
+            response([
+              {
+                status: 'available',
+                kind: 'message',
+                messageId: 'source-1',
+                sourceThreadId: 'source-thread',
+                from: { kind: 'agent', catId: 'opus' },
+                timestamp: 100,
+                readableContent: 'visible source',
+              },
+              { status: 'tombstone', messageId: 'source-2', reason: 'source_unavailable' },
+            ]),
+          ),
+          { status: 200 },
         ),
-        { status: 200 },
-      ),
     );
 
     await renderCard();
@@ -222,6 +223,7 @@ describe('MessageBundleCard', () => {
     await React.act(async () => {
       (container.querySelector('button[aria-expanded="false"]') as HTMLButtonElement).click();
     });
+    expect(mocks.apiFetch).toHaveBeenCalledTimes(2);
     expect(container.textContent).toContain('visible source');
     expect(container.textContent).toContain('原消息已删除、撤回或不可见');
     expect(container.querySelector('[data-bundle-tombstone="source_unavailable"]')).not.toBeNull();
@@ -257,7 +259,7 @@ describe('MessageBundleCard', () => {
               kind: 'quote',
               messageId: 'source-1',
               sourceThreadId: 'source-thread',
-              author: { kind: 'cat', catId: 'opus' },
+              from: { kind: 'agent', catId: 'opus' },
               timestamp: 100,
               readableContent: 'source',
             },

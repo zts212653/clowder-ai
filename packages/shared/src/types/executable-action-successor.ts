@@ -1,8 +1,15 @@
 import { z } from 'zod';
-import { actionSuccessorMetadataObjectSchema, refineActionSuccessorMetadata } from './action-successor.js';
+import { createActionSubjectRefSchema, TASK_ACTION_SUBJECT_REF_DESCRIPTION } from './action-subject-ref.js';
+import {
+  actionSuccessorMetadataObjectSchema,
+  IMPLEMENT_TERMINAL_PREDICATE_DESCRIPTION,
+  refineActionSuccessorMetadata,
+} from './action-successor.js';
 
 export const EXECUTABLE_ACTION_SUCCESSOR_CONTRACT_DESCRIPTION =
   'Direct executable action custody is closed to implement + implementer + task_done. ' +
+  TASK_ACTION_SUBJECT_REF_DESCRIPTION +
+  ' ' +
   'Local cat review uses an ordinary durable handoff with localReviewVerdict + reviewedHeadSha + accepted-source fields; external review enters through an approved proposedAction and records its verdict through the external-review contract. ' +
   'review/reviewer, merge/pr_merged, and every other reserved pair are unavailable on direct carriers.';
 
@@ -11,9 +18,10 @@ const executableTerminalPredicateSchema = z.discriminatedUnion('kind', [
 ]);
 
 const executableActionSuccessorMetadataObjectSchema = actionSuccessorMetadataObjectSchema.extend({
+  subjectRef: createActionSubjectRefSchema(TASK_ACTION_SUBJECT_REF_DESCRIPTION),
   actionFamily: z.literal('implement'),
   successorSlot: z.literal('implementer'),
-  terminalPredicate: executableTerminalPredicateSchema.optional(),
+  terminalPredicate: executableTerminalPredicateSchema.optional().describe(IMPLEMENT_TERMINAL_PREDICATE_DESCRIPTION),
 });
 
 /** MCP direct-carrier contract: only identities backed by the boot-asserted terminal registry. */

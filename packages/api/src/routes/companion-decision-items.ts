@@ -13,7 +13,6 @@ function producerDecisionRef(producer: DecisionReceipt['producer']): string {
 }
 
 function approvalDecisionRef(approval: DecisionApproval): string {
-  if (approval.sourceFeatureId === 'F292') return `f292.repair:${approval.proposalId}`;
   if (approval.sourceFeatureId === 'F306') return `f306.runtime_interaction:${approval.proposalId}`;
   return `approval:${approval.sourceFeatureId}:${approval.proposalId}`;
 }
@@ -61,12 +60,7 @@ function association(approval: DecisionApproval, linked: LinkedDecision): 'exact
       ? 'exact'
       : 'conflict';
   }
-  const producerId =
-    approval.sourceFeatureId === 'F292'
-      ? 'f292.repair'
-      : approval.sourceFeatureId === 'F306'
-        ? 'f306.runtime_interaction'
-        : undefined;
+  const producerId = approval.sourceFeatureId === 'F306' ? 'f306.runtime_interaction' : undefined;
   if (receipt.producer.producerId !== producerId) return 'different';
   const witness = approval.needsMeDecisionRefs?.find(
     (ref) => ref.producerId === producerId && ref.subjectRef === receipt.producer.subjectRef,
@@ -100,7 +94,7 @@ function approvalItems(
       consumed.add(linked);
       return true;
     });
-    if (['F292', 'F306'].includes(approval.sourceFeatureId) && !approval.needsMeDecisionRefs?.length)
+    if (approval.sourceFeatureId === 'F306' && !approval.needsMeDecisionRefs?.length)
       reasons.add('producer_identity_coverage_unverified');
     const { ownerUserId: _ownerUserId, ...visibleApproval } = approval;
     items.push({

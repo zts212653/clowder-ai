@@ -10,26 +10,26 @@
 }
 
 /* The file's own width decides which secondary actions move into More. */
-.v2-file-chrome {
+.content-file-toolbar {
   container-type: inline-size;
 }
-.v2-file-menu-listen,
-.v2-file-menu-view {
+.file-toolbar-menu-listen,
+.file-toolbar-menu-view {
   display: none;
 }
 @container (max-width: 520px) {
-  .v2-file-listen {
+  .file-toolbar-listen {
     display: none;
   }
-  .v2-file-menu-listen {
+  .file-toolbar-menu-listen {
     display: block;
   }
 }
 @container (max-width: 420px) {
-  .v2-file-view-toggle {
+  .file-toolbar-view {
     display: none;
   }
-  .v2-file-menu-view {
+  .file-toolbar-menu-view {
     display: block;
   }
 }
@@ -42,12 +42,7 @@
   position: absolute;
   z-index: 20;
   inset: -3px;
-  border: 2px solid
-    oklch(
-      var(--cat-lineage-l, var(--cat-bubble-l, 0.62)) calc(var(--cocreator-chroma) * var(--cat-bubble-cmul, 1))
-        var(--cocreator-hue)
-    );
-  border-left: 0;
+  border: 2px solid var(--semantic-info);
   border-radius: 0.75rem;
   pointer-events: none;
   content: "";
@@ -55,8 +50,14 @@
 
 /* Design tokens live in theme-tokens.css (imported via layout.tsx) */
 
+:root {
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, "Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei",
+    "Noto Sans CJK SC", "Noto Sans SC", Roboto, sans-serif;
+}
+
 body {
-  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: var(--font-sans);
   color: var(--text-primary);
   background: var(--bg-app);
 }
@@ -300,8 +301,6 @@ body {
 .animation-delay-200 {
   animation-delay: 200ms;
 }
-
-/* Werewolf Cute Theme → werewolf-theme.css */
 
 /* F097/F056: CLI/Thinking table overrides — inherit cat-msg-inset-text
  * so light-mode dark-inset and dark-mode dark-inset both get readable text.

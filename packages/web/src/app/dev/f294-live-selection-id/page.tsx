@@ -10,20 +10,21 @@ import { useChatStore } from '@/stores/chatStore';
 
 const THREAD_ID = 'thread-live-selection-id';
 const INVOCATION_ID = 'inv-live-selection-id';
-const LIVE_MESSAGE_ID = `msg-${INVOCATION_ID}-codex-sol`;
 const PERSISTED_MESSAGE_ID = 'persisted-live-selection-id';
 const TARGET_THREAD_ID = 'thread-live-selection-target';
 const CLI_STDOUT = '刚完成的 CLI 输出正文';
 
 const liveMessage: ChatMessage = {
-  id: LIVE_MESSAGE_ID,
+  // The producer allocates the canonical response ID before the first token.
+  id: PERSISTED_MESSAGE_ID,
   type: 'assistant',
+  from: { kind: 'agent', catId: 'codex-sol' },
   catId: 'codex-sol',
   content: CLI_STDOUT,
   origin: 'stream',
   isStreaming: true,
   timestamp: Date.now(),
-  projectionSourceMessageIds: [LIVE_MESSAGE_ID],
+  projectionSourceMessageIds: [PERSISTED_MESSAGE_ID],
   extra: {
     stream: { invocationId: INVOCATION_ID },
     rich: {

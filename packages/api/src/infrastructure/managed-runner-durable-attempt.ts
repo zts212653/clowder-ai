@@ -5,6 +5,8 @@ import {
   type DurableGateFrozenIdentity,
 } from '../domains/ball-custody/durable-managed-gate-recovery.js';
 import {
+  ALPHA_RECOVERY_JOURNAL_ENV,
+  alphaRecoveryJournalPath,
   DURABLE_GATE_ATTEMPT_TOKEN_ENV,
   DURABLE_GATE_FROZEN_IDENTITY_ENV,
   DURABLE_GATE_RECONCILE_FROM_ENV,
@@ -12,11 +14,7 @@ import {
   DURABLE_GATE_RESUME_EPOCH_ENV,
   durableGateRecoveryReadyPath,
 } from '../domains/ball-custody/durable-managed-gate-recovery-child-contract.js';
-import {
-  readUnixProcessSnapshotSync,
-  sameUnixProcess,
-  type UnixProcessIdentity,
-} from '../utils/cli-process-ownership.js';
+import { readUnixProcessSnapshot, sameUnixProcess, type UnixProcessIdentity } from '../utils/cli-process-ownership.js';
 
 export interface DurableManagedGateAttempt {
   readonly attemptToken: string;
@@ -54,6 +52,9 @@ export function createDurableManagedGateAttempt(
     environment: {
       [DURABLE_GATE_ATTEMPT_TOKEN_ENV]: attemptToken,
       [DURABLE_GATE_RECOVERY_READY_PATH_ENV]: durableGateRecoveryReadyPath(job, attemptToken),
+      ...(job.kind === 'alpha_revision_v1'
+        ? { [ALPHA_RECOVERY_JOURNAL_ENV]: alphaRecoveryJournalPath(job, attemptToken) }
+        : {}),
       ...(resumeEpoch === null ? {} : { [DURABLE_GATE_RESUME_EPOCH_ENV]: String(resumeEpoch) }),
       ...(reconcileFrom === null ? {} : { [DURABLE_GATE_RECONCILE_FROM_ENV]: String(reconcileFrom) }),
       ...(frozenIdentity === null
@@ -68,15 +69,17 @@ function hasAttemptToken(commandAndEnvironment: string | undefined, attemptToken
   return commandAndEnvironment?.split(/\s+/u).includes(marker) ?? false;
 }
 
-function attemptMembers(attemptToken: string): UnixProcessIdentity[] | null {
-  const snapshot = readUnixProcessSnapshotSync({ includeEnvironment: true });
+async function attemptMembers(attemptToken: string): Promise<UnixProcessIdentity[] | null> {
+  const environmentMarkers = [`${DURABLE_GATE_ATTEMPT_TOKEN_ENV}=${attemptToken}`];
+  const snapshot = await readUnixProcessSnapshot({ includeEnvironment: true, environmentMarkers });
   if (snapshot === null) return null;
   const candidates = [...snapshot.values()].filter(
     (entry) => entry.pid !== process.pid && hasAttemptToken(entry.commandAndEnvironment, attemptToken),
   );
   if (candidates.length === 0) return [];
-  const verified = readUnixProcessSnapshotSync({
+  const verified = await readUnixProcessSnapshot({
     includeEnvironment: true,
+    environmentMarkers,
     pids: candidates.map((entry) => entry.pid),
   });
   if (verified === null) return null;
@@ -116,7 +119,7 @@ export async function cleanupDurableManagedGateAttempt(
   let forced = false;
   const signals: DurableManagedGateCleanupSignal[] = [];
   while (Date.now() - startedAt <= budgetMs) {
-    const members = attemptMembers(attemptToken);
+    const members = await attemptMembers(attemptToken);
     if (members === null) return { proven: false, signals };
     if (members.length === 0) return { proven: true, signals };
     const shouldForce = Date.now() - startedAt >= Math.max(pollMs, Math.floor(budgetMs / 2));
@@ -124,5 +127,5 @@ export async function cleanupDurableManagedGateAttempt(
     signals.push(...signalMembers(members, forced ? 'SIGKILL' : 'SIGTERM'));
     await sleep(pollMs);
   }
-  return { proven: attemptMembers(attemptToken)?.length === 0, signals };
+  return { proven: (await attemptMembers(attemptToken))?.length === 0, signals };
 }

@@ -6,9 +6,10 @@ import { DEFAULT_THREAD_STATE } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 
 const statusRender = vi.fn();
+const getCatById = vi.hoisted(() => vi.fn());
 
 vi.mock('@/hooks/useCatData', () => ({
-  useCatData: () => ({ getCatById: () => null, cats: [] }),
+  useCatData: () => ({ getCatById, cats: [] }),
 }));
 
 vi.mock('@/components/ThreadCatStatus', () => ({
@@ -28,6 +29,8 @@ describe('ThreadItem snapshot authority', () => {
 
   beforeEach(() => {
     statusRender.mockReset();
+    getCatById.mockReset();
+    getCatById.mockReturnValue(null);
     useChatStore.setState({
       currentThreadId: 'other-thread',
       threadStates: {
@@ -187,6 +190,11 @@ describe('ThreadItem snapshot authority', () => {
   });
 
   it('keeps the admitted participant visible across working and completed snapshots', () => {
+    getCatById.mockImplementation((id) =>
+      id === 'kimi'
+        ? { id: 'kimi', displayName: 'Kimi', avatar: '/avatars/kimi.png', color: { primary: '#8B5CF6' } }
+        : null,
+    );
     const render = (status: 'working' | 'idle') =>
       React.createElement(ThreadItem, {
         id: 'thread-1',

@@ -22,20 +22,11 @@ export function isMessageTimelineActive(message: MessageTimelinePoint): boolean 
   return message.isStreaming === true;
 }
 
-/** Presentation clock: durable response start/completion, bounded after every admitted input for causality. */
+/** Cards stay at their start/send time. Storage activity and appended input do not move a visible reply. */
 export function getMessageTimelineOrderTime(message: MessageTimelinePoint): number {
-  const liveOrDeliveryTime = message.timelineOrderAt ?? message.deliveredAt ?? message.timestamp;
-  let presentationTime = liveOrDeliveryTime;
-  if (message.lifecycle?.kind === 'response' && message.lifecycle.status === 'processing') {
-    // Stream activity updates the storage cursor, not this response's display position.
-    // Legacy records without a start clock retain their previous activity ordering.
-    presentationTime = message.lifecycle.startedAt ?? liveOrDeliveryTime;
-  } else if (!isMessageTimelineActive(message)) {
-    presentationTime = message.lifecycle?.completedAt ?? liveOrDeliveryTime;
-  }
-  const latestInputTime =
-    message.lifecycle?.kind === 'response' ? message.lifecycle.latestInputTimelineOrderAt : undefined;
-  return latestInputTime === undefined ? presentationTime : Math.max(presentationTime, latestInputTime + 1);
+  return message.lifecycle?.kind === 'response'
+    ? (message.lifecycle.startedAt ?? message.timestamp)
+    : message.timestamp;
 }
 
 /** Storage cursor clock: keep browser pagination on the API/Redis timeline score. */

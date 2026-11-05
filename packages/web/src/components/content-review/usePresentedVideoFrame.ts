@@ -1,5 +1,6 @@
 'use client';
-import { type RefObject, useCallback, useEffect, useState } from 'react';
+import { type RefObject, useCallback, useEffect, useRef, useState } from 'react';
+import { useArtworkVideoPosition } from './ArtworkMediaViewport';
 
 type PresentedFrame = { mediaTime: number; observedPlayhead: number };
 function matchesPosition(frame: PresentedFrame | null, position: number) {
@@ -7,7 +8,7 @@ function matchesPosition(frame: PresentedFrame | null, position: number) {
 }
 
 /** Seeking is a readiness signal, not a revocation of frame evidence that already belongs to that seek. */
-export function usePresentedVideoFrame(videoRef: RefObject<HTMLVideoElement>, src: string | null) {
+export function usePresentedVideoFrame(videoRef: RefObject<HTMLVideoElement>, src: string | null, identity?: string) {
   const [frame, setFrame] = useState<PresentedFrame | null>(null);
   const [seeking, setSeeking] = useState(false);
   useEffect(() => {
@@ -42,7 +43,7 @@ export function usePresentedVideoFrame(videoRef: RefObject<HTMLVideoElement>, sr
     const video = videoRef.current;
     if (video) setSeeking(video.seeking);
   }, [videoRef]);
-  const seekTo = useCallback(
+  const place = useCallback(
     (position: number, options?: { pause?: boolean }) => {
       const video = videoRef.current;
       if (!video) return;
@@ -54,5 +55,19 @@ export function usePresentedVideoFrame(videoRef: RefObject<HTMLVideoElement>, sr
     },
     [videoRef],
   );
+  // A place, chapter or discussion the person asked for outranks where this source was last left.
+  const requested = useRef(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: each loaded source starts without a request.
+  useEffect(() => {
+    requested.current = false;
+  }, [src, identity]);
+  const seekTo = useCallback(
+    (position: number, options?: { pause?: boolean }) => {
+      requested.current = true;
+      place(position, options);
+    },
+    [place],
+  );
+  useArtworkVideoPosition(videoRef, identity, src, place, requested);
   return { frameTime: seeking ? null : (frame?.mediaTime ?? null), onSeeking, onSeeked, seekTo };
 }

@@ -469,7 +469,10 @@ describe('library register + rebuild endpoints', () => {
 
     const dir = mkdtempSync(join(tmpdir(), 'builtin-project-'));
     writeFileSync(join(dir, 'safe.md'), '# Safe\n\nNormal project doc.');
-    writeFileSync(join(dir, 'secret-shaped.md'), '# Example\n\ntoken: ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij\n');
+    writeFileSync(
+      join(dir, 'secret-shaped.md'),
+      ['# Example\n\ntoken: gh', 'p_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij\n'].join(''),
+    );
 
     const { SqliteEvidenceStore } = await import('../../dist/domains/memory/SqliteEvidenceStore.js');
     const dbPath = join(mkdtempSync(join(tmpdir(), 'builtin-project-db-')), 'evidence.sqlite');

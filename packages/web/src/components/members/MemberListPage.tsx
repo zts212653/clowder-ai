@@ -19,6 +19,7 @@ export function MemberListPage({
   config,
   cats,
   onAddMember,
+  onDetectMembers,
   onEditMember,
   onEditCoCreator,
   onToggleAvailability,
@@ -30,6 +31,7 @@ export function MemberListPage({
   config: ConfigData;
   cats: CatData[];
   onAddMember: () => void;
+  onDetectMembers?: () => void;
   onEditMember: (cat: CatData) => void;
   onEditCoCreator: () => void;
   onToggleAvailability: (cat: CatData) => void;
@@ -47,14 +49,26 @@ export function MemberListPage({
       (transport === 'all' || memberTransport(cat) === transport),
   );
   return (
-    <section className="members-v2" data-testid="member-list-page">
+    <section className="members-v2 member-list" data-testid="member-list-page">
       <header className="member-list-heading">
         <div>
           <h2>{t('成员与运行时')}</h2>
         </div>
-        <button type="button" className="member-button member-primary" onClick={onAddMember}>
-          {t('添加成员')}
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" className="member-button" onClick={onAddMember} data-testid="member-add">
+            {t('添加成员')}
+          </button>
+          {cats.length === 0 && (
+            <button
+              type="button"
+              className="member-button member-primary"
+              onClick={onDetectMembers ?? onAddMember}
+              data-testid="member-detect-empty-roster"
+            >
+              {t('一键检测并添加伙伴')}
+            </button>
+          )}
+        </div>
       </header>
       <div className="member-defaults">
         <MemberDefaultCat cats={cats} list={list} />

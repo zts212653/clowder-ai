@@ -1,6 +1,5 @@
 import { mainHealthTemplate } from './main-health.js';
 import { reminderTemplate } from './reminder.js';
-import { repoActivityTemplate } from './repo-activity.js';
 import type { TaskTemplate } from './types.js';
 import { webDigestTemplate } from './web-digest.js';
 
@@ -28,7 +27,6 @@ class TemplateRegistry {
 export const templateRegistry = new TemplateRegistry();
 templateRegistry.register(reminderTemplate);
 templateRegistry.register(webDigestTemplate);
-templateRegistry.register(repoActivityTemplate);
 templateRegistry.register(mainHealthTemplate);
 
 export type { DynamicTaskParams, TaskTemplate } from './types.js';

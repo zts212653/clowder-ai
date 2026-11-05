@@ -1,4 +1,4 @@
-import { refIdentity } from '@cat-cafe/shared';
+import { type EvolutionResolvedExplorationReviewV1, refIdentity } from '@cat-cafe/shared';
 import { useMemo, useState } from 'react';
 import { ExplorationIcon } from './ExplorationIcon';
 import { ExplorationLineage } from './ExplorationLineage';
@@ -6,27 +6,50 @@ import { ExplorationLineageDialog } from './ExplorationLineageDialog';
 import { ExplorationVersionCards } from './ExplorationVersionCards';
 import type { useExplorationWorkspace } from './use-exploration-workspace';
 
+function historicalNotes(catalog: EvolutionResolvedExplorationReviewV1) {
+  const result = new Map<string, string>();
+  const latest = catalog.nodes.at(-1);
+  for (const [index, entry] of catalog.nodes.entries()) {
+    const labels: string[] = [];
+    const key = refIdentity(entry.nodeRef);
+    if (index > 0 && entry.parentEdges.length === 0) {
+      const origin = catalog.experiments.find((run) => refIdentity(run.nodeRef) === key);
+      if (origin) labels.push(`起于：${origin.title}`);
+    }
+    if (entry === latest) labels.push('现在');
+    if (labels.length) result.set(key, labels.join(' · '));
+  }
+  return result;
+}
+
+function experimentNotes(catalog: EvolutionResolvedExplorationReviewV1) {
+  const result = new Map<string, string>();
+  for (const entry of catalog.nodes) {
+    const key = refIdentity(entry.nodeRef);
+    const runs = catalog.experiments.filter((run) => refIdentity(run.nodeRef) === key);
+    const failed = runs.filter((run) => run.status === 'failed').length;
+    const active = runs.filter((run) => run.status === 'running').length;
+    if (failed || active)
+      result.set(key, [failed && `${failed} 次未完成`, active && `${active} 次运行中`].filter(Boolean).join(' · '));
+  }
+  return result;
+}
+
 export function ExplorationNavigation({
   workspace,
   v2 = false,
+  historical = false,
 }: {
   workspace: ReturnType<typeof useExplorationWorkspace>;
   v2?: boolean;
+  historical?: boolean;
 }) {
   const [graph, setGraph] = useState(false);
-  const { catalog, node, selectedNodeKey, selectNode, currentKeys, reading, change } = workspace;
-  const notes = useMemo(() => {
-    const result = new Map<string, string>();
-    for (const entry of catalog?.nodes ?? []) {
-      const key = refIdentity(entry.nodeRef);
-      const runs = (catalog?.experiments ?? []).filter((run) => refIdentity(run.nodeRef) === key);
-      const failed = runs.filter((run) => run.status === 'failed').length;
-      const active = runs.filter((run) => run.status === 'running').length;
-      if (failed || active)
-        result.set(key, [failed && `${failed} 次未完成`, active && `${active} 次运行中`].filter(Boolean).join(' · '));
-    }
-    return result;
-  }, [catalog]);
+  const { catalog, node, selectedNodeKey, selectNode, currentKeys, adoptedKeys, reading, change } = workspace;
+  const notes = useMemo(
+    () => (catalog ? (historical ? historicalNotes(catalog) : experimentNotes(catalog)) : new Map<string, string>()),
+    [catalog, historical],
+  );
   if (!catalog || !node) return null;
   const nodes = v2 ? catalog.nodes : catalog.nodes.filter((entry) => entry.kind === node.kind);
   const open = v2 ? reading.lineageCollapsed !== true : reading.lineageCollapsed === false;
@@ -57,7 +80,7 @@ export function ExplorationNavigation({
       <label className="exploration-version-picker">
         <span className="sr-only">阅读版本</span>
         <select
-          aria-label="选择阅读版本"
+          aria-label={historical ? '选择阅读步骤' : '选择阅读版本'}
           value={selectedNodeKey}
           onChange={(event) => {
             const next = catalog.nodes.find((item) => refIdentity(item.nodeRef) === event.target.value);
@@ -65,7 +88,7 @@ export function ExplorationNavigation({
           }}
         >
           {(['owner_version', 'public_archive'] as const).map((kind) => (
-            <optgroup key={kind} label={kind === 'owner_version' ? '本项目版本' : '公开归档'}>
+            <optgroup key={kind} label={kind === 'owner_version' ? '本项目版本' : historical ? '错题谱系' : '公开归档'}>
               {catalog.nodes
                 .filter((entry) => entry.kind === kind)
                 .map((entry) => (
@@ -78,7 +101,7 @@ export function ExplorationNavigation({
         </select>
       </label>
       <div className="exploration-embedded-map" data-open={open}>
-        {v2 ? (
+        {v2 && !historical ? (
           <ExplorationVersionCards workspace={workspace} notes={notes} />
         ) : (
           !graph && (
@@ -86,6 +109,7 @@ export function ExplorationNavigation({
               nodes={nodes}
               selected={selectedNodeKey}
               currentKeys={currentKeys}
+              adoptedKeys={adoptedKeys}
               nodeNotes={notes}
               toolbarEnd={
                 <>
@@ -131,7 +155,14 @@ export function ExplorationNavigation({
           )
         )}
       </div>
-      {graph && <ExplorationLineageDialog workspace={workspace} allSources={v2} close={() => setGraph(false)} />}
+      {graph && (
+        <ExplorationLineageDialog
+          workspace={workspace}
+          allSources={v2}
+          historical={historical}
+          close={() => setGraph(false)}
+        />
+      )}
     </aside>
   );
 }

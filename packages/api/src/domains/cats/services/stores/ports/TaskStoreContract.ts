@@ -5,6 +5,7 @@ import type {
   DevelopmentScopeV1,
   EntrustedWorkV1,
   ManagedWorkBinding,
+  PluginWaitState,
   TaskItem,
   TaskKind,
   UpdateTaskInput,
@@ -18,15 +19,58 @@ import type {
   DevelopmentWorkResult,
   DevelopmentWorkTransition,
 } from './DevelopmentWorkTransition.js';
+import type {
+  AttachEntrustedWorkArtifactInput,
+  AttachEntrustedWorkArtifactResult,
+} from './EntrustedWorkArtifactEvidence.js';
+import type { OrdinaryTaskMutation, OrdinaryTaskMutationResult } from './OrdinaryTaskMutation.js';
+import type {
+  EntrustedTaskDataControllerTransition,
+  EntrustedTaskDataControllerTransitionResult,
+} from './TaskDataControllerTransition.js';
 
 export const ENTRUSTED_WORK_TERMINAL_ACTION_REQUIRED = 'ENTRUSTED_WORK_TERMINAL_ACTION_REQUIRED' as const;
 export const ENTRUSTED_WORK_ADMISSION_CONFLICT = 'ENTRUSTED_WORK_ADMISSION_CONFLICT' as const;
 export const TASK_SUBJECT_ALREADY_EXISTS = 'TASK_SUBJECT_ALREADY_EXISTS' as const;
 export const TASK_SUBJECT_NAMESPACE_RESERVED = 'TASK_SUBJECT_NAMESPACE_RESERVED' as const;
+export const TASK_SUBJECT_SNAPSHOT_CONFLICT = 'TASK_SUBJECT_SNAPSHOT_CONFLICT' as const;
+
+/** The cutover excludes typed custody, tracking and namespaced producers such as F266. */
+export function isOrdinaryImplementTask(task: {
+  readonly kind?: TaskItem['kind'];
+  readonly subjectKey?: string | null;
+  readonly entrustedWork?: unknown;
+}): boolean {
+  return task.kind === 'work' && task.subjectKey === null && task.entrustedWork === undefined;
+}
+
+/** Internal read/authorize/write fence. Null asserts that the subject is still absent. */
+export interface TaskSubjectUpsertCondition {
+  readonly expected: TaskItem | null;
+}
+
+/** Host-owned liveness fence checked at the aggregate's actual write boundary. */
+export interface TaskMutationWriteFence {
+  /** Existing canonical keys read by this host fence; watched alongside the Task, never a second store. */
+  readonly watchKeys?: readonly string[];
+  assertCurrent(): void | Promise<void>;
+}
+
+export function createTaskSubjectSnapshotConflictError(subjectKey: string): Error & { code: string } {
+  return Object.assign(new Error(`Task subject ${subjectKey} changed after authorization`), {
+    code: TASK_SUBJECT_SNAPSHOT_CONFLICT,
+  });
+}
+
+export function isTaskSubjectSnapshotConflictError(error: unknown): boolean {
+  return error instanceof Error && (error as Error & { code?: string }).code === TASK_SUBJECT_SNAPSHOT_CONFLICT;
+}
 
 export type EntrustedWorkTerminalClosure = Exclude<EntrustedWorkV1['closure'], { state: 'open' }>;
 
 export interface AdmitEntrustedWorkStoreInput {
+  /** Public create policy, fenced by the aggregate authorized by the Host. Internal lifecycle admission may still resume. */
+  readonly createOptions?: { readonly onConflict: 'error' | 'update'; readonly expected: TaskItem | null };
   readonly subjectKey: string;
   readonly task: Pick<CreateTaskInput, 'threadId' | 'title' | 'why' | 'createdBy' | 'ownerCatId' | 'userId'>;
   readonly entrustedWork: EntrustedWorkV1;
@@ -38,6 +82,7 @@ export interface AdmitEntrustedWorkStoreResult {
 }
 
 export interface CloseEntrustedWorkStoreInput {
+  readonly expectedThreadId?: string;
   readonly expectedRevision: number;
   readonly closure: EntrustedWorkTerminalClosure;
   /** Internal Artifact-owner snapshot, never accepted from a closure tool payload. */
@@ -48,9 +93,10 @@ export type CloseEntrustedWorkStoreResult =
   | { readonly kind: 'closed'; readonly task: TaskItem }
   | { readonly kind: 'not_found' }
   | { readonly kind: 'not_entrusted'; readonly task: TaskItem }
-  | { readonly kind: 'revision_conflict' | 'already_closed'; readonly task: TaskItem };
+  | { readonly kind: 'thread_conflict' | 'revision_conflict' | 'already_closed'; readonly task: TaskItem };
 
 export interface UpdateEntrustedWorkStoreInput {
+  readonly expectedThreadId?: string;
   readonly expectedRevision: number;
   readonly status?: Exclude<TaskItem['status'], 'done'>;
   readonly time?: {
@@ -64,7 +110,10 @@ export type UpdateEntrustedWorkStoreResult =
   | { readonly kind: 'updated'; readonly task: TaskItem }
   | { readonly kind: 'not_found' }
   | { readonly kind: 'not_entrusted'; readonly task: TaskItem }
-  | { readonly kind: 'revision_conflict' | 'already_closed' | 'no_change'; readonly task: TaskItem };
+  | {
+      readonly kind: 'thread_conflict' | 'revision_conflict' | 'already_closed' | 'no_change';
+      readonly task: TaskItem;
+    };
 
 export function createEntrustedWorkTerminalActionRequiredError(taskId: string): Error & { code: string } {
   return Object.assign(new Error(`Entrusted work task ${taskId} requires a typed closure action`), {
@@ -150,6 +199,7 @@ export function assertEntrustedWorkGenericUpdateAllowed(task: TaskItem): void {
 }
 
 export function assertEntrustedWorkGenericDeletionAllowed(task: TaskItem): void {
+  if (isOrdinaryImplementTask(task) && task.executionRef) throw new Error('TASK_EXECUTION_MUST_STOP_BEFORE_DELETION');
   if (!task.entrustedWork) return;
   throw Object.assign(new Error(`Entrusted work task ${task.id} cannot be deleted outside its typed lifecycle`), {
     code: ENTRUSTED_WORK_TERMINAL_ACTION_REQUIRED,
@@ -164,7 +214,18 @@ export function assertEntrustedWorkGenericUpsertAllowed(task: TaskItem): void {
 }
 
 /** Common server-side contract for in-memory and Redis task stores. */
+export class TaskPageCursorExpiredError extends Error {}
+
 export interface ITaskStore {
+  mutateOrdinaryTask(
+    command: OrdinaryTaskMutation,
+    writeFence?: TaskMutationWriteFence,
+  ): OrdinaryTaskMutationResult | Promise<OrdinaryTaskMutationResult>;
+  transitionEntrustedTaskDataController(
+    input: EntrustedTaskDataControllerTransition,
+    writeFence?: TaskMutationWriteFence,
+  ): EntrustedTaskDataControllerTransitionResult | Promise<EntrustedTaskDataControllerTransitionResult>;
+  replacePluginWait(taskId: string, input: ReplacePluginWaitInput): TaskItem | null | Promise<TaskItem | null>;
   hasDevelopmentSource(query: DevelopmentSourceQuery): boolean | Promise<boolean>;
   findDevelopmentWork(userId: string, scope: DevelopmentScopeV1): TaskItem[] | Promise<TaskItem[]>;
   transitionDevelopmentWork(input: DevelopmentWorkTransition): DevelopmentWorkResult | Promise<DevelopmentWorkResult>;
@@ -181,10 +242,19 @@ export interface ITaskStore {
     input: UpdateTaskInput,
   ): TaskItem | null | Promise<TaskItem | null>;
   listByThread(threadId: string): TaskItem[] | Promise<TaskItem[]>;
+  /** Bounded raw task-index page; cursor belongs to this thread and is revalidated on every read. */
+  listByThreadPage?(
+    threadId: string,
+    limit: number,
+    afterId?: string,
+  ):
+    | { tasks: TaskItem[]; scannedCount?: number; nextCursor?: string }
+    | Promise<{ tasks: TaskItem[]; scannedCount?: number; nextCursor?: string }>;
   delete(taskId: string): boolean | Promise<boolean>;
   deleteByThread(threadId: string): number | Promise<number>;
   getBySubject(subjectKey: string): TaskItem | null | Promise<TaskItem | null>;
-  upsertBySubject(input: CreateTaskInput): TaskItem | Promise<TaskItem>;
+  /** A supplied condition must be checked atomically with the subject aggregate write. */
+  upsertBySubject(input: CreateTaskInput, condition?: TaskSubjectUpsertCondition): TaskItem | Promise<TaskItem>;
   upsertBySubjectWithManagedWorkBinding(
     input: CreateTaskInput,
     binding: ManagedWorkBinding,
@@ -203,11 +273,18 @@ export interface ITaskStore {
   closeEntrustedWork(
     taskId: string,
     input: CloseEntrustedWorkStoreInput,
+    writeFence?: TaskMutationWriteFence,
   ): CloseEntrustedWorkStoreResult | Promise<CloseEntrustedWorkStoreResult>;
   updateEntrustedWork(
     taskId: string,
     input: UpdateEntrustedWorkStoreInput,
+    writeFence?: TaskMutationWriteFence,
   ): UpdateEntrustedWorkStoreResult | Promise<UpdateEntrustedWorkStoreResult>;
+  /** Internal verified-publication append; never the generic callback artifactRefs replacement. */
+  attachEntrustedWorkArtifactEvidence(
+    taskId: string,
+    input: AttachEntrustedWorkArtifactInput,
+  ): AttachEntrustedWorkArtifactResult | Promise<AttachEntrustedWorkArtifactResult>;
   /** Replace complete state only while the observed wait generation/task revision is still current. */
   replaceAutomationStateIfGeneration(
     taskId: string,
@@ -243,4 +320,13 @@ export interface ReplaceDeploymentWaitIfGenerationInput {
   readonly expectedUpdatedAt?: number;
   readonly deploymentWait: DeploymentWaitStateV1 | undefined;
   readonly status?: Exclude<TaskItem['status'], 'done'>;
+}
+
+export interface ReplacePluginWaitInput {
+  readonly expectedStatus: TaskItem['status'];
+  /** Derived by Host from the current native invocation, never accepted as plugin input. */
+  readonly newRegistration?: boolean;
+  readonly expectedState: PluginWaitState | undefined;
+  readonly expectedGeneration: number | null;
+  readonly state: PluginWaitState;
 }

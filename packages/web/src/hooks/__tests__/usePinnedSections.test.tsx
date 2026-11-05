@@ -49,6 +49,30 @@ describe('usePinnedSections', () => {
     expect(state.isPinned('accounts')).toBe(false);
   });
 
+  it('starts with nothing pinned when no preference has been stored', () => {
+    const state = renderHook();
+
+    expect(state.pinned).toEqual([]);
+    expect(state.isPinned('members')).toBe(false);
+    expect(state.isPinned('accounts')).toBe(false);
+  });
+
+  it('persists an intentional unpin across remounts', () => {
+    const state = renderHook();
+    React.act(() => {
+      state.pin('members');
+      state.pin('accounts');
+    });
+    expect(latest?.pinned).toEqual(['members', 'accounts']);
+    React.act(() => state.unpin('members'));
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null')).toEqual(['accounts']);
+
+    React.act(() => root.unmount());
+    root = createRoot(container);
+    const remounted = renderHook();
+    expect(remounted.pinned).toEqual(['accounts']);
+  });
+
   it('ignores string localStorage payloads', () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify('accounts'));
 
@@ -67,5 +91,23 @@ describe('usePinnedSections', () => {
     expect(state.pinned).toEqual(['accounts', 'skills']);
     expect(state.isPinned('accounts')).toBe(true);
     expect(state.isPinned('skills')).toBe(true);
+  });
+  it('normalizes old im pins for both rails, deduplicates and preserves unpin', () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(['notify', 'im', 'plugins', 'skills']));
+    const state = renderHook();
+    expect(state.pinned).toEqual(['notify', 'plugins', 'skills']);
+    expect(state.isPinned('plugins')).toBe(true);
+    React.act(() => state.unpin('plugins'));
+    expect(latest?.pinned).toEqual(['notify', 'skills']);
+    expect(localStorage.getItem(STORAGE_KEY)).toBe(JSON.stringify(['notify', 'skills']));
+  });
+
+  it('normalizes old pins arriving from another tab without rewriting storage on read', () => {
+    renderHook();
+    const raw = JSON.stringify(['im']);
+    localStorage.setItem(STORAGE_KEY, raw);
+    React.act(() => window.dispatchEvent(new StorageEvent('storage', { key: STORAGE_KEY })));
+    expect(latest?.pinned).toEqual(['plugins']);
+    expect(localStorage.getItem(STORAGE_KEY)).toBe(raw);
   });
 });

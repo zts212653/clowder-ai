@@ -86,7 +86,6 @@ const render = async (sha: string) =>
         collaborationAvailable={false}
         onOpenCollaboration={vi.fn()}
         onSave={vi.fn()}
-        revealInFinder={vi.fn()}
       />,
     ),
   );

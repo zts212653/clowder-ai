@@ -141,8 +141,10 @@ describe('AppendedInputReceipts: expand in place, jump separately', () => {
   it('keeps unsupported delivery static without claiming a model read', async () => {
     await render([source('unsupported', '补充一条消息', 5)]);
     const status = row('unsupported').querySelector<HTMLButtonElement>('[data-append-delivery-state]');
-    expect(status?.dataset.appendDeliveryState).toBe('unavailable');
-    expect(status?.getAttribute('aria-label')).toBe('已收到 lang · 补充一条消息');
+    expect(status?.dataset.appendDeliveryState).toBe('unknown');
+    expect(row('unsupported').textContent).toContain('状态待核对');
+    expect(container.textContent).toContain('补充消息 · 1 条');
+    expect(status?.getAttribute('aria-label')).toBe('lang · 状态待核对 · 补充一条消息');
     expect(status?.querySelector('.animate-pulse')).toBeNull();
     expect(status?.querySelector('span')?.style.backgroundColor).toBe('var(--color-cocreator-primary, #B05F45)');
     vi.useFakeTimers();
@@ -152,7 +154,7 @@ describe('AppendedInputReceipts: expand in place, jump separately', () => {
     act(() => vi.advanceTimersByTime(999));
     expect(document.querySelector('[role="tooltip"]')).toBeNull();
     act(() => vi.advanceTimersByTime(1));
-    expect(document.querySelector('[role="tooltip"]')?.textContent).toBe('已收到 lang补充一条消息');
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toBe('lang · 状态待核对补充一条消息');
     expect(row('unsupported').getAttribute('title')).toBeNull();
     expect(row('unsupported').querySelectorAll('button')).toHaveLength(2);
   });
@@ -201,9 +203,10 @@ describe('AppendedInputReceipts: expand in place, jump separately', () => {
     expect(
       row('tracked').querySelector('[data-append-delivery-state]')?.getAttribute('data-append-delivery-state'),
     ).toBe('pending');
-    expect(row('tracked').querySelector('.animate-pulse')).not.toBeNull();
+    expect(row('tracked').querySelector('.animate-pulse')).toBeNull();
+    expect(row('tracked').textContent).toContain('已收到，等读取确认');
     expect(row('tracked').querySelector('[data-append-delivery-state]')?.getAttribute('aria-label')).toBe(
-      '已收到 lang · 09/01 14:14:08 · 稍后给出结论',
+      'lang · 已收到，等读取确认 · 稍后给出结论',
     );
     const lifecycle = responseFor([input]).lifecycle;
     if (lifecycle?.kind !== 'response') throw new Error('Expected response');
@@ -218,7 +221,7 @@ describe('AppendedInputReceipts: expand in place, jump separately', () => {
     );
     expect(row('tracked').querySelector('.animate-pulse')).toBeNull();
     expect(row('tracked').querySelector('[data-append-delivery-state]')?.getAttribute('aria-label')).toBe(
-      '已收到 lang（未确认读取） · 09/01 14:14:08 · 稍后给出结论',
+      'lang · 已收到，没确认读到 · 稍后给出结论',
     );
     input.lifecycle = {
       ...input.lifecycle,
@@ -232,8 +235,10 @@ describe('AppendedInputReceipts: expand in place, jump separately', () => {
       ),
     );
     expect(row('tracked').querySelector('[data-append-delivery-state]')?.getAttribute('aria-label')).toBe(
-      '已读 lang · 09/01 14:14:11 · 稍后给出结论',
+      'lang · 已读 14:14 · 稍后给出结论',
     );
+    expect(row('tracked').textContent).toContain('已读 14:14');
+    expect(container.textContent).toContain('全部已读');
   });
 
   it.each([
@@ -266,13 +271,29 @@ describe('AppendedInputReceipts: expand in place, jump separately', () => {
     if (state === 'unconfirmed') {
       response.lifecycle = { ...response.lifecycle, status: 'completed', completedAt: input.timestamp + 4_000 };
     }
+    const lifecycle = response.lifecycle;
     await act(async () =>
       root.render(
         <>
           <MessageDispatchAvatars
             message={input}
             timelineMessages={[response]}
-            activeRuns={[]}
+            activeRuns={
+              state === 'unconfirmed'
+                ? []
+                : [
+                    {
+                      threadId: 'thread',
+                      targetId: 'opus',
+                      invocationId: lifecycle.invocationId,
+                      responseMessageId: response.id,
+                      inputEntryIds: lifecycle.inputEntryIds,
+                      inputMessageIds: lifecycle.inputMessageIds,
+                      privateInputEntryIds: [],
+                      startedAt: STARTED_AT,
+                    },
+                  ]
+            }
             getCatLabel={() => '布偶猫'}
           />
           <AppendedInputReceipts response={response} timelineMessages={[input]} getCatById={() => undefined} />
@@ -282,13 +303,22 @@ describe('AppendedInputReceipts: expand in place, jump separately', () => {
     const unconfirmed = state === 'unconfirmed' ? '（未确认读取）' : '';
     const at = state === 'read' ? '09/01 14:14:11' : '09/01 14:14:08';
     const recipient = state === 'read' ? '已读 布偶猫' : '已投递 布偶猫';
-    const sender = state === 'read' ? '已读 lang' : '已收到 lang';
+    const visible = {
+      unsupported: '已收到，读没读查不到',
+      pending: '已收到，等读取确认',
+      unconfirmed: '已收到，没确认读到',
+      read: '已读 14:14',
+    }[state];
     expect(container.querySelector('[data-dispatch-target="opus"]')?.getAttribute('title')).toBe(
       `${recipient}${unconfirmed} · ${at}`,
     );
     expect(row(input.id).querySelector('[data-append-delivery-state]')?.getAttribute('aria-label')).toBe(
-      `${sender}${unconfirmed} · ${at} · 补充内容`,
+      `lang · ${visible} · 补充内容`,
     );
+    expect(row(input.id).textContent).toContain(visible);
+    const sourceLine = container.querySelector('[data-dispatch-target="opus"]')?.textContent;
+    expect(sourceLine).toContain(`收到，并进了${state === 'unconfirmed' ? '已结束' : '正在回'}的这一轮`);
+    expect(sourceLine).toContain(visible.replace(/^已收到，/, ''));
   });
 
   it('toggles truncated text through the message itself without 展开全文 wording', async () => {

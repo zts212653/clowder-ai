@@ -98,6 +98,7 @@ export function subexecutionSceneMessages(): ChatMessage[] {
   ];
   return [
     {
+      from: { kind: 'agent', catId: 'codex' },
       id: 'subagent-working',
       type: 'assistant',
       catId: 'codex',
@@ -120,6 +121,7 @@ export function subexecutionSceneMessages(): ChatMessage[] {
       },
     },
     {
+      from: { kind: 'agent', catId: 'codex' },
       id: 'subagent-completed',
       type: 'assistant',
       catId: 'codex',

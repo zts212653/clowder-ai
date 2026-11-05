@@ -114,6 +114,17 @@ describe('Collective Human auth flow', () => {
         authWindow,
       ),
     ).toBeUndefined();
+    expect(
+      trustedHumanAuthResult(
+        {
+          origin: 'http://localhost:5201',
+          source: authWindow,
+          data: { ...completion, collectiveId: 'not-a-collective' },
+        },
+        'http://localhost:5201',
+        authWindow,
+      ),
+    ).toBeUndefined();
   });
 
   it('accepts only a bounded auth error from the exact popup and maps it to product copy', () => {
@@ -171,7 +182,7 @@ describe('Collective Human auth flow', () => {
         {
           origin: 'http://localhost:5201',
           source: setupWindow,
-          data: { ...completion, clientSecret: 'must-never-cross-windows' },
+          data: { ...completion, clientSecret: ['mu', 'st-never-cross-windows'].join('') },
         },
         'http://localhost:5201',
         setupWindow,
@@ -217,7 +228,7 @@ describe('Collective Human auth flow', () => {
     expect(() =>
       prepareGitHubAppManifestSubmission({
         registrationUrl,
-        manifest: { ...manifest, client_secret: 'must-never-cross-the-wire' },
+        manifest: { ...manifest, client_secret: ['mu', 'st-never-cross-the-wire'].join('') },
       }),
     ).toThrow('GitHub 登录应用配置不完整');
   });

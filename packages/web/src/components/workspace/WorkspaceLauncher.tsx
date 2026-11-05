@@ -30,6 +30,7 @@ export type WorkspaceLauncherDestination =
     }
   | {
       kind: 'host';
+      // `now` is retained only for already-persisted destination descriptors.
       id: 'status' | 'now' | 'voice' | 'films';
       label: string;
       description: string;
@@ -114,13 +115,6 @@ const THREAD_DESTINATIONS: WorkspaceLauncherDestination[] = [
 
 // Canonical v3 destination; classic retains its established card list.
 const V3_DESTINATIONS: WorkspaceLauncherDestination[] = [
-  {
-    kind: 'host',
-    id: 'now',
-    label: '正在发生',
-    description: '查看所有正在进行的工作与详情',
-    searchTerms: 'now running executions commands 正在发生 执行 后台 命令',
-  },
   {
     kind: 'host',
     id: 'voice',

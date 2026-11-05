@@ -3,6 +3,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RichCardBlock } from '@/stores/chat-types';
 import { apiFetch } from '@/utils/api-client';
+import { observeApiSessionOwner } from '@/utils/api-session-identity';
 import { ProposalCard } from '../ProposalCard';
 
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
@@ -60,8 +61,9 @@ describe('ProposalCard (F225 猫猫化 — emoji → CafeIcon SVG)', () => {
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
   beforeEach(() => {
+    observeApiSessionOwner('owner-1');
     vi.mocked(apiFetch).mockReset();
-    vi.mocked(apiFetch).mockImplementation(async () => okJson({ proposal: { status: 'pending' } }));
+    vi.mocked(apiFetch).mockImplementation(async () => okJson({ proposal: { proposalId: 'p1', status: 'pending' } }));
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -102,7 +104,7 @@ describe('ProposalCard (F225 猫猫化 — emoji → CafeIcon SVG)', () => {
 
   it('approved state shows a check SVG, not the ✓ glyph', async () => {
     vi.mocked(apiFetch).mockImplementation(async () =>
-      okJson({ proposal: { status: 'approved', createdThreadId: 'thread_new' } }),
+      okJson({ proposal: { proposalId: 'p1', status: 'approved', createdThreadId: 'thread_new' } }),
     );
     await act(async () => {
       root.render(<ProposalCard block={baseBlock} />);
@@ -112,7 +114,7 @@ describe('ProposalCard (F225 猫猫化 — emoji → CafeIcon SVG)', () => {
   });
 
   it('rejected state shows a cross SVG, not the ✗ glyph', async () => {
-    vi.mocked(apiFetch).mockImplementation(async () => okJson({ proposal: { status: 'rejected' } }));
+    vi.mocked(apiFetch).mockImplementation(async () => okJson({ proposal: { proposalId: 'p1', status: 'rejected' } }));
     await act(async () => {
       root.render(<ProposalCard block={baseBlock} />);
     });
@@ -130,7 +132,7 @@ describe('ProposalCard (F225 猫猫化 — emoji → CafeIcon SVG)', () => {
         posts.push({ url, body: JSON.parse((init.body as string) || '{}') as Record<string, unknown> });
         return okJson({ threadId: 'thread_new' });
       }
-      return okJson({ proposal: { status: 'pending' } });
+      return okJson({ proposal: { proposalId: 'p1', status: 'pending' } });
     });
     await act(async () => {
       root.render(<ProposalCard block={newBlock} />);
@@ -155,7 +157,7 @@ describe('ProposalCard (F225 猫猫化 — emoji → CafeIcon SVG)', () => {
         posts.push({ url, body: JSON.parse((init.body as string) || '{}') as Record<string, unknown> });
         return okJson({ threadId: 'thread_new' });
       }
-      return okJson({ proposal: { status: 'pending', declaredWorkMode: 'parallel' } });
+      return okJson({ proposal: { proposalId: 'p1', status: 'pending', declaredWorkMode: 'parallel' } });
     });
     await act(async () => {
       root.render(<ProposalCard block={baseBlock} />);
@@ -190,7 +192,7 @@ describe('ProposalCard (F225 猫猫化 — emoji → CafeIcon SVG)', () => {
         posts.push({ url, body: JSON.parse((init.body as string) || '{}') as Record<string, unknown> });
         return okJson({ threadId: 'thread_new' });
       }
-      return okJson({ proposal: { status: 'pending' } });
+      return okJson({ proposal: { proposalId: 'p1', status: 'pending' } });
     });
     await act(async () => {
       root.render(<ProposalCard block={unknownModeBlock} />);

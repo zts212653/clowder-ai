@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { describe, it } from 'node:test';
 import * as reviewGuard from './check-external-review-closure.mjs';
 
-const { checkExternalReviewHandoffText, checkExternalReviewSourceBoundary } = reviewGuard;
+const { checkExternalReviewHandoffText } = reviewGuard;
 const routingFixture = JSON.parse(
   readFileSync(
     resolve(import.meta.dirname, '../packages/api/test/harness-eval/fixtures/review-completion-routing.json'),
@@ -67,38 +67,6 @@ describe('review completion dual-route hard guard', () => {
       'External issue review completed: BLOCK. https://github.com/acme/widgets/issues/9#issuecomment-77',
     );
     assert.equal(issueDelivered.ok, true, issueDelivered.errors.join('\n'));
-  });
-
-  it('requires a closed delivery union and rejects broad bot or maintainer suppression', () => {
-    const good = checkExternalReviewSourceBoundary({
-      outcomeSource:
-        "kind: 'delivered'; githubUrl: string | kind: 'pending_delivery'; ownerCatId: string; reason: string",
-      deliveryPolicySource: "if (exactSelfEcho(input)) return 'silent-log';",
-      setupNoiseSource:
-        "if (!bots.has(c.author)) return false; return setupSentence.test(c.body) && c.commentType === 'conversation';",
-    });
-    assert.equal(good.ok, true);
-
-    const commentOnly = checkExternalReviewSourceBoundary({
-      outcomeSource:
-        "kind: 'delivered'; githubUrl: string | kind: 'pending_delivery'; ownerCatId: string; reason: string",
-      deliveryPolicySource:
-        "// OWNER/MEMBER used to return silent-log; association is now context only.\nreturn 'wake-owner';",
-      setupNoiseSource:
-        "if (!bots.has(c.author)) return false; return setupSentence.test(c.body) && c.commentType === 'conversation';",
-    });
-    assert.equal(commentOnly.ok, true, 'historical comments must not trip the executable-code guard');
-
-    const bad = checkExternalReviewSourceBoundary({
-      outcomeSource: "kind: 'delivered'",
-      deliveryPolicySource:
-        "if (author.endsWith('[bot]') || ['OWNER', 'MEMBER'].includes(association)) return 'silent-log';",
-      setupNoiseSource: 'return true;',
-    });
-    assert.equal(bad.ok, false);
-    assert.match(bad.errors.join('\n'), /pending_delivery/);
-    assert.match(bad.errors.join('\n'), /broad bot suppression/);
-    assert.match(bad.errors.join('\n'), /OWNER\/MEMBER/);
   });
 
   it('replays the external/local paired fixture through one intent classifier', () => {

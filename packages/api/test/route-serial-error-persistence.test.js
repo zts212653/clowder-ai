@@ -1,6 +1,47 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
+for (const wake of [
+  { kind: 'legacy', reason: 'carrier_missing' },
+  { kind: 'action_successor', leaseId: 'lease-1', generation: 1, holderCatId: 'codex' },
+]) {
+  it(`${wake.kind} projection never starts a hidden corrective model invocation`, async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const appended = [];
+    let calls = 0;
+    const deps = createMockDeps(
+      {
+        codex: {
+          async *invoke() {
+            calls++;
+            yield {
+              type: 'text',
+              catId: 'codex',
+              content: calls === 1 ? 'Hello from CLI' : 'unwanted correction',
+              timestamp: Date.now(),
+            };
+            yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+          },
+        },
+      },
+      appended,
+    );
+    deps.turnCustodyProjectionService = {
+      open: async () => ({ state: 'unknown_legacy', evidenceRefs: ['test:missing-carrier'] }),
+      close: async () => ({
+        state: 'unknown_legacy',
+        shouldBlock: true,
+        transitionObserved: false,
+        evidenceRefs: ['test:missing-carrier'],
+      }),
+    };
+    for await (const _ of routeSerial(deps, ['codex'], 'Hello', 'user1', 'thread1', { turnCustodyWake: wake })) void _;
+    assert.equal(calls, 1);
+    assert.ok(appended.some((message) => message.content === 'Hello from CLI'));
+    assert.ok(appended.every((message) => !message.content.includes('unwanted correction')));
+  });
+}
+
 /**
  * Verify that ACP error messages are persisted as system messages
  * so they survive F5 (page refresh) — the error badge should render
@@ -293,43 +334,67 @@ describe('route-serial error persistence (F5 reload)', () => {
     });
   }
 
-  it('serial: reports a failed A2A response to the exact predecessor and suppresses recursive report carriers', async () => {
-    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
-    const deps = createMockDeps({ bengal: createErrorService('bengal', 'model unavailable') }, []);
-    const reports = [];
-    const commonOptions = {
-      a2aTriggerMessageId: 'source-from-opus',
-      a2aCallerCatId: 'opus',
-      onLifecycleInvocationStarted: async (input) => {
-        const admission = await lifecycleResponseStoreFor(input);
-        deps.messageStore = admission.store;
-        return { responseMessageId: admission.response.id, priorFrontierMessageId: null };
-      },
-      commitFailedA2AReport: async (input) => {
-        reports.push(input);
-        const current = await deps.messageStore.getById(input.responseMessageId);
-        return { ...current, content: input.message.content, lifecycle: { ...current.lifecycle, ...input.terminal } };
-      },
-    };
+  for (const strategy of ['serial', 'parallel']) {
+    it(`${strategy}: reports a failed A2A response to the exact predecessor and suppresses recursive report carriers`, async () => {
+      const route =
+        strategy === 'serial'
+          ? (await import('../dist/domains/cats/services/agents/routing/route-serial.js')).routeSerial
+          : (await import('../dist/domains/cats/services/agents/routing/route-parallel.js')).routeParallel;
+      const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
+      const { commitFailedResponseAndEnqueueA2ACaller } = await import('../dist/routes/callback-a2a-trigger.js');
+      const deps = createMockDeps({ bengal: createErrorService('bengal', 'model unavailable') }, []);
+      const queue = new InvocationQueue();
+      const threadId = `failure-carrier-${strategy}`;
+      let responseMessageId;
+      const reportsForCurrentResponse = async () =>
+        (await queue.listAllDurable(threadId)).filter((entry) => entry.payload.messageId === responseMessageId);
+      const commonOptions = {
+        a2aTriggerMessageId: 'source-from-opus',
+        a2aCallerCatId: 'opus',
+        onLifecycleInvocationStarted: async (input) => {
+          const admission = await lifecycleResponseStoreFor(input);
+          deps.messageStore = admission.store;
+          responseMessageId = admission.response.id;
+          return { responseMessageId, priorFrontierMessageId: null };
+        },
+        // Direct route callers can lack durable admission receipts. Exercise the
+        // real transaction's legacy fallback, not the number of callback calls.
+        commitFailedA2AReport: (input) =>
+          commitFailedResponseAndEnqueueA2ACaller(
+            {
+              messageStore: deps.messageStore,
+              invocationQueue: queue,
+              queueProcessor: { requestDrain: async () => {} },
+              socketManager: { emitToUser() {}, broadcastAgentMessage() {} },
+              log: { info() {}, warn() {}, error() {} },
+            },
+            input,
+          ),
+      };
 
-    for await (const _ of routeSerial(deps, ['bengal'], 'please handle this', 'user1', 'thread1', commonOptions)) {
-      void _;
-    }
-    assert.equal(reports.length, 1);
-    assert.equal(reports[0].reporterCatId, 'bengal');
-    assert.equal(reports[0].predecessorCatId, 'opus');
-    assert.equal(reports[0].terminal.status, 'failed');
-    assert.match(reports[0].message.content, /model unavailable/);
+      for await (const _ of route(deps, ['bengal'], 'please handle this', 'user1', threadId, commonOptions)) {
+        void _;
+      }
+      const normalReports = await reportsForCurrentResponse();
+      assert.equal(normalReports.length, 1);
+      assert.equal(normalReports[0].from.catId, 'bengal');
+      assert.deepEqual(normalReports[0].targets, ['opus']);
+      assert.equal(normalReports[0].sourceCategory, 'a2a_failure');
+      assert.equal(deps.messageStore.getById(responseMessageId).lifecycle.status, 'failed');
+      assert.match(deps.messageStore.getById(responseMessageId).content, /model unavailable/);
 
-    reports.length = 0;
-    for await (const _ of routeSerial(deps, ['bengal'], 'failure report carrier', 'user1', 'thread1', {
-      ...commonOptions,
-      a2aFailureReport: true,
-    })) {
-      void _;
-    }
-    assert.equal(reports.length, 0, 'a failed report carrier must not recurse back to its reporter');
-  });
+      for await (const _ of route(deps, ['bengal'], 'failure report carrier', 'user1', threadId, {
+        ...commonOptions,
+        a2aFailureReport: true,
+      })) {
+        void _;
+      }
+      const recursiveReports = await reportsForCurrentResponse();
+      assert.equal(recursiveReports.length, 0, 'a failed report carrier must not recurse back to its reporter');
+      assert.equal(deps.messageStore.getById(responseMessageId).lifecycle.status, 'failed');
+      assert.match(deps.messageStore.getById(responseMessageId).content, /model unavailable/);
+    });
+  }
 
   it('persists error-only response as system message with Error: prefix', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
@@ -596,18 +661,78 @@ describe('route-serial error persistence (F5 reload)', () => {
     assert.ok(errorAppend, 'terminal failure still surfaces as system error');
   });
 
-  // Structural regression: only a completed lifecycle response may commit its
-  // durable A2A wake admission.
-  it('F212 cloud R3 P1 structural: lifecycle A2A admission remains gated on provider success', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { fileURLToPath } = await import('node:url');
-    const { dirname, resolve } = await import('node:path');
-    const here = dirname(fileURLToPath(import.meta.url));
-    const source = readFileSync(resolve(here, '../src/domains/cats/services/agents/routing/route-serial.ts'), 'utf8');
-
-    const cloudR3P1Match = source.match(
-      /lifecycleResponse\?\.status\s*===\s*'completed'\s*&&\s*a2aMentions\.length\s*>\s*0/,
-    );
-    assert.ok(cloudR3P1Match, 'Cloud R3 P1: durable A2A admission MUST require a completed response');
-  });
+  for (const fails of [false, true]) {
+    it(`F212 lifecycle A2A admission follows the persisted provider outcome: failure=${fails}`, async () => {
+      const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+      const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+      const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
+      const { commitCompletedResponseAndEnqueueA2ATargets } = await import('../dist/routes/callback-a2a-trigger.js');
+      const { appendTestLifecycleResponseSource } = await import('./helpers/message-from-fixtures.js');
+      const messages = new MessageStore();
+      const queue = new InvocationQueue();
+      const body = 'Handoff content\n@opus please continue';
+      const service = {
+        async *invoke() {
+          yield { type: 'text', catId: 'codex', content: body, timestamp: Date.now() };
+          if (fails) yield { type: 'error', catId: 'codex', error: 'provider failed', timestamp: Date.now() };
+          yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+        },
+      };
+      const deps = createMockDeps({ codex: service }, []);
+      deps.messageStore = messages;
+      const persistenceContext = { errors: [], failed: false };
+      let responseId;
+      for await (const _ of routeSerial(deps, ['codex'], 'work', 'user1', 'thread1', {
+        parentInvocationId: 'completed-response-parent',
+        persistenceContext,
+        onLifecycleInvocationStarted: async (input) => {
+          const response = await appendTestLifecycleResponseSource(messages, {
+            invocationId: input.invocationId,
+            catId: input.catId,
+            threadId: input.threadId,
+            userId: input.userId,
+            timestamp: input.startedAt,
+          });
+          responseId = response.id;
+          return {
+            responseMessageId: response.id,
+            priorFrontierMessageId: null,
+            activeRun: {
+              threadId: input.threadId,
+              targetId: input.catId,
+              invocationId: input.invocationId,
+              responseMessageId: response.id,
+              inputEntryIds: [],
+              inputMessageIds: [],
+              privateInputEntryIds: [],
+              startedAt: input.startedAt,
+            },
+          };
+        },
+        commitCompletedA2AWake: (input) =>
+          commitCompletedResponseAndEnqueueA2ATargets(
+            {
+              messageStore: messages,
+              invocationQueue: queue,
+              queueProcessor: { async requestDrain() {} },
+              socketManager: { emitToUser() {}, broadcastAgentMessage() {} },
+              log: { info() {}, warn() {}, error() {} },
+            },
+            input,
+          ),
+      })) {
+        void _;
+      }
+      assert.deepEqual(persistenceContext.errors, []);
+      const response = await messages.getById(responseId);
+      assert.equal(response.lifecycle.status, fails ? 'failed' : 'completed');
+      assert.ok(response.content.includes(body), 'the same persisted response retains its actual content');
+      const pending = await queue.listAllDurable('thread1');
+      assert.equal(pending.length, fails ? 0 : 1, 'only successful content may admit a downstream wake');
+      if (!fails) {
+        assert.equal(pending[0].payload.sourceRecordId, responseId);
+        assert.deepEqual(pending[0].targets, ['opus']);
+      }
+    });
+  }
 });

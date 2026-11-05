@@ -3,6 +3,7 @@ import { refIdentity } from '@cat-cafe/shared';
 import { useShellPresentation } from '@/components/shell/shell-presentation';
 import { EvolutionSource } from '../EvolutionVersionEvidence';
 import type { EvolutionProgramProjection } from '../evolution-program-projection';
+import { projectAssetVersions } from '../evolution-version-view';
 import { ExplorationActions } from './ExplorationActions';
 import { ExplorationCaseList } from './ExplorationCaseList';
 import { ExplorationComparison } from './ExplorationComparison';
@@ -10,12 +11,20 @@ import { ExplorationConditions } from './ExplorationConditions';
 import { ExplorationCounterexample } from './ExplorationCounterexample';
 import { ExplorationDecisionHeader } from './ExplorationDecisionHeader';
 import { ExplorationDetailStatus } from './ExplorationDetailStatus';
+import { ExplorationHistory } from './ExplorationHistory';
+import {
+  ExplorationHistoryPublicationNotice,
+  ExplorationHistoryPublicationRecords,
+  ExplorationHistoryRecovery,
+} from './ExplorationHistoryPublication';
 import { ExplorationIcon } from './ExplorationIcon';
 import { ExplorationNavigation } from './ExplorationNavigation';
 import { ExplorationOutcome } from './ExplorationOutcome';
 import { ExplorationPairedResults } from './ExplorationPairedResults';
+import { ExplorationPublicShowcase } from './ExplorationPublicShowcase';
 import { ExplorationSourceStatus } from './ExplorationSourceStatus';
 import { ExplorationSummary } from './ExplorationSummary';
+import { isHistoricalStep } from './exploration-history';
 import { useExplorationWorkspace } from './use-exploration-workspace';
 
 export function EvolutionExplorationWorkspace({
@@ -49,6 +58,18 @@ export function EvolutionExplorationWorkspace({
     acceptComparisonScope,
     resetSelection,
   } = workspace;
+  const assetVersions = projectAssetVersions(projection, asset.catalog);
+  const adoptedVersions = assetVersions.filter((version) => version.adopted);
+  const sourceCurrentVersions = assetVersions.filter((version) => version.sourceCurrent);
+  const names = (versions: typeof assetVersions) =>
+    versions
+      .map(
+        ({ ref }) =>
+          asset.catalog?.versions.find((version) => refIdentity(version.versionRef) === refIdentity(ref))?.title ??
+          ref.assetId,
+      )
+      .join('、');
+  const recoverySelection = resource.recoverySelection;
   if (!catalog)
     return (
       <section className="exploration-workspace" aria-label="探索进化">
@@ -56,9 +77,16 @@ export function EvolutionExplorationWorkspace({
           <ExplorationIcon kind="branch" />
           探索进化
         </h2>
-        <p role="status">{resource.error ?? '正在读取版本与实验…'}</p>
-        <ExplorationSourceStatus blockers={resource.blockers} retry={resource.retry} />
-        {resource.error && (
+        {recoverySelection ? (
+          <ExplorationHistoryRecovery
+            message={resource.error}
+            onOpen={() => void workspace.adoptPublication(recoverySelection)}
+          />
+        ) : (
+          <p role="status">{resource.error ?? '正在读取版本与实验…'}</p>
+        )}
+        {!recoverySelection && <ExplorationSourceStatus blockers={resource.blockers} retry={resource.retry} />}
+        {resource.error && !recoverySelection && (
           <>
             <button type="button" className="exploration-link" onClick={resource.retry}>
               重新读取探索记录
@@ -93,6 +121,7 @@ export function EvolutionExplorationWorkspace({
         </button>
       </section>
     );
+  if (isHistoricalStep(node)) return <ExplorationHistory workspace={workspace} projection={projection} mode={mode} />;
   if (mode === 'summary')
     return (
       <>
@@ -118,27 +147,28 @@ export function EvolutionExplorationWorkspace({
       data-exploration-presentation={v2 ? 'v2' : 'classic'}
     >
       <ExplorationSourceStatus blockers={catalog.blockers} retry={resource.retry} />
+      <ExplorationHistoryPublicationNotice workspace={workspace} />
 
       {v2 && (
         <>
           <section className="exploration-version-state" aria-label="生效与阅读状态">
+            <p>当前采用：{adoptedVersions.length ? names(adoptedVersions) : '未登记'}</p>
             <p>
-              当前生效：
-              {!asset.catalog
-                ? '待来源核验'
-                : asset.catalog.currentVersionRefs.length
-                  ? asset.catalog.currentVersionRefs
-                      .map(
-                        (ref) =>
-                          asset.catalog?.versions.find(
-                            (version) => refIdentity(version.versionRef) === refIdentity(ref),
-                          )?.title ?? '已登记，版本名待核实',
-                      )
-                      .join('、')
-                  : '未登记'}
+              来源当前版本：
+              {asset.catalog ? names(sourceCurrentVersions) || '未登记' : '待来源核验'}
             </p>
             <p>正在读：{node.title}</p>
           </section>
+          <ExplorationPublicShowcase
+            key={JSON.stringify([
+              projection.program.workspaceId,
+              projection.program.programId,
+              refIdentity(projection.program.objectRef),
+              refIdentity(catalog.sourceRef),
+            ])}
+            projection={projection}
+            catalog={catalog}
+          />
           <ExplorationNavigation workspace={workspace} v2 />
         </>
       )}
@@ -162,32 +192,27 @@ export function EvolutionExplorationWorkspace({
           {reading.inspector === 'changes' ? (
             <section className="exploration-inline-inspector" aria-label="改动与依据">
               <details className="exploration-adoption">
-                <summary>当前沿用与记录来源</summary>
-                <div className="exploration-current" role="status" aria-label="当前沿用">
-                  当前沿用：
-                  {asset.catalog
-                    ? asset.catalog.currentVersionRefs
-                        .map(
-                          (ref) =>
-                            asset.catalog?.versions.find(
-                              (version) => refIdentity(version.versionRef) === refIdentity(ref),
-                            )?.title ?? ref.assetId,
-                        )
-                        .join('、') || '来源尚无沿用记录'
-                    : '尚待资产来源确认'}
+                <summary>采用与来源版本</summary>
+                <div className="exploration-current" role="status" aria-label="当前采用">
+                  当前采用：{adoptedVersions.length ? names(adoptedVersions) : '未登记'}
                 </div>
+                <p>
+                  来源当前版本：
+                  {asset.catalog ? names(sourceCurrentVersions) || '未登记' : '尚待资产来源确认'}
+                </p>
                 <p>
                   {node.kind === 'public_archive'
                     ? '公开归档；采用以正式回执为准。'
-                    : '来源发布的真实资产版本。阅读不会改变采用。'}
+                    : '来源发布的真实资产版本不等于本项目已采用；阅读也不会改变采用。'}
                 </p>
+                <ExplorationHistoryPublicationRecords workspace={workspace} />
               </details>
               <h3>这一版改了什么</h3>
               {node.changes.map((item, index) => (
                 <div key={`${item.label}:${index}`}>
                   <h4>{item.label}</h4>
                   <p>{item.detail}</p>
-                  <EvolutionSource label="依据" source={item.sourceRef} />
+                  <EvolutionSource label="依据" source={item.sourceRef} href={item.ownerHref} />
                 </div>
               ))}
             </section>

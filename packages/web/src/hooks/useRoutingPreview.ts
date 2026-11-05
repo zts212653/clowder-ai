@@ -22,6 +22,7 @@ export type RoutingPreviewState =
       status: 'ready';
       targetCats: RoutingPreviewResponse['targetCats'];
       reason: ComposerRoutingPreviewReason;
+      unavailableTargets?: RoutingPreviewResponse['unavailableTargets'];
     };
 
 export function useRoutingPreview({

@@ -112,55 +112,67 @@ describe('resolveStartupCliConfigContext', () => {
     }
   });
 
-  it('Alpha startup leaves shared workspace and HOME CLI configuration byte-for-byte unchanged', async () => {
-    assert.equal(process.env.CAT_CAFE_TEST_SANDBOX, '1', 'run through scripts/with-test-home.sh');
-    const root = join(tmpdir(), `cat-cafe-alpha-startup-workspace-${Date.now()}`);
-    const runtime = join(tmpdir(), `cat-cafe-alpha-startup-runtime-${Date.now()}`);
-    const apiCwd = join(runtime, 'packages', 'api');
-    const workspaceConfig = join(root, '.cat-cafe', 'capabilities.json');
-    const geminiConfig = join(root, '.gemini', 'settings.json');
-    const agyConfig = join(homedir(), '.gemini', 'antigravity', 'mcp_config.json');
-    await mkdir(join(root, '.cat-cafe'), { recursive: true });
-    await mkdir(join(root, '.gemini'), { recursive: true });
-    await mkdir(join(homedir(), '.gemini', 'antigravity'), { recursive: true });
-    await mkdir(apiCwd, { recursive: true });
-    await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - packages/*\n');
-    await writeFile(join(runtime, 'pnpm-workspace.yaml'), 'packages:\n  - packages/*\n');
-    const originalAgy = await readFile(agyConfig).catch((err) => {
-      if (err.code === 'ENOENT') return null;
-      throw err;
-    });
-    const capability = {
-      id: 'cat-cafe-memory',
-      type: 'mcp',
-      enabled: true,
-      source: 'cat-cafe',
-      mcpServer: { command: 'node', args: ['/existing-owner/memory.js'] },
-    };
-    await writeFile(workspaceConfig, JSON.stringify({ version: 1, capabilities: [capability] }));
-    const sentinel = JSON.stringify({ mcpServers: { 'cat-cafe-memory': capability.mcpServer } });
-    await writeFile(geminiConfig, sentinel);
-    await writeFile(agyConfig, sentinel);
-    const paths = [workspaceConfig, geminiConfig, agyConfig];
-    const before = await Promise.all(paths.map((path) => readFile(path)));
-    try {
-      const result = await regenerateStartupCliConfigs(apiCwd, {
-        CAT_CAFE_DEPLOYMENT_ID: 'alpha',
-        CAT_CAFE_WORKSPACE_ROOT: root,
-        CAT_CAFE_RUNTIME_ROOT: runtime,
+  for (const [deployment, withRuntimeRoot] of [
+    ['alpha', true],
+    [undefined, true],
+    ['runtime', true],
+    ['runtime', false],
+  ]) {
+    const label =
+      deployment === 'runtime'
+        ? `linked worktree with an inherited runtime identity${withRuntimeRoot ? '' : ' and no runtime root'}`
+        : deployment;
+    it(`${label ?? 'unlabelled linked worktree'} startup leaves shared workspace and HOME CLI configuration byte-for-byte unchanged`, async () => {
+      assert.equal(process.env.CAT_CAFE_TEST_SANDBOX, '1', 'run through scripts/with-test-home.sh');
+      const root = join(tmpdir(), `cat-cafe-alpha-startup-workspace-${Date.now()}`);
+      const runtime = join(tmpdir(), `cat-cafe-alpha-startup-runtime-${Date.now()}`);
+      const apiCwd = join(runtime, 'packages', 'api');
+      const workspaceConfig = join(root, '.cat-cafe', 'capabilities.json');
+      const geminiConfig = join(root, '.gemini', 'settings.json');
+      const agyConfig = join(homedir(), '.gemini', 'antigravity', 'mcp_config.json');
+      await mkdir(join(root, '.cat-cafe'), { recursive: true });
+      await mkdir(join(root, '.gemini'), { recursive: true });
+      await mkdir(join(homedir(), '.gemini', 'antigravity'), { recursive: true });
+      await mkdir(apiCwd, { recursive: true });
+      await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - packages/*\n');
+      await writeFile(join(runtime, 'pnpm-workspace.yaml'), 'packages:\n  - packages/*\n');
+      await writeFile(join(runtime, '.git'), 'gitdir: ../workspace/.git/worktrees/preview\n');
+      const originalAgy = await readFile(agyConfig).catch((err) => {
+        if (err.code === 'ENOENT') return null;
+        throw err;
       });
-      const after = await Promise.all(paths.map((path) => readFile(path)));
-      for (let index = 0; index < paths.length; index++) {
-        assert.equal(after[index].equals(before[index]), true, `Alpha overwrote config ${index}`);
+      const capability = {
+        id: 'cat-cafe-memory',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['/existing-owner/memory.js'] },
+      };
+      await writeFile(workspaceConfig, JSON.stringify({ version: 1, capabilities: [capability] }));
+      const sentinel = JSON.stringify({ mcpServers: { 'cat-cafe-memory': capability.mcpServer } });
+      await writeFile(geminiConfig, sentinel);
+      await writeFile(agyConfig, sentinel);
+      const paths = [workspaceConfig, geminiConfig, agyConfig];
+      const before = await Promise.all(paths.map((path) => readFile(path)));
+      try {
+        const result = await regenerateStartupCliConfigs(apiCwd, {
+          ...(deployment ? { CAT_CAFE_DEPLOYMENT_ID: deployment } : {}),
+          CAT_CAFE_WORKSPACE_ROOT: root,
+          ...(withRuntimeRoot ? { CAT_CAFE_RUNTIME_ROOT: deployment === 'runtime' ? root : runtime } : {}),
+        });
+        const after = await Promise.all(paths.map((path) => readFile(path)));
+        for (let index = 0; index < paths.length; index++) {
+          assert.equal(after[index].equals(before[index]), true, `Alpha overwrote config ${index}`);
+        }
+        assert.deepEqual(result, { projectRoot: root, generated: false, healed: false });
+      } finally {
+        if (originalAgy === null) await rm(agyConfig, { force: true });
+        else await writeFile(agyConfig, originalAgy);
+        await rm(root, { recursive: true, force: true });
+        await rm(runtime, { recursive: true, force: true });
       }
-      assert.deepEqual(result, { projectRoot: root, generated: false, healed: false });
-    } finally {
-      if (originalAgy === null) await rm(agyConfig, { force: true });
-      else await writeFile(agyConfig, originalAgy);
-      await rm(root, { recursive: true, force: true });
-      await rm(runtime, { recursive: true, force: true });
-    }
-  });
+    });
+  }
 
   it('waits for the capability lock before healing and generating startup configs', async () => {
     const root = join(tmpdir(), `cat-cafe-startup-lock-${Date.now()}`);

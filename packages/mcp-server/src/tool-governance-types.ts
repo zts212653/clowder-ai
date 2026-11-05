@@ -76,9 +76,7 @@ export type McpRuntimeProfile =
   | 'agent-key'
   | 'desktop:fable-phase0'
   | 'desktop:cloud-pro-phase0'
-  | 'desktop:live-companion'
-  | 'collective-participation'
-  | 'collective-work';
+  | 'desktop:live-companion';
 
 export type McpSchemaDeliveryPolicy = {
   policy: 'host-default' | 'always-visible' | 'discoverable';

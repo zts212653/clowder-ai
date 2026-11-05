@@ -30,6 +30,13 @@ export const mailboxRuntimeCopy = defineShellCopy(
         publicationFailed: 'The request could not be shown. No action ran.',
         invalid: 'This request expired and can no longer be submitted.',
       },
+      elicitation: {
+        open: (host: string) => `Open ${host}`,
+        unavailable: 'The link is unavailable; you can still decline or cancel this request.',
+        choose: 'Choose an option',
+        yes: 'Yes',
+        no: 'No',
+      },
       form: {
         skip: 'Do not answer',
         submit: 'Submit answer',
@@ -39,5 +46,5 @@ export const mailboxRuntimeCopy = defineShellCopy(
       },
     },
   },
-  { samples: { 'form.otherLabel': [['A'], ['B']] } },
+  { samples: { 'form.otherLabel': [['A'], ['B']], 'elicitation.open': [['example.com'], ['provider.test']] } },
 );

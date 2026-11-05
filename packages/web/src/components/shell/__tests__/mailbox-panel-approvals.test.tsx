@@ -33,9 +33,13 @@ vi.mock('next/navigation', () => ({ usePathname: () => '/thread/current', useRou
 vi.mock('@/stores/chatStore', () => ({
   useChatStore: (s: (v: { setWorkspaceMode: () => void }) => unknown) => s({ setWorkspaceMode: vi.fn() }),
 }));
-vi.mock('@/stores/approvalHubStore', () => ({
-  useApprovalHubStore: (s: (v: { fetchPending: () => void }) => unknown) => s({ fetchPending: vi.fn() }),
-}));
+vi.mock('@/stores/approvalHubStore', () => {
+  const state = { fetchPending: vi.fn(), ensurePending: vi.fn(), pendingRequestVersion: 0, decisionAttempts: {} };
+  const useApprovalHubStore = (select: (value: typeof state) => unknown) => select(state);
+  useApprovalHubStore.getState = () => state;
+  useApprovalHubStore.subscribe = () => () => {};
+  return { useApprovalHubStore };
+});
 vi.mock('../mailbox/open-exact-place', () => ({ openExactPlace: data.navigate }));
 vi.mock('@/hooks/useCatNameResolver', () => ({ useCatNameResolver: () => (catId: string) => `猫:${catId}` }));
 vi.mock('../use-unified-attention', () => ({ useUnifiedAttention: () => data.view }));
@@ -59,6 +63,7 @@ function fakeSessions(initial: ApprovalSession[] = []) {
   let version = 0;
   const fake = {
     open: vi.fn(),
+    currentItem: () => null,
     get: (key: string) => list.find((session) => session.key === key),
     list: () => list,
     subscribe: (listener: () => void) => {
@@ -135,6 +140,14 @@ describe('the 待办 panel and the approvals it can host', () => {
   });
 
   describe('which rows host the original card', () => {
+    it('keeps the native new-conversation card available without expanding the row', async () => {
+      const native = approvalRow(storeItem({ inlineApprovable: false }));
+      show(okRead([native]));
+      await openPanel();
+      expect($('mailbox-item')?.getAttribute('data-expanded')).toBe('false');
+      expect($('hosted-card-stub')?.getAttribute('data-owner')).toBe(OWNER);
+      expect($('hosted-card-stub')?.getAttribute('data-ref')).toBe(native.decisionRef);
+    });
     it('an open, decidable approval hosts it in the expanded row, for the read’s verified owner', async () => {
       show(okRead([row]));
       await openPanel();
@@ -260,21 +273,32 @@ describe('the 待办 panel and the approvals it can host', () => {
 
   describe('a result outlives the row it belongs to', () => {
     it('keeps a decided result when the read no longer lists the approval', async () => {
+      data.sessions = fakeSessions([sessionIn({ kind: 'writing', attemptId: 2 })]);
+      show(okRead([row]));
+      await openPanel();
       data.sessions = fakeSessions([sessionIn(decided)]);
       show(okRead([]));
-      await openPanel();
+      await act(async () => root.render(<MailboxButton />));
       const retained = $('mailbox-retained-result');
       expect(retained).not.toBeNull();
       expect(retained?.textContent).toContain('已同意');
+      expect($('proposal-result-details')).toBeNull();
+      await act(async () => retained?.querySelector<HTMLButtonElement>('button[aria-expanded="false"]')?.click());
       // Named the way its row was named.
       expect(retained?.textContent).toContain('记一条品味');
     });
 
     it('lets the user dismiss it, and only then is it forgotten', async () => {
       const sessions = fakeSessions([sessionIn(decided)]);
+      data.sessions = fakeSessions([sessionIn({ kind: 'writing', attemptId: 2 })]);
+      show(okRead([row]));
+      await openPanel();
       data.sessions = sessions;
       show(okRead([]));
-      await openPanel();
+      await act(async () => root.render(<MailboxButton />));
+      await act(async () =>
+        $('mailbox-retained-result')?.querySelector<HTMLButtonElement>('button[aria-expanded="false"]')?.click(),
+      );
       await click('mailbox-retained-dismiss');
       expect(sessions.close).toHaveBeenCalledWith(KEY);
       expect($('mailbox-retained-result')).toBeNull();

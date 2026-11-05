@@ -1,5 +1,5 @@
 import type { BacklogDependencies, BacklogItem, CatId, MissionHubSelfClaimScope, ThreadPhase } from '@cat-cafe/shared';
-import { catIdSchema, catRegistry } from '@cat-cafe/shared';
+import { catIdSchema, catRegistry, deploymentDefaults } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { getMissionHubSelfClaimScope } from '../config/cat-config-loader.js';
@@ -344,7 +344,7 @@ export const backlogRoutes: FastifyPluginAsync<BacklogRoutesOptions> = async (ap
     } catch (error) {
       reply.status(500);
       return {
-        error: `Failed to read docs/ROADMAP.md: ${error instanceof Error ? error.message : String(error)}`,
+        error: `Failed to read ${deploymentDefaults.roadmapPath}: ${error instanceof Error ? error.message : String(error)}`,
       };
     }
 

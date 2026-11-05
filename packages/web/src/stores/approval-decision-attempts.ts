@@ -8,11 +8,13 @@
  *    canonical re-read to say, and the absence of an attempt never means success;
  *  - fenced: every attempt has a monotonic id, a newer attempt replaces the older at once, and an answer arriving for an
  *    attempt that is no longer the current one is dropped, so a late old 403 cannot dress up a newer request;
- *  - raw: the HTTP status the server answered, `transport_unknown` when no response came back at all, `client_validation`
+ *  - raw: the HTTP status plus an optional exact original-writer effect witness (not a terminal decision),
+ *    `transport_unknown` when no response came back at all, `client_validation`
  *    when the card refused before sending. 400/409/5xx are not classified here ("refused" would claim more than a generic
  *    store knows: a 5xx can land after the side effect, a 409 can be a typed conflict the producer card handles itself).
  */
 import type { ApprovalHubItem } from '@cat-cafe/shared';
+import type { DomainApprovalEffect } from './approval-domain-effect';
 
 export type DecisionActionKind =
   | 'approve'
@@ -24,7 +26,14 @@ export type DecisionActionKind =
 
 export type DecisionAttemptState =
   | { phase: 'submitting' }
-  | { phase: 'response_received'; status: number; ok: boolean; errorCode?: string; message?: string }
+  | {
+      phase: 'response_received';
+      status: number;
+      ok: boolean;
+      errorCode?: string;
+      message?: string;
+      domainEffect?: DomainApprovalEffect;
+    }
   | { phase: 'transport_unknown' }
   | { phase: 'client_validation'; reason: string };
 
@@ -35,6 +44,8 @@ export interface DecisionAttempt {
   /** With `proposalId` (the map key) and `createdAt`, the exact item this attempt was made against. */
   sourceFeatureId: ApprovalHubItem['sourceFeatureId'] | undefined;
   createdAt: number | undefined;
+  ownerUserId?: string;
+  approvalCardRef?: { threadId: string; messageId: string };
   state: DecisionAttemptState;
 }
 
@@ -62,7 +73,10 @@ export function beginDecisionAttempt(
   set: AttemptsUpdate,
   proposalId: string,
   action: DecisionActionKind,
-  item: Pick<ApprovalHubItem, 'sourceFeatureId' | 'createdAt'> | undefined,
+  item:
+    | (Pick<ApprovalHubItem, 'sourceFeatureId' | 'createdAt'> &
+        Partial<Pick<ApprovalHubItem, 'ownerUserId' | 'navigation'>>)
+    | undefined,
 ) {
   lastAttemptId += 1;
   const attemptId = lastAttemptId;
@@ -74,6 +88,8 @@ export function beginDecisionAttempt(
         action,
         sourceFeatureId: item?.sourceFeatureId,
         createdAt: item?.createdAt,
+        ...(item?.ownerUserId ? { ownerUserId: item.ownerUserId } : {}),
+        ...(item?.navigation?.state === 'anchored' ? { approvalCardRef: { ...item.navigation.approvalCardRef } } : {}),
         state: { phase: 'submitting' },
       },
     },
@@ -89,8 +105,12 @@ export function beginDecisionAttempt(
   let responded = false;
   return {
     attemptId,
-    /** The server answered. `body` is the parsed error body when the answer was a failure. */
-    received(response: { status: number; ok: boolean }, body?: { error?: unknown; message?: unknown }) {
+    /** The server answered. The optional effect is a bounded original-writer response fact, not permission or lifecycle. */
+    received(
+      response: { status: number; ok: boolean },
+      body?: { error?: unknown; message?: unknown },
+      domainEffect?: DomainApprovalEffect,
+    ) {
       responded = true;
       settle({
         phase: 'response_received',
@@ -98,6 +118,7 @@ export function beginDecisionAttempt(
         ok: response.ok,
         ...(typeof body?.error === 'string' ? { errorCode: body.error } : {}),
         ...(typeof body?.message === 'string' ? { message: body.message } : {}),
+        ...(response.ok && domainEffect ? { domainEffect } : {}),
       });
     },
     /** The card refused before sending anything. */

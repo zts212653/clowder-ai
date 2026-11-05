@@ -4,6 +4,7 @@
  * MVP: keyword matching + heuristics, no ML model.
  */
 import type { SillyCatEntry, SillyStats } from '@cat-cafe/shared';
+import { getCoCreatorDisplay } from '../../config/co-creator-display.js';
 import type { MessageLike } from './mention-stats.js';
 
 /** Angry scolding patterns — 真生气 */
@@ -45,7 +46,7 @@ export function computeSillyStats(messages: MessageLike[], catNames: Record<stri
       catId,
       displayName: catNames[catId] ?? catId,
       label: '被骂最多 💀',
-      description: 'co-creator发飙次数',
+      description: `${getCoCreatorDisplay().nickname}发飙次数`,
       count,
     }));
 

@@ -7,6 +7,9 @@ export const MessageKeys = {
   /** Hash with message details: msg:{id} */
   detail: (id: string) => `msg:${id}`,
 
+  /** Short-lived owner-token mutex around lifecycle dispatchRef writes. */
+  lifecycleDispatchLock: (id: string) => `msg:${id}:lifecycle-dispatch-lock`,
+
   /** Global timeline sorted set */
   TIMELINE: 'msg:timeline',
 

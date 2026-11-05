@@ -34,6 +34,36 @@ function scoped(state: ArtifactWorkPresentationState) {
 }
 
 describe('F307 artifact work presentation', () => {
+  it('retains explicit work mode through full-window and rejects a stale close', () => {
+    const opened = reduceArtifactWorkPresentation(createArtifactWorkPresentationState(), {
+      type: 'begin',
+      initiator: 'user',
+      threadId: 'thread-a',
+      surfaceId: 'artifact:7',
+      returnHandle: RETURN_HANDLE,
+      workMode: true,
+    }).state;
+    expect(opened.session).toMatchObject({ workMode: true, mode: 'split' });
+    const expanded = reduceArtifactWorkPresentation(opened, {
+      type: 'enter-full-window',
+      initiator: 'user',
+      ...scoped(opened),
+    }).state;
+    const returned = reduceArtifactWorkPresentation(expanded, {
+      type: 'leave-full-window',
+      initiator: 'user',
+      ...scoped(expanded),
+    }).state;
+    expect(returned.session).toMatchObject({ workMode: true, mode: 'split', returnHandle: RETURN_HANDLE });
+    expect(
+      reduceArtifactWorkPresentation(returned, {
+        type: 'close',
+        initiator: 'user',
+        ...scoped(returned),
+        generation: 0,
+      }).state,
+    ).toBe(returned);
+  });
   it('begins in the default 30/70 split only for an explicit user action', () => {
     const initial = createArtifactWorkPresentationState();
     expect(

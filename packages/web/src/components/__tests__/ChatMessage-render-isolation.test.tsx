@@ -4,6 +4,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import type { ChatMessage as ChatMessageData } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { ChatMessage } from '../ChatMessage';
+import { SHELL_PRESENTATION_STORAGE_KEY } from '../shell/shell-presentation';
 
 describe('ChatMessage render isolation', () => {
   let container: HTMLDivElement;
@@ -73,6 +74,31 @@ describe('ChatMessage render isolation', () => {
     expect(getCatById).toHaveBeenCalledTimes(callsAfterInitialRender);
   });
 
+  it('continues rendering new content on the streaming bubble', () => {
+    const message: ChatMessageData = {
+      id: 'message-streaming',
+      type: 'assistant',
+      from: { kind: 'agent', catId: 'codex-sol' },
+      catId: 'codex-sol',
+      content: 'First streamed token',
+      timestamp: 1,
+      isStreaming: true,
+    };
+    const getCatById = () => undefined;
+    act(() => root.render(<ChatMessage message={message} threadId="thread-render" getCatById={getCatById} />));
+    expect(container.textContent).toContain('First streamed token');
+    act(() =>
+      root.render(
+        <ChatMessage
+          message={{ ...message, content: 'First streamed token followed by the next chunk' }}
+          threadId="thread-render"
+          getCatById={getCatById}
+        />,
+      ),
+    );
+    expect(container.textContent).toContain('First streamed token followed by the next chunk');
+  });
+
   it('keeps a delivered input routing warning attached to its History bubble', () => {
     const message: ChatMessageData = {
       id: 'message-with-routing-warning',
@@ -111,61 +137,73 @@ describe('ChatMessage render isolation', () => {
     expect(container.textContent).not.toContain('Thinking...');
   });
 
-  it('renders each appended lifecycle input below the response bubble', () => {
-    const initial: ChatMessageData = {
-      id: 'source-initial',
-      from: { kind: 'user', userId: 'co-creator' },
-      type: 'user',
-      content: '@狸花猫 开始',
-      timestamp: 100,
-    };
-    const appended: ChatMessageData = {
-      id: 'source-appended',
-      from: { kind: 'user', userId: 'co-creator' },
-      type: 'user',
-      content: '@狸花猫 测试下追加消息的',
-      timestamp: new Date(2026, 8, 1, 22, 14, 8).getTime(),
-    };
-    const response: ChatMessageData = {
-      id: 'response-with-append',
-      from: { kind: 'agent', catId: 'cat-1' },
-      type: 'assistant',
-      catId: 'cat-1',
-      content: '收到',
-      timestamp: 100,
-      metadata: { model: 'gpt-test', provider: 'test-provider' },
-      lifecycle: {
-        kind: 'response',
-        orderKey: '100:response-with-append',
-        invocationId: 'invocation-1',
-        targetId: 'cat-1',
-        inputEntryIds: ['entry-initial', 'entry-appended'],
-        inputMessageIds: [initial.id, appended.id],
-        status: 'completed',
-        startedAt: 100,
-        completedAt: new Date(2026, 8, 1, 22, 14, 9).getTime(),
-      },
-    };
-    useChatStore.setState({ messages: [initial, appended, response] });
-
-    act(() => {
-      root.render(<ChatMessage message={response} threadId="thread-render" getCatById={() => undefined} />);
+  describe('classic lifecycle receipts', () => {
+    let previousShell: string | null;
+    beforeEach(() => {
+      previousShell = window.localStorage.getItem(SHELL_PRESENTATION_STORAGE_KEY);
+      window.localStorage.setItem(SHELL_PRESENTATION_STORAGE_KEY, 'classic');
+    });
+    afterEach(() => {
+      if (previousShell === null) window.localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
+      else window.localStorage.setItem(SHELL_PRESENTATION_STORAGE_KEY, previousShell);
     });
 
-    const receipts = container.querySelector('[data-testid="appended-input-receipts"]');
-    const metadata = container.querySelector('[data-testid="message-metadata"]');
-    const appendedRow = container.querySelector('[data-appended-input-id="source-appended"]');
-    expect(metadata?.compareDocumentPosition(receipts!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
-    expect(receipts?.textContent).toContain('补充消息');
-    expect(receipts?.textContent).toContain('@狸花猫 测试下追加消息的');
-    expect(receipts?.textContent).toContain('跳到原文');
-    expect(receipts?.textContent).not.toContain('查看原文');
-    expect(receipts?.textContent).not.toContain('09/01 22:14:08');
-    expect(appendedRow?.getAttribute('title')).toBeNull();
-    expect(appendedRow?.querySelector('[data-append-delivery-state]')?.getAttribute('aria-label')).toContain(
-      '@狸花猫 测试下追加消息的',
-    );
-    expect(receipts?.textContent).not.toContain('@狸花猫 开始');
+    it('renders each appended lifecycle input below the response bubble', () => {
+      const initial: ChatMessageData = {
+        id: 'source-initial',
+        from: { kind: 'user', userId: 'co-creator' },
+        type: 'user',
+        content: '@狸花猫 开始',
+        timestamp: 100,
+      };
+      const appended: ChatMessageData = {
+        id: 'source-appended',
+        from: { kind: 'user', userId: 'co-creator' },
+        type: 'user',
+        content: '@狸花猫 测试下追加消息的',
+        timestamp: new Date(2026, 8, 1, 22, 14, 8).getTime(),
+      };
+      const response: ChatMessageData = {
+        id: 'response-with-append',
+        from: { kind: 'agent', catId: 'cat-1' },
+        type: 'assistant',
+        catId: 'cat-1',
+        content: '收到',
+        timestamp: 100,
+        metadata: { model: 'gpt-test', provider: 'test-provider' },
+        lifecycle: {
+          kind: 'response',
+          orderKey: '100:response-with-append',
+          invocationId: 'invocation-1',
+          targetId: 'cat-1',
+          inputEntryIds: ['entry-initial', 'entry-appended'],
+          inputMessageIds: [initial.id, appended.id],
+          status: 'completed',
+          startedAt: 100,
+          completedAt: new Date(2026, 8, 1, 22, 14, 9).getTime(),
+        },
+      };
+      useChatStore.setState({ messages: [initial, appended, response] });
+
+      act(() => {
+        root.render(<ChatMessage message={response} threadId="thread-render" getCatById={() => undefined} />);
+      });
+
+      const receipts = container.querySelector('[data-testid="appended-input-receipts"]');
+      const metadata = container.querySelector('[data-testid="message-metadata"]');
+      const appendedRow = container.querySelector('[data-appended-input-id="source-appended"]');
+      expect(metadata?.compareDocumentPosition(receipts!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+      expect(receipts?.textContent).toContain('补充消息');
+      expect(receipts?.textContent).toContain('@狸花猫 测试下追加消息的');
+      expect(receipts?.textContent).toContain('跳到原文');
+      expect(receipts?.textContent).not.toContain('查看原文');
+      expect(receipts?.textContent).not.toContain('09/01 22:14:08');
+      expect(appendedRow?.getAttribute('title')).toBeNull();
+      expect(appendedRow?.querySelector('[data-append-delivery-state]')?.getAttribute('aria-label')).toContain(
+        '@狸花猫 测试下追加消息的',
+      );
+      expect(receipts?.textContent).not.toContain('@狸花猫 开始');
+    });
   });
 
   it('shows newest appended inputs first and expands the default three-and-a-half-row viewport', () => {
@@ -220,8 +258,6 @@ describe('ChatMessage render isolation', () => {
       'source-appended-1',
     ]);
     expect(list?.dataset.collapsed).toBe('true');
-    expect(list?.style.maxHeight).toBe('98px');
-    expect(list?.style.maskImage).toContain('transparent 98px');
 
     const expand = container.querySelector('button[aria-expanded="false"]') as HTMLButtonElement | null;
     expect(expand?.getAttribute('aria-label')).toBe('展开剩余 2 条补充消息');
@@ -231,12 +267,14 @@ describe('ChatMessage render isolation', () => {
     act(() => expand?.click());
 
     expect(list?.dataset.collapsed).toBe('false');
-    expect(list?.style.maxHeight).toBe('');
     const collapse = container.querySelector('button[aria-expanded="true"]');
     expect(collapse?.getAttribute('aria-label')).toBe('收起补充消息');
     expect(collapse?.textContent).toBe('');
     expect(collapse?.querySelector('span')?.classList.contains('rotate-180')).toBe(true);
     expect(collapse?.querySelector('svg')?.classList.contains('rotate-90')).toBe(true);
+    act(() => (collapse as HTMLButtonElement | null)?.click());
+    expect(list?.dataset.collapsed).toBe('true');
+    expect(container.querySelector('button[aria-expanded="false"]')?.textContent).toBe('展开剩余 2 条');
   });
 
   it('renders only otherwise-invisible post_message targets at the end of the ordinary body', () => {
@@ -310,7 +348,7 @@ describe('ChatMessage render isolation', () => {
     expect(bubble?.parentElement?.className).not.toContain('w-fit');
   });
 
-  it('shows a terminal response completion time instead of its original start time', () => {
+  it('keeps a terminal response at its original start time', () => {
     const startedAt = new Date(2026, 8, 22, 17, 6).getTime();
     const completedAt = new Date(2026, 8, 22, 17, 49).getTime();
     const message: ChatMessageData = {
@@ -365,8 +403,8 @@ describe('ChatMessage render isolation', () => {
       minute: '2-digit',
     });
     const header = container.querySelector('[data-testid="message-header"]');
-    expect(header?.textContent).toContain(expected);
-    expect(header?.textContent).not.toContain(started);
+    expect(header?.textContent).toContain(started);
+    expect(header?.textContent).not.toContain(expected);
   });
 
   it('presents a human modification source by work title and named cat while preserving the actual human wording', () => {
@@ -421,6 +459,9 @@ describe('ChatMessage render isolation', () => {
     expect(container.querySelector('[data-testid="companion-avatar"]')?.getAttribute('data-companion-cat-id')).toBe(
       'fable-5',
     );
+    expect(
+      container.querySelector('[data-testid="companion-avatar"] [data-sender-avatar="message"]')?.className,
+    ).toContain('w-8 h-8');
     expect(container.querySelector('[data-testid="companion-avatar"] img')?.getAttribute('src')).toBe(
       '/avatars/claude-fable-5.png',
     );

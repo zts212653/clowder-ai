@@ -1,95 +1,46 @@
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
 import { describe, it } from 'node:test';
-import { promisify } from 'node:util';
+import { createGitCapabilityEvolutionMeasurementBindingResolver } from '../../dist/infrastructure/harness-eval/measurement/capability-evolution/capability-evolution-measurement-binding-resolver.js';
+import { writeYaml } from './capability-evolution-measurement-fixtures.js';
+import { measurementBindingGitFixture } from './measurement-binding-git-fixture.js';
 
-import { parse } from 'yaml';
-
-const repoRoot = resolve(import.meta.dirname, '../../../..');
-const programId = 'evolution-program:ba0f4524e49cc879279164d5b272cf8c';
-const sourceArtifactRef =
-  'docs/harness-feedback/measurement-sources/capability-evolution/evolution-program-ba0f4524e49cc879279164d5b272cf8c.yaml';
-const sourcePath = resolve(repoRoot, sourceArtifactRef);
-const publishedV2Revision = 'f11039cdc036a3a6be2c05ea0192f236b8088c5e';
-const exec = promisify(execFile);
 const evidenceProofRef = {
   ownerFeatureId: 'F267',
-  ownerStateRef: 'measurement-proof:f267-capability-evolution-development-episode-alignment-e0-proof-v2',
+  ownerStateRef: 'measurement-proof:f267-capability-evolution-roadshow-e0-proof-v1',
 };
-
-async function productionProgram() {
-  const manifest = parse(await readFile(sourcePath, 'utf8'));
-  return programFromManifest(manifest);
-}
-
-function programFromManifest(manifest) {
-  return {
-    program: {
-      programId,
-      workspaceId: 'user:default-user',
-      sequence: manifest.program.expectedSequence,
-      objectRef: manifest.program.targetRef,
-      claimRef: manifest.program.claimRef,
-      valueOwnerRef: { ownerFeatureId: 'F311', ownerStateRef: 'user:default-user' },
-    },
-  };
-}
-
-async function publishedV2Program() {
-  const { stdout } = await exec('git', ['-C', repoRoot, 'show', `${publishedV2Revision}:${sourceArtifactRef}`]);
-  return programFromManifest(parse(stdout));
-}
+const resolverFor = (fixture, mainRef = 'HEAD') =>
+  createGitCapabilityEvolutionMeasurementBindingResolver({ repoRoot: fixture.repoRoot, mainRef, fetchMain: false });
 
 describe('F267 trusted-main measurement constitution binding', () => {
-  it('reopens the landed ba0f insufficient publication and derives only canonical refs', async () => {
-    const { createGitCapabilityEvolutionMeasurementBindingResolver } = await import(
-      '../../dist/infrastructure/harness-eval/measurement/capability-evolution/capability-evolution-measurement-binding-resolver.js'
-    );
-    const resolver = createGitCapabilityEvolutionMeasurementBindingResolver({
-      repoRoot,
-      mainRef: publishedV2Revision,
-      fetchMain: false,
-    });
-
-    const result = await resolver.resolveMeasurementConstitution({
-      ownerUserId: 'default-user',
-      program: await publishedV2Program(),
+  it('reopens an independently issued insufficient publication and derives exact canonical refs', async (t) => {
+    const fixture = await measurementBindingGitFixture(t);
+    const result = await resolverFor(fixture, fixture.publication.commitSha).resolveMeasurementConstitution({
+      ownerUserId: 'operator',
+      program: fixture.projection,
       evidenceProofRef,
     });
-
     assert.equal(result.status, 'ready', JSON.stringify(result));
     assert.deepEqual(result.binding.measurementCertificateRef, {
       ownerFeatureId: 'F267',
-      ownerStateRef: 'measurement-certificate:f267-capability-evolution-development-episode-alignment-e0-v2',
+      ownerStateRef: 'measurement-certificate:f267-capability-evolution-roadshow-e0-v1',
     });
     assert.deepEqual(result.binding.measurementRoleRefs.consumer, {
       ownerFeatureId: 'F267',
-      ownerStateRef: 'measurement-role:f267-capability-evolution-development-episode-alignment-e0-proof-v2:consumer',
+      ownerStateRef: 'measurement-role:f267-capability-evolution-roadshow-e0-proof-v1:consumer',
     });
     assert.deepEqual(result.binding.sourceRef, {
-      ownerFeatureId: 'F100',
-      ownerStateRef: 'capability-evolution-measurement-source:evolution-program-ba0f4524e49cc879279164d5b272cf8c',
+      ownerFeatureId: 'F311',
+      ownerStateRef: 'capability-evolution-measurement-source:evolution-program-bcc336788a7df9d6075b1efb4c0a7e68',
     });
   });
-
-  it('rejects a different owner user or proof identity without returning partial refs', async () => {
-    const { createGitCapabilityEvolutionMeasurementBindingResolver } = await import(
-      '../../dist/infrastructure/harness-eval/measurement/capability-evolution/capability-evolution-measurement-binding-resolver.js'
-    );
-    const resolver = createGitCapabilityEvolutionMeasurementBindingResolver({
-      repoRoot,
-      mainRef: 'HEAD',
-      fetchMain: false,
-    });
-    const program = await productionProgram();
-
+  it('rejects a different owner user or missing proof without returning partial refs', async (t) => {
+    const fixture = await measurementBindingGitFixture(t);
+    const resolver = resolverFor(fixture);
     assert.equal(
       (
         await resolver.resolveMeasurementConstitution({
           ownerUserId: 'someone-else',
-          program,
+          program: fixture.projection,
           evidenceProofRef,
         })
       ).status,
@@ -97,8 +48,8 @@ describe('F267 trusted-main measurement constitution binding', () => {
     );
     assert.deepEqual(
       await resolver.resolveMeasurementConstitution({
-        ownerUserId: 'default-user',
-        program,
+        ownerUserId: 'operator',
+        program: fixture.projection,
         evidenceProofRef: { ownerFeatureId: 'F267', ownerStateRef: 'measurement-proof:missing-v2' },
       }),
       {
@@ -108,29 +59,18 @@ describe('F267 trusted-main measurement constitution binding', () => {
       },
     );
   });
-
-  it('rejects a superseded publication even when its historical sequence pin matches', async () => {
-    const { createGitCapabilityEvolutionMeasurementBindingResolver } = await import(
-      '../../dist/infrastructure/harness-eval/measurement/capability-evolution/capability-evolution-measurement-binding-resolver.js'
-    );
-    const resolver = createGitCapabilityEvolutionMeasurementBindingResolver({
-      repoRoot,
-      mainRef: 'HEAD',
-      fetchMain: false,
+  it('rejects a superseded publication even when its historical sequence pin matches', async (t) => {
+    const fixture = await measurementBindingGitFixture(t);
+    fixture.manifest.program.expectedSequence += 1;
+    await writeYaml(fixture.repoRoot, fixture.sourceRef, fixture.manifest);
+    await fixture.commit('fixture source superseded after publication');
+    const result = await resolverFor(fixture).resolveMeasurementConstitution({
+      ownerUserId: 'operator',
+      program: fixture.projection,
+      evidenceProofRef,
     });
-    const program = await productionProgram();
-    program.program.sequence = 1;
-
-    const result = await resolver.resolveMeasurementConstitution({
-      ownerUserId: 'default-user',
-      program,
-      evidenceProofRef: {
-        ownerFeatureId: 'F267',
-        ownerStateRef: 'measurement-proof:f267-capability-evolution-development-episode-alignment-e0-proof-v1',
-      },
-    });
-
     assert.equal(result.status, 'unavailable', JSON.stringify(result));
     assert.match(result.reason, /published proof no longer names the current owner source/u);
+    assert.deepEqual(Object.keys(result).sort(), ['reason', 'status']);
   });
 });

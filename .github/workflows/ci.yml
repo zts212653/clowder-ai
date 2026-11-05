@@ -2,19 +2,15 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, next, develop]
     paths-ignore:
       - 'docs/**'
       - '*.md'
       - 'designs/**'
       - 'assets/**'
   pull_request:
-    branches: [main]
-    paths-ignore:
-      - 'docs/**'
-      - '*.md'
-      - 'designs/**'
-      - 'assets/**'
+    branches: [main, next, develop]
+    # Required checks must report for docs/assets-only PRs as well.
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -24,8 +20,13 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    env:
+      # Branch creation has no previous commit; other runs compare the exact event baseline.
+      CAT_CAFE_GATE_BASE_SHA: ${{ github.event.pull_request.base.sha || (github.event.before != '0000000000000000000000000000000000000000' && github.event.before) || github.sha }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -38,10 +39,16 @@ jobs:
           python3 -B .github/scripts/public-test-namespace-init.test.py
           sudo --preserve-env "$(command -v node)" --test .github/scripts/run-public-test-distributable.test.mjs
       - run: pnpm check
+      - name: API dev supervisor regression
+        run: node --test packages/api/test/dev-supervisor.test.js
+      - name: Browser env wrapper regression
+        run: node --test --test-name-pattern='applies --env' packages/web/test/run-with-node-env-test.test.cjs
 
   build:
     name: Build
     runs-on: ubuntu-latest
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.tmp/playwright-browsers
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -50,9 +57,223 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Require first-run test scripts before running them
+        run: >-
+          node scripts/check-required-package-scripts.mjs
+          --package packages/web
+          --script test:first-run-entry:api
+          --script test:first-run-entry:production
+          --script test:onboarding:production-contracts
       - run: pnpm --filter @cat-cafe/shared build
       - run: pnpm --filter @cat-cafe/api build
+      - name: Codex final environment and account consumers
+        run: >-
+          pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs
+          --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1
+          node --import tsx --import ./test/helpers/setup-cat-registry.js
+          --test --test-concurrency=1 --test-timeout=60000
+          test/f320-account-consumers.test.ts
+          test/f320-api-auth-consumers.test.ts
+          test/issue-1654-native-codex-launch.test.ts
+      - name: Codex provider fixture isolates inherited proxy aliases
+        run: >-
+          pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs
+          --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1
+          --env NO_PROXY= --env no_proxy=parent-proxy-fixture.invalid --env No_Proxy=
+          node --import ./test/helpers/setup-cat-registry.js
+          --test --test-concurrency=1 --test-timeout=60000
+          test/issue-1666-provider-environment.test.js
+      - name: ACP catalog static discovery and cancelled editor requests
+        run: |
+          pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs node --import tsx --test --test-timeout=60000 test/agent-client-catalog-static-read.test.ts test/agent-client-catalog-configuration.test.ts test/plugin-icon-static-read.test.ts
+          pnpm --filter @cat-cafe/web exec vitest run src/hooks/__tests__/useAgentClientLibraries-lifecycle.test.tsx src/utils/__tests__/api-client-get-coordination.test.ts src/utils/__tests__/api-client-timeout.test.ts
+      - name: DSH packaged secret guard admission
+        run: >-
+          pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs
+          node --import tsx --test test/secret-dsh.test.ts
+      - name: Named recipient confirmation before Queue admission
+        run: >-
+          pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs
+          node --test test/message-routing-confirmation.test.js
+      - name: Configurable ACP plugin lifecycle and observed model adoption
+        run: >-
+          node --test
+          packages/api/test/plugin-fixed-acp-client.test.js
+          packages/api/test/plugin-agent-model-route.test.js
+          packages/api/test/acp-model-adoption.test.js
+          packages/api/test/acp-model-probe-adoption.test.js
+          packages/api/test/acp-plugin-permission-policy.test.js
+          packages/api/test/acp/acp-native-model-identity.test.js
+          packages/api/test/agent-session-contract/fixed-client-package.test.js
+          packages/api/test/agent-session-contract/client-library-lifecycle.test.js
+          packages/api/test/acp-bootstrap-config-recovery.test.js
+      - name: ACP plugin configuration and member model UI
+        run: >-
+          pnpm --filter @cat-cafe/web exec node scripts/run-with-node-env-test.mjs pnpm exec vitest run
+          src/components/__tests__/plugin-runtime-models.test.tsx
+          src/components/__tests__/member-runtime-catalog.test.tsx
+          src/components/settings/plugin-manager/__tests__/agent-client-identity.test.tsx
+          src/hooks/__tests__/useSendMessage-routing-confirmation.test.ts
+      - name: Scoped member sessions preserve frozen execution contracts
+        run: >-
+          pnpm --filter @cat-cafe/api exec node scripts/with-test-home.mjs
+          --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1
+          node --import tsx --import ./test/helpers/setup-cat-registry.js
+          --test --test-concurrency=2
+          test/plugin-member-runtime.test.ts
+          test/scoped-member-invocation.test.ts
+          test/native-member-frozen-l0.test.js
+          test/claude-scoped-native.test.ts
+          test/claude-sdk-scoped-native.test.ts
+          test/kimi-scoped-native.test.ts
+          test/plugin-member-router.test.ts
+          test/plugin-member-execution.test.ts
+          test/plugin-member-settlement-recovery.test.ts
+          test/codex-plugin-native-launch.test.js
+      - name: Owner-confirmed plugin feedback and private-context suppression
+        run: pnpm --filter @cat-cafe/api test:plugin-feedback
+      - name: Stable implementation rebuild and verified native import resume
+        run: >-
+          pnpm --filter @cat-cafe/api exec node scripts/with-test-home.mjs
+          --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 --env DEFAULT_OWNER_USER_ID=owner
+          node --import tsx --import ./test/helpers/setup-cat-registry.js --test --test-concurrency=2
+          test/mind-pr1762-review.test.js
+          test/host-execution-boundary.test.js
+          test/agent-session-contract/persisted-execution-boundary.test.js
+          test/agent-session-contract/late-execution-boundary.test.js
+      - name: Native import admission and plugin HTTP panel lifecycle
+        run: >-
+          pnpm --filter @cat-cafe/api exec node scripts/with-test-home.mjs
+          --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1
+          node --import tsx --import ./test/helpers/setup-cat-registry.js --test --test-concurrency=2
+          test/f322-import-route.test.ts
+          test/f322-recent-sessions.test.ts
+          test/plugin-ui-resource.test.ts
+      - name: Sandboxed panels use declared HTTP business routing
+        run: >-
+          pnpm --filter @cat-cafe/web exec node scripts/run-with-node-env-test.mjs
+          pnpm exec vitest run src/components/plugins/__tests__/plugin-ui.test.tsx
+          src/components/plugins/__tests__/plugin-panel-http.test.ts
+      - name: Provider EOF and plugin UI stop preserve lifecycle fences
+        run: >-
+          pnpm --filter @cat-cafe/api exec node scripts/with-test-home.mjs
+          --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1
+          node --import tsx --import ./test/helpers/setup-cat-registry.js
+          --test --test-concurrency=2
+          test/agent-session-contract/bridge.test.js
+          test/agent-session-contract/acp-provider.test.js
+          test/agent-session-contract/eof-teardown-lifecycle.test.js
+          test/agent-session-contract/start-rejection-lifecycle.test.js
+          test/agent-session-contract/unconfirmed-prior-admission.test.js
+          test/plugin-ui-stop-publication.test.js
+          test/f202-c1-carrier-neutral-lifecycle.test.js
+          test/plugin-runtime-info.test.ts
+      - name: Managed Codex layout link diagnostic
+        run: >-
+          pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs
+          node --import tsx --test --test-timeout=60000 --test-name-pattern="managed layout"
+          test/codex-managed-layout-diagnostic.test.ts
+      - name: ACP Host policy matrix and existing Unix permissions
+        run: >-
+          node --import tsx --test
+          packages/api/test/acp/acp-bootstrap-posix-preservation.test.ts
+          packages/api/test/acp/acp-host-policy-matrix.test.ts
+      - name: Audit diagnostics respect explicit paths
+        run: node --test scripts/logs-health-audit.test.mjs
+      - name: Plugin native auth link diagnostic
+        run: >-
+          pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs
+          node --import tsx --test --test-timeout=60000 --test-name-pattern="auth link"
+          test/f320-plugin-account.test.ts
+      - name: Native PR and Issue tracking source fence (original candidate bytes)
+        shell: bash
+        run: |
+          set -euo pipefail
+          candidate_dir=$(mktemp -d "$RUNNER_TEMP/native-tracking.XXXXXX")
+          curl --fail --location --retry 3 --max-time 180 \
+            https://github.com/mindfn/clowder-ai-plugins/releases/download/f202-c1-candidate-2b4f0418c1dd/f202-c1-candidate-2b4f0418c1dd.tgz \
+            --output "$candidate_dir/bundle.tgz"
+          echo "542a7e00439fc1ecbe180f7185d2eb4ca66281a3c3785f9b7348941884c6efe3  $candidate_dir/bundle.tgz" | sha256sum --check
+          tar -xzf "$candidate_dir/bundle.tgz" -C "$candidate_dir"
+          export F202_CANDIDATE_MATRIX="$candidate_dir/f202-c1-candidate-2b4f0418c1dd/candidate-matrix.json"
+          pnpm --filter @cat-cafe/api test:native-tracking-artifact
+      - name: Console member identity and persistent send strategy regressions
+        run: >-
+          pnpm --filter @cat-cafe/web exec node scripts/run-with-node-env-test.mjs pnpm exec vitest run
+          src/components/__tests__/1398-sender-identity.test.tsx
+          src/components/__tests__/MessageBundleCard-contract.test.tsx
+          src/components/__tests__/chat-input-message-disposition.test.ts
+          src/components/__tests__/chat-input-add-menu.test.tsx
+          src/components/__tests__/classic-a2a-parity.test.tsx
+          src/hooks/__tests__/useMessageDispositionPreference-settlement.test.tsx
+      - name: Personal first-run lifecycle with production API handlers
+        run: pnpm --filter @cat-cafe/web test:first-run-entry:api
       - run: pnpm --filter @cat-cafe/web build
+      - name: Production first-run pages with real receipt and guide routes
+        env:
+          CAT_CAFE_ENTRY_EVIDENCE_DIR: ${{ github.workspace }}/.tmp/first-run-entry-ci
+        run: |
+          pnpm --filter @cat-cafe/web exec playwright install --with-deps chromium
+          pnpm --filter @cat-cafe/web test:first-run-entry:production
+      - name: Production member creation and recovery HTTP contracts
+        env:
+          CAT_CAFE_ONBOARDING_E2E_EVIDENCE: ${{ github.workspace }}/.tmp/native-team-setup-ci
+        run: pnpm --filter @cat-cafe/web test:onboarding:production-contracts
+      - name: Plugin document direct-navigation origin isolation
+        env:
+          PLUGIN_ORIGIN_ARTIFACTS: ${{ github.workspace }}/.tmp/plugin-document-origin-ci
+        run: >-
+          pnpm --filter @cat-cafe/api exec node scripts/with-test-home.mjs
+          --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 --env DEFAULT_OWNER_USER_ID=owner
+          --env FEEDBACK_PLAYWRIGHT_MODULE=${{ github.workspace }}/packages/web/node_modules/playwright
+          node --import tsx test/plugin-html-origin.journey.mts
+      - name: Preserve first-run browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: first-run-entry-${{ github.sha }}-${{ runner.os }}
+          path: |
+            .tmp/first-run-entry-ci
+            .tmp/native-team-setup-ci
+            .tmp/plugin-document-origin-ci
+          if-no-files-found: ignore
+          retention-days: 7
+
+  web-first-run-onboarding:
+    name: Test (Web First-run Onboarding)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Require first-run onboarding test script before running it
+        run: >-
+          node scripts/check-required-package-scripts.mjs
+          --package packages/web
+          --script test:first-run-onboarding
+      - run: pnpm --filter @cat-cafe/web run test:first-run-onboarding
+      - name: Member avatar hydration, identity and callback status
+        run: >-
+          pnpm --filter @cat-cafe/web exec vitest run
+          src/components/__tests__/CatAvatar-hydration-race.test.tsx
+          src/components/__tests__/CatAvatar-callback-auth-dot.test.tsx
+          src/components/__tests__/CatAvatar-ring.test.tsx
+          src/components/__tests__/cat-nameplate-avatar.test.tsx
+          src/hooks/__tests__/useConversationViewPreference-lifecycle.test.tsx
+          src/components/shell/__tests__/conversation-view-header.test.tsx
+      - name: Browser evidence rejects user echoes and accepts normal identity signatures
+        run: |
+          pnpm --filter @cat-cafe/web exec playwright install --with-deps chromium
+          node --test packages/web/test/browser/native-team-rendered-reply.test.mjs
+          node --test packages/web/test/browser/native-team-observers.test.mjs
+          node --test packages/web/test/browser/native-request-cancellations.test.mjs
+          node --test packages/web/test/browser/native-codex-history-policy.test.mjs
+          node --test packages/web/test/browser/native-team-a2a-proof.test.mjs packages/web/test/browser/native-team-transcript-observation.test.mjs
 
   public-test-prepare:
     name: Public test plan
@@ -60,6 +281,7 @@ jobs:
     timeout-minutes: 15
     outputs:
       mode: ${{ steps.contract.outputs.mode }}
+      plan-artifact-id: ${{ steps.plan_artifact.outputs.artifact-id }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -76,6 +298,7 @@ jobs:
             packages/api/scripts/plan-public-test-shards.mjs
             packages/api/scripts/run-public-test-shard.mjs
             packages/api/scripts/summarize-public-test-shards.mjs
+            packages/api/scripts/select-public-test-reports.mjs
             packages/api/scripts/public-test-provenance.mjs
             packages/api/scripts/resolve-public-test-files.mjs
           )
@@ -106,10 +329,11 @@ jobs:
           mkdir -p "$RUNNER_TEMP/public-test"
           pnpm --filter @cat-cafe/api run test:public:plan -- --output "$RUNNER_TEMP/public-test/plan.json"
       - name: Upload exact public-test plan
+        id: plan_artifact
         if: steps.contract.outputs.mode == 'sharded'
         uses: actions/upload-artifact@v4
         with:
-          name: public-test-plan-${{ github.sha }}
+          name: public-test-plan-${{ github.sha }}-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/public-test/plan.json
           if-no-files-found: error
 
@@ -141,8 +365,9 @@ jobs:
       - name: Download exact public-test plan
         uses: actions/download-artifact@v4
         with:
-          name: public-test-plan-${{ github.sha }}
+          artifact-ids: ${{ needs.public-test-prepare.outputs.plan-artifact-id }}
           path: ${{ runner.temp }}/public-test
+          merge-multiple: true
       - name: Install owned Redis test executables
         if: matrix.lane != 'serial-shared'
         run: |
@@ -187,9 +412,9 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: public-test-report-${{ github.sha }}-${{ matrix.lane }}
+          name: public-test-report-${{ github.sha }}-${{ matrix.lane }}-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/public-test/reports/${{ matrix.lane }}.json
-          if-no-files-found: warn
+          if-no-files-found: error
 
   public-test-summary:
     name: Public test evidence
@@ -205,27 +430,48 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24.20.0
-      - name: Download exact plan and all lane reports
+      - name: Download exact public-test plan
         uses: actions/download-artifact@v4
         with:
-          pattern: public-test-*
-          path: ${{ runner.temp }}/public-test/artifacts
+          artifact-ids: ${{ needs.public-test-prepare.outputs.plan-artifact-id }}
+          path: ${{ runner.temp }}/public-test/plan
           merge-multiple: true
+      - name: Download all public-test report attempts without merging
+        uses: actions/download-artifact@v4
+        with:
+          pattern: public-test-report-${{ github.sha }}-*
+          path: ${{ runner.temp }}/public-test/artifacts
+          merge-multiple: false
       - name: Prove complete public-test coverage and summarize timing
         run: |
-          mkdir -p "$RUNNER_TEMP/public-test/reports"
-          find "$RUNNER_TEMP/public-test/artifacts" -name '*.json' -exec cp {} "$RUNNER_TEMP/public-test/reports/" \;
-          plan_path=$(find "$RUNNER_TEMP/public-test/artifacts" -name 'plan.json' -print -quit)
-          test -n "$plan_path"
+          plan_path="$RUNNER_TEMP/public-test/plan/plan.json"
+          node packages/api/scripts/select-public-test-reports.mjs \
+            --plan "$plan_path" \
+            --artifacts-dir "$RUNNER_TEMP/public-test/artifacts" \
+            --reports-dir "$RUNNER_TEMP/public-test/reports" \
+            --sha "$GITHUB_SHA" --attempt "$GITHUB_RUN_ATTEMPT"
           node packages/api/scripts/summarize-public-test-shards.mjs \
             --plan "$plan_path" \
             --reports-dir "$RUNNER_TEMP/public-test/reports" \
-            --output "$RUNNER_TEMP/public-test/summary.json" \
-            --max-critical-path-ms 600000
+            --output "$RUNNER_TEMP/public-test/summary.json"
+          # Coverage, provenance and failed tests remain blocking. Runner-dependent
+          # elapsed time is an optimization target; job timeouts still bound hangs.
+          node --input-type=module <<'NODE'
+          import { appendFileSync, readFileSync } from 'node:fs';
+          const summary = JSON.parse(readFileSync(`${process.env.RUNNER_TEMP}/public-test/summary.json`, 'utf8'));
+          const targetMs = 600_000;
+          const seconds = (summary.criticalPathMs / 1000).toFixed(1);
+          const line = `Public tests: ${summary.selectedFileCount} files, critical path ${seconds}s, runner minutes ${summary.runnerMinutes.toFixed(2)} (timing target ${targetMs / 1000}s).`;
+          console.log(line);
+          if (summary.criticalPathMs > targetMs) {
+            console.log(`::warning title=Public test timing::${line} All coverage and provenance checks passed; the timing target is advisory.`);
+          }
+          if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${line}\n`);
+          NODE
       - name: Upload public-test evidence
         uses: actions/upload-artifact@v4
         with:
-          name: public-test-summary-${{ github.sha }}
+          name: public-test-summary-${{ github.sha }}-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/public-test/summary.json
           if-no-files-found: error
 
@@ -280,7 +526,7 @@ jobs:
 
   test:
     name: Test (Public)
-    needs: [public-test-prepare, public-test-shards, public-test-summary, public-test-serial, public-test-contract]
+    needs: [public-test-prepare, public-test-shards, public-test-summary, public-test-serial, public-test-contract, web-first-run-onboarding]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -292,11 +538,13 @@ jobs:
           SHARDED_RESULT: ${{ needs.public-test-shards.result }}
           SUMMARY_RESULT: ${{ needs.public-test-summary.result }}
           SERIAL_RESULT: ${{ needs.public-test-serial.result }}
+          WEB_FIRST_RUN_ONBOARDING_RESULT: ${{ needs.web-first-run-onboarding.result }}
           TEST_MODE: ${{ needs.public-test-prepare.outputs.mode }}
         run: |
           set -euo pipefail
           [[ "$PREPARE_RESULT" == 'success' ]]
           [[ "$CONTRACT_RESULT" == 'success' ]]
+          [[ "$WEB_FIRST_RUN_ONBOARDING_RESULT" == 'success' ]]
           case "$TEST_MODE" in
             sharded)
               [[ "$SHARDED_RESULT" == 'success' ]]

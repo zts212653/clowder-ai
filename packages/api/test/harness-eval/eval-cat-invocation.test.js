@@ -112,7 +112,7 @@ describe('Eval cat invocation packet', () => {
     const preReset = text.slice(guardStart, firstReset);
     for (const required of [
       'git -C "$EVAL_CHECKOUT" remote get-url origin',
-      'zts212653/cat-cafe',
+      'zts212653/clowder-ai',
       'catcafe.lifecycle.owner` = `codex',
       'catcafe.lifecycle.policy` = `never',
     ]) {

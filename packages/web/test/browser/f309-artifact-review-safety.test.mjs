@@ -3,10 +3,10 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
 import { startReviewHost } from './fixtures/f309-artifact-review-host.mjs';
 import { mediaFixture } from './fixtures/f309-artifact-review-media.mjs';
-import { selectMarkupTool, selectReviewMode } from './fixtures/f309-artwork-controls.mjs';
+import { imageChatAttachment, selectMarkupTool, selectReviewMode } from './fixtures/f309-artwork-controls.mjs';
 
 async function openReview(page, host) {
   await page.goto(host.origin);
@@ -108,7 +108,7 @@ test('F309 artwork: comment mode keeps real discussion markers reachable', { tim
       () => document.activeElement?.getAttribute('data-testid') === 'review-canvas-annotation-mark',
     );
     await selectReviewMode(page, 'view');
-    await page.getByRole('button', { name: '圈选区域', exact: true }).click();
+    await selectReviewMode(page, 'comment');
     await selectReviewMode(page, 'comment');
     await mark.click();
     await page.waitForFunction(() => document.activeElement?.getAttribute('data-testid') === 'review-comment');
@@ -116,7 +116,7 @@ test('F309 artwork: comment mode keeps real discussion markers reachable', { tim
 });
 
 test(
-  'F309 artwork: unavailable markup mode cannot turn an unfinished selection into a comment draft',
+  'F309 artwork: unavailable markup cannot start drawing or rewrite a retained comment draft',
   { timeout: 90000 },
   async (t) => {
     await withReview(t, 'png', async ({ host, page }) => {
@@ -139,10 +139,12 @@ test(
       );
       await page.reload();
       await selectReviewMode(page, 'view');
-      await page.getByRole('button', { name: '圈选区域', exact: true }).click();
-      await selectReviewMode(page, 'markup');
       await page.getByRole('alert').filter({ hasText: '原记录保留' }).waitFor();
+      const brush = page.getByRole('button', { name: '画笔', exact: true });
+      assert.equal(await brush.isDisabled(), true);
+      await brush.evaluate((button) => button.click());
       const before = await page.evaluate((key) => localStorage.getItem(key), annotationKey);
+      const attachmentBefore = await imageChatAttachment(page);
       const start = await canvasPoint(page, 400, 100, media);
       const end = await canvasPoint(page, 600, 230, media);
       await page.mouse.move(start.x, start.y);
@@ -151,7 +153,10 @@ test(
       await page.mouse.up();
       assert.equal(await page.evaluate((key) => localStorage.getItem(key), annotationKey), before);
       assert.equal(await page.getByTestId('review-markup-layer').count(), 0);
-      assert.equal(await page.getByRole('region', { name: '作品画布工具' }).getAttribute('data-review-mode'), 'markup');
+      assert.equal(await page.getByRole('region', { name: '作品画布工具' }).getAttribute('data-review-mode'), 'view');
+      assert.deepEqual(await imageChatAttachment(page), attachmentBefore);
+      assert.equal(await page.evaluate((key) => localStorage.getItem(key), markupKey), '{unreadable-markup-sentinel');
+      assert.equal((await host.reviews.read(reviewId, host.human)).review.rounds[0].annotations.length, 0);
     });
   },
 );
@@ -165,7 +170,8 @@ test(
       const reviewId = host.store.listReviewIds('operator')[0];
       const media = (await host.reviews.read(reviewId, host.human)).review.rounds[0].asset.media;
       const annotationKey = `cat-cafe:review:operator:${reviewId}:round:1:annotation`;
-      await page.getByRole('button', { name: '圈选区域', exact: true }).click();
+      await selectReviewMode(page, 'comment');
+      const attachmentsBefore = await imageChatAttachment(page);
       const start = await canvasPoint(page, 100, 100, media);
       const end = await canvasPoint(page, 300, 250, media);
       await page.mouse.move(start.x, start.y);
@@ -177,15 +183,19 @@ test(
           ?.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: x, clientY: y, pointerId: 999 }));
       }, end);
       assert.equal(await page.evaluate((key) => localStorage.getItem(key), annotationKey), null);
+      assert.deepEqual(await imageChatAttachment(page), attachmentsBefore);
       await page.mouse.up();
-      await page.waitForFunction((key) => localStorage.getItem(key) !== null, annotationKey);
-      const saved = await page.evaluate((key) => localStorage.getItem(key), annotationKey);
+      await page.getByTestId('review-pending-chat-mark').waitFor();
+      const saved = await imageChatAttachment(page);
+      assert.equal(saved.selections.length, 1);
+      const storedAfterSelection = await page.evaluate((key) => localStorage.getItem(key), annotationKey);
       await page.evaluate(({ x, y }) => {
         document
           .querySelector('[aria-label="图片或视频上的批注"]')
           ?.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: x, clientY: y, pointerId: 999 }));
       }, end);
-      assert.equal(await page.evaluate((key) => localStorage.getItem(key), annotationKey), saved);
+      assert.deepEqual(await imageChatAttachment(page), saved);
+      assert.equal(await page.evaluate((key) => localStorage.getItem(key), annotationKey), storedAfterSelection);
     });
   },
 );
@@ -222,11 +232,12 @@ test(
         };
       }, key);
       await page.reload();
-      await selectReviewMode(page, 'markup');
       await page.getByRole('alert').filter({ hasText: '原记录保留' }).waitFor();
+      assert.equal(await page.getByRole('button', { name: '画笔', exact: true }).isDisabled(), true);
       assert.equal(await page.evaluate((storedKey) => localStorage.getItem(storedKey), key), original);
       assert.equal(await page.evaluate((storedKey) => localStorage.getItem(storedKey), annotationKey), commentDraft);
       await page.getByRole('button', { name: '重新读取草稿', exact: true }).click();
+      await selectReviewMode(page, 'markup');
       await page.getByTestId('review-local-mark').waitFor();
       assert.equal(await page.getByTestId('review-local-mark').count(), 1);
       assert.equal(await page.evaluate((storedKey) => localStorage.getItem(storedKey), annotationKey), commentDraft);
@@ -236,8 +247,8 @@ test(
         value: unsupported,
       });
       await page.reload();
-      await selectReviewMode(page, 'markup');
       await page.getByRole('alert').filter({ hasText: '原记录保留' }).waitFor();
+      assert.equal(await page.getByRole('button', { name: '画笔', exact: true }).isDisabled(), true);
       assert.equal(await page.evaluate((storedKey) => localStorage.getItem(storedKey), key), unsupported);
       const incompatible = JSON.stringify({
         v: 1,
@@ -250,8 +261,8 @@ test(
         value: incompatible,
       });
       await page.reload();
-      await selectReviewMode(page, 'markup');
       await page.getByRole('alert').filter({ hasText: '原记录保留' }).waitFor();
+      assert.equal(await page.getByRole('button', { name: '画笔', exact: true }).isDisabled(), true);
       assert.equal(await page.evaluate((storedKey) => localStorage.getItem(storedKey), key), incompatible);
     });
   },

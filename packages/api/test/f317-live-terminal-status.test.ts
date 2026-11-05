@@ -14,7 +14,7 @@ test('native writer refusal remains readable without a carrier; retry and late o
   const original = messages.append({
     userId: 'owner',
     threadId: 'home',
-    catId: null,
+    from: { kind: 'user', userId: 'owner' },
     content: 'ordinary turn',
     mentions: [],
     timestamp: 1,

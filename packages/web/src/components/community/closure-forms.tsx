@@ -6,6 +6,7 @@
  */
 
 import { useCallback, useState } from 'react';
+import { apiFetch } from '@/utils/api-client';
 import { CheckCircleIcon, ShieldIcon } from './community-icons';
 
 // ---------------------------------------------------------------------------
@@ -33,11 +34,14 @@ export function WaiverAuditForm({
     setSubmitting(true);
     setError(null);
     try {
-      const res = await fetch(`/api/community-issues/${issueId}/waive-closure`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason: reason.trim(), actor, evidence: evidence.trim() }),
-      });
+      const res = await apiFetch(
+        `/api/plugins/official.github-operations/github/community-issues/${encodeURIComponent(issueId)}/waive-closure`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reason: reason.trim(), actor, evidence: evidence.trim() }),
+        },
+      );
       if (!res.ok) {
         setError(`Request failed (${res.status}). Please try again.`);
         return;
@@ -124,11 +128,14 @@ export function ReportAuditForm({
     setSubmitting(true);
     setError(null);
     try {
-      const res = await fetch(`/api/community-issues/${issueId}/report`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ publicCommentUrl: publicCommentUrl.trim(), actor }),
-      });
+      const res = await apiFetch(
+        `/api/plugins/official.github-operations/github/community-issues/${encodeURIComponent(issueId)}/report`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ publicCommentUrl: publicCommentUrl.trim(), actor }),
+        },
+      );
       if (!res.ok) {
         setError(`Request failed (${res.status}). Please try again.`);
         return;

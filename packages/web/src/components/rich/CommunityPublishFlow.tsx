@@ -1,98 +1,80 @@
 'use client';
 
-/**
- * F235: Community Publish Flow — extracted from FrustrationIssueCard to stay
- * under the 350-line component hard limit (docs/SOP.md §directory-structure).
- *
- * Handles: draft creation → inline preview → publish/cancel.
- * Parent owns the master `status` state; this component renders the matching
- * UI and calls `onStatusChange` when transitions happen.
- */
-
 import { useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
-import { CommunityIssuePreviewCard } from './CommunityIssuePreviewCard';
 
 type CommunityPublishStatus = 'confirmed' | 'creating_draft' | 'draft_created';
-
+interface DraftResult {
+  id: string;
+  repo: string;
+  title: string;
+  bodyMarkdown: string;
+  status: string;
+}
 interface CommunityPublishFlowProps {
   issueId: string;
+  title: string;
+  bodyMarkdown: string;
   status: CommunityPublishStatus;
-  /** Draft ID restored from server hydration (Iron Law #5 persistence recovery). */
-  restoredDraftId: string | null;
   onStatusChange: (status: CommunityPublishStatus) => void;
 }
+const endpoint = '/api/plugins/official.github-operations/github/community-issue-drafts';
 
-export function CommunityPublishFlow({ issueId, status, restoredDraftId, onStatusChange }: CommunityPublishFlowProps) {
-  const [createdDraftId, setCreatedDraftId] = useState<string | null>(restoredDraftId);
-  const [draftError, setDraftError] = useState<string | null>(null);
-
-  const handleCreateDraft = async () => {
+/** Transfers the content explicitly selected by the owner to the plugin's ordinary draft action. */
+export function CommunityPublishFlow({
+  issueId,
+  title,
+  bodyMarkdown,
+  status,
+  onStatusChange,
+}: CommunityPublishFlowProps) {
+  const [draft, setDraft] = useState<DraftResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const createDraft = async () => {
     onStatusChange('creating_draft');
-    setDraftError(null);
+    setError(null);
     try {
-      const res = await apiFetch(`/api/community-issue-drafts/from-frustration-issue/${issueId}`, {
+      const configResponse = await apiFetch(`${endpoint}/config`);
+      if (!configResponse.ok) throw new Error('GitHub 插件暂不可用，请检查插件设置。');
+      const config = await configResponse.json();
+      if (!config.defaultRepo) throw new Error('请先在 GitHub 插件中配置发布仓库。');
+      const response = await apiFetch(endpoint, {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requestId: `feedback:${issueId}`, repo: config.defaultRepo, title, bodyMarkdown }),
       });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        if (res.status === 409) {
-          // Draft already exists — recover existing draft ID from response
-          if (data.draft?.draftId) setCreatedDraftId(data.draft.draftId);
-          onStatusChange('draft_created');
-          return;
-        }
-        throw new Error(data.error ?? `HTTP ${res.status}`);
-      }
-      const data = await res.json();
-      if (data.draft?.draftId) setCreatedDraftId(data.draft.draftId);
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error ?? `创建草稿失败 (${response.status})`);
+      if (!result.data?.id || !result.data.title) throw new Error('插件未返回草稿。');
+      setDraft(result.data);
       onStatusChange('draft_created');
-    } catch (err) {
-      setDraftError(err instanceof Error ? err.message : 'Failed to create draft');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '创建草稿失败');
       onStatusChange('confirmed');
     }
   };
-
-  const handleDraftCancelled = () => {
-    setCreatedDraftId(null);
-    onStatusChange('confirmed');
-  };
-
-  // ── Publish to Community button ────────────────────────────────
-  if (status === 'confirmed') {
+  if (status === 'creating_draft') return <div className="mt-2 text-xs text-cafe-muted">正在创建草稿…</div>;
+  if (draft)
     return (
-      <div className="mt-2 flex items-center gap-2">
-        <button
-          type="button"
-          onClick={handleCreateDraft}
-          className="rounded border border-sky-400/50 bg-sky-50/20 px-3 py-1.5 text-xs font-medium text-sky-700 transition hover:bg-sky-100/30 disabled:opacity-50"
-        >
-          Publish to Community
-        </button>
-        {draftError && <span className="text-xs text-red-500">{draftError}</span>}
+      <div className="mt-2 rounded border border-cafe/20 p-3 text-xs">
+        <p className="font-medium">{draft.title}</p>
+        <p className="whitespace-pre-wrap">{draft.bodyMarkdown}</p>
+        <p className="mt-2 text-cafe-muted">
+          {draft.repo} · {draft.id}
+        </p>
+        <p className="text-cafe-muted">草稿已保存在 GitHub 插件中，尚未发布。</p>
       </div>
     );
-  }
-
-  // ── Creating draft spinner ─────────────────────────────────────
-  if (status === 'creating_draft') {
-    return (
-      <div className="mt-2 flex items-center gap-2 text-xs text-cafe-muted">
-        <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-sky-400 border-t-transparent" />
-        Generating preview...
-      </div>
-    );
-  }
-
-  // ── Draft created — inline preview card ────────────────────────
-  if (createdDraftId) {
-    return (
-      <div className="mt-2">
-        <CommunityIssuePreviewCard inlineDraftId={createdDraftId} onDraftCancelled={handleDraftCancelled} />
-      </div>
-    );
-  }
-
-  // ── Fallback: draft created but no ID (edge case) ──────────────
-  return <div className="mt-2 text-xs text-sky-700">✓ Draft created</div>;
+  return (
+    <div className="mt-2 flex items-center gap-2">
+      <button
+        type="button"
+        onClick={createDraft}
+        className="rounded border border-cafe/30 px-3 py-1.5 text-xs font-medium"
+      >
+        创建 GitHub 草稿
+      </button>
+      {error && <span className="text-xs text-red-500">{error}</span>}
+    </div>
+  );
 }

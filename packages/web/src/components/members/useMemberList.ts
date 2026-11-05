@@ -18,7 +18,9 @@ export function useMemberList(cats: CatData[]) {
   const [orderError, setOrderError] = useState<string | null>(null);
   const [savingOrder, setSavingOrder] = useState(false);
   const inFlight = useRef(false);
+  const defaultReadSequence = useRef(0);
   const readDefault = useCallback(async () => {
+    const sequence = ++defaultReadSequence.current;
     setDefaultLoading(true);
     setDefaultError(null);
     setFailedDefaultId(null);
@@ -26,20 +28,29 @@ export function useMemberList(cats: CatData[]) {
       const res = await apiFetch('/api/config/default-cat');
       if (!res.ok) throw new Error('默认猫读取失败');
       const data = (await res.json()) as { catId: string };
+      if (sequence !== defaultReadSequence.current) return;
       setDefaultId(data.catId);
       setDefaultKnown(true);
     } catch {
-      setDefaultKnown(false);
-      setDefaultError('默认猫读取失败，请重试');
+      if (sequence === defaultReadSequence.current) {
+        setDefaultKnown(false);
+        setDefaultError('默认猫读取失败，请重试');
+      }
     } finally {
-      setDefaultLoading(false);
+      if (sequence === defaultReadSequence.current) setDefaultLoading(false);
     }
   }, []);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: registry changes affect the resolved default.
   useEffect(() => {
     void readDefault();
-  }, [readDefault]);
+    return () => {
+      defaultReadSequence.current += 1;
+    };
+  }, [readDefault, cats]);
   const saveDefault = async (catId: string) => {
     if (savingDefault) return;
+    defaultReadSequence.current += 1;
+    setDefaultLoading(false);
     setSavingDefault(true);
     setDefaultError(null);
     setFailedDefaultId(null);
@@ -51,7 +62,10 @@ export function useMemberList(cats: CatData[]) {
       });
       if (!res.ok) throw new Error('默认猫保存失败');
       const body = (await res.json()) as { warning?: string };
+      defaultReadSequence.current += 1;
       setDefaultId(catId);
+      setDefaultKnown(true);
+      setDefaultLoading(false);
       setDefaultError(body.warning ?? null);
     } catch {
       setDefaultError('默认猫保存失败，请重试');

@@ -1,3 +1,4 @@
+import type { RoutingQueueAdmissionReceiptV1 } from '@cat-cafe/shared';
 import type { FastifyBaseLogger } from 'fastify';
 
 export interface CallbackDeliveryDecisionInput {
@@ -6,11 +7,16 @@ export interface CallbackDeliveryDecisionInput {
   threadId: string;
   log: Pick<FastifyBaseLogger, 'error' | 'warn'>;
   logContext?: Record<string, unknown>;
-  enqueueA2A: () => Promise<{ enqueued: readonly string[]; coalesced?: readonly string[] }>;
+  enqueueA2A: () => Promise<{
+    enqueued: readonly string[];
+    coalesced?: readonly string[];
+    routingAdmission?: RoutingQueueAdmissionReceiptV1;
+  }>;
   enqueueFailureMessage: string;
 }
 
 export interface CallbackDeliveryDecision {
+  routingAdmission?: RoutingQueueAdmissionReceiptV1;
   enqueued: readonly string[];
   enqueueAttempted: boolean;
   enqueueFailed: boolean;
@@ -40,12 +46,14 @@ export class MessageDeliveryService {
       if (!anyHandled) {
         return {
           enqueued: a2aResult.enqueued,
+          ...(a2aResult.routingAdmission ? { routingAdmission: a2aResult.routingAdmission } : {}),
           enqueueAttempted: true,
           enqueueFailed: true,
         };
       }
       return {
         enqueued: a2aResult.enqueued,
+        ...(a2aResult.routingAdmission ? { routingAdmission: a2aResult.routingAdmission } : {}),
         enqueueAttempted: true,
         enqueueFailed: false,
       };

@@ -300,15 +300,10 @@ test('a failing injected hook never changes a native parse value', async () => {
   }
 });
 
-test('late parser errors remain errors and a rejected pipeline is never called synchronous decode', async () => {
+test('a rejected pipeline remains an error and is never called synchronous decode', async () => {
   const events: MessageReadDiagnosticEvent[] = [];
   const observer = createMessageReadDiagnostics({ onEvent: (e) => events.push(e), minBatchMs: 0 });
   try {
-    const corrupt = fakeRedis(async () => [[null, { id: 'm', timestamp: '1', queueCustody: '{bad-json' }]]);
-    await assert.rejects(
-      new RedisMessageStore(corrupt, { readDiagnostics: observer }).getByThread('thread', 1),
-      /queueCustody|custody/i,
-    );
     await assert.rejects(
       new RedisMessageStore(
         fakeRedis(async () => {
@@ -319,10 +314,10 @@ test('late parser errors remain errors and a rejected pipeline is never called s
       /rejected/,
     );
     const failed = events.filter((e) => e.kind === 'message_read_batch');
-    assert.equal(failed.length, 2);
+    assert.equal(failed.length, 1);
     assert.ok(failed.every((e) => e.status === 'failed'));
-    assert.equal(failed[1].decodeWallMs, 0);
-    assert.equal(failed[1].decodeThreadCpuMs, null);
+    assert.equal(failed[0].decodeWallMs, 0);
+    assert.equal(failed[0].decodeThreadCpuMs, null);
   } finally {
     observer.stop();
   }

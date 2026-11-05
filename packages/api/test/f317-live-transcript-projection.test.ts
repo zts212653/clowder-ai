@@ -33,7 +33,7 @@ test('only explicitly sourced same-call voice and typing enter captions, in stor
   await store.appendIdempotent({
     userId: 'owner',
     threadId: 'home',
-    catId: null,
+    from: { kind: 'user', userId: 'owner' },
     content: 'legacy typed',
     mentions: [],
     timestamp: Date.now(),

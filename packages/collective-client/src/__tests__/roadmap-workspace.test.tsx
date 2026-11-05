@@ -97,12 +97,19 @@ it('shows every Channel Roadmap and lets its accountable Human complete or reope
   );
 
   expect(container.textContent).toContain('候选版本');
-  expect(container.textContent).toContain('已交付版本');
-  await click('完成路线');
+  expect(container.textContent).not.toContain('已交付版本');
+  await click('候选版本');
+  await click('完成项目');
   expect(onSetStatus).toHaveBeenCalledWith(active, 'completed');
+  await click('项目');
+  const settings = container.querySelector<HTMLDetailsElement>('[aria-label="项目列表显示设置"]');
+  await act(async () => settings?.setAttribute('open', ''));
+  const showCompleted = container.querySelector<HTMLInputElement>('input[aria-label="显示已完成项目"]');
+  await act(async () => showCompleted?.click());
+  expect(container.textContent).toContain('已交付版本');
   await click('已交付版本');
-  expect(container.querySelector('[aria-label="Roadmap · 已交付版本"]')).not.toBeNull();
-  await click('重新打开路线');
+  expect(container.querySelector('[aria-label="项目 · 已交付版本"]')).not.toBeNull();
+  await click('重新打开项目');
   expect(onSetStatus).toHaveBeenCalledWith(completed, 'active');
 });
 
@@ -158,8 +165,9 @@ it('keeps each returned result version and its feedback visible in Work history'
     ),
   );
 
+  await click(route.title);
   await click(revisedWork.title);
-  const details = container.querySelector(`[aria-label="工作详情 · ${revisedWork.title}"]`);
+  const details = container.querySelector(`[aria-label="任务详情 · ${revisedWork.title}"]`);
   expect(details?.textContent).toContain('把结果带回原讨论 · 结果 v2');
   expect(details?.textContent).toContain('退回结果并提出修订 · 结果 v1');
   expect(details?.textContent).toContain('请补上重启后的恢复证据。');
@@ -170,14 +178,24 @@ it('offers only owned active routes and creates a separate route instead of show
   const create = vi.fn(async () => undefined);
   const setWorks = vi.fn(async () => undefined);
   const ownerActions = roadmapActionsFor(work, [ownerRoute], actor.humanId, create, setWorks);
-  expect(ownerActions.map((action) => action.label)).toEqual(['加入「You 的路线」']);
+  expect(ownerActions.map((action) => action.label)).toEqual(['加入项目「You 的路线」']);
   ownerActions[0]?.onInvoke(work);
   expect(setWorks).toHaveBeenCalledWith(ownerRoute, [work.workId]);
 
   const memberActions = roadmapActionsFor(work, [ownerRoute], 'human_bbbbbbbb', create, setWorks);
-  expect(memberActions.map((action) => action.label)).toEqual(['建立另一条路线']);
+  expect(memberActions.map((action) => action.label)).toEqual(['新建另一个项目']);
   memberActions[0]?.onInvoke(work);
   expect(create).toHaveBeenCalledWith(work);
+
+  expect(
+    roadmapActionsFor(
+      { ...work, lifecycle: 'cancelled', status: 'cancelled' },
+      [ownerRoute],
+      actor.humanId,
+      create,
+      setWorks,
+    ),
+  ).toEqual([]);
 
   expect(roadmapActionsFor(work, [{ ...ownerRoute, workIds: [work.workId] }], actor.humanId, create, setWorks)).toEqual(
     [],

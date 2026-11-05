@@ -125,7 +125,7 @@ export async function generateFrictionFindingChildren(
       ownerAsk: {
         targetFeatureId: resolution.target.featureId,
         targetOwnerCatId: resolution.target.ownerCatId,
-        requestedAction: judgment.rationale,
+        requestedAction: judgment.decisionExplanation?.expectedChange ?? judgment.rationale,
       },
       ...(judgment.interventionKind === 'delete_sunset'
         ? { governance: { cvoAcceptRequired: true } }

@@ -2,7 +2,7 @@
 import { type ReactNode, useRef, useState } from 'react';
 import { useShellPresentation } from '@/components/shell/shell-presentation';
 import { resolveArtifactReviewTarget } from './artifact-review-surface';
-import { useF307ExperienceWorkbenchStore } from './experience-workbench-store';
+import { useResolveContentSurface } from './ContentSurfaceResolution';
 import { MessagePublicationLandingResolver } from './MessagePublicationLandingResolver';
 import { createMessagePublicationSurface } from './message-publication-surface';
 import { useWorkspaceSurfaceVisibility, WorkspaceSurfaceVisibilityProvider } from './WorkspaceSurfaceVisibility';
@@ -16,6 +16,7 @@ export function ContentPublicationNavigator({
   surface: WorkspaceSurfaceDescriptor;
   children: ReactNode | ((leadingAction?: ReactNode) => ReactNode);
 }) {
+  const resolveSurface = useResolveContentSurface(surface.id);
   const isV2 = useShellPresentation() === 'v2';
   const [choosing, setChoosing] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -50,9 +51,7 @@ export function ContentPublicationNavigator({
               requestAnimationFrame(() => trigger.current?.focus());
             }}
             onResolved={(resolved) => {
-              useF307ExperienceWorkbenchStore
-                .getState()
-                .dispatch({ type: 'resolve-content-surface', sourceSurfaceId: surface.id, surface: resolved });
+              resolveSurface(resolved);
               setChoosing(false);
             }}
           />

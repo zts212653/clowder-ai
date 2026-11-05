@@ -13,7 +13,6 @@ import { GlobalControlStore } from '../../dist/infrastructure/scheduler/GlobalCo
 import { RunLedger } from '../../dist/infrastructure/scheduler/RunLedger.js';
 import { TaskRunnerV2 } from '../../dist/infrastructure/scheduler/TaskRunnerV2.js';
 import { templateRegistry } from '../../dist/infrastructure/scheduler/templates/registry.js';
-import { createRepoActivityTemplate } from '../../dist/infrastructure/scheduler/templates/repo-activity.js';
 
 describe('F139 Phase 4 E2E', () => {
   let db;
@@ -374,66 +373,6 @@ describe('F139 Phase 4 E2E', () => {
     assert.equal(deliverCalls[0].sourceCategory, 'scheduled');
 
     const runs = ledger.query('digest-browser', 1);
-    assert.equal(runs[0].outcome, 'RUN_DELIVERED');
-  });
-
-  test('AC-H3: repo-activity trigger delivers repo update from GitHub API', async () => {
-    // Mock GitHub API response
-    const ghIssues = [
-      {
-        number: 10,
-        title: 'Add streaming',
-        html_url: 'https://github.com/anthropics/claude-code/issues/10',
-        user: { login: 'alice' },
-      },
-      {
-        number: 11,
-        title: 'Fix timeout',
-        html_url: 'https://github.com/anthropics/claude-code/pull/11',
-        pull_request: { url: '...' },
-        user: { login: 'bob' },
-      },
-    ];
-    const executeGh = mock.fn(async () => ({ stdout: JSON.stringify(ghIssues) }));
-    const repoTemplate = createRepoActivityTemplate({
-      getGitHubToken: () => 'phase4-fixture-token',
-      execFileAsync: executeGh,
-    });
-    store.insert({
-      id: 'repo-watch',
-      templateId: 'repo-activity',
-      trigger: { type: 'interval', ms: 3600_000 },
-      params: { repo: 'anthropics/claude-code' },
-      display: { label: 'claude-code 动态', category: 'repo', description: 'Watch repo' },
-      deliveryThreadId: 'thread-dev',
-      enabled: true,
-      createdBy: 'opus',
-      createdAt: new Date().toISOString(),
-    });
-    runner.hydrateDynamic(store, {
-      get: (id) => (id === repoTemplate.templateId ? repoTemplate : templateRegistry.get(id)),
-    });
-
-    await runner.triggerNow('repo-watch', { manual: true });
-
-    // Must have called GitHub API
-    assert.equal(executeGh.mock.calls.length, 1);
-    const [file, args, options] = executeGh.mock.calls[0].arguments;
-    assert.equal(file, 'gh');
-    assert.equal(args[0], 'api');
-    assert.ok(args[1].startsWith('/repos/anthropics/claude-code/issues?'));
-    assert.equal(options.env.GITHUB_TOKEN, 'phase4-fixture-token');
-    assert.ok(options.signal instanceof AbortSignal);
-
-    // Delivered content includes real issue/PR data
-    assert.equal(deliverCalls.length, 1);
-    assert.ok(deliverCalls[0].content.includes('#10'));
-    assert.ok(deliverCalls[0].content.includes('Add streaming'));
-    assert.ok(deliverCalls[0].content.includes('#11'));
-    assert.equal(deliverCalls[0].threadId, 'thread-dev');
-
-    // Verify ledger
-    const runs = ledger.query('repo-watch', 1);
     assert.equal(runs[0].outcome, 'RUN_DELIVERED');
   });
 

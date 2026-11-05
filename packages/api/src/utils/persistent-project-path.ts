@@ -1,3 +1,4 @@
+import { deploymentDefaults } from '@cat-cafe/shared';
 /**
  * Persistent project-path boundary.
  *
@@ -39,6 +40,9 @@ export interface PersistentProjectPathOptions {
   realpath?: typeof realpath;
   stat?: typeof stat;
 }
+
+/** Host-owned execution sandboxes are instance data, not checkout source. */
+export const HOST_MEMBER_WORKSPACE_DIRECTORY = '.cat-cafe/member-workspaces';
 
 type DirectoryPathResult =
   | { ok: true; path: string }
@@ -89,6 +93,11 @@ export async function resolvePersistentProjectPathDetailed(
   if (!isPathUnderRoots(target.path, [runtimeRoot.path])) {
     return validateProjectPathDetailed(target.path, options);
   }
+
+  // Root issues only hash-named member sandboxes. Remapping one to the source
+  // checkout destroys its identity and makes an otherwise valid prepare fail.
+  const memberWorkspace = relative(resolve(runtimeRoot.path, HOST_MEMBER_WORKSPACE_DIRECTORY), target.path);
+  if (/^[a-f0-9]{64}$/.test(memberWorkspace)) return validateProjectPathDetailed(target.path, options);
 
   const workspaceRootRaw = options.workspaceRoot ?? process.env.CAT_CAFE_WORKSPACE_ROOT;
   if (!workspaceRootRaw) {
@@ -201,7 +210,7 @@ export async function validateExternalProjectPathDetailed(
       return {
         ok: false,
         reason: 'cat_cafe_root_invalid',
-        message: `Clowder AI root is invalid: ${root.message ?? root.reason}`,
+        message: `${deploymentDefaults.brand.name} root is invalid: ${root.message ?? root.reason}`,
       };
     }
     if (!ownedRoots.some((existing) => pathsEqual(existing, root.path))) ownedRoots.push(root.path);
@@ -211,7 +220,7 @@ export async function validateExternalProjectPathDetailed(
     return {
       ok: false,
       reason: 'cat_cafe_owned_path',
-      message: 'Portable governance can only bootstrap an external project, not Clowder AI or its descendants',
+      message: `Portable governance can only bootstrap an external project, not ${deploymentDefaults.brand.name} or its descendants`,
     };
   }
   return target;

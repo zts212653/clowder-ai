@@ -5,49 +5,7 @@ import {
   LIVE_CONTEXT_TRIGGER,
 } from '../src/domains/cats/services/agents/providers/CodexLiveTurnInput.js';
 import { CodexAppServerRpcError } from '../src/domains/cats/services/agents/providers/codex-app-server-rpc-error.js';
-import type { PreparedIdleFreshnessNotice } from '../src/domains/cats/services/freshness/FreshnessNoticeBroker.js';
 import type { LiveProviderInputOutcome, PreparedProviderRequestV1 } from '../src/domains/cats/services/types.js';
-
-const notice: PreparedIdleFreshnessNotice = {
-  noticeId: 'notice',
-  text: 'read current thread full',
-  frontier: 'source',
-  correlationMessageIds: ['source'],
-  boundary: { threadId: 'home', toolSurface: 'other' },
-  provider: 'openai_codex',
-  carrier: 'codex_app_server',
-  deliverySemantics: 'queued_internal_turn',
-};
-
-test('a rejected empty-input race defers; accepted idle transport remains accepted after telemetry failure', async () => {
-  let reject = true;
-  let deferred = 0;
-  let delivered = 0;
-  const input = new CodexLiveTurnInput({
-    enqueue() {},
-    isOpen: () => true,
-    request: async () => {
-      if (reject) throw new CodexAppServerRpcError({ method: 'turn/start', code: -32600, message: 'Empty input' });
-      return { turn: { id: 'real-native-turn' } };
-    },
-  });
-  const idle = {
-    prepare: async () => notice,
-    defer: () => {
-      deferred++;
-    },
-    markMissed: async () => assert.fail('not missed'),
-    commitDelivered: async () => {
-      delivered++;
-      throw new Error('telemetry offline');
-    },
-  };
-  assert.equal(await input.startIdle('native', idle), null);
-  assert.equal(deferred, 1);
-  reject = false;
-  assert.equal(await input.startIdle('native', idle), 'real-native-turn');
-  assert.equal(delivered, 1);
-});
 
 test('each prepared Live input records its actual native acceptance, rejection, or cancellation', async () => {
   let open = true;
@@ -62,9 +20,8 @@ test('each prepared Live input records its actual native acceptance, rejection, 
     isOpen: () => open,
     prepare: (value): PreparedProviderRequestV1 => ({
       v: 1,
-      message: { body: value.kind === 'text' ? value.text : '' },
-      nativeInstructions:
-        value.kind === 'notice' ? [{ body: value.text, injectionDecision: 'app_server_live_freshness_context' }] : [],
+      message: { body: value.text },
+      nativeInstructions: [],
       runtime: { provider: 'openai' },
       tools: { finalSurface: 'unknown' },
       providerNativeVisibility: 'unknown',
@@ -78,24 +35,24 @@ test('each prepared Live input records its actual native acceptance, rejection, 
       outcomes.push(receipt);
       if (receipt.outcome === 'accepted') throw new Error('telemetry write failed');
     },
-    request: async () => {
+    request: async (method) => {
+      if (method === 'thread/realtime/appendText') return {};
       requests++;
       if (reject) throw new CodexAppServerRpcError({ method: 'turn/start', code: -32600, message: 'EmptyInput' });
       return { turn: { id: 'accepted-native-id' } };
     },
   });
-  const idle = {
-    prepare: async () => notice,
-    defer() {},
-    markMissed: async () => assert.fail('not missed'),
-    commitDelivered: async () => {},
-  };
-  assert.equal(await input.startIdle('native', idle), null);
+  let receipt = input.submitText('typed first', 'first');
+  let rejected = assert.rejects(receipt, /EmptyInput/);
+  assert.equal(await input.sendText(queue.shift(), 'native', null), null);
+  await rejected;
   reject = false;
-  assert.equal(await input.startIdle('native', idle), 'accepted-native-id');
+  receipt = input.submitText('typed second', 'second');
+  assert.equal(await input.sendText(queue.shift(), 'native', null), 'accepted-native-id');
+  assert.equal(await receipt, 'accepted-native-id');
   cancelAfterCommit = true;
-  const receipt = input.submitText('typed', 'message');
-  const rejected = assert.rejects(receipt, /Live call ended/);
+  receipt = input.submitText('typed', 'message');
+  rejected = assert.rejects(receipt, /Live call ended/);
   assert.ok(input.isSubmission(queue[0]));
   assert.equal(await input.sendText(queue[0], 'native', null), null);
   await rejected;
@@ -183,7 +140,7 @@ test('application context uses the exact active turn, and revocation before nati
   const receipt = input.submitContextAtBoundary(
     'A bounded source notice',
     ['message-1'],
-    'inbox_notice',
+    'recovery_context',
     controller.signal,
     async () => true,
     'native-thread',
@@ -227,7 +184,7 @@ test('accepted context records native identity while source data stays out of us
   const idleReceipt = input.submitContextAtBoundary(
     'Read exact source',
     ['thread_home#source'],
-    'inbox_notice',
+    'recovery_context',
     signal,
     async () => true,
     'native-thread',
@@ -303,7 +260,7 @@ test('a native safe boundary can write context inline without waiting for its ow
     await input.submitContextAtBoundary(
       'notice',
       ['thread_home#message-1'],
-      'inbox_notice',
+      'recovery_context',
       new AbortController().signal,
       async () => true,
       'native-thread',

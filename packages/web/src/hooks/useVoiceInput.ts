@@ -1,9 +1,11 @@
 'use client';
 
+import { deploymentDefaults } from '@cat-cafe/shared';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useVoiceSettingsStore } from '@/stores/voiceSettingsStore';
 import { apiFetch } from '@/utils/api-client';
 import { correctTranscription, mergeTermEntries, type TermEntry } from '@/utils/transcription-corrector';
+import { useCoCreatorDisplay } from './useCoCreatorConfig';
 
 function normalizeLoopbackUrl(endpoint: string): string {
   try {
@@ -23,9 +25,9 @@ const DEFAULT_LLM_POSTPROCESS_URL = normalizeLoopbackUrl(
   process.env.NEXT_PUBLIC_LLM_POSTPROCESS_URL || 'http://127.0.0.1:9878',
 );
 
-const DEFAULT_PROMPT =
-  '这是 Clowder AI 猫猫协作项目的对话。宪宪是布偶猫（Claude Opus），砚砚是缅因猫（Codex）。' +
-  'co-creator经常说：帮我看看、开个 worktree、跑一下测试、review 一下、rebase 到 main。' +
+const defaultPrompt = (nickname: string) =>
+  `这是 ${deploymentDefaults.brand.displayName} 猫猫协作项目的对话。宪宪是布偶猫（Claude Opus），砚砚是缅因猫（Codex）。` +
+  `${nickname}经常说：帮我看看、开个 worktree、跑一下测试、review 一下、rebase 到 main。` +
   '技术栈：MCP, Redis, Fastify, TypeScript, Whisper, NDJSON, Zustand, WebSocket, ' +
   'InvocationRecord, Hindsight, Codex, Gemini, Claude, Opus, Sonnet, Haiku, ADR, Lua, CAS。';
 
@@ -98,7 +100,8 @@ async function llmPostProcess(text: string): Promise<string> {
 export function useVoiceInput() {
   const settings = useVoiceSettingsStore((s) => s.settings);
 
-  const prompt = settings.customPrompt || DEFAULT_PROMPT;
+  const owner = useCoCreatorDisplay();
+  const prompt = settings.customPrompt || defaultPrompt(owner.nickname);
   const language = settings.language;
 
   // Rebuild merged term entries when custom terms change

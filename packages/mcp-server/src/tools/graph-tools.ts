@@ -1,4 +1,5 @@
 import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+import { invocationFetch } from './invocation-auth.js';
 
 /**
  * Graph Resolve Tool — F188 Phase F (AC-F1)
@@ -13,17 +14,20 @@ import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
  * self-grant private collection visibility.
  */
 
-import { formatRecallMeta } from '@cat-cafe/shared';
+import { deploymentDefaults, formatRecallMeta } from '@cat-cafe/shared';
 import { z } from 'zod';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
+import { resolveInvocationEnv } from './invocation-auth.js';
 
 const defineTool = defineMcpMigrationFactory('graph-tools.ts', undefined, {
   resourceFamily: 'evidence-navigation',
   authority: 'local-runtime',
 });
 
-const API_URL = process.env['CAT_CAFE_API_URL'] ?? 'http://localhost:3004';
+function resolveApiUrl(): string {
+  return resolveInvocationEnv('CAT_CAFE_API_URL') ?? deploymentDefaults.apiBaseUrl;
+}
 
 const RELATION_TYPES = ['wikilink', 'doc_link', 'feature_ref', 'related_to'] as const;
 
@@ -126,10 +130,10 @@ export async function handleGraphResolve(input: {
     params.set('relations', input.relations.join(','));
   }
 
-  const url = `${API_URL}/api/library/graph/resolve?${params.toString()}`;
+  const url = `${resolveApiUrl()}/api/library/graph/resolve?${params.toString()}`;
 
   try {
-    const response = await fetch(url);
+    const response = await invocationFetch(url);
     if (!response.ok) {
       const text = await response.text();
       return recallErrorResult(
@@ -272,7 +276,7 @@ function formatNoMatch(n: GraphNoMatch): string {
 
 function crossReferenceFooter(): string {
   return [
-    '— Clowder AI 7-tool memory family —',
+    `— ${deploymentDefaults.brand.displayName} 7-tool memory family —`,
     '  search_evidence: semantic / fuzzy find (lexical/semantic/hybrid)',
     '  graph_resolve: precise anchor / relations (this tool)',
     '  list_recent: zero-prior / scan recent',
@@ -286,7 +290,7 @@ export const graphTools = [
     description: [
       'Drill into the knowledge graph by anchor or fuzzy query.',
       'Use when: you have a precise anchor (F186) and want neighbors/edges, OR a fuzzy term and need candidate anchors.',
-      'Not for: pure semantic search → use search_evidence. Scanning recent activity → use list_recent.',
+      'Not for: message IDs or threadId#messageId coordinates → use cat_cafe_get_message with the bare messageId and mode=full; known file paths → read_file_slice. Pure semantic search → search_evidence; recent activity → list_recent.',
       'Depth tip: depth>=2 without a relations filter can trigger hub fan-out around super-hubs (F102/F188). Prefer depth=1 first, or pass relations to narrow traversal.',
       '',
       'RANKING (F200 live): Edge weights incorporate consumption frequency — paths cats traverse more often rank higher in candidate ordering. Constitutional edges are immune to demotion.',

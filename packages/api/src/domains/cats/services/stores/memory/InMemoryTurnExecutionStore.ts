@@ -9,6 +9,7 @@ import {
   type CreateTurnExecutionResult,
   cloneTurnExecutionRecord,
   createdOutputFence,
+  hasUnconfirmedProviderTeardown,
   type InterruptRunningTurnExecutionsInput,
   type ITurnExecutionStore,
   matchesTurnExecutionSource,
@@ -102,6 +103,26 @@ export class InMemoryTurnExecutionStore implements ITurnExecutionStore {
     );
   }
 
+  markProviderStarted(invocationId: string, at: number): boolean {
+    const record = this.records.get(invocationId);
+    if (
+      !record ||
+      record.status !== 'running' ||
+      !record.providerLifecycleTracked ||
+      !Number.isFinite(at) ||
+      at < record.startedAt
+    )
+      return false;
+    record.providerStartedAt ??= at;
+    return true;
+  }
+
+  recordProviderTeardown(invocationId: string, at: number): void {
+    const record = this.records.get(invocationId);
+    if (!record || !Number.isFinite(at) || at < record.startedAt) throw new Error('invalid exact provider teardown');
+    record.providerTeardownAt ??= at;
+  }
+
   transitionTerminal(invocationId: string, input: TurnExecutionTerminalInput): TransitionTurnExecutionResult {
     const record = this.records.get(invocationId);
     if (!record) return { outcome: 'not_found', record: null };
@@ -109,9 +130,12 @@ export class InMemoryTurnExecutionStore implements ITurnExecutionStore {
     if (record.status !== 'running') {
       return { outcome: 'already_terminal', record: cloneTurnExecutionRecord(record) };
     }
+    if (hasUnconfirmedProviderTeardown(record) && input.providerTeardownAt === undefined)
+      throw new Error('provider_teardown_unconfirmed');
     record.status = input.status;
     record.endedAt = input.endedAt;
     if (input.terminalReason !== undefined) record.terminalReason = input.terminalReason;
+    if (input.providerTeardownAt !== undefined) record.providerTeardownAt = input.providerTeardownAt;
     this.responsePending.add(invocationId);
     return { outcome: 'transitioned', record: cloneTurnExecutionRecord(record) };
   }
@@ -145,7 +169,12 @@ export class InMemoryTurnExecutionStore implements ITurnExecutionStore {
     const interrupted: TurnExecutionRecord[] = [];
     const excluded = new Set(input.excludedInvocationIds ?? []);
     for (const record of this.records.values()) {
-      if (record.status !== 'running' || record.startedAt >= cutoffStartedAt || excluded.has(record.invocationId)) {
+      if (
+        record.status !== 'running' ||
+        record.startedAt >= cutoffStartedAt ||
+        excluded.has(record.invocationId) ||
+        hasUnconfirmedProviderTeardown(record)
+      ) {
         continue;
       }
       const result = this.transitionTerminal(record.invocationId, {

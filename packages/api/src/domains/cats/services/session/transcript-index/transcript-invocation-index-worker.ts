@@ -5,6 +5,7 @@ import Database from 'better-sqlite3';
 import { normalizeTranscriptEvent } from '../TranscriptEventEnvelope.js';
 import type { TranscriptEvent } from '../TranscriptReader.js';
 import { materializeFilesTouched, type TranscriptFileTouch } from '../transcript-file-touches.js';
+import { projectRequestGenerationEvidence } from './request-generation-evidence.js';
 import { updateCanonicalInvocationIndex } from './transcript-invocation-canonical-index.js';
 import {
   beginTranscriptIndexUpdate,
@@ -139,7 +140,10 @@ async function readEventPage(
       query.kind === 'invocation' ? query.invocationId : undefined,
     );
     hydratedPageBytes += row.byte_length;
-    page.events.push({ event });
+    page.events.push({
+      event:
+        query.kind === 'invocation' && query.generationEvidenceOnly ? projectRequestGenerationEvidence(event) : event,
+    });
   }
   return page;
 }

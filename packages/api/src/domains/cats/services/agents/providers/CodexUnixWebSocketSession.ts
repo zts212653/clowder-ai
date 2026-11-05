@@ -11,6 +11,7 @@ import { assertCodexManagedCarrierSupport } from '../../../../../config/codex-ma
 import { assertCodexSharedStateCarrier } from '../../../../../config/codex-shared-state.js';
 import { buildChildEnv } from '../../../../../utils/cli-spawn.js';
 import { buildUnixSupervisedSpawnPlan } from '../../../../../utils/cli-supervised-process.js';
+import { DEFAULT_MAX_NDJSON_RECORD_BYTES, NdjsonRecordTooLargeError } from '../../../../../utils/ndjson-parser.js';
 import { excerptSanitizedStderr, sanitizeCliStderr } from '../../../../../utils/sanitize-cli-stderr.js';
 import { createStderrTail, type StderrTail } from '../../../../../utils/stderr-tail.js';
 import type { AgentCarrierSession, AgentCarrierSessionOptions } from '../../types.js';
@@ -20,7 +21,9 @@ import { codexHostServedModels } from './codex-served-model.js';
 /** Bounded stderr kept per host for socket-readiness diagnostics (pre-F319 value). */
 const HOST_STDERR_TAIL_CHARS = 8_192;
 
-const SOCKET_READY_TIMEOUT_MS = 10_000;
+// Native cold startup can index an existing rollout history before opening its socket.
+// Keep one bounded startup budget rather than interrupting that initialization at ten seconds.
+const SOCKET_READY_TIMEOUT_MS = 120_000;
 const CLOSE_GRACE_MS = 1_500;
 const MAX_TERMINAL_DIAGNOSTIC_LENGTH = 256;
 const SESSION_SCOPED_ENV_KEYS = new Set<string>([...MCP_CALLBACK_ENV_KEYS, 'CAT_CAFE_CREDENTIAL_FILE']);
@@ -30,6 +33,7 @@ export interface CodexAppServerHostLaunch {
   args: readonly string[];
   cwd?: string;
   env?: Record<string, string | null>;
+  inheritParentEnv?: boolean;
   socketDirectory: string;
   socketPath: string;
 }
@@ -48,29 +52,24 @@ export interface PreparedCodexHostLaunch {
 
 export async function prepareCodexHostLaunch(options: AgentCarrierSessionOptions): Promise<PreparedCodexHostLaunch> {
   assertCodexSharedStateCarrier(options.env);
-  assertCodexManagedCarrierSupport(options.env, options.command);
-  const signatureEnv = Object.fromEntries(
-    Object.entries(options.env ?? {}).filter(([key]) => !SESSION_SCOPED_ENV_KEYS.has(key)),
-  );
-  const env: Record<string, string | null> = { ...signatureEnv };
-  // Missing keys would be inherited again by normalizeEnv(). Explicit nulls
-  // remove invocation identity from the long-lived child process.
-  for (const key of SESSION_SCOPED_ENV_KEYS) env[key] = null;
+  await assertCodexManagedCarrierSupport(options.env, options.command);
+  const env = normalizeEnv(options.env, options.cwd ?? process.cwd(), options.inheritParentEnv);
   const args = withoutTransportArgs(options.args);
   const signaturePayload = {
     command: options.command,
     args,
     cwd: options.cwd ?? null,
-    env: Object.entries(signatureEnv).sort(([left], [right]) => left.localeCompare(right)),
+    env: Object.entries(env).sort(([left], [right]) => left.localeCompare(right)),
   };
   return {
     signature: createHash('sha256').update(JSON.stringify(signaturePayload)).digest('hex'),
-    authIdentity: await readCodexHostAuthIdentity(buildChildEnv(env, { workingDirectory: options.cwd }), options.cwd),
+    authIdentity: await readCodexHostAuthIdentity(env, options.cwd),
     launch: {
       command: options.command,
       args,
       ...(options.cwd ? { cwd: options.cwd } : {}),
       env,
+      inheritParentEnv: false,
     },
   };
 }
@@ -145,7 +144,13 @@ class CodexUnixWebSocketSession implements AgentCarrierSession {
         this.inbox.end(error instanceof Error ? error : new Error(String(error)));
       }
     });
-    socket.once('error', (error) => this.inbox.end(error));
+    socket.once('error', (error: Error & { code?: string }) =>
+      this.inbox.end(
+        error.code === 'WS_ERR_UNSUPPORTED_MESSAGE_LENGTH'
+          ? new NdjsonRecordTooLargeError(undefined, DEFAULT_MAX_NDJSON_RECORD_BYTES)
+          : error,
+      ),
+    );
     socket.once('close', (_code, reason) => {
       const diagnostic = sanitizeCliStderr(reason.toString('utf8').trim()).slice(0, MAX_TERMINAL_DIAGNOSTIC_LENGTH);
       this.inbox.end(diagnostic ? new Error(diagnostic) : undefined);
@@ -208,8 +213,14 @@ class SpawnedCodexAppServerHost implements CodexAppServerHostProcess {
   }
 }
 
-function normalizeEnv(input: Record<string, string | null> | undefined, workingDirectory: string): NodeJS.ProcessEnv {
-  return buildChildEnv(input, { workingDirectory });
+function normalizeEnv(
+  input: Record<string, string | null> | undefined,
+  workingDirectory: string,
+  inheritParentEnv?: boolean,
+) {
+  const env = buildChildEnv(input, { workingDirectory, inheritParentEnv });
+  for (const key of SESSION_SCOPED_ENV_KEYS) delete env[key];
+  return Object.fromEntries(Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined));
 }
 
 export function createCodexSocketDirectory(): string {
@@ -232,7 +243,7 @@ export async function spawnCodexAppServerHost(launch: CodexAppServerHostLaunch):
   });
   const childCwd = launch.cwd ?? process.cwd();
   const supervised = buildUnixSupervisedSpawnPlan(launch.command, launch.args, {
-    env: normalizeEnv(launch.env, childCwd),
+    env: normalizeEnv(launch.env, childCwd, launch.inheritParentEnv),
     killGraceMs: Math.max(250, CLOSE_GRACE_MS - 500),
     socketDirectory: launch.socketDirectory,
   });
@@ -261,10 +272,14 @@ export async function spawnCodexAppServerHost(launch: CodexAppServerHostLaunch):
 
 export async function connectCodexAppServerHost(host: CodexAppServerHostProcess): Promise<AgentCarrierSession> {
   const socket = new WebSocket('ws://localhost/', {
+    maxPayload: DEFAULT_MAX_NDJSON_RECORD_BYTES,
     handshakeTimeout: 3_000,
     perMessageDeflate: false,
     createConnection: () => connect({ path: host.socketPath }),
   });
+  // The peer can send its first frame in the same packet as the handshake.
+  // Install read/error observers before yielding to the open event.
+  const session = new CodexUnixWebSocketSession(socket);
   await new Promise<void>((resolve, reject) => {
     const onOpen = () => {
       socket.off('error', onError);
@@ -277,7 +292,7 @@ export async function connectCodexAppServerHost(host: CodexAppServerHostProcess)
     socket.once('open', onOpen);
     socket.once('error', onError);
   });
-  return new CodexUnixWebSocketSession(socket);
+  return session;
 }
 
 function waitForWebSocketClose(socket: WebSocket, timeoutMs: number): Promise<boolean> {

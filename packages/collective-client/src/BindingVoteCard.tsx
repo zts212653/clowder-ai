@@ -29,7 +29,7 @@ export function BindingVoteSection({
   const relevant = votes.filter((vote) => vote.target.roadmapId === roadmap.roadmapId);
   const hasUnsettledRound = relevant.some((vote) => vote.lifecycle === 'open');
   return (
-    <section className="binding-vote-section" aria-label="路线判断">
+    <section className="binding-vote-section" aria-label="项目判断">
       {relevant.map((vote) => (
         <BindingVoteCard
           key={vote.bindingVoteId}
@@ -66,7 +66,7 @@ function BindingVoteCreator({
   return (
     <VoteDraftForm
       initialQuestion={`${roadmap.title}接下来采用哪一种方案？`}
-      title="路线判断"
+      title="项目判断"
       explanation="冻结投票人和规则；通过只生成 Decision"
       submitLabel="冻结并开票"
       onSubmit={async (draft) => {
@@ -105,12 +105,12 @@ function BindingVoteCard({
   return (
     <article className="binding-vote-card" aria-label={`有约束力的判断 · ${vote.question}`}>
       <header>
-        <span>有约束力的路线判断</span>
+        <span>有约束力的项目判断</span>
         <strong>{bindingVoteStatus(vote)}</strong>
       </header>
       <h3>{vote.question}</h3>
       <p className="binding-authority">
-        {authority?.displayName ?? 'Roadmap 负责人'}以路线负责人权限开票 · 只生成 Decision，不自动改变路线
+        {authority?.displayName ?? '项目负责人'}以项目负责人权限开票 · 只生成 Decision，不自动改变项目
       </p>
       <p className="binding-rule">
         {vote.rules.eligibleVoters.length} 位冻结投票人 · {vote.rules.quorumCount} 人参与且同一选项{' '}
@@ -169,11 +169,11 @@ function BindingVoteCard({
       {decision && (
         <section className="decision-card" aria-label={`Decision · ${decision.statement}`}>
           <strong>Decision · {decision.statement}</strong>
-          <span>票决与来源已保留；路线未被自动修改。</span>
+          <span>票决与来源已保留；项目未被自动修改。</span>
         </section>
       )}
       {vote.status === 'invalidated' && (
-        <p className="decision-result">资格或路线 authority 已变化，本轮失效且不缩小分母。</p>
+        <p className="decision-result">资格或项目负责人权限已变化，本轮失效且不缩小分母。</p>
       )}
     </article>
   );

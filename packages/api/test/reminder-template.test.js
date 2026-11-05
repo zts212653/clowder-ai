@@ -35,6 +35,7 @@ describe('reminderTemplate', () => {
       deliveryThreadId: 'th-abc',
     });
     await spec.run.execute('喝水提醒', 'thread-th-abc', {
+      occurrenceId: 'test-occurrence',
       assignedCatId: 'opus',
       deliver: deliverMock,
       invokeTrigger: triggerMock,
@@ -56,6 +57,7 @@ describe('reminderTemplate', () => {
       deliveryThreadId: 'th-late',
     });
     await spec.run.execute('小本本', 'thread-th-late', {
+      occurrenceId: 'test-occurrence',
       assignedCatId: 'codex',
       deliver: deliverMock,
       invokeTrigger: triggerMock,
@@ -85,6 +87,7 @@ describe('reminderTemplate', () => {
       deliveryThreadId: 'th-xyz',
     });
     await spec.run.execute('test', 'thread-th-xyz', {
+      occurrenceId: 'test-occurrence',
       assignedCatId: null,
       deliver: deliverMock,
     });
@@ -99,6 +102,7 @@ describe('reminderTemplate', () => {
       deliveryThreadId: 'th-visible',
     });
     await spec.run.execute('看得见的提醒', 'thread-th-visible', {
+      occurrenceId: 'test-occurrence',
       assignedCatId: 'opus',
       deliver: deliverMock,
     });
@@ -126,6 +130,7 @@ describe('reminderTemplate', () => {
       deliveryThreadId: 'th-target',
     });
     await spec.run.execute('巡查新闻', 'thread-th-target', {
+      occurrenceId: 'test-occurrence',
       assignedCatId: null,
       deliver: deliverMock,
       invokeTrigger: triggerMock,
@@ -144,6 +149,7 @@ describe('reminderTemplate', () => {
       deliveryThreadId: 'th-assigned',
     });
     await spec.run.execute('巡查新闻', 'thread-th-assigned', {
+      occurrenceId: 'test-occurrence',
       assignedCatId: 'sonnet',
       deliver: deliverMock,
       invokeTrigger: triggerMock,
@@ -152,6 +158,7 @@ describe('reminderTemplate', () => {
   });
 
   it('preserves private owner authentication provenance when a hold timer wakes its cat', async () => {
+    const policy = { mode: 'callback_allowlist', allowedCallbackRoutes: ['POST /api/callbacks/hold-ball'] };
     const deliverMock = mock.fn(async () => 'msg-timer-owner');
     const triggerMock = { trigger: mock.fn(async () => 'enqueued') };
     const spec = reminderTemplate.createSpec('hold-ball-timer-owner', {
@@ -163,9 +170,11 @@ describe('reminderTemplate', () => {
       },
       deliveryThreadId: 'thread-owner',
       ownerAuthProvenance: 'strict',
+      toolExecutionPolicy: policy,
     });
 
     await spec.run.execute('resume owner work', 'thread-thread-owner', {
+      occurrenceId: 'test-occurrence',
       assignedCatId: null,
       deliver: deliverMock,
       invokeTrigger: triggerMock,
@@ -175,6 +184,7 @@ describe('reminderTemplate', () => {
     assert.equal(managedEnvelope.sourceCategory, 'scheduled');
     assert.equal(managedEnvelope.priority, 'urgent');
     assert.equal(managedEnvelope.ownerAuthProvenance, 'strict');
+    assert.deepEqual(managedEnvelope.toolExecutionPolicy, policy);
   });
 
   it('does not grant a private owner provenance carrier to an ordinary reminder', async () => {
@@ -188,6 +198,7 @@ describe('reminderTemplate', () => {
     });
 
     await spec.run.execute('ordinary reminder', 'thread-thread-owner', {
+      occurrenceId: 'test-occurrence',
       assignedCatId: null,
       deliver: deliverMock,
       invokeTrigger: triggerMock,
@@ -213,6 +224,7 @@ describe('reminderTemplate', () => {
     assert.equal(result.run, true);
     assert.equal(result.workItems[0].signal, '定时提醒');
     await spec.run.execute('定时提醒', 'thread-th-abc', {
+      occurrenceId: 'test-occurrence',
       assignedCatId: 'opus',
       deliver: deliverMock,
     });
@@ -289,6 +301,7 @@ describe('reminderTemplate managed-hold terminal visibility', () => {
     await assert.rejects(
       () =>
         spec.run.execute('continue after wait', 'thread-thread-1', {
+          occurrenceId: 'test-occurrence',
           assignedCatId: 'codex',
           deliver: async (input) => {
             delivered.push(input);

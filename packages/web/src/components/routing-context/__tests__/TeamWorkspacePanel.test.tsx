@@ -101,6 +101,9 @@ describe('F293 TeamWorkspacePanel presentation', () => {
     expect(evidence?.open).toBe(false);
     expect(evidence?.textContent).toContain('dossier:codex-terra:2');
     expect(evidence?.textContent).toContain('codex-terra');
+    const records = container.querySelector<HTMLDetailsElement>('[data-testid="team-member-records"]');
+    expect(records).not.toBeNull();
+    expect(records?.open).toBe(false);
     expect(evidence?.textContent).toContain('evidence:terra-fit');
     // Hashes and refs must not leak above the fold.
     const aboveFold = container.textContent?.replace(evidence?.textContent ?? '', '') ?? '';

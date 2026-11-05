@@ -7,6 +7,10 @@
 export const ConciergeKeys = {
   /** String (JSON): per-user ConciergeConfig */
   config: (userId: string) => `concierge:config:${userId}`,
+  /** One bounded current-day claim set; no raw app names or usage history. TTL=0. */
+  appAssistDay: (userId: string) => `concierge:app-assist-day:${userId}`,
+  /** Ephemeral owner policy invalidation channel; carries only enabled/disabled. */
+  appAssistPolicy: (userId: string) => `concierge:app-assist-policy:${userId}`,
   /** String: per-user concierge thread ID (懒创建，幂等) */
   threadId: (userId: string) => `concierge:thread:${userId}`,
   /** String (JSON): relay receipt by ID (TTL=0, INV R1/R4) */

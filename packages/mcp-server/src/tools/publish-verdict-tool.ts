@@ -3,6 +3,7 @@ import { defineMcpCanonicalFactory } from '../tool-governance-migration.js';
 
 import { callbackPost } from './callback-tools.js';
 import { errorResult, type ToolResult } from './file-tools.js';
+import { a2aSourceRefsShape } from './publish-verdict-a2a-source-refs.js';
 import { freshnessReplaySourceRefsShape } from './publish-verdict-freshness-source-refs.js';
 import { frictionAnalysisFindingsShape } from './publish-verdict-friction-findings.js';
 import {
@@ -32,25 +33,6 @@ const verdictPacketShape = z
   .describe(
     'VerdictHandoffPacket — 12 fields total (id, domainId, createdAt, phenomenon, harnessUnderEval, evidencePacket, dailyTrend, rootCauseHypothesis, verdict, ownerAsk, acceptanceReevalPlan, counterarguments; governance optional except delete_sunset). See instructions in your eval cat invocation packet for full schema.',
   );
-
-/**
- * a2a sourceRefs: basenames of pre-sanitized snapshot/attribution YAML files.
- * `kind` is OPTIONAL for backward compat (eval:a2a cats publishing without kind
- * still routes correctly through the discriminated union default).
- */
-const a2aSourceRefsShape = z
-  .object({
-    kind: z.literal('a2a-snapshot-attribution').optional(),
-    snapshotName: z
-      .string()
-      .min(1)
-      .describe('Basename of sanitized eval snapshot YAML inside <harnessFeedbackRoot>/snapshots/.'),
-    attributionName: z
-      .string()
-      .min(1)
-      .describe('Basename of sanitized attribution YAML inside <harnessFeedbackRoot>/attributions/.'),
-  })
-  .describe('eval:a2a sourceRefs — basenames only (path separators / .. rejected by API).');
 
 /**
  * F192 Phase H 收尾 PR-2 (砚砚 R1 P1+P2): capability-wakeup sourceRefs is a
@@ -328,6 +310,7 @@ export const publishVerdictTools = [
       'Output: validates the packet, generates evidence in an isolated worktree, pushes verdict/auto/<domain-slug>/<verdict-id>, opens an auto-PR, and returns { commitSha, prUrl }. ' +
       'GOTCHA: wired domains include eval:a2a plus replayable capability-wakeup, memory, SOP, task-outcome, friction, anchor-first, freshness, QC, and design-gate generators. Unregistered or runtime-unwired domains return 501. ' +
       'GOTCHA: catId must match the registered eval cat for the domain (or its OQ-20 Redis override); 403 not_allowed otherwise. ' +
+      'GOTCHA: eval:a2a can read isolated evidence using sourceRefs.source={kind:"designated-a2a-evaluator",checkoutHeadSha,snapshotSha256,attributionSha256}; the server resolves the declared sibling checkout and fails closed on boundary or hash mismatch. ' +
       'GOTCHA: every evidencePacket.metricRefs entry must resolve against the selected domain glossary; unknown refs return 400 before any evidence branch or PR is created. ' +
       'GOTCHA: refresh_pr verifies exact HEAD, auto-verdict provenance, target-only diff scope, and only auto-resolves the derived measurement census conflict; any other conflict fails closed. ' +
       'GOTCHA: replacement publishes may repeat an exact stored episode verdict, but refresh_pr is preferred when the existing PR only needs a current-base census refresh.',

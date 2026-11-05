@@ -52,7 +52,7 @@ test('installed alpha.24 archive carries one beta.27 ABI from package admission 
   const message = f.messages.append({
     userId: 'modern-composition-owner',
     threadId: 'home',
-    catId: createCatId('codex'),
+    from: { kind: 'agent', catId: createCatId('codex') },
     content: 'Fixture visible answer',
     mentions: [],
     timestamp: Date.now(),

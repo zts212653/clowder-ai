@@ -53,7 +53,7 @@ function fixture() {
     store.append({
       userId: 'owner',
       threadId: 'home',
-      catId: null,
+      from: { kind: 'user', userId: 'owner' },
       content: text,
       mentions: [],
       timestamp: Date.now(),
@@ -108,7 +108,11 @@ test('late persistence cannot replace a newer committed choice; prior messages a
 });
 
 test('forged or foreign owner speech and idle or stopped calls cannot submit new native work', async () => {
-  for (const foreign of [{ userId: 'other' }, { threadId: 'other' }, { catId: createCatId('sonnet') }]) {
+  for (const foreign of [
+    { userId: 'other', from: { kind: 'user' as const, userId: 'other' } },
+    { threadId: 'other' },
+    { from: { kind: 'agent' as const, catId: createCatId('sonnet') } },
+  ]) {
     const f = fixture();
     const row = f.message('改Chrome', foreign);
     f.admit(row);

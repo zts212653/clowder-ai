@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, test } from 'node:test';
 import { createAcpServiceForConfig } from '../../dist/domains/cats/services/agents/providers/acp/AcpServiceFactory.js';
-import { skipAcpProfile } from '../../dist/domains/cats/services/agents/providers/acp/acp-registration-failure.js';
+import { skipAcpProfile } from '../../dist/domains/cats/services/agents/providers/acp/lifecycle/acp-registration-failure.js';
 import { AgentRegistry } from '../../dist/domains/cats/services/agents/registry/AgentRegistry.js';
 import { getService } from '../../dist/domains/cats/services/agents/routing/route-helpers.js';
 
@@ -57,6 +57,7 @@ test('rejected Kimi registration preserves the account diagnostic without creati
   ]);
   const service = await createAcpServiceForConfig({
     projectRoot: root,
+    bootstrapRoot: join(root, 'bootstrap'),
     profileId: 'kimi',
     config: config('kimi'),
     effectiveModel: 'kimi-code/k3',
@@ -91,6 +92,7 @@ test('native OAuth registration is healthy while a separate orphan stays unavail
   try {
     const service = await createAcpServiceForConfig({
       projectRoot: root,
+      bootstrapRoot: join(root, 'bootstrap'),
       profileId: 'kimi',
       config: config('kimi', 'native'),
       effectiveModel: 'kimi-code/k3',
@@ -112,6 +114,7 @@ test('missing account binding reports why the configured cat cannot register', a
   const reasons = new Map();
   const service = await createAcpServiceForConfig({
     projectRoot: root,
+    bootstrapRoot: join(root, 'bootstrap'),
     profileId: 'kimi',
     config: config('kimi', 'missing-native'),
     effectiveModel: 'kimi-code/k3',
@@ -154,6 +157,7 @@ test('httpstream refusal is carried to the caller', async () => {
   const reasons = new Map();
   const service = await createAcpServiceForConfig({
     projectRoot: root,
+    bootstrapRoot: join(root, 'bootstrap'),
     profileId: 'kimi',
     config: config('kimi'),
     effectiveModel: 'kimi-code/k3',

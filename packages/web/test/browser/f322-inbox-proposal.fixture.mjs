@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { catRegistry } from '@cat-cafe/shared';
+import { CLIENT_REQUEST_DIAGNOSTIC_HEADER, catRegistry } from '@cat-cafe/shared';
 import cookie from '@fastify/cookie';
 import Fastify from 'fastify';
 import '../../../api/test/helpers/setup-cat-registry.js';
@@ -9,18 +9,31 @@ import { InMemoryProposalStore } from '../../../api/dist/domains/cats/services/s
 import { ThreadStore } from '../../../api/dist/domains/cats/services/stores/ports/ThreadStore.js';
 import { sessionAuthPlugin, sessionRoute } from '../../../api/dist/infrastructure/session-auth.js';
 import { approvalHubRoutes } from '../../../api/dist/routes/approval-hub-routes.js';
-import { projectCompanionDecisions } from '../../../api/dist/routes/companion-decision-projection.js';
+import { companionDecisionRoutes } from '../../../api/dist/routes/companion-decision-routes.js';
 import { buildProposalCardBlock } from '../../../api/dist/routes/proposal-card-block.js';
 import { proposalRoutes } from '../../../api/dist/routes/proposal-routes.js';
 import { threadsRoutes } from '../../../api/dist/routes/threads.js';
-import { readUserMentionTodos } from '../../../api/dist/routes/user-mention-todo-projection.js';
 import { createTestApprovalRegistry } from '../../../api/test/approval-hub/helpers.js';
 import { CALENDAR_THREAD, createCalendarFixture } from './f310-work-calendar.fixture.mjs';
 
 /** Original producer/store/routes, owner publication and private draft/preferences; no provider or Redis connection. */
-export async function createInboxProposalFixture({ readStateStore, configureRuntime } = {}) {
+export async function createInboxProposalFixture({
+  readStateStore,
+  configureReceipts,
+  proposalProjectPath = 'default',
+  configureRuntime,
+  configureApprovals,
+  configureOwnedReads,
+  collectiveAccountability,
+  readIgnoredPreferences,
+  ownerUserId = 'default-user',
+  participantIds = ['codex61-sol'],
+  threadStore,
+  messageStore,
+} = {}) {
   const original = await createCalendarFixture();
   const app = Fastify();
+  let approvalSources;
   try {
     if (!catRegistry.has('codex61-sol')) {
       catRegistry.register('codex61-sol', {
@@ -32,10 +45,10 @@ export async function createInboxProposalFixture({ readStateStore, configureRunt
         mentionPatterns: ['@codex61-sol'],
       });
     }
-    const owner = 'default-user';
+    const owner = ownerUserId;
     const proposals = new InMemoryProposalStore();
-    const threads = new ThreadStore();
-    const messages = new MessageStore();
+    const threads = threadStore ?? new ThreadStore();
+    const messages = messageStore ?? new MessageStore();
     messages.initializeUserMentionInbox(0);
     threads.ensureThread(CALENDAR_THREAD, 'Controlled source conversation');
     const parent = threads.create(owner, 'Parent project discussion', 'default');
@@ -62,7 +75,7 @@ export async function createInboxProposalFixture({ readStateStore, configureRunt
         parentThreadId: parent.id,
         preferredCats: ['codex61-sol'],
         initialMessage,
-        projectPath: 'default',
+        projectPath: proposalProjectPath,
         declaredWorkMode: 'investigation',
         reportingMode: 'final-only',
         createdBy: owner,
@@ -87,15 +100,18 @@ export async function createInboxProposalFixture({ readStateStore, configureRunt
       });
       records.push(proposals.get(record.proposalId));
     }
-    const registry = await createTestApprovalRegistry([new F128ApprovalAdapter(proposals)]);
     const mutations = [],
       reads = [],
-      readReceipts = [];
+      readReceipts = [],
+      approvalResponses = [];
     app.addHook('onRequest', async (request, reply) => {
       reply
         .header('Access-Control-Allow-Origin', request.headers.origin ?? '*')
         .header('Access-Control-Allow-Credentials', 'true')
-        .header('Access-Control-Allow-Headers', 'Content-Type,x-cat-cafe-user,x-csrf-token')
+        .header(
+          'Access-Control-Allow-Headers',
+          `Content-Type,x-cat-cafe-user,x-csrf-token,${CLIENT_REQUEST_DIAGNOSTIC_HEADER}`,
+        )
         .header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
       if (request.method === 'OPTIONS') return reply.send();
     });
@@ -104,6 +120,14 @@ export async function createInboxProposalFixture({ readStateStore, configureRunt
         mutations.push({ method: request.method, path: request.url.split('?')[0], body: request.body });
     });
     app.addHook('onSend', async (request, _reply, payload) => {
+      if (request.method === 'POST' && /\/api\/proposals\/[^/]+\/approve$/.test(request.url)) {
+        const body = JSON.parse(String(payload));
+        approvalResponses.push({
+          path: request.url,
+          threadId: body.threadId,
+          pinned: body.threadId ? (await threads.get(body.threadId))?.pinned : undefined,
+        });
+      }
       if (
         (request.method === 'POST' || request.method === 'PATCH') &&
         /\/read(?:\/latest)?$|\/read\/mark-all$/.test(request.url)
@@ -113,9 +137,16 @@ export async function createInboxProposalFixture({ readStateStore, configureRunt
     });
     await app.register(cookie);
     await app.register(sessionAuthPlugin);
-    await app.register(sessionRoute);
+    await app.register(sessionRoute, { ownerUserId: owner });
     const socketManager = { emitToUser() {}, broadcastToRoom() {} };
     const runtime = await configureRuntime?.({ app, owner, messages, threads, socketManager });
+    approvalSources = await configureApprovals?.({ app, owner, messages, threads, socketManager });
+    const registry = await createTestApprovalRegistry([
+      new F128ApprovalAdapter(proposals, (id) => threads.get(id)),
+      ...(runtime?.approvalAdapter ? [runtime.approvalAdapter] : []),
+      ...(approvalSources?.adapters ?? []),
+    ]);
+    await configureReceipts?.({ app, owner, messages, threads, proposals });
     await app.register(proposalRoutes, {
       proposalStore: proposals,
       threadStore: threads,
@@ -127,62 +158,70 @@ export async function createInboxProposalFixture({ readStateStore, configureRunt
     // This disposable member DTO represents the named participant in this controlled sample.
     // It does not assert availability or execute a live provider.
     app.get('/api/cats', async () => ({
-      cats: [
-        {
-          id: 'codex61-sol',
-          displayName: '缅因猫 Sol',
-          nickname: '小太阳·砚砚',
-          defaultModel: 'gpt-6.1-sol',
-          clientId: 'openai',
-          carrier: 'cli',
-          avatar: '/avatars/family/codex61-sol.png',
-          color: { primary: 'var(--color-codex-primary)', secondary: 'var(--color-codex-bg)' },
-          mentionPatterns: ['@codex61-sol'],
-          roleDescription: 'Controlled named participant; no provider dispatch',
-          personality: '',
-        },
-      ],
+      cats: participantIds.map((catId) => ({
+        id: catId,
+        displayName: catRegistry.getOrThrow(catId).config.displayName,
+        nickname: catId === 'codex61-sol' ? '小太阳·砚砚' : catRegistry.getOrThrow(catId).config.displayName,
+        defaultModel: catRegistry.getOrThrow(catId).config.defaultModel,
+        clientId: 'openai',
+        carrier: 'cli',
+        avatar: catRegistry.getOrThrow(catId).config.avatar ?? '/avatars/family/codex61-sol.png',
+        color: { primary: 'var(--color-codex-primary)', secondary: 'var(--color-codex-bg)' },
+        mentionPatterns: [`@${catId}`],
+        roleDescription: 'Controlled named participant; no provider dispatch',
+        personality: '',
+      })),
     }));
-    app.get('/api/concierge/work/decisions', async (request) => {
-      const url = new URL(request.url, 'http://controlled.local'),
-        observedAt = Date.now();
-      const source = (coverage) => ({
-        status: 'available',
-        exhaustiveness: 'complete',
-        startedAt: observedAt,
-        observedAt,
-        coverage,
-      });
-      const mentions = await readUserMentionTodos(messages, owner, {
-        cutover: 0,
-        now: observedAt,
-        period: url.searchParams.get('mentionPeriod') ?? 'week',
-        threads,
-      });
-      const runtimeRead = await runtime?.readPending();
-      const read = projectCompanionDecisions(
-        { items: await registry.listPending(owner), coverage: { state: 'complete' } },
-        { ownerReads: [], coverage: { state: 'complete' } },
-        owner,
-        { offset: Number(url.searchParams.get('offset') ?? 0), limit: Number(url.searchParams.get('limit') ?? 20) },
-        observedAt,
-        {
-          approvals: source('all_registered_F246_producers'),
-          needsMe: source('current_linked_F310_five_producers'),
-          ...(runtimeRead ? { structuredChoices: source('pending_f306_structured_choices') } : {}),
+    // Keep the original decision read/auth/title/proof path. Only the absent Work source is an empty owned port.
+    if (configureOwnedReads) await configureOwnedReads({ app, owner, messages, threads, socketManager });
+    else app.get('/api/entrusted-work/needs-me', async () => ({ ownerReads: [], coverage: { state: 'complete' } }));
+    await app.register(companionDecisionRoutes, {
+      ownerUserId: owner,
+      // This disposable app owns no collective requests. An explicit failing source still stays unavailable;
+      // production's missing-plugin behavior is unchanged. Recovery requires a verified whole-inbox read.
+      collectiveAccountability:
+        collectiveAccountability ??
+        (async (principal) => {
+          assert.equal(principal, owner);
+          const observedAt = Date.now();
+          return {
+            status: 200,
+            body: {
+              data: {
+                items: [],
+                reasons: [],
+                state: {
+                  coverage: 'pending_f290_collective_accountability_requests',
+                  status: 'available',
+                  exhaustiveness: 'complete',
+                  startedAt: observedAt,
+                  observedAt,
+                },
+              },
+            },
+          };
+        }),
+      messageStore: messages,
+      threadStore: threads,
+      runtimeInteractionStore: runtime?.store ?? {
+        async listPendingByUser() {
+          return [];
         },
-        mentions,
-        runtimeRead?.records,
-        {
-          mode: url.searchParams.get('personalView') ?? 'visible',
-          snapshot: original.preferenceSnapshot(),
-          state: source('owner_personal_ignored_items'),
+        async readPendingIndexByUser() {
+          return { records: [], exhaustiveness: 'complete' };
         },
-        undefined,
-        runtimeRead?.presentations,
-      );
-      reads.push(read);
-      return read;
+      },
+      readIgnoredItemPreferences: (owner) => readIgnoredPreferences?.(owner) ?? original.preferenceSnapshot(),
+      now: Date.now,
+    });
+    app.addHook('onSend', async (request, reply, payload) => {
+      if (
+        request.method === 'GET' &&
+        request.url.startsWith('/api/concierge/work/decisions?') &&
+        reply.statusCode === 200
+      )
+        reads.push(JSON.parse(String(payload)));
+      return payload;
     });
     app.get('/api/messages', async (request) => {
       const url = new URL(request.url, 'http://controlled.local');
@@ -207,7 +246,10 @@ export async function createInboxProposalFixture({ readStateStore, configureRunt
       return reply.send(Buffer.from(await response.arrayBuffer()));
     });
     await app.listen({ host: '127.0.0.1', port: 0 });
-    assert.equal((await registry.listPending(owner)).length, 2);
+    assert.equal(
+      (await registry.listPending(owner)).length,
+      2 + (approvalSources?.records.filter((record) => !record.initiallySettled).length ?? 0),
+    );
     return {
       apiPort: app.server.address().port,
       proposals,
@@ -219,15 +261,17 @@ export async function createInboxProposalFixture({ readStateStore, configureRunt
       mutations,
       reads,
       readReceipts,
+      approvalResponses,
       original,
       runtime,
+      approvalSources,
       async close() {
         await runtime?.close();
-        await Promise.all([app.close(), original.close()]);
+        await Promise.all([app.close(), original.close(), approvalSources?.close()]);
       },
     };
   } catch (error) {
-    await Promise.all([app.close(), original.close()]);
+    await Promise.all([app.close(), original.close(), approvalSources?.close()]);
     throw error;
   }
 }

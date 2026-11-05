@@ -11,39 +11,40 @@ import {
   validateDurableManagedGateJob,
 } from '../domains/ball-custody/durable-managed-gate-job.js';
 import {
+  rawDurableGateRecord,
   readDurableGateRecord,
   recordManagedJobAttempt,
   settleDurableManagedGateJobFromRunner,
+  writeDurableGateRecord,
 } from '../domains/ball-custody/durable-managed-gate-job-store.js';
 import {
-  acknowledgeDurableGateSelfRecovery,
-  blockDurableGateSelfRecovery,
   type DurableGateFrozenIdentity,
   evaluateDurableGateMutation,
   initializeDurableGateRecovery,
   readDurableGateRecovery,
   synchronizeDurableGateFrozenIdentity,
 } from '../domains/ball-custody/durable-managed-gate-recovery.js';
-import { hasDurableGateRecoveryReadyReceipt } from '../domains/ball-custody/durable-managed-gate-recovery-child-contract.js';
-import { durableGateRawOutcomeIsAmbiguous } from '../domains/ball-custody/durable-managed-gate-recovery-policy.js';
 import { publishDurableGateStopIntent } from '../domains/ball-custody/durable-managed-gate-stop-intent.js';
 import { managedJobLogReceipt, readManagedJobLogTail } from '../domains/managed-job/managed-job-log.js';
 import { readUnixProcessSnapshotSync, type UnixProcessIdentity } from '../utils/cli-process-ownership.js';
 import { runManagedCommandWorker } from './managed-runner-command-worker.js';
 import {
-  cleanupAndDrainDurableManagedGateAttempt,
   type DurableManagedGateAttemptProcess,
   type DurableManagedGateChildResult,
-  durableManagedGateFailureOrProtocolError,
-  durableManagedGateOutcomeApartFromCleanup,
   spawnDurableManagedGateAttempt,
 } from './managed-runner-durable-child.js';
+import { cleanupManagedRecoveryAttempt } from './managed-runner-durable-cleanup.js';
 import { openDurableManagedRunnerLog } from './managed-runner-durable-log.js';
 import {
   durableManagedGateTerminalResult,
   durableManagedGateTerminalSnapshotResult,
   evaluateDurableManagedGateWorkerFence,
 } from './managed-runner-durable-recovery-fence.js';
+import {
+  finalOutcomeAfterCleanup,
+  type RecoveryAttemptOutcome,
+  selfRecoveryOutcome,
+} from './managed-runner-durable-recovery-outcome.js';
 
 const command = process.env.CAT_CAFE_MANAGED_RUNNER_COMMAND;
 const logPath = process.env.CAT_CAFE_MANAGED_JOB_LOG_PATH;
@@ -114,7 +115,7 @@ function spawnAttempt(
     frozenIdentity,
     reconcileFrom,
     capture,
-    beforeSpawn: (attemptToken) => recordManagedJobAttempt(durableJob, attemptToken),
+    beforeSpawn: (attemptToken) => recordManagedJobAttempt(durableJob, attemptToken, resumeEpoch ?? 0),
   });
   activeChild = attempt.child;
   void attempt.closed.then(() => {
@@ -122,10 +123,6 @@ function spawnAttempt(
   });
   return attempt;
 }
-
-type RecoveryAttemptOutcome =
-  | { kind: 'final'; result: DurableManagedGateChildResult }
-  | { kind: 'resume'; pauseEpoch: number; frozenIdentity: DurableGateFrozenIdentity; reconcileFrom: number };
 
 async function cancellationOutcome(
   owner: UnixProcessIdentity,
@@ -151,78 +148,12 @@ async function terminalIntentOutcome(
   if (intent === 'timed_out' && !publishDurableGateStopIntent(durableJob, owner, attempt.attemptToken, intent)) {
     capture(Buffer.from('managed stop provenance unavailable; retaining non-resumable cancellation\n'));
   }
-  const cleanup = await cleanupAndDrainDurableManagedGateAttempt(attempt, reconciliationBudgetMs, pollMs);
+  const cleanup = await cleanupManagedRecoveryAttempt(durableJob, attempt, reconciliationBudgetMs, pollMs);
   if (!cleanup.proven) {
     capture(Buffer.from('durable managed attempt cleanup could not be proven before terminal publication\n'));
     return { kind: 'final', result: { code: 70, signal: null } };
   }
   return { kind: 'final', result: durableManagedGateTerminalResult(intent, terminationSignal) };
-}
-
-async function finalOutcomeAfterCleanup(
-  attempt: DurableManagedGateAttemptProcess,
-  result: DurableManagedGateChildResult,
-  reconciliationBudgetMs: number,
-  pollMs: number,
-): Promise<RecoveryAttemptOutcome> {
-  const cleanup = await cleanupAndDrainDurableManagedGateAttempt(attempt, reconciliationBudgetMs, pollMs);
-  if (cleanup.proven) {
-    return { kind: 'final', result };
-  }
-  capture(Buffer.from('durable managed attempt cleanup could not be proven before terminal publication\n'));
-  return { kind: 'final', result: { code: 70, signal: null } };
-}
-
-async function selfRecoveryOutcome(
-  owner: UnixProcessIdentity,
-  attempt: DurableManagedGateAttemptProcess,
-  pauseEpoch: number,
-  reconcileFrom: number,
-  frozenIdentity: DurableGateFrozenIdentity | null,
-  rawOutcome: DurableManagedGateChildResult | null,
-  reconciliationBudgetMs: number,
-  pollMs: number,
-): Promise<RecoveryAttemptOutcome> {
-  if (!frozenIdentity || !hasDurableGateRecoveryReadyReceipt(durableJob, attempt.attemptToken, frozenIdentity)) {
-    const cleanup = await cleanupAndDrainDurableManagedGateAttempt(attempt, reconciliationBudgetMs, pollMs);
-    blockDurableGateSelfRecovery(
-      durableJob,
-      owner,
-      pauseEpoch,
-      cleanup.proven ? 'child_protocol_unavailable' : 'cleanup_unproven',
-    );
-    capture(Buffer.from('durable live-owner recovery child protocol was not acknowledged\n'));
-    return {
-      kind: 'final',
-      result: cleanup.proven ? durableManagedGateFailureOrProtocolError(rawOutcome) : { code: 70, signal: null },
-    };
-  }
-  const exitWasObservedBeforeCleanup = attempt.currentExit() !== null;
-  const cleanup = await cleanupAndDrainDurableManagedGateAttempt(attempt, reconciliationBudgetMs, pollMs);
-  if (!cleanup.proven) {
-    blockDurableGateSelfRecovery(durableJob, owner, pauseEpoch, 'cleanup_unproven');
-    capture(Buffer.from('durable live-owner recovery cleanup could not be proven\n'));
-    return { kind: 'final', result: { code: 70, signal: null } };
-  }
-  const settledOutcome = durableManagedGateOutcomeApartFromCleanup(
-    attempt,
-    rawOutcome,
-    exitWasObservedBeforeCleanup,
-    cleanup.signals,
-  );
-  if (settledOutcome && durableGateRawOutcomeIsAmbiguous('exit', settledOutcome)) {
-    evaluateDurableGateMutation(durableJob, { ownerIdentity: owner, mutation: 'exit', rawOutcome: settledOutcome });
-    return { kind: 'final', result: settledOutcome };
-  }
-  const fence = recoveryFenceOutcome(owner, true);
-  if (fence) return fence;
-  if (!acknowledgeDurableGateSelfRecovery(durableJob, owner, pauseEpoch)) {
-    capture(Buffer.from('durable live-owner recovery acknowledgement was fenced\n'));
-    const result = durableManagedGateTerminalSnapshotResult(durableJob, terminationSignal);
-    return { kind: 'final', result: result ?? { code: 70, signal: null } };
-  }
-  capture(Buffer.from(`[managed-gate-recovery] resumed pauseEpoch=${pauseEpoch}\n`));
-  return { kind: 'resume', pauseEpoch, frozenIdentity, reconcileFrom };
 }
 
 function recoveryFenceOutcome(
@@ -268,15 +199,28 @@ async function outcomeForRecoveryDecision(
   reconciliationBudgetMs: number,
   pollMs: number,
 ): Promise<RecoveryAttemptOutcome | null> {
+  const context = {
+    job: durableJob,
+    capture,
+    readFence: () => recoveryFenceOutcome(owner, true),
+    terminationSignal: () => terminationSignal,
+  };
   if (decision.action === 'wait') return null;
   if (decision.action === 'blocked') {
-    return finalOutcomeAfterCleanup(attempt, rawOutcome ?? { code: 70, signal: null }, reconciliationBudgetMs, pollMs);
+    return finalOutcomeAfterCleanup(
+      context,
+      attempt,
+      rawOutcome ?? { code: 70, signal: null },
+      reconciliationBudgetMs,
+      pollMs,
+    );
   }
   if (decision.action === 'terminal_intent') {
     return terminalIntentOutcome(owner, attempt, reconciliationBudgetMs, pollMs, decision.intent);
   }
   if (decision.action === 'self_reconcile') {
     return selfRecoveryOutcome(
+      context,
       owner,
       attempt,
       decision.pauseEpoch,
@@ -287,7 +231,7 @@ async function outcomeForRecoveryDecision(
       pollMs,
     );
   }
-  return rawOutcome ? finalOutcomeAfterCleanup(attempt, rawOutcome, reconciliationBudgetMs, pollMs) : null;
+  return rawOutcome ? finalOutcomeAfterCleanup(context, attempt, rawOutcome, reconciliationBudgetMs, pollMs) : null;
 }
 
 async function runRecoveryAwareAttempt(
@@ -398,21 +342,32 @@ if (durableJob.kind === 'command') {
     finishLog();
     if (durableJob.recordStorage === 'sqlite_v1') {
       const record = readDurableGateRecord(durableJob);
-      settleDurableManagedGateJobFromRunner(durableJob, {
+      const intent = durableJob.recovery
+        ? readDurableGateRecovery(durableJob)?.terminalIntent
+        : record?.terminationIntent;
+      const terminalResult = {
         exitCode: outcome.result.code,
-        timedOut: record?.terminationIntent === 'timed_out',
-        cancelled: record?.terminationIntent === 'cancelled' || terminationSignal !== null,
+        timedOut: intent === 'timed_out',
+        cancelled: intent === 'cancelled' || terminationSignal !== null,
         durationMs: Date.now() - (record?.createdAt ?? Date.now()),
         tailOutput: readManagedJobLogTail(durableJob.logPath),
         signal: outcome.result.signal,
         log: managedJobLogReceipt(durableJob.logPath),
         terminationReason:
-          record?.terminationIntent === 'timed_out'
-            ? 'runtime_deadline'
-            : record?.terminationIntent === 'cancelled' || terminationSignal
-              ? 'explicit_cancel'
-              : 'command_exit',
-      });
+          intent === 'timed_out'
+            ? ('runtime_deadline' as const)
+            : intent === 'cancelled' || terminationSignal
+              ? ('explicit_cancel' as const)
+              : ('command_exit' as const),
+      };
+      if (record?.attemptToken && !record.cleanupProven) {
+        const current = rawDurableGateRecord(durableJob);
+        if (current)
+          writeDurableGateRecord(durableJob, { ...current, pendingResult: terminalResult, updatedAt: Date.now() });
+        process.exitCode = 70;
+        break;
+      }
+      settleDurableManagedGateJobFromRunner(durableJob, terminalResult);
     }
     process.exitCode = exitCodeFor(outcome.result);
     break;

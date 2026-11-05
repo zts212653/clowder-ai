@@ -3,6 +3,21 @@ import type { ContentCapability, ContentLandingCapabilities, ContentReviewView }
 /** These are owner facts, not an entrance-specific feature allowlist. */
 export function contentReviewCapabilities(view: ContentReviewView): ContentLandingCapabilities {
   const source = view.review.source;
+  if (source.kind === 'collective-artifact' || source.kind === 'collective-media') {
+    const unavailable = { state: 'unavailable' as const, reason: '共同作品请从它所在的共同体打开。' };
+    return {
+      annotate: unavailable,
+      reply: unavailable,
+      markup: unavailable,
+      requestModification: {
+        ...unavailable,
+        medium: source.kind === 'collective-artifact' ? 'text' : source.media.kind,
+      },
+      versions: unavailable,
+      decide: unavailable,
+      historyReadOnly: view.historyReadOnly === true,
+    };
+  }
   if (source.kind === 'video-project') {
     const unavailable = { state: 'unavailable' as const, reason: '当前文件视图尚不支持视频项目审阅。' };
     return {
@@ -16,16 +31,7 @@ export function contentReviewCapabilities(view: ContentReviewView): ContentLandi
     };
   }
   const medium = source.kind === 'text' ? 'text' : source.media.kind;
-  const writable: ContentCapability =
-    view.sourceState === 'unavailable'
-      ? { state: 'unavailable', reason: '原内容当前不可读取。' }
-      : view.historyReadOnly
-        ? { state: 'read_only', reason: '这是历史版本，讨论和标记留在原版。' }
-        : view.sourceState === 'changed'
-          ? { state: 'read_only', reason: '原内容已变化，请核对当前版本。' }
-          : view.canWrite
-            ? { state: 'available' }
-            : { state: 'read_only', reason: '当前来源只读。' };
+  const writable = sourceWriteCapability(view);
   return {
     annotate: writable,
     reply:
@@ -47,4 +53,16 @@ export function contentReviewCapabilities(view: ContentReviewView): ContentLandi
     decide: { state: 'unavailable', reason: '未选择审阅裁决上下文。' },
     historyReadOnly: view.historyReadOnly === true,
   };
+}
+
+function sourceWriteCapability(view: ContentReviewView): ContentCapability {
+  return view.sourceState === 'unavailable'
+    ? { state: 'unavailable', reason: '原内容当前不可读取。' }
+    : view.historyReadOnly
+      ? { state: 'read_only', reason: '这是历史版本，讨论和标记留在原版。' }
+      : view.sourceState === 'changed'
+        ? { state: 'read_only', reason: '原内容已变化，请核对当前版本。' }
+        : view.canWrite
+          ? { state: 'available' }
+          : { state: 'read_only', reason: '当前来源只读。' };
 }

@@ -1,16 +1,37 @@
 ---
 feature_ids: [F090]
-related_features: [F059, F087]
+related_features: [F059, F087, F101, F202]
 topics: [game, demo, pixel-art, fighting, local-model, open-source]
 doc_kind: spec
+tips_exempt: "Retires the old game implementation; no new user capability or operation to advertise."
 created: 2026-03-09
+updated: 2026-10-18
 ---
 
 # F090: 像素猫猫大作战（Pixel Cat Brawl）
 
-> **Status**: phase-1-done | **Owner**: Ragdoll
+> **Status**: legacy-implementation-retired（PR #5731 已合入；玩法愿望保留，未宣称完成）
 > **Priority**: P1
 > **Evolved from**: F059（开源计划 — 需要 demo video 素材）、F087（训练营候选任务 Q8）
+
+## 2026-10-18 旧主仓实现退役
+
+You 在本 thread 原话 `private-source-id` 提出旧游戏退出主仓，并在
+`private-source-id` 授权实施。这里只退役旧实现；稳定地让猫猫玩游戏的愿望仍保留。
+以后若重做，按 F202 插件边界重新设计，不包装空插件、不等待插件扩展，也不动 Cat Planet 的现役游戏。
+
+退役前完整版本：`c6df09be4c789fe091f8105a244ad853402dd18d`。历史设计、研究、故事和素材来源/许可保留。
+旧运行代码、页面/聊天入口、专用 API/MCP、启动恢复、类型及依赖已从本次变更移除。
+历史数据不删除、不改 TTL、不伪造结束结果：旧 `game:{id}`、
+`game:thread:{threadId}:active/history` 由原库保留，启动不再恢复旧对局。
+
+## User Journey（退役后的历史线程）
+
+旧 `games/*` 线程按普通聊天读取，保留项目路径兼容、play 私密裁剪、session 权限和公共检索排除；
+旧对局面板不再提供。共用队列唤醒迁至 `agents/invocation/wake-cat.ts`，F075 排行榜保留。
+
+已合入 PR #5731（`0174cfce6a82f49d223999678f0c4730cbe04d44`），并通过隔离 Alpha 入口/历史读取/重连验收。
+不能作为当前可用入口或已兑现体验的说明。
 
 ## Why
 

@@ -21,6 +21,7 @@ describe('MountRulesStore (F228)', () => {
   test('readMountRules returns DEFAULT when no capabilities.json exists', async () => {
     const result = await readMountRules(tempDir);
     assert.deepEqual(result, DEFAULT_MOUNT_RULES);
+    assert.equal(result.mountPoints.kimi.path, '.kimi-code/skills');
   });
 
   test('readMountRules returns clone — mutating result does not affect DEFAULT', async () => {

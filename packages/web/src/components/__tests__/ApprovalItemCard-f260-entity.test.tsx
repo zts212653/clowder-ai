@@ -164,7 +164,7 @@ describe('F260 T0: entity proposal card', () => {
     const originLink = card?.querySelector('[data-testid="approval-origin-link"]');
 
     expect(approveBtn).not.toBeNull();
-    expect(approveBtn!.textContent).toContain('批准');
+    expect(approveBtn!.textContent).toContain('同意');
     expect(rejectBtn).not.toBeNull();
     expect(rejectBtn!.textContent).toContain('拒绝');
     expect(cardLink?.textContent).toContain('查看审批卡');
@@ -205,7 +205,7 @@ describe('F260 T0: entity proposal card', () => {
 
     const card = container.querySelector('[data-testid="approval-item-ent-f260-1"]');
     expect(card!.textContent).toContain('未婚喵');
-    expect(card!.textContent).toContain('concept');
+    expect(card!.textContent).toContain('概念');
   });
 
   it('F260 card recovers the proposal and entity ids through a named disclosure', async () => {
@@ -239,9 +239,11 @@ describe('F260 T0: entity proposal card', () => {
     });
 
     const card = container.querySelector('[data-testid="approval-item-ent-f260-1"]');
-    const disclosure = card!.querySelector<HTMLButtonElement>('button[aria-expanded="false"]');
+    const disclosure = card?.querySelector<HTMLDetailsElement>('details');
     expect(disclosure).not.toBeNull();
-    await act(async () => disclosure?.click());
+    expect(disclosure?.open).toBe(false);
+    await act(async () => disclosure?.querySelector('summary')?.click());
+    expect(disclosure?.open).toBe(true);
     expect(card!.textContent).toContain('Recurring term');
   });
 

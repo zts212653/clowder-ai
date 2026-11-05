@@ -52,6 +52,7 @@ describe('the room follows the host that opened it', () => {
     removeEventListener: () => undefined,
   } as unknown as Window;
   const fakeRoot = {
+    ownerDocument: { defaultView: fakeWindow },
     setAttribute: () => undefined,
     style: { setProperty: () => undefined, removeProperty: () => undefined },
   } as unknown as HTMLElement;

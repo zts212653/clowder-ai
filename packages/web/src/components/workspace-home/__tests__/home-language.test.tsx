@@ -227,19 +227,19 @@ describe('F322 AC-B6–B8 · the Workspace home speaks the chosen language', () 
       await renderHome();
       const rows = qa('[data-testid="workspace-deployment-wait-item"]').map((row) => row.textContent ?? '');
       // ready first, then unknown, then waiting — the order is the state's, not the language's
-      expect(rows[0]).toContain('Waiting for 2 hours · Sol · Running version includes dddddddd; API ready');
+      expect(rows[0]).toContain('2 hours');
+      expect(rows[0]).toContain('Running version includes dddddddd; API ready');
       expect(rows[0]).toContain('Ready to resume: Verify it in the original conversation');
-      expect(rows[1]).toContain('Not enough runtime information to confirm the condition is met');
+      expect(rows[1]).toContain("Haven't confirmed the live environment meets this condition");
       expect(rows[1]).toContain('Waiting for a restart and API to be ready');
-      expect(rows[2]).toContain('Wait time unknown · Owner not confirmed');
+      expect(rows[2]).toContain('Wait time unknown');
       expect(rows[2]).toContain("Can't tell yet whether the condition is met");
       expect(rows[2]).toContain('After resuming: Confirm the next step in the original task');
-      expect(rows[3]).toContain(
-        'Waiting for 3 hours · Sol · Waiting until the running version includes bbbbbbbb and API + WEB are ready',
-      );
-      expect(q('#home-wait-title')?.parentElement?.textContent).toContain('Everywhere · 4');
+      expect(rows[3]).toContain('Waiting for live update');
+      expect(rows[3]).toContain('Waiting until the running version includes bbbbbbbb and API + WEB are ready');
+      expect(q('#home-wait-title')?.parentElement?.textContent).toContain('All conversations · 4 items');
       expect(q('[data-testid="deployment-candidate-preview"]')?.textContent).toBe(
-        'Candidate 630c66bc · As of 4 minutes ago · Expected to satisfy 2 items · 1 more item to confirm',
+        'A newer version is on main; after the live update, 2 items will resume · 1 more item to confirm',
       );
     });
 
@@ -251,7 +251,8 @@ describe('F322 AC-B6–B8 · the Workspace home speaks the chosen language', () 
       expect(live).toContain('Current conversation');
       expect(live).toContain('Running full gate');
       expect(live).toContain('0:50');
-      expect(live).toContain('Replying');
+      // An invocation without an activity proof uses the existing neutral conversation label.
+      expect(live).toContain('Working');
       expect(live).toContain('Running code checks');
       expect(
         qa('[data-testid="home-execution-trajectory"]').every((node) =>
@@ -278,7 +279,7 @@ describe('F322 AC-B6–B8 · the Workspace home speaks the chosen language', () 
       expect(wait.awaitingNewBoot('API + WEB')).toBe('Waiting for a restart and API + WEB to be ready');
       expect(wait.satisfiedNewBoot('API + WEB')).toBe('Restarted; API + WEB ready');
       expect(wait.reasonUnavailable).toBe("Can't read run status right now; this item stays.");
-      expect(wait.reasonIncomplete).toBe('Not enough runtime information to confirm the condition is met');
+      expect(wait.reasonIncomplete).toBe("Haven't confirmed the live environment meets this condition");
       expect(wait.observed('4 minutes ago')).toBe('As of 4 minutes ago');
       expect(wait.satisfiable(1)).toBe('Expected to satisfy 1 item');
       expect(wait.satisfiable(3)).toBe('Expected to satisfy 3 items');
@@ -286,7 +287,7 @@ describe('F322 AC-B6–B8 · the Workspace home speaks the chosen language', () 
       expect(zh.awaitingNewBoot('API + WEB')).toBe('等待新启动，API + WEB 就绪');
       expect(zh.satisfiedNewBoot('API')).toBe('已出现新启动，API 已就绪');
       expect(zh.reasonUnavailable).toBe('暂时读不到运行状态，这项等待先保留。');
-      expect(zh.reasonIncomplete).toBe('运行状态信息不足，还不能确认条件已满足');
+      expect(zh.reasonIncomplete).toBe('还没确认正式环境已满足这项等待');
       expect(zh.observed('4 分钟前')).toBe('截至 4 分钟前');
       expect(zh.satisfiable(3)).toBe('预计满足 3 项');
     });

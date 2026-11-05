@@ -116,6 +116,9 @@ test('owner progress and distinct start/estimate facts stay on the same revision
       async listCurrentReceipts() {
         return [];
       },
+      async readCurrentReceipts() {
+        return { receipts: [], coverage: { state: 'complete' } };
+      },
     },
   });
   const read = await reader.read({ taskId, viewer: { surface: 'human', userId: 'owner-progress' } });

@@ -292,7 +292,7 @@ export function recordRestart({ paths, opId, pid }) {
     restart: {
       ...record.restart,
       pid,
-      identity: { startedAt: inspection.identity?.startedAt, command: inspection.identity?.command },
+      identity: frozenIdentity(inspection.state, inspection.identity),
     },
   });
 }

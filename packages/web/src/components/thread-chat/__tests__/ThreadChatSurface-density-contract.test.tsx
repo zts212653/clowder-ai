@@ -1,21 +1,67 @@
 import { act, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ChatMessage, QueueEntry } from '@/stores/chat-types';
 
 const messages = [
-  { id: 'u1', type: 'user', content: 'retry please', timestamp: 1 },
+  {
+    id: 'u1',
+    type: 'user',
+    content: 'retry please',
+    timestamp: 1,
+    lifecycle: {
+      kind: 'input',
+      orderKey: '1:u1',
+      dispatchRefs: [
+        {
+          targetId: 'opus55',
+          phase: 'settled',
+          statusMessageId: 'a1',
+          dispatchedAt: 2,
+          inputRead: { status: 'read', at: 3 },
+        },
+      ],
+    },
+  },
   { id: 's1', type: 'system', variant: 'error', content: 'authentication failed', timestamp: 2 },
   { id: 'c1', type: 'connector', content: 'connector diagnosis', timestamp: 3 },
-  { id: 'a1', type: 'assistant', content: 'recovered', timestamp: 4 },
-] as const;
+  {
+    id: 'a1',
+    type: 'assistant',
+    catId: 'opus55',
+    from: { kind: 'agent', catId: 'opus55' },
+    content: 'recovered',
+    timestamp: 4,
+    lifecycle: {
+      kind: 'response',
+      orderKey: '3:a1',
+      targetId: 'opus55',
+      invocationId: 'inv-opus',
+      startedAt: 3,
+      status: 'completed',
+      inputMessageIds: ['u1'],
+      inputEntryIds: ['entry-u1'],
+      completedAt: 4,
+    },
+  },
+] as const satisfies readonly ChatMessage[];
 const handleSend = vi.hoisted(() => vi.fn());
-const fixture = vi.hoisted(() => ({ navigator: false, readonly: false, forwardingBlocked: false }));
+const navigate = vi.hoisted(() => vi.fn());
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push: navigate }) }));
+const fixture = vi.hoisted(() => ({
+  navigator: false,
+  readonly: false,
+  forwardingBlocked: false,
+  extraMessages: [] as ChatMessage[],
+}));
 
 vi.mock('@/hooks/useThreadScopedSelectors', () => ({
-  useThreadMessages: () =>
-    fixture.navigator
-      ? [...messages, ...messages.slice(0, 2).map((message) => ({ ...message, id: `extra-${message.id}` }))]
-      : messages,
+  useThreadMessages: () => {
+    const current = [...messages, ...fixture.extraMessages];
+    return fixture.navigator
+      ? [...current, ...current.slice(0, 2).map((message) => ({ ...message, id: `extra-${message.id}` }))]
+      : current;
+  },
   useThreadLiveness: () => ({
     hasActive: false,
     activeInvocations: {},
@@ -27,17 +73,20 @@ vi.mock('@/hooks/useThreadScopedSelectors', () => ({
 }));
 
 vi.mock('@/hooks/useChatHistory', () => ({
-  useChatHistory: () => ({
-    messages: fixture.navigator
-      ? [...messages, ...messages.slice(0, 2).map((message) => ({ ...message, id: `extra-${message.id}` }))]
-      : messages,
-    handleScroll: vi.fn(),
-    handleReadingIntent: vi.fn(),
-    scrollContainerRef: { current: null },
-    messagesEndRef: { current: null },
-    isLoadingHistory: false,
-    hasMore: false,
-  }),
+  useChatHistory: () => {
+    const current = [...messages, ...fixture.extraMessages];
+    return {
+      messages: fixture.navigator
+        ? [...current, ...current.slice(0, 2).map((message) => ({ ...message, id: `extra-${message.id}` }))]
+        : current,
+      handleScroll: vi.fn(),
+      handleReadingIntent: vi.fn(),
+      scrollContainerRef: { current: null },
+      messagesEndRef: { current: null },
+      isLoadingHistory: false,
+      hasMore: false,
+    };
+  },
 }));
 
 vi.mock('@/hooks/useSendMessage', () => ({
@@ -69,12 +118,14 @@ vi.mock('../../ChatMessageRow', () => ({
     message,
     sendContext,
     confirmations,
+    onEditCat,
     onEnterSelection,
     forwardingDisabled,
   }: {
-    message: (typeof messages)[number];
+    message: ChatMessage;
     sendContext?: string;
     confirmations?: unknown[];
+    onEditCat: (catId: string) => void;
     onEnterSelection?: (id: string) => void;
     forwardingDisabled?: boolean;
   }) => (
@@ -86,6 +137,9 @@ vi.mock('../../ChatMessageRow', () => ({
       data-confirmation-count={confirmations?.length ?? 0}
     >
       {message.content}
+      {message.type === 'assistant' && (
+        <button type="button" aria-label="编辑伙伴" onClick={() => onEditCat('codex')} />
+      )}
       <button type="button" aria-label={`select-${message.id}`} onClick={() => onEnterSelection?.(message.id)} />
       <button type="button" aria-label={`forward-${message.id}`} disabled={forwardingDisabled} />
     </article>
@@ -120,6 +174,7 @@ vi.mock('../../TransferTargetPicker', () => ({
   ),
 }));
 
+import type { ConversationViewPreferenceController } from '@/hooks/useConversationViewPreference';
 import type { CardConfirmationEntry } from '../../rich/CardBlock';
 import { writeShellPresentation } from '../../shell/shell-presentation';
 import { ThreadChatSurface } from '../ThreadChatSurface';
@@ -131,9 +186,12 @@ beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   writeShellPresentation('classic');
   handleSend.mockClear();
+  handleSend.mockResolvedValue(true);
+  navigate.mockClear();
   fixture.navigator = false;
   fixture.readonly = false;
   fixture.forwardingBlocked = false;
+  fixture.extraMessages = [];
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -158,6 +216,110 @@ function manifest(scope: Element): string[] {
 }
 
 describe('ThreadChatSurface density contract', () => {
+  it('opens the same member settings page from a chat nameplate', async () => {
+    await act(async () => root.render(<ThreadChatSurface threadId="thread-parity" density="full" />));
+    const button = container.querySelector<HTMLButtonElement>('button[aria-label="编辑伙伴"]')!;
+    await act(async () => button.click());
+    expect(navigate).toHaveBeenCalledWith('/settings?s=members&shell=v2&cat=codex');
+  });
+  it('projects a proven single-cat conversation only in v2 and leaves the composer mounted', async () => {
+    fixture.extraMessages = [
+      {
+        id: 'whisper-opus',
+        type: 'user',
+        content: 'private follow-up',
+        timestamp: 5,
+        visibility: 'whisper',
+        whisperTo: ['opus55'],
+        lifecycle: {
+          kind: 'input',
+          orderKey: '5:whisper-opus',
+          dispatchRefs: [
+            {
+              targetId: 'opus55',
+              phase: 'settled',
+              statusMessageId: 'a1',
+              dispatchedAt: 5,
+              inputRead: { status: 'read', at: 4 },
+            },
+          ],
+        },
+      },
+      { id: 'queued-opus', type: 'user', content: 'queued follow-up', timestamp: 6 },
+    ];
+    const queue: QueueEntry[] = [
+      {
+        id: 'queue-opus',
+        threadId: 'thread-parity',
+        userId: 'owner',
+        from: { kind: 'user', userId: 'owner' },
+        content: 'queued follow-up',
+        messageId: 'queued-opus',
+        mergedMessageIds: [],
+        targetCats: ['opus55'],
+        intent: 'execute',
+        status: 'queued',
+        createdAt: 6,
+      },
+    ];
+    const controller: ConversationViewPreferenceController = {
+      snapshot: {
+        stored: { mode: 'cat', catId: 'opus55' },
+        effective: { mode: 'cat', catId: 'opus55' },
+        source: 'thread',
+      },
+      loading: false,
+      saving: false,
+      error: null,
+      save: vi.fn(),
+      subscribeBeforeCommit: vi.fn(() => () => {}),
+    };
+    writeShellPresentation('v2');
+    await act(async () =>
+      root.render(
+        <ThreadChatSurface
+          threadId="thread-parity"
+          density="full"
+          conversationViewController={controller}
+          conversationViewQueue={queue}
+        />,
+      ),
+    );
+
+    expect(
+      Array.from(container.querySelectorAll('[data-thread-chat-message-id]')).map((node) =>
+        node.getAttribute('data-thread-chat-message-id'),
+      ),
+    ).toEqual(['u1', 'whisper-opus', 'a1', 'queued-opus']);
+    expect(container.querySelector('[data-conversation-execution="a1"]')).not.toBeNull();
+    expect(container.querySelector('[data-conversation-input-evidence="read"]')).not.toBeNull();
+    expect(container.querySelector('[data-conversation-pending]')?.textContent).toContain('queued follow-up');
+    const composer = container.querySelector('textarea');
+
+    const groupController: ConversationViewPreferenceController = {
+      ...controller,
+      snapshot: { stored: { mode: 'group' }, effective: { mode: 'group' }, source: 'thread' },
+    };
+    await act(async () =>
+      root.render(
+        <ThreadChatSurface
+          threadId="thread-parity"
+          density="full"
+          conversationViewController={groupController}
+          conversationViewQueue={queue}
+        />,
+      ),
+    );
+    expect(container.querySelectorAll('[data-thread-chat-message-id]')).toHaveLength(6);
+    expect(container.querySelector('[data-single-cat-conversation-timeline]')).toBeNull();
+    expect(container.querySelector('textarea')).toBe(composer);
+
+    act(() => writeShellPresentation('classic'));
+    expect(container.querySelectorAll('[data-thread-chat-message-id]')).toHaveLength(6);
+    expect(container.querySelector('textarea')).toBe(composer);
+    expect(container.querySelector('[data-single-cat-conversation-timeline]')).toBeNull();
+  });
+
   it('keeps composition writable while blocking the message-row prop, selection toolbar and picker', async () => {
     fixture.forwardingBlocked = true;
     await act(async () => root.render(<ThreadChatSurface threadId="thread-guard" density="full" />));

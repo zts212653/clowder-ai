@@ -6,12 +6,21 @@ topics: [memory, cross-project, bootstrap, knowledge-engineering, onboarding]
 doc_kind: spec
 created: 2026-04-08
 updated: 2026-08-29
-tips_exempt: "Global distillation consumer surface sunset by operator (2026-08-29); remaining expedition/bootstrap scope is internal infrastructure with no new user-invokable capability. Renewal required if Phase D+ adds user-facing expedition features."
+tips_exempt: "Renewed 2026-10-23 for F332 consolidation: this documentation change carries forward the existing project bootstrap and memory-read paths, unfinished outcomes and original owners. The global-distillation consumer remains sunset; consolidation adds no user action or discovery surface. Reassess when a new expedition entry ships."
 ---
 
 # F152: Expedition Memory — 外部项目记忆冷启动 + 经验回流
 
-> **Status**: in-progress（retained expedition/bootstrap scope） | **Owner**: Ragdoll | **Priority**: P1 | **Scope decision**: 2026-08-29 operator 批准只 sunset `global-distillation-f152` consumer surface；Phase 0/A/B 与 producer code 保留，durable artifacts 仅作 forensic evidence，不再进入 generic recall delivery。此决定不等于关闭整个 F152，也不是 utility verdict。
+> **Status**: closed (consolidated into F332; 未完成结果继续承接，非全部交付) | **Owner**: Ragdoll | **Priority**: P1
+
+## 2026-10-23 项目收拢至 F332
+
+You 在 `[thread-id]#private-source-id` 明确要求关闭旧记忆项目、
+保留有价值的结果并新立一项。本项目登记据此归入 [F332](F332-experience-informed-memory.md)；
+**本文件仍保留原合同及历史证据的权威，未被逐项替代的合同继续有效。**
+原 AC 实情、Task、owner、accepted scope 和等待不变；本次不声称全部完成、不关闭来源、不迁移数据。
+
+> **关闭前状态快照**: in-progress（retained expedition/bootstrap scope） | **Owner**: Ragdoll | **Priority**: P1 | **Scope decision**: 2026-08-29 operator 批准只 sunset `global-distillation-f152` consumer surface；Phase 0/A/B 与 producer code 保留，durable artifacts 仅作 forensic evidence，不再进入 generic recall delivery。此决定不等于关闭整个 F152，也不是 utility verdict。
 
 ## Why
 

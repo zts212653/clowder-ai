@@ -2,6 +2,7 @@ import type { InvocationTrajectorySummary } from '@cat-cafe/shared';
 import { runModuleWorker } from '../../../../../utils/run-module-worker.js';
 import type { TranscriptEvent, TranscriptReader } from '../TranscriptReader.js';
 import type { TranscriptWriter } from '../TranscriptWriter.js';
+import { projectRequestGenerationEvidence } from './request-generation-evidence.js';
 import type {
   IndexedSession,
   InvocationIndexRequest,
@@ -9,6 +10,7 @@ import type {
   SessionIndexInput,
 } from './transcript-invocation-index-types.js';
 import {
+  createTranscriptReadMetrics,
   notifyTranscriptRead,
   type TranscriptReadMetrics,
   type TranscriptReadObserver,
@@ -94,35 +96,39 @@ export class TranscriptInvocationReader {
     return { invocations: result.invocations, total: result.total };
   }
 
-  async readFiles(session: IndexedSession, signal?: AbortSignal) {
-    const { result } = await this.read([session], { kind: 'files' }, signal);
-    return result.filesTouched;
+  async readFiles(session: IndexedSession, signal?: AbortSignal, observer?: TranscriptReadObserver) {
+    if (!observer) {
+      const { result } = await this.read([session], { kind: 'files' }, signal);
+      return result.filesTouched;
+    }
+    const started = performance.now();
+    const metrics = createTranscriptReadMetrics(1);
+    try {
+      const { result } = await this.read([session], { kind: 'files' }, signal, observer, metrics);
+      metrics.rows = result.filesTouched.length;
+      metrics.status = 'success';
+      return result.filesTouched;
+    } finally {
+      metrics.elapsedMs = performance.now() - started;
+      if (metrics.workerAwaitMs === 0) metrics.prepareMs = metrics.elapsedMs;
+      if (signal?.aborted) metrics.status = 'aborted';
+      notifyTranscriptRead(observer, metrics);
+    }
   }
 
   async readInvocation(
     sessions: readonly IndexedSession[],
     invocationId: string,
-    page: { cursor?: number; limit?: number } = {},
+    page: { cursor?: number; limit?: number; generationEvidenceOnly?: boolean } = {},
     signal?: AbortSignal,
     observer?: TranscriptReadObserver,
   ): Promise<Map<string, InvocationReadPage>> {
     if (!observer) {
       const { result, snapshots } = await this.read(sessions, { kind: 'invocation', invocationId, ...page }, signal);
-      return this.materializePages(result, snapshots, invocationId);
+      return this.materializePages(result, snapshots, invocationId, page.generationEvidenceOnly);
     }
     const started = performance.now();
-    const metrics: TranscriptReadMetrics = {
-      status: 'failed',
-      sessionCount: sessions.length,
-      rows: 0,
-      prepareMs: 0,
-      workerAwaitMs: 0,
-      materializeMs: 0,
-      elapsedMs: 0,
-      sourceBytesScanned: 0,
-      hydratedBytes: 0,
-      summaryCacheHits: 0,
-    };
+    const metrics = createTranscriptReadMetrics(sessions.length);
     try {
       const { result, snapshots } = await this.read(
         sessions,
@@ -134,7 +140,7 @@ export class TranscriptInvocationReader {
       const materializeStarted = performance.now();
       let pages: Map<string, InvocationReadPage>;
       try {
-        pages = this.materializePages(result, snapshots, invocationId);
+        pages = this.materializePages(result, snapshots, invocationId, page.generationEvidenceOnly);
       } finally {
         metrics.materializeMs = performance.now() - materializeStarted;
       }
@@ -175,6 +181,7 @@ export class TranscriptInvocationReader {
     result: InvocationIndexResponse,
     snapshots: Map<string, TranscriptEvent[]>,
     invocationId?: string,
+    generationEvidenceOnly = false,
   ): Map<string, InvocationReadPage> {
     return new Map(
       result.pages.map((indexed) => [
@@ -186,7 +193,8 @@ export class TranscriptInvocationReader {
             const event = snapshots.get(indexed.sessionId)?.[item.bufferIndex];
             if (!event || (invocationId !== undefined && event.invocationId !== invocationId))
               throw new Error('Transcript buffer changed during indexed read');
-            return { ...event, eventNo: item.eventNo };
+            const envelope = { ...event, eventNo: item.eventNo };
+            return generationEvidenceOnly ? projectRequestGenerationEvidence(envelope) : envelope;
           }),
         },
       ]),

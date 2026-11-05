@@ -59,6 +59,44 @@ describe('RFC #1356 Redis Queue ledger', { skip: redisIsolationSkipReason(REDIS_
     };
   }
 
+  it('keeps a host-reserved message identity through atomic admission and replay', async () => {
+    const { generateSortableId } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const reservedId = generateSortableId(100);
+    const queue = new InvocationQueue(store);
+    const source = {
+      from: { kind: 'user', userId: 'owner-1' },
+      userId: 'owner-1',
+      threadId: 'thread-redis',
+      content: 'revise',
+      mentions: ['opus'],
+      timestamp: 100,
+      deliveryStatus: 'queued',
+      idempotencyKey: 'reserved',
+      reservedId,
+    };
+    const input = {
+      from: source.from,
+      userId: source.userId,
+      threadId: source.threadId,
+      content: source.content,
+      kind: 'conversation_input',
+      ownerAuthProvenance: 'strict',
+      targetCats: ['opus'],
+      exactTargets: true,
+      intent: 'execute',
+      idempotencyKey: source.idempotencyKey,
+    };
+    const first = await queue.send(messageStore, source, input);
+    assert.equal(first.outcome, 'enqueued');
+    assert.equal(first.message.id, reservedId);
+    assert.equal((await messageStore.getById(reservedId)).content, 'revise');
+    assert.equal(first.entries[0].payload.messageId, reservedId);
+    const replay = await queue.send(messageStore, source, input);
+    assert.equal(replay.deduped, true);
+    assert.equal(replay.message.id, reservedId);
+    assert.equal((await store.list('thread-redis')).length, 1);
+  });
+
   it('stores one source row with every pending target and rejects a conflicting replay', async () => {
     const entry = row('m1', ['opus', 'codex']);
     assert.equal((await store.enqueue([entry], 5)).outcome, 'enqueued');
@@ -66,6 +104,85 @@ describe('RFC #1356 Redis Queue ledger', { skip: redisIsolationSkipReason(REDIS_
     assert.equal((await store.enqueue([{ ...entry, targets: ['opus'] }], 5)).outcome, 'conflict');
     assert.deepEqual(await store.list('thread-redis'), [entry]);
     assert.deepEqual((await store.getByMessageIds('thread-redis', ['m1', 'missing'])).get('m1'), [entry]);
+  });
+
+  it('rebuilds optional admission provenance without granting execution or changing source identity', async () => {
+    const entry = row('admission-source', ['opus']);
+    await store.enqueue([entry]);
+    const queue = new InvocationQueue(store);
+    await queue.hydrateFromLedger();
+    const observation = {
+      stage: 'queue_admitted',
+      observedAt: 100,
+      snapshotRef: 'snapshot:B',
+      targets: [{ targetCatId: 'opus', factsRef: 'sha256:opaque-facts' }],
+    };
+    assert.equal(await queue.recordRoutingAdmissionObservation('thread-redis', 'owner-1', entry.id, observation), true);
+    assert.equal(
+      (await store.enqueue([entry])).outcome,
+      'replayed',
+      'derived provenance cannot change admission identity',
+    );
+    const rebuilt = new InvocationQueue(store);
+    await rebuilt.hydrateFromLedger();
+    const restored = rebuilt.list('thread-redis', 'owner-1');
+    assert.equal(restored.length, 1);
+    assert.deepEqual(restored[0].delivery.routingAdmission, observation);
+    assert.deepEqual(restored[0].execution, entry.execution, 'the execution policy is unchanged');
+  });
+
+  it('persists an exact routing hold through sibling handoff, claim recovery and a fresh Queue instance', async () => {
+    const source = await messageStore.append({
+      userId: 'owner-1',
+      threadId: 'thread-redis',
+      from: { kind: 'user', userId: 'owner-1' },
+      content: 'Routing-held source',
+      mentions: ['opus', 'codex'],
+      timestamp: 100,
+    });
+    const entry = row(source.id, ['opus', 'codex']);
+    await store.enqueue([entry]);
+    const queue = new InvocationQueue(store);
+    await queue.hydrateFromLedger();
+    const claimed = await queue.markProcessingGroupAcrossUsersDurable(
+      'thread-redis',
+      {
+        entryId: entry.id,
+        targetCats: ['opus', 'codex'],
+      },
+      [entry.id],
+    );
+    assert.ok(claimed);
+    await queue.holdClaimedRoutingTarget('thread-redis', [entry.id], 'opus', messageStore);
+    assert.equal((await queue.retireClaimedLifecycleTarget('thread-redis', entry.id, 'codex')).outcome, 'retired');
+    // Simulate a process disappearing before the short claim was restored.
+    const restarted = new InvocationQueue(store);
+    await restarted.hydrateFromLedger();
+    const pending = await restarted.getDurableEntry('thread-redis', entry.id);
+    assert.equal(pending.status, 'queued');
+    assert.deepEqual(pending.targets, ['opus']);
+    assert.deepEqual(pending.delivery.routingHeldTargetIds, ['opus']);
+    const { isOrdinaryQueueTargetEligible } = await import(
+      '../dist/domains/cats/services/agents/invocation/InvocationQueue.js'
+    );
+    assert.equal(isOrdinaryQueueTargetEligible(pending, 'opus'), false);
+    assert.equal(
+      (await restarted.claimExactSteerEntryDurable('thread-redis', 'owner-1', entry.id, 'opus')).outcome,
+      'rejected',
+    );
+    const retry = await restarted.claimExactSteerEntryDurable(
+      'thread-redis',
+      'owner-1',
+      entry.id,
+      'opus',
+      Date.now(),
+      true,
+    );
+    assert.equal(retry.outcome, 'claimed');
+    const stale = await store.commit('thread-redis', entry.id, 'old-claim', 'claimed', Date.now(), pending);
+    assert.equal(stale.outcome, 'state_changed');
+    await restarted.restoreClaimedEntries('thread-redis', [entry.id]);
+    assert.deepEqual((await store.get('thread-redis', entry.id)).delivery.routingHeldTargetIds, ['opus']);
   });
 
   it('atomically migrates v1 scalar rows without resurrecting admitted targets', async () => {
@@ -601,6 +718,19 @@ describe('RFC #1356 Redis Queue ledger', { skip: redisIsolationSkipReason(REDIS_
       mentions: ['codex', 'sonnet'],
       origin: 'stream',
     };
+
+    await assert.rejects(
+      queue.terminalizeResponseAndEnqueueDurable(
+        messageStore,
+        response.id,
+        { ...patch, expectedInputMessageIds: [] },
+        input,
+      ),
+      /inputs_changed/,
+    );
+    assert.equal((await store.list('thread-redis')).length, 0, 'stale snapshot must not enqueue');
+    assert.equal((await messageStore.getById(response.id)).lifecycle.status, 'processing');
+    patch.expectedInputMessageIds = ['message-input'];
 
     const applied = await queue.terminalizeResponseAndEnqueueDurable(messageStore, response.id, patch, input);
     assert.equal(applied.outcome, 'enqueued');

@@ -1,8 +1,11 @@
 'use client';
 
-import type { CollectiveConnectionProjection, CollectiveConnectorStatus } from './collective-client';
+import { deploymentDefaults } from '@cat-cafe/shared';
+import { useShellLanguage } from '../shell/shell-language';
+import type { CollectiveConnectorStatus } from './collective-client';
 import { normalizeCollectiveServiceUrl } from './collective-client';
 import { localServiceAction, localServiceDescription } from './collective-launch-copy';
+import { useCollectiveText } from './use-collective-text';
 
 export function CollectiveConnectorBoundary({
   status,
@@ -46,6 +49,43 @@ export function CollectiveConnectorBoundary({
   );
 }
 
+export function CollectiveWorldUnavailable({
+  name,
+  onRetry,
+}: {
+  readonly name?: string;
+  readonly onRetry: () => void;
+}) {
+  const t = useCollectiveText();
+  const language = useShellLanguage();
+  const target = name?.trim() || (language === 'en' ? 'this Collective' : '这个共同体');
+  return (
+    <div
+      className="absolute inset-0 z-10 grid place-items-center bg-[var(--cafe-surface-canvas)] p-6"
+      data-testid="collective-world-unavailable"
+    >
+      <section role="alert" className="max-w-md text-center">
+        <h1 className="text-2xl font-semibold text-cafe-primary">
+          {language === 'en' ? `Can't open ${target}` : `暂时无法打开${target}`}
+        </h1>
+        <p className="mt-3 text-sm leading-6 text-cafe-secondary">
+          {language === 'en'
+            ? 'You can continue when the connection recovers. Your existing content and draft are safe.'
+            : '连接恢复后可以继续使用，已有内容和草稿不会被清空。'}
+        </p>
+        <button
+          type="button"
+          className="mt-5 rounded-lg bg-cafe-accent px-4 py-2 text-sm font-semibold"
+          style={{ color: 'var(--cafe-accent-foreground)' }}
+          onClick={onRetry}
+        >
+          {t('重试')}
+        </button>
+      </section>
+    </div>
+  );
+}
+
 export function CollectiveServiceSetup({
   status,
   busy,
@@ -63,13 +103,15 @@ export function CollectiveServiceSetup({
   readonly onOpen: (serviceUrl: string) => void;
   readonly onError: (error?: string) => void;
 }) {
+  const t = useCollectiveText();
   return (
     <div className="grid h-full place-items-center p-6">
       <section className="w-full max-w-lg rounded-2xl bg-[var(--console-card-bg)] p-6 shadow-[var(--console-elevation-2)]">
         <p className="text-xs font-semibold uppercase tracking-wider text-cafe-accent">Collective Service</p>
-        <h1 className="mt-2 text-2xl font-semibold text-cafe-primary">建立共同家园</h1>
+        <h1 className="mt-2 text-2xl font-semibold text-cafe-primary">{t('新建共同体')}</h1>
         <p className="mt-3 text-sm leading-6 text-cafe-secondary">
-          Clowder AI 会创建并守护一份独立运行的本机 Service。登录凭据由 Service 保存，不需要打开终端或复制 secret。
+          {deploymentDefaults.brand.displayName} 会创建并守护一份独立运行的本机 Service。登录凭据由 Service
+          保存，不需要打开终端或复制 secret。
         </p>
         <button
           type="button"
@@ -125,57 +167,31 @@ export function CollectiveServiceSetup({
 export function CollectiveLaunchNotice({
   connectorError,
   worldError,
-  workError,
+  sessionRequired,
+  workNotice,
   pairingError,
   entryError,
   entryBusy,
 }: {
   readonly connectorError?: string;
   readonly worldError?: string;
-  readonly workError?: string;
+  readonly sessionRequired?: boolean;
+  readonly workNotice?: string;
   readonly pairingError?: string;
   readonly entryError?: string;
   readonly entryBusy?: boolean;
 }) {
-  const error = connectorError ?? worldError ?? workError ?? pairingError ?? entryError;
-  if (!error && !entryBusy) return null;
+  const t = useCollectiveText();
+  const error = connectorError ?? worldError ?? pairingError ?? entryError;
+  const notice = workNotice;
+  const signInNotice = sessionRequired && error === worldError;
+  if (!error && !notice && !entryBusy) return null;
   return (
     <div
-      className={`absolute inset-x-0 top-0 z-10 px-4 py-2 text-center text-xs ${error ? 'bg-conn-red-bg text-conn-red-text' : 'bg-conn-amber-bg text-conn-amber-text'}`}
+      role={signInNotice ? 'status' : error ? 'alert' : 'status'}
+      className={`absolute inset-x-0 top-0 z-10 px-4 py-2 text-center text-xs ${signInNotice ? 'border-b border-[var(--console-border-soft)] bg-[var(--shell-work)] text-cafe-secondary' : error ? 'bg-conn-red-bg text-conn-red-text' : 'bg-conn-amber-bg text-conn-amber-text'}`}
     >
-      {error ?? 'Clowder AI 正在安全托管连接凭据…'}
+      {t(error ?? notice ?? `${deploymentDefaults.brand.displayName} 正在安全托管连接凭据…`)}
     </div>
-  );
-}
-
-export function CollectiveConnectionPicker({
-  visible,
-  connections,
-  onSelect,
-}: {
-  readonly visible: boolean;
-  readonly connections: readonly CollectiveConnectionProjection[];
-  readonly onSelect: (connection: CollectiveConnectionProjection) => void;
-}) {
-  if (!visible) return null;
-  return (
-    <section className="absolute inset-0 z-10 grid place-items-center bg-[var(--cafe-surface-canvas)] p-6">
-      <div className="w-full max-w-lg space-y-3">
-        <h1 className="mb-5 text-2xl font-semibold">进入哪个共同家园？</h1>
-        {connections.map((item) => (
-          <button
-            key={item.connectionId}
-            type="button"
-            className="block w-full rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-4 text-left"
-            onClick={() => onSelect(item)}
-          >
-            <strong className="block">{item.endpointLabel}</strong>
-            <span className="text-xs text-cafe-muted">
-              {new URL(item.serviceUrl).host} ({item.endpointId.slice(-6)})
-            </span>
-          </button>
-        ))}
-      </div>
-    </section>
   );
 }

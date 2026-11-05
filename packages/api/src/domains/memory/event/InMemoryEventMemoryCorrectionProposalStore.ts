@@ -1,5 +1,7 @@
 import type { ApprovalEnvelope, ApprovalPublication, EventMemoryCorrectionProposal } from '@cat-cafe/shared';
 import { assertApprovalEnvelopeIdentity, commitApprovalEnvelope } from '@cat-cafe/shared';
+import { InMemorySettledIndex } from '../../../utils/in-memory-settled-index.js';
+import type { SettledHistoryPageOptions, SettledHistorySourcePage } from '../../../utils/settled-history-page.js';
 import type {
   CreateEventMemoryCorrectionProposalInput,
   EventMemoryCorrectionProposalStore,
@@ -8,12 +10,36 @@ import type {
 const DEFAULT_LIST_LIMIT = 100;
 
 export class InMemoryEventMemoryCorrectionProposalStore implements EventMemoryCorrectionProposalStore {
+  private readonly historyIndex = new InMemorySettledIndex();
+
+  /** Keep only derived ordering refs; original snapshots and mutation semantics remain unchanged. */
+  private indexedSnapshot(record: EventMemoryCorrectionProposal): EventMemoryCorrectionProposal {
+    this.historyIndex.update(
+      record.ownerUserId,
+      record.proposalId,
+      ['approved', 'rejected'].includes(record.status) ? (record.approvedAt ?? record.rejectedAt ?? 0) : null,
+    );
+    return clone(record);
+  }
+
+  async listSettledPage(
+    owner: string,
+    options: SettledHistoryPageOptions,
+  ): Promise<SettledHistorySourcePage<EventMemoryCorrectionProposal>> {
+    return this.historyIndex.page(owner, options, async (id) => {
+      const record = this.proposals.get(id);
+      return record && record.ownerUserId === owner && ['approved', 'rejected'].includes(record.status)
+        ? this.indexedSnapshot(record)
+        : null;
+    });
+  }
+
   private readonly proposals = new Map<string, EventMemoryCorrectionProposal>();
   private readonly dedup = new Map<string, string>();
 
   async create(input: CreateEventMemoryCorrectionProposalInput): Promise<EventMemoryCorrectionProposal> {
     const existing = this.proposals.get(input.proposalId);
-    if (existing) return clone(existing);
+    if (existing) return this.indexedSnapshot(existing);
     const createdAt = Date.now();
     const proposal: EventMemoryCorrectionProposal = {
       ...structuredClone(input),
@@ -22,12 +48,12 @@ export class InMemoryEventMemoryCorrectionProposalStore implements EventMemoryCo
       publication: { state: 'staged', stagedAt: createdAt },
     };
     this.proposals.set(proposal.proposalId, proposal);
-    return clone(proposal);
+    return this.indexedSnapshot(proposal);
   }
 
   async get(proposalId: string): Promise<EventMemoryCorrectionProposal | null> {
     const proposal = this.proposals.get(proposalId);
-    return proposal ? clone(proposal) : null;
+    return proposal ? this.indexedSnapshot(proposal) : null;
   }
 
   async listActionable(ownerUserId: string, limit = DEFAULT_LIST_LIMIT): Promise<EventMemoryCorrectionProposal[]> {
@@ -83,7 +109,7 @@ export class InMemoryEventMemoryCorrectionProposalStore implements EventMemoryCo
     if (!proposal || proposal.status !== 'pending' || proposal.ownerUserId !== approvedBy) return null;
     proposal.status = 'approving';
     proposal.approvedBy = approvedBy;
-    return clone(proposal);
+    return this.indexedSnapshot(proposal);
   }
 
   async finalizeApproval(
@@ -97,7 +123,7 @@ export class InMemoryEventMemoryCorrectionProposalStore implements EventMemoryCo
     proposal.approvedBy = approvedBy;
     proposal.approvedAt = Date.now();
     proposal.appliedRevision = appliedRevision;
-    return clone(proposal);
+    return this.indexedSnapshot(proposal);
   }
 
   async rollbackClaim(proposalId: string): Promise<boolean> {
@@ -119,7 +145,7 @@ export class InMemoryEventMemoryCorrectionProposalStore implements EventMemoryCo
     proposal.rejectedBy = rejectedBy;
     proposal.rejectedAt = Date.now();
     proposal.rejectionReason = rejectionReason;
-    return clone(proposal);
+    return this.indexedSnapshot(proposal);
   }
 
   async getDedupProposalId(ownerUserId: string, clientRequestId: string): Promise<string | null> {
@@ -159,6 +185,7 @@ export class InMemoryEventMemoryCorrectionProposalStore implements EventMemoryCo
   async abortStaged(proposalId: string): Promise<void> {
     const proposal = this.proposals.get(proposalId);
     if (!proposal || proposal.publication?.state !== 'staged') return;
+    this.historyIndex.update('', proposalId, null);
     this.proposals.delete(proposalId);
     await this.releaseDedup(proposal.ownerUserId, proposal.clientRequestId, proposalId);
   }

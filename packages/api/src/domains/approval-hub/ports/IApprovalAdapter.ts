@@ -7,6 +7,7 @@
  */
 
 import type { ApprovalItem, ApprovalProducerId, SettledApprovalItem } from '@cat-cafe/shared';
+import type { SettledHistoryPageOptions, SettledHistorySourcePage } from '../../../utils/settled-history-page.js';
 
 export interface ListSettledOpts {
   /** Maximum items to return. Defaults to 50. */
@@ -15,6 +16,29 @@ export interface ListSettledOpts {
 
 /** Pending aggregation has no source page. Read the full representable owner index before paging the union. */
 export const ALL_PENDING_APPROVALS_LIMIT = Number.MAX_SAFE_INTEGER;
+
+export type ApprovalDecisionRead =
+  | { state: 'pending' }
+  | { state: 'closed' }
+  | { state: 'decided'; item: SettledApprovalItem };
+
+export function projectApprovalDecisionRead(
+  status: string,
+  project: () => SettledApprovalItem | null,
+  rejectionReason?: string,
+): ApprovalDecisionRead {
+  if (status === 'approved' || status === 'rejected') {
+    const item = project();
+    if (item?.navigation.state !== 'anchored') return { state: 'closed' };
+    return {
+      state: 'decided',
+      item: status === 'rejected' && rejectionReason ? { ...item, detail: { ...item.detail, rejectionReason } } : item,
+    };
+  }
+  return ['pending', 'approving', 'applying', 'dispatching'].includes(status)
+    ? { state: 'pending' }
+    : { state: 'closed' };
+}
 
 export interface IApprovalAdapter {
   readonly featureId: ApprovalProducerId;
@@ -25,4 +49,11 @@ export interface IApprovalAdapter {
    * Optional — adapters that don't retain decided data return [].
    */
   listSettled?(userId: string, opts?: ListSettledOpts): SettledApprovalItem[] | Promise<SettledApprovalItem[]>;
+  /** True bounded index continuation. Legacy listSettled is never a paging fallback. */
+  listSettledPage?(
+    userId: string,
+    opts: SettledHistoryPageOptions,
+  ): Promise<SettledHistorySourcePage<SettledApprovalItem>>;
+  /** Exact canonical read required by the shared receipt runtime at admission. No history window. */
+  readDecision?(userId: string, proposalId: string): ApprovalDecisionRead | Promise<ApprovalDecisionRead>;
 }

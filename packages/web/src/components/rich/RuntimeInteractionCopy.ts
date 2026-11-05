@@ -20,6 +20,7 @@ export interface RuntimeInteractionCopy {
     publicationFailed: string;
     invalid: string;
   };
+  elicitation: { open: (host: string) => string; unavailable: string; choose: string; yes: string; no: string };
   form: { skip: string; submit: string; choose: string; other: string; otherLabel: (question: string) => string };
 }
 export const CLASSIC_RUNTIME_INTERACTION_COPY: RuntimeInteractionCopy = {
@@ -47,6 +48,13 @@ export const CLASSIC_RUNTIME_INTERACTION_COPY: RuntimeInteractionCopy = {
     unavailable: '此运行没有可用的确认界面。',
     publicationFailed: '请求界面发布失败，未执行任何操作。',
     invalid: '这个请求已失效，不能再提交。',
+  },
+  elicitation: {
+    open: (host) => `打开 ${host}`,
+    unavailable: '链接不可用；你仍可拒绝或取消这次请求。',
+    choose: '请选择',
+    yes: '是',
+    no: '否',
   },
   form: {
     skip: '不回答',

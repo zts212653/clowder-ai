@@ -3,6 +3,7 @@ import { useChatStore } from '@/stores/chatStore';
 import type { SidebarSnapshotRow } from '@/stores/sidebarProjectionStore';
 import { hasPendingThreadDraft, subscribeContextAttachmentDrafts, subscribeThreadDrafts } from '../thread-drafts';
 import { hasThreadRowSignals } from './ThreadRowSignals';
+import type { GroupDecisionRead } from './use-group-decisions';
 
 /** Both canonical draft notifications as one subscription: what changes a text draft or a context-attachment draft. */
 function subscribeToDraftOwner(onChange: () => void): () => void {
@@ -34,7 +35,12 @@ export function useSidebarDraftDecoration(threadId: string): boolean {
 }
 
 /** Virtual rows use the same composer-owned draft truth as the visible decoration, including offscreen drafts. */
-export function useSidebarRowHeight(rows: readonly SidebarSnapshotRow[], _currentId: string | null, compact: boolean) {
+export function useSidebarRowHeight(
+  rows: readonly SidebarSnapshotRow[],
+  _currentId: string | null,
+  compact: boolean,
+  groupDecisions: GroupDecisionRead,
+) {
   const ids = useMemo(() => (compact ? rows.map((row) => row.id) : []), [rows, compact]);
   const flagged = useChatStore(
     useCallback((state) => JSON.stringify(ids.filter((id) => state.threadStates[id]?.hasDraft === true)), [ids]),
@@ -45,6 +51,7 @@ export function useSidebarRowHeight(rows: readonly SidebarSnapshotRow[], _curren
     () => new Set<string>([...(JSON.parse(flagged) as string[]), ...(JSON.parse(kept) as string[])]),
     [flagged, kept],
   );
+  const decisions = groupDecisions.status === 'ready' ? groupDecisions.threadIds : new Set<string>();
   return useCallback(
     (row: SidebarSnapshotRow) => {
       if (!compact) return 80;
@@ -53,10 +60,11 @@ export function useSidebarRowHeight(rows: readonly SidebarSnapshotRow[], _curren
         unreadCount: row.unreadCount,
         hasUserMention: row.hasUserMention,
         hasDraft: drafts.has(row.id),
+        hasPendingDecision: decisions.has(row.id),
       })
         ? 76
         : 52;
     },
-    [compact, drafts],
+    [compact, drafts, decisions],
   );
 }

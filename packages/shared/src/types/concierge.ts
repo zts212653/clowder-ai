@@ -32,6 +32,8 @@ export interface ConciergeConfig {
   ballSize?: number;
   /** 自主行为引擎开关 (E4, default true). When false, cat stays in business-projected state. */
   behaviorEnabled?: boolean;
+  /** Application-name-only assistance is a separate saved opt-in; absent is false. */
+  appAssistEnabled?: boolean;
   /** Household lookup choice shared by all companion surfaces; absent means the owner default (allowed). */
   householdReadsAllowed?: boolean;
 }
@@ -71,6 +73,7 @@ export const CONCIERGE_CONFIG_DEFAULTS: Omit<ConciergeConfig, 'dutyCatProfileId'
   ballPosition: null,
   ballSize: BALL_SIZE_DEFAULT,
   behaviorEnabled: true,
+  appAssistEnabled: false,
 };
 
 /**

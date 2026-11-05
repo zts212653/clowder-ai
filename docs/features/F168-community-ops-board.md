@@ -3,19 +3,13 @@ feature_ids: [F168]
 related_features: [F141, F116, F140, F055, F122, F167, F192, F220, F233, F280]
 topics: [community, orchestration, opensource]
 doc_kind: spec
-mcp_admission_status: accepted
-mcp_admission_ref: "file:docs/features/F168-community-ops-board.md"
-mcp_admission_claims:
-  - ref: "file:docs/features/F168-community-ops-board.md"
-    toolName: cat_cafe_transfer_external_review
-    resourceFamily: tracking-review
-    boundaryKind: authority-boundary
-    decision: accepted
 created: 2026-04-18
-tips_exempt: "Renewed 2026-10-10 for revision-fenced reviewer transfer and stale-verdict rejection: these maintainer authority repairs add no public end-user entry and do not claim runtime activation."
+tips_exempt: "Renewed 2026-10-21: retain the public C1 notice withdrawing the retired Host external-review transfer tool and summarize the existing independent-installation requirement. No new user operation or plugin activation is claimed."
 ---
 
 # F168: Community Operations Board — 社区事务编排引擎
+
+> **C1 当前准入边界**：`cat_cafe_transfer_external_review` 已退役，无同名插件替代，已撤销其准入声明。下文相关实现记录保留为历史，不作为当前工具准入依据。
 
 > **Status**: **done** ✅（2026-08-04 operational closure dogfood complete；2026-08-06 post-close verdict projection starvation 修复见 Timeline）| **基础设施 A→E 全部 merged ✅** | **Phase F backend + backfill + board UX merged, opus-47 vision guards PASS ✅** | **F-Step3 External Case Closure 真实 external case 已闭环 ✅** | **Owner**: Ragdoll (opus-4.8) | **Priority**: P1
 
@@ -244,7 +238,7 @@ operator现在是人肉 dispatcher：手动 @ 猫看 issue/PR、手动分配线�
 
 **架构约束**：
 > "未来这个 feat 最后一个阶段就是要允许社区其他小伙伴用你们这套管理他们自己的社区！你们在架构设计上必须是解耦的！"
-> "人家也是用自己家里搭建的猫猫咖啡呀！不是用这本地这个！但是必须是比如说你的 operator 可以管理 clowder-ai 也能管理其他 operator 的自己的仓"
+社区管理面向各自独立安装的操作者；每个安装实例都应能管理自己的仓库（原意摘要）。
 
 **初版交互策略**：
 > "我建议我们最开始的 A-C 的完整版本，这里的 issue 和 PR 触发别是自动的巡检，而是我手动点击"

@@ -179,10 +179,6 @@ export class LiveCompanionSessions {
     const entry = this.calls.get(observation.callId);
     if (entry?.claimed && entry.userId === userId) await entry.call.observeTextSubmission(observation);
   }
-  signalInbox(userId: string, threadId: string): void {
-    for (const entry of this.calls.values())
-      if (entry.userId === userId && entry.call.status().threadId === threadId) entry.call.signalInbox();
-  }
   async isActiveCarrier(query: { invocationId: string; catId: string; threadId: string }): Promise<boolean> {
     return [...this.calls.values()].some((entry) => entry.claimed && entry.call.isActiveCarrier(query));
   }

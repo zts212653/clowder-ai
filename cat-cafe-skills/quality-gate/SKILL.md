@@ -66,7 +66,7 @@ Step 2: CREATE — 先确定完整旅程，再组织检查
   - 非交互交付按其真实使用场景写输入、处理与最终结果；不为纯文档或内部计算虚构页面旅程
 
 Step 2.5: CLOSE GATE MATRIX + FOLLOW-UP TAIL SCAN（F177 Phase A）🔴
-  - **下面 CloseGateReport / unmet AC 处置 / tail scan / cvo_signoff 四项仅在本次交付声称关闭 Feature（feat close）时执行；普通 PR / Phase 内交付跳过这四项、不生成 CloseGateReport。本步其余按作者/家族触发的检查（包装未做作者的 close 复核、Siamese edit scope）不受此门线影响，仍按各自条件执行**
+  - **下面 CloseGateReport / unmet AC 处置 / tail scan / cvo_signoff 四项仅在本次交付声称关闭 Feature（feat close）时执行；普通 PR / Phase 内交付跳过这四项、不生成 CloseGateReport。本步其余按作者触发的检查（包装未做作者的 close 复核）不受此门线影响，仍按各自条件执行**
   - 检查 CloseGateReport 是否已生成（schema: `../.cat-cafe-shared-refs/close-gate.md`）
   - 每个 unmet AC 是否三选一处置（immediate / delete / cvo_signoff）
   - **Follow-up tail scan**：扫以下文本来源，命中关键词 = **线索（进入语义判定），不是自动 BLOCKED**——判定标准只有一条：该词是否在把 **unmet AC 包装成已完成 / 偷偷延期**（close 借口）。正常阶段描述（"X 属 next phase 的 scope"）、风险讨论、路线图引用不触发（2026-07-15 修订：raw keyword 自动 BLOCK 误杀正常文本）：
@@ -79,7 +79,6 @@ Step 2.5: CLOSE GATE MATRIX + FOLLOW-UP TAIL SCAN（F177 Phase A）🔴
   - cvo_signoff 四件套完整性验证（proposal + cvo message + quote + scope）
   - 🔴 **包装未做作者的 close 复核**（F177 Phase B，原为针对单只已退役猫的规则）：仅当 PR 作者的 dossier「翻车熔断信号」写有「包装未做 / 过早收口」类失败模式时，其 feat close PR 的 quality-gate 由非作者猫重跑，按风险默认只选一只，同族也行；审核者由 reviewer/系统按当前 roster 指定，作者无选择权。其他作者照常自检。通用底线不变：作者自评不能替代已选择的独立 review（reviewer ≠ author）
   - **hotfix**（F177 Phase E）：执行 `node scripts/check-hotfix-pattern.mjs` 识别 hotfix 模式；其"自我说服"风险由跨个体 review 铁律承接（reviewer ≠ author，merge-gate 校验），作者照常自检，不再额外安排另一只猫重跑 quality-gate
-  - 🔴 **Siamese edit scope 检查**（F177 Phase C）：若 PR 作者是Siamese，检查改动文件是否超出白名单（designs/ docs/ assets/ 根目录.md）。碰 packages/ src/ 的改动必须有对应 handoff 记录或 Dry Run Gate 通过证据（build + test pass）
 
 Step 2.6: FALLBACK LAYER CHECK（F177 Phase D）🔴
   - 执行：`node scripts/check-fallback-layers.mjs` 扫描 PR diff

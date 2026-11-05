@@ -19,6 +19,7 @@ interface ArtifactWorkHostInput {
   rightPanelMode: 'status' | 'workspace' | 'transcript';
   currentThreadId?: string | null;
   mediaComposerSurfaceId?: string | null;
+  workModeRequested?: boolean;
 }
 
 function invalidationReason(
@@ -42,6 +43,7 @@ export function useArtifactWorkHostPresentation({
   rightPanelMode,
   currentThreadId,
   mediaComposerSurfaceId,
+  workModeRequested,
 }: ArtifactWorkHostInput) {
   const layout = useF307ExperienceWorkbenchStore((state) => state.layout);
   const presentation = useF307ExperienceWorkbenchStore((state) => state.artifactWorkPresentation);
@@ -52,15 +54,18 @@ export function useArtifactWorkHostPresentation({
     activeSurface,
     surfaceActive,
     hostEligible,
+    workModeHostEligible,
     fullWindowActive,
     narrowWorkComposerActive,
     splitPreferenceActive,
     workspaceWideActive,
+    workModeActive,
   } = projectWorkspaceWorkHost(
     {
       threadId,
       currentThreadId,
       mediaComposerSurfaceId,
+      workModeRequested,
       viewMode,
       isDesktop,
       statusPanelOpen,
@@ -91,7 +96,13 @@ export function useArtifactWorkHostPresentation({
   useEffect(() => {
     const session = presentation.session;
     if (!session) return;
-    const reason = invalidationReason(session, threadId, layout, activeSurface?.id ?? null, hostEligible);
+    const reason = invalidationReason(
+      session,
+      threadId,
+      layout,
+      activeSurface?.id ?? null,
+      hostEligible || (session.workMode === true && workModeHostEligible),
+    );
     if (!reason) return;
     dispatch({
       type: 'invalidate',
@@ -101,7 +112,7 @@ export function useArtifactWorkHostPresentation({
       threadId: session.threadId,
       surfaceId: session.surfaceId,
     });
-  }, [activeSurface?.id, dispatch, hostEligible, layout, presentation.session, threadId]);
+  }, [activeSurface?.id, dispatch, hostEligible, workModeHostEligible, layout, presentation.session, threadId]);
 
   useEffect(() => {
     if (!fullWindowActive) return;
@@ -150,6 +161,7 @@ export function useArtifactWorkHostPresentation({
     fullWindowActive,
     narrowWorkComposerActive,
     workspaceWideActive,
+    workModeActive,
     chatBasis: presentation.desktopWorkChatBasis,
     invalidateHost,
     resizeChatBasis,

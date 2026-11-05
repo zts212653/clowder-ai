@@ -21,7 +21,7 @@ mcp_admission_claims:
 
 # F323: Runtime Restart Coordination｜等待登记、优雅重启与自动回访
 
-> **Status**: in-progress；Phase A 保留，等待回访已加载，原 Task607 继续 A 的用户现场与事故恢复验收；Phase B 已由 #5201 撤回，原 B→C 承接方案失效，尚无获准的新维护执行方案 | **Owner**: 本 thread 指挥责任猫 Astra（@codex-astra, gpt-6-astra）与 Opus55（@opus55, claude-opus-5-5） | **Priority**: P1
+> **Status**: frozen（原开发线已暂停/取消；保留已交付 Phase A，仅留既有事故修复与验收收尾；非全部完成） | **Owner**: 本 thread 收尾责任猫 Astra（@codex-astra, gpt-6-astra）与 Opus55（@opus55, claude-opus-5-5） | **Priority**: P1
 >
 > **operator kickoff**: `[thread-id]#private-source-id`（2026-09-26 PT / 2026-09-27 UTC）：“我们正式立项一下？”；最大痛点是“不知道有多少猫工作干完了要重启”，数小时后重启完需要自动唤醒当时等待的猫。
 > **Original scope**: 同 thread 的 `private-source-id`（通知工作猫、重启后续办）、`private-source-id`（同位置三态按钮）、`private-source-id`（自然收尾、意外中断、主动直接 stop）、`private-source-id`（重启来源审计、异构消息通道）。
@@ -32,6 +32,13 @@ Boundary: Task 条件等待归 ball-custody；准入/投递/执行归 dispatch�
 
 Map delta: `runtime-deployment` 启动历史、API/Web readiness 与部署版本证明随 Phase A #4853 实现；等待仍扩展原 Task，准入仍归 dispatch。B 的维护准入实现已撤回；三态网页控制与维护停启保留为未满足需求，当前没有在建的 C1/C2 承诺，也未新增日常 runtime 的部署授权。
 
+## Current scope: frozen
+
+Development is frozen. Delivered Phase A remains available, with existing incident recovery and
+acceptance follow-up retained. Phase B was withdrawn; its proposed continuation is not an active
+maintenance plan. This status does not claim that all acceptance criteria passed or that the full
+feature was completed. New development or a new maintenance plan requires a separate explicit decision.
+
 ## 当前执行范围（2026-10-12 对账）
 
 operator 原件 `[thread-id]#private-source-id` 已取消 F323
@@ -41,7 +48,7 @@ working threads，并决定撤销 Phase B 的十个提交、保留 A；Astra 在
 `91a8f58e6c6a2e4a8ba94eb5f63cb9d419aab431`；原控制面
 [#5170](https://github.com/zts212653/clowder-ai/pull/5170) 已关闭且未合入。
 
-原 Task607 承载 Phase A 与旧 hold、Queue、Alpha 等事故恢复验收，不能当作 C1/C2 的执行承诺。
+原 Task607 承载保留 Phase A 的收尾与旧 hold、Queue、Alpha 等事故恢复验收，不能当作继续开发整项 F323 或 C1/C2 的执行承诺。
 下文 B/C 的需求和 AC 保留历史，不授权恢复已取消的执行。重新选择维护方案时，须先由 operator
 在本原现场明确具名方案、scope 与授权，再接回原消费者。
 
@@ -236,3 +243,4 @@ Phase A 实现已于 2026-09-30 通过 [#4853](https://github.com/zts212653/clow
 [最终 E1–E5 证据](https://github.com/zts212653/clowder-ai/pull/4853#issuecomment-5918264917) 使用 operator `[thread-id]#private-source-id` 授权的手动完整检查车道：五项 canonical stage receipt、49/49 native S3 浏览器、guards/lint、完整产物检查的剩余定向修复验证均通过。原 canonical whole-run failed 保持原样；主机压力只获本次准入豁免，不声称主机健康或 whole-run PASS。
 
 运行事实：合后 `/health` 返回 deploymentRevision `78c9389604bcb4641c695e05e971c884c01afbf4`，未包含本次 merge；`live=dormant`。当前实例未暴露部署等待登记工具，`registration=unavailable`，不得冒称取得原 Task/generation 回执。独立手机图修改 Task 已 done/satisfied，未要求重复视觉签字。AC-A11、真实壳 Design Gate、Alpha/运行验收与 Phase A 终验仍未完成；原指挥 Task 及 owner 不变。
+

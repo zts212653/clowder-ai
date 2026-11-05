@@ -11,6 +11,8 @@ interface AgentHookHealthNoticeProps {
   syncAttempted?: boolean;
   onSync: () => void | Promise<void>;
   className?: string;
+  /** Native carriers configure the current invocation; project file drift is a separate, advanced concern. */
+  configurationOnly?: boolean;
 }
 
 interface RenderProbe {
@@ -211,16 +213,28 @@ export function AgentHookHealthNotice({
   syncAttempted = false,
   onSync,
   className = '',
+  configurationOnly = false,
 }: AgentHookHealthNoticeProps) {
   if (!shouldRenderAgentHookHealthNotice({ health, error, syncing, synced, syncAttempted })) return null;
 
   const currentStatus = resolveNoticeStatus({ health, error, syncing, synced, syncAttempted });
-  const tone = toneFor(currentStatus);
+  const baseTone = toneFor(currentStatus);
+  const tone = configurationOnly
+    ? {
+        ...baseTone,
+        title: syncing ? '正在同步项目协作配置' : synced ? '项目协作配置已同步' : '项目协作配置待检查',
+        classes: 'border-cafe-subtle bg-cafe-surface text-cafe-secondary',
+      }
+    : baseTone;
   const problematicTargets = previewTargets(health);
   const canSync = !syncing && currentStatus !== 'synced';
-  const body = currentStatus === 'partial-sync' ? partialSyncBody(problematicTargets) : (error ?? tone.body);
+  const body = configurationOnly
+    ? '这里检查项目的 Hook、Skills 和 MCP 文件，不代表模型无法回复。登录与实际连接状态请查看“成员与运行时”。'
+    : currentStatus === 'partial-sync'
+      ? partialSyncBody(problematicTargets)
+      : (error ?? tone.body);
 
-  return (
+  const notice = (
     <div data-testid="agent-hook-health-notice" className={`rounded-lg border p-3 ${tone.classes} ${className}`}>
       <div className="flex items-start gap-3">
         <HubIcon name={tone.icon} className="h-5 w-5 flex-shrink-0 mt-0.5" />
@@ -247,5 +261,16 @@ export function AgentHookHealthNotice({
         </div>
       </div>
     </div>
+  );
+  return configurationOnly ? (
+    <details
+      className="rounded-lg border border-cafe-subtle bg-cafe-surface p-3 text-cafe-secondary"
+      open={syncing || synced}
+    >
+      <summary className="cursor-pointer text-xs">{tone.title} · 项目配置</summary>
+      <div className="mt-2">{notice}</div>
+    </details>
+  ) : (
+    notice
   );
 }

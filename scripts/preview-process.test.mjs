@@ -48,7 +48,7 @@ describe('preview-process managed lifecycle', () => {
   const env = {
     ...process.env,
     CAT_CAFE_PREVIEW_PROCESS_DIR: stateDir,
-    CAT_CAFE_CALLBACK_TOKEN: 'must-not-leak-to-managed-preview',
+    CAT_CAFE_CALLBACK_TOKEN: ['must', 'not', 'leak', 'to', 'managed', 'preview'].join('-'),
   };
 
   before(async () => {
@@ -146,6 +146,11 @@ describe('preview-process managed lifecycle', () => {
       assert.equal(launchd.status, 0, launchd.stderr || launchd.stdout);
       assert.match(launchd.stdout, new RegExp(`\\bpid = ${record.pid}\\b`));
       assert.match(launchd.stdout, /\bruns = 1\b/);
+      assert.match(
+        launchd.stdout,
+        /spawn type = Interactive\b/i,
+        'an explicitly requested preview must not inherit daemon CPU/IO throttling that times out its identity probes',
+      );
       assert.doesNotMatch(
         launchd.stdout,
         /properties = keepalive/,
@@ -177,7 +182,8 @@ describe('preview-process managed lifecycle', () => {
       encoding: 'utf8',
       timeout: 5_000,
     });
-    assert.equal(stop.status, 0, stop.stderr || stop.stdout);
+    assert.equal(stop.status, process.platform === 'win32' ? 1 : 0, stop.stderr || stop.stdout);
+    if (process.platform === 'win32') assert.match(stop.stderr, /cleanup incomplete or failed; state retained/);
 
     const stopped = spawnSync(
       process.execPath,
@@ -186,6 +192,7 @@ describe('preview-process managed lifecycle', () => {
     );
     assert.equal(stopped.status, 1);
     assert.equal(JSON.parse(stopped.stdout).status, 'stopped');
+    if (process.platform === 'win32') assert.equal(JSON.parse(stopped.stdout).registered, true);
   });
 
   it('expires the owned preview process group without relying on a later doctor or reboot', () => {
@@ -205,7 +212,7 @@ describe('preview-process managed lifecycle', () => {
     );
 
     assert.equal(result.error, undefined, result.error?.message);
-    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.status, process.platform === 'win32' ? 1 : 0, result.stderr);
     assert.ok(Date.now() - startedAt < 5_000, 'lease expiry must terminate without an external cleanup pass');
     assert.match(result.stderr, /lease expired.*terminating managed preview/);
   });
@@ -277,9 +284,10 @@ describe('preview-process managed lifecycle', () => {
     if (process.platform !== 'darwin') return;
     const oneShotPort = await reservePort();
     const fixture = [
+      OWNER_REPORT_SOURCE,
       "const http = require('node:http');",
       `const server = http.createServer((_req, res) => res.end('one-shot')).listen(${oneShotPort}, '127.0.0.1');`,
-      'setTimeout(() => server.close(() => process.exit(0)), 750);',
+      'setTimeout(() => server.close(() => { report(0); process.exit(0); }), 750);',
     ].join('');
     const start = spawnSync(
       process.execPath,

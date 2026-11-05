@@ -1,4 +1,4 @@
-import type { CatId } from '@cat-cafe/shared';
+import { type CatId, catRegistry } from '@cat-cafe/shared';
 
 export interface ParsedMention {
   targetCatId: CatId;
@@ -49,4 +49,21 @@ export function parseMentions(text: string, allPatterns: Map<string, string[]>, 
   }
 
   return { targetCatId: (bestCatId ?? defaultCatId) as CatId, matched: Boolean(bestCatId) };
+}
+
+/**
+ * Build @-mention patterns from catRegistry for {@link parseMentions}.
+ *
+ * Shared truth source: ConnectorRouter and the F202 C1 plugin ingress path (gap A) must resolve
+ * the same mentions during the cutover, so neither owns a private copy of this derivation.
+ */
+export function catRegistryMentionPatterns(): Map<string, string[]> {
+  const patterns = new Map<string, string[]>();
+  for (const catId of catRegistry.getAllIds()) {
+    const entry = catRegistry.tryGet(catId);
+    if (entry?.config.mentionPatterns && entry.config.mentionPatterns.length > 0) {
+      patterns.set(catId, [...entry.config.mentionPatterns]);
+    }
+  }
+  return patterns;
 }

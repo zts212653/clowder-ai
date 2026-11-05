@@ -35,8 +35,16 @@ export function registerArtworkEntryJourneys(suite) {
       view.review.contentRef = asset.contentRef;
       view.currentSource = source;
       const messages = [
-        { id: 'upload', type: 'user', content: '', timestamp: 3, contentBlocks: [{ type: 'image', url: uploadedUrl }] },
         {
+          from: { kind: 'user', userId: 'operator' },
+          id: 'upload',
+          type: 'user',
+          content: '',
+          timestamp: 3,
+          contentBlocks: [{ type: 'image', url: uploadedUrl }],
+        },
+        {
+          from: { kind: 'agent', catId: 'codex-terra' },
           id: 'external',
           type: 'assistant',
           catId: 'codex-terra',
@@ -74,6 +82,9 @@ export function registerArtworkEntryJourneys(suite) {
             return {
               body: {
                 threadId: THREAD_ID,
+                view: 'works',
+                total: 1,
+                complete: true,
                 artifacts: [{ ...item, threadId: THREAD_ID, threadTitle: '原对话' }],
                 workLineage: 'resolved',
               },
@@ -108,14 +119,14 @@ export function registerArtworkEntryJourneys(suite) {
         const surface = page.locator('[data-testid="workspace-content-review-surface"]:visible');
         await surface.getByTestId('workspace-content-review-media').waitFor({ timeout: 30_000 });
         await page.screenshot({ path: `${evidence}/v2-upload-dark.png` });
-        await surface.getByRole('button', { name: '返回来源', exact: true }).click();
+        await surface.getByRole('button', { name: '‹ 聊天', exact: true }).click();
         await page.getByRole('button', { name: 'Enlarge 外链图片', exact: true }).click();
         const preview = page.getByRole('dialog', { name: '外链图片', exact: true });
         await preview.getByText('无法批注', { exact: false }).waitFor();
         await page.screenshot({ path: `${evidence}/v2-external-preview-dark.png` });
         await page.keyboard.press('Escape');
         assert.equal(await preview.count(), 0);
-        // The ordinary Works card keeps its full source DTO through the existing enlarged-image/Annotate callback.
+        // Keep the ordinary Home Works card → image preview → annotate journey.
         await ensureWorkspaceOpen(page);
         await page.getByTestId('v2-workspace-home').click();
         const home = page.getByTestId('f307-workspace-home-page');
@@ -134,6 +145,17 @@ export function registerArtworkEntryJourneys(suite) {
         await surface.getByRole('button', { name: /‹.*(首页|Home)/ }).click();
         await card.waitFor();
         assert.deepEqual(errors, []);
+      } catch (error) {
+        await writeFile(
+          `${evidence}/upload-entry-failure.json`,
+          JSON.stringify(
+            { error: String(error), stack: error.stack, errors, body: await page.locator('body').innerText() },
+            null,
+            2,
+          ),
+        );
+        await page.screenshot({ path: `${evidence}/upload-entry-failure.png` });
+        throw error;
       } finally {
         await context.close();
       }
@@ -172,6 +194,7 @@ export function registerArtworkEntryJourneys(suite) {
           `/api/workspace/file/raw?${new URLSearchParams({ worktreeId: worktree.id, path: relative(name) })}`;
         const messages = [
           {
+            from: { kind: 'user', userId: 'operator' },
             id: 'raw-audio-content',
             type: 'user',
             content: '',
@@ -187,6 +210,7 @@ export function registerArtworkEntryJourneys(suite) {
             ],
           },
           {
+            from: { kind: 'agent', catId: 'codex-terra' },
             id: 'raw-audio-rich',
             type: 'assistant',
             catId: 'codex-terra',
@@ -197,6 +221,7 @@ export function registerArtworkEntryJourneys(suite) {
             },
           },
           {
+            from: { kind: 'agent', catId: 'codex-terra' },
             id: 'cat-image',
             type: 'assistant',
             catId: 'codex-terra',
@@ -211,6 +236,7 @@ export function registerArtworkEntryJourneys(suite) {
             },
           },
           {
+            from: { kind: 'agent', catId: 'codex-terra' },
             id: 'cat-video',
             type: 'assistant',
             catId: 'codex-terra',
@@ -232,7 +258,9 @@ export function registerArtworkEntryJourneys(suite) {
             if (route.request().method() === 'POST') sent.push(route.request().postDataJSON());
             await route.fulfill({
               contentType: 'application/json',
-              body: JSON.stringify(route.request().method() === 'GET' ? { messages, hasMore: false } : {}),
+              body: JSON.stringify(
+                route.request().method() === 'GET' ? { messages, hasMore: false } : { status: 'queued' },
+              ),
             });
             return true;
           },
@@ -308,7 +336,7 @@ export function registerArtworkEntryJourneys(suite) {
         await page.locator('[data-testid="context-attachment-list"] [data-context-kind="media"]').waitFor();
         assert.equal(await surface.locator('textarea').count(), 0, 'a native region directly joins the existing Chat');
         await page.screenshot({ path: `${evidence}/v2-workspace-circle-chat.png` });
-        await surface.getByRole('button', { name: '返回来源', exact: true }).click();
+        await surface.getByRole('button', { name: '‹ 聊天', exact: true }).click();
         assert.equal(await composer.inputValue(), '这份未发送的草稿留在这里');
         assert.equal(
           await page.locator('[data-testid="context-attachment-list"] [data-context-kind="media"]').count(),

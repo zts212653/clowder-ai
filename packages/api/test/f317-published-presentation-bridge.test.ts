@@ -91,7 +91,7 @@ async function fixture(t: TestContext) {
     store.append({
       userId,
       threadId: 'home',
-      catId: createCatId('codex'),
+      from: { kind: 'agent', catId: createCatId('codex') },
       mentions: [],
       content: 'Fixture answer',
       timestamp: Date.now(),

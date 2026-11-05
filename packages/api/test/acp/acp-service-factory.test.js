@@ -1,9 +1,9 @@
 // @ts-check
 
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join, relative } from 'node:path';
 import { describe, it } from 'node:test';
 
 const { createAcpServiceForConfig } = await import(
@@ -22,6 +22,7 @@ describe('AcpServiceFactory', () => {
       process.env[envKey] = 'claude-opus-4-6';
       const service = await createAcpServiceForConfig({
         projectRoot,
+        bootstrapRoot: join(projectRoot, 'bootstrap'),
         profileId,
         effectiveModel: process.env[envKey],
         config: {
@@ -87,6 +88,7 @@ describe('AcpServiceFactory', () => {
       });
       const baseInput = {
         projectRoot,
+        bootstrapRoot: join(projectRoot, 'bootstrap'),
         profileId,
         effectiveModel: defaultModel,
         acpConfig: { command: 'mock-acp', startupArgs: ['--acp'] },
@@ -126,6 +128,52 @@ describe('AcpServiceFactory', () => {
     });
   }
 
+  it('cold clients use the isolated root, resolve relative launch paths and recreate a lost cwd', async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), 'acp-cold-bootstrap-'));
+    const bootstrapRoot = join(projectRoot, 'bootstrap');
+    const poolRegistry = new Map();
+    const id = 'cold-bootstrap-acp';
+    writeFileSync(join(projectRoot, 'agent.js'), '// fixture');
+    writeFileSync(join(projectRoot, 'agent.json'), '{}');
+    try {
+      const service = await createAcpServiceForConfig({
+        projectRoot,
+        bootstrapRoot,
+        profileId: id,
+        effectiveModel: 'test-model',
+        config: {
+          id,
+          name: id,
+          displayName: id,
+          color: { primary: '#111111', secondary: '#eeeeee' },
+          avatar: '/fixture.png',
+          mentionPatterns: ['@cold-bootstrap-acp'],
+          roleDescription: 'fixture',
+          clientId: 'acp',
+          defaultModel: 'test-model',
+          mcpSupport: false,
+        },
+        acpConfig: { command: './agent.js', startupArgs: ['--config=./agent.json'] },
+        poolRegistry,
+        log: { info() {}, warn() {} },
+      });
+      assert.ok(service);
+      const pool = poolRegistry.get(id);
+      const first = pool.clientFactory().config;
+      const rel = relative(bootstrapRoot, first.cwd);
+      assert.ok(rel && !rel.startsWith('..') && !isAbsolute(rel));
+      assert.equal(first.command, join(projectRoot, 'agent.js'));
+      assert.deepEqual(first.args, [`--config=${join(projectRoot, 'agent.json')}`]);
+      rmSync(first.cwd, { recursive: true }); // test-owned path only; no process was started
+      const reopened = pool.clientFactory().config;
+      assert.equal(reopened.cwd, first.cwd);
+      assert.ok(existsSync(reopened.cwd), 'cold start must recreate a lost cwd before spawn');
+    } finally {
+      await Promise.all([...poolRegistry.values()].map((pool) => pool.closeAll?.()));
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   it('uses the active project root when building ACP services', async () => {
     const projectRoot = mkdtempSync(join(tmpdir(), 'acp-service-active-root-'));
     const poolRegistry = new Map();
@@ -133,6 +181,7 @@ describe('AcpServiceFactory', () => {
     try {
       const service = await createAcpServiceForConfig({
         projectRoot,
+        bootstrapRoot: join(projectRoot, 'bootstrap'),
         profileId: 'active-root-acp',
         effectiveModel: 'test-model',
         config: {
@@ -178,6 +227,7 @@ describe('AcpServiceFactory', () => {
     try {
       const service = await createAcpServiceForConfig({
         projectRoot,
+        bootstrapRoot: join(projectRoot, 'bootstrap'),
         profileId: 'missing-account-acp',
         effectiveModel: 'gpt-test',
         config: {

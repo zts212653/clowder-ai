@@ -164,6 +164,10 @@ export class DotReturnService {
       catId: message.catId,
       content: message.content,
       contentBlocks: message.contentBlocks ?? [],
+      // Return the stored presentation payload without rewriting the original text
+      // or exposing unrelated execution/tool metadata. Visibility is checked above.
+      ...(message.extra?.rich ? { rich: message.extra.rich } : {}),
+      ...(message.thinking ? { thinking: message.thinking } : {}),
       replyTo: message.replyTo ?? null,
       timestamp: message.timestamp,
     };

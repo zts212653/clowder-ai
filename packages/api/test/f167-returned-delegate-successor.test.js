@@ -10,7 +10,6 @@ import {
   makeProposalListItem,
   makeProposalStore,
   makeTask,
-  mockCommunityStore,
   mockTruthLeaseStore,
   OWNER_CAT,
   OWNER_THREAD,
@@ -158,14 +157,11 @@ function fixture({
   );
   const resolver = new ActionSubjectTruthResolver(
     mockTruthLeaseStore(),
-    mockCommunityStore(),
-    undefined,
     {
       async get(id) {
         return id === task.id ? task : null;
       },
     },
-    undefined,
     delegateProvider,
   );
   const service = new ActionSuccessorAdmissionService(leaseStore, resolver);

@@ -1,5 +1,9 @@
 import type { ProviderNativeFreshnessToolSurface } from '../../freshness/FreshnessAttentionEventLog.js';
-import type { ProviderNativeSafeBoundary } from '../../freshness/FreshnessNoticeBroker.js';
+export interface ProviderNativeSafeBoundary {
+  threadId: string;
+  turnId: string;
+  toolSurface: ProviderNativeFreshnessToolSurface;
+}
 
 export type CodexProtocolItemClassification =
   | 'safe_boundary'

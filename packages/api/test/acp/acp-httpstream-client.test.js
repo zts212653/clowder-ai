@@ -84,6 +84,49 @@ async function withTimeout(promise, ms, message) {
 }
 
 describe('AcpHttpStreamClient', () => {
+  it('preserves opaque configuration receipts and negotiates resume', async () => {
+    const requests = [];
+    const options = [
+      { id: 'model', category: 'model', currentValue: ' wire ', options: [{ value: ' wire ' }, { value: '' }] },
+    ];
+    server = await startJsonRpcServer((message) => {
+      requests.push(message);
+      return {
+        jsonrpc: '2.0',
+        id: message.id,
+        result:
+          message.method === 'initialize'
+            ? { ...INIT_RESULT, agentCapabilities: { sessionCapabilities: { resume: {} } } }
+            : { configOptions: options },
+      };
+    });
+    const { child, agentStdout } = createMockChild();
+    const port = serverPort(server);
+    client = new AcpHttpStreamClient({
+      command: 'fake-http-acp',
+      args: [],
+      cwd: '/tmp',
+      spawnFn: () => {
+        setImmediate(() => agentStdout.write('Listening on port ' + port + '\n'));
+        return child;
+      },
+      portDiscoveryTimeoutMs: 500,
+    });
+    await client.initialize();
+    const resumed = await client.loadSession('existing');
+    assert.equal(resumed.sessionId, 'existing');
+    assert.ok(requests.some((message) => message.method === 'session/resume'));
+    await client.loadSession('existing');
+    assert.equal(requests.filter((message) => message.method === 'session/resume').length, 1, 'reuse active session');
+    for (const value of [' wire ', '']) {
+      const receipt = await client.setSessionConfigOption('existing', ' model ', value);
+      assert.deepEqual(receipt.configOptions, options);
+      const sent = requests.at(-1);
+      assert.equal(sent.params.configId, 'model');
+      assert.equal(sent.params.value, value);
+    }
+  });
+
   let client = null;
   let server = null;
 
@@ -264,7 +307,7 @@ describe('AcpHttpStreamClient', () => {
     assert.match(caught.message, /closed before final prompt response/);
   });
 
-  it('responds to id-bearing permission requests on prompt streams', async () => {
+  it('denies id-bearing permission requests when no approval handler is installed', async () => {
     let resolvePermissionResponse;
     const permissionResponseReceived = new Promise((resolve) => {
       resolvePermissionResponse = resolve;
@@ -347,7 +390,7 @@ describe('AcpHttpStreamClient', () => {
     assert.equal(caught, null, `Permission request should not stall: ${caught?.message}`);
     assert.ok(capturedPermissionResponse, 'client should POST a JSON-RPC response for the permission request');
     assert.equal(capturedPermissionResponse.result?.outcome?.outcome, 'selected');
-    assert.equal(capturedPermissionResponse.result?.outcome?.optionId, 'allow_once');
+    assert.equal(capturedPermissionResponse.result?.outcome?.optionId, 'reject_once');
     assert.equal(events.at(-1)?.update?.content?.text, 'approved');
   });
 

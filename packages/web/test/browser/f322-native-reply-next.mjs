@@ -32,6 +32,7 @@ export async function startNativeHost() {
   await once(finder, 'close');
   const isolation = await createNextDevTestEnvironment('f322-native-reply', {
     NEXT_PUBLIC_API_URL: `http://127.0.0.1:${port}`,
+    API_SERVER_PORT: String(port),
   });
   const server = spawn(
     process.execPath,
@@ -94,6 +95,7 @@ export function readbackResponse(request, trace, message) {
             avatar: '/avatars/codex.png',
             color: { primary: '#5B8C5A', secondary: '#eeeeee' },
             mentionPatterns: ['@codex'],
+            carrier: 'cli',
             clientId: 'openai',
             defaultModel: 'gpt-6.1-sol',
             roster: { available: true },

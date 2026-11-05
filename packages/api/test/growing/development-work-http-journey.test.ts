@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import Fastify from 'fastify';
 import '../helpers/setup-cat-registry.js';
@@ -16,11 +16,11 @@ import {
   handleDevelopmentWork,
   handleResolveDevelopmentWork,
 } from '../../../mcp-server/src/tools/development-work-tools.js';
-import { InvocationRegistry } from '../../src/domains/cats/services/agents/invocation/InvocationRegistry.js';
 import {
   deriveGrowingSourceMessageRevision,
   MessageStore,
-} from '../../src/domains/cats/services/stores/ports/MessageStore.js';
+} from '../../dist/domains/cats/services/stores/ports/MessageStore.js';
+import { InvocationRegistry } from '../../src/domains/cats/services/agents/invocation/InvocationRegistry.js';
 import { InMemoryProposalStore } from '../../src/domains/cats/services/stores/ports/ProposalStore.js';
 import { TaskStore } from '../../src/domains/cats/services/stores/ports/TaskStore.js';
 import { ThreadStore } from '../../src/domains/cats/services/stores/ports/ThreadStore.js';
@@ -62,7 +62,26 @@ test('untimed development crosses MCP, HTTP, original Task, publication, return 
     tasks = new TaskStore(),
     threads = new ThreadStore();
   const proposals = new InMemoryProposalStore();
-  const root = fileURLToPath(new URL('../../../..', import.meta.url));
+  // Real committed scope, independent of objects available in the developer's checkout.
+  const root = join(dir, 'project');
+  await mkdir(join(root, 'docs/features'), { recursive: true });
+  await writeFile(join(root, 'docs/features/F310-isolated-journey.md'), '# Isolated fixture\n## Phase B\n');
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
+  git('init', '--quiet');
+  git('add', 'docs/features/F310-isolated-journey.md');
+  git(
+    '-c',
+    'user.name=Fixture',
+    '-c',
+    'user.email=fixture@example.invalid',
+    '-c',
+    'commit.gpgsign=false',
+    'commit',
+    '--quiet',
+    '-m',
+    'Declare isolated accepted scope',
+  );
+  const acceptedRevision = git('rev-parse', 'HEAD');
   const thread = threads.create('fixture-human', 'Isolated development contract', root);
   const useInvocation = async (threadId = thread.id) => {
     const auth = await registry.create('fixture-human', 'codex-sol', threadId);
@@ -71,7 +90,10 @@ test('untimed development crosses MCP, HTTP, original Task, publication, return 
   };
   const ownerRead = new EntrustedWorkOwnerReadService({
     tasks,
-    producerCatalog: { listCurrentReceipts: async () => [] },
+    producerCatalog: {
+      listCurrentReceipts: async () => [],
+      readCurrentReceipts: async () => ({ receipts: [], coverage: { state: 'complete' as const } }),
+    },
     artifactReader: new F232PreparedArtifactReader({ messages }),
   });
   registerCallbackAuthHook(app, registry);
@@ -149,7 +171,7 @@ test('untimed development crosses MCP, HTTP, original Task, publication, return 
   const human = (content: string) =>
     messages.append({
       userId: 'fixture-human',
-      catId: null,
+      from: { kind: 'user', userId: 'fixture-human' },
       threadId: thread.id,
       content,
       mentions: [],
@@ -165,7 +187,7 @@ test('untimed development crosses MCP, HTTP, original Task, publication, return 
   const scope = {
     featureRef: 'feature:F310',
     phaseKey: 'B',
-    acceptedRevision: '09df55f01b5a9f0c89962baff68a39e0df050a86',
+    acceptedRevision,
   };
   const initial = {
     scope,
@@ -173,6 +195,7 @@ test('untimed development crosses MCP, HTTP, original Task, publication, return 
     sourceMessageRevision: deriveGrowingSourceMessageRevision(source),
   };
   const resolved = await decode(handleResolveDevelopmentWork(initial));
+  assert.equal(resolved.result, 'resolved', JSON.stringify(resolved));
   assert.equal(resolved.scope.workUnitRef, 'feature-phase:F310:B');
   const admitted = await decode(
     handleDevelopmentWork({
@@ -200,7 +223,7 @@ test('untimed development crosses MCP, HTTP, original Task, publication, return 
   await writeFile(artifactPath, body);
   messages.append({
     userId: 'fixture-human',
-    catId: 'codex-sol',
+    from: { kind: 'agent', catId: 'codex-sol' },
     threadId: thread.id,
     content: 'Prepared isolated result',
     mentions: [],
@@ -289,7 +312,7 @@ test('untimed development crosses MCP, HTTP, original Task, publication, return 
   assert.equal(denied.isError, true);
   const report = messages.append({
     userId: 'fixture-human',
-    catId: 'codex-sol',
+    from: { kind: 'agent', catId: 'codex-sol' },
     threadId: child.id,
     content: 'Final isolated result, verified through HTTP',
     mentions: [],

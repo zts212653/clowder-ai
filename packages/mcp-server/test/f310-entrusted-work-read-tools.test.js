@@ -11,6 +11,7 @@ describe('F310 entrusted-work owner-read MCP projection', () => {
     const tool = CANONICAL_TOOL_REGISTRY.find((candidate) => candidate.name === 'cat_cafe_read_entrusted_work');
     assert.ok(tool);
     assert.equal(tool.operation.action, 'read');
+    assert.match(tool.description, /partial attention coverage/i);
     assert.equal(Object.hasOwn(readEntrustedWorkInputSchema, 'producerSubjects'), false);
 
     const parsed = z.object(readEntrustedWorkInputSchema).safeParse({

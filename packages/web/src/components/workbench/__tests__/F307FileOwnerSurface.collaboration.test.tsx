@@ -26,14 +26,23 @@ vi.mock('@/components/workspace/WorkspaceFileViewer', () => ({
   WorkspaceFileViewer: ({
     collaborationAvailable,
     onOpenCollaboration,
+    collaborationLabel,
+    onBack,
   }: {
     collaborationAvailable?: boolean;
+    collaborationLabel?: string;
+    onBack?: () => void;
     onOpenCollaboration?: () => void;
   }) => (
     <div data-testid="workspace-file-viewer">
+      {onBack && (
+        <button type="button" onClick={onBack}>
+          返回原来源
+        </button>
+      )}
       {collaborationAvailable ? (
         <button type="button" onClick={onOpenCollaboration}>
-          协作批注
+          {collaborationLabel ?? '协作批注'}
         </button>
       ) : null}
     </div>
@@ -154,6 +163,34 @@ describe('F307 File owner collaboration entry', () => {
     expect(container.querySelector('[data-testid="workspace-file-viewer"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="workspace-content-review"]')).toBeNull();
     expect([...container.querySelectorAll('button')].some((button) => button.textContent === '协作批注')).toBe(true);
+  });
+
+  it.each([
+    'file-tree',
+    'chat-file-link',
+  ] as const)('DOCX opened from %s reads first and only explicitly enters its original Office owner', async (kind) => {
+    writeShellPresentation('v2');
+    await act(async () =>
+      root.render(
+        <F307FileOwnerSurface
+          surface={createFileSurface({
+            worktreeId: 'worktree-a',
+            path: 'docs/report.docx',
+            navigationOrigin:
+              kind === 'file-tree'
+                ? { kind: 'file-tree', worktreeId: 'worktree-a' }
+                : { kind: 'chat-file-link', threadId: 'thread-1', messageId: 'message-1' },
+          })}
+          onRequestDetach={vi.fn()}
+        />,
+      ),
+    );
+    expect(container.querySelector('[data-testid="workspace-file-viewer"]')).not.toBeNull();
+    expect(mocks.apiFetch.mock.calls.some(([url]) => url === '/api/workspace/content-editor')).toBe(false);
+    const edit = [...container.querySelectorAll('button')].find((button) => button.textContent === '协作编辑');
+    expect(edit).toBeDefined();
+    await act(async () => edit?.click());
+    expect(mocks.apiFetch.mock.calls.some(([url]) => url === '/api/workspace/content-editor')).toBe(true);
   });
 
   it.each([
@@ -297,7 +334,7 @@ describe('F307 File owner collaboration entry', () => {
       ),
     );
     expect(container.querySelector('h2')?.textContent).toBe('notes.md');
-    const back = [...container.querySelectorAll('button')].find((button) => button.textContent === '返回来源');
+    const back = [...container.querySelectorAll('button')].find((button) => button.textContent === '‹ 工具搜索');
     expect(back).toBeTruthy();
     await act(async () => back!.click());
     expect(onReturn).toHaveBeenCalledWith(origin);
@@ -325,7 +362,21 @@ describe('F307 File owner collaboration entry', () => {
     'plugin_disabled',
     'plugin_stopped',
   ])('DOCX retains its source return and common landing when its provider is %s', async (code) => {
-    mocks.apiFetch.mockImplementation(async () => new Response(JSON.stringify({ error: { code } }), { status: 409 }));
+    mocks.apiFetch.mockImplementation(async (url: string) =>
+      url === '/api/workspace/content-editor'
+        ? new Response(JSON.stringify({ error: { code } }), { status: 409 })
+        : new Response(
+            JSON.stringify({
+              path: 'docs/说明书.docx',
+              content: '',
+              sha256: 'office-bytes',
+              size: 25,
+              mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+              binary: true,
+              truncated: false,
+            }),
+          ),
+    );
     const origin = { kind: 'workspace-home-search' as const, query: '说明书' };
     const onReturn = vi.fn();
     await act(async () =>
@@ -337,13 +388,19 @@ describe('F307 File owner collaboration entry', () => {
         />,
       ),
     );
-    expect(container.querySelector('h2')?.textContent).toBe('说明书.docx');
-    const back = [...container.querySelectorAll('button')].find((button) => button.textContent === '返回来源');
-    expect(back).toBeTruthy();
-    await act(async () => back!.click());
-    expect(onReturn).toHaveBeenCalledWith(origin);
+    expect(container.querySelector('[data-testid="workspace-file-viewer"]')).not.toBeNull();
+    const edit = [...container.querySelectorAll('button')].find((button) => button.textContent === '协作编辑');
+    await act(async () => edit?.click());
     expect(container.querySelector('iframe')).toBeNull();
     expect(container.querySelector('a')?.getAttribute('href')).toBe('/settings?s=plugins');
-    expect(mocks.apiFetch.mock.calls.every(([url]) => url === '/api/workspace/content-editor')).toBe(true);
+    expect(mocks.apiFetch.mock.calls.some(([url]) => url === '/api/workspace/content-editor')).toBe(true);
+    const back = [...container.querySelectorAll('button')].find((button) => button.textContent === '‹ 文档');
+    expect(back).toBeDefined();
+    await act(async () => back?.click());
+    expect(container.querySelector('[data-testid="workspace-file-viewer"]')).not.toBeNull();
+    await act(async () =>
+      [...container.querySelectorAll('button')].find((button) => button.textContent === '返回原来源')?.click(),
+    );
+    expect(onReturn).toHaveBeenCalledWith(origin);
   });
 });

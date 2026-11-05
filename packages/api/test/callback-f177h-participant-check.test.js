@@ -357,7 +357,7 @@ describe('F177-H: Cross-post participant check warning', () => {
         clientMessageId: 'typed-local-review-agent-key',
         localReviewVerdict: 'approved',
         reviewedHeadSha: 'a'.repeat(40),
-        reviewSubjectRef: 'pr:zts212653/cat-cafe#4268',
+        reviewSubjectRef: 'pr:zts212653/clowder-ai#4268',
         acceptedSourceRef: 'docs/features/F314-development-episode-alignment-experiment.md',
         acceptedRevision: 'b'.repeat(40),
       },
@@ -370,7 +370,7 @@ describe('F177-H: Cross-post participant check warning', () => {
       verdict: 'approved',
       clientMessageId: 'typed-local-review-agent-key',
       reviewedHeadSha: 'a'.repeat(40),
-      reviewSubjectRef: 'pr:zts212653/cat-cafe#4268',
+      reviewSubjectRef: 'pr:zts212653/clowder-ai#4268',
       acceptedSourceRef: 'docs/features/F314-development-episode-alignment-experiment.md',
       acceptedRevision: 'b'.repeat(40),
     });

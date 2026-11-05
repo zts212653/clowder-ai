@@ -40,6 +40,7 @@ export function createDeliverPrivateFn(
       ...(opts.priority ? { priority: opts.priority } : {}),
       ...(opts.sourceCategory ? { sourceCategory: opts.sourceCategory } : {}),
       ownerAuthProvenance: normalizeOwnerAuthProvenance(opts.ownerAuthProvenance),
+      ...(opts.toolExecutionPolicy ? { toolExecutionPolicy: opts.toolExecutionPolicy } : {}),
     });
     if (!admitted.admitted) throw new Error('scheduler private Queue admission did not happen');
   };
@@ -104,6 +105,7 @@ export function createDeliverFn(deps: DeliveryDeps): (opts: DeliverOpts) => Prom
           ...(opts.priority ? { priority: opts.priority } : {}),
           ...(opts.sourceCategory ? { sourceCategory: opts.sourceCategory } : {}),
           ownerAuthProvenance: normalizeOwnerAuthProvenance(opts.ownerAuthProvenance),
+          ...(opts.toolExecutionPolicy ? { toolExecutionPolicy: opts.toolExecutionPolicy } : {}),
         });
         if (!admission.admitted) throw new Error('scheduler private Queue admission did not happen');
         const stored = admission.notice;
@@ -127,6 +129,7 @@ export function createDeliverFn(deps: DeliveryDeps): (opts: DeliverOpts) => Prom
         // Never inherit the producer-default: an ordinary scheduled wake carries an authenticated
         // owner but NOT a private managed-hold continuation proof. Only hold-ball may project strict.
         ownerAuthProvenance: normalizeOwnerAuthProvenance(opts.ownerAuthProvenance),
+        ...(opts.toolExecutionPolicy ? { toolExecutionPolicy: opts.toolExecutionPolicy } : {}),
       });
       if (admitted.state === 'conflict' || admitted.state === 'unavailable') {
         throw new Error(`scheduler Queue admission did not happen: ${admitted.state}`);

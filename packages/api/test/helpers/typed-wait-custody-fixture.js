@@ -27,8 +27,8 @@ export async function createTypedWaitCustodyFixture(options = {}) {
     },
   });
   const task = await taskStore.create({
-    kind: 'pr_tracking',
-    subjectKey: 'pr:owner/repo#4513',
+    kind: 'work',
+
     threadId: 'thread-wait',
     title: 'CI',
     userId: 'user-1',
@@ -38,16 +38,16 @@ export async function createTypedWaitCustodyFixture(options = {}) {
   const active = {
     v: 1,
     generation: 1,
-    subjectRef: task.subjectKey,
+    subjectRef: 'deployment:abc123def456:runtime',
     ownerFence: { kind: 'containing_task', generation: 1 },
-    baseline: { capturedAt: Date.now(), headSha: 'head-1' },
+    baseline: { capturedAt: Date.now(), bootSequence: 1, bootId: 'boot-1' },
     continuation: {
-      when: [{ kind: 'pr_ci_terminal' }],
+      when: [{ kind: 'new_ready_boot', services: ['api'] }],
       // biome-ignore lint/suspicious/noThenProperty: F280 frozen continuation field.
-      then: 'Read CI.',
+      then: 'Verify the new runtime.',
     },
     createdAt: Date.now(),
-    expiresAt: Date.now() + 60000,
+    autoRenew: false,
   };
   const receipt = createTypedWaitRegistration({
     task,
@@ -55,9 +55,10 @@ export async function createTypedWaitCustodyFixture(options = {}) {
     invocationId: 'child-1',
     source: { kind: 'primary', sourceMessageId: message.id, holdTaskId: 'hold-1' },
   });
-  await taskStore.replaceAutomationStateIfGeneration(task.id, {
+  await taskStore.replaceDeploymentWaitIfGeneration(task.id, {
     expectedGeneration: null,
-    automationState: { await: active },
+    expectedDeploymentWait: undefined,
+    deploymentWait: { await: active },
     waitRegistration: receipt,
   });
   return { store, taskStore, task, active, receipt, message };

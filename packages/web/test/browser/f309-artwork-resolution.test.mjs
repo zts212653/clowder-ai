@@ -4,9 +4,9 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
 import { startReviewHost } from './fixtures/f309-artifact-review-host.mjs';
-import { openAnnotationSave } from './fixtures/f309-artwork-controls.mjs';
+import { seedRetainedImageAnnotation, selectReviewMode } from './fixtures/f309-artwork-controls.mjs';
 
 const sharp = createRequire(new URL('../../../api/package.json', import.meta.url))('sharp');
 const evidenceRoot = process.env.F309_BROWSER_EVIDENCE_DIR ? path.resolve(process.env.F309_BROWSER_EVIDENCE_DIR) : null;
@@ -57,7 +57,8 @@ for (const { width, height } of [
       });
       await page.goto(host.origin);
       await page.getByTestId('open-artifact-review').click();
-      await page.getByRole('button', { name: '放大标注', exact: true }).click();
+      await page.getByTestId('artifact-review-surface').getByTestId('f307-artifact-enter-full-window').click();
+      await selectReviewMode(page, 'markup');
       await page.getByRole('button', { name: '文字', exact: true }).click();
       const at = await mediaPoint(page, 0.22, 0.32);
       await page.mouse.click(at.x, at.y);
@@ -114,26 +115,43 @@ for (const { width, height } of [
       assert.equal(drawing.text, content);
       if (width >= 2304) assert.ok(drawing.fontSize > 48, `4k text needs media-space sizing: ${drawing.fontSize}`);
 
+      await page.getByLabel('作品缩放和平移', { exact: true }).click();
       await page.getByRole('button', { name: '放大作品', exact: true }).click();
       await page.getByRole('button', { name: '放大作品', exact: true }).click();
+      await page.getByLabel('作品缩放和平移', { exact: true }).click();
       const zoomBeforeWheel = await page.getByLabel('当前缩放').textContent();
-      const wheelStage = await page.getByTestId('review-media-stage').boundingBox();
-      await page.mouse.move(wheelStage.x + wheelStage.width / 2, wheelStage.y + wheelStage.height / 2);
-      await page.mouse.wheel(0, -180);
+      const wheelCanvas = await page.getByRole('region', { name: '作品画面' }).boundingBox();
+      await page.mouse.move(wheelCanvas.x + wheelCanvas.width / 2, wheelCanvas.y + wheelCanvas.height / 2);
+      // Image wheel scrolls the picture; Ctrl+wheel is its explicit zoom gesture.
+      await page.keyboard.down('Control');
+      try {
+        await page.mouse.wheel(0, -180);
+      } finally {
+        await page.keyboard.up('Control');
+      }
       await page.waitForFunction(
-        (before) => document.querySelector('output[aria-label="当前缩放"]')?.textContent !== before,
+        (before) => document.querySelector('[aria-label="当前缩放"]')?.textContent !== before,
         zoomBeforeWheel,
         { timeout: 3000 },
       );
       assert.notEqual(await page.getByLabel('当前缩放').textContent(), zoomBeforeWheel);
+      await page.getByLabel('作品缩放和平移', { exact: true }).click();
       await page.getByRole('button', { name: '平移', exact: true }).click();
+      await page.getByLabel('作品缩放和平移', { exact: true }).click();
       const before = await page.getByTestId('review-media-stage').boundingBox();
-      await page.mouse.move(before.x + before.width / 2, before.y + before.height / 2);
+      const panAt = { x: wheelCanvas.x + wheelCanvas.width / 2, y: wheelCanvas.y + wheelCanvas.height / 2 };
+      await page.mouse.move(panAt.x, panAt.y);
       await page.mouse.down();
-      await page.mouse.move(before.x + before.width / 2 + 24, before.y + before.height / 2 + 18);
+      await page.mouse.move(panAt.x - 24, panAt.y - 18);
       await page.mouse.up();
+      await page.waitForFunction((previous) => {
+        const stage = document.querySelector('[data-testid="review-media-stage"]').getBoundingClientRect();
+        return stage.x < previous.x - 1 || stage.y < previous.y - 1;
+      }, before);
+      await page.getByLabel('作品缩放和平移', { exact: true }).click();
       await page.getByRole('button', { name: '平移', exact: true }).click();
-      await page.getByRole('button', { name: '评论', exact: true }).click();
+      await page.getByLabel('作品缩放和平移', { exact: true }).click();
+      await selectReviewMode(page, 'comment');
       const picture = await page.getByRole('region', { name: '作品画面' }).boundingBox();
       const point = { x: picture.x + picture.width * 0.55, y: picture.y + picture.height * 0.32 };
       const expected = await page
@@ -145,8 +163,8 @@ for (const { width, height } of [
         );
       assert.ok(expected.x > 0 && expected.x < width && expected.y > 0 && expected.y < height);
       await page.mouse.click(point.x, point.y);
-      await page.getByRole('textbox', { name: '评论内容' }).fill(`缩放后锚点 ${width}×${height}`);
-      await (await openAnnotationSave(page)).click();
+      await page.getByTestId('review-pending-chat-mark').waitFor();
+      await seedRetainedImageAnnotation(page, host, reviewId, `缩放后锚点 ${width}×${height}`);
       await page.getByTestId('review-canvas-annotation-mark').waitFor();
       const latest = await host.reviews.read(reviewId, host.human);
       const anchor = latest.review.rounds[0].annotations.at(-1).anchor;

@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import {
   CAT_CAFE_SPLIT_ENTRYPOINTS,
@@ -11,15 +11,28 @@ import {
 } from '../../../../../config/capabilities/capability-orchestrator.js';
 import {
   assertMappedCapabilitySource,
-  isSameCapabilityRoot,
   resolveInvokeCapabilityRoot,
 } from '../../../../../config/capabilities/invoke-capability-root.js';
+import {
+  observeInvocationMcpSource,
+  readInvocationMcpConfig,
+  readInvocationMcpFile,
+} from '../../../../../config/capabilities/invoke-mcp-config.js';
+import {
+  bindManagedMcpStdioConfig,
+  materializeNativeMcpHttp,
+  resolveManagedMcpEntrypoint,
+} from '../../../../../config/capabilities/managed-mcp-config.js';
 import { isManagedCatCafeSplit } from '../../../../../config/capabilities/mcp-constants.js';
 import {
   resolveMcpArgs,
   resolveMcpCommand,
   resolveMcpWorkingDir,
 } from '../../../../../config/capabilities/mcp-launch-paths.js';
+import {
+  bindPluginMcpEnvironment,
+  pluginMcpEnvironment,
+} from '../../../../../config/capabilities/plugin-mcp-environment.js';
 import { isRetiredGithubMcpConfigEntry } from '../../../../../config/capabilities/retired-github-mcp.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 
@@ -34,64 +47,78 @@ function resolveMcpWorkspaceRoot(workingDirectory?: string): string {
   return process.cwd();
 }
 
-export async function resolveProviderMcpConfigResolution(input: {
+export interface ProviderMcpConfigPlan {
+  readonly servers: Record<string, Record<string, unknown>>;
+  readonly source: 'capabilities.json' | 'fallback';
+  readonly pluginMcpServerNames: readonly string[];
+  readonly catCafeMcpServerNames: readonly string[];
+}
+
+function catCafeEnvironment(
+  input: { callbackEnv: Record<string, string>; credentialFile?: string },
+  previous: Record<string, string>,
+) {
+  const env = { ...previous };
+  if (input.credentialFile) {
+    delete env.CAT_CAFE_INVOCATION_ID;
+    delete env.CAT_CAFE_CALLBACK_TOKEN;
+  }
+  for (const key of MCP_CALLBACK_ENV_KEYS) {
+    const value = input.callbackEnv[key];
+    if (value && !(input.credentialFile && (key === 'CAT_CAFE_INVOCATION_ID' || key === 'CAT_CAFE_CALLBACK_TOKEN')))
+      env[key] = value;
+  }
+  if (input.credentialFile) env.CAT_CAFE_CREDENTIAL_FILE = input.credentialFile;
+  return env;
+}
+
+export async function captureProviderMcpConfig(input: {
   callbackEnv: Record<string, string>;
   workingDirectory?: string;
   mcpServerPath: string;
   credentialFile?: string;
   provider?: string;
-}): Promise<{ servers: Record<string, Record<string, unknown>>; source: 'capabilities.json' | 'fallback' }> {
+  /** Native clients may inherit a Git-root MCP file while executing in a child directory. */
+  projectMcpRoot?: string;
+}): Promise<ProviderMcpConfigPlan> {
   const distDir = dirname(input.mcpServerPath);
   const binaryProjectRoot = resolve(distDir, '../../..');
   const capabilitiesProjectRoot = await resolveInvokeCapabilityRoot(binaryProjectRoot);
   const catId = input.callbackEnv.CAT_CAFE_CAT_ID;
 
-  const catCafeEnvEntries: Record<string, string> = {
+  const catCafeEnvEntries = catCafeEnvironment(input, {
     ALLOWED_WORKSPACE_DIRS: resolveMcpWorkspaceRoot(input.workingDirectory),
-  };
-  for (const key of MCP_CALLBACK_ENV_KEYS) {
-    const val = input.callbackEnv![key];
-    if (val && !(input.credentialFile && (key === 'CAT_CAFE_INVOCATION_ID' || key === 'CAT_CAFE_CALLBACK_TOKEN')))
-      catCafeEnvEntries[key] = val;
-  }
-
-  if (input.credentialFile) catCafeEnvEntries.CAT_CAFE_CREDENTIAL_FILE = input.credentialFile;
+  });
 
   const mcpServers: Record<string, Record<string, unknown>> = {};
   const managedMcpServerNames = new Set<string>();
+  const pluginMcpServerNames: string[] = [];
+  const catCafeMcpServerNames: string[] = [];
   let resolved = false;
   try {
     // F249: Project config is the single truth source for MCP resolution.
     // Try project first; fall back to global for uninitialized projects.
-    let capConfig = null;
-    let configSourceRoot = capabilitiesProjectRoot;
-    let accessScope: 'global' | 'project' = 'global';
-    if (input.workingDirectory && !isSameCapabilityRoot(input.workingDirectory, capabilitiesProjectRoot)) {
-      try {
-        const projectRaw = readFileSync(join(input.workingDirectory, '.cat-cafe', 'capabilities.json'), 'utf-8');
-        const parsed = JSON.parse(projectRaw);
-        if (parsed?.version === 1 || parsed?.version === 2) {
-          capConfig = parsed;
-          configSourceRoot = input.workingDirectory;
-          accessScope = 'project';
-        }
-      } catch {
-        /* No project config — fall back to global */
-      }
-    }
-    if (!capConfig) {
-      const raw = readFileSync(join(capabilitiesProjectRoot, '.cat-cafe', 'capabilities.json'), 'utf-8');
-      const parsed = JSON.parse(raw);
-      if (parsed?.version === 1 || parsed?.version === 2) capConfig = parsed;
-    }
+    const {
+      config: capConfig,
+      configSourceRoot,
+      accessScope,
+    } = readInvocationMcpConfig(capabilitiesProjectRoot, input.workingDirectory);
     if (capConfig && catId) {
+      if (input.provider === 'kimi') {
+        // Retired or unusable descriptors may be absent from resolveServersForCat.
+        // Their host-owned names must still exclude stale project definitions.
+        for (const cap of capConfig.capabilities) {
+          if (cap.type === 'mcp') managedMcpServerNames.add(cap.id.replace(/:/g, '__'));
+        }
+      }
       for (const s of resolveServersForCat(capConfig, catId, { accessScope })) {
         managedMcpServerNames.add(s.name);
         if (!s.enabled) continue;
         if (isManagedCatCafeSplit(s)) {
           const ep = CAT_CAFE_SPLIT_ENTRYPOINTS.get(s.name)!;
-          const epPath = join(distDir, ep);
+          const epPath = resolveManagedMcpEntrypoint(ep);
           if (existsSync(epPath)) {
+            catCafeMcpServerNames.push(s.name);
             mcpServers[s.name] = {
               command: resolveCatCafeNodeCommand(),
               args: [epPath],
@@ -111,7 +138,9 @@ export async function resolveProviderMcpConfigResolution(input: {
             command: resolveMcpCommand(s.command, workingDir, configSourceRoot),
             args: resolveMcpArgs(s.args, workingDir, configSourceRoot),
           };
-          if (s.env && Object.keys(s.env).length > 0) entry.env = s.env;
+          const environment = pluginMcpEnvironment(s, input.callbackEnv);
+          if (environment && Object.keys(environment).length > 0) entry.env = environment;
+          if (s.source === 'plugin' && environment?.CLOWDER_PLUGIN_ACTION_TOKEN) pluginMcpServerNames.push(s.name);
           if (workingDir) entry.cwd = workingDir;
           mcpServers[s.name] = entry;
         }
@@ -124,8 +153,9 @@ export async function resolveProviderMcpConfigResolution(input: {
   assertMappedCapabilitySource(resolved, binaryProjectRoot, capabilitiesProjectRoot);
   if (!resolved) {
     for (const [name, ep] of CAT_CAFE_SPLIT_ENTRYPOINTS) {
-      const epPath = join(distDir, ep);
+      const epPath = resolveManagedMcpEntrypoint(ep);
       if (existsSync(epPath)) {
+        catCafeMcpServerNames.push(name);
         mcpServers[name] = {
           command: resolveCatCafeNodeCommand(),
           args: [epPath],
@@ -140,23 +170,31 @@ export async function resolveProviderMcpConfigResolution(input: {
   // --strict-mcp-config still applies: only the merged set is active.
   if (input.workingDirectory) {
     try {
-      const userMcpPath = join(input.workingDirectory, '.mcp.json');
-      if (existsSync(userMcpPath)) {
-        const userMcp = JSON.parse(readFileSync(userMcpPath, 'utf-8')) as {
-          mcpServers?: Record<string, unknown>;
-        };
-        if (userMcp.mcpServers && typeof userMcp.mcpServers === 'object') {
-          const excludedMcpServerNames = expandManagedMcpNamesForUserMerge([
-            ...managedMcpServerNames,
-            ...Object.keys(mcpServers),
-          ]);
-          for (const [name, entry] of Object.entries(userMcp.mcpServers)) {
-            if (isRetiredGithubMcpConfigEntry(name, entry)) continue;
-            if (!excludedMcpServerNames.has(name) && !(name in mcpServers) && entry && typeof entry === 'object') {
-              mcpServers[name] = entry as Record<string, unknown>;
+      const excludedMcpServerNames = expandManagedMcpNamesForUserMerge([
+        ...managedMcpServerNames,
+        ...Object.keys(mcpServers),
+        ...(input.provider === 'kimi' ? CAT_CAFE_SPLIT_ENTRYPOINTS.keys() : []),
+      ]);
+      const roots = new Set([input.projectMcpRoot ?? input.workingDirectory, input.workingDirectory]);
+      for (const userMcpRoot of roots) {
+        const userMcpPath = join(userMcpRoot, '.mcp.json');
+        if (existsSync(userMcpPath)) {
+          const userMcp = JSON.parse(readInvocationMcpFile(userMcpPath)) as {
+            mcpServers?: Record<string, unknown>;
+          };
+          if (userMcp.mcpServers && typeof userMcp.mcpServers === 'object') {
+            for (const [name, entry] of Object.entries(userMcp.mcpServers)) {
+              if (isRetiredGithubMcpConfigEntry(name, entry)) continue;
+              if (!excludedMcpServerNames.has(name) && entry && typeof entry === 'object') {
+                const server = { ...(entry as Record<string, unknown>) };
+                if (input.projectMcpRoot && typeof server.command === 'string') {
+                  server.cwd = resolve(userMcpRoot, typeof server.cwd === 'string' ? server.cwd : '.');
+                }
+                mcpServers[name] = server;
+              }
             }
           }
-        }
+        } else observeInvocationMcpSource(userMcpPath, null);
       }
     } catch {
       // best-effort: unreadable user config → capabilities-only
@@ -171,7 +209,48 @@ export async function resolveProviderMcpConfigResolution(input: {
     }),
     '#712: MCP invoke-time injection',
   );
-  return { servers: mcpServers, source: resolved ? 'capabilities.json' : 'fallback' };
+  return structuredClone({
+    servers: mcpServers,
+    source: resolved ? 'capabilities.json' : 'fallback',
+    pluginMcpServerNames,
+    catCafeMcpServerNames,
+  });
+}
+
+export async function resolveProviderMcpConfigResolution(
+  input: Parameters<typeof captureProviderMcpConfig>[0] & { frozenNativeMcpConfig?: ProviderMcpConfigPlan },
+): Promise<{ servers: Record<string, Record<string, unknown>>; source: ProviderMcpConfigPlan['source'] }> {
+  const plan = input.frozenNativeMcpConfig ?? (await captureProviderMcpConfig(input));
+  return materializeProviderMcpConfig(plan, input);
+}
+
+export function materializeProviderMcpConfig(
+  plan: ProviderMcpConfigPlan,
+  input: { callbackEnv: Record<string, string>; credentialFile?: string },
+) {
+  const callback = {
+    ...input.callbackEnv,
+    ...(input.credentialFile ? { CAT_CAFE_CREDENTIAL_FILE: input.credentialFile } : {}),
+  };
+  return {
+    servers: materializeNativeMcpHttp(
+      Object.fromEntries(
+        Object.entries(plan.servers).map(([name, server]) => [
+          name,
+          bindManagedMcpStdioConfig(
+            plan.pluginMcpServerNames.includes(name)
+              ? { ...server, env: bindPluginMcpEnvironment(server.env as Record<string, string>, callback) }
+              : plan.catCafeMcpServerNames.includes(name)
+                ? { ...server, env: catCafeEnvironment(input, server.env as Record<string, string>) }
+                : server,
+            callback,
+          ),
+        ]),
+      ),
+      callback,
+    ),
+    source: plan.source,
+  };
 }
 
 export async function resolveProviderMcpConfig(

@@ -1,0 +1,370 @@
+import { cp, lstat, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
+import process from 'node:process';
+import { isDeepStrictEqual } from 'node:util';
+import type { CapabilityEntry } from '@cat-cafe/shared';
+import type { ConfigurationField, McpContribution } from '@clowder-ai/plugin-contract';
+import { installMcpCapability, removeMcpCapability } from '../../../config/capabilities/capability-mcp-service.js';
+import type { PluginRuntimeAdmission } from '../carrier/runtime-carrier.js';
+import {
+  effectiveConfiguration,
+  resolveVariant,
+  variantFieldRequiredness,
+} from '../configuration-variant-consumption.js';
+import { packageDirectoryName } from '../external-runtime/filesystem-package-locator.js';
+import { ExternalPluginRuntimeError } from '../external-runtime/types.js';
+import { effectivePluginConfigurationValue } from '../manager/plugin-configuration-values.js';
+import { pluginResourceRoot, resolvePackageFile } from './declared-resource-paths.js';
+import type { DeclaredStaticResourceHost } from './declared-static-resources.js';
+import type { DeclaredMcpLaunch } from './native-mcp-launches.js';
+
+const MCP_MARKER = '.clowder-mcp-resource.json';
+const MCP_MATERIALIZATION_VERSION = 3;
+
+export async function activateDeclaredMcp(
+  admission: PluginRuntimeAdmission,
+  host: DeclaredStaticResourceHost | undefined,
+): Promise<readonly DeclaredMcpLaunch[]> {
+  const contributions = (admission.packageRecord.manifest.contributions ?? []).filter(
+    (contribution): contribution is McpContribution => contribution.type === 'mcp',
+  );
+  if (contributions.length === 0) return Object.freeze([]);
+  if (!host) {
+    throw new ExternalPluginRuntimeError('UNSUPPORTED_TRANSPORT', 'Host static-resource activation is unavailable');
+  }
+  if (!host.mcpConfigIO) {
+    throw new ExternalPluginRuntimeError('UNSUPPORTED_TRANSPORT', 'Host MCP capability activation is unavailable');
+  }
+  if (contributions.some((contribution) => contribution.runtime.transport !== 'stdio')) {
+    throw new ExternalPluginRuntimeError('UNSUPPORTED_TRANSPORT', 'Only stdio MCP contributions are supported');
+  }
+
+  const packageRoot = await stablePackageRoot(admission, host, contributions);
+  const installed: string[] = [];
+  const launches: DeclaredMcpLaunch[] = [];
+  try {
+    for (const contribution of contributions) {
+      const entry = await mcpCapability(admission, host, packageRoot, contribution);
+      const server = entry.mcpServer;
+      const { mcpServer: _launch, mcpServerOverride: _override, ...installationPolicy } = entry;
+      // Copy before passing the entry to mutable configuration I/O. This is the
+      // exact verified activation descriptor, not a later capabilities lookup.
+      launches.push(
+        Object.freeze({
+          contributionId: contribution.id,
+          installationPolicy: Object.freeze(installationPolicy),
+          server: Object.freeze({
+            name: entry.id.replaceAll(':', '__'),
+            command: server.command,
+            args: Object.freeze([...(server.args ?? [])]),
+            env: Object.freeze({ ...server.env }),
+            workingDirectory: packageRoot,
+            transport: 'stdio' as const,
+          }),
+        }),
+      );
+      if (host.persistCapabilities === false) continue;
+      // Persist only the standard environment reference, never its process-lifetime value.
+      const { CLOWDER_PLUGIN_ACTION_TOKEN: _token, ...durableEnv } = server.env ?? {};
+      const durableEntry = {
+        ...entry,
+        mcpServer: { ...server, env: { ...durableEnv, ...host.nativeActionEnvironmentReferences?.(contribution.id) } },
+      };
+      await installMcpCapability(host.projectRoot, durableEntry, host.mcpConfigIO, {
+        userId: `plugin:${admission.packageRecord.pluginId}`,
+      });
+      installed.push(entry.id);
+    }
+  } catch (error) {
+    await Promise.allSettled(installed.map((id) => removeMcp(admission.packageRecord.pluginId, id, host)));
+    throw error;
+  }
+  return Object.freeze(launches);
+}
+
+export async function removeDeclaredMcp(pluginId: string, host: DeclaredStaticResourceHost | undefined): Promise<void> {
+  if (!host || host.persistCapabilities === false) return;
+  if (!host.mcpConfigIO) return;
+  const config = await host.mcpConfigIO.readConfig();
+  const owned = config?.capabilities.filter(
+    (capability) => capability.type === 'mcp' && capability.pluginId === pluginId,
+  );
+  const results = await Promise.allSettled((owned ?? []).map((capability) => removeMcp(pluginId, capability.id, host)));
+  const failure = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+  if (failure) throw failure.reason;
+}
+
+async function removeMcp(pluginId: string, capabilityId: string, host: DeclaredStaticResourceHost): Promise<void> {
+  if (!host.mcpConfigIO) return;
+  await removeMcpCapability(host.projectRoot, capabilityId, host.mcpConfigIO, {
+    hard: true,
+    pluginId,
+    userId: `plugin:${pluginId}`,
+  });
+}
+
+async function stablePackageRoot(
+  admission: PluginRuntimeAdmission,
+  host: DeclaredStaticResourceHost,
+  contributions: readonly McpContribution[],
+): Promise<string> {
+  const packageName = admission.packageRecord.provenance?.packageName;
+  if (packageName !== undefined && host.mcpPackages !== undefined) {
+    const provenance = admission.packageRecord.provenance;
+    if (provenance === undefined) throw new Error('package provenance is required when packageName is present');
+    const materialized = await host.mcpPackages.resolve({
+      pluginInstanceId: admission.instance.pluginInstanceId,
+      pluginId: admission.packageRecord.pluginId,
+      packageDigest: admission.packageRecord.packageDigest,
+      packageName,
+      sourceKind: provenance.kind,
+    });
+    try {
+      if (!isDeepStrictEqual(materialized.manifest, admission.packageRecord.manifest)) {
+        throw new ExternalPluginRuntimeError(
+          'PACKAGE_AUTHORITY_MISMATCH',
+          'materialized package manifest differs from the admitted package record',
+        );
+      }
+      await materialized.verifyIntegrity();
+      return await materializeMcpPackage(host, admission, materialized.rootDir, contributions, {
+        ...(materialized.dependencyRoot === undefined ? {} : { dependencyRoot: materialized.dependencyRoot }),
+      });
+    } finally {
+      await materialized.release();
+    }
+  }
+  const located = await host.packages.resolveInstalledPackage(admission.packageRecord.packageDigest);
+  try {
+    if (!isDeepStrictEqual(located.manifest, admission.packageRecord.manifest)) {
+      throw new ExternalPluginRuntimeError(
+        'PACKAGE_AUTHORITY_MISMATCH',
+        'located package manifest differs from the admitted package record',
+      );
+    }
+    await located.verifyIntegrity();
+    return await materializeMcpPackage(host, admission, located.rootDir, contributions);
+  } finally {
+    await located.release();
+  }
+}
+
+async function mcpCapability(
+  admission: PluginRuntimeAdmission,
+  host: DeclaredStaticResourceHost,
+  packageRoot: string,
+  contribution: McpContribution,
+): Promise<CapabilityEntry & { mcpServer: NonNullable<CapabilityEntry['mcpServer']> & { command: string } }> {
+  const entrypoint = await resolvePackageFile(packageRoot, contribution.runtime.entrypoint, 'MCP entrypoint');
+  return {
+    id: `plugin:${admission.packageRecord.pluginId}:${contribution.id}`,
+    type: 'mcp',
+    enabled: true,
+    source: 'plugin',
+    pluginId: admission.packageRecord.pluginId,
+    mcpServer: {
+      command: process.execPath,
+      args: [entrypoint, ...(contribution.runtime.args ?? [])],
+      transport: 'stdio',
+      workingDir: packageRoot,
+      ...(await mcpEnvironment(admission, host, contribution)),
+    },
+  };
+}
+
+async function materializeMcpPackage(
+  host: DeclaredStaticResourceHost,
+  admission: PluginRuntimeAdmission,
+  packageRoot: string,
+  contributions: readonly McpContribution[],
+  options: { readonly dependencyRoot?: string } = {},
+): Promise<string> {
+  const pluginRoot = pluginResourceRoot(host, admission.packageRecord.pluginId);
+  const digestRoot = resolve(pluginRoot, packageDirectoryName(admission.packageRecord.packageDigest));
+  const stableRoot = resolve(digestRoot, `mcp-package-v${MCP_MATERIALIZATION_VERSION}`);
+  if (await validMcpMaterialization(stableRoot, admission, contributions)) return stableRoot;
+
+  await mkdir(digestRoot, { recursive: true, mode: 0o700 });
+  const temporary = await mkdtemp(resolve(pluginRoot, '.materialize-mcp-'));
+  try {
+    const target = resolve(temporary, 'package');
+    await cp(packageRoot, target, { recursive: true, force: false, errorOnExist: true });
+    // Shipped dependencies were already copied with the package; only a separate
+    // materializer-owned closure needs to be attached here.
+    if (
+      options.dependencyRoot !== undefined &&
+      resolve(options.dependencyRoot) !== resolve(packageRoot, 'node_modules') &&
+      (await directoryExists(options.dependencyRoot))
+    ) {
+      await cp(options.dependencyRoot, resolve(target, 'node_modules'), {
+        recursive: true,
+        force: false,
+        errorOnExist: true,
+      });
+    }
+    await writeFile(
+      resolve(target, MCP_MARKER),
+      `${JSON.stringify({
+        pluginId: admission.packageRecord.pluginId,
+        packageDigest: admission.packageRecord.packageDigest,
+        materializationVersion: MCP_MATERIALIZATION_VERSION,
+      })}\n`,
+      { encoding: 'utf8', flag: 'wx', mode: 0o600 },
+    );
+    for (const contribution of contributions) {
+      await resolvePackageFile(target, contribution.runtime.entrypoint, 'MCP entrypoint');
+    }
+    try {
+      await rename(target, stableRoot);
+    } catch (error) {
+      if (!['EEXIST', 'ENOTEMPTY'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error;
+      if (!(await validMcpMaterialization(stableRoot, admission, contributions))) throw error;
+    }
+    return stableRoot;
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+  }
+}
+
+async function validMcpMaterialization(
+  root: string,
+  admission: PluginRuntimeAdmission,
+  contributions: readonly McpContribution[],
+): Promise<boolean> {
+  try {
+    const rootStat = await lstat(root);
+    if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) return false;
+    const marker = JSON.parse(await readFile(resolve(root, MCP_MARKER), 'utf8')) as Record<string, unknown>;
+    if (!validMarker(marker, admission)) return false;
+    for (const contribution of contributions) {
+      await resolvePackageFile(root, contribution.runtime.entrypoint, 'MCP entrypoint');
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function validMarker(marker: Record<string, unknown>, admission: PluginRuntimeAdmission): boolean {
+  return (
+    marker.pluginId === admission.packageRecord.pluginId &&
+    marker.packageDigest === admission.packageRecord.packageDigest &&
+    marker.materializationVersion === MCP_MATERIALIZATION_VERSION &&
+    Object.keys(marker).length === 3
+  );
+}
+
+async function directoryExists(path: string): Promise<boolean> {
+  try {
+    const value = await lstat(path);
+    return value.isDirectory() && !value.isSymbolicLink();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
+async function mcpEnvironment(
+  admission: PluginRuntimeAdmission,
+  host: DeclaredStaticResourceHost,
+  contribution: McpContribution,
+): Promise<{ readonly env?: Readonly<Record<string, string>> }> {
+  const fields = new Map((admission.packageRecord.manifest.configuration ?? []).map((field) => [field.key, field]));
+  // Variant-declared manifests (design §3.4): resolve the branch once per
+  // contribution. Non-selected resolutions refuse the launch (fail-closed);
+  // inactive-branch bindings are silently skipped (no config read or error),
+  // and inactive-branch stores are never read.
+  const variants = admission.packageRecord.manifest.configurationVariants;
+  let variantActiveKeys: ReadonlySet<string> | undefined;
+  let variantEffectiveValues: Record<string, unknown> | undefined;
+  if (variants) {
+    const configuration = admission.packageRecord.manifest.configuration ?? [];
+    const readStored = async (field: ConfigurationField): Promise<unknown> => {
+      return field.kind === 'secret'
+        ? host.configuration.readSecret(admission.instance.pluginInstanceId, field.key)
+        : host.configuration.readConfig(admission.instance.pluginInstanceId, field.key);
+    };
+    // Phase 1: branch selection from the discriminator alone,
+    // fail-closed before any other store read.
+    const discriminatorField = fields.get(variants.discriminator);
+    let probe: Record<string, unknown> = {};
+    if (discriminatorField) {
+      const stored = await readStored(discriminatorField);
+      if (stored !== undefined) probe = { [variants.discriminator]: stored };
+    }
+    const resolution = resolveVariant(admission.packageRecord.manifest, probe);
+    if (resolution.status !== 'selected') {
+      throw new ExternalPluginRuntimeError(
+        'CONFIG_UNAVAILABLE',
+        `MCP contribution ${contribution.id} refuses to start: configuration variant is ${resolution.status}`,
+      );
+    }
+    // Phase 2: read only what the selected branch may deliver — common fields
+    // (claimed by no branch) plus the selected branch's fields.
+    const claimedByBranch = new Set(variants.branches.flatMap((branch) => branch.fields));
+    const branch = variants.branches.find((item) => item.id === resolution.branchId);
+    const activeKeys = new Set(branch?.fields ?? []);
+    const stored: Record<string, unknown> = {};
+    for (const field of configuration) {
+      if (claimedByBranch.has(field.key) && !activeKeys.has(field.key)) continue;
+      const value = await readStored(field);
+      if (value !== undefined) stored[field.key] = value;
+    }
+    variantEffectiveValues = effectiveConfiguration(admission.packageRecord.manifest, stored).effectiveValues;
+    variantActiveKeys = new Set([
+      ...configuration.filter((field) => !claimedByBranch.has(field.key)).map((field) => field.key),
+      ...activeKeys,
+    ]);
+  }
+  const envEntries = await Promise.all(
+    Object.entries(contribution.environment ?? {}).map(async ([name, binding]) => {
+      if (variantActiveKeys && !variantActiveKeys.has(binding.key)) return undefined;
+      const field = fields.get(binding.key);
+      const value = await environmentValue(admission, host, field, binding, variantEffectiveValues);
+      return value === undefined ? undefined : ([name, value] as const);
+    }),
+  );
+  const env = {
+    ...Object.fromEntries(envEntries.filter((entry): entry is readonly [string, string] => entry !== undefined)),
+    ...host.nativeActionEnvironment?.(contribution.id),
+  };
+  return Object.keys(env).length === 0 ? {} : { env };
+}
+
+async function environmentValue(
+  admission: PluginRuntimeAdmission,
+  host: DeclaredStaticResourceHost,
+  field: ConfigurationField | undefined,
+  binding: { readonly source: 'config' | 'secret'; readonly key: string },
+  /**
+   * Variant path (design §3.4): the contract's effective configuration, present
+   * only for variant-declared manifests with a selected branch. Values are the
+   * contract's product (defaults applied, inactive-branch fields absent), so
+   * the raw store is not re-read and requiredness comes from the contract.
+   */
+  effectiveValues?: Record<string, unknown>,
+): Promise<string | undefined> {
+  if (effectiveValues) {
+    const value = field ? effectivePluginConfigurationValue(field, effectiveValues[binding.key]) : undefined;
+    const required = field ? variantFieldRequiredness(field, effectiveValues) : false;
+    if ((value === undefined || value.length === 0) && required) {
+      throw new ExternalPluginRuntimeError(
+        'CONFIG_UNAVAILABLE',
+        `required ${binding.source} ${binding.key} is unavailable`,
+      );
+    }
+    return value || undefined;
+  }
+  const raw =
+    binding.source === 'secret'
+      ? await host.configuration.readSecret(admission.instance.pluginInstanceId, binding.key)
+      : await host.configuration.readConfig(admission.instance.pluginInstanceId, binding.key);
+  const value = field ? effectivePluginConfigurationValue(field, raw) : undefined;
+  if ((value === undefined || value.length === 0) && field?.required) {
+    throw new ExternalPluginRuntimeError(
+      'CONFIG_UNAVAILABLE',
+      `required ${binding.source} ${binding.key} is unavailable`,
+    );
+  }
+  return value || undefined;
+}

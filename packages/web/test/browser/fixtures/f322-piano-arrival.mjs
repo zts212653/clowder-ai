@@ -16,7 +16,7 @@ export function observePianoArrival({ id, savedKey }) {
       nodeToken: target ? tokens.get(target) : null,
       connected: target?.isConnected ?? false,
       matches: chat?.querySelectorAll(`[data-message-id="${id}"]`).length ?? 0,
-      highlighted: target?.classList.contains('ring-blue-400') ?? false,
+      highlighted: target?.dataset.messageJumpFocus === 'true',
       visible: !!box && !!view && box.bottom > view.top && box.top < view.bottom,
       top: box?.top,
       bottom: box?.bottom,

@@ -5,6 +5,7 @@ import type {
   MarketplaceSearchResult,
   MarketplaceSourceStatus,
 } from '@cat-cafe/shared';
+import { deploymentDefaults } from '@cat-cafe/shared';
 import type {
   ProviderNativeCapabilityArtifact,
   ProviderNativeCapabilitySource,
@@ -79,7 +80,7 @@ export class CodexMarketplaceAdapter implements MarketplaceAdapter {
     return {
       mode: 'manual_ui',
       manualSteps: [
-        '在 Clowder AI 现有能力与插件设置中确认安装、授权、密钥和启停状态。',
+        `在 ${deploymentDefaults.brand.displayName} 现有能力与插件设置中确认安装、授权、密钥和启停状态。`,
         'Codex provider source 只提供实时发现与状态证据，不会在浏览时修改提供商配置。',
       ],
       metadata: {

@@ -280,7 +280,7 @@ async function main(): Promise<void> {
   if (command === 'write') {
     await mkdir(dirname(baselinePath), { recursive: true });
     await writeFile(baselinePath, serialized);
-  } else if ((await readFile(baselinePath, 'utf8')) !== serialized) {
+  } else if ((await readFile(baselinePath, 'utf8')).replace(/\r\n/g, '\n') !== serialized) {
     throw new Error('Committed MCP surface baseline differs from the canonical registry; run governance:write');
   }
   process.stdout.write(`${report(protectedSnapshot, current.snapshot)}\n`);

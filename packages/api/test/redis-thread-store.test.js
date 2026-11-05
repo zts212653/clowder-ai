@@ -67,6 +67,38 @@ describe('RedisThreadStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () =
     assert.deepEqual(thread.participants, []);
   });
 
+  it('writes initial pin in the creation transaction and preserves it for a fresh reader without TTL', async () => {
+    const persistentStore = new RedisThreadStore(redis, { ttlSeconds: 0 });
+    const created = await persistentStore.create(
+      'user1',
+      'Pinned at birth',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { pinned: true },
+    );
+    assert.equal(created.pinned, true);
+    assert.equal(typeof created.pinnedAt, 'number');
+    const stored = await redis.hgetall(threadDetailKey(created.id));
+    assert.equal(stored.pinned, 'true');
+    assert.equal(Number(stored.pinnedAt), created.pinnedAt);
+    assert.equal(await redis.ttl(threadDetailKey(created.id)), -1);
+    const freshReader = new RedisThreadStore(redis, { ttlSeconds: 0 });
+    assert.equal((await freshReader.get(created.id)).pinned, true);
+    assert.equal((await freshReader.get(created.id)).pinnedAt, created.pinnedAt);
+    assert.equal((await freshReader.list('user1')).find((thread) => thread.id === created.id).pinned, true);
+    const plain = await persistentStore.create('user1', 'Default');
+    const unchecked = await persistentStore.create('user1', 'Unchecked', undefined, undefined, undefined, undefined, {
+      pinned: false,
+    });
+    for (const thread of [plain, unchecked]) {
+      const read = await freshReader.get(thread.id);
+      assert.equal(read.pinned, false);
+      assert.equal(read.pinnedAt, null);
+    }
+  });
+
   it('get() returns stored thread', async () => {
     const created = await store.create('user1', 'My Thread');
     const fetched = await store.get(created.id);
@@ -74,6 +106,40 @@ describe('RedisThreadStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () =
     assert.equal(fetched.id, created.id);
     assert.equal(fetched.title, 'My Thread');
     assert.equal(fetched.createdBy, 'user1');
+  });
+
+  it('persists generic plugin ownership without TTL and ignores malformed stored ownership', async () => {
+    const persistentStore = new RedisThreadStore(redis, { ttlSeconds: 0 });
+    const thread = await persistentStore.create('user1', 'Plugin-owned thread');
+    const ownership = { v: 1, pluginInstanceId: 'pi_telegram' };
+
+    await persistentStore.updatePluginOwnership(thread.id, ownership);
+    assert.equal(await redis.ttl(threadDetailKey(thread.id)), -1, 'plugin ownership must not expire');
+    assert.deepEqual((await persistentStore.get(thread.id)).pluginOwnership, ownership);
+
+    await redis.hset(threadDetailKey(thread.id), 'pluginOwnership', JSON.stringify({ v: 1, pluginInstanceId: '' }));
+    assert.equal(
+      (await persistentStore.get(thread.id)).pluginOwnership,
+      undefined,
+      'malformed ownership must not grant a plugin authority over the thread',
+    );
+
+    await persistentStore.updatePluginOwnership(thread.id, null);
+    assert.equal(await redis.hget(threadDetailKey(thread.id), 'pluginOwnership'), null);
+
+    await assert.rejects(
+      () => persistentStore.updatePluginOwnership(thread.id, { v: 1, pluginInstanceId: 'pi_telegram', extra: true }),
+      /invalid plugin thread ownership/,
+    );
+    assert.equal(await redis.hget(threadDetailKey(thread.id), 'pluginOwnership'), null);
+
+    await persistentStore.delete(thread.id);
+    await persistentStore.updatePluginOwnership(thread.id, ownership);
+    assert.deepEqual(
+      await redis.hkeys(threadDetailKey(thread.id)),
+      [],
+      'late ownership writes must not recreate a thread',
+    );
   });
 
   it('persists goal intent without TTL and rejects stale provider reconciliation', async () => {

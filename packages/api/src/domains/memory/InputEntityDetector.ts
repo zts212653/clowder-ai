@@ -260,6 +260,9 @@ export class InputEntityDetector {
       if (blocked.has(row.entity_id)) continue;
 
       const aliasNorm = normalizeEntityAlias(row.alias_norm || row.alias);
+      // A boundary-aware match is impossible without the literal first. Avoid
+      // compiling thousands of Unicode regexes for aliases absent from a short send.
+      if (!aliasNorm || !textNorm.includes(aliasNorm)) continue;
       const matcher = compileAliasMatcher(aliasNorm);
       if (!matcher?.(textNorm)) continue;
 
@@ -313,6 +316,7 @@ export class InputEntityDetector {
       if (seen.has(row.doc_anchor)) continue;
 
       const aliasNorm = normalizeEntityAlias(row.alias_norm || row.alias);
+      if (!aliasNorm || !textNorm.includes(aliasNorm)) continue;
       const matcher = compileAliasMatcher(aliasNorm);
       if (!matcher?.(textNorm)) continue;
       if (isRoutingRequestThreadTitle(row, aliasNorm)) continue;

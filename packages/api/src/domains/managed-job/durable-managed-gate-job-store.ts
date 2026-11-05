@@ -9,6 +9,7 @@ import {
   DurableGateSupervisorFenceError,
   writeDurableGateRecordFenced,
 } from './durable-managed-gate-supervisor.js';
+import { isManagedJobAdmitted, parseScheduleAdmission } from './managed-job-admission.js';
 import { readManagedJobLedger } from './managed-job-ledger.js';
 import {
   parseCancellation,
@@ -36,7 +37,9 @@ export interface DurableGateRecord {
   };
   readonly ownerIdentity?: UnixProcessIdentity;
   readonly admissionMessageId?: string;
+  readonly scheduleAdmission?: { readonly scheduleId: string };
   readonly attemptToken?: string;
+  readonly attemptResumeEpoch?: number;
   readonly cleanupProven?: boolean;
   readonly pendingResult?: ManagedCommandTerminalResult;
   readonly result?: ManagedCommandTerminalResult;
@@ -106,7 +109,8 @@ export function recordDurableManagedGateProcess(
   const current = readDurableGateRecord(job);
   const raw = rawDurableGateRecord(job);
   if (!current || !raw || current.state === 'terminal') return false;
-  if (job.recordStorage === 'sqlite_v1' && (current.state !== 'queued' || !current.admissionMessageId)) return false;
+  if (job.recordStorage === 'sqlite_v1' && (current.state !== 'queued' || !isManagedJobAdmitted(job, current)))
+    return false;
   return writeDurableGateRecord(
     job,
     { ...raw, state: 'running', ownerIdentity: processIdentity, updatedAt: now },
@@ -115,12 +119,19 @@ export function recordDurableManagedGateProcess(
 }
 
 /** Persist the shared attempt token before either the command or full-gate adapter starts a child. */
-export function recordManagedJobAttempt(job: DurableManagedGateJob, attemptToken: string): void {
+export function recordManagedJobAttempt(job: DurableManagedGateJob, attemptToken: string, resumeEpoch = 0): void {
   if (job.recordStorage !== 'sqlite_v1') return;
+  if (!Number.isSafeInteger(resumeEpoch) || resumeEpoch < 0) throw new Error('invalid_managed_job_attempt_epoch');
   const current = rawDurableGateRecord(job);
   if (
     !current ||
-    !writeDurableGateRecord(job, { ...current, attemptToken, cleanupProven: false, updatedAt: Date.now() })
+    !writeDurableGateRecord(job, {
+      ...current,
+      attemptToken,
+      attemptResumeEpoch: resumeEpoch,
+      cleanupProven: false,
+      updatedAt: Date.now(),
+    })
   ) {
     throw new Error('managed_job_attempt_fenced');
   }
@@ -154,7 +165,15 @@ export function readDurableGateRecord(job: DurableManagedGateJob): DurableGateRe
     ...(parseCancellation(value.cancel) ? { cancel: parseCancellation(value.cancel) } : {}),
     ...(parseIdentity(value.ownerIdentity) ? { ownerIdentity: parseIdentity(value.ownerIdentity) } : {}),
     ...(typeof value.admissionMessageId === 'string' ? { admissionMessageId: value.admissionMessageId } : {}),
+    ...(parseScheduleAdmission(value.scheduleAdmission)
+      ? { scheduleAdmission: parseScheduleAdmission(value.scheduleAdmission) }
+      : {}),
     ...(typeof value.attemptToken === 'string' ? { attemptToken: value.attemptToken } : {}),
+    ...(typeof value.attemptResumeEpoch === 'number' &&
+    Number.isSafeInteger(value.attemptResumeEpoch) &&
+    value.attemptResumeEpoch >= 0
+      ? { attemptResumeEpoch: value.attemptResumeEpoch }
+      : {}),
     ...(value.cleanupProven === true ? { cleanupProven: true } : {}),
     ...(parseTerminalResult(value.pendingResult) ? { pendingResult: parseTerminalResult(value.pendingResult) } : {}),
     ...(parseTerminalResult(value.result) ? { result: parseTerminalResult(value.result) } : {}),

@@ -25,6 +25,7 @@ const acceptedRevision = 'd'.repeat(40);
 const reviewerInvocationId = 'inv-reviewer';
 const requestMessageId = 'message-request';
 const reviewMessageId = 'message-review';
+const requestReviewProgramId = 'evolution-program:ba0f4524e49cc879279164d5b272cf8c';
 const reviewerScope = {
   userId: authorScope.userId,
   threadId: authorScope.threadId,
@@ -95,7 +96,15 @@ function fixture(options = {}) {
   const attested = options.attested ?? (() => true);
   const service = new RequestReviewUseReceiptService({
     ledger,
-    messageStore: { getById: async (messageId) => messages.get(messageId) ?? null },
+    messageStore: {
+      getById: async (messageId) => messages.get(messageId) ?? null,
+      updateExtra: async (messageId, extra) => {
+        const message = messages.get(messageId);
+        if (!message) return null;
+        message.extra = { ...message.extra, ...extra };
+        return message;
+      },
+    },
     invocationRegistry: { peekRecord: async (invocationId) => invocations.get(invocationId) ?? null },
     versionAttestor: {
       async deliver(ref) {
@@ -188,6 +197,14 @@ describe('request-review actual-use receipts', () => {
       ownerStateRef: `inv:${reviewerInvocationId}`,
     });
     assert.equal(result.receipt.consumerRef.ownerStateRef, 'consumer:request-review-local-review-v1');
+    assert.deepEqual(ctx.messages.get(reviewMessageId).extra.evolutionUseSourceV1, {
+      schemaVersion: 1,
+      programId: requestReviewProgramId,
+      assetVersionRef,
+      receiptRef: result.receipt.receiptRef,
+      use: 'applied',
+      recordedAt: result.receipt.occurredAt,
+    });
   });
 
   it('rejects a mismatched reviewer invocation, subject, or typed message provenance', async () => {
@@ -308,6 +325,7 @@ describe('request-review actual-use receipts', () => {
     const result = await ctx.service.recordLocalReview({ handle, scope: reviewerScope, reviewMessageId });
     assert.equal(result.ok, true);
     assert.equal(result.receipt.use, 'unconfirmed');
+    assert.equal(ctx.messages.get(reviewMessageId).extra.evolutionUseSourceV1.use, 'unconfirmed');
   });
 
   it('records an explicit reviewer dismissal without inferring a typed review fact', async () => {
@@ -330,11 +348,34 @@ describe('request-review actual-use receipts', () => {
     const handle = await prepareAndBind(ctx);
     const first = await ctx.service.recordLocalReview({ handle, scope: reviewerScope, reviewMessageId });
     assert.equal(first.ok, true);
+    delete ctx.messages.get(reviewMessageId).extra.evolutionUseSourceV1;
 
-    const restarted = fixture({ ledger: ctx.ledger }).service;
+    const restarted = new RequestReviewUseReceiptService({
+      ledger: ctx.ledger,
+      messageStore: {
+        getById: async (messageId) => ctx.messages.get(messageId) ?? null,
+        updateExtra: async (messageId, extra) => {
+          const message = ctx.messages.get(messageId);
+          if (!message) return null;
+          message.extra = { ...message.extra, ...extra };
+          return message;
+        },
+      },
+      invocationRegistry: { peekRecord: async (invocationId) => ctx.invocations.get(invocationId) ?? null },
+      versionAttestor: { deliver: async () => ({ status: 'unconfirmed' }) },
+      now: () => '2026-09-12T10:30:00.000Z',
+    });
     const replay = await restarted.recordLocalReview({ handle, scope: reviewerScope, reviewMessageId });
     assert.equal(replay.ok, true);
     assert.equal(replay.outcome, 'duplicate');
     assert.deepEqual(replay.receipt, first.receipt);
+    assert.deepEqual(ctx.messages.get(reviewMessageId).extra.evolutionUseSourceV1, {
+      schemaVersion: 1,
+      programId: requestReviewProgramId,
+      assetVersionRef,
+      receiptRef: first.receipt.receiptRef,
+      use: 'applied',
+      recordedAt: first.receipt.occurredAt,
+    });
   });
 });

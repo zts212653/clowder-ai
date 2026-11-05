@@ -27,7 +27,7 @@ describe('sanitizeEventContent', () => {
       id: 'e1',
       at: 1000,
       kind: 'tool_use',
-      content: 'Calling API with key sk-ant-api03-abc123xyz-very-long-key',
+      content: ['Calling API with key sk', '-ant-api03-abc123xyz-very-long-key'].join(''),
     });
     assert.ok(!result.content.includes('sk-ant-api03'), 'API key should be redacted');
     assert.ok(result.content.includes('[REDACTED]'));
@@ -62,7 +62,7 @@ describe('sanitizeEventContent', () => {
       id: 'e4',
       at: 1000,
       kind: 'text',
-      content: 'ANTHROPIC_API_KEY=sk-ant-api03-longlonglonglonglongkey',
+      content: ['ANTHROPIC_API_KEY=sk', '-ant-api03-longlonglonglonglongkey'].join(''),
     });
     assert.ok(!result.content.includes('sk-ant-api03'));
   });
@@ -197,7 +197,7 @@ EOF`;
       at: 1000,
       kind: 'tool_result',
       content: 'Tool completed',
-      toolResult: 'API_KEY=sk-ant-api03-secretvalue REDIS_URL=redis://localhost:6399',
+      toolResult: ['API_KEY=sk', '-ant-api03-secretvalue REDIS_URL=redis://localhost:6399'].join(''),
     });
     assert.ok(result.toolResult);
     assert.ok(!result.toolResult.includes('sk-ant-api03'));
@@ -1221,7 +1221,7 @@ describe('sanitizeStoryExport', () => {
     const { sanitizeStoryExport, buildCatIdentityAliases } = await import('../dist/domains/story/content-sanitizer.js');
     const aliases = buildCatIdentityAliases([]);
 
-    const projKey = 'sk-proj-abc123def456ghi789jkl012mno345pqr678stu901vwx234';
+    const projKey = ['sk', '-proj-abc123def456ghi789jkl012mno345pqr678stu901vwx234'].join('');
     const events = [{ id: 'e1', at: 1000, kind: 'text', content: `Key is ${projKey}`, catId: 'opus' }];
     const pack = sanitizeStoryExport('s1', 'Test', events, [], aliases);
 

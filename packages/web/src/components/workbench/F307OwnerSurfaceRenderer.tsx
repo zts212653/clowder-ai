@@ -1,24 +1,26 @@
 'use client';
 
 import { type ReactNode, useCallback } from 'react';
+import { WorkContentBoundary } from '@/components/artifacts/WorkContentBoundary';
 import { EvolutionProgramSurface } from '@/components/capability-evolution/solution-gate/SolutionGateHost';
 import { ArtifactReviewSurface } from '@/components/content-review/ArtifactReviewSurface';
 import { TheaterReplayContent } from '@/components/story-player/TheaterReplayContent';
 import type { WorkspaceSurfaceDescriptor } from '@/components/workbench/workbench-contract';
 import { BrowserPanel } from '@/components/workspace/BrowserPanel';
 import { TerminalTab } from '@/components/workspace/TerminalTab';
-import { ThreadChatLink } from '@/components/workspace/ThreadChatLink';
-import { TrajectoryPanel } from '@/components/workspace/trajectory/TrajectoryPanel';
 import type { WorkspaceFileNavigationOrigin } from '@/stores/chat-types';
+import { CollectiveDocumentSurface } from '../collective/CollectiveDocumentSurface';
+import { AgentRunOwnerSurface } from './AgentRunOwnerSurface';
 import { ArtifactFileNavigator } from './ArtifactFileNavigator';
 import { createArtifactReviewSurface, resolveArtifactReviewTarget } from './artifact-review-surface';
 import { CanonicalWorkspaceFileSurface } from './CanonicalWorkspaceFileSurface';
 import { ContentPublicationNavigator } from './ContentPublicationNavigator';
+import { useResolveContentSurface } from './ContentSurfaceResolution';
+import { resolveCollectiveDocumentTarget } from './collective-document-surface';
 import { ContentEditorOwnerSurface } from './content-editor/ContentEditorOwnerSurface';
 import { EvolutionContentReviewSurface } from './content-review/EvolutionContentReviewSurface';
 import { PublicationContentReviewSurface } from './content-review/PublicationContentReviewSurface';
 import { resolveEvolutionMediaTarget } from './evolution-media-surface';
-import { useF307ExperienceWorkbenchStore } from './experience-workbench-store';
 import { F307ArtifactOwnerSurface } from './F307ArtifactOwnerSurface';
 import { F307FileOwnerSurface } from './F307FileOwnerSurface';
 import { F307OwnerUnavailable as OwnerUnavailable } from './F307OwnerUnavailable';
@@ -29,7 +31,6 @@ import { PublicationLandingResolver } from './PublicationLandingResolver';
 import { createPublicationSurface, resolvePublicationTarget } from './publication-surface';
 import {
   createBrowserSurface,
-  resolveAgentRunTarget,
   resolveBrowserTarget,
   resolveContentEditorTarget,
   resolveEvolutionProgramId,
@@ -40,21 +41,6 @@ import { VideoProjectReviewSurface } from './video-project/VideoProjectReviewSur
 import { resolveVideoProjectTarget } from './video-project-surface';
 import { WorkspacePreviewIntentProvider } from './WorkspacePreviewIntent';
 import { WorkspaceSurfaceVisibilityProvider } from './WorkspaceSurfaceVisibility';
-
-function AgentRunOwnerSurface({ surface }: { surface: WorkspaceSurfaceDescriptor }) {
-  const target = resolveAgentRunTarget(surface);
-  if (!target?.threadId) return <OwnerUnavailable message="Agent Run descriptor 没有合法的 F299 invocation 引用。" />;
-  return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 justify-end border-b border-cafe-subtle px-3 py-2">
-        <ThreadChatLink threadId={target.threadId} />
-      </div>
-      <div className="min-h-0 flex-1">
-        <TrajectoryPanel threadId={target.threadId} targetOverride={target} />
-      </div>
-    </div>
-  );
-}
 
 interface F307OwnerSurfaceRendererProps {
   surface: WorkspaceSurfaceDescriptor;
@@ -90,6 +76,7 @@ function F307OwnerSurfaceContent({
   leadingAction,
   fullWindowAction,
 }: Omit<F307OwnerSurfaceRendererProps, 'surfaceVisible'> & { leadingAction?: ReactNode }) {
+  const resolveSurface = useResolveContentSurface(surface.id);
   const browserTarget = resolveBrowserTarget(surface);
   const returnToOrigin = () =>
     surface.navigationOrigin && onReturnToFileOrigin
@@ -121,6 +108,8 @@ function F307OwnerSurfaceContent({
       <OwnerUnavailable message="审片项目没有一致的成片引用。" />
     );
   }
+  const collectiveDocument = resolveCollectiveDocumentTarget(surface);
+  if (collectiveDocument) return <CollectiveDocumentSurface source={collectiveDocument} />;
   if (surface.renderer === 'file-preview' || surface.renderer === 'code-editor') {
     return (
       <CanonicalWorkspaceFileSurface
@@ -191,11 +180,7 @@ function F307OwnerSurfaceContent({
         navigationOrigin={surface.navigationOrigin}
         fullWindowAction={fullWindowAction}
         onContextChange={(context) =>
-          useF307ExperienceWorkbenchStore.getState().dispatch({
-            type: 'resolve-content-surface',
-            sourceSurfaceId: surface.id,
-            surface: createArtifactReviewSurface(context.reviewId, context.threadId, context.title, context.round),
-          })
+          resolveSurface(createArtifactReviewSurface(context.reviewId, context.threadId, context.title, context.round))
         }
         onVersionChange={(round) =>
           onRefreshSurface({
@@ -241,11 +226,7 @@ function F307OwnerSurfaceContent({
           source={source}
           surface={surface}
           onBack={returnToOrigin}
-          onResolved={(resolved) =>
-            useF307ExperienceWorkbenchStore
-              .getState()
-              .dispatch({ type: 'resolve-content-surface', sourceSurfaceId: surface.id, surface: resolved })
-          }
+          onResolved={(resolved) => resolveSurface(resolved)}
         />
       ) : (
         <OwnerUnavailable message="原发布消息坐标已不可用。" />
@@ -253,43 +234,50 @@ function F307OwnerSurfaceContent({
     }
     if (surface.ownerStateRef.owner === 'f138-publication') {
       const target = resolvePublicationTarget(surface);
+      const changeVersion = (ownerRevision: number) => {
+        if (!target) return;
+        onRefreshSurface({
+          ...surface,
+          ...createPublicationSurface({
+            ...target,
+            ownerRevision,
+            title: surface.title,
+            htmlWorkSourceThreadId: surface.htmlWorkSourceThreadId,
+            navigationOrigin: surface.navigationOrigin,
+          }),
+          ...(surface.returnTargetRef ? { returnTargetRef: surface.returnTargetRef } : {}),
+        });
+      };
       return target ? (
-        <PublicationLandingResolver
-          sourceSurface={surface}
-          target={target}
-          leadingAction={leadingAction}
+        <WorkContentBoundary
+          reference={target}
+          threadId={hostThreadId}
+          sourceThreadId={surface.htmlWorkSourceThreadId}
           onBack={returnToOrigin}
-          onResolved={(resolved) =>
-            useF307ExperienceWorkbenchStore
-              .getState()
-              .dispatch({ type: 'resolve-content-surface', sourceSurfaceId: surface.id, surface: resolved })
-          }
+          onVersionChange={changeVersion}
         >
-          <PublicationContentReviewSurface
-            {...target}
+          <PublicationLandingResolver
+            sourceSurface={surface}
+            target={target}
             leadingAction={leadingAction}
-            title={surface.title}
-            fullWindowAction={fullWindowAction}
-            navigationOrigin={surface.navigationOrigin}
-            onVersionChange={(ownerRevision) =>
-              onRefreshSurface({
-                ...surface,
-                ...createPublicationSurface({
-                  ...target,
-                  ownerRevision,
-                  title: surface.title,
-                  navigationOrigin: surface.navigationOrigin,
-                }),
-                ...(surface.returnTargetRef ? { returnTargetRef: surface.returnTargetRef } : {}),
-              })
-            }
-            onBack={() =>
-              surface.navigationOrigin && onReturnToFileOrigin
-                ? onReturnToFileOrigin(surface, surface.navigationOrigin)
-                : onRequestDetach()
-            }
-          />
-        </PublicationLandingResolver>
+            onBack={returnToOrigin}
+            onResolved={(resolved) => resolveSurface(resolved)}
+          >
+            <PublicationContentReviewSurface
+              {...target}
+              leadingAction={leadingAction}
+              title={surface.title}
+              fullWindowAction={fullWindowAction}
+              navigationOrigin={surface.navigationOrigin}
+              onVersionChange={changeVersion}
+              onBack={() =>
+                surface.navigationOrigin && onReturnToFileOrigin
+                  ? onReturnToFileOrigin(surface, surface.navigationOrigin)
+                  : onRequestDetach()
+              }
+            />
+          </PublicationLandingResolver>
+        </WorkContentBoundary>
       ) : (
         <OwnerUnavailable message="作品引用已不可用。" />
       );

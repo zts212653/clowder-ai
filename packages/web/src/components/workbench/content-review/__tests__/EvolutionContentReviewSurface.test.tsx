@@ -9,8 +9,20 @@ vi.mock('@/utils/api-client', () => ({
   API_URL: 'http://api.test',
   apiFetch: (...args: unknown[]) => mocks.apiFetch(...args),
 }));
-it('opens an experiment original with the full discussion surface and explicit derivative action without preparing a publication', async () => {
+vi.mock('@/components/content-review/ContentModificationLanding', () => ({
+  ContentModificationLanding: (props: { source: unknown; allowNewRequest: boolean }) => (
+    <output data-testid="derivative-request-scope">{JSON.stringify(props)}</output>
+  ),
+}));
+it.each([
+  ['image/jpeg', 'classic'],
+  ['image/jpeg', 'v2'],
+  ['image/webp', 'classic'],
+  ['image/webp', 'v2'],
+] as const)('opens an experiment original (%s, %s) with an explicit derivative action without preparing a publication', async (mime, shell) => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  localStorage.setItem('cat-cafe:shell-presentation', shell);
+  mocks.apiFetch.mockReset();
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container),
@@ -32,7 +44,7 @@ it('opens an experiment original with the full discussion surface and explicit d
     kind: 'evolution',
     locator,
     revision: old.revision,
-    mime: 'image/jpeg',
+    mime,
     media: old.media,
     byteLength: 100,
     label: '实验原图',
@@ -55,10 +67,24 @@ it('opens an experiment original with the full discussion surface and explicit d
       '/api/content-reviews/' + view.review.reviewId + '/media?',
     );
     expect(container.textContent).toContain('实验原件');
+    await act(async () => button?.click());
+    const serializedScope = container.querySelector('[data-testid="derivative-request-scope"]')?.textContent;
+    if (!serializedScope) throw new Error('The derivative entry must open its source-bound request');
+    const scope = JSON.parse(serializedScope);
+    expect(scope.allowNewRequest).toBe(true);
+    expect(scope.source).toEqual({
+      kind: 'evolution',
+      locator,
+      expectedSourceRevision: old.revision,
+      reviewId: view.review.reviewId,
+      expectedReviewRevision: view.review.revision,
+    });
+    expect(container.textContent).toContain('实验原件和原讨论保留');
     expect(mocks.apiFetch).toHaveBeenCalledTimes(1);
   } finally {
     act(() => root.unmount());
     container.remove();
+    localStorage.removeItem('cat-cafe:shell-presentation');
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   }
 });

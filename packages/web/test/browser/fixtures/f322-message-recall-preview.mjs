@@ -1,4 +1,5 @@
 // Actual Next Thread/ChatContainer author preview with isolated HTTP fixtures. No Redis or production data.
+
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -6,6 +7,7 @@ import { writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { CLIENT_REQUEST_DIAGNOSTIC_HEADER } from '@cat-cafe/shared';
 import { OTHER_THREAD_ID, realSurfaceApiResponse, THREAD_ID } from '../f307-real-surface-fixtures.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../..');
@@ -14,6 +16,8 @@ const port = Number(process.argv[2] ?? 5333);
 assert.ok(Number.isInteger(port) && port >= 1024 && port < 65535);
 assert.ok(![3001, 3002, 3011, 3012, 4111, 6397, 6398, 6399].includes(port));
 export const previewRecords = Array.from({ length: 22 }, (_, i) => ({
+  from:
+    i % 5 === 4 ? { kind: 'user', userId: 'default-user' } : { kind: 'agent', catId: i % 2 ? 'codex61-sol' : 'opus55' },
   id: `recall-preview-${i}`,
   type: i % 5 === 4 ? 'user' : 'assistant',
   ...(i % 5 === 4 ? {} : { catId: i % 2 ? 'codex61-sol' : 'opus55' }),
@@ -29,6 +33,7 @@ const cats = [
     displayName: '小太阳·砚砚',
     breedId: 'maine-coon',
     avatar: '/avatars/codex.png',
+    carrier: 'cli',
     clientId: 'openai',
     defaultModel: 'gpt-6.1-sol',
     mentionPatterns: ['@codex61-sol'],
@@ -40,6 +45,7 @@ const cats = [
     displayName: '宪宪',
     breedId: 'ragdoll',
     avatar: '/avatars/opus.png',
+    carrier: 'cli',
     clientId: 'anthropic',
     defaultModel: 'claude-opus-5-5',
     mentionPatterns: ['@opus55'],
@@ -50,7 +56,7 @@ const cats = [
 const api = createServer(async (request, response) => {
   response.setHeader('Access-Control-Allow-Origin', `http://127.0.0.1:${port}`);
   response.setHeader('Access-Control-Allow-Credentials', 'true');
-  response.setHeader('Access-Control-Allow-Headers', 'content-type');
+  response.setHeader('Access-Control-Allow-Headers', `content-type,${CLIENT_REQUEST_DIAGNOSTIC_HEADER}`);
   response.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
   if (request.method === 'OPTIONS') {
     response.writeHead(204);

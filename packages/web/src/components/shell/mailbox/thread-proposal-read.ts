@@ -5,8 +5,7 @@ import {
   type ThreadProposal,
   validateApprovalEnvelope,
 } from '@cat-cafe/shared';
-import { useEffect, useState } from 'react';
-import { apiFetch } from '@/utils/api-client';
+import { useApprovalStatus } from '@/components/rich/use-approval-status';
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -32,23 +31,13 @@ function publicationMatches(publication: unknown, item: ApprovalHubItem): boolea
   );
 }
 
-async function readThreadProposal(proposalId: string, signal: AbortSignal): Promise<unknown> {
-  try {
-    const response = await apiFetch(
-      `/api/proposals/${encodeURIComponent(proposalId)}`,
-      { signal },
-      { afterCurrentGet: true },
-    );
-    if (!response.ok) return null;
-    const body: unknown = await response.json();
-    return isRecord(body) ? body.proposal : null;
-  } catch {
-    return null;
-  }
+export function readableProposedFields(value: Record<string, unknown>): boolean {
+  return typeof value.sourceThreadId === 'string' && !!value.sourceThreadId.trim() && readableProposedDetails(value);
 }
 
-function readableProposedFields(value: Record<string, unknown>): boolean {
-  const required = ['sourceThreadId', 'reason', 'projectPath', 'parentThreadId', 'title'];
+/** Display fields alone confer no producer identity or write authority. */
+export function readableProposedDetails(value: Record<string, unknown>): boolean {
+  const required = ['reason', 'projectPath', 'parentThreadId', 'title'];
   if (required.some((field) => typeof value[field] !== 'string' || !(value[field] as string).trim())) return false;
   if (
     value.reportingMode !== undefined &&
@@ -98,30 +87,16 @@ export function matchingThreadProposal(value: unknown, item: ApprovalHubItem): T
 }
 
 export function useThreadProposalRead(item: ApprovalHubItem) {
-  const [snapshot, setSnapshot] = useState<unknown>(null);
-  const [checking, setChecking] = useState(true);
-  const [revision, reread] = useState(0);
-  const version = JSON.stringify(item);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the serialized item and reread revision invalidate this producer read
-  useEffect(() => {
-    let live = true;
-    const controller = new AbortController();
-    setChecking(true);
-    setSnapshot(null);
-    void readThreadProposal(item.proposalId, controller.signal).then((proposal) => {
-      if (!live) return;
-      setSnapshot(proposal);
-      setChecking(false);
-    });
-    return () => {
-      live = false;
-      controller.abort();
-    };
-    // The serialized canonical item includes owner and all displayed fields, without triggering on equivalent refresh copies.
-  }, [version, revision]);
+  const result = useApprovalStatus(
+    'F128',
+    item.proposalId,
+    `/api/proposals/${encodeURIComponent(item.proposalId)}`,
+    true,
+    item.ownerUserId,
+  );
   return {
-    proposal: checking ? null : matchingThreadProposal(snapshot, item),
-    checking,
-    reread: () => reread((n) => n + 1),
+    proposal: result.failed || result.terminal ? null : matchingThreadProposal(result.record, item),
+    checking: result.reading,
+    reread: result.refresh,
   };
 }

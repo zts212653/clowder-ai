@@ -52,8 +52,6 @@ function createMockStoreState() {
     clearCatStatuses: vi.fn(),
     setCurrentThread: vi.fn(),
     updateThreadTitle: vi.fn(),
-    setCurrentGame: vi.fn(),
-    currentGame: null,
     viewMode: 'single' as const,
     setViewMode: vi.fn(),
     clearUnread: vi.fn(),
@@ -119,7 +117,6 @@ vi.mock('../ChatInput', () => ({
   },
 }));
 vi.mock('../ChatMessage', () => ({ ChatMessage: () => null }));
-vi.mock('../game/GameOverlayConnector', () => ({ GameOverlayConnector: () => null }));
 vi.mock('../HubListModal', () => ({ HubListModal: () => null }));
 vi.mock('../MessageActions', () => ({
   MessageActions: ({ children }: { children: React.ReactNode }) => children,
@@ -187,7 +184,6 @@ describe('F173 Phase C Task 2 — ChatContainer.hasActiveInvocation thread-scope
         targetCats: ['opus'],
         catStatuses: { opus: 'streaming' },
         catInvocations: {},
-        currentGame: null,
         unreadCount: 0,
         hasUserMention: false,
         lastActivity: 0,
@@ -241,7 +237,6 @@ describe('F173 Phase C Task 2 — ChatContainer.hasActiveInvocation thread-scope
         targetCats: [],
         catStatuses: {},
         catInvocations: {},
-        currentGame: null,
         unreadCount: 0,
         hasUserMention: false,
         lastActivity: 0,

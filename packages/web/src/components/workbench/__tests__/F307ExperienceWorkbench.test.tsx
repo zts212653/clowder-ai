@@ -13,6 +13,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { encodeTeamWorkspaceSubject } from '@/components/routing-context/team-navigation';
+import { openExactPlace } from '@/components/shell/mailbox/open-exact-place';
 import { writeShellLanguage } from '@/components/shell/shell-language';
 import { writeShellPresentation } from '@/components/shell/shell-presentation';
 import type { WorkspaceSurfaceDescriptor } from '@/components/workbench/workbench-contract';
@@ -436,6 +437,50 @@ describe('F307 zero-surface canonical Home invariant', () => {
     }
   });
 
+  it.each([false, true])('reveals the exact Inbox review from Home, with an existing tab = %s', async (existing) => {
+    writeShellPresentation('v2');
+    const reviewId = `review-${'a'.repeat(64)}`;
+    const review = createArtifactReviewSurface(reviewId, 'thread-a');
+    const previousChat = useChatStore.getState();
+    useChatStore.setState({ currentThreadId: 'thread-a', workspaceForegroundSurfaceId: null });
+    useF307ExperienceWorkbenchStore.setState({
+      layout: createInitialWorkbenchState(existing ? [review] : []),
+    });
+    function ForegroundHost() {
+      const foregroundSurfaceId = useChatStore((state) => state.workspaceForegroundSurfaceId);
+      return (
+        <F307ExperienceWorkbench
+          threadId="thread-a"
+          foregroundSurfaceId={foregroundSurfaceId}
+          visible
+          artifactWorkHostAvailable
+          onSelectDevSurface={() => undefined}
+          worktreeId="worktree-a"
+          openFilePath={null}
+          preview={{ path: '/' }}
+          onOpenAppRoute={mocks.openAppRoute}
+        />
+      );
+    }
+    try {
+      // The mailbox can open Workspace before its automatic foreground binding mounts.
+      await act(async () => openExactPlace(`workspace:content-review:thread-a:${reviewId}`, '/thread/thread-a'));
+      await act(async () => root.render(<ForegroundHost />));
+      expect(container.querySelector('[data-workbench-focus="surface"]')).not.toBeNull();
+      expect(
+        container.querySelector(`[data-owner-surface-id="${review.id}"]`)?.getAttribute('data-surface-visible'),
+      ).toBe('true');
+      expect(useChatStore.getState().workspaceForegroundSurfaceId).toBe(review.id);
+      expect(useChatStore.getState().threadStates['thread-a'].workspaceForegroundSurfaceId).toBe(review.id);
+    } finally {
+      useChatStore.setState({
+        currentThreadId: previousChat.currentThreadId,
+        workspaceForegroundSurfaceId: previousChat.workspaceForegroundSurfaceId,
+        threadStates: previousChat.threadStates,
+      });
+    }
+  });
+
   it('reveals the existing active artifacts owner when an explicit works entry leaves Home', async () => {
     writeShellPresentation('v2');
     const artifacts = createWorkspaceModeSurface('artifacts', 'thread-a');
@@ -488,6 +533,74 @@ describe('F307 zero-surface canonical Home invariant', () => {
         threadStates: previousChat.threadStates,
       });
     }
+  });
+
+  it.each([
+    'v2',
+    'classic',
+  ] as const)('preserves %s status identity while recently closed titles follow presentation and language', async (presentation) => {
+    writeShellPresentation(presentation);
+    writeShellLanguage('zh');
+    const status = createWorkspaceDestinationSurface(
+      { kind: 'host', id: 'status', label: '状态与会话', description: '来源原文', searchTerms: 'status' },
+      'thread-a',
+    )!;
+    useF307ExperienceWorkbenchStore.setState({
+      layout: createInitialWorkbenchState([status]),
+      hydrated: true,
+    });
+    await renderWorkbench();
+    const close = container.querySelector<HTMLButtonElement>(
+      presentation === 'v2'
+        ? '[data-tab-surface-id="workspace:host:status"] [data-workbench-tab-control="close"]'
+        : '[data-testid="f307-close-workspace"]',
+    )!;
+    await act(async () => close.click());
+    const toggle = container.querySelector<HTMLButtonElement>('[data-testid="f307-recently-closed-toggle"]')!;
+    await act(async () => toggle.click());
+    const restore = container.querySelector<HTMLButtonElement>('[data-testid="f307-restore-workspace"]')!;
+    expect(restore.textContent).toBe('恢复 状态与会话');
+    await act(async () => writeShellLanguage('en'));
+    expect(container.querySelector('[data-testid="f307-restore-workspace"]')).toBe(restore);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(restore.textContent).toBe(presentation === 'v2' ? 'Restore Status & sessions' : '恢复 状态与会话');
+    expect(useF307ExperienceWorkbenchStore.getState().layout.recentlyClosed).toEqual([status]);
+    await act(async () => writeShellLanguage('zh'));
+    expect(restore.textContent).toBe('恢复 状态与会话');
+    await act(async () => writeShellLanguage('en'));
+    await act(async () => restore.click());
+    expect(useF307ExperienceWorkbenchStore.getState().layout).toMatchObject({
+      surfaces: [status],
+      activeSurfaceId: status.id,
+      recentlyClosed: [],
+    });
+  });
+
+  it('turns a wide Program into explicit full-window and restores the same Chat split from a named control', async () => {
+    const presentation = { kind: 'chat-workspace' as const, threadId: 'thread-a', chatBasis: 37 };
+    useF307ExperienceWorkbenchStore.setState({
+      layout: createInitialWorkbenchState([PROGRAM_SURFACE]),
+      hydrated: true,
+      mainAreaAttentionSurfaceId: PROGRAM_SURFACE.id,
+      mainAreaAttentionPresentation: presentation,
+    });
+    await renderWorkbench();
+
+    const enter = container.querySelector<HTMLButtonElement>('[data-testid="f307-enter-main-area"]');
+    expect(enter?.getAttribute('aria-label')).toBe(`整窗打开 ${PROGRAM_SURFACE.title}`);
+    await act(async () => enter?.click());
+    expect(useF307ExperienceWorkbenchStore.getState().mainAreaAttentionPresentation).toEqual({
+      ...presentation,
+      mode: 'full-window',
+    });
+
+    const back = container.querySelector<HTMLButtonElement>('[data-testid="f307-return-from-main-area"]');
+    expect(back?.textContent).toContain('回到聊天');
+    await act(async () => back?.click());
+    expect(useF307ExperienceWorkbenchStore.getState()).toMatchObject({
+      mainAreaAttentionSurfaceId: PROGRAM_SURFACE.id,
+      mainAreaAttentionPresentation: presentation,
+    });
   });
 
   it.each([
@@ -1185,6 +1298,11 @@ describe('F307 zero-surface canonical Home invariant', () => {
     const state = useF307ExperienceWorkbenchStore.getState();
     expect(state.layout.activeSurfaceId).toBe(`evolution-program:${programId}`);
     expect(state.mainAreaAttentionSurfaceId).toBe(state.layout.activeSurfaceId);
+    expect(state.mainAreaAttentionPresentation).toEqual({
+      kind: 'chat-workspace',
+      threadId: 'thread-a',
+      chatBasis: 30,
+    });
     expect(onConsumed).toHaveBeenCalledWith(1);
   });
 

@@ -7,7 +7,6 @@ import type {
   TurnExecutionKind,
   TurnExecutionMessageProjection,
   TurnExecutionRecord,
-  TurnExecutionStatus,
   TurnExecutionTerminalInput,
   TurnExecutionTerminalStatus,
   TurnOutputFence,
@@ -36,6 +35,15 @@ export function projectTurnExecutionMessage(record: TurnExecutionRecord): TurnEx
     parentInvocationId: record.parentInvocationId,
     executionKind: record.executionKind,
   };
+}
+
+/** A previous Host ending is not proof that its dispatched native execution stopped. */
+export function hasUnconfirmedProviderTeardown(record: TurnExecutionRecord): boolean {
+  return (
+    record.providerLifecycleTracked === true &&
+    record.providerStartedAt !== undefined &&
+    record.providerTeardownAt === undefined
+  );
 }
 
 export interface TurnExecutionSourceQuery {
@@ -81,10 +89,13 @@ export interface ITurnExecutionStore {
    * Sidebar 需要"这个用户此刻有哪些 child 在跑"，这是 child ledger 自己才答得出的问题。
    */
   listRunningByUser(userId: string): TurnExecutionRecord[] | Promise<TurnExecutionRecord[]>;
+  markProviderStarted(invocationId: string, at: number): boolean | Promise<boolean>;
+  recordProviderTeardown(invocationId: string, at: number): void | Promise<void>;
   transitionTerminal(
     invocationId: string,
     input: TurnExecutionTerminalInput,
   ): TransitionTurnExecutionResult | Promise<TransitionTurnExecutionResult>;
+  /** Restart age cannot retire a dispatched provider until this record carries teardown proof. */
   interruptRunningBefore(
     cutoffStartedAt: number,
     input: InterruptRunningTurnExecutionsInput,
@@ -168,14 +179,19 @@ function assertTimestamp(value: number, field: string): void {
 }
 
 export function assertCreateTurnExecutionInput(input: CreateTurnExecutionInput): void {
+  if (!EXECUTION_KINDS.has(input.executionKind)) {
+    throw new Error(`invalid executionKind: ${String(input.executionKind)}`);
+  }
+  assertTurnExecutionIdentityFields(input);
+}
+
+/** Identity invariants shared with the bounded, read-only retired-record decoder. */
+export function assertTurnExecutionIdentityFields(input: Omit<CreateTurnExecutionInput, 'executionKind'>): void {
   assertNonEmpty(input.invocationId, 'invocationId');
   assertNonEmpty(input.parentInvocationId, 'parentInvocationId');
   assertNonEmpty(input.threadId, 'threadId');
   assertNonEmpty(input.userId, 'userId');
   assertNonEmpty(input.catId as string, 'catId');
-  if (!EXECUTION_KINDS.has(input.executionKind)) {
-    throw new Error(`invalid executionKind: ${String(input.executionKind)}`);
-  }
   assertTimestamp(input.startedAt, 'startedAt');
   if (input.outputFence !== undefined && !isTurnOutputFence(input.outputFence)) {
     throw new Error(`invalid outputFence: ${String(input.outputFence)}`);
@@ -187,15 +203,18 @@ export function assertCreateTurnExecutionInput(input: CreateTurnExecutionInput):
   if (input.causal?.routingGuardReason !== undefined && input.causal.routingGuardReason !== 'missing_routing_exit') {
     throw new Error(`invalid routingGuardReason: ${String(input.causal.routingGuardReason)}`);
   }
-  if (input.causal?.coveredMessageIds !== undefined) {
-    if (!Array.isArray(input.causal.coveredMessageIds) || input.causal.coveredMessageIds.length === 0) {
-      throw new Error('coveredMessageIds must be a non-empty array when present');
-    }
-    const covered = new Set<string>();
-    for (const messageId of input.causal.coveredMessageIds) {
-      assertNonEmpty(messageId, 'coveredMessageId');
-      if (covered.has(messageId)) throw new Error('coveredMessageIds must not contain duplicates');
-      covered.add(messageId);
+  if (input.causal?.coveredMessageIds !== undefined) assertCoveredMessageIds(input.causal.coveredMessageIds);
+  if (input.causal?.routingPreflight) {
+    if (input.causal.routingPreflight.stage !== 'execution_preflight')
+      throw new Error('invalid routing preflight stage');
+    assertTimestamp(input.causal.routingPreflight.observedAt, 'routingPreflight.observedAt');
+    if (input.causal.routingPreflight.snapshotRef !== undefined)
+      assertNonEmpty(input.causal.routingPreflight.snapshotRef, 'routingPreflight.snapshotRef');
+    const admission = input.causal.routingPreflight.admission;
+    if (admission) {
+      if (admission.stage !== 'queue_admitted') throw new Error('invalid routing admission stage');
+      assertTimestamp(admission.observedAt, 'routingAdmission.observedAt');
+      if (admission.snapshotRef !== undefined) assertNonEmpty(admission.snapshotRef, 'routingAdmission.snapshotRef');
     }
   }
 }
@@ -209,10 +228,18 @@ export function assertTurnExecutionTerminalInput(
   if (input.endedAt < record.startedAt) throw new Error('endedAt cannot precede startedAt');
   if (input.status !== 'succeeded') assertNonEmpty(input.terminalReason ?? '', 'terminalReason');
   if (input.terminalReason !== undefined) assertNonEmpty(input.terminalReason, 'terminalReason');
+  if (input.providerTeardownAt !== undefined) {
+    assertTimestamp(input.providerTeardownAt, 'providerTeardownAt');
+    if (input.providerTeardownAt < record.startedAt)
+      throw new Error('providerTeardownAt must be inside the exact execution lifetime');
+  }
 }
 
 export function cloneTurnExecutionRecord(record: TurnExecutionRecord): TurnExecutionRecord {
   return {
+    ...(record.providerLifecycleTracked ? { providerLifecycleTracked: true } : {}),
+    ...(record.providerStartedAt !== undefined ? { providerStartedAt: record.providerStartedAt } : {}),
+    ...(record.providerTeardownAt !== undefined ? { providerTeardownAt: record.providerTeardownAt } : {}),
     invocationId: record.invocationId,
     parentInvocationId: record.parentInvocationId,
     threadId: record.threadId,
@@ -225,6 +252,9 @@ export function cloneTurnExecutionRecord(record: TurnExecutionRecord): TurnExecu
       ? {
           causal: {
             ...record.causal,
+            ...(record.causal.routingPreflight
+              ? { routingPreflight: copyRoutingPreflight(record.causal.routingPreflight) }
+              : {}),
             ...(record.causal.coveredMessageIds ? { coveredMessageIds: [...record.causal.coveredMessageIds] } : {}),
           },
         }
@@ -236,8 +266,30 @@ export function cloneTurnExecutionRecord(record: TurnExecutionRecord): TurnExecu
   };
 }
 
+function copyRoutingPreflight(provenance: NonNullable<TurnExecutionCausalRefs['routingPreflight']>) {
+  return {
+    stage: provenance.stage,
+    observedAt: provenance.observedAt,
+    ...(provenance.snapshotRef ? { snapshotRef: provenance.snapshotRef } : {}),
+    ...(provenance.admission
+      ? {
+          admission: {
+            stage: provenance.admission.stage,
+            observedAt: provenance.admission.observedAt,
+            ...(provenance.admission.snapshotRef ? { snapshotRef: provenance.admission.snapshotRef } : {}),
+          },
+        }
+      : {}),
+  };
+}
+
 function canonicalCausalRefs(causal: TurnExecutionCausalRefs | undefined): TurnExecutionCausalRefs {
   return {
+    ...(causal?.routingPreflight
+      ? {
+          routingPreflight: copyRoutingPreflight(causal.routingPreflight),
+        }
+      : {}),
     ...(causal?.triggerMessageId !== undefined ? { triggerMessageId: causal.triggerMessageId } : {}),
     ...(causal?.routingGuardReason !== undefined ? { routingGuardReason: causal.routingGuardReason } : {}),
     ...(causal?.coveredMessageIds !== undefined ? { coveredMessageIds: [...causal.coveredMessageIds].sort() } : {}),

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
 import { evolutionExplorationReviewV1Schema } from '../../../shared/dist/index.js';
 
 const origin = 'http://127.0.0.1:5188';

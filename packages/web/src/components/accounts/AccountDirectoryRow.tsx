@@ -1,13 +1,18 @@
 'use client';
+import type { AccountQuotaObservation } from '@cat-cafe/shared';
 import { Fragment, useState } from 'react';
 import { AvatarImageWithFallback } from '../AvatarImageWithFallback';
 import { accountRequest } from '../codex-accounts/account-request';
 import { CodexQuotaControl } from '../codex-accounts/CodexQuotaControl';
+import { QuotaQueryDetails } from '../codex-accounts/QuotaQueryFeedback';
+import { quotaCopy } from '../codex-accounts/quota.shell-copy';
+import { nextQuotaAccount } from '../codex-accounts/quota-state';
 import type { AccountMember, ProfileItem } from '../hub-accounts.types';
 import { useShellCopy } from '../shell/shell-copy';
 import { useShellLanguage } from '../shell/shell-language';
 import { useConfirm } from '../useConfirm';
-import { AccountRowMenu } from './AccountRowMenu';
+import { AccountLoginDetails } from './AccountLoginDetails';
+import { AccountRowActions } from './AccountRowActions';
 import { accountDisplayName, accountStatus } from './account-directory-view';
 import { accountMessage } from './account-message';
 import { accountsCopy } from './accounts.shell-copy';
@@ -36,9 +41,17 @@ export function AccountDirectoryRow({
   actionError?: string;
 }) {
   const t = useShellCopy(accountsCopy);
+  const quota = useShellCopy(quotaCopy);
   const language = useShellLanguage();
   const displayName = accountDisplayName(account, t);
+  const native = account.builtin && account.authType === 'oauth';
+  const identityDetail = native
+    ? account.nativeLogin?.officialDefault === false
+      ? account.nativeLogin.home
+      : t.nativeManaged
+    : (account.codex?.identity?.email ?? account.baseUrl ?? '');
   const confirm = useConfirm();
+  const [latestQuery, setLatestQuery] = useState<AccountQuotaObservation | undefined>(account.quota);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -51,7 +64,6 @@ export function AccountDirectoryRow({
   const failed = ['failed', 'timeout', 'interrupted', 'canceled', 'superseded'].includes(attempt?.state ?? '');
   const active = members.filter((m) => m.available);
   const duplicate = accounts.find((p) => p.id === attempt?.duplicateAccountRef);
-  const native = account.builtin && account.authType === 'oauth';
   const id = `account-row-${encodeURIComponent(account.id)}`;
   async function login(action: string, extra: Record<string, unknown> = {}) {
     setBusy(true);
@@ -117,39 +129,79 @@ export function AccountDirectoryRow({
       setBusy(false);
     }
   }
+  const suggestion = used ? nextQuotaAccount(account, accounts) : undefined;
   const action = review
     ? 'handle'
     : waiting
       ? 'cancel'
       : account.codex && (failed || !status.ready)
         ? 'retry'
-        : (status.ready || (native && account.clientId === 'anthropic')) && !used
+        : (status.ready || (native && account.clientId === 'anthropic')) && (!used || !!suggestion)
           ? 'switch'
           : '';
   return (
     <Fragment>
       <tr data-account-id={account.id} id={id} tabIndex={-1}>
-        <td className="account-provider">{provider}</td>
+        <td className="account-provider" title={provider}>
+          {provider}
+        </td>
         <td>
-          <button type="button" className="account-name" aria-expanded={open} onClick={() => setOpen(!open)}>
+          <button
+            type="button"
+            className="account-name"
+            title={displayName}
+            aria-expanded={open}
+            onClick={() => setOpen(!open)}
+          >
             {displayName}
           </button>
-          <small>
-            {native
-              ? account.nativeLogin?.officialDefault === false
-                ? account.nativeLogin.home
-                : t.nativeManaged
-              : (account.codex?.identity?.email ?? account.baseUrl ?? '')}
+          <small className="account-cell-text" title={identityDetail}>
+            {identityDetail}
           </small>
         </td>
         <td>
           <span className={`account-state ${status.ready ? 'account-state-ready' : ''}`}>{status.label}</span>
-          <small>{status.detail}</small>
+          <small className="account-cell-text" title={status.detail}>
+            {status.detail}
+          </small>
+        </td>
+        <td className="account-quota-cell">
+          {account.clientId === 'openai' && account.authType === 'oauth' ? (
+            status.ready || account.quota?.status === 'unavailable' ? (
+              <CodexQuotaControl
+                accountRef={account.id}
+                inUse={used}
+                switchSuggestion={
+                  suggestion ? { name: accountDisplayName(suggestion.account, t), left: suggestion.left } : undefined
+                }
+                allowReading={status.ready}
+                observation={account.quota}
+                reload={refresh}
+                managed={!!account.codex}
+                identity={
+                  account.codex?.identity ??
+                  (account.nativeLogin?.identity?.userId
+                    ? { ...account.nativeLogin.identity, userId: account.nativeLogin.identity.userId }
+                    : undefined)
+                }
+                onObservation={setLatestQuery}
+                onRelogin={account.codex && !waiting && !review ? () => void login('start') : undefined}
+              />
+            ) : (
+              <small>{t.noQuota}</small>
+            )
+          ) : (
+            <small>{account.authType === 'api_key' ? t.providerBalance : quota.unsupported}</small>
+          )}
         </td>
         <td>
           <div className="account-followers">
             {used && <span className="account-used">{t.inUse}</span>}
-            {!used && active.some((m) => m.bindingMode === 'override') && <span>{t.override}</span>}
+            {!used && active.some((m) => m.bindingMode === 'override') && (
+              <span className="account-binding" title={t.override}>
+                {t.override}
+              </span>
+            )}
             {active.slice(0, 5).map((m) => (
               <AvatarImageWithFallback
                 key={m.id}
@@ -162,58 +214,49 @@ export function AccountDirectoryRow({
           </div>
         </td>
         <td>
-          <div className="account-row-actions">
-            {action && (
-              <button
-                type="button"
-                className="account-button"
-                disabled={busy}
-                onClick={() =>
-                  review
-                    ? setOpen(true)
-                    : waiting
-                      ? void login('cancel')
-                      : action === 'retry'
-                        ? void login('start')
-                        : onSwitch(account)
-                }
-              >
-                {t[action]}
-              </button>
-            )}
-            <AccountRowMenu
-              account={account}
-              busy={busy}
-              used={used}
-              memberCount={members.length}
-              canRelogin={!waiting && !review}
-              onRename={() => {
-                setNote(account.displayName);
-                setEditing(true);
-                setOpen(true);
-              }}
-              onRelogin={() => void login('start')}
-              onEdit={() => onEdit(account)}
-              onDelete={() => void remove()}
-            />
-            <button
-              type="button"
-              className="account-expand"
-              aria-label={t.expand(displayName)}
-              aria-expanded={open}
-              onClick={() => setOpen(!open)}
-            >
-              {open ? '⌃' : '⌄'}
-            </button>
-          </div>
+          <AccountRowActions
+            account={account}
+            busy={busy}
+            used={used}
+            memberCount={members.length}
+            label={
+              action === 'switch' && suggestion
+                ? quota.switchTo(accountDisplayName(suggestion.account, t))
+                : action
+                  ? t[action]
+                  : ''
+            }
+            open={open}
+            canRelogin={!waiting && !review}
+            onAction={() =>
+              review
+                ? setOpen(true)
+                : waiting
+                  ? void login('cancel')
+                  : action === 'retry'
+                    ? void login('start')
+                    : onSwitch(suggestion?.account ?? account)
+            }
+            onRename={() => {
+              setNote(account.displayName);
+              setEditing(true);
+              setOpen(true);
+            }}
+            onRelogin={() => void login('start')}
+            onEdit={() => onEdit(account)}
+            onDelete={() => void remove()}
+            onExpand={() => setOpen(!open)}
+            expandLabel={t.expand(displayName)}
+          />
         </td>
       </tr>
       {(open || error || actionError) && (
         <tr className="account-expanded">
-          <td colSpan={5}>
+          <td colSpan={6}>
             {(error || actionError) && <p role="alert">{error ? accountMessage(error, language) : actionError}</p>}
             {open && (
               <div className="account-details">
+                <QuotaQueryDetails observation={latestQuery} />
                 {account.claude && <p>{t.tokenUnknown}</p>}
                 {editing && (
                   <form
@@ -293,34 +336,7 @@ export function AccountDirectoryRow({
                     )}
                   </div>
                 )}
-                {account.clientId === 'openai' && status.ready && (
-                  <CodexQuotaControl
-                    accountRef={account.id}
-                    observation={account.quota}
-                    reload={refresh}
-                    managed={!!account.codex}
-                    identity={account.codex?.identity}
-                  />
-                )}
-                {account.authType === 'api_key' ? (
-                  <p>{t.providerBalance}</p>
-                ) : account.clientId === 'openai' && !status.ready ? (
-                  <p>{t.noQuota}</p>
-                ) : null}
-                {(account.codex || account.nativeLogin) && (
-                  <details>
-                    <summary>{t.loginDetails}</summary>
-                    <p>
-                      {t.loginDirectory}: {account.codex?.credentialHome ?? account.nativeLogin?.home}
-                    </p>
-                    {(account.codex?.identity?.workspaceId ?? account.nativeLogin?.identity?.workspaceId) && (
-                      <p>
-                        {t.workspaceId}:{' '}
-                        {account.codex?.identity?.workspaceId ?? account.nativeLogin?.identity?.workspaceId}
-                      </p>
-                    )}
-                  </details>
-                )}
+                <AccountLoginDetails account={account} />
               </div>
             )}
           </td>

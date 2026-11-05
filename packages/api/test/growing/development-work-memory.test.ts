@@ -128,18 +128,20 @@ test('a terminal scope cannot be reopened by replay or a new source', async () =
     autoRenew: false as const,
     createdAt: 100,
   };
-  assert.ok(
-    store.replaceDeploymentWaitIfGeneration(first.task.id, {
-      expectedGeneration: null,
-      expectedDeploymentWait: first.task.deploymentWait,
-      expectedUpdatedAt: first.task.updatedAt,
-      deploymentWait: { await: active },
-    }),
-  );
-  store.closeEntrustedWork(first.task.id, {
-    expectedRevision: 1,
-    closure: { ...contract.closure, state: 'satisfied', evidenceRefs: ['artifact:accepted'] },
+  const waiting = store.replaceDeploymentWaitIfGeneration(first.task.id, {
+    expectedGeneration: null,
+    expectedDeploymentWait: first.task.deploymentWait,
+    expectedUpdatedAt: first.task.updatedAt,
+    deploymentWait: { await: active },
   });
+  assert.ok(waiting?.entrustedWork);
+  const closure = { ...contract.closure, state: 'satisfied' as const, evidenceRefs: ['artifact:accepted'] };
+  assert.equal(store.closeEntrustedWork(first.task.id, { expectedRevision: 1, closure }).kind, 'revision_conflict');
+  assert.deepEqual(store.get(first.task.id), waiting);
+  assert.equal(
+    store.closeEntrustedWork(first.task.id, { expectedRevision: waiting.entrustedWork.revision, closure }).kind,
+    'closed',
+  );
   assert.equal(store.get(first.task.id)?.deploymentWait?.await, undefined);
   assert.equal(store.get(first.task.id)?.deploymentWait?.waitOutcome?.reason, 'subject_terminal');
   assert.equal((await store.transitionDevelopmentWork(admit)).result, 'scope_closed');

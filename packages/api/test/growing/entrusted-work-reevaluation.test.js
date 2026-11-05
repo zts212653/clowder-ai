@@ -17,6 +17,7 @@ import { scheduleRoutes } from '../../dist/routes/schedule.js';
 import '../helpers/setup-cat-registry.js';
 
 const now = 1_788_220_000_000;
+const activeProducerIds = ['f246.approval', 'f306.runtime_interaction', 'f309.content_review'];
 
 function link(overrides = {}) {
   return {
@@ -135,6 +136,87 @@ function definition(reevaluation) {
 }
 
 describe('F310 typed F139 producer re-evaluation', () => {
+  test('current composition binds exactly its declared producers while historical IDs remain unavailable', async () => {
+    const adapters = activeProducerIds.map(passiveAdapter);
+    const catalog = new NeedsMeProducerCatalog(adapters, activeProducerIds);
+    assert.deepEqual(await catalog.listCurrentReceipts('owner-1'), []);
+    for (const id of activeProducerIds) assert.equal(catalog.get(id).producerId, id);
+    for (const id of ['f292.repair', 'f290.collective_work_result']) {
+      assert.throws(() => catalog.get(id), /not registered/u);
+    }
+    for (const id of activeProducerIds) {
+      assert.throws(
+        () =>
+          new NeedsMeProducerCatalog(
+            adapters.filter((a) => a.producerId !== id),
+            activeProducerIds,
+          ),
+      );
+    }
+    assert.throws(() => new NeedsMeProducerCatalog([...adapters, adapters[0]], activeProducerIds));
+    assert.throws(() => new NeedsMeProducerCatalog([...adapters, passiveAdapter('f292.repair')], activeProducerIds));
+    assert.throws(() => new NeedsMeProducerCatalog([passiveAdapter('unknown')], ['unknown']));
+    assert.throws(() => new NeedsMeProducerCatalog(adapters, [...activeProducerIds, activeProducerIds[0]]));
+  });
+
+  for (const producerId of ['f292.repair', 'f290.collective_work_result']) {
+    test(`historical ${producerId} survives SQLite round-trip and skips without effects`, async () => {
+      const db = new Database(':memory:');
+      try {
+        applyMigrations(db);
+        const store = new DynamicTaskStore(db);
+        const historical = link({ producer: { ...link().producer, producerId } });
+        store.insert(definition(historical));
+        const saved = store.getById(producerAttentionReevaluationTaskId(historical));
+        assert.deepEqual(saved.entrustedWorkReevaluation, historical);
+        const originalTask = task();
+        const beforeTask = structuredClone(originalTask);
+        const catalog = new NeedsMeProducerCatalog(
+          activeProducerIds.map((id) => ({
+            producerId: id,
+            listCurrentReceipts: async () => [],
+            readCurrentReceipt: async () => assert.fail('absent producer must not borrow another owner'),
+            reEvaluate: async () => assert.fail('absent producer must not execute'),
+          })),
+          activeProducerIds,
+        );
+        const spec = createProducerAttentionReevaluationTemplate({
+          tasks: { get: async () => originalTask },
+          producerCatalog: catalog,
+          invalidateProjection: () => assert.fail('absent producer must not invalidate'),
+        }).createSpec(saved.id, { trigger: saved.trigger, entrustedWorkReevaluation: saved.entrustedWorkReevaluation });
+        assert.deepEqual(await spec.admission.gate({ taskId: spec.id, lastRunAt: null, tickCount: 1 }), {
+          run: false,
+          reason: 'producer binding unavailable in current composition',
+        });
+        await spec.run.execute(historical, 'historical', { signal: new AbortController().signal, assignedCatId: null });
+        assert.deepEqual(store.getById(saved.id), saved);
+        assert.deepEqual(originalTask, beforeTask);
+      } finally {
+        db.close();
+      }
+    });
+  }
+
+  test('registered producer read errors remain visible rather than becoming an absent binding', async () => {
+    const failure = new Error('producer read failed');
+    const spec = createProducerAttentionReevaluationTaskSpec('read-failure', {
+      trigger: { type: 'once', fireAt: now + 30_000 },
+      link: link(),
+      tasks: { get: async () => task() },
+      producerCatalog: catalogWith({
+        ...passiveAdapter('f306.runtime_interaction'),
+        readCurrentReceipt: async () => {
+          throw failure;
+        },
+      }),
+    });
+    await assert.rejects(
+      () => spec.admission.gate({ taskId: spec.id, lastRunAt: null, tickCount: 1 }),
+      (error) => error === failure,
+    );
+  });
+
   test('the trigger persists exact Task and producer revisions with its canonical action', () => {
     const canonical = producerAttentionReevaluationLinkV1Schema.parse(link());
     assert.throws(

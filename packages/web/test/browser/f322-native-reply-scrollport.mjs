@@ -9,6 +9,7 @@ import {
 import {
   beginNativeReadingGesture,
   finishScrollProbeTrace,
+  placeNativeAuthorEdge,
   startScrollProbeTrace,
   waitForScrollProbe,
 } from './f322-native-scroll-probe-state.mjs';
@@ -80,21 +81,7 @@ export async function verifyNativeScrollport(page, row, out, name) {
       await beginNativeReadingGesture(page, row);
       if (await verifyCoarseDrawerHit(page, id, width, out, name)) await beginNativeReadingGesture(page, row);
       for (const edge of ['above', 'top', 'middle', 'bottom', 'below']) {
-        await row.evaluate((node, edge) => {
-          const port = node.closest('[data-chat-container]');
-          const bounds = port.getBoundingClientRect();
-          const top = Math.max(0, bounds.top + port.clientTop),
-            bottom = Math.min(window.innerHeight, bounds.top + port.clientTop + port.clientHeight);
-          const target = {
-            above: top - 1,
-            top: top + 1,
-            middle: (top + bottom) / 2,
-            bottom: bottom - 1,
-            below: bottom + 1,
-          }[edge];
-          const slot = node.querySelector('[data-message-action-slot]').getBoundingClientRect();
-          port.scrollTop += slot.top - target;
-        }, edge);
+        await placeNativeAuthorEdge(page, row, edge);
         await waitForScrollProbe(page, id, edge, width, out, name);
         const observation = await page.evaluate((id) => {
           const row = document.querySelector(`[data-message-id="${id}"]`);

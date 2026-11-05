@@ -61,6 +61,30 @@ describe('MCP file slice tools', () => {
     assert.equal(recovered, original);
   });
 
+  test('partial Markdown metadata is not presented as a complete reading of the document rules', async () => {
+    const { handleReadFileSlice } = await import('../dist/tools/file-tools.js');
+    const filePath = join(tempDir, 'guidance.md');
+    writeFileSync(
+      filePath,
+      ['---', 'theme: quiet', 'spacing: 8', '---', '# Rules', 'Use the current rule.'].join('\n'),
+    );
+
+    const partial = await handleReadFileSlice({ path: filePath, startLine: 1, endLine: 2 });
+    assert.match(partial.content[0].text, /document body has not been read/);
+    assert.match(partial.content[0].text, /Document body: .*startLine=5, endLine=124/);
+    assert.match(partial.content[0].text, /Next slice: .*startLine=3, endLine=4, charOffset=0/);
+    assert.ok(!partial.content[0].text.includes('Use the current rule.'));
+
+    const body = await handleReadFileSlice({ path: filePath, startLine: 5, endLine: 6 });
+    assert.match(body.content[0].text, /Use the current rule/);
+    assert.doesNotMatch(body.content[0].text, /document body has not been read|Next slice:/);
+
+    writeFileSync(filePath, ['---', ...Array(600).fill('theme: quiet'), '---', '# Far body'].join('\n'));
+    const distantBody = await handleReadFileSlice({ path: filePath, startLine: 1, endLine: 2 });
+    assert.doesNotMatch(distantBody.content[0].text, /Document body:|Far body/);
+    assert.match(distantBody.content[0].text, /Next slice:/);
+  });
+
   test('Live local reads require an explicit directory; ordinary callers retain the default data root', async () => {
     const { handleReadFileSlice } = await import('../dist/tools/file-tools.js');
     const docs = join(tempDir, 'approved-docs');

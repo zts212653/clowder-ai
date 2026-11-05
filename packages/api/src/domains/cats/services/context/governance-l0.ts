@@ -178,7 +178,6 @@ export function compileGovernanceL0FromMarkdown(markdown: string): string {
     '## 16. 实事求是',
     '### 46 hotfix 标签 + 跨猫升级 review',
     'fallback 层数检测协议',
-    '创意-实现解耦协议',
     '## 0. 身份契约',
     '## 17. 决策漏斗',
   ]) {
@@ -190,7 +189,6 @@ export function compileGovernanceL0FromMarkdown(markdown: string): string {
   const magicWords = extractMagicWords(markdown);
   const identityContract = extractFirstParagraphAfterHeading(markdown, '## 0. 身份契约');
   const fallbackProtocolLabel = extractProtocolLabel(markdown, 'fallback 层数检测协议');
-  const creativeProtocolLabel = extractProtocolLabel(markdown, '创意-实现解耦协议');
 
   return [
     '## 3. 家规（shared-rules.md）',
@@ -211,6 +209,7 @@ export function compileGovernanceL0FromMarkdown(markdown: string): string {
     '- 实事求是：结论必须基于多源证据；没查完就说还没查完。',
     '- @ 是路由指令；收到 @ 后三选一：接 / 退 / 升。状态描述不是球权声明。',
     '- 球权只有第一人称；唯一凭据是 @ 或 hold_ball 动作本身。',
+    `- ${extractFirstParagraphAfterHeading(markdown, '### A2A 状态迁移')}`,
     `- ${extractFirstParagraphAfterHeading(markdown, '### 收尾找')}`,
     '- 等外部条件走 `cat_cafe_hold_ball(...)` 或结构化回调，不把云端 / GitHub bot 投射成本地猫。',
     '- 共享状态文件只在 main 改，改完立刻 `git commit + git push`。',
@@ -224,7 +223,6 @@ export function compileGovernanceL0FromMarkdown(markdown: string): string {
     '### 治理协议（per-family）',
     '- 46 hotfix 止血：fix/hotfix/quick fix/minimal fix/band-aid/temp/workaround → hotfix；跨猫 review 铁律：hotfix PR 必须由非作者 review；按风险默认只找一只，同族也行，不允许 self-merge；2 周升级 review 三选一。',
     `- ${fallbackProtocolLabel}：同一文件新增 ≥3 层 fallback → 坐标系自检、替代方案评估、说明每层为何不能去掉。`,
-    `- ${creativeProtocolLabel}：发现问题 ≠ 动手实现；记录 + handoff；白名单外代码改动需要 Dry Run Gate。`,
     '',
     '### 决策漏斗',
     '- SOP 流程推进不是决策；能翻代码解决的不要问人。详见 `decision-matrix.md`。',

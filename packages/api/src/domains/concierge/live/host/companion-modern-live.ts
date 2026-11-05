@@ -9,11 +9,12 @@ const object = (value: unknown): Record<string, unknown> => {
 
 /** Stable receipts describe backend acceptance, never voice append or playback. */
 export async function sendCompanionText(options: {
-  client: CompanionOwnerClient;
+  client: Pick<CompanionOwnerClient, 'request'>;
   text: string;
   clientMessageId: string;
   callId?: string;
   modern: boolean;
+  composerDraftRevision?: number;
   conversationThread(): Promise<string>;
 }): Promise<ModernReply | { kind: 'delivery'; delivery: 'accepted' | 'unconfirmed' }> {
   const { client, callId, clientMessageId } = options;
@@ -38,6 +39,9 @@ export async function sendCompanionText(options: {
           content: options.text,
           threadId: await options.conversationThread(),
           idempotencyKey: clientMessageId,
+          ...(options.composerDraftRevision === undefined
+            ? {}
+            : { composerDraftRevision: options.composerDraftRevision }),
         });
   } catch (error) {
     if (error instanceof CompanionBridgeError && error.code === 'unavailable') return unconfirmed();

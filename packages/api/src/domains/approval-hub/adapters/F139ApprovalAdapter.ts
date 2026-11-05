@@ -1,7 +1,11 @@
 import type { ApprovalItem, ScheduleMutationProposal, SettledApprovalItem } from '@cat-cafe/shared';
 import type { ScheduleMutationProposalStore } from '../../../infrastructure/scheduler/ScheduleMutationProposalStore.js';
+import type { SettledHistoryPageOptions } from '../../../utils/settled-history-page.js';
 import type { IApprovalAdapter, ListSettledOpts } from '../ports/IApprovalAdapter.js';
+import { type ApprovalDecisionRead, projectApprovalDecisionRead } from '../ports/IApprovalAdapter.js';
+import { projectSettledPage } from '../project-settled-page.js';
 import { compactApprovalProjections, projectApprovalNavigation } from '../projectApprovalNavigation.js';
+import { projectSettledDecisionFacts } from '../settled-decision-facts.js';
 
 const DEFAULT_SETTLED_LIMIT = 50;
 
@@ -10,8 +14,18 @@ export class F139ApprovalAdapter implements IApprovalAdapter {
 
   constructor(private readonly store: ScheduleMutationProposalStore) {}
 
+  async listSettledPage(owner: string, options: SettledHistoryPageOptions) {
+    return projectSettledPage(this.store, owner, options, toSettledItem);
+  }
+
   listPending(userId: string): ApprovalItem[] {
     return compactApprovalProjections(this.store.listPending(userId).map(toItem));
+  }
+
+  async readDecision(userId: string, proposalId: string): Promise<ApprovalDecisionRead> {
+    const p = await this.store.getById(proposalId);
+    if (!p || p.ownerUserId !== userId) return { state: 'closed' };
+    return projectApprovalDecisionRead(p.status, () => toSettledItem(p), p.rejectionReason);
   }
 
   listSettled(userId: string, opts?: ListSettledOpts): SettledApprovalItem[] {
@@ -45,6 +59,11 @@ function toSettledItem(proposal: ScheduleMutationProposal): SettledApprovalItem 
   }
   const navigation = projectApprovalNavigation(proposal, {});
   if (!navigation) return null;
+  const decision = projectSettledDecisionFacts(proposal);
+  const checkpoint = proposal.effectCheckpoint;
+  const taskId = proposal.mutation.kind === 'create' ? proposal.mutation.task.id : proposal.mutation.taskId;
+  const confirmed =
+    proposal.status === 'approved' && checkpoint?.kind === proposal.mutation.kind && checkpoint.taskId === taskId;
   return {
     proposalId: proposal.proposalId,
     sourceFeatureId: 'F139',
@@ -52,10 +71,18 @@ function toSettledItem(proposal: ScheduleMutationProposal): SettledApprovalItem 
     ownerUserId: proposal.ownerUserId,
     status: proposal.status,
     summary: summary(proposal),
-    detail: detail(proposal),
+    detail: {
+      ...detail(proposal),
+      ...decision.detail,
+      ...(confirmed
+        ? {
+            canonicalEffectProofRef: `schedule-proposal:${proposal.proposalId}:checkpoint:${checkpoint.kind}:${taskId}`,
+          }
+        : {}),
+    },
     navigation,
-    decidedAt: proposal.approvedAt ?? proposal.rejectedAt ?? 0,
-    decidedBy: proposal.approvedBy ?? proposal.rejectedBy ?? '',
+    decidedAt: decision.decidedAt,
+    decidedBy: decision.decidedBy,
     createdAt: proposal.createdAt,
   };
 }

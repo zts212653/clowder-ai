@@ -61,7 +61,7 @@ export async function resolveTaskExecutionBinding(
     catId,
   };
   if (lease.holderThreadId === task.threadId && task.ownerCatId === catId) return { kind: 'ready', binding };
-  if (!task.ownerCatId || !task.userId || !task.entrustedWork?.developmentScope) return { kind: 'mismatch' };
+  if (!task.ownerCatId || !task.userId) return { kind: 'mismatch' };
   if (!delegateProvider) return { kind: 'source_unavailable' };
 
   let delegates: Awaited<ReturnType<TaskApprovedDelegateProvider['getForTask']>>;
@@ -71,7 +71,8 @@ export async function resolveTaskExecutionBinding(
       task.threadId,
       task.ownerCatId,
       task.userId,
-      task.entrustedWork.developmentScope,
+      task.entrustedWork?.developmentScope,
+      task.title,
     );
   } catch {
     return { kind: 'source_unavailable' };

@@ -14,6 +14,7 @@ import { useChatStore } from '@/stores/chatStore';
 
 const threadId = 'settlement-browser';
 const source: Message = {
+  from: { kind: 'user', userId: 'default-user' },
   id: 'm',
   type: 'user',
   content: '审阅这条消息',
@@ -25,6 +26,7 @@ const source: Message = {
   },
 };
 const response: Message = {
+  from: { kind: 'agent', catId: 'codex-astra' },
   id: 'r',
   type: 'assistant',
   catId: 'codex-astra',
@@ -61,10 +63,11 @@ useChatStore.setState({
 });
 function Proof() {
   const [mode, setMode] = useState('guard');
-  const failed = mode === 'failed';
+  const failed = mode === 'failed' || mode === 'failed-body';
   const r: Message = failed
     ? {
         ...response,
+        content: mode === 'failed-body' ? '回复失败。\n\n原执行超时：1846576ms，进程仍存活。' : '',
         lifecycle:
           response.lifecycle?.kind === 'response'
             ? { ...response.lifecycle, status: 'failed', completedAt: 3 }
@@ -82,6 +85,7 @@ function Proof() {
         <button onClick={() => setMode('gone')}>原执行结束但无回执</button>
         <button onClick={() => setMode('replacement')}>同猫开始其他工作</button>
         <button onClick={() => setMode('failed')}>原回复超时</button>
+        <button onClick={() => setMode('failed-body')}>原回复错误正文</button>
       </div>
       <MessageDispatchAvatars
         message={source}

@@ -183,6 +183,7 @@ export type MemoryOwnerAction =
 export type MemoryOwnerActionKind = MemoryOwnerAction['action'];
 export type MemoryOwnerActionOutcome = 'applied' | 'replayed';
 export type MemoryOwnerActionError =
+  | 'invalid_content'
   | 'not_available'
   | 'stale_revision'
   | 'source_unavailable'

@@ -45,18 +45,18 @@ describe('cat_cafe_cross_post_message assign_work retry identity', () => {
       effectClass: 'assign_work',
       clientMessageId: 'assign-work-review-42',
       proposedAction: {
-        subjectRef: 'pr:owner/repo#42',
-        actionFamily: 'review',
-        successorSlot: 'reviewer',
+        subjectRef: 'subject:task:work-42',
+        actionFamily: 'implement',
+        successorSlot: 'implementer',
         mode: 'single',
-        terminalPredicate: { kind: 'review_delivered', headSha: 'a'.repeat(40) },
+        terminalPredicate: { kind: 'task_done' },
       },
     });
 
     assert.equal(result.isError, undefined);
     const body = JSON.parse(capturedOptions.body);
     assert.equal(body.clientMessageId, 'assign-work-review-42');
-    assert.equal(body.proposedAction.actionFamily, 'review');
+    assert.equal(body.proposedAction.actionFamily, 'implement');
   });
 
   it('fails closed before transport when assign_work has no proposed action', async () => {

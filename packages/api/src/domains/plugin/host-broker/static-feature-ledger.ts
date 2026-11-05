@@ -13,27 +13,21 @@ const epoch = z
   })
   .strict();
 const preference = z.object({ pluginInstanceId: id, featureId: id, enabled: z.boolean() }).strict();
-const lease = z
-  .object({
-    executionLease: id,
-    pluginInstanceId: id,
-    featureId: id,
-    packageRevision: id,
-    integrityEpoch: revision,
-    activationRevision: revision,
-    lifecycleRevision: revision,
-    grantRevision: revision,
-    // Closed Host admission classes: existing zero-effect editors, or a companion window.
-    // This records the grant; it never grants media capture or general package execution.
-    grantedCapabilities: z.union([z.tuple([]), z.tuple([z.literal('windows.create')])]),
-    connectionId: id,
-    brokerSessionId: id,
-    runtimeLeaseId: id,
-    state: z.enum(['provisioning', 'active', 'revoked']),
-    contributionIds: z.array(id),
-    updatedAt: z.number().int().safe().nonnegative(),
-  })
-  .strict();
+const lease = z.object({
+  executionLease: id,
+  pluginInstanceId: id,
+  featureId: id,
+  packageRevision: id,
+  integrityEpoch: revision,
+  activationRevision: revision,
+  lifecycleRevision: revision,
+  connectionId: id,
+  brokerSessionId: id,
+  runtimeLeaseId: id,
+  state: z.enum(['provisioning', 'active', 'revoked']),
+  contributionIds: z.array(id),
+  updatedAt: z.number().int().safe().nonnegative(),
+});
 const ledger = z
   .object({
     epochs: z.array(epoch),
@@ -131,4 +125,43 @@ export function containStaticFeatureEpoch(
       : record,
   );
   return contained;
+}
+
+/** Instance projections never carry another instance's history across the worker boundary. */
+export function selectStaticFeatures(ledger: StaticFeatureLedger, instanceId?: string): StaticFeatureLedger {
+  if (instanceId === undefined) return structuredClone(ledger);
+  return structuredClone({
+    epochs: ledger.epochs.filter((r) => r.pluginInstanceId === instanceId),
+    preferences: ledger.preferences.filter((r) => r.pluginInstanceId === instanceId),
+    leases: ledger.leases.filter((r) => r.pluginInstanceId === instanceId),
+  });
+}
+export function mergeStaticFeatures(
+  current: StaticFeatureLedger,
+  update: StaticFeatureLedger,
+  instanceId?: string,
+): StaticFeatureLedger {
+  if (instanceId === undefined) return structuredClone(update);
+  if ([...update.epochs, ...update.preferences, ...update.leases].some((r) => r.pluginInstanceId !== instanceId))
+    throw new HostBrokerError('BROKER_INVARIANT', 'Feature update escaped its instance');
+  return {
+    epochs: [...current.epochs.filter((r) => r.pluginInstanceId !== instanceId), ...update.epochs],
+    preferences: [...current.preferences.filter((r) => r.pluginInstanceId !== instanceId), ...update.preferences],
+    leases: [...current.leases.filter((r) => r.pluginInstanceId !== instanceId), ...update.leases],
+  };
+}
+
+export function updateStaticFeatures(current: StaticFeatureLedger, update: StaticFeatureLedger): StaticFeatureLedger {
+  const merge = <T>(existing: T[], next: T[], key: (row: T) => string): T[] => {
+    const records = new Map(existing.map((row) => [key(row), row]));
+    for (const row of next) records.set(key(row), structuredClone(row));
+    return [...records.values()];
+  };
+  return {
+    epochs: merge(current.epochs, update.epochs, (r) => JSON.stringify([r.pluginInstanceId, r.integrityEpoch])),
+    preferences: merge(current.preferences, update.preferences, (r) =>
+      JSON.stringify([r.pluginInstanceId, r.featureId]),
+    ),
+    leases: merge(current.leases, update.leases, (r) => r.executionLease),
+  };
 }

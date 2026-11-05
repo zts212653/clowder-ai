@@ -1,17 +1,19 @@
-import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { generateA2aLiveVerdict } from '../a2a/eval-a2a-live-verdict.js';
 import { loadDomains } from '../hub/eval-hub-read-model.js';
-import type { VerdictGenerator } from './types.js';
+import { readA2aEvaluatorEvidence } from './a2a-evaluator-source.js';
+import type { GeneratorDeps, VerdictGenerator } from './types.js';
 import { isA2aSourceRefs, resolveSourceRefsInRoot, validateSourceRefsFormat } from './validation.js';
+import type { A2aSnapshotAttributionRefs } from './verdict-source-types.js';
 
 /**
  * F192 Phase H AC-H4 (砚砚 R4 P1 + cloud R4 P1) — refactored in PR-2 (砚砚 R1 Q1):
  * a2a adapter is now SELF-CONTAINED — handler passes raw sourceRefs + both roots
  * (live + isolated), adapter does ALL source resolution internally:
  *   1. Validate basename format (validateSourceRefsFormat)
- *   2. Resolve under LIVE harness-feedback root (snapshots/ + attributions/ are
- *      gitignored — exist only where harness wrote them, 砚砚 R17 P1 cloud)
+ *   2. Resolve under the live root, or explicitly select the declared evaluator
+ *      with exact checkout HEAD and two content hashes (no caller-supplied path)
  *   3. Copy raw evidence into ISOLATED worktree so generateA2aLiveVerdict's
  *      in-repo path invariant holds (provenance.relative() rejects outside-repo)
  *   4. Call generateA2aLiveVerdict with submittedPacket (砚砚 R8 P1: cat owns verdict)
@@ -33,24 +35,10 @@ export function createA2aGeneratorAdapter(): VerdictGenerator {
     const snap = sourceRefs.snapshotName as string;
     const attr = sourceRefs.attributionName as string;
 
-    // 砚砚 R17 P1 cloud: snapshots/ + attributions/ are GITIGNORED — only exist in
-    // LIVE checkout where harness wrote them, NEVER on origin/main. So resolve in
-    // LIVE root, then copy into ISOLATED so generator's in-repo path invariant holds
-    // (eval-a2a-live-verdict.ts uses relative() which rejects outside-repo paths).
-    const liveRefs = resolveSourceRefsInRoot(deps.liveHarnessFeedbackRoot, snap, attr);
-    if (!liveRefs.ok) throw new Error(`invalid_source_ref: ${liveRefs.reason}`);
-    if (!existsSync(liveRefs.refs.snapshotPath) || !existsSync(liveRefs.refs.attributionPath)) {
-      throw new Error('evidence_not_found: sourceRefs not found in live harness-feedback');
+    if (sourceRefs.source && packet.domainId !== 'eval:a2a') {
+      throw new Error('invalid_source_ref: designated evaluator is only available for eval:a2a');
     }
-
-    const isoSnapDir = resolve(deps.harnessFeedbackRoot, 'snapshots');
-    const isoAttrDir = resolve(deps.harnessFeedbackRoot, 'attributions');
-    mkdirSync(isoSnapDir, { recursive: true });
-    mkdirSync(isoAttrDir, { recursive: true });
-    const isoSnapPath = resolve(isoSnapDir, snap);
-    const isoAttrPath = resolve(isoAttrDir, attr);
-    copyFileSync(liveRefs.refs.snapshotPath, isoSnapPath);
-    copyFileSync(liveRefs.refs.attributionPath, isoAttrPath);
+    const evidenceSource = await stageRawEvidence(sourceRefs, deps, snap, attr);
 
     // Load domain entry from registry inside the isolated worktree's harness root.
     const domains = loadDomains(deps.harnessFeedbackRoot);
@@ -61,14 +49,38 @@ export function createA2aGeneratorAdapter(): VerdictGenerator {
     // (not regenerated from evidence).
     const artifact = generateA2aLiveVerdict({
       verdictId: packet.id,
-      rawSnapshotPath: isoSnapPath,
-      rawAttributionPath: isoAttrPath,
+      rawSnapshotPath: resolve(deps.harnessFeedbackRoot, 'snapshots', snap),
+      rawAttributionPath: resolve(deps.harnessFeedbackRoot, 'attributions', attr),
       harnessFeedbackRoot: deps.harnessFeedbackRoot,
       domain,
       generatedAt: deps.publicationTime,
       submittedPacket: packet,
+      ...(evidenceSource ? { evidenceSource } : {}),
     });
 
     return { verdictPath: artifact.path, bundleDir: artifact.bundleDir };
   };
+}
+
+async function stageRawEvidence(refs: A2aSnapshotAttributionRefs, deps: GeneratorDeps, snap: string, attr: string) {
+  const isoSnapDir = resolve(deps.harnessFeedbackRoot, 'snapshots');
+  const isoAttrDir = resolve(deps.harnessFeedbackRoot, 'attributions');
+  if (refs.source) {
+    const evidence = await readA2aEvaluatorEvidence(deps.liveHarnessFeedbackRoot, snap, attr, refs.source);
+    mkdirSync(isoSnapDir, { recursive: true });
+    mkdirSync(isoAttrDir, { recursive: true });
+    writeFileSync(resolve(isoSnapDir, snap), evidence.snapshot);
+    writeFileSync(resolve(isoAttrDir, attr), evidence.attribution);
+    return evidence.provenance;
+  }
+  const liveRefs = resolveSourceRefsInRoot(deps.liveHarnessFeedbackRoot, snap, attr);
+  if (!liveRefs.ok) throw new Error(`invalid_source_ref: ${liveRefs.reason}`);
+  if (!existsSync(liveRefs.refs.snapshotPath) || !existsSync(liveRefs.refs.attributionPath)) {
+    throw new Error('evidence_not_found: sourceRefs not found in live harness-feedback');
+  }
+  mkdirSync(isoSnapDir, { recursive: true });
+  mkdirSync(isoAttrDir, { recursive: true });
+  copyFileSync(liveRefs.refs.snapshotPath, resolve(isoSnapDir, snap));
+  copyFileSync(liveRefs.refs.attributionPath, resolve(isoAttrDir, attr));
+  return undefined;
 }

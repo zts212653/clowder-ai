@@ -1,2 +1,12 @@
-packages/api/src/plugins/cloud-cat-personal-host/extension/content-script.js text eol=lf
 .cat-cafe-runtime-revision export-subst
+
+# Prebuild fingerprints and tracked generated inputs must survive native Windows checkout.
+packages/web/src/app/*.css text eol=lf
+packages/ui/src/styles.css text eol=lf
+packages/web/src/generated/vendor-stylesheets.json text eol=lf
+packages/web/public/manifest.json text eol=lf
+
+# Fixed quality materials use byte hashes across Windows and macOS checkouts.
+docs/plans/2026-10-29-role-agent-refactor/quality-review-samples/** text eol=lf
+packages/api/test/role-agent-review-samples.test.js text eol=lf
+scripts/secret-dsh-plugin.mjs text eol=lf

@@ -137,4 +137,88 @@ describe('Bootcamp Flow Integration', () => {
     const finalThread = await threadStore.get(thread.id);
     assert.equal(finalThread.pinned, true, 'Thread should be auto-pinned after farewell');
   });
+  test('onboarding journey retries return one stable thread and preserve server completion', async () => {
+    const app = await createApp();
+    const payload = {
+      title: '首启协作旅程',
+      bootcampState: { v: 1, phase: 'phase-1-intro', leadCat: 'codex', startedAt: 1000, journeyId: 'journey-1234' },
+    };
+    const request = {
+      method: 'POST',
+      url: '/api/threads',
+      headers: { 'x-cat-cafe-user': 'user-1', 'x-cat-cafe-onboarding-journey': 'journey-1234' },
+      payload,
+    };
+    const [first, retry] = await Promise.all([app.inject(request), app.inject(request)]);
+    assert.equal(first.statusCode, 201);
+    assert.equal(retry.statusCode, 200);
+    const firstThread = JSON.parse(first.body);
+    const retryThread = JSON.parse(retry.body);
+    assert.equal(firstThread.id, retryThread.id);
+    assert.equal((await threadStore.list('user-1')).filter((thread) => thread.id === firstThread.id).length, 1);
+
+    const patched = await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/${firstThread.id}`,
+      headers: { 'x-cat-cafe-user': 'user-1' },
+      payload: { bootcampState: { ...payload.bootcampState, completedAt: 2000 } },
+    });
+    assert.equal(patched.statusCode, 200);
+    assert.equal(JSON.parse(patched.body).bootcampState.completedAt, 2000);
+    await app.close();
+  });
+
+  test('onboarding IDs preserve punctuation and ownership across colliding user and journey inputs', async () => {
+    const app = await createApp();
+    const payload = {
+      title: '首启协作旅程',
+      bootcampState: { v: 1, phase: 'phase-1-intro', leadCat: 'codex', startedAt: 1000, journeyId: 'journey-1234' },
+    };
+    const first = await app.inject({
+      method: 'POST',
+      url: '/api/threads',
+      headers: { 'x-cat-cafe-user': 'user.a', 'x-cat-cafe-onboarding-journey': payload.bootcampState.journeyId },
+      payload,
+    });
+    const second = await app.inject({
+      method: 'POST',
+      url: '/api/threads',
+      headers: { 'x-cat-cafe-user': 'usera', 'x-cat-cafe-onboarding-journey': payload.bootcampState.journeyId },
+      payload,
+    });
+    assert.equal(first.statusCode, 201);
+    assert.equal(second.statusCode, 201);
+    assert.notEqual(first.json().id, second.json().id);
+    const longA = await app.inject({
+      method: 'POST',
+      url: '/api/threads',
+      headers: { 'x-cat-cafe-user': 'same-user', 'x-cat-cafe-onboarding-journey': `journey-${'a'.repeat(120)}-left` },
+      payload: {
+        ...payload,
+        bootcampState: { ...payload.bootcampState, journeyId: `journey-${'a'.repeat(120)}-left` },
+      },
+    });
+    const longB = await app.inject({
+      method: 'POST',
+      url: '/api/threads',
+      headers: { 'x-cat-cafe-user': 'same-user', 'x-cat-cafe-onboarding-journey': `journey-${'a'.repeat(120)}-right` },
+      payload: {
+        ...payload,
+        bootcampState: { ...payload.bootcampState, journeyId: `journey-${'a'.repeat(120)}-right` },
+      },
+    });
+    assert.equal(longA.statusCode, 201);
+    assert.equal(longB.statusCode, 201);
+    assert.notEqual(longA.json().id, longB.json().id);
+    const foreignRead = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${first.json().id}`,
+      headers: { 'x-cat-cafe-user': 'usera' },
+    });
+    // Generic thread reads keep their existing public contract. Ownership is
+    // enforced at onboarding ensure, where the stable journey identity is
+    // established, rather than by changing every thread detail read.
+    assert.equal(foreignRead.statusCode, 200);
+    await app.close();
+  });
 });

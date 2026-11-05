@@ -1,14 +1,13 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
 import { after, beforeEach, describe, it } from 'node:test';
 import {
-  loadAllPluginConfigs,
   readPluginConfig,
-  readPluginEnvSnapshot,
-  resolvePluginEnv,
+  readPluginOperationState,
   writePluginConfig,
+  writePluginOperationState,
 } from '../dist/domains/plugin/plugin-config-store.js';
 
 describe('plugin-config-store', () => {
@@ -36,7 +35,7 @@ describe('plugin-config-store', () => {
     assert.deepEqual(result, {});
   });
 
-  it('writePluginConfig creates JSON file and populates configCache (not process.env)', () => {
+  it('writePluginConfig persists JSON without mutating process.env', () => {
     trackEnv('TEST_PLUGIN_KEY');
     trackEnv('TEST_PLUGIN_SECRET');
     delete process.env.TEST_PLUGIN_KEY;
@@ -54,21 +53,6 @@ describe('plugin-config-store', () => {
     const stored = readPluginConfig(tmpDir, 'test-plugin');
     assert.equal(stored.TEST_PLUGIN_KEY, 'abc123');
     assert.equal(stored.TEST_PLUGIN_SECRET, 'secret456');
-
-    const manifest = {
-      id: 'test-plugin',
-      name: 'Test',
-      version: '1.0.0',
-      builtin: false,
-      config: [
-        { envName: 'TEST_PLUGIN_KEY', label: 'Key', sensitive: false, required: true },
-        { envName: 'TEST_PLUGIN_SECRET', label: 'Secret', sensitive: true, required: true },
-      ],
-      resources: [],
-    };
-    const env = resolvePluginEnv([manifest]);
-    assert.equal(env.TEST_PLUGIN_KEY, 'abc123');
-    assert.equal(env.TEST_PLUGIN_SECRET, 'secret456');
   });
 
   it('writePluginConfig merges with existing config', () => {
@@ -83,28 +67,13 @@ describe('plugin-config-store', () => {
     assert.equal(stored.TEST_PLUGIN_B, 'second');
   });
 
-  it('writePluginConfig tombstones key when value is null', () => {
-    trackEnv('TEST_PLUGIN_REMOVE');
-
-    const manifest = {
-      id: 'test-plugin',
-      name: 'Test',
-      version: '1.0.0',
-      builtin: false,
-      config: [{ envName: 'TEST_PLUGIN_REMOVE', label: 'Remove', sensitive: false, required: false }],
-      resources: [],
-    };
-
+  it('writePluginConfig persists a null tombstone while reads omit cleared values', () => {
     writePluginConfig(tmpDir, 'test-plugin', [{ name: 'TEST_PLUGIN_REMOVE', value: 'exists' }]);
-    let env = resolvePluginEnv([manifest]);
-    assert.equal(env.TEST_PLUGIN_REMOVE, 'exists');
-
+    assert.equal(readPluginConfig(tmpDir, 'test-plugin').TEST_PLUGIN_REMOVE, 'exists');
     writePluginConfig(tmpDir, 'test-plugin', [{ name: 'TEST_PLUGIN_REMOVE', value: null }]);
-    env = resolvePluginEnv([manifest]);
-    assert.equal(env.TEST_PLUGIN_REMOVE, undefined, 'null tombstone hides value');
-
-    const stored = readPluginConfig(tmpDir, 'test-plugin');
-    assert.equal(stored.TEST_PLUGIN_REMOVE, undefined);
+    assert.equal(readPluginConfig(tmpDir, 'test-plugin').TEST_PLUGIN_REMOVE, undefined);
+    const stored = JSON.parse(readFileSync(join(tmpDir, '.cat-cafe/plugin-config/test-plugin.json'), 'utf8'));
+    assert.equal(stored.TEST_PLUGIN_REMOVE, null);
   });
 
   it('writePluginConfig reports no changes when values are identical', () => {
@@ -118,77 +87,19 @@ describe('plugin-config-store', () => {
     assert.deepEqual(changedKeys, []);
   });
 
-  it('loadAllPluginConfigs populates configCache for manifest-declared keys only', () => {
-    trackEnv('LOAD_TEST_KEY');
-    trackEnv('LOAD_TEST_ROGUE');
-
-    writePluginConfig(tmpDir, 'load-test', [
-      { name: 'LOAD_TEST_KEY', value: 'loaded' },
-      { name: 'LOAD_TEST_ROGUE', value: 'injected' },
-    ]);
-    delete process.env.LOAD_TEST_KEY;
-    delete process.env.LOAD_TEST_ROGUE;
-
-    const manifest = {
-      id: 'load-test',
-      name: 'Load Test',
-      version: '1.0.0',
-      builtin: false,
-      config: [{ envName: 'LOAD_TEST_KEY', label: 'Key', sensitive: false, required: true }],
-      resources: [],
-    };
-    const count = loadAllPluginConfigs(tmpDir, [manifest]);
-    assert.equal(count, 1);
-    assert.equal(process.env.LOAD_TEST_KEY, undefined, 'must not write process.env');
-
-    const env = resolvePluginEnv([manifest]);
-    assert.equal(env.LOAD_TEST_KEY, 'loaded');
-    assert.equal(env.LOAD_TEST_ROGUE, undefined, 'undeclared key must not be resolved');
-  });
-
-  it('resolvePluginEnv null tombstone overrides dotenv residue', () => {
+  it('persisted tombstones do not fall back to process environment values', () => {
     trackEnv('TOMBSTONE_KEY');
-
     process.env.TOMBSTONE_KEY = 'from-dotenv';
     writePluginConfig(tmpDir, 'tomb-test', [{ name: 'TOMBSTONE_KEY', value: null }]);
-
-    const manifest = {
-      id: 'tomb-test',
-      name: 'Tomb Test',
-      version: '1.0.0',
-      builtin: false,
-      config: [{ envName: 'TOMBSTONE_KEY', label: 'Key', sensitive: false, required: true }],
-      resources: [],
-    };
-    loadAllPluginConfigs(tmpDir, [manifest]);
-    const env = resolvePluginEnv([manifest]);
-    assert.equal(env.TOMBSTONE_KEY, undefined, 'null tombstone must suppress env fallback');
-    assert.equal(process.env.TOMBSTONE_KEY, 'from-dotenv', 'process.env must not be mutated');
+    assert.equal(readPluginConfig(tmpDir, 'tomb-test').TOMBSTONE_KEY, undefined);
+    assert.equal(process.env.TOMBSTONE_KEY, 'from-dotenv');
   });
 
-  it('reads a fresh projection snapshot without replacing the active runtime cache', () => {
-    trackEnv('SNAPSHOT_TEST_KEY');
-    delete process.env.SNAPSHOT_TEST_KEY;
-    const manifest = {
-      id: 'snapshot-test',
-      name: 'Snapshot Test',
-      version: '1.0.0',
-      builtin: false,
-      config: [{ envName: 'SNAPSHOT_TEST_KEY', label: 'Key', sensitive: false, required: true }],
-      resources: [],
-    };
-    writePluginConfig(tmpDir, manifest.id, [{ name: 'SNAPSHOT_TEST_KEY', value: 'active-runtime-value' }]);
-    const configPath = join(tmpDir, '.cat-cafe', 'plugin-config', `${manifest.id}.json`);
+  it('reads fresh persisted values without a process-local configuration cache', () => {
+    writePluginConfig(tmpDir, 'snapshot-test', [{ name: 'SNAPSHOT_TEST_KEY', value: 'previous-value' }]);
+    const configPath = join(tmpDir, '.cat-cafe/plugin-config/snapshot-test.json');
     writeFileSync(configPath, `${JSON.stringify({ SNAPSHOT_TEST_KEY: null })}\n`, 'utf8');
-
-    const projection = readPluginEnvSnapshot(tmpDir, [manifest]);
-
-    assert.equal(projection.SNAPSHOT_TEST_KEY, undefined, 'projection honors the fresh disk tombstone');
-    assert.equal(
-      resolvePluginEnv([manifest]).SNAPSHOT_TEST_KEY,
-      'active-runtime-value',
-      'read-only projection must not replace the live runtime cache',
-    );
+    assert.equal(readPluginConfig(tmpDir, 'snapshot-test').SNAPSHOT_TEST_KEY, undefined);
   });
 
   it('JSON file has restricted permissions (0o600)', () => {
@@ -198,6 +109,7 @@ describe('plugin-config-store', () => {
 
     const configPath = join(tmpDir, '.cat-cafe', 'plugin-config', 'perm-test.json');
     assert.ok(existsSync(configPath));
+    assert.equal(statSync(configPath).mode & 0o777, 0o600);
 
     const raw = readFileSync(configPath, 'utf-8');
     const parsed = JSON.parse(raw);
@@ -218,4 +130,31 @@ describe('plugin-config-store', () => {
     assert.equal(b.PLUGIN_B_KEY, 'b');
     assert.equal(b.PLUGIN_A_KEY, undefined);
   });
+});
+
+it('persists only generic action position and never restores old action output', () => {
+  const root = mkdtempSync(join(os.tmpdir(), 'action-output-'));
+  const file = join(root, '.cat-cafe/plugin-config/generic.json');
+  writePluginConfig(root, 'generic', [{ name: 'ACCESS_TOKEN', value: 'saved-config' }]);
+  writePluginOperationState(root, 'generic', 'code-check', {
+    currentAction: 'confirm-code',
+    updatedAt: 7,
+    lastResult: { render: 'text', data: { code: '1234', cursor: 'private' } },
+  });
+  const stored = JSON.parse(readFileSync(file, 'utf8'));
+  assert.equal(JSON.stringify(stored).includes('private'), false);
+  assert.deepEqual(readPluginOperationState(root, 'generic', 'code-check'), {
+    currentAction: 'confirm-code',
+    updatedAt: 7,
+  });
+  const operationsKey = Object.keys(stored).find((key) => key !== 'ACCESS_TOKEN');
+  stored[operationsKey]['code-check'].lastResult = { render: 'img', data: { url: 'old-image', cursor: 'old-cursor' } };
+  writeFileSync(file, JSON.stringify(stored));
+  assert.equal(readPluginOperationState(root, 'generic', 'code-check').lastResult, undefined);
+  assert.equal(readPluginConfig(root, 'generic').ACCESS_TOKEN, 'saved-config');
+  assert.equal(
+    JSON.parse(readFileSync(file, 'utf8'))[operationsKey]['code-check'].lastResult.data.cursor,
+    'old-cursor',
+    'read projection does not delete owner data',
+  );
 });

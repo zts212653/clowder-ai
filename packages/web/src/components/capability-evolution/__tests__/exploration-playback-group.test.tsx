@@ -22,14 +22,14 @@ afterEach(() => {
   vi.restoreAllMocks();
   delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
 });
-async function render(enabled = true, suffix = '') {
+async function render(enabled = true, suffix = '', count: 2 | 4 = 2) {
   const data = evolutionExplorationReviewV1Schema.parse(explorationFixture({ withDetail: true }));
   if (data.status !== 'resolved' || data.details[0]?.status !== 'resolved') throw Error('unresolved fixture');
   const record = data.details[0]!.records[0]!;
   await act(async () =>
     root.render(
-      <ExplorationPlaybackGroup key={suffix} enabled={enabled}>
-        {['left', 'right'].map((side) => (
+      <ExplorationPlaybackGroup key={suffix} enabled={enabled} expectedPlayers={count}>
+        {(count === 4 ? ['v1', 'v2', 'v3', 'v4'] : ['left', 'right']).map((side) => (
           <ExplorationMedia
             key={side}
             programId={data.programRef.ownerStateRef}
@@ -55,6 +55,21 @@ async function render(enabled = true, suffix = '') {
     ),
   );
 }
+it('waits for all four same-scene originals and pauses the complete group together', async () => {
+  await render(true, '', 4);
+  await act(async () => button('四段同步播放').click());
+  const videos = [...host.querySelectorAll('video')];
+  expect(videos).toHaveLength(4);
+  for (const video of videos) Object.defineProperty(video, 'readyState', { value: 1, configurable: true });
+  await act(async () =>
+    videos.slice(0, 3).forEach((video) => video.dispatchEvent(new Event('loadedmetadata', { bubbles: true }))),
+  );
+  expect(HTMLMediaElement.prototype.play).not.toHaveBeenCalled();
+  await act(async () => videos[3]!.dispatchEvent(new Event('loadedmetadata', { bubbles: true })));
+  expect(HTMLMediaElement.prototype.play).toHaveBeenCalledTimes(4);
+  await act(async () => button('暂停联播').click());
+  expect(HTMLMediaElement.prototype.pause).toHaveBeenCalledTimes(4);
+});
 function button(label: string) {
   const result = [...host.querySelectorAll('button')].find((x) => x.textContent === label);
   expect(result).toBeDefined();
@@ -78,6 +93,23 @@ it('opens both exact originals, waits for both metadata, then plays and seeks th
   expect(videos[1]!.currentTime).toBe(3);
   await act(async () => button('暂停联播').click());
   expect(HTMLMediaElement.prototype.pause).toHaveBeenCalledTimes(2);
+});
+it('does not let a delayed programmatic seek pull the leading original backwards', async () => {
+  await render();
+  await act(async () => button('两段同步播放').click());
+  const videos = [...host.querySelectorAll('video')];
+  for (const video of videos) Object.defineProperty(video, 'readyState', { value: 1, configurable: true });
+  await act(async () => videos.forEach((video) => video.dispatchEvent(new Event('loadedmetadata', { bubbles: true }))));
+  videos[0]!.currentTime = 9.8;
+  await act(async () => videos[0]!.dispatchEvent(new Event('seeking', { bubbles: true })));
+  expect(videos[1]!.currentTime).toBe(9.8);
+  videos[0]!.currentTime = 9.97;
+  await act(async () => videos[1]!.dispatchEvent(new Event('seeking', { bubbles: true })));
+  expect(videos[0]!.currentTime).toBe(9.97);
+  // A user overrides the pending follower seek; the new explicit time still drives the group.
+  videos[1]!.currentTime = 5;
+  await act(async () => videos[1]!.dispatchEvent(new Event('seeking', { bubbles: true })));
+  expect(videos[0]!.currentTime).toBe(5);
 });
 it('replacing the evidence cancels linked playback and never starts the new records automatically', async () => {
   await render();

@@ -23,6 +23,7 @@ import {
   type ProgramAdapterDescriptorV1,
   type ProgramAdapterOperation,
 } from '../program-adapter-registry.js';
+import { projectRequestReviewHarnessExploration } from './request-review-harness-lineage.js';
 import {
   REQUEST_REVIEW_OWNER_FEATURE_ID,
   REQUEST_REVIEW_SKILL_FILE,
@@ -73,6 +74,8 @@ export interface RequestReviewOwnerPort {
   readSkillFileAt(commitOid: string, filePath: string): Promise<string>;
   /** Lists newest-first commits that touched the file, with the exact blob at each commit. */
   listFileHistoryAt(commitOid: string, filePath: string, limit: number): Promise<RequestReviewGitVersion[]>;
+  /** Reads the owner-reviewed F314 historical index from the same pinned repository cut. */
+  readHarnessLineageAt(commitOid: string): Promise<unknown>;
 }
 
 export interface RequestReviewGitVersion {
@@ -86,6 +89,8 @@ export interface RequestReviewOwnerAdapterOptions {
   port: RequestReviewOwnerPort;
   ledger?: Pick<RequestReviewOwnerLedger, 'read'>;
   resolveActions?: () => RequestReviewOwnerActions | undefined;
+  /** F314 owns published history independently of the F100 deployed skill/version reader. */
+  historyReader?: NonNullable<ProgramAdapter['explorationReview']>;
 }
 
 export type RequestReviewOwnerActions = Pick<
@@ -178,6 +183,7 @@ async function resolveSelected(
 }
 
 type SemanticGitVersion = RequestReviewGitVersion & { semanticVersion: string };
+type CatalogGitVersion = Omit<SemanticGitVersion, 'committedAt'> & { committedAt?: string };
 
 async function semanticHistory(
   history: readonly RequestReviewGitVersion[],
@@ -202,8 +208,8 @@ async function semanticHistory(
   return resolved;
 }
 
-function buildVersionCatalog(history: readonly SemanticGitVersion[], current: SemanticGitVersion) {
-  const distinct: SemanticGitVersion[] = [];
+function buildVersionCatalog(history: readonly SemanticGitVersion[], current: CatalogGitVersion) {
+  const distinct: CatalogGitVersion[] = [];
   const seen = new Set<string>();
   for (const entry of [current, ...history]) {
     if (seen.has(entry.semanticVersion)) continue;
@@ -215,7 +221,10 @@ function buildVersionCatalog(history: readonly SemanticGitVersion[], current: Se
     const parent = distinct[index + 1];
     return {
       versionRef: requestReviewAssetVersionRef(entry.semanticVersion),
-      title: `${entry.subject} (${entry.committedAt})`.slice(0, 240),
+      title: (entry.committedAt ? `${entry.subject} (${entry.committedAt})` : `${entry.subject}（提交时间未知）`).slice(
+        0,
+        240,
+      ),
       parentEdges: parent
         ? [
             {
@@ -281,16 +290,15 @@ export function createRequestReviewOwnerAdapter(options: RequestReviewOwnerAdapt
       const currentVersionRef = requestReviewAssetVersionRef(currentSemanticVersion);
       const currentVersionRefs = [currentVersionRef];
       const resolvedHistory = await semanticHistory(history, port, headOid, currentSemanticVersion);
-      const currentHistory = resolvedHistory.find((entry) => entry.commitOid === headOid);
-      const current =
-        currentHistory ??
-        ({
-          commitOid: headOid,
-          blobOid: skillBlobOid,
-          semanticVersion: currentSemanticVersion,
-          committedAt: new Date(0).toISOString(),
-          subject: 'Current request-review skill',
-        } satisfies SemanticGitVersion);
+      const currentHistory = resolvedHistory.find(
+        (entry) => entry.blobOid === skillBlobOid && entry.semanticVersion === currentSemanticVersion,
+      );
+      const current: CatalogGitVersion = currentHistory ?? {
+        commitOid: headOid,
+        blobOid: skillBlobOid,
+        semanticVersion: currentSemanticVersion,
+        subject: 'Current request-review skill',
+      };
       const { versions, commitsByVersion } = buildVersionCatalog(resolvedHistory, current);
 
       const selected = selectedVersionRef
@@ -334,6 +342,42 @@ export function createRequestReviewOwnerAdapter(options: RequestReviewOwnerAdapt
     }
   };
 
+  const explorationReview: NonNullable<ProgramAdapter['explorationReview']> = async (input) => {
+    const envelope = { schemaVersion: 1 as const, programRef: input.programRef, objectRef: input.objectRef };
+    if (
+      input.objectRef.ownerFeatureId !== REQUEST_REVIEW_OWNER_FEATURE_ID ||
+      input.objectRef.ownerStateRef !== TARGET_STATE_REF_PREFIX
+    ) {
+      return {
+        ...envelope,
+        status: 'invalid' as const,
+        blockers: [{ code: 'owner_exploration_scope_mismatch', ownerRef: input.objectRef }],
+      };
+    }
+    try {
+      if (options.historyReader) return await options.historyReader(input);
+      const headOid = await port.gitHeadOid();
+      const projection = projectRequestReviewHarnessExploration(
+        input,
+        await port.readHarnessLineageAt(headOid),
+        new Date().toISOString(),
+      );
+      return (
+        projection ?? {
+          ...envelope,
+          status: 'invalid' as const,
+          blockers: [{ code: 'owner_historical_index_invalid', ownerRef: input.objectRef }],
+        }
+      );
+    } catch {
+      return {
+        ...envelope,
+        status: 'unavailable' as const,
+        blockers: [{ code: 'owner_historical_index_unavailable', ownerRef: input.objectRef }],
+      };
+    }
+  };
+
   return {
     descriptor,
     observe: delegate('observe'),
@@ -344,5 +388,6 @@ export function createRequestReviewOwnerAdapter(options: RequestReviewOwnerAdapt
     freshOutcome: delegate('freshOutcome'),
     rollback: delegate('rollback'),
     versionReview,
+    explorationReview,
   };
 }

@@ -7,8 +7,13 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 
 import { daemonStatePaths, inspectDaemonState, writeDaemonState } from './lib/daemon-state.mjs';
+import { frozenIdentity, identityUnchanged } from './lib/daemon-stop-record.mjs';
 
 const daemonStateModule = join(import.meta.dirname, 'lib', 'daemon-state.mjs');
+
+// The reported production failure moved `ps lstart` by ~6h47m after the host
+// resumed from suspend and the wall clock jumped forward.
+const WALL_CLOCK_JUMP_MS = 6 * 60 * 60 * 1000 + 47 * 60 * 1000;
 
 async function withFakeDaemon(run) {
   const root = mkdtempSync(join(tmpdir(), 'cat-cafe-daemon-timezone-'));
@@ -81,6 +86,33 @@ function writeLegacyV1State({ homeDir, runtimeRoot, launchToken, child }) {
   return { paths, state };
 }
 
+function writeTokenBoundState({ homeDir, runtimeRoot, launchToken, child }) {
+  const paths = daemonStatePaths({ homeDir, projectRoot: runtimeRoot, deploymentId: 'runtime' });
+  writeDaemonState({
+    paths,
+    pid: child.pid,
+    projectRoot: runtimeRoot,
+    deploymentId: 'runtime',
+    launchToken,
+    logFile: join(runtimeRoot, 'cat-cafe-daemon.log'),
+    ports: { frontend: 3001, api: 3002, redis: 6398 },
+  });
+  return { paths, state: JSON.parse(readFileSync(paths.stateFile, 'utf8')) };
+}
+
+function psLstartUtc(epochMs) {
+  const date = new Date(epochMs);
+  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const pad = (value) => String(value).padStart(2, '0');
+  return `${days[date.getUTCDay()]} ${months[date.getUTCMonth()]} ${pad(date.getUTCDate())} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())} ${date.getUTCFullYear()}`;
+}
+
+function shiftStoredWallClock(state, epochMs) {
+  state.process.startedAt = psLstartUtc(epochMs);
+  state.process.startedAtEpochMs = epochMs;
+}
+
 test('process birth identity is stable across caller timezone and locale', () =>
   withFakeDaemon(async ({ child, launchToken }) => {
     const losAngeles = captureIdentityInEnvironment(child.pid, {
@@ -101,9 +133,72 @@ test('process birth identity is stable across caller timezone and locale', () =>
     assert.ok(Number.isSafeInteger(losAngeles.startedAtEpochMs));
     assert.equal(losAngeles.startedAtFormat, 'ps-lstart-utc-c-v1');
     assert.equal(tokyo.startedAtFormat, 'ps-lstart-utc-c-v1');
+    if (process.platform === 'linux') {
+      assert.ok(Number.isSafeInteger(losAngeles.procStartTicks));
+      assert.ok(Number.isSafeInteger(tokyo.procStartTicks));
+      assert.equal(losAngeles.procStartTicks, tokyo.procStartTicks);
+      assert.equal(losAngeles.bootId, tokyo.bootId);
+    }
     assert.equal(losAngeles.command, tokyo.command);
     assert.equal(losAngeles.cwd, tokyo.cwd);
   }));
+
+test('a wall-clock jump does not invalidate a token-bound daemon state', () =>
+  withFakeDaemon(async (fixture) => {
+    const { paths, state } = writeTokenBoundState(fixture);
+    const identity = captureIdentityInEnvironment(fixture.child.pid, { timezone: 'UTC', locale: 'C' });
+    shiftStoredWallClock(state, identity.startedAtEpochMs + WALL_CLOCK_JUMP_MS);
+    writeFileSync(paths.stateFile, `${JSON.stringify(state, null, 2)}\n`);
+
+    const inspection = inspectDaemonState({
+      stateFile: paths.stateFile,
+      expectedProjectRoot: fixture.runtimeRoot,
+      expectedDeploymentId: 'runtime',
+    });
+
+    assert.equal(inspection.kind, 'running');
+  }));
+
+test('a pre-marker token-bound state survives a wall-clock jump', () =>
+  withFakeDaemon(async (fixture) => {
+    const { paths, state } = writeTokenBoundState(fixture);
+    const identity = captureIdentityInEnvironment(fixture.child.pid, { timezone: 'UTC', locale: 'C' });
+    delete state.process.procStartTicks;
+    delete state.process.bootId;
+    shiftStoredWallClock(state, identity.startedAtEpochMs + WALL_CLOCK_JUMP_MS);
+    writeFileSync(paths.stateFile, `${JSON.stringify(state, null, 2)}\n`);
+
+    const inspection = inspectDaemonState({
+      stateFile: paths.stateFile,
+      expectedProjectRoot: fixture.runtimeRoot,
+      expectedDeploymentId: 'runtime',
+    });
+
+    assert.equal(inspection.kind, 'running');
+  }));
+
+test('a frozen stop identity compares the stable marker, not a shifted lstart', () => {
+  const state = { pid: 4242 };
+  const captured = {
+    startedAt: 'Tue Oct 20 16:01:27 2026',
+    startedAtEpochMs: 1792512087000,
+    command: 'node daemon.js',
+    procStartTicks: 123456,
+    bootId: 'boot-a',
+  };
+  const frozen = frozenIdentity(state, captured);
+  assert.equal(frozen.procStartTicks, 123456);
+  assert.equal(frozen.bootId, 'boot-a');
+  assert.equal(
+    identityUnchanged(frozen, state, {
+      ...captured,
+      startedAt: 'Tue Oct 20 00:36:57 2026',
+      startedAtEpochMs: 1792456617000,
+    }),
+    true,
+  );
+  assert.equal(identityUnchanged(frozen, state, { ...captured, procStartTicks: 123457 }), false);
+});
 
 test('a tokenless migrated v1 state uses process-before-migration ordering across timezone', () =>
   withFakeDaemon(async (fixture) => {

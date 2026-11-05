@@ -13,6 +13,7 @@
   padding: 0 12px;
   border-radius: 10px;
   background: var(--shell-paper);
+  --chat-background-role: paper;
   box-shadow: inset 0 0 0 1px var(--shell-hairline-strong);
   color: var(--shell-muted);
 }
@@ -67,6 +68,7 @@
 
 [data-shell="v2"] .home-tool:hover {
   background: color-mix(in srgb, var(--shell-selected) 55%, transparent);
+  --chat-background-role: navigation-hover;
 }
 
 [data-shell="v2"] .home-tool-icon {
@@ -78,6 +80,7 @@
   height: 30px;
   border-radius: 8px;
   background: var(--shell-selected);
+  --chat-background-role: selected;
   color: var(--shell-ink);
 }
 
@@ -263,13 +266,5 @@
     flex-wrap: wrap;
     min-width: 0;
     margin-left: 32px;
-  }
-
-  [data-shell="v2"] .home-wait-main {
-    flex-wrap: wrap;
-  }
-
-  [data-shell="v2"] .home-wait-title {
-    flex-basis: 100%;
   }
 }

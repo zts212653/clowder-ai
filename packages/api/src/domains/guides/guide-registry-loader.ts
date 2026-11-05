@@ -131,6 +131,7 @@ export interface OrchestrationFlow {
   id: string;
   name: string;
   description?: string;
+  nonBlocking?: boolean;
   steps: OrchestrationStep[];
 }
 
@@ -139,6 +140,7 @@ interface RawFlowFile {
   id: string;
   name: string;
   description?: string;
+  nonBlocking?: boolean;
   steps: Array<{
     id: string;
     target: string;
@@ -216,6 +218,7 @@ export function loadGuideFlow(guideId: string): OrchestrationFlow {
     id: parsed.id,
     name: parsed.name,
     description: parsed.description,
+    ...(parsed.nonBlocking === true ? { nonBlocking: true } : {}),
     steps: parsed.steps.map((s) => {
       if (!validAdvance.has(s.advance)) {
         throw new Error(`[F155] Invalid advance type "${s.advance}" in step "${s.id}"`);

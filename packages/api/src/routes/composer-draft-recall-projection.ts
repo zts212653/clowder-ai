@@ -5,7 +5,7 @@ import type {
 } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { emitQueueUpdated, enrichQueueEntries } from '../utils/queue-enrichment.js';
-import { projectRecallMessage } from './composer-draft-recall-helpers.js';
+import { projectComposerDraft, projectRecallMessage } from './composer-draft-recall-helpers.js';
 import type { DerivedTitleSuppression } from './composer-draft-recall-title.js';
 
 type RecalledResult = Extract<RecallMessageToComposerDraftResult, { kind: 'recalled' }>;
@@ -54,7 +54,7 @@ export async function buildRecallSuccessResponse(context: RecallProjectionContex
   return {
     verdict: context.result.verdict,
     message: projectRecallMessage(context.result.message),
-    draft: context.result.draft,
+    draft: projectComposerDraft(context.result.draft),
     insertedRange: context.result.insertedRange,
     queue: await enrichQueueEntries(
       context.invocationQueue.list(context.threadId, context.ownerUserId),

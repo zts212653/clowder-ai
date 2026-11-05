@@ -4,7 +4,7 @@ import { createReadStream } from 'node:fs';
 import { mkdir, mkdtemp, readFile, realpath, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
 import { ensureWorkspaceOpen } from './f307-workspace-open.mjs';
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');

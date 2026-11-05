@@ -11,6 +11,7 @@ import Fastify from 'fastify';
 import { SessionChainStore } from '../src/domains/cats/services/stores/ports/SessionChainStore.js';
 import { ThreadStore } from '../src/domains/cats/services/stores/ports/ThreadStore.js';
 import { sessionChainRoutes } from '../src/routes/session-chain.js';
+import { importExecutionBoundary } from './helpers/import-execution-boundary.js';
 
 // These fixtures model local single-user mode; dedicated owner cases below
 // explicitly exercise configured ownership without inheriting runtime identity.
@@ -31,15 +32,29 @@ test('recent metadata is lazy, capped, and duplicates use one bulk index lookup 
   const sessions = new SessionChainStore();
   const owned = threads.create('owner', 'My imported work');
   const privateThread = threads.create('someone-else', 'Private title');
-  sessions.create({ threadId: owned.id, userId: 'owner', catId: 'codex', cliSessionId: nativeId(2) });
-  sessions.create({ threadId: privateThread.id, userId: 'someone-else', catId: 'codex', cliSessionId: nativeId(3) });
+  for (const [thread, n, userId] of [
+    [owned, 2, 'owner'],
+    [privateThread, 3, 'someone-else'],
+  ] as const) {
+    const record = sessions.create({ threadId: thread.id, userId, catId: 'codex', cliSessionId: nativeId(n) });
+    sessions.update(record.id, {
+      externalImport: {
+        cliSessionId: nativeId(n),
+        clientId: 'openai',
+        projectPath: '/original',
+        firstPrompt: '',
+        lastActivityAt: n,
+        importedAt: 1,
+      },
+    });
+  }
   let listings = 0;
   let requestedLimit = 0;
   let bulkReads = 0;
   const indexed = sessions.getCliSessionBindings?.bind(sessions);
   sessions.getCliSessionBindings = async (ids) => {
     bulkReads++;
-    assert.ok(ids.length <= 20);
+    assert.ok(ids.length <= 200);
     return indexed(ids);
   };
   sessions.getByCliSessionId = () => {
@@ -55,7 +70,10 @@ test('recent metadata is lazy, capped, and duplicates use one bulk index lookup 
       listings++;
       requestedLimit = limit;
       assert.equal(catId, 'codex');
-      return { sessions: Array.from({ length: 30 }, (_, n) => metadata(n + 1)), limited: true };
+      return {
+        sessions: Array.from({ length: 30 }, (_, n) => ({ ...metadata(n + 1), lastActivityAt: 30 - n })),
+        limited: true,
+      };
     },
   };
   const app = Fastify();
@@ -69,7 +87,7 @@ test('recent metadata is lazy, capped, and duplicates use one bulk index lookup 
     assert.equal(response.statusCode, 200);
     const rows = response.json().sessions;
     assert.equal(listings, 1);
-    assert.equal(requestedLimit, 20);
+    assert.equal(requestedLimit, 200);
     assert.equal(bulkReads, 1);
     assert.equal(rows.length, 20);
     assert.deepEqual(rows.find((s: { sessionId: string }) => s.sessionId === nativeId(2)).boundThread, {
@@ -95,6 +113,7 @@ test('listing rejects cloud members and invalid limits before calling a provider
       listings++;
       throw new Error('native index unavailable');
     },
+    resolveImportExecutionBoundary: importExecutionBoundary(metadata(1).projectPath),
     inspectLocalSession: async () => metadata(1),
   };
   const app = Fastify();
@@ -129,9 +148,65 @@ test('memory bulk lookup returns only current claims, including sealed sessions,
   const claims = await store.getCliSessionBindings([nativeId(1), nativeId(1), nativeId(2)]);
   assert.equal(claims.size, 1);
   assert.equal(claims.get(nativeId(1))?.threadId, 't');
+  assert.equal(claims.get(nativeId(1))?.isExternalImport, false);
   store.update(one.id, { status: 'active' });
   store.bindCliSessionId(one.id, nativeId(3));
   assert.equal((await store.getCliSessionBindings([nativeId(1)])).size, 0);
+});
+
+test('known Cafe sessions are removed before the public limit while imported external sessions keep access-safe links', async () => {
+  const threadStore = new ThreadStore();
+  const sessionChainStore = new SessionChainStore();
+  const cafeThread = threadStore.create('owner', 'Cafe origin');
+  const imported = threadStore.create('owner', 'Imported human work');
+  for (let i = 1; i <= 25; i++)
+    sessionChainStore.create({ threadId: cafeThread.id, userId: 'owner', catId: 'codex', cliSessionId: nativeId(i) });
+  const adopted = sessionChainStore.create({
+    threadId: imported.id,
+    userId: 'owner',
+    catId: 'codex',
+    cliSessionId: nativeId(26),
+  });
+  sessionChainStore.update(adopted.id, {
+    externalImport: {
+      cliSessionId: nativeId(26),
+      clientId: 'openai',
+      projectPath: '/original',
+      firstPrompt: '',
+      lastActivityAt: 26,
+      importedAt: 1,
+    },
+  });
+  const app = Fastify();
+  await app.register(sessionChainRoutes, {
+    threadStore,
+    sessionChainStore,
+    listLocalSessions: async () => ({
+      sessions: Array.from({ length: 50 }, (_, i) => ({ ...metadata(i + 1), lastActivityAt: 50 - i })),
+      limited: false,
+    }),
+    resolveImportExecutionBoundary: importExecutionBoundary(metadata(1).projectPath),
+    inspectLocalSession: async () => metadata(1),
+  });
+  try {
+    const response = await app.inject({
+      url: '/api/local-sessions/codex?limit=20',
+      headers: { 'x-cat-cafe-user': 'owner' },
+    });
+    assert.equal(response.statusCode, 200);
+    const result = response.json();
+    assert.equal(result.sessions.length, 20);
+    assert.equal(result.sessions[0].sessionId, nativeId(26));
+    assert.deepEqual(result.sessions[0].boundThread, { id: imported.id, title: 'Imported human work' });
+    assert.equal(result.limited, true);
+    const pasted = await app.inject({
+      url: `/api/local-sessions/codex/${nativeId(1)}`,
+      headers: { 'x-cat-cafe-user': 'owner' },
+    });
+    assert.equal(pasted.statusCode, 409, 'the existing claim is still reported on the ID path');
+  } finally {
+    await app.close();
+  }
 });
 
 for (const path of ['list', 'inspect', 'externalBind'] as const) {
@@ -158,6 +233,7 @@ for (const path of ['list', 'inspect', 'externalBind'] as const) {
             nativeReads++;
             return { sessions: [metadata(1)], limited: false };
           },
+          resolveImportExecutionBoundary: importExecutionBoundary(metadata(1).projectPath),
           inspectLocalSession: async () => {
             nativeReads++;
             return metadata(1);

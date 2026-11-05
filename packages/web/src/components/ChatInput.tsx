@@ -1,6 +1,12 @@
 'use client';
 
-import { CONTEXT_ATTACHMENT_MAX_COUNT, type ContextAttachment, ContextAttachmentSchema } from '@cat-cafe/shared';
+import {
+  CONTEXT_ATTACHMENT_MAX_COUNT,
+  type ContextAttachment,
+  ContextAttachmentSchema,
+  type MessageWorkDisposition,
+} from '@cat-cafe/shared';
+import { ComposerControl, ComposerFrame } from '@cat-cafe/ui';
 import {
   type Dispatch,
   KeyboardEvent,
@@ -14,9 +20,9 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react';
+import { GalleryDraftSummary } from '@/components/content-review/GalleryDraftSummary';
 import { useCatData } from '@/hooks/useCatData';
 import { type ProspectiveThreadRouting, useChatComposerRouting } from '@/hooks/useChatComposerRouting';
-import { reconnectGame } from '@/hooks/useGameReconnect';
 import { useIMEGuard } from '@/hooks/useIMEGuard';
 import { useLiveExecutionCancelControl } from '@/hooks/useLiveExecutionCancelControl';
 import { useMessageDispositionPreference } from '@/hooks/useMessageDispositionPreference';
@@ -27,7 +33,6 @@ import { formatCatDisplayName } from '@/lib/cat-display-name';
 import { useChatStore } from '@/stores/chatStore';
 import { useInputHistoryStore } from '@/stores/inputHistoryStore';
 import { useToastStore } from '@/stores/toastStore';
-import { apiFetch } from '@/utils/api-client';
 import { compressImage } from '@/utils/compressImage';
 import { AppTooltip } from './AppTooltip';
 import { ChatComposerDraftExtras } from './ChatComposerDraftExtras';
@@ -35,24 +40,24 @@ import { ChatContextPicker } from './ChatContextPicker';
 import { ChatInputActionButton } from './ChatInputActionButton';
 import { ChatInputAddMenu } from './ChatInputAddMenu';
 import { ChatInputMenus } from './ChatInputMenus';
+import { ChatInputStickers } from './ChatInputStickers';
 import { ComposerRoutingPreview } from './ComposerRoutingPreview';
+import { useCatCardComposer } from './cat-profile-card/CatProfileCardContext';
 import { chatComposerCopy } from './chat-composer.shell-copy';
 import { type ContextPickerMode, detectContextShortcut } from './chat-context-reference';
-import { buildCatOptions, type CatOption, detectMenuTrigger, GAME_LIST, WEREWOLF_MODES } from './chat-input-options';
+import { buildCatOptions, type CatOption, detectMenuTrigger } from './chat-input-options';
 import {
   deriveImageLifecycleStatus,
   type ImageLifecycleStatus,
   isImageLifecycleBlockingSend,
 } from './chat-input-upload-state';
 import { composerAttachments } from './composer-queue';
-import { GameLobby, type GameStartPayload } from './game/GameLobby';
 import { HistorySearchModal } from './HistorySearchModal';
 import { PathCompletionMenu } from './PathCompletionMenu';
 import { projectScreeningComposerConflict } from './project-screening-composer-group';
 import { conversationDecisionCopy } from './rich/conversation-decision.shell-copy';
 import { submitConversationAnswer } from './rich/runtime-conversation-model';
 import { useShellCopy } from './shell/shell-copy';
-import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
 import {
   getThreadDraft,
   hasPendingThreadDraft,
@@ -118,6 +123,7 @@ interface ChatInputProps {
     replyToId?: string,
     contextAttachments?: ContextAttachment[],
     explicitTargetCats?: string[],
+    messageDisposition?: MessageWorkDisposition,
   ) => void | boolean | Promise<void | boolean>;
   disabled?: boolean;
   hasActiveInvocation?: boolean;
@@ -293,12 +299,11 @@ export function ChatInput({
   const appliedSeedIdRef = useRef<string | null>(null);
 
   const [showMentions, setShowMentions] = useState(false);
-  const [showGameMenu, setShowGameMenu] = useState(false);
-  const [gameStep, setGameStep] = useState<'list' | 'modes'>('list');
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [mentionStart, setMentionStart] = useState(-1);
   const [mentionFilter, setMentionFilter] = useState('');
   const [images, setImages] = useState<File[]>(() => (threadId ? (threadImageDrafts.get(threadId) ?? []) : []));
+  const [stickerThread, setStickerThread] = useState<string>();
   const [contextAttachments, setContextAttachments] = useState<ContextAttachment[]>(() =>
     threadId ? (threadContextAttachmentDrafts.get(threadId) ?? []) : [],
   );
@@ -334,8 +339,8 @@ export function ChatInput({
   const [ghostSuggestion, setGhostSuggestion] = useState<string | null>(null);
   const ghostRef = useRef<string | null>(null);
   const [showHistorySearch, setShowHistorySearch] = useState(false);
-  const [lobbyMode, setLobbyMode] = useState<'player' | 'god-view' | 'detective' | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  useCatCardComposer(input, setInput, textareaRef);
   useComposerKeyboardFocus(shellV2, textareaRef);
   useEffect(() => {
     const handler = (event: Event) => {
@@ -416,9 +421,8 @@ export function ChatInput({
     );
   }, [catOptions, mentionFilter]);
 
-  const activeMenu = showMentions ? 'mention' : showGameMenu ? 'game' : null;
-  const gameMenuItems = gameStep === 'list' ? GAME_LIST : WEREWOLF_MODES;
-  const activeOptions = activeMenu === 'mention' ? filteredCatOptions : (gameMenuItems as unknown as CatOption[]);
+  const activeMenu = showMentions ? 'mention' : null;
+  const activeOptions = filteredCatOptions;
 
   const addHistoryEntry = useInputHistoryStore((s) => s.addEntry);
   const findHistoryMatch = useInputHistoryStore((s) => s.findMatch);
@@ -512,7 +516,9 @@ export function ChatInput({
         return;
       }
       void Promise.resolve(admission).then(
-        (accepted) => settleAdmission(accepted === false ? false : undefined),
+        (accepted) => {
+          settleAdmission(accepted === false ? false : undefined);
+        },
         () => settleAdmission(false),
       );
       markComposerDraftOptimisticallyCleared();
@@ -522,7 +528,6 @@ export function ChatInput({
       setImages([]);
       setContextAttachments([]);
       setShowMentions(false);
-      setShowGameMenu(false);
       // Only clear the reply snapshot that was actually sent.
       if (replyToMessage && useChatStore.getState().replyToMessage?.id === replyToMessage.id) clearReplyTo();
     }
@@ -551,7 +556,6 @@ export function ChatInput({
 
   const closeMenus = useCallback(() => {
     setShowMentions(false);
-    setShowGameMenu(false);
   }, []);
 
   const closeContextPicker = useCallback((restoreComposerFocus = true) => {
@@ -597,55 +601,6 @@ export function ChatInput({
     [closeContextPicker, contextShortcutRange, setInput, contextAttachments, effectiveThreadId],
   );
 
-  const [gameStarting, setGameStarting] = useState(false);
-
-  const startGame = useCallback(
-    async (payload: GameStartPayload) => {
-      closeMenus();
-      if (disabled || sendTemporarilyDisabled || gameStarting) return;
-      const targetThreadId = threadId ?? useChatStore.getState().currentThreadId;
-      setGameStarting(true);
-      try {
-        const res = await apiFetch('/api/game/start', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          useChatStore.getState().addMessageToThread(targetThreadId, {
-            id: `game-err-${Date.now()}`,
-            type: 'system',
-            variant: 'error',
-            content: `开局失败: ${data.error ?? `HTTP ${res.status}`}`,
-            timestamp: Date.now(),
-          });
-          // Restore lobby so user can retry without re-selecting
-          setLobbyMode(payload.humanRole);
-          return;
-        }
-        // Success — dismiss lobby and navigate
-        setLobbyMode(null);
-        pushThreadRouteWithHistory(data.gameThreadId, typeof window !== 'undefined' ? window : undefined);
-        // Hydrate game state immediately (socket reconnect won't fire for same connection)
-        reconnectGame(data.gameThreadId).catch(() => {});
-      } catch (err) {
-        useChatStore.getState().addMessageToThread(targetThreadId, {
-          id: `game-err-${Date.now()}`,
-          type: 'system',
-          variant: 'error',
-          content: `开局失败: ${err instanceof Error ? err.message : '网络异常'}`,
-          timestamp: Date.now(),
-        });
-        // Restore lobby so user can retry
-        setLobbyMode(payload.humanRole);
-      } finally {
-        setGameStarting(false);
-      }
-    },
-    [closeMenus, disabled, sendTemporarilyDisabled, gameStarting, threadId],
-  );
-
   const insertMention = useCallback(
     (option: CatOption) => {
       const before = input.slice(0, mentionStart);
@@ -673,14 +628,8 @@ export function ChatInput({
       setContextPickerMode(null);
       setContextShortcutRange(null);
       const trigger = detectMenuTrigger(val, e.target.selectionStart);
-      if (trigger?.type === 'game') {
-        setShowGameMenu(true);
-        setGameStep('list');
-        setShowMentions(false);
-        setSelectedIdx(0);
-      } else if (trigger?.type === 'mention') {
+      if (trigger?.type === 'mention') {
         setShowMentions(true);
-        setShowGameMenu(false);
         setMentionStart(trigger.start);
         setMentionFilter(trigger.filter);
         // Bare @ defaults to first individual cat so Enter doesn't accidentally
@@ -766,16 +715,6 @@ export function ChatInput({
             return;
           }
           insertMention(opt);
-        } else if (gameStep === 'list') {
-          // Layer 1: drill into mode selection
-          setGameStep('modes');
-          setSelectedIdx(0);
-        } else {
-          // Layer 2: open lobby for mode configuration
-          const mode = WEREWOLF_MODES[selectedIdx];
-          const role = mode.id === 'detective' ? 'detective' : mode.id.startsWith('god') ? 'god-view' : 'player';
-          closeMenus();
-          setLobbyMode(role as 'player' | 'god-view' | 'detective');
         }
         return;
       }
@@ -905,9 +844,7 @@ export function ChatInput({
     });
   }, []);
 
-  // Clamp selectedIdx when catOptions shrink — only when mention menu is active.
-  // selectedIdx is shared by mention/game menus; clamping to catOptions.length
-  // when game menu is open would corrupt game selection.
+  // Clamp selection when the available mention options change.
   useEffect(() => {
     if (!showMentions) return;
     setSelectedIdx((i) => Math.min(i, Math.max(0, filteredCatOptions.length - 1)));
@@ -922,16 +859,6 @@ export function ChatInput({
       return filtered.size === prev.size ? prev : filtered;
     });
   }, [whisperCats, whisperMode, activeCatIds]);
-
-  const handleGameClick = useCallback(() => {
-    setAddMenuOpen(false);
-    closeContextPicker(false);
-    setShowMentions(false);
-    setMentionStart(-1);
-    setShowGameMenu((prev) => !prev);
-    setGameStep('list');
-    setSelectedIdx(0);
-  }, [closeContextPicker]);
 
   const handleWhisperToggle = useCallback(() => {
     setWhisperMode((prev) => {
@@ -1007,6 +934,7 @@ export function ChatInput({
 
   const composerDraftExtras = (
     <ChatComposerDraftExtras
+      threadId={effectiveThreadId}
       files={images}
       contextAttachments={shownContextAttachments}
       replyToMessage={replyToMessage}
@@ -1030,6 +958,16 @@ export function ChatInput({
   const draftExtrasRow = COMPOSER_GRID_ROWS[headerRowCount];
   const textareaRow = COMPOSER_GRID_ROWS[(headerRowCount + draftExtrasRowCount) as 0 | 1 | 2];
   const controlsRow = COMPOSER_GRID_ROWS[(headerRowCount + draftExtrasRowCount + 1) as 1 | 2 | 3];
+  const inputMenus = (
+    <ChatInputMenus
+      catOptions={filteredCatOptions}
+      showMentions={showMentions}
+      selectedIdx={selectedIdx}
+      onSelectIdx={setSelectedIdx}
+      onInsertMention={insertMention}
+      menuRef={menuRef}
+    />
+  );
 
   return (
     <div className={`relative safe-area-bottom ${shellV2 ? 'bg-[var(--shell-work)]' : 'bg-[var(--console-shell-bg)]'}`}>
@@ -1058,29 +996,9 @@ export function ChatInput({
         />
       )}
 
-      <ChatInputMenus
-        catOptions={filteredCatOptions}
-        showMentions={showMentions}
-        showGameMenu={showGameMenu}
-        gameStep={gameStep}
-        onGameStepChange={setGameStep}
-        selectedIdx={selectedIdx}
-        onSelectIdx={setSelectedIdx}
-        onInsertMention={insertMention}
-        onSendCommand={(command) => {
-          // Open lobby instead of sending directly
-          const role = command.includes('detective')
-            ? 'detective'
-            : command.includes('god-view')
-              ? 'god-view'
-              : 'player';
-          closeMenus();
-          setLobbyMode(role as 'player' | 'god-view' | 'detective');
-        }}
-        menuRef={menuRef}
-      />
+      {!shellV2 && inputMenus}
 
-      {whisperMode && !showMentions && !showGameMenu && (
+      {whisperMode && !showMentions && (
         <WhisperCatSelector
           cats={whisperCats}
           selected={whisperTargets}
@@ -1132,9 +1050,9 @@ export function ChatInput({
         <ChatInputAddMenu
           presentation={presentation}
           onAttach={() => fileInputRef.current?.click()}
+          onStickers={() => setStickerThread(threadId ?? '__new__')}
           onAddContext={() => openContextPicker('all')}
           onWhisperToggle={handleWhisperToggle}
-          onGameClick={handleGameClick}
           onClose={() => setAddMenuOpen(false)}
           messageDisposition={messageDisposition}
           triggerRef={addButtonRef}
@@ -1145,16 +1063,25 @@ export function ChatInput({
           preferredCat={shellV2 ? (preferredCatControl ?? undefined) : undefined}
         />
       )}
+      {stickerThread === (threadId ?? '__new__') && (
+        <ChatInputStickers
+          key={threadId ?? '__new__'}
+          onClose={() => setStickerThread(undefined)}
+          onSelect={(file) => setImages((current) => [...current, file].slice(0, 5))}
+        />
+      )}
 
-      <div
+      <ComposerFrame
         className={
           shellV2
-            ? 'relative mx-4 mb-4 mt-2 grid grid-cols-[32px_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-2 rounded-2xl border border-[var(--shell-hairline-strong)] bg-[var(--shell-paper)] px-3 pb-2 pt-2'
+            ? 'relative mx-4 mb-4 mt-2 grid grid-cols-[32px_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-2 px-3 pb-2 pt-2'
             : 'flex gap-2 items-center p-4 pt-2'
         }
         data-testid="chat-input-composer-row"
         data-composer-presentation={presentation}
+        active={shellV2}
       >
+        {shellV2 && inputMenus}
         {hasComposerHeader ? (
           <div
             className="col-span-3 col-start-1 row-start-1 -mx-2 -mt-2 border-b border-[var(--shell-hairline)] px-3 py-1.5"
@@ -1173,8 +1100,9 @@ export function ChatInput({
         ) : null}
         {/* F284: one stable add entry; context, upload and modes disclose on demand. */}
         <AppTooltip label={v2Copy.addHint} side="top" disabled={!shellV2 || addMenuOpen}>
-          <button
+          <ComposerControl
             ref={addButtonRef}
+            active={shellV2}
             type="button"
             onClick={() => {
               closeContextPicker(false);
@@ -1183,9 +1111,7 @@ export function ChatInput({
             }}
             disabled={disabled || sendTemporarilyDisabled}
             className={`${
-              shellV2
-                ? `shell-focusable col-start-1 ${controlsRow} flex h-8 w-8 items-center justify-center rounded-full border border-[var(--shell-hairline-strong)]`
-                : 'p-3 rounded-xl'
+              shellV2 ? `shell-focusable col-start-1 ${controlsRow}` : 'p-3 rounded-xl'
             } transition-all disabled:cursor-not-allowed disabled:opacity-30 ${
               addMenuOpen
                 ? 'text-cafe-accent bg-cafe-surface-sunken rotate-45'
@@ -1203,7 +1129,7 @@ export function ChatInput({
                 clipRule="evenodd"
               />
             </svg>
-          </button>
+          </ComposerControl>
         </AppTooltip>
 
         <div
@@ -1269,6 +1195,7 @@ export function ChatInput({
           </div>
         )}
         <div className={shellV2 ? `col-start-3 ${controlsRow} flex shrink-0 items-center gap-1` : 'contents'}>
+          {shellV2 ? <GalleryDraftSummary attachments={shownContextAttachments} /> : null}
           <ChatInputActionButton
             onTranscript={handleTranscript}
             onSend={handleSend}
@@ -1282,21 +1209,10 @@ export function ChatInput({
             presentation={shellV2 ? 'v2' : 'classic'}
           />
         </div>
-      </div>
+      </ComposerFrame>
 
       {showHistorySearch && (
         <HistorySearchModal onSelect={handleHistorySelect} onClose={() => setShowHistorySearch(false)} />
-      )}
-
-      {lobbyMode && (
-        <GameLobby
-          mode={lobbyMode}
-          cats={cats}
-          onConfirm={(payload) => {
-            startGame(payload);
-          }}
-          onCancel={() => setLobbyMode(null)}
-        />
       )}
     </div>
   );

@@ -7,16 +7,17 @@ import { ComposerPopover } from './ComposerPopover';
 import { type ComposerPreferredCatControl, ComposerPreferredCatSection } from './ComposerPreferredCatSection';
 import { chatComposerCopy } from './chat-composer.shell-copy';
 import { AttachIcon } from './icons/AttachIcon';
-import { GameIcon } from './icons/GameIcon';
-import { MessageDispositionSelector, messageDispositionLabel } from './MessageDispositionSelector';
+import { MessageDispositionSelector } from './MessageDispositionSelector';
+import { messageDispositionCopy } from './message-disposition.shell-copy';
 import { useShellCopy } from './shell/shell-copy';
+import { useShellLanguage } from './shell/shell-language';
 
 interface ChatInputAddMenuProps {
   presentation?: 'classic' | 'v2';
   onAddContext: () => void;
   onAttach: () => void;
+  onStickers?: () => void;
   onWhisperToggle: () => void;
-  onGameClick: () => void;
   onClose: () => void;
   triggerRef: RefObject<HTMLButtonElement>;
   disabled?: boolean;
@@ -31,8 +32,8 @@ export function ChatInputAddMenu({
   presentation = 'classic',
   onAddContext,
   onAttach,
+  onStickers,
   onWhisperToggle,
-  onGameClick,
   onClose,
   triggerRef,
   disabled,
@@ -44,7 +45,10 @@ export function ChatInputAddMenu({
 }: ChatInputAddMenuProps) {
   const [view, setView] = useState<'root' | 'disposition'>('root');
   const localized = useShellCopy(chatComposerCopy);
+  const stickerEnglish = useShellLanguage() === 'en' && presentation === 'v2';
   const t = presentation === 'v2' ? localized : chatComposerCopy.zh;
+  const localizedDisposition = useShellCopy(messageDispositionCopy);
+  const dispositionCopy = (presentation === 'v2' ? localizedDisposition : messageDispositionCopy.zh).composer;
 
   const unavailable = Boolean(disabled || sendDisabled);
 
@@ -58,15 +62,19 @@ export function ChatInputAddMenu({
     >
       <div id="composer-add-menu" data-testid="composer-add-menu" className="bg-cafe-surface-canvas">
         {view === 'disposition' && messageDisposition ? (
-          <MessageDispositionSelector controller={messageDisposition} onBack={() => setView('root')} />
+          <MessageDispositionSelector
+            controller={messageDisposition}
+            onBack={() => setView('root')}
+            presentation={presentation}
+          />
         ) : (
           <div role="menu" aria-label={t.addContent} className="w-full overflow-hidden rounded-lg">
             {presentation === 'v2' && messageDisposition ? (
               <AddMenuItem
                 testId="message-disposition-trigger"
                 dispositionSource={messageDisposition.source}
-                label={`发送策略：${messageDispositionLabel(messageDisposition.effective)}`}
-                description="选择本 Thread 或全局默认策略"
+                label={dispositionCopy.menuLabel(dispositionCopy.label[messageDisposition.effective])}
+                description={dispositionCopy.menuNote}
                 icon={<span aria-hidden>↪</span>}
                 disabled={messageDisposition.loading}
                 onClick={() => setView('disposition')}
@@ -101,12 +109,25 @@ export function ChatInputAddMenu({
                   onAttach();
                 }}
               />
+              {onStickers && (
+                <AddMenuItem
+                  testId="composer-stickers"
+                  icon={<span aria-hidden>☺</span>}
+                  label={stickerEnglish ? 'Stickers' : '贴纸'}
+                  description={stickerEnglish ? 'Add an expression to your draft' : '选一张，放进草稿'}
+                  disabled={unavailable || maxImages}
+                  onClick={() => {
+                    onClose();
+                    onStickers();
+                  }}
+                />
+              )}
               {presentation === 'classic' && messageDisposition ? (
                 <AddMenuItem
                   testId="message-disposition-trigger"
                   dispositionSource={messageDisposition.source}
-                  label="发送策略"
-                  description={messageDispositionLabel(messageDisposition.effective)}
+                  label={dispositionCopy.heading}
+                  description={dispositionCopy.label[messageDisposition.effective]}
                   icon={<StrategyIcon />}
                   disabled={messageDisposition.loading}
                   onClick={() => setView('disposition')}
@@ -125,18 +146,6 @@ export function ChatInputAddMenu({
                 onClick={() => {
                   onClose();
                   onWhisperToggle();
-                }}
-              />
-              <AddMenuItem
-                tooltip={presentation === 'v2'}
-                testId="composer-game"
-                icon={<GameIcon />}
-                label={t.game}
-                description={t.gameHint}
-                disabled={unavailable}
-                onClick={() => {
-                  onClose();
-                  onGameClick();
                 }}
               />
             </div>

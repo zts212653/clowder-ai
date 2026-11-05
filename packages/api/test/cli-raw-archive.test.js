@@ -1,19 +1,15 @@
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import { readFile, rm } from 'node:fs/promises';
-import { join } from 'node:path';
 import { afterEach, beforeEach, describe, test } from 'node:test';
+import { gunzipSync } from 'node:zlib';
 
 const { CliRawArchive } = await import('../dist/domains/cats/services/session/CliRawArchive.js');
 
 const TEST_ARCHIVE_DIR = './test-cli-raw-archive';
 
-function formatToday() {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+async function readArchive(file) {
+  return gunzipSync(await readFile(file)).toString('utf8');
 }
 
 describe('CliRawArchive', () => {
@@ -35,10 +31,10 @@ describe('CliRawArchive', () => {
     await archive.append('inv-1', { seq: 1, type: 'thread.started' });
     await archive.append('inv-1', { seq: 2, type: 'item.completed' });
 
-    const file = join(TEST_ARCHIVE_DIR, formatToday(), 'inv-1.ndjson');
+    const file = archive.getPath('inv-1');
     assert.equal(existsSync(file), true);
 
-    const content = await readFile(file, 'utf-8');
+    const content = await readArchive(file);
     const lines = content.trim().split('\n').filter(Boolean);
     assert.equal(lines.length, 2);
 
@@ -54,15 +50,14 @@ describe('CliRawArchive', () => {
     await archive.append('inv-a', { marker: 'A' });
     await archive.append('inv-b', { marker: 'B' });
 
-    const dir = join(TEST_ARCHIVE_DIR, formatToday());
-    const fileA = join(dir, 'inv-a.ndjson');
-    const fileB = join(dir, 'inv-b.ndjson');
+    const fileA = archive.getPath('inv-a');
+    const fileB = archive.getPath('inv-b');
 
     assert.equal(existsSync(fileA), true);
     assert.equal(existsSync(fileB), true);
 
-    const a = JSON.parse((await readFile(fileA, 'utf-8')).trim());
-    const b = JSON.parse((await readFile(fileB, 'utf-8')).trim());
+    const a = JSON.parse((await readArchive(fileA)).trim());
+    const b = JSON.parse((await readArchive(fileB)).trim());
     assert.equal(a.payload.marker, 'A');
     assert.equal(b.payload.marker, 'B');
   });
@@ -83,10 +78,10 @@ describe('CliRawArchive', () => {
 
     await Promise.all(events.map((event) => archive.append('inv-concurrent', event)));
 
-    const file = join(TEST_ARCHIVE_DIR, formatToday(), 'inv-concurrent.ndjson');
+    const file = archive.getPath('inv-concurrent');
     assert.equal(existsSync(file), true);
 
-    const content = await readFile(file, 'utf-8');
+    const content = await readArchive(file);
     const lines = content.trim().split('\n').filter(Boolean);
     assert.equal(lines.length, 20);
 

@@ -43,7 +43,7 @@ export class EventAuditLog {
   private initialized = false;
 
   constructor(options?: { auditDir?: string }) {
-    this.auditDir = options?.auditDir ?? process.env.AUDIT_LOG_DIR ?? DEFAULT_AUDIT_DIR;
+    this.auditDir = resolve(options?.auditDir ?? process.env.AUDIT_LOG_DIR ?? DEFAULT_AUDIT_DIR);
   }
 
   /**
@@ -63,7 +63,14 @@ export class EventAuditLog {
     const filepath = join(this.auditDir, filename);
     const line = `${JSON.stringify(event)}\n`;
 
-    await appendFile(filepath, line, 'utf-8');
+    try {
+      await appendFile(filepath, line, 'utf-8');
+    } catch (error) {
+      // A removed/repaired directory must not leave this process stuck on its
+      // previous initialization. No retry here: append outcomes may be uncertain.
+      this.initialized = false;
+      throw error;
+    }
 
     return event;
   }
@@ -138,6 +145,11 @@ export class EventAuditLog {
   getLogPath(): string {
     const filename = this.getFilename(Date.now());
     return resolve(this.auditDir, filename);
+  }
+
+  /** The actual directory captured by this writer, without creating files or directories. */
+  getDirectory(): string {
+    return this.auditDir;
   }
 
   /**
@@ -236,6 +248,8 @@ export const AuditEventTypes = {
   SESSION_BIND: 'session_bind',
   /** F211 Phase B: External IDE-direct runtime session registration */
   EXTERNAL_RUNTIME_SESSION_REGISTERED: 'external_runtime_session_registered',
+  /** Managed Host execution boundary reference recorded before provider entry. */
+  SESSION_EXECUTION_BOUNDARY_RECORDED: 'session_execution_boundary_recorded',
 
   // === Push Delivery Diagnostics ===
 

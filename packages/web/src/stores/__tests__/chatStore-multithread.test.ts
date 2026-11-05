@@ -60,7 +60,6 @@ describe('chatStore multi-thread state', () => {
       targetCats: [],
       catStatuses: {},
       catInvocations: {},
-      currentGame: null,
 
       threadStates: {},
       viewMode: 'single',
@@ -147,16 +146,6 @@ describe('chatStore multi-thread state', () => {
 
     useChatStore.getState().setCurrentThread('thread-a');
     expect(useChatStore.getState().getThreadState('thread-a').hasDraft).toBe(true);
-  });
-
-  it('preserves currentGame when switching threads', () => {
-    const game = { gameId: 'g1', gameType: 'werewolf', status: 'playing' as const, currentPhase: 'night', round: 1 };
-    useChatStore.getState().setCurrentGame(game);
-    useChatStore.getState().setCurrentThread('thread-b');
-    expect(useChatStore.getState().currentGame).toBeNull();
-
-    useChatStore.getState().setCurrentThread('thread-a');
-    expect(useChatStore.getState().currentGame).toEqual(game);
   });
 
   it('does nothing when switching to same thread', () => {

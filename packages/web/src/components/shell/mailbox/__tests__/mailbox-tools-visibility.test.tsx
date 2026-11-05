@@ -85,7 +85,9 @@ afterEach(() => {
 it('keeps an expired current-page decision findable by 已过期, while refusing every write', async () => {
   await mount('expired');
   await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="approval-filter-stale"]')?.click());
-  expect(container.textContent).toContain(proposal.summary);
+  // The accepted card removes duplicated/composite titles. Preserve the exact
+  // known work itself, rather than demanding its old raw-address summary.
+  expect(container.textContent).toContain(proposal.detail.content);
   expect(container.querySelector('[data-testid="approval-empty-state"]')).toBeNull();
   expect(container.querySelector('[data-testid="approval-empty-filtered"]')).toBeNull();
   expect(container.querySelector('[data-testid="approval-batch-bar"]')).toBeNull();
@@ -98,7 +100,7 @@ it.each([
   're-reading',
 ] as const)('does not present a known %s decision as an empty list', async (kind) => {
   await mount(kind);
-  expect(container.textContent).toContain(proposal.summary);
+  expect(container.textContent).toContain(proposal.detail.content);
   expect(container.querySelector('[data-testid="approval-empty-state"]')).toBeNull();
   expect(container.querySelector('[data-testid="approval-batch-bar"]')).toBeNull();
   for (const button of container.querySelectorAll<HTMLButtonElement>(

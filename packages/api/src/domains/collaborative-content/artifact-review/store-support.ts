@@ -48,6 +48,11 @@ export function auditPredecessor(review: ArtifactReview, input: ReviewMutation):
   if (!round) return undefined;
   const request = input.request as { action?: { annotationId?: string; replyId?: string } } | null;
   const action = request?.action;
+  if (input.kind === 'judge_response')
+    return {
+      responses: round.responses,
+      source: review.rounds.find((item) => item.number === (round.responseSource?.round ?? round.number - 1)),
+    };
   if (input.kind !== 'supersede_request' && action?.annotationId) {
     const annotation = round.annotations.find((item) => item.id === action.annotationId);
     if (action.replyId) return annotation?.replies.find((item) => item.id === action.replyId);

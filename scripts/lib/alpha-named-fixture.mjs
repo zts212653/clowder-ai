@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const SOURCE_ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
-export const NAMED_ALPHA_PORTS = '5311,5312,5411,5511,15397';
+export const NAMED_ALPHA_PORTS = '5311,5312,5411,15397';
 
 /** Actual Git/worktree and launcher fixture; process/document stores are not simulated deployments. */
 export function namedAlphaFixture(t) {
@@ -23,6 +23,7 @@ export function namedAlphaFixture(t) {
     'scripts/alpha-worktree.sh',
     'scripts/start-dev.sh',
     'scripts/download-source-overrides.sh',
+    'scripts/redis-backup-retention.mjs',
     'scripts/lib/node-runtime-guard.sh',
     'scripts/lib/quickstart-freshness.sh',
     'scripts/lib/alpha-redis-identity.sh',
@@ -30,11 +31,27 @@ export function namedAlphaFixture(t) {
     'scripts/lib/alpha-coordinates.mjs',
     'scripts/lib/alpha-launch-contract.mjs',
     'scripts/lib/alpha-named-launch.sh',
+    'scripts/lib/alpha-lifecycle-lock.mjs',
+    'scripts/lib/process-resource-lease-lock.mjs',
     'scripts/lib/alpha-redis-process.mjs',
     'scripts/lib/alpha-identity-diagnostics.mjs',
     'scripts/lib/alpha-redis-leases.mjs',
     'scripts/lib/process-identity.mjs',
+    'scripts/lib/process-birth-identity.mjs',
     'scripts/lib/process-tree.mjs',
+    'scripts/read-deployment-default.mjs',
+    'scripts/worktree-new.mjs',
+    'scripts/worktree-reaper.mjs',
+    'scripts/lib/worktree-light.mjs',
+    'scripts/lib/worktree-process-refs.mjs',
+    'scripts/lib/worktree-quarantine.mjs',
+    'scripts/lib/worktree-reaper-core.mjs',
+    'scripts/lib/worktree-reaper-probes.mjs',
+    'scripts/lib/worktree-reaper-risk.mjs',
+    'scripts/lib/worktree-retention.mjs',
+    'scripts/lib/worktree-origin.mjs',
+    'packages/shared/src/deployment-defaults.ts',
+    'packages/shared/src/deployment-profiles.json',
     'packages/api/src/config/alpha-coordinates.ts',
   ]) {
     if (!existsSync(join(SOURCE_ROOT, entry))) continue;
@@ -46,7 +63,7 @@ export function namedAlphaFixture(t) {
     '.env\n.env.local\n.cat-cafe/\nnode_modules/\ndist/\npackages/web/.env.local\n*.log\n',
   );
   writeFileSync(join(mainRoot, 'pnpm-workspace.yaml'), 'packages: [packages/*]\n');
-  for (const name of ['web', 'api', 'mcp-server', 'shared', 'collective-service']) {
+  for (const name of ['web', 'api', 'mcp-server', 'shared']) {
     mkdirSync(join(mainRoot, 'packages', name), { recursive: true });
     writeFileSync(join(mainRoot, 'packages', name, 'package.json'), '{}\n');
   }
@@ -61,6 +78,7 @@ export function namedAlphaFixture(t) {
   git(['config', 'user.name', 'Named Alpha Fixture']);
   git(['config', 'user.email', 'named-alpha@example.invalid']);
   git(['config', 'core.hooksPath', '/dev/null']);
+  git(['config', 'extensions.worktreeConfig', 'true']);
   git(['add', '.']);
   git(['commit', '-m', 'main fixture']);
   git(['init', '--bare', remote]);
@@ -92,11 +110,12 @@ export function namedAlphaFixture(t) {
     HOME: home,
     TERM: 'xterm',
     CAT_CAFE_SKIP_NODE_RUNTIME_GUARD: '1',
+    CAT_CAFE_CAT_ID: 'alpha-fixture-owner',
     ALPHA_TEST_CALLS: calls,
   };
   const run = (args, options = {}) =>
     spawnSync('bash', [join(mainRoot, 'scripts/alpha-worktree.sh'), ...args], {
-      cwd: mainRoot,
+      cwd: options.cwd ?? mainRoot,
       encoding: 'utf8',
       env: { ...env, ...options.env },
       timeout: 30_000,

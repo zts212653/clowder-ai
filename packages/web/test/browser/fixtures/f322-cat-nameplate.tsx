@@ -41,13 +41,22 @@ const LONG_NAME_CAT_ID = 'glm52';
 
 const messages: ChatMessageData[] = [
   {
+    from: { kind: 'user', userId: 'default-user' },
     id: 'm-user',
     type: 'user',
     content: '三版封面，暖一点。',
     timestamp: T0 - 60_000,
   },
-  { id: 'm-opus', type: 'assistant', catId: 'opus', content: '好，我先生成三版，生成图片要一会儿。', timestamp: T0 },
   {
+    from: { kind: 'agent', catId: 'opus' },
+    id: 'm-opus',
+    type: 'assistant',
+    catId: 'opus',
+    content: '好，我先生成三版，生成图片要一会儿。',
+    timestamp: T0,
+  },
+  {
+    from: { kind: 'agent', catId: 'codex' },
     id: 'm-codex',
     type: 'assistant',
     catId: 'codex',
@@ -56,6 +65,7 @@ const messages: ChatMessageData[] = [
     timestamp: T0 + 60_000,
   },
   {
+    from: { kind: 'agent', catId: 'gemini' },
     id: 'm-gemini',
     type: 'assistant',
     catId: 'gemini',
@@ -64,6 +74,7 @@ const messages: ChatMessageData[] = [
     timestamp: T0 + 120_000,
   },
   {
+    from: { kind: 'agent', catId: LONG_NAME_CAT_ID },
     id: 'm-streaming',
     type: 'assistant',
     catId: LONG_NAME_CAT_ID,

@@ -5,6 +5,7 @@ import type { HubCatEditorFormState } from './hub-cat-editor.model';
 import { SelectField, TextField } from './hub-cat-editor-fields';
 
 import { useEditorText, useMemberEditorPresentation } from './members/editor-presentation';
+import { MemberOperationFeedback } from './members/MemberOperationFeedback';
 
 type FormPatch = Partial<HubCatEditorFormState>;
 
@@ -29,38 +30,41 @@ function RefAudioField({ value, onUpload }: { value: string; onUpload: (file: Fi
   const filename = refAudioDisplayName(value);
 
   return (
-    <div className="flex flex-col gap-1.5 text-cafe-secondary sm:flex-row sm:items-center sm:gap-3">
-      <span className="text-xs font-bold text-cafe-secondary sm:w-[150px] sm:shrink-0">
-        {page ? t('参考音频') : 'Ref Audio'}
-      </span>
-      <div className="flex min-w-0 flex-1 items-center gap-2">
-        <span
-          className="min-w-0 flex-1 truncate rounded-[10px] border-transparent bg-[var(--console-field-bg,var(--console-card-bg))] px-3 py-2 text-compact leading-5 text-cafe"
-          title={value}
-        >
-          {filename ? filename : <span className="text-cafe-muted">{t('未设置')}</span>}
+    <div className="space-y-2">
+      <div className="flex flex-col gap-1.5 text-cafe-secondary sm:flex-row sm:items-center sm:gap-3">
+        <span className="text-xs font-bold text-cafe-secondary sm:w-[150px] sm:shrink-0">
+          {page ? t('参考音频') : 'Ref Audio'}
         </span>
-        <button
-          type="button"
-          onClick={() => fileRef.current?.click()}
-          className="shrink-0 rounded-[10px] bg-[var(--console-field-bg,var(--console-card-bg))] px-3 py-2 text-compact font-semibold text-cafe-secondary transition hover:opacity-80"
-        >
-          {t('上传')}
-        </button>
-        <input
-          ref={fileRef}
-          type="file"
-          accept="audio/wav,audio/mpeg,audio/mp3,audio/webm,audio/ogg,.wav,.mp3,.webm,.ogg"
-          className="hidden"
-          onChange={(event) => {
-            const file = event.target.files?.[0];
-            if (!file) return;
-            void onUpload(file).finally(() => {
-              if (fileRef.current) fileRef.current.value = '';
-            });
-          }}
-        />
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <span
+            className="min-w-0 flex-1 truncate rounded-[10px] border-transparent bg-[var(--console-field-bg,var(--console-card-bg))] px-3 py-2 text-compact leading-5 text-cafe"
+            title={value}
+          >
+            {filename ? filename : <span className="text-cafe-muted">{t('未设置')}</span>}
+          </span>
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            className="shrink-0 rounded-[10px] bg-[var(--console-field-bg,var(--console-card-bg))] px-3 py-2 text-compact font-semibold text-cafe-secondary transition hover:opacity-80"
+          >
+            {t('上传')}
+          </button>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="audio/wav,audio/mpeg,audio/mp3,audio/webm,audio/ogg,.wav,.mp3,.webm,.ogg"
+            className="hidden"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (!file) return;
+              void onUpload(file).finally(() => {
+                if (fileRef.current) fileRef.current.value = '';
+              });
+            }}
+          />
+        </div>
       </div>
+      <MemberOperationFeedback source="audio" />
     </div>
   );
 }

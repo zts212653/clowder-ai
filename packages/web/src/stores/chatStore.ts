@@ -23,7 +23,6 @@ import type {
   ChatMessageMetadata,
   ChatMessagePatch,
   ComposerDraftInsert,
-  GameState,
   PresentationLockSnapshot,
   PresentationLockView,
   PresentationSurfaceState,
@@ -58,7 +57,6 @@ export type {
   ChatMessagePatch,
   EvidenceData,
   EvidenceResultData,
-  GameState,
   ImageContent,
   MessageContent,
   QueueEntry,
@@ -120,7 +118,6 @@ function snapshotActive(s: ChatState): ThreadState {
     catStatuses: s.catStatuses,
     catStatusDetails: s.catStatusDetails,
     catInvocations: s.catInvocations,
-    currentGame: s.currentGame,
     unreadCount: 0, // active thread always 0
     hasUserMention: false,
     // If the thread is actively streaming, Date.now() is correct — there IS real activity.
@@ -252,7 +249,6 @@ function flattenThread(ts: ThreadState): Partial<ChatState> {
     targetCats: ts.targetCats,
     catStatuses: ts.catStatuses,
     catInvocations: ts.catInvocations,
-    currentGame: ts.currentGame,
     queue: ts.queue,
     queueFull: ts.queueFull,
     queueFullSource: ts.queueFullSource,
@@ -679,8 +675,6 @@ export interface ChatState {
   /** F198 Phase C AC-C3: daemon detail text per catId */
   catStatusDetails: Record<string, string>;
   catInvocations: Record<string, CatInvocationInfo>;
-  /** F101: Active game in current thread */
-  currentGame: GameState | null;
   /** F39: Message queue entries */
   queue: QueueEntry[];
   /** F39: Queue full flag */
@@ -884,8 +878,6 @@ export interface ChatState {
    * handler), and exposing fromSeq would create a contract that nobody honors.
    */
   requestStreamCatchUp: (threadId: string) => void;
-  /** F101: Update current game state */
-  setCurrentGame: (game: GameState | null) => void;
 
   // ── Thread management ──
   setThreads: (threads: Thread[]) => void;
@@ -1048,6 +1040,7 @@ export interface ChatState {
     threadId: string,
     artifact: ThreadArtifactDTO,
     navigationOrigin?: WorkspaceFileNavigationOrigin,
+    presentation?: WorkspaceOpenRequest['presentation'],
   ) => void;
   /**
    * Open one exact workspace file, or show one path in its file tree, in the Workbench of `threadId`.
@@ -1055,10 +1048,15 @@ export interface ChatState {
    * thread; it does not switch projects. Returns false when `threadId` is not the current thread, so a
    * caller never navigates to nothing.
    */
-  openWorkspacePath: (threadId: string, target: WorkspacePathOpenTarget) => boolean;
+  openWorkspacePath: (
+    threadId: string,
+    target: WorkspacePathOpenTarget,
+    presentation?: WorkspaceOpenRequest['presentation'],
+  ) => boolean;
   openPublication: (
     target: Extract<WorkspaceOpenRequest['target'], { kind: 'publication' | 'message-publication' }>,
     hostThreadId: string,
+    presentation?: WorkspaceOpenRequest['presentation'],
   ) => boolean;
   /** Acknowledge one exact transient request after F307 has consumed it. */
   consumeWorkspaceOpenRequest: (revision: number) => void;
@@ -1176,7 +1174,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
   catStatuses: {},
   catStatusDetails: {},
   catInvocations: {},
-  currentGame: null,
   queue: [],
   queueFull: false,
 
@@ -1477,7 +1474,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         ...mirrorActiveFlat(state, durablePatch),
       };
     }),
-  openPublishedArtifact: (threadId, artifact, navigationOrigin) =>
+  openPublishedArtifact: (threadId, artifact, navigationOrigin, presentation) =>
     set((state) => {
       if (state.currentThreadId !== threadId) return {};
       const patch = { rightPanelOpen: true, rightPanelMode: 'workspace' as const, workspaceMode: 'dev' as const };
@@ -1489,13 +1486,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
         workspaceOpenRequest: {
           revision,
           disposition: 'preview' as const,
+          ...(presentation ? { presentation } : {}),
           threadId,
           target: { kind: 'artifact' as const, artifact, ...(navigationOrigin ? { navigationOrigin } : {}) },
         },
       };
     }),
   // An explicit open is honoured under a presentation lock too, as the file-stamp path it replaces was.
-  openWorkspacePath: (threadId, target) => {
+  openWorkspacePath: (threadId, target, presentation) => {
     const state = get();
     if (state.currentThreadId !== threadId) return false;
     const patch = { rightPanelOpen: true, rightPanelMode: 'workspace' as const, workspaceMode: 'dev' as const };
@@ -1504,7 +1502,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
       ...patch,
       ...mirrorActiveFlat(state, patch),
       workspaceOpenRevision: revision,
-      workspaceOpenRequest: { revision, threadId, target, disposition: 'preview' },
+      workspaceOpenRequest: {
+        revision,
+        threadId,
+        target,
+        disposition: 'preview',
+        ...(presentation ? { presentation } : {}),
+      },
     });
     return true;
   },
@@ -1520,12 +1524,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setRightPanelOpen: (open) => set({ rightPanelOpen: open }),
   // F232 P2（云端 round 5）：workspace/transcript mode 被 ChatContainer auto-open effect 强制开，
   // 显式关闭 panel 时必须先退出这两个 mode 回 status，否则 effect 立即重开（关不掉）。status 无此问题，保留。
-  closeRightPanel: () =>
+  closeRightPanel: () => {
+    // A deliberate fold also wins over a cold snapshot when the not-yet-hydrated panel is already closed.
+    if (!get().presentationLock) advanceWorkspaceRevision(get().currentThreadId);
     set((s) => ({
       rightPanelMode:
         s.rightPanelMode === 'workspace' || s.rightPanelMode === 'transcript' ? 'status' : s.rightPanelMode,
       rightPanelOpen: false,
-    })),
+    }));
+  },
   setWorkspaceWorktreeId: (id) => {
     // Guard: skip destructive reset when worktreeId is unchanged.
     // setWorkspaceWorktreeId unconditionally clears openFilePath/openTabs,
@@ -1869,7 +1876,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   // Phase H: Workspace mode
   workspaceMode: 'dev' as const,
-  openPublication: (target, hostThreadId) => {
+  openPublication: (target, hostThreadId, presentation) => {
     // An asynchronous owner read must not steal focus in a conversation opened in the meantime.
     if (get().currentThreadId !== hostThreadId) return false;
     set((state) => {
@@ -1878,7 +1885,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
       return {
         ...patch,
         workspaceOpenRevision: revision,
-        workspaceOpenRequest: { revision, threadId: hostThreadId, target, disposition: 'preview' },
+        workspaceOpenRequest: {
+          revision,
+          threadId: hostThreadId,
+          target,
+          disposition: 'preview',
+          ...(presentation ? { presentation } : {}),
+        },
         ...mirrorActiveFlat(state, patch),
       };
     });
@@ -2493,8 +2506,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
         [threadId]: (state.streamCatchUpVersionByThread[threadId] ?? 0) + 1,
       },
     })),
-
-  setCurrentGame: (game) => set({ currentGame: game }),
 
   // ── Thread management ──
 

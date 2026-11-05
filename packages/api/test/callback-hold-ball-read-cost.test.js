@@ -80,7 +80,7 @@ for (const registrationFails of [false, true]) {
         wakeAfterMs: 60000,
         waitSourceRef: {
           kind: 'github_issue',
-          value: 'zts212653/cat-cafe#1',
+          value: 'zts212653/clowder-ai#1',
           expectedSignal: 'ci_complete',
           slaUntilMs: Date.now() + 3600000,
         },

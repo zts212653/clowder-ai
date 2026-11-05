@@ -59,9 +59,10 @@ function fixture(t) {
   return { ...f, now, owner, redis, proof, deps, input, registryDir, dataDirectory };
 }
 
-test('a named Alpha producer publishes exact ownership, independently of preview or dev leases', (t) => {
+test('a named Alpha producer retains exact ownership after tracked serving changes, independently of preview or dev leases', (t) => {
   const f = fixture(t);
   const file = registerNamedAlphaRedisLease(f.input, f.deps);
+  writeFileSync(join(f.alphaRoot, 'packages/web/package.json'), '{"generatedDuringServing":true}\n');
   const result = readNamedAlphaRedisLeases(f.registryDir, f.deps);
   assert.deepEqual(result, { live: [{ port: 15397, pid: 41021, leaseFile: file }], rejected: [] });
   assert.equal(JSON.parse(readFileSync(file, 'utf8')).kind, 'named-alpha');

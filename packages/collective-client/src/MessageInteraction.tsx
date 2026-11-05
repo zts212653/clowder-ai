@@ -12,6 +12,9 @@ import type {
 } from './client-types.js';
 import { MessageActionBar } from './MessageActionBar.js';
 import { ReactionBar, reactionsForEvent } from './ReactionBar.js';
+import { SharedArtifactCards } from './SharedArtifactLibrary.js';
+import { SharedArtifactMessageFeedback } from './SharedArtifactMessageFeedback.js';
+import { useSharedArtifacts } from './use-collective-artifacts.js';
 import { InformalVoteCard, InformalVoteComposer, type InformalVoteDraft } from './VoteCard.js';
 
 function eventOwnerHumanId(event: CollectiveEventEnvelope): string {
@@ -42,6 +45,7 @@ export function MessageInteraction({
   roadmapActions,
   onSetReaction,
 }: MessageInteractionProps) {
+  const shared = useSharedArtifacts();
   const [pendingReaction, setPendingReaction] = useState<CollectiveReactionEmoji>();
   const [reactionError, setReactionError] = useState<string>();
   const [voteDraftOpen, setVoteDraftOpen] = useState(false);
@@ -75,6 +79,8 @@ export function MessageInteraction({
 
   return (
     <div className="message-interaction" data-message-interaction-event-id={event.eventId}>
+      <SharedArtifactCards eventId={event.eventId} />
+      <SharedArtifactMessageFeedback eventId={event.eventId} />
       {currentHumanId && onSetReaction && (
         <ReactionBar
           eventId={event.eventId}
@@ -141,6 +147,7 @@ export function MessageInteraction({
         onMention={onMention}
         onStartVote={onCreateVote && votes.length === 0 ? () => setVoteDraftOpen(true) : undefined}
         onProposeWork={onProposeWork && works.length === 0 ? onProposeWork : undefined}
+        onPublishArtifact={shared?.api ? () => shared.beginPublication(event.eventId) : undefined}
       />
     </div>
   );
@@ -159,7 +166,11 @@ export interface MessageInteractionProps {
   readonly onReply?: () => void;
   readonly onMention?: () => void;
   readonly onProposeWork?: () => void;
-  readonly onCommitWork?: (work: CollectiveWorkProjection, participant?: CollectiveParticipant) => void;
+  readonly onCommitWork?: (
+    work: CollectiveWorkProjection,
+    participant?: CollectiveParticipant,
+    accountability?: 'self' | 'unassigned',
+  ) => void;
   readonly onDeclineWork?: (work: CollectiveWorkProjection) => void;
   readonly onAcceptWorkResult?: (work: CollectiveWorkProjection) => void;
   readonly onRequestWorkRevision?: (work: CollectiveWorkProjection, feedback: string) => Promise<void>;

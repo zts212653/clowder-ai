@@ -38,6 +38,7 @@ export class F320AccountWire implements AgentCarrierSession {
     if (method === 'config/read') result = { config: this.config };
     if (method === 'configRequirements/read') result = { requirements: null };
     if (method === 'account/read') result = { account: { type: 'chatgpt' } };
+    if (method === 'thread/turns/list') result = { data: [], nextCursor: null };
     if (method === 'thread/start' || method === 'thread/resume')
       result = { thread: { id: 'fixture-thread', turns: [] } };
     if (method === 'turn/start') result = { turn: { id: 'fixture-turn', status: 'inProgress', items: [] } };

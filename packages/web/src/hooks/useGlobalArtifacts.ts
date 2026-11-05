@@ -8,9 +8,16 @@ import type { GlobalArtifactDTO, GlobalArtifactsResponse } from '@cat-cafe/share
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '../utils/api-client';
+import { usePagedGlobalWorks } from './usePagedGlobalWorks';
 import { useWorksSourceRefresh } from './useThreadArtifacts';
 
 type WorkLineage = GlobalArtifactsResponse['workLineage'];
+
+class GlobalArtifactsReadError extends Error {
+  constructor(readonly status: number) {
+    super(`global artifacts fetch failed: ${status}`);
+  }
+}
 
 interface GlobalArtifactsPayload {
   artifacts: GlobalArtifactDTO[];
@@ -36,8 +43,8 @@ async function fetchGlobalArtifacts(
   requireComplete: boolean,
   worksView: boolean,
 ): Promise<GlobalArtifactsPayload> {
-  const res = await apiFetch(path, { signal });
-  if (!res.ok) throw new Error(`global artifacts fetch failed: ${res.status}`);
+  const res = await apiFetch(path, { signal }, { afterCurrentGet: requireComplete });
+  if (!res.ok) throw new GlobalArtifactsReadError(res.status);
   const body = await res.json();
   if (worksView && (body === null || typeof body !== 'object' || body.view !== 'works'))
     throw new Error('Works view unavailable');
@@ -50,12 +57,21 @@ interface UseGlobalArtifactsResult {
   complete: boolean;
   loading: boolean;
   error: boolean;
+  loadingMore?: boolean;
   refetch: () => void;
 }
 
 export type GlobalArtifactsQuery = { view: 'recent-works'; limit: number } | { view: 'works' };
 
-export function useGlobalArtifacts(enabled: boolean, query?: GlobalArtifactsQuery): UseGlobalArtifactsResult {
+export function useGlobalArtifacts(
+  enabled: boolean,
+  query?: GlobalArtifactsQuery,
+  ownerKey?: string | null,
+): UseGlobalArtifactsResult {
+  const worksView = query?.view === 'works';
+  const paged = usePagedGlobalWorks(enabled && worksView, ownerKey);
+  const [resolvedScope, setResolvedScope] = useState<string | null>(null);
+  const resolvedScopeRef = useRef<string | null>(null);
   const [artifacts, setArtifacts] = useState<GlobalArtifactDTO[]>([]);
   const [workLineage, setWorkLineage] = useState<WorkLineage>('unavailable');
   const [complete, setComplete] = useState(true);
@@ -66,10 +82,10 @@ export function useGlobalArtifacts(enabled: boolean, query?: GlobalArtifactsQuer
   const hostThreadId = useChatStore((state) => state.currentThreadId);
 
   const requireComplete = query !== undefined;
-  const worksView = query?.view === 'works';
   const requestPath = query
     ? `/api/artifacts?view=${encodeURIComponent(query.view)}${'limit' in query ? `&limit=${encodeURIComponent(String(query.limit))}` : ''}`
     : '/api/artifacts';
+  const scope = JSON.stringify([requestPath, ownerKey]);
 
   const refetch = useCallback(async () => {
     abortRef.current?.abort();
@@ -85,21 +101,30 @@ export function useGlobalArtifacts(enabled: boolean, query?: GlobalArtifactsQuer
         setArtifacts(result.artifacts);
         setWorkLineage(result.workLineage);
         setComplete(result.complete);
+        setResolvedScope(scope);
+        resolvedScopeRef.current = scope;
       }
     } catch (err: unknown) {
       if (ac.signal.aborted || (err instanceof DOMException && err.name === 'AbortError')) return;
       setError(true);
-      setArtifacts([]);
+      if (
+        resolvedScopeRef.current !== scope ||
+        (err instanceof GlobalArtifactsReadError && (err.status === 401 || err.status === 403))
+      ) {
+        setArtifacts([]);
+        setResolvedScope(null);
+        resolvedScopeRef.current = null;
+      }
       setWorkLineage('unavailable');
       setComplete(false);
     } finally {
       if (!ac.signal.aborted) setLoading(false);
     }
-  }, [requestPath, requireComplete, worksView]);
+  }, [requestPath, requireComplete, worksView, scope]);
 
   useEffect(() => {
     enabledRef.current = enabled;
-    if (enabled) {
+    if (enabled && !worksView) {
       refetch();
     } else {
       setArtifacts([]);
@@ -109,9 +134,19 @@ export function useGlobalArtifacts(enabled: boolean, query?: GlobalArtifactsQuer
       setError(false);
     }
     return () => abortRef.current?.abort();
-  }, [enabled, refetch]);
+  }, [enabled, refetch, worksView]);
 
-  useWorksSourceRefresh(hostThreadId, enabled && worksView, refetch);
+  // The paged Works view re-reads the whole owner catalogue, so host-thread changes are coalesced.
+  useWorksSourceRefresh(hostThreadId, enabled && query !== undefined, worksView ? paged.scheduleRefresh : refetch);
 
-  return { artifacts, workLineage, complete, loading: enabled && (loading || !enabledRef.current), error, refetch };
+  return worksView
+    ? paged
+    : {
+        artifacts: enabled && resolvedScope === scope ? artifacts : [],
+        workLineage: resolvedScope === scope ? workLineage : 'unavailable',
+        complete: resolvedScope === scope && complete,
+        loading: enabled && (loading || !enabledRef.current),
+        error,
+        refetch,
+      };
 }

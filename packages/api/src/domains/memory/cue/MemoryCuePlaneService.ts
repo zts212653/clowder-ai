@@ -8,15 +8,19 @@ import {
   type RecallScopeV1,
 } from '@cat-cafe/shared';
 import type { ContextPresentationEnvelope } from '../../cats/services/session/context/context-presentation.js';
+import { ContextSourceTimeout, type ContextSourceWorkBudget } from './ContextSourceWorkBudget.js';
+import type { ContextSourceOmission } from './context-source-omission.js';
 import { formatMemoryCues, renderMemoryCuePointer, renderThreadOpeningClue } from './format-memory-cues.js';
 import type { MemoryCueEventInput } from './MemoryCueEpisodeStore.js';
 import type { CreateMemoryCueDrillHandleInput, MemoryCueResolverRegistry } from './MemoryCueResolverRegistry.js';
 import { RECALL_RESOLVER_ADMISSION_V5 } from './MemoryCueResolverRegistry.js';
+import { memoryCueSourceIdentity } from './memory-cue-source-identity.js';
 import {
   admitRecallOpportunity,
   getRecallOpportunityCatalogEntry,
   type RecallOpportunityCatalogEntry,
 } from './RecallOpportunityCatalog.js';
+import { OPENING_PRIMER_PREFIX } from './sources/PrimerMemoryCueSource.js';
 
 export interface MemoryCueInvocationState {
   readonly seenDedupeKeys: Set<string>;
@@ -54,6 +58,8 @@ export interface ResolveMemoryCueInput {
   consumerCatId?: string;
   signal?: AbortSignal;
   createDrillHandle(input: CreateMemoryCueDrillHandleInput): string;
+  recordOmission?(reason: ContextSourceOmission): void;
+  contextSourceBudget?: ContextSourceWorkBudget;
 }
 
 const ZERO_RESULT: Omit<MemoryCueResolution, 'status'> = Object.freeze({
@@ -95,7 +101,10 @@ export class MemoryCuePlaneService {
 
     const candidates = await this.collectCandidates(opportunity, entry, expiresAt, input);
     input.signal?.throwIfAborted();
-    const formatted = formatMemoryCues(candidates, { maxTokens: entry.maxPromptTokens });
+    const formatted = formatMemoryCues(candidates, {
+      maxTokens: entry.maxPromptTokens,
+      pointerOnly: opportunity.kind !== 'thread_opened',
+    });
     const deliveryReceipts = formatted.cues.map((cue) =>
       this.createDeliveryReceipt(opportunity.occurredAt, cue, input.consumerCatId),
     );
@@ -106,8 +115,15 @@ export class MemoryCuePlaneService {
       estimatedTokens: formatted.estimatedTokens,
       deliveryReceipts,
       presentationEnvelopes: formatted.cues.map((cue, index) => {
-        const subjectKey = `memory-cue:${cue.resolverFamily}:${cue.source.anchor}`;
-        const isOpeningClue = opportunity.kind === 'thread_opened' && cue.resolverFamily === 'thread_overview';
+        const subjectKey = memoryCueSourceIdentity(cue, input.consumerCatId);
+        const isProfileOpening =
+          opportunity.kind === 'fresh_context_sources' &&
+          cue.resolverFamily === 'profile' &&
+          cue.source.anchor.startsWith(OPENING_PRIMER_PREFIX);
+        const isOpeningClue =
+          isProfileOpening || (opportunity.kind === 'thread_opened' && cue.resolverFamily === 'thread_overview');
+        const cluePolicy = isProfileOpening ? 'F332.ProfileOpeningReference' : 'F321.ThreadOpeningClue';
+        const clueOwner = isProfileOpening ? 'profile_repository' : 'thread_overview';
         const entryVersion = `recall-catalog:${RECALL_OPPORTUNITY_CATALOG_VERSION}:${entry.kind}:${entry.producer}`;
         const asOf = { kind: 'version' as const, value: cue.source.revision };
         return {
@@ -121,17 +137,23 @@ export class MemoryCuePlaneService {
               ? {
                   historicalClueAdmission: {
                     entryVersion,
-                    policyRef: 'F321.ThreadOpeningClue',
+                    policyRef: cluePolicy,
                     sourceAnchor: cue.source.anchor,
                     sourceRevision: cue.source.revision,
                   },
-                  invalidator: { owner: 'thread_overview', ref: `${cue.source.anchor}@${cue.source.revision}` },
+                  invalidator: { owner: clueOwner, ref: `${cue.source.anchor}@${cue.source.revision}` },
                 }
               : {}),
           },
           segments: {
             pointer: renderMemoryCuePointer(cue),
-            ...(isOpeningClue ? { clue: renderThreadOpeningClue(cue) } : {}),
+            ...(isOpeningClue
+              ? {
+                  clue: isProfileOpening
+                    ? `${cue.summary}\n${renderMemoryCuePointer(cue)}`
+                    : renderThreadOpeningClue(cue),
+                }
+              : {}),
           },
           admission: {
             opportunityId: opportunity.opportunityId,
@@ -143,15 +165,13 @@ export class MemoryCuePlaneService {
             asOf,
             sourceRefs: [cue.source.anchor],
             eligibleSurfaces: ['dynamic_context', 'pointer'] as const,
-            presentationPolicyRef: isOpeningClue ? 'F321.ThreadOpeningClue' : 'F296.OpportunityPresentation',
+            presentationPolicyRef: isOpeningClue ? cluePolicy : 'F296.OpportunityPresentation',
             tokenBudget: entry.maxPromptTokens,
             dedupeKey,
             expiresAt,
             invalidators: [
               ...cue.invalidators.map((ref) => ({ owner: opportunity.producer, ref })),
-              ...(isOpeningClue
-                ? [{ owner: 'thread_overview', ref: `${cue.source.anchor}@${cue.source.revision}` }]
-                : []),
+              ...(isOpeningClue ? [{ owner: clueOwner, ref: `${cue.source.anchor}@${cue.source.revision}` }] : []),
             ],
             epistemicCeiling: isOpeningClue ? ('historical_clue' as const) : ('pointer' as const),
           },
@@ -212,14 +232,21 @@ export class MemoryCuePlaneService {
   ): Promise<CueEnvelopeV1[]> {
     let resolved: readonly CueEnvelopeV1[];
     try {
-      resolved = await this.registry.get(family).resolve(opportunity, {
-        now: input.now,
-        expiresAt,
-        signal: input.signal,
-        ...(input.consumerCatId ? { consumerCatId: input.consumerCatId } : {}),
-        createDrillHandle: input.createDrillHandle,
-      });
-    } catch {
+      const run = (signal?: AbortSignal) =>
+        this.registry.get(family).resolve(opportunity, {
+          now: input.now,
+          expiresAt,
+          signal: signal ? AbortSignal.any([signal, ...(input.signal ? [input.signal] : [])]) : input.signal,
+          ...(input.consumerCatId ? { consumerCatId: input.consumerCatId } : {}),
+          createDrillHandle: input.createDrillHandle,
+          recordOmission: input.recordOmission,
+        });
+      // Leave a small part of the same 1500ms account for final source checks.
+      resolved = input.contextSourceBudget ? await input.contextSourceBudget.run(run, 200) : await run();
+    } catch (error) {
+      input.recordOmission?.(
+        error instanceof ContextSourceTimeout || input.signal?.aborted ? 'timeout' : 'source_unavailable',
+      );
       return [];
     }
     return resolved.flatMap((candidate) => {

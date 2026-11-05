@@ -69,11 +69,13 @@ test('saved context capability stays attached to its strategy through draft, dis
     assert((await status.innerText()).includes('This strategy has not been saved'));
     assert.equal((await status.innerText()).includes('Available'), false);
     assert.equal(state.writes.length, 0);
-    await page.getByRole('button', { name: 'Discard', exact: true }).click();
+    await page.getByRole('button', { name: 'Discard changes', exact: true }).click();
     assert.equal(await strategy.inputValue(), 'compress');
     assert((await status.innerText()).includes('Available'));
     await strategy.selectOption('hybrid');
     await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await page.locator('.member-save-bar [role="status"]').filter({ hasText: 'Saved' }).waitFor();
+    await page.getByRole('button', { name: '‹ Members', exact: true }).click();
     await page.getByTestId('member-detail-page').waitFor({ state: 'detached' });
     assert.deepEqual(
       state.writes.map((write) => write.path),

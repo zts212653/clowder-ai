@@ -6,6 +6,7 @@ export const CAT = {
   variantLabel: 'GPT-6.1 Sol',
   color: { primary: '#6b8f34', secondary: '#c8d8b5' },
   mentionPatterns: ['codex61-sol'],
+  carrier: 'cli',
   clientId: 'openai',
   defaultModel: 'gpt-6.1-sol',
   avatar: '/avatars/codex.png',
@@ -21,7 +22,7 @@ const message = (id, content, extra = {}) => ({
   id,
   threadId: COMPANION_THREAD,
   userId: 'fixture-owner',
-  catId: CAT.id,
+  from: { kind: 'agent', catId: CAT.id },
   content,
   mentions: [],
   timestamp: 1791200000000 + id.length,
@@ -237,7 +238,7 @@ export function createEntryFixture(mode = 'missing') {
         : JSON.parse(data);
       const stored = {
         ...message(`saved-send-${messages.length}`, input.content),
-        catId: null,
+        from: { kind: 'user', userId: 'fixture-owner' },
         threadId: input.threadId,
         timestamp: Date.now(),
         contentBlocks: [
@@ -246,7 +247,7 @@ export function createEntryFixture(mode = 'missing') {
         ],
       };
       messages.push(stored);
-      body = { status: 'accepted', userMessageId: stored.id, userMessage: stored };
+      body = { status: 'queued', userMessageId: stored.id };
     } else if (path === '/api/messages')
       body = {
         messages: url.searchParams.get('threadId') === OTHER_THREAD ? other : messages,

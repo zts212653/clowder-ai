@@ -17,7 +17,7 @@ import { useSettingsReadingEntry } from './useSettingsSourceReturn';
 export function useOpenDestination(): {
   openEntry: (entry: SettingsEntry) => void;
   openPin: (pin: ResolvedPin) => void;
-  /** The Workspace 猫猫团队 panel (成员能力与路由状态), a second-level item under 猫猫团队. */
+  /** Open the original Workspace team panel for an already-saved rail shortcut. */
   openTeam: () => void;
 } {
   const pathname = usePathname() ?? '/';

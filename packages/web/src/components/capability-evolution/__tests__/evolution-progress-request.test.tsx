@@ -6,7 +6,7 @@ import type { EvolutionProgramProjection } from '../evolution-program-projection
 import { useEvolutionReading } from '../evolution-reading-state';
 import { useEvolutionProgressRequests } from '../journey/evolution-progress-request';
 import { assetReviewFixture } from './evolution-asset-fixtures';
-import { programFixture } from './evolution-fixtures';
+import { assetRef, programFixture } from './evolution-fixtures';
 
 const api = vi.hoisted(() => ({ fetch: vi.fn() }));
 const catData = vi.hoisted(() => ({
@@ -173,7 +173,7 @@ describe('operator can ask the initiating cat to advance the existing Program', 
   it('keeps recorded version refs out of the default narrative and recoverable in named details', async () => {
     await render();
     const fallback = [...host.querySelectorAll('details')].find((item) =>
-      item.querySelector('summary')?.textContent?.includes('项目最近记录'),
+      item.querySelector('summary')?.textContent?.includes('版本标识'),
     );
     expect(fallback, 'recorded refs stay recoverable in a named detail').toBeDefined();
     expect(fallback?.open).toBe(false);
@@ -182,6 +182,7 @@ describe('operator can ask the initiating cat to advance the existing Program', 
   });
 
   it('shows the adopted version by title and sinks the exact ref into a named detail', async () => {
+    projection.program.currentAssetVersionRefs = [assetRef('v2')];
     api.fetch.mockImplementation(async (path: string) => {
       if (path === '/api/cats') return Response.json({ cats: [{ id: 'codex-sol', displayName: 'Sol' }] });
       if (path.includes('/asset-review')) return Response.json(assetReviewFixture('v2', 'v2'));

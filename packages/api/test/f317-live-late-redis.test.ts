@@ -22,7 +22,7 @@ async function roundTrip(write: Store, read: Store, projection: boolean) {
     await write.appendIdempotent({
       userId: 'owner',
       threadId: 'home',
-      catId: null,
+      from: { kind: 'user', userId: 'owner' },
       content: 'Compare the original reports',
       mentions: [],
       timestamp: Date.now(),
@@ -37,7 +37,7 @@ async function roundTrip(write: Store, read: Store, projection: boolean) {
     await write.appendIdempotent({
       userId: 'owner',
       threadId: 'home',
-      catId: scope.catId,
+      from: { kind: 'agent', catId: scope.catId },
       content: 'Original complete result',
       mentions: [],
       timestamp: Date.now(),
@@ -56,7 +56,7 @@ async function roundTrip(write: Store, read: Store, projection: boolean) {
     await write.appendIdempotent({
       userId: 'owner',
       threadId: 'home',
-      catId: createCatId('system'),
+      from: { kind: 'system', service: 'legacy-briefing' },
       content: 'Deferred result fact',
       mentions: [],
       origin: 'briefing',
@@ -78,7 +78,8 @@ async function roundTrip(write: Store, read: Store, projection: boolean) {
     );
   else
     assert.equal(
-      (await read.getByThread('home', 120, 'owner')).find((m) => m.catId === 'system')?.extra?.systemInfo?.payload.kind,
+      (await read.getByThread('home', 120, 'owner')).find((m) => m.from.kind === 'system')?.extra?.systemInfo?.payload
+        .kind,
       'live_result_notice',
     );
   let woke = 0;
@@ -107,7 +108,7 @@ async function roundTrip(write: Store, read: Store, projection: boolean) {
     await write.appendIdempotent({
       userId: 'owner',
       threadId: 'home',
-      catId: scope.catId,
+      from: { kind: 'agent', catId: scope.catId },
       content: 'Current source-backed reminder',
       mentions: [],
       timestamp: Date.now(),

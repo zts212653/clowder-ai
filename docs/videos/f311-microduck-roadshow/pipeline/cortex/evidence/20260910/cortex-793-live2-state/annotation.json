@@ -1,0 +1,18 @@
+{
+  "run_id": "1bf6ef97a8494d618d47de29a2c0298d",
+  "source": "match.mp4",
+  "source_sha256": "2ad78c2534a9faa5833ab7c5bee25e71fa460afb733c7c037336278cc78217d5",
+  "source_observations_sha256": "e4759fee96ac7506308cf0eb0bd865b5e92781dc09cbbb2fd83ee75686eaa27c",
+  "observation_domain": "simulator_world_state; local ball feedback uses simulator state",
+  "label": "coach: world | local: simulator state",
+  "output": "annotated-match.mp4",
+  "output_sha256": "b9796102725feef27677d3f2b98f09310a737795cf126ea4ce992e70858b0f75",
+  "video_info": {
+    "width": 1280,
+    "height": 720,
+    "r_frame_rate": "10/1",
+    "duration": "240.000000",
+    "nb_frames": "2400"
+  },
+  "edit": "HUD rectangle x=352,y=60,w=928,h=46 only; H.264 re-encode; no time/motion edits"
+}

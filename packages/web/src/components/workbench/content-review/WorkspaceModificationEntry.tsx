@@ -2,6 +2,7 @@
 
 import type { ContentModificationRecord, ContentModificationRequest } from '@cat-cafe/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useArtworkChrome, useRegisterArtworkHistory } from '@/components/content-review/ArtworkChrome';
 import { ContentModificationLanding } from '@/components/content-review/ContentModificationLanding';
 import { modificationSourceVersion, modificationStorageKey } from '@/components/content-review/modification-draft';
 import {
@@ -11,10 +12,11 @@ import {
 } from '@/components/content-review/modification-focus';
 import { textModificationCopy } from '@/components/content-review/text-modification.shell-copy';
 import { useShellCopy } from '@/components/shell/shell-copy';
+import { useShellPresentation } from '@/components/shell/shell-presentation';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { useWorkspaceChatReveal } from '../WorkspaceChatReveal';
-import type { ContentReviewView } from './content-review-contract';
+import type { PrivateContentReviewView } from './content-review-contract';
 import { requestTextModificationInChat, type TextChatRequest } from './request-text-modification-in-chat';
 import type { WorkspaceAnnotationTarget } from './useWorkspaceContentReview';
 import { workspaceReviewRequestSource } from './workspace-modification-source';
@@ -43,7 +45,7 @@ export function WorkspaceModificationEntry({
   compact = false,
   chatRequest,
 }: {
-  view: ContentReviewView;
+  view: PrivateContentReviewView;
   path: string;
   target: WorkspaceAnnotationTarget | null;
   disabled: boolean;
@@ -195,9 +197,13 @@ export function WorkspaceModificationEntry({
     openedRequest.current = openRequest;
     void open();
   }, [openRequest, open]);
+  useRegisterArtworkHistory(() => void open());
+  const chrome = useArtworkChrome();
+  const isV2 = useShellPresentation() === 'v2';
+  const unifiedHistory = !!chrome && isV2 && compact && !allowNewRequest;
   return (
     <>
-      {!hideTrigger && (allowNewRequest || chatRequest || !intent) ? (
+      {!hideTrigger && !unifiedHistory && (allowNewRequest || chatRequest || !intent) ? (
         <div
           className={
             compact

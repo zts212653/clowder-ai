@@ -1,9 +1,11 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { useShellCopy } from '@/components/shell/shell-copy';
 import { useShellPresentation } from '@/components/shell/shell-presentation';
 import { isWorkspaceFullWindowSurface } from './artifact-work-presentation';
 import type { WorkbenchAction, WorkbenchLayoutState } from './workbench-contract';
+import { workspaceChromeCopy } from './workspace-chrome.shell-copy';
 
 function SplitIcon({ collapse = false }: { collapse?: boolean }) {
   return (
@@ -43,6 +45,34 @@ function MainAreaIcon({ returning = false }: { returning?: boolean }) {
   );
 }
 
+function mainAreaControlState(
+  title: string,
+  attentionActive: boolean,
+  attentionIsWide: boolean,
+  copy: Pick<(typeof workspaceChromeCopy)['zh'], 'returnToChat' | 'openFullWindow'>,
+) {
+  if (attentionActive && !attentionIsWide)
+    return {
+      fullWindow: true,
+      label: `${copy.returnToChat} ${title}`,
+      title: '回到同一聊天与阅读现场',
+      testId: 'f307-return-from-main-area',
+    } as const;
+  if (attentionIsWide)
+    return {
+      fullWindow: false,
+      label: copy.openFullWindow(title),
+      title: '临时整窗阅读',
+      testId: 'f307-enter-main-area',
+    } as const;
+  return {
+    fullWindow: false,
+    label: `在主区打开 ${title}`,
+    title: '临时在主区阅读',
+    testId: 'f307-enter-main-area',
+  } as const;
+}
+
 export function F307WorkbenchControlRail({
   layout,
   dispatch,
@@ -51,6 +81,7 @@ export function F307WorkbenchControlRail({
   isDesktop,
   artifactWorkHostAvailable,
   mainAreaAttentionSurfaceId,
+  mainAreaAttentionIsWide = false,
   onEnterMainAreaAttention,
   onExitMainAreaAttention,
 }: {
@@ -61,13 +92,17 @@ export function F307WorkbenchControlRail({
   isDesktop: boolean;
   artifactWorkHostAvailable: boolean;
   mainAreaAttentionSurfaceId: string | null;
+  mainAreaAttentionIsWide?: boolean;
   onEnterMainAreaAttention: (surfaceId: string) => void;
   onExitMainAreaAttention: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const shellPresentation = useShellPresentation();
+  const t = useShellCopy(workspaceChromeCopy);
   const menuRoot = useRef<HTMLDivElement>(null);
   const activeSurface = layout.surfaces.find((surface) => surface.id === layout.activeSurfaceId) ?? null;
+  const attentionActive = activeSurface?.id === mainAreaAttentionSurfaceId;
+  const mainAreaControl = mainAreaControlState(activeSurface?.title ?? '', attentionActive, mainAreaAttentionIsWide, t);
   const splitCandidate = layout.surfaces.find((surface) => surface.id !== layout.activeSurfaceId) ?? null;
   const closeableCount = activeSurface
     ? layout.surfaces.filter(
@@ -120,23 +155,23 @@ export function F307WorkbenchControlRail({
           <button
             type="button"
             onClick={() => {
-              if (mainAreaAttentionSurfaceId === activeSurface.id) onExitMainAreaAttention();
+              if (mainAreaControl?.fullWindow) onExitMainAreaAttention();
               else onEnterMainAreaAttention(activeSurface.id);
             }}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-cafe-muted transition-colors hover:bg-cafe-surface-sunken hover:text-cafe"
-            aria-label={
-              mainAreaAttentionSurfaceId === activeSurface.id
-                ? `返回侧栏 ${activeSurface.title}`
-                : `在主区打开 ${activeSurface.title}`
-            }
-            title={mainAreaAttentionSurfaceId === activeSurface.id ? '返回 Workspace 侧栏' : '临时在主区阅读'}
-            data-testid={
-              mainAreaAttentionSurfaceId === activeSurface.id ? 'f307-return-from-main-area' : 'f307-enter-main-area'
-            }
+            className={`flex h-8 items-center justify-center rounded-lg text-cafe-muted transition-colors hover:bg-cafe-surface-sunken hover:text-cafe ${
+              mainAreaControl?.fullWindow ? 'w-auto px-2.5 text-xs font-semibold' : 'w-8'
+            }`}
+            aria-label={mainAreaControl?.label}
+            title={mainAreaControl?.title}
+            data-testid={mainAreaControl?.testId}
           >
-            <span className="h-4 w-4">
-              <MainAreaIcon returning={mainAreaAttentionSurfaceId === activeSurface.id} />
-            </span>
+            {mainAreaControl?.fullWindow ? (
+              t.returnToChat
+            ) : (
+              <span className="h-4 w-4">
+                <MainAreaIcon returning={false} />
+              </span>
+            )}
           </button>
         )}
 

@@ -15,9 +15,11 @@ const threadId = 'issue1371-queue-reconcile';
 useChatStore.setState({
   currentThreadId: threadId,
   messages: [],
-  activeInvocations: {},
+  activeInvocations: {
+    'ended-execution': { catId: 'codex-astra', mode: 'execute', startedAt: Date.now() - 180_000 },
+  },
   catInvocations: {},
-  hasActiveInvocation: false,
+  hasActiveInvocation: true,
   queue,
 });
 
@@ -26,7 +28,7 @@ function QueueRecoveryProof() {
   return (
     <main className="min-h-screen bg-cafe-surface-canvas p-8 text-cafe" data-ready="true">
       <h1 className="text-xl font-semibold">队列恢复验证</h1>
-      <p className="my-4 text-cafe-secondary">开发测试：三个已结束的消息回执，服务器已完成结算。</p>
+      <p className="my-4 text-cafe-secondary">开发测试：三条待投递消息与过时的执行状态，服务器已完成结算。</p>
       <QueuePanel threadId={threadId} />
     </main>
   );

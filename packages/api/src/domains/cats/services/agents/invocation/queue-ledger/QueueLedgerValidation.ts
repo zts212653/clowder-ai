@@ -1,4 +1,4 @@
-import { isMessageFrom } from '@cat-cafe/shared';
+import { isLifecycleAppendFailure, isMessageFrom, routingAdmissionProvenanceV1Schema } from '@cat-cafe/shared';
 import type { QueueLedgerEntry, QueueLedgerExecution, QueueLedgerPayload, QueueOwner } from './QueueLedger.js';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -172,6 +172,29 @@ export function assertQueueLedgerEntry(value: unknown): asserts value is QueueLe
     throw new Error('queue ledger Live admission scope is invalid');
   assertQueueLedgerExecutionScope(entry as QueueLedgerEntry);
   if (!isRecord(entry.delivery)) throw new Error('queue ledger delivery is invalid');
+  if (entry.delivery.routingAdmission !== undefined)
+    routingAdmissionProvenanceV1Schema.parse(entry.delivery.routingAdmission);
+  if (entry.delivery.routingHeldTargetIds !== undefined) assertQueueTargets(entry.delivery.routingHeldTargetIds);
+  if (entry.delivery.appendPendingByTarget !== undefined) {
+    if (!isRecord(entry.delivery.appendPendingByTarget)) throw new Error('queue Append pending is invalid');
+    for (const [targetId, pending] of Object.entries(entry.delivery.appendPendingByTarget)) {
+      if (
+        !isRecord(pending) ||
+        pending.targetId !== targetId ||
+        typeof pending.dispatchStarted !== 'boolean' ||
+        (pending.requiresCompletion !== undefined && typeof pending.requiresCompletion !== 'boolean') ||
+        !isLifecycleAppendFailure({ ...pending, acceptance: 'unknown', reason: 'exception' })
+      )
+        throw new Error('queue Append pending target is invalid');
+    }
+  }
+  if (entry.delivery.appendRecoveryByTarget !== undefined) {
+    if (!isRecord(entry.delivery.appendRecoveryByTarget)) throw new Error('queue Append recovery is invalid');
+    for (const [targetId, recovery] of Object.entries(entry.delivery.appendRecoveryByTarget)) {
+      if (!isLifecycleAppendFailure(recovery) || recovery.targetId !== targetId)
+        throw new Error('queue Append recovery target is invalid');
+    }
+  }
   if (!isFiniteTimestamp(entry.enqueuedAt)) throw new Error('queue ledger enqueuedAt is invalid');
   assertOptionalTimestamp(entry.claimedAt, 'claimedAt');
   assertOptionalTimestamp(entry.processingStartedAt, 'processingStartedAt');

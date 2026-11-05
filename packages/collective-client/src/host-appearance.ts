@@ -3,6 +3,7 @@ import {
   type CollectiveAppearanceRole,
   type CollectiveAppearanceRoles,
   collectiveHostAppearanceSchema,
+  collectiveHostShellAppearanceSchema,
 } from '@cat-cafe/shared';
 
 import { readableInkOn } from './readable-ink.js';
@@ -39,6 +40,8 @@ export const HUMAN_INK_VARIABLE = '--human-ink';
 export interface HostAppearanceState {
   /** What the host says; `undefined` while no host has spoken (the frame URL or the default decides then). */
   readonly presentation: 'classic' | 'v2' | undefined;
+  readonly language?: 'zh' | 'en';
+  readonly shell?: import('@cat-cafe/shared').CollectiveHostShellAppearance['shell'];
   readonly scheme: 'light' | 'dark';
   readonly roles: CollectiveAppearanceRoles | undefined;
 }
@@ -64,9 +67,31 @@ export function createHostAppearance(input: {
   let state = DIRECT;
   let generation: string | undefined;
   let revision = 0;
+  let shellRevision = 0;
 
   const paint = (next: HostAppearanceState) => {
     input.root.setAttribute('data-theme', next.scheme);
+    input.root.setAttribute('data-shell', 'v2');
+    const language =
+      next.language ?? new URLSearchParams(input.root.ownerDocument.defaultView?.location.search).get('lang');
+    input.root.setAttribute('lang', language === 'en' ? 'en' : 'zh-CN');
+    const shellVariables = {
+      paper: '--shell-paper',
+      work: '--shell-work',
+      frame: '--shell-frame',
+      selected: '--shell-selected',
+      ink: '--shell-ink',
+      body: '--shell-body',
+      muted: '--shell-muted',
+      hairline: '--shell-hairline',
+      hairlineStrong: '--shell-hairline-strong',
+      primaryText: '--shell-primary-text',
+    } as const;
+    for (const [key, variable] of Object.entries(shellVariables)) {
+      const value = next.shell?.[key as keyof typeof shellVariables];
+      if (value) input.root.style.setProperty(variable, value);
+      else input.root.style.removeProperty(variable);
+    }
     input.root.style.colorScheme = next.scheme;
     for (const role of COLLECTIVE_APPEARANCE_ROLES) {
       const variable = ROOM_ROLE_VARIABLES[role];
@@ -89,12 +114,25 @@ export function createHostAppearance(input: {
   const receive: HostAppearanceStore['receive'] = (event) => {
     if (!input.hostOrigin || event.origin !== input.hostOrigin || event.source !== input.parent) return false;
     if (generation === undefined) return false;
+    const extension = collectiveHostShellAppearanceSchema.safeParse(event.data);
+    if (extension.success) {
+      const message = extension.data;
+      if (message.bridgeId !== generation || message.shellRevision <= shellRevision) return false;
+      shellRevision = message.shellRevision;
+      set({ ...state, language: message.language, shell: message.shell });
+      return true;
+    }
     const parsed = collectiveHostAppearanceSchema.safeParse(event.data);
     if (!parsed.success) return false;
     const message = parsed.data;
     if (message.bridgeId !== generation || message.appearanceRevision <= revision) return false;
     revision = message.appearanceRevision;
-    set({ presentation: message.presentation, scheme: message.resolvedScheme, roles: message.roles });
+    set({
+      presentation: message.presentation,
+      scheme: message.resolvedScheme,
+      roles: message.roles,
+      ...(shellRevision ? { language: state.language, shell: state.shell } : {}),
+    });
     return true;
   };
 
@@ -114,6 +152,7 @@ export function createHostAppearance(input: {
       if (bridgeId === generation) return;
       generation = bridgeId;
       revision = 0;
+      shellRevision = 0;
     },
     receive,
     dispose() {

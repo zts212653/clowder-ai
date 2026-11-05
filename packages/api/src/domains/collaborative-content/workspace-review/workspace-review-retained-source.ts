@@ -18,7 +18,8 @@ export async function readRetainedWorkspaceRevision(
   else assertWorkspaceReviewHuman(input.principal);
   const current = owners.store.get(input.reviewId);
   if (!current) throw new WorkspaceContentReviewError('not_found');
-  if (current.ownerUserId !== input.principal.userId) throw new WorkspaceContentReviewError('access_denied');
+  if (current.collaborationScope || current.ownerUserId !== input.principal.userId)
+    throw new WorkspaceContentReviewError('access_denied');
   const retained = owners.store.retained.get(input.reviewId, input.revision);
   if (!retained) throw new WorkspaceContentReviewError('not_found');
   const result = await readRetainedWorkspaceReview(owners, input.principal, retained);
@@ -36,6 +37,12 @@ export async function readRetainedWorkspaceReview(
   principal: WorkspaceReviewPrincipal,
   retained: WorkspaceContentReview,
 ): Promise<WorkspaceContentReview> {
+  if (
+    retained.collaborationScope ||
+    retained.source.kind === 'collective-artifact' ||
+    retained.source.kind === 'collective-media'
+  )
+    throw new WorkspaceContentReviewError('access_denied');
   if (retained.source.kind === 'publication') await readPublicationReview(owners.publications, retained, principal);
   else if (retained.source.kind === 'evolution') await readEvolutionReview(owners.evolution, retained, principal);
   else if (retained.source.kind === 'video-project') await readVideoProjectReview(owners.projects, retained, principal);

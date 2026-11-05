@@ -92,12 +92,13 @@ describe('ThreadExecutionBar Stop surface', () => {
   it.each<CatStatusType>([
     'streaming',
     'suspected_stall',
-  ])('keeps one exact Stop control and never exposes manual force reset for %s', (status) => {
+  ])('keeps the exact Stop and the classic recovery entry for %s', (status) => {
     setActive('opus', status);
     act(() => root.render(React.createElement(ThreadExecutionBar, { threadId: 'thread-a' })));
 
     expect(container.querySelector('button[aria-label="Stop opus live_invocation inv-a"]')).not.toBeNull();
-    expect(container.querySelector('[data-testid="force-reset-entry"]')).toBeNull();
-    expect(container.textContent).not.toContain('强制重置');
+    expect(container.querySelector('[data-testid="force-reset-entry"]')).not.toBeNull();
+    expect(container.textContent).toContain('强制重置');
+    expect(container.textContent).toContain('Alpha');
   });
 });

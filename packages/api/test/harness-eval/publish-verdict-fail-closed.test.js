@@ -5,7 +5,7 @@ import { after, before, describe, it } from 'node:test';
 
 import { handlePublishVerdict } from '../../dist/infrastructure/harness-eval/publish-verdict/publish-verdict.js';
 import { setupHarnessFeedback } from './eval-manual-trigger-fixtures.js';
-import { buildPacket } from './publish-verdict-fixtures.js';
+import { buildPacket, unreachablePublisher } from './publish-verdict-fixtures.js';
 
 /**
  * R9–R10 — Canonical proof failure must not fall back to stale/live state.
@@ -143,6 +143,7 @@ describe('handlePublishVerdict — R9 fail-closed on canonical proof failure', (
 
     const result = await handlePublishVerdict(
       {
+        gitPublisher: unreachablePublisher,
         harnessFeedbackRoot: root,
         now: () => new Date('2026-06-05T11:00:01.000Z'),
         checkStoredSourceEquivalence: designGateSourceEquivalenceCheck,

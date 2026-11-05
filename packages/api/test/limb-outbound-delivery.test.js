@@ -3,7 +3,6 @@ import test from 'node:test';
 
 import { MemoryLimbEmbodimentBindingStore } from '../dist/domains/limb/LimbEmbodimentBindingStore.js';
 import { LimbOutboundDeliveryHook } from '../dist/domains/limb/LimbOutboundDeliveryHook.js';
-import { OutboundDeliveryHook } from '../dist/infrastructure/connectors/OutboundDeliveryHook.js';
 
 const NOW = Date.parse('2026-08-01T09:16:00.000Z');
 
@@ -120,35 +119,4 @@ test('coalesces in-flight and recently completed retries for the same physical r
   await hook.deliver('thread-stackchan', '不要复读我。', 'codex-sol', 'message-transcript-1');
 
   assert.equal(invokeCount, 2, 'one display + one speaker action for one logical reply');
-});
-
-test('connector outbound fanout still reaches a body when the thread has no chat connector', async () => {
-  const delivered = [];
-  const noop = () => {};
-  const hook = new OutboundDeliveryHook({
-    bindingStore: {
-      async getByThread() {
-        return [];
-      },
-    },
-    adapters: new Map(),
-    log: { info: noop, warn: noop, error: noop },
-    limbDelivery: {
-      async deliver(...args) {
-        delivered.push(args);
-      },
-    },
-  });
-
-  await hook.deliver(
-    'thread-stackchan',
-    '我在这里。',
-    'codex-sol',
-    undefined,
-    undefined,
-    undefined,
-    'message-transcript-1',
-  );
-
-  assert.deepEqual(delivered, [['thread-stackchan', '我在这里。', 'codex-sol', 'message-transcript-1']]);
 });

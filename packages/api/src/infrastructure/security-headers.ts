@@ -17,9 +17,23 @@ interface HostAllowlist {
   patterns: RegExp[];
 }
 
-export function applySecurityHeaders(reply: Pick<FastifyReply, 'header'>): void {
+export function applySecurityHeaders(reply: Pick<FastifyReply, 'header' | 'getHeader'>): void {
   reply.header('X-Frame-Options', 'DENY');
-  reply.header('Content-Security-Policy', "frame-ancestors 'none'");
+  const existing = reply.getHeader('Content-Security-Policy');
+  // Keep independently enforced CSPs separate; only framing is this policy's authority.
+  // https://www.w3.org/TR/CSP/#framework-policy
+  const policies = (Array.isArray(existing) ? existing.join(',') : typeof existing === 'string' ? existing : '')
+    .split(',')
+    .map((policy) =>
+      [
+        ...policy
+          .split(';')
+          .map((d) => d.trim())
+          .filter((d) => d && !/^frame-ancestors(?:\s|$)/i.test(d)),
+        "frame-ancestors 'none'",
+      ].join('; '),
+    );
+  reply.header('Content-Security-Policy', policies.join(', '));
 }
 
 /**

@@ -1,4 +1,5 @@
 import type { GlobalArtifactDTO, GlobalArtifactWork, MessageMediaPublicationSource } from '@cat-cafe/shared';
+import type { IndependentWorkCataloguePort } from '../../collaborative-content/works/catalogue.js';
 import { MediaOwnerError } from './media-errors.js';
 import {
   type MessagePublicationLandingDeps,
@@ -24,6 +25,7 @@ export interface GlobalArtifactWorkLineageResolverPort {
 /** Late-bound because the global artifact route is registered before F309 runtime composition. */
 export interface GlobalArtifactWorkLineageResolverHolder {
   current?: GlobalArtifactWorkLineageResolverPort;
+  independent?: IndependentWorkCataloguePort;
 }
 
 interface PreparedLookup {

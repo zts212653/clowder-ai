@@ -6,26 +6,26 @@ topics: [freshness, glass-box, supplement, inbox-notice, runtime-descriptor, sid
 doc_kind: spec
 created: 2026-06-27
 updated: 2026-09-27
-tips_exempt: "F117 integration: this document records the retirement of HELD, supplement and output-commit gates; it introduces no replacement action or setting. Pending delivery uses the shared F117/F047 queue and guidance tips, while native freshness remains an independently owned evaluation capability."
+tips_exempt: "F117 integration: this document records the retirement of HELD, supplement and output-commit gates; it introduces no replacement action or setting. Pending delivery uses the shared F117/F047 queue and guidance tips, provider-native tool-boundary, idle and MCP piggyback freshness notifications are retired for every invocation, including Live."
 ---
 
 # F254: Side-Effect Freshness Gate — 副作用出口 freshness 拦截
 
-> **Status**: partially superseded — **Phase A HELD + Phase B1 MCP piggyback + Phase B2 hold reminder + D1.2 Queue seen/handled ownership + ADR-042 glass-box supplements + Phase E output-commit closure + B3/B4 freshness re-invoke + Phase D output-commit scan are retired by F117/#1398**; the atomic publish path (one original, one exact-boundary frontier annotation), provider-native freshness evaluation and honest carrier precision remain independently owned here. Live delivery capability follows each member's canonical `carrier`; `activeInvocationGuidance` is a separate adapter capability and must not be inferred from freshness precision. | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1
+> **Status**: runtime notification mechanisms retired by F117/#1398 and #1615 — HELD, MCP piggyback, reminders, supplements, output-commit gates, re-invoke and all provider-native tool-boundary／idle freshness notifications are retired, including Live voice. Atomic publication frontier and actual carrier／read evidence remain separate delivery facts. The phase history below is archival, not an active implementation mandate. | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1
 
 ## 当前契约
 
 - Queue 是待投递工作的唯一持久 owner；普通 callback send 不检查 HELD/inbox，不强迫先读再发，也不创建 Queue seen/handled 或 receipt/reminder 的第二本账。
 - supplement offer/claim/decline、output-commit closure、出口 freshness scan 与 B3/B4 自动 re-invoke 已退役。下文这些 Phase 的设计、过程和勾选项仅供历史阅读，不能作为当前 API、设置或调度契约。
 - 公开发布保留原子 `appendAndObservePriorFrontier`，`extra.freshness` 只携带 `priorFrontierMessageId` 供时间线排序；旧 kind 不恢复门禁或补充载体。
-- provider-native freshness 与载体精度独立保留，读取面见 `freshness-unseen-source.ts`。`activeInvocationGuidance`、`deliverySemantics` 与可选读取回执各自描述能力，不能互相推断。
+- 全部调用（包括 Live 语音）均不再装配 native freshness 消费者，工具断点、定时／idle 和 MCP 结果均不得因 thread 有公开未读而要求读增量。公开可读不等于实际收件人；主动历史检索仍可用。Live 的实际输入、结果返回及来源引用使用原有明确投递链路，不保留 freshness 例外。`activeInvocationGuidance`、`deliverySemantics` 与可选读取回执仍各自描述真实能力，不能互相推断。
 - 新消息经共同 send 保存目标、策略并通知 drain；等待、非中断追加和就绪推进使用 [F117](F117-message-delivery-lifecycle.md) 与 [ADR-043](../decisions/043-queue-durable-single-ledger.md) 的同一链路。
 
 Architecture cell: ball-custody, dispatch, bubble-pipeline, transport, harness-eval
 
 Map delta: completed
 
-Map delta why: ADR-042 records the historical supplement design; current pending input is owned by Queue, while atomic publication frontier and provider-native freshness retain their existing owners.
+Map delta why: ADR-042 records the historical supplement design; current pending input is owned by Queue, while atomic publication frontier and carrier/read evidence retain their delivery owners; every runtime freshness notification path is retired, including Live.
 
 ## Why
 

@@ -24,6 +24,7 @@ export function useMessageAnnotationMarkers(
         .filter(
           ({ attachment }) =>
             attachment.source.kind !== 'workspace_file' &&
+            attachment.source.kind !== 'collective_message' &&
             !(attachment.source.kind === 'message' && attachment.source.artifactFile) &&
             attachment.source.threadId === threadId &&
             attachment.source.messageId === messageId,
@@ -38,13 +39,43 @@ export function useMessageAnnotationMarkers(
       setMarkers([]);
       return;
     }
-    const sync = () => setMarkers(positionAnnotationMarkers(root, candidates));
+    const sync = () => {
+      const next = positionAnnotationMarkers(root, candidates);
+      setMarkers((previous) =>
+        previous.length === next.length &&
+        previous.every((marker, index) => {
+          const other = next[index];
+          return (
+            marker.attachment === other.attachment &&
+            marker.number === other.number &&
+            marker.position.top === other.position.top &&
+            marker.position.left === other.position.left
+          );
+        })
+          ? previous
+          : next,
+      );
+    };
+    // A split-pane resize or a covering portal need not resize the browser or scroll the source.
+    const resize = typeof ResizeObserver === 'function' ? new ResizeObserver(sync) : null;
+    for (let node: HTMLElement | null = root; node; node = node.parentElement) resize?.observe(node);
+    const mutation = new MutationObserver(sync);
+    mutation.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['class', 'style', 'hidden', 'inert', 'aria-hidden', 'open'],
+    });
     document.addEventListener('scroll', sync, true);
+    document.addEventListener('load', sync, true);
     window.addEventListener('resize', sync);
     window.addEventListener(CHAT_LAYOUT_CHANGED_EVENT, sync);
     sync();
     return () => {
+      resize?.disconnect();
+      mutation.disconnect();
       document.removeEventListener('scroll', sync, true);
+      document.removeEventListener('load', sync, true);
       window.removeEventListener('resize', sync);
       window.removeEventListener(CHAT_LAYOUT_CHANGED_EVENT, sync);
     };

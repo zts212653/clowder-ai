@@ -132,7 +132,7 @@ describe('work progress is joined from real requests, not the last Human message
     expect(lines()).toHaveLength(1);
     expect(lines()[0].getAttribute('data-state')).toBe('working');
     expect(lines()[0].textContent).toContain('cover.png');
-    expect(lines()[0].textContent).toContain('修改中');
+    expect(lines()[0].textContent).toContain('烁烁修改中');
     const cancel = host.querySelector('button[aria-label="取消修改"]') as HTMLButtonElement;
     await act(async () => cancel.click());
     expect(

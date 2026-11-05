@@ -3,6 +3,40 @@ import { readFileSync } from 'node:fs';
 import { parse } from 'yaml';
 
 const workflow = parse(readFileSync(new URL('../workflows/ci.yml', import.meta.url), 'utf8'));
+assert.ok(
+  !Object.hasOwn(workflow.on.pull_request, 'paths') && !Object.hasOwn(workflow.on.pull_request, 'paths-ignore'),
+  'required public CI must start for every PR, including docs/assets-only changes; workflow-level path filters leave required checks pending',
+);
+for (const event of ['push', 'pull_request']) {
+  assert.deepEqual(
+    [...workflow.on[event].branches].sort(),
+    ['develop', 'main', 'next'],
+    `public CI must cover the stable, integration, and legacy development branches on ${event}`,
+  );
+}
+for (const filename of ['windows-smoke.yml', 'macos-preview-smoke.yml']) {
+  const nativeWorkflow = parse(readFileSync(new URL(`../workflows/${filename}`, import.meta.url), 'utf8'));
+  assert.deepEqual(
+    [...nativeWorkflow.on.pull_request.branches].sort(),
+    ['develop', 'main', 'next'],
+    `${filename} must validate PRs for all branch roles`,
+  );
+  assert.ok(
+    Object.hasOwn(nativeWorkflow.on, 'workflow_dispatch'),
+    `${filename} must support checking the restored next head before ordinary PRs move there`,
+  );
+}
+const lintCheckout = workflow.jobs.lint.steps.find((step) => step.uses === 'actions/checkout@v4');
+assert.equal(
+  workflow.jobs.lint.env?.CAT_CAFE_GATE_BASE_SHA,
+  `\${{ github.event.pull_request.base.sha || (github.event.before != '0000000000000000000000000000000000000000' && github.event.before) || github.sha }}`,
+  'lint governance must use the immutable PR/push baseline, with the initial commit only when a branch has no predecessor',
+);
+assert.equal(
+  lintCheckout?.with?.['fetch-depth'],
+  0,
+  'the lint job runs MCP lineage checks and must fetch complete Git history',
+);
 const runtimeJobs = ['public-test-prepare', 'public-test-shards', 'public-test-summary'];
 const versions = runtimeJobs.map((jobName) => {
   const setupNode = workflow.jobs[jobName].steps.find((step) => step.uses === 'actions/setup-node@v4');
@@ -116,11 +150,27 @@ for (const [pattern, message] of [
 ]) {
   assert.match(distributableLauncher, pattern, message);
 }
+assert.doesNotMatch(
+  summaryStep.run,
+  /--max-critical-path-ms\b/,
+  'public-test coverage must not fail solely because runner-dependent timing exceeds a target',
+);
 assert.match(
   summaryStep.run,
-  /--max-critical-path-ms 600000(?:\s|$)/,
-  'public-test evidence must fail when the measured critical path exceeds 10 minutes',
+  /::warning title=Public test timing::/,
+  'public-test timing above the optimization target must remain visible as a warning',
 );
+assert.match(
+  summaryStep.run,
+  /GITHUB_STEP_SUMMARY/,
+  'public-test timing and runner consumption must remain visible in the job summary',
+);
+for (const job of ['public-test-shards', 'public-test-summary', 'public-test-serial']) {
+  assert.ok(
+    Number.isInteger(workflow.jobs[job]['timeout-minutes']) && workflow.jobs[job]['timeout-minutes'] > 0,
+    `${job} must retain a bounded job timeout for stuck processes`,
+  );
+}
 
 process.stdout.write(
   `public-test CI contract OK (Node ${versions[0]}, owner ${distributableShardStep.env.DEFAULT_OWNER_USER_ID})\n`,

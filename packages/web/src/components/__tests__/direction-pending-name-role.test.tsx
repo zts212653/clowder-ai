@@ -43,7 +43,7 @@ vi.mock('@/components/CatAvatar', () => ({
  * the body text role on the neutral surface-3 base (`--shell-body` on `--shell-selected`); the arrow stays.
  *
  * Pending bubble, new shell: it is the same nameplate as the real reply that replaces it, with one line under it,
- * 「已开始，还没有输出」 / "Started, no output yet"; no avatar column, no dots. A cat the catalogue does not know gets the
+ * 「已接下，还没有输出」 / "Request received, no output yet"; no avatar column, no dots. A cat the catalogue does not know gets the
  * name in the body role, without a plate.
  */
 const opus: CatData = {

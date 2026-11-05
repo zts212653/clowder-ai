@@ -1,6 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, relative, resolve, sep } from 'node:path';
 import type { CatCafeConfig, ClientId, RosterEntry } from '@cat-cafe/shared';
+import { type NativeToolIdentity, nativeToolIdentityFor } from '@cat-cafe/shared';
+import { createModuleLogger } from '../infrastructure/logger.js';
 import { resolveBuiltinClientForProvider } from './account-resolver.js';
 import {
   GEMINI35_CAT_ID,
@@ -11,11 +13,7 @@ import {
   resolveAgyGeminiDefaultModel,
 } from './agy-gemini-models.js';
 import { inheritFullyBlockedMcpCapabilitiesForNewCatsSync } from './capabilities/capability-orchestrator.js';
-import {
-  pickSeedBreed,
-  pruneRosterToRuntimeBreeds,
-  type RuntimeBreedWithCatIds,
-} from './cat-catalog-bootstrap-roster.js';
+import { isUserSelectedCatalog, USER_SELECTED_INITIALIZATION } from './cat-catalog-initialization.js';
 import {
   isTemplateBreedBackfillAllowed,
   isTemplateVariantBackfillAllowed,
@@ -26,6 +24,7 @@ import { readRepairedVoiceRefTexts } from './voice-ref-text-repair.js';
 
 const CONFIG_SUBDIR = '.cat-cafe';
 const CAT_CATALOG_FILENAME = 'cat-catalog.json';
+const log = createModuleLogger('cat-catalog');
 
 function safePath(projectRoot: string, ...segments: string[]): string {
   const root = resolve(projectRoot);
@@ -257,7 +256,7 @@ function buildOwnerRosterEntry(): RosterEntry {
     roles: ['owner'],
     lead: false,
     available: true,
-    evaluation: 'co-creator / 大当家',
+    evaluation: 'co-creator',
   };
 }
 
@@ -383,6 +382,7 @@ function persistMissingTemplateBreeds(projectRoot: string, catalogPath: string, 
   }
 
   const catalog = JSON.parse(catalogRaw) as CatCafeConfig;
+  if (isUserSelectedCatalog(catalog)) return false;
   const template = JSON.parse(templateRaw) as CatCafeConfig;
   const next = structuredClone(catalog) as CatCafeConfig;
   const nextBreeds = next.breeds as unknown as Record<string, unknown>[];
@@ -451,6 +451,7 @@ function persistMissingTemplateVariants(projectRoot: string, catalogPath: string
   }
 
   const catalog = JSON.parse(catalogRaw) as CatCafeConfig;
+  if (isUserSelectedCatalog(catalog)) return false;
   const template = JSON.parse(templateRaw) as CatCafeConfig;
   const next = structuredClone(catalog) as CatCafeConfig;
   const templateBreeds = new Map<string, Record<string, unknown>>();
@@ -598,6 +599,7 @@ function syncGemini35TemplateUpgrade(catalogPath: string, templatePath: string):
   }
 
   const catalog = JSON.parse(catalogRaw) as CatCafeConfig;
+  if (isUserSelectedCatalog(catalog)) return false;
   const template = JSON.parse(templateRaw) as CatCafeConfig;
   const templateBreed = (template.breeds as unknown as Record<string, unknown>[]).find(isGemini35Breed);
   if (!templateBreed) return false;
@@ -758,6 +760,98 @@ function readBootstrapSourceConfig(templatePath: string): { catalog: CatCafeConf
   };
 }
 
+function stringField(record: Record<string, unknown>, field: string): string | undefined {
+  const value = record[field];
+  return typeof value === 'string' ? value : undefined;
+}
+
+function replaceExactLegacyString(
+  target: Record<string, unknown>,
+  field: string,
+  legacy: string,
+  next: string,
+): boolean {
+  if (!next || next === legacy) return false;
+  if (stringField(target, field) !== legacy) return false;
+  target[field] = next;
+  return true;
+}
+
+/** Rename only when both visible-name fields are still the old default. */
+function replaceExactLegacyName(target: Record<string, unknown>, identity: NativeToolIdentity): boolean {
+  const currentName = stringField(target, 'name');
+  const currentDisplayName = stringField(target, 'displayName');
+  const legacy = identity.legacy.name;
+  const nameIsLegacy =
+    currentName === legacy &&
+    (currentDisplayName === legacy || currentDisplayName === undefined || currentDisplayName === '');
+  if (!nameIsLegacy) return false;
+  let changed = false;
+  if (currentName !== identity.name) {
+    target.name = identity.name;
+    changed = true;
+  }
+  if (currentDisplayName !== identity.name) {
+    target.displayName = identity.name;
+    changed = true;
+  }
+  return changed;
+}
+
+function repairLegacyIdentityRecord(record: Record<string, unknown>, identity: NativeToolIdentity): boolean {
+  let changed = replaceExactLegacyName(record, identity);
+  changed = replaceExactLegacyString(record, 'nickname', identity.legacy.nickname, identity.nickname) || changed;
+  changed = replaceExactLegacyString(record, 'avatar', identity.legacy.avatar, identity.avatar) || changed;
+  changed =
+    replaceExactLegacyString(record, 'roleDescription', identity.legacy.roleDescription, identity.roleDescription) ||
+    changed;
+  changed =
+    replaceExactLegacyString(record, 'personality', identity.legacy.personality, identity.personality) || changed;
+  changed =
+    replaceExactLegacyString(record, 'teamStrengths', identity.legacy.teamStrengths, identity.teamStrengths) || changed;
+  return changed;
+}
+
+/**
+ * Repair native-tool members created before their cat identity existed.
+ * Only exact legacy defaults are replaced, so a user's own edits are kept.
+ * Idempotent: after the first successful pass every field no longer matches.
+ */
+export function repairLegacyNativeToolIdentities(catalog: { breeds?: Array<Record<string, unknown>> }): boolean {
+  let changed = false;
+  for (const breed of catalog.breeds ?? []) {
+    const variants = Array.isArray(breed.variants) ? (breed.variants as Array<Record<string, unknown>>) : [];
+    const defaultVariant = variants.find((variant) => variant.id === breed.defaultVariantId) ?? variants[0];
+    const identity = nativeToolIdentityFor({
+      clientId: defaultVariant ? stringField(defaultVariant, 'clientId') : undefined,
+      catId:
+        (defaultVariant ? stringField(defaultVariant, 'catId') : undefined) ??
+        stringField(breed, 'catId') ??
+        stringField(breed, 'id'),
+      acp: defaultVariant?.acp,
+    });
+    if (!identity) continue;
+    changed = repairLegacyIdentityRecord(breed, identity) || changed;
+    for (const variant of variants) {
+      changed = repairLegacyIdentityRecord(variant, identity) || changed;
+    }
+  }
+  return changed;
+}
+
+function repairLegacyNativeIdentityFile(catalogPath: string): boolean {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(catalogPath, 'utf-8'));
+  } catch {
+    return false;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
+  if (!repairLegacyNativeToolIdentities(parsed as { breeds?: Array<Record<string, unknown>> })) return false;
+  writeFileAtomic(catalogPath, `${JSON.stringify(parsed, null, 2)}\n`);
+  return true;
+}
+
 // NOTE: Repairing existing empty catalogs (e.g. Windows reinstall where user-data
 // dir survives) is intentionally NOT done here — we cannot distinguish "broken
 // install with empty breeds" from "user intentionally deleted all members".
@@ -784,42 +878,25 @@ export function bootstrapCatCatalog(projectRoot: string, templatePath: string): 
     // Persist template-added variants into already-enabled runtime breeds so
     // read and write paths agree after upgrades.
     persistMissingTemplateVariants(projectRoot, catalogPath, templatePath);
+    // Replace pre-identity native-tool defaults (Kimi/DSH/Pi) that older
+    // releases persisted. Exact legacy strings only; user edits stay.
+    repairLegacyNativeIdentityFile(catalogPath);
     return catalogPath;
   }
 
   const { catalog: template } = readBootstrapSourceConfig(templatePath);
   const { catalog: migratedCatalog } = migrateCatalogVariants(template);
 
-  // #948: Seed the first breed from the template so the app starts with at least
-  // one usable member. Without this, the registry is empty and the frontend
-  // crashes before the first-run wizard is reachable.
-  // In dev environments (template has no breeds), start empty — developers use
-  // the wizard or manual config to add members.
-  const seedBreed = pickSeedBreed(migratedCatalog);
-
-  let runtimeCatalog: CatCafeConfig;
-  if (seedBreed) {
-    const seedBreeds = [seedBreed as CatCafeConfig['breeds'][number]];
-    runtimeCatalog = {
-      ...migratedCatalog,
-      breeds: seedBreeds,
-    };
-    if ('roster' in runtimeCatalog) {
-      (runtimeCatalog as { roster: Record<string, RosterEntry> }).roster = pruneRosterToRuntimeBreeds(
-        runtimeCatalog.roster as Record<string, RosterEntry>,
-        seedBreeds as RuntimeBreedWithCatIds[],
-        OWNER_ROSTER_KEY,
-        buildOwnerRosterEntry(),
-      );
-    }
-  } else {
-    // Template has no breeds — start empty (first-run wizard guides member addition).
-    runtimeCatalog = createEmptyRuntimeCatalog(migratedCatalog);
-  }
+  // #1651: Templates are an add-member menu. Detection and owner confirmation
+  // create actual members; the empty registry is a supported first-run state.
+  const runtimeCatalog = {
+    ...createEmptyRuntimeCatalog(migratedCatalog),
+    memberInitialization: USER_SELECTED_INITIALIZATION,
+  };
 
   mkdirSync(dirname(catalogPath), { recursive: true });
   writeFileAtomic(catalogPath, `${JSON.stringify(runtimeCatalog, null, 2)}\n`);
-  persistMissingTemplateBreeds(projectRoot, catalogPath, templatePath);
+  log.info('首次启动：已创建空成员目录；项目自带角色模板仅供选择，检测并确认添加后才会创建成员。');
   return catalogPath;
 }
 

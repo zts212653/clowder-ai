@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { EVOLUTION_PREPARATION_SECTIONS } from '@cat-cafe/shared';
-import { ensureWorkspaceOpen } from './f307-workspace-open.mjs';
+import { ensureWorkspaceOpen, openWorkspaceTools } from './f307-workspace-open.mjs';
 import { waitForResponsiveWorkspaceLayout } from './f311-responsive-workspace-layout.mjs';
 
 /** Unnamed, unavailable-owner fixtures matching the reported shape. Never owner outcome proof. */
@@ -141,6 +141,63 @@ export async function verifyUnnamedWorkspaceReadability({
   );
   await capture(page, 'readability-detail');
   return { widths, preparationPolling: { listReads, detailReads, states } };
+}
+
+/** The v2 Settings entry must distinguish real pending approvals from incomplete constitution. */
+export async function verifyV2HomeTruth({ page, base, threadId, programFixture, navigateShell, capture }) {
+  const projection = programFixture('constituting');
+  const programId = 'evolution-program:dddddddddddddddddddddddddddddddd';
+  projection.program = {
+    ...projection.program,
+    programId,
+    displayName: '历史目标试验',
+    currentAssetVersionRefs: [],
+  };
+  projection.cycles = projection.cycles.map((cycle) => ({ ...cycle, programId }));
+  projection.origin = { threadId: 'thread-source-d', title: '历史目标试验来源' };
+  projection.blockers = [
+    { code: 'measurement_certificate_missing', ownerFeatureId: 'F267', message: 'measurement missing' },
+  ];
+  let assetReviewReads = 0;
+  await page.route('**/api/capability-evolution/programs**', async (route) => {
+    assert.equal(route.request().method(), 'GET');
+    const url = new URL(route.request().url());
+    if (url.pathname.endsWith('/asset-review')) {
+      assetReviewReads += 1;
+      return route.fulfill({
+        status: 422,
+        json: {
+          schemaVersion: 1,
+          status: 'unavailable',
+          programRef: { ownerFeatureId: 'F311', ownerStateRef: programId },
+          objectRef: projection.program.objectRef,
+          blockers: [{ code: 'owner_version_review_unavailable', ownerRef: projection.program.objectRef }],
+        },
+      });
+    }
+    if (url.pathname.endsWith('/programs')) return route.fulfill({ json: { programs: [projection] } });
+    if (url.pathname.endsWith(encodeURIComponent(programId))) return route.fulfill({ json: projection });
+    return route.fulfill({ status: 404, json: { error: 'program_not_found' } });
+  });
+
+  await navigateShell(page, new URL(`/thread/${threadId}?shell=v2`, base).href);
+  await (await openWorkspaceTools(page)).getByTestId('workspace-launcher-capability-evolution').click();
+  const workspace = page.getByTestId('capability-evolution-workspace');
+  await workspace.getByText('待判断 0', { exact: true }).waitFor();
+  await workspace.getByText('目前没有需要你拍板的提议。', { exact: true }).waitFor();
+  const row = workspace.getByTestId(`capability-evolution-program-${programId}`);
+  const rowText = await row.innerText();
+  assert.match(rowText, /提出目标（约定待补齐）/);
+  assert.match(rowText, /约定怎样判断改进有效/);
+  assert.doesNotMatch(rowText, /等你确认/);
+
+  await page.waitForTimeout(200);
+  const settledAssetReads = assetReviewReads;
+  assert(settledAssetReads >= 1, 'the visible Program gets one owner read');
+  await page.waitForTimeout(2_500);
+  assert.equal(assetReviewReads, settledAssetReads, 'typed 422 owner gaps must not enter the 2s polling loop');
+  await capture(page, 'v2-home-truth');
+  return { programId, assetReviewReads };
 }
 
 /**

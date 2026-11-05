@@ -17,6 +17,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import {
   type CatId,
   catRegistry,
+  formatRosterLabel,
   isCloudBridgeRecoveryV1,
   isCrossThreadProvenance,
   type MessageContent,
@@ -39,16 +40,17 @@ import {
   type MessageSelectionAdmissionResult,
   MessageSelectionResolver,
 } from '../domains/cats/services/context/MessageSelectionResolver.js';
-import { createGameDriver } from '../domains/cats/services/game/createGameDriver.js';
-import type { GameDriver } from '../domains/cats/services/game/GameDriver.js';
-import { GameOrchestrator } from '../domains/cats/services/game/GameOrchestrator.js';
-import { WerewolfLobby } from '../domains/cats/services/game/werewolf/WerewolfLobby.js';
 import type { AgentRouter } from '../domains/cats/services/index.js';
 import { messageFrom } from '../domains/cats/services/stores/message-from.js';
+import { storedMessageSource } from '../domains/cats/services/stores/message-source.js';
 import type { IDraftStore } from '../domains/cats/services/stores/ports/DraftStore.js';
-import type { IGameStore } from '../domains/cats/services/stores/ports/GameStore.js';
-import type { IMessageStore, StoredMessage } from '../domains/cats/services/stores/ports/MessageStore.js';
-import { isTimelinePublished } from '../domains/cats/services/stores/ports/MessageStore.js';
+import {
+  type AppendMessageInput,
+  assertQueueMessageReplay,
+  type IMessageStore,
+  isTimelinePublished,
+  type StoredMessage,
+} from '../domains/cats/services/stores/ports/MessageStore.js';
 import { deriveAutoThreadTitle, type IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import {
   getTimelineOrderTime,
@@ -58,7 +60,10 @@ import {
 import { createModuleLogger } from '../infrastructure/logger.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { normalizeJsonUnicode } from '../utils/json-unicode.js';
+import { buildThreadDeepLink } from '../utils/thread-deep-link.js';
 import { getDefaultUploadDir } from '../utils/upload-paths.js';
+import { registerGenerationMessagesRoute } from './generation-messages.js';
+import { observeMessageSend } from './message-send-diagnostics.js';
 import { importStoredProjectMessage } from './messages-project-review.js';
 import { captureSentComposerDraftConsumption } from './sent-composer-draft-consumption.js';
 import { admitThreadParticipants } from './thread-participant-admission.js';
@@ -78,7 +83,6 @@ function projectRecoveryForHistory(recovery: StoredRecovery) {
 
 import { emitQueueUpdated, enrichQueueEntries } from '../utils/queue-enrichment.js';
 import { resolveStrictUserId, resolveUserId } from '../utils/request-identity.js';
-import { buildGameSeats, parseGameCommand, sanitizeCatIds } from './game-command-interceptor.js';
 import type { HoldBallCancelDeps } from './hold-ball-cancel.js';
 import { cancelPendingHoldsForThread } from './hold-ball-cancel.js';
 import { formatHoldOwnerName, persistHoldTerminalVisibility } from './hold-ball-terminal-visibility.js';
@@ -92,8 +96,9 @@ function buildMessageBundleSummary(admission: ResolvedBundleAdmission): string {
   if (admission.items.length === 1 && admission.items[0]?.kind === 'quote') {
     return `转发了 1 段引用 · 来自「${sourceTitle}」`;
   }
-  const unit = admission.items.length === 1 ? '条消息' : '条聊天记录';
-  return `转发了 ${admission.items.length} ${unit} · 来自「${sourceTitle}」`;
+  const messageCount = new Set(admission.items.map((item) => item.messageId)).size;
+  const unit = messageCount === 1 ? '条消息' : '条聊天记录';
+  return `转发了 ${messageCount} ${unit} · 来自「${sourceTitle}」`;
 }
 
 type MessageBundleAdmissionFailureReason = Exclude<MessageSelectionAdmissionResult, { status: 'resolved' }>['reason'];
@@ -143,10 +148,6 @@ export interface MessagesRoutesOptions {
   draftStore?: IDraftStore;
   /** Canonical durable ingress for every normal user message. */
   invocationQueue?: InvocationQueue;
-  /** F101: Game store for /game command interception */
-  gameStore?: IGameStore;
-  /** F101: Injectable auto-player for lifecycle-safe teardown in tests/routes */
-  autoPlayer?: Pick<GameDriver, 'startLoop' | 'stopLoop' | 'stopAllLoops'>;
   /** F167 Phase J: deps for auto-cancelling pending hold-ball tasks on user message */
   holdBallCancelDeps?: HoldBallCancelDeps & {
     messageStore?: IMessageStore;
@@ -288,6 +289,7 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 const MAX_FILES = 5;
 
 export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (app, opts) => {
+  registerGenerationMessagesRoute(app, opts.messageStore);
   const uploadDir = getDefaultUploadDir(opts.uploadDir ?? process.env.UPLOAD_DIR);
 
   // Register multipart parser for image uploads
@@ -297,33 +299,9 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
 
   // Shared AgentRouter injected via opts (created in index.ts)
   const router = opts.router;
-  const gameOrchestrator = opts.gameStore
-    ? new GameOrchestrator({
-        gameStore: opts.gameStore,
-        socketManager: opts.socketManager,
-        messageStore: opts.messageStore,
-      })
-    : null;
-  const gameAutoPlayer = gameOrchestrator
-    ? (opts.autoPlayer ??
-      createGameDriver({
-        gameNarratorEnabled: false,
-        legacyDeps: {
-          gameStore: opts.gameStore!,
-          orchestrator: gameOrchestrator,
-          messageStore: opts.messageStore,
-        },
-      }))
-    : null;
-
-  if (gameAutoPlayer) {
-    app.addHook('onClose', async () => {
-      gameAutoPlayer.stopAllLoops();
-    });
-  }
-
   // POST /api/messages - 发送消息（WebSocket 广播）
   app.post('/api/messages', async (request, reply) => {
+    const sendStartedAt = performance.now();
     let content: string;
     let legacyUserId: string | undefined;
     let threadId: string | undefined;
@@ -336,6 +314,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
 
     let messageDisposition: MessageWorkDisposition | undefined;
     let explicitMentionTargetCats: readonly CatId[] | undefined;
+    let exactPublicTargets = false;
 
     // #699: Reply-to (quote) reference
     let replyTo: string | undefined;
@@ -359,7 +338,9 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         whisperRecipients = parsed.whisperTo as CatId[];
       }
       messageDisposition = parsed.messageDisposition;
-      explicitMentionTargetCats = parsed.mentions?.length ? (parsed.mentions as CatId[]) : undefined;
+      exactPublicTargets = parsed.confirmedTargetCats !== undefined;
+      explicitMentionTargetCats = (parsed.confirmedTargetCats ??
+        (parsed.mentions?.length ? parsed.mentions : undefined)) as CatId[] | undefined;
       // #699: Extract replyTo from multipart
       if (parsed.replyTo) {
         replyTo = parsed.replyTo;
@@ -377,9 +358,9 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         contentBlocks = buildMessageContentBlocks(content, parseResult.data.contextAttachments);
       }
       messageDisposition = parseResult.data.messageDisposition;
-      explicitMentionTargetCats = parseResult.data.mentions?.length
-        ? (parseResult.data.mentions as CatId[])
-        : undefined;
+      exactPublicTargets = parseResult.data.confirmedTargetCats !== undefined;
+      explicitMentionTargetCats = (parseResult.data.confirmedTargetCats ??
+        (parseResult.data.mentions?.length ? parseResult.data.mentions : undefined)) as CatId[] | undefined;
       // F35: Extract whisper fields from parsed body
       if (parseResult.data.visibility === 'whisper') {
         whisperVisibility = 'whisper';
@@ -408,6 +389,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         ownerAuthProvenance !== 'strict' ||
         messageBundleRequest ||
         whisperVisibility ||
+        exactPublicTargets ||
         messageDisposition === 'continue_current')
     )
       return reply.code(400).send({ error: 'Invalid Live admission', code: 'INVALID_LIVE_ADMISSION' });
@@ -470,9 +452,9 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         };
       }
 
-      const resolvedTargets = await router.resolveExplicitTargets(messageBundleRequest.targetCats, resolvedThreadId, {
-        persist: false,
-      });
+      const resolvedTargets = replayedSource
+        ? (messageBundleRequest.targetCats as CatId[])
+        : await router.resolveExplicitTargets(messageBundleRequest.targetCats, resolvedThreadId, { persist: false });
       if (resolvedTargets.length !== messageBundleRequest.targetCats.length) {
         reply.status(400);
         return { error: 'Message Bundle contains an unavailable target cat', code: 'MESSAGE_BUNDLE_INVALID_TARGETS' };
@@ -553,119 +535,78 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       }
     }
 
-    // F101: /game command interception — start game directly, skip AI routing
-    const parsedGame = parseGameCommand(content);
-    if (parsedGame && opts.gameStore && opts.threadStore) {
-      if (!gameOrchestrator || !gameAutoPlayer) {
-        throw new Error('game auto-player is unavailable');
-      }
-
-      const DEFAULT_PLAYER_COUNT = 7;
-      const allCatIds = catRegistry.getAllIds();
-      const sanitized = parsedGame.catIds ? sanitizeCatIds(parsedGame.catIds, allCatIds) : [];
-      // Fallback to all cats if sanitize filtered everything out (or no catIds provided)
-      const catIds = sanitized.length > 0 ? sanitized : [...allCatIds];
-      if (catIds.length === 0) {
-        reply.status(400);
-        return { error: '没有可用的猫猫成员，请先在设置中添加一只猫猫', code: 'NO_TARGETS' };
-      }
-      const playerCount = parsedGame.playerCount ?? DEFAULT_PLAYER_COUNT;
-      const seats = buildGameSeats({
-        humanRole: parsedGame.humanRole,
-        userId,
-        catIds,
-        playerCount,
-      });
-
-      // Phase D: Create independent game thread with project categorization
-      const ts = new Date()
-        .toLocaleString('sv-SE', { timeZone: 'Asia/Shanghai' })
-        .replace(' ', '-')
-        .replaceAll(':', '');
-      const gameTitle = `狼人杀 — ${playerCount}人局 (${ts})`;
-      const gameThread = await opts.threadStore.create(userId, gameTitle, `games/${parsedGame.gameType}`);
-      const gameThreadId = gameThread.id;
-      await opts.threadStore.updatePin(gameThreadId, true);
-
-      // Notify source thread about the new game thread (include initiator for frontend guard)
-      opts.socketManager.broadcastToRoom(`thread:${resolvedThreadId}`, 'game:thread_created', {
-        gameThreadId,
-        gameTitle,
-        initiatorUserId: userId,
-        timestamp: Date.now(),
-      });
-
-      // Store user message in the game thread
-      const userMessage = await opts.messageStore.append({
-        from: { kind: 'user', userId },
-        userId,
-        content,
-        mentions: [],
-        timestamp: Date.now(),
-        threadId: gameThreadId,
-      });
-
-      // Use WerewolfLobby for role assignment, then orchestrator for persistence + broadcast
-      const lobby = new WerewolfLobby();
-      const lobbyRuntime = lobby.createLobby({
-        threadId: gameThreadId,
-        playerCount,
-        players: seats.map((s) => ({ actorType: s.actorType, actorId: s.actorId })),
-      });
-      lobby.startGame(lobbyRuntime);
-
-      let gameRuntime;
-      try {
-        gameRuntime = await gameOrchestrator.startGame({
-          threadId: gameThreadId,
-          definition: lobbyRuntime.definition,
-          seats: lobbyRuntime.seats,
-          config: {
-            timeoutMs: 30000,
-            voiceMode: parsedGame.voiceMode,
-            humanRole: parsedGame.humanRole,
-            ...(parsedGame.humanRole === 'player' ? { humanSeat: 'P1' } : {}),
-            observerUserId: userId, // H2 fix: messageStore dual-write needs userId for thread visibility
-          },
-        });
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        if (message.includes('already has an active game')) {
-          reply.status(409);
-          return { error: message };
-        }
-        throw err;
-      }
-
-      // Broadcast scoped views so frontend receives game:state_update
-      await gameOrchestrator.broadcastGameState(gameRuntime.gameId);
-
-      // AC-C3: Start AI auto-play loop — cats submit actions asynchronously
-      gameAutoPlayer.startLoop(gameRuntime.gameId);
-
-      return {
-        status: 'game_started',
-        gameId: gameRuntime.gameId,
-        gameThreadId,
-        userMessageId: userMessage.id,
-      };
-    }
-
     // ADR-008 S1: Pre-resolve targets + intent, persisting @mentions as participants
     log.debug({ threadId: resolvedThreadId, contentLen: content.length }, 'Resolving targets and intent');
     const bundleRoutingTargetCats = explicitBundleTargetCats ?? [];
     const explicitRoutingTargetCats = explicitMentionTargetCats
-      ? await router.resolveExplicitTargets(explicitMentionTargetCats, resolvedThreadId, { persist: false })
+      ? replayedSource
+        ? [...explicitMentionTargetCats]
+        : await router.resolveExplicitTargets(explicitMentionTargetCats, resolvedThreadId, { persist: false })
       : undefined;
     if (explicitMentionTargetCats && explicitRoutingTargetCats?.length !== explicitMentionTargetCats.length) {
       reply.status(400);
       return { error: 'One or more selected member identities are invalid', code: 'INVALID_EXPLICIT_TARGETS' };
     }
-    const structuredTargetCats = admittedMessageBundle ? bundleRoutingTargetCats : explicitRoutingTargetCats;
-    const routingResult: Awaited<ReturnType<AgentRouter['resolveTargetsAndIntent']>> = structuredTargetCats
+    if (!replayedSource && whisperVisibility && whisperRecipients?.length) {
+      const validRecipients = await router.resolveExplicitTargets(whisperRecipients, resolvedThreadId, {
+        persist: false,
+      });
+      if (validRecipients.length !== whisperRecipients.length) {
+        return reply
+          .code(400)
+          .send({ error: 'One or more whisper recipients are invalid', code: 'INVALID_EXPLICIT_TARGETS' });
+      }
+    }
+    let publicMentionTargetCats: CatId[] | undefined;
+    if (!liveSessionId && !whisperVisibility && !admittedMessageBundle && !replayedSource) {
+      const preview = await router.previewTargets(content, {
+        threadId: resolvedThreadId,
+        ...(explicitRoutingTargetCats ? { explicitTargetCats: explicitRoutingTargetCats } : {}),
+      });
+      if (preview.requiresConfirmation) {
+        if (preview.targetCats.length === 0) {
+          return reply.code(409).send({
+            code: 'ROUTING_TARGET_UNAVAILABLE',
+            error: '指定角色当前不可用，且没有有效接替成员，请选择可用角色后再发送。',
+            ...(preview.routingWarnings ? { routingWarnings: preview.routingWarnings } : {}),
+          });
+        }
+        const present = (catId: CatId) => ({
+          catId,
+          displayName: formatRosterLabel(catRegistry.getOrThrow(catId).config),
+        });
+        return reply.code(409).send({
+          code: 'ROUTING_CONFIRMATION_REQUIRED',
+          error: '指定角色当前不可用，请确认实际接收者后再发送。',
+          ...(preview.routingWarnings ? { routingWarnings: preview.routingWarnings } : {}),
+          unavailable: (preview.unavailableTargets ?? []).map(present),
+          targets: preview.targetCats.map(present),
+        });
+      }
+      if (preview.reason.kind === 'current_message_mentions' && preview.targetCats.length > 0) {
+        publicMentionTargetCats = preview.targetCats;
+      }
+    }
+    // Legacy sources lack routing provenance; retain their serial replay snapshot.
+    // New sources freeze prose expansion at the store's actual winning commit,
+    // including races after this preflight. Exact recipient checks stay unchanged.
+    const replayedProseTargets =
+      replayedSource?.content === content &&
+      !replayedSource.extra?.routingTargetSource &&
+      !liveSessionId &&
+      !whisperVisibility
+        ? replayedSource.mentions
+        : undefined;
+    const replayedLiveTargets = replayedSource?.extra?.liveAdmission
+      ? [replayedSource.extra.liveAdmission.targetId as CatId]
+      : undefined;
+    const fixedTargetCats = admittedMessageBundle
+      ? bundleRoutingTargetCats
+      : (explicitRoutingTargetCats ?? publicMentionTargetCats ?? replayedLiveTargets ?? replayedProseTargets);
+    const routingResult: Awaited<ReturnType<AgentRouter['resolveTargetsAndIntent']>> = fixedTargetCats
       ? {
-          targetCats: structuredTargetCats,
-          intent: parseIntent(admittedMessageBundle ? '' : content, structuredTargetCats.length),
+          targetCats: [...fixedTargetCats],
+          intent: parseIntent(admittedMessageBundle ? '' : content, fixedTargetCats.length),
           hasMentions: true,
           routing_warnings: [],
         }
@@ -686,6 +627,34 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         : [...sourceTargetCats];
     if (liveSessionId && targetCats.length !== 1)
       return reply.code(400).send({ error: 'Live requires one exact member', code: 'INVALID_LIVE_ADMISSION' });
+    const resolvedIdempotencyKey = idempotencyKey ?? randomUUID();
+    const sourcePayloadExtra: NonNullable<StoredMessage['extra']> = {
+      ...(routingResult.routing_warnings.length ? { routingWarnings: routingResult.routing_warnings } : {}),
+      ...(!liveSessionId && !whisperVisibility && !admittedMessageBundle
+        ? { routingTargetSource: explicitMentionTargetCats ? ('explicit' as const) : ('prose' as const) }
+        : {}),
+      ...(liveSessionId ? { liveAdmission: { sessionId: liveSessionId, targetId: targetCats[0]! } } : {}),
+      ...(admittedMessageBundle ? { messageBundle: admittedMessageBundle.carrier } : {}),
+    };
+    // Live receipt and shared Queue admission verify the same producer envelope.
+    const sourceMessageInput: AppendMessageInput = {
+      from: { kind: 'user', userId },
+      userId,
+      content,
+      // Routing fallback is server metadata, not an @mention the user wrote.
+      mentions:
+        replayedSource?.extra?.liveAdmission && !explicitMentionTargetCats ? replayedSource.mentions : sourceTargetCats,
+      timestamp: Date.now(),
+      threadId: resolvedThreadId,
+      idempotencyKey: resolvedIdempotencyKey,
+      deliveryStatus: 'queued',
+      ...(contentBlocks ? { contentBlocks } : {}),
+      ...(whisperVisibility && whisperRecipients
+        ? { visibility: whisperVisibility, whisperTo: whisperRecipients }
+        : {}),
+      ...(replyTo ? { replyTo } : {}),
+      ...(Object.keys(sourcePayloadExtra).length > 0 ? { extra: sourcePayloadExtra } : {}),
+    };
     if (replayedSource && (liveSessionId || replayedSource.extra?.liveAdmission)) {
       const receipt = replayedSource.extra?.liveAdmission;
       if (
@@ -697,6 +666,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         replayedSource.userId !== userId
       )
         return reply.code(409).send({ error: 'Live admission identity conflict', code: 'LIVE_ADMISSION_CONFLICT' });
+      assertQueueMessageReplay(replayedSource, sourceMessageInput);
       // Already accepted: return the same durable receipt before touching an ephemeral handle.
       return reply.code(202).send({
         status: 'queued',
@@ -745,163 +715,156 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     // succeeds, so validation/queue-capacity failures leave no false sidebar state.
     // Participants follow the winning committed targets, including a conversation fallback.
 
-    // Server-generated idempotency key if client didn't provide one
-    const resolvedIdempotencyKey = idempotencyKey ?? randomUUID();
-    const sourcePayloadExtra: NonNullable<StoredMessage['extra']> = {
-      ...(liveSessionId ? { liveAdmission: { sessionId: liveSessionId, targetId: targetCats[0]! } } : {}),
-      ...(admittedMessageBundle ? { messageBundle: admittedMessageBundle.carrier } : {}),
-    };
-    const sourcePayloadWrite: { extra: NonNullable<StoredMessage['extra']> } | Record<string, never> =
-      Object.keys(sourcePayloadExtra).length > 0 ? { extra: sourcePayloadExtra } : {};
-
     log.debug({ threadId: resolvedThreadId, targetCats, intent: intent.intent }, 'Queue ingress accepted');
 
     if (opts.invocationQueue) {
-      const queueInput = {
-        ...(liveSessionId ? { liveSessionId } : {}),
-        from: { kind: 'user' as const, userId },
-        threadId: resolvedThreadId,
-        userId,
-        kind: 'conversation_input' as const,
-        ownerAuthProvenance,
-        idempotencyKey: resolvedIdempotencyKey,
-        content,
-        targetCats,
-        ...(messageDisposition ? { messageDisposition } : {}),
-        onQueueEntriesAdmitted: async (
-          entries: readonly import('../domains/cats/services/agents/invocation/InvocationQueue.js').QueueEntry[],
-        ) => {
-          targetCats.splice(0, targetCats.length, ...(entries.flatMap((entry) => entry.targets) as CatId[]));
-          await publishAdmittedParticipants();
-        },
-        intent: intent.intent,
-      };
-      const enqueueResult = await opts.invocationQueue
-        .send(
-          opts.messageStore,
-          {
-            from: queueInput.from,
-            userId,
-            content,
-            // Routing fallback is server-owned metadata, not an @mention the user wrote.
-            mentions: sourceTargetCats,
-            timestamp: Date.now(),
+      const admissionQueue = opts.invocationQueue;
+      return observeMessageSend(
+        request.log,
+        reply.raw,
+        async (trace) => {
+          const queueInput = {
+            ...(exactPublicTargets ? { exactTargets: true } : {}),
+            ...(publicMentionTargetCats ? { allowConversationFallback: false as const } : {}),
+            ...(liveSessionId ? { liveSessionId } : {}),
+            from: { kind: 'user' as const, userId },
             threadId: resolvedThreadId,
-            idempotencyKey: resolvedIdempotencyKey,
-            deliveryStatus: 'queued',
-            ...(contentBlocks ? { contentBlocks } : {}),
-            ...(whisperVisibility && whisperRecipients
-              ? { visibility: whisperVisibility, whisperTo: whisperRecipients }
-              : {}),
-            ...(replyTo ? { replyTo } : {}),
-            ...sourcePayloadWrite,
-          },
-          queueInput,
-        )
-        .catch(async (error: unknown) => {
-          if (!liveSessionId) throw error;
-          // The preflight replay lookup may precede another request's atomic
-          // admission. Only the immutable committed source can prove a conflict;
-          // an unknown write/read outcome must retain its original error.
-          const committed = await opts.messageStore.getByIdempotencyKey(
             userId,
-            resolvedThreadId,
-            resolvedIdempotencyKey,
+            kind: 'conversation_input' as const,
+            ownerAuthProvenance,
+            idempotencyKey: resolvedIdempotencyKey,
+            content,
+            targetCats,
+            ...(routingResult.routing_warnings.length ? { routingWarnings: routingResult.routing_warnings } : {}),
+            ...(messageDisposition ? { messageDisposition } : {}),
+            onQueueEntriesAdmitted: async (
+              entries: readonly import('../domains/cats/services/agents/invocation/InvocationQueue.js').QueueEntry[],
+              message?: StoredMessage,
+            ) => {
+              trace.committed(message?.id);
+              targetCats.splice(0, targetCats.length, ...(entries.flatMap((entry) => entry.targets) as CatId[]));
+              await trace.measure('participants', publishAdmittedParticipants);
+            },
+            intent: intent.intent,
+          };
+          const enqueueResult = await trace.measure('queueAdmission', () =>
+            admissionQueue.send(opts.messageStore, sourceMessageInput, queueInput).catch(async (error: unknown) => {
+              if (!liveSessionId) throw error;
+              // The preflight replay lookup may precede another request's atomic
+              // admission. Only the immutable committed source can prove a conflict;
+              // an unknown write/read outcome must retain its original error.
+              const committed = await opts.messageStore.getByIdempotencyKey(
+                userId,
+                resolvedThreadId,
+                resolvedIdempotencyKey,
+              );
+              if (!committed) throw error;
+              const receipt = committed.extra?.liveAdmission;
+              if (
+                !receipt ||
+                receipt.sessionId !== liveSessionId ||
+                receipt.targetId !== targetCats[0] ||
+                committed.content !== content ||
+                committed.threadId !== resolvedThreadId ||
+                committed.userId !== userId
+              ) {
+                reply.code(409).send({ error: 'Live admission identity conflict', code: 'LIVE_ADMISSION_CONFLICT' });
+                return null;
+              }
+              throw error;
+            }),
           );
-          if (!committed) throw error;
-          const receipt = committed.extra?.liveAdmission;
-          if (
-            !receipt ||
-            receipt.sessionId !== liveSessionId ||
-            receipt.targetId !== targetCats[0] ||
-            committed.content !== content ||
-            committed.threadId !== resolvedThreadId ||
-            committed.userId !== userId
-          ) {
-            reply.code(409).send({ error: 'Live admission identity conflict', code: 'LIVE_ADMISSION_CONFLICT' });
-            return null;
+          if (!enqueueResult) return;
+
+          // Queue full → 429, no message written (no ghost message)
+          if (enqueueResult.outcome === 'full') {
+            const fullQueue = await enrichQueueEntries(
+              admissionQueue.list(resolvedThreadId, userId),
+              opts.messageStore,
+            );
+            opts.socketManager.emitToUser(userId, 'queue_full_warning', {
+              threadId: resolvedThreadId,
+              source: 'user',
+              queueSize: admissionQueue.size(resolvedThreadId, userId),
+              queue: fullQueue,
+            });
+            reply.status(429);
+            return {
+              error: '消息队列已满',
+              code: 'QUEUE_FULL',
+              queueSize: admissionQueue.size(resolvedThreadId, userId),
+            };
           }
-          throw error;
-        });
-      if (!enqueueResult) return;
 
-      // Queue full → 429, no message written (no ghost message)
-      if (enqueueResult.outcome === 'full') {
-        const fullQueue = await enrichQueueEntries(
-          opts.invocationQueue.list(resolvedThreadId, userId),
-          opts.messageStore,
-        );
-        opts.socketManager.emitToUser(userId, 'queue_full_warning', {
-          threadId: resolvedThreadId,
-          source: 'user',
-          queueSize: opts.invocationQueue.size(resolvedThreadId, userId),
-          queue: fullQueue,
-        });
-        reply.status(429);
-        return {
-          error: '消息队列已满',
-          code: 'QUEUE_FULL',
-          queueSize: opts.invocationQueue.size(resolvedThreadId, userId),
-        };
-      }
+          trace.committed(enqueueResult.message?.id);
+          if (enqueueResult.message) {
+            await trace.measure('projectImport', () =>
+              importStoredProjectMessage(enqueueResult.message, opts.onStoredProjectMessage, (error) =>
+                request.log.warn({ err: error }, 'Saved project opinion awaits ledger synchronization'),
+              ),
+            );
+          }
+          const storedUserMessageId = enqueueResult.message?.id ?? null;
+          if (!enqueueResult.deduped && storedUserMessageId) {
+            // F192 Phase G AC-G12 / F227: detect magic words after the atomic admission commits.
+            void tryDetectMagicWords(
+              content,
+              resolvedThreadId,
+              targetCats,
+              storedUserMessageId,
+              userId,
+              opts.onMagicWordDetected,
+            );
+          }
 
-      if (enqueueResult.message) {
-        await importStoredProjectMessage(enqueueResult.message, opts.onStoredProjectMessage, (error) =>
-          request.log.warn({ err: error }, 'Saved project opinion awaits ledger synchronization'),
-        );
-      }
-      const storedUserMessageId = enqueueResult.message?.id ?? null;
-      if (!enqueueResult.deduped && storedUserMessageId) {
-        // F192 Phase G AC-G12 / F227: detect magic words after the atomic admission commits.
-        void tryDetectMagicWords(
-          content,
-          resolvedThreadId,
-          targetCats,
-          storedUserMessageId,
-          userId,
-          opts.onMagicWordDetected,
-        );
-      }
+          const admittedEntries = enqueueResult.entries ?? (enqueueResult.entry ? [enqueueResult.entry] : []);
+          // Common send signals Queue progress; HTTP acknowledges durable admission only.
+          const admittedInvocationQueue = admissionQueue;
+          const admittedEntryStillQueued =
+            admittedEntries.length === 0 ||
+            admittedEntries.some(
+              (admittedEntry) =>
+                admittedInvocationQueue.getEntrySnapshot(resolvedThreadId, userId, admittedEntry.id) !== null,
+            );
 
-      const admittedEntries = enqueueResult.entries ?? (enqueueResult.entry ? [enqueueResult.entry] : []);
-      // Common send signals Queue progress; HTTP acknowledges durable admission only.
-      const admittedInvocationQueue = opts.invocationQueue;
-      const admittedEntryStillQueued =
-        admittedEntries.length === 0 ||
-        admittedEntries.some(
-          (admittedEntry) =>
-            admittedInvocationQueue.getEntrySnapshot(resolvedThreadId, userId, admittedEntry.id) !== null,
-        );
+          // Emit queue update to this user only (privacy: scopeKey isolation)
+          // appendExactEntry owns its own committed projection. Keep the generic
+          // enqueue event only when custody remains in Queue.
+          if (admittedEntryStillQueued) {
+            await trace.measure('queueUpdate', () =>
+              emitQueueUpdated(
+                opts.socketManager,
+                userId,
+                resolvedThreadId,
+                admissionQueue.list(resolvedThreadId, userId),
+                enqueueResult.outcome,
+              ),
+            );
+          }
 
-      // Emit queue update to this user only (privacy: scopeKey isolation)
-      // appendExactEntry owns its own committed projection. Keep the generic
-      // enqueue event only when custody remains in Queue.
-      if (admittedEntryStillQueued) {
-        await emitQueueUpdated(
-          opts.socketManager,
-          userId,
-          resolvedThreadId,
-          opts.invocationQueue.list(resolvedThreadId, userId),
-          enqueueResult.outcome,
-        );
-      }
+          await trace.measure('holds', () => tryAutoCancelPendingHolds(resolvedThreadId, opts.holdBallCancelDeps));
 
-      await tryAutoCancelPendingHolds(resolvedThreadId, opts.holdBallCancelDeps);
-
-      reply.status(202);
-      return {
-        status: 'queued',
-        queuePosition: enqueueResult.queuePosition,
-        entryId: enqueueResult.entry?.id,
-        entries: admittedEntries.flatMap((entry) =>
-          queueEntryTargetCats(entry).map((targetCatId) => ({ entryId: entry.id, targetCatId })),
-        ),
-        merged: false,
-        ...(storedUserMessageId ? { userMessageId: storedUserMessageId } : {}),
-        ...(await readUserMessageReceipt(opts.messageStore, storedUserMessageId, receiptOwner, enqueueResult.message)),
-        ...(await consumeSentDraft(enqueueResult.deduped ? null : (enqueueResult.message ?? null))),
-        ...(admittedMessageBundle && storedUserMessageId ? { messageBundleId: storedUserMessageId } : {}),
-      };
+          reply.status(202);
+          return {
+            status: 'queued',
+            queuePosition: enqueueResult.queuePosition,
+            entryId: enqueueResult.entry?.id,
+            entries: admittedEntries.flatMap((entry) =>
+              queueEntryTargetCats(entry).map((targetCatId) => ({ entryId: entry.id, targetCatId })),
+            ),
+            merged: false,
+            ...(storedUserMessageId ? { userMessageId: storedUserMessageId } : {}),
+            ...(await trace.measure('receipt', () =>
+              readUserMessageReceipt(opts.messageStore, storedUserMessageId, receiptOwner, enqueueResult.message),
+            )),
+            ...(await trace.measure('draft', () =>
+              consumeSentDraft(enqueueResult.deduped ? null : (enqueueResult.message ?? null)),
+            )),
+            ...(admittedMessageBundle && storedUserMessageId ? { messageBundleId: storedUserMessageId } : {}),
+          };
+        },
+        sendStartedAt,
+      );
     }
   });
 
@@ -1141,6 +1104,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     };
     const chatItems: TimelineItem[] = page.map((m) => {
       const from = messageFrom(m);
+      const source = storedMessageSource(m);
       // Same shared rule the client hydration paths use; `messageFrom` always names a sender here.
       const type: TimelineItem['type'] = timelineMessageKind(from, Boolean(m.source)) ?? 'user';
       return {
@@ -1156,7 +1120,9 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         ...(m.metadata ? { metadata: m.metadata } : {}),
         ...(m.origin ? { origin: m.origin } : {}),
         ...(m.thinking ? { thinking: m.thinking } : {}),
-        ...(m.extra?.outputLayout ||
+        ...(m.extra?.cloudBridgeReturn ||
+        m.extra?.outputLayout ||
+        m.extra?.runtimeInteractionCard ||
         m.extra?.contentModificationReceiptV1 ||
         m.extra?.semanticEvent ||
         m.extra?.liveCompanion ||
@@ -1170,6 +1136,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         m.extra?.stream ||
         m.extra?.targetCats ||
         m.extra?.messageBundle ||
+        m.extra?.evolutionUseSourceV1 ||
         m.extra?.scheduler ||
         m.extra?.systemKind ||
         m.extra?.a2aRouting ||
@@ -1181,7 +1148,9 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         m.extra?.recovery
           ? {
               extra: {
+                ...(m.extra?.cloudBridgeReturn ? { cloudBridgeReturn: m.extra.cloudBridgeReturn } : {}),
                 ...(m.extra?.outputLayout ? { outputLayout: m.extra.outputLayout } : {}),
+                ...(m.extra?.runtimeInteractionCard ? { runtimeInteractionCard: m.extra.runtimeInteractionCard } : {}),
                 ...(m.extra?.contentModificationReceiptV1
                   ? { contentModificationReceiptV1: m.extra.contentModificationReceiptV1 }
                   : {}),
@@ -1203,6 +1172,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                 ...(m.extra?.stream ? { stream: m.extra.stream } : {}),
                 ...(m.extra?.targetCats ? { targetCats: m.extra.targetCats } : {}),
                 ...(m.extra?.messageBundle ? { messageBundle: m.extra.messageBundle } : {}),
+                ...(m.extra?.evolutionUseSourceV1 ? { evolutionUseSourceV1: m.extra.evolutionUseSourceV1 } : {}),
                 ...(m.extra?.scheduler ? { scheduler: m.extra.scheduler } : {}),
                 ...(m.extra?.systemKind ? { systemKind: m.extra.systemKind } : {}),
                 ...(m.extra?.a2aRouting ? { a2aRouting: m.extra.a2aRouting } : {}),
@@ -1222,15 +1192,15 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         ...(m.revealedAt ? { revealedAt: m.revealedAt } : {}),
         ...(m.deliveredAt ? { deliveredAt: m.deliveredAt } : {}),
         ...(m.timelineOrderAt !== undefined ? { timelineOrderAt: m.timelineOrderAt } : {}),
-        ...(m.source
+        ...(source
           ? {
               source: {
-                connector: m.source.connector,
-                label: m.source.label,
-                icon: m.source.icon,
-                ...(m.source.url ? { url: m.source.url } : {}),
-                ...(m.source.meta ? { meta: m.source.meta } : {}),
-                ...(m.source.sender ? { sender: m.source.sender } : {}),
+                connector: source.connector,
+                label: source.label,
+                icon: source.icon,
+                ...(source.themeColor ? { themeColor: source.themeColor } : {}),
+                ...(source.meta ? { meta: source.meta } : {}),
+                ...(source.sender ? { sender: source.sender } : {}),
               },
             }
           : {}),

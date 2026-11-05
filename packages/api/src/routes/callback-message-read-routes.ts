@@ -3,7 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { QueueProcessor } from '../domains/cats/services/agents/invocation/QueueProcessor.js';
-import { extractImagePaths, extractImageUrls } from '../domains/cats/services/agents/providers/image-paths.js';
+import { extractImageUrls, extractTrustedImagePaths } from '../domains/cats/services/agents/providers/image-paths.js';
 import { getMessageSpeakerName } from '../domains/cats/services/context/ContextAssembler.js';
 import { readDurableLocalReviewFact } from '../domains/cats/services/local-review-artifact.js';
 import { messageFrom } from '../domains/cats/services/stores/message-from.js';
@@ -28,9 +28,11 @@ import { recordAnchorFullDrill } from './anchor-telemetry.js';
 import { truncateHead } from './callback-anchor-helpers.js';
 import { requireCallbackPrincipal } from './callback-auth-prehandler.js';
 import { projectCallbackMessageBody } from './callback-message-body.js';
+import { coverPublishedMessageReads } from './callback-published-wake-coverage.js';
 import { guardLiveCarrierRead } from './live-carrier-read-guard.js';
 
 export interface CallbackMessageReadDeps {
+  resolveTrustedImagePath?: (hmrId: string) => Promise<string | undefined>;
   messageStore: IMessageStore;
   threadStore?: Pick<IThreadStore, 'get'>;
   invocationQueue?: InvocationQueue;
@@ -163,9 +165,9 @@ export function registerCallbackMessageReadRoutes(app: FastifyInstance, opts: Ca
       // F236 AC-B1: bounded drill terminal. Default preview truncates content (keeps the `content`
       // field name for consumer continuity + adds contentLength/truncated); mode=full returns the
       // complete content + contentBlocks. Image hints stay in both modes.
-      const projectMsg = (m: typeof message) => {
+      const projectMsg = async (m: typeof message) => {
         const localReviewFact = readDurableLocalReviewFact(m);
-        const imagePaths = extractImagePaths(m.contentBlocks, uploadDir);
+        const imagePaths = await extractTrustedImagePaths(m.contentBlocks, uploadDir, opts.resolveTrustedImagePath);
         const imageUrls = extractImageUrls(m.contentBlocks);
         const body = projectCallbackMessageBody(m);
         const { preview, truncated } = isFullDrill
@@ -206,10 +208,10 @@ export function registerCallbackMessageReadRoutes(app: FastifyInstance, opts: Ca
       };
 
       const result: {
-        message: ReturnType<typeof projectMsg>;
-        context?: ReturnType<typeof projectMsg>[];
+        message: Awaited<ReturnType<typeof projectMsg>>;
+        context?: Awaited<ReturnType<typeof projectMsg>>[];
       } = {
-        message: projectMsg(message),
+        message: await projectMsg(message),
       };
 
       const effectiveContextCount = contextCount ?? 0;
@@ -247,10 +249,27 @@ export function registerCallbackMessageReadRoutes(app: FastifyInstance, opts: Ca
             return true;
           })
           .sort((a, b) => a.timestamp - b.timestamp || a.id.localeCompare(b.id));
-        result.context = contextMsgs.map(projectMsg);
+        result.context = await Promise.all(contextMsgs.map(projectMsg));
       }
 
       const contextMessages = Array.isArray(result.context) ? result.context : [];
+
+      if (isFullDrill && principal.kind === 'invocation' && message.threadId === principal.threadId) {
+        try {
+          await coverPublishedMessageReads(opts, {
+            threadId: principal.threadId,
+            userId: principal.userId,
+            catId: principal.catId,
+            invocationId: principal.invocationId,
+            parentInvocationId: expectedParentInvocationId!,
+            messageIds: [message.id, ...contextMessages.map((item) => item.id)],
+          });
+        } catch (err) {
+          app.log.error({ err, messageId }, 'Published wake coverage failed before full drill');
+          reply.status(503);
+          return { error: 'Public wake coverage unavailable', code: 'QUEUE_ADOPTION_UNAVAILABLE' };
+        }
+      }
 
       // F236 AC-B2 (R1/砚砚 P1): record full-drill cost AFTER the whole payload (message +
       // context neighbors + contentBlocks) is assembled, so the cost account isn't undercounted.

@@ -1,5 +1,7 @@
-import type { Capability, PluginManifest, SignalSchemaCatalog } from '@clowder-ai/plugin-contract';
-import type { DesktopWindowFailureReason } from '../desktop-window-runtime/types.js';
+import type { PluginManifest } from '@clowder-ai/plugin-contract';
+import type { DesktopWindowFailureReason } from '../desktop-window-runtime/failure-reason.js';
+import type { PluginAgentClientMetadata } from './agent-client-metadata.js';
+import type { StoredPluginManifest } from './stored-manifest.js';
 
 export const PLUGIN_INVENTORY_SCHEMA_VERSION = 1 as const;
 
@@ -8,15 +10,26 @@ export type InstanceLifecycleState = 'installed' | 'retired';
 export type ConfigReadiness = 'incomplete' | 'ready';
 export type ActivationState = 'disabled' | 'enabling' | 'enabled' | 'disabling' | 'error';
 export type RuntimeState = 'stopped' | 'starting' | 'handshaking' | 'healthy' | 'degraded' | 'crashed';
+export type PluginDependencyClosure = 'shipped' | 'materialized';
 export type PluginPackageProvenance =
   | {
       readonly kind: 'catalog';
       readonly catalogId: string;
       readonly packageName: string;
-      /** Immutable admission metadata; absent legacy records fail closed while discovery is offline. */
+      /** Optional admission-time hint; older installations do not acquire an origin from current discovery. */
       readonly ownerAuthRequired?: boolean;
     }
-  | { readonly kind: 'local-directory' | 'local-archive'; readonly packageName?: string };
+  | {
+      readonly kind: 'local-directory' | 'local-archive';
+      readonly packageName?: string;
+      readonly dependencyClosure?: PluginDependencyClosure;
+    }
+  | {
+      readonly kind: 'git';
+      readonly url: string;
+      readonly packageName?: string;
+      readonly dependencyClosure?: PluginDependencyClosure;
+    };
 export type PluginRuntimeErrorCode =
   | 'AUTH_EXPIRED'
   | 'EVENT_BUS_CONFLICT'
@@ -26,6 +39,7 @@ export type PluginRuntimeErrorCode =
   | 'UNAVAILABLE'
   | 'UPDATE_RESUME_FAILED'
   | 'UPDATE_ROLLBACK_RESUME_FAILED'
+  | 'CONFIGURATION_RESUME_FAILED'
   | 'CATCH_UP_RESUME_FAILED'
   | 'UNEXPECTED_RUNTIME_FAILURE';
 
@@ -43,15 +57,21 @@ export interface PluginPackageRecord {
   readonly pluginId: string;
   readonly version: string;
   readonly contractVersion: string;
-  readonly manifest: PluginManifest;
+  readonly manifest: PluginManifest | null;
+  /** Historical bytes for display/replacement only; never an executable manifest. */
+  readonly incompatibleManifest?: StoredPluginManifest;
   /** Package-local schemas resolved from the exact admitted archive. */
-  readonly signalSchemas: SignalSchemaCatalog;
+  readonly signalSchemas: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
+  /** Optional display source captured from this admitted digest; absent on legacy inventory. */
+  readonly agentClientMetadata?: PluginAgentClientMetadata;
   /** Admission origin is immutable package metadata, not an inference from current catalog reachability. */
   readonly provenance?: PluginPackageProvenance;
   readonly packageState: PackageState;
   readonly verifiedAt: number;
   readonly updatedAt: number;
 }
+
+export type ExecutablePluginPackageRecord = PluginPackageRecord & { readonly manifest: PluginManifest };
 
 export interface PluginInstanceRecord {
   readonly pluginInstanceId: string;
@@ -70,19 +90,10 @@ export interface PluginInstanceRecord {
   readonly lastRuntimeError?: PluginRuntimeErrorRecord;
 }
 
-export interface PluginGrantRecord {
-  readonly pluginInstanceId: string;
-  readonly requestedCapabilities: readonly Capability[];
-  readonly effectiveGrants: readonly Capability[];
-  readonly grantRevision: number;
-  readonly updatedAt: number;
-}
-
 export interface PluginInventorySnapshot {
   readonly schemaVersion: typeof PLUGIN_INVENTORY_SCHEMA_VERSION;
   readonly packages: readonly PluginPackageRecord[];
   readonly instances: readonly PluginInstanceRecord[];
-  readonly grants: readonly PluginGrantRecord[];
 }
 
 export interface PackageAdmissionCandidate {
@@ -92,31 +103,23 @@ export interface PackageAdmissionCandidate {
   /** Digest promised by the immutable package source/registry reservation. */
   readonly expectedPackageDigest: string;
   readonly packagePluginId: string;
-  readonly effectiveGrants: readonly string[];
-  readonly signalSchemas?: SignalSchemaCatalog;
+  readonly signalSchemas?: PluginPackageRecord['signalSchemas'];
+  readonly agentClientMetadata?: PluginAgentClientMetadata;
   readonly provenance?: PluginPackageProvenance;
 }
 
 export interface UpgradePackageInput extends PackageAdmissionCandidate {
   readonly pluginInstanceId: string;
   readonly expectedLifecycleRevision: number;
-  readonly expectedGrantRevision: number;
 }
 
 export interface ReinstallPackageInput extends PackageAdmissionCandidate {
   readonly previousPluginInstanceId: string;
 }
 
-export interface RevokeGrantInput {
-  readonly pluginInstanceId: string;
-  readonly capability: string;
-  readonly expectedGrantRevision: number;
-}
-
 export interface InventoryMutationResult {
   readonly pluginInstanceId: string;
   readonly packageDigest: string;
-  readonly grantRevision: number;
 }
 
 export type PluginInventoryErrorCode =
@@ -125,14 +128,14 @@ export type PluginInventoryErrorCode =
   | 'PACKAGE_DIGEST_MISMATCH'
   | 'PACKAGE_ID_MISMATCH'
   | 'CONTRACT_VERSION_MISMATCH'
-  | 'INVALID_GRANT'
   | 'PACKAGE_ALREADY_INSTALLED'
+  | 'DATA_DIRECTORY_IN_USE'
   | 'INSTANCE_NOT_FOUND'
   | 'STALE_INSTANCE'
   | 'STALE_LIFECYCLE_REVISION'
-  | 'STALE_GRANT_REVISION'
   | 'RUNTIME_NOT_STOPPED'
   | 'INSTANCE_ID_COLLISION'
+  | 'INCOMPATIBLE_PACKAGE'
   | 'CORRUPT_SNAPSHOT'
   | 'UNSUPPORTED_SCHEMA'
   | 'INVENTORY_INVARIANT';

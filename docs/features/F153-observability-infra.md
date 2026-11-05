@@ -5,7 +5,7 @@ topics: [observability, telemetry, metrics, health-check, infrastructure]
 doc_kind: spec
 created: 2026-04-09
 community_issue: "zts212653/clowder-ai#388"
-tips_exempt: "Renewed 2026-09-09 for the observability ownership-cell registration and public-link projection; telemetry remains the existing owner and no new user action is introduced."
+tips_exempt: "Renewed 2026-10-15 for the public repository-name projection in historical intake provenance; observability behavior, ownership and user actions are unchanged."
 ---
 
 # F153: Observability Infrastructure — 运行时可观测基础设施
@@ -119,7 +119,7 @@ Phase E 只回答"发生了什么"（traces、metrics、健康状态），不做
 > **Status**: merged | **Owner**: Ragdoll
 > **Provenance**: zts212653/clowder-ai#592
 > **Implementation PR**: zts212653/clowder-ai#579 (merged 2026-04-28, commit `8cc6f9a1`)
-> **Cat-cafe intake**: zts212653/cat-cafe#1449 (commit `254c6e2fa`)
+> **Cat-cafe intake**: zts212653/clowder-ai#1449 (commit `254c6e2fa`)
 > **Trigger**: 重启后 trace 数据全丢（LocalTraceStore 纯内存）
 > **Discussion**: 2026-04-22，三猫讨论（Ragdoll + Sonnet + GPT-5.4）
 >

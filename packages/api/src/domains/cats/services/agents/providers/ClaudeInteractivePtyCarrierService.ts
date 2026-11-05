@@ -22,7 +22,7 @@
  * deferred to a later phase) to stay minimal and avoid dependency on
  * compileL0ViaSubprocess machinery.
  */
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { type CatId, createCatId } from '@cat-cafe/shared';
@@ -52,6 +52,7 @@ import {
   resolveClaudeModelSelection,
   resolveDefaultClaudeMcpServerPath,
 } from './ClaudeAgentService.js';
+import { captureClaudeMcpConfig, resolveClaudeMcpConfig } from './claude-mcp-config.js';
 import {
   extractEntrypointFromHookEntries,
   extractSessionIdFromHookEntries,
@@ -59,11 +60,12 @@ import {
   isHookTerminalEvent,
 } from './HookSidechannelConsumer.js';
 import { appendLocalImagePathHints, collectImageAccessDirectories } from './image-cli-bridge.js';
-import { extractImagePaths } from './image-paths.js';
+import { extractTrustedImagePaths } from './image-paths.js';
 import { type HookInfrastructureResult, setupHookInfrastructure } from './pty/hook-setup.js';
 import type { PtyDriverOptions } from './pty/PtyDriver.js';
 import { PtyDriver } from './pty/PtyDriver.js';
 import { ptyTranscriptDir, sleep } from './pty/pty-utils.js';
+import { writeInvocationMcpConfigFile } from './session-credential-file.js';
 export { ptyTranscriptDir }; // re-export for consumers (f230-interactive-pty-carrier.test.js)
 
 import { TranscriptTailer } from './TranscriptTailer.js';
@@ -109,7 +111,6 @@ export class ClaudeInteractivePtyCarrierService implements AgentService {
   private readonly claudeBinary: string | undefined;
   private readonly hookSidecarPathOverride: string | undefined;
   /** Cached MCP config file path (created once per instance, reused across invocations). */
-  private mcpConfigFilePath: string | undefined;
 
   constructor(options?: ClaudeInteractivePtyCarrierServiceOptions) {
     this.catId = options?.catId ?? createCatId('opus');
@@ -133,6 +134,15 @@ export class ClaudeInteractivePtyCarrierService implements AgentService {
 
   supportsToolExecutionPolicy(policy: ToolExecutionPolicy): boolean {
     return policy.mode === 'read_only';
+  }
+
+  captureInvocationOptions(input: Parameters<NonNullable<AgentService['captureInvocationOptions']>>[0]) {
+    return captureClaudeMcpConfig({
+      ...input,
+      workingDirectory: input.workingDirectory ?? this.cwd,
+      catId: this.catId,
+      mcpServerPath: this.mcpServerPath,
+    });
   }
 
   contextCapability(): import('../../types.js').AgentContextCapability {
@@ -166,7 +176,9 @@ export class ClaudeInteractivePtyCarrierService implements AgentService {
       [ANTHROPIC_PROFILE_MODE_KEY]: 'subscription',
       ...(options?.callbackEnv ?? {}),
     };
-    const envOverrides = buildClaudeEnvOverrides(callbackEnvWithMode);
+    const envOverrides = buildClaudeEnvOverrides(callbackEnvWithMode, {
+      contextNativeWindowTokens: options?.contextNativeWindowTokens,
+    });
     if (options?.accountEnv) {
       for (const [k, v] of Object.entries(options.accountEnv)) {
         envOverrides[k] = v;
@@ -192,34 +204,35 @@ export class ClaudeInteractivePtyCarrierService implements AgentService {
     );
 
     // ─── Model + args ──────────────────────────────────────────────────────────
-    const { effectiveModel, useEnvModelOverride } = resolveClaudeModelSelection(options?.callbackEnv, model);
+    const { effectiveModel, useEnvModelOverride } = resolveClaudeModelSelection(
+      options?.callbackEnv,
+      options?.executionPreferences?.model ?? model,
+    );
     const extraArgs: string[] = [];
     // --permission-mode bypassPermissions (F230 AC-B4, F198 Phase D parity)
     extraArgs.push('--permission-mode', readOnly ? 'plan' : 'bypassPermissions');
     if (readOnly) extraArgs.push('--tools', '', '--strict-mcp-config');
     // --model (skip if env-based override)
-    if (!useEnvModelOverride) {
+    if (!useEnvModelOverride && effectiveModel) {
       extraArgs.push('--model', effectiveModel);
     }
-    const effortLevel = resolveClaudeEffortLevel(catId as string, effectiveModel, options?.reasoningEffortOverride);
-    extraArgs.push('--effort', effortLevel);
+    const effortLevel = resolveClaudeEffortLevel(
+      catId as string,
+      effectiveModel,
+      options?.reasoningEffortOverride,
+      options?.executionPreferences,
+    );
+    if (effortLevel) extraArgs.push('--effort', effortLevel);
     // --mcp-config + --strict-mcp-config (F230 AC-B3): gated on callbackEnv (no callback = MCP unusable).
     if (!readOnly && options?.callbackEnv && this.mcpServerPath && existsSync(this.mcpServerPath)) {
-      // Write MCP config to temp file (file-based avoids inline JSON shell quoting issues).
-      if (!this.mcpConfigFilePath || !existsSync(this.mcpConfigFilePath)) {
-        const dir = mkdtempSync(join(tmpdir(), 'cat-cafe-pty-mcp-'));
-        this.mcpConfigFilePath = join(dir, 'mcp-config.json');
-        writeFileSync(
-          this.mcpConfigFilePath,
-          JSON.stringify({
-            mcpServers: {
-              'cat-cafe': { command: 'node', args: [this.mcpServerPath] },
-            },
-          }),
-          'utf-8',
-        );
-      }
-      extraArgs.push('--mcp-config', this.mcpConfigFilePath, '--strict-mcp-config');
+      const resolution = await resolveClaudeMcpConfig({
+        frozenNativeMcpConfig: options?.frozenNativeMcpConfig,
+        callbackEnv: options.callbackEnv,
+        workingDirectory: options.workingDirectory ?? this.cwd,
+        mcpServerPath: this.mcpServerPath,
+      });
+      const configPath = writeInvocationMcpConfigFile({ mcpServers: resolution?.servers ?? {} }, options.callbackEnv);
+      extraArgs.push('--mcp-config', configPath, '--strict-mcp-config');
     }
     const cwd = options?.workingDirectory ?? this.cwd;
     if (options?.claudeTokenAccount)
@@ -243,7 +256,11 @@ export class ClaudeInteractivePtyCarrierService implements AgentService {
     // `--session-id` removed (R10): flag writes ai-title only; real events go to a different UUID. PtyDriver watches via watchForTranscriptFile.
 
     // ─── Image inputs: extract paths, grant --add-dir, append path hints (F230 P2-image-inputs fix) ──
-    const imagePaths = extractImagePaths(options?.contentBlocks, options?.uploadDir);
+    const imagePaths = await extractTrustedImagePaths(
+      options?.contentBlocks,
+      options?.uploadDir,
+      options?.resolveTrustedImagePath,
+    );
     const imageAccessDirs = collectImageAccessDirectories(imagePaths);
     const effectivePrompt = appendLocalImagePathHints(prompt, imagePaths);
     for (const dir of imageAccessDirs) {
@@ -345,7 +362,7 @@ export class ClaudeInteractivePtyCarrierService implements AgentService {
             carrier: 'interactive_pty',
             ...(effectiveModel ? { model: effectiveModel } : {}),
             protocol: 'pty_hooks',
-            reasoningEffort: effortLevel,
+            ...(effortLevel ? { reasoningEffort: effortLevel } : {}),
             ...(readOnly ? { toolExecutionPolicy: 'read_only' as const } : {}),
           }),
           tools: Object.freeze({

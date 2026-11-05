@@ -13,6 +13,7 @@ import { describe, it } from 'node:test';
 
 const PLUGIN_MESSAGE = {
   instanceId: 'inst-a',
+  presentation: { connector: 'example', label: 'Example', icon: 'message', sender: { id: 's', name: 'Alice' } },
   revision: 2,
   provenance: { origin: { kind: 'plugin', instanceId: 'inst-a' }, epistemicStatus: 'inference' },
   elements: [
@@ -64,6 +65,13 @@ describe('F288 — safeParseExtra preserves pluginMessage (Redis read path)', ()
   it('fail-closed: malformed pluginMessage shapes are dropped, not passed through', async () => {
     const { safeParseExtra } = await import('../dist/domains/cats/services/stores/redis/redis-message-parsers.js');
     const malformed = [
+      { pluginMessage: { ...PLUGIN_MESSAGE, presentation: { connector: 'example', label: 42, icon: 'message' } } },
+      {
+        pluginMessage: {
+          ...PLUGIN_MESSAGE,
+          presentation: { connector: 'example', label: 'Example', icon: 'message', sender: { id: 42 } },
+        },
+      },
       { pluginMessage: { instanceId: 42, revision: 1, provenance: {}, elements: [], appendOps: [] } },
       { pluginMessage: { instanceId: 'x', revision: 'nope', provenance: {}, elements: [], appendOps: [] } },
       { pluginMessage: { instanceId: 'x', revision: 1, provenance: {}, elements: 'nope', appendOps: [] } },

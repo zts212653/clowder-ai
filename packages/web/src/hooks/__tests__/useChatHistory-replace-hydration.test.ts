@@ -1,3 +1,4 @@
+import type { CodexStartupRecovery } from '@cat-cafe/shared';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -48,7 +49,6 @@ function buildThreadBState(cachedAssistantTs: number): ThreadState {
     catStatuses: { opus: 'streaming' as const },
     catStatusDetails: {},
     catInvocations: {},
-    currentGame: null,
 
     unreadCount: 0,
     hasUserMention: false,
@@ -101,7 +101,6 @@ describe('useChatHistory replace hydration', () => {
       targetCats: [],
       catStatuses: {},
       catInvocations: {},
-      currentGame: null,
 
       threadStates: {},
       currentThreadId: 'thread-a',
@@ -163,6 +162,80 @@ describe('useChatHistory replace hydration', () => {
       expectPending: () => expect(resolveJson).not.toBeNull(),
     };
   }
+
+  for (const stage of ['ready', 'failed', 'cancelled'] as const)
+    it(`restores newer startup ${stage} from history even when the local body is preferred`, async () => {
+      const history = installDeferredHistoryResponse();
+      const cached: CodexStartupRecovery = {
+        invocationId: 'startup-current',
+        stage: 'retry_wait',
+        sequence: 2,
+        attempt: 1,
+        maxAttempts: 6,
+        startedAt: 1,
+        deadlineAt: 120_001,
+        updatedAt: 2,
+      };
+      const state = makeThreadBState(10);
+      state.messages[0] = {
+        ...state.messages[0],
+        content: 'cached answer with additional local reasoning',
+        extra: { startupRecovery: cached },
+      };
+      mountReplaceHydrationThread(state);
+      await history.waitUntilPending();
+      const terminal = { ...cached, stage, sequence: 5, attempt: 3, updatedAt: 20 };
+      await history.resolve({
+        messages: [
+          {
+            id: 'b1',
+            type: 'assistant',
+            catId: 'opus',
+            content: 'final answer',
+            timestamp: 20,
+            extra: { startupRecovery: terminal },
+          },
+        ],
+        hasMore: false,
+      });
+      expect(useChatStore.getState().messages.find((m) => m.id === 'b1')?.extra?.startupRecovery).toEqual(terminal);
+    });
+
+  for (const [stage, sequence, historySequence] of [
+    ['retry_wait', 7, 3],
+    ['ready', 5, 8],
+  ] as const)
+    it(`retains local startup ${stage} independently of the richer history body`, async () => {
+      const history = installDeferredHistoryResponse();
+      const current: CodexStartupRecovery = {
+        invocationId: 'startup-current',
+        stage,
+        sequence,
+        attempt: 2,
+        maxAttempts: 6,
+        startedAt: 1,
+        deadlineAt: 120_001,
+        updatedAt: 2,
+      };
+      const state = makeThreadBState(10);
+      state.messages[0] = { ...state.messages[0], content: 'cached', extra: { startupRecovery: current } };
+      mountReplaceHydrationThread(state);
+      await history.waitUntilPending();
+      await history.resolve({
+        messages: [
+          {
+            id: 'b1',
+            type: 'assistant',
+            catId: 'opus',
+            content: 'history answer with more detail',
+            timestamp: 20,
+            extra: { startupRecovery: { ...current, stage: 'checking', sequence: historySequence } },
+          },
+        ],
+        hasMore: false,
+      });
+      expect(useChatStore.getState().messages.find((m) => m.id === 'b1')?.extra?.startupRecovery).toEqual(current);
+    });
 
   it('rehydrates the saved companion identity instead of replacing it with current selection', async () => {
     const history = installDeferredHistoryResponse();
@@ -264,6 +337,37 @@ describe('useChatHistory replace hydration', () => {
     expect(hydrated?.extra?.cloudBridgeRetry).toEqual(retry);
     expect(hydrated?.extra?.custodyOfferV1).toEqual(offer);
     expect(hydrated?.extra).not.toHaveProperty('queueReceipt');
+  });
+
+  it('restores exact cloud reply proof from cold history without using the stream invocation as its attempt', async () => {
+    const history = installDeferredHistoryResponse();
+    const proof = {
+      v: 1 as const,
+      threadId: 'thread-b',
+      sourceMessageId: 'source119',
+      targetCatId: 'gpt-pro',
+      dispatchInvocationId: 'actual-dispatch',
+    };
+    mountReplaceHydrationThread(makeThreadBState(Date.now() - 1000));
+    await history.waitUntilPending();
+    await history.resolve({
+      messages: [
+        {
+          id: 'reply122',
+          type: 'assistant',
+          catId: 'gpt-pro',
+          content: 'nonempty reply',
+          timestamp: Date.now(),
+          replyTo: 'source119',
+          origin: 'callback',
+          extra: { cloudBridgeReturn: proof, isExplicitPost: true, stream: { invocationId: 'reply122' } },
+        },
+      ],
+      hasMore: false,
+    });
+    const answer = useChatStore.getState().messages.find((message) => message.id === 'reply122');
+    expect(answer?.extra?.cloudBridgeReturn).toEqual(proof);
+    expect(answer?.extra?.stream?.invocationId).not.toBe(proof.dispatchInvocationId);
   });
 
   it('hydrates a modification source from persisted history when no live metadata copy exists', async () => {
@@ -510,7 +614,6 @@ describe('useChatHistory replace hydration', () => {
       catStatuses: {},
       catStatusDetails: {},
       catInvocations: {},
-      currentGame: null,
       unreadCount: 1,
       hasUserMention: false,
       lastActivity: cachedAssistantTs,

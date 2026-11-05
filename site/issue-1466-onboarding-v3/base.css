@@ -1,0 +1,211 @@
+/* Native light palette: theme-tokens / console-tokens / SettingsShellV2 @ bc767769. */
+:root {
+  --work: #fcfbf8;
+  --frame: #f3eee5;
+  --rail: #ebe4d8;
+  --card: #fffefd;
+  --field: #f3eee6;
+  --ink: #29251f;
+  --body: #615a50;
+  --muted: #847b70;
+  --line: #e6e0d8;
+  --accent: #af530b;
+  --selected: #eadbca;
+  --green: #477151;
+  --purple: #8964ad;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+  color: var(--ink);
+  background: var(--work);
+  font-synthesis: none;
+  font-size: 14px;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+}
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+button {
+  cursor: pointer;
+}
+button,
+a,
+input,
+select,
+textarea,
+summary {
+  outline-offset: 4px;
+}
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--accent);
+}
+button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  min-height: 38px;
+  border-radius: 9px;
+  padding: 8px 12px;
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+  justify-content: center;
+}
+button:hover {
+  background: #eee7de;
+}
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.46;
+}
+svg {
+  flex-shrink: 0;
+}
+p {
+  line-height: 1.75;
+  margin: 8px 0;
+  color: var(--body);
+}
+h1,
+h2,
+h3 {
+  line-height: 1.3;
+  margin: 0;
+  color: var(--ink);
+}
+h1 {
+  font-size: 26px;
+  font-weight: 650;
+  letter-spacing: -0.5px;
+}
+h2 {
+  font-size: 18px;
+  font-weight: 600;
+}
+h3 {
+  font-size: 16px;
+  font-weight: 600;
+}
+a {
+  color: var(--accent);
+}
+small,
+.fine {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.65;
+}
+b,
+strong {
+  font-weight: 600;
+}
+input,
+select,
+textarea {
+  color: var(--ink);
+  min-width: 0;
+}
+select {
+  cursor: pointer;
+}
+.primary {
+  background: var(--accent);
+  color: white;
+  font-weight: 600;
+  padding: 11px 18px;
+  min-height: 42px;
+  border-radius: 11px;
+}
+.primary:hover {
+  background: #924508;
+}
+.secondary {
+  background: var(--card);
+  border: 1px solid var(--line);
+}
+.text-button {
+  color: var(--accent);
+  font-size: 13px;
+  padding: 7px 8px;
+}
+.big {
+  padding: 14px 25px;
+  font-size: 15px;
+  min-height: 48px;
+}
+.icon-button {
+  padding: 8px;
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+}
+.selected {
+  background: var(--card);
+}
+.spacer {
+  flex: 1;
+}
+.muted,
+.subtle {
+  color: var(--muted);
+}
+.eyebrow {
+  color: var(--accent);
+  font-size: 12px;
+  letter-spacing: 2px;
+  font-weight: 600;
+}
+.tag {
+  background: var(--field);
+  border: 1px solid var(--line);
+  border-radius: 99px;
+  padding: 5px 10px;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.button-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.avatar {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  border-radius: 50%;
+  background-repeat: no-repeat;
+  background-color: color-mix(in srgb, var(--cat) 14%, var(--card));
+  box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--cat) 50%, transparent);
+  display: inline-block;
+  vertical-align: middle;
+}
+.avatar.large {
+  width: 56px;
+  height: 56px;
+  flex-basis: 56px;
+}
+.sprite {
+  display: block;
+  width: 144px;
+  height: 156px;
+  background-image: var(--sprite);
+  background-size: 144px 156px;
+  background-repeat: no-repeat;
+}
+.sprite.walk {
+  background-size: 576px 156px;
+  animation: walk 0.6s steps(4) infinite;
+}

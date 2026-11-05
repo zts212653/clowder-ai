@@ -31,6 +31,7 @@ import { buildUnixSupervisedSpawnPlan } from '../../../../../../utils/cli-superv
 import {
   type AcpCapacitySignal,
   type AcpClientConfig,
+  type AcpPermissionHandler,
   AcpProtocolError,
   AcpSessionCancelledError,
   AcpStreamIdleError,
@@ -39,13 +40,15 @@ import {
 } from './AcpClient.js';
 import { AcpCwdIdentityTracker } from './acp-cwd-identity.js';
 import { type AcpPromptInput, toAcpPromptContent } from './acp-prompt-content.js';
+import { AcpSessionBindingError, ActiveSessionCache } from './active-session-cache.js';
+import { shutdownAcpChild } from './lifecycle/acp-child-shutdown.js';
+import { respondToAcpPermission } from './permissions/acp-permission-response.js';
 import type {
   AcpAgentRequest,
   AcpInitializeResult,
   AcpMcpServer,
   AcpNewSessionResult,
   AcpNotification,
-  AcpPermissionRequest,
   AcpPromptCapabilities,
   AcpPromptResult,
   AcpResponse,
@@ -81,8 +84,11 @@ interface AgentResponseOptions {
 // ─── Client ──────────────────────────────────────────────────
 
 export class AcpHttpStreamClient {
+  private readonly liveSessions = new ActiveSessionCache();
+  private readonly sessionPermissionHandlers = new Map<string, AcpPermissionHandler>();
   private child: ChildProcess | null = null;
   private closed = false;
+  private closing?: Promise<void>;
   private exited = false;
   /** Sessions whose local prompt ended before provider completion was acknowledged. */
   private readonly unquiescedSessionIds = new Set<string>();
@@ -101,14 +107,27 @@ export class AcpHttpStreamClient {
     this.cwdIdentityTracker = new AcpCwdIdentityTracker(this.config.cwd);
   }
 
+  setSessionPermissionHandler(sessionId: string, handler?: AcpPermissionHandler): void {
+    if (handler) this.sessionPermissionHandlers.set(sessionId, handler);
+    else this.sessionPermissionHandlers.delete(sessionId);
+  }
+
   // ── Lifecycle ────────────────────────────────────────────────
 
   async initialize(): Promise<AcpInitializeResult> {
+    this.liveSessions.clear();
+    this.sessionPermissionHandlers.clear();
     // Phase 1: spawn the process
     const doSpawn = this.config.spawnFn ?? nodeSpawn;
-    let command = resolveCliCommandOrBare(this.config.command);
-    let args = [...this.config.args];
-    const childEnv = buildChildEnv(this.config.env, { workingDirectory: this.config.cwd });
+    const selectedSpawn = this.config.preparedSpawn ?? {
+      command: resolveCliCommandOrBare(this.config.command),
+      args: this.config.args,
+    };
+    let { command } = selectedSpawn;
+    let args = [...selectedSpawn.args];
+    const childEnv = this.config.preparedEnv
+      ? { ...this.config.preparedEnv }
+      : buildChildEnv(this.config.env, { workingDirectory: this.config.cwd });
     if (!IS_WINDOWS && isAbsolute(command)) {
       const binDir = dirname(command);
       childEnv.PATH = childEnv.PATH ? `${binDir}:${childEnv.PATH}` : binDir;
@@ -116,19 +135,19 @@ export class AcpHttpStreamClient {
     // #712: Re-create bootstrap CWD if cleaned up by OS temp-dir rotation or agent exit.
     // Skip when a test spawnFn is injected — the directory may be a fake path
     // (e.g. '/my/project') that can't be created on CI runners.
-    if (!this.config.spawnFn) {
+    if (!this.config.spawnFn && !(IS_WINDOWS && this.config.verifyBootstrapCwd)) {
       mkdirSync(this.config.cwd, { recursive: true, mode: 0o700 });
     }
     // #1203: Capture the cwd's directory identity at spawn so isCwdIntact can
     // detect delete→recreate at the same path, not just deletion.
-    this.cwdIdentityTracker.capture();
 
     const spawnOpts: SpawnOptions & { stdio: ['pipe', 'pipe', 'pipe'] } = {
       cwd: this.config.cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
       env: childEnv,
+      ...(this.config.preparedSpawn?.shell !== undefined ? { shell: this.config.preparedSpawn.shell } : {}),
     };
-    if (IS_WINDOWS && !this.config.spawnFn) {
+    if (IS_WINDOWS && !this.config.spawnFn && !this.config.preparedSpawn) {
       const spawnPlan = resolveWindowsSpawnPlan(command, args);
       command = spawnPlan.command;
       args = spawnPlan.args;
@@ -147,6 +166,8 @@ export class AcpHttpStreamClient {
       spawnOpts.env = supervised.env;
     }
 
+    if (IS_WINDOWS && !this.config.spawnFn) this.config.verifyBootstrapCwd?.(command, args, childEnv);
+    this.cwdIdentityTracker.capture();
     this.child = doSpawn(command, args, spawnOpts) as ChildProcess;
 
     // Stderr: capacity detection (shared with stdio client)
@@ -162,7 +183,7 @@ export class AcpHttpStreamClient {
 
     this.child.on('error', (err) => {
       log.error('ACP HTTP process error: %s', err.message);
-      this.exited = true;
+      this.closed = true;
     });
 
     this.child.on('exit', (code, signal) => {
@@ -212,7 +233,7 @@ export class AcpHttpStreamClient {
     const t0 = Date.now();
     const resp = await this.httpRequest(ACP_METHODS.sessionNew, { cwd: effectiveCwd, mcpServers: compatible });
     log.info({ durationMs: Date.now() - t0, hasResult: !!resp.result }, 'ACP HTTP session/new: response');
-    return resp.result as unknown as AcpNewSessionResult;
+    return this.liveSessions.remember(resp.result as unknown as AcpNewSessionResult, effectiveCwd, compatible);
   }
 
   async loadSession(sessionId: string, cwd?: string, mcpServers: AcpMcpServer[] = []): Promise<AcpNewSessionResult> {
@@ -223,22 +244,57 @@ export class AcpHttpStreamClient {
       'ACP HTTP session/load',
     );
     const t0 = Date.now();
-    const resp = await this.httpRequest(ACP_METHODS.sessionLoad, {
+    const method =
+      !this.initResult?.agentCapabilities?.loadSession &&
+      this.initResult?.agentCapabilities?.sessionCapabilities?.resume
+        ? ACP_METHODS.sessionResume
+        : ACP_METHODS.sessionLoad;
+    if (!this.initResult?.agentCapabilities?.loadSession) {
+      const active = this.liveSessions.get(
+        sessionId,
+        effectiveCwd,
+        compatible,
+        !this.closed && !this.exited && !this.unquiescedSessionIds.has(sessionId),
+      );
+      if (active) return active;
+      if (this.initResult && !this.initResult.agentCapabilities?.sessionCapabilities?.resume)
+        throw new AcpSessionBindingError('ACP 工具未声明会话恢复能力，原历史已保留。');
+    }
+    const resp = await this.httpRequest(method, {
       sessionId,
       cwd: effectiveCwd,
       mcpServers: compatible,
     });
     log.info({ sessionId, durationMs: Date.now() - t0, hasResult: !!resp.result }, 'ACP HTTP session/load: response');
-    return resp.result as unknown as AcpNewSessionResult;
+    return this.liveSessions.remember(
+      {
+        ...resp.result,
+        sessionId: typeof resp.result?.sessionId === 'string' ? resp.result.sessionId : sessionId,
+      } as AcpNewSessionResult,
+      effectiveCwd,
+      compatible,
+    );
   }
 
-  async setSessionConfigOption(sessionId: string, configId: string, value: string): Promise<void> {
-    if (!configId.trim() || !value.trim()) return;
-    await this.httpRequest(ACP_METHODS.sessionSetConfigOption, {
+  async closeSession(sessionId: string): Promise<void> {
+    if (!this.initResult?.agentCapabilities?.sessionCapabilities?.close) return;
+    await this.httpRequest(ACP_METHODS.sessionClose, { sessionId });
+    this.liveSessions.forget(sessionId);
+  }
+
+  async setSessionConfigOption(
+    sessionId: string,
+    configId: string,
+    value: string,
+  ): Promise<Record<string, unknown> | undefined> {
+    if (!configId.trim()) return;
+    const response = await this.httpRequest(ACP_METHODS.sessionSetConfigOption, {
       sessionId,
       configId: configId.trim(),
-      value: value.trim(),
+      value,
     });
+    this.liveSessions.update(sessionId, response.result);
+    return response.result;
   }
 
   /**
@@ -322,6 +378,7 @@ export class AcpHttpStreamClient {
     };
 
     const enqueueSessionUpdate = (params: AcpSessionUpdate | Record<string, unknown>) => {
+      this.liveSessions.notify(params);
       if (params.sessionId !== sessionId) return;
 
       queue.push(params as AcpSessionUpdate);
@@ -583,23 +640,16 @@ export class AcpHttpStreamClient {
     if (cb) cb();
   }
 
-  async close(): Promise<void> {
-    if (this.closed) return;
-    this.closed = true;
+  close(): Promise<void> {
+    this.closing ??= this.closeOwnedProcess();
+    return this.closing;
+  }
 
-    if (this.child && !this.child.killed) {
-      await new Promise<void>((resolve) => {
-        const timer = setTimeout(() => {
-          if (this.child && !this.child.killed) this.child.kill('SIGKILL');
-          resolve();
-        }, KILL_GRACE_MS);
-        this.child!.once('exit', () => {
-          clearTimeout(timer);
-          resolve();
-        });
-        this.child!.kill('SIGTERM');
-      });
-    }
+  private async closeOwnedProcess(): Promise<void> {
+    this.liveSessions.clear();
+    this.sessionPermissionHandlers.clear();
+    this.closed = true;
+    if (this.child?.pid !== undefined && !this.exited) await shutdownAcpChild(this.child, KILL_GRACE_MS, false);
   }
 
   get pid(): number | undefined {
@@ -748,42 +798,14 @@ export class AcpHttpStreamClient {
     };
 
     if (req.method === ACP_METHODS.requestPermission) {
-      const respond = (result: { optionId: string }) => {
-        const acpResult = {
-          outcome: { outcome: 'selected' as const, optionId: result.optionId },
-        };
-        return this.sendAgentResponse({ jsonrpc: '2.0', id: req.id, result: acpResult }, responseOptions);
-      };
-
-      if (this.config.permissionHandler) {
-        let responsePromise: Promise<void> | null = null;
-        try {
-          this.config.permissionHandler(req, (result) => {
-            responsePromise = respond(result);
-          });
-        } catch (err) {
-          log.error('HTTP permissionHandler threw: %s', (err as Error).message);
-          await this.sendAgentResponse(
-            {
-              jsonrpc: '2.0',
-              id: req.id,
-              error: { code: -32603, message: `Permission handler error: ${(err as Error).message}` },
-            },
-            responseOptions,
-          );
-          return;
-        }
-        if (responsePromise) await responsePromise;
-      } else {
-        // Prefer allow_always (session-wide) over allow_once to avoid repeated permission
-        // prompts for every MCP tool call. Kimi sends optionId "approve_for_session" for this.
-        const params = req.params as unknown as AcpPermissionRequest;
-        const allowOption =
-          params.options?.find((o) => o.kind === 'allow_always') ??
-          params.options?.find((o) => o.kind === 'allow_once') ??
-          params.options?.[0];
-        await respond({ optionId: allowOption?.optionId ?? 'allow_once' });
-      }
+      const sessionId = typeof req.params.sessionId === 'string' ? req.params.sessionId : '';
+      await respondToAcpPermission({
+        request: req,
+        handler: this.sessionPermissionHandlers.get(sessionId) ?? this.config.permissionHandler,
+        defaultDecision: this.config.defaultPermissionDecision,
+        signal: options.signal,
+        write: (response) => this.sendAgentResponse(response, responseOptions),
+      });
       return;
     }
 

@@ -9,9 +9,13 @@ code_anchors:
   - packages/api/src/infrastructure/enterprise/LarkActionService.ts
   - packages/api/src/infrastructure/enterprise/LarkCliExecutor.ts
   - packages/api/src/domains/managed-job/ManagedJobService.ts
+  - packages/api/src/domains/managed-job/managed-job-admission.ts
+  - packages/api/src/infrastructure/scheduler/templates/alpha-managed-control.ts
   - packages/api/src/domains/managed-job/managed-job-ledger.ts
   - packages/api/src/domains/managed-job/durable-managed-gate-supervisor.ts
   - packages/api/src/infrastructure/managed-runner-command-worker.ts
+  - packages/api/src/domains/ball-custody/durable-managed-gate-child-contract.ts
+  - packages/api/src/infrastructure/managed-runner-environment.ts
   - packages/api/src/domains/ball-custody/ManagedCommandWakeRecoverySweep.ts
   - packages/api/src/routes/callback-wecom-action-routes.ts
   - packages/api/src/routes/callback-lark-action-routes.ts
@@ -23,6 +27,7 @@ doc_anchors:
   - docs/decisions/029-external-tool-integration-strategy.md
   - docs/features/F162-enterprise-action-toolkit.md
   - docs/features/F308-full-sync-durable-fast-train.md
+  - feature-specs/2026-10-16-alpha-sleep-consumer.md
 static_scan_hints: [ActionService, CliExecutor, callback-action, dry-run, audit, idempotency, resource handle, sync-to-opensource, publish-release-tag, full-sync-train, receipt, gate lease]
 cited_by:
   - {feature: F325, date: 2026-10-14, delta: "Promotes generic managed job truth into Action Plane; retires P1 task-test runner; reuses existing supervisor/wake/UI consumers"}
@@ -37,6 +42,18 @@ cited_by:
 ADR-029 owns the external tool integration strategy: typed `ActionService` is the governance boundary, execution backend is chosen below it, and callback/import/MCP exposure is chosen above it. F162 is the first concrete implementation for WeCom and Lark. F308 adds local maintainer release-train and release-publication executors: durable exact-cut receipts, single-flight leases, remote ref CAS and idempotent retry sit with the external action that may mutate the public target; they do not become a runtime API store or a second sync/release writer.
 
 F261/F325 place general managed-command identity, principal, admission, immutable transitions, supervisor lease/fence, process identity, retry lineage and terminal result in `ManagedJobService` and the promoted managed-job supervisor. Ordinary commands and full gates share this durable core. F167 owns wake/disposition and the existing UI owns presentation; neither is a second job store. MCP/callback authorize and call the service, never directly own the worker. Explicit retries create a new job/epoch after a terminal parent; automatic side-effect replay is disabled. The former Task-specific test runner/guardian is retired.
+
+The opt-in `alpha_revision_v1` consumer uses this same job core with the approved
+subscription's guardian principal and an explicit schedule admission. It cannot
+invent an invocation/message admission or choose a command over worker IPC.
+The subscription freezes its carrier and managed owner; only the existing managed
+worker may resume that exact consumer through the shared recovery protocol.
+
+Checkout provenance supplied to managed child commands is noncredential metadata derived from
+this same validated descriptor's wake target and original invocation (or job id). Inherited
+provenance is discarded, callback/session credentials remain absent, and the receiving
+worktree-storage cell records only a newly created checkout's source. No job or cleanup authority
+is granted by this metadata.
 
 ## Use This When
 

@@ -43,6 +43,7 @@ const quote = (id, revision, from, to) => ({
   },
 });
 const textMessage = (id, attachments, timestamp = 1) => ({
+  from: { kind: 'user', userId: 'operator' },
   id,
   type: 'user',
   content: '这几处帮我改一下',

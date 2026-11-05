@@ -1,21 +1,7 @@
-import type { RichBlock } from '@/stores/chat-types';
+import type { MessageSelectionProjectedItem as BundleItem } from '@cat-cafe/shared';
 import { HubIcon } from './hub-icons';
+import { messageBundleSenderLabel } from './message-bundle-sender';
 import { RichBlocks } from './rich/RichBlocks';
-
-export type BundleAuthor = { kind: 'user'; userId: string } | { kind: 'cat'; catId: string };
-export type BundleItem =
-  | {
-      status: 'available';
-      kind: 'message' | 'quote' | 'cli_quote' | 'rich_block';
-      messageId: string;
-      sourceThreadId: string;
-      author: BundleAuthor;
-      timestamp: number;
-      readableContent: string;
-      comment?: string;
-      richBlock?: RichBlock;
-    }
-  | { status: 'tombstone'; messageId: string; reason: 'source_unavailable' | 'source_changed' };
 
 interface MessageBundleItemViewProps {
   item: BundleItem;
@@ -60,12 +46,7 @@ export function MessageBundleItemView({
     );
   }
 
-  const authorLabel =
-    item.author.kind === 'cat'
-      ? getCatLabel(item.author.catId)
-      : item.author.userId === createdBy
-        ? forwarderName
-        : item.author.userId;
+  const authorLabel = messageBundleSenderLabel(item.from, createdBy, forwarderName, getCatLabel);
   return (
     <>
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-cafe-muted">

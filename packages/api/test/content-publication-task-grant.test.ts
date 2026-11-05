@@ -35,7 +35,7 @@ for (const kind of ['message', 'workspace-snapshot'] as const) {
       const message = f.messages.append({
         userId: 'operator',
         threadId: origin.id,
-        catId: null,
+        from: { kind: 'user', userId: 'operator' },
         mentions: [],
         timestamp: Date.now(),
         content: '上传的图片',

@@ -64,7 +64,7 @@ describe('describeModificationProgress — accepted Studio state board', () => {
       expect(copy).toMatchObject({
         key: 'working',
         indicator: 'spinner',
-        title: '修改中 · 窄屏设计稿 2\u00A0处',
+        title: '烁烁修改中 · 窄屏设计稿 2\u00A0处',
         chip: '烁烁修改中 · 2\u00A0处',
         action: { kind: 'cancel-request', label: '取消修改', compactLabel: '取消' },
       });
@@ -73,18 +73,18 @@ describe('describeModificationProgress — accepted Studio state board', () => {
 
   it('degrades the running title gracefully when the artwork or the place count is unknown', () => {
     expect(describeModificationProgress(input({ execution: 'running' }, { contentTitle: '窄屏设计稿' }))).toMatchObject(
-      { title: '修改中 · 窄屏设计稿', chip: '烁烁修改中' },
+      { title: '烁烁修改中 · 窄屏设计稿', chip: '烁烁修改中' },
     );
     expect(describeModificationProgress(input({ execution: 'running' }, { placeCount: 1 }))).toMatchObject({
-      title: '修改中 · 1\u00A0处',
+      title: '烁烁修改中 · 1\u00A0处',
       chip: '烁烁修改中 · 1\u00A0处',
     });
     expect(describeModificationProgress(input({ execution: 'running' }))).toMatchObject({
-      title: '修改中',
+      title: '烁烁修改中',
       chip: '烁烁修改中',
     });
     // A zero or missing count is never rendered as "0 处".
-    expect(describeModificationProgress(input({ execution: 'running' }, { placeCount: 0 }))?.title).toBe('修改中');
+    expect(describeModificationProgress(input({ execution: 'running' }, { placeCount: 0 }))?.title).toBe('烁烁修改中');
   });
 
   it('says queued work has not started and offers the plain cancel', () => {

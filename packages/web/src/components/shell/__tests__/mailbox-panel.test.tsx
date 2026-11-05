@@ -8,6 +8,7 @@ const data = vi.hoisted(() => ({
   view: {
     result: { kind: 'loading' } as unknown,
     staleRead: null as unknown,
+    badgeResult: undefined as MailboxRead | undefined,
     refetch: vi.fn(),
     nextPage: vi.fn(),
     previousPage: vi.fn(),
@@ -28,7 +29,15 @@ vi.mock('@/stores/chatStore', () => ({
 }));
 vi.mock('@/stores/approvalHubStore', () => {
   // The rail button follows approval decisions through the store (getState/subscribe); nothing is decided in this suite.
-  const state = { fetchPending: data.approvalRefresh, items: [], decisionAttempts: {} };
+  const state = {
+    fetchPending: data.approvalRefresh,
+    ensurePending: vi.fn(async () => undefined),
+    pendingRequestVersion: 0,
+    items: [],
+    decisionAttempts: {},
+    deciding: {},
+    error: null,
+  };
   const useApprovalHubStore = (s: (v: typeof state) => unknown) => s(state);
   useApprovalHubStore.getState = () => state;
   useApprovalHubStore.subscribe = () => () => undefined;
@@ -38,6 +47,16 @@ vi.mock('@/stores/approvalHubStore', () => {
 // that it hands the helper the action and the page it is on.
 vi.mock('../mailbox/open-exact-place', () => ({ openExactPlace: data.navigate }));
 vi.mock('@/hooks/useCatNameResolver', () => ({ useCatNameResolver: () => (catId: string) => `猫:${catId}` }));
+vi.mock('@/hooks/useCatData', () => ({
+  useCatData: () => ({
+    getCatById: (catId: string) => ({
+      displayName: `猫:${catId}`,
+      nickname: `猫:${catId}`,
+      avatar: '',
+      color: { primary: 'var(--shell-ink)', secondary: 'var(--shell-paper)' },
+    }),
+  }),
+}));
 vi.mock('../use-unified-attention', () => ({ useUnifiedAttention: () => data.view }));
 
 import { MailboxButton } from '../MailboxButton';
@@ -51,18 +70,20 @@ const source = (overrides: Partial<UnifiedAttentionSourceRead> = {}): UnifiedAtt
   ...overrides,
 });
 
+// These panel-chrome cases exercise a generic row; native F128/family cards own their own headings.
 const approvalItem = (id: string, summary = `审批 ${id}`): UnifiedAttentionItemV1 => ({
-  decisionRef: `approval:F128:${id}`,
+  decisionRef: `approval:F292:${id}`,
   kind: 'approval',
   summary,
   approval: {
     proposalId: id,
-    sourceFeatureId: 'F128',
+    sourceFeatureId: 'F292',
     resolution: 'open',
     materialization: { state: 'not_started' },
     requesterCatId: 'opus',
     summary,
     detail: {},
+    navigation: { state: 'legacy_unanchored', legacySourceThreadId: null, legacySourceMessageId: null },
     createdAt: Date.now() - 2 * 3600_000,
   } as never,
   linkedNeedsMe: [],
@@ -116,7 +137,9 @@ describe('F322 待办 (the mailbox) on the unified read', () => {
   };
 
   beforeEach(() => {
+    data.view.badgeResult = undefined;
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1024 });
     vi.clearAllMocks();
     data.pathname = '/thread/current';
     show({ kind: 'loading' });
@@ -180,11 +203,13 @@ describe('F322 待办 (the mailbox) on the unified read', () => {
     show(ok({ items: [], totalCount: 0, attentionCount: 0 }));
     render();
     open();
-    const ignored = document.querySelector<HTMLButtonElement>('[data-testid="mailbox-open-ignored"]');
+    const history = document.querySelector<HTMLButtonElement>('[data-testid="mailbox-history"]');
+    act(() => history?.click());
+    const ignored = document.querySelector<HTMLButtonElement>('[data-testid="mailbox-history-tab-ignored"]');
     expect(ignored).not.toBeNull();
     act(() => ignored?.click());
-    expect(data.view.setPersonalView).toHaveBeenCalledWith('ignored', 'week');
-    expect(text('mailbox-title')).toBe('已忽略');
+    expect(data.view.setPersonalView).toHaveBeenCalledWith('ignored', 'all');
+    expect(text('mailbox-title')).toBe('已处理的');
   });
 
   it('opens Schedule from the second mailbox tab through the original Workspace destination and closes the panel', () => {
@@ -312,6 +337,15 @@ describe('F322 待办 (the mailbox) on the unified read', () => {
       }
     });
 
+    it('retains confirmed rail and panel counts during background loading without authorizing stale actions', () => {
+      data.view.badgeResult = ok({ totalCount: 3 });
+      show({ kind: 'loading' });
+      render();
+      expect(host.querySelector('[data-testid="rail-badge-count"]')?.textContent).toBe('3');
+      open();
+      expect(panel()?.querySelector('[data-testid="mailbox-tab-count"]')?.textContent).toBe('3');
+    });
+
     it('never prints a digit while the count is unconfirmed, loading or failed', () => {
       for (const result of [
         { kind: 'loading' } as MailboxRead,
@@ -327,6 +361,15 @@ describe('F322 待办 (the mailbox) on the unified read', () => {
   });
 
   describe('panel', () => {
+    it('covers the mobile viewport instead of docking behind an expanded navigation drawer', () => {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
+      show(ok({ items: [], totalCount: 0 }));
+      render();
+      open();
+      expect(panel()?.style.left).toBe('0px');
+      expect(panel()?.style.visibility).toBe('visible');
+    });
+
     it('focus enters the first row; Escape closes the panel and returns to the rail button', () => {
       show(ok({ items: [approvalItem('a')], totalCount: 1 }));
       render();
@@ -469,7 +512,7 @@ describe('F322 待办 (the mailbox) on the unified read', () => {
         expect(rows()[0].textContent).not.toMatch(/由 .* 发起/);
       });
 
-      it('names the proposing cat once: a title that already leads with that name gets it in bold instead of a second copy', () => {
+      it('keeps the original family heading without a second generic approval toggle', () => {
         // F225 (session handoff): the summary is "Session handoff: <catId> → …" and the title cleaner turns the id into the name.
         const handoff = approvalItem('h', 'Session handoff: opus → codex: 交接说明');
         (handoff.approval as { sourceFeatureId: string; requesterCatId: string }).sourceFeatureId = 'F225';
@@ -487,10 +530,13 @@ describe('F322 待办 (the mailbox) on the unified read', () => {
         expect(occurrences(handoffText, '猫:opus')).toBe(1);
         expect(handoffText).toContain('猫:opus → codex: 交接说明');
         expect(rows()[0].querySelector('.font-semibold')?.textContent?.trim()).toBe('猫:opus');
-        const assignmentText = header(1)?.textContent ?? '';
-        expect(occurrences(assignmentText, '猫:opus')).toBe(1);
-        expect(assignmentText).toContain('派给 猫:codex：写文档');
-        expect(rows()[1].querySelector('.font-semibold')?.textContent?.trim()).toBe('猫:opus');
+        // F193 now renders the same original family card as Chat. Its own heading replaces the legacy row toggle.
+        expect(header(1)).toBeNull();
+        expect(occurrences(rows()[1].textContent ?? '', '猫:opus')).toBe(1);
+        expect(rows()[1].querySelector('[data-testid="approval-item-w"]')?.textContent).toContain('写文档');
+        const reject = rows()[1].querySelector<HTMLButtonElement>('[data-testid="reject-btn"]');
+        expect(reject).not.toBeNull();
+        expect(reject?.disabled).toBe(true); // no original publication proof in this panel-only fixture
       });
 
       it('a work row shows the owning cat’s avatar and "<cat> 的受托工作「…」" only from what the contract names', () => {
@@ -671,8 +717,8 @@ describe('F322 待办 (the mailbox) on the unified read', () => {
         act(() => toggle(0)?.click());
         expect(text('mailbox-place-note')).toBeNull();
         expect(openOriginal()).toHaveLength(0);
-        expect(text('mailbox-history')).toBe('已处理的 @你');
-        expect(text('mailbox-records')).toBe('审批记录');
+        expect(text('mailbox-history')).toBe('已处理的›');
+        expect(text('mailbox-records')).toBeNull();
       });
 
       it.each([

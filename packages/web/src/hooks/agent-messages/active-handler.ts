@@ -115,6 +115,7 @@ function handleActiveToolResult(msg: AgentMsg, threadId: string, ctx: ActiveCont
     toolUseId: msg.toolUseId,
     catId: msg.catId,
     content: msg.content,
+    toolInput: msg.toolInput,
     timestamp: Date.now(),
   });
   writeActiveToolEvent(msg, threadId, event);

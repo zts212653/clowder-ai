@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ExpandableProse } from '@/components/content-overflow';
 import { type CatData, formatCatName } from '@/hooks/useCatData';
+import { resolveAvatarUrl } from '@/lib/avatar-url';
 import { catColorVar } from '@/lib/cat-slug';
 import { isRowPrimaryActionTarget } from '@/utils/row-primary-action';
 
@@ -132,7 +133,7 @@ function CatRow({
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src={cat.avatar}
+          src={resolveAvatarUrl(cat.avatar)}
           alt={formatCatName(cat)}
           className="w-7 h-7 rounded-full shrink-0"
           onError={(e) => {

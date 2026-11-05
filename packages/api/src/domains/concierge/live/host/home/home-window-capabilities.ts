@@ -7,13 +7,13 @@ export class HomeWindowCapabilities {
     { ownerUserId: string; clientToken: string; expiresAt: number; socketId?: string }
   >();
 
-  constructor(private readonly isConnected: (ownerUserId: string, socketId: string) => boolean = () => false) {}
+  constructor(private readonly isConnected?: (ownerUserId: string, socketId: string) => boolean) {}
 
   register(ownerUserId: string, clientId: string, socketId?: string) {
     for (const [id, client] of this.clients)
       if (
         client.expiresAt <= Date.now() &&
-        (!client.socketId || !this.isConnected(client.ownerUserId, client.socketId))
+        (!client.socketId || !this.isConnected?.(client.ownerUserId, client.socketId))
       )
         this.clients.delete(id);
     if (this.clients.size >= 32 && !this.clients.has(clientId)) throw new Error('Home window capacity');
@@ -28,7 +28,8 @@ export class HomeWindowCapabilities {
       client &&
         client.ownerUserId === ownerUserId &&
         client.clientToken === clientToken &&
-        client.expiresAt > Date.now(),
+        client.expiresAt > Date.now() &&
+        (!client.socketId || !this.isConnected || this.isConnected(ownerUserId, client.socketId)),
     );
   }
 
@@ -46,6 +47,7 @@ export class HomeWindowCapabilities {
       // Discovery can ask a still-bound socket to renew over owner HTTP; execution requires a live token.
       (clientId === undefined || client.expiresAt > Date.now()) &&
       client.socketId &&
+      (!this.isConnected || this.isConnected(ownerUserId, client.socketId)) &&
       (!clientId || clientId === id)
         ? [client.socketId]
         : [],

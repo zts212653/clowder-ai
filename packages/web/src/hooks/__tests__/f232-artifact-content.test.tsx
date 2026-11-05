@@ -55,7 +55,11 @@ describe('F232 AC-A7 useArtifactContent', () => {
     vi.restoreAllMocks();
   });
 
-  it('uploads url 文本（站内）→ apiFetch 带 session cookie（hosted 跨域必须带 credentials，云端 P1）', async () => {
+  it.each([
+    'md',
+    'markdown',
+    'mdx',
+  ])('uploads %s → shared Markdown facts and authenticated fetching', async (extension) => {
     vi.mocked(apiFetch).mockResolvedValue({ ok: true, text: async () => '# Hello' } as Response);
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
@@ -65,8 +69,8 @@ describe('F232 AC-A7 useArtifactContent', () => {
         createElement(Probe, {
           artifact: {
             type: 'file',
-            name: 'x.md',
-            url: '/uploads/x.md',
+            name: `x.${extension}`,
+            url: `/uploads/x.${extension}`,
             createdAt: 1,
             catId: null,
             sourceMessageId: null,
@@ -84,7 +88,7 @@ describe('F232 AC-A7 useArtifactContent', () => {
     expect(last.isMarkdown).toBe(true);
     // 站内 uploads 走 apiFetch（credentials:'include'），不走裸 fetch——
     // 否则 hosted 路径 cafe→api.clowder-ai.com 跨域无 cookie → Access/会话 401 → error fallback
-    expect(vi.mocked(apiFetch)).toHaveBeenCalledWith('/uploads/x.md');
+    expect(vi.mocked(apiFetch)).toHaveBeenCalledWith(`/uploads/x.${extension}`);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -121,7 +125,7 @@ describe('F232 AC-A7 useArtifactContent', () => {
   it('repo 文件（ref + worktreeId）→ workspace API 返回正文', async () => {
     vi.mocked(apiFetch).mockResolvedValue({
       ok: true,
-      json: async () => ({ content: 'backlog body', mime: 'text/markdown' }),
+      json: async () => ({ content: 'document body', mime: 'text/markdown' }),
     } as Response);
     const states: S[] = [];
     await act(async () => {
@@ -129,8 +133,8 @@ describe('F232 AC-A7 useArtifactContent', () => {
         createElement(Probe, {
           artifact: {
             type: 'file',
-            name: 'BACKLOG.md',
-            ref: 'docs/ROADMAP.md',
+            name: 'example.md',
+            ref: 'docs/example.md',
             createdAt: 1,
             catId: null,
             sourceMessageId: null,
@@ -144,9 +148,9 @@ describe('F232 AC-A7 useArtifactContent', () => {
       await flush();
     });
     const last = states[states.length - 1];
-    expect(last.content).toBe('backlog body');
+    expect(last.content).toBe('document body');
     expect(vi.mocked(apiFetch)).toHaveBeenCalledWith(
-      expect.stringContaining('/api/workspace/file?worktreeId=wt1&path=docs%2FROADMAP.md'),
+      expect.stringContaining('/api/workspace/file?worktreeId=wt1&path=docs%2Fexample.md'),
     );
   });
 

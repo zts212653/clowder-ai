@@ -17,9 +17,9 @@ describe('the dictionary is the *.shell-copy.ts files beside their pages — no 
     const withTests = listShellCopyFiles(SHELL, { includeTests: true }).map((file) => relative(FIXTURES, file));
     expect(withTests).toEqual(
       expect.arrayContaining([
-        'shell-copy-ok/alpha.shell-copy.ts',
-        'shell-copy-ok/beta.shell-copy.ts',
-        'shell-copy-stray/stray.shell-copy.ts',
+        join('shell-copy-ok', 'alpha.shell-copy.ts'),
+        join('shell-copy-ok', 'beta.shell-copy.ts'),
+        join('shell-copy-stray', 'stray.shell-copy.ts'),
       ]),
     );
   });

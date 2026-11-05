@@ -89,6 +89,7 @@ const FIXED_API_FIXTURES = new Map([
           displayName: '小团团·砚砚',
           color: { primary: 'var(--color-codex-primary)', secondary: 'var(--color-codex-bg)' },
           mentionPatterns: ['@codex-terra'],
+          carrier: 'cli',
           clientId: 'openai',
           defaultModel: 'gpt-5.6-terra',
           avatar: '',

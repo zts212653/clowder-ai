@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { useShellCopy } from '../shell-copy';
+import { MailboxPersonalButton } from './MailboxPersonalButton';
 import { mailboxEntryCopy } from './mailbox-entry.shell-copy';
 import type { useMailboxPersonalPreferences } from './use-mailbox-personal-preferences';
 
@@ -21,15 +22,16 @@ export function MailboxPersonalNotice({ personal }: { personal: ReturnType<typeo
       {personal.undo ? (
         <div role="status" className="mb-3 flex flex-wrap items-center gap-2 text-xs">
           <span>{t.undoNotice}</span>
-          <button
+          <MailboxPersonalButton
             type="button"
             data-testid="mailbox-personal-undo"
-            disabled={personal.actions?.disabled}
+            refusal={personal.undoRefusal}
+            label={t.undo}
             className="shell-nav-row shell-focusable rounded px-2 py-1"
             onClick={() => void personal.undoLast()}
           >
             {t.undo}
-          </button>
+          </MailboxPersonalButton>
           <button
             type="button"
             aria-label={t.dismiss}

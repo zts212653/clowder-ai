@@ -39,7 +39,7 @@ export async function verifyNarrowCurrentAdoption(work, catalog) {
   await work.getByLabel('选择阅读版本', { exact: true }).selectOption(refIdentity(current.nodeRef));
   await work.getByRole('button', { name: '改动与依据', exact: true }).click();
   await work.locator('.exploration-adoption > summary').click();
-  assert((await work.getByRole('status', { name: '当前沿用', exact: true }).innerText()).includes(current.title));
+  assert((await work.getByRole('status', { name: '当前采用', exact: true }).innerText()).includes(current.title));
   await chooseExplorationVersion(work, 'v3');
   await work.getByRole('button', { name: '结果与案例', exact: true }).click();
 }

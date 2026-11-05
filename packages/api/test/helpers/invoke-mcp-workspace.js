@@ -7,8 +7,8 @@ import { PassThrough } from 'node:stream';
 import { namedAlphaEnvironment } from '../../../../scripts/lib/alpha-coordinates.mjs';
 import { CodexAgentService } from '../../dist/domains/cats/services/agents/providers/CodexAgentService.js';
 import { resolveClaudeMcpConfig } from '../../dist/domains/cats/services/agents/providers/claude-mcp-config.js';
-import { writeMcpConfigFile } from '../../dist/domains/cats/services/agents/providers/kimi-config.js';
 import { writeOpenCodeRuntimeConfig } from '../../dist/domains/cats/services/agents/providers/opencode-config-writer.js';
+import { upstreamMcpServersFromArgs } from './direct-mcp-contract.js';
 import { fakeL0Compiler } from './fake-l0-compiler.js';
 
 export const memberIds = ['codex', 'opus', 'kimi', 'glm52'];
@@ -157,24 +157,9 @@ async function codexConfig(_f, workingDirectory) {
   }))
     output.push(event);
   if (!captured) throw new Error(JSON.stringify(output));
-  const result = {};
-  for (const value of captured) {
-    const match = /^mcp_servers\.([^.]+)\.enabled=true$/.exec(value);
-    if (!match) continue;
-    const name = match[1];
-    const field = (key) => {
-      const prefix = `mcp_servers.${name}.${key}=`;
-      const value = captured.find((v) => v.startsWith(prefix));
-      return value ? JSON.parse(value.slice(prefix.length)) : undefined;
-    };
-    const env = {};
-    for (const key of [...Object.keys(callbackFixture), 'ALLOWED_WORKSPACE_DIRS']) {
-      const value = field(`env.${key}`);
-      if (value !== undefined) env[key] = value;
-    }
-    result[name] = { args: field('args') ?? [], command: field('command'), env };
-  }
-  return result;
+  return Object.fromEntries(
+    Object.entries(upstreamMcpServersFromArgs(captured)).filter(([, server]) => server.enabled),
+  );
 }
 
 export const providers = {
@@ -187,15 +172,6 @@ export const providers = {
         callbackEnv: { ...callbackFixture, CAT_CAFE_CAT_ID: 'opus' },
       })
     ).servers,
-  kimi: async (f, workingDirectory) => {
-    const path = await writeMcpConfigFile(workingDirectory ?? '', f.mcpServerPath, {
-      ...callbackFixture,
-      CAT_CAFE_CAT_ID: 'kimi',
-    });
-    const config = JSON.parse(readFileSync(path, 'utf8')).mcpServers;
-    rmSync(join(path, '..'), { recursive: true, force: true });
-    return config;
-  },
   opencode: async (f, workingDirectory) => {
     const path = await writeOpenCodeRuntimeConfig(
       f.runtime,

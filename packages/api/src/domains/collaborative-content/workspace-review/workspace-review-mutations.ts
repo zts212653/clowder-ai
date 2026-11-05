@@ -38,7 +38,9 @@ export function appendWorkspaceSourceHistory(
   const byRevision = new Map<string, WorkspaceContentSource>();
   for (const snapshot of [...(review.sourceHistory ?? [review.source]), source])
     byRevision.set(
-      snapshot.kind === 'video-project' ? `${snapshot.ownerRevision}:${snapshot.revision}` : snapshot.revision,
+      snapshot.kind === 'video-project' || snapshot.kind === 'collective-artifact'
+        ? `${snapshot.ownerRevision}:${snapshot.revision}`
+        : snapshot.revision,
       snapshot,
     );
   const protectedRevisions = new Set([

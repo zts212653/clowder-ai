@@ -16,7 +16,7 @@ async function fixture(t, canonicalPort = true) {
   const publication = f.messages.append({
     userId: 'owner',
     threadId,
-    catId: 'codex-sol',
+    from: { kind: 'agent', catId: 'codex-sol' },
     content: '交回家清单',
     mentions: ['codex'],
     timestamp: Date.now(),

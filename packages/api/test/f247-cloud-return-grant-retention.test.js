@@ -6,10 +6,14 @@ import {
   RedisCloudReturnGrantStore,
 } from '../dist/domains/cats/services/cloud-bridge/cloud-return-grant.js';
 
+/** A Host-minted message id created an hour from now: provably younger than any store's epoch. */
+const hostMessageId = (sequence) =>
+  `${String(Date.now() + 3_600_000).padStart(16, '0')}-${String(sequence).padStart(6, '0')}-abcdef01`;
+
 const claims = {
   threadId: 'thread-f247',
   userId: 'alice',
-  sourceMessageId: 'source-f247',
+  sourceMessageId: hostMessageId(1),
   dispatchInvocationId: 'dispatch-f247',
   targetCatId: 'gpt-pro',
 };
@@ -35,6 +39,9 @@ describe('F247 server-custodied grant retention', () => {
       async get(key) {
         return values.get(key) ?? null;
       },
+      async scan() {
+        return ['0', []];
+      },
       async eval(...args) {
         evalCalls.push(args);
         return 1;
@@ -43,7 +50,8 @@ describe('F247 server-custodied grant retention', () => {
     const store = new RedisCloudReturnGrantStore(redis);
 
     assert.deepEqual(await store.issue(claims), { ok: true, status: 'issued' });
-    assert.deepEqual(setCalls[0].slice(2), ['PX', CloudReturnGrantRetentionMs, 'NX']);
+    const grantWrite = setCalls.find(([key]) => key.startsWith('cloud-bridge:return-grant:'));
+    assert.deepEqual(grantWrite.slice(2), ['PX', CloudReturnGrantRetentionMs, 'NX']);
     assert.deepEqual(await store.issue(claims), { ok: true, status: 'existing' });
     assert.equal(evalCalls[0].at(-1), CloudReturnGrantRetentionMs);
 
@@ -84,8 +92,16 @@ describe('F247 server-custodied grant retention', () => {
 
   it('fails issuance when an existing Redis grant expires before its retention refresh', async () => {
     const redis = {
-      async set() {
+      // Nothing persisted before (F202 h3c-2); the source binding is granted; the grant itself already
+      // exists and then expires before its retention refresh.
+      async get() {
         return null;
+      },
+      async scan() {
+        return ['0', []];
+      },
+      async set(key) {
+        return key.startsWith('cloud-bridge:return-source:') ? 'OK' : null;
       },
       async eval() {
         return 0;

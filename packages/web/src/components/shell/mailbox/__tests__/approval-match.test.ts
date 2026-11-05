@@ -34,15 +34,15 @@ const GENERIC: ApprovalHubItem = {
   detail: {},
   inlineApprovable: true,
 };
-const MEETING: ApprovalHubItem = {
+const VERSIONED: ApprovalHubItem = {
   ...base,
   ownerUserId: OWNER,
-  proposalId: 'p-meeting',
-  sourceFeatureId: 'F292',
-  decisionMode: 'meeting-intake',
-  summary: '整理会议：Weekly sync',
-  detail: { revision: 3, judgmentState: 'unresolved' },
-  inlineApprovable: false,
+  proposalId: 'p-versioned',
+  sourceFeatureId: 'F221',
+  decisionMode: 'approve-reject',
+  summary: '保存品味',
+  detail: { revision: 3, content: 'a preference' },
+  inlineApprovable: true,
 };
 const CONFLICT = {
   version: 1,
@@ -97,7 +97,7 @@ describe('matchHostedApproval', () => {
   describe('the same decision, whichever producer owns it', () => {
     it.each([
       GENERIC,
-      MEETING,
+      VERSIONED,
       ENTITY,
       PERSON,
     ])('matches $sourceFeatureId when the store holds the same decision', (item) => {
@@ -113,7 +113,7 @@ describe('matchHostedApproval', () => {
 
     it('finds the right one among others, and does not confuse a different producer with the same proposal id', () => {
       const lookalike: ApprovalHubItem = { ...GENERIC, sourceFeatureId: 'F193' };
-      expect(match(GENERIC, [MEETING, lookalike, PERSON, GENERIC]).kind).toBe('unmatched');
+      expect(match(GENERIC, [VERSIONED, lookalike, PERSON, GENERIC]).kind).toBe('unmatched');
       expect(match(GENERIC, [lookalike])).toMatchObject({ kind: 'unmatched', reason: 'not_in_store' });
     });
 
@@ -172,16 +172,13 @@ describe('matchHostedApproval', () => {
   });
 
   describe("the producer's own credentials: equal createdAt and lifecycle are not enough", () => {
-    it('F292: a different revision is not the same decision, and a missing or unreadable one cannot be told', () => {
-      expect(match(MEETING, [withDetail(MEETING, { revision: 4 })])).toMatchObject({
+    it('generic detail: a changed or missing revision is not the same decision', () => {
+      expect(match(VERSIONED, [withDetail(VERSIONED, { revision: 4 })])).toMatchObject({
         kind: 'unmatched',
         reason: 'credentials',
-        field: 'revision',
+        field: 'detail',
       });
-      expect(match(MEETING, [withDetail(MEETING, { revision: undefined })])).toMatchObject({ reason: 'credentials' });
-      expect(
-        match(withDetail(MEETING, { revision: 'three' }), [withDetail(MEETING, { revision: 'three' })]),
-      ).toMatchObject({
+      expect(match(VERSIONED, [withDetail(VERSIONED, { revision: undefined })])).toMatchObject({
         reason: 'credentials',
       });
     });
@@ -245,14 +242,14 @@ describe('isHostableApproval', () => {
     ['an inline-approvable generic proposal', GENERIC, true],
     ['an F260 conflict that can be resolved inline', ENTITY, true],
     ['an F276 claim selection', PERSON, true],
-    ['an F292 meeting intake, which is not inline-approvable but decides in its own card', MEETING, true],
+    ['a generic producer with versioned detail', VERSIONED, true],
   ])('hosts %s', (_name, item, expected) => {
     expect(isHostableApproval(asRead(item))).toBe(expected);
   });
 
   it('does not host what is already settled', () => {
     expect(isHostableApproval(asRead({ ...GENERIC, resolution: 'accepted' }))).toBe(false);
-    expect(isHostableApproval(asRead({ ...MEETING, resolution: 'rejected' }))).toBe(false);
+    expect(isHostableApproval(asRead({ ...VERSIONED, resolution: 'rejected' }))).toBe(false);
   });
 
   it('does not host something that cannot be decided inline and is not one of the producers with its own decision card', () => {
@@ -262,6 +259,11 @@ describe('isHostableApproval', () => {
   it('does not host a producer whose decision belongs on its own origin card', () => {
     const runtime: ApprovalHubItem = { ...GENERIC, sourceFeatureId: 'F306', inlineApprovable: true };
     expect(isHostableApproval(asRead(runtime))).toBe(false);
+  });
+
+  it('does not host the retired meeting-intake producer', () => {
+    const old = { ...GENERIC, sourceFeatureId: 'F292' as ApprovalHubItem['sourceFeatureId'] };
+    expect(isHostableApproval(asRead(old))).toBe(false);
   });
 
   it('does not host a producer this build does not know', () => {
@@ -278,7 +280,7 @@ describe('isHostableApproval', () => {
  */
 describe('addressed but unreadable approval data is unmatched, never a throw', () => {
   const decodedApproval = (change: Record<string, unknown>): UnifiedAttentionVisibleApproval => {
-    const visible = asRead(MEETING);
+    const visible = asRead(VERSIONED);
     const source = { status: 'available', exhaustiveness: 'complete' };
     const body = parseUnifiedAttentionRead({
       version: 1,
@@ -289,9 +291,9 @@ describe('addressed but unreadable approval data is unmatched, never a throw', (
       consistency: { state: 'verified', reasons: [] },
       items: [
         {
-          decisionRef: 'approval:F292:p-meeting',
+          decisionRef: 'approval:F221:p-versioned',
           kind: 'approval',
-          summary: MEETING.summary,
+          summary: VERSIONED.summary,
           approval: { ...visible, ...change },
           linkedNeedsMe: [],
         },
@@ -302,13 +304,13 @@ describe('addressed but unreadable approval data is unmatched, never a throw', (
     if (!body?.items[0].approval) throw new Error('the existing decoder did not admit this addressed approval');
     return body.items[0].approval;
   };
-  const ask = (read: UnifiedAttentionVisibleApproval, store: readonly ApprovalHubItem[] = [MEETING]) =>
+  const ask = (read: UnifiedAttentionVisibleApproval, store: readonly ApprovalHubItem[] = [VERSIONED]) =>
     matchHostedApproval({ read, readOwnerUserId: OWNER, storeItems: store, now: NOW });
-  const broken = (change: Record<string, unknown>): ApprovalHubItem => ({ ...MEETING, ...change }) as ApprovalHubItem;
+  const broken = (change: Record<string, unknown>): ApprovalHubItem => ({ ...VERSIONED, ...change }) as ApprovalHubItem;
 
   it('still matches, and returns the store object, for the fully readable version of the same row', () => {
     const result = ask(decodedApproval({}));
-    expect(result.kind === 'matched' && result.item).toBe(MEETING);
+    expect(result.kind === 'matched' && result.item).toBe(VERSIONED);
   });
 
   it.each([
@@ -332,7 +334,7 @@ describe('addressed but unreadable approval data is unmatched, never a throw', (
     ['no createdAt', { createdAt: undefined }, 'identity'],
     ['an expiresAt that is not a time', { expiresAt: 'tomorrow' }, 'version'],
   ])('a store copy with %s is unmatched (%s), not a throw', (_name, change, reason) => {
-    const read = asRead(MEETING);
+    const read = asRead(VERSIONED);
     expect(() => ask(read, [broken(change)])).not.toThrow();
     expect(ask(read, [broken(change)])).toMatchObject({ kind: 'unmatched', reason });
   });

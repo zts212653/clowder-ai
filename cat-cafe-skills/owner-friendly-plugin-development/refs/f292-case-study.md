@@ -62,5 +62,5 @@ Host 安装器只解包 npm tarball，不替插件安装运行依赖。开发仓
 - Feature truth：`docs/features/F292-feishu-meeting-intake-plugin.md`
 - Public contract / official plugin：`zts212653/clowder-ai-plugins#23`
 - Runtime-closure remediation：`zts212653/clowder-ai-plugins#31`
-- In-card owner auth：`zts212653/cat-cafe#3631`
+- In-card owner auth：`zts212653/clowder-ai#3631`
 - Thread：`[thread-id]`

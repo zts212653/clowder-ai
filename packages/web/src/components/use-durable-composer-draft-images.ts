@@ -121,6 +121,7 @@ interface SaveCurrentDraftRef {
 
 interface DurableComposerDraftImageStateOptions {
   threadId?: string;
+  ownerIdRef: MutableRefObject<number>;
   setImages: Dispatch<SetStateAction<File[]>>;
   setIsPreparingImages: Dispatch<SetStateAction<boolean>>;
   saveCurrentDraftRef: SaveCurrentDraftRef;
@@ -128,6 +129,7 @@ interface DurableComposerDraftImageStateOptions {
 
 export function useDurableComposerDraftImageState({
   threadId,
+  ownerIdRef,
   setImages,
   setIsPreparingImages,
   saveCurrentDraftRef,
@@ -174,6 +176,9 @@ export function useDurableComposerDraftImageState({
   }, [restoreDraftImages, threadId]);
   const discardUnrestoredImages = useCallback(async () => {
     if (!threadId || unresolvedImageUrlsRef.current.length === 0) return;
+    // P1 R9: Capture owner before async save
+    const ownerId = ownerIdRef.current;
+    const capturedThreadId = threadId;
     const priorUrls = imageUrlsRef.current;
     const discarded = new Set(unresolvedImageUrlsRef.current);
     imageUrlsRef.current = priorUrls.filter((url) => !discarded.has(url));
@@ -185,12 +190,19 @@ export function useDurableComposerDraftImageState({
     } catch {
       persisted = false;
     }
+    // P1 R9: Validate owner after async save - rollback only if still same owner
     if (!persisted) {
-      imageUrlsRef.current = priorUrls;
-      applyCoverage(threadImageDrafts.get(threadId) ?? []);
+      if (ownerId === ownerIdRef.current && capturedThreadId === threadId) {
+        imageUrlsRef.current = priorUrls;
+        applyCoverage(threadImageDrafts.get(threadId) ?? []);
+      }
+      // If owner changed, old rollback must not pollute new owner state
     }
-    setIsPreparingImages(false);
-  }, [applyCoverage, saveCurrentDraftRef, setIsPreparingImages, threadId]);
+    // P1 R9: Only clear preparing if still same owner
+    if (ownerId === ownerIdRef.current && capturedThreadId === threadId) {
+      setIsPreparingImages(false);
+    }
+  }, [applyCoverage, ownerIdRef, saveCurrentDraftRef, setIsPreparingImages, threadId]);
   const removeImage = useCallback(
     (index: number) => removeDraftImage(index, imageUrlsRef, setImages, applyCoverage),
     [applyCoverage, setImages],

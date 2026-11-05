@@ -39,6 +39,17 @@ export function caseAction(overrides = {}) {
     expectedChange: 'Repair exact evidence-reader drilldown behavior',
     costAndRollback: 'One reversible PR; revert the merge commit',
     withdrawalCondition: 'Withdraw if owner truth or exact target changes',
+    decisionExplanation: {
+      schemaVersion: 1,
+      expectedChange: 'Repair exact evidence-reader drilldown behavior',
+      beforeSummary: 'Repo-relative drill refs fail from package working directories.',
+      afterSummary: 'The same exact ref opens from repository root and package working directories.',
+      changeSetSummary: 'Resolve exact drill refs from the repository root without rewriting stored refs.',
+      attributionBoundary: 'This proposal addresses cwd resolution only; malformed source refs remain invalid.',
+      independentVerification: 'Reopen the same ref from both working directories on the exact candidate.',
+      rejectedCandidates: ['Persist machine-local absolute paths in source refs.'],
+      costAndRollback: 'One reversible PR; revert the merge commit',
+    },
     ...overrides,
   };
 }

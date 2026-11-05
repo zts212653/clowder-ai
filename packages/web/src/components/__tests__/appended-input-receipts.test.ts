@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { dispatchReadText, dispatchReceiptDisplay } from '@/lib/dispatch-receipt-display';
 import type { ChatMessage } from '@/stores/chat-types';
-import { projectAppendedInputReceipts } from '../AppendedInputReceipts';
+import { appendedInputReadDisplay, projectAppendedInputReceipts } from '../AppendedInputReceipts';
 
 const initial: ChatMessage = {
   id: 'source-initial',
@@ -39,6 +40,62 @@ const response: ChatMessage = {
 };
 
 describe('projectAppendedInputReceipts', () => {
+  it('shows a confirmed native write as waiting for read while its internal turn is unfinished', () => {
+    const receipt = dispatchReceiptDisplay(
+      {
+        targetId: 'cat-1',
+        statusMessageId: response.id,
+        phase: 'dispatched',
+        dispatchedAt: appended.timestamp,
+        appendAcceptance: 'written',
+        inputRead: { status: 'pending' },
+      },
+      true,
+    );
+    expect(receipt.state).toBe('pending');
+    expect(dispatchReadText(receipt, true)).toBe('已收到，等读取确认');
+  });
+
+  it('does not call an uncertain provider handoff received in the response receipt', () => {
+    const source: ChatMessage = {
+      ...appended,
+      lifecycle: {
+        kind: 'input',
+        orderKey: '2:source',
+        dispatchRefs: [
+          {
+            targetId: 'cat-1',
+            statusMessageId: response.id,
+            phase: 'dispatched',
+            dispatchedAt: appended.timestamp,
+            inputRead: { status: 'pending' },
+          },
+        ],
+        appendFailures: [
+          {
+            targetId: 'cat-1',
+            responseMessageId: response.id,
+            invocationId: 'invocation-1',
+            reason: 'exception',
+            acceptance: 'unknown',
+            at: appended.timestamp + 1,
+          },
+        ],
+      },
+    };
+    expect(dispatchReadText(appendedInputReadDisplay(source, response), true)).toBe('正在核对收到没…');
+    if (source.lifecycle?.kind !== 'input' || !source.lifecycle.appendFailures?.[0]) {
+      throw new Error('The original input must retain its exact handoff failure');
+    }
+    const checked: ChatMessage = {
+      ...source,
+      lifecycle: {
+        ...source.lifecycle,
+        appendFailures: [{ ...source.lifecycle.appendFailures[0], checkedAt: appended.timestamp + 2 }],
+      },
+    };
+    expect(dispatchReadText(appendedInputReadDisplay(checked, response), true)).toBe('已送出，没确认收到');
+  });
   it('projects only inputs added after the initial dispatch input', () => {
     expect(projectAppendedInputReceipts(response, [appended, initial])).toEqual([appended]);
   });

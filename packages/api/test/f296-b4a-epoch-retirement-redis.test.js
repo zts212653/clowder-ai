@@ -15,7 +15,7 @@ import { BasicTracerProvider, InMemorySpanExporter, SimpleSpanProcessor } from '
 import Redis from 'ioredis';
 import { assertRedisIsolationOrThrow, redisIsolationSkipReason } from './helpers/redis-test-helpers.js';
 import './helpers/setup-cat-registry.js';
-import { artifact, intake } from './memory/asr-person-memory-contract-fixture.js';
+import { memorySceneFixture } from './memory/asr-person-memory-contract-fixture.js';
 
 const TEST_PREFIX = `test:f296-b4a-epoch-retirement:${Date.now()}:`;
 const telemetryExporter = new InMemorySpanExporter();
@@ -224,16 +224,7 @@ describe(
     }
 
     async function writeOpportunityScene(now) {
-      const { buildAsrPersonMemoryDynamicScenes } = await import(
-        '../dist/domains/signal-intake/AsrPersonMemorySceneBuilder.js'
-      );
-      const scene = buildAsrPersonMemoryDynamicScenes({
-        intake: { ...intake, updatedAt: now - 10 },
-        artifact,
-        threadId: 'thread-f296-b4a',
-        consumerCatId: 'codex',
-        now,
-      })[0];
+      const scene = await memorySceneFixture({ now, threadId: 'thread-f296-b4a', consumerCatId: 'codex' });
       return {
         scene,
         source: {

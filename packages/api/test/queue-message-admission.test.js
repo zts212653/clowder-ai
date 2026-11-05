@@ -35,6 +35,23 @@ function queueInput(idempotencyKey, content = idempotencyKey) {
 }
 
 describe('ADR-043 atomic memory message + Queue admission', () => {
+  it('keeps a host-reserved source identity through atomic admission and replay', async () => {
+    const { generateSortableId } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const reservedId = generateSortableId(100);
+    const ledger = new InMemoryQueueLedgerStore();
+    const queue = new InvocationQueue(ledger);
+    const messages = new MessageStore();
+    const source = { ...message('reserved-source'), reservedId };
+    const first = await queue.send(messages, source, queueInput('reserved-source'));
+    assert.equal(first.outcome, 'enqueued');
+    assert.equal(first.message.id, reservedId);
+    assert.equal(first.entries[0].payload.messageId, reservedId);
+    const replay = await queue.send(messages, source, queueInput('reserved-source'));
+    assert.equal(replay.deduped, true);
+    assert.equal(replay.message.id, reservedId);
+    assert.equal((await ledger.list('thread-admission')).length, 1);
+  });
+
   it('binds the single source row to the exact stored message and replays without duplication', async () => {
     const ledger = new InMemoryQueueLedgerStore();
     const queue = new InvocationQueue(ledger);

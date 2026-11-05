@@ -2,6 +2,8 @@ import type { MessageDispositionPreferenceSnapshot } from '@cat-cafe/shared';
 import React from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { writeShellLanguage } from '@/components/shell/shell-language';
+import { writeShellPresentation } from '@/components/shell/shell-presentation';
 import {
   type MessageDispositionPreferenceController,
   useMessageDispositionPreference,
@@ -42,6 +44,8 @@ describe('useMessageDispositionPreference settlement', () => {
   afterEach(() => {
     React.act(() => root.unmount());
     container.remove();
+    writeShellLanguage('zh');
+    writeShellPresentation('classic');
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
 
@@ -62,6 +66,21 @@ describe('useMessageDispositionPreference settlement', () => {
     expect(latest?.loading).toBe(false);
     expect(latest?.error).toBeNull();
     expect(latest?.snapshot).toEqual(SNAPSHOT);
+  });
+
+  it('localizes HTTP failures and re-renders their copy without issuing another preference request', async () => {
+    React.act(() => {
+      writeShellPresentation('v2');
+      writeShellLanguage('en');
+    });
+    apiFetchMock.mockResolvedValueOnce(new Response('{}', { status: 503 }));
+    await React.act(async () => {
+      await latest?.setPreference('global', 'next_work');
+    });
+    expect(latest?.error).toBe('Send mode preferences could not be saved (503)');
+    React.act(() => writeShellLanguage('zh'));
+    expect(latest?.error).toBe('偏好保存失败 (503)');
+    expect(apiFetchMock).toHaveBeenCalledTimes(1);
   });
 
   it.each([

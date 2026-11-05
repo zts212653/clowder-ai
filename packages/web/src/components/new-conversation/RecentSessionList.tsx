@@ -9,7 +9,6 @@ import { sessionActivity, sessionActivityDetail, sessionProjectName } from './se
 export interface RecentSession {
   sessionId: string;
   firstPrompt: string;
-  recentPrompt?: string;
   projectPath: string;
   lastActivityAt: number;
   turnCount: number | null;
@@ -95,8 +94,8 @@ export function RecentSessionList({
       {rows.length > 0 && (
         <ul className="rounded-xl border border-[var(--shell-hairline)] p-1">
           {rows.map((row) => {
-            const label =
-              row.firstPrompt || (row.recentPrompt ? `${copy.recentPrompt}: ${row.recentPrompt}` : copy.unnamed);
+            const boundTitle = row.boundThread?.title?.trim() || copy.untitledThread;
+            const label = row.firstPrompt || (row.boundThread ? boundTitle : copy.unnamed);
             const activity =
               checkedSession?.sessionId === row.sessionId ? checkedSession.lastActivityAt : row.lastActivityAt;
             return (
@@ -118,12 +117,14 @@ export function RecentSessionList({
                       {label}
                     </span>
                     <span
-                      className="mt-1 block truncate text-xs text-[var(--shell-muted)]"
+                      className="mt-1 flex min-w-0 items-center gap-1 text-xs text-[var(--shell-muted)]"
                       title={`${row.projectPath} · ${sessionActivityDetail(activity, language, copy.unknownTime)}`}
                     >
-                      {sessionProjectName(row.projectPath)} · {sessionActivity(activity, language, copy.unknownTime)}
-                      {row.turnCount != null && ` · ${row.turnCount} ${copy.turns}`}
-                      {!row.firstPrompt && ` · ${copy.unknownFirst}`}
+                      <span className="min-w-0 truncate">{sessionProjectName(row.projectPath)}</span>
+                      <span className="shrink-0">
+                        · {sessionActivity(activity, language, copy.unknownTime)}
+                        {row.turnCount != null && ` · ${row.turnCount} ${copy.turns}`}
+                      </span>
                     </span>
                   </span>
                 </label>
@@ -137,9 +138,10 @@ export function RecentSessionList({
                         if (row.boundThread) onNavigate(row.boundThread.id);
                       }}
                     >
-                      {copy.boundPrefix}
-                      {row.boundThread.title ?? copy.unnamed}
-                      {copy.boundSuffix} · {copy.open}
+                      {label === boundTitle
+                        ? copy.boundSameThread
+                        : `${copy.boundPrefix}${boundTitle}${copy.boundSuffix}`}{' '}
+                      · {copy.open}
                     </button>
                   ) : (
                     <p className="mb-2 ml-10 text-xs text-[var(--shell-muted)]">{copy.bound}</p>

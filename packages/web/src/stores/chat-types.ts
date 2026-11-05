@@ -4,6 +4,7 @@ import type {
   ContextAttachment,
   CrossThreadCoordination,
   CustodyOfferV1,
+  EvolutionUseSourceV1,
   LifecycleActiveRun,
   LifecycleAppendAction,
   LifecycleStoredMessageMetadata,
@@ -17,6 +18,7 @@ import type {
   QueueAuthorIntentReceipt,
   QueueRecoveryAction,
   ReplyPreview,
+  RichBlock,
   SchedulerMessageExtra,
   ThreadArtifactDTO,
   TurnExecutionMessageProjection,
@@ -66,6 +68,8 @@ export interface TokenUsage {
 }
 
 export interface ChatMessageMetadata {
+  /** Persisted CLI diagnosis; history and live events also project it into extra. */
+  cliDiagnostics?: CliDiagnostics;
   executionAccount?: import('@cat-cafe/shared').ExecutionAccountSnapshot;
   provider: string;
   model: string;
@@ -110,6 +114,8 @@ export interface ToolEvent {
   type: 'tool_use' | 'tool_result';
   label: string;
   detail?: string;
+  /** Terminal input for the same native tool call, separate from its output detail. */
+  inputDetail?: string;
   resultMeta?: string;
   /** Native provider pair key; Hub UI event ids may differ between use/result rows. */
   toolUseId?: string;
@@ -118,162 +124,29 @@ export interface ToolEvent {
   timestamp: number;
 }
 
-/** F22: Rich block types for frontend rendering */
-export type RichBlockKind =
-  | 'card'
-  | 'diff'
-  | 'checklist'
-  | 'media_gallery'
-  | 'audio'
-  | 'interactive'
-  | 'html_widget'
-  | 'file';
-
-/** F066 Phase 4: Card action button */
-export interface CardAction {
-  label: string;
-  action: string;
-  payload?: Record<string, unknown>;
-}
-
-export interface RichCardBlock {
-  id: string;
-  kind: 'card';
-  v: 1;
-  title: string;
-  bodyMarkdown?: string;
-  tone?: 'info' | 'success' | 'warning' | 'danger';
-  fields?: Array<{ label: string; value: string }>;
-  /** F066 Phase 4: Optional action buttons */
-  actions?: CardAction[];
-  /** F174 D2b-1: opaque metadata for sub-renderer detection (e.g. callback_auth_failure) */
-  meta?: Record<string, unknown>;
-}
-
-export interface RichDiffBlock {
-  id: string;
-  kind: 'diff';
-  v: 1;
-  filePath: string;
-  diff: string;
-  languageHint?: string;
-}
-
-export interface RichChecklistBlock {
-  id: string;
-  kind: 'checklist';
-  v: 1;
-  title?: string;
-  items: Array<{ id: string; text: string; checked?: boolean }>;
-}
-
-export interface RichMediaGalleryBlock {
-  id: string;
-  kind: 'media_gallery';
-  v: 1;
-  title?: string;
-  items: Array<{ url: string; alt?: string; caption?: string }>;
-}
-
-/** F34: Audio block for TTS playback.
- *  F34-b: `text` = voice message (cat "spoke" it). */
-export interface RichAudioBlock {
-  id: string;
-  kind: 'audio';
-  v: 1;
-  url: string;
-  /** F34-b: Voice message text. Present = voice message style. */
-  text?: string;
-  title?: string;
-  durationSec?: number;
-  mimeType?: string;
-}
-
-/** F155: Direct action for interactive options that bypass the chat message pipeline */
-export interface OptionAction {
-  type: 'callback';
-  endpoint: string;
-  payload?: Record<string, unknown>;
-}
-
-/** F096: Interactive block option */
-export interface InteractiveOption {
-  id: string;
-  label: string;
-  emoji?: string;
-  /** SVG icon name from the café icon set — preferred over emoji */
-  icon?: string;
-  description?: string;
-  level?: number;
-  group?: string;
-  /** When true, selecting this option shows a text input for custom user input */
-  customInput?: boolean;
-  /** Placeholder text for the custom input field */
-  customInputPlaceholder?: string;
-  /** F155: When present, clicking calls the endpoint directly instead of sending a chat message */
-  action?: OptionAction;
-}
-
-/** F096: Interactive rich block — user can select/confirm within the block */
-export interface RichInteractiveBlock {
-  id: string;
-  kind: 'interactive';
-  v: 1;
-  interactiveType: 'select' | 'multi-select' | 'card-grid' | 'confirm';
-  title?: string;
-  description?: string;
-  options: InteractiveOption[];
-  maxSelect?: number;
-  allowRandom?: boolean;
-  messageTemplate?: string;
-  disabled?: boolean;
-  selectedIds?: string[];
-  /** Set false when adjacent blocks belong to separate producer items and must submit independently. */
-  autoGroup?: boolean;
-  /** Phase C: blocks sharing the same groupId are submitted together */
-  groupId?: string;
-}
-
-/** F088 Phase J: File attachment block */
-export interface RichFileBlock {
-  id: string;
-  kind: 'file';
-  v: 1;
-  url: string;
-  fileName: string;
-  mimeType?: string;
-  fileSize?: number;
-}
-
-/** F120 Phase C: Inline HTML/JS widget rendered in sandboxed iframe (srcdoc) */
-export interface RichHtmlWidgetBlock {
-  id: string;
-  kind: 'html_widget';
-  v: 1;
-  /** Complete HTML document or fragment to render */
-  html: string;
-  /** Optional title displayed above the widget */
-  title?: string;
-  /** iframe height in px (default: 300) */
-  height?: number;
-}
-
-export type RichBlock =
-  | RichCardBlock
-  | RichDiffBlock
-  | RichChecklistBlock
-  | RichMediaGalleryBlock
-  | RichAudioBlock
-  | RichInteractiveBlock
-  | RichHtmlWidgetBlock
-  | RichFileBlock;
+/** F22 presentation types come from the same language used by every consumer. */
+export type {
+  CardAction,
+  InteractiveOption,
+  OptionAction,
+  RichAudioBlock,
+  RichBlock,
+  RichBlockKind,
+  RichCardBlock,
+  RichChecklistBlock,
+  RichDiffBlock,
+  RichFileBlock,
+  RichHtmlWidgetBlock,
+  RichInteractiveBlock,
+  RichMediaGalleryBlock,
+} from '@cat-cafe/shared';
 
 /** F97: External connector source info (only when type='connector') */
 export interface ConnectorSourceData {
   connector: string;
   label: string;
   icon: string;
-  url?: string;
+  themeColor?: string;
   /** F098-C2: Connector-specific metadata (e.g. targets for multi-mention) */
   meta?: Record<string, unknown>;
   /** F134: Group chat sender identity (message-level binding) */
@@ -300,6 +173,8 @@ export type MessagePublicationOrigin = Pick<
 
 export interface ChatMessage {
   id: string;
+  /** View-only Queue projection; never persisted as a second History record. */
+  queuedEntryId?: string;
   /** RFC #1356 canonical sender identity for persisted messages. */
   from?: MessageFrom;
   /** Client-only exact persisted records folded into this canonical bubble. */
@@ -334,6 +209,7 @@ export interface ChatMessage {
   evidence?: EvidenceData;
   /** F22+F52+F098-C1: Rich blocks + cross-thread origin + explicit targets */
   extra?: {
+    cloudBridgeReturn?: import('@cat-cafe/shared').CloudBridgeReturnV1;
     runtimeInteractionCard?: {
       version: 1;
       interactionId: string;
@@ -343,6 +219,8 @@ export interface ChatMessage {
     outputLayout?: import('@cat-cafe/shared').MessageOutputLayoutV1;
     /** F310 source-owner projection; the card rehydrates canonical state before acting. */
     custodyOfferV1?: CustodyOfferV1;
+    /** F311 receipt-derived navigation source for this later result. */
+    evolutionUseSourceV1?: EvolutionUseSourceV1;
     /** F306 durable projection input shared by live, hydration, callback and replay. */
     semanticEvent?: ProviderSemanticEvent;
     rich?: { v: 1; blocks: RichBlock[] };
@@ -443,6 +321,7 @@ export interface ChatMessage {
       evidence?: string;
       updatedAt: number;
     };
+    startupRecovery?: import('@cat-cafe/shared').CodexStartupRecovery;
   };
   /** F045: Extended thinking content, rendered as collapsible block inside assistant bubble */
   thinking?: string;
@@ -619,6 +498,7 @@ export interface BootcampStateV1 {
   envCheck?: Record<string, { ok: boolean; version?: string; note?: string }>;
   advancedFeatures?: Record<string, 'available' | 'unavailable' | 'skipped'>;
   startedAt: number;
+  journeyId?: string;
   completedAt?: number;
 }
 
@@ -836,6 +716,9 @@ export interface QueueEntry {
   /** #706: HTTP-enriched History preview for QueuePanel display + recall-edit.
    *  Mutation SSE publishes pending targets without waiting for this join. */
   messagePreview?: {
+    timestamp?: number;
+    visibility?: 'whisper';
+    whisperTo?: string[];
     contentBlocks?: ReadonlyArray<MessageContent>;
     replyTo?: string;
     /** Stored connector identity; lets the row reuse the timeline bubble's summary. */
@@ -912,15 +795,6 @@ export interface TrueRecallResponse {
   clientSnapshot?: ComposerDraftInsert['clientSnapshot'];
 }
 
-/** F101: Current game state in a thread */
-export type GameState = {
-  gameId: string;
-  gameType: string;
-  status: 'lobby' | 'playing' | 'finished';
-  currentPhase: string;
-  round: number;
-};
-
 export type TeamWorkspaceSubject = { type: 'cat'; id: string } | { type: 'provider'; id: string };
 
 /**
@@ -959,6 +833,8 @@ export type WorkspaceFileNavigationOrigin =
  * only bridges a fresh user action into an already-hydrated Workbench host. */
 export interface WorkspaceOpenRequest {
   disposition?: 'preview' | 'permanent';
+  /** Explicit artwork action: skip the narrow rail on the way to the existing work host. */
+  presentation?: 'work-mode';
   revision: number;
   threadId: string;
   target:
@@ -975,6 +851,7 @@ export interface WorkspaceOpenRequest {
         /** The review a Host receipt is committed to: the work is entered in that review, or not at all. */
         reviewId?: string;
         title: string;
+        htmlWorkSourceThreadId?: string;
         messagePublicationSource?: MessageMediaPublicationSource;
         navigationOrigin?: WorkspaceFileNavigationOrigin;
       }
@@ -1021,8 +898,6 @@ export interface ThreadState {
   /** F198 Phase C AC-C3: daemon detail text per catId, shown in status dot tooltip */
   catStatusDetails: Record<string, string>;
   catInvocations: Record<string, CatInvocationInfo>;
-  /** F101: Active game in this thread */
-  currentGame: GameState | null;
   unreadCount: number;
   /** F057-C2: Thread has an unread @user mention from a cat */
   hasUserMention: boolean;
@@ -1150,7 +1025,6 @@ export const DEFAULT_THREAD_STATE: ThreadState = {
   catStatuses: {},
   catStatusDetails: {},
   catInvocations: {},
-  currentGame: null,
   unreadCount: 0,
   hasUserMention: false,
   lastActivity: 0,

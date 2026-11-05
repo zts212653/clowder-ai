@@ -191,7 +191,7 @@ test('the route scans the newest 256 thread rows: many newer rows push a call ou
     await f.store.appendIdempotent({
       userId: OWNER,
       threadId: 'home',
-      catId: null,
+      from: { kind: 'user', userId: OWNER },
       content: `后来的普通消息 ${i}`,
       mentions: [],
       timestamp: Date.now(),

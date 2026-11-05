@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 
-interface SettingsPageHeaderProps {
+export interface SettingsPageHeaderProps {
   title: string;
   subtitle?: string;
   children?: ReactNode;

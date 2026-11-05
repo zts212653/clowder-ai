@@ -20,6 +20,7 @@ const ENV_KEYS = [
   'ENABLE_PWA_IN_DEV',
   'CAT_CAFE_WEB_TEST_DIST_DIR',
   'CAT_CAFE_WEB_TEST_TSCONFIG',
+  'CAT_CAFE_DESKTOP_WEB_BUILD',
   'NODE_ENV',
 ];
 
@@ -68,7 +69,59 @@ function loadConfigWithPwaCapture() {
   }
 }
 
+it('precache includes current CSS without eagerly caching every retained historical version', async () => {
+  const currentUrl = require('../src/generated/vendor-stylesheets.json')[0];
+  const historicalUrl = currentUrl.replace(/\.[a-f0-9]{16}\.css$/, '.0000000000000000.css');
+  const entries = [
+    { url: currentUrl.slice(1), revision: 'current' },
+    { url: historicalUrl, revision: 'historical' },
+    { url: 'vendor/app/theme-tokens.css', revision: 'legacy-alias' },
+    { url: '_next/static/css/document.css', revision: 'next-owned' },
+  ];
+  const options = loadConfigWithPwaCapture();
+  const result = await options.workboxOptions.manifestTransforms[0](entries);
+  assert.deepEqual(result.manifest, [entries[0], entries[2], entries[3]]);
+  assert.deepEqual(result.warnings, []);
+});
+
 describe('next.config rewrites', () => {
+  it('compiles desktop images without writing an optimizer cache into the installed application', () => {
+    const { getImgProps } = require('next/dist/shared/lib/get-img-props');
+    const { imageConfigDefault } = require('next/dist/shared/lib/image-config');
+    const defaultLoader = require('next/dist/shared/lib/image-loader').default;
+    const image = (config) =>
+      getImgProps(
+        { src: '/cats/fixture.png', width: 64, height: 64, alt: 'fixture' },
+        { imgConf: { ...imageConfigDefault, ...config.images }, defaultLoader },
+      ).props;
+    withEnv({ NODE_ENV: 'production', CAT_CAFE_DESKTOP_WEB_BUILD: '1' }, (config) => {
+      assert.equal(config.images?.unoptimized, true);
+      assert.equal(image(config).src, '/cats/fixture.png');
+      assert.equal(image(config).srcSet, undefined);
+    });
+    withEnv({ NODE_ENV: 'production' }, (config) => {
+      assert.notEqual(config.images?.unoptimized, true, 'ordinary Web deployments retain image optimization');
+      assert.match(image(config).src, /^\/_next\/image\?/);
+    });
+  });
+
+  it('uses non-adjacent configured API defaults when FRONTEND_PORT selects that Web port', async () => {
+    const originalLoad = Module._load;
+    Module._load = function loadSyntheticDefaults(request, parent, isMain) {
+      const actual = originalLoad.call(this, request, parent, isMain);
+      if (request !== '../shared/src/deployment-defaults.ts') return actual;
+      return { ...actual, deploymentDefaults: { ...actual.deploymentDefaults, webPort: 4510, apiPort: 4599 } };
+    };
+    try {
+      await withEnv({ FRONTEND_PORT: '4510' }, async (config) => {
+        const rewrites = await config.rewrites();
+        assert.equal(rewrites[0].destination, 'http://localhost:4599/api/:path*');
+      });
+    } finally {
+      Module._load = originalLoad;
+    }
+  });
+
   it('proxies /api, /socket.io, and /uploads to default API port', async () => {
     await withEnv({}, async (config) => {
       const rewrites = await config.rewrites();

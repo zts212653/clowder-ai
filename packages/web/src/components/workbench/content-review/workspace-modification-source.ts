@@ -8,6 +8,8 @@ import type { ContentReviewView } from './content-review-contract';
  */
 export function workspaceReviewRequestSource(view: ContentReviewView): ContentModificationRequest['source'] {
   const source = view.review.source;
+  if (source.kind === 'collective-artifact' || source.kind === 'collective-media')
+    throw new Error('Collective modification requires its shared content owner');
   if (source.kind === 'video-project') throw new Error('Video project modification requires its project service');
   if (source.kind === 'publication')
     return {

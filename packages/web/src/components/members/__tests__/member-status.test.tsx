@@ -26,7 +26,8 @@ it('translates the interface status while preserving an owner-authored note verb
       ),
     );
     expect(container.querySelector('.member-status-label')?.textContent).toContain('Low quota');
-    expect(container.querySelector('small')?.textContent).toBe('可用');
+    act(() => container.querySelector<HTMLButtonElement>('button')?.click());
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain('可用');
   } finally {
     act(() => root.unmount());
   }

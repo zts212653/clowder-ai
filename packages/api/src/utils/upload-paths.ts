@@ -1,5 +1,6 @@
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { deploymentDefaults } from '@cat-cafe/shared';
 
 const THIS_DIR = dirname(fileURLToPath(import.meta.url));
 const MODULE_DEFAULT_UPLOAD_DIR = resolve(THIS_DIR, '../../uploads');
@@ -14,6 +15,11 @@ export function getDefaultUploadDir(configuredUploadDir?: string): string {
   return configuredUploadDir ? resolve(configuredUploadDir) : MODULE_DEFAULT_UPLOAD_DIR;
 }
 
+/** Shared connector download/HTTP/read root; preserve the existing cwd-relative default. */
+export function getDefaultConnectorMediaDir(configuredMediaDir?: string): string {
+  return resolve(configuredMediaDir ?? './data/connector-media');
+}
+
 const INTERNAL_ROUTE_PREFIXES = ['/uploads/', '/api/connector-media/', '/api/tts/audio/'];
 
 export function resolveInternalRouteUrl(url: string): string {
@@ -22,7 +28,7 @@ export function resolveInternalRouteUrl(url: string): string {
     const apiBase = (
       process.env.CAT_CAFE_API_URL ??
       process.env.NEXT_PUBLIC_API_URL ??
-      'http://localhost:3004'
+      deploymentDefaults.apiBaseUrl
     ).replace(/\/$/, '');
     return `${apiBase}${url}`;
   }

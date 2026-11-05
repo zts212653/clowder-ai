@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
 import { startReviewHost } from './fixtures/f309-artifact-review-host.mjs';
 import { mediaFixture, offsetRotatedVfrFixture } from './fixtures/f309-artifact-review-media.mjs';
 import { selectReviewMode } from './fixtures/f309-artwork-controls.mjs';
@@ -113,7 +113,7 @@ for (const sample of ['png', 'mp4', 'mp4-offset', 'mp4-short'])
       await canvas.evaluate((element) => (element.dataset.k3Continuity = 'original-canvas'));
       await selectReviewMode(page, 'comment');
       const draft = `对比前未提交的评论-${sample}`;
-      await page.getByRole('textbox', { name: '评论内容' }).fill(draft);
+      await page.getByRole('textbox', { name: kind === 'png' ? '消息输入框' : '评论内容' }).fill(draft);
       await page.getByRole('button', { name: '对比版本', exact: true }).click();
       const compare = page.getByTestId('artifact-media-compare');
       const media = compare.locator(kind === 'png' ? 'figure img' : 'figure video');
@@ -191,7 +191,10 @@ for (const sample of ['png', 'mp4', 'mp4-offset', 'mp4-short'])
       await page.setViewportSize({ width: 1440, height: 1000 });
       await compare.getByRole('button', { name: '返回作品', exact: true }).click();
       assert.equal(await canvas.getAttribute('data-k3-continuity'), 'original-canvas');
-      assert.equal(await page.getByRole('textbox', { name: '评论内容' }).inputValue(), draft);
+      assert.equal(
+        await page.getByRole('textbox', { name: kind === 'png' ? '消息输入框' : '评论内容' }).inputValue(),
+        draft,
+      );
       await page.getByRole('button', { name: '对比版本', exact: true }).click();
       await compare.getByRole('textbox', { name: '审阅结论说明' }).fill('此版本审阅通过；原任务仍由负责猫继续。');
       const actionUrl = `${host.apiOrigin}/api/artifact-reviews/${reviewId}/actions`;
@@ -244,7 +247,8 @@ for (const sample of ['png', 'mp4', 'mp4-offset', 'mp4-short'])
             !request.url.includes('/content-modifications/') && !request.url.includes('/workspace/edit-session'),
         ),
       );
-      await compare.getByRole('button', { name: '返回来源', exact: true }).click();
+      await compare.getByRole('button', { name: '返回作品', exact: true }).click();
+      await page.getByRole('button', { name: '返回', exact: true }).click();
       await page.getByTestId('product-schedule-panel').waitFor();
       assert.deepEqual(errors, []);
       await writeFile(

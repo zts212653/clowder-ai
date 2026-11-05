@@ -4,7 +4,12 @@ import type { FastifyInstance } from 'fastify';
 import fp from 'fastify-plugin';
 import { isDirectLoopbackRequest } from '../utils/loopback-request.js';
 
-const COOKIE_NAME = 'cat_cafe_session';
+export function resolveSessionCookieName(env: NodeJS.ProcessEnv = process.env): string {
+  const name = env.CAT_CAFE_SESSION_COOKIE_NAME?.trim() || 'cat_cafe_session';
+  if (!/^[A-Za-z0-9_-]{1,80}$/.test(name)) throw new Error('Invalid session cookie name');
+  return name;
+}
+const COOKIE_NAME = resolveSessionCookieName();
 const TOKEN_BYTES = 32;
 const DEFAULT_USER_ID = 'default-user';
 const UNPAIRED_USER_ID = 'unpaired-user';
@@ -16,6 +21,8 @@ declare module 'fastify' {
     sessionCsrfToken?: string;
     /** Opaque issuance binding used to prove which browser session authorized an owner action. */
     sessionBindingId?: string;
+    /** Revalidates the same cookie session after an async privileged operation. */
+    assertSessionCurrent?: () => void;
   }
 }
 
@@ -78,6 +85,7 @@ function sessionAuth(app: FastifyInstance, _opts: Record<string, never>, done: (
   app.decorateRequest('sessionUserId', undefined);
   app.decorateRequest('sessionCsrfToken', undefined);
   app.decorateRequest('sessionBindingId', undefined);
+  app.decorateRequest('assertSessionCurrent', undefined);
 
   app.addHook('onRequest', (request, _reply, next) => {
     const session = browserSessionForCookies(request.cookies ?? {});
@@ -85,6 +93,12 @@ function sessionAuth(app: FastifyInstance, _opts: Record<string, never>, done: (
       request.sessionUserId = session.userId;
       request.sessionCsrfToken = session.csrfToken;
       request.sessionBindingId = session.bindingId;
+      const cookies = { ...request.cookies };
+      request.assertSessionCurrent = () => {
+        const current = browserSessionForCookies(cookies);
+        if (!current || current.userId !== session.userId || current.bindingId !== session.bindingId)
+          throw new Error('Authenticated session is no longer current');
+      };
     }
     next();
   });

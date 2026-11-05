@@ -10,6 +10,7 @@ import {
   buildPacket,
   createLiveTreeAsMainReader,
   seedCanonicalMeasurementCensusState,
+  unreachablePublisher,
 } from './publish-verdict-fixtures.js';
 
 /** F192 no_new_window — edge cases: orphan bundles, Layer 1a source verification,
@@ -147,6 +148,7 @@ describe('handlePublishVerdict — no_new_window edge cases and source verificat
 
     const result = await handlePublishVerdict(
       {
+        gitPublisher: unreachablePublisher,
         harnessFeedbackRoot: root,
         now: () => new Date('2026-06-05T11:00:01.000Z'),
         checkStoredSourceEquivalence: () => {
@@ -329,6 +331,7 @@ describe('handlePublishVerdict — no_new_window edge cases and source verificat
 
     const result = await handlePublishVerdict(
       {
+        gitPublisher: unreachablePublisher,
         harnessFeedbackRoot: root,
         now: () => new Date('2026-06-05T11:00:01.000Z'),
       },

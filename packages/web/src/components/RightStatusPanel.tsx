@@ -12,6 +12,7 @@ import { PlanBoardPanel } from './PlanBoardPanel';
 import { SessionIdTag } from './SessionChainInputs';
 import { SessionChainPanel } from './SessionChainPanel';
 import { settingsResourceCardClass } from './SettingsResourceCard';
+import { useShellCopy } from './shell/shell-copy';
 import {
   type CatStatus,
   collectSnapshotActiveCats,
@@ -24,6 +25,7 @@ import {
 import { CatInvocationTime, InvocationIds } from './status-panel-parts';
 import { captureFileCardOrigin } from './workbench/file-card-origin';
 import { useFileCardReturn } from './workbench/useFileCardReturn';
+import { statusPageCopy } from './workspace-status/status-page.shell-copy';
 
 export interface RightStatusPanelProps {
   intentMode: IntentMode;
@@ -88,6 +90,7 @@ function CatInvocationCard({ catId, inv, isActive }: { catId: string; inv: CatIn
 
 /** Toggle between play/debug thinking visibility mode for the thread */
 export function ThinkingModeToggle({ threadId, v2 = false }: { threadId: string; v2?: boolean }) {
+  const t = useShellCopy(statusPageCopy);
   const thread = useChatStore((s) => s.threads.find((t) => t.id === threadId));
   const updateLocal = useChatStore((s) => s.updateThreadThinkingMode);
   const mode = thread?.thinkingMode ?? 'debug';
@@ -120,9 +123,9 @@ export function ThinkingModeToggle({ threadId, v2 = false }: { threadId: string;
     <div className={v2 ? 'status-v2-visibility-row' : 'flex items-center justify-between gap-2 min-w-0'}>
       {v2 ? (
         <>
-          <span>心里话</span>
-          <span className="status-v2-visibility-value" title={isDebug ? '调试模式（相互可见）' : '游戏模式'}>
-            {isDebug ? '调试模式（相互可见）' : '游戏模式'}
+          <span>{t.thinking}</span>
+          <span className="status-v2-visibility-value" title={isDebug ? t.debugMode : t.playMode}>
+            {isDebug ? t.debugMode : t.playMode}
           </span>
         </>
       ) : (
@@ -133,9 +136,17 @@ export function ThinkingModeToggle({ threadId, v2 = false }: { threadId: string;
       <button
         onClick={toggle}
         className="shrink-0 rounded-full px-3 py-1 text-label transition-colors hover:text-cafe"
-        title={isDebug ? '切换到游戏模式（猫猫互相看不到心里话）' : '切换到调试模式（猫猫互相分享心里话）'}
+        title={
+          v2
+            ? isDebug
+              ? t.toPlayHint
+              : t.toDebugHint
+            : isDebug
+              ? '切换到游戏模式（猫猫互相看不到心里话）'
+              : '切换到调试模式（猫猫互相分享心里话）'
+        }
       >
-        {isDebug ? (v2 ? '切换到游戏模式' : '切换游戏') : v2 ? '切换到调试模式' : '切换调试'}
+        {isDebug ? (v2 ? t.toPlay : '切换游戏') : v2 ? t.toDebug : '切换调试'}
       </button>
     </div>
   );
@@ -182,6 +193,7 @@ export function BubbleDisplayToggle({
 
 /** F35: Reveal all whispers in the thread (game-end reveal) */
 export function RevealWhispersButton({ threadId, v2 = false }: { threadId: string; v2?: boolean }) {
+  const t = useShellCopy(statusPageCopy);
   const [status, setStatus] = useState<'idle' | 'pending' | 'done'>('idle');
   const [revealedCount, setRevealedCount] = useState<number | null>(null);
 
@@ -231,9 +243,9 @@ export function RevealWhispersButton({ threadId, v2 = false }: { threadId: strin
     <div className={v2 ? 'status-v2-visibility-row' : 'flex items-center justify-between gap-2 min-w-0'}>
       {v2 ? (
         <>
-          <span>悄悄话</span>
-          <span className="status-v2-visibility-value" title="默认仅相关猫可见">
-            默认仅相关猫可见
+          <span>{t.whispers}</span>
+          <span className="status-v2-visibility-value" title={t.whispersHint}>
+            {t.whispersHint}
           </span>
         </>
       ) : (
@@ -241,16 +253,16 @@ export function RevealWhispersButton({ threadId, v2 = false }: { threadId: strin
       )}
       {status === 'done' ? (
         <span className="shrink-0 text-label text-conn-emerald-text">
-          {v2 ? '已揭晓' : '已揭秘'} {revealedCount} 条
+          {v2 ? t.revealed(revealedCount ?? 0) : `已揭秘 ${revealedCount} 条`}
         </span>
       ) : (
         <button
           onClick={handleReveal}
           disabled={status === 'pending'}
           className="shrink-0 rounded-full px-3 py-1 text-label text-conn-amber-text transition-colors hover:opacity-90 disabled:opacity-50"
-          title="揭晓本线程所有悄悄话"
+          title={v2 ? t.revealHint : '揭晓本线程所有悄悄话'}
         >
-          {status === 'pending' ? (v2 ? '揭晓中…' : '揭秘中...') : v2 ? '全部揭晓' : '揭秘全部'}
+          {status === 'pending' ? (v2 ? t.revealing : '揭秘中...') : v2 ? t.reveal : '揭秘全部'}
         </button>
       )}
     </div>
@@ -268,6 +280,7 @@ function parseLogFilename(name: string): { date: string; seq: number } | null {
 
 /** Exported for tests; rendered inside RightStatusPanel. */
 export function RuntimeLogsButton({ threadId, compact = false }: { threadId: string; compact?: boolean }) {
+  const t = useShellCopy(statusPageCopy);
   const originRef = useFileCardReturn<HTMLElement>('runtime-logs', threadId);
   const setOpenFile = useChatStore((s) => s.setWorkspaceOpenFile);
 
@@ -332,16 +345,16 @@ export function RuntimeLogsButton({ threadId, compact = false }: { threadId: str
       className={compact ? 'status-v2-info-row' : `${SIDEBAR_CARD} flex items-center justify-between px-3 py-2`}
     >
       {compact ? (
-        <span className="status-v2-muted">运行日志</span>
+        <span className="status-v2-muted">{t.logs}</span>
       ) : (
         <h3 className="text-label font-bold text-cafe">运行日志</h3>
       )}
       <button
         onClick={handleClick}
         className="text-label font-bold text-cafe transition-colors hover:text-cafe"
-        title="在 Workspace 面板中打开运行日志目录"
+        title={compact ? t.logsHint : '在 Workspace 面板中打开运行日志目录'}
       >
-        {compact ? '打开目录' : '查看日志'}
+        {compact ? t.openDirectory : '查看日志'}
       </button>
     </section>
   );
@@ -379,6 +392,7 @@ export function RightStatusPanel({
       className="flex flex-col gap-3 overflow-y-auto px-4 py-[18px]"
       data-console-panel="status"
       data-file-origin-scroll
+      data-chat-background-surface="console-shell"
       style={{
         width: width ?? 304,
         flexShrink: 0,

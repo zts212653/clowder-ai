@@ -11,6 +11,15 @@ export function registerCrossThreadLetterJourneys({ webRoot, browser, evidenceDi
   before(async () => {
     const fixtureRoot = path.join(webRoot, 'test/browser/fixtures');
     proof = JSON.parse(await readFile(path.join(fixtureRoot, 'f322-cross-thread-letter-delivery.json'), 'utf8'));
+    // Keep the original callback archive unchanged; serve its agent identities in the current History DTO.
+    proof = {
+      ...proof,
+      messages: proof.messages.map((message) => {
+        assert.equal(message.type, 'assistant');
+        assert.equal(typeof message.catId, 'string');
+        return { ...message, from: { kind: 'agent', catId: message.catId } };
+      }),
+    };
     const built = await build({
       root: webRoot,
       configFile: false,
@@ -53,6 +62,7 @@ export function registerCrossThreadLetterJourneys({ webRoot, browser, evidenceDi
     );
     const sourceMessages = [
       {
+        from: { kind: 'agent', catId: 'opus' },
         id: 'before-original',
         type: 'assistant',
         catId: 'opus',
@@ -60,6 +70,7 @@ export function registerCrossThreadLetterJourneys({ webRoot, browser, evidenceDi
         timestamp: 1,
       },
       {
+        from: { kind: 'agent', catId: 'opus' },
         id: 'original-message',
         type: 'assistant',
         catId: 'opus',
@@ -68,7 +79,14 @@ export function registerCrossThreadLetterJourneys({ webRoot, browser, evidenceDi
         timestamp: 2,
         extra: { stream: { invocationId: proof.invocationId, turnInvocationId: proof.invocationId } },
       },
-      { id: 'after-original', type: 'assistant', catId: 'opus', content: 'After source.\n\n'.repeat(50), timestamp: 3 },
+      {
+        from: { kind: 'agent', catId: 'opus' },
+        id: 'after-original',
+        type: 'assistant',
+        catId: 'opus',
+        content: 'After source.\n\n'.repeat(50),
+        timestamp: 3,
+      },
     ];
     await page.route('**/*', async (route) => {
       const url = new URL(route.request().url());
@@ -100,6 +118,7 @@ export function registerCrossThreadLetterJourneys({ webRoot, browser, evidenceDi
             avatar: `/avatars/${id}.svg`,
             color: { primary, secondary: '#eee' },
             mentionPatterns: [`@${id}`],
+            carrier: 'cli',
             clientId: 'proof',
             defaultModel: 'proof',
           })),

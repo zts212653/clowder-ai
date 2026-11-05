@@ -130,13 +130,9 @@ test('recovered health stays available beyond the closed deadline in table, deta
     assert.equal(await status.getByText('已恢复', { exact: true }).count(), 1);
     await page.getByRole('button', { name: /测试甲.*fixture-a/ }).click();
     await page.getByTestId('member-detail-page').waitFor();
-    assert.equal(await page.locator('.member-detail-status').getByText('已恢复', { exact: true }).count(), 1);
-    const history = await page.locator('.member-history-row summary').allTextContents();
-    assert.equal(history.length, 2);
-    assert.equal(
-      history.some((row) => row.includes('至 ') || row.includes('已失效')),
-      false,
-    );
+    assert.equal(await page.locator('.member-detail-status').getByText('可用', { exact: true }).count(), 1);
+    assert.equal(await page.locator('.member-history-row').count(), 0, 'Diagnostic records are no longer in settings');
+    assert.equal(await page.getByTestId('member-open-records').count(), 1);
     if (screenshots) await page.screenshot({ path: path.join(screenshots, 'r1-recovered-health.png') });
   } finally {
     await context.close();
@@ -156,7 +152,7 @@ test('untouched add uses v2 Chinese and English validation without a write', asy
     );
     if (screenshots) await page.screenshot({ path: path.join(screenshots, 'r1-blank-add-zh.png') });
     await page.evaluate(() => window.f322MemberFixture.writeLanguage('en'));
-    await page.getByRole('button', { name: 'Add', exact: true }).click();
+    await page.getByRole('button', { name: 'Retry save', exact: true }).click();
     const en = page
       .getByRole('alert')
       .filter({ hasText: '4 more fields needed to add: Account, Name, Role, Mention names.' });

@@ -20,6 +20,15 @@ export async function forwardHiddenImageOwner(request, url, composer, calls) {
 
 /** Real visible document + retained Task image + explicit chip removal; no store or storage mutation. */
 export async function verifyHiddenImageRemoval({ page, composer, owner, evidence, calls }) {
+  // Opening a work no longer inserts an unsolicited draft reference. Make a real
+  // selection before testing whether its acknowledged removal survives reload.
+  await page.getByRole('button', { name: '圈选', exact: true }).click();
+  const picture = await page.getByTestId('review-media-stage').boundingBox();
+  assert.ok(picture);
+  await page.mouse.move(picture.x + picture.width * 0.2, picture.y + picture.height * 0.2);
+  await page.mouse.down();
+  await page.mouse.move(picture.x + picture.width * 0.4, picture.y + picture.height * 0.35);
+  await page.mouse.up();
   const media = page.locator('[data-context-kind="media"]').filter({ visible: true });
   await media.waitFor();
   assert.equal(await media.count(), 1);
@@ -40,7 +49,7 @@ export async function verifyHiddenImageRemoval({ page, composer, owner, evidence
       new URL(response.url()).pathname === `/api/threads/${owner.thread.id}/composer-draft` &&
       !response.request().postDataJSON().contentBlocks?.length,
   );
-  await media.getByRole('button', { name: /^移除/ }).click();
+  await media.getByRole('button', { name: /^移除上下文/ }).click();
   const acknowledgment = await cleared;
   assert.equal(acknowledgment.status(), 200);
   const before = (await acknowledgment.json()).draft;

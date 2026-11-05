@@ -1,3 +1,4 @@
+import { deploymentDefaults } from '@cat-cafe/shared';
 import type { PortValidationOptions, PortValidationResult } from './types.js';
 
 /** Clowder AI 自身服务端口 — 硬编码保底 */
@@ -71,7 +72,10 @@ export function validatePort(rawPort: number | string, opts: PortValidationOptio
   }
 
   if (excludedPorts.includes(port)) {
-    return { allowed: false, reason: `Port ${port} is excluded (Clowder AI service port)` };
+    return {
+      allowed: false,
+      reason: `Port ${port} is excluded (${deploymentDefaults.brand.displayName} service port)`,
+    };
   }
 
   return { allowed: true };

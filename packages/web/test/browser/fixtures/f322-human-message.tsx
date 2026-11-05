@@ -47,13 +47,46 @@ const CODE =
   '看这段：\n\n```ts\nconst aVeryLongLineOfCodeThatIsMuchWiderThanTheBlockCanBe = renderTheWholeCoverGallery(options, more, args);\n```';
 
 const messages: ChatMessageData[] = [
-  { id: 'h-short', type: 'user', content: SHORT, timestamp: T0 },
-  { id: 'c-1', type: 'assistant', catId: 'opus', content: '好，我先生成三版。', timestamp: T0 + minute },
-  { id: 'h-run-a', type: 'user', content: '再来一版。', timestamp: T0 + 2 * minute },
-  { id: 'h-run-b', type: 'user', content: LONG, timestamp: T0 + 3 * minute },
-  { id: 'h-code', type: 'user', content: CODE, timestamp: T0 + 4 * minute },
-  { id: 'c-2', type: 'assistant', catId: 'codex', content: '收到。', timestamp: T0 + 5 * minute },
+  { from: { kind: 'user', userId: 'default-user' }, id: 'h-short', type: 'user', content: SHORT, timestamp: T0 },
   {
+    from: { kind: 'agent', catId: 'opus' },
+    id: 'c-1',
+    type: 'assistant',
+    catId: 'opus',
+    content: '好，我先生成三版。',
+    timestamp: T0 + minute,
+  },
+  {
+    from: { kind: 'user', userId: 'default-user' },
+    id: 'h-run-a',
+    type: 'user',
+    content: '再来一版。',
+    timestamp: T0 + 2 * minute,
+  },
+  {
+    from: { kind: 'user', userId: 'default-user' },
+    id: 'h-run-b',
+    type: 'user',
+    content: LONG,
+    timestamp: T0 + 3 * minute,
+  },
+  {
+    from: { kind: 'user', userId: 'default-user' },
+    id: 'h-code',
+    type: 'user',
+    content: CODE,
+    timestamp: T0 + 4 * minute,
+  },
+  {
+    from: { kind: 'agent', catId: 'codex' },
+    id: 'c-2',
+    type: 'assistant',
+    catId: 'codex',
+    content: '收到。',
+    timestamp: T0 + 5 * minute,
+  },
+  {
+    from: { kind: 'user', userId: 'default-user' },
     id: 'h-whisper',
     type: 'user',
     content: '悄悄告诉你一件事。',

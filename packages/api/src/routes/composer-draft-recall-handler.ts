@@ -10,7 +10,7 @@ import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadS
 import type { IIndexBuilder, MessageRecallSuppressionLease } from '../domains/memory/interfaces.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { enrichQueueEntries } from '../utils/queue-enrichment.js';
-import { projectRecallMessage, recallBodySchema } from './composer-draft-recall-helpers.js';
+import { projectComposerDraft, projectRecallMessage, recallBodySchema } from './composer-draft-recall-helpers.js';
 import { buildRecallSuccessResponse, emitRecallProjection } from './composer-draft-recall-projection.js';
 import {
   type DerivedTitleSuppression,
@@ -170,7 +170,7 @@ async function buildAlreadyRecalledResponse(
   return {
     verdict: 'already_recalled',
     message: projectRecallMessage(message),
-    draft,
+    draft: projectComposerDraft(draft),
     insertedRange: null,
     queue: await enrichQueueEntries(
       context.opts.invocationQueue.list(context.threadId, context.ownerUserId),

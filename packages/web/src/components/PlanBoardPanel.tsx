@@ -7,6 +7,8 @@ import { NEUTRAL_DOT_COLOR } from '@/lib/color-defaults';
 import type { CatInvocationInfo } from '@/stores/chatStore';
 import { buildContinueMessage } from '@/utils/taskProgressContinue';
 import { useConfirm } from './useConfirm';
+import { useTrajectoryCopy } from './workspace/trajectory/use-trajectory-copy';
+import { planBoardCopy } from './workspace-status/plan-board.shell-copy';
 
 export interface PlanBoardPanelProps {
   threadId: string;
@@ -48,15 +50,16 @@ function TaskStatusIcon({ status }: { status: 'completed' | 'in_progress' | 'pen
   );
 }
 
-function taskStatusA11yText(status: 'completed' | 'in_progress' | 'pending'): string {
-  if (status === 'completed') return '已完成';
-  if (status === 'in_progress') return '进行中';
-  return '待处理';
+function taskStatusA11yText(status: 'completed' | 'in_progress' | 'pending', copy: typeof planBoardCopy.zh): string {
+  if (status === 'completed') return copy.completed;
+  if (status === 'in_progress') return copy.inProgress;
+  return copy.pending;
 }
 
 /* ── Per-cat plan card ────────────────────────────────────── */
 
 function PlanCard({ catId, threadId, inv }: { catId: string; threadId: string; inv: CatInvocationInfo }) {
+  const copy = useTrajectoryCopy(planBoardCopy);
   const confirm = useConfirm();
   const { getCatById } = useCatData();
   const { handleSend } = useSendMessage(threadId);
@@ -68,7 +71,13 @@ function PlanCard({ catId, threadId, inv }: { catId: string; threadId: string; i
   const status = tp.snapshotStatus;
 
   const statusLabel =
-    status === 'completed' ? '已完成' : status === 'interrupted' ? '已中断' : status === 'running' ? '运行中' : null;
+    status === 'completed'
+      ? copy.completed
+      : status === 'interrupted'
+        ? copy.interrupted
+        : status === 'running'
+          ? copy.running
+          : null;
   const statusTone =
     status === 'completed'
       ? 'bg-conn-green-bg text-conn-green-text'
@@ -96,13 +105,20 @@ function PlanCard({ catId, threadId, inv }: { catId: string; threadId: string; i
           <button
             className="text-micro px-2 py-0.5 rounded-full border border-[var(--console-border-soft)] hover:bg-[var(--console-hover-bg)] transition-colors"
             onClick={async () => {
-              if (await confirm({ title: '继续任务', message: '确认继续上次任务？' })) {
+              if (
+                await confirm({
+                  title: copy.resume,
+                  message: copy.resumeMessage,
+                  confirmLabel: copy.confirm,
+                  cancelLabel: copy.cancel,
+                })
+              ) {
                 const mentionHandle = cat?.mentionPatterns?.[0] ?? `@${catId}`;
                 void handleSend(buildContinueMessage(mentionHandle, tp), undefined, threadId);
               }
             }}
           >
-            继续
+            {copy.continue}
           </button>
         )}
       </div>
@@ -111,7 +127,7 @@ function PlanCard({ catId, threadId, inv }: { catId: string; threadId: string; i
           const taskText = t.status === 'in_progress' ? (t.activeForm ?? t.subject) : t.subject;
           return (
             <div key={t.id} className="flex items-start gap-1 text-xs leading-tight">
-              <span className="sr-only">{taskStatusA11yText(t.status)} </span>
+              <span className="sr-only">{taskStatusA11yText(t.status, copy)} </span>
               <span className="mt-px flex-shrink-0" aria-hidden="true">
                 <TaskStatusIcon status={t.status} />
               </span>
@@ -135,6 +151,7 @@ function PlanCard({ catId, threadId, inv }: { catId: string; threadId: string; i
 /* ── Main panel ───────────────────────────────────────────── */
 
 export function PlanBoardPanel({ threadId, catInvocations }: PlanBoardPanelProps) {
+  const copy = useTrajectoryCopy(planBoardCopy);
   const [completedOpen, setCompletedOpen] = useState(false);
 
   const { runningCats, interruptedCats, completedCats } = useMemo(() => {
@@ -167,7 +184,9 @@ export function PlanBoardPanel({ threadId, catInvocations }: PlanBoardPanelProps
   return (
     <section className="rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3">
       <div className="flex items-center justify-between mb-2">
-        <h3 className="text-xs font-semibold text-cafe-secondary">猫猫祟祟 ({totalCats})</h3>
+        <h3 className="text-xs font-semibold text-cafe-secondary">
+          {copy.title} ({totalCats})
+        </h3>
       </div>
 
       {/* Running cats */}
@@ -187,7 +206,9 @@ export function PlanBoardPanel({ threadId, catInvocations }: PlanBoardPanelProps
             onClick={() => setCompletedOpen((v) => !v)}
             className="w-full flex items-center justify-between text-micro text-cafe-secondary hover:text-cafe-secondary"
           >
-            <span>已完成 ({completedCats.length})</span>
+            <span>
+              {copy.completed} ({completedCats.length})
+            </span>
             <span>{completedOpen ? '▲' : '▼'}</span>
           </button>
           {completedOpen && (

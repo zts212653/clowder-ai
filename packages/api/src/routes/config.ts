@@ -12,7 +12,7 @@ import { catRegistry } from '@cat-cafe/shared';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { collectConfigSnapshot } from '../config/ConfigRegistry.js';
-import { configStore } from '../config/ConfigStore.js';
+import { ConfigRevisionConflict, configStore } from '../config/ConfigStore.js';
 import {
   clearRuntimeDefaultCatId,
   getDefaultCatId,
@@ -20,6 +20,7 @@ import {
   isCatAvailable,
   setRuntimeDefaultCatId,
 } from '../config/cat-config-loader.js';
+import { coCreatorMentionInputSchema } from '../config/co-creator-mention.js';
 import { configEventBus, createChangeSetId } from '../config/config-event-bus.js';
 import type { ConfigSnapshot } from '../config/config-snapshot.js';
 import {
@@ -43,19 +44,33 @@ import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadS
 import { LOG_DIR_PATH } from '../infrastructure/logger.js';
 import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
 import { isDirectLoopbackRequest } from '../utils/loopback-request.js';
+import { saveSpan } from '../utils/member-save-diagnostics.js';
 import { resolveOwnerGate } from '../utils/owner-gate.js';
 import { resolveHeaderUserId, resolveStrictUserId } from '../utils/request-identity.js';
 import { getDefaultUploadDir } from '../utils/upload-paths.js';
 import { configCatOrderRoutes } from './config-cat-order.js';
+import { configChatBackgroundRoutes } from './config-chat-background.js';
 import { configConversationViewRoutes } from './config-conversation-view.js';
 import { configIgnoredItemRoutes } from './config-ignored-items.js';
+import { configLiveProjectRoutes } from './config-live-projects.js';
 import { configMessageDispositionRoutes } from './config-message-disposition.js';
+import { configOnboardingRoutes } from './config-onboarding.js';
+import { configProcessTalkRoutes } from './config-process-talk.js';
 import { configThreadAttentionRoutes } from './config-thread-attention.js';
 
 const patchSchema = z.object({
   key: z.string().min(1),
   value: z.union([z.string(), z.number(), z.boolean()]),
+  expectedRevision: z.string().min(1).optional(),
 });
+
+const VERSIONED_CLIENT_KEYS = new Set([
+  'cli.codexSandboxMode',
+  'cli.codexApprovalPolicy',
+  'codex.execution.model',
+  'codex.execution.authMode',
+  'codex.execution.passModelArg',
+]);
 
 const PERSISTENT_CLI_OUTPUT_KEY = 'ui.bubble.cliOutput';
 
@@ -78,9 +93,9 @@ function authorizeConfigPatch(request: FastifyRequest, key: string): ConfigPatch
   return gateResult ? { ok: false, status: gateResult.status, error: gateResult.error } : { ok: true, operator };
 }
 
-function applyConfigPatch(projectRoot: string, key: string, value: ConfigPatchValue): void {
+function applyConfigPatch(projectRoot: string, key: string, value: ConfigPatchValue, expectedRevision?: string): void {
   if (key !== PERSISTENT_CLI_OUTPUT_KEY) {
-    configStore.set(key, value);
+    configStore.set(key, value, expectedRevision);
     return;
   }
   const normalized = configStore.normalize(key, value);
@@ -102,8 +117,9 @@ const timeZonePatchSchema = z
 
 const coCreatorPatchSchema = z.object({
   name: z.string().trim().min(1),
-  aliases: z.array(z.string().trim().min(1)),
-  mentionPatterns: z.array(z.string().trim().min(1)).min(1),
+  nickname: z.string().trim().min(1).max(64).nullable().optional(),
+  aliases: z.array(z.string().trim().min(1)).optional(),
+  mentionPatterns: z.array(coCreatorMentionInputSchema).min(1),
   timeZone: timeZonePatchSchema.optional(),
   avatar: z.string().trim().nullable().optional(),
   color: z
@@ -122,6 +138,7 @@ const runtimeStatusQuerySchema = z.object({
 interface ConfigRoutesOptions {
   auditLog?: {
     append(input: { type: string; threadId?: string; data: Record<string, unknown> }): Promise<unknown>;
+    getDirectory?(): string;
   };
   envFilePath?: string;
   projectRoot?: string;
@@ -196,13 +213,18 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
   const envFilePath = opts.envFilePath ?? resolve(projectRoot, '.env');
 
   await app.register(configCatOrderRoutes, { projectRoot });
+  await app.register(configLiveProjectRoutes, { projectRoot });
   await app.register(configConversationViewRoutes, { projectRoot, threadStore: opts.threadStore });
+  await app.register(configChatBackgroundRoutes, { projectRoot, threadStore: opts.threadStore });
   await app.register(configIgnoredItemRoutes, { projectRoot });
+  await app.register(configProcessTalkRoutes, { projectRoot });
   await app.register(configMessageDispositionRoutes, { projectRoot });
+  await app.register(configOnboardingRoutes, { projectRoot });
   await app.register(configThreadAttentionRoutes, { projectRoot, threadStore: opts.threadStore });
 
   app.get('/api/config', async () => ({
     config: collectConfigSnapshot(projectRoot),
+    revisions: configStore.revisions(),
   }));
 
   app.patch('/api/config', async (request, reply) => {
@@ -216,16 +238,21 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
       reply.status(authorization.status);
       return { error: authorization.error };
     }
+    if (VERSIONED_CLIENT_KEYS.has(parsed.data.key) && parsed.data.expectedRevision === undefined) {
+      return reply.code(428).send({ error: '请重新读取客户端设置，携带 expectedRevision 后再保存。' });
+    }
 
-    const before = collectConfigSnapshot(projectRoot);
+    const before = saveSpan('config.snapshot.before', () => collectConfigSnapshot(projectRoot));
     const oldValue = getSnapshotValue(before, parsed.data.key);
     try {
-      applyConfigPatch(projectRoot, parsed.data.key, parsed.data.value);
+      saveSpan('config.persist', () =>
+        applyConfigPatch(projectRoot, parsed.data.key, parsed.data.value, parsed.data.expectedRevision),
+      );
     } catch (err) {
-      reply.status(400);
+      reply.status(err instanceof ConfigRevisionConflict ? 409 : 400);
       return { error: (err as Error).message };
     }
-    const after = collectConfigSnapshot(projectRoot);
+    const after = saveSpan('config.snapshot.after', () => collectConfigSnapshot(projectRoot));
     const newValue = getSnapshotValue(after, parsed.data.key);
     const riskLevel = configStore.getRiskLevel(parsed.data.key) ?? 'standard';
 
@@ -240,25 +267,27 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
     }
 
     try {
-      await auditLog.append({
-        type: AuditEventTypes.CONFIG_UPDATED,
-        data: {
-          key: parsed.data.key,
-          oldValue,
-          newValue,
-          operator: authorization.operator,
-          riskLevel,
-          source:
-            parsed.data.key === PERSISTENT_CLI_OUTPUT_KEY
-              ? 'user-preferences'
-              : (configStore.source(parsed.data.key) ?? 'default'),
-        },
-      });
+      await saveSpan('config.audit', () =>
+        auditLog.append({
+          type: AuditEventTypes.CONFIG_UPDATED,
+          data: {
+            key: parsed.data.key,
+            oldValue,
+            newValue,
+            operator: authorization.operator,
+            riskLevel,
+            source:
+              parsed.data.key === PERSISTENT_CLI_OUTPUT_KEY
+                ? 'user-preferences'
+                : (configStore.source(parsed.data.key) ?? 'default'),
+          },
+        }),
+      );
     } catch (err) {
       request.log.warn({ err, key: parsed.data.key }, 'config audit append failed');
     }
 
-    return { config: after };
+    return { config: after, revisions: configStore.revisions() };
   });
 
   const handleCoCreatorPatch = async (request: FastifyRequest, reply: FastifyReply) => {
@@ -276,6 +305,7 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
     try {
       updateRuntimeCoCreator(projectRoot, {
         name: parsed.data.name,
+        ...(parsed.data.nickname !== undefined ? { nickname: parsed.data.nickname } : {}),
         aliases: parsed.data.aliases,
         mentionPatterns: parsed.data.mentionPatterns,
         ...(parsed.data.timeZone !== undefined ? { timeZone: parsed.data.timeZone } : {}),
@@ -295,6 +325,7 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
           target: 'coCreator',
           operator,
           name: next.coCreator.name,
+          ...(parsed.data.nickname !== undefined ? { nickname: parsed.data.nickname } : {}),
           mentionPatterns: next.coCreator.mentionPatterns,
           timeZone: next.coCreator.timeZone,
         },
@@ -329,7 +360,7 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
         projectRoot,
         homeDir: home,
         dataDirs: {
-          auditLogs: resolve(apiCwd, process.env.AUDIT_LOG_DIR ?? './data/audit-logs'),
+          auditLogs: auditLog.getDirectory?.() ?? getEventAuditLog().getDirectory(),
           // F212 Phase F (cloud codex R3 P2 on 3083d7c5f + R4 P2-#2 on fc69597675): use
           // the path the pino destination CAPTURED at logger import. Reading process.env.
           // LOG_DIR directly would let runtime `PATCH /api/config/env` edits change what

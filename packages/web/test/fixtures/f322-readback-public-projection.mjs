@@ -215,11 +215,13 @@ export function projectReadbackCapture(capture) {
     function message(value) {
       assert.equal(value.type, 'assistant');
       assert.equal(value.catId, 'codex');
+      if (value.from !== undefined) assert.deepEqual(value.from, { kind: 'agent', catId: 'codex' });
       assert.equal(value.content, CONTENT);
       assert.equal(value.origin, 'stream');
       if (value.isDraft !== undefined) assert.equal(value.isDraft, true);
       return {
         ...pick(value, ['type', 'catId', 'content', 'origin', 'isDraft']),
+        from: { kind: 'agent', catId: 'codex' },
         id: identity(value.id),
         timestamp: timestamp(value.timestamp),
         extra: extra(value.extra, value.content),
@@ -246,7 +248,12 @@ export function projectReadbackCapture(capture) {
       kind: 'public_safe_capture_projection',
       version: 1,
       producer: 'packages/api/test/f322-reply-output-readback.journey.mjs',
-      transformations: ['consumer field allowlist', 'consistent identity aliases', 'wall clock translation'],
+      transformations: [
+        'consumer field allowlist',
+        'consistent identity aliases',
+        'wall clock translation',
+        'MessageFrom projection of legacy agent rows',
+      ],
       originalArchive: 'retained privately; this projection is not the original capture',
     },
     traces,

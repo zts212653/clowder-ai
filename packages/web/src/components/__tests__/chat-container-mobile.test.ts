@@ -2,6 +2,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatContainer } from '@/components/ChatContainer';
+import { useArtworkLightboxScope } from '@/components/content-review/ArtworkLightboxScope';
 import { writeShellPresentation } from '@/components/shell/shell-presentation';
 import { ThreadChatRuntimeProvider } from '@/components/thread-chat';
 import { createArtifactReviewSurface } from '@/components/workbench/artifact-review-surface';
@@ -74,8 +75,6 @@ const mockStoreState = () => ({
   clearCatStatuses: vi.fn(),
   setCurrentThread: vi.fn(),
   updateThreadTitle: vi.fn(),
-  setCurrentGame: vi.fn(),
-  currentGame: null,
 
   viewMode: mockViewMode,
   setViewMode: vi.fn(),
@@ -155,8 +154,13 @@ vi.mock('../ChatInput', () => ({
     }),
 }));
 vi.mock('../ChatContainerHeader', () => ({
-  ChatContainerHeader: (props: { onToggleSidebar: () => void; onToggleStatusPanel: () => void }) =>
-    React.createElement(
+  ChatContainerHeader: (props: {
+    onToggleSidebar: () => void;
+    onToggleStatusPanel: () => void;
+    onOpenMessageSearch?: () => void;
+  }) => {
+    const lightbox = useArtworkLightboxScope();
+    return React.createElement(
       'div',
       { 'data-testid': 'header' },
       React.createElement('button', {
@@ -169,7 +173,22 @@ vi.mock('../ChatContainerHeader', () => ({
         'data-testid': 'workspace-toggle',
         onClick: props.onToggleStatusPanel,
       }),
-    ),
+      props.onOpenMessageSearch &&
+        React.createElement('button', { type: 'button', onClick: props.onOpenMessageSearch }, '查找消息'),
+      React.createElement('button', {
+        type: 'button',
+        'data-testid': 'open-artwork-lightbox',
+        onClick: () =>
+          lightbox?.open({
+            url: '/uploads/original.png',
+            title: '原作品',
+            alt: '原作品',
+            mediaType: 'image',
+            surface: null,
+          }),
+      }),
+    );
+  },
 }));
 vi.mock('../ThreadSidebar', () => ({
   ThreadSidebar: (props: { onClose: () => void }) =>
@@ -393,6 +412,67 @@ describe('ChatContainer mobile interactions', () => {
       root.render(renderChatContainer('test-thread'));
     });
     expect(container.querySelector('[data-testid="sidebar"]')).toBeNull();
+  });
+
+  it.each([
+    { desktop: false, cover: 'workspace' },
+    { desktop: true, cover: 'workspace' },
+    { desktop: false, cover: 'artwork' },
+    { desktop: true, cover: 'artwork' },
+  ])('keeps the search trip while $cover covers Chat (desktop=$desktop)', ({ desktop, cover }) => {
+    writeShellPresentation('v2');
+    mockMatchMedia(desktop);
+    const id = 'a7eafdfa-513c-4129-8acd-9f4cc8df1aa1';
+    const key = `cat-cafe:message-reading-session:${id}`;
+    const saved = JSON.stringify({
+      v: 1,
+      session: {
+        id,
+        originPersisted: true,
+        trip: {
+          searchId: 'original-search',
+          origin: { threadId: 'test-thread', readingRef: 'original-reading-ref' },
+          targets: [{ threadId: 'test-thread', messageId: 'exact-message' }],
+          generation: 1,
+          settledIndex: 0,
+          pending: null,
+          status: 'ready',
+        },
+      },
+    });
+    localStorage.setItem('cat-cafe:message-reading-active:v1', id);
+    localStorage.setItem(key, saved);
+    const controls = () => document.querySelector('nav[aria-label="浏览本次检索结果"]');
+    try {
+      act(() => root.render(renderChatContainer('test-thread')));
+      const chat = container.querySelector('[data-testid="thread-chat-host"]');
+      const input = container.querySelector('[data-testid="chat-input"]');
+      expect(controls()).not.toBeNull();
+      expect(chat?.contains(controls())).toBe(true);
+      if (cover === 'artwork') {
+        act(() => container.querySelector<HTMLButtonElement>('[data-testid="open-artwork-lightbox"]')?.click());
+        expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+      } else {
+        mockRightPanelMode = 'workspace';
+        mockRightPanelOpen = true;
+        act(() => root.render(renderChatContainer('test-thread')));
+      }
+      expect(controls() !== null).toBe(cover === 'workspace' && desktop);
+      expect(localStorage.getItem(key)).toBe(saved);
+      if (cover === 'artwork') {
+        act(() => document.querySelector<HTMLButtonElement>('[role="dialog"] button[aria-label="关闭作品"]')?.click());
+        expect(document.querySelector('[role="dialog"]')).toBeNull();
+      } else {
+        mockRightPanelOpen = false;
+        act(() => root.render(renderChatContainer('test-thread')));
+      }
+      expect(controls()).not.toBeNull();
+      expect(container.querySelector('[data-testid="chat-input"]')).toBe(input);
+      expect(localStorage.getItem(key)).toBe(saved);
+    } finally {
+      localStorage.removeItem(key);
+      localStorage.removeItem('cat-cafe:message-reading-active:v1');
+    }
   });
 
   it('keeps quote forwarding locked for a stale document and enables it after a refreshed compatible baseline', () => {
@@ -628,6 +708,26 @@ describe('ChatContainer mobile interactions', () => {
     });
 
     expect(mockCloseRightPanel).toHaveBeenCalledOnce();
+  });
+
+  it.each(['composition', 'handled'])('keeps the mobile owner when Escape belongs to %s input', async (kind) => {
+    mockRightPanelOpen = true;
+    mockRightPanelMode = 'workspace';
+    await act(async () => root.render(renderChatContainer('test-thread')));
+    const composer = container.querySelector<HTMLElement>('[data-testid="chat-input"]');
+    if (!composer) throw new Error('composer missing');
+    if (kind === 'handled') composer.addEventListener('keydown', (event) => event.preventDefault());
+    await act(async () =>
+      composer.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'Escape',
+          isComposing: kind === 'composition',
+          bubbles: true,
+          cancelable: true,
+        }),
+      ),
+    );
+    expect(mockCloseRightPanel).not.toHaveBeenCalled();
   });
 
   it.each([false, true])('reveals the original Chat from a covering v2 Workspace on desktop=%s', async (desktop) => {

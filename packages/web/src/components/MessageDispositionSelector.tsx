@@ -6,24 +6,23 @@ import type {
   MessageDispositionPreferenceController,
   MessageDispositionPreferenceScope,
 } from '@/hooks/useMessageDispositionPreference';
-
-const DISPOSITION_LABEL: Record<MessageWorkDisposition, string> = {
-  next_work: '排队等待',
-  continue_current: '引导当前回复',
-};
-
-const SCOPE_LABEL: Record<MessageDispositionPreferenceScope, string> = {
-  thread: '本 Thread',
-  global: '全局默认',
-};
+import { messageDispositionCopy } from './message-disposition.shell-copy';
+import { useShellCopy } from './shell/shell-copy';
 
 interface MessageDispositionSelectorProps {
   controller: MessageDispositionPreferenceController;
   onBack: () => void;
+  presentation?: 'classic' | 'v2';
 }
 
 /** Strategy editor inside the composer's + menu. */
-export function MessageDispositionSelector({ controller, onBack }: MessageDispositionSelectorProps) {
+export function MessageDispositionSelector({
+  controller,
+  onBack,
+  presentation = 'classic',
+}: MessageDispositionSelectorProps) {
+  const localized = useShellCopy(messageDispositionCopy);
+  const t = (presentation === 'v2' ? localized : messageDispositionCopy.zh).composer;
   const [scope, setScope] = useState<MessageDispositionPreferenceScope>('thread');
   const selectedDisposition =
     scope === 'thread'
@@ -42,19 +41,19 @@ export function MessageDispositionSelector({ controller, onBack }: MessageDispos
           type="button"
           onClick={onBack}
           className="flex h-7 w-7 items-center justify-center rounded-lg text-cafe-muted transition-colors hover:bg-cafe-surface-sunken hover:text-cafe-primary"
-          aria-label="返回添加菜单"
+          aria-label={t.back}
         >
           ←
         </button>
         <div className="min-w-0 flex-1">
-          <div className="text-sm font-medium text-cafe-primary">发送策略</div>
+          <div className="text-sm font-medium text-cafe-primary">{t.heading}</div>
         </div>
-        {controller.loading ? <span className="text-micro text-cafe-muted">同步中…</span> : null}
+        {controller.loading ? <span className="text-micro text-cafe-muted">{t.syncing}</span> : null}
       </div>
 
       <div className="p-2.5">
-        <fieldset className="mb-2 flex rounded-lg bg-cafe-surface p-0.5" aria-label="偏好作用域">
-          {(Object.keys(SCOPE_LABEL) as MessageDispositionPreferenceScope[]).map((candidate) => (
+        <fieldset className="mb-2 flex rounded-lg bg-cafe-surface p-0.5" aria-label={t.appliesTo}>
+          {(['thread', 'global'] as const).map((candidate) => (
             <button
               key={candidate}
               type="button"
@@ -67,7 +66,7 @@ export function MessageDispositionSelector({ controller, onBack }: MessageDispos
                   : 'text-cafe-muted hover:text-cafe-secondary'
               }`}
             >
-              {SCOPE_LABEL[candidate]}
+              {t.scope[candidate]}
             </button>
           ))}
         </fieldset>
@@ -94,21 +93,19 @@ export function MessageDispositionSelector({ controller, onBack }: MessageDispos
                 aria-hidden
               />
               <span className="min-w-0">
-                <span className="block text-sm font-medium text-cafe-primary">{DISPOSITION_LABEL[disposition]}</span>
-                <span className="block text-xs text-cafe-muted">
-                  {disposition === 'next_work' ? '等待目标空闲后开始新回复' : '可引导时进入当前回复，否则继续排队'}
-                </span>
+                <span className="block text-sm font-medium text-cafe-primary">{t.label[disposition]}</span>
+                <span className="block text-xs text-cafe-muted">{t.note[disposition]}</span>
               </span>
             </button>
           ))}
         </div>
 
-        {controller.error ? <p className="mt-1 px-0.5 text-micro text-conn-red-text">{controller.error}</p> : null}
+        {controller.error ? (
+          <p role="alert" className="mt-1 px-0.5 text-micro text-conn-red-text">
+            {controller.error}
+          </p>
+        ) : null}
       </div>
     </div>
   );
-}
-
-export function messageDispositionLabel(disposition: MessageWorkDisposition): string {
-  return DISPOSITION_LABEL[disposition];
 }

@@ -15,7 +15,7 @@
  * hook sidechannel (Stop/PostToolUse) for output. Works with ANY claude
  * version — no pinned binary required (2.1.170 pin removed).
  */
-import type { CatId } from '@cat-cafe/shared';
+import { type CatId, catRegistry } from '@cat-cafe/shared';
 import type { AgentMessage, AgentService, AgentServiceOptions, ToolExecutionPolicy } from '../../types.js';
 import { ClaudeAgentService } from './ClaudeAgentService.js';
 import { ClaudeBgCarrierService } from './ClaudeBgCarrierService.js';
@@ -181,6 +181,10 @@ export class FallbackCarrierWrapper implements AgentService {
 
   injectsL0Natively(): boolean {
     return this.carrier.injectsL0Natively?.() ?? false;
+  }
+
+  get captureInvocationOptions(): AgentService['captureInvocationOptions'] {
+    return this.carrier.captureInvocationOptions?.bind(this.carrier);
   }
 
   supportsToolExecutionPolicy(policy: ToolExecutionPolicy): boolean {

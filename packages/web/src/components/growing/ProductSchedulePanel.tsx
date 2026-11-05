@@ -84,7 +84,7 @@ export function ProductSchedulePanel({
   );
   const projection = scope === 'completed' ? completed : active;
   const source = scope === 'completed' ? completedWorks : works;
-  const partial = projection.ownerReads.some((work) => work.envelope.freshness.state !== 'current');
+  const partial = projection.partial;
   const ignoreCoordinate = (work: EntrustedWorkOwnerReadV1): IgnoredItemCoordinate => ({
     kind: 'schedule',
     subjectRef: work.envelope.subjectRef,

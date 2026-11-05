@@ -1,23 +1,32 @@
 import type { UnifiedAttentionItemV1 } from '@cat-cafe/shared';
 import { useId, useSyncExternalStore } from 'react';
-import { useCatData } from '@/hooks/useCatData';
-import { conversationDecisionCopy } from '../../rich/conversation-decision.shell-copy';
-import { knownCatName, ShellCatAvatar, UNKNOWN_CAT_NAME } from '../ShellCatAvatar';
+import { reviewDecisionCopy } from '@/components/content-review/review-decision.shell-copy';
+import { memoryCorrectionCopy } from '@/components/memory/page/memory-correction.shell-copy';
+import { isCorrectionRecoveryProjection } from '@/components/memory/page/read-correction-approval';
+import { ApprovalMember } from '@/components/rich/ApprovalMember';
+import { conversationDecisionCopy } from '@/components/rich/conversation-decision.shell-copy';
+import { isDomainApprovalFeature } from '@/components/rich/DomainApprovalCard';
+import { domainApprovalCopy } from '@/components/rich/domain-approval.shell-copy';
+import { evalRepairCopy } from '@/components/rich/eval-repair.shell-copy';
+import { isScheduleRecoveryProjection } from '@/components/rich/read-schedule-approval';
+import { scheduleApprovalCopy } from '@/components/rich/schedule-approval.shell-copy';
+import { personMemoryCopy } from '../../rich/person-memory.shell-copy';
+import { ShellCatAvatar } from '../ShellCatAvatar';
 import { useShellCopy } from '../shell-copy';
-import { isHostableApproval } from './approval-match';
+import { useShellLanguage } from '../shell-language';
 import { describeReconcile } from './approval-reconcile';
 import { type ApprovalSessions, sessionKey } from './approval-sessions';
-import { HostedApprovalCard } from './HostedApprovalCard';
-import { MailboxChoiceCard } from './MailboxChoiceCard';
 import { MailboxItemPersonalAction } from './MailboxItemPersonalAction';
-import { MailboxRuntimeCard } from './MailboxRuntimeCard';
-import { MailboxWorkDetails } from './MailboxWorkDetails';
+import { MailboxRowBody } from './MailboxRowBody';
 import { mailboxEntryCopy } from './mailbox-entry.shell-copy';
+import { readMailboxReviewSource } from './mailbox-review-match';
 import { useMailboxRowText } from './mailbox-row-text';
+import { mailboxRuntimeCopy } from './mailbox-runtime.shell-copy';
+import { originalApprovalCopy } from './original-approval.shell-copy';
+import { originalApprovalSource } from './original-approval-card-source';
 import { type OriginalPlace, resolveOriginalPlace } from './original-place';
 import { PlaceAction } from './PlaceAction';
 import type { ApprovalAddress } from './read-evidence';
-import { UserMentionDetails } from './UserMentionDetails';
 import type { MailboxPersonalActions } from './use-mailbox-personal-preferences';
 
 export const KIND_LABEL: Record<UnifiedAttentionItemV1['kind'], string> = mailboxEntryCopy.zh.kinds;
@@ -46,7 +55,14 @@ function SessionLineText({ hosted, approval }: { hosted: Hosted; approval: Appro
   useSyncExternalStore(sessions.subscribe, sessions.getVersion, sessions.getVersion);
   const key = sessionKey(ownerUserId, approval);
   const session = sessions.get(key);
-  const view = session ? describeReconcile(session.model.state) : null;
+  const language = useShellLanguage();
+  const view = session
+    ? describeReconcile(session.model.state, {
+        language,
+        ownerUserId,
+        sourceFeatureId: approval.sourceFeatureId,
+      })
+    : null;
   if (!view?.line) return null;
   return (
     <div className="flex items-center gap-2 px-4 pb-3">
@@ -88,85 +104,6 @@ function RowSessionLine({
   return <SessionLineText hosted={hosted} approval={approval} />;
 }
 
-/** The opened row: what the read carries about it, and either the original card (a decidable approval) or the one way to the place. */
-function RowBody({
-  item,
-  id,
-  heading,
-  hosted,
-  personal,
-  readCurrent,
-  onOpen,
-}: {
-  item: UnifiedAttentionItemV1;
-  id: string;
-  heading: string;
-  hosted: Hosted | undefined;
-  personal?: MailboxPersonalActions;
-  readCurrent: boolean;
-  onOpen: (place: OriginalPlace) => void;
-}) {
-  const t = useShellCopy(mailboxEntryCopy);
-  const place = resolveOriginalPlace(item);
-  const hostable = hosted !== undefined && item.approval !== undefined && isHostableApproval(item.approval);
-  return (
-    <section
-      id={id}
-      aria-label={`${item.choiceRequest ? t.choice : t.kinds[item.kind]}：${heading}`}
-      data-testid="mailbox-item-body"
-      className="flex flex-col gap-3 px-3 pb-3 pt-1"
-      style={{ color: 'var(--shell-ink)' }}
-    >
-      {item.userMention ? (
-        <UserMentionDetails key={item.userMention.messageId} request={item.userMention} showHandling={!personal} />
-      ) : item.approval || item.choiceRequest || item.runtimeInteraction ? null : (
-        <MailboxWorkDetails item={item} />
-      )}
-      {personal && !hostable && !item.userMention && !((item.choiceRequest || item.runtimeInteraction) && hosted) ? (
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <MailboxItemPersonalAction item={item} personal={personal} />
-        </div>
-      ) : null}
-      {item.runtimeInteraction && hosted ? (
-        <MailboxRuntimeCard
-          source={item.runtimeInteraction}
-          ownerUserId={hosted.ownerUserId}
-          sessions={hosted.sessions}
-          readCurrent={readCurrent}
-          onAnswerInText={() => onOpen(place)}
-          secondaryActions={
-            <>
-              {personal ? <MailboxItemPersonalAction item={item} personal={personal} /> : null}
-              <PlaceAction quiet place={place} onOpen={onOpen} />
-            </>
-          }
-        />
-      ) : null}
-      {item.choiceRequest && !item.runtimeInteraction && hosted ? (
-        <MailboxChoiceCard
-          key={`${item.choiceRequest.interactionId}:${item.choiceRequest.revision}`}
-          choice={item.choiceRequest}
-          ownerUserId={hosted.ownerUserId}
-          readCurrent={readCurrent}
-        />
-      ) : null}
-      {hostable && hosted ? (
-        <HostedApprovalCard
-          item={item}
-          ownerUserId={hosted.ownerUserId}
-          sessions={hosted.sessions}
-          secondaryAction={personal ? <MailboxItemPersonalAction item={item} personal={personal} /> : undefined}
-          place={place}
-          onOpen={onOpen}
-          readCurrent={readCurrent}
-        />
-      ) : (item.userMention && personal) || (item.runtimeInteraction && hosted) ? null : (
-        <PlaceAction quiet={Boolean(item.approval)} place={place} onOpen={onOpen} />
-      )}
-    </section>
-  );
-}
-
 /**
  * One 待办 item. Collapsed it is a line; expanded (one at a time) it says what the read carries and offers exactly one
  * way forward: open the place that owns the decision. A row from a previous read is never interactive.
@@ -195,7 +132,18 @@ export function MailboxRow({
 }) {
   const t = useShellCopy(mailboxEntryCopy);
   const conversationCopy = useShellCopy(conversationDecisionCopy);
-  const { getCatById } = useCatData({ fetch: false });
+  const runtimeCopy = useShellCopy(mailboxRuntimeCopy);
+  const runtimeKind =
+    item.runtimeInteraction?.sourceKind === 'conversation_decision'
+      ? conversationCopy.kind
+      : runtimeCopy.kind[item.runtimeInteraction?.kind ?? (item.choiceRequest ? 'question' : 'unknown')];
+  const reviewCopy = useShellCopy(reviewDecisionCopy);
+  const originalCopy = useShellCopy(originalApprovalCopy);
+  const domainCopy = useShellCopy(domainApprovalCopy);
+  const correctionCopy = useShellCopy(memoryCorrectionCopy);
+  const scheduleCopy = useShellCopy(scheduleApprovalCopy);
+  const repairCopy = useShellCopy(evalRepairCopy);
+  const personCopy = useShellCopy(personMemoryCopy);
   const bodyId = useId();
   const { catId, lead, title, source, time } = useMailboxRowText(item);
   const heading = lead ? `${lead} ${title}` : title;
@@ -203,18 +151,48 @@ export function MailboxRow({
     hosted && item.approval ? hosted.sessions.get(sessionKey(hosted.ownerUserId, item.approval)) : undefined;
   const retainingDecision = session !== undefined && session.model.state.kind !== 'idle';
   const open = expanded && (!stale || retainingDecision);
-  const nativeConversation = Boolean(hosted && item.runtimeInteraction?.sourceKind === 'conversation_decision');
-  const requester = item.runtimeInteraction?.requesterCatId;
-  const requesterName = requester ? (knownCatName(requester, getCatById) ?? UNKNOWN_CAT_NAME) : null;
-  const requesterModel = requester ? getCatById(requester)?.defaultModel : null;
+  const nativeProposal =
+    hosted !== undefined && item.approval?.sourceFeatureId === 'F128' && !item.approval.inlineApprovable;
+  const nativeOriginal = Boolean(hosted && originalApprovalSource(item));
+  const originalKind = item.approval?.sourceFeatureId === 'F225' ? originalCopy.kind.F225 : originalCopy.kind.F231;
+  const nativeRuntime = Boolean(hosted && (item.runtimeInteraction || item.choiceRequest));
+  const nativeReview = Boolean(hosted && readMailboxReviewSource(item, hosted.ownerUserId));
+  const domainFeature = item.approval?.sourceFeatureId;
+  const nativeDomain = hosted && domainFeature && isDomainApprovalFeature(domainFeature) ? domainFeature : null;
+  const nativeCorrection = Boolean(hosted && domainFeature === 'F321');
+  const nativeSchedule = Boolean(hosted && domainFeature === 'F139');
+  const nativeRepair = Boolean(hosted && domainFeature === 'F266');
+  const nativePerson = Boolean(hosted && domainFeature === 'F276');
+  const nativeCanonical = Boolean(nativeDomain || nativeCorrection || nativeSchedule || nativeRepair || nativePerson);
   return (
     <li
       data-testid="mailbox-item"
-      data-kind-label={nativeConversation ? conversationCopy.kind : item.choiceRequest ? t.choice : t.kinds[item.kind]}
+      data-kind-label={
+        item.collectiveAccountabilityRequest
+          ? t.accountabilityKind
+          : nativePerson
+            ? personCopy.kind
+            : nativeRepair
+              ? repairCopy.kind
+              : nativeSchedule
+                ? scheduleCopy.kind
+                : nativeCorrection
+                  ? correctionCopy.kind
+                  : nativeDomain
+                    ? domainCopy.kind[nativeDomain]
+                    : nativeOriginal
+                      ? originalKind
+                      : nativeReview
+                        ? reviewCopy.kind
+                        : item.choiceRequest || nativeRuntime
+                          ? runtimeKind
+                          : t.kinds[item.kind]
+      }
       data-row-key={rowKey}
       data-stale={stale ? 'true' : undefined}
       data-expanded={open ? 'true' : 'false'}
       className="rounded-[14px]"
+      data-chat-background-surface={item.userMention ? 'work' : 'paper'}
       style={{
         opacity: stale ? 0.6 : undefined,
         border: `1px solid ${open ? 'var(--shell-hairline-strong)' : 'var(--shell-hairline)'}`,
@@ -222,22 +200,29 @@ export function MailboxRow({
       }}
     >
       <div className={item.userMention && personal ? 'flex items-start gap-2 px-3 py-3' : undefined}>
-        {nativeConversation ? (
-          <div
-            className="flex flex-wrap items-center gap-x-2 gap-y-1 px-3 pt-3 text-xs"
-            style={{ color: 'var(--shell-muted)' }}
-          >
-            <span>{conversationCopy.kind}</span>
-            {requester ? (
-              <span className="inline-flex min-w-0 items-center gap-1">
-                <ShellCatAvatar catId={requester} size={20} />
-                <span className="break-words">
-                  {requesterName}
-                  {requesterModel ? ` · ${requesterModel}` : ''}
-                </span>
+        {nativeCanonical ? null : nativeProposal || nativeReview || nativeRuntime || nativeOriginal ? (
+          <div className="space-y-2 px-3 pt-3 text-sm">
+            <div
+              className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs"
+              style={{ color: 'var(--shell-muted)' }}
+            >
+              <span>
+                {nativeOriginal
+                  ? originalKind
+                  : nativeReview
+                    ? reviewCopy.kind
+                    : nativeRuntime
+                      ? runtimeKind
+                      : t.newConversation}
               </span>
+              {catId ? <ApprovalMember catId={catId} /> : null}
+              {time ? <time className="ml-auto flex-none whitespace-nowrap">{time}</time> : null}
+            </div>
+            {nativeProposal ? (
+              <p className="m-0 break-words font-medium" data-testid="mailbox-item-title">
+                {title}
+              </p>
             ) : null}
-            {time ? <time className="ml-auto flex-none whitespace-nowrap">{time}</time> : null}
           </div>
         ) : (
           <button
@@ -270,6 +255,11 @@ export function MailboxRow({
                   style={{ color: 'var(--shell-muted)' }}
                 >
                   <span className={`min-w-0 flex-1 ${open ? 'break-words' : 'truncate'}`}>{title}</span>
+                  {item.userMention.handled && item.userMention.handledReason ? (
+                    <span className="flex-none whitespace-nowrap" data-testid="mailbox-mention-handled-reason">
+                      {t.mentionHandledReasons[item.userMention.handledReason]}
+                    </span>
+                  ) : null}
                   {time && !personal ? <time className="flex-none whitespace-nowrap">{time}</time> : null}
                   <Chevron open={open} />
                 </span>
@@ -281,7 +271,7 @@ export function MailboxRow({
                     className="flex-none rounded px-1.5 text-micro"
                     style={{ background: 'var(--shell-selected)', color: 'var(--shell-muted)' }}
                   >
-                    {item.choiceRequest ? t.choice : t.kinds[item.kind]}
+                    {item.choiceRequest || nativeRuntime ? runtimeKind : t.kinds[item.kind]}
                   </span>
                   <span className="flex-1" />
                   {time ? (
@@ -325,9 +315,16 @@ export function MailboxRow({
           </div>
         ) : null}
       </div>
-      <RowSessionLine open={open || nativeConversation} hosted={hosted} approval={item.approval} />
-      {open || nativeConversation ? (
-        <RowBody
+      {item.approval &&
+      (isScheduleRecoveryProjection(item.approval) || isCorrectionRecoveryProjection(item.approval)) ? null : (
+        <RowSessionLine
+          open={open || nativeProposal || nativeReview || nativeRuntime || nativeOriginal || nativeCanonical}
+          hosted={hosted}
+          approval={item.approval}
+        />
+      )}
+      {open || nativeProposal || nativeReview || nativeRuntime || nativeOriginal || nativeCanonical ? (
+        <MailboxRowBody
           item={item}
           id={bodyId}
           heading={heading}

@@ -7,6 +7,8 @@ import {
   reduceEvolutionProgramEvent,
   replayEvolutionProgramEvents,
 } from '../types/capability-evolution.js';
+import { evolutionExplorationReviewV1Schema } from '../types/capability-evolution-exploration.js';
+import { evolutionExplorationReadNodeRefSchema } from '../types/capability-evolution-exploration-record.js';
 import {
   activeCycleEvents,
   assetRef,
@@ -399,5 +401,140 @@ describe('capability evolution contracts', () => {
     expect(types.evolutionProgramEventEnvelopeV1Schema).toBe(evolutionProgramEventEnvelopeV1Schema);
     expect(root.replayEvolutionProgramEvents).toBe(replayEvolutionProgramEvents);
     expect(types.reduceEvolutionProgramEvent).toBe(reduceEvolutionProgramEvent);
+  });
+});
+
+const explorationRef = (state: string) => ({
+  ownerFeatureId: 'F314',
+  ownerStateRef: state,
+  version: 'revision-1',
+});
+
+function explorationReview() {
+  return {
+    schemaVersion: 1,
+    status: 'resolved',
+    programRef: explorationRef('program:history'),
+    objectRef: explorationRef('capability:history'),
+    sourceRef: explorationRef('publication:history'),
+    readAt: '2026-10-19T20:00:00.000Z',
+    overviewMarkdown: '### 历史\n\n作者正文。',
+    nodes: [
+      {
+        kind: 'public_archive',
+        nodeRef: explorationRef('step:first'),
+        title: '第一步',
+        summary: 'legacy fallback',
+        bodyMarkdown: '### 看见什么\n\n正文。',
+        sourceRef: explorationRef('publication:history'),
+        sources: [{ label: '原件', ref: explorationRef('source:first'), href: 'https://example.com/source' }],
+        changes: [],
+        parentEdges: [],
+        history: { period: '2026-09-19', updatedThrough: '2026-10-19' },
+      },
+    ],
+    experiments: [],
+    details: [],
+    blockers: [],
+  };
+}
+
+describe('capability evolution exploration read compatibility', () => {
+  it('preserves the specific asset coordinates when a forward-compatible node ref is read', () => {
+    const assetRef = {
+      ...explorationRef('asset:history-frame'),
+      assetKind: 'video',
+      assetId: 'history-frame',
+      futureAssetField: true,
+    };
+
+    expect(evolutionExplorationReadNodeRefSchema.parse(assetRef)).toEqual({
+      ownerFeatureId: 'F314',
+      ownerStateRef: 'asset:history-frame',
+      version: 'revision-1',
+      assetKind: 'video',
+      assetId: 'history-frame',
+    });
+    expect(
+      evolutionExplorationReadNodeRefSchema.safeParse({
+        ...explorationRef('asset:history-frame'),
+        assetKind: 'video',
+      }).success,
+    ).toBe(false);
+  });
+
+  it('keeps known authored content while stripping future API fields at every read layer', () => {
+    const candidate = explorationReview() as ReturnType<typeof explorationReview> & Record<string, unknown>;
+    candidate.futureEnvelope = { mode: 'newer-api' };
+    candidate.currentVersionRefs = [explorationRef('forged-adoption')];
+    Object.assign(candidate.programRef, { futureRefField: true });
+    Object.assign(candidate.nodes[0], { futureNodeField: ['newer'] });
+    Object.assign(candidate.nodes[0]?.history, { futureHistoryField: 'newer' });
+    Object.assign(candidate.nodes[0]?.sources?.[0], { futureSourceField: 1 });
+    const publicationRef = explorationRef('publication:history');
+    Object.assign(candidate, {
+      blockers: [
+        {
+          code: 'newer-owner-diagnostic',
+          ownerRef: explorationRef('owner:blocker'),
+          futureBlockerField: true,
+        },
+      ],
+      publication: {
+        revision: 1,
+        current: {
+          ref: { ...publicationRef, futurePublicationRefField: true },
+          sourceRevision: 'a'.repeat(40),
+          revision: 1,
+          bundled: false,
+          futureVersionField: true,
+        },
+        selected: { ref: publicationRef, sourceRevision: 'a'.repeat(40), revision: 1, bundled: false },
+        attempts: [],
+        hasMore: false,
+        selectionUpdate: {
+          kind: 'unchanged',
+          nextSelection: {
+            selectedSourceRef: { ...publicationRef, futureSelectionRefField: true },
+            selectedNodeRef: { ...candidate.nodes[0].nodeRef, futureNodeSelectionField: true },
+            futureSelectionField: true,
+          },
+          futureSelectionUpdateField: true,
+        },
+        futurePublicationField: true,
+      },
+    });
+
+    const parsed = evolutionExplorationReviewV1Schema.safeParse(candidate);
+    expect(parsed.success).toBe(true);
+    if (!parsed.success || parsed.data.status !== 'resolved') return;
+    expect((parsed.data as typeof parsed.data & { overviewMarkdown?: string }).overviewMarkdown).toContain('作者正文');
+    const node = parsed.data.nodes[0] as (typeof parsed.data.nodes)[number] & {
+      bodyMarkdown?: string;
+      sources?: Array<{ label: string; ref: ReturnType<typeof explorationRef>; href?: string }>;
+    };
+    expect(node.bodyMarkdown).toContain('正文');
+    expect(parsed.data).not.toHaveProperty('futureEnvelope');
+    expect(parsed.data).not.toHaveProperty('currentVersionRefs');
+    expect(parsed.data.programRef).not.toHaveProperty('futureRefField');
+    expect(node).not.toHaveProperty('futureNodeField');
+    expect(node.kind).toBe('public_archive');
+    if (node.kind === 'public_archive') expect(node.history).not.toHaveProperty('futureHistoryField');
+    expect(node.sources?.[0]).not.toHaveProperty('futureSourceField');
+    expect(parsed.data.blockers[0]).not.toHaveProperty('futureBlockerField');
+    expect(parsed.data.publication).not.toHaveProperty('futurePublicationField');
+    expect(parsed.data.publication?.current).not.toHaveProperty('futureVersionField');
+    expect(parsed.data.publication?.current.ref).not.toHaveProperty('futurePublicationRefField');
+    expect(parsed.data.publication?.selectionUpdate).not.toHaveProperty('futureSelectionUpdateField');
+    expect(parsed.data.publication?.selectionUpdate?.nextSelection).not.toHaveProperty('futureSelectionField');
+    expect(parsed.data.publication?.selectionUpdate?.nextSelection?.selectedSourceRef).not.toHaveProperty(
+      'futureSelectionRefField',
+    );
+  });
+
+  it('still rejects missing required coordinates while ignoring extensions', () => {
+    const candidate = explorationReview();
+    delete (candidate.nodes[0] as Partial<(typeof candidate.nodes)[number]>).title;
+    expect(evolutionExplorationReviewV1Schema.safeParse(candidate).success).toBe(false);
   });
 });

@@ -136,9 +136,11 @@ export class PersonMemoryProposalStatusContextResolver {
   async resolve(ownerUserId: string, threadId: string, currentPrompt = ''): Promise<string> {
     let messages: readonly StoredMessage[];
     try {
-      // RedisMessageStore implements this as a bounded reverse read. Never hydrate
-      // the lifetime of a persistent thread on every serial/parallel invocation.
-      messages = await this.messageStore.getByThread(threadId, MESSAGE_DISCOVERY_LIMIT, ownerUserId);
+      // Keep the bounded reverse timeline and full rich-card metadata, but leave
+      // unrelated top-level bodies and tool payloads in storage.
+      messages = await this.messageStore.getByThread(threadId, MESSAGE_DISCOVERY_LIMIT, ownerUserId, {
+        artifactProjection: true,
+      });
     } catch {
       return unavailableContext('message_history_unavailable');
     }

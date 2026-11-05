@@ -14,15 +14,23 @@ import { accountMessage } from './accounts/account-message';
 import { accountsCopy } from './accounts/accounts.shell-copy';
 import { ClaudeTokenModal } from './accounts/ClaudeTokenModal';
 import { useAccountDirectory } from './accounts/useAccountDirectory';
-import type { ProfileAuthType, ProfileItem } from './hub-accounts.types';
+import { quotaCopy } from './codex-accounts/quota.shell-copy';
+import type { BuiltinAccountClient, ProfileAuthType, ProfileItem } from './hub-accounts.types';
 import { normalizeBuiltinClientIds } from './hub-accounts.view';
 import { useShellCopy } from './shell/shell-copy';
 import { useShellLanguage } from './shell/shell-language';
 import { type UnifiedAuthEditData, UnifiedAuthModal } from './UnifiedAuthModal';
 import './accounts/account-directory.css';
 
-export function HubAccountsTab() {
+export function HubAccountsTab({
+  initialClientId,
+  toolLabel,
+}: {
+  initialClientId?: BuiltinAccountClient;
+  toolLabel?: string;
+} = {}) {
   const t = useShellCopy(accountsCopy);
+  const quota = useShellCopy(quotaCopy);
   const language = useShellLanguage();
   const directory = useAccountDirectory();
   const { cats } = useCatData();
@@ -105,6 +113,13 @@ export function HubAccountsTab() {
   if (directory.loading && !directory.data) return <p>{t.loading}</p>;
   return (
     <div className="account-directory">
+      {toolLabel && (
+        <p role="status">
+          {language === 'zh'
+            ? `正在管理 ${toolLabel} 的连接。使用工具已有配置时，无需重复添加认证。`
+            : `Managing ${toolLabel} connections. Existing tool configuration needs no duplicate credentials.`}
+        </p>
+      )}
       <div className="account-toolbar">
         <input
           type="search"
@@ -178,6 +193,7 @@ export function HubAccountsTab() {
                       <th>{t.provider}</th>
                       <th>{t.account}</th>
                       <th>{t.status}</th>
+                      <th>{quota.column}</th>
                       <th>{t.usedBy}</th>
                       <th>{t.actions}</th>
                     </tr>
@@ -201,7 +217,7 @@ export function HubAccountsTab() {
                         />
                         {switchTarget?.id === row.account.id && (
                           <tr className="account-expanded">
-                            <td colSpan={5}>
+                            <td colSpan={6}>
                               <AccountSwitchConfirm
                                 account={switchTarget}
                                 onClose={() => setSwitchTarget(undefined)}
@@ -251,6 +267,7 @@ export function HubAccountsTab() {
         initialAuthType={addType}
         open={showAuthModal}
         editProfile={editTarget}
+        initialClientId={editTarget ? undefined : initialClientId}
         onClose={() => {
           setShowAuthModal(false);
           setEditTarget(undefined);

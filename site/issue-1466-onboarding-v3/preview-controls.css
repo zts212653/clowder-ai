@@ -1,0 +1,120 @@
+.preview-top {
+  min-height: 38px;
+  background: #302d28;
+  color: #eee8de;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 0 14px;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  font-size: 11px;
+}
+.preview-top button {
+  color: #f1e4d4;
+  font-size: 11px;
+  min-height: 30px;
+  padding: 4px 8px;
+}
+.preview-top button:hover {
+  background: #4a443a;
+}
+.preview-top b {
+  font-weight: 500;
+}
+.dev-panel {
+  position: fixed;
+  right: 18px;
+  top: 47px;
+  z-index: 30;
+  width: min(350px, calc(100vw - 32px));
+  background: #fffefa;
+  box-shadow: 0 10px 50px #211c2c30;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 20px;
+}
+.dev-panel h2 {
+  font-size: 15px;
+}
+.dev-panel p {
+  font-size: 12px;
+}
+.dev-panel select {
+  width: 100%;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--field);
+  margin: 9px 0;
+}
+.dev-panel .button-row {
+  margin: 10px 0;
+}
+.dev-panel .button-row button {
+  font-size: 12px;
+}
+.dev-label {
+  font-size: 12px;
+  display: block;
+  margin-top: 15px;
+}
+.toast {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #322b24;
+  color: white;
+  padding: 12px 18px;
+  border-radius: 12px;
+  box-shadow: 0 4px 22px #0002;
+  z-index: 40;
+  max-width: 90vw;
+  font-size: 13px;
+}
+.modal-backdrop {
+  position: fixed;
+  inset: 38px 0 0;
+  background: #21190d33;
+  backdrop-filter: blur(4px);
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  z-index: 25;
+}
+.modal {
+  width: min(480px, 100%);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--card);
+  box-shadow: 0 20px 80px #2619092b;
+  padding: 28px;
+}
+.modal h2 {
+  margin-bottom: 10px;
+}
+.modal p {
+  font-size: 13px;
+}
+.modal .button-row {
+  margin-top: 20px;
+}
+.modal code {
+  display: block;
+  background: var(--field);
+  padding: 12px;
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+.mobile-break {
+  display: none;
+}
+@keyframes walk {
+  to {
+    background-position: -576px 0;
+  }
+}

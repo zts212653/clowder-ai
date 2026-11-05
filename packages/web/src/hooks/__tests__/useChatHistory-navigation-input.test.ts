@@ -55,7 +55,6 @@ function makeThreadState(messages: ChatMessage[]): ThreadState {
     catStatuses: {},
     catStatusDetails: {},
     catInvocations: {},
-    currentGame: null,
     unreadCount: 0,
     hasUserMention: false,
     lastActivity: Date.now(),
@@ -189,6 +188,54 @@ describe('useChatHistory navigation input owner', () => {
     return { el, top, second };
   }
 
+  it('keeps an explicit cold-source arrival pending when the first history snapshot commits', async () => {
+    const threadId = 'cold-source-before-first-layout';
+    const message = makeMsg('cold-target', 1);
+    useChatStore.setState({
+      currentThreadId: threadId,
+      messages: [],
+      hasMore: true,
+      threadStates: { [threadId]: { ...makeThreadState([]), hasMore: true } },
+    });
+    let release!: (value: Response) => void;
+    const page = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+    apiFetchMock.mockImplementation(async (url) =>
+      String(url).startsWith('/api/messages?')
+        ? page
+        : ({
+            ok: true,
+            json: async () => ({ tasks: [], queue: [], activeInvocations: [], hasMore: false }),
+          } as Response),
+    );
+    await act(async () => root.render(React.createElement(HookHost, { threadId })));
+    const el = capturedHook!.scrollContainerRef.current!;
+    const top = defineMutableNumberProp(el, 'scrollTop', 0);
+    defineMutableNumberProp(el, 'scrollHeight', 1400);
+    defineMutableNumberProp(el, 'clientHeight', 600);
+    el.getBoundingClientRect = () => ({ top: 100, bottom: 700, height: 600 }) as DOMRect;
+    const rect = () => ({ top: 500 - top.get(), bottom: 620 - top.get(), height: 120 });
+    const boundary = appendMessageBoundary(el, message.id, rect);
+    const target = boundary.firstElementChild as HTMLElement;
+    target.getBoundingClientRect = () => rect() as DOMRect;
+    target.scrollIntoView = () => top.set(240);
+    capturedHook!.messagesEndRef.current!.scrollIntoView = vi.fn();
+    const settled = vi.fn();
+    act(() => {
+      void capturedHook!.navigateToMessage(message.id).then(settled);
+    });
+    await act(async () =>
+      release({ ok: true, json: async () => ({ messages: [message], hasMore: false }) } as Response),
+    );
+    await act(async () => {
+      for (let frame = 0; frame < 8; frame++) flushAnimationFrames();
+    });
+    expect(settled).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'settled', threadId, messageId: message.id }),
+    );
+  });
+
   it('captures the actual surface reading point and restores it only after owner settlement', async () => {
     const { top } = await openThread('search-reading-return');
     const gesture = beginGesture();
@@ -231,6 +278,48 @@ describe('useChatHistory navigation input owner', () => {
     });
     expect(capturedHook!.releaseReadingRef(captured.ref)).toBe(true);
     expect(readChatReadingRef(captured.ref)).toBeUndefined();
+  });
+
+  it('confirms the saved paragraph after a long origin reflows and its real widget acknowledges input', async () => {
+    const threadId = 'search-return-reflowed-paragraph';
+    const { el, top } = await openThread(threadId);
+    const boundary = el.querySelector<HTMLElement>('[data-message-viewport-id="first"]')!;
+    const paragraph = document.createElement('p');
+    paragraph.textContent = 'The same paragraph the reader left.';
+    let paragraphTop = 240;
+    paragraph.getBoundingClientRect = () =>
+      ({ top: 100 + paragraphTop - top.get(), bottom: 140 + paragraphTop - top.get() }) as DOMRect;
+    boundary.querySelector('[data-message-id]')!.appendChild(paragraph);
+    act(() => {
+      const gesture = beginGesture();
+      gesture.scrollTo(200);
+      gesture.end();
+    });
+    const origin = capturedHook!.captureReadingRef()!;
+    expect(readChatReadingRef(origin.ref)?.position).toMatchObject({
+      messageAnchor: { messageId: 'first', viewportOffsetPx: -200, blockViewportOffsetPx: 40 },
+    });
+    const fixture = await mountReceiptWidget(el);
+    try {
+      paragraphTop += 80;
+      act(() => {
+        const gesture = beginGesture();
+        gesture.scrollTo(500);
+        gesture.end();
+      });
+      let receipt!: ReturnType<ReturnType<typeof useChatHistory>['restoreReadingRef']>;
+      act(() => {
+        receipt = capturedHook!.restoreReadingRef(origin.ref);
+      });
+      await act(async () => flushAnimationFrames());
+      expect(top.get()).toBe(280);
+      expect(paragraph.getBoundingClientRect().top - el.getBoundingClientRect().top).toBe(40);
+      await act(async () => fixture.acknowledge(fixture.requests()[0]!));
+      expect(await receipt).toMatchObject({ status: 'settled', exact: true });
+      expect(readChatReadingRef(origin.ref)).toBeDefined();
+    } finally {
+      fixture.dispose();
+    }
   });
 
   it.each([2, 100])('keeps an older origin pending while its page takes %i frames', async (frames) => {
@@ -292,6 +381,51 @@ describe('useChatHistory navigation input owner', () => {
     expect(settled).toHaveBeenCalledWith(expect.objectContaining({ status: 'settled', exact: true }));
     expect(top.get()).toBe(200);
     expect(readChatScrollState(threadId)).toMatchObject({ anchor: 'offset', messageAnchor: { messageId: 'first' } });
+  });
+
+  it.each(['refresh', 'restore'] as const)('keeps a return alive during pointer hover in %s', async (phase) => {
+    const threadId = `return-hover-${phase}`;
+    const { el, top } = await openThread(threadId);
+    act(() => {
+      const gesture = beginGesture();
+      gesture.scrollTo(200);
+      gesture.end();
+    });
+    const origin = capturedHook!.captureReadingRef()!;
+    act(() => {
+      const gesture = beginGesture();
+      gesture.scrollTo(500);
+      gesture.end();
+    });
+    let releaseHistory!: (response: Response) => void;
+    apiFetchMock.mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          releaseHistory = resolve;
+        }),
+    );
+    let receipt!: ReturnType<ReturnType<typeof useChatHistory>['restoreReadingRef']>;
+    await act(async () => {
+      receipt = capturedHook!.restoreReadingRef(origin.ref, undefined, { refresh: true });
+    });
+    expect(releaseHistory).toBeTypeOf('function');
+    const hover = () => {
+      el.dispatchEvent(new MouseEvent('pointermove', { clientY: 150, buttons: 0 }));
+      el.dispatchEvent(new MouseEvent('pointermove', { clientY: 180, buttons: 0 }));
+    };
+    if (phase === 'refresh') act(hover);
+    await act(async () => {
+      releaseHistory({
+        ok: true,
+        json: async () => ({ messages: [makeMsg('first', 1), makeMsg('second', 2)], hasMore: false }),
+      } as Response);
+    });
+    if (phase === 'restore') act(hover);
+    await act(async () => {
+      for (let frame = 0; frame < 8; frame++) flushAnimationFrames();
+    });
+    expect(await receipt).toMatchObject({ status: 'settled', exact: true });
+    expect(top.get()).toBe(200);
   });
 
   it('returns through multiple older pages without converting the origin to bottom', async () => {
@@ -487,6 +621,89 @@ describe('useChatHistory navigation input owner', () => {
     expect(readChatReadingRef(origin.ref)?.threadId).toBe('source-return-cancellation');
   });
 
+  it.each([
+    ['return', 'abort'],
+    ['search', 'abort'],
+    ['return', 'wheel'],
+    ['search', 'wheel'],
+  ] as const)('settles a cancelled %s on %s while its history refresh is still pending', async (kind, cancellation) => {
+    const threadId = `cancel-refresh-${kind}-${cancellation}`;
+    const { el, top } = await openThread(threadId);
+    const origin = capturedHook!.captureReadingRef()!;
+    let releaseHistory!: (response: Response) => void;
+    apiFetchMock.mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          releaseHistory = resolve;
+        }),
+    );
+    const controller = new AbortController();
+    const settled = vi.fn();
+    await act(async () => {
+      const receipt =
+        kind === 'return'
+          ? capturedHook!.restoreReadingRef(origin.ref, controller.signal, { refresh: true })
+          : capturedHook!.navigateToMessage('first', controller.signal, { refresh: true });
+      void receipt.then(settled);
+    });
+    expect(releaseHistory).toBeTypeOf('function');
+    await act(async () => {
+      if (cancellation === 'abort') controller.abort();
+      else el.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
+    });
+    expect(settled).toHaveBeenCalledWith({ status: 'interrupted' });
+    await act(async () => {
+      el.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
+      top.set(200);
+      capturedHook!.handleScroll();
+      releaseHistory({
+        ok: true,
+        json: async () => ({ messages: [makeMsg('first', 1), makeMsg('second', 2)], hasMore: false }),
+      } as Response);
+      for (let frame = 0; frame < 8; frame++) flushAnimationFrames();
+    });
+    expect(settled).toHaveBeenCalledTimes(1);
+    expect(top.get()).toBe(200);
+    expect(readChatReadingRef(origin.ref)?.threadId).toBe(threadId);
+  });
+
+  it('lets a newer source reuse pending history without an old cancellation retiring it', async () => {
+    const { top, second } = await openThread('replacement-during-refresh');
+    second.querySelector<HTMLElement>('[data-message-id]')!.scrollIntoView = () => top.set(500);
+    const origin = capturedHook!.captureReadingRef()!;
+    let releaseHistory!: (response: Response) => void;
+    apiFetchMock.mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          releaseHistory = resolve;
+        }),
+    );
+    const oldController = new AbortController();
+    const oldResult = vi.fn();
+    const newResult = vi.fn();
+    await act(async () => {
+      void capturedHook!.restoreReadingRef(origin.ref, oldController.signal, { refresh: true }).then(oldResult);
+    });
+    await act(async () => {
+      void capturedHook!.navigateToMessage('second', undefined, { refresh: true }).then(newResult);
+      oldController.abort();
+    });
+    expect(oldResult).toHaveBeenCalledWith({ status: 'interrupted' });
+    expect(newResult).not.toHaveBeenCalled();
+    await act(async () => {
+      releaseHistory({
+        ok: true,
+        json: async () => ({ messages: [makeMsg('first', 1), makeMsg('second', 2)], hasMore: false }),
+      } as Response);
+    });
+    await act(async () => {
+      for (let frame = 0; frame < 8; frame++) flushAnimationFrames();
+    });
+    expect(newResult).toHaveBeenCalledWith(expect.objectContaining({ status: 'settled', messageId: 'second' }));
+    expect(oldResult).toHaveBeenCalledTimes(1);
+    expect(top.get()).toBe(500);
+  });
+
   it('refreshes canonical history before a search target can settle, instead of rendering an edited cached body', async () => {
     const { top, second } = await openThread('source-fresh-history');
     apiFetchMock.mockClear();
@@ -528,6 +745,37 @@ describe('useChatHistory navigation input owner', () => {
     });
     expect(result).toHaveBeenCalledWith({ status: 'unavailable' });
     expect(top.get()).toBe(600);
+  });
+
+  it('loads a reply newer than the cached window through canonical refresh before reporting arrival', async () => {
+    const threadId = 'cloud-reply-newer-window';
+    const { el, top } = await openThread(threadId);
+    const reply = makeMsg('reply122', 3);
+    apiFetchMock.mockClear();
+    apiFetchMock.mockResolvedValue({ ok: true, json: async () => ({ messages: [reply], hasMore: false }) } as Response);
+    const boundary = appendMessageBoundary(el, reply.id, () => ({ top: 100 - top.get(), bottom: 500 - top.get() }));
+    boundary.querySelector<HTMLElement>('[data-message-id]')!.scrollIntoView = () => top.set(100);
+    let receipt!: Promise<import('../useChatHistory').ChatMessageNavigationReceipt>;
+    await act(async () => {
+      receipt = capturedHook!.navigateToMessage(reply.id, undefined, { refresh: true });
+      for (let n = 0; n < 10; n++) await Promise.resolve();
+    });
+    expect(
+      apiFetchMock.mock.calls.some(
+        ([url]) => String(url).startsWith('/api/messages?') && !String(url).includes('before='),
+      ),
+    ).toBe(true);
+    await act(async () => {
+      for (let n = 0; n < 8; n++) flushAnimationFrames();
+      await receipt;
+    });
+    expect(await receipt).toMatchObject({ status: 'settled', threadId, messageId: reply.id });
+    expect(
+      useChatStore
+        .getState()
+        .getThreadState(threadId)
+        .messages.some((message) => message.id === reply.id),
+    ).toBe(true);
   });
 
   it('retires an explicit restore receipt on new input, and rejects another thread snapshot', async () => {
@@ -1391,6 +1639,103 @@ describe('useChatHistory navigation input owner', () => {
     expect(readChatScrollState(threadId)).toMatchObject({ anchor: 'offset', messageAnchor: { messageId: 'first' } });
   });
 
+  it('finishes native End at the new bottom when deferred rows grow beyond its original destination', async () => {
+    const threadId = 'native-end-growing-bottom';
+    const { el, top } = await openThread(threadId);
+    top.set(200);
+    saveChatScrollState(threadId, { top: 200, anchor: 'offset' });
+    const end = capturedHook!.messagesEndRef.current!;
+    end.scrollIntoView = vi.fn(() => top.set(el.scrollHeight - el.clientHeight));
+    act(() => {
+      el.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+      top.set(400);
+      capturedHook!.handleScroll();
+      Object.defineProperty(el, 'scrollHeight', { configurable: true, value: 1600 });
+      window.dispatchEvent(new Event(CHAT_LAYOUT_CHANGED_EVENT));
+      flushAnimationFrames();
+    });
+    expect(end.scrollIntoView).not.toHaveBeenCalled();
+    act(() => {
+      top.set(600); // The browser reaches the bottom measured at keydown.
+      capturedHook!.handleScroll();
+      el.dispatchEvent(new Event('scrollend'));
+    });
+    expect(top.get()).toBe(1000);
+    expect(readChatScrollState(threadId)).toEqual({ top: 1000, anchor: 'bottom' });
+    act(() => {
+      Object.defineProperty(el, 'scrollHeight', { configurable: true, value: 1800 });
+      window.dispatchEvent(new Event(CHAT_LAYOUT_CHANGED_EVENT));
+      flushAnimationFrames();
+    });
+    expect(top.get()).toBe(1200);
+    expect(readChatScrollState(threadId)).toEqual({ top: 1200, anchor: 'bottom' });
+  });
+
+  it.each([
+    'upward-wheel',
+    'message-navigation',
+    'thread-switch',
+  ] as const)('cancels an unfinished End destination on %s', async (interrupt) => {
+    const threadId = `native-end-cancel-${interrupt}`;
+    const { el, top } = await openThread(threadId);
+    top.set(200);
+    saveChatScrollState(threadId, { top: 200, anchor: 'offset' });
+    const end = capturedHook!.messagesEndRef.current!;
+    end.scrollIntoView = vi.fn(() => top.set(el.scrollHeight - el.clientHeight));
+    act(() => {
+      el.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+      top.set(400);
+      capturedHook!.handleScroll();
+      Object.defineProperty(el, 'scrollHeight', { configurable: true, value: 1600 });
+      if (interrupt === 'upward-wheel') {
+        el.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
+        top.set(300);
+        capturedHook!.handleScroll();
+      } else if (interrupt === 'message-navigation') {
+        const first = el.querySelector<HTMLElement>('[data-message-id="first"]')!;
+        first.scrollIntoView = vi.fn(() => top.set(0));
+        jump('first');
+      } else {
+        useChatStore.setState({ currentThreadId: 'other-thread' });
+      }
+      el.dispatchEvent(new Event('scrollend'));
+      window.dispatchEvent(new Event(CHAT_LAYOUT_CHANGED_EVENT));
+      flushAnimationFrames();
+    });
+    expect(end.scrollIntoView).not.toHaveBeenCalled();
+    expect(readChatScrollState(threadId)?.anchor).toBe('offset');
+  });
+
+  it.each([
+    'PageDown',
+    'wheel',
+    'click',
+    'outside-End',
+  ] as const)('keeps offset reading after %s when geometry grows', async (input) => {
+    const threadId = `native-offset-growth-${input}`;
+    const { el, top } = await openThread(threadId);
+    top.set(200);
+    saveChatScrollState(threadId, { top: 200, anchor: 'offset' });
+    const end = capturedHook!.messagesEndRef.current!;
+    act(() => {
+      if (input === 'wheel') el.dispatchEvent(new WheelEvent('wheel', { deltaY: 100 }));
+      else if (input === 'click') el.dispatchEvent(new Event('pointerdown'));
+      else if (input === 'outside-End') {
+        const control = document.createElement('button');
+        container.appendChild(control);
+        control.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+      } else el.dispatchEvent(new KeyboardEvent('keydown', { key: input, bubbles: true }));
+      Object.defineProperty(el, 'scrollHeight', { configurable: true, value: 1600 });
+      if (input !== 'click') top.set(600);
+      capturedHook!.handleScroll();
+      el.dispatchEvent(new Event('scrollend'));
+      window.dispatchEvent(new Event(CHAT_LAYOUT_CHANGED_EVENT));
+      flushAnimationFrames();
+    });
+    expect(end.scrollIntoView).not.toHaveBeenCalled();
+    expect(readChatScrollState(threadId)?.anchor).toBe('offset');
+  });
+
   it('keeps an explicit last-message anchor through passive bottom observations and late layout', async () => {
     const threadId = 'piano-last-source-late-layout';
     const { el, top, second } = await openThread(threadId);
@@ -1426,6 +1771,99 @@ describe('useChatHistory navigation input owner', () => {
       gesture.end();
     });
     expect(readChatScrollState(threadId)).toEqual({ top: 1000, anchor: 'bottom' });
+  });
+
+  it.each([
+    300, 600, 800,
+  ])('settles at a %ipx reply header when earlier rows shrink after native arrival', async (height) => {
+    const threadId = `reply-header-after-earlier-reflow-${height}`;
+    const { top, second } = await openThread(threadId);
+    let shift = 0;
+    const rect = () => ({ top: 500 + shift - top.get(), bottom: 500 + height + shift - top.get(), height }) as DOMRect;
+    second.getBoundingClientRect = rect;
+    const target = second.querySelector<HTMLElement>('[data-message-id]')!;
+    target.getBoundingClientRect = rect;
+    target.scrollIntoView = vi.fn(() => top.set(400 - Math.max(0, (600 - height) / 2)));
+
+    act(() => {
+      jump('second');
+      flushAnimationFrames();
+    });
+    expect(target.scrollIntoView).toHaveBeenCalledWith({
+      behavior: 'smooth',
+      block: height > 600 ? 'start' : 'center',
+    });
+    // The browser reached the reply; a preceding content-visibility row then
+    // shrinks. A partly visible short or equal-height reply also loses its header.
+    shift = -200;
+    act(() => {
+      for (let frame = 0; frame < 8; frame++) flushAnimationFrames();
+    });
+    expect(top.get()).toBe(200);
+    expect(readChatScrollState(threadId)).toMatchObject({
+      anchor: 'offset',
+      messageAnchor: { messageId: 'second', viewportOffsetPx: 0 },
+    });
+  });
+
+  it.each([
+    117.5, 289.859375, 625,
+  ])('settles a fitting %ipx reply completely inside the history viewport after native arrival reflows', async (height) => {
+    const threadId = `short-reply-clipped-tail-${height}`;
+    const { el, top, second } = await openThread(threadId);
+    let shift = 0;
+    let renderedHeight = 93.5;
+    const viewport = { top: 129, bottom: 754, height: 625 };
+    el.getBoundingClientRect = () => viewport as DOMRect;
+    Object.defineProperty(el, 'clientHeight', { configurable: true, value: viewport.height });
+    Object.defineProperty(el, 'scrollHeight', { configurable: true, value: 5000 });
+    const rect = () =>
+      ({
+        top: 1500 + shift - top.get(),
+        bottom: 1500 + renderedHeight + shift - top.get(),
+        height: renderedHeight,
+      }) as DOMRect;
+    second.getBoundingClientRect = rect;
+    const target = second.querySelector<HTMLElement>('[data-message-id]')!;
+    target.getBoundingClientRect = rect;
+    target.scrollIntoView = vi.fn(() => top.set(1500 - viewport.top - (viewport.height - renderedHeight) / 2));
+
+    const receipt = capturedHook!.navigateToMessage('second');
+    act(() => flushAnimationFrames());
+    // A first native center alignment can be invalidated by deferred row
+    // layout. These are the two observed short heights and the exact-fit edge;
+    // the captured first-next target begins at 719.5 in a 129..754 viewport.
+    shift = 719.5 - (viewport.top + (viewport.height - renderedHeight) / 2);
+    renderedHeight = height;
+    await act(async () => {
+      for (let frame = 0; frame < 8; frame++) flushAnimationFrames();
+      await receipt;
+    });
+    expect(await receipt).toMatchObject({ status: 'settled', threadId, messageId: 'second' });
+    expect(target.getBoundingClientRect().top).toBeGreaterThanOrEqual(viewport.top - 1);
+    expect(target.getBoundingClientRect().bottom).toBeLessThanOrEqual(viewport.bottom + 1);
+    expect(readChatScrollState(threadId)).toMatchObject({
+      anchor: 'offset',
+      messageAnchor: { messageId: 'second', viewportOffsetPx: 0 },
+    });
+  });
+
+  it('keeps a short reply centered when its full content remains visible', async () => {
+    const { top, second } = await openThread('short-reply-centered');
+    const rect = () => ({ top: 500 - top.get(), bottom: 800 - top.get(), height: 300 }) as DOMRect;
+    second.getBoundingClientRect = rect;
+    const target = second.querySelector<HTMLElement>('[data-message-id]')!;
+    target.getBoundingClientRect = rect;
+    target.scrollIntoView = vi.fn(() => top.set(250));
+    act(() => {
+      jump('second');
+      for (let frame = 0; frame < 8; frame++) flushAnimationFrames();
+    });
+    expect(top.get()).toBe(250);
+    expect(readChatScrollState('short-reply-centered')).toMatchObject({
+      anchor: 'offset',
+      messageAnchor: { messageId: 'second', viewportOffsetPx: 150 },
+    });
   });
 
   it('keeps the v2 source highlighted for a full interval after a late visible arrival', async () => {

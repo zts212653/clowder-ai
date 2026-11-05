@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 import type { DurableManagedGateJob, ManagedJobPrincipal } from './durable-managed-gate-job.js';
-import { openSupervisorStore } from './managed-job-database.js';
+import { closeSupervisorStore, openSupervisorStore } from './managed-job-database.js';
 
 export function managedJobPrincipalKey(principal: ManagedJobPrincipal): string {
   return JSON.stringify([principal.userId, principal.threadId, principal.catId]);
@@ -14,7 +14,7 @@ export function readManagedJobLedger(job: DurableManagedGateJob): Record<string,
       | undefined;
     return row ? (JSON.parse(row.record_json) as Record<string, unknown>) : null;
   } finally {
-    database.close();
+    closeSupervisorStore(database);
   }
 }
 
@@ -85,7 +85,7 @@ export function listManagedJobLedger(job: DurableManagedGateJob, activeOnly = fa
         .all() as { record_json: string }[]
     ).map((row) => JSON.parse(row.record_json) as Record<string, unknown>);
   } finally {
-    database.close();
+    closeSupervisorStore(database);
   }
 }
 
@@ -98,6 +98,6 @@ export function readManagedJobTransitions(job: DurableManagedGateJob): Record<st
         .all(job.jobId) as { record_json: string }[]
     ).map((row) => JSON.parse(row.record_json) as Record<string, unknown>);
   } finally {
-    database.close();
+    closeSupervisorStore(database);
   }
 }

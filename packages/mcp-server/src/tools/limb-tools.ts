@@ -250,7 +250,7 @@ export const limbTools = [
     description:
       'Invoke a tool on a specific limb node. Requires nodeId and command (tool name). ' +
       'Step 3 of 3: list_available → list_tools → invoke_tool. ' +
-      'Examples: limb_invoke_tool(nodeId="weixin-mp", command="weixin_mp.create_draft", params={...}). ' +
+      'Example: limb_invoke_tool(nodeId="fixture-node", command="fixture.run", params={...}). ' +
       'GOTCHA: Get nodeId from limb_list_available and build params according to limb_list_tools schema — do not guess. ' +
       'Shared Antigravity MCP GOTCHA: pass agentKeyCatId to select the correct variant sidecar key.',
     inputSchema: limbInvokeToolInputSchema,

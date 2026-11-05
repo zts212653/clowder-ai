@@ -8,6 +8,7 @@ import {
   handleTriagePawFeel,
   pawFeelDispositionTools,
 } from '../dist/tools/paw-feel-disposition-tools.js';
+import { handleScanPawFeelInbox, pawFeelInboxAuditScanTools } from '../dist/tools/paw-feel-inbox-audit-scan-tool.js';
 
 describe('F278 MCP paw-feel tools', () => {
   const saved = {};
@@ -80,6 +81,28 @@ describe('F278 MCP paw-feel tools', () => {
     );
     assert.ok(tool);
     assert.ok(tool.description.includes('partial'));
+  });
+
+  it('scans bounded audit rows through an authenticated POST continuation', async () => {
+    const result = await handleScanPawFeelInbox({ limit: 25, cursor: 'signed-audit-cursor' });
+
+    assert.equal(result.isError, undefined);
+    const url = new URL(requests[0].url);
+    assert.equal(url.pathname, '/api/callbacks/paw-feel-inbox-audit-scan');
+    assert.equal(url.search, '');
+    assert.equal(requests[0].init.method, 'POST');
+    assert.deepEqual(JSON.parse(requests[0].init.body), { limit: 25, cursor: 'signed-audit-cursor' });
+    const tool = pawFeelInboxAuditScanTools.find((candidate) => candidate.name === 'cat_cafe_scan_paw_feel_inbox');
+    assert.ok(tool);
+    assert.match(tool.description, /Use when:/);
+    assert.match(tool.description, /NOT for:.*cat_cafe_list_paw_feel_inbox/);
+    assert.match(tool.description, /Output:/);
+    assert.match(tool.description, /GOTCHA:.*live.*not.*frozen/i);
+    assert.deepEqual(tool.policy.standaloneReason, {
+      disposition: 'accepted-boundary',
+      kind: 'progressive-disclosure',
+      admissionRef: 'file:docs/features/F278-paw-feel-disposition-inbox.md',
+    });
   });
 
   it('declares current-invocation capture before the final source message exists', async () => {

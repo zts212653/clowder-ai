@@ -32,7 +32,8 @@ test('real Human media takeover keeps both PNG ranges and the original Task in o
   assert.equal(replay.delivery?.messageId, result.delivery?.messageId);
   assert.equal(f.messages.getById(message.id)?.content, message.content);
   assert.equal(
-    f.messages.getByThread(f.thread.id).filter((item) => item.catId === null && item.userId === 'operator').length,
+    f.messages.getByThread(f.thread.id).filter((item) => item.from?.kind === 'user' && item.from.userId === 'operator')
+      .length,
     1,
   );
   assert.deepEqual(await readFile(join(f.root, 'review-input.png')), before);
@@ -78,7 +79,8 @@ test('a real returned media candidate has one durable Host record pointing to th
   const receipts = f.messages.getByThread(f.thread.id).filter((item) => item.extra?.contentModificationReceiptV1);
   assert.equal(receipts.length, 1, 'media candidates must participate in the same durable Host projection');
   const receipt = receipts[0];
-  assert.equal(receipt?.userId, 'system');
+  assert.equal(receipt?.userId, 'operator');
+  assert.deepEqual(receipt?.from, { kind: 'system', service: 'content-modification' });
   assert.equal(receipt?.catId, null);
   assert.equal(receipt?.source, undefined);
   assert.equal(receipt?.replyTo, message.id);

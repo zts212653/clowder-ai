@@ -3,10 +3,19 @@ import { createModuleLogger } from '../../../infrastructure/logger.js';
 const log = createModuleLogger('plugin/package-staging');
 // Diagnostic metadata stays private and does not alter the error/cause contract.
 const failurePhases = new WeakMap<Error, string>();
+const STAGING_PHASES = ['copy', 'digest', 'preflight', 'list', 'extract', 'tree', 'seal'] as const;
+export type PackageStagingPhase = (typeof STAGING_PHASES)[number];
 
 export function recordPackageStagingPhase<T extends Error>(error: T, phase: string): T {
   failurePhases.set(error, phase);
   return error;
+}
+
+/** Read only Host-recorded metadata; error properties cannot forge this value. */
+export function packageStagingPhase(error: unknown): PackageStagingPhase | undefined {
+  if (typeof error !== 'object' || error === null) return undefined;
+  const phase = failurePhases.get(error as Error);
+  return STAGING_PHASES.find((known) => known === phase);
 }
 
 function describeStagingError(error: unknown, depth = 0): Record<string, unknown> {

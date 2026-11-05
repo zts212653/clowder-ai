@@ -51,6 +51,7 @@ test('Redis title provenance survives reload and a concurrent user rename wins',
     assert.equal(indexedClaims.size, 1);
     assert.equal(indexedClaims.get('f322-native')?.threadId, fresh.id);
     assert.equal(indexedClaims.get('f322-native')?.catId, 'codex61-sol');
+    assert.equal(indexedClaims.get('f322-native')?.isExternalImport, true);
     assert.equal(await redis.ttl(`thread:${fresh.id}`), -1);
   } finally {
     await redis.quit();

@@ -48,7 +48,7 @@ const render = (replies: CollectiveEventEnvelope[] = []) =>
   );
 
 it('keeps the exact named Cat as an inline mention without a duplicate delivery-status sentence', () => {
-  expect(render()).toContain('<span class="message-inline-mention">@缅因猫（Sol）</span>');
+  expect(render()).toMatch(/class="message-inline-mention"[^>]*>@缅因猫（Sol）<\/span>/);
   expect(render()).not.toContain('尚无公开回复');
   const humanReply: CollectiveEventEnvelope = {
     ...request,
@@ -57,7 +57,7 @@ it('keeps the exact named Cat as an inline mention without a duplicate delivery-
     recipient: { kind: 'channel' },
     replyToEventId: request.eventId,
   };
-  expect(render([humanReply])).toContain('<span class="message-inline-mention">@缅因猫（Sol）</span>');
+  expect(render([humanReply])).toMatch(/class="message-inline-mention"[^>]*>@缅因猫（Sol）<\/span>/);
   const catReply: CollectiveEventEnvelope = {
     ...request,
     eventId: 'evt_cat_reply',

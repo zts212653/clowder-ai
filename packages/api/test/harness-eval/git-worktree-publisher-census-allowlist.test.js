@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 async function moduleUnderTest() {
-  return import('../../dist/infrastructure/harness-eval/publish-verdict/git-worktree-publisher.js');
+  return import('../../dist/infrastructure/harness-eval/publish-verdict/verdict-stage-paths.js');
 }
 
 describe('verdict publisher F267 census allowlist', () => {

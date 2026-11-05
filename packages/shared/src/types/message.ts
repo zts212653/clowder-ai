@@ -29,6 +29,7 @@ export interface ImageContent {
   readonly type: 'image';
   readonly url: string;
   readonly alt?: string;
+  readonly sticker?: import('./message-stickers.js').MessageSticker;
 }
 
 /**

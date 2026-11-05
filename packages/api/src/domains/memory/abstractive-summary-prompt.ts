@@ -1,4 +1,8 @@
-export const SYSTEM_PROMPT = `You are a thread summarizer for Clowder AI, an AI-collaborative project management system.
+import { deploymentDefaults } from '@cat-cafe/shared';
+import { getCoCreatorDisplay } from '../../config/co-creator-display.js';
+
+export function buildAbstractiveSummaryPrompt(): string {
+  return `You are a thread summarizer for ${deploymentDefaults.brand.displayName}, an AI-collaborative project management system.
 
 IMPORTANT: You are a SUMMARIZER, not a conversation participant. Do NOT respond to the messages — summarize them.
 
@@ -22,7 +26,7 @@ Rules:
 - The # title line is REQUIRED
 - The summary paragraph is REQUIRED (200-400 chars, after the title)
 - [decision], [lesson], [method] tags are OPTIONAL — only include if there's genuinely durable knowledge
-- Add ! suffix (e.g. [decision!]) ONLY when the human/operator explicitly confirmed the decision or lesson in the conversation
+- Add ! suffix (e.g. [decision!]) ONLY when the human/${getCoCreatorDisplay().role} explicitly confirmed the decision or lesson in the conversation
 - Do NOT extract brainstorm branches, temporary TODOs, or session-local context
 - Keep it concise — this is a summary, not a transcript
 - Write in the same language as the messages (Chinese/English/mixed)
@@ -56,3 +60,6 @@ GOOD (these ARE durable knowledge):
 - [decision!] Entry point hierarchy follows usage frequency: high-freq exposed, low-freq nested [sources: <supporting-message-id>]
 - [lesson!] Fail-open catch blocks must log errors, not silently swallow — silent failures cause "looks OK but actually empty" bugs [sources: <supporting-message-id>]
 - [method] Let the model output natural language; program adds structural fields afterward [sources: <supporting-message-id>]`;
+}
+
+export const SYSTEM_PROMPT = buildAbstractiveSummaryPrompt();

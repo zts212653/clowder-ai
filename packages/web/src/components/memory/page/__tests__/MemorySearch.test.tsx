@@ -83,6 +83,19 @@ it('enables the topbar search and keeps only summary/raw and result-type control
   expect(container.textContent).not.toContain('混合检索');
 });
 
+it('lands a find keyword in the existing topbar search and submits it once through the memory owner', async () => {
+  fetchMock.mockImplementation((path: string) =>
+    Promise.resolve(ok(path.includes('/search?') ? { ...response('同源记忆结果'), query: '一行' } : {})),
+  );
+  await act(async () => root.render(<MemoryPagePreview tab="all" initialQuery="一行" />));
+  expect(container.querySelector<HTMLInputElement>('input[aria-label="搜索记忆和资料"]')?.value).toBe('一行');
+  expect(container.textContent).toContain('同源记忆结果');
+  const calls = fetchMock.mock.calls.filter(([url]) => url.startsWith('/api/memory/search?'));
+  expect(calls).toHaveLength(1);
+  expect(new URL(calls[0][0], 'https://example.test').searchParams.get('q')).toBe('一行');
+  expect(fetchMock.mock.calls.some(([url]) => url.startsWith('/api/evidence/search?'))).toBe(false);
+});
+
 it('treats search as a separate view with quiet submission and consistent calendar dates', async () => {
   const body = response('搜索日期');
   body.groups[0].results[0] = { ...body.groups[0].results[0], updatedAt: '2026-09-25' };

@@ -347,9 +347,40 @@ describe('mediaChatTarget', () => {
     });
   });
 
-  it('is null for a type the message does not carry, instead of guessing one', () => {
-    expect(mediaChatTarget({ title: 'a.jpg', mime: 'image/jpeg', source: SOURCE })).toBeNull();
-    expect(mediaChatTarget({ title: 'a.webp', mime: 'image/webp', source: SOURCE })).toBeNull();
+  it.each([
+    ['jpg', 'image/jpeg'],
+    ['webp', 'image/webp'],
+  ])('retains the actual %s original and MIME when handing its circled place to Chat', (extension, mime) => {
+    const source = { ...SOURCE, locator: { ...SOURCE.locator, path: `art/original.${extension}` } };
+    const result = mediaChatTarget({ title: `original.${extension}`, mime, source });
+    expect(result).toEqual({ title: `original.${extension}`, mediaType: mime, source });
+    if (!result) throw new Error('the original image must be a real Chat target');
+    const attachment = added(addMediaSelection([], result, REGION));
+    expect(attachment.source).toEqual(source);
+    expect(attachment.selections).toEqual([{ id: '1', selection: REGION }]);
+  });
+
+  it.each([
+    ['jpg', 'image/jpeg'],
+    ['webp', 'image/webp'],
+  ])('the shared message contract carries a %s without disguising its original bytes as PNG', (extension, mime) => {
+    const source = { ...SOURCE, locator: { ...SOURCE.locator, path: `art/original.${extension}` } };
+    expect(
+      MediaContextAttachmentSchema.safeParse({
+        v: 1,
+        id: 'original-media',
+        kind: 'media',
+        title: `original.${extension}`,
+        mediaType: mime,
+        source,
+        selections: [{ id: '1', selection: REGION }],
+      }).success,
+    ).toBe(true);
+  });
+
+  it('is null for an unsupported type instead of guessing an accepted format', () => {
+    expect(mediaChatTarget({ title: 'a.gif', mime: 'image/gif', source: SOURCE })).toBeNull();
+    expect(mediaChatTarget({ title: 'a.svg', mime: 'image/svg+xml', source: SOURCE })).toBeNull();
   });
 
   it('uses a name the shared schema accepts, never an empty one', () => {

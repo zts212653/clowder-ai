@@ -3,11 +3,11 @@ import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { chromium } from 'playwright';
 import { build } from 'vite';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
 
 test(
-  'real delivery UI keeps missing or replaced execution on original response and folds timeout diagnostics',
+  'real delivery UI keeps missing or replaced execution and its single failure on the original response',
   { timeout: 60000 },
   async () => {
     const webRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -107,9 +107,11 @@ test(
           fullPage: true,
         });
       }
-      await page.locator('[data-testid="diagnostics-toggle"]').click();
-      await page.locator('[data-testid="diagnostics-panel"]').waitFor();
+      assert.equal(await page.locator('[data-testid="diagnostics-toggle"]').count(), 0);
+      await page.getByRole('button', { name: '原回复错误正文', exact: true }).click();
+      await page.getByText('原执行超时：1846576ms，进程仍存活。', { exact: true }).waitFor();
       assert.match(await page.locator('main').innerText(), /1846576ms/);
+      assert.equal(await page.locator('[data-testid="diagnostics-panel"]').count(), 0);
       assert.equal(await page.getByText('回复失败。', { exact: true }).count(), 1);
       if (process.env.ISSUE1371_EVIDENCE_DIR) {
         await page.screenshot({

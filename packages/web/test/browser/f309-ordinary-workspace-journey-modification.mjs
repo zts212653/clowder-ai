@@ -12,7 +12,7 @@ function interceptChatSend(sent) {
   return async (request, url) => {
     if (url.pathname === '/api/messages' && request.method() === 'POST') {
       sent.push(request.postDataJSON());
-      return { body: {} };
+      return { body: { status: 'queued' } };
     }
     return undefined;
   };

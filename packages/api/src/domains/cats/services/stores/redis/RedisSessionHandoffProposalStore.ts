@@ -1,3 +1,6 @@
+import { reconcileSettledIndexTime } from '../../../../../utils/reconcile-settled-index-time.js';
+import { readRedisSettledPage } from '../../../../../utils/redis-settled-page.js';
+import type { SettledHistoryPageOptions, SettledHistorySourcePage } from '../../../../../utils/settled-history-page.js';
 /**
  * F225 Redis-backed SessionHandoffProposalStore.
  *
@@ -27,6 +30,7 @@ import {
   humanDispositionLedgerEntrySchema,
 } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
+import { advanceSettledIndex, SettledIndexPreparingError } from '../../../../../utils/redis-settled-index.js';
 import type {
   RejectSessionHandoffInput,
   SessionHandoffDispositionEntryLookup,
@@ -156,7 +160,9 @@ export class RedisSessionHandoffProposalStore implements ISessionHandoffProposal
   }
 
   async markExpired(proposalId: string): Promise<SessionHandoffProposal | null> {
-    const ok = await this.cas(proposalId, 'pending,approving', ['status', 'expired', 'updatedAt', String(Date.now())]);
+    const existing = await this.get(proposalId);
+    if (!existing || !ACTIVE_STATUSES.has(existing.status)) return null;
+    const ok = await this.casAndSettle(proposalId, existing.userId, existing.status, 'expired', Date.now());
     if (!ok) return null;
     const result = await this.get(proposalId);
     if (result) await this.redis.zrem(HandoffKeys.user(result.userId), proposalId);
@@ -200,7 +206,42 @@ export class RedisSessionHandoffProposalStore implements ISessionHandoffProposal
     return out;
   }
 
+  private async prepareSettledHistory() {
+    const ready = await advanceSettledIndex(this.redis, {
+      progressKey: 'handoff-proposals:history-index:v2',
+      prefix: 'handoff-proposal:',
+      type: 'hash',
+      entry: (raw, key) => {
+        const proposal = hydrateSessionHandoffProposal(raw as Record<string, string>);
+        if (key !== HandoffKeys.detail(proposal.proposalId)) throw new Error('handoff history identity mismatch');
+        return ['approved', 'rejected', 'expired'].includes(proposal.status)
+          ? { indexKey: HandoffKeys.settledUser(proposal.userId), id: proposal.proposalId, score: proposal.updatedAt }
+          : null;
+      },
+    });
+    if (!ready) throw new SettledIndexPreparingError();
+  }
+
+  async listSettledPage(
+    owner: string,
+    options: SettledHistoryPageOptions,
+  ): Promise<SettledHistorySourcePage<SessionHandoffProposal>> {
+    await this.prepareSettledHistory();
+    return readRedisSettledPage(this.redis, HandoffKeys.settledUser(owner), options, async (id, at) => {
+      const p = await this.get(id);
+      if (!p) return null;
+      if (p.userId !== owner || !['approved', 'rejected', 'expired'].includes(p.status))
+        throw new Error('Settled index canonical owner/status mismatch');
+      if (p.proposalId !== id) throw new Error('Settled index identity mismatch');
+      await reconcileSettledIndexTime(this.redis, HandoffKeys.settledUser(owner), id, at, p.updatedAt, [
+        { key: HandoffKeys.detail(id), fields: { status: p.status, userId: p.userId, updatedAt: p.updatedAt } },
+      ]);
+      return p;
+    });
+  }
+
   async listSettledByUser(userId: string, limit = 100): Promise<SessionHandoffProposal[]> {
+    await this.prepareSettledHistory();
     // Read from settled ZSet (score=updatedAt), newest first (ZREVRANGE).
     const ids = await this.redis.zrevrange(HandoffKeys.settledUser(userId), 0, limit - 1);
     if (ids.length === 0) return [];
@@ -214,7 +255,7 @@ export class RedisSessionHandoffProposalStore implements ISessionHandoffProposal
       const d = data as Record<string, string>;
       if (!d.proposalId) continue;
       // Double-check status in case of stale index membership
-      if (d.status !== 'approved' && d.status !== 'rejected') continue;
+      if (d.status !== 'approved' && d.status !== 'rejected' && d.status !== 'expired') continue;
       out.push(hydrateSessionHandoffProposal(d));
     }
     return out;
@@ -249,6 +290,7 @@ export class RedisSessionHandoffProposalStore implements ISessionHandoffProposal
       pipeline.zrem(HandoffKeys.session(existing.sourceSessionId), proposalId);
       pipeline.zrem(HandoffKeys.catThread(existing.userId, existing.sourceCatId, existing.sourceThreadId), proposalId);
       pipeline.zrem(HandoffKeys.user(existing.userId), proposalId);
+      pipeline.zrem(HandoffKeys.settledUser(existing.userId), proposalId);
     }
     await pipeline.exec();
   }

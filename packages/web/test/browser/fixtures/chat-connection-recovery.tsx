@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
 import { MessageViewportBoundary } from '@/components/MessageViewportBoundary';
 import { ThreadChatRuntimeProvider, useThreadChatRuntime } from '@/components/thread-chat/ThreadChatRuntimeProvider';
 import { useActiveExecutionProjection } from '@/hooks/useActiveExecutionProjection';
 import { useChatHistory } from '@/hooks/useChatHistory';
-import { useThreadMessages } from '@/hooks/useThreadScopedSelectors';
 import { useActiveExecutionStore } from '@/stores/activeExecutionStore';
 import { useChatStore } from '@/stores/chatStore';
 
@@ -56,12 +56,64 @@ function Conversation() {
 // parent sync deliberately occurs after the scoped child projects the new DOM,
 // matching ChatContainer -> ThreadChatSurface navigation ordering.
 function ScrollConversation({ activeThread }: { activeThread: string }) {
-  const { scrollContainerRef, messagesEndRef, handleScroll, jumpToLatest } = useChatHistory(activeThread);
-  const messages = useThreadMessages(activeThread);
+  const { scrollContainerRef, messagesEndRef, handleScroll, jumpToLatest, messages } = useChatHistory(activeThread);
+  useEffect(() => {
+    if (!new URLSearchParams(location.search).has('revalidateAtScroll')) return;
+    const viewport = scrollContainerRef.current;
+    let armed = false;
+    let count = 0;
+    const arm = (event: WheelEvent) => {
+      if (event.isTrusted && event.deltaY < 0) armed = true;
+    };
+    const revalidate = (event: Event) => {
+      if (!armed || event.target !== viewport || !viewport) return;
+      armed = false;
+      // Native pixels have moved, but React has not recorded the scroll yet.
+      // Commit an ordinary same-height transport update at that boundary.
+      flushSync(() => {
+        useChatStore.getState().patchThreadMessage(activeThread, 'scroll-80', {
+          content: `Streaming update ${++count}`,
+        });
+      });
+      viewport.dataset.revalidationCount = String(count);
+    };
+    viewport?.addEventListener('wheel', arm);
+    window.addEventListener('scroll', revalidate, true);
+    return () => {
+      viewport?.removeEventListener('wheel', arm);
+      window.removeEventListener('scroll', revalidate, true);
+    };
+  }, [activeThread, scrollContainerRef]);
+  useEffect(() => {
+    if (!new URLSearchParams(location.search).has('streamAtWheel')) return;
+    const viewport = scrollContainerRef.current;
+    // A deterministic transport scheduling boundary: a provider update commits
+    // after trusted wheel input but before the browser dispatches its scroll.
+    // The history owner, store writer, DOM layout and wheel default action are real.
+    const stream = () => {
+      flushSync(() => {
+        useChatStore.getState().patchThreadMessage(activeThread, 'scroll-80', {
+          content: 'Streaming paragraph grows while the reader starts moving upward. '.repeat(240),
+        });
+      });
+    };
+    viewport?.addEventListener('wheel', stream, { once: true });
+    return () => viewport?.removeEventListener('wheel', stream);
+  }, [activeThread, scrollContainerRef]);
   return (
     <>
       <button type="button" onClick={jumpToLatest}>
         Latest
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          useChatStore.getState().patchThreadMessage(activeThread, 'scroll-80', {
+            content: 'A passive update after the reader stopped scrolling.',
+          });
+        }}
+      >
+        Passive update
       </button>
       <button
         type="button"
@@ -78,21 +130,23 @@ function ScrollConversation({ activeThread }: { activeThread: string }) {
         ref={scrollContainerRef}
         onScroll={handleScroll}
         data-scroll-chat
-        style={{ height: 600, overflowY: 'auto', overflowAnchor: 'auto' }}
+        style={{ height: 600, overflowY: 'auto', overflowAnchor: 'none' }}
       >
-        {messages.map((message, index) => (
-          <MessageViewportBoundary
-            key={message.id}
-            messageId={message.id}
-            eager={index >= messages.length - 4}
-            backgroundMountDelayMs={50 + index * 5}
-          >
-            <article data-message-id={message.id} style={{ minHeight: 160, padding: 16 }}>
-              {message.content}
-            </article>
-          </MessageViewportBoundary>
-        ))}
-        <div ref={messagesEndRef} />
+        <div data-thread-chat-reading-column>
+          {messages.map((message, index) => (
+            <MessageViewportBoundary
+              key={message.id}
+              messageId={message.id}
+              eager={index >= messages.length - 4}
+              backgroundMountDelayMs={50 + index * 5}
+            >
+              <article data-message-id={message.id} style={{ minHeight: 160, padding: 16 }}>
+                {message.content}
+              </article>
+            </MessageViewportBoundary>
+          ))}
+          <div ref={messagesEndRef} />
+        </div>
       </div>
     </>
   );

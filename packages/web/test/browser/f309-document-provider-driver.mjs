@@ -1,15 +1,17 @@
-// Production queue/custody/execution machinery; the provider is a bounded deterministic test driver, never a model.
+// Production Queue/History/execution machinery; the provider is a bounded deterministic test driver, never a model.
 // Same provider boundary as api/test/helpers/persisted-queue-fixture; imports use shipped API output.
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { InvocationQueue } from '../../../api/dist/domains/cats/services/agents/invocation/InvocationQueue.js';
 import { InvocationTracker } from '../../../api/dist/domains/cats/services/agents/invocation/InvocationTracker.js';
 import { PersistedQueueDelivery } from '../../../api/dist/domains/cats/services/agents/invocation/PersistedQueueDelivery.js';
-import { QueuedMessageCustodyCoordinator } from '../../../api/dist/domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js';
 import { QueueProcessor } from '../../../api/dist/domains/cats/services/agents/invocation/QueueProcessor.js';
 import { InMemoryTurnExecutionStore } from '../../../api/dist/domains/cats/services/stores/memory/InMemoryTurnExecutionStore.js';
 import { InvocationRecordStore } from '../../../api/dist/domains/cats/services/stores/ports/InvocationRecordStore.js';
-import { MessageStore } from '../../../api/dist/domains/cats/services/stores/ports/MessageStore.js';
+import {
+  MessageStore,
+  settleLifecycleResponseInputs,
+} from '../../../api/dist/domains/cats/services/stores/ports/MessageStore.js';
 import { contentModificationRequestCarrierV1Schema } from '../../../shared/dist/index.js';
 
 function originalHumanTrigger(messages, messageId, { userId, threadId, catId }) {
@@ -21,13 +23,12 @@ function originalHumanTrigger(messages, messageId, { userId, threadId, catId }) 
   assert.ok(human.mentions.includes(catId));
   return human.id;
 }
-/** Real admission, QueueProcessor and durable custody, with a deterministic provider boundary that never calls a model. */
+/** Real admission, QueueProcessor and durable History, with a deterministic provider boundary that never calls a model. */
 export function createDocumentProviderDriver(messages = new MessageStore(), { executionSource = 'carrier' } = {}) {
   const queue = new InvocationQueue();
   const tracker = new InvocationTracker();
   const records = new InvocationRecordStore();
   const turns = new InMemoryTurnExecutionStore();
-  const coordinator = new QueuedMessageCustodyCoordinator({ messageStore: messages });
   const starts = [];
   const completed = [];
   const releases = [];
@@ -35,7 +36,6 @@ export function createDocumentProviderDriver(messages = new MessageStore(), { ex
     queue,
     invocationTracker: tracker,
     messageStore: messages,
-    queueCustodyCoordinator: coordinator,
     turnExecutionStore: turns,
     invocationRecordStore: {
       async create(input) {
@@ -49,6 +49,12 @@ export function createDocumentProviderDriver(messages = new MessageStore(), { ex
     socketManager: { emitToUser() {}, broadcastAgentMessage() {}, broadcastToRoom() {} },
     log: { info() {}, warn() {}, error() {} },
     router: {
+      async resolveConversationTargetsAtAdmission(targets) {
+        return [...targets];
+      },
+      async resolveExplicitTargets(targets) {
+        return [...targets];
+      },
       async *routeExecution(userId, _content, threadId, _messageId, targets, _intent, options) {
         const parentInvocationId = String(options?.parentInvocationId);
         const invocationId = randomUUID();
@@ -78,11 +84,22 @@ export function createDocumentProviderDriver(messages = new MessageStore(), { ex
                 : {}),
           },
         });
+        const lifecycle = await options.onLifecycleInvocationStarted({
+          threadId,
+          userId,
+          catId,
+          invocationId,
+          parentInvocationId,
+          startedAt,
+        });
+        assert.ok(lifecycle);
         yield {
           type: 'system_info',
           catId,
           turnInvocationId: invocationId,
           turnExecutionStartedAt: startedAt,
+          lifecycleResponseMessageId: lifecycle.responseMessageId,
+          lifecyclePriorFrontierMessageId: lifecycle.priorFrontierMessageId,
           timestamp: startedAt,
           extra: { turnExecution: { executionKind: 'ordinary', invocationId, parentInvocationId } },
         };
@@ -111,6 +128,18 @@ export function createDocumentProviderDriver(messages = new MessageStore(), { ex
               terminalReason: 'fixture_provider_released',
               endedAt: Date.now(),
             });
+          const turn = turns.get(invocationId);
+          const terminal = messages.commitLifecycleResponseTerminal(lifecycle.responseMessageId, {
+            invocationId,
+            status: turn.status === 'succeeded' ? 'completed' : turn.status,
+            completedAt: Date.now(),
+            content: '',
+            mentions: [],
+            origin: 'stream',
+            reason: 'fixture_provider_released',
+          });
+          assert.ok(terminal.kind === 'applied' || terminal.kind === 'replayed');
+          await settleLifecycleResponseInputs(messages, terminal.message, lifecycle.responseMessageId);
           yield { type: 'done', catId, invocationId, timestamp: Date.now(), isError: true };
         } finally {
           finish();
@@ -128,7 +157,8 @@ export function createDocumentProviderDriver(messages = new MessageStore(), { ex
     for (let attempt = 0; attempt < 100; attempt += 1) {
       const message = messages.getById(messageId);
       const catId = message?.mentions[0];
-      const id = catId && message?.queueCustody?.awakenedInvocationIdByCatId?.[catId];
+      const ref = message?.lifecycle?.dispatchRefs?.find((item) => item.targetId === catId);
+      const id = ref && messages.getById(ref.statusMessageId)?.lifecycle?.invocationId;
       if (id) {
         const turn = turns.get(id);
         assert.ok(turn);
@@ -148,7 +178,6 @@ export function createDocumentProviderDriver(messages = new MessageStore(), { ex
     tracker,
     records,
     turns,
-    coordinator,
     processor,
     delivery,
     messages,

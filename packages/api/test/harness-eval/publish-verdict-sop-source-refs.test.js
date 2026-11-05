@@ -4,7 +4,7 @@ import { after, before, describe, it } from 'node:test';
 
 import { handlePublishVerdict } from '../../dist/infrastructure/harness-eval/publish-verdict/publish-verdict.js';
 import { setupHarnessFeedback } from './eval-manual-trigger-fixtures.js';
-import { buildPacket } from './publish-verdict-fixtures.js';
+import { buildPacket, unreachablePublisher } from './publish-verdict-fixtures.js';
 
 function stubTrace(overrides = {}) {
   return {
@@ -41,7 +41,7 @@ describe('publish-verdict sop sourceRefs validation', () => {
 
   it('returns 400 invalid_source_ref before generator dispatch for malformed changedFileEvents ordering', async () => {
     const result = await handlePublishVerdict(
-      { harnessFeedbackRoot: root },
+      { gitPublisher: unreachablePublisher, harnessFeedbackRoot: root },
       {
         packet: buildPacket({ domainId: 'eval:sop' }),
         domain: 'eval:sop',

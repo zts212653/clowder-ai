@@ -6,7 +6,7 @@ import {
   derivePluginManagerActions,
   pluginManagerContributionsFromManifest,
   projectPluginManagerCatalogCandidate,
-} from '../dist/domains/plugin/plugin-manager-projection.js';
+} from '../dist/domains/plugin/manager/plugin-manager-projection.js';
 
 function digest(value) {
   return `sha512-${createHash('sha512').update(value).digest('base64')}`;
@@ -24,15 +24,16 @@ const candidate = {
   ownerAuthRequired: false,
   capabilities: [
     {
-      id: 'events.publish',
-      kind: 'events',
-      name: 'Publish declared events',
+      id: 'messaging.send',
+      kind: 'messaging',
+      name: 'Send messages',
     },
   ],
 };
 
 function installedSnapshot(overrides = {}) {
   const packageRecord = {
+    provenance: { kind: 'catalog', catalogId: candidate.catalogId, packageName: candidate.packageName },
     packageDigest: candidate.packageDigest,
     pluginId: candidate.pluginId,
     version: candidate.version,
@@ -48,7 +49,7 @@ function installedSnapshot(overrides = {}) {
           id: 'events',
           name: 'Events',
           resources: [],
-          capabilities: ['events.publish'],
+          capabilities: ['messaging.send'],
         },
       ],
       runtime: { transport: 'stdio', entrypoint: 'dist/entrypoint.js' },
@@ -75,22 +76,50 @@ function installedSnapshot(overrides = {}) {
     schemaVersion: 1,
     packages: [packageRecord],
     instances: [instance],
-    grants: [
-      {
-        pluginInstanceId: instance.pluginInstanceId,
-        requestedCapabilities: ['events.publish'],
-        effectiveGrants: ['events.publish'],
-        grantRevision: 1,
-        updatedAt: 1_000,
-      },
-    ],
   };
 }
 
-const emptySnapshot = { schemaVersion: 1, packages: [], instances: [], grants: [] };
+const emptySnapshot = { schemaVersion: 1, packages: [], instances: [] };
+
+describe('client source trust is descriptive, not an install or enable gate', () => {
+  it('retains trusted catalog provenance recorded at installation', () => {
+    const snapshot = installedSnapshot();
+    snapshot.packages[0].provenance = {
+      kind: 'catalog',
+      catalogId: candidate.catalogId,
+      packageName: candidate.packageName,
+    };
+    assert.equal(projectPluginManagerCatalogCandidate(candidate, snapshot).source.trust, 'official');
+  });
+  for (const kind of ['local-directory', 'local-archive', 'git']) {
+    it(`${kind} remains usable and is not labeled trusted even when its identity matches the catalog`, () => {
+      const snapshot = installedSnapshot();
+      snapshot.packages[0].provenance = {
+        kind,
+        packageName: candidate.packageName,
+        ...(kind === 'git' ? { url: 'https://example.com/plugin.git' } : {}),
+      };
+      const result = projectPluginManagerCatalogCandidate(candidate, snapshot);
+      assert.equal(result.source.trust, 'unverified');
+      assert.equal(result.actions.setEnabled, true);
+    });
+  }
+  it('a missing admission origin cannot borrow a current catalog identity', () => {
+    const snapshot = installedSnapshot();
+    const admitted = projectPluginManagerCatalogCandidate(candidate, snapshot);
+    delete snapshot.packages[0].provenance;
+    const before = structuredClone(snapshot);
+    const result = projectPluginManagerCatalogCandidate(candidate, snapshot);
+    assert.deepEqual(result.source, { kind: 'unknown', packageName: null, trust: 'unknown' });
+    const { source: _admittedSource, ...admittedFacts } = admitted;
+    const { source: _unknownSource, ...legacyFacts } = result;
+    assert.deepEqual(legacyFacts, admittedFacts, 'origin labels do not change existing Host facts or actions');
+    assert.deepEqual(snapshot, before, 'reading cannot manufacture admission provenance');
+  });
+});
 
 describe('F202 terminal Plugin Manager projection', () => {
-  it('projects declared contributions without relabeling permission grants as tools', () => {
+  it('projects declared contributions as tools', () => {
     const manifest = {
       ...installedSnapshot().packages[0].manifest,
       contributions: [
@@ -128,6 +157,24 @@ describe('F202 terminal Plugin Manager projection', () => {
           bridgeVersion: '1.0.0',
           operations: ['load', 'settle', 'comment', 'tracked-change'],
         },
+        {
+          type: 'desktop-window',
+          id: 'companion-window',
+          role: 'companion',
+          surface: {
+            entrypoint: 'dist/window.html',
+            integrity: 'sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+          },
+          bridgeVersion: '1.0.0',
+          presentation: {
+            width: 420,
+            height: 720,
+            transparent: true,
+            frame: false,
+            alwaysOnTop: true,
+            skipTaskbar: true,
+          },
+        },
       ],
     };
 
@@ -142,6 +189,7 @@ describe('F202 terminal Plugin Manager projection', () => {
       { id: 'daily-video-summary', kind: 'schedule', name: 'daily-video-summary' },
       { id: 'video-analysis-guide', kind: 'skill', name: 'video-analysis-guide' },
       { id: 'docx-editor', kind: 'content-editor-provider', name: 'docx-editor' },
+      { id: 'companion-window', kind: 'desktop-window', name: 'companion-window' },
     ]);
   });
 
@@ -165,7 +213,6 @@ describe('F202 terminal Plugin Manager projection', () => {
   it('joins an installed instance without an update or repair affordance', () => {
     const projected = projectPluginManagerCatalogCandidate(candidate, installedSnapshot(), {
       authState: 'not-required',
-      activeCapabilityIds: ['events.publish'],
     });
 
     assert.equal(projected.pluginInstanceId, 'pi_video');
@@ -173,7 +220,6 @@ describe('F202 terminal Plugin Manager projection', () => {
     assert.equal(projected.config, 'ready');
     assert.equal(projected.intent, 'enabled');
     assert.equal(projected.live, 'running');
-    assert.equal(projected.capabilitySummary[0].active, true);
     assert.deepEqual(projected.actions, {
       install: false,
       setEnabled: true,
@@ -184,7 +230,27 @@ describe('F202 terminal Plugin Manager projection', () => {
     assert.equal(Object.hasOwn(projected.actions, 'repair'), false);
   });
 
-  it('allows disable and uninstall after a crash without inventing repair', () => {
+  it('projects owner dependency closure provenance for shipped and materialized packages', () => {
+    for (const dependencyClosure of ['shipped', 'materialized']) {
+      const snapshot = installedSnapshot();
+      snapshot.packages[0].provenance = {
+        kind: 'local-archive',
+        packageName: candidate.packageName,
+        dependencyClosure,
+      };
+
+      const projected = projectPluginManagerCatalogCandidate(candidate, snapshot);
+
+      assert.deepEqual(projected.source, {
+        kind: 'local-archive',
+        packageName: candidate.packageName,
+        trust: 'unverified',
+        dependencyClosure,
+      });
+    }
+  });
+
+  it('allows explicit repair alongside disable and uninstall after a crash', () => {
     const projected = projectPluginManagerCatalogCandidate(candidate, installedSnapshot({ runtimeState: 'crashed' }), {
       activeCapabilityIds: [],
     });
@@ -193,7 +259,32 @@ describe('F202 terminal Plugin Manager projection', () => {
     assert.equal(projected.live, 'crashed');
     assert.equal(projected.actions.setEnabled, true);
     assert.equal(projected.actions.uninstall, true);
-    assert.equal(Object.hasOwn(projected.actions, 'repair'), false);
+    assert.equal(projected.actions.repair, true);
+  });
+
+  it('exposes current activation failure independently of intent and historical diagnostics', () => {
+    const lastRuntimeError = { code: 'UNEXPECTED_RUNTIME_FAILURE', occurredAt: 1_050, exitCode: null, signal: null };
+    for (const activationState of ['error', 'disabled', 'enabled']) {
+      const projected = projectPluginManagerCatalogCandidate(
+        candidate,
+        installedSnapshot({
+          activationState,
+          runtimeState: activationState === 'enabled' ? 'healthy' : 'stopped',
+          lastRuntimeError,
+        }),
+      );
+      assert.equal(projected.activationFailed, activationState === 'error' ? true : undefined);
+      assert.equal(projected.intent, activationState === 'enabled' ? 'enabled' : 'disabled');
+      assert.equal(projected.diagnostic.code, lastRuntimeError.code);
+      assert.equal(projected.actions.setEnabled, true);
+    }
+    const withIntentOverride = projectPluginManagerCatalogCandidate(
+      candidate,
+      installedSnapshot({ activationState: 'error', runtimeState: 'stopped' }),
+      { intentState: 'enabled' },
+    );
+    assert.equal(withIntentOverride.activationFailed, true);
+    assert.equal(withIntentOverride.intent, 'enabled');
   });
 
   it('blocks enable until config and typed owner auth are ready', () => {
@@ -218,7 +309,6 @@ describe('F202 terminal Plugin Manager projection', () => {
     const snapshot = installedSnapshot();
     snapshot.packages[0].packageState = 'quarantined';
     snapshot.instances = [];
-    snapshot.grants = [];
 
     const projected = projectPluginManagerCatalogCandidate(candidate, snapshot);
 

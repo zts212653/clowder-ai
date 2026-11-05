@@ -11,6 +11,9 @@ import type {
   DevelopmentSourceQuery,
   DevelopmentWorkTransition,
 } from '../cats/services/stores/ports/DevelopmentWorkTransition.js';
+import type { AttachEntrustedWorkArtifactInput } from '../cats/services/stores/ports/EntrustedWorkArtifactEvidence.js';
+import type { OrdinaryTaskMutation } from '../cats/services/stores/ports/OrdinaryTaskMutation.js';
+import type { EntrustedTaskDataControllerTransition } from '../cats/services/stores/ports/TaskDataControllerTransition.js';
 import type { ITaskStore } from '../cats/services/stores/ports/TaskStore.js';
 import type {
   AdmitEntrustedWorkStoreInput,
@@ -19,6 +22,9 @@ import type {
   CloseEntrustedWorkStoreResult,
   ReplaceAutomationStateIfGenerationInput,
   ReplaceDeploymentWaitIfGenerationInput,
+  ReplacePluginWaitInput,
+  TaskMutationWriteFence,
+  TaskSubjectUpsertCondition,
   UpdateEntrustedWorkStoreInput,
   UpdateEntrustedWorkStoreResult,
 } from '../cats/services/stores/ports/TaskStoreContract.js';
@@ -43,6 +49,14 @@ export function withBallCustodyTaskEvents(
 }
 
 class BallCustodyTaskStore implements ITaskStore {
+  async mutateOrdinaryTask(command: OrdinaryTaskMutation, writeFence?: TaskMutationWriteFence) {
+    const before = await this.inner.get(command.taskId);
+    const result = await this.inner.mutateOrdinaryTask(command, writeFence);
+    if (before && result.kind === 'updated') this.recordStatusTransition(before, result.task);
+    return result;
+  }
+  readonly listByThreadPage?: NonNullable<ITaskStore['listByThreadPage']>;
+
   findDevelopmentWork(userId: string, scope: DevelopmentScopeV1) {
     return this.inner.findDevelopmentWork(userId, scope);
   }
@@ -52,12 +66,20 @@ class BallCustodyTaskStore implements ITaskStore {
   hasDevelopmentSource(query: DevelopmentSourceQuery) {
     return this.inner.hasDevelopmentSource(query);
   }
+  transitionEntrustedTaskDataController(
+    input: EntrustedTaskDataControllerTransition,
+    writeFence?: TaskMutationWriteFence,
+  ) {
+    return this.inner.transitionEntrustedTaskDataController(input, writeFence);
+  }
   constructor(
     private readonly inner: ITaskStore,
     private readonly ballCustody: IBallCustodyIngest,
     private readonly logger?: WarnLogger,
     private readonly actionLifecycle?: TaskActionSuccessorLifecycle,
-  ) {}
+  ) {
+    if (inner.listByThreadPage) this.listByThreadPage = inner.listByThreadPage.bind(inner);
+  }
 
   create(input: CreateTaskInput): MaybePromise<TaskItem> {
     return this.inner.create(input);
@@ -65,6 +87,26 @@ class BallCustodyTaskStore implements ITaskStore {
 
   get(taskId: string): MaybePromise<TaskItem | null> {
     return this.inner.get(taskId);
+  }
+
+  async replacePluginWait(taskId: string, input: ReplacePluginWaitInput): Promise<TaskItem | null> {
+    const before = await this.inner.get(taskId);
+    if (!before) return null;
+    const tracking = before.kind === 'pr_tracking' || before.kind === 'issue_tracking';
+    const status = tracking
+      ? input.state.await
+        ? 'doing'
+        : input.state.waitOutcome
+          ? 'done'
+          : before.status
+      : before.status;
+    await this.actionLifecycle?.assertUpdateAllowed(before, { status });
+    const updated = await this.inner.replacePluginWait(taskId, input);
+    if (updated) {
+      this.recordStatusTransition({ ...updated, status: input.expectedStatus }, updated);
+      await this.actionLifecycle?.completeStatusTransition(before, updated);
+    }
+    return updated;
   }
 
   getWaitRegistration(taskId: string): ReturnType<ITaskStore['getWaitRegistration']> {
@@ -137,8 +179,8 @@ class BallCustodyTaskStore implements ITaskStore {
     return this.inner.getBySubject(subjectKey);
   }
 
-  upsertBySubject(input: CreateTaskInput): MaybePromise<TaskItem> {
-    return this.inner.upsertBySubject(input);
+  upsertBySubject(input: CreateTaskInput, condition?: TaskSubjectUpsertCondition): MaybePromise<TaskItem> {
+    return this.inner.upsertBySubject(input, condition);
   }
 
   upsertBySubjectWithManagedWorkBinding(input: CreateTaskInput, binding: ManagedWorkBinding): MaybePromise<TaskItem> {
@@ -169,10 +211,14 @@ class BallCustodyTaskStore implements ITaskStore {
     return this.inner.admitEntrustedWork(input);
   }
 
-  closeEntrustedWork(taskId: string, input: CloseEntrustedWorkStoreInput): MaybePromise<CloseEntrustedWorkStoreResult> {
+  closeEntrustedWork(
+    taskId: string,
+    input: CloseEntrustedWorkStoreInput,
+    writeFence?: TaskMutationWriteFence,
+  ): MaybePromise<CloseEntrustedWorkStoreResult> {
     const beforeResult = this.inner.get(taskId);
     const closeAfterBefore = (before: TaskItem | null): MaybePromise<CloseEntrustedWorkStoreResult> => {
-      const closedResult = this.inner.closeEntrustedWork(taskId, input);
+      const closedResult = this.inner.closeEntrustedWork(taskId, input, writeFence);
       const finish = (result: CloseEntrustedWorkStoreResult): MaybePromise<CloseEntrustedWorkStoreResult> => {
         if (!before || result.kind !== 'closed') return result;
         this.recordStatusTransition(before, result.task);
@@ -184,13 +230,19 @@ class BallCustodyTaskStore implements ITaskStore {
     return isPromiseLike(beforeResult) ? beforeResult.then(closeAfterBefore) : closeAfterBefore(beforeResult);
   }
 
+  // Evidence append changes no status/custody and must not complete an action lifecycle.
+  attachEntrustedWorkArtifactEvidence(taskId: string, input: AttachEntrustedWorkArtifactInput) {
+    return this.inner.attachEntrustedWorkArtifactEvidence(taskId, input);
+  }
+
   updateEntrustedWork(
     taskId: string,
     input: UpdateEntrustedWorkStoreInput,
+    writeFence?: TaskMutationWriteFence,
   ): MaybePromise<UpdateEntrustedWorkStoreResult> {
     const beforeResult = this.inner.get(taskId);
     const updateAfterBefore = (before: TaskItem | null): MaybePromise<UpdateEntrustedWorkStoreResult> => {
-      const updatedResult = this.inner.updateEntrustedWork(taskId, input);
+      const updatedResult = this.inner.updateEntrustedWork(taskId, input, writeFence);
       const finish = (result: UpdateEntrustedWorkStoreResult): UpdateEntrustedWorkStoreResult => {
         if (before && result.kind === 'updated') this.recordStatusTransition(before, result.task);
         return result;

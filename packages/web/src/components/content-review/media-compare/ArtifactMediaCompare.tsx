@@ -31,7 +31,7 @@ export function ArtifactMediaCompare({
 }) {
   const isV2 = useShellPresentation() === 'v2';
   const workTitle = isV2
-    ? artworkTitle(title ?? view.review.title, round.asset.mediaType === 'image/png' ? '图片' : '作品')
+    ? artworkTitle(title ?? view.review.title, round.asset.media.kind === 'image' ? '图片' : '作品')
     : view.review.title;
   const pending = Boolean(controller.pending) || Boolean(recovery?.pending);
   const discussion = useArtifactChatDiscussion(view, round, workTitle);

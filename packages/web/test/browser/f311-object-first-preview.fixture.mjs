@@ -43,7 +43,7 @@ export async function createObjectFirstPreviews(bodies) {
   const input = messageStore.append({
     userId: 'default-user',
     threadId: thread.id,
-    catId: 'codex-astra',
+    from: { kind: 'agent', catId: 'codex-astra' },
     content: '隔离修订预览：真实代码组件，草稿内容与冻结来源快照；不是生产提交、验收或运行授权。',
     mentions: [],
     timestamp: 1789636862302,

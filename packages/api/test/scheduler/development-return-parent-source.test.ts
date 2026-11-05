@@ -114,7 +114,7 @@ for (const scenario of invalidOwnerTriggerRelations) {
       case 'unrelated human source': {
         const unrelated = fixture.messages.append({
           userId: fixture.actor.userId,
-          catId: null,
+          from: { kind: 'user', userId: fixture.actor.userId },
           threadId: fixture.actor.threadId,
           content: 'Unrelated human instruction',
           mentions: [],

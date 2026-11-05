@@ -1,10 +1,8 @@
 import { ChatVoiceFeatureControls } from '@/components/ChatVoiceFeatureControls';
-import { WorkspaceNowSurface } from '@/components/workspace/WorkspaceNowSurface';
-import { createAgentRunSurface } from './real-surface-adapters';
 import { VideoProjectList } from './video-project/VideoProjectList';
 import type { WorkspaceSurfaceDescriptor } from './workbench-contract';
 
-/** Catalogue entries reuse the existing running-work, voice and film owners. */
+/** Voice and film tools reuse their original owners; legacy now tabs return through the host. */
 export function WorkspaceAuxiliaryOwnerSurface({
   destination,
   threadId,
@@ -19,12 +17,5 @@ export function WorkspaceAuxiliaryOwnerSurface({
   if (destination === 'host:voice')
     return <ChatVoiceFeatureControls threadId={threadId ?? undefined} defaultCatId={defaultCatId} />;
   if (destination === 'host:films') return <VideoProjectList onOpen={onOpenSurface} />;
-  return (
-    <WorkspaceNowSurface
-      onSelectExecution={(execution) => {
-        const surface = createAgentRunSurface({ execution });
-        if (surface) onOpenSurface(surface);
-      }}
-    />
-  );
+  return null;
 }

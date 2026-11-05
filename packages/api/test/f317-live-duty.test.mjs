@@ -34,7 +34,7 @@ test('Live replaces the old concierge whitelist in both prompt paths; ordinary d
       assert.match(output, /桌面伴随岗位/);
       assert.doesNotMatch(output, /职责：接线，不深潜|工具白名单（只许使用）|triage-plan/);
       assert.match(output, liveCompanion.householdToolsEnabled ? /search_evidence/ : /本次家内资料工具未开放/);
-      assert.match(output, /岗位是倾听和执行/, 'the front-desk duty reaches both prompt paths');
+      assert.match(output, /快端与具名深思端持续配合/, 'the front-desk duty reaches both prompt paths');
       if (liveCompanion.householdToolsEnabled) {
         assert.match(output, /读取不等于处理完成/);
         for (const title of ['接会议、记录与停止', '记下一个想法', '交给伙伴', '问进展', '展示结果并接住改意'])
@@ -185,7 +185,7 @@ test('the actual serial route projects only its Host-owned Live port into duty c
     assert.match(captured, /桌面伴随岗位/);
     assert.match(captured, /HOST_COMPOSITION_CARRIER_CODEX_DUTY_OPUS/);
     assert.match(captured, householdToolsEnabled ? /search_evidence/ : /本次家内资料工具未开放/);
-    assert.match(captured, /岗位是倾听和执行/, 'the real invocation assembly carries the front-desk duty');
+    assert.match(captured, /快端与具名深思端持续配合/, 'the real invocation assembly carries the front-desk duty');
     assert.match(captured, householdToolsEnabled ? /展示结果并接住改意：/ : /没有挂载任何家内工具/);
     assert.equal(searchCount, 0, 'Live must not run the ordinary concierge message prefetch');
     assert.equal(

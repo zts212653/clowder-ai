@@ -1,10 +1,14 @@
+import { InvocationServiceScope } from '../invocation/invocation-service-scope.js';
+import { isRoutingOwnerAttempt } from './routing-owner-attempt.js';
+import { routingPreflightNotice } from './routing-preflight-notice.js';
+import { persistStartupRecovery } from './startup-recovery-projection.js';
 /**
  * Parallel Route Strategy
  * All cats respond independently to the same message.
  */
 
 import crypto from 'node:crypto';
-import type { CatConfig, CatId, OutputCommitDecision } from '@cat-cafe/shared';
+import type { CatConfig, CatId, OutputCommitDecision, RoutingPreflightDecisionV1 } from '@cat-cafe/shared';
 import { catRegistry, resolveWorkflowSopSkill } from '@cat-cafe/shared';
 import {
   deriveHistoryContextTokenCeiling,
@@ -43,6 +47,10 @@ import { sharedEventStore, sharedNudgeCooldown } from '../../../../memory/entity
 import type { PushRecallPresentation } from '../../../../memory/f200-types.js';
 import type { PreparedProactiveMemoryNudge } from '../../../../memory/ProactiveMemoryNudgeService.js';
 import { mergePushRecallPresentations, triggerRecallCorrelation } from '../../../../memory/recall-correlation-hook.js';
+import {
+  preflightRoutingDispatch,
+  routingDispatchPreflightReceipt,
+} from '../../../../routing-context/RoutingDispatchPreflightPort.js';
 import { assembleContext } from '../../context/ContextAssembler.js';
 import {
   buildInvocationContext,
@@ -83,7 +91,11 @@ import {
   resolveInvocationCapacitySnapshot,
   sealBeforeInvocationIfNeeded,
 } from '../invocation/invocation-capacity-snapshot.js';
-import { type InvocationParams, invokeSingleCat } from '../invocation/invoke-single-cat.js';
+import {
+  type InvocationParams,
+  invokeSingleCat,
+  prepareInvocationExecutionBinding,
+} from '../invocation/invoke-single-cat.js';
 import { buildMcpCallbackInstructions, needsMcpInjection } from '../invocation/McpPromptInjector.js';
 import {
   MEMBER_TIMEOUT_REASON,
@@ -95,9 +107,10 @@ import { recordTurnOutputVerdict, requireTurnOutputAllowed } from '../invocation
 import { resolveManagedSessionPolicySnapshot } from '../invocation/session-policy-snapshot.js';
 import { mergeStreams } from '../invocation/stream-merge.js';
 import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentService.js';
-import { AgentServiceUnavailableError } from '../registry/AgentServiceUnavailableError.js';
+import { AgentServiceUnavailableError, ExecutionAdmissionConflict } from '../registry/AgentServiceUnavailableError.js';
 import { parseA2AMentions } from '../routing/a2a-mentions.js';
 import { accumulateTextAggregate } from '../text-aggregation.js';
+import { commitCompletedRouteResponse, isCollectiveBoundResponse } from './commit-completed-response.js';
 import { type ContextEvalInput, extractContextEvalSignals } from './context-eval.js';
 import { buildBriefingMessage } from './format-briefing.js';
 import { isDirectOwnerDispositionOrigin } from './human-disposition-invocation-origin.js';
@@ -179,6 +192,23 @@ export async function* routeParallel(
   threadId: string,
   options: RouteOptions = {},
 ): AsyncIterable<AgentMessage> {
+  const invocationServices = new InvocationServiceScope();
+  try {
+    yield* routeParallelPrepared(deps, targetCats, message, userId, threadId, options, invocationServices);
+  } finally {
+    await invocationServices.dispose();
+  }
+}
+
+async function* routeParallelPrepared(
+  deps: RouteStrategyDeps,
+  targetCats: CatId[],
+  message: string,
+  userId: string,
+  threadId: string,
+  options: RouteOptions,
+  invocationServices: InvocationServiceScope,
+): AsyncIterable<AgentMessage> {
   const {
     contentBlocks,
     uploadDir,
@@ -193,7 +223,135 @@ export async function* routeParallel(
     modeSystemPromptByCat,
   } = options;
 
+  let routingDispatchPreflightDecision: RoutingPreflightDecisionV1 | undefined;
+  const originalTargets = [...targetCats];
+  const executionControls = new Map(
+    targetCats.map((catId) => {
+      const controller = new AbortController();
+      const signals = [controller.signal, signalForCat?.(catId), signal].filter((value) => value !== undefined);
+      return [catId, { controller, signal: AbortSignal.any(signals) }] as const;
+    }),
+  );
+  targetCats = targetCats.filter((catId) => !executionControls.get(catId)?.signal.aborted);
+  const pinnedServices = new Map<CatId, AgentService>();
+  const servicePreparationErrors = new Map<CatId, unknown>();
+  for (const catId of targetCats) {
+    try {
+      pinnedServices.set(catId, invocationServices.pin(getService(deps.services, catId, deps.unavailableServices)));
+    } catch (error) {
+      servicePreparationErrors.set(catId, error);
+    }
+  }
+  const prepared = await Promise.allSettled(
+    targetCats.map(async (catId) => {
+      const catSignal = executionControls.get(catId)?.signal;
+      const capture = (service?: AgentService) =>
+        prepareInvocationExecutionBinding(deps.invocationDeps, {
+          catId,
+          threadId,
+          userId,
+          ownerAuthProvenance: options.ownerAuthProvenance,
+          service,
+          toolExecutionPolicy: options.toolExecutionPolicy,
+          signal: catSignal,
+        });
+      const current = pinnedServices.get(catId);
+      if (!current) return capture();
+      const admitted = await invocationServices.admit(
+        current,
+        () => getService(deps.services, catId, deps.unavailableServices),
+        capture,
+        catSignal,
+      );
+      pinnedServices.set(catId, admitted.service);
+      return admitted.executionBinding;
+    }),
+  );
+  const executionBindings = new Map<CatId, Awaited<ReturnType<typeof prepareInvocationExecutionBinding>>>();
+  for (const [index, result] of prepared.entries()) {
+    const catId = targetCats[index];
+    if (!catId) continue;
+    if (result.status === 'fulfilled') executionBindings.set(catId, result.value);
+    else
+      yield {
+        type: 'error',
+        catId,
+        errorCode:
+          result.reason instanceof ExecutionAdmissionConflict
+            ? 'execution_binding_conflict'
+            : 'execution_binding_unavailable',
+        error: result.reason instanceof Error ? result.reason.message : 'Execution binding is unavailable',
+        timestamp: Date.now(),
+      };
+  }
+  targetCats = targetCats.filter((catId) => executionBindings.has(catId));
+  if (targetCats.length === 0) {
+    if (originalTargets[0]) yield { type: 'done', catId: originalTargets[0], isFinal: true, timestamp: Date.now() };
+    return;
+  }
+  if (deps.routingDispatchPreflight) {
+    const requestedTargetCats = [...targetCats];
+    const routingPreflight = await preflightRoutingDispatch(deps.routingDispatchPreflight, {
+      ownerId: userId,
+      targetCatIds: requestedTargetCats,
+      executionBindings: requestedTargetCats.map((catId) => {
+        const binding = executionBindings.get(catId);
+        const accountRevision = binding?.executionAccount?.accountRevision;
+        return {
+          catId,
+          providerId: binding?.catConfig?.provider?.trim() || binding?.catConfig?.clientId,
+          ...(accountRevision ? { accountRevision } : {}),
+        };
+      }),
+      ...(isRoutingOwnerAttempt(options, targetCats.length === 1 ? targetCats[0] : undefined)
+        ? { ownerRequestedAttempt: true }
+        : {}),
+      ...(options.routingContextIntent ? { intent: options.routingContextIntent } : {}),
+    });
+    routingDispatchPreflightDecision = routingPreflight;
+    for (const targetCatId of requestedTargetCats) {
+      const receipt = routingDispatchPreflightReceipt(routingPreflight, targetCatId);
+      const notice = await routingPreflightNotice(deps, options, routingPreflight, targetCatId, threadId, true);
+      if (notice) yield notice;
+      if (receipt.target.disposition === 'rejected') {
+        yield {
+          type: 'error',
+          catId: targetCatId,
+          errorCode: 'routing_preflight_rejected',
+          error: '本次未执行：成员当前不可用。恢复后可重试原消息。',
+          timestamp: Date.now(),
+        };
+      }
+    }
+    targetCats = requestedTargetCats.filter(
+      (catId) => routingPreflight.targets.find((target) => target.targetCatId === catId)?.disposition !== 'rejected',
+    );
+    if (targetCats.length === 0) {
+      const terminalCatId = requestedTargetCats[0];
+      if (terminalCatId) yield { type: 'done', catId: terminalCatId, isFinal: true, timestamp: Date.now() };
+      return;
+    }
+  }
+  // A persisted legacy domain scope cannot borrow the ordinary parallel carrier.
+  if (options.executionScope) {
+    for (const catId of targetCats)
+      yield {
+        type: 'error',
+        catId,
+        errorCode: 'legacy_execution_scope_retired',
+        error: '旧 Collective 执行入口已迁出，请从已安装插件重新发起。',
+        timestamp: Date.now(),
+      };
+    return;
+  }
   const ownerAuthProvenance = options.ownerAuthProvenance ?? 'unknown';
+  const triggerMessageId = currentUserMessageId ?? options.a2aTriggerMessageId;
+  const collectiveBoundTurn =
+    Boolean(deps.dotReplyTarget) &&
+    isCollectiveBoundResponse(
+      options.executionScope,
+      triggerMessageId ? await deps.messageStore.getById(triggerMessageId) : null,
+    );
   const thinkingMode = options.thinkingMode ?? 'play';
   const turnExecutionKind = 'ordinary';
   const exactA2ACallerCatId = options.a2aTriggerMessageId ? options.a2aCallerCatId : undefined;
@@ -201,6 +359,9 @@ export async function* routeParallel(
     options.cloudDispatchProvenance?.calledByCatId ?? (options.a2aTriggerMessageId ? exactA2ACallerCatId : userId);
   const bridgeTriggerMessageId =
     options.cloudDispatchProvenance?.sourceMessageId ?? options.a2aTriggerMessageId ?? currentUserMessageId;
+  const causalTriggerMessageId = currentUserMessageId ?? options.a2aTriggerMessageId;
+  const causalTriggerMessage = causalTriggerMessageId ? await deps.messageStore.getById(causalTriggerMessageId) : null;
+  const causalTriggerThreadId = causalTriggerMessage?.threadId === threadId ? threadId : undefined;
   // P2-3 fix: also consider default MCP server path (ClaudeAgentService has fallback resolution)
   const mcpServerPath = process.env.CAT_CAFE_MCP_SERVER_PATH || resolveDefaultClaudeMcpServerPath();
   const incrementalMode = Boolean(currentUserMessageId && deps.deliveryCursorStore);
@@ -471,7 +632,10 @@ export async function* routeParallel(
       }
       let service: AgentService;
       try {
-        service = getService(deps.services, catId, deps.unavailableServices);
+        if (servicePreparationErrors.has(catId)) throw servicePreparationErrors.get(catId);
+        const pinned = pinnedServices.get(catId);
+        if (!pinned) throw new Error('No frozen provider service');
+        service = pinned;
       } catch (error) {
         if (!(error instanceof AgentServiceUnavailableError)) throw error;
         unavailableCats.add(catId);
@@ -768,6 +932,11 @@ export async function* routeParallel(
               threadTitle: routeThread?.title ?? undefined,
               projectPath: routeThread?.projectPath,
               cursorOverlay: options.cursorBoundaries?.get(catId as string),
+              ...(options.resolvePendingWakeMessageIds
+                ? {
+                    resolvePendingWakeMessageIds: options.resolvePendingWakeMessageIds.bind(undefined, catId),
+                  }
+                : {}),
               ...(currentUserMessageId ? { sameUserWaveTriggerMessageId: currentUserMessageId } : {}),
               ...(contextProjection ? { contextProjection } : {}),
             },
@@ -941,7 +1110,7 @@ export async function* routeParallel(
 
       // F-parallel-cancel: each concurrent cat listens to ITS OWN slot signal, not the
       // shared primaryController.signal — canceling one cat must not abort its siblings.
-      const catSignal = signalForCat?.(catId) ?? signal;
+      const catSignal = executionControls.get(catId)?.signal;
       // F-parallel-cancel (cloud P2): skip invoke for a cat already cancelled BEFORE this route
       // started it (tombstone aborted signal — e.g. user clicked Stop on this cat pre-invoke).
       // Otherwise invokeSingleCat turns the aborted iterator into error+done, broadcasting /
@@ -954,7 +1123,11 @@ export async function* routeParallel(
       const remoteCancellation = createRemoteCancellationObserver();
       catRemoteCancellation.set(catId, remoteCancellation);
       const invocationStream = invokeSingleCat(deps.invocationDeps, {
+        executionBinding: executionBindings.get(catId),
+        ...(options.routingAdmission ? { routingAdmission: options.routingAdmission } : {}),
         ...(options.routeIntent ? { routeIntent: options.routeIntent } : {}),
+        ...(options.routingContextIntent ? { routingContextIntent: options.routingContextIntent } : {}),
+        ...(routingDispatchPreflightDecision ? { routingDispatchPreflightDecision } : {}),
         catId,
         service,
         capacitySnapshot,
@@ -966,6 +1139,11 @@ export async function* routeParallel(
         ownerAuthProvenance,
         threadId,
         invocationOrigin: resolveInvocationOrigin(options.humanDispositionInvocationOrigin),
+        contextSourceIngress:
+          options.contextSourceIngress ??
+          (options.humanDispositionInvocationOrigin === 'direct_owner' && options.currentUserMessageId
+            ? { kind: 'owner', sourceMessageId: options.currentUserMessageId }
+            : undefined),
         routeTopology: 'parallel',
         ...(targetContentBlocks ? { contentBlocks: targetContentBlocks } : {}),
         ...(targetUploadDir ? { uploadDir: targetUploadDir } : {}),
@@ -996,7 +1174,6 @@ export async function* routeParallel(
         ...(options.asrPersonMemoryScenes?.length ? { asrPersonMemoryScenes: options.asrPersonMemoryScenes } : {}),
         ...(memoryCueLegacyFallbacks.length > 0 ? { memoryCueLegacyFallbacks } : {}),
         ...(options.toolExecutionPolicy ? { toolExecutionPolicy: options.toolExecutionPolicy } : {}),
-        ...(options.executionScope ? { executionScope: options.executionScope } : {}),
         executionKind: turnExecutionKind,
         ...(options.beforeOutputCommit ? { outputFenced: true } : {}),
         executionCausal: {
@@ -1075,6 +1252,7 @@ export async function* routeParallel(
   const catOutputProjections = new Map<string, RoutingMessageOutputProjection>();
   let completedCount = 0;
   let yieldedFinalDone = false;
+  const unconfirmedProviderCats = new Set<string>();
   // F153: Accumulate total tokens across all parallel streams for route aggregate
   let routeTotalTokens = 0;
 
@@ -1117,8 +1295,19 @@ export async function* routeParallel(
       log.error({ streamIndex: idx, catId: targetCats[idx], err }, 'Parallel stream error (post-recovery)');
     },
     {
-      ...(signal ? { signal } : {}),
-      ...(signalForCat ? { signalForIndex: (index: number) => signalForCat(requireTargetCat(targetCats, index)) } : {}),
+      // Adapter-owned cancellation must finish the real child iterator. Legacy
+      // streams retain the existing abort shortcut, scoped to each child.
+      signalForIndex: (index: number) => {
+        const catId = requireTargetCat(targetCats, index);
+        if (pinnedServices.get(catId)?.cancellationMode === 'drain') return undefined;
+        return executionControls.get(catId)?.signal;
+      },
+      ownedControllerForIndex: (index: number) => {
+        const catId = requireTargetCat(targetCats, index);
+        return pinnedServices.get(catId)?.cancellationMode === 'drain'
+          ? executionControls.get(catId)?.controller
+          : undefined;
+      },
       valueForAbort: (index: number): AgentMessage => ({
         type: 'done',
         catId: requireTargetCat(targetCats, index),
@@ -1127,6 +1316,11 @@ export async function* routeParallel(
     },
   );
   for await (const msg of mergedStreams) {
+    if (msg.providerTeardown === 'unconfirmed') {
+      unconfirmedProviderCats.add(msg.catId);
+      yield msg;
+      continue;
+    }
     const transform = msg.catId ? getOutputTransform(msg.catId) : undefined;
     if (msg.type === 'done' && msg.catId && msg.metadata) {
       catMeta.set(msg.catId, mergeMessageMetadataSnapshots(catMeta.get(msg.catId), msg.metadata));
@@ -1184,6 +1378,19 @@ export async function* routeParallel(
           /* ignore parse errors */
         }
       }
+      if (effectiveMsg.extra?.startupRecovery && effectiveMsg.catId) {
+        const responseId = catLifecycleResponse.get(effectiveMsg.catId)?.messageId;
+        if (
+          !(await persistStartupRecovery(
+            deps.messageStore,
+            effectiveMsg,
+            responseId,
+            catInvocationId.get(effectiveMsg.catId),
+          ))
+        )
+          continue;
+        effectiveMsg = { ...effectiveMsg, messageId: responseId };
+      }
       if (effectiveMsg.type === 'text' && effectiveMsg.catId) {
         const cat = effectiveMsg.catId;
         const projection = catOutputProjections.get(cat);
@@ -1239,7 +1446,7 @@ export async function* routeParallel(
       if (
         effectiveMsg.type === 'error' &&
         effectiveMsg.catId &&
-        (signalForCat?.(effectiveMsg.catId) ?? signal)?.aborted
+        executionControls.get(effectiveMsg.catId)?.signal.aborted
       ) {
         continue;
       }
@@ -1248,7 +1455,7 @@ export async function* routeParallel(
         // #267: errors before abort are real provider failures; errors after abort are cleanup
         // F-parallel-cancel: judge abort with THIS cat's own signal, not the shared one —
         // else canceling one concurrent cat mislabels a sibling's real error as cleanup.
-        if (!(signalForCat?.(effectiveMsg.catId) ?? signal)?.aborted) catHadProviderError.add(effectiveMsg.catId);
+        if (!executionControls.get(effectiveMsg.catId)?.signal.aborted) catHadProviderError.add(effectiveMsg.catId);
         if (effectiveMsg.error) {
           const prev = catErrorText.get(effectiveMsg.catId) ?? '';
           catErrorText.set(effectiveMsg.catId, `${prev}${prev ? '\n' : ''}${effectiveMsg.error}`);
@@ -1599,7 +1806,7 @@ export async function* routeParallel(
         await requireTurnOutputAllowed(fencedTurnStore, ownInvId);
       }
       const lifecycleAdmission = catLifecycleResponse.get(msg.catId);
-      const completedSignal = signalForCat?.(msg.catId as CatId) ?? signal;
+      const completedSignal = executionControls.get(msg.catId as CatId)?.signal;
       // F117 KD-22: a member stopped by its output timeout failed, like a provider failure. Its own
       // error after the stop was dropped above, so its failure text and diagnostics come from what
       // its timer kept before stopping it.
@@ -1629,6 +1836,12 @@ export async function* routeParallel(
         errorCode: msg.errorCode,
         outputCommitRejected: !actionOutputCommitAllowed,
       });
+      const outputConfig = executionBindings.get(msg.catId as CatId)?.catConfig;
+      catOutputProjections.get(msg.catId)?.settle({
+        succeeded: lifecycleTerminalStatus === 'completed' && !catHadError.has(msg.catId),
+        nativePhases:
+          !outputConfig?.clientId || outputConfig.clientId === 'openai' || outputConfig.provider === 'openai',
+      });
       const lifecycleResponse =
         lifecycleAdmission && ownInvId
           ? {
@@ -1654,11 +1867,29 @@ export async function* routeParallel(
         : lifecycleResponse && providerFailureText
           ? providerFailureText
           : undefined;
+      const completedDotReturnCommit =
+        lifecycleResponse?.status === 'completed' && ownInvId && !collectiveBoundTurn && deps.dotReplyTarget
+          ? (message: AppendMessageInput) =>
+              commitCompletedRouteResponse(deps, {
+                responseMessageId: lifecycleResponse.messageId,
+                invocationId: ownInvId,
+                terminal: { status: 'completed', completedAt: lifecycleResponse.completedAt },
+                message,
+                targetCats: [],
+                allowDotReturn: true,
+                triggerMessageId,
+                admitWake: options.commitCompletedA2AWake,
+                userId,
+                ownerAuthProvenance,
+                threadId,
+                callerCatId: msg.catId as CatId,
+                ...(options.parentInvocationId ? { parentInvocationId: options.parentInvocationId } : {}),
+              })
+          : undefined;
       const failedA2AReportCommit =
         lifecycleResponse?.status === 'failed' &&
-        options.a2aTriggerMessageId &&
-        exactA2ACallerCatId &&
-        !options.a2aFailureReport
+        (options.commitFailedA2AReport ||
+          (options.a2aTriggerMessageId && exactA2ACallerCatId && !options.a2aFailureReport))
           ? async (message: AppendMessageInput) => {
               if (!options.commitFailedA2AReport) {
                 throw new Error('failed response A2A report admission unavailable');
@@ -1676,7 +1907,9 @@ export async function* routeParallel(
                 ownerAuthProvenance,
                 threadId,
                 reporterCatId: msg.catId as CatId,
-                predecessorCatId: exactA2ACallerCatId as CatId,
+                ...(!options.a2aFailureReport && exactA2ACallerCatId
+                  ? { predecessorCatId: exactA2ACallerCatId as CatId }
+                  : {}),
                 ...(options.parentInvocationId ? { parentInvocationId: options.parentInvocationId } : {}),
               });
             }
@@ -1922,6 +2155,7 @@ export async function* routeParallel(
                     causal: {
                       kind: 'invocation_reply' as const,
                       triggerMessageId: (currentUserMessageId ?? options.a2aTriggerMessageId) as string,
+                      ...(causalTriggerThreadId ? { triggerThreadId: causalTriggerThreadId } : {}),
                     },
                   }
                 : {}),
@@ -1929,6 +2163,7 @@ export async function* routeParallel(
               ...(msg.tracing ? { tracing: msg.tracing } : {}),
             },
           };
+          const terminalCommit = completedDotReturnCommit ?? failedA2AReportCommit;
           let storedMsg = null;
           if (deps.freshnessOutputCommitCoordinator && ownInvId) {
             outputCommitDecision = await deps.freshnessOutputCommitCoordinator.commit({
@@ -1940,7 +2175,7 @@ export async function* routeParallel(
               originTriggerMessageId: currentUserMessageId ?? options.a2aTriggerMessageId ?? null,
               message: streamMessageInput,
               ...(lifecycleResponse ? { lifecycleResponse } : {}),
-              ...(failedA2AReportCommit ? { commitLifecycleResponse: failedA2AReportCommit } : {}),
+              ...(terminalCommit ? { commitLifecycleResponse: terminalCommit } : {}),
             });
             if (options.persistenceContext) {
               options.persistenceContext.outputCommitDecisions = {
@@ -1950,8 +2185,8 @@ export async function* routeParallel(
             }
             storedMsg = await deps.messageStore.getById(outputCommitDecision.messageId);
           } else if (lifecycleResponse && ownInvId) {
-            storedMsg = failedA2AReportCommit
-              ? await failedA2AReportCommit(streamMessageInput)
+            storedMsg = terminalCommit
+              ? await terminalCommit(streamMessageInput)
               : await commitLifecycleResponseFromAppendInput(
                   deps.messageStore,
                   lifecycleResponse.messageId,
@@ -1963,6 +2198,20 @@ export async function* routeParallel(
             storedMsg = await deps.messageStore.append(streamMessageInput);
           }
 
+          if (
+            storedMsg &&
+            ownInvId &&
+            actionOutputCommitAllowed &&
+            lifecycleTerminalStatus === 'completed' &&
+            deps.messageSearchAnswerService
+          ) {
+            try {
+              storedMsg = await deps.messageSearchAnswerService.publishResponse(storedMsg, ownInvId);
+              allRichBlocks = [...(storedMsg.extra?.rich?.blocks ?? allRichBlocks)];
+            } catch {
+              log.warn({ threadId, messageId: storedMsg.id }, 'Search answer binding pending on committed response');
+            }
+          }
           turnStoredMessageId = storedMsg?.id;
 
           const triagePlanStore = deps.invocationDeps.conciergeTriagePlanStore;
@@ -2069,6 +2318,7 @@ export async function* routeParallel(
                       causal: {
                         kind: 'invocation_reply' as const,
                         triggerMessageId: (currentUserMessageId ?? options.a2aTriggerMessageId) as string,
+                        ...(causalTriggerThreadId ? { triggerThreadId: causalTriggerThreadId } : {}),
                       },
                     }
                   : {}),
@@ -2078,6 +2328,8 @@ export async function* routeParallel(
             };
             const answerBearingNoText =
               hasRichBlocks || Boolean(thinking && renderThinkingChunks(thinking).trim().length > 0);
+            const terminalCommit =
+              (answerBearingNoText ? completedDotReturnCommit : undefined) ?? failedA2AReportCommit;
             let storedNoText = null;
             let noTextOutputCommitDecision: OutputCommitDecision | undefined;
             if (answerBearingNoText && deps.freshnessOutputCommitCoordinator && ownInvId) {
@@ -2090,7 +2342,7 @@ export async function* routeParallel(
                 originTriggerMessageId: currentUserMessageId ?? options.a2aTriggerMessageId ?? null,
                 message: noTextMessageInput,
                 ...(lifecycleResponse ? { lifecycleResponse } : {}),
-                ...(failedA2AReportCommit ? { commitLifecycleResponse: failedA2AReportCommit } : {}),
+                ...(terminalCommit ? { commitLifecycleResponse: terminalCommit } : {}),
               });
               noTextOutputCommitDecision = decision;
               if (options.persistenceContext) {
@@ -2101,8 +2353,8 @@ export async function* routeParallel(
               }
               storedNoText = await deps.messageStore.getById(decision.messageId);
             } else if (lifecycleResponse && ownInvId) {
-              storedNoText = failedA2AReportCommit
-                ? await failedA2AReportCommit(noTextMessageInput)
+              storedNoText = terminalCommit
+                ? await terminalCommit(noTextMessageInput)
                 : await commitLifecycleResponseFromAppendInput(
                     deps.messageStore,
                     lifecycleResponse.messageId,
@@ -2114,6 +2366,25 @@ export async function* routeParallel(
               // Reviewed read-only tool-only audit remains non-routable and does not become
               // a normal answer. Unknown or mutating tools enter the freshness gate above.
               storedNoText = await deps.messageStore.append(noTextMessageInput);
+            }
+            if (
+              storedNoText &&
+              ownInvId &&
+              actionOutputCommitAllowed &&
+              lifecycleTerminalStatus === 'completed' &&
+              deps.messageSearchAnswerService
+            ) {
+              try {
+                storedNoText = await deps.messageSearchAnswerService.publishResponse(storedNoText, ownInvId);
+                const bound = storedNoText.extra?.messageSearchAnswer;
+                const block = bound && storedNoText.extra?.rich?.blocks.find((block) => block.id === bound.blockId);
+                if (block && !noTextBlocks.some((current) => current.id === block.id)) noTextBlocks.push(block);
+              } catch {
+                log.warn(
+                  { threadId, messageId: storedNoText.id },
+                  'Search answer binding pending on committed response',
+                );
+              }
             }
             // F088-P3: Stash rich blocks for outbound delivery (no-text branch)
             if (storedNoText && options.persistenceContext && noTextBlocks.length > 0) {
@@ -2157,7 +2428,7 @@ export async function* routeParallel(
               });
             }
           }
-        } else if (!(signalForCat?.(msg.catId) ?? signal)?.aborted && !sawUserFacingSystemInfo) {
+        } else if (!executionControls.get(msg.catId)?.signal.aborted && !sawUserFacingSystemInfo) {
           // No persisted message for fully silent turns.
           if (deps.draftStore && ownInvId) {
             deps.draftStore.delete(userId, threadId, ownInvId)?.catch?.(noop);
@@ -2439,8 +2710,8 @@ export async function* routeParallel(
   // terminal, while a provider error observed before abort remains unhealthy.
   if (deps.invocationDeps.threadStore) {
     for (const catId of targetCats) {
-      const catSignal = signalForCat?.(catId) ?? signal;
-      if (!catSignal?.aborted || catActivityUpdated.has(catId)) continue;
+      const catSignal = executionControls.get(catId)?.signal;
+      if (!catSignal?.aborted || catActivityUpdated.has(catId) || unconfirmedProviderCats.has(catId)) continue;
       try {
         await deps.invocationDeps.threadStore.updateParticipantActivity(
           threadId,
@@ -2486,7 +2757,7 @@ export async function* routeParallel(
   }
 
   // done-guarantee safety net: synthesize final done if loop exited without one
-  if (!yieldedFinalDone && targetCats.length > 0) {
+  if (!yieldedFinalDone && targetCats.length > 0 && unconfirmedProviderCats.size === 0) {
     yield {
       type: 'done' as AgentMessageType,
       catId: targetCats[targetCats.length - 1]!,

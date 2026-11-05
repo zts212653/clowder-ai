@@ -1,4 +1,5 @@
 import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+import { invocationFetch } from './invocation-auth.js';
 
 /**
  * Rich Block Rules Tool
@@ -8,21 +9,25 @@ import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
  * 猫猫首次使用富块前调用此工具获取完整规则。
  */
 
+import { deploymentDefaults } from '@cat-cafe/shared';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
+import { resolveInvocationEnv } from './invocation-auth.js';
 
 const defineTool = defineMcpMigrationFactory('rich-block-rules-tool.ts', undefined, {
   resourceFamily: 'artifact-surface',
   authority: 'local-runtime',
 });
 
-const API_URL = process.env['CAT_CAFE_API_URL'] ?? 'http://localhost:3004';
+function resolveApiUrl(): string {
+  return resolveInvocationEnv('CAT_CAFE_API_URL') ?? deploymentDefaults.apiBaseUrl;
+}
 
 export async function handleGetRichBlockRules(): Promise<ToolResult> {
-  const url = `${API_URL}/api/callbacks/rich-block-rules`;
+  const url = `${resolveApiUrl()}/api/callbacks/rich-block-rules`;
 
   try {
-    const response = await fetch(url);
+    const response = await invocationFetch(url);
 
     if (!response.ok) {
       const text = await response.text();
@@ -53,7 +58,7 @@ export const richBlockRulesTools = [
       implementationExport: 'handleGetRichBlockRules',
       action: 'read',
       risk: { level: 'read', openWorld: false },
-      runtimeProfiles: ['collective-work', 'full', 'readonly', 'desktop:live-companion'],
+      runtimeProfiles: ['full', 'readonly', 'desktop:live-companion'],
     },
   }),
 ] as const;

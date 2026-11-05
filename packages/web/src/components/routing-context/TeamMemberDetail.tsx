@@ -2,6 +2,10 @@
 
 import type { RoutingContextReadModelV1 } from '@cat-cafe/shared';
 import { CatAvatar } from '@/components/CatAvatar';
+import { MemberCopyProvider } from '../members/editor-presentation';
+import { MemberRoutingHistory } from '../members/MemberRoutingHistory';
+import { memberSaveCopy } from '../members/member-save.shell-copy';
+import { useShellCopy } from '../shell/shell-copy';
 import { RoutingSignalControls } from './RoutingSignalControls';
 import { AvailabilityBadge, TeamEvidenceFold } from './TeamCandidatePresentation';
 import type { TeamCapabilityReading, TeamMemberRow } from './team-member-projection';
@@ -64,6 +68,7 @@ export function TeamMemberDetail({
   onChanged: () => Promise<boolean>;
 }) {
   const { identity, capability, availability, candidate } = row;
+  const copy = useShellCopy(memberSaveCopy);
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3">
@@ -114,6 +119,12 @@ export function TeamMemberDetail({
         <TeamEvidenceFold candidate={candidate} capability={capability} />
       </section>
 
+      <details className="rounded-xl border border-cafe-subtle p-4" data-testid="team-member-records">
+        <summary className="cursor-pointer text-xs font-semibold text-cafe-accent">{copy.records}</summary>
+        <MemberCopyProvider>
+          <MemberRoutingHistory cat={{ id: identity.catId }} model={model} />
+        </MemberCopyProvider>
+      </details>
       <RoutingSignalControls
         subjectRef={{ type: 'cat', catId: identity.catId }}
         affectedCatIds={[identity.catId]}

@@ -58,6 +58,7 @@ packages/web/public/vendor/
 .gemini/
 .antigravitycli/
 .kimi/
+.kimi-code/
 .kiro/
 .trae/
 .dare/
@@ -154,6 +155,8 @@ assets/prototypes/
 desktop/node_modules/
 desktop-dist/
 bundled/
+# Locally cached prebuilt desktop resources; never add to the source PR.
+desktop/resources-prebuilt/
 docs/bug-report/werewolf-investigation/poster-screenshot.png
 .worktrees/
 .review-worktrees/
@@ -180,6 +183,8 @@ docs/discussions/exported-threads/
 *.mov
 *.mp4
 !site/assets/guides/*.mp4
+# 官网「30 秒看一个功能」的演示片（720p，每支约 4MB）
+!site/assets/demos/*.mp4
 *.avi
 *.mkv
 *.wav
@@ -239,3 +244,5 @@ packages/api/test/__b1_parent_a__/
 
 # Isolated artwork preview sessions; user-entered drafts and SQLite stay local.
 var/f309-artwork-preview/
+# Host-owned build output; release afterPack compiles its own target binary.
+desktop/plugin-window/native/app-assist

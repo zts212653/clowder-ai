@@ -4,6 +4,7 @@ import type { BacklogItem, MissionHubSelfClaimScope, ThreadPhase } from '@cat-ca
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { formatCatName, useCatData } from '@/hooks/useCatData';
+import { useCoCreatorDisplay } from '@/hooks/useCoCreatorConfig';
 import { resolveCatDisplayName } from '@/lib/cat-display-name';
 import { SuggestionDecisionPanel } from './SuggestionDecisionPanel';
 import { SuggestionOpenForm } from './SuggestionOpenForm';
@@ -53,6 +54,7 @@ export function SuggestionDrawer({
   onReleaseLease,
   onReclaimLease,
 }: SuggestionDrawerProps) {
+  const owner = useCoCreatorDisplay();
   const { cats, getCatById } = useCatData();
   const catOptions = useMemo(
     () =>
@@ -100,10 +102,10 @@ export function SuggestionDrawer({
   const statusLabel = useMemo(() => {
     if (!item) return '未选择任务';
     if (item.status === 'open') return '待建议领取';
-    if (item.status === 'suggested') return '等待co-creator决策';
+    if (item.status === 'suggested') return `等待${owner.nickname}决策`;
     if (item.status === 'dispatched') return '已派发';
     return '已批准';
-  }, [item]);
+  }, [item, owner.nickname]);
 
   const currentSelfClaimScope: MissionHubSelfClaimScope = selfClaimScopes[catId] ?? 'disabled';
   const canSelfClaim = currentSelfClaimScope !== 'disabled';

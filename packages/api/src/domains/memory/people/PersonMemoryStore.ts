@@ -23,6 +23,7 @@ import type {
   PersonRelationship,
   WriteOpportunityLineageV1,
 } from '@cat-cafe/shared';
+import type { SettledHistoryPageOptions, SettledHistorySourcePage } from '../../../utils/settled-history-page.js';
 import type { OwnerMemoryActionStore } from './person-memory-owner-action-contract.js';
 
 export interface StagePersonMemoryCandidateInput {
@@ -82,6 +83,7 @@ export interface StoredPersonMemoryCandidate
   dispositionLineageBindingKey?: string;
   latestDecisionReceipt?: PersonMemoryDecisionReceipt;
   latestUndoReceipt?: PersonMemoryUndoReceipt;
+  closedAt?: number;
   replacedByProposalId?: CaptureCandidateId;
 }
 
@@ -242,7 +244,15 @@ export interface PersonMemoryStore extends OwnerMemoryActionStore {
   ): Promise<RenewDeferredPersonMemoryCandidateClaimResult>;
   getCandidateForOwner(ownerUserId: string, candidateId: string): Promise<StoredPersonMemoryCandidate | null>;
   listPending(ownerUserId: string, limit?: number): Promise<StoredPersonMemoryCandidate[]>;
+  listSettledPage?(
+    owner: string,
+    options: SettledHistoryPageOptions,
+  ):
+    | SettledHistorySourcePage<StoredPersonMemorySettledCandidate>
+    | Promise<SettledHistorySourcePage<StoredPersonMemorySettledCandidate>>;
   listSettled(ownerUserId: string, limit?: number): Promise<StoredPersonMemorySettledCandidate[]>;
+  /** Exact decision time from the index committed atomically with the terminal transition. */
+  getSettledDecisionTime(ownerUserId: string, candidateId: string): Promise<number | null>;
   resolvePendingCandidateBySubject(ownerUserId: string, subject: string): Promise<StoredPersonMemoryCandidate | null>;
   resolveDormantCandidateBySubject(ownerUserId: string, subject: string): Promise<PersonMemorySuppressionToken | null>;
   getPublication(candidateId: string, ownerUserId?: string): Promise<ApprovalPublication | null>;

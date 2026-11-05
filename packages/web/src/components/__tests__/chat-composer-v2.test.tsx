@@ -101,6 +101,57 @@ function button(label: string) {
 }
 
 describe('v2 two-level composer', () => {
+  it('anchors typed mention choices to the composer card instead of the full-width chat rail', () => {
+    renderComposer();
+    typeInto('@');
+    const menu = [...container.querySelectorAll('div')].find(
+      (el) => el.textContent?.includes('↑↓ 选择') && el.classList.contains('absolute'),
+    );
+    expect(menu).toBeDefined();
+    expect(menu?.closest('[data-testid="chat-input-composer-row"]')).not.toBeNull();
+  });
+
+  it('keeps the send strategy chosen in + for this thread instead of one message', async () => {
+    const { apiFetch } = await import('@/utils/api-client');
+    vi.mocked(apiFetch).mockImplementation(async (_url, init) => {
+      const saved = init?.method === 'PUT';
+      return new Response(
+        JSON.stringify({
+          productDefault: 'next_work',
+          global: null,
+          thread: saved ? 'continue_current' : null,
+          effective: saved ? 'continue_current' : 'next_work',
+          source: saved ? 'thread' : 'product',
+        }),
+        { status: 200 },
+      );
+    });
+    useChatStore.setState({
+      hasActiveInvocation: true,
+      activeInvocations: { 'strategy-run': { catId: 'opus', mode: 'execute', startedAt: Date.now() } },
+    });
+    await act(async () => root.render(<ChatInput presentation="v2" threadId="thread-strategy" onSend={onSend} />));
+    act(() => button('添加')?.click());
+    const trigger = () => document.querySelector<HTMLButtonElement>('[data-testid="message-disposition-trigger"]');
+    expect(trigger()?.textContent).toContain('发送策略：排队等待');
+    act(() => trigger()?.click());
+    expect(document.querySelectorAll('[data-disposition-scope]')).toHaveLength(2);
+    await act(async () =>
+      document.querySelector<HTMLButtonElement>('[data-disposition-option="continue_current"]')?.click(),
+    );
+    const write = vi.mocked(apiFetch).mock.calls.find(([, init]) => init?.method === 'PUT');
+    expect(JSON.parse(String(write?.[1]?.body))).toEqual({
+      scope: 'thread',
+      threadId: 'thread-strategy',
+      disposition: 'continue_current',
+    });
+    expect(trigger()?.textContent).toContain('发送策略：引导当前回复');
+    typeInto('继续这个方向');
+    await act(async () => button('发送消息')?.click());
+    typeInto('再补一处');
+    await act(async () => button('发送消息')?.click());
+    expect(onSend.mock.calls.map((call) => call[6])).toEqual([undefined, undefined]);
+  });
   it('keeps mobile controls on one row and clips header and draft dividers inside the card', () => {
     threadReplyDrafts.set('thread-layout', {
       id: 'message-parent',

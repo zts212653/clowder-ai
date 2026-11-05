@@ -8,6 +8,7 @@ import {
   type RecallResolverFamily,
   type RecallScopeV1,
 } from '@cat-cafe/shared';
+import type { ContextSourceOmission } from './context-source-omission.js';
 
 export interface MemoryCueSourceProjection {
   title: string;
@@ -39,6 +40,7 @@ export interface MemoryCueResolverContext {
   consumerCatId?: string;
   signal?: AbortSignal;
   createDrillHandle(input: CreateMemoryCueDrillHandleInput): string;
+  recordOmission?(reason: ContextSourceOmission): void;
 }
 
 export interface MemoryCueResolver {
@@ -57,6 +59,7 @@ export const RECALL_RESOLVER_ADMISSION_V5 = Object.freeze({
   project_knowledge: 'catalog' as const,
   cat_owned_seed: 'catalog' as const,
   thread_overview: 'catalog' as const,
+  matter: 'explicit_read' as const,
 });
 
 export function buildCueEnvelope(input: {
@@ -130,7 +133,9 @@ export class MemoryCueResolverRegistry {
       }
       this.resolvers.set(resolver.family, resolver);
     }
-    const missing = RECALL_RESOLVER_FAMILIES.filter((family) => !this.resolvers.has(family));
+    const missing = RECALL_RESOLVER_FAMILIES.filter(
+      (family) => RECALL_RESOLVER_ADMISSION_V5[family] === 'catalog' && !this.resolvers.has(family),
+    );
     if (missing.length > 0) {
       throw new Error(`Missing memory cue resolver families: ${missing.join(', ')}`);
     }

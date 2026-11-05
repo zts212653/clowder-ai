@@ -8,15 +8,18 @@ import {
   type SessionSummary,
   sealReasonLabel,
 } from '../SessionChainPanel';
+import { sessionChainCopy } from '../session-chain.shell-copy';
+import { useShellCopy } from '../shell/shell-copy';
 import { formatTokenCount } from '../status-helpers';
 import { SessionContextV2 } from './SessionContextV2';
+import { sessionRowCopy } from './session-row.shell-copy';
 
-function age(timestamp: number): string {
+function age(timestamp: number, t: typeof sessionRowCopy.zh.ago): string {
   const seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
-  if (seconds < 60) return `${seconds} 秒前`;
-  if (seconds < 3600) return `${Math.floor(seconds / 60)} 分钟前`;
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)} 小时前`;
-  return `${Math.floor(seconds / 86400)} 天前`;
+  if (seconds < 60) return t.seconds(seconds);
+  if (seconds < 3600) return t.minutes(Math.floor(seconds / 60));
+  if (seconds < 86400) return t.hours(Math.floor(seconds / 3600));
+  return t.days(Math.floor(seconds / 86400));
 }
 
 export function SessionRowV2({
@@ -32,6 +35,8 @@ export function SessionRowV2({
   threadId: string;
   onView: (session: SessionSummary) => void;
 }) {
+  const t = useShellCopy(sessionRowCopy);
+  const chain = useShellCopy(sessionChainCopy);
   const unsealed = session.status === 'active';
   const running = owner.runningCatIds.has(session.catId);
   const count = owner.unsealedCountByCat.get(session.catId) ?? 0;
@@ -50,38 +55,38 @@ export function SessionRowV2({
   return (
     <article className="status-v2-session" data-session-id={session.id} data-session-lifecycle={session.status}>
       <div className="status-v2-session-title">
-        <strong>会话 #{session.seq + 1}</strong>
+        <strong>{t.session(session.seq + 1)}</strong>
         <SessionIdTag id={session.cliSessionId ?? session.id} />
       </div>
       <p className="status-v2-muted">
-        {age(session.createdAt)}开始 · {session.messageCount} 条消息 ·{' '}
+        {t.started(age(session.createdAt, t.ago))} · {chain.messages(session.messageCount)} ·{' '}
         {session.compressionCount == null
-          ? '压缩次数未知'
+          ? t.compressionUnknown
           : session.compressionCount === 0
-            ? '未压缩'
-            : `已压缩 ${session.compressionCount} 次`}
+            ? t.noCompression
+            : t.compressed(session.compressionCount)}
       </p>
       {!unsealed && (
         <p className="status-v2-muted">
-          {session.status === 'sealed' ? '已封存' : '封存中'}
-          {session.sealedAt ? ` · ${age(session.sealedAt)}封存` : ''}
-          {session.sealReason ? ` · ${sealReasonLabel(session.sealReason)}` : ''}
+          {session.status === 'sealed' ? chain.sealed : chain.sealing}
+          {session.sealedAt ? ` · ${t.archivedAt(age(session.sealedAt, t.ago))}` : ''}
+          {session.sealReason ? ` · ${sealReasonLabel(session.sealReason, chain)}` : ''}
         </p>
       )}
       {session.runtimeSession && (
         <div className="status-v2-runtime status-v2-muted">
-          <span>运行会话</span>
+          <span>{chain.runtime}</span>
           <SessionIdTag id={session.runtimeSession.runtimeSessionId} />
           <span>{session.runtimeSession.runtime}</span>
-          <span>{runtimeLifecycleLabel(session.runtimeSession.lifecycleState)}</span>
+          <span>{runtimeLifecycleLabel(session.runtimeSession.lifecycleState, chain)}</span>
           {session.runtimeSession.runtimeConversationId && (
-            <SessionIdTag id={session.runtimeSession.runtimeConversationId} label="运行对话 ID" />
+            <SessionIdTag id={session.runtimeSession.runtimeConversationId} label={chain.runtimeConversationId} />
           )}
         </div>
       )}
       {switchWarning && (
         <div className="status-v2-notice">
-          <span>运行会话意外切换</span>
+          <span>{chain.unexpectedSwitch}</span>
           <SessionIdTag id={switchWarning.previousRuntimeSessionId} />
           <span>→</span>
           <SessionIdTag id={switchWarning.currentRuntimeSessionId} />
@@ -89,13 +94,9 @@ export function SessionRowV2({
       )}
       {usage && (
         <p className="status-v2-tokens">
-          {usage.inputTokens != null && (
-            <span title="输入 token，可能累计多次模型调用；不等于上下文占用">
-              {formatTokenCount(usage.inputTokens)} 输入
-            </span>
-          )}
-          {usage.outputTokens != null && <span>{formatTokenCount(usage.outputTokens)} 输出</span>}
-          {cache != null && <span>{cache}% 缓存命中</span>}
+          {usage.inputTokens != null && <span title={t.inputHint}>{t.input(formatTokenCount(usage.inputTokens))}</span>}
+          {usage.outputTokens != null && <span>{t.output(formatTokenCount(usage.outputTokens))}</span>}
+          {cache != null && <span>{t.cache(cache)}</span>}
           {usage.costUsd != null && <span>${usage.costUsd.toFixed(4)}</span>}
         </p>
       )}
@@ -103,12 +104,10 @@ export function SessionRowV2({
       {ambiguous && unsealed && firstUnsealed?.id === session.id && (
         <p className="status-v2-session-warning">
           <span className="status-v2-dot" style={{ background: 'var(--semantic-warning)' }} />
-          <span>有 {count} 个未封存的会话，压缩前请确认当前使用的会话</span>
+          <span>{t.ambiguity(count)}</span>
         </p>
       )}
-      {ambiguous && session.status === 'sealed' && (
-        <p className="status-v2-muted">多个未封存会话，暂不能恢复；先确认并封存多余会话</p>
-      )}
+      {ambiguous && session.status === 'sealed' && <p className="status-v2-muted">{t.restoreAmbiguity}</p>}
       <div className="status-v2-actions">
         {unsealed && session.cliSessionId && (
           <button
@@ -117,7 +116,7 @@ export function SessionRowV2({
             disabled={cannotTarget || owner.compactingSessionId !== null}
             onClick={() => void owner.onCompact(session)}
           >
-            {owner.compactingSessionId === session.id ? '压缩中…' : '压缩上下文'}
+            {owner.compactingSessionId === session.id ? chain.compacting : t.compact}
           </button>
         )}
         {unsealed && (
@@ -127,12 +126,12 @@ export function SessionRowV2({
             disabled={owner.isStale || running || owner.sealingSessionId !== null}
             onClick={() => void owner.onSeal(session.id)}
           >
-            {owner.sealingSessionId === session.id ? '封存中…' : '封存会话'}
+            {owner.sealingSessionId === session.id ? chain.sealingEllipsis : t.archive}
           </button>
         )}
         {!unsealed && (
           <button type="button" data-testid={`view-session-${session.id}`} onClick={() => onView(session)}>
-            查看历史
+            {t.history}
           </button>
         )}
         {session.status === 'sealed' && (
@@ -142,7 +141,7 @@ export function SessionRowV2({
             disabled={cannotTarget || owner.restoringSessionId !== null}
             onClick={() => void owner.onRestore(session)}
           >
-            {owner.restoringSessionId === session.id ? '恢复中…' : '恢复为当前'}
+            {owner.restoringSessionId === session.id ? chain.restoring : chain.restoreCurrent}
           </button>
         )}
         {unsealed && threadId !== 'default' && (
@@ -153,7 +152,7 @@ export function SessionRowV2({
             onBound={owner.onRefresh}
           />
         )}
-        {running && <span className="status-v2-muted">停止运行后才能{unsealed ? '压缩、绑定或封存' : '恢复'}</span>}
+        {running && <span className="status-v2-muted">{unsealed ? t.stopBeforeActions : t.stopBeforeRestore}</span>}
       </div>
     </article>
   );

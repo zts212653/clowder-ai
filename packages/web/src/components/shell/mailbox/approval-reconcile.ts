@@ -1,11 +1,14 @@
+import type { DomainApprovalEffect } from '@/stores/approval-domain-effect';
+import { readTerminal } from './approval-reconcile-terminal';
+
 /**
  * F322 S3-2b-1b: what the 待办 panel may say about an approval after the user pressed a button on its original card.
  *
  * A write's own answer is not the decision's outcome. A 2xx can leave the proposal open (a partly approved F276
  * selection), a 5xx can land after the side effect, a lost connection says nothing at all, and the Approval Hub store
  * removes an item optimistically before anyone has re-read it. So the panel states only what a canonical re-read proved,
- * and that re-read must have started after the write ended. "After" is a read generation, not a clock: the client's and the
- * server's clocks need not agree, but the panel knows which of its own reads it started later.
+ * and that re-read must have started after the write ended. Unified reads use their local generation; an independent
+ * pending/history confirmation is started and fenced by the exact confirming attempt. Neither uses clock comparison.
  *
  * Pure on purpose: the events say what the store and the unified read reported, the state says what may be shown, and
  * `describeReconcile` turns the state into the one line and the one rule about the actions. Nothing here defaults to
@@ -47,6 +50,10 @@ export interface Terminal {
   /** Transient proof from the original producer and the exact created Thread, never from a POST response. */
   threadId?: string;
   effectUnknown?: boolean;
+  /** Producer-owned durable proof, recovered from an exact fenced settled row. */
+  domainEffect?: DomainApprovalEffect;
+  /** Original producer reason when supplied; legacy closure alone never means expiry or withdrawal. */
+  closedReason?: 'expired' | 'withdrawn';
 }
 
 /** The settled lookup: a row for exactly this proposal and producer, or nothing that can be relied on. */
@@ -95,6 +102,8 @@ export type ReconcileEvent =
   /** The store's current attempt for this proposal (null when it has none). `readGeneration`: reads started so far. */
   | { type: 'attempt'; attempt: TrackedAttempt | null; readGeneration: number }
   | { type: 'read'; read: ReadEvidence }
+  /** A post-write owner pending/history read proved this exact attempt terminal. */
+  | { type: 'terminal-read'; attemptId: number; terminal: Terminal }
   /** The user asked to read again. `readGeneration`: reads started so far, before the one this asks for. */
   | { type: 'reread'; readGeneration: number };
 
@@ -110,25 +119,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 const isHttpStatus = (value: unknown): value is number =>
   Number.isInteger(value) && (value as number) >= 100 && (value as number) <= 599;
-
-const TERMINAL_RESOLUTIONS: readonly Terminal['resolution'][] = ['accepted', 'rejected', 'closed_without_decision'];
-
-/** A terminal, from a settled row, or null when the row does not say one of the three; the time and decider only if real. */
-function readTerminal(value: unknown): Terminal | null {
-  if (!isRecord(value)) return null;
-  const resolution = TERMINAL_RESOLUTIONS.find((candidate) => candidate === value.resolution);
-  if (!resolution) return null;
-  const decidedBy = typeof value.decidedBy === 'string' ? value.decidedBy.trim() : '';
-  return {
-    resolution,
-    ...(typeof value.decidedAt === 'number' && Number.isFinite(value.decidedAt) ? { decidedAt: value.decidedAt } : {}),
-    ...(decidedBy ? { decidedBy } : {}),
-    ...(resolution === 'accepted' && typeof value.threadId === 'string' && value.threadId.trim()
-      ? { threadId: value.threadId }
-      : {}),
-    ...(resolution === 'accepted' && value.effectUnknown === true ? { effectUnknown: true } : {}),
-  };
-}
 
 function confirmingModel(seenAttemptId: number, write: WriteSeen, afterGeneration: number): ReconcileModel {
   return {
@@ -232,6 +222,11 @@ export function reduceReconcile(model: ReconcileModel, event: ReconcileEvent): R
       return onAttempt(model, event.attempt, event.readGeneration);
     case 'read':
       return onRead(model, event.read);
+    case 'terminal-read': {
+      if (model.state.kind !== 'confirming' || model.state.attemptId !== event.attemptId) return model;
+      const terminal = readTerminal(event.terminal);
+      return terminal ? { ...model, state: { kind: 'decided', terminal } } : model;
+    }
     case 'reread':
       return onReread(model, event.readGeneration);
   }
@@ -249,87 +244,4 @@ export interface ReconcileView {
   canReread: boolean;
 }
 
-const RESOLUTION_TEXT: Record<Terminal['resolution'], string> = {
-  accepted: '已同意',
-  rejected: '已拒绝',
-  closed_without_decision: '已结束，没有做决定',
-};
-
-function decidedAtText(ms: number): string {
-  return new Date(ms).toLocaleString('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  });
-}
-
-const UNKNOWN_LINE = '结果暂未确认';
-
-function decidedLine(terminal: Terminal): string {
-  const resolution = readTerminal(terminal)?.resolution;
-  if (!resolution) return UNKNOWN_LINE;
-  const parts = [RESOLUTION_TEXT[resolution]];
-  if (terminal.threadId) parts.push('对话已开');
-  if (terminal.effectUnknown) parts.push('效果暂未确认');
-  const { decidedAt, decidedBy } = readTerminal(terminal) as Terminal;
-  if (decidedAt !== undefined) parts.push(decidedAtText(decidedAt));
-  if (decidedBy) parts.push(decidedBy);
-  return parts.join(' · ');
-}
-
-function confirmingLine(write: WriteSeen | undefined): string {
-  if (write?.outcome === 'accepted') return '已提交，正在确认结果…';
-  if (write?.outcome === 'ended') return '操作已结束，正在确认结果…';
-  return write?.outcome === 'errored' ? '请求返回异常，正在确认结果…' : '没有收到回应，正在确认结果…';
-}
-
-function stillOpenLine(write: WriteSeen | undefined): string {
-  if (write?.outcome === 'accepted') return '已提交，重新读取后仍待决定';
-  if (write?.outcome === 'ended') return '操作已结束，重新读取后仍待决定';
-  return write?.outcome === 'errored' ? '请求返回异常，重新读取后仍待决定' : '没能确认提交结果，重新读取后仍待决定';
-}
-
-const UNCONFIRMED_LINE: Record<UnconfirmedWhy, string> = {
-  left_the_list: '已不在当前待办，结果待确认',
-  cannot_tell: '结果暂未确认',
-  read_failed: '结果暂未确认',
-  not_aligned: '仍待决定，但和审批中心还没对上',
-};
-
-export function describeReconcile(state: ReconcileState): ReconcileView {
-  switch (state.kind) {
-    case 'idle':
-      return { line: null, actions: 'allowed', canReread: false };
-    case 'writing':
-      return { line: '正在提交…', actions: 'held', canReread: false };
-    case 'confirming':
-      return { line: confirmingLine(state.write), actions: 'held', canReread: false };
-    case 'still_open':
-      return {
-        line: stillOpenLine(state.write),
-        actions:
-          !state.write ||
-          state.write.outcome === 'unknown' ||
-          state.write.outcome === 'ended' ||
-          (state.write.outcome === 'errored' && state.write.status >= 500)
-            ? 'held'
-            : 'allowed',
-        canReread: true,
-      };
-    case 'decided':
-      return { line: decidedLine(state.terminal), actions: 'gone', canReread: state.terminal?.effectUnknown === true };
-    case 'unconfirmed':
-      return { line: UNCONFIRMED_LINE[state.why] ?? UNKNOWN_LINE, actions: 'held', canReread: true };
-    case 'needs_login':
-      return { line: '需要登录', actions: 'held', canReread: true };
-    case 'no_permission':
-      return { line: '没有权限', actions: 'held', canReread: true };
-    case 'refused_before_send':
-      return { line: '没有发出，请检查后再试', actions: 'allowed', canReread: false };
-    default:
-      // A state this build does not know: say nothing it cannot back, and let the user ask again.
-      return { line: UNKNOWN_LINE, actions: 'held', canReread: true };
-  }
-}
+export { describeReconcile } from './approval-reconcile-view';

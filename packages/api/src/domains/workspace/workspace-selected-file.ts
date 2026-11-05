@@ -66,6 +66,6 @@ export async function resolveSelectedWorkspaceFile(
   const nativeRoot = await getWorktreeRoot(locator.worktreeId);
   if ((await realpath(resolve(nativeRoot, locator.path))) !== file)
     throw new WorkspaceSecurityError('File owner changed', 'DENIED');
-  const source = await createWorkspaceContentSource(userId).describe({ principal: { userId }, locator });
-  return { ...source.locator, kind: 'file' as const, absolutePath: await realpath(file) };
+  const verified = await createWorkspaceContentSource(userId).resolveFileLocator({ principal: { userId }, locator });
+  return { ...verified, kind: 'file' as const, absolutePath: await realpath(file) };
 }

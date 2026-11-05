@@ -2,10 +2,13 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { chromium } from 'playwright';
 import { build } from 'vite';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { registerEndGrowthJourney } from './chat-end-growth.journey.mjs';
 import { registerNavigationOwnerJourneys } from './chat-navigation-owner.journey.mjs';
 import { registerReadingLandingJourneys } from './chat-reading-landing.journey.mjs';
+import { registerReadingWheelJourneys } from './chat-reading-wheel.journey.mjs';
+import { registerStreamingWheelJourney } from './chat-streaming-wheel.journey.mjs';
 
 const webRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const origin = 'https://chat-recovery.test';
@@ -40,6 +43,17 @@ after(async () => browser?.close());
 registerNavigationOwnerJourneys({ origin, browser: () => browser, bundle: () => bundle.code });
 
 registerReadingLandingJourneys({ origin, threadId, browser: () => browser, bundle: () => bundle.code });
+registerStreamingWheelJourney({ origin, threadId, browser: () => browser, bundle: () => bundle.code });
+registerReadingWheelJourneys({
+  origin,
+  threadId,
+  browser: () => browser,
+  bundle: () => bundle.code,
+  // Headless Playwright hides scrollbars by default. A real thumb drag needs
+  // this separate browser; the other recovery journeys keep their environment.
+  launchNativeScrollbarBrowser: () => chromium.launch({ headless: true, ignoreDefaultArgs: ['--hide-scrollbars'] }),
+});
+registerEndGrowthJourney({ origin, threadId, browser: () => browser, bundle: () => bundle.code });
 
 function fixtureApiBody(pathname, state) {
   if (pathname === '/api/messages') {
@@ -110,6 +124,7 @@ async function openConversation() {
 
 function saveMissedReply(state) {
   state.messages.push({
+    from: { kind: 'agent', catId: 'codex-astra' },
     id: 'missed-reply',
     catId: 'codex-astra',
     content: 'The handoff was already saved',
@@ -186,6 +201,7 @@ test('long deferred history retains its exact reading offset across Back and col
   const errors = [],
     cursors = [];
   const records = Array.from({ length: 80 }, (_, index) => ({
+    from: { kind: 'agent', catId: 'codex-astra' },
     id: `scroll-${index + 1}`,
     type: 'assistant',
     catId: 'codex-astra',
@@ -246,18 +262,17 @@ test('long deferred history retains its exact reading offset across Back and col
     const before = await sample();
     assert.equal(before.id, 'scroll-5');
     await page.getByRole('button', { name: 'Finalize reading message', exact: true }).click();
-    records[4].id = 'settled-reading';
     records[4].isDraft = false;
-    await page.locator('[data-message-id="settled-reading"]').waitFor();
+    await page.locator('[data-message-id="scroll-5"]').waitFor();
     await page.waitForTimeout(100);
-    const rekeyed = await sample();
-    assert.equal(rekeyed.id, 'settled-reading');
-    assert.ok(Math.abs(rekeyed.offset - before.offset) <= 1, JSON.stringify({ before, rekeyed }));
-    before.id = rekeyed.id;
+    const finalized = await sample();
+    assert.equal(finalized.id, 'scroll-5');
+    assert.ok(Math.abs(finalized.offset - before.offset) <= 1, JSON.stringify({ before, finalized }));
+    before.id = finalized.id;
     await page.getByRole('button', { name: 'Other thread', exact: true }).click();
     await page.locator('[data-message-id="other"]').waitFor();
     await page.goBack();
-    await page.locator('[data-message-id="settled-reading"]').waitFor();
+    await page.locator('[data-message-id="scroll-5"]').waitFor();
     await page.waitForTimeout(750);
     const back = await sample();
     assert.equal(back.id, before.id);
@@ -277,7 +292,7 @@ test('long deferred history retains its exact reading offset across Back and col
     assert.ok(Math.abs(imageLoaded.offset - before.offset) <= 1, JSON.stringify({ before, imageLoaded }));
     const priorCursors = cursors.length;
     await page.reload();
-    await page.locator('[data-message-id="settled-reading"]').waitFor();
+    await page.locator('[data-message-id="scroll-5"]').waitFor();
     await page.waitForTimeout(750);
     const reload = await sample();
     assert.equal(reload.id, before.id);

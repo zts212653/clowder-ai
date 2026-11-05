@@ -1,12 +1,14 @@
 'use client';
 
 import type { BuiltinCloudIdentityProtectedField, BuiltinCloudIdentityProtection } from '@cat-cafe/shared';
+import { deploymentDefaults } from '@cat-cafe/shared';
 import { useMemo, useRef } from 'react';
 import type { CatData } from '@/hooks/useCatData';
+import { useCoCreatorDisplay } from '@/hooks/useCoCreatorConfig';
 import { AvatarImageWithFallback } from './AvatarImageWithFallback';
 import { MemberAccountFollowing } from './accounts/MemberAccountFollowing';
 import type { ProfileItem } from './hub-accounts.types';
-import { usesAgyNative } from './hub-cat-editor.agy';
+import { usesAgyAcp, usesAgyNative } from './hub-cat-editor.agy';
 import {
   autoSlug,
   CLIENT_OPTIONS,
@@ -21,11 +23,11 @@ import {
   splitStrengthTags,
 } from './hub-cat-editor.model';
 import { AgyNativeFields } from './hub-cat-editor-agy';
+import { MemberCarrierSelect } from './hub-cat-editor-carrier';
 import { CatColorField } from './hub-cat-editor-color-field';
 import { SectionCard, SelectField, TextField } from './hub-cat-editor-fields';
 import { VoiceConfigSection } from './hub-cat-editor-voice';
 import { TagEditor } from './hub-tag-editor';
-
 import {
   useEditorLabel,
   useEditorText,
@@ -33,6 +35,9 @@ import {
   useMemberFieldError,
   useMembersCopy,
 } from './members/editor-presentation';
+import { MemberChangedField, MemberChangeMark, useMemberChanged } from './members/MemberChangeMark';
+import { MemberOperationFeedback } from './members/MemberOperationFeedback';
+import { PluginAgentClientPicker } from './PluginAgentClientPicker';
 
 type FormPatch = Partial<HubCatEditorFormState>;
 
@@ -87,6 +92,7 @@ export function IdentitySection({
   onAvatarUpload: (file: File) => Promise<void>;
   onRefAudioUpload: (file: File) => Promise<void>;
 }) {
+  const owner = useCoCreatorDisplay();
   const page = useMemberEditorPresentation();
   const t = useEditorText();
   const strengthTags = splitStrengthTags(form.strengths);
@@ -102,7 +108,16 @@ export function IdentitySection({
             ariaLabel="Name"
             value={form.name}
             onChange={(value) => {
-              onChange({ name: value, displayName: value, catId: autoSlug(value, form.catId) });
+              const catId = autoSlug(value, form.catId);
+              const useDefaultAlias =
+                form.configurationSource === 'native_tool' &&
+                (!form.mentionPatterns || form.mentionPatterns === '@' + form.catId);
+              onChange({
+                name: value,
+                displayName: value,
+                catId,
+                ...(useDefaultAlias ? { mentionPatterns: '@' + catId } : {}),
+              });
             }}
             required
             placeholder="成员显示名称，如 我的助手"
@@ -136,7 +151,7 @@ export function IdentitySection({
         ariaLabel="Nickname"
         value={form.nickname}
         onChange={(value) => onChange({ nickname: value })}
-        placeholder="可选，co-creator给的昵称"
+        placeholder={`可选，${owner.nickname}给的昵称`}
       />
       <TextField
         label="显示后缀"
@@ -154,54 +169,59 @@ export function IdentitySection({
         placeholder="角色定位，如 代码审查专家"
       />
 
-      <div className="flex items-center gap-3">
-        <span className="text-xs font-bold text-cafe-secondary sm:w-[150px] sm:shrink-0">
-          {page ? t('头像') : 'Avatar'}
-        </span>
-        <button
-          type="button"
-          onClick={() => fileInputRef.current?.click()}
-          className="flex items-center gap-2 rounded-[10px] bg-[var(--console-field-bg,var(--console-card-bg))] px-3 py-1.5 text-compact text-cafe-secondary transition hover:opacity-80"
-        >
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-cafe-surface-canvas text-micro text-cafe-secondary">
-            {avatarSrc ? (
-              <AvatarImageWithFallback src={avatarSrc} alt="Avatar preview" className="h-full w-full object-cover" />
-            ) : (
-              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24" role="img" aria-label="Default avatar">
-                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2Zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8Zm-2-9a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Zm4 0a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z" />
-              </svg>
-            )}
-          </div>
-          <span>{t(avatarUploading ? '上传中…' : '点击上传')}</span>
-        </button>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/png,image/jpeg,image/webp"
-          className="hidden"
-          onChange={(event) => {
-            const file = event.target.files?.[0];
-            if (!file) return;
-            void onAvatarUpload(file).finally(() => {
-              if (fileInputRef.current) fileInputRef.current.value = '';
-            });
-          }}
-        />
-        <input
-          aria-label="Avatar"
-          value={form.avatar}
-          onChange={(event) => onChange({ avatar: event.target.value })}
-          className="sr-only"
-        />
-      </div>
+      <MemberChangedField label="Avatar">
+        <div className="flex items-center gap-3">
+          <span className="text-xs font-bold text-cafe-secondary sm:w-[150px] sm:shrink-0">
+            {page ? t('头像') : 'Avatar'}
+          </span>
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="flex items-center gap-2 rounded-[10px] bg-[var(--console-field-bg,var(--console-card-bg))] px-3 py-1.5 text-compact text-cafe-secondary transition hover:opacity-80"
+          >
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-cafe-surface-canvas text-micro text-cafe-secondary">
+              {avatarSrc ? (
+                <AvatarImageWithFallback src={avatarSrc} alt="Avatar preview" className="h-full w-full object-cover" />
+              ) : (
+                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24" role="img" aria-label="Default avatar">
+                  <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2Zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8Zm-2-9a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Zm4 0a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z" />
+                </svg>
+              )}
+            </div>
+            <span>{t(avatarUploading ? '上传中…' : '点击上传')}</span>
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            className="hidden"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (!file) return;
+              void onAvatarUpload(file).finally(() => {
+                if (fileInputRef.current) fileInputRef.current.value = '';
+              });
+            }}
+          />
+          <input
+            aria-label="Avatar"
+            value={form.avatar}
+            onChange={(event) => onChange({ avatar: event.target.value })}
+            className="sr-only"
+          />
+        </div>
+        {(cat || !page) && <MemberOperationFeedback source="avatar" />}
+      </MemberChangedField>
 
       {/* F056 KD-18 / AC-E4: single-hue input — all derivation from one primary color
        * (cat-persona-tokens.css OKLCH formulas). Secondary is deprecated; mirror
        * primary → secondary to keep the API payload backward-compatible. */}
-      <CatColorField
-        value={form.colorPrimary}
-        onChange={(hex) => onChange({ colorPrimary: hex, colorSecondary: hex })}
-      />
+      <MemberChangedField label="Background Color">
+        <CatColorField
+          value={form.colorPrimary}
+          onChange={(hex) => onChange({ colorPrimary: hex, colorSecondary: hex })}
+        />
+      </MemberChangedField>
 
       {hasDossier && (
         <p className="rounded-lg bg-conn-purple-bg px-3 py-1.5 text-xs text-conn-purple-text">
@@ -233,26 +253,28 @@ export function IdentitySection({
         placeholder="可选，留空表示无特殊注意"
       />
 
-      <div className="flex items-start gap-3">
-        <span className="w-[140px] shrink-0 pt-1 text-sm font-medium text-cafe-secondary">
-          {page ? t('技能标签') : 'Strengths'}
-        </span>
-        <div className="min-w-0 flex-1">
-          <TagEditor
-            tags={strengthTags}
-            onChange={(tags) => onChange({ strengths: joinTags(tags) })}
-            addLabel={t('+ 选择')}
-            placeholder={t('输入标签，例如 security')}
-            emptyLabel={t('(无)')}
+      <MemberChangedField label="Strengths">
+        <div className="flex items-start gap-3">
+          <span className="w-[140px] shrink-0 pt-1 text-sm font-medium text-cafe-secondary">
+            {page ? t('技能标签') : 'Strengths'}
+          </span>
+          <div className="min-w-0 flex-1">
+            <TagEditor
+              tags={strengthTags}
+              onChange={(tags) => onChange({ strengths: joinTags(tags) })}
+              addLabel={t('+ 选择')}
+              placeholder={t('输入标签，例如 security')}
+              emptyLabel={t('(无)')}
+            />
+          </div>
+          <input
+            aria-label="Strengths"
+            value={form.strengths}
+            onChange={(event) => onChange({ strengths: event.target.value })}
+            className="sr-only"
           />
         </div>
-        <input
-          aria-label="Strengths"
-          value={form.strengths}
-          onChange={(event) => onChange({ strengths: event.target.value })}
-          className="sr-only"
-        />
-      </div>
+      </MemberChangedField>
 
       {!page && <VoiceConfigSection form={form} onChange={onChange} onRefAudioUpload={onRefAudioUpload} />}
     </SectionCard>
@@ -301,12 +323,17 @@ function ComboField({
 }) {
   const listId = `combo-${label.replace(/\s+/g, '-').toLowerCase()}`;
   const displayLabel = useEditorLabel(label);
+  const changed = useMemberChanged(ariaLabel ?? label);
   const invalid = useMemberFieldError(ariaLabel ?? label);
   const t = useEditorText();
   return (
-    <label className="flex flex-col gap-1.5 text-cafe-secondary sm:flex-row sm:items-center sm:gap-3">
+    <label
+      data-member-changed={changed || undefined}
+      className="flex flex-col gap-1.5 text-cafe-secondary sm:flex-row sm:items-center sm:gap-3"
+    >
       <span className="text-xs font-bold text-cafe-secondary sm:w-[150px] sm:shrink-0">
         {displayLabel}
+        <MemberChangeMark label={ariaLabel ?? label} />
         {required && <span className="ml-0.5 text-cafe-accent">*</span>}
       </span>
       <div className="min-w-0 flex-1">
@@ -357,6 +384,7 @@ const PROTECTED_IDENTITY_FIELD_LABELS: Record<BuiltinCloudIdentityProtectedField
   commandArgs: '启动参数',
   cliConfigArgs: 'CLI 配置',
   acp: 'ACP 传输',
+  agentProvider: '插件客户端绑定',
   mentionPatterns: '主句柄 @gpt-pro',
 };
 
@@ -377,6 +405,7 @@ export function ProtectedCloudIdentitySection({
 
   return (
     <SectionCard title="认证与模型" tone={drifted ? 'error' : 'neutral'} data-guide-id="member-editor.auth-config">
+      <MemberOperationFeedback source="accounts" />
       <div className="space-y-3 rounded-xl bg-[var(--console-field-bg,var(--console-card-bg))] px-4 py-3">
         <div>
           <p className={`text-sm font-extrabold ${drifted ? 'text-conn-red-text' : 'text-cafe'}`}>
@@ -387,7 +416,8 @@ export function ProtectedCloudIdentitySection({
               copy.protectedCloudDescription
             ) : (
               <>
-                @gpt-pro 是 Clowder AI 的固定云端入口。它必须保持 ChatGPT Pro 与 Remote MCP 身份，云端回复才能回到正确的
+                @gpt-pro 是 {deploymentDefaults.brand.displayName} 的固定云端入口。它必须保持 ChatGPT Pro 与 Remote MCP
+                身份，云端回复才能回到正确的
                 Thread；因此这里不允许改所属家族、Client、模型、账号或本地运行方式。可以增加别名，主句柄 @gpt-pro
                 固定。需要本地 Codex，请新建另一位成员。
               </>
@@ -415,6 +445,7 @@ export function ProtectedCloudIdentitySection({
             >
               {t(restoring ? '恢复中…' : '恢复云端身份')}
             </button>
+            <MemberOperationFeedback source="restore" />
           </div>
         ) : (
           <dl className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-1 text-xs">
@@ -502,7 +533,9 @@ export function AccountSection({
   const copy = useMembersCopy();
   const selectedProfile = availableProfiles.find((p) => p.id === form.accountRef);
   const native = usesAgyNative(form);
-  const callHint = native ? null : buildCallHint(form.clientId, selectedProfile, form.defaultModel, form.provider);
+  const officialAcp = usesAgyAcp(form);
+  const callHint =
+    native || officialAcp ? null : buildCallHint(form.clientId, selectedProfile, form.defaultModel, form.provider);
   const selectedModel = form.defaultModel.trim();
   const modelNotListed = selectedModel.length > 0 && modelOptions.length > 0 && !modelOptions.includes(selectedModel);
   const modelSuggestions = useMemo(
@@ -516,6 +549,7 @@ export function AccountSection({
 
   return (
     <SectionCard title="认证与模型" tone={hasError ? 'error' : 'neutral'} data-guide-id="member-editor.auth-config">
+      <MemberOperationFeedback source="accounts" />
       <div className="space-y-2">
         <SelectField
           label="Client"
@@ -530,10 +564,12 @@ export function AccountSection({
             const nextCarrier = carrierOptionsForClient(nextClient)[0]?.value ?? 'cli';
             onChange({
               clientId: nextClient,
+              acpAgentProvider: null,
               provider: '',
               cliEffort: '',
               carrier: nextCarrier,
               agyNativeEnabled: nextClient === 'google',
+              agyAcpEnabled: false,
               ...(nextClient === 'google'
                 ? { agyProfileEnabled: true, agyProfileId: form.agyProfileId || form.catId }
                 : {}),
@@ -544,36 +580,10 @@ export function AccountSection({
         />
 
         {carrierOptionsForClient(form.clientId).length > 1 || form.clientId === 'acp' || form.clientId === 'google' ? (
-          <SelectField
-            label="接入方式"
+          <MemberCarrierSelect
+            form={form}
+            onChange={(patch) => onChange({ ...patch, acpAgentProvider: null })}
             ariaLabel={page ? 'Transport' : '接入方式'}
-            value={form.clientId === 'google' ? (native ? 'agy-native' : 'retired') : form.carrier}
-            options={[
-              ...(form.clientId === 'google'
-                ? !native
-                  ? [{ value: 'retired', label: '旧入口已退役，请配置 Native' }]
-                  : []
-                : carrierOptionsForClient(form.clientId)),
-              ...(form.clientId === 'google' ? [{ value: 'agy-native', label: 'AGY Native' }] : []),
-            ]}
-            onChange={(value) => {
-              if (value === 'agy-native') {
-                onChange({ carrier: 'cli', agyNativeEnabled: true });
-                return;
-              }
-              const carrier = value as HubCatEditorFormState['carrier'];
-              onChange({
-                carrier,
-                agyNativeEnabled: false,
-                ...(carrier === 'acp' && !form.acpCommand.trim()
-                  ? { acpCommand: defaultAcpCommandForClient(form.clientId) }
-                  : {}),
-                ...(carrier === 'acp' && !form.acpStartupArgs.trim()
-                  ? { acpStartupArgs: defaultAcpStartupArgsForClient(form.clientId) }
-                  : {}),
-              });
-            }}
-            required
           />
         ) : null}
 
@@ -652,7 +662,7 @@ export function AccountSection({
                     : '模型标识符，如 claude-sonnet-4-5'
               }
             />
-            {native ? <AgyNativeFields form={form} onChange={onChange} /> : null}
+            {native || officialAcp ? <AgyNativeFields form={form} onChange={onChange} /> : null}
             {modelNotListed ? (
               <div className="rounded-[10px] bg-[var(--console-field-bg,var(--console-card-bg))] px-3 py-2">
                 <p className="text-xs leading-4 text-conn-amber-text">
@@ -714,38 +724,51 @@ export function AccountSection({
             ) : null}
             {form.carrier === 'acp' ? (
               <>
-                <TextField
-                  label="ACP Command"
-                  value={form.acpCommand}
-                  onChange={(value) => onChange({ acpCommand: value })}
-                  required
-                  placeholder={defaultAcpCommandForClient(form.clientId) || 'agent-cli'}
-                />
-                <TextField
-                  label="ACP Startup Args"
-                  value={form.acpStartupArgs}
-                  onChange={(value) => onChange({ acpStartupArgs: value })}
-                  required
-                  placeholder={defaultAcpStartupArgsForClient(form.clientId) || '--acp'}
-                />
-                <p className="-mt-1 text-micro leading-4 text-cafe-muted">
-                  空格分隔，如 <code className="text-cafe-secondary">acp --pure</code> 或{' '}
-                  <code className="text-cafe-secondary">--acp --mode agent</code>。带空格的值用引号包裹。
-                </p>
-                <TextField
-                  label="ACP Max Processes"
-                  value={form.acpMaxLiveProcesses}
-                  onChange={(value) => onChange({ acpMaxLiveProcesses: value })}
-                  inputMode="numeric"
-                  placeholder="3"
-                />
-                <TextField
-                  label="ACP Idle TTL (min)"
-                  value={form.acpIdleTtlMinutes}
-                  onChange={(value) => onChange({ acpIdleTtlMinutes: value })}
-                  inputMode="numeric"
-                  placeholder="30"
-                />
+                {!officialAcp && <PluginAgentClientPicker form={form} onChange={onChange} />}
+                {!form.acpAgentProvider && (
+                  <>
+                    <TextField
+                      label="ACP Command"
+                      value={form.acpCommand}
+                      onChange={(value) => onChange({ acpCommand: value })}
+                      required
+                      placeholder={
+                        officialAcp ? 'agy_acp_server.par' : defaultAcpCommandForClient(form.clientId) || 'agent-cli'
+                      }
+                    />
+                    <TextField
+                      label="ACP Startup Args"
+                      value={form.acpStartupArgs}
+                      onChange={(value) => onChange({ acpStartupArgs: value })}
+                      required={!officialAcp}
+                      placeholder={officialAcp ? '' : defaultAcpStartupArgsForClient(form.clientId) || '--acp'}
+                    />
+                    <p className="-mt-1 text-micro leading-4 text-cafe-muted">
+                      {officialAcp ? (
+                        t('官方 ACP 可留空；Command 填已安装程序的路径。')
+                      ) : (
+                        <>
+                          空格分隔，如 <code className="text-cafe-secondary">acp --pure</code> 或{' '}
+                          <code className="text-cafe-secondary">--acp --mode agent</code>。带空格的值用引号包裹。
+                        </>
+                      )}
+                    </p>
+                    <TextField
+                      label="ACP Max Processes"
+                      value={form.acpMaxLiveProcesses}
+                      onChange={(value) => onChange({ acpMaxLiveProcesses: value })}
+                      inputMode="numeric"
+                      placeholder="3"
+                    />
+                    <TextField
+                      label="ACP Idle TTL (min)"
+                      value={form.acpIdleTtlMinutes}
+                      onChange={(value) => onChange({ acpIdleTtlMinutes: value })}
+                      inputMode="numeric"
+                      placeholder="30"
+                    />
+                  </>
+                )}
               </>
             ) : null}
           </>
@@ -762,7 +785,7 @@ export function AccountSection({
         <p className="-mt-1 text-micro leading-4 text-cafe-muted">
           {page
             ? t('发送消息、查记忆等协作工具。关闭后这个成员只能回复，不能使用这些工具协作。')
-            : '控制该成员是否接收 Clowder AI MCP 工具（post_message、search_evidence 等）。关闭后该成员无法使用协作和记忆工具。'}
+            : `控制该成员是否接收 ${deploymentDefaults.brand.name} MCP 工具（post_message、search_evidence 等）。关闭后该成员无法使用协作和记忆工具。`}
         </p>
       </div>
     </SectionCard>
@@ -807,23 +830,25 @@ export function RoutingSection({
   }, [reservedPatterns, page, copy]);
   return (
     <SectionCard title="别名与 @ 路由" tone={hasError ? 'error' : 'neutral'} aria-invalid={invalid || undefined}>
-      <TagEditor
-        tags={aliases}
-        onChange={updateAliases}
-        addLabel={t('+ 添加')}
-        placeholder={page ? copy.砚砚(form.nickname || form.name || t('成员')) : '砚砚'}
-        emptyLabel={t('(至少添加 1 个别名，否则无法 @)')}
-        validate={validateAlias}
-        lockedTags={presentFixedPatterns}
-        minCount={presentFixedPatterns.length > 0 ? 0 : 1}
-      />
-      <textarea
-        aria-label="Aliases"
-        value={form.mentionPatterns}
-        onChange={(event) => updateAliases(currentAliasTags({ ...form, mentionPatterns: event.target.value }))}
-        placeholder="@codex, @缅因猫"
-        className="sr-only"
-      />
+      <MemberChangedField label="Aliases">
+        <TagEditor
+          tags={aliases}
+          onChange={updateAliases}
+          addLabel={t('+ 添加')}
+          placeholder={page ? copy.砚砚(form.nickname || form.name || t('成员')) : '砚砚'}
+          emptyLabel={t('(至少添加 1 个别名，否则无法 @)')}
+          validate={validateAlias}
+          lockedTags={presentFixedPatterns}
+          minCount={presentFixedPatterns.length > 0 ? 0 : 1}
+        />
+        <textarea
+          aria-label="Aliases"
+          value={form.mentionPatterns}
+          onChange={(event) => updateAliases(currentAliasTags({ ...form, mentionPatterns: event.target.value }))}
+          placeholder="@codex, @缅因猫"
+          className="sr-only"
+        />
+      </MemberChangedField>
     </SectionCard>
   );
 }

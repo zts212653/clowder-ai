@@ -91,3 +91,22 @@ test('separate native pages deduplicate IDs and sort their combined visible limi
   assert.equal(result.sessions[1].lastActivityAt, 11000);
   assert.equal(result.limited, true);
 });
+
+test('Cafe first-input envelopes are excluded even when Desktop is the recorded originator', async () => {
+  const cafe = { ...row(1, 'vscode', 'Codex Desktop', 100), preview: '<runtime-routing-context> clipped' };
+  const external = { ...row(2, 'vscode', 'Codex Desktop', 90), preview: 'Explain the runtime-routing-context tag' };
+  const result = await listCodexImportSessions(
+    {
+      request: async (_method, params) => ({
+        data: (params.sourceKinds as string[]).includes('cli') ? [] : [cafe, external],
+        nextCursor: null,
+      }),
+    },
+    1,
+  );
+  assert.deepEqual(
+    result.sessions.map((s) => s.sessionId),
+    [external.id],
+  );
+  assert.equal(result.sessions[0].firstPrompt, external.preview);
+});

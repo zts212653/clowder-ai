@@ -71,10 +71,13 @@ export const takeOverContentModificationInputSchema = {
   ...contentModificationTakeoverSchema.shape,
   ...common,
   sourceMessageId: contentModificationTakeoverSchema.shape.sourceMessageId.describe(
-    'Exact id of the delivered Human message addressed to this authenticated cat, carrying version-bound workspace-file quotes, a canonical PNG/MP4 media attachment, or an immutable project-screening selection.',
+    'Exact id of the delivered Human message addressed to this authenticated cat, carrying version-bound workspace-file quotes, canonical media attachments, or an immutable project-screening selection.',
   ),
   operationId: contentModificationTakeoverSchema.shape.operationId.describe(
-    'UUID for this takeover attempt. Source-message identity owns the request, so retries or competing addressed cats reuse one request.',
+    'Stable UUID for this takeover attempt. Retries must name the same source message and attachmentId. Competing addressed cats reuse the request for that same source selection.',
+  ),
+  attachmentId: contentModificationTakeoverSchema.shape.attachmentId.describe(
+    'Optional exact id of one canonical media context_attachment in the delivered Human message. Required to select one work in a multi-source gallery send; never a filename, path, URL or selection id. Omit for legacy single-source text/media/project takeover.',
   ),
 };
 function post(operation: string, input: { agentKeyCatId?: string }) {
@@ -132,7 +135,7 @@ export const contentModificationTools = [
   defineTool({
     name: 'cat_cafe_take_over_content_modification',
     description:
-      'Take over one delivered Human message addressed to this authenticated cat as one durable text or media modification request. Use when: the Human asks the named cat to modify exact-revision workspace quotes from the same file/base, one canonical PNG/MP4 work with named media ranges or a whole-work attachment, or delivered project-screening marks from the same input/media version. Not for: caller-supplied identities/body/anchors, screenshots as source identity, unversioned or mixed sources, recalled messages, DOCX changes, human acceptance, or writing the original file. Input supplies only source message id and attempt UUID (plus permitted thread selection for agent-key auth); the server rereads owner identity, targets, version, ranges and withdrawal, reuses original media Task custody, and atomically gives competing addressed cats one request. Output: actual request/Task/execution state and server media selection-to-annotation ids. For media content and candidates use read_artifact_review/respond_artifact_review; for accepted project marks use video_project_command. Project takeover requires a real invocation that consumed the original Human message and creates one bound Task without resending the message. Reusing a Human source never creates another request.',
+      'Take over one delivered Human source selection as one durable modification request. Use when: the addressed Human asks this cat to modify exact-revision quotes from one file/base, a canonical image/video with places or a whole-work reference, or immutable project-screening marks. For a gallery message with multiple work sources, supply the exact attachmentId of the one media context_attachment to change; call separately for each requested work with a distinct operationId. Not for: batch Tasks, guessed first attachments, caller-supplied identities/body/anchors/paths, screenshots as identity, unversioned sources, recalled messages, DOCX changes, Human acceptance or writing the original file. Output: the existing owner-authorized request/Task/execution state and server selection-to-annotation ids. The server rereads the original Human, exact work/version and current rights; competing addressed cats reuse the same source-selection request. A retry UUID cannot select a different attachment. Omit attachmentId only for compatible single-source calls; ambiguous multi-source messages are refused. Use read_artifact_review/respond_artifact_review for media content/candidates, or video_project_command for accepted project marks. Project takeover still requires a real invocation that consumed the source; this tool never resends the Human message.',
     inputSchema: takeOverContentModificationInputSchema,
     handler: handleTakeOverContentModification,
     governance: {

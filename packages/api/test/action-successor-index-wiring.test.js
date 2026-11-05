@@ -23,6 +23,23 @@ describe('F167 successor runtime wiring', () => {
     );
   });
 
+  it('wires Task orphan recovery through the existing lease, Task, Message, and Queue owners', () => {
+    const actionWiring = block(
+      "import('./domains/ball-custody/RedisActionSuccessorLeaseStore.js')",
+      'const [dispatchApprovalMod, redisDispatchApprovalMod]',
+    );
+    assert.match(actionWiring, /new orphanRecoveryMod\.TaskActionSuccessorOrphanRecovery\(/);
+    assert.match(actionWiring, /tasks: taskStore/);
+    assert.match(actionWiring, /messages: messageStore/);
+    assert.match(actionWiring, /queue: invocationQueue/);
+    assert.match(actionWiring, /invocationRecords: invocationRecordStore/);
+    assert.match(actionWiring, /turnExecutions: turnExecutionStore/);
+    assert.match(actionWiring, /delegates: taskApprovedDelegateProvider/);
+    assert.match(actionWiring, /new orphanAtomicStoreMod\.RedisActionSuccessorOrphanCarrierAtomicStore\(redis\)/);
+    const callbackOpts = block('const callbackOpts = {', 'await app.register(callbacksRoutes, callbackOpts);');
+    assert.match(callbackOpts, /taskActionSuccessorOrphanRecovery/);
+  });
+
   it('does not pretend messagesRoutes consumes ActionSuccessorAdmissionService', () => {
     const messagesOpts = block('const messagesOpts = {', 'await app.register(messagesRoutes, messagesOpts);');
     assert.doesNotMatch(
@@ -32,15 +49,8 @@ describe('F167 successor runtime wiring', () => {
     );
   });
 
-  it('boot-asserts the admitted predicate capability and wires both producer ports non-optionally', () => {
-    const verdictWiring = block('let externalReviewVerdictService:', 'const callbackOpts = {');
-    assert.match(verdictWiring, /assertActionTerminalCapabilityRegistryReady\(/);
-    assert.match(verdictWiring, /action_successor_preflight: preflightActionLease/);
-    assert.match(verdictWiring, /action_successor_completion: completeActionLease/);
-    assert.match(verdictWiring, /preflightLease: preflightActionLease/);
-    assert.match(verdictWiring, /completeActionLease,/);
-    assert.doesNotMatch(verdictWiring, /local_review_verdict/);
-    assert.doesNotMatch(verdictWiring, /\.\.\.\(actionSuccessor(?:LeaseStore|CompletionService)/);
+  it('keeps plugin business out of the Task truth resolver', () => {
+    assert.doesNotMatch(source, /pluginPredicateProvider|predicateProvider:|authorizeDispatchRecovery/);
   });
 
   it('keeps local review out of action lease settlement and recovery wiring', () => {

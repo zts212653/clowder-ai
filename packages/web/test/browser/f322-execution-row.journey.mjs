@@ -3,8 +3,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { chromium } from 'playwright';
 import { build } from 'vite';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
 
 /**
  * F322 original-B COMPONENT PREVIEW journey — the one-row execution/queue surface in a real browser.
@@ -45,6 +45,7 @@ const cats = [
     avatar: `/avatars/${id}.png`,
     color: { primary: ['#9B7EBD', '#5B8C5A', '#5B9BD5'][n], secondary: '#eeeeee' },
     mentionPatterns: [`@${id}`, `@${['宪宪', '砚砚', '烁烁'][n]}`],
+    carrier: 'cli',
     clientId: 'fixture',
     defaultModel: 'fixture',
   })),
@@ -57,6 +58,7 @@ const cats = [
     avatar: '/avatars/sonnet.png',
     color: { primary: '#7C3AED', secondary: '#eeeeee' },
     mentionPatterns: ['@sonnet', '@宪宪'],
+    carrier: 'cli',
     clientId: 'fixture',
     defaultModel: 'fixture',
   },
@@ -203,10 +205,56 @@ function finish({ errors, unexpected }) {
   assert.deepEqual(unexpected, [], 'requests that left the isolated origin');
 }
 
+test('unavailable recipient explanation stays visible in the actual desktop and mobile composer', async () => {
+  for (const width of [1100, 390]) {
+    const session = await open('working', {
+      mount: true,
+      width,
+      respond: (call) =>
+        call.key === 'POST /api/routing/preview'
+          ? {
+              status: 200,
+              body: { targetCats: ['codex'], reason: { kind: 'recent_replier' }, unavailableTargets: ['opus'] },
+            }
+          : null,
+    });
+    const { page } = session;
+    try {
+      const notice = page.locator('[data-testid="composer-routing-root"] output');
+      await notice.waitFor({ state: 'visible' });
+      assert.equal(await notice.innerText(), '宪宪 · Opus 5.5暂时不能用，改发给砚砚');
+      const geometry = await notice.evaluate((el) => {
+        const box = el.getBoundingClientRect();
+        return {
+          left: box.left,
+          right: box.right,
+          bottom: box.bottom,
+          height: box.height,
+          viewport: innerWidth,
+          pageWidth: document.documentElement.scrollWidth,
+          viewportHeight: innerHeight,
+        };
+      });
+      assert.ok(geometry.left >= 0 && geometry.right <= width, JSON.stringify(geometry));
+      assert.ok(geometry.height > 0 && geometry.bottom <= geometry.viewportHeight, JSON.stringify(geometry));
+      assert.ok(geometry.pageWidth <= width, JSON.stringify(geometry));
+      assert.match(await page.getByTestId('composer-routing-preview').getAttribute('aria-label'), /改发给砚砚/);
+      await page.getByTestId('composer-routing-preview').click();
+      await page.getByRole('dialog').waitFor({ state: 'visible' });
+      await page.keyboard.press('Escape');
+      await shot(page, `unavailable-recipient-${width}`);
+      measurements.push({ scene: 'unavailable-recipient', width, ...geometry });
+      finish(session);
+    } finally {
+      await page.close();
+    }
+  }
+});
+
 test('every state of the design renders its words in a fixed 36px row', async () => {
   const expected = {
-    working: /^宪宪（Opus 5\.5） 正在工作 \d+:\d{2}$/,
-    queue: /^宪宪（Opus 5\.5） 正在工作 \d+:\d{2} · 排队 2$/,
+    working: /^宪宪 · Opus 5\.5 处理中 \d+:\d{2}$/,
+    queue: /^宪宪 · Opus 5\.5 处理中 \d+:\d{2} · 排队 2$/,
     several: /^3 项运行中 · 排队 5$/,
     silent: /^没有动静 \d+:\d{2}$/,
     stopping: /^正在停止 \d+:\d{2}$/,
@@ -235,7 +283,7 @@ test('■ stops the run through the same cancel request, then re-reads the execu
   await session.page.waitForFunction(() => true);
   await expectCalls(session, [
     `POST /api/threads/${THREAD}/executions/live/exec-opus/cancel`,
-    'GET /api/executions/active?projectPath=%2Fpreview',
+    'GET /api/executions/active?scope=all',
   ]);
   assert.deepEqual(session.calls[0].body, { catId: 'opus' });
   finish(session);
@@ -285,10 +333,13 @@ test('several runs: one ■ per run in the panel, each stopping only its own run
   await shot(session.page, 'several-open');
   const runs = session.page.locator('[data-testid="execution-row-run"]');
   assert.equal(await runs.count(), 3);
-  await runs.filter({ hasText: '砚砚' }).locator('button').click();
+  await runs
+    .filter({ hasText: '砚砚' })
+    .getByRole('button', { name: 'Stop codex live_invocation exec-codex', exact: true })
+    .click();
   await expectCalls(session, [
     `POST /api/threads/${THREAD}/executions/live/exec-codex/cancel`,
-    'GET /api/executions/active?projectPath=%2Fpreview',
+    'GET /api/executions/active?scope=all',
   ]);
   finish(session);
   await session.page.close();
@@ -575,6 +626,63 @@ test('mounted, new shell: recipient preview follows visible @ text and preferred
   }
   finish(session);
   await page.close();
+});
+
+test('a long single-recipient name stays visible and selects its registered mention', async () => {
+  const nickname = '鲸鲸 deepseek-flash-1017 · high';
+  const catalog = [...cats, { ...cats[2], id: 'dsh', displayName: '小鲸鱼', nickname, mentionPatterns: ['@dsh'] }];
+  for (const width of [900, 462]) {
+    const session = await open('working', {
+      mount: true,
+      ready: '[data-testid="composer-routing-preview"]',
+      width,
+      catalog,
+      respond: (call) => {
+        if (call.key === `GET /api/config/conversation-view?threadId=${THREAD}`) {
+          return { status: 200, body: { stored: null, effective: { mode: 'group' }, source: 'product' } };
+        }
+        if (call.key === 'POST /api/routing/preview') {
+          return { status: 200, body: { targetCats: ['dsh'], reason: { kind: 'recent_replier' } } };
+        }
+        return null;
+      },
+    });
+    const { page } = session;
+    const trigger = page.getByTestId('composer-routing-preview');
+    await page.waitForFunction(
+      (name) =>
+        document.querySelector('[data-testid="composer-routing-preview"]')?.getAttribute('aria-label')?.includes(name),
+      nickname,
+    );
+    const layout = await page.getByTestId('composer-routing-name').evaluate((name) => ({
+      visible: getComputedStyle(name).visibility !== 'hidden' && getComputedStyle(name).display !== 'none',
+      available: name.clientWidth,
+      required: name.scrollWidth,
+      overflow: getComputedStyle(name).textOverflow,
+      text: name.textContent,
+      composerFits:
+        document.querySelector('[data-testid="chat-input-composer-row"]').scrollWidth <=
+        document.querySelector('[data-testid="chat-input-composer-row"]').clientWidth,
+    }));
+    measurements.push({ scene: 'long-single-recipient', width, ...layout });
+    await shot(page, `long-single-recipient-${width}`);
+    assert.equal(layout.visible, true, `${width}px: the name must remain readable`);
+    assert.ok(layout.available > 20 && layout.required > layout.available, 'the actual long name overflows its slot');
+    assert.equal(layout.overflow, 'ellipsis');
+    assert.equal(layout.text, nickname);
+    assert.equal(layout.composerFits, true);
+    assert.match(await trigger.getAttribute('aria-label'), /鲸鲸 deepseek-flash-1017 · high/);
+    await trigger.hover();
+    const tooltip = page.getByTestId('app-tooltip');
+    await tooltip.waitFor();
+    assert.match(await tooltip.textContent(), /鲸鲸 deepseek-flash-1017 · high/);
+    await trigger.click();
+    const recipient = page.getByTestId('composer-recipient-dsh');
+    await recipient.click();
+    assert.equal(await page.locator('textarea').inputValue(), '@dsh ');
+    finish(session);
+    await page.close();
+  }
 });
 
 test('the complete multi-recipient identity is measured and hidden atomically when it does not fit', async () => {

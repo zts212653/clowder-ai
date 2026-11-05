@@ -1,5 +1,9 @@
 import { z } from 'zod';
-import { actionSubjectRefSchema } from './action-subject-ref.js';
+import { actionSubjectRefSchema, TASK_ACTION_SUBJECT_REF_DESCRIPTION } from './action-subject-ref.js';
+
+export const IMPLEMENT_TERMINAL_PREDICATE_DESCRIPTION =
+  'Required for new implement claims, including claimOrigin=existing_standing: terminalPredicate={kind:"task_done"}. ' +
+  'May be omitted only for returnToPredecessor.';
 
 export const ACTION_SUCCESSOR_ACTION_FAMILIES = [
   'review',
@@ -26,7 +30,6 @@ export type ActionSuccessorClaimOrigin = 'structured_transfer' | 'existing_stand
 
 export const ACTION_TERMINAL_PREDICATE_KINDS = [
   'pr_merged',
-  'review_delivered',
   'ci_passed',
   'test_passed',
   'durable_verdict',
@@ -41,18 +44,13 @@ const canonicalGitObjectIdSchema = z
 
 export const DISPATCH_PROPOSED_ACTION_CAPABILITIES = [
   {
-    actionFamily: 'review',
-    successorSlot: 'reviewer',
-    terminalPredicateKind: 'review_delivered',
-  },
-  {
     actionFamily: 'implement',
     successorSlot: 'implementer',
     terminalPredicateKind: 'task_done',
   },
 ] as const;
 
-const [reviewProposalCapability, implementProposalCapability] = DISPATCH_PROPOSED_ACTION_CAPABILITIES;
+const [implementProposalCapability] = DISPATCH_PROPOSED_ACTION_CAPABILITIES;
 
 const proposedActionCommonShape = {
   mode: z
@@ -71,34 +69,13 @@ const proposedActionCommonShape = {
     .describe('Optional explicit default; approval proposals create only a new structured transfer.'),
 };
 
-const reviewDispatchProposedActionSchema = z
-  .object({
-    subjectRef: z
-      .string()
-      .regex(/^pr:[^/\s]+\/[^#\s]+#[1-9]\d*$/)
-      .describe('Exact external PR subject: pr:<owner>/<repo>#<positive-number>.'),
-    actionFamily: z.literal(reviewProposalCapability.actionFamily).describe('Executable family: external review.'),
-    successorSlot: z.literal(reviewProposalCapability.successorSlot).describe('Required slot: reviewer.'),
-    ...proposedActionCommonShape,
-    terminalPredicate: z
-      .object({
-        kind: z
-          .literal(reviewProposalCapability.terminalPredicateKind)
-          .describe('External review completion is the durable review_delivered verdict.'),
-        headSha: canonicalGitObjectIdSchema.describe('Exact lowercase 40- or 64-character PR HEAD Git OID.'),
-      })
-      .strict()
-      .describe('Exact external review completion predicate and revision.'),
-  })
-  .strict();
-
 const implementDispatchProposedActionSchema = z
   .object({
     subjectRef: z
       .string()
       // biome-ignore lint/suspicious/noControlCharactersInRegex: U+001F is the identity-key delimiter and must be excluded explicitly.
-      .regex(/^subject:task:[^\s\x1f]{1,200}$/)
-      .describe('Exact task subject: subject:task:<taskId>.'),
+      .regex(/^subject:task:[^\s\x1f]{1,200}$/, TASK_ACTION_SUBJECT_REF_DESCRIPTION)
+      .describe(TASK_ACTION_SUBJECT_REF_DESCRIPTION),
     actionFamily: z.literal(implementProposalCapability.actionFamily).describe('Executable family: implement.'),
     successorSlot: z
       .literal(implementProposalCapability.successorSlot)
@@ -115,30 +92,27 @@ const implementDispatchProposedActionSchema = z
   })
   .strict();
 
-export const dispatchProposedActionInputSchema = z
-  .discriminatedUnion('actionFamily', [reviewDispatchProposedActionSchema, implementDispatchProposedActionSchema])
-  .superRefine((value, ctx) => {
-    if (value.mode === 'parallel' && !value.parallelIntent) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['parallelIntent'],
-        message: 'parallel proposed action requires explicit parallelIntent',
-      });
-    }
-    if (value.mode === 'single' && value.parallelIntent) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['parallelIntent'],
-        message: 'single proposed action cannot declare parallel intent',
-      });
-    }
-  });
+export const dispatchProposedActionInputSchema = implementDispatchProposedActionSchema.superRefine((value, ctx) => {
+  if (value.mode === 'parallel' && !value.parallelIntent) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['parallelIntent'],
+      message: 'parallel proposed action requires explicit parallelIntent',
+    });
+  }
+  if (value.mode === 'single' && value.parallelIntent) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['parallelIntent'],
+      message: 'single proposed action cannot declare parallel intent',
+    });
+  }
+});
 
 export type DispatchProposedActionInput = z.infer<typeof dispatchProposedActionInputSchema>;
 
 export const actionTerminalPredicateInputSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('pr_merged') }).strict(),
-  z.object({ kind: z.literal('review_delivered'), headSha: canonicalGitObjectIdSchema }).strict(),
   z.object({ kind: z.literal('ci_passed'), headSha: canonicalGitObjectIdSchema }).strict(),
   z
     .object({
@@ -176,6 +150,8 @@ export function isAllowedActionSuccessorSlot(
 }
 
 export const actionSuccessorMetadataObjectSchema = z.object({
+  expectedOwnerRevision: z.number().int().nonnegative().optional(),
+  stopPreviousExecution: z.boolean().optional(),
   subjectRef: actionSubjectRefSchema,
   actionFamily: z.enum(ACTION_SUCCESSOR_ACTION_FAMILIES),
   successorSlot: z.enum(ACTION_SUCCESSOR_SLOTS),
@@ -283,7 +259,9 @@ function refineTerminalPredicate(value: ActionSuccessorMetadataValue, ctx: z.Ref
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['terminalPredicate'],
-      message: 'new action custody requires a typed terminalPredicate',
+      message:
+        'new action custody requires a typed terminalPredicate' +
+        (value.actionFamily === 'implement' ? `. ${IMPLEMENT_TERMINAL_PREDICATE_DESCRIPTION}` : ''),
     });
   }
 }

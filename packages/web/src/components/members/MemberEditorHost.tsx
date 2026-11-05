@@ -4,7 +4,6 @@ import { HubCatEditor } from '../HubCatEditor';
 import type { HubCatEditorDraft } from '../hub-cat-editor.model';
 import { useMembersCopy } from './editor-presentation';
 import { MemberDetailHeader } from './MemberDetailHeader';
-import { MemberRoutingHistory } from './MemberRoutingHistory';
 import type { MembersCopy } from './members.shell-copy';
 export type MemberDeleteCopy = Pick<MembersCopy, 'deleteTitle' | 'deletePrompt' | 'deleteLabel' | '取消'>;
 
@@ -52,7 +51,6 @@ export function MemberEditorHost({
           />
         ) : undefined
       }
-      history={v2 && cat ? <MemberRoutingHistory cat={cat} /> : undefined}
       onDelete={
         v2 && cat
           ? async () => {

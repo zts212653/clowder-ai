@@ -6,7 +6,7 @@ import { block, cardRef, request } from '../../../rich/__tests__/runtime-convers
 import { deriveMailboxState } from '../../unified-mailbox-state';
 import { MailboxItemGroups } from '../MailboxItemGroups';
 import { projectMailboxRows } from '../mailbox-rows';
-import { okRead } from './mailbox-fixtures';
+import { collectiveResultRow, okRead } from './mailbox-fixtures';
 
 function runtime(kind: 'approval' | 'question' | 'elicitation' | 'conversation_decision'): UnifiedAttentionItemV1 {
   return {
@@ -82,6 +82,7 @@ it('groups all released runtime kinds and the exact content-review receipt under
     runtime('elicitation'),
     runtime('conversation_decision'),
     exactReview(),
+    collectiveResultRow(),
   ];
   const other: UnifiedAttentionItemV1 = {
     decisionRef: 'ordinary-judgment',
@@ -96,7 +97,7 @@ it('groups all released runtime kinds and the exact content-review receipt under
         rows={projectMailboxRows([...decisions, other], [], [])}
         complete
         readKnown
-        groupCounts={{ decisions: 5, userMentions: 0, other: 1 }}
+        groupCounts={{ decisions: 6, userMentions: 0, other: 1 }}
         renderRow={(row) =>
           row.kind === 'item' ? (
             <li key={row.key} data-source={row.item.decisionRef}>
@@ -109,7 +110,7 @@ it('groups all released runtime kinds and the exact content-review receipt under
   );
   const waiting = container.querySelector('[data-testid="mailbox-group-decisions"]');
   for (const item of decisions) expect(waiting?.querySelector(`[data-source="${item.decisionRef}"]`)).not.toBeNull();
-  expect(waiting?.querySelector('h3')?.textContent).toContain('5');
+  expect(waiting?.querySelector('h3')?.textContent).toContain('6');
   expect(container.querySelector('[data-testid="mailbox-group-other"] li')?.textContent).toBe('ordinary');
 });
 
@@ -119,8 +120,11 @@ it.each([
   'elicitation',
   'conversation_decision',
   'content_review',
+  'collective_result',
 ] as const)('keeps a confirmed %s visible without inventing an exact number when the source total is absent', (kind) => {
-  const result = okRead([kind === 'content_review' ? exactReview() : runtime(kind)], {
+  const item =
+    kind === 'content_review' ? exactReview() : kind === 'collective_result' ? collectiveResultRow() : runtime(kind);
+  const result = okRead([item], {
     totalCount: undefined,
     attentionCount: undefined,
   });

@@ -69,7 +69,7 @@ test('Live accepts one entrusted owner request idempotently and cannot substitut
     const source = f.messages.append({
       userId: 'owner',
       threadId: 'home',
-      catId: null,
+      from: { kind: 'user', userId: 'owner' },
       content: 'Compare these two reports and return a reviewable result',
       mentions: [],
       timestamp: Date.now(),
@@ -94,7 +94,7 @@ test('Live accepts one entrusted owner request idempotently and cannot substitut
     const foreign = f.messages.append({
       userId: 'foreign',
       threadId: 'home',
-      catId: null,
+      from: { kind: 'user', userId: 'foreign' },
       content: 'Foreign request',
       mentions: [],
       timestamp: Date.now(),
@@ -142,7 +142,7 @@ test('revocation while reading the admission source prevents Task creation', asy
     const source = f.messages.append({
       userId: 'owner',
       threadId: 'home',
-      catId: null,
+      from: { kind: 'user', userId: 'owner' },
       content: 'Please compare these reports',
       mentions: [],
       timestamp: Date.now(),
@@ -175,7 +175,7 @@ for (const action of ['update', 'close'] as const) {
       const source = f.messages.append({
         userId: 'owner',
         threadId: 'home',
-        catId: null,
+        from: { kind: 'user', userId: 'owner' },
         content: 'Please compare these reports',
         mentions: [],
         timestamp: Date.now(),

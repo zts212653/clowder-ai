@@ -23,7 +23,9 @@ import type {
 } from '@cat-cafe/shared';
 import { catRegistry } from '@cat-cafe/shared';
 import { resolveCatCafeSkillsSource } from '../../utils/skill-source.js';
+import { configEventBus, createChangeSetId } from '../config-event-bus.js';
 import { migrateCapabilitiesV1ToV2 } from '../governance/capabilities-migration.js';
+import { invocationPluginMcpConfig, projectInvocationPluginMcp } from './invocation-plugin-mcp-view.js';
 import {
   cleanStaleClaudeProjectOverrides,
   readAntigravityMcpConfig,
@@ -672,6 +674,16 @@ export async function migrateAndPersistCapabilities(projectRoot: string): Promis
   }
 }
 
+function notifyCapabilitiesConfigChanged(projectRoot: string): void {
+  configEventBus.emitChange({
+    source: 'capabilities',
+    scope: 'domain',
+    changedKeys: [resolve(projectRoot)],
+    changeSetId: createChangeSetId(),
+    timestamp: Date.now(),
+  });
+}
+
 export async function writeCapabilitiesConfig(projectRoot: string, config: CapabilitiesConfig): Promise<void> {
   const dir = safePath(projectRoot, CONFIG_SUBDIR);
   await mkdir(dir, { recursive: true });
@@ -682,6 +694,7 @@ export async function writeCapabilitiesConfig(projectRoot: string, config: Capab
   const tmpPath = `${filePath}.${process.pid}.${randomUUID().slice(0, 8)}.tmp`;
   await writeFile(tmpPath, `${JSON.stringify(config, null, 2)}\n`, 'utf-8');
   await rename(tmpPath, filePath);
+  notifyCapabilitiesConfigChanged(projectRoot);
 }
 
 function writeCapabilitiesConfigSync(projectRoot: string, config: CapabilitiesConfig): void {
@@ -700,6 +713,7 @@ function writeCapabilitiesConfigSync(projectRoot: string, config: CapabilitiesCo
     }
     throw err;
   }
+  notifyCapabilitiesConfigChanged(projectRoot);
 }
 
 export function inheritFullyBlockedMcpCapabilitiesForNewCatInConfig(
@@ -825,7 +839,7 @@ export interface DiscoveryPaths {
   claudeConfig: string; // e.g. <projectRoot>/.mcp.json
   codexConfig: string; // e.g. <projectRoot>/.codex/config.toml
   geminiConfig: string; // e.g. <projectRoot>/.gemini/settings.json
-  kimiConfig: string; // e.g. <projectRoot>/.kimi/mcp.json
+  kimiConfig: string; // e.g. <projectRoot>/.kimi-code/mcp.json
   antigravityConfig?: string; // e.g. ~/.gemini/antigravity/mcp_config.json
 }
 
@@ -1640,7 +1654,8 @@ export function resolveServersForCat(
   /** Track cap.id → encoded name for collision detection. */
   const nameOrigin = new Map<string, string>();
 
-  for (const cap of config.capabilities) {
+  for (const storedCapability of invocationPluginMcpConfig(config, catId).capabilities) {
+    const { capability: cap, available: localActivationAvailable } = projectInvocationPluginMcp(storedCapability);
     if (cap.type !== 'mcp') continue;
     if (isRetiredGithubMcpCapability(cap)) continue;
 
@@ -1657,7 +1672,7 @@ export function resolveServersForCat(
           (STREAMABLE_HTTP_PROVIDERS.has(provider) || entry?.config.agyProfile?.carrier === 'native') &&
           !!mcpServer.url?.trim()
         : hasUsableTransport(mcpServer);
-    const enabled = enabledFromConfig && transportSupported;
+    const enabled = enabledFromConfig && transportSupported && localActivationAvailable;
 
     // MCP server names must not contain colons — Codex uses `mcp:<name>/<tool>`
     // convention, so colons in the name break tool resolution. Plugin capability

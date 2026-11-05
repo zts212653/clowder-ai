@@ -5,6 +5,47 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 
 const approveProposal = vi.fn();
 const rejectProposal = vi.fn();
+let pending: ApprovalHubItem[] = [];
+vi.mock('@/utils/api-client', () => ({
+  apiFetch: vi.fn(async (path: string) =>
+    Response.json(
+      path.startsWith('/api/messages?')
+        ? {
+            messages: pending.map((item) => ({
+              id: 'card-f313',
+              catId: item.requesterCatId,
+              timestamp: item.createdAt,
+              extra: {
+                rich: {
+                  blocks: [
+                    {
+                      id: `eval-repair-proposal-${item.proposalId}`,
+                      kind: 'card',
+                      v: 1,
+                      title: item.summary,
+                      bodyMarkdown: item.detail.expectedChange,
+                      tone: 'warning',
+                      fields: [
+                        { label: '成本与回滚', value: item.detail.costAndRollback },
+                        { label: '撤回条件', value: item.detail.withdrawalCondition },
+                        { label: '精确目标', value: 'exact-head' },
+                      ],
+                      actions: [
+                        { label: '批准', action: 'eval-repair:approve', payload: { proposalId: item.proposalId } },
+                        { label: '拒绝', action: 'eval-repair:reject', payload: { proposalId: item.proposalId } },
+                      ],
+                      meta: { approval: { producerId: 'F266', canonicalProposalId: item.proposalId } },
+                    },
+                  ],
+                },
+              },
+            })),
+            hasMore: false,
+          }
+        : { userId: 'operator' },
+    ),
+  ),
+}));
 
 vi.mock('@/stores/chatStore', () => ({
   useChatStore: Object.assign(
@@ -14,16 +55,21 @@ vi.mock('@/stores/chatStore', () => ({
 }));
 
 vi.mock('@/stores/approvalHubStore', () => ({
-  useApprovalHubStore: (selector: (state: Record<string, unknown>) => unknown) =>
-    selector({
-      close: vi.fn(),
-      approveProposal,
-      rejectProposal,
-      resolveEntityConflict: vi.fn(),
-      deciding: {},
-      selectedIds: new Set<string>(),
-      toggleSelection: vi.fn(),
-    }),
+  useApprovalHubStore: Object.assign(
+    (selector: (state: Record<string, unknown>) => unknown) =>
+      selector({
+        close: vi.fn(),
+        approveProposal,
+        rejectProposal,
+        resolveEntityConflict: vi.fn(),
+        deciding: {},
+        selectedIds: new Set<string>(),
+        toggleSelection: vi.fn(),
+      }),
+    {
+      getState: () => ({ items: pending, pendingReadAvailable: true, isLoading: false, fetchPending: async () => {} }),
+    },
+  ),
 }));
 
 vi.mock('@/utils/scrollToMessage', () => ({ scrollToMessage: vi.fn() }));
@@ -41,8 +87,17 @@ function item(lifecycle: Pick<ApprovalHubItem, 'resolution' | 'materialization'>
     summary: 'Eval repair · approval renderer vocabulary',
     detail: {
       expectedChange: 'Project one canonical lifecycle vocabulary',
-      ownerAuthorizationRef: 'authorization:F266:v1',
-      targetVersionRef: 'target:F246@exact-head',
+      costAndRollback: 'One reversible review; revert the change',
+      withdrawalCondition: 'Withdraw when the target changes',
+      ownerRef: { ownerFeatureId: 'F246', ownerStateRef: 'owner:approval-renderer' },
+      ownerAuthorizationRef: { ownerFeatureId: 'F246', ownerStateRef: 'authorization:approval-renderer' },
+      targetVersionRef: {
+        ownerFeatureId: 'F246',
+        ownerStateRef: 'asset:approval-renderer',
+        assetKind: 'feature_component',
+        assetId: 'F246:approval-renderer',
+        version: 'exact-head',
+      },
     },
     navigation: {
       state: 'anchored',
@@ -84,9 +139,9 @@ describe('F313 F266 Approval Hub card', () => {
   });
 
   it('offers the canonical decision only for an open proposal', async () => {
-    await act(async () =>
-      root.render(<ApprovalItemCard item={item({ resolution: 'open', materialization: { state: 'not_started' } })} />),
-    );
+    const proposal = item({ resolution: 'open', materialization: { state: 'not_started' } });
+    pending = [proposal];
+    await act(async () => root.render(<ApprovalItemCard item={proposal} />));
 
     expect(container.textContent).toContain('approval renderer vocabulary');
     expect(container.textContent).not.toContain('Eval repair ·');

@@ -21,6 +21,7 @@ test('html_widget block → widget artifact with title', () => {
   assert.equal(r[0].type, 'widget');
   assert.equal(r[0].name, '架构图');
   assert.equal(r[0].sourceMessageId, 'm-w1');
+  assert.equal(r[0].widgetBlockId, 'b1', 'html_widget must carry the block coordinate for Works preview');
 });
 
 test('html_widget block without title → fallback name', () => {
@@ -54,6 +55,25 @@ test('interactive block → widget artifact with title', () => {
   assert.equal(r[0].type, 'widget');
   assert.equal(r[0].name, '选择方案');
   assert.equal(r[0].sourceMessageId, 'm-i1');
+  assert.equal(r[0].widgetBlockId, undefined, 'interactive cards stay in chat and must not enter HTML preview');
+});
+
+test('two same-name html_widget blocks in one message keep distinct coordinates', () => {
+  const r = aggregateThreadArtifacts({
+    messages: [
+      msg('m-w3', 340, [
+        { kind: 'html_widget', v: 1, id: 'same-a', html: '<div>a</div>', title: '同名' },
+        { kind: 'html_widget', v: 1, id: 'same-b', html: '<div>b</div>', title: '同名' },
+      ]),
+    ],
+    prTasks: [],
+    fileLedger: [],
+  });
+  assert.deepEqual(
+    r.map((item) => item.widgetBlockId),
+    ['same-a', 'same-b'],
+  );
+  assert.equal(new Set(r.map((item) => item.name)).size, 1);
 });
 
 test('interactive block without title uses description fallback', () => {

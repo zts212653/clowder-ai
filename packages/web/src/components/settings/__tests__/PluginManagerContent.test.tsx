@@ -125,21 +125,6 @@ function connectorPlugin() {
     ...managerPlugin({ installed: true }),
     pluginId: 'telegram',
     displayName: 'Telegram',
-    source: {
-      kind: 'compatibility',
-      adapter: 'connector',
-      packageName: 'connector:telegram',
-      trust: 'first-party',
-    },
-    packageDigest: null,
-    pluginInstanceId: null,
-    lifecycleRevision: null,
-    actions: {
-      install: false,
-      setEnabled: false,
-      uninstall: false,
-      blockingReasons: ['compatibility-read-only'],
-    },
   } as const;
 }
 
@@ -244,6 +229,191 @@ describe('F202 live Plugin Manager Console wiring', () => {
     expect(mockApiFetch.mock.calls.some(([url]) => url === '/api/plugins/personal-chrome')).toBe(false);
   });
 
+  it('renders installed plugins before remote catalog discovery settles, then hydrates available plugins once', async () => {
+    const installed = {
+      ...managerPlugin({ installed: true, pluginId: 'local.github', displayName: 'Installed GitHub' }),
+      live: 'running' as const,
+    };
+    let resolveRemote: ((value: Response) => void) | undefined;
+    const remote = new Promise<Response>((resolve) => {
+      resolveRemote = resolve;
+    });
+    mockApiFetch.mockImplementation(async (url) => {
+      if (url === '/api/plugin-manager/plugins/_local') {
+        return json({
+          plugins: [installed],
+          catalog: { status: 'loading', refreshedAt: null, message: '正在加载可安装插件。' },
+        });
+      }
+      if (url === '/api/plugin-manager/plugins') return remote;
+      if (url === '/api/plugin-manager/plugins/_local/local.github') {
+        const localDetail = detail(installed);
+        return json({
+          ...localDetail,
+          plugin: {
+            ...localDetail.plugin,
+            contributions: [
+              {
+                id: 'github-tools',
+                kind: 'mcp',
+                name: 'github-tools',
+                description: 'GitHub tools.',
+              },
+            ],
+          },
+          catalog: { status: 'loading', refreshedAt: null },
+        });
+      }
+      if (url === '/api/plugin-manager/plugins/local.github/documentation') {
+        return json({ readmeMarkdown: '# Installed README\n\nLocal package documentation.' });
+      }
+      if (url === '/api/plugin-manager/plugins/local.github/contributions/tools') {
+        return json({
+          pluginId: installed.pluginId,
+          tools: [
+            {
+              contributionId: 'github-tools',
+              name: 'installed_tool',
+              description: 'Tool projected by the active local runtime.',
+              inputSchema: { type: 'object' },
+            },
+          ],
+        });
+      }
+      if (url === '/api/plugin-manager/plugins/local.github') return json(detail(installed));
+      return json({}, 404);
+    });
+
+    await act(async () => root.render(<PluginsContent />));
+    await flushEffects();
+
+    expect(container.textContent).toContain('Installed GitHub');
+    expect(container.textContent).not.toContain('Video Analysis');
+    expect(container.textContent).not.toContain('正在加载可安装插件。');
+    expect(container.textContent).not.toContain('目录暂时不可用');
+    expect(container.textContent).toContain('Local package documentation.');
+    expect(container.textContent).toContain('installed_tool');
+
+    await act(async () => {
+      resolveRemote?.(
+        json({
+          plugins: [installed, managerPlugin()],
+          catalog: { status: 'fresh', refreshedAt: 1_000 },
+        }),
+      );
+      await Promise.resolve();
+    });
+    await flushEffects();
+
+    expect(container.textContent).toContain('Installed GitHub');
+    expect(container.textContent).toContain('Video Analysis');
+    expect(mockApiFetch.mock.calls.filter(([url]) => url === '/api/plugin-manager/plugins').length).toBe(1);
+    expect(
+      mockApiFetch.mock.calls.filter(([url]) => url === '/api/plugin-manager/plugins/_local/local.github').length,
+    ).toBeGreaterThan(0);
+    expect(mockApiFetch.mock.calls.filter(([url]) => url === '/api/plugin-manager/plugins/local.github').length).toBe(
+      0,
+    );
+  });
+
+  it('keeps installed plugins usable when the incremental remote catalog read fails', async () => {
+    const installed = managerPlugin({ installed: true, pluginId: 'local.github', displayName: 'Installed GitHub' });
+    mockApiFetch.mockImplementation(async (url) => {
+      if (url === '/api/plugin-manager/plugins/_local') {
+        return json({ plugins: [installed], catalog: { status: 'loading', refreshedAt: null } });
+      }
+      if (url === '/api/plugin-manager/plugins') throw new TypeError('network unavailable');
+      if (url === '/api/plugin-manager/plugins/_local/local.github') {
+        return json({ ...detail(installed), catalog: { status: 'loading', refreshedAt: null } });
+      }
+      return json({}, 404);
+    });
+
+    await act(async () => root.render(<PluginsContent />));
+    await flushEffects();
+
+    expect(container.textContent).toContain('Installed GitHub');
+    expect(container.textContent).toContain('目录暂时不可用；已安装插件仍可管理');
+    expect(container.querySelector('button[aria-label="启用Installed GitHub"]')).not.toBeNull();
+  });
+
+  it('reaches archive confirmation from the live Manager toolbar and refreshes after installation', async () => {
+    let installed = false;
+    const confirmation = {
+      pluginId: 'dev.clowder.video-analysis',
+      pluginInstanceId: 'pi_video',
+      currentPackageDigest: digest,
+      candidatePackageDigest: digest,
+      expectedLifecycleRevision: 7,
+    };
+    mockApiFetch.mockImplementation(async (url, init) => {
+      if (url === '/api/plugin-manager/plugins') return json(response(managerPlugin({ installed })));
+      if (url === '/api/plugin-manager/plugins/dev.clowder.video-analysis')
+        return json(detail(managerPlugin({ installed })));
+      if (url === '/api/plugin-manager/plugins/install/upload') {
+        const body = init?.body as FormData;
+        if (!body.has('replacement'))
+          return json(
+            {
+              code: 'ARCHIVE_REPLACEMENT_CONFIRMATION_REQUIRED',
+              replacement: {
+                confirmation,
+                displayName: 'Video Analysis',
+                currentVersion: '0.1.0',
+                candidateVersion: '0.2.0',
+              },
+            },
+            409,
+          );
+        expect(JSON.parse(body.get('replacement') as string)).toEqual(confirmation);
+        installed = true;
+        return json({ pluginId: confirmation.pluginId, pluginInstanceId: confirmation.pluginInstanceId }, 201);
+      }
+      return json({}, 404);
+    });
+    await act(async () => root.render(<PluginsContent />));
+    await flushEffects();
+    const input = container.querySelector<HTMLInputElement>('[data-plugin-manager-toolbar] input[type="file"]');
+    expect(input, 'archive must be reachable from the real live Manager toolbar').not.toBeNull();
+    if (!input) return;
+    Object.defineProperty(input, 'files', { configurable: true, value: [new File(['fixture'], 'plugin.tgz')] });
+    await act(async () => input.dispatchEvent(new Event('change', { bubbles: true })));
+    expect(container.querySelector('[role="dialog"]')?.textContent).toContain('0.1.0 替换为 0.2.0');
+    expect(installed).toBe(false);
+    const confirm = [...container.querySelectorAll('button')].find((button) => button.textContent === '确认替换');
+    expect(confirm).toBeDefined();
+    await act(async () => confirm?.click());
+    await flushEffects();
+    expect(installed).toBe(true);
+    expect(mockApiFetch.mock.calls.filter(([url]) => url === '/api/plugin-manager/plugins').length).toBeGreaterThan(1);
+    expect(container.textContent).toContain('安装成功: dev.clowder.video-analysis');
+  });
+
+  it('keeps a historical installed plugin visible with the existing unknown-origin label in list and detail', async () => {
+    const legacy = {
+      ...managerPlugin({ installed: true, pluginId: 'dev.clowder.genoffice-docx', displayName: 'Installed GenOffice' }),
+      source: { kind: 'unknown', packageName: null, trust: 'unknown' },
+    };
+    mockApiFetch.mockImplementation(async (url) => {
+      if (url === '/api/plugin-manager/plugins') return json(response(legacy));
+      if (url === `/api/plugin-manager/plugins/${legacy.pluginId}`)
+        return json({
+          plugin: { ...legacy, capabilities: legacy.capabilitySummary, configFields: [] },
+          catalog: { status: 'fresh', refreshedAt: 1000 },
+        });
+      return json({}, 404);
+    });
+    await act(async () => root.render(<PluginsContent />));
+    await flushEffects();
+    const row = container.querySelector(`[data-plugin-id="${legacy.pluginId}"]`);
+    expect(row).not.toBeNull();
+    expect(row?.querySelector('[data-plugin-source-trust="unknown"]')?.textContent).toContain('缺少安装来源记录');
+    expect(container.querySelector('[data-testid="plugin-manager-detail"]')?.textContent).toContain(
+      'Installed GenOffice',
+    );
+    expect(mockApiFetch.mock.calls.every(([, options]) => !options?.method || options.method === 'GET')).toBe(true);
+  });
+
   it('preserves manifest colors in repository compatibility rows and their detail cards', async () => {
     window.history.replaceState({}, '', '/settings?s=plugins');
     const repository = {
@@ -284,7 +454,7 @@ describe('F202 live Plugin Manager Console wiring', () => {
     ) as HTMLElement | null;
     expect(detailIcon?.style.backgroundColor).toBe(listIcon?.style.backgroundColor);
     expect(detailIcon?.style.color).toBe(listIcon?.style.color);
-    expect(row?.querySelector('button[aria-pressed]')).toBeNull();
+    expect(row?.querySelector('button[aria-pressed]')?.getAttribute('aria-pressed')).toBe('false');
     expect(mockApiFetch.mock.calls.every(([, options]) => !options?.method || options.method === 'GET')).toBe(true);
   });
 
@@ -297,7 +467,6 @@ describe('F202 live Plugin Manager Console wiring', () => {
       version: '1.0.0',
       availableVersion: '1.0.0',
       packageDigest: digest,
-      effectiveGrants: [],
       ownerAuthAvailable: false,
       updateAvailable: false,
       instance: null,
@@ -331,6 +500,39 @@ describe('F202 live Plugin Manager Console wiring', () => {
     expect(detailIcon?.querySelector('img')?.getAttribute('src')).toBe(icon.src);
     expect(detailIcon?.style.backgroundColor).toBe(listIcon?.style.backgroundColor);
     expect(mockApiFetch.mock.calls.every(([, options]) => !options?.method || options.method === 'GET')).toBe(true);
+  });
+
+  it('shows when an owner-provided dependency closure was shipped with the package', async () => {
+    const localPlugin = {
+      ...managerPlugin({ installed: true }),
+      source: {
+        kind: 'local-archive',
+        fileName: 'video-analysis.tgz',
+        packageName: '@clowder-ai/video-analysis',
+        trust: 'unverified',
+        dependencyClosure: 'shipped',
+      },
+    } as const;
+    mockApiFetch.mockImplementation(async (url) => {
+      if (url === '/api/plugin-manager/plugins') return json(response(localPlugin));
+      if (url === '/api/plugin-manager/plugins/dev.clowder.video-analysis') {
+        return json({
+          plugin: {
+            ...localPlugin,
+            capabilities: localPlugin.capabilitySummary,
+            configFields: [],
+          },
+          catalog: { status: 'fresh', refreshedAt: 1_000 },
+        });
+      }
+      if (url === '/api/plugin-manager/plugins/dev.clowder.video-analysis/documentation') return json({});
+      return json({}, 404);
+    });
+
+    await act(async () => root.render(<PluginsContent />));
+    await flushEffects();
+
+    expect(container.textContent).toContain('本机自带依赖 · 仅限本机开发');
   });
 
   it('loads detail for the installed plugin selected by visible section ordering', async () => {
@@ -403,11 +605,15 @@ describe('F202 live Plugin Manager Console wiring', () => {
     await act(async () => (toggle as HTMLButtonElement | null)?.click());
     await flushEffects();
 
-    expect(mockApiFetch).toHaveBeenCalledWith('/api/plugin-manager/plugins/dev.clowder.video-analysis/set-enabled', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ enabled: true, expectedRevision: 7 }),
-    });
+    expect(mockApiFetch).toHaveBeenCalledWith(
+      '/api/plugin-manager/plugins/dev.clowder.video-analysis/set-enabled',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ enabled: true, expectedRevision: 7 }),
+      },
+      { mutationTimeoutMs: 5 * 60_000 },
+    );
     expect(listReads).toBeGreaterThanOrEqual(2);
     expect(container.textContent).toContain('插件状态已变化，已刷新最新状态');
   });
@@ -438,15 +644,184 @@ describe('F202 live Plugin Manager Console wiring', () => {
     const install = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '安装');
     await act(async () => install?.click());
     await flushEffects();
-    expect(mockApiFetch).toHaveBeenCalledWith('/api/plugin-manager/plugins/install', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        source: { kind: 'catalog', catalogId: 'dev.clowder.video-analysis' },
-        expectedVersion: '0.1.0-alpha.0',
-        expectedDigest: digest,
-      }),
+    expect(mockApiFetch).toHaveBeenCalledWith(
+      '/api/plugin-manager/plugins/install',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          source: { kind: 'catalog', catalogId: 'dev.clowder.video-analysis' },
+          expectedVersion: '0.1.0-alpha.0',
+          expectedDigest: digest,
+        }),
+      },
+      { mutationTimeoutMs: 600_000 },
+    );
+  });
+
+  it('updates an installed plugin by version without sending old provenance or digest', async () => {
+    const plugin = {
+      ...managerPlugin({ installed: true }),
+      availableVersion: '0.1.0-alpha.1',
+      source: { kind: 'local-archive', packageName: '@clowder-ai/video-analysis', trust: 'unverified' },
+      actions: { install: true, setEnabled: false, uninstall: true, blockingReasons: ['package-incompatible'] },
+    };
+    mockApiFetch.mockImplementation(async (url) => {
+      if (url === '/api/plugin-manager/plugins') return json(response(plugin));
+      if (url === '/api/plugin-manager/plugins/dev.clowder.video-analysis')
+        return json({ ...detail(), plugin: { ...detail().plugin, ...plugin } });
+      if (url === '/api/plugin-manager/plugins/dev.clowder.video-analysis/update')
+        return json({ pluginId: plugin.pluginId, pluginInstanceId: 'pi_video' });
+      return json({}, 404);
     });
+    await act(async () => root.render(<PluginsContent />));
+    await flushEffects();
+    expect(container.textContent).toContain('有更新');
+    const update = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '更新');
+    expect(update).toBeDefined();
+    await act(async () => update?.click());
+    await flushEffects();
+    expect(mockApiFetch).toHaveBeenCalledWith(
+      '/api/plugin-manager/plugins/dev.clowder.video-analysis/update',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ expectedVersion: '0.1.0-alpha.1', expectedRevision: 7 }),
+      }),
+      expect.anything(),
+    );
+    expect(container.querySelector('select[aria-label="安装来源"]')).toBeNull();
+  });
+
+  it('shows one catalog sync warning and keeps individual errors inside repository settings', async () => {
+    const warning = '1 个插件仓库没有同步成功，已保留上次可用的目录。';
+    const sourceError = '插件仓同步失败，保留上次可用目录。';
+    mockApiFetch.mockImplementation(async (url) => {
+      if (String(url).startsWith('/api/plugin-manager/marketplaces'))
+        return json({
+          sources: [
+            {
+              id: 'repo',
+              url: 'https://example.test/plugins.git',
+              origin: 'user',
+              status: 'error',
+              error: sourceError,
+              pluginCount: 1,
+            },
+          ],
+        });
+      if (url === '/api/plugin-manager/plugins')
+        return json({ ...response(), catalog: { status: 'degraded', message: warning } });
+      return json({}, 404);
+    });
+    await act(async () => root.render(<PluginsContent />));
+    await flushEffects();
+    expect(container.textContent?.split(warning)).toHaveLength(2);
+    expect(container.textContent).not.toContain('1 个插件仓库未同步');
+    await act(async () => (container.querySelector('[aria-label="管理插件仓库"]') as HTMLButtonElement).click());
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain(sourceError);
+  });
+
+  it('adds a repository, then installs its plugin through the ordinary Manager button', async () => {
+    const gitUrl = 'ssh://git@git.example.test/team/plugins.git';
+    const marketplace = {
+      sourceId: 'a'.repeat(24),
+      commit: 'b'.repeat(40),
+      path: 'packages/demo',
+      pluginId: 'dev.clowder.video-analysis',
+      version: '0.1.0-alpha.0',
+    };
+    let added = false;
+    const source = { kind: 'git', url: gitUrl, trust: 'unverified', marketplace };
+    const sources = () => ({
+      sources: added
+        ? [{ id: marketplace.sourceId, url: gitUrl, origin: 'user', status: 'ready', pluginCount: 1 }]
+        : [],
+    });
+    mockApiFetch.mockImplementation(async (url, init) => {
+      if (url === '/api/plugin-manager/marketplaces') {
+        if (init?.method === 'POST') added = true;
+        return json(sources());
+      }
+      if (url === '/api/plugin-manager/marketplaces/refresh') return json(sources());
+      if (url === '/api/plugin-manager/plugins')
+        return json(response(added ? { ...managerPlugin(), source } : managerPlugin()));
+      if (url === '/api/plugin-manager/plugins/dev.clowder.video-analysis') return json(detail());
+      if (url === '/api/plugin-manager/plugins/install')
+        return json({ pluginId: marketplace.pluginId, pluginInstanceId: 'pi_example' }, 201);
+      return json({}, 404);
+    });
+    await act(async () => root.render(<PluginsContent />));
+    await flushEffects();
+    expect(container.textContent).not.toContain('从 Git 安装');
+    expect(container.textContent).not.toContain('离线安装');
+    await act(async () => (container.querySelector('[aria-label="管理插件仓库"]') as HTMLButtonElement).click());
+    const input = document.querySelector('[role="dialog"] input') as HTMLInputElement;
+    const branchInput = document.querySelector('[aria-label="分支名"]') as HTMLInputElement;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(input, gitUrl);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(branchInput, 'feature/plugins');
+      branchInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () =>
+      document.querySelector('form')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })),
+    );
+    await flushEffects();
+    expect(mockApiFetch).toHaveBeenCalledWith(
+      '/api/plugin-manager/marketplaces',
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ url: gitUrl, branch: 'feature/plugins' }) }),
+    );
+    await act(async () =>
+      Array.from(document.querySelectorAll('button'))
+        .find((b) => b.textContent === '完成')
+        ?.click(),
+    );
+    await act(async () =>
+      Array.from(container.querySelectorAll('button'))
+        .find((b) => b.textContent === '安装')
+        ?.click(),
+    );
+    await flushEffects();
+    expect(mockApiFetch).toHaveBeenCalledWith(
+      '/api/plugin-manager/plugins/install',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ source: { kind: 'git', url: gitUrl, marketplace } }),
+      }),
+      { mutationTimeoutMs: 600_000 },
+    );
+    expect(mockApiFetch.mock.calls.filter(([url]) => url === '/api/plugin-manager/marketplaces/refresh')).toHaveLength(
+      1,
+    );
+  });
+
+  it('preserves the repository input when checking its address fails', async () => {
+    mockApiFetch.mockImplementation(async (url, init) => {
+      if (url === '/api/plugin-manager/marketplaces' && init?.method === 'POST')
+        return json({ error: '无法访问这个仓库。' }, 422);
+      if (String(url).startsWith('/api/plugin-manager/marketplaces')) return json({ sources: [] });
+      if (url === '/api/plugin-manager/plugins') return json(response());
+      if (url === '/api/plugin-manager/plugins/dev.clowder.video-analysis') return json(detail());
+      return json({}, 404);
+    });
+    await act(async () => root.render(<PluginsContent />));
+    await flushEffects();
+    await act(async () => (container.querySelector('[aria-label="管理插件仓库"]') as HTMLButtonElement).click());
+    const input = document.querySelector('[role="dialog"] input') as HTMLInputElement;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(
+        input,
+        'https://git.example.test/missing.git',
+      );
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () =>
+      document.querySelector('form')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })),
+    );
+    await flushEffects();
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(document.body.textContent).toContain('无法访问这个仓库。');
+    expect(input.value).toBe('https://git.example.test/missing.git');
   });
 
   it('preserves server matches whose query is visible only in plugin identity or publisher metadata', async () => {
@@ -528,12 +903,13 @@ describe('F202 live Plugin Manager Console wiring', () => {
     expect(detailReads.at(-1)).toBe(calendar.pluginId);
   });
 
-  it('renders a compatibility configuration contribution and saves through its typed boundary', async () => {
+  it('renders an installed plugin configuration through the shared manager boundary', async () => {
     const plugin = connectorPlugin();
     mockApiFetch.mockImplementation(async (url, init) => {
       if (url === '/api/plugin-manager/plugins') return json(response(plugin));
       if (url === '/api/plugin-manager/plugins/telegram') return json(connectorDetail());
-      if (url === '/api/connectors/telegram/config' && init?.method === 'PUT') return json({ ok: true });
+      if (url === '/api/plugin-manager/plugins/telegram/contributions/configuration' && init?.method === 'POST')
+        return json({ ok: true });
       return json({}, 404);
     });
 
@@ -555,11 +931,68 @@ describe('F202 live Plugin Manager Console wiring', () => {
     await act(async () => save?.click());
     await flushEffects();
 
-    expect(mockApiFetch).toHaveBeenCalledWith('/api/connectors/telegram/config', {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ fields: [{ name: 'TELEGRAM_BOT_TOKEN', value: '123456:secret' }] }),
+    expect(mockApiFetch).toHaveBeenCalledWith(
+      '/api/plugin-manager/plugins/telegram/contributions/configuration',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          expectedRevision: plugin.lifecycleRevision,
+          updates: [{ key: 'TELEGRAM_BOT_TOKEN', value: '123456:secret' }],
+        }),
+      },
+      { mutationTimeoutMs: 5 * 60_000 },
+    );
+  });
+
+  it('refreshes saved configuration and revision when reconnect fails, without toggling intent', async () => {
+    const plugin = { ...connectorPlugin(), lifecycleRevision: 7, intent: 'enabled' as const, live: 'running' as const };
+    let committed = false;
+    mockApiFetch.mockImplementation(async (url, init) => {
+      const current = committed
+        ? { ...plugin, live: 'stopped', lifecycleRevision: plugin.lifecycleRevision + 2 }
+        : plugin;
+      if (url === '/api/plugin-manager/plugins') return json(response(current));
+      if (url === '/api/plugin-manager/plugins/telegram')
+        return json({
+          ...connectorDetail(),
+          plugin: {
+            ...connectorDetail().plugin,
+            ...current,
+            configFields: connectorDetail().plugin.configFields,
+          },
+        });
+      if (url === '/api/plugin-manager/plugins/telegram/contributions/configuration' && init?.method === 'POST') {
+        committed = true;
+        return json(
+          { code: 'RUNTIME_START_FAILED', error: 'Configuration saved, but the plugin could not restart' },
+          503,
+        );
+      }
+      return json({}, 404);
     });
+    await act(async () => root.render(<PluginsContent />));
+    await flushEffects();
+    const input = container.querySelector('[data-testid="field-TELEGRAM_BOT_TOKEN"]') as HTMLInputElement;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(input, 'changed-token');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const save = () => {
+      const button = Array.from(container.querySelectorAll('button')).find((item) =>
+        item.textContent?.includes('保存配置'),
+      );
+      if (!button) throw new Error('Missing save control');
+      return button;
+    };
+    await act(async () => save().click());
+    await flushEffects();
+    expect(container.textContent).toContain('Configuration saved, but the plugin could not restart');
+    await act(async () => save().click());
+    const writes = mockApiFetch.mock.calls.filter(([, init]) => init?.method === 'POST');
+    expect(writes).toHaveLength(2);
+    expect(JSON.parse(String(writes[1][1]?.body)).expectedRevision).toBe(plugin.lifecycleRevision + 2);
+    expect(writes.every(([url]) => String(url).endsWith('/configuration'))).toBe(true);
   });
 
   it('saves the visible select value, confirms success, and enables with the refreshed revision', async () => {
@@ -619,6 +1052,7 @@ describe('F202 live Plugin Manager Console wiring', () => {
           ],
         }),
       },
+      { mutationTimeoutMs: 5 * 60_000 },
     );
     expect(container.textContent).toContain('配置已保存');
 
@@ -626,11 +1060,15 @@ describe('F202 live Plugin Manager Console wiring', () => {
     await act(async () => toggle?.click());
     await flushEffects();
 
-    expect(mockApiFetch).toHaveBeenCalledWith('/api/plugin-manager/plugins/dev.clowder.video-analysis/set-enabled', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ enabled: true, expectedRevision: 8 }),
-    });
+    expect(mockApiFetch).toHaveBeenCalledWith(
+      '/api/plugin-manager/plugins/dev.clowder.video-analysis/set-enabled',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ enabled: true, expectedRevision: 8 }),
+      },
+      { mutationTimeoutMs: 5 * 60_000 },
+    );
   });
 
   it('uses the shared Console confirmation flow before uninstalling', async () => {
@@ -652,11 +1090,15 @@ describe('F202 live Plugin Manager Console wiring', () => {
     await flushEffects();
 
     expect(nativeConfirm).not.toHaveBeenCalled();
-    expect(mockApiFetch).toHaveBeenCalledWith('/api/plugin-manager/plugins/dev.clowder.video-analysis/uninstall', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ expectedRevision: 7 }),
-    });
+    expect(mockApiFetch).toHaveBeenCalledWith(
+      '/api/plugin-manager/plugins/dev.clowder.video-analysis/uninstall',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ expectedRevision: 7 }),
+      },
+      { mutationTimeoutMs: 5 * 60_000 },
+    );
     nativeConfirm.mockRestore();
   });
 
@@ -686,7 +1128,7 @@ describe('F202 live Plugin Manager Console wiring', () => {
           tools: [
             {
               contributionId: 'video-analysis-toolset',
-              name: 'video_analysis',
+              name: 'video_analysis_execute',
               description: 'Analyze an explicitly selected video.',
               inputSchema: { type: 'object' },
             },
@@ -702,7 +1144,7 @@ describe('F202 live Plugin Manager Console wiring', () => {
     expect(mockApiFetch).toHaveBeenCalledWith(
       '/api/plugin-manager/plugins/dev.clowder.video-analysis/contributions/tools',
     );
-    expect(container.textContent).toContain('video_analysis');
+    expect(container.textContent).toContain('video_analysis_execute');
     expect(container.textContent).toContain('Analyze an explicitly selected video.');
   });
 
@@ -819,10 +1261,11 @@ describe('F202 live Plugin Manager Console wiring', () => {
     expect(container.textContent).not.toContain('README 暂不可用。');
   });
 
-  it('polls by replacing the same projection without emitting duplicate UI errors', async () => {
+  it('loads on page open without polling the plugin list in the background', async () => {
     vi.useFakeTimers();
     let listReads = 0;
     mockApiFetch.mockImplementation(async (url) => {
+      if (String(url).startsWith('/api/plugin-manager/marketplaces')) return json({ sources: [] });
       if (url === '/api/plugin-manager/plugins') {
         listReads += 1;
         return json(response(managerPlugin({ installed: true })));
@@ -835,7 +1278,7 @@ describe('F202 live Plugin Manager Console wiring', () => {
 
     await act(async () => root.render(<PluginsContent />));
     await flushEffects();
-    expect(listReads).toBe(1);
+    expect(listReads).toBe(2);
 
     await act(async () => {
       vi.advanceTimersByTime(5_000);
@@ -844,22 +1287,21 @@ describe('F202 live Plugin Manager Console wiring', () => {
     });
 
     expect(listReads).toBe(2);
+    expect(mockApiFetch.mock.calls.filter(([url]) => url === '/api/plugin-manager/marketplaces/refresh')).toHaveLength(
+      1,
+    );
     expect(container.querySelectorAll('[role="alert"]')).toHaveLength(0);
     expect(container.querySelectorAll('[data-plugin-id="dev.clowder.video-analysis"]')).toHaveLength(1);
   });
 
-  it('keeps an unavailable detail state stable while polling retries it', async () => {
+  it('keeps an unavailable detail state stable without background retries', async () => {
     vi.useFakeTimers();
     let detailReads = 0;
-    let resolveRetry: ((response: Response) => void) | undefined;
-    const retry = new Promise<Response>((resolve) => {
-      resolveRetry = resolve;
-    });
     mockApiFetch.mockImplementation(async (url) => {
       if (url === '/api/plugin-manager/plugins') return json(response(managerPlugin({ installed: true })));
       if (url === '/api/plugin-manager/plugins/dev.clowder.video-analysis') {
         detailReads += 1;
-        return detailReads === 1 ? json({}, 503) : retry;
+        return json({}, 503);
       }
       if (url === '/api/plugin-manager/plugins/dev.clowder.video-analysis/documentation') return json({});
       return json({}, 404);
@@ -875,11 +1317,37 @@ describe('F202 live Plugin Manager Console wiring', () => {
       await Promise.resolve();
     });
 
-    expect(detailReads).toBe(2);
+    expect(detailReads).toBe(1);
     expect(container.textContent).toContain('README 暂不可用。');
     expect(container.textContent).not.toContain('README 加载中…');
-
-    resolveRetry?.(json({}, 503));
+  });
+  it('shows all installed plugins, five available initially, and finds later plugins by scrolling or search', async () => {
+    const installed = Array.from({ length: 7 }, (_, i) =>
+      managerPlugin({ installed: true, pluginId: `installed.${i}`, displayName: `Installed ${i}` }),
+    );
+    const available = Array.from({ length: 12 }, (_, i) =>
+      managerPlugin({ pluginId: `available.${i}`, displayName: `Available ${i}` }),
+    );
+    mockApiFetch.mockImplementation(async (url) => {
+      if (url === '/api/plugin-manager/plugins') return json({ ...response(), plugins: [...installed, ...available] });
+      if (String(url).startsWith('/api/plugin-manager/marketplaces')) return json({ sources: [] });
+      if (String(url).startsWith('/api/plugin-manager/plugins/')) return json(detail(installed[0]));
+      return json({}, 404);
+    });
+    await act(async () => root.render(<PluginsContent />));
     await flushEffects();
+    expect(container.querySelectorAll('[data-plugin-list-row]')).toHaveLength(12);
+    expect(container.querySelector('[data-plugin-id="installed.6"]')).not.toBeNull();
+    const list = container.querySelector('[data-plugin-scroll-region="list"]') as HTMLDivElement;
+    await act(async () => list.dispatchEvent(new Event('scroll', { bubbles: true })));
+    expect(container.querySelectorAll('[data-plugin-list-row]')).toHaveLength(17);
+    const search = container.querySelector('[aria-label="搜索插件"]') as HTMLInputElement;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(search, 'Available 11');
+      search.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(container.querySelector('[data-plugin-id="available.11"]')).not.toBeNull();
+    expect(container.querySelectorAll('[data-plugin-list-row]')).toHaveLength(1);
+    expect(container.querySelector('a[href="/docs/plugin-development.md"]')).not.toBeNull();
   });
 });

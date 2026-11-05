@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/store.js';
 import { reviewVersionOperationId } from '../src/domains/collaborative-content/artifact-review/version-response-service.js';
 import { publicationRecoveryFingerprint } from '../src/domains/collaborative-content/modification/publication-recovery-contract.js';
-import { publicationRecoveryFixture } from './helpers/publication-recovery-fixture.js';
+import { publicationRecoveryFixture, publicationResponseRecord } from './helpers/publication-recovery-fixture.js';
 
 test('only the direct owner Human can authorize a recovery, with a strict public response body', async (t) => {
   const f = await publicationRecoveryFixture(t);
@@ -71,11 +71,12 @@ test('one CAS winner survives concurrent owner commands, database reopen and exa
     f.app.inject(f.ownerInput),
     f.app.inject({ ...f.ownerInput, payload: competing }),
   ]);
-  assert.equal(
-    results.filter((result) => result.statusCode === 200).length,
-    2,
-    results.map((result) => result.body).join('\n'),
-  );
+  const winner = results[2]?.statusCode === 200 ? competing : f.command;
+  const successes = results.filter((result) => result.statusCode === 200);
+  assert.equal(successes.length, winner === competing ? 1 : 2, results.map((result) => result.body).join('\n'));
+  assert.equal(new Set(successes.map((result) => result.json().intent.receiptRef)).size, 1);
+  const winnerReplay = await f.app.inject({ ...f.ownerInput, payload: winner });
+  assert.equal(winnerReplay.statusCode, 200, winnerReplay.body);
   assert.equal(f.carriers().length, 2);
   const selected = f.store.returns.publicationForRequest(f.intent.requestId)!;
   const reopened = new ArtifactReviewStore(join(f.root, 'collaborative-content', 'artifact-reviews.sqlite'));
@@ -84,8 +85,8 @@ test('one CAS winner survives concurrent owner commands, database reopen and exa
     assert.equal(
       reopened.returns.publications.replay(
         'operator',
-        f.command.operationId,
-        publicationRecoveryFingerprint(f.intent.requestId, f.command),
+        winner.operationId,
+        publicationRecoveryFingerprint(f.intent.requestId, winner),
       ),
       selected.receiptRef,
     );
@@ -94,7 +95,7 @@ test('one CAS winner survives concurrent owner commands, database reopen and exa
   }
   const changed = await f.app.inject({
     ...f.ownerInput,
-    payload: { ...f.command, response: { ...f.response, operationId: randomUUID() } },
+    payload: { ...winner, response: { ...f.response, operationId: randomUUID() } },
   });
   assert.equal(changed.statusCode, 409, changed.body);
   assert.equal(changed.json().error, 'operation_reused');
@@ -135,7 +136,7 @@ for (const boundary of [
   'changed-audience',
   'publication-recalled',
   'corrupt-native',
-  'no-body',
+  'no-response-input',
   'cancelled-request',
   'task-closed',
   'owner-receipt',
@@ -147,7 +148,7 @@ for (const boundary of [
     if (boundary === 'publication-recalled')
       f.messages.getById(f.intent.source.publicationMessageId)!._tombstone = true;
     if (boundary === 'corrupt-native') await writeFile(f.image.absPath, 'changed native bytes');
-    if (boundary === 'no-body') f.messages.getById(f.intent.messageId!)!.queueCustody!.bodyExposures = [];
+    if (boundary === 'no-response-input') publicationResponseRecord(f, f.childId).response.inputEntryIds = [];
     if (boundary === 'cancelled-request') await f.integration.requests.cancel(f.intent.requestId, f.human);
     if (boundary === 'task-closed') {
       const task = await f.tasks.get(f.intent.taskId);
@@ -172,7 +173,7 @@ for (const boundary of [
   });
 }
 
-test('fresh recovery callback is bound to the original response fingerprint and exact carrier body exposure', async (t) => {
+test('fresh recovery callback is bound to the original response fingerprint and exact response input', async (t) => {
   const f = await publicationRecoveryFixture(t);
   const admitted = await f.admittedChild();
   const changed = await f.app.inject({
@@ -184,7 +185,7 @@ test('fresh recovery callback is bound to the original response fingerprint and 
   });
   assert.equal(changed.statusCode, 403, changed.body);
   assert.equal(f.store.pendingVersion(f.intent.reviewId), null);
-  f.messages.getById(admitted.current.messageId!)!.queueCustody!.bodyExposures = [];
+  publicationResponseRecord(f, admitted.id).response.inputEntryIds = [];
   assert.equal((await f.app.inject(admitted.callback)).statusCode, 403);
   assert.equal(f.store.pendingVersion(f.intent.reviewId), null);
   assert.equal(f.store.get(f.intent.reviewId)?.rounds.length, 1);
@@ -235,19 +236,8 @@ for (const status of ['succeeded', 'failed'] as const) {
       terminalReason: 'fixture_child_ended_before_carrier_terminal',
       endedAt: Date.now(),
     });
-    if (status === 'failed') {
-      await f.dispatch.releaseProvider(f.childId);
-      for (let attempt = 0; attempt < 100; attempt += 1) {
-        if (f.messages.getById(f.intent.messageId!)?.queueCustody?.status === 'queued') break;
-        await new Promise<void>((resolve) => setTimeout(resolve, 5));
-      }
-    }
-    const carrier = f.messages.getById(f.intent.messageId!);
-    assert.ok(carrier?.queueCustody);
-    assert.equal(carrier.queueCustody.status, status === 'failed' ? 'queued' : 'processing');
-    assert.ok(carrier.queueCustody.pendingTargetCats.some((catId) => catId === f.intent.targetCatId));
-    if (status === 'failed')
-      assert.ok(carrier.queueCustody.failedByCatIds?.some((catId) => catId === f.intent.targetCatId));
+    const response = publicationResponseRecord(f, f.childId).response;
+    assert.equal(response.status, 'processing', 'the original response has not reached a terminal fact');
     const prior = structuredClone(f.store.returns.publicationForRequest(f.intent.requestId));
     const result = await f.app.inject(f.ownerInput);
     assert.equal(result.statusCode, 403, result.body);

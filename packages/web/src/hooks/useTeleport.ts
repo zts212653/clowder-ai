@@ -4,6 +4,7 @@ import { pushThreadRouteWithHistory } from '@/components/ThreadSidebar/thread-na
 import { useChatStore } from '@/stores/chatStore';
 import { API_URL } from '@/utils/api-client';
 import { scrollToMessage } from '@/utils/scrollToMessage';
+import { joinSocketRoomOnConnect } from '@/utils/socket-room';
 import { kickTeleportResolve, planTeleport } from '@/utils/teleport';
 
 /**
@@ -118,7 +119,7 @@ export function useTeleport(): void {
       if (cancelled) return;
       const apiUrl = new URL(API_URL);
       const socket = io(`${apiUrl.protocol}//${apiUrl.host}`, { transports: ['websocket'] });
-      socket.emit('join_room', 'workspace:global');
+      const stopJoiningRoom = joinSocketRoomOnConnect(socket, 'workspace:global');
 
       const handler = (data: TeleportEvent) => {
         // Dedup: the socket may redeliver the same teleport event.
@@ -139,6 +140,7 @@ export function useTeleport(): void {
 
       socket.on('thread:teleport', handler);
       cleanup = () => {
+        stopJoiningRoom();
         socket.off('thread:teleport', handler);
         socket.disconnect();
       };

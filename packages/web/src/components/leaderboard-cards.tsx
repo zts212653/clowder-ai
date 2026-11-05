@@ -15,7 +15,11 @@ function CatName({ catId }: { catId: string }) {
 
 export function CatHeroCard({ cat, unit }: { cat: RankedCat; unit: string }) {
   return (
-    <div className="flex flex-col items-center gap-3 rounded-xl p-5" style={{ background: 'var(--console-pill-bg)' }}>
+    <div
+      className="flex flex-col items-center gap-3 rounded-xl p-5"
+      data-chat-background-surface="console-pill"
+      style={{ background: 'var(--console-pill-bg)' }}
+    >
       <span style={{ fontSize: typographyTokens.fontSizePx.leaderboardMedal }}>
         {MEDAL[cat.rank - 1] ?? `#${cat.rank}`}
       </span>
@@ -38,7 +42,11 @@ export function CatHeroCard({ cat, unit }: { cat: RankedCat; unit: string }) {
 
 export function WorkMetric({ cat, label }: { cat: RankedCat | undefined; label: string }) {
   return (
-    <div className="flex flex-col gap-1.5 rounded-xl p-5" style={{ background: 'var(--console-pill-bg)' }}>
+    <div
+      className="flex flex-col gap-1.5 rounded-xl p-5"
+      data-chat-background-surface="console-pill"
+      style={{ background: 'var(--console-pill-bg)' }}
+    >
       <span
         className="text-4xl font-medium tracking-tight"
         style={{ fontFamily: 'Fraunces, serif', color: 'var(--cafe-text)' }}
@@ -118,7 +126,11 @@ export function StreakRanked({ items }: { items: StreakCat[] }) {
 
 export function SectionCard({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <div className="rounded-2xl p-6 flex flex-col gap-4" style={{ background: 'var(--console-card-bg)' }}>
+    <div
+      className="rounded-2xl p-6 flex flex-col gap-4"
+      data-chat-background-surface="console-card"
+      style={{ background: 'var(--console-card-bg)' }}
+    >
       <h3 className="text-xl font-medium" style={{ fontFamily: 'Fraunces, serif', color: 'var(--cafe-text)' }}>
         {title}
       </h3>

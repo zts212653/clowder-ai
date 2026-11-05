@@ -1,9 +1,19 @@
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import { type ContentTextProposal, type RespondContentText, respondContentTextSchema } from '@cat-cafe/shared';
+import {
+  type ContentTextProposal,
+  respondCollectiveContentTextSchema,
+  respondContentTextSchema,
+} from '@cat-cafe/shared';
 import type Database from 'better-sqlite3';
 import type { WorkspaceContentDescriptionV1 } from '../../../workspace/workspace-content-source.js';
 import { WorkspaceContentSourceError } from '../../../workspace/workspace-content-source.js';
+import { CollectiveModificationJournal } from '../journal/collective-journal.js';
+import { ModificationTextError } from './errors.js';
+import { writeContentTextProposal } from './proposal-write.js';
+
+export { ModificationTextError } from './errors.js';
+export { applyContentTextEdits } from './patch.js';
 
 export interface ModificationTextSource {
   requestId: string;
@@ -12,43 +22,6 @@ export interface ModificationTextSource {
   text: string;
   reviewId: string;
   reviewRevision: number;
-}
-export class ModificationTextError extends Error {
-  constructor(
-    readonly code:
-      | 'not_found'
-      | 'task_changed'
-      | 'source_changed'
-      | 'operation_reused'
-      | 'proposal_changed'
-      | 'invalid_patch',
-  ) {
-    super(code);
-  }
-}
-
-export function applyContentTextEdits(text: string, edits: RespondContentText['edits']): string {
-  let cursor = 0,
-    result = '';
-  for (const [index, edit] of edits.entries()) {
-    if (
-      edit.start < cursor ||
-      edit.end > text.length ||
-      text.slice(edit.start, edit.end) !== edit.expectedText ||
-      (index > 0 && edit.start === edits[index - 1]?.start)
-    )
-      throw new ModificationTextError('invalid_patch');
-    result += text.slice(cursor, edit.start) + edit.replacement;
-    cursor = edit.end;
-  }
-  result += text.slice(cursor);
-  if (
-    Buffer.byteLength(result) > 1024 * 1024 ||
-    result.includes('\0') ||
-    Buffer.from(result).toString('utf8') !== result
-  )
-    throw new ModificationTextError('invalid_patch');
-  return result;
 }
 const sha = (text: string) => `sha256:${createHash('sha256').update(text).digest('hex')}`;
 
@@ -102,47 +75,62 @@ export class ModificationTextStore {
       .all(requestId) as { body: string }[];
     return rows.map((row) => JSON.parse(row.body) as ContentTextProposal);
   }
+  latestProposal(requestId: string): ContentTextProposal | null {
+    const row = this.db
+      .prepare('SELECT body FROM content_modification_text_proposals WHERE request_id=? ORDER BY revision DESC LIMIT 1')
+      .get(requestId) as { body: string } | undefined;
+    return row ? (JSON.parse(row.body) as ContentTextProposal) : null;
+  }
   respond(raw: unknown, authorCatId: string): ContentTextProposal {
     const command = respondContentTextSchema.parse(raw);
-    const fingerprint = createHash('sha256')
-      .update(JSON.stringify([command, authorCatId]))
-      .digest('hex');
     return this.db
       .transaction(() => {
-        const old = this.db
-          .prepare(
-            'SELECT fingerprint,body FROM content_modification_text_proposals WHERE request_id=? AND operation_id=?',
-          )
-          .get(command.requestId, command.operationId) as { fingerprint: string; body: string } | undefined;
-        if (old) {
-          if (old.fingerprint !== fingerprint) throw new ModificationTextError('operation_reused');
-          return JSON.parse(old.body) as ContentTextProposal;
-        }
         const source = this.source(command.requestId);
         if (!source || source.source.revision !== command.baseRevision)
           throw new ModificationTextError('source_changed');
-        const current = this.proposals(command.requestId).at(-1)?.revision ?? 0;
-        if (current !== command.expectedProposalRevision) throw new ModificationTextError('proposal_changed');
-        const text = applyContentTextEdits(source.text, command.edits);
-        const revision = current + 1;
-        const proposalRef = `content-patch:${command.requestId}:${revision}`;
-        const proposal: ContentTextProposal = {
-          proposalRef,
-          requestId: command.requestId,
-          revision,
-          operationId: command.operationId,
-          baseRevision: command.baseRevision,
-          resultRevision: sha(text),
-          edits: command.edits,
-          response: command.response,
+        return writeContentTextProposal(this.db, command, authorCatId, source.text, 1024 * 1024).proposal;
+      })
+      .immediate();
+  }
+
+  /** Source bytes are loaded from the canonical owner for this call, never retained here. */
+  respondOwner(
+    raw: unknown,
+    authorCatId: string,
+    source: {
+      scopeRef: string;
+      contentRef: string;
+      ownerRevision: number;
+      blobDigest: string;
+      text: string;
+    },
+    replayOnly = false,
+  ): ContentTextProposal {
+    const command = respondCollectiveContentTextSchema.parse(raw);
+    return this.db
+      .transaction(() => {
+        const journal = new CollectiveModificationJournal(this.db);
+        const request = journal.get(command.requestId, source.scopeRef);
+        if (!request || request.target.catId !== authorCatId) throw new ModificationTextError('not_found');
+        if (
+          request.source.contentRef !== source.contentRef ||
+          request.source.ownerRevision !== source.ownerRevision ||
+          request.source.blobDigest !== source.blobDigest ||
+          sha(source.text) !== source.blobDigest ||
+          command.expectedOwnerRevision !== source.ownerRevision ||
+          command.baseRevision !== source.blobDigest
+        )
+          throw new ModificationTextError('source_changed');
+        const result = writeContentTextProposal(
+          this.db,
+          command,
           authorCatId,
-          createdAt: Date.now(),
-          receiptRef: `${proposalRef}#prepared`,
-        };
-        this.db
-          .prepare('INSERT INTO content_modification_text_proposals VALUES (?,?,?,?,?)')
-          .run(command.requestId, revision, command.operationId, fingerprint, JSON.stringify(proposal));
-        return proposal;
+          source.text,
+          65536,
+          !replayOnly && ['requested', 'running', 'proposal_ready'].includes(request.state),
+        );
+        if (!result.replayed) journal.noteProposal(request.requestId, source.scopeRef);
+        return result.proposal;
       })
       .immediate();
   }

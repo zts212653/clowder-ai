@@ -13,9 +13,11 @@ import type {
   CollectiveWorkProjection,
   DeliveryState,
 } from './client-types.js';
+import { useCollectiveLanguage, useCollectiveText } from './collective-copy.js';
 import type { ReplySelection } from './composer-draft.js';
 import { MessageInteraction } from './MessageInteraction.js';
 import { isLastOfSelfRunInTopic } from './message-presentation.js';
+import { MessageQuoteProvider } from './message-quote-context.js';
 import { replySelectionForEvent } from './participant-identity.js';
 import { TopicMessage } from './TopicMessage.js';
 import type { InformalVoteDraft } from './VoteCard.js';
@@ -52,6 +54,8 @@ export function TopicPanel({
   highlightedId,
 }: TopicPanelProps) {
   const composerInputId = useId();
+  const language = useCollectiveLanguage();
+  const t = useCollectiveText();
   const [reply, setReply] = useState<ReplySelection>();
   const consumedReplyRequest = useRef<typeof replyRequest>();
   const location =
@@ -70,9 +74,9 @@ export function TopicPanel({
       eventId: replyRequest.eventId,
       ...(event
         ? replySelectionForEvent(event, participants, location?.channelId ?? '', currentHumanId)
-        : { error: '正在回复的消息当前不可用。' }),
+        : { error: t('正在回复的消息当前不可用。') }),
     });
-  }, [replyRequest, thread, participants, location?.channelId, currentHumanId]);
+  }, [replyRequest, thread, participants, location?.channelId, currentHumanId, t]);
   const eventWithInteractions = (event: CollectiveEventEnvelope, index: number) => {
     const linkedWorks = works.filter((work) => work.sourceEventId === event.eventId);
     const linkedVotes = votes.filter((vote) => vote.sourceEventId === event.eventId);
@@ -119,55 +123,67 @@ export function TopicPanel({
     );
   };
   return (
-    <aside className="context-panel" data-spatial-role="context-panel" aria-label="话题">
-      <header className="context-header">
-        <div>
-          <span>话题 · {location ? `# ${location.channelId}` : '早期记录'}</span>
-          <h2>{thread.replies.length} 条回复</h2>
-        </div>
-        <button type="button" onClick={onClose} aria-label="关闭话题">
-          ×
+    <MessageQuoteProvider key={`${namespace}:${thread.root.eventId}`} namespace={namespace}>
+      <aside className="context-panel" data-spatial-role="context-panel" aria-label={t('话题')}>
+        <header className="context-header">
+          <div>
+            <span>
+              {t('话题')} · {location ? `# ${location.channelId}` : t('早期记录')}
+            </span>
+            <h2>
+              {language === 'en'
+                ? `${thread.replies.length} ${thread.replies.length === 1 ? 'reply' : 'replies'}`
+                : `${thread.replies.length} 条回复`}
+            </h2>
+          </div>
+          <button type="button" className="topic-close" onClick={onClose} aria-label={t('关闭话题')}>
+            ×
+          </button>
+        </header>
+        <button type="button" className="topic-return" onClick={onReturnToSource}>
+          {t('在频道中查看')}
         </button>
-      </header>
-      <button type="button" className="topic-return" onClick={onReturnToSource}>
-        在频道中查看
-      </button>
-      <div className="topic-flow">
-        {eventWithInteractions(thread.root, 0)}
-        <div className="topic-divider">
-          <span>回应</span>
+        <div className="topic-flow">
+          {eventWithInteractions(thread.root, 0)}
+          <div className="topic-divider">
+            <span>{t('回应')}</span>
+          </div>
+          {thread.replies.map((reply, index) => eventWithInteractions(reply, index + 1))}
         </div>
-        {thread.replies.map((reply, index) => eventWithInteractions(reply, index + 1))}
-      </div>
-      {location ? (
-        <Composer
-          compact
-          inputId={composerInputId}
-          namespace={namespace}
-          channelId={location.channelId}
-          rootEventId={thread.root.eventId}
-          participants={participants}
-          humans={humans}
-          reply={reply}
-          replyEvents={topicEvents}
-          placeholder={`回复 ${actorDisplayName(thread.root)}`}
-          delivery={delivery}
-          onSend={(body, recipient, entrust, responseRequested, replyToEventId) =>
-            onSend(body, {
-              location: { ...location, rootEventId: location.rootEventId ?? thread.root.eventId },
-              recipient,
-              replyToEventId: replyToEventId ?? thread.root.eventId,
-              ...(responseRequested && recipient.kind === 'channel'
-                ? { attentionRequest: 'response_requested' as const }
-                : {}),
-              ...(entrust && recipient.kind === 'agent' ? { workRequest: 'entrust' } : {}),
-            })
-          }
-        />
-      ) : (
-        <p>这条早期记录的位置尚未确认，暂时无法回复。</p>
-      )}
-    </aside>
+        {location ? (
+          <Composer
+            key={`${namespace}:${location.channelId}:${thread.root.eventId}`}
+            compact
+            inputId={composerInputId}
+            namespace={namespace}
+            channelId={location.channelId}
+            rootEventId={thread.root.eventId}
+            participants={participants}
+            humans={humans}
+            reply={reply}
+            replyEvents={topicEvents}
+            placeholder={
+              language === 'en' ? `Reply to ${actorDisplayName(thread.root)}` : `回复 ${actorDisplayName(thread.root)}`
+            }
+            delivery={delivery}
+            onSend={(body, recipient, entrust, responseRequested, replyToEventId, content) =>
+              onSend(body, {
+                ...content,
+                location: { ...location, rootEventId: location.rootEventId ?? thread.root.eventId },
+                recipient,
+                replyToEventId: replyToEventId ?? thread.root.eventId,
+                ...(responseRequested && recipient.kind === 'channel'
+                  ? { attentionRequest: 'response_requested' as const }
+                  : {}),
+                ...(entrust && recipient.kind === 'agent' ? { workRequest: 'entrust' } : {}),
+              })
+            }
+          />
+        ) : (
+          <p>{t('这条早期记录的位置尚未确认，暂时无法回复。')}</p>
+        )}
+      </aside>
+    </MessageQuoteProvider>
   );
 }
 
@@ -189,7 +205,11 @@ interface TopicPanelProps {
   readonly humanNames: Readonly<Record<string, string>>;
   readonly canSteward: boolean;
   readonly onProposeWork: (sourceEventId: string) => void;
-  readonly onCommitWork: (work: CollectiveWorkProjection, participant?: CollectiveParticipant) => void;
+  readonly onCommitWork: (
+    work: CollectiveWorkProjection,
+    participant?: CollectiveParticipant,
+    accountability?: 'self' | 'unassigned',
+  ) => void;
   readonly onDeclineWork: (work: CollectiveWorkProjection) => void;
   readonly onAcceptWorkResult: (work: CollectiveWorkProjection) => void;
   readonly onRequestWorkRevision?: (work: CollectiveWorkProjection, feedback: string) => Promise<void>;

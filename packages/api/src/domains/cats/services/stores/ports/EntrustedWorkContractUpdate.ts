@@ -4,6 +4,7 @@ import {
   entrustedWorkV1Schema,
   type TaskItem,
 } from '@cat-cafe/shared';
+import { advanceEntrustedWorkRevision } from './EntrustedWorkRevision.js';
 import type { UpdateEntrustedWorkStoreInput } from './TaskStoreContract.js';
 
 export type PreparedEntrustedWorkUpdate =
@@ -14,13 +15,18 @@ export type PreparedEntrustedWorkUpdate =
     }
   | { readonly kind: 'not_found' }
   | { readonly kind: 'not_entrusted'; readonly task: TaskItem }
-  | { readonly kind: 'revision_conflict' | 'already_closed' | 'no_change'; readonly task: TaskItem };
+  | {
+      readonly kind: 'thread_conflict' | 'revision_conflict' | 'already_closed' | 'no_change';
+      readonly task: TaskItem;
+    };
 
 export function prepareEntrustedWorkUpdate(
   task: TaskItem | null,
   input: UpdateEntrustedWorkStoreInput,
 ): PreparedEntrustedWorkUpdate {
   if (!task) return { kind: 'not_found' };
+  if (input.expectedThreadId !== undefined && task.threadId !== input.expectedThreadId)
+    return { kind: 'thread_conflict', task };
   if (!task.entrustedWork) return { kind: 'not_entrusted', task };
   if (task.entrustedWork.closure.state !== 'open' || task.status === 'done') return { kind: 'already_closed', task };
   if (task.entrustedWork.revision !== input.expectedRevision) return { kind: 'revision_conflict', task };
@@ -41,7 +47,7 @@ export function prepareEntrustedWorkUpdate(
   }
   const candidate: EntrustedWorkV1 = {
     ...current,
-    revision: current.revision + 1,
+    ...advanceEntrustedWorkRevision(current),
     time,
     artifactRefs,
     progress: nextProgress,

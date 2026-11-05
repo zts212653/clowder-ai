@@ -5,7 +5,7 @@ export const PLUGIN_ID = 'official.example-source';
 export const INSTANCE_ID = 'pi_example';
 export const PACKAGE_DIGEST = `sha512-${createHash('sha512').update('k2b-example-package').digest('base64')}`;
 
-export function pluginManifest(capabilities = ['events.publish']) {
+export function pluginManifest() {
   return {
     pluginId: PLUGIN_ID,
     version: '1.0.0',
@@ -16,7 +16,6 @@ export function pluginManifest(capabilities = ['events.publish']) {
         id: 'source',
         name: 'Source',
         resources: [],
-        capabilities,
       },
     ],
     signals: {
@@ -44,30 +43,38 @@ export function candidateHello(overrides = {}) {
   };
 }
 
-export function eventsPublishInput(overrides = {}) {
+export function messageSendInput(overrides = {}) {
   return {
-    signalType: 'example.signal.v1',
-    eventId: 'event-1',
-    idempotencyKey: 'publish-1',
-    occurredAt: '2026-08-10T12:00:00Z',
-    payload: { artifactId: 'artifact-1' },
-    source: { handle: 'example://artifact/1' },
+    address: { kind: 'thread_handle', handle: 'thread-handle-1' },
+    idempotencyKey: 'send-1',
+    payload: {
+      provenance: { epistemicStatus: 'inference' },
+      elements: [{ elementId: 'el-1', kind: 'text', payload: { text: 'hello' } }],
+    },
     ...overrides,
   };
 }
 
-export async function readyInventory({ effectiveGrants = ['events.publish'] } = {}) {
+export function messageSendReceipt(messageId) {
+  return {
+    messageId,
+    threadId: 'thread-1',
+    revision: 1,
+    messageHandle: { kind: 'message', token: `handle-${messageId}` },
+  };
+}
+
+export async function readyInventory({ manifest = pluginManifest() } = {}) {
   const inventory = new MemoryPluginInventoryStore();
   const controlPlane = new HostInventoryControlPlane(inventory, {
     createInstanceId: () => INSTANCE_ID,
     now: () => 1_000,
   });
   await controlPlane.installPackage({
-    manifest: pluginManifest(effectiveGrants),
+    manifest,
     computedPackageDigest: PACKAGE_DIGEST,
     expectedPackageDigest: PACKAGE_DIGEST,
     packagePluginId: PLUGIN_ID,
-    effectiveGrants,
     signalSchemas: {
       'schemas/example.signal.v1.schema.json': {
         type: 'object',

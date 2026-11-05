@@ -1,4 +1,5 @@
 import type { SignalArticle } from '@cat-cafe/shared';
+import { deploymentDefaults } from '@cat-cafe/shared';
 
 export interface DailyDigestEmailInput {
   readonly date: string;
@@ -40,11 +41,11 @@ function groupByTier(articles: readonly SignalArticle[]): Map<number, SignalArti
 }
 
 function renderEmptyHtml(date: string): string {
-  return `<h1>🐱 Clowder AI 信号日报 - ${escapeHtml(date)}</h1><p>今日无新增信号，咱们继续观察。</p>`;
+  return `<h1>🐱 ${escapeHtml(deploymentDefaults.brand.displayName)} 信号日报 - ${escapeHtml(date)}</h1><p>今日无新增信号，咱们继续观察。</p>`;
 }
 
 function renderEmptyText(date: string): string {
-  return `🐱 Clowder AI 信号日报 - ${date}\n\n今日无新增信号，咱们继续观察。`;
+  return `🐱 ${deploymentDefaults.brand.displayName} 信号日报 - ${date}\n\n今日无新增信号，咱们继续观察。`;
 }
 
 function renderTierHtml(tier: number, articles: readonly SignalArticle[]): string {
@@ -73,7 +74,7 @@ function renderTierText(tier: number, articles: readonly SignalArticle[]): strin
 }
 
 export function renderDailyDigestEmail(input: DailyDigestEmailInput): DailyDigestEmailContent {
-  const subject = `🐱 Clowder AI 信号日报 - ${input.date}`;
+  const subject = `🐱 ${deploymentDefaults.brand.displayName} 信号日报 - ${input.date}`;
 
   if (input.articles.length === 0) {
     return {
@@ -91,7 +92,7 @@ export function renderDailyDigestEmail(input: DailyDigestEmailInput): DailyDiges
 
   return {
     subject,
-    html: `<h1>🐱 Clowder AI 信号日报 - ${escapeHtml(input.date)}</h1>${htmlSections}`,
-    text: `🐱 Clowder AI 信号日报 - ${input.date}\n\n${textSections}`,
+    html: `<h1>🐱 ${escapeHtml(deploymentDefaults.brand.displayName)} 信号日报 - ${escapeHtml(input.date)}</h1>${htmlSections}`,
+    text: `🐱 ${deploymentDefaults.brand.displayName} 信号日报 - ${input.date}\n\n${textSections}`,
   };
 }

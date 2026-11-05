@@ -17,6 +17,7 @@ const INTERNAL_PROTOCOL_DIAGNOSTIC_SERVICES = new Set(['routing-guard', 'a2a-liv
  * filters remain the primary boundary; this keeps persisted or stale client caches from flashing them.
  */
 export function isHiddenChatRow(message: ChatMessage): boolean {
+  if (message.extra?.scheduler?.hiddenTrigger) return true;
   if (message.extra?.systemKind === 'a2a_routing') return true;
   if (message.type === 'system') {
     // Rehydrate protocol metadata through the same explicit presentation contract as live events.
@@ -29,6 +30,28 @@ export function isHiddenChatRow(message: ChatMessage): boolean {
       return true;
   }
   return message.from?.kind === 'system' && INTERNAL_PROTOCOL_DIAGNOSTIC_SERVICES.has(message.from.service);
+}
+
+/** The durable command card owns the visible body; its transport sources remain anchors. */
+export function isAbsorbedManagedJobMessage(message: ChatMessage, timeline: readonly ChatMessage[]): boolean {
+  const source = message.source;
+  if (
+    source?.connector !== 'hold-ball' ||
+    typeof source.meta?.jobId !== 'string' ||
+    !source.meta.jobId ||
+    typeof source.meta.taskId !== 'string' ||
+    !source.meta.taskId ||
+    source.meta.managedJobCard === true
+  )
+    return false;
+  const jobId = source.meta.jobId;
+  return timeline.some(
+    (candidate) =>
+      candidate.id !== message.id &&
+      candidate.source?.connector === 'hold-ball' &&
+      candidate.source.meta?.jobId === jobId &&
+      candidate.source.meta.managedJobCard === true,
+  );
 }
 
 type GovernanceBlocked = NonNullable<NonNullable<ChatMessage['extra']>['governanceBlocked']>;

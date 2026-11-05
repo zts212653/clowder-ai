@@ -1,63 +1,27 @@
 /**
  * Unified API client for Clowder AI frontend.
  *
- * - Auto-prepends NEXT_PUBLIC_API_URL
+ * - Resolves the API from desktop/runtime identity before build-time defaults
  * - Identity via HttpOnly session cookie (F156 D-1), not header self-reporting
  * - First call lazily establishes session, subsequent calls reuse the cookie
  */
 
+import { resolveShellCopy } from '../components/shell/shell-copy';
+import { readShellLanguage } from '../components/shell/shell-language';
+import { readShellPresentation } from '../components/shell/shell-presentation';
 import { useToastStore } from '../stores/toastStore';
+import { apiClientCopy } from './api-client.shell-copy';
+
 import { markApiGetGeneration } from './api-get-generation';
-import { boundedFetch, waitForPromiseWithSignal } from './bounded-fetch';
+import { resolveApiUrl } from './api-origin';
+import { observeApiSessionOwner } from './api-session-identity';
+import { waitForPromiseWithSignal } from './bounded-fetch';
+import { configureConnectionDiagnostics, scheduleConnectionDiagnosticDelivery } from './connection-diagnostics';
+import { diagnosticFetch, recordConnectionNotice } from './connection-request-trace';
+import { tagSaveRequest, traceSaveTransport } from './member-save-trace';
 
-function getBrowserLocation(): Location | null {
-  if (typeof globalThis !== 'object' || globalThis === null) return null;
-  const candidate = (globalThis as { location?: Location }).location;
-  return candidate ?? null;
-}
+export { resolveApiUrl } from './api-origin';
 
-function isLoopbackLocation(location: Location | null): location is Location {
-  return location != null && (location.hostname === 'localhost' || location.hostname === '127.0.0.1');
-}
-
-const LOOPBACK_API_ORIGIN = /^(https?:\/\/)(?:localhost|127\.0\.0\.1)(?=[:/]|$)/;
-
-function alignLoopbackApiHostname(envUrl: string, location: Location | null): string {
-  if (!isLoopbackLocation(location)) return envUrl;
-  // SameSite=Strict session cookies require the page and local API to use the same hostname.
-  return envUrl.replace(LOOPBACK_API_ORIGIN, `$1${location.hostname}`);
-}
-
-/** @internal Exported for testing — prefer using `API_URL` constant. */
-export function resolveApiUrl(): string {
-  const location = getBrowserLocation();
-
-  // Cloudflare Tunnel: API 走 api.clowder-ai.com，Access cookie 在 .clowder-ai.com 上共享
-  if (location?.hostname === 'cafe.clowder-ai.com') {
-    return 'https://api.clowder-ai.com';
-  }
-  const envUrl = process.env.NEXT_PUBLIC_API_URL;
-  if (envUrl) {
-    const isLocalhostDefault = LOOPBACK_API_ORIGIN.test(envUrl);
-    const isLocalAccess = isLoopbackLocation(location);
-    const isRemoteAccess = location != null && !isLocalAccess;
-    // Skip envUrl when it mismatches actual access origin:
-    //   - localhost env + remote browser → reverse-proxy users would hit dev's loopback
-    //   - cloud env + local browser → would force a Cloudflare Tunnel round-trip for nothing
-    const mismatch = (isLocalhostDefault && isRemoteAccess) || (!isLocalhostDefault && isLocalAccess);
-    if (!mismatch) return alignLoopbackApiHostname(envUrl, location);
-  }
-  if (typeof window === 'undefined') return 'http://localhost:3004';
-  const protocol = location?.protocol ?? 'http:';
-  const hostname = location?.hostname ?? 'localhost';
-  const port = Number(location?.port ?? '') || 0;
-  // Behind reverse proxy (default port 80/443 → port is empty string):
-  // API lives at the same origin, proxied via /api/ and /socket.io/ paths.
-  if (!port) return `${protocol}//${hostname}`;
-  // Direct access with explicit port: convention frontendPort + 1 = apiPort
-  // (runtime: 3001→3002, alpha: 3011→3012).
-  return `${protocol}//${hostname}:${port + 1}`;
-}
 export const API_URL = resolveApiUrl();
 
 const SESSION_BOOTSTRAP_TIMEOUT_MS = 10_000;
@@ -67,6 +31,7 @@ let sessionGate: Promise<void> | null = null;
 let sessionRefresh: Promise<void> | null = null;
 let sessionCsrfToken: string | null = null;
 let lastSessionFailureToastAt = 0;
+configureConnectionDiagnostics(API_URL, () => sessionCsrfToken);
 
 const reportedConnectionErrors = new WeakSet<object>();
 let lastConnectionFailureAt = Number.NEGATIVE_INFINITY;
@@ -77,19 +42,24 @@ export function reportApiConnectionFailure(error: unknown): boolean {
   if (reportedConnectionErrors.has(error)) return true;
   reportedConnectionErrors.add(error);
   const now = Date.now();
-  if (now - lastConnectionFailureAt >= 5_000) {
+  const shown = now - lastConnectionFailureAt >= 5_000;
+  if (shown) {
     lastConnectionFailureAt = now;
+    const t = connectionCopy();
     useToastStore.getState().addToast({
       type: 'error',
-      title: '后端连接异常',
-      message: '未能取得后端响应，请检查服务并刷新确认操作结果。',
+      title: t.connectionTitle,
+      message: t.connectionMessage,
       duration: 5000,
     });
   }
+  recordConnectionNotice(error, shown);
   return true;
 }
 
 export interface ApiFetchOptions {
+  /** Longer bounded wait for mutations that prepare plugin packages. GET deadlines stay unchanged. */
+  mutationTimeoutMs?: number;
   /**
    * A mutation happened while this exact GET may already be active. Attach the
    * caller to one bounded trailing generation instead of the possibly stale one.
@@ -110,6 +80,8 @@ interface GetGeneration {
   path: string;
   init: RequestInit | undefined;
   ifNoneMatch: string | null | undefined;
+  controller: AbortController;
+  waiters: number;
 }
 
 interface GetCoordinationState {
@@ -120,34 +92,44 @@ interface GetCoordinationState {
 const coordinatedGets = new Map<string, GetCoordinationState>();
 let nextGetGeneration = 0;
 
+function connectionCopy() {
+  return resolveShellCopy(apiClientCopy, readShellPresentation() === 'v2' ? readShellLanguage() : 'zh');
+}
+
 function notifySessionFailure() {
   const now = Date.now();
   if (now - lastSessionFailureToastAt < 3000) return;
   lastSessionFailureToastAt = now;
+  const t = connectionCopy();
   useToastStore.getState().addToast({
     type: 'error',
-    title: '会话恢复失败',
-    message: '登录态没有自动恢复成功。请稍后重试；如果仍无响应，再刷新页面。',
+    title: t.sessionTitle,
+    message: t.sessionMessage,
     duration: 6000,
   });
 }
 
 function ensureSession(): Promise<void> {
   if (sessionGate) return sessionGate;
-  const gate = boundedFetch(`${API_URL}/api/session`, { credentials: 'include' }, SESSION_BOOTSTRAP_TIMEOUT_MS)
+  const gate = diagnosticFetch(API_URL, '/api/session', { credentials: 'include' }, SESSION_BOOTSTRAP_TIMEOUT_MS)
     .then(async (res) => {
       if (!res.ok) {
         throw new Error(`session bootstrap failed (${res.status})`);
       }
       const body = (typeof res.json === 'function' ? await res.json().catch(() => null) : null) as {
         csrfToken?: unknown;
+        userId?: unknown;
       } | null;
+      if (sessionGate !== gate) return;
       sessionCsrfToken = typeof body?.csrfToken === 'string' && body.csrfToken ? body.csrfToken : null;
+      observeApiSessionOwner(body?.userId);
+      scheduleConnectionDiagnosticDelivery();
     })
     .catch((err) => {
       if (sessionGate === gate) {
         sessionGate = null;
         sessionCsrfToken = null;
+        observeApiSessionOwner(null);
       }
       throw err;
     });
@@ -165,21 +147,27 @@ export function refreshApiSession(): Promise<void> {
   const gate = (previous ?? Promise.resolve())
     .catch(() => undefined)
     .then(async () => {
-      const res = await boundedFetch(
-        `${API_URL}/api/session`,
+      const res = await diagnosticFetch(
+        API_URL,
+        '/api/session',
         { credentials: 'include' },
         SESSION_BOOTSTRAP_TIMEOUT_MS,
       );
       if (!res.ok) throw new Error(`session bootstrap failed (${res.status})`);
       const body = (typeof res.json === 'function' ? await res.json().catch(() => null) : null) as {
         csrfToken?: unknown;
+        userId?: unknown;
       } | null;
+      if (sessionGate !== gate) return;
       sessionCsrfToken = typeof body?.csrfToken === 'string' && body.csrfToken ? body.csrfToken : null;
+      observeApiSessionOwner(body?.userId);
+      scheduleConnectionDiagnosticDelivery();
     })
     .catch((err) => {
       if (sessionGate === gate) {
         sessionGate = null;
         sessionCsrfToken = null;
+        observeApiSessionOwner(null);
       }
       throw err;
     })
@@ -195,6 +183,7 @@ function invalidateSession(observedGate: Promise<void>) {
   if (sessionGate === observedGate) {
     sessionGate = null;
     sessionCsrfToken = null;
+    observeApiSessionOwner(null);
   }
 }
 
@@ -212,7 +201,7 @@ function ensureBodyForMutation(init?: RequestInit): RequestInit | undefined {
   if (init.body != null) return init;
   return {
     ...init,
-    headers: { 'content-type': 'application/json', ...(init.headers as Record<string, string>) },
+    headers: { 'content-type': 'application/json', ...Object.fromEntries(new Headers(init.headers)) },
     body: '{}',
   };
 }
@@ -250,50 +239,67 @@ function exactGetKey(path: string, init?: RequestInit): string {
   });
 }
 
-function withoutCallerSignal(init?: RequestInit): RequestInit | undefined {
-  if (!init) return undefined;
-  const physicalInit = { ...init };
-  delete physicalInit.signal;
-  return physicalInit;
-}
-
-async function performApiFetch(path: string, init?: RequestInit): Promise<Response> {
+async function performApiFetch(
+  path: string,
+  init?: RequestInit,
+  timeoutMs = API_REQUEST_TIMEOUT_MS,
+  notifyFailure = true,
+): Promise<Response> {
   try {
-    return await performSessionRequest(path, init);
+    return await performSessionRequest(path, init, timeoutMs, notifyFailure);
   } catch (error) {
-    if (!init?.signal?.aborted) reportApiConnectionFailure(error);
+    if (notifyFailure && !init?.signal?.aborted) reportApiConnectionFailure(error);
     throw error;
   }
 }
 
-async function performSessionRequest(path: string, init?: RequestInit): Promise<Response> {
+async function performSessionRequest(
+  path: string,
+  init?: RequestInit,
+  timeoutMs = API_REQUEST_TIMEOUT_MS,
+  notifyFailure = true,
+): Promise<Response> {
   const initialSessionGate = ensureSession();
-  await waitForPromiseWithSignal(initialSessionGate, init?.signal);
+  await traceSaveTransport(init, 'session.wait', () => waitForPromiseWithSignal(initialSessionGate, init?.signal));
   const normalized = withSessionCsrf(ensureBodyForMutation(init));
-  const res = await boundedFetch(
-    `${API_URL}${path}`,
-    {
-      ...normalized,
-      credentials: 'include',
-    },
-    API_REQUEST_TIMEOUT_MS,
+  const res = await traceSaveTransport(
+    init,
+    'http.attempt',
+    () =>
+      diagnosticFetch(
+        API_URL,
+        path,
+        {
+          ...normalized,
+          credentials: 'include',
+        },
+        timeoutMs,
+      ),
+    1,
   );
   if (res.status !== 401) return res;
 
   // Session expired (API restart, cookie cleared). Re-establish and retry once.
   invalidateSession(initialSessionGate);
   const refreshedSessionGate = ensureSession();
-  await waitForPromiseWithSignal(refreshedSessionGate, init?.signal);
+  await traceSaveTransport(init, 'session.refresh', () => waitForPromiseWithSignal(refreshedSessionGate, init?.signal));
   const refreshed = withSessionCsrf(ensureBodyForMutation(init));
-  const retryRes = await boundedFetch(
-    `${API_URL}${path}`,
-    {
-      ...refreshed,
-      credentials: 'include',
-    },
-    API_REQUEST_TIMEOUT_MS,
+  const retryRes = await traceSaveTransport(
+    init,
+    'http.attempt',
+    () =>
+      diagnosticFetch(
+        API_URL,
+        path,
+        {
+          ...refreshed,
+          credentials: 'include',
+        },
+        timeoutMs,
+      ),
+    2,
   );
-  if (retryRes.status === 401) notifySessionFailure();
+  if (retryRes.status === 401 && notifyFailure) notifySessionFailure();
   return retryRes;
 }
 
@@ -308,14 +314,17 @@ function createGetGeneration(
     resolve = resolvePromise;
     reject = rejectPromise;
   });
+  const controller = new AbortController();
   return {
     id: ++nextGetGeneration,
     promise,
     resolve,
     reject,
     path,
-    init: withoutCallerSignal(init),
+    init: { ...init, signal: controller.signal },
     ifNoneMatch,
+    controller,
+    waiters: 0,
   };
 }
 
@@ -330,17 +339,19 @@ function physicalGetInit(generation: GetGeneration): RequestInit | undefined {
 function startGetGeneration(key: string, state: GetCoordinationState, generation: GetGeneration): void {
   void performApiFetch(generation.path, physicalGetInit(generation))
     .then(generation.resolve, generation.reject)
-    .finally(() => {
-      if (state.active !== generation) return;
-      const trailing = state.trailing;
-      if (!trailing) {
-        coordinatedGets.delete(key);
-        return;
-      }
-      state.active = trailing;
-      state.trailing = null;
-      startGetGeneration(key, state, trailing);
-    });
+    .finally(() => finishGetGeneration(key, state, generation));
+}
+
+function finishGetGeneration(key: string, state: GetCoordinationState, generation: GetGeneration): void {
+  if (coordinatedGets.get(key) !== state || state.active !== generation) return;
+  const trailing = state.trailing;
+  if (!trailing) {
+    coordinatedGets.delete(key);
+    return;
+  }
+  state.active = trailing;
+  state.trailing = null;
+  startGetGeneration(key, state, trailing);
 }
 
 async function coordinatedGet(
@@ -365,10 +376,29 @@ async function coordinatedGet(
     generation = state.active;
   }
 
-  const response = await waitForPromiseWithSignal(generation.promise, init?.signal);
-  const clone = response.clone();
-  markApiGetGeneration(clone, generation.id);
-  return clone;
+  generation.waiters += 1;
+  let waiting = true;
+  const release = () => {
+    if (!waiting) return;
+    waiting = false;
+    generation.waiters -= 1;
+    if (generation.waiters === 0 && init?.signal?.aborted) {
+      generation.controller.abort();
+      if (state.trailing === generation) state.trailing = null;
+      else finishGetGeneration(key, state, generation);
+    }
+  };
+  // Detach synchronously: a remount in this turn must join a fresh generation.
+  init?.signal?.addEventListener('abort', release, { once: true });
+  try {
+    const response = await waitForPromiseWithSignal(generation.promise, init?.signal);
+    const clone = response.clone();
+    markApiGetGeneration(clone, generation.id);
+    return clone;
+  } finally {
+    init?.signal?.removeEventListener('abort', release);
+    release();
+  }
 }
 
 /**
@@ -380,14 +410,20 @@ async function coordinatedGet(
  *
  * @param path - API path starting with '/' (e.g. '/api/messages')
  * @param init - Standard RequestInit options
- * @param options - GET generation coordination options
+ * @param options - GET generation coordination or a bounded mutation timeout
  */
 export async function apiFetch(path: string, init?: RequestInit, options?: ApiFetchOptions): Promise<Response> {
+  init = tagSaveRequest(init);
   if (init?.signal?.aborted) {
     throw init.signal.reason ?? new DOMException('The operation was aborted.', 'AbortError');
   }
   if (requestMethod(init) === 'GET') {
     return coordinatedGet(path, init, options?.afterCurrentGet === true, options?.ifNoneMatch);
   }
-  return performApiFetch(path, init);
+  return performApiFetch(path, init, options?.mutationTimeoutMs);
+}
+
+/** Best-effort timing delivery recovers stale sessions without showing diagnostic-only failures to the user. */
+export function sendMemberSaveDiagnostics(init: RequestInit): Promise<Response> {
+  return performApiFetch('/api/diagnostics/member-save', init, API_REQUEST_TIMEOUT_MS, false);
 }

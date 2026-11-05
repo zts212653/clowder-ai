@@ -9,7 +9,6 @@ import {
   makeProposal,
   makeProposalListItem,
   makeTask,
-  mockCommunityStore,
   mockLeaseStore,
   mockTruthLeaseStore,
   OWNER_CAT,
@@ -123,10 +122,7 @@ test('approved Studio proposal admits structured transfer for its exact parent T
   );
   const resolver = new ActionSubjectTruthResolver(
     mockTruthLeaseStore(),
-    mockCommunityStore(),
-    undefined,
     { get: async (id) => (id === TASK_ID ? makeTask() : null) },
-    undefined,
     delegateProvider,
   );
   const service = new ActionSuccessorAdmissionService(mockLeaseStore(), resolver);

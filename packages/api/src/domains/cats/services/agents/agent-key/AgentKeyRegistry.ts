@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import type { AgentKeyRecord, AgentKeyVerifyResult, CatId } from '@cat-cafe/shared';
+import type { AgentKeyRecord, AgentKeyScope, AgentKeyVerifyResult, CatId } from '@cat-cafe/shared';
 import type { IAgentKeyBackend } from './IAgentKeyBackend.js';
 import { MemoryAgentKeyBackend } from './MemoryAgentKeyBackend.js';
 
@@ -20,7 +20,7 @@ export class AgentKeyRegistry {
   async issue(
     catId: CatId,
     userId: string,
-    options?: { rotatedFrom?: string; expiresAt?: null },
+    options?: { rotatedFrom?: string; expiresAt?: null; scope?: AgentKeyScope },
   ): Promise<{ agentKeyId: string; secret: string }> {
     const agentKeyId = `ak_${randomUUID().replace(/-/g, '')}`;
     const secret = randomBytes(32).toString('hex');
@@ -36,7 +36,7 @@ export class AgentKeyRegistry {
       userId,
       secretHash,
       salt,
-      scope: 'user-bound',
+      scope: options?.scope ?? 'user-bound',
       issuedAt: now,
       expiresAt: options?.expiresAt === null ? null : now + this.ttlMs,
       ...(options?.rotatedFrom ? { rotatedFrom: options.rotatedFrom } : {}),
@@ -69,6 +69,7 @@ export class AgentKeyRegistry {
 
     return this.issue(old.catId, old.userId, {
       rotatedFrom: agentKeyId,
+      scope: old.scope,
       ...(old.expiresAt === null ? { expiresAt: null } : {}),
     });
   }

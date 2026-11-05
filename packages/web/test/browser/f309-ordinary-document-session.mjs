@@ -26,13 +26,22 @@ export async function openDocumentSession(
     if (
       url.pathname.startsWith('/api/workspace/') ||
       url.pathname.startsWith('/api/content-modifications') ||
+      (owner.nativeMediaRoutes &&
+        (url.pathname.startsWith('/api/content-publications/') ||
+          url.pathname.startsWith('/api/content-reviews/') ||
+          url.pathname.startsWith('/api/artifact-reviews/') ||
+          url.pathname.startsWith('/api/messages/') ||
+          url.pathname === `/api/threads/${owner.thread.id}/artifacts` ||
+          url.pathname === '/api/artifacts')) ||
       url.pathname === '/api/messages'
     ) {
-      const response = await route.fetch({ url: `${owner.api}${url.pathname}${url.search}` });
+      const upstream = `${owner.api}${url.pathname}${url.search}`;
+      const response = await route.fetch({ url: upstream });
       calls.push({
         method: request.method(),
         path: url.pathname,
         status: response.status(),
+        upstream,
         body: await response.json().catch(() => null),
       });
       if (url.pathname === '/api/workspace/worktrees') {
@@ -51,6 +60,12 @@ export async function openDocumentSession(
     }
     return fulfillFixtureApi(route, createReviewState(), []);
   });
+  if (owner.nativeMediaRoutes)
+    await context.route('**/uploads/*', async (route) => {
+      const url = new URL(route.request().url());
+      const response = await route.fetch({ url: `${owner.api}${url.pathname}` });
+      return route.fulfill({ response });
+    });
   await beforeNavigate?.(context, calls);
   const page = await context.newPage();
   page.on('pageerror', (error) => errors.push(error.message));

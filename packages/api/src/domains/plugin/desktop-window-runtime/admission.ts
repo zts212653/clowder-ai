@@ -1,14 +1,19 @@
 import type { DesktopWindowContribution, PluginManifest } from '@clowder-ai/plugin-contract';
-import { validateCompanionCommand as validateLegacyCommand } from '@clowder-ai/plugin-contract';
+import { validateCompanionCommand as validateLegacyCommand } from '@clowder-ai/plugin-contract-beta21';
 import { validateCompanionCommand as validateModernCommand } from '@clowder-ai/plugin-contract-beta23';
 import { validateCompanionCommand as validateUnifiedCommand } from '@clowder-ai/plugin-contract-beta24';
 import { validateCompanionCommand as validateWorkCommand } from '@clowder-ai/plugin-contract-beta25';
 import { validateCompanionCommand as validatePresentationCommand } from '@clowder-ai/plugin-contract-beta27';
+import { validateCompanionCommand as validateLetterCommand } from '@clowder-ai/plugin-contract-beta28';
+import {
+  validateCompanionCommand as validateAppAssistCommand,
+  validateCompanionReply as validateAppAssistReply,
+} from '@clowder-ai/plugin-contract-beta29';
 import type { CompanionArchiveContract } from './published-companion-v2.js';
 
 // The trusted CJS desktop kernel imports this compiled ESM Host boundary. Package
 // resolution stays in the API installation and uses the contract's import export.
-export { validateCompanionCommand } from '@clowder-ai/plugin-contract';
+export { validateCompanionCommand } from '@clowder-ai/plugin-contract-beta21';
 
 export function companionCommandValidator(contract: CompanionArchiveContract['contract'] = '0.1.0-beta.21') {
   if (contract === '0.1.0-beta.21') return validateLegacyCommand;
@@ -16,7 +21,14 @@ export function companionCommandValidator(contract: CompanionArchiveContract['co
   if (contract === '0.1.0-beta.24') return validateUnifiedCommand;
   if (contract === '0.1.0-beta.25') return validateWorkCommand;
   if (contract === '0.1.0-beta.27') return validatePresentationCommand;
+  if (contract === '0.1.0-beta.28') return validateLetterCommand;
+  if (contract === '0.1.0-beta.29') return validateAppAssistCommand;
   throw new Error('Unsupported companion contract');
+}
+
+export function appAssistReplyValidator(contract: CompanionArchiveContract['contract']) {
+  if (contract !== '0.1.0-beta.29') throw new Error('Unsupported app-assist contract');
+  return validateAppAssistReply;
 }
 
 /** This Host consumer admits one declarative companion body. Package code never
@@ -27,7 +39,7 @@ export function desktopWindowContribution(manifest: PluginManifest): DesktopWind
   const feature = manifest.features[0];
   const contribution = contributions[0];
   if (
-    manifest.runtime.transport !== 'builtin' ||
+    manifest.runtime?.transport !== 'builtin' ||
     manifest.runtime.entrypoint !== undefined ||
     (manifest.configuration?.length ?? 0) !== 0 ||
     (manifest.data?.length ?? 0) !== 0 ||
@@ -37,8 +49,6 @@ export function desktopWindowContribution(manifest: PluginManifest): DesktopWind
     manifest.features.length !== 1 ||
     !feature ||
     feature.resources.length !== 0 ||
-    feature.capabilities.length !== 1 ||
-    feature.capabilities[0] !== 'windows.create' ||
     feature.contributions?.length !== 1 ||
     feature.contributions[0].type !== contribution.type ||
     feature.contributions[0].id !== contribution.id

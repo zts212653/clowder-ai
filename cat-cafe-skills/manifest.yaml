@@ -14,18 +14,6 @@
 
 skills:
 
-  collective-participation:
-    category: "协作交互"
-    description: >
-      Collective Channel 中具名猫的授权上下文读取、事项判断与原处回复。
-      Use when: 公共 Channel 请求你参与、要判断这句话是哪件事和能不能接，或已接纳的 Work 要回到原来源。
-      Not for: 私人历史检索、选择任意 Channel、授予本地 owner 权限、新建委托，或自己把请求宣布成已接下的工作。
-      Output: 范围内上下文与对事项的判断；选择表达时发送具名回复，返回真实送达状态。
-    triggers: ["Collective 请求", "Channel 参与", "回到原来源"]
-    not_for: ["私人历史检索", "委托授权", "任意 Channel 发言", "自行宣布接下工作"]
-    output: "授权公共上下文、事项判断与具名回复回执"
-    next: []
-
   # ── 功能生命周期 ──
   feat-lifecycle:
     category: "开发流程"
@@ -148,10 +136,12 @@ skills:
     category: "引导与协作"
     description: >
       单人或多猫的创意探索、独立思考、讨论收敛。
-      Use when: brainstorm、多猫独立思考、讨论结束需要收敛、方向性问题需要多视角。
+      Use when: 有目标但不知道怎么做、已有方向反复不满意、brainstorm、多猫独立思考、讨论收敛或方向性问题需要多视角。
       Not for: 已有明确 spec 直接写代码、单猫执行已定方案。
       Output: 共同理解、反例、取舍或结论；需要留存且已获授权时形成设计或讨论记录。
     triggers:
+      - "不知道怎么做"
+      - "怎么改都不满意"
       - "brainstorm"
       - "讨论"
       - "多猫独立思考"
@@ -1044,7 +1034,7 @@ skills:
       或给片子配音、对时间轴、交片。
       Not for: 只查某个 Remotion API 怎么写（读官方 remotion-best-practices skill 的 rules/）；
       目的就是讲角色自己故事的动画短片（用 anime-forge）；PPT（用 ppt-forge）。
-      Output: Remotion 工程 + Console 里能直接播的片子。
+      Output: Remotion 工程 + Works 中的视频作品与确定版本的交片卡；修改沿原作品续版、回应原意见。
       GOTCHA: 本 skill 不教怎么拍得好看，那靠你自己看片的眼光；2026-10-14 前的长版方法和审美条文把猫带成了「走流程」，已删。
     triggers:
       - "做视频"
@@ -1058,7 +1048,7 @@ skills:
       - "只查 Remotion API 用法"
       - "讲角色自己故事的动画短片"
       - "PPT"
-    output: "Remotion project + inline-playable film in Console"
+    output: "Remotion project + retained video work + fixed-version card and original-feedback response"
     next: ["rich-messaging", "anime-forge"]
     sop_step: null
     merged_from: null
@@ -1071,7 +1061,7 @@ skills:
       给已有剧本做设定、声音稿、分镜、动态分镜、精绘或后期。
       Not for: 推产品、讲功能的片子，哪怕主角是猫、片里有剧情（用 video-forge）；
       录屏剪辑（用 video-forge）；单张图或单页漫画（用 image-generation）；PPT（用 ppt-forge）。
-      Output: 带真事对照的剧本 md、设定图、声音稿、分镜表、分镜图、动态分镜粗片，以及 Console 里能直接播的成片。
+      Output: 带真事对照的剧本 md、设定图、声音稿、分镜表、分镜图、动态分镜粗片，以及 Works 视频作品和确定版本的成片卡。
       GOTCHA: 按片子目的分流，不按有没有猫角色分：推产品的片子即使主角是猫也走 video-forge（要画的角色段落照本 skill 的画稿开头）；
       先出漂亮图再想故事会做成看不懂的幻灯片（EP0 实测）；画清猫脸的画稿第一段抄 assets/art-brief-header.md。
     triggers:
@@ -1092,7 +1082,7 @@ skills:
       - "录屏剪辑"
       - "单张图或单页漫画"
       - "PPT"
-    output: "Researched script + voice draft + storyboard + motion animatic + final art + inline-playable cut"
+    output: "Researched script + voice draft + storyboard + motion animatic + final art + retained video work and fixed-version card"
     next: ["image-generation", "video-forge", "rich-messaging"]
     sop_step: null
     merged_from: null
@@ -1219,57 +1209,6 @@ skills:
     sop_step: null
     merged_from: null
     feature: "F066"
-
-  # ── 企业 IM 工作流 (F162) ──
-  enterprise-workflow:
-    category: "创作与媒体"
-    description: >
-      企业 IM 工作流自动化：文档、表格、待办/任务、会议/日程一键创建。
-      Use when: operator要求创建企微/飞书的文档/表格/待办/会议/日程/幻灯片，或"一句话生成完整工作流"。
-      Not for: 普通聊天、消息收发（那是 F088 Transport Plane 的活）。
-      Output: 资源链接（文档 URL、企微会议链接、日程 summary 等）通过 callback 返回。
-    triggers:
-      - "创建文档"
-      - "写个文档"
-      - "create doc"
-      - "建个表格"
-      - "创建表格"
-      - "smart table"
-      - "多维表"
-      - "bitable"
-      - "建个待办"
-      - "创建待办"
-      - "todo"
-      - "创建任务"
-      - "task"
-      - "约个会"
-      - "创建会议"
-      - "create meeting"
-      - "创建日程"
-      - "calendar event"
-      - "幻灯片"
-      - "slides"
-      - "deck"
-      - "整理成文档"
-      - "拆成任务"
-      - "golden chain"
-      - "黄金链路"
-      - "工作流"
-      - "enterprise workflow"
-      - "飞书"
-      - "feishu"
-      - "lark"
-      - "企微"
-      - "wecom"
-      - "企业微信"
-    not_for:
-      - "普通聊天"
-      - "消息收发"
-    output: "Enterprise resource links returned through callback"
-    next: []
-    sop_step: null
-    merged_from: null
-    feature: "F162"
 
   # ── Workspace 导航 (F131) ──
   workspace-navigator:

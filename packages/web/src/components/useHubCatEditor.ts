@@ -1,11 +1,10 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
-import { apiFetch } from '@/utils/api-client';
+import { useEffect, useRef, useState } from 'react';
 import type { TemplateCard } from './first-run-quest/TemplateStep';
-import { uploadAvatarAsset, uploadRefAudioAsset } from './hub-cat-editor.client';
 import {
   autoSlug,
+  buildStrategyPayload,
   type CodexRuntimeSettings,
   type HubCatEditorFormState,
   initialState,
@@ -16,13 +15,15 @@ import {
 } from './hub-cat-editor.model';
 import type { HubCatEditorProps } from './hub-cat-editor.types';
 import { useMembersCopy } from './members/editor-presentation';
+import { memberEditorChanges, requiredMemberChangeErrors } from './members/member-editor-changes';
+import { useMemberEditorOperations } from './members/useMemberEditorOperations';
 import { saveHubCatEditor } from './saveHubCatEditor';
-import { readApiError } from './settings/settings-utils';
+import { useShellLanguage } from './shell/shell-language';
 import { useConfirm } from './useConfirm';
 import { useHubCatEditorData } from './useHubCatEditorData';
 
 export function useHubCatEditor(props: HubCatEditorProps) {
-  const { onClose, onSaved } = props;
+  const { onClose } = props;
   const confirm = useConfirm();
   const copy = useMembersCopy();
   const data = useHubCatEditorData(props);
@@ -30,44 +31,49 @@ export function useHubCatEditor(props: HubCatEditorProps) {
   useEffect(() => {
     if (!data.hasUnsavedChanges) baseline.current = data.form;
   }, [data.form, data.hasUnsavedChanges]);
-  const dirtyCount =
-    Object.keys(data.form).filter(
-      (key) =>
-        key !== 'displayName' &&
-        JSON.stringify(data.form[key as keyof HubCatEditorFormState]) !==
-          JSON.stringify(baseline.current[key as keyof HubCatEditorFormState]),
-    ).length +
-    (JSON.stringify(data.strategyForm) !== JSON.stringify(data.strategyBaseline) ? 1 : 0) +
-    (data.codexSettingsBaseline !== null &&
-    JSON.stringify(data.codexSettings) !== JSON.stringify(data.codexSettingsBaseline)
-      ? 1
-      : 0);
+  const english = useShellLanguage() === 'en';
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [saveNotice, setSaveNotice] = useState<'unchanged' | 'saved' | null>(null);
+  const [savedConnection, setSavedConnection] = useState(false);
+  const savingRef = useRef(false);
+  const changes = memberEditorChanges(
+    data.form,
+    baseline.current,
+    data.strategyForm,
+    data.strategyBaseline,
+    data.codexSettings,
+    data.codexSettingsBaseline,
+    english,
+  );
+  const dirtyCount = changes.length;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new editor session must not inherit another session's save receipt.
+  useEffect(() => {
+    setSavedAt(null);
+    setSaveNotice(null);
+  }, [props.cat?.id, props.open]);
   const discard = () => {
+    setSaveNotice(null);
     data.setForm(baseline.current);
     data.setStrategyForm(data.strategyBaseline);
     data.setCodexSettings(data.codexSettingsBaseline);
     data.setHasUnsavedChanges(false);
-    data.setError(null);
+    data.setSaveError(null);
     data.setFieldErrors({});
   };
   const {
-    restoringCloudIdentity,
-    hasUnsavedChanges,
     reservedPatterns,
     setForm,
     setFieldErrors,
-    setError,
     setSelectedTemplateId,
     setHasUnsavedChanges,
-    setRestoringCloudIdentity,
-    setUploadingAvatar,
     setStrategyForm,
     setCodexSettings,
   } = data;
   const patchForm = (patch: Partial<HubCatEditorFormState>) => {
+    setSaveNotice(null);
     setHasUnsavedChanges(true);
     setForm((prev) => ({ ...prev, ...patch }));
-    if (props.presentation === 'page') {
+    {
       const fields: Partial<Record<keyof HubCatEditorFormState, string>> = {
         name: 'Name',
         roleDescription: 'Description',
@@ -96,10 +102,12 @@ export function useHubCatEditor(props: HubCatEditorProps) {
     }
   };
   const patchStrategy = (patch: Partial<StrategyFormState>) => {
+    setSaveNotice(null);
     setHasUnsavedChanges(true);
     setStrategyForm((prev) => (prev ? { ...prev, ...patch } : prev));
   };
   const patchCodex = (patch: Partial<CodexRuntimeSettings>) => {
+    setSaveNotice(null);
     setHasUnsavedChanges(true);
     setCodexSettings((prev) => ({
       ...(prev ?? toCodexRuntimeSettings()),
@@ -144,7 +152,8 @@ export function useHubCatEditor(props: HubCatEditorProps) {
   };
 
   const requestClose = async () => {
-    if (props.presentation === 'page' ? dirtyCount === 0 : !hasUnsavedChanges) {
+    if (data.saving) return;
+    if (dirtyCount === 0) {
       onClose();
       return;
     }
@@ -155,62 +164,64 @@ export function useHubCatEditor(props: HubCatEditorProps) {
     if (await confirm(options)) onClose();
   };
 
-  const handleAvatarUpload = async (file: File) => {
-    setUploadingAvatar(true);
-    setError(null);
-    try {
-      patchForm({ avatar: await uploadAvatarAsset(file) });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '头像上传失败');
-    } finally {
-      setUploadingAvatar(false);
+  const operations = useMemberEditorOperations(props, data, patchForm);
+
+  const handleSave = async () => {
+    if (savingRef.current || data.restoringCloudIdentity || data.saveBlockedByProfileBinding) return;
+    if (props.cat && dirtyCount === 0) {
+      data.setSaveError(null);
+      data.setFieldErrors({});
+      setSaveNotice('unchanged');
+      return;
     }
-  };
-
-  const handleRefAudioUpload = async (file: File) => {
-    setError(null);
-    await uploadRefAudioAsset(file).then(
-      (result) => patchForm({ voiceRefAudio: result.url }),
-      (err) => setError(err instanceof Error ? err.message : '参考音频上传失败'),
-    );
-  };
-
-  const handleRestoreBuiltinCloudIdentity = async (catId: string) => {
-    if (restoringCloudIdentity) return;
-    setRestoringCloudIdentity(true);
-    setError(null);
-    try {
-      const res = await apiFetch(`/api/cats/${catId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ restoreBuiltinCloudIdentity: true }),
-      });
-      if (!res.ok) {
-        setError(await readApiError(res));
+    if (props.cat) {
+      const invalid = requiredMemberChangeErrors(data.form, changes);
+      if (Object.keys(invalid).length) {
+        data.setFieldErrors(invalid);
         return;
       }
-      await onSaved();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '云端身份恢复失败');
+    }
+    savingRef.current = true;
+    setSaveNotice(null);
+    try {
+      const saved = await saveHubCatEditor({ ...props, onClose: props.cat ? () => {} : onClose }, data);
+      if (!saved) return;
+      baseline.current = data.form;
+      if (
+        data.strategyForm &&
+        JSON.stringify(buildStrategyPayload(data.strategyForm)) !==
+          JSON.stringify(data.strategyBaseline ? buildStrategyPayload(data.strategyBaseline) : null)
+      )
+        data.setStrategyBaselineHasOverride(true);
+      data.setStrategyBaseline(data.strategyForm);
+      data.setCodexSettingsBaseline(data.codexSettings);
+      data.setHasUnsavedChanges(false);
+      setSavedConnection(
+        changes.some((change) =>
+          ['defaultModel', 'clientId', 'carrier', 'accountRef', 'accountBindingMode'].includes(change.key),
+        ),
+      );
+      setSavedAt(Date.now());
+      setSaveNotice('saved');
     } finally {
-      setRestoringCloudIdentity(false);
+      savingRef.current = false;
     }
   };
-
-  const handleSave = () => saveHubCatEditor(props, data);
 
   return {
     ...data,
     dirtyCount,
+    changes,
+    savedAt,
+    saveNotice,
+    savedConnection,
     discard,
     patchForm,
     patchStrategy,
     patchCodex,
     handleTemplateSelect,
     requestClose,
-    handleAvatarUpload,
-    handleRefAudioUpload,
-    handleRestoreBuiltinCloudIdentity,
+    ...operations,
     handleSave,
   };
 }

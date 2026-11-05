@@ -2,7 +2,7 @@ import '../helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import Fastify from 'fastify';
-import { proposedReviewAction } from './helpers.js';
+import { proposedTaskAction } from './helpers.js';
 
 // ── R2 P1-1: Commit-point-aware recovery ─────────────────────────────
 // Uses REAL ApprovalIngress with a store where commitEnvelope fails AFTER
@@ -56,6 +56,7 @@ describe('P1-1 R2: commit-point recovery — card committed, commitEnvelope fail
 
     const app = Fastify();
     await app.register(callbacksRoutes, {
+      actionSuccessorAdmissionService: { async preflightStructuredTransferStanding() {} },
       registry,
       messageStore,
       threadStore,
@@ -85,7 +86,7 @@ describe('P1-1 R2: commit-point recovery — card committed, commitEnvelope fail
     content: '@sonnet\nPlease fix the bug',
     targetCats: ['sonnet'],
     effectClass: 'assign_work',
-    proposedAction: proposedReviewAction(),
+    proposedAction: proposedTaskAction(),
     clientMessageId,
   });
 
@@ -158,6 +159,7 @@ describe('P1-1 R2: commit-point recovery — card committed, commitEnvelope fail
 
     const app = Fastify();
     await app.register(callbacksRoutes, {
+      actionSuccessorAdmissionService: { async preflightStructuredTransferStanding() {} },
       registry,
       messageStore,
       threadStore,

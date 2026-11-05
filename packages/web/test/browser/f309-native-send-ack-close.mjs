@@ -44,6 +44,10 @@ export function registerNativeSendAckCloseJourneys(beforeNative) {
             '../../../api/dist/routes/sent-composer-draft-consumption.js'
           );
           const sent = [];
+          const { InvocationQueue } = await import(
+            '../../../api/dist/domains/cats/services/agents/invocation/InvocationQueue.js'
+          );
+          const queue = new InvocationQueue();
           app.get('/api/messages', () => ({
             messages: draftStore.getByThread(THREAD_ID, 50, 'operator'),
             hasMore: false,
@@ -57,18 +61,36 @@ export function registerNativeSendAckCloseJourneys(beforeNative) {
               THREAD_ID,
               body.composerDraftRevision,
             );
-            const message = draftStore.append({
-              userId: 'operator',
-              threadId: THREAD_ID,
-              catId: null,
-              mentions: [],
-              timestamp: Date.now(),
-              content: body.content,
-              contentBlocks: buildMessageContentBlocks(body.content, body.contextAttachments),
-            });
+            const from = { kind: 'user', userId: 'operator' };
+            const admitted = await queue.send(
+              draftStore,
+              {
+                userId: 'operator',
+                threadId: THREAD_ID,
+                from,
+                mentions: ['codex-terra'],
+                deliveryStatus: 'queued',
+                idempotencyKey: body.idempotencyKey,
+                timestamp: Date.now(),
+                content: body.content,
+                contentBlocks: buildMessageContentBlocks(body.content, body.contextAttachments),
+              },
+              {
+                userId: 'operator',
+                threadId: THREAD_ID,
+                from,
+                kind: 'conversation_input',
+                content: body.content,
+                targetCats: ['codex-terra'],
+                intent: 'execute',
+                ownerAuthProvenance: 'strict',
+              },
+            );
+            assert.equal(admitted.outcome, 'enqueued');
+            const message = admitted.message;
             sent.push({ request: body, stored: message, at: Date.now() });
             return {
-              status: 'processing',
+              status: 'queued',
               userMessageId: message.id,
               userMessage: { id: message.id, timestamp: message.timestamp, contentBlocks: message.contentBlocks },
               ...(await consume(message)),
@@ -117,7 +139,7 @@ export function registerNativeSendAckCloseJourneys(beforeNative) {
       ['390-dark-new-typing', 390, true, true, true],
     ]) {
       test(
-        `native composer: accepted send then summary-hide close retains the clear ${label}`,
+        `native composer: accepted send then quote-tag-hide close retains the clear ${label}`,
         { timeout: 120000 },
         async () => {
           const seeded = owner.seed();
@@ -173,7 +195,7 @@ export function registerNativeSendAckCloseJourneys(beforeNative) {
               (text) => document.querySelector('textarea[aria-label="消息输入框"]')?.value === text,
               TEXT,
             );
-            await page.getByTestId('context-annotations-summary').waitFor();
+            await page.getByTestId('context-file-quote-tag').waitFor();
             const send = page.getByRole('button', { name: /^(发送消息|Send message)$/ });
             await send.waitFor();
             const [ack] = await Promise.all([
@@ -185,7 +207,7 @@ export function registerNativeSendAckCloseJourneys(beforeNative) {
             assert.equal(ack.status(), 200);
             const ackBody = await ack.json();
             events.push({ event: 'http-ack', body: ackBody, at: Date.now() });
-            await page.getByTestId('context-annotations-summary').waitFor({ state: 'hidden' });
+            await page.getByTestId('context-file-quote-tag').waitFor({ state: 'hidden' });
             if (newTyping) {
               await page.getByLabel('消息输入框').fill(NEXT_TEXT);
               // This separate preservation control observes the new edit's write. The four close counterexamples do not.
@@ -198,7 +220,7 @@ export function registerNativeSendAckCloseJourneys(beforeNative) {
               await page.evaluate(() => window.dispatchEvent(new Event('f309-release-message-ack')));
               assert.equal((await saved).status(), 200);
             }
-            events.push({ event: 'summary-hidden-close', at: Date.now() });
+            events.push({ event: 'quote-tag-hidden-close', at: Date.now() });
             await context.close();
             events.push({ event: 'closed', at: Date.now() });
             assert.equal(owner.sent.length - start, 1);
@@ -241,7 +263,7 @@ export function registerNativeSendAckCloseJourneys(beforeNative) {
               (text) => document.querySelector('textarea[aria-label="消息输入框"]')?.value === text,
               expectedText,
             );
-            assert.equal(await reopened.getByTestId('context-annotations-summary').count(), 0);
+            assert.equal(await reopened.getByTestId('context-file-quote-tag').count(), 0);
             if (dark)
               await reopened.waitForFunction(() => document.documentElement.getAttribute('data-theme') === 'dark');
             await reopened.screenshot({ path: path.join(evidence, `${label}-cold-open.png`) });

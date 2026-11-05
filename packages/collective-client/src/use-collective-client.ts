@@ -1,30 +1,27 @@
-import { collectiveCollaborationProjectionSchema, collectiveMemberDirectorySchema } from '@cat-cafe/shared';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import type {
-  ClientSnapshot,
-  CollectiveEventEnvelope,
-  CollectiveParticipant,
-  InviteResult,
-  PairingIntentResult,
-} from './client-types.js';
+import {
+  type CollectiveChannelCreateResponse,
+  collectiveChannelCreateResponseSchema,
+  normalizeCollectiveChannelName,
+} from '@cat-cafe/shared';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { readSavedChannelPosition } from './channel-navigation.js';
+import type { ClientSnapshot, InviteResult, PairingIntentResult } from './client-types.js';
 import { phaseForHuman } from './human-auth-flow.js';
 import { collectiveClientNamespace } from './human-send-custody.js';
+import { readMembershipLeaveReadiness } from './leave-readiness.js';
+import { createMessageExpressionPort } from './message-expression-context.js';
 import {
   announcePairingAvailability,
+  PAIRING_PENDING_NOTICE,
   resolvePairingAuthority,
   respondToPairingRequest,
   trustedPairingHostRequest,
 } from './pairing-bridge.js';
+import { useCollectiveArtifacts } from './use-collective-artifacts.js';
 import { useCollectiveCollaboration } from './use-collective-collaboration.js';
+import { useCollectiveRefresh } from './use-collective-refresh.js';
 import { useCollectiveSend } from './use-collective-send.js';
-import {
-  CollectiveClientRequestError,
-  collectiveClientErrorMessage,
-  SESSION_KEY,
-  useHumanAuthSession,
-} from './use-human-auth-session.js';
-
-const POLL_INTERVAL_MS = 1_800;
+import { CollectiveClientRequestError, useHumanAuthSession } from './use-human-auth-session.js';
 
 const initialSnapshot: ClientSnapshot = {
   phase: 'loading',
@@ -36,77 +33,37 @@ const initialSnapshot: ClientSnapshot = {
 
 export function useCollectiveClient() {
   const [snapshot, setSnapshot] = useState<ClientSnapshot>(initialSnapshot);
+  const activeCollectiveId = snapshot.collective?.collectiveId;
+  const activeCollectiveName = snapshot.collective?.name;
+  const activeCollectiveRole = snapshot.collective?.role;
+  const activeNamespace = collectiveClientNamespace(snapshot);
+  const activeServiceInstanceId = snapshot.meta?.serviceInstanceId;
+  const channelCapability = snapshot.meta?.capabilities?.channels;
   const currentNamespace = useRef<string>();
-  currentNamespace.current = collectiveClientNamespace(snapshot);
-  const refreshGeneration = useRef(0);
-  const refreshAbort = useRef<AbortController>();
-  const { token, request, loadMe, invitationMode, bootstrap, authenticate, configureProvider } = useHumanAuthSession(
+  currentNamespace.current = activeNamespace;
+  const {
+    token,
+    request,
+    binaryRequest,
+    loadMe,
+    invitationMode,
+    bootstrap,
+    authenticate,
+    configureProvider,
+    switchAccount: leaveHumanSession,
+  } = useHumanAuthSession(snapshot, setSnapshot);
+  const { refreshEvents, recheckScope, cancelRefresh } = useCollectiveRefresh(
     snapshot,
     setSnapshot,
+    request,
+    loadMe,
+    token,
   );
-  const refreshCollective = snapshot.collective;
-  const refreshNamespace = collectiveClientNamespace({
-    collective: snapshot.collective,
-    me: snapshot.me,
-    meta: snapshot.meta,
-  });
-
-  const refreshEvents = useCallback(async () => {
-    const collective = refreshCollective;
-    if (!collective || !token.current) return;
-    const namespace = refreshNamespace;
-    const generation = ++refreshGeneration.current;
-    refreshAbort.current?.abort();
-    const abort = new AbortController();
-    refreshAbort.current = abort;
-    try {
-      const [result, declared, directory, collaboration] = await Promise.all([
-        request<{ readonly events: readonly CollectiveEventEnvelope[] }>(
-          `/api/events/human?collectiveId=${encodeURIComponent(collective.collectiveId)}`,
-          { signal: abort.signal },
-        ),
-        request<{ readonly participants: readonly CollectiveParticipant[] }>(
-          `/api/participants?collectiveId=${encodeURIComponent(collective.collectiveId)}`,
-          { signal: abort.signal },
-        ),
-        request<unknown>(`/api/members?collectiveId=${encodeURIComponent(collective.collectiveId)}`, {
-          signal: abort.signal,
-        }).then((value) => collectiveMemberDirectorySchema.parse(value)),
-        request<unknown>(`/api/collaboration?collectiveId=${encodeURIComponent(collective.collectiveId)}`, {
-          signal: abort.signal,
-        }).then((value) => collectiveCollaborationProjectionSchema.parse(value)),
-      ]);
-      if (abort.signal.aborted || namespace !== currentNamespace.current || generation !== refreshGeneration.current)
-        return;
-      setSnapshot((current) => ({
-        ...current,
-        events: result.events,
-        participants: declared.participants,
-        members: directory,
-        collaboration,
-        connection: 'online',
-        error: undefined,
-      }));
-    } catch (error) {
-      if (abort.signal.aborted || namespace !== currentNamespace.current || generation !== refreshGeneration.current)
-        return;
-      setSnapshot((current) => ({
-        ...current,
-        connection: 'offline',
-        error: collectiveClientErrorMessage(error),
-      }));
-    }
-  }, [refreshCollective, refreshNamespace, request, token]);
-
-  useEffect(() => {
-    if (snapshot.phase !== 'ready') return;
-    void refreshEvents();
-    const interval = window.setInterval(() => void refreshEvents(), POLL_INTERVAL_MS);
-    return () => {
-      window.clearInterval(interval);
-      refreshAbort.current?.abort();
-    };
-  }, [refreshEvents, snapshot.phase]);
+  const switchAccount = useCallback(() => {
+    cancelRefresh();
+    currentNamespace.current = undefined;
+    leaveHumanSession();
+  }, [cancelRefresh, leaveHumanSession]);
 
   const createCollective = useCallback(
     async (name: string) => {
@@ -126,7 +83,9 @@ export function useCollectiveClient() {
         phase: phaseForHuman(me),
         me,
         collective,
+        restrictedScope: undefined,
         events: [],
+        channels: undefined,
         collaboration: undefined,
         participants: undefined,
         members: undefined,
@@ -136,6 +95,50 @@ export function useCollectiveClient() {
   );
 
   const sendMessage = useCollectiveSend({ snapshot, setSnapshot, currentNamespace, request, refresh: refreshEvents });
+
+  const createChannel = useCallback(
+    async (name: string, clientOperationId: string) => {
+      if (
+        !activeCollectiveId ||
+        !activeServiceInstanceId ||
+        !activeNamespace ||
+        activeNamespace !== currentNamespace.current ||
+        channelCapability !== 1
+      ) {
+        throw new Error('当前 Service 还不能新建频道');
+      }
+      const result = collectiveChannelCreateResponseSchema.parse(
+        await request<CollectiveChannelCreateResponse>('/api/channels', {
+          method: 'POST',
+          body: JSON.stringify({
+            collectiveId: activeCollectiveId,
+            name: normalizeCollectiveChannelName(name),
+            clientOperationId,
+          }),
+        }),
+      );
+      if (
+        result.channel.serviceInstanceId !== activeServiceInstanceId ||
+        result.channel.collectiveId !== activeCollectiveId
+      ) {
+        throw new Error('Service 返回了不属于当前 Collective 的频道');
+      }
+      if (activeNamespace !== currentNamespace.current) return undefined;
+      setSnapshot((current) =>
+        collectiveClientNamespace(current) === activeNamespace
+          ? {
+              ...current,
+              channels: [
+                ...(current.channels ?? []).filter((channel) => channel.channelId !== result.channel.channelId),
+                result.channel,
+              ],
+            }
+          : current,
+      );
+      return result;
+    },
+    [activeCollectiveId, activeNamespace, activeServiceInstanceId, channelCapability, request],
+  );
 
   const createInvite = useCallback(async () => {
     if (!snapshot.collective) return;
@@ -147,59 +150,44 @@ export function useCollectiveClient() {
     setSnapshot((current) => ({ ...current, notice: inviteUrl }));
   }, [request, snapshot.collective]);
 
+  const readLeaveReadiness = useCallback(async () => {
+    if (!activeCollectiveId) throw new Error('当前没有可检查的共同体');
+    return readMembershipLeaveReadiness(request, activeCollectiveId);
+  }, [activeCollectiveId, request]);
+
   const leaveCollective = useCallback(async () => {
-    const collective = snapshot.collective;
-    if (!collective || collective.role !== 'member') return;
-    if (!window.confirm('退出后，你的 Café 会立即停止读取和发送；公开历史与署名会保留。确认退出？')) return;
-    try {
-      await request('/api/memberships/self-leave', {
-        method: 'POST',
-        body: JSON.stringify({ collectiveId: collective.collectiveId }),
-      });
-      const me = await loadMe();
-      const nextCollective = me.collectives[0];
-      ++refreshGeneration.current;
-      refreshAbort.current?.abort();
-      const url = new URL(location.href);
-      if (nextCollective) url.searchParams.set('collectiveId', nextCollective.collectiveId);
-      else url.searchParams.delete('collectiveId');
-      url.searchParams.delete('channelId');
-      history.replaceState(null, '', url);
-      setSnapshot((current) => ({
-        ...current,
-        phase: phaseForHuman(me),
-        me,
-        collective: nextCollective,
-        events: [],
-        collaboration: undefined,
-        participants: undefined,
-        members: undefined,
-        delivery: { kind: 'idle' },
-        connection: 'online',
-        notice: '已退出共同家园；公开历史与署名仍会保留。',
-        error: undefined,
-      }));
-    } catch (error) {
-      setSnapshot((current) => ({ ...current, error: collectiveClientErrorMessage(error) }));
-    }
-  }, [loadMe, request, snapshot.collective]);
+    if (!activeCollectiveId || activeCollectiveRole !== 'member') return;
+    await request('/api/memberships/self-leave', {
+      method: 'POST',
+      body: JSON.stringify({ collectiveId: activeCollectiveId }),
+    });
+    await recheckScope();
+    setSnapshot((current) => ({
+      ...current,
+      notice: `已离开${activeCollectiveName ?? '共同体'}；公开历史和署名仍会保留。`,
+    }));
+  }, [activeCollectiveId, activeCollectiveName, activeCollectiveRole, recheckScope, request]);
 
   const selectCollective = useCallback(
     (collectiveId: string) => {
       const collective = snapshot.me?.collectives.find((item) => item.collectiveId === collectiveId);
       if (!collective) return;
       if (snapshot.collective?.collectiveId === collectiveId) return;
-      ++refreshGeneration.current;
-      refreshAbort.current?.abort();
-      currentNamespace.current = collectiveClientNamespace({ ...snapshot, collective });
+      cancelRefresh();
+      const targetNamespace = collectiveClientNamespace({ ...snapshot, collective });
+      currentNamespace.current = targetNamespace;
       const url = new URL(location.href);
       url.searchParams.set('collectiveId', collectiveId);
-      url.searchParams.delete('channelId');
+      const savedChannelId = targetNamespace ? readSavedChannelPosition(targetNamespace) : undefined;
+      if (savedChannelId) url.searchParams.set('channelId', savedChannelId);
+      else url.searchParams.delete('channelId');
       history.replaceState(null, '', url);
       setSnapshot((current) => ({
         ...current,
         collective,
+        restrictedScope: undefined,
         events: [],
+        channels: undefined,
         collaboration: undefined,
         participants: undefined,
         members: undefined,
@@ -207,61 +195,61 @@ export function useCollectiveClient() {
         delivery: { kind: 'idle' },
       }));
     },
-    [snapshot],
+    [snapshot, cancelRefresh],
   );
 
   const pairHost = useCallback(async () => {
     const hostOrigin = new URLSearchParams(location.search).get('hostOrigin');
     if (!hostOrigin || window.parent === window) return;
     const authority = resolvePairingAuthority({
-      phase: snapshot.phase,
+      phase: snapshot.restrictedScope ? 'unavailable' : snapshot.phase,
       hasSession: Boolean(snapshot.me),
-      collective: snapshot.collective,
+      collective: snapshot.restrictedScope ? undefined : snapshot.collective,
     });
     const result = await respondToPairingRequest({
       ...authority,
       hostOrigin,
       serviceUrl: location.origin,
       createNonce: () => crypto.randomUUID().replaceAll('-', '') + crypto.randomUUID().slice(0, 8),
-      requestIntent: (input) =>
-        request<PairingIntentResult>('/api/pairing-intents', {
-          method: 'POST',
-          body: JSON.stringify(input),
-        }),
+      requestIntent: async (input) => {
+        try {
+          return await request<PairingIntentResult>('/api/pairing-intents', {
+            method: 'POST',
+            body: JSON.stringify(input),
+          });
+        } catch (error) {
+          if (!(error instanceof CollectiveClientRequestError) || error.status !== 401) throw error;
+          try {
+            await loadMe();
+          } catch (verification) {
+            if (verification instanceof CollectiveClientRequestError && verification.status === 401 && !token.current)
+              throw verification;
+          }
+          throw new Error('暂时无法创建配对邀请');
+        }
+      },
       classifyError: (error) =>
         error instanceof CollectiveClientRequestError && error.status === 401 ? 'session_required' : 'pairing_failed',
       postToHost: (message, targetOrigin) => window.parent.postMessage(message, targetOrigin),
     });
-    if (result === 'session_required') {
-      token.current = null;
-      sessionStorage.removeItem(`${SESSION_KEY}:${location.origin}`);
-      setSnapshot((current) => ({
-        ...current,
-        phase: 'entry',
-        me: undefined,
-        collective: undefined,
-        events: [],
-        collaboration: undefined,
-        participants: undefined,
-        members: undefined,
-        error: 'Collective 会话已失效，请重新登录',
-      }));
-      return;
-    }
     setSnapshot((current) =>
       result === 'paired'
-        ? { ...current, notice: 'Clowder AI 正在安全托管连接凭据…', error: undefined }
+        ? { ...current, notice: PAIRING_PENDING_NOTICE, error: undefined }
         : { ...current, error: '暂时无法创建新的配对邀请' },
     );
-  }, [request, snapshot.collective, snapshot.me, snapshot.phase, token]);
+  }, [loadMe, request, snapshot.collective, snapshot.me, snapshot.phase, snapshot.restrictedScope, token]);
+
+  const onHostPaired = useCallback(() => {
+    setSnapshot((current) => (current.notice === PAIRING_PENDING_NOTICE ? { ...current, notice: undefined } : current));
+  }, []);
 
   const announcePairingState = useCallback(() => {
     const hostOrigin = new URLSearchParams(location.search).get('hostOrigin');
     if (!hostOrigin || window.parent === window || snapshot.phase === 'loading') return;
     const authority = resolvePairingAuthority({
-      phase: snapshot.phase,
+      phase: snapshot.restrictedScope ? 'unavailable' : snapshot.phase,
       hasSession: Boolean(snapshot.me),
-      collective: snapshot.collective,
+      collective: snapshot.restrictedScope ? undefined : snapshot.collective,
     });
     announcePairingAvailability({
       ...authority,
@@ -269,7 +257,7 @@ export function useCollectiveClient() {
       serviceUrl: location.origin,
       postToHost: (message, targetOrigin) => window.parent.postMessage(message, targetOrigin),
     });
-  }, [snapshot.collective, snapshot.me, snapshot.phase]);
+  }, [snapshot.collective, snapshot.me, snapshot.phase, snapshot.restrictedScope]);
 
   useEffect(() => announcePairingState(), [announcePairingState]);
 
@@ -292,17 +280,40 @@ export function useCollectiveClient() {
     request,
     refresh: refreshEvents,
   });
+  const artifacts = useCollectiveArtifacts(snapshot, request, refreshEvents);
+  const expressionServiceId = snapshot.meta?.serviceInstanceId;
+  const expressionCollectiveId = snapshot.collective?.collectiveId;
+  const expressionHumanId = snapshot.me?.human.humanId;
+  const expression = useMemo(
+    () =>
+      expressionServiceId && expressionCollectiveId && expressionHumanId
+        ? createMessageExpressionPort(
+            {
+              serviceInstanceId: expressionServiceId,
+              collectiveId: expressionCollectiveId,
+              humanId: expressionHumanId,
+            },
+            binaryRequest,
+          )
+        : undefined,
+    [expressionServiceId, expressionCollectiveId, expressionHumanId, binaryRequest],
+  );
 
   return {
     snapshot,
-    hostHumanSession: { request, refresh: refreshEvents },
+    artifacts,
+    expression,
+    hostHumanSession: { request, refresh: refreshEvents, onPaired: onHostPaired },
     invitationMode,
     bootstrap,
     authenticate,
     configureProvider,
+    switchAccount,
     createCollective,
+    createChannel,
     sendMessage,
     createInvite,
+    readLeaveReadiness,
     leaveCollective,
     pairHost,
     selectCollective,

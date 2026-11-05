@@ -72,7 +72,7 @@ export async function inspectContentModification(
   return contentModificationPage(input, snapshot, value);
 }
 
-function contentModificationPage(
+export function contentModificationPage(
   input: { requestId: string; view: string; cursor: number; expectedSnapshot?: string },
   snapshot: string,
   value: unknown,

@@ -4,13 +4,13 @@ import {
   type RichPersonMemoryProposalCardBlock,
   type TemporalValue,
 } from '@cat-cafe/shared';
+import { getCoCreatorDisplay } from '../config/co-creator-display.js';
 import { projectCandidateInteractionInformedEvidence } from '../domains/memory/people/PersonMemoryInformedEvidence.js';
 import type { StoredPersonMemoryCandidate } from '../domains/memory/people/PersonMemoryStore.js';
 
-const SOURCE_ROLE_LABEL = {
-  owner_explicit: 'You 明确陈述',
-  quoted_third_party: '第三方引述',
-} as const;
+function sourceRoleLabel(role: 'owner_explicit' | 'quoted_third_party'): string {
+  return role === 'owner_explicit' ? `${getCoCreatorDisplay().name} 明确陈述` : '第三方引述';
+}
 
 function draftKindLabel(
   draft:
@@ -20,7 +20,7 @@ function draftKindLabel(
 ): string {
   if ('eventKind' in draft.payload) return '互动事件';
   if ('status' in draft.payload) return '人物关系';
-  return draft.payload.kind === 'reported_fact' ? '事实' : 'You 判断';
+  return draft.payload.kind === 'reported_fact' ? '事实' : `${getCoCreatorDisplay().name} 判断`;
 }
 
 function isInteractionDraft(
@@ -128,7 +128,7 @@ export function buildPersonMemoryProposalCard(
           projectCandidateInteractionInformedEvidence(candidate, draft.draftId),
         );
       }
-      return `${index + 1}. **${draft.normalizedDraft}**\n   类型：${draftKindLabel(draft)} · 来源：${SOURCE_ROLE_LABEL[draft.sourceRole]}\n   原话：“${draft.evidenceExcerpt}”${typedEvidenceSummary(candidate, draft.draftId)}`;
+      return `${index + 1}. **${draft.normalizedDraft}**\n   类型：${draftKindLabel(draft)} · 来源：${sourceRoleLabel(draft.sourceRole)}\n   原话：“${draft.evidenceExcerpt}”${typedEvidenceSummary(candidate, draft.draftId)}`;
     })
     .join('\n\n');
   const card: RichPersonMemoryProposalCardBlock = {

@@ -417,6 +417,87 @@ after(() => {
 });
 
 describe('AgentRouter', () => {
+  for (const mode of ['serial', 'parallel'])
+    test(`${mode} releases pinned services when Host capacity preflight fails before launch`, async () => {
+      const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+      const pinned = ['opus', 'codex'].map((catId) => ({
+        ...createMockAgentService(catId, 'must not launch'),
+        contextCapability() {
+          throw new Error('pin capacity preflight refused');
+        },
+        releaseInvocation: mock.fn(async () => {}),
+      }));
+      const roots = pinned.map((view) => ({ forInvocation: mock.fn(() => view), invoke: view.invoke }));
+      const router = new AgentRouter(
+        await migrateRouterOpts({
+          claudeService: roots[0],
+          codexService: roots[1],
+          geminiService: createMockAgentService('gemini'),
+          registry: createMockRegistry(),
+          messageStore: createMockMessageStore(),
+          threadStore: createMockThreadStore(),
+        }),
+      );
+      await assert.rejects(async () => {
+        for await (const _ of router.route(
+          'owner',
+          `${mode === 'parallel' ? '#ideate' : '#execute'} @opus @codex blocked`,
+          `pin-refusal-${mode}`,
+        )) {
+        }
+      }, /pin capacity preflight refused/);
+      let selected = 0;
+      for (let i = 0; i < roots.length; i++) {
+        assert.equal(pinned[i].invoke.mock.callCount(), 0);
+        if (!roots[i].forInvocation.mock.callCount()) continue;
+        selected++;
+        assert.ok(
+          pinned[i].releaseInvocation.mock.callCount() > 0,
+          'every selected service releases even without an iterator',
+        );
+      }
+      assert.ok(selected > 0);
+    });
+
+  for (const mode of ['serial', 'parallel'])
+    test(`${mode} reads native L0 and launches from the same invocation view`, async () => {
+      const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+      let unpinnedL0Reads = 0;
+      const pinned = ['opus', 'codex'].map((catId) => ({
+        ...createMockAgentService(catId, 'pinned response'),
+        injectsL0Natively: mock.fn(() => true),
+      }));
+      const roots = pinned.map((view) => ({
+        forInvocation: mock.fn(() => view),
+        injectsL0Natively: () => {
+          unpinnedL0Reads++;
+          return false;
+        },
+        async *invoke() {
+          assert.fail('mutable root carrier was launched');
+        },
+      }));
+      const router = new AgentRouter(
+        await migrateRouterOpts({
+          claudeService: roots[0],
+          codexService: roots[1],
+          geminiService: createMockAgentService('gemini'),
+          registry: createMockRegistry(),
+          messageStore: createMockMessageStore(),
+          threadStore: createMockThreadStore(),
+        }),
+      );
+      const message = `${mode === 'parallel' ? '#ideate' : '#execute'} @opus @codex test snapshot`;
+      for await (const _event of router.route('user-1', message, `pinned-${mode}`)) {
+        /* consume real routing */
+      }
+      assert.equal(unpinnedL0Reads, 0, 'L0 assembly must not read the mutable root');
+      for (let i = 0; i < pinned.length; i++) {
+        assert.equal(roots[i].forInvocation.mock.callCount(), 1);
+        assert.ok(pinned[i].injectsL0Natively.mock.callCount() > 0);
+        assert.equal(pinned[i].invoke.mock.callCount(), 1);
+      }
+    });
   test('routeExecution preserves lifecycle and active-run callbacks through the strategy boundary', async () => {
     const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
@@ -538,7 +619,7 @@ describe('AgentRouter', () => {
     );
 
     const { targetCats } = await router.resolveTargetsAndIntent('帮我 review 一下', 'thread-policy');
-    assert.equal(targetCats[0], 'codex', 'Should pick deterministic non-opus fallback (codex) when opus is avoided');
+    assert.deepEqual(targetCats, [], 'Avoiding the configured default must not select an unrelated member');
   });
 
   test('routingPolicy(review) does not trigger on words containing "pr" like "prompt"', async () => {
@@ -1850,7 +1931,7 @@ describe('AgentRouter', () => {
       'static provider/identity line MUST be in user-message prompt for non-native-L0 provider',
     );
     assert.ok(
-      opusReceivedPrompt.includes('## 协作\n'),
+      opusReceivedPrompt.replaceAll('\r\n', '\n').includes('## 协作\n'),
       'static A2A collaboration section MUST be present for non-native-L0 provider',
     );
     assert.ok(
@@ -2400,56 +2481,6 @@ describe('AgentRouter', () => {
 // ── F078: Smart Routing & Group Mentions ─────────────────────────────
 
 describe('F078: Default to last replier', () => {
-  test('canonical no-mention fallback binds the latest completed lifecycle responder before Queue admission', async () => {
-    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
-
-    const messageStore = createMockMessageStore();
-    messageStore.append({
-      from: { kind: 'cat', catId: 'codex' },
-      userId: 'user-1',
-      content: 'completed reply',
-      mentions: [],
-      timestamp: 1,
-      threadId: 't1',
-      lifecycle: {
-        kind: 'response',
-        status: 'completed',
-        sourceMessageId: 'source-1',
-        targetId: 'codex',
-        invocationId: 'invocation-1',
-      },
-    });
-    messageStore.append({
-      from: { kind: 'cat', catId: 'gemini' },
-      userId: 'user-1',
-      content: 'newer but still processing',
-      mentions: [],
-      timestamp: 2,
-      threadId: 't1',
-      lifecycle: {
-        kind: 'response',
-        status: 'processing',
-        sourceMessageId: 'source-2',
-        targetId: 'gemini',
-        invocationId: 'invocation-2',
-      },
-    });
-    const router = new AgentRouter(
-      await migrateRouterOpts({
-        claudeService: createMockAgentService('opus'),
-        codexService: createMockAgentService('codex'),
-        geminiService: createMockAgentService('gemini'),
-        registry: createMockRegistry(),
-        messageStore,
-      }),
-    );
-
-    assert.deepStrictEqual(await router.resolveConversationTargetsAtAdmission([], 't1'), ['codex']);
-    assert.deepStrictEqual(await router.resolveConversationTargetsAtAdmission([], 'thread-without-completed-replies'), [
-      'opus',
-    ]);
-  });
-
   test('no @mention routes to most recent replier only (not all participants)', async () => {
     const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
 
@@ -2517,7 +2548,7 @@ describe('F078: Default to last replier', () => {
     });
   });
 
-  test('no participants falls back away from an unavailable default cat', async () => {
+  test('no participants and unavailable default without successor produce no target', async () => {
     await withAvailabilityConfig({ opus: false }, async () => {
       const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
 
@@ -2536,8 +2567,8 @@ describe('F078: Default to last replier', () => {
       const { targetCats } = await router.resolveTargetsAndIntent('hello', 't1');
       assert.deepStrictEqual(
         targetCats,
-        ['codex'],
-        'should skip unavailable default cat and pick an available fallback',
+        [],
+        'unavailable default without an explicit successor must not pick an unrelated member',
       );
     });
   });
@@ -3648,7 +3679,7 @@ describe('#58: preferredCats candidate scope (not dispatch list)', () => {
     );
   });
 
-  test('AC-Z16 R3: time window 1h cutoff — old user mention not used as fallback', async () => {
+  test('AC-Z16: the last Human mention remains the fallback after two hours', async () => {
     const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
 
     const messageStore = createMockMessageStore();
@@ -3679,8 +3710,7 @@ describe('#58: preferredCats candidate scope (not dispatch list)', () => {
     );
 
     const result = await router.resolveTargetsAndIntent('hi', 't_z16_old');
-    // 远古 mention (>1h ago) 不再用 → fallback to legacy participantsWithActivity → opus
-    assert.deepEqual(result.targetCats, ['opus'], 'old user mention beyond 1h window should not win fallback');
+    assert.deepEqual(result.targetCats, ['codex'], 'only a later Human mention changes the remembered recipient');
   });
 
   test('AC-Z16 R4: 51+ non-user messages between user @ and current → pagination still finds user mention (砚砚 R3 P1)', async () => {
@@ -3795,68 +3825,6 @@ describe('#58: preferredCats candidate scope (not dispatch list)', () => {
       result.targetCats,
       ['codex'],
       'system notices (userId=system, catId=null) must not count as user messages — they should not consume the 5-msg lookback limit',
-    );
-  });
-
-  test('AC-Z16 R11: page-level cutoff stops scan when oldestScore < 1h ago (砚砚 R10 P2)', async () => {
-    // 砚砚 R10 P2: 1h cutoff 在 isUserMessage filter 之后判断，导致只扫 user msg 时才 trip。
-    // 高流量 thread (e.g. 300 cat msgs) 全部 > 1h ago + 0 user msg → 当前 R10 实现会扫完整
-    // 历史才退出 (no more history)，浪费 page query。
-    // 修法: 每页反序扫完没命中 user mention 后，检查 page[0].effectiveScore < cutoffTimestamp，
-    // 直接 return null（下一页 effective score 只会更老，不会有可用 user mention）。
-    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
-
-    const messageStore = createMockMessageStore();
-    const baseTs = Date.now();
-
-    // 300 条 cat msgs 全部 > 1h ago (no user msg at all)
-    for (let i = 0; i < 300; i += 1) {
-      messageStore.append({
-        userId: null,
-        catId: i % 2 === 0 ? 'gemini' : 'opus',
-        content: `vision-guard ancient ${i}`,
-        mentions: [],
-        timestamp: baseTs - 2 * 60 * 60 * 1000 - i * 1000, // 全部 > 2h ago
-        threadId: 't_z16_pcutoff',
-      });
-    }
-
-    // 计数 store calls 验证 early stop
-    let pageCalls = 0;
-    const wrappedStore = {
-      ...messageStore,
-      getByThread: (...args) => {
-        pageCalls += 1;
-        return messageStore.getByThread(...args);
-      },
-      getByThreadBefore: (...args) => {
-        pageCalls += 1;
-        return messageStore.getByThreadBefore(...args);
-      },
-    };
-
-    const threadStore = createMockThreadStore({ t_z16_pcutoff: ['codex', 'opus', 'gemini'] });
-    threadStore.updateParticipantActivity('t_z16_pcutoff', 'gemini');
-
-    const router = new AgentRouter(
-      await migrateRouterOpts({
-        claudeService: createMockAgentService('opus'),
-        codexService: createMockAgentService('codex'),
-        geminiService: createMockAgentService('gemini'),
-        registry: createMockRegistry(),
-        messageStore: wrappedStore,
-        threadStore,
-      }),
-    );
-
-    await router.resolveTargetsAndIntent('继续', 't_z16_pcutoff');
-    // GREEN after R11: page-level cutoff trigger 后 ≤2 page calls (1 from peekTargets + 1 from resolveTargets,
-    //   each finds first page with oldestScore < cutoff and stops immediately)
-    // RED before R11: scans all 300 msgs / 50 = 6 pages × 2 (peek + resolve) = 12 page calls
-    // 用阈值 ≤4 (peek + resolve 各 ≤2 calls) 判断 early stop
-    assert.ok(
-      pageCalls <= 4,
-      `page-level cutoff should stop after first page when oldestScore < 1h cutoff; got ${pageCalls} page calls (expected ≤4)`,
     );
   });
 

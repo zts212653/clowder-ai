@@ -7,6 +7,7 @@ import {
   stageForWork,
   stageLabels,
 } from './roadmap-view-model.js';
+import { workBlockingPresentation, workDependencyPresentation } from './work-blocking-presentation.js';
 
 export function RoadmapProjection({
   works,
@@ -38,8 +39,8 @@ export function RoadmapProjection({
   }
   if (view.lens === 'mine') {
     return (
-      <section className="roadmap-mine" aria-label="我的路线">
-        <p>只看你负责或由你家伙伴推进的工作。</p>
+      <section className="roadmap-mine" aria-label="与我相关">
+        <p>只看你负责或由你家伙伴执行的任务。</p>
         <div className="roadmap-mine-track">
           {works.map((work) => (
             <RoadmapWorkNode
@@ -69,7 +70,7 @@ export function RoadmapProjection({
 function StageRoute({ works, humanNames, selectedWorkId, onSelect }: ProjectionProps) {
   const stages = ['queued', 'active', 'accepted'] as const;
   return (
-    <section className="roadmap-stage-route" aria-label="Roadmap 工作图">
+    <section className="roadmap-stage-route" aria-label="项目任务图">
       {stages.map((stage) => {
         const stageWorks = works.filter((work) => stageForWork(work.status) === stage);
         return (
@@ -90,7 +91,7 @@ function StageRoute({ works, humanNames, selectedWorkId, onSelect }: ProjectionP
                   />
                 ))
               ) : (
-                <p>这一段暂时没有工作。</p>
+                <p>这一段暂时没有任务。</p>
               )}
             </div>
           </section>
@@ -108,7 +109,7 @@ function StatusBoard({ works, humanNames, selectedWorkId, onSelect }: Projection
     { tone: 'accepted', label: '已完成' },
   ] as const;
   return (
-    <section className="roadmap-status-board" aria-label="Roadmap 状态看板">
+    <section className="roadmap-status-board" aria-label="项目状态看板">
       {lanes.map(({ tone, label }) => {
         const laneWorks = works.filter((work) => roadmapStatusTone(work.status) === tone);
         return (
@@ -142,9 +143,8 @@ function DependencyGraph({
 }: ProjectionProps & { readonly allWorks: readonly CollectiveWorkProjection[] }) {
   const levels = dependencyLevels(works);
   const levelValues = [...new Set(levels.values())].sort((left, right) => left - right);
-  const byId = new Map(allWorks.map((work) => [work.workId, work]));
   return (
-    <section className="roadmap-dependency-graph" aria-label="依赖工作图">
+    <section className="roadmap-dependency-graph" aria-label="任务依赖图">
       {levelValues.map((level) => (
         <section
           key={`dependency-level:${level}`}
@@ -154,16 +154,13 @@ function DependencyGraph({
           {works
             .filter((work) => levels.get(work.workId) === level)
             .map((work) => {
-              const dependencies = work.dependencyWorkIds
-                .map((workId) => byId.get(workId)?.title)
-                .filter((title): title is string => Boolean(title));
               return (
                 <div key={work.workId} data-dependency-level={level}>
                   <RoadmapWorkNode
                     work={work}
                     humanNames={humanNames}
                     selected={selectedWorkId === work.workId}
-                    responsibility={dependencies.length ? `等待 ${dependencies.join('、')}` : '没有前置工作'}
+                    responsibility={dependencyResponsibility(work, allWorks)}
                     onSelect={onSelect}
                   />
                 </div>
@@ -173,6 +170,22 @@ function DependencyGraph({
       ))}
     </section>
   );
+}
+
+function dependencyResponsibility(
+  work: CollectiveWorkProjection,
+  availableWorks: readonly CollectiveWorkProjection[],
+): string {
+  const blocking = workBlockingPresentation(work, availableWorks);
+  if (blocking?.kind === 'execution' || blocking?.kind === 'unknown') {
+    const completed = blocking.completedLabels.length ? ` · 前置已完成：${blocking.completedLabels.join('、')}` : '';
+    return `${blocking.detail}${completed}`;
+  }
+  if (blocking?.kind === 'dependencies') return blocking.label;
+  const dependencies = workDependencyPresentation(work, availableWorks);
+  if (dependencies.incompleteLabels.length) return `前置：${dependencies.incompleteLabels.join('、')}`;
+  if (dependencies.completedLabels.length) return `前置已完成：${dependencies.completedLabels.join('、')}`;
+  return '没有前置任务';
 }
 
 interface ProjectionProps {

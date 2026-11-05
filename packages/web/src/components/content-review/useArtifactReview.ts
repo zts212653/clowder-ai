@@ -13,7 +13,8 @@ import {
   restoreArtifactReviewAccess,
   reviewDraftPrefix,
 } from './review-access-invalidation';
-import { clearCommittedReviewDraft } from './review-draft-commit';
+import { appliedReviewView } from './review-command-receipt';
+import { captureReviewDraft, clearCommittedReviewDraft, reviewDraftIsCurrent } from './review-draft-commit';
 import { clearReviewRetryRecord, readReviewRetryRecord } from './review-retry-storage';
 
 const messages: Record<string, string> = {
@@ -38,6 +39,7 @@ export function useArtifactReview(reviewId: string) {
   const retryStorageAvailable = useRef(true);
   const controllerRef = useRef<AbortController | null>(null);
   const generation = useRef(0);
+  const accessGeneration = useRef(0);
 
   const install = useCallback((candidate: ArtifactReviewView) => {
     artifactReviewSchema.parse(candidate.review);
@@ -52,6 +54,7 @@ export function useArtifactReview(reviewId: string) {
   }, []);
   // The denial already cleared what the browser kept (review-access-invalidation); this resets memory.
   const clearRevoked = useCallback(() => {
+    accessGeneration.current += 1;
     generation.current += 1;
     controllerRef.current?.abort();
     pendingRef.current = null;
@@ -155,7 +158,9 @@ export function useArtifactReview(reviewId: string) {
       const latest = current.current;
       if (!latest || saving) return false;
       const scope = generation.current;
+      const accessScope = accessGeneration.current;
       const key = `${reviewDraftPrefix(latest.review.task.ownerUserId, reviewId)}pending`;
+      const draft = captureReviewDraft(reviewDraftPrefix(latest.review.task.ownerUserId, reviewId), command);
       try {
         localStorage.setItem(key, JSON.stringify(command));
       } catch {
@@ -172,11 +177,11 @@ export function useArtifactReview(reviewId: string) {
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify(command),
         });
-        const body = (await response.json()) as { view?: ArtifactReviewView; error?: string };
-        if (scope !== generation.current) return false;
+        const body = (await response.json()) as { view?: ArtifactReviewView; receipt?: unknown; error?: string };
         if (!response.ok) {
+          if (scope !== generation.current) return false;
           if ([400, 403, 404, 409, 410].includes(response.status)) {
-            clearReviewRetryRecord(key);
+            clearReviewRetryRecord(key, command);
             settledOperation.current = command.operationId;
             pendingRef.current = null;
             setPending(null);
@@ -184,13 +189,20 @@ export function useArtifactReview(reviewId: string) {
           if ([401, 404, 410].includes(response.status) || body.error === 'access_denied') revokeAccess();
           throw new Error(messages[body.error ?? ''] ?? '保存尚未完成，请核对后重试；草稿仍保留。');
         }
-        if (scope !== generation.current || !body.view) return false;
-        const retryCleared = clearReviewRetryRecord(key);
+        const acknowledged = appliedReviewView(body, command, latest);
+        if (!acknowledged || accessScope !== accessGeneration.current || !reviewDraftIsCurrent(draft)) return false;
+        if (current.current && current.current.review.task.ownerUserId !== latest.review.task.ownerUserId) return false;
+        // Row retirement only ends React ownership. Its exact server receipt can still settle storage.
+        const retryResult = clearReviewRetryRecord(key, command);
+        if (retryResult === 'replaced') return false;
+        const retryCleared = retryResult === 'cleared';
+        if (retryCleared) clearCommittedReviewDraft(draft);
+        // Old component callbacks must not clear a draft or update a different mounted surface.
+        if (scope !== generation.current) return false;
         settledOperation.current = command.operationId;
         pendingRef.current = null;
         setPending(null);
-        install(body.view);
-        clearCommittedReviewDraft(reviewDraftPrefix(latest.review.task.ownerUserId, reviewId), command);
+        install(acknowledged);
         window.dispatchEvent(new Event('cat-cafe:entrusted-work-projection-invalidated'));
         if (!retryCleared) setError('这次保存已确认，但浏览器未能清理本地重试记录。');
         return true;
@@ -217,9 +229,10 @@ export function useArtifactReview(reviewId: string) {
         setError('上一项保存结果还未确认，请先重试原操作。');
         return false;
       }
+      const ledgerRound = action.kind === 'judge_response' ? action.sourceRound : round;
       return send({
-        ...(latest.review.rounds.find((item) => item.number === round)?.ledgerRef
-          ? { expectedLedgerRevision: latest.review.rounds.find((item) => item.number === round)?.ledgerRevision }
+        ...(latest.review.rounds.find((item) => item.number === ledgerRound)?.ledgerRef
+          ? { expectedLedgerRevision: latest.review.rounds.find((item) => item.number === ledgerRound)?.ledgerRevision }
           : {}),
         reviewId,
         expectedRevision: latest.review.revision,

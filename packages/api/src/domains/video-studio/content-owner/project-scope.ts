@@ -1,3 +1,8 @@
+import {
+  type CollectiveContentScopeV1,
+  collectiveContentOperationContextSchema,
+  collectiveContentScopeRef,
+} from './collective-scope.js';
 import type { ContentOperationContextV1, ContentPublicationScopeV1, VideoProjectScopeV1 } from './types.js';
 
 export const videoProjectMediaType = 'application/vnd.cat-cafe.video-project+json';
@@ -5,13 +10,26 @@ export const videoProjectMediaType = 'application/vnd.cat-cafe.video-project+jso
 export function validateContentOperationContext(
   context: ContentOperationContextV1 | undefined,
   scope?: VideoProjectScopeV1,
+  collectiveScope?: CollectiveContentScopeV1,
 ) {
+  if (collectiveScope) {
+    const parsed = collectiveContentOperationContextSchema.safeParse(context);
+    if (!parsed.success || parsed.data.scopeRef !== collectiveContentScopeRef(collectiveScope) || scope)
+      throw new TypeError('Invalid Collective owner operation context');
+    return;
+  }
   if (context === undefined) return;
+  if (!context || typeof context !== 'object' || Array.isArray(context))
+    throw new TypeError('Invalid video project operation context');
+  if (
+    (context.kind === 'work:create' || context.kind === 'work:submit') &&
+    !scope &&
+    /^sha256:[a-f0-9]{64}$/.test(context.requestDigest) &&
+    Object.keys(context).every((key) => key === 'kind' || key === 'requestDigest')
+  )
+    return;
   if (
     !scope ||
-    !context ||
-    typeof context !== 'object' ||
-    Array.isArray(context) ||
     ![
       'video-project:create',
       'video-project:save',

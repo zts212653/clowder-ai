@@ -3,7 +3,6 @@ import { test } from 'node:test';
 import { createCatId } from '@cat-cafe/shared';
 import { InvocationQueue } from '../src/domains/cats/services/agents/invocation/InvocationQueue.js';
 import { MessageStore } from '../src/domains/cats/services/stores/ports/MessageStore.js';
-import { LiveInbox } from '../src/domains/concierge/live/inbox/LiveInbox.js';
 import type { LiveInboxScope } from '../src/domains/concierge/live/inbox/live-inbox-contract.js';
 import { MessageLiveInboxSource } from '../src/domains/concierge/live/inbox/MessageLiveInboxSource.js';
 import { createPersistedQueueFixture } from './helpers/persisted-queue-fixture.js';
@@ -14,6 +13,7 @@ const scope: LiveInboxScope = {
   threadId: 'home',
   catId: target,
   invocationId: 'live-child',
+  parentInvocationId: 'live-parent',
   callId: 'live',
   generation: 1,
 };
@@ -41,6 +41,7 @@ async function append(store: MessageStore, queue: InvocationQueue, index = 1) {
       content,
       targetCats: [target],
       intent: 'coordinate',
+      authorIntentByCatId: { [target]: { requested: 'continue_current', boundParentInvocationId: 'live-parent' } },
     },
   );
   assert.ok(result.message && result.entry);
@@ -90,15 +91,15 @@ test('Message source pages >100 canonical Queue sources without exposing bodies 
   assert.equal(queue.list(scope.threadId, scope.userId).length, 237);
 });
 
-test('exact History delivery is observed without claiming a notification or current model context', async (t) => {
+test('exact History delivery does not fabricate native read, notification or retained context evidence', async (t) => {
   const f = deliveredFixture();
   t.after(() => f.close());
-  const { message, invocationId } = await f.deliver();
+  const { message } = await f.deliver();
   const ref = await f.source.read(scope, message.id);
   assert.deepEqual(ref?.facts, {
     persisted: true,
     notified: false,
-    readByInvocationIds: [invocationId],
+    readByInvocationIds: [],
     readInCurrentContext: false,
     handled: false,
     playback: 'unknown',
@@ -135,70 +136,4 @@ test('permission, owner/thread/target, recall, cancellation and whisper boundari
   delete message.recall;
   store.markCanceled(message.id);
   assert.equal(await source.read(scope, message.id), null);
-});
-
-test('Host append signal and reconnect reread canonical pending sources without acquiring them', async () => {
-  let wakes = 0;
-  const deliveries: string[] = [];
-  const store = new MessageStore();
-  const queue = new InvocationQueue();
-  const source = new MessageLiveInboxSource({ store, queue, authorize: async () => true });
-  const options = {
-    scope,
-    source,
-    wake: () => {
-      wakes++;
-    },
-    deliver: async (batch: { references: readonly { messageId: string }[] }) => {
-      deliveries.push(...batch.references.map((item) => item.messageId));
-      return 'accepted' as const;
-    },
-  };
-  const inbox = new LiveInbox(options);
-  store.onAppend = () => inbox.signal();
-  const message = await append(store, queue);
-  assert.equal(wakes, 1);
-  assert.equal(deliveries.length, 0);
-  await inbox.atBoundary({ kind: 'tool_complete', generation: 1, userSpeaking: false });
-  assert.deepEqual(deliveries, [message.id]);
-  inbox.close();
-  const recovered = new LiveInbox({ ...options, scope: { ...scope, invocationId: 'new-child', generation: 2 } });
-  await recovered.atBoundary({ kind: 'idle', generation: 2, userSpeaking: false });
-  assert.deepEqual(deliveries, [message.id, message.id]);
-  assert.equal(queue.list(scope.threadId, scope.userId).length, 1);
-  recovered.close();
-});
-
-test('same-child reconnect cannot treat historical delivery as retained working context', async (t) => {
-  const f = deliveredFixture();
-  t.after(() => f.close());
-  const { message, invocationId } = await f.deliver();
-  let retained = false;
-  const currentScope = { ...scope, invocationId };
-  const source = new MessageLiveInboxSource({
-    store: f.messages,
-    queue: f.queue,
-    authorize: async () => true,
-    retainsCurrentInvocationReads: () => retained,
-  });
-  assert.equal((await source.read(currentScope, message.id))?.facts.readInCurrentContext, false);
-  const deliveries: string[] = [];
-  const inbox = new LiveInbox({
-    scope: currentScope,
-    source,
-    wake() {},
-    deliver: async (batch) => {
-      deliveries.push(...batch.references.map((row) => row.messageId));
-      return 'accepted';
-    },
-  });
-  assert.equal(
-    (await inbox.atBoundary({ kind: 'idle', generation: 1, userSpeaking: false })).kind,
-    'successor_required',
-  );
-  assert.deepEqual(deliveries, []);
-  retained = true;
-  assert.equal((await inbox.atBoundary({ kind: 'idle', generation: 1, userSpeaking: false })).pending, 0);
-  assert.equal(f.starts.length, 1, 'inspection does not start or reconstruct another execution');
-  inbox.close();
 });

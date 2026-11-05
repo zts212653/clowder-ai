@@ -21,7 +21,9 @@
  */
 
 import type { CatId } from '@cat-cafe/shared';
+import { excerptSanitizedStderr } from '../../../../../utils/sanitize-cli-stderr.js';
 import type { AgentMessage } from '../../types.js';
+import { readOpenCodeError } from './opencode-error.js';
 
 interface OpenCodeEvent {
   type: string;
@@ -140,11 +142,11 @@ export function transformOpenCodeEvent(event: unknown, catId: CatId | string): A
     }
 
     case 'error': {
-      const errorMsg = event.error?.data?.message ?? event.error?.name ?? 'opencode error';
+      const errorMsg = readOpenCodeError(event).message ?? 'opencode error';
       return {
         type: 'error',
         catId: catId as CatId,
-        error: errorMsg,
+        error: excerptSanitizedStderr(errorMsg, { edge: 'head', maxLength: 2048 }),
         timestamp: ts,
       };
     }

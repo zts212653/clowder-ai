@@ -1,0 +1,94 @@
+.exploration-history-heading {
+  margin-bottom: 16px;
+}
+.exploration-history-heading h2 {
+  margin: 0;
+}
+.exploration-history-heading > p {
+  margin: 4px 0;
+  color: var(--cafe-text-secondary);
+}
+.exploration-history-overview {
+  margin-top: 8px;
+  color: var(--cafe-text-secondary);
+}
+.exploration-history-overview > p {
+  margin: 0;
+}
+.exploration-history-overview .markdown-content > :first-child,
+.exploration-history-authored-body > :first-child {
+  margin-top: 0;
+}
+.exploration-history-overview .markdown-content > :last-child,
+.exploration-history-authored-body > :last-child {
+  margin-bottom: 0;
+}
+.exploration-history-step {
+  scroll-margin-top: 16px;
+  max-width: 880px;
+  margin: 24px auto 0;
+}
+.exploration-history-step h3 {
+  margin: 4px 0 12px;
+  font-size: var(--console-font-lg);
+}
+.exploration-history-step time {
+  color: var(--cafe-text-muted);
+  font-size: var(--console-font-xs);
+}
+.exploration-history-parent {
+  padding-left: 12px;
+  border-left: 2px solid var(--cafe-border);
+}
+.exploration-history-authored-body {
+  margin: 16px 0 24px;
+  line-height: 1.7;
+}
+.exploration-history-changes,
+.exploration-history-cases {
+  margin: 24px 0;
+}
+.exploration-history-changes > div {
+  margin: 12px 0;
+}
+.exploration-history-changes p {
+  margin: 4px 0;
+}
+.exploration-history-cases > article {
+  border-top: 1px solid var(--cafe-border-subtle);
+}
+.exploration-history-case-toggle {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  width: 100%;
+  padding: 14px 0;
+  text-align: left;
+}
+.exploration-history-case-toggle time {
+  flex-shrink: 0;
+}
+.exploration-history-case-toggle > span:nth-child(2) {
+  flex: 1;
+}
+.exploration-history-case-body {
+  padding: 0 0 20px;
+}
+.exploration-history-case-body .exploration-output-reading {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+.exploration-history-next {
+  margin: 8px 0 24px;
+  text-align: left;
+}
+@container evolution (max-width: 500px) {
+  .exploration-history-case-toggle {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .exploration-history-case-toggle time {
+    width: 100%;
+  }
+}

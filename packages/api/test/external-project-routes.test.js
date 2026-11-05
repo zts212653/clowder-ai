@@ -636,6 +636,30 @@ describe('External Project Routes', () => {
     assert.equal(patchRes.json().card.originalText, 'T');
   });
 
+  test('import-backlog diagnostics identify an explicit project document', async (t) => {
+    const { mkdtemp, mkdir, writeFile, rm } = await import('node:fs/promises');
+    const { join } = await import('node:path');
+    const { tmpdir } = await import('node:os');
+    const root = await mkdtemp(join(tmpdir(), 'project-document-diagnostic-'));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    await mkdir(join(root, 'docs'));
+    await writeFile(join(root, 'docs/EXPLICIT.md'), 'Malformed feature table');
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/external-projects',
+      headers: H,
+      payload: { name: 'explicit diagnostic', sourcePath: root, backlogPath: 'docs/EXPLICIT.md' },
+    });
+    assert.equal(created.statusCode, 201);
+    const result = await app.inject({
+      method: 'POST',
+      url: `/api/external-projects/${created.json().project.id}/import-backlog`,
+      headers: H,
+    });
+    assert.equal(result.statusCode, 500);
+    assert.match(result.json().message, /^EXPLICIT.md missing required columns:/);
+  });
+
   test('import-backlog skips orphan when bound item exists for same feature', async () => {
     const { mkdtemp, writeFile, mkdir } = await import('node:fs/promises');
     const { join } = await import('node:path');

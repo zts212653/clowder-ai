@@ -1,3 +1,4 @@
+import { deploymentDefaults } from '@cat-cafe/shared';
 /**
  * Frontend URL/origin resolution shared by screenshot export and CORS setup.
  */
@@ -6,8 +7,17 @@ export interface WarnLoggerLike {
   warn: (...args: unknown[]) => void;
 }
 
-const DEFAULT_FRONTEND_BASE_URL = 'http://localhost:3003';
-const DEFAULT_CORS_ORIGINS = ['http://localhost:3000', 'http://localhost:3003', 'https://cafe.clowder-ai.com'];
+const DEFAULT_FRONTEND_BASE_URL = deploymentDefaults.frontendBaseUrl;
+const DEFAULT_CORS_ORIGINS = deploymentDefaults.corsOrigins;
+
+/** Host navigation uses the frontend origin, never credentials, query strings or request URLs. */
+export function createThreadDeepLinkUrl(frontendBaseUrl: string): (threadId: string) => string {
+  const base = new URL(frontendBaseUrl);
+  if (base.protocol !== 'http:' && base.protocol !== 'https:') {
+    throw new TypeError('Frontend navigation requires an absolute HTTP(S) URL');
+  }
+  return (threadId) => `${base.origin}/thread/${encodeURIComponent(threadId)}`;
+}
 
 /**
  * F156: Loopback (127.x.x.x) is ALWAYS allowed — it is genuinely local.
@@ -86,7 +96,7 @@ export function resolveFrontendBaseUrl(env: NodeJS.ProcessEnv, logger?: WarnLogg
   if (rawFrontendPort?.trim()) {
     logger?.warn(
       { frontendPort: rawFrontendPort },
-      '[thread-export] Invalid FRONTEND_PORT, fallback to localhost:3003',
+      `[thread-export] Invalid FRONTEND_PORT, fallback to localhost:${deploymentDefaults.webPort}`,
     );
   }
 

@@ -3,19 +3,7 @@ import type Database from 'better-sqlite3';
 import type { OutputVerifiedSignalSources } from './output-verified-detector.js';
 import { SqliteSignalSources } from './SqliteSignalSources.js';
 
-/**
- * F200 AC-D2.1/D2.2/D2.3 — Thread-aware signal sources for OutputVerifiedDetector.
- *
- * Extends SqliteSignalSources (invocation status from evidence.sqlite) with
- * Redis-backed signals from thread messages and PR tracking tasks:
- *
- * - AC-D2.1: operator accept + reviewer approval detected via thread message scanning
- * - AC-D2.2: CI passed detected via pr_tracking task automationState
- * - AC-D2.3: PR merged detected via pr_tracking task status='done'
- *
- * Design: optional interface methods (`isCvoAcceptedForThread?` etc.) keep
- * backward compatibility — old callers using plain SqliteSignalSources still work.
- */
+/** Thread-local human/reviewer message signals plus generic invocation evidence. */
 
 /** Minimal message shape needed for signal detection (subset of StoredMessage). */
 export interface SignalMessage {
@@ -32,27 +20,6 @@ export interface SignalMessage {
 /** Minimal message store interface (subset of IMessageStore). */
 export interface SignalMessageStore {
   getByThread(threadId: string, limit?: number, userId?: string): Promise<SignalMessage[]> | SignalMessage[];
-}
-
-/** Minimal task item for signal detection (subset of TaskItem). */
-export interface SignalTaskItem {
-  kind: string;
-  status: string;
-  threadId: string;
-  automationState?: {
-    ci?: {
-      lastBucket?: string;
-      headSha?: string;
-      lastFingerprint?: string;
-      /** Terminal PR state — 'merged' | 'closed'. Persisted by CiCdRouter on lifecycle close. */
-      prState?: string;
-    };
-  };
-}
-
-/** Minimal task store interface (subset of ITaskStore). */
-export interface SignalTaskStore {
-  listByThread(threadId: string): Promise<SignalTaskItem[]> | SignalTaskItem[];
 }
 
 /**
@@ -142,7 +109,6 @@ export class ThreadAwareSignalSources implements OutputVerifiedSignalSources {
   constructor(
     db: Database.Database,
     private readonly messageStore: SignalMessageStore,
-    private readonly taskStore: SignalTaskStore,
   ) {
     this.sqliteSources = new SqliteSignalSources(db);
   }
@@ -150,25 +116,6 @@ export class ThreadAwareSignalSources implements OutputVerifiedSignalSources {
   /** Delegate to SqliteSignalSources for recall_events-based invocation status. */
   async getInvocationStatus(invocationId: string): Promise<string | null> {
     return this.sqliteSources.getInvocationStatus(invocationId);
-  }
-
-  /**
-   * AC-D2.3: Detect PR merge by checking if any pr_tracking task for this thread
-   * has status='done' AND automationState.ci.prState='merged'.
-   * CiCdRouter marks done on BOTH merged and closed — we must distinguish.
-   */
-  async isPrMergedForThread(threadId: string): Promise<boolean> {
-    const tasks = await this.taskStore.listByThread(threadId);
-    const prTasks = tasks.filter((t) => t.kind === 'pr_tracking');
-    if (prTasks.length === 0) return false;
-    // If any pr_tracking task is still active, thread has pending PR work.
-    // Old merged PRs must not leak into new trajectories.
-    if (prTasks.some((t) => t.status !== 'done')) return false;
-    // All terminal — only the LAST (most recently created) task determines
-    // the thread's merge status. An old merged PR followed by a newer closed
-    // PR means the thread's latest work ended in closure, not merge.
-    const lastTask = prTasks[prTasks.length - 1];
-    return lastTask.automationState?.ci?.prState === 'merged';
   }
 
   /**
@@ -221,27 +168,6 @@ export class ThreadAwareSignalSources implements OutputVerifiedSignalSources {
       if (matchesClause(text, REVIEWER_APPROVE_CLAUSE)) return true;
     }
     return false;
-  }
-
-  /**
-   * AC-D2.2: Detect CI passed by checking pr_tracking task automationState.
-   * Requires both a pass/success bucket AND fingerprint alignment with current
-   * headSha to reject stale passes from old commits.
-   */
-  async isCiPassedForThread(threadId: string): Promise<boolean> {
-    const tasks = await this.taskStore.listByThread(threadId);
-    // Only check ACTIVE pr_tracking tasks — done tasks reflect old PR work.
-    const activePrTasks = tasks.filter((t) => t.kind === 'pr_tracking' && t.status !== 'done');
-    return activePrTasks.some((t) => {
-      const ci = t.automationState?.ci;
-      if (!ci) return false;
-      const isBucketPass = ci.lastBucket === 'pass' || ci.lastBucket === 'success';
-      if (!isBucketPass) return false;
-      // Require fingerprint alignment: lastFingerprint = `${headSha}:${bucket}`.
-      // If headSha changed (new commit), fingerprint won't match → stale pass rejected.
-      if (!ci.headSha || !ci.lastFingerprint) return false;
-      return ci.lastFingerprint.startsWith(`${ci.headSha}:`);
-    });
   }
 }
 

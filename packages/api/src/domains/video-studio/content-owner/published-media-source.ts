@@ -1,21 +1,28 @@
 import { constants } from 'node:fs';
-import { open } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
-import { createCatId, type MediaPublicationSource, mediaPublicationSourceSchema } from '@cat-cafe/shared';
+import { open, realpath } from 'node:fs/promises';
+import { basename, join, resolve, sep } from 'node:path';
+import {
+  createCatId,
+  type MediaPublicationSource,
+  mediaPublicationSourceSchema,
+  type ReviewedMediaType,
+} from '@cat-cafe/shared';
 import { aggregateThreadArtifacts } from '../../cats/services/agents/routing/thread-artifacts-aggregator.js';
 import type { IMessageStore } from '../../cats/services/stores/ports/MessageStore.js';
 import { isDurableOwnerReadEvidence, resolveVisibleReplyParent } from '../../cats/services/stores/visibility.js';
 import type { EvolutionMediaReadPort } from '../../collaborative-content/workspace-review/evolution-review-source.js';
 import type { PreparedArtifactReader } from '../../growing/EntrustedWorkOwnerReadService.js';
+import { LocalMediaFileDigest } from './local-media-file-digest.js';
 import { MediaOwnerError } from './media-errors.js';
-import { publishedMediaContentRef, workspaceSnapshotSourceRef } from './publication.js';
+import { publishedMediaContentRef, workPublicationContentRef, workspaceSnapshotSourceRef } from './publication.js';
 import {
   evolutionSnapshotPublication,
   readEvolutionSnapshotSource,
   resolveEvolutionSnapshot,
 } from './published-evolution-media.js';
 import type { MediaReviewPrincipal, PublishedMediaAccess } from './published-media-access.js';
-import { readPublishedMessageItem } from './published-message-media.js';
+import { mediaFileExtensionMatches } from './published-media-file-exports.js';
+import { publishedUploadMediaType, readPublishedMessageItem } from './published-message-media.js';
 import {
   assertWorkspaceSnapshotVisible,
   resolveWorkspaceSnapshot,
@@ -33,10 +40,11 @@ import {
 
 export class PublishedMediaSource {
   private readonly uploadDir: string;
+  private readonly localDigests = new LocalMediaFileDigest();
   constructor(
     private readonly deps: {
       artifacts: PreparedArtifactReader;
-      messages: Pick<IMessageStore, 'getById'>;
+      messages: Pick<IMessageStore, 'getById' | 'getArtifactById'>;
       uploadDir: string;
       readPrivateMessageImage?: (id: string, principal: MediaReviewPrincipal) => Promise<Buffer>;
       workspace?: WorkspaceMediaSourcePort;
@@ -45,6 +53,49 @@ export class PublishedMediaSource {
     },
   ) {
     this.uploadDir = resolve(deps.uploadDir);
+  }
+
+  /** Only exact recorded sources in registered roots may become a local original. */
+  async localOriginalFile(
+    publication: ContentSourcePublicationV1 | undefined,
+    digest: string,
+    principal?: MediaReviewPrincipal,
+    mime?: string,
+  ): Promise<string | null> {
+    if (!publication) return null;
+    try {
+      const path = await this.originalPath(publication, digest, principal);
+      if (!path || (mime && !mediaFileExtensionMatches(path, mime))) return null;
+      return (await this.localDigests.matches(path, digest)) ? path : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async originalPath(
+    publication: ContentSourcePublicationV1,
+    digest: string,
+    principal?: MediaReviewPrincipal,
+  ) {
+    if (publication.sourceRef.startsWith('workspace:')) {
+      const workspace = /^workspace:([^:]+):([^:]+)$/.exec(publication.sourceRef);
+      const root = workspace?.[1],
+        path = workspace?.[2];
+      if (!root || !path || !principal || !this.deps.workspace?.describeFileReference) return null;
+      const description = await this.deps.workspace.describeFileReference({
+        principal: { userId: principal.userId },
+        locator: { worktreeId: decodeURIComponent(root), path: decodeURIComponent(path) },
+      });
+      return description.contentRef === publication.artifactRef && description.revision === digest
+        ? description.absolutePath
+        : null;
+    }
+    const ref = publication.artifactRef;
+    if (!ref.startsWith('/uploads/')) return null;
+    const name = decodeURIComponent(ref.slice('/uploads/'.length));
+    if (!name || name !== basename(name) || name.includes('\\') || name.includes('\0')) return null;
+    const [root, path] = await Promise.all([realpath(this.uploadDir), realpath(join(this.uploadDir, name))]);
+    return path.startsWith(root + sep) ? path : null;
   }
 
   messageIdentity(source: import('@cat-cafe/shared').MessageMediaPublicationSource, principal: MediaReviewPrincipal) {
@@ -74,7 +125,7 @@ export class PublishedMediaSource {
           ? await this.deps.readPrivateMessageImage!(resolved.privateImageId, principal)
           : await readBoundedFile(
               join(this.uploadDir, resolved.fileName),
-              resolved.mediaType === 'image/png' ? 10 * 1024 * 1024 : 256 * 1024 * 1024,
+              resolved.mediaType === 'video/mp4' ? 256 * 1024 * 1024 : 10 * 1024 * 1024,
             );
         await this.assertVisible(scope, resolved.publication, principal);
         return { bytes, mediaType: resolved.mediaType };
@@ -88,6 +139,11 @@ export class PublishedMediaSource {
     principal: MediaReviewPrincipal,
   ): Promise<void> {
     if (scope.ownerUserId !== principal.userId) throw new MediaOwnerError('access_denied');
+    if (!isTaskPublicationScope(scope) && scope.kind === 'work') {
+      // Retained work revisions survive source-file changes. Their live boundary is the owning thread.
+      await this.deps.access.authorizeScope(scope, principal, true, workPublicationContentRef(scope));
+      return;
+    }
     if (!isTaskPublicationScope(scope)) {
       const origin = await this.originPublication(scope, principal);
       // Derive the exact original identity here, including for returned versions. Call order is not authority.
@@ -106,6 +162,14 @@ export class PublishedMediaSource {
   }
 
   async originDetails(scope: ContentPublicationScopeV1, principal: MediaReviewPrincipal) {
+    if (!isTaskPublicationScope(scope) && scope.kind === 'work') {
+      await this.deps.access.authorizeScope(scope, principal, true, workPublicationContentRef(scope));
+      return {
+        title: '作品',
+        sourceRef: `work-operation:${scope.creationOperationId}`,
+        ...(scope.createdBy.kind === 'cat' ? { publisherCatId: scope.createdBy.actorId } : {}),
+      };
+    }
     if (!isTaskPublicationScope(scope) && scope.kind === 'evolution-snapshot') {
       const original = await readEvolutionSnapshotSource(this.deps.evolution, scope.source, principal);
       return { title: original.label, sourceRef: scope.sourceContentRef };
@@ -182,8 +246,8 @@ export class PublishedMediaSource {
     artifactRef: string;
     expectedArtifactRevision: string;
     publicationSource?: import('@cat-cafe/shared').MessageMediaPublicationSource;
-  }): Promise<{ bytes: Buffer; mediaType: 'image/png' | 'video/mp4'; publication: ContentSourcePublicationV1 }> {
-    const file = /^\/uploads\/([a-zA-Z0-9][a-zA-Z0-9._-]*\.(png|mp4))$/i.exec(input.artifactRef);
+  }): Promise<{ bytes: Buffer; mediaType: ReviewedMediaType; publication: ContentSourcePublicationV1 }> {
+    const file = /^\/uploads\/([a-zA-Z0-9][a-zA-Z0-9._-]*\.(png|jpe?g|webp|mp4))$/i.exec(input.artifactRef);
     if (!file?.[1] || !file[2]) throw new MediaOwnerError('invalid_media');
     const exact = input.publicationSource;
     const selected = exact ? await readPublishedMessageItem(this.deps.messages, exact, input.principal) : undefined;
@@ -214,10 +278,10 @@ export class PublishedMediaSource {
     if (!sourceRef) throw new MediaOwnerError('publication_changed');
     const publication = { artifactRef: input.artifactRef, sourceRef, revision: coordinate.artifactRevision };
     await this.assertVisible(input.scope, publication, input.principal);
-    const mediaType = file[2].toLowerCase() === 'png' ? 'image/png' : 'video/mp4';
+    const mediaType = publishedUploadMediaType(file[2]);
     const bytes = await readBoundedFile(
       join(this.uploadDir, file[1]),
-      mediaType === 'image/png' ? 10 * 1024 * 1024 : 256 * 1024 * 1024,
+      mediaType === 'video/mp4' ? 256 * 1024 * 1024 : 10 * 1024 * 1024,
     );
     await this.assertVisible(input.scope, publication, input.principal);
     if (exact) await readPublishedMessageItem(this.deps.messages, exact, input.principal);

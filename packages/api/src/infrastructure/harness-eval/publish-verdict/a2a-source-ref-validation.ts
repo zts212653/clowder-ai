@@ -1,5 +1,6 @@
 import { basename, resolve } from 'node:path';
 import { resolveSafeRawPath } from '../safe-path.js';
+import { validateA2aEvaluatorSource } from './a2a-evaluator-source.js';
 import type { A2aSnapshotAttributionRefs, HandlerError, ResolvedSourceRefs, VerdictSourceRefs } from './types.js';
 
 /**
@@ -14,8 +15,7 @@ export function isA2aSourceRefs(refs: VerdictSourceRefs | undefined): refs is A2
 
 /**
  * Validate sourceRefs format (presence + type + basename — no path resolution).
- * Path resolution happens inside stage callback against LIVE harnessFeedbackRoot
- * (砚砚 R17 P1 cloud: snapshots/attributions are gitignored, only in live).
+ * Path resolution happens inside the stage callback against the selected root.
  */
 export function validateSourceRefsFormat(
   sourceRefs: VerdictSourceRefs | undefined,
@@ -47,9 +47,13 @@ export function validateSourceRefsFormat(
     ['snapshotName', snap],
     ['attributionName', attr],
   ] as const) {
-    if (value === '.' || value === '..' || basename(value) !== value) {
+    if (value === '.' || value === '..' || basename(value) !== value || /[\\\0]/.test(value)) {
       return invalidSourceRef(`${field} invalid: must be simple basename (no path separators, no '.' / '..')`);
     }
+  }
+  if (sourceRefs?.source !== undefined) {
+    const error = validateA2aEvaluatorSource(sourceRefs.source);
+    if (error) return invalidSourceRef(error);
   }
   return { ok: true };
 }

@@ -45,6 +45,8 @@ export function V2WorkbenchChrome(props: F307WorkbenchTabsProps) {
       (surface) => surface.id !== active.id && !props.layout.pinnedSurfaceIds.includes(surface.id),
     );
   const canCloseAll = props.layout.surfaces.some((surface) => !props.layout.pinnedSurfaceIds.includes(surface.id));
+  const fullWindowAttention =
+    active !== undefined && props.mainAreaAttentionSurfaceId === active.id && props.mainAreaAttentionIsWide !== true;
   const items = [
     {
       label: t.focusCurrent,
@@ -126,6 +128,16 @@ export function V2WorkbenchChrome(props: F307WorkbenchTabsProps) {
     >
       <V2WorkbenchTabStrip props={props} />
       <div className="flex shrink-0 items-center" data-testid="v2-workspace-actions">
+        {fullWindowAttention && (
+          <button
+            type="button"
+            className="mr-1 rounded-md border border-cafe-subtle bg-cafe-surface-sunken px-2.5 py-1.5 text-xs font-semibold text-cafe-secondary hover:text-cafe"
+            onClick={props.onExitMainAreaAttention}
+            data-testid="v2-workspace-return-to-chat"
+          >
+            {t.returnToChat}
+          </button>
+        )}
         {props.toolsContent ? (
           <V2WorkspaceMenu
             width={360}

@@ -53,6 +53,7 @@ function createTempProject(name) {
   for (const file of [
     'daemon-state.mjs',
     'process-identity.mjs',
+    'process-birth-identity.mjs',
     'daemon-health-probe.mjs',
     'daemon-stop-operation.mjs',
     'daemon-stop-record.mjs',
@@ -853,7 +854,8 @@ server.listen(3010,'127.0.0.1',()=>setInterval(()=>{},1000));`,
       0,
       `should reject but exited 0\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
     );
-    assert.match(result.stderr, /runtime worktree has local changes/);
+    assert.match(result.stderr, /runtime worktree has local changes relative to its current HEAD/);
+    assert.match(result.stderr, /src\.js/);
   });
 
   it('reports the actual untracked files blocking an ff-only runtime sync', () => {

@@ -10,8 +10,20 @@ mcp_admission_claims:
     decision: accepted
 title: Memory / Evidence
 summary: Evidence indexing、retrieval、scanner selection、bootstrap、library memory，以及带 append-only content-free owner outcome refs 的 execution-time cue orchestration。
-canonical_features: [F102, F152, F209, F221, F227, F231, F255, F260, F263, F271, F276, F282, F287, F321]
+canonical_features: [F102, F152, F209, F221, F227, F231, F255, F260, F263, F271, F276, F282, F287, F321, F332]
 code_anchors:
+  - packages/api/src/domains/memory/matters/MatterMemoryService.ts
+  - packages/api/src/domains/memory/matters/MatterMemoryStore.ts
+  - packages/api/src/routes/memory-matter-routes.ts
+  - packages/mcp-server/src/tools/matter-memory-tools.ts
+  - packages/api/src/domains/memory/MessageSearchAnswerPublicationService.ts
+  - packages/api/src/domains/memory/MessageSearchAnswerPublicationStore.ts
+  - packages/api/src/routes/callback-message-search-answer-routes.ts
+  - packages/api/src/routes/message-search-answer-route.ts
+  - packages/mcp-server/src/tools/message-search-answer-tool.ts
+  - packages/api/src/domains/memory/MessageSearchService.ts
+  - packages/api/src/domains/memory/message-query-qualifier.ts
+  - packages/api/src/domains/memory/message-query-native.ts
   - packages/api/src/domains/memory/LunaCurationClient.ts
   - packages/api/src/domains/memory/curation/ThreadOverviewRepository.ts
   - packages/api/src/domains/memory/curation/ThreadOverviewBackfill.ts
@@ -113,6 +125,8 @@ code_anchors:
   - packages/api/src/routes/taste-observatory.ts
   - packages/mcp-server/src/tools/memory-cue-tools.ts
 doc_anchors:
+  - docs/architecture/f332-matter-memory-contract.md
+  - docs/architecture/f322-message-search-answer-contract.md
   - feature-specs/2026-10-08-f321-luna-thread-recall.md
   - docs/decisions/020-f102-memory-system-architecture.md
   - docs/features/F102-memory-adapter-refactor.md
@@ -139,6 +153,9 @@ doc_anchors:
   - feature-discussions/2026-08-02-f287-close-gate/close-gate-report.md
 static_scan_hints: [IEvidenceStore, IIndexBuilder, RepoScanner, EvidenceStore, IndexBuilder, Scanner, Memory, passage_vectors, entity_id, entity conflict, EntityRegistry, EntityConflictContext, Perspective, searchEvidence, search_evidence, AutoDreamStore, DreamDiaryEntry, SleepPosture, PrivateCue, OwnedSeed, F255PendingCueSink, DiaryEvidenceProjector, world:diary, LifecycleTraceStore, lifecycle_traces, VerificationEvent, ThreeAxisSnapshot, MemoryReflectionStore, SessionReflectionProducer, DailyContextReflectionProducer, DailyContextReflectionTaskSpec, reflection_outputs, pull_only, applyPullOnlyDownrank, ProactiveMemoryOpportunityEvaluator, ProactiveMemoryColdStartConfig, proactive-memory-judgment, opportunityRef, RecallOpportunityCatalog, MemoryCuePlaneService, MemoryCueResolverRegistry, MemoryCueInvocationPromptService, MemoryCueEpisodeStore, MemoryCueDrillHandleService, MemoryCueSourceReader, memory_cue_events]
 cited_by:
+  - {feature: F332, date: 2026-11-02, delta: "2c adds canonical matter/source/retry/forget tables inside the existing memory database; one current-permission projection serves callbacks, owner pages, opening directories and F287 explicit-read receipts"}
+  - {feature: F322, date: 2026-10-26, delta: "memory owns one TTL=0 bounded answer publication; original completed R or explicit message owns its Host-only binding, with no parallel search/index/queue"}
+  - {feature: F322, date: 2026-10-22, delta: "query eligibility is a bounded native read-only consumer of canonical readable message bodies; publication rechecks authority and revision, while recall, source stores, sorting and memory curation ownership stay in existing lanes"}
   - {feature: F321, date: 2026-10-08, delta: "F102 source-thread overviews and durable native session/cursor metadata; catalog v6 first-owner-message resolver and F296 bounded T2 historical clue; message/source/Task authority remains in existing lanes"}
   - {feature: F321, date: 2026-10-07, delta: "Phase A adds browser-owner adapters to original lane services, durable request receipts and Event correction approval; memory source owners remain separate and F287 cue episodes stay content-free"}
   - {feature: F322, date: 2026-10-02, delta: "message-unit query consumes existing passage indexing and canonical message/thread visibility; HTTP, MCP and concierge share one stateless projection without a new index or source store"}
@@ -340,6 +357,7 @@ score, acceptance KPI, cat ranking, automatic tuning, or prompt feedback loop.
 - Compile entity mentions from a revision-fenced WAL snapshot into private staging. The evidence writer queue copies bounded batches, then atomically publishes registry truth, its revision event and generation heads. The current mention view exposes only published generations; per-document and per-entity heads share one monotonic sequence. Publication reserves the SQLite writer before reading fences, rejects any newer overlapping document/entity head, and advances heads monotonically; garbage collection excludes all in-flight staging generations. A rejected publisher rolls back its source mutation and returns a retryable conflict. Preserve older `INSERT OR IGNORE` / `DELETE` consumers through compatibility triggers, and recover interrupted projection cleanup and pending document publications on startup.
 - Keep long projection computation outside the live SQLite writer lock: scheduler ledgers and recall telemetry share that database and still perform synchronous writes. Corpus rebuilds yield between document / message units instead of making one corpus-sized native transaction.
 - Projection batches also own their WAL checkpoint cost: a connection-scoped lease temporarily disables automatic checkpoints and awaits PASSIVE maintenance in the existing projection process. The maintenance job opens only an existing main database, without migrations or a writer transaction. Observe actual frame progress at batch boundaries, apply finite backpressure when readers prevent reclamation, and restore the exact prior connection setting. Maintenance failure cannot revoke published registry/head truth; retain the generation recovery receipt for deferred cleanup. Concurrent checkpoints require a SQLite build containing the WAL-reset fix. This removes bulk checkpoint work from incidental ledger commits, not the physical I/O latency of every individual write.
+- Document, message and transcript indexing batches use `SqliteEvidenceStore.runCheckpointedBatch` under the same writer queue and checkpoint lease. Each file-backed batch awaits PASSIVE maintenance before restoring the connection policy and releasing its queue slot; the next indexing batch yields through that queue. A pinned reader can stop indexing with retryable backpressure after a committed batch, so callers retain that progress and may retry after the reader releases. Markdown source hashes become complete in the passage replacement transaction; message retries consume the existing durable pending-mention marker; failed dirty flushes restore unfinished thread IDs without clearing concurrent marks. The in-memory path stays local. This preserves passage transactions and sync settings while keeping bulk checkpoint I/O off the API thread; it does not bound every WAL write, header sync or OS scheduling delay.
 - Treat F211 runtime session output as evidence after transcript/digest materialization; do not reach back into live runtime binding state, external runtime registration, or agent-key auth from memory indexing code.
 - Keep F255 diary product writes invocation-authenticated and owner-scoped; project them into `world:diary` after product commit, with startup reconciliation for repair.
 - Keep F255 cue ingestion receipt-only and cat seed decisions invocation-authenticated; expose bounded private context only to the matching Present Loop wake.

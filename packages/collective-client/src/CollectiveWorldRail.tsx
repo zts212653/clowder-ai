@@ -1,4 +1,6 @@
+import { MeowClubMark, WorldRailFrame } from '@cat-cafe/ui';
 import type { CollectiveMembership } from './client-types.js';
+import { useCollectiveText } from './collective-copy.js';
 
 export function CollectiveWorldRail({
   activeCollective,
@@ -13,11 +15,12 @@ export function CollectiveWorldRail({
   readonly onSelectCollective?: (collectiveId: string) => void;
   readonly visible: boolean;
 }) {
+  const t = useCollectiveText();
   if (!visible || !collectives?.length) return null;
   return (
-    <aside className="global-rail" data-spatial-role="global-rail" aria-label="选择共同家园">
+    <WorldRailFrame className="global-rail" data-spatial-role="global-rail" aria-label={t('选择共同体')}>
       <div className="brand-mark" role="img" aria-label="Clowder AI Collective">
-        C
+        <MeowClubMark />
       </div>
       <nav>
         {collectives.map((item) => {
@@ -37,6 +40,6 @@ export function CollectiveWorldRail({
           );
         })}
       </nav>
-    </aside>
+    </WorldRailFrame>
   );
 }

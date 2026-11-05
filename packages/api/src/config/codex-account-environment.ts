@@ -1,6 +1,7 @@
 import { readCodexAccountIdentity, sameCodexIdentity } from './codex-account-identity.js';
 import type { CodexAccountLaunchDescriptor } from './codex-account-launch.js';
 import { codexCanonicalPath } from './codex-account-launch.js';
+import { withoutUnreviewedCodexEnvironment } from './codex-env-namespace.js';
 import {
   codexCliConfig,
   codexConfigRecord,
@@ -119,24 +120,13 @@ export function validateCodexOAuthConfig(config: Record<string, unknown>): void 
   if (providerId === 'openai_https')
     validateCodexOwnedProvider(codexConfigRecord(codexConfigRecord(config.model_providers).openai_https));
 }
-// Serialized Option::None fields from pinned ModelProviderInfo are absent inputs, not overrides.
-const NATIVE_UNSET_PROVIDER_FIELDS = new Set([
-  'base_url',
-  'model_catalog_url',
-  'env_key',
-  'env_key_instructions',
-  'experimental_bearer_token',
-  'auth',
-  'gateway_oauth',
-  'aws',
-  'query_params',
-  'http_headers',
-  'env_http_headers',
-  'request_max_retries',
-  'stream_max_retries',
-  'stream_idle_timeout_ms',
-  'websocket_connect_timeout_ms',
-]);
+/**
+ * Native config/read and configRequirements/read serialize Option::None as null, and TOML layers cannot
+ * express null, so a null field there is unset. Nulls are inert by rule, not by a list of field names;
+ * such a list broke every managed account whenever a Codex release added an Option field (0.164.0
+ * `capabilities`, 0.166.0 `project_id`/`location`/`credential_file`). A set value must be ours.
+ * (A JSON null in an RPC overlay loads natively as "", not unset; our overlays carry no provider fields.)
+ */
 export function validateCodexOwnedProvider(provider: Record<string, unknown>): void {
   const allowed: Record<string, unknown> = {
     name: 'OpenAI',
@@ -145,11 +135,7 @@ export function validateCodexOwnedProvider(provider: Record<string, unknown>): v
     supports_websockets: false,
   };
   for (const [key, value] of Object.entries(provider))
-    if (
-      allowed[key] !== value &&
-      !(value === null && NATIVE_UNSET_PROVIDER_FIELDS.has(key)) &&
-      !(key === 'supports_standalone_web_search' && value === false)
-    )
+    if (allowed[key] !== value && value !== null && !(key === 'supports_standalone_web_search' && value === false))
       conflict(`model_providers.openai_https.${key}`);
   for (const [key, value] of Object.entries(allowed))
     if (provider[key] !== value) conflict(`model_providers.openai_https.${key}`);
@@ -235,6 +221,7 @@ export function finalizeCodexAccountEnvironment(
         : null,
   };
   if (descriptor.authMode === 'auto') return env;
+  if (descriptor.managed && descriptor.authMode === 'oauth') Object.assign(env, withoutUnreviewedCodexEnvironment(env));
   for (const key of ALTERNATIVE_CREDENTIAL_ENV) env[key] = null;
   // The composed environment alone cannot distinguish selected routing from another account's ambient fields.
   for (const key of API_ACCOUNT_ENV)

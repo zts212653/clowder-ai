@@ -33,7 +33,7 @@ describe('DistillationCheckpoint', () => {
   describe('onFeatPhaseClose', () => {
     const ctx = {
       prNumber: 2461,
-      repoFullName: 'zts212653/cat-cafe',
+      repoFullName: 'zts212653/clowder-ai',
       authorCatId: 'opus',
       threadId: 'thread_abc',
       featureId: 'F208',
@@ -76,7 +76,7 @@ describe('DistillationCheckpoint', () => {
   describe('onReviewComplete', () => {
     const ctx = {
       prNumber: 2466,
-      repoFullName: 'zts212653/cat-cafe',
+      repoFullName: 'zts212653/clowder-ai',
       reviewerCatId: 'gpt52',
       authorCatId: 'opus-47',
       threadId: 'thread_xyz',

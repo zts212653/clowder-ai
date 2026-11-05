@@ -11,6 +11,7 @@ import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
 
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
+import { invocationFetch } from './invocation-auth.js';
 
 const defineTool = defineMcpMigrationFactory('finance-tools.ts', undefined, {
   resourceFamily: 'finance',
@@ -112,7 +113,9 @@ export function createFinanceQueryHandler(options: FinanceQueryHandlerOptions = 
           throw new Error('Missing ttfund request payload');
         }
         assertReadOnlyTTFundSkill(input.ttfund.skillId);
-        const provider = options.ttfundProvider ?? new TTFundProvider({ frequencyTracker: defaultFrequencyTracker });
+        const provider =
+          options.ttfundProvider ??
+          new TTFundProvider({ frequencyTracker: defaultFrequencyTracker, fetchImpl: invocationFetch });
         const fact = await provider.query(stripTTFundPublicOverrides(input.ttfund));
         return successResult(JSON.stringify(fact, null, 2));
       }
@@ -120,7 +123,9 @@ export function createFinanceQueryHandler(options: FinanceQueryHandlerOptions = 
       if (!input.fred) {
         throw new Error('Missing fred request payload');
       }
-      const provider = options.fredProvider ?? new FredProvider({ frequencyTracker: defaultFrequencyTracker });
+      const provider =
+        options.fredProvider ??
+        new FredProvider({ frequencyTracker: defaultFrequencyTracker, fetchImpl: invocationFetch });
       const fact = await provider.query(stripFredPublicOverrides(input.fred));
       return successResult(JSON.stringify(fact, null, 2));
     } catch (error) {

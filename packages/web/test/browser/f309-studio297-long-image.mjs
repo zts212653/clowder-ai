@@ -45,6 +45,7 @@ export function registerStudio297LongImageJourneys(suite) {
           const url = `/api/workspace/file/raw?${new URLSearchParams({ worktreeId: worktree.id, path: relative })}`;
           const messages = [
             {
+              from: { kind: 'user', userId: 'operator' },
               id: 'private-long-source',
               type: 'user',
               content: '',

@@ -4,8 +4,9 @@ import { test } from 'node:test';
 import { FakeExternalPluginProcess, readFrame, sendFrame } from './plugin-external-runtime-helpers.js';
 
 const DELIVER_INPUT = {
+  kind: 'message',
+  threadId: 'thread-1',
   deliveryId: 'delivery-1',
-  threadHandle: { kind: 'thread_handle', handle: 'thread-handle-1' },
   envelope: {
     messageId: 'message-1',
     revision: 1,

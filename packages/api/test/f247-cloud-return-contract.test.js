@@ -67,7 +67,7 @@ describe('F247 source-bound Remote MCP return contract', () => {
     const { AgentKeyRegistry } = await import('../dist/domains/cats/services/agents/agent-key/AgentKeyRegistry.js');
     const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
     const signer = new CloudReturnBindingSigner(Buffer.alloc(32, 7));
-    const grantStore = new MemoryCloudReturnGrantStore();
+    const grantStore = new MemoryCloudReturnGrantStore(Date.now, { historyBoundary: 0 });
     const agentKeyRegistry = new AgentKeyRegistry({ ttlMs: 86_400_000 });
     const store = new MessageStore();
     const threadStore = new ThreadStore();
@@ -108,7 +108,8 @@ describe('F247 source-bound Remote MCP return contract', () => {
       dispatchInvocationId: 'inv-cloud',
       targetCatId: 'gpt-pro',
     });
-    const { secret } = await agentKeyRegistry.issue('gpt-pro', 'alice');
+    const { secret } = await agentKeyRegistry.issue('gpt-pro', 'alice', { scope: 'cloud-conversation' });
+    const broadcasts = [];
     const app = Fastify();
     await app.register(callbacksRoutes, {
       registry: new InvocationRegistry(),
@@ -117,7 +118,7 @@ describe('F247 source-bound Remote MCP return contract', () => {
       cloudReturnGrantStore: grantStore,
       messageStore: store,
       threadStore,
-      socketManager: { broadcastAgentMessage: () => undefined },
+      socketManager: { broadcastAgentMessage: (message) => broadcasts.push(message) },
     });
 
     const proactive = await app.inject({
@@ -173,6 +174,17 @@ describe('F247 source-bound Remote MCP return contract', () => {
     assert.equal(accepted.statusCode, 200);
     const stored = (await store.getByThread(thread.id)).find((message) => message.content === 'bound remote response');
     assert.equal(stored.replyTo, source.id);
+    assert.deepEqual(stored.extra.cloudBridgeReturn, {
+      v: 1,
+      threadId: thread.id,
+      sourceMessageId: source.id,
+      targetCatId: 'gpt-pro',
+      dispatchInvocationId: 'inv-cloud',
+    });
+    assert.deepEqual(
+      broadcasts.find((message) => message.messageId === stored.id).extra.cloudBridgeReturn,
+      stored.extra.cloudBridgeReturn,
+    );
 
     const consumedReplay = await app.inject({
       method: 'POST',
@@ -184,6 +196,39 @@ describe('F247 source-bound Remote MCP return contract', () => {
     assert.equal(consumedReplay.json().status, 'duplicate');
     assert.equal(consumedReplay.json().messageId, stored.id);
     assert.equal((await store.getByThread(thread.id)).filter((message) => message.replyTo === source.id).length, 1);
+    assert.deepEqual((await store.getById(stored.id)).extra.cloudBridgeReturn, stored.extra.cloudBridgeReturn);
+
+    const legacyBinding = signer.sign({
+      threadId: thread.id,
+      userId: 'alice',
+      sourceMessageId: other.id,
+      dispatchInvocationId: 'legacy-verified-attempt',
+      targetCatId: 'gpt-pro',
+    });
+    const legacy = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-agent-key-secret': secret },
+      payload: {
+        threadId: thread.id,
+        replyTo: other.id,
+        content: 'legacy authenticated return',
+        cloudReturnBinding: legacyBinding,
+      },
+    });
+    assert.equal(legacy.statusCode, 200);
+    const legacyStored = await store.getById(legacy.json().messageId);
+    assert.deepEqual(legacyStored.extra.cloudBridgeReturn, {
+      v: 1,
+      threadId: thread.id,
+      sourceMessageId: other.id,
+      targetCatId: 'gpt-pro',
+      dispatchInvocationId: 'legacy-verified-attempt',
+    });
+    assert.deepEqual(
+      broadcasts.find((message) => message.messageId === legacyStored.id).extra.cloudBridgeReturn,
+      legacyStored.extra.cloudBridgeReturn,
+    );
     await app.close();
   });
 
@@ -196,7 +241,7 @@ describe('F247 source-bound Remote MCP return contract', () => {
     const { AgentKeyRegistry } = await import('../dist/domains/cats/services/agents/agent-key/AgentKeyRegistry.js');
     const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
     const agentKeyRegistry = new AgentKeyRegistry({ ttlMs: 86_400_000 });
-    const grantStore = new MemoryCloudReturnGrantStore();
+    const grantStore = new MemoryCloudReturnGrantStore(Date.now, { historyBoundary: 0 });
     const store = new MessageStore();
     const threadStore = new ThreadStore();
     const thread = await threadStore.create('alice', 'F247 durable recovery before mutable admission');
@@ -223,7 +268,7 @@ describe('F247 source-bound Remote MCP return contract', () => {
     const conciergeConfigStore = {
       get: async () => ({ dutyCatProfileId }),
     };
-    const { secret } = await agentKeyRegistry.issue('gpt-pro', 'alice');
+    const { secret } = await agentKeyRegistry.issue('gpt-pro', 'alice', { scope: 'cloud-conversation' });
     const app = Fastify();
     await app.register(callbacksRoutes, {
       registry: new InvocationRegistry(),
@@ -272,7 +317,7 @@ describe('F247 source-bound Remote MCP return contract', () => {
     const { AgentKeyRegistry } = await import('../dist/domains/cats/services/agents/agent-key/AgentKeyRegistry.js');
     const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
     const agentKeyRegistry = new AgentKeyRegistry({ ttlMs: 86_400_000 });
-    const grantStore = new MemoryCloudReturnGrantStore();
+    const grantStore = new MemoryCloudReturnGrantStore(Date.now, { historyBoundary: 0 });
     const store = new MessageStore();
     const threadStore = new ThreadStore();
     const thread = await threadStore.create('alice', 'F247 retryable grant claim');
@@ -296,7 +341,7 @@ describe('F247 source-bound Remote MCP return contract', () => {
     await grantStore.issue({ ...scope, dispatchInvocationId: 'inv-retryable-grant' });
     const heldClaim = await grantStore.claim(scope);
     assert.equal(heldClaim.ok, true);
-    const { secret } = await agentKeyRegistry.issue('gpt-pro', 'alice');
+    const { secret } = await agentKeyRegistry.issue('gpt-pro', 'alice', { scope: 'cloud-conversation' });
     const app = Fastify();
     await app.register(callbacksRoutes, {
       registry: new InvocationRegistry(),
@@ -343,7 +388,7 @@ describe('F247 source-bound Remote MCP return contract', () => {
     const { AgentKeyRegistry } = await import('../dist/domains/cats/services/agents/agent-key/AgentKeyRegistry.js');
     const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
     const agentKeyRegistry = new AgentKeyRegistry({ ttlMs: 86_400_000 });
-    const backingGrantStore = new MemoryCloudReturnGrantStore();
+    const backingGrantStore = new MemoryCloudReturnGrantStore(Date.now, { historyBoundary: 0 });
     let failCommit = true;
     const grantStore = {
       issue: (claims) => backingGrantStore.issue(claims),
@@ -378,7 +423,7 @@ describe('F247 source-bound Remote MCP return contract', () => {
       dispatchInvocationId: 'inv-commit-recovery',
       targetCatId: 'gpt-pro',
     });
-    const { secret } = await agentKeyRegistry.issue('gpt-pro', 'alice');
+    const { secret } = await agentKeyRegistry.issue('gpt-pro', 'alice', { scope: 'cloud-conversation' });
     const broadcasts = [];
     const app = Fastify();
     await app.register(callbacksRoutes, {
@@ -429,7 +474,7 @@ describe('F247 source-bound Remote MCP return contract', () => {
     const { AgentKeyRegistry } = await import('../dist/domains/cats/services/agents/agent-key/AgentKeyRegistry.js');
     const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
     const agentKeyRegistry = new AgentKeyRegistry({ ttlMs: 86_400_000 });
-    const grantStore = new MemoryCloudReturnGrantStore();
+    const grantStore = new MemoryCloudReturnGrantStore(Date.now, { historyBoundary: 0 });
     const store = new MessageStore();
     const threadStore = new ThreadStore();
     const thread = await threadStore.create('alice', 'F247 durable routing recovery');
@@ -485,7 +530,7 @@ describe('F247 source-bound Remote MCP return contract', () => {
       },
     };
     const broadcasts = [];
-    const { secret } = await agentKeyRegistry.issue('gpt-pro', 'alice');
+    const { secret } = await agentKeyRegistry.issue('gpt-pro', 'alice', { scope: 'cloud-conversation' });
     const app = Fastify();
     await app.register(callbacksRoutes, {
       registry: new InvocationRegistry(),
@@ -570,7 +615,7 @@ describe('F247 source-bound Remote MCP return contract', () => {
     const { AgentKeyRegistry } = await import('../dist/domains/cats/services/agents/agent-key/AgentKeyRegistry.js');
     const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
     const agentKeyRegistry = new AgentKeyRegistry({ ttlMs: 86_400_000 });
-    const grantStore = new MemoryCloudReturnGrantStore();
+    const grantStore = new MemoryCloudReturnGrantStore(Date.now, { historyBoundary: 0 });
     const store = new MessageStore();
     const threadStore = new ThreadStore();
     const thread = await threadStore.create('alice', 'F247 append rollback');
@@ -592,7 +637,7 @@ describe('F247 source-bound Remote MCP return contract', () => {
       dispatchInvocationId: 'inv-append-rollback',
       targetCatId: 'gpt-pro',
     });
-    const { secret } = await agentKeyRegistry.issue('gpt-pro', 'alice');
+    const { secret } = await agentKeyRegistry.issue('gpt-pro', 'alice', { scope: 'cloud-conversation' });
     const originalAppend = store.append.bind(store);
     store.append = () => {
       throw new Error('durable append failed');

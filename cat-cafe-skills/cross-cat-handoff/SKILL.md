@@ -1,6 +1,6 @@
 ---
 name: cross-cat-handoff
-tips_exempt: "2026-09-23：反例表去掉写死猫名，只改猫间路由措辞；未新增用户可直接发起的操作。"
+tips_exempt: "2026-10-27: Task738 replaces ordinary lease calling instructions with exact Task assignment and existing execution control; no new end-user operation or authority."
 description: "跨猫交接与 review 双路由。Use when: 交接、exact-HEAD external PR review task 或 PR tracking。Not for: 自己任务。Output: 足够接手的交接与适用的责任/审查回执。"
 triggers:
   - "交接"
@@ -30,18 +30,30 @@ triggers:
 
 ## Action Successor Single-Flight
 
-当交接会实际唤醒下一只猫时，先判断它是不是某个支持 structured successor 的动作。local cat review 已退出此路径；implement/task_done 与 external review 等仍受下面规则约束。若是，交接信之外还要携带结构化身份：
+先区分已有责任的通知与实现委派。普通 `@` 可以提醒已有 owner；它不产生新的实现授权。当前消息工具的直接 `action` 只支持 Task-backed `implement/task_done`，local cat review 用普通 A2A，外部 review 按下节的专属入口。实现委派除工作包外，还须携带实际 Task 的结构化身份：
 
 ```text
-subjectRef + actionFamily + successorSlot
+action: {
+  subjectRef: "subject:task:<现有 Task.id>",
+  actionFamily: "implement",
+  successorSlot: "implementer",
+  mode: "single",
+  terminalPredicate: { kind: "task_done" },
+  expectedOwnerRevision: 0
+}
 ```
 
-例如：`pr:owner/repo#2868 + merge + reviewer`。`threadId`、catId、requestId 不进身份；换 thread 或换 carrier 仍是同一动作。
+调用同时提供 `clientMessageId` 和明确 `targetCats`；示例版本0须替换为实际 Task.ownerRevision（旧记录缺省为0）。Task 必须覆盖本次工作，目标猫与 thread 必须具有当前 owner/delegate standing；`threadId`、catId、requestId 不是责任对象。资产/文件/Feature 编号写在工作包或成果引用里，不能改个前缀冒充 Task。复用旧 thread 不等于复用旧 Task 或旧批次批准。
+
+`terminalPredicate` 在公开 schema 中可选，是为了兼容 `returnToPredecessor`；新实现 claim（包括 `existing_standing`）仍必须传。`existing_standing + groundingEvidenceRef` 只证明已有 standing 的自接，不因同 catId 或一条人类原话自动授予另一个 thread 的 delegate 资格。没有已核 Task/委派关系时，按 `custody-recognition` 解析原责任与当前 scope，再走对应批准/委派入口；不要捏造 Task、用已完成旧 Task 套新工作或删掉 `action` 绕拒收。原任务内已合法启动的执行不补投第二份。
+
+`acceptedSourceRef/acceptedRevision` 是 `localReviewVerdict` 的字段，不是实现派发的授权参数。实现工作包在 `content` 引用人类来源，权限仍由 Task/standing 解析；不要为通过参数校验加一个假的 review verdict。
 
 - 默认 `mode=single`：一个 holder。前一 successor 仍 active 时，接受 `safe_wait`，不要再召唤下一只。
 - 同 thread 普通单猫通知 → `post_message` / 行首 `@`；同 thread structured single successor → `post_message(action.mode=single)`；跨 thread → `cross_post_message(action)`；真正并行聚合 → `multi_mention(mode=parallel)`。
 - `multi_mention(action.mode=single)` 只保留 legacy 兼容；新交接不要再借“多猫”入口派一个 successor。
-- fallback：只在 server 已记录前手 `failed/canceled/unavailable` 后，用返回的 `leaseId + expectedGeneration` 做 `replace`。caller 自称“它不行了”不算证明。
+- 先按实际 Task 分类：`kind=work / subjectKey=null / 无 entrustedWork` 的普通实现以 Task 分配为准；传 `expectedOwnerRevision`，需停旧执行时用 `stopPreviousExecution`。保留 canonical home/source/WIP 与当前 approved-child 合同；Message/Queue 只承载同一请求，队列回执不是 provider 已启动。同一已授权 Task 跨 thread 不再提交第二张 Approval Hub 卡，兼容 `assign_work + proposedAction` 也走这条原生路径。
+- 仍受治理的 lease fallback：只在 server 已记录前手 `failed/canceled/unavailable` 后，用返回的 `leaseId + expectedGeneration` 做 `replace`。caller 自称“它不行了”不算证明。
 - `mode=parallel`：只用于独立多猫评审、`#ideate` 或明确 operator fan-out，并写 `parallelIntent`；holder 集合一次冻结，不在重复调用中偷偷加猫。
 - failure domain 只用于选择顺序：默认选一个与前手独立的 provider/quota domain；它不是 identity，也不是强制拒绝条件。
 - 外部 subject 已 merged/closed 等终态：停止交接；晚到响应由 generation/terminal fence 抑制。
@@ -81,7 +93,7 @@ PR 就强制 GitHub comment。入口发现 formal + no-comment 冲突时，先�
 ## External Review Verdict Delivery Custody
 
 当 action successor 为外部仓库 PR 产出正式 review 结论时，结论不是交接终点。本轮必须调用
-`cat_cafe_record_external_review_verdict`，把当前 HEAD 的 verdict 与以下二选一结果原子回写：
+`github_record_external_review_verdict`，把当前 HEAD 的 verdict 与以下二选一结果原子回写：
 
 1. `delivered`：review/comment 已写入同一 GitHub PR，附可验证的 delivery proof URL。
 2. `pending_delivery`：GitHub 写入未发生，附具体 reason；owner 由 callback 身份在服务端写入并持久保存。

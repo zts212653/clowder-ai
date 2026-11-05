@@ -1,17 +1,38 @@
-import { type RefObject, useEffect } from 'react';
+import { type RefObject, useLayoutEffect } from 'react';
 
 export function useTextareaAutosize(ref: RefObject<HTMLTextAreaElement>, input: string, placeholder?: string) {
   // biome-ignore lint/correctness/useExhaustiveDependencies: React must commit the draft and displayed placeholder before measuring the DOM's scrollHeight.
-  useEffect(() => {
+  useLayoutEffect(() => {
     const textarea = ref.current;
     if (!textarea) return;
     const resize = () => {
-      textarea.style.height = 'auto';
+      // Measuring the live textarea at `auto` temporarily grows the history viewport.
+      // Chromium clamps its scrollTop immediately, even if the textarea grows back
+      // before paint. Measure outside normal flow so typing cannot erase that offset.
+      const measure = textarea.cloneNode() as HTMLTextAreaElement;
+      measure.removeAttribute('id');
+      measure.removeAttribute('name');
+      measure.removeAttribute('data-testid');
+      measure.tabIndex = -1;
+      measure.setAttribute('aria-hidden', 'true');
+      measure.value = textarea.value;
+      Object.assign(measure.style, {
+        position: 'fixed',
+        visibility: 'hidden',
+        pointerEvents: 'none',
+        width: `${textarea.getBoundingClientRect().width}px`,
+        height: '0',
+        minHeight: '0',
+        maxHeight: 'none',
+        overflow: 'hidden',
+      });
+      textarea.parentElement?.append(measure);
       const isMobile = typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 767px)').matches;
       const maxHeight = isMobile ? 120 : 200;
       // scrollHeight includes padding but excludes our border-box textarea's border.
       const borderHeight = textarea.offsetHeight - textarea.clientHeight;
-      textarea.style.height = `${Math.min(textarea.scrollHeight + borderHeight, maxHeight)}px`;
+      textarea.style.height = `${Math.min(measure.scrollHeight + borderHeight, maxHeight)}px`;
+      measure.remove();
     };
     resize();
     window.addEventListener('resize', resize);

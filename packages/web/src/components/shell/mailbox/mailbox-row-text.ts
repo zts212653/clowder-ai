@@ -7,7 +7,7 @@ import { useShellCopy } from '../shell-copy';
 import { useShellLanguage } from '../shell-language';
 import { leadAndTitle } from './approval-heading';
 import { mailboxEntryCopy } from './mailbox-entry.shell-copy';
-import { readWorkDetail } from './work-detail';
+import { readWorkDetail, readWorkSystemRecommendation } from './work-detail';
 
 /** An id this build's catalog does not know (a newer producer) must not crash the panel: fall back to the raw id. */
 function featureLabel(featureId: string, language: 'zh' | 'en'): string {
@@ -44,6 +44,7 @@ export function useMailboxRowText(item: UnifiedAttentionItemV1): MailboxRowText 
           minute: '2-digit',
         }).format(value);
   const approval = item.approval;
+  const accountability = item.collectiveAccountabilityRequest;
   if (item.userMention) {
     const request = item.userMention;
     return {
@@ -74,6 +75,32 @@ export function useMailboxRowText(item: UnifiedAttentionItemV1): MailboxRowText 
       time: time(choice.createdAt),
     };
   }
+  if (item.collectiveProjectAttention) {
+    const row = item.collectiveProjectAttention;
+    const title =
+      row.kind === 'triage'
+        ? language === 'en'
+          ? `${row.count} new items · Sort`
+          : `来了 ${row.count} 份外部材料 · 去分拣`
+        : row.kind === 'date_suggestion'
+          ? language === 'en'
+            ? `${row.workTitle} · Date suggestions`
+            : `${row.workTitle} · 日期建议等你确认`
+          : language === 'en'
+            ? `${row.workTitle} · Past deadline`
+            : `${row.workTitle} · 已超过截止`;
+    return { catId: null, lead: null, title, source: row.projectTitle, time: time(Date.parse(row.sinceAt)) };
+  }
+  if (accountability) {
+    const requestedAt = Date.parse(accountability.requestedAt);
+    return {
+      catId: null,
+      lead: t.accountabilityLead(accountability.requestedByDisplayName),
+      title: accountability.workTitle,
+      source: t.accountabilitySource(accountability.projectTitle),
+      time: Number.isFinite(requestedAt) ? time(requestedAt) : null,
+    };
+  }
   if (approval) {
     const { lead, title } = leadAndTitle(
       resolveCatName(approval.requesterCatId),
@@ -93,7 +120,7 @@ export function useMailboxRowText(item: UnifiedAttentionItemV1): MailboxRowText 
   return {
     catId: ownerCatId,
     lead: null,
-    title: item.summary,
+    title: readWorkSystemRecommendation(item) === 'collective_result_ready' ? t.collectiveResultReady : item.summary,
     source: owner ? t.ownerWork(owner, work) : workTitle ? work : null,
     time: null,
   };

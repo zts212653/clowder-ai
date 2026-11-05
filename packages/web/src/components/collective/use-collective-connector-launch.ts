@@ -67,7 +67,9 @@ export function useCollectiveConnectorLaunch(input: {
     setBusy('provision');
     setError(undefined);
     try {
-      const response = await apiFetch('/api/plugins/collective-connector/service/provision', { method: 'POST' });
+      const response = await apiFetch('/api/plugins/official.collective-connector/service/provision', {
+        method: 'POST',
+      });
       const body = (await response.json().catch(() => ({}))) as LocalCollectiveServiceLaunch & { error?: string };
       if (!response.ok || !body.service || !body.launchUrl) {
         throw new Error(body.error ?? `Service creation failed (${response.status})`);
@@ -103,7 +105,7 @@ export function useCollectiveConnectorLaunch(input: {
       setError(undefined);
       try {
         const response = await apiFetch(
-          `/api/plugins/collective-connector/${encodeURIComponent(connectionId)}/${operation}`,
+          `/api/plugins/official.collective-connector/connections/${encodeURIComponent(connectionId)}/${operation}`,
           { method: 'POST' },
         );
         const body = (await response.json().catch(() => ({}))) as { error?: string };
@@ -145,12 +147,13 @@ export function useCollectiveConnectorLaunch(input: {
     onPaired,
     mutateConnection,
     selectConnection,
+    refresh: load,
   };
 }
 
 async function readConnectorStatus(afterMutation: boolean): Promise<CollectiveConnectorStatus> {
   const response = await apiFetch(
-    '/api/plugins/collective-connector',
+    '/api/plugins/official.collective-connector/connections',
     undefined,
     afterMutation ? { afterCurrentGet: true } : undefined,
   );
@@ -163,7 +166,12 @@ function automaticallySelectedService(
   status: CollectiveConnectorStatus,
   selectedConnectionId?: string,
 ): string | undefined {
-  const connection = preferredConnection(status.connections, selectedConnectionId);
+  const candidates =
+    status.remoteService && !selectedConnectionId
+      ? status.connections.filter((item) => item.serviceUrl === status.remoteService?.serviceUrl)
+      : status.connections;
+  const connection = preferredConnection(candidates, selectedConnectionId);
   if (connection) return connection.serviceUrl;
+  if (status.remoteService) return status.remoteService.serviceUrl;
   return status.localService?.state === 'ready' ? status.localService.serviceUrl : undefined;
 }

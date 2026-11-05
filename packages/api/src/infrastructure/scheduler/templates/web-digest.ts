@@ -54,7 +54,7 @@ export const webDigestTemplate: TaskTemplate = {
               content: triggerContent,
               userId: triggerUserId,
               targetCatId: catId,
-              idempotencyKey: `web-digest:${tid}:${url}`,
+              idempotencyKey: `web-digest:${instanceId}:${ctx.occurrenceId}:${tid}:${url}`,
               suggestedSkill: 'browser-automation',
               sourceCategory: 'scheduled',
             });

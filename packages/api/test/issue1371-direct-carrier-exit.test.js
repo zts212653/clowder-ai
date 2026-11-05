@@ -88,14 +88,18 @@ test('direct unsupervised carrier bounds actual exit with inherited stdout and p
   try {
     // Exercise the real unsupervised platform branch on every OS; no fake child or pipe.
     Object.defineProperty(process, 'platform', { value: 'win32' });
-    session = await createDirectAgentCarrierSession({
-      command: process.execPath,
-      args: [
-        '-e',
-        'require("node:child_process").spawn(process.execPath,["-e","setTimeout(()=>{},3000)"],{stdio:["ignore",1,2]});process.stdout.write("{\\"n\\":1}\\n{\\"n\\":2}\\n");process.exit(0)',
-      ],
-      invocationId: randomUUID(),
-    });
+    session = await createDirectAgentCarrierSession(
+      {
+        command: process.execPath,
+        args: [
+          '-e',
+          'require("node:child_process").spawn(process.execPath,["-e","setTimeout(()=>{},3000)"],{stdio:["ignore",1,2]});process.stdout.write("{\\"n\\":1}\\n{\\"n\\":2}\\n");process.exit(0)',
+        ],
+        invocationId: randomUUID(),
+      },
+      // Select the unsupervised branch without asking POSIX CI to launch cmd.exe.
+      { windowsSpawnPlan: (command, args) => ({ command, args, mode: 'native-exe', shell: false }) },
+    );
   } finally {
     Object.defineProperty(process, 'platform', original);
   }
@@ -142,16 +146,27 @@ test('direct identity mismatch and pre-aborted turns are refused before process 
 test('direct nonzero exit keeps stderr diagnostics while cleaning inherited stderr', async () => {
   const original = Object.getOwnPropertyDescriptor(process, 'platform');
   let session;
+  // Windows closes its inherited pipe at the direct parent's exit. Preserve a
+  // real buffered diagnostic there; POSIX still proves delayed post-exit drain.
+  const windows = process.platform === 'win32';
+  const descendant = windows
+    ? 'setTimeout(()=>process.stderr.write("delayed diagnostic",()=>process.send("written")),150);setTimeout(()=>{},2500)'
+    : 'setTimeout(()=>process.stderr.write("delayed diagnostic"),150);setTimeout(()=>{},2500)';
+  const stdio = windows ? ['ignore', 'ignore', 2, 'ipc'] : ['ignore', 'ignore', 2];
+  const exit = windows ? 'child.on("message",()=>process.exit(7))' : 'process.exit(7)';
   try {
     Object.defineProperty(process, 'platform', { value: 'win32' });
-    session = await createDirectAgentCarrierSession({
-      command: process.execPath,
-      args: [
-        '-e',
-        'require("node:child_process").spawn(process.execPath,["-e","setTimeout(()=>process.stderr.write(\\"delayed diagnostic\\"),150);setTimeout(()=>{},2500)"],{stdio:["ignore","ignore",2]});process.stdout.write("{\\"n\\":1}\\n");process.exit(7)',
-      ],
-      invocationId: randomUUID(),
-    });
+    session = await createDirectAgentCarrierSession(
+      {
+        command: process.execPath,
+        args: [
+          '-e',
+          `const child=require("node:child_process").spawn(process.execPath,["-e",${JSON.stringify(descendant)}],{stdio:${JSON.stringify(stdio)}});process.stdout.write("{\\"n\\":1}\\n");${exit}`,
+        ],
+        invocationId: randomUUID(),
+      },
+      { windowsSpawnPlan: (command, args) => ({ command, args, mode: 'native-exe', shell: false }) },
+    );
   } finally {
     Object.defineProperty(process, 'platform', original);
   }

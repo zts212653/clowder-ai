@@ -188,7 +188,7 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
       targetCats: ['codex'],
       clientMessageId: 'invalid-subject-ref',
       action: {
-        subjectRef: 'github:zts212653/cat-cafe#3677@181099d2',
+        subjectRef: 'github:zts212653/clowder-ai#3677@181099d2',
         actionFamily: 'implement',
         successorSlot: 'implementer',
         mode: 'single',

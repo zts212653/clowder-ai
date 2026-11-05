@@ -21,7 +21,7 @@ import type {
 /** Active-record input; lifecycle fields are backend-owned. */
 export type AuthInvocationInput = Omit<
   InvocationRecord,
-  'state' | 'expiresAt' | 'endedAt' | 'endReason' | 'terminalRef'
+  'state' | 'expiresAt' | 'endedAt' | 'endReason' | 'terminalRef' | 'retiredAuthorization'
 >;
 
 export interface IAuthInvocationBackend {

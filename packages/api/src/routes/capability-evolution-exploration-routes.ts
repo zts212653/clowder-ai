@@ -33,6 +33,7 @@ export const encodedExplorationRefSchema = encodedRefJson.pipe(evolutionExplorat
 
 const querySchema = z
   .object({
+    selectedSourceRef: encodedExplorationRefSchema.optional(),
     selectedNodeRef: encodedRefJson.pipe(evolutionExplorationNodeRefSchema).optional(),
     selectedExperimentRef: encodedExplorationRefSchema.optional(),
     comparisonExperimentRef: encodedExplorationRefSchema.optional(),

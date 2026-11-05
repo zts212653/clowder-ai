@@ -236,7 +236,7 @@ it('inspecting a formal version preserves the user-confirmed comparison, case, v
   const before = useEvolutionReading.getState().programs[PROGRAM_ID]!.exploration!;
   expect(before.comparisonScope).toBe('paired_subset');
   expect(before.comparisonScopeKey).toBeTruthy();
-  const selector = host.querySelector<HTMLSelectElement>('select[aria-label="本项目正式版本"]')!;
+  const selector = host.querySelector<HTMLSelectElement>('select[aria-label="来源已发布版本"]')!;
   expect(selector).not.toBeNull();
   await act(async () => {
     selector.value = refIdentity(assetRef('v1'));

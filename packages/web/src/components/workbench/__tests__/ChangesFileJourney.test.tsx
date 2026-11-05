@@ -181,7 +181,7 @@ it('keeps a failed file read in the original owner and offers a real return to C
   const file = layout.surfaces.find((item) => item.id === layout.activeSurfaceId)!;
   expect(owner(file.id).textContent).toContain('暂时无法读取此文件');
   expect(owner(file.id).querySelector('[data-testid="v2-file-chrome"]')).toBeNull();
-  await settle(() => button(owner(file.id), '返回来源').click());
+  await settle(() => button(owner(file.id), '‹ 变更').click());
   expect(useF307ExperienceWorkbenchStore.getState().layout.activeSurfaceId).toBe(changes.id);
   expect(owner(changes.id)).toBe(original);
 });

@@ -27,13 +27,17 @@ async function waitForPreview(url, child, output) {
 }
 
 /** Owns synthetic API data and a separate Next dist; never borrows a running Café. */
-export async function startSearchGroupBrowserFixture() {
+export async function startSearchGroupBrowserFixture({
+  startApi = startSearchGroupApi,
+  previewPath = '/dev/f277-attention-preview/search',
+  webPort,
+} = {}) {
   const sync = spawnSync(process.execPath, [path.join(WEB_ROOT, 'scripts/sync-vendor-assets.mjs')], {
     cwd: WEB_ROOT,
     encoding: 'utf8',
   });
   assert.equal(sync.status, 0, `vendor token sync failed:\n${sync.stdout}\n${sync.stderr}`);
-  const api = await startSearchGroupApi();
+  const api = await startApi();
   let nextDev;
   let server;
   let closed = false;
@@ -56,7 +60,7 @@ export async function startSearchGroupBrowserFixture() {
       NEXT_PUBLIC_API_URL: api.url,
       API_SERVER_PORT: new URL(api.url).port,
     });
-    const port = await availablePort();
+    const port = webPort ?? (await availablePort());
     const webUrl = `http://127.0.0.1:${port}`;
     let output = '';
     server = spawn(process.execPath, [NEXT_BIN, 'dev', '-H', '127.0.0.1', '-p', String(port)], {
@@ -73,8 +77,8 @@ export async function startSearchGroupBrowserFixture() {
       server.once('spawn', resolve);
       server.once('error', reject);
     });
-    await waitForPreview(`${webUrl}/dev/f277-attention-preview/search`, server, () => output);
-    return { apiUrl: api.url, webUrl, store: api.store, close };
+    await waitForPreview(`${webUrl}${previewPath}`, server, () => output);
+    return { apiUrl: api.url, webUrl, store: api.store, api, close };
   } catch (error) {
     await close();
     throw error;

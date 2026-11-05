@@ -1,10 +1,11 @@
-import { useEffect } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import { createRoot } from 'react-dom/client';
 import { CatHueInjector } from '@/components/CatHueInjector';
 import { ChatContainerHeader } from '@/components/ChatContainerHeader';
 import { ChatInput } from '@/components/ChatInput';
 import { ChatMessage } from '@/components/ChatMessage';
 import { CoCreatorHueInjector } from '@/components/CoCreatorHueInjector';
+import { scopedQueue } from '@/components/execution-row/thread-queue';
 import { writeShellLanguage } from '@/components/shell/shell-language';
 import { useShellPresentation, writeShellPresentation } from '@/components/shell/shell-presentation';
 import { ThemeApplier } from '@/components/ThemeApplier';
@@ -13,12 +14,17 @@ import { ThreadComposerContext } from '@/components/ThreadComposerContext';
 import { ThreadSidebar } from '@/components/ThreadSidebar/ThreadSidebar';
 import { ThreadChatRuntimeProvider } from '@/components/thread-chat/ThreadChatRuntimeProvider';
 import { ThreadChatSurface } from '@/components/thread-chat/ThreadChatSurface';
+import type { ChatReadingPort } from '@/components/thread-chat/useThreadChatReadingPort';
 import { syncDraftToStorage } from '@/components/thread-drafts';
 import { ResizeHandle } from '@/components/workspace/ResizeHandle';
 import { useCatData } from '@/hooks/useCatData';
 import { primeCoCreatorConfigCache } from '@/hooks/useCoCreatorConfig';
+import { useConversationViewPreference } from '@/hooks/useConversationViewPreference';
+import { useConversationViewReadingCheckpoint } from '@/hooks/useConversationViewReadingCheckpoint';
+import { useThreadMessages } from '@/hooks/useThreadScopedSelectors';
 import type { ChatMessage as ChatMessageData } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
+import { withQueuedInputPreviews } from '@/stores/queued-input-preview';
 import { useSidebarProjectionStore } from '@/stores/sidebarProjectionStore';
 import { useSidebarStore } from '@/stores/sidebarStore';
 import { useThemeStore } from '@/stores/themeStore';
@@ -49,14 +55,16 @@ const sidebar = params.get('sidebar') !== '0';
 const resizable = params.get('resizable') === '1';
 if (resizable) useSidebarStore.getState().setWidth(300);
 const surface = params.get('surface') === '1';
-const messages = [
+const messages: ChatMessageData[] = [
   {
+    from: { kind: 'user', userId: 'owner-proof' },
     id: 'proof-user',
     type: 'user' as const,
     content: '这张封面可以。保留标题和猫猫的位置，再看看聊天区的输入操作。',
     timestamp: Date.now() - 180_000,
   },
   {
+    from: { kind: 'agent', catId: 'codex-astra' },
     id: 'proof-cat',
     type: 'assistant' as const,
     catId: 'codex-astra',
@@ -64,11 +72,32 @@ const messages = [
     timestamp: Date.now() - 120_000,
   },
 ];
+const EMPTY_QUEUE = [] as const;
 
 function ChatProof() {
   const presentation = useShellPresentation();
   const { width, handleResize } = useSidebarStore();
   const { getCatById } = useCatData();
+  const threadMessages = useThreadMessages(CURRENT_THREAD);
+  const queue = useChatStore((state) => scopedQueue(state, CURRENT_THREAD)) ?? EMPTY_QUEUE;
+  const conversationMessages = useMemo(
+    () => withQueuedInputPreviews(threadMessages, queue, CURRENT_THREAD),
+    [queue, threadMessages],
+  );
+  const conversationViewController = useConversationViewPreference(CURRENT_THREAD, presentation === 'v2');
+  const conversationViewReading = useConversationViewReadingCheckpoint({
+    threadId: CURRENT_THREAD,
+    controller: conversationViewController,
+    messages: conversationMessages,
+    queue,
+  });
+  const registerConversationReading = useCallback(
+    (port: ChatReadingPort) => {
+      conversationViewReading.setReadingPort(port);
+      return () => conversationViewReading.setReadingPort(null);
+    },
+    [conversationViewReading.setReadingPort],
+  );
   const ready = useSidebarProjectionStore((state) => state.hasCanonicalSnapshot);
   useEffect(() => {
     if (presentation === 'v2') document.documentElement.setAttribute('data-shell', 'v2');
@@ -109,10 +138,19 @@ function ChatProof() {
           onToggleViewMode={() => undefined}
           statusPanelOpen={false}
           onToggleStatusPanel={() => undefined}
+          conversationViewController={conversationViewController}
+          conversationViewMessages={conversationMessages}
+          conversationViewQueue={queue}
         />
         {surface ? (
           <ThreadChatRuntimeProvider routeThreadId={CURRENT_THREAD}>
-            <ThreadChatSurface threadId={CURRENT_THREAD} density="full" />
+            <ThreadChatSurface
+              threadId={CURRENT_THREAD}
+              density="full"
+              conversationViewController={conversationViewController}
+              conversationViewQueue={queue}
+              onReadingPort={registerConversationReading}
+            />
           </ThreadChatRuntimeProvider>
         ) : (
           <>

@@ -32,8 +32,8 @@ function response(projectPath: string, taskId: string): DeploymentWaitListRespon
 }
 
 let latest: DeploymentWaitProjectionView;
-function Harness({ projectPath }: { projectPath: string | null }) {
-  latest = useDeploymentWaitProjection(projectPath);
+function Harness({ projectPath, scope = 'project' }: { projectPath: string | null; scope?: 'all' | 'project' }) {
+  latest = useDeploymentWaitProjection(projectPath, scope);
   return null;
 }
 
@@ -69,6 +69,21 @@ describe('F323 deployment wait projection hydration', () => {
 
     await act(async () => vi.advanceTimersByTime(4_000));
     expect(mocks.apiFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('discovers all-project waits before the current project is known and rejects legacy scope responses', async () => {
+    mocks.apiFetch.mockResolvedValueOnce(
+      Response.json({ scope: 'all', projectPath: null, items: [], candidate: null }),
+    );
+    await act(async () => root.render(<Harness projectPath={null} scope="all" />));
+    expect(mocks.apiFetch).toHaveBeenLastCalledWith('/api/runtime-deployment/waits?scope=all', {
+      signal: expect.any(AbortSignal),
+    });
+    expect(latest.hydration).toBe('ready');
+    mocks.apiFetch.mockResolvedValueOnce(Response.json(response('/project/a', 'wrong-scope')));
+    await act(async () => latest.retry());
+    expect(latest.hydration).toBe('error');
+    expect(latest.projection?.items).toEqual([]);
   });
 
   it('keeps the last verified snapshot on an error and retries explicitly', async () => {

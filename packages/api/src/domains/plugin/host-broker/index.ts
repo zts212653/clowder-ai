@@ -2,11 +2,6 @@ export type { BrokerConnection, BuiltinBrokerConnection } from './builtin-loopba
 export { digestBrokerValue } from './canonical-json.js';
 export type { HostBrokerControlPlaneOptions } from './control-plane.js';
 export { HostBrokerControlPlane } from './control-plane.js';
-export type { EventsPublishBrokerHandlerOptions } from './events-publish-handler.js';
-export {
-  createEventsPublishBrokerHandler,
-  HostBrokerSignalRuntimeLeaseStore,
-} from './events-publish-handler.js';
 export { createMessagingBrokerHandlers, type MessagingBrokerHandlerOptions } from './messaging-handler.js';
 export type {
   BrokerCallStore,

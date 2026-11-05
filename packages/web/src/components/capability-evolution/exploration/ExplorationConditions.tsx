@@ -1,4 +1,4 @@
-import type { EvolutionExplorationExperimentV1 } from '@cat-cafe/shared';
+import { type EvolutionExplorationExperimentV1, refIdentity } from '@cat-cafe/shared';
 import { EvolutionSource } from '../EvolutionVersionEvidence';
 import { ExplorationIcon } from './ExplorationIcon';
 
@@ -80,8 +80,13 @@ export function ExplorationConditions({
           </div>
         </dl>
         <p>{conditions.limitation}</p>
-        {conditions.preparationRefs.map((entry) => (
-          <EvolutionSource key={entry.label} label={entry.label} source={entry.ref} href={entry.href} />
+        {conditions.preparationRefs.map((entry, index) => (
+          <EvolutionSource
+            key={`${refIdentity(entry.ref)}:${index}`}
+            label={entry.label}
+            source={entry.ref}
+            href={entry.href}
+          />
         ))}
         {onPreparation && (
           <button type="button" className="exploration-link" onClick={onPreparation}>

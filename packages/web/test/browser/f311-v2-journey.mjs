@@ -1,17 +1,16 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { openWorkspaceTools } from './f307-workspace-open.mjs';
 import { verifyV2PreparationPages } from './f311-v2-preparation.journey.mjs';
 import { CONTRACT_THREAD_ID } from './f311-workspace-browser.harness.mjs';
 
-// Settings-to-Workspace was not covered by classic/deep-link or empty-list journeys.
+// The Workspace + entry is distinct from classic/deep-link and empty-list journeys.
 // Share the existing product journey's Next/API/browser setup; isolate only the context.
 const snapshots = JSON.parse(await readFile(new URL('./fixtures/f311-v2-program-snapshots.json', import.meta.url)));
 const [f314, duck] = snapshots.programs;
 
-async function settingsHome(page) {
-  await page.getByTestId('settings-button').click();
-  await page.getByTestId('settings-v2').waitFor();
-  await page.getByTestId('settings-entry-evolution').click();
+async function workspaceHome(page) {
+  await (await openWorkspaceTools(page)).getByTestId('workspace-launcher-capability-evolution').click();
   await page.getByTestId('capability-evolution-workspace').waitFor();
   assert.equal(page.url().includes('/settings'), false);
   await page.getByRole('tab', { name: '进化项目', exact: true }).waitFor();
@@ -62,7 +61,7 @@ export async function verifyV2EvolutionJourney({ fixture, browser, capture }) {
   try {
     await page.goto(`${fixture.apiUrl}/api/session`);
     await page.goto(`${fixture.webUrl}/thread/${CONTRACT_THREAD_ID}?shell=v2`);
-    await settingsHome(page);
+    await workspaceHome(page);
     const home = page.getByTestId('capability-evolution-workspace');
     await home.getByTestId(`capability-evolution-program-${duck.program.programId}`).waitFor();
     assert.ok((await home.innerText()).includes('尚未命名'));
@@ -118,8 +117,8 @@ export async function verifyV2EvolutionJourney({ fixture, browser, capture }) {
       await capture(page, `s1-${label}-main`);
       await verifyV2PreparationPages({ page, main, projection, capture, label });
       await main.getByRole('button', { name: '← 返回侧栏', exact: true }).click();
-      // An explicit Settings home intent overrides restored detail selection.
-      await settingsHome(page);
+      // An explicit Workspace home intent overrides restored detail selection.
+      await workspaceHome(page);
       await home.getByTestId(`capability-evolution-program-${projection.program.programId}`).waitFor();
     }
     for (const width of [416, 320]) {

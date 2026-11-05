@@ -110,6 +110,20 @@ describe('VectorStore', () => {
     assert.equal(Object.keys(meta).length, 0);
   });
 
+  it('vector reset preserves independent scanner version and source-claim bookkeeping', () => {
+    const claims = JSON.stringify([['features/a-helper.md', 'F900']]);
+    db.prepare('INSERT OR REPLACE INTO embedding_meta (key, value) VALUES (?, ?)').run('indexing_version', '15');
+    db.prepare('INSERT OR REPLACE INTO embedding_meta (key, value) VALUES (?, ?)').run(
+      'document_source_claims',
+      claims,
+    );
+    store.initMeta({ modelId: 'old-model', modelRev: 'v1', dim: 256 });
+    store.clearAll();
+    assert.equal(store.getMeta().embedding_model_id, undefined);
+    assert.equal(store.getMeta().indexing_version, '15');
+    assert.equal(store.getMeta().document_source_claims, claims);
+  });
+
   it('count returns number of vectors', () => {
     assert.equal(store.count(), 0);
     store.upsert('A', new Float32Array(256).fill(0.1));

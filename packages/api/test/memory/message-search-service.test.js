@@ -14,6 +14,7 @@ describe('canonical message search projection', () => {
 
   beforeEach(async () => {
     const { MessageSearchService } = await import('../../dist/domains/memory/MessageSearchService.js');
+    const { MessageQueryQualifier } = await import('../../dist/domains/memory/message-query-qualifier.js');
     threads = new Map([
       ['visible', { id: 'visible', title: 'Canonical title', createdBy: 'owner' }],
       ['private', { id: 'private', title: 'Private title', createdBy: 'someone-else' }],
@@ -41,6 +42,10 @@ describe('canonical message search projection', () => {
       });
     }
     service = new MessageSearchService({
+      // These tests isolate canonical permission/projection, not semantic inference.
+      qualifier: new MessageQueryQualifier(async (batch) =>
+        JSON.stringify({ requestId: batch.requestId, rows: batch.rows.map((row) => [row.id, 'supported', row.body]) }),
+      ),
       evidenceStore: {
         readMessagePassageState: () => indexState,
         searchMessagePassages: async (_query, options) => {
@@ -216,7 +221,34 @@ describe('canonical message search projection', () => {
       id: 'bounded-source',
       source: { ...notices[0].source, label: 'x'.repeat(500), sender: { id: 'id', name: 'y'.repeat(500) } },
     };
+    const { MessageStore } = await import('../../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const pluginFrom = { kind: 'plugin', instanceId: 'pi_private-routing-id' };
+    const pluginStore = new MessageStore();
+    const plugin = pluginStore.append({
+      userId: 'owner',
+      threadId: thread.id,
+      from: pluginFrom,
+      content: 'piano plugin input',
+      mentions: [],
+      timestamp: human.timestamp,
+      extra: {
+        pluginMessage: {
+          instanceId: pluginFrom.instanceId,
+          revision: 1,
+          provenance: { origin: pluginFrom, epistemicStatus: 'observation' },
+          elements: [],
+          presentation: {
+            connector: 'custom',
+            label: 'Room Connector',
+            icon: 'message',
+            sender: { id: 'private-chat-route' },
+          },
+        },
+      },
+    });
+    assert.equal(plugin.source, undefined);
     const rows = [
+      plugin,
       ...notices,
       typedLegacy,
       damaged,
@@ -260,7 +292,7 @@ describe('canonical message search projection', () => {
       const fromHuman = response.json().results;
       const fromCat = (await actual.search({ ...input, mode: 'lexical' }, principal)).results;
       for (const hits of [fromHuman, fromCat]) {
-        assert.equal(hits.length, 14, 'speaker classification cannot relax owner-hold or internal-message visibility');
+        assert.equal(hits.length, 15, 'speaker classification cannot relax owner-hold or internal-message visibility');
         for (const notice of notices) {
           const hit = hits.find((hit) => hit.messageId === notice.id);
           assert.equal(hit?.speaker, 'connector');
@@ -274,6 +306,8 @@ describe('canonical message search projection', () => {
           hits.find((hit) => hit.messageId === oversized.id)?.speakerLabel,
           `${'x'.repeat(80)} · ${'y'.repeat(80)}`,
         );
+        assert.equal(hits.find((hit) => hit.messageId === plugin.id)?.speaker, 'connector');
+        assert.equal(hits.find((hit) => hit.messageId === plugin.id)?.speakerLabel, 'Room Connector');
         assert.equal(hits.find((hit) => hit.messageId === human.id)?.speaker, 'user');
         assert.equal(hits.find((hit) => hit.messageId === cat.id)?.speaker, 'codex61-sol');
       }

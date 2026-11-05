@@ -12,12 +12,22 @@ import { writeCatalogAccount } from '../src/config/catalog-accounts.js';
 import { resolveCodexAccountLaunch } from '../src/config/codex-account-launch.js';
 import { describeCodexManagedLayout, prepareCodexManagedLayout } from '../src/config/codex-managed-layout.js';
 import { accountsRoutes } from '../src/routes/accounts.js';
+import { ACCOUNT_AUTH_ENV_KEYS } from './helpers/account-auth-environment.js';
+
+test('CLI-owned synthetic accounts retain auto authentication while explicit accounts retain their selected mode', () => {
+  const cli = { id: 'codex', authType: 'oauth' as const, syntheticNative: true };
+  assert.equal(resolveCodexAccountLaunch(cli).authMode, 'auto');
+  assert.equal(resolveCodexAccountLaunch({ id: 'codex', authType: 'oauth' }).authMode, 'oauth');
+  assert.equal(resolveCodexAccountLaunch({ id: 'provider', authType: 'api_key' }).authMode, 'api_key');
+  assert.equal(resolveCodexAccountLaunch(cli, { authMode: 'oauth' }).authMode, 'oauth');
+});
 
 let root: string;
 let saved: NodeJS.ProcessEnv;
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'f320-managed-'));
   saved = { ...process.env };
+  for (const key of ACCOUNT_AUTH_ENV_KEYS) delete process.env[key];
   process.env.HOME = root;
   process.env.CAT_CAFE_DATA_DIR = join(root, 'data');
   process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = root;

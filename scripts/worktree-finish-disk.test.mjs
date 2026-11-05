@@ -7,6 +7,7 @@ import { directReleaseReceipt, removeFinishedWorktree } from './lib/worktree-dir
 import { fixture, git, idle, SOURCE } from './lib/worktree-finish-fixture.mjs';
 import { moveToQuarantine, quarantineRoot } from './lib/worktree-quarantine.mjs';
 import { lifecycleConfig } from './lib/worktree-reaper-probes.mjs';
+import { ignoredOriginals } from './lib/worktree-release-archive.mjs';
 
 describe('finished worktrees reclaim working copies and preserve originals', () => {
   let fx;
@@ -14,6 +15,44 @@ describe('finished worktrees reclaim working copies and preserve originals', () 
     fx = fixture();
   });
   afterEach(() => rmSync(fx.root, { recursive: true, force: true }));
+
+  it('discards vendor WASM copies rebuilt by sync-vendor-assets while preserving neighboring originals', () => {
+    writeFileSync(
+      join(fx.repo, '.gitignore'),
+      `${readFileSync(join(fx.repo, '.gitignore'), 'utf8')}\n/packages/web/public/vendor/\n`,
+    );
+    git(fx.repo, 'add', '.gitignore');
+    git(fx.repo, 'commit', '-qm', 'declare generated vendor output');
+    const path = fx.make();
+    const generated = [
+      'onnxruntime/ort-wasm-simd-threaded.wasm',
+      'onnxruntime/ort-wasm-simd-threaded.mjs',
+      'esbuild/esbuild.wasm',
+    ];
+    const originals = ['onnxruntime/custom-model.onnx', 'onnxruntime/ort-wasm-notes.txt', 'esbuild/custom.plugin.wasm'];
+    for (const name of [...generated, ...originals]) {
+      const file = join(path, 'packages/web/public/vendor', name);
+      mkdirSync(join(file, '..'), { recursive: true });
+      writeFileSync(file, name);
+    }
+    const result = fx.finish(path);
+    for (const name of generated)
+      assert.equal(existsSync(join(result.archivePath, 'files/packages/web/public/vendor', name)), false);
+    for (const name of originals)
+      assert.equal(readFileSync(join(result.archivePath, 'files/packages/web/public/vendor', name), 'utf8'), name);
+  });
+
+  it('discards rebuildable collective package output instead of accumulating it as unique originals', () => {
+    const path = fx.make();
+    writeFileSync(
+      join(path, '.gitignore'),
+      `${readFileSync(join(path, '.gitignore'), 'utf8')}\n/packages/collective-service/dist/\n`,
+    );
+    mkdirSync(join(path, 'packages/collective-service/dist'), { recursive: true });
+    writeFileSync(join(path, 'packages/collective-service/dist/index.js'), 'rebuildable output');
+    const originals = ignoredOriginals(path);
+    assert.equal(originals.includes('packages/collective-service/dist/index.js'), false);
+  });
 
   it('removes source copies and generated caches, archiving only original ignored files and Git metadata', () => {
     const path = fx.make();

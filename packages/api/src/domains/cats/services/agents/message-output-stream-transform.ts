@@ -25,7 +25,11 @@ function sameSource(a: AgentMessage | undefined, b: AgentMessage): boolean {
     !!first &&
     !!second &&
     sameOutputMessageIdentity(first, second) &&
-    a?.outputMessage?.channel === b.outputMessage?.channel
+    (a?.outputMessage?.channel === b.outputMessage?.channel ||
+      (a?.outputMessage?.channel === 'unknown' &&
+        a.outputMessage.complete === false &&
+        b.outputMessage?.complete === true &&
+        b.outputMessage.textMode === 'replace'))
   );
 }
 

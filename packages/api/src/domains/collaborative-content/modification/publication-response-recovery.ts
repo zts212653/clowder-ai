@@ -59,7 +59,7 @@ export class PublicationResponseRecoveryService {
     const caller = await witnessedPublicationCaller(binding.deps, prior, command.expectedPriorInvocationId, 'terminal');
     if (!caller || caller.status === 'running' || caller.status === 'canceled')
       throw new ArtifactReviewError('access_denied');
-    if (!(await binding.validate(prior))) throw new ArtifactReviewError('publication_changed');
+    if (!(await binding.validate(prior, command.response))) throw new ArtifactReviewError('publication_changed');
     if (
       await media.operationReceipt(
         prior.contentRef,
@@ -69,7 +69,7 @@ export class PublicationResponseRecoveryService {
     )
       throw new ArtifactReviewError('operation_reused');
     // Independent Message/Task owners are re-read after async native/receipt reads; the outbox CAS below is synchronous.
-    const valid = await binding.validate(prior);
+    const valid = await binding.validate(prior, command.response);
     const currentCaller = await witnessedPublicationCaller(
       binding.deps,
       prior,

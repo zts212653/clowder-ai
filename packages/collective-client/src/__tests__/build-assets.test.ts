@@ -1,11 +1,12 @@
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { cp, mkdir, mkdtemp, readFile, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import { expect, it } from 'vitest';
 
-it('builds and serves the distributable client without private docs', async () => {
+it('builds the retained client assets without private docs', async () => {
   const packageRoot = fileURLToPath(new URL('../../', import.meta.url));
   const fixtureRoot = await mkdtemp(join(tmpdir(), 'collective-client-build-'));
   const fixturePackage = join(fixtureRoot, 'packages', 'collective-client');
@@ -15,6 +16,15 @@ it('builds and serves the distributable client without private docs', async () =
       filter: (source) => !['node_modules', 'dist'].includes(basename(source)),
     });
     await cp(join(packageRoot, '../../tsconfig.base.json'), join(fixtureRoot, 'tsconfig.base.json'));
+    await cp(join(packageRoot, '../shared'), join(fixtureRoot, 'packages/shared'), {
+      recursive: true,
+      filter: (source) => !['node_modules', 'dist'].includes(basename(source)),
+    });
+    await symlink(
+      join(packageRoot, '../shared/node_modules'),
+      join(fixtureRoot, 'packages/shared/node_modules'),
+      'dir',
+    );
     const sharedStyles = join(fixtureRoot, 'packages/web/src/app');
     await mkdir(sharedStyles, { recursive: true });
     for (const filename of ['theme-tokens.css', 'console-tokens.css']) {
@@ -25,23 +35,27 @@ it('builds and serves the distributable client without private docs', async () =
 
     execFileSync('pnpm', ['run', 'build'], { cwd: fixturePackage, stdio: 'inherit', timeout: 60_000 });
 
-    const serverPath = join(fixturePackage, 'dist/server.js');
-    const server = (await import(pathToFileURL(serverPath).href)) as typeof import('../server.js');
-    expect(server.collectiveClientHtml()).toContain('/collective-client/app.js');
-    await expect(readFile(join(fixturePackage, 'dist/server.d.ts'), 'utf8')).resolves.toContain(
-      'resolveCollectiveClientAsset',
-    );
-    const landing = server.resolveCollectiveClientAsset('/collective-client/collective-landing-A.png');
-    expect(landing.contentType).toBe('image/png');
-    expect(await readFile(landing.path)).toEqual(
+    const dist = join(fixturePackage, 'dist');
+    expect(await readFile(join(dist, 'index.html'), 'utf8')).toContain('/collective-client/app.js');
+    const manifest = JSON.parse(await readFile(join(dist, 'manifest.json'), 'utf8'));
+    expect(manifest.files.map((file: { path: string }) => file.path).sort()).toEqual([
+      '/collective-client/app.css',
+      '/collective-client/app.js',
+      '/collective-client/collective-landing-A.png',
+      '/index.html',
+    ]);
+    for (const file of manifest.files) {
+      const bytes = await readFile(join(dist, file.path));
+      expect(bytes.length).toBeGreaterThan(0);
+      expect(bytes.length).toBe(file.size);
+      expect(createHash('sha256').update(bytes).digest('hex')).toBe(file.sha256);
+    }
+    expect(await readFile(join(dist, 'collective-client/collective-landing-A.png'))).toEqual(
       await readFile(join(fixturePackage, 'assets/collective-landing-A.png')),
     );
-    for (const pathname of ['/collective-client/app.js', '/collective-client/app.css']) {
-      const asset = server.resolveCollectiveClientAsset(pathname);
-      expect((await readFile(asset.path)).length).toBeGreaterThan(0);
-    }
-    const css = server.resolveCollectiveClientAsset('/collective-client/app.css');
-    expect(await readFile(css.path, 'utf8')).toContain('/collective-client/collective-landing-A.png');
+    expect(await readFile(join(dist, 'collective-client/app.css'), 'utf8')).toContain(
+      '/collective-client/collective-landing-A.png',
+    );
   } finally {
     await rm(fixtureRoot, { recursive: true, force: true });
   }

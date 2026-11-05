@@ -9,6 +9,8 @@ import { isAbsolute } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createHostProcessObserver, readSelfHostFacet } from './lib/self-host-facet.mjs';
 import { assessSideEffect } from './lib/self-host-guard.mjs';
+import { hasPatternKiller } from './lib/self-host-targets.mjs';
+import { appendNativeDenial, guardReason } from './native-effect-audit.mjs';
 import { hereDocumentView } from './native-effect-heredoc.mjs';
 import { decideNativeEffect, deny, invalidCandidate, isRecord } from './native-effect-policy.mjs';
 import {
@@ -17,7 +19,9 @@ import {
   splitShellExecutionSegments,
 } from './native-effect-shell-classifier.mjs';
 import { decideShellHookPayload } from './native-effect-shell-decision.mjs';
+import { remoteSshExecution } from './native-effect-ssh-scope.mjs';
 import { classifyNativeTarget as classifyTarget } from './native-effect-target-classifier.mjs';
+import { nativeSecretDenial } from './native-secret-policy.mjs';
 import { projectLocalNativeShellPayload } from './native-shell-execution-context.mjs';
 
 /** Provider-neutral policy: native-effect-policy.mjs. Re-exported for existing importers. */
@@ -35,12 +39,19 @@ export { decideNativeEffect };
 function applySelfHostPolicy(decision, raw, cwd, resolveSelfHost, observeHost = createHostProcessObserver) {
   if (decision.decision !== 'allow') return decision;
   const { confidence, facet } = resolveSelfHost();
-  // `none` means nothing claims to host this process, so there is no self to
-  // protect. `unreadable` and `ambiguous` mean a deployment is named and we
-  // could not pin it down -- absence of evidence, which is not permission.
-  if (confidence === 'none' || !facet) return decision;
+  // Unhosted calls need no deployment check. Literal pattern killers still
+  // observe global sanctuary listeners and this invocation's ancestor chain.
+  // A named but unreadable deployment retains its unresolved identity.
+  if ((confidence === 'none' || !facet) && !hasPatternKiller(raw, cwd)) return decision;
 
-  const assessment = assessSideEffect(raw, cwd, facet, observeHost(facet));
+  const subject = {
+    ...facet,
+    hostDependencies: [
+      ...(facet?.hostDependencies ?? []),
+      { kind: 'redis', port: 6399, identityRef: 'redis://127.0.0.1:6399' },
+    ],
+  };
+  const assessment = assessSideEffect(raw, cwd, subject, observeHost(subject));
   // Sanctuary was already settled authoritatively above -- we only reach here on
   // `allow`. Re-deciding it from the raw text would throw away the target
   // attribution the policy just did (temporary worktrees, remote repositories),
@@ -63,11 +74,9 @@ export function decideNativeHookPayload(payload, options = {}) {
     payload = projectLocalNativeShellPayload(payload);
     if (!payload) return deny(invalidCandidate(), 'invalid_native_shell_execution');
   }
+  const secretDenial = nativeSecretDenial(payload);
+  if (secretDenial) return deny(invalidCandidate(), secretDenial);
   const resolveSelfHost = options.selfHost ?? readSelfHostFacet;
-  const decision = decideNativeHookPayloadWithoutSelfHost(payload);
-  // Edit payloads are source data. Their file target was already classified;
-  // only a shell payload can express a process action for the self-host guard.
-  if (decision.source.tool !== 'shell') return decision;
   const cwd = isRecord(payload) && typeof payload.cwd === 'string' ? payload.cwd : undefined;
   const raw = isRecord(payload)
     ? hookTargetText(
@@ -75,10 +84,24 @@ export function decideNativeHookPayload(payload, options = {}) {
         normalizeHookToolInput(payload.tool_input),
       )
     : '';
-  return applySelfHostPolicy(decision, hereDocumentView(raw).host, cwd, resolveSelfHost, options.observeHost);
+  const ssh =
+    isRecord(payload) && sourceTool(payload.tool_name) === 'shell'
+      ? remoteSshExecution(raw, cwd, options.sshScope)
+      : null;
+  const decision = decideNativeHookPayloadWithoutSelfHost(payload, ssh);
+  // Edit payloads are source data. Their file target was already classified;
+  // only a shell payload can express a process action for the self-host guard.
+  if (decision.source.tool !== 'shell') return decision;
+  return applySelfHostPolicy(
+    decision,
+    hereDocumentView(ssh?.local ?? raw).host,
+    cwd,
+    resolveSelfHost,
+    options.observeHost,
+  );
 }
 
-function decideNativeHookPayloadWithoutSelfHost(payload) {
+function decideNativeHookPayloadWithoutSelfHost(payload, ssh) {
   if (!isRecord(payload)) return deny(invalidCandidate(), 'unparseable_hook_payload');
   const toolName = typeof payload.tool_name === 'string' ? payload.tool_name : '';
   const toolInput = normalizeHookToolInput(payload.tool_input);
@@ -86,7 +109,7 @@ function decideNativeHookPayloadWithoutSelfHost(payload) {
   const provider = typeof payload.turn_id === 'string' || typeof payload.tool_use_id === 'string' ? 'codex' : 'claude';
   const source = { provider, tool: sourceTool(toolName), ...(cwd ? { cwd } : {}) };
   const raw = hookTargetText(toolName, toolInput);
-  if (source.tool === 'shell') return decideShellHookPayload(hereDocumentView(raw), cwd, source);
+  if (source.tool === 'shell') return decideShellScope(raw, cwd, source, ssh);
   const effect = classifyEffect(toolName, raw);
   const targetText = toolName === 'apply_patch' ? applyPatchTargetText(raw) : raw;
   const patchTargets = toolName === 'apply_patch' && targetText.length > 0 ? targetText.split('\n') : [];
@@ -98,6 +121,20 @@ function decideNativeHookPayloadWithoutSelfHost(payload) {
     source,
   };
   return decideNativeEffect(candidate);
+}
+
+function decideShellScope(raw, cwd, source, ssh) {
+  if (ssh?.unproven)
+    return deny(
+      { effect: 'unknown', target: classifyTarget('', cwd, 'unknown'), source },
+      'ssh_local_execution_unproven',
+    );
+  const decision = decideShellHookPayload(hereDocumentView(ssh?.local ?? raw), cwd, source);
+  if (!ssh?.target || decision.decision === 'deny' || !['read', 'unknown'].includes(decision.effect)) return decision;
+  return {
+    ...decideNativeEffect({ effect: 'unknown', target: { kind: 'ordinary', value: ssh.target }, source }),
+    reasonCode: 'remote_ssh_policy_deferred',
+  };
 }
 
 function normalizeHookToolInput(toolInput) {
@@ -153,6 +190,7 @@ async function runHookCli() {
     payload = null;
   }
   const verdict = decideNativeHookPayload(payload);
+  appendNativeDenial(payload, verdict);
   if (isRecord(payload) && payload.hook_event_name === 'NativeShellSafetyCheck') {
     const fingerprint =
       isRecord(payload.native_execution) && typeof payload.native_execution.fingerprint === 'string'
@@ -175,10 +213,6 @@ async function runHookCli() {
       },
     })}\n`,
   );
-}
-
-function guardReason(verdict) {
-  return `Clowder AI native guard: ${verdict.reasonCode} (${verdict.effect} → ${verdict.target.kind})${verdict.detail ? ` — ${verdict.detail}` : ''}`;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

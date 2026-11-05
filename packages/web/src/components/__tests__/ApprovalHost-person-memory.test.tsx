@@ -40,7 +40,18 @@ vi.mock('@/utils/teleport', () => ({ planTeleport: () => ({}), kickTeleportResol
 vi.mock('../ThreadSidebar/thread-navigation', () => ({ pushThreadRouteWithHistory: vi.fn() }));
 
 import { type ApprovalHost, ApprovalHostContext, type ApprovalRequestEvent } from '../ApprovalHost';
-import { ApprovalItemCard } from '../ApprovalItemCard';
+import { PersonMemoryClaimSelector } from '../PersonMemoryClaimSelector';
+import { useApprovalItemActions } from '../useApprovalItemActions';
+
+function SelectorUnderTest({ item }: { item: ApprovalHubItem }) {
+  const actions = useApprovalItemActions(item);
+  return (
+    <>
+      <PersonMemoryClaimSelector item={item} onReject={() => void actions.handleReject()} />
+      {actions.feedbackDialog}
+    </>
+  );
+}
 
 const draft = (draftId: string, text: string) => ({
   draftId,
@@ -100,10 +111,10 @@ describe('F276 claim selector under a host', () => {
       root.render(
         host ? (
           <ApprovalHostContext.Provider value={host}>
-            <ApprovalItemCard item={item} />
+            <SelectorUnderTest item={item} />
           </ApprovalHostContext.Provider>
         ) : (
-          <ApprovalItemCard item={item} />
+          <SelectorUnderTest item={item} />
         ),
       ),
     );

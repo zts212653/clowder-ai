@@ -44,8 +44,6 @@ function createMockStoreState() {
     clearCatStatuses: vi.fn(),
     setCurrentThread: mockSetCurrentThread,
     updateThreadTitle: vi.fn(),
-    setCurrentGame: vi.fn(),
-    currentGame: null,
 
     viewMode: 'single' as const,
     setViewMode: vi.fn(),
@@ -122,7 +120,6 @@ vi.mock('../BootstrapOrchestrator', () => ({ BootstrapOrchestrator: () => null }
 vi.mock('../ChatContainerHeader', () => ({ ChatContainerHeader: () => null }));
 vi.mock('../ChatInput', () => ({ ChatInput: () => null }));
 vi.mock('../ChatMessage', () => ({ ChatMessage: () => null }));
-vi.mock('../game/GameOverlayConnector', () => ({ GameOverlayConnector: () => null }));
 vi.mock('../HubListModal', () => ({ HubListModal: () => null }));
 vi.mock('../MessageActions', () => ({
   MessageActions: ({ children }: { children: React.ReactNode }) => children,

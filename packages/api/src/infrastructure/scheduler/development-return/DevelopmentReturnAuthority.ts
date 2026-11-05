@@ -8,10 +8,7 @@ import {
 } from '@cat-cafe/shared';
 import { isApprovedDevelopmentProposalForTask } from '../../../domains/ball-custody/approved-development-proposal.js';
 import type { DevelopmentWorkActor } from '../../../domains/cats/services/stores/ports/DevelopmentWorkTransition.js';
-import {
-  deriveGrowingSourceMessageRevision,
-  type StoredMessage,
-} from '../../../domains/cats/services/stores/ports/MessageStore.js';
+import type { StoredMessage } from '../../../domains/cats/services/stores/ports/MessageStore.js';
 import type { Thread } from '../../../domains/cats/services/stores/ports/ThreadStore.js';
 import type { DevelopmentReturnStorage } from '../DynamicTaskStore.js';
 import { resolveDevelopmentReturnSource } from './DevelopmentReturnOriginalSource.js';
@@ -19,6 +16,10 @@ import {
   assertDevelopmentReturnRegistrationInput,
   resolveDevelopmentReturnRegistrationSource,
 } from './DevelopmentReturnRegistrationSource.js';
+import {
+  isCurrentDevelopmentReturnReport,
+  isCurrentDevelopmentReturnReportWindow,
+} from './DevelopmentReturnReportSource.js';
 import type { DevelopmentReturnDeps } from './DevelopmentReturnService.js';
 import {
   parseDevelopmentReturnActionLeaseRef,
@@ -108,27 +109,6 @@ function requireApprovedExecution(
   return { child, proposal };
 }
 
-function isCurrentTerminalReport(
-  report: StoredMessage | null,
-  state: Registration,
-  executionThreadId: string,
-  proposal: ThreadProposal,
-  proposalReporter: boolean,
-): boolean {
-  return Boolean(
-    report &&
-      !report.deletedAt &&
-      !report._tombstone &&
-      !report.source &&
-      report.userId === state.ownerUserId &&
-      report.threadId === executionThreadId &&
-      report.catId !== null &&
-      state.reporterCatIds.includes(report.catId) &&
-      (!proposalReporter || proposal.preferredCats.includes(report.catId)) &&
-      deriveGrowingSourceMessageRevision(report) === state.report?.sourceMessageRevision,
-  );
-}
-
 export async function prepareDevelopmentReturn(
   deps: AuthorityDeps,
   actor: DevelopmentWorkActor,
@@ -198,12 +178,14 @@ function currentDevelopmentReturnResolution(
   task: CurrentDevelopmentTask,
   report: StoredMessage | null,
   state: Registration,
-  child: Thread,
   proposal: ThreadProposal,
   proposalReporter: boolean,
+  predecessor: Registration | null,
+  predecessorWake: StoredMessage | null,
 ): DevelopmentReturnFreshnessResolution {
   if (!state.report) return { kind: 'current', revision: task.entrustedWork.revision };
-  return isCurrentTerminalReport(report, state, child.id, proposal, proposalReporter)
+  return isCurrentDevelopmentReturnReport(report, state, proposalReporter ? proposal.preferredCats : undefined) &&
+    isCurrentDevelopmentReturnReportWindow(report, state, predecessor, predecessorWake)
     ? { kind: 'current', revision: task.entrustedWork.revision }
     : { kind: 'invalid' };
 }
@@ -212,12 +194,16 @@ export async function resolveDevelopmentReturnFreshness(
   deps: AuthorityDeps,
   state: Registration,
 ): Promise<DevelopmentReturnFreshnessResolution> {
-  const [task, owner, child, proposal, report] = await Promise.all([
+  const predecessor = state.predecessorRegistrationId
+    ? deps.definitions.getPrivateExecutionReturn(state.predecessorRegistrationId)
+    : null;
+  const [task, owner, child, proposal, report, predecessorWake] = await Promise.all([
     deps.tasks.get(state.taskRef.slice('task:work:'.length)),
     deps.threads.get(state.ownerThreadId),
     deps.threads.get(state.executionThreadId),
     deps.proposals.get(state.proposalId),
     state.report ? deps.messages.getById(state.report.sourceMessageId) : null,
+    predecessor?.wakeMessageId ? deps.messages.getById(predecessor.wakeMessageId) : null,
   ]);
   const actor = {
     userId: state.ownerUserId,
@@ -256,7 +242,15 @@ export async function resolveDevelopmentReturnFreshness(
   if (returnedSource && JSON.stringify(returnedSource.reporterCatIds) !== JSON.stringify(state.reporterCatIds)) {
     return { kind: 'invalid' };
   }
-  return currentDevelopmentReturnResolution(task, report, state, child, proposal, !returnedSource);
+  return currentDevelopmentReturnResolution(
+    task,
+    report,
+    state,
+    proposal,
+    !returnedSource,
+    predecessor,
+    predecessorWake,
+  );
 }
 
 export async function developmentReturnCurrentRevision(

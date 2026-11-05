@@ -10,7 +10,8 @@
  */
 
 import { join } from 'node:path';
-import type { CatId } from '@cat-cafe/shared';
+import { type CatId, resolveMemberIdentity } from '@cat-cafe/shared';
+import { loadDossierProfiles } from '@cat-cafe/shared/dossier';
 import type { FastifyPluginAsync } from 'fastify';
 import { loadCatConfig, toAllCatConfigs } from '../config/cat-config-loader.js';
 import { resolveDefaultClaudeMcpServerPath } from '../domains/cats/services/agents/providers/ClaudeAgentService.js';
@@ -31,7 +32,7 @@ const NATIVE_L0_CLIENT_IDS = new Set(['anthropic', 'openai', 'opencode']);
 
 /**
  * kimi injects L0 natively only when the new kimi-code CLI is the resolvable
- * binary (legacy `kimi-cli` has no native channel) — probe the machine instead
+ * Kimi Code binary — probe the machine instead
  * of hard-coding the clientId (gpt52 review on PR #3201).
  */
 function isNativeL0Client(clientId: string): boolean {
@@ -194,6 +195,9 @@ export const promptInjectionPreviewRoutes: FastifyPluginAsync = async (app) => {
 
       return {
         catId,
+        identityResolution: catConfig
+          ? resolveMemberIdentity(catConfig, loadDossierProfiles(findMonorepoRoot()).get(catId))
+          : undefined,
         systemPrompt: systemPromptContent,
         dynamicContext,
         bootstrapContext,

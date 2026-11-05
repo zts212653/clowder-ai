@@ -19,7 +19,8 @@ test('production default readers enforce the actual dossier and current roster b
   });
   for (const [ownerCatId, available, expected] of [
     ['fable-5', true, 'codex-astra'],
-    ['opus55', true, 'codex-astra'],
+    // Dossier v0.12 (2026-10-23) removed this member's quota restriction.
+    ['opus55', true, 'opus55'],
     ['codex-sol', true, 'codex-sol'],
     ['codex-sol', false, 'codex-astra'],
   ]) {
@@ -34,9 +35,11 @@ test('production default readers enforce the actual dossier and current roster b
     const spec = createAlphaBrowserTemplate(f.options).createSpec('alpha-subscription', f.params);
     await spec.run.execute('alpha', 'alpha', f.context);
     assert.deepEqual(
-      f.triggered.map((args) => [args[1], args[2]]),
+      f.delivered.map((message) => [message.targetCatId, message.userId]),
       [[expected, 'owner']],
     );
+    assert.ok(f.delivered.every((message) => message.deliveryStatus === 'queued'));
+    assert.deepEqual(f.triggered, [], 'scheduler delivery enters the canonical Queue without a second trigger');
     assert.equal([...f.tasks.values()][0].ownerCatId, ownerCatId);
   }
 });

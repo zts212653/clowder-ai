@@ -29,12 +29,16 @@ export function bindLiveRecoveryHost(input: {
 }): LiveRecoveryHost | undefined {
   const { recovery, inbox } = input.options;
   if (!recovery || !inbox) return undefined;
-  const scope = input.context.boundScope({
+  const boundScope = input.context.boundScope({
     invocationId: input.callbackEnv.CAT_CAFE_INVOCATION_ID,
     catId: input.options.binding.catId,
     threadId: input.options.binding.threadId,
   });
-  if (!scope) throw new LiveCarrierUnavailableError();
+  if (!boundScope) throw new LiveCarrierUnavailableError();
+  const scope = {
+    ...boundScope,
+    ...(input.callbackEnv.CAT_CAFE_EXECUTION_ID ? { parentInvocationId: input.callbackEnv.CAT_CAFE_EXECUTION_ID } : {}),
+  };
   const authorize = async (candidate: LiveInboxScope): Promise<boolean> =>
     sameScope(candidate, scope) && (await input.context.canRead(candidate)) && (await recovery.authorize(candidate));
   const source = inbox.source(scope, authorize, input.isSameCallExposure);

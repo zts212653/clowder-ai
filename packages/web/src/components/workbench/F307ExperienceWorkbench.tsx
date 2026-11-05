@@ -12,6 +12,7 @@ Real-shell host for the shared F307 Workbench kernel.
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { ListenModePlayer } from '@/components/listen-mode/ListenModePlayer';
 import { defaultSettingsSectionPath } from '@/components/settings/settings-entry-path';
+import { openMailbox } from '@/components/shell/mailbox/mailbox-navigation';
 import { resolveShellCopy, useShellCopy } from '@/components/shell/shell-copy';
 import { readShellLanguage } from '@/components/shell/shell-language';
 import { resolveShellNavTarget } from '@/components/shell/shell-navigation';
@@ -38,7 +39,7 @@ import { useChatStore } from '@/stores/chatStore';
 import { useToastStore } from '@/stores/toastStore';
 import { captureChatReadingBeforeLayoutChange } from '@/utils/chat-layout-change';
 import { DEFAULT_ARTIFACT_WORK_CHAT_BASIS, isWorkspaceFullWindowSurface } from './artifact-work-presentation';
-import { toggleArtifactWorkFullWindow } from './artifact-work-presentation-actions';
+import { enterArtifactWorkMode, toggleArtifactWorkFullWindow } from './artifact-work-presentation-actions';
 import { restoreEvolutionMediaOrigin } from './evolution-media-navigation';
 import { useF307ExperienceWorkbenchStore } from './experience-workbench-store';
 import { F307OwnerSurfaceRenderer } from './F307OwnerSurfaceRenderer';
@@ -57,7 +58,9 @@ import {
   createWorkspaceDestinationSurface,
   createWorkspaceModeSurface,
   resolveFileTarget,
+  resolveWorkspaceDestinationTarget,
 } from './real-surface-adapters';
+import { retiredWorkspaceDestination } from './retired-workspace-destinations';
 import { returnFileCard } from './return-file-card';
 import type { ToolsReturnRequest } from './use-tools-viewport-return';
 import { useWorkspaceDestinationAdmission } from './use-workspace-destination-admission';
@@ -123,14 +126,18 @@ function RecentlyClosedSurfaces({
   dispatch,
   onRestore,
   copy,
+  retireLegacy,
 }: {
   layout: WorkbenchLayoutState;
   dispatch: (action: WorkbenchAction) => void;
   onRestore: () => void;
   copy: typeof workspaceChromeCopy.zh;
+  retireLegacy: boolean;
 }) {
+  const isV2 = useShellPresentation() === 'v2';
   const [expanded, setExpanded] = useState(false);
-  if (layout.recentlyClosed.length === 0) return null;
+  const restorable = layout.recentlyClosed.filter((surface) => !retireLegacy || !retiredWorkspaceDestination(surface));
+  if (restorable.length === 0) return null;
   return (
     <aside
       className="shrink-0 border-t border-cafe-subtle bg-[var(--console-panel-bg)] px-3 py-2"
@@ -145,10 +152,10 @@ function RecentlyClosedSurfaces({
           aria-label={expanded ? copy.recentlyClosed.collapse : copy.recentlyClosed.expand}
           data-testid="f307-recently-closed-toggle"
         >
-          {copy.recentlyClosed.label(layout.recentlyClosed.length)}
+          {copy.recentlyClosed.label(restorable.length)}
         </button>
         {expanded &&
-          layout.recentlyClosed.map((surface) => (
+          restorable.map((surface) => (
             <button
               key={surface.id}
               type="button"
@@ -164,7 +171,11 @@ function RecentlyClosedSurfaces({
               className="rounded-lg bg-cafe-surface-sunken px-2 py-1 text-micro font-semibold text-cafe-secondary hover:text-cafe"
               data-testid={`f307-restore-${surface.type}`}
             >
-              {copy.recentlyClosed.restore(surface.title)}
+              {copy.recentlyClosed.restore(
+                isV2 && resolveWorkspaceDestinationTarget(surface)?.destinationRef === 'host:status'
+                  ? copy.statusSurface.label
+                  : surface.title,
+              )}
             </button>
           ))}
       </div>
@@ -176,6 +187,15 @@ function zeroTopologyContract(hydrated: boolean, zeroTopology: boolean, homeFocu
   if (!hydrated) return 'pending-hydration';
   if (zeroTopology && homeFocused) return 'canonical-home';
   return 'not-applicable';
+}
+
+function enterEvolutionProgramReading(surfaceId: string, isDesktop: boolean, threadId?: string): void {
+  if (!isDesktop || !threadId) return;
+  useF307ExperienceWorkbenchStore.getState().enterMainAreaAttention(surfaceId, {
+    kind: 'chat-workspace',
+    threadId,
+    chatBasis: DEFAULT_ARTIFACT_WORK_CHAT_BASIS,
+  });
 }
 
 function useExplicitWorkspaceNavigation({
@@ -312,13 +332,18 @@ function useExplicitWorkspaceNavigation({
     }
     rememberWorkspaceForeground();
     setHomeOpen(false);
+    if (previewEnabled && request.presentation === 'work-mode') {
+      const accepted = useF307ExperienceWorkbenchStore.getState().layout;
+      const active = accepted.surfaces.find((item) => item.id === accepted.activeSurfaceId);
+      if (active && isWorkspaceFullWindowSurface(active, 'v2')) enterArtifactWorkMode(request.threadId, active);
+    }
     if (request.target.kind === 'evolution-home') {
       useEvolutionReading.getState().selectWorkspaceProgram(threadId ?? 'global', null);
       useEvolutionReading.getState().selectWorkspacePage(threadId ?? 'global', 'programs');
       useF307ExperienceWorkbenchStore.getState().exitMainAreaAttention();
     }
     if (request.target.kind === 'evolution-program') {
-      useF307ExperienceWorkbenchStore.getState().enterMainAreaAttention(surface.id);
+      enterEvolutionProgramReading(surface.id, isDesktop, threadId);
     } else if (isDesktop && threadId && request.target.kind === 'mode' && request.target.mode === 'product-schedule') {
       useF307ExperienceWorkbenchStore.getState().enterMainAreaAttention(surface.id, {
         kind: 'chat-workspace',
@@ -468,7 +493,8 @@ export function F307ExperienceWorkbench({
   const hydrate = useF307ExperienceWorkbenchStore((state) => state.hydrate);
   const attentionPresentation = useF307ExperienceWorkbenchStore((state) => state.mainAreaAttentionPresentation);
   const mainAreaAttentionSurfaceId = useF307ExperienceWorkbenchStore((state) => state.mainAreaAttentionSurfaceId);
-  const enterMainAreaAttention = useF307ExperienceWorkbenchStore((state) => state.enterMainAreaAttention);
+  const enterMainAreaFullWindow = useF307ExperienceWorkbenchStore((state) => state.enterMainAreaFullWindow);
+  const returnFromMainAreaFullWindow = useF307ExperienceWorkbenchStore((state) => state.returnFromMainAreaFullWindow);
   const exitMainAreaAttention = useF307ExperienceWorkbenchStore((state) => state.exitMainAreaAttention);
   const focusSurfaceId = useF307ExperienceWorkbenchStore((state) => state.focusSurfaceId);
   const enterFocusMode = useF307ExperienceWorkbenchStore((state) => state.enterFocusMode);
@@ -503,13 +529,36 @@ export function F307ExperienceWorkbench({
   const zeroTopology = projection.visibleSurfaceIds.length === 0;
   const foregroundUnavailable =
     foregroundSurfaceId != null && !layout.surfaces.some((surface) => surface.id === foregroundSurfaceId);
-  const homeFocused = homeOpen || zeroTopology || foregroundSurfaceId === null || foregroundUnavailable;
+  const selectedWorkspaceSurface = layout.surfaces.find((surface) => surface.id === layout.activeSurfaceId);
+  const retiredSelected =
+    isV2 &&
+    visible &&
+    !homeOpen &&
+    foregroundSurfaceId !== null &&
+    selectedWorkspaceSurface &&
+    (foregroundSurfaceId === undefined || foregroundSurfaceId === selectedWorkspaceSurface.id)
+      ? retiredWorkspaceDestination(selectedWorkspaceSurface)
+      : null;
+  const homeFocused =
+    homeOpen || zeroTopology || foregroundSurfaceId === null || foregroundUnavailable || !!retiredSelected;
   const activeWorkspaceSurface = homeFocused
     ? undefined
     : layout.surfaces.find((surface) => surface.id === layout.activeSurfaceId);
   useEffect(() => {
     if (foregroundSurfaceId != null) setHomeOpen(false);
   }, [foregroundSurfaceId]);
+  useEffect(() => {
+    if (!hydrated || !retiredSelected || !selectedWorkspaceSurface) return;
+    dispatch({
+      type: 'close-surface',
+      surfaceId: selectedWorkspaceSurface.id,
+      entitlement: { kind: 'user', reason: 'surface-tab' },
+    });
+    exitMainAreaAttention();
+    onOpenHome?.();
+    setHomeOpen(true);
+    if (retiredSelected === 'mailbox') openMailbox();
+  }, [dispatch, exitMainAreaAttention, hydrated, onOpenHome, retiredSelected, selectedWorkspaceSurface]);
   // A queued explicit request wins initial foreground restoration; a later foreground input still closes Home.
   useWorkspaceExecutionRequest(threadId, setHomeOpen);
   const topologyContract = zeroTopologyContract(hydrated, zeroTopology, homeFocused);
@@ -534,7 +583,7 @@ export function F307ExperienceWorkbench({
       ? [layout.sidecar]
       : []),
     ...layout.recentlyClosed.filter((surface) => surface.type !== 'thread-replay' && !openSurfaceIds.has(surface.id)),
-  ];
+  ].filter((surface) => !isV2 || !retiredWorkspaceDestination(surface));
   const openSurfaceFromOwner = (
     nextSurface: WorkspaceSurfaceDescriptor,
     sourceSurfaceId: string,
@@ -590,7 +639,7 @@ export function F307ExperienceWorkbench({
   }, [destinationAdmission.message]);
   const selectRecentSurface = (requested: WorkspaceSurfaceDescriptor) => {
     const current = useF307ExperienceWorkbenchStore.getState().layout;
-    const surface = selectRecentSurfaces(current, threadId).find((candidate) => candidate.id === requested.id);
+    const surface = selectRecentSurfaces(current, threadId, isV2).find((candidate) => candidate.id === requested.id);
     if (!surface) return;
     const entitlement = { kind: 'user' as const, reason: 'workspace-home-selection' as const };
     if (current.surfaces.some((candidate) => candidate.id === surface.id))
@@ -603,7 +652,7 @@ export function F307ExperienceWorkbench({
     setHomeOpen(false);
   };
   const openHomeArtifact = useCallback<OpenHomeArtifact>(
-    (artifact, origin) => {
+    (artifact, origin, resolvedSurface) => {
       const chat = useChatStore.getState();
       if (!threadId || origin.threadId !== threadId || chat.currentThreadId !== threadId) {
         useToastStore
@@ -625,7 +674,7 @@ export function F307ExperienceWorkbench({
             .addToast({ type: 'info', title: 'PR', message: t.pullRequestSourceUnavailable, duration: 6000 });
         return;
       }
-      chat.openPublishedArtifact(threadId, artifact, origin);
+      openHomeSurface(resolvedSurface);
     },
     [threadId, t, canonicalWorktreeId, worktreeId, openHomeSurface],
   );
@@ -750,7 +799,7 @@ export function F307ExperienceWorkbench({
             surface: program,
             entitlement: { kind: 'user', reason: 'return-origin' },
           });
-          if (origin.expanded && isDesktop) enterMainAreaAttention(program.id);
+          if (origin.expanded) enterEvolutionProgramReading(program.id, isDesktop, threadId);
           else exitMainAreaAttention();
           return;
         }
@@ -886,7 +935,7 @@ export function F307ExperienceWorkbench({
                 captureSettingsOrigin();
                 onOpenAppRoute(resolveShellNavTarget(href, threadId ? `/thread/${encodeURIComponent(threadId)}` : '/'));
               }}
-              recentSurfaces={selectRecentSurfaces(layout, threadId)}
+              recentSurfaces={selectRecentSurfaces(layout, threadId, isV2)}
               onSelectRecentSurface={selectRecentSurface}
               repository={repository}
               worktreeId={worktreeId}
@@ -924,12 +973,14 @@ export function F307ExperienceWorkbench({
               : undefined
           }
           mainAreaAttentionSurfaceId={mainAreaAttentionSurfaceId}
-          onEnterMainAreaAttention={enterMainAreaAttention}
+          onEnterMainAreaAttention={enterMainAreaFullWindow}
           onExitMainAreaAttention={() => {
             captureChatReadingBeforeLayoutChange();
-            exitMainAreaAttention();
+            returnFromMainAreaFullWindow();
           }}
-          mainAreaAttentionIsWide={attentionPresentation.kind === 'chat-workspace'}
+          mainAreaAttentionIsWide={
+            attentionPresentation.kind === 'chat-workspace' && attentionPresentation.mode !== 'full-window'
+          }
         />
       )}
 
@@ -1030,6 +1081,7 @@ export function F307ExperienceWorkbench({
           dispatch={dispatchInput}
           onRestore={() => setHomeOpen(false)}
           copy={controlCopy}
+          retireLegacy={isV2}
         />
       )}
     </section>

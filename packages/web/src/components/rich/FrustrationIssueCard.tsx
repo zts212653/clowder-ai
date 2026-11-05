@@ -34,7 +34,6 @@ interface FrustrationIssueStatusResponse {
   issue?: {
     status?: 'draft' | 'confirmed' | 'skipped' | 'false_positive';
     userDescription?: string;
-    communityIssueDraftId?: string;
   };
 }
 
@@ -87,8 +86,6 @@ export function FrustrationIssueCard({ block }: FrustrationIssueCardProps) {
   const [userDescription, setUserDescription] = useState('');
   const [collapsed, setCollapsed] = useState(false);
   const actionEpochRef = useRef(0);
-  // F235: draft ID restored from server (Iron Law #5 persistence recovery)
-  const [hydratedDraftId, setHydratedDraftId] = useState<string | null>(null);
 
   const isResolved = isResolvedIssueStatus(status);
 
@@ -113,29 +110,6 @@ export function FrustrationIssueCard({ block }: FrustrationIssueCardProps) {
         }
         if (typeof data.issue?.userDescription === 'string') {
           setUserDescription(data.issue.userDescription);
-        }
-        // F235: Restore community draft preview after refresh (Iron Law #5 recovery)
-        // Restore if draft is active (editable) or published (show GitHub link).
-        // Only skip cancelled/missing drafts — those allow creating a replacement.
-        // F235: Restore community draft preview after refresh (Iron Law #5 recovery).
-        // Verify draft is active (editable) or published (show GitHub link).
-        // Cancelled/missing drafts are skipped — user can create a replacement.
-        if (data.issue?.communityIssueDraftId && !hydratedDraftId) {
-          try {
-            const draftRes = await apiFetch(`/api/community-issue-drafts/${data.issue.communityIssueDraftId}`);
-            if (draftRes.ok) {
-              const draftData = (await draftRes.json()) as { draft?: { status?: string } };
-              const draftStatus = draftData.draft?.status;
-              if (draftStatus === 'draft' || draftStatus === 'published') {
-                setHydratedDraftId(data.issue.communityIssueDraftId);
-                if (nextStatus === 'confirmed') {
-                  setStatus('draft_created');
-                }
-              }
-            }
-          } catch {
-            // Draft verification failed — don't restore stale preview
-          }
         }
       } catch {
         // Status hydration is best-effort; keep the original draft UI if unavailable.
@@ -279,7 +253,8 @@ export function FrustrationIssueCard({ block }: FrustrationIssueCardProps) {
         <CommunityPublishFlow
           issueId={issueId}
           status={status}
-          restoredDraftId={hydratedDraftId}
+          title={displayFrustrationTitle(block.title)}
+          bodyMarkdown={[block.bodyMarkdown, userDescription].filter(Boolean).join('\n\n')}
           onStatusChange={setStatus}
         />
       )}

@@ -63,7 +63,6 @@ describe('F194 Phase Z10 AC-Z28 — server-idle wins reverse race (砚砚 R1 P1)
       targetCats: [],
       catStatuses: {},
       catInvocations: {},
-      currentGame: null,
       activeInvocations: {},
 
       threadStates: {},

@@ -1,5 +1,7 @@
 import type { CatId, ConnectorSource, WaitContinuationCarrierV1 } from '@cat-cafe/shared';
 import type { PersistedQueueDeliveryPort } from '../../domains/cats/services/agents/invocation/PersistedQueueDelivery.js';
+import type { OwnerAuthProvenance } from '../../domains/cats/services/owner-auth-provenance.js';
+import type { ToolExecutionPolicy } from '../../domains/cats/services/types.js';
 
 /**
  * RFC §5.1/§5.2: an external connector input is not a special delivery mechanism. It builds the same
@@ -29,6 +31,9 @@ export interface ConnectorDeliveryInput {
   /** How the Queue row should be filed. Stated by the producer; never inferred from the payload. */
   readonly sourceCategory?: import('../../domains/cats/services/agents/invocation/PersistedQueueDelivery.js').PersistedQueueDeliveryInput['sourceCategory'];
   readonly waitContinuationCarrier?: WaitContinuationCarrierV1;
+  /** Server-verified producer facts; never inferred from connector payload or owner userId. */
+  readonly ownerAuthProvenance?: OwnerAuthProvenance;
+  readonly toolExecutionPolicy?: ToolExecutionPolicy;
 }
 
 export interface ConnectorDeliveryResult {
@@ -72,6 +77,8 @@ export async function deliverConnectorMessage(
     ...(input.timestamp !== undefined ? { timestamp: input.timestamp } : {}),
     ...(input.sourceCategory ? { sourceCategory: input.sourceCategory } : {}),
     ...(input.waitContinuationCarrier ? { waitContinuationCarrier: input.waitContinuationCarrier } : {}),
+    ...(input.ownerAuthProvenance ? { ownerAuthProvenance: input.ownerAuthProvenance } : {}),
+    ...(input.toolExecutionPolicy ? { toolExecutionPolicy: input.toolExecutionPolicy } : {}),
   });
 
   // `conflict` and `unavailable` mean the envelope never reached the Queue. Every other state is a

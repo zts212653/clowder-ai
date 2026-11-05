@@ -10,7 +10,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   {
     id: 'members',
     label: '成员与运行时',
-    icon: 'users',
+    icon: 'paw',
     color: 'var(--color-opus-primary)',
     description: '管理成员、模型和接入方式，查看当前接活状态与派活偏好。',
   },
@@ -27,13 +27,6 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     icon: 'key',
     color: 'var(--color-opus-primary)',
     description: '猫登录模型用的号。登录成功后不会自动换号。',
-  },
-  {
-    id: 'im',
-    label: 'IM 对接',
-    icon: 'plug',
-    color: 'var(--cafe-accent)',
-    description: '飞书、钉钉、企微和外部消息入口。',
   },
   {
     id: 'skills',

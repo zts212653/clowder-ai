@@ -1,15 +1,12 @@
 'use client';
 
 import type { PluginManagerListResponse } from '@cat-cafe/shared';
-import type { ReactNode } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useConfirm } from '@/components/useConfirm';
 import { apiFetch } from '@/utils/api-client';
 import { PluginManagerContent } from './PluginManagerContent';
 import type { PluginManagerDesignFixture } from './plugin-manager-fixtures';
 import {
-  type ConfigurationUpdate,
-  configurationRequest,
   type DetailLoadState,
   designFixture,
   detailProjection,
@@ -17,22 +14,26 @@ import {
   fetchManagerList,
   responseError,
 } from './plugin-manager-live-api';
+import type { PluginManagerLiveContentProps } from './plugin-manager-live-types';
+import { INSTALL_TIMEOUT_MS, mutationRequestOptions } from './plugin-manager-mutation-options';
+import { usePluginCatalogCheck } from './usePluginCatalogCheck';
+import { usePluginConfigurationSave } from './usePluginConfigurationSave';
 
-const POLL_INTERVAL_MS = 5_000;
 const EMPTY_COMPATIBILITY: readonly PluginManagerDesignFixture[] = [];
+const INSTALL_UNCONFIRMED = '安装结果尚未确认，后台可能仍在处理。请查看插件列表确认状态，避免重复安装。';
 
 export function PluginManagerLiveContent({
+  presentation = 'v1',
+  pageHeader,
   compatibilityFixtures = EMPTY_COMPATIBILITY,
   renderCompatibilityDetail,
-}: {
-  compatibilityFixtures?: readonly PluginManagerDesignFixture[];
-  renderCompatibilityDetail?: (pluginId: string, plugin: PluginManagerDesignFixture) => ReactNode | undefined;
-} = {}) {
+}: PluginManagerLiveContentProps = {}) {
   const confirm = useConfirm();
   const [snapshot, setSnapshot] = useState<PluginManagerListResponse | null>(null);
   const [detailState, setDetailState] = useState<DetailLoadState>({ state: 'idle' });
   const [busyPluginId, setBusyPluginId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
   const [selectedPluginId, setSelectedPluginId] = useState<string | null>(null);
   const [linkedPluginId, setLinkedPluginId] = useState<string | null>(null);
   const [configurationSavedPluginId, setConfigurationSavedPluginId] = useState<string | null>(null);
@@ -41,9 +42,12 @@ export function PluginManagerLiveContent({
   const listGeneration = useRef(0);
   const detailGeneration = useRef(0);
   const mounted = useRef(true);
+  const localPluginIds = useRef(new Set<string>());
+  const initialSelection = useRef<string | null>(null);
+  const [initialDetailPluginId, setInitialDetailPluginId] = useState<string | null>(null);
   const enableRequests = useRef(new Set<string>());
 
-  const loadDetail = useCallback(async (pluginId: string, afterMutation = false) => {
+  const loadDetail = useCallback(async (pluginId: string, afterMutation = false, local = false) => {
     const generation = ++detailGeneration.current;
     setDetailState((current) =>
       (current.state === 'ready' || current.state === 'unavailable') && current.pluginId === pluginId
@@ -51,7 +55,7 @@ export function PluginManagerLiveContent({
         : { state: 'loading', pluginId },
     );
     try {
-      const value = await fetchManagerDetail(pluginId, afterMutation);
+      const value = await fetchManagerDetail(pluginId, afterMutation, local);
       if (!mounted.current || generation !== detailGeneration.current) return;
       setDetailState({ state: 'ready', pluginId, detail: value });
     } catch {
@@ -60,19 +64,25 @@ export function PluginManagerLiveContent({
     }
   }, []);
 
+  const loadCurrentDetail = useCallback(
+    (pluginId: string, afterMutation = false) =>
+      loadDetail(pluginId, afterMutation, localPluginIds.current.has(pluginId)),
+    [loadDetail],
+  );
+
   const selectPlugin = useCallback(
     (pluginId: string | null) => {
       selectedPluginIdRef.current = pluginId;
       setSelectedPluginId(pluginId);
       setConfigurationSavedPluginId((current) => (current === pluginId ? current : null));
       if (pluginId && !compatibilityFixtures.some((plugin) => plugin.id === pluginId)) {
-        void loadDetail(pluginId);
+        void loadCurrentDetail(pluginId);
         return;
       }
       detailGeneration.current += 1;
       setDetailState({ state: 'idle' });
     },
-    [loadDetail, compatibilityFixtures],
+    [loadCurrentDetail, compatibilityFixtures],
   );
   const linkedSelection = useRef(selectPlugin);
   linkedSelection.current = selectPlugin;
@@ -86,7 +96,7 @@ export function PluginManagerLiveContent({
         hash === '#chatgpt-dot'
           ? 'official.chatgpt-dot'
           : hash === '#personal-chatgpt-pro'
-            ? 'personal-chrome-host'
+            ? 'official.companion.personal-chrome'
             : null;
       setLinkedPluginId(pluginId);
       if (pluginId) linkedSelection.current(pluginId);
@@ -96,80 +106,147 @@ export function PluginManagerLiveContent({
     return () => window.removeEventListener('hashchange', selectLinkedPlugin);
   }, [catalogReady]);
 
+  const commitListSnapshot = useCallback(
+    async (
+      value: PluginManagerListResponse,
+      generation: number,
+      afterMutation: boolean,
+      local: boolean,
+      localInventory?: PluginManagerListResponse,
+    ): Promise<boolean> => {
+      if (!mounted.current || generation !== listGeneration.current) return false;
+      if (localInventory) localPluginIds.current = new Set(localInventory.plugins.map((plugin) => plugin.pluginId));
+      setSnapshot((previous) =>
+        (local || value.catalog.status === 'unavailable') && presentation === 'v2' && previous
+          ? {
+              ...value,
+              // Inventory-only reads and unavailable catalog responses retain the last discovered candidates.
+              plugins: [
+                ...value.plugins,
+                ...previous.plugins.filter(
+                  (p) => p.artifact === 'absent' && !value.plugins.some((item) => item.pluginId === p.pluginId),
+                ),
+              ],
+              catalog: local ? previous.catalog : value.catalog,
+            }
+          : value,
+      );
+      const requested = initialSelection.current;
+      if (requested && value.plugins.some((plugin) => plugin.pluginId === requested)) {
+        initialSelection.current = null;
+        setInitialDetailPluginId(requested);
+        selectPlugin(requested);
+        return true;
+      }
+      if (!local) initialSelection.current = null;
+      const current = selectedPluginIdRef.current;
+      if (current && value.plugins.some((plugin) => plugin.pluginId === current)) {
+        await loadCurrentDetail(current, afterMutation);
+      }
+      return true;
+    },
+    [loadCurrentDetail, selectPlugin, presentation],
+  );
+
+  const commitCheckedCatalog = useCallback(
+    async (value: PluginManagerListResponse) => {
+      const generation = ++listGeneration.current;
+      await commitListSnapshot(value, generation, true, false);
+    },
+    [commitListSnapshot],
+  );
+  const catalogCheck = usePluginCatalogCheck(commitCheckedCatalog);
+
+  const hydrateRemoteList = useCallback(
+    async (search: string, generation: number, afterMutation: boolean, localCommitted: boolean) => {
+      try {
+        const value = await fetchManagerList(search, afterMutation);
+        await commitListSnapshot(value, generation, afterMutation, false);
+        return value;
+      } catch {
+        if (!mounted.current || generation !== listGeneration.current) return;
+        if (localCommitted) {
+          setSnapshot((current) =>
+            current === null
+              ? current
+              : {
+                  ...current,
+                  catalog: {
+                    status: 'unavailable',
+                    refreshedAt: null,
+                    message: '目录暂时不可用；已安装插件仍可管理，稍后再次打开或搜索会重新加载。',
+                  },
+                },
+          );
+          return;
+        }
+        setError('插件列表加载失败；现有状态没有被改写。');
+      }
+    },
+    [commitListSnapshot],
+  );
+
   const loadList = useCallback(
     async (search: string, afterMutation = false) => {
       const generation = ++listGeneration.current;
       try {
-        const value = await fetchManagerList(search, afterMutation);
-        if (!mounted.current) return;
-        if (generation !== listGeneration.current) return value;
-        setSnapshot(value);
-        const current = selectedPluginIdRef.current;
-        if (current && value.plugins.some((plugin) => plugin.pluginId === current)) {
-          await loadDetail(current, afterMutation);
-        }
-        return value;
+        const normalizedSearch = search.trim();
+        const localInventoryPromise = fetchManagerList('', afterMutation, true);
+        const localValuePromise =
+          normalizedSearch.length === 0
+            ? localInventoryPromise
+            : fetchManagerList(normalizedSearch, afterMutation, true);
+        const [localInventory, localValue] = await Promise.all([localInventoryPromise, localValuePromise]);
+        const localCommitted = await commitListSnapshot(localValue, generation, afterMutation, true, localInventory);
+        if (!localCommitted) return localValue;
+        void hydrateRemoteList(search, generation, afterMutation, true);
+        return localValue;
       } catch {
-        if (!mounted.current || generation !== listGeneration.current) return;
-        setError('插件列表加载失败；现有状态没有被改写。');
+        // Older Hosts and partially upgraded desktop bundles can still fall through to canonical discovery.
+        return hydrateRemoteList(search, generation, afterMutation, false);
       }
     },
-    [loadDetail],
+    [commitListSnapshot, hydrateRemoteList],
   );
 
   useEffect(() => {
     mounted.current = true;
-    void loadList('');
-    const timer = window.setInterval(() => void loadList(query.current), POLL_INTERVAL_MS);
+    initialSelection.current = new URLSearchParams(window.location.search).get('plugin');
+    void loadList('').then(() => {
+      if (presentation === 'v2' && mounted.current) void catalogCheck.check();
+    });
     return () => {
       mounted.current = false;
-      window.clearInterval(timer);
     };
-  }, [loadList]);
+  }, [loadList, presentation, catalogCheck.check]);
 
   const refresh = useCallback(async () => {
     await loadList(query.current, true);
   }, [loadList]);
 
-  const configure = useCallback(
-    async (pluginId: string, updates: readonly ConfigurationUpdate[]) => {
-      const plugin = snapshot?.plugins.find((candidate) => candidate.pluginId === pluginId);
-      const request = configurationRequest(plugin, updates);
-      if (!request) {
-        setError('该插件没有可用的配置贡献。');
-        return;
-      }
-      setBusyPluginId(pluginId);
-      setError(null);
-      setConfigurationSavedPluginId(null);
-      try {
-        const response = await apiFetch(request.path, request.init);
-        if (!response.ok) {
-          const failure = await responseError(response, `配置保存失败 (${response.status})`);
-          setError(failure.message);
-          return;
-        }
-        setConfigurationSavedPluginId(pluginId);
-        await refresh();
-      } catch {
-        setError('配置保存失败；现有配置没有被改写。');
-      } finally {
-        setBusyPluginId(null);
-      }
-    },
-    [refresh, snapshot],
-  );
+  const configure = usePluginConfigurationSave({
+    snapshot,
+    refresh,
+    onBusy: setBusyPluginId,
+    onError: setError,
+    onWarning: setWarning,
+    onSaved: setConfigurationSavedPluginId,
+  });
 
   const mutate = useCallback(
     async (pluginId: string, path: string, body: unknown) => {
       setBusyPluginId(pluginId);
       setError(null);
       try {
-        const response = await apiFetch(path, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(body),
-        });
+        const response = await apiFetch(
+          path,
+          {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(body),
+          },
+          mutationRequestOptions(path),
+        );
         if (!response.ok) {
           const failure = await responseError(response, `插件操作失败 (${response.status})`);
           await refresh();
@@ -182,10 +259,38 @@ export function PluginManagerLiveContent({
         }
         await refresh();
       } catch {
-        setError('插件操作失败；现有状态没有被改写。');
+        await refresh();
+        setError(path.endsWith('/install') ? INSTALL_UNCONFIRMED : '操作结果尚未确认，请查看最新插件状态。');
       } finally {
         setBusyPluginId(null);
       }
+    },
+    [refresh],
+  );
+
+  const installFromDirectory = useCallback(
+    async (path: string) => {
+      setError(null);
+      let response: Response;
+      try {
+        response = await apiFetch(
+          '/api/plugin-manager/plugins/install',
+          {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ source: { kind: 'local-directory', path } }),
+          },
+          { mutationTimeoutMs: INSTALL_TIMEOUT_MS },
+        );
+      } catch {
+        await refresh();
+        throw new Error(INSTALL_UNCONFIRMED);
+      }
+      if (!response.ok) {
+        const failure = await responseError(response, `本地插件安装失败 (${response.status})`);
+        throw new Error(failure.message);
+      }
+      await refresh();
     },
     [refresh],
   );
@@ -235,24 +340,44 @@ export function PluginManagerLiveContent({
 
   return (
     <PluginManagerContent
+      pageHeader={pageHeader}
+      presentation={presentation}
+      initialDetailPluginId={initialDetailPluginId}
       fixtures={[...fixtures, ...compatibilityPresentation]}
       renderCompatibilityDetail={renderCompatibilityDetail}
       onStateChanged={refresh}
       onRequestEnable={requestEnable}
-      catalogStatus={snapshot?.catalog.status ?? 'fresh'}
+      catalogCheck={presentation === 'v2' ? catalogCheck.state : undefined}
+      onCheckCatalog={() => void catalogCheck.check()}
+      catalogStatus={catalogCheck.state.unavailable ? 'unavailable' : (snapshot?.catalog.status ?? 'fresh')}
       catalogMessage={snapshot?.catalog.message}
       loading={snapshot === null && error === null}
+      inventoryKnown={snapshot !== null}
       error={error}
+      warning={warning}
       busyPluginId={busyPluginId}
       selectedPluginId={selectedPluginId}
       linkedPluginId={linkedPluginId}
       onPluginSelect={selectPlugin}
       onSearchChange={(value) => {
         query.current = value;
-        void loadList(value);
+        if (presentation !== 'v2') void loadList(value);
       }}
       onInstall={(pluginId) => {
         const plugin = plugins.find((candidate) => candidate.pluginId === pluginId);
+        if (plugin?.artifact === 'installed') {
+          void mutate(pluginId, `/api/plugin-manager/plugins/${encodeURIComponent(pluginId)}/update`, {
+            expectedVersion: plugin.availableVersion,
+            expectedRevision: plugin.lifecycleRevision,
+          });
+          return;
+        }
+        if (plugin?.source.kind === 'git' && plugin.source.marketplace) {
+          void mutate(pluginId, '/api/plugin-manager/plugins/install', {
+            source: { kind: 'git', url: plugin.source.url, marketplace: plugin.source.marketplace },
+          });
+          return;
+        }
         if (
           !plugin ||
           plugin.source.kind !== 'catalog' ||
@@ -266,6 +391,15 @@ export function PluginManagerLiveContent({
           source: { kind: 'catalog', catalogId: plugin.source.catalogId },
           expectedVersion: plugin.availableVersion,
           expectedDigest: plugin.packageDigest,
+        });
+      }}
+      onMarketplaceChange={presentation === 'v2' ? catalogCheck.check : refresh}
+      onDirectoryInstall={installFromDirectory}
+      onRepair={(pluginId) => {
+        const plugin = plugins.find((candidate) => candidate.pluginId === pluginId);
+        if (!plugin?.actions.repair || plugin.lifecycleRevision === null) return;
+        void mutate(pluginId, `/api/plugin-manager/plugins/${encodeURIComponent(pluginId)}/repair`, {
+          expectedRevision: plugin.lifecycleRevision,
         });
       }}
       onSetEnabled={(pluginId, enabled) => {
@@ -305,6 +439,7 @@ export function PluginManagerLiveContent({
         })();
       }}
       onConfigure={(pluginId, updates) => void configure(pluginId, updates)}
+      onOperationChange={(pluginId) => void loadCurrentDetail(pluginId, true)}
     />
   );
 }

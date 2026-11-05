@@ -100,9 +100,9 @@ it('quota preserves remaining percentage/reset and publishes the response even w
     },
   });
   await act(async () => root.render(<CodexQuotaControl accountRef="backup" reload={() => new Promise(() => {})} />));
-  await click('查询此账号额度');
-  expect(host.textContent).toContain('剩余 30%');
-  expect(host.textContent).toContain('2030');
+  await click('查额度');
+  expect(host.textContent).toContain('剩 30%');
+  expect(host.querySelector('[role="meter"]')?.getAttribute('aria-valuenow')).toBe('30');
   expect([...host.querySelectorAll('button')][0].disabled).toBe(false);
 });
 it('quota controls hide prior identity values and reject a late result after same-ref identity changes', async () => {
@@ -127,7 +127,7 @@ it('quota controls hide prior identity values and reject a late result after sam
     ),
   );
   expect(host.textContent).toContain('A额度');
-  await click('查询此账号额度');
+  await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="刷新额度"]')?.click());
   await act(async () =>
     root.render(
       <CodexQuotaControl

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdir, mkdtemp, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -49,13 +49,15 @@ for (const transport of ['stdio', 'httpstream']) {
       const selectedBytes = SYNTHETIC_PNG;
       let url = `/uploads/${filename}`;
       let uploadDir = override;
+      let defaultImagePath;
       process.env.UPLOAD_DIR = envRoot;
       if (scenario === 'override-no-env') delete process.env.UPLOAD_DIR;
       if (scenario === 'default') {
         delete process.env.UPLOAD_DIR;
         uploadDir = undefined;
         await mkdir(getDefaultUploadDir(), { recursive: true });
-        await writeFile(join(getDefaultUploadDir(), filename), selectedBytes);
+        defaultImagePath = join(getDefaultUploadDir(), filename);
+        await writeFile(defaultImagePath, selectedBytes);
       } else {
         await writeFile(join(override, filename), selectedBytes);
       }
@@ -68,8 +70,9 @@ for (const transport of ['stdio', 'httpstream']) {
         await symlink(envRoot, join(override, 'outside'), process.platform === 'win32' ? 'junction' : 'dir');
         url = `/uploads/outside/${filename}`;
       }
-      const fixture = await imageFixture(transport, root);
+      let fixture;
       try {
+        fixture = await imageFixture(transport, root);
         const messages = [];
         for await (const message of service(fixture.client, root).invoke('Describe attached image.', {
           uploadDir,
@@ -100,7 +103,9 @@ for (const transport of ['stdio', 'httpstream']) {
           );
         }
       } finally {
-        await fixture.close();
+        await fixture?.close();
+        if (defaultImagePath) await rm(defaultImagePath, { force: true });
+        await rm(root, { recursive: true, force: true });
         if (previous === undefined) delete process.env.UPLOAD_DIR;
         else process.env.UPLOAD_DIR = previous;
       }

@@ -199,6 +199,8 @@ export interface PlatformFieldStatus {
   inputType?: 'text' | 'number' | 'url';
   /** Select options (only for type: select). */
   options?: Array<{ value: string; label: string }>;
+  /** Variant-discriminated select: show an explicit unselected placeholder instead of falling back to the first option. */
+  configurationVariants?: boolean;
   currentValue: string | null;
 }
 
@@ -216,6 +218,16 @@ export interface PlatformActionDef {
   next?: string;
   rollback?: string;
   timeout?: number;
+  /** Plain text; when present the owner confirms before every invocation (F202 W2-3 h1). */
+  confirm?: string;
+}
+
+/** A row action (F202 W2-3 h1): callable only from one row of a `rows` result, with that row's input. */
+export interface PlatformRowActionDef {
+  id: string;
+  label: string;
+  confirm?: string;
+  next?: string;
 }
 
 /** Operation definition + runtime state (AC-A26). */
@@ -223,8 +235,8 @@ export interface PlatformOperationStatus {
   name: string;
   label: string;
   actions: PlatformActionDef[];
+  rowActions?: PlatformRowActionDef[];
   currentAction?: string;
-  lastResult?: { render: string; data: unknown; label?: string };
   updatedAt?: number;
 }
 

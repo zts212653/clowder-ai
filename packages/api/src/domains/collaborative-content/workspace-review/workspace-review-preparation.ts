@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import type { WorkspaceContentReview, WorkspaceContentReviewReceipt } from '@cat-cafe/shared';
 import type {
   WorkspaceContentLocatorV1,
@@ -19,15 +20,21 @@ export function prepareCanonicalWorkspaceReview(
     operationId: string;
     request: unknown;
     preparationSource?: WorkspaceReviewMutation['preparationSource'];
+    collaborationScope?: WorkspaceContentReview['collaborationScope'];
   },
   now: string,
 ): WorkspaceContentReview {
   const operationId = validateWorkspaceReviewId(input.operationId);
-  const existing = store.getByContent(input.principal.userId, resolved.contentRef);
-  if (existing) return existing;
+  const existing = store.getByContent(input.principal.userId, resolved.contentRef, input.collaborationScope?.scopeRef);
+  if (existing) {
+    if (!isDeepStrictEqual(existing.collaborationScope, input.collaborationScope))
+      throw new WorkspaceContentReviewError('access_denied');
+    return existing;
+  }
   const review: WorkspaceContentReview = {
     version: 1,
-    reviewId: workspaceReviewIdentity(input.principal.userId, resolved.contentRef),
+    reviewId: workspaceReviewIdentity(input.principal.userId, resolved.contentRef, input.collaborationScope?.scopeRef),
+    ...(input.collaborationScope ? { collaborationScope: input.collaborationScope } : {}),
     ownerUserId: input.principal.userId,
     contentRef: resolved.contentRef,
     source: resolved.source,

@@ -79,7 +79,7 @@ export function ContentModificationCandidatePreview({
 /** This is the existing independently authorized candidate read, without an original pair. */
 function CandidateMedia({ asset }: { asset: ReviewedMediaAsset }) {
   const src = `${API_URL}/api/content-publications/${encodeURIComponent(asset.contentRef)}/media/${asset.ownerRevision}`;
-  return asset.mediaType === 'image/png' ? (
+  return asset.media.kind === 'image' ? (
     <Image
       unoptimized
       width={asset.media.width}

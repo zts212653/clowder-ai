@@ -5,6 +5,13 @@ export type TurnExecutionStatus = 'running' | 'succeeded' | 'failed' | 'canceled
 export type TurnExecutionTerminalStatus = Exclude<TurnExecutionStatus, 'running'>;
 
 export interface TurnExecutionCausalRefs {
+  /** Server-produced C provenance only; private execution binding/credentials never enter this ledger. */
+  routingPreflight?: {
+    stage: 'execution_preflight';
+    observedAt: number;
+    snapshotRef?: string;
+    admission?: { stage: 'queue_admitted'; observedAt: number; snapshotRef?: string };
+  };
   triggerMessageId?: string;
   routingGuardReason?: 'missing_routing_exit';
   /** Exact persisted message bodies present in this child's prompt. */
@@ -33,6 +40,8 @@ export interface CreateTurnExecutionInput {
   executionKind: TurnExecutionKind;
   /** A long-lived carrier ending does not complete the sources it read. */
   queueCompletionPolicy?: 'explicit_source';
+  /** Host writes entry before invoking the provider; missing on legacy records. */
+  providerLifecycleTracked?: true;
   startedAt: number;
   causal?: TurnExecutionCausalRefs;
   /**
@@ -46,6 +55,9 @@ export interface TurnExecutionRecord extends CreateTurnExecutionInput {
   status: TurnExecutionStatus;
   endedAt?: number;
   terminalReason?: string;
+  /** Written only after the exact provider iterator has actually closed; a cancel receipt is insufficient. */
+  providerStartedAt?: number;
+  providerTeardownAt?: number;
 }
 
 /** Immutable child identity safe to persist beside a visible message body. */
@@ -59,6 +71,7 @@ export interface TurnExecutionTerminalInput {
   status: TurnExecutionTerminalStatus;
   endedAt: number;
   terminalReason?: string;
+  providerTeardownAt?: number;
 }
 
 export type CreateTurnExecutionOutcome = 'created' | 'replayed' | 'conflict';

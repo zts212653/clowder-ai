@@ -2,14 +2,25 @@
  * F193 Phase I: dispatch proposal approval card block.
  *
  * Shown in the source thread when a cat requests assign_work cross-thread dispatch.
- * Informational only — no `actions` array.  Decisions happen in the F246
- * Approval Hub panel (the canonical decision surface).  This is a permanent
- * boundary: approval cards are status indicators, not interactive controls.
+ * The publication has no actions. Chat/Inbox can host the original domain
+ * writer only after a fresh canonical read verifies this exact publication.
  */
 
 import type { DispatchProposal, RichCardBlock } from '@cat-cafe/shared';
 
-export function buildDispatchProposalCardBlock(proposal: DispatchProposal): RichCardBlock {
+type DispatchCardInput = Pick<
+  DispatchProposal,
+  'proposalId' | 'content' | 'targetThreadId' | 'targetCats' | 'senderCatId'
+> & {
+  proposedAction?: Pick<
+    NonNullable<DispatchProposal['proposedAction']>,
+    'actionFamily' | 'successorSlot' | 'mode' | 'subjectRef'
+  > & {
+    terminalPredicate?: Pick<NonNullable<NonNullable<DispatchProposal['proposedAction']>['terminalPredicate']>, 'kind'>;
+  };
+};
+
+export function buildDispatchProposalCardBlock(proposal: DispatchCardInput): RichCardBlock {
   const contentPreview = proposal.content.length > 200 ? `${proposal.content.slice(0, 197)}…` : proposal.content;
   const action = proposal.proposedAction;
 

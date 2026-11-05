@@ -35,6 +35,17 @@ function repairJudgment(overrides = {}) {
     measurementResultRef: 'measurement:f267/f313/9028c961c203',
     sourceSignalRefs: ['source-message:0001787835904741-000003-1efb6454#0'],
     repairTargetHint: { featureId: 'F188', componentId: 'evidence-reader' },
+    decisionExplanation: {
+      schemaVersion: 1,
+      expectedChange: 'Resolve drill refs from the repository root.',
+      beforeSummary: 'A repo-relative drill ref fails when the reader runs from a package directory.',
+      afterSummary: 'The same exact ref opens from both repository and package working directories.',
+      changeSetSummary: 'Use the repository root for exact drill resolution and keep the existing ref identity.',
+      attributionBoundary: 'This addresses cwd resolution only; it does not validate malformed source refs.',
+      independentVerification: 'Run the same ref from repository root and package cwd on the exact candidate.',
+      rejectedCandidates: ['Rewrite the stored ref to an absolute machine-local path.'],
+      costAndRollback: 'One reversible resolver change; revert it if either existing read path regresses.',
+    },
     ...overrides,
   };
 }
@@ -48,6 +59,7 @@ describe('FrictionAnalysisFindingV1', () => {
       'measurementResultRef',
       'sourceSignalRefs',
       'repairTargetHint',
+      'decisionExplanation',
     ]) {
       const invalid = repairJudgment();
       delete invalid[field];
@@ -106,6 +118,8 @@ describe('FrictionAnalysisFindingV1', () => {
     assert.equal(finding.repairTargetResolution.target.ownerCatId, 'codex-sol');
     assert.ok(Object.isFrozen(finding));
     assert.ok(Object.isFrozen(finding.falsifier));
+    assert.ok(Object.isFrozen(finding.decisionExplanation));
+    assert.ok(Object.isFrozen(finding.decisionExplanation.rejectedCandidates));
     assert.ok(Object.isFrozen(finding.sourceSignalRefs));
     assert.equal(serializeFrictionAnalysisFinding(finding), serializeFrictionAnalysisFinding(replay));
     assert.equal(digestFrictionAnalysisFinding(finding), digestFrictionAnalysisFinding(replay));

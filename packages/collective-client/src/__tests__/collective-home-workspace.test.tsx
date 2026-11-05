@@ -4,7 +4,12 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { CollectiveWorkspace } from '../CollectiveWorkspace.js';
-import type { ClientSnapshot, CollectiveEventEnvelope, CollectiveWorkProjection } from '../client-types.js';
+import type {
+  ClientSnapshot,
+  CollectiveEventEnvelope,
+  CollectiveRoadmapRecord,
+  CollectiveWorkProjection,
+} from '../client-types.js';
 import { projectCollectiveHome } from '../collective-home-model.js';
 import { firstEntryBrowseKey } from '../first-entry/first-entry-model.js';
 import { collectiveClientNamespace } from '../human-send-custody.js';
@@ -46,6 +51,33 @@ const source: CollectiveEventEnvelope = {
   body: '请把真实共同体首页接到公共工作记录。',
   acceptedAt: '2026-10-03T09:00:00.000Z',
 };
+
+it('exposes the shared work library in the normal channel without adding a private Host destination', async () => {
+  window.history.replaceState({}, '', '/?channelId=产品方向');
+  const existing = client(readySnapshot());
+  const shared = {
+    api: { list: vi.fn(async () => []) },
+    catalogue: [],
+    sourceMessage: () => undefined,
+    status: 'ready',
+    open: vi.fn(),
+    close: vi.fn(),
+    refresh: vi.fn(),
+    beginPublication: vi.fn(),
+  };
+  await act(async () =>
+    root.render(
+      <CollectiveWorkspace
+        embedded={false}
+        client={{ ...existing, artifacts: shared } as unknown as ReturnType<typeof useCollectiveClient>}
+      />,
+    ),
+  );
+  const library = [...container.querySelectorAll('button')].find((button) => button.textContent?.startsWith('作品'));
+  expect(library).toBeDefined();
+  await act(async () => library?.click());
+  expect(container.textContent).toContain('还没有共同作品');
+});
 
 const result: CollectiveEventEnvelope = {
   ...source,
@@ -148,6 +180,56 @@ const inaccessibleResultWork: CollectiveWorkProjection = {
   history: [],
 };
 
+const responsibilityRequestId = 'accountability_home1234';
+const responsibilityWork: CollectiveWorkProjection = {
+  v: 1,
+  serviceInstanceId: participant.serviceInstanceId,
+  collectiveId: participant.collectiveId,
+  workId: 'work_responsibility',
+  sourceEventId: source.eventId,
+  sourceLocation: { channelId: '产品方向' },
+  title: '接下 Project Task',
+  intendedOutcome: '受邀成员在原项目中明确接受或拒绝。',
+  proposedBy: { kind: 'human', humanId: 'human_requester', displayName: 'Requester' },
+  accountabilityRequests: [
+    {
+      accountabilityRequestId: responsibilityRequestId,
+      roadmapId: 'roadmap_responsibility',
+      targetHumanId: participant.humanId,
+      targetDisplayName: 'You',
+      requestedByHumanId: 'human_requester',
+      requestedByDisplayName: 'Requester',
+      requestEventId: 'evt_responsibility',
+      requestedAt: '2026-10-03T09:02:00.000Z',
+      status: 'pending',
+    },
+  ],
+  dependencyWorkIds: [],
+  lifecycle: 'committed',
+  status: 'unassigned',
+  revision: 2,
+  createdAt: '2026-10-03T09:01:00.000Z',
+  updatedAt: '2026-10-03T09:02:00.000Z',
+  history: [],
+};
+const responsibilityProject: CollectiveRoadmapRecord = {
+  v: 1,
+  serviceInstanceId: participant.serviceInstanceId,
+  collectiveId: participant.collectiveId,
+  roadmapId: 'roadmap_responsibility',
+  sourceEventId: source.eventId,
+  sourceLocation: { channelId: '产品方向' },
+  title: '责任交接项目',
+  purpose: '每次责任变化都由本人确认。',
+  accountableHumanId: 'human_requester',
+  workIds: [responsibilityWork.workId],
+  status: 'active',
+  revision: 2,
+  createdAt: '2026-10-03T09:00:00.000Z',
+  updatedAt: '2026-10-03T09:02:00.000Z',
+  history: [],
+};
+
 function readySnapshot(): ClientSnapshot {
   const collective = baseSnapshot.collective;
   const me = baseSnapshot.me;
@@ -173,11 +255,13 @@ function readySnapshot(): ClientSnapshot {
 function client(snapshot: ClientSnapshot) {
   return {
     snapshot,
+    switchAccount: vi.fn(),
     selectCollective: vi.fn(),
     createInvite: vi.fn(),
     pairHost: vi.fn(),
     leaveCollective: vi.fn(),
     sendMessage: vi.fn(),
+    respondWorkAccountability: vi.fn(async () => undefined),
   } as unknown as ReturnType<typeof useCollectiveClient>;
 }
 
@@ -280,18 +364,38 @@ it('opens the destination navigation from the collective home on narrow screens'
   ).toBe('true');
 });
 
+it('opens the current Human member profile from the identity card', async () => {
+  await act(async () => root.render(<CollectiveWorkspace embedded={false} client={client(readySnapshot())} />));
+
+  const identity = container.querySelector('summary[aria-label="当前身份：You"]');
+  expect(identity).not.toBeNull();
+  const profile = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
+    (button) => button.textContent === '看我的成员资料',
+  );
+  expect(profile).toBeDefined();
+  await act(async () => profile?.click());
+
+  expect(container.querySelector('[aria-label="成员资料"]')?.textContent).toContain('You');
+  expect(container.querySelector('[aria-label="# general"]')).not.toBeNull();
+});
+
 it('keeps a concrete channel target direct and returns home through the collective title', async () => {
   window.history.replaceState({}, '', '/?channelId=%E4%BA%A7%E5%93%81%E6%96%B9%E5%90%91');
-  await act(async () => root.render(<CollectiveWorkspace embedded={false} client={client(readySnapshot())} />));
+  const snapshot = readySnapshot();
+  await act(async () => root.render(<CollectiveWorkspace embedded={false} client={client(snapshot)} />));
 
   expect(container.querySelector('[data-testid="collective-home"]')).toBeNull();
   expect(container.querySelector('[aria-label="# 产品方向"]')).not.toBeNull();
+  const namespace = collectiveClientNamespace(snapshot);
+  expect(namespace).not.toBeUndefined();
+  expect(window.localStorage.getItem(`collective-channel:${namespace}`)).toBe('产品方向');
 
   const homeButton = container.querySelector<HTMLButtonElement>('[aria-label="打开猫咖共创组首页"]');
   expect(homeButton).not.toBeNull();
   await act(async () => homeButton?.click());
   expect(container.querySelector('[data-testid="collective-home"]')).not.toBeNull();
   expect(new URL(window.location.href).searchParams.has('channelId')).toBe(false);
+  expect(window.localStorage.getItem(`collective-channel:${namespace}`)).toBeNull();
 });
 
 it('opens a channel from a home receipt and records a reloadable channel target', async () => {
@@ -335,7 +439,7 @@ it('returns home when the active world is chosen without switching worlds', asyn
   expect(currentClient.selectCollective).not.toHaveBeenCalled();
 });
 
-it('does not carry a channel destination into a newly selected collective', async () => {
+it('does not invent a saved channel when a newly selected collective opens at home', async () => {
   window.history.replaceState({}, '', '/?channelId=%E4%BA%A7%E5%93%81%E6%96%B9%E5%90%91');
   const firstSnapshot = readySnapshot();
   const firstCollective = firstSnapshot.collective;
@@ -369,7 +473,7 @@ it('does not carry a channel destination into a newly selected collective', asyn
   expect(container.querySelector('[aria-label="# 产品方向"]')).toBeNull();
   const secondNamespace = collectiveClientNamespace({ ...firstSnapshot, collective: secondCollective });
   expect(secondNamespace).not.toBeUndefined();
-  expect(window.localStorage.getItem(`collective-channel:${secondNamespace}`)).toBe('general');
+  expect(window.localStorage.getItem(`collective-channel:${secondNamespace}`)).toBeNull();
 });
 
 it('lets an exact Host Work focus bypass the home and land on its public result', async () => {
@@ -420,6 +524,64 @@ it('lets an exact Host Work focus bypass the home and land on its public result'
 
   expect(container.querySelector('[data-testid="collective-home"]')).toBeNull();
   expect(container.textContent).toContain(result.body);
+  expect(new URL(window.location.href).searchParams.get('channelId')).toBe('产品方向');
+});
+
+it('lands a responsibility link on the exact Project Task and its target-Human actions', async () => {
+  window.history.replaceState({}, '', '/?hostOrigin=http%3A%2F%2Flocalhost%3A3000');
+  const base = readySnapshot();
+  const snapshot: ClientSnapshot = {
+    ...base,
+    collaboration: base.collaboration
+      ? { ...base.collaboration, works: [responsibilityWork], roadmaps: [responsibilityProject] }
+      : undefined,
+  };
+  const post = vi.spyOn(window.parent, 'postMessage');
+  await act(async () => root.render(<CollectiveWorkspace embedded client={client(snapshot)} />));
+  await act(async () => {
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        source: window.parent,
+        origin: 'http://localhost:3000',
+        data: {
+          type: 'collective:host-context-init',
+          bridgeId: 'bridge_12345678',
+          serviceInstanceId: participant.serviceInstanceId,
+          collectiveId: participant.collectiveId,
+          connectionId: participant.connectionId,
+          humanId: participant.humanId,
+          authorityStatus: 'connected',
+        },
+      }),
+    );
+  });
+  const context = post.mock.calls.filter(([body]) => body.type === 'collective:client-context').at(-1)?.[0];
+  if (!context) throw new Error('Expected the current Host context');
+  await act(async () => {
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        source: window.parent,
+        origin: 'http://localhost:3000',
+        data: {
+          type: 'collective:host-focus-project-work',
+          bridgeId: context.bridgeId,
+          contextId: context.contextId,
+          contextRevision: context.revision,
+          workId: responsibilityWork.workId,
+          workRevision: responsibilityWork.revision,
+          channelId: '产品方向',
+          roadmapId: responsibilityProject.roadmapId,
+          accountabilityRequestId: responsibilityRequestId,
+        },
+      }),
+    );
+  });
+
+  expect(container.querySelector('[data-testid="collective-home"]')).toBeNull();
+  expect(container.querySelector('[aria-label="项目 · 责任交接项目"]')).not.toBeNull();
+  expect(container.textContent).toContain(responsibilityWork.title);
+  expect(container.textContent).toContain('接受负责');
+  expect(container.textContent).toContain('暂不接受');
   expect(new URL(window.location.href).searchParams.get('channelId')).toBe('产品方向');
 });
 
@@ -492,4 +654,63 @@ it('keeps an exact Host Work focus when the first-entry guide starts after parti
 
   expect(container.textContent).toContain(result.body);
   expectProductTarget(loaded);
+});
+
+it.each([
+  '我的猫…',
+  '已允许的任务…',
+  '我的日程…',
+  '重新连接…',
+])('closes channel navigation when entering %s from its collective menu', async (label) => {
+  window.history.replaceState({}, '', '/?channelId=产品方向&hostOrigin=http%3A%2F%2Flocalhost%3A3000');
+  const snapshot = readySnapshot();
+  markPairStarted(snapshot);
+  await act(async () => root.render(<CollectiveWorkspace embedded client={client(snapshot)} />));
+  await connectHost();
+  await act(async () => container.querySelector<HTMLButtonElement>('.mobile-navigation')?.click());
+  expect(container.querySelector('.collective-shell')?.getAttribute('data-navigation-open')).toBe('true');
+  const action = [...container.querySelectorAll<HTMLButtonElement>('.collective-menu button')].find((button) =>
+    button.textContent?.startsWith(label),
+  );
+  expect(action).toBeDefined();
+  await act(async () => action?.click());
+  expect(container.querySelector('.collective-shell')?.getAttribute('data-navigation-open')).toBe('false');
+  if (label === '我的猫…') expect(container.querySelector('.members-page [data-host-ui-slot="roster"]')).not.toBeNull();
+});
+
+it('opens the one member destination for a current Host request and rejects foreign or stale requests', async () => {
+  window.history.replaceState({}, '', '/?channelId=产品方向&hostOrigin=http%3A%2F%2Flocalhost%3A3000');
+  const snapshot = readySnapshot();
+  markPairStarted(snapshot);
+  await act(async () => root.render(<CollectiveWorkspace embedded client={client(snapshot)} />));
+  const context = await connectHost();
+  const data = {
+    type: 'collective:host-member-list-open',
+    bridgeId: context.bridgeId,
+    contextId: context.contextId,
+    revision: context.revision,
+  };
+  const send = (message = data, origin = 'http://localhost:3000') =>
+    act(async () =>
+      window.dispatchEvent(new MessageEvent('message', { data: message, origin, source: window.parent })),
+    );
+  await send(data, 'https://foreign.example');
+  await send({ ...data, revision: data.revision + 1 });
+  expect(container.querySelector('.members-page')).toBeNull();
+  await send();
+  expect(container.querySelector('.members-page [data-host-ui-slot="roster"]')).not.toBeNull();
+});
+
+it('removes the covered channel from interaction while the full member page is open and restores the channel on return', async () => {
+  window.history.replaceState({}, '', '/?channelId=产品方向');
+  const snapshot = readySnapshot();
+  await act(async () => root.render(<CollectiveWorkspace embedded={false} client={client(snapshot)} />));
+  const scene = container.querySelector<HTMLElement>('.channel-scene');
+  expect(scene?.hidden).toBe(false);
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="查看成员"]')?.click());
+  expect(container.querySelector('.members-page')).not.toBeNull();
+  expect(scene?.hidden).toBe(true);
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="关闭成员资料"]')?.click());
+  expect(scene?.hidden).toBe(false);
+  expect(container.querySelector('.members-page')).toBeNull();
 });

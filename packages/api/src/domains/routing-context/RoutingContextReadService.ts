@@ -3,7 +3,12 @@ import {
   type RoutingContextReadModelV1,
   routingContextReadModelV1Schema,
 } from '@cat-cafe/shared';
-import type { ResolveRoutingContextInput, RoutingContextResolutionWithSources } from './RoutingContextResolver.js';
+import type { RoutingExecutionBindingProof } from '../../config/account-routing-capacity.js';
+import type {
+  ResolveRoutingContextInput,
+  RoutingContextResolution,
+  RoutingContextResolutionWithSources,
+} from './RoutingContextResolver.js';
 
 const MAX_READ_MODEL_LEDGER_ITEMS = 10_000;
 
@@ -17,10 +22,16 @@ export interface RoutingCandidateCatalogSnapshot {
 }
 
 export interface RoutingCandidateCatalogSource {
-  load(input: { ownerId: string; targetCatIds?: readonly string[] }): Promise<RoutingCandidateCatalogSnapshot>;
+  load(input: {
+    ownerId: string;
+    targetCatIds?: readonly string[];
+    observedAt?: number;
+    executionBindings?: readonly RoutingExecutionBindingProof[];
+  }): Promise<RoutingCandidateCatalogSnapshot>;
 }
 
 interface RoutingContextReadResolver {
+  resolve(input: ResolveRoutingContextInput): Promise<RoutingContextResolution>;
   resolveWithSources(input: ResolveRoutingContextInput): Promise<RoutingContextResolutionWithSources>;
 }
 
@@ -36,13 +47,50 @@ export interface RoutingContextReadInput {
   targetCatIds?: readonly string[];
 }
 
+export type RoutingSnapshotReadModel = Pick<RoutingContextReadModelV1, 'resolution'>;
+
+function projectResolution(
+  loaded: RoutingContextResolution,
+  catalog: RoutingCandidateCatalogSnapshot,
+): RoutingSnapshotReadModel['resolution'] {
+  return loaded.status === 'fresh'
+    ? {
+        state: 'fresh',
+        snapshot: loaded.snapshot,
+        inputRevisionRef: loaded.inputRevisionRef,
+        sourceRefs: {
+          signalEventIds: latest(loaded.sourceRefs.signalEventIds),
+          preferenceRevisionIds: latest(loaded.sourceRefs.preferenceRevisionIds),
+          dossierRevisions: loaded.sourceRefs.dossierRevisions,
+        },
+      }
+    : {
+        state: 'degraded',
+        reason: loaded.reason,
+        affectedCatIds: loaded.affectedCatIds,
+        candidateBindings: catalog.candidates,
+      };
+}
+
 export class RoutingContextReadService {
   constructor(private readonly dependencies: RoutingContextReadServiceDependencies) {}
+
+  /** Selection is a decision read, not a history/presentation read. Never load the audit ledger here. */
+  async readSnapshot(input: RoutingContextReadInput): Promise<RoutingSnapshotReadModel> {
+    const catalog = await this.dependencies.catalogSource.load(input);
+    const resolution = await this.dependencies.resolver.resolve({
+      ...input,
+      catalogRevision: catalog.catalogRevision,
+      candidates: catalog.candidates,
+    });
+    return { resolution: projectResolution(resolution, catalog) };
+  }
 
   async read(input: RoutingContextReadInput): Promise<RoutingContextReadModelV1> {
     const catalog = await this.dependencies.catalogSource.load({
       ownerId: input.ownerId,
       targetCatIds: input.targetCatIds,
+      observedAt: input.observedAt,
     });
     const loaded = await this.dependencies.resolver.resolveWithSources({
       ownerId: input.ownerId,
@@ -51,24 +99,7 @@ export class RoutingContextReadService {
       intent: input.intent,
       candidates: catalog.candidates,
     });
-    const resolution =
-      loaded.resolution.status === 'fresh'
-        ? {
-            state: 'fresh' as const,
-            snapshot: loaded.resolution.snapshot,
-            inputRevisionRef: loaded.resolution.inputRevisionRef,
-            sourceRefs: {
-              signalEventIds: latest(loaded.resolution.sourceRefs.signalEventIds),
-              preferenceRevisionIds: latest(loaded.resolution.sourceRefs.preferenceRevisionIds),
-              dossierRevisions: loaded.resolution.sourceRefs.dossierRevisions,
-            },
-          }
-        : {
-            state: 'degraded' as const,
-            reason: loaded.resolution.reason,
-            affectedCatIds: loaded.resolution.affectedCatIds,
-            candidateBindings: catalog.candidates,
-          };
+    const resolution = projectResolution(loaded.resolution, catalog);
     return routingContextReadModelV1Schema.parse({
       v: 1,
       ownerId: input.ownerId,

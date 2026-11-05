@@ -1,3 +1,4 @@
+import { humanSessionFirstLine, isCatCafeSessionInput, LOCAL_SESSION_CANDIDATE_LIMIT } from '@cat-cafe/shared';
 import { CodexActiveWriterRecoveryError } from '../../runtime-session/CodexSessionReplacementProvenance.js';
 import type { LocalSessionList, LocalSessionMetadata } from '../../types.js';
 import { asCodexAppServerRecord } from './CodexAppServerEventMapper.js';
@@ -11,7 +12,8 @@ export async function listCodexImportSessions(
   client: CodexAppServerNativeRpcClient,
   limit: number,
 ): Promise<LocalSessionList> {
-  if (!Number.isInteger(limit) || limit < 1 || limit > 20) throw new Error('Invalid recent-session limit');
+  if (!Number.isInteger(limit) || limit < 1 || limit > LOCAL_SESSION_CANDIDATE_LIMIT)
+    throw new Error('Invalid recent-session limit');
   // Read interactive sources separately: newer Cafe exec/Desktop carriers must
   // not consume the CLI page. Headless exec sessions remain importable by ID.
   async function readPage(source: 'cli' | 'vscode', pageSize: number, cursor?: string) {
@@ -30,7 +32,12 @@ export async function listCodexImportSessions(
     for (const raw of response.data.slice(0, pageSize)) {
       // Local app-server rejects originators filters. Cafe and Desktop both
       // report vscode; use indexed originator without opening the rollout.
-      if (asCodexAppServerRecord(raw)?.originator === 'cat-cafe') continue;
+      const thread = asCodexAppServerRecord(raw);
+      if (
+        thread?.originator === 'cat-cafe' ||
+        (typeof thread?.preview === 'string' && isCatCafeSessionInput(thread.preview))
+      )
+        continue;
       try {
         sessions.push(projectCodexLocalSession(raw));
       } catch {
@@ -43,7 +50,7 @@ export async function listCodexImportSessions(
     };
   }
 
-  const cli = await readPage('cli', limit);
+  const cli = await readPage('cli', Math.min(limit, INDEX_PAGE_SIZE));
   const sessions = new Map(cli.sessions.map((session) => [session.sessionId, session]));
   const desktopIds = new Set<string>();
   let cursor: string | undefined;
@@ -73,7 +80,7 @@ export function projectCodexLocalSession(raw: unknown): LocalSessionMetadata {
   return {
     sessionId: thread.id,
     clientId: 'openai',
-    firstPrompt: typeof thread.preview === 'string' ? thread.preview.slice(0, 500) : '',
+    firstPrompt: typeof thread.preview === 'string' ? humanSessionFirstLine(thread.preview) : '',
     projectPath: thread.cwd,
     lastActivityAt: typeof thread.updatedAt === 'number' ? thread.updatedAt * 1000 : 0,
     turnCount: null,

@@ -41,7 +41,7 @@ test('the Host project, current Task revision and live source record fence the d
   f.messages.append({
     userId: 'owner',
     threadId: other.id,
-    catId: 'codex-sol',
+    from: { kind: 'agent', catId: 'codex-sol' },
     content: '别的项目',
     mentions: [],
     timestamp: Date.now(),

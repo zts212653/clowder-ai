@@ -25,6 +25,7 @@ import {
   parseSvgAssetToEvidence,
 } from './CatCafeScannerParsing.js';
 import type { RepoScanner, ScannedEvidence } from './interfaces.js';
+import { lessonSections } from './lesson-sections.js';
 import { buildMarkdownDocumentPassages } from './MarkdownPassageIndexer.js';
 import {
   buildTasteDecisionPassage,
@@ -61,14 +62,7 @@ export class CatCafeScanner implements RepoScanner {
     const results: ScannedEvidence[] = [];
 
     // E8: Split lessons-learned.md into per-lesson entries
-    for (const item of splitLessonsLearned(projectRoot)) {
-      results.push({
-        item,
-        provenance: { tier: 'authoritative', source: 'lessons-learned.md' },
-        rawContent: '',
-        passages: [],
-      });
-    }
+    results.push(...splitLessonsLearned(projectRoot));
 
     // Discover all .md files, filtering out excluded child collection paths (AC-H1)
     for (const file of discoverFiles(projectRoot)) {
@@ -184,17 +178,9 @@ function splitLessonsLearned(docsRoot: string) {
     return [];
   }
 
-  type LessonItem = ScannedEvidence['item'];
-  const results: LessonItem[] = [];
-  const sections = content.split(/^### /m).slice(1);
-
-  for (const section of sections) {
-    const titleMatch = section.match(/^(LL-\d+):\s*(.+)/);
-    if (!titleMatch) continue;
-
-    const llId = titleMatch[1];
-    const title = `${llId}: ${titleMatch[2].trim()}`;
-    const body = section.slice(section.indexOf('\n') + 1).trim();
+  const results: ScannedEvidence[] = [];
+  for (const section of lessonSections(content)) {
+    const body = section.content.slice(section.content.indexOf('\n') + 1).trim();
     const summary = body.length > 300 ? `${body.slice(0, 297)}...` : body;
     const keywords: string[] = [];
     const kwMatch = body.match(/关联：(.+)/);
@@ -208,14 +194,19 @@ function splitLessonsLearned(docsRoot: string) {
     }
 
     results.push({
-      anchor: llId,
-      kind: 'lesson',
-      status: 'active',
-      title,
-      summary,
-      keywords: keywords.length > 0 ? keywords : undefined,
-      sourcePath: 'lessons-learned.md',
-      updatedAt: new Date().toISOString(),
+      item: {
+        anchor: section.anchor,
+        kind: 'lesson',
+        status: 'active',
+        title: section.title,
+        summary,
+        keywords: keywords.length > 0 ? keywords : undefined,
+        sourcePath: 'lessons-learned.md',
+        updatedAt: new Date().toISOString(),
+      },
+      provenance: { tier: 'authoritative', source: 'lessons-learned.md' },
+      rawContent: section.content,
+      passages: buildMarkdownDocumentPassages(section.content),
     });
   }
   return results;

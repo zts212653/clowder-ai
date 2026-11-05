@@ -6,9 +6,11 @@ import { useChatStore } from '@/stores/chatStore';
 import { SessionEventsViewer } from '../audit/SessionEventsViewer';
 import type { RightStatusPanelProps } from '../RightStatusPanel';
 import { SessionChainPanel, type SessionChainProjection, type SessionSummary } from '../SessionChainPanel';
+import { useShellCopy } from '../shell/shell-copy';
 import { collectSnapshotActiveCats, deriveActiveCats } from '../status-helpers';
 import { StatusCatGroupV2 } from './StatusCatGroupV2';
 import { StatusDetailsV2 } from './StatusDetailsV2';
+import { statusPageCopy } from './status-page.shell-copy';
 import { projectStatusLastRuns } from './status-run-history';
 import './status-v2.css';
 
@@ -20,6 +22,7 @@ export function WorkspaceStatusPanelV2(props: RightStatusPanelProps) {
 }
 
 function StatusContents(props: RightStatusPanelProps) {
+  const t = useShellCopy(statusPageCopy);
   const messages = useChatStore((state) =>
     state.currentThreadId === props.threadId
       ? state.messages
@@ -81,14 +84,14 @@ function StatusContents(props: RightStatusPanelProps) {
         <div className="status-v2-layout" style={viewing ? { display: 'none' } : undefined}>
           <div className="status-v2-section status-v2-members">
             <h3>
-              成员 {currentIds.length} <span>· 运行中 {owner.runningCatIds.size}</span>
+              {t.members(currentIds.length)} <span>· {t.runningCount(owner.runningCatIds.size)}</span>
             </h3>
             {owner.loadError && (
               <div role="alert" className="status-v2-notice">
                 <span className="status-v2-dot" style={{ background: 'var(--semantic-critical)' }} />
                 {owner.loadError.message}
                 <button type="button" onClick={owner.onRefresh}>
-                  重试
+                  {t.retry}
                 </button>
               </div>
             )}
@@ -96,14 +99,14 @@ function StatusContents(props: RightStatusPanelProps) {
               <div role="alert" className="status-v2-notice">
                 {owner.actionError}
                 <button type="button" onClick={owner.onRefresh}>
-                  重新读取状态
+                  {t.refresh}
                 </button>
               </div>
             )}
             {owner.hasRecentCompact && (
               <p className="status-v2-notice">
                 <span className="status-v2-dot" style={{ background: 'var(--semantic-warning)' }} />
-                压缩后安全保护中 · 高风险操作可能被拦截
+                {t.safety}
               </p>
             )}
             {currentIds.map((catId) => (
@@ -118,13 +121,13 @@ function StatusContents(props: RightStatusPanelProps) {
             ))}
             {currentIds.length === 0 && (
               <p className="status-v2-muted">
-                {owner.loading ? '正在读取会话…' : owner.loadError ? '成员记录暂不可用' : '暂无成员'}
+                {owner.loading ? t.loading : owner.loadError ? t.membersUnavailable : t.noMembers}
               </p>
             )}
             {previousIds.length > 0 && (
               <div className="status-v2-previous">
                 <button type="button" aria-expanded={previousOpen} onClick={() => setPreviousOpen((value) => !value)}>
-                  {previousOpen ? '▾' : '›'} 以往成员 {previousIds.length}
+                  {previousOpen ? '▾' : '›'} {t.previousMembers(previousIds.length)}
                 </button>
                 {previousOpen &&
                   previousIds.map((catId) => (

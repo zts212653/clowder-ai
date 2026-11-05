@@ -301,3 +301,58 @@ describe('F323 deployment wait Hub projection', () => {
     await app.close();
   });
 });
+
+it('reads all visible projects with owning paths while masking foreign tasks and threads', async () => {
+  const app = Fastify();
+  const threads = [
+    { id: 'cafe', projectPath: '/project/cafe', title: 'Cafe', createdBy: 'user-a' },
+    { id: 'planet', projectPath: '/project/planet', title: 'Planet', createdBy: 'user-a' },
+    { id: 'foreign', projectPath: '/project/planet', title: 'Hidden', createdBy: 'user-b' },
+  ];
+  registerDeploymentWaitProjectionRoutes(app, {
+    threadStore: {
+      listCandidates: async (user, ids) => {
+        assert.equal(user, 'user-a');
+        return threads.filter((t) => ids.includes(t.id));
+      },
+    },
+    taskStore: {
+      listByKind: async () => [
+        activeWait({ id: 'c', threadId: 'cafe' }),
+        activeWait({ id: 'p', threadId: 'planet' }),
+        activeWait({ id: 'hidden-thread', threadId: 'foreign' }),
+        { ...activeWait({ id: 'hidden-task', threadId: 'cafe' }), userId: 'user-b' },
+      ],
+    },
+    observeDeployment: async () => currentObservation(),
+    readCandidate: async () => null,
+    proveCandidateInclusion: async () => null,
+  });
+  try {
+    const result = await app.inject({
+      url: '/api/runtime-deployment/waits?scope=all',
+      headers: { 'x-cat-cafe-user': 'user-a' },
+    });
+    assert.equal(result.statusCode, 200, result.body);
+    assert.equal(result.json().scope, 'all');
+    assert.deepEqual(
+      result.json().items.map((i) => [i.taskId, i.projectPath]),
+      [
+        ['c', '/project/cafe'],
+        ['p', '/project/planet'],
+      ],
+    );
+    assert.equal((await app.inject({ url: '/api/runtime-deployment/waits?scope=all' })).statusCode, 401);
+    assert.equal(
+      (
+        await app.inject({
+          url: '/api/runtime-deployment/waits?scope=all&projectPath=/project/cafe',
+          headers: { 'x-cat-cafe-user': 'user-a' },
+        })
+      ).statusCode,
+      400,
+    );
+  } finally {
+    await app.close();
+  }
+});

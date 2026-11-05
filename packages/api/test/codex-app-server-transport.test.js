@@ -109,6 +109,13 @@ class ProtocolWire {
   }
 
   respondThread(message, threadId) {
+    if (message.method === 'thread/resume' && message.params.initialTurnsPage && !this.experimentalApiEnabled) {
+      this.inbox.push({
+        id: message.id,
+        error: { code: -32600, message: 'thread/resume.initialTurnsPage requires experimentalApi capability' },
+      });
+      return;
+    }
     if (this.rejectApprovalsReviewer && message.params.approvalsReviewer) {
       this.inbox.push({
         id: message.id,
@@ -153,6 +160,9 @@ class ProtocolWire {
       case 'thread/resume':
         this.respondThread(message, message.params.threadId);
         break;
+      case 'thread/turns/list':
+        this.inbox.push({ id: message.id, result: { data: [], nextCursor: null } });
+        break;
       case 'turn/start':
         this.respondTurn(message);
         break;
@@ -176,14 +186,52 @@ class ProtocolWire {
   }
 }
 
+test('app-server rejects unpaired surrogates before sending any malformed request', async () => {
+  for (const overrides of [
+    { prompt: frozenPrompt('dispatch summary ends with \ud83d…') },
+    { developerInstructions: 'invalid instruction \udc3e' },
+    { config: { nested: { value: ['invalid config \ud83d'] } } },
+  ]) {
+    const wire = new ProtocolWire();
+    const write = wire.write.bind(wire);
+    wire.write = async (message) => {
+      await write(message);
+      if (message.method === 'turn/start') {
+        wire.inbox.push({
+          method: 'turn/completed',
+          params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed' } },
+        });
+      }
+    };
+    const client = new CodexAppServerClient({ wire });
+    const { values, error } = await collectFailure(
+      client.run({ prompt: frozenPrompt('valid 🐾'), thread: { kind: 'start' }, ...overrides }),
+    );
+
+    assert.match(error?.message ?? '', /invalid Unicode/);
+    const unsafeMethod = overrides.prompt ? 'turn/start' : 'thread/start';
+    assert.equal(
+      wire.writes.some((message) => message.method === unsafeMethod),
+      false,
+    );
+    assert.equal(
+      values.some((event) => event.type === 'app_server.lifecycle' && event.lifecycle.stage === 'failed'),
+      true,
+    );
+    assert.equal(values.at(-1)?.lifecycle?.stage, 'closed');
+    assert.equal(wire.closeCalls, 1);
+  }
+});
+
 test('app-server registers one exact active-run dispatcher and fences it at turn terminal', async () => {
   const wire = new ProtocolWire();
+  const initialPrompt = 'initial work 🐾; literal \\ud83d';
   let dispatcher;
   let releaseCount = 0;
   const client = new CodexAppServerClient({ wire });
   const outputPromise = collect(
     client.run({
-      prompt: frozenPrompt('initial work'),
+      prompt: frozenPrompt(initialPrompt),
       thread: { kind: 'start' },
       activeRunDispatch: {
         invocationId: 'turn-invocation-1',
@@ -198,6 +246,7 @@ test('app-server registers one exact active-run dispatcher and fences it at turn
   );
 
   await waitFor(() => dispatcher !== undefined);
+  assert.equal(wire.writes.find((message) => message.method === 'turn/start').params.input[0].text, initialPrompt);
   assert.deepEqual(dispatcher.capabilities, { append: true, steer: true, inputReadReceipt: true });
   assert.deepEqual(dispatcher.handle, {
     provider: 'openai_codex',
@@ -236,7 +285,7 @@ test('app-server registers one exact active-run dispatcher and fences it at turn
     { text: 'stale', messageIds: ['message-3'] },
     { force: false, expectedInvocationId: 'turn-invocation-stale' },
   );
-  assert.deepEqual(mismatched, { accepted: false, reason: 'active_run_mismatch' });
+  assert.deepEqual(mismatched, { accepted: false, reason: 'active_run_mismatch', acceptance: 'not_accepted' });
 
   wire.inbox.push({
     method: 'turn/completed',
@@ -248,7 +297,7 @@ test('app-server registers one exact active-run dispatcher and fences it at turn
     { text: 'too late', messageIds: ['message-4'] },
     { force: false, expectedInvocationId: 'turn-invocation-1' },
   );
-  assert.deepEqual(terminal, { accepted: false, reason: 'active_run_closed' });
+  assert.deepEqual(terminal, { accepted: false, reason: 'active_run_closed', acceptance: 'not_accepted' });
 });
 
 test('first input read requires its exact native completion, not turn acceptance or a duplicate', async () => {
@@ -444,7 +493,7 @@ test('a rejected steer cannot bind another turn', async () => {
     { text: 'lands on another turn', messageIds: ['message-stale'] },
     { force: false, expectedInvocationId: 'turn-invocation-rejected' },
   );
-  assert.deepEqual(rejected, { accepted: false, reason: 'active_run_mismatch' });
+  assert.deepEqual(rejected, { accepted: false, reason: 'active_run_mismatch', acceptance: 'unknown' });
   wire.inbox.push({
     method: 'turn/completed',
     params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed' } },
@@ -894,6 +943,32 @@ test('authoritative terminal result survives a cleanup failure', async () => {
   assert.equal(lifecycle.at(-1).cleanupError, 'cleanup exploded');
 });
 
+test('ordinary resume loads its turn baseline without requiring experimental capabilities', async () => {
+  const wire = new ProtocolWire();
+  const write = wire.write.bind(wire);
+  wire.write = async (message) => {
+    await write(message);
+    if (message.method === 'turn/start')
+      wire.inbox.push({
+        method: 'turn/completed',
+        params: { threadId: 'thread-existing', turn: { id: 'turn-1', status: 'completed' } },
+      });
+  };
+  const { error } = await collectFailure(
+    new CodexAppServerClient({ wire }).run({
+      prompt: frozenPrompt('continue ordinary work'),
+      thread: { kind: 'resume', threadId: 'thread-existing' },
+    }),
+  );
+  assert.equal(error, null);
+  assert.equal(wire.experimentalApiEnabled, false, 'ordinary resume must not broaden the session capability set');
+  const resume = wire.writes.find((message) => message.method === 'thread/resume');
+  assert.equal(resume.params.excludeTurns, true);
+  const baseline = wire.writes.findIndex((message) => message.method === 'thread/turns/list');
+  assert.ok(baseline >= 0 && baseline < wire.writes.findIndex((message) => message.method === 'turn/start'));
+  assert.equal(wire.writes[baseline].params.itemsView, 'notLoaded');
+});
+
 test('F291 app-server preserves Fast and explicit Standard on thread start/resume', async () => {
   for (const testCase of [
     { thread: { kind: 'start' }, serviceTier: 'fast', expected: 'fast', method: 'thread/start' },
@@ -1050,6 +1125,15 @@ test('exact active-writer resume failure retires the conflicting host and preser
   first.reusedSessionHost = true;
   const firstWrite = first.write.bind(first);
   first.write = async (message) => {
+    if (message.method === 'thread/turns/list') {
+      assert.equal(message.params.itemsView, 'notLoaded');
+      first.writes.push(message);
+      first.inbox.push({
+        id: message.id,
+        result: { data: [{ id: 'turn-existing', status: 'inProgress', startedAt: 1_786_630_000 }], nextCursor: null },
+      });
+      return;
+    }
     if (message.method === 'thread/resume') {
       first.writes.push(message);
       first.inbox.push({
@@ -1145,6 +1229,15 @@ test('active-writer diagnostics do not mistake a reused warm affinity host for a
   first.reusedSessionHost = true;
   const firstWrite = first.write.bind(first);
   first.write = async (message) => {
+    if (message.method === 'thread/turns/list') {
+      assert.equal(message.params.itemsView, 'notLoaded');
+      first.writes.push(message);
+      first.inbox.push({
+        id: message.id,
+        result: { data: [{ id: 'turn-local', status: 'inProgress', startedAt: 100 }], nextCursor: null },
+      });
+      return;
+    }
     if (message.method === 'thread/resume') {
       first.writes.push(message);
       first.inbox.push({

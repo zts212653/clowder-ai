@@ -51,11 +51,11 @@ export interface ApprovalProducerCatalogEntry {
    *   F276 — candidate `sourceRef` can come from an owner-validated deferred receipt
    *          or owner evidence rather than one InvocationRecord; needs scheduler /
    *          deferred route coverage before it could be attested.
-   *   F292 — MeetingIntake lands through signal admission and never calls
-   *          ApprovalIngress.publish, so this value has no effect on this ingress.
    */
   systemOriginExemption: 'server_attested' | 'forbidden';
   history: boolean;
+  /** Required admission choice: terminal decisions are persisted to the canonical card thread. */
+  decisionReceipt: { mode: 'shared-origin-thread'; routePrefix?: string };
   /** Null keeps the producer on its existing binary reject path. */
   humanDispositionReasonCodes: readonly HumanDispositionReasonCode[] | null;
 }
@@ -83,6 +83,7 @@ export const APPROVAL_PRODUCER_CATALOG = {
     // body cannot rewrite any of the three. Verified at the creation site by opus5.
     systemOriginExemption: 'server_attested',
     history: true,
+    decisionReceipt: { mode: 'shared-origin-thread' },
     humanDispositionReasonCodes: null,
   },
   F139: {
@@ -95,6 +96,7 @@ export const APPROVAL_PRODUCER_CATALOG = {
     sourcePolicy: 'message-or-event',
     systemOriginExemption: 'forbidden',
     history: true,
+    decisionReceipt: { mode: 'shared-origin-thread' },
     humanDispositionReasonCodes: null,
   },
   F193: {
@@ -111,6 +113,7 @@ export const APPROVAL_PRODUCER_CATALOG = {
     // @codex-luna, PR #1349 review — not independently re-walked by opus5.
     systemOriginExemption: 'server_attested',
     history: true,
+    decisionReceipt: { mode: 'shared-origin-thread' },
     humanDispositionReasonCodes: null,
   },
   F221: {
@@ -123,6 +126,7 @@ export const APPROVAL_PRODUCER_CATALOG = {
     sourcePolicy: 'message-or-event',
     systemOriginExemption: 'forbidden',
     history: true,
+    decisionReceipt: { mode: 'shared-origin-thread' },
     humanDispositionReasonCodes: null,
   },
   F225: {
@@ -138,6 +142,7 @@ export const APPROVAL_PRODUCER_CATALOG = {
     // InvocationRecord; the request body cannot rewrite any of them.
     systemOriginExemption: 'server_attested',
     history: true,
+    decisionReceipt: { mode: 'shared-origin-thread' },
     humanDispositionReasonCodes: HUMAN_DISPOSITION_REASON_CODES,
   },
   F231: {
@@ -154,6 +159,7 @@ export const APPROVAL_PRODUCER_CATALOG = {
     // → reject); omitting it falls back to the record value. Verified by opus5.
     systemOriginExemption: 'server_attested',
     history: true,
+    decisionReceipt: { mode: 'shared-origin-thread' },
     humanDispositionReasonCodes: null,
   },
   F260: {
@@ -170,6 +176,7 @@ export const APPROVAL_PRODUCER_CATALOG = {
     // re-walked by opus5.
     systemOriginExemption: 'server_attested',
     history: true,
+    decisionReceipt: { mode: 'shared-origin-thread' },
     humanDispositionReasonCodes: null,
   },
   F276: {
@@ -182,19 +189,8 @@ export const APPROVAL_PRODUCER_CATALOG = {
     sourcePolicy: 'message-required',
     systemOriginExemption: 'forbidden',
     history: true,
+    decisionReceipt: { mode: 'shared-origin-thread' },
     humanDispositionReasonCodes: ['not_important', 'wrong_lane', 'bad_evidence', 'wrong', 'other'],
-  },
-  F292: {
-    lifecycleVersion: 1,
-    label: '会议',
-    badgeLabel: 'Meeting',
-    colorToken: 'var(--semantic-info, #3b82f6)',
-    decisionEndpointBase: '/api/meeting-intakes',
-    decisionSurface: 'approval_hub',
-    sourcePolicy: 'message-or-event',
-    systemOriginExemption: 'forbidden',
-    history: true,
-    humanDispositionReasonCodes: null,
   },
   F306: {
     lifecycleVersion: 1,
@@ -210,7 +206,8 @@ export const APPROVAL_PRODUCER_CATALOG = {
     // not call ApprovalIngress, but this required catalog claim stays accurate if
     // shared ingress validation is reused later.
     systemOriginExemption: 'server_attested',
-    history: false,
+    history: true,
+    decisionReceipt: { mode: 'shared-origin-thread', routePrefix: '/api/runtime-interactions' },
     humanDispositionReasonCodes: null,
   },
   F321: {
@@ -227,6 +224,7 @@ export const APPROVAL_PRODUCER_CATALOG = {
     // id plus its exact revision; original source coordinates come from Event.
     systemOriginExemption: 'server_attested',
     history: true,
+    decisionReceipt: { mode: 'shared-origin-thread' },
     humanDispositionReasonCodes: null,
   },
   F266: {
@@ -241,6 +239,7 @@ export const APPROVAL_PRODUCER_CATALOG = {
     // derives user/cat/thread/message identity from its InvocationRecord.
     systemOriginExemption: 'server_attested',
     history: true,
+    decisionReceipt: { mode: 'shared-origin-thread' },
     humanDispositionReasonCodes: null,
   },
 } as const satisfies Record<ApprovalProducerId, ApprovalProducerCatalogEntry>;
@@ -257,7 +256,6 @@ export const APPROVAL_PRODUCER_IDS = Object.freeze([
   'F221',
   'F321',
   'F276',
-  'F292',
   'F306',
 ] as const satisfies readonly ApprovalProducerId[]);
 

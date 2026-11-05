@@ -1,5 +1,6 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { resolvePromptTemplateVariables } from '@cat-cafe/shared';
 
 export type SyncTargetContentKind = 'text' | 'json';
 
@@ -74,7 +75,7 @@ export function checkDrift(target: SyncTarget): DriftResult {
   };
 }
 
-export function applySync(target: SyncTarget, dryRun: boolean): void {
+export function applySync(target: SyncTarget, dryRun: boolean, quiet = false): void {
   const rendered = target.render();
 
   if (dryRun) {
@@ -92,12 +93,20 @@ export function applySync(target: SyncTarget, dryRun: boolean): void {
   if (target.executable || target.targetPath.endsWith('.sh')) {
     chmodSync(target.targetPath, 0o755);
   }
-  console.log(`synced ${target.name} -> ${target.targetPath}`);
+  if (!quiet) console.log(`synced ${target.name} -> ${target.targetPath}`);
 }
 
 function readUserHook(projectRoot: string, name: string): string {
   const path = join(projectRoot, '.claude', 'hooks', 'user-level', name);
-  return readFileSync(path, 'utf-8');
+  const source = readFileSync(path, 'utf-8');
+  if (!source.includes('${CO_CREATOR_ROLE}') && !source.includes('${DECISION_ROLE}')) return source;
+  const values = resolvePromptTemplateVariables();
+  const quote = (text: string): string => `'${text.replaceAll("'", "'\"'\"'")}'`;
+  const bindings = ['CO_CREATOR_ROLE', 'DECISION_ROLE']
+    .map((key) => `readonly ${key}=${quote(values[key])}`)
+    .join('\n');
+  const firstNewline = source.indexOf('\n');
+  return `${source.slice(0, firstNewline + 1)}${bindings}\n${source.slice(firstNewline + 1)}`;
 }
 
 function bashCommand(scriptPath: string): string {

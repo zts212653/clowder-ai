@@ -91,7 +91,7 @@ export function registerOrdinaryTextQuoteJourney(suite) {
           await route.fulfill({
             status: 200,
             contentType: 'application/json',
-            body: JSON.stringify({ userMessageId: 'file-quote-send-receipt' }),
+            body: JSON.stringify({ status: 'queued', userMessageId: 'file-quote-send-receipt' }),
           });
           return true;
         },

@@ -26,7 +26,7 @@ export async function saveHubCatEditor(props: HubCatEditorProps, data: ReturnTyp
     originalProfile,
     showCodexSettings,
     setFieldErrors,
-    setError,
+    setSaveError: setError,
     setSaving,
   } = data;
 
@@ -36,7 +36,7 @@ export async function saveHubCatEditor(props: HubCatEditorProps, data: ReturnTyp
   if (Object.keys(errors).length > 0) {
     setFieldErrors(errors);
     setError(props.presentation === 'page' ? null : `请填写必填字段：${errorMessages.join('、')}`);
-    return;
+    return false;
   }
   setFieldErrors({});
   setSaving(true);
@@ -50,19 +50,22 @@ export async function saveHubCatEditor(props: HubCatEditorProps, data: ReturnTyp
   try {
     const effectiveForm = !cat && selectedProfile?.authType === 'api_key' ? withDefaultModelMentionPattern(form) : form;
     const payloadContext = { accountAuthType: selectedProfile?.authType ?? null };
-    const catPayload = cat
+    const catPayload: Record<string, unknown> = cat
       ? buildCatPatchPayload(effectiveForm, cat, payloadContext)
       : buildCatPayload(effectiveForm, cat, payloadContext);
     const rollbackCatPayload = cat
-      ? cat.identityProtection?.kind === 'builtin-cloud'
-        ? buildCatPatchPayload(initialState(cat, null), cat, {
-            accountAuthType: originalProfile?.authType ?? null,
-            forceServiceTier: true,
-          })
-        : buildCatPayload(initialState(cat, null), cat, {
-            accountAuthType: originalProfile?.authType ?? null,
-            forceServiceTier: true,
-          })
+      ? buildCatPatchPayload(
+          {
+            ...initialState(cat, null),
+            accountBindingMode: catPayload.accountBindingMode
+              ? (cat.accountBindingMode ?? 'follow')
+              : cat.accountBindingMode,
+          },
+          // Compare the original form with the values written, so unchanged client
+          // identity stays omitted and changed model/account fields are restored.
+          { ...cat, ...catPayload },
+          { accountAuthType: originalProfile?.authType ?? null, forceServiceTier: true },
+        )
       : null;
     const strategyEditable = Boolean(cat && strategyForm);
     const nextStrategyPayload = strategyEditable && strategyForm ? buildStrategyPayload(strategyForm) : null;
@@ -82,7 +85,7 @@ export async function saveHubCatEditor(props: HubCatEditorProps, data: ReturnTyp
       if (!strategyRes.ok) {
         const payload = (await strategyRes.json().catch(() => ({}))) as Record<string, unknown>;
         setError((payload.error as string) ?? `Session 策略保存失败 (${strategyRes.status})`);
-        return;
+        return false;
       }
       if (strategyBaselineHasOverride && baselineStrategyPayload) {
         rollbackSteps.push(async () => {
@@ -110,7 +113,7 @@ export async function saveHubCatEditor(props: HubCatEditorProps, data: ReturnTyp
       await rollbackMutations();
       const payload = (await res.json().catch(() => ({}))) as Record<string, unknown>;
       setError((payload.error as string) ?? `保存失败 (${res.status})`);
-      return;
+      return false;
     }
     const persistedCatBody = (await res.json().catch(() => ({}))) as { cat?: { id?: string } };
     const persistedCatId = persistedCatBody.cat?.id ?? cat?.id ?? null;
@@ -135,7 +138,6 @@ export async function saveHubCatEditor(props: HubCatEditorProps, data: ReturnTyp
     if (showCodexSettings && codexSettings && codexSettingsBaseline) {
       const codexPatches = buildCodexConfigPatches(codexSettings, codexSettingsBaseline);
       const rollbackCodexPatches = buildCodexConfigPatches(codexSettingsBaseline, codexSettings);
-      const appliedConfigPatchKeys: string[] = [];
       for (const patch of codexPatches) {
         const configRes = await apiFetch('/api/config', {
           method: 'PATCH',
@@ -143,31 +145,32 @@ export async function saveHubCatEditor(props: HubCatEditorProps, data: ReturnTyp
           body: JSON.stringify(patch),
         });
         if (!configRes.ok) {
-          const appliedRollbackPatches = rollbackCodexPatches.filter((rollbackPatch) =>
-            appliedConfigPatchKeys.includes(rollbackPatch.key),
-          );
-          for (const rollbackPatch of appliedRollbackPatches.reverse()) {
+          await rollbackMutations();
+          const payload = (await configRes.json().catch(() => ({}))) as Record<string, unknown>;
+          setError((payload.error as string) ?? `Codex 运行参数保存失败 (${configRes.status})`);
+          return false;
+        }
+        const rollbackPatch = rollbackCodexPatches.find((candidate) => candidate.key === patch.key);
+        if (rollbackPatch) {
+          rollbackSteps.push(async () => {
             await apiFetch('/api/config', {
               method: 'PATCH',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(rollbackPatch),
-            }).catch(() => {});
-          }
-          await rollbackMutations();
-          const payload = (await configRes.json().catch(() => ({}))) as Record<string, unknown>;
-          setError((payload.error as string) ?? `Codex 运行参数保存失败 (${configRes.status})`);
-          return;
+            });
+          });
         }
-        appliedConfigPatchKeys.push(patch.key);
       }
     }
 
     await onSaved();
     window.dispatchEvent(new CustomEvent('guide:confirm', { detail: { target: 'member-editor.profile' } }));
     onClose();
+    return true;
   } catch (err) {
     await rollbackMutations();
     setError(err instanceof Error ? err.message : '保存失败');
+    return false;
   } finally {
     setSaving(false);
   }

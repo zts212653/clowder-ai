@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { type FileHandle, realpath, stat } from 'node:fs/promises';
 import { relative, sep } from 'node:path';
+import { type ReviewedMediaType, reviewedMediaTypeSchema } from '@cat-cafe/shared';
 import { normalizeWorkspaceRelativePath } from '@cat-cafe/shared/utils';
 import {
   type WorkspaceContentDescriptionV1,
@@ -18,10 +19,10 @@ export function classifyWorkspaceContentMime(mime: string): WorkspaceContentDesc
   return 'unsupported';
 }
 
-export function supportedWorkspaceMediaMime(description: WorkspaceContentDescriptionV1): 'image/png' | 'video/mp4' {
-  if (description.kind !== 'media' || (description.mime !== 'image/png' && description.mime !== 'video/mp4'))
-    throw new WorkspaceContentSourceError('unsupported_media');
-  return description.mime;
+export function supportedWorkspaceMediaMime(description: WorkspaceContentDescriptionV1): ReviewedMediaType {
+  const mime = reviewedMediaTypeSchema.safeParse(description.mime);
+  if (description.kind !== 'media' || !mime.success) throw new WorkspaceContentSourceError('unsupported_media');
+  return mime.data;
 }
 
 export function validateWorkspaceContentLocator(locator: WorkspaceContentLocatorV1): WorkspaceContentLocatorV1 {

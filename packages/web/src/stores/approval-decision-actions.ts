@@ -24,6 +24,7 @@ import {
   withoutDecision,
 } from './approval-decision-http';
 import type { DecisionStoreSlice, SliceUpdate } from './approval-decision-types';
+import { readDomainWriteEffect } from './approval-domain-effect';
 import { createPersonMemoryDecisionActions, type PersonMemoryDecisionActions } from './approval-person-memory-actions';
 
 export interface ApprovalDecisionActions extends PersonMemoryDecisionActions {
@@ -63,7 +64,8 @@ export function createApprovalDecisionActions(
           }
           throw new Error(decisionErrorMessage(data, `Approve failed: ${res.status}`));
         }
-        attempt.received(res);
+        const body: unknown = await res.json().catch(() => null);
+        attempt.received(res, undefined, readDomainWriteEffect(item, body));
         // Optimistic remove from items list
         set((s) => ({
           items: s.items.filter((i) => i.proposalId !== proposalId),
@@ -125,7 +127,8 @@ export function createApprovalDecisionActions(
     },
 
     resolveEntityConflict: async (proposalId, resolution) => {
-      const attempt = beginDecisionAttempt(set, proposalId, 'entity-resolve', findItem(proposalId));
+      const item = findItem(proposalId);
+      const attempt = beginDecisionAttempt(set, proposalId, 'entity-resolve', item);
       set((state) => ({ deciding: { ...state.deciding, [proposalId]: 'resolving' as const } }));
       try {
         const res = await apiFetch(`/api/entity-proposals/${proposalId}/resolve`, {
@@ -148,8 +151,11 @@ export function createApprovalDecisionActions(
           }
           throw new Error(decisionErrorMessage(data, `Resolution failed: ${res.status}`));
         }
-        attempt.received(res);
-        const data = (await res.json()) as EntityResolutionSuccessBody;
+        const body: unknown = await res.json().catch(() => null);
+        attempt.received(res, undefined, readDomainWriteEffect(item, body, true));
+        if (!body || typeof body !== 'object' || !('proposalId' in body) || body.proposalId !== proposalId)
+          throw new Error('Resolution response could not be verified');
+        const data = body as EntityResolutionSuccessBody;
         set((state) => ({
           items: state.items.filter((item) => item.proposalId !== proposalId),
           count: Math.max(0, state.count - 1),

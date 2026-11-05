@@ -15,7 +15,13 @@ export function isMessageSelectableForBundle(message: ChatMessage): boolean {
     isSelectableManagedHoldConnectorSource(message.source) &&
     message.extra?.scheduler?.hiddenTrigger !== true;
   if (!authoredMessage && !managedHoldConnector) return false;
-  if (message.isStreaming || message.extra?.recall || (!managedHoldConnector && message.extra?.scheduler)) return false;
+  if (
+    message.isStreaming ||
+    message.queuedEntryId ||
+    message.extra?.recall ||
+    (!managedHoldConnector && message.extra?.scheduler)
+  )
+    return false;
 
   return Boolean(message.content.trim() || message.contentBlocks?.length || message.extra?.rich?.blocks.length);
 }

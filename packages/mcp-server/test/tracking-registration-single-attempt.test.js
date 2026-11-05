@@ -1,14 +1,8 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it, mock } from 'node:test';
 
-/*
- * Registering tracking reads a live GitHub baseline and installs the next wait generation, so it is
- * not idempotent. The shared callback transport gives each attempt 10 s and replays a failed POST
- * three times. A registration slower than 10 s was therefore sent up to four times, each replay
- * rerunning the whole registration against the same slow GitHub, and after 47 s the caller was told
- * it had timed out, although a registration had landed.
- */
-describe('tracking registration is one attempt that waits for a slow GitHub', () => {
+/* Deployment registration must not replay a request whose durable outcome is unknown. */
+describe('deployment registration is one attempt that waits for a slow response', () => {
   const originalEnv = { ...process.env };
 
   beforeEach(() => {
@@ -25,7 +19,7 @@ describe('tracking registration is one attempt that waits for a slow GitHub', ()
     process.env = { ...originalEnv };
   });
 
-  /** A server that answers only after `ms`, as a registration reading a slow GitHub does. */
+  /** A server that answers only after `ms`, as a slow registration does. */
   function slowServer(ms) {
     return mock.method(
       globalThis,
@@ -61,8 +55,6 @@ describe('tracking registration is one attempt that waits for a slow GitHub', ()
         nextStep: 'Verify the landed behavior.',
       },
     ],
-    ['register_pr_tracking', 'handleRegisterPrTracking', { repoFullName: 'owner/repo', prNumber: 7 }],
-    ['register_issue_tracking', 'handleRegisterIssueTracking', { repoFullName: 'owner/repo', issueNumber: 8 }],
   ];
 
   for (const [tool, handler, input] of registrations) {
@@ -162,7 +154,7 @@ describe('tracking registration is one attempt that waits for a slow GitHub', ()
       mock.method(
         globalThis,
         'fetch',
-        async () => new Response(JSON.stringify({ error: 'PR not found' }), { status: 400 }),
+        async () => new Response(JSON.stringify({ error: 'Deployment not found' }), { status: 400 }),
       );
       const tools = await import('../dist/tools/callback-tools.js');
 

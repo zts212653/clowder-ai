@@ -101,34 +101,21 @@ test('normal callback dispatch automatically starts the partner and returns both
   assert.equal(h.tracker.has(f.thread.id, 'codex-sol'), true);
   const working = await readCompanionWork(f.options);
   assert.equal(working.work.items[0].taskId, taskId);
-  assert.equal(h.notices.length, 0);
-  h.host.observe({ method: 'thread/realtime/transcript/delta', params: { role: 'user', delta: '顺便加上雨伞' } });
+  assert.equal(h.appends.length, 0);
   release.resolve();
-  await eventually(() => returned, 'the partner must persist its publication through post_message');
-  assert.equal(h.notices.length, 0, 'partner completion does not interrupt an owner utterance');
-  h.host.observe({ method: 'thread/realtime/transcript/done', params: { role: 'user', text: '顺便加上雨伞' } });
+  await eventually(() => returned, 'the partner persists its publication through post_message');
   await eventually(
-    () => h.notices.length === 1,
-    () =>
-      JSON.stringify({
-        failure: 'the admitted return automatically wakes the safe boundary',
-        returned,
-        errors: h.errors,
-        queue: h.queue.list(f.thread.id, 'owner'),
-        source: f.messages.getById(returned.messageId),
-        notices: h.notices.map((batch) => batch.references),
-      }),
+    () => h.appends.length === 1,
+    () => JSON.stringify({ errors: h.errors, queue: h.queue.list(f.thread.id, 'owner') }),
   );
-  assert.deepEqual(
-    h.notices[0].references.map((ref) => ref.messageId),
-    [returned.messageId],
-  );
+  assert.ok(h.appends[0].text.includes('第1版'), 'actual full input is appended, with no read-notice turn');
+  assert.doesNotMatch(h.appends[0].text, /freshness notice|readIntent/);
   const first = await h.read(h.live);
   assert.ok(first.messages.some((message) => message.id === returned.messageId && message.content.includes('第1版')));
   await eventually(() => !h.tracker.has(f.thread.id, 'codex-sol'), 'first partner execution must finish');
   const firstReturn = returned.messageId;
   await h.post(h.live, `@codex-sol\n继续同一工作 task:work:${taskId}，第二版加入雨伞。`, ['codex-sol']);
-  await eventually(() => h.notices.length === 2, 'the second return must also arrive automatically');
+  await eventually(() => h.appends.length === 2, 'the second return must also arrive automatically');
   assert.equal(h.starts.length, 2);
   assert.ok(h.starts[1].content.includes(taskId));
   assert.notEqual(returned.messageId, firstReturn);

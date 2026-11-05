@@ -1,7 +1,7 @@
 'use client';
 
 import { BUILTIN_GPT_PRO_CANONICAL_MENTION, supportsCodexFastModel } from '@cat-cafe/shared';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { AvatarImageWithFallback } from '../AvatarImageWithFallback';
 import {
   AccountSection,
@@ -27,8 +27,8 @@ export function MemberEditorPage({
   hasDossier,
   onDelete,
   header,
-  history,
-}: HubCatEditorProps & { editor: HubCatEditorController }) {
+  embedded = false,
+}: HubCatEditorProps & { editor: HubCatEditorController; embedded?: boolean }) {
   const t = useMemberText();
   const copy = useMembersCopy();
   const required = cat ? null : requiredHubCatFields(e.form, e.selectedProfile, true);
@@ -51,13 +51,16 @@ export function MemberEditorPage({
     const field =
       main.current?.querySelector<HTMLElement>('[aria-invalid="true"]') ??
       main.current?.querySelector<HTMLElement>('[role="alert"]');
-    field?.focus();
-    field?.scrollIntoView?.({ block: 'center' });
+    field?.focus({ preventScroll: true });
+    if (!field?.closest('.member-save-bar')) field?.scrollIntoView?.({ block: 'center' });
   }, [validationAttempt]);
   const save = async () => {
     await e.handleSave();
     setValidationAttempt((attempt) => attempt + 1);
   };
+  const editorId = useId();
+  const sectionId = (name: string) => (embedded ? `member-${editorId}-${name}` : `member-${name}`);
+  const showDelete = cat && (!embedded || onDelete);
   const sections = [
     { id: 'model', label: '模型与接入' },
     { id: 'mentions', label: '@ 名字' },
@@ -69,15 +72,10 @@ export function MemberEditorPage({
           { id: 'advanced', label: '高级' },
         ]
       : []),
-    ...(cat
-      ? [
-          { id: 'history', label: '路由历史' },
-          { id: 'delete', label: '删除成员' },
-        ]
-      : []),
+    ...(showDelete ? [{ id: 'delete', label: '删除成员' }] : []),
   ];
   const identitySection = (
-    <div id="member-identity">
+    <div id={sectionId('identity')}>
       <IdentitySection
         cat={cat}
         form={e.form}
@@ -93,150 +91,153 @@ export function MemberEditorPage({
   return (
     <MemberEditorPresentation.Provider value={true}>
       <MemberFieldErrors.Provider value={showRequired ? { ...e.fieldErrors, ...required.errors } : e.fieldErrors}>
-        <div className="members-v2 member-editor-page" data-testid="member-detail-page" ref={main} tabIndex={-1}>
-          <button type="button" className="member-button" onClick={() => void e.requestClose()}>
-            {t('‹ 成员')}
-          </button>
-          <header className="member-page-heading">
-            {cat && <AvatarImageWithFallback src={cat.avatar} alt="" className="member-heading-avatar" />}
-            <div>
-              <h2>{cat ? cat.nickname || cat.displayName : t('添加成员')}</h2>
-              <p>
-                {cat
-                  ? `${cat.displayName} · ${cat.id} · ${cat.defaultModel}`
-                  : t('从家里的一只猫开始：名字、性格、颜色都带过来，再按需要改。')}
-              </p>
-            </div>
-          </header>
-          {header}
-          {!cat && (
-            <>
-              {showRequired && (
-                <p role="alert" className="member-error member-required-error">
-                  {copy.requiredFields(required.errorMessages.map((field) => t(fieldNames[field] ?? field)))}
-                </p>
-              )}
-              {e.loadingTemplates && <p>{t('正在读取模板…')}</p>}
-              {e.templatesError && (
-                <p role="alert">
-                  {t(e.templatesError)}{' '}
-                  <button type="button" className="member-button" onClick={e.retryTemplates}>
-                    {t('重试')}
-                  </button>
-                </p>
-              )}
-              <FamilyTemplatePicker
-                templates={e.templates}
-                selectedId={e.selectedTemplateId}
-                onSelect={e.handleTemplateSelect}
-              />
-              <FamilyAvatarPicker
-                value={e.form.avatar}
-                uploading={e.uploadingAvatar}
-                onSelect={(avatar) => e.patchForm({ avatar })}
-                onUpload={e.handleAvatarUpload}
-              />
-            </>
-          )}
-          {e.error && (
-            <p role="alert" tabIndex={-1} className="member-error">
-              {t(e.error)}
-            </p>
-          )}
-          <div className="member-editor-layout">
-            {cat && (
-              <nav aria-label={t('成员目录')}>
-                {sections.map(({ id, label }) => (
-                  <a key={label} className="member-button" href={`#member-${id}`}>
-                    {t(label)}
-                  </a>
-                ))}
-              </nav>
+        <div
+          className={`members-v2 member-editor-page${embedded ? ' member-editor-embedded' : ''}`}
+          data-testid="member-detail-page"
+          ref={main}
+          tabIndex={-1}
+        >
+          <div className={embedded ? 'member-editor-scroll' : undefined}>
+            {!embedded && (
+              <>
+                <button type="button" className="member-button" onClick={() => void e.requestClose()}>
+                  {t('‹ 成员')}
+                </button>
+                <header className="member-page-heading">
+                  {cat && <AvatarImageWithFallback src={cat.avatar} alt="" className="member-heading-avatar" />}
+                  <div>
+                    <h2>{cat ? cat.nickname || cat.displayName : t('添加成员')}</h2>
+                    <p>
+                      {cat
+                        ? `${cat.displayName} · ${cat.id} · ${cat.defaultModel}`
+                        : t('从家里的一只猫开始：名字、性格、颜色都带过来，再按需要改。')}
+                    </p>
+                  </div>
+                </header>
+                {header}
+              </>
             )}
-            <div className="member-editor-fields">
-              {!cat && identitySection}
-              <div id="member-model">
-                {cat?.id === 'gpt-dot' ? (
-                  <p className="member-helper">
-                    砚砚 · dot 身份独立，沿用 ChatGPT 已连接的猫咖插件。
-                    <a className="underline" href="/settings?s=plugins#chatgpt-dot">
-                      在插件集成中管理连接 ›
-                    </a>
+            {!cat && (
+              <>
+                {showRequired && (
+                  <p role="alert" className="member-error member-required-error">
+                    {copy.requiredFields(required.errorMessages.map((field) => t(fieldNames[field] ?? field)))}
                   </p>
-                ) : cat && e.protectedCloudIdentity ? (
-                  <ProtectedCloudIdentitySection
-                    protection={e.protectedCloudIdentity}
-                    restoring={e.restoringCloudIdentity}
-                    onRestore={() => e.handleRestoreBuiltinCloudIdentity(cat.id)}
-                  />
-                ) : (
-                  <AccountSection
+                )}
+                {e.loadingTemplates && <p>{t('正在读取模板…')}</p>}
+                {e.templatesError && (
+                  <p role="alert">
+                    {t(e.templatesError)}{' '}
+                    <button type="button" className="member-button" onClick={e.retryTemplates}>
+                      {t('重试')}
+                    </button>
+                  </p>
+                )}
+                <FamilyTemplatePicker
+                  templates={e.templates}
+                  selectedId={e.selectedTemplateId}
+                  onSelect={e.handleTemplateSelect}
+                />
+                <FamilyAvatarPicker
+                  value={e.form.avatar}
+                  uploading={e.uploadingAvatar}
+                  onSelect={(avatar) => e.patchForm({ avatar })}
+                  onUpload={e.handleAvatarUpload}
+                />
+              </>
+            )}
+            <div className="member-editor-layout">
+              {cat && (
+                <nav aria-label={t('成员目录')}>
+                  {sections.map(({ id, label }) => (
+                    <a key={label} className="member-button" href={`#${sectionId(id)}`}>
+                      {t(label)}
+                    </a>
+                  ))}
+                </nav>
+              )}
+              <fieldset className="member-editor-fields" disabled={e.saving}>
+                {!cat && identitySection}
+                <div id={sectionId('model')}>
+                  {cat?.id === 'gpt-dot' ? (
+                    <p className="member-helper">
+                      砚砚 · dot 身份独立，沿用 ChatGPT 已连接的猫咖插件。
+                      <a className="underline" href="/settings?s=plugins#chatgpt-dot">
+                        在插件集成中管理连接 ›
+                      </a>
+                    </p>
+                  ) : cat && e.protectedCloudIdentity ? (
+                    <ProtectedCloudIdentitySection
+                      protection={e.protectedCloudIdentity}
+                      restoring={e.restoringCloudIdentity}
+                      onRestore={() => e.handleRestoreBuiltinCloudIdentity(cat.id)}
+                    />
+                  ) : (
+                    <AccountSection
+                      form={e.form}
+                      hasError={e.fieldErrors.account}
+                      modelOptions={e.modelOptions}
+                      availableProfiles={e.availableProfiles}
+                      loadingProfiles={e.loadingProfiles}
+                      onChange={e.patchForm}
+                    />
+                  )}
+                  {e.hasEmptyCreatableAccounts && (
+                    <div>
+                      <p>{t('当前没有可用账号。先新建或登录账号，再选择模型并保存成员。')}</p>
+                      <button type="button" className="member-button" onClick={() => e.setShowAuthModal(true)}>
+                        {t('新建 / 登录账号')}
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <div id={sectionId('mentions')}>
+                  <RoutingSection
                     form={e.form}
-                    hasError={e.fieldErrors.account}
-                    modelOptions={e.modelOptions}
-                    availableProfiles={e.availableProfiles}
-                    loadingProfiles={e.loadingProfiles}
+                    hasError={e.fieldErrors.routing}
+                    reservedPatterns={e.reservedPatterns}
+                    fixedPatterns={e.protectedCloudIdentity ? [BUILTIN_GPT_PRO_CANONICAL_MENTION] : undefined}
                     onChange={e.patchForm}
                   />
+                </div>
+                {cat && identitySection}
+                <section id={sectionId('voice')}>
+                  <h3>{t('语音')}</h3>
+                  <VoiceConfigSection form={e.form} onChange={e.patchForm} onRefAudioUpload={e.handleRefAudioUpload} />
+                </section>
+                {!e.protectedCloudIdentity && (
+                  <>
+                    <div id={sectionId('context')}>
+                      <MemberContextSection editor={e} cat={cat} />
+                    </div>
+                    <div id={sectionId('advanced')}>
+                      <AdvancedRuntimeSection
+                        cat={cat}
+                        form={e.form}
+                        strategyForm={e.strategyForm}
+                        loadingStrategy={e.loadingStrategy}
+                        strategyError={e.strategyError}
+                        codexSettings={e.codexSettings}
+                        loadingCodexSettings={e.loadingCodexSettings}
+                        codexSettingsError={e.codexSettingsError}
+                        codexSettingsEditable={e.codexSettingsEditable}
+                        showCodexSettings={e.showCodexSettings}
+                        codexSpeedVisible={
+                          e.form.clientId === 'openai' &&
+                          e.selectedProfile?.authType === 'oauth' &&
+                          e.form.carrier !== 'acp' &&
+                          (cat ? cat.cli != null : true)
+                        }
+                        codexFastSupported={supportsCodexFastModel(e.form.defaultModel)}
+                        onChange={e.patchForm}
+                        onStrategyChange={e.patchStrategy}
+                        onCodexChange={e.patchCodex}
+                      />
+                    </div>
+                  </>
                 )}
-                {e.hasEmptyCreatableAccounts && (
-                  <div>
-                    <p>{t('当前没有可用账号。先新建或登录账号，再选择模型并保存成员。')}</p>
-                    <button type="button" className="member-button" onClick={() => e.setShowAuthModal(true)}>
-                      {t('新建 / 登录账号')}
-                    </button>
-                  </div>
-                )}
-              </div>
-              <div id="member-mentions">
-                <RoutingSection
-                  form={e.form}
-                  hasError={e.fieldErrors.routing}
-                  reservedPatterns={e.reservedPatterns}
-                  fixedPatterns={e.protectedCloudIdentity ? [BUILTIN_GPT_PRO_CANONICAL_MENTION] : undefined}
-                  onChange={e.patchForm}
-                />
-              </div>
-              {cat && identitySection}
-              <section id="member-voice">
-                <h3>{t('语音')}</h3>
-                <VoiceConfigSection form={e.form} onChange={e.patchForm} onRefAudioUpload={e.handleRefAudioUpload} />
-              </section>
-              {!e.protectedCloudIdentity && (
-                <>
-                  <div id="member-context">
-                    <MemberContextSection editor={e} cat={cat} />
-                  </div>
-                  <div id="member-advanced">
-                    <AdvancedRuntimeSection
-                      cat={cat}
-                      form={e.form}
-                      strategyForm={e.strategyForm}
-                      loadingStrategy={e.loadingStrategy}
-                      strategyError={e.strategyError}
-                      codexSettings={e.codexSettings}
-                      loadingCodexSettings={e.loadingCodexSettings}
-                      codexSettingsError={e.codexSettingsError}
-                      codexSettingsEditable={e.codexSettingsEditable}
-                      showCodexSettings={e.showCodexSettings}
-                      codexSpeedVisible={
-                        e.form.clientId === 'openai' &&
-                        e.selectedProfile?.authType === 'oauth' &&
-                        e.form.carrier !== 'acp' &&
-                        (cat ? cat.cli != null : true)
-                      }
-                      codexFastSupported={supportsCodexFastModel(e.form.defaultModel)}
-                      onChange={e.patchForm}
-                      onStrategyChange={e.patchStrategy}
-                      onCodexChange={e.patchCodex}
-                    />
-                  </div>
-                </>
-              )}
-              {cat && (
-                <>
-                  <section id="member-history">{history}</section>
-                  <section id="member-delete">
+                {cat && showDelete && (
+                  <section id={sectionId('delete')} className="member-delete-card">
                     <h3>{t('删除成员')}</h3>
                     {cat.identityProtection ? (
                       <p>{t('受保护成员不能删除。')}</p>
@@ -254,11 +255,11 @@ export function MemberEditorPage({
                       </>
                     )}
                   </section>
-                </>
-              )}
+                )}
+              </fieldset>
             </div>
           </div>
-          {(!cat || e.dirtyCount > 0) && <MemberSaveBar editor={e} creating={!cat} anchor={main} onSave={save} />}
+          <MemberSaveBar editor={e} creating={!cat} onSave={save} modal={embedded} />
           <UnifiedAuthModal
             open={e.showAuthModal && e.createAccountClient !== undefined}
             initialClientId={e.createAccountClient}

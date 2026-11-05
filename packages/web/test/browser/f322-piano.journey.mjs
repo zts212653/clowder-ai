@@ -18,7 +18,7 @@ async function landed(page, id) {
       if (!row || saved?.messageAnchor?.messageId !== id) return false;
       const box = row.getBoundingClientRect(),
         view = chat.getBoundingClientRect();
-      return box.bottom > view.top && box.top < view.bottom && row.classList.contains('ring-blue-400');
+      return box.bottom > view.top && box.top < view.bottom && row.dataset.messageJumpFocus === 'true';
     },
     { id, savedKey },
   );

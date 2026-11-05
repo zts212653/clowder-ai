@@ -47,6 +47,8 @@ function closeEvent(eventType, eventId, closesSignalIds, overrides = {}) {
 describe('RedisRoutingSignalEventStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () => {
   let RedisRoutingSignalEventStore;
   let RoutingSignalEventKeys;
+  let STORE_ROUTING_SIGNAL_DECISION_PROJECTION_LUA;
+  let routingSignalDecisionClosureMap;
   let createRedisClient;
   let redis;
   let store;
@@ -55,6 +57,12 @@ describe('RedisRoutingSignalEventStore', { skip: redisIsolationSkipReason(REDIS_
     assertRedisIsolationOrThrow(REDIS_URL, 'RedisRoutingSignalEventStore');
     ({ RedisRoutingSignalEventStore, RoutingSignalEventKeys } = await import(
       '../dist/domains/routing-context/RedisRoutingSignalEventStore.js'
+    ));
+    ({ routingSignalDecisionClosureMap } = await import(
+      '../dist/domains/routing-context/preflight/RoutingSignalDecisionProjection.js'
+    ));
+    ({ STORE_ROUTING_SIGNAL_DECISION_PROJECTION_LUA } = await import(
+      '../dist/domains/routing-context/RedisRoutingSignalPersistence.js'
     ));
     ({ createRedisClient } = await import('@cat-cafe/shared/utils'));
     redis = createRedisClient({ url: REDIS_URL, keyPrefix: 'f293-routing-signal-test:' });
@@ -93,11 +101,167 @@ describe('RedisRoutingSignalEventStore', { skip: redisIsolationSkipReason(REDIS_
     assert.equal(await restarted.getByCommand('owner-1', 'command:missing'), null);
   });
 
+  it('reuses a durable decision projection after restart and advances it from the append sequence', async () => {
+    const failure = asserted('signal:projection-failure', {
+      source: 'provider_error',
+      state: 'unavailable',
+      reasonCode: 'provider_unreachable',
+    });
+    const success = closeEvent('recovered', 'signal:projection-success', [], {
+      source: 'dispatch_success',
+      probeStartedAt: 1_500,
+    });
+    await store.append(failure);
+    await store.append(success);
+
+    const built = await store.readDecisionProjection('owner-1');
+    assert.equal(built.revision, 2);
+    assert.equal(built.assertions.length, 1);
+    assert.equal(routingSignalDecisionClosureMap(built).get(failure.eventId)?.eventId, success.eventId);
+
+    const restarted = new RedisRoutingSignalEventStore(redis);
+    let fullLedgerReads = 0;
+    restarted.listByOwner = async () => {
+      fullLedgerReads += 1;
+      throw new Error('durable projection must survive restart without a full-ledger read');
+    };
+    assert.deepEqual(await restarted.readDecisionProjection('owner-1'), built);
+
+    const next = asserted('signal:projection-next', {
+      observedAt: 3_000,
+      validUntil: 30_000,
+    });
+    await restarted.append(next);
+    const advanced = await restarted.readDecisionProjection('owner-1');
+    assert.equal(advanced.revision, 3);
+    assert.deepEqual(
+      advanced.assertions.map((event) => event.eventId),
+      [failure.eventId, next.eventId],
+    );
+    assert.equal(fullLedgerReads, 0);
+  });
+
+  it('advances warm process decision state on append without Redis reads in the next preflight', async () => {
+    const failure = asserted('signal:hot-failure', {
+      source: 'provider_error',
+      state: 'unavailable',
+      reasonCode: 'provider_unreachable',
+    });
+    await store.append(failure);
+    const warm = await store.readDecisionProjection('owner-1');
+    assert.equal(warm.revision, 1);
+
+    const success = closeEvent('recovered', 'signal:hot-success', [], {
+      source: 'dispatch_success',
+      probeStartedAt: 1_500,
+    });
+    await store.append(success);
+
+    const methods = ['get', 'zrangebyscore', 'mget', 'eval'];
+    const originals = new Map();
+    let redisReads = 0;
+    for (const method of methods) {
+      originals.set(method, redis[method]);
+      redis[method] = (...args) => {
+        redisReads += 1;
+        return originals.get(method).apply(redis, args);
+      };
+    }
+    try {
+      assert.equal(await store.getOwnerRevision('owner-1'), 2);
+      const advanced = await store.readDecisionProjection('owner-1');
+      assert.equal(advanced.revision, 2);
+      assert.equal(routingSignalDecisionClosureMap(advanced).get(failure.eventId)?.eventId, success.eventId);
+      assert.equal(redisReads, 0, 'warm owner revision and projection must stay off Redis');
+    } finally {
+      for (const [method, original] of originals) redis[method] = original;
+    }
+  });
+
+  it('includes an append that commits while a cold decision projection is being persisted', async () => {
+    const first = asserted('signal:cold-race-first');
+    await store.append(first);
+    const restarted = new RedisRoutingSignalEventStore(redis);
+    const persistCompleted = Promise.withResolvers();
+    const releasePersist = Promise.withResolvers();
+    const originalEval = redis.eval;
+    redis.eval = async function (script, ...args) {
+      const result = await originalEval.call(this, script, ...args);
+      if (script === STORE_ROUTING_SIGNAL_DECISION_PROJECTION_LUA) {
+        persistCompleted.resolve();
+        await releasePersist.promise;
+      }
+      return result;
+    };
+
+    try {
+      const loading = restarted.readDecisionProjection('owner-1');
+      await persistCompleted.promise;
+      const second = asserted('signal:cold-race-second', { observedAt: 1_001 });
+      await restarted.append(second);
+      releasePersist.resolve();
+      const projection = await loading;
+      assert.equal(projection.revision, 2);
+      assert.deepEqual(
+        projection.assertions.map((event) => event.eventId),
+        [first.eventId, second.eventId],
+      );
+      assert.equal((await restarted.readDecisionProjection('owner-1')).revision, 2);
+    } finally {
+      releasePersist.resolve();
+      redis.eval = originalEval;
+    }
+  });
+
+  it('rebuilds a late assertion against canonical success history instead of the latest frontier', async () => {
+    const firstSuccess = closeEvent('recovered', 'signal:late-first-success', [], {
+      source: 'dispatch_success',
+      observedAt: 2_000,
+      probeStartedAt: 1_500,
+    });
+    const laterSuccess = closeEvent('recovered', 'signal:late-later-success', [], {
+      source: 'dispatch_success',
+      observedAt: 10_001,
+      probeStartedAt: 9_500,
+    });
+    await store.append(firstSuccess);
+    await store.append(laterSuccess);
+    await store.readDecisionProjection('owner-1');
+
+    const lateFailure = asserted('signal:late-after-successes', {
+      source: 'provider_error',
+      state: 'unavailable',
+      reasonCode: 'provider_unreachable',
+      observedAt: 1_000,
+    });
+    let appendRebuildReads = 0;
+    const originalStoreList = store.listByOwner.bind(store);
+    store.listByOwner = async (...args) => {
+      appendRebuildReads += 1;
+      return originalStoreList(...args);
+    };
+    await store.append(lateFailure);
+    assert.equal(appendRebuildReads, 1, 'the single writer must repair an unprojectable append before returning');
+
+    const restarted = new RedisRoutingSignalEventStore(redis);
+    let restartReads = 0;
+    const originalList = restarted.listByOwner.bind(restarted);
+    restarted.listByOwner = async (...args) => {
+      restartReads += 1;
+      return originalList(...args);
+    };
+    const projection = await restarted.readDecisionProjection('owner-1');
+
+    assert.equal(restartReads, 0, 'the repaired durable projection must survive restart');
+    assert.equal(routingSignalDecisionClosureMap(projection).get(lateFailure.eventId)?.eventId, firstSuccess.eventId);
+  });
+
   it('keeps every detail, command, chronology and closure key at TTL=-1', async () => {
     const signal = asserted('signal:ttl');
     const recovery = closeEvent('recovered', 'signal:ttl-recovery', [signal.eventId]);
     await store.append(signal);
     await store.append(recovery);
+    await store.readDecisionProjection(signal.ownerId);
 
     const keys = [
       RoutingSignalEventKeys.detail(signal.ownerId, signal.eventId),
@@ -106,8 +270,114 @@ describe('RedisRoutingSignalEventStore', { skip: redisIsolationSkipReason(REDIS_
       RoutingSignalEventKeys.subjectTimeline(signal.ownerId, signal.subjectRef),
       RoutingSignalEventKeys.closures(signal.ownerId),
       RoutingSignalEventKeys.ownerRevision(signal.ownerId),
+      RoutingSignalEventKeys.ownerAppendSequence(signal.ownerId),
+      RoutingSignalEventKeys.decisionProjection(signal.ownerId),
     ];
     for (const key of keys) assert.equal(await redis.ttl(key), -1, `${key} must be durable`);
+  });
+
+  it('rebuilds a malformed or sequence-gapped derived projection without changing source truth', async () => {
+    const first = asserted('signal:projection-rebuild-1');
+    await store.append(first);
+    await store.readDecisionProjection('owner-1');
+
+    await redis.set(RoutingSignalEventKeys.decisionProjection('owner-1'), '{malformed');
+    const afterMalformed = await new RedisRoutingSignalEventStore(redis).readDecisionProjection('owner-1');
+    assert.deepEqual(
+      afterMalformed.assertions.map((event) => event.eventId),
+      [first.eventId],
+    );
+
+    const second = asserted('signal:projection-rebuild-2', { observedAt: 1_001 });
+    const coldWriter = new RedisRoutingSignalEventStore(redis);
+    await coldWriter.append(second);
+    await redis.zrem(RoutingSignalEventKeys.ownerAppendSequence('owner-1'), second.eventId);
+    const restarted = new RedisRoutingSignalEventStore(redis);
+    let rebuildReads = 0;
+    const originalList = restarted.listByOwner.bind(restarted);
+    restarted.listByOwner = async (...args) => {
+      rebuildReads += 1;
+      return originalList(...args);
+    };
+    const rebuilt = await restarted.readDecisionProjection('owner-1');
+
+    assert.equal(rebuildReads, 1);
+    assert.deepEqual(
+      rebuilt.assertions.map((event) => event.eventId),
+      [first.eventId, second.eventId],
+    );
+    assert.deepEqual(await restarted.listByOwner('owner-1'), [first, second]);
+  });
+
+  it('rejects a semantically truncated projection with a stale content hash and rebuilds it', async () => {
+    const failure = asserted('signal:projection-truncated-failure', {
+      source: 'provider_error',
+      state: 'unavailable',
+    });
+    const success = closeEvent('recovered', 'signal:projection-truncated-success', [], {
+      source: 'dispatch_success',
+      probeStartedAt: 1_500,
+    });
+    await store.append(failure);
+    await store.append(success);
+    await store.readDecisionProjection('owner-1');
+
+    const key = RoutingSignalEventKeys.decisionProjection('owner-1');
+    const truncated = JSON.parse(await redis.get(key));
+    truncated.assertions = [];
+    truncated.closures = [];
+    await redis.set(key, JSON.stringify(truncated));
+
+    const rebuilt = await new RedisRoutingSignalEventStore(redis).readDecisionProjection('owner-1');
+    assert.deepEqual(
+      rebuilt.assertions.map((event) => event.eventId),
+      [failure.eventId],
+    );
+    assert.equal(routingSignalDecisionClosureMap(rebuilt).get(failure.eventId)?.eventId, success.eventId);
+  });
+
+  it('rebuilds the prior split-closure checkpoint shape during a rolling upgrade', async () => {
+    const failure = asserted('signal:projection-prior-shape-failure', {
+      source: 'provider_error',
+      state: 'unavailable',
+    });
+    const success = closeEvent('recovered', 'signal:projection-prior-shape-success', [], {
+      source: 'dispatch_success',
+      probeStartedAt: 1_500,
+    });
+    await store.append(failure);
+    await store.append(success);
+    await store.readDecisionProjection('owner-1');
+
+    const key = RoutingSignalEventKeys.decisionProjection('owner-1');
+    const priorShape = JSON.parse(await redis.get(key));
+    priorShape.explicitClosures = [];
+    delete priorShape.closures;
+    await redis.set(key, JSON.stringify(priorShape));
+
+    const rebuilt = await new RedisRoutingSignalEventStore(redis).readDecisionProjection('owner-1');
+    assert.equal(routingSignalDecisionClosureMap(rebuilt).get(failure.eventId)?.eventId, success.eventId);
+    assert.equal(Array.isArray(rebuilt.closures), true);
+  });
+
+  it('self-heals wrong Redis types in disposable projection keys without blocking canonical append', async () => {
+    const first = asserted('signal:derived-type-1');
+    await store.append(first);
+    await store.readDecisionProjection('owner-1');
+    await redis.del(RoutingSignalEventKeys.ownerAppendSequence('owner-1'));
+    await redis.set(RoutingSignalEventKeys.ownerAppendSequence('owner-1'), 'poison');
+    await redis.del(RoutingSignalEventKeys.decisionProjection('owner-1'));
+    await redis.hset(RoutingSignalEventKeys.decisionProjection('owner-1'), 'poison', 'value');
+
+    const second = asserted('signal:derived-type-2', { observedAt: 1_001 });
+    assert.equal((await store.append(second)).outcome, 'appended');
+    const rebuilt = await store.readDecisionProjection('owner-1');
+
+    assert.deepEqual(
+      rebuilt.assertions.map((event) => event.eventId),
+      [first.eventId, second.eventId],
+    );
+    assert.deepEqual(await store.listByOwner('owner-1'), [first, second]);
   });
 
   it('persists an atomic success window before a late failure, survives restart and replays once', async () => {
@@ -210,19 +480,26 @@ describe('RedisRoutingSignalEventStore', { skip: redisIsolationSkipReason(REDIS_
     await assert.rejects(store.getOwnerRevision('owner-1'), /malformed routing signal owner revision/);
   });
 
-  it('treats a legacy owner timeline without a revision key as revision zero', async () => {
+  it('projects a legacy owner timeline without revision or append-sequence keys and then advances it', async () => {
     const legacy = asserted('signal:legacy');
     await store.append(legacy);
     await redis.del(RoutingSignalEventKeys.ownerRevision('owner-1'));
+    await redis.del(RoutingSignalEventKeys.ownerAppendSequence('owner-1'));
 
     const restarted = new RedisRoutingSignalEventStore(redis);
     assert.equal(await restarted.getOwnerRevision('owner-1'), 0);
     assert.deepEqual(await restarted.listByOwner('owner-1'), [legacy]);
+    const migrated = await restarted.readDecisionProjection('owner-1');
+    assert.equal(migrated.revision, 0);
+    assert.deepEqual(migrated.assertions, [legacy]);
 
     const next = asserted('signal:post-legacy', { observedAt: 1_001 });
     await restarted.append(next);
     assert.equal(await restarted.getOwnerRevision('owner-1'), 1);
     assert.deepEqual(await restarted.listByOwner('owner-1'), [legacy, next]);
+    const advanced = await restarted.readDecisionProjection('owner-1');
+    assert.equal(advanced.revision, 1);
+    assert.deepEqual(advanced.assertions, [legacy, next]);
   });
 
   it('fails closed on malformed persisted records without deleting source truth', async () => {

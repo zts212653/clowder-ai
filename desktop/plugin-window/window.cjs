@@ -24,6 +24,15 @@ async function createManagedWindow(
 ) {
   const { url, presentation, publicCompanionV2, companionContract } = validateLaunch(input);
   const { app, BrowserWindow, session, screen, ipcMain, powerMonitor, systemPreferences, shell, dialog } = electron;
+  const appAssist = companionContract === '0.1.0-beta.29' ? options.appAssist : undefined;
+  const runAppAssist = (method) => {
+    if (!appAssist) return Promise.resolve();
+    try {
+      return Promise.resolve(appAssist[method]()).catch(() => undefined);
+    } catch {
+      return Promise.resolve();
+    }
+  };
   // The trusted Host admits only the exact published archive. The installed
   // public command validator is a second fence for this optional state.
   let receiveOnlyAdmitted = false;
@@ -78,6 +87,24 @@ async function createManagedWindow(
       spellcheck: false,
     },
   });
+  // Visibility, lock and sleep are independent native boundaries. A later
+  // show/reload may only restart the source after every outstanding boundary
+  // has been released by its matching native event.
+  const appAssistPauses = new Set(appAssist ? ['hidden'] : []);
+  const pauseAppAssist = (reason) => {
+    if (!appAssist || appAssistPauses.has(reason)) return Promise.resolve();
+    appAssistPauses.add(reason);
+    return runAppAssist('suspend');
+  };
+  const resumeAppAssistIfEligible = () => {
+    if (!appAssist || appAssistPauses.size || win.isDestroyed() || !win.isVisible() || app?.isHidden?.() === true)
+      return Promise.resolve();
+    return runAppAssist('resume');
+  };
+  const releaseAppAssist = (reason) => {
+    if (appAssist) appAssistPauses.delete(reason);
+    return resumeAppAssistIfEligible();
+  };
   let firstFailure;
   const reportFailure = (reason) => {
     if (firstFailure) return;
@@ -107,7 +134,14 @@ async function createManagedWindow(
     if (!win.isDestroyed()) win.webContents.send('companion:event', event);
   };
   const voice = createVoiceHost(electron, {
-    callScoped: ['0.1.0-beta.23', '0.1.0-beta.24', '0.1.0-beta.25', '0.1.0-beta.27'].includes(companionContract),
+    callScoped: [
+      '0.1.0-beta.23',
+      '0.1.0-beta.24',
+      '0.1.0-beta.25',
+      '0.1.0-beta.27',
+      '0.1.0-beta.28',
+      '0.1.0-beta.29',
+    ].includes(companionContract),
     resources: options.voiceResources,
     isArmed: () => controller.armed,
     requestOffer: (sdp) => controller.request({ kind: 'offer', sdp }, false),
@@ -159,8 +193,10 @@ async function createManagedWindow(
   const revokeMedia = (reason) => {
     clearHideConfirmation();
     if (reason === 'hidden') preferences.suspend('hidden');
+    void pauseAppAssist(reason);
     controller.suspend(reason);
   };
+  let pendingSettings;
   const requestController = (command, activated) => {
     if (command.kind === 'view.resize') motion.revoke('resize');
     const preparing = command.kind === 'prepare' && activated === true && !controller.armed;
@@ -170,6 +206,7 @@ async function createManagedWindow(
       .then((result) => {
         preferences.accept(ticket, result);
         result = toPublishedWindowReply(result, companionContract);
+        if (appAssist && result.kind === 'state') result = { ...result, appAssist: appAssist.snapshot() };
         return receiveOnlyAdmitted && result.kind === 'state'
           ? { ...result, audio: { supportedModes: ['duplex', 'receive_only'], activeMode: voice.mode() } }
           : result;
@@ -179,6 +216,7 @@ async function createManagedWindow(
         preferences.accept(ticket, result);
         return result;
       });
+    if (command.kind === 'settings.read') pendingSettings = reply;
     if (preparing) voice.prepare(reply);
     return reply;
   };
@@ -231,13 +269,25 @@ async function createManagedWindow(
     // A deliberate hide revokes media before the window disappears, even on
     // platforms where BrowserWindow does not emit a matching hide event.
     if (command.kind === 'view.hide' && activated === true) revokeMedia('hidden');
+    if (command.kind === 'view.layout') {
+      // The shipped renderer reads settings before its initial layout. Settle
+      // the newest read first so its CSS size and this reply share coordinates.
+      let observed;
+      do {
+        observed = pendingSettings;
+        await observed;
+      } while (observed !== pendingSettings);
+      if (!isSurface(event)) return { kind: 'error', code: 'permission_required' };
+    }
     const presentationReply = petWindow.request(command, activated === true);
     if (presentationReply) {
       preferences.presentation(command, presentationReply);
       return presentationReply;
     }
     if (command.kind.startsWith('audio.')) return voice.request(command, activated === true);
-    return requestController(command, activated);
+    return appAssist
+      ? appAssist.request(command, (forwarded) => requestController(forwarded, activated))
+      : requestController(command, activated);
   });
   partition.setPermissionCheckHandler(
     (contents, permission, origin) =>
@@ -259,6 +309,12 @@ async function createManagedWindow(
   );
   partition.setDisplayMediaRequestHandler((_request, callback) => callback({}), { useSystemPicker: true });
   const unwatchPower = preferences.watchPower(powerMonitor, revokeMedia);
+  const appAssistPowerListeners = {
+    'unlock-screen': () => void releaseAppAssist('locked'),
+    resume: () => void releaseAppAssist('suspended'),
+  };
+  if (appAssist)
+    for (const [event, listener] of Object.entries(appAssistPowerListeners)) powerMonitor.on(event, listener);
   win.on('hide', () => {
     preferences.suspend('hidden');
     petWindow.dismiss();
@@ -275,7 +331,7 @@ async function createManagedWindow(
     clearHideConfirmation();
     hideConfirmation = setTimeout(() => {
       hideConfirmation = undefined;
-      if (!win.isDestroyed()) controller.suspend('hidden');
+      if (!win.isDestroyed()) revokeMedia('hidden');
     }, 1000);
     hideConfirmation.unref?.();
   });
@@ -284,6 +340,7 @@ async function createManagedWindow(
       clearHideConfirmation();
       preferences.resume('hidden');
       motion.arm();
+      void releaseAppAssist('hidden');
     }
   });
   win.on('blur', () => {
@@ -294,12 +351,15 @@ async function createManagedWindow(
   win.on('closed', () => {
     reportFailure('window-closed');
     clearHideConfirmation();
+    void runAppAssist('close');
     motion.close();
     petWindow.close();
     controller.close();
     voice.close();
     ipcMain.removeHandler('companion:request');
     unwatchPower();
+    if (appAssist)
+      for (const [event, listener] of Object.entries(appAssistPowerListeners)) powerMonitor.off(event, listener);
   });
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', (event, target) => {
@@ -315,14 +375,26 @@ async function createManagedWindow(
     reportFailure('unresponsive');
     if (!win.isDestroyed()) win.destroy();
   });
+  let initialPageLoad = true;
+  let pageReset = runAppAssist('reset');
+  win.webContents.on('did-start-loading', () => {
+    if (!initialPageLoad) pageReset = runAppAssist('reset');
+  });
+  win.webContents.on('did-finish-load', () => {
+    if (initialPageLoad) return;
+    void pageReset.then(resumeAppAssistIfEligible);
+  });
   try {
+    await pageReset;
     await win.loadURL(url);
   } catch (error) {
     if (!win.isDestroyed()) win.destroy();
     throw error;
   }
+  initialPageLoad = false;
   if (win.isDestroyed()) throw new Error('Window closed during load');
   win.showInactive();
+  await releaseAppAssist('hidden');
   return {
     /** Internal Host lease, never serialized onto the renderer or pipe. */
     motionLease: () => motion.current(),
@@ -338,6 +410,7 @@ async function createManagedWindow(
     show() {
       if (win.isDestroyed()) throw new Error('Window closed');
       win.showInactive();
+      void releaseAppAssist('hidden');
     },
     async navigate(params) {
       if (!params || Object.keys(params).join(',') !== 'url') throw new Error('Invalid conversation navigation');

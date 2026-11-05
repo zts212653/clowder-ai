@@ -8,11 +8,13 @@ export function PluginVisual({
   iconBg,
   name,
   size = 'small',
+  className = '',
 }: {
   icon: PluginIconSpec;
   iconBg?: string;
   name: string;
   size?: 'small' | 'large';
+  className?: string;
 }) {
   const glyphClassName = size === 'large' ? 'h-5 w-5' : 'h-4.5 w-4.5';
   const imageIcon = typeof icon !== 'string';
@@ -20,7 +22,7 @@ export function PluginVisual({
   return (
     <span
       data-plugin-icon={typeof icon === 'string' ? icon : icon.src}
-      className={`${settingsResourceAvatarClass} ${imageIcon ? 'overflow-hidden' : ''}`}
+      className={`${settingsResourceAvatarClass} ${imageIcon ? 'overflow-hidden' : ''} ${className}`}
       style={{ backgroundColor: iconBg ?? 'var(--conn-gray-bg)', color: foreground }}
     >
       {typeof icon === 'string' ? (

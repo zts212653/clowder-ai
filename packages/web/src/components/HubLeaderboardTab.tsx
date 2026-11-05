@@ -3,6 +3,7 @@
 import type { LeaderboardRange, LeaderboardStatsResponse } from '@cat-cafe/shared';
 import localFont from 'next/font/local';
 import { useCallback, useEffect, useState } from 'react';
+import { useCoCreatorDisplay } from '@/hooks/useCoCreatorConfig';
 import { apiFetch } from '@/utils/api-client';
 import { CatHeroCard, MiniRanked, SectionCard, StreakRanked, WorkMetric } from './leaderboard-cards';
 import { AchievementWall, CvoLevelCard, GameArena, SillyCatsList } from './leaderboard-phase-bc';
@@ -22,6 +23,7 @@ const RANGE_OPTIONS: { value: LeaderboardRange; label: string }[] = [
 ];
 
 export function HubLeaderboardTab() {
+  const owner = useCoCreatorDisplay();
   const [data, setData] = useState<LeaderboardStatsResponse | null>(null);
   const [range, setRange] = useState<LeaderboardRange>('all');
   const [loading, setLoading] = useState(false);
@@ -50,6 +52,7 @@ export function HubLeaderboardTab() {
   return (
     <div
       className="flex flex-col gap-6 p-6 rounded-xl overflow-y-auto"
+      data-chat-background-surface="console-pill"
       style={{ background: 'var(--console-pill-bg)', fontFamily: plusJakartaSans.style.fontFamily }}
     >
       {/* Header + Range Filter */}
@@ -137,7 +140,7 @@ export function HubLeaderboardTab() {
             <SectionCard title="成就墙">
               <AchievementWall achievements={data.achievements ?? []} />
             </SectionCard>
-            <SectionCard title="operator 能力等级">
+            <SectionCard title={`${owner.role} 能力等级`}>
               {data.cvoLevel ? (
                 <CvoLevelCard level={data.cvoLevel} />
               ) : (

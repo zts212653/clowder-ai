@@ -4,12 +4,67 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { decideAgyNativeHookPayload } from '../../../scripts/agy-native-effect-guard.mjs';
 import { decideNativeHookPayload } from '../../../scripts/native-effect-target-guard.mjs';
+import { nativeHookTestEnv } from './helpers/native-hook-programs.js';
 
 const cwd = '/tmp/ordinary-workspace';
 const options = { selfHost: () => ({ confidence: 'none' }) };
 const payload = (name, args) => ({ toolCall: { name, args }, workspacePaths: [cwd] });
+
+test('official ACP tokens, settings and trust decisions remain protected under the shared AGY policy', () => {
+  const profileHome = '/tmp/acp-profile';
+  for (const name of ['settings.json', 'acp_token.json', 'acp_business_token.json', 'trusted_workspaces.json']) {
+    const path = join(profileHome, '.gemini/antigravity-acp', name);
+    assert.equal(
+      decideAgyNativeHookPayload(payload('write_to_file', { TargetFile: path }), { ...options, profileHome }).decision,
+      'deny',
+      name,
+    );
+    assert.equal(
+      decideAgyNativeHookPayload(payload('run_command', { CommandLine: `echo changed > '${path}'` }), {
+        ...options,
+        profileHome,
+      }).decision,
+      'deny',
+      name,
+    );
+  }
+});
+
+test('per-run data aliases keep native artifacts writable while control roots remain protected', () => {
+  const root = mkdtempSync(join(tmpdir(), 'native-artifact-alias-'));
+  const profileHome = join(root, 'profile');
+  const data = join(profileHome, '.gemini/antigravity-cli');
+  const runGemini = join(profileHome, '.cat-cafe-native-runs/run-fixture/.gemini');
+  mkdirSync(data, { recursive: true });
+  mkdirSync(runGemini, { recursive: true });
+  symlinkSync(data, join(runGemini, 'antigravity-cli'), 'dir');
+  try {
+    const artifact = join(runGemini, 'antigravity-cli/brain/conversation/task.md');
+    assert.equal(
+      decideAgyNativeHookPayload(payload('write_to_file', { TargetFile: artifact }), { ...options, profileHome })
+        .decision,
+      'allow',
+    );
+    for (const target of [
+      runGemini,
+      join(runGemini, 'config/hooks.json'),
+      join(runGemini, 'antigravity-cli/settings.json'),
+      join(runGemini, 'antigravity-cli/antigravity-oauth-token'),
+    ]) {
+      assert.equal(
+        decideAgyNativeHookPayload(payload('write_to_file', { TargetFile: target }), { ...options, profileHome })
+          .decision,
+        'deny',
+        target,
+      );
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test('AGY effect decisions are the shared decisions for ordinary work and protected targets', () => {
   for (const command of [
@@ -86,7 +141,7 @@ test('the official CLI settings and mounted skill view are host control data, in
         path,
       );
     }
-    const command = `echo overwrite > ${profileHome}/.gemini/antigravity-cli/settings.json`;
+    const command = `echo overwrite > '${profileHome}/.gemini/antigravity-cli/settings.json'`;
     assert.equal(
       decideAgyNativeHookPayload(payload('run_command', { CommandLine: command }), { ...options, profileHome })
         .decision,
@@ -106,7 +161,11 @@ test('the official CLI settings and mounted skill view are host control data, in
 test('bad hook input always prints a concrete deny instead of AGY empty-output allow', () => {
   const script = new URL('../../../scripts/agy-native-effect-guard.mjs', import.meta.url);
   for (const input of ['not json', '{}', '{"toolCall":{"name":"run_command","args":{}}}']) {
-    const stdout = execFileSync(process.execPath, [script.pathname], { input, encoding: 'utf8' });
+    const stdout = execFileSync(process.execPath, [fileURLToPath(script)], {
+      input,
+      encoding: 'utf8',
+      env: nativeHookTestEnv(),
+    });
     assert.equal(JSON.parse(stdout).decision, 'deny');
   }
 });
@@ -144,8 +203,10 @@ test('AGY control targets follow shell directories, normalized paths and quoted 
       'cd .agents && dd if=../notes.txt of=hooks.json',
       "printf 'cd .agents && printf x > hooks.json' | sh",
       'rm -rf .agents',
-      `rm -rf ${profileHome}/.gemini`,
-      `printf x > ${profileHome}/.cat-cafe-native-turn.sqlite`,
+      `rm -rf '${profileHome}/.gemini'`,
+      `printf x > '${profileHome}/.cat-cafe-native-turn.sqlite'`,
+      `rm -rf '${profileHome}/.cat-cafe-native-runs'`,
+      `printf x > '${profileHome}/.cat-cafe-native-runs/run-other/.gemini/config/hooks.json'`,
     ]) {
       assert.equal(
         decideAgyNativeHookPayload(payload('run_command', { CommandLine: command, Cwd: root }), {

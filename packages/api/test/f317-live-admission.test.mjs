@@ -4,17 +4,17 @@ import { test } from 'node:test';
 import { CONCIERGE_CONFIG_DEFAULTS } from '@cat-cafe/shared';
 import cookie from '@fastify/cookie';
 import Fastify from 'fastify';
-import { MessageStore } from '../src/domains/cats/services/stores/ports/MessageStore.ts';
-import { ThreadStore } from '../src/domains/cats/services/stores/ports/ThreadStore.ts';
-import { MemoryConciergeConfigStore } from '../src/domains/concierge/ConciergeConfigStore.ts';
-import { ConciergeThreadService } from '../src/domains/concierge/ConciergeThreadService.ts';
-import { createOwnerLocalNoteProfile } from '../src/domains/concierge/live/host/owner-local-note-profile.ts';
-import { OwnerPageActionService } from '../src/domains/concierge/live/host/owner-page-action-service.ts';
-import { LiveCompanionSessions } from '../src/domains/concierge/live/LiveCompanionSessions.ts';
-import { sessionAuthPlugin, sessionRoute } from '../src/infrastructure/session-auth.ts';
-import { companionDecisionRoutes } from '../src/routes/companion-decision-routes.ts';
-import { conciergeLiveRoutes } from '../src/routes/concierge-live.ts';
-import { messagesRoutes } from '../src/routes/messages.ts';
+import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
+import { ThreadStore } from '../dist/domains/cats/services/stores/ports/ThreadStore.js';
+import { MemoryConciergeConfigStore } from '../dist/domains/concierge/ConciergeConfigStore.js';
+import { ConciergeThreadService } from '../dist/domains/concierge/ConciergeThreadService.js';
+import { createOwnerLocalNoteProfile } from '../dist/domains/concierge/live/host/owner-local-note-profile.js';
+import { OwnerPageActionService } from '../dist/domains/concierge/live/host/owner-page-action-service.js';
+import { LiveCompanionSessions } from '../dist/domains/concierge/live/LiveCompanionSessions.js';
+import { sessionAuthPlugin, sessionRoute } from '../dist/infrastructure/session-auth.js';
+import { companionDecisionRoutes } from '../dist/routes/companion-decision-routes.js';
+import { conciergeLiveRoutes } from '../dist/routes/concierge-live.js';
+import { messagesRoutes } from '../dist/routes/messages.js';
 import './helpers/setup-cat-registry.js';
 import { createPersistedQueueFixture } from './helpers/persisted-queue-fixture.ts';
 
@@ -58,7 +58,7 @@ test('Live surface enters ordinary messages with a real owner session and cannot
       hasMentions: true,
     }),
     ackCollectedCursors: async () => {},
-    runNativeLive: async (userId, threadId, messageId, targets, options) => {
+    prepareNativeLive: async (userId, threadId, messageId, targets, options) => {
       passedPort = options.liveCompanion;
       sourceMessage = await messageStore.getById(messageId);
       startupMcpConfig = await passedPort.configure({
@@ -66,7 +66,8 @@ test('Live surface enters ordinary messages with a real owner session and cannot
         CAT_CAFE_USER_ID: userId,
         CAT_CAFE_THREAD_ID: threadId,
         CAT_CAFE_CAT_ID: targets[0],
-        CAT_CAFE_INVOCATION_ID: 'own-call',
+        CAT_CAFE_INVOCATION_ID: options.fixtureChildInvocationId,
+        CAT_CAFE_EXECUTION_ID: options.parentInvocationId,
         CAT_CAFE_CALLBACK_TOKEN: 'own-token',
       });
       await passedPort.ready('native', {
@@ -89,18 +90,22 @@ test('Live surface enters ordinary messages with a real owner session and cannot
           return {};
         },
       });
-      await passedPort.finished;
     },
   };
   const queueFixture = createPersistedQueueFixture(messageStore, {
     liveCompanionSessions: sessions,
     onExecution: (options) =>
-      router.runNativeLive(
+      router.prepareNativeLive(
         'default-user',
         messageStore.getById(options.persistedPromptMessageIds[0]).threadId,
         options.persistedPromptMessageIds[0],
         ['codex'],
-        options,
+        {
+          ...options,
+          fixtureChildInvocationId: messageStore.getById(
+            messageStore.getById(options.persistedPromptMessageIds[0]).lifecycle.dispatchRefs[0].statusMessageId,
+          ).lifecycle.invocationId,
+        },
       ),
   });
   await app.register(cookie);
@@ -126,6 +131,8 @@ test('Live surface enters ordinary messages with a real owner session and cannot
     pageActionOwner,
     threadService: new ConciergeThreadService({ threadStore }),
     messageStore,
+    invocationQueue: queueFixture.queue,
+    progressOwnedCarrier: (entry, catId) => queueFixture.processor.progressOwnedCarrier(entry, catId),
     sessionChainStore: { getActive: async () => ({ cliSessionId: 'native' }) },
     mcpDistDir: resolve('../mcp-server/dist'),
     allowedDirectories: [resolve('../../docs')],
@@ -208,6 +215,13 @@ test('Live surface enters ordinary messages with a real owner session and cannot
   for (let attempt = 0; !passedPort && attempt < 100; attempt++) await new Promise((resolve) => setTimeout(resolve, 5));
   assert.ok(passedPort, 'actual Queue must start the accepted Live handle');
   await passedPort.initialized.promise;
+  const exactChild = await queueFixture.waitForAwakening(sourceMessage.id);
+  assert.equal(queueFixture.turns.get(exactChild).queueCompletionPolicy, 'explicit_source');
+  assert.equal(
+    messageStore.getByThread(status.threadId, 30, 'default-user').filter((m) => m.lifecycle?.kind === 'response')
+      .length,
+    1,
+  );
   assert.deepEqual(
     startupMcpConfig.mcp_servers['cat-cafe-collab'].disabled_tools,
     ['sources', 'start', 'attach', 'status', 'stop'].map((name) => `cat_cafe_meeting_${name}`),
@@ -299,4 +313,11 @@ test('Live surface enters ordinary messages with a real owner session and cannot
   assert.equal(changed.statusCode, 409);
   assert.equal(changed.json().code, 'live_selection_changed');
   assert.equal(passedPort.status().state, 'failed', 'selection changes stop old authority instead of rebinding it');
+  await assert.rejects(passedPort.finished, /selection changed/);
+  await queueFixture.releaseProvider(exactChild, 'failed');
+  assert.equal(
+    messageStore.getByIdempotencyKey('default-user', status.threadId, `message-lifecycle-response:${exactChild}`)
+      .lifecycle.status,
+    'failed',
+  );
 });

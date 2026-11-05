@@ -35,12 +35,17 @@ export function observePianoPointerOwnership() {
     });
   const observer = new MutationObserver((changes) => {
     for (const change of changes) {
-      if (!change.oldValue?.includes('ring-blue-400') && change.target.classList.contains('ring-blue-400'))
+      if (change.oldValue !== 'true' && change.target.dataset.messageJumpFocus === 'true')
         trace.highlightAdded.push(change.target.getAttribute('data-message-id'));
     }
   });
   document.addEventListener('pointerdown', down);
-  observer.observe(chat, { subtree: true, attributes: true, attributeFilter: ['class'], attributeOldValue: true });
+  observer.observe(chat, {
+    subtree: true,
+    attributes: true,
+    attributeFilter: ['data-message-jump-focus'],
+    attributeOldValue: true,
+  });
   window.stopPianoPointerOwnership = () => {
     observer.disconnect();
     document.removeEventListener('pointerdown', down);

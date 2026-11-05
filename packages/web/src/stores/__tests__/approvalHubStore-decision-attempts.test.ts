@@ -163,13 +163,14 @@ describe('approvalHubStore decisionAttempts', () => {
       await done;
     });
 
-    it('records a 2xx as a response received and nothing more', async () => {
+    it('records a 2xx response and only the exact domain writer witness, never a decision outcome', async () => {
       mockApiFetch.mockResolvedValueOnce(respond(200, okBody));
       await run();
       expect(store().decisionAttempts[item.proposalId]?.state).toEqual({
         phase: 'response_received',
         status: 200,
         ok: true,
+        ...(kind === 'entity-resolve' ? { domainEffect: 'entity-written' } : {}),
       });
     });
 
@@ -335,5 +336,21 @@ describe('approvalHubStore decisionAttempts', () => {
     await store().withdrawPersonMemory(PERSON.proposalId);
     expect(store().decisionAttempts[GENERIC.proposalId]?.state).toMatchObject({ status: 403 });
     expect(store().decisionAttempts[PERSON.proposalId]?.state).toMatchObject({ status: 200, ok: true });
+  });
+  it('retains the actual 200 when a resolution response has unreadable JSON; it cannot confirm an effect', async () => {
+    mockApiFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => {
+        throw new Error('invalid JSON');
+      },
+    });
+    await store().resolveEntityConflict(ENTITY.proposalId, RESOLVE);
+    expect(store().decisionAttempts[ENTITY.proposalId]?.state).toEqual({
+      phase: 'response_received',
+      status: 200,
+      ok: true,
+    });
+    expect(store().items.some((item) => item.proposalId === ENTITY.proposalId)).toBe(true);
   });
 });

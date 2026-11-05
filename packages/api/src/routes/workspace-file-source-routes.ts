@@ -101,12 +101,12 @@ export function registerWorkspaceFileSourceRoutes(
       const contentRoot = await resolveWorkspaceContentRoot(target.worktreeId);
       if ((await realpath(join(contentRoot.root, target.path))) !== (await realpath(absolutePath)))
         throw new WorkspaceSecurityError('Content owner does not identify the selected file', 'DENIED');
-      const source = await createWorkspaceContentSource(ownerUserId).describe({
+      const locator = await createWorkspaceContentSource(ownerUserId).resolveFileLocator({
         principal: { userId: ownerUserId },
         locator: { worktreeId: contentRoot.canonicalWorktreeId, path: target.path },
       });
       return {
-        ...source.locator,
+        ...locator,
         kind: 'file',
         ...(body.data.root ? { absolutePath: await realpath(absolutePath) } : {}),
       };

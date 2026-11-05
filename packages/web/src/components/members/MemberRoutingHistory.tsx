@@ -1,15 +1,33 @@
 'use client';
 
-import { routingSignalClosures } from '@cat-cafe/shared';
+import { type RoutingContextReadModelV1, routingSignalClosures } from '@cat-cafe/shared';
 import type { CatData } from '@/hooks/useCatData';
 import { useRoutingContext } from '../routing-context/useRoutingContext';
 import { useMembersCopy, useMemberText } from './editor-presentation';
 import { memberSignalDeadline, SIGNAL_SOURCE_LABELS } from './member-projection';
 import { useMemberClock } from './useMemberClock';
-export function MemberRoutingHistory({ cat }: { cat: CatData }) {
+export function MemberRoutingHistory({ cat, model }: { cat: Pick<CatData, 'id'>; model?: RoutingContextReadModelV1 }) {
+  return model ? <MemberRoutingRecords cat={cat} data={model} /> : <MemberRoutingHistoryReader cat={cat} />;
+}
+function MemberRoutingHistoryReader({ cat }: { cat: Pick<CatData, 'id'> }) {
+  const read = useRoutingContext();
+  return <MemberRoutingRecords cat={cat} {...read} />;
+}
+function MemberRoutingRecords({
+  cat,
+  data,
+  error,
+  loading,
+  refresh,
+}: {
+  cat: Pick<CatData, 'id'>;
+  data: RoutingContextReadModelV1 | null;
+  error?: string | null;
+  loading?: boolean;
+  refresh?: () => Promise<boolean>;
+}) {
   const t = useMemberText();
   const copy = useMembersCopy();
-  const { data, error, loading, refresh } = useRoutingContext();
   const now = useMemberClock(data);
   const bindings =
     data?.resolution.state === 'fresh'
@@ -36,7 +54,7 @@ export function MemberRoutingHistory({ cat }: { cat: CatData }) {
       {error && (
         <p role="alert">
           {t('读取失败')}{' '}
-          <button type="button" className="member-button" onClick={() => void refresh()}>
+          <button type="button" className="member-button" onClick={() => void refresh?.()}>
             {t('重试')}
           </button>
         </p>

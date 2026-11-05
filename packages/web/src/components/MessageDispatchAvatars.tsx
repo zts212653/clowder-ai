@@ -1,195 +1,113 @@
 'use client';
 
-import {
-  hasExactLifecycleProcessingDispatch,
-  type LifecycleActiveRun,
-  type LifecycleDispatchRef,
-  type LifecycleStoredMessageMetadata,
-} from '@cat-cafe/shared';
-import { dispatchReceiptDisplay, dispatchReceiptLabel } from '@/lib/dispatch-receipt-display';
-import type { ChatMessage } from '@/stores/chat-types';
-import { focusLineageMessage } from '@/utils/focusLineageMessage';
+import type { LifecycleActiveRun } from '@cat-cafe/shared';
+import type { ChatMessage, QueueEntry } from '@/stores/chat-types';
 import { CatAvatar } from './CatAvatar';
+import { MessageDispatchRecipient } from './MessageDispatchRecipient';
+import { projectMessageDispatchAvatars } from './message-dispatch-projection';
+import { QueueTargetRetryButton } from './QueueTargetRetryButton';
 
-export interface MessageDispatchAvatarProjection {
-  targetId: string;
-  phase: 'delivered' | 'processing' | 'settled';
-  dispatchedAt?: number;
-  statusMessageId?: string;
-  evidenceKey: string;
-}
-
-const TERMINAL_RESPONSE_STATUSES = new Set(['completed', 'failed', 'canceled', 'interrupted']);
-
-function exactMessageById(messages: readonly ChatMessage[], messageId: string): ChatMessage | undefined {
-  const matches = messages.filter((candidate) => candidate.id === messageId);
-  return matches.length === 1 ? matches[0] : undefined;
-}
-
-function deliveredProjection(ref: LifecycleDispatchRef): MessageDispatchAvatarProjection {
-  return {
-    targetId: ref.targetId,
-    phase: 'delivered',
-    dispatchedAt: ref.dispatchedAt,
-    evidenceKey: `dispatch:${ref.targetId}:${ref.statusMessageId}:${ref.dispatchedAt}`,
-  };
-}
-
-function linkedProjection(
-  ref: LifecycleDispatchRef,
-  phase: 'processing' | 'settled',
-  linkedAt: number,
-): MessageDispatchAvatarProjection {
-  return {
-    targetId: ref.targetId,
-    phase,
-    dispatchedAt: ref.dispatchedAt ?? linkedAt,
-    statusMessageId: ref.statusMessageId,
-    evidenceKey: `message:${ref.statusMessageId}`,
-  };
-}
-
-function projectDispatchRef(
-  sourceMessageId: string,
-  sourceDispatchRefs: readonly LifecycleDispatchRef[],
-  ref: LifecycleDispatchRef,
-  statusLifecycle: LifecycleStoredMessageMetadata,
-  activeRuns: readonly LifecycleActiveRun[],
-): MessageDispatchAvatarProjection | null {
-  if (statusLifecycle.kind === 'delivery_failure') {
-    const exactFailure =
-      ref.phase === 'settled' &&
-      statusLifecycle.inputMessageId === sourceMessageId &&
-      statusLifecycle.requestedTargets.includes(ref.targetId);
-    return exactFailure ? linkedProjection(ref, 'settled', statusLifecycle.createdAt) : null;
-  }
-  if (
-    statusLifecycle.kind !== 'response' ||
-    statusLifecycle.targetId !== ref.targetId ||
-    !statusLifecycle.inputMessageIds.includes(sourceMessageId)
-  ) {
-    return null;
-  }
-  if (ref.phase === 'settled') {
-    return TERMINAL_RESPONSE_STATUSES.has(statusLifecycle.status)
-      ? linkedProjection(ref, 'settled', statusLifecycle.startedAt)
-      : null;
-  }
-  if (statusLifecycle.status !== 'processing') return null;
-  return hasExactLifecycleProcessingDispatch({
-    sourceMessageId,
-    sourceDispatchRefs,
-    responseMessageId: ref.statusMessageId,
-    responseLifecycle: statusLifecycle,
-    activeRuns,
-  })
-    ? linkedProjection(ref, 'processing', statusLifecycle.startedAt)
-    : null;
-}
-
-/**
- * The only live dispatch projection. It consumes exact source/ref/response/run
- * identities and fails closed whenever those records disagree or are ambiguous.
- */
-export function projectMessageDispatchAvatars(
-  message: ChatMessage,
-  timelineMessages: readonly ChatMessage[],
-  activeRuns: readonly LifecycleActiveRun[],
-): MessageDispatchAvatarProjection[] {
-  const refs = message.lifecycle?.dispatchRefs ?? [];
-  const targetCounts = new Map<string, number>();
-  for (const ref of refs) targetCounts.set(ref.targetId, (targetCounts.get(ref.targetId) ?? 0) + 1);
-
-  return refs.flatMap((ref): MessageDispatchAvatarProjection[] => {
-    if (targetCounts.get(ref.targetId) !== 1) return [];
-    const statusMessage = exactMessageById(timelineMessages, ref.statusMessageId);
-    const statusLifecycle = statusMessage?.lifecycle;
-    if (!statusLifecycle) return [deliveredProjection(ref)];
-    const linked = projectDispatchRef(message.id, refs, ref, statusLifecycle, activeRuns);
-    return [linked ?? deliveredProjection(ref)];
-  });
-}
-
-/** A delivery-failure row linked from a source is an internal settlement carrier. */
-export function isLinkedDeliveryFailureCarrier(
-  message: ChatMessage,
-  timelineMessages: readonly ChatMessage[],
-): boolean {
-  const lifecycle = message.lifecycle;
-  if (lifecycle?.kind !== 'delivery_failure') return false;
-  // A targetless origin failure has no source/member settlement to absorb it.
-  // It is the canonical user-visible "唤起处理成员失败" system row.
-  if (lifecycle.requestedTargets.length === 0) return false;
-  const source = exactMessageById(timelineMessages, lifecycle.inputMessageId);
-  if (!source) return false;
-  // Only a canonical cat source can receive the ordinary A2A failure report.
-  // User/connector/system origins must keep this result as their visible row,
-  // even though their source avatar also settles against the same result.
-  if (source.from?.kind !== 'agent') return false;
-  return lifecycle.requestedTargets.every(
-    (targetId) =>
-      source.lifecycle?.dispatchRefs?.filter(
-        (ref) => ref.targetId === targetId && ref.phase === 'settled' && ref.statusMessageId === message.id,
-      ).length === 1,
-  );
-}
+export type { MessageDispatchAvatarProjection } from './message-dispatch-projection';
+export { isLinkedDeliveryFailureCarrier, projectMessageDispatchAvatars } from './message-dispatch-projection';
 
 interface MessageDispatchAvatarsProps {
   message: ChatMessage;
   timelineMessages: readonly ChatMessage[];
   activeRuns: readonly LifecycleActiveRun[];
   getCatLabel: (catId: string) => string;
+  queue?: readonly QueueEntry[];
+  inline?: boolean;
+  threadId?: string;
 }
 
+/** One readable receipt per exact recipient; reply progress never substitutes for reading evidence. */
 export function MessageDispatchAvatars({
   message,
   timelineMessages,
   activeRuns,
   getCatLabel,
+  queue = [],
+  inline = false,
+  threadId,
 }: MessageDispatchAvatarsProps) {
   const projections = projectMessageDispatchAvatars(message, timelineMessages, activeRuns);
-  if (projections.length === 0) return null;
+  const pending = queue.filter((entry) => entry.messageId === message.id);
+  if (projections.length === 0 && pending.length === 0) return null;
   const alignsRight = message.type === 'user' && !message.catId;
+  const agentSource = message.from?.kind === 'agent' || Boolean(message.catId);
+  const whisper = message.visibility === 'whisper';
+  const deliveredTargets = new Set(projections.map((projection) => projection.targetId));
   return (
     <ul
-      className={`-mt-3 mb-4 flex gap-1.5 ${alignsRight ? 'justify-end pr-10' : 'justify-start pl-10'}`}
+      className={`flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-cafe-muted ${inline ? (alignsRight ? 'justify-end' : 'justify-start') : `-mt-3 mb-4 ${alignsRight ? 'justify-end pr-10' : 'justify-start pl-10'}`}`}
       data-testid="message-dispatch-avatars"
-      aria-label="消息处理成员"
+      aria-label={agentSource ? '回话交接' : '消息收件进度'}
     >
-      {projections.map((projection) => {
-        const label = getCatLabel(projection.targetId);
-        const processing = projection.phase === 'processing';
-        const ref = message.lifecycle?.dispatchRefs?.find((candidate) => candidate.targetId === projection.targetId);
-        const linked = ref ? exactMessageById(timelineMessages, ref.statusMessageId)?.lifecycle : undefined;
-        const running =
-          linked?.kind === 'response' &&
-          linked.targetId === projection.targetId &&
-          linked.inputMessageIds.includes(message.id)
-            ? linked.status === 'processing'
-            : ref?.phase !== 'settled';
-        const receipt = dispatchReceiptDisplay(ref, running);
-        const title = dispatchReceiptLabel(receipt, label, 'recipient');
-        return (
-          <li
-            key={`${projection.targetId}:${projection.evidenceKey}`}
-            data-dispatch-target={projection.targetId}
-            data-dispatch-phase={projection.phase}
-            title={title}
-          >
-            {projection.statusMessageId ? (
-              <button
-                type="button"
-                aria-label={`${title}，跳转到对应回复`}
-                className="block rounded-full"
-                onClick={() => focusLineageMessage(projection.statusMessageId!)}
-              >
-                <CatAvatar catId={projection.targetId} size={11} status={processing ? 'streaming' : undefined} />
-              </button>
-            ) : (
-              <CatAvatar catId={projection.targetId} size={11} status={processing ? 'streaming' : undefined} />
-            )}
-          </li>
+      {projections.map((projection) => (
+        <MessageDispatchRecipient
+          key={`${projection.targetId}:${projection.evidenceKey}`}
+          projection={projection}
+          message={message}
+          timelineMessages={timelineMessages}
+          pending={pending}
+          getCatLabel={getCatLabel}
+          agentSource={agentSource}
+          whisper={whisper}
+          recipientCount={projections.length}
+          threadId={threadId}
+        />
+      ))}
+      {pending.flatMap((entry) => {
+        const retryActions =
+          entry.recoveryActions?.filter(
+            (action) => action.kind === 'retry_target' && !deliveredTargets.has(action.targetCatId),
+          ) ?? [];
+        const retryTargets = new Set(
+          retryActions.map((action) => (action.kind === 'retry_target' ? action.targetCatId : '')),
         );
+        const targets = entry.targetCats.filter((target) => !deliveredTargets.has(target) && !retryTargets.has(target));
+        const retryRows = retryActions.flatMap((action) =>
+          action.kind === 'retry_target'
+            ? [
+                <li key={action.id} className="inline-flex items-center gap-1 text-conn-red-text">
+                  <span>没送到</span>
+                  <CatAvatar catId={action.targetCatId} size={16} />
+                  <span>{getCatLabel(action.targetCatId)}</span>
+                  <QueueTargetRetryButton entry={entry} action={action} label="重新发送" />
+                </li>,
+              ]
+            : [],
+        );
+        if (entry.targetCats.length > 0 && targets.length === 0) return retryRows;
+        const ahead = queue.slice(0, queue.indexOf(entry)).filter((candidate) => {
+          const source = timelineMessages.find((item) => item.id === candidate.messageId);
+          return targets.some(
+            (target) =>
+              candidate.targetCats.includes(target) &&
+              !source?.lifecycle?.dispatchRefs?.some((ref) => ref.targetId === target),
+          );
+        }).length;
+        const waiting =
+          !entry.autoExecute ||
+          targets.length === 0 ||
+          ahead > 0 ||
+          activeRuns.some((run) => targets.includes(run.targetId) && !run.inputMessageIds.includes(message.id));
+        return [
+          ...retryRows,
+          <li key={entry.id} className="inline-flex flex-wrap items-center gap-1" data-dispatch-queued={entry.id}>
+            <span>{waiting ? (agentSource ? '排队交给' : '排队中 · 等') : '发送中 ·'}</span>
+            {targets.map((target) => (
+              <span key={target} className="inline-flex items-center gap-1">
+                <CatAvatar catId={target} size={16} />
+                {getCatLabel(target)}
+              </span>
+            ))}
+            <span>
+              {targets.length ? (waiting && !agentSource ? '接' : '') : '选择收件猫'}
+              {ahead > 0 ? `，前面还有 ${ahead} 条` : ''}
+            </span>
+          </li>,
+        ];
       })}
     </ul>
   );

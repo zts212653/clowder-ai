@@ -14,17 +14,27 @@ import type {
   MessageContent,
   MessageFrom,
   QueueAuthorIntentReceipt,
+  QueueRecoveryAction,
 } from '@cat-cafe/shared';
+import { appendRepeatKey } from '../domains/cats/services/agents/invocation/append-delivery-identity.js';
 import {
   type QueueEntry,
   queueEntryOwnerId,
   queueEntryTargetCats,
 } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
+import {
+  isOwnerRecoverableRoutingTarget,
+  isOwnerRepeatableAppendTarget,
+} from '../domains/cats/services/agents/invocation/queue-routing-recovery-policy.js';
+import { storedMessageSource } from '../domains/cats/services/stores/message-source.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 
 /** Projection of StoredMessage fields useful for QueuePanel / recall-edit. */
 export interface QueueEntryMessagePreview {
+  timestamp?: number;
+  visibility?: 'whisper';
+  whisperTo?: readonly string[];
   contentBlocks?: readonly MessageContent[];
   replyTo?: string;
   /** Stored connector identity, so a queue row can render the same summary as its timeline bubble. */
@@ -54,6 +64,7 @@ export interface EnrichedQueueEntry {
   continuationKey?: string;
   position?: number;
   messagePreview?: QueueEntryMessagePreview;
+  recoveryActions?: QueueRecoveryAction[];
 }
 
 type QueueUpdateEmitter = Pick<SocketManager, 'emitToUser'>;
@@ -108,24 +119,68 @@ function collectMessageIds(entry: Pick<EnrichedQueueEntry, 'messageId'>): string
 async function buildMessageEnrichment(
   msgIds: string[],
   messageStore: IMessageStore,
-): Promise<{ messagePreview: QueueEntryMessagePreview } | null> {
+  entry?: QueueEntry,
+): Promise<Pick<EnrichedQueueEntry, 'messagePreview' | 'recoveryActions'> | null> {
   const blocks: MessageContent[] = [];
   let replyTo: string | undefined;
   let connector: string | undefined;
   let source: ConnectorSource | undefined;
+  let timestamp: number | undefined;
+  let visibility: 'whisper' | undefined;
+  let whisperTo: readonly string[] | undefined;
+  const recoveryActions: QueueRecoveryAction[] = [];
 
   for (const msgId of msgIds) {
     const msg = await messageStore.getById(msgId);
     if (!msg) continue;
+    if (entry?.status === 'queued') {
+      for (const targetCatId of entry.delivery.routingHeldTargetIds ?? []) {
+        const native = entry.delivery.appendPendingByTarget?.[targetCatId];
+        const response = native?.requiresCompletion ? await messageStore.getById(native.responseMessageId) : undefined;
+        const repeat = isOwnerRepeatableAppendTarget(entry, msg, targetCatId, response);
+        if (!repeat && !isOwnerRecoverableRoutingTarget(entry, msg, targetCatId)) continue;
+        const failure = entry.delivery.appendRecoveryByTarget?.[targetCatId];
+        if (
+          repeat &&
+          failure &&
+          (await messageStore.getByIdempotencyKey(
+            msg.userId,
+            msg.threadId,
+            appendRepeatKey(msg.id, targetCatId, failure.invocationId),
+          ))
+        )
+          continue;
+        recoveryActions.push({
+          id: `${repeat ? 'repeat' : 'retry'}:${entry.id}:${targetCatId}`,
+          entryId: entry.id,
+          kind: repeat ? 'repeat_target' : 'retry_target',
+          targetCatId,
+          request: {
+            method: 'POST',
+            path: `/api/threads/${encodeURIComponent(entry.threadId)}/messages/${encodeURIComponent(msg.id)}/routing-targets/${encodeURIComponent(targetCatId)}/${repeat ? 'repeat' : 'retry'}`,
+          },
+        });
+      }
+    }
+    timestamp ??= msg.timestamp;
+    if (msg.visibility === 'whisper') {
+      visibility = 'whisper';
+      whisperTo = msg.whisperTo;
+    }
     if (msg.contentBlocks) blocks.push(...msg.contentBlocks);
     if (!replyTo && msg.replyTo) replyTo = msg.replyTo;
-    if (!connector && msg.source?.connector) connector = msg.source.connector;
-    if (!source && msg.source) source = structuredClone(msg.source);
+    const messageSource = storedMessageSource(msg);
+    if (!connector && messageSource?.connector) connector = messageSource.connector;
+    if (!source && messageSource) source = structuredClone(messageSource);
   }
 
-  if (blocks.length === 0 && !replyTo && !connector) return null;
+  if (timestamp === undefined && blocks.length === 0 && !replyTo && !connector && recoveryActions.length === 0)
+    return null;
   return {
+    ...(recoveryActions.length ? { recoveryActions } : {}),
     messagePreview: {
+      ...(timestamp !== undefined ? { timestamp } : {}),
+      ...(visibility ? { visibility, whisperTo } : {}),
       ...(blocks.length > 0 ? { contentBlocks: blocks } : {}),
       ...(replyTo ? { replyTo } : {}),
       ...(connector ? { connector } : {}),
@@ -145,12 +200,17 @@ export async function enrichQueueEntries(
   messageStore: IMessageStore | null | undefined,
 ): Promise<EnrichedQueueEntry[]> {
   const projected = entries.filter(isPublicQueueEntry).map(projectPublicQueueEntry);
-  return enrichProjectedQueueEntries(projected, messageStore);
+  return enrichProjectedQueueEntries(
+    projected,
+    messageStore,
+    new Map(entries.map((entry) => [entry.id, structuredClone(entry)])),
+  );
 }
 
 async function enrichProjectedQueueEntries(
   projected: EnrichedQueueEntry[],
   messageStore: IMessageStore | null | undefined,
+  rawEntries: ReadonlyMap<string, QueueEntry>,
 ): Promise<EnrichedQueueEntry[]> {
   if (!messageStore || projected.length === 0) return projected;
 
@@ -160,7 +220,7 @@ async function enrichProjectedQueueEntries(
         const msgIds = collectMessageIds(entry);
         if (msgIds.length === 0) return entry;
 
-        const enrichment = await buildMessageEnrichment(msgIds, messageStore);
+        const enrichment = await buildMessageEnrichment(msgIds, messageStore, rawEntries.get(entry.id));
         return enrichment ? { ...entry, ...enrichment } : entry;
       }),
     );

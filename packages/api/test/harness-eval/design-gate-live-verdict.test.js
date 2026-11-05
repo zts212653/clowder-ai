@@ -89,7 +89,7 @@ function bundle(overrides = {}) {
         eligibility: { eligible: true, trigger: 'preservation_boundary_delta' },
         consequence: { kind: 'alpha_no_escape', evidenceRef: 'alpha:f303-phase-c-pr3901-alpha#services' },
         sourceRefs: [
-          'github:pr:zts212653/cat-cafe#3901',
+          'github:pr:zts212653/clowder-ai#3901',
           'local-review:0001787501286658-000077-5d3e5e07:approved',
           'alpha:f303-phase-c-pr3901-alpha#services',
         ],

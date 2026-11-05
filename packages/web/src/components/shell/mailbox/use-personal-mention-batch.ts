@@ -61,7 +61,7 @@ export function usePersonalMentionBatch(
     }
   }, [snapshot, read, view]);
   const prepare = async (period: MentionIgnorePeriod) => {
-    if (!owner || personal.actions?.disabled !== false || running.current) return;
+    if (!owner || personal.batchRefusal !== null || running.current) return;
     running.current = true;
     setBusy(true);
     setNotice(null);
@@ -87,7 +87,7 @@ export function usePersonalMentionBatch(
   };
   const confirm = async () => {
     if (!snapshot || running.current) return;
-    if (!current(snapshot.ownerUserId) || personal.actions?.disabled !== false) {
+    if (!current(snapshot.ownerUserId) || personal.batchRefusal !== null) {
       withdraw();
       return;
     }

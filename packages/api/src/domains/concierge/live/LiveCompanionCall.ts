@@ -186,9 +186,6 @@ export class LiveCompanionCall implements CodexLiveRunPort {
   async hasCurrentCompanion(): Promise<boolean> {
     return this.options.verifyCompanion ? this.options.verifyCompanion() : true;
   }
-  acceptsFreshness(): boolean {
-    return this.acceptsInput() && this.options.householdToolsEnabled !== false;
-  }
   exposureReason(message: FreshnessReadableMessage): 'same_live_call_exposure' | null {
     const state = {
       stopRequested: this.startupSignal.aborted,
@@ -223,9 +220,6 @@ export class LiveCompanionCall implements CodexLiveRunPort {
     });
     this.boundaryContexts.configure(callbackEnv);
     return config;
-  }
-  signalInbox(): void {
-    this.boundaryContexts.signalInbox();
   }
   hasPendingInboxWake(): boolean {
     return this.boundaryContexts.hasPendingWake() || this.lateResults.hasPending();

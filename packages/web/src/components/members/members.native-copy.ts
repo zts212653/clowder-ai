@@ -1,6 +1,8 @@
 // Fixed UI and validator messages only; model IDs, paths and API errors remain source data.
 export const nativeCopy = {
   zh: {
+    'AGY 官方 ACP': 'AGY 官方 ACP',
+    '官方 ACP 可留空；Command 填已安装程序的路径。': '官方 ACP 可留空；Command 填已安装程序的路径。',
     '启用 Native': '启用 Native',
     暂停: '暂停',
     '隔离 Profile ID': '隔离 Profile ID',
@@ -17,6 +19,9 @@ export const nativeCopy = {
     'Profile 根目录和批准工作区必须使用绝对路径': 'Profile 根目录和批准工作区必须使用绝对路径',
   },
   en: {
+    'AGY 官方 ACP': 'AGY Official ACP',
+    '官方 ACP 可留空；Command 填已安装程序的路径。':
+      'Leave arguments empty for official ACP. Set Command to the installed executable path.',
     '启用 Native': 'Enable Native',
     暂停: 'Paused',
     '隔离 Profile ID': 'Isolated Profile ID',

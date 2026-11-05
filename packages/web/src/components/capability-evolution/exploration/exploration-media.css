@@ -13,7 +13,8 @@
 .exploration-media figcaption > svg {
   color: var(--chart-3);
 }
-.exploration-media figcaption > span {
+.exploration-media-provenance {
+  margin-top: 6px;
   font-size: var(--console-font-label);
   color: var(--cafe-text-muted);
 }
@@ -40,6 +41,7 @@
   position: relative;
   min-height: 96px;
   background: var(--cafe-surface-sunken);
+  --chat-background-role: cafe-sunken;
   border-radius: 12px;
   padding-bottom: 4px;
 }
@@ -54,6 +56,7 @@
   border: 1px solid var(--cafe-border);
   border-radius: 8px;
   background: var(--cafe-surface);
+  --chat-background-role: cafe;
   color: var(--cafe-text);
 }
 .exploration-discuss {
@@ -86,6 +89,7 @@
 }
 .exploration-media-choices [aria-pressed="true"] {
   background: var(--cafe-surface-elevated);
+  --chat-background-role: cafe-elevated;
   color: var(--cafe-text);
 }
 .exploration-media-missing {
@@ -102,6 +106,7 @@
 .exploration-media-message {
   padding: 20px 12px;
   background: var(--cafe-surface);
+  --chat-background-role: cafe;
   border-radius: 8px;
 }
 .exploration-media-message button {

@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { AVATAR_RAW_FILE_LIMIT_BYTES } from '@cat-cafe/shared';
 import multipart from '@fastify/multipart';
 import type { FastifyPluginAsync } from 'fastify';
+import { detectImageMime } from '../utils/image-mime.js';
 import { getDefaultUploadDir } from '../utils/upload-paths.js';
 
 const ACCEPTED_IMAGE_MIME = ['image/png', 'image/jpeg', 'image/webp'] as const;
@@ -16,47 +17,6 @@ function isAcceptedMime(mime: string): mime is AcceptedMime {
 function extForMime(mime: AcceptedMime): string {
   if (mime === 'image/jpeg') return 'jpg';
   return mime.split('/')[1] ?? 'bin';
-}
-
-/**
- * Sniff image magic signature from buffer prefix. Returns the detected MIME
- * type or `null` if no supported signature matches. mimetype on the multipart
- * part is supplied by the client and cannot be trusted as ground truth.
- */
-function detectImageMime(buffer: Buffer): AcceptedMime | null {
-  // PNG: 89 50 4E 47 0D 0A 1A 0A
-  if (
-    buffer.length >= 8 &&
-    buffer[0] === 0x89 &&
-    buffer[1] === 0x50 &&
-    buffer[2] === 0x4e &&
-    buffer[3] === 0x47 &&
-    buffer[4] === 0x0d &&
-    buffer[5] === 0x0a &&
-    buffer[6] === 0x1a &&
-    buffer[7] === 0x0a
-  ) {
-    return 'image/png';
-  }
-  // JPEG: FF D8 FF
-  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
-    return 'image/jpeg';
-  }
-  // WebP: "RIFF" .... "WEBP"
-  if (
-    buffer.length >= 12 &&
-    buffer[0] === 0x52 &&
-    buffer[1] === 0x49 &&
-    buffer[2] === 0x46 &&
-    buffer[3] === 0x46 &&
-    buffer[8] === 0x57 &&
-    buffer[9] === 0x45 &&
-    buffer[10] === 0x42 &&
-    buffer[11] === 0x50
-  ) {
-    return 'image/webp';
-  }
-  return null;
 }
 
 export const avatarsRoutes: FastifyPluginAsync = async (app) => {
@@ -118,7 +78,9 @@ export const avatarsRoutes: FastifyPluginAsync = async (app) => {
     // client-supplied and cannot be trusted. Reject if bytes do not match a
     // supported image signature, or if the detected type disagrees with the
     // declared one.
-    const detected = detectImageMime(buffer);
+    const sniffed = detectImageMime(buffer);
+    // Preserve the avatar contract: GIF signatures remain unsupported here.
+    const detected = sniffed !== null && isAcceptedMime(sniffed) ? sniffed : null;
     if (detected === null || detected !== file.mimetype) {
       return reply.status(415).send({
         error: 'File contents do not match the declared image type',

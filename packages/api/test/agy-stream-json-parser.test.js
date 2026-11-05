@@ -96,6 +96,22 @@ test('agy-stream-json-parser', async (t) => {
     assert.equal(turn.outcome, 'ok');
   });
 
+  await t.test('an unreadable terminal error cannot be normalized into a successful response', () => {
+    const turn = summarizeAgyStreamJsonTurn([
+      JSON.stringify({
+        event: 'result',
+        result: {
+          conversation_id: 'c',
+          status: 'SUCCESS',
+          response: 'Apparently successful',
+          error: { code: 'UNPARSED_FAILURE' },
+        },
+      }),
+    ]);
+    assert.equal(turn.outcome, 'protocol_error');
+    assert.ok(turn.anomalies.some((anomaly) => anomaly.kind === 'invalid_result_evidence'));
+  });
+
   // ── 以下四条来自 local review CHANGES_REQUESTED（HEAD 839dbc1b0f）。
   // 全部是同一个病：协议漂移在到达 decideOutcome 之前就被悄悄抹平成确定结论。
   // 这正是本文件顶部自己声明的那条边界，第一版实现没守住。

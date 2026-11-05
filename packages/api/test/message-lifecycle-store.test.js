@@ -425,43 +425,6 @@ describe('MessageStore lifecycle input dispatch CAS', () => {
       runs: [{ targetId: 'opus', invocationId: 'turn-stale', responseMessageId: opus.id, dispatchedAt: 103 }],
     });
     assert.deepEqual(wrongRun, { kind: 'conflict', reason: 'response_lifecycle_conflict' });
-
-    const failure = store.append(
-      canonicalTestMessageInput({
-        userId: 'owner-1',
-        threadId: 'thread-1',
-        catId: null,
-        content: 'codex carrier closed',
-        mentions: [],
-        timestamp: 110,
-        lifecycle: {
-          kind: 'delivery_failure',
-          orderKey: '110:failure-codex',
-          from: { kind: 'system', service: 'message_delivery' },
-          status: 'failed',
-          sourceEntryId: 'entry-append',
-          inputMessageId: input.id,
-          requestedTargets: ['codex'],
-          reason: 'control_carrier_replaced',
-          createdAt: 110,
-        },
-      }),
-    );
-    const rejection = {
-      threadId: 'thread-1',
-      entryId: 'entry-append',
-      inputMessageIds: [input.id],
-      failureMessageIds: [failure.id],
-      run: { targetId: 'codex', invocationId: 'turn-codex', responseMessageId: codex.id },
-    };
-    assert.equal(store.commitLifecycleAppendRejection(rejection).kind, 'applied');
-    assert.deepEqual(store.getById(input.id).lifecycle.dispatchRefs, [
-      { targetId: 'opus', phase: 'dispatched', statusMessageId: opus.id, dispatchedAt: 101 },
-      { targetId: 'codex', phase: 'settled', statusMessageId: failure.id, dispatchedAt: 102 },
-    ]);
-    assert.deepEqual(store.getById(codex.id).lifecycle.inputEntryIds, ['entry-old']);
-    assert.deepEqual(store.getById(codex.id).lifecycle.inputMessageIds, ['message-old']);
-    assert.equal(store.commitLifecycleAppendRejection(rejection).kind, 'replayed');
   });
 
   test('publishes agent speech with a durable ledger wake in the same append', async () => {

@@ -6,11 +6,13 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { nativeHookPrograms } from './helpers/native-hook-programs.js';
+import { decideNativeHookPayload } from '../../../scripts/native-effect-target-guard.mjs';
+import { nativeHookPrograms, nativeHookTestEnv } from './helpers/native-hook-programs.js';
 
 function admitted(command, cwd) {
   for (const [program, script, tool_name] of nativeHookPrograms()) {
     const result = spawnSync(program, [script], {
+      env: nativeHookTestEnv(),
       input: JSON.stringify({ tool_name, cwd, tool_input: { cmd: command, command } }),
       encoding: 'utf8',
     });
@@ -65,11 +67,16 @@ test('curl startup and proxy environment alter actual effects; pure argv stays u
     const shell = `curl ${row.args.map((value) => JSON.stringify(value)).join(' ')}`;
     for (const [program, script, tool_name] of nativeHookPrograms()) {
       const judged = spawnSync(program, [script], {
+        env: nativeHookTestEnv(),
         input: JSON.stringify({ tool_name, cwd: runtime, tool_input: { cmd: shell, command: shell } }),
         encoding: 'utf8',
       });
       assert.equal(judged.status, 0, judged.stderr);
-      assert.ok(judged.stdout.includes('"deny"'), judged.stdout);
+      assert.equal(
+        decideNativeHookPayload({ tool_name, cwd: runtime, tool_input: { command: shell, cmd: shell } }).effect,
+        'unknown',
+      );
+      assert.ok(!judged.stdout.includes('read_only'), judged.stdout);
     }
     // Actual probe runs only in its own ordinary fixture, after its ordinary policy admission.
     admitted(shell, root);

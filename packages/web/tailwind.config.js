@@ -6,6 +6,9 @@ module.exports = {
   content: ['./src/**/*.{js,ts,jsx,tsx,mdx}', '../shared/src/**/*.{js,ts}'],
   theme: {
     extend: {
+      fontFamily: {
+        sans: 'var(--font-sans)',
+      },
       fontSize: {
         /* token-based (from typography-tokens.json — includes micro/label/compact with lineHeight) */
         ...typographyTokens.fontSize,
@@ -343,6 +346,7 @@ module.exports = {
     },
   },
   plugins: [
+    require('./scripts/chat-background/surface-plugin.cjs'),
     /* Expose fontSizePx as --console-font-{name} CSS vars for JS/non-Tailwind consumers */
     ({ addBase }) => {
       const vars = {};

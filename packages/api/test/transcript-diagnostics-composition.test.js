@@ -13,7 +13,7 @@ import { InvocationRecordStore } from '../dist/domains/cats/services/stores/port
 import { SessionChainStore } from '../dist/domains/cats/services/stores/ports/SessionChainStore.js';
 import { sessionTranscriptRoutes } from '../dist/routes/session-transcript.js';
 
-test('compiled API composition logs both real process reads without transcript bodies or source IDs', async (t) => {
+test('compiled API composition logs one reused process read without transcript bodies or source IDs', async (t) => {
   const dataDir = await mkdtemp(join(tmpdir(), 'task229-composition-'));
   t.after(() => rm(dataDir, { recursive: true, force: true }));
   const sessionChainStore = new SessionChainStore();
@@ -22,7 +22,7 @@ test('compiled API composition logs both real process reads without transcript b
   const writer = new TranscriptWriter({ dataDir });
   const realSnapshot = writer.readBufferedSnapshot.bind(writer);
   writer.readBufferedSnapshot = async (...args) => {
-    await delay(120); // Force both actual read reports above the finite reporter's threshold.
+    await delay(120); // Force the actual read report above the finite reporter's threshold.
     return realSnapshot(...args);
   };
   const threadId = 'private-thread-canary';
@@ -91,21 +91,21 @@ test('compiled API composition logs both real process reads without transcript b
   const reads = records.filter((record) => record.type === 'transcript_read');
   assert.deepEqual(
     reads.map((record) => record.stage),
-    ['canonical', 'generations'],
+    ['canonical'],
   );
   assert.ok(
     reads.every((record) => record.rows === 2 && record.sessionCount === 1 && record.requestId === 'request-canary'),
   );
   const settled = records.filter((record) => record.type === 'transcript_worker' && record.phase === 'settled');
-  // Fast workers need not be reported individually; coverage still counts both.
+  // Fast workers need not be reported individually; coverage still counts the read.
   assert.ok(settled.every((record) => record.started && record.outcome === 'success'));
   const coverage = records.find((record) => record.type === 'transcript_read_coverage_end');
-  assert.equal(coverage.observedReads, 2);
-  assert.equal(coverage.completedReads, 2);
-  assert.equal(coverage.rows, 4);
-  assert.equal(coverage.settledWorkers, 2);
-  assert.equal(coverage.settledStartedWorkers, 2);
-  assert.equal(coverage.processMeasuredWorkers, 2);
+  assert.equal(coverage.observedReads, 1);
+  assert.equal(coverage.completedReads, 1);
+  assert.equal(coverage.rows, 2);
+  assert.equal(coverage.settledWorkers, 1);
+  assert.equal(coverage.settledStartedWorkers, 1);
+  assert.equal(coverage.processMeasuredWorkers, 1);
   assert.equal(coverage.processMeasurementMissingWorkers, 0);
   assert.ok(coverage.moduleLoadWallMs > 0);
   assert.ok(coverage.operationWallMs > 0);

@@ -32,20 +32,11 @@ case "$SKILL_NAME" in
   *)                  SOP_STAGE="other:${SKILL_NAME}" ;;
 esac
 
-# F073 P4 (AC-14): Try shared HTTP API (best-effort, fire-and-forget)
-API_PORT="${API_SERVER_PORT:-3004}"
-INVOCATION_ID="${CAT_CAFE_INVOCATION_ID:-}"
-CALLBACK_TOKEN="${CAT_CAFE_CALLBACK_TOKEN:-}"
-
-if [ -n "$INVOCATION_ID" ] && [ -n "$CALLBACK_TOKEN" ]; then
-  curl -sf -o /dev/null \
-    -X POST "http://localhost:${API_PORT}/api/sessions/sop-bookmark" \
-    -H "Content-Type: application/json" \
-    -H "X-Invocation-Id: ${INVOCATION_ID}" \
-    -H "X-Callback-Token: ${CALLBACK_TOKEN}" \
-    -d "{\"cliSessionId\": \"$SESSION_ID\", \"skill\": \"$SKILL_NAME\", \"sopStage\": \"$SOP_STAGE\"}" \
-    --connect-timeout 2 --max-time 5 2>/dev/null || true
-fi
+# F073 P4 (AC-14): Bounded best-effort callback through the installed carrier.
+SCRIPT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd) || exit 1
+jq -n --arg sid "$SESSION_ID" --arg skill "$SKILL_NAME" --arg stage "$SOP_STAGE" \
+  '{session_id: $sid, skill: $skill, sopStage: $stage}' | \
+  node "$SCRIPT_ROOT/.claude/hooks/f24-compaction.mjs" sop-set >/dev/null 2>&1 || true
 
 # AC-17 dual-write: always write /tmp/ file as degradation safety net.
 # Even when API succeeds, local copy ensures recovery if API is unavailable at read time.

@@ -23,7 +23,8 @@ export interface CollectiveHomeProjection {
 const activityLabels: Readonly<Partial<Record<CollectiveWorkProjection['history'][number]['action'], string>>> = {
   proposed: '提出了',
   committed: '接受了',
-  dependencies_changed: '更新了前置工作',
+  accountability_assigned: '接下了',
+  dependencies_changed: '更新了前置任务',
   progress_started: '开始推进',
   progress_reported: '更新了进展',
   result_returned: '带回了',

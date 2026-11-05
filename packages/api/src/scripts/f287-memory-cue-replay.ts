@@ -128,7 +128,7 @@ function makeOpportunity(family: EvaluatedFamily, scope: RecallScopeV1 = OWNER_S
       scope,
       occurredAt: 10_000,
       payload: {
-        repoFullName: 'zts212653/cat-cafe',
+        repoFullName: 'zts212653/clowder-ai',
         prNumber: 287,
         headSha: '2870000000000000000000000000000000000000',
         phase: 'merge_gate',
@@ -188,7 +188,7 @@ function createRegistry(state: FixtureSourceState): MemoryCueResolverRegistry {
       async resolve(input) {
         if (
           input.ownerUserId !== OWNER_SCOPE.ownerUserId ||
-          input.repoFullName !== 'zts212653/cat-cafe' ||
+          input.repoFullName !== 'zts212653/clowder-ai' ||
           input.externalCondition !== 'billing_spending_limit_zero_step'
         ) {
           return null;

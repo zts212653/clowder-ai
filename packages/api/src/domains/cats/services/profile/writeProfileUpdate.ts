@@ -69,6 +69,8 @@ export interface WriteProfilePrimerOptions {
    */
   allowAlreadyApplied?: boolean;
   fileOps?: ProfileWriteFileOps;
+  /** Capsule compatibility reads the effective old or new file under the same canonical target lock. */
+  readCurrentContent?: () => string;
 }
 
 const DEFAULT_FILE_OPS: ProfileWriteFileOps = { writeFileSync, renameSync, rmSync };
@@ -111,7 +113,11 @@ export function writeProfileTarget(
   options: WriteProfilePrimerOptions = {},
 ): { writtenPath: string } {
   const fileOps = options.fileOps ?? DEFAULT_FILE_OPS;
-  const current = existsSync(absolutePath) ? readFileSync(absolutePath, 'utf8') : '';
+  const current = options.readCurrentContent
+    ? options.readCurrentContent()
+    : existsSync(absolutePath)
+      ? readFileSync(absolutePath, 'utf8')
+      : '';
   const currentHash = hashContent(current);
   if (currentHash !== proposal.baseContentHash) {
     if (options.allowAlreadyApplied && current === proposal.afterContent) return { writtenPath: absolutePath };

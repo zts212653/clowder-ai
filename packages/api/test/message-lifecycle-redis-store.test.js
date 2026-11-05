@@ -52,6 +52,38 @@ describe(
       await redis.quit();
     });
 
+    test('serializes five concurrent dispatchRef appends for one fan-out source', async () => {
+      const input = await store.append(
+        canonicalFixture({
+          userId: 'owner-redis',
+          threadId: 'thread-redis-fanout',
+          catId: null,
+          content: '@all hello',
+          mentions: ['opus', 'codex', 'dsh', 'kimi', 'pi'],
+          timestamp: 200,
+        }),
+      );
+      const orderKey = input.lifecycle?.orderKey ?? `${input.timestamp}:${input.id}`;
+      const targets = ['opus', 'codex', 'dsh', 'kimi', 'pi'];
+      const results = await Promise.all(
+        targets.map((targetId, index) =>
+          store.advanceLifecycleInputDispatch(input.id, {
+            orderKey,
+            targetId,
+            phase: 'dispatched',
+            statusMessageId: `${input.id}-response-${targetId}`,
+            dispatchedAt: 200 + index,
+          }),
+        ),
+      );
+      assert.equal(
+        results.filter((result) => result.kind === 'applied' || result.kind === 'replayed').length,
+        targets.length,
+      );
+      const refs = (await store.getById(input.id)).lifecycle.dispatchRefs;
+      assert.deepEqual(refs.map((ref) => ref.targetId).sort(), [...targets].sort());
+    });
+
     test('atomically attaches one Queue input to every Redis-backed processing Active Run', async () => {
       const input = await store.append(
         canonicalFixture({
@@ -104,42 +136,6 @@ describe(
       assert.deepEqual((await store.getById(opus.id)).lifecycle.inputEntryIds, ['entry-old', 'entry-append']);
       assert.deepEqual((await store.getById(codex.id)).lifecycle.inputMessageIds, ['message-old', input.id]);
       assert.equal((await store.commitLifecycleAppendAdmission(admission)).kind, 'replayed');
-
-      const failure = await store.append(
-        canonicalFixture({
-          userId: 'owner-redis',
-          threadId: 'thread-redis-append',
-          catId: null,
-          content: 'codex carrier closed',
-          mentions: [],
-          timestamp: 110,
-          lifecycle: {
-            kind: 'delivery_failure',
-            orderKey: '110:failure-codex',
-            from: { kind: 'system', service: 'message_delivery' },
-            status: 'failed',
-            sourceEntryId: 'entry-append',
-            inputMessageId: input.id,
-            requestedTargets: ['codex'],
-            reason: 'control_carrier_replaced',
-            createdAt: 110,
-          },
-        }),
-      );
-      const rejection = {
-        threadId: 'thread-redis-append',
-        entryId: 'entry-append',
-        inputMessageIds: [input.id],
-        failureMessageIds: [failure.id],
-        run: { targetId: 'codex', invocationId: 'turn-codex', responseMessageId: codex.id },
-      };
-      assert.equal((await store.commitLifecycleAppendRejection(rejection)).kind, 'applied');
-      assert.deepEqual((await store.getById(input.id)).lifecycle.dispatchRefs, [
-        { targetId: 'opus', phase: 'dispatched', statusMessageId: opus.id, dispatchedAt: 101 },
-        { targetId: 'codex', phase: 'settled', statusMessageId: failure.id, dispatchedAt: 102 },
-      ]);
-      assert.deepEqual((await store.getById(codex.id)).lifecycle.inputMessageIds, ['message-old']);
-      assert.equal((await store.commitLifecycleAppendRejection(rejection)).kind, 'replayed');
     });
 
     test('publishes a lifecycle response to cursor reads only with its terminal body', async () => {
@@ -304,6 +300,90 @@ describe(
       assert.deepEqual(terminal.message.lifecycle.dispatchRefs, [
         { targetId: 'codex', phase: 'settled', statusMessageId: 'child-response' },
       ]);
+    });
+
+    test('rejects a terminal snapshot when Append adopts another input between its read and Lua commit', async () => {
+      const late = await store.append(
+        canonicalFixture({
+          userId: 'owner-redis',
+          threadId: 'thread-dot-terminal-race',
+          catId: null,
+          content: 'late Ask',
+          mentions: ['opus'],
+          timestamp: 150,
+        }),
+      );
+      const processing = await store.append(
+        canonicalFixture({
+          userId: 'owner-redis',
+          threadId: 'thread-dot-terminal-race',
+          catId: 'opus',
+          content: '',
+          mentions: [],
+          timestamp: 100,
+          lifecycle: {
+            kind: 'response',
+            orderKey: '100:dot-terminal-race',
+            from: { kind: 'agent', catId: 'opus' },
+            invocationId: 'dot-race-child',
+            targetId: 'opus',
+            inputEntryIds: ['entry-initial'],
+            inputMessageIds: ['message-initial'],
+            status: 'processing',
+            startedAt: 100,
+          },
+        }),
+      );
+      let injected = false;
+      const racingRedis = new Proxy(redis, {
+        get(target, property) {
+          if (property === 'eval')
+            return async (...args) => {
+              const script = args[0];
+              if (
+                !injected &&
+                typeof script === 'string' &&
+                script.includes("existing.status == 'processing'") &&
+                script.includes('existingRaw ~= ARGV[14]')
+              ) {
+                injected = true;
+                const adopted = await store.commitLifecycleAppendAdmission({
+                  threadId: 'thread-dot-terminal-race',
+                  entryId: 'entry-late',
+                  inputMessageIds: [late.id],
+                  runs: [
+                    {
+                      targetId: 'opus',
+                      invocationId: 'dot-race-child',
+                      responseMessageId: processing.id,
+                      dispatchedAt: 151,
+                    },
+                  ],
+                });
+                assert.equal(adopted.kind, 'applied');
+              }
+              return target.eval(...args);
+            };
+          const value = Reflect.get(target, property, target);
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
+      const racingStore = new RedisMessageStore(racingRedis, { ttlSeconds: 0 });
+      const terminal = await racingStore.commitLifecycleResponseTerminal(processing.id, {
+        invocationId: 'dot-race-child',
+        status: 'completed',
+        completedAt: 200,
+        content: 'answer chosen before late Ask',
+        mentions: [],
+        expectedInputMessageIds: ['message-initial'],
+      });
+      assert.equal(injected, true, 'Append must run between the terminal read and atomic write');
+      assert.equal(terminal.kind, 'conflict');
+      assert.equal(terminal.reason, 'inputs_changed');
+      const current = await store.getById(processing.id);
+      assert.equal(current.lifecycle.status, 'processing');
+      assert.equal(current.content, '');
+      assert.deepEqual(current.lifecycle.inputMessageIds, ['message-initial', late.id]);
     });
 
     test('atomically publishes the exact targetless input followed by one replay-safe failure result', async () => {

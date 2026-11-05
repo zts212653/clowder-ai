@@ -1,13 +1,9 @@
 /**
  * F203 Phase C — shared L0 compile boundary (Task 3a).
  *
- * The API build artefact CANNOT in-process import
- * `scripts/compile-system-prompt-l0.mjs`: that .mjs hardcodes
- * `await import('../packages/api/dist/...')` relative to itself, so importing
- * it back into the compiled API package would couple the built package to an
- * out-of-package script, require dist to be built, and double-bootstrap
- * catRegistry inside the API process. Instead we cross the boundary via a
- * subprocess to the Phase B CLI (KD-10: `writeL0File()` + `--out`).
+ * Admission captures typed L0 input using the shared Node-only capture module.
+ * The child receives private JSON on stdin and renders it without bootstrapping
+ * registry or reloading profile/rules. Diagnostic CLI callers retain live mode.
  *
  * Single source of truth for that boundary — both ClaudeBgCarrierService
  * (`--system-prompt-file`) and CodexAgentService (`-c developer_instructions`)
@@ -24,12 +20,14 @@ import { spawn as nodeSpawn } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { FrozenL0Input } from '@cat-cafe/shared/l0-input';
 import {
   CURRENT_CORPUS_PROFILE_URI,
   CURRENT_RELATIONSHIP_PROFILE_URI,
   DEFAULT_PROFILE_USER_ID,
 } from '@cat-cafe/shared/profile-contract';
 import { profilePointerEmitted } from '../../../../../infrastructure/telemetry/instruments.js';
+import { saveSpan } from '../../../../../utils/member-save-diagnostics.js';
 import { FileProfileRepository } from '../../profile/ProfileRepository.js';
 import { L0DependencySignatureTracker } from './l0-dependency-signature.js';
 import { type L0CacheGeneration, L0ProfileCache, type L0Projection } from './l0-profile-cache.js';
@@ -75,7 +73,7 @@ export async function warmL0Cache(
 ): Promise<void> {
   await Promise.all(
     catIds.map((catId) =>
-      compileL0ViaSubprocess({ catId, userId }).catch((err: unknown) => {
+      saveSpan('l0.compile', () => compileL0ViaSubprocess({ catId, userId }), { catId }).catch((err: unknown) => {
         logger?.warn({ catId, err: (err as Error).message }, 'L0 pre-compile failed at startup (will retry on invoke)');
       }),
     ),
@@ -129,12 +127,16 @@ export function resolveL0CompilerScriptPath(cwd: string = process.cwd()): string
 }
 
 export interface CompileL0Options {
+  frozenInput?: FrozenL0Input;
+  requireFrozenInput?: boolean;
   /** Cat to compile L0 for (must be registered in the runtime cat catalog). */
   catId: string;
   /** User whose private profile is compiled. Defaults to CAT_CAFE_USER_ID/default-user. */
   userId?: string;
   /** Private Work retains home L0 without USER_CAPSULE; public uses its separate bounded projection. */
   projection?: L0Projection;
+  /** Frozen provider model for a bounded member invocation. */
+  runtimeModel?: string;
   /** Canonical data root test/config seam. Defaults to CAT_CAFE_DATA_DIR/~/.cat-cafe. */
   dataDir?: string;
   /**
@@ -150,12 +152,13 @@ export interface CompileL0Options {
 }
 
 type L0ProjectionContext =
+  | { readonly projection: 'frozen'; readonly profileSignature: string }
   | { readonly projection: Exclude<L0Projection, 'owner'>; readonly profileSignature: string }
   | { readonly projection: 'owner'; readonly profileDir: string; readonly profileSignature: string | null };
 
 function resolveProjection(options: CompileL0Options): L0Projection {
   if (options.projection === undefined) return 'owner';
-  if (options.projection === 'owner' || options.projection === 'public' || options.projection === 'collective-work')
+  if (options.projection === 'owner' || options.projection === 'public' || options.projection === 'scoped-member')
     return options.projection;
   throw new Error(`Unsupported L0 projection: ${String(options.projection)}`);
 }
@@ -190,14 +193,24 @@ function projectionProfileIsCurrent(context: L0ProjectionContext): boolean {
  *   exits non-zero, or produces empty output (fail-closed).
  */
 export async function compileL0ViaSubprocess(options: CompileL0Options): Promise<string> {
+  if (options.requireFrozenInput && !options.frozenInput)
+    throw new Error('Frozen L0 input is required for an invocation');
   const { catId, outPath } = options;
+  const frozen = options.frozenInput;
+  if (frozen && (frozen.catId !== catId || (options.projection && options.projection !== frozen.projection)))
+    throw new Error('Frozen L0 input does not match the invocation member/projection');
   const userId = options.userId ?? process.env.CAT_CAFE_USER_ID ?? DEFAULT_PROFILE_USER_ID;
-  const projection = resolveProjection(options);
-  const key = l0Cache.key(userId, catId, projection);
+  const projection = frozen?.projection ?? resolveProjection(options);
+  const frozenKey = frozen ? `${frozen.compilerVersion}:${frozen.inputDigest}` : undefined;
+  const key =
+    l0Cache.key(userId, catId, projection, frozenKey) +
+    (!frozen && options.runtimeModel ? `\0${options.runtimeModel}` : '');
   const cwd = options.cwd ?? process.cwd();
   const scriptPath = resolveL0CompilerScriptPath(cwd);
-  const dependencySignature = scriptPath ? refreshL0DependencySignature(cwd, scriptPath) : null;
-  const projectionContext = resolveProjectionContext(options, userId, key, projection);
+  const dependencySignature = frozenKey ?? (scriptPath ? refreshL0DependencySignature(cwd, scriptPath) : null);
+  const projectionContext: L0ProjectionContext = frozen
+    ? { projection: 'frozen', profileSignature: frozenKey! }
+    : resolveProjectionContext(options, userId, key, projection);
   const { profileSignature } = projectionContext;
 
   // Cache hit — skip subprocess entirely
@@ -265,16 +278,24 @@ async function doCompileL0(
   // Public and private Work compilation receive neither profile paths nor bytes.
   const args = [
     scriptPath,
-    '--cat',
-    catId,
-    ...(projectionContext.projection !== 'owner'
-      ? ['--projection', projectionContext.projection]
-      : ['--profile-dir', projectionContext.profileDir]),
+    ...(options.frozenInput
+      ? ['--frozen-input']
+      : [
+          '--cat',
+          catId,
+          ...(options.runtimeModel ? ['--runtime-model', options.runtimeModel] : []),
+          ...(projectionContext.projection === 'owner'
+            ? ['--profile-dir', projectionContext.profileDir]
+            : ['--projection', projectionContext.projection]),
+        ]),
     ...(outPath ? ['--out', outPath] : []),
   ];
 
   const stdout = await new Promise<string>((resolvePromise, rejectPromise) => {
-    const child = spawnFn(process.execPath, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawnFn(process.execPath, args, {
+      cwd,
+      stdio: [options.frozenInput ? 'pipe' : 'ignore', 'pipe', 'pipe'],
+    });
     let out = '';
     let err = '';
     let settled = false;
@@ -283,6 +304,10 @@ async function doCompileL0(
       settled = true;
       rejectPromise(error);
     };
+    if (options.frozenInput) {
+      child.stdin?.on('error', fail);
+      child.stdin?.end(JSON.stringify(options.frozenInput));
+    }
     child.stdout?.on('data', (d: Buffer) => {
       out += d.toString();
     });
@@ -317,7 +342,7 @@ async function doCompileL0(
   if (
     dependencySignature &&
     profileSignature !== null &&
-    dependencySignatures.isCurrent(dependencySignature) &&
+    (options.frozenInput || dependencySignatures.isCurrent(dependencySignature)) &&
     projectionProfileIsCurrent(projectionContext) &&
     l0Cache.generationIsCurrent(cacheKey, compileGeneration)
   ) {

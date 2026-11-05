@@ -1,4 +1,5 @@
 import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+import { invocationFetch } from './invocation-auth.js';
 
 /**
  * F152 Phase C: Distillation MCP Tools
@@ -7,16 +8,20 @@ import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
  * cat_cafe_review_distillation — approve/reject distillation candidate
  */
 
+import { deploymentDefaults } from '@cat-cafe/shared';
 import { z } from 'zod';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
+import { resolveInvocationEnv } from './invocation-auth.js';
 
 const defineTool = defineMcpMigrationFactory('distillation-tools.ts', undefined, {
   resourceFamily: 'distillation',
   authority: 'callback-owner',
 });
 
-const API_URL = process.env['CAT_CAFE_API_URL'] ?? 'http://localhost:3004';
+function resolveApiUrl(): string {
+  return resolveInvocationEnv('CAT_CAFE_API_URL') ?? deploymentDefaults.apiBaseUrl;
+}
 
 export const markGeneralizableInputSchema = {
   anchor: z.string().min(1).describe('Evidence anchor to mark'),
@@ -25,11 +30,14 @@ export const markGeneralizableInputSchema = {
 
 export async function handleMarkGeneralizable(input: { anchor: string; generalizable: boolean }): Promise<ToolResult> {
   try {
-    const res = await fetch(`${API_URL}/api/evidence/${encodeURIComponent(input.anchor)}/generalizable`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ generalizable: input.generalizable }),
-    });
+    const res = await invocationFetch(
+      `${resolveApiUrl()}/api/evidence/${encodeURIComponent(input.anchor)}/generalizable`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ generalizable: input.generalizable }),
+      },
+    );
     if (!res.ok) {
       const text = await res.text();
       return errorResult(`Failed (${res.status}): ${text}`);
@@ -53,7 +61,7 @@ export async function handleNominateForGlobal(input: {
   personNames?: string[];
 }): Promise<ToolResult> {
   try {
-    const res = await fetch(`${API_URL}/api/distillation/nominate`, {
+    const res = await invocationFetch(`${resolveApiUrl()}/api/distillation/nominate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(input),
@@ -81,11 +89,14 @@ export async function handleReviewDistillation(input: {
   reviewerId: string;
 }): Promise<ToolResult> {
   try {
-    const res = await fetch(`${API_URL}/api/distillation/${encodeURIComponent(input.candidateId)}/review`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ decision: input.decision, reviewerId: input.reviewerId }),
-    });
+    const res = await invocationFetch(
+      `${resolveApiUrl()}/api/distillation/${encodeURIComponent(input.candidateId)}/review`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ decision: input.decision, reviewerId: input.reviewerId }),
+      },
+    );
     if (!res.ok) {
       const text = await res.text();
       return errorResult(`Review failed (${res.status}): ${text}`);

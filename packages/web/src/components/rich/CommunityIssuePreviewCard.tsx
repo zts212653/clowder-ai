@@ -66,7 +66,9 @@ export function CommunityIssuePreviewCard({ block, inlineDraftId, onDraftCancell
 
     const hydrate = async () => {
       try {
-        const res = await apiFetch(`/api/community-issue-drafts/${draftId}`);
+        const res = await apiFetch(
+          `/api/plugins/official.github-operations/github/community-issue-drafts/by-id/${encodeURIComponent(draftId)}`,
+        );
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         if (cancelled) return;
@@ -94,14 +96,17 @@ export function CommunityIssuePreviewCard({ block, inlineDraftId, onDraftCancell
     setState('publishing');
     setError(null);
     try {
-      const res = await apiFetch(`/api/community-issue-drafts/${draftId}/publish`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: editTitle,
-          bodyMarkdown: editBody,
-        }),
-      });
+      const res = await apiFetch(
+        `/api/plugins/official.github-operations/github/community-issue-drafts/by-id/${encodeURIComponent(draftId)}/publish`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: editTitle,
+            bodyMarkdown: editBody,
+          }),
+        },
+      );
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error ?? `HTTP ${res.status}`);
@@ -120,9 +125,12 @@ export function CommunityIssuePreviewCard({ block, inlineDraftId, onDraftCancell
     setState('cancelling');
     setError(null);
     try {
-      const res = await apiFetch(`/api/community-issue-drafts/${draftId}/cancel`, {
-        method: 'POST',
-      });
+      const res = await apiFetch(
+        `/api/plugins/official.github-operations/github/community-issue-drafts/by-id/${encodeURIComponent(draftId)}/cancel`,
+        {
+          method: 'POST',
+        },
+      );
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error ?? `HTTP ${res.status}`);

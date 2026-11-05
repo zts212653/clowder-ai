@@ -1,8 +1,21 @@
+import type { ThreadArtifactDTO } from '@cat-cafe/shared';
 import { act, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createArtifactReviewSurface } from '../artifact-review-surface';
+import { F307ArtifactOwnerSurface } from '../F307ArtifactOwnerSurface';
 import { F307OwnerSurfaceRenderer } from '../F307OwnerSurfaceRenderer';
+import { createArtifactSurface } from '../real-surface-adapters';
+
+const catalogue = vi.hoisted(() => ({ artifacts: [] as ThreadArtifactDTO[] }));
+vi.mock('@/hooks/useThreadArtifacts', () => ({
+  useThreadArtifacts: () => ({ artifacts: catalogue.artifacts, loading: false, error: false }),
+}));
+vi.mock('../ArtifactPublicationSurface', () => ({
+  ArtifactPublicationSurface: ({ artifact }: { artifact: ThreadArtifactDTO }) => (
+    <div data-testid="original-publication-owner" data-url={artifact.url} />
+  ),
+}));
 
 vi.mock('@/components/content-review/ArtifactReviewSurface', () => ({
   ArtifactReviewSurface: ({
@@ -74,3 +87,31 @@ for (const shell of ['v2', 'classic']) {
     expect(Boolean(trigger?.closest('header'))).toBe(shell === 'v2');
   });
 }
+
+it.each([
+  'jpg',
+  'webp',
+])('a restored %s F232 descriptor resolves its exact original publication owner', async (extension) => {
+  const artifact: ThreadArtifactDTO = {
+    type: 'image',
+    name: `original.${extension}`,
+    url: `/uploads/original.${extension}`,
+    sourceMessageId: 'original-message',
+    createdAt: 42,
+    catId: null,
+    publicationItem: { kind: 'rich-file', blockId: 'original-file' },
+  };
+  catalogue.artifacts = [artifact];
+  await act(async () =>
+    root.render(
+      <F307ArtifactOwnerSurface
+        surface={createArtifactSurface({ threadId: 'original-thread', artifact })}
+        onRequestDetach={vi.fn()}
+        onOpenSurface={vi.fn()}
+      />,
+    ),
+  );
+  expect(element.querySelector('[data-testid="original-publication-owner"]')?.getAttribute('data-url')).toBe(
+    artifact.url,
+  );
+});

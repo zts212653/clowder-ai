@@ -63,6 +63,11 @@ test('Live approves only the admitted page inspection while execution still requ
     assert.deepEqual(servers['cat-cafe-collab'].tools, {
       cat_cafe_page_action_inspect: { approval_mode: 'approve' },
       cat_cafe_home_action: { approval_mode: 'approve' },
+      cat_cafe_admit_entrusted_work: { approval_mode: 'approve' },
+      cat_cafe_read_entrusted_work: { approval_mode: 'approve' },
+      cat_cafe_update_entrusted_work: { approval_mode: 'approve' },
+      cat_cafe_update_task: { approval_mode: 'approve' },
+      cat_cafe_close_entrusted_work: { approval_mode: 'approve' },
     });
     assert.deepEqual(
       servers['cat-cafe-collab'].disabled_tools,

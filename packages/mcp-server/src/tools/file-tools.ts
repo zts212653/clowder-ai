@@ -10,7 +10,9 @@ import { homedir } from 'node:os';
 import * as path from 'node:path';
 import { createInterface } from 'node:readline';
 import { z } from 'zod';
+import { resolveAbsolutePath } from '../utils/path-utils.js';
 import { ensureDir, isPathAllowed } from '../utils/path-validator.js';
+import { authorizeInvocationTool, resolveInvocationEnv } from './invocation-auth.js';
 
 const defineTool = defineMcpCanonicalFactory('file-tools.ts', undefined, {
   resourceFamily: 'evidence-navigation',
@@ -82,7 +84,7 @@ type CollectionManifestRef = {
 };
 
 function loadCollectionManifestRefs(): CollectionManifestRef[] {
-  const dataDir = process.env.CAT_CAFE_DATA_DIR ?? path.join(homedir(), '.cat-cafe');
+  const dataDir = resolveInvocationEnv('CAT_CAFE_DATA_DIR') ?? path.join(homedir(), '.cat-cafe');
   const manifestPath = path.join(dataDir, 'library', 'collections.json');
   if (!fs.existsSync(manifestPath)) return [];
   try {
@@ -102,7 +104,7 @@ function resolveFileSlicePath(inputPath: string): { filePath: string; displayPat
       const filePath = path.resolve(inputPath);
       return { filePath, displayPath: filePath };
     }
-    const allowedDirs = (process.env['ALLOWED_WORKSPACE_DIRS'] ?? '')
+    const allowedDirs = (resolveInvocationEnv('ALLOWED_WORKSPACE_DIRS') ?? '')
       .split(/[:,]/)
       .map((dir) => dir.trim())
       .filter(Boolean)
@@ -124,7 +126,7 @@ function resolveFileSlicePath(inputPath: string): { filePath: string; displayPat
         };
       }
     }
-    const filePath = path.resolve(inputPath);
+    const filePath = resolveAbsolutePath(inputPath);
     return { filePath, displayPath: filePath };
   }
 
@@ -190,6 +192,7 @@ export async function handleReadFileSlice(input: {
   if (!isPathAllowed(filePath)) {
     return errorResult(`Access denied: ${filePath} is not within allowed directories`);
   }
+  await authorizeInvocationTool('cat_cafe_read_file_slice');
   if (!fs.existsSync(filePath)) {
     return errorResult(`File not found: ${filePath}`);
   }
@@ -204,18 +207,28 @@ export async function handleReadFileSlice(input: {
   let usedContentChars = 0;
   let nextSlice: { startLine: number; charOffset: number } | undefined;
   let invalidOffset = false;
+  let inFrontmatter = false;
+  let documentBodyLine: number | undefined;
   const stream = fs.createReadStream(filePath, { encoding: 'utf-8' });
   const reader = createInterface({ input: stream, crlfDelay: Infinity });
 
   try {
     for await (const line of reader) {
       currentLine++;
-      if (currentLine < input.startLine) continue;
       if (currentLine > endLine) {
+        nextSlice ??= { startLine: currentLine, charOffset: 0 };
+        // Locate the body without returning unrequested content or scanning an unbounded prelude.
+        if (inFrontmatter && currentLine <= endLine + MAX_FILE_SLICE_LINES) {
+          if (/^(---|\.\.\.)\s*$/.test(line)) documentBodyLine = currentLine + 1;
+          else continue;
+        }
         reader.close();
         stream.destroy();
         break;
       }
+      if (currentLine === 1) inFrontmatter = /\.md$/i.test(filePath) && line.replace(/^\uFEFF/, '').trim() === '---';
+      else if (inFrontmatter && /^(---|\.\.\.)\s*$/.test(line)) inFrontmatter = false;
+      if (currentLine < input.startLine) continue;
       const offset = currentLine === input.startLine ? (input.charOffset ?? 0) : 0;
       if (offset > line.length) {
         invalidOffset = true;
@@ -253,13 +266,18 @@ export async function handleReadFileSlice(input: {
   }
 
   const actualEndLine = input.startLine + lines.length - 1;
-  const continuation = nextSlice
-    ? `\nNext slice: cat_cafe_read_file_slice(path=${JSON.stringify(input.path)}, startLine=${nextSlice.startLine}, endLine=${endLine}, charOffset=${nextSlice.charOffset})`
+  const nextEndLine = nextSlice && nextSlice.startLine > endLine ? nextSlice.startLine + requestedLines - 1 : endLine;
+  const bodyNavigation = documentBodyLine
+    ? `\nDocument body: cat_cafe_read_file_slice(path=${JSON.stringify(input.path)}, startLine=${documentBodyLine}, endLine=${documentBodyLine + DEFAULT_FILE_SLICE_LINES - 1})`
     : '';
-  const text = `File slice: ${displayPath}:${input.startLine}-${actualEndLine}\n${lines.join('\n')}${continuation}`;
+  const continuation = nextSlice
+    ? `\nSource continues beyond this slice; read applicable remaining sections before concluding its current rules.${inFrontmatter ? ' This slice ends inside YAML frontmatter; the document body has not been read.' : ''}\nNext slice: cat_cafe_read_file_slice(path=${JSON.stringify(input.path)}, startLine=${nextSlice.startLine}, endLine=${nextEndLine}, charOffset=${nextSlice.charOffset})`
+    : '';
+  const text = `File slice: ${displayPath}:${input.startLine}-${actualEndLine}${bodyNavigation}\n${lines.join('\n')}${continuation}`;
   if (text.length > FILE_SLICE_RESPONSE_MAX_CHARS) {
     return errorResult('File slice source path exceeds the bounded response budget; use a shorter permitted path');
   }
+  await authorizeInvocationTool('cat_cafe_read_file_slice');
   return successResult(text);
 }
 
@@ -268,7 +286,7 @@ export async function handleReadFileSlice(input: {
  * 写入文件内容，带路径验证和自动创建父目录
  */
 export async function handleWriteFile(input: { path: string; content: string }): Promise<ToolResult> {
-  const filePath = path.resolve(input.path);
+  const filePath = resolveAbsolutePath(input.path);
 
   // 路径验证
   if (!isPathAllowed(filePath)) {
@@ -316,7 +334,7 @@ function listFilesRecursive(dirPath: string, basePath: string): string[] {
  * 列出目录中的文件，支持递归选项
  */
 export async function handleListFiles(input: { path: string; recursive?: boolean }): Promise<ToolResult> {
-  const dirPath = path.resolve(input.path);
+  const dirPath = resolveAbsolutePath(input.path);
   const recursive = input.recursive ?? false;
 
   // 路径验证

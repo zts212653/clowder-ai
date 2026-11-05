@@ -1,7 +1,38 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { createCatId } from '@cat-cafe/shared';
 import { CLI_EXECUTION_ID_ENV, CLI_EXECUTION_OWNER_BINDING_ENV } from '../src/utils/cli-process-ownership.js';
+import { claudeSdkRuntimeFixture } from './helpers/claude-sdk-runtime-fixture.js';
+import { assertClaudeSettingsPreserved, claudeUserSettings } from './helpers/claude-settings-contract.js';
+
+for (const source of ['relative-file', 'inline'])
+  test(`SDK preserves user settings and hooks without a compaction plan (${source})`, async (t) => {
+    const { prepareClaudeSdkLaunch } = await import(
+      '../src/domains/cats/services/agents/providers/claude-sdk-launch.js'
+    );
+    const root = mkdtempSync(join(tmpdir(), 'claude-sdk-user-settings-'));
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    const path = join(root, 'user-settings.json');
+    const original = `${JSON.stringify(claudeUserSettings, null, 2)}\n`;
+    writeFileSync(path, original);
+    const prepared = await prepareClaudeSdkLaunch({
+      runtime: claudeSdkRuntimeFixture(),
+      catId: createCatId('opus'),
+      model: 'claude-test',
+      prompt: 'inspect settings',
+      l0CompilerFn: async () => 'identity',
+      abortController: new AbortController(),
+      options: {
+        workingDirectory: root,
+        cliConfigArgs: ['--settings', source === 'relative-file' ? 'user-settings.json' : original],
+      },
+    });
+    assertClaudeSettingsPreserved(JSON.parse(prepared.sdkOptions.settings as string));
+    assert.equal(readFileSync(path, 'utf8'), original, 'SDK leaves the user source file unchanged');
+  });
 
 test('SDK child strips API-owned credentials and owner capabilities from inherited and account env', async (t) => {
   const { spawnSync } = await import('node:child_process');
@@ -23,6 +54,7 @@ test('SDK child strips API-owned credentials and owner capabilities from inherit
     }
   });
   const prepared = await prepareClaudeSdkLaunch({
+    runtime: claudeSdkRuntimeFixture(),
     catId: createCatId('opus'),
     model: 'claude-opus-4-6',
     prompt: 'check',
@@ -57,6 +89,7 @@ test('launch preserves resume, account isolation, native identity and managed F2
   assert.equal(plan.ready, true);
   let recorded: import('../src/domains/cats/services/types.js').PreparedProviderRequestV1 | undefined;
   const prepared = await prepareClaudeSdkLaunch({
+    runtime: claudeSdkRuntimeFixture(),
     catId: createCatId('opus'),
     model: 'claude-opus-4-6',
     prompt: 'actual task',
@@ -84,12 +117,18 @@ test('launch preserves resume, account isolation, native identity and managed F2
     },
   });
   assert.equal(prepared.sdkOptions.resume, 'prior-session');
+  assert.equal(prepared.sdkOptions.env?.CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS, '1');
   assert.equal(prepared.sdkOptions.env?.ANTHROPIC_API_KEY, undefined);
   assert.equal(prepared.sdkOptions.env?.ANTHROPIC_BASE_URL, undefined);
   assert.equal(prepared.sdkOptions.env?.SOME_ACCOUNT_SETTING, 'kept');
   assert.equal(prepared.sdkOptions.systemPrompt, 'native identity\n\nroute append');
   const settings = JSON.parse(prepared.sdkOptions.settings as string);
-  assert.equal(settings.disableAllHooks, true);
+  assert.equal(settings.disableAllHooks, false, 'host security hooks remain enabled');
+  assert.ok(
+    settings.hooks.PreToolUse.some((entry: { hooks: Array<{ command: string }> }) =>
+      entry.hooks.some(({ command }) => command.includes('secret-native-hook.mjs')),
+    ),
+  );
   assert.ok(settings.hooks.PreCompact[0].hooks[0].command.includes('f24-compaction.mjs'));
   assert.equal(recorded?.message.body, 'actual task');
 });
@@ -97,6 +136,7 @@ test('launch preserves resume, account isolation, native identity and managed F2
 test('read-only policy cannot be reopened through operator tool or MCP flags', async () => {
   const { prepareClaudeSdkLaunch } = await import('../src/domains/cats/services/agents/providers/claude-sdk-launch.js');
   const prepared = await prepareClaudeSdkLaunch({
+    runtime: claudeSdkRuntimeFixture(),
     catId: createCatId('opus'),
     model: 'claude-opus-4-6',
     prompt: 'check',
@@ -128,6 +168,7 @@ test('read-only SDK ignores all operator settings, hooks and extra arguments', a
   );
   const prepare = (compactionLaunchPlan?: ReturnType<typeof buildClaudeCompactionLaunchPlan>) =>
     prepareClaudeSdkLaunch({
+      runtime: claudeSdkRuntimeFixture(),
       catId: createCatId('opus'),
       model: 'claude-opus-4-6',
       prompt: 'inspect',
@@ -181,6 +222,7 @@ test('SDK retains repeated operator directories together with image directories'
   };
   const prepare = (readOnly = false) =>
     prepareClaudeSdkLaunch({
+      runtime: claudeSdkRuntimeFixture(),
       catId: createCatId('opus'),
       model: 'claude-opus-4-6',
       prompt: 'inspect',
@@ -189,9 +231,13 @@ test('SDK retains repeated operator directories together with image directories'
       options: { ...options, ...(readOnly ? { toolExecutionPolicy: { mode: 'read_only' as const } } : {}) },
     });
   const prepared = await prepare();
-  assert.deepEqual(prepared.sdkOptions.additionalDirectories, ['/tmp/first', '/tmp/second with spaces', '/tmp/images']);
+  assert.deepEqual(prepared.sdkOptions.additionalDirectories, [
+    '/tmp/first',
+    '/tmp/second with spaces',
+    resolve('/tmp/images'),
+  ]);
   assert.equal(prepared.sdkOptions.extraArgs?.['add-dir'], undefined);
-  assert.deepEqual((await prepare(true)).sdkOptions.additionalDirectories, ['/tmp/images']);
+  assert.deepEqual((await prepare(true)).sdkOptions.additionalDirectories, [resolve('/tmp/images')]);
 });
 
 test('production invocation keeps native SDK query with tmux enabled and preserves CLI overrides', async (t) => {
@@ -224,6 +270,7 @@ test('production invocation keeps native SDK query with tmux enabled and preserv
   registerWorktrees([{ id: 'f318-tmux-contract', root: fixtureRoot }]);
   let sdkLaunches = 0;
   const sdk = new ClaudeSdkAgentService({
+    runtimeResolver: claudeSdkRuntimeFixture,
     catId: createCatId('opus'),
     model: 'claude-opus-4-6',
     mcpServerPath: '',
@@ -241,6 +288,7 @@ test('production invocation keeps native SDK query with tmux enabled and preserv
           user_message_uuids: [first?.uuid],
           usage: { input_tokens: 1, output_tokens: 1 },
         };
+        yield { type: 'system', subtype: 'session_state_changed', state: 'idle' };
       },
     }),
   });

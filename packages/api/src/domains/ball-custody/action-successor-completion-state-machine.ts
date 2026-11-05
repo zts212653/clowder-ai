@@ -257,12 +257,14 @@ export function continueActionSuccessorFreshRevision(
       holderOutcomes: {},
       terminalPredicateState: { kind: 'predicate_backed' },
       terminalPredicate: input.terminalPredicate,
+
       completionCandidates: {},
       evidenceRefs: [
         ...new Set([issuerStandingEvidenceRef, evidenceRef, input.delegateEvidenceRef].filter((r): r is string => !!r)),
       ],
       returnTransitions: [],
       replacementTransitions: [],
+      orphanCarrierRecoveryTransitions: [],
       revision: 1,
       createdAt: input.now,
       updatedAt: input.now,

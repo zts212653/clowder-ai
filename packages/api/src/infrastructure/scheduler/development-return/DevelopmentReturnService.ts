@@ -25,6 +25,10 @@ import {
   prepareDevelopmentReturn,
   resolveDevelopmentReturnFreshness,
 } from './DevelopmentReturnAuthority.js';
+import {
+  isAdmissibleDevelopmentReturnReport,
+  renderDevelopmentReturnWakeContentV1,
+} from './DevelopmentReturnReportSource.js';
 import { publishDevelopmentReturnRetirement } from './DevelopmentReturnRetirement.js';
 import { parseDevelopmentReturnActionLeaseRef, sameDevelopmentReturnSource } from './DevelopmentReturnSource.js';
 
@@ -147,17 +151,12 @@ export class DevelopmentReturnService {
     ) {
       throw new Error('Return reporter authority is no longer current');
     }
-    const message = await this.deps.messages.getById(report.sourceMessageId);
-    if (
-      !message ||
-      message.userId !== actor.userId ||
-      message.threadId !== actor.threadId ||
-      message.catId !== actor.catId ||
-      message.deletedAt ||
-      message._tombstone ||
-      message.source ||
-      message.timestamp < state.registeredAt
-    )
+    const predecessor = state.predecessorRegistrationId ? this.read(state.predecessorRegistrationId) : null;
+    const [message, predecessorWake] = await Promise.all([
+      this.deps.messages.getById(report.sourceMessageId),
+      predecessor?.wakeMessageId ? this.deps.messages.getById(predecessor.wakeMessageId) : null,
+    ]);
+    if (!isAdmissibleDevelopmentReturnReport(message, state, actor.catId, predecessor, predecessorWake))
       throw new Error('A current persisted terminal report from this execution is required');
     const publication = { ...report, sourceMessageRevision: deriveGrowingSourceMessageRevision(message) };
     if (state.report && JSON.stringify(state.report) !== JSON.stringify(publication))
@@ -252,12 +251,7 @@ export class DevelopmentReturnService {
       this.deps.definitions.replacePrivateExecutionReturn(id, state, { ...state, status: 'retired' });
       return;
     }
-    const content =
-      `[开发责任续办] registration=${id}; signal=${state.reason}; ${state.taskRef} observedRevision=${state.observedRevision}; currentRevision=${state.deliveryRevision}（投递认领时；行动前重读）\n` +
-      (state.report
-        ? `执行现场已提交 ${state.report.outcome}；sourceMessage=${state.report.sourceMessageId}；evidence=${state.report.evidenceRefs.join(', ')}。\n`
-        : '回流预算到期：这只是一次当前事实复核，不代表成功，不重派执行或催促其他猫。\n') +
-      '由原 owner 先重读同一 Task、当前授权和产物，再执行确切 owner action 或注册有据的合法后继；报告/唤醒本身不算工作完成。';
+    const content = renderDevelopmentReturnWakeContentV1(state);
     ctx.signal.throwIfAborted();
     // Dispatch owns message admission, replay and terminal custody; the producer never mints a second wake.
     const result = await this.deps.delivery.deliver({

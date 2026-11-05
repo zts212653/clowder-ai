@@ -5,13 +5,10 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { build } from 'vite';
 
-// Reuse an explicitly supplied browser proof driver, without a product dependency
-// or a fallback to a retired package's node_modules.
-assert.ok(
-  process.env.CLASSIC_A2A_PLAYWRIGHT_MODULE,
-  'Set CLASSIC_A2A_PLAYWRIGHT_MODULE to an installed Playwright ESM module',
-);
-const { chromium } = await import(process.env.CLASSIC_A2A_PLAYWRIGHT_MODULE);
+// Use this package's declared browser driver. Controlled proofs retain the
+// existing explicit module override.
+const playwrightModule = process.env.CLASSIC_A2A_PLAYWRIGHT_MODULE ?? 'playwright';
+const { chromium } = await import(playwrightModule);
 
 // Deterministic frontend rendering proof; no native provider or backend lifecycle claim.
 test(
@@ -166,13 +163,7 @@ test(
           );
           assert.deepEqual(
             await page.getByRole('menuitem').evaluateAll((items) => items.map((item) => item.dataset.testid)),
-            [
-              'composer-add-context',
-              'composer-upload',
-              'message-disposition-trigger',
-              'composer-whisper',
-              'composer-game',
-            ],
+            ['composer-add-context', 'composer-upload', 'message-disposition-trigger', 'composer-whisper'],
           );
           assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
           measurements.push({ width, theme, ...metrics });
@@ -190,12 +181,19 @@ test(
           );
         }
       }
-      await page.getByRole('button', { name: 'fail save', exact: true }).click();
       await page.getByRole('button', { name: '添加内容', exact: true }).click();
       await page.getByTestId('message-disposition-trigger').click();
       await page.locator('[data-disposition-option="continue_current"]').click();
-      assert.equal(await page.getByTestId('message-disposition-panel').count(), 1);
-      assert.ok((await page.getByTestId('message-disposition-panel').innerText()).includes('保存失败，请重试'));
+      assert.equal(await page.getByTestId('message-disposition-panel').count(), 0);
+      assert.match(await page.getByTestId('message-disposition-trigger').innerText(), /引导当前回复/);
+      await page.getByTestId('message-disposition-trigger').click();
+      assert.equal(await page.locator('[data-disposition-scope=thread]').count(), 1);
+      assert.equal(await page.locator('[data-disposition-scope=global]').count(), 1);
+      assert.doesNotMatch(await page.getByTestId('message-disposition-panel').innerText(), /仅这一次/);
+      assert.equal(
+        await page.locator('[data-disposition-option="continue_current"]').getAttribute('aria-pressed'),
+        'true',
+      );
       await page.keyboard.press('Escape');
       await page.getByRole('button', { name: 'switch shell', exact: true }).click();
       await page.getByRole('button', { name: '添加内容', exact: true }).click();

@@ -34,6 +34,12 @@ export async function beginNativeReadingGesture(page, row) {
     const slot = node.querySelector('[data-message-action-slot]').getBoundingClientRect();
     port.scrollTop += slot.top - (bounds.top + bounds.bottom) / 2;
     const count = window.__f322ScrollProbeTrace.inputs.length;
+    const onScrollEnd = () => {
+      if (window.__f322ScrollProbeTrace.inputs.length <= count) return;
+      window.__f322ScrollProbeTrace.settledInputCount = count + 1;
+      port.removeEventListener('scrollend', onScrollEnd);
+    };
+    port.addEventListener('scrollend', onScrollEnd);
     port.addEventListener(
       'wheel',
       (event) => {
@@ -47,8 +53,25 @@ export async function beginNativeReadingGesture(page, row) {
   await page.mouse.wheel(0, -32);
   await page.waitForFunction((count) => {
     const inputs = window.__f322ScrollProbeTrace.inputs;
-    return inputs.length > count && inputs.at(-1).trusted;
+    return inputs.length > count && inputs.at(-1).trusted && window.__f322ScrollProbeTrace.settledInputCount > count;
   }, input.count);
+}
+
+/** Move the real scrollport through native input so its reading owner captures each new position. */
+export async function placeNativeAuthorEdge(page, row, edge) {
+  const input = await row.evaluate((node, edge) => {
+    const port = node.closest('[data-chat-container]');
+    const bounds = port.getBoundingClientRect();
+    const top = Math.max(0, bounds.top + port.clientTop);
+    const bottom = Math.min(innerHeight, bounds.top + port.clientTop + port.clientHeight);
+    const target = { above: top - 1, top: top + 1, middle: (top + bottom) / 2, bottom: bottom - 1, below: bottom + 1 }[
+      edge
+    ];
+    const slot = node.querySelector('[data-message-action-slot]').getBoundingClientRect();
+    return { x: bounds.left + 20, y: (top + bottom) / 2, delta: slot.top - target };
+  }, edge);
+  await page.mouse.move(input.x, input.y);
+  await page.mouse.wheel(0, input.delta);
 }
 
 function currentScrollProbe({ id, edge }) {

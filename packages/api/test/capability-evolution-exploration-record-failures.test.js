@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import {
   ArchiveIntegrityError,
@@ -12,8 +12,11 @@ import {
 } from '../dist/infrastructure/capability-evolution/adapters/microduck-exploration/archive-reader.js';
 import { readFootballRecord } from '../dist/infrastructure/capability-evolution/adapters/microduck-exploration/observation.js';
 import { createMicroduckExplorationBindings } from '../dist/infrastructure/capability-evolution/adapters/microduck-exploration/publication.js';
+import { createExplorationArchiveFixture } from './fixtures/microduck-exploration-archive.fixture.js';
 
-const repoRoot = resolve(import.meta.dirname, '../../..');
+const fixture = await createExplorationArchiveFixture();
+after(fixture.cleanup);
+const repoRoot = fixture.repoRoot;
 const root = resolve(repoRoot, 'docs/videos/f311-microduck-roadshow/pipeline/football');
 const catalogPath = '/20260909-demo/catalog.json';
 const comparisonPath = '/20260909-short-approach/comparison.json';
@@ -71,8 +74,8 @@ test('all archive publication integrity exits are invalid, while a failed read r
 });
 
 test('a corrupt exact capture yields invalid detail without destroying an independently readable comparison', async () => {
-  const selected = original.runs.find((run) => run.id === '20260909-positions-v4');
-  const comparison = original.runs.find((run) => run.id === '20260909-short-v8');
+  const selected = original.runs.find((run) => run.id === 'fixture-positions');
+  const comparison = original.runs.find((run) => run.id === 'fixture-compare-b');
   assert(selected && comparison);
   for (const mode of ['offline', 'corrupt']) {
     const badPath = `/evidence/${selected.id}/${selected.index.episodes[0].capture}`;

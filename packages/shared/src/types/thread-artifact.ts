@@ -16,6 +16,8 @@ export interface ThreadArtifactDTO {
   type: ThreadArtifactType;
   /** 显示名（fileName / caption / filePath / PR 标题） */
   name: string;
+  /** MIME projected from the original durable file block; a display name must not overwrite this fact. */
+  mime?: string;
   /** 哪只猫产生的（null = 未知 / 系统） */
   catId: string | null;
   /** 产生 / 更新时间（毫秒 epoch；排序键，时间倒序） */
@@ -26,6 +28,15 @@ export interface ThreadArtifactDTO {
   url?: string;
   /** Exact item within the durable source message; URL/name never disambiguate a publication. */
   publicationItem?: MessageMediaItemSelector;
+  /**
+   * `html_widget` 在原消息 `extra.rich.blocks` 里的块 id。
+   *
+   * 只回答「哪条消息里的哪个 HTML 块」，不是作品 ID、不是版本号，也不含正文。
+   * 由服务端从已持久化的原块生成；读取正文时必须重新核对 thread / message / block id
+   * 以及 `kind === 'html_widget'`，不能只按标题或数组里第一个 widget 命中。
+   * 没有这个字段的 widget 产物（interactive 卡片、旧数据）不能进 HTML 预览。
+   */
+  widgetBlockId?: string;
   /** 去重键（PR ref `org/repo#123` / 文件路径）；同 ref 取最新 */
   ref?: string;
   /** File-ledger owner key, independent of display name/update time. Not execution-root proof. */
@@ -63,6 +74,9 @@ export interface GlobalArtifactWork {
   contentRef: string;
   ownerRevision: number;
   currentOwnerRevision: number;
+  /** Source-provenanced production time for this fixed version, distinct from catalogue import order. */
+  versionCreatedAt?: number;
+  versionTimeSource?: string;
 }
 
 /** GET /api/artifacts 响应 */
@@ -75,4 +89,13 @@ export interface GlobalArtifactsResponse {
   workLineage: 'resolved' | 'unavailable';
   /** Present on bounded views. False means older owner history was intentionally not scanned. */
   complete?: boolean;
+  /** Only on opt-in Works pages. Positions convey no authority; every page rechecks owner access. */
+  nextCursor?: string;
+}
+
+/** Opt-in `view=works&read=pages`: page size is never a claimed whole-catalogue total. */
+export interface GlobalWorksPageResponse extends Omit<GlobalArtifactsResponse, 'total' | 'complete' | 'view'> {
+  view: 'works';
+  pageTotal: number;
+  complete: boolean;
 }

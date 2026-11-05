@@ -23,6 +23,8 @@ export function buildManagedRunnerEnvironment(inheritedEnv: NodeJS.ProcessEnv): 
   delete environment[CLI_PROCESS_CONTEXT_ENV];
   for (const key of [...MCP_CALLBACK_ENV_KEYS, ...MCP_SESSION_ENV_KEYS, 'CAT_CAFE_CREDENTIAL_FILE'])
     delete environment[key];
+  // Only the validated job descriptor can supply its own checkout provenance.
+  delete environment.CAT_CAFE_WORKTREE_ORIGIN;
   // The API process that hosts this runner is usually the live runtime; its lifecycle
   // opt-ins must not reach a command that may start a worktree dev server.
   for (const key of RUNTIME_ONLY_LIFECYCLE_ENV_KEYS) delete environment[key];

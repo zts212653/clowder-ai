@@ -94,7 +94,6 @@ const mockGetThreadState = vi.fn((threadId: string) => {
     catStatuses: {} as Record<string, 'pending' | 'spawning' | 'streaming' | 'done' | 'error'>,
     catInvocations: {} as Record<string, CatInvocationInfo>,
     activeInvocations: mockThreadActiveInvocations[threadId] ?? {},
-    currentGame: null,
 
     unreadCount: 0,
     lastActivity: 0,
@@ -286,7 +285,6 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
       catStatuses: {} as Record<string, 'pending' | 'spawning' | 'streaming' | 'done' | 'error'>,
       catInvocations: {} as Record<string, CatInvocationInfo>,
       activeInvocations: mockThreadActiveInvocations[threadId] ?? {},
-      currentGame: null,
       unreadCount: 0,
       lastActivity: 0,
     }));
@@ -1579,7 +1577,6 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
           }
         : {}) as Record<string, CatInvocationInfo>,
       activeInvocations: mockThreadActiveInvocations[threadId] ?? {},
-      currentGame: null,
       unreadCount: 0,
       lastActivity: 0,
     }));
@@ -2340,7 +2337,6 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
       catStatuses: {},
       catInvocations: {},
       activeInvocations: {},
-      currentGame: null,
       unreadCount: 0,
       lastActivity: 0,
     }));
@@ -2375,7 +2371,6 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
       catStatuses: {},
       catInvocations: {},
       activeInvocations: {},
-      currentGame: null,
       unreadCount: 0,
       lastActivity: 0,
     }));

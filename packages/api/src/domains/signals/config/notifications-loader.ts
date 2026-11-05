@@ -1,13 +1,14 @@
 import { existsSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { deploymentDefaults } from '@cat-cafe/shared';
 import { parse, stringify } from 'yaml';
 import { z } from 'zod';
 import type { SignalPaths } from './signal-paths.js';
 import { resolveSignalPaths } from './signal-paths.js';
 import { ensureSignalWorkspace } from './sources-loader.js';
 
-const NOTIFICATIONS_FILE_BANNER = '# Clowder AI Signal Hunter notifications config\n';
+const NOTIFICATIONS_FILE_BANNER = `# ${deploymentDefaults.brand.name} Signal Hunter notifications config\n`;
 
 const DailyDigestTimeSchema = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
 
@@ -69,7 +70,7 @@ export const DEFAULT_SIGNAL_NOTIFICATIONS: SignalNotificationConfig = {
         secure: false,
       },
       to: 'owner@example.com',
-      from: 'Clowder AI Signals <noreply@cat-cafe.local>',
+      from: `${deploymentDefaults.brand.name} Signals <noreply@cat-cafe.local>`,
     },
     in_app: {
       enabled: true,

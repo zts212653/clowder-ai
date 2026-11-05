@@ -26,6 +26,7 @@ export const CALLBACK_AUTH_FAILURE_REASONS = [
   'agent_key_revoked',
   'agent_key_unknown',
   'agent_key_scope_mismatch',
+  'cloud_principal_not_configured',
 ] as const;
 
 export type CallbackAuthFailureReason = (typeof CALLBACK_AUTH_FAILURE_REASONS)[number];

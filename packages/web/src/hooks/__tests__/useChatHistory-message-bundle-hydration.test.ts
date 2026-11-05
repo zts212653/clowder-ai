@@ -74,6 +74,7 @@ describe('F294 — cold hydration preserves Message Bundle carriers', () => {
           {
             id: 'bundle-carrier-1',
             type: 'user',
+            from: { kind: 'user', userId: 'owner' },
             content: '转发了 1 条聊天记录',
             extra: { messageBundle: MESSAGE_BUNDLE },
             timestamp: 1700000000000,
@@ -94,5 +95,24 @@ describe('F294 — cold hydration preserves Message Bundle carriers', () => {
 
     expect(useChatStore.getState().messages).toHaveLength(1);
     expect(useChatStore.getState().messages[0].extra?.messageBundle).toEqual(MESSAGE_BUNDLE);
+  });
+
+  it('preserves the same refs-only carrier on first live delivery and its subsequent refresh', () => {
+    const delivered = {
+      id: 'bundle-carrier-live',
+      from: { kind: 'user' as const, userId: 'owner' },
+      catId: null,
+      userId: 'owner',
+      mentions: ['opus'],
+      content: '转发了 1 条聊天记录',
+      timestamp: 1700000000000,
+      extra: { messageBundle: MESSAGE_BUNDLE },
+    };
+    for (const deliveredAt of [1700000000001, 1700000000002]) {
+      useChatStore.getState().markMessagesDelivered('thread-target', [delivered.id], deliveredAt, [delivered]);
+      expect(useChatStore.getState().messages).toHaveLength(1);
+      expect(useChatStore.getState().messages[0].from).toEqual(delivered.from);
+      expect(useChatStore.getState().messages[0].extra?.messageBundle).toEqual(MESSAGE_BUNDLE);
+    }
   });
 });

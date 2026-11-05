@@ -6,7 +6,8 @@
  *    the old per-source counts and never the page's `items.length`;
  *  - "empty" needs a proven complete empty set; zero rows from a source that could not prove full coverage is "partial";
  *  - "needs login" needs an explicit authentication signal; forbidden / not enabled / unreachable is not a login prompt;
- *  - loading and failure withdraw the earlier claim — nothing here carries a previous number or previous rows.
+ *  - initial loading and failure carry no count. During a same-scope background read, the reader may supply the last
+ *    confirmed badge read separately; the current result/generation and all actions still follow the pending read.
  */
 import type { UnifiedAttentionReadV1, UnifiedAttentionSourceRead } from '@cat-cafe/shared';
 import { isMailboxDecision } from './mailbox/mailbox-decision-kind';

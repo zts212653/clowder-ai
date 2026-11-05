@@ -19,9 +19,20 @@ import {
   program,
   SOURCE_REF,
   sha256,
-  validSourceManifest,
+  sourceManifestFromEvidence,
   writeYaml,
 } from './capability-evolution-measurement-fixtures.js';
+
+import {
+  createMeasurementCertificateFixture,
+  createMeasurementResultFixture,
+} from './helpers/measurement-certificate-fixture.js';
+
+// Issuer contracts run against explicit synthetic evidence, not private home archives.
+async function validSourceManifest(options = {}) {
+  const certificate = await createMeasurementCertificateFixture();
+  return sourceManifestFromEvidence(certificate, createMeasurementResultFixture(certificate), options);
+}
 
 const exec = promisify(execFile);
 
@@ -57,6 +68,34 @@ async function loadIssuer() {
 }
 
 describe('F267 capability-evolution measurement issuer', () => {
+  it('reports missing publication provider before reading program or source evidence', async () => {
+    const { createCapabilityEvolutionMeasurementIssuer } = await loadIssuer();
+    const calls = [];
+    const unreachable = (operation) => async () => {
+      calls.push(operation);
+      assert.fail(`${operation} must not run without a publication provider`);
+    };
+    const issuer = createCapabilityEvolutionMeasurementIssuer({
+      repoRoot: '/definitely/not/a/repository',
+      programReader: { get: unreachable('program read') },
+      sourceStore: {
+        readOnMain: unreachable('source read'),
+        verifySourceRevision: unreachable('source verification'),
+      },
+    });
+
+    const result = await issuer.issue({
+      programId: PROGRAM_ID,
+      ownerUserId: 'operator',
+      catId: 'codex-sol',
+      clientMessageId: 'missing-publication-provider',
+    });
+
+    assert.equal(result.status, 'insufficient');
+    assert.equal(result.reason, 'publication_provider_unavailable');
+    assert.deepEqual(calls, []);
+  });
+
   it('rejects a source-message trailer injection before reading or publishing', async () => {
     const { createCapabilityEvolutionMeasurementIssuer } = await loadIssuer();
     let programReads = 0;

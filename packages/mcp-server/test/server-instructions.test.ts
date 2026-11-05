@@ -28,6 +28,11 @@ describe('F286 provider-native server discovery instructions', () => {
       assert.ok(instruction.indexOf('.') > 20, 'first sentence must be a meaningful retrieval index');
       assert.ok(Buffer.byteLength(instruction, 'utf8') <= 2_000);
       assert.doesNotMatch(instruction, /credential|token|password|current user|current project/i);
+      if (family === 'collab') {
+        assert.match(instruction.split('.')[0], /personal profiles.*relationship context/i);
+        assert.match(instruction, /this connection.s authenticated scope/i);
+        assert.match(instruction, /installed Apps.*independent connections/i);
+      }
 
       const server = createServer();
       const client = new Client({ name: `f286-${family}-instructions`, version: '1.0.0' });

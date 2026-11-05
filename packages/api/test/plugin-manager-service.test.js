@@ -1,12 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { describe, it } from 'node:test';
-
-import {
-  PluginManagerCompatibilityAdapter,
-  RepositoryPluginManagerCompatibilityProvider,
-} from '../dist/domains/plugin/manager/plugin-manager-compatibility.js';
-import { PluginManagerService } from '../dist/domains/plugin/plugin-manager-service.js';
+import { PluginManagerService } from '../dist/domains/plugin/manager/plugin-manager-service.js';
 
 function digest(value) {
   return `sha512-${createHash('sha512').update(value).digest('base64')}`;
@@ -22,18 +17,18 @@ const published = {
   description: 'Search scenes in selected videos.',
   publisher: 'Clowder AI',
   ownerAuthRequired: false,
-  capabilities: [{ id: 'events.publish', kind: 'events', name: 'Scene events' }],
+  capabilities: [{ id: 'messaging.send', kind: 'messaging', name: 'Scene events' }],
 };
 
-const emptyInventory = { schemaVersion: 1, packages: [], instances: [], grants: [] };
+const emptyInventory = { schemaVersion: 1, packages: [], instances: [] };
 
 const bundledGithub = {
   pluginId: 'github',
-  pluginInstanceId: 'compat:github',
+  pluginInstanceId: 'instance:github',
   displayName: 'GitHub',
   description: 'Track pull requests and CI.',
   publisher: 'Clowder AI',
-  source: { kind: 'bundled', packageName: '@clowder-ai/github', trust: 'first-party' },
+  source: { kind: 'local-archive', packageName: '@clowder-ai/github', trust: 'unverified' },
   availableVersion: '1.0.0',
   installedVersion: '1.0.0',
   packageDigest: null,
@@ -55,12 +50,13 @@ const bundledGithub = {
 
 function service({
   catalog,
-  compatibility = [],
+  installedPackages = [],
   inventory = emptyInventory,
   installer,
   lifecycle,
   configuration,
   quarantine,
+  stateProjection,
 } = {}) {
   return new PluginManagerService({
     catalog: {
@@ -72,7 +68,8 @@ function service({
         },
     },
     inventory: { snapshot: async () => inventory },
-    compatibility: { list: async () => compatibility },
+    installedPackages: { list: async () => installedPackages },
+    ...(stateProjection === undefined ? {} : { stateProjection }),
     ...(installer === undefined ? {} : { installer }),
     ...(lifecycle === undefined ? {} : { lifecycle }),
     ...(configuration === undefined ? {} : { configuration }),
@@ -119,6 +116,7 @@ function installedInventory(overrides = {}) {
     schemaVersion: 1,
     packages: [
       {
+        provenance: { kind: 'catalog', catalogId: published.catalogId, packageName: published.packageName },
         packageDigest: published.packageDigest,
         pluginId: published.pluginId,
         version: published.version,
@@ -135,7 +133,7 @@ function installedInventory(overrides = {}) {
               runtime: { transport: 'stdio', entrypoint: 'dist/mcp-entrypoint.js' },
             },
           ],
-          features: [{ id: 'events', name: 'Events', resources: [], capabilities: ['events.publish'] }],
+          features: [{ id: 'events', name: 'Events', resources: [], capabilities: ['messaging.send'] }],
           runtime: { transport: 'stdio', entrypoint: 'dist/entrypoint.js' },
         },
         signalSchemas: {},
@@ -159,19 +157,163 @@ function installedInventory(overrides = {}) {
         ...overrides,
       },
     ],
-    grants: [
-      {
-        pluginInstanceId: 'pi_video',
-        requestedCapabilities: ['events.publish'],
-        effectiveGrants: ['events.publish'],
-        grantRevision: 1,
-        updatedAt: 1_000,
-      },
-    ],
   };
 }
 
 describe('F202 terminal Plugin Manager service', () => {
+  it('projects Host-bundled candidates without awaiting remote catalog discovery', async () => {
+    let remoteCatalogReads = 0;
+    let localCatalogReads = 0;
+    const manager = new PluginManagerService({
+      catalog: {
+        snapshot: async () => {
+          remoteCatalogReads += 1;
+          return new Promise(() => {});
+        },
+        localSnapshot: async () => {
+          localCatalogReads += 1;
+          return {
+            candidates: [published],
+            status: 'stale',
+            refreshedAt: null,
+          };
+        },
+      },
+      inventory: { snapshot: async () => emptyInventory },
+      installedPackages: { list: async () => [] },
+    });
+
+    const result = await Promise.race([
+      manager.listLocal(),
+      new Promise((resolve) => setTimeout(() => resolve('remote-blocked-bundled-state'), 100)),
+    ]);
+
+    assert.notEqual(result, 'remote-blocked-bundled-state');
+    assert.equal(remoteCatalogReads, 0);
+    assert.equal(localCatalogReads, 1);
+    assert.deepEqual(
+      result.plugins.map((plugin) => plugin.pluginId),
+      [published.pluginId],
+    );
+  });
+
+  it('projects installed plugins without awaiting remote catalog discovery', async () => {
+    let catalogReads = 0;
+    const neverSettles = new Promise(() => {});
+    const manager = new PluginManagerService({
+      catalog: {
+        snapshot: async () => {
+          catalogReads += 1;
+          return neverSettles;
+        },
+      },
+      inventory: { snapshot: async () => emptyInventory },
+      installedPackages: { list: async () => [bundledGithub] },
+    });
+
+    const result = await Promise.race([
+      manager.listLocal(),
+      new Promise((resolve) => setTimeout(() => resolve('remote-blocked-local-state'), 100)),
+    ]);
+
+    assert.notEqual(result, 'remote-blocked-local-state');
+    assert.equal(catalogReads, 0);
+    assert.deepEqual(
+      result.plugins.map((plugin) => plugin.pluginId),
+      ['github'],
+    );
+    assert.deepEqual(result.catalog, {
+      status: 'loading',
+      refreshedAt: null,
+      message: 'Loading available plugins; installed plugins are ready.',
+    });
+  });
+
+  it('operates on installed plugins without awaiting remote catalog discovery', async () => {
+    let catalogReads = 0;
+    const lifecycleCalls = [];
+    const manager = new PluginManagerService({
+      catalog: {
+        snapshot: async () => {
+          catalogReads += 1;
+          return new Promise(() => {});
+        },
+      },
+      inventory: { snapshot: async () => emptyInventory },
+      installedPackages: { list: async () => [bundledGithub] },
+      lifecycle: {
+        setEnabled: async (...args) => lifecycleCalls.push(args),
+        uninstall: async () => {},
+      },
+    });
+
+    const result = await Promise.race([
+      manager.setEnabled('github', { enabled: false, expectedRevision: 1 }),
+      new Promise((resolve) => setTimeout(() => resolve('remote-blocked-operation'), 100)),
+    ]);
+
+    assert.notEqual(result, 'remote-blocked-operation');
+    assert.equal(catalogReads, 0);
+    assert.deepEqual(lifecycleCalls, [['instance:github', false, 1]]);
+  });
+
+  it('applies the live state projection to local installed rows before authorizing lifecycle writes', async () => {
+    let projectionCalls = 0;
+    const lifecycleCalls = [];
+    const installed = {
+      ...bundledGithub,
+      pluginId: published.pluginId,
+      pluginInstanceId: 'pi_video',
+      displayName: published.displayName,
+      source: {
+        kind: 'catalog',
+        catalogId: published.catalogId,
+        packageName: published.packageName,
+        trust: 'official',
+      },
+      installedVersion: published.version,
+      availableVersion: published.version,
+      packageDigest: published.packageDigest,
+      auth: 'connected',
+      config: 'ready',
+      intent: 'disabled',
+      live: 'stopped',
+      lifecycleRevision: 3,
+      capabilitySummary: [],
+      capabilities: [],
+    };
+    const manager = service({
+      inventory: installedInventory(),
+      installedPackages: [installed],
+      stateProjection: {
+        read: async () => {
+          projectionCalls += 1;
+          return { authState: 'disconnected', configState: 'incomplete', intentState: 'disabled' };
+        },
+      },
+      lifecycle: {
+        setEnabled: async (...args) => lifecycleCalls.push(args),
+        uninstall: async () => {},
+      },
+    });
+
+    const canonical = (await manager.get(published.pluginId)).plugin;
+    const local = (await manager.getLocal(published.pluginId)).plugin;
+    assert.deepEqual(
+      { auth: local.auth, config: local.config, actions: local.actions },
+      { auth: canonical.auth, config: canonical.config, actions: canonical.actions },
+    );
+    assert.equal(local.auth, 'disconnected');
+    assert.equal(local.config, 'incomplete');
+    assert.equal(local.actions.setEnabled, false);
+    await assert.rejects(
+      manager.setEnabled(published.pluginId, { enabled: true, expectedRevision: 3 }),
+      (error) => error?.code === 'ACTION_NOT_ALLOWED',
+    );
+    assert.equal(projectionCalls, 3);
+    assert.deepEqual(lifecycleCalls, []);
+  });
+
   it('returns installed package contributions in detail without treating grants as tools', async () => {
     const manager = service({ inventory: installedInventory() });
 
@@ -180,10 +322,6 @@ describe('F202 terminal Plugin Manager service', () => {
     assert.deepEqual(result.plugin.contributions, [
       { id: 'video-analysis-toolset', kind: 'mcp', name: 'video-analysis-toolset' },
     ]);
-    assert.deepEqual(
-      result.plugin.capabilities.map(({ id }) => id),
-      ['events.publish'],
-    );
   });
 
   it('preserves unavailable catalog contribution metadata in detail', async () => {
@@ -194,8 +332,8 @@ describe('F202 terminal Plugin Manager service', () => {
     assert.equal('contributions' in result.plugin, false);
   });
 
-  it('returns one searchable list across published and compatibility plugins', async () => {
-    const manager = service({ compatibility: [bundledGithub] });
+  it('returns one searchable list across catalog and installed packages', async () => {
+    const manager = service({ installedPackages: [bundledGithub] });
 
     const all = await manager.list();
     assert.deepEqual(
@@ -231,20 +369,20 @@ describe('F202 terminal Plugin Manager service', () => {
     assert.deepEqual(result.plugins[0].description, localized.description);
   });
 
-  it('deduplicates a compatibility row once the same plugin is Host-managed', async () => {
-    const compatibilityDuplicate = { ...bundledGithub, pluginId: published.pluginId, displayName: 'Old Video' };
-    const manager = service({ compatibility: [compatibilityDuplicate] });
+  it('deduplicates an installed row when the same plugin is in catalog inventory', async () => {
+    const installedPackagesDuplicate = { ...bundledGithub, pluginId: published.pluginId, displayName: 'Old Video' };
+    const manager = service({ installedPackages: [installedPackagesDuplicate] });
 
     const result = await manager.list();
     assert.equal(result.plugins.filter((plugin) => plugin.pluginId === published.pluginId).length, 1);
     assert.equal(result.plugins.find((plugin) => plugin.pluginId === published.pluginId).displayName, 'Video Analysis');
   });
 
-  it('keeps installed compatibility plugins visible when catalog discovery fails', async () => {
+  it('keeps installed packages visible when catalog discovery fails', async () => {
     const manager = new PluginManagerService({
       catalog: { snapshot: async () => Promise.reject(new Error('offline')) },
       inventory: { snapshot: async () => emptyInventory },
-      compatibility: { list: async () => [bundledGithub] },
+      installedPackages: { list: async () => [bundledGithub] },
     });
 
     const result = await manager.list();
@@ -259,47 +397,8 @@ describe('F202 terminal Plugin Manager service', () => {
     });
   });
 
-  it('keeps repository compatibility visible when its shared catalog suppression read fails', async () => {
-    const catalog = { snapshot: async () => Promise.reject(new Error('offline')) };
-    const compatibility = new PluginManagerCompatibilityAdapter([
-      new RepositoryPluginManagerCompatibilityProvider(
-        async () => [
-          {
-            id: 'github',
-            name: 'GitHub',
-            version: '1.0.0',
-            status: 'enabled',
-            configured: true,
-            config: [],
-            resources: [{ type: 'mcp', name: 'github-toolset', enabled: true }],
-            hasHealthCheck: false,
-          },
-        ],
-        {
-          loadSuppressedPluginIds: async () =>
-            (await catalog.snapshot()).entries.flatMap((entry) =>
-              entry.replacesRepositoryPluginId === undefined ? [] : [entry.replacesRepositoryPluginId],
-            ),
-        },
-      ),
-    ]);
-    const manager = new PluginManagerService({
-      catalog,
-      inventory: { snapshot: async () => emptyInventory },
-      compatibility,
-    });
-
-    const result = await manager.list();
-
-    assert.deepEqual(
-      result.plugins.map((plugin) => plugin.pluginId),
-      ['github'],
-    );
-    assert.equal(result.catalog.status, 'unavailable');
-  });
-
   it('gets the same projection used by list and reports an unknown plugin honestly', async () => {
-    const manager = service({ compatibility: [bundledGithub] });
+    const manager = service({ installedPackages: [bundledGithub] });
 
     const detail = (await manager.get('github')).plugin;
     assert.equal(detail.pluginId, 'github');
@@ -452,3 +551,55 @@ describe('F202 terminal Plugin Manager service', () => {
     ]);
   });
 });
+
+it('keeps one plugin row without exposing source or version choices', async () => {
+  const gitCandidate = {
+    ...published,
+    catalogId: 'git.team.video',
+    version: '1.2.0',
+    packageDigest: null,
+    sourceLabel: 'team-plugins · preview',
+    directorySource: {
+      kind: 'git',
+      url: 'ssh://git@example.invalid/team/plugins.git',
+      packageName: published.packageName,
+      trust: 'unverified',
+      marketplace: {
+        sourceId: 'team-preview',
+        commit: 'a'.repeat(40),
+        path: 'packages/video',
+        pluginId: published.pluginId,
+        version: '1.2.0',
+      },
+    },
+  };
+  const manager = service({ catalog: { candidates: [published, gitCandidate], status: 'fresh', refreshedAt: 1 } });
+  const listed = await manager.list();
+  assert.equal(listed.plugins.length, 1);
+  assert.equal(listed.plugins[0].source.kind, 'catalog', 'official remains the default, not an implicit override');
+  const detail = (await manager.get(published.pluginId)).plugin;
+  assert.equal(Object.hasOwn(listed.plugins[0], 'installSources'), false);
+  assert.equal(Object.hasOwn(detail, 'installSources'), false);
+});
+
+for (const version of ['0.9.0', '1.0.0', '1.0.1', '1.0.1-alpha.1']) {
+  it(`offers only newer compatible updates: ${version}`, async () => {
+    const manager = service({
+      inventory: installedInventory(),
+      catalog: {
+        candidates: [{ ...published, version, compatibleReplacement: true, packageDigest: digest(version) }],
+        status: 'fresh',
+        refreshedAt: 1,
+      },
+    });
+    const plugin = (await manager.get(published.pluginId)).plugin;
+    assert.equal(plugin.actions.install, version.startsWith('1.0.1'));
+    assert.equal(Object.hasOwn(plugin, 'installSources'), false);
+    assert.equal(Object.hasOwn(plugin, 'installRequest'), false);
+    await assert.rejects(manager.update(published.pluginId, { expectedVersion: version, expectedRevision: 99 }));
+    if (!version.startsWith('1.0.1')) {
+      await assert.rejects(manager.update(published.pluginId, { expectedVersion: version, expectedRevision: 3 }));
+    }
+    await assert.rejects(manager.update(published.pluginId, { expectedVersion: '9.9.9', expectedRevision: 3 }));
+  });
+}

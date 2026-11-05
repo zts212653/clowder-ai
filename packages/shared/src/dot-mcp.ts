@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { deploymentDefaults } from './deployment-defaults.js';
 
 export const dotEventRefSchema = z.object({ event_id: z.string().regex(/^dot_evt_[a-f0-9]{64}$/) }).strict();
 export const dotSubscriptionArguments = z
@@ -34,8 +35,7 @@ const eventRef = { type: 'string', pattern: '^dot_evt_[a-f0-9]{64}$' };
 export const DOT_TOOLS = [
   {
     name: 'cat_cafe_dot_read_source',
-    description:
-      'Use when: a dot.summoned event asks you to join a Clowder AI conversation. NOT for: arbitrary threads or another cat’s identity. Output: the exact original message, recent visible context, query scope and observation time. GOTCHA: call separately for every event; batching never changes its source.',
+    description: `Use when: a dot.summoned event asks you to join a ${deploymentDefaults.brand.displayName} conversation. NOT for: arbitrary threads or another cat’s identity. Output: the exact original message, recent visible context, query scope and observation time. GOTCHA: call separately for every event; batching never changes its source.`,
     inputSchema: {
       type: 'object',
       properties: { event_id: eventRef },
@@ -58,8 +58,7 @@ export const DOT_TOOLS = [
   },
   {
     name: 'cat_cafe_dot_publish_image',
-    description:
-      'Use when: delivering a generated original PNG to the exact conversation that summoned you. NOT for: Library IDs, private download links, local server paths, SVG or user impersonation. Output: a durable image publication and its original reply message. GOTCHA: obtain actual file bytes through authorized file tools; send at most 10 MiB per PNG and 8 images per event. Reuse each image’s stable publication_key for retries; failed writes keep that slot. Clowder AI renders and retains the original without user download/upload.',
+    description: `Use when: delivering a generated original PNG to the exact conversation that summoned you. NOT for: Library IDs, private download links, local server paths, SVG or user impersonation. Output: a durable image publication and its original reply message. GOTCHA: obtain actual file bytes through authorized file tools; send at most 10 MiB per PNG and 8 images per event. Reuse each image’s stable publication_key for retries; failed writes keep that slot. ${deploymentDefaults.brand.displayName} renders and retains the original without user download/upload.`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -75,8 +74,7 @@ export const DOT_TOOLS = [
   },
   {
     name: 'cat_cafe_dot_ask',
-    description:
-      'Ask authorized house cats as the paired dot through the existing Clowder AI connection. Use when: initiating a question or collaboration, 主动问家猫. NOT for: answering a dot.summoned event (use dot_reply), impersonating the owner, changing work authority or choosing an author. Output: a durable gpt-dot message and routing receipt; actual replies return to the same subscription. GOTCHA: generic post_message uses Pro identity, not dot. Prepare the current dot subscription once; reuse client_message_id for retries without changing thread, recipients or text.',
+    description: `Ask authorized house cats as the paired dot through the existing ${deploymentDefaults.brand.displayName} connection. Use when: initiating a question or collaboration, 主动问家猫. NOT for: answering a dot.summoned event (use dot_reply), impersonating the owner, changing work authority or choosing an author. Output: a durable gpt-dot message and routing receipt; actual replies return to the same subscription. GOTCHA: generic post_message uses Pro identity, not dot. Prepare the current dot subscription once; reuse client_message_id for retries without changing thread, recipients or text.`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -100,8 +98,7 @@ export const DOT_TOOLS = [
 
 export const DOT_EVENT_DEFINITION = {
   name: 'dot.summoned',
-  description:
-    'An admitted Clowder AI summon for this connected dot. Read the referenced original message; reply to that same source.',
+  description: `An admitted ${deploymentDefaults.brand.displayName} summon for this connected dot. Read the referenced original message; reply to that same source.`,
   delivery: ['webhook'],
   inputSchema: {
     type: 'object',

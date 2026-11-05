@@ -42,7 +42,7 @@ const fixtures = {
     scope,
     occurredAt: 1_785_600_000_001,
     payload: {
-      repoFullName: 'zts212653/cat-cafe',
+      repoFullName: 'zts212653/clowder-ai',
       prNumber: 3366,
       headSha: 'b83ce623eff16b0085be39801844e9b6b04c9313',
       phase: 'merge_gate',
@@ -166,8 +166,8 @@ describe('F287 memory cue shared contract', () => {
     ]).toEqual(['person_memory', 'evidence', 'taste', 'profile', 'event', 'evidence', 'evidence', 'owned_seed']);
   });
 
-  it('admits only the ten versioned producer/kind pairs after the Phase E vertical slice', () => {
-    expect(RECALL_OPPORTUNITY_CATALOG_VERSION).toBe(6);
+  it('admits only the twelve versioned producer/kind pairs including the two context source entries', () => {
+    expect(RECALL_OPPORTUNITY_CATALOG_VERSION).toBe(8);
     expect(RECALL_OPPORTUNITY_V1_PAIRS).toEqual([
       { kind: 'subject_seen', producer: 'entity_nudge' },
       { kind: 'delivery_decision', producer: 'github_ci' },
@@ -179,6 +179,8 @@ describe('F287 memory cue shared contract', () => {
       { kind: 'project_source_required', producer: 'task_context' },
       { kind: 'owned_seed_available', producer: 'present_loop' },
       { kind: 'thread_opened', producer: 'owner_message' },
+      { kind: 'fresh_context_sources', producer: 'context_epoch' },
+      { kind: 'authorized_task_sources', producer: 'task_action_custody' },
     ]);
 
     for (const fixture of Object.values(fixtures)) {
@@ -258,7 +260,7 @@ describe('F287 memory cue shared contract', () => {
       v: 1,
       cueId: 'cue-1',
       opportunityId: fixtures.subject_seen.opportunityId,
-      catalogVersion: 6,
+      catalogVersion: 8,
       resolverFamily: 'person_entity',
       resolverVersion: 1,
       whyNow: 'A named subject is present in the current decision frame.',
@@ -289,7 +291,7 @@ describe('F287 memory cue shared contract', () => {
       v: 1,
       producer: 'github_ci',
       producerProvenance: 'server_github_ci',
-      repoFullName: 'zts212653/cat-cafe',
+      repoFullName: 'zts212653/clowder-ai',
       prNumber: 3366,
       headSha: 'b83ce623eff16b0085be39801844e9b6b04c9313',
       phase: 'merge_gate',

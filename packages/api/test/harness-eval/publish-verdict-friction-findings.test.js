@@ -98,6 +98,17 @@ function findings() {
       analysisDisposition: 'repair',
       approvalRequirement: { kind: 'required', reason: 'repair' },
       interventionKind: 'fix',
+      decisionExplanation: {
+        schemaVersion: 1,
+        expectedChange: 'Resolve exact drill refs from the repository root.',
+        beforeSummary: 'Repo-relative drill refs fail when the reader starts in a package directory.',
+        afterSummary: 'The same exact ref opens from both repository and package working directories.',
+        changeSetSummary: 'Change cwd resolution while preserving the existing exact source ref.',
+        attributionBoundary: 'This proposal addresses cwd resolution only; malformed refs remain invalid.',
+        independentVerification: 'Open the same ref from repository root and package cwd on the exact candidate.',
+        rejectedCandidates: ['Persist machine-local absolute paths in source artifacts.'],
+        costAndRollback: 'One reversible resolver change; revert it if an existing read path regresses.',
+      },
     }),
     judgment('04eaba997290', 'default-mode-tool-availability', 'F203'),
     judgment('1193e4fa241b', 'a2a-disposition-source-mismatch', 'F167', {
@@ -205,6 +216,14 @@ describe('eval:friction finding breakout publish', () => {
       assert.notEqual(rootArtifact.repairTarget.featureId, 'F245');
       assert.equal(rootArtifact.ownerAsk.targetFeatureId, rootArtifact.repairTarget.featureId);
       assert.equal(rootArtifact.ownerAsk.targetOwnerCatId, rootArtifact.repairTarget.ownerCatId);
+      if (child.findingKey === 'evidence-reader-drilldown-path') {
+        const finding = JSON.parse(readFileSync(join(bundle, 'finding.json'), 'utf8'));
+        assert.equal(finding.decisionExplanation.expectedChange, 'Resolve exact drill refs from the repository root.');
+        assert.deepEqual(finding.decisionExplanation.rejectedCandidates, [
+          'Persist machine-local absolute paths in source artifacts.',
+        ]);
+        assert.equal(rootArtifact.ownerAsk.requestedAction, finding.decisionExplanation.expectedChange);
+      }
     }
   });
 

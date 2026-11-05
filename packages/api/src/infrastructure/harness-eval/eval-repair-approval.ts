@@ -1,6 +1,7 @@
 import {
   type ApprovalOriginRef,
   createCatId,
+  evalRepairDecisionExplanationV1Schema,
   exactAssetVersionRefV1Schema,
   ownerTruthRefV1Schema,
 } from '@cat-cafe/shared';
@@ -40,6 +41,11 @@ function ownerLineageFields(ownerLineage: EvalRepairOwnerLineage | undefined) {
       interventionRef: ownerTruthRefV1Schema.parse(ownerLineage.interventionRef),
     },
   };
+}
+
+function decisionExplanationFields(action: EvalRepairCaseAction) {
+  if (!action.decisionExplanation) return {};
+  return { decisionExplanation: evalRepairDecisionExplanationV1Schema.parse(action.decisionExplanation) };
 }
 
 export class EvalRepairApprovalService {
@@ -119,6 +125,7 @@ export class EvalRepairApprovalService {
           expectedChange: action.expectedChange,
           costAndRollback: action.costAndRollback,
           withdrawalCondition: action.withdrawalCondition,
+          ...decisionExplanationFields(action),
           ownerRef: owner.ownerRef,
           ownerAuthorizationRef: owner.ownerAuthorizationRef,
           targetVersionRef: owner.targetVersionRef,

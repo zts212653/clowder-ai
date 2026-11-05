@@ -48,7 +48,7 @@ describe('F167 Phase S action successor identity', () => {
   });
 
   it('keeps schema and runtime diagnostics aligned for an invalid subjectRef', () => {
-    const subjectRef = 'github:zts212653/cat-cafe#3677@181099d2';
+    const subjectRef = 'github:zts212653/clowder-ai#3677@181099d2';
     const parsed = actionSuccessorMetadataSchema.safeParse({
       subjectRef,
       actionFamily: 'review',

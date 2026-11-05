@@ -172,7 +172,6 @@ describe('F247 R8 P1-1: EXPLICIT_TOOL_ANNOTATIONS regression guard', () => {
       'cat_cafe_library_rebuild',
       'signal_delete_article',
       // R8.2 砚砚 finding: unregister/unlink tools must be destructive
-      'cat_cafe_unregister_tracking', // stops all automated PR/CI/issue notifications, deletes association
       'signal_link_thread', // action=unlink branch DELETEs association (max-risk path)
     ];
 

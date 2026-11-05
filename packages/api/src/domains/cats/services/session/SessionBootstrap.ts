@@ -11,7 +11,9 @@
  */
 
 import type { CatId } from '@cat-cafe/shared';
+import { deploymentDefaults } from '@cat-cafe/shared';
 import { estimateTokens } from '../../../../utils/token-counter.js';
+import { sliceUnicodeSafe } from '../../../../utils/unicode-safe-slice.js';
 import type { PushRecallPresentation } from '../../../memory/f200-types.js';
 import { formatRecallPointer } from '../agents/routing/context-transport.js';
 import { formatPromptTime } from '../format-time.js';
@@ -49,10 +51,8 @@ const HANDOFF_MARKER_CLOSE = '[/Previous Session Summary]';
 const HANDOFF_NOTE_MARKER_CLOSE = '[/Cat Handoff Note]';
 const MAX_NOTE_FIELD_CHARS = 600;
 function sanitizeNoteField(text: string): string {
-  return sanitizeHandoffBody(text)
-    .replace(/\[\/?Cat Handoff Note[^\]]*\]/g, '') // strip own-marker spoofing (open + close)
-    .slice(0, MAX_NOTE_FIELD_CHARS)
-    .trim();
+  const sanitized = sanitizeHandoffBody(text).replace(/\[\/?Cat Handoff Note[^\]]*\]/g, '');
+  return sliceUnicodeSafe(sanitized, 0, MAX_NOTE_FIELD_CHARS).trim();
 }
 
 /** Hard cap for entire bootstrap output (AC-5).
@@ -79,7 +79,7 @@ function capHandoffNoteToBudget(section: string, maxTokens: number): string {
     ? section.slice(0, -HANDOFF_NOTE_MARKER_CLOSE.length)
     : section;
   while (body.length > 0 && estimateTokens(body + suffix) > maxTokens) {
-    body = body.slice(0, Math.floor(body.length * 0.9));
+    body = sliceUnicodeSafe(body, 0, Math.floor(body.length * 0.9));
   }
   return body.trimEnd() + suffix;
 }
@@ -260,7 +260,9 @@ export async function buildSessionBootstrap(
       const thread = await opts.threadStore.get(threadId);
       const query = thread?.title ?? '';
       if (query && query.length > 2) {
-        const apiUrl = process.env.CAT_CAFE_API_URL ?? `http://localhost:${process.env.API_SERVER_PORT ?? '3004'}`;
+        const apiUrl =
+          process.env.CAT_CAFE_API_URL ??
+          `http://localhost:${process.env.API_SERVER_PORT ?? String(deploymentDefaults.apiPort)}`;
         const params = new URLSearchParams({ q: query, limit: '5' });
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 500);
@@ -473,7 +475,7 @@ function formatDigest(digest: ExtractiveDigestV1): string {
   if (digest.errors.length > 0) {
     lines.push(`Errors encountered: ${digest.errors.length}`);
     for (const err of digest.errors.slice(0, 3)) {
-      lines.push(`  - ${err.message.slice(0, 200)}`);
+      lines.push(`  - ${sliceUnicodeSafe(err.message, 0, 200)}`);
     }
   }
 
@@ -494,5 +496,5 @@ function formatDigest(digest: ExtractiveDigestV1): string {
 }
 
 function formatInlineMessage(text: string): string {
-  return JSON.stringify(text.replace(/\s*\n\s*/g, ' ').slice(0, 500));
+  return JSON.stringify(sliceUnicodeSafe(text.replace(/\s*\n\s*/g, ' '), 0, 500));
 }

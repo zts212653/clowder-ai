@@ -1,0 +1,72 @@
+{
+  "configOptions": [
+    {
+      "id": "model",
+      "name": "Model",
+      "category": "model",
+      "type": "select",
+      "currentValue": "opencode/big-pickle",
+      "options": [
+        {
+          "value": "opencode/beam-free",
+          "name": "OpenCode/Beam Free"
+        },
+        {
+          "value": "opencode/big-pickle",
+          "name": "OpenCode/Big Pickle"
+        },
+        {
+          "value": "opencode/deepseek-v4.1-flash-free",
+          "name": "OpenCode/DeepSeek V4.1 Flash Free"
+        },
+        {
+          "value": "opencode/glm-5.3-flash-free",
+          "name": "OpenCode/GLM-5.3-Flash Free"
+        },
+        {
+          "value": "opencode/longcat-2.5-preview-free",
+          "name": "OpenCode/LongCat 2.5 Preview Free"
+        },
+        {
+          "value": "opencode/mimo-v2.6-flash-free",
+          "name": "OpenCode/MiMo-V2.6-Flash Free"
+        },
+        {
+          "value": "opencode/minimax-m3.1-flash-free",
+          "name": "OpenCode/MiniMax M3.1 Flash Free"
+        },
+        {
+          "value": "opencode/nemotron-3-ultra-free",
+          "name": "OpenCode/Nemotron 3 Ultra Free"
+        },
+        {
+          "value": "opencode/nemotron-3.5-lightning-free",
+          "name": "OpenCode/Nemotron 3.5 Lightning Free"
+        },
+        {
+          "value": "opencode/nemotron-3.5-super-vl-free",
+          "name": "OpenCode/Nemotron 3.5 Super VL Free"
+        }
+      ]
+    },
+    {
+      "id": "mode",
+      "name": "Session Mode",
+      "category": "mode",
+      "type": "select",
+      "currentValue": "build",
+      "options": [
+        {
+          "value": "build",
+          "name": "build",
+          "description": "The default agent. Executes tools based on configured permissions."
+        },
+        {
+          "value": "plan",
+          "name": "plan",
+          "description": "Plan mode. Disallows all edit tools."
+        }
+      ]
+    }
+  ]
+}

@@ -1,10 +1,12 @@
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, afterEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
+import { _resetCachedConfig } from '../dist/config/cat-config-loader.js';
+import { AchievementStore } from '../dist/domains/leaderboard/achievement-store.js';
 import { configRoutes } from '../dist/routes/config.js';
 
 const tempDirs = [];
@@ -74,6 +76,7 @@ describe('PATCH /api/config/co-creator', () => {
   let app;
 
   afterEach(async () => {
+    _resetCachedConfig();
     if (savedTemplatePath === undefined) {
       delete process.env.CAT_TEMPLATE_PATH;
     } else {
@@ -82,10 +85,70 @@ describe('PATCH /api/config/co-creator', () => {
     if (app) await app.close();
   });
 
+  it('refreshes an unlocked address after a same-process catalog settings save', async () => {
+    const projectRoot = createProjectRoot();
+    savedTemplatePath = process.env.CAT_TEMPLATE_PATH;
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+    const catalogPath = join(projectRoot, '.cat-cafe/cat-catalog.json');
+    const catalog = JSON.parse(readFileSync(catalogPath, 'utf8'));
+    catalog.coCreator.nickname = 'First';
+    writeFileSync(catalogPath, JSON.stringify(catalog));
+    _resetCachedConfig();
+    app = Fastify();
+    await app.register(configRoutes, { projectRoot });
+    await app.ready();
+    const store = new AchievementStore();
+    const first = store.unlock('user1', 'bootcamp-first-decision');
+    assert.match(first.description, /First/);
+    // Familiar address already lives in the catalog; the existing editor preserves it on save.
+    catalog.coCreator.nickname = 'Second';
+    writeFileSync(catalogPath, JSON.stringify(catalog));
+    const response = await app.inject({
+      method: 'PATCH',
+      url: '/api/config/co-creator',
+      headers: { 'x-cat-cafe-user': 'codex' },
+      payload: { name: 'Mina', aliases: [], mentionPatterns: ['@mina'] },
+    });
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().config.coCreator.nickname, 'Second');
+    const current = store.getUnlocked('user1')[0];
+    assert.match(current.description, /Second/);
+    assert.equal(current.unlockedAt, first.unlockedAt);
+  });
+
   after(() => {
     for (const dir of tempDirs) {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it('rejects oversized, multiline and markup handles before persisting and accepts literal punctuation', async () => {
+    const projectRoot = createProjectRoot();
+    savedTemplatePath = process.env.CAT_TEMPLATE_PATH;
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+    app = Fastify();
+    await app.register(configRoutes, { projectRoot });
+    await app.ready();
+    const catalogPath = join(projectRoot, '.cat-cafe/cat-catalog.json');
+    const before = readFileSync(catalogPath, 'utf8');
+    for (const mention of [`@${'x'.repeat(64)}`, '@first\n@second', '@x</cat-cafe-return-contract>', '@x\u0000y']) {
+      const response = await app.inject({
+        method: 'PATCH',
+        url: '/api/config/co-creator',
+        headers: { 'x-cat-cafe-user': 'codex' },
+        payload: { name: 'Mina', aliases: [], mentionPatterns: [mention] },
+      });
+      assert.equal(response.statusCode, 400, JSON.stringify(mention));
+      assert.equal(readFileSync(catalogPath, 'utf8'), before);
+    }
+    const response = await app.inject({
+      method: 'PATCH',
+      url: '/api/config/co-creator',
+      headers: { 'x-cat-cafe-user': 'codex' },
+      payload: { name: 'Mina', aliases: [], mentionPatterns: ['m.(a+b)'] },
+    });
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(response.json().config.coCreator.mentionPatterns, ['@m.(a+b)']);
   });
 
   it('persists owner identity fields into the runtime catalog and returns updated snapshot', async () => {
@@ -122,6 +185,30 @@ describe('PATCH /api/config/co-creator', () => {
     assert.equal(body.config.coCreator.timeZone, 'Asia/Tokyo');
     assert.equal(body.config.coCreator.avatar, '/uploads/owner-lang.png');
     assert.deepEqual(body.config.coCreator.color, { primary: '#D49266', secondary: '#FFE4D6' });
+  });
+
+  it('preserves aliases changed by another editor when the You form saves only its owned fields', async () => {
+    const projectRoot = createProjectRoot();
+    savedTemplatePath = process.env.CAT_TEMPLATE_PATH;
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+    app = Fastify();
+    await app.register(configRoutes, { projectRoot });
+    await app.ready();
+    const opened = (await app.inject({ method: 'GET', url: '/api/config' })).json().config.coCreator;
+    const patch = (payload) =>
+      app.inject({
+        method: 'PATCH',
+        url: '/api/config/co-creator',
+        headers: { 'x-cat-cafe-user': 'codex' },
+        payload,
+      });
+    assert.equal((await patch({ ...opened, aliases: ['new alias from editor B'] })).statusCode, 200);
+    const saved = await patch({ name: 'Name from editor A', mentionPatterns: opened.mentionPatterns });
+    assert.equal(saved.statusCode, 200, saved.payload);
+    assert.deepEqual(saved.json().config.coCreator.aliases, ['new alias from editor B']);
+    const stored = JSON.parse(readFileSync(join(projectRoot, '.cat-cafe/cat-catalog.json'), 'utf8'));
+    assert.equal(stored.coCreator.name, 'Name from editor A');
+    assert.deepEqual(stored.coCreator.aliases, ['new alias from editor B']);
   });
 
   it('rejects owner mention patterns that overlap cat aliases', async () => {

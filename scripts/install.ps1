@@ -477,6 +477,10 @@ Write-Step "Step 4/7 - Generate .env"
 Set-Location $ProjectRoot
 Write-Ok "Using project root: $ProjectRoot"
 
+$deploymentJson = & (Get-Command node -ErrorAction Stop) (Join-Path $ProjectRoot "scripts/read-deployment-default.mjs") --json
+if ($LASTEXITCODE -ne 0) { throw "Could not read deployment defaults" }
+$deploymentDefaults = $deploymentJson | ConvertFrom-Json -ErrorAction Stop
+
 $envFile = Join-Path $ProjectRoot ".env"
 $envExample = Join-Path $ProjectRoot ".env.example"
 
@@ -489,9 +493,9 @@ if (Test-Path $envFile) {
 } else {
     Write-Warn ".env.example not found - creating minimal .env"
     @"
-FRONTEND_PORT=3003
-API_SERVER_PORT=3004
-NEXT_PUBLIC_API_URL=http://localhost:3004
+FRONTEND_PORT=$($deploymentDefaults.webPort)
+API_SERVER_PORT=$($deploymentDefaults.apiPort)
+NEXT_PUBLIC_API_URL=$($deploymentDefaults.apiBaseUrl)
 REDIS_PORT=6399
 "@ | Out-File -FilePath $envFile -Encoding utf8
     Write-Ok "Minimal .env created"
@@ -652,7 +656,7 @@ $cliTools = @(
     @{ Name = "Claude"; Label = "Claude"; Cmd = "claude"; Pkg = "@anthropic-ai/claude-code" },
     @{ Name = "Codex"; Label = "Codex"; Cmd = "codex"; Pkg = "@openai/codex" },
     @{ Name = "Antigravity"; Label = "Antigravity CLI"; Cmd = "agy"; InstallKind = "antigravity-native" },
-    @{ Name = "Kimi"; Label = "Kimi"; Cmd = "kimi"; Pkg = "kimi-cli"; InstallKind = "python" }
+    @{ Name = "Kimi"; Label = "Kimi Code"; Cmd = "kimi"; Pkg = "@moonshot-ai/kimi-code" }
 )
 
 if (-not $SkipCli) {
@@ -673,16 +677,6 @@ if (-not $SkipCli) {
             try {
                 if ($tool.InstallKind -eq "antigravity-native") {
                     Install-AntigravityCli
-                } elseif ($tool.InstallKind -eq "python") {
-                    $uvCommand = Resolve-ToolCommand -Name "uv"
-                    if ($uvCommand) {
-                        & $uvCommand tool install --python 3.13 $tool.Pkg 2>$null
-                    } else {
-                        $pythonCommand = Resolve-ToolCommand -Name "python"
-                        if (-not $pythonCommand) { $pythonCommand = Resolve-ToolCommand -Name "py" }
-                        if (-not $pythonCommand) { throw "python command not found" }
-                        & $pythonCommand -m pip install --user --upgrade $tool.Pkg 2>$null
-                    }
                 } else {
                     if (-not $npmInstallCommand) { throw "npm command not found" }
                     & $npmInstallCommand install -g $tool.Pkg 2>$null
@@ -745,7 +739,7 @@ $startCmd = ".\scripts\start-windows.ps1"
 Write-Host "    $startCmd" -ForegroundColor White
 Write-Host ""
 $frontendPort = Get-InstallerEnvValueFromFile -EnvFile $envFile -Key "FRONTEND_PORT"
-if (-not $frontendPort) { $frontendPort = "3003" }
+if (-not $frontendPort) { $frontendPort = [string]$deploymentDefaults.webPort }
 Write-Host "  Then open http://localhost:$frontendPort" -ForegroundColor Cyan
 Write-Host ""
 

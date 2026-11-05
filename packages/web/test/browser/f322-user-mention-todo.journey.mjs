@@ -2,10 +2,11 @@ import assert from 'node:assert/strict';
 import { mkdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
+import { installMentionPreferences } from './f322-mention-personal-owner.mjs';
 
 /** Real message owner and decision routes behind the real shell/mailbox. Browser transport alone is isolated. */
 export function registerUserMentionJourney({ test, openProof, closeProof }) {
-  test('explicit F320 mention → one mailbox row → replacement → human reply / handled → closed', async () => {
+  test('explicit F320 mention → one mailbox row → replacement → human reply / personal ignore → closed', async () => {
     const require = createRequire(new URL('../../../api/package.json', import.meta.url));
     const Fastify = require('fastify');
     // The canonical browser command is plain Node. Load real TS owners without
@@ -26,15 +27,17 @@ export function registerUserMentionJourney({ test, openProof, closeProof }) {
     });
     app.get('/api/approval-hub/pending', async () => ({ items: [], coverage: { state: 'complete' } }));
     app.get('/api/entrusted-work/needs-me', async () => ({ ownerReads: [], coverage: { state: 'complete' } }));
+    const preferences = await installMentionPreferences(app);
     await app.register(companionDecisionRoutes, {
       ownerUserId: 'owner-1',
       messageStore: messages,
       runtimeInteractionStore: new InMemoryRuntimeInteractionStore(),
+      readIgnoredItemPreferences: preferences.read,
       now: () => 0,
     });
     const source = {
       userId: 'owner-1',
-      catId: 'codex61-sol',
+      from: { kind: 'agent', catId: 'codex61-sol' },
       threadId: 'thread-other',
       timestamp: 1791589825011,
       mentions: [],
@@ -55,18 +58,34 @@ export function registerUserMentionJourney({ test, openProof, closeProof }) {
           return {
             body: {
               cats: [
-                { id: 'opus', displayName: '布偶猫', color: { primary: '#7966a8', secondary: '#eeeaf8' } },
-                { id: 'glm52', displayName: '狸花猫', color: { primary: '#9b744f', secondary: '#f3eadf' } },
-                { id: 'codex61-sol', displayName: '小太阳·砚砚', color: { primary: '#b05f45', secondary: '#f3e3da' } },
+                {
+                  id: 'opus',
+                  carrier: 'cli',
+                  displayName: '布偶猫',
+                  color: { primary: '#7966a8', secondary: '#eeeaf8' },
+                },
+                {
+                  id: 'glm52',
+                  carrier: 'cli',
+                  displayName: '狸花猫',
+                  color: { primary: '#9b744f', secondary: '#f3eadf' },
+                },
+                {
+                  id: 'codex61-sol',
+                  carrier: 'cli',
+                  displayName: '小太阳·砚砚',
+                  color: { primary: '#b05f45', secondary: '#f3e3da' },
+                },
               ],
             },
           };
-        if (!url.pathname.startsWith('/api/concierge/work/mentions/')) return null;
+        if (!url.pathname.startsWith('/api/concierge/work/mentions/') && url.pathname !== '/api/config/ignored-items')
+          return null;
         const response = await app.inject({
           method: request.method(),
-          url: url.pathname,
+          url: url.pathname + url.search,
           headers: { origin: 'http://localhost' },
-          payload: request.postDataJSON(),
+          ...(['POST', 'PATCH'].includes(request.method()) ? { payload: request.postDataJSON() } : {}),
         });
         return { status: response.statusCode, body: response.json() };
       },
@@ -109,10 +128,15 @@ export function registerUserMentionJourney({ test, openProof, closeProof }) {
       // The actual original-place control navigates to the source conversation.
       await page.getByTestId('mailbox-open-original').click();
       await page.waitForURL('**/thread/thread-other');
-      messages.append({ ...source, catId: null, timestamp: source.timestamp + 2, content: '可以，稍后重启' });
+      messages.append({
+        ...source,
+        from: { kind: 'user', userId: source.userId },
+        timestamp: source.timestamp + 2,
+        content: '可以，稍后重启',
+      });
       await invalidate();
       if ((await page.getByTestId('mailbox-panel').count()) === 0) await page.getByTestId('mailbox-button').click();
-      await page.getByTestId('mailbox-empty').waitFor();
+      await page.getByTestId('mailbox-group-mentions').getByText('暂无 @你 请求', { exact: true }).waitFor();
       await page.getByRole('button', { name: '待办，暂无', exact: true }).waitFor();
       messages.append({ ...source, mentionsUser: true, timestamp: source.timestamp + 3, content: replacement.content });
       await invalidate();
@@ -120,8 +144,14 @@ export function registerUserMentionJourney({ test, openProof, closeProof }) {
       await page.getByTestId('mailbox-item-toggle').waitFor();
       assert.equal(await page.getByTestId('rail-badge-count').count(), 0);
       await page.getByTestId('mailbox-item-toggle').click();
-      await page.getByTestId('mailbox-mention-resolve').click();
-      await page.getByTestId('mailbox-empty').waitFor();
+      await page.getByTestId('mailbox-item-ignore').click();
+      await page.getByTestId('mailbox-group-mentions').getByText('暂无 @你 请求', { exact: true }).waitFor();
+      assert.equal(preferences.read('owner-1').entries.length, 1);
+      assert.equal(
+        messages.listUserMentionRequests('owner-1').length,
+        1,
+        'personal ignore never handles the canonical request',
+      );
       await page.getByRole('button', { name: '待办，暂无', exact: true }).waitFor();
       assert.equal(await page.getByTestId('mailbox-item').count(), 0);
       // More than one page: the newest request is visible immediately; valid old requests remain reachable.
@@ -163,6 +193,7 @@ export function registerUserMentionJourney({ test, openProof, closeProof }) {
     } finally {
       await closeProof(proof);
       await app.close();
+      await preferences.close();
       if (previousOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
       else process.env.DEFAULT_OWNER_USER_ID = previousOwner;
     }

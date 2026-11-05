@@ -4,7 +4,8 @@ import type {
   RuntimeInteractionRequest,
   RuntimeInteractionResponse,
 } from '@cat-cafe/shared';
-import { useMemo, useState } from 'react';
+import { useId, useMemo, useState } from 'react';
+import { CLASSIC_RUNTIME_INTERACTION_COPY, type RuntimeInteractionCopy } from './RuntimeInteractionCopy';
 import { RuntimeInteractionDecisionActions } from './RuntimeInteractionDecisionActions';
 
 type ElicitationRequest = Extract<RuntimeInteractionRequest, { kind: 'elicitation' }>;
@@ -14,7 +15,9 @@ export function RuntimeInteractionElicitationForm({
   request,
   disabled,
   onSubmit,
+  copy = CLASSIC_RUNTIME_INTERACTION_COPY.elicitation,
 }: {
+  copy?: RuntimeInteractionCopy['elicitation'];
   request: ElicitationRequest;
   disabled: boolean;
   onSubmit: (response: RuntimeInteractionResponse) => void;
@@ -31,11 +34,11 @@ export function RuntimeInteractionElicitationForm({
             rel="noreferrer"
             className="block min-h-10 rounded-xl border border-cafe px-3 py-2 text-sm text-[var(--semantic-info)] underline"
           >
-            打开 {target.host}
+            {copy.open(target.host)}
           </a>
         ) : (
           <p className="rounded-xl border border-[var(--semantic-critical)] px-3 py-2 text-sm text-[var(--semantic-critical)]">
-            链接不可用；你仍可拒绝或取消这次请求。
+            {copy.unavailable}
           </p>
         )}
         <RuntimeInteractionDecisionActions
@@ -46,18 +49,21 @@ export function RuntimeInteractionElicitationForm({
       </div>
     );
   }
-  return <FormElicitation request={request} disabled={disabled} onSubmit={onSubmit} />;
+  return <FormElicitation request={request} disabled={disabled} onSubmit={onSubmit} copy={copy} />;
 }
 
 function FormElicitation({
   request,
   disabled,
   onSubmit,
+  copy,
 }: {
+  copy: RuntimeInteractionCopy['elicitation'];
   request: Extract<ElicitationRequest, { mode: 'form' }>;
   disabled: boolean;
   onSubmit: (response: RuntimeInteractionResponse) => void;
 }) {
+  const formId = useId();
   const [values, setValues] = useState<Record<string, Primitive>>(() => defaultValues(request.requestedSchema));
   const complete = useMemo(
     () => (request.requestedSchema.required ?? []).every((id) => values[id] !== undefined && values[id] !== ''),
@@ -76,7 +82,7 @@ function FormElicitation({
     <div className="space-y-3">
       <RequestMessage message={request.message} />
       {Object.entries(request.requestedSchema.properties).map(([id, property]) => {
-        const inputId = `runtime-interaction-${request.interactionId}-${id}`;
+        const inputId = `${formId}-${id}`;
         return (
           <div key={id} className="block space-y-1.5 text-sm">
             <label htmlFor={inputId} className="font-semibold">
@@ -86,6 +92,7 @@ function FormElicitation({
               <span className="block text-xs text-cafe-muted">{property.description}</span>
             ) : null}
             <PrimitiveInput
+              copy={copy}
               inputId={inputId}
               name={id}
               property={property}
@@ -107,6 +114,7 @@ function FormElicitation({
 }
 
 function PrimitiveInput({
+  copy,
   inputId,
   name,
   property,
@@ -114,6 +122,7 @@ function PrimitiveInput({
   disabled,
   onChange,
 }: {
+  copy: RuntimeInteractionCopy['elicitation'];
   inputId: string;
   name: string;
   property: RuntimeInteractionObjectSchema['properties'][string];
@@ -131,10 +140,10 @@ function PrimitiveInput({
         onChange={(event) => onChange(coerceValue(property.type, event.target.value))}
         className="min-h-10 w-full rounded-xl border border-cafe bg-cafe-surface px-3"
       >
-        <option value="">请选择</option>
+        <option value="">{copy.choose}</option>
         {(property.enum ?? [true, false]).map((option) => (
           <option key={String(option)} value={String(option)}>
-            {option ? '是' : '否'}
+            {option ? copy.yes : copy.no}
           </option>
         ))}
       </select>
@@ -150,7 +159,7 @@ function PrimitiveInput({
         onChange={(event) => onChange(coerceValue(property.type, event.target.value))}
         className="min-h-10 w-full rounded-xl border border-cafe bg-cafe-surface px-3"
       >
-        <option value="">请选择</option>
+        <option value="">{copy.choose}</option>
         {property.enum.map((option) => (
           <option key={String(option)} value={String(option)}>
             {String(option)}

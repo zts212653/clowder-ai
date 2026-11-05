@@ -41,14 +41,23 @@ describe('F293 Phase B ownership guard', () => {
     expect(f307Destination).toContain('<TeamWorkspacePanel');
   });
 
-  it('keeps Settings ledger read-only and routes every writer to Team', () => {
+  it('keeps member records and routing writers in Team, outside Settings', () => {
     const settings = source('src/components/settings/SettingsContent.tsx');
-    const ledger = source('src/components/routing-context/RoutingContextLedger.tsx');
-    expect(settings).toContain('<RoutingContextLedger');
+    const editor = source('src/components/members/MemberEditorPage.tsx');
+    const detail = source('src/components/routing-context/TeamMemberDetail.tsx');
+    const team = source('src/components/routing-context/TeamWorkspacePanel.tsx');
+    const roster = source('src/components/routing-context/TeamMemberRoster.tsx');
+    const records = source('src/components/members/MemberRoutingHistory.tsx');
+    expect(settings).not.toMatch(/RoutingContextLedger|MemberRoutingHistory/);
+    expect(editor).not.toContain('MemberRoutingHistory');
+    expect(detail).toContain('<MemberRoutingHistory');
+    expect(detail).toContain('<RoutingSignalControls');
+    expect(team).toContain('<RoutingSignalControls');
+    expect(roster).toContain('<RoutingPreferenceControls');
     expect(settings.indexOf("section === 'profiles'")).toBeLessThan(settings.indexOf('<OpenTeamWorkspaceButton />'));
     expect(settings).not.toMatch(/Routing(?:Signal|Preference)Controls/);
-    expect(ledger).not.toMatch(/routing-context-client|markRoutingSignal|closeRoutingSignal|createRoutingPreference/);
-    expect(ledger).not.toContain('<form');
+    expect(records).not.toMatch(/routing-context-client|markRoutingSignal|closeRoutingSignal|createRoutingPreference/);
+    expect(records).not.toContain('<form');
   });
 
   it('deep-links ordinary mentions into the exact Team subject', () => {

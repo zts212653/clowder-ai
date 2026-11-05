@@ -7,7 +7,7 @@ import { createServer } from 'node:net';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
 import {
   canonicalWorktreeId,
   collaborationOwnerOutOfScopeResponse,
@@ -79,6 +79,7 @@ const FIXED_API_FIXTURES = new Map([
           displayName: '小太阳·砚砚',
           color: { primary: 'var(--color-codex-primary)', secondary: 'var(--color-codex-bg)' },
           mentionPatterns: ['@codex-sol'],
+          carrier: 'cli',
           clientId: 'openai',
           defaultModel: 'gpt-5.6-sol',
           avatar: '',

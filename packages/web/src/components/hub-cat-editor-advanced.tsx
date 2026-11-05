@@ -15,8 +15,8 @@ import {
 } from './hub-cat-editor.model';
 import { SectionCard, SelectField, TextField } from './hub-cat-editor-fields';
 import { TagEditor } from './hub-tag-editor';
-
 import { useEditorText, useMemberEditorPresentation } from './members/editor-presentation';
+import { MemberChangedField } from './members/MemberChangeMark';
 
 type FormPatch = Partial<HubCatEditorFormState>;
 
@@ -91,7 +91,7 @@ export function AdvancedRuntimeSection({
             <ContextWindowCompatibilityNotice cat={cat} form={form} />
           </>
         )}
-        {cliExtensionsAvailable && cliEffortOptions ? (
+        {form.configurationSource !== 'native_tool' && cliExtensionsAvailable && cliEffortOptions ? (
           <>
             <TextField
               label="CLI Effort"
@@ -138,22 +138,24 @@ export function AdvancedRuntimeSection({
           </div>
         ) : null}
         {cliExtensionsAvailable ? (
-          <div className="space-y-1">
-            <p className="text-sm font-medium text-cafe">{t('额外 CLI 参数')}</p>
-            <TagEditor
-              tags={form.cliConfigArgs}
-              onChange={(nextTags) => onChange({ cliConfigArgs: nextTags })}
-              addLabel={t('+ 添加参数')}
-              placeholder={t('例如 --model xxx 或 --flag value')}
-              emptyLabel={t('无额外参数')}
-              tone="green"
-            />
-            <p className="text-label leading-4 text-cafe-muted">
-              {page
-                ? t('启动时附加这些参数；与上方字段重复的保留参数以上方字段为准。')
-                : '每条直接追加到 CLI 命令。普通重复参数以用户参数为准；`CLI Effort`、`速度档位`等结构化保留项始终以上方字段为准，对应 raw 参数会被忽略。'}
-            </p>
-          </div>
+          <MemberChangedField label="Extra CLI arguments">
+            <div className="space-y-1">
+              <p className="text-sm font-medium text-cafe">{t('额外 CLI 参数')}</p>
+              <TagEditor
+                tags={form.cliConfigArgs}
+                onChange={(nextTags) => onChange({ cliConfigArgs: nextTags })}
+                addLabel={t('+ 添加参数')}
+                placeholder={t('例如 --model xxx 或 --flag value')}
+                emptyLabel={t('无额外参数')}
+                tone="green"
+              />
+              <p className="text-label leading-4 text-cafe-muted">
+                {page
+                  ? t('启动时附加这些参数；与上方字段重复的保留参数以上方字段为准。')
+                  : '每条直接追加到 CLI 命令。普通重复参数以用户参数为准；`CLI Effort`、`速度档位`等结构化保留项始终以上方字段为准，对应 raw 参数会被忽略。'}
+              </p>
+            </div>
+          </MemberChangedField>
         ) : null}
       </div>
 

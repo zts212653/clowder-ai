@@ -65,7 +65,7 @@ export function registerPublishedTextJourneys(suite) {
         const original = owner.messages.append({
           userId: 'operator',
           threadId: owner.thread.id,
-          catId: owner.catId,
+          from: { kind: 'agent', catId: owner.catId },
           content: 'Published document.',
           timestamp: 41,
           extra: { rich: { blocks: [file] } },
@@ -101,7 +101,7 @@ export function registerPublishedTextJourneys(suite) {
                 const message = owner.messages.append({
                   userId: 'operator',
                   threadId: owner.thread.id,
-                  catId: null,
+                  from: { kind: 'user', userId: 'operator' },
                   timestamp: Date.now(),
                   content: input.content,
                   contentBlocks: buildMessageContentBlocks(input.content, input.contextAttachments),
@@ -111,7 +111,7 @@ export function registerPublishedTextJourneys(suite) {
                 await route.fulfill({
                   status: 200,
                   contentType: 'application/json',
-                  body: JSON.stringify({ userMessageId: message.id, threadId: owner.thread.id }),
+                  body: JSON.stringify({ status: 'queued', userMessageId: message.id, threadId: owner.thread.id }),
                 });
               });
             },
@@ -124,8 +124,9 @@ export function registerPublishedTextJourneys(suite) {
           await reader.getByText('Original words.', { exact: true }).waitFor();
           const handle = await reader.elementHandle();
           assert.equal(await reader.getByText('只读', { exact: true }).count(), 1);
-          for (const action of ['编辑', '请猫修改', '朗读', '采用并写回'])
+          for (const action of ['编辑', '请猫修改', '采用并写回'])
             assert.equal(await reader.getByRole('button', { name: action, exact: true }).count(), 0);
+          assert.equal(await reader.getByRole('button', { name: '朗读', exact: true }).count(), 1);
           await select(
             page,
             reader.getByText('Original words.', { exact: true }),

@@ -63,7 +63,8 @@ describe('TmuxGateway', () => {
       await gateway.execInPane(
         isolatedWorktree,
         paneId,
-        "if env | grep -Eq '^(CONNECTOR_GATEWAY_AUTOSTART|CAT_CAFE_PROVISION_GLOBAL_SIDECAR)=1$'; then echo runtime-caps-present; else echo runtime-caps-absent; fi",
+        // Start the result on its own line; the complete marker must not appear in the echoed command.
+        "if env | grep -Eq '^(CONNECTOR_GATEWAY_AUTOSTART|CAT_CAFE_PROVISION_GLOBAL_SIDECAR)=1$'; then printf '\\nruntime-caps-%s\\n' present; else printf '\\nruntime-caps-%s\\n' absent; fi",
       );
       const outputLines = await waitForPaneLine(gateway, isolatedWorktree, paneId, 'runtime-caps-absent');
       assert.equal(outputLines.includes('runtime-caps-present'), false);
@@ -101,7 +102,7 @@ describe('TmuxGateway', () => {
       await gateway.execInPane(
         preexistingWorktree,
         paneId,
-        "if env | grep -Eq '^(CONNECTOR_GATEWAY_AUTOSTART|CAT_CAFE_PROVISION_GLOBAL_SIDECAR)=1$'; then echo runtime-caps-present; else echo runtime-caps-absent; fi",
+        "if env | grep -Eq '^(CONNECTOR_GATEWAY_AUTOSTART|CAT_CAFE_PROVISION_GLOBAL_SIDECAR)=1$'; then printf '\\nruntime-caps-%s\\n' present; else printf '\\nruntime-caps-%s\\n' absent; fi",
       );
       const outputLines = await waitForPaneLine(gateway, preexistingWorktree, paneId, 'runtime-caps-absent');
       assert.equal(outputLines.includes('runtime-caps-present'), false);

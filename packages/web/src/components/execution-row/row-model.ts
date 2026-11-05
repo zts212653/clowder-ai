@@ -10,7 +10,11 @@
  *  - unknown is never blank: every reason / state has words, including ones this code has never heard of;
  *  - force-reset belongs to the thread's abnormal execution, never a delivered Queue entry.
  */
-import type { ActiveExecutionNonCancelableReason, ActiveExecutionProjection } from '@cat-cafe/shared';
+import type {
+  ActiveExecutionNonCancelableReason,
+  ActiveExecutionProjection,
+  ActiveHoldWaitProjection,
+} from '@cat-cafe/shared';
 import { activeExecutionKey } from '@/stores/activeExecutionStore';
 import type { QueueEntry } from '@/stores/chat-types';
 import { type ExecutionRowWords, executionRowCopy } from './execution-row.shell-copy';
@@ -19,7 +23,16 @@ import type { QueueWaitInfo } from './queue-view';
 /** Why the row offers thread recovery; normal reset lives in the title menu. */
 export type ForceResetReason = 'silent_turn' | 'unverified_legacy';
 
-export type RowStatus = 'working' | 'stopping' | 'blocked' | 'silent' | 'unverified' | 'waiting';
+export type RowStatus =
+  | 'working'
+  | 'stopping'
+  | 'blocked'
+  | 'silent'
+  | 'confirming'
+  | 'unverified'
+  | 'waiting'
+  /** Nothing runs here; a cat holds the ball with a wake armed. */
+  | 'holding';
 
 /** What the single ■ slot shows. `none` = nothing to stop here (several runs: each has its own ■ in the panel). */
 export type StopSlot =
@@ -42,8 +55,12 @@ export interface ExecutionRowInput {
   silent: Readonly<Record<string, { since: number | null }>>;
   /** The canonical projection failed its last refresh for this thread. */
   hydrationStale: boolean;
+  /** An initial read is still inside its bounded confirmation window. */
+  hydrationLoading?: boolean;
   /** The legacy socket still reports a live turn while the canonical projection has none and is not ready. */
   hasUnverifiedLegacyExecution: boolean;
+  /** This thread's held balls: the cat exited and a wake is armed. Absent = none. */
+  waits?: readonly ActiveHoldWaitProjection[];
   queue: {
     /** Entries the user is shown (selectVisibleQueueEntries). */
     entries: readonly QueueEntry[];
@@ -84,6 +101,11 @@ export interface ExecutionRowModel {
   /** "状态暂不可核对" badge. */
   staleNote: boolean;
   waitInfo: QueueWaitInfo | null;
+  /** Held balls on this thread, earliest wake first. */
+  holdCount: number;
+  earliestWakeAt: number | null;
+  /** The one hold the row is about, when the row is `holding` with exactly one. */
+  hold: ActiveHoldWaitProjection | null;
 }
 
 const ORDER = (left: ActiveExecutionProjection, right: ActiveExecutionProjection) =>
@@ -100,8 +122,12 @@ interface Counts {
   running: number;
   silent: number;
   unverified: boolean;
+  confirming: boolean;
+  queued: number;
+  holds: number;
 }
 
+/** Running work, an unconfirmed run and the user's own queue all speak before a hold. */
 function statusFor(counts: Counts, stop: StopSlot): RowStatus {
   if (counts.running > 0) {
     if (stop.kind === 'pending') return 'stopping';
@@ -109,6 +135,8 @@ function statusFor(counts: Counts, stop: StopSlot): RowStatus {
     return stop.kind === 'blocked' ? 'blocked' : 'working';
   }
   if (counts.unverified) return 'unverified';
+  if (counts.confirming) return 'confirming';
+  if (counts.queued === 0 && counts.holds > 0) return 'holding';
   return 'waiting';
 }
 
@@ -130,10 +158,14 @@ export function deriveExecutionRow(input: ExecutionRowInput): ExecutionRowModel 
   const { queue } = input;
   const single = executions.length === 1 ? executions[0] : null;
   const visibleQueueCount = queue.entries.length;
+  const holds = [...(input.waits ?? [])].sort((left, right) => left.wakeAt - right.wakeAt);
   const counts: Counts = {
     running: executions.length,
     silent: executions.filter((execution) => input.silent[activeExecutionKey(execution)] !== undefined).length,
-    unverified: executions.length === 0 && input.hasUnverifiedLegacyExecution,
+    unverified: executions.length === 0 && input.hasUnverifiedLegacyExecution && !input.hydrationLoading,
+    confirming: executions.length === 0 && input.hasUnverifiedLegacyExecution && Boolean(input.hydrationLoading),
+    queued: visibleQueueCount,
+    holds: holds.length,
   };
   const stop = stopSlotFor(single, input.cancelPendingKeys);
   const status = statusFor(counts, stop);
@@ -141,7 +173,7 @@ export function deriveExecutionRow(input: ExecutionRowInput): ExecutionRowModel 
   const resume = queue.canRecoverOrphaned ? 'recover' : null;
 
   return {
-    visible: counts.running > 0 || counts.unverified || visibleQueueCount > 0,
+    visible: counts.running > 0 || counts.unverified || counts.confirming || visibleQueueCount > 0 || holds.length > 0,
     status,
     runningCount: counts.running,
     queuedCount: queue.entries.filter((entry) => entry.status === 'queued').length,
@@ -157,7 +189,23 @@ export function deriveExecutionRow(input: ExecutionRowInput): ExecutionRowModel 
     panelToggle: counts.running > 1 || visibleQueueCount > 0,
     staleNote: input.hydrationStale && counts.running > 0,
     waitInfo: queue.waitInfo,
+    holdCount: holds.length,
+    earliestWakeAt: holds[0]?.wakeAt ?? null,
+    hold: status === 'holding' && holds.length === 1 ? holds[0] : null,
   };
+}
+
+/** The wall-clock wake time the hold card already shows: 24-hour HH:MM, local time. */
+export function formatWakeTime(wakeAt: number): string {
+  const date = new Date(wakeAt);
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
+function holdingText(model: ExecutionRowModel, nameOf: (catId: string) => string, copy: ExecutionRowWords): string {
+  const time = model.earliestWakeAt === null ? '' : formatWakeTime(model.earliestWakeAt);
+  return model.hold
+    ? copy.status.holdingOne(nameOf(model.hold.catId), time)
+    : copy.status.holdingMany(model.holdCount, time);
 }
 
 /** m:ss, the clock the design shows. */
@@ -222,8 +270,12 @@ export function rowStatusText(
       return silentText(model, clock, tail, copy);
     case 'unverified':
       return copy.status.unverified;
+    case 'confirming':
+      return copy.status.confirming;
     case 'waiting':
       return copy.status.waiting(model.queuedCount > 0 ? model.queuedCount : model.visibleQueueCount);
+    case 'holding':
+      return holdingText(model, nameOf, copy);
   }
 }
 
@@ -241,7 +293,11 @@ export function rowCompactStatusText(model: ExecutionRowModel, copy: ExecutionRo
       return copy.compact.silent;
     case 'unverified':
       return copy.compact.unverified;
+    case 'confirming':
+      return copy.compact.confirming;
     case 'waiting':
       return copy.compact.waiting(model.queuedCount > 0 ? model.queuedCount : model.visibleQueueCount);
+    case 'holding':
+      return copy.compact.holding;
   }
 }

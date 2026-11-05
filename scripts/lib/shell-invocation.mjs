@@ -49,8 +49,9 @@ export function executedInvocations(
     lines.some((line) => /^(?:if|then|else|elif|for|while|until|case|function)\b/.test(line));
   for (const line of lines) {
     const pipeline = [];
+    const stages = splitPipelineStages(line);
     let stdin = input;
-    for (const stage of splitPipelineStages(line)) {
+    for (const stage of stages) {
       const parsed = parseStage(stage, depth, cwd, stdin, frame, bindings);
       if (!parsed.complete) complete = false;
       // Keep every stage: dropping one would hand its successor the wrong stdin.
@@ -62,7 +63,7 @@ export function executedInvocations(
       unresolvedEvidence.push(...(parsed.unresolvedEvidence ?? []));
       if (!parsed.invocation && !parsed.complete) unresolvedEvidence.push(stage);
       if (parsed.invocation || !parsed.complete) stdin = pipelineOutput(parsed.output, stdin, stage);
-      if (parsed.invocation?.name === 'set' && parsed.invocation.operands[0] === '--') {
+      if (stages.length === 1 && parsed.invocation?.name === 'set' && parsed.invocation.operands[0] === '--') {
         const values = parsed.invocation.operands.slice(1);
         const sources = operandSources(values, parsed.markers, bindings, frame);
         setParameters(frame, values, sources, uncertain);
@@ -72,7 +73,15 @@ export function executedInvocations(
     if (stdin) outputs.push(stdin);
   }
   const output = mergedPipelineOutput(outputs);
-  return { pipelines, complete, directInvocations, unresolvedEvidence, parameterScope: depth, output };
+  return {
+    pipelines,
+    complete,
+    directInvocations,
+    unresolvedEvidence,
+    parameterScope: depth,
+    parameters: frame,
+    output,
+  };
 }
 export function executionChainInvocations(raw, { cwd, bindings, stdin: input } = {}) {
   const combined = { pipelines: [], complete: true, unresolvedEvidence: [] };

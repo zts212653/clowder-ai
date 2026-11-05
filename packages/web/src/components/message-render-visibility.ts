@@ -2,7 +2,7 @@ import type { ChatMessage } from '@/stores/chat-types';
 import { computeCliDiagnosticsDedup } from '@/utils/cli-diagnostics-dedup';
 import { doesAssistantMessageRenderBubble } from './assistant-message-renderability';
 import { isKnownReason } from './CliDiagnosticsPanel';
-import { isHiddenChatRow } from './chat-row-surface';
+import { isAbsorbedManagedJobMessage, isHiddenChatRow } from './chat-row-surface';
 import { isLinkedCloudBindingRecoveryNotice } from './cloud-binding-recovery';
 
 /**
@@ -58,6 +58,7 @@ export function messageRendersNothing(
   }
 
   if (message.from?.kind === 'external' || message.from?.kind === 'plugin' || message.type === 'connector') {
+    if (isAbsorbedManagedJobMessage(message, timeline)) return true;
     return isConnectorSystemNotice(message) && isLinkedCloudBindingRecoveryNotice(message, timeline);
   }
 

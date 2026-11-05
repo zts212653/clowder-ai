@@ -1,9 +1,12 @@
 'use client';
 
 import type { MessageSearchResponse, MessageSearchResult } from '@cat-cafe/shared';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { AppTooltip } from '../AppTooltip';
 import { ShellGlyph } from '../shell/ShellIcons';
+import { useShellPresentation } from '../shell/shell-presentation';
 import { MessageSearchResults } from './MessageSearchResults';
+import type { MessageFindDestination, MessageFindState } from './message-find-state';
 import { useMessageSearch } from './useMessageSearch';
 
 export function MessageSearchPanel({
@@ -11,18 +14,27 @@ export function MessageSearchPanel({
   onClose,
   onNavigate,
   resolveSpeaker,
+  onOpenDestination,
+  initialState,
 }: {
   threadId: string;
   onClose: () => void;
   onNavigate: (result: MessageSearchResult, response: MessageSearchResponse) => void;
   resolveSpeaker?: (speaker: string) => string;
+  onOpenDestination?: (destination: MessageFindDestination, state: MessageFindState) => void;
+  initialState?: MessageFindState;
 }) {
-  const [query, setQuery] = useState('');
-  const [scope, setScope] = useState<'thread' | 'global'>('thread');
-  const [sort, setSort] = useState<'time' | 'relevance'>('time');
+  const journey6 = useShellPresentation() === 'v2';
+  const [query, setQuery] = useState(initialState?.query ?? '');
+  const [scope, setScope] = useState<'thread' | 'global'>(initialState?.scope ?? 'thread');
+  const [sort, setSort] = useState<'time' | 'relevance'>(initialState?.sort ?? 'time');
   const input = useRef<HTMLInputElement>(null);
+  const scroll = useRef<HTMLDivElement>(null);
   const composing = useRef(false);
-  const search = useMessageSearch(threadId);
+  const search = useMessageSearch(threadId, initialState);
+  useLayoutEffect(() => {
+    if (scroll.current && initialState) scroll.current.scrollTop = initialState.scrollTop;
+  }, [initialState]);
   useEffect(() => {
     input.current?.focus();
   }, []);
@@ -38,7 +50,7 @@ export function MessageSearchPanel({
     <div
       role="dialog"
       aria-label="查找消息"
-      className="flex max-h-[min(70vh,600px)] min-h-0 flex-col rounded-2xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3 shadow-[var(--console-shadow-soft)]"
+      className={`flex ${journey6 ? 'max-h-[min(80vh,760px)]' : 'max-h-[min(70vh,600px)]'} min-h-0 flex-col rounded-2xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-3 shadow-[var(--console-shadow-soft)]`}
       onKeyDown={(event) => {
         if (event.key === 'Escape' && !event.nativeEvent.isComposing && !composing.current) {
           event.stopPropagation();
@@ -97,9 +109,45 @@ export function MessageSearchPanel({
             {item === 'thread' ? '当前对话' : '全局'}
           </button>
         ))}
+        {journey6 && (
+          <>
+            <span aria-hidden="true" className="self-center text-cafe-muted">
+              ｜
+            </span>
+            {(['works', 'memory'] as const).map((destination) => (
+              <AppTooltip
+                key={destination}
+                label={
+                  destination === 'works' ? `到作品里按名称搜「${query.trim()}」` : `到记忆页里搜「${query.trim()}」`
+                }
+                detail="看完点「‹ 回到查找」回到这里"
+                side="bottom"
+              >
+                <button
+                  type="button"
+                  disabled={!query.trim() || !onOpenDestination}
+                  className="rounded-lg px-2 py-1 hover:bg-[var(--console-hover-bg)] disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-500)]"
+                  onClick={() =>
+                    onOpenDestination?.(destination, {
+                      query,
+                      scope,
+                      sort,
+                      scrollTop: scroll.current?.scrollTop ?? 0,
+                      status: search.status === 'loading' ? 'idle' : search.status,
+                      ...(search.response ? { response: search.response } : {}),
+                    })
+                  }
+                >
+                  {destination === 'works' ? '作品 ↗' : '记忆 ↗'}
+                </button>
+              </AppTooltip>
+            ))}
+          </>
+        )}
       </div>
-      <div className="min-h-0 overflow-auto">
+      <div ref={scroll} data-message-search-scroll className="min-h-0 overflow-auto">
         <MessageSearchResults
+          journey6={journey6}
           currentThreadId={threadId}
           status={search.status}
           response={search.response}

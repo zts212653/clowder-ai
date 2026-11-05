@@ -114,9 +114,9 @@ it('shows the frozen authority and majority rule while supporting option, abstai
       />,
     ),
   );
-  expect(container.textContent).toContain('有约束力的路线判断');
+  expect(container.textContent).toContain('有约束力的项目判断');
   expect(container.textContent).toContain('2 位冻结投票人 · 2 人参与且同一选项 2 票才通过');
-  expect(container.textContent).toContain('只生成 Decision，不自动改变路线');
+  expect(container.textContent).toContain('只生成 Decision，不自动改变项目');
   expect(container.textContent).not.toContain('结算为 Decision');
   await click('周四');
   expect(onCast).toHaveBeenCalledWith(vote, { kind: 'option', optionId: vote.options[0]?.optionId });
@@ -181,7 +181,7 @@ it('lets only the frozen authority settle and renders the resulting Decision wit
     ),
   );
   expect(container.textContent).toContain('Decision · 周四');
-  expect(container.textContent).toContain('路线未被自动修改');
+  expect(container.textContent).toContain('项目未被自动修改');
 });
 
 it('does not offer Decision settlement after the frozen Roadmap authority becomes invalid', async () => {

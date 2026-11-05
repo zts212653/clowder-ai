@@ -30,8 +30,6 @@ type StoreState = {
   clearCatStatuses: ReturnType<typeof vi.fn>;
   setCurrentThread: ReturnType<typeof vi.fn>;
   updateThreadTitle: ReturnType<typeof vi.fn>;
-  setCurrentGame: ReturnType<typeof vi.fn>;
-  currentGame: null;
   viewMode: 'single' | 'split';
   setViewMode: ReturnType<typeof vi.fn>;
   setCurrentProject: ReturnType<typeof vi.fn>;
@@ -72,8 +70,6 @@ const makeStoreState = (): StoreState => ({
   clearCatStatuses: vi.fn(),
   setCurrentThread: vi.fn(),
   updateThreadTitle: vi.fn(),
-  setCurrentGame: vi.fn(),
-  currentGame: null,
   viewMode: 'single',
   setViewMode: vi.fn(),
   setCurrentProject: vi.fn(),
@@ -116,33 +112,6 @@ vi.mock('@/stores/chatStore', () => {
     return selector ? selector(state) : state;
   };
   return { useChatStore: hook };
-});
-
-vi.mock('@/stores/gameStore', () => {
-  const gameState = {
-    gameView: null,
-    isGameActive: false,
-    isNight: false,
-    selectedTarget: null,
-    godScopeFilter: null,
-    myRole: null,
-    myRoleIcon: null,
-    myActionLabel: null,
-    myActionHint: null,
-    isGodView: false,
-    isDetective: false,
-    detectiveBoundName: null,
-    godSeats: [],
-    godNightSteps: [],
-    hasTargetedAction: false,
-    altActionName: null,
-    overlayMinimized: false,
-  };
-  const hook = (selector?: (s: typeof gameState) => unknown) => {
-    return selector ? selector(gameState) : gameState;
-  };
-  hook.getState = () => ({ restoreOverlay: vi.fn() });
-  return { useGameStore: hook };
 });
 
 vi.mock('@/utils/api-client', () => ({
@@ -247,7 +216,6 @@ vi.mock('../BootstrapOrchestrator', () => ({ BootstrapOrchestrator: () => null }
 vi.mock('../BootcampListModal', () => ({ BootcampListModal: () => null }));
 vi.mock('@/components/HubListModal', () => ({ HubListModal: () => null }));
 vi.mock('@/components/ProjectSetupCard', () => ({ ProjectSetupCard: () => null }));
-vi.mock('@/components/game/GameOverlayConnector', () => ({ GameOverlayConnector: () => null }));
 vi.mock('@/components/icons/PawIcon', () => ({ PawIcon: () => null }));
 vi.mock('@/components/icons/BootcampIcon', () => ({ BootcampIcon: () => null }));
 vi.mock('@/components/workspace/ResizeHandle', () => ({ ResizeHandle: () => null }));
@@ -293,6 +261,26 @@ describe('ChatContainer bottom chrome observer', () => {
     });
     container.remove();
     globalThis.ResizeObserver = originalResizeObserver;
+  });
+
+  it('retains the reading viewport and composer home across route thread switches', async () => {
+    await act(async () => root.render(renderChatContainer('thread-a')));
+    const history = container.querySelector('[data-chat-container]');
+    const composerHome = container.querySelector('[data-thread-composer-home]');
+    expect(history).not.toBeNull();
+    expect(composerHome).not.toBeNull();
+
+    await act(async () => root.render(renderChatContainer('thread-b')));
+    expect(container.querySelector('[data-thread-chat-surface]')?.getAttribute('data-thread-id')).toBe('thread-b');
+    expect(container.querySelector('[data-chat-container]')).toBe(history);
+    expect(container.querySelector('[data-thread-composer-home]')).toBe(composerHome);
+    expect(container.querySelector('[data-thread-composer-host]')?.getAttribute('data-thread-composer-host')).toBe(
+      'thread-b',
+    );
+
+    await act(async () => root.render(renderChatContainer('thread-a')));
+    expect(container.querySelector('[data-chat-container]')).toBe(history);
+    expect(container.querySelector('[data-thread-composer-home]')).toBe(composerHome);
   });
 
   it('re-observes the new bottom chrome after split view toggles back to single', async () => {

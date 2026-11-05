@@ -9,7 +9,7 @@ test('only addressable cat publications enter delivery slots, even when later hu
   f.messages.append({
     userId: 'owner',
     threadId: f.thread.id,
-    catId: 'codex-sol',
+    from: { kind: 'agent', catId: 'codex-sol' },
     content: '对话辅助',
     mentions: [],
     timestamp: 2000,
@@ -41,7 +41,7 @@ test('only addressable cat publications enter delivery slots, even when later hu
     f.messages.append({
       userId: 'owner',
       threadId: f.thread.id,
-      catId: null,
+      from: { kind: 'user', userId: 'owner' },
       content: '这份是我的参考',
       mentions: [],
       timestamp: 3000 + i,

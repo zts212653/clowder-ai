@@ -18,7 +18,7 @@ function fixture(afterOpen?: () => void) {
   const message = messages.append({
     threadId: thread.id,
     userId: 'owner',
-    catId: null,
+    from: { kind: 'user', userId: 'owner' },
     content: 'source',
     timestamp: 1,
     mentions: [],

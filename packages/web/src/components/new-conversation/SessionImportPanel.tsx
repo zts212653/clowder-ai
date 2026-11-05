@@ -1,4 +1,5 @@
 'use client';
+import { LOCAL_SESSION_IMPORT_TOOLS, localSessionImportTool } from '@cat-cafe/shared';
 import { useEffect, useRef, useState } from 'react';
 import { useCatData } from '@/hooks/useCatData';
 import { apiFetch } from '@/utils/api-client';
@@ -26,13 +27,7 @@ export function SessionImportPanel({
   const copy = useShellCopy(sessionImportCopy);
   const { cats } = useCatData();
   const identities = buildComposerRecipientIdentities(cats);
-  const nativeCats = cats.filter(
-    (c) =>
-      c.id !== 'gpt-pro' &&
-      c.provider !== 'openai-chatgpt-pro' &&
-      c.cli &&
-      ['openai', 'anthropic'].includes(c.clientId),
-  );
+  const nativeCats = cats.filter((cat) => localSessionImportTool(cat));
   const anchor = useRef<HTMLButtonElement>(null);
   const pending = admission.intent?.sessionImport;
   const [clientId, setClientId] = useState<string | null>(nativeCats[0]?.clientId ?? null);
@@ -163,8 +158,11 @@ export function SessionImportPanel({
                     changeSelection();
                   }}
                 >
-                  <option value="anthropic">Claude Code</option>
-                  <option value="openai">Codex</option>
+                  {LOCAL_SESSION_IMPORT_TOOLS.map((tool) => (
+                    <option key={tool.clientId} value={tool.clientId}>
+                      {tool.label}
+                    </option>
+                  ))}
                 </select>
               </label>
               <label className="block space-y-1.5 text-sm">
@@ -183,8 +181,7 @@ export function SessionImportPanel({
                 >
                   {compatibleCats.map((cat) => (
                     <option key={cat.id} value={cat.id}>
-                      {identities.get(cat.id)?.label ?? cat.displayName} ·{' '}
-                      {cat.clientId === 'openai' ? 'Codex' : 'Claude Code'}
+                      {identities.get(cat.id)?.label ?? cat.displayName} · {localSessionImportTool(cat)?.label}
                     </option>
                   ))}
                 </select>

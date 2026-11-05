@@ -1,0 +1,17 @@
+#!/usr/bin/env node
+import { delimiter, dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { prepareSecretSafeSend } from '../lib/secret-outbound-args.mjs';
+import { executeSecretSafeCommand } from '../lib/secret-command-execution.mjs';
+
+const ownDir = dirname(fileURLToPath(import.meta.url));
+let prepared;
+try {
+  prepared = await prepareSecretSafeSend('curl', process.argv.slice(2));
+} catch {
+  process.stderr.write('secret_send_blocked: content was unsafe or could not be inspected; use explicit request flags and files.\n');
+  process.exit(1);
+}
+process.on('exit', () => prepared.dispose());
+const PATH = (process.env.PATH ?? '').split(delimiter).filter((part) => part && resolve(part) !== ownDir).join(delimiter);
+process.exit(await executeSecretSafeCommand('curl', prepared.args, { ...process.env, PATH }));

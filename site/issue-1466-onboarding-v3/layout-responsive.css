@@ -1,0 +1,171 @@
+@media (max-width: 1050px) {
+  .app-shell {
+    grid-template-columns: 48px 180px minmax(0, 1fr);
+  }
+  .page {
+    padding: 28px 24px;
+  }
+  .tabs {
+    padding-left: 20px;
+    gap: 4px;
+  }
+  .sidebar {
+    padding: 22px 8px;
+  }
+  .editor-layout {
+    grid-template-columns: 135px minmax(0, 1fr);
+    gap: 16px;
+  }
+  .field-panel {
+    padding: 20px;
+  }
+  .field {
+    grid-template-columns: 85px minmax(0, 1fr);
+    gap: 12px;
+  }
+  .page-heading {
+    gap: 14px;
+  }
+}
+@media (max-width: 760px) {
+  h1 {
+    font-size: 23px;
+  }
+  .preview-top {
+    font-size: 10px;
+    padding: 0 10px;
+  }
+  .preview-top .preview-version {
+    display: none;
+  }
+  .app-shell {
+    grid-template-columns: 44px minmax(0, 1fr);
+  }
+  .rail {
+    padding: 10px 3px;
+    gap: 8px;
+  }
+  .rail .logo {
+    width: 29px;
+  }
+  .sidebar {
+    display: none;
+  }
+  .page {
+    padding: 22px 16px;
+  }
+  .tabs {
+    padding: 14px 12px 4px;
+    gap: 2px;
+  }
+  .tabs .muted {
+    display: none;
+  }
+  .tab {
+    font-size: 12px;
+    padding: 6px 9px;
+  }
+  .progress {
+    gap: 8px;
+    font-size: 11px;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+  }
+  .progress b {
+    width: 12px;
+  }
+  .progress i {
+    width: 17px;
+    height: 17px;
+  }
+  .page-heading {
+    flex-wrap: wrap;
+    margin-bottom: 18px;
+  }
+  .page-heading p {
+    font-size: 12px;
+  }
+  .quiet-note {
+    align-items: flex-start;
+    line-height: 1.7;
+  }
+  .sticky-footer {
+    bottom: 8px;
+    padding: 14px;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .sticky-footer > .primary {
+    width: 100%;
+  }
+  .sticky-footer p {
+    line-height: 1.65;
+  }
+  .editor-layout {
+    display: block;
+  }
+  .editor-layout nav {
+    flex-direction: row;
+    overflow-x: auto;
+    margin-bottom: 15px;
+  }
+  .section-link {
+    white-space: nowrap;
+    font-size: 12px;
+    padding: 8px 10px;
+  }
+  .field-panel {
+    padding: 18px 14px;
+  }
+  .field {
+    grid-template-columns: 1fr;
+    gap: 7px;
+  }
+  .two-fields {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+  .two-fields .field {
+    margin: 12px 0;
+  }
+  .default-member {
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 16px;
+  }
+  .member-row {
+    padding: 15px;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .member-row .large {
+    width: 40px;
+    height: 40px;
+    flex-basis: 40px;
+  }
+  .member-row h3 {
+    font-size: 14px;
+    overflow-wrap: anywhere;
+  }
+  .member-enabled {
+    margin-left: 52px;
+  }
+  .settings-footnote {
+    flex-wrap: wrap;
+  }
+  .mobile-break {
+    display: block;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *:before,
+  *:after {
+    /* biome-ignore lint/complexity/noImportantStyles: Respect reduced motion across all prototype animations. */
+    animation: none !important;
+    /* biome-ignore lint/complexity/noImportantStyles: Respect reduced motion across all prototype transitions. */
+    transition: none !important;
+    /* biome-ignore lint/complexity/noImportantStyles: Prevent smooth scrolling when reduced motion is requested. */
+    scroll-behavior: auto !important;
+  }
+}

@@ -14,6 +14,7 @@ export function lineageLabels(
   view: ExplorationReading['viewport'],
   size: { width: number; height: number },
   selected?: string,
+  beside = false,
 ) {
   const result = new Map<string, { side: 'start' | 'end'; above: boolean }>();
   const occupied: Box[] = [];
@@ -26,8 +27,13 @@ export function lineageLabels(
       [...item.node.title].reduce((sum, ch) => sum + (/[^\x00-\x7f]/.test(ch) ? 12 : 7), 8),
     );
     const side = x + width > size.width ? 'end' : 'start';
-    const above = y + 32 > size.height;
-    const box = { left: side === 'end' ? x + 14 - width : x - 14, top: above ? y - 30 : y + 14, width, height: 18 };
+    const above = !beside && y + 32 > size.height;
+    const box = {
+      left: side === 'end' ? (beside ? x - 18 - width : x + 14 - width) : beside ? x + 18 : x - 14,
+      top: beside ? y - 9 : above ? y - 30 : y + 14,
+      width,
+      height: 18,
+    };
     if (
       box.left < 0 ||
       box.top < 0 ||

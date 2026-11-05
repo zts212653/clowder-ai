@@ -1,5 +1,5 @@
 import type { RuntimeInteractionRequest, RuntimeInteractionResponse } from '@cat-cafe/shared';
-import { useId, useMemo, useState } from 'react';
+import { type ReactNode, useId, useMemo, useState } from 'react';
 import { CLASSIC_RUNTIME_INTERACTION_COPY, type RuntimeInteractionCopy } from './RuntimeInteractionCopy';
 
 type QuestionRequest = Extract<RuntimeInteractionRequest, { kind: 'question' }>;
@@ -11,26 +11,47 @@ export function RuntimeInteractionQuestionForm({
   onSubmit,
   onReject,
   copy = CLASSIC_RUNTIME_INTERACTION_COPY.form,
+  presentation,
+  secondaryActions,
 }: {
   request: QuestionRequest;
   copy?: RuntimeInteractionCopy['form'];
+  presentation?: 'mailbox';
+  secondaryActions?: ReactNode;
   disabled: boolean;
   onSubmit: (response: RuntimeInteractionResponse) => void;
   onReject: () => void;
 }) {
   const [values, setValues] = useState<Record<string, string>>({});
+  const [multiValues, setMultiValues] = useState<Record<string, string[]>>({});
   const [otherValues, setOtherValues] = useState<Record<string, string>>({});
   const answers = useMemo(
     () =>
       Object.fromEntries(
-        request.questions.map((question) => [
-          question.id,
-          otherValues[question.id]?.trim() || values[question.id]?.trim() || '',
-        ]),
+        request.questions.map((question) => {
+          const typed = values[question.id]?.trim() ?? '';
+          // The secondary "other" input only exists for option questions; a
+          // question without options answers through the main text input.
+          const other = question.options?.length ? (otherValues[question.id]?.trim() ?? '') : '';
+          if (question.multiSelect) {
+            // F306 Phase C (iCode parity): multi-select questions submit every
+            // selected option; free text appends as an additional value. With
+            // no options the main input IS the free-text path.
+            const selected = question.options?.length ? (multiValues[question.id] ?? []) : [];
+            const freeText = question.options?.length ? other : typed;
+            return [question.id, freeText ? [...selected, freeText] : selected] as const;
+          }
+          const single = other || typed;
+          return [question.id, single ? [single] : []] as const;
+        }),
       ),
-    [otherValues, request.questions, values],
+    [multiValues, otherValues, request.questions, values],
   );
-  const complete = Object.values(answers).every((answer) => answer.length > 0);
+  // iCode parity: a question marked allowUnanswered may stay empty; everything
+  // else keeps the original "all questions answered" gate.
+  const complete = request.questions.every(
+    (question) => (answers[question.id]?.length ?? 0) > 0 || question.allowUnanswered === true,
+  );
 
   return (
     <form
@@ -38,10 +59,7 @@ export function RuntimeInteractionQuestionForm({
       onSubmit={(event) => {
         event.preventDefault();
         if (!complete || disabled) return;
-        onSubmit({
-          kind: 'answers',
-          answers: Object.fromEntries(Object.entries(answers).map(([id, answer]) => [id, [answer]])),
-        });
+        onSubmit({ kind: 'answers', answers });
       }}
     >
       {request.questions.map((question) => (
@@ -50,19 +68,37 @@ export function RuntimeInteractionQuestionForm({
           question={question}
           copy={copy}
           value={values[question.id] ?? ''}
+          multiValue={multiValues[question.id] ?? []}
           otherValue={otherValues[question.id] ?? ''}
           disabled={disabled}
           onValueChange={(value) => {
             setValues((current) => ({ ...current, [question.id]: value }));
             if (value) setOtherValues((current) => ({ ...current, [question.id]: '' }));
           }}
+          onToggleMulti={(label) => {
+            setMultiValues((current) => {
+              const selected = current[question.id] ?? [];
+              return {
+                ...current,
+                [question.id]: selected.includes(label)
+                  ? selected.filter((entry) => entry !== label)
+                  : [...selected, label],
+              };
+            });
+          }}
           onOtherValueChange={(value) => {
             setOtherValues((current) => ({ ...current, [question.id]: value }));
-            if (value) setValues((current) => ({ ...current, [question.id]: '' }));
+            // Single-choice semantics stay mutually exclusive; multi-select
+            // free text appends instead of clearing the checkboxes.
+            if (value && !question.multiSelect) setValues((current) => ({ ...current, [question.id]: '' }));
           }}
         />
       ))}
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+      <div
+        className={
+          presentation === 'mailbox' ? 'flex flex-wrap items-center gap-2' : 'grid grid-cols-1 gap-2 sm:grid-cols-2'
+        }
+      >
         <button
           type="button"
           disabled={disabled}
@@ -75,9 +111,15 @@ export function RuntimeInteractionQuestionForm({
           type="submit"
           disabled={!complete || disabled}
           className="min-h-10 rounded-xl bg-[var(--semantic-success)] px-3 py-2 text-sm font-medium text-[var(--cafe-accent-foreground)] disabled:cursor-not-allowed disabled:opacity-50"
+          style={
+            presentation === 'mailbox'
+              ? { background: 'var(--shell-primary)', color: 'var(--shell-primary-on)' }
+              : undefined
+          }
         >
           {copy.submit}
         </button>
+        {secondaryActions}
       </div>
     </form>
   );
@@ -87,17 +129,21 @@ function QuestionField({
   question,
   copy,
   value,
+  multiValue,
   otherValue,
   disabled,
   onValueChange,
+  onToggleMulti,
   onOtherValueChange,
 }: {
   question: Question;
   copy: RuntimeInteractionCopy['form'];
   value: string;
+  multiValue: readonly string[];
   otherValue: string;
   disabled: boolean;
   onValueChange: (value: string) => void;
+  onToggleMulti: (label: string) => void;
   onOtherValueChange: (value: string) => void;
 }) {
   const instanceId = useId();
@@ -111,21 +157,44 @@ function QuestionField({
         {question.question}
       </label>
       {question.options ? (
-        <select
-          id={inputId}
-          name={question.id}
-          value={value}
-          onChange={(event) => onValueChange(event.target.value)}
-          className="min-h-10 w-full rounded-xl border border-cafe bg-cafe-surface px-3 text-sm"
-        >
-          <option value="">{copy.choose}</option>
-          {question.options.map((option) => (
-            <option key={option.label} value={option.label}>
-              {option.label}
-              {option.description ? ` — ${option.description}` : ''}
-            </option>
-          ))}
-        </select>
+        question.multiSelect ? (
+          <div className="space-y-1.5">
+            {question.options.map((option, index) => {
+              const optionId = `${inputId}-option-${index}`;
+              return (
+                <label key={option.label} htmlFor={optionId} className="flex items-start gap-2 text-sm">
+                  <input
+                    id={optionId}
+                    type="checkbox"
+                    checked={multiValue.includes(option.label)}
+                    onChange={() => onToggleMulti(option.label)}
+                    className="mt-1"
+                  />
+                  <span>
+                    {option.label}
+                    {option.description ? <span className="text-cafe-muted"> — {option.description}</span> : null}
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        ) : (
+          <select
+            id={inputId}
+            name={question.id}
+            value={value}
+            onChange={(event) => onValueChange(event.target.value)}
+            className="min-h-10 w-full rounded-xl border border-cafe bg-cafe-surface px-3 text-sm"
+          >
+            <option value="">{copy.choose}</option>
+            {question.options.map((option) => (
+              <option key={option.label} value={option.label}>
+                {option.label}
+                {option.description ? ` — ${option.description}` : ''}
+              </option>
+            ))}
+          </select>
+        )
       ) : (
         <input
           id={inputId}
@@ -137,7 +206,7 @@ function QuestionField({
           className="min-h-10 w-full rounded-xl border border-cafe bg-cafe-surface px-3 text-sm"
         />
       )}
-      {question.isOther ? (
+      {question.isOther && question.options ? (
         <>
           <label htmlFor={otherInputId} className="sr-only">
             {copy.otherLabel(question.question)}

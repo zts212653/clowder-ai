@@ -11,9 +11,12 @@ import {
 import { ApprovalItemCard } from '@/components/ApprovalItemCard';
 import { useApprovalHubStore } from '@/stores/approvalHubStore';
 import { useShellCopy } from '../shell-copy';
+import { useShellLanguage } from '../shell-language';
+import { ApprovalDecisionReceipt } from './ApprovalDecisionReceipt';
 import { ApprovalResultLink } from './ApprovalResultLink';
 import { type HostedApprovalMatch, matchHostedApproval } from './approval-match';
 import { describeReconcile } from './approval-reconcile';
+import { approvalReconcileCopy } from './approval-reconcile.shell-copy';
 import { type ApprovalSessions, sessionKey } from './approval-sessions';
 import { mailboxEntryCopy } from './mailbox-entry.shell-copy';
 import type { OriginalPlace } from './original-place';
@@ -21,9 +24,6 @@ import { PlaceAction } from './PlaceAction';
 import { ThreadProposalDecision } from './ThreadProposalDecision';
 
 const MUTED = { color: 'var(--shell-muted)' } as const;
-
-/** Editing retention belongs to a later slice; the reporter is one stable function so the original card keeps its identity. */
-const noteEditing = () => undefined;
 
 /**
  * F322 S3-2b-1c: the original approval card, hosted in the 待办 panel.
@@ -38,8 +38,8 @@ const noteEditing = () => undefined;
  *  - The store removes an item optimistically on a 2xx. That is not a result and must not make the card vanish while the
  *    answer is being confirmed, so the last matched copy stays on screen until the result is in.
  */
-/** The store's copy is what the card acts on. Opening the row reads it afresh (a read; it changes nothing), once per approval. */
-function useStoreCopies(key: string): {
+/** The mailbox's shared pending read supplies the original writer; expanding a row does not refetch its entire table. */
+function useStoreCopies(): {
   storeItems: readonly ApprovalHubItem[];
   storeChecked: boolean;
   storeWaiting: boolean;
@@ -47,22 +47,7 @@ function useStoreCopies(key: string): {
   const storeItems = useApprovalHubStore((state) => state.items);
   const unavailable = useApprovalHubStore((state) => state.isLoading || !state.pendingReadAvailable);
   const loading = useApprovalHubStore((state) => state.isLoading);
-  const [storeChecked, setStoreChecked] = useState(false);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: one refresh per opened approval
-  useEffect(() => {
-    let live = true;
-    setStoreChecked(false);
-    void useApprovalHubStore
-      .getState()
-      .fetchPending()
-      .finally(() => {
-        if (live) setStoreChecked(true);
-      });
-    return () => {
-      live = false;
-    };
-  }, [key]);
-  return { storeItems, storeChecked: storeChecked && !unavailable, storeWaiting: !storeChecked || loading };
+  return { storeItems, storeChecked: !unavailable, storeWaiting: loading };
 }
 
 /** What stands in the card's place when the original card may not be shown: still checking, or checked and not the same decision. */
@@ -100,6 +85,7 @@ function SessionStatus({
   canReread: boolean;
   onReread: () => void;
 }) {
+  const t = useShellCopy(approvalReconcileCopy);
   return (
     <>
       {line ? (
@@ -120,7 +106,7 @@ function SessionStatus({
             onClick={onReread}
             className="shell-nav-row shell-focusable rounded-lg px-2 py-1 text-xs"
           >
-            重新读取
+            {t.reread}
           </button>
         </div>
       ) : null}
@@ -148,25 +134,41 @@ function Hosted({
   secondaryAction?: ReactNode;
 }) {
   const t = useShellCopy(mailboxEntryCopy);
+  const [editors, setEditors] = useState<ReadonlySet<string>>(() => new Set());
+  const reportEditing = useCallback((source: string, editing: boolean) => {
+    setEditors((current) => {
+      if (current.has(source) === editing) return current;
+      const next = new Set(current);
+      if (editing) next.add(source);
+      else next.delete(source);
+      return next;
+    });
+  }, []);
   const key = sessionKey(ownerUserId, { sourceFeatureId: approval.sourceFeatureId, proposalId: approval.proposalId });
 
   useEffect(() => {
-    sessions.open({ ownerUserId, decisionRef: item.decisionRef, approval });
-  }, [sessions, ownerUserId, item.decisionRef, approval]);
+    sessions.open({
+      ownerUserId,
+      decisionRef: item.decisionRef,
+      approval,
+      ...(item.originalApprovalCard?.block.kind === 'card' ? { originalBlock: item.originalApprovalCard.block } : {}),
+    });
+  }, [sessions, ownerUserId, item.decisionRef, approval, item.originalApprovalCard?.block]);
   useSyncExternalStore(sessions.subscribe, sessions.getVersion, sessions.getVersion);
   const session = sessions.get(key);
-  const { storeItems, storeChecked, storeWaiting } = useStoreCopies(key);
+  const { storeItems, storeChecked, storeWaiting } = useStoreCopies();
 
   const match = matchHostedApproval({ read: approval, readOwnerUserId: ownerUserId, storeItems, now: Date.now() });
   const state = session?.model.state ?? { kind: 'idle' as const };
-  const reconcile = describeReconcile(state);
+  const language = useShellLanguage();
+  const reconcile = describeReconcile(state, { language, ownerUserId, sourceFeatureId: approval.sourceFeatureId });
 
   const lastMatched = useRef<ApprovalHubItem | null>(null);
   if (match.kind === 'matched') lastMatched.current = match.item;
   const shown =
     match.kind === 'matched'
       ? match.item
-      : state.kind !== 'idle'
+      : state.kind !== 'idle' || editors.size > 0
         ? (lastMatched.current ?? (session ? { ...session.approval, ownerUserId } : null))
         : null;
   const showCard = shown !== null && reconcile.actions !== 'gone';
@@ -180,10 +182,13 @@ function Hosted({
   const reportRequest = useCallback((event: ApprovalRequestEvent) => sessions.hostReport(key, event), [sessions, key]);
   const originalPlaceAction = useMemo(
     () => (
-      <span className="flex flex-wrap items-center justify-end gap-2">
+      <div
+        className="ml-auto flex flex-wrap items-center justify-end gap-2"
+        data-testid="mailbox-row-secondary-actions"
+      >
         {secondaryAction}
         <PlaceAction quiet place={place} onOpen={onOpen} />
-      </span>
+      </div>
     ),
     [place, onOpen, secondaryAction],
   );
@@ -194,12 +199,31 @@ function Hosted({
       originalPlaceAction,
       writesLocked,
       authorizeWrite,
-      reportEditing: noteEditing,
+      reportEditing,
       reportRequest,
     }),
-    [originalPlaceAction, writesLocked, authorizeWrite, reportRequest, t],
+    [originalPlaceAction, writesLocked, authorizeWrite, reportEditing, reportRequest, t],
   );
 
+  if (state.kind === 'decided') {
+    return (
+      <div data-testid="mailbox-hosted-approval" data-state={state.kind} data-session-key={key}>
+        <ApprovalDecisionReceipt
+          session={session ?? { approval, ownerUserId }}
+          terminal={state.terminal}
+          line={reconcile.line ?? ''}
+        >
+          <SessionStatus
+            line={null}
+            notice={session?.notice ?? null}
+            canReread={reconcile.canReread}
+            onReread={() => sessions.reread(key)}
+          />
+          {originalPlaceAction}
+        </ApprovalDecisionReceipt>
+      </div>
+    );
+  }
   return (
     <div
       className="flex flex-col gap-2"
@@ -235,7 +259,7 @@ function Hosted({
         onReread={() => sessions.reread(key)}
       />
       <ApprovalResultLink state={state} />
-      {showCard && shown?.decisionMode !== 'claim-select' && shown?.sourceFeatureId !== 'F292'
+      {showCard && (shown?.sourceFeatureId === 'F276' || shown?.decisionMode !== 'claim-select')
         ? null
         : originalPlaceAction}
     </div>
@@ -264,6 +288,7 @@ export function HostedApprovalCard({
   if (!approval) return null;
   return (
     <Hosted
+      key={sessionKey(ownerUserId, approval)}
       item={item}
       approval={approval}
       ownerUserId={ownerUserId}

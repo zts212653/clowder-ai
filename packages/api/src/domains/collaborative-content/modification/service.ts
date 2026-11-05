@@ -120,14 +120,16 @@ export class ContentModificationService {
   async takeOver(raw: unknown, principal: MediaReviewPrincipal): Promise<ModificationRequestView> {
     if (!isCatPrincipal(principal)) throw new ContentModificationJournalError('not_found');
     const input = contentModificationTakeoverSchema.parse(raw);
-    const existing = this.deps.store.requests.get(
-      modificationMessageRequestId(principal.userId, input.sourceMessageId),
-      principal.userId,
-    );
+    const requestId = modificationMessageRequestId(principal.userId, input.sourceMessageId, input.attachmentId);
+    const operation = this.deps.store.requests.forTakeoverOperation(principal.userId, input.operationId);
+    if (operation && operation.requestId !== requestId) throw new ContentModificationJournalError('operation_reused');
+    const existing = this.deps.store.requests.get(requestId, principal.userId);
     const resolved = await this.deps.resolveTakeover(input, principal, existing ?? undefined);
     const record = this.deps.store.requests.reserveFromMessage(principal.userId, resolved.payload, {
       messageId: input.sourceMessageId,
       messageRevision: resolved.sourceMessageRevision,
+      ...(input.attachmentId ? { attachmentId: input.attachmentId } : {}),
+      operationId: input.operationId,
       visibility: resolved.sourceVisibility,
     });
     if (record.payload.source.kind === 'video-project' && record.payload.targetCatId !== principal.actor.actorId)

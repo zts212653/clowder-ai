@@ -70,7 +70,7 @@ test('canonical multiline or long names remain usable in the bounded public card
   const publication = f.messages.append({
     userId: 'owner',
     threadId: f.thread.id,
-    catId: 'codex-sol',
+    from: { kind: 'agent', catId: 'codex-sol' },
     content: '交付长标题',
     mentions: [],
     timestamp: Date.now(),

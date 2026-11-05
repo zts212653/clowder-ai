@@ -196,7 +196,14 @@ describe('F264 author message disposition selector', () => {
 
   it('uses one normal Send button during active work and lets Queue apply the selected strategy', async () => {
     const onSend = vi.fn(async () => true);
-    useChatStore.setState({ targetCats: ['opus', 'kimi', 'sol'] });
+    useChatStore.setState({
+      targetCats: ['astra'],
+      activeInvocations: {
+        opus: { catId: 'opus', mode: 'execute' },
+        sol: { catId: 'sol', mode: 'execute' },
+        kimi: { catId: 'kimi', mode: 'execute' },
+      },
+    });
     await renderThreadInput({ threadId: 'thread-active', onSend, hasActiveInvocation: true });
     expect(document.querySelector('textarea')?.placeholder).toBe(
       '想调整方向？可直接给布偶猫/缅因猫（sol）发消息，引导回复。',
@@ -217,8 +224,54 @@ describe('F264 author message disposition selector', () => {
       await Promise.resolve();
     });
     expect(onSend).toHaveBeenCalledWith('继续补充约束', undefined, undefined, undefined);
-    act(() => useChatStore.setState({ targetCats: ['kimi', 'unknown'] }));
+    act(() =>
+      useChatStore.setState({
+        activeInvocations: { kimi: { catId: 'kimi', mode: 'execute' }, unknown: { catId: 'unknown', mode: 'execute' } },
+      }),
+    );
     expect(document.querySelector('textarea')?.placeholder).toBe('输入消息... (@ 召唤猫猫 · /thread 引用对话)');
+  });
+
+  it.each([
+    'classic',
+    'v2',
+  ] as const)('uses canonical active members ahead of targets and custom copy in %s', async (presentation) => {
+    useChatStore.setState({
+      targetCats: ['opus', 'sol'],
+      activeInvocations: { stale: { catId: 'opus', mode: 'execute' } },
+    });
+    useActiveExecutionStore.setState({
+      executionsByKey: {
+        astra: {
+          kind: 'live_invocation',
+          executionId: 'active-astra',
+          threadId: 'thread-canonical',
+          threadTitle: null,
+          catId: 'astra',
+          startedAt: 1,
+          cancelability: { state: 'not_cancelable', reason: 'control_plane_unavailable' },
+        },
+      },
+    });
+    await renderThreadInput({
+      threadId: 'thread-canonical',
+      onSend: vi.fn(),
+      hasActiveInvocation: true,
+      presentation,
+      placeholder: '自定义空闲提示',
+    });
+    expect(document.querySelector('textarea')?.placeholder).toBe(
+      '想调整方向？可直接给缅因猫（astra）发消息，引导回复。',
+    );
+    act(() => useChatStore.setState({ targetCats: ['kimi'] }));
+    expect(document.querySelector('textarea')?.placeholder).toBe(
+      '想调整方向？可直接给缅因猫（astra）发消息，引导回复。',
+    );
+    act(() => {
+      useActiveExecutionStore.getState().reset();
+      useChatStore.setState({ activeInvocations: {}, hasActiveInvocation: false });
+    });
+    expect(document.querySelector('textarea')?.placeholder).toBe('自定义空闲提示');
   });
 
   it('can persist the choice for this thread', async () => {
@@ -254,6 +307,32 @@ describe('F264 author message disposition selector', () => {
     expect(container.textContent).not.toContain('恢复继承');
     expect(container.textContent).not.toContain('消息入队后按目标的实时状态执行');
     expect(document.querySelector('[data-testid="message-disposition-onboarding"]')).toBeNull();
+  });
+
+  it('saves the global default from the same selector', async () => {
+    await renderThreadInput({ threadId: 'thread-global', onSend: vi.fn(), hasActiveInvocation: false });
+    await openDisposition();
+    await act(async () => {
+      document.querySelector<HTMLButtonElement>('[data-disposition-scope="global"]')?.click();
+    });
+    await act(async () => {
+      document.querySelector<HTMLButtonElement>('[data-disposition-option="continue_current"]')?.click();
+      await Promise.resolve();
+    });
+    const put = mockApiFetch.mock.calls.find((call) => call[1]?.method === 'PUT');
+    expect(JSON.parse(String(put?.[1]?.body))).toEqual({ scope: 'global', disposition: 'continue_current' });
+  });
+
+  it('keeps the selector open and the saved value intact when persistence fails', async () => {
+    await renderThreadInput({ threadId: 'thread-failure', onSend: vi.fn(), hasActiveInvocation: false });
+    await openDisposition();
+    mockApiFetch.mockRejectedValueOnce(new Error('offline'));
+    await act(async () => {
+      document.querySelector<HTMLButtonElement>('[data-disposition-option="continue_current"]')?.click();
+      await Promise.resolve();
+    });
+    expect(document.querySelector('[role="alert"]')?.textContent).toBe('offline');
+    expect(document.querySelector('[data-disposition-option="next_work"]')?.getAttribute('aria-pressed')).toBe('true');
   });
 
   it('keeps strategy independent of the current carrier capability', async () => {

@@ -67,6 +67,37 @@ describe('POST → GET /api/messages roundtrip', () => {
     assert.equal(body.hasMore, false);
   });
 
+  it('projects the receipt-derived F311 source carrier into Chat history', async () => {
+    const source = {
+      schemaVersion: 1,
+      programId: 'evolution-program:ba0f4524e49cc879279164d5b272cf8c',
+      assetVersionRef: {
+        ownerFeatureId: 'F100',
+        ownerStateRef: 'skill:cat-cafe-skills/request-review/SKILL.md',
+        version: 'a'.repeat(64),
+        assetKind: 'skill',
+        assetId: 'cat-cafe-skills/request-review/SKILL.md',
+      },
+      receiptRef: { ownerFeatureId: 'F100', ownerStateRef: 'request-review-use:receipt-1' },
+      use: 'applied',
+      recordedAt: '2026-10-14T17:00:00.000Z',
+    };
+    messageStore.append({
+      userId: 'default-user',
+      from: { kind: 'agent', catId: 'codex-sol' },
+      content: 'review done',
+      mentions: [],
+      timestamp: 2_000,
+      extra: { evolutionUseSourceV1: source },
+    });
+
+    const res = await app.inject({ method: 'GET', url: '/api/messages' });
+    const body = JSON.parse(res.body);
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(body.messages[0].extra.evolutionUseSourceV1, source);
+  });
+
   it('normalizes lone surrogates before persisting message JSON', () => {
     const loneHighSurrogate = String.fromCharCode(0xd800);
     const loneLowSurrogate = String.fromCharCode(0xdc00);

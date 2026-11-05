@@ -12,7 +12,7 @@ let container: HTMLDivElement;
 let root: ReturnType<typeof createRoot>;
 const payload = {
   type: 'routing_preflight',
-  retryInvocationId: 'parent/1',
+  sourceMessageId: 'source/1',
   target: { targetCatId: 'codex-astra', disposition: 'rejected' },
 };
 beforeEach(() => {
@@ -34,20 +34,20 @@ it('refreshes an early running receipt until the retryable failure is durable', 
   vi.useFakeTimers();
   apiFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ status: 'running' }) });
   apiFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ status: 'failed' }) });
-  await act(async () => root.render(<RoutingPreflightActions payload={payload} />));
+  await act(async () => root.render(<RoutingPreflightActions payload={payload} threadId="thread/1" />));
   expect(container.textContent).not.toContain('重试这条');
   await act(async () => vi.advanceTimersByTimeAsync(2_000));
   expect(container.textContent).toContain('重试这条');
   expect(apiFetch.mock.calls.every((call) => call[1]?.method !== 'POST')).toBe(true);
 });
 
-it('reads current terminal truth and retries the exact original invocation only after a click', async () => {
+it('reads current terminal truth and retries the exact original pending target only after a click', async () => {
   apiFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ status: 'failed' }) });
   await act(async () => {
-    root.render(<RoutingPreflightActions payload={payload} />);
+    root.render(<RoutingPreflightActions payload={payload} threadId="thread/1" />);
   });
   expect(apiFetch).toHaveBeenCalledTimes(1);
-  expect(apiFetch.mock.calls[0][0]).toBe('/api/invocations/parent%2F1');
+  expect(apiFetch.mock.calls[0][0]).toBe('/api/threads/thread%2F1/messages/source%2F1/routing-targets/codex-astra');
   apiFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ status: 'retrying' }) });
   await act(async () => {
     (
@@ -56,7 +56,10 @@ it('reads current terminal truth and retries the exact original invocation only 
       ) as HTMLButtonElement
     ).click();
   });
-  expect(apiFetch.mock.calls[1]).toEqual(['/api/invocations/parent%2F1/retry', { method: 'POST' }]);
+  expect(apiFetch.mock.calls[1]).toEqual([
+    '/api/threads/thread%2F1/messages/source%2F1/routing-targets/codex-astra/retry',
+    { method: 'POST' },
+  ]);
   expect(container.textContent).toContain('已提交重试');
   expect(openTeamSubject).not.toHaveBeenCalled();
 });
@@ -64,7 +67,7 @@ it('reads current terminal truth and retries the exact original invocation only 
 it('does not replay completed history and opens the existing Team list only on explicit navigation', async () => {
   apiFetch.mockResolvedValue({ ok: true, json: async () => ({ status: 'succeeded' }) });
   await act(async () => {
-    root.render(<RoutingPreflightActions payload={payload} />);
+    root.render(<RoutingPreflightActions payload={payload} threadId="thread/1" />);
   });
   expect(container.textContent).toContain('这条已执行');
   expect(container.textContent).not.toContain('重试这条');
@@ -78,7 +81,7 @@ it('does not replay completed history and opens the existing Team list only on e
 it('shows an actionable error without declaring a rejected retry successful', async () => {
   apiFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ status: 'failed' }) });
   await act(async () => {
-    root.render(<RoutingPreflightActions payload={payload} />);
+    root.render(<RoutingPreflightActions payload={payload} threadId="thread/1" />);
   });
   apiFetch.mockResolvedValueOnce({ ok: false, json: async () => ({ error: '已有一次重试正在执行' }) });
   await act(async () => {

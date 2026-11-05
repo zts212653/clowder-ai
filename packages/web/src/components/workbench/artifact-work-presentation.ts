@@ -1,3 +1,4 @@
+import { contentFileExtension, projectFileContent } from '@cat-cafe/shared';
 import { resolveFileTarget } from './real-surface-adapters';
 import type { WorkspaceSurfaceDescriptor } from './workbench-contract';
 
@@ -27,6 +28,8 @@ export interface ArtifactWorkPresentationSession {
   readonly threadId: string;
   readonly surfaceId: string;
   readonly mode: 'split' | 'full-window';
+  /** Explicit artwork entry, distinct from ordinary Workspace file browsing. */
+  readonly workMode?: true;
   readonly returnHandle: ArtifactWorkReturnHandle;
 }
 export interface ArtifactWorkPresentationState {
@@ -71,6 +74,7 @@ export type ArtifactWorkPresentationCommand =
       readonly threadId: string;
       readonly surfaceId: string;
       readonly returnHandle: ArtifactWorkReturnHandle;
+      readonly workMode?: true;
     }
   | { readonly type: 'set-chat-basis'; readonly initiator: Initiator; readonly basis: number }
   | (SessionCommand & { readonly type: 'enter-full-window'; readonly initiator: Initiator })
@@ -143,6 +147,7 @@ function beginSession(state: ArtifactWorkPresentationState, command: BeginComman
         threadId: command.threadId,
         surfaceId: command.surfaceId,
         mode: 'split',
+        ...(command.workMode ? { workMode: true as const } : {}),
         returnHandle: command.returnHandle,
       },
     },
@@ -235,7 +240,9 @@ type WorkSurfaceCoordinate = { readonly type?: string } & Partial<
 >;
 
 export function isWorkspaceArtworkPath(path: string): boolean {
-  return /\.(png|mp4|mdx?|txt|docx)$/i.test(path);
+  const facts = projectFileContent({ name: path });
+  // Default work presentation is narrower than all readable or editable formats.
+  return facts.floating || facts.kind === 'markdown' || ['txt', 'docx'].includes(contentFileExtension(path));
 }
 
 /** Presentation reads the canonical file coordinate; admission and bytes remain with the file/review owners. */

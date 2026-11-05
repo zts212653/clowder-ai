@@ -52,7 +52,7 @@ async function setup() {
   const message = messages.append({
     userId: f.principal.userId,
     threadId: 'thread-1',
-    catId: null,
+    from: { kind: 'user', userId: f.principal.userId },
     mentions: ['sol'],
     content: 'Please fix the opening',
     timestamp: Date.now(),

@@ -5,6 +5,7 @@ local function encodeRow(value)
   encoded = string.gsub(encoded, '"targets":{}', '"targets":[]')
   encoded = string.gsub(encoded, '"claimedTargetIds":{}', '"claimedTargetIds":[]')
   encoded = string.gsub(encoded, '"requestedTargetCats":{}', '"requestedTargetCats":[]')
+  encoded = string.gsub(encoded, '"routingHeldTargetIds":{}', '"routingHeldTargetIds":[]')
   return encoded
 end
 `;

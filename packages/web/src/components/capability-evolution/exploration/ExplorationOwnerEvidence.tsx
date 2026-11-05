@@ -30,11 +30,11 @@ export function ExplorationOwnerEvidence({
   return (
     <>
       <details className="exploration-owner-diff">
-        <summary>本项目正式版本的内容变化</summary>
+        <summary>来源已发布版本的内容变化</summary>
         <label className="exploration-owner-selector">
-          本项目正式版本
+          来源已发布版本
           <select
-            aria-label="本项目正式版本"
+            aria-label="来源已发布版本"
             value={versionRef ? refIdentity(versionRef) : ''}
             onChange={(event) => {
               const next = asset.catalog?.versions.find(
@@ -55,17 +55,17 @@ export function ExplorationOwnerEvidence({
         </label>
         {diff ? (
           <>
-            <p>相对当前采用 {diff.comparedToVersionRef.version}</p>
+            <p>相对来源当前版本 {diff.comparedToVersionRef.version}</p>
             <p className="whitespace-pre-line">{diff.summary}</p>
             <EvolutionSource label="展开原始 diff" source={diff.rawDiffRef} href={diff.ownerHref} />
           </>
         ) : (
-          <p>与最新采用版的内容对照尚待来源确认。</p>
+          <p>与来源当前版本的内容对照尚待确认。</p>
         )}
         <p className="exploration-caption">内容变化解释机制，行为改善仍要看绑定此版本的实际记录。</p>
       </details>
       <details className="exploration-owner-evidence">
-        <summary>本项目正式版本的独立验证与后续沿用</summary>
+        <summary>来源版本的独立验证与后续沿用</summary>
         <EvolutionVersionEvidence selected={selected} readStatus={readStatus} />
         <EvolutionActualUse selected={selected} readStatus={readStatus} />
       </details>

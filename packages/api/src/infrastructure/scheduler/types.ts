@@ -96,6 +96,7 @@ export interface PrivateDeliverOpts {
   priority?: 'urgent' | 'normal';
   sourceCategory?: 'ci' | 'review' | 'conflict' | 'scheduled' | 'a2a' | 'issue';
   ownerAuthProvenance?: import('../../domains/cats/services/owner-auth-provenance.js').OwnerAuthProvenance;
+  toolExecutionPolicy?: import('../../domains/cats/services/types.js').ToolExecutionPolicy;
 }
 
 export interface DeliverOpts {
@@ -121,6 +122,7 @@ export interface DeliverOpts {
   suggestedSkill?: string;
   sourceCategory?: 'ci' | 'review' | 'conflict' | 'scheduled' | 'a2a' | 'issue';
   ownerAuthProvenance?: import('../../domains/cats/services/owner-auth-provenance.js').OwnerAuthProvenance;
+  toolExecutionPolicy?: import('../../domains/cats/services/types.js').ToolExecutionPolicy;
   /** Optional canonical source identity for scheduler-backed continuation producers. */
   source?: ConnectorSource;
 }
@@ -153,6 +155,8 @@ export type ScheduleLifecycleNotifier = (notice: ScheduleLifecycleNotice) => voi
 
 /** Phase 1b+2: context passed to execute — carries actor resolution + context spec */
 export interface ExecuteContext {
+  /** One scheduled occurrence, stable for every delivery/retry within this execution. */
+  occurrenceId: string;
   /** Aborted when this work item's scheduler timeout fires. */
   signal: AbortSignal;
   /** Cat resolved by ActorResolver, or null if no actor spec / no match */

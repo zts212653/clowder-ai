@@ -54,7 +54,7 @@ test('diagnostic attachment failure cannot prevent store initialization or poiso
   }
 });
 
-test('read workers skip even an injected observer; standalone stores have no implicit attachment', async (t) => {
+test('worker-mode store constructors ignore injected API observers; process-owner diagnostics are separate', async (t) => {
   const scratch = mkdtempSync(join(tmpdir(), 'sql-diagnostic-worker-'));
   t.after(() => rmSync(scratch, { recursive: true, force: true }));
   const path = join(scratch, 'evidence.sqlite');

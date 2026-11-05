@@ -11,6 +11,14 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
 function createSandbox(envFile = '') {
   const dir = mkdtempSync(join(tmpdir(), 'cc-alpha-redis-'));
   mkdirSync(join(dir, 'scripts', 'lib'), { recursive: true });
+  mkdirSync(join(dir, 'packages/shared/src'), { recursive: true });
+  for (const relative of [
+    'scripts/read-deployment-default.mjs',
+    'packages/shared/src/deployment-defaults.ts',
+    'packages/shared/src/deployment-profiles.json',
+  ]) {
+    cpSync(join(root, relative), join(dir, relative));
+  }
   for (const path of [
     'start-dev.sh',
     'download-source-overrides.sh',

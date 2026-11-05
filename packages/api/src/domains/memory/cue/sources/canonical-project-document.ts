@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readFile, realpath } from 'node:fs/promises';
 import { isAbsolute, relative, resolve } from 'node:path';
+import { type MemoryCueDocumentWindowRequest, memoryCueDocumentWindowRequestSchema } from '@cat-cafe/shared';
 
 export const MAX_CANONICAL_PROJECT_DOCUMENT_CONTENT_CHARS = 4_000;
 
@@ -13,6 +14,9 @@ export interface CanonicalProjectDocument {
 export interface CanonicalProjectDocumentWindow {
   readonly content: string;
   readonly contentTruncated: boolean;
+  readonly contentRange: { start: number; end: number; total: number; unit: 'utf16_code_unit' };
+  readonly nextOffset: number | null;
+  readonly location: { status: 'start' | 'offset' | 'matched' | 'not_found'; matchOffset?: number };
 }
 
 function isContained(root: string, candidate: string): boolean {
@@ -40,9 +44,29 @@ export async function readCanonicalProjectDocument(
   }
 }
 
-export function canonicalProjectDocumentWindow(content: string): CanonicalProjectDocumentWindow {
+export function canonicalProjectDocumentWindow(
+  content: string,
+  request: MemoryCueDocumentWindowRequest = {},
+): CanonicalProjectDocumentWindow {
+  const window = memoryCueDocumentWindowRequestSchema.parse(request);
+  let start = Math.min(window.offset ?? 0, content.length);
+  let location: CanonicalProjectDocumentWindow['location'] = {
+    status: window.offset === undefined ? 'start' : 'offset',
+  };
+  if (window.query !== undefined) {
+    const literal = window.query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const match = new RegExp(literal, 'iu').exec(content);
+    if (match) {
+      start = Math.max(0, match.index - 200);
+      location = { status: 'matched', matchOffset: match.index };
+    } else location = { status: 'not_found' };
+  }
+  const end = Math.min(start + MAX_CANONICAL_PROJECT_DOCUMENT_CONTENT_CHARS, content.length);
   return {
-    content: content.slice(0, MAX_CANONICAL_PROJECT_DOCUMENT_CONTENT_CHARS),
-    contentTruncated: content.length > MAX_CANONICAL_PROJECT_DOCUMENT_CONTENT_CHARS,
+    content: content.slice(start, end),
+    contentTruncated: start > 0 || end < content.length,
+    contentRange: { start, end, total: content.length, unit: 'utf16_code_unit' },
+    nextOffset: end < content.length ? end : null,
+    location,
   };
 }

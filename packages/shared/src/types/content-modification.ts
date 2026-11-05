@@ -70,7 +70,11 @@ export const contentModificationSelectionItemSchema = z.union([
 ]);
 
 export const contentModificationTakeoverSchema = z
-  .object({ sourceMessageId: id, operationId: z.string().uuid() })
+  .object({
+    sourceMessageId: id,
+    operationId: z.string().uuid(),
+    attachmentId: z.string().trim().min(1).max(128).optional(),
+  })
   .strict();
 export type ContentModificationTakeover = z.infer<typeof contentModificationTakeoverSchema>;
 

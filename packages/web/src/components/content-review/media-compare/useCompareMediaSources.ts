@@ -2,12 +2,14 @@
 import type { ReviewedMediaAsset } from '@cat-cafe/shared';
 import { useEffect, useRef, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
+import { reviewMediaDisplayPath } from '../useReviewMediaSource';
 
 export type CompareMediaVersion = { asset: ReviewedMediaAsset; label: string; mediaPath?: string };
 export function compareMediaPath(version: CompareMediaVersion): string {
-  return (
+  return reviewMediaDisplayPath(
     version.mediaPath ??
-    `/api/content-publications/${encodeURIComponent(version.asset.contentRef)}/media/${version.asset.ownerRevision}`
+      `/api/content-publications/${encodeURIComponent(version.asset.contentRef)}/media/${version.asset.ownerRevision}`,
+    version.asset.mediaType,
   );
 }
 export function compareMediaKey(versions: readonly CompareMediaVersion[]): string {

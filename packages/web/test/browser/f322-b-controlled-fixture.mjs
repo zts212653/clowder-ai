@@ -27,6 +27,7 @@ export function createF322BControlledFixture(threadId) {
     cancelability: { state: 'cancelable', target: { kind: 'managed_command', taskId: 'sample-hold-exact' } },
   };
   const message = {
+    from: { kind: 'agent', catId: catId },
     id: 'sample-live-message-exact',
     catId,
     content: 'F322 controlled live transcript: exact turn, original execution record.',
@@ -77,6 +78,7 @@ export function createF322BControlledFixture(threadId) {
               variantLabel: 'GPT-6.1 Sol',
               color: { primary: '#5B8C5A', secondary: '#eeeeee' },
               mentionPatterns: ['@codex61-sol'],
+              carrier: 'cli',
               clientId: 'openai',
               defaultModel: 'gpt-6.1-sol',
               avatar: '/avatars/family/codex61-sol.png',

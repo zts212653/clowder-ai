@@ -9,11 +9,10 @@
 
 .entry-card {
   width: min(480px, 100%);
-  padding: 30px;
+  padding: 24px;
   border: 1px solid var(--cafe-border);
-  border-radius: 18px;
+  border-radius: 12px;
   background: var(--cafe-surface);
-  box-shadow: var(--cafe-shadow);
 }
 
 .entry-eyebrow {
@@ -26,8 +25,8 @@
 .entry-card h2,
 .state-scene h2 {
   margin: 0 0 9px;
-  font-family: ui-serif, Georgia, serif;
-  font-size: 25px;
+  font-family: inherit;
+  font-size: 20px;
   font-weight: 600;
   letter-spacing: -0.02em;
 }
@@ -109,6 +108,59 @@
   margin-top: 9px;
   color: var(--cafe-danger);
   font-size: 11px;
+}
+
+.scope-recovery {
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  padding: 24px;
+  overflow-y: auto;
+}
+.scope-recovery-card {
+  width: min(520px, 100%);
+  color: var(--cafe-text);
+}
+.scope-recovery-card h2 {
+  font-size: 23px;
+}
+.scope-recovery-card > p {
+  color: var(--cafe-text-secondary);
+  line-height: 1.65;
+}
+.scope-recovery-draft {
+  margin-top: 28px;
+  padding: 16px;
+  border: 1px solid var(--cafe-border);
+  border-radius: 12px;
+  background: var(--cafe-canvas);
+}
+.scope-recovery-draft header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+}
+.scope-recovery-draft button {
+  border: 0;
+  background: transparent;
+  color: var(--cafe-accent-ink);
+}
+.scope-recovery-draft textarea {
+  display: block;
+  width: 100%;
+  min-height: 112px;
+  margin: 12px 0;
+  padding: 0;
+  border: 0;
+  resize: vertical;
+  background: transparent;
+  color: var(--cafe-text);
+  line-height: 1.6;
+}
+.scope-recovery-draft small {
+  color: var(--cafe-text-secondary);
 }
 
 @media (max-width: 620px) {

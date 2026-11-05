@@ -4,7 +4,7 @@ import { mapToPresentation } from '../../src/domains/cats/services/session/conte
 
 test('only the exact admitted thread-opening source can present a T2 historical clue', () => {
   const admission = {
-    entryVersion: 'recall-catalog:6:thread_opened:owner_message',
+    entryVersion: 'recall-catalog:7:thread_opened:owner_message',
     policyRef: 'F321.ThreadOpeningClue',
     sourceAnchor: 'thread-overview:old',
     sourceRevision: 'revision',
@@ -46,7 +46,7 @@ test('the final provider boundary rejects a forged envelope policy for an otherw
     epistemicCeiling: 'historical_clue' as const,
     invalidator: { owner: 'thread_overview', ref: 'thread-overview:old@rev' },
     historicalClueAdmission: {
-      entryVersion: 'recall-catalog:6:thread_opened:owner_message',
+      entryVersion: 'recall-catalog:7:thread_opened:owner_message',
       policyRef: 'F321.ThreadOpeningClue',
       sourceAnchor: 'thread-overview:old',
       sourceRevision: 'rev',

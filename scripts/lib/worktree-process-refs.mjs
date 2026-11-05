@@ -46,7 +46,7 @@ function invocationWrappers(table, observerPid) {
     visited.add(row.pid);
     row = byPid.get(row.ppid);
     if (!row) break;
-    const finish = /worktree-finish\.mjs(?:[\s'"\\]|$)|worktree:finish(?:\s|$)/.test(row.command);
+    const finish = /worktree-(?:finish|trim)\.mjs(?:[\s'"\\]|$)|worktree:(?:finish|trim)(?:\s|$)/.test(row.command);
     const wrapper = /(?:^|[\s/])(sh|zsh|bash|dash|fish|pnpm(?:\.c?js)?)(?:\s|$)/.test(row.command);
     if (finish && wrapper) excluded.add(row.pid);
   }

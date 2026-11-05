@@ -55,10 +55,13 @@ export const ACP_METHODS = {
   authenticate: 'authenticate',
   sessionNew: 'session/new',
   sessionLoad: 'session/load',
+  sessionResume: 'session/resume',
+  sessionClose: 'session/close',
   sessionPrompt: 'session/prompt',
   sessionCancel: 'session/cancel', // notification (no response)
   sessionSetMode: 'session/set_mode',
   sessionSetConfigOption: 'session/set_config_option',
+  sessionSetModel: 'session/set_model',
 
   // Agent → Client notifications
   sessionUpdate: 'session/update',
@@ -67,6 +70,9 @@ export const ACP_METHODS = {
   requestPermission: 'session/request_permission',
   fsReadTextFile: 'fs/read_text_file',
   fsWriteTextFile: 'fs/write_text_file',
+
+  // iCode (Chrys) private extension requests
+  chrysRequestInput: '_chrys/request_input',
 } as const;
 
 // ─── Initialize ────────────────────────────────────────────────
@@ -84,7 +90,13 @@ export interface AcpInitializeResult {
     version: string;
   };
   agentCapabilities: {
-    loadSession: boolean;
+    loadSession?: boolean;
+    sessionCapabilities?: {
+      resume?: Record<string, unknown>;
+      list?: Record<string, unknown>;
+      close?: Record<string, unknown>;
+    };
+    _meta?: Record<string, unknown>;
     promptCapabilities?: AcpPromptCapabilities;
     mcpCapabilities?: {
       http?: boolean;
@@ -111,6 +123,7 @@ export interface AcpPromptCapabilities {
 export interface AcpNewSessionParams {
   cwd: string;
   mcpServers: AcpMcpServer[];
+  _meta?: Record<string, unknown>;
 }
 
 export interface AcpNewSessionResult {
@@ -180,11 +193,19 @@ export type AcpSessionUpdateType =
   | 'stream_idle_warning' // F149: injected by AcpClient.promptStream idle watchdog
   | 'stream_tool_wait_warning'; // tool_call pending — idle is expected, not a stall
 
+/** Tool result entries include nested content, diffs, terminals, or future extension blocks. */
+export interface AcpToolCallContent {
+  type: string;
+  [key: string]: unknown;
+}
+
 export interface AcpSessionUpdate {
   sessionId: string;
   update: {
     sessionUpdate: AcpSessionUpdateType;
-    content?: AcpContentBlock;
+    content?: AcpContentBlock | AcpToolCallContent[];
+    rawInput?: unknown;
+    rawOutput?: unknown;
     [key: string]: unknown;
   };
 }
@@ -194,6 +215,8 @@ export interface AcpSessionUpdate {
 export type AcpMcpServer = AcpMcpServerStdio | AcpMcpServerHttp | AcpMcpServerSse;
 
 export interface AcpMcpServerStdio {
+  /** Host provenance; removed by materialization before the native RPC. */
+  hostSource?: 'plugin';
   name: string;
   command: string;
   args: string[];

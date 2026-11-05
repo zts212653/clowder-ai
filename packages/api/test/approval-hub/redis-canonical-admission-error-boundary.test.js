@@ -27,13 +27,13 @@ test('cold projection rebuild failures preserve the retryable unavailable error 
     },
   };
   const store = new RedisDispatchProposalStore(redis);
-  const subjectRef = 'pr:owner/repo#42';
+  const subjectRef = 'subject:task:work-42';
 
   await assert.rejects(
     () =>
       store.claimActionSuccessorWithCanonicalAdmission({
         ownerUserId: 'user-1',
-        canonicalActionKey: 'user-1\u001fpr:owner/repo#42\u001freview\u001freviewer',
+        canonicalActionKey: 'user-1\u001fsubject:task:work-42\u001freview\u001freviewer',
         negativeAuthorization: {
           sourceInvocationId: 'invocation-cold-rebuild',
           sourceThreadId: 'thread-source',
@@ -46,8 +46,8 @@ test('cold projection rebuild failures preserve the retryable unavailable error 
           leaseId: 'lease-cold-rebuild',
           tenantScope: 'user-1',
           subjectRef,
-          actionFamily: 'review',
-          successorSlot: 'reviewer',
+          actionFamily: 'implement',
+          successorSlot: 'implementer',
           mode: 'single',
           holderCatIds: ['sonnet'],
           dispatchId: 'cross-post:cold-rebuild',
@@ -58,9 +58,9 @@ test('cold projection rebuild failures preserve the retryable unavailable error 
           issuerStandingEvidenceRef: 'callback:cold-rebuild',
           evidenceRefs: ['callback:cold-rebuild'],
           terminalPredicate: canonicalizeActionTerminalPredicate({
-            actionFamily: 'review',
+            actionFamily: 'implement',
             subjectRef,
-            predicate: { kind: 'review_delivered', headSha: 'a'.repeat(40) },
+            predicate: { kind: 'task_done' },
           }),
           now: 1,
         },

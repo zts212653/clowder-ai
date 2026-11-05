@@ -92,6 +92,12 @@ async function runFirstFileJourney(suite, scenario) {
     }
     await observeFirstFileQuote(page);
     openedReview = await assertNativeEntryReview(page, f, entry);
+    if (extension === 'md' && shell === 'v2') {
+      // The cold read still uses the real owner. Source/render switching remounts
+      // its reference projection, whose loading row retires once the empty read
+      // completes; select only after that announced loading phase has finished.
+      await page.getByRole('region', { name: '引用消息 0', exact: true }).waitFor({ state: 'hidden' });
+    }
     await quoteNative(page, extension, entry, f.phrases[0], '第一处改具体些。');
     await quoteNative(page, extension, entry, f.phrases[1], '第二处保留语气。');
     const preparePostCountBeforeSend = calls.filter(
@@ -155,7 +161,7 @@ async function runFirstFileJourney(suite, scenario) {
     await page.screenshot({ path: `${EVIDENCE}/first-file-${slug}-applied.png` });
     await page
       .getByTestId('workspace-content-review-surface')
-      .getByRole('button', { name: '返回来源', exact: true })
+      .getByRole('button', { name: '‹ 聊天', exact: true })
       .click();
     assert.equal(new URL(page.url()).pathname, `/thread/${f.owner.thread.id}`);
     await page.locator(`[data-message-id="${candidate.receipt.id}"]`).waitFor({ state: 'visible' });

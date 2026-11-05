@@ -8,6 +8,11 @@ export const DURABLE_GATE_FROZEN_IDENTITY_ENV = 'CAT_CAFE_MANAGED_GATE_FROZEN_ID
 export const DURABLE_GATE_RECOVERY_READY_PATH_ENV = 'CAT_CAFE_MANAGED_GATE_RECOVERY_READY_PATH';
 export const DURABLE_GATE_RESUME_EPOCH_ENV = 'CAT_CAFE_MANAGED_GATE_RESUME_EPOCH';
 export const DURABLE_GATE_RECONCILE_FROM_ENV = 'CAT_CAFE_MANAGED_GATE_RECONCILE_FROM';
+export const ALPHA_RECOVERY_JOURNAL_ENV = 'CAT_CAFE_ALPHA_RECOVERY_JOURNAL';
+
+export function alphaRecoveryJournalPath(job: DurableManagedGateJob, attemptToken: string): string {
+  return join(dirname(job.recordPath), `${job.jobId}.attempt-${attemptToken}.alpha-observations.jsonl`);
+}
 
 interface DurableGateRecoveryReadyReceipt {
   readonly version: 1;
@@ -15,6 +20,11 @@ interface DurableGateRecoveryReadyReceipt {
   readonly jobId: string;
   readonly attemptToken: string;
   readonly frozenFingerprint: string;
+  readonly consumerKind?: string;
+  readonly subscriptionId?: string;
+  readonly s3JobId?: string;
+  readonly generation?: number;
+  readonly executionPlanFingerprint?: string;
 }
 
 export function durableGateRecoveryReadyPath(job: DurableManagedGateJob, attemptToken: string): string {
@@ -45,6 +55,18 @@ export function hasDurableGateRecoveryReadyReceipt(
   frozenIdentity: DurableGateFrozenIdentity,
 ): boolean {
   const receipt = parseReadyReceipt(durableGateRecoveryReadyPath(job, attemptToken));
+  if (job.kind === 'alpha_revision_v1') {
+    if (
+      frozenIdentity.kind !== 'alpha_revision_v1' ||
+      receipt?.consumerKind !== 'alpha_revision_v1' ||
+      receipt.subscriptionId !== frozenIdentity.subscriptionId ||
+      receipt.s3JobId !== frozenIdentity.s3JobId ||
+      !Number.isSafeInteger(receipt.generation) ||
+      (receipt.generation ?? 0) < 1 ||
+      receipt.executionPlanFingerprint !== frozenIdentity.fingerprint
+    )
+      return false;
+  } else if (frozenIdentity.kind === 'alpha_revision_v1') return false;
   return (
     receipt?.jobId === job.jobId &&
     receipt.attemptToken === attemptToken &&

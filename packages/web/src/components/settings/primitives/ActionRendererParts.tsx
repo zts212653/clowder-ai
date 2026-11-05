@@ -6,6 +6,7 @@
 import Image from 'next/image';
 
 import { CheckCircleIcon, type PlatformActionDef, QrCodeIcon, SpinnerIcon } from '../../HubConfigIcons';
+import { ActionResultLink } from './ActionResultLink';
 
 // Re-export types used by ActionRenderer for its internal state
 export type ActionPhase = 'idle' | 'loading' | 'result' | 'polling' | 'connected' | 'error' | 'disconnecting';
@@ -49,7 +50,7 @@ export function ConnectedBanner({
   );
 }
 
-export function QrImagePanel({
+export function ActionImagePanel({
   connectorId,
   url,
   statusLabel,
@@ -64,17 +65,17 @@ export function QrImagePanel({
     <div className="console-list-card flex flex-col items-center gap-3 rounded-xl p-4 shadow-[var(--console-shadow-soft)]">
       <Image
         src={url}
-        alt={`${connectorId} QR code`}
+        alt={statusLabel ?? 'Action result'}
         width={192}
         height={192}
         unoptimized
         className="h-48 w-48 rounded-lg"
-        data-testid={`${connectorId}-qr-image`}
+        data-testid={`${connectorId}-action-image`}
       />
       {showSpinner && (
         <div className="flex items-center gap-2 text-cafe-secondary text-xs">
           <SpinnerIcon />
-          <span>{statusLabel ?? 'Waiting for scan...'}</span>
+          <span>{statusLabel ?? 'Processing...'}</span>
         </div>
       )}
     </div>
@@ -145,13 +146,15 @@ export function ActionPanelBody({
       )}
 
       {imgData?.url && (
-        <QrImagePanel
+        <ActionImagePanel
           connectorId={connectorId}
           url={imgData.url}
           statusLabel={lastResult?.label}
           showSpinner={phase === 'polling'}
         />
       )}
+
+      <ActionResultLink result={lastResult} testId={`${connectorId}-authorization-link`} fallbackLabel="打开授权页" />
 
       {phase === 'polling' && !imgData?.url && (
         <div className="flex items-center gap-2 text-cafe-secondary text-sm">

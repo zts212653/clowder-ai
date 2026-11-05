@@ -157,7 +157,7 @@ export const accountsCopy = defineShellCopy(
       handle: 'Resolve',
       cancel: 'Cancel',
       retry: 'Retry',
-      switch: 'Use this account',
+      switch: 'Use account',
       inUse: 'In use',
       override: 'Individual override',
       rename: 'Rename note',

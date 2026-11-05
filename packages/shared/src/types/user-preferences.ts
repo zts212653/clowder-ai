@@ -4,8 +4,10 @@
  * Separate from cat-catalog.json (configuration, not preference).
  */
 
+import type { ChatBackgroundPreferences } from '../chat-background.js';
 import type { ConversationViewPreferences } from '../conversation-view-preference.js';
 import type { IgnoredItemPreferences } from '../ignored-item-preference.js';
+import type { ProcessTalkMode } from '../process-talk-preference.js';
 import type { MessageWorkDisposition } from './queue-receipt.js';
 
 export type MessageDispositionPreferenceSource = 'thread' | 'global' | 'product';
@@ -36,6 +38,8 @@ export interface ThreadAttentionGroup {
 export type ThreadAttentionMemberSort = 'manual' | 'running-first';
 
 export interface ThreadAttentionPreferences {
+  /** Most recently used destinations first; membership remains in thread metadata. */
+  recentGroupIds?: string[];
   aliases?: Record<string, string>;
   open?: Record<string, boolean>;
   /** F322: collapsed Groups reveal attention shortcuts unless explicitly disabled. */
@@ -52,6 +56,16 @@ export interface BubbleDefaultPreferences {
 }
 
 export interface UserPreferences {
+  /** F322: private whole-window image preferences. No TTL, message or export content. */
+  chatBackgrounds?: ChatBackgroundPreferences;
+  /** F322: personal display only, per authenticated user, no TTL and no thread override. */
+  processTalk?: { owners?: Record<string, { mode: ProcessTalkMode }> };
+  /** #1466: durable personal guide receipts. Keys include operator and guide version. */
+  onboardingGuides?: Record<string, { status: 'pending' | 'dismissed' | 'completed'; updatedAt: number }>;
+  /** Happening Now per-project presentation only; persisted without expiry. */
+  liveProjectFolds?: Record<string, boolean>;
+  waitingProjectFolds?: Record<string, boolean>;
+  deploymentWaitFolds?: Record<string, boolean>;
   /** F322: owner-private ignored work/request coordinates. No TTL or canonical lifecycle effect. */
   ignoredItems?: IgnoredItemPreferences;
   /** F321: background curation preference and its durable first-enable boundary. */

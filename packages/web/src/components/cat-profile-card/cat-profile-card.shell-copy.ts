@@ -1,0 +1,50 @@
+import { defineShellCopy } from '../shell/shell-copy';
+
+export const catProfileCardCopy = defineShellCopy(
+  {
+    zh: {
+      title: (name: string) => `看猫 · ${name}`,
+      original: (name: string) => `查看${name}的原图`,
+      originalAlt: (name: string) => `${name}的原图`,
+      close: '收起小卡',
+      model: '模型',
+      mention: '@ 它',
+      onlyCat: '只看它的回话',
+      switching: '切换中…',
+      settings: '设置 ›',
+      switchFailed: '未能切换对话视图，请重试。',
+      working: (time: string) => `正在这条对话里回复 · ${time} ·`,
+      unconfirmed: '回复状态未确认',
+      loading: '读取中',
+      activity: '看它在干什么 ›',
+      record: '执行记录',
+      recordUnavailable: '这一轮的记录暂时无法定位，请稍后再试。',
+    },
+    en: {
+      title: (name: string) => `Meet ${name}`,
+      original: (name: string) => `View ${name}'s original image`,
+      originalAlt: (name: string) => `${name}'s original image`,
+      close: 'Close cat card',
+      model: 'Model',
+      mention: '@ Mention',
+      onlyCat: 'View this cat',
+      switching: 'Switching…',
+      settings: 'Settings ›',
+      switchFailed: 'Could not switch the conversation view. Try again.',
+      working: (time: string) => `Replying here · ${time} ·`,
+      unconfirmed: 'Reply status unconfirmed',
+      loading: 'Loading',
+      activity: 'View activity ›',
+      record: 'Execution record',
+      recordUnavailable: 'This turn’s record cannot be located yet. Try again shortly.',
+    },
+  },
+  {
+    samples: {
+      title: [['鲸鲸'], ['宪宪']],
+      original: [['鲸鲸'], ['宪宪']],
+      originalAlt: [['鲸鲸'], ['宪宪']],
+      working: [['0:21'], ['2:34']],
+    },
+  },
+);

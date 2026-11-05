@@ -103,6 +103,31 @@ async function refreshOpenPreviewCatalogue(page, card, dialog, fixture, batch = 
   assert.equal(await originalCard.evaluate((element) => element.isConnected), false);
 }
 
+async function waitForOriginalArtwork(page, dialog, fixture) {
+  const owner = dialog.getByTestId('workspace-content-review-surface');
+  await owner.waitFor();
+  await page.waitForFunction(
+    ({ element, contentRef }) => {
+      const image = element.querySelector('[data-testid="workspace-content-review-media"]');
+      return (
+        element.isConnected &&
+        element.dataset.contentReady === 'true' &&
+        element.dataset.contentRef === contentRef &&
+        element.dataset.ownerRevision === '4' &&
+        image?.complete &&
+        image.naturalWidth > 1 &&
+        new URL(image.currentSrc || image.src).pathname.endsWith('/media/4')
+      );
+    },
+    { element: await owner.elementHandle(), contentRef: fixture.image.work.contentRef },
+  );
+  const image = owner.getByTestId('workspace-content-review-media');
+  await image.evaluate((element) => element.decode());
+  assert.equal(await owner.getAttribute('data-content-ref'), fixture.image.work.contentRef);
+  assert.equal(await owner.getAttribute('data-owner-revision'), '4');
+  return owner;
+}
+
 async function runCase({ width, language, theme }) {
   const context = await suite.browser.newContext({ viewport: { width: 1440, height: 1000 } });
   const page = await context.newPage();
@@ -111,12 +136,49 @@ async function runCase({ width, language, theme }) {
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
   await context.addInitScript(
-    ({ language, theme }) => {
+    ({ language, theme, threadId }) => {
       localStorage.setItem('cat-cafe:shell-presentation', 'v2');
       localStorage.setItem('cat-cafe:shell-language', language);
       localStorage.setItem('theme', theme);
+      if (localStorage.getItem('cat-cafe:workbench-layout-v2') === null) {
+        const id = 'workspace:host:now',
+          owner = 'f284-workspace-launcher';
+        const old = {
+          id,
+          type: 'workspace',
+          renderer: 'workspace-destination',
+          title: '正在发生',
+          context: 'Old standalone page',
+          objectRef: { kind: 'workspace-destination', id: 'host:now' },
+          ownerStateRef: { owner, key: 'host:now' },
+          resultTargetRef: { owner, key: `${threadId}:host:now` },
+          capabilities: {
+            split: true,
+            sidecar: true,
+            pin: true,
+            closePolicy: 'detach-host',
+            restorePolicy: 'descriptor',
+          },
+        };
+        localStorage.setItem(
+          'cat-cafe:workbench-layout-v2',
+          JSON.stringify({
+            schemaVersion: 2,
+            layoutOwner: 'f307',
+            surfaces: [old],
+            activeSurfaceId: id,
+            pinnedSurfaceIds: [],
+            previewSurfaceId: null,
+            split: null,
+            sidecar: null,
+            recentlyClosed: [],
+            recentSurfaceIdsByThread: { [threadId]: [id] },
+            activity: [],
+          }),
+        );
+      }
     },
-    { language, theme },
+    { language, theme, threadId: WORKSPACE_SAMPLE_THREAD },
   );
   await page.route('**/api/**', (route) => fixture.answer(route));
   await page.route('**/uploads/f322-controlled-*.png', (route) => fixture.answer(route));
@@ -128,22 +190,44 @@ async function runCase({ width, language, theme }) {
     await ensureWorkspaceOpen(page);
     const home = page.getByTestId('f307-workspace-home-page');
     await home.waitFor();
+    const legacyNow = page.locator(
+      '[data-tab-surface-id="workspace:host:now"] [data-workbench-tab-control="activate"]',
+    );
+    await legacyNow.waitFor();
+    await legacyNow.press('Enter');
+    await legacyNow.waitFor({ state: 'detached' });
+    await home.waitFor();
+    assert.equal(await page.getByTestId('workspace-now-v2').count(), 0);
+    const closedNow = await page.evaluate(() => JSON.parse(localStorage.getItem('cat-cafe:workbench-layout-v2')));
+    assert.ok(!closedNow.surfaces.some((surface) => surface.id === 'workspace:host:now'));
+    await page.screenshot({ path: `${evidenceDir}/${name}-legacy-now-home.png` });
+    await writeFile(`${evidenceDir}/${name}-legacy-now-proof.json`, JSON.stringify(closedNow, null, 2));
     await resizeWorkspace(page, width);
     await page.waitForFunction(
       () =>
         document.querySelectorAll('[data-testid="f307-workspace-home-page"] [data-testid="workspace-running-object"]')
           .length === 20,
     );
+    const running = home.getByTestId('workspace-developing');
+    assert.equal(
+      await home.getByTestId('workspace-deployment-waits').count(),
+      0,
+      'The exact all-project empty projection hides the wait section',
+    );
     assert.equal(await home.locator(':scope > .home-column > .home-section').count(), 3);
     assert.equal(await home.getByTestId('workspace-running-object').count(), 20);
     assert.equal(await home.locator('button.home-stop').count(), 20);
     assert.equal(await home.locator('[data-testid="workspace-developing"] .home-all').count(), 0);
-    assert.deepEqual(await home.locator('.home-live-name').allTextContents(), Array(20).fill('小太阳·砚砚'));
-    for (const node of await home.locator('.home-live-name').all()) {
+    assert.deepEqual(await running.locator('.home-live-name').allTextContents(), Array(20).fill('小太阳·砚砚'));
+    for (const node of await running.locator('.home-live-name').all()) {
+      assert.equal(await node.evaluate((el) => getComputedStyle(el).textOverflow), 'ellipsis');
+      assert.ok(await node.evaluate((el) => el.getBoundingClientRect().width > 0), 'Nickname remains visible');
+    }
+    for (const metadata of await running.locator('.home-live-status, .home-live-clock').all()) {
       assert.equal(
-        await node.evaluate((el) => el.scrollWidth <= el.clientWidth + 1),
+        await metadata.evaluate((el) => el.scrollWidth <= el.clientWidth + 1),
         true,
-        'Nickname stays complete; only titles truncate',
+        'Accepted Home metadata stays readable while the full nickname remains in DOM and avatar label',
       );
     }
     assert.ok(
@@ -154,11 +238,11 @@ async function runCase({ width, language, theme }) {
     );
     assert.equal(await home.getByTestId('workspace-running-here').count(), 2);
     assert.ok((await home.getByTestId('workspace-running-here').first().innerText()).trimEnd().endsWith(' ·'));
-    assert.equal(await home.getByRole('img', { name: '小太阳·砚砚', exact: true }).count(), 20);
-    await home
+    assert.equal(await running.getByRole('img', { name: '小太阳·砚砚', exact: true }).count(), 20);
+    await running
       .locator('.home-live-heading [role="img"] img')
       .evaluateAll((nodes) => Promise.all(nodes.map((node) => node.decode())));
-    const avatars = await home.locator('.home-live-heading [role="img"]').evaluateAll((nodes) =>
+    const avatars = await running.locator('.home-live-heading [role="img"]').evaluateAll((nodes) =>
       nodes.map((node) => ({
         html: node.outerHTML,
         width: node.getBoundingClientRect().width,
@@ -175,8 +259,8 @@ async function runCase({ width, language, theme }) {
       avatars.every((item) => item.width >= 20 && item.height >= 20),
       'Every row has a visible avatar with its original size',
     );
-    assert.equal(await home.locator('.home-live-status[data-tone="wait"]').count(), 10);
-    const waitColor = await home
+    assert.equal(await running.locator('.home-live-status[data-tone="wait"]').count(), 10);
+    const waitColor = await running
       .locator('.home-live-status[data-tone="wait"] .home-execution-status-dot')
       .first()
       .evaluate((element) => {
@@ -214,40 +298,23 @@ async function runCase({ width, language, theme }) {
     await cards.first().press('Enter');
     const dialog = page.getByRole('dialog', { name: fixture.image.name, exact: true });
     await dialog.waitFor();
-    await dialog.locator('img').evaluate(async (image) => image.decode());
-    assert.ok(await dialog.locator('img').evaluate((image) => image.naturalWidth > 1));
-    const annotateLabel = language === 'en' ? 'Annotate' : '批注';
-    assert.equal(await dialog.getByRole('button', { name: annotateLabel, exact: true }).count(), 1);
+    // Main #5603 routes Home to the original F309 floating owner. Avatars are
+    // also images in this dialog; decode the exact artwork instead of all img.
+    await waitForOriginalArtwork(page, dialog, fixture);
+    assert.equal(await dialog.getByTestId('lightbox-open-workspace').count(), 1);
     assert.equal(
       await dialog.getByRole('link', { name: language === 'en' ? 'Download' : '下载', exact: true }).count(),
       0,
     );
     await page.screenshot({ path: `${evidenceDir}/${name}-image.png` });
-    await page.keyboard.press('ArrowRight');
-    await page.getByRole('dialog', { name: fixture.artifacts[1].name, exact: true }).waitFor();
-    await page.keyboard.press('ArrowLeft');
-    await dialog.waitFor();
-    await dialog.getByRole('button', { name: language === 'en' ? 'Next image' : '下一张', exact: true }).focus();
-    await page.keyboard.press('Enter');
-    const finalImage = page.getByRole('dialog', { name: fixture.artifacts[1].name, exact: true });
-    await finalImage.waitFor();
-    await page.keyboard.press('Tab');
-    assert.equal(
-      await finalImage.evaluate((element) => element.contains(document.activeElement)),
-      true,
-      'Focus stays in the original lightbox when its Next button becomes disabled',
-    );
-    await finalImage
-      .getByRole('button', { name: language === 'en' ? 'Previous image' : '上一张', exact: true })
-      .focus();
-    await page.keyboard.press('Enter');
-    await dialog.waitFor();
+    // The original floating host owns keyboard trapping and the same composer.
+    // Legacy HomeArtifactLightbox paging remains covered in its existing units.
+    const closePreview = dialog.getByTitle(language === 'en' ? 'Close' : '关闭', { exact: true });
+    await closePreview.focus();
     await page.keyboard.press('Shift+Tab');
-    assert.equal(
-      await dialog.evaluate((element) => element.contains(document.activeElement)),
-      true,
-      'Focus stays in the original lightbox when its Previous button becomes disabled',
-    );
+    assert.equal(await dialog.evaluate((element) => element.contains(document.activeElement)), true);
+    await page.keyboard.press('Tab');
+    assert.equal(await closePreview.evaluate((element) => element === document.activeElement), true);
     await refreshOpenPreviewCatalogue(page, entryCard, dialog, fixture);
     await page.keyboard.press('Escape');
     assert.equal(await page.getByRole('dialog').count(), 0);
@@ -255,7 +322,7 @@ async function runCase({ width, language, theme }) {
     assert.equal(await entryCard.evaluate((element) => document.activeElement === element), true);
     assert.equal(await cards.count(), 3, 'The bounded summary retains the exact preview entry among newer works');
     await entryCard.click();
-    await dialog.getByRole('button', { name: language === 'en' ? 'Close preview' : '关闭预览', exact: true }).click();
+    await closePreview.click();
     assert.equal(await page.getByRole('dialog').count(), 0);
 
     const menu = entryCard.locator('..').locator('details');
@@ -277,14 +344,15 @@ async function runCase({ width, language, theme }) {
     await download.press('Escape');
     assert.equal(await menu.getAttribute('open'), null);
     await entryCard.click();
-    await dialog.getByRole('button', { name: annotateLabel, exact: true }).click();
-    const originalReview = page.getByTestId('workspace-content-review-surface');
-    await originalReview.waitFor();
+    await dialog.getByTestId('lightbox-open-workspace').click();
+    await dialog.waitFor({ state: 'detached' });
+    const workspaceReview = page.getByTestId('workspace-content-review-surface');
+    await workspaceReview.waitFor();
     await page.waitForFunction(
       () => document.querySelector('[data-testid="workspace-content-review-surface"]')?.dataset.contentReady === 'true',
     );
-    assert.equal(await originalReview.getAttribute('data-content-ref'), fixture.image.work.contentRef);
-    assert.equal(await originalReview.getAttribute('data-owner-revision'), '4');
+    assert.equal(await workspaceReview.getAttribute('data-content-ref'), fixture.image.work.contentRef);
+    assert.equal(await workspaceReview.getAttribute('data-owner-revision'), '4');
     await originalHome(page, language);
     assert.equal(await entryCard.getAttribute('aria-current'), 'true');
     assert.equal(await composer.inputValue(), draft);
@@ -331,13 +399,14 @@ async function runCase({ width, language, theme }) {
     await toolsTrigger.press('Enter');
     const tools = page.locator('[data-v2-workspace-menu]:not([hidden])');
     await tools.waitFor();
-    await tools.getByTestId('workspace-launcher-now').click();
-    await page.getByTestId('workspace-now-v2').waitFor();
-    assert.equal(await page.getByTestId('workspace-now-v2').getByTestId('workspace-running-object').count(), 20);
-    await originalHome(page, language);
+    // Main #5589 retired the duplicate Now page; all running work stays on Home.
+    assert.equal(await tools.getByTestId('workspace-launcher-now').count(), 0);
+    await page.keyboard.press('Escape');
+    await tools.waitFor({ state: 'hidden' });
+    assert.equal(await home.getByTestId('workspace-running-object').count(), 20);
     await toolsTrigger.click();
     await tools.waitFor();
-    assert.equal(await tools.locator('[data-workspace-destination]').count(), 18);
+    assert.equal(await tools.locator('[data-workspace-destination]').count(), 17);
     assert.deepEqual(
       await tools.locator('.home-group-title').allTextContents(),
       language === 'en' ? ['Recent work pages', 'Activity', 'Code', 'Other'] : ['最近的工作页', '活动', '代码', '其他'],
@@ -465,11 +534,28 @@ async function runCase({ width, language, theme }) {
     await cards.filter({ hasText: freshImage.name }).waitFor();
     assert.ok(fixture.calls.filter((call) => call.path.endsWith('/artifacts')).length > catalogueReads);
     await cards.filter({ hasText: freshImage.name }).click();
-    await page.getByRole('dialog', { name: freshImage.name, exact: true }).waitFor();
+    const retained = page.getByRole('dialog', { name: freshImage.name, exact: true });
+    await retained.waitFor();
+    await waitForOriginalArtwork(page, retained, fixture);
     fixture.setArtifacts([]);
     await page.evaluate(() => window.dispatchEvent(new Event('cat-cafe:entrusted-work-projection-invalidated')));
-    await home.getByText(language === 'en' ? 'Cannot open this work' : '无法打开这件作品', { exact: true }).waitFor();
+    await page.waitForFunction(
+      () => document.querySelectorAll('[data-testid="workspace-home-artifact-card"]').length === 0,
+    );
     assert.equal(await cards.count(), 0);
+    // Catalogue membership is a projection; removing it does not revoke the
+    // independently readable original publication owner or invent an unavailable result.
+    assert.equal(await retained.isVisible(), true);
+    assert.equal(
+      await retained.getByTestId('workspace-content-review-surface').getAttribute('data-content-ref'),
+      fixture.image.work.contentRef,
+    );
+    assert.equal(
+      await home.getByText(language === 'en' ? 'Cannot open this work' : '无法打开这件作品', { exact: true }).count(),
+      0,
+    );
+    await retained.getByTitle(language === 'en' ? 'Close' : '关闭', { exact: true }).click();
+    assert.equal(await page.getByRole('dialog').count(), 0);
     assert.equal(await composer.inputValue(), draft);
     assert.deepEqual(await composer.evaluate((input) => [input.selectionStart, input.selectionEnd]), [3, 8]);
     assert.deepEqual(errors, []);

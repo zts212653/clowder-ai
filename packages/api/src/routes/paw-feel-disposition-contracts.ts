@@ -1,4 +1,9 @@
-import { ownerTruthRefV1Schema, PAW_FEEL_INBOX_SORTS, PAW_FEEL_ISSUE_RESOLUTIONS } from '@cat-cafe/shared';
+import {
+  ownerTruthRefV1Schema,
+  PAW_FEEL_INBOX_SORTS,
+  PAW_FEEL_ISSUE_RESOLUTIONS,
+  pawFeelRepairRequestSchema,
+} from '@cat-cafe/shared';
 import { z } from 'zod';
 import {
   PawFeelBundleCommandSchema,
@@ -89,7 +94,8 @@ export const PawFeelSingleActionBodySchema = z.discriminatedUnion('type', [
       eventId: z.string().trim().min(1),
       signalId: z.string().trim().min(1),
       expectedSequence: z.number().int().nonnegative(),
-      leaseId: z.string().trim().min(1),
+      repairBinding: pawFeelRepairRequestSchema.optional(),
+      leaseId: z.string().trim().min(1).optional(),
       actionRef: z.string().trim().min(1),
     })
     .strict(),
@@ -113,5 +119,11 @@ export function pawFeelSingleActionCommand(
   if (action.type === 'no_action') {
     return { ...base, type: 'mark_no_action', reasonCode: action.reasonCode };
   }
-  return { ...base, type: 'mark_fix', leaseId: action.leaseId, actionRef: action.actionRef };
+  return {
+    ...base,
+    type: 'mark_fix',
+    repairBinding: action.repairBinding,
+    leaseId: action.leaseId,
+    actionRef: action.actionRef,
+  };
 }

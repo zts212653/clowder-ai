@@ -1,12 +1,19 @@
 import type { WorkspaceContentReviewAction } from '@cat-cafe/shared';
 import { useRef, useState } from 'react';
+import { WorkCoverMenuItems } from '@/components/artifacts/WorkCoverMenuItems';
+import { artworkActionsCopy } from '@/components/content-review/artwork-actions.shell-copy';
+import { GalleryPlaceEditor } from '@/components/content-review/GalleryPlaceEditor';
 import { ImageWorkProgress } from '@/components/content-review/ImageWorkProgress';
+import { mediaChatMime } from '@/components/content-review/media-chat-selection';
 import { modificationStorageKey } from '@/components/content-review/modification-draft';
 import { modificationFocusStanding, usePendingModificationFocus } from '@/components/content-review/modification-focus';
 import { ReviewToolbarIcon } from '@/components/content-review/ReviewToolbarIcon';
 import commentStyles from '@/components/content-review/review-comment.module.css';
 import toolbarStyles from '@/components/content-review/review-toolbar.module.css';
 import styles from '@/components/content-review/review-workspace.module.css';
+import { reviewMediaDisplayPath } from '@/components/content-review/useReviewMediaSource';
+import { useShellCopy } from '@/components/shell/shell-copy';
+import { useShellPresentation } from '@/components/shell/shell-presentation';
 import { useChatStore } from '@/stores/chatStore';
 import { API_URL } from '@/utils/api-client';
 import { isChatWorkElementVisible } from '../WorkspaceChatWorkScope';
@@ -86,11 +93,15 @@ export function WorkspaceContentReviewProjection({
   const comparing = comparingAt !== null && comparingAt === openRevision;
   const threadId = useChatStore((state) => state.currentThreadId);
   const pendingFocus = usePendingModificationFocus();
+  const privateOwner = view.review.ownerUserId;
   const openingComparison =
     !!pendingFocus?.candidateRef &&
     view.review.source.kind !== 'video-project' &&
+    view.review.source.kind !== 'collective-artifact' &&
+    view.review.source.kind !== 'collective-media' &&
+    typeof privateOwner === 'string' &&
     modificationFocusStanding(pendingFocus, { threadId: threadId ?? null, revision: openRevision }) === 'ours' &&
-    modificationStorageKey(view.review.ownerUserId, workspaceReviewRequestSource(view)) ===
+    modificationStorageKey(privateOwner, workspaceReviewRequestSource(view)) ===
       modificationStorageKey(pendingFocus.record.ownerUserId, pendingFocus.record.payload.source);
   // A text selection is live, like the card built on it: it targets "请猫修改" but is never stored as a draft,
   // so it cannot overwrite the quote of an old unsubmitted text draft.
@@ -113,9 +124,17 @@ export function WorkspaceContentReviewProjection({
     else setDiscussionOpen(false);
   };
   const source = view.currentSource ?? view.review.source;
+  const isV2 = useShellPresentation() === 'v2';
+  const artworkCopy = useShellCopy(artworkActionsCopy);
   const canAuthor = view.canWrite && view.sourceState === 'current' && capabilities.annotate.state === 'available';
   const canWrite = canAuthor && !busy;
-  const imageChatPrimary = source.kind !== 'text' && source.kind !== 'video-project' && source.mime === 'image/png';
+  const imageChatPrimary =
+    source.kind !== 'text' &&
+    source.kind !== 'video-project' &&
+    source.kind !== 'collective-artifact' &&
+    source.kind !== 'collective-media' &&
+    !!mediaChatMime(source.mime) &&
+    (source.media.kind === 'image' || isV2 || Boolean(workflow?.videoWork));
   const mediaRoot = useRef<HTMLDivElement>(null);
   const mediaChat = useWorkspaceMediaChat({
     view,
@@ -128,6 +147,8 @@ export function WorkspaceContentReviewProjection({
     referenceOnOpen: imageChatPrimary && !comparing && !openingComparison,
     isWorkVisible: () => isChatWorkElementVisible(mediaRoot.current),
   });
+  if (source.kind === 'collective-artifact')
+    return <p className="p-3 text-sm text-cafe-muted">共同作品请从它所在的共同体打开。</p>;
   if (source.kind === 'video-project')
     return <p className="p-3 text-sm text-cafe-muted">当前文件视图尚不支持视频项目审阅。</p>;
   const saveAnnotation = (
@@ -182,10 +203,10 @@ export function WorkspaceContentReviewProjection({
       onActive: openDiscussion,
       onReturnToCanvas: returnToCanvas,
     })
-  ) : (
+  ) : privateOwner ? (
     <WorkspaceContentReviewComments
       reviewId={view.review.reviewId}
-      ownerUserId={view.review.ownerUserId}
+      ownerUserId={privateOwner}
       annotations={view.review.annotations}
       resolutions={view.annotationResolutions}
       activeAnnotationId={activeAnnotationId}
@@ -197,14 +218,14 @@ export function WorkspaceContentReviewProjection({
       onReply={(annotationId, body) => act({ kind: 'reply', annotationId, replyId: crypto.randomUUID(), body })}
       onSetState={(annotationId, state) => act({ kind: 'set_annotation_state', annotationId, state })}
     />
-  );
+  ) : null;
   const sourceState = <WorkspaceContentReviewSourceState view={view} busy={busy} refreshSource={refreshSource} />;
   const modification =
-    workflow && 'modification' in workflow ? (
+    source.kind === 'collective-media' || !privateOwner ? null : workflow && 'modification' in workflow ? (
       workflow.modification
     ) : (
       <WorkspaceModificationEntry
-        view={view}
+        view={{ ...view, review: { ...view.review, ownerUserId: privateOwner } }}
         path={path}
         target={
           source.kind === 'text'
@@ -213,7 +234,7 @@ export function WorkspaceContentReviewProjection({
               : null
             : target
         }
-        allowNewRequest={!imageChatPrimary && source.kind !== 'text'}
+        allowNewRequest={source.kind === 'evolution' || (!imageChatPrimary && source.kind !== 'text')}
         chatRequest={source.kind === 'text' ? { content: sourceText, revision: sourceTextRevision } : undefined}
         disabled={
           !canWrite ||
@@ -264,12 +285,35 @@ export function WorkspaceContentReviewProjection({
         {view.review.annotations.length > 0 ? <div className="border-t border-cafe-subtle p-3">{comments}</div> : null}
       </>
     );
+  const originalMediaSrc = workflow?.mediaSource
+    ? (workflow.mediaSource.downloadSrc ?? workflow.mediaSource.src ?? '')
+    : source.kind === 'publication'
+      ? `${API_URL}/api/content-publications/${encodeURIComponent(source.publication.contentRef)}/media/${source.publication.ownerRevision}`
+      : `${API_URL}/api/${source.kind === 'evolution' ? '' : 'workspace/'}content-reviews/${encodeURIComponent(view.review.reviewId)}/media?expectedSourceRevision=${encodeURIComponent(source.revision)}`;
   return (
     <div
       ref={mediaRoot}
-      className={`${styles.workspace} ${imageChatPrimary ? styles.imageWorkspace : ''}`}
+      className={`${styles.workspace} ${imageChatPrimary ? styles.imageWorkspace : ''} ${workflow?.videoWork ? styles.videoWorkspace : ''}`}
       data-comparing={comparing ? 'true' : undefined}
+      data-video-work-canvas={workflow?.videoWork ? '' : undefined}
+      data-video-discussion-open={workflow?.videoWork ? String(discussionOpen || !!workflow.assetDetail) : undefined}
+      style={workflow?.playbackHidden ? { display: 'none' } : undefined}
     >
+      {workflow?.videoWork ? (
+        <div className="flex shrink-0 justify-end px-3 pt-2">
+          <button
+            type="button"
+            className="rounded border border-cafe-subtle px-2 py-1 text-xs"
+            aria-expanded={discussionOpen}
+            onClick={() => {
+              workflow?.onCloseAssetDetail?.();
+              setDiscussionOpen(!discussionOpen);
+            }}
+          >
+            一起讨论{view.review.annotations.length ? ` · ${view.review.annotations.length}` : ''}
+          </button>
+        </div>
+      ) : null}
       {sourceState}
       {imageChatPrimary ? <ImageWorkProgress target={mediaChat.target} /> : null}
       {imageChatPrimary && draft.trim() ? (
@@ -280,18 +324,26 @@ export function WorkspaceContentReviewProjection({
       ) : null}
       {view.sourceState === 'current' ? (
         <WorkspaceContentReviewMedia
+          seekRequest={workflow?.seekRequest}
+          markRequest={workflow?.markRequest}
+          selectionRequest={workflow?.selectionRequest}
+          playbackHidden={workflow?.playbackHidden}
+          onPlaybackTime={workflow?.onPlaybackTime}
+          chapterNavigation={workflow?.chapterNavigation}
           draftKey={workflow?.canvasDraftKey}
           canMarkup={capabilities.markup.state === 'available'}
           key={`${view.review.reviewId}:${source.revision}`}
+          originalUrl={originalMediaSrc}
+          filename={path.split('/').at(-1) || path}
+          mime={source.mime}
+          byteLength={'byteLength' in source ? source.byteLength : undefined}
           reviewId={view.review.reviewId}
           sourceRevision={source.revision}
-          src={
-            workflow?.mediaSource
-              ? workflow.mediaSource.src
-              : source.kind === 'publication'
-                ? `${API_URL}/api/content-publications/${encodeURIComponent(source.publication.contentRef)}/media/${source.publication.ownerRevision}`
-                : `${API_URL}/api/${source.kind === 'evolution' ? '' : 'workspace/'}content-reviews/${encodeURIComponent(view.review.reviewId)}/media?expectedSourceRevision=${encodeURIComponent(source.revision)}`
-          }
+          src={workflow?.mediaSource ? workflow.mediaSource.src : reviewMediaDisplayPath(originalMediaSrc, source.mime)}
+          download={{
+            src: originalMediaSrc,
+            filename: `作品.${source.mime === 'image/jpeg' ? 'jpg' : source.mime.split('/')[1]}`,
+          }}
           media={source.media}
           sourceError={workflow?.mediaSource?.error}
           annotations={view.review.annotations}
@@ -304,8 +356,48 @@ export function WorkspaceContentReviewProjection({
           selected={target?.kind === 'media_anchor' ? target.anchor : null}
           restoreComment={canWrite && draft.trim() !== ''}
           composer={composer}
+          chatPlaceEditor={
+            mediaChat.editor
+              ? {
+                  anchor: mediaChat.editor.anchor,
+                  cancel: mediaChat.editor.cancel,
+                  content: <GalleryPlaceEditor key={mediaChat.editor.selectionId} editor={mediaChat.editor} />,
+                }
+              : undefined
+          }
           imageChatPrimary={imageChatPrimary}
-          wholeWorkAction={!comparing && !openingComparison ? <WholeWorkChatButton chat={mediaChat} /> : undefined}
+          wholeWorkAction={
+            !comparing && !openingComparison ? (
+              <>
+                <WholeWorkChatButton
+                  chat={mediaChat}
+                  menuItem={isV2}
+                  label={
+                    isV2 ? (source.media.kind === 'video' ? artworkCopy.wholeVideo : artworkCopy.wholeImage) : undefined
+                  }
+                />
+                {source.kind === 'publication' &&
+                source.media.kind === 'video' &&
+                source.publication.contentRef.startsWith('work:') ? (
+                  <WorkCoverMenuItems
+                    artifact={{
+                      type: 'video',
+                      name: path.split('/').at(-1) || path,
+                      url: `/api/content-publications/${encodeURIComponent(source.publication.contentRef)}/media/${source.publication.ownerRevision}`,
+                      catId: null,
+                      createdAt: 0,
+                      sourceMessageId: null,
+                      work: { ...source.publication, currentOwnerRevision: source.publication.ownerRevision },
+                    }}
+                    title={path.split('/').at(-1) || path}
+                    focusReturn={() =>
+                      document.querySelector<HTMLElement>('[aria-haspopup="menu"][aria-expanded="true"]')
+                    }
+                  />
+                ) : null}
+              </>
+            ) : undefined
+          }
           onOpenDiscussion={() => {
             setDiscussionOpen(true);
           }}
@@ -339,30 +431,63 @@ export function WorkspaceContentReviewProjection({
             回到作品画面
           </button>
         </div>
-      ) : !imageChatPrimary ? (
+      ) : !imageChatPrimary && source.kind !== 'collective-media' ? (
         <p className="shrink-0 border-t border-cafe-subtle px-3 pt-2 text-xs text-cafe-muted">
           修改想法 · {target?.kind === 'media_anchor' ? '当前选区' : '整图'}
         </p>
       ) : null}
       {!comparing && !imageChatPrimary ? (
         <div className="flex shrink-0 justify-end px-3 py-2">
-          <WholeWorkChatButton chat={mediaChat} />
+          <WholeWorkChatButton
+            chat={mediaChat}
+            label={isV2 ? (source.media.kind === 'video' ? artworkCopy.wholeVideo : artworkCopy.wholeImage) : undefined}
+          />
         </div>
       ) : null}
       {imageChatPrimary || !mediaChat.offered ? <AddToChatNotice chat={mediaChat} /> : null}
       <div className={styles.modificationRegion}>{modification}</div>
-      {discussionOpen || view.sourceState !== 'current' ? (
+      {workflow?.assetDetail || discussionOpen || view.sourceState !== 'current' ? (
         <aside className={styles.drawer} aria-label="作品讨论">
           <div className={styles.drawerHeader}>
-            <h3 className={styles.drawerTitle}>
-              <ReviewToolbarIcon name="comment" />
-              一起讨论
-            </h3>
-            <button type="button" className={toolbarStyles.iconButton} aria-label="关闭讨论" onClick={closeDiscussion}>
-              <ReviewToolbarIcon name="close" />
-            </button>
+            {workflow?.assetDetail ? (
+              <button
+                type="button"
+                className="text-sm text-cafe-muted"
+                onClick={() => {
+                  workflow.onCloseAssetDetail?.();
+                  setDiscussionOpen(true);
+                }}
+              >
+                ‹ 一起讨论
+              </button>
+            ) : (
+              <>
+                <h3 className={styles.drawerTitle}>
+                  <ReviewToolbarIcon name="comment" />
+                  一起讨论
+                </h3>
+                <button
+                  type="button"
+                  className={toolbarStyles.iconButton}
+                  aria-label="关闭讨论"
+                  onClick={closeDiscussion}
+                >
+                  <ReviewToolbarIcon name="close" />
+                </button>
+              </>
+            )}
           </div>
-          <div className={styles.drawerBody}>{comments}</div>
+          <div className={styles.drawerBody}>
+            {workflow?.assetDetail ?? (
+              <>
+                {workflow?.videoWork && !view.review.annotations.length ? (
+                  <p className="p-3 text-xs text-cafe-muted">没标的都算通过。</p>
+                ) : null}
+                {workflow?.responseDiscussion}
+                {comments}
+              </>
+            )}
+          </div>
         </aside>
       ) : null}
     </div>

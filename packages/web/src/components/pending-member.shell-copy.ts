@@ -1,14 +1,14 @@
 import { defineShellCopy } from './shell/shell-copy';
 
 /**
- * F322 B (north-star §1.16, 合同三): the one line under the nameplate of a cat that has started and has not written anything
- * yet. It is replaced by the real reply as soon as the first piece of output arrives.
+ * The active invocation proves receipt, not that a provider process has started.
+ * Replace this line with the real reply as soon as output arrives.
  */
 export const pendingMemberCopy = defineShellCopy({
   zh: {
-    started: '已开始，还没有输出',
+    started: '已接下，还没有输出',
   },
   en: {
-    started: 'Started, no output yet',
+    started: 'Request received, no output yet',
   },
 });

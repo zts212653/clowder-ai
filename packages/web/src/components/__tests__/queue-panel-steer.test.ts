@@ -208,7 +208,7 @@ describe('QueuePanel steer (F047)', () => {
     });
 
     const html = container.innerHTML;
-    expect(html).toContain('Steer');
+    expect(html).toContain('处理这条');
   });
 
   it("offers the target's supported guidance for a GitHub Wait event", async () => {
@@ -724,7 +724,7 @@ describe('QueuePanel steer (F047)', () => {
     if (refreshState !== 'converged') {
       expect(toasts.some((toast) => toast.type === 'info')).toBe(false);
       if (refreshState === 'network-failure') expect(toasts.at(-1)?.title).toBe('后端连接异常');
-      expect(toasts.some((toast) => toast.title === 'Steer 失败')).toBe(false);
+      expect(toasts.some((toast) => toast.title === '排队消息未能调整')).toBe(false);
     }
   });
 
@@ -862,7 +862,7 @@ describe('QueuePanel steer (F047)', () => {
 
     expect(container.querySelector('[data-testid="steer-confirm"]')).toBeNull();
     expect(useChatStore.getState().queue).toEqual([]);
-    expect(useToastStore.getState().toasts.some((toast) => toast.title === '部分 Steer 未完成')).toBe(false);
+    expect(useToastStore.getState().toasts.some((toast) => toast.title === '部分成员还没接下这条消息')).toBe(false);
   });
 
   it('keeps Steer available for an ordinary pending target', () => {
@@ -899,8 +899,8 @@ describe('QueuePanel steer (F047)', () => {
     await openSteer(container);
 
     expect(container.textContent).toContain('布偶猫');
-    expect(container.querySelector('[data-testid="steer-guide-reply"]')?.textContent).toBe('立即发送，引导回复');
-    expect(container.querySelector('[data-testid="steer-interrupt-reply"]')?.textContent).toBe('立即发送，中断回复');
+    expect(container.querySelector('[data-testid="steer-guide-reply"]')?.textContent).toBe('接进当前回复');
+    expect(container.querySelector('[data-testid="steer-interrupt-reply"]')?.textContent).toBe('停下并处理这条');
     expect(container.textContent).not.toContain('旧回复会被停止');
     expect(container.textContent).not.toContain('提到队首');
 

@@ -21,6 +21,7 @@ function repairIdentity(projection: PawFeelDispositionProjection) {
   return {
     ...(projection.ownerCatId ? { ownerCatId: projection.ownerCatId } : {}),
     ...(projection.taskId ? { taskId: projection.taskId } : {}),
+    ...(projection.repairBinding ? { repairBinding: projection.repairBinding } : {}),
     ...(projection.actionLeaseRef ? { leaseId: projection.actionLeaseRef.leaseId } : {}),
   };
 }
@@ -42,7 +43,7 @@ function verifiedOutcomeContinuation(projection: PawFeelDispositionProjection): 
       binding?.targetVersionRef.ownerStateRef,
       binding?.outcomeVerifierRef.ownerStateRef,
       outcome.taskTerminalRef.ownerStateRef,
-      outcome.leaseTerminalRef.ownerStateRef,
+      outcome.leaseTerminalRef?.ownerStateRef,
       outcome.ownerOutcomeRef.ownerStateRef,
       ...outcome.verificationRefs.map((ref) => ref.ownerStateRef),
     ]),

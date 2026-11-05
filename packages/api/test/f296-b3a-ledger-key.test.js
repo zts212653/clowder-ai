@@ -77,7 +77,7 @@ describe('F296 B3a gate 1: ledger key encoding is injective', () => {
     '12:not-really-twelve',
     ':',
     '::',
-    'pr:zts212653/cat-cafe#3776',
+    'pr:zts212653/clowder-ai#3776',
     'subject:memory:ab:c',
     ' ',
     'emoji-\u{1F43E}-multibyte',

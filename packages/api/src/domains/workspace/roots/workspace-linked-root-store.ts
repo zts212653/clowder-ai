@@ -15,6 +15,7 @@ import Database from 'better-sqlite3';
 import { z } from 'zod';
 import { resolveActiveProjectRoot } from '../../../utils/active-project-root.js';
 import { durableIdForCanonicalRoot } from '../workspace-worktree-identity.js';
+import { flushParentDirectorySync } from './flush-parent-directory.js';
 
 const rootSchema = z
   .object({
@@ -119,12 +120,7 @@ function writeState(path: string, state: LinkedRootState): void {
       closeSync(file);
     }
     renameSync(temporary, path);
-    const directory = openSync(dirname(path), 'r');
-    try {
-      fsyncSync(directory);
-    } finally {
-      closeSync(directory);
-    }
+    flushParentDirectorySync(path);
   } finally {
     try {
       unlinkSync(temporary);

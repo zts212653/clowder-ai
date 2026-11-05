@@ -4,7 +4,14 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import type { CatId, MessageContent, MessageFrom, RichBlock, RichBlockBase } from '@cat-cafe/shared';
+import type {
+  CatId,
+  MessageContent,
+  MessageFrom,
+  RichBlock,
+  RichBlockBase,
+  RoutingPreflightDecisionV1,
+} from '@cat-cafe/shared';
 import { catRegistry, isCrossThreadProvenance } from '@cat-cafe/shared';
 import { resolveUnboundHistoryContextTokenCeiling } from '../../../../../config/context-capacity.js';
 import { DEFAULT_HIERARCHICAL_CONTEXT } from '../../../../../config/hierarchical-context-config.js';
@@ -27,13 +34,14 @@ const log = createModuleLogger('context-transport');
 const PROMPT_MESSAGE_SAFETY_CHAR_LIMIT = 100_000;
 
 import { estimateTokens } from '../../../../../utils/token-counter.js';
+import { sliceUnicodeSafe } from '../../../../../utils/unicode-safe-slice.js';
 import { matchExplicitApprovedTasteTrigger } from '../../../../memory/cue/ExplicitApprovedTasteTriggerCatalog.js';
 import type { MemoryCueOpportunitySeed } from '../../../../memory/cue/MemoryCueInvocationPromptService.js';
 import type { NudgeProcessResult } from '../../../../memory/EntityNudgeService.js';
+import { formatRoadmapPointer, readNavigationRoadmap } from '../../../../workspace/thread-roadmap-source.js';
 import type { CloudDispatchProvenance } from '../../cloud-bridge/types.js';
 import { buildMessageMap, formatMessage } from '../../context/ContextAssembler.js';
-import { BRIEFING_TIMEZONE } from '../../duty-briefing/constants.js';
-import { formatPromptTime } from '../../format-time.js';
+import { CO_CREATOR_TIME_ZONE, formatPromptTime } from '../../format-time.js';
 import type { DegradationResult } from '../../orchestration/DegradationPolicy.js';
 import { mapToPresentation } from '../../session/context/context-presentation.js';
 import {
@@ -120,6 +128,8 @@ export interface RouteBroadcaster {
 
 /** Dependencies shared across route strategies */
 export interface RouteStrategyDeps {
+  messageSearchAnswerService?: import('../../../../memory/MessageSearchAnswerPublicationService.js').MessageSearchAnswerPublicationService;
+  routingDispatchPreflight?: import('../../../../routing-context/RoutingDispatchPreflightPort.js').RoutingDispatchPreflightPort;
   services: Record<string, AgentService>;
   unavailableServices?: ReadonlyMap<string, AgentRegistrationFailure>;
   invocationDeps: InvocationDeps;
@@ -148,6 +158,7 @@ export interface RouteStrategyDeps {
   skillLoadEventLog?: import('../../tool-usage/SkillLoadEventLog.js').SkillLoadEventLog;
   /** F148 Phase F: Task store for navigation context (optional, fail-open) */
   taskStore?: import('../../stores/ports/TaskStore.js').ITaskStore;
+  ownedWaitStatusReader?: import('../../../../ball-custody/OwnedWaitStatus.js').OwnedWaitStatusReader;
   /** RFC A79: exact lifecycle situation shared with UI and read-only thread context. */
   threadExecutionSituationSource?: import('../invocation/thread-execution-situation.js').ThreadExecutionSituationSource;
   /** F222: Frustration auto-issue store (optional, fail-open) */
@@ -257,10 +268,16 @@ export function mergePersistedPromptMessages(
   return [...persistedPromptMessages, exactTrigger];
 }
 
-/** Actual-send routing refused one of a route's requested targets. */
-
 /** Common options for both strategies */
 export interface RouteOptions {
+  /** Trusted Queue provenance for comparing B with C; never an execution grant. */
+  routingAdmission?: import('@cat-cafe/shared').RoutingAdmissionProvenanceV1;
+  /** Server-owned ingress only; never copied from an HTTP/MCP request body. */
+  contextSourceIngress?: import('../../../../memory/cue/ContextSourceAdmission.js').ContextSourceIngress;
+  /** Persist the exact policy refusal before publishing its receipt; Queue owns recovery. */
+  onRoutingPreflightRejected?: (target: RoutingPreflightDecisionV1['targets'][number]) => Promise<void>;
+  /** Server-owned one-shot owner click for this exact pending target. */
+  routingOwnerRetryTarget?: string;
   /** Execution-owned fan-out policy. Queue dequeue uses parallel fan-out for one source
    *  with multiple targets; ordinary routes retain their intent-derived default. */
   targetDispatchMode?: 'serial' | 'parallel' | undefined;
@@ -268,13 +285,14 @@ export interface RouteOptions {
   /** Route-owned intent plus whether the user explicitly selected it. */
   routeIntent?: AgentRouteIntent;
   /** F293: deterministic scope used to resolve sparse routing cognition. */
+  routingContextIntent?: 'review' | 'architecture';
   /** Authentication-grade owner provenance propagated unchanged to every child invocation. */
   ownerAuthProvenance?: OwnerAuthProvenance;
   /** F281 Phase C: explicit first-party ingress provenance; omitted legacy callers fail closed. */
   humanDispositionInvocationOrigin?: HumanDispositionInvocationOrigin;
   /** Canonical Queue source class for admission/retry policy. */
   routingQueueSource?: 'user' | 'connector' | 'agent' | 'system';
-  /** Immutable Host domain scope forwarded to children; it limits execution, never grants authority. */
+  /** Retained legacy record discriminator. The retired Host executor is rejected; current plugins use public invocation. */
   executionScope?: 'collective-participation' | 'collective-work';
   /** F167 Phase T: exact protocol wake carrier for this route, never inferred from response prose. */
   turnCustodyWake?: import('../../../../ball-custody/TurnCustodyProjectionService.js').TurnCustodyWakeProvenance;
@@ -339,7 +357,12 @@ export interface RouteOptions {
     | ((input: {
         responseMessageId: string;
         invocationId: string;
-        terminal: { status: 'completed'; completedAt: number; reason?: string };
+        terminal: {
+          status: 'completed';
+          completedAt: number;
+          reason?: string;
+          expectedInputMessageIds?: readonly string[];
+        };
         message: AppendMessageInput;
         targetCats: CatId[];
         userId: string;
@@ -350,7 +373,11 @@ export interface RouteOptions {
         callerTraceContext?: import('../../../../../infrastructure/telemetry/genai-semconv.js').CallerTraceContext;
       }) => Promise<StoredMessage>)
     | undefined;
-  /** Canonical failed-final path: terminalize the response and wake the exact A2A caller once. */
+  /**
+   * Canonical failed-final transaction. Always persists the terminal response;
+   * durable receipts select eligible callers and suppress failure-report bounces.
+   * Calling this hook does not itself imply a caller wake was admitted.
+   */
   commitFailedA2AReport?:
     | ((input: {
         responseMessageId: string;
@@ -361,7 +388,7 @@ export interface RouteOptions {
         ownerAuthProvenance: OwnerAuthProvenance;
         threadId: string;
         reporterCatId: CatId;
-        predecessorCatId: CatId;
+        predecessorCatId?: CatId;
         parentInvocationId?: string;
         callerTraceContext?: import('../../../../../infrastructure/telemetry/genai-semconv.js').CallerTraceContext;
       }) => Promise<StoredMessage>)
@@ -376,11 +403,6 @@ export interface RouteOptions {
   persistenceContext?: PersistenceContext;
   /** F167 Phase S: durable outcome CAS run after model completion and before every route-side side effect. */
   beforeOutputCommit?: ((catId: CatId) => Promise<boolean>) | undefined;
-  /**
-   * F117 soak: called once for each requested target that actual-send routing refused (A2A follow-up
-   * targets are not requested targets). A Queue attempt keeps the exact refusal, so its entry waits
-   * for that target's retry time even when the entry named no target.
-   */
   /** F11: Mode-specific system prompt section (appended after identity prompt) */
   modeSystemPrompt?: string | undefined;
   /** F11: Per-cat mode prompt override (takes precedence over modeSystemPrompt) */
@@ -390,6 +412,8 @@ export interface RouteOptions {
   /** F108: Unique invocation ID for WorklistRegistry isolation in concurrent execution.
    *  When provided, worklist is keyed by this ID instead of threadId. */
   parentInvocationId?: string | undefined;
+  /** A recovery proof cannot acknowledge an older wake that still awaits this target. */
+  resolvePendingWakeMessageIds?: (catId: string, messageIds: readonly string[]) => Promise<readonly string[]>;
   /** Exact, non-trigger message bodies exposed by incremental context to this invocation. */
   onPromptMessagesExposed?:
     | ((input: {
@@ -960,16 +984,16 @@ export function toStoredToolEvent(
   if (!msg.toolEventId?.startsWith(prefix)) msg.toolEventId = `${prefix}${randomUUID()}`;
   if (executionRef) msg.toolExecutionRef = executionRef;
   const instance = { id: msg.toolEventId, ...(msg.toolExecutionRef ? { executionRef: msg.toolExecutionRef } : {}) };
+  let inputDetail: string | undefined;
+  if (msg.toolInput !== undefined) {
+    try {
+      inputDetail = truncateDetail(JSON.stringify(msg.toolInput), 200);
+    } catch {
+      inputDetail = '[unserializable]';
+    }
+  }
   if (msg.type === 'tool_use') {
     const toolName = msg.toolName ?? 'unknown';
-    let detail: string | undefined;
-    if (msg.toolInput) {
-      try {
-        detail = truncateDetail(JSON.stringify(msg.toolInput), 200);
-      } catch {
-        detail = '[unserializable]';
-      }
-    }
     return {
       ...instance,
       type: 'tool_use',
@@ -977,7 +1001,7 @@ export function toStoredToolEvent(
       // R6 maintainer: persist native tool name as data field (decoupled from display label).
       // Hydrate prefers this for span naming; label parse becomes legacy fallback only.
       toolName,
-      ...(detail ? { detail } : {}),
+      ...(inputDetail !== undefined ? { detail: inputDetail } : {}),
       timestamp: msg.timestamp,
       ...(msg.toolUseId ? { toolUseId: msg.toolUseId } : {}),
       ...(msg.toolTracing ? { tracing: msg.toolTracing } : {}),
@@ -993,6 +1017,7 @@ export function toStoredToolEvent(
       type: 'tool_result',
       label: `${msg.catId as string} ← result`,
       detail,
+      ...(inputDetail !== undefined ? { inputDetail } : {}),
       timestamp: msg.timestamp,
       ...(msg.toolUseId ? { toolUseId: msg.toolUseId } : {}),
       ...(msg.toolResultStatus ? { status: msg.toolResultStatus } : {}),
@@ -1354,6 +1379,8 @@ export async function fetchAfterCursor(
 
 /** Options for caller-specified budget overrides */
 export interface IncrementalContextOptions {
+  /** Pending wakes cap recovery only; they remain visible in the actual projection. */
+  resolvePendingWakeMessageIds?: (messageIds: readonly string[]) => Promise<readonly string[]>;
   /**
    * Invocation-owned history ceiling for the token-trim pass.
    * The routing layer should calculate this as:
@@ -1434,7 +1461,7 @@ function projectVisibleMessages(messages: readonly StoredMessage[]) {
   );
 }
 
-type SameRouteBoundaryCap = { active: false } | { active: true; boundary: CanonicalVisibilityCursor | undefined };
+type IncrementalBoundaryCap = { active: false } | { active: true; boundary: CanonicalVisibilityCursor | undefined };
 
 interface SameRouteIsolationContext {
   readonly laterUserTurnBoundary?: CanonicalVisibilityCursor;
@@ -1491,17 +1518,14 @@ function incrementalDeferralReason(
   return undefined;
 }
 
-function resolveSameRouteBoundaryCap(
+function resolveIncrementalBoundaryCap(
   unseen: StoredMessage[],
   cursor: string | undefined,
   catId: CatId,
   playMode: boolean,
   options: IncrementalContextOptions | undefined,
   isolation: SameRouteIsolationContext,
-): SameRouteBoundaryCap {
-  if (!playMode || (!options?.sameRouteOutputMessageIds?.size && !options?.sameUserWaveTriggerMessageId)) {
-    return { active: false };
-  }
+): IncrementalBoundaryCap {
   const firstWithheldIndex = unseen.findIndex(
     (message) => incrementalDeferralReason(message, catId, playMode, options, isolation) !== undefined,
   );
@@ -1511,7 +1535,7 @@ function resolveSameRouteBoundaryCap(
     firstWithheldIndex === 0 ? cursor : cursorFor(unseen[firstWithheldIndex - 1] as StoredMessage);
   return {
     active: true,
-    boundary: canonicalDeferredBoundary(precedingCursor, 'same-route-withheld-predecessor'),
+    boundary: canonicalDeferredBoundary(precedingCursor, 'incremental-withheld-predecessor'),
   };
 }
 
@@ -1598,9 +1622,9 @@ function isVisibleTargetTrigger(trigger: StoredMessage | null, threadId: string,
   );
 }
 
-function clampToSameRouteBoundaryCap(
+function clampToIncrementalBoundaryCap(
   candidate: CanonicalVisibilityCursor | undefined,
-  cap: SameRouteBoundaryCap,
+  cap: IncrementalBoundaryCap,
 ): CanonicalVisibilityCursor | undefined {
   if (!cap.active) return candidate;
   if (!candidate || !cap.boundary) return undefined;
@@ -1623,7 +1647,7 @@ async function resolveRecentFilesTouched(
   try {
     const activeSession = await Promise.resolve(sessionChainStore.getActive(catId, threadId, userId));
     if (isHomeSession(activeSession) && activeSession.userId === userId) {
-      return transcriptWriter.getFilesTouched(activeSession.id, { threadId, catId });
+      return await transcriptWriter.getFilesTouched(activeSession.id, { threadId, catId });
     }
 
     const threadSessions = await Promise.resolve(sessionChainStore.getChainByThread(threadId));
@@ -1634,8 +1658,9 @@ async function resolveRecentFilesTouched(
           isHomeSession(session) && session.status === 'active' && session.catId === catId && session.userId === userId,
       );
     if (!callerSession) return [];
-    return transcriptWriter.getFilesTouched(callerSession.id, { threadId, catId: callerSession.catId });
+    return await transcriptWriter.getFilesTouched(callerSession.id, { threadId, catId: callerSession.catId });
   } catch {
+    log.warn({ threadId, catId }, 'Optional recent file observations unavailable; preserving authoritative context');
     return [];
   }
 }
@@ -1758,9 +1783,17 @@ async function assembleIncrementalContextInternal(
       }
     }
   }
-  const loadedUnseen = await fetchAfterCursor(deps.messageStore, threadId, cursor, userId);
-  const deliveryRecovery = recoverableDeliveryBoundary(loadedUnseen, { userId, threadId, catId });
-  let unseen = loadedUnseen;
+  const fetchedUnseen = await fetchAfterCursor(deps.messageStore, threadId, cursor, userId);
+  // Public speech stays in the unread projection. Queue coverage is committed
+  // for the exact fully projected IDs before the provider sees this prompt.
+  const loadedUnseen = fetchedUnseen;
+  const pendingWakes = new Set(
+    await options?.resolvePendingWakeMessageIds?.(fetchedUnseen.map((message) => message.id)),
+  );
+  const firstPending = fetchedUnseen.findIndex((message) => pendingWakes.has(message.id));
+  const recoveryPrefix = firstPending < 0 ? fetchedUnseen : fetchedUnseen.slice(0, firstPending);
+  const deliveryRecovery = recoverableDeliveryBoundary(recoveryPrefix, { userId, threadId, catId });
+  let unreadCandidates = fetchedUnseen;
   if (deliveryRecovery.cursor && (!cursor || compareCursors(deliveryRecovery.cursor, cursor) > 0)) {
     try {
       await deps.deliveryCursorStore.ackCursor(userId, catId, threadId, deliveryRecovery.cursor);
@@ -1768,13 +1801,14 @@ async function assembleIncrementalContextInternal(
       // when another reader has already advanced the durable slot further.
       cursor = deliveryRecovery.cursor;
       const recoveredCursor = cursor;
-      unseen = loadedUnseen.filter(
+      unreadCandidates = fetchedUnseen.filter(
         (message) => message.visibilitySeq === undefined || compareCursors(cursorFor(message), recoveredCursor) > 0,
       );
     } catch (err) {
       log.warn({ err, catId, threadId }, 'Delivery boundary recovery failed; retaining unread context');
     }
   }
+  const unseen = unreadCandidates;
 
   // Debug mode: cats see all whispers (full transparency). Play mode: cats only see their own whispers.
   const playMode = thinkingMode !== 'debug';
@@ -1793,8 +1827,8 @@ async function assembleIncrementalContextInternal(
       sameRouteOutputMessageIds: options?.sameRouteOutputMessageIds,
     }),
   };
-  const sameRouteBoundaryCap = resolveSameRouteBoundaryCap(
-    unseen,
+  const incrementalBoundaryCap = resolveIncrementalBoundaryCap(
+    unreadCandidates,
     cursor,
     catId,
     playMode,
@@ -1894,6 +1928,27 @@ async function assembleIncrementalContextInternal(
       const tasks = await Promise.resolve(deps.taskStore.listByThread(threadId));
       activeTasks = summarizeActiveTasks(tasks);
       allThreadTasks = tasks;
+      if (deps.ownedWaitStatusReader) {
+        try {
+          const hasActiveWait = await deps.ownedWaitStatusReader({ userId, threadId, catId }, tasks);
+          if (hasActiveWait !== undefined) {
+            const ownedIds = new Set(
+              tasks
+                .filter(
+                  (task) =>
+                    task.kind === 'work' &&
+                    task.userId === userId &&
+                    task.threadId === threadId &&
+                    task.ownerCatId === catId,
+                )
+                .map((task) => task.id),
+            );
+            activeTasks = activeTasks.map((task) => (ownedIds.has(task.id) ? { ...task, hasActiveWait } : task));
+          }
+        } catch {
+          // Unknown wait state must not erase the existing Task/navigation context.
+        }
+      }
     } catch {
       // fail-open: tasks stay empty
     }
@@ -1946,9 +2001,15 @@ async function assembleIncrementalContextInternal(
       };
     }
   }
+  const roadmap =
+    threadStore && options?.contextProjection?.contextMode !== 'hot'
+      ? await readNavigationRoadmap(threadStore, userId, threadId)
+      : undefined;
   const navigationHeader = formatNavigationHeader({
     threadId,
     currentCatId: catId,
+    recentWorkDirectory: Boolean(threadStore) && options?.contextProjection?.contextMode !== 'hot',
+    ...(roadmap ? { roadmapPointer: formatRoadmapPointer(roadmap) } : {}),
     baton,
     tasks: activeTasks,
     ...(executionSituation ? { executionSituation } : {}),
@@ -2016,7 +2077,7 @@ async function assembleIncrementalContextInternal(
       rankedSources,
       storedLedgerArtifacts,
       viewer,
-      sameRouteBoundaryCap,
+      incrementalBoundaryCap,
       contextMode ?? 'cold',
       deltaSize,
     );
@@ -2038,9 +2099,9 @@ async function assembleIncrementalContextInternal(
           contextText: options?.contextProjection
             ? `${formatContextProjection(options.contextProjection, deltaSize)}\n${navigationHeader}`
             : navigationHeader,
-          boundaryId: clampToSameRouteBoundaryCap(
+          boundaryId: clampToIncrementalBoundaryCap(
             canonicalDeferredBoundary(cursor, 'warm-empty-cursor'),
-            sameRouteBoundaryCap,
+            incrementalBoundaryCap,
           ),
           projectedMessageIds: [],
           exposedMessageIds: [],
@@ -2090,7 +2151,7 @@ async function assembleIncrementalContextInternal(
         formatPromptTime(epochMs, {
           nowMs: options.nowMs,
           includeAge: 'stale',
-          staleComparisonTimeZone: BRIEFING_TIMEZONE,
+          staleComparisonTimeZone: CO_CREATOR_TIME_ZONE,
         })
     : undefined;
   const lines = capped.map((m) => {
@@ -2114,9 +2175,9 @@ async function assembleIncrementalContextInternal(
     const zeroBudgetDegradation = `⚠️ 增量上下文预算耗尽: 系统提示已占满 prompt 预算，${capped.length} 条未读消息全部丢弃`;
     // #1200/#3444: only canonical evidence may enter the deferred ACK slot.
     const zeroLastMsg = capped[capped.length - 1];
-    const zeroBoundaryId = clampToSameRouteBoundaryCap(
+    const zeroBoundaryId = clampToIncrementalBoundaryCap(
       canonicalDeferredBoundary(zeroLastMsg ? cursorFor(zeroLastMsg) : undefined, 'warm-zero-budget-tail'),
-      sameRouteBoundaryCap,
+      incrementalBoundaryCap,
     );
     return {
       ...projectionOutput,
@@ -2170,9 +2231,9 @@ async function assembleIncrementalContextInternal(
           contextText: options?.contextProjection
             ? `${formatContextProjection(options.contextProjection, deltaSize)}\n${navigationHeader}`
             : navigationHeader,
-          boundaryId: clampToSameRouteBoundaryCap(
+          boundaryId: clampToIncrementalBoundaryCap(
             canonicalDeferredBoundary(cursor, 'warm-trimmed-empty-cursor'),
-            sameRouteBoundaryCap,
+            incrementalBoundaryCap,
           ),
           projectedMessageIds: [],
           exposedMessageIds: [],
@@ -2201,9 +2262,9 @@ async function assembleIncrementalContextInternal(
   // #1200/#3444: cursorFor remains graded for general consumers; this producer
   // admits only the canonical branch into deferred delivery state.
   const lastCappedMsg = finalCapped[finalCapped.length - 1];
-  const boundaryId = clampToSameRouteBoundaryCap(
+  const boundaryId = clampToIncrementalBoundaryCap(
     canonicalDeferredBoundary(lastCappedMsg ? cursorFor(lastCappedMsg) : undefined, 'warm-visible-tail'),
-    sameRouteBoundaryCap,
+    incrementalBoundaryCap,
   );
   return {
     ...projectionOutput,
@@ -2245,7 +2306,7 @@ async function assembleSmartWindowContext(
   rankedSources: import('./source-ranking.js').RankedSource[],
   preReadStoredArtifacts: import('./artifact-tracking.js').RecentArtifact[],
   viewer: { type: 'cat'; catId: CatId } | { type: 'user' },
-  sameRouteBoundaryCap: SameRouteBoundaryCap,
+  incrementalBoundaryCap: IncrementalBoundaryCap,
   contextMode: 'cold' | 'hot',
   deltaSize: 'small' | 'large',
 ): Promise<IncrementalContextResult> {
@@ -2353,7 +2414,7 @@ async function assembleSmartWindowContext(
             if (estimateTokens(summary.slice(0, mid)) <= hcConfig.maxThreadMemoryTokens) lo = mid;
             else hi = mid - 1;
           }
-          summary = `${summary.slice(0, lo)}…`;
+          summary = `${sliceUnicodeSafe(summary, 0, lo)}…`;
         }
         threadMemorySummary = summary;
         // storedFileArtifacts already pre-read via preReadStoredArtifacts (G1→G2 bridge)
@@ -2443,7 +2504,7 @@ async function assembleSmartWindowContext(
         formatPromptTime(epochMs, {
           nowMs: options.nowMs,
           includeAge: 'stale',
-          staleComparisonTimeZone: BRIEFING_TIMEZONE,
+          staleComparisonTimeZone: CO_CREATOR_TIME_ZONE,
         })
     : undefined;
   const burstLines = scrubbedBurst.map((m) => {
@@ -2463,9 +2524,9 @@ async function assembleSmartWindowContext(
   // #1200/#3444: cursorFor remains graded for general consumers; this producer
   // admits only the canonical branch into deferred delivery state.
   const lastRelevantMsg = relevant[relevant.length - 1];
-  const boundaryId = clampToSameRouteBoundaryCap(
+  const boundaryId = clampToIncrementalBoundaryCap(
     canonicalDeferredBoundary(lastRelevantMsg ? cursorFor(lastRelevantMsg) : undefined, 'cold-visible-tail'),
-    sameRouteBoundaryCap,
+    incrementalBoundaryCap,
   );
   const directiveSource = selectDirectiveSources(rankedSources)[0];
   const navigationPresentations = [

@@ -148,15 +148,6 @@ export const CORE_COMMANDS: readonly SlashCommandDefinition[] = [
     surface: 'web',
     source: 'core',
   },
-  // --- game (both surfaces) ---
-  {
-    name: '/game',
-    usage: '/game werewolf [player|god-view] [voice]',
-    description: '开始狼人杀游戏',
-    category: 'game',
-    surface: 'both',
-    source: 'core',
-  },
   // --- connector ---
   {
     name: '/commands',

@@ -74,7 +74,7 @@ export function V2WorkbenchTabStrip({ props }: { props: F307WorkbenchTabsProps }
   const root = useRef<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(0);
   const surfaces = props.layout.surfaces;
-  const labels = workbenchTabLabels(surfaces, t.modeTabs, t.voiceSurface.label);
+  const labels = workbenchTabLabels(surfaces, t.modeTabs, t.voiceSurface.label, t.statusSurface.label);
   const measureKey = JSON.stringify([
     surfaces.map((surface) => [surface.id, labels.get(surface.id)]),
     props.layout.activeSurfaceId,

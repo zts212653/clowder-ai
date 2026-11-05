@@ -5,6 +5,7 @@
   min-height: 0;
   overflow: hidden;
   background: var(--cafe-surface-canvas);
+  --chat-background-role: cafe-canvas;
   color: var(--cafe-text);
 }
 .topbar {
@@ -104,6 +105,7 @@
   overflow: hidden;
   border-radius: 16px;
   background: var(--cafe-surface-elevated);
+  --chat-background-role: cafe-elevated;
 }
 .imageWorkspace {
   overflow: hidden;
@@ -113,10 +115,12 @@
   margin: 0;
   border-radius: 0;
   background: var(--cafe-surface-sunken);
+  --chat-background-role: cafe-sunken;
 }
 /* The desk is darker than its paper controls in both themes; dark roles do not follow light token names. */
 :global([data-theme="dark"]) .imageArtwork {
   background: var(--cafe-surface-elevated);
+  --chat-background-role: cafe-elevated;
 }
 .imageArtwork .media {
   margin: 44px 12px 72px;
@@ -215,6 +219,7 @@
   border-radius: 99px;
   padding: 5px 11px;
   background: var(--cafe-surface-canvas);
+  --chat-background-role: cafe-canvas;
   box-shadow: var(--shadow-elevation-1);
   color: var(--cafe-text-muted);
   text-align: center;
@@ -238,6 +243,7 @@
   border: 1px solid var(--cafe-border-subtle);
   border-radius: 18px;
   background: var(--cafe-surface-canvas);
+  --chat-background-role: cafe-canvas;
   box-shadow: var(--shadow-elevation-3);
 }
 .drawerHeader {
@@ -264,6 +270,32 @@
   overscroll-behavior: contain;
   padding: 16px;
 }
+.videoWorkspace {
+  padding-right: 280px;
+}
+.videoWorkspace .drawer {
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 280px;
+  border-radius: 0;
+  box-shadow: none;
+}
+.videoWorkspace .artwork {
+  min-height: min(340px, 45vh);
+  margin: 0;
+  border-radius: 0;
+}
+@media (max-width: 900px) {
+  .videoWorkspace {
+    padding-right: 0;
+  }
+  .videoWorkspace .drawer {
+    position: relative;
+    flex: 0 0 220px;
+    width: 100%;
+  }
+}
 .badgeButton {
   display: flex;
   height: 32px;
@@ -273,6 +305,7 @@
   border-radius: 99px;
   border: 1px solid var(--cafe-border-subtle);
   background: var(--cafe-surface-canvas);
+  --chat-background-role: cafe-canvas;
   color: var(--semantic-info);
   font-size: var(--console-font-label);
   box-shadow: var(--shadow-elevation-1);

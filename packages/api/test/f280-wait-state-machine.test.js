@@ -8,7 +8,7 @@ function activeAwait(overrides = {}) {
   return {
     v: 1,
     generation: 4,
-    subjectRef: 'pr:zts212653/cat-cafe#3300',
+    subjectRef: 'pr:zts212653/clowder-ai#3300',
     ownerFence: { kind: 'containing_task', generation: 4 },
     baseline: {
       capturedAt: 100,

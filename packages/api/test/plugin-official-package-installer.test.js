@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 import { access, mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -23,8 +22,6 @@ import {
   releaseFence,
 } from './plugin-official-package-installer.fixture.js';
 
-const packageJson = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
-
 test('installs only the exact catalog artifact and admits schemas from those bytes', async () => {
   const archive = await packageArchive();
   const { packagesRoot, store, installer } = await harness(archive);
@@ -34,7 +31,6 @@ test('installs only the exact catalog artifact and admits schemas from those byt
   assert.deepEqual(installed, {
     pluginInstanceId: 'pi_official',
     packageDigest: archive.integrity,
-    grantRevision: 1,
   });
   const snapshot = await store.snapshot();
   assert.equal(snapshot.packages.length, 1);
@@ -55,9 +51,10 @@ test('installs only the exact catalog artifact and admits schemas from those byt
   await access(join(packagesRoot, packageDirectoryName(archive.integrity), 'package.tgz'));
 });
 
-test('installs a package built against the exact consumed prerelease contract', async () => {
+test('installs a package declaring the contract implemented by this Host', async () => {
   const packageManifest = manifest({
-    contractVersion: packageJson.dependencies['@clowder-ai/plugin-contract'],
+    // A plugin may explicitly require the protocol implemented by this build.
+    contractVersion: PLUGIN_CONTRACT_PACKAGE_VERSION,
   });
   const archive = await packageArchive({ packageManifest });
   const entry = catalogEntry(archive.integrity);
@@ -68,30 +65,49 @@ test('installs a package built against the exact consumed prerelease contract', 
   assert.equal((await store.snapshot()).packages[0].contractVersion, PLUGIN_CONTRACT_PACKAGE_VERSION);
 });
 
-test('quarantines a catalog package rejected by the Host contract allowlist', async () => {
-  const packageManifest = manifest({ contractVersion: '0.1.0-beta.14' });
-  const archive = await packageArchive({ packageManifest });
-  const entry = catalogEntry(archive.integrity);
-  const { packagesRoot, inventory, store } = await harness(archive, entry);
-  const quarantines = new FilePluginPackageQuarantineStore(join(packagesRoot, 'quarantines.json'), {
-    now: () => 10_000,
-  });
-  const installer = new OfficialPluginPackageInstaller({
-    inventory,
-    packagesRoot,
-    catalog: [entry],
-    fetchArchive: async () => archive.bytes,
-    quarantine: quarantines,
-  });
+for (const contractVersion of ['0.1.0-beta.14', '0.3.1-beta.1', '0.3.1-candidate.1', '0.3.1', '0.3.2-beta.1']) {
+  test(`installs the in-range historical declaration ${contractVersion}`, async () => {
+    const archive = await packageArchive({ packageManifest: manifest({ contractVersion }) });
+    const entry = catalogEntry(archive.integrity);
+    const { store, installer } = await harness(archive, entry);
 
-  await assert.rejects(installer.install(entry.catalogId, releaseFence(entry)), isInstallError('INVENTORY_REJECTED'));
+    const installed = await installer.install(entry.catalogId, releaseFence(entry));
 
-  assert.equal((await store.snapshot()).instances.length, 0);
-  const [rejected] = await quarantines.list();
-  assert.equal(rejected.pluginId, entry.pluginId);
-  assert.equal(rejected.packageDigest, archive.integrity);
-  assert.equal(rejected.failure.code, 'CONTRACT_VERSION_MISMATCH');
-});
+    const snapshot = await store.snapshot();
+    assert.equal(snapshot.packages[0].manifest.contractVersion, contractVersion);
+    assert.equal(snapshot.instances[0].pluginInstanceId, installed.pluginInstanceId);
+    assert.equal(snapshot.packages[0].packageDigest, archive.integrity);
+  });
+}
+
+for (const contractVersion of ['0.1.0-beta.12', '0.3.2-candidate.1', '0.3.2']) {
+  test(`quarantines ${contractVersion} outside the Host supported contract range`, async () => {
+    const packageManifest = manifest({ contractVersion });
+    const archive = await packageArchive({ packageManifest });
+    const entry = catalogEntry(archive.integrity);
+    const { packagesRoot, inventory, store } = await harness(archive, entry);
+    const quarantines = new FilePluginPackageQuarantineStore(join(packagesRoot, 'quarantines.json'), {
+      now: () => 10_000,
+    });
+    const installer = new OfficialPluginPackageInstaller({
+      inventory,
+      packagesRoot,
+      catalog: [entry],
+      fetchArchive: async () => archive.bytes,
+      quarantine: quarantines,
+    });
+
+    await assert.rejects(installer.install(entry.catalogId, releaseFence(entry)), isInstallError('INVENTORY_REJECTED'));
+
+    const snapshot = await store.snapshot();
+    assert.deepEqual(snapshot.instances, []);
+    assert.deepEqual(snapshot.packages, []);
+    const [rejected] = await quarantines.list();
+    assert.equal(rejected.pluginId, entry.pluginId);
+    assert.equal(rejected.packageDigest, archive.integrity);
+    assert.equal(rejected.failure.code, 'CONTRACT_VERSION_MISMATCH');
+  });
+}
 
 test('same exact catalog install is idempotent and does not mint a second instance', async () => {
   const archive = await packageArchive();
@@ -150,7 +166,6 @@ test('explicit update replaces a stopped older package in place and preserves it
   assert.deepEqual(updated, {
     pluginInstanceId: 'pi_official',
     packageDigest: nextArchive.integrity,
-    grantRevision: 2,
   });
   const snapshot = await store.snapshot();
   assert.equal(snapshot.instances.filter((instance) => instance.lifecycleState === 'installed').length, 1);

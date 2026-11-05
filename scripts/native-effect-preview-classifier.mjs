@@ -36,8 +36,10 @@ export function managedPreviewOperationDecision(raw, shellCwd) {
   const invocation = parseManagedPreviewInvocation(tokens);
   if (invocation === INVALID_MANAGED_PREVIEW) return deniedPreview();
   if (!invocation) return null;
-  if (targetsRuntimeSanctuary(invocation.packageCwd)) return deniedPreview();
-  if (targetsRuntimeSanctuary(invocation.options.get('--cwd'))) return deniedPreview();
+  for (const path of [invocation.packageCwd, invocation.options.get('--cwd')]) {
+    if (targetsRuntimeSanctuary(path))
+      return { ...deniedPreview(), target: { kind: 'runtime_sanctuary', value: physicalDirectory(path) } };
+  }
   const namedAlpha = namedAlphaPreviewDecision(invocation, shellCwd);
   if (namedAlpha?.status === 'unregistered') {
     const observation = unregisteredPreviewStatus(invocation, shellCwd);

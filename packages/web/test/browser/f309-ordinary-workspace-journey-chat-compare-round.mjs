@@ -52,12 +52,14 @@ const TASK_CONTEXT = {
 };
 const conversation = (length, timestamp) =>
   Array.from({ length }, (_, index) => ({
+    from: { kind: 'user', userId: 'operator' },
     id: `round-${timestamp}-${index}`,
     type: 'user',
     content: `${timestamp === 0 ? '较早' : '之后'}的一条对话 ${index + 1}`,
     timestamp,
   }));
 const sentMessage = {
+  from: { kind: 'user', userId: 'operator' },
   id: SENT_ID,
   type: 'user',
   content: '请处理这一处',
@@ -80,6 +82,7 @@ const sentMessage = {
   ],
 };
 const receiptMessage = {
+  from: { kind: 'system', service: 'content-modification' },
   id: RECEIPT_ID,
   type: 'system',
   catId: null,
@@ -103,6 +106,7 @@ const receiptMessage = {
   },
 };
 const nativeMessage = {
+  from: { kind: 'agent', catId: 'codex-terra' },
   id: NATIVE_ID,
   type: 'assistant',
   catId: 'codex-terra',
@@ -366,10 +370,12 @@ export function registerOrdinaryChatCompareRoundJourney(suite) {
         const { context, page, calls, errors } = await open({ native: true, width, dark: width === 390 });
         try {
           const compare = await openComparison(page, calls);
-          await compare.getByRole('button', { name: '返回来源', exact: true }).click();
+          await compare.getByRole('button', { name: '返回作品', exact: true }).click();
+          await page.getByRole('button', { name: '‹ 聊天', exact: true }).click();
           // Direct receipt reentry remains the working control.
           await openComparison(page, calls);
-          await compare.getByRole('button', { name: '返回来源', exact: true }).click();
+          await compare.getByRole('button', { name: '返回作品', exact: true }).click();
+          await page.getByRole('button', { name: '‹ 聊天', exact: true }).click();
           await page
             .locator(`[data-message-id="${NATIVE_ID}"]`)
             .getByRole('button', { name: '打开作品 图片', exact: true })
@@ -383,7 +389,7 @@ export function registerOrdinaryChatCompareRoundJourney(suite) {
           );
           if (closeNative) {
             await page.getByRole('button', { name: /^关闭 图片/ }).click();
-          } else await round.getByRole('button', { name: '返回', exact: true }).click();
+          } else await round.getByRole('button', { name: '‹ 聊天', exact: true }).click();
           await receiptLine(page).getByRole('button', { name: '打开对照', exact: true }).click();
           await page.getByTestId('artifact-media-compare').waitFor({ state: 'visible', timeout: 10_000 });
           assert.equal(
@@ -547,7 +553,8 @@ export function registerOrdinaryChatCompareRoundJourney(suite) {
         });
         await page.waitForTimeout(500);
         assert.equal(await page.evaluate(receiptInChat, RECEIPT_ID), false, 'the receipt starts out of sight');
-        await compare.getByRole('button', { name: '返回来源', exact: true }).click();
+        await compare.getByRole('button', { name: '返回作品', exact: true }).click();
+        await page.getByRole('button', { name: '‹ 聊天', exact: true }).click();
         await page.waitForFunction(receiptInChat, RECEIPT_ID, { timeout: 15_000 });
         assert.equal(
           await page.evaluate(() => window.__chatBeforeOpen === document.querySelector('[data-chat-container]')),
@@ -635,11 +642,13 @@ export function registerOrdinaryChatCompareRoundJourney(suite) {
           const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
           assert.ok(overflow <= 0, `${label}: no horizontal overflow, got ${overflow}px`);
           const windowHeight = page.viewportSize()?.height ?? 0;
-          // The way back to the work and to the conversation are on screen, and nothing covers the first line.
-          for (const name of ['返回作品', '返回来源']) {
-            const box = await compare.getByRole('button', { name, exact: true }).boundingBox();
-            assert.ok(box && box.y >= 0 && box.y + box.height <= windowHeight, `${label}: ${name} is in view`);
-          }
+          // Comparison returns through the work's original source action.
+          const back = compare.getByRole('button', { name: '返回作品', exact: true });
+          const backBox = await back.boundingBox();
+          assert.ok(
+            backBox && backBox.y >= 0 && backBox.y + backBox.height <= windowHeight,
+            `${label}: 返回作品 is in view`,
+          );
           const words = compare.locator('p, button, label, figcaption, summary, output, h3, span, select');
           let measured = 0;
           const unreadable = [];
@@ -661,6 +670,14 @@ export function registerOrdinaryChatCompareRoundJourney(suite) {
           assert.ok(measured >= 5, `${label}: measured ${measured} words`);
           await writeFile(roundContrast.file, `${JSON.stringify(roundContrast.values, null, 2)}\n`);
           await page.screenshot({ path: `${EVIDENCE}/round-compare-${slug}.png` });
+          await back.click();
+          const source = page.getByRole('button', { name: '‹ 聊天', exact: true });
+          const sourceBox = await source.boundingBox();
+          assert.ok(
+            sourceBox && sourceBox.y >= 0 && sourceBox.y + sourceBox.height <= windowHeight,
+            `${label}: the original conversation return is in view after leaving comparison`,
+          );
+          await source.click();
           assert.deepEqual(errors, []);
         } finally {
           await context.close();

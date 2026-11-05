@@ -12,6 +12,8 @@ export interface ApprovalCardDetails {
 
 interface ApprovalCardShellProps {
   testId: string;
+  /** A containing row already provides the title, source header, and card frame. */
+  embedded?: boolean;
   header?: ReactNode;
   title: string;
   titleLines?: 2 | 3 | 4;
@@ -26,6 +28,7 @@ interface ApprovalCardShellProps {
 /** F305 shared reading order for pending and settled approval records. */
 export function ApprovalCardShell({
   testId,
+  embedded = false,
   header,
   title,
   titleLines = 3,
@@ -40,22 +43,24 @@ export function ApprovalCardShell({
 
   return (
     <article
-      className={`overflow-hidden rounded-xl border border-cafe bg-cafe-surface shadow-sm ${className}`.trim()}
+      className={`${embedded ? '' : 'overflow-hidden rounded-xl border border-cafe bg-cafe-surface shadow-sm'} ${className}`.trim()}
       data-approval-card-shell="true"
       data-testid={testId}
     >
-      <div className="space-y-3 p-3">
-        {header && <header>{header}</header>}
+      <div className={embedded ? 'space-y-3' : 'space-y-3 p-3'}>
+        {!embedded && header && <header>{header}</header>}
 
         <div className="space-y-1.5">
-          <div data-testid={titleTestId}>
-            <ExpandableProse
-              as="h3"
-              text={title}
-              lines={titleLines}
-              contentClassName="text-sm font-semibold leading-snug text-cafe"
-            />
-          </div>
+          {!embedded && (
+            <div data-testid={titleTestId}>
+              <ExpandableProse
+                as="h3"
+                text={title}
+                lines={titleLines}
+                contentClassName="text-sm font-semibold leading-snug text-cafe"
+              />
+            </div>
+          )}
           {context}
         </div>
 

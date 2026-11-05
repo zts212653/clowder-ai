@@ -15,11 +15,11 @@ import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import {
   captureProcessIdentity,
-  captureReadableIdentity,
+  captureSpawnedIdentity,
+  compareStableBirth,
   identityInspectionIsUnreadable,
   inspectProcessIdentity,
   observeProcessIdentity,
-  spawnedIdentityRefusal,
   waitUntilIdentityGone,
 } from './process-identity.mjs';
 
@@ -105,15 +105,13 @@ export function writeDaemonState({
   ports,
   captureIdentity = captureProcessIdentity,
 }) {
+  const expectedRoot = canonicalPath(projectRoot);
   let identity;
   try {
-    identity = captureReadableIdentity(pid, { capture: captureIdentity });
+    identity = captureSpawnedIdentity(pid, expectedRoot, launchToken, { capture: captureIdentity });
   } catch (error) {
     throw new DaemonStateError(error.reason ?? 'spawned-process-identity-unreadable', error.message, error.details);
   }
-  const expectedRoot = canonicalPath(projectRoot);
-  const refusal = spawnedIdentityRefusal(pid, identity, expectedRoot, launchToken);
-  if (refusal) throw new DaemonStateError(refusal.reason, refusal.message, refusal.details);
   const state = stateFromIdentity({
     pid,
     identity,
@@ -220,7 +218,11 @@ function refuseUnverifiedStop(paths, pid) {
  */
 function matchesExpectedIdentity(expected, state, identity) {
   if (expected.pid !== state.pid) return false;
-  if (expected.startedAt && identity?.startedAt && expected.startedAt !== identity.startedAt) return false;
+  const stableBirth = compareStableBirth(expected, identity);
+  if (stableBirth === false) return false;
+  if (stableBirth !== true && expected.startedAt && identity?.startedAt && expected.startedAt !== identity.startedAt) {
+    return false;
+  }
   return !(expected.command && identity?.command && expected.command !== identity.command);
 }
 

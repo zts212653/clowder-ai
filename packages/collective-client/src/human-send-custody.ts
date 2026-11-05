@@ -35,8 +35,9 @@ export function collectiveClientNamespace(snapshot: {
   meta?: { serviceInstanceId: string };
   collective?: { collectiveId: string };
   me?: { human: { humanId: string } };
+  restrictedScope?: unknown;
 }) {
-  return snapshot.meta && snapshot.collective && snapshot.me
+  return !snapshot.restrictedScope && snapshot.meta && snapshot.collective && snapshot.me
     ? `${snapshot.meta.serviceInstanceId}:${snapshot.collective.collectiveId}:${snapshot.me.human.humanId}`
     : undefined;
 }

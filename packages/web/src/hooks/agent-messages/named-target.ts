@@ -1,3 +1,4 @@
+import { isCloudBridgeReturnV1 } from '@cat-cafe/shared';
 import type { NamedMessageStore, NamedMessageTarget, StreamTextWrite } from '@/hooks/named-message-writer';
 import type { ChatMessage } from '@/stores/chat-types';
 import { isMessageTimelineActive } from '@/stores/message-timeline';
@@ -84,6 +85,7 @@ export function callbackPost(msg: AgentEventFields, timestamp: number): ChatMess
   if (!msg.messageId) return undefined;
   const turn = msg.turnInvocationId && msg.turnInvocationId !== msg.invocationId ? msg.turnInvocationId : undefined;
   const extra: NonNullable<ChatMessage['extra']> = {
+    ...(isCloudBridgeReturnV1(msg.extra?.cloudBridgeReturn) ? { cloudBridgeReturn: msg.extra.cloudBridgeReturn } : {}),
     ...(msg.extra?.crossPost ? { crossPost: msg.extra.crossPost } : {}),
     ...(msg.extra?.isExplicitPost ? { isExplicitPost: true } : {}),
     ...(msg.extra?.targetCats ? { targetCats: msg.extra.targetCats } : {}),

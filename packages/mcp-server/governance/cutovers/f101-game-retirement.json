@@ -1,0 +1,49 @@
+{
+  "resource": {
+    "kind": "family",
+    "resourceFamily": "game"
+  },
+  "retiredNames": ["cat_cafe_submit_game_action"],
+  "canonicalNames": [],
+  "expectedProfiles": {},
+  "rollbackRevision": "c6df09be4c789fe091f8105a244ad853402dd18d",
+  "layers": {
+    "mcp-definition": {
+      "status": "covered",
+      "consumers": ["packages/mcp-server/src/tools/index.ts", "packages/api/src/routes/callbacks.ts"]
+    },
+    "runtime-catalog-profile": {
+      "status": "covered",
+      "consumers": [
+        "packages/mcp-server/src/canonical-server-tools.ts",
+        "packages/mcp-server/governance/mcp-surface-baseline.json"
+      ]
+    },
+    "prompt-l0": {
+      "status": "covered",
+      "consumers": ["assets/prompt-templates/c1-mcp-callback.md"]
+    },
+    "fixture-test": {
+      "status": "covered",
+      "consumers": [
+        "packages/mcp-server/test/legacy-game-retirement.test.js",
+        "packages/mcp-server/test/tool-registration.test.js",
+        "packages/mcp-server/test/desktop-mode.test.ts"
+      ]
+    },
+    "skill-convention": {
+      "status": "covered",
+      "consumers": ["cat-cafe-skills/refs/mcp-callbacks.md"]
+    },
+    "eval": {
+      "status": "not-applicable",
+      "rationale": "No live consumers in this layer; the fixed-root scan verifies retirement. Historical documents remain outside the executable surface.",
+      "absenceEvidence": ["cat_cafe_submit_game_action"]
+    },
+    "observability": {
+      "status": "not-applicable",
+      "rationale": "No live consumers in this layer; the fixed-root scan verifies retirement. Historical documents remain outside the executable surface.",
+      "absenceEvidence": ["cat_cafe_submit_game_action"]
+    }
+  }
+}

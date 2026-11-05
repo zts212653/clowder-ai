@@ -3,6 +3,25 @@ import type { WorkspaceSurfaceDescriptor } from './workbench-contract';
 
 // Architecture cell: hub-action-surface. This controller changes projection only; owners keep their state.
 
+export function enterArtifactWorkMode(threadId: string, surface: WorkspaceSurfaceDescriptor): void {
+  const store = useF307ExperienceWorkbenchStore.getState();
+  if (store.layout.activeSurfaceId !== surface.id) return;
+  store.exitMainAreaAttention();
+  store.dispatchArtifactWorkPresentation({
+    type: 'begin',
+    initiator: 'user',
+    threadId,
+    surfaceId: surface.id,
+    workMode: true,
+    returnHandle: {
+      host: { owner: 'chat-container', key: threadId },
+      workbench: { owner: 'f307-experience-workbench', key: surface.id },
+      chatReadingRef: null,
+      client: surface.ownerStateRef,
+    },
+  });
+}
+
 export function toggleArtifactWorkFullWindow(threadId: string, surface: WorkspaceSurfaceDescriptor): void {
   const store = useF307ExperienceWorkbenchStore.getState();
   store.exitMainAreaAttention();

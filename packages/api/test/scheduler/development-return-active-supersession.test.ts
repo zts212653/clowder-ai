@@ -5,6 +5,7 @@ import { canonicalizeActionTerminalPredicate } from '../../src/domains/ball-cust
 import {
   claimActionSuccessor,
   recordActionSuccessorOutcome,
+  recoverOrphanActionSuccessorCarrier,
   replaceActionSuccessor,
 } from '../../src/domains/ball-custody/action-successor-state-machine.js';
 import { DynamicTaskStore } from '../../src/infrastructure/scheduler/DynamicTaskStore.js';
@@ -66,6 +67,51 @@ function initialReplacementLease(f: Awaited<ReturnType<typeof fixture>>) {
   });
   assert.equal(replaced.outcome, 'replaced');
   return replaced.lease;
+}
+
+function initialOrphanRecoveryLease(f: Awaited<ReturnType<typeof fixture>>) {
+  const subjectRef = `subject:task:${f.input.taskId}`;
+  const terminalPredicate = canonicalizeActionTerminalPredicate({
+    actionFamily: 'implement',
+    subjectRef,
+    predicate: { kind: 'task_done' },
+  });
+  const delegateEvidenceRef =
+    `proposal:${f.child.createdFromProposalId}` + `:approved:thread:${f.child.id}:cat:${ORIGINAL_DELEGATE_CAT}`;
+  const claimed = claimActionSuccessor(null, {
+    leaseId: 'lease-active-development-return-orphan-recovery',
+    tenantScope: f.actor.userId,
+    subjectRef,
+    actionFamily: 'implement',
+    successorSlot: 'implementer',
+    mode: 'single',
+    holderCatIds: [ORIGINAL_DELEGATE_CAT],
+    holderThreadId: f.child.id,
+    predecessorCatId: f.actor.catId,
+    predecessorThreadId: f.actor.threadId,
+    dispatchId: 'cross-post:legacy-orphan-development-delegate',
+    claimOrigin: 'structured_transfer',
+    issuerStandingEvidenceRef: 'callback:legacy-orphan-development-delegate',
+    evidenceRefs: [delegateEvidenceRef],
+    terminalPredicate,
+    now: f.service.now() - 100,
+  }).lease;
+  const recovered = recoverOrphanActionSuccessorCarrier(claimed, {
+    expectedGeneration: claimed.generation,
+    expectedRevision: claimed.revision,
+    taskId: f.input.taskId,
+    taskRevision: f.input.expectedRevision,
+    sourceMessageId: 'message:legacy-orphan-development-delegate',
+    predecessorCatId: f.actor.catId,
+    predecessorThreadId: f.actor.threadId,
+    holderCatId: ORIGINAL_DELEGATE_CAT,
+    holderThreadId: f.child.id,
+    dispatchId: 'cross-post:recovered-orphan-development-delegate',
+    evidenceRef: 'callback:recovered-orphan-development-delegate',
+    now: f.service.now() - 60,
+  });
+  assert.equal(recovered.outcome, 'recovered');
+  return recovered.lease;
 }
 
 function installLease(f: Awaited<ReturnType<typeof fixture>>, lease: ReturnType<typeof initialReplacementLease>) {
@@ -134,6 +180,29 @@ test('current g2 atomically supersedes the active g1 return and becomes the only
   assert.equal(oldBinaryStore.getPrivateExecutionReturn(first.registrationId), null);
   assert.equal(oldBinaryStore.getPrivateExecutionReturn(next.registrationId), null);
   assert.equal(oldBinaryStore.getById(next.registrationId)?.enabled, false);
+});
+
+test('orphan-recovered g2 atomically supersedes the active g1 return registration', async (t) => {
+  const f = await fixture(t, {
+    ownerCatId: 'codex-astra',
+    proposalDelegateCatId: ORIGINAL_DELEGATE_CAT,
+    catAuthoredProposalSource: true,
+    proposalTriggerCatId: 'codex-sol',
+  });
+  const first = await f.service.register(f.actor, f.input, 'strict');
+  assert.equal(first.status, 'waiting');
+  const lease = initialOrphanRecoveryLease(f);
+  installLease(f, lease);
+
+  const next = await f.service.register(f.actor, successorInput(f, first.registrationId, lease), 'strict');
+
+  assert.equal(f.service.read(first.registrationId)?.status, 'retired');
+  assert.equal(f.service.read(first.registrationId)?.reason, 'superseded');
+  assert.equal(next.status, 'waiting');
+  assert.deepEqual(next.reporterCatIds, [ORIGINAL_DELEGATE_CAT]);
+  assert.equal(next.predecessorRegistrationId, first.registrationId);
+  assert.equal(f.runner.getRegisteredTasks().includes(first.registrationId), false);
+  assert.equal(f.runner.getRegisteredTasks().includes(next.registrationId), true);
 });
 
 test('legacy direct predecessor retires in a V46-readable shape while its fenced successor stays hidden', async (t) => {

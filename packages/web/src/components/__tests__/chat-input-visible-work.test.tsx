@@ -17,7 +17,10 @@ vi.mock('@/hooks/useVoiceInput', () => ({ useVoiceInput: () => ({ state: 'idle',
 vi.mock('@/hooks/useCatData', () => ({
   useCatData: () => ({ cats: [], getCatById: () => undefined, getCatsByBreed: () => new Map() }),
 }));
-vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn(async () => new Response('{}', { status: 200 })) }));
+vi.mock('@/utils/api-client', () => ({
+  API_URL: 'http://api.test',
+  apiFetch: vi.fn(async () => new Response('{}', { status: 200 })),
+}));
 
 const threadId = 'thread-visible-work';
 type Send = Parameters<typeof ChatInput>[0]['onSend'];
@@ -177,4 +180,38 @@ it('a visible work does not make an empty composer sendable', async () => {
   await sendEnter();
   expect(send).not.toHaveBeenCalled();
   expect(getContextAttachmentDraft(threadId)).toEqual([]);
+});
+
+it.each([
+  'accepted',
+  'refused',
+] as const)('one gallery send carries both exact originals once and preserves the whole draft on %s', async (outcome) => {
+  const works: MediaContextAttachment[] = [0, 1].map((index) => ({
+    ...attachment,
+    id: `gallery-${index}`,
+    title: `图${index + 1}.png`,
+    source: { kind: 'artifact-review', reviewId: `review-${index}`, round: 2, expectedReviewRevision: 5 },
+    gallery: {
+      threadId,
+      messageId: 'original-gallery',
+      messageRevision: '12',
+      item: { kind: 'content-block', index },
+      index,
+      count: 2,
+    },
+    selections: [
+      { id: String(index + 1), selection: { kind: 'image-point', x: 20, y: 30 }, instruction: `图${index + 1}这一处` },
+    ],
+  }));
+  syncContextAttachmentDraftToStorage(threadId, works);
+  const send = vi.fn<Send>(() => outcome === 'accepted');
+  await render(send);
+  const input = host.querySelector('textarea');
+  expect(host.querySelector('[data-testid="gallery-draft-summary"]')?.textContent).toContain('2 张图 · 2 处');
+  await sendEnter();
+  expect(send).toHaveBeenCalledOnce();
+  expect(send.mock.calls[0]).toEqual(['保留我的两行说明\n另一行', undefined, undefined, undefined, works]);
+  expect(host.querySelector('textarea')).toBe(input);
+  expect(getContextAttachmentDraft(threadId)).toEqual(outcome === 'accepted' ? [] : works);
+  if (outcome === 'refused') expect(input?.value).toBe('保留我的两行说明\n另一行');
 });

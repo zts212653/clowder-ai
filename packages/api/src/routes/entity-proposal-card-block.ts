@@ -2,14 +2,18 @@
  * F260 Phase I: entity proposal approval card block.
  *
  * Shown in the source thread when a cat proposes a new entity registration.
- * Informational only — no `actions` array.  Decisions happen in the F246
- * Approval Hub panel (the canonical decision surface).  This is a permanent
- * boundary: approval cards are status indicators, not interactive controls.
+ * The publication has no actions. Chat/Inbox can host the original domain
+ * writer only after a fresh canonical read verifies this exact publication.
  */
 
 import type { EntityProposal, RichCardBlock } from '@cat-cafe/shared';
 
-export function buildEntityProposalCardBlock(proposal: EntityProposal): RichCardBlock {
+export function buildEntityProposalCardBlock(
+  proposal: Pick<
+    EntityProposal,
+    'proposalId' | 'canonicalName' | 'rationale' | 'entityId' | 'entityType' | 'aliases' | 'stance' | 'sourceCatId'
+  >,
+): RichCardBlock {
   return {
     id: `entity-proposal-${proposal.proposalId}`,
     kind: 'card',

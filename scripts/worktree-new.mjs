@@ -12,14 +12,15 @@
  * requires extensions.worktreeConfig) or, for a standalone clone, its `--local` config — never the shared
  * repository config.
  *
- * Order: validate everything (declaration, worktreeConfig, base) → capacity gate (at the cap: refuse and
- * name the holders; creation never moves anyone's directory) → `git worktree add` → declaration; if the
+ * Order: validate everything (declaration, worktreeConfig, base) → `git worktree add` → declaration; if the
  * declaration fails, the new worktree and branch are removed again so nothing half-created is left behind.
  */
 import { fileURLToPath } from 'node:url';
-import { DEFAULT_POLICY, LIFECYCLE_POLICIES } from './lib/worktree-reaper-core.mjs';
+import { deferredMedia, initializeLightCheckout } from './lib/worktree-light.mjs';
+import { originFromEnvironment, validateOrigin } from './lib/worktree-origin.mjs';
+import { LIFECYCLE_POLICIES } from './lib/worktree-reaper-core.mjs';
 import { checkoutKind, git } from './lib/worktree-reaper-probes.mjs';
-import { capacityHolders, checkCapacity, mainRepoFrom } from './worktree-reaper.mjs';
+import { mainRepoFrom } from './worktree-reaper.mjs';
 
 function flag(args, name) {
   const i = args.indexOf(name);
@@ -50,8 +51,9 @@ function worktreeConfigEnabled(dir) {
 }
 
 /** Write catcafe.lifecycle.* for an existing worktree or clone. */
-export function declareLifecycle(dir, { owner, policy, ttlDays, now = Date.now() }) {
+export function declareLifecycle(dir, { owner, policy, ttlDays, now = Date.now(), origin }) {
   validateDeclaration({ owner, policy, ttlDays });
+  validateOrigin(origin);
   const scope = checkoutKind(dir) === 'clone' ? '--local' : '--worktree';
   if (scope === '--worktree' && !worktreeConfigEnabled(dir)) {
     throw new Error('extensions.worktreeConfig is not enabled; refusing to write a shared-config declaration');
@@ -60,36 +62,11 @@ export function declareLifecycle(dir, { owner, policy, ttlDays, now = Date.now()
   set('owner', owner);
   set('policy', policy);
   set('createdAt', new Date(now).toISOString());
+  if (origin) set('origin', JSON.stringify(origin));
   if (policy === 'ttl') set('expiresAt', new Date(now + ttlDays * 86_400_000).toISOString());
 }
 
-/**
- * At the cap, refuse and say who holds the slots. Creation never moves or deletes anything — not even
- * directories whose owners' declarations already release them: quarantine stays an explicit
- * `pnpm worktree:reap --apply`, run by whoever is authorised to (review round 2).
- */
-function ensureCapacity({ repo, max, parentDir }) {
-  const cap = checkCapacity({ repo, parentDir, max });
-  if (!cap.over) return;
-  const byOwner = new Map();
-  for (const h of capacityHolders({ repo, parentDir }).active) {
-    const name = h.retentionStatus ? `${h.name} [${h.retentionStatus} until=${h.retainedUntil ?? 'unknown'}]` : h.name;
-    byOwner.set(h.owner, [...(byOwner.get(h.owner) ?? []), name]);
-  }
-  const holders = [...byOwner]
-    .sort((a, b) => b[1].length - a[1].length)
-    .map(([owner, names]) => `  ${owner}: ${names.length} (${names.join(', ')})`)
-    .join('\n');
-  const err = new Error(
-    `capacity: ${cap.count}/${cap.max} active declared worktrees. Holders:\n${holders}\n` +
-      'Next: use worktree:finish for one of your own; for the rest ask the listed owner in their thread. ' +
-      '`pnpm worktree:reap` (dry-run) shows which ones their owners already released. Nothing was created or moved.',
-  );
-  err.exitCode = 2;
-  throw err;
-}
-
-/** Validate → capacity → `git worktree add` → declaration (rolled back if it fails). */
+/** Validate → `git worktree add` → declaration (rolled back if it fails). No numeric veto or cleanup. */
 export function createWorktree({
   repo,
   path,
@@ -98,22 +75,28 @@ export function createWorktree({
   owner,
   policy = 'merged',
   ttlDays,
-  max = DEFAULT_POLICY.maxWorktrees,
   now,
-  parentDir,
+  full = false,
   declare = declareLifecycle,
+  origin,
 }) {
   validateDeclaration({ owner, policy, ttlDays });
+  validateOrigin(origin);
   if (!worktreeConfigEnabled(repo)) {
     throw new Error('extensions.worktreeConfig is not enabled; run `git config extensions.worktreeConfig true` once');
   }
   if (!git(repo, ['rev-parse', '--verify', '--quiet', `${base}^{commit}`]).ok) {
     throw new Error(`invalid --base ${base}: not a commit in this repository (fetch it first?)`);
   }
-  ensureCapacity({ repo, max, parentDir });
-  mustGit(repo, ['worktree', 'add', path, ...(branch ? ['-b', branch] : []), base], 'worktree add');
+  const deferred = full ? null : deferredMedia(repo, base);
+  mustGit(
+    repo,
+    ['worktree', 'add', ...(full ? [] : ['--no-checkout']), path, ...(branch ? ['-b', branch] : []), base],
+    'worktree add',
+  );
   try {
-    declare(path, { owner, policy, ttlDays, now });
+    if (deferred) initializeLightCheckout(path, deferred);
+    declare(path, { owner, policy, ttlDays, now, origin });
   } catch (err) {
     // Fresh and clean by construction: remove without --force (anything unexpected makes git refuse).
     const removed = git(repo, ['worktree', 'remove', path]).ok;
@@ -132,13 +115,26 @@ function main(argv) {
   const decl = {
     owner: flag(argv, '--owner') ?? process.env.CAT_CAFE_CAT_ID,
     policy: flag(argv, '--policy') ?? 'merged',
+    origin: originFromEnvironment(process.env, {
+      threadId: flag(argv, '--thread-id'),
+      sourceRef: flag(argv, '--source-ref'),
+      role: flag(argv, '--role'),
+      userId: flag(argv, '--user-id'),
+    }),
     ttlDays: ttlRaw === undefined ? undefined : Number(ttlRaw),
   };
   if (argv.includes('--declare-only')) {
     declareLifecycle(path, decl);
   } else {
     const repo = mainRepoFrom(process.cwd());
-    createWorktree({ repo, path, branch: flag(argv, '--branch'), base: flag(argv, '--base'), ...decl });
+    createWorktree({
+      repo,
+      path,
+      branch: flag(argv, '--branch'),
+      base: flag(argv, '--base'),
+      full: argv.includes('--full'),
+      ...decl,
+    });
   }
   console.log(`[worktree-new] ${path} declared owner=${decl.owner} policy=${decl.policy}`);
   return 0;

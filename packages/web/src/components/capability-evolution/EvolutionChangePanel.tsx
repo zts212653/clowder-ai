@@ -196,7 +196,7 @@ export function EvolutionChangePanel({
               {current.status === 'pending'
                 ? '等待批准'
                 : current.status === 'approved'
-                  ? '已批准，等待执行'
+                  ? '已同意，等生效回执'
                   : current.status === 'changed'
                     ? '已执行，等待复验'
                     : current.status === 'outcome'

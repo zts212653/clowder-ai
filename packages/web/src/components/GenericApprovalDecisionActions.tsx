@@ -84,7 +84,7 @@ export function GenericApprovalDecisionActions({
                   : (decisionWords?.reject ?? '拒绝')}
             </button>
           )}
-          {presentation === 'mailbox' ? <span className="ml-auto">{originalPlaceAction}</span> : null}
+          {presentation === 'mailbox' ? originalPlaceAction : null}
           {presentation === 'mailbox' ? null : (
             <ApprovalProvenanceLinks navigation={item.navigation} onBeforeNavigate={onBeforeNavigate} />
           )}

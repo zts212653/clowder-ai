@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
+import { registerNativeMediaOwnerRoutes } from './f309-artwork-lightbox-native-owner.mjs';
 import { createDocumentProviderDriver } from './f309-document-provider-driver.mjs';
 import { startRealWorkspaceOwner } from './f309-ordinary-workspace-real-owner.mjs';
 
 /** Real F063/Task/journal/receipt/callback routes. Only human session issuance and the provider are synthetic. */
-export async function startRealDocumentOwner(dataDir, { executionSource = 'carrier' } = {}) {
+export async function startRealDocumentOwner(dataDir, { executionSource = 'carrier', media = false } = {}) {
   return startRealWorkspaceOwner(dataDir, {
     configure: async ({ app, content, root }) => {
       const { catRegistry, createCatId } = await import('../../../shared/dist/index.js');
@@ -96,6 +97,18 @@ export async function startRealDocumentOwner(dataDir, { executionSource = 'carri
       const registry = new InvocationRegistry();
       const auth = await registry.create('operator', catId, thread.id);
       const headers = { 'x-invocation-id': auth.invocationId, 'x-callback-token': auth.callbackToken };
+      if (media)
+        await registerNativeMediaOwnerRoutes({
+          app,
+          artifacts,
+          integration,
+          threads,
+          messages,
+          tasks,
+          registry,
+          dataDir,
+          socketManager: socket,
+        });
       // Use the production history projection, including its Host speaker and visibility rules.
       // Human send/provider dispatch is a separate declared boundary; never pretend an unused router ran.
       await app.register(async (scope) => {
@@ -167,6 +180,7 @@ export async function startRealDocumentOwner(dataDir, { executionSource = 'carri
       }
       return {
         app,
+        nativeMediaRoutes: media,
         workspaceSource: content.source,
         fileReviewStore: content.store,
         messages,

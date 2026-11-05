@@ -44,6 +44,7 @@ test('human and agent sources remain distinct ledger entries and attach to one e
       content: 'a distinct agent request',
       targetCats: ['codex-astra', 'kimi'],
       intent: 'execute',
+      authorIntentByCatId: { 'codex-astra': { requested: 'continue_current', boundParentInvocationId: 'live-parent' } },
     },
   );
   assert.notEqual(second.entry.id, f.entry.id);

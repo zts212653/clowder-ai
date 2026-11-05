@@ -89,7 +89,8 @@ export function recallTimeline(
     SELECT json_array('cue', thread_id, invocation_id, cue_id) AS key, MIN(occurred_at) AS at, thread_id, invocation_id, cue_id, NULL AS recall_id
     FROM memory_cue_events WHERE owner_user_id = @owner AND thread_id IN (SELECT id FROM visible)
       AND axis = 'consumption' AND consumption_outcome = 'presented'
-      AND (@source = 'all' OR @source = 'push') AND (@cat = '' OR consumer_cat_id = @cat)
+      AND (@source = 'all' OR @source = CASE WHEN read_origin = 'explicit_read' THEN 'pull' ELSE 'push' END)
+      AND (@cat = '' OR consumer_cat_id = @cat)
     GROUP BY thread_id, invocation_id, cue_id HAVING at BETWEEN @from AND @to
   ) SELECT * FROM timeline WHERE (@at IS NULL OR at < @at OR (at = @at AND key < @key))
     ORDER BY at DESC, key DESC LIMIT @limit`)

@@ -112,25 +112,36 @@ export async function verifyRedisQueueLedgerReplay(
   entries: readonly QueueLedgerEntry[],
 ): Promise<QueueLedgerEnqueueResult> {
   const raws = await redis.hmget(QueueLedgerKeys.entries(threadId), ...entries.map((entry) => entry.id));
-  // A retired `private_input` row is the reason receipts exist: the row is removed on purpose once
-  // its last target reaches processing, so a missing row here is only corruption when no receipt
-  // settled the identity either. Where a receipt did, it carries the verdict the row would have.
+  // Private receipts own the original envelope even while live targets shrink.
+  // A missing row is valid when a receipt survives its last recipient's retirement.
   const receipts = await redis.hmget(QueueLedgerKeys.privateAdmissions(threadId), ...entries.map((entry) => entry.id));
   const verified = entries.map((input, index) => {
     const raw = raws[index];
+    const receipt = receipts[index];
+    if (input.kind === 'private_input' && typeof receipt === 'string') {
+      return {
+        matches: receipt === queueLedgerAdmissionFingerprint(input),
+        live: typeof raw === 'string' ? hydrateQueueLedgerEntry(raw) : undefined,
+      };
+    }
     if (typeof raw === 'string') {
       const stored = hydrateQueueLedgerEntry(raw);
       return { matches: queueLedgerAdmissionsMatch(stored, input), live: stored };
     }
-    const receipt = receipts[index];
-    if (input.kind !== 'private_input' || typeof receipt !== 'string') {
-      throw new Error('Queue replay identity vanished after atomic preflight');
-    }
-    // The row is gone on purpose, so this identity has no entry left to hand back. Returning the
-    // incoming envelope instead would read as freshly queued work and start a second execution —
-    // the exact duplicate the receipt exists to prevent.
-    return { matches: receipt === queueLedgerAdmissionFingerprint(input), live: undefined };
+    throw new Error('Queue replay identity vanished after atomic preflight');
   });
   if (!verified.every((result) => result.matches)) return { outcome: 'conflict', entries: [] };
   return { outcome: 'replayed', entries: verified.flatMap((result) => (result.live ? [result.live] : [])) };
+}
+
+/** Consult the existing immutable producer receipt before applying current target configuration. */
+export async function replayRedisPrivateAdmission(
+  redis: RedisClient,
+  entry: QueueLedgerEntry,
+): Promise<QueueLedgerEnqueueResult | null> {
+  const receipt = await redis.hget(QueueLedgerKeys.privateAdmissions(entry.threadId), entry.id);
+  if (receipt === null) return null;
+  if (receipt !== queueLedgerAdmissionFingerprint(entry)) return { outcome: 'conflict', entries: [] };
+  const current = await getRedisQueueLedgerEntry(redis, entry.threadId, entry.id);
+  return { outcome: 'replayed', entries: current ? [current] : [] };
 }

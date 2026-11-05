@@ -70,7 +70,7 @@ test('foreign sessions, assistant text, and renderer-copied voice metadata do no
       const forged = f.store.append({
         userId: 'owner',
         threadId: 'home',
-        catId: null,
+        from: { kind: 'user', userId: 'owner' },
         content: phrase,
         mentions: [],
         timestamp: Date.now(),

@@ -96,6 +96,17 @@ export async function startExplorationBrowserFixture(options = {}) {
   code.program.objectRef = { ownerFeatureId: 'F100', ownerStateRef: 'capability:code-behavior' };
   code.origin = { threadId: CONTRACT_THREAD_ID, title: '读取必须尊重实际身份', createdByCatId: 'codex-sol' };
   const programs = new Map([duck, code].map((value) => [value.program.programId, value]));
+  const snapshots = JSON.parse(
+    await readFile(path.join(ROOT, 'packages/web/test/browser/fixtures/f311-v2-program-snapshots.json'), 'utf8'),
+  );
+  const realDuck = snapshots.programs.find(
+    (projection) => projection.program.programId === 'evolution-program:352afab60afb6263b8386eaed12dba03',
+  );
+  const { createDuckCapabilityPublicAdapter } = await load(
+    'packages/api/src/infrastructure/capability-evolution/adapters/microduck-exploration/duck-capability-public-adapter.ts',
+  );
+  const publicDuckAdapter = createDuckCapabilityPublicAdapter({ repoRoot: ROOT });
+  programs.set(realDuck.program.programId, realDuck);
   const capturedCode = await codePublication(capabilityEvolutionProgramRoutes, code);
   let corruptRun;
   const originalBindings = createMicroduckLocalOwnerBindings({
@@ -144,7 +155,12 @@ export async function startExplorationBrowserFixture(options = {}) {
     adapterRegistry: {
       resolve: (ref) => ({
         status: 'resolved',
-        adapter: ref.ownerFeatureId === 'microduck-owner' ? bindings : codeAdapter,
+        adapter:
+          ref.ownerFeatureId === 'microduck-owner'
+            ? bindings
+            : ref.ownerFeatureId === 'F311'
+              ? publicDuckAdapter
+              : codeAdapter,
       }),
     },
   });
@@ -172,11 +188,16 @@ export async function startExplorationBrowserFixture(options = {}) {
         return { status: 503, body: { error: 'isolated_transport_outage' } };
       if (!mediaAvailable && url.pathname.includes('/exploration-media/'))
         return { status: 503, body: { error: 'isolated_source_unavailable' } };
-      const response = await app.inject({ url: `${url.pathname}${url.search}`, method: request.method });
+      const response = await app.inject({
+        url: `${url.pathname}${url.search}`,
+        method: request.method,
+        headers: request.headers,
+      });
       const binary = /^(image|video)\//.test(response.headers['content-type'] ?? '');
       return {
         status: response.statusCode,
         contentType: response.headers['content-type'],
+        headers: response.headers,
         body: binary ? response.rawPayload : response.json(),
         binary,
       };
@@ -186,6 +207,7 @@ export async function startExplorationBrowserFixture(options = {}) {
     ...fixture,
     duck,
     code,
+    realDuck,
     writes,
     messages,
     capturedCode,

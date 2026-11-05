@@ -21,6 +21,7 @@ interface Read {
   error?: string;
   errorKind?: 'transport' | 'source' | 'integrity';
   blockers?: EvolutionExplorationReviewV1['blockers'];
+  recoverySelection?: EvolutionExplorationSelectionV1;
 }
 interface State {
   reads: Record<string, Read>;
@@ -58,11 +59,15 @@ function failScope(
   error: string,
   errorKind: Read['errorKind'] = 'source',
   blockers?: EvolutionExplorationReviewV1['blockers'],
+  recoverySelection?: EvolutionExplorationSelectionV1,
 ) {
   const { [scope]: removed, ...catalogs } = state.catalogs;
   void removed;
   const reads = Object.fromEntries(Object.entries(state.reads).filter(([, read]) => read.scope !== scope));
-  emit({ catalogs, reads: { ...reads, [key]: { scope, loading: false, error, errorKind, blockers } } });
+  emit({
+    catalogs,
+    reads: { ...reads, [key]: { scope, loading: false, error, errorKind, blockers, recoverySelection } },
+  });
 }
 function transportFailure(scope: string, key: string, previous?: EvolutionResolvedExplorationReviewV1) {
   emit({
@@ -88,6 +93,7 @@ async function read(
   projection: EvolutionProgramProjection,
   selection: EvolutionExplorationSelectionV1,
   automatic = false,
+  preserveScope = false,
 ) {
   if (requests.has(key) || (automatic && state.reads[key]?.errorKind === 'integrity')) return;
   const ticket = ++nextTicket;
@@ -103,8 +109,24 @@ async function read(
   const epoch = generation;
   const isCurrent = () => epoch === generation && scopeTickets.get(scope) === ticket;
   const timer = window.setTimeout(() => controller.abort(), 20_000);
-  const previous = activeKeys.get(scope) === key ? state.reads[key]?.review : undefined;
+  const previousKey = activeKeys.get(scope);
+  const previous = previousKey === key ? state.reads[key]?.review : undefined;
   activeKeys.set(scope, key);
+  const fail = (
+    error: string,
+    kind: Read['errorKind'],
+    blockers?: Read['blockers'],
+    recovery?: EvolutionExplorationSelectionV1,
+  ) => {
+    if (!preserveScope) return failScope(scope, key, error, kind, blockers, recovery);
+    emit({
+      ...state,
+      reads: {
+        ...state.reads,
+        [key]: { scope, loading: false, error, errorKind: kind, blockers, recoverySelection: recovery },
+      },
+    });
+  };
   emit({
     ...state,
     reads: { ...state.reads, [key]: { scope, loading: true, ...(previous ? { review: previous } : {}) } },
@@ -141,9 +163,7 @@ async function read(
     if (!parsed.success) {
       if (response.status >= 500) transportFailure(scope, key, previous);
       else
-        failScope(
-          scope,
-          key,
+        fail(
           response.status === 404
             ? '项目或来源已不再可读；请回到可用版本。'
             : '来源返回的记录未通过契约核验，已移除对应证据。请核对来源后重试。',
@@ -157,23 +177,28 @@ async function read(
       review.programRef.ownerStateRef !== projection.program.programId ||
       refIdentity(review.objectRef) !== refIdentity(projection.program.objectRef)
     ) {
-      failScope(scope, key, '来源身份与本项目不一致，已移除对应证据。请核对来源后重试。', 'integrity');
+      fail('来源身份与本项目不一致，已移除对应证据。请核对来源后重试。', 'integrity');
       return;
     }
     if (review.status !== 'resolved') {
-      failScope(
-        scope,
-        key,
-        review.status === 'invalid'
-          ? '来源未通过完整性或契约核验，已停止使用这些探索记录。请核对来源后重新读取。'
-          : '来源暂时无法提供这些探索记录；可重试或回读准备材料。',
+      if (review.status === 'unavailable' && previous?.publication) {
+        transportFailure(scope, key, previous);
+        return;
+      }
+      fail(
+        review.recoverySelection
+          ? '上次阅读位置属于较早的内容版本。原选择已保留，可以打开最新历史重新定位。'
+          : review.status === 'invalid'
+            ? '来源未通过完整性或契约核验，已停止使用这些探索记录。请核对来源后重新读取。'
+            : '来源暂时无法提供这些探索记录；可重试或回读准备材料。',
         review.status === 'invalid' ? 'integrity' : 'source',
         review.blockers,
+        review.recoverySelection,
       );
       return;
     }
     if (!response.ok || !evolutionExplorationSelectionMatches(review, selection)) {
-      failScope(scope, key, '来源与所选记录不一致，已移除对应证据。请核对来源后重试。', 'integrity');
+      fail('来源与所选记录不一致，已移除对应证据。请核对来源后重试。', 'integrity');
       return;
     }
     const invalid = review.details.some(
@@ -193,7 +218,20 @@ async function read(
   } finally {
     window.clearTimeout(timer);
     if (requests.get(key) === controller) requests.delete(key);
+    // A failed prefetch must leave the visible selection as the active read.
+    if (preserveScope && isCurrent() && !state.reads[key]?.review && previousKey && activeKeys.get(scope) === key)
+      activeKeys.set(scope, previousKey);
   }
+}
+
+function selectionKey(scope: string, selection: EvolutionExplorationSelectionV1) {
+  return JSON.stringify([
+    scope,
+    selection.selectedSourceRef ? refIdentity(selection.selectedSourceRef) : null,
+    selection.selectedNodeRef ? refIdentity(selection.selectedNodeRef) : null,
+    selection.selectedExperimentRef ? refIdentity(selection.selectedExperimentRef) : null,
+    selection.comparisonExperimentRef ? refIdentity(selection.comparisonExperimentRef) : null,
+  ]);
 }
 
 /** Shared canonical reads across sidecar/main; detail is never borrowed from a previous selection. */
@@ -212,17 +250,21 @@ export function useEvolutionExploration(
     projection.program.programId,
     refIdentity(projection.program.objectRef),
   ]);
-  const key = JSON.stringify([
-    scope,
-    selection.selectedNodeRef ? refIdentity(selection.selectedNodeRef) : null,
-    selection.selectedExperimentRef ? refIdentity(selection.selectedExperimentRef) : null,
-    selection.comparisonExperimentRef ? refIdentity(selection.comparisonExperimentRef) : null,
-  ]);
+  const key = selectionKey(scope, selection);
   const target = useRef({ projection, selection });
   target.current = { projection, selection };
   const retry = useCallback(() => {
     void read(scope, key, target.current.projection, target.current.selection);
   }, [scope, key]);
+  const prepareSelection = useCallback(
+    async (next: EvolutionExplorationSelectionV1) => {
+      const nextKey = selectionKey(scope, next);
+      await read(scope, nextKey, target.current.projection, next, false, true);
+      const prepared = state.reads[nextKey]?.review;
+      return Boolean(prepared && evolutionExplorationSelectionMatches(prepared, next));
+    },
+    [scope],
+  );
   // biome-ignore lint/correctness/useExhaustiveDependencies: a new owner sequence must refresh the same selection identity
   useEffect(() => {
     if (!surfaceVisible) return;
@@ -241,12 +283,19 @@ export function useEvolutionExploration(
     };
   }, [retry, scope, key, projection.program.sequence, surfaceVisible]);
   const result = snapshot.reads[key];
+  const catalog = result?.review ?? snapshot.catalogs[scope];
   return {
     review: result?.review,
-    catalog: snapshot.catalogs[scope],
+    catalog:
+      catalog &&
+      (!selection.selectedSourceRef || refIdentity(catalog.sourceRef) === refIdentity(selection.selectedSourceRef))
+        ? catalog
+        : undefined,
     loading: result?.loading ?? true,
     error: result?.error,
     blockers: result?.blockers,
+    recoverySelection: result?.recoverySelection,
     retry,
+    prepareSelection,
   };
 }

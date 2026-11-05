@@ -14,6 +14,26 @@ function canonical(value: unknown): string {
 
 function exactVersionPayload(item: UnifiedAttentionItemV1): unknown | null {
   if (item.userMention) return userMentionVersionPayload(item.userMention);
+  if (item.collectiveProjectAttention) {
+    const value = item.collectiveProjectAttention;
+    return {
+      kind: 'collective_project_attention',
+      producerId: value.producerId,
+      subjectRef: value.subjectRef,
+      revision: value.expectedProducerRevision,
+      count: value.count,
+    };
+  }
+  if (item.collectiveAccountabilityRequest) {
+    const request = item.collectiveAccountabilityRequest;
+    return {
+      kind: 'collective_accountability_request',
+      producerId: request.producerId,
+      subjectRef: request.subjectRef,
+      workRevision: request.workRevision,
+      status: request.status,
+    };
+  }
   if (item.choiceRequest && legacyQuestionProjectionMatches(item)) {
     return {
       kind: 'structured_choice',

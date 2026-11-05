@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { chromium } from 'playwright';
 import { build } from 'vite';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
 
 const webRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const origin = 'https://f322-session-import.test';
@@ -103,10 +103,7 @@ for (const language of ['zh', 'en'])
         assert.equal(listReads, 0, 'closed panel must not read native indexes');
         await page
           .getByRole('button', {
-            name:
-              language === 'zh'
-                ? '接上 Claude Code / Codex 里已有的会话'
-                : 'Connect an existing Claude Code / Codex session',
+            name: language === 'zh' ? '接上本机已有的会话' : 'Connect an existing local session',
             exact: true,
           })
           .click();

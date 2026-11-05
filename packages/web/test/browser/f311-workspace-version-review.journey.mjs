@@ -55,11 +55,11 @@ export async function verifyRichVersionReview({
   const liveCurrent = program
     .locator('section[aria-label="阅读版本"] button')
     .filter({ hasText: '保留的另一个候选' })
-    .filter({ hasText: '当前采用' });
+    .filter({ hasText: '来源当前版本' });
   await liveCurrent.waitFor();
   assert.match(await liveCurrent.innerText(), /v3/);
   await program.getByText('v1 · 原有审阅结果', { exact: true }).waitFor();
-  await program.getByText('相对当前采用 v3', { exact: true }).waitFor();
+  await program.getByText('相对来源当前版本 v3', { exact: true }).waitFor();
   await assertContained(program);
   await navigateShell(page, targetUrl('judgment', 'v2'));
   await program.locator('.exploration-owner-evidence > summary').click();

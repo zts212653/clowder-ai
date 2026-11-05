@@ -63,6 +63,7 @@ export const RICH_BLOCK_RULES = `### 富消息块使用规则（B 风格：平�
   - \`title\` 可选（显示在 widget 顶部标题栏）
   - \`height\` 可选（像素，默认 300，范围 50-2000）
   - 沙盒隔离：allow-scripts 但无 allow-same-origin，无法访问宿主页面
+  - 内联 \`on*\` 事件属性（如 \`onclick=\`）会被消毒剥掉，按钮点了没反应也不报错；改在 \`<script>\` 里用 \`addEventListener\` 绑定（写法见 rich-messaging skill）
 
 **何时不用**（保持纯文本）：
 - 日常聊天、闲聊、打招呼

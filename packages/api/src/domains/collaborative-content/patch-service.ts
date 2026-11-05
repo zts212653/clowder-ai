@@ -55,7 +55,7 @@ export type CollaborativePatchResultV1 =
 export interface CollaborativePatchServiceOptions {
   readonly sessions: Pick<EditorSessionService, 'authorize' | 'run'>;
   readonly owner: Pick<ProjectContentOwnerService, 'load' | 'settle' | 'listOutbox'>;
-  readonly materializer: ContentPatchMaterializerPort;
+  readonly materializer?: ContentPatchMaterializerPort;
   readonly semanticOperations?: SemanticOperationStore;
 }
 
@@ -85,6 +85,8 @@ export class CollaborativePatchService {
       if (input.operation.kind === 'direct-settlement') {
         bytes = input.operation.bytes;
       } else {
+        if (!this.options.materializer)
+          throw new EditorSessionError('PROVIDER_UNAVAILABLE', 'Content materializer unavailable');
         if (!this.options.semanticOperations)
           throw new EditorSessionError('PROVIDER_UNAVAILABLE', 'Semantic operation store unavailable');
         const intent = await this.options.semanticOperations.prepare({

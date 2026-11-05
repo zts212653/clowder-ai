@@ -4,6 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, test } from 'node:test';
+import { invokeKnownHostSession as invokeSingleCat } from './helpers/known-host-session-fixture.js';
 
 async function collect(iterable) {
   const messages = [];
@@ -52,7 +53,6 @@ describe('F211 A2 Antigravity session transcript materialization', () => {
   });
 
   test('rotated Antigravity session transcript keeps text, lifecycle, tool evidence, and seal reason digest', async () => {
-    const { invokeSingleCat } = await import('../dist/domains/cats/services/agents/invocation/invoke-single-cat.js');
     const { RuntimeSessionStore } = await import(
       '../dist/domains/cats/services/runtime-session/RuntimeSessionStore.js'
     );
@@ -69,7 +69,9 @@ describe('F211 A2 Antigravity session transcript materialization', () => {
     const transcriptReader = new TranscriptReader({ dataDir: tmpDir });
     const sessionSealer = new SessionSealer(sessionChainStore, transcriptWriter);
 
+    const implementationSnapshot = () => ({ key: 'test:antigravity-transcript', generation: 'same-adapter' });
     const firstService = {
+      implementationSnapshot,
       async *invoke(prompt, options) {
         await options?.beforeProviderLaunch?.({
           v: 1,
@@ -133,6 +135,7 @@ describe('F211 A2 Antigravity session transcript materialization', () => {
     assert.ok(oldSession, 'first Antigravity session must create an active SessionRecord');
 
     const rotationService = {
+      implementationSnapshot,
       async *invoke(prompt, options) {
         await options?.beforeProviderLaunch?.({
           v: 1,

@@ -36,6 +36,14 @@ export function summarizeManagedJobHealth(
   const tokens = new Set(
     history.flatMap((entry) => (typeof entry.attemptToken === 'string' ? [entry.attemptToken] : [])),
   );
+  const epochs = new Map<number, Set<string>>();
+  for (const entry of history) {
+    if (typeof entry.attemptToken !== 'string') continue;
+    const epoch = number(entry.attemptResumeEpoch);
+    const attempts = epochs.get(epoch) ?? new Set<string>();
+    attempts.add(entry.attemptToken);
+    epochs.set(epoch, attempts);
+  }
   const terminal = latest.state === 'terminal';
   const status =
     latest.terminalStatus === 'green'
@@ -57,7 +65,7 @@ export function summarizeManagedJobHealth(
         ? Math.max(0, now - number(started.updatedAt))
         : 0,
     logBytes: number(record(result.log).bytes),
-    duplicateAttempts: Math.max(0, tokens.size - 1),
+    duplicateAttempts: [...epochs.values()].reduce((total, attempts) => total + Math.max(0, attempts.size - 1), 0),
     unresolvedExecution: !terminal && inspection === 'pending' && tokens.size > 0 && latest.cleanupProven !== true,
     userMessageCancellation: record(latest.cancel).reason === 'user_message',
   };
@@ -89,7 +97,7 @@ function telemetry() {
   return instruments;
 }
 
-export function observeManagedJobHealth(
+export function collectManagedJobHealth(
   job: DurableManagedGateJob,
   inspection: DurableGateInspection,
   history: readonly RecordValue[],
@@ -101,7 +109,17 @@ export function observeManagedJobHealth(
   } catch {
     // Log rotation must not block job reconciliation; the terminal hash receipt remains authoritative.
   }
-  const latest = history.at(-1) ?? {};
+  return health;
+}
+
+/** The API owns observation deduplication even when I/O ran in a short-lived worker. */
+export function observeManagedJobHealthSnapshot(
+  job: DurableManagedGateJob,
+  inspection: DurableGateInspection,
+  health: ManagedJobHealth,
+  latest: RecordValue,
+  now: number,
+): ManagedJobHealth {
   const revision = number(latest.revision) || number(latest.updatedAt);
   const previous = seen.get(job.jobId);
   const signature = `${revision}:${inspection.state}`;
@@ -143,6 +161,21 @@ export function observeManagedJobHealth(
     seen.set(job.jobId, { signature, adopted: previous?.adopted === true || inspection.state === 'adopted' });
   }
   return health;
+}
+
+export function observeManagedJobHealth(
+  job: DurableManagedGateJob,
+  inspection: DurableGateInspection,
+  history: readonly RecordValue[],
+  now: number,
+): ManagedJobHealth {
+  return observeManagedJobHealthSnapshot(
+    job,
+    inspection,
+    collectManagedJobHealth(job, inspection, history, now),
+    history.at(-1) ?? {},
+    now,
+  );
 }
 
 export function publishManagedJobCensus(health: readonly ManagedJobHealth[]): void {

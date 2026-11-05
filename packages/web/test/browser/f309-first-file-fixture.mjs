@@ -10,7 +10,7 @@ export async function observeFirstFileQuote(page) {
   await page.evaluate(() => {
     const records = [];
     window.__firstFileQuoteTrace = records;
-    const snapshot = (event) => {
+    const snapshot = (event, point) => {
       if (records.length >= 200) return;
       const editor = document.querySelector('[data-testid="context-annotation-comment"]');
       const card = document.querySelector('[data-testid="context-annotation-editor"]');
@@ -22,9 +22,53 @@ export async function observeFirstFileQuote(page) {
         quote: card?.querySelector('blockquote')?.textContent,
         active: document.activeElement?.getAttribute('data-testid'),
         draftSummary: document.querySelector('[data-testid="context-annotations-summary"]')?.textContent,
+        ...(point
+          ? {
+              point,
+              selection: window.getSelection()?.toString(),
+              paragraphs: [...document.querySelectorAll('[data-testid="workspace-content-review-text"] p')].map(
+                (p) => ({ text: p.textContent, rect: p.getBoundingClientRect().toJSON() }),
+              ),
+              containers: [
+                ...document.querySelectorAll(
+                  '[data-testid="workspace-content-review-text"], [data-testid="workspace-file-viewer"]',
+                ),
+              ].map((node) => ({
+                id: node.dataset.testid,
+                rect: node.getBoundingClientRect().toJSON(),
+                scrollTop: node.scrollTop,
+                ancestors: [
+                  ...(function* () {
+                    let p = node.parentElement;
+                    for (let n = 0; p && n < 4; n++, p = p.parentElement) yield p;
+                  })(),
+                ].map((p) => ({
+                  id: p.dataset.testid,
+                  className: p.className,
+                  rect: p.getBoundingClientRect().toJSON(),
+                  scrollTop: p.scrollTop,
+                  children: [...p.children].map((c) => ({
+                    id: c.dataset.testid,
+                    tag: c.tagName,
+                    height: c.getBoundingClientRect().height,
+                    text: c.textContent?.slice(0, 90),
+                  })),
+                })),
+              })),
+            }
+          : {}),
       };
       records.push(value);
     };
+    for (const type of ['mousedown', 'mousemove', 'mouseup'])
+      document.addEventListener(
+        type,
+        (event) => {
+          if (event.target?.closest?.('[data-testid="workspace-content-review-text"]'))
+            snapshot(type, { x: event.clientX, y: event.clientY, target: event.target.tagName });
+        },
+        true,
+      );
     for (const type of ['input', 'keydown', 'keyup', 'focusin', 'focusout'])
       document.addEventListener(
         type,
@@ -90,7 +134,7 @@ export async function createFirstFileFixture(extension, { longMarkdown = false }
       const message = owner.messages.append({
         userId: 'operator',
         threadId: owner.thread.id,
-        catId: null,
+        from: { kind: 'user', userId: 'operator' },
         mentions: [owner.catId],
         timestamp: Date.now(),
         content: input.content,
@@ -101,6 +145,7 @@ export async function createFirstFileFixture(extension, { longMarkdown = false }
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
+          status: 'queued',
           userMessageId: message.id,
           threadId: owner.thread.id,
         }),

@@ -5,12 +5,11 @@ import { createServer } from 'node:net';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
 import { createNextDevTestEnvironment } from './next-dev-test-environment.mjs';
 
 const WEB_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const NEXT_BIN = path.resolve(WEB_ROOT, '../../node_modules/next/dist/bin/next');
-const LIVE_MESSAGE_ID = 'msg-inv-live-selection-id-codex-sol';
 const PERSISTED_MESSAGE_ID = 'persisted-live-selection-id';
 
 async function findFreePort() {
@@ -84,6 +83,7 @@ test(
                 displayName: '缅因猫 Sol',
                 color: { primary: '#6b8f34', secondary: '#c8d8b5' },
                 mentionPatterns: ['codex-sol'],
+                carrier: 'cli',
                 clientId: 'openai',
                 defaultModel: 'gpt-5.6-sol',
                 avatar: '/avatars/codex.png',
@@ -119,7 +119,7 @@ test(
       await page.goto(url, { waitUntil: 'networkidle' });
       const article = page.getByTestId('live-message-identity-probe');
       await article.waitFor();
-      assert.equal(await article.getAttribute('data-message-id'), LIVE_MESSAGE_ID);
+      assert.equal(await article.getAttribute('data-message-id'), PERSISTED_MESSAGE_ID);
       assert.equal(await article.getAttribute('data-message-streaming'), 'true');
 
       await page.getByRole('button', { name: '完成并立即选中' }).click();

@@ -6,7 +6,6 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, test } from 'node:test';
 import { catRegistry } from '@cat-cafe/shared';
 import { CatAgentService } from '../dist/domains/cats/services/agents/providers/catagent/CatAgentService.js';
-import { LlmAIProvider } from '../dist/domains/cats/services/game/LlmAIProvider.js';
 
 let root;
 let previousRoot;
@@ -49,25 +48,3 @@ for (const baseUrl of ['https://gateway.invalid/v1?tenant=a#part', 'file:///tmp/
     assert.deepEqual(urls, baseUrl.startsWith('file:') ? [] : ['https://gateway.invalid/v1/messages?tenant=a#part']);
   });
 }
-
-test('real Google game request encodes the complete key in one URL parameter', async () => {
-  const key = 'FAKE&admin=yes+#?/';
-  put('accounts.json', { gemini: { authType: 'oauth', clientId: 'google' } });
-  put('credentials.json', { gemini: { apiKey: key } });
-  catRegistry.register('endpoint-google', {
-    ...configs.gemini,
-    id: 'endpoint-google',
-    clientId: 'google',
-    accountRef: 'gemini',
-    defaultModel: 'gemini-fixture',
-    mentionPatterns: ['@endpoint-google'],
-  });
-  let actual;
-  globalThis.fetch = async (url) => {
-    actual = new URL(url);
-    return Response.json({ candidates: [{ content: { parts: [{ text: 'fixture' }] } }] });
-  };
-  assert.equal(await new LlmAIProvider('endpoint-google').generateSpeech('fixture'), 'fixture');
-  assert.deepEqual([...actual.searchParams], [['key', key]]);
-  assert.equal(actual.hash, '');
-});

@@ -22,7 +22,8 @@ vi.mock('@/hooks/useCatData', () => ({
       { id: 'codex', displayName: 'Sol', clientId: 'openai', cli: { command: 'codex' } },
       { id: 'claude', displayName: 'Sonnet', clientId: 'anthropic', cli: { command: 'claude' } },
       { id: 'gpt-pro', displayName: 'Pro Cloud', clientId: 'openai' },
-      { id: 'other', displayName: 'Other', clientId: 'opencode' },
+      { id: 'oc', displayName: 'OpenCode cat', clientId: 'opencode', cli: { command: 'opencode' } },
+      { id: 'kimi', displayName: 'Kimi', clientId: 'kimi', cli: { command: 'kimi' } },
     ],
   }),
 }));
@@ -75,7 +76,7 @@ it('keeps the real viewport import panel open across stationary outside history 
   api.mockResolvedValue({ ok: true, json: async () => ({ sessions: [] }) });
   const admission = fixture();
   await render(admission);
-  await click('接上 Claude Code / Codex 里已有的会话');
+  await click('接上本机已有的会话');
   const history = document.createElement('div');
   document.body.append(history);
   await act(async () => history.dispatchEvent(new Event('scroll')));
@@ -86,7 +87,7 @@ it('shows a locked session in place with a check-again action, and never starts 
   const admission = fixture();
   api.mockResolvedValue({ ok: false, json: async () => ({ code: 'SESSION_ACTIVE_WRITER' }) });
   await render(admission);
-  await click('接上 Claude Code / Codex 里已有的会话');
+  await click('接上本机已有的会话');
   expect(document.querySelector('select')?.textContent).not.toContain('Other');
   await enterId('019aaaaa-1111-7111-8111-111111111111');
   await click('核对会话');
@@ -97,6 +98,126 @@ it('shows a locked session in place with a check-again action, and never starts 
   expect(button('接上并打开').disabled).toBe(true);
   expect(admission.importSession).not.toHaveBeenCalled();
 });
+
+it('offers OpenCode members and its native IDs, while unsupported native identity contracts stay absent', async () => {
+  api.mockImplementation(async (url: string) => ({
+    ok: true,
+    json: async () =>
+      url.includes('?')
+        ? {
+            sessions: [
+              {
+                sessionId: 'ses_original',
+                firstPrompt: '',
+                projectPath: '/work/long-project',
+                lastActivityAt: 1,
+                turnCount: null,
+                alreadyBound: false,
+              },
+            ],
+          }
+        : {
+            session: {
+              sessionId: 'ses_original',
+              firstPrompt: '',
+              projectPath: '/work/long-project',
+              lastActivityAt: 1,
+            },
+          },
+  }));
+  const admission = fixture();
+  await render(admission);
+  await click('接上本机已有的会话');
+  const tool = document.querySelector<HTMLSelectElement>('select[aria-label="会话来自哪个工具"]')!;
+  expect(Array.from(tool.options).map((o) => o.value)).toEqual(['anthropic', 'openai', 'opencode']);
+  await act(async () => {
+    tool.value = 'opencode';
+    tool.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  expect(document.querySelector('select[aria-label="交给哪只猫"]')?.textContent).toContain('OpenCode cat');
+  expect(document.querySelector('select[aria-label="交给哪只猫"]')?.textContent).not.toContain('Kimi');
+  expect(document.querySelector('input[type="radio"]')?.getAttribute('aria-label')).toBe('没有可显示的第一句');
+  await click('没有可显示的第一句');
+  expect(api).toHaveBeenCalledWith('/api/local-sessions/oc/ses_original');
+  await click('接上并打开');
+  expect(admission.importSession).toHaveBeenCalledWith(
+    expect.objectContaining({ sessionId: 'ses_original', catId: 'oc' }),
+  );
+});
+
+it('explains a pasted OpenCode child session and does not begin conversation admission', async () => {
+  api.mockResolvedValue({ ok: false, json: async () => ({ code: 'SESSION_NOT_TOP_LEVEL' }) });
+  const admission = fixture();
+  await render(admission);
+  await click('接上本机已有的会话');
+  const tool = document.querySelector<HTMLSelectElement>('select[aria-label="会话来自哪个工具"]')!;
+  await act(async () => {
+    tool.value = 'opencode';
+    tool.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await enterId('ses_child');
+  await click('核对会话');
+  expect(document.querySelector('[role="alert"]')?.textContent).toContain('这是子代理派生的会话，请选择原来的主会话。');
+  expect(button('接上并打开').disabled).toBe(true);
+  expect(admission.importSession).not.toHaveBeenCalled();
+});
+
+it('uses the accessible bound conversation name when no human first line exists', async () => {
+  api.mockResolvedValue({
+    ok: true,
+    json: async () => ({
+      limited: true,
+      sessions: [
+        {
+          sessionId: 'known',
+          firstPrompt: '',
+          recentPrompt: 'runtime wrapper must not become a label',
+          projectPath: '/work/project',
+          lastActivityAt: 1,
+          turnCount: null,
+          alreadyBound: true,
+          boundThread: { id: 'bound', title: '用户确认的名字' },
+        },
+        {
+          sessionId: 'hidden',
+          firstPrompt: '',
+          recentPrompt: 'do not use the latest prompt as the first',
+          projectPath: '/work/project',
+          lastActivityAt: 1,
+          turnCount: null,
+          alreadyBound: true,
+        },
+        {
+          sessionId: 'untitled',
+          firstPrompt: '',
+          projectPath: '/work/project',
+          lastActivityAt: 1,
+          turnCount: null,
+          alreadyBound: true,
+          boundThread: { id: 'own-untitled', title: null },
+        },
+        {
+          sessionId: 'same-title',
+          firstPrompt: '同名首句',
+          projectPath: '/work/project',
+          lastActivityAt: 1,
+          turnCount: null,
+          alreadyBound: true,
+          boundThread: { id: 'own-same', title: '同名首句' },
+        },
+      ],
+    }),
+  });
+  await render(fixture());
+  await click('接上本机已有的会话');
+  const labels = Array.from(document.querySelectorAll('input[type="radio"]')).map((r) => r.getAttribute('aria-label'));
+  expect(labels).toEqual(['用户确认的名字', '没有可显示的第一句', '无标题对话', '同名首句']);
+  expect(document.body.textContent?.match(/用户确认的名字/g)).toHaveLength(1);
+  expect(document.body.textContent?.match(/同名首句/g)).toHaveLength(1);
+  expect(document.body.textContent).not.toContain('已接在「没有可显示的第一句」');
+  expect(document.body.textContent).not.toContain('runtime wrapper');
+  expect(document.body.textContent).toContain('只显示最近的一部分');
+});
 it('a checked session supplies its project and first prompt to message-free admission', async () => {
   const admission = fixture();
   api.mockResolvedValue({
@@ -106,7 +227,7 @@ it('a checked session supplies its project and first prompt to message-free admi
     }),
   });
   await render(admission);
-  await click('接上 Claude Code / Codex 里已有的会话');
+  await click('接上本机已有的会话');
   await enterId('id');
   await click('核对会话');
   expect(document.querySelector<HTMLInputElement>('input[aria-label="对话名（可不填）"]')?.placeholder).toBe(
@@ -121,7 +242,7 @@ it('a checked session supplies its project and first prompt to message-free admi
 it('Escape dismisses a panel while the read-only session probe is pending', async () => {
   api.mockReturnValue(new Promise(() => {}));
   await render(fixture());
-  await click('接上 Claude Code / Codex 里已有的会话');
+  await click('接上本机已有的会话');
   await enterId('id');
   await click('核对会话');
   await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
@@ -130,7 +251,7 @@ it('Escape dismisses a panel while the read-only session probe is pending', asyn
 
 it('only offers cats using the selected native tool', async () => {
   await render(fixture());
-  await click('接上 Claude Code / Codex 里已有的会话');
+  await click('接上本机已有的会话');
   const cats = document.querySelector('select[aria-label="交给哪只猫"]');
   expect(cats?.textContent).toContain('Sol');
   expect(cats?.textContent).not.toContain('Sonnet');
@@ -141,7 +262,7 @@ it('owner denial explains the access boundary rather than suggesting pasted ID a
   const admission = fixture();
   api.mockResolvedValue({ ok: false, status: 403, json: async () => ({ code: 'SESSION_OWNER_REQUIRED' }) });
   await render(admission);
-  await click('接上 Claude Code / Codex 里已有的会话');
+  await click('接上本机已有的会话');
   expect(document.body.textContent).toContain('只有配置的所有者可以查看或接入本机会话');
   expect(document.body.textContent).not.toContain('最近会话暂时读不到，可以粘贴会话 ID');
   expect(document.body.textContent).not.toContain('找不到？粘贴会话 ID');
@@ -183,7 +304,7 @@ it('lazily shows recent metadata; selection still checks the lock and claimed ro
   );
   await render(admission, navigate);
   expect(api).not.toHaveBeenCalled();
-  await click('接上 Claude Code / Codex 里已有的会话');
+  await click('接上本机已有的会话');
   expect(api).toHaveBeenCalledWith(
     '/api/local-sessions/codex?limit=20',
     expect.objectContaining({ signal: expect.any(AbortSignal) }),
@@ -214,7 +335,7 @@ it('tool switches discard the previous list response and keep pasted ID availabl
       : Promise.resolve({ ok: false, json: async () => ({}) }),
   );
   await render(fixture());
-  await click('接上 Claude Code / Codex 里已有的会话');
+  await click('接上本机已有的会话');
   await act(async () => {
     const select = document.querySelector<HTMLSelectElement>('select[aria-label="会话来自哪个工具"]');
     if (!select) throw new Error('tool selector missing');
@@ -235,7 +356,7 @@ it('tool switches discard the previous list response and keep pasted ID availabl
 it('keeps the pasted-ID fallback collapsed until it is requested', async () => {
   api.mockResolvedValue({ ok: true, json: async () => ({ sessions: [] }) });
   await render(fixture());
-  await click('接上 Claude Code / Codex 里已有的会话');
+  await click('接上本机已有的会话');
   expect(document.querySelector('input[aria-label="会话 ID"]')).toBeNull();
   await click('找不到？粘贴会话 ID');
   expect(document.querySelector('input[aria-label="会话 ID"]')).not.toBeNull();
@@ -270,7 +391,7 @@ it('selects the entire session row and synchronizes its activity with the succes
           },
   }));
   await render(fixture());
-  await click('接上 Claude Code / Codex 里已有的会话');
+  await click('接上本机已有的会话');
   const row = document.querySelector('section[aria-label="最近会话"] li');
   if (!row) throw new Error('session row missing');
   const detail = row.querySelector('[title^="/projects/"]') ?? row.querySelector('p');

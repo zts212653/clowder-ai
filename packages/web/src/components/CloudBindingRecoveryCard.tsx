@@ -1,5 +1,8 @@
 'use client';
 
+import { isCloudBridgeOutboundReceiptV1 } from '@cat-cafe/shared';
+import { useId } from 'react';
+import type { ChatMessage } from '@/stores/chat-types';
 import { personalChromeSettingsHref } from '@/utils/personal-chrome-settings';
 import {
   CloudConversationChoices,
@@ -7,15 +10,22 @@ import {
   ConversationSummary,
   OpenConversation,
 } from './CloudConversationChoices';
+import { CloudReplyStatus } from './CloudReplyStatus';
+import { recoveryHeading } from './cloud-binding-recovery-heading';
 import type { RecoveryDeliveryStatus, RecoveryLoadState, RecoveryPhase } from './cloud-binding-recovery-operations';
+import { cloudDispatchReceipt } from './cloud-dispatch-receipt';
+import { useShellPresentation } from './shell/shell-presentation';
 import { useCloudBindingRecovery } from './useCloudBindingRecovery';
+import { useCloudReply } from './useCloudReply';
 
 export interface CloudBindingRecoveryCardProps {
+  timelineMessages?: readonly ChatMessage[];
   threadId: string;
   sourceMessageId: string;
   targetCatId: string;
   attemptId?: string;
   deliveryStatus?: RecoveryDeliveryStatus;
+  bindingOnly?: boolean;
 }
 
 export interface CloudBindingRecoveryCardViewProps extends CloudBindingRecoveryCardProps {
@@ -53,57 +63,44 @@ const primaryClass =
 const secondaryClass =
   'rounded-lg border border-[var(--console-border-soft)] px-3 py-2 text-xs font-semibold text-cafe hover:bg-[var(--console-hover-bg)] disabled:opacity-50';
 
-function recoveryHeading(props: CloudBindingRecoveryCardViewProps): [string, string] {
-  if (props.deliveryStatus === 'sent') return ['已发送到 ChatGPT', '砚砚 Pro 已收到这条消息，回复会回到这里。'];
-  if (props.deliveryStatus === 'failed')
-    return ['这条消息未发送', `请处理投递提示中的问题后，重新 @${props.targetCatId} 发一条新消息。`];
-  if (props.phase === 'binding') return ['正在连接砚砚 Pro…', '正在保存当前对话的连接。'];
-  if (props.phase === 'retrying') return ['已连接，正在提交发送…', '正在继续发送原来的这条消息。'];
-  if (
-    props.phase === 'queued' ||
-    (props.deliveryStatus === 'sending' && props.loadState.kind === 'loading') ||
-    (props.loadState.kind === 'ready' && props.loadState.retryState === 'pending')
-  )
-    return ['消息已进入发送流程', '正在等待 ChatGPT 的送达确认。'];
-  const connected = props.loadState.kind === 'ready' && props.loadState.boundConversationId !== null;
-  if (props.loadState.kind === 'ready' && props.loadState.connectionIssue)
-    return ['连接组件尚未就绪', props.loadState.connectionIssue];
-  const title = connected ? '砚砚 Pro 已连接到这个对话' : '选择砚砚 Pro 要继续的对话';
-  if (props.loadState.kind === 'loading') return [title, '正在读取会话与发送状态…'];
-  if (props.deliveryStatus === 'unknown') return [title, '暂时无法确认原消息是否送达，请查看原对话。'];
-  if (props.attemptId)
-    return [
-      title,
-      connected ? '原消息尚未完成发送，可以继续发送。' : '这条消息还没有发送。请选择要连接的 ChatGPT 会话。',
-    ];
-  return [
-    title,
-    connected ? '后续在这里召唤砚砚 Pro，会继续使用已连接的会话。' : '连接后，在这里召唤砚砚 Pro 就会继续使用该会话。',
-  ];
-}
-
 function ReadyRecovery(
   props: CloudBindingRecoveryCardViewProps & { loadState: Extract<RecoveryLoadState, { kind: 'ready' }> },
 ) {
   const { loadState, selectedConversationId, showChoices, phase, onRefresh } = props;
+  const shell = useShellPresentation();
+  // Its own radio group: other recovery cards, and the thread panel, can show choices at the same time.
+  const radioName = `cloud-recovery-conversation-${useId()}`;
   if (loadState.candidates.length === 0)
     return (
       <div className="mt-3 text-sm text-cafe-secondary">
-        <p>还没有已授权会话。打开目标 ChatGPT 对话后，点击扩展里的「授权此会话」。</p>
-        <div className="mt-3 flex flex-wrap gap-2">
-          <a
-            data-recovery-open-chatgpt
-            href="https://chatgpt.com/"
-            target="_blank"
-            rel="noopener noreferrer"
-            className={primaryClass}
-          >
-            打开 ChatGPT 授权会话
-          </a>
-          <button type="button" onClick={onRefresh} className={secondaryClass}>
-            我已授权，重新检查
-          </button>
-        </div>
+        {loadState.connectionIssue ? (
+          <div className="flex flex-wrap gap-2">
+            <a href={personalChromeSettingsHref()} className={primaryClass}>
+              {loadState.connectionActionLabel ?? '检查 Chrome 连接'}
+            </a>
+            <button type="button" onClick={onRefresh} className={secondaryClass}>
+              我已处理，重新检查
+            </button>
+          </div>
+        ) : (
+          <>
+            <p>还没有已授权会话。打开目标 ChatGPT 对话后，点击扩展里的「授权此会话」。</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <a
+                data-recovery-open-chatgpt
+                href="https://chatgpt.com/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className={primaryClass}
+              >
+                打开 ChatGPT 授权会话
+              </a>
+              <button type="button" onClick={onRefresh} className={secondaryClass}>
+                我已授权，重新检查
+              </button>
+            </div>
+          </>
+        )}
       </div>
     );
   const selected = loadState.candidates.find((candidate) => candidate.conversationId === selectedConversationId);
@@ -126,19 +123,21 @@ function ReadyRecovery(
     <div>
       {loadState.connectionIssue ? (
         <a
-          href={personalChromeSettingsHref(props.threadId)}
+          href={personalChromeSettingsHref()}
           className="mt-2 inline-block text-xs font-semibold text-cafe-interactive hover:underline"
         >
-          检查连接组件
+          {loadState.connectionActionLabel ?? '检查 Chrome 连接'}
         </a>
       ) : null}
       {showChoices ? (
         <CloudConversationChoices
+          layout={shell === 'v2' ? 'rows' : 'cards'}
           candidates={loadState.candidates}
           selectedConversationId={selectedConversationId}
           boundConversationId={loadState.boundConversationId}
           busy={busy}
           onSelect={props.onSelect}
+          name={radioName}
         />
       ) : selected ? (
         <div className="mt-3 rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-3 py-2">
@@ -159,7 +158,7 @@ function ReadyRecovery(
           {loadState.titleSyncMessage}
         </p>
       ) : null}
-      {!props.attemptId && loadState.retryStateError ? (
+      {!props.attemptId && !props.bindingOnly && loadState.retryStateError ? (
         <p role="status" className="mt-3 text-xs text-cafe-secondary">
           {loadState.retryStateError}
         </p>
@@ -205,13 +204,22 @@ function ReadyRecovery(
 }
 
 export function CloudBindingRecoveryCardView(props: CloudBindingRecoveryCardViewProps) {
+  // A failed cat dispatch proves it was not sent, not why. Only the owner read
+  // can confirm that a connection is missing; an existing route keeps its original warning.
+  if (
+    props.bindingOnly &&
+    props.loadState.kind === 'ready' &&
+    props.loadState.boundConversationId &&
+    props.phase !== 'connected'
+  )
+    return null;
   const [title, description] = recoveryHeading(props);
   const terminal = props.deliveryStatus === 'sent' || props.deliveryStatus === 'failed';
   return (
     <section
       aria-label="砚砚 Pro 会话连接"
       data-testid="cloud-binding-recovery-card"
-      className="mt-3 rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-4 text-left"
+      className="mt-3 w-full rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-4 text-left"
     >
       <div className="flex items-start gap-2 text-cafe">
         <ConnectionIcon />
@@ -231,6 +239,9 @@ export function CloudBindingRecoveryCardView(props: CloudBindingRecoveryCardView
               <p role="alert" className="text-xs text-conn-red-text">
                 {props.loadState.message}
               </p>
+              <a href={personalChromeSettingsHref()} className={`${secondaryClass} mt-2 inline-block`}>
+                {props.loadState.actionLabel ?? '检查 Personal Chrome'}
+              </a>
               <button type="button" onClick={props.onRefresh} className={`${secondaryClass} mt-2`}>
                 重新检查
               </button>
@@ -243,10 +254,58 @@ export function CloudBindingRecoveryCardView(props: CloudBindingRecoveryCardView
 }
 
 export function CloudBindingRecoveryCard(props: CloudBindingRecoveryCardProps) {
-  const controller = useCloudBindingRecovery(props);
+  const shell = useShellPresentation();
+  const receipt = props.timelineMessages
+    ?.flatMap((m) => {
+      const value = m.source?.meta?.cloudBridgeOutboundReceipt;
+      return m.source?.connector === 'cloud-bridge-status' &&
+        m.replyTo === props.sourceMessageId &&
+        isCloudBridgeOutboundReceiptV1(value) &&
+        value.sourceMessageId === props.sourceMessageId &&
+        value.targetCatId === props.targetCatId &&
+        (!props.attemptId || value.dispatchInvocationId === props.attemptId)
+        ? [value]
+        : [];
+    })
+    .at(-1);
+  const identity =
+    receipt ??
+    (props.attemptId
+      ? {
+          sourceMessageId: props.sourceMessageId,
+          targetCatId: props.targetCatId,
+          dispatchInvocationId: props.attemptId,
+        }
+      : undefined);
+  const logical = useCloudReply(identity, props.threadId, props.timelineMessages);
+  const source = props.timelineMessages?.find((m) => m.id === props.sourceMessageId);
+  const native = source ? cloudDispatchReceipt(source, props.targetCatId, props.timelineMessages ?? []) : undefined;
+  if (
+    shell === 'v2' &&
+    native?.identity.dispatchInvocationId === identity?.dispatchInvocationId &&
+    logical.state !== 'unverified'
+  )
+    return null;
+  if (logical.state !== 'unverified')
+    return (
+      <section data-testid="cloud-binding-recovery-card" className="mt-3 rounded-xl border border-default p-4">
+        <CloudReplyStatus
+          result={logical}
+          targetCatId={props.targetCatId}
+          hostUnconfirmed={receipt?.status === 'unknown' && receipt.transport === 'host'}
+        />
+      </section>
+    );
+  return <ActiveRecoveryCard {...props} />;
+}
+
+function ActiveRecoveryCard(props: CloudBindingRecoveryCardProps) {
+  // Cat-authored sources may connect a route, but never enter the user retry operation.
+  const operation = props.bindingOnly ? { ...props, attemptId: undefined } : props;
+  const controller = useCloudBindingRecovery(operation);
   return (
     <CloudBindingRecoveryCardView
-      {...props}
+      {...operation}
       {...controller}
       onRefresh={controller.refreshTitles}
       onSelect={controller.selectConversation}

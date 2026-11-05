@@ -4,8 +4,16 @@ title: Runtime Deployment / Daemon Lifecycle
 summary: Managed deployment identity, frozen build target, daemon ownership, stop/restart operation evidence, and durable per-boot readiness facts kept separate from task waits and invocation admission.
 doc_kind: architecture
 created: 2026-09-27
-canonical_features: [F300, F323]
+canonical_features: [F300, F323, F330]
 code_anchors:
+  - packages/shared/src/deployment-profiles.json
+  - packages/shared/src/deployment-defaults.ts
+  - scripts/read-deployment-default.mjs
+  - scripts/project-deployment-defaults.mjs
+  - scripts/deployment-brand-config.mjs
+  - scripts/brand-dictionary-helper.mjs
+  - scripts/start-windows.ps1
+  - scripts/lib/platform-status.mjs
   - scripts/runtime-worktree.sh
   - scripts/start-dev.sh
   - scripts/alpha-worktree.sh
@@ -17,6 +25,8 @@ code_anchors:
   - packages/api/src/config/alpha-coordinates.ts
   - scripts/daemon-state.mjs
   - scripts/lib/daemon-state.mjs
+  - scripts/lib/process-identity.mjs
+  - scripts/lib/process-birth-identity.mjs
   - scripts/lib/daemon-stop-operation.mjs
   - scripts/lib/daemon-stop-record.mjs
   - scripts/lib/daemon-stop-claim.mjs
@@ -28,6 +38,8 @@ code_anchors:
   - packages/api/src/domains/runtime-deployment/RuntimeDeploymentObservationProvider.ts
   - packages/api/src/routes/runtime-deployment-routes.ts
 doc_anchors:
+  - feature-specs/2026-10-20-f330-deployment-defaults.md
+  - feature-specs/2026-10-21-f330-phase-a-final.md
   - docs/decisions/039-runtime-passive-freeze.md
   - docs/features/F300-self-sensing-home-state-awareness.md
   - docs/features/F323-runtime-restart-coordination.md
@@ -114,3 +126,20 @@ second Task/wait database.
 Watch duplicated daemon state files, direct PID signals outside the verified lifecycle, mutable checkout
 HEAD presented as running version, exit intent presented as clean completion, free-text actor fields used
 as permission, boot observers directly waking cats, and restart code modifying a currently serving tree.
+
+## Deployment defaults
+
+F330 keeps edition defaults in `packages/shared/src/deployment-profiles.json`. API, Web, MCP and
+bootstrap scripts resolve this same data, preserving each consumer's existing environment precedence.
+The public build selects only its public profile before compilation; shared consumers are not rewritten.
+The data belongs to the deployment artifact and takes effect on build/start. It creates no new process,
+port rebinding, credential store, lifecycle authority or restart permission. The existing frozen Git target
+and prepared-artifact checks cover changes to this source file.
+
+F330 derives display brands and repository coordinates from `assets/brand-dictionary.yaml` into that
+runtime JSON; an index-aware consistency check rejects drift. Maintenance source and target repository
+roles read the same canonical coordinates, independently of the selected runtime edition. Explicit
+repository allowlists and immutable origin attestations remain authority/provenance, not deployment
+defaults. Startup profiles own existing Unix/Windows default values while each launcher retains explicit
+environment precedence and mandatory isolation/lifecycle overrides. Desktop installation identity and
+release artifacts remain outside this Phase A contract.

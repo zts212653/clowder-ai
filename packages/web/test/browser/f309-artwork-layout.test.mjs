@@ -5,9 +5,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
 import { startReviewHost } from './fixtures/f309-artifact-review-host.mjs';
-import { openAnnotationSave, selectReviewMode } from './fixtures/f309-artwork-controls.mjs';
+import { selectReviewMode } from './fixtures/f309-artwork-controls.mjs';
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
 
@@ -60,16 +60,20 @@ for (const width of [1280, 390]) {
           '',
           'Opening an artwork must not take the main area by itself.',
         );
-        await page.getByRole('button', { name: /^在主区打开 / }).click();
+        await page.getByTestId('artifact-review-surface').getByTestId('f307-artifact-enter-full-window').click();
+        assert.equal(await page.getByTestId('review-host-chat').isVisible(), false);
+        await page.getByTestId('artifact-review-surface').getByTestId('f307-artifact-exit-full-window').click();
         assert.equal(
           await workbench.getAttribute('data-main-area-attention'),
-          await workbench.getAttribute('data-active-surface'),
-          'The explicit expand gives the artwork the main area.',
+          '',
+          'Full-window return leaves the original artwork mounted without legacy main-area attention.',
         );
       }
       await selectReviewMode(page, 'comment');
       const stage = await page.getByTestId('review-media-stage').boundingBox();
-      const composer = await page.getByRole('textbox', { name: '评论内容' }).boundingBox();
+      const input = page.getByRole('textbox', { name: '消息输入框' });
+      await input.fill('请保留画面比例 · layout sentinel');
+      const composer = await input.boundingBox();
       assert.ok(stage && composer);
       assert.ok(
         composer.y >= 0 && composer.y + composer.height <= 900,
@@ -79,7 +83,7 @@ for (const width of [1280, 390]) {
         stage.y >= 0 && stage.y + stage.height <= 900,
         `The complete artwork stage must remain in the viewport: ${JSON.stringify(stage)}`,
       );
-      const send = await (await openAnnotationSave(page)).boundingBox();
+      const send = await page.getByRole('button', { name: 'Send message', exact: true }).boundingBox();
       assert.ok(send && send.y + send.height <= 900, 'Sending must not require scrolling below the artwork.');
       await page.screenshot({ path: path.join(evidence, `layout-${width}-comment.png`), fullPage: true });
       await selectReviewMode(page, 'markup');

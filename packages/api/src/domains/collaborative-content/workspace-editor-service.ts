@@ -45,12 +45,12 @@ export class WorkspaceEditorService {
   }) {
     const contentRef = this.contentRef(input);
     const existingBinding = await this.options.bindings.get(contentRef);
-    const snapshot = await this.options.inventory.snapshot();
+    const snapshot = await this.options.inventory.snapshot({ currentOnly: true });
     const candidates = snapshot.instances
       .filter((instance) => instance.lifecycleState === 'installed')
       .flatMap((instance) => {
         const pkg = snapshot.packages.find((value) => value.packageDigest === instance.packageDigest);
-        if (!pkg) return [];
+        if (!pkg?.manifest) return [];
         return staticEditorContributions(pkg.manifest)
           .filter((value) => value.mediaTypes.includes(DOCX_MEDIA_TYPE))
           .map((contribution) => ({ instance, pkg, contribution }));

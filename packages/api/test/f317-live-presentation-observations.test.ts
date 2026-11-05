@@ -46,7 +46,7 @@ test('only a trusted current-call assistant item can be visible; native/message 
   const message = store.append({
     userId: 'owner',
     threadId: 'home',
-    catId: createCatId('codex61-sol'),
+    from: { kind: 'agent', catId: createCatId('codex61-sol') },
     mentions: [],
     content: 'Actual answer',
     timestamp: now,
@@ -81,7 +81,7 @@ test('a foreign message or permission revoked during a read cannot record visibi
   const message = store.append({
     userId: 'foreign',
     threadId: 'home',
-    catId: createCatId('codex61-sol'),
+    from: { kind: 'agent', catId: createCatId('codex61-sol') },
     mentions: [],
     content: 'Foreign',
     timestamp: Date.now(),
@@ -135,7 +135,7 @@ test('an owned message cannot record a visible fact if the call is revoked or it
     const message = store.append({
       userId: 'owner',
       threadId: 'home',
-      catId: createCatId('codex61-sol'),
+      from: { kind: 'agent', catId: createCatId('codex61-sol') },
       mentions: [],
       content: 'Owned answer',
       timestamp: Date.now(),

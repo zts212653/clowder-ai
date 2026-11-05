@@ -6,11 +6,10 @@
  */
 
 import type { CapabilityEntry, McpToolInfo } from '@cat-cafe/shared';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import type { StdioServerParameters } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { getDefaultEnvironment, StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import type { StdioClientTransport, StdioServerParameters } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { resolvePencilCommand } from '../config/capabilities/capability-orchestrator.js';
+import { resolveEnvReferences } from '../utils/env-references.js';
+import { loadMcpClient, loadMcpHttp, loadMcpStdio } from '../utils/lazy-mcp-sdk.js';
 
 export interface McpProbeResult {
   connectionStatus: 'connected' | 'disconnected' | 'unknown';
@@ -41,25 +40,16 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
   });
 }
 
-function sanitizeEnv(env: Record<string, string> | undefined): Record<string, string> | undefined {
-  const safe: Record<string, string> = { ...getDefaultEnvironment() };
+function sanitizeEnv(
+  env: Record<string, string> | undefined,
+  defaults: Record<string, string>,
+): Record<string, string> | undefined {
+  const safe: Record<string, string> = { ...defaults };
   if (!env) return safe;
-  for (const [key, value] of Object.entries(env)) {
+  for (const [key, value] of Object.entries(resolveEnvReferences(env))) {
     if (typeof value === 'string') safe[key] = value;
   }
   return safe;
-}
-
-/**
- * Resolve `${ENV_VAR}` references in header values from process.env.
- * Supports bare `${VAR}` as well as embedded `Bearer ${VAR}` patterns.
- */
-function resolveEnvVarsInRecord(record: Record<string, string>): Record<string, string> {
-  const resolved: Record<string, string> = {};
-  for (const [key, value] of Object.entries(record)) {
-    resolved[key] = value.replace(/\$\{([^}]+)\}/g, (_, name) => process.env[name] ?? '');
-  }
-  return resolved;
 }
 
 function remainingTimeout(deadlineMs: number): number {
@@ -122,8 +112,13 @@ export async function probeMcpCapability(
   if (!capability.mcpServer) return { connectionStatus: 'unknown' };
 
   const isHttp = capability.mcpServer.transport === 'streamableHttp';
-  if (isHttp) return probeHttpMcp(capability, options);
-  return probeStdioMcp(capability, options);
+  try {
+    if (isHttp) return await probeHttpMcp(capability, options);
+    return await probeStdioMcp(capability, options);
+  } catch (err) {
+    // SDK initialization can now fail at first use rather than route import time.
+    return { connectionStatus: 'disconnected', tools: [], error: (err as Error).message };
+  }
 }
 
 async function probeHttpMcp(capability: CapabilityEntry, options: { timeoutMs?: number }): Promise<McpProbeResult> {
@@ -143,9 +138,14 @@ async function probeHttpMcp(capability: CapabilityEntry, options: { timeoutMs?: 
 
   const timeoutMs = options.timeoutMs ?? DEFAULT_HTTP_PROBE_TIMEOUT_MS;
   const deadlineMs = Date.now() + timeoutMs;
+  const [{ Client }, { StreamableHTTPClientTransport }] = await withTimeout(
+    Promise.all([loadMcpClient(), loadMcpHttp()]),
+    remainingTimeout(deadlineMs),
+  );
+  if (Date.now() >= deadlineMs) throw new Error(`Probe timeout after ${timeoutMs}ms`);
   const requestInit: RequestInit = {};
   if (capability.mcpServer?.headers && Object.keys(capability.mcpServer.headers).length > 0) {
-    requestInit.headers = resolveEnvVarsInRecord(capability.mcpServer.headers);
+    requestInit.headers = resolveEnvReferences(capability.mcpServer.headers);
   }
 
   const transport = new StreamableHTTPClientTransport(parsed, { requestInit });
@@ -185,13 +185,18 @@ async function probeStdioMcp(
 
   const timeoutMs = resolveProbeTimeoutMs(capability, options.timeoutMs);
   const deadlineMs = Date.now() + timeoutMs;
+  const [{ Client }, { getDefaultEnvironment, StdioClientTransport }] = await withTimeout(
+    Promise.all([loadMcpClient(), loadMcpStdio()]),
+    remainingTimeout(deadlineMs),
+  );
+  if (Date.now() >= deadlineMs) throw new Error(`Probe timeout after ${timeoutMs}ms`);
   const serverParams: StdioServerParameters = {
     command,
     args,
     cwd: mcp.workingDir ?? options.projectRoot,
     stderr: 'ignore',
   };
-  const env = sanitizeEnv(mcp.env);
+  const env = sanitizeEnv(mcp.env, getDefaultEnvironment());
   if (env && Object.keys(env).length > 0) serverParams.env = env;
 
   const transport = new StdioClientTransport(serverParams);

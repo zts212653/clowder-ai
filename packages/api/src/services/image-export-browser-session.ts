@@ -1,7 +1,8 @@
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
-import puppeteer, { type Browser, type Page } from 'puppeteer-core';
+import type { Browser, Page } from 'puppeteer-core';
 import { createModuleLogger } from '../infrastructure/logger.js';
+import { loadPuppeteer } from '../utils/lazy-puppeteer.js';
 import {
   type BrowserCloseReason,
   hasErrorCode,
@@ -127,8 +128,11 @@ export class ImageExportBrowserSession {
   }
 
   private async launchBrowser(): Promise<Browser> {
+    const executablePath = detectChromePath();
+    const puppeteer = await loadPuppeteer();
+    this.assertOpen();
     const browser = await puppeteer.launch({
-      executablePath: detectChromePath(),
+      executablePath,
       headless: true,
       args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
     });

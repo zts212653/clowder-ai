@@ -48,7 +48,7 @@ export function ReviewReply({
             void onSave(draft.draft.body).then((ok) => {
               if (ok) {
                 setEditing(false);
-                draft.clear();
+                draft.clear(draft.draft);
               }
             });
           }}

@@ -6,10 +6,14 @@ import {
   RedisCloudReturnGrantStore,
 } from '../dist/domains/cats/services/cloud-bridge/cloud-return-grant.js';
 
+/** A Host-minted message id created an hour from now: provably younger than any store's epoch. */
+const hostMessageId = (sequence) =>
+  `${String(Date.now() + 3_600_000).padStart(16, '0')}-${String(sequence).padStart(6, '0')}-abcdef01`;
+
 const claims = {
   threadId: 'thread-f247',
   userId: 'alice',
-  sourceMessageId: 'source-f247',
+  sourceMessageId: hostMessageId(1),
   dispatchInvocationId: 'dispatch-f247',
   targetCatId: 'gpt-pro',
 };
@@ -64,7 +68,7 @@ describe('F247 server-custodied exact-source return grant', () => {
     await store.issue(claims);
 
     for (const mismatch of [
-      { sourceMessageId: 'source-other' },
+      { sourceMessageId: hostMessageId(2) },
       { threadId: 'thread-other' },
       { userId: 'mallory' },
       { targetCatId: 'other-cloud-cat' },
@@ -92,6 +96,9 @@ describe('F247 server-custodied exact-source return grant', () => {
       },
       async get(key) {
         return values.get(key) ?? null;
+      },
+      async scan() {
+        return ['0', []];
       },
       async eval() {
         throw new Error('not used by this restart assertion');

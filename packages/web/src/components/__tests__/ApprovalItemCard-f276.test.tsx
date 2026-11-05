@@ -43,6 +43,21 @@ vi.mock('../ThreadSidebar/thread-navigation', () => ({
   pushThreadRouteWithHistory: navigationMocks.pushThreadRouteWithHistory,
 }));
 
+let canonicalItem: ApprovalHubItem;
+// This dispatch/selector test isolates the owner-read seam; the mounted original-card tests exercise real HTTP hydration.
+vi.mock('../rich/use-person-memory-proposal', () => ({
+  usePersonMemoryProposal: () => ({
+    source: {
+      item: canonicalItem,
+      snapshot: { status: 'pending_approval', remainingDraftIds: canonicalItem.detail.remainingDraftIds },
+    },
+    checked: true,
+    checking: false,
+    refresh: vi.fn(),
+    beforeWrite: async () => true,
+  }),
+}));
+
 import { ApprovalItemCard } from '../ApprovalItemCard';
 
 const ITEM: ApprovalHubItem = {
@@ -130,6 +145,7 @@ describe('ApprovalItemCard F276', () => {
     document.body.appendChild(container);
     root = createRoot(container);
     vi.clearAllMocks();
+    canonicalItem = ITEM;
     storeMocks.rejectProposal.mockResolvedValue(true);
   });
 
@@ -213,13 +229,14 @@ describe('ApprovalItemCard F276', () => {
       },
     ];
 
+    canonicalItem = typedItem;
     await act(async () => root.render(<ApprovalItemCard item={typedItem} />));
 
     expect(container.querySelectorAll('input[type="checkbox"]')).toHaveLength(2);
     expect(container.textContent).toContain('事件类型、发生了什么、主题/重要性');
-    expect(container.textContent).toContain('message_text');
-    expect(container.textContent).toContain('reported_fact');
-    expect(container.textContent).toContain('user_assessment');
+    expect(container.textContent).toContain('对话原文');
+    expect(container.textContent).toContain('事实陈述');
+    expect(container.textContent).toContain('本人判断');
     expect(container.textContent).toContain('我和黄挺开会，这件事很重要');
 
     const source = container.querySelector<HTMLButtonElement>('[data-testid="person-memory-informed-source-0"]');

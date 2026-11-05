@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { act } from 'react';
+import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { HubMemberOverviewCard } from '@/components/HubMemberOverviewCard';
@@ -31,8 +32,8 @@ describe('#723 list-level member deletion coverage', () => {
         onEdit: () => {},
       }),
     );
-    expect(html).toContain('aria-label="删除成员"');
-    expect(html).toContain('title="删除成员"');
+    expect(html).toContain(`aria-label="删除成员：${cat.displayName}"`);
+    expect(html).toContain(`title="删除成员：${cat.displayName}"`);
   });
 
   it('does not render delete button when onDelete is omitted', () => {
@@ -48,16 +49,22 @@ describe('#723 list-level member deletion coverage', () => {
 
   it('delete button fires onDelete with the correct cat data', () => {
     const onDelete = vi.fn();
+    const onEdit = vi.fn();
     const cat = makeCat({ id: 'cat-callback', clientId: 'openai' });
-
-    const html = renderToStaticMarkup(
-      React.createElement(HubMemberOverviewCard, {
-        cat,
-        onDelete,
-        onEdit: () => {},
-      }),
-    );
-    expect(html).toContain('aria-label="删除成员"');
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    try {
+      act(() => root.render(<HubMemberOverviewCard cat={cat} onDelete={onDelete} onEdit={onEdit} />));
+      const button = container.querySelector<HTMLButtonElement>(`button[aria-label="删除成员：${cat.displayName}"]`);
+      expect(button).not.toBeNull();
+      act(() => button?.click());
+      expect(onDelete).toHaveBeenCalledExactlyOnceWith(cat);
+      expect(onEdit).not.toHaveBeenCalled();
+    } finally {
+      act(() => root.unmount());
+      container.remove();
+    }
   });
 
   it('disabled cats also get delete button at list level', () => {
@@ -73,6 +80,6 @@ describe('#723 list-level member deletion coverage', () => {
         onEdit: () => {},
       }),
     );
-    expect(html).toContain('aria-label="删除成员"');
+    expect(html).toContain(`aria-label="删除成员：${cat.displayName}"`);
   });
 });

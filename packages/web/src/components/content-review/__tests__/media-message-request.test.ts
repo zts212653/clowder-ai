@@ -35,9 +35,9 @@ describe('mediaAttachmentOf', () => {
     expect(mediaAttachmentOf([{ type: 'text', text: '只有字' }, block(quote)])).toBeNull();
   });
 
-  it('takes the first one when there are several, because one send carries one', () => {
+  it('does not guess a first work when a gallery carries several', () => {
     const first = media({ id: 'media-first' });
-    expect(mediaAttachmentOf([block(first), block(media({ id: 'media-second' }))])).toBe(first);
+    expect(mediaAttachmentOf([block(first), block(media({ id: 'media-second' }))])).toBeNull();
   });
 });
 
@@ -114,21 +114,25 @@ describe('mediaRequestsForMessage', () => {
     expect(joined.map((item) => item.requestId)).toEqual(['r-a', 'r-b', 'r-c']);
   });
 
-  it('names the cat from the owner context first, then the roster, then the id itself', () => {
+  it('names the original target id from the roster, retaining a historical context name when that cat is unavailable', () => {
     const joined = mediaRequestsForMessage(
       catalogue(
         [
           request({ id: 'r-ctx', sourceMessageId: 'message-1', targetCatId: 'cat-a', createdAt: 1 }),
           request({ id: 'r-roster', sourceMessageId: 'message-1', targetCatId: 'cat-a', createdAt: 2 }),
           request({ id: 'r-raw', sourceMessageId: 'message-1', targetCatId: 'cat-z', createdAt: 3 }),
+          request({ id: 'r-history', sourceMessageId: 'message-1', targetCatId: 'cat-old', createdAt: 4 }),
         ],
-        [{ requestIds: ['r-ctx'], targetName: '烁烁' }],
+        [
+          { requestIds: ['r-ctx'], targetName: '原具名猫' },
+          { requestIds: ['r-history'], targetName: '团团' },
+        ],
       ),
       'message-1',
       media(),
       nameOf,
     );
-    expect(joined.map((item) => item.targetName)).toEqual(['烁烁', '花花', 'cat-z']);
+    expect(joined.map((item) => item.targetName)).toEqual(['花花', '花花', 'cat-z', '团团']);
   });
 
   it('carries the media title and how many places the message covered; the whole work covers none', () => {
@@ -172,4 +176,17 @@ describe('hasRequestFromMessage', () => {
       ),
     ).toBe(false);
   });
+});
+
+it('joins a gallery takeover only to its named work and does not end discovery of a sibling', () => {
+  const own = media({ id: 'picture-2', title: '图二.png' });
+  const other = request({ id: 'request-for-picture-1', sourceMessageId: 'message-gallery' });
+  other.record.progress.sourceAttachmentId = 'picture-1';
+  const second = request({ id: 'request-for-picture-2', sourceMessageId: 'message-gallery' });
+  second.record.progress.sourceAttachmentId = own.id;
+  expect(
+    mediaRequestsForMessage(catalogue([other, second]), 'message-gallery', own, nameOf).map((item) => item.requestId),
+  ).toEqual(['request-for-picture-2']);
+  expect(hasRequestFromMessage(catalogue([other]), 'message-gallery', own.id)).toBe(false);
+  expect(hasRequestFromMessage(catalogue([other, second]), 'message-gallery', own.id)).toBe(true);
 });

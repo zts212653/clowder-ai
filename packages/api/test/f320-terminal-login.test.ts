@@ -27,7 +27,7 @@ function fixture(keepShell = false) {
     `#!/usr/bin/env node
 const fs=require('node:fs');const path=require('node:path');
 const args=process.argv.slice(2);
-fs.appendFileSync(path.join(process.env.CODEX_HOME,'calls.jsonl'),JSON.stringify({args,home:process.env.CODEX_HOME,envHasKey:!!process.env.OPENAI_API_KEY,tty:!!process.stdin.isTTY})+'\\n');
+fs.appendFileSync(path.join(process.env.CODEX_HOME,'calls.jsonl'),JSON.stringify({args,home:process.env.CODEX_HOME,envHasKey:!!process.env.OPENAI_API_KEY,issuerOverride:!!process.env.CODEX_APP_SERVER_LOGIN_ISSUER,tty:!!process.stdin.isTTY})+'\\n');
 if(args.at(-1)==='status')process.exit(process.env.F320_FAKE_STATUS==='fail'?1:0);
 if(process.env.F320_FAKE_LOGIN==='hang'){setInterval(()=>{},1000);}
 else if(process.env.F320_FAKE_LOGIN==='fail')process.exit(1);
@@ -89,7 +89,10 @@ else {const claims={'https://api.openai.com/auth':{chatgpt_user_id:'fixture-user
 }
 test('account login wakes terminal for official login and status in the isolated home, with quoted paths', async () => {
   const saved = process.env.OPENAI_API_KEY;
+  const savedIssuer = process.env.CODEX_APP_SERVER_LOGIN_ISSUER;
   process.env.OPENAI_API_KEY = 'ambient-test-secret';
+  // A login-issuer knob a later Codex reads; it must not reach the managed login from Terminal's env.
+  process.env.CODEX_APP_SERVER_LOGIN_ISSUER = 'https://issuer.invalid';
   const f = fixture();
   try {
     const identity = await f.run();
@@ -108,11 +111,14 @@ test('account login wakes terminal for official login and status in the isolated
       ],
     );
     assert.ok(calls.every((x) => x.home === f.home && !x.envHasKey));
+    assert.ok(calls.every((x) => !x.issuerOverride));
     assert.doesNotMatch(readFileSync(join(dirname(f.home), 'terminal-request.json'), 'utf8'), /ambient-test-secret/);
     assert.equal(readFileSync(join(dirname(f.home), 'terminal-result.json'), 'utf8').includes('id_token'), false);
   } finally {
     if (saved === undefined) delete process.env.OPENAI_API_KEY;
     else process.env.OPENAI_API_KEY = saved;
+    if (savedIssuer === undefined) delete process.env.CODEX_APP_SERVER_LOGIN_ISSUER;
+    else process.env.CODEX_APP_SERVER_LOGIN_ISSUER = savedIssuer;
     f.close();
   }
 });

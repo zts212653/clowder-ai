@@ -5,7 +5,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
-import { homedir, tmpdir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -196,7 +196,7 @@ process.stdout.write(output);
     stdio: ['ignore', 'pipe', 'pipe'],
     env: {
       PATH: '/opt/homebrew/opt/node@24/bin:/usr/bin:/bin',
-      HOME: homedir(),
+      HOME: home,
       LANG: 'en_US.UTF-8',
       CODEX_HOME: home,
       CODEX_SQLITE_HOME: home,

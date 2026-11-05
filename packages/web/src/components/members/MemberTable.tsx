@@ -1,15 +1,19 @@
 'use client';
 import { useId, useRef } from 'react';
 import type { CatData } from '@/hooks/useCatData';
+import { AppTooltip } from '../AppTooltip';
 import { AvatarImageWithFallback } from '../AvatarImageWithFallback';
 import type { ConfigData } from '../config-viewer-types';
 import type { RoutingContextQueryState } from '../routing-context/useRoutingContext';
 import { useMembersCopy, useMemberText } from './editor-presentation';
 import { MemberAccountName } from './MemberAccountName';
+import { MemberConnectionSummary } from './MemberConnectionSummary';
+import { MemberRuntimeSummary } from './MemberRuntimeSummary';
 import { MemberStatus } from './MemberStatus';
-import { memberClientName, memberStatus, memberTransport } from './member-projection';
+import { memberStatus, memberTransport } from './member-projection';
 import { useMemberClock } from './useMemberClock';
 import type { useMemberList } from './useMemberList';
+import { useMemberLoginCheck } from './useMemberLoginCheck';
 export function MemberTable({
   config,
   visible,
@@ -39,6 +43,7 @@ export function MemberTable({
   const t = useMemberText();
   const copy = useMembersCopy();
   const now = useMemberClock(routing.data);
+  const loginFor = useMemberLoginCheck(list.allCats.some((cat) => cat.configurationSource === 'native_tool'));
   return (
     <div className="member-table-scroll">
       <p id={sortHelpId} className="sr-only">
@@ -59,10 +64,13 @@ export function MemberTable({
         </thead>
         <tbody>
           {config.coCreator && filter !== 'disabled' && transport === 'all' && (
-            <tr>
+            <tr className="member-co-creator">
               <td />
               <td>
                 <button type="button" className="member-name" onClick={onEditCoCreator}>
+                  {config.coCreator.avatar && (
+                    <AvatarImageWithFallback src={config.coCreator.avatar} alt="" className="member-avatar" />
+                  )}
                   {config.coCreator.name} <small>{t('所有者')}</small>
                 </button>
               </td>
@@ -136,48 +144,56 @@ export function MemberTable({
                 </div>
               </td>
               <td>
-                <button type="button" className="member-name" onClick={() => onEditMember(cat)}>
-                  <AvatarImageWithFallback src={cat.avatar} alt="" className="member-avatar" />
-                  <span>
-                    <strong>{cat.nickname || cat.displayName}</strong>
-                    <small>
-                      {cat.breedDisplayName || cat.displayName} · {cat.id}
-                    </small>
-                  </span>
-                </button>
+                <AppTooltip
+                  label={`${cat.nickname || cat.displayName} · ${cat.breedDisplayName || cat.displayName}`}
+                  intent="content"
+                  multiline
+                >
+                  <button type="button" className="member-name" onClick={() => onEditMember(cat)}>
+                    <AvatarImageWithFallback src={cat.avatar} alt="" className="member-avatar" />
+                    <span>
+                      <strong>{cat.nickname || cat.displayName}</strong>
+                      <small>{cat.breedDisplayName || cat.displayName}</small>
+                    </span>
+                  </button>
+                </AppTooltip>
               </td>
               <td>
-                {memberClientName(cat)} · {cat.defaultModel || t('未设置')}
+                <MemberRuntimeSummary cat={cat} />
               </td>
               <td>
                 <MemberAccountName cat={cat} accounts={list.accounts} />
               </td>
               <td>
-                {t(memberTransport(cat))} ·{' '}
-                {list.accounts.find((p) => p.id === cat.accountRef)?.authType === 'oauth'
-                  ? t('账号登录')
-                  : list.accounts.find((p) => p.id === cat.accountRef)?.authType === 'api_key'
-                    ? t('配置账号')
-                    : t('认证未确认')}
+                <AppTooltip label={t(memberTransport(cat))} intent="content">
+                  <button type="button" className="member-cell-text">
+                    {t(memberTransport(cat))}
+                  </button>
+                </AppTooltip>
               </td>
               <td>
                 <MemberStatus
+                  catId={cat.id}
                   status={
                     routing.loading && !routing.data
                       ? { label: '读取中', detail: '', tone: 'unknown' }
-                      : memberStatus(cat, routing.data, routing.error, now)
+                      : memberStatus(cat, routing.data, routing.error, now, loginFor(cat))
                   }
                 />
               </td>
               <td>
-                <details>
-                  <summary>
+                <AppTooltip
+                  label={cat.mentionPatterns.join(' · ') || t('未设置')}
+                  intent="content"
+                  multiline
+                  showOnClick
+                >
+                  <button type="button" className="member-aliases">
                     {cat.mentionPatterns.length
                       ? copy.aliasCount(cat.mentionPatterns[0], cat.mentionPatterns.length)
                       : t('未设置')}
-                  </summary>
-                  {cat.mentionPatterns.join('、')}
-                </details>
+                  </button>
+                </AppTooltip>
               </td>
               <td>
                 <button
@@ -192,6 +208,7 @@ export function MemberTable({
                   <span />
                 </button>
               </td>
+              <MemberConnectionSummary cat={cat} accounts={list.accounts} />
             </tr>
           ))}
         </tbody>

@@ -10,15 +10,16 @@
  * Wire: `pnpm gen:env-reference` in root package.json
  */
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { parseCategories, parseVars } from './lib/env-registry-parser.mjs';
+import { loadEnvRegistrySource } from './lib/env-registry-source.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const REGISTRY_PATH = join(ROOT, 'packages/api/src/config/env-registry.ts');
 const OUTPUT_PATH = join(ROOT, 'docs/env-reference.md');
 
-const src = readFileSync(REGISTRY_PATH, 'utf-8');
+const src = loadEnvRegistrySource(REGISTRY_PATH);
 const categories = parseCategories(src);
 const vars = parseVars(src);
 

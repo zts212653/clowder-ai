@@ -3,8 +3,9 @@ import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { after, before } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { chromium } from 'playwright';
 import { build } from 'vite';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { visibleAttentionFixture } from './f322-visible-attention.fixture.mjs';
 
 // Real rail, mailbox, tooltip, settings shell, preference/pin stores and navigation hooks.
 // Only Next routing and domain content renderers are test boundaries. Every request is
@@ -81,25 +82,26 @@ const unifiedSource = (extra = {}) => ({
   ...extra,
 });
 // F310's unified owner read (version 1). The default is the proven complete empty set.
-const unifiedRead = (overrides = {}) => ({
-  version: 1,
-  status: 'available',
-  scope: 'owner_all_projects',
-  identity: { ownerUserId: 'owner-1' },
-  observedAt: 3,
-  sources: {
-    approvals: unifiedSource(),
-    needsMe: unifiedSource({ coverage: 'current_linked_F310_five_producers' }),
-    structuredChoices: unifiedSource({ coverage: 'pending_f306_structured_choices' }),
-  },
-  readWindow: { startedAt: 1, endedAt: 3, consistency: 'independent_source_reads' },
-  consistency: { state: 'verified', reasons: [] },
-  items: [],
-  totalCount: 0,
-  attentionCount: 0,
-  page: { offset: 0, limit: 20, scope: 'known_rows', hasMore: false },
-  ...overrides,
-});
+const unifiedRead = (overrides = {}) =>
+  visibleAttentionFixture({
+    version: 1,
+    status: 'available',
+    scope: 'owner_all_projects',
+    identity: { ownerUserId: 'owner-1' },
+    observedAt: 3,
+    sources: {
+      approvals: unifiedSource(),
+      needsMe: unifiedSource({ coverage: 'current_linked_F310_five_producers' }),
+      structuredChoices: unifiedSource({ coverage: 'pending_f306_structured_choices' }),
+    },
+    readWindow: { startedAt: 1, endedAt: 3, consistency: 'independent_source_reads' },
+    consistency: { state: 'verified', reasons: [] },
+    items: [],
+    totalCount: 0,
+    attentionCount: 0,
+    page: { offset: 0, limit: 20, scope: 'known_rows', hasMore: false },
+    ...overrides,
+  });
 export async function openProof({
   pins = ['notify'],
   shell = 'v2',
@@ -174,13 +176,27 @@ export async function openProof({
         '/api/session': session,
         '/api/approval-hub/pending': { items: [], count: 0 },
         // The classic presentation (reached by the theme test) still reads Needs Me for its own rail.
-        '/api/entrusted-work/needs-me': { ownerReads: [] },
+        '/api/entrusted-work/needs-me': { ownerReads: [], coverage: { state: 'complete' } },
         // The v2 conversation header's own reads (ThreadIndicator, DaemonActiveIndicator, cat roster).
         '/api/threads/thread-return': { id: 'thread-return', title: '返回原处的对话', projectPath: '/work/fixture' },
         '/api/threads/thread-return/active-pane': { active: false },
+        '/api/threads/thread-return/artifacts': {
+          view: 'works',
+          artifacts: [],
+          total: 0,
+          complete: true,
+          workLineage: 'resolved',
+        },
         // A second conversation, for "open the source in another conversation".
         '/api/threads/thread-other': { id: 'thread-other', title: '另一个对话', projectPath: '/work/fixture' },
         '/api/threads/thread-other/active-pane': { active: false },
+        '/api/threads/thread-other/artifacts': {
+          view: 'works',
+          artifacts: [],
+          total: 0,
+          complete: true,
+          workLineage: 'resolved',
+        },
         '/api/cats': {
           cats: [
             {
@@ -199,12 +215,16 @@ export async function openProof({
           ],
         },
         '/api/config/cat-order': { catOrder: [] },
+        '/api/plugins/official.collective-connector/connections': { runtimeStatus: 'active', connections: [] },
+        '/api/config/chat-background': { threads: {} },
         '/api/config/conversation-view': {
           stored: null,
           effective: { mode: 'group' },
           source: 'product',
         },
       };
+      if (url.pathname === '/api/plugin-ui' && request.method() === 'GET')
+        return handler.fulfill({ json: { entries: [] } });
       if (!(url.pathname in bodies)) {
         unexpected.push(request.url());
         return handler.fulfill({ status: 404, body: '{}' });

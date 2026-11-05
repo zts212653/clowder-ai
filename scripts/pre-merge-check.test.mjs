@@ -203,6 +203,7 @@ const knownCommands = new Set([
   'check:sources',
   'check:installed',
   'check:artifacts',
+  'check:artifacts:after-api-tests',
   '-r --if-present run build',
   '-r --workspace-concurrency=1 --if-present --filter',
   '-r exec bash -lc',
@@ -211,6 +212,9 @@ const knownCommands = new Set([
   '--filter @cat-cafe/api run',
 ]);
 if (command === 'run check:fix' && process.env.STUB_CHECKFIX_FAIL === '1') {
+  process.exit(1);
+}
+if (args.includes('!@cat-cafe/web') && args.includes('test') && process.env.STUB_API_TEST_FAIL === '1') {
   process.exit(1);
 }
 if (!knownCommands.has(command)) {
@@ -235,6 +239,7 @@ if (
   args[0]?.endsWith('/run-with-gate-resource-permit.mjs') &&
   process.env.CAT_CAFE_FULL_GATE_LEASE_HELD === '1'
 ) {
+  appendFileSync(${JSON.stringify(logPath)}, 'stage-parent ' + (process.env.CAT_CAFE_GATE_EXECUTION_PARENT_JOB_ID ?? '<unset>') + '\\n');
   const { runGateResourceStageFixture } = require(${JSON.stringify(path.join(repoRoot, 'scripts', 'lib', 'gate-resource-stage-fixture.mjs'))});
   process.exit(runGateResourceStageFixture(args.slice(1)));
 }
@@ -266,6 +271,7 @@ if (args[0]?.endsWith('plan-browser-verification.mjs')) {
 }
 if (args[0]?.endsWith('run-browser-verification.mjs')) {
   appendFileSync(${JSON.stringify(logPath)}, 'browser-outer-permit ' + (process.env.CAT_CAFE_FULL_GATE_RESOURCE_PERMIT_HELD ?? '<unset>') + '\\n');
+  appendFileSync(${JSON.stringify(logPath)}, 'browser-parent ' + (process.env.CAT_CAFE_GATE_EXECUTION_PARENT_JOB_ID ?? '<unset>') + '\\n');
   process.exit(Number(process.env.STUB_BROWSER_VERIFICATION_EXIT ?? '0'));
 }
 if (args[0]?.endsWith('gate-prepared-artifacts.mjs') && args[1] === 'record') {
@@ -468,6 +474,70 @@ function runGate(bash, args = [], extraEnv = {}, options = {}) {
     rmSync(tempDir, { recursive: true, force: true });
   }
 }
+
+describe('artifact check reuse after API tests', () => {
+  it(
+    'keeps every distinct artifact check when the canonical check chain grows',
+    SOURCE_GATE_CONTROL_TEST_OPTIONS,
+    () => {
+      const scripts = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8')).scripts;
+      const apiScripts = JSON.parse(readFileSync(path.join(repoRoot, 'packages/api/package.json'), 'utf8')).scripts;
+      const expand = (name) =>
+        scripts[name].split(' && ').flatMap((command) => {
+          const alias = /^pnpm (?:run )?([\w:.-]+)$/u.exec(command)?.[1];
+          return alias && scripts[alias] ? expand(alias) : [command];
+        });
+      // These are the real API entrypoint's root and one-directory JS globs.
+      // A future suite split must re-establish coverage before reusing this lane.
+      assert.match(apiScripts.test, / test\/\*\.test\.js test\/\*\*\/\*\.test\.js(?:\s|$)/);
+      assert.match(apiScripts['test:prompt-budget'], / test\/system-prompt-builder\.test\.js$/);
+      const full = expand('check:artifacts');
+      const remaining = expand('check:artifacts:after-api-tests');
+      assert.match(
+        scripts['check:source-evidence:after-api-tests'],
+        /source-tests\/\*\*\/\*\.test\.js/u,
+        'the source-proof lane must cover the files removed from the remainder',
+      );
+      const withoutApiTests = (commands) =>
+        commands.flatMap((command) => {
+          if (/^pnpm --filter @cat-cafe\/(?:api|shared) build$/u.test(command)) return [];
+          if (command === 'pnpm --filter @cat-cafe/api test:prompt-budget') return [];
+          const remainder = command.replace(
+            / packages\/api\/(?:test|source-tests)\/(?:[\w-]+\/)?[\w.-]+\.test\.js/gu,
+            (entry) => {
+              const testPath = entry.trim();
+              assert.ok(existsSync(path.join(repoRoot, testPath)), `artifact test does not exist: ${testPath}`);
+              return '';
+            },
+          );
+          return remainder === 'node --test' ? [] : [remainder];
+        });
+      assert.ok(full.some((command) => command.includes('packages/api/test/')));
+      assert.ok(!remaining.some((command) => command.includes('packages/api/test/')));
+      assert.deepEqual(withoutApiTests(remaining), withoutApiTests(full));
+    },
+  );
+
+  it(
+    'never reaches the remainder or publishes green after an API suite failure',
+    SOURCE_GATE_CONTROL_TEST_OPTIONS,
+    (t) => {
+      const result = runGate(
+        requireBash(t),
+        [],
+        { STUB_API_TEST_FAIL: '1', STUB_GREEN_STAGES: 'check-sources,check-installed,tsc' },
+        { sourceFixture: true },
+      );
+      assert.equal(result.status, 1, result.stdout + result.stderr);
+      assert.ok(
+        result.logLines.includes('pnpm -r --workspace-concurrency=1 --if-present --filter !@cat-cafe/web run test'),
+        'the failure must come from the API stage, not an earlier gate check',
+      );
+      assert.ok(!result.logLines.some((line) => line.startsWith('pnpm check:artifacts')));
+      assert.ok(!result.logLines.some((line) => /settle .*--status green|write-gate-last-run.sh/.test(line)));
+    },
+  );
+});
 
 describe('pre-merge-check dependency refresh order', () => {
   it(
@@ -794,11 +864,21 @@ describe('pre-merge-check dependency refresh order', () => {
   );
 
   it('keeps a completed --no-rebase full probe noncanonical', SOURCE_GATE_CONTROL_TEST_OPTIONS, (t) => {
-    const result = runGate(requireBash(t), ['--no-rebase'], { STUB_GATE_ROUTE: 'full' }, { sourceFixture: true });
+    const result = runGate(
+      requireBash(t),
+      ['--no-rebase'],
+      {
+        STUB_GATE_ROUTE: 'full',
+        CAT_CAFE_GATE_EXECUTION_PARENT_JOB_ID: 'stale-parent',
+      },
+      { sourceFixture: true },
+    );
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stdout, /route=full/);
     assert.equal(result.sentinelWritten, false);
     assert.ok(!result.logLines.some((line) => line.includes('gate-terminal-receipt.mjs begin')));
+    assert.ok(result.logLines.includes('browser-parent <unset>'));
+    assert.ok(result.logLines.includes('stage-parent <unset>'));
   });
 
   it(
@@ -829,7 +909,7 @@ describe('pre-merge-check dependency refresh order', () => {
       assert.equal(result.stderr.trim().split('\n').at(-1), 'CAT_CAFE_MANAGED_TERMINAL_STATE=unverified');
       assert.ok(result.logLines.some((line) => line.includes('run-browser-verification.mjs')));
       // Every tier of the check chain still runs before the partial settlement.
-      for (const tier of ['pnpm check:sources', 'pnpm check:installed', 'pnpm check:artifacts']) {
+      for (const tier of ['pnpm check:sources', 'pnpm check:installed', 'pnpm check:artifacts:after-api-tests']) {
         assert.ok(
           result.logLines.some((line) => line === tier),
           `${tier} did not run`,
@@ -1482,6 +1562,11 @@ describe('pre-merge-check dependency refresh order', () => {
       result.logLines.includes('pnpm -r --workspace-concurrency=1 --if-present --filter !@cat-cafe/web run test'),
       `expected non-browser workspace tests, got:\n${result.logLines.join('\n')}`,
     );
+    const artifactCheck = fixture.publicSyncFixture ? 'pnpm check:artifacts' : 'pnpm check:artifacts:after-api-tests';
+    const otherCheck = fixture.publicSyncFixture ? 'pnpm check:artifacts:after-api-tests' : 'pnpm check:artifacts';
+    const apiIndex = result.logLines.findIndex((line) => line.includes('--filter !@cat-cafe/web run test'));
+    assert.ok(result.logLines.indexOf(artifactCheck) > apiIndex, result.logLines.join('\n'));
+    assert.ok(!result.logLines.includes(otherCheck));
     const plannedBrowser = result.logLines.some(
       (line) => line.includes('run-browser-verification.mjs') && line.includes('--mode merge'),
     );
@@ -1501,7 +1586,12 @@ describe('pre-merge-check dependency refresh order', () => {
     'passes a frozen browser plan to its executor without a second outer permit',
     SOURCE_GATE_CONTROL_TEST_OPTIONS,
     (t) => {
-      const result = runGate(requireBash(t), [], {}, { sourceFixture: true });
+      const result = runGate(
+        requireBash(t),
+        [],
+        { CAT_CAFE_MANAGED_JOB_ID: 'current-producer', CAT_CAFE_GATE_EXECUTION_PARENT_JOB_ID: 'stale-parent' },
+        { sourceFixture: true },
+      );
       assert.equal(result.status, 0, result.stderr);
       const call = result.logLines.find(
         (line) => line.startsWith('node ') && line.includes('run-browser-verification.mjs'),
@@ -1509,6 +1599,8 @@ describe('pre-merge-check dependency refresh order', () => {
       assert.ok(call, result.logLines.join('\n'));
       assert.match(call, /--head a{40} --base 1{40} --mode merge/);
       assert.ok(result.logLines.includes('browser-outer-permit <unset>'));
+      assert.ok(result.logLines.includes('browser-parent current-producer'), result.logLines.join('\n'));
+      assert.ok(result.logLines.includes('stage-parent current-producer'), result.logLines.join('\n'));
       assert.ok(!result.logLines.includes('pnpm --filter @cat-cafe/web run test:browser'));
     },
   );
@@ -1530,6 +1622,8 @@ describe('pre-merge-check dependency refresh order', () => {
 
     assert.equal(result.status, 0, result.stderr);
     assert.ok(result.logLines.includes('pnpm --filter @cat-cafe/api run test:public'));
+    assert.ok(result.logLines.includes('pnpm check:artifacts'));
+    assert.ok(!result.logLines.includes('pnpm check:artifacts:after-api-tests'));
     assert.ok(
       !result.logLines.some((line) => line.includes('gate-terminal-receipt.mjs')),
       `source public probes must not produce or consume canonical receipts, got:\n${result.logLines.join('\n')}`,

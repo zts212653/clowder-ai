@@ -145,7 +145,7 @@ test('a checkpoint is routed once to its own carrier and cannot borrow Codex aut
   );
 });
 
-test('idle native control refuses a raced profile lease instead of waiting and compacting a stale target', async (t) => {
+test('idle native control refuses a raced conversation lease instead of waiting and compacting a stale target', async (t) => {
   const f = fixture(t);
   const first = [];
   for await (const msg of f.service.invoke('hello', { workingDirectory: f.workspace, spawnCliOverride: f.spawn }))
@@ -154,7 +154,9 @@ test('idle native control refuses a raced profile lease instead of waiting and c
   const { acquireAgyNativeProfileTurn } = await import(
     '../dist/domains/cats/services/agents/providers/agy-native/agy-native-profile-turn.js'
   );
-  const release = acquireAgyNativeProfileTurn(binding.profileHome, 'other-active-invocation');
+  const release = acquireAgyNativeProfileTurn(binding.profileHome, 'other-active-invocation', {
+    conversationId: binding.cliSessionId,
+  });
   try {
     await assert.rejects(
       f.service.requestNativeCompaction({

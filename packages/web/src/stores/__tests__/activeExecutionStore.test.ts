@@ -45,6 +45,30 @@ function response(executions: ActiveExecutionProjection[]): ActiveExecutionListR
 describe('F295 activeExecutionStore', () => {
   beforeEach(() => useActiveExecutionStore.getState().reset());
 
+  it('keeps the current project as an anchor while hydrating work from all projects', () => {
+    const store = useActiveExecutionStore.getState();
+    const execution = { ...live('planet-inv', 100), projectPath: '/project/planet' };
+    store.applySnapshot('thread-a', store.beginHydration('thread-a', '/project/cafe'), {
+      scope: 'all',
+      executions: [execution],
+    });
+    expect(useActiveExecutionStore.getState()).toMatchObject({
+      projectPath: '/project/cafe',
+      scope: 'all',
+      hydration: 'ready',
+      executionsByKey: { [activeExecutionKey(execution)]: execution },
+    });
+    store.beginCancellation(execution);
+    store.beginHydration('planet-thread', '/project/planet');
+    expect(useActiveExecutionStore.getState()).toMatchObject({
+      projectPath: '/project/planet',
+      hydration: 'ready',
+      scope: 'all',
+      executionsByKey: { [activeExecutionKey(execution)]: execution },
+      cancelPendingByKey: { [activeExecutionKey(execution)]: true },
+    });
+  });
+
   it('does not let an in-flight snapshot resurrect an exact canceled slot or erase its sibling', () => {
     const store = useActiveExecutionStore.getState();
     const first = live('same-parent', 100, 'opus');

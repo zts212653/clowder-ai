@@ -2,13 +2,17 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { origin, webRoot } from './fixtures/f322-chat-real-page-build.mjs';
-import { CURRENT_THREAD, cats, createChatProofApi, DRAFT } from './fixtures/f322-chat-real-page-data.mjs';
+import { BUSY_THREAD, CURRENT_THREAD, cats, createChatProofApi, DRAFT } from './fixtures/f322-chat-real-page-data.mjs';
 
 export function pianoRecords(count) {
   return Array.from({ length: count }, (_, index) => {
     const n = index + 1;
     const content = `消息 ${n}：${'用实际消息高度定位，保持原阅读位置和草稿。'.repeat(1 + (index % 5))}`;
     return {
+      from:
+        index % 4 === 0
+          ? { kind: 'user', userId: 'owner-proof' }
+          : { kind: 'agent', catId: cats[index % cats.length].id },
       id: `piano-${n}`,
       catId: index % 4 === 0 ? null : cats[index % cats.length].id,
       timestamp: 1791500000000 + index * 1000,
@@ -89,6 +93,17 @@ export async function openPianoPage(
       return route.fulfill({
         contentType: 'application/json',
         body: JSON.stringify({ targetCats: [cats[0].id], reason: { kind: 'recent_replier' } }),
+      });
+    }
+    if (
+      request.method() === 'GET' &&
+      [CURRENT_THREAD, BUSY_THREAD].some((threadId) => url.pathname === `/api/threads/${threadId}/queue`)
+    ) {
+      // This ruler fixture has exactly the supplied history, with no pending
+      // input. The shared single-cat scenario owns its separate queued record.
+      return route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ queue: [], activeInvocations: [] }),
       });
     }
     if (url.pathname.startsWith('/api/')) {

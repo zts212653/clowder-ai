@@ -7,6 +7,7 @@ export type ApprovalDecisionDetails = ApprovalCardDetails;
 
 export interface ApprovalDecisionCardProps {
   testId: string;
+  embedded?: boolean;
   header?: ReactNode;
   title: string;
   actionReason?: ReactNode;
@@ -23,6 +24,7 @@ export interface ApprovalDecisionCardProps {
  */
 export function ApprovalDecisionCard({
   testId,
+  embedded,
   header,
   title,
   actionReason,
@@ -33,6 +35,7 @@ export function ApprovalDecisionCard({
   return (
     <ApprovalCardShell
       testId={testId}
+      embedded={embedded}
       header={header}
       title={title}
       context={

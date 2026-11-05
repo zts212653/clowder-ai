@@ -99,7 +99,7 @@ function originalPosition(anchor: WorkspaceContentAnchor, source: WorkspaceConte
     if (target.kind === 'artwork') return `画稿 ${target.assetVersionRef}`;
     return `这一刻 · ${target.tick} tick`;
   }
-  return source.kind === 'text' || source.kind === 'video-project'
+  return source.kind === 'text' || source.kind === 'video-project' || source.kind === 'collective-artifact'
     ? '原媒体位置'
     : anchorLabel(anchor.anchor, source.media);
 }

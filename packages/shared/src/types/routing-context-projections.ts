@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { routingCapacityFactsV1Schema } from './routing-capacity-facts.js';
 import {
   addRoutingDuplicateIssues,
   ROUTING_CONTEXT_VERSION,
@@ -102,6 +103,7 @@ const routingPreflightTargetV1Schema = z
     disposition: z.enum(['allowed', 'warned', 'rejected']),
     ownerAttempt: z.literal(true).optional(),
     automaticRetryAt: routingEpochMsSchema.optional(),
+    capacityFacts: routingCapacityFactsV1Schema.optional(),
     /** Reasons that causally explain this target's disposition. */
     reasons: z.array(routingReasonV1Schema).max(32),
     /**
@@ -145,6 +147,7 @@ const routingPreflightTargetV1Schema = z
 export const routingPreflightReceiptV1Schema = z
   .object({
     type: z.literal('routing_preflight'),
+    stage: z.literal('execution_preflight').optional(),
     v: z.literal(ROUTING_CONTEXT_VERSION),
     ownerId: routingOwnerIdSchema,
     observedAt: routingEpochMsSchema,

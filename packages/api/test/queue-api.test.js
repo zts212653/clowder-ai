@@ -220,6 +220,148 @@ describe('Queue Management API', () => {
     if (app) await app.close();
   });
 
+  it('HTTP queue reconciliation carries presentation from a real persisted plugin message', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const store = new MessageStore();
+    const from = { kind: 'plugin', instanceId: 'pi_8e8bfc62-7545-4c31-a764-666d3284d138' };
+    const presentation = {
+      connector: 'custom-plugin',
+      label: 'Room Connector',
+      icon: '/plugin.svg',
+      themeColor: '#07c160',
+    };
+    await deps.invocationQueue.send(
+      store,
+      {
+        from,
+        userId: 'user-a',
+        threadId: 't1',
+        content: 'Plugin input',
+        mentions: ['opus'],
+        timestamp: 1,
+        deliveryStatus: 'queued',
+        extra: {
+          pluginMessage: {
+            instanceId: from.instanceId,
+            revision: 1,
+            provenance: { origin: from, epistemicStatus: 'observation' },
+            elements: [],
+            presentation,
+          },
+        },
+      },
+      {
+        from,
+        userId: 'user-a',
+        threadId: 't1',
+        content: 'Plugin input',
+        targetCats: ['opus'],
+        kind: 'conversation_input',
+        intent: 'execute',
+        ownerAuthProvenance: 'unknown',
+        priority: 'normal',
+      },
+    );
+    deps.messageStore.getById.mock.mockImplementation(async (id) => store.getById(id));
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/threads/t1/queue',
+      headers: { 'x-cat-cafe-user': 'user-a' },
+    });
+    assert.equal(res.statusCode, 200, res.body);
+    const [entry] = res.json().queue;
+    assert.deepEqual(entry.from, from);
+    assert.deepEqual(entry.messagePreview.source, presentation);
+    assert.equal(entry.messagePreview.connector, presentation.connector);
+    assert.equal(store.getById(entry.messageId).source, undefined);
+  });
+
+  async function routingRecoveryFixture() {
+    const result = enqueueEntry(deps.invocationQueue, {
+      from: { kind: 'agent', catId: 'codex' },
+      source: 'agent',
+      kind: 'message_wake',
+      sourceId: 'routing-source',
+      messageId: 'routing-source',
+      targetCats: ['opus'],
+    });
+    const source = {
+      id: 'routing-source',
+      threadId: 't1',
+      userId: 'user-a',
+      from: { kind: 'agent', catId: 'codex' },
+      content: 'Original request',
+      deliveryStatus: 'queued',
+    };
+    const records = new Map([[source.id, source]]);
+    deps.messageStore.getById.mock.mockImplementation(async (id) => records.get(id) ?? null);
+    await deps.invocationQueue.markProcessingByIdDurable('t1', result.entry.id, 'opus');
+    await deps.invocationQueue.holdClaimedRoutingTarget('t1', [result.entry.id], 'opus', deps.messageStore);
+    await deps.invocationQueue.restoreClaimedEntries('t1', [result.entry.id]);
+    deps.queueProcessor.retryRoutingTarget = mock.fn(async () => ({ started: true }));
+    return { result, source, records, url: '/api/threads/t1/messages/routing-source/routing-targets/opus' };
+  }
+
+  it('reads pending F293 recovery and retries only its original target under the authenticated owner', async () => {
+    const { url, result } = await routingRecoveryFixture();
+    const headers = { 'x-cat-cafe-user': 'user-a' };
+    const read = await app.inject({ method: 'GET', url, headers });
+    assert.equal(read.statusCode, 200, read.body);
+    assert.equal(read.json().status, 'failed');
+    const retry = await app.inject({ method: 'POST', url: `${url}/retry`, headers });
+    assert.equal(retry.statusCode, 202, retry.body);
+    assert.deepEqual(deps.queueProcessor.retryRoutingTarget.mock.calls[0].arguments, [
+      't1',
+      'user-a',
+      result.entry.id,
+      'opus',
+    ]);
+  });
+
+  it('does not turn stale or cross-owner routing history into retry authority', async () => {
+    const { url, source } = await routingRecoveryFixture();
+    assert.equal((await app.inject({ method: 'POST', url: `${url}/retry` })).statusCode, 401);
+    assert.equal(
+      (await app.inject({ method: 'POST', url: `${url}/retry`, headers: { 'x-cat-cafe-user': 'user-b' } })).statusCode,
+      404,
+    );
+    source.recall = { exposure: 'none' };
+    assert.equal(
+      (await app.inject({ method: 'POST', url: `${url}/retry`, headers: { 'x-cat-cafe-user': 'user-a' } })).statusCode,
+      404,
+    );
+    assert.equal(deps.queueProcessor.retryRoutingTarget.mock.calls.length, 0);
+  });
+
+  it('never reopens a consumed Queue target from an old routing receipt', async () => {
+    const { url, result } = await routingRecoveryFixture();
+    assert.ok(await deps.invocationQueue.claimQueuedEntryForWithdrawal('t1', 'user-a', result.entry.id));
+    assert.ok(await deps.invocationQueue.commitClaimedWithdrawal('t1', result.entry.id));
+    const response = await app.inject({
+      method: 'POST',
+      url: `${url}/retry`,
+      headers: { 'x-cat-cafe-user': 'user-a' },
+    });
+    assert.equal(response.statusCode, 409, response.body);
+    assert.equal(deps.queueProcessor.retryRoutingTarget.mock.calls.length, 0);
+  });
+
+  it('does not accept browser fallback identity, disabled members or an already-dispatched target', async () => {
+    const { url, source } = await routingRecoveryFixture();
+    const post = (headers = { 'x-cat-cafe-user': 'user-a' }) =>
+      app.inject({ method: 'POST', url: `${url}/retry`, headers });
+    assert.equal((await post({ origin: 'http://127.0.0.1:3011', 'x-cat-cafe-user': 'user-a' })).statusCode, 401);
+    deps.isCatAvailable.mock.mockImplementation(() => false);
+    assert.equal((await post()).statusCode, 409);
+    deps.isCatAvailable.mock.mockImplementation(() => true);
+    source.lifecycle = {
+      kind: 'input',
+      dispatchRefs: [{ targetId: 'opus', phase: 'dispatched', statusMessageId: 'response' }],
+    };
+    assert.equal((await post()).statusCode, 409);
+    assert.equal(deps.queueProcessor.retryRoutingTarget.mock.calls.length, 0);
+  });
+
   // ── Auth ──
 
   it('returns 401 when userId header missing', async () => {
@@ -366,6 +508,28 @@ describe('Queue Management API', () => {
       expectedRuns: [{ targetId: 'opus', invocationId: 'turn-1', responseMessageId: 'response-1' }],
     });
 
+    deps.messageStore.getById.mock.mockImplementation(async (id) => ({
+      id,
+      userId: 'user-a',
+      threadId: 't1',
+      from: { kind: 'agent', catId: 'codex' },
+      content: 'Task work',
+      timestamp: Date.now(),
+      mentions: ['opus'],
+      extra: { taskHandoffInvalid: true },
+    }));
+    const taskSource = await app.inject({
+      method: 'GET',
+      url: '/api/threads/t1/queue',
+      headers: { 'x-cat-cafe-user': 'user-a' },
+    });
+    assert.equal(taskSource.statusCode, 200, taskSource.body);
+    assert.equal(
+      JSON.parse(taskSource.body).queue[0].lifecycleActions,
+      undefined,
+      'Task work must enter through Task execution binding',
+    );
+    deps.messageStore.getById.mock.mockImplementation(async () => null);
     deps.invocationTracker.getAgentClientActiveRunDispatcher.mock.mockImplementation(() => undefined);
     const unsupported = await app.inject({
       method: 'GET',
@@ -1742,14 +1906,15 @@ describe('Queue Management API', () => {
       { threadId: 't1', userId: 'user-a', catId: 'opus' },
       { preserveHolderExecutionIds: ['inv-active'] },
     ]);
-    // The durable canceled response owns the visible terminal; transport emits
-    // one done event so the frontend clears the old invocation without a
-    // duplicate centered cancellation notice.
+    // A request cannot prove that the previous execution has stopped.
     const broadcastCalls = deps.socketManager.broadcastAgentMessage.mock.calls;
-    assert.ok(broadcastCalls.length >= 1, 'should broadcast done for canceled invocation');
-    const doneCall = broadcastCalls.find((c) => c.arguments[0].type === 'done');
-    assert.ok(doneCall, 'should broadcast done event to clear frontend loading state');
-    assert.equal(doneCall.arguments[0].isFinal, true);
+    const requestCall = broadcastCalls.find((c) => c.arguments[0].type === 'status');
+    assert.ok(requestCall, 'should broadcast the cancellation request');
+    assert.notEqual(requestCall.arguments[0].isFinal, true);
+    assert.equal(
+      broadcastCalls.some((c) => c.arguments[0].type === 'done'),
+      false,
+    );
   });
 
   it('POST /queue/:entryId/steer immediate releases QueueProcessor mutex after cancel (P2 race)', async () => {
@@ -1977,14 +2142,15 @@ describe('Queue Management API', () => {
     });
     assert.equal(res.statusCode, 200, res.body);
 
-    // done should only be broadcast for opus (the steered cat), NOT codex
+    // Only opus receives the request; no sibling is terminalized.
     const broadcastCalls = deps.socketManager.broadcastAgentMessage.mock.calls;
-    const doneCalls = broadcastCalls.filter((c) => c.arguments[0].type === 'done');
-    assert.equal(doneCalls.length, 1, 'should broadcast exactly 1 done event (steered cat only)');
-    assert.equal(doneCalls[0].arguments[0].catId, 'opus');
-    // codex should NOT receive a done event
-    const codexDone = broadcastCalls.find((c) => c.arguments[0].type === 'done' && c.arguments[0].catId === 'codex');
-    assert.equal(codexDone, undefined, 'codex should NOT receive cancel done when not steered');
+    const requestCalls = broadcastCalls.filter((c) => c.arguments[0].type === 'status');
+    assert.equal(requestCalls.length, 1);
+    assert.equal(requestCalls[0].arguments[0].catId, 'opus');
+    assert.equal(
+      broadcastCalls.some((c) => c.arguments[0].type === 'done'),
+      false,
+    );
   });
 
   it('POST /queue/:entryId/steer returns 404 for another user entry', async () => {
@@ -2000,7 +2166,7 @@ describe('Queue Management API', () => {
 
   // ── F122B AC-B9: Per-cat cancel ──
 
-  it('POST /cancel/:catId cancels active cat and broadcasts done (AC-B9)', async () => {
+  it('POST /cancel/:catId requests cancellation without broadcasting done (AC-B9)', async () => {
     deps.invocationTracker.has = mock.fn(() => true);
     deps.invocationTracker.cancel = mock.fn(() => ({
       cancelled: true,
@@ -2023,10 +2189,14 @@ describe('Queue Management API', () => {
       { preserveHolderExecutionIds: ['inv-active'] },
     ]);
 
-    // Should broadcast done for opus
-    const doneCalls = deps.socketManager.broadcastAgentMessage.mock.calls.filter((c) => c.arguments[0].type === 'done');
-    assert.equal(doneCalls.length, 1);
-    assert.equal(doneCalls[0].arguments[0].catId, 'opus');
+    const broadcasts = deps.socketManager.broadcastAgentMessage.mock.calls;
+    const requests = broadcasts.filter((c) => c.arguments[0].type === 'status');
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].arguments[0].catId, 'opus');
+    assert.equal(
+      broadcasts.some((c) => c.arguments[0].type === 'done'),
+      false,
+    );
   });
 
   it('POST /cancel/:catId leaves an executing Queue reservation for normal completion to drain', async () => {

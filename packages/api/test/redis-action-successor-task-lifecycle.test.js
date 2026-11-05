@@ -48,26 +48,18 @@ describe('task-backed Redis ActionSuccessor lifecycle', { skip: redisIsolationSk
     const rawTasks = new TaskStore();
     const task = await rawTasks.create({
       threadId: 'thread-task',
+      subjectKey: 'eval-case:kept-implementation-contract',
       title: 'Implement F167 task custody',
       why: 'prove the executable task lifecycle',
       ownerCatId: 'opus',
       userId: 'user-1',
       createdBy: 'codex-sol',
     });
-    const truthResolver = new ActionSubjectTruthResolver(
-      leaseStore,
-      {
-        async get() {
-          return null;
-        },
+    const truthResolver = new ActionSubjectTruthResolver(leaseStore, {
+      async get(taskId) {
+        return rawTasks.get(taskId);
       },
-      undefined,
-      {
-        async get(taskId) {
-          return rawTasks.get(taskId);
-        },
-      },
-    );
+    });
     const admission = new ActionSuccessorAdmissionService(leaseStore, truthResolver);
     const completion = new ActionSuccessorCompletionService(leaseStore, truthResolver);
     const lifecycle = new TaskActionSuccessorLifecycle({ leaseStore, completionService: completion });
@@ -122,26 +114,18 @@ describe('task-backed Redis ActionSuccessor lifecycle', { skip: redisIsolationSk
     const rawTasks = new TaskStore();
     const task = await rawTasks.create({
       threadId: 'thread-task',
+      subjectKey: 'eval-case:kept-implementation-contract',
       title: 'Replace F167 task custody',
       why: 'prove replacement preserves the complete standing evidence chain',
       ownerCatId: 'codex-sol',
       userId: 'user-1',
       createdBy: 'codex-sol',
     });
-    const truthResolver = new ActionSubjectTruthResolver(
-      leaseStore,
-      {
-        async get() {
-          return null;
-        },
+    const truthResolver = new ActionSubjectTruthResolver(leaseStore, {
+      async get(taskId) {
+        return rawTasks.get(taskId);
       },
-      undefined,
-      {
-        async get(taskId) {
-          return rawTasks.get(taskId);
-        },
-      },
-    );
+    });
     const admission = new ActionSuccessorAdmissionService(leaseStore, truthResolver);
     const subjectRef = `subject:task:${task.id}`;
     const action = {

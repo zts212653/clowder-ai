@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process';
+import { realpathSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { isStalePencilProbe, PENCIL_PROBE_RULE, pencilOwnedDescendants } from './lib/pencil-codex-probe-policy.mjs';
 import { enrichPencilProbes, revalidatePencilFinding } from './lib/pencil-codex-probes.mjs';
 import { isCatCafeCommand, STALE_DEV_PROCESS_RULES } from './lib/stale-dev-process-rules.mjs';
@@ -230,6 +233,13 @@ async function killFindings(findings) {
 }
 
 export async function main(argv = process.argv.slice(2)) {
+  if (process.platform === 'win32') {
+    console.error(
+      '[stale-dev-processes] Windows process enumeration/cleanup is not supported yet; no processes were inspected or terminated.',
+    );
+    process.exitCode = 1;
+    return;
+  }
   const run = argv.includes('--run');
   const pencilOnly = argv.includes('--pencil-only');
   const psOutput = listProcesses();
@@ -240,6 +250,20 @@ export async function main(argv = process.argv.slice(2)) {
   if (run) await killFindings(findings);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+function isDirectExecution() {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  try {
+    const entryPath = realpathSync(resolve(entry));
+    const modulePath = realpathSync(fileURLToPath(import.meta.url));
+    return process.platform === 'win32'
+      ? entryPath.toLowerCase() === modulePath.toLowerCase()
+      : entryPath === modulePath;
+  } catch {
+    return false;
+  }
+}
+
+if (isDirectExecution()) {
   await main();
 }

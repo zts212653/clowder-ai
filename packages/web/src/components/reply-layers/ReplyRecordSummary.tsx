@@ -10,7 +10,11 @@ import { subexecutionCopy } from './subexecution.shell-copy';
 
 function Separator() {
   return (
-    <span aria-hidden="true" className="flex-none" style={{ color: 'var(--shell-muted)', opacity: 0.6 }}>
+    <span
+      aria-hidden="true"
+      className={`flex-none ${styles.separator}`}
+      style={{ color: 'var(--shell-muted)', opacity: 0.6 }}
+    >
       ·
     </span>
   );

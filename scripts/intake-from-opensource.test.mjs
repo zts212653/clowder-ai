@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
+import { parseDictionary } from './brand-dictionary-helper.mjs';
+import { refreshDeploymentBrands } from './deployment-brand-config.mjs';
 
 const SOURCE_SCRIPT = resolve(process.cwd(), 'scripts/intake-from-opensource.sh');
 const GH_RETRY_LIB = resolve(process.cwd(), 'scripts/lib/intake-gh-retry.sh');
@@ -63,6 +65,16 @@ function makeFixture() {
   mkdirSync(join(repoRoot, 'docs', 'ops'), { recursive: true });
   cpSync(SOURCE_SCRIPT, join(repoRoot, 'scripts', 'intake-from-opensource.sh'));
   mkdirSync(join(repoRoot, 'scripts', 'lib'), { recursive: true });
+  for (const file of [
+    'scripts/publication-branches.json',
+    'scripts/lib/publication-branches.mjs',
+    'scripts/lib/intake-target-lineage.mjs',
+  ])
+    cpSync(resolve(file), join(repoRoot, file));
+  writeFileSync(
+    join(repoRoot, 'scripts/publication-branches.json'),
+    JSON.stringify({ version: 1, integrationBranch: 'main', releaseBranch: 'main' }),
+  );
   cpSync(GH_RETRY_LIB, join(repoRoot, 'scripts', 'lib', 'intake-gh-retry.sh'));
   cpSync(resolve('scripts/lib/intake-brand-paths.mjs'), join(repoRoot, 'scripts/lib/intake-brand-paths.mjs'));
   cpSync(
@@ -99,9 +111,22 @@ function makeRemoteFixture() {
   mkdirSync(join(repoRoot, 'docs', 'ops'), { recursive: true });
   cpSync(SOURCE_SCRIPT, join(repoRoot, 'scripts', 'intake-from-opensource.sh'));
   mkdirSync(join(repoRoot, 'scripts', 'lib'), { recursive: true });
+  for (const file of [
+    'scripts/publication-branches.json',
+    'scripts/lib/publication-branches.mjs',
+    'scripts/lib/intake-target-lineage.mjs',
+  ])
+    cpSync(resolve(file), join(repoRoot, file));
+  writeFileSync(
+    join(repoRoot, 'scripts/publication-branches.json'),
+    JSON.stringify({ version: 1, integrationBranch: 'main', releaseBranch: 'main' }),
+  );
   cpSync(GH_RETRY_LIB, join(repoRoot, 'scripts', 'lib', 'intake-gh-retry.sh'));
   cpSync(resolve('scripts/lib/intake-brand-paths.mjs'), join(repoRoot, 'scripts/lib/intake-brand-paths.mjs'));
   chmodSync(join(repoRoot, 'scripts', 'intake-from-opensource.sh'), 0o755);
+  cpSync(DICTIONARY_HELPER, join(repoRoot, 'scripts/brand-dictionary-helper.mjs'));
+  mkdirSync(join(repoRoot, 'assets'));
+  cpSync(DICTIONARY_YAML, join(repoRoot, 'assets/brand-dictionary.yaml'));
 
   git(sandboxRoot, 'init', '--bare', 'clowder-ai-remote.git');
   git(sandboxRoot, 'clone', remoteRoot, 'clowder-ai');
@@ -125,6 +150,79 @@ function writeLedger(ledgerPath, lastReviewedHead, entries) {
     'utf-8',
   );
 }
+
+describe('integration watermark ancestry', () => {
+  it('advances along remote next while the target checkout remains on a different main', () => {
+    const f = makeRemoteFixture();
+    try {
+      const base = commitFile(f.targetRoot, 'base.txt', 'base', 'base');
+      git(f.targetRoot, 'push', 'origin', 'main');
+      git(f.targetRoot, 'checkout', '-b', 'next');
+      const next = commitFile(f.targetRoot, 'team.txt', 'next payload', 'sync: cat-cafe next payload');
+      git(f.targetRoot, 'push', 'origin', 'next');
+      git(f.targetRoot, 'checkout', 'main');
+      const main = commitFile(f.targetRoot, 'stable.txt', 'stable payload', 'stable patch');
+      git(f.targetRoot, 'push', 'origin', 'main');
+      writeFileSync(
+        join(f.repoRoot, 'scripts/publication-branches.json'),
+        JSON.stringify({ version: 1, integrationBranch: 'next', releaseBranch: 'main' }),
+      );
+      writeFileSync(
+        f.ledgerPath,
+        JSON.stringify({ target_branch: 'next', last_reviewed_target_head: base, entries: [] }),
+      );
+      runAdvance(f.repoRoot);
+      assert.equal(JSON.parse(readFileSync(f.ledgerPath, 'utf8')).last_reviewed_target_head, next);
+      assert.equal(git(f.targetRoot, 'rev-parse', 'HEAD'), main);
+    } finally {
+      rmSync(f.sandboxRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a target behind the reviewed head without changing ledger bytes', () => {
+    const f = makeFixture();
+    try {
+      writeFileSync(join(f.targetRoot, 'base.txt'), 'base');
+      git(f.targetRoot, 'add', '.');
+      git(f.targetRoot, 'commit', '-m', 'base');
+      const base = git(f.targetRoot, 'rev-parse', 'HEAD');
+      writeFileSync(join(f.targetRoot, 'later.txt'), 'reviewed');
+      git(f.targetRoot, 'add', '.');
+      git(f.targetRoot, 'commit', '-m', 'reviewed contribution');
+      const reviewed = git(f.targetRoot, 'rev-parse', 'HEAD');
+      writeLedger(f.ledgerPath, reviewed, []);
+      const before = readFileSync(f.ledgerPath, 'utf8');
+      git(f.targetRoot, 'checkout', '-B', 'main', base);
+      const result = runResult('bash', ['scripts/intake-from-opensource.sh', '--advance-ledger'], f.repoRoot);
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr + result.stdout, /not an ancestor/);
+      assert.equal(readFileSync(f.ledgerPath, 'utf8'), before);
+    } finally {
+      rmSync(f.sandboxRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a watermark from a different integration branch even at the same commit', () => {
+    const f = makeFixture();
+    try {
+      writeFileSync(join(f.targetRoot, 'base.txt'), 'base');
+      git(f.targetRoot, 'add', '.');
+      git(f.targetRoot, 'commit', '-m', 'base');
+      const head = git(f.targetRoot, 'rev-parse', 'HEAD');
+      writeFileSync(
+        f.ledgerPath,
+        JSON.stringify({ target_branch: 'next', last_reviewed_target_head: head, entries: [] }),
+      );
+      const before = readFileSync(f.ledgerPath, 'utf8');
+      const result = runResult('bash', ['scripts/intake-from-opensource.sh', '--advance-ledger'], f.repoRoot);
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr + result.stdout, /ledger branch/);
+      assert.equal(readFileSync(f.ledgerPath, 'utf8'), before);
+    } finally {
+      rmSync(f.sandboxRoot, { recursive: true, force: true });
+    }
+  });
+});
 
 function runAdvance(repoRoot) {
   return run('bash', ['scripts/intake-from-opensource.sh', '--advance-ledger'], repoRoot);
@@ -624,7 +722,7 @@ describe('intake-from-opensource.sh --advance-ledger', () => {
     assert.equal(git(fixture.targetRoot, 'rev-parse', 'origin/main'), remoteHead);
   });
 
-  it('falls back to local HEAD when fetch fails and origin/main is stale', () => {
+  it('refuses to advance to an unpublished local HEAD when target fetch fails', () => {
     const fixture = makeRemoteFixture();
     fixtures.push(fixture.sandboxRoot);
 
@@ -645,10 +743,11 @@ describe('intake-from-opensource.sh --advance-ledger', () => {
       },
     ]);
 
-    const output = runAdvance(fixture.repoRoot);
-    assert.match(output, /Ledger advanced to:/);
-    const updatedLedger = JSON.parse(readFileSync(fixture.ledgerPath, 'utf-8'));
-    assert.equal(updatedLedger.last_reviewed_target_head, localHead);
+    const before = readFileSync(fixture.ledgerPath, 'utf8');
+    const output = runResult('bash', ['scripts/intake-from-opensource.sh', '--advance-ledger'], fixture.repoRoot);
+    assert.notEqual(output.status, 0);
+    assert.match(output.stderr, /refusing stale watermark/);
+    assert.equal(readFileSync(fixture.ledgerPath, 'utf8'), before);
   });
 });
 
@@ -656,8 +755,8 @@ describe('intake-from-opensource.sh --advance-ledger', () => {
 
 const BRAND_GOOD = {
   'packages/web/src/app/layout.tsx': `export const metadata = {
-  title: 'Clowder AI',
-  description: 'Your AI team collaboration space',
+  title: deploymentDefaults.brand.name,
+  description: deploymentDefaults.brand.tagline,
   icons: {
     icon: [
       { url: '/icons/favicon.svg', type: 'image/svg+xml' },
@@ -667,15 +766,42 @@ const BRAND_GOOD = {
   },
 };`,
   'packages/web/public/manifest.json': '{"name": "Clowder AI", "short_name": "Clowder AI"}',
-  'packages/web/src/components/SplitPaneView.tsx': '<h1>Clowder AI</h1>',
-  'packages/web/src/components/ChatContainerHeader.tsx':
-    "const INTERNAL_BASENAMES = ['cat-cafe', 'cat-cafe-runtime', 'clowder-ai'];\n<h1>Clowder AI</h1>",
+  'packages/web/src/components/SplitPaneView.tsx': '<h1>{deploymentDefaults.brand.name}</h1>',
+  'packages/web/src/components/ChatContainerHeader.tsx': '<h1>{deploymentDefaults.brand.displayName}</h1>',
+  'packages/web/src/components/ThreadIndicator.tsx':
+    "const INTERNAL_BASENAMES = ['cat-cafe', 'cat-cafe-runtime', 'clowder-ai'];",
   'packages/web/src/utils/api-client.ts':
     '/** Unified API client for Clowder AI frontend. */\n// Auth uses HttpOnly session cookie.',
   'packages/api/src/infrastructure/connectors/connector-gateway-bootstrap.ts':
     "frontendBaseUrl: deps.frontendBaseUrl ?? 'http://localhost:3003',",
   'packages/web/public/icons/favicon.svg': '<svg></svg>',
 };
+
+function prepareBrandConfig(repoRoot) {
+  for (const file of [
+    'scripts/deployment-brand-config.mjs',
+    'scripts/project-deployment-defaults.mjs',
+    'packages/shared/src/deployment-defaults.ts',
+    'packages/shared/src/deployment-profiles.json',
+  ]) {
+    mkdirSync(join(repoRoot, file, '..'), { recursive: true });
+    cpSync(resolve(file), join(repoRoot, file));
+  }
+  mkdirSync(join(repoRoot, 'assets'), { recursive: true });
+  cpSync(DICTIONARY_YAML, join(repoRoot, 'assets', 'brand-dictionary.yaml'));
+
+  const profilePath = join(repoRoot, 'packages/shared/src/deployment-profiles.json');
+  const packaged = JSON.parse(readFileSync(profilePath, 'utf8'));
+  const homeFixture = refreshDeploymentBrands(
+    {
+      schemaVersion: 1,
+      activeProfile: 'home',
+      profiles: { home: packaged.profiles[packaged.activeProfile] },
+    },
+    parseDictionary(readFileSync(DICTIONARY_YAML, 'utf8')),
+  );
+  writeFileSync(profilePath, JSON.stringify(homeFixture));
+}
 
 function makeBrandFixture(overrides = {}) {
   const sandboxRoot = mkdtempSync(join(tmpdir(), 'cc-brand-guard-'));
@@ -690,8 +816,7 @@ function makeBrandFixture(overrides = {}) {
 
   // Phase 2 dictionary-driven scan needs only the self-contained helper and dictionary YAML.
   cpSync(DICTIONARY_HELPER, join(repoRoot, 'scripts', 'brand-dictionary-helper.mjs'));
-  mkdirSync(join(repoRoot, 'assets'), { recursive: true });
-  cpSync(DICTIONARY_YAML, join(repoRoot, 'assets', 'brand-dictionary.yaml'));
+  prepareBrandConfig(repoRoot);
 
   const files = { ...BRAND_GOOD, ...overrides };
   for (const [relPath, content] of Object.entries(files)) {
@@ -731,6 +856,23 @@ describe('intake-from-opensource.sh --validate-inbound', () => {
     fixtures.push(f.sandboxRoot);
     const output = runValidate(f.repoRoot);
     assert.match(output, /No brand violations detected/);
+  });
+
+  it('rejects staged home brand drift despite an unstaged repair', () => {
+    const f = makeBrandFixture();
+    fixtures.push(f.sandboxRoot);
+    run('git', ['init', '-q'], f.repoRoot);
+    const path = join(f.repoRoot, 'packages/shared/src/deployment-profiles.json');
+    const original = readFileSync(path, 'utf8');
+    const input = JSON.parse(original);
+    input.profiles.home.brand.name = 'Unrelated product';
+    writeFileSync(path, JSON.stringify(input));
+    run('git', ['add', '.'], f.repoRoot);
+    writeFileSync(path, original);
+    assert.throws(
+      () => run('bash', ['scripts/intake-from-opensource.sh', '--validate-inbound', '--from-index'], f.repoRoot),
+      /Command failed/,
+    );
   });
 
   it('allows the outbound sync toolchain to name its public target repository', () => {
@@ -783,7 +925,7 @@ describe('intake-from-opensource.sh --validate-inbound', () => {
     assert.match(err.stdout, /favicon/i);
   });
 
-  it('catches missing Clowder AI brand in ChatContainerHeader.tsx', () => {
+  it('catches a disconnected configured brand in ChatContainerHeader.tsx', () => {
     const f = makeBrandFixture({
       'packages/web/src/components/ChatContainerHeader.tsx':
         "const INTERNAL_BASENAMES = ['some-other'];\n<h1>Some App</h1>",
@@ -797,8 +939,7 @@ describe('intake-from-opensource.sh --validate-inbound', () => {
 
   it('catches polluted INTERNAL_BASENAMES even when title text is correct', () => {
     const f = makeBrandFixture({
-      'packages/web/src/components/ChatContainerHeader.tsx':
-        "const INTERNAL_BASENAMES = ['clowder-ai'];\n<h1>Clowder AI</h1>",
+      'packages/web/src/components/ThreadIndicator.tsx': "const INTERNAL_BASENAMES = ['clowder-ai'];",
     });
     fixtures.push(f.sandboxRoot);
     const err = captureValidateFailure(f.repoRoot);
@@ -978,42 +1119,46 @@ if (flag === '--classify-path') {
     assert.match(err.stdout, /fail-closed|broken.*brand-sensitive|anchor.*pet/i);
   });
 
-  it('catches public frontend port contamination in connector-gateway-bootstrap.ts', () => {
+  it('catches public API port contamination at the surviving Host entrypoint', () => {
     const f = makeBrandFixture({
-      'packages/api/src/infrastructure/connectors/connector-gateway-bootstrap.ts':
-        "frontendBaseUrl: deps.frontendBaseUrl ?? 'http://localhost:3003',",
+      'packages/api/src/index.ts': "const port = process.env.API_SERVER_PORT ?? '3004';",
     });
     fixtures.push(f.sandboxRoot);
     const err = captureValidateFailure(f.repoRoot);
     assert.match(err.stdout, /brand violation/i);
-    assert.match(err.stdout, /connector-gateway-bootstrap/);
+    assert.match(err.stdout, /packages\/api\/src\/index\.ts/);
   });
 
   it('Phase 2 skip honors all BRAND_EXPECTATIONS entries via printf + [@] anchor', () => {
     // Regression for echo→printf fix in intake-from-opensource.sh:
     // Old `echo "${BRAND_EXPECTATIONS[*]}" | grep -q "^${bsf}|"` joined array entries
     // onto one line, so the ^anchor only matched the FIRST entry. Files later in the
-    // BRAND_EXPECTATIONS array (e.g. weixin/WeixinAdapter.ts at the back) leaked into
+    // BRAND_EXPECTATIONS array (e.g. routing/AgentRouter.ts at the back) leaked into
     // Phase 2 dictionary scan and got double-counted, or produced false brand-violation
     // reports if their content happened to match a public-term sentinel.
     // New `printf '%s\n' "${BRAND_EXPECTATIONS[@]}"` puts each entry on its own line,
     // so the ^anchor matches any entry — including back-of-array files.
     const f = makeBrandFixture({
-      // weixin/WeixinAdapter.ts is a BACK-of-array BRAND_EXPECTATIONS entry. Plant
+      // routing/AgentRouter.ts is a BACK-of-array BRAND_EXPECTATIONS entry. Plant
       // "Clowder AI" (the public-term sentinel from the stub below) into the file —
       // Phase 2 dictionary scan would report a violation if the BRAND_EXPECTATIONS skip
-      // failed. Phase 1 BRAND_EXPECTATIONS for this file checks localhost:3003/3004
+      // failed. Phase 1 BRAND_EXPECTATIONS for this file checks the public API port
       // contamination, not brand terms, so it passes Phase 1.
-      'packages/api/src/infrastructure/connectors/im-connectors/weixin/WeixinAdapter.ts':
-        '// Clowder AI internal adapter for weixin\nexport class WeixinAdapter {}\n',
+      'packages/api/src/domains/cats/services/agents/routing/AgentRouter.ts':
+        '// Clowder AI routing uses the home API fallback\nexport class AgentRouter {}\n',
     });
     fixtures.push(f.sandboxRoot);
 
     // Stub: brand-sensitive-patterns lists the three real anchors PLUS the back-of-array
-    // WeixinAdapter.ts path. Phase 2 should SKIP WeixinAdapter.ts because it IS in
+    // AgentRouter.ts path. Phase 2 should SKIP AgentRouter.ts because it IS in
     // BRAND_EXPECTATIONS (covered by the localhost-port rules) — the printf + [@] fix
     // makes the ^${bsf}| anchor match the back-of-array entry, so Phase 2 skip works.
+    writeFileSync(
+      join(f.repoRoot, 'scripts', 'fixture-dictionary-parser.mjs'),
+      readFileSync(DICTIONARY_HELPER, 'utf8').split('// ── CLI interface ──')[0],
+    );
     const stub = `
+export { parseDictionary, getRepositoryCoordinates } from './fixture-dictionary-parser.mjs';
 const flag = process.argv[2];
 if (flag === '--classify-path') {
   console.log(JSON.stringify({ classification: 'manual-port', risk: 'P1', reason: 'test' }));
@@ -1022,17 +1167,17 @@ if (flag === '--classify-path') {
 } else if (flag === '--manual-port-patterns') {
   console.log('assets/system-prompts/**');
 } else if (flag === '--brand-sensitive-patterns') {
-  console.log('packages/web/public/manifest.json\\npackages/web/public/icons/**\\npackages/web/public/concierge/**/pet.json\\npackages/api/src/infrastructure/connectors/im-connectors/weixin/WeixinAdapter.ts');
+  console.log('packages/web/public/manifest.json\\npackages/web/public/icons/**\\npackages/web/public/concierge/**/pet.json\\npackages/api/src/domains/cats/services/agents/routing/AgentRouter.ts');
 } else {
   console.log('');
 }
 `;
     writeFileSync(join(f.repoRoot, 'scripts', 'brand-dictionary-helper.mjs'), stub, 'utf-8');
 
-    // With printf + [@] fix: Phase 2 SKIPS WeixinAdapter.ts (covered by BRAND_EXPECTATIONS),
+    // With printf + [@] fix: Phase 2 SKIPS AgentRouter.ts (covered by BRAND_EXPECTATIONS),
     // so the "Clowder AI" sentinel inside the file does NOT produce a Phase 2 brand violation.
     const output = runValidate(f.repoRoot);
-    assert.doesNotMatch(output, /WeixinAdapter\.ts.*Clowder AI.*dictionary-driven/);
+    assert.doesNotMatch(output, /AgentRouter\.ts.*Clowder AI.*dictionary-driven/);
     assert.match(output, /No brand violations detected/);
   });
 
@@ -1092,6 +1237,17 @@ function makeHookFixture() {
   cpSync(resolve('scripts/lib/intake-brand-paths.mjs'), join(repoRoot, 'scripts/lib/intake-brand-paths.mjs'));
   chmodSync(join(repoRoot, 'scripts', 'intake-from-opensource.sh'), 0o755);
 
+  // The actual hook runs its secret scanner before the branch-specific guards.
+  // Keep that scanner real in the fixture, including its local module closure.
+  for (const path of [
+    'secret-git-guard.mjs',
+    'lib/secret-content-scan.mjs',
+    'lib/secret-content-rules.mjs',
+    'lib/secret-git-objects.mjs',
+  ]) {
+    cpSync(resolve('scripts', path), join(repoRoot, 'scripts', path));
+  }
+
   cpSync(
     resolve('scripts/materialize-biome-index-snapshot.mjs'),
     join(repoRoot, 'scripts/materialize-biome-index-snapshot.mjs'),
@@ -1129,7 +1285,6 @@ describe('pre-commit hook brand guard (--from-index)', () => {
     'packages/api/src/domains/cats/services/stores/redis/RedisMessageStore.ts',
     'packages/api/src/domains/cats/services/stores/redis/RedisThreadReadStateStore.ts',
     'packages/shared/src/utils/redis.ts',
-    'packages/api/src/domains/cats/services/duty-briefing/collectDutyBriefingInput.ts',
     'packages/api/src/domains/cats/services/freshness/ThreadUnseenChecker.ts',
     'packages/api/src/domains/cats/services/freshness/checkFreshnessForPostMessage.ts',
     'packages/api/src/domains/cats/services/freshness/checkStreamOutputFreshness.ts',
@@ -1249,6 +1404,7 @@ function makeRecordFixture(mock = {}) {
     mkdirSync(join(absPath, '..'), { recursive: true });
     writeFileSync(absPath, content, 'utf-8');
   }
+  prepareBrandConfig(fixture.repoRoot);
   const absorbPrHead = mock.absorbPrHead ?? 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
   const absorbPrHeadShort = absorbPrHead.slice(0, 8);
 
@@ -1384,7 +1540,7 @@ for ((i=1; i<=$#; i++)); do
 done
 
 if [ "\${1:-}" = "issue" ] && [ "\${2:-}" = "view" ]; then
-  if [ "$repo" != "zts212653/cat-cafe" ]; then
+  if [ "$repo" != "zts212653/clowder-ai" ]; then
     exit 1
   fi
   issue_id="\${3:-}"
@@ -1398,7 +1554,7 @@ NODE
 fi
 
 if [ "\${1:-}" = "pr" ] && [ "\${2:-}" = "view" ]; then
-  if [ "$repo" = "zts212653/cat-cafe" ]; then
+  if [ "$repo" = "zts212653/clowder-ai" ]; then
     cat <<'JSON'
 ${mockAbsorbPrJson}
 JSON
@@ -1413,7 +1569,7 @@ JSON
 fi
 
 if [ "\${1:-}" = "pr" ] && [ "\${2:-}" = "diff" ]; then
-  if [ "$repo" = "zts212653/cat-cafe" ]; then
+  if [ "$repo" = "zts212653/clowder-ai" ]; then
     cat <<'FILES'
 ${mockAbsorbPrFileList}
 FILES
@@ -1536,7 +1692,7 @@ for ((i=1; i<=$#; i++)); do
   fi
 done
 
-if [ "\${1:-}" = "pr" ] && [ "\${2:-}" = "view" ] && [ "$repo" = "zts212653/cat-cafe" ]; then
+if [ "\${1:-}" = "pr" ] && [ "\${2:-}" = "view" ] && [ "$repo" = "zts212653/clowder-ai" ]; then
   cat <<'JSON'
 {"headRefOid":"${currentHead}","state":"OPEN","headRefName":"fix/intake-fixture"}
 JSON
@@ -1550,7 +1706,7 @@ JSON
   exit 0
 fi
 
-if [ "\${1:-}" = "pr" ] && [ "\${2:-}" = "comment" ] && [ "\${3:-}" = "5678" ] && [ "$repo" = "zts212653/cat-cafe" ]; then
+if [ "\${1:-}" = "pr" ] && [ "\${2:-}" = "comment" ] && [ "\${3:-}" = "5678" ] && [ "$repo" = "zts212653/clowder-ai" ]; then
   body_file=""
   for ((i=1; i<=$#; i++)); do
     if [ "\${!i}" = "--body-file" ]; then
@@ -1667,6 +1823,9 @@ describe('intake-from-opensource.sh --record strict guard (absorbed)', () => {
       ['README.ja-JP.md', 'README.opensource.ja-JP.md'],
       ['SETUP.md', 'SETUP.md'],
       ['CONTRIBUTING.md', 'CONTRIBUTING.md'],
+      ['CLAUDE.md', 'CLAUDE.opensource.md'],
+      ['AGENTS.md', 'AGENTS.opensource.md'],
+      ['GEMINI.md', 'GEMINI.opensource.md'],
     ];
     const f = makeRecordFixture({
       targetPrFiles: mappings.map(([path]) => ({ path })),
@@ -1697,6 +1856,58 @@ describe('intake-from-opensource.sh --record strict guard (absorbed)', () => {
       { PATH: `${f.mockBin}:${process.env.PATH}` },
     );
     assert.match(output, /Recorded PR #495 → absorbed/);
+  });
+
+  it('rejects each public agent guide absorption when its canonical source is absent from the reviewed diff', () => {
+    const observations = [];
+    for (const target of ['CLAUDE.md', 'AGENTS.md', 'GEMINI.md']) {
+      const source = target.replace('.md', '.opensource.md');
+      const f = makeRecordFixture({
+        targetPrFiles: [{ path: target }],
+        absorbPrFiles: [{ path: 'packages/shared/src/fixture.ts' }],
+        issueBody: [
+          'Source: clowder-ai#495',
+          '## Per-File Decision Table',
+          '| File | Change | Decision | Reason |',
+          `| ${target} | public guide | manual-port | preserve community work |`,
+        ].join('\n'),
+      });
+      fixtures.push(f.sandboxRoot);
+      const result = runResult(
+        'bash',
+        [
+          SOURCE_SCRIPT,
+          '--record',
+          '--pr',
+          '495',
+          '--decision',
+          'absorbed',
+          '--intent-issue',
+          '1234',
+          '--absorb-pr',
+          '1236',
+          '--review-proof',
+          'https://github.com/zts212653/clowder-ai/pull/1236#issuecomment-1',
+        ],
+        f.repoRoot,
+        { PATH: `${f.mockBin}:${process.env.PATH}` },
+      );
+      observations.push({
+        target,
+        rejected: result.status !== 0,
+        sourceNamed: (result.stdout + result.stderr).includes(`${target} -> ${source}`),
+        ledgerEmpty: JSON.parse(readFileSync(f.ledgerPath, 'utf8')).entries.length === 0,
+      });
+    }
+    assert.deepEqual(
+      observations,
+      ['CLAUDE.md', 'AGENTS.md', 'GEMINI.md'].map((target) => ({
+        target,
+        rejected: true,
+        sourceNamed: true,
+        ledgerEmpty: true,
+      })),
+    );
   });
 
   it('rejects a partially ported localized README and does not write an absorbed record', () => {
@@ -2312,7 +2523,9 @@ describe('intake-from-opensource.sh --record strict guard (absorbed)', () => {
   it('requires intent issue metadata for absorbed records', () => {
     const f = makeRecordFixture();
     fixtures.push(f.sandboxRoot);
-    const err = captureRecordFailure(f.repoRoot, ['--pr', '495', '--decision', 'absorbed']);
+    const err = captureRecordFailure(f.repoRoot, ['--pr', '495', '--decision', 'absorbed'], {
+      PATH: `${f.mockBin}:${process.env.PATH}`,
+    });
     assert.match(err.stdout, /requires --intent-issue/);
   });
 
@@ -3704,5 +3917,144 @@ describe('F238: intake plan classifies dictionary-flipped directories as manual-
 
     assert.match(plain, /Manual:\s+6/, 'all 6 flipped directories should be manual-port');
     assert.match(plain, /Safe:\s+1/, 'only packages/api file should be safe');
+  });
+});
+
+it('home intake rejects an exported active deployment profile from the index', () => {
+  const file = 'packages/shared/src/deployment-profiles.json';
+  const f = makeBrandFixture();
+  const original = readFileSync(join(f.repoRoot, file), 'utf8');
+  try {
+    git(f.repoRoot, 'init', '-q');
+    git(f.repoRoot, 'add', '.');
+    let result = runResult(
+      'bash',
+      ['scripts/intake-from-opensource.sh', '--validate-inbound', '--from-index'],
+      f.repoRoot,
+    );
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    writeFileSync(join(f.repoRoot, file), JSON.stringify({ ...JSON.parse(original), activeProfile: 'opensource' }));
+    git(f.repoRoot, 'add', file);
+    writeFileSync(join(f.repoRoot, file), original);
+    result = runResult('bash', ['scripts/intake-from-opensource.sh', '--validate-inbound', '--from-index'], f.repoRoot);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stdout + result.stderr, /active deployment profile must remain home/);
+  } finally {
+    rmSync(f.sandboxRoot, { recursive: true, force: true });
+  }
+});
+
+describe('deployment brand index inputs', () => {
+  let f;
+  const config = 'packages/shared/src/deployment-profiles.json';
+  const checker = 'scripts/project-deployment-defaults.mjs';
+  afterEach(() => {
+    if (f) rmSync(f.sandboxRoot, { recursive: true, force: true });
+  });
+
+  function fixture() {
+    f = makeBrandFixture();
+    git(f.repoRoot, 'init', '-q');
+    git(f.repoRoot, 'add', '.');
+    f.alias = join(f.sandboxRoot, 'logical-repo');
+    symlinkSync(f.repoRoot, f.alias, 'dir');
+    return f;
+  }
+  function check(path) {
+    return runResult(process.execPath, [checker, path, '--check-brands', 'home', '--from-index'], f.repoRoot);
+  }
+  function inbound(root = f.alias) {
+    return runResult(
+      'bash',
+      [join(root, 'scripts/intake-from-opensource.sh'), '--validate-inbound', '--from-index'],
+      f.repoRoot,
+    );
+  }
+
+  it('validates an absolute input through a repository directory alias', () => {
+    fixture();
+    const result = check(join(f.alias, config));
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+  });
+
+  it('runs the actual inbound guard through a logical repository alias', () => {
+    fixture();
+    const result = inbound();
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stdout, /No brand violations detected/);
+  });
+
+  it('commits through the actual pre-commit hook from a logical repository alias', () => {
+    f = makeHookFixture();
+    cpSync(DICTIONARY_HELPER, join(f.repoRoot, 'scripts/brand-dictionary-helper.mjs'));
+    prepareBrandConfig(f.repoRoot);
+    f.alias = join(f.sandboxRoot, 'logical-repo');
+    symlinkSync(f.repoRoot, f.alias, 'dir');
+    const path = 'assets/system-prompts/alias-probe.md';
+    mkdirSync(join(f.repoRoot, path, '..'), { recursive: true });
+    writeFileSync(join(f.repoRoot, path), '# Alias path probe\n');
+    writeFileSync(join(f.repoRoot, 'packages/web/public/icons/favicon.svg'), '<svg><title>Alias probe</title></svg>');
+    git(f.repoRoot, 'add', 'assets', 'scripts', 'packages/shared', 'packages/web/public/icons/favicon.svg');
+    const result = runResult(
+      'bash',
+      ['-c', 'cd "$1" && git commit -m "alias path probe"', 'fixture', f.alias],
+      f.repoRoot,
+    );
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stdout + result.stderr, /No brand violations detected/);
+  });
+
+  it('reads staged data through an alias even after its worktree parent directory is removed', () => {
+    fixture();
+    rmSync(join(f.repoRoot, 'packages/shared/src'), { recursive: true });
+    const result = check(join(f.alias, config));
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+  });
+
+  it('retains the staged namespace when a worktree parent becomes a different directory link', () => {
+    fixture();
+    const other = 'packages/shared/replacement';
+    mkdirSync(join(f.repoRoot, other));
+    const changed = JSON.parse(readFileSync(join(f.repoRoot, config), 'utf8'));
+    changed.profiles.home.brand.name = 'Wrong replacement';
+    writeFileSync(join(f.repoRoot, other, 'deployment-profiles.json'), JSON.stringify(changed));
+    git(f.repoRoot, 'add', other);
+    rmSync(join(f.repoRoot, 'packages/shared/src'), { recursive: true });
+    symlinkSync('replacement', join(f.repoRoot, 'packages/shared/src'), 'dir');
+    const result = check(join(f.alias, config));
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+  });
+
+  it('rejects an outside input even if it contains identical valid configuration', () => {
+    fixture();
+    const outside = join(f.sandboxRoot, 'outside.json');
+    cpSync(join(f.repoRoot, config), outside);
+    const result = check(outside);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /Index input must be inside the repository/);
+  });
+
+  it('rejects staged brand drift through an alias despite an unstaged repair', () => {
+    fixture();
+    const original = readFileSync(join(f.repoRoot, config), 'utf8');
+    const input = JSON.parse(original);
+    input.profiles.home.brand.name = 'Wrong staged brand';
+    writeFileSync(join(f.repoRoot, config), JSON.stringify(input));
+    git(f.repoRoot, 'add', config);
+    writeFileSync(join(f.repoRoot, config), original);
+    const result = inbound();
+    assert.notEqual(result.status, 0);
+    assert.match(result.stdout + result.stderr, /Deployment brand home differs from its canonical dictionary/);
+    assert.doesNotMatch(result.stdout + result.stderr, /deployment brand checker failed/);
+  });
+
+  it('reports an unreadable staged input as a checker failure rather than a brand difference', () => {
+    fixture();
+    writeFileSync(join(f.repoRoot, config), '{broken json');
+    git(f.repoRoot, 'add', config);
+    const result = inbound(f.repoRoot);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stdout + result.stderr, /deployment brand checker failed/);
+    assert.doesNotMatch(result.stdout + result.stderr, /deployment brand differs from its canonical dictionary/);
   });
 });

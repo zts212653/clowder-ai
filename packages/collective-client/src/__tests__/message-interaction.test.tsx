@@ -144,7 +144,7 @@ describe.each([
     expect(container.querySelector('.reaction-bar')).toBeNull();
     expect(container.querySelector('.vote-create-action')).toBeNull();
     expect(container.textContent).not.toContain('发起随手投票');
-    expect(container.textContent).not.toContain('整理为工作');
+    expect(container.textContent).not.toContain('建成任务');
 
     const interaction = interactionFor(rootEvent.eventId);
     expect(button(interaction, '添加回应')).toBeDefined();
@@ -272,7 +272,7 @@ it('binds Topic actions and reaction picker to the exact reply event', async () 
   expect(document.activeElement).toBe(moreTrigger);
 
   await click(moreTrigger);
-  await click(button(replyInteraction, '整理为工作'));
+  await click(button(replyInteraction, '建成任务'));
   expect(onProposeWork).toHaveBeenCalledWith(replyEvent.eventId);
 
   await click(button(replyInteraction, '更多消息动作'));

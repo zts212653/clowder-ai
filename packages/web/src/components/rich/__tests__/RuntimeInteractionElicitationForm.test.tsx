@@ -3,7 +3,10 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiFetch } from '@/utils/api-client';
+import { writeShellLanguage } from '../../shell/shell-language';
+import { writeShellPresentation } from '../../shell/shell-presentation';
 import { RichBlocks } from '../RichBlocks';
+import { RuntimeInteractionCard } from '../RuntimeInteractionCard';
 import {
   block,
   cardRef,
@@ -27,6 +30,8 @@ describe('RuntimeInteractionElicitationForm', () => {
   afterAll(() => delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT);
   beforeEach(() => {
     vi.mocked(apiFetch).mockReset();
+    writeShellPresentation('classic');
+    writeShellLanguage('zh');
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -34,6 +39,65 @@ describe('RuntimeInteractionElicitationForm', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    writeShellPresentation('classic');
+    writeShellLanguage('zh');
+  });
+
+  it('keeps each label bound to its own input when Chat and Inbox show the same request', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(okJson({ interaction: record(formRequest(['region'])) }));
+    await act(async () =>
+      root.render(
+        <>
+          <RichBlocks blocks={[block]} messageId={messageId} />
+          <RuntimeInteractionCard block={block} messageId={messageId} presentation="mailbox" />
+        </>,
+      ),
+    );
+    const cards = [...container.querySelectorAll('[data-testid="runtime-interaction-card"]')];
+    expect(cards).toHaveLength(2);
+    expect(new Set([...container.querySelectorAll('input')].map((input) => input.id)).size).toBe(2);
+    for (const card of cards) {
+      const label = card.querySelector('label');
+      expect(label?.control).toBe(card.querySelector('input'));
+    }
+  });
+
+  it('uses the chosen language in the original form and preserves answers when language changes', async () => {
+    const request = {
+      ...formRequest(['enabled']),
+      requestedSchema: {
+        type: 'object' as const,
+        properties: { enabled: { type: 'boolean' as const, title: 'Provider supplied title' } },
+        required: ['enabled'],
+        additionalProperties: false as const,
+      },
+    };
+    vi.mocked(apiFetch).mockResolvedValue(okJson({ interaction: record(request) }));
+    writeShellPresentation('v2');
+    writeShellLanguage('en');
+    await render(root);
+    const input = container.querySelector('select[name="enabled"]') as HTMLSelectElement;
+    expect([...input.options].map((option) => option.textContent)).toEqual(['Choose an option', 'Yes', 'No']);
+    await act(async () => setSelect(input, 'false'));
+    await act(async () => writeShellLanguage('zh'));
+    expect(container.querySelector('select[name="enabled"]')).toBe(input);
+    expect(input.value).toBe('false');
+    expect([...input.options].map((option) => option.textContent)).toEqual(['请选择', '是', '否']);
+    expect(container.textContent).toContain('Provider supplied title');
+    expect(vi.mocked(apiFetch).mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0);
+  });
+
+  it.each([
+    ['https://example.com/authorize', 'Open example.com'],
+    ['javascript:alert(1)', 'The link is unavailable; you can still decline or cancel this request.'],
+  ])('uses English for URL elicitation controls without altering URL safety: %s', async (url, expected) => {
+    vi.mocked(apiFetch).mockResolvedValue(okJson({ interaction: record(urlRequest(url)) }));
+    writeShellPresentation('v2');
+    writeShellLanguage('en');
+    await render(root);
+    expect(container.textContent).toContain(expected);
+    expect(container.querySelector('a')?.href ?? null).toBe(url.startsWith('https:') ? url : null);
+    expect(container.textContent).toContain('Open the provider page, then confirm.');
   });
 
   it('renders the required URL elicitation message and safe link', async () => {

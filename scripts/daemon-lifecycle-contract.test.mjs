@@ -22,6 +22,20 @@ test('start-dev daemon lifecycle uses namespaced, identity-checked state', () =>
   assert.doesNotMatch(startDev, /DAEMON_PID_FILE="\$\{DAEMON_STATE_DIR\}\/daemon\.pid"/);
 });
 
+test('the daemon is launched only through nohup, the one wrapper spawned-identity capture waits past', () => {
+  const launches = [...startDev.matchAll(/^.*"\$script_path" "\$@" --cat-cafe-daemon-token=.*$/gm)].map(([line]) =>
+    line.trim(),
+  );
+  assert.ok(launches.length > 0, 'launch_daemon_child launch lines not found');
+  for (const line of launches) {
+    assert.match(
+      line,
+      /^(?:[A-Z_]+=\S+ )?nohup "\$script_path" /,
+      `a new launch wrapper must also be taught to LAUNCH_WRAPPER in scripts/lib/process-identity.mjs: ${line}`,
+    );
+  }
+});
+
 test('official runtime and alpha wrappers declare deployment identity before start or stop', () => {
   assert.match(runtimeWorktree, /export CAT_CAFE_DEPLOYMENT_ID=runtime/);
   assert.match(runtimeWorktree, /stop\)\s+stop_runtime_daemon/);

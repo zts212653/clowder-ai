@@ -49,6 +49,7 @@ describe('webDigestTemplate', () => {
       deliveryThreadId: 'th-1',
     });
     await spec.run.execute(null, 'thread-th-1', {
+      occurrenceId: 'test-occurrence',
       assignedCatId: 'opus',
       deliver: deliverMock,
       fetchContent: fetchMock,
@@ -77,6 +78,7 @@ describe('webDigestTemplate', () => {
       deliveryThreadId: 'th-2',
     });
     await spec.run.execute(null, 'thread-th-2', {
+      occurrenceId: 'test-occurrence',
       assignedCatId: 'opus',
       deliver: deliverMock,
       fetchContent: fetchMock,
@@ -114,6 +116,7 @@ describe('webDigestTemplate', () => {
       deliveryThreadId: 'th-2',
     });
     await spec.run.execute(null, 'thread-th-2', {
+      occurrenceId: 'test-occurrence',
       assignedCatId: 'opus',
       deliver: deliverMock,
       fetchContent: fetchMock,

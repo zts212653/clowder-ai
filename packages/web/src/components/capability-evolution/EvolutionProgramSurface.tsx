@@ -3,6 +3,7 @@
 import { type ExactAssetVersionRefV1, refIdentity } from '@cat-cafe/shared';
 import { useEffect, useMemo, useState } from 'react';
 import { useShellPresentation } from '@/components/shell/shell-presentation';
+import { DEFAULT_ARTIFACT_WORK_CHAT_BASIS } from '@/components/workbench/artifact-work-presentation';
 import {
   createCapabilityEvolutionWorkspaceSurface,
   isCapabilityEvolutionWorkspaceSurface,
@@ -52,6 +53,29 @@ export function EvolutionProgramList({ onOpenProgram }: { onOpenProgram: (progra
   return <CapabilityEvolutionWorkspace targetThreadId={null} onOpenProgram={onOpenProgram} />;
 }
 
+function enterProgramReading(surfaceId: string, desktop: boolean): void {
+  if (!desktop) return;
+  const threadId = useChatStore.getState().currentThreadId;
+  useF307ExperienceWorkbenchStore
+    .getState()
+    .enterMainAreaAttention(
+      surfaceId,
+      threadId ? { kind: 'chat-workspace', threadId, chatBasis: DEFAULT_ARTIFACT_WORK_CHAT_BASIS } : undefined,
+    );
+}
+
+function returnFromProgramReading(): void {
+  const store = useF307ExperienceWorkbenchStore.getState();
+  if (
+    store.mainAreaAttentionPresentation.kind === 'chat-workspace' &&
+    store.mainAreaAttentionPresentation.mode === 'full-window'
+  ) {
+    store.returnFromMainAreaFullWindow();
+    return;
+  }
+  store.exitMainAreaAttention();
+}
+
 export function EvolutionProgramSurface({ programId }: { programId: string }) {
   const v2 = useShellPresentation() === 'v2';
   const { projection, error, reload } = useEvolutionPrograms(programId);
@@ -71,6 +95,7 @@ export function EvolutionProgramSurface({ programId }: { programId: string }) {
       store.dispatch({ type: 'refresh-surface', surface: descriptor });
   }, [programId, projection?.program.displayName, projection?.origin]);
   const main = useF307ExperienceWorkbenchStore((state) => state.mainAreaAttentionSurfaceId === surfaceId);
+  const attentionPresentation = useF307ExperienceWorkbenchStore((state) => state.mainAreaAttentionPresentation);
   const desktop = useIsDesktop();
   const [expanded, setExpanded] = useState(false);
   const reviewing = main || (!desktop && expanded);
@@ -106,11 +131,11 @@ export function EvolutionProgramSurface({ programId }: { programId: string }) {
   const open = (_id: string, view: EvolutionReadingView = 'judgment') => {
     openEvolutionReading(programId, view);
     setExpanded(true);
-    if (desktop) useF307ExperienceWorkbenchStore.getState().enterMainAreaAttention(surfaceId);
+    enterProgramReading(surfaceId, desktop);
   };
   const returnToRail = () => {
     setExpanded(false);
-    useF307ExperienceWorkbenchStore.getState().exitMainAreaAttention();
+    returnFromProgramReading();
   };
   const backToWorkspace = () => {
     const store = useF307ExperienceWorkbenchStore.getState();
@@ -185,6 +210,9 @@ export function EvolutionProgramSurface({ programId }: { programId: string }) {
               controls={controls}
               returnToRail={returnToRail}
               desktop={desktop}
+              fullWindow={
+                attentionPresentation.kind === 'chat-workspace' && attentionPresentation.mode === 'full-window'
+              }
               moment={moment}
               v2={v2}
             />
@@ -256,7 +284,8 @@ export function EvolutionProgramSurface({ programId }: { programId: string }) {
                               {asset.catalog?.versions.find(
                                 (item) => refIdentity(item.versionRef) === refIdentity(version.ref),
                               )?.title ?? version.ref.version}
-                              {version.current && <span className="ml-2">当前采用</span>}
+                              {version.sourceCurrent && <span className="ml-2">来源当前版本</span>}
+                              {version.adopted && <span className="ml-2">当前采用</span>}
                             </span>
                             <span className="mt-1 block break-all font-mono text-cafe-muted">
                               {version.ref.version}
@@ -269,7 +298,9 @@ export function EvolutionProgramSurface({ programId }: { programId: string }) {
                         {asset.catalog ? '资产来源尚未提供版本记录。' : pendingOwnerRead(readStatus, '版本记录')}
                       </p>
                     )}
-                    {asset.catalog && <EvolutionSource label="采用来源" source={asset.catalog.currentProofRef} />}
+                    {asset.catalog && (
+                      <EvolutionSource label="来源当前版本证明" source={asset.catalog.currentProofRef} />
+                    )}
                     {selected && typeof window !== 'undefined' && (
                       <a
                         data-testid="evolution-version-link"

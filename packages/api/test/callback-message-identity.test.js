@@ -13,7 +13,7 @@ import { ThreadStore } from '../dist/domains/cats/services/stores/ports/ThreadSt
 import { appendA2ASourceWithLedgerAdmission } from '../dist/routes/callback-a2a-trigger.js';
 import { callbacksRoutes } from '../dist/routes/callbacks.js';
 
-async function harness(t, transport) {
+async function harness(t, transport, extraDeps = {}) {
   const registry = new InvocationRegistry();
   const agentKeyRegistry = new AgentKeyRegistry();
   const messageStore = new MessageStore();
@@ -32,6 +32,7 @@ async function harness(t, transport) {
   const app = Fastify();
   t.after(() => app.close());
   await app.register(callbacksRoutes, {
+    ...extraDeps,
     registry,
     agentKeyRegistry,
     messageStore,
@@ -65,6 +66,48 @@ async function harness(t, transport) {
 }
 
 for (const transport of ['invocation', 'agent-key']) {
+  test(`${transport}: cross-post observes queue admission without claiming execution while retaining the exact target`, async (t) => {
+    let decision;
+    const h = await harness(t, transport, {
+      routingDispatchPreflight: {
+        async preflight(input) {
+          decision = {
+            v: 1,
+            ownerId: input.ownerId,
+            observedAt: Date.now(),
+            resolverState: 'fresh',
+            targets: input.targetCatIds.map((targetCatId) => ({
+              targetCatId,
+              disposition: 'rejected',
+              reasons: [{ code: 'quota_exhausted', summary: 'Temporarily unavailable', sourceRefs: ['quota:1'] }],
+              alternatives: [],
+            })),
+          };
+          return decision;
+        },
+      },
+    });
+    const response = await h.post('routing-annotation');
+    assert.equal(response.statusCode, 200, response.body);
+    const body = response.json();
+    assert.equal(body.routing_preflight, undefined);
+    assert.deepEqual(body.routing_admission, {
+      v: 1,
+      stage: 'queue_admitted',
+      executionPreflight: 'pending',
+      ownerId: 'identity-owner',
+      observedAt: decision.observedAt,
+      targets: [
+        {
+          targetCatId: 'codex',
+          availabilityObservation: 'unavailable',
+          reasons: [{ code: 'quota_exhausted', summary: 'Temporarily unavailable', sourceRefs: ['quota:1'] }],
+        },
+      ],
+    });
+    assert.deepEqual(h.invocationQueue.list(h.to.id, 'identity-owner')[0].targets, ['codex']);
+  });
+
   test(`${transport}: same-ID concurrent A2A retry has one durable source and one target row`, async (t) => {
     const h = await harness(t, transport);
     const responses = await Promise.all([h.post('source-a'), h.post('source-a')]);

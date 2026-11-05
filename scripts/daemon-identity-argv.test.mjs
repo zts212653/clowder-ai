@@ -15,7 +15,12 @@ import {
   stopDaemon,
   writeDaemonState,
 } from './lib/daemon-state.mjs';
-import { captureReadableIdentity } from './lib/process-identity.mjs';
+import {
+  captureReadableIdentity,
+  compareStableBirth,
+  compareStoredIdentity,
+  PROCESS_START_TIME_FORMAT,
+} from './lib/process-identity.mjs';
 
 /**
  * F300 daemon identity: an unreadable argv is "unknown", never "a different
@@ -35,8 +40,17 @@ import { captureReadableIdentity } from './lib/process-identity.mjs';
 
 const tempRoots = new Set();
 const children = new Set();
+/** Forked PID -> the shell that launched it, which reaps it; the PID is ours only while that shell lives. */
+const forkedPids = new Map();
 
 afterEach(async () => {
+  for (const [pid, shell] of forkedPids) {
+    if (shell.exitCode !== null || shell.signalCode !== null) continue;
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch {}
+  }
+  forkedPids.clear();
   for (const child of children) {
     if (child.exitCode === null && child.signalCode === null) {
       child.kill('SIGKILL');
@@ -126,6 +140,72 @@ test('capture reports an unreadable argv as unavailable rather than as a command
   assert.equal(typeof readable.ucomm, 'string');
 });
 
+const STABLE_MARKER_TOKEN = '--cat-cafe-daemon-token=stable-marker-token';
+
+function stableMarkerFixture(overrides = {}) {
+  return {
+    startedAt: 'Tue Oct 20 16:01:27 2026',
+    startedAtEpochMs: 1792512087000,
+    startedAtFormat: PROCESS_START_TIME_FORMAT,
+    command: `node daemon.js ${STABLE_MARKER_TOKEN}`,
+    cwd: '/runtime',
+    argvAvailable: true,
+    procStartTicks: 123456,
+    bootId: 'boot-a',
+    ...overrides,
+  };
+}
+
+test('a stable /proc birth marker takes precedence over a shifted wall-clock lstart', () => {
+  const state = {
+    process: {
+      ...stableMarkerFixture({ startedAt: 'Tue Oct 20 00:36:57 2026', startedAtEpochMs: 1792456617000 }),
+      launchToken: 'stable-marker-token',
+    },
+  };
+  const live = stableMarkerFixture({ startedAt: 'Tue Oct 20 16:01:27 2026' });
+
+  assert.equal(compareStoredIdentity(state, live), 'match');
+});
+
+test('a different stable birth marker remains a conclusive mismatch', () => {
+  const state = {
+    process: {
+      ...stableMarkerFixture({ startedAt: 'Tue Oct 20 00:36:57 2026', procStartTicks: 999999 }),
+      launchToken: 'stable-marker-token',
+    },
+  };
+  const live = stableMarkerFixture();
+
+  assert.equal(compareStoredIdentity(state, live), 'mismatch');
+});
+
+test('an unreadable argv with a matching stable marker stays unknown, not mismatched', () => {
+  const state = {
+    process: {
+      ...stableMarkerFixture({ startedAt: 'Tue Oct 20 00:36:57 2026' }),
+      launchToken: 'stable-marker-token',
+    },
+  };
+  const live = stableMarkerFixture({ command: '(node)', argvAvailable: false });
+
+  assert.equal(compareStoredIdentity(state, live), 'unknown');
+});
+
+test('an incomplete Linux marker cannot override the frozen wall-clock fallback', () => {
+  const stored = stableMarkerFixture();
+  for (const partial of [{ bootId: undefined }, { bootId: '' }, { procStartTicks: -1 }]) {
+    assert.equal(compareStableBirth(stored, { ...stored, ...partial }), undefined);
+  }
+  assert.equal(compareStableBirth(stored, { ...stored, bootId: 'another-boot' }), false);
+});
+
+test('an unreadable pre-marker process stays unknown when only its wall-clock birth changes', () => {
+  const stored = stableMarkerFixture({ procStartTicks: undefined, bootId: undefined });
+  const live = unreadable({ ...stored, startedAtEpochMs: stored.startedAtEpochMs + 24_420_000 });
+  assert.equal(compareStoredIdentity({ process: { ...stored, launchToken: 'stable-marker-token' } }, live), 'unknown');
+});
+
 test('writing state re-reads a transiently unreadable argv instead of calling it a mismatch', async () => {
   const fixture = createFixture();
   const launchToken = 'retry-token';
@@ -174,6 +254,122 @@ test('a readable argv without the launch token is still an identity mismatch, wi
   );
 });
 
+/**
+ * start-dev.sh launches the daemon with `nohup ... --cat-cafe-daemon-token=T &`.
+ * Until the forked child execs, it is a copy of the launching shell: ps shows
+ * the shell's own argv - readable, in the right cwd, without the token. Here the
+ * child sleeps before its exec so the state write lands inside that window.
+ */
+async function forkDaemonWithDelayedExec(projectRoot, launchToken, delaySeconds) {
+  const script = [
+    `{ sleep ${delaySeconds}; exec nohup "$NODE_BIN" -e 'setInterval(() => {}, 1000)' -- "--cat-cafe-daemon-token=$LAUNCH_TOKEN"; } &`,
+    'echo "$!"',
+    'wait',
+  ].join('\n');
+  const shell = spawn('/bin/bash', ['-c', script], {
+    cwd: projectRoot,
+    env: { ...process.env, NODE_BIN: process.execPath, LAUNCH_TOKEN: launchToken },
+    stdio: ['ignore', 'pipe', 'ignore'],
+  });
+  children.add(shell);
+  const pid = await new Promise((resolve, reject) => {
+    shell.stdout.once('data', (chunk) => resolve(Number.parseInt(String(chunk), 10)));
+    shell.once('error', reject);
+  });
+  forkedPids.set(pid, shell);
+  return { pid };
+}
+
+function inspectRuntime({ homeDir, runtimeRoot }) {
+  return inspectDaemonState({
+    stateFile: daemonStatePaths({ homeDir, projectRoot: runtimeRoot, deploymentId: 'runtime' }).stateFile,
+    expectedProjectRoot: runtimeRoot,
+    expectedDeploymentId: 'runtime',
+  });
+}
+
+test('writing state waits out the fork-to-exec window instead of reading the launcher argv as a mismatch', async () => {
+  const fixture = createFixture();
+  const launchToken = 'delayed-exec-token';
+  const child = await forkDaemonWithDelayedExec(fixture.runtimeRoot, launchToken, 0.5);
+
+  const paths = writeState({ ...fixture, child, launchToken });
+
+  const state = JSON.parse(readFileSync(paths.stateFile, 'utf8'));
+  assert.equal(state.pid, child.pid);
+  assert.match(state.process.command, new RegExp(`--cat-cafe-daemon-token=${launchToken}`));
+  assert.equal(inspectRuntime(fixture).kind, 'running', 'the recorded identity must keep matching the daemon');
+});
+
+/**
+ * The full launch chain, read by read: the fork (launcher argv, no token), nohup
+ * (token, but about to exec), then the daemon. The nohup stage normally lasts
+ * about a millisecond, so it is injected rather than raced for.
+ */
+test('writing state records the daemon, never the nohup stage that already carries the token', async () => {
+  const fixture = createFixture();
+  const launchToken = 'nohup-stage-token';
+  const child = await spawnFakeDaemon(fixture.runtimeRoot, launchToken);
+  const stages = [
+    (identity) => ({ ...identity, command: '/bin/bash ./scripts/start-dev.sh --daemon' }),
+    (identity) => ({ ...identity, command: `nohup ${identity.command}` }),
+  ];
+  let calls = 0;
+  const paths = writeState({
+    ...fixture,
+    child,
+    launchToken,
+    captureIdentity: (pid) => {
+      const identity = captureProcessIdentity(pid);
+      calls += 1;
+      return calls <= stages.length ? stages[calls - 1](identity) : identity;
+    },
+  });
+
+  const state = JSON.parse(readFileSync(paths.stateFile, 'utf8'));
+  assert.equal(state.process.command, captureProcessIdentity(child.pid).command);
+  assert.equal(inspectRuntime(fixture).kind, 'running');
+});
+
+test('a child that never gets past nohup is refused with its own reason and nothing is recorded', async () => {
+  const fixture = createFixture();
+  const launchToken = 'stuck-nohup-token';
+  const child = await spawnFakeDaemon(fixture.runtimeRoot, launchToken);
+  const paths = daemonStatePaths({ ...fixture, projectRoot: fixture.runtimeRoot, deploymentId: 'runtime' });
+  assert.throws(
+    () =>
+      writeState({
+        ...fixture,
+        child,
+        launchToken,
+        captureIdentity: (pid) => {
+          const identity = captureProcessIdentity(pid);
+          return { ...identity, command: `nohup ${identity.command}` };
+        },
+      }),
+    (error) =>
+      error instanceof DaemonStateError &&
+      error.reason === 'spawned-process-exec-unsettled' &&
+      !error.message.includes(launchToken),
+  );
+  assert.equal(existsSync(paths.stateFile), false);
+});
+
+test('a spawned process in another cwd is refused at once, naming what was observed', async () => {
+  const fixture = createFixture();
+  const elsewhere = createFixture().runtimeRoot;
+  const child = await spawnFakeDaemon(elsewhere, 'elsewhere-token');
+  const startedAt = Date.now();
+  assert.throws(
+    () => writeState({ ...fixture, child, launchToken: 'elsewhere-token' }),
+    (error) =>
+      error instanceof DaemonStateError &&
+      error.reason === 'spawned-process-identity-mismatch' &&
+      error.message.includes(`cwd ${error.details.observedCwd}`),
+  );
+  assert.ok(Date.now() - startedAt < 1_000, 'a different cwd is conclusive and must not wait');
+});
+
 test('inspection gives an unreadable argv its own fail-closed reason', async () => {
   const fixture = createFixture();
   const launchToken = 'inspect-token';
@@ -190,36 +386,49 @@ test('inspection gives an unreadable argv its own fail-closed reason', async () 
   assert.equal(inspection.reason, 'process-argv-unavailable');
 });
 
-test('a stop never records "terminated" on the strength of an unreadable argv', async () => {
-  const fixture = createFixture();
-  const launchToken = 'stop-token';
-  const child = await spawnFakeDaemon(fixture.runtimeRoot, launchToken, { ignoreSigterm: true });
-  const paths = writeState({ ...fixture, child, launchToken });
+for (const clockJump of [false, true]) {
+  test(`a stop never records "terminated" on unreadable argv${clockJump ? ' after a pre-marker clock jump' : ''}`, async () => {
+    const fixture = createFixture();
+    const launchToken = 'stop-token';
+    const child = await spawnFakeDaemon(fixture.runtimeRoot, launchToken, { ignoreSigterm: true });
+    const paths = writeState({ ...fixture, child, launchToken });
+    if (clockJump) {
+      const state = JSON.parse(readFileSync(paths.stateFile, 'utf8'));
+      delete state.process.procStartTicks;
+      delete state.process.bootId;
+      writeFileSync(paths.stateFile, `${JSON.stringify(state)}\n`);
+    }
 
-  // The first read is readable, so the stop really opens against a running
-  // daemon and signals it. Every later read cannot see the argv - exactly the
-  // window in which the old code decided the daemon was gone.
-  let calls = 0;
-  const captureIdentity = (pid) => {
-    calls += 1;
-    const identity = calls === 1 ? captureReadableIdentity(pid) : captureProcessIdentity(pid);
-    return calls === 1 ? identity : unreadable(identity);
-  };
+    // The first read is readable, so the stop really opens against a running
+    // daemon and signals it. Every later read cannot see the argv - exactly the
+    // window in which the old code decided the daemon was gone.
+    let calls = 0;
+    const captureIdentity = (pid) => {
+      calls += 1;
+      const identity = calls === 1 ? captureReadableIdentity(pid) : captureProcessIdentity(pid);
+      return calls === 1
+        ? identity
+        : unreadable({
+            ...identity,
+            ...(clockJump ? { startedAtEpochMs: identity.startedAtEpochMs + 24_420_000 } : {}),
+          });
+    };
 
-  await assert.rejects(
-    stopDaemon({
-      paths,
-      expectedProjectRoot: fixture.runtimeRoot,
-      expectedDeploymentId: 'runtime',
-      graceMs: 200,
-      captureIdentity,
-    }),
-    (error) => error instanceof DaemonStateError && error.reason === 'stop-outcome-unknown',
-  );
-  assert.equal(existsSync(paths.stateFile), true, 'state must survive an unverifiable stop');
-  const audit = existsSync(paths.auditFile) ? readFileSync(paths.auditFile, 'utf8') : '';
-  assert.doesNotMatch(audit, /"outcome":"terminated"/);
-});
+    await assert.rejects(
+      stopDaemon({
+        paths,
+        expectedProjectRoot: fixture.runtimeRoot,
+        expectedDeploymentId: 'runtime',
+        graceMs: 200,
+        captureIdentity,
+      }),
+      (error) => error instanceof DaemonStateError && error.reason === 'stop-outcome-unknown',
+    );
+    assert.equal(existsSync(paths.stateFile), true, 'state must survive an unverifiable stop');
+    const audit = existsSync(paths.auditFile) ? readFileSync(paths.auditFile, 'utf8') : '';
+    assert.doesNotMatch(audit, /"outcome":"terminated"/);
+  });
+}
 
 function unreadableField(field, empty = false) {
   return (pid) =>

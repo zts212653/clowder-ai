@@ -645,6 +645,8 @@ gpt-pro（以及未来 claude-cloud / gemini-cloud 等其他 cloud cats），不
 - `@gpt-pro` 无可用 binding 时提示：“先绑定 conversation，或选择复制并打开。”不得只显示内部 `HOST_APPEND_UNAVAILABLE`。
 ### Phase G — dot 独立接入、猫咖内召唤与协作
 
+**2026-10-16 本人续办，G1仍未通过**：正式boot35的Ask734被全文读取并接纳后，canonical终稿711仍指向human708；显式对照744成功不代签自动回程。[PR5626](https://github.com/zts212653/clowder-ai/pull/5626)已合入4901f6ffe9cb6f8e072a06dd43b86f7b41a7aabf：按canonical输入与精确child/response关系绑定唯一Ask，串/并行文字与非文字共用原子终稿/Queue提交，保留原执行来源与sender权限；dot读源补可选rich/thinking。原cloud对a4370df8e5审毕无新问题，实际合入树与验证候选逐字相同。
+
 **Status**: in-progress；Astra 负责设计/范围，Sol61 实现。operator 于本 thread `[thread-id]#private-source-id` 接受概念并要求直接开发、在真实代码里打磨。
 
 **2026-10-11 实现状态**：首版 #5336 已合入 `7c6ef410e4`，browser admission #5343 已合入 `fad12058a8`。

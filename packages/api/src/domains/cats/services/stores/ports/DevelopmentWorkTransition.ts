@@ -7,6 +7,7 @@ import {
   entrustedWorkV1Schema,
   type TaskItem,
 } from '@cat-cafe/shared';
+import { advanceEntrustedWorkRevision } from './EntrustedWorkRevision.js';
 import { createEntrustedTaskItem } from './TaskItemFactory.js';
 
 export interface DevelopmentWorkActor {
@@ -211,7 +212,7 @@ function prepareAggregate(
     ...initial,
     time: { ...initial.time, ...input.time },
     developmentScope: current?.developmentScope ?? scope,
-    revision: current ? current.revision + 1 : 1,
+    ...(current ? advanceEntrustedWorkRevision(current) : { revision: 1, executionAuthorityRevision: 1 }),
     ...(input.parentTaskRef ? { parentTaskRef: input.parentTaskRef } : {}),
     ...(input.predecessorTaskRef ? { predecessorTaskRef: input.predecessorTaskRef } : {}),
   });

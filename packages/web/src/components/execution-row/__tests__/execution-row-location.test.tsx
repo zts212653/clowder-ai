@@ -12,6 +12,7 @@ import {
   useMessageDisclosureState,
 } from '../../message-disclosure-state';
 import { writeShellLanguage } from '../../shell/shell-language';
+import { MessageNavigationProvider } from '../../thread-chat/MessageNavigationContext';
 import { ExecutionRow } from '../ExecutionRow';
 
 const apiFetch = vi.hoisted(() => vi.fn());
@@ -97,18 +98,21 @@ describe('execution row location through the original owner', () => {
     writeShellLanguage('zh');
     vi.unstubAllGlobals();
   });
-  async function render(run: ActiveExecutionProjection) {
+  async function render(run: ActiveExecutionProjection, navigate?: (messageId: string) => boolean) {
     const store = useActiveExecutionStore.getState();
     store.applySnapshot(THREAD, store.beginHydration(THREAD, '/project'), {
       projectPath: '/project',
       executions: [run],
     });
+    const content = (
+      <>
+        <RecordOwner />
+        <ExecutionRow threadId={THREAD} />
+      </>
+    );
     await act(async () =>
       root.render(
-        <>
-          <RecordOwner />
-          <ExecutionRow threadId={THREAD} />
-        </>,
+        navigate ? <MessageNavigationProvider value={navigate}>{content}</MessageNavigationProvider> : content,
       ),
     );
   }
@@ -117,10 +121,18 @@ describe('execution row location through the original owner', () => {
 
   it('names a live reply, scrolls to its exact child bubble and opens its original record', async () => {
     await render(execution());
-    expect(text()).toContain('砚砚 · GPT-6.1 Sol 正在回话');
+    expect(text()).toContain('砚砚 · GPT-6.1 Sol 处理中');
     expect(locate()).not.toBeNull();
     await act(async () => locate()?.click());
     expect(scroll.mock.instances).toContain(container.querySelector('[data-message-id="original-writing-message"]'));
+    expect(container.querySelector('[data-testid="original-record"]')?.getAttribute('data-expanded')).toBe('true');
+  });
+
+  it('hands the exact live message to this chat reading owner so streaming cannot reclaim bottom follow', async () => {
+    const navigate = vi.fn(() => true);
+    await render(execution(), navigate);
+    await act(async () => locate()?.click());
+    expect(navigate).toHaveBeenCalledWith(message.id);
     expect(container.querySelector('[data-testid="original-record"]')?.getAttribute('data-expanded')).toBe('true');
   });
 
@@ -145,7 +157,7 @@ describe('execution row location through the original owner', () => {
   it('keeps the type distinction when language changes', async () => {
     await render(execution());
     act(() => writeShellLanguage('en'));
-    expect(text()).toContain('replying');
+    expect(text()).toContain('working');
   });
   it('keeps running words in the narrow managed row, in both languages', async () => {
     await render(execution({ kind: 'managed_command', activity: 'full_gate' }));

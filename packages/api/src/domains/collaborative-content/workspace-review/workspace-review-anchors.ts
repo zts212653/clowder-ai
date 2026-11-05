@@ -43,7 +43,7 @@ export function toWorkspaceReviewSource(
 }
 
 export function assertWorkspaceMediaAnchor(
-  source: Exclude<WorkspaceContentSource, { kind: 'text' | 'video-project' }>,
+  source: Exclude<WorkspaceContentSource, { kind: 'text' | 'video-project' | 'collective-artifact' }>,
   anchor: ArtifactReviewAnchor,
 ): void {
   try {
@@ -59,9 +59,9 @@ export function isWorkspaceTextAnchor(
   return 'kind' in anchor && anchor.kind === 'text_quote';
 }
 
-export function workspaceReviewIdentity(ownerUserId: string, contentRef: string): string {
+export function workspaceReviewIdentity(ownerUserId: string, contentRef: string, scopeRef?: string): string {
   return `workspace-review-${createHash('sha256')
-    .update(JSON.stringify([ownerUserId, contentRef]))
+    .update(JSON.stringify(scopeRef ? ['collective-artifact', scopeRef, contentRef] : [ownerUserId, contentRef]))
     .digest('hex')}`;
 }
 

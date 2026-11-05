@@ -1,6 +1,8 @@
 import type { ImmutableMedia } from '@cat-cafe/shared';
-import Image from 'next/image';
 import { type RefObject, useCallback } from 'react';
+import { ContentMediaElement } from '@/components/content-review/ContentMediaElement';
+import { videoArtworkCopy } from '@/components/content-review/video-artwork.shell-copy';
+import { useShellCopy } from '@/components/shell/shell-copy';
 
 export function WorkspaceReviewMediaElement({
   src,
@@ -8,6 +10,7 @@ export function WorkspaceReviewMediaElement({
   media,
   video,
   selectionActive,
+  customControls = false,
   onSeeking,
   onSeeked,
   onSeconds,
@@ -18,42 +21,43 @@ export function WorkspaceReviewMediaElement({
   media: ImmutableMedia;
   video: RefObject<HTMLVideoElement>;
   selectionActive: boolean;
+  customControls?: boolean;
   onSeeking: () => void;
   onSeeked: () => void;
   onSeconds: (seconds: number) => void;
   onError: (error: string) => void;
 }) {
+  const t = useShellCopy(videoArtworkCopy);
   // Next/Image reassigns src when its error callback changes; keep ordinary canvas renders from restarting pixels.
-  const imageError = useCallback(() => onError('此浏览器无法显示这张图片，请重新读取或下载原文件查看。'), [onError]);
-  if (!src) return <p className="p-4 text-sm text-cafe-muted">{error ?? '正在核对并读取原版媒体…'}</p>;
+  const imageError = useCallback(() => onError(t.imageError), [onError, t.imageError]);
+  if (!src) return <p className="p-4 text-sm text-cafe-muted">{error ?? t.loading}</p>;
   if (media.kind === 'image')
     return (
-      <Image
+      <ContentMediaElement
+        kind="image"
         src={src}
-        alt="正在批注的作品"
+        title={t.imageAlt}
         width={media.width}
         height={media.height}
-        unoptimized
         className="absolute inset-0 h-full w-full object-contain"
-        data-testid="workspace-content-review-media"
+        testId="workspace-content-review-media"
         onError={imageError}
       />
     );
   return (
-    // biome-ignore lint/a11y/useMediaCaption: The source owner supplies real tracks; no invented captions.
-    <video
-      ref={video}
-      controls={!selectionActive}
-      playsInline
+    <ContentMediaElement
+      kind="video"
       src={src}
+      videoRef={video}
       className="absolute inset-0 h-full w-full object-contain"
-      data-testid="workspace-content-review-media"
-      onSeeking={onSeeking}
-      onSeeked={onSeeked}
-      onTimeUpdate={(event) => onSeconds(event.currentTarget.currentTime)}
-      onError={() => onError('此浏览器无法播放这份视频，请重新读取或下载原文件查看。')}
-    >
-      浏览器不支持视频播放
-    </video>
+      testId="workspace-content-review-media"
+      videoProps={{
+        controls: !selectionActive && !customControls,
+        onSeeking,
+        onSeeked,
+        onTimeUpdate: (event) => onSeconds(event.currentTarget.currentTime),
+      }}
+      onError={() => onError(t.videoError)}
+    />
   );
 }

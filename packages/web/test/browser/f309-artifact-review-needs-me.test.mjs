@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
 import { startReviewHost } from './fixtures/f309-artifact-review-host.mjs';
 import { mediaFixture } from './fixtures/f309-artifact-review-media.mjs';
 import { selectReviewMode } from './fixtures/f309-artwork-controls.mjs';
@@ -74,11 +74,13 @@ for (const kind of ['png', 'mp4']) {
       assert.equal(await row.getAttribute('data-producer-id'), 'f309.content_review');
       await row.getByTestId('needs-me-open-action').click();
       await selectReviewMode(page, 'comment');
-      const draft = page.getByRole('textbox', { name: '评论内容' });
+      const draft = page.getByRole('textbox', { name: kind === 'png' ? '消息输入框' : '评论内容' });
+      await page.getByTestId('artifact-review-surface').waitFor();
       await draft.waitFor();
       await draft.fill(`Needs Me 入口保留的陌生意见 · ${kind}`);
       await page.reload();
       // AC-U2: the retained draft is showing again on return, without re-entering comment mode.
+      await page.getByTestId('artifact-review-surface').waitFor();
       await draft.waitFor();
       assert.equal(await draft.inputValue(), `Needs Me 入口保留的陌生意见 · ${kind}`);
       assert.equal(await page.getByTestId('artifact-review-surface').count(), 1);
@@ -88,6 +90,7 @@ for (const kind of ['png', 'mp4']) {
       assert.equal(await row.getAttribute('data-selected'), 'true');
 
       await row.getByTestId('open-artifact-review').click();
+      await page.getByTestId('artifact-review-surface').waitFor();
       await draft.waitFor();
       assert.equal(await draft.inputValue(), `Needs Me 入口保留的陌生意见 · ${kind}`);
       await page.getByRole('button', { name: '返回', exact: true }).click();
@@ -99,9 +102,11 @@ for (const kind of ['png', 'mp4']) {
       await scheduleRow.waitFor();
       const scheduleItemRef = await scheduleRow.getAttribute('data-item-ref');
       await scheduleRow.getByTestId('open-artifact-review').click();
+      await page.getByTestId('artifact-review-surface').waitFor();
       await draft.waitFor();
       assert.equal(await draft.inputValue(), `Needs Me 入口保留的陌生意见 · ${kind}`);
       await page.reload();
+      await page.getByTestId('artifact-review-surface').waitFor();
       await draft.waitFor();
       await page.getByTestId('f307-close-review').click();
       await scheduleRow.waitFor();

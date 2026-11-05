@@ -1,5 +1,6 @@
 ---
 name: browser-automation
+tips_exempt: "2026-10-28: background browser defaults and agent routing repair an existing workflow; no new end-user entry or setup action."
 description: >
   浏览器工作流总路由：为外部网站浏览、登录态流程、浏览器自动化、证据采集选择合适后端。
   Use when: 需要操作外部网站、登录页、JS 重页面、没有 webfetch/VL 但需要浏览器、或需要在多种浏览器工具之间路由。
@@ -29,14 +30,23 @@ triggers:
 - 选择合适的浏览器后端
 - 把任务转给更具体的 skill / ref，而不是在这里重复厂商文档
 
+## 先按目的选入口
+
+- **自动验证、Alpha 自验、截图取证**：使用猫自有的无头浏览器；本地 WebApp 走 `webapp-testing`，外部网页按下面的后端路由。运行服务和验证页面都不需要激活桌面。
+- **给operator看 localhost 成品**：走 `browser-preview` 展示 Hub 内嵌面板。面板排队或未确认送达时保留原回执，不改用系统浏览器。
+- **明确要求看着操作，或当前任务明确包含自有 profile 的可见首次登录**：走 `refs/playwright-mcp.md` 的显式可见分支；已有明确请求就直接执行该分支，不再索要一次工具配置批准。
+- **接手人的已登录浏览器**：只有本任务明确需要并已获授权接手那个会话，才走 `refs/playwriter.md`。需要登录态、iframe 或无头执行失败，都不是自动接管人的 Chrome 的理由。
+
+普通自动化默认无头。不要用系统 `open`、应用 activate、可见窗口或真实 Chrome 接管来自动兜底。账号必须本人确认时，交付可点击入口与恢复点，由人主动打开。
+
 ## 执行前四问
 
-在真正打开浏览器前，先回答这四个问题：
+在真正执行浏览器操作前，先明确这四件事；已知答案直接沿用：
 
 1. **真的需要浏览器吗？**
    如果只是读文档、抓纯文本、做搜索，不要默认上浏览器。
-2. **目标是 localhost 还是外部网站？**
-   `localhost` → `browser-preview`；外部网站才留在本 skill。
+2. **目的是自动验证、展示成品，还是外部交互？**
+   先按上面的目的选入口，再看目标主机；localhost 自测也走无头验证，不能一律路由成展示。
 3. **这只猫的客户端能力是什么？**
    MCP 原生、CLI-only、是否有 `webfetch`、是否能跑 shell、是否有 VL。
 4. **这次任务的 session 属于谁？**
@@ -64,14 +74,14 @@ triggers:
 
 1. **先问：真的需要浏览器吗？**
    如果只是读文档、抓纯文本、做搜索，不要默认上浏览器。
-2. **目标是 localhost 吗？**
-   是 → `browser-preview`
-3. **目标是本地 WebApp 验证吗？**
+2. **目标是本地 WebApp 验证吗？**
    是 → `webapp-testing`
+3. **目的是给人展示 localhost 页面吗？**
+   是 → `browser-preview` 的 Hub 内嵌面板
 4. **客户端已经有稳定可用的 Playwright MCP 吗？**
    是 → `refs/playwright-mcp.md`（MCP ID: `playwright`）
-5. **需要接手人类已登录的 Chrome、复杂 iframe、多 tab 调试吗？**
-   是 → 用 `claude-in-chrome` MCP（工具前缀 `mcp__claude-in-chrome__*`），参考 `refs/playwriter.md`
+5. **本任务明确获准接手人类现有 Chrome 会话吗？**
+   是 → 用 `claude-in-chrome` MCP（工具前缀 `mcp__claude-in-chrome__*`），参考 `refs/playwriter.md`；复杂 iframe、多 tab 本身不要求接管人的会话
 6. **这是 CLI 型猫，没 webfetch / 没 VL，但能跑命令吗？**
    是 → `refs/agent-browser.md`（MCP ID: `agent-browser`，社区 wrapper，使用前先做本机验活）
 7. **需要长驻 daemon、持久 session、HTTP-first 服务吗？**
@@ -83,8 +93,9 @@ triggers:
 |------|------|--------|------|
 | 本地前端页面预览 | `browser-preview` | — | 独立 skill |
 | 本地 WebApp 测试 / 回归 | `webapp-testing` + Playwright | `playwright` | 已接入 |
-| MCP 原生客户端的常规网页自动化 | `Playwright MCP` | `playwright` | ✅ 已接入 — `npx @playwright/mcp@latest` |
-| 已登录 Chrome、iframe-heavy、手工接管 | `claude-in-chrome` | `claude-in-chrome` | ✅ 已接入 — Chrome 扩展管理，无需手动启动 |
+| MCP 原生客户端的常规网页自动化 | 无头 `Playwright MCP` | `playwright` | 受管描述符显式指定 `--headless` |
+| 明确要求可见操作 / 明确包含自有 profile 可见首次登录 | 自有可见 Playwright 会话 | — | 按 `refs/playwright-mcp.md`，保持全局默认无头 |
+| 明确获准接手人的已登录 Chrome | `claude-in-chrome` | `claude-in-chrome` | Chrome 扩展直接操作人的会话，后台导航也会改变其 tab |
 | CLI 型猫、没 webfetch / 没 VL | `agent-browser` | — (CLI 工具) | ✅ 可用 — `npm i -g agent-browser`，通过 Bash tool 调 CLI |
 | 服务化浏览器、持久化 session、重复批任务 | `PinchTab` | `pinchtab` | ✅ 已接入 — native binary `pinchtab mcp`（外网 URL 用 eval 导航，见 ref） |
 
@@ -128,7 +139,8 @@ triggers:
 | 默认所有猫都装同一套浏览器后端 | CLI/MCP/登录态需求互相打架 | 先按场景选，再按客户端能力落工具 |
 | 在主 skill 里复制厂商文档 | 一改后端就大面积漂移 | 厂商细节压到 `refs/` |
 | 简单抓取先上浏览器 | 成本高、速度慢、失败面更大 | 先判断是否能用更轻量工具 |
-| 把本地测试和外部网站操作混成一个动作 | 路由混乱，证据链不清楚 | `localhost` 和外部网站分开处理 |
+| 把所有 localhost 操作都路由成展示 | 自测被误当作要给人开页面 | 先按自动验证 / 展示 / 外部交互区分，再看主机 |
+| 把需要登录或无头失败当作开窗许可 | 自动化打断人的桌面 | 保留无头默认；显式可见操作用自有 profile，本人确认交可点击入口 |
 | 登录态责任不清楚就开干 | 容易误用人类 session | 先说清 session 属于谁，再动手 |
 | 做完只说”好了”不留证据 | 后续无法验收或复现 | 至少交付 URL/截图/文本/日志中的一种 |
 | PinchTab 外网用 `pinchtab_navigate` | Clash TUN 下 403（Go 层 DNS 预检拦截 `198.18.x.x`） | 用 `pinchtab_eval` + `window.location.href` 导航，详见 `refs/pinchtab.md` |

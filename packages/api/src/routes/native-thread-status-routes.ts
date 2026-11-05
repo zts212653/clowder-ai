@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { CatId, SessionRecord } from '@cat-cafe/shared';
+import { deploymentDefaults } from '@cat-cafe/shared';
 import type { FastifyInstance, FastifyPluginOptions, FastifyReply, FastifyRequest } from 'fastify';
 import type { AgentRegistry } from '../domains/cats/services/agents/registry/AgentRegistry.js';
 import { isHomeSession } from '../domains/cats/services/session/session-scope.js';
@@ -64,7 +65,7 @@ export async function nativeThreadStatusRoutes(
     if (!source) return;
     const targetThreadId = request.body?.targetThreadId?.trim();
     if (!targetThreadId || targetThreadId === source.thread.id) {
-      return reply.status(400).send({ error: 'A distinct Clowder AI target thread is required' });
+      return reply.status(400).send({ error: `A distinct ${deploymentDefaults.brand.name} target thread is required` });
     }
     const targetThread = await options.threadStore.get(targetThreadId);
     if (!targetThread) return reply.status(404).send({ error: 'Target thread not found' });
@@ -99,7 +100,7 @@ export async function nativeThreadStatusRoutes(
       );
       if (!bound) {
         return reply.status(409).send({
-          error: 'Native fork could not bind the Clowder AI target',
+          error: `Native fork could not bind the ${deploymentDefaults.brand.name} target`,
           code: 'NATIVE_FORK_BIND_CONFLICT',
           providerEvidence: { runtimeSessionId: fork.forkedRuntimeSessionId, binding: 'unbound' },
         });

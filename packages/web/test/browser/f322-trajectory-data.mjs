@@ -183,6 +183,7 @@ export const cats = [
     avatar: '/avatars/codex.png',
     color: { primary: '#5B8C5A', secondary: '#DCE7D8' },
     mentionPatterns: ['@codex61-sol'],
+    carrier: 'cli',
     clientId: 'openai',
     defaultModel: 'gpt-6.1-sol',
   },

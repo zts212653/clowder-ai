@@ -24,7 +24,7 @@ export function ExplorationDecisionHeader({
             <div key={`${item.label}:${index}`}>
               <h4>{item.label}</h4>
               <p>{item.detail}</p>
-              <EvolutionSource label="依据" source={item.sourceRef} />
+              <EvolutionSource label="依据" source={item.sourceRef} href={item.ownerHref} />
             </div>
           ))}
           {!node.changes.length && <p>来源未登记成员变化，不能推断哪些成员改变或保持不变。</p>}

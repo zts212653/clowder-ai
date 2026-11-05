@@ -11,6 +11,7 @@
 }
 .member-defaults {
   background: var(--shell-paper);
+  --chat-background-role: paper;
   border: 1px solid var(--shell-hairline);
   border-radius: 12px;
   margin: 20px 0 12px;
@@ -34,6 +35,7 @@
 }
 .members-v2 select {
   background: var(--shell-work);
+  --chat-background-role: work;
   border: 1px solid var(--shell-hairline);
   border-radius: 8px;
   font-size: var(--console-font-xs);
@@ -54,10 +56,12 @@
 }
 .member-filters .member-button[aria-pressed="true"] {
   background: var(--shell-paper);
+  --chat-background-role: paper;
   box-shadow: 0 0 0 1px var(--shell-hairline);
 }
 .member-table-scroll {
   background: var(--shell-paper);
+  --chat-background-role: paper;
   border: 1px solid var(--shell-hairline);
   border-radius: 12px;
   overflow-x: auto;
@@ -65,6 +69,8 @@
 .member-table {
   border-collapse: collapse;
   width: 100%;
+  min-width: 1040px;
+  table-layout: fixed;
 }
 .member-table th {
   color: var(--shell-muted);
@@ -78,30 +84,49 @@
   border-top: 1px solid var(--shell-hairline);
   padding: 12px;
   font-size: var(--console-font-xs);
+  vertical-align: middle;
+  line-height: 1.55;
 }
 .member-table tr:hover td {
   background: var(--shell-selected);
+  --chat-background-role: selected;
 }
 .member-table th:first-child,
 .member-table td:first-child {
   width: 32px;
   padding: 8px;
 }
-.member-table td:nth-child(2) {
-  min-width: 170px;
+.member-table th:nth-child(2) {
+  width: 19%;
 }
-.member-table td:nth-child(3) {
-  overflow-wrap: anywhere;
-  min-width: 130px;
-  max-width: 180px;
+.member-table th:nth-child(3) {
+  width: 21%;
 }
-.member-table td:nth-child(4) {
-  min-width: 140px;
-  max-width: 200px;
-  overflow-wrap: anywhere;
+.member-table th:nth-child(4) {
+  width: 14%;
 }
-.member-table td:nth-child(4) small {
+.member-table th:nth-child(5) {
+  width: 11%;
+}
+.member-table th:nth-child(6) {
+  width: 10%;
+}
+.member-table th:nth-child(7) {
+  width: 17%;
+}
+.member-table th:last-child {
+  width: 60px;
+}
+.member-runtime-summary,
+.member-cell-text,
+.member-name strong,
+.member-name small,
+.member-aliases {
   display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .member-name {
   display: inline-flex;
@@ -109,14 +134,47 @@
   gap: 10px;
   text-align: left;
   color: var(--shell-ink);
+  max-width: 100%;
 }
 .member-name > span {
   display: flex;
   flex-direction: column;
+  min-width: 0;
 }
 .member-name .member-avatar {
   width: 32px;
   height: 32px;
+  flex-shrink: 0;
+}
+.member-aliases {
+  max-width: 100%;
+  text-align: left;
+}
+.member-cell-text {
+  width: 100%;
+  text-align: left;
+}
+.member-identity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+  font-size: var(--console-font-xs);
+}
+.member-identity code {
+  overflow-wrap: anywhere;
+}
+.member-status-trigger {
+  display: inline-flex;
+  padding: 4px 0;
+  color: inherit;
+}
+.member-status-trigger:focus-visible,
+.member-cell-text:focus-visible,
+.member-runtime-summary:focus-visible {
+  outline: 2px solid var(--cafe-accent);
+  outline-offset: 2px;
 }
 .member-name small {
   font-size: var(--console-font-xs);
@@ -171,14 +229,15 @@
 }
 .member-switch > span {
   background: var(--shell-paper);
+  --chat-background-role: paper;
   border-radius: 50%;
   display: block;
   height: 14px;
   width: 14px;
 }
 .member-switch[aria-checked="true"] {
-  background: var(--cafe-accent);
-  border-color: var(--cafe-accent);
+  background: var(--shell-ink);
+  border-color: var(--shell-ink);
 }
 .member-switch[aria-checked="true"] > span {
   margin-left: 14px;
@@ -223,8 +282,5 @@
   }
   .member-sort {
     display: none;
-  }
-  .member-table details {
-    min-width: 130px;
   }
 }

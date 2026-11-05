@@ -36,7 +36,7 @@ const review = (edges: Array<[string, string]>, current = 'v1'): EvolutionResolv
   currentVersionRefs: [assetRef(current)],
   currentProofRef: ownerRef('current'),
   blockers: [],
-  versions: [...new Set(['v1', ...edges.flat()])].map((version) => ({
+  versions: [...new Set(['v1', current, ...edges.flat()])].map((version) => ({
     versionRef: assetRef(version),
     parentEdges: edges
       .filter(([, child]) => child === version)
@@ -45,9 +45,19 @@ const review = (edges: Array<[string, string]>, current = 'v1'): EvolutionResolv
 });
 
 describe('asset history is independent of program cycle order and reading state', () => {
-  it('keeps a Program snapshot separate from a fresh owner current version', () => {
-    expect(projectAssetVersions(programFixture())[0]?.current).toBe(false);
-    expect(projectAssetVersions(programFixture(), review([]))[0]?.current).toBe(true);
+  it('keeps Program adoption separate from a fresh owner current version', () => {
+    const projection = programFixture();
+    const versions = projectAssetVersions(projection, review([], 'v2'));
+    expect(
+      versions.map((version) => ({
+        version: version.ref.version,
+        adopted: version.adopted,
+        sourceCurrent: version.sourceCurrent,
+      })),
+    ).toEqual([
+      { version: 'v1', adopted: true, sourceCurrent: false },
+      { version: 'v2', adopted: false, sourceCurrent: true },
+    ]);
   });
   it('creates edges only from owner-issued derivation proof and detects a real sibling branch', () => {
     const versions = projectAssetVersions(
@@ -93,7 +103,8 @@ describe('asset history is independent of program cycle order and reading state'
     projection.program.currentAssetVersionRefs = [assetRef('v2')];
     const versions = projectAssetVersions(projection, review([['v1', 'v2']], 'v2'));
     expect(selectedAssetVersion(versions, refIdentity(assetRef('v1')))?.ref.version).toBe('v1');
-    expect(versions.find((item) => item.current)?.ref.version).toBe('v2');
+    expect(versions.find((item) => item.sourceCurrent)?.ref.version).toBe('v2');
+    expect(versions.find((item) => item.adopted)?.ref.version).toBe('v2');
   });
   it('keeps an unavailable exact deep link unresolved rather than selecting a different version', () => {
     expect(

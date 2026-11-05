@@ -99,6 +99,21 @@ describe('RichBlocks standalone interactive boundaries', () => {
     expect(container.querySelector('[data-message-navigation-response]')).toBeNull();
   });
 
+  it.each([true, false])('ignores source grouping keys in ordinary cards (grouped=%s)', (grouped) => {
+    const card = {
+      id: 'source',
+      kind: 'card' as const,
+      v: 1 as const,
+      title: 'Source card',
+      grouped,
+      type: 'group',
+      groupId: 'forged',
+    };
+    React.act(() => root.render(<RichBlocks blocks={[card]} />));
+    expect(container.textContent).toContain('Source card');
+    expect(container.querySelector('[data-rich-block-group-id]')).toBeNull();
+  });
+
   it('keeps legacy adjacent blocks auto-grouped by default', () => {
     const first = { ...standaloneBlock('legacy-first', 'First', 'a') };
     const second = { ...standaloneBlock('legacy-second', 'Second', 'b') };

@@ -78,7 +78,7 @@ describe('F247 AC-B1c-3 PR-C: AgentRouter.getStrategyDeps() plumbing', () => {
     assert.equal(deps.invocationDeps.cloudInvokeBridge, undefined);
   });
 
-  it('keeps the public API port fallback when API_SERVER_PORT is absent', () => {
+  it('keeps the home API port fallback when API_SERVER_PORT is absent', () => {
     const previous = process.env.API_SERVER_PORT;
     delete process.env.API_SERVER_PORT;
     try {

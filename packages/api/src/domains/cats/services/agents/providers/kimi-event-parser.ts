@@ -99,16 +99,6 @@ export function readSessionIdFromMessage(message: KimiPrintMessage): string | un
   return undefined;
 }
 
-export function buildKimiPrompt(prompt: string, systemPrompt?: string, imagePaths: readonly string[] = []): string {
-  const basePrompt = appendLocalImagePathHints(prompt, imagePaths);
-  if (!systemPrompt?.trim()) return basePrompt;
-  return [
-    '<system_instructions>',
-    systemPrompt.trim(),
-    '</system_instructions>',
-    '',
-    '<user_request>',
-    basePrompt,
-    '</user_request>',
-  ].join('\n');
+export function buildKimiPrompt(prompt: string, imagePaths: readonly string[] = []): string {
+  return appendLocalImagePathHints(prompt, imagePaths);
 }

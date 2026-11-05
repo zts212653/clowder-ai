@@ -1,13 +1,16 @@
 'use client';
 import { type ReviewedMediaAsset, reviewedMediaAssetSchema } from '@cat-cafe/shared';
 import { type ReactNode, useEffect, useState } from 'react';
+import { artworkActionsCopy } from '@/components/content-review/artwork-actions.shell-copy';
 import { checked } from '@/components/content-review/modification-http';
+import { useShellCopy } from '@/components/shell/shell-copy';
 import type { WorkspaceFileNavigationOrigin } from '@/stores/chat-types';
 import { apiFetch } from '@/utils/api-client';
 import { useWorkspaceSurfaceVisibility } from '../WorkspaceSurfaceVisibility';
 import { ContentLandingHeader } from './ContentLandingHeader';
 import { ContentReviewSurface } from './ContentReviewSurface';
 import { useWorkspaceContentReview } from './useWorkspaceContentReview';
+import { VideoWorkReview } from './VideoWorkReview';
 
 type Props = {
   contentRef: string;
@@ -62,6 +65,7 @@ function PublicationSurface({
   fullWindowAction,
 }: Props) {
   const titleInHost = false;
+  const artworkCopy = useShellCopy(artworkActionsCopy);
   const review = useWorkspaceContentReview({ publication: { contentRef, ownerRevision } });
   const visible = useWorkspaceSurfaceVisibility();
   const [latest, setLatest] = useState(ownerRevision),
@@ -103,7 +107,7 @@ function PublicationSurface({
   }, [contentRef, ownerRevision, visible, attempt]);
   if (error)
     return (
-      <section>
+      <section data-content-opening-state="blocked">
         <ContentLandingHeader
           title={titleInHost ? undefined : title}
           leadingAction={leadingAction}
@@ -124,6 +128,24 @@ function PublicationSurface({
     historical && review.view
       ? { ...review, view: { ...review.view, canWrite: false, historyReadOnly: true } }
       : review;
+  if (
+    contentRef.startsWith('work:') &&
+    verifiedAsset?.attempt === attempt &&
+    verifiedAsset.asset.media.kind === 'video'
+  )
+    return (
+      <VideoWorkReview
+        asset={verifiedAsset.asset}
+        latest={latest}
+        review={effective}
+        title={title}
+        onBack={onBack}
+        onVersionChange={onVersionChange}
+        leadingAction={leadingAction}
+        fullWindowAction={fullWindowAction}
+        navigationOrigin={navigationOrigin}
+      />
+    );
   return (
     <ContentReviewSurface
       review={effective}
@@ -159,14 +181,15 @@ function PublicationSurface({
         <label className="shrink-0 text-xs text-cafe-muted">
           <span className="sr-only">作品版本</span>
           <select
-            aria-label="作品版本"
+            aria-label={artworkCopy.versionLabel}
             value={ownerRevision}
             onChange={(event) => onVersionChange?.(Number(event.target.value))}
             className="rounded bg-transparent p-1"
           >
             {Array.from({ length: latest }, (_, index) => index + 1).map((revision) => (
               <option key={revision} value={revision}>
-                第 {revision} 版{revision === latest ? ' · 当前' : ' · 历史'}
+                {artworkCopy.versionNumber(revision)} ·{' '}
+                {revision === latest ? artworkCopy.current : artworkCopy.historyVersion}
               </option>
             ))}
           </select>

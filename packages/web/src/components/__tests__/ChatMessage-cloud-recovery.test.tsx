@@ -113,7 +113,12 @@ describe('ChatMessage wires exact Host delivery facts into recovery', () => {
     render(status);
     await act(async () => {});
     expect(container.textContent).toContain(label);
-    expect(apiFetch).not.toHaveBeenCalled();
+    expect(apiFetch).toHaveBeenCalledTimes(1);
+    const [url, init] = vi.mocked(apiFetch).mock.calls[0];
+    expect(url).toBe(
+      '/api/threads/thread-1/messages/source-1/cloud-return?targetCatId=gpt-pro&dispatchInvocationId=dispatch-1',
+    );
+    expect(init?.method).toBeUndefined();
   });
 
   it('does not borrow a terminal fact from a different exact dispatch', async () => {

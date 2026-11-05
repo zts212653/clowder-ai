@@ -32,8 +32,9 @@ const BOOTSTRAP_ONLY_NEXT_PUBLIC_VARS = [
   'NEXT_PUBLIC_PROJECT_ROOT',
   'NEXT_PUBLIC_DEBUG_SKIP_FILE_CHANGE_UI',
 ];
-const DEPRECATED_ENV_VARS = [
-  'MODE_SWITCH_REQUIRES_APPROVAL',
+const DEPRECATED_ENV_VARS = ['MODE_SWITCH_REQUIRES_APPROVAL'];
+const RETIRED_PLUGIN_ENV_VARS = [
+  'GITHUB_MCP_PAT',
   'GITHUB_REVIEW_IMAP_USER',
   'GITHUB_REVIEW_IMAP_PASS',
   'GITHUB_REVIEW_IMAP_HOST',
@@ -86,6 +87,27 @@ describe('env-registry', () => {
     assert.equal(apiKey.sensitive, true);
   });
 
+  it('keeps the desktop plugin bridge handoff internal and its bearer sensitive', () => {
+    const bridgeNames = ['CAT_CAFE_PLUGIN_NETWORK_BRIDGE_URL', 'CAT_CAFE_PLUGIN_NETWORK_BRIDGE_TOKEN'];
+    for (const name of bridgeNames) {
+      const definition = ENV_VARS.find((entry) => entry.name === name);
+      assert.ok(definition, `${name} must be registered`);
+      assert.equal(definition.hubVisible, false, `${name} is an internal desktop handoff`);
+      assert.equal(definition.runtimeEditable, false);
+      assert.equal(isEditableEnvVar(definition), false);
+    }
+    assert.equal(ENV_VARS.find((entry) => entry.name === bridgeNames[1]).sensitive, true);
+    setEnv(bridgeNames[0], 'http://127.0.0.1:41827');
+    setEnv(bridgeNames[1], 'test-only-bridge-bearer');
+    for (const summary of [buildEnvSummary(), buildSystemEnvSummary()]) {
+      assert.equal(
+        summary.some((entry) => bridgeNames.includes(entry.name)),
+        false,
+      );
+      assert.equal(JSON.stringify(summary).includes('test-only-bridge-bearer'), false);
+    }
+  });
+
   it('registers KIMI_QUOTA_API_FALLBACK_ENABLED as bootstrap-only quota config', () => {
     const def = ENV_VARS.find((v) => v.name === 'KIMI_QUOTA_API_FALLBACK_ENABLED');
     assert.ok(def, 'KIMI_QUOTA_API_FALLBACK_ENABLED should be in registry');
@@ -94,10 +116,14 @@ describe('env-registry', () => {
     assert.equal(def.hubVisible, false);
   });
 
-  it('registers KIMI_CONFIG_FILE as bootstrap-only kimi config', () => {
-    const def = ENV_VARS.find((v) => v.name === 'KIMI_CONFIG_FILE');
-    assert.ok(def, 'KIMI_CONFIG_FILE should be in registry');
+  it('registers only native KIMI_CODE_HOME as bootstrap-only kimi config', () => {
+    const def = ENV_VARS.find((v) => v.name === 'KIMI_CODE_HOME');
+    assert.ok(def, 'KIMI_CODE_HOME should be in registry');
     assert.equal(def.category, 'kimi');
+    assert.equal(
+      ENV_VARS.some((entry) => ['KIMI_SHARE_DIR', 'KIMI_CONFIG_FILE'].includes(entry.name)),
+      false,
+    );
     assert.equal(def.runtimeEditable, false);
     assert.equal(def.hubVisible, false);
   });
@@ -115,12 +141,11 @@ describe('env-registry', () => {
     }
   });
 
-  it('documents connector autostart as wrapper process authority rather than dotenv configuration', () => {
-    const def = ENV_VARS.find((v) => v.name === 'CONNECTOR_GATEWAY_AUTOSTART');
-
-    assert.ok(def, 'CONNECTOR_GATEWAY_AUTOSTART should be in registry');
-    assert.doesNotMatch(def.description, /\.env/);
-    assert.match(def.description, /启动进程环境|wrapper/);
+  it('does not advertise retired connector autostart as Host configuration', () => {
+    assert.equal(
+      ENV_VARS.some((entry) => entry.name === 'CONNECTOR_GATEWAY_AUTOSTART'),
+      false,
+    );
   });
 
   it('REDIS_URL has maskMode url', () => {
@@ -175,8 +200,8 @@ describe('env-registry', () => {
     assert.equal(hindsightVars.length, 0, 'All HINDSIGHT_* vars should be removed');
   });
 
-  it('marks GITHUB_MCP_PAT, F102_API_KEY as sensitive + runtimeEditable (#340 P6: OPENAI_API_KEY removed)', () => {
-    for (const name of ['GITHUB_MCP_PAT', 'F102_API_KEY']) {
+  it('marks the retained F102_API_KEY as sensitive and runtime editable', () => {
+    for (const name of ['F102_API_KEY']) {
       const def = ENV_VARS.find((v) => v.name === name);
       assert.ok(def, `${name} should be in registry`);
       assert.equal(def.sensitive, true, `${name} should be sensitive`);
@@ -191,7 +216,14 @@ describe('env-registry', () => {
   });
 
   it('hasSensitiveEditableVars detects whitelisted sensitive vars', () => {
-    assert.ok(hasSensitiveEditableVars(['GITHUB_MCP_PAT']));
+    assert.equal(hasSensitiveEditableVars(RETIRED_PLUGIN_ENV_VARS), false);
+    for (const name of RETIRED_PLUGIN_ENV_VARS) {
+      assert.equal(
+        ENV_VARS.some((entry) => entry.name === name),
+        false,
+        `${name} belongs to its plugin`,
+      );
+    }
     assert.ok(hasSensitiveEditableVars(['FRONTEND_URL', 'F102_API_KEY']));
     assert.ok(!hasSensitiveEditableVars(['FRONTEND_URL', 'AUDIT_LOG_DIR']));
     assert.ok(!hasSensitiveEditableVars(['OPENAI_API_KEY']), 'OPENAI_API_KEY is no longer editable (#340 P6)');
@@ -713,7 +745,7 @@ describe('PATCH /api/config/env (route)', () => {
     }
   });
 
-  it('rejects CONNECTOR_GATEWAY_AUTOSTART hub writes because IM autostart is a startup trust boundary', async () => {
+  it('rejects writes to the retired connector autostart variable', async () => {
     const { configRoutes } = await import('../dist/routes/config.js');
     const tempRoot = mkdtempSync(resolve(tmpdir(), 'cat-cafe-env-'));
     const envFilePath = resolve(tempRoot, '.env');
@@ -823,6 +855,36 @@ describe('PATCH /api/config/env (route)', () => {
       const body = JSON.parse(res.payload);
       assert.match(body.error, /not editable/);
       assert.equal(readFileSync(envFilePath, 'utf8'), 'CAT_OPUS_MAX_PROMPT_CHARS=150000\n');
+    } finally {
+      await app.close();
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects desktop plugin bridge handoff edits without changing the file or process', async () => {
+    const { configRoutes } = await import('../dist/routes/config.js');
+    const tempRoot = mkdtempSync(resolve(tmpdir(), 'cat-cafe-env-'));
+    const envFilePath = resolve(tempRoot, '.env');
+    const bridgeNames = ['CAT_CAFE_PLUGIN_NETWORK_BRIDGE_URL', 'CAT_CAFE_PLUGIN_NETWORK_BRIDGE_TOKEN'];
+    const original = `${bridgeNames.map((name) => `${name}=original`).join('\n')}\n`;
+    writeFileSync(envFilePath, original, 'utf8');
+    for (const name of bridgeNames) setEnv(name, 'original');
+    const app = Fastify({ logger: false });
+    try {
+      await configRoutes(app, { projectRoot: tempRoot, envFilePath, auditLog: { append: async () => {} } });
+      await app.ready();
+      for (const name of bridgeNames) {
+        const res = await app.inject({
+          method: 'PATCH',
+          url: '/api/config/env',
+          headers: { 'x-cat-cafe-user': 'codex' },
+          payload: { updates: [{ name, value: 'changed' }] },
+        });
+        assert.equal(res.statusCode, 400, name);
+        assert.match(JSON.parse(res.payload).error, /not editable/);
+        assert.equal(readFileSync(envFilePath, 'utf8'), original);
+        assert.equal(process.env[name], 'original');
+      }
     } finally {
       await app.close();
       rmSync(tempRoot, { recursive: true, force: true });

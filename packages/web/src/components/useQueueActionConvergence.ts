@@ -19,7 +19,7 @@ function steerFailureMessage(status: number, code: unknown, error: unknown): str
   if (status === 409 && (code === 'CONTINUE_STATE_CHANGED' || code === 'STEER_ENTRY_UNAVAILABLE')) {
     return '队列状态已更新，请按最新可用操作继续';
   }
-  return typeof error === 'string' ? error : 'Steer 失败，请重试';
+  return typeof error === 'string' ? error : '排队消息未能调整，请重试';
 }
 
 interface MappedSteerTarget {
@@ -115,7 +115,7 @@ export function useQueueActionConvergence(threadId: string) {
           }
           addToast({
             type: 'error',
-            title: 'Steer 失败',
+            title: '排队消息未能调整',
             message: steerFailureMessage(mappingResponse.status, mapping?.code, mapping?.error),
             threadId,
             duration: 5000,
@@ -129,7 +129,7 @@ export function useQueueActionConvergence(threadId: string) {
         if (failures.length > 0) {
           addToast({
             type: 'error',
-            title: '部分 Steer 未完成',
+            title: '部分成员还没接下这条消息',
             message: failures.join('；'),
             threadId,
             duration: 5000,
@@ -139,7 +139,13 @@ export function useQueueActionConvergence(threadId: string) {
         if (feedback) addToast({ type: 'info', ...feedback, threadId, duration: 5000 });
       } catch (error) {
         if (reportApiConnectionFailure(error) || (error instanceof Error && error.name === 'AbortError')) return;
-        addToast({ type: 'error', title: 'Steer 失败', message: 'Steer 失败，请重试', threadId, duration: 5000 });
+        addToast({
+          type: 'error',
+          title: '排队消息未能调整',
+          message: '排队消息未能调整，请重试',
+          threadId,
+          duration: 5000,
+        });
       }
     },
     [addToast, refreshQueue, steerEntryId, threadId],

@@ -10,7 +10,9 @@ import {
   type ConnectorDeliveryInput,
   deliverConnectorMessage,
 } from '../../infrastructure/email/deliver-connector-message.js';
+import type { TypedWaitAuthorization } from '../ball-custody/TypedWaitRegistration.js';
 import { receiptOwnsOutcome } from './DeploymentWaitAuthority.js';
+import { resolveDeploymentWaitAuthorization } from './DeploymentWaitAuthorization.js';
 import { DeploymentWaitCurrentTurnClaim } from './DeploymentWaitCurrentTurnClaim.js';
 import type {
   DeploymentWaitLifecycleResult,
@@ -76,7 +78,10 @@ export class DeploymentWaitPublisher {
     const key = currentReceipt?.notificationKey ?? state.transportAttempt?.idempotencyKey;
     if (!key) return { kind: 'state_only', reason: 'publication_identity_unavailable' };
     const publication = { current: !!currentReceipt, key };
+    const authorization = wakeOwner ? await this.authorization(task.id, outcome) : {};
+    if (!authorization) return { kind: 'state_only', reason: 'authorization_source_unverified' };
     const input: ConnectorDeliveryInput = {
+      ...authorization,
       userId: allocated.userId,
       threadId: allocated.threadId,
       catId: allocated.ownerCatId,
@@ -110,6 +115,29 @@ export class DeploymentWaitPublisher {
     const messageId = publication.current ? await this.publishHistory(input) : await this.publishQueue(input);
     if (!messageId) return { kind: 'state_only', reason: 'publication_not_admitted' };
     return this.acknowledge(task.id, outcome, publication, messageId, input.content, currentInvocationId);
+  }
+
+  private async authorization(
+    taskId: string,
+    outcome: DeploymentWaitOutcomeV1,
+  ): Promise<TypedWaitAuthorization | null> {
+    const snapshot = await this.opts.taskStore.getWaitRegistration(taskId);
+    const state = snapshot?.task.deploymentWait;
+    if (!state || !snapshot?.receipt || !receiptOwnsOutcome(snapshot.task, outcome, snapshot.receipt, true))
+      return null;
+    const proof = await resolveDeploymentWaitAuthorization(snapshot.receipt, this.opts);
+    if (!proof) return null;
+    if (!proof.verified || snapshot.receipt.authorization) return proof.authorization;
+    // Seal a verified legacy source before admission. A crash/retry or later token GC must not
+    // lose the restrictions that authorized this exact Queue message. The Task still owns revocation.
+    const sealed = await this.opts.taskStore.replaceDeploymentWaitIfGeneration(taskId, {
+      expectedGeneration: outcome.generation,
+      expectedDeploymentWait: state,
+      expectedUpdatedAt: snapshot.task.updatedAt,
+      deploymentWait: state,
+      waitRegistration: { ...snapshot.receipt, authorization: proof.authorization },
+    });
+    return sealed ? proof.authorization : null;
   }
 
   private async publishHistory(input: ConnectorDeliveryInput): Promise<string | null> {

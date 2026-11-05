@@ -24,8 +24,13 @@ const HEIGHT_ROW = {
   hasUserMention: false,
 } as SidebarSnapshotRow;
 const HEIGHT_ROWS = [HEIGHT_ROW];
+const MOCK_GROUP_DECISIONS = { status: 'ready' as const, threadIds: new Set<string>() };
 function HeightProbe({ currentId = null, compact = true }: { currentId?: string | null; compact?: boolean }) {
-  return <span data-testid="height">{useSidebarRowHeight(HEIGHT_ROWS, currentId, compact)(HEIGHT_ROW)}</span>;
+  return (
+    <span data-testid="height">
+      {useSidebarRowHeight(HEIGHT_ROWS, currentId, compact, MOCK_GROUP_DECISIONS)(HEIGHT_ROW)}
+    </span>
+  );
 }
 
 const REPLY: DraftReplyContext = { id: 'm1', content: 'quoted', senderCatId: null, threadId: 'A' };

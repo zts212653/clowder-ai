@@ -1,3 +1,4 @@
+import { deploymentDefaults } from '@cat-cafe/shared';
 import type { AgentCarrierSession } from '../../types.js';
 import {
   asCodexAppServerRecord,
@@ -100,7 +101,11 @@ export async function runCodexAppServerInitializedRpc<T>(input: {
   try {
     const initialized = await bounded(
       request('initialize', {
-        clientInfo: { name: 'cat-cafe', title: 'Clowder AI native thread controls', version: '1' },
+        clientInfo: {
+          name: 'cat-cafe',
+          title: `${deploymentDefaults.brand.displayName} native thread controls`,
+          version: '1',
+        },
         capabilities: input.capabilities ?? {},
       }),
     );

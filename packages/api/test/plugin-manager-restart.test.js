@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -9,7 +9,6 @@ import {
   createDormantPluginRuntimeComposition,
   createPluginManagerRuntimeComposition,
 } from '../dist/domains/plugin/index.js';
-import { MemoryMeetingIntakeStore, MemorySignalRouteStore } from '../dist/domains/signal-intake/index.js';
 import { completeExternalHandshake, FakePluginProcessAdapter } from './plugin-external-runtime-helpers.js';
 import { catalogEntry, manifest, packageArchive } from './plugin-official-package-installer.fixture.js';
 
@@ -22,8 +21,6 @@ after(async () => {
 function runtime(projectRoot, processes) {
   return createDormantPluginRuntimeComposition({
     projectRoot,
-    routes: new MemorySignalRouteStore(),
-    intakes: new MemoryMeetingIntakeStore(),
     messageStore: new MessageStore(),
     ...(processes === undefined ? {} : { processes }),
     now: () => 12_000,
@@ -44,13 +41,7 @@ test('Plugin Manager recovers durable inventory and revision fences after Host r
   roots.push(projectRoot);
   const packageManifest = manifest();
   const archive = await packageArchive({ packageManifest });
-  const entry = catalogEntry(archive.integrity, {
-    ownerAuth: {
-      kind: 'lark-cli-device',
-      runnerPath: 'dist/auth.js',
-      domains: ['event'],
-    },
-  });
+  const entry = catalogEntry(archive.integrity);
   let catalogOffline = false;
   const catalogProvider = {
     async snapshot() {
@@ -97,7 +88,7 @@ test('Plugin Manager recovers durable inventory and revision fences after Host r
   assert.equal(recovered.plugins[0].pluginInstanceId, installed.pluginInstanceId);
   assert.equal(recovered.plugins[0].lifecycleRevision, 2);
   assert.equal(recovered.plugins[0].intent, 'disabled');
-  assert.equal(recovered.plugins[0].auth, 'error', 'offline projection must preserve and fail closed on owner auth');
+  assert.equal(recovered.plugins[0].auth, 'not-required');
   assert.deepEqual(recovered.plugins[0].source, {
     kind: 'catalog',
     catalogId: entry.catalogId,
@@ -113,24 +104,14 @@ test('Plugin Manager recovers durable inventory and revision fences after Host r
   assert.equal((await restartedRuntime.inventoryStore.snapshot()).instances[0].lifecycleState, 'retired');
 });
 
-test('Plugin Manager completes install, config/auth, enable, restart, disable, and uninstall on one Host runtime', async () => {
+test('Plugin Manager completes install, config, enable, restart, disable, and uninstall on one Host runtime', async () => {
   const projectRoot = await mkdtemp(join(tmpdir(), 'cat-cafe-f202-manager-lifecycle-'));
   roots.push(projectRoot);
   const packageManifest = manifest();
   const archive = await packageArchive({ packageManifest });
-  const entry = catalogEntry(archive.integrity, {
-    ownerAuth: {
-      kind: 'lark-cli-device',
-      runnerPath: 'dist/auth.js',
-      domains: ['event'],
-    },
-  });
+  const entry = catalogEntry(archive.integrity);
   const catalogProvider = {
     snapshot: async () => ({ entries: [entry], status: 'fresh', checkedAt: 11_000 }),
-  };
-  const auth = {
-    status: async () => ({ status: 'connected' }),
-    start: async () => ({ status: 'connected' }),
   };
   const firstProcesses = new FakePluginProcessAdapter();
   const firstRuntime = runtime(projectRoot, firstProcesses);
@@ -139,7 +120,6 @@ test('Plugin Manager completes install, config/auth, enable, restart, disable, a
     catalogProvider,
     catalogManifests: [packageManifest],
     fetchOfficialArchive: async () => archive.bytes,
-    auth,
     now: () => 12_000,
   }).manager;
 
@@ -151,7 +131,7 @@ test('Plugin Manager completes install, config/auth, enable, restart, disable, a
   await firstRuntime.lifecycle.prepare(installed.pluginInstanceId, 2);
   const configured = (await firstManager.get(entry.pluginId)).plugin;
   assert.equal(configured.config, 'ready');
-  assert.equal(configured.auth, 'connected');
+  assert.equal(configured.auth, 'not-required');
   assert.equal(configured.actions.setEnabled, true);
 
   const enabling = firstManager.setEnabled(entry.pluginId, { enabled: true, expectedRevision: 2 });
@@ -186,13 +166,12 @@ test('Plugin Manager completes install, config/auth, enable, restart, disable, a
     runtime: restartedRuntime,
     catalogProvider,
     catalogManifests: [packageManifest],
-    auth,
     now: () => 12_000,
   }).manager;
   const resumed = (await restartedManager.get(entry.pluginId)).plugin;
   assert.equal(resumed.intent, 'enabled');
   assert.equal(resumed.live, 'running');
-  assert.equal(resumed.auth, 'connected');
+  assert.equal(resumed.auth, 'not-required');
 
   await restartedManager.setEnabled(entry.pluginId, {
     enabled: false,
@@ -203,122 +182,4 @@ test('Plugin Manager completes install, config/auth, enable, restart, disable, a
   assert.equal(disabled.live, 'stopped');
   await restartedManager.uninstall(entry.pluginId, { expectedRevision: disabled.lifecycleRevision });
   assert.equal((await restartedRuntime.inventoryStore.snapshot()).instances[0].lifecycleState, 'retired');
-});
-
-test('Plugin Manager resumes Host-supervised builtin contribution invocation after restart', async () => {
-  const projectRoot = await mkdtemp(join(tmpdir(), 'cat-cafe-f202-manager-builtin-restart-'));
-  roots.push(projectRoot);
-  const materializedRoot = join(projectRoot, 'materialized');
-  await mkdir(join(materializedRoot, 'dist'), { recursive: true });
-  await writeFile(join(materializedRoot, 'dist/entrypoint.js'), '// builtin fixture\n', 'utf8');
-  const packageManifest = manifest({
-    runtime: { transport: 'builtin' },
-    description: 'Runs a restart-safe Host-supervised contribution.',
-    icon: 'github',
-    contributions: [
-      {
-        type: 'mcp',
-        id: 'fixture-tools',
-        runtime: { transport: 'stdio', entrypoint: 'dist/entrypoint.js' },
-      },
-    ],
-    features: [
-      {
-        id: 'source',
-        name: 'Source',
-        resources: [],
-        contributions: [{ type: 'mcp', id: 'fixture-tools' }],
-        capabilities: ['events.publish'],
-      },
-    ],
-  });
-  const archive = await packageArchive({ packageManifest });
-  const entry = catalogEntry(archive.integrity, {
-    pluginId: packageManifest.pluginId,
-    version: packageManifest.version,
-    presentation: {
-      displayName: packageManifest.name,
-      description: packageManifest.description,
-      icon: packageManifest.icon,
-      publisher: 'Clowder AI',
-    },
-  });
-  const catalogProvider = {
-    snapshot: async () => ({ entries: [entry], status: 'fresh', checkedAt: 11_000 }),
-  };
-  const builtinContributions = (onStart) => ({
-    materializer: {
-      resolve: async () => ({
-        rootDir: materializedRoot,
-        verifyIntegrity: async () => {},
-        release: async () => {},
-      }),
-    },
-    configuration: {
-      readConfig: async () => undefined,
-      readSecret: async () => undefined,
-    },
-    runtime: {
-      start: async (spec) => {
-        onStart(spec);
-        return {
-          tools: [
-            {
-              name: 'fixture_tool',
-              inputSchema: { type: 'object', properties: { value: { type: 'string' } } },
-            },
-          ],
-          callTool: async (name, args) => ({ name, args }),
-          close: async () => {},
-        };
-      },
-    },
-  });
-
-  const firstStarts = [];
-  const firstRuntime = runtime(projectRoot);
-  const firstComposition = createPluginManagerRuntimeComposition({
-    runtime: firstRuntime,
-    catalogProvider,
-    catalogManifests: [],
-    fetchOfficialArchive: async () => archive.bytes,
-    builtinContributions: builtinContributions((spec) => firstStarts.push(structuredClone(spec))),
-    now: () => 12_000,
-  });
-  await firstComposition.manager.install({
-    source: { kind: 'catalog', catalogId: entry.catalogId },
-    expectedVersion: entry.version,
-    expectedDigest: entry.packageDigest,
-  });
-  await firstComposition.manager.setEnabled(entry.pluginId, { enabled: true, expectedRevision: 2 });
-  assert.equal(firstStarts.length, 1);
-  await firstRuntime.shutdown('test_restart');
-
-  let resumeStarted;
-  const resumedStart = new Promise((resolve) => {
-    resumeStarted = resolve;
-  });
-  const restartedRuntime = runtime(projectRoot);
-  const restartedComposition = createPluginManagerRuntimeComposition({
-    runtime: restartedRuntime,
-    catalogProvider,
-    catalogManifests: [],
-    builtinContributions: builtinContributions((spec) => resumeStarted(spec)),
-    now: () => 12_000,
-  });
-  const recovery = await restartedRuntime.recoverAfterRestart();
-  assert.equal(recovery.resumeRequested, 1);
-  await resumedStart;
-
-  const resumed = await waitForPluginLiveState(restartedComposition.manager, entry.pluginId, 'running');
-  assert.equal(resumed.intent, 'enabled');
-  assert.equal(resumed.live, 'running');
-  assert.deepEqual(
-    await restartedComposition.builtinSupervisor.callPluginTool(entry.pluginId, 'fixture-tools', 'fixture_tool', {
-      value: 'after-restart',
-    }),
-    { name: 'fixture_tool', args: { value: 'after-restart' } },
-  );
-
-  await restartedRuntime.shutdown('test_complete');
 });

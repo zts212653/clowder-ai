@@ -3,10 +3,12 @@ import { isDeepStrictEqual } from 'node:util';
 import type { ContentModificationAcceptance, ContentModificationRejection } from '@cat-cafe/shared';
 import type Database from 'better-sqlite3';
 import { workspaceWritebackReceiptRef } from '../../workspace/writeback/journal.js';
+import { CollectiveContentAcceptanceStore } from './collective-acceptance-store.js';
 import { ContentModificationJournalError } from './journal.js';
 
 export type ContentAcceptance = ContentModificationAcceptance;
 export class ContentAcceptanceStore {
+  readonly collective: CollectiveContentAcceptanceStore;
   constructor(private readonly db: Database.Database) {
     db.exec(`CREATE TABLE IF NOT EXISTS content_modification_acceptances (
       owner_user_id TEXT NOT NULL, operation_id TEXT NOT NULL, request_id TEXT NOT NULL, body TEXT NOT NULL,
@@ -14,6 +16,7 @@ export class ContentAcceptanceStore {
       CREATE TABLE IF NOT EXISTS content_modification_rejections (
         owner_user_id TEXT NOT NULL, request_id TEXT NOT NULL, candidate_ref TEXT NOT NULL, body TEXT NOT NULL,
         PRIMARY KEY(owner_user_id,request_id,candidate_ref));`);
+    this.collective = new CollectiveContentAcceptanceStore(db);
   }
   reserve(input: Omit<ContentAcceptance, 'humanReceiptRef' | 'fileReceiptRef' | 'acceptedAt'>): ContentAcceptance {
     return this.db
@@ -22,6 +25,8 @@ export class ContentAcceptanceStore {
           .prepare('SELECT body FROM content_modification_acceptances WHERE owner_user_id=? AND operation_id=?')
           .get(input.ownerUserId, input.acceptOperationId) as { body: string } | undefined;
         if (row) {
+          if (JSON.parse(row.body).kind === 'collective-artifact')
+            throw new ContentModificationJournalError('operation_reused');
           const old = JSON.parse(row.body) as ContentAcceptance;
           const { humanReceiptRef: _human, fileReceiptRef: _file, acceptedAt: _time, ...prior } = old;
           if (!isDeepStrictEqual(prior, input)) throw new ContentModificationJournalError('operation_reused');
@@ -48,7 +53,7 @@ export class ContentAcceptanceStore {
   list(requestId: string, ownerUserId: string): ContentAcceptance[] {
     const rows = this.db
       .prepare(
-        'SELECT body FROM content_modification_acceptances WHERE request_id=? AND owner_user_id=? ORDER BY rowid',
+        `SELECT body FROM content_modification_acceptances WHERE request_id=? AND owner_user_id=? AND COALESCE(json_extract(body,'$.kind'),'private')<>'collective-artifact' ORDER BY rowid`,
       )
       .all(requestId, ownerUserId) as { body: string }[];
     return rows.map((row) => JSON.parse(row.body) as ContentAcceptance);

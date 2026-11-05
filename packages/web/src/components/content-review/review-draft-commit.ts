@@ -4,13 +4,17 @@ export const REVIEW_DRAFT_COMMITTED_EVENT = 'cat-cafe:review-draft-committed';
 export interface ReviewDraftCommit {
   key: string;
   body: string;
+  submittedDraft?: string;
 }
-export function clearCommittedReviewDraft(prefix: string, command: ArtifactReviewCommand): void {
+interface ReviewDraftSnapshot extends ReviewDraftCommit {
+  saved: string | null;
+}
+export function captureReviewDraft(prefix: string, command: ArtifactReviewCommand): ReviewDraftSnapshot | null {
   const action = command.action;
   let suffix: string, body: string;
   switch (action.kind) {
     case 'request_image_edit':
-      if (action.edit.kind !== 'erase-region') return;
+      if (action.edit.kind !== 'erase-region') return null;
       suffix = 'annotation';
       body = action.note ?? '';
       break;
@@ -33,10 +37,41 @@ export function clearCommittedReviewDraft(prefix: string, command: ArtifactRevie
       body = action.explanation;
       break;
     default:
-      return;
+      return null;
   }
   const key = `${prefix}round:${command.round}:${suffix}`;
-  clearCommittedDraft(key, body);
+  try {
+    const saved = localStorage.getItem(key);
+    const draft = saved ? (JSON.parse(saved) as { body?: unknown }) : null;
+    return {
+      key,
+      body,
+      saved,
+      ...(draft?.body === body ? { submittedDraft: JSON.stringify(draft) } : {}),
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function clearCommittedReviewDraft(snapshot: ReviewDraftSnapshot | null): void {
+  if (!snapshot?.submittedDraft) return;
+  try {
+    if (localStorage.getItem(snapshot.key) !== snapshot.saved) return;
+    localStorage.removeItem(snapshot.key);
+  } catch {
+    return;
+  }
+  window.dispatchEvent(new CustomEvent<ReviewDraftCommit>(REVIEW_DRAFT_COMMITTED_EVENT, { detail: snapshot }));
+}
+
+export function reviewDraftIsCurrent(snapshot: ReviewDraftSnapshot | null): boolean {
+  if (!snapshot) return true;
+  try {
+    return localStorage.getItem(snapshot.key) === snapshot.saved;
+  } catch {
+    return false;
+  }
 }
 
 export function clearCommittedDraft(key: string, body: string): void {

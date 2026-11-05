@@ -3,6 +3,7 @@
  * Extracted from publish-verdict.test.js per AGENTS.md 350-line hard limit.
  */
 
+import assert from 'node:assert/strict';
 import { cpSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
@@ -12,22 +13,21 @@ import { reviveActiveEraRegistry } from './measurement-census-active-era.js';
 const REPO_ROOT = resolve(import.meta.dirname, '../../../..');
 
 /**
- * Seed the committed state that a real GitWorktreePublisher checks out from
- * origin/main. Verdict generators may add domain-specific fixtures afterwards,
- * but the F267 census refresh must always start from a complete repository.
+ * Build an empty instance from the shipped domain definitions. Publisher tests
+ * add their own verdicts and evidence; live home verdicts and migration results
+ * must not become inputs to a portable publishing contract.
  */
 export function seedCanonicalMeasurementCensusState(isolatedRepoRoot) {
   rmSync(resolve(isolatedRepoRoot, 'docs/harness-feedback/bundles'), { recursive: true, force: true });
-  for (const relativePath of [
-    'docs/harness-feedback/eval-domains',
-    'docs/harness-feedback/verdicts',
-    'docs/harness-feedback/registry/measurement-bundles.yaml',
-  ]) {
+  rmSync(resolve(isolatedRepoRoot, 'docs/harness-feedback/verdicts'), { recursive: true, force: true });
+  rmSync(resolve(isolatedRepoRoot, 'docs/harness-feedback/registry/measurement-bundles.yaml'), { force: true });
+  for (const relativePath of ['docs/harness-feedback/eval-domains']) {
     const target = resolve(isolatedRepoRoot, relativePath);
     rmSync(target, { recursive: true, force: true });
     mkdirSync(resolve(target, '..'), { recursive: true });
     cpSync(resolve(REPO_ROOT, relativePath), target, { recursive: true });
   }
+  mkdirSync(resolve(isolatedRepoRoot, 'docs/harness-feedback/verdicts'), { recursive: true });
   // Publisher tests exercise actionable publishing on active domains; the
   // 2026-10-01 dormancy batch is revived here and covered by its own tests.
   reviveActiveEraRegistry(resolve(isolatedRepoRoot, 'docs/harness-feedback/eval-domains'));
@@ -48,6 +48,7 @@ export function markMeasurementCensusDomainCertifiedUsable(isolatedRepoRoot, dom
   entry.validityMigration = {
     ...entry.validityMigration,
     status: 'certified_usable',
+    batch: entry.validityMigration.riskRank,
     certificateRef: `docs/harness-feedback/certificates/test-${domainId}.yaml`,
     resultRef: `docs/harness-feedback/measurement-results/test-${domainId}.yaml`,
     replayRef: `docs/harness-feedback/replays/test-${domainId}.yaml`,
@@ -121,3 +122,10 @@ export function buildPacket(overrides = {}) {
     ...overrides,
   };
 }
+
+/** Installed dependency for tests that must terminate before any publication. */
+export const unreachablePublisher = {
+  async publishOnIsolatedWorktree() {
+    assert.fail('validation or replay must terminate before publication');
+  },
+};

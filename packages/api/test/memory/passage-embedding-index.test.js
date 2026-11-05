@@ -321,6 +321,16 @@ The unchangedvectortoken remains stable across warm rebuilds.
   });
 
   it('embeds late-arriving dirty-thread passages without full rebuild', async () => {
+    await store.upsertEntities([
+      {
+        entityId: 'concept:passage',
+        type: 'concept',
+        canonicalName: 'Passage',
+        aliases: ['passage'],
+        provenance: [{ source: 'fixture' }],
+        updatedAt: '2026-01-01',
+      },
+    ]);
     const messages = [
       {
         id: 'msg_dirty_001',
@@ -359,6 +369,13 @@ The unchangedvectortoken remains stable across warm rebuilds.
     assert.equal(passageCount, 2);
     assert.equal(passageVectorStore.count(), 2, 'dirty flush should backfill missing passage vectors');
     assert.equal(refreshCalls.length, 1, 'dirty flush should refresh entity mentions once per dirty batch');
+    assert.equal(
+      db
+        .prepare("SELECT count(*) AS n FROM entity_mentions WHERE entity_id='concept:passage' AND source='passage'")
+        .get().n,
+      2,
+      'dirty flush must publish mentions for the initial and late-arriving passages',
+    );
   });
 
   it('fails open when passage embedding throws', async () => {

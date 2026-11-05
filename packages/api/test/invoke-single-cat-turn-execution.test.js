@@ -67,6 +67,38 @@ async function collect(iterable) {
 }
 
 describe('invokeSingleCat durable child execution lifecycle', () => {
+  test('a fallback child cannot inherit the admission observation of a mixed fan-out sibling', async () => {
+    const store = new InMemoryTurnExecutionStore();
+    await collect(
+      invokeSingleCat(makeDeps(store, 'child-without-B'), {
+        catId: 'codex',
+        prompt: 'fallback after exact continuation',
+        userId: 'user-1',
+        threadId: 'thread-1',
+        isLastCat: true,
+        service: {
+          async *invoke() {
+            yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+          },
+        },
+        routingDispatchPreflightDecision: routingDecision(),
+        routingAdmission: {
+          stage: 'queue_admitted',
+          observedAt: 0,
+          snapshotRef: 'B:other-target',
+          targets: [{ targetCatId: 'opus', factsRef: 'facts:opus' }],
+        },
+      }),
+    );
+    const child = await store.get('child-without-B');
+    assert.equal(child.causal.routingPreflight.snapshotRef, 'routing-snapshot:1');
+    assert.equal(
+      child.causal.routingPreflight.admission,
+      undefined,
+      'B.targets is an explicit subset, not a fan-out verdict',
+    );
+  });
+
   test('a cancellation-only terminal never succeeds or schedules a freshness invocation', async () => {
     const store = new InMemoryTurnExecutionStore();
     let reinvokes = 0;
@@ -319,7 +351,7 @@ describe('invokeSingleCat durable child execution lifecycle', () => {
     assert.doesNotMatch(JSON.stringify(terminal), /secret-token-should-not-persist/);
   });
 
-  test('persists success without global availability observation', async () => {
+  test('observes success only after the canonical durable terminal and carries the exact preflight decision', async () => {
     const store = new InMemoryTurnExecutionStore();
     const observed = [];
     const exactDecision = routingDecision();
@@ -347,15 +379,31 @@ describe('invokeSingleCat durable child execution lifecycle', () => {
         threadId: 'thread-1',
         parentInvocationId: 'parent-1',
         routingDispatchPreflightDecision: exactDecision,
+        routingAdmission: {
+          stage: 'queue_admitted',
+          observedAt: 0,
+          snapshotRef: 'snapshot:B',
+          targets: [{ targetCatId: 'codex', factsRef: 'facts:codex' }],
+        },
         isLastCat: true,
       }),
     );
 
-    assert.equal((await store.get('child-routing-success')).status, 'succeeded');
-    assert.deepEqual(observed, []);
+    assert.equal(observed.length, 1);
+    assert.equal(observed[0].status, 'succeeded');
+    assert.equal(observed[0].observationId, 'child-routing-success');
+    assert.equal(observed[0].evidenceRef, 'turn-execution:child-routing-success');
+    assert.equal(observed[0].preflightDecision, exactDecision);
+    assert.deepEqual((await store.get('child-routing-success')).causal.routingPreflight, {
+      stage: 'execution_preflight',
+      observedAt: exactDecision.observedAt,
+      snapshotRef: exactDecision.snapshotRef,
+      admission: { stage: 'queue_admitted', observedAt: 0, snapshotRef: 'snapshot:B' },
+    });
+    assert.equal(observed[0].observedAt, (await store.get('child-routing-success')).endedAt);
   });
 
-  test('persists provider failure without disabling a member globally', async () => {
+  test('maps structured provider failures after persistence and keeps observer failure advisory', async () => {
     const store = new InMemoryTurnExecutionStore();
     const observed = [];
     const service = {
@@ -399,7 +447,9 @@ describe('invokeSingleCat durable child execution lifecycle', () => {
     );
 
     assert.equal((await store.get('child-routing-failure')).status, 'failed');
-    assert.deepEqual(observed, []);
+    assert.equal(observed.length, 1);
+    assert.equal(observed[0].status, 'failed');
+    assert.equal(observed[0].failureClass, 'quota_exhausted');
   });
 
   test('provider iterator ending without terminal done is interrupted, never succeeded', async () => {
@@ -487,6 +537,8 @@ describe('invokeSingleCat durable child execution lifecycle', () => {
 
     assert.equal(providerCalled, false);
     assert.deepEqual(await store.get('child-returned'), {
+      providerLifecycleTracked: true,
+      providerTeardownAt: (await store.get('child-returned')).endedAt,
       invocationId: 'child-returned',
       parentInvocationId: 'parent-1',
       threadId: 'thread-1',
@@ -512,6 +564,9 @@ describe('invokeSingleCat durable child execution lifecycle', () => {
       },
       get: (invocationId) => canonicalStore.get(invocationId),
       listByParent: (parentInvocationId) => canonicalStore.listByParent(parentInvocationId),
+      listRunningByUser: (userId) => canonicalStore.listRunningByUser(userId),
+      markProviderStarted: (invocationId, at) => canonicalStore.markProviderStarted(invocationId, at),
+      recordProviderTeardown: (invocationId, at) => canonicalStore.recordProviderTeardown(invocationId, at),
       transitionTerminal: (invocationId, input) => canonicalStore.transitionTerminal(invocationId, input),
       interruptRunningBefore: (cutoff, input) => canonicalStore.interruptRunningBefore(cutoff, input),
     };

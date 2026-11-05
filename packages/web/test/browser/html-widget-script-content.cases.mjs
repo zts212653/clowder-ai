@@ -34,6 +34,7 @@ async function deliver(page, html, mode) {
       if (!moduleId) throw new Error('ChatStore unavailable in the Next dev fixture');
       const state = require(moduleId).useChatStore.getState();
       const message = {
+        from: { kind: 'agent', catId: 'codex-sol' },
         id: 'f294-script-content-message',
         type: 'assistant',
         catId: 'codex-sol',

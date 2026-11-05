@@ -8,7 +8,7 @@ import { dirname, join } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 
 const roots = [];
-const EXPECTED_REPO = 'zts212653/cat-cafe';
+const EXPECTED_REPO = 'zts212653/clowder-ai';
 
 function git(root, args, options = {}) {
   return execFileSync('git', args, { cwd: root, encoding: 'utf8', ...options }).trim();

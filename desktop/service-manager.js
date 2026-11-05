@@ -3,15 +3,50 @@
 
 const { spawn, execSync } = require('node:child_process');
 const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 const net = require('node:net');
 const http = require('node:http');
 const fs = require('node:fs');
 const os = require('node:os');
 const crypto = require('node:crypto');
+const { resolveDesktopRuntime } = require('./runtime-config');
+const { initializeDesktopTemplate } = require('./desktop-template');
+const { prepareProjectMirrors } = require('./project-mirrors');
+const { waitForProjectMirrors } = require('./project-mirror-readiness');
+const { createPluginNetworkBridge } = require('./plugin-network-bridge');
+const { createStartupTimeline } = require('./startup-timing');
+const { prepareStartupServices, stopOwnedStartupProcess } = require('./startup-services');
+const { resolveExternalNodeEntry } = require('./subprocess-entry');
+const { readClientHomes, resolveDefaultClientHomes } = require('./client-homes');
+const {
+  consumeMemoryFallbackConsent,
+  discardMemoryFallbackConsent,
+  consentPath,
+} = require('./memory-fallback-consent');
 
 const POLL_INTERVAL_MS = 500;
 const MAX_WAIT_MS = 120_000;
 const REDIS_FALLBACK_PORT_CHECK_MS = 5_000;
+
+// Ordinary installs must fail closed when Redis is unavailable: running the API
+// on an in-memory store silently makes history and queued work non-durable.
+// Only an explicit user decision (see memory-fallback-consent.js) may degrade.
+const REDIS_UNAVAILABLE_MESSAGES = Object.freeze({
+  port_in_use_non_redis: 'Redis 端口已被其他程序占用，无法确认它是 Redis。请关闭占用该端口的程序后重新打开应用。',
+  binary_missing: '未找到可用的 Redis（应用自带与系统 redis-server 均不可用）。请重新安装应用或恢复 Redis 后重试。',
+  binary_unusable: '应用自带的 Redis 无法运行。请重新安装应用或修复 Redis 后重试。',
+  start_failed: 'Redis 启动失败或未在预期时间内就绪。请查看日志后重试。',
+});
+class RedisUnavailableError extends Error {
+  constructor(reason, port, { allowMemoryOnce = true } = {}) {
+    super(`${REDIS_UNAVAILABLE_MESSAGES[reason]}（端口 ${port}）应用不会自动改用内存存储。`);
+    this.name = 'RedisUnavailableError';
+    this.code = 'REDIS_UNAVAILABLE';
+    this.reason = reason;
+    this.port = port;
+    this.recovery = { allowMemoryOnce };
+  }
+}
 
 const IS_WIN = process.platform === 'win32';
 const IS_MAC = process.platform === 'darwin';
@@ -25,6 +60,8 @@ const ARCH_SEG = process.arch === 'arm64' ? 'arm64' : 'x64';
 // Reads brand name from electron-builder config — single source of truth
 // shared with main.js (which imports USER_DATA_DIR from this module).
 function resolveUserDataDir() {
+  const { instanceRoot } = resolveDesktopRuntime();
+  if (instanceRoot) return instanceRoot;
   let brandName;
   try {
     brandName = require('./package.json').build?.productName || 'Clowder AI';
@@ -91,18 +128,45 @@ function resolveNode(projectRoot) {
 }
 
 class ServiceManager {
-  constructor(projectRoot, { frontendPort, apiPort, onStatus }) {
+  constructor(
+    projectRoot,
+    { frontendPort, apiPort, redisPort = 6399, onStatus, allowMemoryFallback = false, pluginNetworkFetch },
+  ) {
     this.root = projectRoot;
     this.frontendPort = frontendPort;
     this.apiPort = apiPort;
+    this.redisPort = redisPort;
     this.onStatus = onStatus || (() => {});
     this.procs = {};
     this.memoryMode = false;
+    // Explicit consent only: constructor option or startAll({ allowMemoryFallback }).
+    this.allowMemoryFallback = allowMemoryFallback === true;
+    this.timeline = createStartupTimeline({ component: 'services', emit: log });
+    this.startupAbort = null;
+    this.pluginNetworkFetch = pluginNetworkFetch;
+    this.pluginNetworkBridge = null;
+    this.pluginNetworkBinding = null;
   }
 
-  async startAll() {
+  async startAll({ allowMemoryFallback = false } = {}) {
+    if (allowMemoryFallback) this.allowMemoryFallback = true;
+    this.startupAbort = new AbortController();
+    try {
+      return await this.timeline.runPhase('all-services', () => this._startAll());
+    } catch (error) {
+      await this._stopPluginNetworkBridge();
+      throw error;
+    }
+  }
+
+  async _startAll() {
     log(`=== ServiceManager.startAll() ===`);
     log(`projectRoot: ${this.root}`);
+    if (resolveDesktopRuntime().instanceRoot) {
+      for (const port of [this.frontendPort, this.apiPort, this.redisPort]) {
+        if (await this._isPortOpen(port)) throw new Error(`Isolated desktop port ${port} is already occupied`);
+      }
+    }
 
     // ---- Pre-flight checks ----
     const nodeExe = resolveNode(this.root);
@@ -129,31 +193,67 @@ class ServiceManager {
     const userDataDir = this._getUserDataDir();
     this._ensureUserDataDir(userDataDir);
     log(`User data dir: ${userDataDir}`);
+    this._consumeMemoryConsent(userDataDir);
+    this.timeline.mark('preflight-complete');
+    this.startupAbort.signal.throwIfAborted();
 
     // NOTE: workspace junction repair must happen at install time (admin).
     // Runtime repair in Program Files fails with EPERM for non-admin users.
 
+    // Windows can report a freshly-created NTFS junction as present while the
+    // first traversal still returns ENOENT. Do not spawn API/Web in that
+    // window: the API reads bundled docs and skills during bootstrap and would
+    // otherwise bind its port, then exit later with an opaque startup failure.
+    await this._waitForProjectMirrors(userDataDir, undefined, nodeExe);
+
     // ---- Redis ----
     this.onStatus('Starting Redis...');
-    await this._startRedis(userDataDir);
+    await this.timeline.runPhase('redis-ready', () => this._startRedis(userDataDir));
+    if (resolveDesktopRuntime().instanceRoot && this.memoryMode)
+      throw new Error('Isolated desktop requires its own persistent Redis');
     log(`Redis phase complete. memoryMode=${this.memoryMode}`);
 
-    // ---- API ----
-    this.onStatus('Starting API server...');
-    let apiReady = false;
+    this.startupAbort.signal.throwIfAborted();
+    await this._startPluginNetworkBridge();
+    this.onStatus('Starting API and Web...');
+    await prepareStartupServices({
+      controller: this.startupAbort,
+      api: (signal) =>
+        this.timeline.runPhase('api-port-ready', () => this._startApiWithFallback(nodeExe, userDataDir, signal)),
+      web: (signal) =>
+        this.timeline.runPhase('web-http-ready', async () => {
+          this._startNextJs();
+          log(`Web process spawned, waiting for HTTP on port ${this.frontendPort}`);
+          await this._waitForHttpReady(this.frontendPort, 'Web', signal);
+        }),
+    });
+    this.startupAbort.signal.throwIfAborted();
+    this.onStatus('Ready!');
+  }
+
+  async _startApiWithFallback(nodeExe, userDataDir, signal) {
     try {
-      await this._startApi(nodeExe, userDataDir);
-      apiReady = true;
+      await this._startApi(nodeExe, userDataDir, signal);
     } catch (err) {
+      signal.throwIfAborted();
       log(`API first-attempt failed: ${err.message}`);
       // If API failed and we haven't tried memory mode yet, retry with MEMORY_STORE=1
-      if (!this.memoryMode) {
+      // only when the Redis process is actually unavailable. A slow/cold API
+      // entry must not be converted into a misleading degraded-mode failure
+      // while the durable Redis backend is still healthy.
+      const redisAvailable = await this._isPortOpen(this.redisPort);
+      if (!this.memoryMode && this._memoryFallbackAllowed() && !redisAvailable) {
+        const failedProcess = this.procs.api;
+        await this.timeline.runPhase('api-failed-process-stopped', () =>
+          stopOwnedStartupProcess(failedProcess, () => this._killProcessTree('api', failedProcess, 5000)),
+        );
+        signal.throwIfAborted();
+        if (this.procs.api === failedProcess) delete this.procs.api;
         this.onStatus('API failed — retrying with memory store...');
         log('Retrying API with MEMORY_STORE=1');
-        this.memoryMode = true;
+        this._useMemoryStore('api_failed');
         try {
-          await this._startApi(nodeExe, userDataDir);
-          apiReady = true;
+          await this._startApi(nodeExe, userDataDir, signal);
         } catch (err2) {
           log(`API retry also failed: ${err2.message}`);
           throw new Error(`API server failed to start:\n${err2.message}`);
@@ -162,18 +262,6 @@ class ServiceManager {
         throw err;
       }
     }
-
-    if (!apiReady) {
-      throw new Error('API server did not start');
-    }
-
-    // ---- Web ----
-    this.onStatus('Starting Web frontend...');
-    this._startNextJs();
-    log(`Web process spawned, waiting for HTTP on port ${this.frontendPort}`);
-    await this._waitForHttpReady(this.frontendPort, 'Web');
-
-    this.onStatus('Ready!');
   }
 
   _getUserDataDir() {
@@ -183,6 +271,13 @@ class ServiceManager {
   _ensureUserDataDir(baseDir) {
     const dirs = [
       baseDir,
+      ...(resolveDesktopRuntime().instanceRoot
+        ? [
+            path.join(baseDir, 'home', 'AppData', 'Local'),
+            path.join(baseDir, 'home', 'AppData', 'Roaming'),
+            path.join(baseDir, 'temp'),
+          ]
+        : []),
       path.join(baseDir, 'data', 'transcripts'),
       path.join(baseDir, 'data', 'logs', 'api'),
       path.join(baseDir, 'data', 'connector-media'),
@@ -217,125 +312,7 @@ class ServiceManager {
       }
     }
 
-    // Mirror read-only install-dir resources into the project dir via symlinks.
-    // Without these, findMonorepoRoot(cwd) resolves to the project dir but
-    // docs/cat-cafe-skills/packages are not under it — so API routes like
-    // /api/docs, capabilities.ts skill listing, and MCP server spawning
-    // (resolve(projectRoot, 'packages/mcp-server/dist/memory.js')) all fail.
-    // Windows uses NTFS junctions (no admin needed, absolute paths). macOS
-    // uses plain directory symlinks.
-    const linkType = IS_WIN ? 'junction' : 'dir';
-    const mirrors = ['.claude', 'assets', 'cat-cafe-skills', 'docs', 'guides', 'packages', 'plugins', 'scripts'];
-
-    // Helper: remove a junction or symlink. On Windows, NTFS junctions are
-    // directory reparse points — fs.unlinkSync calls DeleteFileW which fails
-    // on directory entries (EPERM). fs.rmdirSync calls RemoveDirectoryW which
-    // correctly removes junctions without recursing into the target.
-    const removeLink = (linkPath) => {
-      if (IS_WIN) {
-        try {
-          fs.rmdirSync(linkPath);
-        } catch {
-          fs.unlinkSync(linkPath); // fallback for true symlinks
-        }
-      } else {
-        fs.unlinkSync(linkPath);
-      }
-    };
-
-    for (const name of mirrors) {
-      const src = path.join(this.root, name);
-      const dst = path.join(projectDir, name);
-      if (!fs.existsSync(src)) {
-        log(`Skipping mirror ${name} — source missing at ${src}`);
-        continue;
-      }
-      try {
-        // lstatSync does NOT follow symlinks/junctions — it inspects the
-        // link entry itself. existsSync follows the target, so a broken
-        // junction (target path removed after reinstall) returns false
-        // even though the junction entry still occupies the path, causing
-        // symlinkSync to fail with EEXIST.
-        let dstStat = null;
-        try {
-          dstStat = fs.lstatSync(dst);
-        } catch {
-          // Path doesn't exist at all — proceed to create
-        }
-        if (dstStat?.isSymbolicLink()) {
-          // Verify junction/symlink target matches current install root.
-          // After reinstall to a different path, stale junctions cause
-          // UNKNOWN errors because the old target no longer exists.
-          try {
-            const target = fs.readlinkSync(dst);
-            if (path.resolve(target) === path.resolve(src)) continue;
-            removeLink(dst);
-            log(`Removed stale ${linkType}: ${dst} (was -> ${target})`);
-          } catch {
-            try {
-              removeLink(dst);
-            } catch {
-              // Ignore — symlinkSync below will report the real error
-            }
-          }
-        } else if (dstStat?.isDirectory()) {
-          // On Windows, lstatSync().isSymbolicLink() can return false for
-          // NTFS junctions (IO_REPARSE_TAG_MOUNT_POINT ≠ SYMLINK tag),
-          // making them appear as plain directories. Probe with readlinkSync
-          // to detect hidden junctions; real directories throw EINVAL.
-          if (IS_WIN) {
-            try {
-              const target = fs.readlinkSync(dst);
-              // readlinkSync succeeded → it's a junction, not a real dir.
-              if (path.resolve(target) === path.resolve(src)) continue;
-              removeLink(dst);
-              log(`Removed stale junction (was dir-flagged): ${dst} (was -> ${target})`);
-            } catch {
-              continue; // Genuine directory — don't replace
-            }
-          } else {
-            continue; // Real directory on macOS — don't replace
-          }
-        }
-        fs.symlinkSync(src, dst, linkType);
-        log(`Mirror ${linkType} created: ${dst} -> ${src}`);
-      } catch (err) {
-        log(`Warning: failed to create ${linkType} ${dst}: ${err.message}`);
-      }
-    }
-
-    // Verify critical junctions are traversable. On Windows, freshly-created
-    // NTFS junctions occasionally return UNKNOWN errors from readFileSync
-    // even though the link entry and target both exist (observed on first
-    // launch after installer on clean machines). Removing and recreating
-    // the junction resolves it — so retry once if the probe fails.
-    const criticalProbes = [
-      { mirror: 'cat-cafe-skills', probe: path.join('refs', 'shared-rules.md') },
-      { mirror: 'plugins', probe: path.join('github', 'plugin.yaml') },
-    ];
-    for (const { mirror, probe } of criticalProbes) {
-      const probePath = path.join(projectDir, mirror, probe);
-      const src = path.join(this.root, mirror);
-      const dst = path.join(projectDir, mirror);
-      try {
-        fs.readFileSync(probePath, 'utf-8');
-      } catch (probeErr) {
-        log(`Junction probe FAILED for ${probePath}: ${probeErr.message} — rebuilding`);
-        try {
-          removeLink(dst);
-        } catch {
-          /* best effort */
-        }
-        try {
-          fs.symlinkSync(src, dst, linkType);
-          // Second attempt — verify again
-          fs.readFileSync(probePath, 'utf-8');
-          log(`Junction rebuilt and verified: ${dst} -> ${src}`);
-        } catch (retryErr) {
-          log(`Junction rebuild ALSO FAILED: ${retryErr.message}`);
-        }
-      }
-    }
+    prepareProjectMirrors({ installRoot: this.root, projectDir, log });
 
     // scripts/ has no node_modules. compile-system-prompt-l0.mjs uses ESM
     // `import { catRegistry } from '@cat-cafe/shared'` — Node ESM ignores
@@ -364,6 +341,17 @@ class ServiceManager {
     }
   }
 
+  async _waitForProjectMirrors(baseDir, timeoutMs = 5_000, nodeExe = resolveNode(this.root)) {
+    await waitForProjectMirrors({
+      installRoot: this.root,
+      projectDir: path.join(baseDir, 'project'),
+      nodeExe,
+      signal: this.startupAbort?.signal,
+      log,
+      timeoutMs,
+    });
+  }
+
   _getOrCreateTelemetrySalt(userDataDir) {
     const saltFile = path.join(userDataDir, 'telemetry-salt.txt');
     try {
@@ -380,28 +368,23 @@ class ServiceManager {
     return salt;
   }
 
-  async _startApi(nodeExe, userDataDir) {
-    const apiEntry = path.join(this.root, 'packages', 'api', 'dist', 'index.js');
+  async _startApi(nodeExe, userDataDir, signal = this.startupAbort?.signal) {
+    const desktopEntry = path.join(this.root, 'packages', 'api', 'dist', 'index.desktop.js');
+    const apiEntry = fs.existsSync(desktopEntry)
+      ? desktopEntry
+      : path.join(this.root, 'packages', 'api', 'dist', 'index.js');
     // Copy cat-template.json from install root to the writable project dir,
     // and point the API at that copy via CAT_TEMPLATE_PATH. Otherwise the
     // API's cat-config-loader derives projectRoot=dirname(templatePath) from
     // the install location and tries to bootstrap .cat-cafe/cat-catalog.json
     // inside Program Files → EPERM → fallback to placeholder model names.
     const userProjectDir = path.join(userDataDir, 'project');
-    const templateSrc = path.join(this.root, 'cat-template.json');
     const templateDst = path.join(userProjectDir, 'cat-template.json');
     try {
-      if (fs.existsSync(templateSrc)) {
-        const srcStat = fs.statSync(templateSrc);
-        const dstStat = fs.existsSync(templateDst) ? fs.statSync(templateDst) : null;
-        if (!dstStat || srcStat.mtimeMs > dstStat.mtimeMs) {
-          fs.copyFileSync(templateSrc, templateDst);
-          log(`cat-template.json copied to ${templateDst}`);
-        }
-      } else {
-        log(`WARNING: cat-template.json missing at ${templateSrc}`);
-      }
+      initializeDesktopTemplate(this.root, userProjectDir);
+      log(`Persistent cat-template.json ready at ${templateDst}`);
     } catch (err) {
+      if (!fs.existsSync(templateDst)) throw new Error(`Unable to initialize persistent template: ${err.message}`);
       log(`Warning: failed to mirror cat-template.json: ${err.message}`);
     }
 
@@ -409,16 +392,46 @@ class ServiceManager {
     if (fs.existsSync(templateDst)) {
       envOverrides.CAT_TEMPLATE_PATH = templateDst;
     }
+    // Keep the project copy as the writable overlay, but let the API merge in
+    // role templates shipped by this installer. Without this, an upgraded
+    // project keeps the template it copied on first install and new tools
+    // (for example Kimi) cannot resolve their cat identity.
+    const shippedTemplate = path.join(this.root, 'cat-template.json');
+    if (fs.existsSync(shippedTemplate)) {
+      envOverrides.CAT_TEMPLATE_BASE_PATH = shippedTemplate;
+    }
     // cwd must be a writable dir containing pnpm-workspace.yaml so that the
     // API's findMonorepoRoot() anchors on it, not on Program Files.
-    this._startProcess('api', nodeExe, [apiEntry], { envOverrides, cwd: userProjectDir });
+    this._startProcess(
+      'api',
+      nodeExe,
+      ['--import', pathToFileURL(resolveExternalNodeEntry('api-startup-probe.mjs')).href, apiEntry],
+      { envOverrides, cwd: userProjectDir },
+    );
     log(`API process spawned, waiting for port ${this.apiPort}`);
-    await this._waitForPort(this.apiPort, 'API');
+    this.timeline.mark('api-process-spawned');
+    await this._waitForPort(this.apiPort, 'API', signal);
   }
 
   _buildApiEnv(userDataDir) {
     const salt = this._getOrCreateTelemetrySalt(userDataDir);
     return {
+      // Binary lookup and runtime-path redirection are one API contract.
+      // Keep writable project data outside the installation and respect an
+      // ordinary deployment's existing explicit workspace selection.
+      CAT_CAFE_RUNTIME_ROOT: this.root,
+      CAT_CAFE_WORKSPACE_ROOT: process.env.CAT_CAFE_WORKSPACE_ROOT?.trim() || path.join(userDataDir, 'project'),
+      ...(resolveDesktopRuntime().instanceRoot
+        ? {
+            CAT_CAFE_CONFIG_ROOT: path.join(userDataDir, 'project'),
+            CAT_CAFE_WORKSPACE_ROOT: path.join(userDataDir, 'project'),
+            CAT_CAFE_GLOBAL_CONFIG_ROOT: path.join(userDataDir, 'global'),
+            CAT_CAFE_DATA_DIR: path.join(userDataDir, 'data'),
+            PREVIEW_GATEWAY_PORT: '0',
+            CAT_CAFE_SKIP_HOMEDIR_MIGRATION: '1',
+            CAT_CAFE_SESSION_COOKIE_NAME: `cat_cafe_desktop_${crypto.createHash('sha256').update(userDataDir).digest('hex').slice(0, 12)}`,
+          }
+        : {}),
       TELEMETRY_HMAC_SALT: salt,
       EVIDENCE_DB: path.join(userDataDir, 'evidence.sqlite'),
       TRANSCRIPT_DATA_DIR: path.join(userDataDir, 'data', 'transcripts'),
@@ -428,7 +441,29 @@ class ServiceManager {
       TTS_CACHE_DIR: path.join(userDataDir, 'data', 'tts-cache'),
       AUDIT_LOG_DIR: path.join(userDataDir, 'data', 'audit-logs'),
       CLI_RAW_ARCHIVE_DIR: path.join(userDataDir, 'data', 'cli-raw-archive'),
+      ...(this.pluginNetworkBinding
+        ? {
+            CAT_CAFE_PLUGIN_NETWORK_BRIDGE_URL: this.pluginNetworkBinding.endpoint,
+            CAT_CAFE_PLUGIN_NETWORK_BRIDGE_TOKEN: this.pluginNetworkBinding.token,
+          }
+        : {}),
     };
+  }
+
+  async _startPluginNetworkBridge() {
+    if (!this.pluginNetworkFetch || this.pluginNetworkBridge) return;
+    const bridge = createPluginNetworkBridge({ netFetch: this.pluginNetworkFetch });
+    const binding = await bridge.start();
+    this.pluginNetworkBridge = bridge;
+    this.pluginNetworkBinding = binding;
+    log('Desktop plugin network bridge ready on loopback');
+  }
+
+  async _stopPluginNetworkBridge() {
+    const bridge = this.pluginNetworkBridge;
+    this.pluginNetworkBridge = null;
+    this.pluginNetworkBinding = null;
+    if (bridge) await bridge.close();
   }
 
   async _startRedis(userDataDir) {
@@ -438,26 +473,37 @@ class ServiceManager {
     const platformSeg = IS_WIN ? 'windows' : `darwin-${ARCH_SEG}`;
     const redisDir = path.join(this.root, '.cat-cafe', 'redis', platformSeg);
     const portableRedis = path.join(redisDir, `redis-server${EXE_SUFFIX}`);
+    // An isolated instance can never degrade, so its failures must not advertise
+    // the one-launch memory choice the dialog would otherwise offer.
+    const isolated = Boolean(resolveDesktopRuntime().instanceRoot);
+    const fail = (reason) => new RedisUnavailableError(reason, this.redisPort, { allowMemoryOnce: !isolated });
 
     // Already running — verify it is actually Redis
-    if (await this._isPortOpen(6399)) {
-      const isRedis = await this._verifyRedisPing(6399);
+    if (await this._isPortOpen(this.redisPort)) {
+      if (isolated) throw new Error(`Isolated Redis port ${this.redisPort} is already occupied`);
+      const isRedis = await this._verifyRedisPing(this.redisPort);
       if (isRedis) {
-        this.onStatus('Redis already running on 6399');
+        this.onStatus(`Redis already running on ${this.redisPort}`);
         return;
       }
-      log('Port 6399 occupied by non-Redis — using memory store');
-      this.memoryMode = true;
-      return;
+      log(`Port ${this.redisPort} occupied by non-Redis`);
+      if (this._memoryFallbackAllowed()) {
+        this._useMemoryStore('port_in_use_non_redis');
+        return;
+      }
+      throw fail('port_in_use_non_redis');
     }
 
     const hasPortable = fs.existsSync(portableRedis);
     const hasSystem = await this._commandExists('redis-server');
 
     if (!hasPortable && !hasSystem) {
-      log('Redis not found — using memory store');
-      this.memoryMode = true;
-      return;
+      log('Redis not found');
+      if (this._memoryFallbackAllowed()) {
+        this._useMemoryStore('binary_missing');
+        return;
+      }
+      throw fail('binary_missing');
     }
 
     // Persist data to writable user directory so sessions survive app restart.
@@ -468,8 +514,9 @@ class ServiceManager {
     // (e.g. packaged Windows installs where the default 10000 exceeds the
     // process file descriptor limit).  512 is far above local desktop needs.
     const redisArgs = [
+      ...(resolveDesktopRuntime().instanceRoot ? ['--bind', '127.0.0.1'] : []),
       '--port',
-      '6399',
+      String(this.redisPort),
       '--dir',
       redisDataDir,
       '--save',
@@ -486,24 +533,64 @@ class ServiceManager {
       redisCwd = redisDir;
       const canRun = this._testRedisBinary(portableRedis, redisDir);
       if (!canRun) {
-        log('Redis binary test failed — using memory store');
-        this.memoryMode = true;
-        return;
+        log('Redis binary test failed');
+        if (this._memoryFallbackAllowed()) {
+          this._useMemoryStore('binary_unusable');
+          return;
+        }
+        throw fail('binary_unusable');
       }
     }
 
     this._startProcess('redis', redisCmd, redisArgs, { cwd: redisCwd });
-    const redisReady = await this._waitForPortWithFallback(6399, 'Redis', 'redis');
+    const redisReady = await this._waitForPortWithFallback(this.redisPort, 'Redis', 'redis');
     if (!redisReady) {
-      log('Redis failed to start — using memory store');
-      this.memoryMode = true;
+      log('Redis failed to start');
       if (this.procs.redis && !this.procs.redis.killed) {
         try {
           this.procs.redis.kill();
         } catch {}
       }
       delete this.procs.redis;
+      if (this._memoryFallbackAllowed()) {
+        this._useMemoryStore('start_failed');
+        return;
+      }
+      throw fail('start_failed');
     }
+  }
+
+  /** Memory store is reachable only through an explicit decision, never through a failure branch. */
+  _memoryFallbackAllowed() {
+    return this.allowMemoryFallback && !resolveDesktopRuntime().instanceRoot;
+  }
+
+  /** A consent file written by the startup-failure dialog authorizes exactly one launch. */
+  _consumeMemoryConsent(userDataDir) {
+    const file = consentPath(userDataDir);
+    const hadConsent = fs.existsSync(file);
+    if (resolveDesktopRuntime().instanceRoot) {
+      // The dialog must not offer degradation here; drop any stale consent so a
+      // later ordinary launch cannot inherit it.
+      if (!hadConsent) return false;
+      discardMemoryFallbackConsent(userDataDir);
+      log('Discarded memory-store consent: an isolated desktop never degrades');
+      return false;
+    }
+    if (!hadConsent) return false;
+    if (!consumeMemoryFallbackConsent(userDataDir)) {
+      log('Memory-store consent could not be consumed; refusing degraded start');
+      return false;
+    }
+    this.allowMemoryFallback = true;
+    log('Consumed one-launch memory-store consent');
+    return true;
+  }
+
+  _useMemoryStore(reason) {
+    this.memoryMode = true;
+    log(`Memory store enabled by explicit consent (${reason}); data will not survive restart`);
+    this.onStatus('Redis 不可用，已按你的选择使用临时内存存储（重启后数据不会保留）');
   }
 
   _testRedisBinary(exe, cwd) {
@@ -534,59 +621,66 @@ class ServiceManager {
   _startNextJs() {
     const webDir = path.join(this.root, 'packages', 'web');
     const nodeExe = resolveNode(this.root) || 'node';
-
-    let nextJs = null;
-    // Primary: deployed layout (pnpm deploy --node-linker=hoisted) places next
-    // directly under packages/web/node_modules/next.
-    const deployed = path.join(webDir, 'node_modules', 'next', 'dist', 'bin', 'next');
-    if (fs.existsSync(deployed)) nextJs = deployed;
-    // Dev fallback: pnpm store layout in root.
-    if (!nextJs) {
-      const pnpmDir = path.join(this.root, 'node_modules', '.pnpm');
-      if (fs.existsSync(pnpmDir)) {
-        try {
-          const dirs = fs.readdirSync(pnpmDir).filter((d) => d.startsWith('next@'));
-          for (const d of dirs) {
-            const candidate = path.join(pnpmDir, d, 'node_modules', 'next', 'dist', 'bin', 'next');
-            if (fs.existsSync(candidate)) {
-              nextJs = candidate;
-              break;
-            }
-          }
-        } catch {}
-      }
-    }
-    if (!nextJs) {
-      const hoisted = path.join(this.root, 'node_modules', 'next', 'dist', 'bin', 'next');
-      if (fs.existsSync(hoisted)) nextJs = hoisted;
-    }
-
-    let cmd, args;
-    if (nextJs) {
-      cmd = nodeExe;
-      args = [nextJs, 'start', '--port', String(this.frontendPort)];
-    } else if (IS_WIN) {
-      cmd = 'cmd.exe';
-      const localNext = path.join(webDir, 'node_modules', '.bin', 'next.cmd');
-      args = ['/c', fs.existsSync(localNext) ? localNext : 'next.cmd', 'start', '--port', String(this.frontendPort)];
-    } else {
-      // macOS/Linux fallback: spawn node against any next binary on PATH.
-      // In practice 'deployed' above is always found after pnpm deploy, so
-      // this branch only triggers during broken installs.
-      cmd = nodeExe;
-      args = ['-e', 'console.error("next entry not found — reinstall required"); process.exit(1)'];
-    }
-
-    log(`Starting Next.js: ${cmd} ${args.join(' ')}`);
-    this._startProcess('web', cmd, args, { cwd: webDir });
+    this._startProcess(
+      'web',
+      nodeExe,
+      [
+        resolveExternalNodeEntry('runtime-web-server.js'),
+        webDir,
+        String(this.frontendPort),
+        String(this.apiPort),
+        resolveDesktopRuntime().instanceRoot ? '127.0.0.1' : '0.0.0.0',
+      ],
+      { cwd: webDir },
+    );
   }
 
   _startProcess(name, cmd, args, opts = {}) {
+    this.startupAbort?.signal.throwIfAborted();
+    const { instanceRoot } = resolveDesktopRuntime();
+    const inherited = instanceRoot
+      ? Object.fromEntries(
+          Object.entries(process.env).filter(([key]) =>
+            [
+              'PATH',
+              'PATHEXT',
+              'SYSTEMROOT',
+              'WINDIR',
+              'COMSPEC',
+              'PROGRAMFILES',
+              'PROGRAMFILES(X86)',
+              'PROGRAMDATA',
+              'PROCESSOR_ARCHITECTURE',
+              'NUMBER_OF_PROCESSORS',
+            ].includes(key.toUpperCase()),
+          ),
+        )
+      : process.env;
     const env = {
-      ...process.env,
+      ...inherited,
+      ...(instanceRoot
+        ? {
+            CAT_CAFE_DESKTOP_INSTANCE_ROOT: instanceRoot,
+            HOME: path.join(instanceRoot, 'home'),
+            USERPROFILE: path.join(instanceRoot, 'home'),
+            APPDATA: path.join(instanceRoot, 'home', 'AppData', 'Roaming'),
+            LOCALAPPDATA: path.join(instanceRoot, 'home', 'AppData', 'Local'),
+            TEMP: path.join(instanceRoot, 'temp'),
+            TMP: path.join(instanceRoot, 'temp'),
+            CODEX_HOME: path.join(instanceRoot, 'home', '.codex'),
+            CLAUDE_CONFIG_DIR: path.join(instanceRoot, 'home', '.claude'),
+            DSH_HOME: path.join(instanceRoot, 'home', '.dsh'),
+            CAT_CAFE_WORKSPACE_ROOT: path.join(instanceRoot, 'project'),
+            ALLOWED_WORKSPACE_DIRS: path.join(instanceRoot, 'project'),
+            REDIS_PORT: String(this.redisPort),
+            API_SERVER_HOST: '127.0.0.1',
+            NODE_ENV: 'production',
+          }
+        : {}),
       API_SERVER_PORT: String(this.apiPort),
       FRONTEND_PORT: String(this.frontendPort),
       NEXT_PUBLIC_API_URL: `http://localhost:${this.apiPort}`,
+      ...(resolveDesktopRuntime().instanceRoot ? { FRONTEND_URL: `http://localhost:${this.frontendPort}` } : {}),
       PROMPT_DEBUG: '1',
     };
 
@@ -623,14 +717,34 @@ class ServiceManager {
 
     if (this.memoryMode) {
       env.MEMORY_STORE = '1';
+      // InvocationRegistry deliberately fails closed without Redis unless
+      // the degraded mode is explicit. Keep the fallback self-consistent.
+      env.CAT_CAFE_INVOCATION_REGISTRY = 'memory';
       delete env.REDIS_URL;
     } else {
-      env.REDIS_URL = 'redis://localhost:6399';
+      env.REDIS_URL = `redis://localhost:${this.redisPort}`;
     }
 
     // Apply API-specific env overrides (writable paths, telemetry salt, etc.)
     if (opts.envOverrides) {
       Object.assign(env, opts.envOverrides);
+    }
+    if (name === 'api') {
+      // Ordinary launches respect explicit client bindings. Only an isolated
+      // instance replaces them with its own authorized client-homes mapping.
+      if (instanceRoot) {
+        for (const key of [
+          'CLAUDE_CONFIG_DIR',
+          'CODEX_HOME',
+          'DSH_HOME',
+          'KIMI_CODE_HOME',
+          'PI_CODING_AGENT_DIR',
+          'npm_config_cache',
+        ]) {
+          delete env[key];
+        }
+      }
+      Object.assign(env, instanceRoot ? readClientHomes(instanceRoot) : resolveDefaultClientHomes(env));
     }
 
     log(`[${name}] spawn: ${cmd} ${args.join(' ')}`);
@@ -723,10 +837,13 @@ class ServiceManager {
     });
   }
 
-  async _waitForPort(port, label) {
+  async _waitForPort(port, label, signal = this.startupAbort?.signal) {
     const deadline = Date.now() + MAX_WAIT_MS;
     while (Date.now() < deadline) {
-      if (await this._isPortOpen(port)) {
+      signal?.throwIfAborted();
+      const open = await this._isPortOpen(port);
+      signal?.throwIfAborted();
+      if (open) {
         this.onStatus(`${label} ready on port ${port}`);
         return;
       }
@@ -746,10 +863,16 @@ class ServiceManager {
     throw new Error(`${label} did not start within ${MAX_WAIT_MS / 1000}s (port ${port})`);
   }
 
-  async _waitForHttpReady(port, label) {
+  async _waitForHttpReady(port, label, signal = this.startupAbort?.signal) {
     const deadline = Date.now() + MAX_WAIT_MS;
+    let attempts = 0;
     while (Date.now() < deadline) {
-      if (await this._isHttpReady(port)) {
+      signal?.throwIfAborted();
+      attempts++;
+      const ready = await this._isHttpReady(port);
+      signal?.throwIfAborted();
+      if (ready) {
+        this.timeline.mark('web-probe-ready', { attempts });
         this.onStatus(`${label} ready on port ${port}`);
         return;
       }
@@ -769,7 +892,10 @@ class ServiceManager {
     const deadline = Date.now() + MAX_WAIT_MS;
     const earlyCheckDeadline = Date.now() + REDIS_FALLBACK_PORT_CHECK_MS;
     while (Date.now() < deadline) {
-      if (await this._isPortOpen(port)) {
+      this.startupAbort?.signal.throwIfAborted();
+      const open = await this._isPortOpen(port);
+      this.startupAbort?.signal.throwIfAborted();
+      if (open) {
         this.onStatus(`${label} ready on port ${port}`);
         return true;
       }
@@ -787,24 +913,52 @@ class ServiceManager {
   }
 
   async stopAll() {
+    this.startupAbort?.abort(new Error('Desktop startup cancelled'));
     const KILL_TIMEOUT_MS = 5000;
-    const killPromises = [];
+    const entries = Object.entries(this.procs);
+    // API shutdown still writes to Redis (audit, plugin teardown and leases).
+    // Drain its consumers before terminating their persistence dependency.
+    const groups = [entries.filter(([name]) => name !== 'redis'), entries.filter(([name]) => name === 'redis')];
 
-    for (const [name, proc] of Object.entries(this.procs)) {
-      if (!proc || proc.killed) continue;
-      // Skip children that already exited on their own — their PID may have
-      // been reused by Windows, so taskkill could hit an unrelated process.
-      if (proc.exitCode !== null || proc.signalCode !== null) {
-        log(`[desktop] ${name} already exited (code=${proc.exitCode}), skipping`);
-        continue;
+    for (const group of groups) {
+      const killPromises = [];
+      for (const [name, proc] of group) {
+        if (!proc) continue;
+        // Skip children that already exited on their own — their PID may have
+        // been reused by Windows, so taskkill could hit an unrelated process.
+        if (proc.exitCode !== null || proc.signalCode !== null) {
+          log(`[desktop] ${name} already exited (code=${proc.exitCode}), skipping`);
+          continue;
+        }
+        // killed records a sent signal, not a completed exit. Observe an
+        // already-signalled child without sending another signal to its PID.
+        if (proc.killed) {
+          killPromises.push(this._waitForProcessExit(proc, KILL_TIMEOUT_MS));
+          continue;
+        }
+        log(`[desktop] stopping ${name} (pid=${proc.pid})...`);
+
+        killPromises.push(this._killProcessTree(name, proc, KILL_TIMEOUT_MS));
       }
-      log(`[desktop] stopping ${name} (pid=${proc.pid})...`);
-
-      killPromises.push(this._killProcessTree(name, proc, KILL_TIMEOUT_MS));
+      await Promise.allSettled(killPromises);
     }
-
-    await Promise.allSettled(killPromises);
     this.procs = {};
+    await this._stopPluginNetworkBridge();
+  }
+
+  _waitForProcessExit(proc, timeoutMs) {
+    if (proc.exitCode !== null || proc.signalCode !== null) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      const onExit = () => {
+        clearTimeout(timer);
+        resolve(true);
+      };
+      const timer = setTimeout(() => {
+        proc.removeListener('exit', onExit);
+        resolve(false);
+      }, timeoutMs);
+      proc.once('exit', onExit);
+    });
   }
 
   async _killProcessTree(name, proc, timeoutMs) {
@@ -835,14 +989,7 @@ class ServiceManager {
     // macOS/Linux: SIGTERM first, then SIGKILL after timeout
     proc.kill('SIGTERM');
 
-    const exited = await new Promise((resolve) => {
-      if (proc.exitCode !== null) return resolve(true);
-      const timer = setTimeout(() => resolve(false), timeoutMs);
-      proc.once('exit', () => {
-        clearTimeout(timer);
-        resolve(true);
-      });
-    });
+    const exited = await this._waitForProcessExit(proc, timeoutMs);
 
     if (!exited) {
       log(`[${name}] did not exit after SIGTERM, sending SIGKILL`);

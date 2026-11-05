@@ -1,4 +1,5 @@
 ---
+anchor: doc:features/F081-write-path-audit
 feature_ids: [F081]
 related_features: [F069, F072, F297]
 superseded_by: F297
@@ -7,7 +8,7 @@ doc_kind: audit
 created: 2026-03-10
 status: done
 completed: 2026-03-10
-tips_exempt: completed write-path audit appendix superseded by F297; diagnostic record with no cat-facing capability or workflow to teach
+tips_exempt: Memory identity metadata repair only; this supporting source keeps its existing content and parent feature behavior, with no new user action or capability.
 ---
 
 # F081 Appendix — Bubble/Thread State Write-Path Audit

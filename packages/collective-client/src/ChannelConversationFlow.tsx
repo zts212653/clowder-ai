@@ -4,6 +4,7 @@ import { roadmapActionsFor } from './channel-collaboration.js';
 import { eventChannelId, eventDayLabel } from './channel-navigation.js';
 import type {
   ChannelThread,
+  CollectiveChannelProjection,
   CollectiveEventEnvelope,
   CollectiveParticipant,
   CollectiveReactionSummary,
@@ -11,6 +12,7 @@ import type {
   CollectiveVoteProjection,
   CollectiveWorkProjection,
 } from './client-types.js';
+import { useCollectiveLanguage, useCollectiveText } from './collective-copy.js';
 import { isLastOfSelfRun, isLastOfSelfRunInTopic } from './message-presentation.js';
 import { TopicMessage } from './TopicMessage.js';
 import type { InformalVoteDraft } from './VoteCard.js';
@@ -21,6 +23,8 @@ export function ChannelConversationFlow({
   legacy,
   search,
   humanName,
+  channel,
+  collectiveName,
   channelWorks,
   channelVotes,
   channelReactions,
@@ -39,6 +43,8 @@ export function ChannelConversationFlow({
   readonly legacy: readonly CollectiveEventEnvelope[];
   readonly search: boolean;
   readonly humanName: string;
+  readonly channel?: CollectiveChannelProjection;
+  readonly collectiveName?: string;
   readonly channelWorks: readonly CollectiveWorkProjection[];
   readonly channelVotes: readonly CollectiveVoteProjection[];
   readonly channelReactions: readonly CollectiveReactionSummary[];
@@ -53,25 +59,38 @@ export function ChannelConversationFlow({
   readonly presentation?: 'v2' | 'classic';
   readonly children?: ReactNode;
 }) {
+  const language = useCollectiveLanguage();
+  const t = useCollectiveText();
   return (
     <div ref={flowRef} className="channel-flow" aria-live="polite">
       {threads.length === 0 && !children ? (
         <div className="channel-empty">
-          <h2>{search ? '没有找到相关讨论' : '这里还很安静'}</h2>
-          <p>{search ? '换一个关键词，或者从左边进入频道。' : `${humanName}，从一句话开始吧。`}</p>
+          <h2>{t(search ? '没有找到相关讨论' : channel ? '这是这个频道的开头。' : '这里还很安静')}</h2>
+          <p>
+            {search
+              ? t('换一个关键词，或者从左边进入频道。')
+              : channel
+                ? language === 'en'
+                  ? `${channel.createdBy.displayName} created it on ${new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(new Date(channel.createdAt))}. Everyone in ${collectiveName ?? 'this Collective'} can see it.`
+                  : `${channel.createdBy.displayName} ${new Intl.DateTimeFormat('zh-CN', { month: 'long', day: 'numeric' }).format(new Date(channel.createdAt))}新建，${collectiveName ?? '共同体'}的成员都能看到。`
+                : language === 'en'
+                  ? `${humanName}, start with a message.`
+                  : `${humanName}，从一句话开始吧。`}
+          </p>
         </div>
       ) : (
         threads.map((thread, index) => (
           <div key={thread.root.eventId}>
             {(!index ||
-              eventDayLabel(threads[index - 1]?.root.acceptedAt) !== eventDayLabel(thread.root.acceptedAt)) && (
+              eventDayLabel(threads[index - 1]?.root.acceptedAt, language) !==
+                eventDayLabel(thread.root.acceptedAt, language)) && (
               <div className="day-divider">
-                <span>{eventDayLabel(thread.root.acceptedAt)}</span>
+                <span>{eventDayLabel(thread.root.acceptedAt, language)}</span>
               </div>
             )}
             {search && (
               <button type="button" className="search-source" onClick={() => actions.returnToRoot(thread.root)}>
-                # {eventChannelId(thread.root)} · 在频道中查看
+                # {eventChannelId(thread.root)} · {t('在频道中查看')}
               </button>
             )}
             <ChannelMessage
@@ -91,7 +110,9 @@ export function ChannelConversationFlow({
               humanNames={humanNames}
               reactions={channelReactions}
               onProposeWork={(event) => void actions.proposeWork(event.eventId).catch(() => undefined)}
-              onCommitWork={(work, participant) => void actions.commitWork(work, participant).catch(() => undefined)}
+              onCommitWork={(work, participant, accountability) =>
+                void actions.commitWork(work, participant, accountability).catch(() => undefined)
+              }
               onDeclineWork={(work) => void actions.declineWork(work).catch(() => undefined)}
               onAcceptWorkResult={(work) => void actions.acceptWorkResult(work).catch(() => undefined)}
               onRequestWorkRevision={actions.requestWorkRevision}
@@ -110,7 +131,7 @@ export function ChannelConversationFlow({
       {children}
       {legacy.length > 0 && !search && (
         <details className="legacy-history">
-          <summary>早期记录 · 位置尚未确认</summary>
+          <summary>{t('早期记录 · 位置尚未确认')}</summary>
           {legacy.map((event, index) => (
             <TopicMessage
               key={event.eventId}
@@ -134,7 +155,11 @@ export interface ChannelConversationActions {
   readonly mention: (event: CollectiveEventEnvelope) => void;
   readonly openMember: (event: CollectiveEventEnvelope) => void;
   readonly proposeWork: (sourceEventId: string) => Promise<void>;
-  readonly commitWork: (work: CollectiveWorkProjection, participant?: CollectiveParticipant) => Promise<void>;
+  readonly commitWork: (
+    work: CollectiveWorkProjection,
+    participant?: CollectiveParticipant,
+    accountability?: 'self' | 'unassigned',
+  ) => Promise<void>;
   readonly declineWork: (work: CollectiveWorkProjection) => Promise<void>;
   readonly acceptWorkResult: (work: CollectiveWorkProjection) => Promise<void>;
   readonly requestWorkRevision: (work: CollectiveWorkProjection, feedback: string) => Promise<void>;

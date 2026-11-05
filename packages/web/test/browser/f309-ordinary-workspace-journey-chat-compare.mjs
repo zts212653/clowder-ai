@@ -50,12 +50,14 @@ const FILE_SOURCE = {
 };
 const conversation = (kind, length, timestamp) =>
   Array.from({ length }, (_, index) => ({
+    from: { kind: 'user', userId: 'operator' },
     id: `${kind}-${index}`,
     type: 'user',
     content: `${kind === 'earlier' ? '较早' : '之后'}的一条对话 ${index + 1}`,
     timestamp,
   }));
 const sentMessage = {
+  from: { kind: 'user', userId: 'operator' },
   id: SENT_ID,
   type: 'user',
   content: '请处理这一处',
@@ -77,6 +79,7 @@ const sentMessage = {
   ],
 };
 const receiptMessage = {
+  from: { kind: 'system', service: 'content-modification' },
   id: RECEIPT_ID,
   type: 'system',
   catId: null,
@@ -484,14 +487,17 @@ export function registerOrdinaryChatCompareJourney(suite) {
           const view = chat.getBoundingClientRect();
           return box.bottom > view.top && box.top < view.bottom;
         };
-        await page.evaluate(() => {
+        await page.locator('[data-message-id="later-39"]').scrollIntoViewIfNeeded();
+        await page.waitForFunction((id) => {
+          const row = document.querySelector(`[data-message-id="${id}"]`);
           const chat = document.querySelector('[data-chat-container]');
-          chat.scrollTop = chat.scrollHeight;
-          chat.dispatchEvent(new Event('scroll', { bubbles: true }));
-        });
-        await page.waitForTimeout(500);
+          if (!row || !chat) return false;
+          const box = row.getBoundingClientRect(),
+            view = chat.getBoundingClientRect();
+          return box.bottom <= view.top || box.top >= view.bottom;
+        }, RECEIPT_ID);
         assert.equal(await page.evaluate(receiptInChat, RECEIPT_ID), false, 'the receipt starts out of sight');
-        await page.getByRole('button', { name: '返回来源', exact: true }).click();
+        await page.getByRole('button', { name: '‹ 聊天', exact: true }).click();
         await page.waitForFunction(receiptInChat, RECEIPT_ID, { timeout: 15_000 });
         assert.equal(
           await page.evaluate(() => window.__chatBeforeOpen === document.querySelector('[data-chat-container]')),

@@ -1,3 +1,6 @@
+import { createHmac, randomBytes } from 'node:crypto';
+import { isAbsolute } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import type { CatConfig } from '@cat-cafe/shared';
 import type { FastifyBaseLogger } from 'fastify';
 import {
@@ -8,22 +11,50 @@ import {
   validateRuntimeProviderBinding,
 } from '../../../../../../config/account-resolver.js';
 import { AccountStoreVerdictError } from '../../../../../../config/account-store-format.js';
-import { resolveBoundAccountRefForCat } from '../../../../../../config/cat-account-binding.js';
+import {
+  resolveBoundAccountRefForCat,
+  usesNativeToolConfiguration,
+} from '../../../../../../config/cat-account-binding.js';
 import type { AcpVariantConfig } from '../../../../../../config/cat-config-loader.js';
 import { resolveContextCapacity } from '../../../../../../config/context-capacity.js';
+import { inspectDshNativeLaunch } from '../../../../../../config/native-accounts/dsh-installation.js';
+import { inspectKimiNativeLaunch } from '../../../../../../config/native-accounts/kimi-installation.js';
 import { resolveEffectiveOpenCodeModel } from '../../../../../../config/opencode-model.js';
+import { invalidateCliCommand, resolveCliCommandOrBare } from '../../../../../../utils/cli-resolve.js';
+import { buildChildEnv } from '../../../../../../utils/cli-spawn.js';
+import { resolveWindowsSpawnPlan, type WindowsSpawnPlan } from '../../../../../../utils/cli-spawn-win.js';
+import { saveSpan } from '../../../../../../utils/member-save-diagnostics.js';
 import type { AgentRegistrationFailure } from '../../registry/AgentServiceUnavailableError.js';
+import { ExecutionAdmissionConflict } from '../../registry/AgentServiceUnavailableError.js';
+import { prepareDshSecretPatch, verifyDshSecretPatch } from '../dsh-secret-patch.js';
+import { ensureKimiSecretHooks } from '../kimi-secret-hooks.js';
 import { prepareOpenCodeAcpSpawnConfig } from '../opencode-acp-spawn-config.js';
+import { piBridgeStorageArgs } from '../pi/pi-bridge-launch.js';
 import { AcpAgentService } from './AcpAgentService.js';
-import { AcpClient } from './AcpClient.js';
+import { AcpClient, type AcpClientConfig } from './AcpClient.js';
 import { AcpHttpStreamClient } from './AcpHttpStreamClient.js';
-import { AcpProcessPool, DEFAULT_ACP_IDLE_TTL_MS, type PoolKey } from './AcpProcessPool.js';
-import { resolveAcpBootstrapArgs, resolveAcpBootstrapCommand, resolveAcpBootstrapCwd } from './acp-bootstrap-cwd.js';
+import { AcpProcessPool, DEFAULT_ACP_IDLE_TTL_MS } from './AcpProcessPool.js';
 // resolveAcpMcpServers + resolveDisabledServerIds moved to AcpAgentService.invoke()
 // for invoke-time resolution (#712 P1-1).
 import { createAcpPoolSpawnSignature } from './acp-pool-signature.js';
-import { skipAcpProfile } from './acp-registration-failure.js';
 import { tryPrepareAcpProcessEnv } from './acp-spawn-env.js';
+import { denyAgyAcpPermission } from './agy/agy-acp-permission.js';
+import { prepareAgyAcpProfile } from './agy/agy-acp-profile.js';
+import type { AgyAcpConfig } from './agy/agy-acp-session.js';
+import {
+  type AcpBootstrapContext,
+  resolveAcpBootstrap,
+  type VerifiedAcpBootstrapContext,
+  verifyAcpBootstrap,
+} from './bootstrap/acp-bootstrap-context.js';
+import { skipAcpProfile } from './lifecycle/acp-registration-failure.js';
+import { pendingAcpPoolRetirement, trackAcpPoolRetirement } from './pool/acp-pool-retirement-registry.js';
+import {
+  type AcpServicePoolLease,
+  bindAcpServicePoolLease,
+  retainAcpServicePool,
+  retireAcpServicePool,
+} from './pool/acp-service-pool-lease.js';
 
 export type AcpPoolRegistry = Map<string, AcpProcessPool>;
 
@@ -34,19 +65,14 @@ export interface CreateAcpServiceForConfigInput {
   /** Effective model resolved once by registry construction (env override included). */
   effectiveModel: string;
   acpConfig: AcpVariantConfig;
+  /** Catalog construction uses its existing accessor; plugin sources retain their registration fence. */
+  resolveCurrentAcpConfig?(): AcpVariantConfig | undefined;
   poolRegistry: AcpPoolRegistry;
   log: Pick<FastifyBaseLogger, 'info' | 'warn'>;
+  /** Tests supply an owned throwaway root; production uses the platform default. */
+  bootstrapRoot?: string;
   /** Carry a safe registration failure to the router while leaving this service absent. */
   onUnavailable?: (reason: AgentRegistrationFailure) => void;
-}
-
-interface AcpBootstrapContext {
-  projectRoot: string;
-  command: string;
-  args: string[];
-  cwd: string;
-  model?: string;
-  poolKey: PoolKey;
 }
 
 interface AcpAccountContext {
@@ -55,6 +81,7 @@ interface AcpAccountContext {
 }
 
 interface AcpSpawnContext {
+  antigravity?: AgyAcpConfig;
   env?: Record<string, string>;
   sessionModel?: string;
   openCodeRuntimeConfig: unknown;
@@ -68,6 +95,9 @@ interface AcpContextPolicy {
 }
 
 const CONTEXT_POLICY_ACP_CLIENTS = new Set(['opencode', 'google', 'kimi']);
+// Process-local pool identity: neither raw inherited credentials nor a guessable
+// secret hash belongs in diagnostic objects or persistent session compatibility.
+const environmentFingerprintKey = randomBytes(32);
 
 function resolveAcpContextPolicy(config: CatConfig, effectiveModel: string): AcpContextPolicy | null {
   if (!CONTEXT_POLICY_ACP_CLIENTS.has(config.clientId)) return null;
@@ -85,28 +115,8 @@ function resolveAcpContextPolicy(config: CatConfig, effectiveModel: string): Acp
   };
 }
 
-function resolveAcpBootstrap(
-  projectRoot: string,
-  profileId: string,
-  acpConfig: AcpVariantConfig,
-  effectiveModel: string,
-): AcpBootstrapContext {
-  const model = effectiveModel.trim() || undefined;
-  const args = resolveAcpBootstrapArgs(projectRoot, acpConfig.startupArgs, {
-    base_model: model,
-    model,
-  });
-  return {
-    projectRoot,
-    command: resolveAcpBootstrapCommand(projectRoot, acpConfig.command),
-    args,
-    cwd: resolveAcpBootstrapCwd(projectRoot, profileId),
-    model,
-    poolKey: { projectPath: projectRoot, providerProfile: profileId },
-  };
-}
-
 function resolveAcpAccount(projectRoot: string, config: CatConfig): AcpAccountContext {
+  if (usesNativeToolConfiguration(config)) return { account: null };
   const catId = config.id;
   const accountRef = resolveBoundAccountRefForCat(projectRoot, catId, config);
   const builtinClient = resolveBuiltinClientForProvider(config.clientId);
@@ -125,6 +135,32 @@ async function prepareAcpSpawnContext(
 ): Promise<AcpSpawnContext | null> {
   const { config, profileId } = input;
   const catId = config.id;
+  if (config.agyProfile?.carrier === 'acp') {
+    try {
+      if (
+        config.clientId !== 'google' ||
+        input.acpConfig.transport === 'httpstream' ||
+        (accountContext.account &&
+          (accountContext.account.authType !== 'oauth' || Object.keys(accountContext.account.envVars ?? {}).length))
+      ) {
+        throw new Error('AGY official ACP requires Google personal OAuth over stdio without account overrides');
+      }
+      const prepared = await prepareAgyAcpProfile({
+        catId,
+        model: input.effectiveModel,
+        projectRoot: bootstrap.projectRoot,
+        profile: config.agyProfile,
+      });
+      return { ...prepared, sessionModel: input.effectiveModel, openCodeRuntimeConfig: null, contextPolicy: null };
+    } catch (err) {
+      return skipAcpProfile(
+        input,
+        'invalid-spawn-env',
+        { err, catId, profileId, accountRef: accountContext.accountRef },
+        'ACP registry sync skipped member due to invalid AGY profile',
+      );
+    }
+  }
   const acpEnvResult = tryPrepareAcpProcessEnv({
     clientId: config.clientId,
     provider: config.provider,
@@ -140,6 +176,7 @@ async function prepareAcpSpawnContext(
     );
   }
   let acpSpawnEnv: Record<string, string> | undefined = acpEnvResult.env;
+  if (config.clientId === 'kimi') await ensureKimiSecretHooks(acpSpawnEnv ?? {});
 
   let openCodeAcpSpawnConfig: Awaited<ReturnType<typeof prepareOpenCodeAcpSpawnConfig>>;
   const contextPolicy = resolveAcpContextPolicy(config, input.effectiveModel);
@@ -147,7 +184,7 @@ async function prepareAcpSpawnContext(
     // kimi-code's ACP server creates sessions through the same KimiCLI.create()
     // path as the CLI. KIMI_MODEL_MAX_CONTEXT_SIZE is its supported model-window
     // override, so keep the member policy process-scoped instead of mutating the
-    // user's shared ~/.kimi/config.toml.
+    // user's shared ~/.kimi-code/config.toml.
     acpSpawnEnv = {
       ...(acpSpawnEnv ?? {}),
       KIMI_MODEL_MAX_CONTEXT_SIZE: String(contextPolicy.windowTokens),
@@ -196,31 +233,41 @@ async function prepareAcpSpawnContext(
 
 async function ensureAcpPool(
   input: CreateAcpServiceForConfigInput,
-  bootstrap: AcpBootstrapContext,
+  bootstrap: VerifiedAcpBootstrapContext,
   spawn: AcpSpawnContext,
-): Promise<AcpProcessPool> {
+  preparedEnv: Readonly<Record<string, string>>,
+  preparedSpawn: NonNullable<AcpClientConfig['preparedSpawn']>,
+): Promise<{ pool: AcpProcessPool; lease: AcpServicePoolLease }> {
   const { profileId, acpConfig, poolRegistry } = input;
   const spawnSignature = createAcpPoolSpawnSignature({
-    command: bootstrap.command,
-    args: bootstrap.args,
+    command: preparedSpawn.command,
+    args: [...preparedSpawn.args],
+    ...(preparedSpawn.shell !== undefined ? { shell: preparedSpawn.shell } : {}),
     cwd: bootstrap.cwd,
-    env: spawn.env ?? null,
+    bootstrapIsolation: bootstrap.isolation,
+    environmentFingerprint: createHmac('sha256', environmentFingerprintKey)
+      .update(JSON.stringify(preparedEnv))
+      .digest('hex'),
     openCodeRuntimeConfig: spawn.openCodeRuntimeConfig,
     contextPolicy: spawn.contextPolicy,
     maxLiveProcesses: acpConfig.pool?.maxLiveProcesses ?? 3,
     idleTtlMs: acpConfig.pool?.idleTtlMs ?? DEFAULT_ACP_IDLE_TTL_MS,
     transport: acpConfig.transport ?? 'stdio',
     supportsMultiplexing: acpConfig.supportsMultiplexing,
+    protocolAdapter: acpConfig.protocolAdapter,
+    permissionPolicy: acpConfig.permissionPolicy,
+    ...(spawn.antigravity ? { sessionPolicy: { provider: 'antigravity', profile: spawn.antigravity.profile } } : {}),
   });
 
   const existingPool = poolRegistry.get(profileId);
   if (existingPool && existingPool.spawnSignature !== spawnSignature) {
-    existingPool.retireWhenIdle();
+    const retirement = retireAcpServicePool(existingPool, () => existingPool.retireWhenIdle());
+    trackAcpPoolRetirement(poolRegistry, profileId, retirement.completion);
     poolRegistry.delete(profileId);
   }
 
   const activePool = poolRegistry.get(profileId);
-  if (activePool) return activePool;
+  if (activePool) return { pool: activePool, lease: retainAcpServicePool(poolRegistry, profileId, activePool, false) };
 
   const pool = new AcpProcessPool(
     {
@@ -228,32 +275,50 @@ async function ensureAcpPool(
       idleTtlMs: acpConfig.pool?.idleTtlMs ?? DEFAULT_ACP_IDLE_TTL_MS,
       healthCheckIntervalMs: 30_000,
     },
-    acpConfig,
+    spawn.antigravity ? { ...acpConfig, supportsMultiplexing: false, rejectActiveSessionLease: true } : acpConfig,
     () => {
       const clientCfg = {
         command: bootstrap.command,
         args: bootstrap.args,
-        cwd: bootstrap.cwd,
+        // Cold starts must recreate a lost cwd and revalidate its permissions.
+        // Existing live processes keep their cwd and drain under pool policy.
+        cwd: bootstrap.verifyCwd(preparedSpawn.command, [...preparedSpawn.args], preparedEnv),
+        preparedEnv,
+        preparedSpawn,
+        ...(process.platform === 'win32' ? { verifyBootstrapCwd: bootstrap.verifyCwd } : {}),
         ...(spawn.env ? { env: spawn.env } : {}),
+        // iCode fail-closed policy: flagged native effects must never be
+        // auto-approved by the generic default (allow) path.
+        defaultPermissionDecision:
+          acpConfig.protocolAdapter === 'icode' || acpConfig.permissionPolicy === 'deny'
+            ? ('reject' as const)
+            : ('allow' as const),
+        ...(spawn.antigravity
+          ? { inheritParentEnv: false, permissionHandler: denyAgyAcpPermission, antigravityDiagnostics: true }
+          : {}),
       };
       return acpConfig.transport === 'httpstream' ? new AcpHttpStreamClient(clientCfg) : new AcpClient(clientCfg);
     },
     spawnSignature,
+    pendingAcpPoolRetirement(poolRegistry, profileId),
   );
   poolRegistry.set(profileId, pool);
-  return pool;
+  return { pool, lease: retainAcpServicePool(poolRegistry, profileId, pool, true) };
 }
 
 export async function createAcpServiceForConfig(
   input: CreateAcpServiceForConfigInput,
-): Promise<AcpAgentService | null> {
-  const { projectRoot, profileId, config, acpConfig } = input;
+): Promise<(AcpAgentService & { disposeHostService(): Promise<void> }) | null> {
+  const { projectRoot, profileId, resolveCurrentAcpConfig } = input;
+  const config = structuredClone(input.config);
+  const acpConfig = structuredClone(input.acpConfig);
   const catId = config.id;
+  const clientId = config.clientId;
   const effectiveModel =
     config.clientId === 'opencode'
       ? (resolveEffectiveOpenCodeModel(config.provider, input.effectiveModel)?.model ?? input.effectiveModel)
       : input.effectiveModel;
-  const effectiveInput = effectiveModel === input.effectiveModel ? input : { ...input, effectiveModel };
+  const effectiveInput = { ...input, config, acpConfig, effectiveModel };
 
   if (acpConfig.transport === 'httpstream' && acpConfig.experimental !== true) {
     return skipAcpProfile(
@@ -261,6 +326,28 @@ export async function createAcpServiceForConfig(
       'httpstream-missing-experimental-opt-in',
       { catId, profileId },
       'ACP registry sync skipped member because httpstream transport requires experimental opt-in',
+    );
+  }
+
+  if (acpConfig.protocolAdapter === 'icode' && acpConfig.transport === 'httpstream') {
+    return skipAcpProfile(
+      input,
+      'icode-requires-stdio',
+      { catId, profileId, transport: acpConfig.transport },
+      'ACP registry sync skipped iCode member because the icode adapter requires stdio transport',
+    );
+  }
+
+  const icodeModelProfileId = acpConfig.protocolAdapter === 'icode' ? acpConfig.modelProfileId?.trim() : undefined;
+  if (acpConfig.protocolAdapter === 'icode' && !icodeModelProfileId) {
+    // Display model (defaultModel/effectiveModel) is not an iCode model profile
+    // id. Falling back to it would either fail on session/set_model or leave the
+    // provider on its own default while the thread shows a different model.
+    return skipAcpProfile(
+      input,
+      'icode-missing-model-profile',
+      { catId, profileId },
+      'ACP registry sync skipped iCode member because modelProfileId is required',
     );
   }
 
@@ -297,21 +384,115 @@ export async function createAcpServiceForConfig(
       );
     }
   }
-  const spawn = await prepareAcpSpawnContext(effectiveInput, bootstrap, accountContext);
+  const accountSource = structuredClone(accountContext);
+  const spawn = await saveSpan('acp.prepare', () => prepareAcpSpawnContext(effectiveInput, bootstrap, accountContext));
   if (!spawn) return null;
-  const pool = await ensureAcpPool(effectiveInput, bootstrap, spawn);
+  bootstrap.args = piBridgeStorageArgs(
+    bootstrap.command,
+    bootstrap.args,
+    [bootstrap.projectRoot, catId, profileId, accountContext.accountRef ?? 'native-profile'],
+    { ...process.env, ...spawn.env },
+  );
+  const originalArgs = bootstrap.args;
+  const nativeDsh = inspectDshNativeLaunch({
+    command: bootstrap.command,
+    args: originalArgs,
+    env: spawn.env ?? {},
+    projectRoot: bootstrap.projectRoot,
+  });
+  bootstrap.args = await prepareDshSecretPatch(bootstrap.command, originalArgs, bootstrap.projectRoot);
+  const nativeKimi =
+    config.clientId === 'kimi' && accountContext.account?.id && acpConfig.transport !== 'httpstream'
+      ? inspectKimiNativeLaunch({
+          command: bootstrap.command,
+          args: originalArgs,
+          env: {},
+          projectRoot: bootstrap.projectRoot,
+          accountRef: accountContext.account.id,
+        })
+      : null;
+  // Audit and execution consume one fresh plan, rather than separate cache generations.
+  invalidateCliCommand(bootstrap.command);
+  const selectedCommand = resolveCliCommandOrBare(bootstrap.command);
+  const selected: Pick<WindowsSpawnPlan, 'command' | 'args' | 'shell'> =
+    process.platform === 'win32'
+      ? resolveWindowsSpawnPlan(selectedCommand, bootstrap.args, { refresh: true })
+      : { command: selectedCommand, args: [...bootstrap.args] };
+  let shell = selected.shell;
+  if (shell === true) {
+    const command = process.env.ComSpec || 'cmd.exe';
+    if (!isAbsolute(command)) invalidateCliCommand(command);
+    shell = isAbsolute(command) ? command : resolveCliCommandOrBare(command);
+  }
+  const preparedSpawn = Object.freeze({
+    command: selected.command,
+    args: Object.freeze([...selected.args]),
+    ...(shell !== undefined ? { shell } : {}),
+  });
+  const root = input.bootstrapRoot ?? acpConfig.bootstrapRoot;
+  const verified = verifyAcpBootstrap(
+    bootstrap,
+    profileId,
+    root,
+    spawn.env,
+    acpConfig.bootstrapRoot !== undefined,
+    preparedSpawn,
+  );
+  if (bootstrap.args !== originalArgs) {
+    const patch = bootstrap.args.at(-1);
+    if (!patch) throw new Error('secret_dsh_patch_unavailable');
+    const verifyCwd = verified.verifyCwd;
+    verified.verifyCwd = (...args) => {
+      if (!verifyDshSecretPatch(patch)) throw new Error('secret_dsh_patch_changed');
+      return verifyCwd(...args);
+    };
+  }
+  const prepareEnvironment = () =>
+    Object.fromEntries(
+      Object.entries(
+        buildChildEnv(spawn.env, {
+          workingDirectory: verified.cwd,
+          ...(spawn.antigravity ? { inheritParentEnv: false } : {}),
+        }),
+      )
+        .filter((entry): entry is [string, string] => entry[1] !== undefined)
+        .sort(([left], [right]) => left.localeCompare(right)),
+    );
+  const preparedEnv = Object.freeze(prepareEnvironment());
+  const assertConstructionCurrent = () => {
+    if (resolveCurrentAcpConfig && !isDeepStrictEqual(acpConfig, resolveCurrentAcpConfig()))
+      throw new ExecutionAdmissionConflict('ACP launch source changed; refresh this member before admission.');
+    if (!isDeepStrictEqual(accountSource, resolveAcpAccount(bootstrap.projectRoot, config)))
+      throw new ExecutionAdmissionConflict('ACP account source changed; refresh this member before admission.');
+    if (!isDeepStrictEqual(preparedEnv, prepareEnvironment()))
+      throw new ExecutionAdmissionConflict('ACP process environment changed; refresh this member before admission.');
+  };
+  const { pool, lease } = await saveSpan('acp.pool', () =>
+    ensureAcpPool(effectiveInput, verified, spawn, preparedEnv, preparedSpawn),
+  );
 
   // #712 P1-1: pass whitelist — MCP resolution happens at invoke time in
   // AcpAgentService so capability toggles take effect without registry rebuild.
-  return new AcpAgentService({
+  const service = new AcpAgentService({
+    ...(nativeDsh ? { nativeDsh } : {}),
+    ...(nativeKimi ? { nativeKimi } : {}),
+    ...(spawn.antigravity ? { antigravity: spawn.antigravity, agentBusyRetryDelaysMs: [] } : {}),
     catId,
     pool,
+    clientId,
     poolKey: bootstrap.poolKey,
     projectRoot: bootstrap.projectRoot,
     mcpWhitelist: acpConfig.mcpWhitelist ?? [],
     providerName: config.clientId === 'acp' ? 'acp' : config.clientId,
     modelName: spawn.sessionModel ?? config.defaultModel ?? 'acp',
-    sessionModel: spawn.sessionModel,
+    // iCode: modelProfileId is the session/set_model target (iCode model
+    // configuration id), distinct from defaultModel (display/audit model name).
+    // The factory rejects iCode members without it, so this is always defined.
+    sessionModel: acpConfig.protocolAdapter === 'icode' ? icodeModelProfileId : spawn.sessionModel,
+    protocolAdapter: acpConfig.protocolAdapter,
+    executionApproval: config.executionApproval ?? 'auto',
+    defaultPermissionDecision:
+      acpConfig.protocolAdapter === 'icode' || acpConfig.permissionPolicy === 'deny' ? 'reject' : 'allow',
     contextBinding: {
       model: effectiveModel,
       ...((config.clientId === 'opencode' || config.clientId === 'kimi') && spawn.contextPolicy?.windowTokens
@@ -324,4 +505,14 @@ export async function createAcpServiceForConfig(
     // promptStream uses it as the authoritative no-event termination threshold.
     idleTtlMs: acpConfig.pool?.idleTtlMs ?? DEFAULT_ACP_IDLE_TTL_MS,
   });
+  const captureOptions = service.captureInvocationOptions.bind(service);
+  service.captureInvocationOptions = async (options) => {
+    if ('accountRef' in options && options.accountRef !== accountSource.account?.id)
+      throw new ExecutionAdmissionConflict('ACP selected account changed; refresh this member before admission.');
+    assertConstructionCurrent();
+    const captured = await captureOptions(options);
+    assertConstructionCurrent();
+    return captured;
+  };
+  return bindAcpServicePoolLease(service, lease);
 }

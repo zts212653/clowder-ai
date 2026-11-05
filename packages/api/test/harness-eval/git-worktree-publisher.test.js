@@ -46,7 +46,7 @@ function refExists(repoRoot, refName) {
 function createTestPublisher(createGitWorktreePublisher, repoRoot, overrides = {}) {
   return createGitWorktreePublisher({
     repoRoot,
-    expectedRepoFullName: 'zts212653/cat-cafe',
+    expectedRepoFullName: 'zts212653/clowder-ai',
     contractRunner: async () => {},
     ...overrides,
   });
@@ -261,7 +261,7 @@ exit 97
       );
       assert.deepEqual(publishedStatuses, [
         {
-          repoFullName: 'zts212653/cat-cafe',
+          repoFullName: 'zts212653/clowder-ai',
           headSha: remoteBranchSha,
           statuses: [
             {

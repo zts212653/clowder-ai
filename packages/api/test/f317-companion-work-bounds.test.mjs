@@ -31,7 +31,7 @@ test('an exhausted artifact window with no publications is unknown, not proven e
     f.messages.append({
       userId: 'owner',
       threadId: f.thread.id,
-      catId: null,
+      from: { kind: 'user', userId: 'owner' },
       content: '没有产物的普通聊天',
       mentions: [],
       timestamp: 1000 + i,

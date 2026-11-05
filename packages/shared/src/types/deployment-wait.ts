@@ -125,6 +125,7 @@ export interface DeploymentWaitObservationProjection {
 
 /** Read-only Hub projection. Task and deployment owners remain the only writers. */
 export interface DeploymentWaitItemProjection {
+  readonly projectPath?: string;
   readonly taskId: string;
   readonly threadId: string;
   readonly threadTitle: string | null;
@@ -152,11 +153,13 @@ export interface DeploymentCandidateProjection {
   readonly unknownCount: number;
 }
 
-export interface DeploymentWaitListResponse {
-  readonly projectPath: string;
+export type DeploymentWaitListResponse = {
   readonly items: readonly DeploymentWaitItemProjection[];
   readonly candidate: DeploymentCandidateProjection | null;
-}
+} & (
+  | { readonly scope?: 'project'; readonly projectPath: string }
+  | { readonly scope: 'all'; readonly projectPath: null }
+);
 
 export type DeploymentWaitEvaluation =
   | {

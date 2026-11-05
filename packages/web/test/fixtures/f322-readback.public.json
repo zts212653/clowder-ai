@@ -5,7 +5,12 @@
     "kind": "public_safe_capture_projection",
     "version": 1,
     "producer": "packages/api/test/f322-reply-output-readback.journey.mjs",
-    "transformations": ["consumer field allowlist", "consistent identity aliases", "wall clock translation"],
+    "transformations": [
+      "consumer field allowlist",
+      "consistent identity aliases",
+      "wall clock translation",
+      "MessageFrom projection of legacy agent rows"
+    ],
     "originalArchive": "retained privately; this projection is not the original capture"
   },
   "traces": [
@@ -317,6 +322,10 @@
         "catId": "codex",
         "content": "检查 **日志** 🐾。\n\n保留 **答案段** 🐾。\n\n第二段完整回答。\n\n[Sol/gpt-6.1-sol🐾]",
         "origin": "stream",
+        "from": {
+          "kind": "agent",
+          "catId": "codex"
+        },
         "id": "0001700000000000-000000-00000000",
         "timestamp": 1700000000000,
         "extra": {
@@ -426,6 +435,10 @@
           "content": "检查 **日志** 🐾。\n\n保留 **答案段** 🐾。\n\n第二段完整回答。\n\n[Sol/gpt-6.1-sol🐾]",
           "origin": "stream",
           "isDraft": true,
+          "from": {
+            "kind": "agent",
+            "catId": "codex"
+          },
           "id": "draft-child-public-readback-serial",
           "timestamp": 1700000000038,
           "extra": {
@@ -835,6 +848,10 @@
         "catId": "codex",
         "content": "检查 **日志** 🐾。\n\n保留 **答案段** 🐾。\n\n第二段完整回答。\n\n[Sol/gpt-6.1-sol🐾]",
         "origin": "stream",
+        "from": {
+          "kind": "agent",
+          "catId": "codex"
+        },
         "id": "0001700000000195-000001-00000000",
         "timestamp": 1700000000195,
         "extra": {
@@ -945,6 +962,10 @@
           "content": "检查 **日志** 🐾。\n\n保留 **答案段** 🐾。\n\n第二段完整回答。\n\n[Sol/gpt-6.1-sol🐾]",
           "origin": "stream",
           "isDraft": true,
+          "from": {
+            "kind": "agent",
+            "catId": "codex"
+          },
           "id": "draft-child-public-readback-parallel",
           "timestamp": 1700000000204,
           "extra": {

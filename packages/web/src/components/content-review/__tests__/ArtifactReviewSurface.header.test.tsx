@@ -14,7 +14,8 @@ vi.mock('../useArtifactReview', () => ({
   useArtifactReview: (reviewId: string) => mocks.controller(reviewId),
   reviewDraftPrefix: (user: string, id: string) => `cat-cafe:review:${user}:${id}:`,
 }));
-vi.mock('../useReviewMediaSource', () => ({
+vi.mock('../useReviewMediaSource', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../useReviewMediaSource')>()),
   useReviewMediaSource: () => ({ src: 'blob:original-owner-media', error: null }),
 }));
 vi.mock('@/utils/api-client', () => ({
@@ -134,7 +135,14 @@ it('uses the same visible owner and host name from comparison', async () => {
   await act(async () =>
     root.render(<ArtifactReviewSurface reviewId="review-one" title="发布入口实看" onBack={vi.fn()} />),
   );
-  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="对比版本"]')?.click());
+  const versions = container.querySelector<HTMLSelectElement>('select[aria-label="作品版本"]');
+  expect(versions).not.toBeNull();
+  await act(async () => {
+    if (versions) {
+      versions.value = 'compare';
+      versions.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  });
   const compare = container.querySelector('[data-testid="artifact-media-compare"]');
   expect(compare).not.toBeNull();
   await act(async () =>
@@ -184,7 +192,14 @@ it('keeps the same Task context chooser in details instead of another permanent 
     ),
   );
   expect(container.querySelector('[aria-label="作品讨论上下文"]')).toBeNull();
-  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="审阅详情"]')?.click());
+  const versions = container.querySelector<HTMLSelectElement>('select[aria-label="作品版本"]');
+  expect(versions).not.toBeNull();
+  await act(async () => {
+    if (versions) {
+      versions.value = 'details';
+      versions.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  });
   expect(container.querySelector('[aria-label="版本与历史"] [aria-label="作品讨论上下文"]')).not.toBeNull();
   expect(mocks.controller().act).not.toHaveBeenCalled();
 });

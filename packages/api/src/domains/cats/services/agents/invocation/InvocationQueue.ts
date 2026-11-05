@@ -21,9 +21,10 @@ import type {
   QueueAuthorIntent,
   QueueAuthorIntentFallbackReason,
   QueueTargetAttemptTerminalReason,
+  RoutingAdmissionProvenanceV1,
   WaitContinuationCarrierV1,
 } from '@cat-cafe/shared';
-import { isMessageFrom } from '@cat-cafe/shared';
+import { isMessageFrom, routingAdmissionProvenanceV1Schema } from '@cat-cafe/shared';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import type { CallerTraceContext } from '../../../../../infrastructure/telemetry/genai-semconv.js';
 import {
@@ -36,12 +37,17 @@ import {
   actionSuccessorFencesMatch,
 } from '../../../../ball-custody/ActionSuccessorAdmissionContract.js';
 import type { CloudDispatchProvenance } from '../../cloud-bridge/types.js';
+import type { LifecycleAppendRecoveryInput } from '../../stores/lifecycle-append-recovery.js';
+import { type LifecycleWakeCoverageInput, ordinaryWakeCoverageEligible } from '../../stores/lifecycle-wake-coverage.js';
 import {
   type AppendMessageInput,
   assertQueueMessageReplay,
   type IMessageStore,
+  isTimelinePublished,
+  LifecycleResponseInputsChangedError,
   type LifecycleResponseTerminalPatch,
   messageIdempotencyScope,
+  reusesProseRouting,
   type StoredMessage,
 } from '../../stores/ports/MessageStore.js';
 import type { ToolExecutionPolicy } from '../../types.js';
@@ -57,8 +63,21 @@ import {
 } from './queue-ledger/QueueLedger.js';
 import { createQueueLedgerAdmission } from './queue-ledger/QueueLedgerAdmission.js';
 import { assertQueueLedgerExecutionScope } from './queue-ledger/QueueLedgerValidation.js';
+import { isOwnerRecoverableRoutingTarget } from './queue-routing-recovery-policy.js';
 
 export type QueueEntry = QueueLedgerEntry;
+
+/** Sent or uncertain input still belongs to its original run, even while its row is queued. */
+export function hasInFlightLifecycleAppend(entry: Pick<QueueEntry, 'delivery'>): boolean {
+  return (
+    hasPendingLifecycleAppend(entry) ||
+    Object.values(entry.delivery.appendRecoveryByTarget ?? {}).some((failure) => failure.acceptance === 'unknown')
+  );
+}
+
+function hasPendingLifecycleAppend(entry: Pick<QueueEntry, 'delivery'>): boolean {
+  return Object.keys(entry.delivery.appendPendingByTarget ?? {}).length > 0;
+}
 
 type QueueAttemptSettlementOutcome = 'handled' | 'failed' | 'interrupted' | 'cancelled';
 
@@ -74,6 +93,10 @@ type LifecycleTargetRetirementResult =
   | { outcome: 'state_changed' };
 
 export interface QueueEnqueueInput {
+  /** Server-owned deliberate repeat keeps the originally selected recipient. */
+  exactTargets?: boolean;
+  /** A public named recipient passed preflight; later unavailability must not choose another member. */
+  allowConversationFallback?: false;
   /** Consumer observers register after commit and before the shared drain notification. Not persisted. */
   onQueueEntriesAdmitted?: (entries: readonly QueueEntry[], message?: StoredMessage) => void | Promise<void>;
   threadId: string;
@@ -222,9 +245,13 @@ export function isSystemPinnedQueueEntry(entry: Pick<QueueEntry, 'from' | 'sourc
  * attempt is terminal-failed. The entry itself may still carry eligible siblings
  * or remain visible to lifecycle/recovery code.
  */
-export function isOrdinaryQueueTargetEligible(entry: Pick<QueueEntry, 'status' | 'targets'>, catId: string): boolean {
+export function isOrdinaryQueueTargetEligible(
+  entry: Pick<QueueEntry, 'status' | 'targets' | 'delivery'>,
+  catId: string,
+): boolean {
   return (
     (entry.status === 'queued' || entry.status === 'claimed') &&
+    !entry.delivery.routingHeldTargetIds?.includes(catId) &&
     (entry.targets.length === 0 || entry.targets.includes(catId))
   );
 }
@@ -378,6 +405,34 @@ export class InvocationQueue {
     );
   }
 
+  private resolveAdmissionInput(input: QueueEnqueueInput): QueueEnqueueInput {
+    if (!this.admissionPolicy.resolvePreResolvedTargets) return input;
+    const implicit =
+      input.from.kind === 'system' &&
+      (input.kind === 'private_input' || input.kind === 'conversation_input') &&
+      !input.exactTargets &&
+      input.allowConversationFallback !== false &&
+      !input.executionScope &&
+      !input.actionSuccessorFence &&
+      !input.waitContinuationCarrier &&
+      !input.cloudDispatchProvenance &&
+      !input.requiresExactCloudDispatchProvenance &&
+      !input.liveSessionId &&
+      !input.a2aParentInvocationId &&
+      Object.keys(input.authorIntentByCatId ?? {}).length === 0 &&
+      input.sourceCategory !== 'a2a_failure';
+    const targetCats = this.admissionPolicy.resolvePreResolvedTargets(input.targetCats, implicit);
+    if (input.targetCats.length > 0 && targetCats.length === 0) throw new Error('Queue admission has no valid target');
+    return { ...input, targetCats };
+  }
+
+  /** A receipt probe carries the immutable producer request, before any current routing choice. */
+  private privateAdmissionProbe(input: QueueEnqueueInput, sourceId: string, enqueuedAt: number) {
+    return input.kind === 'private_input'
+      ? this.createLedgerRows(input, sourceId, enqueuedAt, undefined, undefined, false, undefined, false)[0]!
+      : null;
+  }
+
   private createLedgerRows(
     input: QueueEnqueueInput,
     sourceId: string,
@@ -386,11 +441,20 @@ export class InvocationQueue {
     replayEntries?: readonly QueueLedgerEntry[],
     reuseResolvedTargets = false,
     requestedTargetCats?: readonly string[],
+    resolveTargets = true,
   ): QueueLedgerEntry[] {
     InvocationQueue.requireAdmissionContract({ ...input, messageId: messageId ?? input.messageId });
     // A stable source reuses its winning policy, including an exact parent or
     // fallback. Only genuinely new admissions consult the current defaults.
     const replay = replayEntries?.find((entry) => entry.id === queueEntryId(sourceId));
+    if (this.admissionPolicy.resolvePreResolvedTargets) {
+      requestedTargetCats ??= input.targetCats;
+      if (replay && !isDeepStrictEqual(replay.payload.requestedTargetCats ?? replay.targets, requestedTargetCats)) {
+        throw new Error(`Queue admission identity conflict: ${sourceId}`);
+      }
+      if (resolveTargets)
+        input = replay ? { ...input, targetCats: [...replay.targets] } : this.resolveAdmissionInput(input);
+    }
     if (
       requestedTargetCats &&
       replay?.payload.requestedTargetCats &&
@@ -430,7 +494,9 @@ export class InvocationQueue {
         : {}),
       content: input.content,
       ...(messageId ? { messageId } : {}),
-      ...(input.routingWarnings ? { routingWarnings: input.routingWarnings } : {}),
+      ...((replay ? replay.payload.routingWarnings : input.routingWarnings)
+        ? { routingWarnings: replay ? replay.payload.routingWarnings : input.routingWarnings }
+        : {}),
       ...(authorIntentByCatId ? { authorIntentByCatId } : {}),
       intent: input.intent,
       ownerAuthProvenance: input.ownerAuthProvenance,
@@ -509,7 +575,17 @@ export class InvocationQueue {
       const terminal = await this.ledgerStore.commit(row.threadId, row.id, row.claimId, 'withdrawn', Date.now());
       return terminal.outcome === 'updated' ? [terminal.entry] : [];
     }
-    const dispatchedTargets = new Set(source?.lifecycle?.dispatchRefs?.map((ref) => ref.targetId) ?? []);
+    const dispatchedTargets = new Set(
+      source?.lifecycle?.dispatchRefs
+        ?.filter(
+          (ref) =>
+            !row.delivery.appendPendingByTarget?.[ref.targetId] ||
+            ref.appendAcceptance === 'accepted' ||
+            (!row.delivery.appendPendingByTarget?.[ref.targetId]?.requiresCompletion &&
+              ref.inputRead?.status === 'read'),
+        )
+        .map((ref) => ref.targetId) ?? [],
+    );
     const claimedTargets = row.claimedTargetIds ?? [];
     if (claimedTargets.length > 0 && claimedTargets.every((targetId) => dispatchedTargets.has(targetId))) {
       // A response lifecycle is the durable receiver. A crash after that
@@ -533,31 +609,32 @@ export class InvocationQueue {
     threadId: string,
     entryIds: readonly string[],
     messageStore: Pick<IMessageStore, 'getById'>,
+    expectedAttempts?: readonly QueueEntry[],
   ): Promise<boolean> {
     let converged = true;
     for (const entryId of entryIds) {
       const row = await this.ledgerStore.get(threadId, entryId);
+      const expected = expectedAttempts?.find((attempt) => attempt.id === entryId);
+      // A delayed recovery belongs to its original claim, not whichever sibling now owns the row.
+      if (expectedAttempts && row?.status === 'claimed' && row.claimId !== expected?.claimId) continue;
       if (!row) {
         this.ledgerClaimIds.delete(entryId);
         this.removeCachedEntry(threadId, entryId);
-        this.forgetAdmittedEntries(threadId, entryId);
         continue;
       }
       if (row.status !== 'claimed' || !row.claimId) {
         this.ledgerClaimIds.delete(entryId);
         this.removeCachedEntry(threadId, entryId);
-        this.forgetAdmittedEntries(threadId, entryId);
         if (row.status === 'queued') this.cacheLedgerEntries([row]);
         else converged = false;
         continue;
       }
       const remaining = await this.reconcileClaimedLedgerEntry(row, messageStore);
-      this.ledgerClaimIds.delete(entryId);
+      if (this.ledgerClaimIds.get(entryId) === row.claimId) this.ledgerClaimIds.delete(entryId);
       this.removeCachedEntry(threadId, entryId);
-      this.forgetAdmittedEntries(threadId, entryId);
       this.cacheLedgerEntries(remaining);
       const durable = await this.ledgerStore.get(threadId, entryId);
-      if (durable?.status === 'claimed') converged = false;
+      if (durable?.status === 'claimed' && durable.claimId === row.claimId) converged = false;
     }
     return converged;
   }
@@ -566,14 +643,19 @@ export class InvocationQueue {
     const sourceId = InvocationQueue.persistentSourceId(input);
     const enqueuedAt = this.nextEnqueuedAt();
     const existing = await this.ledgerStore.get(input.threadId, queueEntryId(sourceId));
-    const rows = this.createLedgerRows(
-      input,
-      sourceId,
-      enqueuedAt,
-      input.messageId ?? undefined,
-      existing ? [existing] : undefined,
-    );
-    const result = await this.ledgerStore.enqueue(rows, input.from.kind === 'user' ? MAX_QUEUE_DEPTH : undefined);
+    const probe = this.privateAdmissionProbe(input, sourceId, enqueuedAt);
+    const replay = probe ? await this.ledgerStore.replayPrivateAdmission(probe) : null;
+    const rows = replay
+      ? []
+      : this.createLedgerRows(
+          input,
+          sourceId,
+          enqueuedAt,
+          input.messageId ?? undefined,
+          existing ? [existing] : undefined,
+        );
+    const result =
+      replay ?? (await this.ledgerStore.enqueue(rows, input.from.kind === 'user' ? MAX_QUEUE_DEPTH : undefined));
     if (result.outcome === 'full') return { outcome: 'full' };
     if (result.outcome === 'conflict') throw new Error(`Queue admission identity conflict: ${sourceId}`);
     const entries = this.cacheLedgerEntries(result.entries);
@@ -605,7 +687,15 @@ export class InvocationQueue {
     messageStore: IMessageStore,
   ): Promise<EnqueueResult & { entries?: QueueEntry[]; notice?: StoredMessage }> {
     const sourceId = InvocationQueue.persistentSourceId(input);
-    const rows = this.createLedgerRows(input, sourceId, this.nextEnqueuedAt(), undefined);
+    const enqueuedAt = this.nextEnqueuedAt();
+    const probe = this.privateAdmissionProbe(input, sourceId, enqueuedAt);
+    const replay = probe ? await this.ledgerStore.replayPrivateAdmission(probe) : null;
+    if (replay?.outcome === 'conflict') throw new Error(`Queue admission identity conflict: ${sourceId}`);
+    const existing = await this.ledgerStore.get(input.threadId, queueEntryId(sourceId));
+    const rows =
+      replay && probe
+        ? [probe]
+        : this.createLedgerRows(input, sourceId, enqueuedAt, undefined, existing ? [existing] : undefined);
     const result = await messageStore.appendNoticeWithPrivateQueueAdmission(notice, rows, this.ledgerStore);
     if (result.outcome === 'full') return { outcome: 'full' };
     const entries = this.cacheLedgerEntries(result.entries);
@@ -626,15 +716,21 @@ export class InvocationQueue {
       throw new Error('synchronous durable Queue admission requires the in-memory ledger');
     }
     const sourceId = InvocationQueue.persistentSourceId(input);
+    const enqueuedAt = this.nextEnqueuedAt();
+    const probe = this.privateAdmissionProbe(input, sourceId, enqueuedAt);
+    const replay = probe ? this.ledgerStore.replayPrivateAdmissionNow(probe) : null;
     const existing = this.ledgerStore.getNow(input.threadId, queueEntryId(sourceId));
-    const rows = this.createLedgerRows(
-      input,
-      sourceId,
-      this.nextEnqueuedAt(),
-      input.messageId ?? undefined,
-      existing ? [existing] : undefined,
-    );
-    const result = this.ledgerStore.enqueueNow(rows, input.from.kind === 'user' ? MAX_QUEUE_DEPTH : undefined);
+    const rows = replay
+      ? []
+      : this.createLedgerRows(
+          input,
+          sourceId,
+          enqueuedAt,
+          input.messageId ?? undefined,
+          existing ? [existing] : undefined,
+        );
+    const result =
+      replay ?? this.ledgerStore.enqueueNow(rows, input.from.kind === 'user' ? MAX_QUEUE_DEPTH : undefined);
     if (result.outcome === 'full') return { outcome: 'full' };
     if (result.outcome === 'conflict') throw new Error(`Queue admission identity conflict: ${sourceId}`);
     const entries = this.cacheLedgerEntries(result.entries);
@@ -688,6 +784,19 @@ export class InvocationQueue {
     wake();
   }
 
+  /**
+   * Project rows already committed by a cross-owner atomic transaction.
+   * This method never writes custody; it only updates the process cache and emits the ordinary drain signal.
+   */
+  async adoptCommittedAdmission(entries: readonly QueueLedgerEntry[], message: StoredMessage): Promise<QueueEntry[]> {
+    if (entries.length === 0 || entries.some((entry) => entry.threadId !== message.threadId)) {
+      throw new Error('committed Queue admission must contain one message-scoped thread');
+    }
+    const projected = this.cacheLedgerEntries(entries);
+    await this.notifyAdmission(message.threadId, projected, message);
+    return projected;
+  }
+
   /** One storage transaction for a queued Message and its complete Queue fan-out. */
   async send(
     messageStore: IMessageStore,
@@ -713,7 +822,8 @@ export class InvocationQueue {
       throw new Error('Whisper Queue targets must be authorized recipients');
     }
     const exactTargets = Boolean(
-      message.visibility === 'whisper' ||
+      input.exactTargets ||
+        message.visibility === 'whisper' ||
         input.executionScope ||
         input.actionSuccessorFence ||
         input.waitContinuationCarrier ||
@@ -725,6 +835,9 @@ export class InvocationQueue {
         input.kind === 'message_wake',
     );
     const reuseResolvedTargets = !exactTargets;
+    if (exactTargets && message.extra?.routingTargetSource === 'prose') {
+      throw new Error('Exact Queue admission cannot use prose routing provenance');
+    }
     const requestedTargetCats = [...input.targetCats];
     const committed = message.idempotencyKey
       ? await messageStore.getByIdempotencyKey(input.userId, messageIdempotencyScope(message), message.idempotencyKey)
@@ -738,26 +851,41 @@ export class InvocationQueue {
       assertQueueMessageReplay(committed, message);
       return { outcome: 'enqueued', message: committed, entries: [], deduped: true };
     }
+    if (!committedRow && !exactTargets && input.from.kind === 'system') input = this.resolveAdmissionInput(input);
     input = {
       ...input,
-      targetCats:
-        committedRow && !exactTargets
-          ? [...committedRow.targets]
-          : await this.resolveSendTargets(input.targetCats, input.threadId, input.content, exactTargets),
+      targetCats: committedRow
+        ? [...committedRow.targets]
+        : await this.resolveSendTargets(
+            input.targetCats,
+            input.threadId,
+            input.content,
+            exactTargets || input.allowConversationFallback === false,
+          ),
     };
     const enqueuedAt = this.nextEnqueuedAt();
     const result = await messageStore.appendWithQueueLedgerAdmission(
       message,
-      (messageId, replayEntries) =>
-        this.createLedgerRows(
-          input,
+      (messageId, replayEntries, replaySource) => {
+        // The store supplies the actual winner, including commits after our preflight.
+        // Only an unchanged prose request may reuse its derived expansion and intent.
+        const reuseProse = replaySource && reusesProseRouting(replaySource, message);
+        const replay = reuseProse ? replayEntries?.find((entry) => entry.id === queueEntryId(messageId)) : undefined;
+        // Async policy already selected canonical recipients. Validate those identities
+        // at commit without interpreting a newly disabled successor as another predecessor.
+        const admissionInput =
+          committed || replaySource ? input : this.resolveAdmissionInput({ ...input, exactTargets: true });
+        return this.createLedgerRows(
+          replay ? { ...admissionInput, intent: replay.execution.intent } : admissionInput,
           messageId,
           enqueuedAt,
           messageId,
           replayEntries,
           reuseResolvedTargets,
-          requestedTargetCats,
-        ),
+          reuseProse ? (replay?.payload.requestedTargetCats ?? replaySource.mentions) : requestedTargetCats,
+          false,
+        );
+      },
       this.ledgerStore,
       input.from.kind === 'user' ? MAX_QUEUE_DEPTH : undefined,
     );
@@ -816,6 +944,8 @@ export class InvocationQueue {
       input.from.kind === 'user' ? MAX_QUEUE_DEPTH : undefined,
     );
     if (result.kind === 'full') return { outcome: 'full' };
+    if (result.kind === 'conflict' && result.reason === 'inputs_changed')
+      throw new LifecycleResponseInputsChangedError();
     if (result.kind !== 'applied' && result.kind !== 'replayed') {
       throw new Error(
         `lifecycle response terminal Queue admission conflict: ${result.kind}:${'reason' in result ? result.reason : 'missing'}`,
@@ -903,6 +1033,12 @@ export class InvocationQueue {
     }
     const anchor = await this.ledgerStore.get(input.threadId, entryId);
     if (!anchor) return { outcome: 'not_found' as const, entries: [] };
+    if (
+      this.admissionPolicy.resolvePreResolvedTargets &&
+      !this.admissionPolicy.resolvePreResolvedTargets([bindTargetCatId], false).includes(bindTargetCatId)
+    ) {
+      throw new Error('Queue target expansion has no valid target');
+    }
     const siblingInput: QueueEnqueueInput = { ...input, sourceId: messageId, messageId };
     const siblingRows =
       siblingInput.targetCats.length > 0
@@ -941,12 +1077,21 @@ export class InvocationQueue {
     if (current && queueEntryOwnerId(current) !== userId) {
       throw new Error('Queue target reconciliation owner mismatch');
     }
+    const resolveTargets = this.admissionPolicy.resolvePreResolvedTargets;
+    const validAdditions = resolveTargets
+      ? addTargetIds.filter((id) => resolveTargets([id], false).includes(id))
+      : addTargetIds;
+    const validIntent = Object.fromEntries(
+      Object.entries(authorIntentByTarget).filter(
+        ([id]) => validAdditions.includes(id) || current?.targets.includes(id),
+      ),
+    );
     const result = await this.ledgerStore.reconcileTargets(
       threadId,
       entryId,
-      addTargetIds,
+      validAdditions,
       removeTargetIds,
-      authorIntentByTarget,
+      validIntent,
     );
     if (result.outcome === 'updated' || result.outcome === 'replayed') {
       this.removeCachedEntry(threadId, entryId);
@@ -1051,6 +1196,21 @@ export class InvocationQueue {
     return removed.map((entry) => structuredClone(entry));
   }
 
+  /** A completed execution releases only its local attempts; pending or live siblings keep theirs. */
+  forgetAdmittedTargets(threadId: string, entryId: string, targetCatIds: readonly string[]): void {
+    const entries = this.admittedEntries.get(entryId);
+    if (!entries) return;
+    const completed = new Set(targetCatIds);
+    const remaining = entries.filter((entry) => {
+      if (entry.threadId !== threadId) return true;
+      entry.targets = entry.targets.filter((target) => !completed.has(target));
+      for (const target of completed) this.admittedAttemptEvidence.get(entry)?.delete(target);
+      return entry.targets.length > 0;
+    });
+    if (remaining.length === 0) this.admittedEntries.delete(entryId);
+    else this.admittedEntries.set(entryId, remaining);
+  }
+
   private cacheLedgerClaim(entries: readonly QueueLedgerEntry[], claimId: string): QueueEntry[] {
     const projected = this.cacheLedgerEntries(entries);
     for (const entry of projected) {
@@ -1071,6 +1231,7 @@ export class InvocationQueue {
     entryId: string,
     targetCatId: string,
     claimedAt = Date.now(),
+    allowRoutingHeldTarget = false,
   ): Promise<DurableSteerClaimResult> {
     const entry = this.findEntry(threadId, userId, entryId);
     if (!entry) return { outcome: 'rejected', reason: 'entry_not_found' };
@@ -1079,7 +1240,10 @@ export class InvocationQueue {
     if (
       isSystemPinnedQueueEntry(entry) ||
       entry.execution.liveSessionId ||
-      (!assignsTargetlessConversation && !isOrdinaryQueueTargetEligible(entry, targetCatId))
+      (!assignsTargetlessConversation &&
+        !(allowRoutingHeldTarget
+          ? entry.targets.includes(targetCatId)
+          : isOrdinaryQueueTargetEligible(entry, targetCatId)))
     ) {
       return { outcome: 'rejected', reason: 'entry_ineligible' };
     }
@@ -1159,6 +1323,28 @@ export class InvocationQueue {
     return result?.changed ?? false;
   }
 
+  /** Preserve a refused pending target under the same durable claim, never a second ledger. */
+  async holdClaimedRoutingTarget(
+    threadId: string,
+    entryIds: readonly string[],
+    targetCatId: string,
+    messageStore: Pick<IMessageStore, 'getById'>,
+  ): Promise<void> {
+    for (const entryId of entryIds) {
+      const claimId = this.ledgerClaimIds.get(entryId);
+      const entry = await this.ledgerStore.get(threadId, entryId);
+      if (!entry || !entry.targets.includes(targetCatId)) continue;
+      const source = entry.payload.messageId ? await messageStore.getById(entry.payload.messageId) : null;
+      if (!isOwnerRecoverableRoutingTarget(entry, source, targetCatId)) continue;
+      if (!claimId || entry.claimId !== claimId || !entry.claimedTargetIds?.includes(targetCatId))
+        throw new Error('routing refusal lost its exact Queue claim');
+      entry.delivery.routingHeldTargetIds = [...new Set([...(entry.delivery.routingHeldTargetIds ?? []), targetCatId])];
+      const result = await this.ledgerStore.commit(threadId, entryId, claimId, 'claimed', Date.now(), entry);
+      if (result.outcome !== 'updated') throw new Error('routing refusal could not persist its Queue hold');
+      this.cacheLedgerEntries([result.entry]);
+    }
+  }
+
   async restoreClaimedEntries(threadId: string, entryIds: readonly string[]): Promise<boolean> {
     let restoredAll = true;
     for (const entryId of entryIds) {
@@ -1181,11 +1367,84 @@ export class InvocationQueue {
     return restoredAll;
   }
 
+  /** Persist first-handoff custody before any native call; release its short claim only after History admission. */
+  async prepareLifecycleAppendHandoff(
+    entry: QueueEntry,
+    pending: NonNullable<QueueEntry['delivery']['appendPendingByTarget']>,
+    releaseClaim = false,
+  ): Promise<void> {
+    const current = await this.ledgerStore.get(entry.threadId, entry.id);
+    const claimId = this.ledgerClaimIds.get(entry.id);
+    if (!current || current.status !== 'claimed' || !claimId || current.claimId !== claimId)
+      throw new Error('Append preparation lost its original Queue claim');
+    const replacement = structuredClone(current);
+    replacement.delivery.appendPendingByTarget = { ...replacement.delivery.appendPendingByTarget, ...pending };
+    replacement.delivery.routingHeldTargetIds = [
+      ...new Set([...(replacement.delivery.routingHeldTargetIds ?? []), ...Object.keys(pending)]),
+    ];
+    const result = await this.ledgerStore.commit(entry.threadId, entry.id, claimId, 'claimed', Date.now(), replacement);
+    if (result.outcome !== 'updated') throw new Error('Append preparation did not commit');
+    this.cacheLedgerEntries([result.entry]);
+    if (releaseClaim && !(await this.restoreClaimedEntries(entry.threadId, [entry.id])))
+      throw new Error('Append handoff claim release did not commit');
+  }
+
+  async recoverLifecycleAppend(messageStore: IMessageStore, input: LifecycleAppendRecoveryInput) {
+    // A lost store reply cannot justify dropping the original Queue owner. Replay
+    // this one atomic transaction, never the provider call or source admission.
+    const commit = () => messageStore.commitLifecycleAppendRecovery(input, this.ledgerStore);
+    let result;
+    try {
+      result = await commit();
+    } catch {
+      result = await commit();
+    }
+    if (result.kind === 'applied' || result.kind === 'replayed') {
+      if (result.entry.status !== 'claimed') this.ledgerClaimIds.delete(result.entry.id);
+      this.forgetAdmittedTargets(result.entry.threadId, result.entry.id, [input.failure.targetId]);
+      this.cacheLedgerEntries([result.entry]);
+    }
+    return result;
+  }
+
+  async retireReadAppendRecovery(
+    threadId: string,
+    messageId: string,
+    targetId: string,
+    responseMessageId: string,
+    completed = false,
+  ): Promise<boolean> {
+    const entryId = queueEntryId(messageId);
+    const entry = await this.ledgerStore.get(threadId, entryId);
+    if (
+      !entry ||
+      (entry.delivery.appendRecoveryByTarget?.[targetId]?.responseMessageId !== responseMessageId &&
+        entry.delivery.appendPendingByTarget?.[targetId]?.responseMessageId !== responseMessageId)
+    )
+      return false;
+    if (entry.delivery.appendPendingByTarget?.[targetId]?.requiresCompletion && !completed) return false;
+    const result = await this.ledgerStore.reconcileTargets(threadId, entryId, [], [targetId], {});
+    if (result.outcome !== 'updated' && result.outcome !== 'replayed') return false;
+    this.removeCachedEntry(threadId, entryId);
+    if (result.entry) this.cacheLedgerEntries([result.entry]);
+    return true;
+  }
+
   /** Claim one queued row before an external withdrawal side effect. */
   async claimQueuedEntryForWithdrawal(threadId: string, userId: string, entryId: string): Promise<QueueEntry | null> {
     const entry = this.findEntry(threadId, userId, entryId);
-    if (!entry || entry.status !== 'queued') return null;
-    return this.claimLedgerEntry(entry);
+    // Withdrawal stops future work; an uncertain *finished* handoff stays in
+    // History and does not permanently veto this owner action. True recall
+    // still uses hasInFlightLifecycleAppend because it retracts source content.
+    if (!entry || entry.status !== 'queued' || hasPendingLifecycleAppend(entry)) return null;
+    const claimed = await this.claimLedgerEntry(entry);
+    // The cache can predate a concurrent Append. Inspect the canonical claim
+    // before any History cancellation or ledger withdrawal side effect.
+    if (claimed && hasPendingLifecycleAppend(claimed)) {
+      await this.restoreClaimedEntries(threadId, [claimed.id]);
+      return null;
+    }
+    return claimed;
   }
 
   /** Freeze the source entry for one message before its withdrawal side effect. */
@@ -1201,7 +1460,8 @@ export class InvocationQueue {
     if (matches.length === 0 || matches.some((entry) => queueEntryOwnerId(entry) !== userId)) {
       return { outcome: 'not_found' };
     }
-    if (matches.some((entry) => entry.status !== 'queued')) return { outcome: 'processing' };
+    if (matches.some((entry) => entry.status !== 'queued' || hasInFlightLifecycleAppend(entry)))
+      return { outcome: 'processing' };
     const claimId = randomUUID();
     const claimed = await this.ledgerStore.claimPrefix(
       threadId,
@@ -1212,7 +1472,15 @@ export class InvocationQueue {
     if (claimed.outcome !== 'claimed') {
       return { outcome: claimed.outcome === 'not_found' ? 'not_found' : 'processing' };
     }
-    return { outcome: 'claimed', entries: this.cacheLedgerClaim(claimed.entries, claimId) };
+    const entries = this.cacheLedgerClaim(claimed.entries, claimId);
+    if (entries.some(hasInFlightLifecycleAppend)) {
+      await this.restoreClaimedEntries(
+        threadId,
+        entries.map((entry) => entry.id),
+      );
+      return { outcome: 'processing' };
+    }
+    return { outcome: 'claimed', entries };
   }
 
   /** Withdraw every source entry frozen by claimMessageEntriesForWithdrawal. */
@@ -1232,6 +1500,25 @@ export class InvocationQueue {
     if (committed.outcome !== 'updated') return null;
     this.ledgerClaimIds.delete(entryId);
     return this.removeCachedEntry(threadId, entryId);
+  }
+
+  /** Retire one private recipient through the existing target CAS, preserving sibling claims. */
+  async withdrawQueuedPrivateTarget(
+    threadId: string,
+    userId: string,
+    entryId: string,
+    catId: string,
+  ): Promise<QueueEntry | null> {
+    const entry = await this.ledgerStore.get(threadId, entryId);
+    if (entry?.kind !== 'private_input' || queueEntryOwnerId(entry) !== userId || !entry.targets.includes(catId))
+      return null;
+    // Private inputs cannot Append. Target reconciliation atomically refuses
+    // an already claimed recipient while allowing a different sibling to run.
+    const result = await this.ledgerStore.reconcileTargets(threadId, entryId, [], [catId], {});
+    if (result.outcome === 'state_changed') return null;
+    this.removeCachedEntry(threadId, entryId);
+    if ('entry' in result && result.entry) this.cacheLedgerEntries([result.entry]);
+    return result.outcome === 'updated' ? { ...entry, targets: [catId] } : null;
   }
 
   /** Persist explicit ordering through the same claim/commit CAS as dequeue. */
@@ -1260,6 +1547,24 @@ export class InvocationQueue {
     }
     this.cacheLedgerEntries([committed.entry]);
     return true;
+  }
+
+  /** B is optional provenance. A worker that already claimed this row never waits for it. */
+  async recordRoutingAdmissionObservation(
+    threadId: string,
+    userId: string,
+    entryId: string,
+    observation: RoutingAdmissionProvenanceV1,
+  ): Promise<boolean> {
+    const parsed = routingAdmissionProvenanceV1Schema.parse(observation);
+    const result = await this.mutateQueuedLedgerEntry(threadId, userId, entryId, (entry) => {
+      if (entry.delivery.routingAdmission) return false;
+      entry.delivery.routingAdmission = structuredClone(parsed);
+      return true;
+    });
+    // The metadata CAS may briefly win a worker's claim. Restore its ordinary drain notification.
+    if (result) await this.notifyAdmission(threadId, [result.entry]);
+    return result?.changed ?? false;
   }
 
   /**
@@ -1337,6 +1642,53 @@ export class InvocationQueue {
     return { changed, newlySeen };
   }
 
+  /** Durable pending targets whose ordinary public bodies may be covered by this exact projection. */
+  async projectedWakeCandidates(
+    threadId: string,
+    userId: string,
+    targetId: string,
+    messageIds: readonly string[],
+    messageStore: Pick<IMessageStore, 'getById'>,
+  ) {
+    const indexed = await this.ledgerStore.getByMessageIds(threadId, messageIds);
+    const candidates = messageIds.flatMap((messageId) =>
+      (indexed.get(messageId) ?? [])
+        .filter(
+          (entry) =>
+            entry.owner.kind === 'user' &&
+            entry.owner.userId === userId &&
+            ordinaryWakeCoverageEligible(entry, targetId),
+        )
+        .map((entry) => ({ entryId: entry.id, messageId })),
+    );
+    const sources = await Promise.all(candidates.map((candidate) => messageStore.getById(candidate.messageId)));
+    return candidates.filter((_, index) => {
+      const source = sources[index];
+      return (
+        source &&
+        source.userId === userId &&
+        source.threadId === threadId &&
+        source.visibility !== 'whisper' &&
+        isTimelinePublished(source) &&
+        !source.recall &&
+        !source._tombstone &&
+        !source.deletedAt
+      );
+    });
+  }
+
+  async commitProjectedWakeCoverage(messageStore: IMessageStore, input: LifecycleWakeCoverageInput) {
+    const result = await messageStore.commitLifecycleWakeCoverage(input, this.ledgerStore);
+    if (result.kind === 'applied' || result.kind === 'replayed') {
+      for (const [index, candidate] of input.entries.entries()) {
+        this.removeCachedEntry(input.threadId, candidate.entryId);
+        const remaining = result.entries[index];
+        if (remaining) this.cacheLedgerEntries([remaining]);
+      }
+    }
+    return result;
+  }
+
   /** Claim one exact pending target on its source entry before binding a full-body read to the active child. */
   async claimExactExposureDurable(
     threadId: string,
@@ -1350,7 +1702,9 @@ export class InvocationQueue {
       !entry ||
       entry.status !== 'queued' ||
       !entry.targets.includes(targetCatId) ||
+      !isOrdinaryQueueTargetEligible(entry, targetCatId) ||
       !isOrdinaryBodyReadEntry(entry) ||
+      entry.delivery.appendRecoveryByTarget?.[targetCatId] ||
       entry.payload.messageId !== messageId
     ) {
       return null;
@@ -1384,10 +1738,43 @@ export class InvocationQueue {
     return { entry: admitted.entry, newlySeen: true };
   }
 
-  async claimPreAdmissionFailureAcrossUsersDurable(threadId: string, entryId: string): Promise<QueueEntry | null> {
-    const best = this.peekOldestAcrossUsers(threadId);
-    if (!best || best.id !== entryId) return null;
-    return this.claimLedgerEntry(best);
+  async claimPreAdmissionFailureAcrossUsersDurable(
+    threadId: string,
+    entryId: string,
+    expectedTargets: readonly string[],
+  ): Promise<QueueEntry | null> {
+    const queued = this.listQueuedAcrossUsers(threadId);
+    const index = queued.findIndex((entry) => entry.id === entryId);
+    const selected = queued[index];
+    // Failure belongs to the resolved pending recipients, never a replacement
+    // added by Steer or a target whose owner has since placed it on hold.
+    const matchesResolvedRecipients = (entry: QueueEntry) =>
+      entry.targets.length === expectedTargets.length &&
+      entry.targets.every((target, position) => target === expectedTargets[position]) &&
+      !entry.delivery.routingHeldTargetIds?.some((target) => entry.targets.includes(target));
+    if (!selected || !matchesResolvedRecipients(selected)) return null;
+    // Recheck the current order after asynchronous target resolution. Disjoint
+    // work may settle, but a targetless or overlapping predecessor is a barrier.
+    if (
+      queued
+        .slice(0, index)
+        .some(
+          (entry) =>
+            entry.targets.length === 0 ||
+            selected.targets.length === 0 ||
+            entry.targets.some((target) => selected.targets.includes(target)),
+        )
+    )
+      return null;
+    const claimed = await this.claimLedgerEntry(selected);
+    if (!claimed) return null;
+    // Claim freezes the durable row. Compare that authoritative snapshot before
+    // publishing any failure; a racing edit remains queued for fresh resolution.
+    if (!matchesResolvedRecipients(claimed)) {
+      await this.rollbackProcessingDurable(threadId, entryId);
+      return null;
+    }
+    return claimed;
   }
 
   /** Durable counterpart of markProcessingAcrossUsers. */
@@ -1674,24 +2061,45 @@ export class InvocationQueue {
     terminalOutcome: QueueAttemptSettlementOutcome = 'handled',
     failureReason?: QueueTargetAttemptTerminalReason,
     terminalAt = Date.now(),
+    expectedAttempt?: QueueEntry,
   ): Promise<QueueEntry | null> {
-    const admitted = this.forgetAdmittedEntries(threadId, entryId);
-    if (admitted[0]) return admitted[0];
-    const snapshot = this.findEntryAcrossUsers(threadId, entryId);
-    if (!snapshot || snapshot.status !== 'claimed') return null;
-    const claimId = this.ledgerClaimIds.get(entryId);
-    if (!claimId) return null;
-    const committed = await this.ledgerStore.commit(threadId, entryId, claimId, 'withdrawn', terminalAt);
+    const snapshot = expectedAttempt ?? this.findEntryAcrossUsers(threadId, entryId);
+    if (!snapshot || snapshot.status !== 'claimed') {
+      if (expectedAttempt) {
+        const admitted = this.findAdmittedEntry(threadId, entryId, expectedAttempt.targets[0]);
+        const removed = admitted ? structuredClone(admitted) : null;
+        this.forgetAdmittedTargets(threadId, entryId, expectedAttempt.targets);
+        return removed;
+      }
+      return this.forgetAdmittedEntries(threadId, entryId)[0] ?? null;
+    }
+    // The attempt carries its original claim. Never borrow a newer sibling's token from the cache.
+    const claimId = snapshot.claimId;
+    const claimedTargetIds = snapshot.claimedTargetIds;
+    if (!claimId || !claimedTargetIds || (claimedTargetIds.length === 0 && snapshot.targets.length > 0)) return null;
+    const committed = await this.ledgerStore.commit(
+      threadId,
+      entryId,
+      claimId,
+      'withdrawn',
+      terminalAt,
+      undefined,
+      // A targetless admission failure retires the empty row under the same claim token.
+      claimedTargetIds.length > 0 ? claimedTargetIds : undefined,
+    );
     if (committed.outcome !== 'updated') return null;
-    this.ledgerClaimIds.delete(entryId);
-    return this.removeCachedEntry(threadId, entryId);
+    if (this.ledgerClaimIds.get(entryId) === claimId) this.ledgerClaimIds.delete(entryId);
+    this.removeCachedEntry(threadId, entryId);
+    const remaining = await this.ledgerStore.get(threadId, entryId);
+    if (remaining) this.cacheLedgerEntries([remaining]);
+    return committed.entry;
   }
 
   async removeProcessedDurable(threadId: string, userId: string, entryId: string): Promise<QueueEntry | null> {
     const snapshot =
       this.getEntrySnapshot(threadId, userId, entryId) ?? this.findAdmittedEntry(threadId, entryId, undefined, userId);
     if (!snapshot) return null;
-    return this.removeProcessedAcrossUsersDurable(threadId, entryId);
+    return this.removeProcessedAcrossUsersDurable(threadId, entryId, 'handled', undefined, Date.now(), snapshot);
   }
 
   /** Terminalize one exact row without manufacturing a rollback path. */
@@ -1918,6 +2326,7 @@ export class InvocationQueue {
     catId: string,
     parentInvocationId: string | undefined,
   ): boolean {
+    if (entry.delivery.appendRecoveryByTarget?.[catId]) return false;
     // All ordinary sources follow the same saved policy and exact-parent fence.
     const authorIntent = entry.delivery.authorIntentByTarget?.[catId];
     return Boolean(
@@ -1970,6 +2379,15 @@ export class InvocationQueue {
       for (const e of q) if (e.status === 'queued') queued.push(e);
     }
     return queued.sort(InvocationQueue.compareEntries).map((entry) => ({ ...entry }));
+  }
+
+  /** Short claims still own their remaining recipients' positions until durable handoff or restoration. */
+  listPendingAcrossUsers(threadId: string): QueueEntry[] {
+    return [...this.queues.values()]
+      .filter((entries) => this.queueMatchesThread(entries, threadId))
+      .flatMap((entries) => entries.filter((entry) => entry.status === 'queued' || entry.status === 'claimed'))
+      .sort(InvocationQueue.compareEntries)
+      .map((entry) => structuredClone(entry));
   }
 
   /** One entry of the thread by id, whichever user owns it. */

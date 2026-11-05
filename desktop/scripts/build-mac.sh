@@ -65,29 +65,27 @@ die()   { err "$*"; exit 1; }
 bold "Step 1/6 — Build web application"
 if [[ $SKIP_WEB -eq 0 ]]; then
   cd "$PROJECT_ROOT"
-  if ! pnpm install --frozen-lockfile; then
-    warn "frozen-lockfile failed, retrying with pnpm install"
-    pnpm install
-  fi
-  pnpm run build
+  pnpm install --frozen-lockfile || die "Frozen dependency installation failed"
+  # API's standalone build re-emits shared output; finish it before Web reads it.
+  CAT_CAFE_DESKTOP_WEB_BUILD=1 pnpm -r --workspace-concurrency=1 run build
   ok "Web application built"
 else
   ok "Skipped (--skip-web)"
 fi
 
-# ─── Step 2: pnpm deploy runtime packages ──────────────────────────────
-bold "Step 2/6 — pnpm deploy runtime packages"
+# A reused ordinary Web build must not bypass the Desktop image profile.
+WEB_BUILD_REVISION="$(git -C "$PROJECT_ROOT" rev-parse HEAD)"
+node "$SCRIPT_DIR/verify-web-build.cjs" "$PROJECT_ROOT/packages/web" "$WEB_BUILD_REVISION" || die "Desktop Web admission failed; rebuild instead of reusing incompatible artifacts"
+
+# ─── Step 2: frozen runtime packages ──────────────────────────────
+bold "Step 2/6 — frozen runtime packages"
 if [[ $SKIP_DEPLOY -eq 0 ]]; then
   mkdir -p "$BUNDLED_DIR"
-  rm -rf "$DEPLOY_ROOT"
-  mkdir -p "$DEPLOY_ROOT"
   cd "$PROJECT_ROOT"
-  for pkg in api web mcp-server; do
-    echo "  Deploying @cat-cafe/$pkg ..."
-    CAT_CAFE_SKIP_NODE_RUNTIME_GUARD=1 \
-      pnpm --filter "@cat-cafe/$pkg" --prod --config.node-linker=hoisted deploy "${DEPLOY_ROOT}/${pkg}" \
-      || die "pnpm deploy @cat-cafe/$pkg failed"
-  done
+  nextDeploy="$BUNDLED_DIR/deploy-$(date +%s)-$$"
+  node desktop/scripts/frozen-runtime-deploy.mjs "$PROJECT_ROOT" "$nextDeploy" || die "Frozen runtime export failed"
+  [[ ! -d "$DEPLOY_ROOT" ]] || mv "$DEPLOY_ROOT" "$BUNDLED_DIR/deploy-before-$(date +%s)-$$"
+  mv "$nextDeploy" "$DEPLOY_ROOT"
   # Web's .next build output is outside the package's "files" field,
   # so pnpm deploy doesn't copy it. Inject manually.
   webNextSrc="${PROJECT_ROOT}/packages/web/.next"
@@ -104,6 +102,9 @@ else
   [[ -d "$DEPLOY_ROOT" ]] || die "bundled/deploy/ missing. Run without --skip-deploy first."
   ok "Skipped (--skip-deploy)"
 fi
+
+# This is the Web tree electron-builder actually packages, including reuse.
+node "$SCRIPT_DIR/verify-web-build.cjs" "$DEPLOY_ROOT/web" "$WEB_BUILD_REVISION" || die "Desktop deploy Web admission failed; rebuild instead of reusing incompatible artifacts"
 
 # ─── Step 3: Bundle Node.js portable (both archs) ──────────────────────
 bold "Step 3/6 — Bundle Node.js portable (arm64 + x64)"
@@ -228,7 +229,7 @@ fi
 cd "$DESKTOP_DIR"
   if [[ ! -d node_modules ]]; then
     echo "  Installing desktop dependencies ..."
-    npm install --include=dev || die "npm install failed in desktop/"
+    npm ci --include=dev || die "npm ci failed in desktop/"
   fi
 
 # electron-builder writes into desktop/dist/. Force a clean output dir.
@@ -237,7 +238,9 @@ rm -rf "${DESKTOP_DIR}/dist"
 # Build .app bundles only (--dir). electron-builder's built-in dmgbuild
 # under-allocates disk image size when afterPack injects large node_modules,
 # causing "No space left on device". We create DMGs ourselves via hdiutil.
-EB_ARGS=("--mac" "dir")
+# Keep the source checkout clean; the requested version belongs to the package.
+VERSION="${CATCAFE_VERSION:-$(node -p "require('./package.json').version")}"
+EB_ARGS=("--mac" "dir" "--config.extraMetadata.version=$VERSION")
 for arch in "${ARCHS[@]}"; do
   EB_ARGS+=("--$arch")
 done
@@ -278,7 +281,6 @@ done
 # prevents ejection. main.js has a runtime guard for this case, but a clear
 # install UI prevents the user from ever hitting that error path.
 mkdir -p "$DIST_DIR"
-VERSION="$(node -p "require('./package.json').version")"
 
 # Creates a simple green drag arrow background for the install DMG using only
 # Python's standard library, avoiding external image dependencies on build
@@ -404,7 +406,7 @@ for arch in "${ARCHS[@]}"; do
   #   2. Convert the writable image to compressed UDZO for distribution.
   rw_dmg="$(mktemp -u).dmg"
   echo "  Creating writable staging DMG for ${arch} ..."
-  hdiutil create -volname "Clowder AI" -srcfolder "$dmg_staging" -ov \
+  hdiutil create -puppetstrings -volname "Clowder AI" -srcfolder "$dmg_staging" -ov \
     -fs HFS+ -format UDRW "$rw_dmg" \
     || die "hdiutil create (writable) failed for ${arch}"
   rm -rf "$dmg_staging"

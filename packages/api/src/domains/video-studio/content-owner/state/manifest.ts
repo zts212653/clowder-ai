@@ -1,3 +1,4 @@
+import { type CollectiveContentScopeV1, validateCollectiveContentScope } from '../collective-scope.js';
 import { validateVideoProjectMediaScope } from '../project-media-scope.js';
 import { validateContentOperationContext, validateVideoProjectScope } from '../project-scope.js';
 import { validateContentPublication } from '../publication.js';
@@ -15,6 +16,7 @@ interface StoredOperationV1 {
 }
 
 export interface ProjectContentStateV1 {
+  readonly collectiveScope?: CollectiveContentScopeV1;
   readonly schemaVersion: 1;
   readonly contentRef: string;
   readonly mediaType: string;
@@ -28,7 +30,11 @@ export interface ProjectContentStateV1 {
 }
 
 export function parseProjectContentState(raw: string, expectedContentRef: string): ProjectContentStateV1 {
-  const parsed: unknown = JSON.parse(raw);
+  return validateProjectContentState(JSON.parse(raw), expectedContentRef);
+}
+
+/** Validate the entire freshly decoded graph, including scopes, receipts and every revision. */
+export function validateProjectContentState(parsed: unknown, expectedContentRef: string): ProjectContentStateV1 {
   if (!isRecord(parsed) || parsed.schemaVersion !== 1 || parsed.contentRef !== expectedContentRef) {
     throw invalidState(expectedContentRef);
   }
@@ -42,6 +48,7 @@ export function parseProjectContentState(raw: string, expectedContentRef: string
     throw corruptState(expectedContentRef);
   }
   const state = parsed as unknown as ProjectContentStateV1;
+  validateCollectiveContentScope(state.collectiveScope, state);
   validateVideoProjectScope(state.projectScope, state.contentRef, state.mediaType, state.publicationScope);
   validateVideoProjectMediaScope(state.projectMediaScope, state);
   if (state.projectMediaScope && state.currentOwnerRevision !== 1) throw corruptState(expectedContentRef);
@@ -93,7 +100,7 @@ function validateRevision(
   if (value.sourcePublication !== undefined && !isRecord(value.sourcePublication)) {
     throw corruptState(state.contentRef);
   }
-  validateContentPublication(state.publicationScope, value.sourcePublication);
+  validateContentPublication(state.publicationScope, value.sourcePublication, state.mediaType);
   return value as unknown as ProjectContentRevisionV1;
 }
 
@@ -116,7 +123,7 @@ function validateReceipt(
   ) {
     throw corruptState(state.contentRef);
   }
-  validateContentOperationContext(value.operationContext, state.projectScope);
+  validateContentOperationContext(value.operationContext, state.projectScope, state.collectiveScope);
   return value as unknown as ContentSettlementReceiptV1;
 }
 

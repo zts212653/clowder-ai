@@ -2,15 +2,16 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { alphaCheckoutRefusal, observeAlphaGit as git } from './alpha-identity-diagnostics.mjs';
 
 export const ALPHA_COORDINATE_VERSION = 1;
-// Runtime/standard Alpha/Redis, Service manifest defaults, launcher proxy and
-// the F247 remote sidecar. The test checks these against their source controls.
+// Runtime/standard Alpha/Redis, retained Host sidecar defaults and launcher proxy.
+// Historical service ports stay reserved to avoid colliding with existing instances.
 const PROTECTED_PORTS = new Set([
   3001, 3002, 3011, 3012, 3098, 4100, 4111, 5201, 5211, 6379, 6099, 6397, 6398, 6399, 6401, 9876, 9877, 9878, 9879,
   9880, 9881,
 ]);
-const PORT_ROLES = ['frontend', 'api', 'preview', 'service', 'redis'];
+const PORT_ROLES = ['frontend', 'api', 'preview', 'redis'];
 const EXACT_SHA = /^[a-f0-9]{40}(?:[a-f0-9]{24})?$/;
 const SAFE_PATH = /^[A-Za-z0-9._/@+-]+$/;
 
@@ -43,16 +44,6 @@ export function assertNamedAlphaNotServing(coordinates, { readCwds = readProcess
     throw new Error('Named Alpha checkout has a live process; preserve its serving tree');
 }
 
-function git(root, args) {
-  return execFileSync('git', args, {
-    cwd: root,
-    encoding: 'utf8',
-    timeout: 5_000,
-    maxBuffer: 4 * 1024 * 1024,
-    stdio: ['ignore', 'pipe', 'pipe'],
-  }).trim();
-}
-
 function physicalDirectory(raw) {
   if (typeof raw !== 'string' || !SAFE_PATH.test(raw) || !isAbsolute(raw)) throw new Error('Invalid Alpha directory');
   const absolute = resolve(raw);
@@ -76,11 +67,13 @@ function assertNotLinked(path) {
 }
 
 function assertMain(root) {
-  const common = realpathSync(git(root, ['rev-parse', '--path-format=absolute', '--git-common-dir']));
+  const common = realpathSync(
+    git(root, ['rev-parse', '--path-format=absolute', '--git-common-dir'], 'main.common-directory'),
+  );
   if (
     basename(root) !== 'cat-cafe' ||
     common !== join(root, '.git') ||
-    git(root, ['branch', '--show-current']) !== 'main'
+    git(root, ['branch', '--show-current'], 'main.branch') !== 'main'
   )
     throw new Error('Named Alpha requires the actual main checkout');
   const controls = [
@@ -89,15 +82,16 @@ function assertMain(root) {
     'scripts/lib/alpha-coordinates.mjs',
     'scripts/lib/alpha-launch-contract.mjs',
     'scripts/lib/alpha-named-launch.sh',
+    'scripts/lib/alpha-lifecycle-lock.mjs',
     'scripts/lib/alpha-redis-process.mjs',
     'scripts/lib/alpha-redis-leases.mjs',
     'scripts/lib/alpha-identity-diagnostics.mjs',
   ];
   try {
-    git(root, ['ls-files', '--error-unmatch', '--', ...controls]);
-    git(root, ['diff', '--exit-code', 'HEAD', '--', ...controls]);
-  } catch {
-    throw new Error('Named Alpha requires committed unchanged launcher controls');
+    git(root, ['ls-files', '--error-unmatch', '--', ...controls], 'main.controls-tracked');
+    git(root, ['diff', '--exit-code', 'HEAD', '--', ...controls], 'main.controls-clean');
+  } catch (cause) {
+    throw alphaCheckoutRefusal('Named Alpha requires committed unchanged launcher controls', cause);
   }
   return common;
 }
@@ -125,7 +119,6 @@ export function deriveNamedAlphaCoordinates({ mainRoot, instance, ports, targetS
     join(alphaRoot, '.cat-cafe'),
     join(alphaRoot, '.cat-cafe/redis'),
     join(alphaRoot, '.cat-cafe/redis-backups'),
-    join(alphaRoot, '.cat-cafe/collective-service'),
     join(alphaRoot, '.cat-cafe/uploads'),
     join(alphaRoot, '.cat-cafe/transcripts'),
     join(alphaRoot, '.cat-cafe/stories'),
@@ -163,11 +156,14 @@ export function parseNamedAlphaCoordinates(raw) {
 }
 
 /** Git registration and history are the existing authority source; the tuple is configuration, not a grant. */
-export function assertNamedAlphaCheckout(coordinates, { requireBuilds = false, requireTarget = false } = {}) {
+export function assertNamedAlphaCheckout(
+  coordinates,
+  { requireBuilds = false, requireTarget = false, requireClean = true } = {},
+) {
   const { mainRoot, alphaRoot, branch, targetSha } = coordinates;
   const root = physicalDirectory(alphaRoot);
   const common = assertMain(mainRoot);
-  const registered = git(mainRoot, ['worktree', 'list', '--porcelain'])
+  const registered = git(mainRoot, ['worktree', 'list', '--porcelain'], 'checkout.registration')
     .split('\n\n')
     .some(
       (record) =>
@@ -175,17 +171,18 @@ export function assertNamedAlphaCheckout(coordinates, { requireBuilds = false, r
     );
   if (
     !registered ||
-    realpathSync(git(root, ['rev-parse', '--path-format=absolute', '--git-common-dir'])) !== common ||
-    git(root, ['branch', '--show-current']) !== branch
+    realpathSync(
+      git(root, ['rev-parse', '--path-format=absolute', '--git-common-dir'], 'checkout.common-directory'),
+    ) !== common ||
+    git(root, ['branch', '--show-current'], 'checkout.branch') !== branch
   )
     throw new Error('Named Alpha checkout is not registered under its exact main branch');
-  if (git(root, ['status', '--porcelain=v1', '--untracked-files=no']))
-    throw new Error('Named Alpha has tracked changes');
-  const head = git(root, ['rev-parse', 'HEAD']);
+  if (requireClean) assertCleanNamedAlphaCheckout(root);
+  const head = git(root, ['rev-parse', 'HEAD'], 'checkout.head');
   try {
-    git(mainRoot, ['merge-base', '--is-ancestor', head, 'refs/remotes/origin/main']);
-  } catch {
-    throw new Error('Named Alpha revision is outside main lineage');
+    git(mainRoot, ['merge-base', '--is-ancestor', head, 'refs/remotes/origin/main'], 'checkout.main-lineage');
+  } catch (cause) {
+    throw alphaCheckoutRefusal('Named Alpha revision is outside main lineage', cause);
   }
   if ((requireTarget && !targetSha) || (targetSha && head !== targetSha))
     throw new Error('Named Alpha target revision changed');
@@ -199,6 +196,11 @@ export function assertNamedAlphaCheckout(coordinates, { requireBuilds = false, r
     }
   }
   return head;
+}
+
+function assertCleanNamedAlphaCheckout(root) {
+  if (git(root, ['status', '--porcelain=v1', '--untracked-files=no'], 'checkout.tracked-status'))
+    throw new Error('Named Alpha has tracked changes');
 }
 
 export function namedAlphaEnvironment(coordinates) {
@@ -230,12 +232,6 @@ export function namedAlphaEnvironment(coordinates) {
     REDIS_KEY_PREFIX: 'cat-cafe:',
     REDIS_DATA_DIR: join(alphaRoot, '.cat-cafe/redis'),
     REDIS_BACKUP_DIR: join(alphaRoot, '.cat-cafe/redis-backups'),
-    COLLECTIVE_SERVICE_HOST: '127.0.0.1',
-    COLLECTIVE_SERVICE_PORT: String(ports.service),
-    COLLECTIVE_SERVICE_DATA_DIR: join(alphaRoot, '.cat-cafe/collective-service'),
-    COLLECTIVE_SERVICE_PUBLIC_URL: `http://127.0.0.1:${ports.service}`,
-    NEXT_PUBLIC_COLLECTIVE_SERVICE_URL: `http://127.0.0.1:${ports.service}`,
-    COLLECTIVE_SERVICE_ALLOWED_HOST_ORIGINS: `http://localhost:${ports.frontend},http://127.0.0.1:${ports.frontend}`,
     ANTHROPIC_PROXY_ENABLED: '0',
     ASR_ENABLED: '0',
     TTS_ENABLED: '0',
@@ -243,7 +239,6 @@ export function namedAlphaEnvironment(coordinates) {
     EMBED_ENABLED: '0',
     EMBED_MODE: 'off',
     AUDIO_SERVICE_ENABLED: '0',
-    CONNECTOR_GATEWAY_AUTOSTART: '0',
     CAT_CAFE_F247_CLOUD_AUTOSTART: '0',
   };
 }

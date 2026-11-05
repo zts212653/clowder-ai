@@ -1,5 +1,6 @@
 import { type RoutingPreferenceRevisionV1, routingPreferenceRevisionV1Schema } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
+import { projectRoutingPreferenceHeads } from './preflight/RoutingPreferenceDecisionProjection.js';
 import {
   type IRoutingPreferenceStore,
   type RoutingPreferenceAppendResult,
@@ -28,7 +29,7 @@ if existing_command then
   if not redis.call('ZSCORE', KEYS[3], ARGV[2]) or not redis.call('ZSCORE', KEYS[4], ARGV[2]) then
     return {'CORRUPT_REPLAY', ''}
   end
-  return {'REPLAYED', existing_detail}
+  return {'REPLAYED', existing_detail, tostring(redis.call('ZCARD', KEYS[3]))}
 end
 if redis.call('EXISTS', KEYS[2]) == 1 then return {'REVISION_CONFLICT', ''} end
 
@@ -53,8 +54,15 @@ redis.call('SET', KEYS[2], ARGV[1])
 redis.call('ZADD', KEYS[3], tonumber(ARGV[3]), ARGV[2])
 redis.call('ZADD', KEYS[4], tonumber(ARGV[3]), ARGV[2])
 redis.call('SET', KEYS[5], ARGV[2])
-return {'APPENDED', ARGV[1]}
+return {'APPENDED', ARGV[1], tostring(redis.call('ZCARD', KEYS[3]))}
 `;
+
+const MAX_HOT_OWNERS = 256;
+
+interface PreferenceDecisionHeads {
+  revision: number;
+  heads: RoutingPreferenceRevisionV1[];
+}
 
 function keyPart(value: string): string {
   return Buffer.from(value, 'utf8').toString('base64url');
@@ -73,6 +81,10 @@ export const RoutingPreferenceKeys = {
 } as const;
 
 export class RedisRoutingPreferenceStore implements IRoutingPreferenceStore {
+  private readonly ownerTimelineRevisionCache = new Map<string, number>();
+  private readonly decisionHeadsCache = new Map<string, PreferenceDecisionHeads>();
+  private readonly decisionHeadLoads = new Map<string, Promise<PreferenceDecisionHeads>>();
+
   constructor(private readonly redis: RedisClient) {}
 
   async append(revisionInput: RoutingPreferenceRevisionV1): Promise<RoutingPreferenceAppendResult> {
@@ -98,13 +110,24 @@ export class RedisRoutingPreferenceStore implements IRoutingPreferenceStore {
       String(revision.version),
       predecessorId,
       revision.lifecycle,
-    )) as [string, string];
-    const [outcome, payload] = result;
+    )) as [string, string, string?];
+    const [outcome, payload, timelineRevisionRaw] = result;
     if (outcome === 'APPENDED') {
-      return { outcome: 'appended', revision: this.parsePersisted(payload, revision.revisionId) };
+      const persisted = this.parsePersisted(payload, revision.revisionId);
+      const timelineRevision = this.parseTimelineRevision(timelineRevisionRaw, revision.ownerId);
+      this.rememberTimelineRevision(revision.ownerId, timelineRevision);
+      this.advanceDecisionHeads(persisted, timelineRevision);
+      return { outcome: 'appended', revision: persisted };
     }
     if (outcome === 'REPLAYED') {
-      return { outcome: 'replayed', revision: this.parsePersisted(payload, revision.revisionId) };
+      const persisted = this.parsePersisted(payload, revision.revisionId);
+      const timelineRevision = this.parseTimelineRevision(timelineRevisionRaw, revision.ownerId);
+      this.rememberTimelineRevision(revision.ownerId, timelineRevision);
+      const cached = this.decisionHeadsCache.get(revision.ownerId);
+      if (cached !== undefined && cached.revision !== timelineRevision) {
+        this.decisionHeadsCache.delete(revision.ownerId);
+      }
+      return { outcome: 'replayed', revision: persisted };
     }
     if (outcome === 'COMMAND_CONFLICT') {
       throw new RoutingPreferenceConflictError(`routing preference command conflict: ${revision.commandId}`);
@@ -150,6 +173,34 @@ export class RedisRoutingPreferenceStore implements IRoutingPreferenceStore {
     throw new RoutingPreferenceHydrationError(`malformed persisted routing preference head: ${preferenceId}`);
   }
 
+  async readDecisionHeads(ownerId: string): Promise<RoutingPreferenceRevisionV1[]> {
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const cached = this.decisionHeadsCache.get(ownerId);
+      const knownRevision = this.ownerTimelineRevisionCache.get(ownerId);
+      if (cached !== undefined && (knownRevision === undefined || cached.revision >= knownRevision)) {
+        return [...this.rememberDecisionHeads(ownerId, cached).heads];
+      }
+      if (cached !== undefined) this.decisionHeadsCache.delete(ownerId);
+
+      let load = this.decisionHeadLoads.get(ownerId);
+      if (load === undefined) {
+        load = this.loadDecisionHeads(ownerId);
+        this.decisionHeadLoads.set(ownerId, load);
+      }
+      try {
+        const loaded = await load;
+        const latestKnownRevision = this.ownerTimelineRevisionCache.get(ownerId);
+        if (latestKnownRevision !== undefined && loaded.revision < latestKnownRevision) continue;
+        return [...this.rememberDecisionHeads(ownerId, loaded).heads];
+      } finally {
+        if (this.decisionHeadLoads.get(ownerId) === load) this.decisionHeadLoads.delete(ownerId);
+      }
+    }
+    throw new RoutingPreferenceHydrationError(
+      `routing preference decision heads could not reach a stable revision: ${ownerId}`,
+    );
+  }
+
   async listByOwner(ownerId: string): Promise<RoutingPreferenceRevisionV1[]> {
     return this.listTimeline(ownerId, RoutingPreferenceKeys.ownerTimeline(ownerId));
   }
@@ -164,6 +215,10 @@ export class RedisRoutingPreferenceStore implements IRoutingPreferenceStore {
 
   private async listTimeline(ownerId: string, timelineKey: string): Promise<RoutingPreferenceRevisionV1[]> {
     const revisionIds = await this.redis.zrange(timelineKey, 0, -1);
+    return this.hydrateTimeline(ownerId, revisionIds);
+  }
+
+  private async hydrateTimeline(ownerId: string, revisionIds: string[]): Promise<RoutingPreferenceRevisionV1[]> {
     if (revisionIds.length === 0) return [];
     const raws = await this.redis.mget(
       ...revisionIds.map((revisionId) => RoutingPreferenceKeys.detail(ownerId, revisionId)),
@@ -176,6 +231,74 @@ export class RedisRoutingPreferenceStore implements IRoutingPreferenceStore {
       }
       return this.parsePersisted(raw, revisionIds[index]);
     });
+  }
+
+  private async loadDecisionHeads(ownerId: string): Promise<PreferenceDecisionHeads> {
+    const timelineKey = RoutingPreferenceKeys.ownerTimeline(ownerId);
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const revisionIdsBefore = await this.redis.zrange(timelineKey, 0, -1);
+      const revisions = await this.hydrateTimeline(ownerId, revisionIdsBefore);
+      const revisionIdsAfter = await this.redis.zrange(timelineKey, 0, -1);
+      if (
+        revisionIdsBefore.length === revisionIdsAfter.length &&
+        revisionIdsBefore.every((revisionId, index) => revisionId === revisionIdsAfter[index])
+      ) {
+        return { revision: revisionIdsAfter.length, heads: projectRoutingPreferenceHeads(revisions) };
+      }
+    }
+    throw new RoutingPreferenceHydrationError(
+      `routing preference owner revision changed during decision projection: ${ownerId}`,
+    );
+  }
+
+  private advanceDecisionHeads(revision: RoutingPreferenceRevisionV1, timelineRevision: number): void {
+    const cached = this.decisionHeadsCache.get(revision.ownerId);
+    if (cached === undefined) return;
+    if (cached.revision + 1 !== timelineRevision) {
+      this.decisionHeadsCache.delete(revision.ownerId);
+      return;
+    }
+    this.rememberDecisionHeads(revision.ownerId, {
+      revision: timelineRevision,
+      heads: projectRoutingPreferenceHeads([...cached.heads, revision]),
+    });
+  }
+
+  private rememberDecisionHeads(ownerId: string, value: PreferenceDecisionHeads): PreferenceDecisionHeads {
+    const current = this.decisionHeadsCache.get(ownerId);
+    if (current !== undefined && current.revision > value.revision) return current;
+    this.decisionHeadsCache.delete(ownerId);
+    this.decisionHeadsCache.set(ownerId, value);
+    this.trimCache(this.decisionHeadsCache);
+    this.rememberTimelineRevision(ownerId, value.revision);
+    return value;
+  }
+
+  private rememberTimelineRevision(ownerId: string, revision: number): void {
+    const current = this.ownerTimelineRevisionCache.get(ownerId);
+    if (current !== undefined && current > revision) return;
+    this.ownerTimelineRevisionCache.delete(ownerId);
+    this.ownerTimelineRevisionCache.set(ownerId, revision);
+    this.trimCache(this.ownerTimelineRevisionCache);
+  }
+
+  private trimCache<T>(cache: Map<string, T>): void {
+    while (cache.size > MAX_HOT_OWNERS) {
+      const oldestOwnerId = cache.keys().next().value;
+      if (oldestOwnerId === undefined) break;
+      cache.delete(oldestOwnerId);
+    }
+  }
+
+  private parseTimelineRevision(raw: string | undefined, ownerId: string): number {
+    if (raw === undefined || !/^(0|[1-9]\d*)$/.test(raw)) {
+      throw new RoutingPreferenceHydrationError(`malformed routing preference owner revision: ${ownerId}`);
+    }
+    const revision = Number(raw);
+    if (!Number.isSafeInteger(revision)) {
+      throw new RoutingPreferenceHydrationError(`unsafe routing preference owner revision: ${ownerId}`);
+    }
+    return revision;
   }
 
   private parsePersisted(raw: string, revisionId: string): RoutingPreferenceRevisionV1 {

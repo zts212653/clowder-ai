@@ -138,8 +138,11 @@ export class ManagedCommandWakeRecoverySweep {
     const jobs = await new ManagedJobService().reconcile(legacyJobs, this.now());
     const observed = new Map(jobs.map(({ job, inspection }) => [job.jobId, inspection]));
     const allTasks = new Map(tasks.map((task) => [task.id, task]));
-    for (const { job } of jobs) {
-      const task = this.deps.dynamicTaskStore.getById(job.originTaskId);
+    for (const { job, inspection } of jobs) {
+      // The indexed candidate selector already includes terminal jobs whose wake
+      // is undelivered. Settled history cannot add a new execution candidate.
+      if ('result' in inspection && !allTasks.has(job.originTaskId)) continue;
+      const task = allTasks.get(job.originTaskId) ?? this.deps.dynamicTaskStore.getById(job.originTaskId);
       if (task) allTasks.set(task.id, task);
     }
     const running = [...allTasks.values()].flatMap((task) => {

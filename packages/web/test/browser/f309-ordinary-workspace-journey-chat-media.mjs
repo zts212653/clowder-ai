@@ -51,6 +51,7 @@ const REQUEST_ID = `f309-modification-${'e'.repeat(64)}`;
 const DECOY_ID = `f309-modification-${'f'.repeat(64)}`;
 const SENT_ID = 'human-media-sent';
 const sentMessage = (timestamp = 1) => ({
+  from: { kind: 'user', userId: 'operator' },
   id: SENT_ID,
   type: 'user',
   content: '这两处帮我处理一下',
@@ -161,7 +162,7 @@ export function registerOrdinaryChatMediaJourney(suite) {
       handleApi: async (request, url) => {
         if (url.pathname === '/api/messages' && request.method() === 'POST') {
           sent.push(request.postDataJSON());
-          return { body: {} };
+          return { body: { status: 'queued' } };
         }
         return undefined;
       },
@@ -318,6 +319,7 @@ export function registerOrdinaryChatMediaJourney(suite) {
         assert.deepEqual(await numbers(page.locator(`${CHIP} [data-testid="media-selection-number"]`)), ['1']);
         assert.deepEqual(await numbers(page.locator(`${MARKS} text`)), ['1']);
         assert.equal(await page.locator(MARKS).getAttribute('data-selection-id'), '2');
+        assert.ok(((await chip.textContent()) ?? '').includes('图片 · 1处选区'));
 
         await page.getByLabel('消息输入框').fill('请处理这一处');
         await page.getByRole('button', { name: 'Send message', exact: true }).click();
@@ -346,16 +348,15 @@ export function registerOrdinaryChatMediaJourney(suite) {
         );
         assert.deepEqual(projected, body.contextAttachments);
 
-        // The sent message reads as the places that were circled, with no coordinates and no internal ids.
+        // Queue admission alone must not manufacture History. The four delivered-History
+        // cases below verify the exact same attachment's readable message projection.
         const sentChip = page.locator('[data-chat-container] [data-context-kind="media"]');
-        await sentChip.waitFor();
-        const shown = (await sentChip.textContent()) ?? '';
-        assert.ok(shown.includes('图片 · 1处选区') && shown.includes('圈选'), shown);
+        assert.equal(await sentChip.count(), 0, 'a pending source has no optimistic History bubble');
         assert.doesNotMatch(
           await page.locator('[data-chat-container]').innerText(),
           /image-region|sha256|review-|expectedSource/,
         );
-        await page.screenshot({ path: `${EVIDENCE}/media-chat-sent-1440.png` });
+        await page.screenshot({ path: `${EVIDENCE}/media-chat-admitted-1440.png` });
         assert.deepEqual(errors, []);
       } finally {
         await context.close();
@@ -376,6 +377,7 @@ export function registerOrdinaryChatMediaJourney(suite) {
       async () => {
         const slug = label.replaceAll(' ', '-');
         const message = {
+          from: { kind: 'user', userId: 'operator' },
           id: 'human-media',
           type: 'user',
           content: '这两处帮我处理一下',

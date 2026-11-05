@@ -213,6 +213,30 @@ test('owner commit followed by a projection crash recovers once after restart an
   restartedStore.close();
 });
 
+test('reading a reserved response without an owner receipt never publishes; an explicit authorized retry can resume', async (t) => {
+  const f = await fixture(t);
+  const view = await annotate(f.service, await f.service.prepare(f.prepareRequest, reviewHuman));
+  const response = await newVersion(f, view);
+  const mutation = f.service.versions.mutation(response, reviewCat.actor, 1);
+  f.store.reserveVersion(mutation, response);
+  let publications = 0;
+  const publish = f.media.publishVersion.bind(f.media);
+  f.media.publishVersion = async (input) => {
+    publications += 1;
+    return publish(input);
+  };
+  for (const principal of [reviewHuman, reviewCat]) {
+    const unknown = await f.service.read(view.review.reviewId, principal);
+    assert.equal(unknown.pendingVersion, true);
+    assert.equal(unknown.review.rounds.length, 1);
+    assert.equal(publications, 0, 'a read must not reconstruct the producer and perform an owner write');
+  }
+  const resumed = await f.service.respond(response, reviewCat);
+  assert.equal(resumed.view.pendingVersion, false);
+  assert.equal(resumed.view.review.rounds.length, 2);
+  assert.equal(publications, 1);
+});
+
 test('a Task revision change during asynchronous authorization cannot commit a stale annotation', async (t) => {
   const f = await fixture(t);
   const view = await f.service.prepare(f.prepareRequest, reviewHuman);

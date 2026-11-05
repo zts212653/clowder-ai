@@ -2,6 +2,7 @@
 import { act, type ComponentProps } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { ArtworkWorkModeScope } from '@/components/content-review/ArtworkWorkModeScope';
 import { useChatStore } from '@/stores/chatStore';
 import { writeShellLanguage } from '../../shell/shell-language';
 import { writeShellPresentation } from '../../shell/shell-presentation';
@@ -78,6 +79,28 @@ function openActions() {
   });
   return document.getElementById(trigger?.getAttribute('aria-controls') ?? '');
 }
+
+it('explicit artwork work mode removes the duplicate tab row without changing or closing its owner layout', () => {
+  const layout = useF307ExperienceWorkbenchStore.getState().layout;
+  act(() =>
+    root.render(
+      <ArtworkWorkModeScope onReturn={() => {}}>
+        <F307WorkbenchTabs {...props} />
+      </ArtworkWorkModeScope>,
+    ),
+  );
+  expect(host.querySelector('[data-testid="v2-workspace-chrome"]')).toBeNull();
+  expect(useF307ExperienceWorkbenchStore.getState().layout).toBe(layout);
+  act(() =>
+    root.render(
+      <ArtworkWorkModeScope onReturn={null}>
+        <F307WorkbenchTabs {...props} />
+      </ArtworkWorkModeScope>,
+    ),
+  );
+  expect(host.querySelector('[data-testid="v2-workspace-chrome"]')).toBeTruthy();
+  expect(useF307ExperienceWorkbenchStore.getState().layout).toBe(layout);
+});
 
 it('keeps typed tabs visible, renders each title once and closes through the original layout owner', () => {
   act(() => root.render(<F307WorkbenchTabs {...props} />));

@@ -1,8 +1,10 @@
 import type { Readable, Writable } from 'node:stream';
 import type { PluginManifest } from '@clowder-ai/plugin-contract';
+import type { SealReadDiagnostics } from '../diagnostics/observation-work.js';
 import type { HostBrokerControlPlane } from '../host-broker/control-plane.js';
 import type { PluginInventoryStore } from '../host-inventory/ports.js';
 import type { PluginRuntimeErrorCode } from '../host-inventory/types.js';
+import type { PluginRuntimeConfigurationPort } from '../manifest-configuration-projection.js';
 
 export type ExternalPluginRuntimeErrorCode =
   | 'INSTANCE_NOT_RUNNABLE'
@@ -17,6 +19,8 @@ export type ExternalPluginRuntimeErrorCode =
   | 'HEARTBEAT_TIMEOUT'
   | 'HEARTBEAT_REJECTED'
   | 'DELIVERY_REJECTED'
+  | 'CONFIG_UNAVAILABLE'
+  | 'DATA_DIRECTORY_UNAVAILABLE'
   | 'PROTOCOL_VIOLATION';
 
 export class ExternalPluginRuntimeError extends Error {
@@ -37,13 +41,23 @@ export interface VerifiedPluginPackage {
   verifyIntegrity(): Promise<void>;
   /** Revalidate this private generation's sealed tree identity for already
    * snapshotted static assets. Never substitutes for executable admission. */
-  verifyStaticIntegrity?(): Promise<void>;
+  verifyStaticIntegrity?(diagnostics?: SealReadDiagnostics): Promise<void>;
   /** Release the private per-runtime staging directory after the process is gone. */
   release(): Promise<void>;
 }
 
 export interface VerifiedPluginPackageLocator {
   resolveInstalledPackage(packageDigest: string): Promise<VerifiedPluginPackage>;
+  /** Read inert static bytes from the admitted archive without granting executable tree authority. */
+  readInstalledStaticFile?(
+    packageDigest: string,
+    selectFile: (manifest: PluginManifest) => string,
+  ): Promise<VerifiedPluginStaticFile>;
+}
+
+export interface VerifiedPluginStaticFile {
+  readonly manifest: PluginManifest;
+  readonly bytes: Buffer | undefined;
 }
 
 export interface ExternalPluginBootstrapEnvironment extends NodeJS.ProcessEnv {
@@ -90,6 +104,12 @@ export interface ExternalPluginRuntimeHandle {
 
 export interface ExternalPluginRuntimeSupervisorOptions {
   readonly inventory: PluginInventoryStore;
+  /**
+   * F202 C1 gap C: reads the instance's stored configuration so manifest-declared fields can be
+   * projected into the child's environment. Absent means no projection — a package then receives
+   * only the protocol variables, which is the pre-C1 behaviour.
+   */
+  readonly configuration?: PluginRuntimeConfigurationPort;
   readonly broker: HostBrokerControlPlane;
   readonly packages: VerifiedPluginPackageLocator;
   readonly processes?: ExternalPluginProcessAdapter;

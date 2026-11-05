@@ -23,7 +23,7 @@ for (const invalidation of ['unsubscribe', 'expire'] as const) {
         const source = f.messages.append({
           userId: 'owner',
           threadId: thread.id,
-          catId,
+          from: catId ? { kind: 'agent', catId } : { kind: 'user', userId: 'owner' },
           content: 'read before invalidation',
           mentions: [],
           timestamp: now,
@@ -77,7 +77,7 @@ test('enabled dot accepts ordinary housecat sources and returns to each exact so
       const source = f.messages.append({
         userId: 'owner',
         threadId: thread.id,
-        catId: createCatId(catId),
+        from: { kind: 'agent', catId: createCatId(catId) },
         content: '@dot 请看这条来源',
         mentions: [createCatId('gpt-dot')],
         timestamp: Date.now(),
@@ -104,14 +104,14 @@ test('ordinary housecat access retains owner, thread, self-loop and plugin-disab
   try {
     const thread = f.thread('owned');
     const foreignThread = f.thread('foreign', 'other');
-    for (const input of [
+    for (const { catId, ...input } of [
       { userId: 'other', threadId: thread.id, catId: 'codex61-sol' },
       { userId: 'owner', threadId: foreignThread.id, catId: 'sonnet' },
       { userId: 'owner', threadId: thread.id, catId: 'gpt-dot' },
     ]) {
       const source = f.messages.append({
         ...input,
-        catId: createCatId(input.catId),
+        from: { kind: 'agent', catId: createCatId(catId) },
         content: 'invalid scope',
         mentions: [],
         timestamp: Date.now(),
@@ -122,7 +122,7 @@ test('ordinary housecat access retains owner, thread, self-loop and plugin-disab
     const source = f.messages.append({
       userId: 'owner',
       threadId: thread.id,
-      catId: createCatId('sonnet'),
+      from: { kind: 'agent', catId: createCatId('sonnet') },
       content: 'disabled',
       mentions: [],
       timestamp: Date.now(),

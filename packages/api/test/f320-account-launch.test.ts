@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type TestContext, test } from 'node:test';
@@ -11,7 +11,6 @@ import {
   resolveCodexAppServerControlOptions,
 } from '../src/domains/cats/services/agents/providers/codex-app-server-control-options.js';
 import { createCodexSessionContextSnapshotResolver } from '../src/domains/cats/services/agents/providers/codex-session-context-snapshot.js';
-import { prepareCollectiveCodexHome } from '../src/domains/cats/services/agents/providers/collective-codex-home.js';
 import { loadCodexCredentialsForTests } from '../src/routes/quota.js';
 
 async function fixture(t: TestContext) {
@@ -33,12 +32,18 @@ test('account revision excludes user notes and credential rotation, and canonica
   const a = f.descriptor();
   await writeFile(join(f.home, 'auth.json'), '{"fixture":"never-a-real-token"}');
   const renamed = { ...f.account, displayName: '私人 Plus' };
-  assert.equal(resolveCodexAccountLaunch(renamed, { cwd: f.root }).accountRevision, a.accountRevision);
+  assert.equal(
+    resolveCodexAccountLaunch(renamed, { cwd: f.root, env: { HOME: f.root } }).accountRevision,
+    a.accountRevision,
+  );
   await symlink(f.home, join(f.root, 'alias'));
   const alias = { ...f.account, envVars: { CODEX_HOME: join(f.root, 'alias') } };
-  assert.deepEqual(resolveCodexAccountLaunch(alias, { cwd: f.root }), a);
+  assert.deepEqual(resolveCodexAccountLaunch(alias, { cwd: f.root, env: { HOME: f.root } }), a);
   const other = { ...f.account, id: 'codex-b' };
-  assert.notEqual(resolveCodexAccountLaunch(other, { cwd: f.root }).accountRevision, a.accountRevision);
+  assert.notEqual(
+    resolveCodexAccountLaunch(other, { cwd: f.root, env: { HOME: f.root } }).accountRevision,
+    a.accountRevision,
+  );
 });
 
 test('native sqlite_home precedence is represented, and a later CLI override cannot misroute it', async (t) => {
@@ -167,24 +172,6 @@ test('explicit API routing comes from its account snapshot; auto retains ambient
   const auto = resolveCodexAccountLaunch(f.account, { cwd: f.root, authMode: 'auto' });
   const inherited = finalizeCodexAccountEnvironment(auto, { env: ambient, selectedApiEnv, cwd: f.root, args: [] });
   for (const [key, value] of Object.entries(ambient)) assert.equal(inherited[key], value);
-});
-
-test('Collective uses the selected file login while keeping private config/history/SQLite out', async (t) => {
-  const f = await fixture(t);
-  await writeFile(join(f.home, 'auth.json'), 'fixture-selected-login');
-  await writeFile(join(f.home, 'AGENTS.md'), 'PRIVATE_FIXTURE_INSTRUCTION');
-  const publicEnv = await prepareCollectiveCodexHome(join(f.root, 'public'), 'oauth', f.home);
-  assert.equal(await realpath(join(publicEnv.CODEX_HOME, 'auth.json')), join(f.home, 'auth.json'));
-  assert.equal(await readFile(join(publicEnv.CODEX_HOME, 'auth.json'), 'utf8'), 'fixture-selected-login');
-  assert.deepEqual(await readdir(publicEnv.CODEX_HOME), ['auth.json']);
-  assert.equal(publicEnv.CODEX_SQLITE_HOME, publicEnv.CODEX_HOME);
-  const final = finalizeCodexAccountEnvironment(f.descriptor(), {
-    env: { ...publicEnv, CODEX_SQLITE_HOME: '/private-family-state' },
-    args: ['exec'],
-    cwd: f.root,
-    executionHome: publicEnv.CODEX_HOME,
-  });
-  assert.equal(final.CODEX_SQLITE_HOME, publicEnv.CODEX_HOME);
 });
 
 test('OAuth preflight fails closed on incomplete CLI config and non-regular or oversized config', async (t) => {

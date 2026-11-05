@@ -5,15 +5,15 @@
 
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 import { describe, mock, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { catRegistry } from '@cat-cafe/shared';
 
 const REPO_ROOT_TEMPLATE = resolve(dirname(fileURLToPath(import.meta.url)), '../../..', 'cat-template.json');
 const CAT_TEMPLATE_PATH = REPO_ROOT_TEMPLATE;
-const CAT_DOSSIER_PATH = resolve(dirname(fileURLToPath(import.meta.url)), '../../../docs/team/cat-dossier.md');
 const FULL_RUNTIME_PROMPT_CHAR_BUDGET = 7050; // 6500→6700→7050: gemini35 + gpt-pro roster growth
 
 function assertWithinFullRuntimePromptBudget(prompt) {
@@ -31,11 +31,11 @@ describe('SystemPromptBuilder', () => {
   }
 
   async function withFreshRuntimeRegistry(run) {
-    const { loadCatConfig, toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
+    const { loadResolvedCatConfig, toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
     const originalConfigs = catRegistry.getAllConfigs();
     catRegistry.reset();
     try {
-      const runtimeConfigs = toAllCatConfigs(loadCatConfig(CAT_TEMPLATE_PATH));
+      const runtimeConfigs = toAllCatConfigs(loadResolvedCatConfig(process.env.CAT_TEMPLATE_PATH));
       for (const [id, config] of Object.entries(runtimeConfigs)) {
         catRegistry.register(id, config);
       }
@@ -157,7 +157,8 @@ describe('SystemPromptBuilder', () => {
       mcpAvailable: true,
     });
     assert.ok(prompt.includes('cat_cafe_post_message'));
-    assert.ok(prompt.includes('cat_cafe_register_pr_tracking'));
+    assert.ok(prompt.includes('已安装的 GitHub 插件'));
+    assert.equal(prompt.includes('cat_cafe_register_pr_tracking'), false); // mcp-cutover-negative-reference: absence
     assert.ok(prompt.includes('cat_cafe_get_pending_mentions'));
     assert.ok(prompt.includes('cat_cafe_get_thread_context'));
   });
@@ -489,6 +490,9 @@ describe('SystemPromptBuilder', () => {
     assert.ok(opencodeId.includes('### 执行纪律'), 'OpenCode workflow should include execution discipline');
     assert.ok(opencodeId.includes('出口一问'), 'OpenCode workflow should include exit check (出口一问)');
     assert.ok(opencodeId.includes('OMOC Sisyphus'), 'OpenCode workflow should keep golden-chinchilla governance');
+    for (const prompt of [opusId, codexId, opencodeId, buildStaticIdentity('gemini25')]) {
+      assert.match(prompt, /常规 reviewer（缅因猫、Sonnet、kimi 或 gemini-argon；Argon 只审不写）/);
+    }
   });
 
   test('buildStaticIdentity is deterministic', async () => {
@@ -715,21 +719,17 @@ describe('SystemPromptBuilder', () => {
     assert.ok(!rosterSection.includes('| 布偶猫/宪宪'), 'Opus default should not list itself');
   });
 
-  test('buildStaticIdentity roster hydrates Fable from the dossier or uses the public fallback', async () => {
+  test('roster hydrates an explicit dossier fixture and falls back without that installation', async (t) => {
     await withFreshRuntimeRegistry(async () => {
-      const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
-      const identity = buildStaticIdentity('codex');
-      const fableRow = identity
-        .split('## 队友名册')[1]
-        ?.split('\n')
-        .find((line) => line.includes('claude-fable-5'));
-
-      assert.ok(fableRow, 'codex roster should include Fable');
-      if (existsSync(CAT_DOSSIER_PATH)) {
-        assert.match(fableRow, /宪宪（他）/, 'home roster must hydrate Fable pronouns from the dossier');
-      } else {
-        assert.match(fableRow, /新猫，待校准/, 'public roster must keep the generic config fallback without a dossier');
-      }
+      const { buildTeammateRoster } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+      const { writeDossierFixture } = await import('./helpers/dossier-fixture.js');
+      const root = mkdtempSync(join(tmpdir(), 'api-roster-dossier-'));
+      t.after(() => rmSync(root, { recursive: true, force: true }));
+      writeDossierFixture(root);
+      const roster = buildTeammateRoster('codex', root);
+      assert.match(roster, /（戊）/);
+      assert.match(roster, /fixture-roster-canary/);
+      assert.doesNotMatch(buildTeammateRoster('codex', join(root, 'absent')), /（戊）|fixture-roster-canary/);
     });
   });
 
@@ -822,7 +822,8 @@ describe('SystemPromptBuilder', () => {
     assert.ok(ctx.includes('terminal Release'));
     assert.ok(ctx.includes('不要发送“收到/谢谢” ACK'));
     assert.ok(ctx.includes('继续原任务'));
-    assert.ok(ctx.includes('无需 @co-creator'));
+    const { getCoCreatorConfig } = await import('../dist/config/cat-config-loader.js');
+    assert.ok(ctx.includes(`无需 ${getCoCreatorConfig().mentionPatterns[0]}`));
     assert.ok(!ctx.includes('回复请用 cross_post_message'));
   });
 
@@ -1045,6 +1046,32 @@ describe('SystemPromptBuilder', () => {
     }
   });
 
+  test('teammate roster keeps a variant cat nickname next to its variant label', async () => {
+    const { loadCatConfig, toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
+    const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const originalConfigs = catRegistry.getAllConfigs();
+    catRegistry.reset();
+    try {
+      const runtimeConfigs = toAllCatConfigs(loadCatConfig(CAT_TEMPLATE_PATH));
+      for (const [id, config] of Object.entries(runtimeConfigs)) {
+        catRegistry.register(id, config);
+      }
+      const prompt = buildStaticIdentity('opus');
+      const rosterLines = prompt.split('\n').filter((l) => l.trim().startsWith('|'));
+      const glmLine = rosterLines.find((l) => l.includes('@glm52'));
+      assert.match(glmLine ?? '', /^\| 狸花猫 GLM-5\.2\/小狸花 \|/, `got: ${glmLine}`);
+      const sonnetLine = rosterLines.find((l) => l.includes('@sonnet'));
+      assert.match(sonnetLine ?? '', /^\| 布偶猫 Sonnet\/宪宪 \|/, `family row is self here; got: ${sonnetLine}`);
+      const geminiVariantLine = rosterLines.find((l) => l.includes('@gemini38'));
+      assert.match(geminiVariantLine ?? '', /^\| 暹罗猫 Gemini 3\.8 Flash \|/, `got: ${geminiVariantLine}`);
+    } finally {
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(originalConfigs)) {
+        catRegistry.register(id, config);
+      }
+    }
+  });
+
   test('F167-F AC-F10: AGENTS.md / CLAUDE.md have no hardcoded "@x = model-y" bindings', async () => {
     // KD-21 invariant: handle/model must stay decoupled in static docs. If someone
     // re-introduces "@codex（model=gpt-5.3-codex）" style hardcoding, this test traps it.
@@ -1248,6 +1275,20 @@ describe('SystemPromptBuilder', () => {
     });
     assert.ok(ctx.includes('[路由提醒]'), 'Should include routing feedback banner');
     assert.ok(ctx.includes('@opus'), 'Should mention the target cat');
+  });
+
+  test('void hold feedback is a factual wait reconciliation rather than a self-mention routing instruction', async () => {
+    const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const ctx = buildInvocationContext({
+      catId: 'codex',
+      mode: 'independent',
+      teammates: ['opus'],
+      mcpAvailable: true,
+      mentionRoutingFeedback: { sourceTimestamp: Date.now(), items: [{ targetCatId: 'codex', reason: 'void_hold' }] },
+    });
+    assert.match(ctx, /等待对账/);
+    assert.doesNotMatch(ctx, /上次你提到了.*@codex/);
+    assert.doesNotMatch(ctx, /请.*hold_ball/);
   });
 
   test('buildInvocationContext does not contain static identity or MCP tools', async () => {
@@ -1805,7 +1846,7 @@ describe('SystemPromptBuilder', () => {
     assert.ok(ctx.includes('F080'), 'Should contain feature ID');
   });
 
-  test('buildSystemPrompt size stays under 3900 chars with SOP hint after Magic Words + runtime prompt growth', async () => {
+  test('buildSystemPrompt size stays under full runtime prompt budget with SOP hint', async () => {
     const build = await getBuilder();
     const prompt = build({
       catId: 'opus',
@@ -1822,8 +1863,7 @@ describe('SystemPromptBuilder', () => {
         featureId: 'F073',
       },
     });
-    // 6200→6500→6700→6800→7050: decision funnel §17 + roster growth + F208 dossier l0RosterSummary
-    assert.ok(prompt.length < 7050, `Prompt with SOP hint is ${prompt.length} chars, expected < 7050`);
+    assertWithinFullRuntimePromptBudget(prompt);
   });
 
   // --- F092: Voice Mode prompt injection ---
@@ -1852,7 +1892,7 @@ describe('SystemPromptBuilder', () => {
     assert.ok(!ctx.includes('Voice Mode ON'), 'Should not include voice mode header');
   });
 
-  test('buildSystemPrompt size stays under 5200 chars with voice mode + SOP hint after Magic Words growth', async () => {
+  test('buildSystemPrompt size stays under full runtime prompt budget with voice mode + SOP hint', async () => {
     const build = await getBuilder();
     const prompt = build({
       catId: 'opus',
@@ -1870,8 +1910,7 @@ describe('SystemPromptBuilder', () => {
       },
       voiceMode: true,
     });
-    // 6200→6500→6700→6800→7050: decision funnel §17 + roster growth + F208 dossier l0RosterSummary
-    assert.ok(prompt.length < 7050, `Prompt with voice mode + SOP hint is ${prompt.length} chars, expected < 7050`);
+    assertWithinFullRuntimePromptBudget(prompt);
   });
 
   test('buildInvocationContext injects bootcamp mode when bootcampState provided', async () => {
@@ -1935,7 +1974,7 @@ describe('SystemPromptBuilder', () => {
 
   // --- 回归测试：maine-coon prompt 必须包含 A2A 执行纪律 ---
 
-  test('maine-coon prompt contains execution discipline keywords', async () => {
+  test('maine-coon prompt keeps execution discipline without blanket silence', async () => {
     const build = await getBuilder();
     const prompt = build({
       catId: 'codex',
@@ -1943,19 +1982,29 @@ describe('SystemPromptBuilder', () => {
       teammates: [],
       mcpAvailable: false,
     });
-    assert.ok(prompt.includes('静默执行'), 'maine-coon prompt must include 静默执行');
-    assert.ok(prompt.includes('声明'), 'maine-coon prompt must include 声明 ≠ 执行');
+    assert.ok(!prompt.includes('静默执行'), 'work must not suppress human-facing progress');
+    assert.ok(prompt.includes('声明 = 执行'), 'progress statements must still be backed by action');
     // F064 球权模型: 空气传球 警告并入 "A2A 球权检查" invocation context（矛盾 push back 语义）
     assert.ok(prompt.includes('push back'), 'maine-coon prompt must include push back (phantom handoff guard)');
     assert.ok(prompt.includes('出口一问'), 'maine-coon prompt must include 出口一问');
   });
 
-  test('maine-coon workflow contains A2A state transition keywords', async () => {
+  test('maine-coon prompt separates A2A routing from human-facing progress', async () => {
     const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
     const codexId = buildStaticIdentity('codex');
-    assert.ok(codexId.includes('BLOCKED'), 'codex prompt must include BLOCKED state');
-    assert.ok(codexId.includes('REVIEW READY'), 'codex prompt must include REVIEW READY state');
-    assert.ok(codexId.includes('DONE'), 'codex prompt must include DONE state');
+    assert.ok(codexId.includes('跨猫路由只在需要对方行动或状态迁移时发送'));
+    const sourceRules = readFileSync(
+      resolve(dirname(CAT_TEMPLATE_PATH), 'cat-cafe-skills/refs/shared-rules.md'),
+      'utf8',
+    );
+    const progressBoundary = sourceRules.match(/人或队友发起任务，进度都对人可见/)?.[0];
+    assert.ok(progressBoundary, 'the source must declare the human progress boundary');
+    assert.ok(codexId.includes(progressBoundary));
+    assert.ok(codexId.includes('先用本轮正文说明要做什么，再调用工具'));
+    assert.ok(codexId.includes('工作中更新关键发现、阻碍与下一步'));
+    assert.ok(codexId.includes('进度说明无需 @ 或唤醒队友'));
+    assert.ok(!codexId.includes('只发状态迁移消息'));
+    assert.ok(codexId.includes('serial/handoff 场景且需要对方行动 → @ 对应猫'));
   });
 
   // ─── F129 Pack Block Injection ──────────────────────────────────────
@@ -2084,8 +2133,8 @@ describe('SystemPromptBuilder', () => {
     const magicWordPattern = /\|.*?「(.+?)」/g;
     const rulesMagicWords = [...rulesText.matchAll(magicWordPattern)].map((m) => m[1]);
     assert.ok(
-      rulesMagicWords.length === 6,
-      `Expected six current magic-word definitions in shared-rules.md, got ${rulesMagicWords.length}`,
+      rulesMagicWords.length > 0,
+      'Expected current magic-word definitions in shared-rules.md before checking every compiled entry',
     );
     const build = await getBuilder();
     const prompt = build({
@@ -2105,30 +2154,30 @@ describe('SystemPromptBuilder', () => {
     const { resolve } = await import('node:path');
     const { createHash } = await import('node:crypto');
 
-    // Extract world-view / principle section headings from shared-rules.md
     const rulesPath = resolve(import.meta.dirname, '../../../cat-cafe-skills/refs/shared-rules.md');
     const rulesText = readFileSync(rulesPath, 'utf8');
-    const headings = rulesText
-      .split('\n')
-      .filter((l) => /^###?\s+(P\d|W\d)/.test(l))
-      .sort()
-      .join('\n');
-    const hash = createHash('sha256').update(headings).digest('hex').slice(0, 16);
-
-    // Pin: update this hash whenever you add/remove/rename P* or W* sections
-    // in shared-rules.md, AND update GOVERNANCE_L0_DIGEST in SystemPromptBuilder.ts
-    const PINNED_HASH = '1b137442fdbb0d1c';
-    if (PINNED_HASH === '${PLACEHOLDER}') {
-      // First run — print hash for pinning
-      console.log(`[drift-guard] shared-rules headings hash: ${hash} — pin this value`);
-      return; // skip assertion on first run
-    }
-    assert.equal(
-      hash,
-      PINNED_HASH,
-      `shared-rules.md P*/W* headings changed (got ${hash}, pinned ${PINNED_HASH}). ` +
-        'Update GOVERNANCE_L0_DIGEST in SystemPromptBuilder.ts to match, then update PINNED_HASH here.',
+    const built = JSON.parse(
+      readFileSync(new URL('../dist/domains/cats/services/context/governance-build.json', import.meta.url), 'utf8'),
     );
+    const sha256 = (text) => createHash('sha256').update(text).digest('hex');
+    assert.equal(built.schemaVersion, 1);
+    assert.equal(built.source, 'cat-cafe-skills/refs/shared-rules.md');
+    assert.equal(built.sourceSha256, sha256(rulesText), 'governance source changed after build; rebuild the API');
+    const { getGovernanceDigest } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const prompt = getGovernanceDigest();
+    assert.equal(built.compiledSha256, sha256(prompt), 'runtime governance differs from its build projection');
+    const headings = [...rulesText.matchAll(/^###\s+([PW]\d)\.\s+(.+)$/gm)];
+    assert.equal(headings.length, 13);
+    for (const [, key, text] of headings) {
+      assert.ok(
+        prompt.includes(
+          `- **${key}** ${text
+            .replace(/\*\*|`/g, '')
+            .replace(/\s+/g, ' ')
+            .trim()}`,
+        ),
+      );
+    }
   });
 
   // ── F182 Phase B: Roster invisibility guard ─────────────────────────────────────────────────

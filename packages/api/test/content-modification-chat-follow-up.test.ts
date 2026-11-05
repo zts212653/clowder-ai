@@ -7,12 +7,14 @@ import type {
   ContentWritebackReceipt,
 } from '@cat-cafe/shared';
 import Fastify from 'fastify';
+// The persisted Queue fixture loads its ledger from dist; use the same module
+// graph for atomic in-memory admission instead of mixing two class identities.
+import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { InvocationRegistry } from '../src/domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { PersistedQueueDeliveryInput } from '../src/domains/cats/services/agents/invocation/PersistedQueueDelivery.js';
 import { queueEntryId } from '../src/domains/cats/services/agents/invocation/queue-ledger/QueueLedger.js';
 import { assembleContext } from '../src/domains/cats/services/context/ContextAssembler.js';
 import { DeliveryCursorStore } from '../src/domains/cats/services/stores/ports/DeliveryCursorStore.js';
-import { MessageStore } from '../src/domains/cats/services/stores/ports/MessageStore.js';
 import { ThreadStore } from '../src/domains/cats/services/stores/ports/ThreadStore.js';
 import { canViewMessage } from '../src/domains/cats/services/stores/visibility.js';
 import { ContentModificationChatProjection } from '../src/domains/collaborative-content/modification/chat-projection.js';

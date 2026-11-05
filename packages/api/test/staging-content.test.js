@@ -190,12 +190,10 @@ describe('L0 Staging Protocol PR-B-impl (ADR-038)', () => {
       assert.ok(out.includes('[爪感差:'));
     });
 
-    sourceOnlyTest('freshness handling names the full current-thread read surface', () => {
+    sourceOnlyTest('retired freshness handling is absent from rendered staging and its manifest', () => {
       const out = buildStagingPrepend('codex');
-      const freshnessClause = out.match(/\*\*Freshness notice 处理\*\*[^\n]*/)?.[0] ?? '';
-      assert.match(freshnessClause, /get_thread_context/);
-      assert.match(freshnessClause, /responseMode.*full/);
-      assert.doesNotMatch(freshnessClause, /list_recent/);
+      assert.doesNotMatch(out, /\*\*Freshness notice 处理\*\*|收到来信提示/);
+      assert.ok(!loadStagingManifest().items.some((item) => item.id === 'freshness-notice-handling'));
     });
 
     sourceOnlyTest('四象限 is owned by compiled L0, not duplicated in staging', () => {

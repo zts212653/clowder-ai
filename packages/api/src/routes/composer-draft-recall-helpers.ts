@@ -6,6 +6,13 @@ import {
 import { z } from 'zod';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 
+/** Keep internal Host recovery metadata out of the existing composer HTTP contract. */
+export function projectComposerDraft(draft: Awaited<ReturnType<IMessageStore['getOwnerComposerDraft']>>) {
+  if (!draft) return null;
+  const { companionSubmissions: _hostOnly, ...publicDraft } = draft;
+  return publicDraft;
+}
+
 const composerDraftImageBlockSchema = z
   .object({
     type: z.literal('image'),

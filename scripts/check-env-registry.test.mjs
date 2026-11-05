@@ -12,8 +12,11 @@
 
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join, resolve, win32 } from 'node:path';
 import { describe, it } from 'node:test';
+import { parseVars } from './lib/env-registry-parser.mjs';
+import { loadEnvRegistrySource } from './lib/env-registry-source.mjs';
+import './lib/env-registry-source.test.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
 
@@ -22,6 +25,11 @@ const ROOT = resolve(import.meta.dirname, '..');
 const ALLOWLIST = new Map([
   ['HOME', 'OS-provided home directory'],
   ['SHELL', 'OS-provided shell path'],
+  ['ZDOTDIR', 'Zsh-owned startup configuration root; inherited tool setting, not an app setting'],
+  [
+    'CAT_CAFE_ORIGINAL_ZDOTDIR',
+    'Host-owned shell guard handoff preserving the original Zsh startup root; not user configuration',
+  ],
   ['PATH', 'OS-provided executable search path'],
   ['TMPDIR', 'OS-provided temporary directory passed to the isolated AGY CLI; not an app setting'],
   ['Path', 'Windows OS-provided PATH alias; executable search input, not an app setting'],
@@ -33,8 +41,15 @@ const ALLOWLIST = new Map([
   ['APPDATA', 'Windows OS variable (cli-spawn-win.ts)'],
   ['LOCALAPPDATA', 'Windows OS variable (cli-resolve.ts)'],
   ['SYSTEMROOT', 'Windows OS variable (project-path.ts)'],
+  [
+    'SystemRoot',
+    'Windows OS-provided SystemRoot spelling used by taskkill and the ACP PowerShell verifier; not an app setting',
+  ],
   ['PROGRAMFILES', 'Windows OS variable (ImageExporter.ts Chrome detection)'],
   ['PATHEXT', 'Windows OS variable (capability-orchestrator.ts executable extension lookup)'],
+  ['ComSpec', 'Windows OS-provided command shell path used by the ACP frozen spawn plan; not an app setting'],
+  ['ProgramData', 'Windows OS-provided machine data root used for the ACP bootstrap fallback; not an app setting'],
+  ['ALLUSERSPROFILE', 'Windows OS-provided alias of ProgramData used when ProgramData is unset'],
   ['NODE_ENV', 'Node.js standard'],
   ['GH_HOST', 'Inherited GitHub CLI host used to partition credential quota; not an app setting'],
   ['GH_CONFIG_DIR', 'GitHub CLI-owned configuration location used to identify its auth store'],
@@ -44,6 +59,7 @@ const ALLOWLIST = new Map([
   ['all_proxy', 'Standard proxy convention (lowercase variant of ALL_PROXY)'],
   ['npm_execpath', 'Package-manager metadata injected by npm/pnpm; not user-configurable'],
   ['npm_config_user_agent', 'Package-manager metadata injected by npm/pnpm; not user-configurable'],
+  ['npm_config_cache', 'Inherited npm cache location used for read-only discovery of an installed DSH entry'],
   ['INIT_CWD', 'Package-manager metadata injected by npm/pnpm; original invocation directory'],
   ['COGVIDEO_API_KEY', 'F139 MediaHub CogVideoX provider — mcp-server-local credential'],
   ['CLAUDE_BIN', 'F254 developer-only live fixture executable override; not a runtime setting'],
@@ -55,44 +71,12 @@ const ALLOWLIST = new Map([
     'CAT_CAFE_GATE_BASE_SHA',
     'Pre-merge gate internal exact-base handoff to MCP governance; not user or runtime configuration',
   ],
-  // F240: Per-connector env vars migrated to YAML manifests (connector.yaml / plugin.yaml).
-  // Runtime still reads process.env as fallback in resolveConnectorEnv() chain, but
-  // documentation/display is now driven by the YAML config.fields declarations.
-  ['TELEGRAM_BOT_TOKEN', 'F240: defined in connectors/telegram/connector.yaml'],
-  ['FEISHU_APP_ID', 'F240: defined in connectors/feishu/connector.yaml'],
-  ['FEISHU_APP_SECRET', 'F240: defined in connectors/feishu/connector.yaml'],
-  ['FEISHU_VERIFICATION_TOKEN', 'F240: defined in connectors/feishu/connector.yaml'],
-  ['FEISHU_BOT_OPEN_ID', 'F240: defined in connectors/feishu/connector.yaml'],
-  ['FEISHU_ADMIN_OPEN_IDS', 'F240: defined in connectors/feishu/connector.yaml'],
-  ['FEISHU_CONNECTION_MODE', 'F240: defined in connectors/feishu/connector.yaml'],
-  [
-    'FEISHU_GROUP_BOT_MENTIONS_JSON',
-    'F240: connector-scoped power-user env (#1035 — JSON map for outbound @alias resolution; .env-only, not surfaced in Hub UI)',
-  ],
-  ['DINGTALK_APP_KEY', 'F240: defined in connectors/dingtalk/connector.yaml'],
-  ['DINGTALK_APP_SECRET', 'F240: defined in connectors/dingtalk/connector.yaml'],
-  ['XIAOYI_AK', 'F240: defined in connectors/xiaoyi/connector.yaml'],
-  ['XIAOYI_SK', 'F240: defined in connectors/xiaoyi/connector.yaml'],
-  ['XIAOYI_AGENT_ID', 'F240: defined in connectors/xiaoyi/connector.yaml'],
-  ['WEIXIN_BOT_TOKEN', 'F240: defined in connectors/weixin/connector.yaml'],
-  ['WECOM_BOT_ID', 'F240: defined in connectors/wecom/connector.yaml'],
-  ['WECOM_BOT_SECRET', 'F240: defined in connectors/wecom/connector.yaml'],
-  ['WECOM_CORP_ID', 'F240: defined in connectors/wecom/connector.yaml'],
-  ['WECOM_AGENT_ID', 'F240: defined in connectors/wecom/connector.yaml'],
-  ['WECOM_AGENT_SECRET', 'F240: defined in connectors/wecom/connector.yaml'],
-  ['WECOM_TOKEN', 'F240: defined in connectors/wecom/connector.yaml'],
-  ['WECOM_ENCODING_AES_KEY', 'F240: defined in connectors/wecom/connector.yaml'],
 ]);
 
 // ── Extract registered names from env-registry.ts ──
 function loadRegisteredNames() {
-  const src = readFileSync(join(ROOT, 'packages/api/src/config/env-registry.ts'), 'utf-8');
-  const names = new Set();
-  // Match: name: 'VAR_NAME' or name: "VAR_NAME"
-  for (const m of src.matchAll(/name:\s*['"]([A-Z_][A-Z0-9_]*)['"],?/g)) {
-    names.add(m[1]);
-  }
-  return names;
+  const src = loadEnvRegistrySource(join(ROOT, 'packages/api/src/config/env-registry.ts'));
+  return new Set(parseVars(src).map(({ name }) => name));
 }
 
 // ── Recursively collect .ts files ──
@@ -171,6 +155,7 @@ describe('env-registry completeness', () => {
     'WEIXIN_ENABLE_UNSAFE_VOICE_MODES',
     'WEIXIN_CAPTURE_INBOUND_VOICE_MEDIA',
   ];
+  const isPluginNetworkConsumer = (location) => /(?:^|[/\\])plugin-network-fetch\.ts:\d+$/.test(location);
 
   it('every allowlist entry has a non-empty reason', () => {
     for (const [name, reason] of ALLOWLIST) {
@@ -178,24 +163,20 @@ describe('env-registry completeness', () => {
     }
   });
 
-  it('keeps GitHub Repo Inbox process env vars in env-registry', () => {
-    for (const name of repoInboxEnvNames) {
-      assert.ok(registeredNames.has(name), `${name} should be registered in env-registry.ts`);
-      assert.ok(!ALLOWLIST.has(name), `${name} is runtime user config and must not be allowlisted`);
-    }
-  });
-
-  it('keeps GitHub feedback self-filter fallback in env-registry', () => {
-    for (const name of githubSelfFilterEnvNames) {
-      assert.ok(registeredNames.has(name), `${name} should be registered in env-registry.ts`);
-      assert.ok(!ALLOWLIST.has(name), `${name} is runtime user config and must not be allowlisted`);
-    }
-  });
-
-  it('keeps Weixin runtime voice flags in env-registry', () => {
-    for (const name of weixinRuntimeFlagNames) {
-      assert.ok(registeredNames.has(name), `${name} should stay registered; it is not a connector credential`);
-      assert.ok(!ALLOWLIST.has(name), `${name} is not declared in connectors/weixin/connector.yaml`);
+  it('does not expose retired GitHub and IM process configuration', () => {
+    for (const name of [
+      ...repoInboxEnvNames,
+      ...githubSelfFilterEnvNames,
+      ...weixinRuntimeFlagNames,
+      'GITHUB_MCP_PAT',
+      'CONNECTOR_GATEWAY_AUTOSTART',
+      'TELEGRAM_BOT_TOKEN',
+      'FEISHU_APP_SECRET',
+      'WECOM_AGENT_SECRET',
+    ]) {
+      assert.equal(registeredNames.has(name), false, `${name} must not remain Host configuration`);
+      assert.equal(ALLOWLIST.has(name), false, `${name} must not bypass the registry`);
+      assert.equal(envRefs.has(name), false, `${name} must not be read by Host code`);
     }
   });
 
@@ -215,6 +196,21 @@ describe('env-registry completeness', () => {
           'or add to ALLOWLIST in this script with a reason.',
       );
     }
+  });
+
+  it('checks both desktop plugin bridge handoff variables without an allowlist bypass', () => {
+    for (const name of ['CAT_CAFE_PLUGIN_NETWORK_BRIDGE_URL', 'CAT_CAFE_PLUGIN_NETWORK_BRIDGE_TOKEN']) {
+      assert.ok(envRefs.get(name)?.some(isPluginNetworkConsumer), `${name} must be discovered at its API consumer`);
+      assert.ok(registeredNames.has(name), `${name} must be registered`);
+      assert.equal(ALLOWLIST.has(name), false, `${name} must not bypass registration`);
+    }
+  });
+
+  it('recognizes the bridge consumer with Windows and POSIX diagnostic separators', () => {
+    assert.ok(isPluginNetworkConsumer(`${win32.join('packages', 'api', 'plugin-network-fetch.ts')}:5`));
+    assert.ok(isPluginNetworkConsumer('packages/api/plugin-network-fetch.ts:5'));
+    assert.equal(isPluginNetworkConsumer('packages/api/other-plugin-network-fetch.ts:5'), false);
+    assert.equal(isPluginNetworkConsumer('packages/api/plugin-network-fetch.ts:5/other.ts:2'), false);
   });
 
   it('no allowlist entry that is actually registered (redundant)', () => {

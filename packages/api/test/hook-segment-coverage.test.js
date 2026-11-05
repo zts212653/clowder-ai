@@ -283,7 +283,7 @@ describe('Hook segment coverage (AC-P2-14)', () => {
     }
   });
 
-  it('per-turn trace produces exactly 23 per-turn events', () => {
+  it('per-turn trace retains all 23 active hooks after retiring Signal article injection', () => {
     const { trace } = ppb.buildInvocationContextViaHookPipelineWithTrace({
       catId: 'opus',
       mode: 'serial',
@@ -294,6 +294,13 @@ describe('Hook segment coverage (AC-P2-14)', () => {
       a2aEnabled: true,
     });
     assert.equal(trace.events.length, 23, `Expected 23 per-turn events, got ${trace.events.length}`);
+    const expectedIds = [...Array.from({ length: 19 }, (_, i) => `D${i + 1}`), 'D21', 'R1', 'R2', 'N1'];
+    assert.deepEqual(
+      trace.events.map((event) => event.hookId).sort(),
+      expectedIds.sort(),
+      'Retiring D20 must preserve every other per-turn hook',
+    );
+    assert.ok(!trace.patches.some((patch) => patch.hookId === 'D20'), 'Retired article injection produces no patch');
   });
 
   // -- Trace capture (AC-P2-8) -----------------------------------------------

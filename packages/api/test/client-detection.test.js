@@ -96,3 +96,31 @@ test('hasApiKey reflects env var presence', async () => {
     }
   }
 });
+
+test('Claude settings API credentials count as authenticated without exposing the value', async () => {
+  const existsOnPath = mock.fn(async (cli) => cli === 'claude');
+  const settings = JSON.stringify({
+    env: {
+      ANTHROPIC_AUTH_TOKEN: 'fixture-claude-token-must-never-leave-api',
+      ANTHROPIC_BASE_URL: 'https://example.invalid',
+    },
+  });
+  const result = await detectAvailableClients({
+    existsOnPath,
+    auth: {
+      homeDir: 'C:/fixture-home',
+      readFile: (file) =>
+        file.endsWith('settings.json')
+          ? settings
+          : (() => {
+              throw new Error('missing');
+            })(),
+      env: {},
+    },
+  });
+  const claude = result.find((client) => client.client === 'claude');
+  assert.equal(claude?.authenticated, true);
+  assert.equal(claude?.authType, 'native');
+  assert.equal(claude?.hasApiKey, false);
+  assert.equal(JSON.stringify(result).includes('fixture-claude-token'), false);
+});

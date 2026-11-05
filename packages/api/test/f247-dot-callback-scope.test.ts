@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import './helpers/setup-cat-registry.js';
 import { createCatId } from '@cat-cafe/shared';
 import Fastify from 'fastify';
 import { AgentKeyRegistry } from '../src/domains/cats/services/agents/agent-key/AgentKeyRegistry.js';
@@ -10,7 +11,7 @@ for (const sourceWriter of [false, true]) {
   test(`dot credentials cannot enter generic callback routes; source writer opt-in=${sourceWriter}`, async () => {
     const keys = new AgentKeyRegistry();
     const dot = await keys.issue(createCatId('gpt-dot'), 'owner', { expiresAt: null });
-    const pro = await keys.issue(createCatId('gpt-pro'), 'owner');
+    const pro = await keys.issue(createCatId('gpt-pro'), 'owner', { scope: 'cloud-conversation' });
     const app = Fastify();
     let handled = 0;
     registerCallbackAuthHook(app, new InvocationRegistry(), {
@@ -55,7 +56,11 @@ for (const sourceWriter of [false, true]) {
         url: '/api/callbacks/list-threads',
         headers: { 'x-agent-key-secret': pro.secret },
       });
-      assert.equal(legacy.statusCode, 200, 'Pro retains its existing callback contract');
+      assert.equal(
+        legacy.statusCode,
+        200,
+        'Pro retains its callback contract with the current cloud-conversation credential',
+      );
     } finally {
       await app.close();
     }

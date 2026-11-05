@@ -8,6 +8,7 @@ import { applyThemeCSS } from '@/stores/themeStore';
 import '@/app/globals.css';
 import '@/app/theme-tokens.css';
 import '@/app/console-tokens.css';
+import '@/app/connector-tokens.css';
 import '@/app/shell-v2.css';
 
 const classic = new URL(location.href).searchParams.get('classic') === '1';

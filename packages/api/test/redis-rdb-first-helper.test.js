@@ -37,11 +37,16 @@ exit 0
     `#!/usr/bin/env bash
 set -euo pipefail
 printf '%s\\n' "$*" >> "${cliArgsLog}"
-if [[ "\${1:-}" == "-p" ]]; then
-  shift 2
-fi
+while [[ "\${1:-}" == -* ]]; do
+  case "$1" in
+    -h|-p) shift 2 ;;
+    --raw|-e) shift ;;
+    *) exit 2 ;;
+  esac
+done
 case "\${1:-}" in
   ping)
+    printf 'PONG\\n'
     exit 0
     ;;
   config)

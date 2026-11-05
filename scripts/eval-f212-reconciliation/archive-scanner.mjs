@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { gunzipSync } from 'node:zlib';
 
 /**
  * F212 Phase H AC-H10 R3 P1-C + Cloud R1 P2: sequence-aware NDJSON scanner.
@@ -21,12 +22,6 @@ import { readFileSync } from 'node:fs';
  *     terminal failure → persistence required.
  */
 export function scanArchiveForAbnormalExit(archivePath) {
-  const text = readFileSync(archivePath, 'utf8');
-  // Sol R6 P2 fix: preserve 1-based PHYSICAL line numbers so downstream error
-  // messages match the actual file (`sed -n 1,10p` in editor). Blank lines are
-  // still skipped for parsing but do not shift the reported line number.
-  const rawLines = text.split('\n');
-
   /**
    * F212 Phase H Sol Final确权 P1-B (2026-07-10): fail-CLOSED on malformed input.
    * Previously JSON.parse errors were silently skipped and missing timestamps
@@ -42,22 +37,8 @@ export function scanArchiveForAbnormalExit(archivePath) {
    */
   const malformedLines = [];
   const records = [];
-  for (let i = 0; i < rawLines.length; i++) {
-    const line = rawLines[i];
-    if (line.trim().length === 0) continue; // Skip blank lines silently.
-    const physicalLine = i + 1; // 1-based physical line number
-    let record;
-    try {
-      record = JSON.parse(line);
-    } catch (err) {
-      malformedLines.push({ line: physicalLine, reason: `JSON parse: ${err.message.slice(0, 100)}` });
-      continue;
-    }
-    if (typeof record.timestamp !== 'number' || Number.isNaN(record.timestamp)) {
-      malformedLines.push({ line: physicalLine, reason: 'missing/non-numeric timestamp' });
-      continue;
-    }
-    records.push({ record, timestamp: record.timestamp, _orderIndex: i });
+  for (const file of Array.isArray(archivePath) ? archivePath : [archivePath]) {
+    appendArchiveRecords(file, records, malformedLines);
   }
 
   // Stable ascending sort by timestamp. Node's Array.sort has been spec-stable
@@ -91,4 +72,28 @@ export function scanArchiveForAbnormalExit(archivePath) {
   }
 
   return { emitted, streamErrorCount, finalTerminal, reasonCode, malformedLines };
+}
+
+function appendArchiveRecords(file, records, malformedLines) {
+  const bytes = readFileSync(file);
+  const text = (file.endsWith('.gz') ? gunzipSync(bytes) : bytes).toString('utf8');
+  // Physical line numbers are local to each file, including blank lines.
+  const rawLines = text.split('\n');
+  for (let i = 0; i < rawLines.length; i++) {
+    const line = rawLines[i];
+    if (line.trim().length === 0) continue; // Skip blank lines silently.
+    const physicalLine = i + 1; // 1-based physical line number
+    let record;
+    try {
+      record = JSON.parse(line);
+    } catch (err) {
+      malformedLines.push({ file, line: physicalLine, reason: `JSON parse: ${err.message.slice(0, 100)}` });
+      continue;
+    }
+    if (typeof record.timestamp !== 'number' || Number.isNaN(record.timestamp)) {
+      malformedLines.push({ file, line: physicalLine, reason: 'missing/non-numeric timestamp' });
+      continue;
+    }
+    records.push({ record, timestamp: record.timestamp, _orderIndex: records.length });
+  }
 }

@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { Composer, type HumanMention, type MentionSelection } from './Composer.js';
 import type { ClientTarget, CollectiveParticipant, DeliveryState } from './client-types.js';
+import { useCollectiveLanguage } from './collective-copy.js';
 import type { FirstEntryGuide } from './first-entry/use-first-entry-guide.js';
 
 export function ChannelComposer({
   namespace,
+  collectiveName,
   channelId,
   participants,
   humans,
@@ -15,6 +17,7 @@ export function ChannelComposer({
   firstEntry,
 }: {
   readonly namespace: string;
+  readonly collectiveName: string;
   readonly channelId: string;
   readonly participants: readonly CollectiveParticipant[];
   readonly humans: readonly HumanMention[];
@@ -24,6 +27,7 @@ export function ChannelComposer({
   readonly onCafe?: () => void;
   readonly firstEntry?: FirstEntryGuide;
 }) {
+  const language = useCollectiveLanguage();
   const host = useRef<HTMLDivElement>(null);
   const guidePhase = firstEntry?.phase;
   const guideCat = firstEntry?.narrator;
@@ -73,7 +77,11 @@ export function ChannelComposer({
   return (
     <>
       {firstEntry?.phase === 'handoff' && (
-        <p className="first-entry-audience">#general 是公开频道 · 这个 Collective 的成员都看得到</p>
+        <p className="first-entry-audience">
+          {language === 'en'
+            ? `#general is public · visible to all ${collectiveName} members`
+            : `#general 是公开频道 · ${collectiveName}的成员都看得到`}
+        </p>
       )}
       {firstEntry?.phase === 'empty' && (
         <output className="first-entry-hint">
@@ -103,11 +111,17 @@ export function ChannelComposer({
           channelId={channelId}
           participants={participants}
           humans={humans}
-          placeholder={`在 #${channelId} 里说点什么……`}
+          placeholder={
+            language === 'en'
+              ? `Post to # ${channelId} · visible to all ${collectiveName} members`
+              : `发到 # ${channelId} · ${collectiveName}的成员都看得到`
+          }
           delivery={delivery}
           mention={guideMention ?? mention}
-          onSend={async (body, recipient, entrust, responseRequested) => {
+          onSend={async (body, recipient, entrust, responseRequested, replyToEventId, content) => {
             await onSend(body, {
+              ...content,
+              ...(replyToEventId ? { replyToEventId } : {}),
               location: { channelId },
               recipient,
               ...(responseRequested && recipient.kind === 'channel'

@@ -219,6 +219,8 @@ export interface CapabilityBoardItem {
   type: 'mcp' | 'skill' | 'limb';
   source: 'cat-cafe' | 'external' | 'plugin';
   enabled: boolean;
+  /** A Host-local installation supplies access; change its state in Plugin Manager. */
+  accessManagedByPlugin?: boolean;
   /** F228: Global enabled for skills (mirrors CapabilityEntry.globalEnabled in board response) */
   globalEnabled?: boolean;
   /** Per-cat effective state (global + overrides resolved) */

@@ -170,7 +170,7 @@ test('the owner route returns exact group counts for a full vector larger than i
     request.sessionUserId = 'owner';
   });
   app.get('/api/approval-hub/pending', async () => ({
-    items: [approval('decision')],
+    items: [approval('decision', 'F139')],
     coverage: { state: 'complete' },
   }));
   app.get('/api/entrusted-work/needs-me', async () => ({

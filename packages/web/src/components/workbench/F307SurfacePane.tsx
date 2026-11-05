@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { FileToolbarHostControls } from '@/components/content-review/FileToolbar';
 import { useShellCopy } from '@/components/shell/shell-copy';
 import { useShellPresentation } from '@/components/shell/shell-presentation';
 import type { WorkspaceSurfaceDescriptor } from '@/components/workbench/workbench-contract';
@@ -6,7 +7,11 @@ import { FocusModeButton } from '@/components/workspace/FocusModeButton';
 import { WorkspaceFocusExitButton } from '@/components/workspace/WorkspaceFocusShell';
 import { resolveArtifactReviewTarget } from './artifact-review-surface';
 import { resolvePublicationTarget } from './publication-surface';
-import { isVoiceDestinationSurface } from './real-surface-adapters';
+import {
+  isVoiceDestinationSurface,
+  parseArtifactObjectId,
+  resolveWorkspaceDestinationTarget,
+} from './real-surface-adapters';
 import { WorkspaceChatWorkSurface } from './WorkspaceChatWorkScope';
 import { promoteWorkspacePreview } from './WorkspacePreviewIntent';
 import { workspaceChromeCopy } from './workspace-chrome.shell-copy';
@@ -57,18 +62,25 @@ interface F307SurfacePaneProps {
 }
 
 export function F307SurfacePane(props: F307SurfacePaneProps) {
-  // Audit row44 (review R2): the voice pane's accessible name is a v2 display projection — the real
-  // consumption point is the article's aria-label, and only the v2 voice surface gets a localized one.
-  // Classic and every other surface keep the stored title and read nothing new.
-  if (useShellPresentation() === 'v2' && isVoiceDestinationSurface(props.surface)) {
-    return <V2VoiceSurfacePane {...props} />;
+  // Canonical host names are display projections, including restored descriptors.
+  // Classic and other owners keep their stored title; no owner/key changes on locale switches.
+  const localizedHost =
+    isVoiceDestinationSurface(props.surface) ||
+    resolveWorkspaceDestinationTarget(props.surface)?.destinationRef === 'host:status';
+  if (useShellPresentation() === 'v2' && localizedHost) {
+    return <V2LocalizedHostPane {...props} />;
   }
   return <SurfacePaneBody {...props} />;
 }
 
-function V2VoiceSurfacePane(props: F307SurfacePaneProps) {
+function V2LocalizedHostPane(props: F307SurfacePaneProps) {
   const t = useShellCopy(workspaceChromeCopy);
-  return <SurfacePaneBody {...props} accessibleName={t.voiceSurface.label} />;
+  return (
+    <SurfacePaneBody
+      {...props}
+      accessibleName={isVoiceDestinationSurface(props.surface) ? t.voiceSurface.label : t.statusSurface.label}
+    />
+  );
 }
 
 function SurfacePaneBody({
@@ -82,9 +94,15 @@ function SurfacePaneBody({
   children,
   accessibleName,
 }: F307SurfacePaneProps & { accessibleName?: string }) {
+  const isV2 = useShellPresentation() === 'v2';
+  const artifactKind = surface.type === 'artifact' ? parseArtifactObjectId(surface.objectRef.id)?.type : undefined;
+  // File-backed catalogue entries render the same reader as Workspace files.
+  // Widgets and PRs retain their separate tool chrome and owners.
+  const artifactFileChrome = isV2 && !!artifactKind && artifactKind !== 'widget' && artifactKind !== 'pr';
   const chromeOwnedByTool =
-    useShellPresentation() === 'v2' &&
+    isV2 &&
     (['file', 'code', 'browser', 'terminal', 'workspace'].includes(surface.type) ||
+      artifactFileChrome ||
       Boolean(resolveArtifactReviewTarget(surface) || resolvePublicationTarget(surface)));
   return (
     <article
@@ -109,7 +127,9 @@ function SurfacePaneBody({
           <span className="h-4 w-4 shrink-0 text-cafe-muted">
             <SurfaceGlyph type={surface.type} />
           </span>
-          <span className="min-w-0 flex-1 truncate text-xs font-semibold text-cafe">{surface.title}</span>
+          <span className="min-w-0 flex-1 truncate text-xs font-semibold text-cafe">
+            {accessibleName ?? surface.title}
+          </span>
           <span className="truncate text-micro text-cafe-muted">{surface.context}</span>
           {onToggleArtifactWorkFullWindow ? (
             <button
@@ -132,7 +152,25 @@ function SurfacePaneBody({
         className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-auto [&>*]:min-h-0 [&>*]:w-full [&>*]:flex-1"
         data-testid="f307-owner-surface-host"
       >
-        <WorkspaceChatWorkSurface surfaceId={surface.id}>{children}</WorkspaceChatWorkSurface>
+        <FileToolbarHostControls
+          value={
+            artifactFileChrome && onToggleArtifactWorkFullWindow ? (
+              <button
+                type="button"
+                className="shrink-0 rounded-md border border-cafe-subtle px-2 py-1 text-xs"
+                onClick={onToggleArtifactWorkFullWindow}
+                aria-label={artifactWorkFullWindow ? '展开聊天' : '整窗查看作品'}
+                data-testid={
+                  artifactWorkFullWindow ? 'f307-artifact-exit-full-window' : 'f307-artifact-enter-full-window'
+                }
+              >
+                {artifactWorkFullWindow ? '展开聊天' : '整窗'}
+              </button>
+            ) : null
+          }
+        >
+          <WorkspaceChatWorkSurface surfaceId={surface.id}>{children}</WorkspaceChatWorkSurface>
+        </FileToolbarHostControls>
         {focusMode && onExitFocusMode && (
           <WorkspaceFocusExitButton
             onExit={onExitFocusMode}

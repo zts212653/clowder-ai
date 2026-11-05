@@ -1,6 +1,6 @@
-import type { ApprovalHubItem } from '@cat-cafe/shared';
+import type { ApprovalFeatureId, ApprovalHubItem } from '@cat-cafe/shared';
 import { useState, useSyncExternalStore } from 'react';
-import { ApprovalPanel } from '@/components/ApprovalPanel';
+import { ApprovalPendingPane, type ApprovalStatusFilter } from '@/components/ApprovalPendingPane';
 import { isApprovalItemBatchDecidable } from '@/lib/approval-features';
 import { useApprovalHubStore } from '@/stores/approvalHubStore';
 import { ShellGlyph } from '../ShellIcons';
@@ -10,13 +10,13 @@ import { matchHostedApproval } from './approval-match';
 import { describeReconcile } from './approval-reconcile';
 import { type ApprovalSessions, sessionKey } from './approval-sessions';
 import { HostedApprovalCard } from './HostedApprovalCard';
+import { handledHistoryCopy } from './handled-history.shell-copy';
 import { mailboxEntryCopy } from './mailbox-entry.shell-copy';
 import type { MailboxSection } from './mailbox-navigation';
 import { resolveOriginalPlace } from './original-place';
 
 /** The existing filters/history/batch eligibility, scoped to decisions the current owner read can actually authorize. */
 export function MailboxApprovalTools({
-  section,
   view,
   sessions,
   onBack,
@@ -30,6 +30,9 @@ export function MailboxApprovalTools({
 }) {
   const t = useShellCopy(mailboxEntryCopy);
   useSyncExternalStore(sessions.subscribe, sessions.getVersion, sessions.getVersion);
+  const [featureFilters, setFeatureFilters] = useState<Set<ApprovalFeatureId>>(() => new Set());
+  const [statusFilter, setStatusFilter] = useState<ApprovalStatusFilter>('all');
+  const [threadQuery, setThreadQuery] = useState('');
   const [batchNotice, setBatchNotice] = useState<string | null>(null);
   const rawItems = useApprovalHubStore((state) => state.items);
   const loading = useApprovalHubStore((state) => state.isLoading);
@@ -131,10 +134,13 @@ export function MailboxApprovalTools({
               {batchNotice}
             </output>
           ) : null}
-          <ApprovalPanel
-            initialTab={section === 'records' ? 'history' : 'pending'}
-            showPendingCount={false}
-            historyOwnerUserId={read?.identity.ownerUserId}
+          <ApprovalPendingPane
+            featureFilters={featureFilters}
+            onFeatureFiltersChange={setFeatureFilters}
+            statusFilter={statusFilter}
+            onStatusFilterChange={setStatusFilter}
+            threadQuery={threadQuery}
+            onThreadQueryChange={setThreadQuery}
             consumer={{
               items: displayedItems,
               canBatchDecide,
@@ -172,33 +178,19 @@ export function MailboxSecondLayer({
   onNavigate: (section: MailboxSection) => void;
   disabled?: boolean;
 }) {
-  const t = useShellCopy(mailboxEntryCopy);
+  const t = useShellCopy(handledHistoryCopy);
   return (
-    <footer
-      className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t pt-3 text-sm"
-      style={{ borderColor: 'var(--shell-hairline)' }}
-    >
+    <footer className="flex-none border-t px-[22px] py-3 text-sm" style={{ borderColor: 'var(--shell-hairline)' }}>
       <button
         type="button"
         disabled={disabled}
         data-testid="mailbox-history"
         onClick={() => onNavigate('history')}
-        className="shell-nav-row shell-focusable inline-flex items-center gap-1.5 rounded-lg px-3 py-2 disabled:opacity-50"
-        style={{ color: 'var(--shell-body)', border: '1px solid var(--shell-hairline-strong)' }}
+        className="shell-nav-row shell-focusable inline-flex w-full items-center gap-2 rounded-lg py-1 text-left disabled:opacity-50"
       >
         <ShellGlyph name="history" className="h-4 w-4" />
-        {t.history}
-      </button>
-      <button
-        type="button"
-        disabled={disabled}
-        data-testid="mailbox-records"
-        onClick={() => onNavigate('records')}
-        className="shell-nav-row shell-focusable inline-flex items-center gap-1.5 rounded-lg px-3 py-2 disabled:opacity-50"
-        style={{ color: 'var(--shell-body)', border: '1px solid var(--shell-hairline-strong)' }}
-      >
-        <ShellGlyph name="checkSquare" className="h-4 w-4" />
-        {t.records}
+        {t.title}
+        <span aria-hidden="true">›</span>
       </button>
     </footer>
   );

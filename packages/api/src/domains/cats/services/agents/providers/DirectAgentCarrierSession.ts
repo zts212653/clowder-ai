@@ -4,6 +4,7 @@ import { observeCliExecutionProcess } from '../../../../../utils/CliExecutionObs
 import { CliExitOutputDrain } from '../../../../../utils/CliExitOutputDrain.js';
 import type { CliExecutionOwnerRef } from '../../../../../utils/cli-process-ownership.js';
 import { buildChildEnv } from '../../../../../utils/cli-spawn.js';
+import { resolveWindowsSpawnPlan } from '../../../../../utils/cli-spawn-win.js';
 import { buildUnixSupervisedSpawnPlan } from '../../../../../utils/cli-supervised-process.js';
 import { isParseError, parseNDJSON } from '../../../../../utils/ndjson-parser.js';
 import { excerptSanitizedStderr } from '../../../../../utils/sanitize-cli-stderr.js';
@@ -17,12 +18,17 @@ const DIRECT_STDERR_TAIL_CHARS = 8192;
 export interface DirectAgentCarrierSessionDeps {
   /** Server-owned per-turn identity; never derive it from ambient or warm-host environment. */
   executionOwner?: CliExecutionOwnerRef;
+  windowsSpawnPlan?: typeof resolveWindowsSpawnPlan;
   /** Host-prepared complete environment; ordinary provider sessions still inherit normally. */
   finalEnvironment?: Readonly<NodeJS.ProcessEnv>;
 }
 
-function normalizeEnv(input: Record<string, string | null> | undefined, workingDirectory: string): NodeJS.ProcessEnv {
-  return buildChildEnv(input, { workingDirectory });
+function normalizeEnv(
+  input: Record<string, string | null> | undefined,
+  workingDirectory: string,
+  inheritParentEnv?: boolean,
+): NodeJS.ProcessEnv {
+  return buildChildEnv(input, { workingDirectory, inheritParentEnv });
 }
 
 class DirectAgentCarrierSession implements AgentCarrierSession {
@@ -51,10 +57,12 @@ class DirectAgentCarrierSession implements AgentCarrierSession {
       throw new Error('direct_carrier_owner_mismatch');
     }
     const childCwd = options.cwd ?? process.cwd();
-    const env = deps.finalEnvironment ? { ...deps.finalEnvironment } : normalizeEnv(options.env, childCwd);
+    const env = deps.finalEnvironment
+      ? { ...deps.finalEnvironment }
+      : normalizeEnv(options.env, childCwd, options.inheritParentEnv);
     const launch =
       process.platform === 'win32'
-        ? { command: options.command, args: [...options.args], env }
+        ? { ...(deps.windowsSpawnPlan ?? resolveWindowsSpawnPlan)(options.command, options.args), env }
         : buildUnixSupervisedSpawnPlan(options.command, options.args, {
             env,
             killGraceMs: 500,
@@ -62,6 +70,11 @@ class DirectAgentCarrierSession implements AgentCarrierSession {
     this.child = spawn(launch.command, launch.args, {
       ...(options.cwd ? { cwd: options.cwd } : {}),
       env: launch.env,
+      windowsHide: true,
+      shell:
+        'shell' in launch && (typeof launch.shell === 'string' || typeof launch.shell === 'boolean')
+          ? launch.shell
+          : false,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     observeCliExecutionProcess(this.child, deps.executionOwner);

@@ -10,7 +10,7 @@
  * targetPath is DERIVED from the authenticated cat's stable persona
  * (`relationship/{relationshipKey}-primer.md`), never
  * user-supplied — so a malicious afterContent can't escape the profile dir. INV-6: AC-C1 only
- * writes the current persona primer; capsule is rejected at the schema layer.
+ * writes only after the owner confirms; F332 KD-8 adds the bounded owner-wide capsule.
  *
  * The companion approve/reject endpoints are user-authenticated and live in
  * profile-update-decision-routes.ts.
@@ -24,9 +24,11 @@ import {
   type ProfileUpdateProposal,
 } from '@cat-cafe/shared';
 import {
+  PROFILE_CAPSULE_RELATIVE_PATH,
   profileCorpusRelativePath,
   relationshipKeyFromPrimerRelativePath,
   relationshipPrimerRelativePath,
+  renderUserCapsuleSection,
 } from '@cat-cafe/shared/profile-contract';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
@@ -46,7 +48,7 @@ const proposeSchema = z.object({
   rationale: z.string().trim().min(1).max(1000),
   signalKind: z.enum(COLLECTION_SIGNAL_KINDS),
   sourceMessageId: z.string().min(1).optional(),
-  // Phase E: 'primer' (per-persona) or 'corpus' (owner-wide). 'capsule' is not in the union → 400 (INV-6).
+  // Paths and identity are derived below; the cat can only choose a governed layer.
   targetLayer: z.enum(PROFILE_UPDATE_TARGET_LAYERS).default('primer'),
   clientRequestId: z.string().min(1).max(200).optional(),
 });
@@ -105,18 +107,30 @@ export function registerCallbackProposeProfileUpdateRoutes(app: FastifyInstance,
       }
     }
 
+    if (targetLayer === 'capsule') {
+      try {
+        if (!renderUserCapsuleSection(afterContent)) throw new Error('Capsule is empty');
+      } catch {
+        return reply
+          .status(400)
+          .send({ error: 'invalid_content', detail: 'Capsule must contain 1–300 non-whitespace characters' });
+      }
+    }
+
     // Phase E: derive target identity by layer.
     let targetPath: string;
     let beforeContent: string;
     let scope: ReturnType<FileProfileRepository['scope']> | undefined;
 
-    if (targetLayer === 'corpus') {
+    if (targetLayer === 'capsule' || targetLayer === 'corpus') {
       try {
-        targetPath = profileCorpusRelativePath();
-        beforeContent = repository.readCorpus(record.userId)?.content ?? '';
+        targetPath = targetLayer === 'capsule' ? PROFILE_CAPSULE_RELATIVE_PATH : profileCorpusRelativePath();
+        beforeContent =
+          (targetLayer === 'capsule' ? repository.readCapsule(record.userId) : repository.readCorpus(record.userId))
+            ?.content ?? '';
       } catch {
         reply.status(503);
-        return { error: 'corpus_target_unavailable', detail: 'Corpus repository is currently unavailable' };
+        return { error: `${targetLayer}_target_unavailable`, detail: 'Profile repository is currently unavailable' };
       }
     } else {
       // Target identity is derived from the authenticated cat's stable persona — never user-supplied.
@@ -269,7 +283,9 @@ function publishProfileUpdateApproval(
 ) {
   const sourceMessageId = proposal.signalProvenance.sourceMessageId ?? fallbackOriginMessageId;
   let cardContent: string;
-  if (proposal.targetLayer === 'corpus') {
+  if (proposal.targetLayer === 'capsule') {
+    cardContent = '提议更新开场简介';
+  } else if (proposal.targetLayer === 'corpus') {
     cardContent = '提议更新共享事实档案（corpus）';
   } else {
     const relationshipKey = relationshipKeyFromPrimerRelativePath(proposal.targetPath);

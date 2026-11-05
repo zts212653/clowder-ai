@@ -3,12 +3,14 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { catRegistry, createCatId } from '@cat-cafe/shared';
+import { catRegistry, createCatId, type MessageWorkDisposition } from '@cat-cafe/shared';
 import Fastify from 'fastify';
 import { loadCatConfig, toAllCatConfigs } from '../../src/config/cat-config-loader.js';
+import { saveMessageDispositionPreference } from '../../src/config/user-preferences-store.js';
 import { AgentKeyRegistry } from '../../src/domains/cats/services/agents/agent-key/AgentKeyRegistry.js';
 import { InvocationQueue } from '../../src/domains/cats/services/agents/invocation/InvocationQueue.js';
 import { InvocationRegistry } from '../../src/domains/cats/services/agents/invocation/InvocationRegistry.js';
+import { InvocationTracker } from '../../src/domains/cats/services/agents/invocation/InvocationTracker.js';
 import { MemoryCloudReturnGrantStore } from '../../src/domains/cats/services/cloud-bridge/cloud-return-grant.js';
 import { DotAskService } from '../../src/domains/cats/services/cloud-bridge/dot/DotAskService.js';
 import { DotConnectionService } from '../../src/domains/cats/services/cloud-bridge/dot/DotConnectionService.js';
@@ -25,7 +27,9 @@ import { type CallbackRoutesOptions, callbacksRoutes } from '../../src/routes/ca
 import { registerDotMcpRoutes } from '../../src/routes/chatgpt-dot-mcp-routes.js';
 import { sharedRemote } from './f247-shared-remote.js';
 
-export async function dotProactiveFixture(options: Pick<CallbackRoutesOptions, 'turnExecutionStore'> = {}) {
+export async function dotProactiveFixture(
+  options: Pick<CallbackRoutesOptions, 'turnExecutionStore'> & { messageDisposition?: MessageWorkDisposition } = {},
+) {
   for (const [id, config] of Object.entries(
     toAllCatConfigs(loadCatConfig(fileURLToPath(new URL('../../../../cat-template.json', import.meta.url)))),
   ))
@@ -46,7 +50,21 @@ export async function dotProactiveFixture(options: Pick<CallbackRoutesOptions, '
   const keys = new AgentKeyRegistry();
   const registry = new InvocationRegistry();
   const records = new InvocationRecordStore();
-  const queue = new InvocationQueue();
+  const invocationTracker = new InvocationTracker();
+  if (options.messageDisposition)
+    saveMessageDispositionPreference(dir, { scope: 'global', disposition: options.messageDisposition });
+  const carrierCapability = {
+    provider: 'openai_codex',
+    carrier: 'codex_app_server',
+    deliverySemantics: 'exact_active_turn',
+    activeInvocationGuidance: 'supported',
+  } as const;
+  const queue = new InvocationQueue(undefined, {
+    projectRoot: dir,
+    invocationTracker,
+    resolveCarrierCapability: () => carrierCapability,
+  });
+  const queueProcessor: NonNullable<CallbackRoutesOptions['queueProcessor']> = {};
   const postResults: Array<{ statusCode: number; body: { messageId?: string; kind?: string } }> = [];
   let enabled = true;
   const connection = new DotConnectionService({
@@ -135,7 +153,8 @@ export async function dotProactiveFixture(options: Pick<CallbackRoutesOptions, '
     threadStore: threads,
     socketManager: socket,
     invocationQueue: queue,
-    queueProcessor: {} as CallbackRoutesOptions['queueProcessor'],
+    queueProcessor,
+    invocationTracker,
     invocationRecordStore: records,
     router: {} as AgentRouter,
     admitDotReturn: (i) => returns.admitReturn(i),
@@ -252,7 +271,10 @@ export async function dotProactiveFixture(options: Pick<CallbackRoutesOptions, '
     records,
     socket,
     queue,
+    queueProcessor,
+    invocationTracker,
     connection,
+    carrierCapability,
     setup,
     pro,
     asks,

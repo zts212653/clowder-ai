@@ -6,6 +6,7 @@ canonical_features: [F229, F317]
 code_anchors:
   - packages/shared/src/types/concierge.ts
   - packages/api/src/domains/concierge/ConciergeConfigStore.ts
+  - packages/api/src/domains/concierge/concierge-app-assist-store.ts
   - packages/api/src/domains/concierge/ConciergeThreadService.ts
   - packages/api/src/domains/concierge/ConciergePromptSection.ts
   - packages/api/src/domains/concierge/concierge-keys.ts
@@ -16,6 +17,8 @@ code_anchors:
   - packages/api/src/domains/concierge/live/LiveCompanionCall.ts
   - packages/api/src/domains/concierge/live/LiveCompanionSessions.ts
   - packages/api/src/domains/concierge/live/CompanionHostBridge.ts
+  - packages/api/src/domains/concierge/live/host/companion-app-assist-owner.ts
+  - desktop/plugin-window/app-assist-host.cjs
   - desktop/plugin-window/window.cjs
   - desktop/plugin-window/voice-host.cjs
 doc_anchors:
@@ -62,6 +65,9 @@ This consumer does not replace the browser `ThreadChatSurface`. Cat-ball selecti
 ## Storage
 
 - `concierge:config:{userId}` — `ConciergeConfig` JSON, TTL=0 (LL-048 persistent-by-default iron rule).
+- `appAssistEnabled` is an independent default-off field in that same config. It is never inferred from pet behavior, proactive policy, household access or a call.
+- `concierge:app-assist-day:{userId}` — one current local-day object containing at most 256 opaque app keys, TTL=0. The verified owner's IANA timezone determines the day. Atomic saved-consent checks and claims prevent duplicate hints across Host instances; later days replace the object and clock rollback cannot reset it. No raw application name, bundle ID, timestamps or usage history is stored.
+- `concierge:app-assist-policy:{userId}` is a boolean-only revocation pub/sub channel, not another persistent record. Source or subscription loss stops the independent observer. The trusted desktop Host window session owns the transient offer, expiry and settlement; the API receives only opaque claim keys and never becomes an offer owner. Native projection is limited to activation-notification `{bundleId,name}` and does not read titles, URLs, documents or screens.
 - `concierge:thread:{userId}` — concierge `threadId`, TTL=0.
 - Thread record: `threadKind?: 'concierge'` on `IThreadStore`, filtered from default sidebar listing.
 

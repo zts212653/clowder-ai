@@ -75,6 +75,8 @@ export type HandleRecord = AddressHandleRecord | MessageHandleRecord;
 export interface HandleStore {
   put(record: HandleRecord): Promise<void>;
   get(handleId: string): Promise<HandleRecord | null>;
+  /** Atomic create-if-absent for deterministic Host-internal address handles. */
+  getOrCreateAddressHandle(record: AddressHandleRecord): Promise<{ record: AddressHandleRecord; created: boolean }>;
   /**
    * Atomic get-or-create for message handles. Returns the existing handle if
    * one is already minted for `record.messageId`; otherwise persists `record`
@@ -109,10 +111,22 @@ export interface AppendLease {
   readonly isCurrent?: () => boolean;
 }
 
+export interface EventAppendOptions {
+  /**
+   * Dedupe this key beyond event retention: a later append of the same key returns the first
+   * sequence even after the event (and its retention-window dedupe entry) was trimmed. For a
+   * publisher that may retry after a failed settlement write — without it, recovery after a trim
+   * appends the same message a second time. The fence has no expiry: it lasts exactly as long as
+   * the publisher may still retry, and the publisher ends it with `releaseFence` once the
+   * publication is recorded (W2-5b review P1s, PR #1487 comments 5828208840 / 5828779117).
+   */
+  readonly durableFence?: boolean;
+}
+
 export interface EventLogStore {
   /**
-   * Atomically: dedupe by eventKey within the retained window → assign next
-   * per-thread sequence → append → trim to retentionCount (INV-3 monotonic).
+   * Atomically: dedupe by eventKey within the retained window (and, when asked, by a durable
+   * fence) → assign next per-thread sequence → append → trim to retentionCount (INV-3 monotonic).
    * The submitted event carries no sequence — the store assigns it and the
    * read path returns events with their assigned sequence.
    */
@@ -122,7 +136,10 @@ export interface EventLogStore {
     event: MessageOutputEventInput,
     retentionCount: number,
     lease?: AppendLease,
+    options?: EventAppendOptions,
   ): Promise<EventLogAppendResult>;
+  /** Ends a durable fence once its publisher has recorded the publication; idempotent. */
+  releaseFence(threadId: string, eventKey: string): Promise<void>;
   /** Events with sequence > afterSequence, ascending, at most limit. */
   readAfter(threadId: string, afterSequence: number, limit: number): Promise<MessageOutputEvent[]>;
   /** Smallest retained sequence (retention floor projection); null when log is empty. */
@@ -168,6 +185,14 @@ export interface SnapshotViewRecord {
   readonly lastPageOffset?: number;
   /** Final ack is invalid until every frozen page has been consumed. */
   readonly traversalComplete: boolean;
+  /** One durable, bounded entitlement lease for the last returned page. */
+  readonly activePageLease?: SnapshotPageLease;
+}
+
+export interface SnapshotPageLease {
+  readonly sessionId: string;
+  readonly pageOffset: number;
+  readonly expiresAt: number;
 }
 
 /** Unpublished capture lease. Partial rows are never visible to readers. */
@@ -245,7 +270,20 @@ export interface CursorStore {
     subscriptionId: string,
     snapshotId: string,
     expected: { readonly offset: number; readonly tokenId?: string },
-    next: { readonly offset: number; readonly tokenId?: string; readonly traversalComplete: boolean },
+    next: {
+      readonly offset: number;
+      readonly tokenId?: string;
+      readonly traversalComplete: boolean;
+      readonly lease: SnapshotPageLease;
+    },
+  ): Promise<boolean>;
+  /** CAS rotation for replay of exactly the last frozen page. */
+  rotateSnapshotPageLease(
+    pluginInstanceId: string,
+    subscriptionId: string,
+    snapshotId: string,
+    expectedSessionId: string,
+    next: { readonly lease: SnapshotPageLease; readonly nextPageTokenId?: string },
   ): Promise<boolean>;
   /**
    * Consume the final snapshot entitlement atomically: validate the exact
@@ -256,6 +294,8 @@ export interface CursorStore {
     subscriptionId: string,
     snapshotId: string,
     headSequence: number,
+    sessionId?: string,
+    now?: number,
   ): Promise<'applied' | 'replayed' | 'rejected'>;
   /**
    * Atomically create a subscription and its (instance, handle) index, or
@@ -279,10 +319,21 @@ export interface AppendLock {
   release(messageId: string, lease: AppendLease): Promise<void>;
 }
 
+/**
+ * In-flight Host publication spans per thread (W2-5b-0). Process-local, not a durable store: it
+ * lives in this bundle because the bundle is the one object shared by the publishing seam that
+ * writes the stream and the domain whose snapshot reads it. See `stores/host-publication-gate.ts`.
+ */
+export interface HostPublicationTracker {
+  begin(threadId: string): () => void;
+  isBusy(threadId: string): boolean;
+}
+
 export interface MessagingStores {
   readonly ledger: LedgerStore;
   readonly handles: HandleStore;
   readonly events: EventLogStore;
   readonly cursors: CursorStore;
   readonly appendLock: AppendLock;
+  readonly publications: HostPublicationTracker;
 }

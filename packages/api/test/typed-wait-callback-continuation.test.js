@@ -103,7 +103,16 @@ async function harness(t, options = {}) {
       ];
     },
   };
-  let baselineHook = async () => {};
+  const task = taskStore.create({
+    kind: 'work',
+    threadId: thread.id,
+    title: 'Deployment wait',
+    ownerCatId: 'opus',
+    createdBy: 'opus',
+    userId: 'user-1',
+  });
+  let afterCaptureHook = async () => {};
+  let observations = 0;
   const app = Fastify();
   await app.register(callbacksRoutes, {
     registry,
@@ -116,12 +125,23 @@ async function harness(t, options = {}) {
     reflectionService: { reflect: async () => '' },
     markerQueue: { list: async () => [] },
     ballCustodyEventLog: { read: async () => structuredClone(events) },
-    fetchPrWaitBaseline: async () => {
-      await baselineHook();
-      return { baseline: { capturedAt: Date.now(), headSha: 'head-1' }, collectorState: {} };
+    deploymentObservationProvider: {
+      observe: async () => {
+        if (++observations === 2) await afterCaptureHook();
+        return {
+          subjectRef: 'deployment:abc123def456:runtime',
+          bootSequence: 1,
+          bootId: 'boot-1',
+          observedAt: Date.now(),
+        };
+      },
     },
-    fetchIssueWaitBaseline: async () => ({ baseline: { capturedAt: Date.now(), author: 'owner' }, collectorState: {} }),
-    verifyPrReviewEventWaitCoverage: async () => ({ covered: true }),
+    deploymentWaitLifecycleHolder: {
+      current: {
+        observe: async () => ({ kind: 'not_matched' }),
+        releaseCurrentExecutionClaim: async () => {},
+      },
+    },
   });
   await app.listen({ host: '127.0.0.1', port: 0 });
   t.after(() => app.close());
@@ -159,17 +179,16 @@ async function harness(t, options = {}) {
         sourceMessageId: wake.sourceMessageId,
       });
     },
-    onBaseline(fn) {
-      baselineHook = fn;
+    afterCapture(fn) {
+      afterCaptureHook = fn;
     },
     async adoptHold(suffix, scope) {
       const wake = appendHold(suffix, scope);
       activeInputMessageIds.push(wake.sourceMessageId);
       return wake;
     },
-    /** `when` undefined is the normal call: the server arms its default set, comment surfaces included. */
-    async register(when, kind = 'pr', { deadline = true } = {}) {
-      const response = await fetch(`${app.listeningOrigin}/api/callbacks/register-${kind}-tracking`, {
+    async register(when = { kind: 'new_ready_boot', services: ['api'] }, expectedStatus = 200) {
+      const response = await fetch(`${app.listeningOrigin}/api/callbacks/register-deployment-wait`, {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
@@ -177,70 +196,42 @@ async function harness(t, options = {}) {
           'x-callback-token': auth.callbackToken,
         },
         body: JSON.stringify({
-          repoFullName: 'owner/repo',
-          [`${kind}Number`]: 4513,
-          ...(when ? { when } : {}),
+          taskId: task.id,
+          deploymentId: 'runtime',
+          when,
           nextStep: 'Continue with the result.',
-          ...(deadline ? { expiresAt: Date.now() + 60000 } : {}),
         }),
       });
       const body = await response.json();
-      assert.equal(response.status, 200, JSON.stringify(body));
+      assert.equal(response.status, expectedStatus, JSON.stringify(body));
       assert.equal(JSON.stringify(body).includes('typedWaitRegistration'), false);
-      assert.equal(JSON.stringify(body.await).includes(auth.invocationId), false);
+      assert.equal(JSON.stringify(body.await ?? {}).includes(auth.invocationId), false);
       return body;
     },
     resolve: (overrides = {}) => resolveTypedWaitContinuation({ taskStore, ...identity, ...overrides }),
   };
 }
 
-const cases = [
-  ['head change', [{ kind: 'pr_head_changed' }]],
-  ['review decision', [{ kind: 'pr_review_decision_changed' }]],
-  ['review thread', [{ kind: 'pr_review_thread_changed', reviewThreadIds: ['thread-1'] }]],
-  ['CI terminal', [{ kind: 'pr_ci_terminal' }]],
-  ['conflict', [{ kind: 'pr_became_conflicting' }]],
-  ['conversation comment', [{ kind: 'pr_conversation_comment_added', authorLogins: ['reviewer'] }]],
-  ['inline comment', [{ kind: 'pr_inline_comment_added', authorLogins: ['reviewer'] }]],
-  ['anchored review', [{ kind: 'pr_review_result_available', triggerCommentId: 4936000000 }]],
-  ['issue comment', [{ kind: 'issue_comment_added' }], 'issue'],
-  ['issue author', [{ kind: 'issue_author_commented' }], 'issue'],
-];
-for (const [name, when, kind] of cases) {
-  test(`authenticated ${name} registration continues only its source`, async (t) => {
-    const h = await harness(t);
-    await h.register(when, kind);
-    assert.equal((await h.resolve()).kind, 'bypass');
-    assert.equal((await h.resolve({ sourceMessageId: 'unrelated-source' })).kind, 'reject');
-    assert.equal((await h.resolve({ invocationId: 'unrelated-invocation' })).kind, 'reject');
-  });
-}
-
-// #1392 AC-7 made the normal registration arm both comment surfaces and made the deadline optional.
-// That normal call is what a cat makes after pushing, so it has to be the one the stop gate accepts.
-for (const [kind, commentKind] of [
-  ['pr', 'pr_conversation_comment_added'],
-  ['issue', 'issue_comment_added'],
+// Provider-specific PR/issue predicates live in the GitHub plugin. Exercise the shared
+// private continuation boundary through the current authenticated deployment producer.
+for (const when of [
+  { kind: 'new_ready_boot', services: ['api'] },
+  { kind: 'revision_included', revision: 'a'.repeat(40), services: ['api'] },
 ]) {
-  test(`the normal ${kind} registration, with no conditions and no deadline, continues only its source`, async (t) => {
+  test(`authenticated ${when.kind} registration continues only its source`, async (t) => {
     const h = await harness(t);
-    const body = await h.register(undefined, kind, { deadline: false });
-    assert.equal(body.await.expiresAt, undefined, 'the normal registration has no deadline');
-    assert.ok(
-      body.await.continuation.when.some((predicate) => predicate.kind === commentKind),
-      'and it listens to comments',
-    );
+    const body = await h.register(when);
+    assert.equal(body.await.expiresAt, undefined);
     assert.equal((await h.resolve()).kind, 'bypass');
+    assert.equal(
+      (await h.resolve({ now: Date.now() + 120_000 })).kind,
+      'bypass',
+      'persistent wait does not silently expire',
+    );
     assert.equal((await h.resolve({ sourceMessageId: 'unrelated-source' })).kind, 'reject');
     assert.equal((await h.resolve({ invocationId: 'unrelated-invocation' })).kind, 'reject');
   });
 }
-
-test('a narrow registration without a deadline continues its source too', async (t) => {
-  const h = await harness(t);
-  await h.register([{ kind: 'pr_ci_terminal' }], 'pr', { deadline: false });
-  assert.equal((await h.resolve()).kind, 'bypass');
-});
 
 test('an old same-owner anchored review tracker cannot stand in for this invocation', async (t) => {
   const h = await harness(t);
@@ -275,48 +266,48 @@ test('an old same-owner anchored review tracker cannot stand in for this invocat
   assert.equal((await h.resolve()).kind, 'reject');
 });
 
-test('primary managed command source can establish a CI continuation', async (t) => {
+test('primary managed command source can establish a deployment continuation', async (t) => {
   const h = await harness(t, { primaryHold: true });
-  await h.register([{ kind: 'pr_ci_terminal' }]);
+  await h.register();
   const continuation = await h.resolve();
   assert.equal(continuation.kind, 'bypass');
   assert.deepEqual(continuation.reference, { taskId: continuation.reference.taskId, generation: 1 });
 });
 
-test('an adopted hold binds only the exposed source, independently of the user origin', async (t) => {
+test('an adopted hold cannot replace the authenticated deployment origin', async (t) => {
   const h = await harness(t);
   const wake = await h.adoptHold('one');
-  await h.register([{ kind: 'pr_ci_terminal' }]);
-  assert.equal((await h.resolve({ sourceMessageId: wake.sourceMessageId, holdTaskId: wake.taskId })).kind, 'bypass');
-  assert.equal((await h.resolve()).kind, 'reject');
+  await h.register();
+  assert.equal((await h.resolve({ sourceMessageId: wake.sourceMessageId, holdTaskId: wake.taskId })).kind, 'reject');
+  assert.equal((await h.resolve()).kind, 'bypass');
 });
 
 test('registration before adoption cannot retrospectively consume that source', async (t) => {
   const h = await harness(t);
   let wake;
-  h.onBaseline(async () => {
-    wake = await h.adoptHold('during-baseline');
+  h.afterCapture(async () => {
+    wake = await h.adoptHold('after-source-capture');
   });
-  await h.register([{ kind: 'pr_ci_terminal' }]);
+  await h.register();
+  assert.equal((await h.resolve()).kind, 'bypass');
   assert.equal((await h.resolve({ sourceMessageId: wake.sourceMessageId, holdTaskId: wake.taskId })).kind, 'reject');
 });
 
-test('multiple pending adopted sources cannot be settled by one wait registration', async (t) => {
+test('multiple adopted sources leave the primary deployment continuation intact', async (t) => {
   const h = await harness(t);
   const wakes = [await h.adoptHold('one'), await h.adoptHold('two')];
   for (const wake of wakes) assert.equal(h.retirement(wake).kind, 'live');
-  await h.register([{ kind: 'pr_ci_terminal' }]);
+  await h.register();
   for (const wake of wakes)
     assert.equal((await h.resolve({ sourceMessageId: wake.sourceMessageId, holdTaskId: wake.taskId })).kind, 'reject');
-  assert.equal((await h.resolve()).kind, 'reject');
+  assert.equal((await h.resolve()).kind, 'bypass');
 });
 
-test('two retired entry sources do not grant first-retired continuation authority', async (t) => {
-  // C6 supersedes public first-retired authorization; original 19/20 RED is retained in evidence.
+test('retired adopted sources cannot displace the primary deployment continuation', async (t) => {
   const h = await harness(t, { holdsBall: false });
   const wakes = [await h.adoptHold('one'), await h.adoptHold('two')];
   for (const wake of wakes) assert.equal(h.retirement(wake).kind, 'retired');
-  await h.register([{ kind: 'pr_ci_terminal' }]);
+  await h.register();
 
   const [first, second] = wakes;
   assert.equal((await h.resolve({ sourceMessageId: first.sourceMessageId, holdTaskId: first.taskId })).kind, 'reject');
@@ -324,40 +315,46 @@ test('two retired entry sources do not grant first-retired continuation authorit
     (await h.resolve({ sourceMessageId: second.sourceMessageId, holdTaskId: second.taskId })).kind,
     'reject',
   );
-  assert.equal((await h.resolve()).kind, 'reject');
+  assert.equal((await h.resolve()).kind, 'bypass');
 });
 
 for (const retired of [false, true]) {
   for (const primaryHold of [false, true]) {
     for (const reversed of [false, true]) {
-      test(`ambiguous entry denies authority: retired=${retired}, primary=${primaryHold}, reversed=${reversed}`, async (t) => {
+      test(`adopted entry order and retirement cannot change deployment primary: retired=${retired}, primary=${primaryHold}, reversed=${reversed}`, async (t) => {
         const h = await harness(t, { holdsBall: !retired, primaryHold });
         const wakes = [h.primary ?? (await h.adoptHold('first')), await h.adoptHold('second')];
         if (reversed) h.reverseInputs();
-        await h.register([{ kind: 'pr_ci_terminal' }]);
+        await h.register();
         for (const wake of wakes) {
           assert.equal(
             (await h.resolve({ sourceMessageId: wake.sourceMessageId, holdTaskId: wake.taskId })).kind,
-            'reject',
+            wake === h.primary ? 'bypass' : 'reject',
           );
         }
         const [task] = h.taskStore.listByThread(h.identity.threadId);
-        assert.equal(h.taskStore.getWaitRegistration(task.id).receipt, null);
+        assert.deepEqual(h.taskStore.getWaitRegistration(task.id)?.receipt?.source, {
+          kind: 'primary',
+          sourceMessageId: h.identity.sourceMessageId,
+          ...(h.primary ? { holdTaskId: h.primary.taskId } : {}),
+        });
+        assert.equal((await h.resolve()).kind, 'bypass');
       });
     }
   }
 }
 
-test('a sole exact retired source still establishes a private continuation', async (t) => {
+test('a sole retired adopted source never gains deployment continuation authority', async (t) => {
   const h = await harness(t, { holdsBall: false });
   const wake = await h.adoptHold('sole-retired');
   assert.equal(h.retirement(wake).kind, 'retired');
-  await h.register([{ kind: 'pr_ci_terminal' }]);
-  assert.equal((await h.resolve({ sourceMessageId: wake.sourceMessageId, holdTaskId: wake.taskId })).kind, 'bypass');
+  await h.register();
+  assert.equal((await h.resolve({ sourceMessageId: wake.sourceMessageId, holdTaskId: wake.taskId })).kind, 'reject');
+  assert.equal((await h.resolve()).kind, 'bypass');
 });
 
 for (const reversed of [false, true]) {
-  test(`mixed retired/live entry sources deny authority, reversed=${reversed}`, async (t) => {
+  test(`mixed retired/live adopted sources cannot change the deployment primary, reversed=${reversed}`, async (t) => {
     const h = await harness(t, { holdsBall: false });
     const first = await h.adoptHold('retired');
     h.holdAgain();
@@ -365,7 +362,8 @@ for (const reversed of [false, true]) {
     assert.equal(h.retirement(first).kind, 'retired');
     assert.equal(h.retirement(second).kind, 'live');
     if (reversed) h.reverseInputs();
-    await h.register([{ kind: 'pr_ci_terminal' }]);
+    await h.register();
+    assert.equal((await h.resolve()).kind, 'bypass');
     for (const wake of [first, second]) {
       assert.equal(
         (await h.resolve({ sourceMessageId: wake.sourceMessageId, holdTaskId: wake.taskId })).kind,
@@ -386,12 +384,12 @@ for (const [name, options] of [
   ['History read unavailable', { sourceReadError: true }],
   ['child lookup unavailable', { activeRunReadError: true }],
 ]) {
-  test(`actual tracking producer denies mismatched ${name} private receipt`, async (t) => {
+  test(`actual deployment producer denies mismatched ${name} private receipt`, async (t) => {
     const h = await harness(t, { primaryHold: true, ...options });
-    await h.register([{ kind: 'pr_ci_terminal' }]);
+    await h.register(undefined, 409);
     const [task] = h.taskStore.listByThread(h.identity.threadId);
-    assert.ok(task.automationState.await, 'public tracking remains installed');
-    assert.equal(h.taskStore.getWaitRegistration(task.id).receipt, null);
+    assert.equal(task.deploymentWait, undefined, 'no wait is installed without a valid source');
+    assert.equal(h.taskStore.getWaitRegistration(task.id)?.receipt ?? null, null);
     assert.equal((await h.resolve()).kind, 'reject');
   });
 }
@@ -402,11 +400,10 @@ for (const [name, overrides] of [
   ['cat', { catId: 'foreign-cat' }],
   ['child', { invocationId: 'foreign-child' }],
   ['hold', { holdTaskId: 'foreign-hold' }],
-  ['expiry', { now: Date.now() + 120_000 }],
 ]) {
   test(`valid private receipt rejects replay with changed ${name}`, async (t) => {
     const h = await harness(t, { primaryHold: true });
-    await h.register([{ kind: 'pr_ci_terminal' }]);
+    await h.register();
     assert.equal((await h.resolve()).kind, 'bypass');
     assert.equal((await h.resolve(overrides)).kind, 'reject');
   });
@@ -418,20 +415,25 @@ for (const [name, mutate] of [
   [
     'generation',
     (task) => ({
-      automationState: {
-        ...task.automationState,
-        await: { ...task.automationState.await, generation: 2, ownerFence: { kind: 'containing_task', generation: 2 } },
+      deploymentWait: {
+        ...task.deploymentWait,
+        currentExecutionClaim: undefined,
+        await: { ...task.deploymentWait.await, generation: 2, ownerFence: { kind: 'containing_task', generation: 2 } },
       },
     }),
   ],
   [
     'predicate',
     (task) => ({
-      automationState: {
-        ...task.automationState,
+      deploymentWait: {
+        ...task.deploymentWait,
+        currentExecutionClaim: undefined,
         await: {
-          ...task.automationState.await,
-          continuation: { ...task.automationState.await.continuation, when: [{ kind: 'pr_head_changed' }] },
+          ...task.deploymentWait.await,
+          continuation: {
+            ...task.deploymentWait.await.continuation,
+            when: [{ kind: 'new_ready_boot', services: ['web'] }],
+          },
         },
       },
     }),
@@ -439,16 +441,21 @@ for (const [name, mutate] of [
 ]) {
   test(`private receipt cannot survive ${name}`, async (t) => {
     const h = await harness(t, { primaryHold: true });
-    await h.register([{ kind: 'pr_ci_terminal' }]);
+    await h.register();
     assert.equal((await h.resolve()).kind, 'bypass');
     const [task] = h.taskStore.listByThread(h.identity.threadId);
-    assert.ok(h.taskStore.update(task.id, mutate(task)));
+    const change = mutate(task);
+    if (change.deploymentWait) {
+      assert.ok(
+        h.taskStore.replaceDeploymentWaitIfGeneration(task.id, {
+          expectedGeneration: task.deploymentWait.await.generation,
+          expectedDeploymentWait: task.deploymentWait,
+          deploymentWait: change.deploymentWait,
+        }),
+      );
+    } else {
+      assert.ok(h.taskStore.update(task.id, change));
+    }
     assert.equal((await h.resolve()).kind, 'reject');
   });
 }
-
-test('unanchored review cannot gain the authority of a generic predicate', async (t) => {
-  const h = await harness(t);
-  await h.register([{ kind: 'pr_review_result_available' }, { kind: 'pr_ci_terminal' }]);
-  assert.equal((await h.resolve()).kind, 'reject');
-});

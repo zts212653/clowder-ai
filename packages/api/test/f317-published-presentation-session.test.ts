@@ -22,6 +22,21 @@ test('the production Session and Call preserve the Host guard and claimed owner 
     publish() {},
   });
   try {
+    assert.deepEqual(
+      await sessions.observePresentation(
+        'owner',
+        {
+          kind: 'presentation.observe',
+          event: 'first_text_visible',
+          observedAt: Date.now(),
+          callId,
+          reference: { kind: 'message', messageId: 'not-yet-published' },
+        },
+        async () => true,
+      ),
+      { kind: 'error', code: 'invalid_request' },
+    );
+    await sessions.claim(callId, 'owner', 'home', [catId]);
     await call.ready('root', {
       submitText: async () => 'turn',
       request: async (method) => {
@@ -41,7 +56,7 @@ test('the production Session and Call preserve the Host guard and claimed owner 
     const message = store.append({
       userId: 'owner',
       threadId: 'home',
-      catId,
+      from: { kind: 'agent', catId },
       content: 'Synthetic visible answer',
       mentions: [],
       timestamp: Date.now(),
@@ -62,12 +77,6 @@ test('the production Session and Call preserve the Host guard and claimed owner 
       callId,
       reference: { kind: 'message' as const, messageId: message.id },
     };
-    assert.deepEqual(
-      await sessions.observePresentation('owner', receipt, async () => true),
-      { kind: 'error', code: 'invalid_request' },
-      'unclaimed calls cannot receive public facts',
-    );
-    sessions.claim(callId, 'owner', 'home', [catId]);
     assert.deepEqual(await sessions.observePresentation('foreign', receipt, async () => true), {
       kind: 'error',
       code: 'invalid_request',

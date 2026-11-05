@@ -32,42 +32,50 @@ function resource(projectPath: string): string {
   return `/api/runtime-deployment/waits?projectPath=${encodeURIComponent(projectPath)}`;
 }
 
-export function useDeploymentWaitProjection(projectPath: string | null): DeploymentWaitProjectionView {
+export function useDeploymentWaitProjection(
+  projectPath: string | null,
+  scope: 'project' | 'all' = 'project',
+): DeploymentWaitProjectionView {
+  const selection = scope === 'all' ? 'all' : projectPath;
   const [state, setState] = useState<ProjectionState>(INITIAL_STATE);
   const requestVersion = useRef(0);
 
   const refresh = useCallback(
     async (signal?: AbortSignal): Promise<void> => {
-      if (!projectPath) return;
+      if (!selection) return;
       const version = ++requestVersion.current;
       setState((current) => ({
-        projectPath,
-        projection: current.projectPath === projectPath ? current.projection : null,
+        projectPath: selection,
+        projection: current.projectPath === selection ? current.projection : null,
         hydration: 'loading',
         error: null,
       }));
       try {
-        const response = await apiFetch(resource(projectPath), { signal });
+        const response = await apiFetch(
+          scope === 'all' ? '/api/runtime-deployment/waits?scope=all' : resource(selection),
+          { signal },
+        );
         if (!response.ok) throw new Error(`Deployment wait hydration failed (${response.status})`);
         const projection = (await response.json()) as DeploymentWaitListResponse;
-        if (projection.projectPath !== projectPath) throw new Error('Deployment wait project identity mismatch');
+        if (scope === 'all' ? projection.scope !== 'all' : projection.projectPath !== projectPath)
+          throw new Error('Deployment wait scope identity mismatch');
         if (requestVersion.current !== version) return;
-        setState({ projectPath, projection, hydration: 'ready', error: null });
+        setState({ projectPath: selection, projection, hydration: 'ready', error: null });
       } catch (error) {
         if (signal?.aborted || requestVersion.current !== version) return;
         setState((current) => ({
-          projectPath,
-          projection: current.projectPath === projectPath ? current.projection : null,
+          projectPath: selection,
+          projection: current.projectPath === selection ? current.projection : null,
           hydration: 'error',
           error: error instanceof Error ? error.message : String(error),
         }));
       }
     },
-    [projectPath],
+    [projectPath, selection, scope],
   );
 
   useEffect(() => {
-    if (!projectPath) {
+    if (!selection) {
       requestVersion.current += 1;
       setState(INITIAL_STATE);
       return;
@@ -87,11 +95,11 @@ export function useDeploymentWaitProjection(projectPath: string | null): Deploym
       window.removeEventListener('online', update);
       document.removeEventListener('visibilitychange', updateWhenVisible);
     };
-  }, [projectPath, refresh]);
+  }, [selection, refresh]);
 
   return {
-    projection: state.projectPath === projectPath ? state.projection : null,
-    hydration: projectPath ? state.hydration : 'idle',
+    projection: state.projectPath === selection ? state.projection : null,
+    hydration: selection ? state.hydration : 'idle',
     error: state.error,
     retry: () => refresh(),
   };

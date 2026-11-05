@@ -1,3 +1,4 @@
+import { secretRuntimeScript } from '@cat-cafe/mcp-server/dist/secret-runtime.js';
 /**
  * CLI Process Spawner
  * 通用 CLI 子进程管理器，处理生命周期、超时和清理
@@ -7,6 +8,7 @@ import { spawn as nodeSpawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { deploymentDefaults } from '@cat-cafe/shared';
 import type { Span } from '@opentelemetry/api';
 import { context, SpanStatusCode, trace } from '@opentelemetry/api';
 import { createModuleLogger } from '../infrastructure/logger.js';
@@ -35,6 +37,7 @@ import {
 import { invalidateCliCommand } from './cli-resolve.js';
 import { resolveWindowsSpawnPlan } from './cli-spawn-win.js';
 import { buildUnixSupervisedSpawnPlan } from './cli-supervised-process.js';
+import { prepareGuardedZshDirectory } from './guarded-zsh-directory.js';
 import { registerProcessActivity } from './process-activity-registry.js';
 
 export { resolveCliSupervisorNodeArgs } from './cli-supervised-process.js';
@@ -50,8 +53,9 @@ const log = createModuleLogger('cli-spawn');
 
 const IS_WINDOWS = process.platform === 'win32';
 const CAT_CAFE_RUNTIME_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
-const GUARDED_GH_BIN = resolve(CAT_CAFE_RUNTIME_ROOT, 'scripts', 'guarded-bin');
-const GUARDED_ZSH_DIR = resolve(CAT_CAFE_RUNTIME_ROOT, 'scripts', 'guarded-zsh');
+const GUARDED_GH_BIN = secretRuntimeScript('guarded-bin');
+const GUARDED_ZSH_SOURCE_DIR = secretRuntimeScript('guarded-zsh');
+const GUARDED_ZSH_DIR = resolve(CAT_CAFE_RUNTIME_ROOT, '.cat-cafe', 'tmp', 'guarded-zsh');
 type GuardedChildEnv = Record<string, string | null | undefined>;
 type SourceEnvOverrides = Readonly<Record<string, string | null>> | undefined;
 
@@ -65,7 +69,7 @@ function shouldRefreshOriginalZdotdir(
   currentZdotdir: string,
 ): boolean {
   if (hasSourceOverride(sourceOverrides, 'CAT_CAFE_ORIGINAL_ZDOTDIR')) return false;
-  if (resolve(currentZdotdir) === GUARDED_ZSH_DIR) return false;
+  if ([GUARDED_ZSH_DIR, GUARDED_ZSH_SOURCE_DIR].includes(resolve(currentZdotdir))) return false;
   return hasSourceOverride(sourceOverrides, 'ZDOTDIR') || !env.CAT_CAFE_ORIGINAL_ZDOTDIR;
 }
 
@@ -75,6 +79,7 @@ function shouldRefreshHistfile(env: GuardedChildEnv, sourceOverrides: SourceEnvO
 }
 
 function configureGuardedZshEnv(env: GuardedChildEnv, sourceOverrides: SourceEnvOverrides): void {
+  prepareGuardedZshDirectory(GUARDED_ZSH_SOURCE_DIR, GUARDED_ZSH_DIR);
   const currentZdotdir = env.ZDOTDIR ?? env.HOME ?? process.env.HOME;
   // An explicit ZDOTDIR selects a new startup context. Refresh inherited companion values unless
   // the caller supplied those companions explicitly; otherwise parent-shell state leaks across contexts.
@@ -82,7 +87,10 @@ function configureGuardedZshEnv(env: GuardedChildEnv, sourceOverrides: SourceEnv
     env.CAT_CAFE_ORIGINAL_ZDOTDIR = currentZdotdir;
   }
   if (currentZdotdir && shouldRefreshHistfile(env, sourceOverrides)) {
-    env.HISTFILE = resolve(currentZdotdir, '.zsh_history');
+    const historyDir = [GUARDED_ZSH_DIR, GUARDED_ZSH_SOURCE_DIR].includes(resolve(currentZdotdir))
+      ? (env.CAT_CAFE_ORIGINAL_ZDOTDIR ?? env.HOME ?? process.env.HOME ?? currentZdotdir)
+      : currentZdotdir;
+    env.HISTFILE = resolve(historyDir, '.zsh_history');
   }
   env.SHELL_SESSIONS_DISABLE ||= '1';
   env.ZDOTDIR = GUARDED_ZSH_DIR;
@@ -101,12 +109,14 @@ export function withVerdictGhGuardEnv<T extends Record<string, string | null | u
   }
   mutable.CAT_CAFE_VERDICT_GH_GUARD_ROOT = CAT_CAFE_RUNTIME_ROOT;
   mutable.CAT_CAFE_VERDICT_GH_GUARD_BIN = GUARDED_GH_BIN;
-  if (existsSync(resolve(GUARDED_ZSH_DIR, '.zprofile'))) {
+  if (existsSync(resolve(GUARDED_ZSH_SOURCE_DIR, '.zprofile'))) {
     configureGuardedZshEnv(mutable, sourceOverrides);
   }
   if (!mutable.CAT_CAFE_VERDICT_REPO_FULL_NAME) {
     mutable.CAT_CAFE_VERDICT_REPO_FULL_NAME =
-      process.env.CAT_CAFE_VERDICT_REPO_FULL_NAME ?? process.env.CAT_CAFE_REPO_FULL_NAME ?? 'zts212653/cat-cafe';
+      process.env.CAT_CAFE_VERDICT_REPO_FULL_NAME ??
+      process.env.CAT_CAFE_REPO_FULL_NAME ??
+      deploymentDefaults.repositoryFullName;
   }
   return env;
 }
@@ -345,6 +355,9 @@ export function buildChildEnv(
   const workingDirectory = resolve(options.workingDirectory ?? process.cwd());
   merged.PWD = workingDirectory;
   merged.INIT_CWD = workingDirectory;
+  if (['shared', 'stdio'].includes(merged.CAT_CAFE_MCP_TRANSPORT ?? '') && merged.CAT_CAFE_CREDENTIAL_FILE) {
+    delete merged.CAT_CAFE_CALLBACK_TOKEN;
+  }
   return withVerdictGhGuardEnv(merged, overrides);
 }
 
@@ -494,6 +507,10 @@ export async function* spawnCli(
   const stdoutDrain = child.stdout ? new CliExitOutputDrain(child.stdout) : undefined;
   let exitDrainTimer: ReturnType<typeof setTimeout> | undefined;
   let exitObserved = false;
+  let resolveProcessExit!: () => void;
+  const processExit = new Promise<void>((resolve) => {
+    resolveProcessExit = resolve;
+  });
   let resolveExitDrain!: () => void;
   const exitDrainComplete = new Promise<void>((resolve) => {
     resolveExitDrain = resolve;
@@ -501,6 +518,7 @@ export async function* spawnCli(
   const observeProcessExit = (): void => {
     if (exitObserved) return;
     exitObserved = true;
+    resolveProcessExit();
     stdoutDrain?.start();
     exitDrainTimer = setTimeout(() => {
       stdoutDrain?.finish();
@@ -718,6 +736,7 @@ export async function* spawnCli(
     finalStage: terminationController.getFinalStage(),
   });
 
+  let streamCompleted = false;
   try {
     if (!stdoutDrain) {
       throw new Error(`CLI process ${options.command} has no stdout`);
@@ -1169,7 +1188,16 @@ export async function* spawnCli(
         cliDiagnostics,
       };
     }
+    streamCompleted = true;
   } finally {
+    if (!streamCompleted) {
+      // Protocol rejection/consumer return bypasses the normal drain below the
+      // yield loop. Keep caller-owned credentials and leases alive until the
+      // supervised process exits; sending SIGTERM/SIGKILL is not exit evidence.
+      // Wait for OS exit, not inherited stdio, which may remain open afterward.
+      killChild();
+      if (!childExited) await processExit;
+    }
     if (exitDrainTimer) clearTimeout(exitDrainTimer);
     stdoutDrain?.dispose();
     drainBufferedStderr();

@@ -1,3 +1,5 @@
+import { InMemorySettledIndex } from '../../../../../utils/in-memory-settled-index.js';
+import type { SettledHistoryPageOptions, SettledHistorySourcePage } from '../../../../../utils/settled-history-page.js';
 /**
  * F231 Phase C ProfileUpdateProposalStore
  *
@@ -59,6 +61,10 @@ export interface IProfileUpdateProposalStore {
     limit?: number,
   ): ProfileUpdateProposal[] | Promise<ProfileUpdateProposal[]>;
   /** List approved/rejected proposals for a user, sorted by decision timestamp desc (F246 Phase H). */
+  listSettledPage?(
+    owner: string,
+    options: SettledHistoryPageOptions,
+  ): SettledHistorySourcePage<ProfileUpdateProposal> | Promise<SettledHistorySourcePage<ProfileUpdateProposal>>;
   listSettledByUser(userId: string, limit?: number): ProfileUpdateProposal[] | Promise<ProfileUpdateProposal[]>;
   /** CAS pending → approving. Returns claimed snapshot, or null if not pending. */
   claimForApproval(
@@ -101,6 +107,30 @@ const DEFAULT_LIST_LIMIT = 100;
 
 /** In-memory implementation for tests and single-process dev. */
 export class InMemoryProfileUpdateProposalStore implements IProfileUpdateProposalStore {
+  private readonly historyIndex = new InMemorySettledIndex();
+
+  /** Keep only derived ordering refs; original snapshots and mutation semantics remain unchanged. */
+  private indexedSnapshot(record: ProfileUpdateProposal): ProfileUpdateProposal {
+    this.historyIndex.update(
+      record.createdBy,
+      record.proposalId,
+      ['approved', 'rejected'].includes(record.status) ? (record.approvedAt ?? record.rejectedAt ?? 0) : null,
+    );
+    return clone(record);
+  }
+
+  async listSettledPage(
+    owner: string,
+    options: SettledHistoryPageOptions,
+  ): Promise<SettledHistorySourcePage<ProfileUpdateProposal>> {
+    return this.historyIndex.page(owner, options, async (id) => {
+      const record = this.proposals.get(id);
+      return record && record.createdBy === owner && ['approved', 'rejected'].includes(record.status)
+        ? this.indexedSnapshot(record)
+        : null;
+    });
+  }
+
   private readonly proposals = new Map<string, ProfileUpdateProposal>();
   private readonly dedupCache = new Map<string, string>();
 
@@ -124,12 +154,12 @@ export class InMemoryProfileUpdateProposalStore implements IProfileUpdateProposa
       publication: { state: 'staged', stagedAt: now },
     };
     this.proposals.set(proposal.proposalId, proposal);
-    return clone(proposal);
+    return this.indexedSnapshot(proposal);
   }
 
   get(proposalId: string): ProfileUpdateProposal | null {
     const found = this.proposals.get(proposalId);
-    return found ? clone(found) : null;
+    return found ? this.indexedSnapshot(found) : null;
   }
 
   listPending(userId: string, limit: number = DEFAULT_LIST_LIMIT): ProfileUpdateProposal[] {
@@ -159,7 +189,7 @@ export class InMemoryProfileUpdateProposalStore implements IProfileUpdateProposa
     proposal.status = 'approving';
     proposal.approvedBy = approvedBy;
     proposal.claimedAt = Date.now();
-    return clone(proposal);
+    return this.indexedSnapshot(proposal);
   }
 
   recordCheckpoint(proposalId: string, checkpoint: ProfileUpdateCheckpoint): ProfileUpdateProposal | null {
@@ -167,7 +197,7 @@ export class InMemoryProfileUpdateProposalStore implements IProfileUpdateProposa
     if (!proposal || proposal.status !== 'approving') return null;
     if (checkpoint.writtenPath !== undefined) proposal.writtenPath = checkpoint.writtenPath;
     if (checkpoint.provenancePath !== undefined) proposal.provenancePath = checkpoint.provenancePath;
-    return clone(proposal);
+    return this.indexedSnapshot(proposal);
   }
 
   finalizeApproval(proposalId: string): ProfileUpdateProposal | null {
@@ -176,7 +206,7 @@ export class InMemoryProfileUpdateProposalStore implements IProfileUpdateProposa
     proposal.status = 'approved';
     proposal.approvedAt = Date.now();
     delete proposal.claimedAt;
-    return clone(proposal);
+    return this.indexedSnapshot(proposal);
   }
 
   rollbackClaim(proposalId: string): boolean {
@@ -195,7 +225,7 @@ export class InMemoryProfileUpdateProposalStore implements IProfileUpdateProposa
     proposal.rejectedBy = rejectedBy;
     proposal.rejectedAt = Date.now();
     if (rejectionReason) proposal.rejectionReason = rejectionReason;
-    return clone(proposal);
+    return this.indexedSnapshot(proposal);
   }
 
   getDedupProposalId(userId: string, clientRequestId: string): string | null {
@@ -221,6 +251,7 @@ export class InMemoryProfileUpdateProposalStore implements IProfileUpdateProposa
   }
 
   delete(proposalId: string): void {
+    this.historyIndex.update('', proposalId, null);
     this.proposals.delete(proposalId);
   }
 
@@ -254,7 +285,7 @@ export class InMemoryProfileUpdateProposalStore implements IProfileUpdateProposa
   ): ProfileUpdateProposal[] {
     const result: ProfileUpdateProposal[] = [];
     for (const proposal of this.proposals.values()) {
-      if (predicate(proposal)) result.push(clone(proposal));
+      if (predicate(proposal)) result.push(this.indexedSnapshot(proposal));
     }
     result.sort(sort);
     return result.slice(0, Math.max(0, limit));

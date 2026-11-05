@@ -37,6 +37,8 @@ describe('F167 Redis proposal binding completeness', { skip: redisIsolationSkipR
         projectPath: '/test',
         createdBy: TENANT,
         subjectTaskId: TASK_ID,
+        subjectTaskTitle: 'Original Task',
+        initialMessage: 'Implement the original Task and return verified results.',
         ...overrides,
       });
       const approve = async (proposalId, childThreadId) => {
@@ -105,6 +107,8 @@ describe('F167 Redis proposal binding completeness', { skip: redisIsolationSkipR
         projectPath: '/test',
         createdBy: TENANT,
         subjectTaskId: TASK_ID,
+        subjectTaskTitle: 'Original Task',
+        initialMessage: 'Implement the original Task and return verified results.',
       });
       await store.claimForApproval({ proposalId, approvedBy: TENANT });
       const child = await threads.create(TENANT, 'Approved child', '/test', parent.id, {

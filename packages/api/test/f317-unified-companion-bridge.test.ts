@@ -42,7 +42,12 @@ function read(items: unknown[] = [approval()]) {
     scope: 'owner_all_projects',
     identity: { ownerUserId: 'owner' },
     observedAt: 2,
-    sources: { approvals: source(), needsMe: { ...source(), coverage: 'current_linked_F310_five_producers' } },
+    sources: {
+      approvals: source(),
+      needsMe: { ...source(), coverage: 'current_linked_F310_five_producers' },
+      personalPreferences: { ...source(), coverage: 'owner_personal_ignored_items' },
+    },
+    personalView: { mode: 'visible', preferenceRevision: 1 },
     readWindow: { startedAt: 1, endedAt: 2, consistency: 'independent_source_reads' },
     consistency: { state: 'verified', reasons: [] },
     items,
@@ -237,6 +242,7 @@ test('all unavailable and authentication failures remain unread rather than beco
         status: 'unavailable',
         totalCount: undefined,
         sources: {
+          personalPreferences: { ...source(status, 'unknown'), coverage: 'owner_personal_ignored_items' },
           approvals: source(status, 'unknown'),
           needsMe: {
             ...source(status, 'unknown'),

@@ -23,13 +23,14 @@ describe('Collective product shell', () => {
         onInvite={() => undefined}
         onPair={() => undefined}
       >
-        <p>正在读取共同家园</p>
+        <p>正在读取共同体</p>
       </ProductShell>,
     );
 
     expect(html).not.toContain('data-experience-gate');
     expect(html).not.toContain('general');
     expect(html).not.toContain('aria-label="Clowder AI Collective菜单"');
+    expect(html).not.toContain('共同家园');
   });
 
   it('uses Service-owned world navigation and the accepted destination/scene grammar', () => {
@@ -86,7 +87,6 @@ describe('Collective product shell', () => {
         connection="online"
         canSteward={false}
         canPair
-        canLeave
         onInvite={() => undefined}
         onPair={() => undefined}
         onLeave={() => undefined}
@@ -100,6 +100,26 @@ describe('Collective product shell', () => {
     expect(html).not.toContain('邀请成员');
     expect(html).not.toContain('共同家园在线');
     expect(html).not.toContain('共同现场已连接');
+  });
+
+  it('lets a steward inspect why leaving is blocked without claiming they can leave', () => {
+    const html = renderToStaticMarkup(
+      <ProductShell
+        embedded={false}
+        collective={collective}
+        connection="online"
+        canSteward
+        canPair={false}
+        onInvite={() => undefined}
+        onPair={() => undefined}
+        onLeave={() => undefined}
+      >
+        <p>真实 Channel</p>
+      </ProductShell>,
+    );
+
+    expect(html).toContain('离开共同体…');
+    expect(html).not.toContain('共同体设置');
   });
 
   it('keeps paired-Café status out of the shared navigation chrome', () => {

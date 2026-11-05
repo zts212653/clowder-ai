@@ -102,6 +102,22 @@ describe('Workspace running work counts cat/thread work, retaining exact activit
     ]);
   });
 
+  it('labels project identity on classic global rows with identical conversation titles', async () => {
+    hydrate([
+      { ...live('codex-sol', 'thread-a', 'a'), threadTitle: '同名对话', projectPath: '/a/demo' },
+      { ...live('codex-sol', 'thread-b', 'b'), threadTitle: '同名对话', projectPath: '/b/demo' },
+    ]);
+    await act(async () => root.render(<WorkspaceNowSurface repository={{ name: 'current-repo', branch: 'main' }} />));
+    const labels = [...container.querySelectorAll('[data-testid="workspace-running-project"]')];
+    expect(labels.map((node) => node.textContent)).toEqual(['a/demo', 'b/demo']);
+    expect(labels.map((node) => node.getAttribute('title'))).toEqual(['/a/demo', '/b/demo']);
+    expect(container.textContent).toContain('当前项目');
+    expect([...container.querySelectorAll('a')].map((link) => link.getAttribute('href'))).toEqual([
+      '/thread/thread-a',
+      '/thread/thread-b',
+    ]);
+  });
+
   it('keeps a stable work row while live and background executions finish independently', async () => {
     const turn = live();
     const task = command();

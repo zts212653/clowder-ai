@@ -81,12 +81,23 @@ async function run(getSuite, width, language) {
     }
     let response = realSurfaceApiResponse(request, false);
     if (url.pathname === `/api/threads/${THREAD_ID}/artifacts`)
-      response = { body: { threadId: THREAD_ID, artifacts: cards } };
+      response = {
+        body: {
+          threadId: THREAD_ID,
+          artifacts: cards,
+          ...(url.searchParams.get('view') === 'works'
+            ? { view: 'works', complete: true, total: cards.length, workLineage: 'resolved' }
+            : {}),
+        },
+      };
     if (url.pathname === '/api/artifacts')
       response = {
         body: {
           artifacts: cards.map((a) => ({ ...a, threadId: THREAD_ID, threadTitle: 'Native PR source' })),
           total: cards.length,
+          ...(url.searchParams.get('view') === 'works'
+            ? { view: 'works', complete: true, workLineage: 'resolved' }
+            : {}),
         },
       };
     if (url.pathname === '/api/workspace/diff')
@@ -164,7 +175,10 @@ async function run(getSuite, width, language) {
     await page.screenshot({ path: path.join(evidenceDir, `${name}-back.png`) });
     backend.setUnavailable(false);
     await home.locator('section[aria-labelledby="home-works-title"] .home-all').click();
-    const row = host.locator('[data-artifact-row]').filter({ hasText: cards[1].name });
+    const row = host
+      .getByTestId('v2-works-panel')
+      .getByTestId('workspace-home-artifact-card')
+      .filter({ hasText: cards[1].name });
     await row.waitFor();
     await row.press('Enter');
     await status.getByText('owner/repo#8', { exact: true }).waitFor();

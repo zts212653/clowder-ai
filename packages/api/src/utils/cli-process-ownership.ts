@@ -11,9 +11,11 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
-import { debuglog } from 'node:util';
+import { debuglog, isDeepStrictEqual } from 'node:util';
+import { macProcessEnvironmentCommand } from '#process-environment-snapshot';
 import { CLI_PROCESS_OWNER_ENV } from './cli-process-environment.js';
 
 export { CLI_PROCESS_OWNER_ENV } from './cli-process-environment.js';
@@ -71,7 +73,9 @@ export interface CliExecutionOwnerSnapshot {
 export interface CliExecutionOwnerTermination {
   matched: number;
   signaled: number;
+  /** Complete control-plane access is distinct from confirmed process retirement. */
   complete: boolean;
+  stopped: boolean;
 }
 
 export interface CliExecutionOwnerService {
@@ -102,10 +106,10 @@ interface CliExecutionOwnerLog {
   warn(bindings: Record<string, unknown>, message: string): void;
 }
 
-export interface ProcessSnapshotOptions {
-  includeEnvironment?: boolean;
-  pids?: readonly number[];
-}
+export type ProcessSnapshotOptions = { pids?: readonly number[] } & (
+  | { includeEnvironment?: false; environmentMarkers?: never }
+  | { includeEnvironment: true; environmentMarkers: readonly string[] }
+);
 
 export type ReadProcessSnapshot = (
   options?: ProcessSnapshotOptions,
@@ -346,12 +350,20 @@ function isKnownEmptyExactPidSnapshot(input: {
 export function readUnixProcessSnapshotSync(
   options: ProcessSnapshotOptions = {},
 ): Map<number, UnixProcessSnapshotEntry> | null {
-  if (process.platform === 'win32') return null;
   const pids = options.pids?.filter(isPositiveSafeInteger);
+  // An explicit empty PID set needs no platform-specific process lookup.
   if (pids && pids.length === 0) return new Map();
-  const args = buildUnixProcessSnapshotArgs(options.includeEnvironment === true, pids);
+  if (process.platform === 'win32') return null;
+  const command =
+    options.includeEnvironment && process.platform === 'darwin'
+      ? macProcessEnvironmentCommand({
+          pids,
+          markers: options.environmentMarkers,
+          retainEnvironmentKeys: [CLI_PROCESS_OWNER_ENV],
+        })
+      : { file: '/bin/ps', args: buildUnixProcessSnapshotArgs(options.includeEnvironment === true, pids) };
   if (options.includeEnvironment) processDebug('ownership-process-table-scan');
-  const result = spawnSync('/bin/ps', args, {
+  const result = spawnSync(command.file, command.args, {
     encoding: 'utf8',
     timeout: CLI_PROCESS_SNAPSHOT_TIMEOUT_MS,
     maxBuffer: options.includeEnvironment ? 32 * 1024 * 1024 : 4 * 1024 * 1024,
@@ -386,21 +398,28 @@ export function readUnixProcessSnapshotSync(
 export function readUnixProcessSnapshot(
   options: ProcessSnapshotOptions = {},
 ): Promise<Map<number, UnixProcessSnapshotEntry> | null> {
-  if (process.platform === 'win32') return Promise.resolve(null);
   const pids = options.pids?.filter(isPositiveSafeInteger);
   if (pids && pids.length === 0) return Promise.resolve(new Map());
-  const args = buildUnixProcessSnapshotArgs(options.includeEnvironment === true, pids);
+  if (process.platform === 'win32') return Promise.resolve(null);
+  const command =
+    options.includeEnvironment && process.platform === 'darwin'
+      ? macProcessEnvironmentCommand({
+          pids,
+          markers: options.environmentMarkers,
+          retainEnvironmentKeys: [CLI_PROCESS_OWNER_ENV],
+        })
+      : { file: '/bin/ps', args: buildUnixProcessSnapshotArgs(options.includeEnvironment === true, pids) };
   if (options.includeEnvironment) processDebug('ownership-process-table-scan');
   return new Promise((resolveSnapshot) => {
     execFile(
-      '/bin/ps',
-      args,
+      command.file,
+      command.args,
       {
         encoding: 'utf8',
         timeout: CLI_PROCESS_SNAPSHOT_TIMEOUT_MS,
         maxBuffer: options.includeEnvironment ? 32 * 1024 * 1024 : 4 * 1024 * 1024,
       },
-      (error, stdout, stderr) => {
+      async (error, stdout, stderr) => {
         if (typeof stdout !== 'string') {
           resolveSnapshot(null);
           return;
@@ -417,7 +436,13 @@ export function readUnixProcessSnapshot(
         for (const line of stdout.split('\n')) {
           const entry = parseSnapshotLine(line, options.includeEnvironment === true);
           if (!entry) continue;
-          attachLinuxProcEnvironment(entry, options.includeEnvironment === true);
+          if (options.includeEnvironment && process.platform === 'linux') {
+            try {
+              entry.commandAndEnvironment = decodeLinuxProcEnvironment(await readFile(`/proc/${entry.pid}/environ`));
+            } catch {
+              delete entry.commandAndEnvironment;
+            }
+          }
           snapshot.set(entry.pid, entry);
         }
         resolveSnapshot(snapshot);
@@ -632,12 +657,44 @@ export function createCliExecutionOwnerService(
     async terminateExact(execution) {
       const { records, complete } = readRecoverableRecords();
       const snapshot = await ownerIdentitySnapshot(records, processSnapshotReader);
-      if (!snapshot) return { matched: 0, signaled: 0, complete: false };
+      if (!snapshot) return { matched: 0, signaled: 0, complete: false, stopped: false };
       // An unreadable manifest may belong to the same execution scope. Do not
       // perform a partial destructive cancel while exact ownership is unknown.
-      if (!complete) return { matched: 0, signaled: 0, complete: false };
+      if (!complete) return { matched: 0, signaled: 0, complete: false, stopped: false };
       const result = terminateCliExecutionOwner(execution, records, snapshot, options.kill ?? process.kill);
-      return { matched: result.matched, signaled: result.signaled, complete: result.failed === 0 };
+      const originalScope = records.filter(
+        ({ manifest }) => manifest.execution && sameCliExecutionScope(manifest.execution, execution),
+      );
+      const after = readRecoverableRecords();
+      const scope = [
+        ...originalScope,
+        ...after.records.filter(
+          ({ manifest }) => manifest.execution && sameCliExecutionScope(manifest.execution, execution),
+        ),
+      ];
+      // Retain original birth identities even if a manifest disappeared after
+      // signaling, and veto a new live child in this same execution scope.
+      const identities = scope.flatMap(({ manifest }) =>
+        manifest.root ? [manifest.supervisor, manifest.root] : [manifest.supervisor],
+      );
+      const observed = await processSnapshotReader({ pids: [...new Set(identities.map(({ pid }) => pid))] });
+      const current = readRecoverableRecords();
+      const sameScopeObserved = current.records
+        .filter(({ manifest }) => manifest.execution && sameCliExecutionScope(manifest.execution, execution))
+        .every(({ manifest }) => scope.some((record) => isDeepStrictEqual(record.manifest, manifest)));
+      return {
+        matched: result.matched,
+        signaled: result.signaled,
+        complete: result.failed === 0,
+        stopped:
+          result.failed === 0 &&
+          after.complete &&
+          current.complete &&
+          sameScopeObserved &&
+          originalScope.length > 0 &&
+          observed !== null &&
+          identities.every((identity) => !sameUnixProcess(identity, observed.get(identity.pid))),
+      };
     },
   };
 }

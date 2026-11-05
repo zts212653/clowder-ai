@@ -14,6 +14,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
+const providerDirectory = (provider) => (provider === 'kimi' ? '.kimi-code' : `.${provider}`);
+
 const PROJECT_ROOT = join(import.meta.dirname, '..', '..', '..', '..');
 const SCRIPT = join(PROJECT_ROOT, 'scripts', 'sync-skills.sh');
 const PROVIDERS = ['claude', 'codex', 'gemini', 'kimi'];
@@ -115,7 +117,7 @@ function plain(output) {
 }
 
 function assertManagedLink(worktree, provider, skill) {
-  const link = join(worktree, `.${provider}`, 'skills', skill);
+  const link = join(worktree, providerDirectory(provider), 'skills', skill);
   assert.ok(existsSync(link), `missing ${link}`);
   assert.ok(lstatSync(link).isSymbolicLink(), `${link} must be a symlink`);
   assert.equal(readlinkSync(link), `../../cat-cafe-skills/${skill}`);
@@ -139,7 +141,7 @@ describe('F301 scoped sync-skills CLI', () => {
     for (const provider of PROVIDERS) {
       assertManagedLink(fixture.current, provider, 'current-only');
       assert.equal(
-        existsSync(join(fixture.peer, `.${provider}`, 'skills', 'peer-only')),
+        existsSync(join(fixture.peer, providerDirectory(provider), 'skills', 'peer-only')),
         false,
         `default mode must not touch peer ${provider} mount`,
       );

@@ -23,6 +23,8 @@ import { describeMessageInvocationTrajectory, openMessageInvocationTrajectory } 
 import { LiveSelectionAnnotationAction } from './LiveSelectionAnnotationAction';
 import { MessageActionSlotProvider } from './MessageActionSlot';
 import { MessageAnnotationActions } from './MessageAnnotationActions';
+import type { MessagePartSelection } from './message-part-selection';
+import { RichBlockSelectionContext } from './message-part-selection-context';
 import { MessageActionsDock } from './message-v2/MessageActionsDock';
 import { MessageActionsOverlay } from './message-v2/MessageActionsOverlay';
 import {
@@ -56,6 +58,9 @@ interface MessageActionsProps {
   children: React.ReactNode;
   selectionMode?: boolean;
   selected?: boolean;
+  partiallySelected?: boolean;
+  partSelection?: MessagePartSelection;
+  onToggleRichBlock?: (messageId: string, blockId: string) => void;
   selectionEligible?: boolean;
   onEnterSelection?: (messageId: string) => void;
   onToggleSelection?: (messageId: string) => void;
@@ -166,6 +171,9 @@ export function MessageActions({
   children,
   selectionMode = false,
   selected = false,
+  partiallySelected = false,
+  partSelection,
+  onToggleRichBlock,
   selectionEligible = false,
   onEnterSelection,
   onToggleSelection,
@@ -235,9 +243,9 @@ export function MessageActions({
   const isAssistant = message.type === 'assistant' || (message.type === 'user' && !!message.catId);
   const isRecalled = Boolean(message.extra?.recall);
   const invocationTrajectory = describeMessageInvocationTrajectory(message);
-  const canAct = (isUser || isAssistant) && !message.isStreaming && !isRecalled;
+  const canAct = (isUser || isAssistant) && !message.isStreaming && !message.queuedEntryId && !isRecalled;
   // #699: Reply is available on all message types (not just user/assistant)
-  const canReply = !message.isStreaming && !isRecalled;
+  const canReply = !message.isStreaming && !message.queuedEntryId && !isRecalled;
   // A processing lifecycle can exist before its assistant bubble has any body.
   // In that state MessageActionSlot has not mounted, so the legacy fallback dock
   // would float over the author row. Wait for the real bubble-owned slot instead.
@@ -275,6 +283,7 @@ export function MessageActions({
     if (!overflowOpen && !compactOpen) return;
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
+      setOverflowOpen(false);
       setCompactOpen(false);
     };
     window.addEventListener('keydown', closeOnEscape);
@@ -407,7 +416,20 @@ export function MessageActions({
 
   const overflowMenuItems =
     presentation === 'v2' ? (
-      <CopyIdButton messageId={message.id} label={words.copyId} />
+      <>
+        <button
+          type="button"
+          role="menuitem"
+          className="min-h-8 w-full px-3 py-1.5 text-left text-xs text-cafe-secondary hover:bg-cafe-surface-elevated"
+          onClick={() => {
+            setOverflowOpen(false);
+            handleBranch();
+          }}
+        >
+          {words.branch}
+        </button>
+        <CopyIdButton messageId={message.id} label={words.copyId} />
+      </>
     ) : (
       <>
         {invocationTrajectory && (
@@ -461,7 +483,6 @@ export function MessageActions({
           })
         }
         onTrajectory={invocationTrajectory ? () => openMessageInvocationTrajectory(message, threadId) : undefined}
-        onBranch={handleBranch}
         onDelete={handleSoftDelete}
         onMore={() => {
           setForceOverflowSheet(false);
@@ -476,6 +497,7 @@ export function MessageActions({
       <div
         data-quote-exclude
         data-testid="message-actions-toolbar"
+        data-chat-background-layer="opaque"
         role="toolbar"
         aria-label="消息操作"
         className={`${toolbarVisibilityClass} ${compactPresentation ? 'relative' : actionSlot ? actionSlotPositionClass : `absolute ${toolbarPositionClass}`} z-30 flex transition-opacity bg-cafe-surface/90 rounded-lg shadow-sm border border-cafe ${
@@ -560,8 +582,8 @@ export function MessageActions({
               type="button"
               onClick={() => onEnterSelection?.(message.id)}
               className="rounded p-1 text-cafe-muted transition-colors hover:bg-cafe-surface-elevated hover:text-cafe-primary"
-              title="多选消息"
-              aria-label="多选消息"
+              title="多选：转发或导出"
+              aria-label="多选：转发或导出"
             >
               <svg aria-hidden="true" className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <rect x="3" y="4" width="6" height="6" rx="1" strokeWidth={2} />
@@ -666,18 +688,32 @@ export function MessageActions({
     <div
       ref={messageRef}
       data-context-quote-source="message"
+      data-selection-message-id={selectionMode ? message.id : undefined}
       data-message-selection={selectionMode ? (selected ? 'selected' : 'available') : undefined}
       data-selection-layout={selectionMode ? 'leading-gutter' : undefined}
       className={`group relative ${selectionMode ? 'pl-12' : ''}${presentation === 'v2' && selected && selectionMode ? ' rounded-xl bg-cafe-surface-sunken' : ''}`.trimEnd()}
     >
-      <MessageActionSlotProvider register={setActionSlot}>{children}</MessageActionSlotProvider>
+      <RichBlockSelectionContext.Provider
+        value={
+          selectionMode
+            ? {
+                messageId: message.id,
+                selection: partSelection,
+                disabled: !selectionEligible,
+                onToggle: onToggleRichBlock,
+              }
+            : null
+        }
+      >
+        <MessageActionSlotProvider register={setActionSlot}>{children}</MessageActionSlotProvider>
+      </RichBlockSelectionContext.Provider>
       <MessageActionOwnershipProvider value={managedOwner}>
         {selectionMode && selectionEligible && (
           <button
             type="button"
             role="checkbox"
-            aria-checked={selected}
-            aria-label={selected ? '取消选择这条消息' : '选择这条消息'}
+            aria-checked={partiallySelected ? 'mixed' : selected}
+            aria-label={partiallySelected ? '选择整条消息' : selected ? '取消选择这条消息' : '选择这条消息'}
             onClick={() => onToggleSelection?.(message.id)}
             className={`absolute left-2 top-2 z-20 grid h-7 w-7 place-items-center rounded-full border-2 transition-[background-color,border-color,transform] active:scale-95 ${
               selected
@@ -687,7 +723,12 @@ export function MessageActions({
           >
             {selected && (
               <svg aria-hidden="true" className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="m5 12 4 4L19 6" />
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2.5}
+                  d={partiallySelected ? 'M5 12h14' : 'm5 12 4 4L19 6'}
+                />
               </svg>
             )}
           </button>

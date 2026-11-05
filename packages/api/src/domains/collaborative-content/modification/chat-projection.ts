@@ -172,7 +172,9 @@ export class ContentModificationChatProjection {
     const taskId = record.progress.task?.taskId;
     if (!sourceMessageId || !taskId) throw new Error('Content modification receipt requires bound source and Task');
     const idempotencyKey = receiptMessageIdempotencyKey(record.ownerUserId, event);
-    const prior = await this.deps.messages.getByIdempotencyKey('system', record.payload.threadId, idempotencyKey);
+    const prior =
+      (await this.deps.messages.getByIdempotencyKey(record.ownerUserId, record.payload.threadId, idempotencyKey)) ??
+      (await this.deps.messages.getByIdempotencyKey('system', record.payload.threadId, idempotencyKey));
     if (prior) return this.readPrior(record, event, prior);
 
     if (record.progress.prepared?.kind === 'media') await this.deps.authorizeMediaReceipt?.(record);
@@ -222,8 +224,12 @@ export class ContentModificationChatProjection {
     idempotent = true,
   ): ContentModificationChatProjectionResult {
     const parsed = contentModificationReceiptV1Schema.safeParse(message.extra?.contentModificationReceiptV1);
+    // Pre-MessageFrom rows retain their original system owner and canonical
+    // legacy sender projection. Their idempotency key already binds the Human.
+    const legacySystemReceipt =
+      message.userId === 'system' && message.from?.kind === 'system' && message.from.service === 'system';
     if (
-      message.userId !== record.ownerUserId ||
+      (!legacySystemReceipt && message.userId !== record.ownerUserId) ||
       message.from?.kind !== 'system' ||
       message.threadId !== record.payload.threadId ||
       message.catId !== null ||
@@ -238,6 +244,9 @@ export class ContentModificationChatProjection {
       ) ||
       !parsed.success ||
       parsed.data.requestId !== record.requestId ||
+      parsed.data.sourceMessageId !== record.progress.sourceMessageId ||
+      parsed.data.taskId !== record.progress.task?.taskId ||
+      parsed.data.targetCatId !== record.payload.targetCatId ||
       parsed.data.state !== event.state ||
       parsed.data.receiptRef !== event.receiptRef ||
       parsed.data.candidateRef !== event.candidateRef

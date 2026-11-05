@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from 'node:util';
 import type { RespondWithMediaVersion } from '@cat-cafe/shared';
 import type Database from 'better-sqlite3';
+import { acceptedVersionSchema } from '../artifact-review/accepted-version-response.js';
 import { ArtifactReviewError } from '../artifact-review/errors.js';
 import { assertVersionResponses } from '../artifact-review/reducer.js';
 import type { ArtifactReviewStore } from '../artifact-review/store.js';
@@ -15,7 +16,17 @@ export function assertRecoveryResponse(
   const review = store.get(intent.reviewId);
   const round = review?.rounds.at(-1);
   if (!review || !round) throw new ArtifactReviewError('not_found');
-  if (store.pendingVersion(intent.reviewId)) throw new ArtifactReviewError('version_pending');
+  const pending = store.pendingVersion(intent.reviewId);
+  if (pending) {
+    const { publicationSource: _source, ...accepted } = acceptedVersionSchema.parse(pending.payload);
+    if (
+      pending.input.actor.kind !== 'cat' ||
+      pending.input.actor.actorId !== intent.targetCatId ||
+      !isDeepStrictEqual(accepted, response) ||
+      !isDeepStrictEqual(pending.input.request, response)
+    )
+      throw new ArtifactReviewError('operation_reused');
+  }
   if (store.reviewReceipt(intent.reviewId, receiptReference(intent.reviewId, response.operationId)))
     throw new ArtifactReviewError('operation_reused');
   if (

@@ -19,12 +19,15 @@ test('v2 host: filters, keyboard sorting, detail, failed save, discard and exact
     await page.getByTestId('member-detail-page').waitFor();
     if (screenshots) await page.screenshot({ path: path.join(screenshots, 'detail-light.png') });
     await page.locator('input[aria-label="Name"]').fill('修改后的名字');
-    await page.getByRole('region', { name: '未保存修改' }).waitFor();
-    await page.waitForFunction(() => {
-      const bar = document.querySelector('.member-save-bar')?.getBoundingClientRect();
-      const panel = document.querySelector('[data-trajectory-origin-scroll]')?.getBoundingClientRect();
-      return bar && panel && Math.abs(bar.left + bar.width / 2 - panel.left - panel.width / 2) < 1;
-    });
+    await page.getByRole('region', { name: '保存成员设置' }).waitFor();
+    assert.equal(
+      await page.locator('.member-save-bar').evaluate((bar) => {
+        const r = bar.getBoundingClientRect();
+        const field = document.querySelector('.member-editor-layout').getBoundingClientRect();
+        return Math.abs(r.left - field.left) < 1 && r.bottom <= innerHeight;
+      }),
+      true,
+    );
     if (screenshots) await page.screenshot({ path: path.join(screenshots, 'detail-unsaved-light.png') });
     state.rejectSave = true;
     await page.getByRole('button', { name: '保存', exact: true }).click();
@@ -33,7 +36,7 @@ test('v2 host: filters, keyboard sorting, detail, failed save, discard and exact
     await page.getByRole('button', { name: '‹ 成员', exact: true }).click();
     await page.getByRole('button', { name: '取消', exact: true }).click();
     assert.equal(await page.locator('input[aria-label="Name"]').inputValue(), '修改后的名字');
-    await page.getByRole('button', { name: '放弃', exact: true }).click();
+    await page.getByRole('button', { name: '放弃修改', exact: true }).click();
     assert.equal(await page.locator('input[aria-label="Name"]').inputValue(), '隔离测试甲');
     await page.getByRole('button', { name: '‹ 成员', exact: true }).click();
     assert.equal(await page.locator('tr[data-cat-id]').count(), 3);
@@ -45,6 +48,7 @@ test('v2 host: filters, keyboard sorting, detail, failed save, discard and exact
     await page.locator('input[aria-label="Name"]').fill('保存后的名字');
     state.rejectSave = false;
     await page.getByRole('button', { name: '保存', exact: true }).click();
+    await page.getByRole('button', { name: '‹ 成员', exact: true }).click();
     await page.getByTestId('member-detail-page').waitFor({ state: 'detached' });
     assert.equal(state.cats.find((cat) => cat.id === 'fixture-a').name, '保存后的名字');
   } finally {
@@ -63,6 +67,7 @@ test('protected identity stays locked; deletion uses the original confirmation o
     assert.equal(await page.getByRole('button', { name: '删除成员', exact: true }).count(), 0);
     await page.locator('input[aria-label="Nickname"]').fill('隔离Pro新昵称');
     await page.getByRole('button', { name: '保存', exact: true }).click();
+    await page.getByRole('button', { name: '‹ 成员', exact: true }).click();
     await page.getByTestId('member-detail-page').waitFor({ state: 'detached' });
     const patch = state.writes.find((write) => write.path === '/api/cats/gpt-pro').body;
     for (const field of state.cats.find((cat) => cat.id === 'gpt-pro').identityProtection.lockedFields)
@@ -111,7 +116,7 @@ test('language and a selected custom theme preserve the dirty draft, focus and r
     assert.equal(await page.evaluate(() => localStorage.getItem('cat-cafe:shell-language')), 'en');
     assert.equal(state.writes.length, 0);
     if (screenshots) await page.screenshot({ path: path.join(screenshots, 'detail-custom-english.png') });
-    await page.getByRole('button', { name: 'Discard', exact: true }).click();
+    await page.getByRole('button', { name: 'Discard changes', exact: true }).click();
     await page.getByRole('button', { name: '‹ Members', exact: true }).click();
     await page.getByRole('button', { name: /测试乙.*fixture-b/ }).click();
     await page.getByRole('button', { name: 'Delete member', exact: true }).click();
@@ -197,7 +202,7 @@ test('English at 240px keeps full member names and confines overflow to the tabl
     if (screenshots) await page.screenshot({ path: path.join(screenshots, 'detail-240-english.png') });
     await page.locator('#member-voice').scrollIntoViewIfNeeded();
     if (screenshots) await page.screenshot({ path: path.join(screenshots, 'detail-240-voice-english.png') });
-    await page.getByRole('button', { name: 'Discard', exact: true }).click();
+    await page.getByRole('button', { name: 'Discard changes', exact: true }).click();
     await page.getByRole('button', { name: '‹ Members', exact: true }).click();
     await page.getByRole('button', { name: 'Add member', exact: true }).click();
     await page.getByTestId('member-detail-page').waitFor();
@@ -240,5 +245,44 @@ test('wide, narrow, dark and classic production surfaces; every approved avatar 
     } finally {
       await context.close();
     }
+  }
+});
+
+// Real table layout catches intrinsic button widths painting across cell borders.
+test('long member text stays in its column and reveals full text on hover and focus', async () => {
+  const { context, page, state } = await scene();
+  try {
+    Object.assign(state.cats[2], {
+      defaultModel: 'gemini-4-argon-high-with-a-long-native-model-name',
+      accountRef: state.accounts[0].id,
+      mentionPatterns: ['@a-very-long-member-handle-that-must-not-cover-the-switch'],
+    });
+    state.accounts[0].displayName = 'A very long OAuth account name that must stay inside its column';
+    await page.reload();
+    const row = page.locator('tr[data-cat-id="fixture-c"]');
+    await row.waitFor();
+    for (const selector of ['.member-runtime-summary', '.member-cell-text', '.member-aliases']) {
+      const trigger = row.locator(selector).first();
+      const bounds = await trigger.evaluate((el) => ({
+        right: el.getBoundingClientRect().right,
+        cellRight: el.closest('td').getBoundingClientRect().right,
+        clipped: el.scrollWidth > el.clientWidth,
+      }));
+      assert.ok(bounds.right <= bounds.cellRight, `${selector} must stay inside its cell`);
+      assert.equal(bounds.clipped, true, `${selector} actually exercises truncation`);
+      await trigger.hover();
+      const tip = page.getByRole('tooltip');
+      await tip.waitFor();
+      assert.equal(await tip.innerText(), await trigger.textContent());
+      await page.mouse.move(0, 0);
+      await page.keyboard.press('Tab');
+      await trigger.focus();
+      await tip.waitFor();
+      assert.equal(await tip.innerText(), await trigger.textContent());
+      await page.keyboard.press('Escape');
+    }
+    if (screenshots) await page.screenshot({ path: path.join(screenshots, 'long-member-columns.png') });
+  } finally {
+    await context.close();
   }
 });

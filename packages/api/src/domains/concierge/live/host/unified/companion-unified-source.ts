@@ -1,5 +1,7 @@
 import { isDeepStrictEqual } from 'node:util';
 import {
+  collectiveAccountabilityAttentionItemSchema,
+  collectiveProjectAttentionItemSchema,
   NEEDS_ME_PRODUCER_IDS,
   type UnifiedAttentionItemV1,
   type UnifiedAttentionReadV1,
@@ -8,6 +10,7 @@ import {
 } from '@cat-cafe/shared';
 import { z } from 'zod';
 import { CompanionBridgeError } from '../../companion-owner-client.js';
+import { companionRuntimeInteractionSchema } from './companion-unified-runtime.js';
 
 const source = z.object({
   status: z.enum(['available', 'unavailable', 'unauthenticated', 'forbidden', 'invalid']),
@@ -16,11 +19,17 @@ const source = z.object({
   coverage: z.enum(['all_registered_F246_producers', 'current_linked_F310_five_producers']),
   exhaustiveness: z.enum(['complete', 'partial', 'unknown']),
 });
+const collectiveAccountabilitySource = source.extend({
+  coverage: z.literal('pending_f290_collective_accountability_requests'),
+});
 const row = z.object({
   decisionRef: z.string().min(1),
   kind: z.enum(['approval', 'judgment', 'repair']),
   summary: z.string(),
   approval: z.record(z.unknown()).optional(),
+  collectiveAccountabilityRequest: z.unknown().optional(),
+  collectiveProjectAttention: collectiveProjectAttentionItemSchema.optional(),
+  runtimeInteraction: companionRuntimeInteractionSchema.optional(),
   linkedNeedsMe: z.array(z.object({ ownerRead: z.unknown(), receipt: z.unknown() })),
 });
 const read = z.object({
@@ -29,7 +38,17 @@ const read = z.object({
   scope: z.literal('owner_all_projects'),
   identity: z.object({ ownerUserId: z.string().min(1) }),
   observedAt: z.number().finite().nonnegative(),
-  sources: z.object({ approvals: source, needsMe: source }),
+  sources: z.object({
+    approvals: source,
+    needsMe: source,
+    collectiveAccountabilityRequests: collectiveAccountabilitySource.optional(),
+    collectiveProjectAttention: source
+      .extend({ coverage: z.literal('pending_f290_project_materials_and_dates') })
+      .optional(),
+    structuredChoices: source.extend({ coverage: z.literal('pending_f306_structured_choices') }).optional(),
+    personalPreferences: source.extend({ coverage: z.literal('owner_personal_ignored_items') }),
+  }),
+  personalView: z.object({ mode: z.literal('visible'), preferenceRevision: z.number().int().nonnegative().optional() }),
   readWindow: z.object({
     startedAt: z.number(),
     endedAt: z.number(),
@@ -47,47 +66,91 @@ const read = z.object({
 });
 
 function item(raw: z.infer<typeof row>, ownerUserId: string): UnifiedAttentionItemV1 {
-  let approval: UnifiedAttentionItemV1['approval'];
-  if (raw.approval) {
-    if ('ownerUserId' in raw.approval && raw.approval.ownerUserId !== ownerUserId)
-      throw new CompanionBridgeError('permission_required');
-    const canonical = unifiedAttentionApprovalsSourceSchema.parse({
-      items: [{ ...raw.approval, ownerUserId }],
-    }).items[0]!;
-    const { ownerUserId: _owner, ...visible } = canonical;
-    approval = visible;
-  }
+  const approval = visibleApproval(raw.approval, ownerUserId);
   if ((raw.kind === 'approval') !== (approval !== undefined)) throw new CompanionBridgeError('unavailable');
-  const linkedNeedsMe = raw.linkedNeedsMe.map((linked) => {
-    const work = unifiedAttentionWorkSourceSchema.parse({ ownerReads: [linked.ownerRead] }).ownerReads[0]!;
-    if (work.envelope.visibility.ownerUserId !== ownerUserId) throw new CompanionBridgeError('permission_required');
-    const receipt = work.attentionReceipts.find((candidate) => isDeepStrictEqual(candidate, linked.receipt));
-    if (
-      !receipt ||
-      !receipt.eligible ||
-      receipt.taskRef.subjectRef !== work.envelope.subjectRef ||
-      !NEEDS_ME_PRODUCER_IDS.some((id) => id === receipt.producer.producerId) ||
-      !receipt.kind ||
-      !receipt.recommendation ||
-      !work.preparedArtifact ||
-      work.brief?.current?.state === 'done' ||
-      receipt.taskRef.observedRevision !== work.envelope.revision ||
-      work.envelope.freshness?.state !== 'current' ||
-      work.envelope.freshness.observedRevision !== work.envelope.revision ||
-      receipt.action?.expectedProducerRevision !== receipt.producer.revision
-    )
-      throw new CompanionBridgeError('unavailable');
-    return { ownerRead: work, receipt };
-  });
-  if (!approval && (!linkedNeedsMe.length || linkedNeedsMe.some(({ receipt }) => receipt.kind !== raw.kind)))
+  const linkedNeedsMe = raw.linkedNeedsMe.map((linked) => visibleNeedsMe(linked, ownerUserId));
+  const accountability = raw.collectiveAccountabilityRequest
+    ? collectiveAccountabilityAttentionItemSchema.parse(raw.collectiveAccountabilityRequest)
+    : undefined;
+  const project = raw.collectiveProjectAttention;
+  const runtime = raw.runtimeInteraction;
+  if (
+    (runtime &&
+      (raw.decisionRef !== `f306.runtime_interaction:${runtime.interactionId}` ||
+        (raw.kind !== 'judgment' &&
+          !(approval?.sourceFeatureId === 'F306' && approval.proposalId === runtime.interactionId)))) ||
+    (project &&
+      (approval ||
+        linkedNeedsMe.length > 0 ||
+        raw.kind !== 'judgment' ||
+        raw.decisionRef !== `${project.producerId}:${project.subjectRef}`)) ||
+    [accountability, project, runtime].filter(Boolean).length > 1
+  )
+    throw new CompanionBridgeError('unavailable');
+  if (
+    accountability &&
+    (approval ||
+      linkedNeedsMe.length > 0 ||
+      raw.kind !== 'judgment' ||
+      raw.decisionRef !== `${accountability.producerId}:${accountability.subjectRef}`)
+  ) {
+    throw new CompanionBridgeError('unavailable');
+  }
+  if (
+    !approval &&
+    !accountability &&
+    !project &&
+    !runtime &&
+    (!linkedNeedsMe.length || linkedNeedsMe.some(({ receipt }) => receipt.kind !== raw.kind))
+  )
     throw new CompanionBridgeError('unavailable');
   return {
     decisionRef: raw.decisionRef,
     kind: raw.kind,
     summary: raw.summary,
     ...(approval ? { approval } : {}),
+    ...(accountability ? { collectiveAccountabilityRequest: accountability } : {}),
+    ...(project ? { collectiveProjectAttention: project } : {}),
+    ...(runtime ? { runtimeInteraction: runtime } : {}),
     linkedNeedsMe,
   };
+}
+
+function visibleApproval(
+  raw: z.infer<typeof row>['approval'],
+  ownerUserId: string,
+): UnifiedAttentionItemV1['approval'] {
+  if (!raw) return undefined;
+  if ('ownerUserId' in raw && raw.ownerUserId !== ownerUserId) throw new CompanionBridgeError('permission_required');
+  const canonical = unifiedAttentionApprovalsSourceSchema.parse({
+    items: [{ ...raw, ownerUserId }],
+  }).items[0];
+  if (!canonical) throw new CompanionBridgeError('unavailable');
+  const { ownerUserId: _owner, ...visible } = canonical;
+  return visible;
+}
+
+function visibleNeedsMe(linked: z.infer<typeof row>['linkedNeedsMe'][number], ownerUserId: string) {
+  const work = unifiedAttentionWorkSourceSchema.parse({ ownerReads: [linked.ownerRead] }).ownerReads[0];
+  if (!work) throw new CompanionBridgeError('unavailable');
+  if (work.envelope.visibility.ownerUserId !== ownerUserId) throw new CompanionBridgeError('permission_required');
+  const receipt = work.attentionReceipts.find((candidate) => isDeepStrictEqual(candidate, linked.receipt));
+  if (
+    !receipt ||
+    !receipt.eligible ||
+    receipt.taskRef.subjectRef !== work.envelope.subjectRef ||
+    !NEEDS_ME_PRODUCER_IDS.some((id) => id === receipt.producer.producerId) ||
+    !receipt.kind ||
+    !receipt.recommendation ||
+    !work.preparedArtifact ||
+    work.brief?.current?.state === 'done' ||
+    receipt.taskRef.observedRevision !== work.envelope.revision ||
+    work.envelope.freshness?.state !== 'current' ||
+    work.envelope.freshness.observedRevision !== work.envelope.revision ||
+    receipt.action?.expectedProducerRevision !== receipt.producer.revision
+  )
+    throw new CompanionBridgeError('unavailable');
+  return { ownerRead: work, receipt };
 }
 
 /** Reuse the canonical source validators, then bind every retained row to this Host principal. */
@@ -106,10 +169,16 @@ export function parseUnifiedCompanionSource(
   )
     throw new CompanionBridgeError('unavailable');
   const items = parsed.items.map((value) => item(value, ownerUserId));
+  if (parsed.sources.personalPreferences.status !== 'available' && items.length > 0)
+    throw new CompanionBridgeError('unavailable');
   if (
     items.some(
       (value) =>
         (value.approval && parsed.sources.approvals.status !== 'available') ||
+        (value.collectiveAccountabilityRequest &&
+          parsed.sources.collectiveAccountabilityRequests?.status !== 'available') ||
+        (value.collectiveProjectAttention && parsed.sources.collectiveProjectAttention?.status !== 'available') ||
+        (value.runtimeInteraction && parsed.sources.structuredChoices?.status !== 'available') ||
         (value.linkedNeedsMe.length > 0 && parsed.sources.needsMe.status !== 'available'),
     )
   )

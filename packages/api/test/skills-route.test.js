@@ -19,6 +19,8 @@ import { skillsRoutes } from '../dist/routes/skills.js';
 import { skillsWriteRoutes } from '../dist/routes/skills-write.js';
 import { resolveStartupProjectRoot } from '../dist/utils/startup-root.js';
 
+const providerDirectory = (provider) => (provider === 'kimi' ? '.kimi-code' : `.${provider}`);
+
 const AUTH_HEADERS = { 'x-cat-cafe-user': 'test-user' };
 const OWNER_SESSION_HEADERS = {
   'x-test-session-user': 'you',
@@ -261,14 +263,14 @@ describe('Skills Route', () => {
       mkdir(join(projectDir, '.claude'), { recursive: true }),
       mkdir(join(projectDir, '.codex'), { recursive: true }),
       mkdir(join(projectDir, '.gemini'), { recursive: true }),
-      mkdir(join(projectDir, '.kimi'), { recursive: true }),
+      mkdir(join(projectDir, '.kimi-code'), { recursive: true }),
       mkdir(homeDir, { recursive: true }),
     ]);
     await Promise.all([
       symlink(sourceSkillsDir, join(projectDir, '.claude', 'skills')),
       symlink(sourceSkillsDir, join(projectDir, '.codex', 'skills')),
       symlink(sourceSkillsDir, join(projectDir, '.gemini', 'skills')),
-      symlink(sourceSkillsDir, join(projectDir, '.kimi', 'skills')),
+      symlink(sourceSkillsDir, join(projectDir, '.kimi-code', 'skills')),
     ]);
 
     process.env.HOME = homeDir;
@@ -312,13 +314,13 @@ describe('Skills Route', () => {
       mkdir(join(homeDir, '.claude'), { recursive: true }),
       mkdir(join(homeDir, '.codex'), { recursive: true }),
       mkdir(join(homeDir, '.gemini'), { recursive: true }),
-      mkdir(join(homeDir, '.kimi'), { recursive: true }),
+      mkdir(join(homeDir, '.kimi-code'), { recursive: true }),
     ]);
     await Promise.all([
       symlink(mainSkillsDir, join(homeDir, '.claude', 'skills')),
       symlink(mainSkillsDir, join(homeDir, '.codex', 'skills')),
       symlink(mainSkillsDir, join(homeDir, '.gemini', 'skills')),
-      symlink(mainSkillsDir, join(homeDir, '.kimi', 'skills')),
+      symlink(mainSkillsDir, join(homeDir, '.kimi-code', 'skills')),
     ]);
 
     process.env.HOME = homeDir;
@@ -362,7 +364,7 @@ describe('Skills Route', () => {
         claude: { enabled: true, path: '.project-claude/skills' },
         codex: { enabled: false, path: '.codex/skills' },
         gemini: { enabled: false, path: '.gemini/skills' },
-        kimi: { enabled: false, path: '.kimi/skills' },
+        kimi: { enabled: false, path: '.kimi-code/skills' },
       },
     };
 
@@ -415,7 +417,7 @@ describe('Skills Route', () => {
       ...DEFAULT_MOUNT_RULES,
       mountPoints: {
         ...DEFAULT_MOUNT_RULES.mountPoints,
-        kimi: { enabled: false, path: '.kimi/skills' },
+        kimi: { enabled: false, path: '.kimi-code/skills' },
       },
     };
 
@@ -476,7 +478,7 @@ describe('Skills Route', () => {
       mkdir(join(projectDir, '.claude/skills'), { recursive: true }),
       mkdir(join(projectDir, '.codex/skills'), { recursive: true }),
       mkdir(join(projectDir, '.gemini/skills'), { recursive: true }),
-      mkdir(join(projectDir, '.kimi/skills'), { recursive: true }),
+      mkdir(join(projectDir, '.kimi-code/skills'), { recursive: true }),
       mkdir(homeDir, { recursive: true }),
       writeCapabilitiesConfig(projectDir, {
         version: 2,
@@ -491,7 +493,10 @@ describe('Skills Route', () => {
     ]);
     for (const provider of ['claude', 'codex', 'gemini']) {
       for (const skillName of sourceSkillNames) {
-        await symlink(join(sourceSkillsDir, skillName), join(projectDir, `.${provider}/skills`, skillName));
+        await symlink(
+          join(sourceSkillsDir, skillName),
+          join(projectDir, `${providerDirectory(provider)}/skills`, skillName),
+        );
       }
     }
     process.env.HOME = homeDir;
@@ -541,7 +546,7 @@ describe('Skills Route', () => {
       ...DEFAULT_MOUNT_RULES,
       mountPoints: {
         ...DEFAULT_MOUNT_RULES.mountPoints,
-        kimi: { enabled: false, path: '.kimi/skills' },
+        kimi: { enabled: false, path: '.kimi-code/skills' },
       },
     };
 
@@ -566,7 +571,10 @@ describe('Skills Route', () => {
     await writeMountRules(projectDir, rules);
     for (const provider of ['claude', 'codex', 'gemini']) {
       for (const skillName of sourceSkillNames) {
-        await symlink(join(sourceSkillsDir, skillName), join(projectDir, `.${provider}/skills`, skillName));
+        await symlink(
+          join(sourceSkillsDir, skillName),
+          join(projectDir, `${providerDirectory(provider)}/skills`, skillName),
+        );
       }
     }
     process.env.HOME = homeDir;
@@ -613,7 +621,7 @@ describe('Skills Route', () => {
         claude: { enabled: false, path: '.claude/skills' },
         codex: { enabled: false, path: '.codex/skills' },
         gemini: { enabled: false, path: '.gemini/skills' },
-        kimi: { enabled: false, path: '.kimi/skills' },
+        kimi: { enabled: false, path: '.kimi-code/skills' },
       },
       customPaths: [{ alias: 'opencode', path: customSkillsDir }],
     };
@@ -689,7 +697,7 @@ describe('Skills Route', () => {
       mkdir(join(projectDir, '.claude/skills'), { recursive: true }),
       mkdir(join(projectDir, '.codex/skills'), { recursive: true }),
       mkdir(join(projectDir, '.gemini/skills'), { recursive: true }),
-      mkdir(join(projectDir, '.kimi/skills'), { recursive: true }),
+      mkdir(join(projectDir, '.kimi-code/skills'), { recursive: true }),
       mkdir(homeDir, { recursive: true }),
     ]);
     await writeCapabilitiesConfig(projectDir, {
@@ -699,7 +707,10 @@ describe('Skills Route', () => {
     for (const provider of ['claude', 'codex', 'gemini', 'kimi']) {
       for (const skillName of sourceSkillNames) {
         if (skillName === 'debugging') continue;
-        await symlink(join(sourceSkillsDir, skillName), join(projectDir, `.${provider}/skills`, skillName));
+        await symlink(
+          join(sourceSkillsDir, skillName),
+          join(projectDir, `${providerDirectory(provider)}/skills`, skillName),
+        );
       }
     }
     process.env.HOME = homeDir;
@@ -790,7 +801,7 @@ describe('Skills Route', () => {
       mkdir(join(projectDir, '.claude/skills'), { recursive: true }),
       mkdir(join(projectDir, '.codex/skills'), { recursive: true }),
       mkdir(join(projectDir, '.gemini/skills'), { recursive: true }),
-      mkdir(join(projectDir, '.kimi/skills'), { recursive: true }),
+      mkdir(join(projectDir, '.kimi-code/skills'), { recursive: true }),
       mkdir(homeDir, { recursive: true }),
     ]);
     await writeCapabilitiesConfig(projectDir, {
@@ -927,7 +938,7 @@ describe('Skills Route', () => {
     await mkdir(skillSourceDir, { recursive: true });
     await writeFile(join(skillSourceDir, 'SKILL.md'), '# Project Local Source Skill\n');
     for (const provider of ['claude', 'codex', 'gemini', 'kimi']) {
-      const skillsDir = join(projectDir, `.${provider}`, 'skills');
+      const skillsDir = join(projectDir, providerDirectory(provider), 'skills');
       const linkPath = join(skillsDir, skillName);
       await mkdir(skillsDir, { recursive: true });
       await symlink(relative(dirname(linkPath), skillSourceDir), linkPath);
@@ -1046,7 +1057,7 @@ describe('Skills Route', () => {
         claude: { enabled: true, path: '.persistent-claude/skills' },
         codex: { enabled: false, path: '.codex/skills' },
         gemini: { enabled: false, path: '.gemini/skills' },
-        kimi: { enabled: false, path: '.kimi/skills' },
+        kimi: { enabled: false, path: '.kimi-code/skills' },
       },
     });
     const sourceSkillsDir = resolveRepoSkillsDir();
@@ -1175,7 +1186,7 @@ describe('Skills Route', () => {
 
       // Filesystem symlinks must exist for all default mount points
       for (const provider of ['claude', 'codex', 'gemini', 'kimi']) {
-        const link = join(projectDir, `.${provider}/skills/tdd`);
+        const link = join(projectDir, `${providerDirectory(provider)}/skills/tdd`);
         assert.equal(
           (await lstat(link)).isSymbolicLink(),
           true,
@@ -1215,7 +1226,7 @@ describe('Skills Route', () => {
       assert.match(JSON.parse(res.body).error, /not found/i);
       for (const provider of ['claude', 'codex', 'gemini', 'kimi']) {
         await assert.rejects(
-          () => lstat(join(projectDir, `.${provider}/skills`, unknownSkillName)),
+          () => lstat(join(projectDir, `${providerDirectory(provider)}/skills`, unknownSkillName)),
           /ENOENT/,
           `${provider} must not receive a dangling symlink for an unknown skill`,
         );
@@ -1348,7 +1359,7 @@ describe('Skills Route', () => {
       assert.equal((await lstat(join(projectDir, '.claude/skills', skillName))).isSymbolicLink(), true);
       for (const provider of ['codex', 'gemini', 'kimi']) {
         await assert.rejects(
-          () => lstat(join(projectDir, `.${provider}/skills`, skillName)),
+          () => lstat(join(projectDir, `${providerDirectory(provider)}/skills`, skillName)),
           /ENOENT/,
           `${provider} must not be remounted outside the existing skill mountPaths`,
         );
@@ -1394,7 +1405,7 @@ describe('Skills Route', () => {
       version: 1,
       mountPoints: {
         ...DEFAULT_MOUNT_RULES.mountPoints,
-        kimi: { enabled: false, path: '.kimi/skills' },
+        kimi: { enabled: false, path: '.kimi-code/skills' },
       },
       customPaths: [],
     });
@@ -1413,7 +1424,7 @@ describe('Skills Route', () => {
       assert.deepEqual(body.mountPaths, ['claude']);
       assert.equal((await lstat(join(projectDir, '.claude/skills', skillName))).isSymbolicLink(), true);
       await assert.rejects(
-        () => lstat(join(projectDir, '.kimi/skills', skillName)),
+        () => lstat(join(projectDir, '.kimi-code/skills', skillName)),
         /ENOENT/,
         'disabled provider must not be reported or persisted as mounted',
       );
@@ -1869,7 +1880,7 @@ describe('Skills Route', () => {
       ],
     });
     for (const provider of ['codex', 'gemini', 'kimi']) {
-      const staleDir = join(projectDir, `.${provider}/skills`);
+      const staleDir = join(projectDir, `${providerDirectory(provider)}/skills`);
       const staleLink = join(staleDir, skillName);
       await mkdir(staleDir, { recursive: true });
       await symlink(relative(dirname(staleLink), skillSourceDir), staleLink);
@@ -1891,7 +1902,7 @@ describe('Skills Route', () => {
 
       for (const provider of ['codex', 'gemini', 'kimi']) {
         await assert.rejects(
-          () => lstat(join(projectDir, `.${provider}/skills`, skillName)),
+          () => lstat(join(projectDir, `${providerDirectory(provider)}/skills`, skillName)),
           /ENOENT/,
           `${provider} must not be remounted outside plugin mountPaths`,
         );
@@ -1946,7 +1957,7 @@ describe('Skills Route', () => {
       ],
     });
     for (const provider of ['claude', 'codex', 'gemini', 'kimi']) {
-      const staleDir = join(projectDir, `.${provider}/skills`);
+      const staleDir = join(projectDir, `${providerDirectory(provider)}/skills`);
       const staleLink = join(staleDir, skillName);
       await mkdir(staleDir, { recursive: true });
       await symlink(relative(dirname(staleLink), skillSourceDir), staleLink);
@@ -1967,7 +1978,7 @@ describe('Skills Route', () => {
 
       for (const provider of ['claude', 'codex', 'gemini', 'kimi']) {
         await assert.rejects(
-          () => lstat(join(projectDir, `.${provider}/skills`, skillName)),
+          () => lstat(join(projectDir, `${providerDirectory(provider)}/skills`, skillName)),
           /ENOENT/,
           `${provider} must not be mounted when plugin mountPaths is empty`,
         );

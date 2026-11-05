@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { CLIENT_REQUEST_DIAGNOSTIC_HEADER } from '@cat-cafe/shared';
 import { availablePort, stopChild } from './f290-runtime-journey.harness.mjs';
 import { realSurfaceApiResponse } from './f307-real-surface-fixtures.mjs';
 import { createNextDevTestEnvironment } from './next-dev-test-environment.mjs';
@@ -128,7 +129,7 @@ function rejectProgramWrite(request, url, programWrites) {
   return { status: 405, body: { error: 'read_only_contract_fixture' } };
 }
 
-function createFixtureApi({
+export function createFixtureApi({
   programPath,
   projection,
   ownerBindings,
@@ -137,9 +138,26 @@ function createFixtureApi({
   preparationMediaAvailable,
   thread,
   handleRequest,
+  browserOrigin,
 }) {
   return createServer(async (request, response) => {
     const url = new URL(request.url, 'http://127.0.0.1');
+    const originAllowed = typeof request.headers.origin === 'string' && request.headers.origin === browserOrigin();
+    if (originAllowed) {
+      response.setHeader('Access-Control-Allow-Origin', request.headers.origin);
+      response.setHeader('Access-Control-Allow-Credentials', 'true');
+      response.setHeader(
+        'Access-Control-Allow-Headers',
+        `Content-Type,x-cat-cafe-user,x-csrf-token,${CLIENT_REQUEST_DIAGNOSTIC_HEADER}`,
+      );
+      response.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+      response.setHeader('Vary', 'Origin');
+    }
+    if (request.method === 'OPTIONS') {
+      response.writeHead(originAllowed ? 204 : 403);
+      response.end();
+      return;
+    }
     try {
       const custom = await handleRequest?.({ request, url });
       const result =
@@ -159,6 +177,7 @@ function createFixtureApi({
       response.writeHead(result.status ?? 200, {
         'cache-control': 'private, no-store',
         'content-type': result.contentType ?? 'application/json',
+        ...result.headers,
       });
       response.end(result.binary ? result.body : JSON.stringify(result.body));
     } catch (error) {
@@ -232,6 +251,7 @@ export async function startEvolutionWorkspaceBrowserFixture(projection, options 
     ],
   ]);
   const programWrites = [];
+  let browserOrigin;
   const api = createFixtureApi({
     programPath,
     projection,
@@ -241,6 +261,7 @@ export async function startEvolutionWorkspaceBrowserFixture(projection, options 
     preparationMediaAvailable: () => mediaAvailable,
     thread,
     handleRequest: options.handleRequest,
+    browserOrigin: () => browserOrigin,
   });
   const disposeApi = options.configureApi?.(api);
   let nextDev;
@@ -265,6 +286,7 @@ export async function startEvolutionWorkspaceBrowserFixture(projection, options 
     await once(api, 'listening');
     const apiUrl = `http://127.0.0.1:${api.address().port}`;
     const webUrl = `http://127.0.0.1:${options.webPort ?? (await availablePort())}`;
+    browserOrigin = new URL(webUrl).origin;
     nextDev = await createNextDevTestEnvironment('f311-workspace', {
       NEXT_PUBLIC_API_URL: options.browserApiUrl ?? webUrl,
       API_SERVER_PORT: new URL(apiUrl).port,

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -32,18 +32,77 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   const projectRoot = resolve(args.projectRoot ?? process.env.CAT_CAFE_PROJECT_ROOT ?? defaultProjectRoot());
   const targetRoot = resolve(args.targetRoot ?? process.env.CAT_CAFE_TARGET_ROOT ?? homedir());
-  const agentHooksModule = resolve(projectRoot, 'packages', 'api', 'dist', 'agent-hooks', 'index.js');
+  const agentHooksDirectory = resolve(projectRoot, 'packages', 'api', 'dist', 'agent-hooks');
+  const bundledAgentHooksModule = resolve(agentHooksDirectory, 'index.desktop.js');
+  const agentHooksModule = existsSync(bundledAgentHooksModule)
+    ? bundledAgentHooksModule
+    : resolve(agentHooksDirectory, 'index.js');
+  const started = performance.now();
+  const initialCpu = process.cpuUsage();
+  const logFiles = [
+    resolve(projectRoot, '.installer-logs', 'agent-hooks.log'),
+    resolve(targetRoot, '.cat-cafe', 'installer-logs', 'agent-hooks.log'),
+  ];
+  const emit = (event) => {
+    const line = `[agent-hook-install] ${JSON.stringify({
+      version: 1,
+      component: 'node',
+      pid: process.pid,
+      elapsedMs: Math.round((performance.now() - started) * 100) / 100,
+      ...event,
+    })}\n`;
+    process.stdout.write(line);
+    for (const logFile of logFiles) {
+      try {
+        mkdirSync(dirname(logFile), { recursive: true });
+        appendFileSync(logFile, line, 'utf8');
+        break;
+      } catch {
+        // Original-user hooks may not write Program Files. Try only the owned profile.
+      }
+    }
+  };
+  const phase = async (name, work) => {
+    const phaseStarted = performance.now();
+    const cpu = process.cpuUsage();
+    const mark = (state) => {
+      const used = process.cpuUsage(cpu);
+      emit({
+        phase: name,
+        state,
+        durationMs: Math.round((performance.now() - phaseStarted) * 100) / 100,
+        userCpuMs: used.user / 1000,
+        systemCpuMs: used.system / 1000,
+      });
+    };
+    mark('started');
+    try {
+      const result = await work();
+      mark('completed');
+      return result;
+    } catch (error) {
+      mark('failed');
+      throw error;
+    }
+  };
 
-  if (!existsSync(agentHooksModule)) {
-    throw new Error(`agent hook module missing: ${agentHooksModule}`);
-  }
-
-  const { syncAgentHooks } = await import(pathToFileURL(agentHooksModule).href);
-  const status = await syncAgentHooks({ projectRoot, targetRoot });
-  console.log(`Agent CLI hook sync status: ${status.status}`);
+  const { syncAgentHooks } = await phase('module-import', () => import(pathToFileURL(agentHooksModule).href));
+  const status = await phase('hook-sync', () => syncAgentHooks({ projectRoot, targetRoot, diagnostics: emit }));
+  const healthStatus = ['configured', 'missing', 'stale', 'unsupported', 'error'].includes(status.status)
+    ? status.status
+    : 'error';
+  const used = process.cpuUsage(initialCpu);
+  emit({
+    phase: 'sync-result',
+    state: 'completed',
+    healthStatus,
+    durationMs: Math.round((performance.now() - started) * 100) / 100,
+    userCpuMs: used.user / 1000,
+    systemCpuMs: used.system / 1000,
+  });
 }
 
-main().catch((error) => {
-  console.error(error instanceof Error ? error.message : String(error));
+main().catch(() => {
+  console.error('Agent CLI hook sync failed; inspect the fixed-phase installation diagnostics.');
   process.exit(1);
 });

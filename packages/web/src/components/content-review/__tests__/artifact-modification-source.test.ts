@@ -39,8 +39,18 @@ describe('artifactRoundChatTarget — what 「引用到聊天」 names for a med
 
   it('is null while the ledger version is unverified, and for a type a media message cannot carry', () => {
     expect(artifactRoundChatTarget(view, round({ ledgerRef: 'ledger-1' }))).toBeNull();
-    const jpeg = round({ asset: { mediaType: 'image/jpeg', contentRef: 'content-1', ownerRevision: 4 } });
-    expect(artifactRoundChatTarget(view, jpeg)).toBeNull();
+    const gif = round({ asset: { mediaType: 'image/gif', contentRef: 'content-1', ownerRevision: 4 } });
+    expect(artifactRoundChatTarget(view, gif)).toBeNull();
+  });
+
+  it.each(['image/jpeg', 'image/webp'])('keeps %s on the original round and Task', (mediaType) => {
+    expect(
+      artifactRoundChatTarget(view, round({ asset: { mediaType, contentRef: 'content-1', ownerRevision: 4 } })),
+    ).toMatchObject({
+      mediaType,
+      source: { kind: 'artifact-review', reviewId: 'review-9', round: 2 },
+      taskContext: { taskId: 'task-1' },
+    });
   });
 });
 

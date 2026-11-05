@@ -85,9 +85,29 @@ describe('member page reuses the editor transaction', () => {
   it('discards edits without writing configuration', async () => {
     await renderPage();
     await changeName('修改后');
-    expect(document.querySelector('.member-save-bar')?.textContent).toContain('1 处修改未保存');
-    await click('放弃');
+    expect(document.querySelector('.member-save-bar')?.textContent).toContain('1 处修改还没保存');
+    await click('放弃修改');
     expect(container.querySelector<HTMLInputElement>('input[aria-label="Name"]')?.value).toBe('测试成员');
+    expect(vi.mocked(apiFetch).mock.calls.filter(([, init]) => init?.method)).toHaveLength(0);
+  });
+  it('keeps Save discoverable before editing, after restoring the original value and after discard', async () => {
+    await renderPage();
+    const saveButton = () =>
+      Array.from(document.querySelectorAll('button')).find((button) => button.textContent?.trim() === '保存');
+    const expectClean = () => {
+      expect(saveButton(), 'the confirmation action must not disappear when there is no field difference').toBeTruthy();
+      expect(saveButton()?.disabled).toBe(false);
+      expect(document.querySelector('.member-save-bar')?.textContent).toContain('没有改动');
+    };
+    expectClean();
+    await click('保存');
+    await changeName('修改后');
+    expect(saveButton()?.disabled).toBe(false);
+    await changeName('测试成员');
+    expectClean();
+    await changeName('再次修改');
+    await click('放弃修改');
+    expectClean();
     expect(vi.mocked(apiFetch).mock.calls.filter(([, init]) => init?.method)).toHaveLength(0);
   });
   it('keeps the page and draft when the original API rejects a save', async () => {
@@ -102,7 +122,7 @@ describe('member page reuses the editor transaction', () => {
     expect(callbacks.onClose).not.toHaveBeenCalled();
     expect(callbacks.onSaved).not.toHaveBeenCalled();
   });
-  it('saves through the original member endpoint and then returns', async () => {
+  it('saves through the original endpoint and keeps the result visible', async () => {
     const callbacks = await renderPage();
     await changeName('保存后的名字');
     await click('保存');
@@ -112,7 +132,8 @@ describe('member page reuses the editor transaction', () => {
     expect(writes[0][1]?.method).toBe('PATCH');
     expect(JSON.parse(String(writes[0][1]?.body)).name).toBe('保存后的名字');
     expect(callbacks.onSaved).toHaveBeenCalledOnce();
-    expect(callbacks.onClose).toHaveBeenCalledOnce();
+    expect(callbacks.onClose).not.toHaveBeenCalled();
+    expect(container.textContent).toContain('已保存');
   });
   it('offers an honest template retry and still allows starting blank', async () => {
     vi.mocked(apiFetch).mockImplementation(async (url) =>
@@ -164,7 +185,10 @@ describe('member page reuses the editor transaction', () => {
       ),
     );
     expect(container.textContent).toContain('503');
-    expect(document.querySelector('.member-save-bar')).toBeNull();
+    expect(document.querySelector('.member-save-bar')?.textContent).toContain('没有改动');
+    expect(
+      Array.from(document.querySelectorAll('button')).find((button) => button.textContent?.trim() === '保存')?.disabled,
+    ).toBe(false);
     expect(vi.mocked(apiFetch).mock.calls.filter(([, init]) => init?.method)).toHaveLength(0);
   });
 });

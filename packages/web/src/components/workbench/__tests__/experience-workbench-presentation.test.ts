@@ -242,3 +242,25 @@ it('admits a wide Schedule only in its captured host and clears it on a differen
   store.setMainAreaAttentionChatBasis(50);
   expect(useF307ExperienceWorkbenchStore.getState().mainAreaAttentionPresentation).toEqual({ kind: 'overlay' });
 });
+
+it('admits an evolution Program into the same Chat-preserving wide host', () => {
+  const presentation = { kind: 'chat-workspace' as const, threadId: 'thread-a', chatBasis: 34 };
+  useF307ExperienceWorkbenchStore.setState({ layout: createInitialWorkbenchState([PROGRAM_SURFACE]) });
+
+  useF307ExperienceWorkbenchStore.getState().enterMainAreaAttention(PROGRAM_SURFACE.id, presentation);
+
+  expect(useF307ExperienceWorkbenchStore.getState()).toMatchObject({
+    mainAreaAttentionSurfaceId: PROGRAM_SURFACE.id,
+    mainAreaAttentionPresentation: presentation,
+  });
+  useF307ExperienceWorkbenchStore.getState().enterMainAreaFullWindow(PROGRAM_SURFACE.id);
+  expect(useF307ExperienceWorkbenchStore.getState().mainAreaAttentionPresentation).toEqual({
+    ...presentation,
+    mode: 'full-window',
+  });
+  useF307ExperienceWorkbenchStore.getState().returnFromMainAreaFullWindow();
+  expect(useF307ExperienceWorkbenchStore.getState()).toMatchObject({
+    mainAreaAttentionSurfaceId: PROGRAM_SURFACE.id,
+    mainAreaAttentionPresentation: presentation,
+  });
+});

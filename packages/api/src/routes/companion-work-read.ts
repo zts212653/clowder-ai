@@ -4,6 +4,7 @@ import type { IMessageStore } from '../domains/cats/services/stores/ports/Messag
 import type { RuntimeInteractionPendingReadSource } from '../domains/runtime-interaction/ports/RuntimeInteractionStore.js';
 import { migrateStoredProjectPath } from '../utils/persistent-project-path.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
+import type { CollectiveAccountabilitySource } from './companion-collective-accountability-source.js';
 import { companionDecisionWireResponse, readCompanionDecisionProjection } from './companion-decision-read-service.js';
 
 const pageSchema = z
@@ -81,6 +82,7 @@ export function registerCompanionWorkReadRoutes(
   projectPath: string,
   runtimeInteractionStore?: RuntimeInteractionPendingReadSource,
   messageStore?: Pick<IMessageStore, 'getById'>,
+  collectiveAccountability?: CollectiveAccountabilitySource,
 ): void {
   app.get('/api/callbacks/companion/running-work', async (request, reply) => {
     const record = requireCallbackAuth(request, reply);
@@ -121,6 +123,7 @@ export function registerCompanionWorkReadRoutes(
       runtimeInteractionStore,
       undefined,
       messageStore,
+      collectiveAccountability,
     );
     const response = companionDecisionWireResponse(result, view);
     return reply.code(response.statusCode).send(response.body);

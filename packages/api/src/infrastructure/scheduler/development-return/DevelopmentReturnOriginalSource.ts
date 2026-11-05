@@ -11,7 +11,9 @@ import {
 import type { DevelopmentReturnStorage } from '../DynamicTaskStore.js';
 import type { DevelopmentReturnDeps } from './DevelopmentReturnService.js';
 
-type Deps = Pick<DevelopmentReturnDeps, 'tasks' | 'messages' | 'readReviewProvenance'>;
+import { resolveTerminalDevelopmentReturnTrigger } from './DevelopmentReturnSystemTrigger.js';
+
+type Deps = Pick<DevelopmentReturnDeps, 'tasks' | 'messages' | 'definitions' | 'readReviewProvenance'>;
 
 type ApprovedCatTriggerRelation =
   | { kind: 'owner' }
@@ -41,7 +43,7 @@ function currentOriginal(message: StoredMessage, actor: DevelopmentWorkActor): b
   );
 }
 
-function exactApprovedProposalSource(
+function exactApprovedProposalEnvelope(
   message: StoredMessage,
   actor: DevelopmentWorkActor,
   task: TaskItem,
@@ -54,7 +56,6 @@ function exactApprovedProposalSource(
       message.threadId === proposal.sourceThreadId &&
       !message.deletedAt &&
       !message._tombstone &&
-      !message.source &&
       message.timestamp <= (proposal.approvedAt ?? 0) &&
       isApprovedDevelopmentProposalForTask(proposal, {
         id: task.id,
@@ -184,6 +185,41 @@ async function resolveApprovedCatTrigger(
   };
 }
 
+async function resolveApprovedSystemTrigger(
+  deps: Deps,
+  actor: DevelopmentWorkActor,
+  task: TaskItem,
+  proposal: ThreadProposal,
+  trigger: StoredMessage,
+  preferredSourceActionRef?: string,
+): Promise<ResolvedDevelopmentReturnSource | null> {
+  const human = await resolveHumanTaskSource(deps, actor, task, preferredSourceActionRef);
+  if (!human) return null;
+  const systemRelation = await resolveTerminalDevelopmentReturnTrigger(deps, actor, task, trigger);
+  if (!systemRelation) return null;
+  return {
+    sourceActionRef: `message:${human.id}`,
+    returnStorage: 'parent_bound',
+    sourceMessageRevision: relationRevision('approved-terminal-development-return-trigger-v1', {
+      humanSourceRef: `message:${human.id}`,
+      humanSourceRevision: deriveGrowingSourceMessageRevision(human),
+      proposalTriggerRef: `message:${trigger.id}`,
+      proposalTriggerRevision: deriveGrowingSourceMessageRevision(trigger),
+      proposalId: proposal.proposalId,
+      approvedBy: proposal.approvedBy,
+      approvedAt: proposal.approvedAt,
+      sourceThreadId: proposal.sourceThreadId,
+      parentThreadId: proposal.parentThreadId,
+      subjectTaskId: proposal.subjectTaskId,
+      createdThreadId: proposal.createdThreadId,
+      approvedDevelopmentScope: proposal.approvedDevelopmentScope,
+      taskId: task.id,
+      predecessorTaskRef: task.entrustedWork?.predecessorTaskRef,
+      systemRelation,
+    }),
+  };
+}
+
 async function resolveRecordedReviewSource(
   deps: Deps,
   actor: DevelopmentWorkActor,
@@ -261,7 +297,10 @@ export async function resolveDevelopmentReturnSource(
   preferredSourceActionRef?: string,
 ): Promise<ResolvedDevelopmentReturnSource | null> {
   if (!trigger) return null;
-  const approvedProposalSource = exactApprovedProposalSource(trigger, actor, task, proposal);
+  const approvedProposalSource = exactApprovedProposalEnvelope(trigger, actor, task, proposal);
+  if (approvedProposalSource && trigger.source) {
+    return resolveApprovedSystemTrigger(deps, actor, task, proposal, trigger, preferredSourceActionRef);
+  }
   const catTriggerRelation = approvedProposalSource ? approvedCatTriggerRelation(trigger, actor) : null;
   if (catTriggerRelation)
     return resolveApprovedCatTrigger(

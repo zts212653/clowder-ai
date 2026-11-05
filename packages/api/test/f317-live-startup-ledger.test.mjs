@@ -181,7 +181,7 @@ for (const [phase, disposition] of [
             ? 'PROVIDER_EXECUTION_FAILED'
             : undefined,
       );
-      assert.equal(freshnessReinvokes, disposition === 'accepted' ? 1 : 0);
+      assert.equal(freshnessReinvokes, 0, 'canonical Queue progression does not reinvoke the retired freshness runner');
       if (disposition === 'closed')
         assert.equal(
           messages.filter((message) => message.type === 'error').length,

@@ -29,6 +29,7 @@ describe('GET /api/artifacts — server-side query params (F232 Phase B)', () =>
     sessionChainStore,
     transcriptWriter,
     artifactWorkLineage,
+    prTitleReader,
   } = {}) {
     const threadStore = {
       get: async (id) => threads.find((t) => t.id === id) ?? null,
@@ -48,6 +49,7 @@ describe('GET /api/artifacts — server-side query params (F232 Phase B)', () =>
       ...(sessionChainStore ? { sessionChainStore } : {}),
       ...(transcriptWriter ? { transcriptWriter } : {}),
       ...(artifactWorkLineage ? { artifactWorkLineage: { current: artifactWorkLineage } } : {}),
+      ...(prTitleReader ? { prTitleReader } : {}),
     });
     return a;
   }
@@ -55,6 +57,36 @@ describe('GET /api/artifacts — server-side query params (F232 Phase B)', () =>
   // --- Test fixtures ---
   const T1 = { id: 'T1', title: 'F232 产物', createdBy: 'alice' };
   const T2 = { id: 'T2', title: 'F229 审计', createdBy: 'alice' };
+
+  it('decorates only owner-visible PRs in the global works catalogue', async () => {
+    const refs = [];
+    const task = {
+      kind: 'pr_tracking',
+      title: 'PR tracking: org/repo#12',
+      ownerCatId: 'codex61-sol',
+      updatedAt: 200,
+      status: 'doing',
+    };
+    app = await makeApp({
+      threads: [{ ...T1, createdBy: 'system' }],
+      threadTasks: {
+        T1: [
+          { ...task, subjectKey: 'pr:org/repo#12', userId: 'alice' },
+          { ...task, subjectKey: 'pr:org/repo#13', userId: 'bob' },
+        ],
+      },
+      prTitleReader: async (ref) => {
+        refs.push(ref);
+        return 'The original PR title';
+      },
+    });
+    const result = await app.inject({ method: 'GET', url: '/api/artifacts?view=works', headers: AUTH });
+    assert.equal(result.statusCode, 200);
+    assert.deepEqual(refs, ['org/repo#12']);
+    assert.equal(result.json().artifacts[0].name, 'The original PR title');
+    assert.equal(result.json().artifacts[0].threadId, 'T1');
+    assert.equal(result.json().total, 1);
+  });
 
   it('the named global works view shares the thread delivery boundary and preserves original default catalogue', async () => {
     const tasks = [

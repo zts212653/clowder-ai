@@ -21,6 +21,18 @@ const event = (id: string, over: Partial<RecallEvent> = {}): RecallEvent => ({
 });
 
 describe('F322 S4 reply recall projection', () => {
+  it('does not put an unavailable recall badge on a cross-thread input', () => {
+    const crossPost: ChatMessage = {
+      ...reply,
+      lifecycle: { kind: 'input', orderKey: '1:reply', producerInvocationId: 'turn' },
+      extra: {
+        crossPost: { sourceThreadId: 'other-thread', sourceInvocationId: 'turn' },
+        stream: { turnInvocationId: 'turn' },
+      },
+    };
+    const projections = buildReplyRecallProjections({ messages: [crossPost], events: [], status: 'unavailable' });
+    expect(projections.has('reply')).toBe(false);
+  });
   it('binds only the exact cat turn and preserves the same event objects the memory panel groups', () => {
     const events = [event('search'), event('delivery', { source: 'push' })];
     const projection = buildReplyRecallProjections({ messages: [reply], events, status: 'ready' }).get('reply');

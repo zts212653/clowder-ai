@@ -59,6 +59,7 @@ function mcpEffectiveEnabled(item: CapabilityBoardItem, isProject: boolean): boo
 }
 
 function mcpSubInfo(item: CapabilityBoardItem): string | undefined {
+  if (item.accessManagedByPlugin) return '启用或停用此工具，请前往插件集成。';
   const server = item.mcpServer;
   if (!server) return undefined;
   if (server.transport === 'streamableHttp') return server.url ? `http · ${server.url}` : 'http';
@@ -318,8 +319,8 @@ export function McpManageContent() {
                   <ToggleSwitch
                     enabled={effectiveEnabled}
                     busy={busy}
-                    disabled={false}
-                    title={effectiveEnabled ? '禁用' : '启用'}
+                    disabled={item.accessManagedByPlugin}
+                    title={item.accessManagedByPlugin ? '请在插件集成中管理' : effectiveEnabled ? '禁用' : '启用'}
                     onClick={(event) => {
                       event.stopPropagation();
                       cap.handleToggle(item, !effectiveEnabled);
@@ -363,6 +364,7 @@ export function McpManageContent() {
                     item={item}
                     catFamilies={cap.catFamilies}
                     toggling={cap.toggling}
+                    disabled={item.accessManagedByPlugin}
                     onToggle={cap.handleToggle}
                   />
                 ) : undefined

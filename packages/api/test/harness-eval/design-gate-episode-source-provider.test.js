@@ -45,7 +45,7 @@ observedAt: "2026-08-23T16:52:00.000Z"
 channel: alpha
 landedRevision: ${LANDED}
 includedMergeRevision: ${MERGE}
-earlierSelfCheckRef: github:pr:zts212653/cat-cafe#3901@${HEAD}#validation/pnpm-gate
+earlierSelfCheckRef: github:pr:zts212653/clowder-ai#3901@${HEAD}#validation/pnpm-gate
 services:
   - { name: api, endpoint: "http://localhost:3012/health", statusCode: 200 }
   - { name: web, endpoint: "http://localhost:3011/", statusCode: 200 }
@@ -72,9 +72,9 @@ episodes:
     consumerBoundaryRefs:
       - repo:packages/api/src/infrastructure/harness-eval/eval-cat-invocation.ts
       - repo:packages/mcp-server/src/tools/publish-verdict-tool.ts
-    pullRequestRef: github:pr:zts212653/cat-cafe#3901
+    pullRequestRef: github:pr:zts212653/clowder-ai#3901
     exactHeadRef: git:${HEAD}
-    gateReceiptRef: github:pr:zts212653/cat-cafe#3901@${HEAD}#validation/pnpm-gate
+    gateReceiptRef: github:pr:zts212653/clowder-ai#3901@${HEAD}#validation/pnpm-gate
     reviewMessageRef: cat-cafe:thread:thread_mt5xeb8e7qs467i2/message:${REVIEW_MESSAGE_ID}
     reviewVerdictRef: local-review:${REVIEW_MESSAGE_ID}:approved
     landedAlphaReceiptRef: repo:docs/harness-feedback/design-gate/receipts/f303-phase-c-pr3901-alpha.yaml
@@ -85,7 +85,7 @@ episodes:
 
 function pullRequest(overrides = {}) {
   return {
-    repoFullName: 'zts212653/cat-cafe',
+    repoFullName: 'zts212653/clowder-ai',
     number: 3901,
     state: 'MERGED',
     headSha: HEAD,
@@ -285,7 +285,7 @@ test('missing explicit Alpha consequence invalidates the episode instead of infe
   write(
     root,
     'docs/harness-feedback/design-gate/receipts/f303-phase-c-pr3901-alpha.yaml',
-    `kind: f303-landed-alpha-receipt\nschemaVersion: 1\nreceiptId: f303-phase-c-pr3901-alpha\nobservedAt: "2026-08-23T16:52:00.000Z"\nchannel: alpha\nlandedRevision: ${LANDED}\nincludedMergeRevision: ${MERGE}\nearlierSelfCheckRef: github:pr:zts212653/cat-cafe#3901@${HEAD}#validation/pnpm-gate\nservices:\n  - { name: api, endpoint: "http://localhost:3012/health", statusCode: 200 }\nredisPort: 6398\n`,
+    `kind: f303-landed-alpha-receipt\nschemaVersion: 1\nreceiptId: f303-phase-c-pr3901-alpha\nobservedAt: "2026-08-23T16:52:00.000Z"\nchannel: alpha\nlandedRevision: ${LANDED}\nincludedMergeRevision: ${MERGE}\nearlierSelfCheckRef: github:pr:zts212653/clowder-ai#3901@${HEAD}#validation/pnpm-gate\nservices:\n  - { name: api, endpoint: "http://localhost:3012/health", statusCode: 200 }\nredisPort: 6398\n`,
   );
 
   const bundle = await provider(root).resolve({
@@ -335,8 +335,8 @@ test('a gate receipt bound to a different HEAD invalidates the episode', async (
     root,
     sourceMapPath,
     readFileSync(join(root, sourceMapPath), 'utf8').replace(
-      `gateReceiptRef: github:pr:zts212653/cat-cafe#3901@${HEAD}#validation/pnpm-gate`,
-      'gateReceiptRef: github:pr:zts212653/cat-cafe#3901@0000000000000000000000000000000000000000#validation/pnpm-gate',
+      `gateReceiptRef: github:pr:zts212653/clowder-ai#3901@${HEAD}#validation/pnpm-gate`,
+      'gateReceiptRef: github:pr:zts212653/clowder-ai#3901@0000000000000000000000000000000000000000#validation/pnpm-gate',
     ),
   );
 

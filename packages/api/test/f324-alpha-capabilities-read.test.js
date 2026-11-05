@@ -8,7 +8,7 @@ import Fastify from 'fastify';
 
 const AUTH = { 'x-cat-cafe-user': 'test-user' };
 
-async function fixture(deployment, run) {
+async function fixture(deployment, run, withRuntimeRoot = true) {
   assert.equal(process.env.CAT_CAFE_TEST_SANDBOX, '1', 'run through scripts/with-test-home.sh');
   const dir = await realpath(await mkdtemp(join(tmpdir(), 'f324-alpha-read-')));
   const main = join(dir, 'main');
@@ -51,15 +51,18 @@ async function fixture(deployment, run) {
       await writeFile(join(root, '.cat-cafe', 'capabilities.json'), config);
       await writeFile(join(root, '.gemini', 'settings.json'), sentinel);
     }
+    await writeFile(join(runtime, '.git'), 'gitdir: ../main/.git/worktrees/preview\n');
     await mkdir(join(homedir(), '.gemini', 'antigravity'), { recursive: true });
     await writeFile(agy, sentinel);
     Object.assign(process.env, {
-      CAT_CAFE_DEPLOYMENT_ID: deployment,
       CAT_CAFE_RUNTIME_ROOT: runtime,
       CAT_CAFE_WORKSPACE_ROOT: main,
       PROJECT_ALLOWED_ROOTS: dir,
       DEFAULT_OWNER_USER_ID: 'you',
     });
+    if (deployment === undefined) delete process.env.CAT_CAFE_DEPLOYMENT_ID;
+    else process.env.CAT_CAFE_DEPLOYMENT_ID = deployment;
+    if (!withRuntimeRoot) delete process.env.CAT_CAFE_RUNTIME_ROOT;
     process.chdir(runtime);
     const { capabilitiesRoutes } = await import(`../dist/routes/capabilities.js?f324=${dir}`);
     app = Fastify();
@@ -104,6 +107,36 @@ test('F324 Alpha authenticated capabilities GET reads the mapped workspace witho
     assert.ok(res.json().items.some((item) => item.id === 'cat-cafe-memory'));
     await unchanged(files, before);
   });
+});
+
+test('an unlabelled worktree capabilities GET cannot heal or prune the shared registry', async () => {
+  await fixture(undefined, async ({ app, main, paths }) => {
+    const files = paths(main);
+    const before = await bytes(files);
+    const res = await app.inject({ method: 'GET', url: '/api/capabilities', headers: AUTH });
+    assert.equal(res.statusCode, 200);
+    assert.ok(res.json().items.some((item) => item.id === 'cat-cafe-memory'));
+    await unchanged(files, before);
+  });
+});
+
+test('a runtime-labelled linked worktree without its root cannot modify a project on capabilities GET', async () => {
+  await fixture(
+    'runtime',
+    async ({ app, main, paths }) => {
+      const files = paths(main);
+      const before = await bytes(files);
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/capabilities?projectPath=${encodeURIComponent(main)}`,
+        headers: AUTH,
+      });
+      assert.equal(res.statusCode, 200);
+      assert.ok(res.json().items.some((item) => item.id === 'cat-cafe-memory'));
+      await unchanged(files, before);
+    },
+    false,
+  );
 });
 
 test('F324 Alpha external-project GET preserves project, main and HOME configurations', async () => {

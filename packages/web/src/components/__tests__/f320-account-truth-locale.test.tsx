@@ -110,7 +110,8 @@ it('English covers the directory, native product name, expanded details and add 
   expect(host.textContent).toContain('In use');
   expect(host.textContent).toContain('私人备注');
   await click('私人备注');
-  expect(host.textContent).toContain('Account quota');
+  expect(host.querySelector('thead')?.textContent).toContain('Quota');
+  expect(host.querySelector('.account-expanded')?.textContent).not.toContain('Check quota');
   expect(host.textContent).toContain('Login details');
   await click('+ Add account');
   await click('Codex · Sign in to another account');
@@ -138,7 +139,7 @@ it('English switch confirmation and known login errors remain actionable without
         : list(),
   );
   await render();
-  await click('Use this account');
+  await click('Use account');
   expect(host.querySelector('section[aria-label="Confirm account switch"]')).not.toBeNull();
   expect(host.textContent).toContain('Sign in using the official tool');
   expect(vi.mocked(apiFetch).mock.calls.some(([p]) => String(p).endsWith('/binding/commit'))).toBe(false);
@@ -176,7 +177,7 @@ it('English switch preview uses one member for both the target and exception', a
         : list(),
   );
   await render();
-  await click('Use this account');
+  await click('Use account');
   expect(host.textContent).toContain('1 member will switch:');
   expect(host.textContent).toContain('1 member on other accounts: Astra（用户备注）');
   expect(host.textContent).not.toContain('1 members');
@@ -236,6 +237,16 @@ it('binding commit displays a changed-preview error without changing selection',
   expect(host.querySelector('[data-account-id="codex"] .account-used')).not.toBeNull();
 });
 it.each([
+  [
+    '当前平台尚未支持新增 Codex 账号，请继续使用本机默认账号',
+    '当前平台尚未支持新增 Codex 账号，请继续使用本机默认账号',
+    'Adding Codex accounts is not supported on this platform yet. Continue using the local default account.',
+  ],
+  [
+    '无法读取 Codex 组织托管策略，请核对权限后重试',
+    '无法读取 Codex 组织托管策略，请核对权限后重试',
+    'Could not read the Codex managed policy. Check permissions and retry.',
+  ],
   [
     'codex_managed_layout_changed',
     '托管账号目录已改变，请核对账号配置',

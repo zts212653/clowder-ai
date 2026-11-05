@@ -54,6 +54,7 @@ test('registered F295 and F317 share the persistent identity of a disposable run
         catId: 'codex61-sol',
         startedAt: 10,
         executionId: 'private-execution',
+        invocationId: 'private-child',
         ownerUserId: 'owner',
         controlSource: 'tracker',
       },

@@ -99,7 +99,7 @@ describe('C 3480 meeting-transcript origin — source label', () => {
     }
   });
 
-  it('keeps the generic label for every other origin', async () => {
+  it('names a file-tree return without presenting it as a meeting source', async () => {
     await act(async () => {
       root.render(
         <ContentLandingHeader
@@ -109,7 +109,7 @@ describe('C 3480 meeting-transcript origin — source label', () => {
         />,
       );
     });
-    expect(container.textContent).toContain('返回来源');
+    expect(container.textContent).toContain('‹ 文件');
     expect(container.textContent).not.toContain('‹ 会议伴随');
   });
 });

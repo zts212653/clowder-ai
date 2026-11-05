@@ -3,8 +3,10 @@ import {
   PAW_FEEL_NO_ACTION_REASONS,
   type PawFeelDirectRepairBindingV1,
   type PawFeelDirectRepairOutcomeV1,
+  type PawFeelRepairBinding,
   type PawFeelResumeConditionV1,
   type PawFeelSignatureAction,
+  pawFeelRepairRequestSchema,
 } from '@cat-cafe/shared';
 import { z } from 'zod';
 
@@ -33,84 +35,103 @@ export const PawFeelResumeSelectorCommandSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('bounded_time'), recheckAt: z.string().datetime({ offset: true }) }).strict(),
 ]);
 
-export const PawFeelDispositionCommandSchema = z.discriminatedUnion('type', [
-  commandBase.extend({ type: z.literal('mark_seen') }).strict(),
-  commandBase
-    .extend({
-      type: z.literal('route_pending'),
-      targetThreadId: nonEmptyString.optional(),
-      ownerEvidenceRef: nonEmptyString.optional(),
-      proposalId: nonEmptyString.optional(),
-    })
-    .strict(),
-  commandBase
-    .extend({
-      type: z.literal('confirm_routed'),
-      targetThreadId: nonEmptyString.optional(),
-      proposalId: nonEmptyString.optional(),
-      receiptRef: nonEmptyString,
-    })
-    .strict(),
-  commandBase
-    .extend({
-      type: z.literal('route_reopened'),
-      rejectionRef: nonEmptyString,
-      reasonCode: nonEmptyString,
-    })
-    .strict(),
-  commandBase
-    .extend({
-      type: z.literal('close'),
-      reasonCode: nonEmptyString,
-      outcomeRef: nonEmptyString,
-    })
-    .strict(),
-  commandBase
-    .extend({
-      type: z.literal('mark_duplicate'),
-      duplicateOf: nonEmptyString,
-    })
-    .strict(),
-  commandBase
-    .extend({
-      type: z.literal('mark_no_action'),
-      reasonCode: z.enum(PAW_FEEL_NO_ACTION_REASONS),
-    })
-    .strict(),
-  commandBase
-    .extend({
-      type: z.literal('mark_fix'),
-      leaseId: nonEmptyString,
-      actionRef: nonEmptyString,
-    })
-    .strict(),
-  commandBase
-    .extend({
-      type: z.literal('link_repair_outcome'),
-      bindingRef: ownerTruthRefV1Schema,
-      ownerOutcomeRef: ownerTruthRefV1Schema,
-    })
-    .strict(),
-  commandBase
-    .extend({
-      type: z.literal('request_signature'),
-      action: z.discriminatedUnion('type', [
-        z.object({ type: z.literal('duplicate'), duplicateOf: nonEmptyString }).strict(),
-        z.object({ type: z.literal('no_action'), reasonCode: z.enum(PAW_FEEL_NO_ACTION_REASONS) }).strict(),
-        z.object({ type: z.literal('fix'), leaseId: nonEmptyString, actionRef: nonEmptyString }).strict(),
-      ]),
-      preferredSignerCatId: nonEmptyString.optional(),
-    })
-    .strict(),
-  commandBase
-    .extend({
-      type: z.literal('mark_blocked'),
-      blockerCode: nonEmptyString,
-      blockerRef: nonEmptyString,
-      resume: PawFeelResumeSelectorCommandSchema,
-    })
-    .strict(),
-]);
+export const PawFeelDispositionCommandSchema = z
+  .discriminatedUnion('type', [
+    commandBase.extend({ type: z.literal('mark_seen') }).strict(),
+    commandBase
+      .extend({
+        type: z.literal('route_pending'),
+        targetThreadId: nonEmptyString.optional(),
+        ownerEvidenceRef: nonEmptyString.optional(),
+        proposalId: nonEmptyString.optional(),
+      })
+      .strict(),
+    commandBase
+      .extend({
+        type: z.literal('confirm_routed'),
+        targetThreadId: nonEmptyString.optional(),
+        proposalId: nonEmptyString.optional(),
+        receiptRef: nonEmptyString,
+      })
+      .strict(),
+    commandBase
+      .extend({
+        type: z.literal('route_reopened'),
+        rejectionRef: nonEmptyString,
+        reasonCode: nonEmptyString,
+      })
+      .strict(),
+    commandBase
+      .extend({
+        type: z.literal('close'),
+        reasonCode: nonEmptyString,
+        outcomeRef: nonEmptyString,
+      })
+      .strict(),
+    commandBase
+      .extend({
+        type: z.literal('mark_duplicate'),
+        duplicateOf: nonEmptyString,
+      })
+      .strict(),
+    commandBase
+      .extend({
+        type: z.literal('mark_no_action'),
+        reasonCode: z.enum(PAW_FEEL_NO_ACTION_REASONS),
+      })
+      .strict(),
+    commandBase
+      .extend({
+        type: z.literal('mark_fix'),
+        repairBinding: pawFeelRepairRequestSchema.optional(),
+        leaseId: nonEmptyString.optional(),
+        actionRef: nonEmptyString,
+      })
+      .strict(),
+    commandBase
+      .extend({
+        type: z.literal('link_repair_outcome'),
+        bindingRef: ownerTruthRefV1Schema,
+        ownerOutcomeRef: ownerTruthRefV1Schema,
+      })
+      .strict(),
+    commandBase
+      .extend({
+        type: z.literal('request_signature'),
+        action: z.discriminatedUnion('type', [
+          z.object({ type: z.literal('duplicate'), duplicateOf: nonEmptyString }).strict(),
+          z.object({ type: z.literal('no_action'), reasonCode: z.enum(PAW_FEEL_NO_ACTION_REASONS) }).strict(),
+          z
+            .object({
+              type: z.literal('fix'),
+              repairBinding: pawFeelRepairRequestSchema.optional(),
+              leaseId: nonEmptyString.optional(),
+              actionRef: nonEmptyString,
+            })
+            .strict(),
+        ]),
+        preferredSignerCatId: nonEmptyString.optional(),
+      })
+      .strict(),
+    commandBase
+      .extend({
+        type: z.literal('mark_blocked'),
+        blockerCode: nonEmptyString,
+        blockerRef: nonEmptyString,
+        resume: PawFeelResumeSelectorCommandSchema,
+      })
+      .strict(),
+  ])
+  .superRefine((command, context) => {
+    const fix =
+      command.type === 'mark_fix'
+        ? command
+        : command.type === 'request_signature' && command.action.type === 'fix'
+          ? command.action
+          : undefined;
+    if (fix && Number(fix.repairBinding !== undefined) + Number(fix.leaseId !== undefined) !== 1)
+      context.addIssue({ code: z.ZodIssueCode.custom, message: 'fix requires exactly one repair binding reference' });
+  });
 
 export type PawFeelDispositionCommand = z.infer<typeof PawFeelDispositionCommandSchema>;
 
@@ -129,7 +150,14 @@ export const PawFeelCatPrincipalSchema = PawFeelPrincipalSchema.refine(
 export const PawFeelTerminalActionSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('duplicate'), duplicateOf: nonEmptyString }).strict(),
   z.object({ type: z.literal('no_action'), reasonCode: z.enum(PAW_FEEL_NO_ACTION_REASONS) }).strict(),
-  z.object({ type: z.literal('fix'), leaseId: nonEmptyString, actionRef: nonEmptyString }).strict(),
+  z
+    .object({
+      type: z.literal('fix'),
+      repairBinding: pawFeelRepairRequestSchema.optional(),
+      leaseId: nonEmptyString.optional(),
+      actionRef: nonEmptyString,
+    })
+    .strict(),
 ]);
 
 export const PawFeelBundleActionSchema = z.discriminatedUnion('type', [
@@ -185,8 +213,9 @@ export type PawFeelBundleCommand = z.infer<typeof PawFeelBundleCommandSchema>;
 export interface PawFeelResolvedFix {
   ownerCatId: string;
   taskId: string;
-  leaseId: string;
-  leaseGeneration: number;
+  repairBinding?: PawFeelRepairBinding;
+  leaseId?: string;
+  leaseGeneration?: number;
   custodyEvidenceRef: string;
 }
 

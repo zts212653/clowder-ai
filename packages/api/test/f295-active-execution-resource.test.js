@@ -86,6 +86,74 @@ describe('F295 user/project active execution resource', () => {
     await app?.close();
   });
 
+  it('uses the same user-wide resource across project anchors and hydrates only admitted live candidates', async () => {
+    const candidateRead = mock.fn(async (userId, ids) =>
+      userId === USER_ID && ids.includes('thread-c')
+        ? [{ id: 'thread-c', title: 'C', projectPath: '/project/other', createdBy: USER_ID }]
+        : [],
+    );
+    deps.threadStore.listCandidates = candidateRead;
+    deps.buildLiveCandidateSnapshot = async () => ({ threadIds: ['thread-c', 'foreign'], complete: true });
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/executions/active?scope=all',
+      headers: { 'x-cat-cafe-user': USER_ID },
+    });
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(candidateRead.mock.calls[0].arguments, [USER_ID, ['thread-c', 'foreign']]);
+    assert.deepEqual(
+      response.json().executions.map((row) => [row.threadId, row.projectPath]),
+      [['thread-c', '/project/other']],
+    );
+    assert.equal(deps.threadStore.listByProject.mock.callCount(), 0);
+    assert.deepEqual(
+      deps.resolveLiveExecutions.mock.calls.map((call) => call.arguments[0]),
+      ['thread-c'],
+    );
+  });
+
+  it('falls back to complete visible enumeration when a global candidate snapshot is incomplete', async () => {
+    deps.threadStore.list = mock.fn(async () => [
+      { id: 'thread-c', title: 'C', projectPath: '/project/other', createdBy: USER_ID },
+    ]);
+    deps.threadStore.listCandidates = mock.fn(async () => []);
+    deps.buildLiveCandidateSnapshot = async () => ({ threadIds: [], complete: false });
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/executions/active?scope=all',
+      headers: { 'x-cat-cafe-user': USER_ID },
+    });
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(
+      response.json().executions.map((row) => row.threadId),
+      ['thread-c'],
+    );
+    assert.equal(deps.threadStore.listCandidates.mock.callCount(), 0);
+  });
+
+  it('keeps other projects fresh when one project live read fails and does not reuse its previous rows', async () => {
+    deps.threadStore.list = async () => [
+      { id: 'thread-a', title: 'A', projectPath: '/project/cafe', createdBy: USER_ID },
+      { id: 'thread-c', title: 'C', projectPath: '/project/other', createdBy: USER_ID },
+    ];
+    const resolve = deps.resolveLiveExecutions;
+    deps.resolveLiveExecutions = async (...args) => {
+      if (args[0] === 'thread-c') throw new Error('provider secret must not escape');
+      return resolve(...args);
+    };
+    const response = await app.inject({
+      url: '/api/executions/active?scope=all',
+      headers: { 'x-cat-cafe-user': USER_ID },
+    });
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(
+      response.json().executions.map((row) => row.threadId),
+      ['thread-a'],
+    );
+    assert.deepEqual(response.json().unavailableProjectPaths, ['/project/other']);
+    assert.equal(response.body.includes('provider secret'), false);
+  });
+
   it('keeps pre-admission tracker reservations out of running replies without dropping exact cancellation', async () => {
     deps.resolveLiveExecutions.mock.mockImplementation(async (threadId) =>
       threadId === 'thread-a'
@@ -367,6 +435,10 @@ describe('F295 user/project active execution resource', () => {
     const listByProject = deps.threadStore.listByProject;
     let activeBuilders = 0;
     let maxBuildersAcrossKeys = 0;
+    let signalOtherEntered;
+    const otherEntered = new Promise((resolve) => {
+      signalOtherEntered = resolve;
+    });
     let releaseCafe;
     let signalCafeEntered;
     const cafeGate = new Promise((resolve) => {
@@ -381,6 +453,8 @@ describe('F295 user/project active execution resource', () => {
       if (projectPath === '/project/cafe') {
         signalCafeEntered();
         await cafeGate;
+      } else {
+        signalOtherEntered();
       }
       activeBuilders -= 1;
       return listByProject(userId, projectPath);
@@ -389,7 +463,7 @@ describe('F295 user/project active execution resource', () => {
     const cafe = inject(app, '/project/cafe');
     await cafeEntered;
     const other = inject(app, '/project/other');
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await otherEntered;
     releaseCafe();
     const [cafeResponse, otherResponse] = await Promise.all([cafe, other]);
 

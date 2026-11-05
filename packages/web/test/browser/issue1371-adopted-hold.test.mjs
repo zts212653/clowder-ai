@@ -6,8 +6,8 @@ import { createServer } from 'node:net';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { chromium } from 'playwright';
 import { build } from 'vite';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
 import { createNextDevTestEnvironment } from './next-dev-test-environment.mjs';
 
 const webRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -59,7 +59,7 @@ after(async () => {
 });
 
 test(
-  '#1371 failed wake is visible on desktop/mobile and never retries from rendering',
+  '#1371 failed notification remains visible while pending targets can be withdrawn without retrying the failure',
   { timeout: 60000 },
   async () => {
     const page = await browser.newPage({ viewport: { width: 1100, height: 800 } });
@@ -89,7 +89,8 @@ test(
       assert.match(text, /检查已通过，通知尚未结算/);
       assert.doesNotMatch(text, /routine internal control/);
       assert.equal(await page.locator('[data-queue-target-row="codex-astra"]').count(), 1);
-      assert.match(text, /队列已暂停\s*1/);
+      assert.equal(await page.locator('[data-message-id="preview-failed-response"]').count(), 1);
+      assert.match(text, /等待下一次明确通知/);
       for (const [width, theme] of [
         [1100, 'light'],
         [360, 'light'],
@@ -112,6 +113,8 @@ test(
       await page.getByRole('button', { name: '停止后续处理', exact: true }).click();
       await page.waitForFunction(() => !document.querySelector('[data-queue-target-row="codex-astra"]'));
       assert.deepEqual(writes, ['DELETE /api/threads/issue1371-preview/queue/adopted-hold-preview']);
+      assert.equal(await page.locator('[data-message-id="preview-failed-response"]').count(), 1);
+      assert.match(await page.locator('main').innerText(), /检查已通过，通知尚未结算/);
       assert.deepEqual(errors, []);
     } finally {
       await page.close();
@@ -119,7 +122,7 @@ test(
   },
 );
 
-test('a missed completion recovers three stale receipts without a reconnect, click or mutation', async () => {
+test('a missed completion reconciles three pending targets from the canonical owner without a reconnect, click or mutation', async () => {
   const origin = 'https://queue-reconcile.test';
   const threadId = 'issue1371-queue-reconcile';
   const queue = [1, 2, 3].map((index) => ({
@@ -129,20 +132,13 @@ test('a missed completion recovers three stale receipts without a reconnect, cli
     messageId: `message-${index}`,
     mergedMessageIds: [],
     content: `已处理的讨论消息 ${index}`,
-    source: 'agent',
+    from: { kind: 'agent', catId: 'codex-astra' },
     sourceCategory: 'a2a',
     targetCats: ['codex-astra'],
-    targetStates: { 'codex-astra': 'seen' },
     intent: 'execute',
     autoExecute: true,
     status: 'queued',
     createdAt: 1200,
-    queueReceipt: {
-      version: 1,
-      entryId: `stale-${index}`,
-      reminderAttempts: [],
-      targets: [{ catId: 'codex-astra', state: 'seen', invocationId: 'ended-child', seenAt: 1300 }],
-    },
   }));
   const result = await build({
     root: webRoot,
@@ -208,7 +204,7 @@ test('a missed completion recovers three stale receipts without a reconnect, cli
     await page.goto(origin, { waitUntil: 'domcontentloaded' });
     await page.locator('main[data-ready="true"]').waitFor();
     assert.equal(await page.locator('[data-queue-target-row="codex-astra"]').count(), 3);
-    assert.match(await page.locator('main').innerText(), /已读，但关联回合已结束/);
+    assert.equal(await page.locator('[data-testid="queue-recover"]').count(), 0);
     assert.match(await page.locator('main').innerText(), /已处理的讨论消息 1/);
     if (process.env.ISSUE1371_EVIDENCE_DIR) {
       await mkdir(process.env.ISSUE1371_EVIDENCE_DIR, { recursive: true });

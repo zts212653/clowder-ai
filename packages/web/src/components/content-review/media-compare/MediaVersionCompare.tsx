@@ -112,7 +112,7 @@ function CompareSession({ original, candidate, onUnavailable, decision, fallback
                     maxWidth: version.asset.media.width,
                   }}
                 >
-                  {version.asset.mediaType === 'image/png' ? (
+                  {version.asset.media.kind === 'image' ? (
                     <Image
                       unoptimized
                       src={source.sources[index]}

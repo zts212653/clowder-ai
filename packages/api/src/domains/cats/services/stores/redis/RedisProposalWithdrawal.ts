@@ -24,9 +24,10 @@ export async function withdrawPendingProposal(
   };
   const result = (await redis.eval(
     CAS_TRANSITION_LUA,
-    2,
+    3,
     ProposalKeys.detail(updated.proposalId),
     ProposalKeys.userPending(updated.createdBy),
+    ProposalKeys.userSettled(updated.createdBy),
     updated.proposalId,
     'pending',
     'zrem',

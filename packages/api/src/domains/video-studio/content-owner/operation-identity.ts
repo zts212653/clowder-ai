@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import type { CollectiveContentScopeV1 } from './collective-scope.js';
 import type {
   ContentActorV1,
   ContentOperationContextV1,
@@ -19,6 +20,7 @@ export function operationFingerprint(input: {
   readonly projectMediaScope?: VideoProjectMediaScopeV1;
   readonly operationContext: ContentOperationContextV1 | undefined;
   readonly sourcePublication: ContentSourcePublicationV1 | undefined;
+  readonly collectiveScope?: CollectiveContentScopeV1;
 }): `sha256:${string}` {
   return `sha256:${createHash('sha256')
     .update(
@@ -34,6 +36,7 @@ export function operationFingerprint(input: {
         projectMediaScope: input.projectMediaScope,
         operationContext: input.operationContext,
         sourcePublication: input.sourcePublication,
+        ...(input.collectiveScope ? { collectiveScope: input.collectiveScope } : {}),
       }),
     )
     .digest('hex')}`;

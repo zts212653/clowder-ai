@@ -6,15 +6,14 @@
  *
  * T8: wakeWhen runner cancelled on hold_ball cancel → no stale wake
  * T9: wakeWhen re-hold retires only the old carrier; authorized job keeps running
- * T10: messageStore.append failure → fallback task NOT removed
  * T11: cancelWakeWhenRunner export + activeRunners registry
- * T12: execution-plane queue full → fallback task NOT removed
- * T13: execution-plane trigger failure → fallback task NOT removed
+ * T12: atomic wake admission refused → fallback task NOT removed
+ * T13: atomic wake admission throws → fallback task NOT removed
  * T14: positive execution-plane ack + durable carrier → fallback task retired
  */
 
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { beforeEach, describe, test } from 'node:test';
@@ -77,6 +76,7 @@ describe('F167 Phase P: wakeWhen cancel/replace/delivery tests', () => {
     const removedIds = [];
     const appendedMessages = [];
     const ownerAuthProvenanceByTaskId = new Map();
+    const privateAuthorizationByTaskId = new Map();
     const defaultTemplate = {
       createSpec(taskId, taskParams) {
         return { taskId, taskParams };
@@ -111,10 +111,12 @@ describe('F167 Phase P: wakeWhen cancel/replace/delivery tests', () => {
         },
       },
       dynamicTaskStore: {
-        insert(record, ownerAuthProvenance) {
+        insert(record, authorization) {
           insertedTasks.push(record);
-          if (ownerAuthProvenance !== undefined) {
-            ownerAuthProvenanceByTaskId.set(record.id, ownerAuthProvenance);
+          if (authorization !== undefined) {
+            const snapshot = typeof authorization === 'string' ? { ownerAuthProvenance: authorization } : authorization;
+            privateAuthorizationByTaskId.set(record.id, snapshot);
+            ownerAuthProvenanceByTaskId.set(record.id, snapshot.ownerAuthProvenance);
           }
         },
         getAll() {
@@ -126,10 +128,14 @@ describe('F167 Phase P: wakeWhen cancel/replace/delivery tests', () => {
         remove(id) {
           removedIds.push(id);
           ownerAuthProvenanceByTaskId.delete(id);
+          privateAuthorizationByTaskId.delete(id);
           return true;
         },
         getPrivateOwnerAuthProvenance(id) {
           return ownerAuthProvenanceByTaskId.get(id) ?? 'unknown';
+        },
+        getPrivateOwnerAuthorization(id) {
+          return privateAuthorizationByTaskId.get(id) ?? { ownerAuthProvenance: 'unknown' };
         },
         updateParams(id, params) {
           const task = insertedTasks.find((t) => t.id === id && !removedIds.includes(t.id));
@@ -183,6 +189,7 @@ describe('F167 Phase P: wakeWhen cancel/replace/delivery tests', () => {
       _removedIds: removedIds,
       _appendedMessages: appendedMessages,
       _ownerAuthProvenanceByTaskId: ownerAuthProvenanceByTaskId,
+      _privateAuthorizationByTaskId: privateAuthorizationByTaskId,
     };
     return { ...deps, ...overrides };
   }
@@ -225,6 +232,18 @@ describe('F167 Phase P: wakeWhen cancel/replace/delivery tests', () => {
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
     assert.fail('command did not reach its durable terminal');
+  }
+
+  async function waitForWakeHandling(deps, taskId, handled) {
+    await waitForCommandTerminal(deps, taskId);
+    const deadline = Date.now() + 3000;
+    while (Date.now() < deadline) {
+      if (handled()) return;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.fail(
+      `wake handling did not settle: ${deps.dynamicTaskStore.getById(taskId)?.params.holdLifecycle.managedCommand.state}`,
+    );
   }
 
   for (const actorUserId of ['scheduler', 'system']) {
@@ -673,7 +692,7 @@ describe('F167 Phase P: wakeWhen cancel/replace/delivery tests', () => {
     cancelWakeWhenRunner('nonexistent-thread', 'nonexistent-cat');
   });
 
-  test('wakeWhen registration persists the authenticated owner provenance outside public task params', async () => {
+  test('wakeWhen registration persists authenticated provenance and tool restrictions outside public task params', async () => {
     const { ManagedRunner } = await import('../dist/infrastructure/managed-runner.js');
     const originalStart = ManagedRunner.prototype.start;
     ManagedRunner.prototype.start = () => ({
@@ -685,6 +704,7 @@ describe('F167 Phase P: wakeWhen cancel/replace/delivery tests', () => {
       const deps = makeStubDeps();
       const app = await createApp(deps);
       const ownerUserId = 'user-owner-provenance';
+      const policy = { mode: 'callback_allowlist', allowedCallbackRoutes: ['POST /api/callbacks/hold-ball'] };
       const thread = await threadStore.create(ownerUserId, 'owner provenance');
       const { invocationId, callbackToken } = await registry.create(
         ownerUserId,
@@ -692,7 +712,7 @@ describe('F167 Phase P: wakeWhen cancel/replace/delivery tests', () => {
         thread.id,
         undefined,
         undefined,
-        undefined,
+        policy,
         undefined,
         'strict',
       );
@@ -711,17 +731,20 @@ describe('F167 Phase P: wakeWhen cancel/replace/delivery tests', () => {
       assert.equal(response.statusCode, 200, response.body);
       const taskId = JSON.parse(response.body).taskId;
       assert.equal(deps._ownerAuthProvenanceByTaskId.get(taskId), 'strict');
+      assert.deepEqual(deps._privateAuthorizationByTaskId.get(taskId).toolExecutionPolicy, policy);
       assert.equal(Object.hasOwn(deps.dynamicTaskStore.getById(taskId).params, 'ownerAuthProvenance'), false);
+      assert.equal(Object.hasOwn(deps.dynamicTaskStore.getById(taskId).params, 'toolExecutionPolicy'), false);
       await app.close();
     } finally {
       ManagedRunner.prototype.start = originalStart;
     }
   });
 
-  test('wakeAfterMs registration preserves the authenticated owner provenance outside public task params', async () => {
+  test('wakeAfterMs registration preserves authenticated provenance and tool restrictions for immediate and restarted delivery', async () => {
     const deps = makeStubDeps();
     const app = await createApp(deps);
     const ownerUserId = 'user-owner-timer-provenance';
+    const policy = { mode: 'callback_allowlist', allowedCallbackRoutes: ['POST /api/callbacks/hold-ball'] };
     const thread = await threadStore.create(ownerUserId, 'timer owner provenance');
     const { invocationId, callbackToken } = await registry.create(
       ownerUserId,
@@ -729,7 +752,7 @@ describe('F167 Phase P: wakeWhen cancel/replace/delivery tests', () => {
       thread.id,
       undefined,
       undefined,
-      undefined,
+      policy,
       undefined,
       'strict',
     );
@@ -754,6 +777,8 @@ describe('F167 Phase P: wakeWhen cancel/replace/delivery tests', () => {
     assert.equal(response.statusCode, 200, response.body);
     const taskId = JSON.parse(response.body).taskId;
     assert.equal(deps._ownerAuthProvenanceByTaskId.get(taskId), 'strict');
+    assert.deepEqual(deps._privateAuthorizationByTaskId.get(taskId).toolExecutionPolicy, policy);
+    assert.deepEqual(deps._registeredDynamic[0].spec.taskParams.toolExecutionPolicy, policy);
     assert.equal(Object.hasOwn(deps.dynamicTaskStore.getById(taskId).params, 'ownerAuthProvenance'), false);
     await app.close();
   });
@@ -918,6 +943,150 @@ describe('F167 Phase P: wakeWhen cancel/replace/delivery tests', () => {
       }
     });
   }
+
+  // ─── F314 Humphrey case: hook-forced full gate must not be throttled ──────
+  test('F314: full gate wakeWhen skips the hourly hold quota; other holds still hit it without routing to the co-creator', async () => {
+    const { ManagedRunner } = await import('../dist/infrastructure/managed-runner.js');
+    const { recordDurableManagedGateProcess } = await import(
+      '../dist/domains/ball-custody/durable-managed-gate-job.js'
+    );
+    const { getCoCreatorDisplay } = await import('../dist/config/co-creator-display.js');
+    const originalStart = ManagedRunner.prototype.start;
+    let resolveCompletion;
+    ManagedRunner.prototype.start = (_command, options) => {
+      const processIdentity = { pid: 43, ppid: 1, pgid: 43, startedAt: 'birth-43' };
+      assert.equal(recordDurableManagedGateProcess(options.managedJob, processIdentity), true);
+      return {
+        admission: Promise.resolve({ spawned: true, pid: 43, processIdentity }),
+        completion: new Promise((resolve) => {
+          resolveCompletion = resolve;
+        }),
+      };
+    };
+    const tempDir = mkdtempSync(path.join(os.tmpdir(), 'hold-ball-gate-quota-'));
+    const previousDataDir = process.env.CAT_CAFE_DATA_DIR;
+    process.env.CAT_CAFE_DATA_DIR = tempDir;
+
+    try {
+      const deps = makeStubDeps();
+      let admissions = 0;
+      deps.holdQuotaStore.tryAdmit = async () => {
+        admissions++;
+        return { admitted: false, count: 3, retryAtMs: Date.now() + 60_000, retryAfterMs: 60_000 };
+      };
+      const app = await createApp(deps);
+      const ownerUserId = 'user-gate-quota';
+      const thread = await threadStore.create(ownerUserId, 'gate quota');
+      const { invocationId, callbackToken } = await registry.create(ownerUserId, 'codex', thread.id);
+      const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
+
+      const gate = await app.inject({
+        method: 'POST',
+        url: '/api/callbacks/hold-ball',
+        headers,
+        payload: { reason: 'rerun canonical gate', nextStep: 'consume result', wakeWhen: { command: 'pnpm gate' } },
+      });
+      assert.equal(gate.statusCode, 200, gate.body);
+      assert.equal(admissions, 0, 'a full gate hold must not consult the hourly hold quota');
+
+      const other = await app.inject({
+        method: 'POST',
+        url: '/api/callbacks/hold-ball',
+        headers,
+        payload: { reason: 'wait for build', nextStep: 'read output', wakeWhen: { command: 'echo done' } },
+      });
+      assert.equal(other.statusCode, 429, other.body);
+      assert.equal(admissions, 1, 'non-gate holds still spend the hourly hold quota');
+      const otherBody = JSON.parse(other.body);
+      assert.ok(
+        !otherBody.error.includes(getCoCreatorDisplay().mention),
+        `quota exhaustion must not tell the cat to route the ball to the co-creator: ${otherBody.error}`,
+      );
+
+      const job = resolveManagedCommandJob(deps.dynamicTaskStore.getById(JSON.parse(gate.body).taskId));
+      const terminal = { exitCode: 0, timedOut: false, durationMs: 5, tailOutput: 'gate green' };
+      settleDurableManagedGateJobFromRunner(job, terminal);
+      resolveCompletion(terminal);
+      const deadline = Date.now() + 1_000;
+      while (getActiveRunnerCount() > 0 && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      assert.equal(getActiveRunnerCount(), 0, 'gate fake worker must leave no active registry residue');
+      await app.close();
+    } finally {
+      ManagedRunner.prototype.start = originalStart;
+      if (previousDataDir === undefined) delete process.env.CAT_CAFE_DATA_DIR;
+      else process.env.CAT_CAFE_DATA_DIR = previousDataDir;
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test('F314 review P1: a failing hold-count read neither blocks nor fakes the quota-exempt full gate launch', async () => {
+    const { ManagedRunner } = await import('../dist/infrastructure/managed-runner.js');
+    const { recordDurableManagedGateProcess } = await import(
+      '../dist/domains/ball-custody/durable-managed-gate-job.js'
+    );
+    const originalStart = ManagedRunner.prototype.start;
+    let starts = 0;
+    let resolveCompletion;
+    ManagedRunner.prototype.start = (_command, options) => {
+      starts++;
+      const processIdentity = { pid: 44, ppid: 1, pgid: 44, startedAt: 'birth-44' };
+      assert.equal(recordDurableManagedGateProcess(options.managedJob, processIdentity), true);
+      return {
+        admission: Promise.resolve({ spawned: true, pid: 44, processIdentity }),
+        completion: new Promise((resolve) => {
+          resolveCompletion = resolve;
+        }),
+      };
+    };
+    const tempDir = mkdtempSync(path.join(os.tmpdir(), 'hold-ball-gate-count-fault-'));
+    const previousDataDir = process.env.CAT_CAFE_DATA_DIR;
+    process.env.CAT_CAFE_DATA_DIR = tempDir;
+
+    try {
+      const deps = makeStubDeps();
+      deps.holdQuotaStore.tryAdmit = async () => assert.fail('a full gate hold must not consult the hourly quota');
+      deps.holdQuotaStore.getCount = async () => {
+        throw new Error('hold quota store unavailable');
+      };
+      const app = await createApp(deps);
+      const ownerUserId = 'user-gate-count-fault';
+      const thread = await threadStore.create(ownerUserId, 'gate count fault');
+      const { invocationId, callbackToken } = await registry.create(ownerUserId, 'codex', thread.id);
+      const request = {
+        method: 'POST',
+        url: '/api/callbacks/hold-ball',
+        headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+        payload: { reason: 'rerun canonical gate', nextStep: 'consume result', wakeWhen: { command: 'pnpm gate' } },
+      };
+
+      const first = await app.inject(request);
+      assert.equal(first.statusCode, 200, first.body);
+      assert.equal(starts, 1, 'the first response must reflect a real launch, not a persisted task with no command');
+
+      const retry = await app.inject(request);
+      assert.equal(retry.statusCode, 200, retry.body);
+      assert.equal(retry.json().taskId, first.json().taskId);
+      assert.equal(starts, 1, 'a retry reuses the running gate instead of launching again or faking success');
+
+      const job = resolveManagedCommandJob(deps.dynamicTaskStore.getById(first.json().taskId));
+      const terminal = { exitCode: 0, timedOut: false, durationMs: 5, tailOutput: 'gate green' };
+      settleDurableManagedGateJobFromRunner(job, terminal);
+      resolveCompletion(terminal);
+      const deadline = Date.now() + 1_000;
+      while (getActiveRunnerCount() > 0 && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      assert.equal(getActiveRunnerCount(), 0, 'gate fake worker must leave no active registry residue');
+      await app.close();
+    } finally {
+      ManagedRunner.prototype.start = originalStart;
+      if (previousDataDir === undefined) delete process.env.CAT_CAFE_DATA_DIR;
+      else process.env.CAT_CAFE_DATA_DIR = previousDataDir;
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
 
   // ─── T8: wakeWhen hold with cancel → runner is cancelled ────────────────
   test('T8: wakeWhen hold registers active runner, cancel removes it', async () => {
@@ -1936,65 +2105,18 @@ describe('F167 Phase P: wakeWhen cancel/replace/delivery tests', () => {
     await new Promise((resolve) => setTimeout(resolve, 200));
   });
 
-  // ─── T10: messageStore.append failure → fallback kept alive ─────────────
-  test('T10: wake delivery failure keeps fallback reminder alive', async () => {
-    let appendCount = 0;
-    const deps = makeStubDeps({
-      messageStore: {
-        getByIdempotencyKey() {
-          return null;
-        },
-        async append(msg) {
-          appendCount++;
-          // First append = visibility message (hold registered) → succeed
-          if (appendCount <= 1) {
-            return { id: `msg-${appendCount}`, ...msg };
-          }
-          // Second append = wake completion message → FAIL
-          throw new Error('simulated messageStore failure');
-        },
-      },
-    });
-    const app = await createApp(deps);
-    const thread = await threadStore.create('user-hb-t10', 'hb-t10');
-    const { invocationId, callbackToken } = await registry.create('user-hb-t10', 'codex', thread.id);
-    const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
-
-    // Create wakeWhen hold with a fast command
-    const r1 = await app.inject({
-      method: 'POST',
-      url: '/api/callbacks/hold-ball',
-      headers,
-      payload: {
-        reason: 'fast gate',
-        nextStep: 'check fast',
-        wakeWhen: { command: 'echo done' },
-      },
-    });
-    assert.equal(r1.statusCode, 200);
-    const { taskId } = JSON.parse(r1.body);
-
-    // Wait for command to complete + async callback to fire
-    await new Promise((r) => setTimeout(r, 500));
-
-    // P1-2 fix: fallback reminder task should NOT have been removed
-    // because wake message delivery failed
-    const fallbackRemoved = deps._removedIds.includes(taskId);
-    assert.equal(
-      fallbackRemoved,
-      false,
-      'fallback task should NOT be removed when wake delivery fails — cat needs the fallback wake',
-    );
-  });
-
-  test('T12: queue-full trigger keeps fallback reminder alive after completion message is written', async () => {
+  // F117 replaced standalone message append with atomic wake admission; T13 covers its failure.
+  test('T12: refused atomic wake admission keeps the completed command recoverable', async (t) => {
+    let admissionCalls = 0;
     const deps = makeStubDeps({
       // Queue capacity refused the row. One transaction means nothing is written at all.
       async admitManagedWake() {
+        admissionCalls += 1;
         return {};
       },
     });
     const app = await createApp(deps);
+    t.after(() => app.close());
     const thread = await threadStore.create('user-hb-t12', 'hb-t12');
     const { invocationId, callbackToken } = await registry.create('user-hb-t12', 'codex', thread.id);
 
@@ -2011,7 +2133,16 @@ describe('F167 Phase P: wakeWhen cancel/replace/delivery tests', () => {
     assert.equal(response.statusCode, 200);
     const { taskId } = JSON.parse(response.body);
 
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await waitForWakeHandling(deps, taskId, () => {
+      const command = deps.dynamicTaskStore.getById(taskId)?.params.holdLifecycle.managedCommand;
+      return admissionCalls > 0 && command?.messageClaimedAt === undefined;
+    });
+    assert.equal(admissionCalls, 1, 'the refused admission must actually have been attempted');
+    const task = deps.dynamicTaskStore.getById(taskId);
+    assert.equal(task.enabled, true);
+    assert.equal(task.params.holdLifecycle.managedCommand.state, 'condition_met');
+    assert.equal(task.params.holdLifecycle.managedCommand.result.exitCode, 0);
+    assert.equal(deps._unregisteredIds.includes(taskId), false);
 
     // This used to assert the completion message was durable BEFORE dispatch. One transaction
     // removes that ordering: a refused admission leaves no wake message behind to reconcile.
@@ -2027,13 +2158,16 @@ describe('F167 Phase P: wakeWhen cancel/replace/delivery tests', () => {
     );
   });
 
-  test('T13: trigger throw keeps fallback reminder alive after completion message is written', async () => {
+  test('T13: failed atomic wake admission keeps the completed command recoverable', async (t) => {
+    let admissionCalls = 0;
     const deps = makeStubDeps({
       async admitManagedWake() {
+        admissionCalls += 1;
         throw new Error('simulated execution-plane failure');
       },
     });
     const app = await createApp(deps);
+    t.after(() => app.close());
     const thread = await threadStore.create('user-hb-t13', 'hb-t13');
     const { invocationId, callbackToken } = await registry.create('user-hb-t13', 'codex', thread.id);
 
@@ -2050,7 +2184,16 @@ describe('F167 Phase P: wakeWhen cancel/replace/delivery tests', () => {
     assert.equal(response.statusCode, 200);
     const { taskId } = JSON.parse(response.body);
 
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await waitForWakeHandling(deps, taskId, () => {
+      const command = deps.dynamicTaskStore.getById(taskId)?.params.holdLifecycle.managedCommand;
+      return admissionCalls > 0 && command?.messageClaimedAt === undefined;
+    });
+    assert.equal(admissionCalls, 1, 'the failed admission must actually have been attempted');
+    const task = deps.dynamicTaskStore.getById(taskId);
+    assert.equal(task.enabled, true);
+    assert.equal(task.params.holdLifecycle.managedCommand.state, 'condition_met');
+    assert.equal(task.params.holdLifecycle.managedCommand.result.exitCode, 0);
+    assert.equal(deps._unregisteredIds.includes(taskId), false);
 
     // An admission that throws committed neither half, so no wake receipt may survive it — the
     // fallback reminder below is what keeps the wake recoverable, not a stranded message.
@@ -2066,7 +2209,7 @@ describe('F167 Phase P: wakeWhen cancel/replace/delivery tests', () => {
     );
   });
 
-  test('T14: dispatched trigger retires fallback only after its durable carrier succeeds', async () => {
+  test('T14: dispatched trigger retires fallback only after its durable carrier succeeds', async (t) => {
     const deps = makeStubDeps({
       invocationRecordStore: {
         getByIdempotencyKey(_threadId, _userId, key) {
@@ -2075,6 +2218,7 @@ describe('F167 Phase P: wakeWhen cancel/replace/delivery tests', () => {
       },
     });
     const app = await createApp(deps);
+    t.after(() => app.close());
     const thread = await threadStore.create('user-hb-t14', 'hb-t14');
     const { invocationId, callbackToken } = await registry.create('user-hb-t14', 'codex', thread.id);
 
@@ -2091,13 +2235,23 @@ describe('F167 Phase P: wakeWhen cancel/replace/delivery tests', () => {
     assert.equal(response.statusCode, 200);
     const { taskId } = JSON.parse(response.body);
 
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    // Admission only proves the detached worker spawned; terminal persistence and wake handling follow it.
+    await waitForWakeHandling(deps, taskId, () => deps._unregisteredIds.includes(taskId));
 
     const tombstone = deps._insertedTasks.find((task) => task.id === taskId);
+    const job = resolveManagedCommandJob(deps.dynamicTaskStore.getById(taskId));
+    assert.equal(
+      deps._unregisteredIds.includes(taskId),
+      true,
+      `retirement did not complete: ${JSON.stringify({
+        enabled: tombstone?.enabled,
+        lifecycle: tombstone?.params?.holdLifecycle,
+        gate: job ? readDurableGateRecord(job) : null,
+      })}`,
+    );
     assert.equal(deps._removedIds.includes(taskId), false, 'completion receipt must remain queryable by taskId');
     assert.equal(tombstone.enabled, false, 'successfully completed carrier retires scheduler execution');
     assert.equal(tombstone.params.holdLifecycle.status, 'fired');
     assert.equal(tombstone.params.holdLifecycle.managedCommand.state, 'consumed');
-    assert.equal(deps._unregisteredIds.includes(taskId), true);
   });
 });

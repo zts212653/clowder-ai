@@ -1,3 +1,7 @@
+import { reconcileSettledIndexTime } from '../../../../../utils/reconcile-settled-index-time.js';
+import { advanceSettledIndex, SettledIndexPreparingError } from '../../../../../utils/redis-settled-index.js';
+import { readRedisSettledPage } from '../../../../../utils/redis-settled-page.js';
+import type { SettledHistoryPageOptions, SettledHistorySourcePage } from '../../../../../utils/settled-history-page.js';
 /**
  * Redis-backed F128 Proposal store.
  *
@@ -20,6 +24,7 @@ import type {
 } from '@cat-cafe/shared';
 import { assertApprovalEnvelopeIdentity, generateProposalId } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
+import type { ApprovedTaskContinuationInput } from '../../../../ball-custody/approved-task-continuation.js';
 import type {
   ClaimForApprovalInput,
   CreateProposalInput,
@@ -30,8 +35,11 @@ import type {
 } from '../ports/ProposalStore.js';
 import { ProposalKeys } from '../redis-keys/proposals/proposal-keys.js';
 import { abortRedisStaged, commitRedisApprovalEnvelope } from './RedisApprovalPublication.js';
+import { finalizeRedisProposalApproval } from './RedisProposalApproval.js';
+import { continueRedisApprovedTask } from './RedisProposalContinuation.js';
+import { recordRedisRevisionRequest, supersedeRedisProposal } from './RedisProposalRevision.js';
+import { createdThreadCheckpointFields } from './RedisProposalStoreFields.js';
 import {
-  applyFinalize,
   CAS_TRANSITION_LUA,
   hydrateProposal,
   RECORD_CREATED_THREAD_LUA,
@@ -60,6 +68,10 @@ export class RedisProposalStore implements IProposalStore {
     this.dedupTtlSeconds = options?.dedupTtlSeconds ?? DEFAULT_DEDUP_TTL_SECONDS;
   }
 
+  continueApprovedTask(input: ApprovedTaskContinuationInput) {
+    return continueRedisApprovedTask(this.redis, input);
+  }
+
   async create(input: CreateProposalInput): Promise<ThreadProposal> {
     const now = Date.now();
     const proposal: ThreadProposal = {
@@ -74,6 +86,10 @@ export class RedisProposalStore implements IProposalStore {
       parentThreadId: input.parentThreadId,
       preferredCats: [...input.preferredCats],
       projectPath: input.projectPath,
+      suggestedGroupId: input.suggestedGroupId,
+      suggestedPinned: input.suggestedPinned,
+      groupSuggestionReason: input.groupSuggestionReason,
+      supersedesProposalId: input.supersedesProposalId,
       createdBy: input.createdBy,
       createdAt: now,
       publication: { state: 'staged', stagedAt: now },
@@ -102,8 +118,87 @@ export class RedisProposalStore implements IProposalStore {
     return hydrateProposal(data);
   }
 
+  async recordRevisionRequest(
+    proposalId: string,
+    request: NonNullable<ThreadProposal['revisionRequest']>,
+  ): Promise<ThreadProposal | null> {
+    return (await recordRedisRevisionRequest(this.redis, proposalId, request)) ? this.get(proposalId) : null;
+  }
+
+  async supersedePending(
+    proposalId: string,
+    replacementId: string,
+    requestMessageId: string,
+  ): Promise<ThreadProposal | null> {
+    const proposal = await this.get(proposalId);
+    return proposal && (await supersedeRedisProposal(this.redis, proposal, replacementId, requestMessageId))
+      ? this.get(proposalId)
+      : null;
+  }
+
   async listByUser(userId: string, limit: number = DEFAULT_LIST_LIMIT): Promise<ThreadProposal[]> {
     return this.loadFromIndex(ProposalKeys.userList(userId), limit);
+  }
+
+  private async prepareSettledHistory() {
+    const ready = await advanceSettledIndex(this.redis, {
+      progressKey: 'proposals:history-index:v1',
+      prefix: 'proposal:',
+      type: 'hash',
+      entry: (raw, key) => {
+        const p = hydrateProposal(raw as Record<string, string>);
+        if (key !== ProposalKeys.detail(p.proposalId)) throw new Error('proposal history identity mismatch');
+        return ['approved', 'rejected', 'withdrawn'].includes(p.status)
+          ? {
+              indexKey: ProposalKeys.userSettled(p.createdBy),
+              id: p.proposalId,
+              score: p.withdrawnAt ?? p.approvedAt ?? p.rejectedAt ?? p.createdAt,
+            }
+          : null;
+      },
+    });
+    if (!ready) throw new SettledIndexPreparingError();
+  }
+
+  async listSettledPage(
+    owner: string,
+    options: SettledHistoryPageOptions,
+  ): Promise<SettledHistorySourcePage<ThreadProposal>> {
+    await this.prepareSettledHistory();
+    return readRedisSettledPage(this.redis, ProposalKeys.userSettled(owner), options, async (id, at) => {
+      const p = await this.get(id);
+      if (!p) return null;
+      if (p.createdBy !== owner || !['approved', 'rejected', 'withdrawn'].includes(p.status))
+        throw new Error('Settled index canonical owner/status mismatch');
+      if (p.proposalId !== id) throw new Error('Settled index identity mismatch');
+      await reconcileSettledIndexTime(
+        this.redis,
+        ProposalKeys.userSettled(owner),
+        id,
+        at,
+        p.withdrawnAt ?? p.approvedAt ?? p.rejectedAt ?? 0,
+        [
+          {
+            key: ProposalKeys.detail(id),
+            fields: {
+              status: p.status,
+              createdBy: p.createdBy,
+              approvedAt: p.approvedAt,
+              rejectedAt: p.rejectedAt,
+              withdrawnAt: p.withdrawnAt,
+            },
+          },
+        ],
+      );
+      return p;
+    });
+  }
+
+  async listSettledByUser(userId: string, limit = DEFAULT_LIST_LIMIT): Promise<ThreadProposal[]> {
+    await this.prepareSettledHistory();
+    return (await this.loadFromIndex(ProposalKeys.userSettled(userId), limit)).filter(
+      (p) => p.createdBy === userId && ['approved', 'rejected', 'withdrawn'].includes(p.status),
+    );
   }
 
   async listPending(userId: string, limit: number = DEFAULT_LIST_LIMIT): Promise<ThreadProposal[]> {
@@ -134,14 +229,8 @@ export class RedisProposalStore implements IProposalStore {
     return { ...proposal, status: 'approving', approvedBy: input.approvedBy, claimedAt };
   }
 
-  async finalizeApproval(input: FinalizeApprovalInput): Promise<ThreadProposal | null> {
-    const proposal = await this.get(input.proposalId);
-    if (!proposal || proposal.status !== 'approving') return null;
-    const now = Date.now();
-    const updated = applyFinalize(proposal, input, now);
-    const pairs = this.finalizedFields(updated);
-    const ok = await this.casTransition(updated.proposalId, updated.createdBy, 'approving', 'noop', '', pairs);
-    return ok ? updated : null;
+  finalizeApproval(input: FinalizeApprovalInput): Promise<ThreadProposal | null> {
+    return finalizeRedisProposalApproval(this.redis, input);
   }
 
   async recordCreatedThread(proposalId: string, threadId: string, overrides?: ProposalApproveOverrides): Promise<void> {
@@ -149,7 +238,7 @@ export class RedisProposalStore implements IProposalStore {
       RECORD_CREATED_THREAD_LUA,
       1,
       ProposalKeys.detail(proposalId),
-      ...this.createdThreadCheckpointFields(threadId, overrides),
+      ...createdThreadCheckpointFields(threadId, overrides),
     );
   }
 
@@ -251,6 +340,7 @@ export class RedisProposalStore implements IProposalStore {
     if (proposal) {
       pipeline.zrem(ProposalKeys.userList(proposal.createdBy), proposalId);
       pipeline.zrem(ProposalKeys.userPending(proposal.createdBy), proposalId);
+      pipeline.zrem(ProposalKeys.userSettled(proposal.createdBy), proposalId);
       pipeline.zrem(ProposalKeys.threadList(proposal.sourceThreadId), proposalId);
     }
     await pipeline.exec();
@@ -275,9 +365,10 @@ export class RedisProposalStore implements IProposalStore {
   ): Promise<boolean> {
     const result = (await this.redis.eval(
       CAS_TRANSITION_LUA,
-      2,
+      3,
       ProposalKeys.detail(proposalId),
       ProposalKeys.userPending(userId),
+      ProposalKeys.userSettled(userId),
       proposalId,
       expectedStatus,
       pendingIndexAction,
@@ -285,50 +376,6 @@ export class RedisProposalStore implements IProposalStore {
       ...fieldPairs,
     )) as number;
     return result === 1;
-  }
-
-  private finalizedFields(updated: ThreadProposal): string[] {
-    const fields: string[] = [
-      'status',
-      'approved',
-      'approvedAt',
-      String(updated.approvedAt ?? 0),
-      'claimedAt',
-      '0',
-      'title',
-      updated.title,
-      'parentThreadId',
-      updated.parentThreadId,
-      'preferredCats',
-      JSON.stringify(updated.preferredCats),
-      // F128: persist project ownership on finalize so an approve-time re-home (overrides
-      // .projectPath, applied by applyOverrides) is durable. Without this HSET the hash keeps
-      // the create-time projectPath and a fresh get() hydrates a stale value — a Redis-only
-      // divergence the in-memory store can't surface (LL: in-memory masks Redis behavior).
-      'projectPath',
-      updated.projectPath,
-      'reportingMode',
-      updated.reportingMode ?? '',
-      'declaredWorkMode',
-      updated.declaredWorkMode ?? '',
-    ];
-    if (updated.createdThreadId) fields.push('createdThreadId', updated.createdThreadId);
-    fields.push('initialMessage', updated.initialMessage ?? '');
-    return fields;
-  }
-
-  private createdThreadCheckpointFields(threadId: string, overrides: ProposalApproveOverrides | undefined): string[] {
-    const fields = ['createdThreadId', threadId];
-    if (!overrides) return fields;
-    if (overrides.title !== undefined) fields.push('title', overrides.title);
-    if (overrides.parentThreadId !== undefined) fields.push('parentThreadId', overrides.parentThreadId);
-    if (overrides.preferredCats !== undefined) fields.push('preferredCats', JSON.stringify(overrides.preferredCats));
-    if (overrides.projectPath !== undefined) fields.push('projectPath', overrides.projectPath);
-    if (overrides.reportingMode !== undefined) fields.push('reportingMode', overrides.reportingMode);
-    if (overrides.declaredWorkMode !== undefined) fields.push('declaredWorkMode', overrides.declaredWorkMode);
-    if (overrides.initialMessage === null) fields.push('initialMessage', '');
-    else if (typeof overrides.initialMessage === 'string') fields.push('initialMessage', overrides.initialMessage);
-    return fields;
   }
 
   private async loadFromIndex(indexKey: string, limit: number | null): Promise<ThreadProposal[]> {

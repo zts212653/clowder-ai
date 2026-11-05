@@ -1,23 +1,26 @@
 'use client';
 
+import { WorldRailFrame } from '@cat-cafe/ui';
 import { usePathname, useRouter } from 'next/navigation';
-import { Suspense, useCallback } from 'react';
+import { Suspense, useCallback, useEffect } from 'react';
 import { useApprovalHubSync } from '@/hooks/useApprovalHub';
 import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
 import { usePinnedSections } from '@/hooks/usePinnedSections';
 import { ClapperboardIcon } from '../ActivityBar';
+import { useCollectiveWorldDirectoryRecovery } from '../collective/use-collective-world-directory-recovery';
 import { useConciergeRailToggle } from '../concierge/ConciergeRailToggle';
 import { HubIcon } from '../hub-icons';
 import { MeowClubMark } from '../icons/MeowClubMark';
+import { PluginUiEntries } from '../plugins/PluginUiEntries';
 import { type ResolvedPin, resolvePin } from '../settings/settings-ia';
+import { CollectiveWorldRailEntries } from './CollectiveWorldRailEntries';
 import { MailboxButton } from './MailboxButton';
 import { RailButton } from './RailButton';
-import { CatBallImage, ShellGlyph } from './ShellIcons';
+import { CatBallImage } from './ShellIcons';
 import { isSettingsRoute } from './settings-reading-bridge';
-import { resolveShellNavTarget } from './shell-navigation';
+import { rememberCafeReturnTarget, resolveShellNavTarget } from './shell-navigation';
 import { useOpenDestination } from './use-open-destination';
 import { usePresentationRail } from './use-presentation-rail';
-import { useWorldRailEntries } from './use-world-rail-entries';
 import { useSettingsReadingEntry } from './useSettingsSourceReturn';
 
 const CAFE_NAME = '我的 Café';
@@ -35,14 +38,23 @@ export function WorldRail() {
   const router = useRouter();
   // The one mount of the F246 approval sync for the shell (classic ActivityBar is not rendered alongside).
   useApprovalHubSync();
+  useCollectiveWorldDirectoryRecovery();
 
   const captureSettingsOrigin = useSettingsReadingEntry();
+  useEffect(() => rememberCafeReturnTarget(pathname), [pathname]);
   const go = useCallback(
     (path: string) => {
-      if (isSettingsRoute(path)) captureSettingsOrigin();
+      if (isSettingsRoute(path.split('?')[0])) captureSettingsOrigin();
       router.push(resolveShellNavTarget(path, pathname));
     },
     [router, pathname, captureSettingsOrigin],
+  );
+  const openWorld = useCallback(
+    (href: string) => {
+      rememberCafeReturnTarget(pathname);
+      router.push(href);
+    },
+    [pathname, router],
   );
 
   const inCafe = pathname === '/' || pathname.startsWith('/thread/');
@@ -50,17 +62,17 @@ export function WorldRail() {
   const inSettings = pathname.startsWith('/settings');
 
   return (
-    <nav
-      aria-label="主导航"
-      data-testid="world-rail"
-      className="flex h-full w-[52px] flex-none flex-col items-center gap-1.5 px-0 pb-3 pt-2.5"
-      style={{ background: 'var(--shell-frame)', borderRight: '1px solid var(--shell-hairline)' }}
-    >
+    <WorldRailFrame aria-label="主导航" data-testid="world-rail">
       <CafeWorld selected={inCafe} onOpen={() => go('/')} />
       <RailSeparator />
-      <CollectiveWorld selected={inCollective} onOpen={() => go('/collective')} />
+      <CollectiveWorldRailEntries
+        inCollective={inCollective}
+        onOpenWorld={openWorld}
+        onOpenDirectory={() => go('/collective')}
+      />
 
       <div className="mt-auto flex flex-col items-center gap-1.5">
+        <PluginUiEntries />
         <Suspense fallback={null}>
           <PinnedRailItems />
         </Suspense>
@@ -68,9 +80,9 @@ export function WorldRail() {
         <MailboxButton />
         <ConciergeButton />
         <div className="h-1" aria-hidden="true" />
-        <AvatarButton selected={inSettings} onOpen={() => go('/settings')} />
+        <AvatarButton selected={inSettings} onOpen={() => go('/settings?s=you')} />
       </div>
-    </nav>
+    </WorldRailFrame>
   );
 }
 
@@ -88,30 +100,6 @@ function CafeWorld({ selected, onOpen }: { selected: boolean; onOpen: () => void
       <span className="flex h-6 w-6 items-center justify-center" style={{ color: 'var(--shell-primary)' }}>
         <MeowClubMark className="h-6 w-6" />
       </span>
-    </RailButton>
-  );
-}
-
-/**
- * Collective worlds come from F290's authoritative directory (#4830 adapter), which is bridged through
- * the Collective surface's own session. Outside that surface the directory is UNKNOWN here — so this
- * renders the existing Collective destination as one honest entry instead of inventing world names,
- * and never draws "no other worlds". Per-world entries and the "…" list arrive with the F290 assembly.
- */
-function CollectiveWorld({ selected, onOpen }: { selected: boolean; onOpen: () => void }) {
-  const directory = useWorldRailEntries();
-  return (
-    <RailButton
-      ariaLabel="共同体"
-      tip="共同体"
-      tipDetail={directory.statusText}
-      selected={selected}
-      ariaCurrent={selected ? 'page' : undefined}
-      onClick={onOpen}
-      testId="world-collective"
-      guideId="nav.collective"
-    >
-      <ShellGlyph name="users" className="h-5 w-5" />
     </RailButton>
   );
 }
@@ -196,8 +184,8 @@ function AvatarButton({ selected, onOpen }: { selected: boolean; onOpen: () => v
         aria-hidden="true"
       >
         {coCreator.avatar ? (
-          // biome-ignore lint/performance/noImgElement: tiny runtime-configured avatar URL, onError falls back to initial
           // eslint-disable-next-line @next/next/no-img-element
+          // biome-ignore lint/performance/noImgElement: tiny runtime-configured avatar URL, onError falls back to initial
           <img
             src={coCreator.avatar}
             alt=""

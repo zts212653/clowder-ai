@@ -10,6 +10,7 @@ function previewCats() {
         displayName: '小星星·砚砚',
         color: { primary: '#8b6a52', secondary: '#f4e8dc' },
         mentionPatterns: ['@codex-astra'],
+        carrier: 'cli',
         clientId: 'openai',
         defaultModel: 'gpt-6-astra',
         avatar: '',

@@ -1,5 +1,6 @@
 'use client';
 
+import { SandboxedWidgetFrame } from '@cat-cafe/ui';
 import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useMessageDisclosureState } from '@/components/message-disclosure-state';
 import type { RichHtmlWidgetBlock } from '@/stores/chat-types';
@@ -20,6 +21,7 @@ import {
 } from './html-widget-layout-machine';
 import { resolveWidgetMeasurementError, resolveWidgetPresentation } from './html-widget-presentation';
 import { sanitizeWidgetHtml } from './sanitize-widget-html';
+import { WorkspaceHtmlWidgetBlock } from './WorkspaceHtmlWidgetBlock';
 
 function isExportSearch(search: string): boolean {
   const value = new URLSearchParams(search).get('export');
@@ -87,7 +89,7 @@ function resolveMeasuredViewportAnchor({
   };
 }
 
-export function HtmlWidgetBlock({ block, disclosureKey }: { block: RichHtmlWidgetBlock; disclosureKey?: string }) {
+function ChatHtmlWidgetBlock({ block, disclosureKey }: { block: RichHtmlWidgetBlock; disclosureKey?: string }) {
   const reactId = useId();
   const instanceId = `html-widget-${reactId}`;
   const iframeId = `${instanceId}-frame`;
@@ -245,15 +247,12 @@ export function HtmlWidgetBlock({ block, disclosureKey }: { block: RichHtmlWidge
             正在准备完整内容…
           </output>
         ) : (
-          <iframe
+          <SandboxedWidgetFrame
             id={iframeId}
             ref={iframeRef}
-            srcDoc={bridgedHtml}
-            sandbox="allow-scripts"
-            scrolling="no"
+            html={bridgedHtml}
             title={accessibleTitle}
-            style={{ width: '100%', height: `${visibleHeight}px`, border: 'none', display: 'block' }}
-            referrerPolicy="no-referrer"
+            height={visibleHeight}
           />
         )}
         {longContent && !fullyExpanded ? (
@@ -284,5 +283,22 @@ export function HtmlWidgetBlock({ block, disclosureKey }: { block: RichHtmlWidge
         </div>
       ) : null}
     </div>
+  );
+}
+
+/** One HTML entry: chat measures content; Works retains its existing independently scrolling viewport. */
+export function HtmlWidgetBlock({
+  block,
+  disclosureKey,
+  presentation = 'chat',
+}: {
+  block: RichHtmlWidgetBlock;
+  disclosureKey?: string;
+  presentation?: 'chat' | 'workspace';
+}) {
+  return presentation === 'workspace' ? (
+    <WorkspaceHtmlWidgetBlock block={block} />
+  ) : (
+    <ChatHtmlWidgetBlock block={block} disclosureKey={disclosureKey} />
   );
 }

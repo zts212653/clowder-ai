@@ -8,7 +8,17 @@ import { useShellPresentation } from '../shell/shell-presentation';
 import { helpTipCopy } from './help-tip.shell-copy';
 
 /** Concept explanations can be read on hover/focus or pinned by click/touch. */
-export function HelpTip({ topic, children }: { topic: string; children: ReactNode }) {
+export function HelpTip({
+  topic,
+  children,
+  trigger,
+  triggerClassName,
+}: {
+  topic: string;
+  children: ReactNode;
+  trigger?: ReactNode;
+  triggerClassName?: string;
+}) {
   const localized = useShellCopy(helpTipCopy);
   const copy = useShellPresentation() === 'v2' ? localized : helpTipCopy.zh;
   const id = useId();
@@ -109,7 +119,11 @@ export function HelpTip({ topic, children }: { topic: string; children: ReactNod
         aria-expanded={open}
         aria-controls={open ? id : undefined}
         aria-describedby={open ? `${id}-text` : undefined}
-        className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-cafe-subtle text-xs text-cafe-muted hover:text-cafe focus-visible:outline focus-visible:outline-2 focus-visible:outline-cafe-accent"
+        className={
+          trigger
+            ? triggerClassName
+            : 'inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-cafe-subtle text-xs text-cafe-muted hover:text-cafe focus-visible:outline focus-visible:outline-2 focus-visible:outline-cafe-accent'
+        }
         onFocus={() => {
           if (!suppressFocus.current) {
             clearHover();
@@ -121,7 +135,7 @@ export function HelpTip({ topic, children }: { topic: string; children: ReactNod
           setMode((m) => (m === 'pinned' ? 'closed' : 'pinned'));
         }}
       >
-        <span aria-hidden="true">?</span>
+        {trigger ?? <span aria-hidden="true">?</span>}
       </button>
       {open &&
         typeof document !== 'undefined' &&

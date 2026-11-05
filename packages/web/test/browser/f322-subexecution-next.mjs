@@ -281,6 +281,15 @@ export async function runSubexecutionNextJourney(browser, evidenceDir) {
   const data = JSON.parse(await readFile(source, 'utf8'));
   assert.equal(data.redisPort, 6398);
   assert.equal(data.traces.length, 2);
+  // Preserve the archived capture; project its legacy cat identity only in the served DTO.
+  for (const trace of data.traces) {
+    for (const message of [trace.api, trace.draft?.api].filter(Boolean)) {
+      assert.equal(message.type, 'assistant');
+      assert.equal(typeof message.catId, 'string');
+      if (message.from) assert.deepEqual(message.from, { kind: 'agent', catId: message.catId });
+      else message.from = { kind: 'agent', catId: message.catId };
+    }
+  }
   const out = evidenceDir ? path.join(evidenceDir, 'subexecution-next') : undefined;
   if (out) await mkdir(out, { recursive: true });
   const host = await startNativeHost();

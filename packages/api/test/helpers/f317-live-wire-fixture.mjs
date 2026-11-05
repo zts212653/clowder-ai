@@ -38,6 +38,7 @@ export function wireFixture({ holdFirstTurn = false } = {}) {
           push({ id: message.id, result: { config: { mcp_servers: { unapproved: { command: 'external' } } } } });
         if (message.method === 'initialize') push({ id: message.id, result: {} });
         if (message.method === 'thread/start') push({ id: message.id, result: { thread: { id: 'native' } } });
+        if (message.method === 'thread/turns/list') push({ id: message.id, result: { data: [], nextCursor: null } });
         if (message.method === 'turn/start') {
           const id = ++starts === 1 ? 'first' : `turn-${starts}`;
           push({ id: message.id, result: { turn: { id } } });

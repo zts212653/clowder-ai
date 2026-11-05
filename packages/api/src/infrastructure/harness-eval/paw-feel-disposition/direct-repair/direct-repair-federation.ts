@@ -22,7 +22,7 @@ export interface PawFeelDirectRepairOwnerProvider {
     binding: PawFeelDirectRepairBindingV1;
     ownerOutcomeRef: OwnerTruthRefV1;
     taskTerminalRef: OwnerTruthRefV1;
-    leaseTerminalRef: OwnerTruthRefV1;
+    leaseTerminalRef?: OwnerTruthRefV1;
   }): Promise<PawFeelDirectRepairOutcomeV1>;
 }
 

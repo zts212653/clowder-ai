@@ -1,5 +1,7 @@
 import { parseWaitOwnerFence } from '@cat-cafe/shared';
 import { createModuleLogger } from '../../infrastructure/logger.js';
+import type { DynamicTaskOwnerAuthorization } from '../../infrastructure/scheduler/DynamicTaskStore.js';
+import { normalizeOwnerAuthProvenance } from '../cats/services/owner-auth-provenance.js';
 import {
   type ManagedCommandWakeActionLeaseAdmission,
   resolveManagedCommandWakeActionLeaseAdmission,
@@ -185,7 +187,16 @@ export async function publishManagedCommandWakeMessage(
   }
 
   try {
+    const ownerAuthorization: DynamicTaskOwnerAuthorization = deps.dynamicTaskStore.getPrivateOwnerAuthorization
+      ? deps.dynamicTaskStore.getPrivateOwnerAuthorization(claimed.task.id)
+      : {
+          ownerAuthProvenance: normalizeOwnerAuthProvenance(
+            deps.dynamicTaskStore.getPrivateOwnerAuthProvenance?.(claimed.task.id),
+          ),
+          toolExecutionPolicy: { mode: 'read_only', replayDeniedToolNames: [] },
+        };
     const admitted = await deps.admitWake({
+      ...ownerAuthorization,
       message: {
         from: { kind: 'system', service: 'managed-command-wake' },
         userId: claimed.userId,

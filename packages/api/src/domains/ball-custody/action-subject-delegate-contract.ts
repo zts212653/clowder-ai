@@ -68,8 +68,9 @@ export interface TaskApprovedDelegateProvider {
     taskThreadId: string,
     currentOwnerCatId: string,
     tenantScope: string,
-    /** F167 R5: current task scope for drift detection. Absent → tasks without scope get no delegates. */
+    /** F167 R5: current task scope for drift detection. Absent → only an exact generic continuation can authorize delegation. */
     currentDevelopmentScope?: DevelopmentScopeSnapshot,
+    currentTaskTitle?: string,
   ): Promise<ReadonlyArray<ApprovedDelegate>>;
 }
 
@@ -77,7 +78,11 @@ export interface TaskApprovedDelegateProvider {
  * Narrow snapshot of a task used for action subject truth resolution.
  */
 export interface TaskActionSnapshot {
+  kind?: import('@cat-cafe/shared').TaskKind;
+  subjectKey?: string | null;
+  entrustedWork?: unknown;
   id: string;
+  title?: string;
   status: 'todo' | 'doing' | 'blocked' | 'done';
   ownerCatId: string | null;
   threadId: string;

@@ -137,14 +137,14 @@ describe('F167 terminal event-wait disposition', () => {
     const { service } = harness();
     const cases = [
       'garbage',
-      'wait:pr:zts212653/cat-cafe#3300:g4:totally_new_reason',
-      'wait:pr:zts212653/cat-cafe#3300:g4:',
-      'wait:pr:zts212653/cat-cafe#3300:gX:subject_terminal',
-      'wait:pr:zts212653/cat-cafe#3300:subject_terminal',
-      'wait:pr:zts212653/cat-cafe#3300:g0:subject_terminal',
-      'xwait:pr:zts212653/cat-cafe#3300:g4:subject_terminal',
-      ' wait:pr:zts212653/cat-cafe#3300:g4:subject_terminal',
-      'wait:pr:zts212653/cat-cafe#3300:g4:subject_terminal\n',
+      'wait:pr:zts212653/clowder-ai#3300:g4:totally_new_reason',
+      'wait:pr:zts212653/clowder-ai#3300:g4:',
+      'wait:pr:zts212653/clowder-ai#3300:gX:subject_terminal',
+      'wait:pr:zts212653/clowder-ai#3300:subject_terminal',
+      'wait:pr:zts212653/clowder-ai#3300:g0:subject_terminal',
+      'xwait:pr:zts212653/clowder-ai#3300:g4:subject_terminal',
+      ' wait:pr:zts212653/clowder-ai#3300:g4:subject_terminal',
+      'wait:pr:zts212653/clowder-ai#3300:g4:subject_terminal\n',
       'wait::g4:subject_terminal',
     ];
     for (const outcomeId of cases) {

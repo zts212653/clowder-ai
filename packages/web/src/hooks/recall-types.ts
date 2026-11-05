@@ -1,8 +1,15 @@
-import type { RecallMatchRank, RecallMatchType, RecallResolverFamily, RecallResultStatus } from '@cat-cafe/shared';
+import type {
+  MatterReadSummary,
+  RecallMatchRank,
+  RecallMatchType,
+  RecallResolverFamily,
+  RecallResultStatus,
+} from '@cat-cafe/shared';
 
 export type MemoryCueStatus = 'presented_unreported' | 'drilled' | 'applied' | 'dismissed' | 'invalidated';
 
 export interface RecallResultItem {
+  sourceUnavailableReason?: 'source_corrected' | 'source_forgotten' | 'scope_revoked';
   title: string;
   titleStatus?: 'loading' | 'unavailable';
   /** Null explicitly means this source has no verified owner-readable destination. */
@@ -19,6 +26,7 @@ export interface RecallResultItem {
 }
 
 export interface RecallEvent {
+  matterRead?: MatterReadSummary;
   id: string;
   catId?: string;
   invocationId?: string;
@@ -49,6 +57,7 @@ export interface RecallEvent {
 }
 
 export interface RecallSourceView {
+  sourceUnavailableReason?: RecallResultItem['sourceUnavailableReason'];
   anchor: string;
   invocationId?: string;
   cueId?: string;

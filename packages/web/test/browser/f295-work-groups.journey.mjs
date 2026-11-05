@@ -59,7 +59,7 @@ export async function runWorkGroupsJourney({ browser, baseUrl, viewport, threadI
     assert.equal(await astra.getByRole('link', { name: 'Chat', exact: true }).count(), 1);
     assert.equal(await astra.getByTestId('workspace-running-activity').count(), 2);
     await astra.getByText('回复中', { exact: true }).waitFor();
-    await astra.getByText('后台 · 全量门禁', { exact: true }).waitFor();
+    await astra.getByText('托管命令 · 全量门禁', { exact: true }).waitFor();
     await page.screenshot({ path: `/tmp/f295-work-groups-${viewport.width}.png` });
 
     await astra.getByRole('button', { name: 'Stop codex-astra live_invocation shared-parent', exact: true }).click();

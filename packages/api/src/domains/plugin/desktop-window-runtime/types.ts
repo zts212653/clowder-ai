@@ -1,4 +1,10 @@
+import type { DesktopWindowFailureReason } from './failure-reason.js';
+
+export type { DesktopWindowFailureReason } from './failure-reason.js';
+
 import type { DesktopWindowContribution } from '@clowder-ai/plugin-contract';
+import type { DesktopAppAssistOwner } from '../../concierge/live/host/companion-app-assist-owner.js';
+import type { ObservationWorkSummary } from '../diagnostics/observation-work.js';
 import type { StaticSurfaceServer } from '../external-runtime/static-surface-server.js';
 import type { VerifiedPluginPackage, VerifiedPluginPackageLocator } from '../external-runtime/types.js';
 import type { BuiltinBrokerConnection } from '../host-broker/builtin-loopback.js';
@@ -10,10 +16,12 @@ import type {
   HostTextSubmission,
   HostVoiceObservation,
 } from './companion-private-wire.js';
+import type { ObservationError, ObservationStage } from './observation-diagnostics.js';
 import type { DesktopWindowObserver } from './observer.js';
 import type { CompanionArchiveContract } from './published-companion-v2.js';
 
 export interface DesktopCompanionBridge {
+  readonly appAssist?: DesktopAppAssistOwner;
   request(input: unknown): Promise<CompanionReply>;
   close(): Promise<void>;
   observeVoice?(observation: HostVoiceObservation): Promise<void>;
@@ -21,18 +29,6 @@ export interface DesktopCompanionBridge {
 }
 
 export type DesktopWindowVisibility = 'visible' | 'hidden';
-export type DesktopWindowFailureReason =
-  | 'renderer-gone'
-  | 'unresponsive'
-  | 'window-closed'
-  | 'process-exit'
-  | 'request-timeout'
-  | 'protocol-violation'
-  | 'connection-ended'
-  | 'heartbeat-expired'
-  | 'poll-failed'
-  | 'surface-unavailable'
-  | 'unknown';
 export interface DesktopWindowFailure {
   readonly reason: DesktopWindowFailureReason;
   readonly exitCode: number | null;
@@ -47,12 +43,17 @@ export interface DesktopWindowFailure {
     readonly deadlineAtMs: number;
     readonly elapsedMs: number;
     readonly lastPollAnswerAgeMs: number | null;
+    readonly error?: ObservationError;
+    /** Inclusive monotonic durations; overlapping transactions do not imply lock-wait causation. */
+    readonly stages?: readonly ObservationStage[];
+    readonly costs?: ObservationWorkSummary;
   };
   /** Only emitted to Host diagnostics; never persisted as plugin identity. */
   readonly pid?: number;
   readonly lastStage?: string | null;
 }
 export interface DesktopWindowLaunch {
+  readonly appAssist?: DesktopAppAssistOwner;
   readonly url: string;
   readonly presentation: DesktopWindowContribution['presentation'];
   /** Present only for the exact verified public archive that carries the new contract. */
@@ -66,6 +67,8 @@ export interface DesktopWindowLaunch {
 }
 /** A trusted Host-owned executable, never a package-supplied main/preload script. */
 export interface DesktopWindowExecutor {
+  /** Prepare the Host component before opening expiring Broker/feature authority. */
+  prepare?(): Promise<void>;
   open(input: DesktopWindowLaunch): Promise<DesktopWindowHandle>;
 }
 export interface DesktopWindowHandle {

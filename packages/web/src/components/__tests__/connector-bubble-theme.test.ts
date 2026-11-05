@@ -4,12 +4,33 @@
  * from the unified ConnectorDefinition metadata.
  */
 
+import { type ConnectorDefinition, registerConnectorDefinition, unregisterConnectorDefinition } from '@cat-cafe/shared';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatMessage } from '@/stores/chat-types';
 import { apiFetch } from '@/utils/api-client';
 import { ConnectorBubble } from '../ConnectorBubble';
+import { ShellPresentationContext } from '../shell/shell-presentation';
+
+// Plugin identities are registered at runtime rather than compiled into the Host.
+// These cases exercise registered presentation, so supply that prerequisite here.
+const pluginPresentations: readonly ConnectorDefinition[] = [
+  ...['github-review', 'github-wait', 'github-issue-comment'].map((id) => ({
+    id,
+    displayName: id,
+    icon: { type: 'svg' as const, iconId: 'github' },
+    themeColor: '#778899',
+    description: 'Registered GitHub presentation fixture',
+  })),
+  {
+    id: 'feishu',
+    displayName: 'Feishu',
+    icon: { type: 'png', src: '/images/connectors/feishu.png' },
+    themeColor: '#3370FF',
+    description: 'Registered external platform fixture',
+  },
+];
 
 vi.mock('@/utils/api-client', () => ({
   API_URL: 'http://api.test',
@@ -22,11 +43,13 @@ describe('ConnectorBubble theme', () => {
   const mockApiFetch = vi.mocked(apiFetch);
 
   beforeAll(() => {
+    for (const presentation of pluginPresentations) registerConnectorDefinition(presentation);
     (globalThis as { React?: typeof React }).React = React;
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   });
 
   afterAll(() => {
+    for (const presentation of pluginPresentations) unregisterConnectorDefinition(presentation.id);
     delete (globalThis as { React?: typeof React }).React;
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
@@ -72,6 +95,40 @@ describe('ConnectorBubble theme', () => {
       },
     };
   }
+
+  it('uses the common v2 member shell and ignores legacy hidden source links', () => {
+    const message: ChatMessage = {
+      id: 'm-common-shell',
+      type: 'connector',
+      content: '[owner/repo#42](https://github.com/owner/repo/pull/42)',
+      timestamp: Date.now(),
+      from: { kind: 'plugin', instanceId: 'github' },
+      source: {
+        connector: 'github-wait',
+        label: 'GitHub',
+        icon: 'github',
+        themeColor: '#778899',
+        url: 'https://github.com/owner/repo/pull/42',
+      } as ChatMessage['source'] & { url: string },
+    };
+
+    act(() =>
+      root.render(
+        React.createElement(
+          ShellPresentationContext.Provider,
+          { value: 'v2' },
+          React.createElement(ConnectorBubble, { message }),
+        ),
+      ),
+    );
+
+    expect(container.querySelector('[data-testid="member-nameplate"]')).not.toBeNull();
+    expect(container.querySelector('a[href="https://github.com/owner/repo/pull/42"]')).not.toBeNull();
+    expect(container.querySelectorAll('a[href="https://github.com/owner/repo/pull/42"]')).toHaveLength(1);
+    expect(container.querySelector('[data-testid="message-bubble"]')?.getAttribute('style') ?? '').not.toContain(
+      'background-color',
+    );
+  });
 
   for (const type of ['text_frustration', 'retry_burst']) {
     it(`withdraws the complete trusted ${type} presentation without deleting its message anchor`, async () => {
@@ -371,7 +428,6 @@ describe('ConnectorBubble theme', () => {
         connector: 'github-review',
         label: 'GitHub Review',
         icon: 'github',
-        url: 'https://github.com/zts212653/clowder-ai/pull/97',
       },
     };
     act(() => root.render(React.createElement(ConnectorBubble, { message })));
@@ -391,7 +447,6 @@ describe('ConnectorBubble theme', () => {
         connector: 'github-ci',
         label: 'GitHub CI/CD',
         icon: 'github',
-        url: 'https://github.com/zts212653/clowder-ai/actions/runs/123',
       },
     };
     act(() => root.render(React.createElement(ConnectorBubble, { message })));
@@ -404,7 +459,7 @@ describe('ConnectorBubble theme', () => {
     { connector: 'github-wait', label: 'GitHub Wait', icon: 'github', themeToken: 'github-wait' },
     { connector: 'frustration-auto-issue', label: '问题检测', icon: '🔍', themeToken: 'frustration-auto-issue' },
     { connector: 'physical-limb.stackchan', label: 'StackChan', icon: 'robot', themeToken: 'physical-limb-stackchan' },
-  ] as const)('renders built-in $connector with its registered SVG and CSS-safe theme token instead of the fallback icon', ({
+  ] as const)('renders registered $connector with its SVG and CSS-safe theme token instead of the fallback icon', ({
     connector,
     label,
     icon,
@@ -438,7 +493,6 @@ describe('ConnectorBubble theme', () => {
         connector: 'github-issue-comment',
         label: 'Issue Comment',
         icon: 'github',
-        url: 'https://github.com/zts212653/clowder-ai/issues/861',
       },
     };
 

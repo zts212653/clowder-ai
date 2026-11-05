@@ -8,7 +8,6 @@ import { RunLedger } from '../../dist/infrastructure/scheduler/RunLedger.js';
 import { createMainHealthTemplate } from '../../dist/infrastructure/scheduler/templates/main-health.js';
 import { createPresentLoopTemplate } from '../../dist/infrastructure/scheduler/templates/present-loop.js';
 import { reminderTemplate } from '../../dist/infrastructure/scheduler/templates/reminder.js';
-import { createRepoActivityTemplate } from '../../dist/infrastructure/scheduler/templates/repo-activity.js';
 import { webDigestTemplate } from '../../dist/infrastructure/scheduler/templates/web-digest.js';
 
 const INTERVAL_MS = 50 * 60_000;
@@ -70,18 +69,6 @@ describe('scheduler self-echo admission boundary', () => {
   const factories = [
     ['reminder', () => reminderTemplate],
     ['web-digest', () => webDigestTemplate],
-    [
-      'repo-activity',
-      () =>
-        createRepoActivityTemplate({
-          getGitHubToken: () => 'self-echo-fixture-token',
-          execFileAsync: async (file, args) => {
-            assert.equal(file, 'gh');
-            assert.equal(args[0], 'api');
-            return { stdout: '[]' };
-          },
-        }),
-    ],
     [
       'main-health',
       () =>

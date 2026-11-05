@@ -68,6 +68,8 @@ test('every tool the guidance names is mounted for Live; capture tools are never
   assert.doesNotMatch(deep, /audio_capture|开始录音了|已经开始录/);
   const meeting = LIVE_FRONT_DESK_SCENES.find((scene) => scene.id === 'meeting');
   assert.ok(meeting);
+  assert.doesNotMatch(meeting.deep, /read_meeting_artifact/);
+  assert.match(meeting.deep, /resourceRef 只是引用/);
   assert.match(meeting.deep, /三件事/, 'joining, reading an existing capture and starting a recording stay distinct');
   assert.match(meeting.deep, /不能只丢一句/, 'a missing tool is explained, not bounced back as a manual click');
 });
@@ -141,6 +143,14 @@ for (const householdToolsEnabled of [true, false]) {
       assert.ok(prompt.includes(liveFrontDeskFastGuidance(householdToolsEnabled)));
     } finally {
       await call.stop();
+    }
+  });
+}
+
+for (const tools of [true, false]) {
+  test(`Live fast/deep prompts have no notice-to-catch-up protocol (tools=${tools})`, () => {
+    for (const prompt of [dutyText(tools), liveRealtimePrompt({ catId: 'codex', householdToolsEnabled: tools })]) {
+      assert.doesNotMatch(prompt, /收到来信提示|freshness notice|acknowledgeHeld|readIntent.*unread/i);
     }
   });
 }

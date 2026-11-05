@@ -1,3 +1,4 @@
+import { deploymentDefaults } from '@cat-cafe/shared';
 // F102: Memory service factory — creates SQLite-backed memory services
 
 import { mkdirSync } from 'node:fs';
@@ -227,7 +228,7 @@ export async function createMemoryServices(config: MemoryConfig): Promise<Memory
     id: 'project:cat-cafe',
     kind: 'project',
     name: 'cat-cafe',
-    displayName: 'Clowder AI Project',
+    displayName: `${deploymentDefaults.brand.displayName} Project`,
     root: docsRoot,
     sensitivity: 'internal',
     scannerLevel: 0,

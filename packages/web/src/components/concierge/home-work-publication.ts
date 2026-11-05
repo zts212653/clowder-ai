@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { getThreadHref, pushThreadRouteWithHistory } from '../ThreadSidebar/thread-navigation';
+import { publicationContentRefSchema } from '../workbench/publication-surface';
 import type { HomeCommandInput, HomeOutcome } from './home-action-bridge';
 import { afterPaintUntil } from './home-after-paint';
 
@@ -12,7 +13,7 @@ const publication = z
     source: messageMediaPublicationSourceSchema,
     artifact: z
       .object({
-        contentRef: z.string().regex(/^prepared-media:[a-f0-9]{64}$/),
+        contentRef: publicationContentRefSchema,
         ownerRevision: z.number().int().positive().safe(),
       })
       .strict()

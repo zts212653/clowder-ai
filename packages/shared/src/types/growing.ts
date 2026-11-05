@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { entrustedWorkTaskExecutionV1Schema } from './entrusted-work-human-terminal.js';
 import { preparedArtifactSnapshotV1Schema } from './growing-artifact.js';
 import { developmentScopeV1Schema, developmentTaskRefSchema } from './growing-development.js';
+import { entrustedTaskDataControllerV1Schema } from './task-data-controller.js';
 
 const boundedRef = z.string().trim().min(1).max(1_000);
 const boundedText = z.string().trim().min(1).max(4_000);
@@ -188,6 +189,10 @@ const entrustedClosureSchema = z.discriminatedUnion('state', [
 export const entrustedWorkV1Schema = z
   .object({
     revision: revisionSchema,
+    /** Host-owned execution epoch. Absent on legacy contracts; never inferred from aggregate revision. */
+    executionAuthorityRevision: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
+    /** Current data-maintenance authority. This never replaces immutable admission or business execution authority. */
+    dataController: entrustedTaskDataControllerV1Schema.optional(),
     admission: entrustedAdmissionSchema,
     developmentScope: developmentScopeV1Schema.optional(),
     parentTaskRef: developmentTaskRefSchema.optional(),
@@ -229,6 +234,43 @@ export const NEEDS_ME_PRODUCER_IDS = [
   'f309.content_review',
   'f290.collective_work_result',
 ] as const;
+
+const producerAttentionUnavailableSourceV1Schema = z
+  .object({
+    producerId: z.enum(NEEDS_ME_PRODUCER_IDS),
+    status: z.literal('unavailable'),
+    reason: z.enum(['source_unavailable', 'source_incomplete', 'source_invalid', 'source_read_failed']),
+  })
+  .strict();
+
+/** Read coverage is explicit so one failed producer never masquerades as a complete empty snapshot. */
+export const producerAttentionCoverageV1Schema = z
+  .discriminatedUnion('state', [
+    z.object({ state: z.literal('complete') }).strict(),
+    z
+      .object({
+        state: z.literal('partial'),
+        unavailableSources: z
+          .array(producerAttentionUnavailableSourceV1Schema)
+          .min(1)
+          .max(NEEDS_ME_PRODUCER_IDS.length),
+      })
+      .strict(),
+  ])
+  .superRefine((coverage, context) => {
+    if (coverage.state !== 'partial') return;
+    const seen = new Set<string>();
+    coverage.unavailableSources.forEach((source, index) => {
+      if (seen.has(source.producerId)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['unavailableSources', index, 'producerId'],
+          message: 'producer attention coverage cannot repeat an unavailable source',
+        });
+      }
+      seen.add(source.producerId);
+    });
+  });
 
 const producerCoordinateSchema = z
   .object({
@@ -320,5 +362,6 @@ export type EntrustedWorkV1 = z.infer<typeof entrustedWorkV1Schema>;
 export type EntrustedWorkTaskRefV1 = z.infer<typeof entrustedWorkTaskRefV1Schema>;
 export type PhaseBNeedsMeProducerId = (typeof PHASE_B_NEEDS_ME_PRODUCER_IDS)[number];
 export type NeedsMeProducerId = (typeof NEEDS_ME_PRODUCER_IDS)[number];
+export type ProducerAttentionCoverageV1 = z.infer<typeof producerAttentionCoverageV1Schema>;
 export type ProducerAttentionReevaluationLinkV1 = z.infer<typeof producerAttentionReevaluationLinkV1Schema>;
 export type ProducerAttentionReceiptV1 = z.infer<typeof producerAttentionReceiptV1Schema>;

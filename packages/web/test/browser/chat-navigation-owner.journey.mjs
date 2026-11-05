@@ -6,6 +6,7 @@ import { test } from 'node:test';
 export function registerNavigationOwnerJourneys({ origin, browser, bundle }) {
   const threadId = 'chat-recovery';
   const records = Array.from({ length: 16 }, (_, index) => ({
+    from: { kind: 'agent', catId: 'opus' },
     id: `nav-${index + 1}`,
     type: 'assistant',
     catId: 'opus',
@@ -55,7 +56,7 @@ export function registerNavigationOwnerJourneys({ origin, browser, bundle }) {
         [data-message-piano-thumb], [data-message-piano-grab] {position:absolute;right:2px}
         [data-message-piano-thumb] {pointer-events:none;border:1px solid #333}
         [data-message-piano-grab] {z-index:0}
-        .ring-blue-400 {box-shadow:0 0 0 2px rgb(96 165 250)}
+        [data-message-jump-focus="true"] {box-shadow:0 0 0 2px rgb(96 165 250)}
         </style><div id="root"></div><script type="module" src="/proof.js"></script>`,
       });
     });
@@ -188,7 +189,7 @@ export function registerNavigationOwnerJourneys({ origin, browser, bundle }) {
               childList: true,
               subtree: true,
               attributes: true,
-              attributeFilter: ['class'],
+              attributeFilter: ['data-message-jump-focus'],
               attributeOldValue: true,
             });
             window.navigationHighlightObserver = observer;
@@ -216,7 +217,7 @@ export function registerNavigationOwnerJourneys({ origin, browser, bundle }) {
                 viewportTop: view.top,
                 viewportBottom: view.bottom,
                 visible: box.bottom > view.top && box.top < view.bottom,
-                highlighted: target.classList.contains('ring-blue-400'),
+                highlighted: target.dataset.messageJumpFocus === 'true',
                 scrollTop: viewport.scrollTop,
                 nodeToken: token(target),
                 isConnected: target.isConnected,
@@ -236,7 +237,7 @@ export function registerNavigationOwnerJourneys({ origin, browser, bundle }) {
             return (
               box.bottom > view.top &&
               box.top < view.bottom &&
-              target.classList.contains('ring-blue-400') &&
+              target.dataset.messageJumpFocus === 'true' &&
               saved.messageAnchor?.messageId === 'nav-4'
             );
           });
@@ -267,7 +268,7 @@ export function registerNavigationOwnerJourneys({ origin, browser, bundle }) {
             await page.screenshot({ path: path.join(evidenceDir, `${evidenceName}.png`) });
           }
           await page.waitForFunction(
-            () => !document.querySelector('[data-message-id="nav-4"]').classList.contains('ring-blue-400'),
+            () => document.querySelector('[data-message-id="nav-4"]').dataset.messageJumpFocus !== 'true',
           );
           const samples = await page.evaluate(() => window.navigationHighlightSamples);
           const nodeChanges = await page.evaluate(() => {

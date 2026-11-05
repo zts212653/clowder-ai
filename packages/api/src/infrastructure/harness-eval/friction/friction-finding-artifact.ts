@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { evalRepairDecisionExplanationV1Schema } from '@cat-cafe/shared';
 import { z } from 'zod';
 
 const findingKeySchema = z
@@ -57,6 +58,7 @@ export const FrictionAnalysisFindingInputV1Schema = z
     measurementResultRef: z.string().trim().min(1),
     sourceSignalRefs: nonEmptyRefArraySchema,
     repairTargetHint: RepairTargetHintV1Schema,
+    decisionExplanation: evalRepairDecisionExplanationV1Schema.optional(),
   })
   .strict()
   .superRefine((finding, ctx) => {
@@ -73,6 +75,13 @@ export const FrictionAnalysisFindingInputV1Schema = z
           code: z.ZodIssueCode.custom,
           path: ['approvalRequirement'],
           message: 'repair disposition requires Approval reason repair',
+        });
+      }
+      if (!finding.decisionExplanation) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['decisionExplanation'],
+          message: 'repair disposition requires an owner-supplied decision explanation',
         });
       }
       return;
@@ -124,6 +133,9 @@ export const FrictionAnalysisFindingV1Schema = z
     withdrawalCondition: z.string().trim().min(1),
     measurementResultRef: z.string().trim().min(1),
     sourceSignalRefs: nonEmptyRefArraySchema,
+    // Optional while old immutable finding artifacts remain readable. New
+    // repair inputs are required to publish it by the input refinement above.
+    decisionExplanation: evalRepairDecisionExplanationV1Schema.optional(),
     repairTargetResolution: repairTargetResolutionSchema,
   })
   .strict();

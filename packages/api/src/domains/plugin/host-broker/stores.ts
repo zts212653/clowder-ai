@@ -1,15 +1,18 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
-import type {
-  BrokerCallStore,
-  BrokerRuntimeLeaseStore,
-  BrokerSessionStore,
-  HostBrokerStore,
-  HostBrokerTransaction,
-} from './ports.js';
+import type { SnapshotReadDiagnostics } from '../diagnostics/observation-work.js';
+import type { HostBrokerStore, HostBrokerTransaction } from './ports.js';
+import { brokerReadConnection, brokerReadPorts, matchesBrokerPhase } from './read-ports.js';
 import { cloneHostBrokerSnapshot, emptyHostBrokerSnapshot, parseHostBrokerSnapshot } from './snapshot.js';
-import { emptyStaticFeatureLedger, type StaticFeatureLedger } from './static-feature-ledger.js';
+import {
+  emptyStaticFeatureLedger,
+  mergeStaticFeatures,
+  type StaticFeatureLedger,
+  selectStaticFeatures,
+  updateStaticFeatures,
+} from './static-feature-ledger.js';
+import { selectFeatureActivation } from './static-feature-selection.js';
 import type { BrokerCallRecord, BrokerRuntimeLeaseRecord, BrokerSessionRecord, HostBrokerSnapshot } from './types.js';
 import { HOST_BROKER_SCHEMA_VERSION, HostBrokerError } from './types.js';
 
@@ -47,35 +50,74 @@ function fileQueue(path: string): SerialQueue {
 }
 
 class MutableBrokerSnapshot implements HostBrokerTransaction {
+  private written = false;
   private featureLedger: StaticFeatureLedger | undefined;
   readonly staticFeatures = {
-    get: () => structuredClone(this.featureLedger ?? emptyStaticFeatureLedger()),
-    put: (ledger: StaticFeatureLedger) => {
-      this.featureLedger = structuredClone(ledger);
+    getPreference: (id: string, featureId: string) => {
+      const record = this.featureLedger?.preferences.find(
+        (r) => r.pluginInstanceId === id && r.featureId === featureId,
+      );
+      return record && structuredClone(record);
+    },
+    getForActivation: (id: string, featureId: string, sessionId: string) =>
+      selectFeatureActivation(this.featureLedger ?? emptyStaticFeatureLedger(), id, featureId, sessionId),
+    getActive: (id: string) => {
+      const ledger = selectStaticFeatures(this.featureLedger ?? emptyStaticFeatureLedger(), id);
+      return { ...ledger, leases: ledger.leases.filter((r) => r.state !== 'revoked') };
+    },
+    update: (ledger: StaticFeatureLedger) => {
+      this.featureLedger = updateStaticFeatures(this.featureLedger ?? emptyStaticFeatureLedger(), ledger);
+      this.written = true;
+    },
+    get: (instanceId?: string) => selectStaticFeatures(this.featureLedger ?? emptyStaticFeatureLedger(), instanceId),
+    getLease: (id: string) => {
+      const record = this.featureLedger?.leases.find((r) => r.executionLease === id);
+      return record && structuredClone(record);
+    },
+    put: (ledger: StaticFeatureLedger, instanceId?: string) => {
+      this.featureLedger = mergeStaticFeatures(this.featureLedger ?? emptyStaticFeatureLedger(), ledger, instanceId);
+      this.written = true;
     },
   };
   private readonly sessionRecords = new Map<string, BrokerSessionRecord>();
   private readonly runtimeLeaseRecords = new Map<string, BrokerRuntimeLeaseRecord>();
   private readonly callRecords = new Map<string, BrokerCallRecord>();
 
-  readonly sessions: BrokerSessionStore = {
-    getByConnectionId: (connectionId) => this.clone(this.sessionRecords.get(connectionId)),
-    getBySessionId: (brokerSessionId) =>
+  readonly sessions = {
+    getByConnectionId: (connectionId: string) => this.clone(this.sessionRecords.get(connectionId)),
+    getBySessionId: (brokerSessionId: string) =>
       this.clone([...this.sessionRecords.values()].find((record) => record.brokerSessionId === brokerSessionId)),
-    list: () => [...this.sessionRecords.values()].map((record) => structuredClone(record)),
-    put: (record) => this.sessionRecords.set(record.connectionId, structuredClone(record)),
+    list: (pluginInstanceId?: string, phase?: string | readonly string[]) =>
+      [...this.sessionRecords.values()]
+        .filter(
+          (r) => (!pluginInstanceId || r.pluginInstanceId === pluginInstanceId) && matchesBrokerPhase(r.phase, phase),
+        )
+        .map((record) => structuredClone(record)),
+    put: (record: BrokerSessionRecord) => {
+      this.sessionRecords.set(record.connectionId, structuredClone(record));
+      this.written = true;
+    },
   };
 
-  readonly runtimeLeases: BrokerRuntimeLeaseStore = {
-    get: (runtimeLeaseId) => this.clone(this.runtimeLeaseRecords.get(runtimeLeaseId)),
-    list: () => [...this.runtimeLeaseRecords.values()].map((record) => structuredClone(record)),
-    put: (record) => this.runtimeLeaseRecords.set(record.runtimeLeaseId, structuredClone(record)),
+  readonly runtimeLeases = {
+    get: (runtimeLeaseId: string) => this.clone(this.runtimeLeaseRecords.get(runtimeLeaseId)),
+    list: (state?: string | readonly string[]) =>
+      [...this.runtimeLeaseRecords.values()]
+        .filter((r) => matchesBrokerPhase(r.state, state))
+        .map((record) => structuredClone(record)),
+    put: (record: BrokerRuntimeLeaseRecord) => {
+      this.runtimeLeaseRecords.set(record.runtimeLeaseId, structuredClone(record));
+      this.written = true;
+    },
   };
 
-  readonly calls: BrokerCallStore = {
-    get: (ledgerKey) => this.clone(this.callRecords.get(ledgerKey)),
+  readonly calls = {
+    get: (ledgerKey: string) => this.clone(this.callRecords.get(ledgerKey)),
     list: () => [...this.callRecords.values()].map((record) => structuredClone(record)),
-    put: (record) => this.callRecords.set(record.ledgerKey, structuredClone(record)),
+    put: (record: BrokerCallRecord) => {
+      this.callRecords.set(record.ledgerKey, structuredClone(record));
+      this.written = true;
+    },
   };
 
   constructor(snapshot: HostBrokerSnapshot) {
@@ -85,6 +127,10 @@ class MutableBrokerSnapshot implements HostBrokerTransaction {
       this.runtimeLeaseRecords.set(record.runtimeLeaseId, structuredClone(record));
     }
     for (const record of snapshot.calls) this.callRecords.set(record.ledgerKey, structuredClone(record));
+  }
+
+  hasWrites(): boolean {
+    return this.written;
   }
 
   toSnapshot(): HostBrokerSnapshot {
@@ -103,6 +149,10 @@ class MutableBrokerSnapshot implements HostBrokerTransaction {
 }
 
 export class MemoryHostBrokerStore implements HostBrokerStore {
+  readonly read = brokerReadPorts(this);
+  readConnection(id: string) {
+    return brokerReadConnection(this, id);
+  }
   private current: HostBrokerSnapshot;
   private readonly queue = new SerialQueue();
 
@@ -110,9 +160,11 @@ export class MemoryHostBrokerStore implements HostBrokerStore {
     this.current = parseHostBrokerSnapshot(initial);
   }
 
-  async snapshot(): Promise<HostBrokerSnapshot> {
-    await this.queue.settled();
-    return cloneHostBrokerSnapshot(this.current);
+  async snapshot(diagnostics?: SnapshotReadDiagnostics): Promise<HostBrokerSnapshot> {
+    if (diagnostics) await diagnostics.measure('queue', () => this.queue.settled());
+    else await this.queue.settled();
+    const clone = () => cloneHostBrokerSnapshot(this.current);
+    return diagnostics ? diagnostics.sync('clone', clone) : clone();
   }
 
   async transaction<T>(work: (transaction: HostBrokerTransaction) => Promise<T> | T): Promise<T> {
@@ -142,6 +194,10 @@ function isNotFound(error: unknown): boolean {
 }
 
 export class FileHostBrokerStore implements HostBrokerStore {
+  readonly read = brokerReadPorts(this);
+  readConnection(id: string) {
+    return brokerReadConnection(this, id);
+  }
   readonly path: string;
   private readonly queue: SerialQueue;
   private readonly fileOps: HostBrokerFileOps;
@@ -152,15 +208,21 @@ export class FileHostBrokerStore implements HostBrokerStore {
     this.fileOps = { readFile, mkdir, writeFile, rename, unlink, ...options.fileOps };
   }
 
-  async snapshot(): Promise<HostBrokerSnapshot> {
-    await this.queue.settled();
-    return cloneHostBrokerSnapshot(await this.load());
+  async snapshot(diagnostics?: SnapshotReadDiagnostics): Promise<HostBrokerSnapshot> {
+    if (diagnostics) await diagnostics.measure('queue', () => this.queue.settled());
+    else await this.queue.settled();
+    const loaded = await this.load(diagnostics);
+    const clone = () => cloneHostBrokerSnapshot(loaded);
+    return diagnostics ? diagnostics.sync('clone', clone) : clone();
   }
 
   async transaction<T>(work: (transaction: HostBrokerTransaction) => Promise<T> | T): Promise<T> {
     return this.queue.run(async () => {
       const mutable = new MutableBrokerSnapshot(await this.load());
       const result = await work(mutable);
+      // Keep the fresh read and serialized authority/effect boundary. A callback
+      // that used no write port must not turn a check into a full JSON commit.
+      if (!mutable.hasWrites()) return result;
       const next = mutable.toSnapshot();
       await this.fileOps.mkdir(dirname(this.path), { recursive: true });
       const temporaryPath = `${this.path}.tmp-${process.pid}-${randomUUID()}`;
@@ -182,20 +244,33 @@ export class FileHostBrokerStore implements HostBrokerStore {
     });
   }
 
-  private async load(): Promise<HostBrokerSnapshot> {
+  private async load(diagnostics?: SnapshotReadDiagnostics): Promise<HostBrokerSnapshot> {
+    let migrated = false;
+    try {
+      await access(`${this.path}.state.sqlite`);
+      migrated = true;
+    } catch (error) {
+      if (!isNotFound(error)) throw error;
+    }
+    if (migrated)
+      throw new HostBrokerError('BROKER_INVARIANT', 'Legacy JSON store was migrated; use the SQLite state owner');
     let raw: string;
     try {
-      raw = await this.fileOps.readFile(this.path, 'utf8');
+      const read = () => this.fileOps.readFile(this.path, 'utf8');
+      raw = await (diagnostics ? diagnostics.measure('read', read) : read());
     } catch (error) {
       if (isNotFound(error)) return emptyHostBrokerSnapshot();
       throw error;
     }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      throw new HostBrokerError('CORRUPT_SNAPSHOT', `Host Broker snapshot at ${this.path} is not valid JSON`);
-    }
-    return parseHostBrokerSnapshot(parsed);
+    const parse = () => {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        throw new HostBrokerError('CORRUPT_SNAPSHOT', `Host Broker snapshot at ${this.path} is not valid JSON`);
+      }
+      return parseHostBrokerSnapshot(parsed);
+    };
+    return diagnostics ? diagnostics.sync('parse', parse) : parse();
   }
 }

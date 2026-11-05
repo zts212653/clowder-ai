@@ -12,6 +12,46 @@ describe('CatCatalogSubscriber', () => {
     cleanups.length = 0;
   });
 
+  it('waits for routing readiness, but not optional prompt warming', async () => {
+    let releaseRouting;
+    let releaseWarm;
+    let ready = false;
+    const onWarm = mock.fn(
+      () =>
+        new Promise((resolve) => {
+          releaseWarm = resolve;
+        }),
+    );
+    const sub = createCatCatalogSubscriber({
+      onReconcile: () =>
+        new Promise((resolve) => {
+          releaseRouting = resolve;
+        }),
+      onWarm,
+      log: { info() {}, warn() {} },
+    });
+    cleanups.push(() => sub.unsubscribe());
+    const done = configEventBus
+      .emitChangeAsync({
+        source: 'cat-config',
+        scope: 'domain',
+        changedKeys: ['test-cat'],
+        changeSetId: createChangeSetId(),
+        timestamp: Date.now(),
+      })
+      .then(() => {
+        ready = true;
+      });
+    await new Promise(setImmediate);
+    assert.equal(ready, false);
+    assert.equal(onWarm.mock.callCount(), 0);
+    releaseRouting();
+    await done;
+    assert.equal(onWarm.mock.callCount(), 1, 'starts warming after the registry is ready');
+    assert.equal(ready, true, 'save does not wait for subprocess prompt compilation');
+    releaseWarm();
+  });
+
   it('emitChangeAsync awaits subscriber before resolving (P1-1: consistency)', async () => {
     let reconciled = false;
     const onReconcile = mock.fn(async () => {

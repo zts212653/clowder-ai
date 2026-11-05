@@ -44,6 +44,7 @@ export async function createProposalTestContext({
 
   const app = Fastify();
   await app.register(callbacksRoutes, {
+    proposalProjectRoot: projectRoot,
     registry,
     messageStore,
     taskStore,

@@ -28,6 +28,7 @@
 }
 .solution-experiment {
   background: var(--console-card-bg);
+  --chat-background-role: console-card;
   border: 1px solid var(--cafe-border);
   border-radius: 12px;
   padding: 22px;
@@ -36,6 +37,7 @@
   width: fit-content;
   padding: 2px 7px;
   background: var(--cafe-surface-sunken);
+  --chat-background-role: cafe-sunken;
   color: var(--cafe-text-muted);
   font-size: var(--console-font-label);
   border-radius: 4px;
@@ -72,6 +74,7 @@
   gap: 12px;
   color: var(--cafe-text-secondary);
   background: var(--cafe-surface-sunken);
+  --chat-background-role: cafe-sunken;
   padding: 16px;
   border-radius: 8px;
 }
@@ -96,6 +99,7 @@
 .solution-comparison-table [data-regression="true"] {
   border-left: 3px solid var(--content-category-diagnosis);
   background: var(--cafe-surface-sunken);
+  --chat-background-role: cafe-sunken;
 }
 .solution-run-context,
 .solution-reference,
@@ -130,6 +134,7 @@
 .solution-warning {
   border-left: 3px solid var(--content-category-diagnosis);
   background: var(--cafe-surface-sunken);
+  --chat-background-role: cafe-sunken;
   padding: 12px;
   color: var(--cafe-text-secondary);
 }
@@ -154,6 +159,7 @@
   overflow-wrap: anywhere;
   font-size: var(--console-font-xs);
   background: var(--cafe-surface-sunken);
+  --chat-background-role: cafe-sunken;
   padding: 16px;
   border-radius: 8px;
   margin: 12px 0;

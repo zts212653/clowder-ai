@@ -1,8 +1,20 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { type SidebarSnapshotRow, useSidebarProjectionStore } from '@/stores/sidebarProjectionStore';
 import { renderChatContainer, resetChatContainerMocks, storeState } from './chat-container-test-helpers';
+
+const brandDisplayName = vi.hoisted(() => 'Synthetic Welcome Écran');
+vi.mock('@cat-cafe/shared', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@cat-cafe/shared')>();
+  return {
+    ...actual,
+    deploymentDefaults: {
+      ...actual.deploymentDefaults,
+      brand: { ...actual.deploymentDefaults.brand, displayName: brandDisplayName },
+    },
+  };
+});
 
 let host: HTMLDivElement;
 let root: Root;
@@ -44,6 +56,13 @@ afterEach(() => {
   localStorage.removeItem('cat-cafe:first-run-quest-skipped');
   delete (globalThis as { React?: typeof React }).React;
   delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
+});
+
+describe('ChatContainer selected deployment brand', () => {
+  it('renders the configured display name in the empty-conversation welcome', async () => {
+    await render();
+    expect(host.textContent).toContain(`欢迎来到 ${brandDisplayName}!`);
+  });
 });
 
 describe('ChatContainer URL research hint', () => {

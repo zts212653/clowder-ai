@@ -6,7 +6,7 @@ import {
   type UnixProcessIdentity,
 } from '../../utils/cli-process-ownership.js';
 import type { DurableManagedGateJob } from './durable-managed-gate-job.js';
-import { openSupervisorStore, transaction } from './managed-job-database.js';
+import { closeSupervisorStore, openSupervisorStore, transaction } from './managed-job-database.js';
 import { writeManagedJobLedger } from './managed-job-ledger.js';
 
 export const CURRENT_DURABLE_GATE_SUPERVISOR_EPOCH = randomUUID();
@@ -25,8 +25,16 @@ export class DurableGateSupervisorFenceError extends Error {
   }
 }
 
+let supervisorBirthIdentity: UnixProcessIdentity | null = null;
+
 function currentSupervisorIdentity(): UnixProcessIdentity | null {
-  return readUnixProcessSnapshotSync({ pids: [process.pid] })?.get(process.pid) ?? null;
+  // This process's birth identity cannot change during its lifetime. Observe it
+  // before first admission; renewal authority comes from the transactional lease,
+  // not a new ps invocation. Unknown initial observations remain retryable.
+  if (supervisorBirthIdentity?.pid === process.pid) return supervisorBirthIdentity;
+  const observed = readUnixProcessSnapshotSync({ pids: [process.pid] })?.get(process.pid);
+  if (observed) supervisorBirthIdentity = { ...observed };
+  return observed ?? null;
 }
 
 function previousSupervisorIsProvenDead(current: {
@@ -112,7 +120,7 @@ export function claimDurableGateSupervisor(
       return { supervisorEpoch: job.supervisorEpoch, fencingToken, leaseUntil };
     });
   } finally {
-    database.close();
+    closeSupervisorStore(database);
   }
 }
 
@@ -167,6 +175,6 @@ export function writeDurableGateRecordFenced(
       return true;
     });
   } finally {
-    database.close();
+    closeSupervisorStore(database);
   }
 }

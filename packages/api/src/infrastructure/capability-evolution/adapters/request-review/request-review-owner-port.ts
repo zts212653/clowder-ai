@@ -15,6 +15,8 @@ export interface RequestReviewOwnerPortOptions {
   repoRoot: string;
 }
 
+const HARNESS_LINEAGE_INDEX_FILE = 'docs/discussions/f314-incident-archive/lineage/lineage-index.json' as const;
+
 const PACKET_SHAPES = [
   ['Review-Subject-Ref:', 'Accepted-Source-Ref:', 'Accepted-Revision:'],
   ['Review-Subject-Ref:', 'Reviewed-Head-Sha:', 'Accepted-Source-Ref:', 'Accepted-Revision:'],
@@ -142,6 +144,10 @@ export function createRequestReviewOwnerPort(options: RequestReviewOwnerPortOpti
         });
       }
       return versions;
+    },
+
+    async readHarnessLineageAt(commitOid: string): Promise<unknown> {
+      return JSON.parse(await git(['show', `${commitOid}:${HARNESS_LINEAGE_INDEX_FILE}`]));
     },
   };
 }

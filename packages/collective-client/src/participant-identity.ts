@@ -1,4 +1,5 @@
 import type { CollectiveEventEnvelope, CollectiveParticipant, CollectiveRecipient } from './client-types.js';
+import { participantLabel } from './participant-label.js';
 
 export function participantKey(
   participant: Pick<CollectiveParticipant, 'serviceInstanceId' | 'connectionId' | 'catId'>,
@@ -37,7 +38,9 @@ export function mentionSelectionForEvent(
       item.channelIds.includes(channelId),
   );
   return participant
-    ? { selection: { recipient: participantRecipient(participant), label: participant.displayName } }
+    ? {
+        selection: { recipient: participantRecipient(participant), label: participantLabel(participant, participants) },
+      }
     : { error: '这只猫当前未在本频道参与。' };
 }
 

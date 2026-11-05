@@ -208,8 +208,8 @@ test('F326 multiple real causal sources select the accepted canonical Task inste
   t.after(f.cleanup);
   const second = f.messages.append({
     userId: f.principal.userId,
+    from: { kind: 'user', userId: f.principal.userId },
     threadId: f.message.threadId,
-    catId: null,
     mentions: [f.principal.actor.actorId],
     content: 'Please take over this second opening opinion',
     timestamp: Date.now() + 1,
@@ -238,8 +238,8 @@ test('F326 an 8000-character canonical opinion remains complete through Task tak
   t.after(f.cleanup);
   const long = f.messages.append({
     userId: f.principal.userId,
+    from: { kind: 'user', userId: f.principal.userId },
     threadId: f.message.threadId,
-    catId: null,
     mentions: [f.principal.actor.actorId],
     content: '改'.repeat(8000),
     timestamp: Date.now() + 1,

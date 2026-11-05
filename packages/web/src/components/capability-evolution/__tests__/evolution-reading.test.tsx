@@ -32,12 +32,14 @@ describe('F311 exact version reading in shared owner surfaces', () => {
   let current: string;
   let unavailable: boolean;
   let wrongVersion: boolean;
+  let adoptedVersions: string[];
 
   beforeEach(() => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     current = 'v2';
     unavailable = false;
     wrongVersion = false;
+    adoptedVersions = ['v1'];
     useEvolutionReading.setState({ programs: {}, workspaceProgramIds: {} });
     useF307ExperienceWorkbenchStore.setState({
       layout: createInitialWorkbenchState([surface]),
@@ -58,6 +60,7 @@ describe('F311 exact version reading in shared owner surfaces', () => {
         return Response.json(assetReviewFixture(wrongVersion ? 'v3' : version, current));
       }
       const projection = programFixture('observing');
+      projection.program.currentAssetVersionRefs = adoptedVersions.map((version) => assetRef(version));
       return Response.json(path.endsWith('/programs') ? { programs: [projection] } : projection);
     });
   });
@@ -84,7 +87,7 @@ describe('F311 exact version reading in shared owner surfaces', () => {
   }
   const program = () => host.querySelector<HTMLElement>('[data-testid="evolution-program-surface"]')!;
 
-  it('keeps selected history and scroll while a fresh owner adoption updates all mounted consumers', async () => {
+  it('keeps selected history and scroll while a fresh owner version updates without rewriting adoption', async () => {
     openEvolutionReading(PROGRAM_ID, 'history', assetRef('v1'));
     await render();
     const selected = useEvolutionReading.getState().programs[PROGRAM_ID];
@@ -97,16 +100,26 @@ describe('F311 exact version reading in shared owner surfaces', () => {
     });
     current = 'v3';
     await act(async () => window.dispatchEvent(new Event('focus')));
-    expect(program().textContent).toContain('v3当前采用');
+    expect(program().textContent).toContain('v3来源当前版本');
+    expect(program().textContent).toContain('最初采用当前采用');
     const workspaceHome = host.querySelector('[data-testid="capability-evolution-workspace"]')?.textContent;
-    expect(workspaceHome).toContain('当前采用：保留的另一个候选');
-    expect(workspaceHome).not.toContain('当前采用：v3');
+    expect(workspaceHome).toContain('当前采用：最初采用');
+    expect(workspaceHome).not.toContain('当前采用：保留的另一个候选');
     expect(useEvolutionReading.getState().programs[PROGRAM_ID]?.selectedVersionRef?.version).toBe('v1');
     expect(program().scrollTop).toBe(180);
     await act(async () => window.dispatchEvent(new Event('pagehide')));
     expect(useEvolutionReading.getState().programs[PROGRAM_ID]?.scroll.history).toBe(180);
     expect(program().textContent).toContain('v1 comparison_baseline');
     expect(program().textContent).not.toContain('后续任务已实际使用这个版本');
+  });
+
+  it('does not call the owner current file adopted when the Program has no adoption receipt', async () => {
+    adoptedVersions = [];
+    openEvolutionReading(PROGRAM_ID, 'history');
+    await render();
+    expect(program().textContent).toContain('v2来源当前版本');
+    expect(program().textContent).not.toContain('v2当前采用');
+    expect(host.querySelector('[data-testid="capability-evolution-workspace"]')?.textContent).toContain('尚无采用记录');
   });
 
   it('keeps three evidence roles bound to the selected version and needs an applied-use receipt', async () => {
@@ -130,19 +143,18 @@ describe('F311 exact version reading in shared owner surfaces', () => {
     expect(useEvolutionReading.getState().programs[PROGRAM_ID]?.selectedVersionRef?.version).toBe('missing-version');
   });
 
-  it('clears live current claims on loss of owner read authorization across every consumer', async () => {
+  it('clears owner-current claims on authorization loss while retaining Program adoption truth', async () => {
     await render();
     await click('探索进化', program());
     await click('改动与依据', program());
-    expect(program().querySelector('[aria-label="当前沿用"]')?.textContent).toContain('补充边界示例');
+    expect(program().querySelector('[aria-label="当前采用"]')?.textContent).toContain('最初采用');
     unavailable = true;
     await act(async () => window.dispatchEvent(new Event('focus')));
-    expect(program().querySelector('[aria-label="当前沿用"]')?.textContent ?? '').not.toContain('补充边界示例');
     expect(program().querySelector('[aria-label="阅读版本"]')?.textContent ?? program().textContent).not.toContain(
-      'v2当前采用',
+      'v2来源当前版本',
     );
-    expect(host.querySelector('[data-testid="capability-evolution-workspace"]')?.textContent).not.toContain(
-      '当前采用 v2',
+    expect(host.querySelector('[data-testid="capability-evolution-workspace"]')?.textContent).toContain(
+      '当前采用 1 个已记录版本',
     );
   });
 
@@ -239,7 +251,8 @@ describe('F311 exact version reading in shared owner surfaces', () => {
       view: 'history',
       versionRef: assetRef('v1'),
     });
-    expect(program().textContent).toContain('v2当前采用');
+    expect(program().textContent).toContain('v2来源当前版本');
+    expect(program().textContent).toContain('最初采用当前采用');
   });
 
   it('persists only reading preferences and consumes exact source links once', () => {

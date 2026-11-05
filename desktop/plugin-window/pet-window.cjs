@@ -2,10 +2,72 @@ const { petMetrics, placePetPanel, validBallSize } = require('./pet-placement.cj
 const { createPetTravel } = require('./pet-travel.cjs');
 const inside = (p, r) => r && p.x >= r.x && p.x <= r.x + r.width && p.y >= r.y && p.y <= r.y + r.height;
 const clamp = (value, low, high) => Math.max(low, Math.min(value, high));
+const exactKeys = (value, allowed) =>
+  value &&
+  typeof value === 'object' &&
+  !Array.isArray(value) &&
+  Object.keys(value).every((key) => allowed.includes(key));
+function validCallLayout(value) {
+  if (!exactKeys(value, ['presentation', 'bubble']) || !['lite', 'controls'].includes(value.presentation)) return false;
+  if (value.bubble === undefined) return true;
+  return (
+    exactKeys(value.bubble, ['width', 'height']) &&
+    Object.keys(value.bubble).length === 2 &&
+    Number.isInteger(value.bubble.width) &&
+    value.bubble.width >= 120 &&
+    value.bubble.width <= 420 &&
+    Number.isInteger(value.bubble.height) &&
+    value.bubble.height >= 32 &&
+    value.bubble.height <= 500
+  );
+}
+const panelKinds = new Set([
+  'none',
+  'bubble',
+  'actions',
+  'menu',
+  'chat',
+  'decisions',
+  'transcript',
+  'settings',
+  'app-assist',
+]);
+const validDimension = (value, minimum, maximum) => Number.isInteger(value) && value >= minimum && value <= maximum;
+function validLayoutCommand(command) {
+  return (
+    panelKinds.has(command.panel) &&
+    validDimension(command.width, 120, 420) &&
+    validDimension(command.height, 32, 500) &&
+    (command.call === undefined || (command.panel === 'actions' && validCallLayout(command.call)))
+  );
+}
+function copyPanelRequest(command) {
+  if (command.panel === 'none') return undefined;
+  return {
+    kind: command.panel,
+    width: command.width,
+    height: command.height,
+    ...(command.call
+      ? {
+          call: {
+            presentation: command.call.presentation,
+            ...(command.call.bubble ? { bubble: { ...command.call.bubble } } : {}),
+          },
+        }
+      : {}),
+  };
+}
 
 /** Own-window presentation only. Renderer never chooses a display, absolute
  * desktop coordinate, another window, or an unbounded drag lifetime. */
 function createPetWindow({ win, screen, publish, motionLease, travelOptions = {}, now = Date.now }) {
+  // Native placement and hit testing use DIP coordinates. Page/pinch zoom must
+  // not silently shrink the CSS viewport; the persisted ballSize owns sizing.
+  void win.webContents?.setVisualZoomLevelLimits?.(1, 1);
+  const normalizePageScale = () => {
+    const zoom = win.webContents?.getZoomFactor?.();
+    if (zoom !== undefined && zoom !== 1) win.webContents.setZoomFactor(1);
+  };
   let anchor;
   let layout;
   let dragging;
@@ -22,6 +84,7 @@ function createPetWindow({ win, screen, publish, motionLease, travelOptions = {}
       bounds: next,
       pet: { ...layout.pet, x: layout.pet.x + dx, y: layout.pet.y + dy },
       panel: layout.panel && { ...layout.panel, x: layout.panel.x + dx, y: layout.panel.y + dy },
+      bubble: layout.bubble && { ...layout.bubble, x: layout.bubble.x + dx, y: layout.bubble.y + dy },
     };
     anchor = { x: layout.pet.x, y: layout.pet.y };
   }
@@ -36,6 +99,7 @@ function createPetWindow({ win, screen, publish, motionLease, travelOptions = {}
         })
       : null;
   function apply(panel, pointer) {
+    normalizePageScale();
     const bounds = win.getBounds();
     const size = petMetrics(ballSize).pet;
     anchor ??= { x: bounds.x + (bounds.width - size.width) / 2, y: bounds.y + bounds.height - size.height - 8 };
@@ -51,6 +115,16 @@ function createPetWindow({ win, screen, publish, motionLease, travelOptions = {}
         width: layout.panel?.width ?? 0,
         height: layout.panel?.height ?? 0,
       },
+      ...(layout.bubble
+        ? {
+            bubble: {
+              x: layout.bubble.x - layout.bounds.x,
+              y: layout.bubble.y - layout.bounds.y,
+              width: layout.bubble.width,
+              height: layout.bubble.height,
+            },
+          }
+        : {}),
       width: layout.bounds.width,
       height: layout.bounds.height,
     };
@@ -119,6 +193,7 @@ function createPetWindow({ win, screen, publish, motionLease, travelOptions = {}
   }
   function tick() {
     if (win.isDestroyed() || !layout) return;
+    normalizePageScale();
     const cursor = screen.getCursorScreenPoint();
     updateDrag(cursor);
     const ignore =
@@ -140,62 +215,54 @@ function createPetWindow({ win, screen, publish, motionLease, travelOptions = {}
     }
     return { kind: 'ok' };
   }
+  function requestLayout(command) {
+    if (!validLayoutCommand(command)) return { kind: 'error', code: 'invalid_request' };
+    timer ??= setInterval(tick, 32);
+    timer.unref?.();
+    if (command.panel !== panelKind) menuPointer = command.panel === 'menu' ? screen.getCursorScreenPoint() : undefined;
+    panelKind = command.panel;
+    panelRequest = copyPanelRequest(command);
+    const reply = apply(panelRequest, menuPointer);
+    if (command.panel === 'none') travel?.resume();
+    else travel?.pause();
+    return reply;
+  }
+  function requestDrag(command, activated) {
+    if (command.phase === 'end') return endDrag();
+    if (command.phase !== 'start') return { kind: 'error', code: 'invalid_request' };
+    if (!activated || !layout || !inside(screen.getCursorScreenPoint(), layout.pet))
+      return { kind: 'error', code: 'permission_required' };
+    travel?.pause();
+    dragging = {
+      anchor: { x: layout.pet.x, y: layout.pet.y },
+      cursor: screen.getCursorScreenPoint(),
+      at: now(),
+      moved: false,
+    };
+    return { kind: 'ok' };
+  }
+  function requestReset(activated) {
+    if (!activated) return { kind: 'error', code: 'permission_required' };
+    dragging = undefined;
+    resetPosition();
+    return { kind: 'ok' };
+  }
+  function requestHide(activated) {
+    if (!activated) return { kind: 'error', code: 'permission_required' };
+    dragging = undefined;
+    travel?.pause();
+    win.hide();
+    return { kind: 'ok' };
+  }
+  function request(command, activated) {
+    if (command.kind === 'view.layout') return requestLayout(command);
+    if (command.kind === 'view.drag') return requestDrag(command, activated);
+    if (command.kind === 'view.reset') return requestReset(activated);
+    if (command.kind === 'view.hide') return requestHide(activated);
+    return null;
+  }
   return {
-    request(command, activated) {
-      if (command.kind === 'view.layout') {
-        if (
-          !['none', 'bubble', 'actions', 'menu', 'chat', 'decisions', 'transcript', 'settings'].includes(
-            command.panel,
-          ) ||
-          !Number.isInteger(command.width) ||
-          command.width < 120 ||
-          command.width > 420 ||
-          !Number.isInteger(command.height) ||
-          command.height < 32 ||
-          command.height > 500
-        )
-          return { kind: 'error', code: 'invalid_request' };
-        timer ??= setInterval(tick, 32);
-        timer.unref?.();
-        if (command.panel !== panelKind)
-          menuPointer = command.panel === 'menu' ? screen.getCursorScreenPoint() : undefined;
-        panelKind = command.panel;
-        panelRequest =
-          command.panel === 'none' ? undefined : { kind: command.panel, width: command.width, height: command.height };
-        const reply = apply(panelRequest, menuPointer);
-        if (command.panel === 'none') travel?.resume();
-        else travel?.pause();
-        return reply;
-      }
-      if (command.kind === 'view.drag') {
-        if (command.phase === 'end') return endDrag();
-        if (command.phase !== 'start') return { kind: 'error', code: 'invalid_request' };
-        if (!activated || !layout || !inside(screen.getCursorScreenPoint(), layout.pet))
-          return { kind: 'error', code: 'permission_required' };
-        travel?.pause();
-        dragging = {
-          anchor: { x: layout.pet.x, y: layout.pet.y },
-          cursor: screen.getCursorScreenPoint(),
-          at: now(),
-          moved: false,
-        };
-        return { kind: 'ok' };
-      }
-      if (command.kind === 'view.reset') {
-        if (!activated) return { kind: 'error', code: 'permission_required' };
-        dragging = undefined;
-        resetPosition();
-        return { kind: 'ok' };
-      }
-      if (command.kind === 'view.hide') {
-        if (!activated) return { kind: 'error', code: 'permission_required' };
-        dragging = undefined;
-        travel?.pause();
-        win.hide();
-        return { kind: 'ok' };
-      }
-      return null;
-    },
+    request,
     dismiss() {
       dragging = undefined;
       travel?.pause();

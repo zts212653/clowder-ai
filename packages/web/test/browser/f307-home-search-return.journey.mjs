@@ -466,8 +466,15 @@ async function runHomeWorksReturnCase({ browser, baseUrl, evidenceDir }, width, 
     const url = new URL(request.url());
     let response = realSurfaceApiResponse(request, false);
     if (url.pathname === `/api/threads/${THREAD_ID}/artifacts`) {
+      const artifacts = returning ? [companion('newer.txt'), ...initial] : initial;
       response = {
-        body: { threadId: THREAD_ID, artifacts: returning ? [companion('newer.txt'), ...initial] : initial },
+        body: {
+          threadId: THREAD_ID,
+          artifacts,
+          ...(url.searchParams.get('view') === 'works'
+            ? { view: 'works', complete: true, total: artifacts.length, workLineage: 'resolved' }
+            : {}),
+        },
       };
     }
     if (url.pathname === '/api/workspace/resolve-file-source' && request.method() === 'POST') {

@@ -59,37 +59,7 @@ Actor 类型、仓库归属、`authorAssociation` 都不是 predicate。Bot CI �
 
 ## 注册示例
 
-```text
-# 普通：跟踪这个 PR（绝大多数情况就是这一行）
-cat_cafe_register_pr_tracking(repoFullName="owner/repo", prNumber=42)
-
-# 高级：只等外部作者 push
-cat_cafe_register_pr_tracking(
-  repoFullName="owner/repo",
-  prNumber=42,
-  when=[{ kind: "pr_head_changed" }],
-  nextStep="Re-lock the exact HEAD and review the delta.",
-  expiresAt=<future unix ms>  # 可选；省略则没有时间到期
-)
-
-# 等 CI 到终态
-cat_cafe_register_pr_tracking(
-  repoFullName="owner/repo",
-  prNumber=42,
-  when=[{ kind: "pr_ci_terminal" }, { kind: "pr_became_conflicting" }],
-  nextStep="Re-check mergeability and continue merge-gate.",
-  expiresAt=<future unix ms>  # 可选；省略则没有时间到期
-)
-
-# Codex connector 已对 exact trigger 留下 EYES 后，等该结果
-cat_cafe_register_pr_tracking(
-  repoFullName="owner/repo",
-  prNumber=42,
-  when=[{ kind: "pr_review_result_available", triggerCommentId: 123456789 }],
-  nextStep="Consume the exact-HEAD cloud review verdict.",
-  expiresAt=<future unix ms>  # 可选；省略则没有时间到期
-)
-```
+先用 `tool_search` 查找已安装 GitHub 插件的 PR 跟踪工具，按其 schema 提交 `repoFullName`、`prNumber` 和唯一 `registrationId`；未知响应后重试时复用该 ID 与参数。普通跟踪省略 `when`；仅等 CI、冲突、HEAD 或 review 时，显式选择对应 predicate。等待已登记成功才进入事件驱动。
 
 `nextStep` 可选、只显示、不解析；省略时服务端写一条确定性的。它不会变成隐藏的 mode。baseline 由服务端实时读取，调用方不能提交 HEAD、cursor 或 CI bucket。
 

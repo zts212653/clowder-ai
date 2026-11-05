@@ -80,6 +80,7 @@ const patchConciergeConfigSchema = z
     ballSize: z.number().int().min(BALL_SIZE_MIN).max(BALL_SIZE_MAX),
     /** E4: autonomous behavior engine toggle */
     behaviorEnabled: z.boolean(),
+    appAssistEnabled: z.boolean(),
     householdReadsAllowed: z.boolean(),
   })
   .partial()
@@ -465,7 +466,8 @@ export const conciergeRoutes: FastifyPluginAsync<ConciergeRoutesOptions> = async
         opts.configWriteTimeoutMs ?? 3000,
       );
       writeTimer.unref();
-      await conciergeConfigStore.put(userId, updated);
+      if (conciergeConfigStore.patch) await conciergeConfigStore.patch(userId, patch);
+      else await conciergeConfigStore.put(userId, updated);
       return updated;
     };
     let updated: ConciergeConfig;

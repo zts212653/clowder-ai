@@ -1,10 +1,13 @@
 import type {
+  CollectiveAccountabilityAttentionItem,
   RichInteractiveBlock,
   RuntimeInteractionRecord,
   UnifiedAttentionItemV1,
   UnifiedAttentionReadV1,
   UnifiedAttentionVisibleApproval,
 } from '@cat-cafe/shared';
+import { collectiveAccountabilityAttentionItemSchema, collectiveProjectAttentionItemSchema } from '@cat-cafe/shared';
+import type { CollectiveAccountabilityAttentionSourceRead } from './companion-collective-accountability-source.js';
 import { projectDecisionItems } from './companion-decision-items.js';
 import { type DecisionPersonalViewInput, selectDecisionPersonalItems } from './companion-decision-personal-view.js';
 import {
@@ -29,6 +32,7 @@ function projectionSources(
   observedAt: number,
   approvalCoverage: 'complete' | 'partial' | 'unknown' | undefined,
   needsMeCoverage: 'complete' | 'partial' | 'unknown' | undefined,
+  collectiveAccountability: CollectiveAccountabilityAttentionSourceRead | undefined,
 ) {
   const base =
     sourceReads ??
@@ -36,7 +40,14 @@ function projectionSources(
       approvals: sourceRead('all_registered_F246_producers', observedAt, approvalCoverage),
       needsMe: sourceRead('current_linked_F310_five_producers', observedAt, needsMeCoverage),
     } satisfies ProjectionSourceReads);
-  return { ...base, ...(userMentions ? { userMentions: userMentions.state } : {}) };
+  return {
+    ...base,
+    ...(collectiveAccountability ? { collectiveAccountabilityRequests: collectiveAccountability.state } : {}),
+    ...(collectiveAccountability?.projectRead
+      ? { collectiveProjectAttention: collectiveAccountability.projectRead.state }
+      : {}),
+    ...(userMentions ? { userMentions: userMentions.state } : {}),
+  };
 }
 
 function exactCountFields(input: {
@@ -102,6 +113,74 @@ function legacyVectors(selectedItems: UnifiedAttentionItemV1[]) {
   return { approvalItems, otherNeedsMe };
 }
 
+function collectiveAccountabilityItems(
+  source: CollectiveAccountabilityAttentionSourceRead | undefined,
+  reasons: Set<string>,
+): UnifiedAttentionItemV1[] {
+  if (!source) return [];
+  for (const reason of source.reasons) reasons.add(reason);
+  const items: UnifiedAttentionItemV1[] = [];
+  const seen = new Set<string>();
+  for (const candidate of source.items) {
+    const parsed = collectiveAccountabilityAttentionItemSchema.safeParse(candidate);
+    if (!parsed.success) {
+      reasons.add('collective_accountability_item_invalid');
+      continue;
+    }
+    const request: CollectiveAccountabilityAttentionItem = parsed.data;
+    const decisionRef = `${request.producerId}:${request.subjectRef}`;
+    if (seen.has(decisionRef)) {
+      reasons.add('collective_accountability_identity_conflict');
+      continue;
+    }
+    seen.add(decisionRef);
+    items.push({
+      decisionRef,
+      kind: 'judgment',
+      summary: `${request.requestedByDisplayName} 邀请你负责「${request.workTitle}」 · ${request.projectTitle}`,
+      collectiveAccountabilityRequest: request,
+      linkedNeedsMe: [],
+    });
+  }
+  if (source.projectRead) {
+    for (const reason of source.projectRead.reasons) reasons.add(reason);
+    for (const candidate of source.projectRead.items) {
+      const parsed = collectiveProjectAttentionItemSchema.safeParse(candidate);
+      if (!parsed.success) {
+        reasons.add('collective_project_attention_invalid');
+        continue;
+      }
+      const value = parsed.data,
+        decisionRef = `${value.producerId}:${value.subjectRef}`;
+      if (seen.has(decisionRef)) {
+        reasons.add('collective_project_attention_identity_conflict');
+        continue;
+      }
+      seen.add(decisionRef);
+      const summary =
+        value.kind === 'triage'
+          ? `${value.projectTitle} 来了 ${value.count} 份外部材料 · 去分拣`
+          : value.kind === 'date_suggestion'
+            ? `${value.workTitle} 有 ${value.count} 条日期建议 · 等你确认`
+            : `${value.workTitle} 已超过截止 · 改日期或去看看`;
+      items.push({ decisionRef, kind: 'judgment', summary, collectiveProjectAttention: value, linkedNeedsMe: [] });
+    }
+  }
+  return items;
+}
+
+function attachOriginalApprovalCards(
+  items: UnifiedAttentionItemV1[],
+  originalApprovalCards: OriginalApprovalCardRead | undefined,
+) {
+  if (!originalApprovalCards) return;
+  for (const item of items) {
+    if (!item.approval) continue;
+    const proof = originalApprovalCards.proofs.get(originalApprovalCardKey(item.approval));
+    if (proof) item.originalApprovalCard = proof;
+  }
+}
+
 export function projectCompanionDecisions(
   approvalsSource: unknown,
   needsMeSource: unknown,
@@ -114,6 +193,7 @@ export function projectCompanionDecisions(
   personal?: DecisionPersonalViewInput,
   originalApprovalCards?: OriginalApprovalCardRead,
   conversationPresentations?: ReadonlyMap<string, RichInteractiveBlock>,
+  collectiveAccountability?: CollectiveAccountabilityAttentionSourceRead,
 ) {
   const approvalRead = approvalsSourceSchema.parse(approvalsSource);
   const workRead = needsMeSourceSchema.parse(needsMeSource);
@@ -122,11 +202,8 @@ export function projectCompanionDecisions(
   assertDecisionOwner(approvals, needsMe, userId);
   const unified = projectDecisionItems(approvals, needsMe);
   const reasons = new Set([...unified.reasons, ...(originalApprovalCards?.reasons ?? [])]);
-  for (const item of unified.items) {
-    if (!item.approval) continue;
-    const proof = originalApprovalCards?.proofs.get(originalApprovalCardKey(item.approval));
-    if (proof) item.originalApprovalCard = proof;
-  }
+  unified.items.push(...collectiveAccountabilityItems(collectiveAccountability, reasons));
+  attachOriginalApprovalCards(unified.items, originalApprovalCards);
   mergeStructuredChoices(unified.items, structuredChoices, reasons, userId, conversationPresentations);
   const canonicalDecisionItems = unified.items;
   const personalProjection = selectDecisionPersonalItems({
@@ -138,10 +215,18 @@ export function projectCompanionDecisions(
   });
   unified.reasons = [...reasons];
   const sources = {
-    ...projectionSources(sourceReads, userMentions, observedAt, approvalRead.coverage?.state, workRead.coverage?.state),
+    ...projectionSources(
+      sourceReads,
+      userMentions,
+      observedAt,
+      approvalRead.coverage?.state,
+      workRead.coverage?.state,
+      collectiveAccountability,
+    ),
     ...(personal ? { personalPreferences: personal.state } : {}),
   };
   const { sourceStates, complete, consistent, status } = summarizeSources(sources, unified.reasons);
+  const exact = complete && consistent;
   const selectedItems = personalProjection.pageItems;
   const { approvalItems, otherNeedsMe } = legacyVectors(selectedItems);
   return {
@@ -163,12 +248,17 @@ export function projectCompanionDecisions(
       decisionQualifiedCount: personalProjection.attentionItems.length,
       hasStructuredChoices: sources.structuredChoices !== undefined,
     }),
-    ...(userMentions?.counts ? { mentionCounts: userMentions.counts, mentionPeriod: userMentions.period } : {}),
+    ...(userMentions?.counts
+      ? {
+          ...(exact ? { mentionCounts: userMentions.counts } : {}),
+          mentionPeriod: userMentions.period,
+        }
+      : {}),
     ...(personalProjection.view
       ? {
           personalView: {
             ...personalProjection.view,
-            ...(complete && consistent ? personalProjection.counts : {}),
+            ...(exact ? personalProjection.counts : {}),
           },
         }
       : {}),
@@ -176,8 +266,8 @@ export function projectCompanionDecisions(
     observedAt,
     approvalCoverage: 'all_registered_F246_producers' as const,
     needsMeCoverage: 'current_linked_F310_five_producers' as const,
-    ...(sources.approvals.status === 'available' ? { approvalCount: approvalItems.length } : {}),
-    ...(sources.needsMe.status === 'available'
+    ...(exact ? { approvalCount: approvalItems.length } : {}),
+    ...(exact
       ? {
           needsMeCount: new Set(needsMe.map((read) => read.envelope.subjectRef)).size,
           otherNeedsMeCount: otherNeedsMe.length,

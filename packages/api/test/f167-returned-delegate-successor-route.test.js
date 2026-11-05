@@ -9,7 +9,6 @@ import {
   makeProposalListItem,
   makeProposalStore,
   makeTask,
-  mockCommunityStore,
   mockTruthLeaseStore,
   OWNER_CAT,
   SUBJECT_REF,
@@ -148,14 +147,11 @@ async function createRouteHarness(t) {
   );
   const resolver = new ActionSubjectTruthResolver(
     mockTruthLeaseStore(),
-    mockCommunityStore(),
-    undefined,
     {
       async get(id) {
         return id === task.id ? task : null;
       },
     },
-    undefined,
     delegateProvider,
   );
   const actionService = new ActionSuccessorAdmissionService(leaseStore, resolver);

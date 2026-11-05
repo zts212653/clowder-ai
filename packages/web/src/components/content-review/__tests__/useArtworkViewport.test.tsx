@@ -24,13 +24,17 @@ afterEach(async () => {
   container.remove();
   vi.unstubAllGlobals();
 });
-function Artwork({ scroll = true }: { scroll?: boolean }) {
+function Artwork({ scroll = true, gallery = false }: { scroll?: boolean; gallery?: boolean }) {
   const ref = useRef<HTMLElement>(null);
-  const viewport = useArtworkViewport(ref, { width: 840, height: 1552 }, 1, scroll);
+  const viewport = useArtworkViewport(ref, { width: 840, height: 1552 }, 1, scroll, gallery);
   return (
     <>
       <button onClick={viewport.actual}>100%</button>
+      <button data-testid="pan" onClick={() => viewport.setPanMode(true)}>
+        Pan
+      </button>
       <section ref={ref} {...viewport.handlers}>
+        <button data-testid="gallery-control">Next artwork</button>
         <div
           data-testid="stage"
           data-scale={viewport.renderedScale}
@@ -63,6 +67,36 @@ it('keeps the existing wheel zoom for video and other artwork consumers', async 
       .dispatchEvent(new WheelEvent('wheel', { deltaY: 100, bubbles: true, cancelable: true })),
   );
   expect(Number(container.querySelector<HTMLElement>('[data-testid="stage"]')!.dataset.scale)).toBeLessThan(1);
+});
+
+it('lets a horizontal gesture reach gallery paging until the image needs horizontal panning', async () => {
+  await act(async () => root.render(<Artwork gallery />));
+  const section = container.querySelector('section')!;
+  const fitted = new WheelEvent('wheel', { deltaX: 90, bubbles: true, cancelable: true });
+  await act(async () => section.dispatchEvent(fitted));
+  expect(fitted.defaultPrevented, 'a fitted gallery image must not swallow its parent paging gesture').toBe(false);
+  await act(async () => container.querySelector('button')!.click());
+  const zoomed = new WheelEvent('wheel', { deltaX: 90, bubbles: true, cancelable: true });
+  await act(async () => section.dispatchEvent(zoomed));
+  expect(zoomed.defaultPrevented).toBe(true);
+  expect(container.querySelector<HTMLElement>('[data-testid="stage"]')!.style.transform).toBe('translate(30px, 526px)');
+});
+
+it('keeps gallery buttons clickable while image panning is active', async () => {
+  await act(async () => root.render(<Artwork gallery />));
+  await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="pan"]')!.click());
+  const section = container.querySelector('section')!;
+  section.setPointerCapture = vi.fn();
+  const pointer = new Event('pointerdown', { bubbles: true, cancelable: true });
+  Object.defineProperties(pointer, {
+    button: { value: 0 },
+    pointerId: { value: 1 },
+    clientX: { value: 10 },
+    clientY: { value: 10 },
+  });
+  await act(async () => container.querySelector('[data-testid="gallery-control"]')!.dispatchEvent(pointer));
+  expect(pointer.defaultPrevented, 'pressing a gallery control must not start image panning').toBe(false);
+  expect(section.setPointerCapture).not.toHaveBeenCalled();
 });
 
 it('keeps a fitted landscape picture and its dock near the top of a tall image desk', async () => {

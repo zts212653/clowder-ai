@@ -127,7 +127,7 @@ for (const superseded of [false, true])
     const row = store.append({
       userId: 'owner',
       threadId: 'home',
-      catId: null,
+      from: { kind: 'user', userId: 'owner' },
       content: '现在结果怎样？',
       timestamp: 1,
       mentions: [],
@@ -175,7 +175,7 @@ for (const superseded of [false, true])
       store.append({
         userId: 'owner',
         threadId: 'home',
-        catId: null,
+        from: { kind: 'user', userId: 'owner' },
         content: '不用继续，改回Chrome',
         timestamp: 2,
         mentions: [],

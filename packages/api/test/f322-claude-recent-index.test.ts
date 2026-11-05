@@ -13,6 +13,24 @@ const entry = (sessionId: string, timestamp: number, display: string) => ({
   display,
   project: '/original',
 });
+test('a Cafe-origin first entry excludes that Claude session even when later human entries exist', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'f322-claude-human-'));
+  try {
+    await writeFile(
+      join(root, 'history.jsonl'),
+      [
+        entry(id1, 1, '<runtime-routing-context> clipped…'),
+        entry(id1, 2, '整理发布说明\n补充细节'),
+        entry(id1, 3, '第二次请求'),
+      ]
+        .map(JSON.stringify)
+        .join('\n'),
+    );
+    assert.deepEqual((await readClaudeRecentSessionIndex(20, root)).sessions, []);
+  } finally {
+    await rm(root, { recursive: true });
+  }
+});
 test('Claude listing reads the CLI prompt index, retaining the first indexed prompt and recent ordering', async () => {
   const root = await mkdtemp(join(tmpdir(), 'f322-claude-index-'));
   try {
@@ -20,7 +38,7 @@ test('Claude listing reads the CLI prompt index, retaining the first indexed pro
     await writeFile(join(root, 'projects', 'unreadable-transcript.jsonl'), 'not metadata');
     await writeFile(
       join(root, 'history.jsonl'),
-      [entry(id1, 1, 'Fix login'), entry(id2, 2, 'Review CSS'), entry(id1, 3, 'Now verify it')]
+      [entry(id1, 1, 'Fix login'), entry(id2, 2, 'Review CSS'), entry(id1, 3, 'Identity: quoted later')]
         .map(JSON.stringify)
         .join('\n') + '\n',
     );

@@ -2,9 +2,8 @@
  * F221 Phase I: taste proposal approval card block.
  *
  * Shown in the source thread when a cat captures a taste signal for operator review.
- * Informational only — no `actions` array.  Decisions happen in the F246
- * Approval Hub panel (the canonical decision surface).  This is a permanent
- * boundary: approval cards are status indicators, not interactive controls.
+ * The publication has no actions. Chat/Inbox can host the original domain
+ * writer only after a fresh canonical read verifies this exact publication.
  */
 
 import type { RichCardBlock, TasteProposal } from '@cat-cafe/shared';
@@ -19,7 +18,14 @@ const DIMENSION_LABELS: Record<string, string> = {
   'creative-craft': '创作工艺',
 };
 
-export function buildTasteProposalCardBlock(proposal: TasteProposal): RichCardBlock {
+type TasteCardInput = Pick<
+  TasteProposal,
+  'id' | 'scene' | 'quote' | 'takeaway' | 'dimension' | 'tags' | 'privacy' | 'catId'
+> & {
+  correctionTarget?: Pick<NonNullable<TasteProposal['correctionTarget']>, 'reason' | 'suggestedPatch'>;
+};
+
+export function buildTasteProposalCardBlock(proposal: TasteCardInput): RichCardBlock {
   const scenePreview = proposal.scene.length > 200 ? `${proposal.scene.slice(0, 197)}…` : proposal.scene;
   const correction = proposal.correctionTarget;
 

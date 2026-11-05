@@ -1,4 +1,4 @@
-import { exactAssetVersionRefV1Schema, reviewSubjectRefSchema } from '@cat-cafe/shared';
+import { deploymentDefaults, exactAssetVersionRefV1Schema, reviewSubjectRefSchema } from '@cat-cafe/shared';
 import { z } from 'zod';
 import { defineMcpCanonicalFactory } from '../tool-governance-migration.js';
 import { callbackPost } from './callback-tools.js';
@@ -65,7 +65,7 @@ export const openWithWorkspaceNavigatorInputSchema = {
     .string()
     .min(1)
     .optional()
-    .describe('Current Clowder AI thread id; omit to use the thread bound to invocation auth.'),
+    .describe(`Current ${deploymentDefaults.brand.name} thread id; omit to use the thread bound to invocation auth.`),
 };
 
 export const prepareRequestReviewConsumptionInputSchema = {

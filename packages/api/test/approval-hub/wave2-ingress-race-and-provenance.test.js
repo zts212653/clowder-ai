@@ -2,7 +2,7 @@ import '../helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
-import { proposedReviewAction } from './helpers.js';
+import { proposedTaskAction } from './helpers.js';
 
 function createSucceedingIngress() {
   return {
@@ -80,6 +80,7 @@ describe('F193 concurrent dispatch publication', () => {
 
     const app = Fastify();
     await app.register(callbacksRoutes, {
+      actionSuccessorAdmissionService: { async preflightStructuredTransferStanding() {} },
       registry,
       messageStore,
       threadStore,
@@ -109,7 +110,7 @@ describe('F193 concurrent dispatch publication', () => {
         content: '@sonnet\nPlease fix the bug',
         targetCats: ['sonnet'],
         effectClass: 'assign_work',
-        proposedAction: proposedReviewAction(),
+        proposedAction: proposedTaskAction(),
         clientMessageId: 'dispatch-concurrent-staged',
       },
     };

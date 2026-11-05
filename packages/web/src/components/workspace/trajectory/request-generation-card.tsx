@@ -1,4 +1,5 @@
 import type { RequestGenerationGapV1, RequestGenerationProjectionV1 } from '@cat-cafe/shared';
+import { deploymentDefaults } from '@cat-cafe/shared';
 import { useShellPresentation } from '@/components/shell/shell-presentation';
 import { TrajectoryId } from './TrajectoryId';
 import { trajectoryInputCopy } from './trajectory-input.shell-copy';
@@ -179,7 +180,7 @@ function Generation({ generation }: { generation: RequestGenerationProjectionV1 
           )
         ) : (
           <>
-            {'Tools'}: {envelope.tools.finalSurface} · {'Clowder AI schemas'}:{' '}
+            {'Tools'}: {envelope.tools.finalSurface} · {`${deploymentDefaults.brand.displayName} schemas`}:{' '}
             <span className="font-mono">
               {envelope.tools.catCafeSchemaSetHash ? shortDigest(envelope.tools.catCafeSchemaSetHash) : t.unreported}
             </span>{' '}
@@ -245,7 +246,9 @@ export function RequestGenerationSection({
         <div>
           <h3 className="text-sm font-semibold text-cafe-primary">{isV2 ? t.title : 'Input generations'}</h3>
           <p className="mt-0.5 text-micro text-cafe-muted">
-            {isV2 ? t.description : 'Clowder AI 实际组装并提交的每一代输入；默认只显示摘要。'}
+            {isV2
+              ? t.description
+              : `${deploymentDefaults.brand.displayName} 实际组装并提交的每一代输入；默认只显示摘要。`}
           </p>
         </div>
         {hasRevealable && (

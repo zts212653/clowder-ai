@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, normalize, relative, resolve } from 'node:path';
 import type { EvalDomainRegistryEntry } from '../domain/eval-domain-registry.js';
+import type { A2aEvaluatorSource } from '../publish-verdict/verdict-source-types.js';
 import { parseVerdictHandoffPacket, type VerdictHandoffPacket } from '../verdict-handoff.js';
 import { buildA2aVerdictHandoff } from './eval-a2a-adapter.js';
 // R3 cloud P1 fix on PR #2466: YAML artifact parsers extracted to a separate
@@ -23,6 +24,7 @@ interface GenerateA2aLiveVerdictInput {
   generatedAt?: string;
   generatorCommit?: string;
   submittedPacket?: VerdictHandoffPacket; // 砚砚 R8 P1: Phase H cat-mediated (cat owns verdict; undefined = operator regen)
+  evidenceSource?: A2aEvaluatorSource & { checkoutName: string };
 }
 
 export interface A2aLiveVerdictArtifact {
@@ -106,6 +108,7 @@ export function generateA2aLiveVerdict(input: GenerateA2aLiveVerdictInput): A2aL
       ...(input.generatorCommit ? { commit: input.generatorCommit } : {}),
     },
     sanitizeRulesVersion: SANITIZE_RULES_VERSION,
+    ...(input.evidenceSource ? { evidenceSource: input.evidenceSource } : {}),
   };
 
   writeJson(join(bundleDir, 'snapshot.json'), snapshotBundle);

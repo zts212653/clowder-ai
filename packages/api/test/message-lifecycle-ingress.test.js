@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it, mock } from 'node:test';
+import { isHydratedMessageBundle } from '@cat-cafe/shared';
 import Fastify from 'fastify';
 import './helpers/setup-cat-registry.js';
 
 const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
 const { InvocationRegistry } = await import('../dist/domains/cats/services/agents/invocation/InvocationRegistry.js');
 const { messagesRoutes } = await import('../dist/routes/messages.js');
+const { messageBundleRoutes } = await import('../dist/routes/message-bundles.js');
 const { sendMessageSchema } = await import('../dist/routes/messages.schema.js');
 
 function createDependencies(overrides = {}) {
@@ -46,8 +48,10 @@ function createDependencies(overrides = {}) {
       emitToUser: mock.fn(),
     },
     router: {
+      previewTargets: async () => ({ targetCats: [], reason: { kind: 'default_cat' } }),
       resolveTargetsAndIntent: mock.fn(async () => ({
         targetCats: ['opus'],
+        routing_warnings: [],
         intent: { intent: 'execute' },
       })),
       resolveExplicitTargets: mock.fn(async (cats) => cats),
@@ -573,6 +577,7 @@ describe('canonical message lifecycle ingress', () => {
   it('keeps whisper visibility while routing an idle target through the same Queue', async () => {
     dependencies.router.resolveTargetsAndIntent.mock.mockImplementation(async () => ({
       targetCats: ['codex'],
+      routing_warnings: [],
       intent: { intent: 'execute' },
     }));
 
@@ -597,6 +602,7 @@ describe('canonical message lifecycle ingress', () => {
   it('keeps an all-idle multi-target input in one source Queue row', async () => {
     dependencies.router.resolveTargetsAndIntent.mock.mockImplementation(async () => ({
       targetCats: ['opus', 'codex'],
+      routing_warnings: [],
       intent: { intent: 'execute' },
       hasMentions: true,
     }));
@@ -663,6 +669,28 @@ describe('canonical message lifecycle ingress', () => {
     assert.deepEqual(stored.extra.messageBundle.items, [{ kind: 'message', messageId: sourceMessage.id }]);
     assert.equal(stored.content.includes(sourceMessage.content), false);
     assert.equal(dependencies.router.routeExecution.mock.calls.length, 0);
+    const bundleId = response.json().messageBundleId;
+    assert.equal(bundleId, 'message-1');
+    dependencies.messageStore.getById.mock.mockImplementation(async (id) =>
+      id === bundleId ? { id: bundleId, ...stored } : id === sourceMessage.id ? sourceMessage : null,
+    );
+    const reader = Fastify();
+    try {
+      await reader.register(messageBundleRoutes, dependencies);
+      const read = await reader.inject({
+        method: 'GET',
+        url: `/api/message-bundles/${bundleId}`,
+        headers: { 'x-cat-cafe-user': 'user-1' },
+      });
+      assert.equal(read.statusCode, 200, read.body);
+      const projection = read.json();
+      assert.ok(isHydratedMessageBundle(projection), 'the created carrier must hydrate into the shared Web contract');
+      assert.deepEqual(projection.items[0].from, sourceMessage.from);
+      assert.equal(projection.items[0].readableContent, sourceMessage.content);
+      assert.equal('author' in projection.items[0], false);
+    } finally {
+      await reader.close();
+    }
   });
 
   it('detects magic words against the durable Queue source identity', async () => {

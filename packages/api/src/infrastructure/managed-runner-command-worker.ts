@@ -12,6 +12,7 @@ import {
   cleanupAndDrainDurableManagedGateAttempt,
   spawnDurableManagedGateAttempt,
 } from './managed-runner-durable-child.js';
+import { recordManagedAttemptCleanup } from './managed-runner-durable-cleanup.js';
 
 /** Ordinary commands use the same detached worker, attempt token, cleanup proof and bounded log as full gates. */
 export async function runManagedCommandWorker(input: {
@@ -41,6 +42,7 @@ export async function runManagedCommandWorker(input: {
   });
   let nextHeartbeat = Date.now() + 5000;
   let terminal: 'cancelled' | 'timed_out' | null = null;
+  let lostExecutionFence = false;
   while (!attempt.currentExit()) {
     const now = Date.now();
     if (input.cancelled() || hasDurableGateCancellationRequestArtifact(job)) {
@@ -55,7 +57,7 @@ export async function runManagedCommandWorker(input: {
       const current = rawDurableGateRecord(job);
       if (!current || !writeDurableGateRecord(job, { ...current, updatedAt: now })) {
         input.capture(Buffer.from('managed job worker lost its execution fence\n'));
-        terminal = 'cancelled';
+        lostExecutionFence = true;
         break;
       }
       nextHeartbeat = now + 5000;
@@ -76,17 +78,23 @@ export async function runManagedCommandWorker(input: {
     terminationReason:
       terminal === 'cancelled' ? 'explicit_cancel' : terminal === 'timed_out' ? 'runtime_deadline' : 'command_exit',
   };
-  const recorded = writeDurableGateRecord(job, {
-    ...rawDurableGateRecord(job),
-    ...(terminal ? { state: 'cancelling', terminationIntent: terminal } : {}),
-    pendingResult: observedResult,
-    updatedAt: Date.now(),
-  });
+  // A fenced worker may stop its own attempt, but cannot invent a cancellation
+  // or reacquire authority while publishing a result over its successor.
+  const recorded =
+    !lostExecutionFence &&
+    writeDurableGateRecord(job, {
+      ...rawDurableGateRecord(job),
+      ...(terminal ? { state: 'cancelling', terminationIntent: terminal } : {}),
+      pendingResult: observedResult,
+      updatedAt: Date.now(),
+    });
   const cleanup = await (input.cleanupAttempt ?? cleanupAndDrainDurableManagedGateAttempt)(attempt, 3000, 100);
   if (!cleanup.proven)
     input.capture(Buffer.from('managed job cleanup is unproven; recovery must retain responsibility\n'));
+  const cleanupRecorded =
+    cleanup.proven && recorded && recordManagedAttemptCleanup(job, attempt.attemptToken, cleanup.proven);
   input.finishLog();
-  if (!cleanup.proven || !recorded) return 70;
+  if (!cleanupRecorded) return 70;
   const result: ManagedCommandTerminalResult = {
     ...observedResult,
     durationMs: Date.now() - startedAt,

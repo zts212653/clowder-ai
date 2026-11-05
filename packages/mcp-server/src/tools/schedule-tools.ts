@@ -1,4 +1,5 @@
 import { defineMcpCanonicalFactory, defineMcpMigrationFactory } from '../tool-governance-migration.js';
+import { invocationFetch } from './invocation-auth.js';
 
 /**
  * F139 Phase 3A: Schedule MCP Tools (AC-G2)
@@ -12,6 +13,7 @@ import { z } from 'zod';
 import { callbackGet, callbackPost, getCallbackConfig } from './callback-tools.js';
 import type { ToolResult } from './file-tools.js';
 import { errorResult } from './file-tools.js';
+import { resolveInvocationEnv } from './invocation-auth.js';
 
 const scheduleGovernance = {
   resourceFamily: 'schedule',
@@ -45,7 +47,7 @@ async function callbackDelete(path: string, options?: { agentKeyCatId?: string }
   if (!config) return errorResult(NO_CONFIG_ERROR);
 
   try {
-    const response = await fetch(`${config.apiUrl}${path}`, {
+    const response = await invocationFetch(`${config.apiUrl}${path}`, {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json', ...buildAuthHeaders(config) },
     });
@@ -152,7 +154,7 @@ export async function handleRegisterScheduledTask(input: {
 
   // Auto-inject the selected cat's ID so reminder tasks wake the registering cat, not default opus.
   // Shared Antigravity MCP has no per-process CAT_CAFE_CAT_ID; the selected sidecar cat is the actor.
-  const currentCatId = authMode === 'agent-key' ? input.agentKeyCatId : process.env['CAT_CAFE_CAT_ID'];
+  const currentCatId = authMode === 'agent-key' ? input.agentKeyCatId : resolveInvocationEnv('CAT_CAFE_CAT_ID');
   if (input.templateId !== ENTRUSTED_WORK_REEVALUATION_TEMPLATE_ID && !params.targetCatId && currentCatId) {
     params.targetCatId = currentCatId;
   }

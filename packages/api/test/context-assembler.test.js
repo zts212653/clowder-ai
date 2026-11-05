@@ -1,3 +1,4 @@
+import { coCreatorDisplay } from '@cat-cafe/shared';
 /**
  * ContextAssembler Tests
  * 测试历史 context 组装和消息格式化
@@ -6,6 +7,7 @@
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
+import { getCoCreatorConfig } from '../dist/config/cat-config-loader.js';
 
 /** Helper: create a mock StoredMessage */
 function mockMsg(overrides) {
@@ -22,12 +24,13 @@ function mockMsg(overrides) {
 }
 
 describe('formatMessage', () => {
-  test('formats user message with co-creator', async () => {
+  test('formats user message with the configured familiar address', async () => {
     const { formatMessage } = await import('../dist/domains/cats/services/context/ContextAssembler.js');
     const msg = mockMsg({ content: '你好', timestamp: new Date('2026-02-07T14:02:00Z').getTime() });
     const result = formatMessage(msg);
     assert.ok(result.includes('14:02 UTC'));
-    assert.ok(result.includes('co-creator'));
+    const coCreator = getCoCreatorConfig();
+    assert.ok(result.includes(` ${coCreator.nickname ?? coCreatorDisplay(coCreator).nickname}]`));
     assert.ok(result.includes('你好'));
   });
 
@@ -96,7 +99,8 @@ describe('assembleContext', () => {
     const { assembleContext } = await import('../dist/domains/cats/services/context/ContextAssembler.js');
     const result = assembleContext([mockMsg({ content: '你好世界' })]);
     assert.ok(result.contextText.includes('[对话历史 - 最近 1 条]'));
-    assert.ok(result.contextText.includes('co-creator'));
+    const coCreator = getCoCreatorConfig();
+    assert.ok(result.contextText.includes(` ${coCreator.nickname ?? coCreatorDisplay(coCreator).nickname}]`));
     assert.ok(result.contextText.includes('你好世界'));
     assert.ok(result.contextText.endsWith('[/对话历史]'));
     assert.equal(result.messageCount, 1);
@@ -110,7 +114,8 @@ describe('assembleContext', () => {
       mockMsg({ catId: 'codex', content: '我也在', timestamp: 3000 }),
     ];
     const result = assembleContext(msgs);
-    assert.ok(result.contextText.includes('co-creator'));
+    const coCreator = getCoCreatorConfig();
+    assert.ok(result.contextText.includes(` ${coCreator.nickname ?? coCreatorDisplay(coCreator).nickname}]`));
     assert.ok(result.contextText.includes('布偶猫'));
     assert.ok(result.contextText.includes('缅因猫'));
     assert.equal(result.messageCount, 3);
@@ -160,7 +165,11 @@ describe('assembleContext', () => {
     assert.ok(result.contextText.includes('你好'), 'user message should be included');
     assert.ok(result.contextText.includes('猫猫回复'), 'cat message should be included');
     assert.ok(!result.contextText.includes('stream_idle_stall'), 'system error should NOT enter prompt');
-    assert.ok(!result.contextText.includes('co-creator] Error:'), 'system error must not appear as co-creator');
+    const coCreator = getCoCreatorConfig();
+    assert.ok(
+      !result.contextText.includes(`${coCreator.nickname ?? coCreatorDisplay(coCreator).nickname}] Error:`),
+      'system error must not appear as the configured human',
+    );
   });
 
   test('includes delivered owner-bound managed hold facts for the shared user/cat view', async () => {
@@ -283,6 +292,26 @@ describe('assembleContext', () => {
 });
 
 describe('formatMessage — head+tail truncation (#91 regression)', () => {
+  test('head and tail cuts keep Unicode well formed within the content budget', async () => {
+    const { formatMessage } = await import('../dist/domains/cats/services/context/ContextAssembler.js');
+    // 200 UTF-16 units; a 100-unit budget cuts through both emoji pairs.
+    const content = `${'H'.repeat(26)}😼${'M'.repeat(129)}🐾${'T'.repeat(41)}`;
+    assert.equal(content.length, 200);
+    const result = formatMessage(mockMsg({ content }), { truncate: 100 });
+    const body = result.slice(result.indexOf('] ') + 2);
+    assert.ok(body.isWellFormed(), 'head/tail boundaries must not produce lone surrogates');
+    assert.ok(body.startsWith('H'.repeat(26)));
+    assert.ok(body.endsWith('T'.repeat(41)));
+    assert.ok(body.length <= 100, 'safe cuts must stay inside the existing UTF-16 budget');
+    assert.ok(!body.includes('\uFFFD'), 'do not replace a split emoji with a replacement character');
+  });
+
+  test('tiny truncation budgets do not leave half an emoji', async () => {
+    const { formatMessage } = await import('../dist/domains/cats/services/context/ContextAssembler.js');
+    const result = formatMessage(mockMsg({ content: '😼hello' }), { truncate: 1 });
+    assert.ok(result.isWellFormed(), 'the no-marker prefix path must also preserve Unicode');
+  });
+
   test('preserves conclusion at end of long message', async () => {
     const { formatMessage } = await import('../dist/domains/cats/services/context/ContextAssembler.js');
     // Simulate: long work log + conclusion at end (the exact bug scenario)
@@ -585,7 +614,11 @@ describe('assembleContext — F8 token-based truncation', () => {
     });
     const result = formatMessage(msg);
     assert.ok(result.includes('GitHub Review'), 'should use source.label instead of co-creator');
-    assert.ok(!result.includes('co-creator'), 'should NOT show co-creator for connector messages');
+    const coCreator = getCoCreatorConfig();
+    assert.ok(
+      !result.includes(` ${coCreator.nickname ?? coCreatorDisplay(coCreator).nickname}]`),
+      'connector must retain its own speaker',
+    );
     assert.ok(result.includes('GitHub Review 通知'));
   });
 });
@@ -741,6 +774,21 @@ describe('F134: group chat sender name in LLM context', () => {
 });
 
 describe('#699: inline reply-to preview', () => {
+  test('reply previews preserve emoji at and across the 60-unit boundary', async () => {
+    const { formatMessage, buildMessageMap, assembleContext } = await import(
+      '../dist/domains/cats/services/context/ContextAssembler.js'
+    );
+    for (const prefixLength of [58, 59, 60]) {
+      const parent = mockMsg({ id: 'unicode-parent', content: `${'字'.repeat(prefixLength)}😼🐾！`, timestamp: 1000 });
+      const reply = mockMsg({ id: 'unicode-reply', content: '收到', replyTo: parent.id, timestamp: 2000 });
+      const result = formatMessage(reply, { messageMap: buildMessageMap([parent, reply]) });
+      assert.ok(result.isWellFormed(), `preview must be valid at offset ${prefixLength}`);
+      assert.ok(result.includes(`${'字'.repeat(Math.min(prefixLength, 60))}${prefixLength === 58 ? '😼' : ''}…]`));
+      assert.ok(!result.includes('\uFFFD'));
+      assert.ok(assembleContext([parent, reply]).contextText.isWellFormed(), 'the full assembled prompt must be valid');
+    }
+  });
+
   test('formatMessage includes reply preview when messageMap contains parent', async () => {
     const { formatMessage, buildMessageMap } = await import(
       '../dist/domains/cats/services/context/ContextAssembler.js'

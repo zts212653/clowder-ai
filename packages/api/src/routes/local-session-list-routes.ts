@@ -1,4 +1,10 @@
-import { catRegistry } from '@cat-cafe/shared';
+import {
+  catRegistry,
+  humanSessionFirstLine,
+  isLocalSessionId,
+  LOCAL_SESSION_CANDIDATE_LIMIT,
+  localSessionImportTool,
+} from '@cat-cafe/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { canAccessThread } from '../domains/guides/guide-state-access.js';
@@ -8,8 +14,8 @@ import type { LocalSessionImportOptions } from './local-session-import-routes.js
 
 const querySchema = z.object({ limit: z.coerce.number().int().min(1).max(20).default(20) }).strict();
 const rowSchema = z.object({
-  sessionId: z.string().uuid(),
-  clientId: z.enum(['openai', 'anthropic']),
+  sessionId: z.string().max(200),
+  clientId: z.enum(['openai', 'anthropic', 'opencode']),
   projectPath: z.string().startsWith('/'),
   firstPrompt: z.string().max(500),
   lastActivityAt: z.number().finite().nonnegative(),
@@ -26,34 +32,45 @@ export function registerLocalSessionListRoute(app: FastifyInstance, options: Loc
       return reply.status(ownerError.status).send({ code: 'SESSION_OWNER_REQUIRED', error: ownerError.error });
     const cat = catRegistry.tryGet(request.params.catId);
     const query = querySchema.safeParse(request.query);
-    if (
-      !query.success ||
-      !cat?.config.cli ||
-      request.params.catId === 'gpt-pro' ||
-      cat.config.provider === 'openai-chatgpt-pro' ||
-      !['anthropic', 'openai'].includes(cat.config.clientId)
-    )
-      return reply.status(400).send({ error: 'Choose a local Claude Code or Codex member; limit must be 1–20' });
+    if (!query.success || !cat || !localSessionImportTool(cat.config))
+      return reply.status(400).send({ error: 'Choose a supported local member; limit must be 1–20' });
     if (!options.listLocalSessions) return reply.status(503).send({ error: 'Recent session index unavailable' });
     try {
-      const listing = await options.listLocalSessions(request.params.catId, query.data.limit);
-      const sessions = listing.sessions
-        .slice(0, query.data.limit)
+      const listing = await options.listLocalSessions(request.params.catId, LOCAL_SESSION_CANDIDATE_LIMIT);
+      const candidates = listing.sessions
+        .slice(0, LOCAL_SESSION_CANDIDATE_LIMIT)
         .flatMap((raw) => {
           const parsed = rowSchema.safeParse(raw);
-          return parsed.success && parsed.data.clientId === cat.config.clientId ? [parsed.data] : [];
+          return parsed.success &&
+            parsed.data.clientId === cat.config.clientId &&
+            isLocalSessionId(parsed.data.clientId, parsed.data.sessionId)
+            ? [{ ...parsed.data, firstPrompt: humanSessionFirstLine(parsed.data.firstPrompt), recentPrompt: undefined }]
+            : [];
         })
         .sort((a, b) => b.lastActivityAt - a.lastActivityAt);
-      const claims = await options.sessionChainStore.getCliSessionBindings(sessions.map((s) => s.sessionId));
+      const claims = await options.sessionChainStore.getCliSessionBindings(candidates.map((s) => s.sessionId));
+      const eligible = candidates.filter((s) => {
+        const claim = claims.get(s.sessionId);
+        return !claim || claim.isExternalImport;
+      });
+      const sessions = eligible.slice(0, query.data.limit);
       const threads = new Map(
         await Promise.all(
-          [...new Set([...claims.values()].map((c) => c.threadId))].map(
-            async (id) => [id, await options.threadStore.get(id)] as const,
-          ),
+          [
+            ...new Set(
+              sessions.flatMap((s) => {
+                const claim = claims.get(s.sessionId);
+                return claim ? [claim.threadId] : [];
+              }),
+            ),
+          ].map(async (id) => [id, await options.threadStore.get(id)] as const),
         ),
       );
       return {
-        limited: listing.limited || listing.sessions.length > query.data.limit,
+        limited:
+          listing.limited ||
+          listing.sessions.length > LOCAL_SESSION_CANDIDATE_LIMIT ||
+          eligible.length > query.data.limit,
         sessions: sessions.map((session) => {
           const claim = claims.get(session.sessionId);
           const thread = claim ? threads.get(claim.threadId) : undefined;

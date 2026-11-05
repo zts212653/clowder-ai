@@ -1,3 +1,4 @@
+import { contentFileMime } from '@cat-cafe/shared';
 /**
  * Memory-bounded workspace file reading (F063 OOM fix).
  *
@@ -19,47 +20,13 @@
 
 import { createHash } from 'node:crypto';
 import { open, stat } from 'node:fs/promises';
-import { extname } from 'node:path';
 
 /** Hard cap on bytes read into memory for a text preview / hash. */
 export const MAX_PREVIEW_BYTES = 1024 * 1024; // 1 MB
 
-const MIME_MAP: Record<string, string> = {
-  '.ts': 'text/typescript',
-  '.tsx': 'text/tsx',
-  '.js': 'text/javascript',
-  '.jsx': 'text/jsx',
-  '.json': 'application/json',
-  '.md': 'text/markdown',
-  '.css': 'text/css',
-  '.html': 'text/html',
-  '.svg': 'image/svg+xml',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.webp': 'image/webp',
-  '.ico': 'image/x-icon',
-  '.yaml': 'text/yaml',
-  '.yml': 'text/yaml',
-  '.toml': 'text/toml',
-  '.sh': 'text/x-shellscript',
-  '.py': 'text/x-python',
-  // Audio
-  '.mp3': 'audio/mpeg',
-  '.wav': 'audio/wav',
-  '.m4a': 'audio/mp4',
-  '.ogg': 'audio/ogg',
-  '.flac': 'audio/flac',
-  // Video
-  '.mp4': 'video/mp4',
-  '.webm': 'video/webm',
-  '.mov': 'video/quicktime',
-};
-
-/** Guess a MIME type from a file extension; 'text/plain' when unknown. */
+/** MIME is a shared fact. Byte-based text readability does not invent a MIME for an unknown format. */
 export function guessMime(filepath: string): string {
-  return MIME_MAP[extname(filepath)] ?? 'text/plain';
+  return contentFileMime(filepath);
 }
 
 function isMediaMime(mime: string): boolean {

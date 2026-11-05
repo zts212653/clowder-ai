@@ -3,6 +3,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { RuntimeInteractionPendingReadSource } from '../domains/runtime-interaction/ports/RuntimeInteractionStore.js';
+import type { CollectiveAccountabilitySource } from './companion-collective-accountability-source.js';
 import { companionDecisionWireResponse, readCompanionDecisionProjection } from './companion-decision-read-service.js';
 import { requirePluginOwnerLocalAccess } from './plugin-access-guards.js';
 import { registerUserMentionHandlingRoutes, type UserMentionInboxStore } from './user-mention-handling-routes.js';
@@ -14,7 +15,7 @@ const pageSchema = z
     limit: z.coerce.number().int().min(1).max(20).default(20),
     view: z.literal('unified').optional(),
     includeUserMentions: z.literal('true').optional(),
-    mentionPeriod: z.enum(['recent', 'today', 'week', 'earlier', 'handled']).default('week'),
+    mentionPeriod: z.enum(['recent', 'today', 'week', 'earlier', 'handled', 'all']).default('week'),
     personalView: z.enum(['visible', 'ignored']).optional(),
   })
   .strict();
@@ -22,6 +23,7 @@ const pageSchema = z
 /** Owner-local decision read and exact-source mention acknowledgement, independent of Live configuration. */
 export const companionDecisionRoutes: FastifyPluginAsync<{
   ownerUserId: string;
+  collectiveAccountability?: CollectiveAccountabilitySource;
   messageStore?: UserMentionInboxStore & Pick<IMessageStore, 'getById'>;
   now?: () => number;
   threadStore?: MentionReadOptions['threads'];
@@ -52,6 +54,7 @@ export const companionDecisionRoutes: FastifyPluginAsync<{
       options.runtimeInteractionStore,
       personalView ? { mode: personalView, read: options.readIgnoredItemPreferences } : undefined,
       options.messageStore,
+      options.collectiveAccountability,
     );
     const response = companionDecisionWireResponse(result, view);
     return reply.code(response.statusCode).send(response.body);

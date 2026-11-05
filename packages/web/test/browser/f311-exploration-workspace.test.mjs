@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { after, before, test } from 'node:test';
 import { refIdentity } from '@cat-cafe/shared';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
 import {
   accessibleExplorationNode,
   chooseExplorationComparison as chooseComparison,
@@ -19,8 +19,11 @@ import {
   verifySameRunGuard,
 } from './f311-exploration-recovery.journey.mjs';
 import { startExplorationBrowserFixture } from './f311-exploration-workspace.harness.mjs';
+import { verifyHistoryEntryJourney } from './f311-history-entry.journey.mjs';
 import { waitForResponsiveWorkspaceLayout } from './f311-responsive-workspace-layout.mjs';
+import { verifyV2ClosureJourney } from './f311-v2-closure.journey.mjs';
 import { verifyV2ExplorationReading } from './f311-v2-exploration.journey.mjs';
+import { verifyV2PublicSources } from './f311-v2-public-sources.journey.mjs';
 import { CONTRACT_THREAD_ID } from './f311-workspace-browser.harness.mjs';
 
 await import('tsx');
@@ -88,12 +91,46 @@ const runsFor = (title) =>
   );
 
 test(
-  'v2 Settings opens the isolated public archive, keeps counterexamples visible and links exact original videos',
+  'v2 Workspace tools reads the existing duck goal, four walking originals and two Cortex matches without target aliasing',
+  { timeout: 120_000 },
+  async () => {
+    report.publicSourceReading = await verifyV2PublicSources({ fixture, browser, capture });
+    report.checks.push(
+      '352afab6 exact original target snapshot through actual authenticated reader; v1-v4 same-scene four-video sync; both Cortex originals and ten-second read window; no invented ancestry, narrow stacking/dark/explicit reentry; not production auth or AC-UX6.',
+    );
+  },
+);
+
+test(
+  'v2 history entry leads with the published archive, recovers an old selection, opens exact sources, and returns',
+  { timeout: 120_000 },
+  async () => {
+    const historyEntry = await verifyHistoryEntryJourney({ fixture, browser, capture });
+    report.historyEntry = historyEntry;
+    report.checks.push(
+      `Workspace tools → Program preserves an old F314 coordinate, leads with explicit current-history recovery before evaluation gaps, opens ${historyEntry.stepCount}-step/${historyEntry.caseCount}-case history with exact original and cited source links, and restores the exact selected step after return; zero Program/proposal writes.`,
+    );
+  },
+);
+
+test(
+  'v2 journey preserves preparation and exploration reading, opens one fixture decision, and returns an exact Chat source',
+  { timeout: 120_000 },
+  async () => {
+    report.closureJourney = await verifyV2ClosureJourney({ fixture, browser, capture });
+    report.checks.push(
+      'One explicitly isolated F266 candidate traverses Workspace tools → Program → preparation → F314 history → restored selection → Mailbox → later Chat exact-use source; source and rollback only navigate, with zero Program/candidate writes and no optimistic adoption claim.',
+    );
+  },
+);
+
+test(
+  'v2 Workspace tools opens the isolated public archive, keeps counterexamples visible and links exact original videos',
   { timeout: 120_000 },
   async () => {
     await verifyV2ExplorationReading({ fixture, browser, catalog, capture });
     report.checks.push(
-      'v2 Settings/public archive reading, independent current/selected pointers, unfiltered counterexample, original paired playback/seek/pause, 416/320/dark; isolated owner Program only, not real 352afab6 source binding.',
+      'v2 Workspace tools/public archive reading, independent current/selected pointers, unfiltered counterexample, original paired playback/seek/pause, 416/320/dark; isolated owner Program only, not real 352afab6 source binding.',
     );
   },
 );

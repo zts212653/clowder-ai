@@ -1,14 +1,21 @@
 'use client';
 
 import { resolvePluginDescription } from '@cat-cafe/shared';
-import { ExternalLinkIcon } from '../../HubConfigIcons';
+import { personalChromeSettingsHref } from '@/utils/personal-chrome-settings';
 import { HubIcon } from '../../hub-icons';
-import { MarkdownContent } from '../../MarkdownContent';
 import { settingsResourceCardClass, settingsResourceRowClass } from '../../SettingsResourceCard';
 import { SettingsText } from '../primitives/SettingsText';
+import { PluginDetailFooter, PluginDetailHeader, PluginDetailStateAction } from './controls/PluginManagerDetailChrome';
+import { pluginManagerText } from './controls/plugin-manager.shell-copy';
 import { DotConnectionDetail } from './DotConnectionDetail';
+import { PluginCapabilityDocumentation } from './PluginCapabilityDocumentation';
+import PluginConnectorSettings from './PluginConnectorSettings';
+import { PluginManagerBindings } from './PluginManagerBindings';
 import { PluginManagerConfigurationSection } from './PluginManagerConfigurationSection';
+import { PluginManagerDetailPrelude } from './PluginManagerDetailPrelude';
+import { PluginSourceLabel } from './PluginSourceLabel';
 import { PluginVisual } from './PluginVisual';
+import type { PluginManagerPresentation } from './plugin-manager-attention';
 import type { PluginManagerDesignFixture } from './plugin-manager-fixtures';
 
 function SectionHeading({ children }: { children: string }) {
@@ -19,184 +26,107 @@ function SectionHeading({ children }: { children: string }) {
   );
 }
 
-const contributionKindLabel: Record<string, string> = {
-  mcp: 'MCP',
-  schedule: 'Scheduler',
-  skill: 'Skill',
-  'direct-tool': 'Tool',
-  limb: 'Limb',
-  webhook: 'Webhook',
-  messaging: 'Messaging',
-  events: 'Events',
-  identity: 'Identity',
-  connector: 'Connector',
-  service: 'Service',
-  ui: 'UI',
-  'content-editor-provider': 'Content Editor',
-  'desktop-window': 'Desktop Window',
-};
-
-interface CapabilityDocItem {
-  key: string;
-  kind: string;
-  name: string;
-  description?: string;
-}
-
-function CapabilityDocRow({ item }: { item: CapabilityDocItem }) {
-  return (
-    <li className="list-disc">
-      <SettingsText as="p" variant="sm" tone="secondary">
-        <span className="font-medium text-cafe">{item.name}</span>
-        {item.description === undefined ? null : <span> — {item.description}</span>}
-      </SettingsText>
-    </li>
-  );
-}
-
-function capabilityDocItems(plugin: PluginManagerDesignFixture): CapabilityDocItem[] {
-  return (plugin.contributions ?? []).flatMap((contribution) => {
-    const tools =
-      contribution.kind === 'mcp' ? (plugin.tools ?? []).filter((tool) => tool.contributionId === contribution.id) : [];
-    if (tools.length > 0) {
-      return tools.map((tool) => ({
-        key: `${contribution.id}:${tool.name}`,
-        kind: 'mcp',
-        name: tool.name,
-        ...(tool.description === undefined ? {} : { description: tool.description }),
-      }));
-    }
-    return [
-      {
-        key: contribution.id,
-        kind: contribution.kind,
-        name: contribution.name,
-        ...(contribution.description === undefined ? {} : { description: contribution.description }),
-      },
-    ];
-  });
-}
-
-function groupCapabilityDocs(items: readonly CapabilityDocItem[]) {
-  const groups = new Map<string, CapabilityDocItem[]>();
-  for (const item of items) {
-    const group = groups.get(item.kind) ?? [];
-    group.push(item);
-    groups.set(item.kind, group);
-  }
-  return [...groups].map(([kind, groupedItems]) => ({ kind, items: groupedItems }));
-}
-
-function CapabilityDocumentation({
-  plugin,
-  installed,
-  groups,
-}: {
-  plugin: PluginManagerDesignFixture;
-  installed: boolean;
-  groups: readonly { kind: string; items: CapabilityDocItem[] }[];
-}) {
-  return (
-    <section className="space-y-3" data-plugin-detail-section="capability-docs">
-      <SectionHeading>能力说明</SectionHeading>
-      {plugin.readme.state === 'loading' ? (
-        <SettingsText as="p" variant="sm" tone="muted">
-          README 加载中…
-        </SettingsText>
-      ) : plugin.readme.state === 'unavailable' ? (
-        <SettingsText as="p" variant="sm" tone="muted">
-          README 暂不可用。
-        </SettingsText>
-      ) : plugin.readme.state === 'absent' ? null : (
-        <MarkdownContent content={plugin.readme.markdown} disableCommandPrefix />
-      )}
-      {plugin.docsUrl && (
-        <a href={plugin.docsUrl} target="_blank" rel="noopener noreferrer" className="console-inline-link">
-          <ExternalLinkIcon />
-          <span>查看插件文档</span>
-        </a>
-      )}
-      {plugin.contributions === undefined ? (
-        <SettingsText as="p" variant="sm" tone="muted">
-          {installed ? '能力信息暂不可用。' : '安装后可查看具体工具与用途。'}
-        </SettingsText>
-      ) : groups.length > 0 ? (
-        <div className="space-y-3">
-          {groups.map(({ kind, items }) => (
-            <section key={kind} className="space-y-1.5" data-contribution-kind={kind}>
-              <SettingsText as="h5" variant="xs" tone="muted" className="font-semibold">
-                {contributionKindLabel[kind] ?? kind}
-              </SettingsText>
-              {kind === 'mcp' && plugin.live === 'running' && plugin.tools === undefined && (
-                <SettingsText as="p" variant="xs" tone="muted">
-                  工具信息暂不可用。
-                </SettingsText>
-              )}
-              <ul className="space-y-1.5 pl-4">
-                {items.map((item) => (
-                  <CapabilityDocRow key={item.key} item={item} />
-                ))}
-              </ul>
-            </section>
-          ))}
-        </div>
-      ) : (
-        <SettingsText as="p" variant="sm" tone="muted">
-          此插件未声明可展示的工具或资源。
-        </SettingsText>
-      )}
-    </section>
-  );
+function dependencyClosureLabel(plugin: PluginManagerDesignFixture): string | undefined {
+  if (plugin.dependencyClosure === 'shipped') return '本机自带依赖 · 仅限本机开发';
+  if (plugin.dependencyClosure === 'materialized') return '安装时解析依赖';
+  return undefined;
 }
 
 export function PluginManagerDetailCard({
   plugin,
   locale,
+  presentation = 'v1',
+  onOperationChange,
   busy = false,
   onSaveConfig,
   configurationValidationRequest = 0,
   configurationSaved = false,
   onStateChanged,
+  onInstall,
+  onRepair,
+  onUninstall,
+  onSetEnabled,
+  onBlockedToggle,
 }: {
   plugin: PluginManagerDesignFixture;
   locale: string;
+  presentation?: PluginManagerPresentation;
+  onOperationChange?: () => void;
   busy?: boolean;
   onSaveConfig?: (updates: readonly { key: string; value: string | null }[]) => void;
   configurationValidationRequest?: number;
   configurationSaved?: boolean;
   onStateChanged?: () => void | Promise<void>;
+  onInstall?: (() => void) | undefined;
+  onRepair?: (() => void) | undefined;
+  onUninstall?: (() => void) | undefined;
+  onSetEnabled?: ((enabled: boolean) => void) | undefined;
+  onBlockedToggle?: (() => void) | undefined;
 }) {
   const installed = plugin.artifact === 'installed';
   const description = resolvePluginDescription(plugin.description, locale);
-  const capabilityItems = capabilityDocItems(plugin);
-  const capabilityGroups = groupCapabilityDocs(capabilityItems);
+  const closureLabel = dependencyClosureLabel(plugin);
+  const t = pluginManagerText(locale);
 
   return (
     <article data-testid="plugin-manager-detail" className={settingsResourceCardClass}>
-      <div className="space-y-5 p-4">
-        <section className="space-y-2.5" data-plugin-detail-section="identity">
-          <SectionHeading>插件标识</SectionHeading>
-          <div className={`${settingsResourceRowClass} w-full px-0 py-0`}>
-            <PluginVisual icon={plugin.icon} iconBg={plugin.iconBg} name={plugin.displayName} size="large" />
-            <div className="min-w-0 flex-1">
-              <SettingsText as="h3" variant="sm" tone="default" className="font-semibold">
-                {plugin.displayName}
-              </SettingsText>
-              <SettingsText as="p" variant="xs" tone="muted" className="mt-0.5 break-all">
-                {plugin.installedVersion ?? plugin.availableVersion} · {plugin.packageName} · {plugin.publisher}
-              </SettingsText>
+      <div className="max-w-[720px] space-y-5 p-4 text-sm [&_label]:text-sm">
+        {presentation === 'v2' && (
+          <PluginDetailHeader
+            plugin={plugin}
+            locale={locale}
+            busy={busy}
+            onInstall={onInstall}
+            onSetEnabled={onSetEnabled}
+            onBlockedToggle={onBlockedToggle}
+          />
+        )}
+        {presentation === 'v1' && (
+          <section className="space-y-2.5" data-plugin-detail-section="identity">
+            <SectionHeading>{t.identity}</SectionHeading>
+            <div className={`${settingsResourceRowClass} w-full flex-wrap px-0 py-0`}>
+              <PluginVisual icon={plugin.icon} iconBg={plugin.iconBg} name={plugin.displayName} size="large" />
+              <div className="min-w-0 flex-1">
+                <SettingsText as="h3" variant="sm" tone="default" className="font-semibold">
+                  {plugin.displayName}
+                </SettingsText>
+                <PluginSourceLabel trust={plugin.trust} repositoryName={plugin.repositoryName} locale={locale} />
+                <SettingsText as="p" variant="xs" tone="muted" className="mt-0.5 break-all !text-compact">
+                  {plugin.installedVersion ?? plugin.availableVersion} · {plugin.packageName} · {plugin.publisher}
+                </SettingsText>
+                {plugin.installedVersion && plugin.availableVersion !== plugin.installedVersion && (
+                  <SettingsText as="p" variant="xs" tone="secondary" className="break-all !text-compact">
+                    {t.available(plugin.availableVersion)}
+                  </SettingsText>
+                )}
+                {closureLabel === undefined ? null : (
+                  <SettingsText as="p" variant="xs" tone="muted" className="mt-0.5">
+                    {closureLabel}
+                  </SettingsText>
+                )}
+              </div>
+              <PluginDetailStateAction
+                plugin={plugin}
+                locale={locale}
+                busy={busy}
+                onInstall={onInstall}
+                onSetEnabled={onSetEnabled}
+                onBlockedToggle={onBlockedToggle}
+              />
             </div>
-          </div>
-        </section>
+          </section>
+        )}
 
-        <section className="space-y-2" data-plugin-detail-section="introduction">
-          <SectionHeading>插件简介</SectionHeading>
-          <SettingsText as="p" variant="sm" tone="secondary">
-            {description}
-          </SettingsText>
-        </section>
+        {presentation === 'v1' && (
+          <section className="space-y-2" data-plugin-detail-section="introduction">
+            <SectionHeading>插件简介</SectionHeading>
+            <SettingsText as="p" variant="sm" tone="secondary">
+              {description}
+            </SettingsText>
+          </section>
+        )}
 
-        {plugin.diagnostic && (
+        {presentation === 'v1' && plugin.diagnostic && (
           <div className="flex items-start gap-2 rounded-xl bg-conn-amber-bg px-3 py-2.5">
             <HubIcon name="alert-triangle" className="mt-0.5 h-4 w-4 shrink-0 text-conn-amber-text" />
             <SettingsText as="p" variant="sm" tone="amber">
@@ -206,24 +136,81 @@ export function PluginManagerDetailCard({
         )}
 
         {plugin.id === 'official.chatgpt-dot' ? (
-          <DotConnectionDetail
-            installed={installed}
-            activationRequest={configurationValidationRequest}
-            activationAllowed={plugin.intent === 'enabled' || plugin.actions?.setEnabled === true}
-            onStateChanged={onStateChanged}
-          />
+          <>
+            <section className="space-y-2">
+              <SectionHeading>ChatGPT Pro · 本机 Chrome</SectionHeading>
+              <SettingsText as="p" variant="sm" tone="secondary">
+                要让砚砚 Pro 接收消息，请安装并启用 Personal Chrome，准备 Chrome
+                连接，再在扩展中授权指定会话。回到当前对话选择并连接该会话后，才能向它发送消息。
+              </SettingsText>
+              <a
+                href={personalChromeSettingsHref()}
+                className="inline-block text-sm font-medium text-cafe-interactive hover:underline"
+              >
+                设置 Personal Chrome
+              </a>
+            </section>
+            {presentation === 'v2' && (
+              <PluginManagerDetailPrelude
+                plugin={plugin}
+                description={description}
+                locale={locale}
+                busy={busy}
+                onInstall={onInstall}
+                onRepair={onRepair}
+              />
+            )}
+            <DotConnectionDetail
+              installed={installed}
+              compact={presentation === 'v2'}
+              activationRequest={configurationValidationRequest}
+              activationAllowed={plugin.intent === 'enabled' || plugin.actions?.setEnabled === true}
+              onStateChanged={onStateChanged}
+              secondaryAction
+            />
+          </>
         ) : (
           <>
             <PluginManagerConfigurationSection
               plugin={plugin}
+              presentation={presentation}
+              beforeConfiguration={
+                presentation === 'v2' ? (
+                  <PluginManagerDetailPrelude
+                    plugin={plugin}
+                    description={description}
+                    locale={locale}
+                    busy={busy}
+                    onInstall={onInstall}
+                    onRepair={onRepair}
+                  />
+                ) : undefined
+              }
+              onOperationChange={onOperationChange}
               busy={busy}
               onSaveConfig={onSaveConfig}
               validationRequest={configurationValidationRequest}
               saved={configurationSaved}
             />
 
-            <CapabilityDocumentation plugin={plugin} installed={installed} groups={capabilityGroups} />
+            {installed && plugin.permissions && (
+              <PluginConnectorSettings key={plugin.id} pluginId={plugin.id} pluginLabel={plugin.permissions.label} />
+            )}
+
+            {plugin.bindings !== undefined && (
+              <PluginManagerBindings
+                key={plugin.id}
+                pluginId={plugin.id}
+                bindings={plugin.bindings}
+                onChange={onOperationChange}
+              />
+            )}
+
+            <PluginCapabilityDocumentation plugin={plugin} presentation={presentation} />
           </>
+        )}
+        {presentation === 'v2' && (
+          <PluginDetailFooter plugin={plugin} locale={locale} busy={busy} onUninstall={onUninstall} />
         )}
       </div>
     </article>

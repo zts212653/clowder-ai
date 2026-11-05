@@ -23,6 +23,7 @@ export function acceptWorldDirectory(input: {
   if (!directory) return undefined;
   if (
     input.generation.expectedServiceInstanceId &&
+    directory.serviceInstanceId &&
     directory.serviceInstanceId !== input.generation.expectedServiceInstanceId
   ) {
     return undefined;

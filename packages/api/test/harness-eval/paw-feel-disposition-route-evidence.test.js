@@ -21,6 +21,8 @@ function lease(overrides = {}) {
 function task(overrides = {}) {
   return {
     id: 'task-1',
+    kind: 'work',
+    subjectKey: 'eval-case:repair',
     threadId: 'thread-owner',
     ownerCatId: 'opus',
     status: 'doing',
@@ -82,20 +84,11 @@ describe('PawFeelFixEvidenceResolver', () => {
           : { ok: false, reason: 'lease_not_active' };
       },
     };
-    const truthResolver = new ActionSubjectTruthResolver(
-      leaseStore,
-      {
-        async get() {
-          return null;
-        },
+    const truthResolver = new ActionSubjectTruthResolver(leaseStore, {
+      async get(taskId) {
+        return taskId === storedTask.id ? storedTask : null;
       },
-      undefined,
-      {
-        async get(taskId) {
-          return taskId === storedTask.id ? storedTask : null;
-        },
-      },
-    );
+    });
     const admission = new ActionSuccessorAdmissionService(leaseStore, truthResolver);
     const admitted = await admission.admit({
       tenantScope: 'user-1',
@@ -132,6 +125,13 @@ describe('PawFeelFixEvidenceResolver', () => {
       taskId: 'task-1',
       leaseId: admitted.lease.leaseId,
       leaseGeneration: 1,
+      repairBinding: {
+        kind: 'action_lease',
+        taskId: 'task-1',
+        leaseId: admitted.lease.leaseId,
+        generation: 1,
+        holderThreadId: 'thread-owner',
+      },
       custodyEvidenceRef: `action-lease:${admitted.lease.leaseId}:generation:1`,
     });
   });
@@ -144,6 +144,13 @@ describe('PawFeelFixEvidenceResolver', () => {
       taskId: 'task-1',
       leaseId: 'lease-1',
       leaseGeneration: 3,
+      repairBinding: {
+        kind: 'action_lease',
+        taskId: 'task-1',
+        leaseId: 'lease-1',
+        generation: 3,
+        holderThreadId: 'thread-owner',
+      },
       custodyEvidenceRef: 'action-lease:lease-1:generation:3',
     });
   });

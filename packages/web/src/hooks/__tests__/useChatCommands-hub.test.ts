@@ -7,6 +7,18 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useChatStore } from '@/stores/chatStore';
 
+const brandDisplayName = vi.hoisted(() => 'Synthetic Config Écran');
+vi.mock('@cat-cafe/shared', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@cat-cafe/shared')>();
+  return {
+    ...actual,
+    deploymentDefaults: {
+      ...actual.deploymentDefaults,
+      brand: { ...actual.deploymentDefaults.brand, displayName: brandDisplayName },
+    },
+  };
+});
+
 const mockPush = vi.fn();
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: mockPush }),
@@ -69,9 +81,12 @@ describe('useChatCommands /help and /config', () => {
     expect(mockPush).toHaveBeenCalledWith('/settings?s=system');
   });
 
-  it('/config set still adds messages (regression)', async () => {
+  it('/config set renders the configured brand in its actual response message', async () => {
     const handled = await act(() => captured?.processCommand('/config set cli.timeoutMs 120000'));
     expect(handled).toBe(true);
-    expect(useChatStore.getState().messages.length).toBeGreaterThanOrEqual(1);
+    const message = useChatStore
+      .getState()
+      .messages.find((entry) => entry.type === 'system' && entry.content.includes('[已更新]'));
+    expect(message?.content).toContain(`[配置] ${brandDisplayName} 运行配置`);
   });
 });

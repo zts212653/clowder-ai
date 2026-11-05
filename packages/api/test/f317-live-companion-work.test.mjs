@@ -61,9 +61,6 @@ for (const [reason, revoke] of Object.entries({
   canceled: (m) => {
     m.deliveryStatus = 'canceled';
   },
-  withdrawn: (m) => {
-    m.queueCustody = { withdrawnByCatIds: ['codex'] };
-  },
   noticeOnly: (m) => {
     m.deliveryStatus = 'queued';
     m.origin = 'briefing';
@@ -93,7 +90,6 @@ test('published queued real-cat speech is readable, but a queue notice does not 
   assert.equal((await read(f.options, f.scope)).length, 1);
   source.visibility = 'whisper';
   source.whisperTo = ['sonnet'];
-  source.queueCustody = { notifiedByCatIds: ['codex'] };
   assert.deepEqual(await read(f.options, f.scope), []);
 });
 

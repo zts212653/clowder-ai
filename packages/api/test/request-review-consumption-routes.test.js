@@ -23,7 +23,15 @@ describe('request-review consumption callback routes', () => {
     const ledger = new MemoryRequestReviewOwnerLedger();
     const receipts = new RequestReviewUseReceiptService({
       ledger,
-      messageStore: { getById: async (id) => messages.get(id) ?? null },
+      messageStore: {
+        getById: async (id) => messages.get(id) ?? null,
+        updateExtra: async (id, extra) => {
+          const message = messages.get(id);
+          if (!message) return null;
+          message.extra = { ...message.extra, ...extra };
+          return message;
+        },
+      },
       invocationRegistry: { peekRecord: async (id) => invocations.get(id) ?? null },
       versionAttestor: {
         deliver: async (ref) => ({
@@ -169,6 +177,7 @@ describe('request-review consumption callback routes', () => {
     assert.equal(recorded.statusCode, 200);
     assert.equal(recorded.json().receipt.use, 'applied');
     assert.equal(recorded.json().receipt.invocationRef.ownerStateRef, 'inv:inv-reviewer');
+    assert.equal(messages.get('message-review').extra.evolutionUseSourceV1.use, 'applied');
 
     const unsupported = await app.inject({
       method: 'POST',

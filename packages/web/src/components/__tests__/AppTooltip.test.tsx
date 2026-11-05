@@ -159,7 +159,7 @@ describe('F322 AppTooltip — the shell name tip', () => {
     const { a } = renderTwo();
     pointer(a, 'pointerover');
     React.act(() => vi.advanceTimersByTime(APP_TOOLTIP_DELAY_MS));
-    expect(tip()?.className).toContain('pointer-events-none');
+    expect(tip()?.style.pointerEvents).toBe('none');
     pointer(a, 'pointerout');
     expect(tip()).toBeNull();
   });

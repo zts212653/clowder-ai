@@ -171,7 +171,7 @@ function describeWorking(input: ModificationProgressInput): ModificationProgress
   return {
     key: 'working',
     indicator: 'spinner',
-    title: subject ? `修改中 · ${subject}` : '修改中',
+    title: subject ? `${input.targetName}修改中 · ${subject}` : `${input.targetName}修改中`,
     chip: `${input.targetName}修改中${places ? ` · ${places}` : ''}`,
     action: action('cancel-request', '取消修改', '取消'),
   };

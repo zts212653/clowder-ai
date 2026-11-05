@@ -77,3 +77,50 @@ it('holds row placement under the pointer, projects fresh facts, and recomputes 
     vi.unstubAllGlobals();
   }
 });
+
+it('compacts read content within the list while retaining the pointer ordering session', async () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  vi.useFakeTimers();
+  const host = document.createElement('div');
+  document.body.append(host);
+  const root = createRoot(host);
+  const bounds = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+    this: HTMLElement,
+  ) {
+    const natural = Number(this.dataset.height ?? this.firstElementChild?.getAttribute('data-height') ?? 0);
+    const height = Math.max(natural, Number.parseFloat(this.style.minHeight) || 0);
+    return { top: 0, bottom: height, height, left: 0, right: 240, width: 240, x: 0, y: 0, toJSON: () => ({}) };
+  });
+  function Probe({ height }: { height: number }) {
+    const surface = useRef<HTMLDivElement>(null);
+    const reading = useSidebarReadingSession(surface, true, 'same-list');
+    return (
+      <div ref={surface} data-surface data-held={reading.held}>
+        <div data-sidebar-row-key="read-row" style={{ minHeight: reading.heights['read-row'] }}>
+          <div data-height={height}>{height === 120 ? 'Unread preview' : 'Current facts'}</div>
+        </div>
+      </div>
+    );
+  }
+  try {
+    await act(async () => root.render(<Probe height={120} />));
+    act(() => host.querySelector('[data-surface]')?.dispatchEvent(new Event('pointerenter')));
+    act(() =>
+      host.querySelector('[data-sidebar-row-key]')?.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })),
+    );
+    await act(async () => root.render(<Probe height={40} />));
+    const wrapper = host.querySelector<HTMLElement>('[data-sidebar-row-key]');
+    expect(wrapper?.getBoundingClientRect().height).toBe(120); // Preserve the immediate next-click target.
+    await act(async () => vi.advanceTimersByTimeAsync(250));
+    act(() => host.querySelector('[data-surface]')?.dispatchEvent(new MouseEvent('pointermove', { bubbles: true })));
+    await act(async () => vi.advanceTimersByTimeAsync(750));
+    expect(wrapper?.getBoundingClientRect().height).toBe(40); // Do not keep the empty slot until pointerleave.
+    expect(host.querySelector('[data-surface]')?.getAttribute('data-held')).toBe('true');
+  } finally {
+    act(() => root.unmount());
+    host.remove();
+    bounds.mockRestore();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  }
+});

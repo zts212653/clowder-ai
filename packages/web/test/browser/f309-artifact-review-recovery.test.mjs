@@ -3,10 +3,15 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
 import { startReviewHost } from './fixtures/f309-artifact-review-host.mjs';
 import { mediaFixture, offsetRotatedVfrFixture } from './fixtures/f309-artifact-review-media.mjs';
-import { openAnnotationSave, openReviewPanel, selectReviewMode } from './fixtures/f309-artwork-controls.mjs';
+import {
+  openAnnotationSave,
+  openReviewPanel,
+  seedRetainedImageAnnotation,
+  selectReviewMode,
+} from './fixtures/f309-artwork-controls.mjs';
 import { installMediaDiagnostics, readMediaDiagnostics } from './fixtures/f309-media-diagnostics.mjs';
 
 async function openReview(page, host) {
@@ -137,11 +142,16 @@ for (const kind of ['png', 'mp4'])
       await selectReviewMode(page, 'view');
       await page.getByRole('button', { name: '圈出这帧画面', exact: true }).click();
     } else {
-      await page.getByRole('button', { name: '圈选区域', exact: true }).click();
+      await selectReviewMode(page, 'comment');
     }
     await circle(page, view.review.rounds[0].asset.media);
-    await page.getByRole('textbox', { name: '评论内容' }).fill('帧坐标及撤权恢复的陌生意见');
-    await (await openAnnotationSave(page)).click();
+    if (kind === 'png') {
+      await page.getByTestId('review-pending-chat-mark').waitFor();
+      await seedRetainedImageAnnotation(page, host, reviewId, '帧坐标及撤权恢复的陌生意见');
+    } else {
+      await page.getByRole('textbox', { name: '评论内容' }).fill('帧坐标及撤权恢复的陌生意见');
+      await (await openAnnotationSave(page)).click();
+    }
     await openReviewPanel(page, 'comments');
     await page.getByTestId('review-comment').waitFor();
     view = await host.reviews.read(reviewId, host.human);
@@ -172,7 +182,7 @@ for (const kind of ['png', 'mp4'])
         'saved frame tick must identify the independently decoded, actually displayed frame',
       );
     }
-    const draft = page.getByRole('textbox', { name: '评论内容' });
+    const draft = page.getByRole('textbox', { name: kind === 'png' ? '消息输入框' : '评论内容' });
     await selectReviewMode(page, 'comment');
     await draft.fill('返回原入口后还在的草稿');
     await page.getByRole('button', { name: '返回', exact: true }).click();
@@ -184,9 +194,11 @@ for (const kind of ['png', 'mp4'])
     assert.equal(await selected.getAttribute('data-subject-ref'), `task:work:${host.taskId}`);
     await page.getByTestId('open-artifact-review').click();
     // AC-U2: the retained draft is showing again on return, without re-entering comment mode.
+    await page.getByTestId('artifact-review-surface').waitFor();
     await draft.waitFor();
     assert.equal(await draft.inputValue(), '返回原入口后还在的草稿');
     await page.reload();
+    await page.getByTestId('artifact-review-surface').waitFor();
     await draft.waitFor();
     assert.equal(await draft.inputValue(), '返回原入口后还在的草稿');
     if (clock) {

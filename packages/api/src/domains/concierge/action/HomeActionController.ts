@@ -14,6 +14,11 @@ export interface HomeActionTarget extends Pick<PageCandidate, 'id' | 'label' | '
   readonly revision: string;
 }
 
+export type HomeActionNotice = {
+  readonly status: 'ask' | 'none' | 'unavailable' | 'stale' | 'blocked';
+  readonly reason: string;
+};
+
 export type HomeActionResult = {
   readonly requestMessageId: string;
   readonly observedAtMs: number;
@@ -24,7 +29,7 @@ export type HomeActionResult = {
 
 export interface HomeActionPorts {
   currentRequest(): Promise<HomeActionRequest | null>;
-  targets(request: HomeActionRequest): Promise<readonly HomeActionTarget[]>;
+  targets(request: HomeActionRequest): Promise<readonly HomeActionTarget[] | HomeActionNotice>;
   select(request: HomeActionRequest, targets: readonly HomeActionTarget[]): Promise<PageChoice>;
   /** The existing owner performs its final scope/revision check and operation together. */
   execute(
@@ -107,7 +112,10 @@ export class HomeActionController {
   }
 
   private async chooseAndExecute(request: HomeActionRequest): Promise<HomeActionResult> {
-    const targets = await this.ports.targets(request);
+    const discovery = await this.ports.targets(request);
+    if (!(await this.isCurrent(request))) return this.result(request, 'stale', 'request_changed');
+    if ('status' in discovery) return this.result(request, discovery.status, discovery.reason);
+    const targets = discovery;
     if (targets.length > 32 || new Set(targets.map((t) => t.id)).size !== targets.length)
       throw new Error('Invalid owner targets');
     if (!(await this.isCurrent(request))) return this.result(request, 'stale', 'request_changed');
@@ -129,6 +137,7 @@ export class HomeActionController {
       return this.result(request, 'blocked', 'value_not_from_owner');
     const currentTargets = await this.ports.targets(request);
     if (
+      'status' in currentTargets ||
       !sameTarget(
         target,
         currentTargets.find((t) => t.id === target.id),

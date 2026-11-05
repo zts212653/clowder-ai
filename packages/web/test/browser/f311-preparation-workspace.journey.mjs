@@ -117,6 +117,85 @@ export async function verifyPreparationWorkspace({
   await records.locator(':scope > summary').click();
   await records.getByText('待核实', { exact: true }).first().waitFor();
   assert.doesNotMatch(await records.locator('[data-progress-state]').innerText(), /codex-terra/u);
+  const chatHost = page.getByTestId('thread-chat-host');
+  await page.waitForFunction(
+    () =>
+      document.querySelector('[data-testid="contextual-workspace-host"]')?.getAttribute('data-presentation') ===
+      'wide-workspace',
+  );
+  assert.equal(await chatHost.getAttribute('aria-hidden'), null, 'normal Program reading must keep Chat visible');
+  assert.equal(
+    await page.getByTestId('f307-experience-workbench').getAttribute('data-active-surface'),
+    `evolution-program:${initial.program.programId}`,
+    'the wide host must retain the exact Program identity',
+  );
+  const composer = chatHost.getByRole('textbox', { name: '消息输入框', exact: true });
+  const draft = 'F311 阅读时仍在原 Chat 的草稿';
+  await composer.fill(draft);
+  const resize = page.getByRole('separator', { name: '右侧面板分隔条', exact: true });
+  const initialBasis = await chatHost.evaluate((node) => node.style.flexBasis);
+  await resize.press('ArrowRight');
+  const splitBasis = await chatHost.evaluate((node) => node.style.flexBasis);
+  assert.notEqual(splitBasis, initialBasis, 'the person-adjusted Chat/Program ratio must change before full-window');
+  const readingTop = await program.evaluate((element) => {
+    element.scrollTop = 180;
+    element.dispatchEvent(new Event('scroll'));
+    window.__f311ReturnProgram = element;
+    return element.scrollTop;
+  });
+  await chatHost.evaluate((element) => {
+    window.__f311ReturnChat = element;
+  });
+  assert(readingTop > 0, 'the return contract needs a real scrolled reading position');
+  const v2Actions = page.locator('summary[aria-label="更多 Workspace 操作"]');
+  if (await v2Actions.count()) {
+    await v2Actions.click();
+    await page.getByRole('menuitemcheckbox', { name: '整窗', exact: true }).click();
+  } else {
+    await page.getByRole('button', { name: /^整窗打开 /u }).click();
+  }
+  await page.waitForFunction(
+    () =>
+      document.querySelector('[data-testid="contextual-workspace-host"]')?.getAttribute('data-presentation') ===
+      'main-area-attention',
+  );
+  const returnToChat = page.getByRole('button', { name: /回到聊天/u }).first();
+  await returnToChat.waitFor();
+  assert.equal(await chatHost.getAttribute('aria-hidden'), 'true');
+  assert.equal(
+    await chatHost.evaluate((node) => window.__f311ReturnChat === node && node.isConnected),
+    true,
+    'full-window must retain the exact Chat DOM instead of replacing it',
+  );
+  assert.equal(
+    await program.evaluate((node) => window.__f311ReturnProgram === node && node.isConnected),
+    true,
+    'full-window must retain the exact Program DOM instead of remounting it',
+  );
+  await capture(page, 'preparation-full-window-visible-return-1360');
+  await returnToChat.click();
+  await page.waitForFunction(
+    () =>
+      document.querySelector('[data-testid="contextual-workspace-host"]')?.getAttribute('data-presentation') ===
+      'wide-workspace',
+  );
+  assert.equal(await chatHost.getAttribute('aria-hidden'), null);
+  assert.equal(await composer.inputValue(), draft, 'return must preserve the exact Chat draft');
+  assert.equal(
+    await chatHost.evaluate((node) => node.style.flexBasis),
+    splitBasis,
+    'return must restore the person-adjusted Chat/Program ratio',
+  );
+  assert.equal(await tabs.filter({ hasText: '可进化对象' }).getAttribute('aria-selected'), 'true');
+  assert.equal(
+    await program.evaluate((node) => node.scrollTop),
+    readingTop,
+    'return must preserve Program reading position',
+  );
+  await page.evaluate(() => {
+    delete window.__f311ReturnChat;
+    delete window.__f311ReturnProgram;
+  });
   assertFlatPreparationSurface(await readFlatPreparationSurface(data), 'object candidates');
   await program.evaluate((element) => {
     element.scrollTop = 0;

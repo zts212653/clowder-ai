@@ -28,7 +28,9 @@ export function registerCapabilityEvolutionMeasurementIssuanceRoute(
           catId: request.callbackPrincipal.catId,
           clientMessageId: body.clientMessageId,
         });
-        return reply.status(result.status === 'published' ? 201 : 422).send(result);
+        const status =
+          result.status === 'published' ? 201 : result.reason === 'publication_provider_unavailable' ? 503 : 422;
+        return reply.status(status).send(result);
       } catch (error) {
         if (error instanceof z.ZodError) {
           return reply.status(400).send({ error: 'invalid_input', issues: error.issues });

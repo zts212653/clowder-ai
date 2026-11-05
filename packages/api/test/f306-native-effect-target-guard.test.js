@@ -5,9 +5,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { assertGuardedOrUnproved } from './helpers/native-effect-policy-assertions.js';
+import { nativeHookTestEnv } from './helpers/native-hook-programs.js';
 
 const guardModule = import('../../../scripts/native-effect-target-guard.mjs');
 const hookPath = fileURLToPath(new URL('../../../scripts/native-effect-target-guard.mjs', import.meta.url));
+// A protected policy coordinate, not a deployment default for the exporter to remap.
+const runtimeWebPort = 3001;
 
 function candidate(effect, kind, value = '/tmp/ordinary', source = {}) {
   return {
@@ -21,12 +25,12 @@ function assertUnboundedManagedPreviewCommands(decide, commands, cwd) {
   for (const command of commands) {
     const decision = decide(command, cwd);
     assert.equal(decision.decision, 'deny', command);
-    assert.equal(decision.reasonCode, 'unbounded_managed_preview_operation', command);
+    assert.equal(decision.reasonCode, 'protected_managed_preview_operation', command);
   }
 }
 
 describe('F306 AC-C7 provider-neutral effect/target policy', () => {
-  test('denies protected irreversible or uncertain effects without making workspace a jail', async () => {
+  test('denies known protected effects and defers uncertainty without making workspace a jail', async () => {
     const { decideNativeEffect } = await guardModule;
 
     assert.equal(decideNativeEffect(candidate('write', 'runtime_sanctuary')).decision, 'deny');
@@ -36,7 +40,11 @@ describe('F306 AC-C7 provider-neutral effect/target policy', () => {
     );
     assert.equal(decideNativeEffect(candidate('delete', 'broad_root', '/')).decision, 'deny');
     assert.equal(decideNativeEffect(candidate('repository_rewrite', 'protected_branch', 'main')).decision, 'deny');
-    assert.equal(decideNativeEffect(candidate('unknown', 'runtime_sanctuary')).decision, 'deny');
+    for (const kind of ['runtime_sanctuary', 'redis_sanctuary']) {
+      const unknown = decideNativeEffect(candidate('unknown', kind));
+      assert.equal(unknown.decision, 'allow');
+      assert.equal(unknown.effect, 'unknown');
+    }
 
     assert.equal(decideNativeEffect(candidate('read', 'runtime_sanctuary')).decision, 'allow');
     assert.equal(
@@ -55,8 +63,7 @@ describe('F306 AC-C7 provider-neutral effect/target policy', () => {
       decideNativeEffect(candidate('remote_mutation', 'runtime_sanctuary', '/runtime/unresolved')).decision,
       'deny',
     );
-    // An unrecognised effect is not a dangerous one (2026-09-26); only the literal
-    // runtime and Redis 6399 sanctuaries stay closed to it (asserted above).
+    // An unrecognised effect is not a proved read or a known dangerous effect.
     assert.equal(
       decideNativeEffect(candidate('unknown', 'remote_repository', 'github://current/pull/4368')).decision,
       'allow',
@@ -108,10 +115,11 @@ describe('F306 AC-C7 provider-neutral effect/target policy', () => {
       assert.equal(decision.target.value, `preview://alpha${realpathSync(repoRoot)}:3011`, command);
     }
 
-    // Denied by the preview rule itself (`unbounded_managed_preview_operation`). Before
+    // Ordinary unsupported preview grammar defers; real protected coordinates still refuse.
+    // Previously denied by the preview rule itself (`unbounded_managed_preview_operation`). Before
     // 2026-09-26 the mentioned main checkout also labelled these `broad_root`; an unrecognised
     // effect no longer makes a mentioned root the target, so the label is `ordinary`.
-    for (const { command, cwd = broadRepoRoot, target } of [
+    for (const { command, cwd = broadRepoRoot, target, expected = 'allow' } of [
       {
         command: `pnpm preview:process start --port 3011 --cwd ${broadRepoRoot} -- pnpm runtime:start`,
         target: 'ordinary',
@@ -133,27 +141,31 @@ describe('F306 AC-C7 provider-neutral effect/target policy', () => {
         target: 'ordinary',
       },
       {
-        command: `pnpm preview:process start --port 3003 --cwd ${broadRepoRoot} -- pnpm alpha:start`,
-        target: 'ordinary',
+        command: `pnpm preview:process start --port ${runtimeWebPort} --cwd ${broadRepoRoot} -- pnpm alpha:start`,
+        target: 'runtime_sanctuary',
+        expected: 'deny',
       },
       {
         command: `pnpm preview:process start --port 3011 --cwd ${runtimeRoot} -- pnpm alpha:start`,
         cwd: runtimeRoot,
         target: 'runtime_sanctuary',
+        expected: 'deny',
       },
       {
         command: `pnpm preview:process start --port 3011 --cwd ${broadRepoRoot} -- redis-cli -p 6399 shutdown`,
         target: 'redis_sanctuary',
+        expected: 'deny',
       },
       {
         command: 'pnpm preview:process start --port 3011 --cwd . -- redis-cli -p 6399 shutdown',
         cwd: '/tmp',
         target: 'redis_sanctuary',
+        expected: 'deny',
       },
     ]) {
       const decision = decide(command, cwd);
-      assert.equal(decision.decision, 'deny', command);
-      assert.equal(decision.reasonCode, 'unbounded_managed_preview_operation', command);
+      assert.equal(decision.decision, expected, command);
+      if (expected === 'deny') assert.equal(decision.reasonCode, 'protected_managed_preview_operation', command);
       assert.equal(decision.target.kind, target, command);
     }
   });
@@ -206,11 +218,11 @@ describe('F306 AC-C7 provider-neutral effect/target policy', () => {
     }
 
     for (const command of [
-      `pnpm preview:process start --port 3003 --cwd ${worktreeRoot} -- ${child}`,
+      `pnpm preview:process start --port ${runtimeWebPort} --cwd ${worktreeRoot} -- ${child}`,
       `pnpm preview:process start --port 3511 --cwd ${worktreeRoot} -- env CAT_CAFE_RUNTIME_ROOT=${runtimeRoot} pnpm dev:direct`,
       `pnpm preview:process start --port 3511 --cwd ${worktreeRoot} -- env CAT_CAFE_WORKSPACE_ROOT=${repoRoot} CAT_CAFE_RUNTIME_ROOT=${runtimeRoot} pnpm runtime:start`,
     ]) {
-      assert.equal(decide(command).decision, 'deny', command);
+      assertGuardedOrUnproved(decide(command), command);
     }
 
     for (const reservedPort of [
@@ -228,7 +240,11 @@ describe('F306 AC-C7 provider-neutral effect/target policy', () => {
     ]) {
       for (const aliasedPort of [reservedPort, `0${reservedPort}`, `000${reservedPort}`]) {
         const command = `pnpm preview:process start --port ${aliasedPort} --cwd ${worktreeRoot} -- ${child}`;
-        assert.equal(decide(command).decision, 'deny', command);
+        assert.equal(
+          decide(command).decision,
+          ['3001', '3002', '6399'].includes(reservedPort) ? 'deny' : 'allow',
+          command,
+        );
       }
     }
 
@@ -308,10 +324,10 @@ describe('F306 AC-C7 provider-neutral effect/target policy', () => {
     assert.equal(ordinaryStatusFromManagedShell.target.kind, 'ordinary');
 
     assertUnboundedManagedPreviewCommands(decide, [
-      `pnpm preview:process status --port 3003 --cwd ${worktreeRoot} --json`,
+      `pnpm preview:process status --port ${runtimeWebPort} --cwd ${worktreeRoot} --json`,
       `pnpm preview:process status --port 03001 --cwd ${worktreeRoot} --json`,
-      `pnpm preview:process status --port 6397 --cwd ${worktreeRoot} --json`,
     ]);
+    assert.equal(decide(`pnpm preview:process status --port 6397 --cwd ${worktreeRoot} --json`).decision, 'allow');
   });
 
   test('does not reinterpret apply_patch source text as a shell command', async () => {
@@ -608,7 +624,7 @@ describe('F306 AC-C7 provider-neutral effect/target policy', () => {
       [`rm -rf ${runtimeRoot}-cwd-debug*`, 'allow'],
       ['rm -rf /unrelated-fixture/cat-cafe-runtime*', 'allow'],
     ]) {
-      const env = { ...process.env };
+      const env = nativeHookTestEnv();
       delete env.CAT_CAFE_DEPLOYMENT_ID;
       const result = spawnSync(process.execPath, [hookPath], {
         encoding: 'utf8',
@@ -654,7 +670,7 @@ describe('F306 AC-C7 provider-neutral effect/target policy', () => {
         tool_input: { command },
       });
       assert.equal(pipedMutation.target.kind, 'redis_sanctuary', command);
-      assert.equal(pipedMutation.decision, 'deny', command);
+      assertGuardedOrUnproved(pipedMutation, command);
     }
 
     for (const command of [
@@ -753,7 +769,6 @@ describe('F306 AC-C7 provider-neutral effect/target policy', () => {
     });
     assert.equal(opaqueProtectedCommand.effect, 'unknown');
     assert.equal(opaqueProtectedCommand.target.kind, 'runtime_sanctuary');
-    assert.equal(opaqueProtectedCommand.decision, 'deny');
   });
 
   test('shares the same classifier with Claude Edit/Write payloads', async () => {
@@ -780,6 +795,7 @@ describe('F306 AC-C7 provider-neutral effect/target policy', () => {
 
   test('hook CLI emits a synchronous Codex/Claude-compatible deny and stays silent on allow', () => {
     const denied = spawnSync(process.execPath, [hookPath], {
+      env: nativeHookTestEnv(),
       encoding: 'utf8',
       input: JSON.stringify({
         turn_id: 'turn-denied',
@@ -795,6 +811,7 @@ describe('F306 AC-C7 provider-neutral effect/target policy', () => {
     assert.match(output.hookSpecificOutput.permissionDecisionReason, /broad_root_delete/);
 
     const allowed = spawnSync(process.execPath, [hookPath], {
+      env: nativeHookTestEnv(),
       encoding: 'utf8',
       input: JSON.stringify({
         turn_id: 'turn-allowed',

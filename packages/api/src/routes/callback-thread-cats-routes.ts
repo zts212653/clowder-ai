@@ -8,6 +8,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { isCatAvailable } from '../config/cat-config-loader.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
+import type { RoutingSelectionService } from '../domains/routing-context/selection/RoutingSelectionService.js';
 import { requireCallbackPrincipal } from './callback-auth-prehandler.js';
 import { resolvePrincipalThread } from './callback-scope-helpers.js';
 import { categorizeThreadCats } from './thread-cats-core.js';
@@ -15,9 +16,13 @@ import { categorizeThreadCats } from './thread-cats-core.js';
 interface ThreadCatsCallbackDeps {
   threadStore: IThreadStore;
   agentRegistry: { getAllEntries(): Map<string, unknown> };
+  routingSelection?: Pick<RoutingSelectionService, 'read'>;
 }
 
-const querySchema = z.object({ threadId: z.string().trim().min(1).max(200).optional() });
+const querySchema = z.object({
+  threadId: z.string().trim().min(1).max(200).optional(),
+  forRole: z.enum(['review', 'architecture', 'implementation']).optional(),
+});
 
 export function registerCallbackThreadCatsRoutes(app: FastifyInstance, deps: ThreadCatsCallbackDeps): void {
   const { threadStore, agentRegistry } = deps;
@@ -59,9 +64,25 @@ export function registerCallbackThreadCatsRoutes(app: FastifyInstance, deps: Thr
       isCatAvailable,
     });
 
+    let selection: Awaited<ReturnType<RoutingSelectionService['read']>> | undefined;
+    if (parsed.data.forRole) {
+      const targetCatIds = [...result.routableNow, ...result.routableNotJoined]
+        .map((cat) => cat.catId)
+        .filter((catId) => catId !== principal.catId);
+      selection = deps.routingSelection
+        ? await deps.routingSelection.read({ ownerId: principal.userId, role: parsed.data.forRole, targetCatIds })
+        : {
+            stage: 'selection',
+            role: parsed.data.forRole,
+            roleFit: 'agent_judgment',
+            facts: 'unknown: routing source unavailable',
+            missingCatIds: targetCatIds,
+          };
+    }
     return {
       threadId,
       ...result,
+      ...(selection ? { selection } : {}),
       routingPolicy: thread.routingPolicy ? `v${thread.routingPolicy.v}` : null,
     };
   });

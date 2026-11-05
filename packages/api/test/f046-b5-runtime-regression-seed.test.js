@@ -1,8 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
 import { describe, it } from 'node:test';
-import { fileURLToPath } from 'node:url';
 import './helpers/setup-cat-registry.js';
 
 const { parseA2AMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
@@ -16,14 +13,8 @@ describe('F046 B5 runtime regression scenarios after lifecycle cutover', () => {
     assert.deepEqual(parseA2AMentions('@缅因猫 prefix issue', 'opus'), ['codex']);
   });
 
-  it('commits downstream A2A only from a completed response instead of recursive route execution', () => {
-    const here = dirname(fileURLToPath(import.meta.url));
-    const source = readFileSync(resolve(here, '../src/domains/cats/services/agents/routing/route-serial.ts'), 'utf8');
-
-    assert.match(source, /lifecycleResponse\?\.status === 'completed' && a2aMentions\.length > 0/);
-    assert.match(source, /commitCompletedA2AWake\(/);
-    assert.doesNotMatch(source, /Routing feedback\(one-shot\):/);
-  });
+  // Completed-response wake behavior is exercised through the real route in
+  // route-strategies.test.js and f247-serial-cloud-source.test.js.
 
   it('keeps dynamic identity metadata handle-free', () => {
     const context = buildInvocationContext({

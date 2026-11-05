@@ -201,7 +201,7 @@ export default function F294SelectionToolbarPreviewPage() {
                 kind: 'cli_quote',
                 messageId: 'f294-cli-source-message',
                 sourceThreadId: 'f294-layout-preview',
-                author: { kind: 'cat', catId: 'codex-sol' },
+                from: { kind: 'agent', catId: 'codex-sol' },
                 timestamp: 1_786_841_841_409,
                 readableContent: 'exact selected fragment',
               }}

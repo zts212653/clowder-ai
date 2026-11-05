@@ -4,6 +4,7 @@ import type {
   InvocationTrajectoryTokens,
   SessionRecord,
 } from '@cat-cafe/shared';
+import { sliceUnicodeSafe } from '../../../../utils/unicode-safe-slice.js';
 import { FirstAssistantOutputAccumulator } from './FirstAssistantOutputAccumulator.js';
 import type { TranscriptEvent } from './TranscriptReader.js';
 
@@ -135,7 +136,7 @@ function accumulateEvent(counters: ProjectionCounters, envelope: TranscriptEvent
     counters.messageCount += 1;
     const content = textContent(envelope.event);
     if (content && counters.keyMessages.length < MAX_KEY_MESSAGES) {
-      counters.keyMessages.push(content.slice(0, MAX_KEY_MESSAGE_LENGTH));
+      counters.keyMessages.push(sliceUnicodeSafe(content, 0, MAX_KEY_MESSAGE_LENGTH));
     }
   }
   if (type === 'tool_use') {

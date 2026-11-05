@@ -346,7 +346,7 @@ test('the owner route reads preferences only for an explicit unified personal vi
     request.sessionUserId = 'owner';
   });
   app.get('/api/approval-hub/pending', async () => ({
-    items: [approval('route-a'), approval('route-b')],
+    items: [approval('route-a', 'F139'), approval('route-b', 'F139')],
     coverage: { state: 'complete' },
   }));
   app.get('/api/entrusted-work/needs-me', async () => ({ ownerReads: [], coverage: { state: 'complete' } }));
@@ -355,6 +355,22 @@ test('the owner route reads preferences only for an explicit unified personal vi
   let failRead = false;
   await app.register(companionDecisionRoutes, {
     ownerUserId: 'owner',
+    collectiveAccountability: async () => ({
+      status: 200,
+      body: {
+        data: {
+          items: [],
+          reasons: [],
+          state: {
+            coverage: 'pending_f290_collective_accountability_requests',
+            status: 'available',
+            exhaustiveness: 'complete',
+            startedAt: 1,
+            observedAt: 2,
+          },
+        },
+      },
+    }),
     readIgnoredItemPreferences(ownerUserId: string) {
       reads++;
       assert.equal(ownerUserId, 'owner');

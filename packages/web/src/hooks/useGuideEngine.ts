@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
+import { FIRST_RUN_ENTRY_GUIDE_ID } from '@/components/first-run-quest/firstRunEntryReceipt';
 import { syncLocalBootcampState } from '@/components/first-run-quest/syncLocalBootcampState';
 import type { Thread } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
@@ -50,29 +51,45 @@ export function useGuideEngine() {
       if (!isActiveThread() || hasActiveSession()) return;
       if (startInFlightRef.current === startKey) return;
       startInFlightRef.current = startKey;
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10_000);
+      const ownsStart = () => startInFlightRef.current === startKey && isActiveThread();
+      const reportFailure = () => {
+        if (ownsStart() && !useGuideStore.getState().session)
+          useGuideStore.setState({
+            startFailure: { guideId, threadId, message: '入口提醒暂时无法加载，可以直接开始对话；稍后可重试。' },
+          });
+      };
       try {
-        const res = await apiFetch(`/api/guide-flows/${encodeURIComponent(guideId)}`);
+        const res = await apiFetch(`/api/guide-flows/${encodeURIComponent(guideId)}`, { signal: controller.signal });
         if (!res.ok) {
           console.error(`[Guide] Flow fetch failed (${res.status}), awaiting next guide_start event`);
+          reportFailure();
           return;
         }
         const flow = (await res.json()) as OrchestrationFlow;
         if (!flow?.steps?.length) {
           console.warn(`[Guide] Empty flow: ${guideId}`);
+          reportFailure();
           return;
         }
-        if (!isActiveThread() || hasActiveSession()) return;
+        if (!ownsStart() || controller.signal.aborted || hasActiveSession()) return;
         // Ensure server-side guide session exists — client-triggered guides
         // (e.g. bootcamp) skip /api/guide-actions/start, so register here.
-        apiFetch('/api/guide-actions/start', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ threadId, guideId }),
-        }).catch(() => {}); // best-effort, don't block guide start
+        // The personal reminder is acknowledged by FirstRunEntryReminder through
+        // session-owned preferences; it must never claim a shared thread's guide.
+        if (guideId !== FIRST_RUN_ENTRY_GUIDE_ID)
+          apiFetch('/api/guide-actions/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ threadId, guideId }),
+          }).catch(() => {}); // existing thread guide registration remains best-effort
         startGuide(flow, threadId);
       } catch (err) {
         console.error(`[Guide] Failed to fetch flow "${guideId}":`, err);
+        reportFailure();
       } finally {
+        clearTimeout(timeout);
         if (startInFlightRef.current === startKey) {
           startInFlightRef.current = null;
         }
@@ -83,8 +100,8 @@ export function useGuideEngine() {
 
   // Dev testing helper
   useEffect(() => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (window as any).__startGuide = (flowId: string, threadId?: string) => {
+    const guideWindow = window as Window & { __startGuide?: (flowId: string, threadId?: string) => void };
+    guideWindow.__startGuide = (flowId: string, threadId?: string) => {
       useGuideStore.getState().reduceServerEvent({
         action: 'start',
         guideId: flowId,
@@ -92,8 +109,7 @@ export function useGuideEngine() {
       });
     };
     return () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      delete (window as any).__startGuide;
+      delete guideWindow.__startGuide;
     };
   }, []);
 
@@ -117,6 +133,7 @@ export function useGuideEngine() {
     const { sessionId, threadId } = session;
     const guideId = session.flow.id;
     if (!threadId) return;
+    if (guideId === FIRST_RUN_ENTRY_GUIDE_ID) return; // personal receipt owner supplies the real completion ACK
 
     const notify = async (attempt = 1): Promise<void> => {
       try {

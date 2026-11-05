@@ -14,15 +14,39 @@
 export class CodexAppServerRpcError extends Error {
   readonly code?: number;
   readonly method: string;
+  /** Private, same-response evidence. Only a bounded safe projection may leave the provider. */
+  readonly data?: unknown;
 
-  constructor(input: { message: string; method: string; code?: number }) {
+  constructor(input: { message: string; method: string; code?: number; data?: unknown }) {
     super(input.message);
     this.name = 'CodexAppServerRpcError';
     this.method = input.method;
+    this.data = input.data;
     if (typeof input.code === 'number') this.code = input.code;
   }
 }
 
 export function isCodexAppServerRpcError(value: unknown): value is CodexAppServerRpcError {
   return value instanceof CodexAppServerRpcError;
+}
+
+/** Transport failure of one named request, distinct from a provider's JSON-RPC verdict. */
+export class CodexAppServerRequestError extends Error {
+  constructor(
+    readonly method: string,
+    readonly requestCause: unknown,
+  ) {
+    super(requestCause instanceof Error ? requestCause.message : String(requestCause), { cause: requestCause });
+    this.name = 'CodexAppServerRequestError';
+  }
+}
+
+/** Missing acknowledgement is a transport failure, never a provider rejection or replay permission. */
+export class CodexAppServerTurnStartTimeoutError extends Error {
+  constructor(requestId: number, timeoutMs: number) {
+    super(
+      `Codex app-server did not acknowledge turn/start RPC ${requestId} within ${timeoutMs} ms; acceptance is unknown`,
+    );
+    this.name = 'CodexAppServerTurnStartTimeoutError';
+  }
 }

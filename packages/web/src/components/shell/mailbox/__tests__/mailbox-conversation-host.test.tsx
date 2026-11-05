@@ -6,6 +6,7 @@ import { apiFetch } from '@/utils/api-client';
 import { binding, block, cardRef, record, request } from '../../../rich/__tests__/runtime-conversation-test-fixtures';
 import { createApprovalSessions } from '../approval-sessions';
 import { MailboxRow } from '../MailboxRow';
+import { collectiveFailure } from './collective-failure.fixture';
 import { okRead } from './mailbox-fixtures';
 
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
@@ -64,14 +65,20 @@ afterEach(() => {
   vi.mocked(apiFetch).mockReset();
   vi.unstubAllGlobals();
 });
-async function render() {
+async function render(outage = false) {
+  const result = okRead([item], { identity: { ownerUserId: 'owner' } });
+  if (result.kind !== 'ok') throw new Error('Expected source');
+  result.read.sources.structuredChoices = {
+    ...result.read.sources.approvals,
+    coverage: 'pending_f306_structured_choices',
+  };
   const sessions = createApprovalSessions({
     readsStarted: () => starts,
     refetch: () => {},
     refreshStore: async () => {},
     storeItems: () => [],
     attempts: () => ({}),
-    latestRead: () => ({ result: okRead([item], { identity: { ownerUserId: 'owner' } }), generation: 1 }),
+    latestRead: () => ({ result: outage ? collectiveFailure(result, true) : result, generation: 1 }),
     now: Date.now,
   });
   await act(async () =>
@@ -93,8 +100,11 @@ const button = (text: string) => {
   if (!b) throw new Error(text);
   return b;
 };
-it('keeps the original conversation choices actionable in the collapsed row and retains the canonical local result', async () => {
-  await render();
+it.each([
+  false,
+  true,
+])('keeps original conversation choices actionable (Collective failure=%s) and retains the canonical result', async (outage) => {
+  await render(outage);
   expect(container.querySelector('[data-testid=runtime-conversation-card]')).not.toBeNull();
   expect(container.textContent?.split(request.title).length).toBe(2);
   await act(async () => button('Alpha').click());
@@ -102,9 +112,7 @@ it('keeps the original conversation choices actionable in the collapsed row and 
   const posts = vi.mocked(apiFetch).mock.calls.filter(([, o]) => o?.method === 'POST');
   expect(posts).toHaveLength(1);
   expect(JSON.parse(String(posts[0][1]?.body)).expectedRevision).toBe(5);
-  expect(container.querySelector('[data-testid=conversation-decision-result]')?.textContent).toContain(
-    '已在对话里回答',
-  );
+  expect(container.querySelector('[data-testid=conversation-decision-result]')?.textContent).toContain('已选「Alpha」');
 });
 it('a newer pending read closes the writer before React has committed its stale row', async () => {
   await render();

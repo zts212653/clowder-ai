@@ -38,6 +38,43 @@ describe('typed wait registration keeps exact private Redis authority', () => {
     assert.equal((await resolveTypedWaitContinuation({ taskStore: cold, ...h.identity })).kind, 'bypass');
   });
 
+  for (const sessionHandoff of [
+    undefined,
+    { proposalId: 'approved-handoff', continuationEntryId: 'private-entry', sourceSessionId: 'sealed-session' },
+  ]) {
+    test(`authorization and ${sessionHandoff ? 'handoff' : 'message'} source survive cold hydration only in the private receipt`, async (t) => {
+      const h = await harness(t);
+      const authorization = {
+        ownerAuthProvenance: 'strict',
+        toolExecutionPolicy: {
+          mode: 'callback_allowlist',
+          allowedCallbackRoutes: ['POST /api/callbacks/register-deployment-wait'],
+        },
+      };
+      const receipt = createTypedWaitRegistration({
+        task: h.task,
+        active: h.active,
+        invocationId: h.identity.invocationId,
+        source: { ...h.receipt.source, ...(sessionHandoff ? { sessionHandoff } : {}) },
+        authorization,
+      });
+      const current = await h.taskStore.get(h.task.id);
+      assert.ok(
+        await h.taskStore.replaceDeploymentWaitIfGeneration(h.task.id, {
+          expectedGeneration: 1,
+          expectedDeploymentWait: current.deploymentWait,
+          expectedUpdatedAt: current.updatedAt,
+          deploymentWait: current.deploymentWait,
+          waitRegistration: receipt,
+        }),
+      );
+      const cold = new RedisTaskStore(h.redis);
+      assert.deepEqual((await cold.getWaitRegistration(h.task.id)).receipt.authorization, authorization);
+      assert.deepEqual((await cold.getWaitRegistration(h.task.id)).receipt.source, receipt.source);
+      assert.equal(JSON.stringify(await cold.get(h.task.id)).includes('ownerAuthProvenance'), false);
+    });
+  }
+
   test('a losing Task CAS cannot overwrite the winning generation receipt', async (t) => {
     const h = await harness(t);
     const active = { ...h.active, generation: 2, ownerFence: { kind: 'containing_task', generation: 2 } };
@@ -48,14 +85,55 @@ describe('typed wait registration keeps exact private Redis authority', () => {
       source: h.receipt.source,
     });
     assert.equal(
-      await h.taskStore.replaceAutomationStateIfGeneration(h.task.id, {
+      await h.taskStore.replaceDeploymentWaitIfGeneration(h.task.id, {
+        expectedDeploymentWait: (await h.taskStore.get(h.task.id)).deploymentWait,
         expectedGeneration: 0,
-        automationState: { await: active },
+        deploymentWait: { await: active },
         waitRegistration: nextReceipt,
       }),
       null,
     );
     assert.deepEqual((await h.taskStore.getWaitRegistration(h.task.id)).receipt, h.receipt);
+  });
+
+  test('matched legacy receipt can seal authorization once without replacing its source or scope', async (t) => {
+    const h = await harness(t);
+    const authorization = { ownerAuthProvenance: 'strict' };
+    const current = await h.taskStore.get(h.task.id);
+    const waitOutcome = {
+      v: 1,
+      domain: 'deployment',
+      outcomeId: `wait:${h.active.subjectRef}:g1:matched`,
+      generation: 1,
+      subjectRef: h.active.subjectRef,
+      ownerFence: h.active.ownerFence,
+      reason: 'matched',
+      delivery: 'pending',
+      registeredAt: h.active.createdAt,
+      at: Date.now(),
+      actor: { kind: 'system' },
+    };
+    assert.ok(
+      await h.taskStore.replaceDeploymentWaitIfGeneration(h.task.id, {
+        expectedGeneration: 1,
+        expectedDeploymentWait: current.deploymentWait,
+        deploymentWait: { waitOutcome },
+      }),
+    );
+    const replace = (receipt) =>
+      h.taskStore.replaceDeploymentWaitIfGeneration(h.task.id, {
+        expectedGeneration: 1,
+        expectedDeploymentWait: { waitOutcome },
+        deploymentWait: { waitOutcome },
+        waitRegistration: receipt,
+      });
+    await assert.rejects(replace({ ...h.receipt, invocationId: 'another-invocation', authorization }), /does not bind/);
+    assert.deepEqual((await h.taskStore.getWaitRegistration(h.task.id)).receipt, h.receipt);
+    assert.ok(await replace({ ...h.receipt, authorization }));
+    const cold = new RedisTaskStore(h.redis);
+    assert.deepEqual((await cold.getWaitRegistration(h.task.id)).receipt, { ...h.receipt, authorization });
+    await assert.rejects(replace({ ...h.receipt, authorization: { ownerAuthProvenance: 'unknown' } }), /does not bind/);
+    assert.deepEqual((await cold.getWaitRegistration(h.task.id)).receipt.authorization, authorization);
   });
 
   test('collector-only updates retain the same active registration', async (t) => {
@@ -66,16 +144,18 @@ describe('typed wait registration keeps exact private Redis authority', () => {
     assert.equal((await resolveTypedWaitContinuation({ taskStore: h.taskStore, ...h.identity })).kind, 'bypass');
   });
 
-  test('expiry and generation replacement fail closed on a fresh canonical read', async (t) => {
+  test('persistent waits survive elapsed time but generation replacement revokes authority', async (t) => {
     const h = await harness(t);
     assert.equal(
-      (await resolveTypedWaitContinuation({ taskStore: h.taskStore, ...h.identity, now: h.active.expiresAt + 1 })).kind,
-      'reject',
+      (await resolveTypedWaitContinuation({ taskStore: h.taskStore, ...h.identity, now: Number.MAX_SAFE_INTEGER }))
+        .kind,
+      'bypass',
     );
     const active = { ...h.active, generation: 2, ownerFence: { kind: 'containing_task', generation: 2 } };
-    await h.taskStore.replaceAutomationStateIfGeneration(h.task.id, {
+    await h.taskStore.replaceDeploymentWaitIfGeneration(h.task.id, {
+      expectedDeploymentWait: (await h.taskStore.get(h.task.id)).deploymentWait,
       expectedGeneration: 1,
-      automationState: { await: active },
+      deploymentWait: { await: active },
     });
     assert.equal((await resolveTypedWaitContinuation({ taskStore: h.taskStore, ...h.identity })).kind, 'reject');
   });
@@ -95,7 +175,7 @@ describe('typed wait registration keeps exact private Redis authority', () => {
 
   // C1-C7: a private continuation receipt authorizes only its exact Task/child.
   // These are fresh Redis Task reads, not the retired Message-custody Lua/Queue CAS.
-  for (const deadline of ['bounded', 'persistent']) {
+  for (const deadline of ['persistent']) {
     async function registered(t) {
       const h = await harness(t);
       if (deadline === 'persistent') {
@@ -107,9 +187,10 @@ describe('typed wait registration keeps exact private Redis authority', () => {
           source: h.receipt.source,
         });
         assert.ok(
-          await h.taskStore.replaceAutomationStateIfGeneration(h.task.id, {
+          await h.taskStore.replaceDeploymentWaitIfGeneration(h.task.id, {
+            expectedDeploymentWait: (await h.taskStore.get(h.task.id)).deploymentWait,
             expectedGeneration: 1,
-            automationState: { await: active },
+            deploymentWait: { await: active },
             waitRegistration: receipt,
           }),
         );
@@ -178,21 +259,22 @@ describe('typed wait registration keeps exact private Redis authority', () => {
             winner = original;
             return {}; // Simulate unavailable detail, never delete retained fixture data.
           }
-          const state = JSON.parse(original.automationState);
+          const state = JSON.parse(original.deploymentWait);
           const patch = {};
           if (drift === 'owner') patch.ownerCatId = 'foreign-cat';
           else if (drift === 'user') patch.userId = 'foreign-user';
           else if (drift === 'thread') patch.threadId = 'foreign-thread';
           else if (drift === 'done') patch.status = 'done';
-          else if (drift === 'subject') state.await.subjectRef = 'pr:owner/repo#different';
+          else if (drift === 'subject') state.await.subjectRef = 'deployment:different:runtime';
           else if (drift === 'generation') state.await.generation = 2;
           else if (drift === 'fence') state.await.ownerFence.generation = 2;
-          else if (drift === 'predicate') state.await.continuation.when = [{ kind: 'pr_head_changed' }];
-          else if (drift === 'baseline') state.await.baseline.headSha = 'new-head';
+          else if (drift === 'predicate')
+            state.await.continuation.when = [{ kind: 'new_ready_boot', services: ['web'] }];
+          else if (drift === 'baseline') state.await.baseline.bootId = 'new-boot';
           else if (drift === 'terminal') state.waitOutcome = { generation: 1, reason: 'matched' };
           else if (drift === 'expiry') state.await.expiresAt = 1;
           else if (drift === 'receipt') patch.typedWaitRegistration = '{}';
-          patch.automationState = JSON.stringify(state);
+          patch.deploymentWait = JSON.stringify(state);
           await h.redis.hset(key, patch);
           winner = await read(key);
           return winner;
@@ -208,7 +290,7 @@ describe('typed wait registration keeps exact private Redis authority', () => {
     }
   }
 
-  test('expiry uses the time of the final Redis proof read, without a timer or stored hash change', async (t) => {
+  test('persistent deployment wait remains live at a later final proof read without stored hash changes', async (t) => {
     const h = await harness(t);
     const key = TaskKeys.detail(h.task.id);
     const read = h.redis.hgetall.bind(h.redis);
@@ -221,13 +303,10 @@ describe('typed wait registration keeps exact private Redis authority', () => {
       Date.now = () => now;
       h.redis.hgetall = async (requested) => {
         const raw = await read(requested);
-        if (requested === key && ++reads === 1) now = h.active.expiresAt;
+        if (requested === key && ++reads === 1) now = initialNow + 60_000;
         return raw;
       };
-      assert.deepEqual(await resolveTypedWaitContinuation({ taskStore: h.taskStore, ...h.identity }), {
-        kind: 'reject',
-        reason: 'no_candidate',
-      });
+      assert.equal((await resolveTypedWaitContinuation({ taskStore: h.taskStore, ...h.identity })).kind, 'bypass');
       assert.equal(reads, 1, 'listByThread uses a pipeline; this direct read is getWaitRegistration');
       assert.deepEqual(await read(key), before);
     } finally {

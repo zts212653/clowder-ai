@@ -1,3 +1,4 @@
+import type { HydratedMessageBundle } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { MessageSelectionResolver } from '../domains/cats/services/context/MessageSelectionResolver.js';
 import { messageFrom } from '../domains/cats/services/stores/message-from.js';
@@ -64,6 +65,6 @@ export const messageBundleRoutes: FastifyPluginAsync<MessageBundleRoutesOptions>
       sourceThread: resolution.sourceThread,
       note: resolution.note,
       items: resolution.items,
-    };
+    } satisfies HydratedMessageBundle;
   });
 };

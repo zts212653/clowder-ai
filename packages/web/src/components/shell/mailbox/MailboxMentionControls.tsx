@@ -2,6 +2,7 @@ import type { UnifiedAttentionReadV1 } from '@cat-cafe/shared';
 import { useShellCopy } from '../shell-copy';
 import type { UnifiedAttentionView } from '../use-unified-attention';
 import { MailboxPeriodFilter } from './MailboxPeriodFilter';
+import { MailboxPersonalButton } from './MailboxPersonalButton';
 import { MentionHandlingConfirmation } from './MentionHandlingConfirmation';
 import { mailboxEntryCopy } from './mailbox-entry.shell-copy';
 import type { useMailboxPersonalPreferences } from './use-mailbox-personal-preferences';
@@ -34,16 +35,17 @@ export function MailboxMentionControls({
         </h3>
         <div className="flex flex-none items-center gap-1">
           <MailboxPeriodFilter read={read} view={view} busy={batch.busy} compact />
-          <button
+          <MailboxPersonalButton
             type="button"
             data-testid="mailbox-mentions-ignore-all"
-            disabled={batch.busy || personal.actions?.disabled !== false}
+            refusal={batch.busy ? 'refreshing' : personal.batchRefusal}
+            label={t.ignoreAllShort}
             className="shell-nav-row shell-focusable rounded-lg border border-[var(--shell-hairline-strong)] px-2 py-1 disabled:opacity-50"
             aria-label={t.ignoreAll(labels[period])}
             onClick={() => void batch.prepare(period)}
           >
             {t.ignoreAllShort}
-          </button>
+          </MailboxPersonalButton>
         </div>
       </div>
       {batch.notice ? (

@@ -38,11 +38,7 @@ export function WorkspaceChatWorkScopeProvider({
       const current = host.current;
       const active = current.getActiveSurfaceId();
       const work = active ? registrations.get(active) : null;
-      current.onRegisteredWorkChange?.(
-        work?.threadId === current.threadId && work.attachment.mediaType === 'image/png' && current.isHostVisible()
-          ? active
-          : null,
-      );
+      current.onRegisteredWorkChange?.(work?.threadId === current.threadId && current.isHostVisible() ? active : null);
     };
     return {
       register(work) {
@@ -60,8 +56,7 @@ export function WorkspaceChatWorkScopeProvider({
         if (requestThreadId !== current.threadId || !current.isHostVisible()) return null;
         const active = current.getActiveSurfaceId();
         const work = active ? registrations.get(active) : undefined;
-        if (work?.threadId !== requestThreadId || work.attachment.mediaType !== 'image/png' || !work.isVisible())
-          return null;
+        if (work?.threadId !== requestThreadId || !work.isVisible()) return null;
         return work.attachment;
       },
     };

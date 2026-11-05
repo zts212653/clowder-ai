@@ -4,17 +4,9 @@ import { useEffect, useState } from 'react';
 import { ExpandableProse } from '@/components/content-overflow';
 import { apiFetch } from '@/utils/api-client';
 import { isRowPrimaryActionTarget } from '@/utils/row-primary-action';
+import type { OnboardingTemplateDraft } from './onboarding-journey';
 
-export interface TemplateCard {
-  id: string;
-  name: string;
-  nickname?: string;
-  avatar: string;
-  color: { primary: string; secondary: string };
-  roleDescription: string;
-  personality: string;
-  teamStrengths?: string;
-}
+export type TemplateCard = OnboardingTemplateDraft;
 
 interface TemplateStepProps {
   onSelect: (template: TemplateCard) => void;

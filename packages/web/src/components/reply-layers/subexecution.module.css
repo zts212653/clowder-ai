@@ -57,7 +57,7 @@
   .lastLineChildren {
     gap: 0;
   }
-  .lastLineChildren .elapsedSeparator,
+  .lastLineChildren .separator,
   .lastLineChildren .totalLabel {
     display: none;
   }

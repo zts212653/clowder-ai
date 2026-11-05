@@ -1,6 +1,6 @@
-import { workExecutionPresentation } from './CollectiveWorkCard.js';
 import type { CollectiveWorkProjection } from './client-types.js';
 import { roadmapStatusTone } from './roadmap-view-model.js';
+import { workExecutionPresentation } from './work-execution-presentation.js';
 
 export function RoadmapWorkNode({
   work,
@@ -15,11 +15,13 @@ export function RoadmapWorkNode({
   readonly responsibility?: string;
   readonly onSelect: (workId: string) => void;
 }) {
-  const accountable = work.accountableHumanId ? (humanNames[work.accountableHumanId] ?? 'Collective 成员') : '待确认';
+  const accountable = work.accountableHumanId ? (humanNames[work.accountableHumanId] ?? '共同体成员') : '未分配';
   const execution = workExecutionPresentation(work);
   const ownership = work.assignment
     ? `${work.assignment.displayName} ${execution.assignmentAction} · ${accountable} 负责`
-    : `${accountable} 负责`;
+    : work.accountableHumanId
+      ? `${accountable} 负责`
+      : '未分配 · 等待负责人接下';
   return (
     <button
       type="button"

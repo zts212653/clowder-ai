@@ -54,7 +54,7 @@ type PreparedEvaluation = { readonly decision: DurableGateRecoveryDecision } | {
 const RETRY_EVALUATION = Symbol('retry durable gate recovery evaluation');
 
 function recoveryConfig(job: DurableManagedGateJob) {
-  if (job.kind !== 'resumable_full_gate_v2' || job.recovery?.protocolVersion !== 2) {
+  if (!['resumable_full_gate_v2', 'alpha_revision_v1'].includes(job.kind) || job.recovery?.protocolVersion !== 2) {
     throw new Error(`durable gate recovery is not admitted for job ${job.jobId}`);
   }
   return job.recovery;

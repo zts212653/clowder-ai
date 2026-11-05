@@ -2,17 +2,22 @@
 
 import type { ActiveExecutionProjection } from '@cat-cafe/shared';
 import type { Ref } from 'react';
+import { useShellCopy } from '@/components/shell/shell-copy';
 import type { WorkspaceDevSurface, WorkspaceLauncherDestination } from '@/components/workspace/WorkspaceLauncher';
 import type { LauncherWorkspaceSearch } from '@/components/workspace/WorkspaceLauncherSearch';
+import { useChatStore } from '@/stores/chatStore';
 import type { WorkspaceSurfaceDescriptor } from '../workbench/workbench-contract';
 import { HomeLiveCard } from './HomeLiveCard';
 import { HomeStatusSummary } from './HomeStatusSummary';
 import { HomeWaitCard } from './HomeWaitCard';
 import { HomeWorksSummary, type OpenHomeArtifact } from './HomeWorksSummary';
 import { useHomeDestinationSelect } from './use-home-destination';
+import { workspaceV3Copy } from './workspace-v3.shell-copy';
 import './workspace-home-cards.css';
 import './workspace-home-tools.css';
 import './workspace-v3.css';
+import './home-rows.css';
+import './home-unified.css';
 
 /**
  * Workspace v3 Home: all running objects, the current conversation's status/session summary, and latest works.
@@ -49,6 +54,9 @@ export function WorkspaceHomeV2({
   onOpenArtifact?: OpenHomeArtifact;
   returnArtifactId?: string;
 }) {
+  const words = useShellCopy(workspaceV3Copy);
+  const conversationTitle =
+    useChatStore((state) => state.threads?.find((thread) => thread.id === threadId)?.title) || threadId || '';
   const selectDestination = useHomeDestinationSelect({ onSelectDevSurface, onSelectDestination });
 
   return (
@@ -63,6 +71,10 @@ export function WorkspaceHomeV2({
       <div className="home-column" data-workspace-home-content="">
         <HomeLiveCard threadId={threadId} onSelectExecution={onSelectExecution} />
         <HomeWaitCard hideWhenEmpty />
+        <div className="home-conversation-scope text-xs" data-testid="home-conversation-scope">
+          <b>{words.thisConversation}</b>
+          <span title={conversationTitle}>{conversationTitle}</span>
+        </div>
         <HomeStatusSummary threadId={threadId} onSelectDestination={selectDestination} />
         <HomeWorksSummary
           threadId={threadId}

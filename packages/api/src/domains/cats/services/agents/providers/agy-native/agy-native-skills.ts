@@ -9,6 +9,7 @@ import {
   realpathSync,
   renameSync,
   rmdirSync,
+  rmSync,
   statSync,
   symlinkSync,
   writeFileSync,
@@ -63,6 +64,8 @@ export async function materializeAgyNativeSkills(input: {
   workspace: string;
   runtimeRoot: string;
   userHome?: string;
+  /** A run owns config/skills; the account data directory must not gain a run-specific alias. */
+  canonicalOnly?: boolean;
 }): Promise<string[]> {
   const mainRoot = await resolveInvokeCapabilityRoot(input.runtimeRoot);
   const rules = await readEffectiveMountRules(input.workspace, mainRoot);
@@ -88,7 +91,7 @@ export async function materializeAgyNativeSkills(input: {
   const legacyParent = join(input.profileHome, '.gemini', 'antigravity-cli');
   directory(join(input.profileHome, '.gemini'));
   directory(parent);
-  directory(legacyParent);
+  if (!input.canonicalOnly) directory(legacyParent);
   const destination = join(parent, 'skills');
   const legacy = join(legacyParent, 'skills');
   const allowedParents = [parent, legacyParent];
@@ -100,14 +103,16 @@ export async function materializeAgyNativeSkills(input: {
     else throw new Error('Native skills conflict with an existing profile entry');
   }
   let emptyLegacy = false;
-  try {
-    const entry = lstatSync(legacy);
-    if (entry.isSymbolicLink()) {
-      if (resolve(legacyParent, readlinkSync(legacy)) !== destination) readPublishedSnapshot(legacy, allowedParents);
-    } else if (entry.isDirectory() && readdirSync(legacy).length === 0) emptyLegacy = true;
-    else throw new Error('Native skills conflict with an existing legacy profile entry');
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  if (!input.canonicalOnly) {
+    try {
+      const entry = lstatSync(legacy);
+      if (entry.isSymbolicLink()) {
+        if (resolve(legacyParent, readlinkSync(legacy)) !== destination) readPublishedSnapshot(legacy, allowedParents);
+      } else if (entry.isDirectory() && readdirSync(legacy).length === 0) emptyLegacy = true;
+      else throw new Error('Native skills conflict with an existing legacy profile entry');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
   }
   // Build an immutable view and publish one pointer. An API crash before this
   // rename leaves the old complete view visible; its partial successor can be
@@ -136,9 +141,29 @@ export async function materializeAgyNativeSkills(input: {
   symlinkSync(snapshot, temporary, process.platform === 'win32' ? 'junction' : 'dir');
   if (emptyBootstrap) rmdirSync(destination);
   renameSync(temporary, destination);
+  if (input.canonicalOnly) return [...new Set(readableRoots)];
   const alias = join(legacyParent, `.cat-cafe-skills-pointer-${randomUUID()}`);
   symlinkSync(destination, alias, process.platform === 'win32' ? 'junction' : 'dir');
   if (emptyLegacy) rmdirSync(legacy);
   renameSync(alias, legacy);
   return [...new Set(readableRoots)];
+}
+
+/** Retire only the previous host-published alias before concurrent views are introduced. */
+export function retireAgyNativeLegacySkillAlias(profileHome: string): void {
+  const parent = join(profileHome, '.gemini', 'config');
+  const legacyParent = join(profileHome, '.gemini', 'antigravity-cli');
+  const legacy = join(legacyParent, 'skills');
+  const entry = lstatSync(legacy, { throwIfNoEntry: false });
+  if (!entry) return;
+  if (!entry.isSymbolicLink()) {
+    if (entry.isDirectory() && readdirSync(legacy).length === 0) {
+      rmdirSync(legacy);
+      return;
+    }
+    throw new Error('Native legacy skills are not a host-owned alias');
+  }
+  const target = resolve(legacyParent, readlinkSync(legacy));
+  readPublishedSnapshot(target === join(parent, 'skills') ? target : legacy, [parent, legacyParent]);
+  rmSync(legacy);
 }

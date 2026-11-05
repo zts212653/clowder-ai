@@ -2,8 +2,9 @@ import { constants } from 'node:fs';
 import { open, realpath } from 'node:fs/promises';
 import { extname, isAbsolute, relative, resolve, sep } from 'node:path';
 import type { MessageContent } from '@cat-cafe/shared';
+import { detectImageMime } from '../../../../../../utils/image-mime.js';
 import { MAX_IMAGE_FILE_SIZE } from '../../../../../../utils/image-storage.js';
-import { getDefaultUploadDir } from '../../../../../../utils/upload-paths.js';
+import { getDefaultConnectorMediaDir, getDefaultUploadDir } from '../../../../../../utils/upload-paths.js';
 import { AcpImageInputError, requireAcpImageCapability } from './acp-prompt-content.js';
 import type { AcpContentBlock, AcpPromptCapabilities } from './types.js';
 
@@ -24,38 +25,58 @@ function inside(root: string, path: string): boolean {
   return rel !== '' && !isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${sep}`);
 }
 
-/** Only platform uploads are dereferenced; no remote fetch or arbitrary native paths. */
+/** Platform uploads or Host-ledger-authorized media only; no remote fetch or caller-supplied native paths. */
 export async function readAcpImageBlocks(
   content: readonly MessageContent[] | undefined,
   capabilities?: AcpPromptCapabilities,
   signal?: AbortSignal,
   uploadDir?: string,
+  resolveTrustedImagePath?: (hmrId: string) => Promise<string | undefined>,
 ): Promise<readonly AcpContentBlock[]> {
   const images = content?.filter((block) => block.type === 'image') ?? [];
   if (images.length === 0) return [];
   requireAcpImageCapability(capabilities);
   if (images.length > MAX_IMAGES) throw tooLarge();
-  let root: string;
-  try {
-    root = await realpath(getDefaultUploadDir(uploadDir ?? process.env.UPLOAD_DIR));
-  } catch {
-    throw new AcpImageInputError('image_input_unavailable', '图片附件无法读取，请重新上传。');
-  }
   const blocks: AcpContentBlock[] = [];
   for (const image of images) {
     signal?.throwIfAborted();
-    if (typeof image.url !== 'string' || !image.url.startsWith('/uploads/')) throw invalid();
+    if (typeof image.url !== 'string') throw invalid();
     let path: string;
-    try {
-      path = resolve(root, decodeURIComponent(image.url.slice('/uploads/'.length)));
-    } catch {
-      throw invalid();
+    let canonical: string;
+    let root: string | undefined;
+    if (/^hmr:hmr_[A-Za-z0-9_-]{32}$/.test(image.url) && resolveTrustedImagePath) {
+      const authorized = await resolveTrustedImagePath(image.url.slice(4));
+      if (!authorized || !isAbsolute(authorized)) throw invalid();
+      path = authorized;
+    } else {
+      let selectedRoot: string;
+      let encodedPath: string;
+      if (image.url.startsWith('/uploads/')) {
+        selectedRoot = getDefaultUploadDir(uploadDir ?? process.env.UPLOAD_DIR);
+        encodedPath = image.url.slice('/uploads/'.length);
+      } else if (image.url.startsWith('/api/connector-media/')) {
+        selectedRoot = getDefaultConnectorMediaDir(process.env.CONNECTOR_MEDIA_DIR);
+        encodedPath = image.url.slice('/api/connector-media/'.length);
+      } else {
+        throw invalid();
+      }
+      try {
+        root = await realpath(selectedRoot);
+      } catch {
+        throw new AcpImageInputError('image_input_unavailable', '图片附件无法读取，请重新上传。');
+      }
+      try {
+        path = resolve(root, decodeURIComponent(encodedPath));
+      } catch {
+        throw invalid();
+      }
+      if (!inside(root, path)) throw invalid();
     }
-    const mimeType = MIME_TYPES[extname(path).toLowerCase()];
-    if (!mimeType || !inside(root, path)) throw invalid();
+    // Ledger blobs have opaque names; their bytes are checked below just like upload bytes.
+    if (root !== undefined && !MIME_TYPES[extname(path).toLowerCase()]) throw invalid();
     try {
-      const canonical = await realpath(path);
-      if (!inside(root, canonical)) throw invalid();
+      canonical = await realpath(path);
+      if (root ? !inside(root, canonical) : canonical !== path) throw invalid();
       const file = await open(canonical, constants.O_RDONLY | constants.O_NOFOLLOW);
       try {
         const info = await file.stat();
@@ -71,8 +92,10 @@ export async function readAcpImageBlocks(
           length += bytesRead;
         }
         if (length > MAX_IMAGE_FILE_SIZE) throw tooLarge();
-        if (length === 0) throw invalid();
-        blocks.push(Object.freeze({ type: 'image', mimeType, data: buffer.subarray(0, length).toString('base64') }));
+        const bytes = buffer.subarray(0, length);
+        const mimeType = detectImageMime(bytes);
+        if (!mimeType) throw invalid();
+        blocks.push(Object.freeze({ type: 'image', mimeType, data: bytes.toString('base64') }));
       } finally {
         await file.close();
       }

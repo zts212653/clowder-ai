@@ -61,7 +61,8 @@ export type CapabilityEvolutionMeasurementIssuance =
         | 'source_owner_revision_invalid'
         | 'source_owner_store_unavailable'
         | 'idempotency_collision'
-        | 'publication_failed';
+        | 'publication_failed'
+        | 'publication_provider_unavailable';
       sourceRef?: OwnerTruthRefV1;
       blockers: CapabilityEvolutionMeasurementBlocker[];
       detail?: string;
@@ -102,7 +103,7 @@ interface ProgramReader {
 export interface CapabilityEvolutionMeasurementIssuerOptions {
   repoRoot: string;
   programReader: ProgramReader;
-  gitPublisher: GitPublisher;
+  gitPublisher?: GitPublisher;
   sourceStore?: CapabilityEvolutionMeasurementSourceStore;
   evalCatId?: string;
 }
@@ -219,11 +220,13 @@ async function publishPreparedMeasurement(
 ): Promise<CapabilityEvolutionMeasurementIssuance> {
   const { artifactRef, evidenceProofRef, manifest, manifestRevision, proofRef, roles, sourceRef, sourceSha256 } =
     prepared;
+  const gitPublisher = options.gitPublisher;
+  if (!gitPublisher) return insufficient('publication_provider_unavailable');
   const branchName = `measurement/auto/capability-evolution/${manifest.decisionProof.proofId}`;
   let proofStatus: 'verified' | 'insufficient' | undefined;
   try {
     const replay = await resolveCapabilityEvolutionMeasurementPublication({
-      gitPublisher: options.gitPublisher,
+      gitPublisher,
       branchName,
       sourceMessageId: input.clientMessageId,
       ownerUserId: input.ownerUserId,
@@ -238,7 +241,7 @@ async function publishPreparedMeasurement(
       return { status: 'published', ...capabilityEvolutionMeasurementPublicationFields({ ...prepared, ...replay }) };
     }
 
-    const published = await options.gitPublisher.publishOnIsolatedWorktree({
+    const published = await gitPublisher.publishOnIsolatedWorktree({
       branchName,
       sourceBase: manifestRevision,
       async stage(worktreeRoot) {
@@ -326,6 +329,7 @@ export function createCapabilityEvolutionMeasurementIssuer(
       if (!isValidSourceMessageId(input.clientMessageId)) return insufficient('idempotency_collision');
       if (!PROGRAM_ID.test(input.programId)) return insufficient('invalid_program_id');
       if (input.catId !== (options.evalCatId ?? 'codex-sol')) return insufficient('not_domain_eval_cat');
+      if (!options.gitPublisher) return insufficient('publication_provider_unavailable');
       return issue(input);
     },
   };

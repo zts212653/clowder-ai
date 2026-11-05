@@ -20,6 +20,8 @@ interface SelectionAnnotationActionProps {
   actionTestId: string;
   /** Returning `false` refuses the save: the card, the words and the selection stay as they were. */
   onSave: (comment: string) => void | boolean;
+  /** A content owner can stage a selection in its existing durable composer before collecting words there. */
+  collectComment?: boolean;
   /** F294: optional cross-thread path. Unlike Add to chat, Comment may be empty. */
   onForward?: (comment: string) => void;
   initialComment?: string;
@@ -65,6 +67,7 @@ export function SelectionAnnotationAction({
   positionMode,
   actionTestId,
   onSave,
+  collectComment = true,
   onForward,
   initialComment = '',
   initialEditing = false,
@@ -118,20 +121,25 @@ export function SelectionAnnotationAction({
     return renderSelectionSurface(
       <button
         ref={actionSurfaceRef}
+        data-chat-background-layer="opaque"
         type="button"
         data-testid={actionTestId}
         data-context-annotation-ui
         onMouseDown={(event) => event.preventDefault()}
         onClick={() => {
+          if (!collectComment) {
+            onSave('');
+            return;
+          }
           onOpen?.();
           setEditing(true);
         }}
         style={position}
         className={
           triggerClassName ??
-          `${positionClass} z-[70] flex items-center gap-1.5 rounded-lg bg-cafe-accent px-2.5 py-1.5 text-xs font-medium text-[var(--cafe-surface)] shadow-lg transition-colors hover:bg-cafe-interactive`
+          `${positionClass}${collectComment ? '' : ' min-h-8'} z-[70] flex items-center gap-1.5 rounded-lg bg-cafe-accent px-2.5 py-1.5 text-xs font-medium text-[var(--cafe-surface)] shadow-lg transition-colors hover:bg-cafe-interactive`
         }
-        title={ADD_TO_CHAT_LABEL}
+        title={typeof triggerContent === 'string' ? triggerContent : ADD_TO_CHAT_LABEL}
       >
         {triggerContent ?? (
           <>
@@ -166,6 +174,7 @@ export function SelectionAnnotationAction({
   return renderSelectionSurface(
     <section
       ref={actionSurfaceRef}
+      data-chat-background-layer="opaque"
       data-testid="context-annotation-editor"
       data-context-annotation-ui
       onKeyDown={(event) => {

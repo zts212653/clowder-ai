@@ -17,9 +17,11 @@ import type { InvocationTracker } from '../domains/cats/services/agents/invocati
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import { deploymentWaitGeneration } from '../domains/cats/services/stores/ports/TaskDeploymentWaitState.js';
 import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
+import { captureDeploymentWaitAuthorization } from '../domains/runtime-deployment/DeploymentWaitAuthorization.js';
 import type { DeploymentWaitLifecycleService } from '../domains/runtime-deployment/DeploymentWaitLifecycleService.js';
+import type { SessionHandoffWaitSourceDeps } from '../domains/runtime-deployment/SessionHandoffWaitSource.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
-import { captureTypedWaitSource } from './callback-typed-wait-source.js';
+import { captureDeploymentWaitSource } from './callback-typed-wait-source.js';
 
 const deploymentIdSchema = z.string().regex(/^[a-z][a-z0-9._-]{0,63}$/);
 
@@ -39,7 +41,7 @@ export interface DeploymentObservationProvider {
   }): Promise<DeploymentObservationV1 | null>;
 }
 
-export interface DeploymentWaitCallbackRouteDeps {
+export interface DeploymentWaitCallbackRouteDeps extends SessionHandoffWaitSourceDeps {
   readonly taskStore: ITaskStore;
   readonly messageStore: Pick<IMessageStore, 'getById'>;
   readonly registry: Pick<InvocationRegistry, 'isLatest'>;
@@ -183,8 +185,10 @@ async function performRegistration(
   const observation = await observe();
   if (!observation) return result(503, { error: 'Deployment baseline is unavailable; no wait was registered' });
 
-  const source = await captureTypedWaitSource(auth, {
+  const source = await captureDeploymentWaitSource(auth, {
     messageStore: deps.messageStore,
+    ...(deps.handoffProposalStore ? { handoffProposalStore: deps.handoffProposalStore } : {}),
+    ...(deps.sessionChainStore ? { sessionChainStore: deps.sessionChainStore } : {}),
     ...(deps.invocationTracker ? { invocationTracker: deps.invocationTracker } : {}),
   });
   if (!source) return result(409, { error: 'Invocation source is unavailable; no wait was registered' });
@@ -203,7 +207,13 @@ async function performRegistration(
 
   const previousGeneration = deploymentWaitGeneration(task.deploymentWait) ?? 0;
   const awaitState = buildAwaitState(registration, observation, previousGeneration + 1);
-  const receipt = createTypedWaitRegistration({ task, active: awaitState, invocationId: auth.invocationId, source });
+  const receipt = createTypedWaitRegistration({
+    task,
+    active: awaitState,
+    invocationId: auth.invocationId,
+    source,
+    authorization: captureDeploymentWaitAuthorization(auth),
+  });
   if (!receipt || !(await deps.registry.isLatest(auth.invocationId))) {
     return result(409, { error: 'Invocation no longer owns deployment wait registration' });
   }

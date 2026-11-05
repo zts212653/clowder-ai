@@ -74,7 +74,7 @@ describe('distillation opportunity routes', () => {
   it('GET returns pending opportunities after checkpoint fires', async () => {
     await checkpoint.onFeatPhaseClose({
       prNumber: 2461,
-      repoFullName: 'zts212653/cat-cafe',
+      repoFullName: 'zts212653/clowder-ai',
       authorCatId: 'opus',
       threadId: 'thread_abc',
       featureId: 'F208',

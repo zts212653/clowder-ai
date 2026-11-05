@@ -18,12 +18,8 @@ export interface AgyProfile {
   readonly profileId: string;
   readonly homePath: string;
   /**
-   * F210 cache-leak fix (砚砚 拍 cwd sandbox 方向)：agy spawn cwd 的 **per-profile base**（profile HOME
-   * 下专用子目录）。实际 spawn cwd 由 `resolveAgySpawnCwd` 在此 base 下再按 workingDirectory 派生
-   * per-worktree 子目录（`<cwdPath>/<workspaceKey>`，cloud P1：AGY 按 cwd scope conversation 命名空间，
-   * 不能多 worktree 共用同一 cwd）。AGY 写 cwd-relative cache（`cache/projects.json`）到 spawn cwd——
-   * cwd=repo root 时泄漏到 worktree（实证 2026-06-03）。cwd-relative cache 落 profile 而非 repo；
-   * workspace 仍通过 `--add-dir workingDirectory` 显式授权。
+   * Private process/cache sandbox base. resolveAgySpawnCwd keeps one child per
+   * worktree; Native command cwd is independently pinned by the host effect hook.
    */
   readonly cwdPath: string;
   readonly settingsPath: string;
@@ -306,13 +302,13 @@ export function resolveAgyProfile(input: ResolveAgyProfileInput): AgyProfile | n
  * symlink fail-closed（cloud P2）：base + sandbox 都拒绝已存在 symlink——mkdirSync(recursive) 会跟随
  * symlink 把 cwd-relative cache 写回 repo/真 HOME，绕过本修复。
  *
- * **为什么把 process cwd 挪到 sandbox 不破坏 AGY 工作区**（refute 静态 reviewer 把 process cwd 与
- * AGY active workspace 混为一谈，砚砚 probe 实测 2026-06-03）：AGY 的 active workspace 绑定到
- * `--add-dir workingDirectory`，**不是** process cwd。实测 `cd <sandbox> && agy --add-dir <work>`：
- * AGY tool `pwd` 回 `<work>`、能读 `<work>` 文件、`<work>/GEMINI.md` 指令照常加载；只有内部 cwd-relative
- * `cache/projects.json` 落 sandbox。所以三件事同时成立：active workspace=worktree（--add-dir 授权）、
- * cwd-relative cache 落 sandbox、conversation scope 由 per-worktree sandbox 隔离。Native carrier 始终
- * 传 `--add-dir <absolute workingDirectory>`，不要删。
+ * Native keeps `--add-dir <workingDirectory>` for workspace admission, not
+ * command cwd selection. The historical 2026-06-03 `pwd` result does not define
+ * today's default: controlled CLI 1.4.10 cases follow the first path-sorted
+ * active workspace, including auxiliary skill/upload roots. Native therefore
+ * pins the host-admitted command workspace in its effect hook while this
+ * process/cache coordinate stays isolated. Do not infer command cwd from the
+ * first workspace or move this process into the repository to fix tool cwd.
  */
 export function resolveAgySpawnCwd(agyProfile: AgyProfile | null, catId: string, workingDirectory: string): string {
   const workspaceKey = createHash('sha256').update(resolve(workingDirectory)).digest('hex').slice(0, 16);

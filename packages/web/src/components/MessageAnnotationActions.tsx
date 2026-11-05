@@ -28,7 +28,7 @@ export function MessageAnnotationActions({
       positionMode="fixed"
       actionTestId={`context-annotation-marker-${marker.attachment.id}`}
       triggerContent={marker.number}
-      triggerClassName="fixed z-[65] grid h-7 w-7 place-items-center rounded-full border-2 border-[var(--cafe-surface)] bg-cafe-accent text-xs font-bold text-[var(--cafe-surface)] shadow-lg transition-transform hover:scale-110"
+      triggerClassName="fixed z-40 grid h-7 w-7 place-items-center rounded-full border-2 border-[var(--cafe-surface)] bg-cafe-accent text-xs font-bold text-[var(--cafe-surface)] shadow-lg transition-transform hover:scale-110"
       onOpen={() => setOpened(marker)}
       onClose={() => setOpened((current) => (current?.attachment.id === marker.attachment.id ? null : current))}
       onSave={(comment) => onSave(marker.attachment, comment)}

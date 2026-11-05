@@ -1,15 +1,16 @@
 import { isAbsolute } from 'node:path';
-import type {
-  PluginManagerInstallRequest,
-  PluginManagerSetEnabledRequest,
-  PluginManagerUninstallRequest,
+import {
+  PluginArchiveReplacementConfirmationSchema,
+  type PluginManagerInstallRequest,
+  type PluginManagerSetEnabledRequest,
+  type PluginManagerUninstallRequest,
 } from '@cat-cafe/shared';
 import { z } from 'zod';
 import { defineMcpCanonicalFactory } from '../tool-governance-migration.js';
 import { NO_CONFIG_ERROR } from './callback-tools.js';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
-import { resolveInvocationCredentials } from './invocation-auth.js';
+import { resolveInvocationCredentials, resolveInvocationEnv } from './invocation-auth.js';
 
 const ADMISSION_REF = 'file:docs/features/F202-plugin-framework.md' as const;
 const defineTool = defineMcpCanonicalFactory('plugin-management-tools.ts', undefined, {
@@ -76,7 +77,7 @@ const localInstallSchema = z
   .object({
     source: z
       .object({
-        kind: z.enum(['local-directory', 'local-archive']),
+        kind: z.literal('local-directory'),
         path: z
           .string()
           .trim()
@@ -88,8 +89,42 @@ const localInstallSchema = z
       .strict(),
   })
   .strict();
+const gitInstallSchema = z
+  .object({
+    source: z
+      .object({
+        kind: z.literal('git'),
+        url: z
+          .string()
+          .trim()
+          .min(1)
+          .max(4_096)
+          .describe('Absolute https, ssh, git, or file repository URL selected by the user.'),
+      })
+      .strict(),
+  })
+  .strict();
+const archiveInstallSchema = z
+  .object({
+    source: z
+      .object({
+        kind: z.literal('local-archive'),
+        path: z
+          .string()
+          .trim()
+          .min(1)
+          .max(4_096)
+          .refine(isAbsolute)
+          .describe('Absolute owner-selected .tgz archive path.'),
+      })
+      .strict(),
+    replacement: PluginArchiveReplacementConfirmationSchema.optional().describe(
+      'Exact confirmation from the Host replacement offer; send only after the owner confirms this archive replacement.',
+    ),
+  })
+  .strict();
 const pluginInstallRequestSchema = z
-  .union([catalogInstallSchema, localInstallSchema])
+  .union([catalogInstallSchema, localInstallSchema, archiveInstallSchema, gitInstallSchema])
   .describe('Closed Host Manager install request. Catalog installs are version/digest fenced.');
 
 export const pluginListInputSchema = {};
@@ -144,7 +179,7 @@ export interface PluginManagerHttpClientOptions {
 }
 
 function resolveCallbackAuth(): PluginManagerClientAuth | null {
-  const apiUrl = process.env.CAT_CAFE_API_URL?.trim();
+  const apiUrl = resolveInvocationEnv('CAT_CAFE_API_URL')?.trim();
   const { invocationId, callbackToken } = resolveInvocationCredentials();
   if (!apiUrl || !invocationId || !callbackToken) return null;
   return {
@@ -314,7 +349,7 @@ export const pluginManagementTools = [
   defineTool({
     name: 'plugin_list_tools',
     description:
-      'List callable tool schemas from one currently active Host-supervised plugin. Use when the user asks to use an installed plugin capability and after plugin_get confirms it is enabled/running. NOT for: catalog discovery, lifecycle changes, or guessing a tool schema. Output: active contribution ids, exact dynamic tool names, descriptions, and input schemas; no plugin process or authority is created.',
+      'List plugin-declared direct tool schemas from one currently active plugin. Use when the user asks to use an installed plugin capability and after plugin_get confirms it is enabled/running. NOT for: catalog discovery, lifecycle changes, MCP declarations, or guessing a tool schema. Output: active contribution ids, exact direct tool names, descriptions, and input schemas; no plugin process or authority is created.',
     inputSchema: pluginListToolsInputSchema,
     handler: handlers.listTools,
     governance: {
@@ -333,7 +368,7 @@ export const pluginManagementTools = [
   defineTool({
     name: 'plugin_call',
     description:
-      "Invoke one exact tool on a currently active Host-supervised plugin contribution. Use only when the user asks to perform that plugin capability after reading its schema with plugin_list_tools. NOT for: install, configuration, lifecycle changes, direct MCP process launch, or guessed arguments. Output/side effect: returns the plugin MCP result and may cause the dynamic tool's declared external effects; Host rechecks live instance and grant authority before every call, and secrets remain inside Host supervision.",
+      'Invoke one exact plugin-declared direct tool on a currently active plugin. Use only when the user asks to perform that plugin capability after reading its schema with plugin_list_tools. NOT for: install, configuration, lifecycle changes, MCP tools, or guessed arguments. Output/side effect: returns the direct tool result and may cause its declared external effects; Host rechecks live instance and grant authority before every call.',
     inputSchema: pluginCallInputSchema,
     handler: handlers.call,
     governance: {
@@ -352,7 +387,7 @@ export const pluginManagementTools = [
   defineTool({
     name: 'plugin_install',
     description:
-      'Install a catalog candidate or local directory/archive through Host package admission and inventory. Use only when the user explicitly asks to install/add that plugin. NOT for: arbitrary npm search, enable, update, repair, or bypassing package verification. Output/side effect: admits an immutable verified package and disabled instance, returning its ids; catalog requests require the exact observed version/digest, and local code is never imported into the API process.',
+      'Install a catalog candidate, git repository, or local directory/archive through Host package admission. Use when the user explicitly asks to install a plugin or replace its legacy installation with a selected archive. NOT for: arbitrary npm search, enable, general repair, or bypassing verification. Output/side effect: admits verified bytes and returns instance ids; a legacy archive replacement preserves the instance and data and applies the confirmed Host-policy grants. GOTCHA: ARCHIVE_REPLACEMENT_CONFIRMATION_REQUIRED changes no installed state; present the offer to the owner and retry with its exact replacement.confirmation only after confirmation. Stale confirmations require a new offer. Catalog requests require the observed version/digest.',
     inputSchema: pluginInstallInputSchema,
     handler: handlers.install,
     governance: {

@@ -7,12 +7,27 @@ import { useCatData } from '@/hooks/useCatData';
 import type { ChatMessage as Message } from '@/stores/chat-types';
 
 const source: Message = {
+  from: { kind: 'agent', catId: 'opus' },
   id: 'c-source',
   type: 'assistant',
   catId: 'opus',
   timestamp: 1791210000000,
   content: 'A readable message with its actions owned by the author row.',
   extra: { crossPost: { sourceThreadId: 'c-original' } },
+};
+const retiredSource: Message = {
+  ...source,
+  id: 'c-retired-source',
+  from: { kind: 'agent', catId: 'retired-source-cat' },
+  catId: 'retired-source-cat',
+};
+const humanSource: Message = {
+  ...source,
+  id: 'c-user',
+  from: { kind: 'user', userId: 'default-user' },
+  type: 'user',
+  catId: undefined,
+  extra: undefined,
 };
 
 /** Controlled inputs through the real row/selection/card components; live acceptance is separate. */
@@ -32,26 +47,16 @@ export function ReadingActions() {
       >
         <ChatMessage message={source} threadId="thread-replies" getCatById={getCatById} onEditCat={() => undefined} />
       </MessageActions>
-      <MessageActions
-        message={{ ...source, id: 'c-retired-source', catId: 'retired-source-cat' }}
-        threadId="thread-replies"
-      >
+      <MessageActions message={retiredSource} threadId="thread-replies">
         <ChatMessage
-          message={{ ...source, id: 'c-retired-source', catId: 'retired-source-cat' }}
+          message={retiredSource}
           threadId="thread-replies"
           getCatById={getCatById}
           onEditCat={() => undefined}
         />
       </MessageActions>
-      <MessageActions
-        message={{ ...source, id: 'c-user', type: 'user', catId: undefined, extra: undefined }}
-        threadId="thread-replies"
-      >
-        <ChatMessage
-          message={{ ...source, id: 'c-user', type: 'user', catId: undefined, extra: undefined }}
-          threadId="thread-replies"
-          getCatById={getCatById}
-        />
+      <MessageActions message={humanSource} threadId="thread-replies">
+        <ChatMessage message={humanSource} threadId="thread-replies" getCatById={getCatById} />
       </MessageActions>
       {selected && (
         <MessageSelectionToolbar

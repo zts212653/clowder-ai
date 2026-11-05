@@ -3,6 +3,7 @@ import {
   ownerTruthRefV1Schema,
   PAW_FEEL_NO_ACTION_REASONS,
   type PawFeelDispositionEvent,
+  pawFeelRepairBindingSchema,
 } from '@cat-cafe/shared';
 import { z } from 'zod';
 
@@ -55,7 +56,7 @@ export const PawFeelDirectRepairOutcomeV1Schema = z
     schemaVersion: z.literal(1),
     bindingRef: ownerTruthRefV1Schema,
     taskTerminalRef: ownerTruthRefV1Schema,
-    leaseTerminalRef: ownerTruthRefV1Schema,
+    leaseTerminalRef: ownerTruthRefV1Schema.optional(),
     ownerOutcomeRef: ownerTruthRefV1Schema,
     verificationRefs: z.tuple([ownerTruthRefV1Schema]).rest(ownerTruthRefV1Schema),
     disposition: z.enum(['verified_changed', 'verified_no_change']),
@@ -97,8 +98,9 @@ const signatureActionSchema = z.discriminatedUnion('type', [
       type: z.literal('fix'),
       ownerCatId: nonEmptyString,
       taskId: nonEmptyString,
-      leaseId: nonEmptyString,
-      leaseGeneration: z.number().int().nonnegative(),
+      repairBinding: pawFeelRepairBindingSchema.optional(),
+      leaseId: nonEmptyString.optional(),
+      leaseGeneration: z.number().int().nonnegative().optional(),
       custodyEvidenceRef: nonEmptyString,
       directRepairBinding: PawFeelDirectRepairBindingV1Schema.optional(),
     })
@@ -165,8 +167,9 @@ export const PawFeelDispositionEventSchema = z.discriminatedUnion('type', [
       type: z.literal('fix'),
       ownerCatId: nonEmptyString,
       taskId: nonEmptyString,
-      leaseId: nonEmptyString,
-      leaseGeneration: z.number().int().nonnegative(),
+      repairBinding: pawFeelRepairBindingSchema.optional(),
+      leaseId: nonEmptyString.optional(),
+      leaseGeneration: z.number().int().nonnegative().optional(),
       custodyEvidenceRef: nonEmptyString,
       directRepairBinding: PawFeelDirectRepairBindingV1Schema.optional(),
     })
@@ -220,5 +223,29 @@ export const PawFeelDispositionEventSchema = z.discriminatedUnion('type', [
 ]);
 
 export function parsePawFeelDispositionEvent(raw: unknown): PawFeelDispositionEvent {
-  return PawFeelDispositionEventSchema.parse(raw) as PawFeelDispositionEvent;
+  const event = PawFeelDispositionEventSchema.parse(raw);
+  const fix =
+    event.type === 'fix'
+      ? event
+      : event.type === 'signature_requested' && event.action.type === 'fix'
+        ? event.action
+        : undefined;
+  if (fix) {
+    if (!fix.repairBinding && (!fix.leaseId || fix.leaseGeneration === undefined))
+      throw new Error('repair event has no exact binding');
+    if (fix.repairBinding?.taskId !== undefined && fix.repairBinding.taskId !== fix.taskId)
+      throw new Error('repair Task differs from binding');
+    if (
+      fix.repairBinding?.kind === 'task_assignment' &&
+      (fix.leaseId !== undefined || fix.leaseGeneration !== undefined)
+    )
+      throw new Error('Task assignment event cannot carry a lease identity');
+    if (
+      fix.repairBinding?.kind === 'action_lease' &&
+      fix.leaseId !== undefined &&
+      (fix.leaseId !== fix.repairBinding.leaseId || fix.leaseGeneration !== fix.repairBinding.generation)
+    )
+      throw new Error('repair lease identity differs');
+  }
+  return event as PawFeelDispositionEvent;
 }

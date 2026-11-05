@@ -11,6 +11,10 @@ import type { WorkspaceContentReview } from './workspace-content-review.js';
 export interface ContentModificationProgress {
   sourceMessageId?: string;
   sourceMessageRevision?: `sha256:${string}`;
+  /** Optional narrow selection within a multi-work Human message; absent on legacy whole-message requests. */
+  sourceAttachmentId?: string;
+  /** Retry UUID aliases bound to this same request in the existing journal, never a separate batch owner. */
+  takeoverOperationIds?: string[];
   sourceKind?: 'generated_request' | 'human_message';
   /** Immutable audience copied from the Human source so Host receipts cannot widen a whisper. */
   sourceVisibility?:

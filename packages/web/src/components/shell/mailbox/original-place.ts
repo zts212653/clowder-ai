@@ -1,23 +1,31 @@
 import type { UnifiedAttentionItemV1 } from '@cat-cafe/shared';
+import {
+  resolveArtifactReviewTarget,
+  reviewSurfaceFromPreparedRef,
+} from '@/components/workbench/artifact-review-surface';
 import { resolveEntrustedWorkActionTarget } from '@/hooks/useWorkspaceNavigate';
 import { APPROVAL_FEATURES } from '@/lib/approval-features';
+import { readMailboxReviewSource } from './mailbox-review-match';
 import { eligibleReceiptOf, isRecord } from './work-detail';
 
 export type MailboxDestination = 'approval' | 'needs-me';
 
 /**
  * Where a row can really take you from the 待办 panel.
- *  - `exact`: a place `navigateToEntrustedWorkAction` can reach without the workspace's own surface machinery — the
- *    source message (with its block) or a collective-work result.
- *  - `list`: the original list. Approvals, meeting-intake repairs and artifact reviews are located through F307 workspace
- *    surfaces that exist only inside the workspace host, so the panel does not claim to find the one item; it says so
- *    and opens the list that owns it. A generic list is never presented as the exact place.
+ *  - `exact`: the source message, a collective-work result, or an owner-verified F309 prepared review in its F307 host.
+ *  - `list`: the original list when this build has no verified exact source coordinate. A generic list is never
+ *    presented as the exact place.
  */
-export type OriginalPlace = { kind: 'exact'; actionRef: string } | { kind: 'list'; destination: MailboxDestination };
+export type OriginalPlace =
+  | { kind: 'exact'; actionRef: string; host?: 'workspace' }
+  | { kind: 'list'; destination: MailboxDestination };
 
-const REACHABLE_FROM_PANEL = new Set(['message', 'collective-work']);
+const REACHABLE_FROM_PANEL = new Set(['message', 'collective-work', 'collective-accountability', 'collective-project']);
 
 function actionRefOf(item: UnifiedAttentionItemV1): string | null {
+  const accountabilityRef =
+    item.collectiveProjectAttention?.actionRef ?? item.collectiveAccountabilityRequest?.actionRef;
+  if (typeof accountabilityRef === 'string' && accountabilityRef.trim() !== '') return accountabilityRef;
   const action = eligibleReceiptOf(item)?.receipt.action;
   const ref = isRecord(action) ? action.actionRef : undefined;
   return typeof ref === 'string' && ref.trim() !== '' ? ref : null;
@@ -50,9 +58,37 @@ export function resolveOriginalPlace(item: UnifiedAttentionItemV1): OriginalPlac
     return { kind: 'exact', actionRef: `message:${threadId}:${messageId}#${blockId}` };
   }
   if (item.kind === 'approval') return approvalCardPlace(item);
+  const review = originalReviewPlace(item);
+  if (review) return review;
   const actionRef = actionRefOf(item);
   const target = actionRef ? resolveEntrustedWorkActionTarget(actionRef) : null;
   return actionRef && target && REACHABLE_FROM_PANEL.has(target.kind)
     ? { kind: 'exact', actionRef }
     : { kind: 'list', destination: 'needs-me' };
+}
+
+/** Prepared review navigation is accepted only with the current typed F309 owner receipt. */
+function originalReviewPlace(item: UnifiedAttentionItemV1): OriginalPlace | null {
+  const entry = eligibleReceiptOf(item);
+  const envelope = entry?.ownerRead.envelope;
+  const visibility = isRecord(envelope) ? envelope.visibility : null;
+  const owner = isRecord(visibility) ? visibility.ownerUserId : null;
+  const review = typeof owner === 'string' ? readMailboxReviewSource(item, owner) : null;
+  const prepared = entry?.ownerRead.preparedArtifact;
+  const ref =
+    isRecord(prepared) && typeof prepared.openInWorkspaceRef === 'string' ? prepared.openInWorkspaceRef : null;
+  const surface = ref ? reviewSurfaceFromPreparedRef(ref) : null;
+  const reviewTarget = surface && resolveArtifactReviewTarget(surface);
+  const work = entry?.ownerRead.work;
+  if (
+    ref &&
+    review &&
+    reviewTarget &&
+    reviewTarget.reviewId === review.reviewId &&
+    isRecord(work) &&
+    reviewTarget.threadId === work.threadId
+  ) {
+    return { kind: 'exact', host: 'workspace', actionRef: ref };
+  }
+  return null;
 }

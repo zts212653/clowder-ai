@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { apiFetch } from '@/utils/api-client';
 import { reviewDraftPrefix, useArtifactReview } from '../useArtifactReview';
+import { appliedResult } from './review-command.fixture';
 
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
 
@@ -124,7 +125,9 @@ it('a confirmed server write remains successful when local retry cleanup fails',
   vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => {
     throw new DOMException('Storage is blocked', 'SecurityError');
   });
-  vi.mocked(apiFetch).mockResolvedValue(response({ view: { ...initial, review: { ...initial.review, revision: 2 } } }));
+  vi.mocked(apiFetch).mockImplementation(async (_path, init) =>
+    response(appliedResult({ ...initial, review: { ...initial.review, revision: 2 } }, JSON.parse(String(init?.body)))),
+  );
   await act(async () => {
     expect(
       await controller.act(

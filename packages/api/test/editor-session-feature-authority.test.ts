@@ -37,7 +37,6 @@ test('a fresh feature activation invalidates an old editor session even with unc
         installationInstanceId: 'instance',
         providerVersion: '0.1.0-alpha.0',
         packageDigest: 'sha512-package',
-        grantRevision: 1,
         lifecycleRevision: 3,
         activationState: 'enabled',
         runtimeState: 'healthy',

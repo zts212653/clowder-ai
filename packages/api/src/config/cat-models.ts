@@ -21,6 +21,9 @@ function getCatModelEnvKey(catId: string): string {
  * 运行时读 catRegistry（.cat-cafe/cat-catalog.json），环境变量可 override。
  */
 export function getCatModel(catName: string, configuredFallback?: string): string {
+  if (catRegistry.tryGet(catName)?.config.configurationSource === 'native_tool') {
+    return catRegistry.tryGet(catName)!.config.defaultModel;
+  }
   // 1. 环境变量最高优先 (dynamic key: CAT_{CATID}_MODEL)
   const envKey = getCatModelEnvKey(catName);
   const envValue = process.env[envKey]?.trim();
@@ -34,10 +37,10 @@ export function getCatModel(catName: string, configuredFallback?: string): strin
     return entry.config.defaultModel;
   }
 
-  // Read models may project a resolved runtime-catalog member before that
-  // member has been reconciled into the process registry. Keep the same env
-  // precedence while accepting the caller's concrete catalog value.
-  if (configuredFallback) return configuredFallback;
+  // clowder-ai#1796: test `undefined`, not truthiness. An empty `defaultModel` is
+  // legal (CLI-decided), so a caller that passes '' has supplied a value; only an
+  // omitted argument has none. Truthiness threw here and 500'd GET /api/cats.
+  if (configuredFallback !== undefined) return configuredFallback;
 
   throw new Error(`No model configured for cat "${catName}"`);
 }

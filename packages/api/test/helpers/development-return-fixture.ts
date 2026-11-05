@@ -105,7 +105,7 @@ export async function createDevelopmentReturnFixture(
     : options.separateProposalSource
       ? messages.append({
           userId: 'human',
-          catId: null,
+          from: { kind: 'user', userId: 'human' },
           threadId: proposalSourceThread.id,
           content: '把这个精确子工作拆到批准 child',
           mentions: [],

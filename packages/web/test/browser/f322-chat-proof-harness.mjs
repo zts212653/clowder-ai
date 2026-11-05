@@ -51,6 +51,9 @@ export function createChatProofHarness(context, built, evidenceDir, measurements
         const file = path.resolve(webRoot, 'public', url.pathname.slice(1));
         if (file.startsWith(path.join(webRoot, 'public/avatars/')) && existsSync(file))
           return route.fulfill({ contentType: 'image/png', body: readFileSync(file) });
+        const familyFile = path.resolve(webRoot, 'public/avatars/family', path.basename(url.pathname));
+        if (familyFile.startsWith(path.join(webRoot, 'public/avatars/family/')) && existsSync(familyFile))
+          return route.fulfill({ contentType: 'image/png', body: readFileSync(familyFile) });
         unexpected.push(url.pathname);
         return route.abort();
       }

@@ -1,0 +1,122 @@
+'use client';
+import type { RichCardBlock } from '@cat-cafe/shared';
+import { useCallback, useRef } from 'react';
+import { type ApprovalHost, ApprovalHostContext } from '@/components/ApprovalHost';
+import { matchHostedApproval } from '@/components/shell/mailbox/approval-match';
+import { describeReconcile } from '@/components/shell/mailbox/approval-reconcile';
+import { useShellCopy } from '@/components/shell/shell-copy';
+import { useShellLanguage } from '@/components/shell/shell-language';
+import { CardBlock } from './CardBlock';
+import { EvalRepairApprovalCard } from './EvalRepairApprovalCard';
+import { evalRepairCopy } from './eval-repair.shell-copy';
+import { evalRepairCandidate } from './eval-repair-model';
+import { ReconciledApprovalResult } from './ReconciledApprovalResult';
+import { type RepairCoordinate, readEvalRepairPending, readEvalRepairResult } from './read-eval-repair';
+import { RetainedApprovalCardResult, useOriginalApprovalRead } from './use-original-approval-read';
+
+/** The original published card uses the same canonical source/writer. Recognition and UI state confer no authority. */
+export function OriginalEvalRepairCard({ block, coordinate }: { block: RichCardBlock; coordinate?: RepairCoordinate }) {
+  const t = useShellCopy(evalRepairCopy),
+    language = useShellLanguage();
+  const proposalId = evalRepairCandidate(block),
+    threadId = coordinate?.threadId,
+    messageId = coordinate?.messageId;
+  const writing = useRef(false);
+  const source = useOriginalApprovalRead('F266', proposalId, { threadId, messageId, block }, async (_signal, fresh) => {
+    const ref = threadId && messageId ? { threadId, messageId } : null;
+    const next = proposalId && ref ? await readEvalRepairPending(proposalId, ref, undefined, block, fresh) : null;
+    const outcome =
+      !next && proposalId && ref ? await readEvalRepairResult(proposalId, ref, undefined, block, fresh) : null;
+    return { next, outcome };
+  });
+  const last = source.value?.next ?? null,
+    result = source.value?.outcome ?? null;
+  const current = !!last && !source.reading && !source.failed;
+  const live = useRef(last);
+  live.current = current ? last : null;
+  const refresh = useCallback(async () => {
+    const next = (await source.refresh())?.next ?? null;
+    live.current = next;
+    return next;
+  }, [source.refresh]);
+  const beforeWrite = useCallback(async () => {
+    const previous = live.current;
+    if (!previous || writing.current) return false;
+    const next = await refresh();
+    if (!next) return false;
+    return (
+      matchHostedApproval({
+        read: previous,
+        readOwnerUserId: previous.ownerUserId,
+        storeItems: [next],
+        now: Date.now(),
+      }).kind === 'matched'
+    );
+  }, [refresh]);
+  const host: ApprovalHost = {
+    presentation: 'mailbox',
+    writesLocked: !current || writing.current,
+    authorizeWrite: () => Boolean(live.current && !writing.current),
+    reportEditing: () => {},
+    reportRequest: (event) => {
+      writing.current = event.phase === 'start';
+    },
+  };
+  if (source.retained)
+    return (
+      <div data-testid="eval-repair-result">
+        <RetainedApprovalCardResult item={source.retained} reread={() => void source.reread()} />
+      </div>
+    );
+  if (result) {
+    const line =
+      describeReconcile(
+        { kind: 'decided', terminal: result.terminal },
+        {
+          language,
+          ownerUserId: result.ownerUserId,
+          originalEffect: result.effect,
+        },
+      ).line ?? '';
+    return (
+      <ApprovalHostContext.Provider value={host}>
+        <div data-testid="eval-repair-result">
+          <ReconciledApprovalResult terminal={result.terminal} line={line}>
+            <CardBlock block={{ ...block, actions: undefined }} />
+            <button type="button" className="shell-focusable text-xs hover:underline" onClick={() => void refresh()}>
+              {t.reread}
+            </button>
+          </ReconciledApprovalResult>
+        </div>
+      </ApprovalHostContext.Provider>
+    );
+  }
+  return (
+    <ApprovalHostContext.Provider value={host}>
+      {last ? (
+        <EvalRepairApprovalCard
+          item={last}
+          beforeWrite={beforeWrite}
+          afterWrite={async () => {
+            await refresh();
+          }}
+        />
+      ) : (
+        <details>
+          <summary className="shell-focusable cursor-pointer text-sm">{t.original}</summary>
+          <CardBlock block={{ ...block, actions: undefined }} />
+        </details>
+      )}
+      {!current ? <p className="text-xs text-[var(--shell-muted)]">{t.unverified}</p> : null}
+      <button
+        type="button"
+        className="shell-nav-row shell-focusable rounded px-2 py-1 text-xs"
+        onClick={() => {
+          void refresh();
+        }}
+      >
+        {t.reread}
+      </button>
+    </ApprovalHostContext.Provider>
+  );
+}

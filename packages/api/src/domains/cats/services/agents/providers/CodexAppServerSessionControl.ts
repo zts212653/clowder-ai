@@ -1,3 +1,4 @@
+import { deploymentDefaults } from '@cat-cafe/shared';
 import type { AgentCarrierSession, ProviderCompactionObservation } from '../../types.js';
 import {
   asCodexAppServerRecord,
@@ -81,7 +82,11 @@ export async function requestCodexAppServerCompaction(input: {
 
   try {
     await requestBeforeDeadline('initialize', {
-      clientInfo: { name: 'cat-cafe', title: 'Clowder AI native session control', version: '1' },
+      clientInfo: {
+        name: 'cat-cafe',
+        title: `${deploymentDefaults.brand.displayName} native session control`,
+        version: '1',
+      },
       capabilities: {},
     });
     await write({ method: 'initialized' });

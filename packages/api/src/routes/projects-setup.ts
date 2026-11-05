@@ -1,3 +1,4 @@
+import { deploymentDefaults } from '@cat-cafe/shared';
 /**
  * F113 Phase E: POST /api/projects/setup
  * Orchestrates project initialization: clone/init/skip only.
@@ -134,7 +135,8 @@ async function isEmptyDir(dirPath: string): Promise<boolean> {
 
 export const projectSetupRoute: FastifyPluginAsync<ProjectSetupRouteOptions> = async (app, opts) => {
   const catCafeRoot = await redirectRuntimeProjectPath(opts.catCafeRoot ?? findMonorepoRoot(process.cwd()));
-  if (!catCafeRoot) throw new Error('Unable to resolve persistent Clowder AI root for project setup');
+  if (!catCafeRoot)
+    throw new Error(`Unable to resolve persistent ${deploymentDefaults.brand.name} root for project setup`);
 
   app.post('/api/projects/setup', async (request, reply) => {
     const userId = resolveHeaderUserId(request);
@@ -169,7 +171,7 @@ export const projectSetupRoute: FastifyPluginAsync<ProjectSetupRouteOptions> = a
       reply.status(isOwnedPath ? 400 : 403);
       return {
         error: isOwnedPath
-          ? 'Cannot setup governance inside Clowder AI; choose an external project'
+          ? `Cannot setup governance inside ${deploymentDefaults.brand.name}; choose an external project`
           : 'Project path not allowed',
       };
     }

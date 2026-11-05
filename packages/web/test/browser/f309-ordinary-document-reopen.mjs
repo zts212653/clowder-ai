@@ -92,6 +92,7 @@ export function registerDocumentReopenJourney(suite) {
           assert.match(await viewer.innerText(), /# Harbour guide/);
           await session.page.keyboard.press('Escape');
           await openComparison('existing-file');
+          await session.context.unrouteAll({ behavior: 'wait' });
           await session.context.close();
           session = await openDocumentSession(suite, f.owner, { width, dark, shell: 'v2' });
           const candidate = await openComparison('new-context');
@@ -99,12 +100,13 @@ export function registerDocumentReopenJourney(suite) {
           await candidate.getByText('已写回原文件', { exact: true }).waitFor();
           assert.match(await readFile(f.absolute, 'utf8'), /First revised paragraph/);
           // The parent's post-acceptance case used a genuinely new context, without saved tabs or layout.
+          await session.context.unrouteAll({ behavior: 'wait' });
           await session.context.close();
           session = await openDocumentSession(suite, f.owner, { width, dark, shell: 'v2' });
           await openComparison('applied-new-context');
           await session.page
             .getByTestId('workspace-content-review-surface')
-            .getByRole('button', { name: '返回来源', exact: true })
+            .getByRole('button', { name: '‹ 聊天', exact: true })
             .click();
           assert.ok(session.page.url().includes(`/thread/${f.owner.thread.id}`));
           await session.page.locator(`[data-message-id="${receipt.id}"]`).waitFor({ state: 'visible' });

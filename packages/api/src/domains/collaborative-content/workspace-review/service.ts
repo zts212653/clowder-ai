@@ -3,7 +3,6 @@ import type {
   EvolutionMediaLocator,
   PublicationReviewContext,
   WorkspaceContentReview,
-  WorkspaceContentReviewAction,
   WorkspaceContentReviewView,
 } from '@cat-cafe/shared';
 import {
@@ -18,6 +17,7 @@ import {
   resolveEvolutionReviewSource,
 } from './evolution-review-source.js';
 import {
+  assertPublicationAnchorEvidence,
   type PublicationReviewPort,
   type PublicationReviewTarget,
   readPublicationReview,
@@ -25,7 +25,7 @@ import {
 } from './publication-review-source.js';
 import { type WorkspaceContentReviewStore, type WorkspaceReviewMutation } from './store.js';
 import { readVideoProjectReview, type VideoProjectReviewPort } from './video-project-review-source.js';
-import { applyWorkspaceReviewAction } from './workspace-review-actions.js';
+import { applyWorkspaceReviewAction, type WorkspaceReviewServerAction } from './workspace-review-actions.js';
 import {
   assertWorkspaceReviewHuman,
   validateWorkspaceReviewBody,
@@ -169,6 +169,16 @@ export class WorkspaceContentReviewService {
       review: view.review,
       target: input.target,
     });
+    if ('anchor' in anchor && anchor.anchor.kind === 'video-range' && anchor.anchor.storyEvidence) {
+      const source = view.review.source;
+      if (source.kind !== 'publication') throw new WorkspaceContentReviewError('invalid_action');
+      await assertPublicationAnchorEvidence(
+        this.options.publications,
+        source.publication,
+        anchor.anchor,
+        input.principal,
+      );
+    }
     const result = this.options.store.mutate(mutation, (review) => ({
       ...review,
       revision: review.revision + 1,
@@ -196,7 +206,7 @@ export class WorkspaceContentReviewService {
     readonly reviewId: string;
     readonly expectedRevision: number;
     readonly operationId: string;
-    readonly action: WorkspaceContentReviewAction;
+    readonly action: WorkspaceReviewServerAction;
   }) {
     const ownerReview = this.requireOwnerReview(input.principal, input.reviewId);
     if (ownerReview.source.kind === 'video-project') throw new WorkspaceContentReviewError('unsupported_content');
@@ -326,7 +336,8 @@ export class WorkspaceContentReviewService {
     assertWorkspaceReviewHuman(principal);
     const review = this.options.store.get(reviewId);
     if (!review) throw new WorkspaceContentReviewError('not_found');
-    if (review.ownerUserId !== principal.userId) throw new WorkspaceContentReviewError('access_denied');
+    if (review.collaborationScope || review.ownerUserId !== principal.userId)
+      throw new WorkspaceContentReviewError('access_denied');
     return review;
   }
 }

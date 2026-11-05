@@ -4,8 +4,6 @@ import { MessageStore } from '../src/domains/cats/services/stores/ports/MessageS
 import type { DesktopWindowFailure, DesktopWindowLaunch } from '../src/domains/plugin/desktop-window-runtime/types.js';
 import { OfficialPluginPackageInstaller } from '../src/domains/plugin/official-package-installer.js';
 import { createDormantPluginRuntimeComposition } from '../src/domains/plugin/runtime-composition.js';
-import { MemoryMeetingIntakeStore } from '../src/domains/signal-intake/MeetingIntakeStore.js';
-import { MemorySignalRouteStore } from '../src/domains/signal-intake/SignalRouteStore.js';
 import { desktopWindowFixture } from './f317-window.fixture.js';
 
 test('a stalled steady-state poll reports its deadline, pending request and first terminal initiator', async (t) => {
@@ -23,8 +21,6 @@ test('a stalled steady-state poll reports its deadline, pending request and firs
   });
   const runtime = createDormantPluginRuntimeComposition({
     projectRoot: f.root,
-    routes: new MemorySignalRouteStore(),
-    intakes: new MemoryMeetingIntakeStore(),
     messageStore: new MessageStore(),
     onDesktopFailure: (_id, failure) => {
       reported.push(failure);

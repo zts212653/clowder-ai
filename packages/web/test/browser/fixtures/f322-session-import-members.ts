@@ -7,6 +7,7 @@ const cats = [
     nickname: '小太阳',
     name: 'Sol',
     mentionPatterns: ['codex'],
+    carrier: 'cli',
     clientId: 'openai',
     provider: 'openai',
     cli: { command: 'codex' },

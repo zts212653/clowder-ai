@@ -58,6 +58,37 @@ describe('managed execution details in Workspace Now', () => {
     await act(async () => root.render(<HomeLiveCard threadId="host-thread" onSelectExecution={vi.fn()} />));
     await act(async () => requestExecutionDetail(run));
   }
+  it('expands the requested command under its running row and keeps Stop on that row only', async () => {
+    await open();
+    const detail = host.querySelector('[data-testid="workspace-execution-detail"]');
+    const row = detail?.closest('[data-testid="workspace-running-object"]');
+    expect(row?.getAttribute('data-execution-id')).toBe(run.executionId);
+    expect(row?.querySelectorAll('.home-execution-stop button[aria-label^="停止"]')).toHaveLength(1);
+    expect(detail?.querySelector('button[aria-label^="停止"]')).toBeNull();
+  });
+  it('reveals the requested folded project without rewriting its saved fold, then restores it on Collapse', async () => {
+    const selected = { ...run, projectPath: '/work/folded-project' };
+    seed([selected]);
+    mocks.apiFetch.mockImplementation(async (path: string) =>
+      path === '/api/config/live-projects'
+        ? Response.json({ collapsed: { '/work/folded-project': true } })
+        : Response.json(valid),
+    );
+    await act(async () => root.render(<HomeLiveCard threadId="host-thread" />));
+    const toggle = host.querySelector<HTMLButtonElement>('[data-testid="home-live-project"] button[aria-expanded]');
+    expect(toggle?.getAttribute('aria-expanded')).toBe('false');
+    await act(async () => requestExecutionDetail(selected));
+    expect(toggle?.getAttribute('aria-expanded')).toBe('true');
+    const detail = host.querySelector('[data-testid="workspace-execution-detail"]');
+    expect(detail?.closest('[data-execution-id]')?.getAttribute('data-execution-id')).toBe(run.executionId);
+    const collapse = [...(detail?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find(
+      (button) => button.textContent === '收起',
+    );
+    await act(async () => collapse?.click());
+    expect(toggle?.getAttribute('aria-expanded')).toBe('false');
+    expect(host.querySelector('[data-testid="workspace-execution-detail"]')).toBeNull();
+    expect(mocks.apiFetch.mock.calls.some((call) => call[1]?.method === 'PUT')).toBe(false);
+  });
   it('reads the exact task, retains raw command/start/source and cancels that task only', async () => {
     await open();
     expect(mocks.apiFetch).toHaveBeenCalledWith('/api/callbacks/hold-ball/hold-exact/status');
@@ -69,7 +100,7 @@ describe('managed execution details in Workspace Now', () => {
       '/thread/thread-command-source',
     );
     const stop = host.querySelector<HTMLButtonElement>(
-      '[data-testid="workspace-execution-detail"] button:is([aria-label^="停止"], [aria-label^="Stop "])',
+      '[data-testid="workspace-running-object"] .home-execution-stop button:is([aria-label^="停止"], [aria-label^="Stop "])',
     );
     await act(async () => stop?.click());
     expect(mocks.cancel).not.toHaveBeenCalled();
@@ -94,18 +125,18 @@ describe('managed execution details in Workspace Now', () => {
   it('names the Stop action and confirmation in the selected language without internal execution ids', async () => {
     await open();
     const stop = host.querySelector<HTMLButtonElement>(
-      '[data-testid="workspace-execution-detail"] button:is([aria-label^="停止"], [aria-label^="Stop "])',
+      '[data-testid="workspace-running-object"] .home-execution-stop button:is([aria-label^="停止"], [aria-label^="Stop "])',
     );
-    expect(stop?.getAttribute('aria-label')).toBe('停止小太阳·砚砚 · GPT-6.1 Sol的全量门禁');
+    expect(stop?.getAttribute('aria-label')).toBe('停止小太阳·砚砚的这次执行');
     await act(async () => stop?.click());
-    expect(document.querySelector('[role="dialog"]')?.textContent).toContain('停止全量门禁？');
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain('停止小太阳·砚砚的这次执行？');
   });
   it('Escape dismisses Stop confirmation while keeping this execution detail open', async () => {
     await open();
     await act(async () =>
       host
         .querySelector<HTMLButtonElement>(
-          '[data-testid="workspace-execution-detail"] button:is([aria-label^="停止"], [aria-label^="Stop "])',
+          '[data-testid="workspace-running-object"] .home-execution-stop button:is([aria-label^="停止"], [aria-label^="Stop "])',
         )
         ?.click(),
     );
@@ -123,7 +154,7 @@ describe('managed execution details in Workspace Now', () => {
     await act(async () =>
       host
         .querySelector<HTMLButtonElement>(
-          '[data-testid="workspace-execution-detail"] button:is([aria-label^="停止"], [aria-label^="Stop "])',
+          '[data-testid="workspace-running-object"] .home-execution-stop button:is([aria-label^="停止"], [aria-label^="Stop "])',
         )
         ?.click(),
     );
@@ -141,7 +172,7 @@ describe('managed execution details in Workspace Now', () => {
       await act(async () =>
         host
           .querySelector<HTMLButtonElement>(
-            '[data-testid="workspace-execution-detail"] button:is([aria-label^="停止"], [aria-label^="Stop "])',
+            '[data-testid="workspace-running-object"] .home-execution-stop button:is([aria-label^="停止"], [aria-label^="Stop "])',
           )
           ?.click(),
       );
@@ -158,21 +189,19 @@ describe('managed execution details in Workspace Now', () => {
     await open();
     host
       .querySelector<HTMLButtonElement>(
-        '[data-testid="workspace-execution-detail"] button:is([aria-label^="停止"], [aria-label^="Stop "])',
+        '[data-testid="workspace-running-object"] .home-execution-stop button:is([aria-label^="停止"], [aria-label^="Stop "])',
       )
       ?.focus();
     await act(async () =>
       host
         .querySelector<HTMLButtonElement>(
-          '[data-testid="workspace-execution-detail"] button:is([aria-label^="停止"], [aria-label^="Stop "])',
+          '[data-testid="workspace-running-object"] .home-execution-stop button:is([aria-label^="停止"], [aria-label^="Stop "])',
         )
         ?.click(),
     );
     await act(async () => seed([{ ...run, cancelability: { state: 'not_cancelable', reason: 'terminalizing' } }]));
     expect(document.querySelector('[role="dialog"]')).toBeNull();
-    expect(host.querySelector('[data-testid="workspace-execution-detail"]')?.contains(document.activeElement)).toBe(
-      true,
-    );
+    expect(host.querySelector('[data-testid="workspace-running-object"]')?.contains(document.activeElement)).toBe(true);
     expect(mocks.cancel).not.toHaveBeenCalled();
   });
   it('keeps the original non-cancelable reason visible in the selected language', async () => {
@@ -180,7 +209,9 @@ describe('managed execution details in Workspace Now', () => {
     seed([{ ...run, cancelability: { state: 'not_cancelable', reason: 'foreign_principal' } }]);
     await open();
     const detail = host.querySelector('[data-testid="workspace-execution-detail"]');
-    expect(detail?.textContent).toContain('Started by a schedule; you are not the initiator');
+    expect(detail?.closest('[data-testid="workspace-running-object"]')?.textContent).toContain(
+      'Started by a schedule; you are not the initiator',
+    );
     expect(detail?.querySelector('button:is([aria-label^="停止"], [aria-label^="Stop "])')).toBeNull();
     expect(mocks.cancel).not.toHaveBeenCalled();
   });

@@ -19,7 +19,10 @@ interface Input {
   readonly ownerUserId: string;
   readonly sessions: LiveCompanionSessions;
   readonly service: OwnerPageActionService;
-  readonly messages: Pick<IMessageStore, 'appendIdempotent' | 'getById' | 'getByThread' | 'getByThreadAfter'>;
+  readonly messages: Pick<
+    IMessageStore,
+    'appendIdempotent' | 'getById' | 'getByThread' | 'getByThreadAfter' | 'recordCompanionDeliveryAcceptance'
+  >;
   readonly threadService: Pick<ConciergeThreadService, 'getOrCreate' | 'isCurrent'>;
   readonly mcpDistDir: string;
   readonly allowedDirectories: readonly string[];

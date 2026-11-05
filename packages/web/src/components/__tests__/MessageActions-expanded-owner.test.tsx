@@ -123,6 +123,15 @@ describe('all action surfaces retain the same message owner', () => {
   }
 
   for (const overflow of [false, true]) {
+    it(`Escape closes the ${overflow ? 'overflow' : 'compact'} sheet and restores its original action`, () => {
+      render();
+      const sheet = openSheet(overflow);
+      act(() => document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+      flush();
+      expect(sheet.isConnected).toBe(false);
+      expect(document.querySelector('[role="menu"]')).toBeNull();
+      expect(document.activeElement).toBe(required('[data-testid="message-actions-compact-trigger"]'));
+    });
     for (const hidden of [true, false]) {
       it(`retires an open ${overflow ? 'overflow' : 'compact'} sheet on ${hidden ? 'retained hidden' : 'clipped'} ownership, then permits a fresh sheet`, async () => {
         render();

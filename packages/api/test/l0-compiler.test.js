@@ -10,7 +10,7 @@
 
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
@@ -319,6 +319,8 @@ test('compileL0ViaSubprocess invalidates cached L0 when governance rules change'
   const sharedRulesPath = join(root, 'cat-cafe-skills', 'refs', 'shared-rules.md');
   const localRulesPath = join(root, 'cat-cafe-skills', 'refs', 'shared-rules.local.md');
   const overrideRulesPath = join(root, 'cat-cafe-skills', 'refs', 'shared-rules.local-override.md');
+  const fixedTime = new Date('2026-01-01T00:00:00.000Z');
+  utimesSync(sharedRulesPath, fixedTime, fixedTime);
   const spawnFn = buildFakeSpawn({ stdout: 'L0 BEFORE GOVERNANCE CHANGE' });
 
   const out1 = await compileL0ViaSubprocess({ catId: 'governance-change-cat', cwd: root, spawnFn });
@@ -326,6 +328,8 @@ test('compileL0ViaSubprocess invalidates cached L0 when governance rules change'
   assert.equal(spawnFn.calls.length, 1);
 
   writeFileSync(sharedRulesPath, 'UPDATED GOVERNANCE RULES');
+  // Same-size writes can share a filesystem timestamp; changed content must still invalidate L0.
+  utimesSync(sharedRulesPath, fixedTime, fixedTime);
 
   const spawnFn2 = buildFakeSpawn({ stdout: 'L0 AFTER SHARED RULES CHANGE' });
   const out2 = await compileL0ViaSubprocess({ catId: 'governance-change-cat', cwd: root, spawnFn: spawnFn2 });
@@ -455,11 +459,6 @@ const REQUIRED_L5_TOOL_NAMES = [
   'cat_cafe_create_rich_block',
   'cat_cafe_get_rich_block_rules',
   'cat_cafe_generate_document',
-  'cat_cafe_register_pr_tracking',
-  'cat_cafe_register_issue_tracking',
-  'cat_cafe_unregister_tracking',
-  'cat_cafe_validate_community_route',
-  'cat_cafe_record_external_review_verdict',
   'cat_cafe_list_session_chain',
   'cat_cafe_read_session_digest',
   'cat_cafe_read_session_events',

@@ -3,14 +3,17 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { chromium } from 'playwright';
 import { build } from 'vite';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { runMessageBundleNextJourney } from './f294-message-bundle-next.mjs';
 import { runActionOwnerNextJourney } from './f322-action-owner-next.mjs';
+import { runCatProfileCardJourney } from './f322-cat-profile-card.journey.mjs';
 import { registerCrossThreadLetterJourneys } from './f322-cross-thread-letter.journey.mjs';
 import { runNativeReplyNextJourney } from './f322-native-reply-next.mjs';
 import { runNarrowUserActionJourney } from './f322-native-reply-reading.mjs';
 import { runNativeReplyMotionJourney } from './f322-reply-motion.journey.mjs';
 import { runSubexecutionNextJourney } from './f322-subexecution-next.mjs';
+import { runThreadSettingsJourney } from './f322-thread-settings.journey.mjs';
 import { contrast, measureReply } from './fixtures/f322-reply-layers-metrics.mjs';
 
 /**
@@ -27,6 +30,22 @@ const fixtureRoot = path.join(webRoot, 'test/browser/fixtures');
 const origin = 'https://f322-reply-layers.test';
 const evidenceDir = process.env.REPLY_LAYERS_EVIDENCE_DIR;
 const measurements = [];
+
+test(
+  'conversation settings: header and sidebar share one drawer with linked Feature editing',
+  { timeout: 300000 },
+  async () => {
+    await runThreadSettingsJourney(browser, process.env.THREAD_SETTINGS_EVIDENCE_DIR ?? evidenceDir);
+  },
+);
+
+test(
+  'native cat card: avatar, original image, caret mention, cat view, settings and mobile sheet',
+  { timeout: 300000 },
+  async () => {
+    await runCatProfileCardJourney(browser, process.env.CAT_CARD_EVIDENCE_DIR ?? evidenceDir);
+  },
+);
 let browser, script, css;
 const startedIn = process.cwd();
 
@@ -42,6 +61,7 @@ const cats = [
   avatar: `/avatars/${id}.png`,
   color: { primary, secondary: '#eeeeee' },
   mentionPatterns: [`@${id}`],
+  carrier: 'cli',
   clientId: 'fixture',
   defaultModel: 'fixture',
 }));
@@ -100,6 +120,10 @@ function fixtureAssetResponse(url) {
 }
 
 function fixtureApiResponse(pathname) {
+  // These fixture replies have no additional inputs during generation (#5614).
+  if (/^\/api\/threads\/thread-replies\/messages\/[^/]+\/generation-messages$/.test(pathname)) {
+    return { messageIds: [], hasAppendedInputs: false, complete: true };
+  }
   switch (pathname) {
     case '/api/message-bundles/c-bundle':
       return {
@@ -116,7 +140,7 @@ function fixtureApiResponse(pathname) {
             kind: 'message',
             messageId: id,
             sourceThreadId: 'c-original',
-            author: { kind: 'cat', catId: 'opus' },
+            from: { kind: 'agent', catId: 'opus' },
             timestamp: 1791210000000,
             readableContent: `${id.toUpperCase()} authorized source`,
           })),
@@ -199,6 +223,37 @@ async function open({
 
 const measure = (page, id) => page.evaluate(measureReply(), id);
 
+test('Activity hover and focus preserve containment, geometry and record disclosure', async () => {
+  const { page, errors, unexpected } = await open({ width: 720, viewportWidth: 1440 });
+  try {
+    const row = page.locator('[data-message-id="r-done"]');
+    const boundary = row.locator('xpath=ancestor::*[@data-message-viewport-boundary][1]');
+    const toggle = row.getByTestId('reply-record-toggle');
+    await toggle.scrollIntoViewIfNeeded();
+    const before = await boundary.boundingBox();
+    const box = await toggle.boundingBox();
+    for (const offset of [-4, 4, box.height - 1, box.height + 4]) {
+      await page.mouse.move(box.x + 12, box.y + offset);
+      await page.waitForTimeout(30);
+      assert.equal(await boundary.evaluate((el) => getComputedStyle(el).contentVisibility), 'auto');
+      const after = await boundary.boundingBox();
+      assert.equal(after.y, before.y);
+      assert.equal(after.height, before.height);
+      assert.equal(await toggle.getAttribute('aria-expanded'), 'false');
+    }
+    await toggle.focus();
+    assert.equal(await boundary.evaluate((el) => getComputedStyle(el).contentVisibility), 'auto');
+    await toggle.press('Enter');
+    assert.equal(await toggle.getAttribute('aria-expanded'), 'true');
+    await toggle.press('Enter');
+    assert.equal(await toggle.getAttribute('aria-expanded'), 'false');
+    assert.deepEqual(errors, []);
+    assert.deepEqual(unexpected, []);
+  } finally {
+    await page.close();
+  }
+});
+
 test('failed primary executions disclose their reason, survive reload and identify the collapsed member', async () => {
   const { page, errors, unexpected } = await open({ failureVisibility: true });
   try {
@@ -225,7 +280,7 @@ const STATES = [
   ['r-working', 'working', '正在运行命令 pnpm'],
   ['r-working-long', 'working', '正在运行命令 pnpm'],
   ['r-quiet', 'quiet', '没有动静'],
-  ['r-unverified', 'unverified', '状态暂不可核对'],
+  ['r-durable-processing', 'working', '正在写回复'],
   ['r-failed', 'failed', '没有完成：等待回复超时'],
   ['r-stopped', 'stopped', '已停止'],
 ];
@@ -480,17 +535,22 @@ test('the settled reply: record line with duration and errors, trajectory at its
   assert.deepEqual(errors, []);
 });
 
-test('S3/S4: the real reply projects a parallel handoff and terminal recall on the same line, with carriers kept invisible', async () => {
+test('S3/S4: canonical dispatch avatars and terminal recall retain exact sources, with linked and legacy carriers invisible', async () => {
   const { page, errors, unexpected } = await open({ width: 400 });
   const reply = page.locator('[data-message-id="r-handoff-recall"]');
-  const handoff = reply.locator('[data-testid="reply-handoff"]');
-  assert.equal(await handoff.count(), 1);
-  assert.match((await handoff.innerText()).replace(/\s+/g, ' '), /同时交给.*缅因猫.*暹罗猫/);
+  const dispatch = reply.locator('xpath=following-sibling::ul[@data-testid="message-dispatch-avatars"]');
+  assert.deepEqual(
+    await dispatch
+      .locator('[data-dispatch-target]')
+      .evaluateAll((items) => items.map((item) => [item.dataset.dispatchTarget, item.dataset.dispatchPhase])),
+    [
+      ['codex', 'settled'],
+      ['gemini', 'settled'],
+    ],
+  );
   assert.equal(await reply.locator('[data-testid="reply-recall"]').innerText(), '召回 1');
-  for (const id of ['r-handoff-route-1', 'r-handoff-route-2']) {
-    const carrier = page.locator(`[data-message-id="${id}"]`);
-    assert.equal(await carrier.getAttribute('data-projected-a2a-routing'), 'true', `${id}: carrier is projection-only`);
-    assert.equal((await carrier.innerText()).trim(), '', `${id}: no separate blue capsule remains`);
+  for (const id of ['r-handoff-route-1', 'r-handoff-route-2', 'r-dispatch-failure-1', 'r-dispatch-failure-2']) {
+    assert.equal(await page.locator(`[data-message-id="${id}"]`).count(), 0, `${id}: no separate carrier row`);
   }
   await reply.locator('[data-testid="reply-record-toggle"]').click();
   assert.equal(await reply.locator('[data-testid="reply-record"] > :first-child').innerText(), '检索 1');
@@ -499,10 +559,10 @@ test('S3/S4: the real reply projects a parallel handoff and terminal recall on t
   assert.equal(url.searchParams.get('workspaceMode'), 'recall');
   assert.equal(url.searchParams.get('recallInv'), 'r-handoff-recall');
   assert.equal(url.searchParams.get('recallCat'), 'opus');
-  const fallback = page.locator('[data-message-id="r-hidden-handoff-route"]');
-  assert.equal(await page.locator('[data-message-id="r-hidden-handoff-source"]').count(), 0);
-  assert.equal(await fallback.locator('[data-testid="reply-handoff"]').count(), 1);
-  assert.match((await fallback.innerText()).replace(/\s+/g, ' '), /交给.*缅因猫/);
+  const fallback = page.locator('[data-message-id="r-orphan-dispatch-failure"]');
+  assert.equal(await page.locator('[data-message-id="r-source-not-in-timeline"]').count(), 0);
+  assert.equal(await fallback.isVisible(), true, 'an unlinked failure remains visible instead of disappearing');
+  assert.match(await fallback.innerText(), /唤起处理成员失败/);
   const m = await measure(page, 'r-handoff-recall');
   assert.ok(m.columnScroll.scrollWidth <= m.columnScroll.clientWidth, 'the 400px column does not overflow');
   assert.deepEqual(errors, []);
@@ -640,7 +700,12 @@ test('v2 reading actions remain transient and forwarding keeps the ordered autho
     await actions.getByRole('button', { name: '更多消息操作' }).click();
     await actions.getByRole('menu', { name: '更多消息操作', exact: true }).waitFor();
     assert.equal(await actions.getByRole('menuitem', { name: '复制消息 ID' }).count(), 1);
-    assert.equal(await actions.getByRole('separator').count(), 1);
+    assert.deepEqual(
+      await actions.getByRole('menuitem').allTextContents(),
+      ['从这里分支', '复制消息 ID'],
+      'More keeps the existing branch and ID actions; reading actions live on the dock',
+    );
+    assert.equal(await actions.getByRole('separator').count(), 0);
     await actions.getByRole('button', { name: '多选消息' }).click();
     assert.equal(await host.getByRole('checkbox', { checked: true }).count(), 1);
     const selected = host.getByTestId('message-selection-toolbar');
@@ -672,7 +737,7 @@ test('v2 reading actions remain transient and forwarding keeps the ordered autho
     assert.ok((await card.innerText()).includes('THIRD authorized source'));
     const overflow = await host.evaluate((el) => ({ width: el.clientWidth, scroll: el.scrollWidth }));
     assert.ok(overflow.scroll <= overflow.width);
-    assert.deepEqual(errors, []);
+    assert.deepEqual(errors, [], JSON.stringify({ unexpected }));
     assert.deepEqual(unexpected, []);
     await page.close();
   }
@@ -797,6 +862,14 @@ for (const [width, base, presentation] of [
 }
 
 // Registered F322 reply journey; no extra browser unit or parallel admission.
+test(
+  'native message bundle: original crash route, canonical sender, reload and contained bad reads',
+  { timeout: 300000 },
+  async () => {
+    await runMessageBundleNextJourney(browser, evidenceDir);
+  },
+);
+
 test(
   'native output: actual Next host preserves answer/process, source selection, history and classic',
   { timeout: 300000 },

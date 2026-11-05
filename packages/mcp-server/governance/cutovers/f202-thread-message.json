@@ -1,0 +1,56 @@
+{
+  "resource": {
+    "kind": "family",
+    "resourceFamily": "thread-message"
+  },
+  "retiredNames": [],
+  "canonicalNames": [],
+  "expectedProfiles": {
+    "cat_cafe_post_message": [
+      "full",
+      "agent-key",
+      "desktop:fable-phase0",
+      "desktop:cloud-pro-phase0",
+      "desktop:live-companion"
+    ]
+  },
+  "rollbackRevision": "466d4549fe2d75c9cc5c96b9497f47e464d13cf2",
+  "layers": {
+    "mcp-definition": {
+      "status": "covered",
+      "consumers": ["packages/mcp-server/src/canonical-server-tools.ts"]
+    },
+    "runtime-catalog-profile": {
+      "status": "covered",
+      "consumers": [
+        "packages/mcp-server/src/server-toolsets.ts",
+        "packages/mcp-server/governance/mcp-surface-baseline.json"
+      ]
+    },
+    "prompt-l0": {
+      "status": "covered",
+      "consumers": ["assets/prompt-templates/l5-mcp-tools-index.md"]
+    },
+    "skill-convention": {
+      "status": "covered",
+      "consumers": ["cat-cafe-skills/refs/mcp-callbacks.md", "docs/features/F202-plugin-framework.md"]
+    },
+    "fixture-test": {
+      "status": "covered",
+      "consumers": [
+        "packages/mcp-server/test/tool-registration.test.js",
+        "packages/mcp-server/test/f202-native-tracking-ownership.test.js",
+        "packages/api/test/system-prompt-builder.test.js"
+      ]
+    },
+    "eval": {
+      "status": "not-applicable",
+      "rationale": "C1 moves provider business to installed contributions and removes the retired task execution profile. Deterministic registration, profile and installed-contribution tests cover this ownership change; no model quality claim is made.",
+      "absenceEvidence": []
+    },
+    "observability": {
+      "status": "covered",
+      "consumers": ["packages/api/src/domains/plugin/runtime-composition.ts"]
+    }
+  }
+}

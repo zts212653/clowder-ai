@@ -1,8 +1,4 @@
 import type {
-  RecoverActiveExternalReviewVerdictInput,
-  RecoverActiveExternalReviewVerdictResult,
-} from './action-successor-external-review-recovery-state-machine.js';
-import type {
   ActionCompletionVerdict,
   ActionSuccessorDispatchFailureReason,
   ActionSuccessorIdentityInput,
@@ -113,10 +109,6 @@ export type ActionSuccessorCommitOutcomeResult =
       lease: ActionSuccessorLease | null;
     };
 
-export type ActionSuccessorExternalReviewRecoveryStoreResult =
-  | RecoverActiveExternalReviewVerdictResult
-  | { outcome: 'subject_terminal'; lease: ActionSuccessorLease };
-
 export interface ActionSuccessorLeaseStore {
   get(leaseId: string): Promise<ActionSuccessorLease | null>;
   getByIdentity(input: ActionSuccessorIdentityInput): Promise<ActionSuccessorLease | null>;
@@ -134,10 +126,6 @@ export interface ActionSuccessorLeaseStore {
       now: number;
     },
   ): Promise<ActionSuccessorCommitOutcomeResult>;
-  recoverExternalReviewVerdict(
-    leaseId: string,
-    input: RecoverActiveExternalReviewVerdictInput,
-  ): Promise<ActionSuccessorExternalReviewRecoveryStoreResult>;
   recordCompletionCandidate(
     leaseId: string,
     input: { generation: number; catId: string; evidenceRefs: string[]; now: number },

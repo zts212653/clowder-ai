@@ -7,9 +7,27 @@ import { before, describe, test } from 'node:test';
 
 /** @type {typeof import('../dist/domains/messaging/contract/validate.js')} */
 let validate;
+let contract;
 before(async () => {
   validate = await import('../dist/domains/messaging/contract/validate.js');
+  contract = await import('@clowder-ai/plugin-contract');
 });
+
+function mediaDraft(reference, overrides = {}) {
+  return validDraft({
+    payload: {
+      provenance: { epistemicStatus: 'inference' },
+      elements: [
+        {
+          elementId: 'media-1',
+          kind: 'media_ref',
+          payload: { type: 'image', reference, ...(reference.startsWith('pmr_') ? { sourceId: 'source-1' } : {}) },
+        },
+      ],
+    },
+    ...overrides,
+  });
+}
 
 function validDraft(overrides = {}) {
   return {
@@ -38,6 +56,47 @@ function expectValidationError(fn, detailSnippet) {
 }
 
 describe('validateDraft — happy path', () => {
+  test('beta.20 admits only the frozen media-ref draft entry paths', () => {
+    assert.equal(
+      validate.validateDraft(mediaDraft('pmr_event-1', { sourceEventId: 'event-1' })).sourceEventId,
+      'event-1',
+    );
+    assert.equal(
+      validate.validateDraft(mediaDraft('hmr_persisted', { draftAudience: { kind: 'whisper', targets: ['cat-a'] } }))
+        .draftAudience.kind,
+      'whisper',
+    );
+    assert.equal(
+      validate.validateDraft(mediaDraft('legacy-platform-key')).payload.elements[0].payload.reference,
+      'legacy-platform-key',
+    );
+  });
+
+  test('beta.20 send receipt admits pendingPublication true, never false or with publishSequence', () => {
+    const receipt = {
+      messageId: 'msg-1',
+      threadId: 'thread-1',
+      revision: 1,
+      messageHandle: { kind: 'message', token: 'opaque-token' },
+    };
+    assert.equal(
+      contract.validateMessagingRowResult('messaging.send', { ...receipt, pendingPublication: true }).valid,
+      true,
+    );
+    assert.equal(
+      contract.validateMessagingRowResult('messaging.send', { ...receipt, pendingPublication: false }).valid,
+      false,
+    );
+    assert.equal(
+      contract.validateMessagingRowResult('messaging.send', {
+        ...receipt,
+        publishSequence: 1,
+        pendingPublication: true,
+      }).valid,
+      false,
+    );
+  });
+
   test('accepts a minimal valid draft and returns it typed', () => {
     const draft = validate.validateDraft(validDraft());
     assert.equal(draft.idempotencyKey, 'idem-1');
@@ -81,6 +140,18 @@ describe('validateDraft — happy path', () => {
 });
 
 describe('validateDraft — fail-closed', () => {
+  test('beta.20 rejects whisper PMR and PMR without sourceEventId with VALIDATION', () => {
+    expectValidationError(() =>
+      validate.validateDraft(
+        mediaDraft('pmr_source', {
+          sourceEventId: 'event-1',
+          draftAudience: { kind: 'whisper', targets: ['cat-a'] },
+        }),
+      ),
+    );
+    expectValidationError(() => validate.validateDraft(mediaDraft('pmr_source')));
+  });
+
   test('rejects non-object input', () => {
     expectValidationError(() => validate.validateDraft(null));
     expectValidationError(() => validate.validateDraft('draft'));

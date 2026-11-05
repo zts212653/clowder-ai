@@ -73,12 +73,11 @@ async function createActionProposal(store, overrides = {}) {
     createdAt: Date.now(),
     proposedAction: {
       subjectRef: 'pr:cat-cafe/cat-cafe#42',
-      actionFamily: 'review',
-      successorSlot: 'reviewer',
+      actionFamily: 'implement',
+      successorSlot: 'implementer',
       mode: 'single',
       terminalPredicate: {
-        kind: 'review_delivered',
-        headSha: 'a'.repeat(40),
+        kind: 'task_done',
       },
     },
     ...overrides,

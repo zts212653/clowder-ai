@@ -29,6 +29,7 @@ describe('GET /api/threads/:threadId/artifacts (F232)', () => {
     sessionChainStore,
     transcriptWriter,
     artifactWorkLineage,
+    prTitleReader,
   } = {}) {
     const threadStore = {
       get: async (id) => (thread && id === thread.id ? thread : null),
@@ -42,11 +43,47 @@ describe('GET /api/threads/:threadId/artifacts (F232)', () => {
       ...(sessionChainStore ? { sessionChainStore } : {}),
       ...(transcriptWriter ? { transcriptWriter } : {}),
       ...(artifactWorkLineage ? { artifactWorkLineage } : {}),
+      ...(prTitleReader ? { prTitleReader } : {}),
     });
     return a;
   }
 
   const AUTH = { 'x-cat-cafe-user': 'alice' };
+
+  it('resolves real PR titles only after thread and Task owner visibility are checked', async () => {
+    const refs = [];
+    const task = {
+      kind: 'pr_tracking',
+      title: 'PR tracking: org/repo#12',
+      ownerCatId: 'codex61-sol',
+      status: 'doing',
+      updatedAt: 200,
+    };
+    const prTitleReader = async (ref) => {
+      refs.push(ref);
+      return 'Readable original PR title';
+    };
+    app = await makeApp({
+      tasks: [
+        { ...task, subjectKey: 'pr:org/repo#12', userId: 'alice' },
+        { ...task, subjectKey: 'pr:org/repo#13', userId: 'bob' },
+      ],
+      prTitleReader,
+    });
+    const denied = await app.inject({
+      method: 'GET',
+      url: '/api/threads/T1/artifacts?view=works',
+      headers: { 'x-cat-cafe-user': 'bob' },
+    });
+    assert.equal(denied.statusCode, 403);
+    assert.deepEqual(refs, []);
+    const response = await app.inject({ method: 'GET', url: '/api/threads/T1/artifacts?view=works', headers: AUTH });
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(refs, ['org/repo#12']);
+    assert.equal(response.json().artifacts[0].name, 'Readable original PR title');
+    assert.equal(response.json().artifacts[0].ref, 'org/repo#12');
+    assert.equal(response.json().total, 1);
+  });
 
   it('admits only formally bound PRs from owner-visible work Tasks, never prose or another owner', async () => {
     const work = { kind: 'work', title: 'Delivered outcome', ownerCatId: 'codex61-sol', updatedAt: 200 };

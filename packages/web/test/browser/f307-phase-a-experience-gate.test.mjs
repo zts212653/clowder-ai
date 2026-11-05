@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
 import { registerDefaultEntryJourney } from './default-entry-journey.harness.mjs';
 import { registerChatFileTabJourneys } from './f307-chat-file-tabs.journey.mjs';
 import { registerHomeSearchReturnJourneys } from './f307-home-search-return.journey.mjs';
@@ -693,6 +693,7 @@ test('root reply keeps child identity distinct after hydration at desktop and 39
       return json(route, {
         messages: [
           {
+            from: { kind: 'agent', catId: 'codex-sol' },
             id: 'f307-root-final-with-child',
             type: 'assistant',
             catId: 'codex-sol',
@@ -1794,7 +1795,8 @@ test(
       const page = await context.newPage();
       await page.route('**/api/**', (route) => {
         const url = new URL(route.request().url());
-        if (url.pathname === '/api/entrusted-work/needs-me') return json(route, { ownerReads: [] });
+        if (url.pathname === '/api/entrusted-work/needs-me')
+          return json(route, { ownerReads: [], coverage: { state: 'complete' } });
         const response = realSurfaceApiResponse(route.request(), false);
         return json(route, response.body, response.status);
       });
@@ -1921,7 +1923,7 @@ test(
         await page.route('**/api/**', (route) => {
           const url = new URL(route.request().url());
           if (url.pathname === '/api/entrusted-work/owner-reads' || url.pathname === '/api/entrusted-work/needs-me') {
-            return json(route, { ownerReads: [ownerRead] });
+            return json(route, { ownerReads: [ownerRead], coverage: { state: 'complete' } });
           }
           const result = realSurfaceApiResponse(route.request(), false);
           return json(route, result.body, result.status);

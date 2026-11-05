@@ -39,6 +39,7 @@ export interface EvalRepairApprovalRecord {
   decision?: DecidedEvent;
   approvalRef?: OwnerTruthRefV1;
   decidedAt?: string;
+  closedAt?: string;
   supersededByCaseActionRef?: string;
   supersessionDrift?: 'owner' | 'authorization' | 'target';
   supersessionDecisionRef?: OwnerTruthRefV1;
@@ -157,6 +158,7 @@ function supersedeApproval(
   }
   record.lifecycle = { resolution: 'closed_without_decision', materialization: { state: 'not_started' } };
   record.supersededByCaseActionRef = event.freshCaseActionRef;
+  record.closedAt = event.occurredAt;
   record.supersessionDrift = event.drift;
   record.supersessionDecisionRef = event.decisionRef;
 }

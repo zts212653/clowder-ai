@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { test } from 'node:test';
-import type { Capability } from '@clowder-ai/plugin-contract';
 import { HostBrokerControlPlane } from '../src/domains/plugin/host-broker/control-plane.js';
 import { parseHostBrokerSnapshot } from '../src/domains/plugin/host-broker/snapshot.js';
 import { StaticFeatureAuthority } from '../src/domains/plugin/host-broker/static-feature-authority.js';
@@ -13,7 +12,7 @@ import { desktopWindowManifest } from './f317-window.fixture.js';
 const digest = `sha512-${createHash('sha512').update('window fixture').digest('base64')}`;
 const manifest = desktopWindowManifest();
 
-async function fixture(grants: Capability[] = ['windows.create']) {
+async function fixture() {
   const inventory = new MemoryPluginInventoryStore();
   const control = new HostInventoryControlPlane(inventory, { createInstanceId: () => 'pi_window' });
   await control.installPackage({
@@ -21,7 +20,6 @@ async function fixture(grants: Capability[] = ['windows.create']) {
     computedPackageDigest: digest,
     expectedPackageDigest: digest,
     packagePluginId: manifest.pluginId,
-    effectiveGrants: grants,
   });
   await inventory.transaction((tx) => {
     const instance = tx.instances.get('pi_window')!;
@@ -64,10 +62,9 @@ async function fixture(grants: Capability[] = ['windows.create']) {
   };
 }
 
-test('a desktop body gets only its granted capability under the existing durable feature lease', async () => {
+test('a desktop body activates under the existing durable feature lease', async () => {
   const f = await fixture();
   const pending = await f.authority.begin('pi_window', 'body');
-  assert.deepEqual(pending.grantedCapabilities, ['windows.create']);
   await assert.rejects(f.authority.run(pending.executionLease, async () => assert.fail('before commit')));
   const live = await f.authority.commit(pending.executionLease);
   assert.deepEqual(live.contributionIds, ['body']);
@@ -77,23 +74,19 @@ test('a desktop body gets only its granted capability under the existing durable
   await f.connection.close('test');
 });
 
-test('requesting a window never substitutes for an effective grant, or broadens zero-capability editors', async () => {
-  const denied = await fixture([]);
-  await assert.rejects(denied.authority.begin('pi_window', 'body'), /grant|capability/i);
-  const granted = await fixture();
-  const editorAuthority = new StaticFeatureAuthority(granted.options);
-  await assert.rejects(editorAuthority.begin('pi_window', 'body'), /authority|static|capability/i);
-});
-
-for (const reason of ['revoke', 'expire', 'damage'] as const) {
+for (const reason of ['disable', 'expire', 'damage'] as const) {
   test(`${reason} fences a desktop lease before a late visibility or bridge operation`, async () => {
     const f = await fixture();
     const lease = await f.authority.begin('pi_window', 'body');
     await f.authority.commit(lease.executionLease);
-    if (reason === 'revoke')
+    if (reason === 'disable')
       await f.inventory.transaction((tx) => {
-        const grant = tx.grants.get('pi_window')!;
-        tx.grants.put({ ...grant, grantRevision: grant.grantRevision + 1, effectiveGrants: [] });
+        const instance = tx.instances.get('pi_window')!;
+        tx.instances.put({
+          ...instance,
+          activationState: 'disabled',
+          lifecycleRevision: instance.lifecycleRevision + 1,
+        });
       });
     if (reason === 'expire') f.advance();
     if (reason === 'damage') f.damage();
@@ -103,7 +96,7 @@ for (const reason of ['revoke', 'expire', 'damage'] as const) {
   });
 }
 
-test('an editor consumer cannot use a granted window lease even when its opaque id is known', async () => {
+test('an editor consumer cannot use a desktop window lease even when its opaque id is known', async () => {
   const f = await fixture();
   const lease = await f.authority.begin('pi_window', 'body');
   await f.authority.commit(lease.executionLease);

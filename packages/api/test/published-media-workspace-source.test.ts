@@ -8,6 +8,7 @@ import { PublishedMediaService } from '../src/domains/video-studio/content-owner
 import { PublishedMediaSource } from '../src/domains/video-studio/content-owner/published-media-source.js';
 import { WorkspaceContentSourceService } from '../src/domains/workspace/workspace-content-source.js';
 import { createReviewFixture, reviewCat, reviewHuman } from './helpers/artifact-review-fixture.js';
+import { screeningFixture } from './helpers/video-project-screening.js';
 
 test('an explicit workspace snapshot retains bytes in F138, preserves original file and has its own identity', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'f309-workspace-publication-'));
@@ -78,4 +79,27 @@ test('an explicit workspace snapshot retains bytes in F138, preserves original f
   await assert.rejects(media.prepare({ ...input, operationId: 'stale-base' }), /revision_changed|publication_changed/);
   allowed = false;
   await assert.rejects(media.bytes(asset.contentRef, 1, reviewHuman), /access_denied|registered root removed/);
+});
+
+test('a cold published-video read probes the retained file without loading the whole movie', async (t) => {
+  const video = await screeningFixture();
+  t.after(video.cleanup);
+  const f = createReviewFixture(video.dataDir, video.root);
+  const sources = new PublishedMediaSource({
+    access: f.access,
+    artifacts: f.artifacts,
+    messages: f.messageStore,
+    uploadDir: video.root,
+    workspace: video.workspace,
+  });
+  const media = new PublishedMediaService({ access: f.access, owner: f.owner, sources });
+  const source = { kind: 'workspace-snapshot' as const, threadId: 'thread-cover', ...video.request.source };
+  const asset = await media.prepare({ source, operationId: 'film-first-version', principal: reviewHuman });
+  const load = f.owner.load.bind(f.owner);
+  f.owner.load = async (contentRef, revision) => {
+    assert.notEqual(contentRef, asset.contentRef, 'video metadata cannot require a full-file load');
+    return load(contentRef, revision);
+  };
+  const cold = new PublishedMediaService({ access: f.access, owner: f.owner, sources });
+  assert.deepEqual(await cold.read(asset.contentRef, asset.ownerRevision, reviewHuman), asset);
 });

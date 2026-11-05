@@ -1,7 +1,10 @@
 import { pushThreadRouteWithHistory } from '@/components/ThreadSidebar/thread-navigation';
+import { useShellCopy } from '../shell-copy';
 import type { ReconcileState } from './approval-reconcile';
+import { approvalReconcileCopy } from './approval-reconcile.shell-copy';
 
 export function ApprovalResultLink({ state }: { state: ReconcileState }) {
+  const t = useShellCopy(approvalReconcileCopy);
   if (state.kind !== 'decided' || state.terminal.resolution !== 'accepted' || !state.terminal.threadId) return null;
   const threadId = state.terminal.threadId;
   return (
@@ -12,7 +15,7 @@ export function ApprovalResultLink({ state }: { state: ReconcileState }) {
       style={{ color: 'var(--shell-primary-text)' }}
       onClick={() => pushThreadRouteWithHistory(threadId, window)}
     >
-      打开
+      {t.open}
     </button>
   );
 }

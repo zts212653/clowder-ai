@@ -18,13 +18,25 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
+import { requireVisibleWorktreeIndex } from './worktree-light.mjs';
 import { git, safeRealpath } from './worktree-reaper-probes.mjs';
 
 export const RELEASE_ARCHIVES = '.worktree-release-archives';
+const BUILT_PACKAGES = [
+  'api',
+  'web',
+  'shared',
+  'mcp-server',
+  'collective-client',
+  'collective-service',
+  'collective-connector',
+];
 const quote = (value) => `'${value.replaceAll("'", "'\\''")}'`;
 const generated = (path) =>
   /(^|\/)node_modules(\/|$)/.test(path) ||
-  /^packages\/(api|web|shared|mcp-server)\/dist(\/|$)/.test(path) ||
+  BUILT_PACKAGES.some((name) => path.startsWith(`packages/${name}/dist/`)) ||
+  // sync-vendor-assets.mjs recreates these exact output families from installed dependencies.
+  /^packages\/web\/public\/vendor\/(?:onnxruntime\/ort-wasm[^/]*\.(?:wasm|mjs)|esbuild\/esbuild\.wasm)$/.test(path) ||
   /^packages\/web\/\.next(?:\/|$|-test-[^/]+(?:\/|$))/.test(path) ||
   /^packages\/web\/tsconfig\.next-test-[^/]+\.json$/.test(path);
 
@@ -32,12 +44,6 @@ function mustGit(repo, args) {
   const result = git(repo, args);
   if (!result.ok) throw new Error(`archive git ${args[0]} refused`);
   return result.out.trim();
-}
-
-function requireVisibleIndex(path) {
-  const flags = mustGit(path, ['ls-files', '-v', '-z']).split('\0');
-  if (flags.some((row) => /^[a-zS] /.test(row)))
-    throw new Error('hidden index flags: retain or explicitly restore normal source visibility before finish');
 }
 
 function hashFile(path) {
@@ -84,7 +90,7 @@ export function ignoredOriginals(path) {
     '.',
     ':(exclude)node_modules',
     ':(exclude,glob)**/node_modules/**',
-    ...['api', 'web', 'shared', 'mcp-server'].map((name) => `:(exclude,glob)packages/${name}/dist/**`),
+    ...BUILT_PACKAGES.map((name) => `:(exclude,glob)packages/${name}/dist/**`),
     ':(exclude,glob)packages/web/.next/**',
     ':(exclude,glob)packages/web/.next-test-*/**',
   ]);
@@ -132,7 +138,7 @@ function applyDirectoryModes(root, modes) {
 }
 
 export function createReleaseArchive({ repo, entry, archivePath, txn }) {
-  requireVisibleIndex(entry.path);
+  requireVisibleWorktreeIndex(entry.path);
   const root = dirname(archivePath);
   mkdirSync(root, { recursive: true, mode: 0o700 });
   if (realpathSync(root) !== root) throw new Error('archive root is a symlink');
@@ -183,6 +189,8 @@ export function createReleaseArchive({ repo, entry, archivePath, txn }) {
     owner: entry.lifecycle.owner,
     sourceRef: entry.finishSourceRef,
     head: entry.head,
+    ...(entry.mergedAt ? { mergedAt: entry.mergedAt } : {}),
+    ...(entry.mergedPr ? { mergedPr: entry.mergedPr } : {}),
     branch: entry.branch,
     originals,
     originalDirectories,
@@ -228,7 +236,7 @@ export function verifyReleaseArchive(archivePath, expectedSha256, expectedRepo) 
 }
 
 export function verifySourceOriginals(entry, manifest) {
-  requireVisibleIndex(entry.path);
+  requireVisibleWorktreeIndex(entry.path);
   const names = ignoredOriginals(entry.path);
   if (JSON.stringify(names) !== JSON.stringify(manifest.originals.map((item) => item.path)))
     throw new Error('ignored originals changed before removal');
@@ -243,5 +251,12 @@ export function verifySourceOriginals(entry, manifest) {
 export function releaseRestoreCommand(repo, entry, archivePath) {
   const path = entry.originalPath ?? entry.path;
   const config = join(archivePath, 'git-metadata/config.worktree');
-  return `git -C ${quote(repo)} worktree add --detach ${quote(path)} ${quote(entry.head)} && cp -a ${quote(join(archivePath, 'files'))}/. ${quote(path)}/ && cp -P ${quote(config)} "$(git -C ${quote(path)} rev-parse --git-path config.worktree)"`;
+  const sparse = join(archivePath, 'git-metadata/info/sparse-checkout');
+  const gitPath = (name) => `"$(git -C ${quote(path)} rev-parse --git-path ${name})"`;
+  return (
+    `git -C ${quote(repo)} worktree add --detach --no-checkout ${quote(path)} ${quote(entry.head)} && ` +
+    `cp -P ${quote(config)} ${gitPath('config.worktree')} && ` +
+    `(if [ -f ${quote(sparse)} ]; then mkdir -p "$(git -C ${quote(path)} rev-parse --absolute-git-dir)/info" && cp -P ${quote(sparse)} ${gitPath('info/sparse-checkout')}; fi) && ` +
+    `git -C ${quote(path)} read-tree -mu HEAD && cp -a ${quote(join(archivePath, 'files'))}/. ${quote(path)}/`
+  );
 }

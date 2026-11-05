@@ -1,4 +1,4 @@
-import type { CompanionReply } from '@clowder-ai/plugin-contract';
+import type { CompanionReply } from '@clowder-ai/plugin-contract-beta21';
 import { z } from 'zod';
 import type { CompanionOwnerClient } from './companion-owner-client.js';
 

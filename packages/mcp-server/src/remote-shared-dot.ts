@@ -3,6 +3,7 @@ import { DOT_TOOLS, dotAskArguments, dotEventRefSchema, dotImageArguments, dotRe
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
+import { registerCoCreatorPresentation } from './co-creator-presentation.js';
 import { getCallbackConfig } from './tools/callback-tools.js';
 
 const RPC_METHODS = new Set(['events/list', 'events/subscribe', 'events/unsubscribe']);
@@ -143,7 +144,7 @@ export function registerSharedDotTools(server: McpServer) {
   for (const [index, tool] of DOT_TOOLS.entries()) {
     const schema = schemas[index];
     if (!schema) throw new Error('dot_tool_contract_missing_schema');
-    server.registerTool(
+    const registered = server.registerTool(
       tool.name,
       {
         description: tool.description,
@@ -182,5 +183,6 @@ export function registerSharedDotTools(server: McpServer) {
         }
       },
     );
+    registerCoCreatorPresentation(server, tool.name, registered);
   }
 }

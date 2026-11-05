@@ -1,8 +1,9 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
+import { deploymentDefaults } from '../../packages/shared/src/deployment-defaults.ts';
 
-const DEFAULT_API_PORT = '3004';
-const DEFAULT_WEB_PORT = '3003';
+const DEFAULT_API_PORT = String(deploymentDefaults.apiPort);
+const DEFAULT_WEB_PORT = String(deploymentDefaults.webPort);
 
 export function pidIsRunning(pid) {
   try {
@@ -62,7 +63,7 @@ export function buildWindowsStatus({
   if (!existsSync(runDir)) {
     return {
       exitCode: 1,
-      lines: [`Clowder AI Windows services not running (no run directory: ${runDir})`],
+      lines: [`${deploymentDefaults.brand.name} Windows services not running (no run directory: ${runDir})`],
     };
   }
 
@@ -72,7 +73,7 @@ export function buildWindowsStatus({
     { pidFile: `web-${webPort}.pid`, running: false },
   ];
 
-  const lines = ['Clowder AI Windows status'];
+  const lines = [`${deploymentDefaults.brand.name} Windows status`];
   for (const service of requiredServices) {
     const pidPath = resolve(runDir, service.pidFile);
     const label = basename(service.pidFile, '.pid');

@@ -9,7 +9,6 @@ const REPO_ROOT = resolve(dirname(SCRIPT_PATH), '..');
 const PRODUCT_PATHS = [
   'packages/collective-client/src',
   'packages/web/src/components/collective',
-  'packages/web/src/components/settings/OfficialPluginCard.tsx',
   'packages/api/src/domains/plugin/official-catalog.ts',
   'packages/web/src/app/dev/f290-asset-collaboration',
 ];

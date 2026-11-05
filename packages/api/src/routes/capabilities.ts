@@ -1,3 +1,4 @@
+import { deploymentDefaults } from '@cat-cafe/shared';
 /**
  * Capabilities Route — F041 统一能力看板 API
  *
@@ -17,7 +18,6 @@
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import type { CapabilityEntry, CapabilityPatchRequest, GovernanceSelection, MountRules } from '@cat-cafe/shared';
 import { catRegistry, STANDARD_MOUNT_POINT_IDS } from '@cat-cafe/shared';
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
@@ -41,6 +41,7 @@ import {
   requireLocalCapabilityWriteRequest,
   resolveCapabilityWriteSessionUserId,
 } from '../config/capabilities/capability-write-guards.js';
+import { resolveInvokeCapabilityRoot } from '../config/capabilities/invoke-capability-root.js';
 import { allowsImplicitCapabilityWrites } from '../config/capabilities/startup-cli-config.js';
 import { GovernanceRegistry } from '../config/governance/governance-registry.js';
 import { validateSkillName } from '../config/governance/skill-sync.js';
@@ -51,16 +52,11 @@ import {
   scanProjectSkillSources,
 } from '../domains/capabilities/capability-board-parts.js';
 import { readCapabilitySnapshot } from '../domains/capabilities/capability-read-service.js';
-import { resourceCapId } from '../domains/plugin/PluginRegistry.js';
-import { parsePluginManifest } from '../domains/plugin/plugin-manifest.js';
 import { syncMcpAll } from '../mcp/mcp-sync-all.js';
 import { syncAll } from '../skills/skill-sync-all.js';
 import { type MountConflict, syncProject } from '../skills/skill-sync-engine.js';
-import {
-  redirectRuntimeProjectPath,
-  resolvePersistentProjectPath,
-  validateExternalProjectPathDetailed,
-} from '../utils/persistent-project-path.js';
+import { resolveKimiRuntimePaths } from '../utils/kimi-cli-runtime.js';
+import { resolvePersistentProjectPath, validateExternalProjectPathDetailed } from '../utils/persistent-project-path.js';
 import { pathsEqual } from '../utils/project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import { resolveMainRepoPath } from '../utils/skill-mount.js';
@@ -153,71 +149,9 @@ function findCapabilityPatchTargetIndex(
 
 // ────────── Helpers ──────────
 
-const MODULE_REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
-const CANONICAL_PLUGINS_DIR = join(MODULE_REPO_ROOT, 'packages', 'api', 'src', 'plugins');
-
-async function collectDeclaredPluginSkillIds(
-  pluginsDir: string,
-  declaredSkillIds: Map<string, Set<string>>,
-): Promise<boolean> {
-  const pluginDirs = await listSubdirs(pluginsDir);
-  if (pluginDirs === null) return false;
-
-  for (const dirName of pluginDirs) {
-    const manifestPath = join(pluginsDir, dirName, 'plugin.yaml');
-    if (!existsSync(manifestPath)) continue;
-
-    try {
-      const manifest = parsePluginManifest(manifestPath);
-      if (manifest.id !== dirName) continue;
-      const skillIds = new Set(
-        manifest.resources
-          .filter((resource) => resource.type === 'skill')
-          .map((resource) => resourceCapId(manifest.id, resource)),
-      );
-      declaredSkillIds.set(manifest.id, skillIds);
-    } catch {}
-  }
-
-  return true;
-}
-
-async function readDeclaredPluginSkillIds(projectRoot: string): Promise<Map<string, Set<string>> | null> {
-  const declaredSkillIds = new Map<string, Set<string>>();
-  const pluginsDirs = [CANONICAL_PLUGINS_DIR];
-  const projectPluginsDir = join(projectRoot, 'plugins');
-  if (resolve(projectPluginsDir) !== resolve(CANONICAL_PLUGINS_DIR)) {
-    pluginsDirs.push(projectPluginsDir);
-  }
-
-  for (const pluginsDir of pluginsDirs) {
-    const ok = await collectDeclaredPluginSkillIds(pluginsDir, declaredSkillIds);
-    if (!ok) return null;
-  }
-
-  return declaredSkillIds;
-}
-
-function isDeclaredPluginSkill(
-  cap: CapabilityEntry,
-  allSkillNames: Set<string>,
-  declaredPluginSkillIds: Map<string, Set<string>> | null,
-): boolean {
-  if (!cap.pluginId) return false;
-  if (declaredPluginSkillIds === null) return true;
-  const declaredIds = declaredPluginSkillIds.get(cap.pluginId);
-  if (!declaredIds) return allSkillNames.has(cap.id);
-  return declaredIds.has(cap.id);
-}
-
-function shouldKeepSkillCapability(
-  cap: CapabilityEntry,
-  allSkillNames: Set<string>,
-  declaredPluginSkillIds: Map<string, Set<string>> | null,
-): boolean {
-  if (cap.type !== 'skill') return true;
-  if (cap.source === 'external') return allSkillNames.has(cap.id);
-  if (cap.pluginId) return isDeclaredPluginSkill(cap, allSkillNames, declaredPluginSkillIds);
+/** Installed plugin skill lifecycle owns pruning its own capability entries. */
+function shouldKeepSkillCapability(cap: CapabilityEntry, allSkillNames: Set<string>): boolean {
+  if (cap.type !== 'skill' || cap.pluginId) return true;
   return allSkillNames.has(cap.id);
 }
 
@@ -300,7 +234,7 @@ function getDiscoveryPaths(projectRoot: string) {
     claudeConfig: join(projectRoot, '.mcp.json'),
     codexConfig: join(projectRoot, '.codex', 'config.toml'),
     geminiConfig: join(projectRoot, '.gemini', 'settings.json'),
-    kimiConfig: join(projectRoot, '.kimi', 'mcp.json'),
+    kimiConfig: join(projectRoot, '.kimi-code', 'mcp.json'),
     antigravityConfig: join(homedir(), '.gemini', 'antigravity', 'mcp_config.json'),
   };
 }
@@ -314,8 +248,14 @@ function getCliConfigPaths(projectRoot: string) {
 
 // ────────── Route Plugin ──────────
 
-export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
-  const persistentProjectRoot = await redirectRuntimeProjectPath(PROJECT_ROOT);
+export interface CapabilitiesRoutesOptions {
+  readonly resolvePluginMcpView?: () => Promise<
+    import('../config/capabilities/invocation-plugin-mcp-view.js').InvocationPluginMcpView | undefined
+  >;
+}
+
+export const capabilitiesRoutes: FastifyPluginAsync<CapabilitiesRoutesOptions> = async (app, options) => {
+  const persistentProjectRoot = await resolveInvokeCapabilityRoot(PROJECT_ROOT);
   if (!persistentProjectRoot) throw new Error('Unable to resolve persistent global capabilities root');
   const getProjectRoot = (): string => persistentProjectRoot;
 
@@ -345,9 +285,9 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
       projectRoot = validated;
     }
     const mainRoot = getProjectRoot();
-    // Alpha reads the canonical snapshot; implicit bootstrap, healing, discovery,
+    // Previews read the canonical snapshot; implicit bootstrap, healing, discovery,
     // skill pruning and CLI regeneration have the same authority as startup.
-    if (allowsImplicitCapabilityWrites()) {
+    if (allowsImplicitCapabilityWrites(process.env, PROJECT_ROOT)) {
       const home = homedir();
       const mountRules = await readMountRules(projectRoot, mainRoot);
       const catCafeRepoRoot = await resolveMainRepoPath();
@@ -430,11 +370,8 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
       // Prune stale skills no longer on filesystem.
       // Guard: only prune when ALL provider scans succeeded (no null returns).
       if (allScansOk) {
-        const declaredPluginSkillIds = await readDeclaredPluginSkillIds(projectRoot);
         const before = config.capabilities.length;
-        config.capabilities = config.capabilities.filter((c) =>
-          shouldKeepSkillCapability(c, allSkillNames, declaredPluginSkillIds),
-        );
+        config.capabilities = config.capabilities.filter((c) => shouldKeepSkillCapability(c, allSkillNames));
         if (config.capabilities.length !== before) configDirty = true;
       }
 
@@ -450,7 +387,7 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
           claudeConfig: join(home, '.claude', 'mcp.json'),
           codexConfig: join(home, '.codex', 'config.toml'),
           geminiConfig: join(home, '.gemini', 'settings.json'),
-          kimiConfig: join(home, '.kimi', 'mcp.json'),
+          kimiConfig: join(resolveKimiRuntimePaths(process.env, home).shareDir, 'mcp.json'),
           antigravityConfig: join(home, '.gemini', 'antigravity', 'mcp_config.json'),
         };
         const [projectTagged, userTagged] = await Promise.all([
@@ -485,6 +422,7 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
       isProjectView: !!query.projectPath,
       config: await readCapabilitiesConfigState(projectRoot),
       scope: { kind: 'console' },
+      pluginMcpView: await options.resolvePluginMcpView?.(),
       secrets: { launchFields: includeMcpLaunchFields, values: includeMcpSecrets },
       ...(probeEnabled ? { resolvers: { probeMcp: (cap) => probeMcpCapability(cap, { projectRoot }) } } : {}),
     });
@@ -961,7 +899,7 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
       return {
         error:
           validatedResult.reason === 'cat_cafe_owned_path'
-            ? 'Cannot confirm governance inside Clowder AI; choose an external project'
+            ? `Cannot confirm governance inside ${deploymentDefaults.brand.name}; choose an external project`
             : 'Invalid project path',
       };
     }

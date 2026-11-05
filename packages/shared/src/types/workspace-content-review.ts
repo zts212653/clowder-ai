@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { artifactReviewAnchorSchema, immutableMediaSchema, reviewedMediaAssetSchema } from './artifact-review.js';
 import { artifactReviewDrawingSchema, artifactReviewImageEditSchema } from './artifact-review-drawing.js';
+import { reviewedMediaTypeSchema } from './artifact-review-media.js';
 import { evolutionMediaLocatorSchema } from './evolution-media-source.js';
 import { videoProjectMessageContextSchema } from './video-project-message.js';
 import {
@@ -34,6 +35,27 @@ export const workspaceContentActorSchema = z.discriminatedUnion('kind', [
 export type WorkspaceContentActor = z.infer<typeof workspaceContentActorSchema>;
 
 export const workspaceContentSourceSchema = z.discriminatedUnion('kind', [
+  z
+    .object({
+      kind: z.literal('collective-media'),
+      contentRef: id,
+      ownerRevision: positive,
+      blobDigest: revision,
+      ownerReceiptRef: id,
+      revision,
+      mime: z.enum(['image/png', 'video/mp4']),
+      media: immutableMediaSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('collective-artifact'),
+      revision,
+      ownerRevision: positive,
+      mime: z.literal('text/markdown'),
+      byteLength: z.number().int().nonnegative().max(65536),
+    })
+    .strict(),
   videoProjectReviewSourceSchema,
   z
     .object({
@@ -60,7 +82,7 @@ export const workspaceContentSourceSchema = z.discriminatedUnion('kind', [
       kind: z.literal('media'),
       locator: workspaceContentLocatorSchema,
       revision,
-      mime: z.enum(['image/png', 'video/mp4']),
+      mime: reviewedMediaTypeSchema,
       byteLength: positive,
       media: immutableMediaSchema,
     })
@@ -69,7 +91,7 @@ export const workspaceContentSourceSchema = z.discriminatedUnion('kind', [
     .object({
       kind: z.literal('publication'),
       revision,
-      mime: z.enum(['image/png', 'video/mp4']),
+      mime: reviewedMediaTypeSchema,
       media: immutableMediaSchema,
       publication: reviewedMediaAssetSchema.omit({ media: true, mediaType: true }),
     })
@@ -127,6 +149,18 @@ export type WorkspaceContentVisualMark = z.infer<typeof workspaceContentVisualMa
 
 export const workspaceContentAnnotationSchema = z
   .object({
+    collectiveMessage: z
+      .object({
+        serviceInstanceId: id,
+        collectiveId: id,
+        eventId: id,
+        channelId: id,
+        rootEventId: id,
+        ownerRevision: positive,
+        blobDigest: revision,
+      })
+      .strict()
+      .optional(),
     imageEdit: artifactReviewImageEditSchema.optional(),
     reanchoredFrom: z.object({ round: positive, annotationId: id }).strict().optional(),
     id,
@@ -150,6 +184,18 @@ export type WorkspaceContentAnnotation = z.infer<typeof workspaceContentAnnotati
 
 export const workspaceContentReviewSchema = z
   .object({
+    collaborationScope: z
+      .object({
+        kind: z.literal('collective-artifact'),
+        scopeRef: id,
+        serviceInstanceId: id,
+        collectiveId: id,
+        artifactId: id,
+        sourceEventId: id.optional(),
+        custodyRevision: positive.optional(),
+      })
+      .strict()
+      .optional(),
     version: z.literal(1),
     reviewId: id,
     ownerUserId: id,
@@ -164,7 +210,20 @@ export const workspaceContentReviewSchema = z
     createdAt: timestamp,
     updatedAt: timestamp,
   })
-  .strict();
+  .strict()
+  .superRefine((review, context) => {
+    const shared = review.source.kind === 'collective-artifact' || review.source.kind === 'collective-media';
+    if (
+      shared !== Boolean(review.collaborationScope) ||
+      (shared && (review.sourceHistory ?? []).some((source) => source.kind !== review.source.kind)) ||
+      (review.source.kind === 'collective-media' &&
+        (!review.collaborationScope?.sourceEventId || !review.collaborationScope.custodyRevision))
+    )
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Collective source and collaboration scope must agree',
+      });
+  });
 export type WorkspaceContentReview = z.infer<typeof workspaceContentReviewSchema>;
 
 export type WorkspaceContentAnnotationResolution = {

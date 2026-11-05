@@ -87,7 +87,7 @@ test('old summons read only the canonical source boundary, including equal times
       f.messages.append({
         threadId: thread.id,
         userId: 'owner',
-        catId: null,
+        from: { kind: 'user', userId: 'owner' },
         content,
         mentions: [],
         timestamp,
@@ -98,7 +98,7 @@ test('old summons read only the canonical source boundary, including equal times
     f.messages.append({
       threadId: thread.id,
       userId: 'owner',
-      catId: null,
+      from: { kind: 'user', userId: 'owner' },
       content: 'private whisper',
       mentions: [],
       timestamp: 100,
@@ -125,6 +125,70 @@ test('old summons read only the canonical source boundary, including equal times
     );
     f.messages.softDelete(earlier.id, 'owner');
     assert.deepEqual((await f.returns.read(f.setup.credentialSecret, f.delivered[0]!)).context, []);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test('source and visible context preserve rich payloads without exposing unrelated metadata', async () => {
+  const f = await fixture();
+  try {
+    const thread = f.threads.create('owner', 'non-text source boundary');
+    const rich = {
+      v: 1 as const,
+      blocks: [
+        { kind: 'card' as const, v: 1 as const, id: 'answer', title: 'Result', bodyMarkdown: 'actual card body' },
+      ],
+    };
+    const append = (timestamp: number, visibility?: 'whisper') =>
+      f.messages.append({
+        userId: 'owner',
+        threadId: thread.id,
+        from: { kind: 'user', userId: 'owner' },
+        content: 'verbatim original text',
+        mentions: [],
+        timestamp,
+        thinking: 'stored presentation sentinel',
+        extra: { rich: structuredClone(rich), stream: { invocationId: 'internal-invocation' } },
+        ...(visibility ? { visibility, whisperTo: [] } : {}),
+      });
+    const earlier = append(100);
+    const hidden = append(101, 'whisper');
+    const source = append(102);
+    assert.equal(
+      (
+        await f.bridge.dispatch({
+          catId: 'gpt-dot',
+          userId: 'owner',
+          threadId: thread.id,
+          sourceMessageId: source.id,
+          dispatchInvocationId: 'presentation-read',
+          content: source.content,
+        })
+      ).kind,
+      'sent',
+    );
+    const eventId = f.delivered[0]!;
+    const read = await f.returns.read(f.setup.credentialSecret, eventId);
+    assert.deepEqual(
+      read.context.map((message) => message.id),
+      [earlier.id],
+    );
+    for (const projected of [read.source, ...read.context]) {
+      assert.equal(projected.content, source.content);
+      assert.deepEqual(projected.rich, rich);
+      assert.equal(projected.thinking, source.thinking);
+      assert.equal('extra' in projected, false, 'do not serialize all MessageExtra');
+      assert.equal(JSON.stringify(projected).includes('internal-invocation'), false);
+    }
+    const hiddenRecord = f.messages.getById(hidden.id)!;
+    hiddenRecord.extra!.rich!.blocks[0] = { ...rich.blocks[0]!, bodyMarkdown: 'private rich sentinel' };
+    const current = await f.returns.read(f.setup.credentialSecret, eventId);
+    assert.equal(JSON.stringify(current).includes('private rich sentinel'), false);
+    f.messages.softDelete(earlier.id, 'owner');
+    assert.deepEqual((await f.returns.read(f.setup.credentialSecret, eventId)).context, []);
+    f.messages.softDelete(source.id, 'owner');
+    await assert.rejects(f.returns.read(f.setup.credentialSecret, eventId), /dot_source_unavailable/);
   } finally {
     await f.cleanup();
   }

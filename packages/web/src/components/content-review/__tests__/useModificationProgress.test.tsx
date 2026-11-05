@@ -104,7 +104,7 @@ describe('useModificationProgress', () => {
     mocks.fetch.mockImplementation(async () => ok(detail({ execution: 'running' })));
     await mount();
     expect(latest.copy?.key).toBe('working');
-    expect(latest.copy?.title).toBe('修改中 · 窄屏设计稿 2\u00A0处');
+    expect(latest.copy?.title).toBe('烁烁修改中 · 窄屏设计稿 2\u00A0处');
     expect(getCalls()).toHaveLength(1);
     expect(String(getCalls()[0][0])).toBe('/api/content-modifications/request-1');
 

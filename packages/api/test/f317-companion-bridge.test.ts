@@ -3,8 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { test } from 'node:test';
 import { CONCIERGE_CONFIG_DEFAULTS, catRegistry, createCompanionIdentitySnapshot } from '@cat-cafe/shared';
-import { validateCompanionReply } from '@clowder-ai/plugin-contract';
 import { validateCompanionReply as validateCompanionReplyBeta20 } from '@clowder-ai/plugin-contract-beta20';
+import { validateCompanionReply } from '@clowder-ai/plugin-contract-beta21';
 import cookie from '@fastify/cookie';
 import Fastify from 'fastify';
 import { MessageStore } from '../src/domains/cats/services/stores/ports/MessageStore.js';
@@ -36,7 +36,7 @@ const historicalIdentity = createCompanionIdentitySnapshot({
 function authorDisplayName(catId: string): string {
   const cat = catRegistry.tryGet(catId);
   assert.ok(cat, `fixture cat ${catId} must exist`);
-  return cat.config.displayName;
+  return cat.config.nickname?.trim() || cat.config.displayName;
 }
 
 async function fixture() {

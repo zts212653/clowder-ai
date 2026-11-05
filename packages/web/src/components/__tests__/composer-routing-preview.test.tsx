@@ -150,7 +150,27 @@ function PreviewProbe({ content, preferredCats }: { content: string; preferredCa
   return <output>{JSON.stringify(preview)}</output>;
 }
 
+function RoutedRecipientProbe() {
+  const preview = useRoutingPreview({
+    enabled: true,
+    content: '继续',
+    scope: { scope: 'thread', threadId: 'thread-a' },
+  });
+  return <ComposerRoutingPreview preview={preview} onInsertMention={() => {}} />;
+}
+
 describe('server-backed composer routing preview', () => {
+  it('shows a server-confirmed unavailable recipient and replacement without opening a tooltip', async () => {
+    api.mockResolvedValue({
+      ok: true,
+      json: async () => ({ targetCats: ['codex'], reason: { kind: 'recent_replier' }, unavailableTargets: ['opus'] }),
+    });
+    await act(async () => root.render(<RoutedRecipientProbe />));
+    await act(async () => vi.advanceTimersByTimeAsync(180));
+    expect(host.textContent).toContain('宪宪 · Opus 5.5暂时不能用，改发给砚砚');
+    expect(host.querySelector('button')?.getAttribute('aria-label')).toContain('砚砚');
+  });
+
   it('debounces draft changes and sends prospective preferences to the read-only endpoint', async () => {
     api.mockResolvedValue({
       ok: true,

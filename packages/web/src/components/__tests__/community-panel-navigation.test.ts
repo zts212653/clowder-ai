@@ -1,3 +1,8 @@
+// Component interaction fixtures; direct transport is covered by community-direct-api.test.tsx.
+vi.mock('@/utils/api-client', () => ({
+  apiFetch: (path: string, init?: RequestInit) => globalThis.fetch(path, init),
+}));
+
 import React from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -73,13 +78,13 @@ describe('CommunityPanel navigation (C6)', () => {
 
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
       const requestUrl = String(url);
-      if (requestUrl.includes('/api/community-repos')) {
+      if (requestUrl.includes('/api/plugins/official.github-operations/github/community-repos')) {
         return { ok: true, json: async () => ({ repos: ['test/repo'] }) } as Response;
       }
-      if (requestUrl.includes('/api/community-decision-queue')) {
+      if (requestUrl.includes('/api/plugins/official.github-operations/github/community-decision-queue')) {
         return { ok: true, json: async () => ({ items: [], warnings: [] }) } as Response;
       }
-      if (requestUrl.includes('/api/community-findings')) {
+      if (requestUrl.includes('/api/plugins/official.github-operations/github/community-findings')) {
         return { ok: true, json: async () => ({ findings: [] }) } as Response;
       }
       return { ok: true, json: async () => MOCK_BOARD } as Response;

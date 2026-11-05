@@ -12,6 +12,7 @@ export const RESOLVER_LABELS: Record<RecallResolverFamily, string> = {
   project_knowledge: '功能',
   cat_owned_seed: '猫自己的种子',
   thread_overview: '线程概况',
+  matter: '事情',
 };
 const TYPE_LABELS: Record<string, string> = {
   ...RESOLVER_LABELS,
@@ -33,11 +34,19 @@ const TYPE_LABELS: Record<string, string> = {
   commit: '提交',
 };
 export const recallTypeLabel = (sourceType?: string) => TYPE_LABELS[sourceType ?? ''] ?? '记忆';
+const UNAVAILABLE_LABELS = {
+  source_corrected: '来源已更正',
+  source_forgotten: '来源已遗忘',
+  scope_revoked: '来源已不可访问',
+};
 function hasReadableTitle(item: RecallResultItem): boolean {
   const title = item.title.trim();
   return !!title && title !== item.anchor && !/^(?:thread-thread_|person-memory:|person_[A-Za-z0-9_-]+$)/.test(title);
 }
 export function recallResultTitle(item: RecallResultItem): string {
+  if (item.sourceUnavailableReason && Object.hasOwn(UNAVAILABLE_LABELS, item.sourceUnavailableReason)) {
+    return `${recallTypeLabel(item.sourceType)} · ${UNAVAILABLE_LABELS[item.sourceUnavailableReason]}`;
+  }
   if (item.titleStatus === 'loading') return `${recallTypeLabel(item.sourceType)} · 正在读取标题…`;
   if (item.titleStatus === 'unavailable') return `${recallTypeLabel(item.sourceType)} · 暂时读不到标题`;
   return hasReadableTitle(item) ? item.title : `${recallTypeLabel(item.sourceType)} · 标题没有记录下来`;
@@ -54,7 +63,9 @@ export function recallResultHref(item: RecallResultItem): string | null {
   return null;
 }
 export function recallDeliveryLabel(event: RecallEvent): string | undefined {
-  return event.cueStatus ? `点名递送 · ${recallTypeLabel(event.resolverFamily)}` : undefined;
+  return event.cueStatus
+    ? `${event.source === 'pull' ? '主动读取' : '点名递送'} · ${recallTypeLabel(event.resolverFamily)}`
+    : undefined;
 }
 export function recallReplyTimeLabel(group: RecallGroup, earlierRepliesPending: boolean, now = new Date()): string {
   if (group.timestamp == null) {

@@ -128,6 +128,16 @@ describe('F311 Change & Learn permanent surface', () => {
     expect(evolutionApprovalId({ ownerFeatureId: 'F266', ownerStateRef: 'eval-repair-proposal:' })).toBeUndefined();
   });
 
+  it('states that human agreement still awaits the owner effect receipt', async () => {
+    const approved = {
+      ...currentChange('approved'),
+      approvalRef: { ownerFeatureId: 'F246', ownerStateRef: 'approval:proposal-1' },
+    } satisfies EvolutionChangeLineage;
+    await act(async () => root.render(<Harness initial={projection('writing_back', 9, approved)} />));
+    expect(container.textContent).toContain('已同意，等生效回执');
+    expect(container.textContent).not.toContain('已批准，等待执行');
+  });
+
   it('adopts a conflict projection without hiding the fresh sequence as an HTTP error', async () => {
     const awaiting = projection('awaiting_approval', 8, currentChange('pending'));
     const refreshed = projection('awaiting_approval', 9, currentChange('pending'));

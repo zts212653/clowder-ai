@@ -27,6 +27,7 @@ interface RoutingPreviewPresentation {
   reason: string;
   stateLabel: string;
   whisperPreview: boolean;
+  unavailableNotice?: string;
 }
 
 function buildRecipientOptions(
@@ -113,11 +114,20 @@ function presentRoutingPreview(
   const joinedNames = names.join(language === 'zh' ? '、' : ', ');
   const whisperPreview = preview.status === 'ready' && preview.reason.kind === 'whisper_recipients';
   if (joinedNames && preview.status === 'ready') {
+    const unavailableNames = preview.unavailableTargets
+      ?.map(
+        (catId) =>
+          identities.get(catId)?.label ?? composerCatName(catId, getCatById, language === 'zh' ? '猫猫' : 'Cat'),
+      )
+      .join(language === 'zh' ? '、' : ', ');
+    const unavailableNotice =
+      !whisperPreview && unavailableNames ? copy.unavailableRedirect(unavailableNames, joinedNames) : undefined;
     return {
       joinedNames,
-      reason: explainReason(preview.reason, joinedNames, copy),
+      reason: unavailableNotice ?? explainReason(preview.reason, joinedNames, copy),
       stateLabel: joinedNames,
       whisperPreview,
+      unavailableNotice,
     };
   }
   if (whisperPreview) {
@@ -151,11 +161,18 @@ export function ComposerRoutingPreview({
   const [open, setOpen] = useState(false);
   const identities = useMemo(() => buildComposerRecipientIdentities(cats), [cats]);
   const options = useMemo(() => buildRecipientOptions(cats, identities), [cats, identities]);
-  const { reason, stateLabel, whisperPreview } = presentRoutingPreview(preview, copy, language, getCatById, identities);
+  const { reason, stateLabel, whisperPreview, unavailableNotice } = presentRoutingPreview(
+    preview,
+    copy,
+    language,
+    getCatById,
+    identities,
+  );
   const readyWithRecipients = preview.status === 'ready' && preview.targetCats.length > 0;
   const visibleRecipientCount = readyWithRecipients ? Math.min(preview.targetCats.length, 3) : 0;
-  const recipientName = useWholeRecipientName(stateLabel, readyWithRecipients && !compact);
-  const recipientNameIsDecorative = compact ? true : !recipientName.fits;
+  const wholeRecipientNames = !compact && visibleRecipientCount > 1;
+  const recipientName = useWholeRecipientName(stateLabel, wholeRecipientNames);
+  const recipientNameIsDecorative = compact || (wholeRecipientNames && !recipientName.fits);
   const compactLayout = useCompactRoutingLayout({
     active: compact,
     hasChevron: !whisperPreview,
@@ -223,9 +240,9 @@ export function ComposerRoutingPreview({
           ) : null}
           {readyWithRecipients ? (
             <span
-              ref={compact ? undefined : recipientName.slot}
+              ref={wholeRecipientNames ? recipientName.slot : undefined}
               data-testid="composer-routing-name"
-              data-name-fits={compact ? undefined : recipientName.fits ? 'true' : 'false'}
+              data-name-fits={wholeRecipientNames ? (recipientName.fits ? 'true' : 'false') : undefined}
               data-compact-name-policy={compact ? 'whole-or-hidden' : undefined}
               aria-hidden={recipientNameIsDecorative}
               className={`${styles.readyName} ${compact ? 'truncate whitespace-nowrap' : ''} text-[var(--shell-ink-soft)]`}
@@ -234,15 +251,15 @@ export function ComposerRoutingPreview({
                   ? compactLayout.mobile && !compactLayout.showName
                     ? { display: 'none' }
                     : undefined
-                  : { visibility: recipientName.fits ? 'visible' : 'hidden' }
+                  : { visibility: wholeRecipientNames && !recipientName.fits ? 'hidden' : 'visible' }
               }
             >
-              {compact ? (
-                stateLabel
-              ) : (
+              {wholeRecipientNames ? (
                 <span ref={recipientName.content} className={styles.readyNameContent}>
                   {stateLabel}
                 </span>
+              ) : (
+                stateLabel
               )}
             </span>
           ) : (
@@ -261,6 +278,11 @@ export function ComposerRoutingPreview({
           ) : null}
         </button>
       </AppTooltip>
+      {unavailableNotice ? (
+        <output className="block whitespace-normal break-words px-1.5 text-xs text-[var(--shell-muted)]">
+          {unavailableNotice}
+        </output>
+      ) : null}
       {open && !whisperPreview ? (
         <ComposerRecipientMenu
           anchor={trigger}

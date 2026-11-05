@@ -95,7 +95,7 @@ export function registerProfileUpdateDecisionRoutes(app: FastifyInstance, deps: 
     // If anything was written to disk, cache is stale — regardless of result.ok.
     // Partial commits (write OK, checkpoint/provenance failed) must still invalidate.
     if (!result.proposal?.writtenPath) return;
-    if (result.proposal.targetLayer === 'corpus') {
+    if (result.proposal.targetLayer !== 'primer') {
       // Corpus is owner-wide: all cats sharing this owner must see the updated pointer.
       clearL0CacheOwner(result.proposal.createdBy);
     } else {

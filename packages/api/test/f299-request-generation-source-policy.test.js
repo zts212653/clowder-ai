@@ -7,8 +7,12 @@ let encodeProfileSourceRef;
 let requestGenerationMessageSourceRefs;
 let requestGenerationPresentations;
 let resolveRequestGenerationSourceStates;
+let codexActiveWorkContext;
 
 before(async () => {
+  ({ codexActiveWorkContext } = await import(
+    '../dist/domains/cats/services/agents/providers/codex-active-work-context.js'
+  ));
   ({
     encodeMemoryCueSourceRef,
     encodeProfileSourceRef,
@@ -21,6 +25,28 @@ before(async () => {
 });
 
 describe('F299 request-generation source policy', () => {
+  it('resolves native-compaction source coordinates through the same message owner policy', async () => {
+    const context = codexActiveWorkContext({
+      threadId: 'thread-1',
+      invocationId: 'inv-1',
+      promptMessageIds: ['source'],
+    });
+    assert.deepEqual(context.sourceRefs, [{ owner: 'message', ref: 'thread-1:source' }]);
+    assert.match(context.body, /"promptMessageIds":\["source"\]/);
+    for (const [state, message] of [
+      ['available', { id: 'source', threadId: 'thread-1', userId: 'owner-1' }],
+      ['deleted', { id: 'source', threadId: 'thread-1', userId: 'owner-1', _tombstone: true }],
+      ['redacted', { id: 'source', threadId: 'thread-1', userId: 'another-owner' }],
+    ]) {
+      const states = await resolveRequestGenerationSourceStates(context.sourceRefs, {
+        userId: 'owner-1',
+        threadId: 'thread-1',
+        invocationId: 'inv-1',
+        messageStore: { getById: async () => message },
+      });
+      assert.equal([...states.values()][0], state);
+    }
+  });
   it('inherits message hard-delete, soft-delete, and owner scope without inventing absence truth', async () => {
     const messages = new Map([
       ['available', { id: 'available', threadId: 'thread-1', userId: 'owner-1' }],

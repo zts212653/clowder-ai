@@ -3,7 +3,9 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatMessage } from '@/stores/chat-types';
 import { getOrderedMessageTimeline } from '@/stores/message-timeline';
-import { TIMELINE_ORDER_ROUND_INTERVAL_MS, useViewportMessageTimeline } from '../useViewportMessageTimeline';
+import { useViewportMessageTimeline } from '../useViewportMessageTimeline';
+
+const TIMELINE_ORDER_ROUND_INTERVAL_MS = 1_000;
 
 function message(id: string, time: number): ChatMessage {
   return { id, type: 'assistant', catId: 'opus', content: id, timestamp: time, timelineOrderAt: time };
@@ -44,7 +46,7 @@ describe('useViewportMessageTimeline', () => {
     vi.useRealTimers();
   });
 
-  it('updates two live replies without swapping them across sort rounds, then moves only for read input and terminal state', () => {
+  it('keeps visible replies in place through streaming, appended reads, completion and late chunks', () => {
     let displayed: ChatMessage[] = [];
     const Probe = ({ messages }: { messages: ChatMessage[] }) => {
       displayed = useViewportMessageTimeline('thread-a', messages);
@@ -82,7 +84,7 @@ describe('useViewportMessageTimeline', () => {
     read[0] = { ...first, lifecycle: { ...first.lifecycle, latestInputTimelineOrderAt: 40 } };
     act(() => root.render(React.createElement(Probe, { messages: read })));
     act(() => vi.advanceTimersByTime(TIMELINE_ORDER_ROUND_INTERVAL_MS));
-    expect(displayed.map((item) => item.id)).toEqual(['b', 'append', 'a']);
+    expect(displayed.map((item) => item.id)).toEqual(['a', 'b', 'append']);
 
     const terminal = [...read];
     const active = terminal[0];
@@ -90,7 +92,7 @@ describe('useViewportMessageTimeline', () => {
     terminal[0] = { ...active, lifecycle: { ...active.lifecycle, status: 'completed', completedAt: 50 } };
     act(() => root.render(React.createElement(Probe, { messages: terminal })));
     act(() => vi.advanceTimersByTime(TIMELINE_ORDER_ROUND_INTERVAL_MS));
-    expect(displayed.map((item) => item.id)).toEqual(['b', 'append', 'a']);
+    expect(displayed.map((item) => item.id)).toEqual(['a', 'b', 'append']);
 
     const late = [...terminal];
     const completed = late[0];
@@ -98,10 +100,10 @@ describe('useViewportMessageTimeline', () => {
     late[0] = { ...completed, timestamp: 80, timelineOrderAt: 80, content: 'late chunk' };
     act(() => root.render(React.createElement(Probe, { messages: late })));
     act(() => vi.advanceTimersByTime(TIMELINE_ORDER_ROUND_INTERVAL_MS));
-    expect(displayed.map((item) => item.id)).toEqual(['b', 'append', 'a']);
+    expect(displayed.map((item) => item.id)).toEqual(['a', 'b', 'append']);
   });
 
-  it('updates content immediately but moves existing cards only at the next serial round', () => {
+  it('updates content immediately without moving legacy cards when the storage cursor changes', () => {
     let displayed: ChatMessage[] = [];
     const Probe = ({ messages }: { messages: ChatMessage[] }) => {
       displayed = useViewportMessageTimeline('thread-a', messages);
@@ -121,11 +123,11 @@ describe('useViewportMessageTimeline', () => {
     expect(displayed.map((item) => item.id)).toEqual(['a', 'b']);
     act(() => vi.advanceTimersByTime(1));
     expect(displayed.map((item) => item.id)).toEqual(getOrderedMessageTimeline(later).map((item) => item.id));
-    expect(host.textContent).toBe('b:b|a:chunk 2');
+    expect(host.textContent).toBe('a:chunk 2|b:b');
 
     const newest = [{ ...later[0], timelineOrderAt: 5, content: 'chunk 3' }, first[1]];
     act(() => root.render(React.createElement(Probe, { messages: newest })));
-    expect(host.textContent).toBe('b:b|a:chunk 3');
+    expect(host.textContent).toBe('a:chunk 3|b:b');
     act(() => vi.advanceTimersByTime(TIMELINE_ORDER_ROUND_INTERVAL_MS));
     expect(displayed.map((item) => item.id)).toEqual(getOrderedMessageTimeline(newest).map((item) => item.id));
   });

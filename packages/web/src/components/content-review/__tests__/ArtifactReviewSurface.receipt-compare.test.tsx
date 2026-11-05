@@ -15,7 +15,8 @@ vi.mock('../useArtifactReview', () => ({
   useArtifactReview: (reviewId: string) => mocks.controller(reviewId),
   reviewDraftPrefix: (user: string, id: string) => `cat-cafe:review:${user}:${id}:`,
 }));
-vi.mock('../useReviewMediaSource', () => ({
+vi.mock('../useReviewMediaSource', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../useReviewMediaSource')>()),
   useReviewMediaSource: () => ({ src: 'blob:original-owner-media', error: null }),
 }));
 vi.mock('@/utils/api-client', () => ({ API_URL: 'http://api.test', apiFetch: vi.fn() }));

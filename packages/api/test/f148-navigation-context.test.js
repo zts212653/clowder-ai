@@ -2,9 +2,28 @@ import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
+const { getCoCreatorConfig } = await import('../dist/config/cat-config-loader.js');
+const coCreator = getCoCreatorConfig();
+const userLabel = coCreator.nickname ?? coCreator.name;
+
 const { extractBatonContext, summarizeActiveTasks, formatNavigationHeader } = await import(
   '../dist/domains/cats/services/agents/routing/navigation-context.js'
 );
+
+it('shows known absent waits only for the current owner, without treating unknown as absent', () => {
+  const text = formatNavigationHeader({
+    currentCatId: 'codex',
+    baton: null,
+    tasks: [
+      { id: '1', title: '自己的待办', status: 'doing', ownerCatId: 'codex', hasActiveWait: false },
+      { id: '2', title: '别猫的待办', status: 'todo', ownerCatId: 'opus', hasActiveWait: false },
+      { id: '3', title: '状态未知', status: 'todo', ownerCatId: 'codex' },
+      { id: '4', title: '已登记等待', status: 'blocked', ownerCatId: 'codex', hasActiveWait: true },
+    ],
+  });
+  assert.match(text, /自己的待办.*\[未挂等待\]/);
+  assert.doesNotMatch(text, /(?:别猫的待办|状态未知|已登记等待).*\[未挂等待\]/);
+});
 
 describe('extractBatonContext', () => {
   const messages = [
@@ -34,7 +53,7 @@ describe('extractBatonContext', () => {
   it('identifies human speaker as "user"', () => {
     const baton = extractBatonContext(messages, 'opus');
     assert.equal(baton.fromSpeaker, 'user');
-    assert.equal(baton.fromSpeakerDisplay, 'co-creator');
+    assert.equal(baton.fromSpeakerDisplay, userLabel);
   });
 
   it('does not infer custody changes from same-author prose', () => {
@@ -240,7 +259,7 @@ describe('extractBatonContext', () => {
     assert.ok(baton !== null);
     assert.equal(
       baton.fromSpeakerDisplay,
-      'co-creator',
+      userLabel,
       `expected 'co-creator', got '${baton.fromSpeakerDisplay}' — internal userId leaked to display`,
     );
   });
@@ -401,13 +420,13 @@ describe('formatNavigationHeader', () => {
       },
       tasks: [],
     });
-    assert.ok(header.includes('co-creator本地 2026-05-31 23:20 America/Los_Angeles / 2026-06-01 06:20 UTC'), header);
+    assert.ok(header.includes(`${userLabel}本地 2026-05-31 23:20 America/Los_Angeles / 2026-06-01 06:20 UTC`), header);
   });
 
   it('injects a per-invocation temporal envelope with local and UTC dates', () => {
     const header = formatNavigationHeader({ baton: null, tasks: [] }, { nowMs: Date.UTC(2026, 6, 6, 3, 14, 0, 0) });
     assert.ok(
-      header.includes('当前时间: co-creator本地 2026-07-05 20:14 America/Los_Angeles / 2026-07-06 03:14 UTC'),
+      header.includes(`当前时间: ${userLabel}本地 2026-07-05 20:14 America/Los_Angeles / 2026-07-06 03:14 UTC`),
       header,
     );
     assert.ok(header.includes('relative terms use this now'), header);

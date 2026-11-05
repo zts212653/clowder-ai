@@ -74,7 +74,7 @@ export function registerEntrustedWorkReadRoutes(app: FastifyInstance, options: E
       reply.status(400);
       return { error: 'Invalid Schedule view' };
     }
-    return { ownerReads: await options.service.listForOwner(userId, query.data.view) };
+    return options.service.readForOwner(userId, query.data.view);
   });
 
   app.get('/api/entrusted-work/needs-me', async (request, reply) => {
@@ -83,7 +83,7 @@ export function registerEntrustedWorkReadRoutes(app: FastifyInstance, options: E
       reply.status(401);
       return { error: 'Identity required' };
     }
-    return { ownerReads: await options.service.listNeedsMeForOwner(userId), coverage: { state: 'complete' as const } };
+    return options.service.readNeedsMeForOwner(userId);
   });
 
   app.get('/api/entrusted-work/:taskId/owner-read', async (request, reply) => {

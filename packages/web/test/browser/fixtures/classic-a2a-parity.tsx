@@ -35,6 +35,7 @@ const inputs: ChatMessage[] = [
   },
 ];
 const response: ChatMessage = {
+  from: { kind: 'agent', catId: 'codex' },
   id: 'response',
   type: 'assistant',
   content: '回执示例',
@@ -55,15 +56,8 @@ const response: ChatMessage = {
 function Proof() {
   const presentation = useShellPresentation();
   const [open, setOpen] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [fail, setFail] = useState(false);
   const [effective, setEffective] = useState<'next_work' | 'continue_current'>('next_work');
   const trigger = useRef<HTMLButtonElement>(null);
-  const choose = async (_scope: 'thread' | 'global', value: 'next_work' | 'continue_current') => {
-    setError(fail ? '保存失败，请重试' : null);
-    if (!fail) setEffective(value);
-    return !fail;
-  };
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-4 p-4 text-cafe-primary">
       <div className="flex gap-4">
@@ -86,7 +80,6 @@ function Proof() {
         >
           switch theme
         </button>
-        <button onClick={() => setFail(!fail)}>fail save</button>
       </div>
       <article data-message-id="source-1" className="rounded-lg bg-cafe-surface p-3">
         原文
@@ -119,18 +112,20 @@ function Proof() {
           presentation={presentation}
           triggerRef={trigger}
           messageDisposition={{
-            snapshot: { productDefault: 'next_work', thread: null, global: null, effective, source: 'product' },
+            snapshot: { productDefault: 'next_work', thread: effective, global: null, effective, source: 'thread' },
             effective,
-            source: 'product',
+            source: 'thread',
             loading: false,
-            error,
-            setPreference: choose,
+            error: null,
+            setPreference: async (_scope, value) => {
+              setEffective(value ?? 'next_work');
+              return true;
+            },
           }}
           onClose={() => setOpen(false)}
           onAddContext={() => {}}
           onAttach={() => {}}
           onWhisperToggle={() => {}}
-          onGameClick={() => {}}
         />
       )}
     </main>

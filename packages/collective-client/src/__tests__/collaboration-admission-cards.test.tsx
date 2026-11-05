@@ -107,7 +107,7 @@ async function renderRoadmap(current: CollectiveWorkProjection) {
         />
         <RoadmapWorkDetails
           work={current}
-          works={[current]}
+          availableWorks={[current]}
           view={{ roadmapId: roadmap.roadmapId, lens: 'stage', presentation: 'graph', scope: 'focus' }}
           currentHumanId={participant.humanId}
           humanNames={{ [participant.humanId]: 'You' }}
@@ -122,9 +122,9 @@ async function renderRoadmap(current: CollectiveWorkProjection) {
 
 it.each([
   ['committed', 'ready', '可以开始'],
-  ['in_progress', 'in_progress', '推进中'],
-  ['committed', 'blocked', '等待前置工作'],
-  ['in_progress', 'blocked', '等待前置工作'],
+  ['in_progress', 'in_progress', '进行中'],
+  ['committed', 'blocked', '等待前置任务'],
+  ['in_progress', 'blocked', '等待前置任务'],
 ] as const)('REVIEW: %s/%s rejected Host admission preserves acceptance without claiming execution', async (lifecycle, status, misleading) => {
   await renderWorkCard(assignedWork(lifecycle, status, 'rejected'));
   expect(container.textContent).not.toContain(misleading);
@@ -141,14 +141,14 @@ it.each([
 ] as const)('keeps %s/%s awaiting current admission despite the first admitted receipt', async (lifecycle, status) => {
   await renderWorkCard(assignedWork(lifecycle, status));
   expect(container.textContent).toContain('已接下，待家内准入');
-  expect(container.textContent).not.toContain('等待前置工作');
+  expect(container.textContent).not.toContain('等待前置任务');
   expect(container.textContent).not.toContain('推进');
 });
 
 it.each([
   ['committed', 'ready', '已准入，待开始', '已接下'],
-  ['committed', 'blocked', '等待前置工作', '已接下'],
-  ['in_progress', 'in_progress', '推进中', '推进'],
+  ['committed', 'blocked', '等待前置任务', '已接下'],
+  ['in_progress', 'in_progress', '进行中', '推进'],
 ] as const)('shows actual admitted %s/%s facts without treating admission as progress', async (lifecycle, status, label, action) => {
   await renderWorkCard(assignedWork(lifecycle, status, 'admitted'));
   expect(container.querySelector('header strong')?.textContent).toBe(label);
@@ -198,7 +198,7 @@ it.each([
   expect(container.querySelector('header strong')?.textContent).toBe('当前无法执行');
   expect(container.textContent).toContain('当前委托已经不可用');
   expect(container.textContent).toContain(`${participant.displayName} 已接下 · You 负责`);
-  expect(container.textContent).not.toContain('等待前置工作');
+  expect(container.textContent).not.toContain('等待前置任务');
   expect(container.textContent).not.toContain(`${participant.displayName} 推进`);
   expect(current.acceptance).toEqual(historicalReceipt);
   expect(current.executionAuthority?.hostAdmission).toEqual(currentReceipt);
@@ -218,7 +218,7 @@ it('keeps actual progress when its current Service status and Host receipt both 
     executionStatus: { issuer: 'service' as const, revision: 2, state: 'permitted' as const },
   });
   await renderWorkCard(current);
-  expect(container.querySelector('header strong')?.textContent).toBe('推进中');
+  expect(container.querySelector('header strong')?.textContent).toBe('进行中');
   expect(container.textContent).toContain(`${participant.displayName} 推进 · You 负责`);
 });
 
@@ -236,7 +236,7 @@ it.each([
   await renderWorkCard(current);
   expect(container.querySelector('header strong')?.textContent).toBe('当前无法执行');
   expect(container.textContent).toContain(message);
-  expect(container.textContent).not.toContain('等待前置工作');
+  expect(container.textContent).not.toContain('等待前置任务');
 });
 
 it('binds the live check to initial execution while keeping its admitted acceptance immutable', async () => {
@@ -264,13 +264,13 @@ it('does not apply a stale unavailable check to a permitted successor execution'
     },
   });
   await renderWorkCard(current);
-  expect(container.querySelector('header strong')?.textContent).toBe('推进中');
+  expect(container.querySelector('header strong')?.textContent).toBe('进行中');
 });
 
 it.each([
   ['rejected', '暂时不能执行', '已接下'],
   [undefined, '已接下，待家内准入', '已接下'],
-  ['admitted', '推进中', '推进'],
+  ['admitted', '进行中', '推进'],
 ] as const)('uses the same current admission facts in Roadmap node and details (%s)', async (admission, label, action) => {
   const current = assignedWork('in_progress', admission === 'admitted' ? 'in_progress' : 'blocked', admission);
   await renderRoadmap(current);
@@ -300,5 +300,5 @@ it('does not claim current Roadmap progress after live Service permission is wit
   expect(container.textContent).toContain('当前委托已经不可用');
   expect(container.textContent).toContain(`${participant.displayName} 已接下`);
   expect(container.textContent).not.toContain(`${participant.displayName} 推进`);
-  expect(container.textContent).not.toContain('等待前置工作');
+  expect(container.textContent).not.toContain('等待前置任务');
 });

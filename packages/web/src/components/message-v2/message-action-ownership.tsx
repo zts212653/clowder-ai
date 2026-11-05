@@ -10,7 +10,7 @@ interface Reset {
 }
 export interface MessageActionOwnership {
   id: string;
-  pending(): void;
+  pending(readMessage: () => boolean): void;
   settle(message: boolean, anchor: boolean): void;
   available(kind: Kind): boolean;
   register(node: HTMLElement, kind: Kind): () => void;
@@ -26,7 +26,7 @@ function createOwnership(id: string): MessageActionOwnership {
   const available = { message: false, anchor: false };
   const roots = new Map<HTMLElement, { kind: Kind; inert: boolean; aria: string | null }>();
   const resets = new Set<Reset>();
-  const canUse = (kind: Kind) => !pending && available[kind];
+  const canUse = (kind: Kind) => available[kind] && (kind === 'message' || !pending);
   const apply = (node: HTMLElement, source: { kind: Kind; inert: boolean; aria: string | null }) => {
     const allowed = canUse(source.kind);
     node.toggleAttribute('data-message-action-unavailable', !allowed);
@@ -34,17 +34,25 @@ function createOwnership(id: string): MessageActionOwnership {
     if (!allowed) node.setAttribute('aria-hidden', 'true');
     else if (source.aria === null) node.removeAttribute('aria-hidden');
     else node.setAttribute('aria-hidden', source.aria);
-    node.dataset.messageActionState = pending ? 'pending' : allowed ? 'available' : 'unavailable';
+    node.dataset.messageActionState =
+      pending && source.kind === 'anchor' ? 'pending' : allowed ? 'available' : 'unavailable';
     const active = document.activeElement;
     if (!allowed && active instanceof HTMLElement && node.contains(active)) active.blur();
   };
   return {
     id,
     available: canUse,
-    pending() {
+    pending(readMessage) {
+      // Most rows have no body portal. Only an active selection/dialog needs an
+      // immediate visibility check; toolbar-only rows retain the batched layout pass.
+      const hasMessageSurface = [...roots.values()].some((source) => source.kind === 'message');
+      const messageReadable = hasMessageSurface && readMessage();
+      const messageLost = hasMessageSurface && available.message && !messageReadable;
       pending = true;
+      // Toolbar placement is pending; the independently checked body may still be readable.
+      available.message = messageReadable;
       for (const [node, source] of roots) apply(node, source);
-      for (const reset of resets) if (reset.pending) reset.callback();
+      for (const reset of resets) if (reset.pending || (messageLost && reset.kind === 'message')) reset.callback();
     },
     settle(message, anchor) {
       const lost = { message: available.message && !message, anchor: available.anchor && !anchor };

@@ -268,3 +268,14 @@ it('uses the host full-window callback and preserves keyboard movement and Escap
   expect(trigger?.closest('details')?.open).toBe(false);
   expect(document.activeElement).toBe(trigger);
 });
+
+it('keeps a named return-to-chat action visible while an ordinary surface is full-window', () => {
+  props.mainAreaAttentionSurfaceId = file.id;
+  props.mainAreaAttentionIsWide = false;
+  render();
+
+  const back = host.querySelector<HTMLButtonElement>('[data-testid="v2-workspace-return-to-chat"]');
+  expect(back?.textContent).toContain('回到聊天');
+  act(() => back?.click());
+  expect(props.onExitMainAreaAttention).toHaveBeenCalledOnce();
+});

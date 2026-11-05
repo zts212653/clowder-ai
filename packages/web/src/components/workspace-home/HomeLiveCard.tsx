@@ -3,11 +3,16 @@
 import type { ActiveExecutionProjection } from '@cat-cafe/shared';
 import { useMemo } from 'react';
 import { useShellCopy } from '@/components/shell/shell-copy';
-import { groupRunningWork } from '@/components/workspace/workspace-running-work';
 import { useCatData } from '@/hooks/useCatData';
+import { useLiveProjectFolds } from '@/hooks/useLiveProjectFolds';
 import { resolveCatNameplateName } from '@/lib/cat-display-name';
 import { activeExecutionKey, useActiveExecutionStore } from '@/stores/activeExecutionStore';
+import { clearExecutionDetailRequest, useExecutionDetailRequest } from './execution-detail-request';
 import { HomeExecutionRow } from './HomeExecutionRow';
+import { HomeHoldRow } from './HomeHoldRow';
+import { HomeLiveProject } from './HomeLiveProject';
+import { groupLiveProjects } from './live-project-groups';
+import './home-live-projects.css';
 import { ManagedExecutionDetail } from './ManagedExecutionDetail';
 import { useHomeClock } from './use-home-clock';
 import { homeCopy } from './workspace-home.shell-copy';
@@ -24,16 +29,23 @@ function HomeLiveContent({
   const v3 = useShellCopy(workspaceV3Copy);
   const { getCatById } = useCatData();
   const executionsByKey = useActiveExecutionStore((state) => state.executionsByKey);
+  const waits = useActiveExecutionStore((state) => state.waits);
   const hydration = useActiveExecutionStore((state) => state.hydration);
-  const running = useMemo(
-    () =>
-      groupRunningWork(Object.values(executionsByKey)).flatMap((work) =>
-        work.executions.map((execution) => ({ ...work, key: activeExecutionKey(execution), executions: [execution] })),
-      ),
-    [executionsByKey],
+  const currentProject = useActiveExecutionStore((state) => state.projectPath);
+  const unavailable = useActiveExecutionStore((state) => state.unavailableProjectPaths);
+  const folds = useLiveProjectFolds();
+  const projects = useMemo(
+    () => groupLiveProjects(Object.values(executionsByKey), currentProject, unavailable, waits),
+    [executionsByKey, currentProject, unavailable, waits],
   );
+  const running = projects.flatMap((project) => project.executions);
+  const holding = projects.flatMap((project) => project.waits);
+  const request = useExecutionDetailRequest();
+  const requestedKey = request && request.hostThreadId === threadId ? request.executionKey : null;
+  const hasRequestedRow = requestedKey !== null && running.some((item) => activeExecutionKey(item) === requestedKey);
+  const showProjects = projects.length > 1 || (projects.length === 1 && projects[0].path !== currentProject);
   const nicknameOwners = new Map<string, Set<string>>();
-  for (const catId of new Set(running.map((work) => work.catId))) {
+  for (const catId of new Set([...running, ...holding].map((item) => item.catId))) {
     const cat = getCatById(catId);
     const nickname = cat?.nickname?.trim() || cat?.displayName || catId;
     const owners = nicknameOwners.get(nickname) ?? new Set<string>();
@@ -55,26 +67,76 @@ function HomeLiveContent({
         <h2 id="home-live-title" className="home-card-title text-sm">
           {t.live.title}
         </h2>
-        <span className="home-card-scope text-xs">{t.live.scope(running.length)}</span>
+        <span className="home-card-scope text-xs">
+          {unavailable.length ? t.live.partialScope(running.length) : t.live.scope(running.length)}
+          {holding.length > 0 && t.live.waitingTail(holding.length)}
+        </span>
       </header>
-      {running.length === 0 && (
+      {running.length === 0 && holding.length === 0 && unavailable.length === 0 && (
         <output data-testid="workspace-developing-status" className="text-xs text-cafe-muted">
           {hydration === 'loading' ? t.live.loading : hydration === 'error' ? t.live.unverified : v3.empty}
         </output>
       )}
       <div className="home-rows">
-        {running.map((work) => (
-          <HomeExecutionRow
-            key={work.key}
-            execution={work.executions[0]}
-            threadTitle={work.threadTitle ?? work.threadId}
-            catName={rowName(work.catId)}
-            here={threadId !== undefined && work.threadId === threadId}
-            now={now}
-            onSelectExecution={onSelectExecution}
-          />
-        ))}
+        {projects.map((project) => {
+          const runRows = project.executions.map((execution) => (
+            <HomeExecutionRow
+              key={activeExecutionKey(execution)}
+              execution={execution}
+              threadTitle={execution.threadTitle ?? execution.threadId}
+              catName={rowName(execution.catId)}
+              here={threadId !== undefined && execution.threadId === threadId}
+              now={now}
+              onSelectExecution={onSelectExecution}
+              detail={
+                activeExecutionKey(execution) === requestedKey ? (
+                  <ManagedExecutionDetail threadId={threadId} />
+                ) : undefined
+              }
+              detailRevision={activeExecutionKey(execution) === requestedKey ? request?.revision : undefined}
+            />
+          ));
+          const rows = [
+            ...runRows,
+            ...project.waits.map((wait) => (
+              <HomeHoldRow
+                key={wait.waitId}
+                wait={wait}
+                catName={rowName(wait.catId)}
+                here={threadId !== undefined && wait.threadId === threadId}
+              />
+            )),
+          ];
+          return showProjects || project.unavailable ? (
+            <HomeLiveProject
+              key={project.path}
+              group={project}
+              current={project.path === currentProject}
+              collapsed={
+                folds.collapsed[project.path] === true &&
+                !project.executions.some((item) => activeExecutionKey(item) === requestedKey)
+              }
+              busy={folds.loading || folds.saving}
+              toggle={() => {
+                const revealed = project.executions.some((item) => activeExecutionKey(item) === requestedKey);
+                if (revealed) clearExecutionDetailRequest();
+                if (!revealed || folds.collapsed[project.path] !== true) void folds.toggle(project.path);
+              }}
+              now={now}
+            >
+              {rows}
+            </HomeLiveProject>
+          ) : (
+            rows
+          );
+        })}
       </div>
+      {requestedKey && !hasRequestedRow ? <ManagedExecutionDetail threadId={threadId} /> : null}
+      {folds.error && showProjects && (
+        <p className="home-card-foot text-xs" data-tone="warn" role="status">
+          {t.live.foldFailed}
+        </p>
+      )}
       {hydration === 'error' && (
         <p className="home-card-foot text-xs" data-tone="warn">
           {t.live.stale}
@@ -85,10 +147,5 @@ function HomeLiveContent({
 }
 
 export function HomeLiveCard(props: Parameters<typeof HomeLiveContent>[0]) {
-  return (
-    <>
-      <ManagedExecutionDetail threadId={props.threadId} />
-      <HomeLiveContent {...props} />
-    </>
-  );
+  return <HomeLiveContent {...props} />;
 }

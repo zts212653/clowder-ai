@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from 'node:util';
 import type { ContentModificationRecord } from '@cat-cafe/shared';
+import { queueEntryId } from '../../../cats/services/agents/invocation/queue-ledger/QueueLedger.js';
 import type { IMessageStore, StoredMessage } from '../../../cats/services/stores/ports/MessageStore.js';
 import type { TurnExecutionSourceReadPort } from '../../../cats/services/stores/ports/TurnExecutionStore.js';
 import { type MediaPublicationReturnIntent, mediaPublicationProjection } from './media-publication-return.js';
@@ -7,7 +8,7 @@ import { readModificationSourceExecution } from './source-execution.js';
 
 /** Exact durable source causality identifies the consumer; live actions additionally require it to be running. */
 export async function witnessedPublicationCaller(
-  deps: { messages: Pick<IMessageStore, 'getById'>; turns?: TurnExecutionSourceReadPort },
+  deps: { messages: Pick<IMessageStore, 'getById' | 'getByIdempotencyKey'>; turns?: TurnExecutionSourceReadPort },
   intent: MediaPublicationReturnIntent,
   invocationId?: string,
   requiredCarrierStatus?: 'terminal',
@@ -17,6 +18,15 @@ export async function witnessedPublicationCaller(
   const child = carrier
     ? await readModificationSourceExecution(deps.messages, deps.turns, carrier, intent.targetCatId, invocationId)
     : undefined;
+  const receiver =
+    child &&
+    carrier &&
+    (await deps.messages.getByIdempotencyKey(
+      carrier.userId,
+      carrier.threadId,
+      `message-lifecycle-response:${child.invocationId}`,
+    ));
+  const response = receiver?.lifecycle;
   if (
     carrier &&
     !carrier.recall &&
@@ -34,6 +44,16 @@ export async function witnessedPublicationCaller(
     child?.userId === intent.ownerUserId &&
     child.threadId === intent.threadId &&
     child.catId === intent.targetCatId &&
+    receiver?.userId === intent.ownerUserId &&
+    receiver.threadId === intent.threadId &&
+    receiver.catId === intent.targetCatId &&
+    response?.kind === 'response' &&
+    response.invocationId === child.invocationId &&
+    response.targetId === intent.targetCatId &&
+    (carrier.visibility === 'whisper'
+      ? response.inputEntryIds.includes(queueEntryId(carrier.id))
+      : response.inputMessageIds.includes(carrier.id)) &&
+    (!requiredCarrierStatus || ['completed', 'failed', 'canceled'].includes(response.status)) &&
     (!requiredCarrierStatus || ['succeeded', 'failed', 'canceled'].includes(child.status)) &&
     (child.causal?.triggerMessageId === carrier.id || child.causal?.coveredMessageIds?.includes(carrier.id))
   )

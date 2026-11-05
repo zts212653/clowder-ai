@@ -9,8 +9,8 @@
 
 import { createHash } from 'node:crypto';
 import type { CapabilitiesConfig, CapabilityEntry } from '@cat-cafe/shared';
-import { readCapabilitiesConfig } from '../config/capabilities/capability-orchestrator.js';
 import { listAllProjectPaths } from '../config/governance/list-all-projects.js';
+import { readMcpSyncConfig } from './mcp-config-state.js';
 import { canonicalJson, extractMcpEntries } from './mcp-sync-engine.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -95,8 +95,8 @@ export async function checkMcpProject(
   globalConfig?: CapabilitiesConfig | null,
   projectConfig?: CapabilitiesConfig | null,
 ): Promise<McpDriftResult> {
-  const gc = globalConfig ?? (await readCapabilitiesConfig(catCafeRoot));
-  const pc = projectConfig ?? (await readCapabilitiesConfig(projectRoot));
+  const gc = globalConfig ?? (await readMcpSyncConfig(catCafeRoot, 'global'));
+  const pc = projectConfig ?? (await readMcpSyncConfig(projectRoot, 'project'));
 
   const globalMcpEntries = extractMcpEntries(gc);
   const projectMcpEntries = extractMcpEntries(pc);
@@ -168,7 +168,7 @@ export async function checkMcpProject(
  * Used when opening the "All MCP" tab to show aggregated banner.
  */
 export async function checkMcpGlobal(catCafeRoot: string): Promise<McpGlobalDriftResult> {
-  const globalConfig = await readCapabilitiesConfig(catCafeRoot);
+  const globalConfig = await readMcpSyncConfig(catCafeRoot, 'global');
 
   // #712: Unified project enumeration (governance + nested thread-derived)
   const projectPaths = await listAllProjectPaths(catCafeRoot);

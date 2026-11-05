@@ -1,22 +1,28 @@
 import type { ApprovalHubItem, RichBlock, RichCardBlock, UnifiedAttentionOriginalApprovalCard } from '@cat-cafe/shared';
 import type { IMessageStore, StoredMessage } from '../domains/cats/services/stores/ports/MessageStore.js';
+import { isExactInformationalApprovalCard } from './companion-informational-approval-card.js';
 
-type OriginalCardProducerId = 'F225' | 'F231';
+type OriginalCardProducerId = 'F225' | 'F231' | 'F193' | 'F221' | 'F260';
 
-interface OriginalCardValidator {
-  blockId(proposalId: string): string;
-  actions: readonly [string, string];
-}
+type OriginalCardValidator = { blockId(proposalId: string): string } & (
+  | { family: 'interactive'; actions: readonly [string, string] }
+  | { family: 'informational' }
+);
 
 const ORIGINAL_CARD_VALIDATORS = {
   F225: {
+    family: 'interactive',
     blockId: (proposalId) => `handoff-${proposalId}`,
     actions: ['handoff:approve', 'handoff:reject'],
   },
   F231: {
+    family: 'interactive',
     blockId: (proposalId) => `profile-update-${proposalId}`,
     actions: ['profile-update:approve', 'profile-update:reject'],
   },
+  F193: { family: 'informational', blockId: (proposalId) => `dispatch-${proposalId}` },
+  F221: { family: 'informational', blockId: (proposalId) => `taste-proposal-${proposalId}` },
+  F260: { family: 'informational', blockId: (proposalId) => `entity-proposal-${proposalId}` },
 } as const satisfies Record<OriginalCardProducerId, OriginalCardValidator>;
 
 export interface OriginalApprovalCardRead {
@@ -68,7 +74,7 @@ export async function readOriginalApprovalCards(
 function isOriginalCardProducer(item: ApprovalHubItem): item is ApprovalHubItem & {
   sourceFeatureId: OriginalCardProducerId;
 } {
-  return item.sourceFeatureId === 'F225' || item.sourceFeatureId === 'F231';
+  return Object.hasOwn(ORIGINAL_CARD_VALIDATORS, item.sourceFeatureId);
 }
 
 async function readOneOriginalApprovalCard(
@@ -79,6 +85,7 @@ async function readOneOriginalApprovalCard(
   if (item.navigation.state !== 'anchored') return null;
   const { approvalCardRef } = item.navigation;
   const message = await messageStore.getById(approvalCardRef.messageId);
+  if (message?.id !== approvalCardRef.messageId) return null;
   if (!liveMessageMatches(message, item, ownerUserId, approvalCardRef.threadId)) return null;
 
   const blocks = message.extra?.rich?.blocks ?? [];
@@ -134,6 +141,7 @@ function isExactProducerCard(
   ) {
     return false;
   }
+  if (validator.family === 'informational') return isExactInformationalApprovalCard(block, item);
   if (!block.actions || block.actions.length !== validator.actions.length) return false;
   return validator.actions.every((actionName) => {
     const matches = block.actions?.filter((action) => action.action === actionName) ?? [];

@@ -78,7 +78,7 @@ export function CommunityIssueDraftCard({ block, messageId }: CommunityIssueDraf
     let cancelled = false;
     const fetchConfig = async () => {
       try {
-        const res = await apiFetch('/api/community-issue-drafts/config');
+        const res = await apiFetch('/api/plugins/official.github-operations/github/community-issue-drafts/config');
         if (!res.ok) return;
         const data = (await res.json()) as RepoConfig;
         if (cancelled) return;
@@ -108,7 +108,7 @@ export function CommunityIssueDraftCard({ block, messageId }: CommunityIssueDraf
         // preventing same-user cross-thread collisions with same block.id.
         // R1 P2-1 fix: use messageId as threadId (traceable identifier —
         // CommunityIssueDraft.threadId has no query consumers, used for audit only).
-        const createRes = await apiFetch('/api/community-issue-drafts', {
+        const createRes = await apiFetch('/api/plugins/official.github-operations/github/community-issue-drafts', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -146,11 +146,14 @@ export function CommunityIssueDraftCard({ block, messageId }: CommunityIssueDraf
 
       // Step 2: Publish
       setState('publishing');
-      const pubRes = await apiFetch(`/api/community-issue-drafts/${resolvedDraftId}/publish`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, bodyMarkdown: body }),
-      });
+      const pubRes = await apiFetch(
+        `/api/plugins/official.github-operations/github/community-issue-drafts/by-id/${encodeURIComponent(resolvedDraftId)}/publish`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title, bodyMarkdown: body }),
+        },
+      );
       if (!pubRes.ok) {
         const data = (await pubRes.json().catch(() => ({}))) as { error?: string };
         throw new Error(data.error ?? `HTTP ${pubRes.status}`);

@@ -94,7 +94,11 @@ export function createContentModificationIntegration(deps: {
         ? principal.invocationId &&
           (await witnessedPublicationCaller(publicationBinding.deps, intent, principal.invocationId))?.status ===
             'running'
-        : await publicationBinding.currentCaller(intent, principal.invocationId))
+        : await publicationBinding.currentCaller(
+            intent,
+            principal.invocationId,
+            mode === 'effect' ? command : undefined,
+          ))
     )
       throw new MediaOwnerError('access_denied');
     const publication = await deps.messages.getById(intent.source.publicationMessageId);

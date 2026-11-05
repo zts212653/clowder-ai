@@ -7,7 +7,7 @@ const { classifyLocalReviewLoopBrake, readDurableLocalReviewFact } = await impor
 
 const SOURCE_REF = 'docs/features/F314-development-episode-alignment-experiment.md';
 const SOURCE_REVISION = 'a'.repeat(40);
-const REVIEW_SUBJECT_REF = 'pr:zts212653/cat-cafe#4255';
+const REVIEW_SUBJECT_REF = 'pr:zts212653/clowder-ai#4255';
 
 function reviewMessage({
   id,

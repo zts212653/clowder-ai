@@ -77,7 +77,7 @@ test('satisfied-wait retirement retains event matching and thread scope with a n
           mode: 'timer',
           status: 'active',
           createdBy: 'hold-ball:codex61-sol',
-          subjectKey: 'zts212653/cat-cafe#1',
+          subjectKey: 'zts212653/clowder-ai#1',
           expectedSignalKey: 'ci_complete',
           wakeAt: Date.now() + 60_000,
         },
@@ -88,7 +88,12 @@ test('satisfied-wait retirement retains event matching and thread scope with a n
   t.after(reads.stop);
   const unregistered: string[] = [];
   const retired = retirePendingHoldsForSatisfiedWait(
-    { threadId: 'target', subjectKey: 'zts212653/cat-cafe#1', expectedSignalKey: 'ci_complete', sourceKind: 'fixture' },
+    {
+      threadId: 'target',
+      subjectKey: 'zts212653/clowder-ai#1',
+      expectedSignalKey: 'ci_complete',
+      sourceKind: 'fixture',
+    },
     {
       dynamicTaskStore: store,
       taskRunner: {

@@ -195,7 +195,7 @@ describe('Eval Hub operator narrative', () => {
     assert.doesNotMatch(narrative.action, /Fix|ownerAsk|owner/i);
   });
 
-  it('explains build and sunset decisions in operator language', () => {
+  it('explains build and sunset decisions in operator language', async () => {
     const build = run(
       baseInput({
         verdict: 'build',
@@ -222,7 +222,8 @@ describe('Eval Hub operator narrative', () => {
     assert.match(build.summary, /缺失能力信号/);
     assert.match(build.action, /负责 F236 的猫/);
     assert.match(sunset.headline, /可以停用/);
-    assert.match(sunset.action, /You.*决定/);
+    const { getCoCreatorConfig } = await import('../../dist/config/cat-config-loader.js');
+    assert.equal(sunset.action, `需要 ${getCoCreatorConfig().name} 决定是否停用这项评估。`);
   });
 
   it('surfaces an overdue re-evaluation without exposing lifecycle enums', () => {

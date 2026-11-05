@@ -19,11 +19,11 @@ const request = (overrides = {}) => ({
   evidenceRef: 'message:req-1',
   now: 100,
   action: {
-    subjectRef: 'pr:owner/repo#2868',
-    actionFamily: 'review',
-    successorSlot: 'reviewer',
+    subjectRef: 'subject:task:work-2868',
+    actionFamily: 'implement',
+    successorSlot: 'implementer',
     mode: 'single',
-    terminalPredicate: { kind: 'review_delivered', headSha: '1111111111111111111111111111111111111111' },
+    terminalPredicate: { kind: 'task_done' },
   },
   ...overrides,
 });
@@ -66,7 +66,7 @@ function harness({
       return (
         configured ?? {
           status: 'verified',
-          evidenceRef: `community:${predicate.subjectRef}:head:${predicate.headSha}`,
+          evidenceRef: `task:${predicate.subjectRef}:active:100`,
           freshnessKey: predicate.freshnessKey,
         }
       );
@@ -107,6 +107,21 @@ function harness({
     },
   };
   return { service: new ActionSuccessorAdmissionService(leaseStore, truthResolver), calls };
+}
+
+function returnedTaskFreshness(predicate) {
+  return {
+    status: 'verified',
+    evidenceRef: 'task:work-2868:active:100',
+    freshnessKey: predicate.freshnessKey,
+    ownerCatId: 'codex-sol',
+    holderThreadId: 'thread-source',
+    tenantScope: 'user-1',
+    approvedDelegates: [
+      { catId: 'codex-terra', threadId: 'thread-target', evidenceRef: 'approval:child-target' },
+      { catId: 'gpt52', threadId: 'thread-next-review', evidenceRef: 'approval:child-next' },
+    ],
+  };
 }
 
 describe('ActionSuccessorAdmissionService', () => {
@@ -180,21 +195,25 @@ describe('ActionSuccessorAdmissionService', () => {
   });
 
   it('continues an external completed review lease when server truth verifies a new HEAD', async () => {
-    const oldPredicate = canonicalizeActionTerminalPredicate({
-      actionFamily: 'review',
-      subjectRef: 'pr:owner/repo#2868',
-      predicate: { kind: 'review_delivered', headSha: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' },
-    });
+    const oldPredicate = {
+      ...canonicalizeActionTerminalPredicate({
+        actionFamily: 'implement',
+        subjectRef: 'subject:task:work-2868',
+        predicate: { kind: 'task_done' },
+      }),
+      freshnessKey: 'test-revision:old',
+      digest: 'test-predicate:old',
+    };
     const newPredicate = canonicalizeActionTerminalPredicate({
-      actionFamily: 'review',
-      subjectRef: 'pr:owner/repo#2868',
-      predicate: { kind: 'review_delivered', headSha: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' },
+      actionFamily: 'implement',
+      subjectRef: 'subject:task:work-2868',
+      predicate: { kind: 'task_done' },
     });
     const completedLease = {
       leaseId: 'lease-1',
       generation: 1,
       status: 'completed',
-      actionFamily: 'review',
+      actionFamily: 'implement',
       mode: 'single',
       holderCatIds: ['codex-terra'],
       terminalPredicate: oldPredicate,
@@ -210,7 +229,7 @@ describe('ActionSuccessorAdmissionService', () => {
       claimResult: { outcome: 'safe_wait', lease: completedLease },
       freshnessResolution: {
         status: 'verified',
-        evidenceRef: 'community:pr:owner/repo#2868:head:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+        evidenceRef: 'community:subject:task:work-2868:head:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
         freshnessKey: newPredicate.freshnessKey,
       },
       continueResult: { outcome: 'continued', lease: continuedLease },
@@ -220,11 +239,11 @@ describe('ActionSuccessorAdmissionService', () => {
       request({
         dispatchId: 'multi-mention:req-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
         action: {
-          subjectRef: 'pr:owner/repo#2868',
-          actionFamily: 'review',
-          successorSlot: 'reviewer',
+          subjectRef: 'subject:task:work-2868',
+          actionFamily: 'implement',
+          successorSlot: 'implementer',
           mode: 'single',
-          terminalPredicate: { kind: 'review_delivered', headSha: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' },
+          terminalPredicate: { kind: 'task_done' },
         },
       }),
     );
@@ -240,15 +259,15 @@ describe('ActionSuccessorAdmissionService', () => {
 
   it('continues a completed legacy lease when server truth verifies the current HEAD', async () => {
     const newPredicate = canonicalizeActionTerminalPredicate({
-      actionFamily: 'review',
-      subjectRef: 'pr:owner/repo#2868',
-      predicate: { kind: 'review_delivered', headSha: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' },
+      actionFamily: 'implement',
+      subjectRef: 'subject:task:work-2868',
+      predicate: { kind: 'task_done' },
     });
     const completedLease = {
       leaseId: 'lease-legacy',
       generation: 1,
       status: 'completed',
-      actionFamily: 'review',
+      actionFamily: 'implement',
       mode: 'single',
       holderCatIds: ['codex-terra'],
     };
@@ -263,7 +282,7 @@ describe('ActionSuccessorAdmissionService', () => {
       claimResult: { outcome: 'safe_wait', lease: completedLease },
       freshnessResolution: {
         status: 'verified',
-        evidenceRef: 'community:pr:owner/repo#2868:head:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+        evidenceRef: 'community:subject:task:work-2868:head:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
         freshnessKey: newPredicate.freshnessKey,
       },
       continueResult: { outcome: 'continued', lease: continuedLease },
@@ -273,11 +292,11 @@ describe('ActionSuccessorAdmissionService', () => {
       request({
         dispatchId: 'multi-mention:legacy-to-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
         action: {
-          subjectRef: 'pr:owner/repo#2868',
-          actionFamily: 'review',
-          successorSlot: 'reviewer',
+          subjectRef: 'subject:task:work-2868',
+          actionFamily: 'implement',
+          successorSlot: 'implementer',
           mode: 'single',
-          terminalPredicate: { kind: 'review_delivered', headSha: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' },
+          terminalPredicate: { kind: 'task_done' },
         },
       }),
     );
@@ -289,27 +308,31 @@ describe('ActionSuccessorAdmissionService', () => {
   });
 
   it('surfaces terminal truth when the fresh-revision CAS loses to a terminal marker', async () => {
-    const oldPredicate = canonicalizeActionTerminalPredicate({
-      actionFamily: 'review',
-      subjectRef: 'pr:owner/repo#2868',
-      predicate: { kind: 'review_delivered', headSha: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' },
-    });
+    const oldPredicate = {
+      ...canonicalizeActionTerminalPredicate({
+        actionFamily: 'implement',
+        subjectRef: 'subject:task:work-2868',
+        predicate: { kind: 'task_done' },
+      }),
+      freshnessKey: 'test-revision:old',
+      digest: 'test-predicate:old',
+    };
     const newPredicate = canonicalizeActionTerminalPredicate({
-      actionFamily: 'review',
-      subjectRef: 'pr:owner/repo#2868',
-      predicate: { kind: 'review_delivered', headSha: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' },
+      actionFamily: 'implement',
+      subjectRef: 'subject:task:work-2868',
+      predicate: { kind: 'task_done' },
     });
     const completedLease = {
       leaseId: 'lease-1',
       generation: 1,
       status: 'completed',
-      actionFamily: 'review',
+      actionFamily: 'implement',
       mode: 'single',
       holderCatIds: ['codex-terra'],
       terminalPredicate: oldPredicate,
     };
     const terminal = {
-      subjectRef: 'pr:owner/repo#2868',
+      subjectRef: 'subject:task:work-2868',
       state: 'merged',
       evidenceRef: 'github:merged-during-cas',
       observedAt: 101,
@@ -325,7 +348,7 @@ describe('ActionSuccessorAdmissionService', () => {
       claimResult: { outcome: 'safe_wait', lease: completedLease },
       freshnessResolution: {
         status: 'verified',
-        evidenceRef: 'community:pr:owner/repo#2868:head:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+        evidenceRef: 'community:subject:task:work-2868:head:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
         freshnessKey: newPredicate.freshnessKey,
       },
       continueResult: { outcome: 'subject_terminal', lease: completedLease },
@@ -335,11 +358,11 @@ describe('ActionSuccessorAdmissionService', () => {
       request({
         dispatchId: 'multi-mention:req-cas-race',
         action: {
-          subjectRef: 'pr:owner/repo#2868',
-          actionFamily: 'review',
-          successorSlot: 'reviewer',
+          subjectRef: 'subject:task:work-2868',
+          actionFamily: 'implement',
+          successorSlot: 'implementer',
           mode: 'single',
-          terminalPredicate: { kind: 'review_delivered', headSha: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' },
+          terminalPredicate: { kind: 'task_done' },
         },
       }),
     );
@@ -350,21 +373,25 @@ describe('ActionSuccessorAdmissionService', () => {
   });
 
   it('fails closed when terminal-aware CAS and the durable truth resolver disagree', async () => {
-    const oldPredicate = canonicalizeActionTerminalPredicate({
-      actionFamily: 'review',
-      subjectRef: 'pr:owner/repo#2868',
-      predicate: { kind: 'review_delivered', headSha: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' },
-    });
+    const oldPredicate = {
+      ...canonicalizeActionTerminalPredicate({
+        actionFamily: 'implement',
+        subjectRef: 'subject:task:work-2868',
+        predicate: { kind: 'task_done' },
+      }),
+      freshnessKey: 'test-revision:old',
+      digest: 'test-predicate:old',
+    };
     const newPredicate = canonicalizeActionTerminalPredicate({
-      actionFamily: 'review',
-      subjectRef: 'pr:owner/repo#2868',
-      predicate: { kind: 'review_delivered', headSha: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' },
+      actionFamily: 'implement',
+      subjectRef: 'subject:task:work-2868',
+      predicate: { kind: 'task_done' },
     });
     const completedLease = {
       leaseId: 'lease-1',
       generation: 1,
       status: 'completed',
-      actionFamily: 'review',
+      actionFamily: 'implement',
       mode: 'single',
       holderCatIds: ['codex-terra'],
       terminalPredicate: oldPredicate,
@@ -378,7 +405,7 @@ describe('ActionSuccessorAdmissionService', () => {
       claimResult: { outcome: 'safe_wait', lease: completedLease },
       freshnessResolution: {
         status: 'verified',
-        evidenceRef: 'community:pr:owner/repo#2868:head:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+        evidenceRef: 'community:subject:task:work-2868:head:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
         freshnessKey: newPredicate.freshnessKey,
       },
       continueResult: { outcome: 'subject_terminal', lease: completedLease },
@@ -391,8 +418,7 @@ describe('ActionSuccessorAdmissionService', () => {
             action: {
               ...request().action,
               terminalPredicate: {
-                kind: 'review_delivered',
-                headSha: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+                kind: 'task_done',
               },
             },
           }),
@@ -423,7 +449,7 @@ describe('ActionSuccessorAdmissionService', () => {
     assert.equal(calls.claim[0].claimOrigin, 'structured_transfer');
     assert.equal(calls.claim[0].issuerStandingEvidenceRef, 'message:req-1');
     assert.equal(calls.resolveFreshness.length, 1);
-    assert.equal(calls.resolveFreshness[0].headSha, '1111111111111111111111111111111111111111');
+    assert.equal(calls.resolveFreshness[0].freshnessKey, 'task:work-2868');
   });
 
   it('rejects non-exact freshness before a new claim', async () => {
@@ -456,173 +482,6 @@ describe('ActionSuccessorAdmissionService', () => {
       );
       assert.equal(calls.resolveFreshness.length, 1);
       assert.equal(calls.claim.length, 0);
-    }
-  });
-
-  it('admits one fenced direct-carrier review successor from durable done-tracking HEAD truth', async () => {
-    const claimedLease = {
-      leaseId: 'lease-done-tracking',
-      generation: 1,
-      mode: 'single',
-      holderCatIds: ['codex-terra'],
-    };
-    const claimCalls = [];
-    const leaseStore = {
-      async getSubjectTerminal() {
-        return null;
-      },
-      async markSubjectTerminal() {
-        throw new Error('terminal marker write is not expected');
-      },
-      async clearSubjectTerminal() {
-        throw new Error('terminal marker clear is not expected');
-      },
-      async claim(input) {
-        claimCalls.push(input);
-        return { outcome: 'claimed', lease: claimedLease };
-      },
-      async get() {
-        return null;
-      },
-      async replace() {
-        throw new Error('replace is not expected');
-      },
-      async commitOutcome() {
-        throw new Error('commitOutcome is not expected');
-      },
-      async returnToPredecessor() {
-        throw new Error('returnToPredecessor is not expected');
-      },
-      async markReturnDelivered() {
-        throw new Error('markReturnDelivered is not expected');
-      },
-      async continueFreshRevision() {
-        throw new Error('continueFreshRevision is not expected');
-      },
-    };
-    const resolver = new ActionSubjectTruthResolver(
-      leaseStore,
-      {
-        async get() {
-          return null;
-        },
-      },
-      {
-        async getBySubject() {
-          return {
-            kind: 'pr_tracking',
-            status: 'done',
-            headSha: '1111111111111111111111111111111111111111',
-            ciPrState: null,
-            reviewPrState: null,
-            closedAt: null,
-          };
-        },
-      },
-    );
-    const service = new ActionSuccessorAdmissionService(leaseStore, resolver);
-    const input = request({
-      sourceThreadId: 'thread-direct-carrier',
-      targetThreadId: 'thread-direct-carrier',
-      dispatchId: 'post:done-tracking-direct-carrier',
-    });
-
-    assert.deepEqual(await service.admit(input), {
-      admit: true,
-      outcome: 'claimed',
-      lease: claimedLease,
-      fence: {
-        leaseId: claimedLease.leaseId,
-        generation: claimedLease.generation,
-        dispatchId: input.dispatchId,
-      },
-    });
-    assert.equal(claimCalls.length, 1);
-    assert.equal(claimCalls[0].terminalPredicate.kind, 'review_delivered');
-    assert.equal(claimCalls[0].holderThreadId, 'thread-direct-carrier');
-  });
-
-  it('does not mint a reviewer lease from a terminal PR tracking task when community HEAD is unavailable', async () => {
-    for (const prState of ['merged', 'closed']) {
-      const terminalTask = {
-        kind: 'pr_tracking',
-        status: 'done',
-        automationState: {
-          ci: {
-            headSha: '1111111111111111111111111111111111111111',
-            prState,
-          },
-        },
-      };
-      const claimCalls = [];
-      const leaseStore = {
-        async getSubjectTerminal() {
-          return null;
-        },
-        async markSubjectTerminal() {
-          throw new Error('terminal marker write is not expected');
-        },
-        async clearSubjectTerminal() {
-          throw new Error('terminal marker clear is not expected');
-        },
-        async claim(input) {
-          claimCalls.push(input);
-          return {
-            outcome: 'claimed',
-            lease: {
-              leaseId: `lease-${prState}`,
-              generation: 1,
-              mode: 'single',
-              holderCatIds: ['codex-terra'],
-            },
-          };
-        },
-        async get() {
-          return null;
-        },
-        async replace() {
-          throw new Error('replace is not expected');
-        },
-        async commitOutcome() {
-          throw new Error('commitOutcome is not expected');
-        },
-        async returnToPredecessor() {
-          throw new Error('returnToPredecessor is not expected');
-        },
-        async markReturnDelivered() {
-          throw new Error('markReturnDelivered is not expected');
-        },
-        async continueFreshRevision() {
-          throw new Error('continueFreshRevision is not expected');
-        },
-      };
-      const resolver = new ActionSubjectTruthResolver(
-        leaseStore,
-        {
-          async get() {
-            return null;
-          },
-        },
-        {
-          async getBySubject() {
-            return {
-              kind: terminalTask.kind,
-              status: terminalTask.status,
-              headSha: terminalTask.automationState.ci.headSha,
-              ciPrState: terminalTask.automationState.ci.prState,
-              reviewPrState: null,
-              closedAt: null,
-            };
-          },
-        },
-      );
-      const service = new ActionSuccessorAdmissionService(leaseStore, resolver);
-
-      await assert.rejects(
-        () => service.admit(request({ dispatchId: `terminal-tracking:${prState}` })),
-        /action successor freshness rejected: insufficient/,
-      );
-      assert.equal(claimCalls.length, 0, `${prState} tracker must not reach leaseStore.claim`);
     }
   });
 
@@ -677,7 +536,7 @@ describe('ActionSuccessorAdmissionService', () => {
 
   it('checks terminal truth before creating a lease', async () => {
     const truth = {
-      subjectRef: 'pr:owner/repo#2868',
+      subjectRef: 'subject:task:work-2868',
       state: 'merged',
       evidenceRef: 'github:merged',
       observedAt: 90,
@@ -693,13 +552,13 @@ describe('ActionSuccessorAdmissionService', () => {
 
   it('uses replace only with the current matching lease and expected generation', async () => {
     const newPredicate = canonicalizeActionTerminalPredicate({
-      actionFamily: 'review',
-      subjectRef: 'pr:owner/repo#2868',
-      predicate: { kind: 'review_delivered', headSha: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' },
+      actionFamily: 'implement',
+      subjectRef: 'subject:task:work-2868',
+      predicate: { kind: 'task_done' },
     });
     const currentLease = {
       leaseId: 'lease-1',
-      key: 'user-1\u001fpr:owner/repo#2868\u001freview\u001freviewer',
+      key: 'user-1\u001fsubject:task:work-2868\u001fimplement\u001fimplementer',
       generation: 1,
       mode: 'single',
       holderCatIds: ['codex-terra'],
@@ -717,7 +576,7 @@ describe('ActionSuccessorAdmissionService', () => {
         dispatchId: 'multi-mention:req-2',
         action: {
           ...request().action,
-          terminalPredicate: { kind: 'review_delivered', headSha: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' },
+          terminalPredicate: { kind: 'task_done' },
           replace: { leaseId: 'lease-1', expectedGeneration: 1 },
         },
       }),
@@ -752,18 +611,22 @@ describe('ActionSuccessorAdmissionService', () => {
   });
 
   it('reattaches only the returned predecessor route with a fresh predicate and exact return proof', async () => {
-    const oldPredicate = canonicalizeActionTerminalPredicate({
-      actionFamily: 'review',
-      subjectRef: 'pr:owner/repo#2868',
-      predicate: { kind: 'review_delivered', headSha: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' },
-    });
+    const oldPredicate = {
+      ...canonicalizeActionTerminalPredicate({
+        actionFamily: 'implement',
+        subjectRef: 'subject:task:work-2868',
+        predicate: { kind: 'task_done' },
+      }),
+      freshnessKey: 'test-revision:old',
+      digest: 'test-predicate:old',
+    };
     const currentLease = {
       leaseId: 'lease-1',
-      key: 'user-1\u001fpr:owner/repo#2868\u001freview\u001freviewer',
+      key: 'user-1\u001fsubject:task:work-2868\u001fimplement\u001fimplementer',
       tenantScope: 'user-1',
-      subjectRef: 'pr:owner/repo#2868',
-      actionFamily: 'review',
-      successorSlot: 'reviewer',
+      subjectRef: 'subject:task:work-2868',
+      actionFamily: 'implement',
+      successorSlot: 'implementer',
       generation: 2,
       revision: 3,
       status: 'active',
@@ -777,7 +640,7 @@ describe('ActionSuccessorAdmissionService', () => {
       terminalPredicate: oldPredicate,
       holderOutcomes: {},
       completionCandidates: {},
-      evidenceRefs: ['message:request-1', 'message:grounding-mismatch'],
+      evidenceRefs: ['approval:child-target', 'message:grounding-mismatch'],
       returnDeliveryState: 'pending',
       returnDeliveryEvidenceRef: 'message:grounding-mismatch',
       returnTransitions: [
@@ -797,6 +660,7 @@ describe('ActionSuccessorAdmissionService', () => {
     const reattachedLease = { ...currentLease, generation: 3, holderCatIds: ['gpt52'] };
     const { service, calls } = harness({
       currentLease,
+      freshnessResolution: returnedTaskFreshness,
       replaceResult: { outcome: 'reattached', lease: reattachedLease },
     });
 
@@ -810,7 +674,7 @@ describe('ActionSuccessorAdmissionService', () => {
         incomingActionLeaseRef: { leaseId: 'lease-1', generation: 2 },
         action: {
           ...request().action,
-          terminalPredicate: { kind: 'review_delivered', headSha: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' },
+          terminalPredicate: { kind: 'task_done' },
           replace: { leaseId: 'lease-1', expectedGeneration: 2 },
         },
       }),
@@ -826,7 +690,7 @@ describe('ActionSuccessorAdmissionService', () => {
       leaseId: 'lease-1',
       generation: 2,
     });
-    assert.match(calls.replace[0].input.freshnessEvidenceRef, /^community:/);
+    assert.match(calls.replace[0].input.freshnessEvidenceRef, /^task:/);
 
     for (const overrides of [{ actorCatId: 'codex-terra' }, { sourceThreadId: 'thread-target' }]) {
       await assert.rejects(
@@ -841,8 +705,7 @@ describe('ActionSuccessorAdmissionService', () => {
               action: {
                 ...request().action,
                 terminalPredicate: {
-                  kind: 'review_delivered',
-                  headSha: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+                  kind: 'task_done',
                 },
                 replace: { leaseId: 'lease-1', expectedGeneration: 2 },
               },
@@ -858,7 +721,7 @@ describe('ActionSuccessorAdmissionService', () => {
   it('requires either the exact returned fence or persisted delivered-return evidence', async () => {
     const currentLease = {
       leaseId: 'lease-1',
-      key: 'user-1\u001fpr:owner/repo#2868\u001freview\u001freviewer',
+      key: 'user-1\u001fsubject:task:work-2868\u001fimplement\u001fimplementer',
       generation: 2,
       status: 'active',
       mode: 'single',
@@ -869,6 +732,7 @@ describe('ActionSuccessorAdmissionService', () => {
       predecessorThreadId: 'thread-target',
       holderOutcomes: {},
       completionCandidates: {},
+      evidenceRefs: ['approval:child-target'],
       returnDeliveryState: 'pending',
       returnTransitions: [
         {
@@ -876,6 +740,7 @@ describe('ActionSuccessorAdmissionService', () => {
           fromGeneration: 1,
           toGeneration: 2,
           rejectingCatId: 'codex-terra',
+          rejectingThreadId: 'thread-target',
           predecessorCatId: 'codex-sol',
           predecessorThreadId: 'thread-source',
           groundingEvidenceRef: 'message:mismatch',
@@ -885,10 +750,14 @@ describe('ActionSuccessorAdmissionService', () => {
     };
     const action = {
       ...request().action,
-      terminalPredicate: { kind: 'review_delivered', headSha: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' },
+      terminalPredicate: { kind: 'task_done' },
       replace: { leaseId: 'lease-1', expectedGeneration: 2 },
     };
-    const missing = harness({ currentLease, replaceResult: { outcome: 'reattached', lease: currentLease } });
+    const missing = harness({
+      currentLease,
+      freshnessResolution: returnedTaskFreshness,
+      replaceResult: { outcome: 'reattached', lease: currentLease },
+    });
     const rejected = await missing.service.admit(
       request({
         sourceThreadId: 'thread-source',
@@ -908,6 +777,7 @@ describe('ActionSuccessorAdmissionService', () => {
     };
     const delivered = harness({
       currentLease: deliveredLease,
+      freshnessResolution: returnedTaskFreshness,
       replaceResult: { outcome: 'reattached', lease: { ...deliveredLease, generation: 3 } },
     });
     const accepted = await delivered.service.admit(
@@ -1014,7 +884,7 @@ describe('ActionSuccessorAdmissionService', () => {
   it('does not use existing-standing metadata to bypass a structured replacement issuer route', async () => {
     const currentLease = {
       leaseId: 'lease-1',
-      key: 'user-1\u001fpr:owner/repo#2868\u001freview\u001freviewer',
+      key: 'user-1\u001fsubject:task:work-2868\u001fimplement\u001fimplementer',
       generation: 1,
       status: 'replaceable',
       mode: 'single',
@@ -1050,7 +920,7 @@ describe('ActionSuccessorAdmissionService', () => {
   it('rejects non-exact freshness before replacement', async () => {
     const currentLease = {
       leaseId: 'lease-1',
-      key: 'user-1\u001fpr:owner/repo#2868\u001freview\u001freviewer',
+      key: 'user-1\u001fsubject:task:work-2868\u001fimplement\u001fimplementer',
       generation: 1,
       status: 'replaceable',
       mode: 'single',
@@ -1096,7 +966,7 @@ describe('ActionSuccessorAdmissionService', () => {
     const { service } = harness({
       currentLease: {
         leaseId: 'lease-1',
-        key: 'user-1\u001fpr:owner/repo#2868\u001fmerge\u001freviewer',
+        key: 'user-1\u001fsubject:task:work-2868\u001fmerge\u001freviewer',
         generation: 1,
       },
     });
@@ -1112,7 +982,7 @@ describe('ActionSuccessorAdmissionService', () => {
   it('surfaces terminal truth when replacement loses its CAS to a terminal marker', async () => {
     const currentLease = {
       leaseId: 'lease-1',
-      key: 'user-1\u001fpr:owner/repo#2868\u001freview\u001freviewer',
+      key: 'user-1\u001fsubject:task:work-2868\u001fimplement\u001fimplementer',
       generation: 1,
       status: 'replaceable',
       mode: 'single',
@@ -1122,7 +992,7 @@ describe('ActionSuccessorAdmissionService', () => {
       predecessorThreadId: 'thread-source',
     };
     const terminal = {
-      subjectRef: 'pr:owner/repo#2868',
+      subjectRef: 'subject:task:work-2868',
       state: 'closed',
       evidenceRef: 'github:closed-during-replace',
       observedAt: 101,
@@ -1150,7 +1020,7 @@ describe('ActionSuccessorAdmissionService', () => {
   it('returns a rejected single lease only to its persisted predecessor route', async () => {
     const currentLease = {
       leaseId: 'lease-1',
-      key: 'user-1\u001fpr:owner/repo#2868\u001freview\u001freviewer',
+      key: 'user-1\u001fsubject:task:work-2868\u001fimplement\u001fimplementer',
       generation: 1,
       mode: 'single',
       holderCatIds: ['codex-terra'],
@@ -1208,7 +1078,7 @@ describe('ActionSuccessorAdmissionService', () => {
   it('surfaces terminal truth when return loses its CAS to a terminal marker', async () => {
     const currentLease = {
       leaseId: 'lease-1',
-      key: 'user-1\u001fpr:owner/repo#2868\u001freview\u001freviewer',
+      key: 'user-1\u001fsubject:task:work-2868\u001fimplement\u001fimplementer',
       generation: 1,
       status: 'active',
       mode: 'single',
@@ -1218,7 +1088,7 @@ describe('ActionSuccessorAdmissionService', () => {
       predecessorThreadId: 'thread-source',
     };
     const terminal = {
-      subjectRef: 'pr:owner/repo#2868',
+      subjectRef: 'subject:task:work-2868',
       state: 'merged',
       evidenceRef: 'github:merged-during-return',
       observedAt: 101,
@@ -1279,7 +1149,7 @@ describe('ActionSuccessorAdmissionService', () => {
   it('replays the same return request after the generation transition', async () => {
     const currentLease = {
       leaseId: 'lease-1',
-      key: 'user-1\u001fpr:owner/repo#2868\u001freview\u001freviewer',
+      key: 'user-1\u001fsubject:task:work-2868\u001fimplement\u001fimplementer',
       generation: 2,
       mode: 'single',
       holderCatIds: ['codex-sol'],
@@ -1331,7 +1201,7 @@ describe('ActionSuccessorAdmissionService', () => {
   it('records a parallel holder rejection without admitting a whole-lease return dispatch', async () => {
     const currentLease = {
       leaseId: 'lease-parallel',
-      key: 'user-1\u001fpr:owner/repo#2868\u001freview\u001freviewer',
+      key: 'user-1\u001fsubject:task:work-2868\u001fimplement\u001fimplementer',
       generation: 1,
       mode: 'parallel',
       holderCatIds: ['codex-terra', 'opus'],

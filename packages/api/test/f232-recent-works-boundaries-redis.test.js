@@ -43,7 +43,13 @@ describe('F232 recent works — bounded Redis boundaries', { skip: redisIsolatio
       },
       messageStore: store,
       taskStore: { listByThread: async () => [] },
-      ...(artifactWorkLineage ? { artifactWorkLineage: { current: artifactWorkLineage } } : {}),
+      artifactWorkLineage: {
+        current: artifactWorkLineage ?? { resolve: async ({ artifacts }) => artifacts.map(() => undefined) },
+        independent: {
+          readRecent: async () => ({ artifacts: [], complete: true }),
+          readThread: async () => ({ artifacts: [], snapshot: 'empty' }),
+        },
+      },
     });
   };
 
@@ -80,7 +86,7 @@ describe('F232 recent works — bounded Redis boundaries', { skip: redisIsolatio
     store.append({
       userId: OWNER,
       threadId: 'thread-a',
-      catId: 'codex61-sol',
+      from: { kind: 'agent', catId: 'codex61-sol' },
       content: name,
       mentions: [],
       timestamp,
@@ -130,12 +136,47 @@ describe('F232 recent works — bounded Redis boundaries', { skip: redisIsolatio
     });
   };
 
+  it('late rich publication invalidates material projections while prose and thinking updates do not', async () => {
+    const message = await store.append({
+      userId: OWNER,
+      threadId: THREADS[0].id,
+      from: { kind: 'agent', catId: 'codex61-sol' },
+      content: 'already saved response',
+      mentions: [],
+      timestamp: Date.now(),
+    });
+    const changed = [];
+    store.onTimelineChanged = (updated) => changed.push(updated);
+    await store.augmentStreamMetadata(message.id, { thinking: 'still writing' });
+    assert.equal(changed.length, 0);
+    await store.augmentStreamMetadata(message.id, {
+      extra: {
+        rich: {
+          v: 1,
+          blocks: [{ kind: 'file', v: 1, id: 'late-file', url: '/uploads/current.pdf', fileName: 'current.pdf' }],
+        },
+      },
+    });
+    assert.equal(changed.length, 1);
+    assert.equal(changed[0].extra.rich.blocks[0].fileName, 'current.pdf');
+    await store.augmentStreamMetadata(message.id, { extra: { rich: changed[0].extra.rich } });
+    assert.equal(changed.length, 1, 'replaying the same rich result is not a new material invalidation');
+    await store.updateExtra(message.id, {
+      rich: {
+        v: 1,
+        blocks: [{ kind: 'file', v: 1, id: 'revision', url: '/uploads/revision.pdf', fileName: 'revision.pdf' }],
+      },
+    });
+    assert.equal(changed.length, 2);
+    assert.equal(changed[1].extra.rich.blocks[0].fileName, 'revision.pdf');
+  });
+
   it('bounds actual Redis hydration across invisible-message refill', async () => {
     const time = Date.now();
     await appendFile(time, 'old-visible-work.pdf');
     for (let index = 1; index <= 700; index += 1) {
       await appendFile(time + index, `queued-${index}.pdf`, {
-        catId: null,
+        from: { kind: 'user', userId: OWNER },
         deliveryStatus: 'queued',
       });
     }
@@ -158,7 +199,7 @@ describe('F232 recent works — bounded Redis boundaries', { skip: redisIsolatio
     await store.append({
       userId: OWNER,
       threadId: 'thread-a',
-      catId: 'opus55',
+      from: { kind: 'agent', catId: 'opus55' },
       content: 'gallery',
       mentions: [],
       timestamp: time,
@@ -246,7 +287,7 @@ describe('F232 recent works — bounded Redis boundaries', { skip: redisIsolatio
     await store.append({
       userId: OWNER,
       threadId: 'thread-a',
-      catId: 'opus55',
+      from: { kind: 'agent', catId: 'opus55' },
       content: 'version gallery',
       mentions: [],
       timestamp: time,

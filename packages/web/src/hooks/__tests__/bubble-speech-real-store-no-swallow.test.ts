@@ -53,7 +53,6 @@ describe('F194 speech vs real store dedup (no mock — gpt52 R1)', () => {
       catStatuses: {},
       catInvocations: {},
       activeInvocations: {},
-      currentGame: null,
       threadStates: {},
       viewMode: 'single',
       splitPaneThreadIds: [],

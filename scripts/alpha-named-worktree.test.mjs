@@ -5,14 +5,17 @@ import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { NAMED_ALPHA_PORTS, namedAlphaFixture } from './lib/alpha-named-fixture.mjs';
+import { lifecycleConfig } from './lib/worktree-reaper-probes.mjs';
+import { managedPreviewOperationDecision } from './native-effect-preview-classifier.mjs';
 import { decideNativeHookPayload } from './native-effect-target-guard.mjs';
+import { finishWorktree, ownedWorktreeFacts } from './worktree-finish.mjs';
 
 test('canonical named Alpha launcher carries one tuple from actual main to isolated child', (t) => {
   const f = namedAlphaFixture(t);
   f.captureChild();
   writeFileSync(
     join(f.mainRoot, '.env'),
-    'API_SERVER_PORT=3004\nFRONTEND_URL=http://foreign.invalid\nCOLLECTIVE_SERVICE_PORT=5211\nCAT_CAFE_DATA_DIR=/must-not-use\n',
+    'API_SERVER_PORT=3004\nFRONTEND_URL=http://foreign.invalid\nCAT_CAFE_DATA_DIR=/must-not-use\n',
   );
   const result = f.run([
     'start',
@@ -29,11 +32,9 @@ test('canonical named Alpha launcher carries one tuple from actual main to isola
   assert.equal(env.API_SERVER_PORT, '5312');
   assert.equal(env.FRONTEND_PORT, '5311');
   assert.equal(env.PREVIEW_GATEWAY_PORT, '5411');
-  assert.equal(env.COLLECTIVE_SERVICE_PORT, '5511');
   assert.equal(env.REDIS_PORT, '15397');
   assert.equal(env.API_SERVER_HOST, '127.0.0.1');
   assert.equal(env.FRONTEND_URL, 'http://localhost:5311');
-  assert.equal(env.NEXT_PUBLIC_COLLECTIVE_SERVICE_URL, 'http://127.0.0.1:5511');
   assert.equal(env.REDIS_DATA_DIR, join(f.alphaRoot, '.cat-cafe/redis'));
   assert.equal(env.CAT_CAFE_SIDECAR_LIFECYCLE_DISABLED, '1');
   assert.equal(env.CAT_CAFE_DIRECT_NO_WATCH, '1');
@@ -63,7 +64,7 @@ test('named Alpha preserves managed preview context across dotenv and does not m
   assert.equal(direct.CAT_CAFE_PREVIEW_CLEANUP_RESULT, '');
 });
 
-test('actual native guard admits only the registered main-lineage named Alpha child', (t) => {
+test('named Alpha attribution requires the registered main-lineage child; the launcher rejects unsupported shapes', (t) => {
   const f = namedAlphaFixture(t);
   const child = `pnpm alpha:start --instance f290-communication --ports ${NAMED_ALPHA_PORTS} --allow-empty-redis`;
   const decide = (command, cwd = f.mainRoot) =>
@@ -91,11 +92,34 @@ test('actual native guard admits only the registered main-lineage named Alpha ch
     command.replace('5311 --cwd', '3001 --cwd'),
     command.replace('15397', '6399'),
     command.replace('pnpm alpha:start', 'env CAT_CAFE_DEPLOYMENT_ID= pnpm alpha:start'),
-  ])
-    assert.equal(decide(invalid).decision, 'deny', invalid);
-  assert.equal(decide(command, f.alphaRoot).decision, 'deny', 'launcher belongs to the actual main coordinate');
+  ]) {
+    const verdict = decide(invalid);
+    assert.notEqual(managedPreviewOperationDecision(invalid, f.mainRoot)?.status, 'allow', invalid);
+    assert.notEqual(verdict.target.value, allowed.target.value, 'unsupported shape gains no named attribution');
+    if (invalid.includes('3001 --cwd') || invalid.includes('6399'))
+      assert.equal(verdict.decision, 'deny', 'recognised protected tuples stay refused');
+    else assert.equal(verdict.effect, 'unknown', 'ordinary unsupported grammar remains unproved');
+  }
+  for (const flag of [
+    ['--force'],
+    ['--no-sync'],
+    ['--env-file', '/tmp/evil'],
+    ['--dir', '/tmp/arbitrary'],
+    ['--branch', 'feature'],
+    ['--remote', 'other'],
+  ]) {
+    const rejected = f.run(['start', '--instance', 'f290-communication', '--ports', NAMED_ALPHA_PORTS, ...flag]);
+    assert.notEqual(rejected.status, 0, 'the real launcher retains its option contract');
+  }
+  assert.equal(managedPreviewOperationDecision(command, f.alphaRoot)?.status, 'deny');
+  assert.equal(decide(command, f.alphaRoot).effect, 'unknown', 'main coordinate was not proved');
   writeFileSync(join(f.alphaRoot, 'scripts/alpha-worktree.sh'), '# dirty\n');
-  assert.equal(decide(command).decision, 'deny', 'tracked dirty implementation cannot start');
+  assert.equal(managedPreviewOperationDecision(command, f.mainRoot)?.status, 'deny');
+  assert.equal(decide(command).effect, 'unknown', 'tracked dirty implementation has no named proof');
+  const dirty = f.run(['start', '--instance', 'f290-communication', '--ports', NAMED_ALPHA_PORTS]);
+  assert.notEqual(dirty.status, 0);
+  assert.match(dirty.stderr, /tracked changes/);
+  assert.doesNotMatch(f.readCalls(), /pnpm|redis-cli/);
 });
 
 test('named status/stop consume the existing launcher record coordinates without a start preflight', (t) => {
@@ -117,18 +141,24 @@ test('named status/stop consume the existing launcher record coordinates without
     command: ['pnpm', 'alpha:start', '--instance', 'f290-communication', '--ports', NAMED_ALPHA_PORTS],
   };
   writeFileSync(join(stateDir, `${id}.json`), JSON.stringify(record));
-  for (const action of ['status', 'stop']) {
-    const verdict = decideNativeHookPayload(
-      {
-        tool_name: 'exec_command',
-        cwd: '/tmp',
-        tool_input: { cmd: `pnpm --dir ${f.mainRoot} preview:process ${action} --cwd ${f.mainRoot} --port 5311` },
-      },
-      { selfHost: () => ({ confidence: 'none' }) },
-    );
-    assert.equal(verdict.decision, 'allow', JSON.stringify(verdict));
-    assert.equal(verdict.target.value, `preview://alpha${f.mainRoot}:5311`);
-  }
+  // Serving/build-generated tracked changes do not invalidate an existing
+  // lifecycle coordinate. Startup still requires the exact clean checkout.
+  writeFileSync(join(f.alphaRoot, 'packages/web/package.json'), '{"generated":true}\n');
+  for (const action of ['status', 'stop'])
+    for (const tool_name of ['Bash', 'exec_command']) {
+      const command = `pnpm --dir ${f.mainRoot} preview:process ${action} --cwd ${f.mainRoot} --port 5311`;
+      const verdict = decideNativeHookPayload(
+        {
+          tool_name,
+          cwd: '/tmp',
+          tool_input: { cmd: command, command },
+          ...(tool_name === 'exec_command' ? { turn_id: 'named-alpha-stop' } : {}),
+        },
+        { selfHost: () => ({ confidence: 'none' }) },
+      );
+      assert.equal(verdict.decision, 'allow', JSON.stringify(verdict));
+      assert.equal(verdict.target.value, `preview://alpha${f.mainRoot}:5311`);
+    }
   record.command[record.command.length - 1] = '5311,3002,5411,5511,6399';
   writeFileSync(join(stateDir, `${id}.json`), JSON.stringify(record));
   const verdict = decideNativeHookPayload(
@@ -139,15 +169,16 @@ test('named status/stop consume the existing launcher record coordinates without
     },
     { selfHost: () => ({ confidence: 'none' }) },
   );
-  assert.equal(verdict.decision, 'deny');
+  assert.equal(verdict.effect, 'unknown', 'a malformed stored tuple supplies no lifecycle proof');
+  assert.notEqual(verdict.target.value, `preview://alpha${f.mainRoot}:5311`);
 });
 
 test('named start rejects path overrides and protected tuples before contacting any Redis', (t) => {
   const f = namedAlphaFixture(t);
   for (const args of [
-    ['--ports', '5311,5312,5411,5511,6399'],
-    ['--ports', '05311,5312,5411,5511,15397'],
-    ['--ports', '5311,5311,5411,5511,15397'],
+    ['--ports', '5311,5312,5411,6399'],
+    ['--ports', '05311,5312,5411,15397'],
+    ['--ports', '5311,5311,5411,15397'],
     ['--ports', NAMED_ALPHA_PORTS, '--dir', f.alphaRoot],
     ['--ports', NAMED_ALPHA_PORTS, '--no-sync'],
   ]) {
@@ -182,14 +213,52 @@ test('named init creates only its main-derived registered checkout and preserves
   const sentinel = join(legacy, '.cat-cafe/redis/dump.rdb');
   writeFileSync(sentinel, 'preserve damaged original');
   const created = join(f.directory, 'cat-cafe-alpha-new-site');
-  const result = f.run(['init', '--instance', 'new-site', '--ports', NAMED_ALPHA_PORTS]);
+  const result = f.run(['init', '--instance', 'new-site', '--ports', NAMED_ALPHA_PORTS], {
+    cwd: f.directory,
+    env: {
+      CAT_CAFE_THREAD_ID: 'thread_alpha_original',
+      CAT_CAFE_USER_ID: 'owner-user',
+      CAT_CAFE_INVOCATION_ID: 'alpha-birth',
+    },
+  });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(f.git(['branch', '--show-current'], created), 'alpha/new-site-main-sync');
   assert.equal(f.git(['rev-parse', 'HEAD'], created), f.git(['rev-parse', 'origin/main']));
   assert.equal(readFileSync(sentinel, 'utf8'), 'preserve damaged original');
   assert.equal(f.readCalls().includes('redis-cli '), false);
   assert.equal(existsSync(legacy), true);
+  const finish = { repo: f.mainRoot, path: created, owner: f.env.CAT_CAFE_CAT_ID, sourceRef: 'task:alpha-init' };
+  const { lifecycle } = ownedWorktreeFacts(finish);
+  assert.equal(lifecycle.policy, 'merged');
+  assert.equal(lifecycle.origin.threadId, 'thread_alpha_original');
+  assert.equal(lifecycle.origin.role, 'alpha');
+  assert.ok(Number.isFinite(Date.parse(lifecycle.createdAt)));
+  assert.equal(lifecycleConfig(f.mainRoot, '--local')?.owner, undefined, 'declaration is private to the new tree');
+  const repeated = f.run(['init', '--instance', 'new-site', '--ports', NAMED_ALPHA_PORTS], {
+    env: { CAT_CAFE_CAT_ID: 'another-caller' },
+  });
+  assert.equal(repeated.status, 0, repeated.stderr);
+  assert.deepEqual(lifecycleConfig(created, '--worktree'), lifecycle, 'existing owner and birth stay unchanged');
+  assert.equal(finishWorktree(finish).storageDisposition, 'removed');
+  assert.equal(finishWorktree({ ...finish, mode: 'check' }).state, 'released');
+  assert.equal(existsSync(created), false);
+  assert.equal(readFileSync(sentinel, 'utf8'), 'preserve damaged original');
 });
+
+for (const failure of ['missing owner', 'shared-only config']) {
+  test(`named init refuses ${failure} before creating an undeclared checkout`, (t) => {
+    const f = namedAlphaFixture(t);
+    if (failure === 'shared-only config') f.git(['config', 'extensions.worktreeConfig', 'false']);
+    const result = f.run(['init', '--instance', 'undeclared', '--ports', NAMED_ALPHA_PORTS], {
+      env: failure === 'missing owner' ? { CAT_CAFE_CAT_ID: '' } : {},
+    });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, failure === 'missing owner' ? /invalid --owner/ : /worktreeConfig/);
+    assert.equal(existsSync(join(f.directory, 'cat-cafe-alpha-undeclared')), false);
+    assert.equal(f.git(['branch', '--list', 'alpha/undeclared-main-sync']), '');
+    assert.equal(f.readCalls(), '', 'refusal happens before dependency installation or service probes');
+  });
+}
 
 test('a main advance during compilation cannot widen the once-frozen named Alpha target', (t) => {
   const f = namedAlphaFixture(t);
@@ -220,13 +289,14 @@ test('a live process in the named checkout prevents a new tuple from rebuilding 
     serving.once('error', reject);
   });
   t.after(() => serving.kill());
-  const tuple = '5321,5322,5421,5521,15407';
+  const tuple = '5321,5322,5421,15407';
   const command = `pnpm preview:process start --port 5321 --cwd ${f.mainRoot} -- pnpm alpha:start --instance f290-communication --ports ${tuple}`;
   const decision = decideNativeHookPayload(
     { turn_id: 'serving-alpha', tool_name: 'exec_command', cwd: f.mainRoot, tool_input: { cmd: command } },
     { selfHost: () => ({ confidence: 'none' }) },
   );
-  assert.equal(decision.decision, 'deny');
+  assert.equal(decision.effect, 'unknown', 'serving checkout supplies no new-start attribution');
+  assert.equal(managedPreviewOperationDecision(command, f.mainRoot)?.status, 'deny');
   const start = f.run(['start', '--instance', 'f290-communication', '--ports', tuple]);
   assert.notEqual(start.status, 0);
   assert.match(start.stderr, /checkout has a live process/);

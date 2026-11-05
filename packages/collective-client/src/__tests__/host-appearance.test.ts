@@ -65,6 +65,42 @@ describe('the room appearance from the host', () => {
   });
   afterEach(() => store.dispose());
 
+  it('sets standalone document language from the same URL preference as its visible copy', () => {
+    const previous = location.href;
+    try {
+      history.replaceState(null, '', '/?lang=en');
+      store.dispose();
+      store = createHostAppearance({ root, hostOrigin: undefined, parent });
+      expect(root.lang).toBe('en');
+    } finally {
+      history.replaceState(null, '', previous);
+    }
+  });
+
+  it('accepts display extensions only from the current Host generation and never regresses their own sequence', () => {
+    store.observeGeneration('bridge_aaaaaaaa');
+    const extension = {
+      type: 'collective:host-shell-appearance',
+      v: 1,
+      bridgeId: 'bridge_aaaaaaaa',
+      shellRevision: 1,
+      language: 'en',
+    };
+    expect(deliver(extension, { origin: 'https://foreign.example' })).toBe(false);
+    expect(deliver(extension, { source: {} })).toBe(false);
+    expect(deliver({ ...extension, bridgeId: 'bridge_obsolete' })).toBe(false);
+    expect(deliver(extension)).toBe(true);
+    expect(store.getState().language).toBe('en');
+    expect(deliver({ ...extension, language: 'zh' })).toBe(false);
+    expect(deliver(message())).toBe(true);
+    expect(store.getState().language).toBe('en');
+    store.observeGeneration('bridge_bbbbbbbb');
+    expect(deliver({ ...extension, shellRevision: 99 })).toBe(false);
+    expect(deliver(message({ bridgeId: 'bridge_bbbbbbbb' }))).toBe(true);
+    expect(store.getState().language).toBeUndefined();
+    expect(root.getAttribute('lang')).toBe('zh-CN');
+  });
+
   it('is classic, light and cocoa until a host says otherwise, and never follows the OS into dark', () => {
     const matchMedia = vi.fn(() => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
     vi.stubGlobal('matchMedia', matchMedia);

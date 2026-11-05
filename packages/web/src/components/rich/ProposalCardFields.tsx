@@ -56,22 +56,24 @@ export function formatReportingMode(value: ReportingModeEditValue): string {
 export function ReportingModeEdit({
   value,
   onChange,
+  copy,
 }: {
   value: ReportingModeEditValue;
   onChange: (v: ReportingModeEditValue) => void;
+  copy?: { label: string; options: Record<ReportingModeEditValue, string> };
 }) {
   return (
     <label className="block">
-      <span className="text-cafe-muted">回报模式:</span>{' '}
+      <span className="text-cafe-muted">{copy?.label ?? '回报模式'}:</span>{' '}
       <select
-        aria-label="回报模式"
+        aria-label={copy?.label ?? '回报模式'}
         className="mt-0.5 w-full rounded border border-[var(--console-border-soft)] bg-cafe-surface-canvas p-1 text-xs"
         value={value}
         onChange={(e) => onChange(e.target.value as ReportingModeEditValue)}
       >
         {REPORTING_MODE_OPTIONS.map((option) => (
           <option key={option.value} value={option.value}>
-            {option.label}
+            {copy?.options[option.value] ?? option.label}
           </option>
         ))}
       </select>
@@ -95,27 +97,29 @@ export function formatDeclaredWorkMode(value: DeclaredWorkModeEditValue): string
 export function DeclaredWorkModeEdit({
   value,
   onChange,
+  copy,
 }: {
   value: DeclaredWorkModeEditValue;
   onChange: (value: DeclaredWorkModeEditValue) => void;
+  copy?: { label: string; unknown: string; options: Record<Exclude<DeclaredWorkModeEditValue, ''>, string> };
 }) {
   return (
     <label className="block">
-      <span className="text-cafe-muted">协作方式:</span>{' '}
+      <span className="text-cafe-muted">{copy?.label ?? '协作方式'}:</span>{' '}
       <select
-        aria-label="协作方式"
+        aria-label={copy?.label ?? '协作方式'}
         className="mt-0.5 w-full rounded border border-[var(--console-border-soft)] bg-cafe-surface-canvas p-1 text-xs"
         value={value}
         onChange={(event) => onChange(event.target.value as DeclaredWorkModeEditValue)}
       >
         {value === '' && (
           <option value="" disabled>
-            {UNKNOWN_DECLARED_WORK_MODE_LABEL}
+            {copy?.unknown ?? UNKNOWN_DECLARED_WORK_MODE_LABEL}
           </option>
         )}
         {DECLARED_WORK_MODE_OPTIONS.map((option) => (
           <option key={option.value} value={option.value}>
-            {option.label}
+            {copy?.options[option.value as Exclude<DeclaredWorkModeEditValue, ''>] ?? option.label}
           </option>
         ))}
       </select>
@@ -128,30 +132,32 @@ export function ProjectPathEdit({
   onChange,
   existingProjects,
   defaultParent,
+  copy,
 }: {
   value: string;
   onChange: (v: string) => void;
   existingProjects: string[];
   defaultParent: boolean;
+  copy?: { label: string; choose: string; manual: string; warning: string };
 }) {
   const selectValue = existingProjects.includes(value) ? value : '';
   return (
     <div className="space-y-1">
       {defaultParent && (
         <div className="rounded border border-[var(--semantic-warning)] bg-[var(--semantic-warning-surface)] px-2 py-1 text-xs text-cafe-secondary">
-          这个子 thread 会进入未分类。请选择项目，或留空表示明确保留未分类。
+          {copy?.warning ?? '这个子 thread 会进入未分类。请选择项目，或留空表示明确保留未分类。'}
         </div>
       )}
       {existingProjects.length > 0 && (
         <label className="block">
-          <span className="text-cafe-muted">从已有项目选择:</span>{' '}
+          <span className="text-cafe-muted">{copy?.choose ?? '从已有项目选择'}:</span>{' '}
           <select
-            aria-label="从已有项目选择"
+            aria-label={copy?.choose ?? '从已有项目选择'}
             className="mt-0.5 w-full rounded border border-[var(--console-border-soft)] bg-cafe-surface-canvas p-1 font-mono text-xs"
             value={selectValue}
             onChange={(e) => onChange(e.target.value)}
           >
-            <option value="">手动输入 / 保留未分类</option>
+            <option value="">{copy?.manual ?? '手动输入 / 保留未分类'}</option>
             {existingProjects.map((project) => (
               <option key={project} value={project}>
                 {project}
@@ -161,7 +167,9 @@ export function ProjectPathEdit({
         </label>
       )}
       <EditField
-        label={defaultParent ? '项目归属 (绝对路径，留空=保留未分类)' : '项目归属 (绝对路径，留空=默认)'}
+        label={
+          copy?.label ?? (defaultParent ? '项目归属 (绝对路径，留空=保留未分类)' : '项目归属 (绝对路径，留空=默认)')
+        }
         value={value}
         onChange={onChange}
       />

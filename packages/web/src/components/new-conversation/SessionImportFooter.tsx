@@ -47,9 +47,11 @@ export function SessionImportFooter({
   const copy = useShellCopy(sessionImportCopy);
   const language = useShellLanguage();
   const failureMessages: Record<string, string> = {
-    SESSION_ACTIVE_WRITER: clientId === 'anthropic' ? copy.lockedClaude : copy.lockedCodex,
+    SESSION_ACTIVE_WRITER:
+      clientId === 'anthropic' ? copy.lockedClaude : clientId === 'openai' ? copy.lockedCodex : copy.lockedOther,
     SESSION_OWNER_REQUIRED: copy.ownerRequired,
     SESSION_ALREADY_BOUND: copy.bound,
+    SESSION_NOT_TOP_LEVEL: copy.childSession,
   };
   const failureMessage = failureMessages[failure?.code ?? ''] ?? copy.failed;
   return (

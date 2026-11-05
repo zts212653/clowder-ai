@@ -133,7 +133,7 @@ it('renders Native fields and its original model validation in English', async (
   expect(container.textContent).toContain('denied outright');
   const save = [...document.querySelectorAll('button')].find((button) => button.textContent === 'Save');
   await act(async () => save?.click());
-  expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+  expect(container.querySelector('[role="alert"]')?.textContent).toContain(
     'AGY Native needs at least one approved workspace.',
   );
   expect(vi.mocked(apiFetch).mock.calls.filter(([, init]) => init?.method)).toHaveLength(0);
@@ -153,15 +153,77 @@ it.each(['healthy', 'drifted'] as const)('explains protected cloud identity in E
   expectEnglish();
   expect(container.textContent).toContain('ChatGPT Pro');
 });
-it('keeps the classic modal copy when the durable v2 preference is English', async () => {
-  await act(async () => root.render(<HubCatEditor open cat={cat} onClose={vi.fn()} onSaved={vi.fn()} />));
-  const modal = document.querySelector('[role="dialog"]');
-  expect(modal?.textContent).toContain('认证与模型');
-  expect(modal?.textContent).toContain('身份信息');
-  expect(modal?.textContent).not.toContain('Model & connection');
-  expect(modal?.querySelector<HTMLInputElement>('input[aria-label="Model"]')?.placeholder).toBe(
-    '模型标识符，如 claude-sonnet-4-5',
+it.each(['zh', 'en'] as const)('presents the same Codex member form from settings and Chat (%s)', async (language) => {
+  writeShellLanguage(language);
+  const codex = { ...cat, clientId: 'openai', accountRef: 'codex', cli: {}, defaultModel: 'gpt-6.1-sol' };
+  vi.mocked(apiFetch).mockImplementation(
+    async (url) =>
+      new Response(
+        JSON.stringify(
+          url === '/api/accounts'
+            ? { providers: [{ id: 'codex', clientId: 'openai', displayName: 'Codex', authType: 'oauth', models: [] }] }
+            : url === '/api/config'
+              ? {
+                  config: {
+                    cli: { codexSandboxMode: 'danger-full-access', codexApprovalPolicy: 'on-request' },
+                    codexExecution: { authMode: 'oauth' },
+                  },
+                }
+              : {},
+        ),
+      ),
   );
+  await act(async () =>
+    root.render(
+      <HubCatEditor
+        key="settings"
+        open
+        presentation="page"
+        cat={codex}
+        onClose={vi.fn()}
+        onSaved={vi.fn()}
+        onDelete={vi.fn()}
+      />,
+    ),
+  );
+  const pageForm = document.querySelector('.member-editor-fields');
+  expect(pageForm).toBeTruthy();
+  const expected = pageForm?.textContent?.replace(/\s+/g, ' ').trim();
+  expect(expected).toContain(language === 'zh' ? '完整访问（danger-full-access）' : 'Full access (danger-full-access)');
+  await act(async () =>
+    root.render(
+      <>
+        <HubCatEditor
+          key="settings"
+          open
+          presentation="page"
+          cat={codex}
+          onClose={vi.fn()}
+          onSaved={vi.fn()}
+          onDelete={vi.fn()}
+        />
+        <HubCatEditor key="chat" open cat={codex} onClose={vi.fn()} onSaved={vi.fn()} onDelete={vi.fn()} />
+      </>,
+    ),
+  );
+  const modal = document.querySelector('[role="dialog"]');
+  expect(modal?.querySelector('select[aria-label="MCP Support"] option[value="false"]')?.textContent).toBe(
+    language === 'zh' ? '关闭' : 'Off',
+  );
+  expect(modal?.querySelector('button[aria-label]')?.getAttribute('aria-label')).toBe(
+    language === 'zh' ? '关闭' : 'Close',
+  );
+  if (language === 'en')
+    expect(modal?.querySelector('.member-editor-fields')?.textContent?.match(/\p{Script=Han}/gu) ?? []).toEqual([]);
+  expect(modal?.querySelector('.member-editor-fields')?.textContent?.replace(/\s+/g, ' ').trim()).toBe(expected);
+  expect(modal?.textContent).not.toContain('── Codex 专属 (仅 Client=Codex 时显示) ──');
+  for (const link of modal?.querySelectorAll<HTMLAnchorElement>('nav a') ?? []) {
+    const target = document.getElementById(link.hash.slice(1));
+    expect(modal?.contains(target), 'A modal directory link must target its own form, even with Settings open').toBe(
+      true,
+    );
+  }
+  expect(vi.mocked(apiFetch).mock.calls.filter(([, init]) => init?.method)).toHaveLength(0);
 });
 it.each([
   ['zh', '添加', '还差 4 项才能添加：账号、名称、角色描述、@ 名字。'],
@@ -188,7 +250,8 @@ it.each([
   expect(submit?.disabled).toBe(false);
   await act(async () => submit?.click());
   const alerts = Array.from(container.querySelectorAll('[role="alert"]')).map((a) => a.textContent);
-  expect(alerts).toEqual([message]);
+  expect(alerts[0]).toBe(message);
+  expect(alerts[1]).toContain(language === 'en' ? 'Your changes are still here' : '修改还在');
   expect(container.querySelector('input[aria-label="Name"]')?.getAttribute('aria-invalid')).toBe('true');
   expect(vi.mocked(apiFetch).mock.calls.filter(([, init]) => init?.method)).toHaveLength(0);
 });

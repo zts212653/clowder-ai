@@ -7,11 +7,12 @@ import { createServer } from 'node:net';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
 import { trajectoryFixture } from './f295-trajectory-fixture.mjs';
 import { runWorkGroupsJourney } from './f295-work-groups.journey.mjs';
 import { ensureWorkspaceOpen } from './f307-workspace-open.mjs';
 import { runF322BExecutionLocationJourney } from './f322-b-execution-location.journey.mjs';
+import { runHappeningProjectsJourney } from './happening-projects.journey.mjs';
 
 const WEB_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const NEXT_BIN = path.resolve(WEB_ROOT, '../../node_modules/next/dist/bin/next');
@@ -74,6 +75,7 @@ const FIXED_API_FIXTURES = new Map([
           displayName: '小太阳·砚砚',
           color: { primary: 'var(--color-codex-primary)', secondary: 'var(--color-codex-bg)' },
           mentionPatterns: ['@codex-sol'],
+          carrier: 'cli',
           clientId: 'openai',
           defaultModel: 'gpt-5.6-sol',
           avatar: '',
@@ -327,3 +329,22 @@ for (const viewport of [
       }
     },
   );
+
+for (const [width, language] of [
+  [1440, 'zh'],
+  [390, 'en'],
+]) {
+  test(
+    `Happening Now projects fold, persist, navigate and stop exactly (${width}px ${language})`,
+    { timeout: 120_000 },
+    () =>
+      runHappeningProjectsJourney({
+        browser,
+        baseUrl,
+        threadId: THREAD_ID,
+        fixtureForApi,
+        viewport: { width, height: 1000 },
+        language,
+      }),
+  );
+}

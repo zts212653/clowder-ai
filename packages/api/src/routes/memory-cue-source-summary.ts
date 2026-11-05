@@ -2,10 +2,12 @@ import { RECALL_RESOLVER_FAMILIES, type RecallResolverFamily } from '@cat-cafe/s
 import type Database from 'better-sqlite3';
 import type { FastifyPluginAsync } from 'fastify';
 import { MemoryCueSourceSummaryReader } from '../domains/memory/cue/MemoryCueSourceSummaryReader.js';
+import type { MatterMemoryService } from '../domains/memory/matters/MatterMemoryService.js';
 import { resolveDirectLocalAuthorizationUserId } from '../utils/request-identity.js';
 
 export interface MemoryCueSourceSummaryOptions {
   evidenceDb: Database.Database;
+  matterMemoryService?: MatterMemoryService;
 }
 
 /** F321 A1b: owner-local, content-free source-anchor read model. */
@@ -23,6 +25,15 @@ export const memoryCueSourceSummaryRoutes: FastifyPluginAsync<MemoryCueSourceSum
       }
       if (typeof sourceAnchor !== 'string' || !sourceAnchor.trim() || sourceAnchor.length > 500) {
         return reply.status(400).send({ error: 'Invalid sourceAnchor' });
+      }
+      if (resolverFamily === 'matter') {
+        const page = sourceAnchor.startsWith('matter:')
+          ? await opts.matterMemoryService?.project(
+              { userId: ownerUserId, viewer: { type: 'user' } },
+              sourceAnchor.slice('matter:'.length),
+            )
+          : null;
+        if (!page) return reply.status(404).send({ error: 'not_available' });
       }
       return reader.summarize(ownerUserId, resolverFamily as RecallResolverFamily, sourceAnchor.trim());
     },

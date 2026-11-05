@@ -34,7 +34,13 @@ export function useReviewDraft(key: string) {
   useEffect(() => {
     const committed = (event: Event) => {
       const detail = (event as CustomEvent<ReviewDraftCommit>).detail;
-      if (detail?.key === key) setDraft((current) => (current?.body === detail.body ? null : current));
+      if (detail?.key === key)
+        setDraft((current) =>
+          current?.body === detail.body &&
+          (detail.submittedDraft === undefined || JSON.stringify(current) === detail.submittedDraft)
+            ? null
+            : current,
+        );
     };
     window.addEventListener(REVIEW_DRAFT_COMMITTED_EVENT, committed);
     return () => window.removeEventListener(REVIEW_DRAFT_COMMITTED_EVENT, committed);
@@ -48,9 +54,15 @@ export function useReviewDraft(key: string) {
       setStorageError(true);
     }
   }
-  function clear() {
-    setDraft(null);
+  function clear(submitted?: ReviewDraft) {
     try {
+      if (submitted) {
+        const saved = localStorage.getItem(key);
+        if (saved && JSON.stringify(JSON.parse(saved)) !== JSON.stringify(submitted)) return;
+      }
+      setDraft((current) =>
+        submitted && current && JSON.stringify(current) !== JSON.stringify(submitted) ? current : null,
+      );
       localStorage.removeItem(key);
       setStorageError(false);
     } catch {

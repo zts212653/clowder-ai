@@ -2,15 +2,16 @@ import type { EntrustedWorkOwnerReadV1, GlobalArtifactDTO } from '@cat-cafe/shar
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { primeCoCreatorConfigCache, resetCoCreatorConfigCacheForTest } from '@/hooks/useCoCreatorConfig';
 import { NeedsMeOwnerSurface, ProductScheduleOwnerSurface } from '../GrowingOwnerSurfaces';
-import { createWorkspaceDestinationSurface } from '../real-surface-adapters';
+import { createWorkspaceDestinationSurface, resolveFileTarget } from '../real-surface-adapters';
 
 const mocks = vi.hoisted(() => ({
   fetch: vi.fn(),
   ownerReads: [] as EntrustedWorkOwnerReadV1[],
   navigate: vi.fn(),
 }));
-vi.mock('@/utils/api-client', () => ({ apiFetch: mocks.fetch }));
+vi.mock('@/utils/api-client', () => ({ apiFetch: mocks.fetch, API_URL: 'http://localhost' }));
 vi.mock('@/hooks/useEntrustedWorkProjection', () => ({
   useEntrustedWorkProjection: () => ({ ownerReads: mocks.ownerReads, loading: false, error: false, refetch: vi.fn() }),
 }));
@@ -88,6 +89,22 @@ function preparedOwnerRead(): EntrustedWorkOwnerReadV1 {
   };
 }
 
+function mockRequests(read: (path: string) => Promise<Response>) {
+  mocks.fetch.mockImplementation((path: string) => {
+    if (path === '/api/session') return Promise.resolve(Response.json({ userId: 'owner' }));
+    if (path === '/api/config/ignored-items') {
+      return Promise.resolve(Response.json({ ownerUserId: 'owner', revision: 0, entries: [] }));
+    }
+    return read(path);
+  });
+}
+
+function expectOnlyOwnerReads(projection: 'product-schedule' | 'needs-me') {
+  expect(mocks.fetch.mock.calls.map(([path]) => path)).toEqual(
+    projection === 'product-schedule' ? ['/api/session', '/api/config/ignored-items'] : [],
+  );
+}
+
 describe('F310 prepared Artifact loading in real owner surfaces', () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -97,6 +114,9 @@ describe('F310 prepared Artifact loading in real owner surfaces', () => {
 
   beforeEach(() => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    resetCoCreatorConfigCacheForTest();
+    // This owner-data loading fixture supplies its independent display config explicitly.
+    primeCoCreatorConfigCache({ name: 'Prepared owner', aliases: [], mentionPatterns: ['@prepared-owner'] });
     mocks.ownerReads = [preparedOwnerRead()];
     mocks.fetch.mockReset();
     mocks.navigate.mockReset();
@@ -105,7 +125,7 @@ describe('F310 prepared Artifact loading in real owner surfaces', () => {
     const catalog = new Promise<Response>((resolve) => {
       finishCatalog = resolve;
     });
-    mocks.fetch.mockImplementation((path: string) => {
+    mockRequests((path: string) => {
       if (path !== '/api/threads/thread-source/artifacts') throw new Error(`Unexpected request: ${path}`);
       return catalog.then((response) => response.clone());
     });
@@ -116,6 +136,7 @@ describe('F310 prepared Artifact loading in real owner surfaces', () => {
 
   afterEach(() => {
     act(() => root.unmount());
+    resetCoCreatorConfigCacheForTest();
     container.remove();
     vi.unstubAllGlobals();
   });
@@ -155,11 +176,17 @@ describe('F310 prepared Artifact loading in real owner surfaces', () => {
     await act(async () => finishCatalog(new Response(JSON.stringify({ threadId: 'thread-source', artifacts }))));
   }
 
+  it('renders the configured human owner without adding an owner-data dependency', async () => {
+    await render('needs-me');
+    expect(container.querySelector('[data-testid="entrusted-work-brief"]')?.textContent).toContain('Prepared owner');
+    expect(mocks.fetch.mock.calls.map(([path]) => path)).toEqual(['/api/threads/thread-source/artifacts']);
+  });
+
   it.each([
     'product-schedule',
     'needs-me',
   ] as const)('%s opens its exact publication even when the unrelated global catalog times out', async (projection) => {
-    mocks.fetch.mockImplementation((path: string) => {
+    mockRequests((path: string) => {
       if (path === '/api/artifacts') return Promise.reject(new Error('Request timed out'));
       if (path === '/api/threads/thread-source/artifacts') {
         return Promise.resolve(new Response(JSON.stringify({ threadId: 'thread-source', artifacts: [artifact] })));
@@ -182,11 +209,45 @@ describe('F310 prepared Artifact loading in real owner surfaces', () => {
   it.each([
     'product-schedule',
     'needs-me',
+  ] as const)('%s hands the common opener resolved raw FILE to its original return host', async (projection) => {
+    const raw =
+      '/api/workspace/file/raw?' +
+      new URLSearchParams({
+        worktreeId: 'source-tree',
+        path: 'docs/后续建设.md',
+      });
+    const work = preparedOwnerRead();
+    if (!work.preparedArtifact) throw new Error('Expected a prepared source');
+    work.preparedArtifact = {
+      ...work.preparedArtifact,
+      artifactRef: raw,
+      openInWorkspaceRef: `workspace:artifact:thread-source:700:${raw}`,
+    };
+    mocks.ownerReads = [work];
+    mockRequests((path) => {
+      if (path !== '/api/threads/thread-source/artifacts') throw new Error(`Unexpected request: ${path}`);
+      return Promise.resolve(Response.json({ threadId: 'thread-source', artifacts: [{ ...artifact, url: raw }] }));
+    });
+    await render(projection);
+    await act(async () =>
+      button(projection === 'needs-me' ? 'needs-me-open-artifact' : 'product-schedule-open-artifact').click(),
+    );
+    expect(open).toHaveBeenCalledOnce();
+    const { artifact: surface, returnSurface } = open.mock.calls[0][0];
+    expect(surface.type).toBe('file');
+    expect(resolveFileTarget(surface)).toMatchObject({ worktreeId: 'source-tree', path: 'docs/后续建设.md' });
+    expect(decodeURIComponent(returnSurface.resultTargetRef.key)).toContain(`${subjectRef}|2`);
+    expect(mocks.fetch.mock.calls.map(([path]) => path)).not.toContain(raw);
+  });
+
+  it.each([
+    'product-schedule',
+    'needs-me',
   ] as const)('%s waits only for its original thread and opens the exact publication with the original return item', async (projection) => {
     await render(projection);
     const openButton = button(projection === 'needs-me' ? 'needs-me-open-artifact' : 'product-schedule-open-artifact');
     if (projection === 'product-schedule') {
-      expect(mocks.fetch).not.toHaveBeenCalled();
+      expectOnlyOwnerReads(projection);
       expect(openButton.disabled).toBe(false);
       act(() => openButton.click());
     }
@@ -219,9 +280,11 @@ describe('F310 prepared Artifact loading in real owner surfaces', () => {
   it('aborts an unfinished owner read on departure and never opens its late result', async () => {
     await render('product-schedule');
     act(() => button('product-schedule-open-artifact').click());
-    const signal = mocks.fetch.mock.calls[0]?.[1]?.signal as AbortSignal;
+    const request = mocks.fetch.mock.calls.find(([path]) => path === '/api/threads/thread-source/artifacts');
+    const signal = request?.[1]?.signal as AbortSignal | undefined;
+    expect(signal?.aborted).toBe(false);
     act(() => root.render(null));
-    expect(signal.aborted).toBe(true);
+    expect(signal?.aborted).toBe(true);
     await loadCatalog([artifact]);
     expect(open).not.toHaveBeenCalled();
   });
@@ -274,7 +337,7 @@ describe('F310 prepared Artifact loading in real owner surfaces', () => {
     expect(result.artifact.resultTargetRef).toEqual({ owner: 'thread', key: 'thread-source' });
     expect(decodeURIComponent(result.returnSurface.resultTargetRef.key)).toContain(`${subjectRef}|2`);
     expect(container.querySelector('[role="alert"]')).toBeNull();
-    expect(mocks.fetch).not.toHaveBeenCalled();
+    expectOnlyOwnerReads(projection);
   });
 
   it.each([
@@ -294,7 +357,7 @@ describe('F310 prepared Artifact loading in real owner surfaces', () => {
       openInWorkspaceRef: `workspace:content-review:thread-source:${reviewId}`,
     };
     mocks.ownerReads = [ownerRead];
-    mocks.fetch.mockImplementation((path: string) => {
+    mockRequests((path: string) => {
       if (path === '/api/artifacts') return Promise.resolve(new Response(JSON.stringify({ artifacts: [] })));
       if (path === `/api/artifact-reviews/${reviewId}`)
         return Promise.resolve(new Response(JSON.stringify({ review: { reviewId, title: '判断产物面板按钮文案' } })));

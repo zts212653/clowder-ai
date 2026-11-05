@@ -40,7 +40,7 @@ async function fixture(t, documents?) {
   function source(content = '继续这个 Phase B，把接受的结果做好', extra = {}) {
     return messageStore.append({
       userId: 'human',
-      catId: null,
+      from: { kind: 'user', userId: 'human' },
       threadId: thread.id,
       content,
       mentions: [],
@@ -152,7 +152,7 @@ test('callback source auth rejects forged, stale, and cross-thread sources witho
     401,
   );
   assert.equal((await f.post({ ...body, sourceMessageRevision: `sha256:${'b'.repeat(64)}` })).statusCode, 409);
-  const forged = f.source('continue', { catId: 'codex-sol' });
+  const forged = f.source('continue', { from: { kind: 'agent', catId: 'codex-sol' } });
   assert.equal((await f.post(f.payload('admit', forged, { title: 'Phase B', closure }))).statusCode, 409);
   const elsewhere = f.threadStore.create('human', 'Elsewhere', process.cwd());
   const foreign = f.source('continue', { threadId: elsewhere.id });

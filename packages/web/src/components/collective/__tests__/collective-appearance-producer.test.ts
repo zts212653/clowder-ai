@@ -125,3 +125,11 @@ describe('numbering what is said, one frame generation at a time', () => {
     });
   });
 });
+
+it('keeps the v1 message consumable by a strict legacy Client when the Host adds language and shell roles', () => {
+  const appearance = readHostAppearance({ presentation: 'v2', scheme: 'light', language: 'en', resolveColor });
+  if (!appearance) throw new Error('Expected a resolved appearance');
+  const message = createAppearanceSequencer().next('bridge_aaaaaaaa', appearance);
+  expect(message).not.toHaveProperty('language');
+  expect(message).not.toHaveProperty('shell');
+});

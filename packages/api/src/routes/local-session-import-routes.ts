@@ -1,6 +1,5 @@
-import { catRegistry } from '@cat-cafe/shared';
+import { catRegistry, humanSessionFirstLine, isLocalSessionId, localSessionImportTool } from '@cat-cafe/shared';
 import type { FastifyInstance } from 'fastify';
-import { z } from 'zod';
 import type { ISessionChainStore } from '../domains/cats/services/stores/ports/SessionChainStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import type { LocalSessionList, LocalSessionMetadata } from '../domains/cats/services/types.js';
@@ -36,6 +35,8 @@ export async function localSessionConflict(
 
 export function localSessionFailure(error: unknown): { code: string; error: string } {
   const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
+  if (code === 'SESSION_NOT_TOP_LEVEL')
+    return { code, error: 'Subagent sessions cannot be imported. Choose the original parent session.' };
   return code === 'SESSION_ACTIVE_WRITER'
     ? { code, error: 'This session is running in its original tool. Close it there, then check again.' }
     : {
@@ -56,21 +57,17 @@ export function registerLocalSessionImportRoutes(app: FastifyInstance, options: 
         return reply.status(ownerError.status).send({ code: 'SESSION_OWNER_REQUIRED', error: ownerError.error });
       const { catId, sessionId } = request.params;
       const cat = catRegistry.tryGet(catId);
-      if (
-        !cat ||
-        catId === 'gpt-pro' ||
-        cat.config.provider === 'openai-chatgpt-pro' ||
-        !cat.config.cli ||
-        !['openai', 'anthropic'].includes(cat.config.clientId) ||
-        !z.string().uuid().safeParse(sessionId).success
-      ) {
-        return reply.status(400).send({ error: 'Choose a Claude Code or Codex member and a valid session ID' });
+      if (!cat || !localSessionImportTool(cat.config) || !isLocalSessionId(cat.config.clientId, sessionId)) {
+        return reply.status(400).send({ error: 'Choose a supported local member and a valid native session ID' });
       }
       const conflict = await localSessionConflict(options, sessionId, userId);
       if (conflict) return reply.status(409).send(conflict);
       if (!options.inspectLocalSession) return reply.status(503).send({ error: 'Session inspection is unavailable' });
       try {
-        return { session: await options.inspectLocalSession(catId, sessionId) };
+        const session = await options.inspectLocalSession(catId, sessionId);
+        if (session.sessionId !== sessionId || session.clientId !== cat.config.clientId)
+          throw new Error('Native session inspection returned a different identity');
+        return { session: { ...session, firstPrompt: humanSessionFirstLine(session.firstPrompt) } };
       } catch (error) {
         return reply.status(409).send(localSessionFailure(error));
       }

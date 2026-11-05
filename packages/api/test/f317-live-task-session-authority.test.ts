@@ -37,32 +37,36 @@ async function fixture(householdToolsEnabled = true) {
     householdToolsEnabled,
     publish() {},
   });
-  await call.configure({
-    CAT_CAFE_API_URL: 'http://127.0.0.1:5227',
-    CAT_CAFE_USER_ID: actor.userId,
-    CAT_CAFE_THREAD_ID: actor.threadId,
-    CAT_CAFE_CAT_ID: catId,
-    CAT_CAFE_INVOCATION_ID: actor.invocationId,
-    CAT_CAFE_CALLBACK_TOKEN: 'fixture-token',
-  });
-  await call.ready('root', {
-    submitText: async () => 'turn',
-    request: async (method) => {
-      if (method === 'thread/realtime/start') {
-        await call.observe({
-          method: 'thread/realtime/started',
-          params: { threadId: 'root', realtimeSessionId: 'rtc' },
-        });
-        await call.observe({ method: 'thread/realtime/sdp', params: { threadId: 'root', sdp: 'answer' } });
-      }
-      if (method === 'thread/realtime/stop')
-        await call.observe({ method: 'thread/realtime/closed', params: { threadId: 'root' } });
-      return {};
-    },
-  });
-  await call.start('synthetic-offer');
+  async function start() {
+    await sessions.claim(call.id, actor.userId, actor.threadId, [actor.catId]);
+    await call.configure({
+      CAT_CAFE_API_URL: 'http://127.0.0.1:5227',
+      CAT_CAFE_USER_ID: actor.userId,
+      CAT_CAFE_THREAD_ID: actor.threadId,
+      CAT_CAFE_CAT_ID: catId,
+      CAT_CAFE_INVOCATION_ID: actor.invocationId,
+      CAT_CAFE_CALLBACK_TOKEN: 'fixture-token',
+    });
+    await call.ready('root', {
+      submitText: async () => 'turn',
+      request: async (method) => {
+        if (method === 'thread/realtime/start') {
+          await call.observe({
+            method: 'thread/realtime/started',
+            params: { threadId: 'root', realtimeSessionId: 'rtc' },
+          });
+          await call.observe({ method: 'thread/realtime/sdp', params: { threadId: 'root', sdp: 'answer' } });
+        }
+        if (method === 'thread/realtime/stop')
+          await call.observe({ method: 'thread/realtime/closed', params: { threadId: 'root' } });
+        return {};
+      },
+    });
+    await call.start('synthetic-offer');
+  }
   return {
     sessions,
+    start,
     call,
     actor,
     authority: createLiveTaskAuthority(sessions, turns),
@@ -79,7 +83,7 @@ test('production Task adapter uses the actual turn policy and the claimed owner/
     assert.equal(await f.authority.isLive({ ...f.actor, invocationId: 'ordinary' }), false);
     assert.equal(await f.authority.isLive({ ...f.actor, invocationId: 'missing' }), false);
     await assert.rejects(f.authority.assertCurrent(f.actor));
-    f.sessions.claim(f.call.id, f.actor.userId, f.actor.threadId, [f.actor.catId]);
+    await f.start();
     await f.authority.assertCurrent(f.actor);
     for (const actor of [
       { ...f.actor, userId: 'foreign' },
@@ -113,7 +117,7 @@ test('production Task adapter uses the actual turn policy and the claimed owner/
 test('a claimed real Session without household tools cannot admit Task mutations', async () => {
   const f = await fixture(false);
   try {
-    f.sessions.claim(f.call.id, f.actor.userId, f.actor.threadId, [f.actor.catId]);
+    await f.start();
     await assert.rejects(f.authority.assertCurrent(f.actor));
   } finally {
     await f.sessions.close();

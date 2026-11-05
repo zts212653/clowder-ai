@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it, mock } from 'node:test';
+import { isHydratedMessageBundle } from '@cat-cafe/shared';
 import Fastify from 'fastify';
 import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
@@ -92,6 +93,7 @@ describe('GET /api/message-bundles/:messageId', () => {
     });
 
     assert.equal(response.statusCode, 200, response.body);
+    assert.ok(isHydratedMessageBundle(response.json()), 'actual route response must satisfy the Web read contract');
     assert.deepEqual(JSON.parse(response.body), {
       messageBundleId: 'bundle-1',
       targetThreadId: 'target-thread',
@@ -166,6 +168,7 @@ describe('GET /api/message-bundles/:messageId', () => {
 
     assert.equal(response.statusCode, 200, response.body);
     const body = JSON.parse(response.body);
+    assert.ok(isHydratedMessageBundle(body), 'tombstones remain valid projections without sender or content');
     assert.deepEqual(body.items, [{ status: 'tombstone', messageId: 'source-1', reason: 'source_unavailable' }]);
     assert.equal(response.body.includes('recalled private body'), false);
   });

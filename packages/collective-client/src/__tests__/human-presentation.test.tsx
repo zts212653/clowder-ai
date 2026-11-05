@@ -99,11 +99,12 @@ describe('who a message belongs to', () => {
 describe('new presentation: your own message stays named on the left', () => {
   const markup = renderMessage(mine, ME);
 
-  it('keeps the avatar, name, and origin instead of relying on alignment to imply identity', () => {
+  it('keeps the avatar and name instead of relying on alignment to imply identity', () => {
     expect(markup).toContain('data-author="self"');
     expect(markup).toContain('avatar-button');
-    expect(markup).toContain('<strong>阿宪</strong>');
-    expect(markup).toContain('Collective 成员');
+    expect(markup).toMatch(/data-testid="cat-nameplate-name"[^>]*>阿宪<\/span>/);
+    expect(markup).toContain('human-nameplate');
+    expect(markup).not.toContain('Collective 成员');
   });
 
   it('keeps the body and what you can do with the message without a private-chat bubble', () => {
@@ -129,7 +130,7 @@ describe('new presentation: another person', () => {
   it('is on the left with an avatar, name, and time', () => {
     expect(markup).toContain('data-author="other-human"');
     expect(markup).toContain('avatar-button');
-    expect(markup).toMatch(/message-meta[\s\S]*<strong>阿禾<\/strong>/);
+    expect(markup).toMatch(/message-meta[\s\S]*cat-nameplate-name[^>]*>阿禾<\/span>/);
     expect(markup).toMatch(/<time[^>]*>/);
   });
 
@@ -141,14 +142,14 @@ describe('new presentation: another person', () => {
   it('keeps the sender from the original event when the name is the same as yours', () => {
     const same = renderMessage(sameNameOther, ME);
     expect(same).toContain('data-author="other-human"');
-    expect(same).toContain('<strong>阿宪</strong>');
+    expect(same).toMatch(/data-testid="cat-nameplate-name"[^>]*>阿宪<\/span>/);
     expect(same).not.toContain('data-author="self"');
   });
 
   it('is on the left, named, when the viewer is unknown', () => {
     const unknown = renderMessage(mine, undefined);
     expect(unknown).toContain('data-author="other-human"');
-    expect(unknown).toContain('<strong>阿宪</strong>');
+    expect(unknown).toMatch(/data-testid="cat-nameplate-name"[^>]*>阿宪<\/span>/);
     expect(unknown).not.toContain('message-bubble');
   });
 });
@@ -158,7 +159,7 @@ describe('new presentation: cats are untouched', () => {
     const markup = renderMessage(myCat, ME);
 
     expect(markup).toContain('avatar-button');
-    expect(markup).toContain('<strong>缅因猫</strong>');
+    expect(markup).toMatch(/data-testid="cat-nameplate-name"[^>]*>缅因猫<\/span>/);
     expect(markup).not.toContain('data-author="self"');
   });
 });
@@ -198,7 +199,7 @@ describe('reply previews keep the responder visible', () => {
   });
 });
 
-describe('classic presentation is what it always was', () => {
+describe('the classic author-state contract uses the same shared identity plate', () => {
   const classic = (root: CollectiveEventEnvelope, viewer: string | undefined) =>
     renderToStaticMarkup(
       <ChannelMessage
@@ -215,14 +216,14 @@ describe('classic presentation is what it always was', () => {
     ['your own message', mine, ME],
     ['another person', theirs, ME],
     ['an unknown viewer', mine, undefined],
-  ] as const)('%s keeps the avatar column, the name and the origin line', (_label, root, viewer) => {
+  ] as const)('%s keeps the avatar and name without an internal origin label', (_label, root, viewer) => {
     const markup = classic(root, viewer);
 
     expect(markup).toContain('avatar-button');
     expect(markup).toContain('class="message-meta"');
-    expect(markup).toContain('Collective 成员 · 人');
+    expect(markup).not.toContain('Collective 成员 · 人');
     expect(markup).not.toContain('data-author="self"');
-    expect(markup).not.toContain('human-nameplate');
+    expect(markup).toContain('human-nameplate');
     expect(markup).not.toContain('message-bubble');
   });
 });
@@ -259,7 +260,7 @@ describe('the host said nothing: the room is the classic layout', () => {
       renderToStaticMarkup(<TopicMessage event={mine} currentHumanId={ME} />),
     ]) {
       expect(markup).not.toContain('data-author');
-      expect(markup).not.toContain('human-nameplate');
+      expect(markup).toContain('human-nameplate');
       expect(markup).not.toContain('message-bubble');
     }
     expect(channel(mine)).toContain('avatar-button');
@@ -338,17 +339,17 @@ describe('topic messages', () => {
 
   it('draws your own and another person with the same left-side identity grammar', () => {
     expect(topic(mine, ME)).toContain('data-author="self"');
-    expect(topic(mine, ME)).toContain('<strong>阿宪</strong>');
+    expect(topic(mine, ME)).toMatch(/data-testid="cat-nameplate-name"[^>]*>阿宪<\/span>/);
     expect(topic(mine, ME)).toContain('avatar');
-    expect(topic(theirs, ME)).toContain('<strong>阿禾</strong>');
-    expect(topic(theirs, ME)).not.toContain('human-nameplate');
+    expect(topic(theirs, ME)).toMatch(/data-testid="cat-nameplate-name"[^>]*>阿禾<\/span>/);
+    expect(topic(theirs, ME)).toContain('human-nameplate');
   });
 
   it('draw an unknown viewer on the left, named', () => {
     const markup = topic(mine, undefined);
 
     expect(markup).toContain('data-author="other-human"');
-    expect(markup).toContain('<strong>阿宪</strong>');
+    expect(markup).toMatch(/data-testid="cat-nameplate-name"[^>]*>阿宪<\/span>/);
   });
 
   it('keep the classic layout in the classic presentation', () => {
@@ -448,7 +449,7 @@ describe('the places that draw an event without the channel flow around it', () 
     const markup = flow([mine], '');
 
     expect(markup).not.toContain('data-author="self"');
-    expect(markup).toContain('<strong>阿宪</strong>');
+    expect(markup).toMatch(/data-testid="cat-nameplate-name"[^>]*>阿宪<\/span>/);
   });
 
   it("plays the first-entry demo with the narrator as the viewer: the host's question is yours, the neighbour is another person", () => {

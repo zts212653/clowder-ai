@@ -12,7 +12,11 @@ import { useEvolutionReading } from '../evolution-reading-state';
 import { ExplorationLineage } from '../exploration/ExplorationLineage';
 import { ExplorationPairedResults } from '../exploration/ExplorationPairedResults';
 import { compareExplorationRecords } from '../exploration/exploration-comparison';
-import { layoutExplorationLineage } from '../exploration/exploration-lineage';
+import {
+  LINEAGE_NODE_SIZE,
+  layoutExplorationLineage,
+  layoutExplorationLineageV2,
+} from '../exploration/exploration-lineage';
 import { DEFAULT_EXPLORATION, explorationReadingSchema } from '../exploration/exploration-reading';
 import { EvolutionMomentContext } from '../journey/EvolutionMomentContext';
 import { programFixture } from './evolution-fixtures';
@@ -272,5 +276,65 @@ describe('accepted exploration reading experience', () => {
     const readable = onViewport.mock.calls.at(-1)![0];
     expect(readable.zoom).toBeGreaterThanOrEqual(1);
     expect(explorationReadingSchema.safeParse({ ...DEFAULT_EXPLORATION, viewport: readable }).success).toBe(true);
+  });
+
+  it('centres Locate and Home on the same grouped v2 coordinates that the canvas renders', async () => {
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(320);
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(210);
+    const template = evolutionExplorationNodeSchema.parse(explorationFixture().nodes[0]);
+    if (template.kind !== 'owner_version') throw new Error('Expected the real owner-version fixture');
+    const archive = (id: string, parent?: string) =>
+      evolutionExplorationNodeSchema.parse({
+        kind: 'public_archive',
+        nodeRef: source(id),
+        sourceRef: source(`${id}-source`),
+        title: id,
+        summary: `${id} archive`,
+        changes: [],
+        parentEdges: parent ? [{ parentNodeRef: source(parent), sourceRef: source(`${parent}:${id}`) }] : [],
+      });
+    const cortex = archive('cortex-archive-container:matches');
+    const nodes = [
+      template,
+      archive('registered-root'),
+      archive('registered-child', 'registered-root'),
+      archive('solo'),
+      cortex,
+    ];
+    const selected = refIdentity(cortex.nodeRef);
+    const onViewport = vi.fn();
+    await act(async () =>
+      root.render(
+        <ExplorationLineage
+          nodes={nodes}
+          selected={selected}
+          currentKeys={new Set()}
+          viewport={DEFAULT_EXPLORATION.viewport}
+          onViewport={onViewport}
+          onSelect={() => {}}
+          v2
+        />,
+      ),
+    );
+    const expected = layoutExplorationLineageV2(nodes, []).nodes.find((entry) => entry.key === selected);
+    if (!expected) throw new Error('Expected selected Cortex node in grouped layout');
+    const assertCentred = () => {
+      const view = onViewport.mock.calls.at(-1)?.[0];
+      expect(view).toBeDefined();
+      expect(view.x + (expected.x + LINEAGE_NODE_SIZE.width / 2) * view.zoom).toBeCloseTo(160);
+      expect(view.y + (expected.y + LINEAGE_NODE_SIZE.height / 2) * view.zoom).toBeCloseTo(105);
+    };
+
+    onViewport.mockClear();
+    const locate = host.querySelector<HTMLButtonElement>('button[aria-label="定位阅读版"]');
+    if (!locate) throw new Error('Expected Locate control');
+    await act(async () => locate.click());
+    assertCentred();
+
+    onViewport.mockClear();
+    const canvas = host.querySelector<HTMLElement>('[aria-label="可平移缩放的版本画布"]');
+    if (!canvas) throw new Error('Expected lineage canvas');
+    await act(async () => canvas.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true })));
+    assertCentred();
   });
 });

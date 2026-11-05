@@ -73,7 +73,11 @@ export function usePersonAction(personId: string, onApplied: (action: PersonOwne
     },
     submit: (input: PersonOwnerCommand) => {
       if (!pending.current) {
-        command.current = { ...input, requestId: crypto.randomUUID() };
+        const requestId = crypto.randomUUID();
+        command.current = {
+          ...input,
+          requestId: input.action === 'hard_forget_person' ? `person_forget_${requestId}` : requestId,
+        };
         void execute();
       }
     },

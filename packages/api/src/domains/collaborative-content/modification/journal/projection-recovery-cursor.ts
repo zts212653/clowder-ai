@@ -25,12 +25,13 @@ export function nextContentModificationProjectionBodies(db: Database.Database, l
       let rows = db
         .prepare(
           `SELECT request_id,body FROM content_modification_requests
-           WHERE request_id>? ORDER BY request_id LIMIT ?`,
+           WHERE request_id>? AND COALESCE(json_extract(body,'$.kind'),'private')<>'collective-artifact' ORDER BY request_id LIMIT ?`,
         )
         .all(cursor.last_request_id ?? '', limit) as ProjectionRow[];
       if (rows.length === 0 && cursor.last_request_id !== null) {
         rows = db
-          .prepare('SELECT request_id,body FROM content_modification_requests ORDER BY request_id LIMIT ?')
+          .prepare(`SELECT request_id,body FROM content_modification_requests
+            WHERE COALESCE(json_extract(body,'$.kind'),'private')<>'collective-artifact' ORDER BY request_id LIMIT ?`)
           .all(limit) as ProjectionRow[];
       }
       db.prepare('UPDATE content_modification_projection_cursor SET last_request_id=? WHERE singleton=1').run(

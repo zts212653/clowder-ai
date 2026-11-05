@@ -8,6 +8,8 @@ export interface AgyNativeSettingsInput {
   readonly profileHome: string;
   readonly model: string;
   readonly policy: ReturnType<typeof buildAgyNativePolicy>;
+  /** Account admission is monotonic across concurrently admitted workspaces. */
+  readonly retainTrustedWorkspaces?: boolean;
 }
 
 const PROFILE_SETTING_KEYS = new Set(['modelProvider', 'model', 'trustedWorkspaces', 'colorScheme']);
@@ -61,9 +63,17 @@ export function materializeAgyNativeSettings(input: AgyNativeSettingsInput): str
   const next = {
     ...retained,
     model: input.model,
-    trustedWorkspaces: [input.policy.workspaceRoot],
+    trustedWorkspaces: [
+      ...new Set([
+        ...(input.retainTrustedWorkspaces && Array.isArray(existing.trustedWorkspaces)
+          ? existing.trustedWorkspaces.filter((entry): entry is string => typeof entry === 'string')
+          : []),
+        input.policy.workspaceRoot,
+      ]),
+    ],
     ...input.policy.settings,
   };
+  if (JSON.stringify(existing) === JSON.stringify(next)) return settingsPath;
   const temp = join(settingsDir, `.settings-${randomUUID()}.tmp`);
   writeFileSync(temp, `${JSON.stringify(next, null, 2)}\n`, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
   try {

@@ -2,7 +2,8 @@ import type { LifecycleActiveRun } from '@cat-cafe/shared';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ChatMessage } from '@/stores/chat-types';
+import { MessageNavigationProvider } from '@/components/thread-chat/MessageNavigationContext';
+import type { ChatMessage, QueueEntry } from '@/stores/chat-types';
 import {
   isLinkedDeliveryFailureCarrier,
   MessageDispatchAvatars,
@@ -279,11 +280,204 @@ describe('MessageDispatchAvatars', () => {
     const item = container.querySelector('[data-dispatch-target="opus"]');
     expect(item?.getAttribute('title')).toBe('已投递 布偶猫 · 09/07 13:02:14');
     const button = container.querySelector('button');
-    expect(button?.getAttribute('aria-label')).toBe('已投递 布偶猫 · 09/07 13:02:14，跳转到对应回复');
+    expect(button?.getAttribute('aria-label')).toBe('看布偶猫的回复');
+    expect(item?.textContent).toContain('布偶猫');
+    expect(item?.textContent).toContain('收到，已回复');
+    expect(item?.textContent).toContain('看回复');
     act(() => button?.click());
     expect(statusRow.scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'center' });
     expect(statusRow.dataset.messageJumpFocus).toBe('true');
     statusRow.remove();
+  });
+
+  it('uses the clicked surface owner when another surface contains the same reply', () => {
+    const firstJump = vi.fn(() => true);
+    const secondJump = vi.fn(() => true);
+    act(() => {
+      root.render(
+        <>
+          {[firstJump, secondJump].map((jump, index) => (
+            <MessageNavigationProvider key={index} value={jump}>
+              <MessageDispatchAvatars
+                message={source('settled')}
+                timelineMessages={[response('completed')]}
+                activeRuns={[]}
+                getCatLabel={() => '布偶猫'}
+              />
+            </MessageNavigationProvider>
+          ))}
+        </>,
+      );
+    });
+    act(() => container.querySelectorAll('button')[1]?.click());
+    expect(secondJump).toHaveBeenCalledExactlyOnceWith('response-1');
+    expect(firstJump).not.toHaveBeenCalled();
+  });
+
+  it('checks uncertain Append without a button, then offers an explicit repeat until exact read proof', () => {
+    const message = source('dispatched');
+    message.lifecycle = {
+      ...message.lifecycle!,
+      appendFailures: [
+        {
+          targetId: 'opus',
+          invocationId: 'turn-1',
+          responseMessageId: 'response-1',
+          reason: 'exception',
+          acceptance: 'unknown',
+          at: DISPATCHED_AT + 1,
+        },
+      ],
+    };
+    const entry: QueueEntry = {
+      id: 'entry-1',
+      threadId: 'thread-1',
+      userId: 'user-1',
+      content: message.content,
+      messageId: message.id,
+      mergedMessageIds: [],
+      targetCats: ['opus'],
+      status: 'queued',
+      createdAt: 100,
+      autoExecute: true,
+      intent: 'execute',
+      from: message.from!,
+      priority: 'normal',
+      recoveryActions: [
+        {
+          id: 'repeat:entry-1:opus',
+          entryId: 'entry-1',
+          kind: 'repeat_target',
+          targetCatId: 'opus',
+          request: { method: 'POST', path: '/api/threads/thread-1/messages/source-1/routing-targets/opus/repeat' },
+        },
+      ],
+    };
+    const render = () =>
+      act(() =>
+        root.render(
+          <MessageDispatchAvatars
+            message={message}
+            timelineMessages={[response('processing')]}
+            activeRuns={[activeRun]}
+            queue={[entry]}
+            getCatLabel={() => '宪宪'}
+          />,
+        ),
+      );
+    render();
+    expect(container.textContent).toContain('正在核对 宪宪 收到没…');
+    expect(container.textContent).not.toContain('再发一次');
+    expect(container.querySelector('button')).toBeNull();
+    message.lifecycle = {
+      ...message.lifecycle!,
+      appendFailures: message.lifecycle!.appendFailures!.map((failure) => ({
+        ...failure,
+        checkedAt: DISPATCHED_AT + 2,
+      })),
+    };
+    render();
+    expect(container.textContent).toContain('已送出，没确认收到');
+    expect(container.textContent).toContain('再发一次');
+    expect(container.textContent).toContain('会作为新消息再次发送，可能重复执行');
+    expect(container.textContent).not.toContain('收到，正在回');
+    expect(container.textContent).not.toContain('没送到');
+    expect(container.textContent).not.toContain('Agent Client');
+    message.lifecycle = {
+      ...message.lifecycle!,
+      dispatchRefs: message.lifecycle!.dispatchRefs!.map((ref) => ({ ...ref, appendAcceptance: 'accepted' })),
+    };
+    render();
+    expect(container.textContent).not.toContain('再发一次');
+    expect(container.textContent).not.toContain('没确认收到');
+    expect(container.textContent).not.toContain('已读');
+    message.lifecycle = {
+      ...message.lifecycle!,
+      dispatchRefs: [
+        {
+          targetId: 'opus',
+          phase: 'dispatched',
+          statusMessageId: 'response-1',
+          dispatchedAt: DISPATCHED_AT,
+          inputRead: { status: 'read', at: DISPATCHED_AT + 2 },
+        },
+      ],
+    };
+    render();
+    expect(container.textContent).not.toContain('待核对');
+    expect(container.textContent).not.toContain('再发一次');
+  });
+
+  it.each([false, true])('shows sending while idle and queueing only behind actual work (busy=%s)', (busy) => {
+    const message: ChatMessage = {
+      ...source('dispatched'),
+      type: 'user',
+      from: { kind: 'user', userId: 'owner' },
+      lifecycle: { ...source('dispatched').lifecycle!, dispatchRefs: [] },
+    };
+    const entry: QueueEntry = {
+      id: 'pending',
+      threadId: 'thread-1',
+      userId: 'owner',
+      messageId: message.id,
+      content: message.content,
+      mergedMessageIds: [],
+      targetCats: ['opus'],
+      status: 'queued',
+      createdAt: 100,
+      autoExecute: true,
+      intent: 'execute',
+      from: message.from!,
+      priority: 'normal',
+    };
+    act(() =>
+      root.render(
+        <MessageDispatchAvatars
+          message={message}
+          timelineMessages={[]}
+          activeRuns={busy ? [{ ...activeRun, inputMessageIds: ['older-input'] }] : []}
+          queue={[entry]}
+          getCatLabel={() => '宪宪'}
+        />,
+      ),
+    );
+    expect(container.textContent).toContain(busy ? '排队中' : '发送中');
+    expect(container.textContent).not.toContain(busy ? '发送中' : '排队中');
+  });
+
+  it('does not count an original handoff still being checked as work ahead of an explicit repeat', () => {
+    const original = source('dispatched');
+    const repeated = { ...original, id: 'new-input', lifecycle: { ...original.lifecycle!, dispatchRefs: [] } };
+    const base = {
+      threadId: 'thread-1',
+      userId: 'user-1',
+      content: 'input',
+      mergedMessageIds: [],
+      targetCats: ['opus'],
+      status: 'queued' as const,
+      createdAt: 100,
+      autoExecute: true,
+      intent: 'execute',
+      from: original.from!,
+      priority: 'normal' as const,
+    };
+    const queue = [
+      { ...base, id: 'old-entry', messageId: original.id },
+      { ...base, id: 'new-entry', messageId: repeated.id },
+    ];
+    act(() =>
+      root.render(
+        <MessageDispatchAvatars
+          message={repeated}
+          timelineMessages={[original, response('processing')]}
+          activeRuns={[activeRun]}
+          queue={queue}
+          getCatLabel={() => '宪宪'}
+        />,
+      ),
+    );
+    expect(container.textContent).toContain('排队中 · 等');
+    expect(container.textContent).not.toContain('前面还有');
   });
 
   it('uses a first input receipt when present, without treating a response as read evidence', () => {
@@ -317,7 +511,7 @@ describe('MessageDispatchAvatars', () => {
     );
   });
 
-  it('renders an unlinked delivered avatar as tooltip-only', () => {
+  it('retains known delivery but marks an unlinked reply as unverified and non-clickable', () => {
     act(() => {
       root.render(
         <MessageDispatchAvatars
@@ -329,9 +523,40 @@ describe('MessageDispatchAvatars', () => {
       );
     });
     expect(container.querySelector('button')).toBeNull();
+    expect(container.textContent).toContain('收到，回复状态待核对');
+    expect(container.textContent).not.toContain('已回复');
     expect(container.querySelector('[data-dispatch-target="opus"]')?.getAttribute('title')).toBe(
       '已投递 布偶猫 · 09/07 13:02:14',
     );
+  });
+
+  it.each([
+    ['completed', '已回复'],
+    ['failed', '回复失败'],
+    ['canceled', '已取消'],
+    ['interrupted', '回复中断'],
+  ] as const)('shows the exact %s outcome for both initial and appended inputs', (status, expected) => {
+    for (const appended of [false, true]) {
+      const input = { ...source('settled'), timestamp: appended ? 115 : 100 };
+      const linked = response(status, appended ? ['initial-input', input.id] : [input.id]);
+      act(() =>
+        root.render(
+          <MessageDispatchAvatars
+            message={input}
+            timelineMessages={[linked]}
+            activeRuns={[]}
+            getCatLabel={() => '布偶猫'}
+          />,
+        ),
+      );
+      expect(container.textContent).toContain(expected);
+      if (status !== 'completed') expect(container.textContent).not.toContain('已回复');
+      if (appended) {
+        expect(container.textContent).toContain('并进了已结束的这一轮');
+        expect(container.textContent).toContain('读没读查不到');
+        expect(container.textContent).not.toContain('已读');
+      }
+    }
   });
 
   it('uses animation only for processing and adds no terminal outcome badge', () => {
@@ -359,7 +584,8 @@ describe('MessageDispatchAvatars', () => {
       );
     });
     expect(container.querySelector('[data-testid="cat-avatar"]')?.getAttribute('data-status')).toBe('streaming');
-    expect(container.querySelector('[data-testid="cat-avatar"]')?.getAttribute('data-size')).toBe('11');
+    expect(container.querySelector('[data-testid="cat-avatar"]')?.getAttribute('data-size')).toBe('16');
+    expect(container.textContent).toContain('收到，正在回');
   });
 
   it.each([

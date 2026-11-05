@@ -62,7 +62,6 @@ describe('/queue idle + /messages draft → hasActiveInvocation restored (cancel
       targetCats: [],
       catStatuses: {},
       catInvocations: {},
-      currentGame: null,
       activeInvocations: {},
 
       threadStates: {},

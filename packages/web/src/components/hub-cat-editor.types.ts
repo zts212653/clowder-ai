@@ -11,7 +11,6 @@ export interface HubCatEditorProps {
   presentation?: 'modal' | 'page';
   onDelete?: () => Promise<void> | void;
   header?: React.ReactNode;
-  history?: React.ReactNode;
   open: boolean;
   onClose: () => void;
   onSaved: () => Promise<void> | void;

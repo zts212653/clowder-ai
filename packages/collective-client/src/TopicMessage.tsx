@@ -1,8 +1,16 @@
+import { AppTooltip } from '@cat-cafe/ui';
+import { CollectiveNameplate } from './CollectiveNameplate.js';
 import { actorDisplayName, formatEventTime } from './channel-model.js';
 import type { CollectiveEventEnvelope, CollectiveParticipant } from './client-types.js';
+import { useCollectiveLanguage, useCollectiveText } from './collective-copy.js';
 import { MemberAvatar } from './MemberAvatar.js';
+import { MessageAttachments } from './MessageAttachments.js';
 import { MessageMarkdown } from './MessageMarkdown.js';
+import { MessageQuotes, QuotableMessage } from './MessageQuotes.js';
+import { MessageReadEnd } from './MessageReadEnd.js';
+import { MessageRichBlocks } from './MessageRichBlocks.js';
 import { authorPresentation } from './message-presentation.js';
+import { participantLabel } from './participant-label.js';
 import { useRoomPresentation } from './use-room-presentation.js';
 
 export function MessageAvatar({
@@ -20,6 +28,8 @@ export function MessageAvatar({
       ? participants.find(
           (participant) =>
             participant.serviceInstanceId === event.serviceInstanceId &&
+            participant.collectiveId === event.collectiveId &&
+            participant.humanId === actor.human.humanId &&
             participant.connectionId === actor.provenance.connectionId &&
             participant.catId === actor.provenance.catId,
         )
@@ -43,11 +53,13 @@ export function MessageBody({
   readonly participants?: readonly CollectiveParticipant[];
   readonly responseState?: 'waiting' | 'responded';
 }) {
+  const t = useCollectiveText();
   const recipient = event.recipient?.kind === 'agent' ? event.recipient : undefined;
   const namedCat = recipient
     ? participants.find(
         (participant) =>
           participant.serviceInstanceId === event.serviceInstanceId &&
+          participant.collectiveId === event.collectiveId &&
           participant.connectionId === recipient.connectionId &&
           participant.humanId === recipient.humanId &&
           participant.catId === recipient.agentId,
@@ -55,21 +67,44 @@ export function MessageBody({
     : undefined;
   return (
     <>
-      <MessageMarkdown
-        source={event.body}
-        prefix={
-          recipient ? (
-            <span className="message-inline-mention">@{namedCat?.displayName ?? recipient.agentId}</span>
-          ) : undefined
-        }
-      />
+      <MessageAttachments event={event} />
+      <MessageQuotes quotes={event.contextAttachments} />
+      <MessageRichBlocks event={event} />
+      <QuotableMessage event={event}>
+        <MessageMarkdown
+          source={event.body}
+          event={event}
+          prefix={
+            recipient ? (
+              <AppTooltip
+                label={
+                  namedCat
+                    ? `${namedCat.displayName} · ${namedCat.humanDisplayName} · @${namedCat.catId}`
+                    : `@${recipient.agentId}`
+                }
+                intent="content"
+                side="top"
+              >
+                {/* biome-ignore lint/a11y/noNoninteractiveTabindex: focus reveals the exact recipient identity tooltip without introducing a new action. */}
+                <span className="message-inline-mention" tabIndex={0}>
+                  @{namedCat ? participantLabel(namedCat, participants) : recipient.agentId}
+                </span>
+              </AppTooltip>
+            ) : undefined
+          }
+        />
+      </QuotableMessage>
       {event.attentionRequest && (
         <p className="request-kind">
-          希望伙伴回应
-          {responseState === 'waiting' ? ' · 尚未有人回应' : responseState === 'responded' ? ' · 已有回应' : ''}
+          {t('希望伙伴回应')}
+          {responseState === 'waiting'
+            ? ` · ${t('尚未有人回应')}`
+            : responseState === 'responded'
+              ? ` · ${t('已有回应')}`
+              : ''}
         </p>
       )}
-      {event.workRequest && <p className="request-kind">请求持续处理</p>}
+      {event.workRequest && <p className="request-kind">{t('请求持续处理')}</p>}
     </>
   );
 }
@@ -92,32 +127,32 @@ export function TopicMessage({
   /** Time visibility supplied by the surrounding flow; consecutive own messages show it once. */
   readonly showTime?: boolean;
 }) {
+  const language = useCollectiveLanguage();
   const v2 = useRoomPresentation(presentation) === 'v2';
   const author = authorPresentation(event, currentHumanId);
   return (
-    <article className="topic-message" data-author={v2 ? author : undefined}>
-      {onOpenMember ? (
-        <button
-          type="button"
-          className="avatar-button"
-          onClick={() => onOpenMember(event)}
-          aria-label={`查看 ${actorDisplayName(event)}`}
-        >
-          <MessageAvatar event={event} participants={participants} compact />
-        </button>
-      ) : (
-        <MessageAvatar event={event} participants={participants} compact />
-      )}
+    <article
+      id={`collective-event-${event.eventId}`}
+      data-event-id={event.eventId}
+      tabIndex={-1}
+      className="topic-message"
+      data-author={v2 ? author : undefined}
+    >
       <div>
         <header className="message-meta">
-          <strong>{actorDisplayName(event)}</strong>
+          <CollectiveNameplate
+            event={event}
+            participants={participants}
+            onOpen={onOpenMember ? () => onOpenMember(event) : undefined}
+          />
           {(!v2 || showTime) && (
             <time className={v2 ? 'message-time' : undefined} dateTime={event.acceptedAt}>
-              {formatEventTime(event.acceptedAt)}
+              {formatEventTime(event.acceptedAt, language)}
             </time>
           )}
         </header>
         <MessageBody event={event} participants={participants} />
+        <MessageReadEnd eventId={event.eventId} />
       </div>
     </article>
   );

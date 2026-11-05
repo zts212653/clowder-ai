@@ -6,10 +6,12 @@ export interface MessageMountPolicy {
   backgroundMountDelayMs?: number;
 }
 
-/** Prioritize the newest conversation surface, then fill older DOM in gently. */
-export function messageMountPolicy(index: number, total: number): MessageMountPolicy {
+/** Paint the current reading window and newest messages, then fill older DOM in gently. */
+export function messageMountPolicy(index: number, total: number, readingAnchorIndex = -1): MessageMountPolicy {
   const distanceFromTail = total - 1 - index;
-  if (distanceFromTail < EAGER_MESSAGE_TAIL_COUNT) return { eager: true };
+  const inReadingWindow =
+    readingAnchorIndex >= 0 && index >= readingAnchorIndex - 1 && index < readingAnchorIndex + EAGER_MESSAGE_TAIL_COUNT;
+  if (distanceFromTail < EAGER_MESSAGE_TAIL_COUNT || inReadingWindow) return { eager: true };
   return {
     eager: false,
     backgroundMountDelayMs: (distanceFromTail - EAGER_MESSAGE_TAIL_COUNT + 1) * BACKGROUND_MOUNT_STAGGER_MS,

@@ -1,5 +1,6 @@
 import { refIdentity } from '@cat-cafe/shared';
 import { CatAvatar } from '@/components/CatAvatar';
+import { openMailbox } from '@/components/shell/mailbox/mailbox-navigation';
 import { useCatData } from '@/hooks/useCatData';
 import {
   blockerLabel,
@@ -9,7 +10,56 @@ import {
 } from './capability-evolution-presentation';
 import { EvolutionHomeActionsV2 } from './EvolutionHomeActionsV2';
 import { journeyStageLabel } from './EvolutionJourney';
+import { evolutionApprovalId } from './evolution-approval-navigation';
 import { useEvolutionAssetReview } from './evolution-asset-resource';
+import { projectAssetVersions } from './evolution-version-view';
+
+export function pendingEvolutionApprovalIds(programs: EvolutionProgramPresentationProjection[]): string[] {
+  return [
+    ...new Set(
+      programs.flatMap((projection) => {
+        const current = projection.lineage?.current;
+        if (projection.program.lifecycle !== 'active' || current?.status !== 'pending') return [];
+        const id = evolutionApprovalId(current.approvalRef) ?? evolutionApprovalId(current.proposalRef);
+        return id ? [id] : [];
+      }),
+    ),
+  ];
+}
+
+export function EvolutionPendingDecisions({
+  programs,
+  readComplete,
+}: {
+  programs: EvolutionProgramPresentationProjection[];
+  readComplete: boolean;
+}) {
+  const proposalIds = pendingEvolutionApprovalIds(programs);
+  return (
+    <section className="evolution-v2-pending" aria-label="待判断的能力进化提议">
+      <h2 className="evolution-v2-section-title">
+        待判断 {readComplete ? proposalIds.length : proposalIds.length ? `已读 ${proposalIds.length}` : '待核实'}
+      </h2>
+      {proposalIds.length ? (
+        <button
+          type="button"
+          className="evolution-link"
+          onClick={() =>
+            openMailbox(
+              proposalIds.length === 1 ? { section: 'pending', proposalId: proposalIds[0] } : { section: 'pending' },
+            )
+          }
+        >
+          去待办审阅
+        </button>
+      ) : readComplete ? (
+        <span>目前没有需要你拍板的提议。</span>
+      ) : (
+        <span>待办尚未读全，暂时不能确认。</span>
+      )}
+    </section>
+  );
+}
 
 export function EvolutionPhaseGaps({ projection }: { projection: EvolutionProgramPresentationProjection }) {
   const gaps = preparationGaps(projection);
@@ -55,17 +105,16 @@ function ProjectRow({
 }) {
   const { program, origin } = projection;
   const asset = useEvolutionAssetReview(projection);
-  const refs = asset.catalog?.currentVersionRefs;
-  const titles = refs?.map(
-    (ref) => asset.catalog?.versions.find((version) => refIdentity(version.versionRef) === refIdentity(ref))?.title,
+  const adoptedVersions = projectAssetVersions(projection, asset.catalog).filter((version) => version.adopted);
+  const titles = adoptedVersions.map(
+    (version) =>
+      asset.catalog?.versions.find((entry) => refIdentity(entry.versionRef) === refIdentity(version.ref))?.title,
   );
-  const adopted = !refs
-    ? '待来源核验'
-    : !refs.length
-      ? '尚无采用记录'
-      : titles?.every(Boolean)
-        ? titles.join('、')
-        : `${refs.length} 个已记录版本`;
+  const adopted = !adoptedVersions.length
+    ? '尚无采用记录'
+    : titles.every(Boolean)
+      ? titles.join('、')
+      : `${adoptedVersions.length} 个已记录版本`;
   const status = productStatus(projection);
   const phase = journeyStageLabel(projection);
   return (
@@ -133,6 +182,7 @@ export function CapabilityEvolutionHomeV2({
   return (
     <>
       <EvolutionHomeActionsV2 targetThreadId={targetThreadId} reload={reload} />
+      <EvolutionPendingDecisions programs={programs} readComplete={!uncertain} />
       <section aria-label="正在进行的进化项目">
         <h2 className="evolution-v2-section-title">
           正在进行 <small>{uncertain ? `已读 ${active.length}` : active.length}</small>

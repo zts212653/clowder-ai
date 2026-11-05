@@ -60,6 +60,31 @@ function model(
   };
 }
 describe('member status is only an owner projection', () => {
+  it('does not present a newly created native teammate as usable without a successful connection', () => {
+    const native = { ...cat, configurationSource: 'native_tool' as const };
+    expect(memberStatus(native, model('available')).label).toBe('待验证');
+  });
+  it('recognizes a first successful native call even when no prior failure contributes candidate reasons', () => {
+    const m = model('available');
+    m.signalEvents = [
+      {
+        v: 1,
+        eventId: 'first-success',
+        commandId: 'first-success',
+        ownerId: 'owner',
+        subjectRef: { type: 'cat', catId: 'member' },
+        source: 'dispatch_success',
+        reasonCode: 'dispatch_success_probe',
+        eventType: 'recovered',
+        state: 'available',
+        observedAt: 100,
+        probeStartedAt: 90,
+        evidenceRef: 'successful-invocation',
+        closesSignalIds: [],
+      },
+    ];
+    expect(memberStatus({ ...cat, configurationSource: 'native_tool' }, m, null, 101).label).toBe('可用');
+  });
   it('does not turn missing, failed or stale facts into availability', () => {
     expect(memberStatus(cat, null).label).toBe('未确认');
     expect(memberStatus(cat, model('available'), 'read failed').label).toBe('未确认');

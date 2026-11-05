@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -26,8 +26,21 @@ test('the repository contains no rejected F290 workbench runtime surface', () =>
   assert.deepEqual(scanF290WorkbenchBoundary(), []);
 });
 
-test('the canonical Web test lane runs the real F290 Service-backed browser journey', () => {
-  const webPackage = JSON.parse(readFileSync(join(process.cwd(), 'packages/web/package.json'), 'utf8'));
+test('the Host browser lane preserves shared navigation and C2 coverage', () => {
+  const root = process.cwd();
+  const webPackage = JSON.parse(readFileSync(join(root, 'packages/web/package.json'), 'utf8'));
   assert.match(webPackage.scripts['pretest:browser'], /ensure-browser-test-artifacts\.cjs/);
-  assert.match(webPackage.scripts['test:browser'], /test\/browser\/f290-collective-runtime-journey\.test\.mjs/);
+  assert.deepEqual(scanF290WorkbenchBoundary(root), []);
+  const retainedCoverage = [
+    'packages/web/test/browser/f322-human-collective.journey.mjs',
+    'packages/web/test/browser/fixtures/f322-human-collective.tsx',
+    'packages/web/test/browser/f290-asset-true-frontend.test.mjs',
+    'packages/web/test/browser/f290-runtime-journey.harness.mjs',
+    'packages/web/test/browser/default-entry-journey.harness.mjs',
+    'packages/web/src/components/collective/__tests__',
+    'packages/collective-client/src',
+  ];
+  for (const path of retainedCoverage) assert.ok(existsSync(join(root, path)), `lost C2 coverage: ${path}`);
+  assert.match(webPackage.scripts['test:browser'], /chat-connection-recovery\.test\.mjs/);
+  assert.match(webPackage.scripts['test:browser'], /navigation-continuity\.test\.mjs/);
 });

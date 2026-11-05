@@ -573,7 +573,9 @@ default_frontend_url() {
     if [[ -f .env ]]; then
         frontend_port="$(read_env_key FRONTEND_PORT || true)"
     fi
-    frontend_port="${frontend_port:-${FRONTEND_PORT:-3003}}"
+    local default_frontend_port
+    default_frontend_port="$(node "$PROJECT_DIR/scripts/read-deployment-default.mjs" webPort)"
+    frontend_port="${frontend_port:-${FRONTEND_PORT:-$default_frontend_port}}"
     printf 'http://localhost:%s\n' "$frontend_port"
 }
 
@@ -1007,61 +1009,8 @@ install_brew_cask() {
     hash -r 2>/dev/null || true
     command -v "$cmd" &>/dev/null || { fail "$name install failed. Try: brew install --cask $cask"; exit 1; }; ok "$name installed"
 }
-install_kimi_cli() {
-    info "  Installing Kimi CLI..."
-    # kimi-cli requires Python >=3.12 (verified via pypi metadata). Resolution
-    # order matches the D-plan service install policy — reuse what the user
-    # already has, NEVER auto-install uv on their system:
-    #   1. uv (reuse only) → uv tool install isolates kimi in its own venv
-    #   2. pipx (reuse only) → similar isolation
-    #   3. python-resolve.sh resolver → falls back to ~/.cat-cafe/python/,
-    #      and we create ~/.cat-cafe/kimi-venv/ on top of it, then symlink
-    #      $USER_BIN_DIR/kimi to the venv's kimi executable.
-    local log_file; log_file="$(mktemp)"
-    local installer_tried=""
-    if command -v uv &>/dev/null; then
-        installer_tried="uv (reused)"
-        if ! uv tool install --python 3.12 kimi-cli >"$log_file" 2>&1; then
-            uv tool upgrade kimi-cli >>"$log_file" 2>&1 || true
-        fi
-    elif command -v pipx &>/dev/null; then
-        installer_tried="pipx (reused)"
-        if ! pipx install kimi-cli >"$log_file" 2>&1; then
-            pipx upgrade kimi-cli >>"$log_file" 2>&1 || true
-        fi
-    else
-        installer_tried="project-owned venv via python-resolve.sh"
-        # Source the resolver in a subshell to avoid leaking RESOLVED_* into
-        # the caller's environment unintentionally.
-        # shellcheck source=services/python-resolve.sh
-        . "$PROJECT_DIR/scripts/services/python-resolve.sh"
-        if ! resolve_python_312 >>"$log_file" 2>&1; then
-            rm -f "$log_file"
-            fail "Kimi install failed: no Python >=3.12 available and resolver couldn't bootstrap one"
-            info "    Recovery: install Python 3.12+ (system / brew / uv / pyenv) and rerun"
-            exit 1
-        fi
-        local kimi_venv="$HOME/.cat-cafe/kimi-venv"
-        if [[ ! -x "$kimi_venv/bin/kimi" ]]; then
-            "$RESOLVED_PYTHON" -m venv "$kimi_venv" >>"$log_file" 2>&1 || true
-        fi
-        "$kimi_venv/bin/pip" install --upgrade kimi-cli >>"$log_file" 2>&1 || true
-        # Symlink into $USER_BIN_DIR so `kimi` is on PATH.
-        local kimi_bin="${USER_BIN_DIR:-$HOME/.local/bin}"
-        mkdir -p "$kimi_bin"
-        ln -sfn "$kimi_venv/bin/kimi" "$kimi_bin/kimi"
-    fi
-    export PATH="${USER_BIN_DIR:-$HOME/.local/bin}:$PATH"; hash -r 2>/dev/null || true
-    if command -v kimi &>/dev/null; then
-        rm -f "$log_file"
-        ok "Kimi CLI installed via $installer_tried"
-    else
-        fail "Kimi install failed via $installer_tried — last output:"
-        tail -10 "$log_file" 2>/dev/null | sed 's/^/    /'
-        info "    Recovery: install one of uv / pipx / Python 3.12+ on your system, then rerun"
-        rm -f "$log_file"
-        exit 1
-    fi
+install_kimi_code() {
+    install_npm_cli "Kimi Code" "kimi" "@moonshot-ai/kimi-code"
 }
 install_claude_cli() {
     info "  Installing Claude Code..."
@@ -1110,7 +1059,7 @@ MISSING_AGENTS=()
 command -v claude &>/dev/null && ok "Claude Code already installed" || MISSING_AGENTS+=("claude")
 command -v codex &>/dev/null && ok "Codex CLI already installed"  || MISSING_AGENTS+=("codex")
 antigravity_cli_available && ok "Antigravity CLI already installed" || MISSING_AGENTS+=("agy")
-command -v kimi &>/dev/null && ok "Kimi CLI already installed"   || MISSING_AGENTS+=("kimi")
+command -v kimi &>/dev/null && ok "Kimi Code already installed"   || MISSING_AGENTS+=("kimi")
 
 if [[ ${#MISSING_AGENTS[@]} -gt 0 ]]; then
     INSTALL_AGENTS=("${MISSING_AGENTS[@]}")  # default: install all missing
@@ -1135,7 +1084,7 @@ if [[ ${#MISSING_AGENTS[@]} -gt 0 ]]; then
             claude) install_claude_cli ;;
             codex)  install_codex_cli ;;
             agy)    install_antigravity_cli ;;
-            kimi)   install_kimi_cli ;;
+            kimi)   install_kimi_code ;;
         esac
     done
 fi

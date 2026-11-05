@@ -1,11 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { CollectivePrivateWorkRefusalError } from '../src/domains/cats/services/agents/invocation/collective-private-refusal.ts';
 import { InvocationQueue } from '../src/domains/cats/services/agents/invocation/InvocationQueue.ts';
 import { InvocationTracker } from '../src/domains/cats/services/agents/invocation/InvocationTracker.ts';
 import { QueueProcessor } from '../src/domains/cats/services/agents/invocation/QueueProcessor.ts';
 import { MessageStore } from '../src/domains/cats/services/stores/ports/MessageStore.ts';
-import { CollectiveWorkDispatcher } from '../src/domains/plugin/builtin-runtime/collective-work-dispatcher.ts';
 
 // Actual production QueueProcessor and History/ledger cutover. The router and
 // current domain permission ports are deterministic, not a model/grant/Redis claim.
@@ -43,6 +41,8 @@ async function fixture(route, overrides = {}) {
         resolveConversationTargetsAtAdmission: async (targets) => [...targets],
         routeExecution: async function* (...args) {
           calls.push(args);
+          assert.equal(args[6].publicInvocationBinding, undefined);
+          assert.equal(args[6].toolExecutionPolicy, undefined);
           yield* route(...args);
         },
         ackCollectedCursors: async () => {},
@@ -63,13 +63,38 @@ async function fixture(route, overrides = {}) {
     ownerCatId: 'codex',
     entrustedWork: { revision: 1, intendedOutcome: 'processor seam' },
   };
-  const dispatcher = new CollectiveWorkDispatcher({
-    invocationQueue: queue,
-    messageStore: messages,
-    threadStore: { get: async () => ({ createdBy: task.userId, participants: ['codex'] }) },
-    context: () => ({ resolvePrivate: async () => ({ admitted: true }) }),
+  const source = messages.append({
+    userId: task.userId,
+    threadId: task.threadId,
+    from: { kind: 'plugin', instanceId: 'instance' },
+    content: 'public source',
+    mentions: [],
+    timestamp: Date.now(),
+    extra: {
+      pluginMessage: {
+        instanceId: 'instance',
+        revision: 1,
+        presentation: { connector: 'fixture', label: 'Fixture' },
+        elements: [],
+        appendOps: [],
+        provenance: { origin: { kind: 'plugin', instanceId: 'instance' }, epistemicStatus: 'observation' },
+      },
+    },
   });
-  const receipt = await dispatcher.dispatch(task, task.userId, 1, { kind: 'admission' });
+  await queue.enqueueExistingMessageDurable(messages, source.id, {
+    userId: task.userId,
+    threadId: task.threadId,
+    from: source.from,
+    sourceId: source.id,
+    messageId: source.id,
+    kind: 'conversation_input',
+    content: source.content,
+    targetCats: ['codex'],
+    intent: 'execute',
+    ownerAuthProvenance: 'unknown',
+    autoExecute: true,
+  });
+  const receipt = { messageId: source.id };
   return { queue, messages, records, calls, repairs, errors, processor, task, receipt };
 }
 async function waitFor(predicate, label) {
@@ -130,21 +155,6 @@ test('C7 unknown History after claim restores exact pending target without admit
   assert.equal(after.id, before.id);
   assert.equal(after.status, 'queued');
   assert.deepEqual(after.execution, before.execution);
-});
-test('real processor forwards immutable domain scope and durably refuses before receiver/provider admission', async () => {
-  const f = await fixture(async function* (_owner, _body, _thread, _source, _targets, _intent, options) {
-    assert.equal(options.executionScope, 'collective-work');
-    assert.equal(options.ownerAuthProvenance, 'unknown');
-    throw new CollectivePrivateWorkRefusalError('work_execution_not_current', 'isolated authority expired');
-  });
-  assert.equal((await f.processor.processNext(f.task.threadId, f.task.userId)).started, true);
-  await waitFor(() => f.messages.getById(f.receipt.messageId).deliveryStatus === 'canceled', 'refusal cancellation');
-  await waitFor(() => f.queue.list(f.task.threadId, f.task.userId).length === 0, 'pending retirement');
-  assert.equal(f.calls.length, 1);
-  assert.equal(f.records.get('isolated-parent').status, 'failed');
-  assert.match(f.records.get('isolated-parent').error, /collective_private_work_refused/);
-  assert.equal(f.messages.getByThread(f.task.threadId).filter((m) => m.lifecycle?.kind === 'response').length, 0);
-  assert.deepEqual(await f.queue.listAllDurable(f.task.threadId), []);
 });
 test('transport failure restores the exact scoped pending row without publishing a receiver', async () => {
   const f = await fixture(async function* () {
@@ -207,22 +217,6 @@ test('History lookup failure at provider admission restores claim without starti
   assert.equal(after.id, before.id);
   assert.equal(after.status, 'queued');
   assert.equal(get(f.receipt.messageId).deliveryStatus, 'queued');
-});
-
-test('refusal evidence rejected by the record store cannot cancel or retire the pending source', async () => {
-  const f = await fixture(async function* () {
-    throw new CollectivePrivateWorkRefusalError('owner_admission_unavailable', 'isolated refusal');
-  });
-  const update = f.processor.deps.invocationRecordStore.update;
-  f.processor.deps.invocationRecordStore.update = async (id, patch) =>
-    patch.error?.startsWith('collective_private') ? null : update(id, patch);
-  assert.equal((await f.processor.processNext(f.task.threadId, f.task.userId)).started, true);
-  await waitFor(
-    () => f.errors.some((args) => String(args[1]).includes('Queue attempt settlement failed')),
-    'failed evidence',
-  );
-  assert.equal(f.messages.getById(f.receipt.messageId).deliveryStatus, 'queued');
-  assert.equal((await f.queue.listAllDurable(f.task.threadId)).length, 1);
 });
 
 test('stale receipt sink is never invoked and cannot suppress canonical cleanup', async () => {

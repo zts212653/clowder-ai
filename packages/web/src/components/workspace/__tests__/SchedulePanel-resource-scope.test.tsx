@@ -1,10 +1,12 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { writeShellLanguage } from '@/components/shell/shell-language';
 import { WorkspaceSurfaceVisibilityProvider } from '@/components/workbench/WorkspaceSurfaceVisibility';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { SchedulePanel } from '../SchedulePanel';
+import { formatTrigger, outcomeLabel, timeAgo } from '../schedule-helpers';
 
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
 
@@ -40,6 +42,7 @@ describe('SchedulePanel resource scope', () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
+    writeShellLanguage('en');
     fetch.mockReset();
     fetch.mockImplementation(async (path) =>
       path.includes('/control') ? Response.json({ global: null }) : tasks('All task'),
@@ -61,6 +64,113 @@ describe('SchedulePanel resource scope', () => {
     expect(target).toBeDefined();
     await act(async () => target?.click());
   }
+
+  it('renders scheduler chrome in Chinese while preserving task data and raw timing expressions', async () => {
+    const fixture = {
+      id: 'owner-task',
+      profile: 'normal',
+      source: 'dynamic',
+      dynamicTaskId: 'dynamic-1',
+      enabled: false,
+      trigger: { type: 'cron', expression: '0 9 * * *' },
+      lastRun: {
+        task_id: 'owner-task',
+        subject_key: 'thread:thread-a',
+        outcome: 'RUN_DELIVERED',
+        started_at: new Date().toISOString(),
+        duration_ms: 120,
+      },
+      runStats: { total: 2, delivered: 2, failed: 0, skipped: 0 },
+      display: { label: 'User label / 用户标题', category: 'system', description: 'Keep this original description.' },
+      subjectPreview: null,
+    };
+    fetch.mockImplementation(async (path) => {
+      if (path.includes('/control')) return Response.json({ global: { enabled: true } });
+      if (path.includes('/runs')) return Response.json({ runs: [fixture.lastRun] });
+      return Response.json({ tasks: [fixture] });
+    });
+    writeShellLanguage('zh');
+    await act(async () => root.render(<SchedulePanel />));
+    const text = container.textContent ?? '';
+    for (const label of [
+      '全部',
+      '当前对话',
+      '调度器运行中',
+      '系统',
+      '自建',
+      '定时：0 9 * * *',
+      '已送达',
+      '2 次送达',
+      '已暂停',
+      '想安排定时任务？',
+    ])
+      expect(text).toContain(label);
+    expect(text).toContain(fixture.display.label);
+    expect(text).toContain(fixture.display.description);
+    expect(text).not.toMatch(/Current Thread|Scheduler active|PAUSED|delivered|never run/);
+    await act(async () => container.querySelector<HTMLElement>('[role="button"]')?.click());
+    for (const label of ['调度目标', '最近运行', '恢复', '删除']) expect(container.textContent).toContain(label);
+    expect(container.querySelector('[data-testid="schedule-subject-key-owner-task"]')?.textContent).toContain(
+      'thread:thread-a',
+    );
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>('button[title="调度器运行中，点击暂停"]')?.click(),
+    );
+    expect(fetch).toHaveBeenCalledWith('/api/schedule/control', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: false, reason: '由调度面板暂停', updatedBy: 'user' }),
+    });
+  });
+
+  it('changes language without replacing the expanded row, losing scope, or issuing another read', async () => {
+    writeShellLanguage('zh');
+    await act(async () => root.render(<SchedulePanel />));
+    await click('当前对话');
+    const row = container.querySelector<HTMLElement>('[role="button"]');
+    await act(async () => row?.click());
+    const detail = container.querySelector('[id^="schedule-task-detail-"]');
+    expect(detail).not.toBeNull();
+    fetch.mockClear();
+    await act(async () => writeShellLanguage('en'));
+    expect(container.textContent).toContain('Current Thread');
+    expect(container.textContent).toContain('Showing tasks for:');
+    expect(container.textContent).toContain('Recent runs:');
+    expect(container.querySelector('[role="button"]')).toBe(row);
+    expect(container.querySelector('[id^="schedule-task-detail-"]')).toBe(detail);
+    expect(fetch).not.toHaveBeenCalled();
+    await act(async () => writeShellLanguage('zh'));
+    expect(container.textContent).toContain('当前对话的任务');
+    expect(container.textContent).toContain('最近运行');
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('localizes an already failed read without refetching or claiming an empty healthy list', async () => {
+    fetch.mockResolvedValue(new Response(null, { status: 503 }));
+    writeShellLanguage('zh');
+    await act(async () => root.render(<SchedulePanel />));
+    expect(container.textContent).toContain('同步调度任务失败');
+    expect(container.textContent).not.toContain('暂无定时任务');
+    fetch.mockClear();
+    await act(async () => writeShellLanguage('en'));
+    expect(container.textContent).toContain('Schedule could not be refreshed');
+    expect(container.textContent).not.toMatch(/同步调度任务失败|No scheduled tasks|All healthy/);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('formats once, interval and relative-time states in the selected language without changing trigger data', () => {
+    const now = Date.now(),
+      trigger = { type: 'once' as const, fireAt: now + 120000 };
+    expect(formatTrigger(trigger, 'zh')).toBe('单次，2 分钟后');
+    expect(formatTrigger(trigger, 'en')).toBe('once in 2m');
+    expect(formatTrigger({ type: 'once', fireAt: now - 1000 }, 'zh')).toBe('单次（已触发）');
+    expect(formatTrigger({ type: 'interval', ms: 30000 }, 'zh')).toBe('每 30 秒');
+    expect(timeAgo(new Date(now - 180000).toISOString(), 'zh')).toBe('3 分钟前');
+    expect(outcomeLabel('RUN_FAILED', 'zh')).toBe('失败');
+    expect(outcomeLabel('SKIP_NO_CANDIDATES', 'zh')).toBe('未执行');
+    expect(outcomeLabel('UNRECOGNIZED_STATE', 'zh')).toBe('状态待确认');
+    expect(trigger).toEqual({ type: 'once', fireAt: now + 120000 });
+  });
 
   it('keeps the description fallback recoverable when subjectPreview is absent', async () => {
     const description = '定时任务的完整说明。'.repeat(40);
@@ -158,7 +268,7 @@ describe('SchedulePanel resource scope', () => {
       vi.advanceTimersByTime(30_000);
     });
     expect(container.textContent).toContain('All task');
-    expect(container.textContent).toContain('同步调度任务失败');
+    expect(container.textContent).toContain('Schedule could not be refreshed');
     expect(container.textContent).not.toContain('All healthy');
     fetch.mockImplementation(async (path) =>
       path.includes('/control') ? Response.json({ global: null }) : tasks('Recovered task'),
@@ -167,13 +277,13 @@ describe('SchedulePanel resource scope', () => {
       vi.advanceTimersByTime(30_000);
     });
     expect(container.textContent).toContain('Recovered task');
-    expect(container.textContent).not.toContain('同步调度任务失败');
+    expect(container.textContent).not.toContain('Schedule could not be refreshed');
   });
 
   it('shows an initial read failure without claiming the task list is empty or healthy', async () => {
     fetch.mockResolvedValue(new Response(null, { status: 503 }));
     await act(async () => root.render(<SchedulePanel />));
-    expect(container.textContent).toContain('同步调度任务失败');
+    expect(container.textContent).toContain('Schedule could not be refreshed');
     expect(container.textContent).not.toContain('No scheduled tasks');
     expect(container.textContent).not.toContain('All healthy');
   });

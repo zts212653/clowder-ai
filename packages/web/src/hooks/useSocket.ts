@@ -6,6 +6,7 @@ import {
   type MessageFrom,
   type ProviderSemanticEvent,
   type ReplyPreview,
+  type SuggestionView,
   timelineMessageKind,
 } from '@cat-cafe/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -24,7 +25,7 @@ import { useGuideStore } from '@/stores/guideStore';
 import { findLatestMessageByTimeline } from '@/stores/message-timeline';
 import { useSidebarProjectionStore } from '@/stores/sidebarProjectionStore';
 import { useToastStore } from '@/stores/toastStore';
-import { API_URL, apiFetch, refreshApiSession } from '@/utils/api-client';
+import { API_URL, refreshApiSession } from '@/utils/api-client';
 import { invalidateSidebarProjection } from '@/utils/sidebar-thread-snapshot';
 import { getUserId } from '@/utils/userId';
 import { writeStoredSnapshot } from './named-message-writer';
@@ -33,15 +34,15 @@ import {
   type PreviewAutoOpenEvent,
   type PreviewAutoOpenReceipt,
 } from './preview-auto-open-delivery';
-import { type QueueActiveInvocationSlot } from './queue-active-invocation-hydration';
-import {
-  hasStaleActiveThreadPresentation,
-  reconcileQueueActiveInvocationProjection,
-} from './queue-active-invocation-reconciliation';
+import { hasStaleActiveThreadPresentation } from './queue-active-invocation-reconciliation';
+import { bumpLiveQueueHydrateEpoch, getLiveQueueHydrateEpoch, reconcileThreadWithServer } from './queue-reconciliation';
+
+export { reconcileThreadWithServer } from './queue-reconciliation';
+
+import { useSuggestionStore } from '../components/suggestions/suggestion-store';
 import { refreshActiveExecutionProjection } from './useActiveExecutionProjection';
 // F173 Phase E: isInvocationReplaced 检查已下沉到 useAgentMessages.handleAgentMessage
 // dispatch entry，useSocket 不再做 active path drop guard。
-import { reconnectGame } from './useGameReconnect';
 import { type ExplicitStopIntent, emitExplicitCancel, newCancelIdentity } from './useSocket-cancel-provenance';
 // F173 Phase E (KD-1): bg refs + background message processing moved into
 // useAgentMessages — useSocket no longer dispatches active vs background.
@@ -149,15 +150,6 @@ export interface SocketCallbacks {
   onMessageReceiptUpdated?: (data: { messageId: string; threadId: string }) => void;
   onCustodyOfferUpdated?: (data: { messageId: string; threadId: string }) => void;
   onThreadBranched?: (data: { sourceThreadId: string; newThreadId: string; fromMessageId: string }) => void;
-  /** F101: Game state update */
-  onGameStateUpdate?: (data: { gameId: string; view: unknown; timestamp: number }) => void;
-  /** F101 Phase D: Independent game thread created */
-  onGameThreadCreated?: (data: {
-    gameThreadId: string;
-    gameTitle: string;
-    initiatorUserId: string;
-    timestamp: number;
-  }) => void;
   /** #80 fix-C: Clear the done-timeout guard (called when background thread completes) */
   /** F39: Queue updated */
   onQueueUpdated?: (data: {
@@ -190,72 +182,6 @@ const STALE_RECENT_ENGAGEMENT_MS = 5 * 60_000;
 let reconcileGeneration = 0;
 /** Per-thread last-probe timestamp used by the watchdog cooldown. */
 const staleProbeCooldown = new Map<string, number>();
-/** Per-thread epoch used to invalidate stale live queue-processing hydrates. */
-const liveQueueHydrateEpoch = new Map<string, number>();
-
-function bumpLiveQueueHydrateEpoch(threadId: string): number {
-  const next = (liveQueueHydrateEpoch.get(threadId) ?? 0) + 1;
-  liveQueueHydrateEpoch.set(threadId, next);
-  return next;
-}
-
-function getLiveQueueHydrateEpoch(threadId: string): number {
-  return liveQueueHydrateEpoch.get(threadId) ?? 0;
-}
-
-/**
- * Query /queue for one thread and reconcile local state against server truth.
- * Shared by reconnect reconciliation and the stale-watchdog probe.
- * `shouldAbort` lets the caller bail out when a newer reconciliation supersedes it.
- *
- * Exported for tests (F173 PR-C Task 10 — fixture asserts mirror invariant).
- */
-interface QueueReconciliationSnapshot {
-  queue?: import('../stores/chat-types').QueueEntry[];
-  activeInvocations?: QueueActiveInvocationSlot[];
-}
-
-async function fetchQueueReconciliationSnapshot(threadId: string): Promise<QueueReconciliationSnapshot | null> {
-  try {
-    const response = await apiFetch(`/api/threads/${threadId}/queue`);
-    if (!response.ok) return null;
-    return (await response.json()) as QueueReconciliationSnapshot;
-  } catch {
-    return null;
-  }
-}
-
-export async function reconcileThreadWithServer(
-  threadId: string,
-  shouldAbort: () => boolean,
-  source: string,
-  socketFallback?: {
-    queue: import('../stores/chat-types').QueueEntry[];
-  },
-): Promise<void> {
-  // Reconnect/watchdog GETs must also yield to newer committed socket truth,
-  // not just to another probe of their own kind.
-  const queueEpoch = getLiveQueueHydrateEpoch(threadId);
-  const data = await fetchQueueReconciliationSnapshot(threadId);
-  if (shouldAbort() || getLiveQueueHydrateEpoch(threadId) !== queueEpoch) return;
-  const queue = Array.isArray(data?.queue) ? data.queue : socketFallback?.queue;
-  const store = useChatStore.getState();
-  if (queue) {
-    store.setQueue(threadId, queue);
-  }
-  if (!data) return;
-
-  try {
-    reconcileQueueActiveInvocationProjection({
-      threadId,
-      slots: data.activeInvocations,
-      source,
-    });
-  } catch {
-    // Queue replacement is already settled above. Liveness reconciliation is
-    // recoverable from the next event/watchdog and must not reject its caller.
-  }
-}
 
 /**
  * After socket reconnect, bidirectionally reconcile invocation state with server.
@@ -505,11 +431,6 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
         queueLength: desiredRooms.length,
       });
 
-      // F101: Recover game state on reconnect
-      if (tid) {
-        reconnectGame(tid).catch(() => {});
-      }
-
       // Reconnect reconciliation: verify invocation state against server truth.
       // Socket disconnect can lose done(isFinal) events, leaving stale "replying" UI.
       // Delay slightly so any buffered events arrive first.
@@ -681,14 +602,17 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
         window.dispatchEvent(new CustomEvent('cat-cafe:proposal-created', { detail: proposal }));
       }
     });
+    socket.on('memory_matter_changed', () => {
+      window.dispatchEvent(new Event('cat-cafe:memory-matter-changed'));
+    });
     socket.on('runtime_interaction_updated', (interaction: { interactionId: string; status: string }) => {
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('cat-cafe:runtime-interaction-updated', { detail: interaction }));
       }
     });
-    socket.on('entrusted_work_projection_invalidated', () => {
+    socket.on('entrusted_work_projection_invalidated', (data: { ownerUserId: string }) => {
       if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('cat-cafe:entrusted-work-projection-invalidated'));
+        window.dispatchEvent(new CustomEvent('cat-cafe:entrusted-work-projection-invalidated', { detail: data }));
       }
     });
     const onArtifactReviewChanged = (data: { reviewId: string }) => {
@@ -701,6 +625,10 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
     };
     socket.on('artifact_review_changed', onArtifactReviewChanged);
     socket.on('content_modification_source_saved', onContentModificationSourceSaved);
+    // F335 交付二：回话下面那一排原地换一行（提议 → 回执 → 撤销）。
+    socket.on('suggestion_updated', (data: { threadId?: string; suggestion?: SuggestionView }) => {
+      if (data?.suggestion?.id) useSuggestionStore.getState().upsert(data.suggestion);
+    });
     socket.on('custody_offer_updated', (data: { messageId: string; threadId: string }) => {
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('cat-cafe:custody-offer-updated', { detail: data }));
@@ -1148,33 +1076,6 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
         timestamp: number;
       }) => {
         useBrakeStore.getState().show(data);
-      },
-    );
-
-    // F101: Game state updates (per-seat scoped views)
-    socket.on('game:state_update', (data: { gameId: string; view: unknown; timestamp: number }) => {
-      callbacksRef.current.onGameStateUpdate?.(data);
-    });
-
-    // F101 Phase I: Narrator narrative messages (e.g. "🐺 狼人请睁眼")
-    socket.on(
-      'game:narrative',
-      (data: { threadId: string; message: { id: string; type: string; content: string; timestamp: number } }) => {
-        if (!data?.threadId || !data?.message?.id) return;
-        useChatStore.getState().addMessageToThread(data.threadId, {
-          id: data.message.id,
-          type: 'system',
-          content: data.message.content,
-          timestamp: data.message.timestamp,
-        });
-      },
-    );
-
-    // F101 Phase D: Independent game thread created
-    socket.on(
-      'game:thread_created',
-      (data: { gameThreadId: string; gameTitle: string; initiatorUserId: string; timestamp: number }) => {
-        callbacksRef.current.onGameThreadCreated?.(data);
       },
     );
 

@@ -26,13 +26,13 @@ import { after, before, describe, it } from 'node:test';
 
 const PROJECT_ROOT = join(import.meta.dirname, '..', '..', '..', '..');
 const SCRIPT = join(PROJECT_ROOT, 'scripts', 'sync-skills.sh');
-const PROVIDERS = ['.claude', '.codex', '.gemini', '.kimi'];
+const PROVIDERS = ['.claude', '.codex', '.gemini', '.kimi-code'];
 
 // Resolve the real git binary path — the test git wrapper delegates
 // non-worktree-list commands to the real binary via this absolute path.
 const REAL_GIT = spawnSync('which', ['git'], { encoding: 'utf-8' }).stdout.trim();
 
-function runScript(args, tmpHome, gitWrapperDir) {
+function runScript(args, tmpHome, gitWrapperDir, reportedWorktree = PROJECT_ROOT) {
   return spawnSync('bash', [SCRIPT, ...args], {
     cwd: PROJECT_ROOT,
     encoding: 'utf-8',
@@ -46,7 +46,7 @@ function runScript(args, tmpHome, gitWrapperDir) {
       // per 砚砚 review of PR #2513). All other git subcommands (rev-parse,
       // -C, etc.) pass through to the real binary.
       PATH: `${gitWrapperDir}:${process.env.PATH}`,
-      _SYNC_SKILLS_TEST_REPO: PROJECT_ROOT,
+      _SYNC_SKILLS_TEST_REPO: reportedWorktree,
     },
     timeout: 30_000, // 1 worktree ≈ 1-2s; 30s is generous
     maxBuffer: 10 * 1024 * 1024,
@@ -169,6 +169,19 @@ describe('sync-skills.sh --user opt-in (F239 Phase A, ADR-025)', () => {
    * runs and works under any worktree fs state.
    */
   describe('project-level coverage (F239 AC-A1)', () => {
+    it('targets native Kimi Code project skills without writing the retired directory', () => {
+      const project = join(tmpHome, 'owned-project');
+      mkdirSync(join(project, 'cat-cafe-skills', 'owned-skill'), { recursive: true });
+      writeFileSync(
+        join(project, 'cat-cafe-skills', 'owned-skill', 'SKILL.md'),
+        '---\nname: owned-skill\ndescription: fixture\n---\n',
+      );
+      const result = runScript(['--all', '--dry-run', '--verbose'], tmpHome, gitWrapperDir, project);
+      assert.equal(result.status, 0, result.stderr);
+      assert.ok(result.stdout.includes(join(project, '.kimi-code', 'skills')));
+      assert.ok(!result.stdout.includes(join(project, '.kimi', 'skills')));
+    });
+
     it('projects the shared refs coordinate inside the every-provider loop', async () => {
       const content = await readFile(SCRIPT, 'utf-8');
       const part1Match = content.match(/# ─── Part 1[\s\S]*?# ─── Part 2/);

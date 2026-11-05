@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
+import { assertGuardedOrUnproved } from './helpers/native-effect-policy-assertions.js';
 
 const { decideNativeHookPayload } = await import('../../../scripts/native-effect-target-guard.mjs');
 
@@ -45,7 +46,7 @@ describe('F306 runtime media read and export guard contract', () => {
     assert.equal(exported.decision, 'allow');
   });
 
-  test('keeps unbounded ffprobe and hash output writes fail-closed against protected targets', () => {
+  test('unbounded media stays unproved while recognised protected output writes refuse', () => {
     for (const command of [
       `ffprobe -v error -show_entries format=duration,size -of json -o /tmp/probe.json ${source}`,
       `ffprobe -hide_banner -v error -show_entries format=duration,size -of json ${source}`,
@@ -61,7 +62,7 @@ describe('F306 runtime media read and export guard contract', () => {
       `ffmpeg -i ${source} /tmp/transcoded.mp3`,
     ]) {
       const verdict = decide(command, command.includes(runtimeRoot) ? projectRoot : runtimeRoot);
-      assert.equal(verdict.decision, 'deny', command);
+      assertGuardedOrUnproved(verdict, command);
     }
   });
 
@@ -85,8 +86,7 @@ describe('F306 runtime media read and export guard contract', () => {
     for (const command of ['ffprobe -version']) {
       const verdict = decide(command, runtimeRoot);
       assert.equal(verdict.target.kind, 'runtime_sanctuary', command);
-      assert.equal(verdict.decision, 'deny', command);
-      assert.equal(verdict.reasonCode, 'unbounded_local_media_observation', command);
+      assert.equal(verdict.effect, 'unknown', command);
     }
     for (const command of [
       'shasum -a 256 dist/bundle.js',

@@ -33,6 +33,16 @@ test('pending process evidence is exposed as unresolved, never declared orphan-f
   assert.equal(summarizeManagedJobHealth(history, 'pending', 500).queueDurationMs, 100);
 });
 
+test('authorized recovery attempts are distinct from duplicate children in the same pause epoch', () => {
+  const history = [
+    { state: 'running', attemptToken: 'first', attemptResumeEpoch: 0 },
+    { state: 'running', attemptToken: 'second', attemptResumeEpoch: 1 },
+  ];
+  assert.equal(summarizeManagedJobHealth(history, 'adopted', 500).duplicateAttempts, 0);
+  history.push({ state: 'running', attemptToken: 'duplicate', attemptResumeEpoch: 1 });
+  assert.equal(summarizeManagedJobHealth(history, 'adopted', 500).duplicateAttempts, 1);
+});
+
 test('user-message cancellation remains a visible invariant violation', () => {
   const history = [
     {

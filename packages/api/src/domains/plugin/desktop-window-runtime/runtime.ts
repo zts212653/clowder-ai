@@ -1,11 +1,13 @@
 import { WIRE_VERSION } from '@clowder-ai/plugin-contract';
-import type { BuiltinPluginRuntime } from '../builtin-runtime/hybrid-supervisor.js';
+import type { BundledPluginRuntime } from '../builtin-runtime/carriers/bundled-runtime-carrier.js';
 import { startStaticSurfaceServer } from '../external-runtime/static-surface-server.js';
 import type { VerifiedPluginPackage } from '../external-runtime/types.js';
 import type { BuiltinBrokerConnection } from '../host-broker/builtin-loopback.js';
 import { StaticFeatureAuthority } from '../host-broker/static-feature-authority.js';
+import type { ExecutablePluginPackageRecord } from '../host-inventory/types.js';
 import { desktopWindowContribution } from './admission.js';
 import { unexpectedDesktopLossId } from './desktop-loss.js';
+import { ObservationDiagnostics } from './observation-diagnostics.js';
 import { DesktopWindowObserver } from './observer.js';
 import { resolveCompanionArchiveContract } from './published-companion-v2.js';
 import type {
@@ -15,8 +17,8 @@ import type {
   DesktopWindowRuntimeOptions as Options,
 } from './types.js';
 
-/** One owner desktop body; observations are ephemeral, while installation, grants and leases remain in their stores. */
-export class DesktopWindowPluginRuntime implements BuiltinPluginRuntime {
+/** One owner desktop body; observations are ephemeral, while installation and leases remain in their stores. */
+export class DesktopWindowPluginRuntime implements BundledPluginRuntime {
   readonly features: StaticFeatureAuthority;
   private active: ActiveWindow | undefined;
   private starting: { id: string; controller: AbortController; promise: Promise<void> } | undefined;
@@ -32,16 +34,20 @@ export class DesktopWindowPluginRuntime implements BuiltinPluginRuntime {
       broker: options.broker,
       admission: 'desktop-companion',
       now: this.now,
-      verifyActivePackage: async (id, digest) => {
+      verifyActivePackage: async (id, digest, diagnostics) => {
         const run = this.active;
         if (!run || run.id !== id || run.digest !== digest || run.closing)
           throw new Error('desktop package unavailable');
         // The surface serves frozen Host buffers; mutable executable admission
         // keeps verifyIntegrity. Every authority check still validates the seal.
-        await (run.package.verifyStaticIntegrity?.() ?? run.package.verifyIntegrity());
+        await (run.package.verifyStaticIntegrity?.(diagnostics) ?? run.package.verifyIntegrity());
         if (this.active !== run || run.closing) throw new Error('desktop ended during package verification');
       },
     });
+  }
+
+  claims(packageRecord: Pick<ExecutablePluginPackageRecord, 'manifest'>): boolean {
+    return desktopWindowContribution(packageRecord.manifest) !== undefined;
   }
 
   start(id: string): Promise<void> {
@@ -74,10 +80,21 @@ export class DesktopWindowPluginRuntime implements BuiltinPluginRuntime {
     )
       return null;
     try {
-      return await this.features.run(run.lease, async () =>
-        this.active === run && run.ready && !run.closing && this.now() - observation.observedAt < this.freshnessMs
-          ? structuredClone(observation)
-          : null,
+      return await this.features.run(
+        run.lease,
+        async () => {
+          // The observer can publish a new genuine sample while package IO waits.
+          // Read its current projection without polling or changing its timestamp.
+          const current = run.observer?.observation;
+          return this.active === run &&
+            run.ready &&
+            !run.closing &&
+            current &&
+            this.now() - current.observedAt < this.freshnessMs
+            ? structuredClone(current)
+            : null;
+        },
+        new ObservationDiagnostics('presence'),
       );
     } catch {
       return null;
@@ -85,7 +102,15 @@ export class DesktopWindowPluginRuntime implements BuiltinPluginRuntime {
   }
 
   async unexpectedLossId(): Promise<string | null> {
-    return unexpectedDesktopLossId(await this.options.inventory.snapshot(), 'official.companion');
+    const authority = await this.options.inventory.readCurrentAuthority('official.companion');
+    return unexpectedDesktopLossId(
+      {
+        schemaVersion: 1,
+        instances: authority ? [authority.instance] : [],
+        packages: authority?.packageRecord ? [authority.packageRecord] : [],
+      },
+      'official.companion',
+    );
   }
 
   /** Revocation is cleanup, never an effect that can mint or renew authority. */
@@ -100,20 +125,31 @@ export class DesktopWindowPluginRuntime implements BuiltinPluginRuntime {
 
   async show(): Promise<void> {
     const run = this.active;
-    if (!run?.ready || !run.observer || !run.lease || !(await this.presence()))
+    if (!run?.ready || !run.observer || !run.window || !run.lease || run.closing)
       throw new Error('desktop body unavailable');
+    const observer = run.observer;
+    const window = run.window;
+    // Join the live attempt when Host IO has aged the projection. An explicit
+    // owner click may wait for fresh evidence; it cannot revive a failed run.
+    if (!observer.observation || this.now() >= observer.observation.expiresAt)
+      await this.observeOrClose(run, () => observer.observe());
+    if (this.active !== run || !(await this.presence())) throw new Error('desktop body unavailable');
     // Admit the send atomically with authority, but never hold a store transaction
     // while waiting for an OS process. A later close is ordered after this send.
     const admitted = await this.features.run(run.lease, async () => ({
-      completion: run.window!.show().then(
+      completion: window.show().then(
         () => ({ ok: true as const }),
         (error: unknown) => ({ ok: false as const, error }),
       ),
     }));
     const result = await admitted.completion;
     if (!result.ok) throw result.error;
+    await this.observeOrClose(run, () => observer.observeAfterShow());
+  }
+
+  private async observeOrClose(run: ActiveWindow, observe: () => Promise<void>): Promise<void> {
     try {
-      await run.observer.observeAfterShow();
+      await observe();
     } catch (error) {
       this.observationLost(run, error);
       throw error;
@@ -124,10 +160,10 @@ export class DesktopWindowPluginRuntime implements BuiltinPluginRuntime {
     let pkg: VerifiedPluginPackage | undefined;
     let connection: BuiltinBrokerConnection | undefined;
     try {
-      const snapshot = await this.options.inventory.snapshot();
-      const instance = snapshot.instances.find((r) => r.pluginInstanceId === id && r.lifecycleState === 'installed');
-      const installed = instance && snapshot.packages.find((r) => r.packageDigest === instance.packageDigest);
-      const contribution = installed && desktopWindowContribution(installed.manifest);
+      const authority = await this.options.inventory.readAuthority(id);
+      const instance = authority?.instance?.lifecycleState === 'installed' ? authority.instance : undefined;
+      const installed = authority?.packageRecord;
+      const contribution = installed?.manifest && desktopWindowContribution(installed.manifest);
       if (!instance || !installed || !contribution) throw new Error('unsupported desktop companion');
       pkg = await this.options.packages.resolveInstalledPackage(instance.packageDigest);
       if (JSON.stringify(pkg.manifest) !== JSON.stringify(installed.manifest))
@@ -136,6 +172,8 @@ export class DesktopWindowPluginRuntime implements BuiltinPluginRuntime {
       if (installed.pluginId === 'official.companion' && !companionContract)
         throw new Error('companion archive contract unavailable');
       const publicCompanionV2 = companionContract !== undefined;
+      controller.signal.throwIfAborted();
+      await this.options.executor.prepare?.();
       controller.signal.throwIfAborted();
       connection = await this.options.broker.openBuiltinConnection(id);
       const run: ActiveWindow = {
@@ -201,6 +239,7 @@ export class DesktopWindowPluginRuntime implements BuiltinPluginRuntime {
             initiator: 'executor',
           }),
         ...(run.bridge ? { request: (input: unknown) => run.bridge!.request(input) } : {}),
+        ...(run.bridge?.appAssist ? { appAssist: run.bridge.appAssist } : {}),
         ...(run.bridge?.observeVoice
           ? {
               onVoiceObservation: async (observation) => {
@@ -247,12 +286,13 @@ export class DesktopWindowPluginRuntime implements BuiltinPluginRuntime {
   }
 
   private observationLost(run: ActiveWindow, error: unknown): void {
+    const observation = run.observer?.diagnostic(error);
     this.lost(run, {
-      reason:
-        error instanceof Error && error.message === 'desktop heartbeat expired' ? 'heartbeat-expired' : 'poll-failed',
+      reason: observation?.error?.reason === 'heartbeat_expired' ? 'heartbeat-expired' : 'poll-failed',
       exitCode: null,
       signal: null,
       initiator: 'host-observer',
+      ...(observation ? { observation } : {}),
     });
   }
 
@@ -261,7 +301,7 @@ export class DesktopWindowPluginRuntime implements BuiltinPluginRuntime {
     failure: DesktopWindowFailure = { reason: 'unknown', exitCode: null, signal: null },
   ): void {
     if (this.active !== run || run.closing) return;
-    const observation = run.observer?.diagnostic();
+    const observation = failure.observation ?? run.observer?.diagnostic();
     const firstFailure = observation ? { ...failure, observation } : failure;
     // Claim the first live terminal cause before aborting: the executor's
     // abort handler synchronously calls onClosed(undefined) back into lost().
@@ -277,8 +317,8 @@ export class DesktopWindowPluginRuntime implements BuiltinPluginRuntime {
     void this.close(run, 'desktop_runtime_lost')
       .catch(() => undefined) // Cleanup failure must not erase the observed loss from inventory.
       .then(() =>
-        this.options.inventory.transaction((tx) => {
-          const current = tx.instances.get(run.id);
+        this.options.inventory.transaction(async (tx) => {
+          const current = await tx.instances.get(run.id);
           if (
             current?.packageDigest === run.digest &&
             current.lifecycleRevision === run.lifecycleRevision &&
@@ -286,7 +326,7 @@ export class DesktopWindowPluginRuntime implements BuiltinPluginRuntime {
             !this.active
           ) {
             const occurredAt = this.now();
-            tx.instances.put({
+            await tx.instances.put({
               ...current,
               runtimeState: 'crashed',
               updatedAt: occurredAt,
@@ -315,7 +355,7 @@ export class DesktopWindowPluginRuntime implements BuiltinPluginRuntime {
     if (this.active !== run || !run.ready || run.closing || !run.lease || !disable)
       throw new Error('Current companion unavailable');
     await this.features.run(run.lease, async () => undefined);
-    const before = (await this.options.inventory.snapshot()).instances.find((row) => row.pluginInstanceId === run.id);
+    const before = await this.options.inventory.read.instances.get(run.id);
     if (before?.packageDigest !== run.digest || before.activationState !== 'enabled')
       throw new Error('Current companion changed');
     // Admit the fixed revision under this exact feature generation. Do not hold
@@ -329,12 +369,15 @@ export class DesktopWindowPluginRuntime implements BuiltinPluginRuntime {
       return { completion };
     });
     await admitted.completion;
-    const after = (await this.options.inventory.snapshot()).instances.find((row) => row.pluginInstanceId === run.id);
+    const after = await this.options.inventory.read.instances.get(run.id);
     if (after?.packageDigest !== run.digest || after.activationState !== 'disabled' || this.active === run)
       throw new Error('Companion disable unconfirmed');
   }
 
   private async closeRun(run: ActiveWindow, reason: string): Promise<void> {
+    // Stop application observation before awaiting the durable broker fence.
+    // Physical child cleanup below still owns the final stop proof if IPC fails.
+    void run.bridge?.appAssist?.revoke?.().catch(() => {});
     try {
       await run.connection.close(reason); // Attempt the durable fence before child cleanup.
     } finally {

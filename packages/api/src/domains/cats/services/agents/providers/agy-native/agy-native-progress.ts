@@ -1,13 +1,16 @@
 import type { CatId } from '@cat-cafe/shared';
 import type { AgentMessage, MessageMetadata } from '../../../types.js';
+import { AgyStepEvidence } from '../agy-step-evidence.js';
 import type { AgyStreamJsonEvent } from '../agy-stream-json-parser.js';
 import { agyNativeToolIdentity, agyNativeToolResultContent } from './agy-native-tool-result.js';
 
 /** Incremental presentation only. Terminal authority stays with the completed turn. */
 export class AgyNativeProgress {
-  private readonly started = new Set<string>();
+  private readonly evidence = new AgyStepEvidence();
+  private readonly started = new Map<string, { nativeName: string; emitted: boolean }>();
   private readonly finished = new Set<string>();
   private readonly parameters = new Map<number, Record<string, unknown>>();
+  private readonly errors = new Map<number, string>();
   private readonly checkpoints = new Set<number>();
   private text = '';
 
@@ -16,7 +19,13 @@ export class AgyNativeProgress {
     private readonly metadata: MessageMetadata,
   ) {}
 
-  step(event: Extract<AgyStreamJsonEvent, { kind: 'step' }>): AgentMessage[] {
+  step(observed: Extract<AgyStreamJsonEvent, { kind: 'step' }>): AgentMessage[] {
+    const event = this.evidence.observe(observed);
+    if (event.anomalies.length && !this.errors.has(event.stepIndex))
+      this.errors.set(
+        event.stepIndex,
+        `Native tool result unconfirmed: ${event.anomalies.map((a) => a.detail).join('; ')}`,
+      );
     const messages: AgentMessage[] = [];
     if (
       event.stepType === 'checkpoint' &&
@@ -53,30 +62,53 @@ export class AgyNativeProgress {
       });
     }
     if (event.stepType !== 'tool' || !event.toolName) return messages;
-    if (event.toolParameters) this.parameters.set(event.stepIndex, event.toolParameters);
-    const identity = agyNativeToolIdentity(event.toolName, this.parameters.get(event.stepIndex) ?? {});
+    const toolUseId = `${this.metadata.sessionId}:${event.stepIndex}`;
+    let started = this.started.get(toolUseId);
+    if (!started) {
+      started = { nativeName: event.toolName, emitted: false };
+      this.started.set(toolUseId, started);
+    }
+    const startedToolName = started.nativeName;
+    // A live tool ID belongs to its first native tool, including before terminal validation.
+    const identityChanged = startedToolName !== event.toolName;
+    if (!identityChanged) {
+      if (event.toolParameters) this.parameters.set(event.stepIndex, event.toolParameters);
+      if (event.toolErrorMessage) this.errors.set(event.stepIndex, event.toolErrorMessage);
+    }
+    const identity = agyNativeToolIdentity(startedToolName, this.parameters.get(event.stepIndex) ?? {});
     if (event.toolName === 'call_mcp_tool' && identity.toolName === 'call_mcp_tool' && event.state === 'ACTIVE') {
       return messages;
     }
     const common = {
       catId: this.catId,
       toolName: identity.toolName,
-      toolUseId: `${this.metadata.sessionId}:${event.stepIndex}`,
+      toolUseId,
       toolSource: identity.toolSource,
       metadata: this.metadata,
       timestamp: Date.now(),
     };
-    if (!this.started.has(common.toolUseId)) {
-      this.started.add(common.toolUseId);
+    if (!started.emitted) {
+      started.emitted = true;
       messages.push({ ...common, type: 'tool_use', toolInput: identity.toolInput });
     }
-    if (!this.finished.has(common.toolUseId) && (event.state === 'DONE' || event.state === 'ERROR')) {
+    if (
+      !this.finished.has(common.toolUseId) &&
+      (identityChanged || event.state === 'DONE' || event.state === 'ERROR')
+    ) {
       this.finished.add(common.toolUseId);
+      const error = identityChanged
+        ? [
+            this.errors.get(event.stepIndex),
+            `Native tool result unconfirmed: tool identity changed from ${startedToolName} to ${event.toolName}.`,
+          ]
+            .filter(Boolean)
+            .join('\n\n')
+        : (this.errors.get(event.stepIndex) ?? null);
       messages.push({
         ...common,
         type: 'tool_result',
-        content: agyNativeToolResultContent(event.toolOutput, event.toolErrorMessage),
-        toolResultStatus: event.state === 'DONE' && !event.toolErrorMessage ? 'ok' : 'error',
+        content: agyNativeToolResultContent(identityChanged ? null : event.toolOutput, error),
+        toolResultStatus: event.state === 'DONE' && error === null ? 'ok' : 'error',
       });
     }
     return messages;
@@ -87,7 +119,7 @@ export class AgyNativeProgress {
       if (message.type === 'session_init' || message.type === 'tool_use') return [];
       if (message.type === 'tool_result') {
         const id = message.toolUseId;
-        if (!id || !this.started.has(id) || this.finished.has(id)) return [];
+        if (!id || !this.started.get(id)?.emitted || this.finished.has(id)) return [];
         this.finished.add(id);
         return [message];
       }

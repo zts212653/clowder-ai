@@ -50,10 +50,42 @@ describe('body selection uses readable message ownership rather than the author 
     return editor;
   }
 
+  it('keeps a readable selection clickable while only toolbar geometry is pending', () => {
+    const trigger = document.querySelector<HTMLButtonElement>('[data-testid="owned-selection"]');
+    if (!trigger) throw new Error('Missing real selection trigger');
+    const toolbar = document.createElement('button');
+    document.body.append(toolbar);
+    const unregister = owner.register(toolbar, 'anchor');
+    try {
+      act(() => {
+        trigger.focus();
+        owner.pending(() => true);
+      });
+      expect(trigger.hasAttribute('data-message-action-unavailable')).toBe(false);
+      expect(trigger.hasAttribute('inert')).toBe(false);
+      expect(document.activeElement).toBe(trigger);
+      expect(toolbar.hasAttribute('inert')).toBe(true);
+      expect(openEditor().contains(document.activeElement)).toBe(true);
+    } finally {
+      unregister();
+      toolbar.remove();
+    }
+  });
+
+  it('revokes a selection immediately when the source becomes unreadable during measurement', () => {
+    const trigger = document.querySelector<HTMLButtonElement>('[data-testid="owned-selection"]');
+    if (!trigger) throw new Error('Missing real selection trigger');
+    act(() => owner.pending(() => true));
+    expect(trigger.hasAttribute('inert')).toBe(false);
+    act(() => owner.pending(() => false));
+    expect(trigger.hasAttribute('inert')).toBe(true);
+    expect(trigger.getAttribute('aria-hidden')).toBe('true');
+  });
+
   it('preserves the opened draft and focus through pending paint and author-anchor loss', () => {
     const editor = openEditor();
     expect(editor.contains(document.activeElement)).toBe(true);
-    act(() => owner.pending());
+    act(() => owner.pending(() => false));
     expect(editor.hasAttribute('inert')).toBe(false);
     expect(editor.getAttribute('aria-hidden')).not.toBe('true');
     expect(editor.contains(document.activeElement)).toBe(true);

@@ -2,8 +2,9 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { respondWithMediaVersionSchema } from '@cat-cafe/shared';
+import { queueEntryId } from '../src/domains/cats/services/agents/invocation/queue-ledger/QueueLedger.js';
 import { mediaPublicationFixture } from './helpers/media-publication-fixture.js';
-import { waitForRecoveryCarrierTerminal } from './helpers/publication-recovery-fixture.js';
+import { publicationResponseRecord, waitForRecoveryCarrierTerminal } from './helpers/publication-recovery-fixture.js';
 
 test('an explicit owner recovery preserves the rejected terminal return and gives the same response a fresh authenticated child', async (t) => {
   const f = await mediaPublicationFixture(t, false, { publicationLedger: true });
@@ -106,9 +107,7 @@ test('an explicit owner recovery preserves the rejected terminal return and give
   assert.notEqual(childId, oldChildId);
   const credentials = f.dispatch.credentials.get(childId);
   assert.ok(credentials);
-  assert.ok(
-    f.messages.getById(newCarrier.id)?.queueCustody?.bodyExposures?.some((item) => item.invocationId === childId),
-  );
+  assert.ok(publicationResponseRecord(f, childId).response.inputEntryIds.includes(queueEntryId(newCarrier.id)));
   const oldAttempt = await f.app.inject(callback);
   assert.notEqual(oldAttempt.statusCode, 200, 'the old authenticated child cannot respond to the new generation');
   const freshInput = {

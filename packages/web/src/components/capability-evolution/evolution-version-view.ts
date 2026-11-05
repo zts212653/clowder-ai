@@ -8,25 +8,37 @@ import type { EvolutionProgramProjection } from './evolution-program-projection'
 
 export interface EvolutionVersionView {
   ref: ExactAssetVersionRefV1;
-  current: boolean;
+  sourceCurrent: boolean;
+  adopted: boolean;
   parents: ExactAssetVersionRefV1[];
 }
+
+function exactVersionKeys(refs: EvolutionProgramProjection['program']['currentAssetVersionRefs']): Set<string> {
+  const keys = new Set<string>();
+  for (const ref of refs) {
+    const exact = exactAssetVersionRefV1Schema.safeParse(ref);
+    if (exact.success) keys.add(refIdentity(exact.data));
+  }
+  return keys;
+}
+
 export function projectAssetVersions(
   projection: EvolutionProgramProjection,
   review?: EvolutionResolvedAssetReviewV1,
 ): EvolutionVersionView[] {
   const versions = new Map<string, EvolutionVersionView>();
-  const current = new Set(review?.currentVersionRefs.map(refIdentity) ?? []);
+  const sourceCurrent = new Set(review?.currentVersionRefs.map(refIdentity) ?? []);
+  const adopted = exactVersionKeys(projection.program.currentAssetVersionRefs);
   const add = (ref: ExactAssetVersionRefV1) => {
     const key = refIdentity(ref);
     let version = versions.get(key);
     if (!version) {
-      version = { ref, current: current.has(key), parents: [] };
+      version = { ref, sourceCurrent: sourceCurrent.has(key), adopted: adopted.has(key), parents: [] };
       versions.set(key, version);
     }
     return version;
   };
-  // Execution records make versions discoverable, but do not establish parenthood or live adoption.
+  // Execution records make versions discoverable, but do not establish parenthood or Program adoption.
   for (const cycle of projection.lineage?.cycles ?? []) {
     for (const change of cycle.changes) {
       add(change.targetVersionRef);
@@ -63,10 +75,12 @@ export function selectedAssetVersion(
   selectedKey?: string,
 ): EvolutionVersionView | undefined {
   if (selectedKey !== undefined) return versions.find((version) => refIdentity(version.ref) === selectedKey);
-  return versions.find((version) => version.current) ?? versions.at(-1);
+  return (
+    versions.find((version) => version.sourceCurrent) ?? versions.find((version) => version.adopted) ?? versions.at(-1)
+  );
 }
 
-/** A fresh catalog can precede the selected read; never relabel an older comparison as the new current. */
+/** A fresh owner catalog can precede the selected read; never relabel an older comparison as its new source-current. */
 export function currentVersionDiff(
   selected: EvolutionResolvedAssetReviewV1['selected'],
   catalog?: EvolutionResolvedAssetReviewV1,

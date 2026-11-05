@@ -19,6 +19,69 @@ const EXPECTED_NAMES = [
   'plugin_uninstall',
 ] as const;
 
+const replacement = {
+  pluginId: 'legacy.plugin',
+  pluginInstanceId: 'pi_legacy',
+  currentPackageDigest: `sha512-${'A'.repeat(86)}==`,
+  candidatePackageDigest: `sha512-${'B'.repeat(85)}A==`,
+  expectedLifecycleRevision: 8,
+};
+
+it('archive replacement uses a closed fence on archive requests only', () => {
+  const tool = pluginManagementTools.find((item) => item.name === 'plugin_install');
+  assert.ok(tool);
+  const schema = z.object(tool.inputSchema as z.ZodRawShape).strict();
+  const request = { source: { kind: 'local-archive', path: '/tmp/plugin.tgz' }, replacement };
+  assert.equal(schema.safeParse({ request }).success, true);
+  for (const bad of [
+    { ...replacement, expectedLifecycleRevision: 0 },
+    { ...replacement, candidatePackageDigest: `sha512-${'B'.repeat(86)}==` },
+    { ...replacement, unexpected: true },
+    { ...replacement, pluginInstanceId: '' },
+  ])
+    assert.equal(schema.safeParse({ request: { ...request, replacement: bad } }).success, false);
+  for (const source of [
+    { kind: 'local-directory', path: '/tmp/plugin' },
+    { kind: 'git', url: 'https://example.test/plugin.git' },
+  ]) {
+    assert.equal(schema.safeParse({ request: { source, replacement } }).success, false);
+  }
+});
+
+it('MCP preserves the Host offer in its error and forwards the exact owner-confirmed fence', async () => {
+  const calls: unknown[] = [];
+  const offer = {
+    code: 'ARCHIVE_REPLACEMENT_CONFIRMATION_REQUIRED',
+    replacement: {
+      confirmation: replacement,
+      displayName: 'Legacy',
+      currentVersion: '0.1.0',
+      candidateVersion: '0.2.0',
+    },
+  };
+  const client = createPluginManagerHttpClient({
+    resolveAuth: () => ({
+      apiUrl: 'http://localhost:3004',
+      headers: { 'x-invocation-id': 'i', 'x-callback-token': 't' },
+    }),
+    fetchImpl: (async (_url, init) => {
+      calls.push(JSON.parse(String(init?.body)));
+      return calls.length === 1
+        ? Response.json(offer, { status: 409 })
+        : Response.json({ pluginInstanceId: 'pi_legacy' });
+    }) as typeof fetch,
+  });
+  const handlers = createPluginManagementHandlers(client);
+  const source = { kind: 'local-archive' as const, path: '/tmp/plugin.tgz' };
+  const offered = await handlers.install({ request: { source } });
+  assert.equal(offered.isError, true);
+  assert.match(JSON.stringify(offered), /ARCHIVE_REPLACEMENT_CONFIRMATION_REQUIRED/);
+  assert.match(JSON.stringify(offered), /expectedLifecycleRevision/);
+  const confirmed = await handlers.install({ request: { source, replacement } });
+  assert.notEqual(confirmed.isError, true);
+  assert.deepEqual(calls, [{ source }, { source, replacement }]);
+});
+
 describe('F202 Agent plugin management surface', () => {
   it('publishes six management tools plus governed contribution discovery/invocation', () => {
     assert.deepEqual(pluginManagementTools.map((tool) => tool.name).sort(), [...EXPECTED_NAMES]);
@@ -38,6 +101,10 @@ describe('F202 Agent plugin management surface', () => {
         `${tool.name} must state its output and side effects`,
       );
     }
+    const byName = new Map(pluginManagementTools.map((tool) => [tool.name, tool]));
+    assert.match(byName.get('plugin_list_tools')?.description ?? '', /plugin-declared direct tool schemas/);
+    assert.match(byName.get('plugin_call')?.description ?? '', /plugin-declared direct tool/);
+    assert.doesNotMatch(byName.get('plugin_call')?.description ?? '', /Host-supervised|plugin MCP result/);
   });
 
   it('derives read/write/destructive annotations and profile exposure from governance', () => {
@@ -127,6 +194,21 @@ describe('F202 Agent plugin management surface', () => {
       }).success,
       true,
     );
+
+    const installTool = byName.get('plugin_install');
+    assert.ok(installTool);
+    const install = z.object(installTool.inputSchema as z.ZodRawShape).strict();
+    assert.equal(
+      install.safeParse({ request: { source: { kind: 'git', url: 'https://git.example/plugins/example.git' } } })
+        .success,
+      true,
+    );
+    assert.equal(
+      install.safeParse({
+        request: { source: { kind: 'git', url: 'https://git.example/plugins/example.git', extra: true } },
+      }).success,
+      false,
+    );
   });
 
   it('delegates management and contribution operations to one injected Host client contract', async () => {
@@ -185,6 +267,7 @@ describe('F202 Agent plugin management surface', () => {
         expectedDigest: digest,
       },
     });
+    await handlers.install({ request: { source: { kind: 'git', url: 'ssh://git@git.example/plugins/example.git' } } });
     await handlers.setEnabled({ pluginId: 'official.video', enabled: true, expectedRevision: 4 });
     await handlers.uninstall({ pluginId: 'official.video', expectedRevision: 5 });
 
@@ -208,6 +291,7 @@ describe('F202 Agent plugin management surface', () => {
           expectedDigest: digest,
         },
       ],
+      ['install', { source: { kind: 'git', url: 'ssh://git@git.example/plugins/example.git' } }],
       ['set-enabled', 'official.video', { enabled: true, expectedRevision: 4 }],
       ['uninstall', 'official.video', { expectedRevision: 5 }],
     ]);
@@ -236,7 +320,7 @@ describe('F202 Agent plugin management surface', () => {
     await client.call('official.video', 'video-analysis-toolset', 'video_analysis', {
       videoUrl: 'https://media.example/video.mp4',
     });
-    await client.install({ source: { kind: 'local-directory', path: '/tmp/plugin' } });
+    await client.install({ source: { kind: 'git', url: 'https://git.example/plugins/example.git' } });
     await client.setEnabled('official.video', { enabled: true, expectedRevision: 2 });
     await client.uninstall('official.video', { expectedRevision: 3 });
 

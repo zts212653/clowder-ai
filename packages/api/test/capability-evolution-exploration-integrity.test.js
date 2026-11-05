@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import { createMicroduckExplorationBindings } from '../dist/infrastructure/capability-evolution/adapters/microduck-exploration/publication.js';
+import { createExplorationArchiveFixture } from './fixtures/microduck-exploration-archive.fixture.js';
 
-const repoRoot = resolve(import.meta.dirname, '../../..');
+const fixture = await createExplorationArchiveFixture();
+after(fixture.cleanup);
+const repoRoot = fixture.repoRoot;
 const programRef = { ownerFeatureId: 'F311', ownerStateRef: 'evolution-program:bcc336788a7df9d6075b1efb4c0a7e68' };
 const objectRef = { ownerFeatureId: 'microduck-owner', ownerStateRef: 'simulator:walking', version: '1' };
 const input = { programRef, objectRef };
@@ -29,11 +31,11 @@ test('comparison inventory order never invents a public lineage edge without a d
   });
   const review = await binding.explorationReview(input);
   assert.equal(review.status, 'resolved');
-  for (const title of ['v5', 'v6', 'v7', 'v8']) {
+  for (const title of ['v3', 'v4']) {
     const node = review.nodes.find((entry) => entry.title === title);
     assert.deepEqual(node.parentEdges, [], `${title} has no declared parent in this inventory`);
   }
-  const v4 = review.nodes.find((entry) => entry.title === 'v4');
+  const v4 = review.nodes.find((entry) => entry.title === 'v2');
   assert.equal(v4.parentEdges.length, 1, 'declared catalog ancestry remains available');
 });
 
@@ -55,7 +57,7 @@ test('owner failure, unavailable and invalid identities stay visible alongside r
   for (const [versionReview, code] of cases) {
     const review = await owner({ versionReview }).explorationReview(input);
     assert.equal(review.status, 'resolved', 'public sources have an independent read boundary');
-    assert.equal(review.nodes.filter((node) => node.kind === 'public_archive').length, 9);
+    assert.equal(review.nodes.filter((node) => node.kind === 'public_archive').length, 5);
     assert(
       review.blockers.some((entry) => entry.code === code),
       `missing ${code}`,
@@ -71,12 +73,12 @@ test('unreadable or corrupt replay provenance is a media failure, not an absent 
         if (mode === 'manifest' && file.endsWith('/20260909-demo/catalog.json')) {
           const catalog = JSON.parse((await readFile(file)).toString('utf8'));
           const row = catalog.episodes.find(
-            (entry) => entry.runId === '20260907-approach-v2' && entry.caseId === 'approach-left-straight',
+            (entry) => entry.runId === 'fixture-origin' && entry.caseId === 'fixture-left-contact',
           );
           row.identicalCaptureReplayVideoRef.sha256 = '0'.repeat(64);
           return Buffer.from(JSON.stringify(catalog));
         }
-        if (mode !== 'manifest' && file.endsWith('/20260907-approach-v2/media-run.json')) {
+        if (mode !== 'manifest' && file.endsWith('/fixture-origin/media-run.json')) {
           if (mode === 'hash') return Buffer.from('corrupt replay');
           throw new Error('source offline');
         }
@@ -84,7 +86,7 @@ test('unreadable or corrupt replay provenance is a media failure, not an absent 
       },
     });
     const catalog = await binding.explorationReview(input);
-    const run = catalog.experiments.find((entry) => entry.title.includes('20260907-approach-v2'));
+    const run = catalog.experiments.find((entry) => entry.title.includes('fixture-origin'));
     const review = await binding.explorationReview({
       ...input,
       selectedNodeRef: run.nodeRef,
@@ -92,7 +94,7 @@ test('unreadable or corrupt replay provenance is a media failure, not an absent 
     });
     const detail = review.details[0];
     assert.equal(detail.status, 'resolved', 'numerical records remain readable');
-    const record = detail.records.find((entry) => entry.caseId === 'approach-left-straight');
+    const record = detail.records.find((entry) => entry.caseId === 'fixture-left-contact');
     assert.equal(record.mediaStatus?.status, mode === 'offline' ? 'unavailable' : 'invalid');
     assert.equal(record.media.length, 0);
     assert(record.trace.points.length > 0);

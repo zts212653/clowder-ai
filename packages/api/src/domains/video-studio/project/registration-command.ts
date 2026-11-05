@@ -1,6 +1,6 @@
 import { videoProjectScreeningSchema, videoProjectSelfReviewSchema } from '@cat-cafe/shared';
 import { ContentOwnerIdempotencyError, type ProjectContentOwnerService } from '../content-owner/service.js';
-import type { ContentOperationContextV1 } from '../content-owner/types.js';
+import type { VideoContentOperationContextV1 } from '../content-owner/types.js';
 import { sameProjectValue } from './document-mutations.js';
 import { validateScreeningAppend } from './registration-facts.js';
 import type { AppendVideoProjectScreening } from './screening-types.js';
@@ -45,10 +45,10 @@ async function prepare(
   projects: VideoProjectReadPort,
   input: ScreeningAppend | SelfReviewAppend,
   registration: Registration,
-  kind: ContentOperationContextV1['kind'],
+  kind: VideoContentOperationContextV1['kind'],
   validate: () => Promise<void>,
 ) {
-  const context: ContentOperationContextV1 = { kind, requestDigest: input.requestDigest };
+  const context: VideoContentOperationContextV1 = { kind, requestDigest: input.requestDigest };
   const receipt = await projects.operationReceipt(input);
   if (receipt) {
     const saved = await projects.load({ ...input, ownerRevision: receipt.ownerRevision });

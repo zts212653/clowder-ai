@@ -1,6 +1,11 @@
+import type { ApprovedTaskContractV1, TaskContractContinuationV1 } from '@cat-cafe/shared';
 import { type DevelopmentScopeSnapshot, sameDevelopmentScopeSnapshot } from './action-subject-delegate-contract.js';
+import type { CompleteProposalContract } from './approved-task-contract.js';
 
-export interface ApprovedDevelopmentProposalSnapshot {
+export interface ApprovedDevelopmentProposalSnapshot
+  extends Partial<Omit<CompleteProposalContract, 'approvedDevelopmentScope'>> {
+  readonly approvedTaskContract?: ApprovedTaskContractV1;
+  readonly taskContractContinuation?: TaskContractContinuationV1;
   readonly proposalId: string;
   readonly status: string;
   readonly createdThreadId?: string;
@@ -17,6 +22,7 @@ export interface ApprovedDevelopmentProposalSnapshot {
 
 export interface DevelopmentTaskAuthoritySnapshot {
   readonly id: string;
+  readonly title?: string;
   readonly threadId: string;
   readonly ownerCatId?: string | null;
   readonly userId?: string;
@@ -24,13 +30,14 @@ export interface DevelopmentTaskAuthoritySnapshot {
 }
 
 /** One exact, current Task relation through either its legacy source or approved parent thread. */
-export function isApprovedDevelopmentProposalForTask(
+export function matchesApprovedTaskIdentity(
   proposal: ApprovedDevelopmentProposalSnapshot,
   task: DevelopmentTaskAuthoritySnapshot,
 ): boolean {
   return Boolean(
     task.ownerCatId &&
       task.userId &&
+      !proposal.approvalContractInvalid &&
       proposal.status === 'approved' &&
       proposal.createdThreadId &&
       (proposal.sourceThreadId === task.threadId || proposal.parentThreadId === task.threadId) &&
@@ -38,7 +45,16 @@ export function isApprovedDevelopmentProposalForTask(
       proposal.createdBy === task.userId &&
       proposal.approvedBy === task.userId &&
       Number.isFinite(proposal.approvedAt) &&
-      proposal.subjectTaskId === task.id &&
-      sameDevelopmentScopeSnapshot(proposal.approvedDevelopmentScope, task.developmentScope),
+      proposal.subjectTaskId === task.id,
+  );
+}
+
+export function isApprovedDevelopmentProposalForTask(
+  proposal: ApprovedDevelopmentProposalSnapshot,
+  task: DevelopmentTaskAuthoritySnapshot,
+): boolean {
+  return (
+    matchesApprovedTaskIdentity(proposal, task) &&
+    sameDevelopmentScopeSnapshot(proposal.approvedDevelopmentScope, task.developmentScope)
   );
 }

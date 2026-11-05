@@ -2,6 +2,7 @@ import {
   MAX_MESSAGE_OUTPUT_REFS,
   MAX_MESSAGE_OUTPUT_RUNS,
   type MessageOutputOwner,
+  type OutputMessageIdentity,
   readHostSignatureOutput,
   readOutputMessageIdentity,
   sameOutputMessageIdentity,
@@ -14,16 +15,12 @@ export function createMessageOutputState(owner: MessageOutputOwner): MessageOutp
   return { owner, entries: [] };
 }
 
-function observationReason(
-  validPrefix: boolean,
-  mode: unknown,
-  identity: unknown,
-  channel: unknown,
-  complete: unknown,
-) {
+function observationReason(validPrefix: boolean, mode: unknown, identity: unknown, complete: unknown) {
   if (!validPrefix || (mode !== 'append' && mode !== 'replace')) return 'conflict' as const;
   if (complete !== undefined && typeof complete !== 'boolean') return 'conflict' as const;
-  if (!identity || !channel) return 'unknown_output' as const;
+  if (!identity) return 'unknown_output' as const;
+  // Missing channels remain unavailable at materialization. They are not a
+  // permanent conflict: a native item may reveal its phase at completion.
   return undefined;
 }
 
@@ -49,7 +46,7 @@ function observation(input: MessageOutputTextInput) {
     displayPrefix: prefix === 2 && validPrefix,
     text: prefix === 2 && validPrefix ? input.content.slice(2) : input.content,
     reason:
-      observationReason(validPrefix, nativeMode, identity, channel, metadata?.complete) ??
+      observationReason(validPrefix, nativeMode, identity, metadata?.complete) ??
       (input.fragment?.changed ? ('content_changed' as const) : undefined),
   };
 }
@@ -71,28 +68,77 @@ function appendRun(state: MessageOutputState, run: OutputTextRun): MessageOutput
 
 type Observation = ReturnType<typeof observation>;
 
+function continuesAcrossTools(
+  state: MessageOutputState,
+  next: Observation,
+  index: number,
+  previous: OutputTextRun,
+  signatureSuffix?: string,
+) {
+  // One native run stays anchored at its first text observation; late command
+  // results retain their arrival order. Only a proven producer signature removal
+  // may shorten the observed text; ordinary prefix truncation remains conflict.
+  const removedOwnSignature = signatureSuffix !== undefined && (next.text + signatureSuffix).startsWith(previous.text);
+  return (
+    state.entries.slice(index + 1).every((entry) => entry.kind === 'tool') &&
+    (next.mode === 'append' || next.text.startsWith(previous.text) || removedOwnSignature)
+  );
+}
+
+function duplicateCompletion(previous: OutputTextRun, next: Observation): boolean {
+  return (
+    previous.complete &&
+    next.complete &&
+    previous.channel === next.channel &&
+    next.mode === 'replace' &&
+    previous.text === next.text
+  );
+}
+
+function latestNativeRunIndex(state: MessageOutputState, identity: OutputMessageIdentity, next: Observation): number {
+  let latest = -1;
+  const completion = next.complete && next.mode === 'replace';
+  for (let index = state.entries.length - 1; index >= 0; index--) {
+    const entry = state.entries[index];
+    if (entry.kind !== 'text' || !entry.identity || !sameOutputMessageIdentity(entry.identity, identity)) continue;
+    // A retry of either side of a past conflict is still a duplicate, even if
+    // the other observation was more recent. New fragments use the latest run.
+    if (!completion || duplicateCompletion(entry, next)) return index;
+    if (latest < 0) latest = index;
+  }
+  return latest;
+}
+
 function updateExistingRun(
   state: MessageOutputState,
   next: Observation,
   index: number,
   previous: OutputTextRun,
+  signatureSuffix?: string,
 ): MessageOutputState {
   const sameChannel = previous.channel === next.channel;
-  const duplicateCompletion =
-    previous.complete && next.complete && sameChannel && next.mode === 'replace' && previous.text === next.text;
-  if (duplicateCompletion) return state;
-  if (!sameChannel || previous.complete || index !== state.entries.length - 1 || next.reason) {
+  const observedChannel = previous.channel === undefined && next.channel !== undefined && !previous.complete;
+  if (duplicateCompletion(previous, next))
+    return next.reason ? { ...state, reason: state.reason ?? next.reason } : state;
+  const conflictingObservation = next.reason && next.reason !== 'content_changed';
+  if (
+    (!sameChannel && !observedChannel) ||
+    previous.complete ||
+    (index !== state.entries.length - 1 && !continuesAcrossTools(state, next, index, previous, signatureSuffix)) ||
+    conflictingObservation
+  ) {
     // Contradictory public text remains readable, with no classification claim.
     return appendRun({ ...state, reason: 'conflict' }, { kind: 'text', ...next, paragraphBoundary: true });
   }
   const entries = [...state.entries];
   entries[index] = {
     ...previous,
+    channel: next.channel,
     text: next.mode === 'replace' ? next.text : previous.text + next.text,
     complete: next.complete,
     displayPrefix: previous.displayPrefix || next.displayPrefix,
   };
-  return { ...state, entries };
+  return { ...state, entries, ...(next.reason ? { reason: state.reason ?? next.reason } : {}) };
 }
 
 function appendUnobservedRun(state: MessageOutputState, next: Observation): MessageOutputState {
@@ -153,13 +199,9 @@ export function accumulateMessageOutputText(
     };
   }
   const identity = next.identity;
-  const index = identity
-    ? state.entries.findIndex(
-        (entry) => entry.kind === 'text' && entry.identity && sameOutputMessageIdentity(entry.identity, identity),
-      )
-    : -1;
+  const index = identity ? latestNativeRunIndex(state, identity, next) : -1;
   const previous = state.entries[index];
-  if (previous?.kind === 'text') return updateExistingRun(state, next, index, previous);
+  if (previous?.kind === 'text') return updateExistingRun(state, next, index, previous, input.nativeSignatureSuffix);
   const reason = state.reason ?? next.reason ?? (invalidOuterMode(input.textMode) ? 'conflict' : undefined);
   return appendUnobservedRun({ ...state, ...(reason ? { reason } : {}) }, next);
 }

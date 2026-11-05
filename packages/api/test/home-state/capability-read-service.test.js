@@ -122,6 +122,8 @@ describe('F300 2.1 capability read service', () => {
   let writeCapabilitiesConfig;
   let capabilitiesRoutes;
   let capabilitySnapshotRoutes;
+  let allowsImplicitCapabilityWrites;
+  let binaryRoot;
   let handleCapabilitiesSnapshot;
   let savedEnv;
   let savedFetch;
@@ -135,6 +137,8 @@ describe('F300 2.1 capability read service', () => {
     ));
     ({ capabilitiesRoutes } = await import('../../dist/routes/capabilities.js'));
     ({ capabilitySnapshotRoutes } = await import('../../dist/routes/capability-snapshot.js'));
+    ({ allowsImplicitCapabilityWrites } = await import('../../dist/config/capabilities/startup-cli-config.js'));
+    binaryRoot = (await import('../../dist/utils/monorepo-root.js')).findMonorepoRoot();
     ({ handleCapabilitiesSnapshot } = await import('../../../mcp-server/dist/tools/home-state-tools.js'));
     const { catRegistry } = await import('@cat-cafe/shared');
     if (!catRegistry.tryGet('codex-astra')) {
@@ -183,7 +187,7 @@ describe('F300 2.1 capability read service', () => {
     assert.equal(fs.existsSync(join(projectRoot, '.cat-cafe')), false);
   });
 
-  it('snapshot route reads absent without bootstrapping; the Console route still owns bootstrap', async () => {
+  it('snapshot never bootstraps; Console bootstrap requires the publication-owning Host', async () => {
     const projectRoot = await makeProject('route-absent');
     cleanup.push(projectRoot);
     const app = await appWithBothEntries();
@@ -196,14 +200,21 @@ describe('F300 2.1 capability read service', () => {
       assert.deepEqual(calls, [], `snapshot route wrote: ${calls.join(', ')}`);
       assert.deepEqual(await listTree(projectRoot), []);
 
-      // Positive control: the same spy does see the writer route's bootstrap, so
-      // the empty list above is a measurement, not a blind spot.
+      // The Console owns bootstrap only in a publishing Host. A linked checkout
+      // is a negative control: it must preserve absence just like the snapshot.
       const { result: console, calls: writerCalls } = await recordFsWrites(() =>
         app.inject({
           url: `/api/capabilities?projectPath=${encodeURIComponent(projectRoot)}`,
           headers: { 'x-cat-cafe-user': 'test-user' },
         }),
       );
+      if (!allowsImplicitCapabilityWrites(process.env, binaryRoot)) {
+        assert.equal(console.statusCode, 500, console.body);
+        assert.equal(console.json().error, 'config_missing');
+        assert.deepEqual(writerCalls, [], 'a linked or isolated Host cannot bootstrap shared policy');
+        assert.deepEqual(await listTree(projectRoot), []);
+        return;
+      }
       assert.equal(console.statusCode, 200, console.body);
       assert.ok(fs.existsSync(join(projectRoot, '.cat-cafe', 'capabilities.json')), 'writer route bootstraps');
       assert.ok(

@@ -1,4 +1,10 @@
-import type { ArtifactReviewAnchor, MediaContextAttachment } from '@cat-cafe/shared';
+import {
+  type ArtifactReviewAnchor,
+  ContextAttachmentsSchema,
+  contentModificationOutcome,
+  type MediaContextAttachment,
+  MediaContextAttachmentSchema,
+} from '@cat-cafe/shared';
 import { useChatStore } from '@/stores/chatStore';
 import { composerAttachments, queuedServerAckBlocks } from '../composer-queue';
 import {
@@ -57,7 +63,14 @@ export function addMediaWorkToChat(
   if (!threadId) return { kind: 'refused', reason: 'no_thread' };
   if (queuedServerAckBlocks()) return { kind: 'refused', reason: 'recall_pending' };
   const current = composerAttachments(threadId);
-  const pending = pendingMediaAttachment(current);
+  const pending =
+    pendingMediaAttachment(current, target) ??
+    (refreshWholeReview
+      ? current.find(
+          (item): item is MediaContextAttachment =>
+            item.kind === 'media' && sameMediaContentWithAdvancedReview(item, target),
+        )
+      : undefined);
   const refresh =
     refreshWholeReview &&
     pending?.selections.length === 0 &&
@@ -84,7 +97,14 @@ export function addMediaSelectionToChat(
   // later.
   if (queuedServerAckBlocks()) return { kind: 'refused', reason: 'recall_pending' };
   const current = composerAttachments(threadId);
-  const pending = pendingMediaAttachment(current);
+  const pending =
+    pendingMediaAttachment(current, target) ??
+    (replaceWholeWork
+      ? current.find(
+          (item): item is MediaContextAttachment =>
+            item.kind === 'media' && sameMediaContentWithAdvancedReview(item, target),
+        )
+      : undefined);
   // The accepted image page references the whole work on open. A deliberate canvas selection replaces
   // only that same-source empty reference, atomically after all ordinary selection/collection checks.
   // Existing callers retain the refusal; another work, recall or invalid selection can never be erased.
@@ -113,14 +133,52 @@ export function addMediaSelectionToChat(
  * Takes one place out of the attachment that shows it. The attachment is named by id, never assumed to be the first
  * media attachment of the composer: a draft can hold more than one, and a place belongs to the one it is shown on.
  */
-export function removeMediaSelectionFromChat(threadId: string, attachmentId: string, selectionId: string): void {
+export function removeMediaSelectionFromChat(threadId: string, attachmentId: string, selectionId: string): boolean {
   const attachment = composerAttachments(threadId).find(
     (item): item is MediaContextAttachment => item.kind === 'media' && item.id === attachmentId,
   );
-  if (!attachment) return;
+  if (!attachment) return false;
   const next = removeMediaSelection(attachment, selectionId);
-  if (next === attachment) return;
+  if (next === attachment) return false;
   // Reachable only while the input is not taking what is queued for it; changing a recall's answer is never done.
-  if (queuedServerAckBlocks()) return;
+  if (queuedServerAckBlocks()) return false;
   queueMediaChange(threadId, attachment.id, next, true);
+  return true;
+}
+
+/** Edit exactly one original place through the same queued composer delta, preserving sibling works and text. */
+export function updateMediaSelectionWordsInChat(
+  threadId: string,
+  attachmentId: string,
+  selectionId: string,
+  words: string,
+): boolean {
+  if (queuedServerAckBlocks()) return false;
+  const current = composerAttachments(threadId);
+  const attachment = current.find(
+    (item): item is MediaContextAttachment => item.kind === 'media' && item.id === attachmentId,
+  );
+  if (!attachment || !attachment.selections.some((item) => item.id === selectionId)) return false;
+  const instruction = words.trim();
+  const parsed = MediaContextAttachmentSchema.safeParse({
+    ...attachment,
+    selections: attachment.selections.map((item) => {
+      if (item.id !== selectionId) return item;
+      const place = { ...item };
+      delete place.instruction;
+      return { ...place, ...(instruction ? { instruction } : {}) };
+    }),
+  });
+  if (!parsed.success) return false;
+  try {
+    contentModificationOutcome({ body: '', selections: parsed.data.selections });
+  } catch {
+    return false;
+  }
+  if (
+    !ContextAttachmentsSchema.safeParse(current.map((item) => (item.id === attachmentId ? parsed.data : item))).success
+  )
+    return false;
+  queueMediaChange(threadId, attachmentId, parsed.data, true);
+  return true;
 }

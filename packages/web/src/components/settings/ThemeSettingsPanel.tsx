@@ -6,6 +6,7 @@ import { HubIcon } from '../hub-icons';
 import { useShellCopy } from '../shell/shell-copy';
 import { type ShellLanguage, useShellLanguage, writeShellLanguage } from '../shell/shell-language';
 import { type ShellPresentation, useShellPresentation, writeShellPresentation } from '../shell/shell-presentation';
+import { ProcessTalkSettings } from './ProcessTalkSettings';
 import { themeSettingsCopy } from './theme-settings.shell-copy';
 
 const OklchTuner = lazy(() => import('../dev/OklchTuner').then((m) => ({ default: m.OklchTuner })));
@@ -50,6 +51,7 @@ function ChoiceRow({
       role="radio"
       aria-checked={selected}
       data-testid={testId}
+      data-chat-background-surface={selected ? 'selected' : 'paper'}
       onClick={onChoose}
       className="shell-focusable flex items-center gap-3 rounded-lg px-3 py-2 text-left text-sm"
       style={{
@@ -158,6 +160,8 @@ export function ThemeSettingsPanel() {
         </div>
       </section>
 
+      <ProcessTalkSettings />
+
       <section aria-labelledby="theme-list-heading">
         <h3 id="theme-list-heading" className="text-sm font-semibold" style={{ color: 'var(--shell-ink)' }}>
           {t.colors.heading}
@@ -168,6 +172,7 @@ export function ThemeSettingsPanel() {
             return (
               <li
                 key={theme.id}
+                data-chat-background-surface={active ? 'selected' : 'paper'}
                 className="flex items-center gap-2 rounded-lg px-3 py-2"
                 style={{
                   background: active ? 'var(--shell-selected)' : 'var(--shell-paper)',

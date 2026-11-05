@@ -1,10 +1,25 @@
-import { realpathSync } from 'node:fs';
+import { realpathSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { redirectRuntimeProjectPath } from '../../utils/persistent-project-path.js';
 import { pathsEqual } from '../../utils/project-path.js';
 
+/** An explicit host configuration root is authoritative, including an absent registry. */
+export function resolveDeclaredCapabilityRoot(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const declared = env.CAT_CAFE_CONFIG_ROOT?.trim();
+  if (!declared) return undefined;
+  const root = resolve(declared);
+  try {
+    if (statSync(root).isDirectory()) return root;
+  } catch {
+    // Invalid declared authority must not select a more permissive fallback.
+  }
+  throw new Error('Unable to resolve persistent global capabilities root: invalid CAT_CAFE_CONFIG_ROOT');
+}
+
 /** Use the same persistent default as Settings; executable roots remain runtime-owned. */
 export async function resolveInvokeCapabilityRoot(binaryRoot: string): Promise<string> {
+  const declared = resolveDeclaredCapabilityRoot();
+  if (declared) return declared;
   // Standalone/dev callers without a declared workspace retain their existing source.
   if (
     !process.env.CAT_CAFE_RUNTIME_ROOT?.trim() ||
@@ -19,7 +34,7 @@ export async function resolveInvokeCapabilityRoot(binaryRoot: string): Promise<s
 
 /** A declared persistent source is authority, including absence; do not enable default tools on read failure. */
 export function assertMappedCapabilitySource(resolved: boolean, binaryRoot: string, configRoot: string): void {
-  if (!resolved && !isSameCapabilityRoot(binaryRoot, configRoot)) {
+  if (!resolved && (resolveDeclaredCapabilityRoot() !== undefined || !isSameCapabilityRoot(binaryRoot, configRoot))) {
     throw new Error('Persistent capabilities source is missing or unreadable');
   }
 }

@@ -205,6 +205,7 @@ async function runCheckOnReceiptTree(
 
 async function executeMainHealth(
   input: MainHealthSignal,
+  instanceId: string,
   subjectKey: string,
   ctx: ExecuteContext,
   deps: MainHealthExecutionDeps,
@@ -237,7 +238,7 @@ async function executeMainHealth(
     content,
     userId: deps.triggerUserId,
     targetCatId: input.guardianCatId,
-    idempotencyKey: `main-health:${threadId}:${status}`,
+    idempotencyKey: `main-health:${instanceId}:${ctx.occurrenceId}:${threadId}`,
     priority: status === 'red' ? 'urgent' : 'normal',
     sourceCategory: 'scheduled',
   });
@@ -303,7 +304,7 @@ export function createMainHealthTemplate(options: MainHealthTemplateOptions = {}
           overlap: 'skip',
           timeoutMs: 10 * 60_000,
           async execute(signal, subjectKey, ctx) {
-            await executeMainHealth(signal as MainHealthSignal, subjectKey, ctx, {
+            await executeMainHealth(signal as MainHealthSignal, instanceId, subjectKey, ctx, {
               inspectReceipt,
               inspectLocalTree,
               runHealthCheck,

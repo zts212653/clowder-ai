@@ -53,6 +53,7 @@ async function execute(template, overrides = {}) {
   const deliver = mock.fn(async () => 'message-health');
   const trigger = mock.fn(async () => 'dispatched');
   await spec.run.execute(admitted.workItems[0].signal, admitted.workItems[0].subjectKey, {
+    occurrenceId: 'test-occurrence',
     assignedCatId: 'fallback-health-monitor',
     deliver,
     invokeTrigger: { trigger },

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-
+import { F266ApprovalAdapter } from '../../dist/domains/approval-hub/adapters/F266ApprovalAdapter.js';
 import { createEvalRepairCutover } from '../../dist/infrastructure/harness-eval/eval-repair-cutover.js';
 import {
   actionRef,
@@ -88,6 +88,9 @@ describe('F313/F266 Approval-gated repair dispatch', () => {
     assert.equal('clientMessageId' in proposal, false);
     assert.match(proposal.requestIdempotencyRef, /^idempotency:F266:[a-f0-9]{64}$/);
     assert.equal(proposal.requestIdempotencyRef.includes('client-1'), false);
+    assert.deepEqual(proposal.detail.decisionExplanation, caseAction().decisionExplanation);
+    const [pending] = await new F266ApprovalAdapter(ctx.eventLog).listPending('owner-user');
+    assert.deepEqual(pending.detail.decisionExplanation, caseAction().decisionExplanation);
     await ctx.service.decide({
       proposalId: first.proposalId,
       decision: 'accept',

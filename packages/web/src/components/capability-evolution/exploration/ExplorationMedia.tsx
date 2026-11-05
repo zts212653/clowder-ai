@@ -7,7 +7,11 @@ import { ExplorationIcon } from './ExplorationIcon';
 import { useExplorationPlayback } from './ExplorationPlaybackGroup';
 import { ExplorationTrace, type explorationTraceBounds } from './ExplorationTrace';
 
-function mediaUrl(programId: string, record: EvolutionExplorationRecordV1, media: EvolutionExplorationMediaV1) {
+export function explorationMediaUrl(
+  programId: string,
+  record: Pick<EvolutionExplorationRecordV1, 'experimentRef' | 'recordRef'>,
+  media: EvolutionExplorationMediaV1,
+) {
   const query = new URLSearchParams({
     experimentRef: JSON.stringify(record.experimentRef),
     recordRef: JSON.stringify(record.recordRef),
@@ -64,7 +68,17 @@ function ImageEvidence({ src, label }: { src: string; label: string }) {
 }
 
 /** F311 reads replays in place; discussion lives in the shared F309 landing, opened beside it on request. */
-function VideoEvidence({ src, label, poster }: { src: string; label: string; poster?: string }) {
+function VideoEvidence({
+  src,
+  label,
+  poster,
+  posterLabel,
+}: {
+  src: string;
+  label: string;
+  poster?: string;
+  posterLabel?: string;
+}) {
   const [state, setState] = useState<'idle' | 'loading' | 'ready' | 'failed'>('idle');
   const [attempt, setAttempt] = useState(0);
   const playback = useExplorationPlayback();
@@ -79,7 +93,7 @@ function VideoEvidence({ src, label, poster }: { src: string; label: string; pos
   if (state === 'idle' || state === 'failed')
     return (
       <div className="exploration-video-cover">
-        {poster && state === 'idle' && <ImageEvidence src={poster} label={`${label} · 归档首帧`} />}
+        {poster && state === 'idle' && <ImageEvidence src={poster} label={`${label} · ${posterLabel ?? '归档首帧'}`} />}
         {state === 'failed' && <p>回放读取失败；当前实验与数值仍保留。</p>}
         <button
           type="button"
@@ -152,7 +166,7 @@ export function ExplorationMedia({
       </p>
     );
   const label = [sideLabel, record.label, media?.label ?? '所选原件'].filter(Boolean).join(' · ');
-  const src = media ? mediaUrl(programId, record, media) : '';
+  const src = media ? explorationMediaUrl(programId, record, media) : '';
   const openOriginal = () => {
     if (media)
       openEvolutionMedia(
@@ -160,13 +174,14 @@ export function ExplorationMedia({
         label,
       );
   };
-  const image = record.media.find((item) => item.kind === 'image' && item.timeRange?.startSeconds === 0);
+  const image =
+    record.media.find((item) => item.kind === 'image' && item.timeRange?.startSeconds === 0) ??
+    record.media.find((item) => item.kind === 'image');
   return (
     <figure className="exploration-media" data-media-record={refIdentity(record.recordRef)}>
       <figcaption>
         <ExplorationIcon kind="evidence" />
         <strong>{label}</strong>
-        {media && <span>{media.provenance === 'original' ? '真实原件' : '相同 capture 的确定性回放'}</span>}
       </figcaption>
       {record.mediaStatus || !media ? (
         <div className="exploration-media-message" role="status">
@@ -180,10 +195,16 @@ export function ExplorationMedia({
           key={refIdentity(media.mediaRef)}
           src={src}
           label={label}
-          poster={image ? mediaUrl(programId, record, image) : undefined}
+          poster={image ? explorationMediaUrl(programId, record, image) : undefined}
+          posterLabel={image?.label}
         />
       ) : (
         <ImageEvidence key={refIdentity(media.mediaRef)} src={src} label={label} />
+      )}
+      {media && (
+        <p className="exploration-media-provenance">
+          {media.provenance === 'original' ? '真实原件' : '相同 capture 的确定性回放'}
+        </p>
       )}
       {media && !record.mediaStatus ? (
         <button type="button" className="exploration-discuss" aria-label={`打开并讨论 ${label}`} onClick={openOriginal}>

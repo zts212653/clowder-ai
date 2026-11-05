@@ -7,6 +7,15 @@ import { computeSkillDrift } from '../routes/skills-drift.js';
 import { syncDrift } from '../skills/drift-resolver.js';
 import { resolveStartupProjectRoot } from '../utils/startup-root.js';
 import { claudeSettingsHealth, syncClaudeSettings } from './claude-settings.js';
+import { measureHookPhase } from './diagnostics.js';
+import {
+  type AgentHookDiffSummary,
+  type AgentHookHealthStatus,
+  type AgentHookOptions,
+  type AgentHookStatusResponse,
+  aggregateStatus,
+  type HealthResult,
+} from './health-contract.js';
 import {
   applySync,
   buildAgentHookTargets,
@@ -17,43 +26,13 @@ import {
   selectAgentHookTargets,
 } from './sync-targets.js';
 
-export type AgentHookHealthStatus = 'configured' | 'missing' | 'stale' | 'unsupported' | 'error';
-
-export interface AgentHookDiffSummary {
-  kind: 'text' | 'json';
-  message: string;
-  line?: number;
-  fields?: string[];
-}
-
-export interface HealthResult extends DriftResult {
-  status: AgentHookHealthStatus;
-  reason: string;
-  diff?: AgentHookDiffSummary;
-}
-
-export interface AgentHookStatusResponse {
-  status: AgentHookHealthStatus;
-  targets: HealthResult[];
-}
-
-export interface AgentHookOptions {
-  /** Install/root repo — source for hook templates (.claude/hooks/). */
-  projectRoot: string;
-  targetRoot: string;
-  /**
-   * When the thread targets an external project, this is that project's path.
-   * Skill/MCP health and sync operate against this root instead of projectRoot.
-   * Defaults to projectRoot when not set (root project thread).
-   */
-  capabilityProjectRoot?: string;
-  /**
-   * Fail-closed: only `true` enables capability-level mutations (skill/MCP sync).
-   * Omitted / undefined / false → hook file sync only, no capability writes.
-   * Set by the route layer after passing the owner gate (#1049 P2-4).
-   */
-  ownerAuthorized?: boolean;
-}
+export type {
+  AgentHookDiffSummary,
+  AgentHookHealthStatus,
+  AgentHookOptions,
+  AgentHookStatusResponse,
+  HealthResult,
+} from './health-contract.js';
 
 interface CapabilityTruth {
   root: string;
@@ -72,28 +51,6 @@ type JsonObject = Record<string, unknown>;
 
 function buildSelectedAgentHookTargets(options: AgentHookOptions): SyncTarget[] {
   return selectAgentHookTargets(buildAgentHookTargets(options));
-}
-
-function statusSeverity(status: AgentHookHealthStatus): number {
-  switch (status) {
-    case 'error':
-      return 5;
-    case 'stale':
-      return 4;
-    case 'missing':
-      return 3;
-    case 'unsupported':
-      return 2;
-    case 'configured':
-      return 1;
-  }
-}
-
-function aggregateStatus(targets: HealthResult[]): AgentHookHealthStatus {
-  return targets.reduce<AgentHookHealthStatus>(
-    (current, target) => (statusSeverity(target.status) > statusSeverity(current) ? target.status : current),
-    'configured',
-  );
 }
 
 function mapDriftResult(result: DriftResult): AgentHookHealthStatus {
@@ -331,7 +288,10 @@ async function syncCapabilityDrift(capRoot: string, truth: CapabilityTruth): Pro
 
 export async function getAgentHookStatus(options: AgentHookOptions): Promise<AgentHookStatusResponse> {
   const targets = buildSelectedAgentHookTargets(options);
-  const hookResults = [...targets.map(targetHealth), claudeSettingsHealth(options.targetRoot)];
+  const hookResults = [
+    ...measureHookPhase(options.diagnostics, 'hook-files-health', () => targets.map(targetHealth)),
+    measureHookPhase(options.diagnostics, 'claude-settings-health', () => claudeSettingsHealth(options.targetRoot)),
+  ];
 
   // #1049 Step 3: unified health check — hooks + skills + MCPs
   // capabilityProjectRoot targets the thread's project; projectRoot stays
@@ -339,8 +299,8 @@ export async function getAgentHookStatus(options: AgentHookOptions): Promise<Age
   const capRoot = options.capabilityProjectRoot ?? options.projectRoot;
   const truth = resolveCapabilityTruth(capRoot);
   const [skillHealth, mcpHealth] = await Promise.all([
-    checkSkillHealth(capRoot, truth),
-    checkMcpHealth(capRoot, truth),
+    measureHookPhase(options.diagnostics, 'skills-health', () => checkSkillHealth(capRoot, truth)),
+    measureHookPhase(options.diagnostics, 'mcp-health', () => checkMcpHealth(capRoot, truth)),
   ]);
   const results = [...hookResults, skillHealth, mcpHealth];
 
@@ -352,10 +312,10 @@ export async function getAgentHookStatus(options: AgentHookOptions): Promise<Age
 
 export async function syncAgentHooks(options: AgentHookOptions): Promise<AgentHookStatusResponse> {
   // Sync hooks (existing behavior)
-  for (const target of buildSelectedAgentHookTargets(options)) {
-    applySync(target, false);
-  }
-  await syncClaudeSettings(options.targetRoot);
+  measureHookPhase(options.diagnostics, 'hook-files-write', () => {
+    for (const target of buildSelectedAgentHookTargets(options)) applySync(target, false, Boolean(options.diagnostics));
+  });
+  await measureHookPhase(options.diagnostics, 'claude-settings-merge', () => syncClaudeSettings(options.targetRoot));
 
   // #1049 Step 3: sync skills + MCPs with keep-project policy.
   // Health-triggered sync preserves user-customized content (skill symlinks,
@@ -369,18 +329,20 @@ export async function syncAgentHooks(options: AgentHookOptions): Promise<AgentHo
   // projectRoot stays the install repo for hook templates.
   const capRoot = options.capabilityProjectRoot ?? options.projectRoot;
   const truth = resolveCapabilityTruth(capRoot);
-  const projectConfig = options.ownerAuthorized === true ? await readCapabilitiesConfig(capRoot) : null;
+  const projectConfig = await measureHookPhase(options.diagnostics, 'capability-owner-check', async () =>
+    options.ownerAuthorized === true ? await readCapabilitiesConfig(capRoot) : null,
+  );
 
   if (projectConfig !== null) {
-    await syncCapabilityDrift(capRoot, truth);
+    await measureHookPhase(options.diagnostics, 'capability-sync', () => syncCapabilityDrift(capRoot, truth));
   }
 
-  const status = await getAgentHookStatus(options);
+  const status = await measureHookPhase(options.diagnostics, 'health-check', () => getAgentHookStatus(options));
   // `hooks.json` semantic equality is canonicalized in health checks; preserve
   // a direct parse here so malformed output fails immediately after sync.
-  const codex = status.targets.find((target) => target.name === 'codex-hooks');
-  if (codex?.status === 'configured') {
-    void canonicalJsonString(readFileSync(codex.targetPath, 'utf-8'));
-  }
+  measureHookPhase(options.diagnostics, 'codex-output-validate', () => {
+    const codex = status.targets.find((target) => target.name === 'codex-hooks');
+    if (codex?.status === 'configured') void canonicalJsonString(readFileSync(codex.targetPath, 'utf-8'));
+  });
   return status;
 }

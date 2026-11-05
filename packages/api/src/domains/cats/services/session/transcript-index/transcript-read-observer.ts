@@ -17,6 +17,21 @@ export interface TranscriptReadObserver {
   onWorkerTiming: (timing: ModuleWorkerTiming) => void;
 }
 
+export function createTranscriptReadMetrics(sessionCount: number): TranscriptReadMetrics {
+  return {
+    status: 'failed',
+    sessionCount,
+    rows: 0,
+    prepareMs: 0,
+    workerAwaitMs: 0,
+    materializeMs: 0,
+    elapsedMs: 0,
+    sourceBytesScanned: 0,
+    hydratedBytes: 0,
+    summaryCacheHits: 0,
+  };
+}
+
 export function notifyTranscriptRead(observer: TranscriptReadObserver | undefined, metrics: TranscriptReadMetrics) {
   try {
     observer?.onRead(metrics);

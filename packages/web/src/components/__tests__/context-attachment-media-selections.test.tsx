@@ -60,6 +60,31 @@ describe('a media attachment reads as the places the person circled', () => {
   const text = () => container.textContent ?? '';
   const button = (label: string) => container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
 
+  it('lets the reader recover the frozen paragraph quote from a video place', () => {
+    const attachment: MediaContextAttachment = {
+      ...media([]),
+      mediaType: 'video/mp4',
+      selections: [
+        {
+          id: '1',
+          selection: {
+            kind: 'video-range',
+            streamId: '0',
+            startTick: 12,
+            endTick: 24,
+            storyEvidence: { paragraphId: 'original', metadataRevision: 3, quote: '原话第一行\n原话第二行' },
+          },
+        },
+      ],
+    };
+    render(<ContextAttachmentView attachment={attachment} />);
+    expect(text()).toContain('段落');
+    const quote = container.querySelector<HTMLButtonElement>('button[aria-expanded="false"]');
+    expect(quote?.textContent).toContain('原文');
+    act(() => quote?.click());
+    expect(text()).toContain('原话第一行\n原话第二行');
+  });
+
   it('in a sent message, numbers each place, says what was done there and shows the words for it', () => {
     render(<ContextAttachmentView attachment={TWO} />);
     expect(text()).toContain('窄屏设计稿');

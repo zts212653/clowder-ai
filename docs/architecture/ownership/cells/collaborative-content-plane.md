@@ -11,11 +11,20 @@ description_confirmed_by: codex-sol
 description_updated_at: 2026-09-13T20:42:00Z
 doc_kind: architecture
 created: 2026-08-27
-canonical_features: [F309]
+canonical_features: [F309, F326]
 code_anchors:
+  - packages/api/src/domains/collaborative-content/asset-canon/service.ts
+  - packages/api/src/domains/collaborative-content/asset-canon/store.ts
+  - packages/api/src/domains/collaborative-content/asset-canon/service-updates.ts
   - packages/api/src/domains/cats/services/cloud-bridge/dot/DotImageService.ts
   - packages/api/src/routes/chatgpt-dot-image-routes.ts
   - packages/api/src/domains/collaborative-content/runtime-composition.ts
+  - packages/api/src/domains/collaborative-content/collective-artifact/markdown-owner.ts
+  - packages/api/src/domains/collaborative-content/collective-artifact/markdown-reviews.ts
+  - packages/api/src/domains/collaborative-content/collective-artifact/markdown-modifications.ts
+  - packages/api/src/domains/collaborative-content/collective-artifact/published-media-owner.ts
+  - packages/api/src/domains/collaborative-content/collective-artifact/media-reviews.ts
+  - packages/api/src/domains/collaborative-content/collective-artifact/custody-transfer-owner.ts
   - packages/api/src/domains/collaborative-content/workspace-editor-service.ts
   - packages/api/src/domains/collaborative-content/editor-session-service.ts
   - packages/api/src/domains/collaborative-content/patch-service.ts
@@ -30,6 +39,11 @@ code_anchors:
   - packages/api/src/domains/collaborative-content/modification/control/runtime-control-service.ts
   - packages/api/src/domains/collaborative-content/workspace-review/service.ts
   - packages/api/src/domains/collaborative-content/artifact-review/version-response-service.ts
+  - packages/api/src/domains/collaborative-content/works/service.ts
+  - packages/api/src/domains/collaborative-content/works/review-response.ts
+  - packages/api/src/domains/collaborative-content/works/version-store.ts
+  - packages/api/src/domains/collaborative-content/works/context-store.ts
+  - packages/api/src/routes/living-work-routes.ts
   - packages/api/src/routes/content-modification-routes.ts
   - packages/api/src/routes/callback-content-modification-routes.ts
   - packages/api/src/routes/callback-content-editor-routes.ts
@@ -39,6 +53,8 @@ code_anchors:
   - packages/api/src/domains/collaborative-content/workspace-review/video-project-review-service.ts
   - packages/mcp-server/src/tools/content-editor-tools.ts
   - packages/mcp-server/src/tools/content-modification-tools.ts
+  - packages/mcp-server/src/tools/work-tools.ts
+  - packages/web/src/components/workbench/content-review/VideoWorkReview.tsx
   - packages/web/src/components/workbench/content-review/ContentReviewSurface.tsx
   - packages/web/src/components/content-review/ContentModificationPanel.tsx
   - packages/web/src/components/workbench/content-editor/ContentEditorOwnerSurface.tsx
@@ -51,6 +67,8 @@ doc_anchors:
   - docs/features/F138-video-studio.md
   - docs/features/F326-editing-desk.md
   - feature-specs/2026-10-07-f326-phase-a-contract.md
+  - feature-specs/2026-10-20-f326-phase-c-real-films.md
+  - docs/architecture/f309-living-work-entry-contract.md
 static_scan_hints: [SelectionAnchor, AuthorizationDecisionRef, AnnotationThread, PatchProposal, Disposition, ContentChangeReceipt, receiptId, causal checkpoint, replay, PresenceProjection, change awareness, proposal state CAS, applyReceipt, coordinate space, timebase, table range, reanchor, orphaned, content adapter]
 cited_by:
   - {feature: F247, date: 2026-10-10, delta: dot G1 source-bound Events and private original image consumer}
@@ -60,6 +78,8 @@ cited_by:
   - {feature: F309, date: 2026-09-20, delta: "Phase U — shared landing and canonical discussion, explicit request saga, file candidate decisions, and native control receipts; no second file/media/Task/Queue owner"}
   - {feature: F309, date: 2026-10-02, delta: "Studio K1/K2 — revision-bound Cat ContextAttachments enter through Hub action transport; F309 derives one request from the current Human message and projects immutable Host receipts; F063 remains source/writeback owner and Queue only carries verified conflict/unknown continuation"}
   - {feature: F326, date: 2026-10-07, delta: "Phase A consumer — F138 owns immutable project scope and JSON/CAS/receipts; F309 extends the shared artifact ledger with project targets and append-only history; renderer stays external"}
+  - {feature: F326, date: 2026-10-20, delta: "Phase C consumer — shared Work create/explicit submit/fixed references use the F138 owner; version annotations, source/story/material references and original review response projection stay in the existing F309 database; F232/F307 only discover and mount"}
+  - {feature: F290, date: 2026-10-17, delta: "W4 branch adapts the same retained Markdown/media owners and review ledger to exact Collective scopes; version-bound proposals, Human dispositions and recovery preserve canonical receipts. Not yet merged or accepted."}
 ---
 
 # Collaborative Content Plane
@@ -88,13 +108,30 @@ attention/runtime decides whether an authorized bounded change notice enters mod
 invocation. F063/F138 and future Office, image, canvas and table owners
 implement the authorization/content adapter ports.
 
+F326 C consumes the same owner through the common Work entry. F138 manifests retain the only content
+revision/head, immutable bytes, publication scope and settlement receipts. F309's version annotations and
+versioned video context reference those exact revisions; neither metadata table chooses a head or stores a
+second film. Optional responses reserve the existing review and project the same owner receipt into Work
+annotations and original review completion in the existing SQLite transaction. Source bindings do not grant
+access. F063 retains original-file authority; F232 and F307 discover and mount the Work instead of treating
+an internal video-project as a second public identity. HTML body/sandbox admission remains format-owned.
+
 This boundary also governs F290 W4 shared Markdown. F290 authenticates Collective Humans and supplies fresh
 membership/visibility context, but does not store Markdown bytes. A canonical Markdown content owner holds the
 same `contentRef`, bytes, opaque owner version, mutation/undo receipts and final action authorization. F309 owns
 the read/annotation/proposal/disposition/version lifecycle around that owner; F307 only mounts the owner surface.
-No currently shipped path satisfies this full boundary: the existing Workspace editor and named-cat service are
-DOCX-only and fenced to one Host `ownerUserId`; F063 Markdown is owner-local worktree SHA CAS, not cross-Human
-content authority.
+The W4 branch adapts the same retained content owner, workspace review store and modification journal to an
+owner-admitted Collective scope. The Service authenticates independent Humans and revalidates exact public source,
+membership, resource action, version and custody generation; the owner can still deny every read or effect. Human
+proposal adoption serializes proposal state and owner version, then returns the canonical receipt. The original
+private Host routes keep their own `ownerUserId` fence. This branch evidence does not claim a shipped or accepted
+path; F063 Markdown remains owner-local worktree SHA CAS, and no public Office editor is added.
+
+Retained PNG/MP4 use the original F138 media owner and this same review ledger through a distinct source kind.
+Only read, history and annotation actions are admitted. Current versions accept new anchors; retained historical
+versions are read-only with fresh-authorized replies. F307 mounts the existing review canvas/comments through a
+versioned public reference; metadata stays on the authenticated Collective transport and bytes use the local Host
+session proxy. No private owner identity, token or source locator crosses the iframe boundary.
 
 ## Phase U request and result boundaries
 
@@ -259,3 +296,9 @@ delegation authorizer. Runtime composition defaults to denial for that Cat port.
 file/media routes retain their checks. Phase A defines callable domain ports and tests; it adds no project
 HTTP/MCP entry, editing surface, rendering execution or production activation. Renderer-specific mappings
 remain in the external `remotion-studio` adapter, with only generic frozen JSON fixtures in this repository.
+
+## Editing Desk Canon Library
+
+F326 Phase D appends file-version judgments, explicit supersession events, purpose bindings and exact-version keep decisions in the existing F309 Work SQLite database. F063 still authorizes roots and file reads; F138 owns immutable work bytes and versions. The library never rewrites an old film, creates a review opinion automatically, or infers a successor from a filename. Cat writes retain original-creator authorization; bindings and keep decisions require the direct Human. Selection provenance is validated on new Work index writes, while unchanged original citations remain historical.
+
+Member settings read the same unique member-avatar binding. Catalog response projection and the avatar byte route are consumers; they never write a second avatar value into catalog metadata. Partial profile PATCH remains separate from this selection receipt. Member identity remains owned by identity-session.

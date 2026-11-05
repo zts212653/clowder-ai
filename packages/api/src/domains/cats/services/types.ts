@@ -7,6 +7,7 @@ import type {
   A2ARoutingProjection,
   CatId,
   CliEffortPreset,
+  ClientId,
   CodexSpeedValue,
   CrossThreadCoordination,
   FreshnessCarrierCapability,
@@ -292,6 +293,8 @@ export type AgentMessageType =
  * A message yielded from an agent during invocation
  */
 export interface AgentMessage {
+  /** Negative teardown fact: Host completion cannot attest that this provider stopped. */
+  providerTeardown?: 'unconfirmed';
   /** The type of this message */
   type: AgentMessageType;
   /** F306: provider-neutral user-meaning event; native wire names stop in the adapter. */
@@ -357,6 +360,8 @@ export interface AgentMessage {
   toolChannel?: 'analysis' | 'commentary' | 'final' | 'unknown';
   /** Tool input parameters (for 'tool_use' type) */
   toolInput?: Record<string, unknown>;
+  /** Native tool facts retained in transcript events; separate from the bounded display summary. */
+  toolRawPayload?: { rawInput?: unknown; rawOutput?: unknown; content?: unknown };
   /** Native completed-file result captured at event birth; never inferred from a later session directory. */
   fileResultEvidence?: import('./agents/providers/native-file-result-evidence.js').NativeFileResultEvidence;
   /** F153 Phase J AC-J1: native provider tool call id; used to pair tool_use ↔ tool_result for real-duration spans.
@@ -400,6 +405,8 @@ export interface AgentMessage {
   messageTimestamp?: number;
   /** F52: Cross-thread origin metadata (set for cross-thread callback messages) */
   extra?: {
+    cloudBridgeReturn?: import('@cat-cafe/shared').CloudBridgeReturnV1;
+    startupRecovery?: import('@cat-cafe/shared').CodexStartupRecovery;
     outputLayout?: import('@cat-cafe/shared').MessageOutputLayoutV1;
     crossPost?: {
       sourceThreadId: string;
@@ -509,6 +516,8 @@ export interface AgentCarrierSessionOptions {
   args: readonly string[];
   cwd?: string;
   env?: Record<string, string | null>;
+  /** False when env is a complete, sanitized launch snapshot. */
+  inheritParentEnv?: boolean;
   signal?: AbortSignal;
   invocationId: string;
   /** Existing provider session id used for warm-host affinity. */
@@ -907,8 +916,8 @@ export interface AgentContextBinding {
 
 /** Provider-native identity for one exact, still-open Agent Client run. */
 export interface AgentClientActiveRunHandle {
-  readonly provider: 'openai_codex' | 'anthropic' | 'anthropic_acp' | 'opencode' | 'other';
-  readonly carrier: 'codex_app_server' | 'claude_agent_sdk' | 'acp' | 'other';
+  readonly provider: 'openai_codex' | 'anthropic' | 'anthropic_acp' | 'opencode' | 'google' | 'other';
+  readonly carrier: 'codex_app_server' | 'claude_agent_sdk' | 'acp' | 'agy_stream_json' | 'other';
   readonly threadId: string;
   readonly turnId: string;
 }
@@ -918,8 +927,12 @@ export interface AgentClientDispatchInput {
   readonly text: string;
   readonly imagePaths?: readonly string[];
   readonly messageIds: readonly string[];
+  /** Correlates the first handoff and read-only reconciliation; not a provider dedup guarantee. */
+  readonly deliveryId?: string;
   /** Exact adapter evidence; delivery and Stop never wait for this callback. */
   readonly onInputRead?: () => Promise<void>;
+  /** Queued internal turns retain Queue custody until their own terminal result. */
+  readonly onInputCompleted?: (completed: boolean) => Promise<void>;
 }
 
 export interface AgentClientDispatchOptions {
@@ -936,17 +949,30 @@ export type AgentClientDispatchResult =
     }
   | {
       readonly accepted: false;
-      readonly reason: 'active_run_mismatch' | 'active_run_closed' | 'invalid_input' | 'provider_rejected';
+      readonly reason:
+        | 'active_run_mismatch'
+        | 'active_run_closed'
+        | 'invalid_input'
+        | 'provider_rejected'
+        | 'exception';
+      /** Absent evidence is unknown. Only an explicit pre-handoff refusal can be automatically retried. */
+      readonly acceptance?: 'not_accepted' | 'unknown';
     };
 
 /** Live-only adapter. Durable Queue/History state must never be stored here. */
 export interface AgentClientActiveRunDispatcher {
   readonly invocationId: string;
-  readonly capabilities: { readonly append: boolean; readonly steer: boolean; readonly inputReadReceipt?: boolean };
+  readonly capabilities: {
+    readonly append: boolean;
+    readonly steer: boolean;
+    readonly inputReadReceipt?: boolean;
+    readonly inputCompletionReceipt?: boolean;
+  };
   readonly handle: AgentClientActiveRunHandle;
   /** Exact native consumption of this run’s first input; never awaited by delivery or Stop. */
   readonly initialInputRead?: Promise<number>;
   dispatch(input: AgentClientDispatchInput, options: AgentClientDispatchOptions): Promise<AgentClientDispatchResult>;
+  inspectInput?(deliveryId: string): Promise<'accepted' | 'not_accepted' | 'unknown'>;
 }
 
 export interface AgentClientActiveRunDispatchRegistration {
@@ -956,22 +982,30 @@ export interface AgentClientActiveRunDispatchRegistration {
 }
 
 /** ADR-042 automatic supplement execution: provider + callback layers must enforce this, not prompt prose. */
+/** Host-owned native action coordinates; never accepted from package tool input. */
+export interface PluginNativeActionTarget {
+  readonly instanceId: string;
+  readonly contributionId: string;
+}
+
+/** Host-issued lease coordinates. These restrict a native call; they grant no authority alone. */
+export interface MemberSessionExecutionScope {
+  readonly sessionId: string;
+  readonly generation: number;
+  readonly executionId: string;
+}
+
 export type ToolExecutionPolicy =
   | {
       readonly mode: 'read_only';
       readonly replayDeniedToolNames: readonly string[];
     }
-  | { readonly mode: 'collective_participation' }
   | { readonly mode: 'callback_allowlist'; readonly allowedCallbackRoutes: readonly string[] }
   | {
-      readonly mode: 'collective_work';
-      readonly taskId: string;
-      readonly threadId: string;
-      readonly executionRevision: number;
-      readonly executionRef: string;
-      readonly workspaceRoot: string;
-      /** Only host-resolved, explicitly admitted resources; never inferred from external prose. */
-      readonly readOnlyRoots: readonly string[];
+      readonly mode: 'plugin_native';
+      readonly pluginInstanceId: string;
+      readonly contributionId: string;
+      readonly memberSession?: MemberSessionExecutionScope;
     };
 
 /**
@@ -1009,7 +1043,7 @@ export type ClaudeCompactionHooksFactory = (identity: {
 
 export interface LocalSessionMetadata {
   sessionId: string;
-  clientId: 'openai' | 'anthropic';
+  clientId: import('@cat-cafe/shared').LocalSessionClientId;
   firstPrompt: string;
   projectPath: string;
   lastActivityAt: number;
@@ -1030,6 +1064,20 @@ export interface LocalSessionReadInput {
 }
 
 export interface AgentServiceOptions {
+  /** Host-selected external Claude program; never fall back to the SDK's bundled engine. */
+  claudeSdkRuntime?: import('./agents/providers/claude-sdk-runtime.js').ClaudeSdkRuntime;
+  /** Admission-owned MCP descriptors; callback credentials are materialized for the current turn. */
+  frozenAcpMcpServers?: import('./agents/providers/acp/types.js').AcpMcpServer[];
+  frozenNativeMcpConfig?: import('./agents/providers/provider-mcp-config.js').ProviderMcpConfigPlan;
+  frozenKimiMcpConfig?: import('./agents/providers/kimi-mcp-surface.js').KimiMcpConfigPlan;
+  frozenCodexMcpInput?: import('./agents/providers/codex-mcp-input.js').CodexMcpInputPlan;
+  codexLaunchPolicy?: import('../../../config/codex-cli.js').CodexLaunchPolicy;
+  /** Frozen requested preferences; actual adopted model/effort remain provider observations. */
+  executionPreferences?: import('./agents/providers/member-execution-preferences.js').MemberExecutionPreferences;
+  /** Admission-owned identity/rules; the L0 child never reloads mutable configuration. */
+  frozenL0Input?: import('@cat-cafe/shared/l0-input').FrozenL0Input;
+  /** Host logical SessionRecord identity; sessionId remains the native resume id. */
+  hostSessionId?: string;
   /** Binding restored from the canonical SessionRecord, including across API restarts. */
   nativeSessionBinding?: import('@cat-cafe/shared').NativeSessionBinding;
   /** Imported histories must never be silently replaced by a fresh native session. */
@@ -1041,6 +1089,13 @@ export interface AgentServiceOptions {
   runtimeInteractionPort?: import('../../runtime-interaction/ports/RuntimeInteractionPort.js').RuntimeInteractionPort;
   /** F310: source-bound Task relation resolved from canonical Task truth for an F306 question. */
   resolveEntrustedWorkTaskRef?: () => Promise<import('@cat-cafe/shared').EntrustedWorkTaskRefV1 | undefined>;
+  /** Host-only exact descriptor plus public source/invocation currentness. Not a plugin or SDK DTO.
+   * Never a plugin or SDK DTO. */
+  pluginNativeLaunch?: {
+    readonly server: import('../../plugin/declared/native-mcp-types.js').NativeMcpServer;
+    readonly sandbox: { readonly kind: 'public' | 'scoped-member'; readonly workspaceRoot: string };
+    readonly assertCurrent: () => void | Promise<void>;
+  };
   /** F317 Host-only continuous companion port; no model-supplied configuration. */
   liveCompanion?: import('./agents/providers/CodexLiveRunPort.js').CodexLiveRunPort;
   /** Route-owned intent. Providers may project only explicit behavior intent onto native modes. */
@@ -1089,6 +1144,8 @@ export interface AgentServiceOptions {
   contentBlocks?: readonly MessageContent[];
   /** Upload directory for resolving image paths */
   uploadDir?: string;
+  /** Host-only verified HMR path resolver; never provided to callback or plugin surfaces. */
+  resolveTrustedImagePath?: (hmrId: string) => Promise<string | undefined>;
   /** AbortSignal to cancel the invocation */
   signal?: AbortSignal;
   /** Correlation context for audit logging and raw trace linking */
@@ -1103,8 +1160,6 @@ export interface AgentServiceOptions {
   spawnCliOverride?: SpawnCliOverride;
   /** F254 D2: optional tmux/direct duplex carrier factory for app-server mode. */
   agentCarrierSessionFactory?: AgentCarrierSessionFactory;
-  /** F254 D2: per-invocation two-phase provider-native freshness controller. */
-  activeInvocationFreshness?: import('./freshness/FreshnessNoticeBroker.js').ActiveInvocationFreshnessController;
   /** #1354: expose an exact provider-native active-turn dispatcher after turn acceptance. */
   activeRunDispatch?: AgentClientActiveRunDispatchRegistration;
   /** F117 K2: Claude compaction hooks for a carrier that runs them in-process (the Agent SDK carrier). */
@@ -1203,6 +1258,41 @@ export interface ProviderRequestGenerationCommitV1 {
  * Interface that all agent services must implement
  */
 export interface AgentService {
+  /** The adapter handles AbortSignal and owns teardown; Host must drain it before terminalizing. */
+  readonly cancellationMode?: 'drain';
+  /** Host-owned implementation identity; a pinned registered view rejects a replaced generation. */
+  implementationSnapshot?(): Readonly<{
+    key: string;
+    /** Process-local replacement token, used only by pinned execution checks. */
+    generation: string;
+    /** Stable across rebuild/restart; changes when the selected implementation's compatibility changes. */
+    compatibilityRevision?: string;
+    clientId?: ClientId;
+  }>;
+  /** Read configuration before any provider lease. Returns owned descriptors, never starts a model turn. */
+  captureInvocationOptions?(input: {
+    signal?: AbortSignal;
+    workingDirectory?: string;
+    toolExecutionPolicy?: ToolExecutionPolicy;
+    accountEnv?: Record<string, string>;
+    /** Resolved runtime account identity, including implicit defaults; present undefined means native/unbound. */
+    accountRef?: string;
+    mcpSupport?: boolean;
+    liveCompanion?: AgentServiceOptions['liveCompanion'];
+  }): Promise<
+    Pick<
+      AgentServiceOptions,
+      | 'frozenAcpMcpServers'
+      | 'frozenNativeMcpConfig'
+      | 'frozenKimiMcpConfig'
+      | 'frozenCodexMcpInput'
+      | 'claudeSdkRuntime'
+    >
+  >;
+  /** Pin one prepared carrier generation before Host policy, L0 and capacity admission. Idempotent on a pinned view. */
+  forInvocation?(): AgentService;
+  /** Release a pinned Host invocation even when policy/preflight exits before a provider iterator starts. Idempotent. */
+  releaseInvocation?(): Promise<void>;
   /**
    * Invoke the agent with a prompt and stream back messages
    * @param prompt The user's prompt/message
@@ -1232,6 +1322,7 @@ export interface AgentService {
 
   /** Request provider-native compaction on an already bound, idle runtime. */
   requestNativeCompaction?(input: {
+    readonly frozenL0Input?: import('@cat-cafe/shared/l0-input').FrozenL0Input;
     readonly nativeSessionBinding?: import('@cat-cafe/shared').NativeSessionBinding;
     readonly userId?: string;
     /** Preserve a proven boundary even if the later control transport fails. */
@@ -1297,6 +1388,13 @@ export interface AgentService {
 
   /** True only when this concrete carrier applies the requested policy before model launch. */
   supportsToolExecutionPolicy?(policy: ToolExecutionPolicy): boolean;
+  /** Reject unsupported scoped-native authentication before any Queue/model admission. */
+  assertScopedMemberAccount?(account: import('@cat-cafe/shared').ExecutionAccountSnapshot): void;
+  /** An inspected native credential, resolved by its carrier without catalog/login copies. */
+  resolveScopedNativeAccount?(input: {
+    readonly workingDirectory: string;
+    readonly accountRef?: string;
+  }): Promise<import('../../../config/account-resolver.js').RuntimeProviderProfile | null>;
 
   /** F254 D2: effective carrier capability for this concrete service instance. */
   freshnessCarrierCapability?(
@@ -1350,6 +1448,8 @@ export interface AgentService {
  * Same as `compileL0ViaSubprocess` but injectable for testing.
  */
 export type L0CompilerFn = (options: {
+  frozenInput?: import('@cat-cafe/shared/l0-input').FrozenL0Input;
+  requireFrozenInput?: boolean;
   catId: string;
   userId?: string;
   projection?: 'owner' | 'public';

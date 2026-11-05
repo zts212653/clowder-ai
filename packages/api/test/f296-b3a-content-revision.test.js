@@ -137,7 +137,7 @@ describe('F296 B3a gate 4: content-derived revision', () => {
 
     const project = (content) =>
       mapToPresentation({
-        subjectKey: 'pr:zts212653/cat-cafe#3776',
+        subjectKey: 'pr:zts212653/clowder-ai#3776',
         asOf: contentRevision(content),
         sourceTier: 'T1',
         invalidator,

@@ -157,7 +157,7 @@ describe('runtime governance creates project-level skill links (ADR-025)', () =>
     assert.ok(content.includes('.claude/skills'), 'governance-bootstrap must reference .claude/skills');
     assert.ok(content.includes('.codex/skills'), 'governance-bootstrap must reference .codex/skills');
     assert.ok(content.includes('.gemini/skills'), 'governance-bootstrap must reference .gemini/skills');
-    assert.ok(content.includes('.kimi/skills'), 'governance-bootstrap must reference .kimi/skills');
+    assert.ok(content.includes('.kimi-code/skills'), 'governance-bootstrap must reference .kimi-code/skills');
     assert.ok(content.includes("IS_WIN32 ? 'junction'"), 'governance-bootstrap must use junction on Windows');
   });
 
@@ -178,7 +178,7 @@ describe('runtime governance creates project-level skill links (ADR-025)', () =>
     assert.ok(mountRulesContent.includes("claude: { enabled: true, path: '.claude/skills' }"));
     assert.ok(mountRulesContent.includes("codex: { enabled: true, path: '.codex/skills' }"));
     assert.ok(mountRulesContent.includes("gemini: { enabled: true, path: '.gemini/skills' }"));
-    assert.ok(mountRulesContent.includes("kimi: { enabled: true, path: '.kimi/skills' }"));
+    assert.ok(mountRulesContent.includes("kimi: { enabled: true, path: '.kimi-code/skills' }"));
   });
 
   it('governance readiness preflight has been removed instead of repurposed', async () => {

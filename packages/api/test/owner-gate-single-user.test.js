@@ -8,19 +8,19 @@
  *
  * Tests cover:
  *   - resolveOwnerGate (unified gate function — packages/api/src/utils/owner-gate.ts)
- *   - requireConnectorWriteOwner (delegates to resolveOwnerGate)
+ *   - requireOwnerWrite (delegates to resolveOwnerGate)
  *   - checkOwnerGate in callback-auth-debug (delegates to resolveOwnerGate)
  *   - skills write routes (owner gate + local capability write boundary)
  *   - config.ts inline sensitive env check (delegates to resolveOwnerGate)
  */
 
 import assert from 'node:assert/strict';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { requireCapabilityWriteOwner } from '../dist/config/capabilities/capability-write-guards.js';
-import {
-  requireConnectorWriteNetworkGuard,
-  requireConnectorWriteOwner,
-} from '../dist/config/connector-secret-write-guards.js';
+import { requireOwnerWrite, requireOwnerWriteNetworkGuard } from '../dist/config/owner-write-guards.js';
 import { resolveOwnerGate } from '../dist/utils/owner-gate.js';
 
 const SAVED_OWNER = process.env.DEFAULT_OWNER_USER_ID;
@@ -90,29 +90,29 @@ describe('Issue #794 — owner gate single-user fallthrough', () => {
     });
   });
 
-  // ── requireConnectorWriteOwner ─────────────────────────────────────
+  // ── requireOwnerWrite ─────────────────────────────────────
 
-  describe('requireConnectorWriteOwner', () => {
+  describe('requireOwnerWrite', () => {
     it('returns null (allow) when DEFAULT_OWNER_USER_ID is not set', () => {
-      const result = requireConnectorWriteOwner('any-session-user');
+      const result = requireOwnerWrite('any-session-user');
       assert.equal(result, null, 'should allow any authenticated user in single-user mode');
     });
 
     it('returns null when DEFAULT_OWNER_USER_ID is empty string', () => {
       process.env.DEFAULT_OWNER_USER_ID = '   ';
-      const result = requireConnectorWriteOwner('any-session-user');
+      const result = requireOwnerWrite('any-session-user');
       assert.equal(result, null, 'whitespace-only should be treated as unconfigured');
     });
 
     it('returns null when userId matches configured owner', () => {
       process.env.DEFAULT_OWNER_USER_ID = 'the-owner';
-      const result = requireConnectorWriteOwner('the-owner');
+      const result = requireOwnerWrite('the-owner');
       assert.equal(result, null);
     });
 
     it('returns 403 when userId does NOT match configured owner', () => {
       process.env.DEFAULT_OWNER_USER_ID = 'the-owner';
-      const result = requireConnectorWriteOwner('imposter');
+      const result = requireOwnerWrite('imposter');
       assert.ok(result);
       assert.equal(result.status, 403);
     });
@@ -209,8 +209,12 @@ describe('Issue #794 — owner gate single-user fallthrough', () => {
 
   describe('skills requireSkillsOwner (via route)', () => {
     let app;
+    let projectRoot;
 
     beforeEach(async () => {
+      projectRoot = await mkdtemp(join(tmpdir(), 'owner-gate-skills-'));
+      const skillsSourceDir = join(projectRoot, 'cat-cafe-skills');
+      await mkdir(skillsSourceDir);
       const Fastify = (await import('fastify')).default;
       app = Fastify();
       app.addHook('preHandler', async (request) => {
@@ -221,13 +225,17 @@ describe('Issue #794 — owner gate single-user fallthrough', () => {
       });
       const { skillsRoutes } = await import('../dist/routes/skills.js');
       const { skillsWriteRoutes } = await import('../dist/routes/skills-write.js');
-      await app.register(skillsRoutes);
-      await app.register(skillsWriteRoutes);
+      await app.register(skillsRoutes, { mainProjectRoot: projectRoot, skillsSourceDir });
+      await app.register(skillsWriteRoutes, { mainProjectRoot: projectRoot, skillsSourceDir });
       await app.ready();
     });
 
     afterEach(async () => {
-      await app?.close();
+      try {
+        await app?.close();
+      } finally {
+        if (projectRoot) await rm(projectRoot, { recursive: true, force: true });
+      }
     });
 
     it('does not 403 on POST /api/skills/sync in single-user mode', async () => {
@@ -315,16 +323,16 @@ describe('Issue #794 — owner gate single-user fallthrough', () => {
       assert.ok(coreResult, 'resolveOwnerGate should reject');
       assert.equal(coreResult.status, 403);
       // Connector gate (delegates to resolveOwnerGate)
-      const connResult = requireConnectorWriteOwner('imposter');
-      assert.ok(connResult, 'requireConnectorWriteOwner should reject');
+      const connResult = requireOwnerWrite('imposter');
+      assert.ok(connResult, 'requireOwnerWrite should reject');
       assert.equal(connResult.status, 403);
     });
 
     it('all gates allow any user when DEFAULT_OWNER_USER_ID is not configured', () => {
       const coreResult = resolveOwnerGate('any-user');
       assert.equal(coreResult, null, 'resolveOwnerGate should allow');
-      const connResult = requireConnectorWriteOwner('any-user');
-      assert.equal(connResult, null, 'requireConnectorWriteOwner should allow');
+      const connResult = requireOwnerWrite('any-user');
+      assert.equal(connResult, null, 'requireOwnerWrite should allow');
       // Capability/plugin writes with allowMissingOwner should also fall through
       const capResult = requireCapabilityWriteOwner('any-user', { allowMissingOwner: true });
       assert.equal(capResult, null, 'requireCapabilityWriteOwner (allowMissingOwner) should allow');
@@ -365,36 +373,36 @@ describe('Issue #794 — owner gate single-user fallthrough', () => {
     });
   });
 
-  describe('requireConnectorWriteNetworkGuard', () => {
+  describe('requireOwnerWriteNetworkGuard', () => {
     it('allows direct loopback requests when owner is not configured', () => {
       delete process.env.DEFAULT_OWNER_USER_ID;
-      const result = requireConnectorWriteNetworkGuard({ ip: '127.0.0.1', headers: {} });
+      const result = requireOwnerWriteNetworkGuard({ ip: '127.0.0.1', headers: {} });
       assert.equal(result, null);
     });
 
     it('allows direct loopback IPv6 requests when owner is not configured', () => {
       delete process.env.DEFAULT_OWNER_USER_ID;
-      const result = requireConnectorWriteNetworkGuard({ ip: '::1', headers: {} });
+      const result = requireOwnerWriteNetworkGuard({ ip: '::1', headers: {} });
       assert.equal(result, null);
     });
 
     it('blocks non-loopback requests when owner is not configured', () => {
       delete process.env.DEFAULT_OWNER_USER_ID;
-      const result = requireConnectorWriteNetworkGuard({ ip: '192.168.1.100', headers: {} });
+      const result = requireOwnerWriteNetworkGuard({ ip: '192.168.1.100', headers: {} });
       assert.ok(result, 'should block');
       assert.equal(result.status, 403);
     });
 
     it('allows non-loopback requests when owner IS configured', () => {
       process.env.DEFAULT_OWNER_USER_ID = 'configured-owner';
-      const result = requireConnectorWriteNetworkGuard({ ip: '192.168.1.100', headers: {} });
+      const result = requireOwnerWriteNetworkGuard({ ip: '192.168.1.100', headers: {} });
       assert.equal(result, null, 'should allow — owner gate handles identity');
     });
 
     it('blocks loopback IP with proxy forwarding headers when owner is not configured', () => {
       delete process.env.DEFAULT_OWNER_USER_ID;
       // Reverse proxy connects on loopback but forwards a remote client
-      const result = requireConnectorWriteNetworkGuard({
+      const result = requireOwnerWriteNetworkGuard({
         ip: '127.0.0.1',
         headers: { 'x-forwarded-for': '203.0.113.50' },
       });
@@ -404,7 +412,7 @@ describe('Issue #794 — owner gate single-user fallthrough', () => {
 
     it('blocks loopback IP with x-real-ip header when owner is not configured', () => {
       delete process.env.DEFAULT_OWNER_USER_ID;
-      const result = requireConnectorWriteNetworkGuard({
+      const result = requireOwnerWriteNetworkGuard({
         ip: '::1',
         headers: { 'x-real-ip': '10.0.0.5' },
       });
@@ -414,7 +422,7 @@ describe('Issue #794 — owner gate single-user fallthrough', () => {
 
     it('allows proxy-forwarded loopback when owner IS configured', () => {
       process.env.DEFAULT_OWNER_USER_ID = 'configured-owner';
-      const result = requireConnectorWriteNetworkGuard({
+      const result = requireOwnerWriteNetworkGuard({
         ip: '127.0.0.1',
         headers: { 'x-forwarded-for': '203.0.113.50' },
       });

@@ -6,6 +6,7 @@ import {
   type ActionSuccessorIdentityInput,
   canonicalizeActionIdentity,
 } from './action-successor-identity.js';
+import type { ActionSuccessorOrphanCarrierRecoveryTransition } from './action-successor-orphan-carrier-recovery-state-machine.js';
 import type {
   ActionSuccessorReturnDeliveryState,
   ActionSuccessorReturnTransition,
@@ -39,6 +40,15 @@ export {
   canonicalizeActionIdentity,
   canonicalizeActionSubjectRef,
 } from './action-successor-identity.js';
+export type {
+  ActionSuccessorOrphanCarrierRecoveryTransition,
+  RecoverOrphanActionSuccessorCarrierInput,
+  RecoverOrphanActionSuccessorCarrierResult,
+} from './action-successor-orphan-carrier-recovery-state-machine.js';
+export {
+  currentOrphanCarrierRecovery,
+  recoverOrphanActionSuccessorCarrier,
+} from './action-successor-orphan-carrier-recovery-state-machine.js';
 export type {
   RetirePendingDispatchForFreshnessMismatchInput,
   RetirePendingDispatchForFreshnessMismatchResult,
@@ -140,6 +150,7 @@ interface ActionSuccessorLeaseBase extends ActionSuccessorIdentity {
   returnDeliveryOverdueObservedAt?: number;
   returnTransitions: ActionSuccessorReturnTransition[];
   replacementTransitions: ActionSuccessorReplacementTransition[];
+  orphanCarrierRecoveryTransitions: ActionSuccessorOrphanCarrierRecoveryTransition[];
   /** Initial approved carrier transport; custody already exists while pending. */
   dispatchDeliveryState?: ActionSuccessorDispatchDeliveryState;
   dispatchDeliveryAttemptCount?: number;
@@ -308,6 +319,7 @@ export function claimActionSuccessor(
     evidenceRefs: [...new Set([...input.evidenceRefs, provenance.issuerStandingEvidenceRef])],
     returnTransitions: [],
     replacementTransitions: [],
+    orphanCarrierRecoveryTransitions: [],
     revision: 1,
     createdAt: input.now,
     updatedAt: input.now,

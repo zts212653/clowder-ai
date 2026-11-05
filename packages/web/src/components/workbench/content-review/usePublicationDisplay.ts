@@ -1,5 +1,6 @@
 import { immutableMediaSchema, type ReviewedMediaAsset } from '@cat-cafe/shared';
 import { type RefObject, useLayoutEffect, useRef } from 'react';
+import { reviewMediaDisplayPath } from '@/components/content-review/useReviewMediaSource';
 import { API_URL } from '@/utils/api-client';
 import { useWorkspaceSurfaceVisibility } from '../WorkspaceSurfaceVisibility';
 import type { ContentReviewView } from './content-review-contract';
@@ -85,7 +86,10 @@ export function usePublicationDisplay(
       const publication = verifiedPublication(options.request, options.view);
       const expected = publication
         ? new URL(
-            `${API_URL}/api/content-publications/${encodeURIComponent(publication.contentRef)}/media/${publication.ownerRevision}`,
+            reviewMediaDisplayPath(
+              `${API_URL}/api/content-publications/${encodeURIComponent(publication.contentRef)}/media/${publication.ownerRevision}`,
+              options.request?.asset?.mediaType,
+            ),
             window.location.href,
           ).href
         : null;

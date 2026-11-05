@@ -100,10 +100,16 @@ export function registerFileQuotePersistenceJourneys({ openFromHome, addPlace, s
             const response = page.waitForResponse(
               (item) => new URL(item.url()).pathname === '/api/messages' && item.request().method() === 'POST',
             );
+            await page.evaluate(() => {
+              window.__f309SendAcknowledged = false;
+              window.addEventListener('guide:confirm', (event) => {
+                if (event.detail?.target === 'chat.input') window.__f309SendAcknowledged = true;
+              });
+            });
             await page.getByRole('button', { name: 'Send message', exact: true }).click();
             assert.equal((await response).status(), 200);
-            // The stored message id proves the page consumed the ACK, not just that headers reached Playwright.
-            await page.locator('[data-message-id="file-quote-send-receipt"]').waitFor();
+            // The canonical queued ACK is parsed before this event. Admission no longer invents a History bubble.
+            await page.waitForFunction(() => window.__f309SendAcknowledged === true);
             await context.unrouteAll({ behavior: 'ignoreErrors' });
             await context.close();
             const cold = await suite().browser.newContext({ viewport: { width, height: 900 } });

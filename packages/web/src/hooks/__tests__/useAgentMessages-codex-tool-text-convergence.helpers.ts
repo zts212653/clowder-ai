@@ -26,7 +26,6 @@ export function cleanStoreState(currentThreadId = 'thread-1') {
     catStatuses: {},
     catInvocations: {},
     activeInvocations: {},
-    currentGame: null,
     threadStates: {},
     viewMode: 'single',
     splitPaneThreadIds: [],
