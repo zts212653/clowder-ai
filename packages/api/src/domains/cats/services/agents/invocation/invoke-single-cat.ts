@@ -1768,6 +1768,30 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
   if (!sharedMcpLaunch) throw new Error('Shared MCP admission snapshot unavailable');
   const { transport: mcpTransport, context: admittedSharedMcpContext } = sharedMcpLaunch;
   const sharedMcpContext = isScopedMember ? undefined : admittedSharedMcpContext;
+  // #1838: an earlier execution of this exact role that a Windows host job or its exact controller
+  // API still owns is a live writer on the same native session; a per-process session mutex cannot
+  // see it across API instances. Only that positive proof refuses entry, and it must refuse before
+  // registry.create, which replaces the live turn's callback credential. An unknown or unlinked one
+  // is no live owner and settles through the ordinary #1849 path, so it never blocks.
+  if (process.platform === 'win32' && deps.turnExecutionStore) {
+    callerSignal?.throwIfAborted();
+    const running = await deps.turnExecutionStore.listRunningByUser(userId);
+    const liveOwner = await findWindowsLiveOwner({
+      records: running.filter((record) => record.threadId === threadId && record.catId === catId),
+    });
+    if (liveOwner) {
+      // Refused like any admission that ends before an invocation exists: an error, then done.
+      yield {
+        type: 'error',
+        catId,
+        errorCode: 'prior_provider_live_owner',
+        error: `同一角色的上一轮执行仍有存活的 owner，暂不能开始新任务。阻塞执行 invocationId=${liveOwner.invocationId}`,
+        timestamp: Date.now(),
+      };
+      yield { type: 'done', catId, timestamp: Date.now() };
+      return;
+    }
+  }
   const { invocationId, callbackToken } = await registry.create(
     userId,
     catId,
@@ -3001,30 +3025,6 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
     if (deps.sessionChainStore && invocationPolicyRecordId) {
       invocationPolicyPersistenceReady = true;
       await refreshInvocationPolicyExecution();
-    }
-
-    // #1838: an earlier execution of this exact role that a Windows host job or its exact controller
-    // API still owns is a live writer on the same native session; a per-process session mutex cannot
-    // see it across API instances. Only that positive proof refuses entry. An unknown or unlinked one
-    // is no live owner and settles through the ordinary #1849 path, so it never blocks.
-    if (process.platform === 'win32' && deps.turnExecutionStore) {
-      signal.throwIfAborted();
-      const running = await preflightRace(
-        Promise.resolve(deps.turnExecutionStore.listRunningByUser(userId)),
-        'turnExecutionStore.windowsLiveOwner',
-        signal,
-      );
-      const liveOwner = await findWindowsLiveOwner({
-        records: running.filter(
-          (record) => record.invocationId !== invocationId && record.threadId === threadId && record.catId === catId,
-        ),
-      });
-      if (liveOwner) {
-        turnExecutionFailureReason = 'prior_provider_live_owner';
-        throw new Error(
-          `同一角色的上一轮执行仍有存活的 owner，暂不能开始新任务。阻塞执行 invocationId=${liveOwner.invocationId}`,
-        );
-      }
     }
 
     const catConfig = frozenExecutionBinding.catConfig;
