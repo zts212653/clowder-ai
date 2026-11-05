@@ -15,6 +15,18 @@ import { assertCodexSharedStateRoots } from './codex-shared-state.js';
 const ACTIVE = new Set(['preparing', 'queued', 'waiting']);
 function processBirth(pid: number): string {
   try {
+    if (process.platform === 'win32')
+      return execFileSync(
+        join(process.env.SystemRoot ?? 'C:/Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe'),
+        [
+          '-NoLogo',
+          '-NoProfile',
+          '-NonInteractive',
+          '-Command',
+          `[System.Diagnostics.Process]::GetProcessById(${pid}).StartTime.ToUniversalTime().Ticks`,
+        ],
+        { encoding: 'utf8', timeout: 5000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] },
+      ).trim();
     return execFileSync('/bin/ps', ['-p', String(pid), '-o', 'lstart='], {
       encoding: 'utf8',
       timeout: 1000,
@@ -272,13 +284,18 @@ export class CodexLoginManager {
       .catch((error) => {
         this.update(root, ref, attempt, {
           state: controller.signal.aborted ? 'interrupted' : /timeout/.test(String(error)) ? 'timeout' : 'failed',
-          error: /osascript|Terminal|terminal_open/.test(String(error))
-            ? '未能唤起终端，请允许打开终端后重试'
-            : /unsupported|policy_unavailable/.test(String(error))
-              ? '当前原生版本或组织托管策略尚未支持，请核对账号类型与配置'
-              : terminalOpened
-                ? '官方登录未完成，请查看终端输出后在此重试'
-                : '未能开始官方登录，请在此重试',
+          error:
+            (
+              [
+                [/codex_managed_platform_unsupported/, '当前平台尚未支持新增 Codex 账号，请继续使用本机默认账号'],
+                [/codex_managed_policy_unavailable/, '无法读取 Codex 组织托管策略，请核对权限后重试'],
+                [/codex_managed_policy_unsupported/, '当前组织托管策略尚不支持新增 Codex 账号，请联系管理员核对'],
+                [/codex_managed_version_unverified/, '当前 Codex 版本的账号隔离检查未通过，请查看兼容性检查结果后重试'],
+                [/codex_cli_unavailable/, '未找到官方 Codex 命令，请安装后重试'],
+                [/osascript|Terminal|terminal_open/, '未能唤起终端，请允许打开终端后重试'],
+              ] as const
+            ).find(([pattern]) => pattern.test(String(error)))?.[1] ??
+            (terminalOpened ? '官方登录未完成，请查看终端输出后在此重试' : '未能开始官方登录，请在此重试'),
         });
       })
       .finally(() => {
