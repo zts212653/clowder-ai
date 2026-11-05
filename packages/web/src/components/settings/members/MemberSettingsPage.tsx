@@ -2,8 +2,10 @@
 import { useSearchParams } from 'next/navigation';
 import { useState } from 'react';
 import { type CatData, formatCatName } from '@/hooks/useCatData';
+import { isDshMember } from '@/lib/member-model-display';
 import type { MemberSaveTrace } from '@/utils/member-save-trace';
 import { usesAgyAcp, usesAgyNative } from '../../hub-cat-editor.agy';
+import { splitCommandArgs } from '../../hub-cat-editor.model';
 import { MemberCurrentStatus } from '../../members/MemberCurrentStatus';
 import { MemberIdentity } from '../../members/MemberIdentity';
 import { memberSaveCopy } from '../../members/member-save.shell-copy';
@@ -58,7 +60,11 @@ export function MemberSettingsPage({
     : usesAgyNative(form)
       ? 'AGY Native'
       : form.carrier === 'acp'
-        ? /dsh|deepseek/i.test(form.acpCommand + form.acpStartupArgs)
+        ? isDshMember({
+            clientId: form.clientId,
+            agentProvider: form.acpAgentProvider,
+            acp: { command: form.acpCommand, startupArgs: splitCommandArgs(form.acpStartupArgs) },
+          })
           ? 'DSH'
           : 'ACP'
         : form.clientId === 'openai'
@@ -250,11 +256,6 @@ export function MemberSettingsPage({
               )}
             </fieldset>
           </div>
-          {editor.error && (
-            <div role="alert" className="mt-4 rounded-xl bg-conn-red-bg p-4 text-sm text-conn-red-text">
-              {editor.error}
-            </div>
-          )}
           {editor.conflicted && (
             <button
               type="button"
@@ -278,6 +279,15 @@ export function MemberSettingsPage({
             className="sticky bottom-0 z-40 mt-5 flex w-full flex-wrap items-center justify-between gap-3 border-t border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-5 py-4"
             data-testid="member-save-bar"
           >
+            {/* The form can be taller than the viewport; keep a rejected save beside the action that caused it. */}
+            {editor.error && (
+              <div
+                role="alert"
+                className="max-h-[30vh] w-full overflow-y-auto break-words rounded-xl bg-conn-red-bg px-4 py-3 text-sm text-conn-red-text"
+              >
+                {editor.error}
+              </div>
+            )}
             {draft.pendingWrite ? (
               <span className="text-sm" role="status">
                 {t(

@@ -10,20 +10,26 @@ export interface MemberChoice {
 export function MemberChoicePicker({
   label,
   value,
+  formatValue = (value: string) => value,
   options,
   onChange,
   inheritLabel,
   inheritDetail,
+  inheritValueLabel,
+  inheritedValue,
   searchable = false,
   allowCustom = false,
   english = false,
 }: {
   label: string;
   value: string;
+  formatValue?: (value: string) => string;
   options: MemberChoice[];
   onChange: (value: string) => void;
   inheritLabel: string;
   inheritDetail?: string;
+  inheritValueLabel?: string;
+  inheritedValue?: string;
   searchable?: boolean;
   allowCustom?: boolean;
   english?: boolean;
@@ -40,12 +46,22 @@ export function MemberChoicePicker({
     listId = `${id}-list`,
     labelId = `${id}-label`;
   const selected = options.find((option) => option.value === value);
+  const valueLabel = selected && selected.label !== value ? selected.label : formatValue(value);
   const all: MemberChoice[] = [
     { value: '', label: inheritLabel, description: inheritDetail },
-    ...options.filter((o) => o.value !== ''),
+    ...options
+      .filter((o) => o.value !== '')
+      .map((option) => ({
+        ...option,
+        label: option.label === option.value ? formatValue(option.value) : option.label,
+      })),
   ];
   if (value && !selected)
-    all.splice(1, 0, { value, label: value, description: english ? 'Saved or custom value' : '已保存／自定义值' });
+    all.splice(1, 0, {
+      value,
+      label: valueLabel,
+      description: english ? 'Saved or custom value' : '已保存／自定义值',
+    });
   const filtered = all.filter(
     (o) => !search || `${o.label} ${o.value} ${o.group ?? ''}`.toLowerCase().includes(search.toLowerCase()),
   );
@@ -128,7 +144,7 @@ export function MemberChoicePicker({
         }}
         className="flex min-h-11 w-full items-center justify-between gap-3 rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-field-bg)] px-3 py-2 text-left text-sm focus-visible:outline-cafe-accent"
       >
-        <span className="min-w-0 break-words">{value ? (selected?.label ?? value) : inheritLabel}</span>
+        <span className="min-w-0 break-words">{value ? valueLabel : inheritValueLabel || inheritLabel}</span>
         <span aria-hidden="true" className="text-cafe-secondary">
           ▾
         </span>
@@ -168,9 +184,16 @@ export function MemberChoicePicker({
                 >
                   <span className="min-w-0 flex-1">
                     <span className="block break-words">{option.label}</span>
+                    {!value && option.value && option.value === inheritedValue && (
+                      <span className="block text-xs font-normal text-cafe-secondary">
+                        {english ? 'Current inherited model' : '当前继承模型'}
+                      </span>
+                    )}
                     {option.value &&
                       options.some((other) => other.label === option.label && other.value !== option.value) && (
-                        <span className="block break-all text-xs font-normal text-cafe-secondary">{option.value}</span>
+                        <span className="block break-all text-xs font-normal text-cafe-secondary">
+                          {formatValue(option.value)}
+                        </span>
                       )}
                     {option.description && (
                       <span className="mt-1 block text-xs font-normal leading-relaxed text-cafe-secondary">

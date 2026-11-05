@@ -2,10 +2,21 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { useAgentClientLibraries } from '@/hooks/useAgentClientLibraries';
+import {
+  isDshMember,
+  memberModelCatalogKey,
+  memberModelValueLabel,
+  useMemberModelCatalogs,
+} from '@/lib/member-model-display';
 import { apiFetch } from '@/utils/api-client';
 import type { ProfileItem } from '../../hub-accounts.types';
 import { usesAgyAcp, usesAgyNative } from '../../hub-cat-editor.agy';
-import { builtinAccountIdForClient, filterAccounts, type HubCatEditorFormState } from '../../hub-cat-editor.model';
+import {
+  builtinAccountIdForClient,
+  filterAccounts,
+  type HubCatEditorFormState,
+  splitCommandArgs,
+} from '../../hub-cat-editor.model';
 import { SelectField } from '../../hub-cat-editor-fields';
 import { MemberCatalogStatus } from './MemberCatalogStatus';
 import { MemberChoicePicker } from './MemberChoicePicker';
@@ -79,6 +90,16 @@ export function MemberRuntimeFields({
           ? 'ACP'
           : form.clientId);
   const native = form.configurationSource === 'native_tool';
+  const displayMember = {
+    id: form.catId,
+    clientId: form.clientId,
+    agentProvider: form.acpAgentProvider,
+    acp: { command: form.acpCommand, startupArgs: splitCommandArgs(form.acpStartupArgs) },
+    accountRef: form.accountRef,
+    cliConfigArgs: form.cliConfigArgs,
+  };
+  const dsh = isDshMember(displayMember);
+  const english = t('zh', 'en') === 'en';
   const availableAccounts = filterAccounts(form.clientId, accounts),
     identity = availableAccounts.find((item) => item.id === form.accountRef);
   const defaultIdentity = usesDefaultNativeIdentity(form);
@@ -92,9 +113,21 @@ export function MemberRuntimeFields({
     refresh,
     form.cliConfigArgs.length > 0,
   );
+  const displayKey = memberModelCatalogKey(displayMember);
+  useEffect(() => {
+    if (dsh && catalog)
+      useMemberModelCatalogs.setState((state) => ({ catalogs: { ...state.catalogs, [displayKey]: catalog } }));
+  }, [dsh, catalog, displayKey]);
   const defaultModel = catalog?.defaultModel ?? (!form.accountRef ? selected?.configuredModel : undefined);
-  const defaultModelLabel =
+  const configuredModelLabel =
     catalog?.defaultModelLabel ?? catalog?.models.find((item) => item.value === defaultModel)?.label ?? defaultModel;
+  const modelLabel = (value: string) => (dsh ? memberModelValueLabel(value, true, catalog?.models, english) : value);
+  const defaultModelLabel =
+    defaultModel !== undefined
+      ? dsh
+        ? memberModelValueLabel(defaultModel, true, catalog?.models, english, catalog?.defaultModelLabel)
+        : configuredModelLabel
+      : undefined;
   const defaultModelSource =
     catalog?.defaultModelSource === 'client_report'
       ? t('客户端回报', 'Client report')
@@ -231,24 +264,24 @@ export function MemberRuntimeFields({
           {t('已检测登录 · 实际连接待验证', 'Sign-in detected · Connection not yet verified')}
         </p>
       )}
-      {native &&
-        !form.accountRef &&
-        form.clientId === 'acp' &&
-        /dsh|deepseek/i.test(form.acpCommand + form.acpStartupArgs) && (
-          <MemberDshProviderSetup
-            form={form}
-            runtimeId={selected?.id ?? (editing ? `acp:${form.catId}` : 'dsh')}
-            t={t}
-            patch={patch}
-          />
-        )}
+      {native && !form.accountRef && dsh && (
+        <MemberDshProviderSetup
+          form={form}
+          runtimeId={selected?.id ?? (editing ? `acp:${form.catId}` : 'dsh')}
+          t={t}
+          patch={patch}
+        />
+      )}
       <div className="grid gap-4 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
         <MemberChoicePicker
           label={t('模型', 'Model')}
           value={form.defaultModel}
-          options={models}
+          formatValue={modelLabel}
+          options={dsh ? models.map((item) => ({ ...item, label: modelLabel(item.value) })) : models}
           onChange={(defaultModel) => patch({ defaultModel })}
           inheritLabel={follow}
+          inheritValueLabel={dsh && defaultModelLabel ? `${defaultModelLabel} · ${follow}` : undefined}
+          inheritedValue={dsh ? defaultModel : undefined}
           inheritDetail={defaultModel !== undefined ? `${defaultModelSource}：${defaultModelLabel}` : undefined}
           searchable
           allowCustom
@@ -274,7 +307,13 @@ export function MemberRuntimeFields({
       </div>
       <div className="space-y-1 text-sm text-cafe-secondary" role="status">
         <MemberModelSummary
-          model={form.defaultModel ? (activeModel?.label ?? form.defaultModel) : defaultModelLabel}
+          model={
+            form.defaultModel
+              ? dsh
+                ? modelLabel(form.defaultModel)
+                : (activeModel?.label ?? form.defaultModel)
+              : defaultModelLabel
+          }
           effort={
             tierlessKimi
               ? undefined
