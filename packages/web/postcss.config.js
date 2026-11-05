@@ -1,6 +1,6 @@
 module.exports = {
   plugins: {
-    [require.resolve('./src/components/chat-background/native-surfaces.cjs')]: {},
+    [require.resolve('./scripts/chat-background/native-surfaces.cjs')]: {},
     tailwindcss: {},
     autoprefixer: {},
   },

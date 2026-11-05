@@ -52,9 +52,24 @@ export interface PluginStorageDeleteResult {
   readonly revision?: number;
 }
 
+export interface PluginStorageScanInput {
+  readonly prefix: string;
+  readonly suffix?: string;
+  readonly cursor?: string;
+  /** Redis COUNT is a work hint, not a response-size or snapshot guarantee. */
+  readonly count?: number;
+}
+
+export interface PluginStoragePage {
+  /** Continue even after an empty page; only "0" completes an iteration. */
+  readonly cursor: string;
+  readonly entries: Readonly<Record<string, PluginStorageEntry>>;
+}
+
 export interface PluginPrivateStoragePort {
   get(pluginId: string, key: string): Promise<PluginStorageEntry | undefined>;
   list(pluginId: string): Promise<Readonly<Record<string, PluginStorageEntry>>>;
+  scan?(pluginId: string, input: PluginStorageScanInput): Promise<PluginStoragePage>;
   set(pluginId: string, key: string, value: unknown): Promise<{ readonly revision: number }>;
   compareAndSet(
     pluginId: string,
@@ -68,6 +83,7 @@ export interface PluginPrivateStoragePort {
 export interface PluginStorageHost {
   get(key: string): Promise<PluginStorageEntry | undefined>;
   list(): Promise<Readonly<Record<string, PluginStorageEntry>>>;
+  scan?(input: PluginStorageScanInput): Promise<PluginStoragePage>;
   set(key: string, value: unknown): Promise<{ readonly revision: number }>;
   compareAndSet(
     key: string,
@@ -87,9 +103,11 @@ export function createPluginStorageHost(input: {
     }
     return input.storage;
   };
+  const scan = input.storage?.scan?.bind(input.storage, input.pluginId);
   return {
     get: (key) => requireService().get(input.pluginId, key),
     list: () => requireService().list(input.pluginId),
+    ...(scan ? { scan } : {}),
     set: (key, value) => requireService().set(input.pluginId, key, value),
     compareAndSet: (key, expectedRevision, value) =>
       requireService().compareAndSet(input.pluginId, key, expectedRevision, value),
@@ -156,6 +174,35 @@ export class RedisPluginPrivateStorage implements PluginPrivateStoragePort {
         .filter(([key]) => key !== REVISION_COUNTER_FIELD)
         .map(([key, value]) => [key, decodeRecord(value)]),
     );
+  }
+
+  async scan(pluginId: string, input: PluginStorageScanInput): Promise<PluginStoragePage> {
+    if (typeof input?.prefix !== 'string' || input.prefix.length > MAX_STORAGE_KEY_LENGTH) {
+      throw new TypeError(`plugin storage prefix must be a string of at most ${MAX_STORAGE_KEY_LENGTH} characters`);
+    }
+    if (
+      input.suffix !== undefined &&
+      (typeof input.suffix !== 'string' || input.suffix.length > MAX_STORAGE_KEY_LENGTH)
+    ) {
+      throw new TypeError(`plugin storage suffix must be a string of at most ${MAX_STORAGE_KEY_LENGTH} characters`);
+    }
+    const cursor = input.cursor ?? '0';
+    if (typeof cursor !== 'string' || !/^(0|[1-9]\d{0,19})$/.test(cursor)) {
+      throw new TypeError('plugin storage cursor must be a Redis unsigned decimal cursor');
+    }
+    const count = input.count ?? 50;
+    if (!Number.isSafeInteger(count) || count < 1 || count > 200) {
+      throw new TypeError('plugin storage scan count must be an integer from 1 to 200');
+    }
+    const literal = (value: string) => value.replace(/[?*[\]\\]/g, '\\$&');
+    const pattern = `${literal(input.prefix)}*${literal(input.suffix ?? '')}`;
+    const [next, fields] = await this.redis.hscan(this.hashKey(pluginId), cursor, 'MATCH', pattern, 'COUNT', count);
+    const entries: [string, PluginStorageEntry][] = [];
+    for (let index = 0; index < fields.length; index += 2) {
+      const key = fields[index];
+      if (key !== REVISION_COUNTER_FIELD) entries.push([key, decodeRecord(fields[index + 1])]);
+    }
+    return { cursor: next, entries: Object.fromEntries(entries) };
   }
 
   async set(pluginId: string, key: string, value: unknown): Promise<{ readonly revision: number }> {

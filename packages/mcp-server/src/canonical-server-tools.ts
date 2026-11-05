@@ -29,6 +29,7 @@ import {
   hubActionTools,
   libraryLifecycleTools,
   limbTools,
+  matterMemoryTools,
   pawFeelDispositionTools,
   pawFeelInboxAuditScanTools,
   perspectiveTools,
@@ -45,6 +46,7 @@ import {
   signalStudyTools,
   signalsTools,
   skillConsumptionTools,
+  suggestionTools,
   workTools,
 } from './tools/index.js';
 import { liveMeetingTools } from './tools/live-meeting-tools.js';
@@ -74,6 +76,7 @@ export const CANONICAL_TOOL_SOURCES = {
     ...entrustedWorkReadTools,
     ...developmentWorkTools,
     ...developmentReturnTools,
+    ...suggestionTools,
     ...eventMemoryTools,
     ...publishVerdictTools,
     ...evalLifecycleTools,
@@ -89,6 +92,7 @@ export const CANONICAL_TOOL_SOURCES = {
   memory: [
     ...recallMetricsTools,
     ...callbackMemoryTools,
+    ...matterMemoryTools,
     ...distillationTools,
     ...evidenceTools,
     ...externalRuntimeSessionReadTools,

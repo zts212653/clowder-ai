@@ -279,7 +279,7 @@ export interface CatCafeConfigV1 {
 export interface CoCreatorConfig {
   /** Primary display name (e.g. "You") */
   readonly name: string;
-  /** Optional familiar form of address, prefilled as co-creator for new installations. */
+  /** Optional familiar form of address, prefilled as co-creator for new house installations. */
   readonly nickname?: string;
   /** An explicit nickname choice, including clearing it; never inferred from an unrelated edit. */
   readonly nicknameSource?: 'user';

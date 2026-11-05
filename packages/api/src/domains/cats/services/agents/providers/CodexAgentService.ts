@@ -180,6 +180,7 @@ import {
 import { buildCodexCapacityRecoveryCardMessage } from './codex-capacity-recovery-card.js';
 import { CodexErrorEvidence } from './codex-error-evidence.js';
 import { CODEX_LIVE_POLICY_ARGS } from './codex-live-policy.js';
+import { codexLoopbackProxyEnvironment } from './codex-loopback-proxy-env.js';
 import { type PreparedCodexNativeLaunch, prepareCodexNativeLaunch } from './codex-plugin-native-launch.js';
 import {
   buildCodexServedModelMismatchEvent,
@@ -581,6 +582,12 @@ function buildCodexCustomProviderArgs(baseUrl: string, authMode: CodexAuthMode):
 
 const CODEX_SIGNATURE_BOUNDARY_INSTRUCTION =
   'Codex output boundary: do not append the cat signature to commentary/progress messages; append it exactly once, only at the end of the final response.';
+
+const CODEX_MCP_ROUTING_INSTRUCTION = `Codex MCP tool routing:
+- Treat cat_cafe_* names in guidance as short references. Invoke the exact registered tool name and namespace from your current native tool surface.
+- When functions.exec is available, discover the exact key in ALL_TOOLS and call it on tools; do not infer an unqualified tool call from prompt text.
+- If Codex returns unsupported call, verify tool registration and namespace before diagnosing callback authentication.
+- An absent callback token in the shell alone does not prove missing MCP credentials: a credential file or private HTTP headers may carry them.`;
 
 /** Build the structured Codex reasoning-effort config argument. */
 export function buildCodexReasoningArgs(effortLevel: string): string[] {
@@ -1495,7 +1502,10 @@ export class CodexAgentService implements AgentService {
       });
       const separator = compiledL0.endsWith('\n') ? '\n' : '\n\n';
       const providerInstructions = `${compiledL0}${separator}${CODEX_SIGNATURE_BOUNDARY_INSTRUCTION}`;
-      return { value: providerInstructions };
+      return {
+        value:
+          projection === 'owner' ? `${providerInstructions}\n\n${CODEX_MCP_ROUTING_INSTRUCTION}` : providerInstructions,
+      };
     } catch (err) {
       return {
         error: `L0 compile failed for ${this.catId as string}: ${(err as Error).message}`,
@@ -2164,15 +2174,22 @@ export class CodexAgentService implements AgentService {
               ? { executionHome: apiExecutionHome ?? rawEnv.CODEX_HOME ?? `${rawEnv.HOME}/.codex` }
               : {}),
           });
-      codexEnv = await prepareCodexEnvironment(finalAccountEnv, {
-        workingDirectory: options?.workingDirectory,
-        inheritParentEnv: !native,
-        bindExecutionOwner: true,
-      });
+      codexEnv = { ...finalAccountEnv };
+      if (!native && !readOnly && !live && privateMcpRpc) {
+        Object.assign(codexEnv, codexLoopbackProxyEnvironment(codexEnv));
+      }
       if (!native && authMode === 'api_key') {
         if (!finalAccountEnv.CODEX_HOME) throw new Error('Codex account home is unavailable');
         mkdirSync(finalAccountEnv.CODEX_HOME, { recursive: true, mode: 0o700 });
       }
+
+      // Freeze only after account and local-connection policy. All carriers consume
+      // this snapshot without inheriting keys that the finalizer removed.
+      codexEnv = await prepareCodexEnvironment(codexEnv, {
+        workingDirectory: options?.workingDirectory,
+        inheritParentEnv: !native,
+        bindExecutionOwner: true,
+      });
 
       const semanticCompletionController = new AbortController();
 
@@ -2590,6 +2607,7 @@ export class CodexAgentService implements AgentService {
       const nickname = catConfig?.nickname?.trim();
       const displayName = catConfig?.displayName?.trim();
       const signatureIdentity = nickname || displayName;
+      const signatureModel = effectiveModel.trim();
       const signatureIdentityAliases = [...new Set([nickname, displayName])].filter((identity): identity is string =>
         Boolean(identity && identity !== signatureIdentity),
       );
@@ -2599,7 +2617,7 @@ export class CodexAgentService implements AgentService {
           ? {
               signatureIdentity,
               ...(signatureIdentityAliases.length > 0 ? { signatureIdentityAliases } : {}),
-              canonicalSignature: `[${signatureIdentity}/${effectiveModel}🐾]`,
+              ...(signatureModel ? { canonicalSignature: `[${signatureIdentity}/${signatureModel}🐾]` } : {}),
             }
           : {}),
       };

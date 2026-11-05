@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
-import { catRegistry } from '@cat-cafe/shared';
+import { catRegistry, isDshLauncher } from '@cat-cafe/shared';
 import { parse } from 'smol-toml';
 import { getRegisteredAcpConfig } from '../config/cat-config-loader.js';
 import { resolveCliCommand } from '../utils/cli-resolve.js';
@@ -33,6 +33,8 @@ export function discoverNativeRuntimes(projectRoot: string, commandFor = resolve
   const home = homedir();
   const codex = metadata(join(process.env.CODEX_HOME || join(home, '.codex'), 'config.toml'), true);
   const claude = metadata(join(process.env.CLAUDE_CONFIG_DIR || join(home, '.claude'), 'settings.json'));
+  const claudeEnv =
+    claude.env !== null && typeof claude.env === 'object' ? (claude.env as Record<string, unknown>) : {};
   const builtins = (
     [
       ['codex', 'Codex', 'openai'],
@@ -40,8 +42,10 @@ export function discoverNativeRuntimes(projectRoot: string, commandFor = resolve
     ] as const
   ).map(([id, label, clientId]) => {
     const command = commandFor(id);
-    const configuredModel = text(id === 'codex' ? codex.model : claude.model);
-    const configuredEffort = text(id === 'codex' ? codex.model_reasoning_effort : claude.effortLevel);
+    const configuredModel = text(id === 'codex' ? codex.model : (claudeEnv.ANTHROPIC_MODEL ?? claude.model));
+    const configuredEffort = text(
+      id === 'codex' ? codex.model_reasoning_effort : (claudeEnv.CLAUDE_CODE_EFFORT_LEVEL ?? claude.effortLevel),
+    );
     const models = new Set<string>();
     if (configuredModel) models.add(configuredModel);
     for (const entry of Object.values(catRegistry.getAllConfigs())) {
@@ -74,7 +78,8 @@ export function discoverNativeRuntimes(projectRoot: string, commandFor = resolve
         id: `acp:${cat.id}`,
         label: agy
           ? 'AGY 官方 ACP'
-          : /dsh|deepseek/i.test([config.command, ...config.startupArgs].join(' '))
+          : isDshLauncher(config.command, config.startupArgs) ||
+              (profileState !== undefined && profileState !== 'custom_startup')
             ? 'DSH'
             : cat.displayName,
         clientId: agy ? 'google' : 'acp',

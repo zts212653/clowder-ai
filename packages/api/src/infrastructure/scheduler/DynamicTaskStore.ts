@@ -17,8 +17,10 @@ import {
 } from '../../domains/cats/services/owner-auth-provenance.js';
 import type { ToolExecutionPolicy } from '../../domains/cats/services/types.js';
 import { assertDevelopmentReturnChain } from './development-return/DevelopmentReturnChain.js';
+import { HOLD_WAIT_CANDIDATE_FILTER } from './hold-wait-candidate-schema.js';
 import { MANAGED_COMMAND_CANDIDATE_FILTER } from './managed-command-candidate-schema.js';
 import { type RetainedManagedCommandState, reconcileRetainedManagedCommand } from './retained-managed-command.js';
+import { SCHEDULE_LIST_FILTER } from './schedule-list-schema.js';
 import type { TaskDisplayMeta, TriggerSpec } from './types.js';
 
 function returnIdentity(state: DevelopmentReturnRegistrationV1): string {
@@ -226,6 +228,14 @@ export class DynamicTaskStore {
     return rows.map(todef);
   }
 
+  /** Indexed schedule projection; retired wake carriers stay available by ID. */
+  getScheduleTasks(): DynamicTaskDef[] {
+    const rows = this.db
+      .prepare(`SELECT * FROM dynamic_task_defs WHERE ${SCHEDULE_LIST_FILTER} ORDER BY created_at DESC`)
+      .all() as RawRow[];
+    return rows.map(todef);
+  }
+
   /** Select before decoding historical payloads; private return projections remain authoritative. */
   getEnabled(): DynamicTaskDef[] {
     const rows = this.db
@@ -261,6 +271,14 @@ export class DynamicTaskStore {
       .prepare(`SELECT * FROM dynamic_task_defs
       WHERE ${MANAGED_COMMAND_CANDIDATE_FILTER}
       ORDER BY created_at DESC`)
+      .all() as RawRow[];
+    return rows.map(todef);
+  }
+
+  /** Armed hold-ball carriers for the "在等" projection; served by the schedule-list partial index. */
+  listHoldWaitCandidates(): DynamicTaskDef[] {
+    const rows = this.db
+      .prepare(`SELECT * FROM dynamic_task_defs WHERE ${HOLD_WAIT_CANDIDATE_FILTER} ORDER BY created_at DESC`)
       .all() as RawRow[];
     return rows.map(todef);
   }

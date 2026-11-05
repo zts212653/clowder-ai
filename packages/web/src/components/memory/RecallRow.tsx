@@ -55,7 +55,10 @@ export function RecallCard({
   const expandable = kind !== 'delivery' || allowDeliveryExpansion;
   const summary = (
     <>
-      <span className="mt-1 text-cafe-secondary" title={{ search: '检索', graph: '关系查询', delivery: '递送' }[kind]}>
+      <span
+        className="mt-1 text-cafe-secondary"
+        title={{ search: '检索', graph: '关系查询', delivery: '递送', read: '读取' }[kind]}
+      >
         <RecallIcon kind={kind} />
       </span>
       <span className="min-w-0 flex-1">

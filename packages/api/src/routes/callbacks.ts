@@ -957,6 +957,7 @@ export interface CallbackRoutesOptions {
   evidenceStore: IEvidenceStore;
   /** Optional shared publisher; caller authentication remains in callback routes. */
   messageSearchService?: import('../domains/memory/MessageSearchService.js').MessageSearchService;
+  matterMemoryService?: import('../domains/memory/matters/MatterMemoryService.js').MatterMemoryService;
   messageSearchAnswerService?: import('../domains/memory/MessageSearchAnswerPublicationService.js').MessageSearchAnswerPublicationService;
   markerQueue: IMarkerQueue;
   reflectionService: IReflectionService;
@@ -6077,6 +6078,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     messageSearchAnswerService: opts.messageSearchAnswerService,
     evidenceStore: opts.evidenceStore,
     messageSearchService: opts.messageSearchService,
+    matterMemoryService: opts.matterMemoryService,
     messageStore: opts.messageStore,
     ...(opts.threadStore ? { threadStore: opts.threadStore } : {}),
     markerQueue: opts.markerQueue,

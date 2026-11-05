@@ -50,7 +50,7 @@ export interface PluginOperationConfigurationPort {
 }
 
 export interface InstalledPluginOperationsOptions {
-  readonly inventory: Pick<PluginInventoryStore, 'snapshot'>;
+  readonly inventory: Pick<PluginInventoryStore, 'snapshot' | 'read' | 'readAuthority' | 'readCurrentAuthority'>;
   readonly configuration: PluginOperationConfigurationPort;
   readonly invocation: Pick<HostPluginInvocationPort, 'invoke'>;
   readonly settingsInvocation?: PluginSettingsInvocation;
@@ -204,12 +204,10 @@ export class InstalledPluginOperations {
   }
 
   private async resolve(pluginId: string): Promise<InstalledPluginOperationResult | ActivePlugin> {
-    const snapshot = await this.options.inventory.snapshot();
-    const instance = snapshot.instances.find(
-      (candidate) => candidate.pluginId === pluginId && candidate.lifecycleState === 'installed',
-    );
+    const authority = await this.options.inventory.readCurrentAuthority(pluginId);
+    const instance = authority?.instance;
     if (!instance) return response(404, { error: `Plugin '${pluginId}' is not installed` }, false);
-    const packageRecord = snapshot.packages.find((candidate) => candidate.packageDigest === instance.packageDigest);
+    const packageRecord = authority?.packageRecord;
     if (!packageRecord) return response(404, { error: `Plugin '${pluginId}' package is unavailable` });
     if (!packageRecord.manifest)
       return response(409, { error: 'Plugin version is incompatible; update or reinstall it' });
@@ -311,14 +309,8 @@ export class InstalledPluginOperations {
     };
     const assertCurrent = async () => {
       assertRequestCurrent();
-      const snapshot = await this.options.inventory.snapshot();
-      const instance = snapshot.instances.find(
-        (candidate) => candidate.pluginId === pluginId && candidate.lifecycleState === 'installed',
-      );
-      fence.assertRecords(
-        instance,
-        snapshot.packages.find((candidate) => candidate.packageDigest === instance?.packageDigest),
-      );
+      const authority = await this.options.inventory.readCurrentAuthority(pluginId);
+      fence.assertRecords(authority?.instance, authority?.packageRecord);
     };
     const rejected = actionInputRejection(action, body);
     if (rejected) return rejected;

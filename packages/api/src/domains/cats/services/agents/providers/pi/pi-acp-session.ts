@@ -160,7 +160,10 @@ export class PiAcpSession {
         finished = true;
         if (cancelled || event.aborted === true) complete('cancelled');
         else if (events.failure) fail(events.failure);
-        else if (!events.completedAssistant) fail(new Error('Pi settled without a completed assistant response'));
+        else if (!events.completedAssistant)
+          fail(new Error(`Pi settled without a completed assistant response${this.rpc.diagnosticContext()}`));
+        else if (!events.hasResponseOutput)
+          fail(new Error(`Pi settled without usable assistant text or tool calls${this.rpc.diagnosticContext()}`));
         else complete('end_turn');
       }
     });

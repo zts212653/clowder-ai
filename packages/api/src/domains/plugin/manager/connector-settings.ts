@@ -79,7 +79,7 @@ export class ConnectorSettingsService {
   ) {}
 
   private async authority(pluginId: string) {
-    const snapshot = await this.options.inventory.snapshot();
+    const snapshot = await this.options.inventory.snapshot({ pluginId });
     const instance = snapshot.instances.find(
       (item) => item.pluginId === pluginId && item.lifecycleState === 'installed',
     );

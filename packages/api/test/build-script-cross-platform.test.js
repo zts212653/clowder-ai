@@ -132,6 +132,21 @@ test('desktop build fails closed when source locks do not match', async () => {
   }
 });
 
+test('desktop release inputs require an executable Corepack beside the bundled Node runtime', async () => {
+  const windowsBuildScript = await readFile(desktopBuildScriptPath, 'utf8');
+  const macBuildScript = await readFile(desktopMacBuildScriptPath, 'utf8');
+
+  assert.match(windowsBuildScript, /\$corepackCmd = Join-Path \$bundledNode "corepack\.cmd"/);
+  assert.match(windowsBuildScript, /Test-Path \$corepackCmd/);
+  assert.match(windowsBuildScript, /& \$corepackCmd --version/);
+  assert.match(windowsBuildScript, /Corepack executable missing beside bundled Node/);
+
+  assert.match(macBuildScript, /local corepack="\$\{dest\}\/bin\/corepack"/);
+  assert.match(macBuildScript, /\[\[ -x "\$corepack" \]\]/);
+  assert.match(macBuildScript, /"\$corepack" --version/);
+  assert.match(macBuildScript, /Corepack executable missing beside bundled Node/);
+});
+
 test('F210 desktop packaging does not bundle Gemini CLI as AGY replacement', async () => {
   const macBuildScript = await readFile(desktopMacBuildScriptPath, 'utf8');
   const windowsBuildScript = await readFile(desktopBuildScriptPath, 'utf8');

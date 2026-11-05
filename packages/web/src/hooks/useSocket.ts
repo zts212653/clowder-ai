@@ -6,6 +6,7 @@ import {
   type MessageFrom,
   type ProviderSemanticEvent,
   type ReplyPreview,
+  type SuggestionView,
   timelineMessageKind,
 } from '@cat-cafe/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -38,6 +39,7 @@ import { bumpLiveQueueHydrateEpoch, getLiveQueueHydrateEpoch, reconcileThreadWit
 
 export { reconcileThreadWithServer } from './queue-reconciliation';
 
+import { useSuggestionStore } from '../components/suggestions/suggestion-store';
 import { refreshActiveExecutionProjection } from './useActiveExecutionProjection';
 // F173 Phase E: isInvocationReplaced 检查已下沉到 useAgentMessages.handleAgentMessage
 // dispatch entry，useSocket 不再做 active path drop guard。
@@ -600,12 +602,15 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
         window.dispatchEvent(new CustomEvent('cat-cafe:proposal-created', { detail: proposal }));
       }
     });
+    socket.on('memory_matter_changed', () => {
+      window.dispatchEvent(new Event('cat-cafe:memory-matter-changed'));
+    });
     socket.on('runtime_interaction_updated', (interaction: { interactionId: string; status: string }) => {
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('cat-cafe:runtime-interaction-updated', { detail: interaction }));
       }
     });
-    socket.on('entrusted_work_projection_invalidated', (data: { ownerUserId: string }) => {
+    socket.on('entrusted_work_projection_invalidated', (data: { ownerUserId: string; threadId?: string }) => {
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('cat-cafe:entrusted-work-projection-invalidated', { detail: data }));
       }
@@ -620,6 +625,10 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
     };
     socket.on('artifact_review_changed', onArtifactReviewChanged);
     socket.on('content_modification_source_saved', onContentModificationSourceSaved);
+    // F335 交付二：回话下面那一排原地换一行（提议 → 回执 → 撤销）。
+    socket.on('suggestion_updated', (data: { threadId?: string; suggestion?: SuggestionView }) => {
+      if (data?.suggestion?.id) useSuggestionStore.getState().upsert(data.suggestion);
+    });
     socket.on('custody_offer_updated', (data: { messageId: string; threadId: string }) => {
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('cat-cafe:custody-offer-updated', { detail: data }));

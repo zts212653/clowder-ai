@@ -57,12 +57,10 @@ export class HostPluginConfigurationService implements PluginManagerConfiguratio
   }
 
   async fields(pluginId: string): Promise<readonly PluginManagerConfigField[] | undefined> {
-    const snapshot = await this.options.inventory.snapshot();
-    const instance = snapshot.instances.find(
-      (candidate) => candidate.pluginId === pluginId && candidate.lifecycleState === 'installed',
-    );
+    const authority = await this.options.inventory.readCurrentAuthority(pluginId);
+    const instance = authority?.instance;
     if (!instance) return undefined;
-    const packageRecord = snapshot.packages.find((candidate) => candidate.packageDigest === instance.packageDigest);
+    const packageRecord = authority?.packageRecord;
     if (!packageRecord) {
       throw new PluginManagerServiceError('CONFIGURATION_UNAVAILABLE', 'Installed plugin package is unavailable');
     }
@@ -87,12 +85,10 @@ export class HostPluginConfigurationService implements PluginManagerConfiguratio
   }
 
   async readActionInput(pluginId: string): Promise<Readonly<Record<string, unknown>>> {
-    const snapshot = await this.options.inventory.snapshot();
-    const instance = snapshot.instances.find(
-      (candidate) => candidate.pluginId === pluginId && candidate.lifecycleState === 'installed',
-    );
+    const authority = await this.options.inventory.readCurrentAuthority(pluginId);
+    const instance = authority?.instance;
     if (!instance) return {};
-    const packageRecord = snapshot.packages.find((candidate) => candidate.packageDigest === instance.packageDigest);
+    const packageRecord = authority?.packageRecord;
     if (!packageRecord) {
       throw new PluginManagerServiceError('CONFIGURATION_UNAVAILABLE', 'Installed plugin package is unavailable');
     }
@@ -116,8 +112,8 @@ export class HostPluginConfigurationService implements PluginManagerConfiguratio
     state: OperationState,
     fence?: PluginOperationCommitFence,
   ): Promise<void> {
-    await this.options.inventory.transaction((transaction) => {
-      if (fence) assertOperationCommit(fence, transaction, pluginId);
+    await this.options.inventory.transaction(async (transaction) => {
+      if (fence) await assertOperationCommit(fence, transaction, pluginId);
       writePluginOperationState(this.options.projectRoot, pluginId, operationKey, state);
     });
   }
@@ -135,10 +131,10 @@ export class HostPluginConfigurationService implements PluginManagerConfiguratio
     values: Readonly<Record<string, string>>,
     fence?: PluginOperationCommitFence,
   ): Promise<readonly string[]> {
-    return this.options.inventory.transaction((transaction) => {
-      if (fence) assertOperationCommit(fence, transaction, pluginId);
-      const instance = transaction.instances.getCurrent(pluginId);
-      const record = instance && transaction.packages.get(instance.packageDigest);
+    return this.options.inventory.transaction(async (transaction) => {
+      if (fence) await assertOperationCommit(fence, transaction, pluginId);
+      const instance = await transaction.instances.getCurrent(pluginId);
+      const record = instance && (await transaction.packages.get(instance.packageDigest));
       if (
         !instance ||
         instance.pluginInstanceId !== pluginInstanceId ||
@@ -171,8 +167,8 @@ export class HostPluginConfigurationService implements PluginManagerConfiguratio
   }
 
   async reconcile(pluginId: string, pluginInstanceId: string): Promise<void> {
-    await this.options.inventory.transaction((transaction) => {
-      const current = requireConfigurationTarget(transaction, pluginId, pluginInstanceId);
+    await this.options.inventory.transaction(async (transaction) => {
+      const current = await requireConfigurationTarget(transaction, pluginId, pluginInstanceId);
       if (
         current.packageRecord.manifest === null ||
         current.instance.runtimeState !== 'stopped' ||
@@ -182,7 +178,7 @@ export class HostPluginConfigurationService implements PluginManagerConfiguratio
       const stored = readPluginConfig(this.options.projectRoot, pluginId);
       const configReadiness = manifestConfigurationReady(current.packageRecord, stored) ? 'ready' : 'incomplete';
       if (configReadiness === current.instance.configReadiness) return;
-      transaction.instances.put({
+      await transaction.instances.put({
         ...current.instance,
         configReadiness,
         lifecycleRevision: current.instance.lifecycleRevision + 1,
@@ -226,9 +222,9 @@ export class HostPluginConfigurationService implements PluginManagerConfiguratio
       let previous: string | undefined;
       let written: string | undefined;
       await this.options.inventory.transaction(
-        (transaction) => {
+        async (transaction) => {
           previous = readPluginConfigText(this.options.projectRoot, pluginId);
-          configureTransaction({
+          await configureTransaction({
             transaction,
             projectRoot: this.options.projectRoot,
             pluginId,
@@ -267,8 +263,8 @@ export class HostPluginConfigurationService implements PluginManagerConfiguratio
         stopReason: 'configuration_update',
         resumeFailureCode: 'CONFIGURATION_RESUME_FAILED',
         preflight: async () => {
-          await this.options.inventory.transaction((transaction) => {
-            const current = requireConfigurationTarget(transaction, pluginId, pluginInstanceId);
+          await this.options.inventory.transaction(async (transaction) => {
+            const current = await requireConfigurationTarget(transaction, pluginId, pluginInstanceId);
             assertConfigurationFence(current.instance, request.expectedRevision);
             const fields = manifestConfiguration(current.packageRecord);
             if (fields.length === 0) {

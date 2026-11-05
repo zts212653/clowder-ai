@@ -34,6 +34,33 @@ it('refreshes mounted recent Works on the existing owner source invalidation', a
   }
 });
 
+it('a global catalogue refreshes for another threads scoped work event', async () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  apiFetch.mockReset();
+  apiFetch.mockResolvedValue({
+    ok: true,
+    json: async () => ({ artifacts: [], complete: false, workLineage: 'resolved' }),
+  });
+  function Probe() {
+    useGlobalArtifacts(true, { view: 'recent-works', limit: 12 }, 'host');
+    return null;
+  }
+  const root = createRoot(document.createElement('div'));
+  try {
+    await act(async () => root.render(<Probe />));
+    expect(apiFetch).toHaveBeenCalledTimes(1);
+    await act(async () =>
+      window.dispatchEvent(
+        new CustomEvent('cat-cafe:entrusted-work-projection-invalidated', { detail: { threadId: 'another' } }),
+      ),
+    );
+    expect(apiFetch).toHaveBeenCalledTimes(2);
+  } finally {
+    act(() => root.unmount());
+    vi.unstubAllGlobals();
+  }
+});
+
 it('retains known cards after a temporary source failure but clears them after permission denial', async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   apiFetch.mockReset();

@@ -119,9 +119,9 @@ export class ContentEditorPluginRuntime implements BundledPluginRuntime {
     let pkg: VerifiedPluginPackage | undefined;
     let connection: BuiltinBrokerConnection | undefined;
     try {
-      const inventory = await this.options.inventory.snapshot();
-      const instance = inventory.instances.find((r) => r.pluginInstanceId === id && r.lifecycleState === 'installed');
-      const installed = instance && inventory.packages.find((r) => r.packageDigest === instance.packageDigest);
+      const authority = await this.options.inventory.readAuthority(id);
+      const instance = authority?.instance?.lifecycleState === 'installed' ? authority.instance : undefined;
+      const installed = authority?.packageRecord;
       if (!instance || !installed?.manifest || staticEditorContributions(installed.manifest).length === 0)
         throw new Error('unsupported static editor');
       pkg = await this.options.packages.resolveInstalledPackage(instance.packageDigest);
@@ -146,9 +146,8 @@ export class ContentEditorPluginRuntime implements BundledPluginRuntime {
       });
       signal.throwIfAborted();
       await connection.ready({ bindingNonce: binding.bindingNonce });
-      const preferences = (await this.options.brokerStore.snapshot()).staticFeatures?.preferences ?? [];
       for (const feature of pkg.manifest.features) {
-        if (preferences.find((r) => r.pluginInstanceId === id && r.featureId === feature.id)?.enabled === false)
+        if ((await this.options.brokerStore.read.staticFeatures.getPreference(id, feature.id))?.enabled === false)
           continue;
         const pending = await this.features.begin(id, feature.id);
         signal.throwIfAborted();
@@ -214,15 +213,15 @@ export class ContentEditorPluginRuntime implements BundledPluginRuntime {
     }
     if (this.active.has(id) && this.active.get(id) !== run) return;
     await this.close(id, 'static_editor_runtime_failed');
-    await this.options.inventory.transaction((tx) => {
-      const current = tx.instances.get(id);
+    await this.options.inventory.transaction(async (tx) => {
+      const current = await tx.instances.get(id);
       if (
         current?.packageDigest === run.packageDigest &&
         current.lifecycleRevision === run.lifecycleRevision &&
         current.activationState === 'enabled' &&
         !this.active.has(id)
       ) {
-        tx.instances.put({ ...current, runtimeState: 'crashed', updatedAt: (this.options.now ?? Date.now)() });
+        await tx.instances.put({ ...current, runtimeState: 'crashed', updatedAt: (this.options.now ?? Date.now)() });
       }
     });
   }

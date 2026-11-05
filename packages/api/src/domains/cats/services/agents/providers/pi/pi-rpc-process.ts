@@ -75,6 +75,11 @@ export class PiRpcProcess {
     return () => this.listeners.delete(listener);
   }
 
+  diagnosticContext(): string {
+    const context = this.diagnostics.context();
+    return context ? `; recent Pi CLI diagnostics${context}` : '';
+  }
+
   private fail(error: Error): void {
     if (this.failure) return;
     error.message += this.diagnostics.context();
