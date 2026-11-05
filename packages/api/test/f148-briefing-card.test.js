@@ -24,6 +24,26 @@ function makeCoverage(overrides = {}) {
 }
 
 describe('F148 briefing card — navigation-first collapsed view', () => {
+  it('records the routed receiver and a human coverage summary without changing raw navigation', () => {
+    const result = buildBriefingMessage(makeCoverage(), 'thread-1', {
+      receiverCatId: 'kimi',
+      receiverDisplayName: '墨墨',
+    });
+    const card = result.extra.rich.blocks[0];
+    assert.equal(card.meta.kind, 'context_briefing');
+    assert.equal(card.meta.receiverCatId, 'kimi');
+    assert.equal(card.meta.receiverDisplayName, '墨墨');
+    assert.equal(card.meta.coverageSummary, '近期消息 5 条 · 历史略过 42 条');
+    assert.ok(card.fields.find((field) => field.label === '下一步').value.includes('cat_cafe_search_evidence'));
+  });
+
+  it('does not infer a receiver when no routed identity was supplied', () => {
+    const card = buildBriefingMessage(makeCoverage(), 'thread-1').extra.rich.blocks[0];
+    assert.equal(card.meta.receiverCatId, undefined);
+    assert.equal(card.meta.receiverDisplayName, undefined);
+    assert.equal(card.meta.coverageSummary, '近期消息 5 条 · 历史略过 42 条');
+  });
+
   describe('summary (collapsed title)', () => {
     it('shows baton + truth source + next step when all available', () => {
       const result = buildBriefingMessage(makeCoverage(), 'thread-1', {
