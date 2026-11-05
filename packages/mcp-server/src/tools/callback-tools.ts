@@ -725,13 +725,7 @@ export const updateTaskInputSchema = {
     .describe(
       'New task status. Entrusted work rejects status=done here; its Task owner requires an evidence-backed typed closure action.',
     ),
-  why: z
-    .string()
-    .max(1000)
-    .optional()
-    .describe(
-      'Optional note explaining the status change. When ending ordinary work as done, say how it ended (the completed result, or the withdrawal and its reason); entrusted work keeps its typed closure',
-    ),
+  why: z.string().max(1000).optional().describe('Optional note explaining the status change'),
   // F193-E1 P1-4 fix: allow patching dispatchGate on existing tasks
   dispatchGate: z
     .object({
@@ -3918,15 +3912,10 @@ export const callbackTools = [
     name: 'cat_cafe_list_tasks',
     description:
       'Read a bounded list of durable tasks with optional threadId/catId/status/kind filters, or exact featureId matching canonical TaskItem.relatedFeatureId. ' +
-      'Use when: resuming existing work and checking its current scope, status, authorization source or execution artifacts before asking the owner again for facts already saved; also for finding tasks, owners, blockers and feature work. ' +
-      'TASK STATE: for kind=work, todo/doing/blocked record unfinished work and done records ended work, not proof that every artifact is complete. ' +
-      'why is saved task context: it may carry a requirement or stay unchanged across later status or progress updates, so it is neither new authorization nor a guaranteed latest instruction; reconcile it with the latest request and the current owner record, including typed progress/closure when present. ' +
-      'If a generic resume only identifies ended work, report the recorded state, any available result entry and verified mismatch, and obtain explicit authorization before further writes; an explicit redo or extension request already authorizes new work within its scope under the existing Task lifecycle, without reviving the ended Task through this reader. Tracking kinds keep their own lifecycle. ' +
-      'If a generic resume could still mean more than one unfinished work, ask which to continue by work name before any write. ' +
-      'The choice is settled by a current request that clearly refers to one work, by a newer explicit request or a newer explicit selection in the owner record, ' +
-      'or when only one work legitimately matches, even if unrelated unfinished work exists; that work proceeds under its current state and authorization. ' +
-      'A doing status, a saved why that says to continue, an earlier request or artifact, the listing order or a stop-point link is only a cue: ' +
-      'alone it does not settle a choice that is otherwise still open. ' +
+      'Use when: resuming existing work and checking its current scope, status, authorization source or execution artifacts before asking the owner again; also for finding tasks, owners, blockers and feature work. ' +
+      'When resuming, reconcile Task status, saved why and closure evidence with the current request; done records an ended Task, not proof that every artifact is complete. ' +
+      'If the intended work or its authority remains unclear, clarify before writing: name the candidate works, or state the recorded result and the specific conflict and ask the one missing question. ' +
+      'Otherwise carry out the clearly authorized request through the existing Task lifecycle without asking again or silently reopening an ended Task. ' +
       'NOT for: creating or changing tasks (use cat_cafe_create_task or cat_cafe_update_task). ' +
       'Output: up to 50 tasks plus totalMatched/truncated; feature-filtered reads also return a content-free queryRef for owner verification. ' +
       'GOTCHA: overview why fields can be anchored; pass taskId to retrieve one task with its full untruncated why. Drill the original authorization and receipts when needed; discovery grants no new authority, and search summaries do not replace current Task truth.',
@@ -4097,7 +4086,7 @@ export const callbackTools = [
       'NOT for: temporary execution steps (use PlanBoard/TodoWrite), NOT for inline checklists in a message (use create_rich_block with kind:"checklist"). ' +
       'Output: task appears in the thread 🧶 毛线球 panel, persists across sessions, visible to all cats and {{coCreator.nickname}}. ' +
       'GOTCHA: 毛线球 ≠ checklist rich block. 毛线球 lives in the task panel and survives session boundaries; checklist is ephemeral inline content in one message. ' +
-      'TIP: Include a "why" to give context to whoever picks up the open task; that saved context does not authorize further work after the task ends. ' +
+      'TIP: Include a "why" to give context to whoever picks up the task. ' +
       'F193-E1 DISPATCH GATE: If your task references a feature (F-number) outside your current scope, ' +
       'provide dispatchGate with status "dispatched" (you already cross_posted to the owning thread) ' +
       'or "not_dispatched" (with reason). If you omit dispatchGate and external F-IDs are detected, ' +

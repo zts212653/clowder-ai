@@ -7,7 +7,6 @@ import { getMessageDisplayName } from '../../context/ContextAssembler.js';
 import { formatPromptTimeRange } from '../../format-time.js';
 import type { StoredMessage } from '../../stores/ports/MessageStore.js';
 import type { ThreadMemorySourceRef } from '../../stores/ports/ThreadStore.js';
-import { formatThreadMessageDrill } from './thread-drill-pointer.js';
 
 // --- Phase D: Coverage Map (AC-D2) ---
 
@@ -314,65 +313,13 @@ export function buildTombstone(
   return { omittedCount: omitted.length, timeRange, participants, keywords, retrievalHints };
 }
 
-/**
- * F332 / #1087: exact read coordinates for an omitted range.
- *
- * Prompt-only: these IDs are rendered into the cat-facing tombstone line and
- * are deliberately NOT added to `retrievalHints`, which also feed the
- * user-visible briefing card. They locate messages; they never carry bodies.
- */
-export interface TombstoneCoordinates {
-  readonly threadId: string;
-  readonly firstMessageId: string;
-  readonly lastMessageId: string;
-  /** Already-selected anchor IDs inside the range, excluding the bounds. */
-  readonly keyMessageIds: readonly string[];
-}
-
-const MAX_TOMBSTONE_KEY_MESSAGE_IDS = 3;
-
-/**
- * Bound coordinates to the omitted range itself: anchors outside it are
- * ignored, duplicates and the range bounds are removed, and at most three
- * keys survive so the line stays cheap on every repeated cold turn.
- */
-export function buildTombstoneCoordinates(
-  omitted: readonly Pick<StoredMessage, 'id'>[],
-  anchorMessageIds: readonly string[],
-  threadId: string,
-): TombstoneCoordinates | null {
-  const first = omitted[0];
-  const last = omitted[omitted.length - 1];
-  if (!first || !last) return null;
-  const omittedIds = new Set(omitted.map((message) => message.id));
-  const keyMessageIds: string[] = [];
-  for (const id of anchorMessageIds) {
-    if (keyMessageIds.length >= MAX_TOMBSTONE_KEY_MESSAGE_IDS) break;
-    if (!omittedIds.has(id) || id === first.id || id === last.id || keyMessageIds.includes(id)) continue;
-    keyMessageIds.push(id);
-  }
-  return { threadId, firstMessageId: first.id, lastMessageId: last.id, keyMessageIds };
-}
-
-function formatTombstoneCoordinates(coordinates: TombstoneCoordinates): string {
-  const keys = coordinates.keyMessageIds.length > 0 ? `; key ${coordinates.keyMessageIds.join(', ')}` : '';
-  return (
-    `Coordinates: first ${coordinates.firstMessageId}; last ${coordinates.lastMessageId}${keys}.` +
-    ` Open any with ${formatThreadMessageDrill(coordinates.threadId, '<id>')}.`
-  );
-}
-
-/** Format tombstone as compact context string (~40 tokens; ~+60 with coordinates) */
-export function formatTombstone(
-  tombstone: ContextTombstone,
-  options?: { readonly coordinates?: TombstoneCoordinates | null },
-): string {
+/** Format tombstone as compact context string (~40 tokens) */
+export function formatTombstone(tombstone: ContextTombstone): string {
   const range = formatPromptTimeRange(tombstone.timeRange.from, tombstone.timeRange.to);
   const parts = [
     `[System: skipped ${tombstone.omittedCount} messages (${range}).`,
     `Participants: ${tombstone.participants.join(', ') || 'user'}.`,
     `Keywords: ${tombstone.keywords.join(', ') || 'N/A'}.`,
-    ...(options?.coordinates ? [formatTombstoneCoordinates(options.coordinates)] : []),
     `For details: ${tombstone.retrievalHints.join('; ')}]`,
   ];
   return parts.join(' ');

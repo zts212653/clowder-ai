@@ -140,28 +140,3 @@ test('artifact delivery keeps already published queued speech at its authoring t
   assert.deepEqual(ids(page.messages), [queued.id, later.id]);
   assert.equal(page.nextCursor.timestamp, 10);
 });
-
-// F332 / #1087 review: Redis serves both projections from the thread index and
-// differs only in the selected hash fields; memory must not window the global
-// log for one of them, or a quiet thread's rows vanish behind busy neighbours.
-test('recipient pages read the same thread timeline as artifact pages', () => {
-  const store = new MessageStore();
-  append(store, 1);
-  append(store, 2);
-  for (let i = 0; i < 150; i++) append(store, 100 + i, { threadId: 'busy-neighbour' });
-  const bounded = (projection) =>
-    store.getByThreadBeforeBounded('T', Number.MAX_SAFE_INTEGER, 100, undefined, 'u', 100, projection);
-  const recipient = bounded({ recipientProjection: true });
-  const artifact = bounded({ artifactProjection: true });
-  assert.equal(recipient.messages.length, 2, 'neighbour rows must not evict the quiet thread');
-  assert.deepEqual(ids(recipient.messages), ids(artifact.messages));
-  assert.equal(recipient.scannedCount, artifact.scannedCount);
-  assert.equal(recipient.exhausted, true);
-  assert.equal(recipient.exhausted, artifact.exhausted);
-  assert.deepEqual(recipient.nextCursor, artifact.nextCursor);
-  // The unprojected default keeps its F148 global-window accounting unchanged.
-  const unprojected = bounded(undefined);
-  assert.equal(unprojected.messages.length, 0);
-  assert.equal(unprojected.scannedCount, 100);
-  assert.equal(unprojected.exhausted, false);
-});
