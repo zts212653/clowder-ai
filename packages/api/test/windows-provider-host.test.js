@@ -263,3 +263,100 @@ for (const owner of ['own', 'other']) {
     },
   );
 }
+
+const { recordVerifiedWindowsJobTeardowns, stopWithWindowsJobProof } = await import(
+  new URL('../dist/domains/cats/services/agents/invocation/WindowsJobStopRecovery.js', import.meta.url)
+);
+const { InMemoryTurnExecutionStore } = await import(
+  new URL('../dist/domains/cats/services/stores/memory/InMemoryTurnExecutionStore.js', import.meta.url)
+);
+
+function startedChild() {
+  const store = new InMemoryTurnExecutionStore();
+  store.createRunning({
+    executionId: EXECUTION.executionId,
+    invocationId: EXECUTION.invocationId,
+    parentInvocationId: EXECUTION.executionId,
+    threadId: EXECUTION.threadId,
+    catId: EXECUTION.catId,
+    userId: EXECUTION.userId,
+    executionKind: 'ordinary',
+    startedAt: 1,
+    providerLifecycleTracked: true,
+  });
+  store.markProviderStarted(EXECUTION.invocationId, 2);
+  return store;
+}
+
+// The API confirmed the host job closed, then died before its canonical teardown was durable (or the
+// write failed). The next process must still find the job and finish that stop, retrying a failure.
+test(
+  'a stop not yet durable keeps the whole evidence, and a failed write is retried',
+  { skip: !isWindows, timeout: 90_000 },
+  async (t) => {
+    const { dataDir } = fixture(t);
+    const scope = await createWindowsProviderHostScope({ execution: EXECUTION, dataDir });
+    const host = await scope.take();
+    t.after(() => killOwned(host.job.apiPid));
+    await once(host.launch({ command: process.execPath, args: ['-e', ''], env: { ...process.env } }), 'exit');
+    assert.equal(await scope.close(), true);
+    assert.equal(existsSync(host.job.path), true, 'closed but not durably stopped: the owner record stays');
+
+    const store = startedChild();
+    let failOnce = true;
+    const flaky = {
+      get: (id) => store.get(id),
+      recordProviderTeardown: (id, at) => {
+        if (failOnce) {
+          failOnce = false;
+          throw new Error('teardown write failed');
+        }
+        return store.recordProviderTeardown(id, at);
+      },
+    };
+    const first = await recordVerifiedWindowsJobTeardowns({ store: flaky, dataDir });
+    assert.deepEqual(first.released, []);
+    assert.ok(first.preserved.some((entry) => entry.reason.startsWith('teardown_write_failed')));
+    assert.equal(existsSync(host.job.path), true, 'a failed write keeps the proof for the retry');
+    assert.equal(readWindowsJobExecutionLinks(host.job.jobName, dataDir).links.length, 1);
+
+    const retry = await recordVerifiedWindowsJobTeardowns({ store: flaky, dataDir });
+    assert.deepEqual(retry.released, [EXECUTION.invocationId]);
+    assert.equal(typeof (await store.get(EXECUTION.invocationId)).providerTeardownAt, 'number');
+  },
+);
+
+// A retry ran the provider in a second host. One closed job says nothing about the other: when the
+// second job's owner record is missing or unreadable, neither recovery nor a Stop may release it.
+for (const damage of ['missing', 'unreadable']) {
+  test(
+    `an execution whose other job owner is ${damage} keeps its protection`,
+    { skip: !isWindows, timeout: 90_000 },
+    async (t) => {
+      const { dataDir } = fixture(t);
+      const scope = await createWindowsProviderHostScope({ execution: EXECUTION, dataDir });
+      const first = await scope.take();
+      const second = await scope.take();
+      t.after(() => {
+        for (const host of [first, second]) killOwned(host.job.apiPid);
+      });
+      assert.equal(await scope.close(), true);
+      if (damage === 'missing') rmSync(second.job.path);
+      else writeFileSync(second.job.path, '{ not json');
+
+      const store = startedChild();
+      const pass = await recordVerifiedWindowsJobTeardowns({ store, dataDir });
+      assert.deepEqual(pass.released, []);
+      assert.ok(
+        pass.preserved.some(
+          (entry) => entry.invocationId === EXECUTION.invocationId && entry.reason === 'linked_job_not_closed',
+        ),
+      );
+      assert.equal((await store.get(EXECUTION.invocationId)).providerTeardownAt, undefined);
+
+      const stop = await stopWithWindowsJobProof({ store, record: await store.get(EXECUTION.invocationId), dataDir });
+      assert.equal(stop.stopped, false);
+      assert.equal((await store.get(EXECUTION.invocationId)).status, 'running');
+    },
+  );
+}

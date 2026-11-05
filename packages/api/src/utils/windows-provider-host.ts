@@ -163,7 +163,8 @@ export async function createWindowsProviderHostScope(options: {
         }).path,
       );
     } catch (error) {
-      await host.close();
+      // No link names this job, so nothing depends on its record once it is verifiably closed.
+      if ((await host.close()).verdict === 'absent') clearWindowsJobOwner(host.job.path);
       throw error;
     }
     hosts.push(host);
