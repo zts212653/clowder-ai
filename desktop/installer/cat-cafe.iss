@@ -90,6 +90,10 @@ Name: "{app}\desktop-dist"
 Name: "{app}\node"
 
 [Files]
+; PrepareToInstall extracts these before any bulk payload is needed.
+Source: "..\scripts\configure-desktop-instance.ps1"; Flags: dontcopy
+Source: "..\scripts\stop-installed-desktop.ps1"; Flags: dontcopy
+
 ; ── Bulk archives ─────────────────────────────────────────────────────
 ; Shipped as tar.gz and extracted post-install by Windows' built-in tar.exe.
 ; This replaces per-file Inno Setup extraction of 30K+ node_modules files,
@@ -154,7 +158,6 @@ Source: "..\..\guides\*";                          DestDir: "{app}\guides"; \
 ; Desktop scripts (post-install config generation)
 Source: "..\scripts\post-install-offline.ps1";   DestDir: "{app}\scripts"
 Source: "..\scripts\configure-desktop-instance.ps1"; DestDir: "{app}\scripts"
-Source: "..\scripts\configure-desktop-instance.ps1"; Flags: dontcopy
 Source: "..\scripts\stop-installed-desktop.ps1"; DestDir: "{app}\scripts"
 Source: "..\scripts\generate-desktop-config.ps1"; DestDir: "{app}\scripts"
 Source: "..\scripts\sync-agent-hooks-offline.mjs"; DestDir: "{app}\scripts"
