@@ -55,6 +55,7 @@ import type { IThreadStore, Thread } from '../domains/cats/services/stores/ports
 import {
   hasUnconfirmedProviderTeardown,
   type ITurnExecutionStore,
+  type TurnExecutionRecord,
 } from '../domains/cats/services/stores/ports/TurnExecutionStore.js';
 import type { DynamicTaskStore } from '../infrastructure/scheduler/DynamicTaskStore.js';
 import { buildCancelMessages, type SocketManager } from '../infrastructure/websocket/index.js';
@@ -122,6 +123,14 @@ export interface QueueRoutesOptions {
   };
   /** Durable OS owner truth used when the in-memory tracker handle is gone. */
   cliExecutionOwnerService?: CliExecutionOwnerService;
+  /**
+   * #1838: Stop of one execution whose provider started and whose stop is unconfirmed. It ends the
+   * execution only with an exact stop proof (the Windows API job it belonged to verifiably closed);
+   * otherwise it names why it could not, and the execution keeps its occupancy.
+   */
+  stopUnconfirmedProvider?: (
+    record: TurnExecutionRecord,
+  ) => Promise<{ stopped: true } | { stopped: false; reason: string }>;
 }
 
 function liveExecutionCandidateKey(candidate: Pick<LiveExecutionCandidate, 'catId' | 'executionId'>): string {
@@ -720,6 +729,44 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     return { cancelled: cancelResult.cancelled };
   };
 
+  /**
+   * #1838: a member whose provider started and whose stop is unconfirmed ends only with an exact stop
+   * proof. Every such child of this execution is stopped through that proof; the first one that cannot
+   * be names the reason, and the caller then keeps the execution and its occupancy. Null means none is left.
+   */
+  const refuseUnconfirmedProviderStop = async (input: {
+    threadId: string;
+    userId: string;
+    catId: string;
+    executionId: string;
+    request: FastifyRequest;
+  }): Promise<{ error: string; code: 'PROVIDER_TEARDOWN_UNCONFIRMED' } | null> => {
+    const children = await opts.turnExecutionStore?.listByParent(input.executionId);
+    const unconfirmed = (children ?? []).filter(
+      (child) =>
+        child.parentInvocationId === input.executionId &&
+        child.threadId === input.threadId &&
+        child.userId === input.userId &&
+        child.catId === input.catId &&
+        child.status === 'running' &&
+        hasUnconfirmedProviderTeardown(child),
+    );
+    for (const child of unconfirmed) {
+      let stop: Awaited<ReturnType<NonNullable<QueueRoutesOptions['stopUnconfirmedProvider']>>>;
+      try {
+        stop = opts.stopUnconfirmedProvider
+          ? await opts.stopUnconfirmedProvider(child)
+          : { stopped: false, reason: 'no_stop_proof' };
+      } catch (err) {
+        input.request.log.error({ err, invocationId: child.invocationId }, 'stop proof could not be committed');
+        stop = { stopped: false, reason: 'stop_proof_unavailable' };
+      }
+      if (!stop.stopped)
+        return { error: `原执行停止尚未确认，保留执行占用（${stop.reason}）`, code: 'PROVIDER_TEARDOWN_UNCONFIRMED' };
+    }
+    return null;
+  };
+
   const reconcileInactiveLiveInvocation = async (input: {
     threadId: string;
     userId: string;
@@ -779,25 +826,8 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
 
     // An empty owner snapshot cannot certify a dispatched child whose exact
     // teardown has never been recorded (including unsupported Windows owners).
-    const children = await opts.turnExecutionStore?.listByParent(input.executionId);
-    if (
-      children?.some(
-        (child) =>
-          child.parentInvocationId === input.executionId &&
-          child.threadId === input.threadId &&
-          child.userId === input.userId &&
-          child.catId === input.catId &&
-          child.status === 'running' &&
-          hasUnconfirmedProviderTeardown(child),
-      )
-    ) {
-      return {
-        reconciled: false,
-        controlPlaneUnavailable: true,
-        error: '原执行停止尚未确认，保留执行占用',
-        code: 'PROVIDER_TEARDOWN_UNCONFIRMED',
-      };
-    }
+    const refusal = await refuseUnconfirmedProviderStop(input);
+    if (refusal) return { reconciled: false, controlPlaneUnavailable: true, ...refusal };
 
     const inflight = invocationQueue.findProcessingByCat(input.threadId, input.catId);
     if (inflight && queueEntryOwnerId(inflight) !== input.userId) {
@@ -2030,6 +2060,21 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
               // Orphan cancel skipped — a sibling cat is still active; let normal lifecycle handle it
               reply.status(404);
               return { error: '该猫当前未在执行', code: 'CAT_NOT_ACTIVE' };
+            }
+            // #1838: canceling the record must not strand a started provider of any member: that
+            // child would leave the live list while it still blocks its thread/role.
+            for (const memberCat of orphanRecord.targetCats as string[]) {
+              const refusal = await refuseUnconfirmedProviderStop({
+                threadId,
+                userId: guard.userId,
+                catId: memberCat,
+                executionId: orphanRecord.id,
+                request,
+              });
+              if (refusal) {
+                reply.status(503);
+                return refusal;
+              }
             }
 
             await snapshotPendingPrivateStop(threadId, guard.userId, orphanRecord.targetCats)();

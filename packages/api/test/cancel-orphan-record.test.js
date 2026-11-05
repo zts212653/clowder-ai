@@ -120,6 +120,7 @@ async function buildApp(opts = {}) {
     socketManager,
     invocationRecordStore: recordStore,
     ...(opts.agentSessionMutex ? { agentSessionMutex: opts.agentSessionMutex } : {}),
+    ...opts.routeOptions,
   });
 
   await app.ready();
@@ -441,5 +442,103 @@ describe('cancel route: orphan record cleanup (Thread 1 regression)', () => {
       'a promoted invocation must not observe the orphan record while it is still running',
     );
     assert.deepEqual(lockScopes, [{ threadId: THREAD_ID, userId: USER_ID, catId: CAT_ID }]);
+  });
+});
+
+describe('#1838 cancel route: a dead API s started provider stops only with its job proof', async () => {
+  const { mkdirSync, mkdtempSync, rmSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { InMemoryTurnExecutionStore } = await import(
+    '../dist/domains/cats/services/stores/memory/InMemoryTurnExecutionStore.js'
+  );
+  const { stopWithWindowsJobProof } = await import(
+    '../dist/domains/cats/services/agents/invocation/WindowsJobStopRecovery.js'
+  );
+  const { recordWindowsJobExecutionLink } = await import('../dist/utils/windows-job-execution-links.js');
+  const { resolveWindowsJobDirectory } = await import('../dist/utils/windows-job-owner.js');
+  const JOB = `Local${String.fromCharCode(92)}ClowderApiJob-cancel-test`;
+  const verdict = (observed) => async () => ({ stdout: `${JSON.stringify(observed)}\r\n`, stderr: '' });
+
+  async function stopAfterApiDied(t, execute) {
+    const dataDir = mkdtempSync(join(tmpdir(), 'issue1838-cancel-'));
+    t.after(() => rmSync(dataDir, { recursive: true, force: true }));
+    mkdirSync(resolveWindowsJobDirectory(dataDir), { recursive: true });
+    writeFileSync(
+      join(resolveWindowsJobDirectory(dataDir), 'owner.json'),
+      JSON.stringify({ v: 1, jobName: JOB, apiPid: 4321, helperPid: 4322, sessionId: 1, createdAt: 1 }),
+    );
+    const parent = 'inv-dead-api';
+    const execution = { executionId: parent, invocationId: 'child-dead-api', threadId: THREAD_ID, catId: CAT_ID };
+    const turns = new InMemoryTurnExecutionStore();
+    turns.createRunning({
+      ...execution,
+      parentInvocationId: parent,
+      userId: USER_ID,
+      executionKind: 'ordinary',
+      startedAt: 1,
+      providerLifecycleTracked: true,
+    });
+    turns.markProviderStarted(execution.invocationId, 2);
+    recordWindowsJobExecutionLink({ dataDir, jobName: JOB, execution: { ...execution, userId: USER_ID } });
+    const { app, recordStore, queueProcessor } = await buildApp({
+      tracker: makeTracker({ hasSlot: false }),
+      recordStore: makeRecordStore({
+        runningRecord: {
+          id: parent,
+          threadId: THREAD_ID,
+          userId: USER_ID,
+          targetCats: [CAT_ID],
+          status: 'running',
+          idempotencyKey: 'idem-dead-api',
+          intent: 'execute',
+          createdAt: Date.now() - 60_000,
+          updatedAt: Date.now() - 60_000,
+        },
+      }),
+      routeOptions: {
+        turnExecutionStore: turns,
+        // index.ts wires exactly this on Windows; only the native job query is fixed here.
+        stopUnconfirmedProvider: (record) => stopWithWindowsJobProof({ store: turns, record, dataDir, execute }),
+      },
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${THREAD_ID}/cancel/${CAT_ID}`,
+      headers: { 'x-cat-cafe-user': USER_ID },
+    });
+    return { res, child: turns.get(execution.invocationId), recordStore, queueProcessor };
+  }
+
+  it('keeps the execution and names the reason while its job still owns members', async (t) => {
+    const { res, child, recordStore, queueProcessor } = await stopAfterApiDied(
+      t,
+      verdict({ state: 'present', activeProcesses: 2, sessionId: 1 }),
+    );
+    assert.equal(res.statusCode, 503, res.body);
+    const body = JSON.parse(res.body);
+    assert.equal(body.code, 'PROVIDER_TEARDOWN_UNCONFIRMED');
+    assert.match(body.error, /job_present:/, 'the user sees why the stop is not confirmed');
+    assert.equal(child.status, 'running', 'no success is reported without proof');
+    assert.equal(
+      recordStore.updates.some((update) => update.input.status === 'canceled'),
+      false,
+      'the parent is not canceled while its provider may still run',
+    );
+    assert.equal(
+      queueProcessor.actions.some((action) => action.op === 'releaseSlot'),
+      false,
+    );
+  });
+
+  it('cancels the execution with the proof once its job verifiably closed', async (t) => {
+    const { res, child, recordStore } = await stopAfterApiDied(
+      t,
+      verdict({ state: 'absent', nativeError: 2, sessionId: 1 }),
+    );
+    assert.equal(res.statusCode, 200, res.body);
+    assert.deepEqual([child.status, child.terminalReason], ['canceled', 'user_cancel']);
+    assert.equal(typeof child.providerTeardownAt, 'number');
+    assert.ok(recordStore.updates.some((update) => update.id === 'inv-dead-api' && update.input.status === 'canceled'));
   });
 });

@@ -21,7 +21,7 @@ const { TurnExecutionStartupReconciler } = await import(
 const { hasUnconfirmedProviderTeardown } = await import(
   '../dist/domains/cats/services/stores/ports/TurnExecutionStore.js'
 );
-const { clearSettledWindowsJobEvidence, recordVerifiedWindowsJobTeardowns } = await import(
+const { clearSettledWindowsJobEvidence, recordVerifiedWindowsJobTeardowns, stopWithWindowsJobProof } = await import(
   '../dist/domains/cats/services/agents/invocation/WindowsJobStopRecovery.js'
 );
 const { recordWindowsJobExecutionLink, resolveWindowsJobLinksDirectory } = await import(
@@ -196,4 +196,44 @@ test('an execution that crashed before its provider started settles without the 
   assert.deepEqual(pass.released, [], 'no teardown proof is needed when no provider started');
   assert.deepEqual((await reconcile()).invocationIds, ['child-1']);
   assert.deepEqual(await clearSettledWindowsJobEvidence({ store, pass }), { clearedLinks: 1, clearedJobs: 1 });
+});
+
+test('Stop ends a dead API s execution only with its exact job proof, and names every refusal', async (t) => {
+  // Verifiably closed and linked to exactly this execution: canceled with the proof, link removed.
+  const closed = fixture(t);
+  closed.link(closed.start('child-1'));
+  const stopped = await stopWithWindowsJobProof({
+    store: closed.store,
+    record: closed.store.get('child-1'),
+    dataDir: closed.dataDir,
+    execute: ABSENT,
+  });
+  assert.deepEqual(stopped, { stopped: true });
+  const record = closed.store.get('child-1');
+  assert.deepEqual([record.status, record.terminalReason], ['canceled', 'user_cancel']);
+  assert.equal(hasUnconfirmedProviderTeardown(record), false);
+  assert.deepEqual(readdirSync(resolveWindowsJobLinksDirectory(closed.dataDir)), []);
+
+  const refusals = {
+    present: [answer({ state: 'present', activeProcesses: 2, sessionId: 1 }), /^job_present:/],
+    unknown: [
+      async () => {
+        throw new Error('powershell unavailable');
+      },
+      /^job_unknown:/,
+    ],
+    unlinked: [ABSENT, /^no_windows_job_link$/],
+    mismatched: [ABSENT, /^link_identity_mismatch$/],
+  };
+  for (const [name, [execute, reason]] of Object.entries(refusals)) {
+    const { dataDir, store, start, link } = fixture(t);
+    const execution = start('child-1');
+    if (name === 'mismatched') link({ ...execution, threadId: 'another-thread' });
+    else if (name !== 'unlinked') link(execution);
+    const result = await stopWithWindowsJobProof({ store, record: store.get('child-1'), dataDir, execute });
+    assert.equal(result.stopped, false, name);
+    assert.match(result.reason, reason, name);
+    assert.equal(store.get('child-1').status, 'running', `${name}: the execution keeps its occupancy`);
+    assert.equal(hasUnconfirmedProviderTeardown(store.get('child-1')), true, name);
+  }
 });

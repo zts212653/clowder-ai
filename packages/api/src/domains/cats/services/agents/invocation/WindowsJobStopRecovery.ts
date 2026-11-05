@@ -138,6 +138,40 @@ export async function recordVerifiedWindowsJobTeardowns(options: {
   return pass;
 }
 
+/**
+ * A user's Stop on one running execution whose provider started and whose stop is unconfirmed,
+ * after its API died. Only a verifiably closed job that is linked to exactly this execution proves
+ * its provider gone; then the execution is canceled with that proof and its link removed. A job
+ * that is present, in another session or unknown, a missing link or a mismatched one stops nothing:
+ * the execution keeps its occupancy and the caller reports the exact reason. Nothing is killed here.
+ */
+export async function stopWithWindowsJobProof(options: {
+  store: Pick<ITurnExecutionStore, 'transitionTerminal'>;
+  record: TurnExecutionRecord;
+  dataDir?: string;
+  execute?: WindowsJobQueryExecute;
+}): Promise<{ stopped: true } | { stopped: false; reason: string }> {
+  const { record } = options;
+  const resolution = await resolveWindowsJobStopEvidence(options);
+  for (const job of resolution.verifiedStopped) {
+    const link = job.links.find((entry) => entry.execution.invocationId === record.invocationId);
+    if (!link) continue;
+    if (!matchesLinkedExecution(record, link.execution)) return { stopped: false, reason: 'link_identity_mismatch' };
+    const result = await options.store.transitionTerminal(record.invocationId, {
+      status: 'canceled',
+      endedAt: job.verifiedAt,
+      terminalReason: 'user_cancel',
+      providerTeardownAt: job.verifiedAt,
+    });
+    if (!result.record || result.record.status === 'running')
+      return { stopped: false, reason: 'terminal_not_committed' };
+    clearWindowsJobExecutionLink(link.path);
+    return { stopped: true };
+  }
+  const owner = resolution.unresolved.find((job) => job.invocationIds.includes(record.invocationId));
+  return { stopped: false, reason: owner ? `job_${owner.verdict}:${owner.reason}` : 'no_windows_job_link' };
+}
+
 export async function clearSettledWindowsJobEvidence(options: {
   store: Pick<ITurnExecutionStore, 'get'>;
   pass: WindowsJobTeardownPass;

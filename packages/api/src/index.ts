@@ -169,6 +169,7 @@ import {
 } from './domains/cats/services/agents/invocation/sidebar-presence-source.js';
 import { listenBeforeTurnExecutionRecovery } from './domains/cats/services/agents/invocation/TurnExecutionStartupReconciler.js';
 import { createThreadExecutionSituationSource } from './domains/cats/services/agents/invocation/thread-execution-situation.js';
+import { stopWithWindowsJobProof } from './domains/cats/services/agents/invocation/WindowsJobStopRecovery.js';
 import { createZombieTerminalRecovery } from './domains/cats/services/agents/invocation/ZombieTerminalRecovery.js';
 import {
   type AcpPoolRegistry,
@@ -3427,6 +3428,13 @@ async function main(): Promise<void> {
     dynamicTaskStore, // F295: canonical managed-command execution read projection
     activeExecutionService, // F297 AC-D3: shared composition; project scan uses its live-candidate view
     cliExecutionOwnerService,
+    // #1838: Stop proves a dead API's provider gone only through the kernel job it was linked to.
+    ...(process.platform === 'win32'
+      ? {
+          stopUnconfirmedProvider: (record: TurnExecutionRecord) =>
+            stopWithWindowsJobProof({ store: turnExecutionStore, record, dataDir: process.env.CAT_CAFE_DATA_DIR }),
+        }
+      : {}),
   });
   await app.register(invocationsRoutes, {
     invocationRecordStore,
