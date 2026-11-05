@@ -11,6 +11,8 @@
  * may replace a field only when it still equals that legacy value, so a user's
  * own edits are never overwritten.
  */
+import { isDshLauncher } from './dsh-launcher.js';
+
 export type NativeToolKey = 'kimi' | 'dsh' | 'pi';
 
 export interface NativeToolColor {
@@ -134,7 +136,14 @@ export function resolveNativeToolKey(input: NativeToolIdentityInput): NativeTool
 
   const descriptor = descriptorText(input.acp);
   if (descriptor.includes('pi-acp-bridge') || descriptor.includes('pi-coding-agent')) return 'pi';
-  if (descriptor.includes('dsh') || descriptor.includes('deepseek')) return 'dsh';
+  const acp = input.acp;
+  if (acp && typeof acp === 'object' && 'command' in acp && typeof acp.command === 'string') {
+    const args =
+      'startupArgs' in acp && Array.isArray(acp.startupArgs)
+        ? acp.startupArgs.filter((arg): arg is string => typeof arg === 'string')
+        : [];
+    if (isDshLauncher(acp.command, args)) return 'dsh';
+  }
   return undefined;
 }
 

@@ -1,9 +1,9 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { expect, it, vi } from 'vitest';
+import { dshModelLabel } from '@/lib/dsh-model-label';
 import { apiFetch } from '@/utils/api-client';
 import { initialState } from '../hub-cat-editor.model';
-import { dshModelLabel } from '../settings/members/dsh-model-label';
 import { MemberRuntimeFields } from '../settings/members/MemberRuntimeFields';
 
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
@@ -76,7 +76,8 @@ it.each([
     );
     const label = live ? 'DeepSeek Flash' : 'deepseek-official / deepseek-flash';
     const model = host.querySelector<HTMLButtonElement>('[role=combobox]');
-    expect(model?.textContent).toContain(status === 'inherited' ? '跟随 DSH 设置' : label);
+    expect(model?.textContent).toContain(label);
+    if (status === 'inherited') expect(model?.textContent).toContain('跟随 DSH 设置');
     expect(host.querySelector('[data-testid=member-model-summary]')?.textContent).toContain(label);
     expect(patch).not.toHaveBeenCalled();
     await act(async () => model?.click());
@@ -98,3 +99,38 @@ it.each([
   '["provider",42]',
 ])('leaves a non-route or malformed manual model ID unchanged: %s', (value) =>
   expect(dshModelLabel(value)).toBe(value));
+
+it('preserves another ACP client opaque ID when its arguments mention DeepSeek', async () => {
+  const route = '["gateway","model"]';
+  vi.mocked(apiFetch).mockResolvedValue(new Response('{}', { status: 503 }));
+  const host = document.createElement('div');
+  const root = createRoot(host);
+  try {
+    await act(async () =>
+      root.render(
+        <MemberRuntimeFields
+          form={{
+            ...initialState(),
+            catId: 'custom',
+            clientId: 'acp',
+            configurationSource: 'native_tool',
+            defaultModel: route,
+            carrier: 'acp',
+            acpCommand: 'custom-acp',
+            acpStartupArgs: '--provider deepseek',
+          }}
+          accounts={[]}
+          patch={vi.fn()}
+          t={(zh) => zh}
+          accountHref="/settings?s=accounts"
+          editing
+        />,
+      ),
+    );
+    expect(host.querySelector('[role=combobox]')?.textContent).toContain(route);
+    expect(host.textContent).not.toContain('DSH 自定义 LLM');
+  } finally {
+    await act(async () => root.unmount());
+    vi.resetAllMocks();
+  }
+});

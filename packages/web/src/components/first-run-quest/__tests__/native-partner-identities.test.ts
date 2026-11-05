@@ -16,6 +16,19 @@ const tools: RuntimeChoice[] = (['kimi', 'opencode'] as const).map((id) => ({
 }));
 
 describe('native partner identities reflect tools rather than an unrelated model family', () => {
+  it('does not give another ACP client the DSH identity because it uses DeepSeek', () => {
+    const runtime: RuntimeChoice = {
+      id: 'acp:custom',
+      label: 'Custom ACP',
+      clientId: 'acp',
+      installed: true,
+      models: [],
+      acp: { command: 'custom-acp', startupArgs: ['--provider', 'deepseek'] },
+    };
+    const form = nativePartnerIdentity(runtime, templateConfig.roleTemplates, []);
+    expect(form.displayName).not.toBe('小鲸鱼');
+    expect(form.avatar).not.toBe('/avatars/family/dsh.png');
+  });
   it('uses the real Kimi and OpenCode templates and distinct, editable personalities', () => {
     const partners = tools.map((runtime) => ({
       form: nativePartnerIdentity(runtime, templateConfig.roleTemplates, []),

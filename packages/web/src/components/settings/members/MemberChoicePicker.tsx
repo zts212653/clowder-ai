@@ -15,6 +15,8 @@ export function MemberChoicePicker({
   onChange,
   inheritLabel,
   inheritDetail,
+  inheritValueLabel,
+  inheritedValue,
   searchable = false,
   allowCustom = false,
   english = false,
@@ -26,6 +28,8 @@ export function MemberChoicePicker({
   onChange: (value: string) => void;
   inheritLabel: string;
   inheritDetail?: string;
+  inheritValueLabel?: string;
+  inheritedValue?: string;
   searchable?: boolean;
   allowCustom?: boolean;
   english?: boolean;
@@ -140,7 +144,7 @@ export function MemberChoicePicker({
         }}
         className="flex min-h-11 w-full items-center justify-between gap-3 rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-field-bg)] px-3 py-2 text-left text-sm focus-visible:outline-cafe-accent"
       >
-        <span className="min-w-0 break-words">{value ? valueLabel : inheritLabel}</span>
+        <span className="min-w-0 break-words">{value ? valueLabel : inheritValueLabel || inheritLabel}</span>
         <span aria-hidden="true" className="text-cafe-secondary">
           ▾
         </span>
@@ -180,6 +184,11 @@ export function MemberChoicePicker({
                 >
                   <span className="min-w-0 flex-1">
                     <span className="block break-words">{option.label}</span>
+                    {!value && option.value && option.value === inheritedValue && (
+                      <span className="block text-xs font-normal text-cafe-secondary">
+                        {english ? 'Current inherited model' : '当前继承模型'}
+                      </span>
+                    )}
                     {option.value &&
                       options.some((other) => other.label === option.label && other.value !== option.value) && (
                         <span className="block break-all text-xs font-normal text-cafe-secondary">
