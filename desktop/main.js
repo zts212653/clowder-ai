@@ -114,6 +114,10 @@ function createSplashWindow() {
   splashWindow.center();
 }
 async function createMainWindow() {
+  // Service readiness can expire while resolving preview origins or loading
+  // the first frame. Use the same owned child handles at both boundaries.
+  const activeServices = services;
+  activeServices.assertStartupProcessesRunning();
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -175,6 +179,7 @@ async function createMainWindow() {
       url: createVersionedRendererUrl(APP_URL, app.getVersion()),
       signal: startupController.signal,
       onVisible: () => {
+        activeServices.assertStartupProcessesRunning();
         if (splashWindow && !splashWindow.isDestroyed()) splashWindow.close();
         mainWindow.show();
       },

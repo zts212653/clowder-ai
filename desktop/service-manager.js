@@ -254,13 +254,14 @@ class ServiceManager {
         if (outcome !== 'ready') throw occupiedDesktopPorts(`${label} ${port} (::1)`);
       }),
     );
-    this.startupAbort.signal.throwIfAborted();
-    // The first ready child can exit while its peer is still starting.
-    for (const [label, port] of endpoints) {
-      const proc = this.procs[label.toLowerCase()];
-      if (proc) assertStartupProcess(proc, label, port, LOG_FILE);
-    }
+    this.assertStartupProcessesRunning();
     this.onStatus('Ready!');
+  }
+
+  assertStartupProcessesRunning() {
+    this.startupAbort?.signal.throwIfAborted();
+    assertStartupProcess(this.procs.api, 'API', this.apiPort, LOG_FILE);
+    assertStartupProcess(this.procs.web, 'Web', this.frontendPort, LOG_FILE);
   }
 
   async _startApiWithFallback(nodeExe, userDataDir, signal) {

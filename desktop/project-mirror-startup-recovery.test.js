@@ -60,6 +60,7 @@ test('one startup recovers unreadable docs mirrors when the actual Node consumer
   };
   manager._startNextJs = () => starts.push('web');
   manager._waitForHttpReady = async () => {};
+  manager.assertStartupProcessesRunning = () => {};
   const originalRead = fs.readFileSync;
   const docsProbe = path.join(userRoot, 'project/docs/harness-feedback/eval-domains/eval-design-gate.yaml');
   let failedParentReads = 0;
