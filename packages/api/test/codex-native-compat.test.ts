@@ -31,11 +31,19 @@ afterEach(() => {
 function sandbox() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'codex-native-compat-')));
   process.env.CAT_CAFE_DATA_DIR = join(root, 'data');
-  const binary = join(root, 'codex');
+  const binary = join(root, process.platform === 'win32' ? 'codex.CMD' : 'codex');
   const calls = join(root, 'version-calls');
   const install = (version: string, delaySeconds = 0) => {
     // A rewrite is what an npm/Homebrew upgrade does: new inode, new version string.
     rmSync(binary, { force: true });
+    if (process.platform === 'win32') {
+      writeFileSync(binary, '@echo off\r\nnode "%~dp0\\version.js" %*\r\n');
+      writeFileSync(
+        join(root, 'version.js'),
+        `require('node:fs').appendFileSync(${JSON.stringify(calls)},'x\\n');setTimeout(()=>console.log('codex-cli ${version}'),${delaySeconds * 1000});`,
+      );
+      return;
+    }
     writeFileSync(
       binary,
       `#!/bin/sh\necho x >> '${calls}'\nsleep ${delaySeconds}\nprintf 'codex-cli ${version}\\n'\n`,
