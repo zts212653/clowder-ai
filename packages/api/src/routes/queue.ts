@@ -109,7 +109,8 @@ export interface QueueRoutesOptions {
   turnExecutionStore?: Pick<
     ITurnExecutionStore,
     'get' | 'listByParent' | 'transitionTerminal' | 'clearResponsePending' | 'listResponsePending'
-  >;
+  > &
+    Partial<Pick<ITurnExecutionStore, 'listRunningByUser'>>;
   /** Existing managed-wake receipt owner; late-bound after delivery composition. */
   getManagedCommandWakeRecovery?: () => ManagedCommandWakeRecoveryLike | undefined;
   /** F295: existing durable task truth used only to project active managed commands. */
@@ -794,6 +795,31 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       }
     }
     return null;
+  };
+
+  /**
+   * #1838: the exact (parent, cat) scopes of this thread's started children whose stop is unconfirmed
+   * and whose parent record no longer runs. An older cancel/reset could end the parent and leave such
+   * a child running; admission reads children by user and still refuses its role, so every Stop entry
+   * has to reach it through its exact parent instead of only walking running parents.
+   */
+  const endedParentUnconfirmedScopes = async (threadId: string, userId: string) => {
+    const runningParents = new Set(
+      ((await opts.invocationRecordStore?.listRunningByThread(threadId, userId)) ?? []).map((record) => record.id),
+    );
+    const children = (await opts.turnExecutionStore?.listRunningByUser?.(userId)) ?? [];
+    const scopes = children.flatMap((child) => {
+      const executionId = child.parentInvocationId;
+      return executionId &&
+        !runningParents.has(executionId) &&
+        child.status === 'running' &&
+        child.threadId === threadId &&
+        child.userId === userId &&
+        hasUnconfirmedProviderTeardown(child)
+        ? [{ executionId, catId: child.catId as string }]
+        : [];
+    });
+    return [...new Map(scopes.map((scope) => [`${scope.executionId}\u0000${scope.catId}`, scope])).values()];
   };
 
   /**
@@ -2169,7 +2195,28 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
             return { ok: true, cancelled: true };
           }
         }
+        // #1838: a started child whose parent already ended is no running record, so the branch above
+        // cannot reach it. Stop it through its exact parent before reporting the cat as inactive.
+        const endedScopes = (await endedParentUnconfirmedScopes(threadId, guard.userId)).filter(
+          (scope) => scope.catId === catId,
+        );
+        for (const scope of endedScopes) {
+          const refusal = await refuseUnconfirmedProviderStop({ threadId, userId: guard.userId, ...scope, request });
+          if (refusal) {
+            reply.status(503);
+            return refusal;
+          }
+        }
         const lockRelease = releaseAgentSessionLocks({ threadId, userId: guard.userId, catId }, request, 'cancel');
+        if (endedScopes.length > 0) {
+          await retirePending();
+          for (const m of buildCancelMessages({ cancelled: true, catIds: [catId] })) {
+            socketManager.broadcastAgentMessage(m, threadId);
+          }
+          if (queueProcessor.canReleaseSlotForUser(threadId, catId, guard.userId))
+            queueProcessor.releaseSlot(threadId, catId);
+          return { ok: true, cancelled: true };
+        }
         if (
           (lockRelease.releasedHolders > 0 || lockRelease.rejectedWaiters > 0) &&
           queueProcessor.canReleaseSlotForUser(threadId, catId, guard.userId)
@@ -2244,6 +2291,15 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
           reply.status(503);
           return refusal;
         }
+      }
+    }
+    // A child whose parent already ended is never in the running records above, yet it still blocks.
+    for (const scope of await endedParentUnconfirmedScopes(threadId, guard.userId)) {
+      if (invocationTracker.has(threadId, scope.catId)) continue;
+      const refusal = await refuseUnconfirmedProviderStop({ threadId, userId: guard.userId, ...scope, request });
+      if (refusal) {
+        reply.status(503);
+        return refusal;
       }
     }
     // 1. Abort all active InvocationTracker slots (controllers + slot deletion).

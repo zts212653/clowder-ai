@@ -85,6 +85,8 @@ function makeSocketManager() {
 function makeThreadStore() {
   return {
     get: async (id) => ({ id, createdBy: USER_ID }),
+    // The active execution list reads the viewer's threads of the project.
+    listByProject: async () => [{ id: THREAD_ID, createdBy: USER_ID }],
     addParticipants: async () => {},
     updateLastActive: async () => {},
   };
@@ -474,7 +476,12 @@ describe('#1838 cancel route: a dead API s started provider stops only with its 
     }),
   };
 
-  async function stopAfterApiDied(t, execute, route = 'cancel', { settleFails = false, tracked = false } = {}) {
+  async function stopAfterApiDied(
+    t,
+    execute,
+    route = 'cancel',
+    { settleFails = false, tracked = false, parentEnded = false } = {},
+  ) {
     const dataDir = mkdtempSync(join(tmpdir(), 'issue1838-cancel-'));
     t.after(() => rmSync(dataDir, { recursive: true, force: true }));
     mkdirSync(resolveWindowsJobDirectory(dataDir), { recursive: true });
@@ -557,7 +564,8 @@ describe('#1838 cancel route: a dead API s started provider stops only with its 
           threadId: THREAD_ID,
           userId: USER_ID,
           targetCats: [CAT_ID],
-          status: 'running',
+          // An older cancel/reset ended the parent but left its started child running.
+          status: parentEnded ? 'canceled' : 'running',
           idempotencyKey: 'idem-dead-api',
           intent: 'execute',
           createdAt: Date.now() - 60_000,
@@ -583,6 +591,15 @@ describe('#1838 cancel route: a dead API s started provider stops only with its 
     t.after(() => app.close());
     return {
       res,
+      // What the active execution list showed before the Stop.
+      listed: () =>
+        app
+          .inject({
+            method: 'GET',
+            url: `/api/threads/${THREAD_ID}/executions/active`,
+            headers: { 'x-cat-cafe-user': USER_ID },
+          })
+          .then((list) => JSON.parse(list.body).executions ?? []),
       child: turns.get(execution.invocationId),
       recordStore,
       queueProcessor,
@@ -737,4 +754,43 @@ describe('#1838 cancel route: a dead API s started provider stops only with its 
     assert.equal(body.code, 'PROVIDER_TEARDOWN_UNCONFIRMED');
     assert.match(body.error, /job_present:/);
   });
+
+  // #1838 owner P1: an older cancel/reset ended the parent and left its started child running.
+  // Admission still refuses the role on that child, so every Stop entry must reach it through its
+  // exact parent: unknown/present keep it listed, a verified stop ends it and its reply.
+  for (const route of ['live', 'cancel', 'force-reset']) {
+    for (const observed of [
+      { state: 'present', activeProcesses: 2, sessionId: 1 },
+      { state: 'unknown', nativeError: 5, sessionId: 1 },
+    ]) {
+      it(`ended parent: ${route} keeps the child listed while its job is ${observed.state}`, async (t) => {
+        const { res, child, recordStore, listed } = await stopAfterApiDied(t, verdict(observed), route, {
+          parentEnded: true,
+        });
+        assert.equal(res.statusCode, 503, res.body);
+        assert.equal(JSON.parse(res.body).code, 'PROVIDER_TEARDOWN_UNCONFIRMED');
+        assert.equal(child.status, 'running');
+        assert.deepEqual(
+          (await listed()).map(({ executionId, catId }) => ({ executionId, catId })),
+          [{ executionId: 'inv-dead-api', catId: CAT_ID }],
+          'the blocking child stays visible under its exact parent',
+        );
+        assert.deepEqual(recordStore.updates, [], 'the ended parent is not touched');
+      });
+    }
+    it(`ended parent: ${route} ends the child and its reply with the exact proof only`, async (t) => {
+      const { res, child, response, turns, recordStore, listed } = await stopAfterApiDied(
+        t,
+        verdict({ state: 'absent', nativeError: 2, sessionId: 1 }),
+        route,
+        { parentEnded: true },
+      );
+      assert.equal(res.statusCode, 200, res.body);
+      assert.deepEqual([child.status, typeof child.providerTeardownAt], ['canceled', 'number']);
+      assert.deepEqual([response.lifecycle.status, response.content], ['canceled', 'streamed body']);
+      assert.deepEqual(await turns.listResponsePending(), [], 'nothing is left for the next startup');
+      assert.deepEqual(await listed(), []);
+      assert.deepEqual(recordStore.updates, [], 'the ended parent is never reopened or rewritten');
+    });
+  }
 });

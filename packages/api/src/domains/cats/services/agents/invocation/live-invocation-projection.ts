@@ -239,7 +239,9 @@ export async function resolveActiveInvocationsStrict(
   invocationTracker: InvocationTrackerLike,
   recordStore: IInvocationRecordStore | undefined,
   responseStatus: ResponseStatusReader | undefined,
-  turnExecutionStore: Pick<ITurnExecutionStore, 'listByParent'> | undefined,
+  turnExecutionStore:
+    | (Pick<ITurnExecutionStore, 'listByParent'> & Partial<Pick<ITurnExecutionStore, 'listRunningByUser'>>)
+    | undefined,
   /** F117 KD-23: the caller's CLI owner snapshot; without a complete one, running members stay listed unverified. */
   ownerSnapshot?: OwnerSnapshot,
 ): Promise<ActiveInvocationProjection[]> {
@@ -259,6 +261,9 @@ export async function resolveActiveInvocationsStrict(
             childrenByParent.set(parentId, children);
             return children;
           },
+          ...(turnExecutionStore.listRunningByUser
+            ? { listRunningChildrenByUser: turnExecutionStore.listRunningByUser.bind(turnExecutionStore) }
+            : {}),
         }
       : {}),
     ...(ownerSnapshot ? { ownerSnapshot } : {}),

@@ -116,6 +116,11 @@ export interface LivenessReadDeps {
    *  the caller's fail-open path: "unknown" must not read as "no running child". */
   listTurnExecutionsByParent?: (parentInvocationId: string) => Promise<TurnExecutionRecord[]> | TurnExecutionRecord[];
   /**
+   * #1838: the user's running children read from the child side, the same read admission uses. A
+   * started child whose parent already ended still blocks its role, so it must stay listable.
+   */
+  listRunningChildrenByUser?: (userId: string) => Promise<TurnExecutionRecord[]> | TurnExecutionRecord[];
+  /**
    * The CLI owner snapshot the caller already took. A listed owner proves its member processing.
    * When the snapshot is complete, a running child without a slot or an owner proves nothing; when
    * it is absent or incomplete, a running child stands in for the owner it cannot verify, and when
@@ -128,13 +133,13 @@ type RunningChildExecution = TurnExecutionRecord & { status: 'running' };
 
 function isScopedRunningChild(
   child: TurnExecutionRecord,
-  parent: InvocationRecord,
+  parentId: string,
   threadId: string,
   userId: string,
 ): child is RunningChildExecution {
   return (
     child.status === 'running' &&
-    child.parentInvocationId === parent.id &&
+    child.parentInvocationId === parentId &&
     child.threadId === threadId &&
     child.userId === userId &&
     typeof child.invocationId === 'string' &&
@@ -210,7 +215,7 @@ async function newestRunningChildren(
 ): Promise<Map<string, RunningChildExecution>> {
   const newestByCat = new Map<string, RunningChildExecution>();
   for (const child of await Promise.resolve(listTurnExecutionsByParent(record.id))) {
-    if (!isScopedRunningChild(child, record, threadId, userId)) continue;
+    if (!isScopedRunningChild(child, record.id, threadId, userId)) continue;
     const existing = newestByCat.get(child.catId);
     if (!existing || child.startedAt > existing.startedAt) newestByCat.set(child.catId, child);
   }
@@ -218,10 +223,10 @@ async function newestRunningChildren(
 }
 
 /** A running child standing in for an owner no complete snapshot can verify. */
-function liveFromUnverifiedChild(record: InvocationRecord, child: RunningChildExecution): LiveInvocation {
+function liveFromUnverifiedChild(parentId: string, child: RunningChildExecution): LiveInvocation {
   return {
     catId: child.catId as CatId,
-    executionId: record.id,
+    executionId: parentId,
     invocationId: child.invocationId,
     startedAt: child.startedAt,
     source: 'parent+child-execution',
@@ -273,7 +278,7 @@ function liveForRecord(
     // unconfirmed: it still blocks its thread/role, so it stays listed for the user to see and stop.
     if (proven.has(catId)) continue;
     if (evidence.ownerUnverifiable || hasUnconfirmedProviderTeardown(child))
-      listed.push(liveFromUnverifiedChild(record, child));
+      listed.push(liveFromUnverifiedChild(record.id, child));
   }
   if (!evidence.ownerUnverifiable) return listed;
   if (listed.length === 0 && evidence.snapshotIncomplete) {
@@ -314,6 +319,22 @@ export async function getThreadLiveInvocations(
     active.push(...liveForRecord(record, children, evidence));
   }
   const runningRecordIds = new Set(records.map((record) => record.id));
+  // #1838: an older cancel/reset could end the parent and leave its started child running. Admission
+  // still refuses the role on that child, so it is listed under its exact parent for the user to stop.
+  // A running parent already listed its own children above.
+  if (deps.listRunningChildrenByUser) {
+    for (const child of await Promise.resolve(deps.listRunningChildrenByUser(userId))) {
+      const parentId = child.parentInvocationId;
+      if (
+        typeof parentId === 'string' &&
+        parentId.length > 0 &&
+        !runningRecordIds.has(parentId) &&
+        isScopedRunningChild(child, parentId, threadId, userId) &&
+        hasUnconfirmedProviderTeardown(child)
+      )
+        active.push(liveFromUnverifiedChild(parentId, child));
+    }
+  }
   for (const entry of heldSlots) {
     if (entry.executionId === undefined || !runningRecordIds.has(entry.executionId)) {
       active.push(liveFromSlot(entry, 'tracker-only'));
