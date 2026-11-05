@@ -123,20 +123,21 @@ test('only same-session ERROR_FILE_NOT_FOUND is a stop verdict', { timeout: 20_0
 test('a verifiably closed job releases exactly its linked executions, and they settle', async (t) => {
   const { dataDir, store, start, link, reconcile } = fixture(t);
   link(start('child-1'));
-  // Started under some other owner with no link: no proof covers it, so it stays blocked.
+  // Started under some other owner with no link: no proof covers it. Since #1849 it still settles
+  // through the ordinary Host interruption, but its physical exit stays unknown.
   start('unlinked');
 
   const pass = await recordVerifiedWindowsJobTeardowns({ store, dataDir, execute: ABSENT });
-  assert.deepEqual(pass.released, ['child-1']);
+  assert.deepEqual(pass.released, ['child-1'], 'only the linked execution gets a teardown');
   assert.deepEqual(pass.preserved, []);
 
   const recovery = await reconcile();
-  assert.deepEqual(recovery.invocationIds, ['child-1']);
+  assert.deepEqual([...recovery.invocationIds].sort(), ['child-1', 'unlinked']);
   assert.equal(store.get('child-1').status, 'interrupted');
   assert.equal(store.get('child-1').terminalReason, 'process_restart');
   assert.equal(hasUnconfirmedProviderTeardown(store.get('child-1')), false);
-  assert.equal(store.get('unlinked').status, 'running');
-  assert.equal(hasUnconfirmedProviderTeardown(store.get('unlinked')), true);
+  assert.equal(store.get('unlinked').status, 'interrupted');
+  assert.equal(store.get('unlinked').providerTeardownAt, undefined, 'no proof, so no teardown is written');
 
   assert.deepEqual(await clearSettledWindowsJobEvidence({ store, pass }), { clearedLinks: 1, clearedJobs: 1 });
   assert.deepEqual(readdirSync(resolveWindowsJobDirectory(dataDir)), []);
