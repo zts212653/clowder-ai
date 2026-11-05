@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -80,7 +80,9 @@ test('uses the Host-adjacent Corepack and pins lifecycle pnpm resolution for ins
   );
   const shimDirectory = calls[0].args[4];
   assert.equal(typeof shimDirectory, 'string');
-  const expectedPath = process.env.PATH ? `${shimDirectory}:${process.env.PATH}` : shimDirectory;
+  const expectedPath = process.env.PATH
+    ? `${shimDirectory}:/opt/clowder/node/bin:${process.env.PATH}`
+    : `${shimDirectory}:/opt/clowder/node/bin`;
   assert.equal(readPath(calls[1].options.env), expectedPath);
   assert.equal(readPath(calls[2].options.env), expectedPath);
   const env = calls[1].options.env;
@@ -127,10 +129,70 @@ test('runs the Windows Corepack entry with the same Host Node instead of a syste
         '--frozen-lockfile',
       ],
       shell: undefined,
-      envPath: process.env.PATH ? `${shimDirectory};${process.env.PATH}` : shimDirectory,
+      envPath: process.env.PATH
+        ? `${shimDirectory};C:\\Clowder\\runtime;${process.env.PATH}`
+        : `${shimDirectory};C:\\Clowder\\runtime`,
     },
   ]);
 });
+
+test(
+  'binds a lifecycle bare pnpm child to the Host Node when inherited PATH has no node',
+  {
+    skip: process.platform === 'win32' ? 'POSIX shebang regression' : false,
+  },
+  async (t) => {
+    const f = await fixture(t, undefined, { name: '@example/demo' });
+    const runtimeRoot = await mkdtemp(join(tmpdir(), 'marketplace-host-runtime-'));
+    t.after(() => rm(runtimeRoot, { recursive: true, force: true }));
+    const runtimeBin = join(runtimeRoot, 'bin');
+    const corepackDirectory = join(runtimeRoot, 'lib/node_modules/corepack/dist');
+    const hostNode = join(runtimeBin, 'node');
+    const corepackLauncher = join(runtimeBin, 'corepack');
+    const corepackScript = join(corepackDirectory, 'corepack.js');
+    await Promise.all([mkdir(runtimeBin, { recursive: true }), mkdir(corepackDirectory, { recursive: true })]);
+    await symlink(process.execPath, hostNode);
+    await writeFile(corepackLauncher, '#!/bin/sh\nexit 0\n');
+    await chmod(corepackLauncher, 0o755);
+    await writeFile(
+      corepackScript,
+      String.raw`const { spawnSync } = require('node:child_process');
+const { chmodSync, writeFileSync } = require('node:fs');
+const { join } = require('node:path');
+const [command, ...args] = process.argv.slice(2);
+if (command === 'enable') {
+  const installDirectory = args[args.indexOf('--install-directory') + 1];
+  const shim = join(installDirectory, 'pnpm');
+  writeFileSync(shim, '#!/usr/bin/env node\nprocess.stdout.write("9.15.4\\n");\n');
+  chmodSync(shim, 0o755);
+  process.exit(0);
+}
+if (command === 'pnpm@9.15.4' && args[0] === 'install') {
+  const child = spawnSync('pnpm', ['--version'], { encoding: 'utf8', env: process.env });
+  if (child.error) throw child.error;
+  if (child.status !== 0) {
+    process.stderr.write(child.stderr || child.stdout);
+    process.exit(child.status ?? 1);
+  }
+  writeFileSync(join(process.cwd(), 'lifecycle-pnpm-version.txt'), child.stdout);
+  process.exit(0);
+}
+throw new Error('Unexpected synthetic Corepack invocation: ' + process.argv.slice(2).join(' '));
+`,
+    );
+
+    const inheritedPath = process.env.PATH;
+    process.env.PATH = join(runtimeRoot, 'inherited-path-without-node');
+    try {
+      await prepareMarketplaceDirectory(f.directory, f.root, { execPath: hostNode });
+    } finally {
+      if (inheritedPath === undefined) delete process.env.PATH;
+      else process.env.PATH = inheritedPath;
+    }
+
+    assert.equal(await readFile(join(f.root, 'lifecycle-pnpm-version.txt'), 'utf8'), '9.15.4\n');
+  },
+);
 
 test('rejects repositories without an exact pnpm packageManager declaration', async (t) => {
   for (const [label, manifest] of [

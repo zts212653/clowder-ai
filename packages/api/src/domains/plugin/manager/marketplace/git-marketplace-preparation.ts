@@ -135,6 +135,7 @@ export async function prepareMarketplaceDirectory(
   const execPath = deps.execPath ?? process.execPath;
   const corepack = hostCorepackPaths(platform, execPath);
   const path = platform === 'win32' ? win32 : posix;
+  const runtimeDirectory = path.dirname(execPath);
   const pathExists = deps.exists ?? existsSync;
   if (!pathExists(corepack.launcher)) {
     throw new Error('Marketplace preparation requires the Host-bundled Corepack executable');
@@ -188,12 +189,14 @@ export async function prepareMarketplaceDirectory(
       ...baseOptions,
       env: {
         ...lifecycleEnv,
-        PATH: inheritedPath ? `${shimDirectory}${path.delimiter}${inheritedPath}` : shimDirectory,
+        PATH: [shimDirectory, runtimeDirectory, inheritedPath].filter(Boolean).join(path.delimiter),
       },
     };
     // This is the repository's existing pnpm workspace preparation. In particular,
     // its postinstall restores retained SDK graphs before directory admission. The
     // isolated shim also pins bare pnpm invocations made by lifecycle subprocesses.
+    // Put this Host Node next so the shim's `#!/usr/bin/env node` cannot fall
+    // through to a missing or unrelated system runtime.
     await runCorepack('install', [packageManager, 'install', '--frozen-lockfile'], options);
     if (pkg.scripts?.build) {
       await runCorepack('build', [packageManager, '--filter', `${pkg.name}...`, 'build'], options);
