@@ -684,6 +684,7 @@ import {
 import { MEMBER_TIMEOUT_REASON, MemberOutputTimeout, type MemberTimeoutEvent } from './member-output-timeout.js';
 import type { TaskProgressItem, TaskProgressStatus, TaskProgressStore } from './TaskProgressStore.js';
 import { assertToolExecutionPolicySupported, normalizeToolExecutionPolicy } from './tool-execution-policy.js';
+import { findWindowsLiveOwner } from './WindowsJobStopRecovery.js';
 
 function usesAgyNativeCarrier(service: AgentService): boolean {
   return service instanceof AgyNativeAgentService;
@@ -3000,6 +3001,30 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
     if (deps.sessionChainStore && invocationPolicyRecordId) {
       invocationPolicyPersistenceReady = true;
       await refreshInvocationPolicyExecution();
+    }
+
+    // #1838: an earlier execution of this exact role that a Windows host job or its exact controller
+    // API still owns is a live writer on the same native session; a per-process session mutex cannot
+    // see it across API instances. Only that positive proof refuses entry. An unknown or unlinked one
+    // is no live owner and settles through the ordinary #1849 path, so it never blocks.
+    if (process.platform === 'win32' && deps.turnExecutionStore) {
+      signal.throwIfAborted();
+      const running = await preflightRace(
+        Promise.resolve(deps.turnExecutionStore.listRunningByUser(userId)),
+        'turnExecutionStore.windowsLiveOwner',
+        signal,
+      );
+      const liveOwner = await findWindowsLiveOwner({
+        records: running.filter(
+          (record) => record.invocationId !== invocationId && record.threadId === threadId && record.catId === catId,
+        ),
+      });
+      if (liveOwner) {
+        turnExecutionFailureReason = 'prior_provider_live_owner';
+        throw new Error(
+          `同一角色的上一轮执行仍有存活的 owner，暂不能开始新任务。阻塞执行 invocationId=${liveOwner.invocationId}`,
+        );
+      }
     }
 
     const catConfig = frozenExecutionBinding.catConfig;

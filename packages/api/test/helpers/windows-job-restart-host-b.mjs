@@ -39,6 +39,9 @@ const config = JSON.parse(readFileSync(configPath, 'utf8'));
 const { execution: e, callbackToken } = JSON.parse(readFileSync(config.hostAFile, 'utf8'));
 // `settle-fail` is the fixed recovery whose response settlement throws, as a Redis error would.
 const fixed = mode !== 'baseline';
+// The API's one data root, as in production: recovery and the real provider entry read the same
+// host-job evidence there.
+if (fixed) process.env.CAT_CAFE_DATA_DIR = config.dataDir;
 const client = createRedisClient({ url: config.redisUrl, keyPrefix: config.prefix });
 
 // The index.ts composition: callback auth wraps the canonical store; recovery settles through it.
