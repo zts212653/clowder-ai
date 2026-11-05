@@ -106,7 +106,7 @@ export function ThreadWorksPanelV2({ threadId, width, onClose, onSelectArtifact,
     scroll,
     required,
   );
-  useWorksViewportReturn(scroll, initialView?.viewport, !active.loading && !active.error);
+  useWorksViewportReturn(scroll, initialView?.viewport, surfaceVisible && !active.loading && !active.error);
   useEffect(() => {
     setNotice(undefined);
   }, [threadId, scope]);

@@ -109,6 +109,47 @@ it('retains the shared thread snapshot, cancels only after the last active consu
   expect(panel?.artifacts[0]?.name).toBe('resumed');
 });
 
+it('retries a PR title canceled when the last visible thread owner hides', async () => {
+  let result: ReturnType<typeof useThreadArtifacts> | undefined;
+  function Panel({ active }: { active: boolean }) {
+    result = useThreadArtifacts('pr-title-thread', 'works', active);
+    return null;
+  }
+  const render = (active: boolean) => act(async () => root.render(<Panel active={active} />));
+  const ref = 'fixture-org/fixture-repo#1864';
+  const threadResponse = () =>
+    Response.json({
+      artifacts: [{ ...artifact(ref), type: 'pr', ref }],
+      view: 'works',
+      workLineage: 'resolved',
+      total: 1,
+      complete: true,
+    });
+  let finish = (_: Response) => {};
+  fetch
+    .mockResolvedValueOnce(threadResponse())
+    .mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          finish = resolve;
+        }),
+    )
+    .mockResolvedValueOnce(threadResponse())
+    .mockResolvedValueOnce(Response.json({ title: 'Restored title' }));
+  await render(true);
+  expect(fetch.mock.calls[1][0]).toContain('/github/pr-title');
+  const signal = fetch.mock.calls[1][1].signal as AbortSignal;
+  await render(false);
+  expect(signal.aborted).toBe(true);
+  await render(true);
+  expect(fetch).toHaveBeenCalledTimes(4);
+  expect(fetch.mock.calls[3][0]).toContain('/github/pr-title');
+  await act(async () => {
+    finish(Response.json({ title: 'Canceled title' }));
+  });
+  expect(result?.artifacts[0]?.name).toBe('Restored title');
+});
+
 it('pauses a global continuation, keeps partial results during resume, and isolates a new owner', async () => {
   let result: ReturnType<typeof useGlobalArtifacts> | undefined;
   function Panel({ paused, owner }: { paused: boolean; owner: string }) {

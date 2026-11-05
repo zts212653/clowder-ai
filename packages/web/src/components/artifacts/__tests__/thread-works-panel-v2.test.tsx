@@ -11,6 +11,7 @@ import { startMessageReadingSession } from '@/components/message-search/message-
 import type { MessageSearchHost } from '@/components/message-search/useMessageSearchHost';
 import { writeShellLanguage } from '@/components/shell/shell-language';
 import { writeShellPresentation } from '@/components/shell/shell-presentation';
+import { WorkspaceSurfaceVisibilityProvider } from '@/components/workbench/WorkspaceSurfaceVisibility';
 import { useChatStore } from '@/stores/chatStore';
 import { ThreadWorksPanelV2 } from '../ThreadWorksPanelV2';
 
@@ -454,6 +455,42 @@ it('keeps the pending return and its cards mounted while the source refreshes', 
   top = 60;
   await act(async () => host.querySelector('img')!.dispatchEvent(new Event('load')));
   await vi.waitFor(() => expect(host.querySelector<HTMLElement>('.v2-works-scroll')?.scrollTop).toBe(250));
+});
+
+it('waits for the restored Works owner to be visible and loaded before applying its saved viewport', async () => {
+  const initialView = {
+    scope: 'thread' as const,
+    filter: 'all' as const,
+    query: '',
+    grouping: 'time' as const,
+    catFilter: null,
+    collapsed: [],
+    viewport: { scrollTop: 200 },
+  };
+  const render = (visible: boolean) =>
+    act(async () =>
+      root.render(
+        <WorkspaceSurfaceVisibilityProvider visible={visible}>
+          <ThreadWorksPanelV2 threadId="work-source" initialView={initialView} />
+        </WorkspaceSurfaceVisibilityProvider>,
+      ),
+    );
+  await render(false);
+  const list = host.querySelector<HTMLElement>('.v2-works-scroll');
+  expect(list?.scrollTop).toBe(0);
+  let finish = (_: Response) => {};
+  data.fetch.mockImplementationOnce(
+    () =>
+      new Promise<Response>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  await render(true);
+  expect(list?.scrollTop).toBe(0);
+  await act(async () => {
+    finish(Response.json({ artifacts: items, workLineage: 'resolved', view: 'works', complete: true, total: 2 }));
+  });
+  expect(list?.scrollTop).toBe(200);
 });
 
 it('standalone global Works opens another conversation artifact through the current host owner', async () => {
