@@ -803,25 +803,39 @@ describe('#1838 cancel route: a dead API s started provider stops only with its 
   // Admission still refuses the role on that child, so every Stop entry must reach it through its
   // exact parent: unknown/present keep it listed, a verified stop ends it and its reply.
   for (const route of ['live', 'cancel', 'force-reset']) {
-    for (const observed of [
-      { state: 'present', activeProcesses: 2, sessionId: 1 },
-      { state: 'unknown', nativeError: 5, sessionId: 1 },
-    ]) {
-      it(`ended parent: ${route} keeps the child listed while its job is ${observed.state}`, async (t) => {
-        const { res, child, recordStore, listed } = await stopAfterApiDied(t, verdict(observed), route, {
-          parentEnded: true,
-        });
-        assert.equal(res.statusCode, 503, res.body);
-        assert.equal(JSON.parse(res.body).code, 'PROVIDER_TEARDOWN_UNCONFIRMED');
-        assert.equal(child.status, 'running');
-        assert.deepEqual(
-          (await listed()).map(({ executionId, catId }) => ({ executionId, catId })),
-          [{ executionId: 'inv-dead-api', catId: CAT_ID }],
-          'the blocking child stays visible under its exact parent',
-        );
-        assert.deepEqual(recordStore.updates, [], 'the ended parent is not touched');
-      });
-    }
+    // A job still present is positive proof of a live owner: the Stop refuses and keeps the child.
+    it(`ended parent: ${route} keeps the child listed while its job is present`, async (t) => {
+      const { res, child, recordStore, listed } = await stopAfterApiDied(
+        t,
+        verdict({ state: 'present', activeProcesses: 2, sessionId: 1 }),
+        route,
+        { parentEnded: true },
+      );
+      assert.equal(res.statusCode, 503, res.body);
+      assert.match(JSON.parse(res.body).code, /^PROVIDER_(TEARDOWN_UNCONFIRMED|LIVE_OWNER)$/);
+      assert.equal(child.status, 'running');
+      assert.deepEqual(
+        (await listed()).map(({ executionId, catId }) => ({ executionId, catId })),
+        [{ executionId: 'inv-dead-api', catId: CAT_ID }],
+        'the blocking child stays visible under its exact parent',
+      );
+      assert.deepEqual(recordStore.updates, [], 'the ended parent is not touched');
+    });
+    // #1849: an unknown job is no live owner. The Stop ends the child through its owner path with its
+    // physical exit unknown: no teardown is written, and the ended parent is never reopened.
+    it(`ended parent: ${route} ends the child without a teardown while its job is unknown`, async (t) => {
+      const { res, child, recordStore, listed } = await stopAfterApiDied(
+        t,
+        verdict({ state: 'unknown', nativeError: 5, sessionId: 1 }),
+        route,
+        { parentEnded: true },
+      );
+      assert.equal(res.statusCode, 200, res.body);
+      assert.notEqual(child.status, 'running', 'the unknown no longer blocks its role');
+      assert.equal(child.providerTeardownAt, undefined, 'no proof, so no teardown is written');
+      assert.deepEqual(await listed(), []);
+      assert.deepEqual(recordStore.updates, [], 'the ended parent is not touched');
+    });
     it(`ended parent: ${route} ends the child and its reply with the exact proof only`, async (t) => {
       const { res, child, response, turns, recordStore, listed } = await stopAfterApiDied(
         t,

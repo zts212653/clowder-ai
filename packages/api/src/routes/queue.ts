@@ -798,8 +798,24 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
         input.request.log.error({ err, invocationId: child.invocationId }, 'stop proof could not be committed');
         stop = { stopped: false, reason: 'stop_proof_unavailable' };
       }
-      if (!stop.stopped)
+      if (stop.stopped) continue;
+      // Without a stop proof, only positive proof of a live owner keeps the execution: a host job
+      // still present or its exact controller alive, or this exact child in the CLI owner snapshot.
+      const snapshot = await retryProcessOwnerSnapshot(input.request, opts.cliExecutionOwnerService);
+      const liveOwner =
+        snapshot.owners.some((owner) => owner.invocationId === child.invocationId) ||
+        (await opts.findWindowsLiveOwner?.([child])) !== undefined;
+      if (liveOwner)
         return { error: `原执行停止尚未确认，保留执行占用（${stop.reason}）`, code: 'PROVIDER_TEARDOWN_UNCONFIRMED' };
+      // #1849: an unknown or unlinked one is canceled through its owner path; its physical exit stays
+      // unknown, so no teardown is written. Its R settles from the ledger below.
+      const ended = await opts.turnExecutionStore?.transitionTerminal(child.invocationId, {
+        status: 'canceled',
+        endedAt: Date.now(),
+        terminalReason: 'user_cancel',
+      });
+      if (!ended?.record || ended.record.status === 'running')
+        return { error: '原执行终态未能写入，请重试', code: 'EXECUTION_RESPONSE_SETTLEMENT_FAILED' };
     }
     // The KD-21 ledger is the authority on which R is still owed: it holds every ended child of this
     // execution whose reply never committed, whether the proof above just ended it or an earlier
