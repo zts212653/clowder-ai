@@ -36,8 +36,6 @@ function splitText(value: string, node: PhrasingContent, source: string): Phrasi
     const start = match.index + match[1].length;
     if (start > end) result.push({ type: 'text', value: value.slice(end, start) });
     const resolved = link(reference, 'text');
-    if (/^https?:/.test(reference) && start === 0 && reference.length === value.length)
-      resolved.position = node.position;
     if (/^https?:/.test(reference) && exactText && sourceStart != null) {
       const point = (offset: number) => {
         const lines = source.slice(0, offset).split('\n');
