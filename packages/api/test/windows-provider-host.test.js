@@ -81,6 +81,8 @@ test(
     const host = await prepareWindowsProviderHost({ dataDir });
     t.after(() => killOwned(host.job.apiPid));
     assert.notEqual(host.job.apiPid, process.pid, 'the API itself is not the job owner');
+    assert.equal(host.job.controller?.pid, process.pid, 'the record names the API that can launch into it');
+    assert.equal(typeof host.job.controller?.createdAt, 'number');
     assert.equal(existsSync(host.job.path), true, 'the job is recorded before anything is launched');
     await new Promise((resolve) => setTimeout(resolve, 300));
     assert.equal(existsSync(join(dir, 'started')), false, 'nothing runs before launch');
@@ -314,6 +316,25 @@ test(
         return store.recordProviderTeardown(id, at);
       },
     };
+    // While its controlling API lives, a closed job is no stop: that API could still start a host.
+    const whileControllerLives = await recordVerifiedWindowsJobTeardowns({ store: flaky, dataDir });
+    assert.deepEqual(whileControllerLives.released, []);
+    assert.deepEqual(
+      whileControllerLives.preserved.filter((entry) => entry.invocationId === EXECUTION.invocationId),
+      [{ invocationId: EXECUTION.invocationId, reason: 'controller_not_gone' }],
+    );
+    const stopWhileLives = await stopWithWindowsJobProof({
+      store,
+      record: await store.get(EXECUTION.invocationId),
+      dataDir,
+    });
+    assert.deepEqual(stopWhileLives, { stopped: false, reason: 'controller_not_gone' });
+    // The recorded controller is now a different process (same pid, another birth): it is gone.
+    const owner = JSON.parse(readFileSync(host.job.path, 'utf8'));
+    writeFileSync(
+      host.job.path,
+      JSON.stringify({ ...owner, controller: { ...owner.controller, createdAt: owner.controller.createdAt - 1 } }),
+    );
     const first = await recordVerifiedWindowsJobTeardowns({ store: flaky, dataDir });
     assert.deepEqual(first.released, []);
     assert.ok(first.preserved.some((entry) => entry.reason.startsWith('teardown_write_failed')));

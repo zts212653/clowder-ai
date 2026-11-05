@@ -24,11 +24,14 @@ import {
 } from '../../../../../utils/windows-job-execution-links.js';
 import {
   clearWindowsJobOwner,
+  queryWindowsControllers,
   queryWindowsJobStopEvidence,
   readWindowsJobOwnerRecords,
+  type WindowsControllerVerdict,
   type WindowsJobOwnerEntry,
   type WindowsJobQueryExecute,
   type WindowsJobStopVerdict,
+  windowsControllerKey,
 } from '../../../../../utils/windows-job-owner.js';
 import {
   hasUnconfirmedProviderTeardown,
@@ -47,6 +50,8 @@ export interface WindowsJobStopResolution {
   }>;
   /** Jobs still present, in another session, or unknown. Nothing they own may be released. */
   unresolved: Array<{ jobName: string; verdict: WindowsJobStopVerdict; reason: string; invocationIds: string[] }>;
+  /** The controlling API of each closed provider-host job, keyed by exact pid and birth. */
+  controllers: Map<string, WindowsControllerVerdict>;
 }
 
 /** Resolve every durable job record except this process's own into a stop verdict. */
@@ -54,7 +59,7 @@ export async function resolveWindowsJobStopEvidence(
   options: { dataDir?: string; currentJobName?: string; execute?: WindowsJobQueryExecute } = {},
 ): Promise<WindowsJobStopResolution> {
   const { records, invalidPaths } = readWindowsJobOwnerRecords(options.dataDir);
-  const resolution: WindowsJobStopResolution = { verifiedStopped: [], unresolved: [] };
+  const resolution: WindowsJobStopResolution = { verifiedStopped: [], unresolved: [], controllers: new Map() };
   for (const job of records.filter((record) => record.jobName !== options.currentJobName)) {
     const evidence = await queryWindowsJobStopEvidence(job, options);
     const verifiedAt = Date.now();
@@ -76,7 +81,21 @@ export async function resolveWindowsJobStopEvidence(
       invocationIds: [],
     });
   }
+  // Read after the job queries: a controller seen gone from here on can no longer add a host, so the
+  // link set each release reads afterwards is final for that controller.
+  const controllers = resolution.verifiedStopped.flatMap(({ job }) =>
+    job.controller ? [{ ...job.controller, sessionId: job.sessionId }] : [],
+  );
+  resolution.controllers = await queryWindowsControllers(controllers, options);
   return resolution;
+}
+
+/**
+ * A closed job proves its host's tree gone, but not that its controlling API cannot start another
+ * host for the same execution. An API-member job (no controller) closed only when that API died.
+ */
+function controllerGone(resolution: WindowsJobStopResolution, job: WindowsJobOwnerEntry): boolean {
+  return !job.controller || resolution.controllers.get(windowsControllerKey(job.controller)) === 'gone';
 }
 
 function matchesLinkedExecution(record: TurnExecutionRecord, execution: CliExecutionOwnerRef): boolean {
@@ -138,9 +157,17 @@ export async function recordVerifiedWindowsJobTeardowns(options: {
       if (!hasUnconfirmedProviderTeardown(record)) continue;
       // One closed job says nothing about a writer in another (a retry can rebuild the provider in a
       // new host): every job this execution ran in must be among the verifiably closed ones.
+      // Read only now, after the controller check: a host its API linked meanwhile is counted too.
       const linkedJobs = readWindowsJobNamesLinkedTo(execution.invocationId, options.dataDir);
       if (!linkedJobs || linkedJobs.some((jobName) => !closedJobs.has(jobName))) {
         pass.preserved.push({ invocationId: execution.invocationId, reason: 'linked_job_not_closed' });
+        continue;
+      }
+      // Its API could still launch a new host into it: the execution keeps its protection until
+      // every controlling API is verifiably gone.
+      const linkedClosed = resolution.verifiedStopped.filter(({ job }) => linkedJobs.includes(job.jobName));
+      if (linkedClosed.some(({ job }) => !controllerGone(resolution, job))) {
+        pass.preserved.push({ invocationId: execution.invocationId, reason: 'controller_not_gone' });
         continue;
       }
       await options.store.recordProviderTeardown(execution.invocationId, verifiedAt);
@@ -176,6 +203,8 @@ export async function stopWithWindowsJobProof(options: {
   if (linkedJobs.length === 0) return { stopped: false, reason: 'no_windows_job_link' };
   const closed = resolution.verifiedStopped.filter(({ job }) => linkedJobs.includes(job.jobName));
   if (closed.length < linkedJobs.length) return { stopped: false, reason: 'linked_job_not_closed' };
+  if (closed.some(({ job }) => !controllerGone(resolution, job)))
+    return { stopped: false, reason: 'controller_not_gone' };
   const links = closed.flatMap((job) =>
     job.links.filter((entry) => entry.execution.invocationId === record.invocationId),
   );

@@ -25,7 +25,15 @@ import { Socket } from 'node:net';
 import { basename, join } from 'node:path';
 import { promisify } from 'node:util';
 import { resolveCatCafeDataRoot } from './cli-process-ownership.js';
-import { HELPER_READY, JOB_NAME_PREFIX, jobOwnerScript, jobQueryScript, powershellArgs } from './windows-job-native.js';
+import {
+  controllerQueryScript,
+  HELPER_READY,
+  JOB_NAME_PREFIX,
+  jobOwnerScript,
+  jobQueryScript,
+  PROVIDER_JOB_NAME_PREFIX,
+  powershellArgs,
+} from './windows-job-native.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -47,6 +55,11 @@ export interface WindowsJobOwnerRecord {
   /** The session whose `Local\` namespace holds the job name; another session cannot see it. */
   sessionId: number;
   createdAt: number;
+  /**
+   * Provider-host jobs only: the API that started the host and can still launch into its execution.
+   * The job closing proves that host's tree gone; only this API's exit proves no further host comes.
+   */
+  controller?: { pid: number; createdAt: number };
 }
 
 export type WindowsJobOwnerEntry = WindowsJobOwnerRecord & { path: string };
@@ -75,10 +88,20 @@ function isNonNegativeSafeInteger(value: unknown): value is number {
 
 export function parseWindowsJobOwnerRecord(value: unknown): WindowsJobOwnerRecord | null {
   const record = asRecord(value);
-  if (!record || record.v !== 1) return null;
-  if (typeof record.jobName !== 'string' || !record.jobName.startsWith(JOB_NAME_PREFIX)) return null;
+  if (!record || record.v !== 1 || typeof record.jobName !== 'string') return null;
   if (!isPositiveSafeInteger(record.apiPid) || !isPositiveSafeInteger(record.helperPid)) return null;
   if (!isNonNegativeSafeInteger(record.sessionId) || !isPositiveSafeInteger(record.createdAt)) return null;
+  const controller = asRecord(record.controller);
+  const validController =
+    controller && isPositiveSafeInteger(controller.pid) && isPositiveSafeInteger(controller.createdAt)
+      ? { pid: controller.pid, createdAt: controller.createdAt }
+      : null;
+  // The prefix fixes the kind: a provider-host job without a usable controller is unreadable, never
+  // read as the API-member kind whose own death a closed job already proved.
+  const kindValid = record.jobName.startsWith(PROVIDER_JOB_NAME_PREFIX)
+    ? validController !== null
+    : record.jobName.startsWith(JOB_NAME_PREFIX) && record.controller === undefined;
+  if (!kindValid) return null;
   return {
     v: 1,
     jobName: record.jobName,
@@ -86,6 +109,7 @@ export function parseWindowsJobOwnerRecord(value: unknown): WindowsJobOwnerRecor
     helperPid: record.helperPid,
     sessionId: record.sessionId,
     createdAt: record.createdAt,
+    ...(validController ? { controller: validController } : {}),
   };
 }
 
@@ -116,14 +140,20 @@ export function currentWindowsApiJob(): WindowsApiJob | null {
  * on a timeout: it may already have assigned the API, and killing it would kill the API too.
  */
 export async function adoptWindowsApiJob(
-  options: { dataDir?: string; targetPid?: number; expectedScript?: string } = {},
+  options: {
+    dataDir?: string;
+    targetPid?: number;
+    expectedScript?: string;
+    /** A provider host adopting itself: the API that started it, which the record must name. */
+    controllerPid?: number;
+  } = {},
 ): Promise<WindowsJobAdoption> {
   if (process.platform !== 'win32') return { adopted: false, reason: 'not_windows' };
   const targetPid = options.targetPid ?? process.pid;
   const expectedScript = basename(options.expectedScript ?? process.argv[1] ?? '');
   const dataDir = resolveCatCafeDataRoot(options.dataDir);
   const directory = resolveWindowsJobDirectory(dataDir);
-  const jobName = `${JOB_NAME_PREFIX}${randomUUID()}`;
+  const jobName = `${options.controllerPid ? PROVIDER_JOB_NAME_PREFIX : JOB_NAME_PREFIX}${randomUUID()}`;
   const ownerRecordPath = join(directory, `${randomUUID()}.json`);
   try {
     mkdirSync(directory, { recursive: true, mode: 0o700 });
@@ -132,7 +162,13 @@ export async function adoptWindowsApiJob(
     return { adopted: false, reason: `job_directory_unavailable:${String(error)}` };
   }
 
-  const script = jobOwnerScript({ targetPid, expectedScript, jobName, ownerRecordPath });
+  const script = jobOwnerScript({
+    targetPid,
+    expectedScript,
+    jobName,
+    ownerRecordPath,
+    ...(options.controllerPid ? { controllerPid: options.controllerPid } : {}),
+  });
   const helper = spawn('powershell.exe', powershellArgs(script), {
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
@@ -255,4 +291,48 @@ export async function queryWindowsJobStopEvidence(
       : { verdict: 'present', activeProcesses: 0, reason: 'job_present_count_unusable' };
   }
   return unknown(`job_query_error:${String(observed.nativeError ?? 'unknown')}`);
+}
+
+export type WindowsControllerVerdict = 'alive' | 'gone' | 'unknown';
+
+/** One controller API exactly: pid alone could name a later process. */
+export function windowsControllerKey(controller: { pid: number; createdAt: number }): string {
+  return `${controller.pid}:${controller.createdAt}`;
+}
+
+/**
+ * Whether each recorded controller API still exists. Only `gone` seen from the controller's own
+ * session permits anything; a failed or unparseable probe, or another session, stays `unknown`.
+ */
+export async function queryWindowsControllers(
+  controllers: ReadonlyArray<{ pid: number; createdAt: number; sessionId: number }>,
+  options: { execute?: WindowsJobQueryExecute } = {},
+): Promise<Map<string, WindowsControllerVerdict>> {
+  const verdicts = new Map<string, WindowsControllerVerdict>(
+    controllers.map((controller) => [windowsControllerKey(controller), 'unknown']),
+  );
+  if (controllers.length === 0) return verdicts;
+  const run = options.execute ?? execFileAsync;
+  let parsed: unknown;
+  try {
+    const { stdout } = await run('powershell.exe', powershellArgs(controllerQueryScript(controllers)), {
+      timeout: QUERY_TIMEOUT_MS,
+      windowsHide: true,
+      maxBuffer: 1024 * 1024,
+    });
+    parsed = JSON.parse(stdout.trim().split('\n').pop() ?? '');
+  } catch {
+    return verdicts;
+  }
+  const observed = asRecord(parsed);
+  const reported = asRecord(observed?.verdicts);
+  if (!observed || !reported) return verdicts;
+  for (const controller of controllers) {
+    const key = windowsControllerKey(controller);
+    const verdict = reported[key];
+    // A process of another session may be invisible here, so its absence proves nothing.
+    if (observed.sessionId === controller.sessionId && (verdict === 'alive' || verdict === 'gone'))
+      verdicts.set(key, verdict);
+  }
+  return verdicts;
 }

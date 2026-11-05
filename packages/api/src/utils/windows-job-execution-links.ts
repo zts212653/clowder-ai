@@ -12,7 +12,7 @@ import { randomUUID } from 'node:crypto';
 import { chmodSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { type CliExecutionOwnerRef, resolveCatCafeDataRoot } from './cli-process-ownership.js';
-import { JOB_NAME_PREFIX } from './windows-job-native.js';
+import { isClowderJobName } from './windows-job-native.js';
 
 const WINDOWS_JOB_LINKS_DIRECTORY = 'windows-job-execution-links';
 
@@ -43,7 +43,7 @@ export function parseWindowsJobExecutionLink(value: unknown): WindowsJobExecutio
   const record = value as Record<string, unknown>;
   const execution = record.execution as Record<string, unknown> | null | undefined;
   if (record.v !== 1 || typeof execution !== 'object' || execution === null) return null;
-  if (!nonEmpty(record.jobName) || !record.jobName.startsWith(JOB_NAME_PREFIX)) return null;
+  if (!nonEmpty(record.jobName) || !isClowderJobName(record.jobName)) return null;
   const { executionId, invocationId, threadId, catId, userId } = execution;
   if (!nonEmpty(executionId) || !nonEmpty(invocationId) || !nonEmpty(threadId)) return null;
   if (!nonEmpty(catId) || !nonEmpty(userId)) return null;

@@ -8,6 +8,12 @@
  */
 
 export const JOB_NAME_PREFIX = 'Local\\ClowderApiJob-';
+/** A provider host's job: its record must also name the API controlling it. */
+export const PROVIDER_JOB_NAME_PREFIX = 'Local\\ClowderProviderJob-';
+
+export function isClowderJobName(name: string): boolean {
+  return name.startsWith(JOB_NAME_PREFIX) || name.startsWith(PROVIDER_JOB_NAME_PREFIX);
+}
 export const HELPER_READY = 'JOB_READY_HELPER_OUTSIDE';
 
 /** Shared C# interop; the helper and the query differ only in what they do with the handle. */
@@ -107,18 +113,34 @@ export function jobOwnerScript(input: {
   expectedScript: string;
   jobName: string;
   ownerRecordPath: string;
+  /** Provider hosts: the API that started the target, which must be its parent; 0 for none. */
+  controllerPid?: number;
 }): string {
   const parameters = [
     `$TargetProcessId = ${input.targetPid}`,
     `$ExpectedScript = ${psLiteral(input.expectedScript)}`,
     `$JobName = ${psLiteral(input.jobName)}`,
     `$OwnerRecordPath = ${psLiteral(input.ownerRecordPath)}`,
+    `$ControllerPid = ${input.controllerPid ?? 0}`,
   ].join('\n');
   return `$ErrorActionPreference = 'Stop'\n${JOB_INTEROP}\n${parameters}\n${String.raw`
 # Only adopt the exact process this deployment started: exact pid, and the script file name (the
 # recorded CommandLine keeps whatever path form the process was launched with).
 $targetRow = Get-CimInstance Win32_Process -Filter "ProcessId = $TargetProcessId" -ErrorAction Stop
 if (!$targetRow -or !$targetRow.CommandLine.Contains($ExpectedScript)) { Write-Output 'JOB_FAILED_NOT_OUR_PROCESS'; exit 4 }
+
+# A provider host's job outlives nothing but the host, so its record also names the API that can
+# still launch into this execution: exact pid and birth, read while that API waits for this host.
+$controller = $null
+if ($ControllerPid -ne 0) {
+  if ($targetRow.ParentProcessId -ne $ControllerPid) { Write-Output 'JOB_FAILED_CONTROLLER_NOT_PARENT'; exit 11 }
+  $controllerRow = Get-CimInstance Win32_Process -Filter "ProcessId = $ControllerPid" -ErrorAction Stop
+  if (!$controllerRow -or !$controllerRow.CreationDate) { Write-Output 'JOB_FAILED_CONTROLLER_IDENTITY'; exit 11 }
+  $controller = [ordered]@{
+    pid       = $ControllerPid
+    createdAt = [int64](($controllerRow.CreationDate.ToUniversalTime() - [datetime]'1970-01-01Z').TotalMilliseconds)
+  }
+}
 
 $jobHandle = [ClowderJobInterop]::CreateJobObject([IntPtr]::Zero, $JobName)
 if ($jobHandle -eq [IntPtr]::Zero) { Write-Output 'JOB_FAILED_CREATE'; exit 5 }
@@ -137,6 +159,7 @@ try {
     sessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
     createdAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
   }
+  if ($controller) { $record['controller'] = $controller }
   $temporaryPath = $OwnerRecordPath + '.' + $PID + '.tmp'
   [System.IO.File]::WriteAllText($temporaryPath, ($record | ConvertTo-Json -Compress))
   [System.IO.File]::Move($temporaryPath, $OwnerRecordPath)
@@ -196,6 +219,34 @@ try {
 } finally {
   [void][ClowderJobInterop]::CloseHandle($jobHandle)
 }
+`}`;
+}
+
+/**
+ * Whether each recorded controller still exists as the same process: `alive` (same pid and birth),
+ * `gone` (no such pid, or a pid reused by a later process), or `unknown` (the query itself failed).
+ * The TS side alone decides what any of these permits.
+ */
+export function controllerQueryScript(controllers: ReadonlyArray<{ pid: number; createdAt: number }>): string {
+  // The unary comma keeps each pair a pair: `@(@(1,2))` would flatten a single entry into `@(1,2)`.
+  const list = controllers.map(({ pid, createdAt }) => `$Controllers += ,@(${pid},${createdAt})`).join('\n');
+  return `$ErrorActionPreference = 'Stop'\n$Controllers = @()\n${list}\n${String.raw`
+$sessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
+$verdicts = [ordered]@{}
+foreach ($entry in $Controllers) {
+  $pidValue = $entry[0]
+  $key = "$($entry[0]):$($entry[1])"
+  try {
+    $row = Get-CimInstance Win32_Process -Filter "ProcessId = $pidValue" -ErrorAction Stop
+  } catch {
+    $verdicts[$key] = 'unknown'
+    continue
+  }
+  if (!$row) { $verdicts[$key] = 'gone'; continue }
+  $birth = [int64](($row.CreationDate.ToUniversalTime() - [datetime]'1970-01-01Z').TotalMilliseconds)
+  $verdicts[$key] = if ($birth -eq $entry[1]) { 'alive' } else { 'gone' }
+}
+Write-Output ([ordered]@{ sessionId = $sessionId; verdicts = $verdicts } | ConvertTo-Json -Compress)
 `}`;
 }
 

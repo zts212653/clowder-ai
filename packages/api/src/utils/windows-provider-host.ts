@@ -235,7 +235,8 @@ async function runHost(dataDir: string): Promise<void> {
   // An API that dies before launch leaves nothing to start; during the run this ends the tree.
   const onDisconnect = (): void => process.exit(0);
   process.once('disconnect', onDisconnect);
-  const adoption = await adoptWindowsApiJob({ dataDir });
+  // The API that started this host waits for it, so it is still this process's parent here.
+  const adoption = await adoptWindowsApiJob({ dataDir, controllerPid: process.ppid });
   if (!adoption.adopted) {
     process.send?.({ type: 'failed', reason: adoption.reason }, () => process.exit(1));
     return;
