@@ -109,7 +109,11 @@ import { readProcessActivity } from '../../../../../utils/process-activity-regis
 import { pathsEqual } from '../../../../../utils/project-path.js';
 import { tcpProbe } from '../../../../../utils/tcp-probe.js';
 import { estimateTokens } from '../../../../../utils/token-counter.js';
-import { recordWindowsJobExecutionLink } from '../../../../../utils/windows-job-execution-links.js';
+import {
+  clearWindowsJobExecutionLink,
+  recordWindowsJobExecutionLink,
+  type WindowsJobExecutionLinkEntry,
+} from '../../../../../utils/windows-job-execution-links.js';
 import { currentWindowsApiJob } from '../../../../../utils/windows-job-owner.js';
 import { resolveEntrustedWorkTaskRefFromSource } from '../../../../growing/EntrustedWorkRuntimeInteractionBinding.js';
 import {
@@ -2324,6 +2328,8 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
   let activeServiceIterator: AsyncIterator<AgentMessage> | null = null;
   const unclosedServiceIterators = new Set<AsyncIterator<AgentMessage>>();
   let providerTeardownUnconfirmed = false;
+  // #1838: this turn's link to the API's kernel job; removed once its terminal and teardown are durable.
+  let windowsJobLink: WindowsJobExecutionLinkEntry | undefined;
   const unconfirmedTeardownMessage = () => ({
     type: 'status' as const,
     catId,
@@ -5981,7 +5987,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
       // write fails this turn before any provider exists, while its record can still settle.
       const windowsApiJob = currentWindowsApiJob();
       if (windowsApiJob && deps.turnExecutionStore?.markProviderStarted)
-        recordWindowsJobExecutionLink({
+        windowsJobLink = recordWindowsJobExecutionLink({
           dataDir: windowsApiJob.dataDir,
           jobName: windowsApiJob.record.jobName,
           execution: { executionId: executionParentInvocationId, invocationId, threadId, catId, userId },
@@ -6973,6 +6979,9 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
             log.warn({ invocationId, err }, 'F293 durable dispatch signal observation failed');
           }
         }
+        // #1838: a durable terminal with confirmed teardown needs no stop proof; any other state keeps it.
+        if (windowsJobLink && result.record?.status !== 'running' && result.record?.providerTeardownAt !== undefined)
+          clearWindowsJobExecutionLink(windowsJobLink.path);
       } catch (err) {
         // A running record is deliberately left for startup reconciliation;
         // never manufacture lifecycle truth from logs or the auth registry.
