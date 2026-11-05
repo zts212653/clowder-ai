@@ -12,7 +12,8 @@ const readers = {
 };
 
 for (const [name, read] of Object.entries(readers)) {
-  test(`${name} admits four canonical reads, bounds the window and consumes every manifest`, async (t) => {
+  const windowSize = name === 'publication' ? 1 : 4;
+  test(`${name} bounds canonical reads to ${windowSize} and consumes every candidate`, async (t) => {
     const f = await ownerManifestFixture(t);
     // Establish valid real files and expected output before interposing only read completion.
     const expected = await read(f);
@@ -33,13 +34,13 @@ for (const [name, read] of Object.entries(readers)) {
     try {
       await first;
       await setImmediate();
-      assert.equal(counter.stats().active, 4, 'independent reads must share one bounded four-file window');
-      assert.equal(counter.stats().paths.length, 4, 'a blocked window must not admit the whole catalogue');
+      assert.equal(counter.stats().active, windowSize, 'canonical reads must share the bounded window');
+      assert.equal(counter.stats().paths.length, windowSize, 'a blocked window must not admit the whole catalogue');
     } finally {
       release();
       assert.deepEqual(await running, expected);
       assert.equal(counter.stats().active, 0);
-      assert.equal(counter.stats().peak, 4);
+      assert.equal(counter.stats().peak, windowSize);
       assert.equal(counter.stats().paths.length, f.refs.length);
       assert.equal(new Set(counter.stats().paths).size, f.refs.length);
     }
@@ -100,7 +101,14 @@ test('all three complete readers retain owner/type/source filters and ignore non
     matches.map((match) => match.contentRef),
     [...f.refs].sort((a, b) => a.localeCompare(b)),
   );
-  assert.equal(counter.stats().paths.length, 3 * 12, 'every valid manifest is freshly read by each consumer');
+  const coldReads = 3 * 12 + f.refs.length;
+  assert.equal(counter.stats().paths.length, coldReads, 'two full readers plus one backfill and indexed candidates');
+  assert.deepEqual((await readers.publication(f)).get('all'), matches);
+  assert.deepEqual(
+    counter.stats().paths.slice(coldReads).sort(),
+    f.refs.map(f.statePath).sort(),
+    'a warm source lookup freshly reads only its matching canonical manifests',
+  );
   assert.equal(
     decodes,
     counter.stats().paths.length,
