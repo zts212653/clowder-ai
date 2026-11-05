@@ -82,6 +82,14 @@ export interface ITurnExecutionStore {
   listRunningByUser(userId: string): TurnExecutionRecord[] | Promise<TurnExecutionRecord[]>;
   markProviderStarted(invocationId: string, at: number): boolean | Promise<boolean>;
   recordProviderTeardown(invocationId: string, at: number): void | Promise<void>;
+  /**
+   * Records the provider-stop proof established by startup process-owner reaping.
+   * This is telemetry/settlement evidence only; dispatch admission must not read it.
+   */
+  attestProviderTeardownBefore(
+    cutoffStartedAt: number,
+    stoppedAt: number,
+  ): TurnExecutionRecord[] | Promise<TurnExecutionRecord[]>;
   transitionTerminal(
     invocationId: string,
     input: TurnExecutionTerminalInput,

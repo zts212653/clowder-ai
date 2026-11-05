@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createCatId } from '@cat-cafe/shared';
+import { TurnExecutionStartupReconciler } from '../src/domains/cats/services/agents/invocation/TurnExecutionStartupReconciler.js';
 import { pluginSentMessageStorageKey } from '../src/domains/plugin/host-surface/plugin-sent-message-read.js';
 import { createMemberSessionHost } from '../src/domains/plugin/member-sessions/host.js';
 import { memberExecutionKey } from '../src/domains/plugin/member-sessions/validation.js';
@@ -18,6 +19,74 @@ function cancelProvider(f: Awaited<ReturnType<typeof fixture>>, teardown = true)
     mentions: [],
   });
 }
+
+test('startup process-owner recovery settles a provider-started member execution and admits its next input', async () => {
+  const f = await fixture();
+  await f.host().claim(f.claim);
+  const recovery = new TurnExecutionStartupReconciler({
+    store: f.turns,
+    now: () => 200,
+    settleEndedTurnResponse: async (turn) => {
+      f.messages.commitLifecycleResponseTerminal(f.response.id, {
+        invocationId: turn.invocationId,
+        status: turn.status === 'succeeded' ? 'completed' : turn.status,
+        completedAt: turn.endedAt ?? 200,
+        reason: turn.terminalReason,
+        content: '',
+        mentions: [],
+      });
+      f.turns.clearResponsePending(turn.invocationId);
+    },
+  });
+  await recovery.reconcile({ processStartedAt: 150 });
+
+  const original = await f.port.getExecution({
+    sessionId: f.input.sessionId,
+    generation: f.input.generation,
+    executionId: f.input.executionId,
+  });
+  assert.equal(original?.phase, 'interrupted');
+  assert.ok((await f.turns.get(f.claim.invocationId))?.providerTeardownAt !== undefined);
+  const next = await f.port.execute({ ...f.input, executionId: 'after-restart', semanticCursor: 8 });
+  assert.equal(next.phase, 'queued');
+  assert.equal(f.sends(), 2);
+});
+
+test('startup process-owner recovery attests an already-terminal unconfirmed provider before plugin settlement', async () => {
+  const f = await fixture();
+  await f.host().claim(f.claim);
+  f.turns.transitionTerminal(f.claim.invocationId, { status: 'succeeded', endedAt: 120 });
+  f.messages.commitLifecycleResponseTerminal(f.response.id, {
+    invocationId: f.claim.invocationId,
+    status: 'completed',
+    completedAt: 120,
+    content: 'finished before native stop was known',
+    mentions: [],
+  });
+  f.turns.clearResponsePending(f.claim.invocationId);
+  assert.equal(
+    (
+      await f.port.getExecution({
+        sessionId: f.input.sessionId,
+        generation: f.input.generation,
+        executionId: f.input.executionId,
+      })
+    )?.phase,
+    'running',
+  );
+
+  await new TurnExecutionStartupReconciler({ store: f.turns, now: () => 200 }).reconcile({ processStartedAt: 150 });
+  assert.equal(
+    (
+      await f.port.getExecution({
+        sessionId: f.input.sessionId,
+        generation: f.input.generation,
+        executionId: f.input.executionId,
+      })
+    )?.phase,
+    'succeeded',
+  );
+});
 
 test('late original teardown settles its archived generation without changing a renewed grant or waking again', async () => {
   const f = await fixture();

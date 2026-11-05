@@ -5,18 +5,24 @@ import { InMemoryTurnExecutionStore } from '../dist/domains/cats/services/stores
 import { serializeTurnExecutionIdentity } from '../dist/domains/cats/services/stores/ports/TurnExecutionStore.js';
 import { RedisTurnExecutionStore } from '../dist/domains/cats/services/stores/redis/RedisTurnExecutionStore.js';
 
+function runningInput(invocationId, startedAt) {
+  return {
+    invocationId,
+    parentInvocationId: 'owned-parent',
+    threadId: 'owned-thread',
+    userId: 'owned-user',
+    catId: invocationId,
+    executionKind: 'ordinary',
+    startedAt,
+  };
+}
+
 for (const startedAt of [0, 50])
   test(`restart interrupts every prior-Host child even when teardown was never recorded; started=${startedAt}`, async () => {
     const store = new InMemoryTurnExecutionStore();
     const create = (invocationId, tracked = true) =>
       store.createRunning({
-        invocationId,
-        parentInvocationId: 'owned-parent',
-        threadId: 'owned-thread',
-        userId: 'owned-user',
-        catId: invocationId,
-        executionKind: 'ordinary',
-        startedAt,
+        ...runningInput(invocationId, startedAt),
         ...(tracked ? { providerLifecycleTracked: true } : {}),
       });
     create('started-without-teardown');
@@ -41,7 +47,12 @@ for (const startedAt of [0, 50])
       'interrupted',
       'the new Host retires all prior-Host ownership',
     );
-    assert.equal(store.get('started-without-teardown').providerTeardownAt, undefined);
+    assert.equal(
+      store.get('started-without-teardown').providerTeardownAt,
+      200,
+      'completed process-owner reaping proves the old provider stopped',
+    );
+    assert.equal(first.providerStopAttestationCount, 1);
     assert.deepEqual(store.listRunningByUser('owned-user'), []);
     assert.deepEqual(
       new Set(first.invocationIds),
@@ -99,5 +110,59 @@ test('the Redis store terminalizes a prior-Host child without teardown telemetry
   assert.equal(
     writes.some(([kind]) => kind === 'eval'),
     true,
+  );
+});
+
+test('the Redis store attests every prior-Host provider stop without requiring a running child', async () => {
+  const running = {
+    ...runningInput('redis-running', 10),
+    providerLifecycleTracked: true,
+  };
+  const terminal = {
+    ...runningInput('redis-terminal', 20),
+    providerLifecycleTracked: true,
+  };
+  const hashes = new Map(
+    [running, terminal].map((input) => [
+      `turnexec:record:${input.invocationId}`,
+      {
+        ...Object.fromEntries(Object.entries(input).map(([key, value]) => [key, String(value)])),
+        providerLifecycleTracked: '1',
+        providerStartedAt: String(input.startedAt),
+        status: input === running ? 'running' : 'succeeded',
+        outputFence: 'open',
+        ...(input === terminal ? { endedAt: '30' } : {}),
+        immutableIdentity: serializeTurnExecutionIdentity(input),
+      },
+    ]),
+  );
+  const store = new RedisTurnExecutionStore({
+    options: {},
+    scan: async () => ['0', [...hashes.keys()]],
+    pipeline: () => {
+      const keys = [];
+      return {
+        hgetall(key) {
+          keys.push(key);
+          return this;
+        },
+        exec: async () => keys.map((key) => [null, hashes.get(key)]),
+      };
+    },
+    eval: async (_script, _keyCount, key, field, value) => {
+      assert.equal(field, 'providerTeardownAt');
+      hashes.get(key)[field] = value;
+      return 1;
+    },
+  });
+
+  const attested = await store.attestProviderTeardownBefore(100, 200);
+
+  assert.deepEqual(
+    attested.map((record) => [record.invocationId, record.providerTeardownAt]),
+    [
+      ['redis-running', 200],
+      ['redis-terminal', 200],
+    ],
   );
 });

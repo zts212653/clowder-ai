@@ -2320,6 +2320,9 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
   const toolSpanTracker = new ToolSpanTracker(invocationSpan, catId as string);
   let activeServiceIterator: AsyncIterator<AgentMessage> | null = null;
   const unclosedServiceIterators = new Set<AsyncIterator<AgentMessage>>();
+  // Provider/session adapters can explicitly say that native stop is unknown.
+  // Keep that diagnostic truthful without turning it into dispatch ownership.
+  let providerStopProofMissing = false;
   let ordinaryTaskExecutionId: string | undefined;
   let presentationDelivery: { confirm(): Promise<AgentMessage[]>; release(reason: string): Promise<void> } | undefined;
   let currentPresentationAttempt: ProviderPresentationAttempt<InvocationPresentationReceipt> | undefined;
@@ -5990,6 +5993,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
           break;
         }
         let msg = await protectNativeProviderResult(iterResult.value, options);
+        if (msg.providerTeardown === 'unconfirmed') providerStopProofMissing = true;
         if (msg.nativeGoalObservation) {
           if (!threadStore || !deps.sessionChainStore) continue;
           const projected = await projectNativeGoalMessage({
@@ -6876,7 +6880,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
         };
       }
       try {
-        if (unclosedServiceIterators.size === 0) {
+        if (unclosedServiceIterators.size === 0 && !providerStopProofMissing) {
           terminal = { ...terminal, providerTeardownAt: terminal.endedAt };
           await deps.turnExecutionStore.recordProviderTeardown?.(invocationId, terminal.endedAt);
         }

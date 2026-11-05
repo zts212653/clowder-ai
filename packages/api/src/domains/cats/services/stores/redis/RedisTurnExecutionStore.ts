@@ -193,6 +193,40 @@ export class RedisTurnExecutionStore implements ITurnExecutionStore {
       throw new Error('invalid exact provider teardown');
   }
 
+  async attestProviderTeardownBefore(cutoffStartedAt: number, stoppedAt: number): Promise<TurnExecutionRecord[]> {
+    if (!Number.isFinite(cutoffStartedAt) || cutoffStartedAt < 0 || !Number.isFinite(stoppedAt) || stoppedAt < 0) {
+      throw new Error('invalid provider teardown attestation boundary');
+    }
+    const prefix = this.redis.options.keyPrefix ?? '';
+    const pattern = `${prefix.replace(/[\\*?[\]]/g, '\\$&')}${TurnExecutionKeys.record('*')}`;
+    const attested: TurnExecutionRecord[] = [];
+    let cursor = '0';
+    do {
+      const [next, keys] = await this.redis.scan(cursor, 'MATCH', pattern, 'COUNT', 200);
+      cursor = next;
+      if (!keys.length) continue;
+      const pipeline = this.redis.pipeline();
+      for (const key of keys) pipeline.hgetall(prefix ? key.slice(prefix.length) : key);
+      const results = await pipeline.exec();
+      for (let index = 0; index < keys.length; index += 1) {
+        const hash = readAuthoritativeHash(results?.[index], `turn execution ${keys[index]}`);
+        if (hash === null) continue;
+        const record = hydrateTurnExecution(hash as RedisTurnExecutionHash);
+        if (!record) throw new Error(`turn execution ${keys[index]}: non-empty hash failed to hydrate`);
+        if (
+          record.startedAt >= cutoffStartedAt ||
+          record.providerLifecycleTracked !== true ||
+          record.providerStartedAt === undefined ||
+          record.providerTeardownAt !== undefined
+        )
+          continue;
+        await this.recordProviderTeardown(record.invocationId, stoppedAt);
+        attested.push({ ...record, providerTeardownAt: stoppedAt });
+      }
+    } while (cursor !== '0');
+    return sortTurnExecutions(attested).map(cloneTurnExecutionRecord);
+  }
+
   async transitionTerminal(
     invocationId: string,
     input: TurnExecutionTerminalInput,

@@ -122,6 +122,25 @@ export class InMemoryTurnExecutionStore implements ITurnExecutionStore {
     record.providerTeardownAt ??= at;
   }
 
+  attestProviderTeardownBefore(cutoffStartedAt: number, stoppedAt: number): TurnExecutionRecord[] {
+    if (!Number.isFinite(cutoffStartedAt) || cutoffStartedAt < 0 || !Number.isFinite(stoppedAt) || stoppedAt < 0) {
+      throw new Error('invalid provider teardown attestation boundary');
+    }
+    const attested: TurnExecutionRecord[] = [];
+    for (const record of this.records.values()) {
+      if (
+        record.startedAt >= cutoffStartedAt ||
+        record.providerLifecycleTracked !== true ||
+        record.providerStartedAt === undefined ||
+        record.providerTeardownAt !== undefined
+      )
+        continue;
+      this.recordProviderTeardown(record.invocationId, stoppedAt);
+      attested.push(cloneTurnExecutionRecord(record));
+    }
+    return sortRecords(attested);
+  }
+
   transitionTerminal(invocationId: string, input: TurnExecutionTerminalInput): TransitionTurnExecutionResult {
     const record = this.records.get(invocationId);
     if (!record) return { outcome: 'not_found', record: null };

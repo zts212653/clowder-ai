@@ -154,6 +154,7 @@ describe('TurnExecutionStartupReconciler', () => {
     await store.createRunning(runningInput('ordinary-a', 10));
     const reconciler = new TurnExecutionStartupReconciler({
       store: {
+        attestProviderTeardownBefore: (cutoff, stoppedAt) => store.attestProviderTeardownBefore(cutoff, stoppedAt),
         interruptRunningBefore: (cutoff, input) => store.interruptRunningBefore(cutoff, input),
         listResponsePending: async () => {
           throw new Error('corrupt ledger record');
@@ -208,6 +209,7 @@ describe('TurnExecutionStartupReconciler', () => {
     const result = await reconciler.reconcile({ processStartedAt: 101 });
 
     assert.deepEqual(result, {
+      providerStopAttestationCount: 0,
       interruptedCount: 2,
       invocationIds: ['guard-boundary', 'ordinary-exact-process-start'],
       settledResponseCount: 0,
