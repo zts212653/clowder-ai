@@ -30,7 +30,10 @@ import { HELPER_READY, JOB_NAME_PREFIX, jobOwnerScript, jobQueryScript, powershe
 const execFileAsync = promisify(execFile);
 
 const WINDOWS_JOB_DIRECTORY = 'windows-api-jobs';
-const HELPER_TIMEOUT_MS = 30_000;
+// Adoption blocks startup before listen and normally takes about 1s (PowerShell + Add-Type). A
+// stalled helper costs this whole bound and then falls back to the pre-#1838 manual stop check, so
+// it matches the restart query's bound instead of adding up to 30s to a slow start.
+const HELPER_TIMEOUT_MS = 10_000;
 const QUERY_TIMEOUT_MS = 10_000;
 
 export type WindowsJobStopVerdict = 'absent' | 'present' | 'unknown';
