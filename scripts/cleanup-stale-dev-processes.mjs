@@ -15,6 +15,7 @@ export {
 
 const HOUR = 60 * 60;
 const KILL_GRACE_MS = 2000;
+const WINDOWS_CREATION_TOLERANCE_MS = 5_000;
 const MAX_REPORTED_COMMAND_LENGTH = 500;
 const WINDOWS_PROCESS_QUERY = [
   "$ErrorActionPreference = 'Stop';",
@@ -92,7 +93,13 @@ function windowsCreationMs(value) {
 export function parseWindowsProcessList(raw, { nowMs = Date.now() } = {}) {
   const decoded = JSON.parse(String(raw).replace(/^\uFEFF/, ''));
   const rows = Array.isArray(decoded) ? decoded : [decoded];
-  const ids = new Set(rows.map((row) => Number(row?.ProcessId)).filter((pid) => Number.isSafeInteger(pid) && pid > 0));
+  const byId = new Map();
+  for (const row of rows) {
+    const pid = Number(row?.ProcessId);
+    if (!Number.isSafeInteger(pid) || pid <= 0) continue;
+    const createdAt = windowsCreationMs(row.CreationDate);
+    byId.set(pid, { pid, createdAt });
+  }
   return rows
     .map((row) => {
       const pid = Number(row?.ProcessId);
@@ -104,6 +111,18 @@ export function parseWindowsProcessList(raw, { nowMs = Date.now() } = {}) {
         .replaceAll('\\', '/')
         .trim();
       const rss = Number(row.WorkingSetSize);
+      const parent = byId.get(ppid);
+      // Windows keeps the dead parent PID. A live PID alone is not evidence:
+      // if the parent PID was reused by a newer process, the child is orphaned.
+      // Missing timestamps are treated conservatively as "parent may exist" so
+      // an unverifiable snapshot cannot expand cleanup scope.
+      const orphaned =
+        Number.isSafeInteger(ppid) && ppid > 0
+          ? parent === undefined ||
+            (parent.createdAt !== undefined &&
+              createdAt !== undefined &&
+              parent.createdAt > createdAt + WINDOWS_CREATION_TOLERANCE_MS)
+          : false;
       return {
         pid,
         ppid: Number.isSafeInteger(ppid) && ppid >= 0 ? ppid : 0,
@@ -113,7 +132,8 @@ export function parseWindowsProcessList(raw, { nowMs = Date.now() } = {}) {
         elapsedSeconds,
         rssKb: Number.isFinite(rss) ? Math.round(rss / 1024) : 0,
         command,
-        orphaned: Number.isSafeInteger(ppid) && ppid > 0 && !ids.has(ppid),
+        createdAt,
+        orphaned,
       };
     })
     .filter(Boolean);
@@ -226,33 +246,116 @@ export function processExists(pid) {
   }
 }
 
-function killWindowsTree(pid) {
-  // Windows has no graceful SIGTERM for console process trees. Without /F,
-  // taskkill returns 128 for a Node child and leaves it running; force the
-  // tree for both stages and let processExists() record the outcome.
-  const args = ['/PID', String(pid), '/T', '/F'];
+export function readWindowsCreationMs(pid) {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return undefined;
+  const script = `$p = Get-CimInstance Win32_Process -Filter "ProcessId=${pid}"; if ($p -and $p.CreationDate) { $p.CreationDate.ToUniversalTime().ToString('o') }`;
+  const output = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
+    encoding: 'utf8',
+    windowsHide: true,
+    timeout: 10_000,
+  }).trim();
+  return output ? windowsCreationMs(output) : undefined;
+}
+
+/** Refuse to kill when the PID no longer belongs to the snapshotted process.
+ * The creation timestamp is the cheap identity check Windows exposes; a
+ * recycled PID would be a different process and must not be terminated. */
+export function revalidateWindowsTarget(pid, expectedCreatedAtMs, { readCreationMs = readWindowsCreationMs } = {}) {
+  if (expectedCreatedAtMs === undefined) return;
+  const actual = readCreationMs(pid);
+  if (actual === undefined) {
+    throw Object.assign(new Error(`process ${pid} is already gone`), { code: 'ESRCH' });
+  }
+  if (Math.abs(actual - expectedCreatedAtMs) > WINDOWS_CREATION_TOLERANCE_MS) {
+    throw Object.assign(new Error(`process ${pid} was recycled before termination`), { code: 'ESRCH' });
+  }
+}
+
+const WINDOWS_TERMINATE_SCRIPT = String.raw`
+$ErrorActionPreference = 'Stop'
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public static class ClowderProcess {
+  [DllImport("kernel32.dll", SetLastError=true)]
+  public static extern IntPtr OpenProcess(uint access, bool inherit, int processId);
+  [DllImport("kernel32.dll", SetLastError=true)]
+  public static extern bool GetProcessTimes(IntPtr handle, out long creation, out long exit, out long kernel, out long user);
+  [DllImport("kernel32.dll", SetLastError=true)]
+  public static extern bool TerminateProcess(IntPtr handle, uint exitCode);
+  [DllImport("kernel32.dll")]
+  public static extern bool CloseHandle(IntPtr handle);
+}
+"@
+$pidValue = [int]$env:CLOWDER_TARGET_PID
+$handle = [ClowderProcess]::OpenProcess(0x1001, $false, $pidValue)
+if ($handle -eq [IntPtr]::Zero) {
+  $lastError = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+  throw "OPEN_FAILED:$lastError"
+}
+try {
+  [long]$creation = 0
+  [long]$exitTime = 0
+  [long]$kernelTime = 0
+  [long]$userTime = 0
+  if (-not [ClowderProcess]::GetProcessTimes($handle, [ref]$creation, [ref]$exitTime, [ref]$kernelTime, [ref]$userTime)) {
+    $lastError = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+    throw "QUERY_FAILED:$lastError"
+  }
+  $actual = [DateTime]::FromFileTimeUtc($creation)
+  $expected = [DateTime]::Parse($env:CLOWDER_TARGET_CREATED).ToUniversalTime()
+  if ([Math]::Abs(($actual - $expected).TotalMilliseconds) -gt 5000) {
+    throw 'RECYCLED'
+  }
+  if (-not [ClowderProcess]::TerminateProcess($handle, 1)) {
+    $lastError = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+    throw "TERMINATE_FAILED:$lastError"
+  }
+} finally {
+  [void][ClowderProcess]::CloseHandle($handle)
+}
+`;
+
+/** Open, identity-check and terminate the same process handle.
+ * Looking up a PID and then invoking an external kill command leaves a PID-reuse window; this
+ * script keeps the opened handle for both GetProcessTimes and TerminateProcess. */
+export function killWindowsProcess(pid, item, { execFileImpl = execFileSync } = {}) {
+  if (!Number.isSafeInteger(pid) || pid <= 0) {
+    throw Object.assign(new Error(`invalid process id: ${pid}`), { code: 'ESRCH' });
+  }
+  if (typeof item?.createdAt !== 'number' || !Number.isFinite(item.createdAt)) {
+    throw Object.assign(new Error(`process ${pid} has no snapshot creation time; refusing to terminate`), {
+      code: 'ESRCH',
+    });
+  }
   try {
-    execFileSync('taskkill', args, { windowsHide: true, stdio: 'ignore', timeout: 10_000 });
+    execFileImpl('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', WINDOWS_TERMINATE_SCRIPT], {
+      encoding: 'utf8',
+      windowsHide: true,
+      timeout: 10_000,
+      env: {
+        ...process.env,
+        CLOWDER_TARGET_PID: String(pid),
+        CLOWDER_TARGET_CREATED: new Date(item.createdAt).toISOString(),
+      },
+    });
   } catch (error) {
     const message = String(error?.stderr ?? error?.message ?? '');
-    if (error?.status === 128 && !processExists(pid)) {
-      throw Object.assign(new Error(`process ${pid} is already gone`), { code: 'ESRCH', cause: error });
-    }
-    if (/not found|no running instance/i.test(message) && !processExists(pid)) {
-      throw Object.assign(new Error(`process ${pid} is already gone`), { code: 'ESRCH', cause: error });
+    if (/OPEN_FAILED:(?:87|1168)/.test(message) || /QUERY_FAILED|RECYCLED/.test(message)) {
+      throw Object.assign(new Error(`process ${pid} is already gone or was recycled`), { code: 'ESRCH', cause: error });
     }
     throw error;
   }
 }
 
-function defaultKill(pid, signal) {
-  if (process.platform === 'win32') return killWindowsTree(pid);
-  return process.kill(pid, signal);
+function defaultKill(pid, _signal, item) {
+  if (process.platform === 'win32') return killWindowsProcess(pid, item);
+  return process.kill(pid, _signal);
 }
 
 function sendSignal(item, signal, killFn) {
   try {
-    killFn(item.pid, signal);
+    killFn(item.pid, signal, item);
     return { status: 'sent' };
   } catch (error) {
     if (error?.code === 'ESRCH') return { status: 'gone' };

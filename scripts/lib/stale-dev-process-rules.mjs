@@ -4,6 +4,10 @@ const HOUR = 60 * 60;
 // 6399=runtime sanctuary / 6401=user-redis persistent data.
 const PROTECTED_REDIS_PORTS = new Set([6379, 6099, 6397, 6398, 6399, 6401]);
 const CAT_CAFE_WORKTREE_PATH = /\/cat-cafe(?:-[^/\s]+)?(?:\/|$)/;
+// NTFS paths are case-insensitive, so a worktree named `Cat-Cafe` must match
+// the same rules as `cat-cafe` on Windows.
+const CAT_CAFE_WORKTREE_PATH_CI = /\/cat-cafe(?:-[^/\s]+)?(?:\/|$)/i;
+const GATE_PERMIT_SCRIPT = /\/scripts\/run-with-gate-resource-permit\.mjs(?=["']?(?:\s|$))/;
 
 function tokenizeCommand(command) {
   return command.match(/"[^"]*"|'[^']*'|\S+/g)?.map((token) => token.replace(/^(['"])(.*)\1$/, '$2')) ?? [];
@@ -27,8 +31,8 @@ function isNodeCommand(command) {
   return execBasename(executable) === 'node';
 }
 
-export function isCatCafeCommand(command) {
-  return CAT_CAFE_WORKTREE_PATH.test(command);
+export function isCatCafeCommand(command, { caseInsensitive = process.platform === 'win32' } = {}) {
+  return (caseInsensitive ? CAT_CAFE_WORKTREE_PATH_CI : CAT_CAFE_WORKTREE_PATH).test(command);
 }
 
 function isPinchtabBinaryBasename(name) {
@@ -102,7 +106,7 @@ export const STALE_DEV_PROCESS_RULES = [
     match: (processRow) =>
       isOrphaned(processRow) &&
       isNodeCommand(processRow.command) &&
-      /\/scripts\/run-with-gate-resource-permit\.mjs(?:\s|$)/.test(processRow.command) &&
+      GATE_PERMIT_SCRIPT.test(processRow.command) &&
       isCatCafeCommand(processRow.command),
     reason: 'orphaned Clowder AI gate resource permit runner (reparented to init)',
   },
