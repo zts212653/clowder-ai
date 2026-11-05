@@ -108,7 +108,7 @@ export interface QueueRoutesOptions {
   /** Durable child turns: the KD-21 ledger, and a running child standing in for an owner no snapshot can verify. */
   turnExecutionStore?: Pick<
     ITurnExecutionStore,
-    'get' | 'listByParent' | 'transitionTerminal' | 'clearResponsePending'
+    'get' | 'listByParent' | 'transitionTerminal' | 'clearResponsePending' | 'listResponsePending'
   >;
   /** Existing managed-wake receipt owner; late-bound after delivery composition. */
   getManagedCommandWakeRecovery?: () => ManagedCommandWakeRecoveryLike | undefined;
@@ -732,7 +732,9 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
   /**
    * #1838: a member whose provider started and whose stop is unconfirmed ends only with an exact stop
    * proof. Every such child of this execution is stopped through that proof; the first one that cannot
-   * be names the reason, and the caller then keeps the execution and its occupancy. Null means none is left.
+   * be names the reason, and the caller then keeps the execution and its occupancy. A child that
+   * already ended but whose reply is still owed settles here too, so a retry of the same Stop closes
+   * that reply instead of reporting a success it did not reach. Null means nothing is left.
    */
   const refuseUnconfirmedProviderStop = async (input: {
     threadId: string;
@@ -740,7 +742,10 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     catId: string;
     executionId: string;
     request: FastifyRequest;
-  }): Promise<{ error: string; code: 'PROVIDER_TEARDOWN_UNCONFIRMED' | 'EXECUTION_RESPONSE_SETTLEMENT_FAILED' } | null> => {
+  }): Promise<{
+    error: string;
+    code: 'PROVIDER_TEARDOWN_UNCONFIRMED' | 'EXECUTION_RESPONSE_SETTLEMENT_FAILED';
+  } | null> => {
     const children = await opts.turnExecutionStore?.listByParent(input.executionId);
     const unconfirmed = (children ?? []).filter(
       (child) =>
@@ -763,13 +768,20 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       }
       if (!stop.stopped)
         return { error: `原执行停止尚未确认，保留执行占用（${stop.reason}）`, code: 'PROVIDER_TEARDOWN_UNCONFIRMED' };
-      // The proof ended the child above; its streamed reply settles here, in this API's lifetime,
-      // instead of waiting for the next startup to close R. When that commit fails, the child is
-      // already terminal, so this Stop reports the unfinished reply rather than a success it did not
-      // reach; the pending ledger still holds R for the next startup's settlement pass, and a retry
-      // finds no running child left and completes the parent.
+    }
+    // The KD-21 ledger is the authority on which R is still owed: it holds every ended child of this
+    // execution whose reply never committed, whether the proof above just ended it or an earlier
+    // attempt failed after ending it. Settling from there makes the retry complete the same reply.
+    const owed = (await opts.turnExecutionStore?.listResponsePending?.()) ?? [];
+    for (const child of owed.filter(
+      (record) =>
+        record.parentInvocationId === input.executionId &&
+        record.threadId === input.threadId &&
+        record.userId === input.userId &&
+        record.catId === input.catId,
+    )) {
       try {
-        await settleStoppedChildResponse(stop.record, input);
+        await settleStoppedChildResponse(child, input);
       } catch (err) {
         input.request.log.error(
           { err, invocationId: child.invocationId },
@@ -2212,12 +2224,15 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     // #1838: a running record may still own a started provider whose stop is unconfirmed, exactly
     // like the orphan-cancel path. Consume the same exact proof *before* mutating anything: a reset
     // that canceled the parent but left that child running would hide it from the live list while it
-    // still blocks the next message of the same thread and role.
+    // still blocks the next message of the same thread and role. A cat this API still controls
+    // locally is not one of those: cancelAll below aborts it through its normal path, so demanding
+    // external kernel proof there would refuse a reset the product can perform itself.
     const preResetRunningRecords = opts.invocationRecordStore
       ? await opts.invocationRecordStore.listRunningByThread(threadId, guard.userId)
       : [];
     for (const record of preResetRunningRecords) {
       for (const memberCat of record.targetCats as string[]) {
+        if (invocationTracker.has(threadId, memberCat)) continue;
         const refusal = await refuseUnconfirmedProviderStop({
           threadId,
           userId: guard.userId,

@@ -468,10 +468,13 @@ describe('#1838 cancel route: a dead API s started provider stops only with its 
     cancel: () => ({ url: `/api/threads/${THREAD_ID}/cancel/${CAT_ID}` }),
     'force-reset': () => ({ url: `/api/threads/${THREAD_ID}/force-reset` }),
     // The active execution list's own Stop, on the candidate it still projects.
-    live: (parent) => ({ url: `/api/threads/${THREAD_ID}/executions/live/${parent}/cancel`, payload: { catId: CAT_ID } }),
+    live: (parent) => ({
+      url: `/api/threads/${THREAD_ID}/executions/live/${parent}/cancel`,
+      payload: { catId: CAT_ID },
+    }),
   };
 
-  async function stopAfterApiDied(t, execute, route = 'cancel', { settleFails = false } = {}) {
+  async function stopAfterApiDied(t, execute, route = 'cancel', { settleFails = false, tracked = false } = {}) {
     const dataDir = mkdtempSync(join(tmpdir(), 'issue1838-cancel-'));
     t.after(() => rmSync(dataDir, { recursive: true, force: true }));
     mkdirSync(resolveWindowsJobDirectory(dataDir), { recursive: true });
@@ -523,6 +526,23 @@ describe('#1838 cancel route: a dead API s started provider stops only with its 
       content: 'streamed body',
       updatedAt: 2,
     });
+    // A failing response store that the test can heal, so a retry runs the real settlement path.
+    let rejectCommit = settleFails;
+    const responseStore = new Proxy(messageStore, {
+      get: (target, property) =>
+        property === 'commitLifecycleResponseTerminal' && rejectCommit
+          ? () => {
+              throw new Error('response terminal store unavailable');
+            }
+          : target[property],
+    });
+    const aborts = [];
+    const tracker = makeTracker({ hasSlot: tracked });
+    tracker.getExecutionId = () => parent;
+    tracker.cancelAll = (_thread, _user, reason) => {
+      aborts.push(reason);
+      return { catIds: [CAT_ID], executionIds: [parent], executionIdByCatId: { [CAT_ID]: parent } };
+    };
     const { app, recordStore, queueProcessor } = await buildApp({
       queueProcessor: {
         ...makeQueueProcessor(),
@@ -530,7 +550,7 @@ describe('#1838 cancel route: a dead API s started provider stops only with its 
         suppressAutoResume: () => {},
         hasProcessingSlotReservation: () => false,
       },
-      tracker: makeTracker({ hasSlot: false }),
+      tracker,
       recordStore: makeRecordStore({
         runningRecord: {
           id: parent,
@@ -546,24 +566,11 @@ describe('#1838 cancel route: a dead API s started provider stops only with its 
       }),
       routeOptions: {
         turnExecutionStore: turns,
-        messageStore,
+        messageStore: responseStore,
         draftStore,
         cliExecutionOwnerService: { listLive: async () => ({ complete: true, owners: [] }) },
         // index.ts wires exactly this on Windows; only the native job query is fixed here.
         stopUnconfirmedProvider: (record) => stopWithWindowsJobProof({ store: turns, record, dataDir, execute }),
-        ...(settleFails
-          ? // The proof stopped the provider, but this API cannot commit the reply's terminal.
-            {
-              messageStore: new Proxy(messageStore, {
-                get: (target, property) =>
-                  property === 'commitLifecycleResponseTerminal'
-                    ? () => {
-                        throw new Error('response terminal store unavailable');
-                      }
-                    : target[property],
-              }),
-            }
-          : {}),
       },
     });
     const { url, payload } = ROUTES[route](parent);
@@ -580,8 +587,19 @@ describe('#1838 cancel route: a dead API s started provider stops only with its 
       recordStore,
       queueProcessor,
       turns,
+      aborts,
       response: await messageStore.getById(response.id),
+      readResponse: () => messageStore.getById(response.id),
       draft: draftStore.getByThread(USER_ID, THREAD_ID)[0],
+      // The same Stop again, after the response store recovers.
+      retry: async () => {
+        rejectCommit = false;
+        return app.inject({
+          method: 'POST',
+          url: `/api/threads/${THREAD_ID}/cancel/${CAT_ID}`,
+          headers: { 'x-cat-cafe-user': USER_ID },
+        });
+      },
     };
   }
 
@@ -660,6 +678,19 @@ describe('#1838 cancel route: a dead API s started provider stops only with its 
     assert.equal(draft, undefined, 'the settled draft is gone');
   });
 
+  // force-reset must not refuse a reset this API can perform itself: a cat it still controls locally
+  // is aborted through the normal cancelAll path, so the job proof is not what ends that execution.
+  it('force-reset still aborts the provider this API controls locally', async (t) => {
+    const { res, aborts } = await stopAfterApiDied(
+      t,
+      verdict({ state: 'present', activeProcesses: 2, sessionId: 1 }),
+      'force-reset',
+      { tracked: true },
+    );
+    assert.equal(res.statusCode, 200, res.body);
+    assert.deepEqual(aborts, ['cancel_all'], 'the locally controlled provider gets its normal abort');
+  });
+
   // The end of a Stop is not the provider proof alone: when the reply it ended cannot be committed,
   // reporting success would hide a still-streaming reply behind a green Stop.
   it('reports the unfinished reply instead of a Stop it did not complete', async (t) => {
@@ -679,14 +710,28 @@ describe('#1838 cancel route: a dead API s started provider stops only with its 
     );
   });
 
+  // The child above is already terminal, so a retry cannot find a running child to stop. It must
+  // still finish the reply the failed attempt left owed instead of reporting a success.
+  it('a retry settles the reply the failed Stop left owed', async (t) => {
+    const { res, turns, readResponse, retry } = await stopAfterApiDied(
+      t,
+      verdict({ state: 'absent', nativeError: 2, sessionId: 1 }),
+      'cancel',
+      { settleFails: true },
+    );
+    assert.equal(res.statusCode, 503, res.body);
+    assert.equal((await readResponse()).lifecycle.status, 'processing', 'the first attempt left R owed');
+
+    const second = await retry();
+    assert.equal(second.statusCode, 200, second.body);
+    assert.equal((await readResponse()).lifecycle.status, 'canceled', 'the retry settled the old reply');
+    assert.deepEqual(await turns.listResponsePending(), [], 'nothing is left owed');
+  });
+
   // The active execution list's Stop has its own route; it must report the actual refusal, not a
   // generic control-plane error that hides which job still owns the execution.
   it('the active execution Stop reports its actual Job refusal', async (t) => {
-    const { res } = await stopAfterApiDied(
-      t,
-      verdict({ state: 'present', activeProcesses: 2, sessionId: 1 }),
-      'live',
-    );
+    const { res } = await stopAfterApiDied(t, verdict({ state: 'present', activeProcesses: 2, sessionId: 1 }), 'live');
     assert.equal(res.statusCode, 503, res.body);
     const body = JSON.parse(res.body);
     assert.equal(body.code, 'PROVIDER_TEARDOWN_UNCONFIRMED');
