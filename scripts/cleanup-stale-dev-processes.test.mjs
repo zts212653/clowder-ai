@@ -5,8 +5,13 @@ import { tmpdir } from 'node:os';
 import { delimiter, dirname, join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { findStaleDevProcesses, parseWindowsProcessList, terminateFindings } from './cleanup-stale-dev-processes.mjs';
-import { isOrphaned } from './lib/stale-dev-process-rules.mjs';
+import {
+  findStaleDevProcesses,
+  parseWindowsProcessList,
+  revalidateWindowsTarget,
+  terminateFindings,
+} from './cleanup-stale-dev-processes.mjs';
+import { isCatCafeCommand, isOrphaned } from './lib/stale-dev-process-rules.mjs';
 
 const script = resolve(dirname(fileURLToPath(import.meta.url)), 'cleanup-stale-dev-processes.mjs');
 
@@ -113,11 +118,31 @@ test('Windows process snapshots normalize paths and detect dead parents', () => 
 
   assert.equal(rows.length, 2);
   assert.equal(rows[0].elapsedSeconds, 3600);
+  assert.equal(rows[0].createdAt, Date.parse('2026-11-02T09:00:00.000Z'));
   assert.equal(rows[0].elapsed, '01:00:00');
   assert.equal(rows[0].rssKb, 2048);
   assert.equal(rows[0].command, 'C:/Program Files/nodejs/node.exe C:/src/cat-cafe/scripts/x.mjs');
   assert.equal(rows[0].orphaned, true);
   assert.equal(rows[1].orphaned, false);
+});
+
+test('Windows worktree matching is case-insensitive without weakening POSIX', () => {
+  assert.equal(isCatCafeCommand('C:/src/cat-cafe/scripts/a.mjs'), true);
+  assert.equal(isCatCafeCommand('C:/src/Cat-Cafe/scripts/a.mjs', { caseInsensitive: true }), true);
+  assert.equal(isCatCafeCommand('C:/src/Cat-Cafe/scripts/a.mjs', { caseInsensitive: false }), false);
+});
+
+test('Windows kill revalidation rejects a missing or recycled PID', () => {
+  assert.doesNotThrow(() => revalidateWindowsTarget(123, 1000, { readCreationMs: () => 1000 }));
+  assert.throws(() => revalidateWindowsTarget(123, 1000, { readCreationMs: () => 9000 }), /recycled/);
+  assert.throws(() => revalidateWindowsTarget(123, 1000, { readCreationMs: () => undefined }), /already gone/);
+  assert.doesNotThrow(() =>
+    revalidateWindowsTarget(123, undefined, {
+      readCreationMs: () => {
+        throw new Error('must not query without a snapshot timestamp');
+      },
+    }),
+  );
 });
 
 test('orphan fallback keeps POSIX PID 1 semantics', () => {
@@ -133,6 +158,26 @@ test('Windows quoted node commands still match orphan rules', () => {
     JSON.stringify([
       {
         ProcessId: 500,
+        ParentProcessId: 999,
+        CreationDate: '2026-11-02T08:00:00.000Z',
+        WorkingSetSize: 1024,
+        CommandLine: command,
+      },
+    ]),
+    { nowMs: now },
+  );
+  const findings = findStaleDevProcesses(rows, { ownPid: 1, nowMs: now });
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0].ruleId, 'orphan-cat-cafe-node-test');
+});
+
+test('Windows stale rules match a Cat-Cafe worktree casing', { skip: process.platform !== 'win32' }, () => {
+  const now = Date.parse('2026-11-02T10:00:00.000Z');
+  const command = String.raw`"C:\Program Files\nodejs\node.exe" --test C:\work\Cat-Cafe\packages\api\test\cli-spawn.test.js`;
+  const rows = parseWindowsProcessList(
+    JSON.stringify([
+      {
+        ProcessId: 600,
         ParentProcessId: 999,
         CreationDate: '2026-11-02T08:00:00.000Z',
         WorkingSetSize: 1024,
@@ -180,4 +225,18 @@ test('termination sends a signal and records a process that exits during grace',
   assert.equal(result.sigtermSent, 1);
   assert.equal(result.alreadyGone, 1);
   assert.equal(result.failed.length, 0);
+});
+
+test('termination passes the snapshot identity to the platform kill path', async () => {
+  const seen = [];
+  const result = await terminateFindings([{ pid: 4242, ruleId: 'fixture', createdAt: 111 }], {
+    killFn: (pid, signal, item) => {
+      seen.push([pid, signal, item.createdAt]);
+    },
+    existsFn: () => false,
+    sleepFn: async () => {},
+  });
+  assert.deepEqual(seen, [[4242, 'SIGTERM', 111]]);
+  assert.equal(result.sigtermSent, 1);
+  assert.equal(result.alreadyGone, 1);
 });

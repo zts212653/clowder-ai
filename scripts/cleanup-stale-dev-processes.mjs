@@ -113,6 +113,7 @@ export function parseWindowsProcessList(raw, { nowMs = Date.now() } = {}) {
         elapsedSeconds,
         rssKb: Number.isFinite(rss) ? Math.round(rss / 1024) : 0,
         command,
+        createdAt,
         orphaned: Number.isSafeInteger(ppid) && ppid > 0 && !ids.has(ppid),
       };
     })
@@ -226,10 +227,41 @@ export function processExists(pid) {
   }
 }
 
-function killWindowsTree(pid) {
-  // Windows has no graceful SIGTERM for console process trees. Without /F,
-  // taskkill returns 128 for a Node child and leaves it running; force the
-  // tree for both stages and let processExists() record the outcome.
+export function readWindowsCreationMs(pid) {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return undefined;
+  const script = `$p = Get-CimInstance Win32_Process -Filter "ProcessId=${pid}"; if ($p -and $p.CreationDate) { $p.CreationDate.ToUniversalTime().ToString('o') }`;
+  const output = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
+    encoding: 'utf8',
+    windowsHide: true,
+    timeout: 10_000,
+  }).trim();
+  return output ? windowsCreationMs(output) : undefined;
+}
+
+const WINDOWS_CREATION_TOLERANCE_MS = 5_000;
+
+/** Refuse to kill when the PID no longer belongs to the snapshotted process.
+ * The creation timestamp is the cheap identity check Windows exposes; a
+ * recycled PID would be a different process and must not be terminated. */
+export function revalidateWindowsTarget(pid, expectedCreatedAtMs, { readCreationMs = readWindowsCreationMs } = {}) {
+  if (expectedCreatedAtMs === undefined) return;
+  const actual = readCreationMs(pid);
+  if (actual === undefined) {
+    throw Object.assign(new Error(`process ${pid} is already gone`), { code: 'ESRCH' });
+  }
+  if (Math.abs(actual - expectedCreatedAtMs) > WINDOWS_CREATION_TOLERANCE_MS) {
+    throw Object.assign(new Error(`process ${pid} was recycled before termination`), { code: 'ESRCH' });
+  }
+}
+
+function killWindowsTree(pid, item) {
+  // Revalidate PID identity against the snapshot before touching the tree:
+  // Windows recycles PIDs quickly, and the snapshot can be seconds old by the
+  // time the kill runs. /T is needed because a stale test runner keeps its
+  // child node processes alive; killing only the root would leave them behind.
+  // Without /F taskkill returns 128 for a Node child and leaves it running, so
+  // force the tree for both stages and let processExists() record the outcome.
+  revalidateWindowsTarget(pid, item?.createdAt);
   const args = ['/PID', String(pid), '/T', '/F'];
   try {
     execFileSync('taskkill', args, { windowsHide: true, stdio: 'ignore', timeout: 10_000 });
@@ -245,14 +277,14 @@ function killWindowsTree(pid) {
   }
 }
 
-function defaultKill(pid, signal) {
-  if (process.platform === 'win32') return killWindowsTree(pid);
+function defaultKill(pid, signal, item) {
+  if (process.platform === 'win32') return killWindowsTree(pid, item);
   return process.kill(pid, signal);
 }
 
 function sendSignal(item, signal, killFn) {
   try {
-    killFn(item.pid, signal);
+    killFn(item.pid, signal, item);
     return { status: 'sent' };
   } catch (error) {
     if (error?.code === 'ESRCH') return { status: 'gone' };
