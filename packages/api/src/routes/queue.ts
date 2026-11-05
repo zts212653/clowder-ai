@@ -773,9 +773,12 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     // The KD-21 ledger is the authority on which R is still owed: it holds every ended child of this
     // execution whose reply never committed, whether the proof above just ended it or an earlier
     // attempt failed after ending it. Settling from there makes the retry complete the same reply.
+    // Only a canceled turn is a Stop's to settle, and it settles as canceled. A turn of the same
+    // execution that ended any other way keeps its own outcome and its own settlement.
     const owed = (await opts.turnExecutionStore?.listResponsePending?.()) ?? [];
     for (const child of owed.filter(
       (record) =>
+        record.status === 'canceled' &&
         record.parentInvocationId === input.executionId &&
         record.threadId === input.threadId &&
         record.userId === input.userId &&

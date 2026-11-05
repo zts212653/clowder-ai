@@ -480,7 +480,7 @@ describe('#1838 cancel route: a dead API s started provider stops only with its 
     t,
     execute,
     route = 'cancel',
-    { settleFails = false, tracked = false, parentEnded = false, childFinished = false } = {},
+    { settleFails = false, tracked = false, parentEnded = false, childFinished = false, siblingFinished = false } = {},
   ) {
     const dataDir = mkdtempSync(join(tmpdir(), 'issue1838-cancel-'));
     t.after(() => rmSync(dataDir, { recursive: true, force: true }));
@@ -508,6 +508,43 @@ describe('#1838 cancel route: a dead API s started provider stops only with its 
     // The turn's processing R and its streamed draft, keyed exactly as QueueProcessor writes them.
     const messageStore = new MessageStore();
     const draftStore = new DraftStore();
+    // Another turn of the same parent and cat that finished on its own, its reply still owed.
+    const sibling = siblingFinished ? 'child-finished' : undefined;
+    if (sibling) {
+      turns.createRunning({
+        ...execution,
+        invocationId: sibling,
+        parentInvocationId: parent,
+        userId: USER_ID,
+        executionKind: 'ordinary',
+        startedAt: 1,
+        providerLifecycleTracked: true,
+      });
+      turns.markProviderStarted(sibling, 2);
+      turns.transitionTerminal(sibling, { status: 'succeeded', endedAt: 3, providerTeardownAt: 3 });
+    }
+    const siblingResponse = sibling
+      ? await messageStore.append({
+          from: { kind: 'agent', catId: CAT_ID },
+          userId: USER_ID,
+          threadId: THREAD_ID,
+          mentions: [],
+          content: '',
+          origin: 'stream',
+          timestamp: 1,
+          idempotencyKey: lifecycleResponseIdempotencyKey(sibling),
+          lifecycle: {
+            kind: 'response',
+            orderKey: `1:${sibling}`,
+            invocationId: sibling,
+            targetId: CAT_ID,
+            inputEntryIds: [],
+            inputMessageIds: [],
+            status: 'processing',
+            startedAt: 1,
+          },
+        })
+      : undefined;
     const response = await messageStore.append({
       from: { kind: 'agent', catId: CAT_ID },
       userId: USER_ID,
@@ -610,6 +647,7 @@ describe('#1838 cancel route: a dead API s started provider stops only with its 
       aborts,
       response: await messageStore.getById(response.id),
       readResponse: () => messageStore.getById(response.id),
+      readSibling: () => (siblingResponse ? messageStore.getById(siblingResponse.id) : undefined),
       draft: draftStore.getByThread(USER_ID, THREAD_ID)[0],
       // The same Stop again, after the response store recovers.
       retry: async () => {
@@ -833,4 +871,26 @@ describe('#1838 cancel route: a dead API s started provider stops only with its 
     assert.equal((await turns.listResponsePending()).length, 1, 'its own settlement still owns the reply');
     assert.deepEqual(recordStore.updates, []);
   });
+  // Maintainer P1 (34df): a Stop-ended turn and a turn that finished on its own, both owing their
+  // reply, under the same parent and cat. The Stop settles only the turn it ended; the other keeps
+  // its own settlement and is never relabeled canceled, on every Stop entry.
+  for (const route of ['live', 'cancel', 'force-reset']) {
+    it(`ended parent: ${route} settles only the turn it stopped when another owes its own reply`, async (t) => {
+      const { res, child, turns, readResponse, readSibling } = await stopAfterApiDied(
+        t,
+        verdict({ state: 'absent', nativeError: 2, sessionId: 1 }),
+        route,
+        { parentEnded: true, siblingFinished: true },
+      );
+      assert.equal(res.statusCode, 200, res.body);
+      assert.equal(child.status, 'canceled');
+      assert.equal((await readResponse()).lifecycle.status, 'canceled', 'the stopped turn s reply is settled');
+      assert.equal((await readSibling()).lifecycle.status, 'processing', 'the finished turn s reply is not relabeled');
+      assert.deepEqual(
+        (await turns.listResponsePending()).map((record) => [record.invocationId, record.status]),
+        [['child-finished', 'succeeded']],
+        'the finished turn stays owed to its own settlement',
+      );
+    });
+  }
 });
