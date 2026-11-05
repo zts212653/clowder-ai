@@ -66,7 +66,10 @@ test('complete independent Works reads canonical manifests at most twice, with f
   const originalRead = fs.readFile;
   fs.readFile = async (path, ...args) => {
     const value = await originalRead(path, ...args);
-    if (String(path).startsWith(join(root, 'projects', 'content-owner-v1')) && basename(String(path)) === 'state.json') {
+    if (
+      String(path).startsWith(join(root, 'projects', 'content-owner-v1')) &&
+      basename(String(path)) === 'state.json'
+    ) {
       stateReads++;
       manifestBytes += Buffer.byteLength(value);
     }

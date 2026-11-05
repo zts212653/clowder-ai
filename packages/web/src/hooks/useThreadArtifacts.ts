@@ -15,7 +15,6 @@ export function useWorksSourceRefresh(
 ) {
   const messages = useChatStore((state) => selectThreadMessagesRaw(state, enabled ? (threadId ?? null) : null));
   const { hasActive } = useThreadLiveness(enabled ? (threadId ?? null) : null);
-  const streaming = messages.some((message) => message.isStreaming);
   const materialKey = useMemo(
     () =>
       JSON.stringify(
@@ -33,18 +32,18 @@ export function useWorksSourceRefresh(
       ),
     [messages],
   );
-  const previous = useRef({ threadId, materialKey, enabled, streaming, hasActive });
+  const previous = useRef({ threadId, materialKey, enabled, hasActive });
   useEffect(() => {
     const before = previous.current;
-    previous.current = { threadId, materialKey, enabled, streaming, hasActive };
+    previous.current = { threadId, materialKey, enabled, hasActive };
     if (
       enabled &&
       before.enabled &&
       before.threadId === threadId &&
-      (before.materialKey !== materialKey || (before.streaming && !streaming) || (before.hasActive && !hasActive))
+      (before.materialKey !== materialKey || (before.hasActive && !hasActive))
     )
       refetch();
-  }, [enabled, materialKey, threadId, refetch, streaming, hasActive]);
+  }, [enabled, materialKey, threadId, refetch, hasActive]);
   useEffect(() => {
     if (!enabled) return;
     const changed = (event: Event) => {
@@ -59,10 +58,8 @@ export function useWorksSourceRefresh(
       refetch();
     };
     window.addEventListener('cat-cafe:entrusted-work-projection-invalidated', changed);
-    window.addEventListener('cat-cafe:artifact-review-changed', changed);
     return () => {
       window.removeEventListener('cat-cafe:entrusted-work-projection-invalidated', changed);
-      window.removeEventListener('cat-cafe:artifact-review-changed', changed);
     };
   }, [enabled, threadId, refetch, scopeToThread]);
 }

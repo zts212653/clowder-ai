@@ -83,6 +83,10 @@ it('still refreshes for published material, completion and explicit invalidation
   await act(async () => {
     useChatStore.getState().setThreadMessageStreaming(target.threadId, target.messageId, false);
   });
+  expect(apiFetch).toHaveBeenCalledTimes(2);
+  await act(async () => useChatStore.getState().setThreadHasActiveInvocation(target.threadId, true));
+  expect(apiFetch).toHaveBeenCalledTimes(2);
+  await act(async () => useChatStore.getState().setThreadHasActiveInvocation(target.threadId, false));
   expect(apiFetch).toHaveBeenCalledTimes(3);
   await act(async () => {
     useChatStore.getState().addMessageToThread(target.threadId, {

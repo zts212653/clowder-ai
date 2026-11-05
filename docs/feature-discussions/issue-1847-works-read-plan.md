@@ -33,7 +33,7 @@ Architecture cell: `collaborative-content-plane`（内容事实与授权）、`t
 ## B：标题从既有 PR 事实投影，作品 GET 不访问 GitHub
 
 - 复用 GitHub 插件已有 `SdkCommunityPrStore`；观测与后台查询更新原 PR 记录的 title，不新增宿主标题权威，不覆盖原 review/route 字段。
-- 主仓 reader 通过既有插件路由的 `mode=local` 只读本地记录，缺失显示 ref。旧插件严格拒绝新参数时，主仓仍显示 ref，作品请求不转去查询 GitHub。
+- 主仓 reader 通过既有插件路由的 `mode=local` 只读本地记录，缺失显示 ref，包括只有 Task 标题的 PR 产物；后台补取失败时继续显示 ref。旧插件严格拒绝新参数时，作品请求不转去查询 GitHub。
 - 前端共享数据加载完成后独立补取缺失标题，最多 20 条、4 并发、每次 5 秒；失败保留一分钟的有界负缓存。成功更新共享展示，不额外重读作品列表。
 - 配套插件沿原 collector 回写标题；账号凭据与请求授权继续由插件处理。插件 PR 的提交、版本发布和安装分别记录，不把源码存在写成当前实例已更新。
 
@@ -55,6 +55,7 @@ Architecture cell: `collaborative-content-plane`（内容事实与授权）、`t
 - 砚砚：建议用原 owner 的候选索引与 canonical point reads，避免第二套 head/revision 状态机。
 - 宪宪第一轮：补齐 lineage 第三遍扫描，确认 owner store 归属、publicationScope 不变与旧数据迁移边界；反对用 recentArtifacts.label 冒充标题事实。
 - 宪宪第二轮：读路径迁移失败应拒绝，但新写入不能被旧坏目录拖垮；失败 promise 要能重试；删去无效 Collective 快照挂钩；补提交 rename 窗口及真实 HTTP 带媒体计数验证。以上已采纳并验证。
+- 实现审查：移除消息流结束的重复失效，只保留调用终态和真实 material 变化；作品列表不再新增无范围的 review 事件订阅，review 界面沿原更新链。完整文本/工具轮次和双线程 review 事件先复现失败，再由同一用例验证修正。
 - 跨仓插件提交属于原 `next` PR 之外的新增交付边界，已单独请求确认；A/C 继续原授权工作。
 
 ## 证据与回退边界
@@ -62,4 +63,5 @@ Architecture cell: `collaborative-content-plane`（内容事实与授权）、`t
 - 基线 RED：固定 3 件目标作品，其他作品 10→100 时，canonical manifest 读取 32→212、root 遍历均 2 次；独立来源查找读取 31 份 manifest。
 - GREEN：常态目标线程读取 12→12、root 遍历 0；来源查找 1 次；真实带媒体的线程 HTTP 请求 17→17、root 遍历 0、作品总数保持 4。耗时只是同一合成环境的辅助记录，不作安装版性能承诺。
 - 前端 RED：三个真实消费方 3 次请求，新增纯文本仍多读一次。共享实现的组件测试及无头 Chrome 流程验证初次 1、作品变化 1、流式文本 0、旧线程失效 0。
+- 审查后完整轮次验证：纯文本消息结束 0、无作品变更的 review 事件 0；调用终态由三个消费方共享 1 次读取。Recent 的首次迁移与预热单列 34 次 canonical 读取，随后 12 件/3 件结果的请求分别 66/48 次，不混入常态预算。原故障注入已迁到线程读取入口，仍保留 unavailable 和 `publication_changed` 断言。
 - 原 canonical 数据和版本注释不迁移、不删除；回退源码即可恢复旧读取方式。若降级后的旧写者又发布新数据，重新启用索引版前须重建派生索引；旧写者不维护该索引，不能直接沿用旧 ready marker。

@@ -85,16 +85,27 @@ try {
   await page.getByRole('button', { name: 'Stream text', exact: true }).click();
   await page.waitForTimeout(100);
   assert.equal(reads(), 1);
+  await page.getByRole('button', { name: 'Finish message', exact: true }).click();
+  await page.waitForTimeout(100);
+  assert.equal(reads(), 1, 'a plain message ending does not publish work');
+  await page.getByRole('button', { name: 'Review elsewhere', exact: true }).click();
+  await page.waitForTimeout(100);
+  assert.equal(reads(), 1, 'unscoped review updates do not invalidate Works');
+  await Promise.all([
+    page.waitForResponse((response) => new URL(response.url()).pathname.endsWith('/artifacts')),
+    page.getByRole('button', { name: 'Finish invocation', exact: true }).click(),
+  ]);
+  assert.equal(reads(), 2, 'one invocation terminal refresh is shared by all three consumers');
   version = 2;
   await page.getByRole('button', { name: 'Publish work', exact: true }).click();
   await page.getByTestId('header-works').filter({ hasText: '2' }).waitFor();
-  assert.equal(reads(), 2);
+  assert.equal(reads(), 3);
   await page.getByRole('button', { name: 'Switch thread', exact: true }).click();
   await page.getByTestId('header-works').filter({ hasText: '0' }).waitFor();
-  assert.equal(reads(), 3);
+  assert.equal(reads(), 4);
   await page.getByRole('button', { name: 'Old thread changed', exact: true }).click();
   await page.waitForTimeout(100);
-  assert.equal(reads(), 3);
+  assert.equal(reads(), 4);
   assert.deepEqual(errors, []);
   assert.deepEqual(unexpected, []);
   const evidence = path.resolve(webRoot, '../../artifacts/issue1847-browser');
@@ -109,6 +120,9 @@ try {
         initialReads: 1,
         materialReads: 1,
         streamedTextReads: 0,
+        messageEndReads: 0,
+        invocationEndReads: 1,
+        reviewEventReads: 0,
         backgroundTitleLookups: 1,
       },
       null,
@@ -120,6 +134,9 @@ try {
       initialReads: 1,
       materialReads: 1,
       streamedTextReads: 0,
+      messageEndReads: 0,
+      invocationEndReads: 1,
+      reviewEventReads: 0,
       backgroundTitleLookups: 1,
       threadSwitchReads: 1,
       oldThreadReads: 0,

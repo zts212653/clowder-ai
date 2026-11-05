@@ -16,6 +16,7 @@ function Proof() {
       <button
         type="button"
         onClick={() => {
+          useChatStore.getState().setThreadHasActiveInvocation(thread, true);
           useChatStore.getState().addMessageToThread(thread, {
             id: 'stream',
             type: 'assistant',
@@ -30,6 +31,24 @@ function Proof() {
         }}
       >
         Stream text
+      </button>
+      <button type="button" onClick={() => useChatStore.getState().setThreadMessageStreaming(thread, 'stream', false)}>
+        Finish message
+      </button>
+      <button type="button" onClick={() => useChatStore.getState().setThreadHasActiveInvocation(thread, false)}>
+        Finish invocation
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          window.dispatchEvent(
+            new CustomEvent('cat-cafe:artifact-review-changed', {
+              detail: { reviewId: 'another-review' },
+            }),
+          )
+        }
+      >
+        Review elsewhere
       </button>
       <button
         type="button"

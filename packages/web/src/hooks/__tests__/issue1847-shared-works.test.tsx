@@ -57,9 +57,18 @@ it('three real consumers share one initial read and one read per material change
   expect(calls.fetch.mock.calls.filter(([url]) => String(url).includes('/artifacts'))).toHaveLength(2);
 });
 
-it('plain text and ordinary tool activity do not invalidate works', async () => {
-  await act(async () => root.render(<ThreadWorksButton threadId="shared" />));
+it('a complete text and tool invocation shares one terminal read without reading at each message end', async () => {
+  await act(async () =>
+    root.render(
+      <>
+        <ThreadWorksButton threadId="shared" />
+        <ThreadWorksPanelV2 threadId="shared" />
+        <HomeWorksSummary threadId="shared" worktreeId={null} onSelectDestination={vi.fn()} />
+      </>,
+    ),
+  );
   const count = calls.fetch.mock.calls.length;
+  await act(async () => useChatStore.getState().setThreadHasActiveInvocation('shared', true));
   await act(async () =>
     useChatStore.getState().addMessageToThread('shared', {
       id: 'plain',
@@ -75,7 +84,43 @@ it('plain text and ordinary tool activity do not invalidate works', async () => 
       contentBlocks: [{ type: 'tool_result', toolId: 'read-file', result: 'no work published' }],
     }),
   );
+  await act(async () => useChatStore.getState().setThreadMessageStreaming('shared', 'plain', false));
   expect(calls.fetch).toHaveBeenCalledTimes(count);
+  await act(async () => useChatStore.getState().setThreadMessageStreaming('shared', 'plain', true));
+  await act(async () => useChatStore.getState().patchThreadMessage('shared', 'plain', { content: 'continued text' }));
+  await act(async () => useChatStore.getState().setThreadMessageStreaming('shared', 'plain', false));
+  expect(calls.fetch).toHaveBeenCalledTimes(count);
+  await act(async () => useChatStore.getState().setThreadHasActiveInvocation('shared', false));
+  expect(calls.fetch).toHaveBeenCalledTimes(count + 1);
+});
+
+it('a review-only event does not invalidate the Works lists of mounted threads', async () => {
+  await act(async () =>
+    root.render(
+      <>
+        <ThreadWorksButton threadId="shared" />
+        <ThreadWorksButton threadId="other" />
+      </>,
+    ),
+  );
+  expect(calls.fetch).toHaveBeenCalledTimes(2);
+  await act(async () =>
+    window.dispatchEvent(
+      new CustomEvent('cat-cafe:artifact-review-changed', {
+        detail: { reviewId: 'a-review-with-no-work-publication' },
+      }),
+    ),
+  );
+  expect(calls.fetch).toHaveBeenCalledTimes(2);
+  await act(async () =>
+    window.dispatchEvent(
+      new CustomEvent('cat-cafe:entrusted-work-projection-invalidated', {
+        detail: { threadId: 'shared' },
+      }),
+    ),
+  );
+  expect(calls.fetch).toHaveBeenCalledTimes(3);
+  expect(calls.fetch.mock.calls.filter(([url]) => String(url).includes('/threads/other/'))).toHaveLength(1);
 });
 
 it('shows a missing PR ref immediately and shares one separate background title lookup', async () => {
