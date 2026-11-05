@@ -478,7 +478,7 @@ it('waits for the restored Works owner to be visible and loaded before applying 
   await render(false);
   const list = host.querySelector<HTMLElement>('.v2-works-scroll');
   expect(list?.scrollTop).toBe(0);
-  let finish = (_: Response) => {};
+  let finish: (response: Response) => void = () => {};
   data.fetch.mockImplementationOnce(
     () =>
       new Promise<Response>((resolve) => {

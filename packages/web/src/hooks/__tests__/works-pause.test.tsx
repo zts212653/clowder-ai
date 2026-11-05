@@ -63,7 +63,7 @@ it('retains the shared thread snapshot, cancels only after the last active consu
   fetch.mockResolvedValueOnce(page('retained'));
   await render(true, true);
   expect(fetch).toHaveBeenCalledTimes(1);
-  let finish = (_: Response) => {};
+  let finish: (response: Response) => void = () => {};
   fetch.mockImplementationOnce(
     () =>
       new Promise<Response>((resolve) => {
@@ -125,7 +125,7 @@ it('retries a PR title canceled when the last visible thread owner hides', async
       total: 1,
       complete: true,
     });
-  let finish = (_: Response) => {};
+  let finish: (response: Response) => void = () => {};
   fetch
     .mockResolvedValueOnce(threadResponse())
     .mockImplementationOnce(
@@ -160,7 +160,7 @@ it('pauses a global continuation, keeps partial results during resume, and isola
     act(async () => root.render(<Panel paused={paused} owner={owner} />));
   await render(true);
   expect(fetch).not.toHaveBeenCalled();
-  let finish = (_: Response) => {};
+  let finish: (response: Response) => void = () => {};
   fetch.mockResolvedValueOnce(page('partial', 'next')).mockImplementationOnce(
     () =>
       new Promise<Response>((resolve) => {
@@ -228,7 +228,7 @@ it('keeps classic global results when hiding during a reread', async () => {
   expect(fetch).not.toHaveBeenCalled();
   fetch.mockResolvedValueOnce(Response.json({ artifacts: [artifact('classic')] }));
   await render(false);
-  let finish = (_: Response) => {};
+  let finish: (response: Response) => void = () => {};
   fetch.mockImplementationOnce(
     () =>
       new Promise<Response>((resolve) => {
