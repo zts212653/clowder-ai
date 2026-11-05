@@ -85,6 +85,7 @@ test('every Electron build runs npm ci even when the installed Electron version 
 $ProjectRoot = ${quote(root)}
 ${mocks}
 function npm { $global:LASTEXITCODE = 0; Set-Content -LiteralPath ${quote(path.join(root, 'npm-args.txt'))} -Value ($args -join ' ') }
+function node { $global:LASTEXITCODE = 0; Set-Content -LiteralPath ${quote(path.join(root, 'node-args.txt'))} -Value ($args -join ' ') }
 function npx { $global:LASTEXITCODE = 0 }
 ${section}
 }`,
@@ -92,6 +93,11 @@ ${section}
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.equal(fs.existsSync(path.join(root, 'npm-args.txt')), true, 'locked desktop dependencies were not installed');
   assert.equal(fs.readFileSync(path.join(root, 'npm-args.txt'), 'utf8').trim(), 'ci --include=dev');
+  assert.match(
+    fs.readFileSync(path.join(root, 'node-args.txt'), 'utf8'),
+    /prewarm-win-codesign\.mjs/,
+    'the winCodeSign prewarm must run before electron-builder',
+  );
 });
 
 test('a manifest never assigns skipped old installers or ZIPs to this build', { skip: !windows }, (t) => {
