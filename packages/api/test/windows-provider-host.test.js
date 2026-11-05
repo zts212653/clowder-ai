@@ -182,3 +182,81 @@ test(
     assert.equal((await host.close()).verdict, 'absent');
   },
 );
+
+const { createWindowsProviderHostScope, bindWindowsProviderHostScope } = await import(
+  new URL('../dist/utils/windows-provider-host.js', import.meta.url)
+);
+const { readWindowsJobExecutionLinks } = await import(
+  new URL('../dist/utils/windows-job-execution-links.js', import.meta.url)
+);
+const { spawnCli } = await import(new URL('../dist/utils/cli-spawn.js', import.meta.url));
+const EXECUTION = {
+  executionId: 'scope-parent',
+  invocationId: 'scope-child',
+  threadId: 'scope-thread',
+  catId: 'codex',
+  userId: 'scope-user',
+};
+
+test(
+  'a scope links every host to the exact execution before it can launch',
+  { skip: !isWindows, timeout: 90_000 },
+  async (t) => {
+    const { dataDir } = fixture(t);
+    const scope = await createWindowsProviderHostScope({ execution: EXECUTION, dataDir });
+    const first = await scope.take();
+    const second = await scope.take();
+    t.after(() => {
+      for (const host of [first, second]) killOwned(host.job.apiPid);
+    });
+    assert.notEqual(first.job.jobName, second.job.jobName, 'a later provider gets its own job');
+    for (const host of [first, second]) {
+      const { links } = readWindowsJobExecutionLinks(host.job.jobName, dataDir);
+      assert.deepEqual(
+        links.map((link) => link.execution),
+        [EXECUTION],
+        'linked before launch',
+      );
+    }
+    assert.equal(await scope.close(), true, 'every job verifiably closed');
+    for (const host of [first, second]) assert.equal(existsSync(host.job.path), false);
+    scope.clearLinks();
+    for (const host of [first, second])
+      assert.deepEqual(readWindowsJobExecutionLinks(host.job.jobName, dataDir).links, []);
+  },
+);
+
+async function drain(iterator) {
+  for (;;) if ((await iterator.next()).done) return;
+}
+
+for (const owner of ['own', 'other']) {
+  test(
+    `spawnCli ${owner === 'own' ? 'inside its execution scope reaps' : 'for another invocation leaves'} a broken-chain writer`,
+    { skip: !isWindows, timeout: 90_000 },
+    async (t) => {
+      const { dir, dataDir, script } = fixture(t);
+      const writer = script('writer.cjs', ['setInterval(() => {}, 1000);']);
+      const launcher = script('launcher.cjs', [
+        "const { spawn } = require('node:child_process');",
+        "const fs = require('node:fs');",
+        `const writer = spawn(process.execPath, [${JSON.stringify(writer)}], { stdio: 'ignore', detached: true });`,
+        'writer.unref();',
+        `fs.writeFileSync(${JSON.stringify(join(dir, 'writer.pid'))}, String(writer.pid));`,
+      ]);
+      const scope = await createWindowsProviderHostScope({ execution: EXECUTION, dataDir });
+      const invocationId = owner === 'own' ? EXECUTION.invocationId : 'unrelated-title-cli';
+      await drain(
+        bindWindowsProviderHostScope(
+          () => spawnCli({ command: process.execPath, args: [launcher], invocationId })[Symbol.asyncIterator](),
+          scope,
+        ),
+      );
+      const writerPid = Number(readFileSync(join(dir, 'writer.pid'), 'utf8'));
+      t.after(() => killOwned(writerPid));
+      assert.equal(await scope.close(), true);
+      if (owner === 'own') await waitFor(() => !alive(writerPid), 5_000, 'writer reaped with its host job');
+      else assert.equal(alive(writerPid), true, "a process of another invocation is not this execution's to stop");
+    },
+  );
+}

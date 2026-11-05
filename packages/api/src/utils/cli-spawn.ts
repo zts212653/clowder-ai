@@ -48,6 +48,7 @@ import { ProcessLivenessProbe } from './ProcessLivenessProbe.js';
 import { RUNTIME_ONLY_LIFECYCLE_ENV_KEYS } from './runtime-only-env.js';
 import { sanitizeCliStderr } from './sanitize-cli-stderr.js';
 import { createStderrTail } from './stderr-tail.js';
+import { type WindowsProviderHost, windowsProviderHostScopeFor } from './windows-provider-host.js';
 
 const log = createModuleLogger('cli-spawn');
 
@@ -401,15 +402,25 @@ export async function* spawnCli(
     workingDirectory: options.cwd,
     inheritParentEnv: options.inheritParentEnv,
   });
-  const child = doSpawn(options.command, options.args, {
-    cwd: options.cwd,
-    env: childEnv,
-    // Incident 2026-05-29 (cross-thread-context-contamination): when stdinInput is
-    // provided, open stdin as a pipe so the prompt can be streamed off the command
-    // line. Otherwise keep 'ignore' (unchanged for providers not using stdin).
-    stdio: [options.stdinInput != null || options.onStdinReady ? 'pipe' : 'ignore', 'pipe', 'pipe'],
-    bindExecutionOwner: options.bindExecutionOwner !== false,
-  });
+  // Incident 2026-05-29 (cross-thread-context-contamination): when stdinInput is
+  // provided, open stdin as a pipe so the prompt can be streamed off the command
+  // line. Otherwise keep 'ignore' (unchanged for providers not using stdin).
+  const stdin = options.stdinInput != null || options.onStdinReady ? 'pipe' : 'ignore';
+  // #1838: inside its execution's host scope, a Windows provider starts in a linked host whose own
+  // kernel job owns the whole tree. Same spawn plan as defaultSpawn; only the parent changes.
+  const hostScope = !deps?.spawnFn && IS_WINDOWS ? windowsProviderHostScopeFor(options.invocationId) : undefined;
+  const child = hostScope
+    ? launchInWindowsHost(await hostScope.take(), options.command, options.args, {
+        cwd: options.cwd,
+        env: childEnv,
+        stdin,
+      })
+    : doSpawn(options.command, options.args, {
+        cwd: options.cwd,
+        env: childEnv,
+        stdio: [stdin, 'pipe', 'pipe'],
+        bindExecutionOwner: options.bindExecutionOwner !== false,
+      });
   if (options.bindExecutionOwner !== false) {
     const executionOwner = cliExecutionOwnerRefFromEnvironment({
       ...childEnv,
@@ -1316,6 +1327,27 @@ export function isLivenessWarning(value: unknown): value is import('./ProcessLiv
     '__livenessWarning' in value &&
     (value as Record<string, unknown>).__livenessWarning === true
   );
+}
+
+/** #1838: defaultSpawn's Windows plan, launched in a linked provider host instead of directly. */
+function launchInWindowsHost(
+  host: WindowsProviderHost,
+  command: string,
+  args: readonly string[],
+  options: { cwd?: string | undefined; env?: NodeJS.ProcessEnv | undefined; stdin: 'pipe' | 'ignore' },
+): ChildProcessLike {
+  const plan = resolveWindowsSpawnPlan(command, args);
+  const child = host.launch({
+    command: plan.command,
+    args: plan.args,
+    ...(options.cwd ? { cwd: options.cwd } : {}),
+    ...(options.env ? { env: options.env } : {}),
+    ...(plan.shell !== undefined ? { shell: plan.shell } : {}),
+    stdin: options.stdin,
+  });
+  // The host's own stdin is always a pipe; a provider started without stdin must not hold it open.
+  if (options.stdin === 'ignore') child.stdin?.end();
+  return child;
 }
 
 /**

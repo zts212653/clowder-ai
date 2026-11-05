@@ -15,10 +15,12 @@
  * moment later, so `close` reports the job's own verdict.
  */
 
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { type ChildProcess, spawn } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
-import { resolveCatCafeDataRoot } from './cli-process-ownership.js';
+import { type CliExecutionOwnerRef, resolveCatCafeDataRoot } from './cli-process-ownership.js';
+import { clearWindowsJobExecutionLink, recordWindowsJobExecutionLink } from './windows-job-execution-links.js';
 import {
   adoptWindowsApiJob,
   clearWindowsJobOwner,
@@ -43,6 +45,8 @@ export interface WindowsProviderLaunch {
   cwd?: string;
   env?: NodeJS.ProcessEnv;
   shell?: boolean | string;
+  /** The provider's stdin; the host's own stdin is always a pipe, so `ignore` is passed through. */
+  stdin?: 'pipe' | 'ignore';
 }
 
 export interface WindowsProviderHost {
@@ -121,6 +125,92 @@ export async function prepareWindowsProviderHost(options: { dataDir?: string } =
     },
   };
 }
+/**
+ * Every provider host one execution uses. Each host is linked to the exact execution before it may
+ * launch, so after a crash the execution is joinable to all of its jobs; it counts as stopped only
+ * when every one of them is verifiably closed, since one closed job says nothing about a writer in
+ * another (a startup retry can rebuild its provider within the same execution).
+ */
+export interface WindowsProviderHostScope {
+  readonly execution: CliExecutionOwnerRef;
+  /** A linked host to launch the next provider in: the prepared first one, then a new one each time. */
+  take(): Promise<WindowsProviderHost>;
+  /** Ends every host and reports whether all of their jobs are verifiably closed. */
+  close(): Promise<boolean>;
+  /** Removes this execution's links; only once its stop is recorded, since they are its only proof. */
+  clearLinks(): void;
+}
+
+/** Prepares and links the first host. Throws before anything is linked when no host can be owned. */
+export async function createWindowsProviderHostScope(options: {
+  execution: CliExecutionOwnerRef;
+  dataDir?: string;
+}): Promise<WindowsProviderHostScope> {
+  const hosts: WindowsProviderHost[] = [];
+  const linkPaths: string[] = [];
+  const prepareLinked = async (): Promise<WindowsProviderHost> => {
+    const host = await prepareWindowsProviderHost({ dataDir: options.dataDir });
+    // A host whose link cannot be written must not run unaccounted: end it within this owner.
+    try {
+      linkPaths.push(
+        recordWindowsJobExecutionLink({
+          dataDir: host.dataDir,
+          jobName: host.job.jobName,
+          execution: options.execution,
+        }).path,
+      );
+    } catch (error) {
+      await host.close();
+      throw error;
+    }
+    hosts.push(host);
+    return host;
+  };
+  let first: WindowsProviderHost | undefined = await prepareLinked();
+  return {
+    execution: options.execution,
+    async take() {
+      const host = first ?? (await prepareLinked());
+      first = undefined;
+      return host;
+    },
+    async close() {
+      const verdicts = await Promise.all(hosts.map((host) => host.close()));
+      return verdicts.every((evidence) => evidence.verdict === 'absent');
+    },
+    clearLinks() {
+      for (const path of linkPaths) clearWindowsJobExecutionLink(path);
+    },
+  };
+}
+
+const currentScope = new AsyncLocalStorage<WindowsProviderHostScope>();
+
+/** Iterators execute lazily, so next/return/throw each run inside the scope, not just construction. */
+export function bindWindowsProviderHostScope<T>(
+  create: () => AsyncIterator<T>,
+  scope: WindowsProviderHostScope | undefined,
+): AsyncIterator<T> {
+  if (!scope) return create();
+  const iterator = currentScope.run(scope, create);
+  const { return: finish, throw: fail } = iterator;
+  return {
+    next: () => currentScope.run(scope, () => iterator.next()),
+    ...(finish ? { return: (value?: T) => currentScope.run(scope, () => finish.call(iterator, value)) } : {}),
+    ...(fail ? { throw: (error?: unknown) => currentScope.run(scope, () => fail.call(iterator, error)) } : {}),
+  };
+}
+
+/**
+ * The scope a spawn seam launches in, only for the exact execution it belongs to. Async context
+ * also flows into work an invocation merely starts (a title or summary CLI), and such a process
+ * must not be counted in, or stopped by, this execution's jobs.
+ */
+export function windowsProviderHostScopeFor(invocationId: string | undefined): WindowsProviderHostScope | undefined {
+  const scope = currentScope.getStore();
+  return scope && invocationId !== undefined && scope.execution.invocationId === invocationId ? scope : undefined;
+}
+
 function isLaunch(message: unknown): message is { type: 'launch'; plan: WindowsProviderLaunch } {
   if (typeof message !== 'object' || message === null || !('type' in message) || message.type !== 'launch')
     return false;
@@ -148,17 +238,21 @@ async function runHost(dataDir: string): Promise<void> {
   process.once('message', (message) => {
     if (!isLaunch(message)) return process.exit(65);
     const { plan } = message;
+    // A provider the caller gave no stdin keeps reading EOF, not a pipe that never closes.
+    const stdin = plan.stdin === 'ignore' ? 'ignore' : 'pipe';
     const child = spawn(plan.command, [...plan.args], {
       ...(plan.cwd ? { cwd: plan.cwd } : {}),
       ...(plan.env ? { env: plan.env } : {}),
       ...(plan.shell !== undefined ? { shell: plan.shell } : {}),
-      stdio: ['pipe', 'pipe', 'pipe'],
+      stdio: [stdin, 'pipe', 'pipe'],
       windowsHide: true,
     });
-    child.stdin.on('error', () => {});
-    process.stdin.pipe(child.stdin);
-    child.stdout.pipe(process.stdout);
-    child.stderr.pipe(process.stderr);
+    if (child.stdin) {
+      child.stdin.on('error', () => {});
+      process.stdin.pipe(child.stdin);
+    }
+    child.stdout?.pipe(process.stdout);
+    child.stderr?.pipe(process.stderr);
     let finished = false;
     // The host exits by itself with the provider's code; leaving the job then reaps any descendant.
     const finish = (code: number): void => {
@@ -166,10 +260,10 @@ async function runHost(dataDir: string): Promise<void> {
       finished = true;
       process.exitCode = code;
       process.off('disconnect', onDisconnect);
-      process.stdin.unpipe(child.stdin);
+      process.stdin.unpipe();
       process.stdin.destroy();
-      child.stdout.destroy();
-      child.stderr.destroy();
+      child.stdout?.destroy();
+      child.stderr?.destroy();
       process.disconnect?.();
     };
     child.once('error', (error) => {
