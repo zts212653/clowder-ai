@@ -150,7 +150,7 @@ export async function stopWithWindowsJobProof(options: {
   record: TurnExecutionRecord;
   dataDir?: string;
   execute?: WindowsJobQueryExecute;
-}): Promise<{ stopped: true } | { stopped: false; reason: string }> {
+}): Promise<{ stopped: true; record: TurnExecutionRecord } | { stopped: false; reason: string }> {
   const { record } = options;
   const resolution = await resolveWindowsJobStopEvidence(options);
   for (const job of resolution.verifiedStopped) {
@@ -165,8 +165,9 @@ export async function stopWithWindowsJobProof(options: {
     });
     if (!result.record || result.record.status === 'running')
       return { stopped: false, reason: 'terminal_not_committed' };
+    // The caller settles the ended turn's response next; the terminal record carries what it needs.
     clearWindowsJobExecutionLink(link.path);
-    return { stopped: true };
+    return { stopped: true, record: result.record };
   }
   const owner = resolution.unresolved.find((job) => job.invocationIds.includes(record.invocationId));
   return { stopped: false, reason: owner ? `job_${owner.verdict}:${owner.reason}` : 'no_windows_job_link' };

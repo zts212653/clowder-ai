@@ -130,7 +130,7 @@ export interface QueueRoutesOptions {
    */
   stopUnconfirmedProvider?: (
     record: TurnExecutionRecord,
-  ) => Promise<{ stopped: true } | { stopped: false; reason: string }>;
+  ) => Promise<{ stopped: true; record: TurnExecutionRecord } | { stopped: false; reason: string }>;
 }
 
 function liveExecutionCandidateKey(candidate: Pick<LiveExecutionCandidate, 'catId' | 'executionId'>): string {
@@ -740,7 +740,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     catId: string;
     executionId: string;
     request: FastifyRequest;
-  }): Promise<{ error: string; code: 'PROVIDER_TEARDOWN_UNCONFIRMED' } | null> => {
+  }): Promise<{ error: string; code: 'PROVIDER_TEARDOWN_UNCONFIRMED' | 'EXECUTION_RESPONSE_SETTLEMENT_FAILED' } | null> => {
     const children = await opts.turnExecutionStore?.listByParent(input.executionId);
     const unconfirmed = (children ?? []).filter(
       (child) =>
@@ -763,8 +763,59 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       }
       if (!stop.stopped)
         return { error: `原执行停止尚未确认，保留执行占用（${stop.reason}）`, code: 'PROVIDER_TEARDOWN_UNCONFIRMED' };
+      // The proof ended the child above; its streamed reply settles here, in this API's lifetime,
+      // instead of waiting for the next startup to close R. When that commit fails, the child is
+      // already terminal, so this Stop reports the unfinished reply rather than a success it did not
+      // reach; the pending ledger still holds R for the next startup's settlement pass, and a retry
+      // finds no running child left and completes the parent.
+      try {
+        await settleStoppedChildResponse(stop.record, input);
+      } catch (err) {
+        input.request.log.error(
+          { err, invocationId: child.invocationId },
+          'stopped execution response could not be settled',
+        );
+        return {
+          error: `原执行已停止，但原回复未能结算，请重试（${String(err)}）`,
+          code: 'EXECUTION_RESPONSE_SETTLEMENT_FAILED',
+        };
+      }
     }
     return null;
+  };
+
+  /**
+   * KD-21: the child's terminal transition already ended its turn, so R settles from what it
+   * streamed, keeping the live body and clearing the draft and its pending ledger entry.
+   */
+  const settleStoppedChildResponse = async (
+    child: TurnExecutionRecord,
+    input: { threadId: string; userId: string; request: FastifyRequest },
+  ): Promise<void> => {
+    if (!messageStore || !opts.turnExecutionStore) return;
+    await settleResponseFromDraft(
+      {
+        messageStore,
+        ...(opts.draftStore ? { draftStore: opts.draftStore } : {}),
+        turnStore: opts.turnExecutionStore,
+        ...(opts.invocationRecordStore ? { invocationRecords: opts.invocationRecordStore } : {}),
+        commitFailedResponse: (response, patch) =>
+          commitRecoveredFailedResponse(
+            { socketManager, messageStore, invocationQueue, queueProcessor, log: input.request.log },
+            response,
+            patch,
+          ),
+        emit: (userId, message) => emitLifecycleMessageUpdated(socketManager, userId, message),
+      },
+      {
+        userId: input.userId,
+        threadId: input.threadId,
+        invocationId: child.invocationId,
+        status: 'canceled',
+        reason: child.terminalReason ?? 'user_cancel',
+        endedAt: child.endedAt ?? Date.now(),
+      },
+    );
   };
 
   const reconcileInactiveLiveInvocation = async (input: {
@@ -1059,7 +1110,11 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       return {
         cancelled: false,
         reconciled: reconciled.reconciled,
+        // The exact refusal (its code and its reason) is what the user needs to see, so it travels
+        // with controlPlaneUnavailable instead of being flattened into a generic control-plane error.
         ...(reconciled.controlPlaneUnavailable ? { controlPlaneUnavailable: true } : {}),
+        ...(reconciled.error ? { error: reconciled.error } : {}),
+        ...(reconciled.code ? { code: reconciled.code } : {}),
       };
     },
     reconcileInactiveLiveInvocation,
@@ -2154,6 +2209,28 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     if (!guard) return;
 
     const retirePending = snapshotPendingPrivateStop(threadId, guard.userId);
+    // #1838: a running record may still own a started provider whose stop is unconfirmed, exactly
+    // like the orphan-cancel path. Consume the same exact proof *before* mutating anything: a reset
+    // that canceled the parent but left that child running would hide it from the live list while it
+    // still blocks the next message of the same thread and role.
+    const preResetRunningRecords = opts.invocationRecordStore
+      ? await opts.invocationRecordStore.listRunningByThread(threadId, guard.userId)
+      : [];
+    for (const record of preResetRunningRecords) {
+      for (const memberCat of record.targetCats as string[]) {
+        const refusal = await refuseUnconfirmedProviderStop({
+          threadId,
+          userId: guard.userId,
+          catId: memberCat,
+          executionId: record.id,
+          request,
+        });
+        if (refusal) {
+          reply.status(503);
+          return refusal;
+        }
+      }
+    }
     // 1. Abort all active InvocationTracker slots (controllers + slot deletion).
     //    This clears the primary busy source (invocationTracker.has) that hasActiveExecution checks.
     //    cancelAll aborts in-flight requests and removes active slots atomically.

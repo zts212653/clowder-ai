@@ -208,7 +208,9 @@ test('Stop ends a dead API s execution only with its exact job proof, and names 
     dataDir: closed.dataDir,
     execute: ABSENT,
   });
-  assert.deepEqual(stopped, { stopped: true });
+  // The caller settles the ended turn's response next, so the successful stop carries that record.
+  assert.equal(stopped.stopped, true);
+  assert.deepEqual(stopped.record, closed.store.get('child-1'));
   const record = closed.store.get('child-1');
   assert.deepEqual([record.status, record.terminalReason], ['canceled', 'user_cancel']);
   assert.equal(hasUnconfirmedProviderTeardown(record), false);
