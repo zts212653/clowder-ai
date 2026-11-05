@@ -67,7 +67,10 @@ export function MemberRuntimeFields({
         return (await response.json()) as { runtimes: RuntimeChoice[] };
       })
       .then((data) => {
-        if (!controller.signal.aborted) setRuntimes(data.runtimes);
+        if (!controller.signal.aborted) {
+          setRuntimes(data.runtimes);
+          useMemberModelCatalogs.setState({ runtimes: data.runtimes });
+        }
       })
       .catch(() => {
         if (!controller.signal.aborted) setError(true);
@@ -94,11 +97,11 @@ export function MemberRuntimeFields({
     id: form.catId,
     clientId: form.clientId,
     agentProvider: form.acpAgentProvider,
-    acp: { command: form.acpCommand, startupArgs: splitCommandArgs(form.acpStartupArgs) },
+    acp: { command: form.acpCommand, startupArgs: splitCommandArgs(form.acpStartupArgs), transport: form.acpTransport },
     accountRef: form.accountRef,
     cliConfigArgs: form.cliConfigArgs,
   };
-  const dsh = isDshMember(displayMember);
+  const dsh = isDshMember(displayMember, runtimes);
   const english = t('zh', 'en') === 'en';
   const availableAccounts = filterAccounts(form.clientId, accounts),
     identity = availableAccounts.find((item) => item.id === form.accountRef);

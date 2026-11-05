@@ -2,7 +2,7 @@
 import { useSearchParams } from 'next/navigation';
 import { useState } from 'react';
 import { type CatData, formatCatName } from '@/hooks/useCatData';
-import { isDshMember } from '@/lib/member-model-display';
+import { isDshMember, useMemberModelCatalogs } from '@/lib/member-model-display';
 import type { MemberSaveTrace } from '@/utils/member-save-trace';
 import { usesAgyAcp, usesAgyNative } from '../../hub-cat-editor.agy';
 import { splitCommandArgs } from '../../hub-cat-editor.model';
@@ -54,17 +54,25 @@ export function MemberSettingsPage({
   const editor = useMemberEditor(cat, cats, onSaved, onBeforeCreate);
   const { draft, accounts, ready, saving, dirtyCount } = editor;
   const { form, baseline, section } = draft;
+  const runtimes = useMemberModelCatalogs((state) => state.runtimes);
   const identity = accounts.find((account) => account.id === form.accountRef);
   const tool = usesAgyAcp(form)
     ? t('AGY 官方 ACP', 'AGY official ACP')
     : usesAgyNative(form)
       ? 'AGY Native'
       : form.carrier === 'acp'
-        ? isDshMember({
-            clientId: form.clientId,
-            agentProvider: form.acpAgentProvider,
-            acp: { command: form.acpCommand, startupArgs: splitCommandArgs(form.acpStartupArgs) },
-          })
+        ? isDshMember(
+            {
+              clientId: form.clientId,
+              agentProvider: form.acpAgentProvider,
+              acp: {
+                command: form.acpCommand,
+                startupArgs: splitCommandArgs(form.acpStartupArgs),
+                transport: form.acpTransport,
+              },
+            },
+            runtimes,
+          )
           ? 'DSH'
           : 'ACP'
         : form.clientId === 'openai'
