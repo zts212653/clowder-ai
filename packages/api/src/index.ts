@@ -147,6 +147,7 @@ import {
 import { InvocationTracker } from './domains/cats/services/agents/invocation/InvocationTracker.js';
 import { emitLifecycleMessageUpdated } from './domains/cats/services/agents/invocation/lifecycle-message-update.js';
 import type { NativeControlReceiptPort } from './domains/cats/services/agents/invocation/NativeControlReceipt.js';
+import { recoverPriorProcessExecutions } from './domains/cats/services/agents/invocation/prior-process-execution-recovery.js';
 import type {
   InvocationRecordStoreLike,
   RouterLike,
@@ -166,15 +167,8 @@ import {
   createSidebarPresenceSource,
   type SidebarTerminalExecution,
 } from './domains/cats/services/agents/invocation/sidebar-presence-source.js';
-import {
-  listenBeforeTurnExecutionRecovery,
-  TurnExecutionStartupReconciler,
-} from './domains/cats/services/agents/invocation/TurnExecutionStartupReconciler.js';
+import { listenBeforeTurnExecutionRecovery } from './domains/cats/services/agents/invocation/TurnExecutionStartupReconciler.js';
 import { createThreadExecutionSituationSource } from './domains/cats/services/agents/invocation/thread-execution-situation.js';
-import {
-  clearSettledWindowsJobEvidence,
-  recordVerifiedWindowsJobTeardowns,
-} from './domains/cats/services/agents/invocation/WindowsJobStopRecovery.js';
 import { createZombieTerminalRecovery } from './domains/cats/services/agents/invocation/ZombieTerminalRecovery.js';
 import {
   type AcpPoolRegistry,
@@ -7692,14 +7686,30 @@ async function main(): Promise<void> {
       },
       recover: async () => {
         if (!redis) return;
-        const authRecovery = await turnExecutionStore.reconcileStartup({ processStartedAt: PROCESS_START_AT });
-        const liveExecutionOwners = await cliExecutionOwnerService.listLive();
-        // #1838: a Windows API job that verifiably closed proves every provider it owned is gone.
-        // Only that writes teardown proof; the reconciler below then settles those executions.
-        const windowsJobTeardowns = await recordVerifiedWindowsJobTeardowns({
-          store: turnExecutionStore,
-          dataDir: process.env.CAT_CAFE_DATA_DIR,
-          ...(windowsApiJob.adopted ? { currentJobName: windowsApiJob.job.record.jobName } : {}),
+        const {
+          authRecovery,
+          liveOwnersComplete,
+          childRecovery,
+          startupRecovery,
+          windowsJobTeardowns,
+          windowsJobEvidence,
+        } = await recoverPriorProcessExecutions({
+          processStartedAt: PROCESS_START_AT,
+          turnExecutionStore,
+          listLiveExecutionOwners: () => cliExecutionOwnerService.listLive(),
+          settleEndedTurnResponse: (turn) => settleTurnResponse(turn, responseOutcomeForEndedTurn(turn)),
+          windowsJobDataDir: process.env.CAT_CAFE_DATA_DIR,
+          ...(windowsApiJob.adopted ? { currentWindowsJobName: windowsApiJob.job.record.jobName } : {}),
+          orphans: {
+            invocationRecordStore,
+            taskProgressStore,
+            log: app.log,
+            messageStore,
+            socketManager: socketManager ?? undefined,
+            invocationQueue,
+            ...(ballCustodyIngest ? { ballCustody: ballCustodyIngest } : {}),
+          },
+          markStartupRecoveryComplete: () => registry.markStartupRecoveryComplete(),
         });
         if (windowsJobTeardowns.preserved.length > 0) {
           app.log.warn(
@@ -7707,48 +7717,12 @@ async function main(): Promise<void> {
             '[api] Preserved Windows provider executions whose stop could not be verified',
           );
         }
-        const childReconciler = new TurnExecutionStartupReconciler({
-          store: turnExecutionStore,
-          settleEndedTurnResponse: (turn) => settleTurnResponse(turn, responseOutcomeForEndedTurn(turn)),
-        });
-        const childRecovery = liveExecutionOwners.complete
-          ? await childReconciler.reconcile({
-              processStartedAt: PROCESS_START_AT,
-              protectedInvocationIds: liveExecutionOwners.owners.map((owner) => owner.invocationId),
-            })
-          : {
-              interruptedCount: 0,
-              invocationIds: [],
-              // Ended turns have no owner left to wait for; running ones keep their unknown owners.
-              ...(await childReconciler.settleEndedTurnResponses({ processStartedAt: PROCESS_START_AT })),
-              reconciledAt: Date.now(),
-              skippedReason: 'cli_execution_owner_snapshot_incomplete',
-            };
-        if (!liveExecutionOwners.complete) {
+        if (!liveOwnersComplete) {
           app.log.warn(
             { callbackAuthLifecycle: { kind: 'live_execution_owner_snapshot_incomplete' } },
             '[api] Preserved prior running TurnExecutions because external process liveness was unknown',
           );
         }
-        const { StartupReconciler } = await import('./domains/cats/services/agents/invocation/StartupReconciler.js');
-        const reconciler = new StartupReconciler({
-          invocationRecordStore,
-          turnExecutionStore,
-          taskProgressStore,
-          log: app.log,
-          processStartAt: PROCESS_START_AT,
-          messageStore,
-          socketManager: socketManager ?? undefined,
-          invocationQueue,
-          ...(ballCustodyIngest ? { ballCustody: ballCustodyIngest } : {}),
-        });
-        const startupRecovery = await reconciler.reconcileOrphans();
-        registry.markStartupRecoveryComplete();
-        // Evidence is removed only after settlement, so a failure here keeps it for the next start.
-        const windowsJobEvidence = await clearSettledWindowsJobEvidence({
-          store: turnExecutionStore,
-          pass: windowsJobTeardowns,
-        }).catch((error: unknown) => ({ clearFailed: String(error) }));
         for (const scope of startupRecovery.queueResumeScopes) {
           try {
             await queueProcessor.requestDrain(scope.threadId);

@@ -27,9 +27,16 @@ test('C7 startup has one canonical pending ledger and cannot reconstruct old Mes
   assert.equal(index.includes('QueuedMessageCustodyStartupReconciler'), false);
   const hydrate = index.indexOf('await invocationQueue.hydrateFromLedger(messageStore)');
   const listen = index.indexOf('address = await listenBeforeTurnExecutionRecovery');
-  const child = index.indexOf('new TurnExecutionStartupReconciler');
-  const parent = index.indexOf('await reconciler.reconcileOrphans()');
-  assert.ok(hydrate >= 0 && hydrate < listen && listen < child && child < parent);
+  const recover = index.indexOf('await recoverPriorProcessExecutions(');
+  assert.ok(hydrate >= 0 && hydrate < listen && listen < recover);
+  // The child-before-parent order lives in the one recovery function index.ts runs.
+  const recovery = readFileSync(
+    new URL('domains/cats/services/agents/invocation/prior-process-execution-recovery.ts', root),
+    'utf8',
+  );
+  const child = recovery.indexOf('new TurnExecutionStartupReconciler');
+  const parent = recovery.indexOf('}).reconcileOrphans()');
+  assert.ok(child >= 0 && child < parent);
 });
 
 function fixture(t, status = 'running', targets = ['opus']) {

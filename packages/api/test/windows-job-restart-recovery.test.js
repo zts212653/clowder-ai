@@ -203,15 +203,25 @@ test('a killed Windows API leaves no stuck execution after a real restart', { sk
     assert.deepEqual(baseline.interrupted, []);
     untouched(baseline);
 
-    // GREEN: the fixed recovery proves the job closed and the existing owners settle every object.
+    // GREEN, with a failing response store: the job proof ends the child, and R stays pending.
+    const settleFailed = runB('settle-fail');
+    assert.equal(settleFailed.adopted, true, 'API B adopts its own job and still exits by itself');
+    assert.deepEqual(settleFailed.released, [childId]);
+    assert.deepEqual(settleFailed.interrupted, [childId]);
+    assert.deepEqual([settleFailed.status, settleFailed.terminalReason], ['interrupted', 'process_restart']);
+    assert.deepEqual([settleFailed.blocked, settleFailed.blockerId, settleFailed.runningIds], [false, null, []]);
+    assert.deepEqual(settleFailed.parent, { status: 'failed', error: 'process_restart' });
+    assert.equal(settleFailed.sweptParents, 1);
+    assert.deepEqual([settleFailed.settledResponses, settleFailed.settlementFailures], [0, [childId]]);
+    assert.deepEqual(
+      [settleFailed.response.status, settleFailed.drafts, settleFailed.responsePending],
+      ['processing', 1, [childId]],
+    );
+    assert.equal(settleFailed.authOk, false, "the old child's callback credential no longer verifies");
+
+    // The next start retries the pending R from its draft.
     const recovered = runB('fixed');
-    assert.equal(recovered.adopted, true, 'API B adopts its own job and still exits by itself');
-    assert.deepEqual(recovered.released, [childId]);
-    assert.deepEqual(recovered.interrupted, [childId]);
-    assert.deepEqual([recovered.status, recovered.terminalReason], ['interrupted', 'process_restart']);
-    assert.deepEqual([recovered.blocked, recovered.blockerId, recovered.runningIds], [false, null, []]);
-    assert.deepEqual(recovered.parent, { status: 'failed', error: 'process_restart' });
-    assert.equal(recovered.sweptParents, 1);
+    assert.deepEqual([recovered.released, recovered.interrupted, recovered.sweptParents], [[], [], 0]);
     // R keeps the streamed body and says it was interrupted; it does not claim the work finished.
     assert.deepEqual(recovered.response, {
       status: 'interrupted',
@@ -219,7 +229,6 @@ test('a killed Windows API leaves no stuck execution after a real restart', { sk
       content: config.streamedBody,
     });
     assert.deepEqual([recovered.settledResponses, recovered.drafts, recovered.responsePending], [1, 0, []]);
-    assert.equal(recovered.authOk, false, "the old child's callback credential no longer verifies");
     assert.deepEqual(readdirSync(join(dataDir, 'windows-job-execution-links')), []);
     const owners = readdirSync(join(dataDir, 'windows-api-jobs')).map((name) =>
       JSON.parse(readFileSync(join(dataDir, 'windows-api-jobs', name), 'utf8')),
@@ -230,7 +239,7 @@ test('a killed Windows API leaves no stuck execution after a real restart', { sk
       "A's evidence is cleared once settled",
     );
 
-    t.diagnostic(JSON.stringify({ whileAlive, baseline, recovered }));
+    t.diagnostic(JSON.stringify({ whileAlive, baseline, settleFailed, recovered }));
     // Recovery again changes nothing, and the next message of the same thread/role reaches its provider.
     const repeated = runB('next');
     assert.deepEqual([repeated.released, repeated.interrupted, repeated.status], [[], [], 'interrupted']);
