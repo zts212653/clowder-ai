@@ -831,7 +831,11 @@ describe('#1838 cancel route: a dead API s started provider stops only with its 
         { parentEnded: true },
       );
       assert.equal(res.statusCode, 200, res.body);
-      assert.notEqual(child.status, 'running', 'the unknown no longer blocks its role');
+      assert.deepEqual(
+        [child.status, child.terminalReason],
+        ['canceled', 'user_cancel'],
+        'the unknown no longer blocks its role',
+      );
       assert.equal(child.providerTeardownAt, undefined, 'no proof, so no teardown is written');
       assert.deepEqual(await listed(), []);
       assert.deepEqual(recordStore.updates, [], 'the ended parent is not touched');
@@ -847,13 +851,21 @@ describe('#1838 cancel route: a dead API s started provider stops only with its 
       );
       assert.equal(res.statusCode, 503, res.body);
       const ended = await turns.get('child-dead-api');
-      assert.notEqual(ended.status, 'running', 'the first attempt already ended the child');
+      assert.deepEqual(
+        [ended.status, ended.terminalReason],
+        ['canceled', 'user_cancel'],
+        'the first attempt already ended the child',
+      );
       assert.equal(ended.providerTeardownAt, undefined);
       assert.equal((await readResponse()).lifecycle.status, 'processing', 'its reply is still owed');
 
       const second = await retry();
       assert.equal(second.statusCode, 200, second.body);
-      assert.notEqual((await readResponse()).lifecycle.status, 'processing', 'the retry settled the reply');
+      assert.deepEqual(
+        [(await readResponse()).lifecycle.status, (await readResponse()).content],
+        ['canceled', 'streamed body'],
+        'the retry settled the reply with what it streamed',
+      );
       assert.deepEqual(await turns.listResponsePending(), [], 'nothing is left owed');
       assert.equal((await turns.get('child-dead-api')).providerTeardownAt, undefined, 'still no teardown');
       assert.deepEqual(recordStore.updates, [], 'the ended parent is never reopened or rewritten');
