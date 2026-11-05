@@ -1,0 +1,521 @@
+diff --git a/packages/api/src/index.ts b/packages/api/src/index.ts
+index 4d41f4ac5..d1a4b3c8a 100644
+--- a/packages/api/src/index.ts
++++ b/packages/api/src/index.ts
+@@ -7684,8 +7684,8 @@ async function main(): Promise<void> {
+         // Windows child-owner records plus a native identity probe are the stop evidence.
+         // Only a verified stop releases an execution; alive/unknown keep the protection.
+         const windowsStopEvidence = await resolveWindowsStopEvidence({ dataDir: process.env.CAT_CAFE_DATA_DIR });
+-        for (const invocationId of windowsStopEvidence.verifiedStoppedInvocationIds) {
+-          await turnExecutionStore.recordProviderTeardown?.(invocationId, Date.now());
++        for (const entry of windowsStopEvidence.verifiedStopped) {
++          await turnExecutionStore.recordProviderTeardown?.(entry.invocationId, Date.now());
+         }        if (windowsStopEvidence.unresolved.length > 0) {
+           app.log.warn(
+             { windowsStopEvidence: windowsStopEvidence.unresolved },
+diff --git a/packages/api/src/utils/CliExecutionObservation.ts b/packages/api/src/utils/CliExecutionObservation.ts
+index 09e3354dc..c6ffb81df 100644
+--- a/packages/api/src/utils/CliExecutionObservation.ts
++++ b/packages/api/src/utils/CliExecutionObservation.ts
+@@ -1,6 +1,6 @@
+ import type { CliExecutionOwnerRef } from './cli-process-ownership.js';
+ import type { ChildProcessLike } from './cli-types.js';
+-import { readWindowsProcessTable, recordWindowsChildOwner } from './windows-cli-child-owner.js';
++import { readWindowsDescendants, readWindowsProcessTable, recordWindowsChildOwner } from './windows-cli-child-owner.js';
+ 
+ interface Observation {
+   owner: CliExecutionOwnerRef;
+@@ -14,20 +14,31 @@ const RETENTION_MS = 24 * 60 * 60 * 1_000;
+  * durably as soon as the process exists. Without it a forced API kill leaves a durable `running`
+  * child that no later process can prove stopped.
+  *
++ * Descendants visible at registration are captured too: a provider that spawns through a shim or
++ * launcher can outlive that intermediate, and a stop check that only knows the root would then
++ * miss a survivor whose ParentProcessId names the vanished launcher.
++ *
+  * The record is never deleted here: a crash between the provider's own exit and the durable
+  * teardown write would otherwise destroy the only proof that it stopped. Startup recovery clears
+  * the record once the execution is settled.
+  *
+- * Residual window: this lands one probe after spawn, not before it.
++ * Residual window: this lands just after spawn, so a provider that starts, spawns and crashes
++ * inside that window is still covered only by the ledger's unconfirmed protection.
+  */
+ function recordWindowsProviderIdentity(child: ChildProcessLike, owner: CliExecutionOwnerRef): void {
+   if (process.platform !== 'win32') return;
+-  if (child.pid === undefined) return;
+-  void readWindowsProcessTable([child.pid])
+-    .then((table) => {
+-      const identity = table?.get(child.pid as number);
+-      if (!identity) return;
+-      recordWindowsChildOwner({ execution: owner, root: { pid: identity.pid, creationDate: identity.creationDate } });
++  const rootPid = child.pid;
++  if (rootPid === undefined) return;
++  void readWindowsProcessTable([rootPid])
++    .then(async (table) => {
++      const root = table?.get(rootPid);
++      if (!root) return;
++      const descendants = await readWindowsDescendants(rootPid);
++      recordWindowsChildOwner({
++        execution: owner,
++        root: { pid: root.pid, creationDate: root.creationDate },
++        ...(descendants ? { descendants } : {}),
++      });
+     })
+     .catch(() => {
+       // Losing the record costs the *unlock*, never the protection: the ledger keeps its
+diff --git a/packages/api/src/utils/windows-cli-child-owner.ts b/packages/api/src/utils/windows-cli-child-owner.ts
+index af69a55fd..f577b008e 100644
+--- a/packages/api/src/utils/windows-cli-child-owner.ts
++++ b/packages/api/src/utils/windows-cli-child-owner.ts
+@@ -54,6 +54,27 @@ export interface WindowsChildOwnerRecord {
+   execution: CliExecutionOwnerRef;
+   /** The provider process this API instance started. */
+   root: WindowsProcessIdentity;
++  /**
++   * Birth identities observed for the root's descendants at registration time.
++   *
++   * A provider can spawn through an intermediate (shim → launcher → writer) and the intermediate
++   * may exit before the root does. Walking down from a dead root then cannot reach the survivor,
++   * because its ParentProcessId names the vanished intermediate. Recording the descendants we can
++   * see lets the stop check continue from every known member of the chain instead of only the root.
++   *
++   * `undefined` means the chain was never observed (registration could not read the table), so a
++   * stop cannot be proven. An empty array is a real observation: the provider had no descendants
++   * at that moment.
++   */
++  descendants?: WindowsProcessIdentity[];
++  /**
++   * True when registration read the whole process table at capture time.
++   *
++   * This is what licenses "root gone and nothing reachable from it" to mean stopped. Without a
++   * capture-time table read we cannot tell "the provider never spawned a child" from "we failed to
++   * look", and the latter could hide a survivor behind an intermediate we never saw.
++   */
++  chainObserved?: true;
+ }
+ 
+ export type WindowsStopVerdict = 'alive' | 'verified-stopped' | 'unknown';
+@@ -112,7 +133,25 @@ export function parseWindowsChildOwnerRecord(value: unknown): WindowsChildOwnerR
+   if (!execution) return null;
+   const root = parseWindowsProcessIdentity(record.root);
+   if (!root) return null;
+-  return { v: 1, ownerId: record.ownerId, createdAt: record.createdAt, execution, root };
++  // A malformed descendant cannot be ignored: dropping it would narrow the stop check and could
++  // turn an unreachable survivor into a false "stopped". The whole record is rejected instead.
++  let descendants: WindowsProcessIdentity[] | undefined;
++  if (record.descendants !== undefined) {
++    if (!Array.isArray(record.descendants)) return null;
++    const parsed = record.descendants.map(parseWindowsProcessIdentity);
++    if (parsed.some((identity) => !identity)) return null;
++    descendants = parsed as WindowsProcessIdentity[];
++  }
++  if (record.chainObserved !== undefined && record.chainObserved !== true) return null;
++  return {
++    v: 1,
++    ownerId: record.ownerId,
++    createdAt: record.createdAt,
++    execution,
++    root,
++    ...(descendants ? { descendants } : {}),
++    ...(record.chainObserved === true ? { chainObserved: true as const } : {}),
++  };
+ }
+ 
+ export function resolveWindowsChildOwnerDirectory(dataDir?: string): string {
+@@ -120,78 +159,84 @@ export function resolveWindowsChildOwnerDirectory(dataDir?: string): string {
+ }
+ 
+ /**
+- * The exact Win32_Process rows for the given PIDs. Returns null when the probe could not run,
+- * so a failed probe reads as `unknown` and never as "nothing is there".
++ * One bounded Win32_Process read.
++ *
++ * `-ErrorAction SilentlyContinue` is deliberately NOT used: with it, a failing CIM query exits 0
++ * with empty stdout, which parses as "nothing is there" and would grant a stop proof from a failed
++ * probe. Instead the query must throw (`-ErrorAction Stop`), and a trailing sentinel proves the
++ * pipeline actually ran. Missing sentinel, non-zero exit, or an error row all resolve to null.
+  */
+-export async function readWindowsProcessTable(
+-  pids: readonly number[],
+-  execFileImpl: typeof execFile = execFile,
+-): Promise<Map<number, RawWindowsProcess> | null> {
+-  const wanted = pids.filter(isPositiveSafeInteger);
+-  if (wanted.length === 0) return new Map();
+-  // One bounded query for the whole snapshot; the request path must never start a
+-  // PowerShell process per owner. -Filter keeps the result set to the PIDs we asked about.
+-  const filter = wanted.map((pid) => `ProcessId = ${pid}`).join(' OR ');
+-  const script = [
+-    `Get-CimInstance Win32_Process -Filter "${filter}" -ErrorAction SilentlyContinue |`,
+-    'ForEach-Object { "{0}`t{1}`t{2}" -f $_.ProcessId, $_.ParentProcessId, $_.CreationDate.Ticks }',
++function probeWindowsProcessScript(filter: string | null): string {
++  const query = filter
++    ? `Get-CimInstance Win32_Process -Filter "${filter}" -ErrorAction Stop`
++    : 'Get-CimInstance Win32_Process -ErrorAction Stop';
++  return [
++    '$ErrorActionPreference = "Stop";',
++    'try {',
++    `  ${query} | ForEach-Object { "{0}\`t{1}\`t{2}" -f $_.ProcessId, $_.ParentProcessId, $_.CreationDate.Ticks }`,
++    '  "__PROBE_OK__"',
++    '} catch {',
++    '  "__PROBE_FAILED__"',
++    '  exit 3',
++    '}',
+   ].join(' ');
++}
++
++function parseProcessTableOutput(stdout: string): Map<number, RawWindowsProcess> | null {
++  if (!stdout.includes('__PROBE_OK__')) return null;
++  const table = new Map<number, RawWindowsProcess>();
++  for (const line of stdout.split('\n')) {
++    const [pid, ppid, creationDate] = line.trim().split('\t');
++    const parsedPid = Number(pid);
++    const parsedPpid = Number(ppid);
++    if (!isPositiveSafeInteger(parsedPid) || !Number.isInteger(parsedPpid)) continue;
++    if (typeof creationDate !== 'string' || creationDate.trim() === '') continue;
++    table.set(parsedPid, { pid: parsedPid, ppid: parsedPpid, creationDate: creationDate.trim() });
++  }
++  return table;
++}
++
++function runWindowsProcessProbe(
++  filter: string | null,
++  maxBuffer: number,
++  execFileImpl: typeof execFile,
++): Promise<Map<number, RawWindowsProcess> | null> {
+   return new Promise((resolveTable) => {
+     execFileImpl(
+       'powershell.exe',
+-      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script],
+-      { timeout: PROBE_TIMEOUT_MS, windowsHide: true, maxBuffer: 4 * 1024 * 1024 },
++      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', probeWindowsProcessScript(filter)],
++      { timeout: PROBE_TIMEOUT_MS, windowsHide: true, maxBuffer },
+       (error, stdout) => {
+         if (error || typeof stdout !== 'string') {
+           resolveTable(null);
+           return;
+         }
+-        const table = new Map<number, RawWindowsProcess>();
+-        for (const line of stdout.split('\n')) {
+-          const [pid, ppid, creationDate] = line.trim().split('\t');
+-          const parsedPid = Number(pid);
+-          const parsedPpid = Number(ppid);
+-          if (!isPositiveSafeInteger(parsedPid) || !Number.isInteger(parsedPpid)) continue;
+-          if (typeof creationDate !== 'string' || creationDate.trim() === '') continue;
+-          table.set(parsedPid, { pid: parsedPid, ppid: parsedPpid, creationDate: creationDate.trim() });
+-        }
+-        resolveTable(table);
++        resolveTable(parseProcessTableOutput(stdout));
+       },
+     );
+   });
+ }
+ 
++/**
++ * The exact Win32_Process rows for the given PIDs. Returns null when the probe could not run,
++ * so a failed probe reads as `unknown` and never as "nothing is there".
++ */
++export async function readWindowsProcessTable(
++  pids: readonly number[],
++  execFileImpl: typeof execFile = execFile,
++): Promise<Map<number, RawWindowsProcess> | null> {
++  const wanted = pids.filter(isPositiveSafeInteger);
++  if (wanted.length === 0) return new Map();
++  // One bounded query for the whole snapshot; the request path must never start a
++  // PowerShell process per owner. -Filter keeps the result set to the PIDs we asked about.
++  return runWindowsProcessProbe(wanted.map((pid) => `ProcessId = ${pid}`).join(' OR '), 4 * 1024 * 1024, execFileImpl);
++}
++
+ /** The whole table, used only to walk descendants of a dead root. */
+ async function readFullWindowsProcessTable(
+   execFileImpl: typeof execFile = execFile,
+ ): Promise<Map<number, RawWindowsProcess> | null> {
+-  const script = [
+-    'Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |',
+-    'ForEach-Object { "{0}`t{1}`t{2}" -f $_.ProcessId, $_.ParentProcessId, $_.CreationDate.Ticks }',
+-  ].join(' ');
+-  return new Promise((resolveTable) => {
+-    execFileImpl(
+-      'powershell.exe',
+-      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script],
+-      { timeout: PROBE_TIMEOUT_MS, windowsHide: true, maxBuffer: 8 * 1024 * 1024 },
+-      (error, stdout) => {
+-        if (error || typeof stdout !== 'string') {
+-          resolveTable(null);
+-          return;
+-        }
+-        const table = new Map<number, RawWindowsProcess>();
+-        for (const line of stdout.split('\n')) {
+-          const [pid, ppid, creationDate] = line.trim().split('\t');
+-          const parsedPid = Number(pid);
+-          const parsedPpid = Number(ppid);
+-          if (!isPositiveSafeInteger(parsedPid) || !Number.isInteger(parsedPpid)) continue;
+-          if (typeof creationDate !== 'string' || creationDate.trim() === '') continue;
+-          table.set(parsedPid, { pid: parsedPid, ppid: parsedPpid, creationDate: creationDate.trim() });
+-        }
+-        resolveTable(table);
+-      },
+-    );
+-  });
++  return runWindowsProcessProbe(null, 8 * 1024 * 1024, execFileImpl);
+ }
+ 
+ /**
+@@ -200,58 +245,97 @@ async function readFullWindowsProcessTable(
+  * A missing root PID is NOT enough to call the provider stopped: measured on Windows 11, a child
+  * outlives its parent and keeps reporting the dead parent's PID, so the tree is walked explicitly.
+  *
+- * Three distinct cases, never collapsed:
+- * - root PID gone entirely  → walk its stale-PPID descendants; none left means verified-stopped.
++ * Cases, never collapsed:
+  * - root PID present, same creation time → alive.
+  * - root PID present, different creation time → the PID was REUSED. The recorded provider is gone
+  *   but its former descendants are indistinguishable from the new process's children, so the
+  *   answer is unknown and no PID is reported. Reporting the new process's children here would let
+  *   an operator Stop unrelated processes.
++ * - root PID gone → walk descendants by PPID.
++ * - root PID gone, no descendant found → verified-stopped ONLY IF the chain is provably complete.
++ *
++ * The last clause is the important one. A root→launcher→writer tree where the launcher exits
++ * first leaves the writer alive with a PPID pointing at the dead launcher. Walking down from the
++ * root cannot see it, so an empty walk would wrongly read as "the whole provider stopped" and let
++ * a second writer into the session. A walk from a gone root therefore proves a stop only when
++ * nothing in the table still hangs off ANY pid in the recorded chain; if the table shows orphans of
++ * vanished intermediates we did not record, the answer is unknown.
+  */
+ export function classifyWindowsStopEvidence(
+   roots: readonly WindowsProcessIdentity[],
+   table: ReadonlyMap<number, RawWindowsProcess> | null,
+-  options: { fullTable?: ReadonlyMap<number, RawWindowsProcess> | null } = {},
++  options: {
++    fullTable?: ReadonlyMap<number, RawWindowsProcess> | null;
++    /**
++     * The recorded chain covered the provider end to end (its descendants were captured at
++     * registration and none is missing). Only then can "nothing survives" prove a stop; an
++     * incomplete chain leaves an unrecorded intermediate able to hide a survivor.
++     */
++    chainComplete?: boolean;
++  } = {},
+ ): WindowsStopEvidence {
+   if (!table) return { verdict: 'unknown', liveProcessIds: [], reason: 'process_probe_failed' };
+   const root = roots[0];
+   if (!root) return { verdict: 'unknown', liveProcessIds: [], reason: 'identity_missing' };
+ 
+-  const observedRoot = table.get(root.pid);
+-  if (observedRoot) {
+-    return observedRoot.creationDate === root.creationDate
+-      ? { verdict: 'alive', liveProcessIds: [root.pid], reason: 'provider_root_alive' }
+-      : { verdict: 'unknown', liveProcessIds: [], reason: 'pid_reused_identity_mismatch' };
++  // A recorded member that still exists with its exact birth time is the provider itself.
++  const aliveRecorded = roots.filter((identity) => table.get(identity.pid)?.creationDate === identity.creationDate);
++  if (aliveRecorded.length > 0) {
++    return { verdict: 'alive', liveProcessIds: aliveRecorded.map((identity) => identity.pid), reason: 'provider_alive' };
+   }
+ 
+-  // Root PID is absent. Descendants may still run with a stale ParentProcessId, so the tree is
+-  // walked. A full-table read that failed is unknown, never "stopped".
++  // A recorded pid now held by a DIFFERENT process: reuse. Its children are indistinguishable from
++  // the new owner's, so reporting them would let an operator stop an unrelated tree.
++  const reused = roots.filter((identity) => {
++    const observed = table.get(identity.pid);
++    return observed !== undefined && observed.creationDate !== identity.creationDate;
++  });
++  if (reused.length > 0) return { verdict: 'unknown', liveProcessIds: [], reason: 'pid_reused_identity_mismatch' };
++
++  // Every recorded identity is gone. Survivors can still hang off any LINK of the chain, not just
++  // the root: a shim/launcher that exited before the root leaves a writer whose ParentProcessId
++  // names that vanished launcher. Walk from every recorded member so those survivors are found.
+   const full = options.fullTable;
+   if (!full) return { verdict: 'unknown', liveProcessIds: [], reason: 'process_tree_probe_failed' };
+ 
++  const reached = new Set<number>(roots.map((identity) => identity.pid));
+   const live: number[] = [];
+-  const pending = [root.pid];
+-  const seen = new Set<number>(pending);
++  const pending = [...reached];
+   while (pending.length > 0) {
+     const parent = pending.pop() as number;
+     for (const candidate of full.values()) {
+-      if (candidate.ppid !== parent || seen.has(candidate.pid)) continue;
+-      seen.add(candidate.pid);
++      if (candidate.ppid !== parent || reached.has(candidate.pid)) continue;
++      reached.add(candidate.pid);
+       live.push(candidate.pid);
+       pending.push(candidate.pid);
+     }
+   }
+-  return live.length > 0
+-    ? { verdict: 'alive', liveProcessIds: live, reason: 'provider_descendant_alive' }
+-    : { verdict: 'verified-stopped', liveProcessIds: [], reason: 'provider_tree_stopped' };
++  if (live.length > 0) return { verdict: 'alive', liveProcessIds: live, reason: 'provider_descendant_alive' };
++
++  // Nothing survives off any recorded link.
++  //
++  // But an unrecorded intermediate can still hide a survivor: if the chain was root→X→writer and X
++  // was gone before we could record it, the walk above never sees the writer. Such an orphan is
++  // indistinguishable from unrelated system noise (a real machine has dozens of processes whose
++  // PPID names a dead pid), so it cannot be treated as proof either way. Only a chain that we
++  // observed end-to-end can prove a stop; otherwise the answer stays unknown.
++  return options.chainComplete
++    ? { verdict: 'verified-stopped', liveProcessIds: [], reason: 'provider_tree_stopped' }
++    : { verdict: 'unknown', liveProcessIds: [], reason: 'provider_chain_incomplete' };
+ }
+ 
+-/** Probe once, then classify many records against the same snapshots. */
++/**
++ * Probe once, then classify against the same snapshots.
++ *
++ * `chainComplete` requires that the record captured the provider's descendants: only such a chain
++ * can prove a stop, because an unrecorded intermediate may still hide a survivor.
++ */
+ export async function probeWindowsStopEvidence(
+   roots: readonly WindowsProcessIdentity[],
+   options: {
+     readTable?: ReadWindowsProcessTable;
+     readFullTable?: () => Promise<Map<number, RawWindowsProcess> | null>;
++    chainComplete?: boolean;
+   } = {},
+ ): Promise<WindowsStopEvidence> {
+   const uniquePids = [...new Set(roots.map((root) => root.pid))];
+@@ -259,7 +343,10 @@ export async function probeWindowsStopEvidence(
+   if (!table) return { verdict: 'unknown', liveProcessIds: [], reason: 'process_probe_failed' };
+   const rootMissing = roots.some((root) => !table.has(root.pid));
+   const fullTable = rootMissing ? await (options.readFullTable ?? readFullWindowsProcessTable)() : undefined;
+-  return classifyWindowsStopEvidence(roots, table, { fullTable });
++  return classifyWindowsStopEvidence(roots, table, {
++    fullTable,
++    ...(options.chainComplete === undefined ? {} : { chainComplete: options.chainComplete }),
++  });
+ }
+ 
+ function atomicWrite(path: string, record: WindowsChildOwnerRecord): void {
+@@ -282,6 +369,10 @@ export function recordWindowsChildOwner(options: {
+   dataDir?: string;
+   execution: CliExecutionOwnerRef;
+   root: WindowsProcessIdentity;
++  /** Descendants observed at registration, so a survivor orphaned by an intermediate stays reachable. */
++  descendants?: WindowsProcessIdentity[];
++  /** The table was read at capture time, which is what licenses a later "stopped" verdict. */
++  chainObserved?: boolean;
+ }): { path: string; record: WindowsChildOwnerRecord } {
+   const directory = resolveWindowsChildOwnerDirectory(options.dataDir);
+   mkdirSync(directory, { recursive: true, mode: 0o700 });
+@@ -293,6 +384,8 @@ export function recordWindowsChildOwner(options: {
+     createdAt: Date.now(),
+     execution: options.execution,
+     root: options.root,
++    ...(options.descendants && options.descendants.length > 0 ? { descendants: options.descendants } : {}),
++    ...(options.chainObserved === true ? { chainObserved: true as const } : {}),
+   };
+   const path = join(directory, `${ownerId}.json`);
+   atomicWrite(path, record);
+@@ -300,7 +393,7 @@ export function recordWindowsChildOwner(options: {
+ }
+ 
+ export interface WindowsChildOwnerScan {
+-  records: WindowsChildOwnerRecord[];
++  records: Array<WindowsChildOwnerRecord & { path: string }>;
+   /** Records that could not be parsed; their executions stay protected as unknown. */
+   invalidPaths: string[];
+ }
+@@ -314,7 +407,7 @@ export function readWindowsChildOwnerRecords(dataDir?: string): WindowsChildOwne
+     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { records: [], invalidPaths: [] };
+     throw error;
+   }
+-  const records: WindowsChildOwnerRecord[] = [];
++  const records: Array<WindowsChildOwnerRecord & { path: string }> = [];
+   const invalidPaths: string[] = [];
+   for (const name of names) {
+     const path = join(directory, name);
+@@ -324,7 +417,7 @@ export function readWindowsChildOwnerRecords(dataDir?: string): WindowsChildOwne
+         invalidPaths.push(path);
+         continue;
+       }
+-      records.push(record);
++      records.push({ ...record, path });
+     } catch {
+       invalidPaths.push(path);
+     }
+@@ -338,12 +431,20 @@ export function clearWindowsChildOwner(path: string): void {
+ }
+ 
+ export interface WindowsStopResolution {
+-  /** Execution ids whose exact provider identity is verified stopped in this pass. */
+-  verifiedStoppedInvocationIds: string[];
+-  /** Execution ids that are alive or unknown; they keep their protection and stay visible. */
++  /**
++   * Executions whose exact provider identity is verified stopped, with the record paths to clear
++   * once the execution is durably settled. Clearing before the settlement write would destroy the
++   * only stop evidence if the write then failed.
++   */
++  verifiedStopped: Array<{ invocationId: string; recordPath: string }>;
++  /** Executions that are alive or unknown; they keep their protection and stay visible. */
+   unresolved: Array<{ invocationId: string; verdict: WindowsStopVerdict; reason: string; liveProcessIds: number[] }>;
+ }
+ 
++export function verifiedStoppedInvocationIds(resolution: WindowsStopResolution): string[] {
++  return resolution.verifiedStopped.map((entry) => entry.invocationId);
++}
++
+ /**
+  * Turn durable Windows ownership records into consumable stop evidence for startup recovery.
+  *
+@@ -359,13 +460,20 @@ export async function resolveWindowsStopEvidence(
+   } = {},
+ ): Promise<WindowsStopResolution> {
+   const { records, invalidPaths } = readWindowsChildOwnerRecords(options.dataDir);
+-  const verifiedStoppedInvocationIds: string[] = [];
++  const verifiedStopped: WindowsStopResolution['verifiedStopped'] = [];
+   const unresolved: WindowsStopResolution['unresolved'] = [];
+   // A malformed record cannot prove anything about its execution, so it is reported unknown
+   // rather than silently dropped: a dropped record looks identical to "no provider ever ran".
+   for (const record of records) {
+-    const evidence = await probeWindowsStopEvidence([record.root], options);
+-    if (evidence.verdict === 'verified-stopped') verifiedStoppedInvocationIds.push(record.execution.invocationId);
++    const chain = [record.root, ...(record.descendants ?? [])];
++    // A stop is provable only when registration actually observed the tree. Otherwise an
++    // intermediate we never saw could still be hiding a survivor, so the answer stays unknown.
++    const evidence = await probeWindowsStopEvidence(chain, {
++      ...options,
++      chainComplete: record.chainObserved === true,
++    });
++    if (evidence.verdict === 'verified-stopped')
++      verifiedStopped.push({ invocationId: record.execution.invocationId, recordPath: record.path });
+     else
+       unresolved.push({
+         invocationId: record.execution.invocationId,
+@@ -382,5 +490,33 @@ export async function resolveWindowsStopEvidence(
+       liveProcessIds: [],
+     });
+   }
+-  return { verifiedStoppedInvocationIds, unresolved };
++  return { verifiedStopped, unresolved };
++}
++
++/**
++ * Descendant birth identities currently reachable from `rootPid`, captured at registration.
++ *
++ * Empty is a legitimate answer (the provider has not spawned yet), but it must not be confused
++ * with a failed read: `null` means the table could not be read, so the caller records no chain and
++ * the stop check stays conservative instead of assuming the provider has no children.
++ */
++export async function readWindowsDescendants(
++  rootPid: number,
++  options: { readFullTable?: () => Promise<Map<number, RawWindowsProcess> | null> } = {},
++): Promise<WindowsProcessIdentity[] | null> {
++  const full = await (options.readFullTable ?? readFullWindowsProcessTable)();
++  if (!full) return null;
++  const reached = new Set<number>([rootPid]);
++  const descendants: WindowsProcessIdentity[] = [];
++  const pending = [rootPid];
++  while (pending.length > 0) {
++    const parent = pending.pop() as number;
++    for (const candidate of full.values()) {
++      if (candidate.ppid !== parent || reached.has(candidate.pid)) continue;
++      reached.add(candidate.pid);
++      descendants.push({ pid: candidate.pid, creationDate: candidate.creationDate });
++      pending.push(candidate.pid);
++    }
++  }
++  return descendants;
+ }
