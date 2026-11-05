@@ -48,20 +48,37 @@ test('uses the Host-adjacent Corepack and pins lifecycle pnpm resolution for ins
     calls.map(({ command, args }) => ({ command, args })),
     [
       {
-        command: '/opt/clowder/node/bin/corepack',
-        args: ['enable', 'pnpm', '--install-directory', calls[0].args[3]],
+        command: '/opt/clowder/node/bin/node',
+        args: [
+          '/opt/clowder/node/lib/node_modules/corepack/dist/corepack.js',
+          'enable',
+          'pnpm',
+          '--install-directory',
+          calls[0].args[4],
+        ],
       },
       {
-        command: '/opt/clowder/node/bin/corepack',
-        args: ['pnpm@9.15.4', 'install', '--frozen-lockfile'],
+        command: '/opt/clowder/node/bin/node',
+        args: [
+          '/opt/clowder/node/lib/node_modules/corepack/dist/corepack.js',
+          'pnpm@9.15.4',
+          'install',
+          '--frozen-lockfile',
+        ],
       },
       {
-        command: '/opt/clowder/node/bin/corepack',
-        args: ['pnpm@9.15.4', '--filter', '@example/demo...', 'build'],
+        command: '/opt/clowder/node/bin/node',
+        args: [
+          '/opt/clowder/node/lib/node_modules/corepack/dist/corepack.js',
+          'pnpm@9.15.4',
+          '--filter',
+          '@example/demo...',
+          'build',
+        ],
       },
     ],
   );
-  const shimDirectory = calls[0].args[3];
+  const shimDirectory = calls[0].args[4];
   assert.equal(typeof shimDirectory, 'string');
   const expectedPath = process.env.PATH ? `${shimDirectory}:${process.env.PATH}` : shimDirectory;
   assert.equal(readPath(calls[1].options.env), expectedPath);
@@ -73,47 +90,44 @@ test('uses the Host-adjacent Corepack and pins lifecycle pnpm resolution for ins
   assert.equal(env.COREPACK_ENABLE_STRICT, '1');
 });
 
-test('resolves the Windows Corepack shim adjacent to the Host Node before spawning', async (t) => {
+test('runs the Windows Corepack entry with the same Host Node instead of a system Node', async (t) => {
   const f = await fixture(t, undefined, { name: '@example/demo' });
-  const plans = [];
   const calls = [];
 
   await prepareMarketplaceDirectory(f.directory, f.root, {
     platform: 'win32',
     execPath: 'C:\\Clowder\\runtime\\node.exe',
     exists: () => true,
-    windowsSpawnPlan: (command, args) => {
-      plans.push({ command, args });
-      return { command: 'C:\\Clowder\\runtime\\node.exe', args: ['corepack.js', ...args], shell: undefined };
-    },
     exec: async (command, args, options) => {
       calls.push({ command, args, shell: options.shell, envPath: readPath(options.env) });
       return { stdout: '', stderr: '' };
     },
   });
 
-  assert.deepEqual(plans, [
-    {
-      command: 'C:\\Clowder\\runtime\\corepack.cmd',
-      args: ['enable', 'pnpm', '--install-directory', plans[0].args[3]],
-    },
-    {
-      command: 'C:\\Clowder\\runtime\\corepack.cmd',
-      args: ['pnpm@9.15.4', 'install', '--frozen-lockfile'],
-    },
-  ]);
+  const shimDirectory = calls[0].args[4];
   assert.deepEqual(calls, [
     {
       command: 'C:\\Clowder\\runtime\\node.exe',
-      args: ['corepack.js', 'enable', 'pnpm', '--install-directory', plans[0].args[3]],
+      args: [
+        'C:\\Clowder\\runtime\\node_modules\\corepack\\dist\\corepack.js',
+        'enable',
+        'pnpm',
+        '--install-directory',
+        shimDirectory,
+      ],
       shell: undefined,
       envPath: process.env.PATH,
     },
     {
       command: 'C:\\Clowder\\runtime\\node.exe',
-      args: ['corepack.js', 'pnpm@9.15.4', 'install', '--frozen-lockfile'],
+      args: [
+        'C:\\Clowder\\runtime\\node_modules\\corepack\\dist\\corepack.js',
+        'pnpm@9.15.4',
+        'install',
+        '--frozen-lockfile',
+      ],
       shell: undefined,
-      envPath: process.env.PATH ? `${plans[0].args[3]};${process.env.PATH}` : plans[0].args[3],
+      envPath: process.env.PATH ? `${shimDirectory};${process.env.PATH}` : shimDirectory,
     },
   ]);
 });
@@ -154,6 +168,19 @@ test('fails closed when the Host-adjacent Corepack executable is unavailable', a
       exec: async () => ({ stdout: '', stderr: '' }),
     }),
     /Host-bundled Corepack/i,
+  );
+});
+
+test('fails closed when the Host-bundled Corepack entry script is unavailable', async (t) => {
+  const f = await fixture(t, undefined, { name: '@example/demo' });
+  await assert.rejects(
+    prepareMarketplaceDirectory(f.directory, f.root, {
+      platform: 'linux',
+      execPath: '/opt/clowder/node/bin/node',
+      exists: (candidate) => !candidate.endsWith('/corepack/dist/corepack.js'),
+      exec: async () => ({ stdout: '', stderr: '' }),
+    }),
+    /Host-bundled Corepack entry script/i,
   );
 });
 

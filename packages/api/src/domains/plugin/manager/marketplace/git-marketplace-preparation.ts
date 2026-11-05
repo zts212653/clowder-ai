@@ -4,7 +4,6 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, posix, win32 } from 'node:path';
 import { promisify } from 'node:util';
-import { resolveWindowsSpawnPlan } from '../../../../utils/cli-spawn-win.js';
 import { excerptSanitizedStderr } from '../../../../utils/sanitize-cli-stderr.js';
 
 const exec = promisify(execFile);
@@ -35,7 +34,6 @@ interface MarketplacePreparationDeps {
     args: readonly string[],
     options: Record<string, unknown>,
   ) => Promise<{ stdout: string; stderr: string }>;
-  readonly windowsSpawnPlan?: typeof resolveWindowsSpawnPlan;
 }
 
 const EXACT_SEMVER =
@@ -56,9 +54,16 @@ function exactPnpmPackageManager(value: unknown): string {
   return value;
 }
 
-function hostCorepackPath(platform: NodeJS.Platform, execPath: string): string {
+function hostCorepackPaths(platform: NodeJS.Platform, execPath: string): { launcher: string; script: string } {
   const path = platform === 'win32' ? win32 : posix;
-  return path.join(path.dirname(execPath), platform === 'win32' ? 'corepack.cmd' : 'corepack');
+  const runtimeDirectory = path.dirname(execPath);
+  return {
+    launcher: path.join(runtimeDirectory, platform === 'win32' ? 'corepack.cmd' : 'corepack'),
+    script:
+      platform === 'win32'
+        ? path.join(runtimeDirectory, 'node_modules', 'corepack', 'dist', 'corepack.js')
+        : path.join(runtimeDirectory, '..', 'lib', 'node_modules', 'corepack', 'dist', 'corepack.js'),
+  };
 }
 
 function outputText(value: unknown): string {
@@ -127,11 +132,15 @@ export async function prepareMarketplaceDirectory(
     throw new Error('Invalid marketplace package name');
   }
   const packageManager = exactPnpmPackageManager(rootPkg?.packageManager);
-  const corepack = hostCorepackPath(platform, deps.execPath ?? process.execPath);
+  const execPath = deps.execPath ?? process.execPath;
+  const corepack = hostCorepackPaths(platform, execPath);
   const path = platform === 'win32' ? win32 : posix;
   const pathExists = deps.exists ?? existsSync;
-  if (!pathExists(corepack)) {
+  if (!pathExists(corepack.launcher)) {
     throw new Error('Marketplace preparation requires the Host-bundled Corepack executable');
+  }
+  if (!pathExists(corepack.script)) {
+    throw new Error('Marketplace preparation requires the Host-bundled Corepack entry script');
   }
   const baseEnv = {
     ...process.env,
@@ -155,10 +164,12 @@ export async function prepareMarketplaceDirectory(
     options: Record<string, unknown>,
   ) => {
     try {
-      if (platform === 'win32') {
-        const plan = (deps.windowsSpawnPlan ?? resolveWindowsSpawnPlan)(corepack, args);
-        await runExec(plan.command, plan.args, { ...options, ...(plan.shell ? { shell: plan.shell } : {}) });
-      } else await runExec(corepack, args, options);
+      // Corepack's POSIX launcher uses `#!/usr/bin/env node`, while its Windows
+      // .cmd shim is normally parsed by the generic external-CLI spawn helper.
+      // Neither path proves that the packaged Host Node is used on a clean
+      // machine. Invoke the entry script with this API process executable so
+      // version selection never depends on a system Node or PATH.
+      await runExec(execPath, [corepack.script, ...args], options);
     } catch (error) {
       throw childFailure(error, packageManager, phase, root);
     }
