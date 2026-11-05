@@ -161,6 +161,7 @@ export async function runSignalFetchScheduler(
     dryRun,
     deduplication: services.deduplication,
     articleStore: services.articleStore,
+    now: schedulerNow,
   });
 
   const summaryBase = {

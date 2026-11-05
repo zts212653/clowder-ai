@@ -88,6 +88,25 @@ function filterArticlesByKeywordFilter(
   return articles.filter((article) => shouldKeepArticleByKeywordFilter(source, article));
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Feeds that ship their whole archive would otherwise flood the inbox on a first run. */
+function filterArticlesByMaxAge(
+  source: SignalSource,
+  articles: readonly FetchResult['articles'][number][],
+  now: Date,
+): readonly FetchResult['articles'][number][] {
+  const maxAgeDays = source.filters?.maxAgeDays;
+  if (!maxAgeDays) return articles;
+
+  const cutoff = now.getTime() - maxAgeDays * DAY_MS;
+  return articles.filter((article) => {
+    const publishedAt = Date.parse(article.publishedAt);
+    // An unparseable date cannot prove the article is stale, so keep it.
+    return Number.isNaN(publishedAt) || publishedAt >= cutoff;
+  });
+}
+
 export function selectSources(
   config: SignalSourceConfig,
   sourceId: string | undefined,
@@ -171,6 +190,7 @@ async function processSource(params: {
   dryRun: boolean;
   deduplication: DeduplicationLike;
   articleStore: ArticleStoreLike;
+  now: Date;
 }): Promise<SourceProcessingResult> {
   const fetcher = params.fetchers.find((candidate) => candidate.canHandle(params.source));
   if (!fetcher) {
@@ -194,7 +214,11 @@ async function processSource(params: {
     };
   }
 
-  const filteredArticles = filterArticlesByKeywordFilter(params.source, fetched.articles);
+  const filteredArticles = filterArticlesByMaxAge(
+    params.source,
+    filterArticlesByKeywordFilter(params.source, fetched.articles),
+    params.now,
+  );
   const stored = await storeFetchedArticles({
     source: params.source,
     articles: filteredArticles,
@@ -218,6 +242,8 @@ export async function processSources(params: {
   dryRun: boolean;
   deduplication: DeduplicationLike;
   articleStore: ArticleStoreLike;
+  /** Clock for maxAgeDays filtering; the scheduler passes its own. */
+  now?: Date | undefined;
 }): Promise<{
   readonly errors: readonly FetchError[];
   readonly fetchedArticles: number;
@@ -229,6 +255,8 @@ export async function processSources(params: {
   let fetchedArticles = 0;
   let duplicateArticles = 0;
 
+  const now = params.now ?? new Date();
+
   for (const source of params.sources) {
     const sourceResult = await processSource({
       source,
@@ -236,6 +264,7 @@ export async function processSources(params: {
       dryRun: params.dryRun,
       deduplication: params.deduplication,
       articleStore: params.articleStore,
+      now,
     });
 
     errors.push(...sourceResult.errors);

@@ -40,6 +40,8 @@ export const SignalSourceSchema = z.object({
   filters: z
     .object({
       keywords: SignalKeywordFilterSchema.optional(),
+      /** Keep only articles published within this many days; undated articles are kept. */
+      maxAgeDays: z.number().int().positive().optional(),
     })
     .optional(),
 });

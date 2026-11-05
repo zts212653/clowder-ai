@@ -57,6 +57,8 @@ export const TIER1_GLOBAL_SOURCES: readonly SignalSource[] = [
     enabled: true,
     fetch: { method: 'rss' },
     schedule: { frequency: 'daily' },
+    // The feed carries the full archive (back to 2015); only take the last week.
+    filters: { maxAgeDays: 7 },
   },
   {
     id: 'openai-research',

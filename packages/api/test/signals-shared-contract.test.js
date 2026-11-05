@@ -66,6 +66,30 @@ describe('shared signals contract', () => {
     });
   });
 
+  it('keeps filters.maxAgeDays and only accepts positive whole days', () => {
+    const source = {
+      id: 'openai-news-rss',
+      name: 'OpenAI News RSS',
+      url: 'https://openai.com/news/rss.xml',
+      tier: 1,
+      category: 'official',
+      enabled: true,
+      fetch: { method: 'rss' },
+      schedule: { frequency: 'daily' },
+    };
+
+    const parsed = shared.SignalSourceSchema.parse({ ...source, filters: { maxAgeDays: 7 } });
+    assert.equal(parsed.filters.maxAgeDays, 7);
+
+    for (const maxAgeDays of [0, -3, 1.5]) {
+      assert.equal(
+        shared.SignalSourceSchema.safeParse({ ...source, filters: { maxAgeDays } }).success,
+        false,
+        `maxAgeDays=${maxAgeDays} should be rejected`,
+      );
+    }
+  });
+
   it('rejects unsafe source ids with path traversal characters', () => {
     const invalidIds = ['../outside', '..', '/tmp/evil', 'signals/news', 'news\\archive'];
 

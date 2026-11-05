@@ -229,6 +229,49 @@ describe('signal source processor', () => {
     assert.equal(result.errors.length, 0);
   });
 
+  it('drops articles older than filters.maxAgeDays against the run clock and keeps undated ones', async () => {
+    // A feed that ships its whole archive (e.g. OpenAI News back to 2015) must not
+    // flood the inbox on the first scheduled run.
+    const source = createSource({ filters: { maxAgeDays: 7 } });
+    const storeCalls = [];
+
+    const result = await processSources({
+      sources: [source],
+      fetchers: [
+        {
+          canHandle() {
+            return true;
+          },
+          async fetch() {
+            return createFetchResult(source.id, [
+              createRawArticle({ url: 'https://example.com/fresh', publishedAt: '2026-02-18T00:00:00.000Z' }),
+              createRawArticle({ url: 'https://example.com/boundary', publishedAt: '2026-02-12T03:00:00.000Z' }),
+              createRawArticle({ url: 'https://example.com/archive', publishedAt: '2015-12-11T00:00:00.000Z' }),
+              createRawArticle({ url: 'https://example.com/undated', publishedAt: 'not a date' }),
+            ]);
+          },
+        },
+      ],
+      dryRun: false,
+      deduplication: new DeduplicationService(),
+      articleStore: {
+        async store(input) {
+          storeCalls.push(input.article.url);
+          return createStoredArticle(input);
+        },
+      },
+      now: new Date('2026-02-19T03:00:00.000Z'),
+    });
+
+    assert.deepEqual(storeCalls, [
+      'https://example.com/fresh',
+      'https://example.com/boundary',
+      'https://example.com/undated',
+    ]);
+    assert.equal(result.fetchedArticles, 3);
+    assert.equal(result.errors.length, 0);
+  });
+
   it('uses local weekday semantics when selecting weekly sources', () => {
     const config = {
       version: 1,

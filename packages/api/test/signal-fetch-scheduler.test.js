@@ -411,4 +411,64 @@ describe('runSignalFetchScheduler', () => {
     assert.equal(summary.processedSources, 2);
     assert.equal(summary.skippedSources, 2);
   });
+
+  it('applies source maxAgeDays against the scheduler clock, not the wall clock', async () => {
+    const storedTitles = [];
+    const source = createSource({ id: 'openai-news-rss', filters: { maxAgeDays: 7 } });
+
+    const summary = await runSignalFetchScheduler({
+      loadSources: async () => ({ version: 1, sources: [source] }),
+      loadNotifications: async () => createNotificationsConfig(),
+      loadKnownUrls: async () => [],
+      fetchers: [
+        {
+          canHandle() {
+            return true;
+          },
+          async fetch(current) {
+            return {
+              articles: [
+                {
+                  url: 'https://openai.com/index/new-post',
+                  title: 'New post',
+                  publishedAt: '2026-02-18T00:00:00.000Z',
+                },
+                {
+                  url: 'https://openai.com/index/archive-2015',
+                  title: 'Archive post',
+                  publishedAt: '2015-12-11T00:00:00.000Z',
+                },
+              ],
+              errors: [],
+              metadata: { fetchedAt: '2026-02-19T08:00:00.000Z', duration: 1, source: current.id },
+            };
+          },
+        },
+      ],
+      articleStore: {
+        async store(input) {
+          storedTitles.push(input.article.title);
+          return {
+            id: input.articleId,
+            url: input.article.url,
+            title: input.article.title,
+            source: input.source.id,
+            tier: input.source.tier,
+            publishedAt: input.article.publishedAt,
+            fetchedAt: input.fetchedAt,
+            status: 'inbox',
+            tags: [],
+            filePath: `/tmp/${input.articleId}.md`,
+          };
+        },
+      },
+      createEmailService: () => ({ sendDailyDigest: async () => ({ status: 'skipped' }) }),
+      createInAppService: () => ({ publishDailyDigest: async () => ({ status: 'skipped' }) }),
+      now: () => new Date('2026-02-19T08:00:00.000Z'),
+    });
+
+    assert.deepEqual(storedTitles, ['New post']);
+    assert.equal(summary.fetchedArticles, 1);
+    assert.equal(summary.storedArticles, 1);
+  });
 });

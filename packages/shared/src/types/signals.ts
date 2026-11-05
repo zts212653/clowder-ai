@@ -38,6 +38,8 @@ export interface SignalSource {
   readonly filters?:
     | {
         readonly keywords?: SignalKeywordFilter | undefined;
+        /** Keep only articles published within this many days; undated articles are kept. */
+        readonly maxAgeDays?: number | undefined;
       }
     | undefined;
 }
