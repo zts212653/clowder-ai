@@ -836,6 +836,28 @@ describe('#1838 cancel route: a dead API s started provider stops only with its 
       assert.deepEqual(await listed(), []);
       assert.deepEqual(recordStore.updates, [], 'the ended parent is not touched');
     });
+    // The unknown case when the first Stop ended the child but could not commit its reply: the same
+    // Stop again settles that reply, still without a teardown and without reopening the parent.
+    it(`ended parent: a ${route} retry settles the reply of an unknown-job child`, async (t) => {
+      const { res, turns, readResponse, retry, recordStore } = await stopAfterApiDied(
+        t,
+        verdict({ state: 'unknown', nativeError: 5, sessionId: 1 }),
+        route,
+        { parentEnded: true, settleFails: true },
+      );
+      assert.equal(res.statusCode, 503, res.body);
+      const ended = await turns.get('child-dead-api');
+      assert.notEqual(ended.status, 'running', 'the first attempt already ended the child');
+      assert.equal(ended.providerTeardownAt, undefined);
+      assert.equal((await readResponse()).lifecycle.status, 'processing', 'its reply is still owed');
+
+      const second = await retry();
+      assert.equal(second.statusCode, 200, second.body);
+      assert.notEqual((await readResponse()).lifecycle.status, 'processing', 'the retry settled the reply');
+      assert.deepEqual(await turns.listResponsePending(), [], 'nothing is left owed');
+      assert.equal((await turns.get('child-dead-api')).providerTeardownAt, undefined, 'still no teardown');
+      assert.deepEqual(recordStore.updates, [], 'the ended parent is never reopened or rewritten');
+    });
     it(`ended parent: ${route} ends the child and its reply with the exact proof only`, async (t) => {
       const { res, child, response, turns, recordStore, listed } = await stopAfterApiDied(
         t,
