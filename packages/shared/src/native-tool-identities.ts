@@ -139,8 +139,8 @@ export function resolveNativeToolKey(input: NativeToolIdentityInput): NativeTool
   const acp = input.acp;
   if (acp && typeof acp === 'object' && 'command' in acp && typeof acp.command === 'string') {
     const args =
-      'startupArgs' in acp && Array.isArray(acp.startupArgs)
-        ? acp.startupArgs.filter((arg): arg is string => typeof arg === 'string')
+      'startupArgs' in acp && Array.isArray(acp.startupArgs) && acp.startupArgs.every((arg) => typeof arg === 'string')
+        ? acp.startupArgs
         : [];
     if (isDshLauncher(acp.command, args)) return 'dsh';
   }

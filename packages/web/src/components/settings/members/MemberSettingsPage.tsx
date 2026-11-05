@@ -1,9 +1,11 @@
 'use client';
+import { isDshLauncher } from '@cat-cafe/shared';
 import { useSearchParams } from 'next/navigation';
 import { useState } from 'react';
 import { type CatData, formatCatName } from '@/hooks/useCatData';
 import type { MemberSaveTrace } from '@/utils/member-save-trace';
 import { usesAgyAcp, usesAgyNative } from '../../hub-cat-editor.agy';
+import { splitCommandArgs } from '../../hub-cat-editor.model';
 import { MemberCurrentStatus } from '../../members/MemberCurrentStatus';
 import { MemberIdentity } from '../../members/MemberIdentity';
 import { memberSaveCopy } from '../../members/member-save.shell-copy';
@@ -58,7 +60,7 @@ export function MemberSettingsPage({
     : usesAgyNative(form)
       ? 'AGY Native'
       : form.carrier === 'acp'
-        ? /dsh|deepseek/i.test(form.acpCommand + form.acpStartupArgs)
+        ? isDshLauncher(form.acpCommand, splitCommandArgs(form.acpStartupArgs))
           ? 'DSH'
           : 'ACP'
         : form.clientId === 'openai'
