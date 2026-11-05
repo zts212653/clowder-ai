@@ -1252,7 +1252,6 @@ async function* routeParallelPrepared(
   const catOutputProjections = new Map<string, RoutingMessageOutputProjection>();
   let completedCount = 0;
   let yieldedFinalDone = false;
-  const unconfirmedProviderCats = new Set<string>();
   // F153: Accumulate total tokens across all parallel streams for route aggregate
   let routeTotalTokens = 0;
 
@@ -1316,11 +1315,6 @@ async function* routeParallelPrepared(
     },
   );
   for await (const msg of mergedStreams) {
-    if (msg.providerTeardown === 'unconfirmed') {
-      unconfirmedProviderCats.add(msg.catId);
-      yield msg;
-      continue;
-    }
     const transform = msg.catId ? getOutputTransform(msg.catId) : undefined;
     if (msg.type === 'done' && msg.catId && msg.metadata) {
       catMeta.set(msg.catId, mergeMessageMetadataSnapshots(catMeta.get(msg.catId), msg.metadata));
@@ -2711,7 +2705,7 @@ async function* routeParallelPrepared(
   if (deps.invocationDeps.threadStore) {
     for (const catId of targetCats) {
       const catSignal = executionControls.get(catId)?.signal;
-      if (!catSignal?.aborted || catActivityUpdated.has(catId) || unconfirmedProviderCats.has(catId)) continue;
+      if (!catSignal?.aborted || catActivityUpdated.has(catId)) continue;
       try {
         await deps.invocationDeps.threadStore.updateParticipantActivity(
           threadId,
@@ -2757,7 +2751,7 @@ async function* routeParallelPrepared(
   }
 
   // done-guarantee safety net: synthesize final done if loop exited without one
-  if (!yieldedFinalDone && targetCats.length > 0 && unconfirmedProviderCats.size === 0) {
+  if (!yieldedFinalDone && targetCats.length > 0) {
     yield {
       type: 'done' as AgentMessageType,
       catId: targetCats[targetCats.length - 1]!,

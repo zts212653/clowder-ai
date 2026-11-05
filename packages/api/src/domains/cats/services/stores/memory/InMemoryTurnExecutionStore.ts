@@ -9,7 +9,6 @@ import {
   type CreateTurnExecutionResult,
   cloneTurnExecutionRecord,
   createdOutputFence,
-  hasUnconfirmedProviderTeardown,
   type InterruptRunningTurnExecutionsInput,
   type ITurnExecutionStore,
   matchesTurnExecutionSource,
@@ -123,6 +122,25 @@ export class InMemoryTurnExecutionStore implements ITurnExecutionStore {
     record.providerTeardownAt ??= at;
   }
 
+  attestProviderTeardownBefore(cutoffStartedAt: number, stoppedAt: number): TurnExecutionRecord[] {
+    if (!Number.isFinite(cutoffStartedAt) || cutoffStartedAt < 0 || !Number.isFinite(stoppedAt) || stoppedAt < 0) {
+      throw new Error('invalid provider teardown attestation boundary');
+    }
+    const attested: TurnExecutionRecord[] = [];
+    for (const record of this.records.values()) {
+      if (
+        record.startedAt >= cutoffStartedAt ||
+        record.providerLifecycleTracked !== true ||
+        record.providerStartedAt === undefined ||
+        record.providerTeardownAt !== undefined
+      )
+        continue;
+      this.recordProviderTeardown(record.invocationId, stoppedAt);
+      attested.push(cloneTurnExecutionRecord(record));
+    }
+    return sortRecords(attested);
+  }
+
   transitionTerminal(invocationId: string, input: TurnExecutionTerminalInput): TransitionTurnExecutionResult {
     const record = this.records.get(invocationId);
     if (!record) return { outcome: 'not_found', record: null };
@@ -130,8 +148,6 @@ export class InMemoryTurnExecutionStore implements ITurnExecutionStore {
     if (record.status !== 'running') {
       return { outcome: 'already_terminal', record: cloneTurnExecutionRecord(record) };
     }
-    if (hasUnconfirmedProviderTeardown(record) && input.providerTeardownAt === undefined)
-      throw new Error('provider_teardown_unconfirmed');
     record.status = input.status;
     record.endedAt = input.endedAt;
     if (input.terminalReason !== undefined) record.terminalReason = input.terminalReason;
@@ -167,14 +183,8 @@ export class InMemoryTurnExecutionStore implements ITurnExecutionStore {
       throw new Error('cutoffStartedAt must be a finite non-negative number');
     }
     const interrupted: TurnExecutionRecord[] = [];
-    const excluded = new Set(input.excludedInvocationIds ?? []);
     for (const record of this.records.values()) {
-      if (
-        record.status !== 'running' ||
-        record.startedAt >= cutoffStartedAt ||
-        excluded.has(record.invocationId) ||
-        hasUnconfirmedProviderTeardown(record)
-      ) {
+      if (record.status !== 'running' || record.startedAt >= cutoffStartedAt) {
         continue;
       }
       const result = this.transitionTerminal(record.invocationId, {

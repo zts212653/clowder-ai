@@ -126,17 +126,21 @@ test('adapter reports missing terminal on EOF; errors/outcomes/metadata/status m
   assert.equal(messages.at(-1).providerTeardown, 'unconfirmed');
 });
 
-test('adapter retains its busy turn after EOF or an explicitly unconfirmed terminal', async () => {
+test('EOF and explicitly unconfirmed teardown stay telemetry and do not retain admission', async () => {
   for (const terminal of [undefined, message('done', { providerTeardown: 'unconfirmed' })]) {
-    const { provider, bridge } = harness({
+    let starts = 0;
+    const { bridge } = harness({
       async *invoke() {
+        starts += 1;
         if (terminal) yield terminal;
       },
     });
     const messages = await collect(bridge.invoke('x', options()));
     assert.equal(messages.at(-1).providerTeardown, 'unconfirmed');
-    const next = await collect(bridge.invoke('must wait', options({ invocationId: 'next' })));
-    assert.equal(next.at(-1).errorCode, 'busy');
+    const next = await collect(bridge.invoke('next', options({ invocationId: 'next' })));
+    assert.equal(next.at(-1).providerTeardown, 'unconfirmed');
+    assert.notEqual(next.at(-1).errorCode, 'busy');
+    assert.equal(starts, 2);
   }
 });
 test('release reports errors; native id absence strips stale Host sessionId', async () => {

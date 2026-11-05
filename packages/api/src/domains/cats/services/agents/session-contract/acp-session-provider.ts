@@ -268,8 +268,9 @@ export class AcpSessionProvider implements Contract.AgentSessionProvider {
       await iterator?.return?.();
       // A return on a generator already closed by a failed next is a no-op,
       // not evidence that its failing finally released the execution lease.
-      // EOF or an explicitly unconfirmed terminal does not prove native stop.
-      if (sourceReadCompleted && terminal?.providerTeardown !== 'unconfirmed') {
+      // A completed read does end this Host-side turn even when native teardown
+      // remains unknown: providerTeardown is telemetry, not admission authority.
+      if (sourceReadCompleted) {
         active.done = true;
         cleanup();
       }

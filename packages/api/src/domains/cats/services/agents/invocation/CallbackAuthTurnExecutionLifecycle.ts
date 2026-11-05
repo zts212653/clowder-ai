@@ -69,6 +69,9 @@ export class CallbackAuthTurnExecutionLifecycle implements ITurnExecutionStore {
   recordProviderTeardown(invocationId: string, at: number) {
     return this.store.recordProviderTeardown(invocationId, at);
   }
+  attestProviderTeardownBefore(cutoffStartedAt: number, stoppedAt: number) {
+    return this.store.attestProviderTeardownBefore(cutoffStartedAt, stoppedAt);
+  }
 
   async transitionTerminal(
     invocationId: string,

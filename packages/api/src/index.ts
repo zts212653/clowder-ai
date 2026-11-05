@@ -7653,6 +7653,9 @@ async function main(): Promise<void> {
     if (ownerRecovery.foundOwners > 0 || ownerRecovery.invalidManifests > 0) {
       app.log.info({ result: ownerRecovery }, '[api] CLI process owner startup recovery completed');
     }
+    if (ownerRecovery.retainedOwners > 0) {
+      throw new Error(`CLI process owner startup recovery retained ${ownerRecovery.retainedOwners} execution owner(s)`);
+    }
     const claudeBgOwnerRecovery = await reapStaleClaudeBgJobOwners({
       dataDir: process.env.CAT_CAFE_DATA_DIR,
       killGraceMs: ownerKillGraceMs,
@@ -7678,30 +7681,11 @@ async function main(): Promise<void> {
       recover: async () => {
         if (!redis) return;
         const authRecovery = await turnExecutionStore.reconcileStartup({ processStartedAt: PROCESS_START_AT });
-        const liveExecutionOwners = await cliExecutionOwnerService.listLive();
         const childReconciler = new TurnExecutionStartupReconciler({
           store: turnExecutionStore,
           settleEndedTurnResponse: (turn) => settleTurnResponse(turn, responseOutcomeForEndedTurn(turn)),
         });
-        const childRecovery = liveExecutionOwners.complete
-          ? await childReconciler.reconcile({
-              processStartedAt: PROCESS_START_AT,
-              protectedInvocationIds: liveExecutionOwners.owners.map((owner) => owner.invocationId),
-            })
-          : {
-              interruptedCount: 0,
-              invocationIds: [],
-              // Ended turns have no owner left to wait for; running ones keep their unknown owners.
-              ...(await childReconciler.settleEndedTurnResponses({ processStartedAt: PROCESS_START_AT })),
-              reconciledAt: Date.now(),
-              skippedReason: 'cli_execution_owner_snapshot_incomplete',
-            };
-        if (!liveExecutionOwners.complete) {
-          app.log.warn(
-            { callbackAuthLifecycle: { kind: 'live_execution_owner_snapshot_incomplete' } },
-            '[api] Preserved prior running TurnExecutions because external process liveness was unknown',
-          );
-        }
+        const childRecovery = await childReconciler.reconcile({ processStartedAt: PROCESS_START_AT });
         const { StartupReconciler } = await import('./domains/cats/services/agents/invocation/StartupReconciler.js');
         const reconciler = new StartupReconciler({
           invocationRecordStore,

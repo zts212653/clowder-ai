@@ -24,9 +24,9 @@ test('canonical child and response completion advance the cursor once, including
   assert.equal(started.phase, 'running');
   assert.equal((await f.port.get(f.session.sessionId))?.consumedCursor, 0);
   await f.host().assertCurrent(f.claim);
-  assert.throws(
-    () => f.turns.transitionTerminal(f.claim.invocationId, { status: 'succeeded', endedAt: 200 }),
-    /provider_teardown_unconfirmed/,
+  assert.equal(
+    f.turns.transitionTerminal(f.claim.invocationId, { status: 'succeeded', endedAt: 200 }).outcome,
+    'transitioned',
   );
   await assert.rejects(() => f.host().settle(f.claim), /settlement_pending/);
   f.turns.recordProviderTeardown(f.claim.invocationId, 201);
@@ -125,14 +125,13 @@ test('revocation stops tools but still records the original canonical canceled r
   const f = await fixture();
   await f.host().claim(f.claim);
   await f.owner(() => f.port.revoke(f.session.sessionId));
-  assert.throws(
-    () =>
-      f.turns.transitionTerminal(f.claim.invocationId, {
-        status: 'canceled',
-        endedAt: 200,
-        terminalReason: 'user_stop',
-      }),
-    /provider_teardown_unconfirmed/,
+  assert.equal(
+    f.turns.transitionTerminal(f.claim.invocationId, {
+      status: 'canceled',
+      endedAt: 200,
+      terminalReason: 'user_stop',
+    }).outcome,
+    'transitioned',
   );
   f.messages.commitLifecycleResponseTerminal(f.response.id, {
     invocationId: f.claim.invocationId,

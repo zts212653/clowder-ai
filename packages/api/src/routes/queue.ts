@@ -52,10 +52,7 @@ import type { IDraftStore } from '../domains/cats/services/stores/ports/DraftSto
 import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
 import { type IMessageStore, isTimelinePublished } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { IThreadStore, Thread } from '../domains/cats/services/stores/ports/ThreadStore.js';
-import {
-  hasUnconfirmedProviderTeardown,
-  type ITurnExecutionStore,
-} from '../domains/cats/services/stores/ports/TurnExecutionStore.js';
+import { type ITurnExecutionStore } from '../domains/cats/services/stores/ports/TurnExecutionStore.js';
 import type { DynamicTaskStore } from '../infrastructure/scheduler/DynamicTaskStore.js';
 import { buildCancelMessages, type SocketManager } from '../infrastructure/websocket/index.js';
 import type { CliExecutionOwnerService, LiveCliExecutionOwner } from '../utils/cli-process-ownership.js';
@@ -774,28 +771,6 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
         reconciled: result.cancelled || result.reconciled === true,
         ...(processOwner.executionId !== input.executionId ? { replacement: true } : {}),
         ...(result.controlPlaneUnavailable ? { controlPlaneUnavailable: true } : {}),
-      };
-    }
-
-    // An empty owner snapshot cannot certify a dispatched child whose exact
-    // teardown has never been recorded (including unsupported Windows owners).
-    const children = await opts.turnExecutionStore?.listByParent(input.executionId);
-    if (
-      children?.some(
-        (child) =>
-          child.parentInvocationId === input.executionId &&
-          child.threadId === input.threadId &&
-          child.userId === input.userId &&
-          child.catId === input.catId &&
-          child.status === 'running' &&
-          hasUnconfirmedProviderTeardown(child),
-      )
-    ) {
-      return {
-        reconciled: false,
-        controlPlaneUnavailable: true,
-        error: '原执行停止尚未确认，保留执行占用',
-        code: 'PROVIDER_TEARDOWN_UNCONFIRMED',
       };
     }
 

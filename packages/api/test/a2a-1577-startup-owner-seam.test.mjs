@@ -123,20 +123,19 @@ test('one ended sibling cannot authorize interruption or progress deletion for a
   assert.equal(f.actions.cleared, 0);
 });
 
-test('post-listen child recovery and parent recovery preserve the same exact detached owner', async (t) => {
+test('post-listen child recovery retires every prior-Host child before parent recovery', async (t) => {
   const f = fixture(t, 'running', ['opus', 'codex']);
   f.child('opus');
   f.child('codex');
   const recovery = new TurnExecutionStartupReconciler({ store: f.turns, now: () => 1000000 });
-  const pass = await recovery.reconcile({ processStartedAt: 2000, protectedInvocationIds: ['child-opus'] });
-  assert.deepEqual(pass.invocationIds, ['child-codex']);
+  const pass = await recovery.reconcile({ processStartedAt: 2000 });
+  assert.deepEqual(pass.invocationIds, ['child-codex', 'child-opus']);
   assert.equal(f.turns.get('child-codex').status, 'interrupted');
-  assert.equal(f.turns.get('child-opus').status, 'running');
-  assert.equal((await f.run()).swept, 0);
-  assert.equal(f.records.get(f.invocationId).status, 'running');
-  assert.equal(f.actions.cleared, 0);
-  assert.equal(f.actions.notices, 0);
-  assert.equal((await f.run()).swept, 0, 'repeat recovery does not interrupt the protected owner');
+  assert.equal(f.turns.get('child-opus').status, 'interrupted');
+  assert.equal((await f.run()).swept, 1);
+  assert.equal(f.records.get(f.invocationId).status, 'failed');
+  assert.equal(f.actions.cleared, 2);
+  assert.equal((await f.run()).swept, 0, 'repeat recovery is idempotent');
 });
 
 for (const mismatch of [

@@ -55,8 +55,9 @@ export interface TurnExecutionRecord extends CreateTurnExecutionInput {
   status: TurnExecutionStatus;
   endedAt?: number;
   terminalReason?: string;
-  /** Written only after the exact provider iterator has actually closed; a cancel receipt is insufficient. */
+  /** Provider lifecycle telemetry only. These fields never grant or retain dispatch ownership. */
   providerStartedAt?: number;
+  /** Written only after the exact provider iterator has actually closed; a cancel receipt is insufficient. */
   providerTeardownAt?: number;
 }
 
@@ -91,6 +92,4 @@ export interface TransitionTurnExecutionResult {
 export interface InterruptRunningTurnExecutionsInput {
   endedAt: number;
   terminalReason: string;
-  /** Exact children with a presently live external process owner. */
-  excludedInvocationIds?: string[];
 }

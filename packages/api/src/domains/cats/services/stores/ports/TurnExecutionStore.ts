@@ -37,15 +37,6 @@ export function projectTurnExecutionMessage(record: TurnExecutionRecord): TurnEx
   };
 }
 
-/** A previous Host ending is not proof that its dispatched native execution stopped. */
-export function hasUnconfirmedProviderTeardown(record: TurnExecutionRecord): boolean {
-  return (
-    record.providerLifecycleTracked === true &&
-    record.providerStartedAt !== undefined &&
-    record.providerTeardownAt === undefined
-  );
-}
-
 export interface TurnExecutionSourceQuery {
   userId: string;
   threadId: string;
@@ -91,11 +82,19 @@ export interface ITurnExecutionStore {
   listRunningByUser(userId: string): TurnExecutionRecord[] | Promise<TurnExecutionRecord[]>;
   markProviderStarted(invocationId: string, at: number): boolean | Promise<boolean>;
   recordProviderTeardown(invocationId: string, at: number): void | Promise<void>;
+  /**
+   * Records the provider-stop proof established by startup process-owner reaping.
+   * This is telemetry/settlement evidence only; dispatch admission must not read it.
+   */
+  attestProviderTeardownBefore(
+    cutoffStartedAt: number,
+    stoppedAt: number,
+  ): TurnExecutionRecord[] | Promise<TurnExecutionRecord[]>;
   transitionTerminal(
     invocationId: string,
     input: TurnExecutionTerminalInput,
   ): TransitionTurnExecutionResult | Promise<TransitionTurnExecutionResult>;
-  /** Restart age cannot retire a dispatched provider until this record carries teardown proof. */
+  /** Retires running children that belong to an earlier Host process. */
   interruptRunningBefore(
     cutoffStartedAt: number,
     input: InterruptRunningTurnExecutionsInput,
