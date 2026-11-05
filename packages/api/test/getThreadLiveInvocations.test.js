@@ -263,6 +263,36 @@ describe('F117 KD-23 getThreadLiveInvocations — a running child is not an owne
     assert.deepEqual(result.active, []);
   });
 
+  it('#1838 with a complete snapshot, a child whose provider started without confirmed teardown stays listed, degraded', async () => {
+    // A killed API leaves no owner, but its provider may still run: the child still blocks the
+    // thread/role, so it must stay visible and stoppable instead of vanishing from the list.
+    const started = { providerLifecycleTracked: true, providerStartedAt: 1_600 };
+    const result = await getThreadLiveInvocations(
+      THREAD_ID,
+      USER_ID,
+      makeDeps({
+        records: [makeRecord()],
+        children: {
+          'inv-1': [
+            makeChild(started),
+            makeChild({ invocationId: 'child-torn-down', catId: 'codex', ...started, providerTeardownAt: 1_700 }),
+          ],
+        },
+        ownerSnapshot: { complete: true, owners: [] },
+      }),
+    );
+    assert.deepEqual(summary(result), [
+      {
+        catId: 'opus',
+        executionId: 'inv-1',
+        invocationId: 'child-1',
+        source: 'parent+child-execution',
+        degraded: true,
+        reason: 'child_running_owner_unverified',
+      },
+    ]);
+  });
+
   it('with an incomplete snapshot, a running child stands in for its unverified owner, degraded', async () => {
     const result = await getThreadLiveInvocations(
       THREAD_ID,

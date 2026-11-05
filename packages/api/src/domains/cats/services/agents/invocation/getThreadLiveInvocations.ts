@@ -12,6 +12,9 @@
  * incomplete the startup settlement keeps the previous process's running children, and a turn
  * whose owner died stays running until something settles it. With a complete snapshot that lists no
  * owner, such a member is not processing, and the active-execution read-repair ends the record.
+ * The exception (#1838) is a child whose provider started and whose teardown is unconfirmed: a dead
+ * owner does not prove its provider stopped, and the child still blocks its thread/role, so it stays
+ * listed, degraded, until a stop proof settles it.
  *
  * Without a complete snapshot nobody can tell whether an owner outside this process lives, so the
  * evidence that remains is listed, degraded: the user still sees it and can stop it (F117 KD-10:
@@ -35,6 +38,7 @@
 
 import type { CatId, TurnExecutionRecord } from '@cat-cafe/shared';
 import type { InvocationRecord } from '../../stores/ports/InvocationRecordStore.js';
+import { hasUnconfirmedProviderTeardown } from '../../stores/ports/TurnExecutionStore.js';
 import type { ActiveSlotInfo } from './InvocationTracker.js';
 
 export type LivenessSource =
@@ -262,12 +266,16 @@ function liveForRecord(
   const proven = new Set<string>(held.map((entry) => entry.slot.catId));
   const byOwner = liveFromOwners(record, proven, evidence.threadId, evidence.userId, evidence.owners);
   listed.push(...byOwner);
-  if (!evidence.ownerUnverifiable) return listed;
 
   for (const live of byOwner) proven.add(live.catId);
   for (const [catId, child] of children) {
-    if (!proven.has(catId)) listed.push(liveFromUnverifiedChild(record, child));
+    // #1838: even a complete snapshot cannot clear a child whose provider started and whose stop is
+    // unconfirmed: it still blocks its thread/role, so it stays listed for the user to see and stop.
+    if (proven.has(catId)) continue;
+    if (evidence.ownerUnverifiable || hasUnconfirmedProviderTeardown(child))
+      listed.push(liveFromUnverifiedChild(record, child));
   }
+  if (!evidence.ownerUnverifiable) return listed;
   if (listed.length === 0 && evidence.snapshotIncomplete) {
     for (const catId of new Set(record.targetCats as string[])) listed.push(liveFromUnverifiedRecord(record, catId));
   }
