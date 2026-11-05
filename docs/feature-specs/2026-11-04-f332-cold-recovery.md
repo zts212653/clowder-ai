@@ -9,9 +9,11 @@ updated: 2026-11-05
 
 # F332 Phase B：冷恢复首包需求与交付方案
 
-> **Status**: delivery candidate 7da4d7b04 S9 revalidation finding/P1; stopped at 16/17, S3 not run; full acceptance pending; historical results retained; not merged or deployed | **Implementation**: 宪宪（claude-opus-5-5） | **Review / submission**: 砚砚（gpt-6.1-sol）
+> **Status**: narrowed R1 code reviewed, behavior not revalidated; latest tested S9 finding/P1 retained; stopped at 16/17, S3 not run; full acceptance pending; not merged or deployed | **Implementation**: 宪宪（claude-opus-5-5） | **Review / submission**: 砚砚（gpt-6.1-sol）
 
 **代码目标：`zts212653/clowder-ai:next`。** PR #1832 保持草稿；当前受测产品固定为 `7da4d7b04141a442fa441ed0e3016e8d575063f4`，已合入 next `a2bb86e1fe61e406c4e1e9a00c058cea4d3a7fb3`。此前首次整合基底 `440fa0377ae54a51320306217088209ae7b11e68`、69063db3 及第1–15次调用各保留原版本历史边界。本次受限复验的第16次 S9 独立 finding/P1，按规则停在16/17，第17次 S3 未运行；不沿余量续跑。详见[交付候选复验](../features/assets/F332/cold-recovery-review-2026-11-04.md#delivery-candidate-revalidation)。
+
+**后续未受测修订：收窄R1已通过独立代码复审。** 作者提交`a733a02a07e2756fb6edc8963a2cbfb075624576`仅替换原多工文字及对应tools/list测试/治理基线；与已发布来源勘误`86ce76254`整合后产品树仍与作者一致。较新明确请求或有效owner选择可解除旧未决；清楚自然指代或唯一合法匹配不因另有未结束工作被强制追问；旧why、doing、旧请求/产物、排列或停点在仍有歧义时单独不足以定对象。原已结束、明确重做/追加和typed closure合同保留。固定审核脚本重建、45/45、Biome、治理及208项实际tools/list核对通过，只证明确定性投递；尚无R1真实行为观察，不关闭第16次P1，不自动使用余1次。详见[收窄R1复审](../features/assets/F332/cold-recovery-review-2026-11-04.md#narrowed-multi-work-r1)。
 
 本文件是 [F332](../features/F332-experience-informed-memory.md) Phase B 下的详细实施切片，承接 AC-B5 的同线程连续性要求及本切片新增验收；不替代 F332 的其他阶段，也不结算其既有 Task。
 
