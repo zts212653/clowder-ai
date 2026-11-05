@@ -23,6 +23,7 @@ export function assertNativeAuthHookContract(settings) {
     ['env CODEX_HOME=/tmp/fixture codex login', 'deny'],
     [String.raw`C:\tools\codex.exe login`, 'deny'],
     [String.raw`cmd.exe /c C:\tools\codex.exe logout`, 'deny'],
+    [String.raw`cmd.exe /c "C:\Program Files\codex.exe" login`, 'deny'],
     ['codex login status', undefined],
     [String.raw`C:\tools\codex.exe login status`, undefined],
     ['codex login --help', undefined],

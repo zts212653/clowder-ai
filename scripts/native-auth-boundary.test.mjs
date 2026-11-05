@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { classifyShellSegment } from './native-effect-shell-classifier.mjs';
 import { decideNativeHookPayload } from './native-effect-target-guard.mjs';
 import { secretNativeHook } from './secret-native-hook.mjs';
@@ -25,9 +25,13 @@ const mutations = [
   String.raw`tools\codex.exe login`,
   String.raw`co\dex.exe login`,
   String.raw`\\server\tools\codex.exe login`,
+  String.raw`\tools\codex.exe login`,
   String.raw`env CODEX_HOME=/tmp/fixture C:\tools\codex.exe login`,
   String.raw`powershell.exe -Command C:\tools\codex.exe login`,
   String.raw`cmd.exe /c C:\tools\codex.exe logout`,
+  String.raw`cmd.exe /c "C:\Program Files\codex.exe" login`,
+  String.raw`powershell.exe -Command '& "C:\Program Files\codex.exe" logout'`,
+  String.raw`C:\node\node.exe C:\tools\codex.js login`,
   String.raw`pwsh -Command 'C:\tools\codex.exe login'`,
   'codex.cmd logout',
   'codex -c model="fixture" login',
@@ -61,6 +65,8 @@ const observations = [
   String.raw`C:\tools\codex.exe login --help`,
   String.raw`cmd.exe /c C:\tools\codex.exe login status`,
   String.raw`tools\codex.exe login status`,
+  String.raw`cmd.exe /c "C:\Program Files\codex.exe" login status`,
+  String.raw`C:\node\node.exe C:\tools\codex.js login status`,
 ];
 const ordinary = [
   'echo "codex login"',
@@ -76,6 +82,9 @@ const ordinary = [
   String.raw`rg C:\tools\codex.exe docs`,
   String.raw`C:\tools\mycodex.exe login`,
   String.raw`C:\tools\codex.exe.log login`,
+  String.raw`C:\node\node.exe -e "console.log('codex login')"`,
+  String.raw`C:\tools\codex.exe`,
+  String.raw`C:\tools\codex.exe exec -- fixture`,
 ];
 
 const payload = (command, tool_name = 'Bash') => ({
@@ -139,4 +148,39 @@ test('ordinary unknown and write classifications keep their existing meaning', (
   assert.equal(classifyShellSegment('custom-tool --new-operation'), 'unknown');
   assert.equal(classifyShellSegment('touch fixture.txt'), 'write');
   assert.equal(classifyShellSegment('codex exec -- echo --help'), 'unknown');
+});
+
+test('native Windows executor projects its command into authentication policy', () => {
+  for (const [command, expected] of [
+    [String.raw`C:\tools\codex.exe login`, 'deny'],
+    [String.raw`cmd.exe /c "C:\Program Files\codex.exe" logout`, 'deny'],
+    [String.raw`C:\tools\codex.exe login status`, 'allow'],
+  ]) {
+    const result = decideNativeHookPayload(
+      {
+        session_id: 'fixture-session',
+        turn_id: 'fixture-turn',
+        tool_use_id: 'fixture-call',
+        hook_event_name: 'NativeShellSafetyCheck',
+        tool_name: 'Bash',
+        cwd: process.cwd(),
+        native_execution: {
+          plan_id: 'fixture-plan',
+          call_id: 'fixture-call',
+          turn_id: 'fixture-turn',
+          environment_id: 'local',
+          cwd_uri: pathToFileURL(process.cwd()).href,
+          argv: ['powershell.exe', '-NoProfile', '-Command', command],
+          command,
+          phase: 'before_first_effect',
+          constraints: {},
+          fingerprint: 'fixture-fingerprint',
+        },
+      },
+      { selfHost: () => ({ confidence: 'none' }) },
+    );
+    assert.equal(result.decision, expected);
+    if (expected === 'deny') assert.equal(result.reasonCode, 'native_auth_mutation');
+    else assert.equal(result.effect, 'read');
+  }
 });

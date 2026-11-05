@@ -1,3 +1,4 @@
+import { scriptFileCall } from './lib/shell-code-inputs.mjs';
 import { executedInvocations } from './lib/shell-invocation.mjs';
 import { commandName, shellInvocation } from './native-effect-shell-tokenizer.mjs';
 
@@ -40,35 +41,14 @@ export const NATIVE_AUTH_DENIAL =
 /** Classify resolved invocations, never command-looking text in data operands. */
 export function codexAuthenticationEffect(invocations, depth = 0) {
   if (depth > 8) return undefined;
-  const effects = invocations.map(({ name, operands, text = '' }) => {
-    // The shared POSIX reader consumes unquoted backslashes. Restore literal Windows
-    // path spelling only for auth identity and delegated cmd/PowerShell code inputs.
-    const rawWords = shellInvocation(text).words.map(({ value, start, end }) => ({
-      value,
-      raw: text.slice(start, end),
-    }));
-    const programWord = rawWords.find(({ value }) => commandName(value) === name);
-    const windowsWords = rawWords.filter(({ raw }) =>
-      /^(?:\\\\|[^\\\s"'`$;&|<>()*?{}]+\\)[^\s"'`$;&|<>()*?{}]+$/.test(raw),
-    );
-    let program = commandName(name ?? '').replace(/\.(?:exe|cmd|bat|ps1|[cm]?js)$/, '');
-    // Preserve a known POSIX identity too: co\dex.exe still executes codex.exe in Bash.
-    if (program !== 'codex' && !SHELL_COMMAND_OPTIONS.has(program) && windowsWords.includes(programWord))
-      program = commandName(programWord.raw).replace(/\.(?:exe|cmd|bat|ps1|[cm]?js)$/, '');
+  const effects = invocations.map((invocation) => {
+    const view = literalWindowsInvocation(invocation);
+    const { program, operands, text } = view;
     const commandOption = SHELL_COMMAND_OPTIONS.get(program);
-    if (commandOption) {
-      const index = operands.findIndex((arg) => commandOption.test(arg));
-      return index < 0
-        ? undefined
-        : codexAuthenticationEffect(
-            executedInvocations(
-              operands
-                .slice(index + 1)
-                .map((arg) => windowsWords.find(({ value }) => value === arg)?.raw ?? arg)
-                .join(' '),
-            ).pipelines.flat(),
-            depth + 1,
-          );
+    if (commandOption) return shellAuthenticationEffect(view, commandOption, depth);
+    if (program === 'node' && !operands.some((arg) => ['-e', '--eval', '-p', '--print'].includes(arg))) {
+      const script = scriptFileCall(operands, text);
+      return script ? codexAuthenticationEffect([script], depth + 1) : undefined;
     }
     if (program !== 'codex') return undefined;
     const { words, help } = codexArguments(operands);
@@ -79,6 +59,43 @@ export function codexAuthenticationEffect(invocations, depth = 0) {
   });
   if (effects.includes('auth_mutation')) return 'auth_mutation';
   return effects.length > 0 && effects.every((effect) => effect === 'read') ? 'read' : undefined;
+}
+
+/** Recover literal Windows spelling without changing the shared POSIX reader. */
+function literalWindowsInvocation({ name, operands, text = '' }) {
+  const rawWords = shellInvocation(text).words.map(({ value, start, end }) => ({
+    value,
+    raw: text.slice(start, end),
+    end,
+  }));
+  const programWord = rawWords.find(({ value }) => commandName(value) === name);
+  const windowsWords = rawWords.filter(({ raw }) =>
+    /^(?:\\|[^\\\s"'`$;&|<>()*?{}]+\\)[^\s"'`$;&|<>()*?{}]+$/.test(raw),
+  );
+  let program = commandName(name ?? '').replace(/\.(?:exe|cmd|bat|ps1|[cm]?js)$/, '');
+  // Preserve a known POSIX identity too: co\dex.exe still executes codex.exe in Bash.
+  if (program !== 'codex' && !SHELL_COMMAND_OPTIONS.has(program) && windowsWords.includes(programWord))
+    program = commandName(programWord.raw).replace(/\.(?:exe|cmd|bat|ps1|[cm]?js)$/, '');
+  return {
+    program,
+    operands: operands.map((arg) => windowsWords.find(({ value }) => value === arg)?.raw ?? arg),
+    rawWords,
+    text,
+  };
+}
+
+/** Whole-script quotes and executable-only quotes carry different word boundaries. */
+function shellAuthenticationEffect({ operands, rawWords, text }, commandOption, depth) {
+  const index = operands.findIndex((arg) => commandOption.test(arg));
+  if (index < 0) return undefined;
+  const sources = [operands.slice(index + 1).join(' ')];
+  const codeStart = rawWords.find(({ value }) => value === operands[index])?.end;
+  if (codeStart !== undefined) sources.push(text.slice(codeStart));
+  const effects = sources.map((source) =>
+    codexAuthenticationEffect(executedInvocations(source).pipelines.flat(), depth + 1),
+  );
+  if (effects.includes('auth_mutation')) return 'auth_mutation';
+  return effects.includes('read') ? 'read' : undefined;
 }
 
 /** Codex's Clap options own their values, including values resembling subcommands/help. */
