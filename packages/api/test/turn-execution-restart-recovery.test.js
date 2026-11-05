@@ -6,7 +6,7 @@ import { serializeTurnExecutionIdentity } from '../dist/domains/cats/services/st
 import { RedisTurnExecutionStore } from '../dist/domains/cats/services/stores/redis/RedisTurnExecutionStore.js';
 
 for (const startedAt of [0, 50])
-  test(`restart retains an unconfirmed provider and its response until exact teardown proof; started=${startedAt}`, async () => {
+  test(`restart interrupts every prior-Host child even when teardown was never recorded; started=${startedAt}`, async () => {
     const store = new InMemoryTurnExecutionStore();
     const create = (invocationId, tracked = true) =>
       store.createRunning({
@@ -19,41 +19,38 @@ for (const startedAt of [0, 50])
         startedAt,
         ...(tracked ? { providerLifecycleTracked: true } : {}),
       });
-    create('unconfirmed');
-    assert.equal(store.markProviderStarted('unconfirmed', startedAt), true);
-    create('confirmed');
-    assert.equal(store.markProviderStarted('confirmed', startedAt), true);
-    store.recordProviderTeardown('confirmed', 70);
+    create('started-without-teardown');
+    assert.equal(store.markProviderStarted('started-without-teardown', startedAt), true);
+    create('closed');
+    assert.equal(store.markProviderStarted('closed', startedAt), true);
+    store.recordProviderTeardown('closed', 70);
     create('not-dispatched');
     create('legacy', false);
     const settled = [];
-    let now = 200;
     const reconciler = new TurnExecutionStartupReconciler({
       store,
-      now: () => now,
+      now: () => 200,
       settleEndedTurnResponse: async (turn) => {
         settled.push(turn.invocationId);
         store.clearResponsePending(turn.invocationId);
       },
     });
     const first = await reconciler.reconcile({ processStartedAt: 100 });
-    assert.equal(store.get('unconfirmed').status, 'running', 'restart time cannot prove that a native writer stopped');
-    assert.equal(store.get('unconfirmed').providerTeardownAt, undefined);
-    assert.deepEqual(
-      store.listRunningByUser('owned-user').map((record) => record.invocationId),
-      ['unconfirmed'],
+    assert.equal(
+      store.get('started-without-teardown').status,
+      'interrupted',
+      'the new Host retires all prior-Host ownership',
     );
-    assert.deepEqual(new Set(first.invocationIds), new Set(['confirmed', 'not-dispatched', 'legacy']));
-    assert.equal(settled.includes('unconfirmed'), false, 'the existing response must remain nonterminal');
-    store.recordProviderTeardown('unconfirmed', 220);
-    now = 250;
-    const second = await reconciler.reconcile({ processStartedAt: 100 });
-    assert.deepEqual(second.invocationIds, ['unconfirmed']);
-    assert.equal(store.get('unconfirmed').status, 'interrupted');
-    assert.equal(settled.filter((id) => id === 'unconfirmed').length, 1);
+    assert.equal(store.get('started-without-teardown').providerTeardownAt, undefined);
+    assert.deepEqual(store.listRunningByUser('owned-user'), []);
+    assert.deepEqual(
+      new Set(first.invocationIds),
+      new Set(['started-without-teardown', 'closed', 'not-dispatched', 'legacy']),
+    );
+    assert.equal(settled.filter((id) => id === 'started-without-teardown').length, 1);
   });
 
-test('the real Redis owner hydrates the unconfirmed fact and does not issue a restart terminal write', async () => {
+test('the Redis store terminalizes a prior-Host child without teardown telemetry and removes its running index', async () => {
   const input = {
     invocationId: 'owned-redis-child',
     parentInvocationId: 'owned-parent',
@@ -72,20 +69,35 @@ test('the real Redis owner hydrates the unconfirmed fact and does not issue a re
     outputFence: 'open',
     immutableIdentity: serializeTurnExecutionIdentity(input),
   };
-  let writes = 0;
+  const writes = [];
   const store = new RedisTurnExecutionStore({
     smembers: async () => [input.invocationId],
     hgetall: async () => hash,
-    eval: async () => {
-      writes++;
-      throw new Error('unexpected terminal write');
+    eval: async (...args) => {
+      writes.push(['eval', ...args]);
+      hash.status = 'interrupted';
+      hash.endedAt = '200';
+      hash.terminalReason = 'process_restart';
+      return 1;
     },
-    srem: async () => {
-      writes++;
-      throw new Error('unexpected running-index removal');
+    srem: async (...args) => {
+      writes.push(['srem', ...args]);
+      return 1;
     },
   });
   assert.equal((await store.get(input.invocationId)).providerStartedAt, 0);
-  assert.deepEqual(await store.interruptRunningBefore(100, { endedAt: 200, terminalReason: 'process_restart' }), []);
-  assert.equal(writes, 0);
+  const interrupted = await store.interruptRunningBefore(100, {
+    endedAt: 200,
+    terminalReason: 'process_restart',
+  });
+  assert.deepEqual(
+    interrupted.map((record) => record.invocationId),
+    [input.invocationId],
+  );
+  assert.equal(interrupted[0].status, 'interrupted');
+  assert.equal(interrupted[0].providerTeardownAt, undefined);
+  assert.equal(
+    writes.some(([kind]) => kind === 'eval'),
+    true,
+  );
 });

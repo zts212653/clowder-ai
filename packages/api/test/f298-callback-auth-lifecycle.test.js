@@ -255,7 +255,7 @@ describe('F298 callback auth lifecycle', () => {
     });
   });
 
-  test('startup preserves a live detached exact run and interrupts only the lost run', async () => {
+  test('startup retires every prior-Host run after process-owner reaping', async () => {
     const { InvocationRegistry } = await import(
       '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
     );
@@ -291,11 +291,13 @@ describe('F298 callback auth lifecycle', () => {
     await lifecycle.reconcileStartup({ processStartedAt: 1_000 });
     const recovery = await new TurnExecutionStartupReconciler({ store: lifecycle, now: () => 2_000 }).reconcile({
       processStartedAt: 1_000,
-      protectedInvocationIds: [live.invocationId],
     });
 
-    assert.deepEqual(recovery.invocationIds, [lost.invocationId]);
-    assert.equal((await registry.verify(live.invocationId, live.callbackToken)).ok, true);
+    assert.deepEqual(new Set(recovery.invocationIds), new Set([live.invocationId, lost.invocationId]));
+    assert.deepEqual(await registry.verify(live.invocationId, live.callbackToken), {
+      ok: false,
+      reason: 'interrupted',
+    });
     assert.deepEqual(await registry.verify(lost.invocationId, lost.callbackToken), {
       ok: false,
       reason: 'interrupted',

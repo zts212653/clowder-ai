@@ -293,21 +293,20 @@ describe('RedisTurnExecutionStore', { skip: redisIsolationSkipReason(REDIS_URL) 
     assert.deepEqual(await redis.smembers('turnexec:running'), ['new']);
   });
 
-  test('interruptRunningBefore preserves an exact externally-owned child', async () => {
+  test('interruptRunningBefore retires every child before the new Host cutoff', async () => {
     await store.createRunning(runningInput({ invocationId: 'detached-live', startedAt: 90 }));
     await store.createRunning(runningInput({ invocationId: 'lost-run', startedAt: 91 }));
 
     const interrupted = await store.interruptRunningBefore(100, {
       endedAt: 200,
       terminalReason: 'process_restart',
-      excludedInvocationIds: ['detached-live'],
     });
 
     assert.deepEqual(
       interrupted.map((record) => record.invocationId),
-      ['lost-run'],
+      ['detached-live', 'lost-run'],
     );
-    assert.equal((await store.get('detached-live')).status, 'running');
+    assert.equal((await store.get('detached-live')).status, 'interrupted');
     assert.equal((await store.get('lost-run')).status, 'interrupted');
   });
 

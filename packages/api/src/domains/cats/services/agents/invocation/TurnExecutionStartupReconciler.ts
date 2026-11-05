@@ -59,10 +59,7 @@ export class TurnExecutionStartupReconciler {
     this.settleEndedTurnResponse = deps.settleEndedTurnResponse;
   }
 
-  async reconcile(input: {
-    processStartedAt: number;
-    protectedInvocationIds?: readonly string[];
-  }): Promise<TurnExecutionStartupReconcileResult> {
+  async reconcile(input: { processStartedAt: number }): Promise<TurnExecutionStartupReconcileResult> {
     if (!Number.isFinite(input.processStartedAt) || input.processStartedAt < 0) {
       throw new Error('processStartedAt must be a finite non-negative number');
     }
@@ -71,11 +68,9 @@ export class TurnExecutionStartupReconciler {
     // belongs to the previous process. The store takes an exclusive cutoff; +1
     // includes that exact millisecond without changing its reusable contract.
     const exclusiveCutoffStartedAt = input.processStartedAt + 1;
-    const protectedIds = new Set(input.protectedInvocationIds ?? []);
     const interrupted = await this.store.interruptRunningBefore(exclusiveCutoffStartedAt, {
       endedAt: reconciledAt,
       terminalReason: 'process_restart',
-      ...(protectedIds.size > 0 ? { excludedInvocationIds: [...protectedIds] } : {}),
     });
     const settlement = await this.settleEndedTurnResponses(input);
     return {
@@ -93,12 +88,8 @@ export class TurnExecutionStartupReconciler {
    * Only ended turns are touched, so this is safe even when external owner liveness is unknown.
    * One response that cannot settle must neither strand the others nor fail startup recovery.
    */
-  async settleEndedTurnResponses(input: {
-    processStartedAt: number;
-    protectedInvocationIds?: readonly string[];
-  }): Promise<ResponseSettlementPass> {
+  async settleEndedTurnResponses(input: { processStartedAt: number }): Promise<ResponseSettlementPass> {
     const exclusiveCutoffStartedAt = input.processStartedAt + 1;
-    const protectedIds = new Set(input.protectedInvocationIds ?? []);
     const pass: ResponseSettlementPass = { settledResponseCount: 0, responseSettlementFailures: [] };
     if (!this.settleEndedTurnResponse) return pass;
     let pending: readonly TurnExecutionRecord[];
@@ -108,7 +99,7 @@ export class TurnExecutionStartupReconciler {
       return { ...pass, responseLedgerError: String(error) };
     }
     for (const turn of pending) {
-      if (turn.startedAt >= exclusiveCutoffStartedAt || protectedIds.has(turn.invocationId)) continue;
+      if (turn.startedAt >= exclusiveCutoffStartedAt) continue;
       try {
         await this.settleEndedTurnResponse(turn);
         pass.settledResponseCount += 1;

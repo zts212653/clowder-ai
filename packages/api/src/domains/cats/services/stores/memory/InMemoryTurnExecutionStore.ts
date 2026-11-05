@@ -9,7 +9,6 @@ import {
   type CreateTurnExecutionResult,
   cloneTurnExecutionRecord,
   createdOutputFence,
-  hasUnconfirmedProviderTeardown,
   type InterruptRunningTurnExecutionsInput,
   type ITurnExecutionStore,
   matchesTurnExecutionSource,
@@ -130,8 +129,6 @@ export class InMemoryTurnExecutionStore implements ITurnExecutionStore {
     if (record.status !== 'running') {
       return { outcome: 'already_terminal', record: cloneTurnExecutionRecord(record) };
     }
-    if (hasUnconfirmedProviderTeardown(record) && input.providerTeardownAt === undefined)
-      throw new Error('provider_teardown_unconfirmed');
     record.status = input.status;
     record.endedAt = input.endedAt;
     if (input.terminalReason !== undefined) record.terminalReason = input.terminalReason;
@@ -167,14 +164,8 @@ export class InMemoryTurnExecutionStore implements ITurnExecutionStore {
       throw new Error('cutoffStartedAt must be a finite non-negative number');
     }
     const interrupted: TurnExecutionRecord[] = [];
-    const excluded = new Set(input.excludedInvocationIds ?? []);
     for (const record of this.records.values()) {
-      if (
-        record.status !== 'running' ||
-        record.startedAt >= cutoffStartedAt ||
-        excluded.has(record.invocationId) ||
-        hasUnconfirmedProviderTeardown(record)
-      ) {
+      if (record.status !== 'running' || record.startedAt >= cutoffStartedAt) {
         continue;
       }
       const result = this.transitionTerminal(record.invocationId, {

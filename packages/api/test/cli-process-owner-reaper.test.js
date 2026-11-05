@@ -125,7 +125,7 @@ test(
 );
 
 test(
-  'startup reaper preserves an owner whose supervisor identity is still live',
+  'startup reaper terminates a prior-Host execution owner whose supervisor is still live',
   { skip: process.platform === 'win32' && 'Unix supervisor is not used on Windows' },
   async () => {
     const dataDir = await mkdtemp(join(realpathSync(tmpdir()), 'cat-cafe-owner-active-'));
@@ -146,6 +146,12 @@ test(
           CAT_CAFE_DATA_DIR: dataDir,
           CAT_CAFE_SUPERVISOR_PARENT_PID: String(process.pid),
           CAT_CAFE_SUPERVISOR_KILL_GRACE_MS: '100',
+          CAT_CAFE_PROCESS_EXECUTION_OWNER: '1',
+          CAT_CAFE_EXECUTION_ID: 'parent-execution',
+          CAT_CAFE_INVOCATION_ID: 'child-execution',
+          CAT_CAFE_THREAD_ID: 'thread',
+          CAT_CAFE_CAT_ID: 'codex',
+          CAT_CAFE_USER_ID: 'owner',
         },
         stdio: ['ignore', 'ignore', 'pipe'],
       });
@@ -155,13 +161,8 @@ test(
       const result = await reapStaleCliProcessOwners({ dataDir, killGraceMs: 100, log: silentLog });
 
       assert.equal(result.foundOwners, 1);
-      assert.equal(result.skippedActiveOwners, 1);
-      assert.equal(result.reapedOwners, 0);
-      assert.equal(isProcessAlive(childPid), true);
-      assert.equal((await readdir(join(dataDir, 'cli-process-owners'))).length, 1);
-
-      supervisor.kill('SIGTERM');
-      await new Promise((resolve) => supervisor.once('exit', resolve));
+      assert.equal(result.skippedActiveOwners, 0);
+      assert.equal(result.reapedOwners, 1);
       assert.equal(await waitUntil(() => !isProcessAlive(childPid)), true);
       assert.deepEqual(await readdir(join(dataDir, 'cli-process-owners')), []);
     } finally {

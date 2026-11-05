@@ -44,10 +44,7 @@ describe('TurnExecutionStartupReconciler', () => {
         recover: async () => {
           const snapshot = await owners.listLive();
           if (snapshot.complete) {
-            await reconciler.reconcile({
-              processStartedAt: 100,
-              protectedInvocationIds: snapshot.owners.map((owner) => owner.invocationId),
-            });
+            await reconciler.reconcile({ processStartedAt: 100 });
           }
         },
         onRecoveryError: (error) => assert.fail(error),
@@ -99,7 +96,7 @@ describe('TurnExecutionStartupReconciler', () => {
     const store = new InMemoryTurnExecutionStore();
     await store.createRunning(runningInput('ordinary-a', 10));
     await store.createRunning(runningInput('ordinary-b', 20));
-    await store.createRunning(runningInput('ordinary-protected', 30));
+    await store.createRunning(runningInput('ordinary-c', 30));
     await store.createRunning(runningInput('ordinary-after-start', 150));
     const settled = [];
     const reconciler = new TurnExecutionStartupReconciler({
@@ -112,20 +109,18 @@ describe('TurnExecutionStartupReconciler', () => {
       },
     });
 
-    const result = await reconciler.reconcile({
-      processStartedAt: 100,
-      protectedInvocationIds: ['ordinary-protected'],
-    });
+    const result = await reconciler.reconcile({ processStartedAt: 100 });
 
-    assert.deepEqual(result.invocationIds, ['ordinary-a', 'ordinary-b']);
+    assert.deepEqual(result.invocationIds, ['ordinary-a', 'ordinary-b', 'ordinary-c']);
     assert.deepEqual(settled, [
       { invocationId: 'ordinary-a', status: 'interrupted', terminalReason: 'process_restart' },
       { invocationId: 'ordinary-b', status: 'interrupted', terminalReason: 'process_restart' },
+      { invocationId: 'ordinary-c', status: 'interrupted', terminalReason: 'process_restart' },
     ]);
     assert.deepEqual(result.responseSettlementFailures, [
       { invocationId: 'ordinary-a', error: 'Error: commit rejected' },
     ]);
-    assert.equal(result.settledResponseCount, 1);
+    assert.equal(result.settledResponseCount, 2);
     assert.deepEqual(
       store.listResponsePending().map((turn) => turn.invocationId),
       ['ordinary-a'],
@@ -231,26 +226,28 @@ describe('TurnExecutionStartupReconciler', () => {
     assert.equal((await store.get('ordinary-future')).status, 'running');
   });
 
-  test('F298 preserves an exact child backed by a live detached process owner', async () => {
+  test('F298 retires every prior-Host child after startup process reaping', async () => {
     const store = new InMemoryTurnExecutionStore();
     await store.createRunning(runningInput('detached-live', 50));
     await store.createRunning(runningInput('lost-run', 60));
     const reconciler = new TurnExecutionStartupReconciler({ store, now: () => 200 });
 
-    const result = await reconciler.reconcile({
-      processStartedAt: 100,
-      protectedInvocationIds: ['detached-live'],
-    });
+    const result = await reconciler.reconcile({ processStartedAt: 100 });
 
-    assert.deepEqual(result.invocationIds, ['lost-run']);
-    assert.equal((await store.get('detached-live')).status, 'running');
+    assert.deepEqual(result.invocationIds, ['detached-live', 'lost-run']);
+    assert.equal((await store.get('detached-live')).status, 'interrupted');
     assert.equal((await store.get('lost-run')).status, 'interrupted');
   });
 
-  test('production startup obtains exact live process owners before child interruption', () => {
+  test('production startup reaps process owners before interrupting every prior-Host child', () => {
     const source = readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8');
-    assert.match(source, /cliExecutionOwnerService\.listLive\(\)/);
-    assert.match(source, /protectedInvocationIds:\s*liveExecutionOwners\.owners\.map/);
+    const processReaping = source.indexOf('await reapStaleCliProcessOwners');
+    const retainedOwnerRefusal = source.indexOf('ownerRecovery.retainedOwners > 0');
+    const childRecovery = source.indexOf('await childReconciler.reconcile');
+    assert.ok(processReaping >= 0);
+    assert.ok(retainedOwnerRefusal > processReaping);
+    assert.ok(childRecovery > retainedOwnerRefusal);
+    assert.doesNotMatch(source, /protectedInvocationIds/);
   });
 
   test('is idempotent across duplicate startup calls', async () => {

@@ -9,9 +9,7 @@ import { memberExecutionFixture as fixture } from './helpers/plugin-member-execu
 function cancelProvider(f: Awaited<ReturnType<typeof fixture>>, teardown = true) {
   if (teardown) f.turns.recordProviderTeardown(f.claim.invocationId, 200);
   const terminal = { status: 'canceled' as const, endedAt: 200, terminalReason: 'user_stop' };
-  if (teardown || f.turns.get(f.claim.invocationId)?.providerStartedAt === undefined)
-    f.turns.transitionTerminal(f.claim.invocationId, terminal);
-  else assert.throws(() => f.turns.transitionTerminal(f.claim.invocationId, terminal), /provider_teardown_unconfirmed/);
+  f.turns.transitionTerminal(f.claim.invocationId, terminal);
   f.messages.commitLifecycleResponseTerminal(f.response.id, {
     invocationId: f.claim.invocationId,
     status: 'canceled',

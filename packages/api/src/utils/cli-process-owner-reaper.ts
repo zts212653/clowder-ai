@@ -47,7 +47,14 @@ function selectStaleOwners(
   const stale: CliProcessOwnerRecord[] = [];
   let activeCount = 0;
   for (const record of records) {
-    if (sameUnixProcess(record.manifest.supervisor, identitySnapshot.get(record.manifest.supervisor.pid))) {
+    // Startup runs after the API instance lease is acquired and before this
+    // process can dispatch a provider. Any execution-bound supervisor therefore
+    // belongs to the previous Host and must be reaped even when it is still alive.
+    // Unbound warm carriers may survive because they cannot write a turn.
+    if (
+      !record.manifest.execution &&
+      sameUnixProcess(record.manifest.supervisor, identitySnapshot.get(record.manifest.supervisor.pid))
+    ) {
       activeCount += 1;
     } else {
       stale.push(record);
