@@ -7,6 +7,7 @@ import type { ProfileItem } from '../../hub-accounts.types';
 import { usesAgyAcp, usesAgyNative } from '../../hub-cat-editor.agy';
 import { builtinAccountIdForClient, filterAccounts, type HubCatEditorFormState } from '../../hub-cat-editor.model';
 import { SelectField } from '../../hub-cat-editor-fields';
+import { dshModelLabel } from './dsh-model-label';
 import { MemberCatalogStatus } from './MemberCatalogStatus';
 import { MemberChoicePicker } from './MemberChoicePicker';
 import { MemberConfigurationDetails } from './MemberConfigurationDetails';
@@ -79,6 +80,8 @@ export function MemberRuntimeFields({
           ? 'ACP'
           : form.clientId);
   const native = form.configurationSource === 'native_tool';
+  const dsh = form.clientId === 'acp' && /dsh|deepseek/i.test(form.acpCommand + form.acpStartupArgs);
+  const modelLabel = (value: string) => (dsh ? dshModelLabel(value) : value);
   const availableAccounts = filterAccounts(form.clientId, accounts),
     identity = availableAccounts.find((item) => item.id === form.accountRef);
   const defaultIdentity = usesDefaultNativeIdentity(form);
@@ -93,8 +96,9 @@ export function MemberRuntimeFields({
     form.cliConfigArgs.length > 0,
   );
   const defaultModel = catalog?.defaultModel ?? (!form.accountRef ? selected?.configuredModel : undefined);
-  const defaultModelLabel =
+  const configuredModelLabel =
     catalog?.defaultModelLabel ?? catalog?.models.find((item) => item.value === defaultModel)?.label ?? defaultModel;
+  const defaultModelLabel = configuredModelLabel !== undefined ? modelLabel(configuredModelLabel) : undefined;
   const defaultModelSource =
     catalog?.defaultModelSource === 'client_report'
       ? t('客户端回报', 'Client report')
@@ -231,21 +235,19 @@ export function MemberRuntimeFields({
           {t('已检测登录 · 实际连接待验证', 'Sign-in detected · Connection not yet verified')}
         </p>
       )}
-      {native &&
-        !form.accountRef &&
-        form.clientId === 'acp' &&
-        /dsh|deepseek/i.test(form.acpCommand + form.acpStartupArgs) && (
-          <MemberDshProviderSetup
-            form={form}
-            runtimeId={selected?.id ?? (editing ? `acp:${form.catId}` : 'dsh')}
-            t={t}
-            patch={patch}
-          />
-        )}
+      {native && !form.accountRef && dsh && (
+        <MemberDshProviderSetup
+          form={form}
+          runtimeId={selected?.id ?? (editing ? `acp:${form.catId}` : 'dsh')}
+          t={t}
+          patch={patch}
+        />
+      )}
       <div className="grid gap-4 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
         <MemberChoicePicker
           label={t('模型', 'Model')}
           value={form.defaultModel}
+          formatValue={modelLabel}
           options={models}
           onChange={(defaultModel) => patch({ defaultModel })}
           inheritLabel={follow}
@@ -274,7 +276,7 @@ export function MemberRuntimeFields({
       </div>
       <div className="space-y-1 text-sm text-cafe-secondary" role="status">
         <MemberModelSummary
-          model={form.defaultModel ? (activeModel?.label ?? form.defaultModel) : defaultModelLabel}
+          model={form.defaultModel ? modelLabel(activeModel?.label ?? form.defaultModel) : defaultModelLabel}
           effort={
             tierlessKimi
               ? undefined
