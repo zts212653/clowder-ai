@@ -1,0 +1,77 @@
+# 发送前看清链接范围：v2 输入框探索效果稿
+
+关联 [Issue #1863](https://github.com/zts212653/clowder-ai/issues/1863)。本稿回应维护者提出的“真实效果与解析语义验证”，提交探索分支供讨论，不表示已获正式实施、排期或合入批准。
+
+## 推荐采用的体验
+
+保留原生输入框，用暖色细线和极浅底提示“这段源文本发送后会生成网页链接”。用户自己用空格、换行或 Markdown 调整边界。原文、发送、草稿和气泡语义不变，classic 不增加新标记。
+
+参考 Codex GUI 的原位链接提示，我们认为它的优点很直接：输入时就看得见系统把哪些字算进链接，不用发送后才发现说明文字被吞进去。建议认可这个体验优化，并以本稿的实际效果继续确定视觉和正式范围。
+
+### Codex 参考
+
+用户提供的 Codex 图形界面截图：
+
+![Codex GUI 参考：网址与紧贴的中文同色，空格后恢复正文](../assets/issue1863/codex-reference.png)
+
+截图里“这是链接”仍被算进链接，空格之后“这不是”恢复正文颜色。借鉴点是**边界在编辑时可见**，并非 Codex 能自动理解中文说明。
+
+公开源码取证限定在 [Codex `695961ee` 的 TUI URL 检测](https://github.com/openai/codex/blob/695961ee88a2c84c0919814a4345b94a2d10f3ca/codex-rs/tui/src/terminal_hyperlinks.rs#L593)，[输入区](https://github.com/openai/codex/blob/695961ee88a2c84c0919814a4345b94a2d10f3ca/codex-rs/tui/src/bottom_pane/textarea/hyperlinks.rs#L24)与[用户历史](https://github.com/openai/codex/blob/695961ee88a2c84c0919814a4345b94a2d10f3ca/codex-rs/tui/src/history_cell/messages.rs#L333)复用检测。没有定位到截图 GUI 输入框的公开实现；本原型没有复制其 GUI 代码、蓝字或图标。
+
+### 我们的实际输入框
+
+直接挂载生产 `ChatInput`，保留原生 textarea。原字色与字宽不变：
+
+| URL 紧贴中文：整段显示标记 | 插入空格：说明脱离标记 |
+|---|---|
+| ![紧贴中文](../assets/issue1863/01-composer.png) | ![插入空格](../assets/issue1863/02-composer-space.png) |
+
+长 URL 跨行和内部滚动：
+
+![窄屏跨行与内部滚动](../assets/issue1863/03-composer-narrow.png)
+
+暗色：
+
+![暗色输入框](../assets/issue1863/04-composer-dark.png)
+
+[完整自动化操作录像](../assets/issue1863/editing-demo.webm)。录像来自 Windows 上的无头 Chromium 自动化，不是人工 Windows 输入法选词录像。
+
+## 标记含义与实现范围
+
+裸网址标当前解析范围；显式 `[标签](URL)`、尖括号链接、引用式链接使用处及会转成链接的完整 URL 行内代码，标记整个源构造。标签与定界符不称作“地址”。引用定义修改或删除后，使用处的结果跟随解析变化。网页 URL 经聊天插件转成引用仍属于范围；邮箱、本地路径和 commit 不扩展。
+
+输入提示与消息组件共用 GFM/breaks、聊天引用/数学配置，以及命令前缀和数学预处理。只给必要的 AST 转换补源位置；不更改链接目标或断词规则。遇到无法定位的网页链接，原型明确显示“部分链接范围尚无法标记”，不宣称无标记就是非链接。
+
+在 v2 中，装饰层位于原生 textarea 后方且不接收鼠标事件、不参与读屏；原生文字、选区、光标和撤销历史保留。宽度按 `clientWidth`，滚动与尺寸变化同步。组字期间暂隐标记，确认后恢复，避免干扰原生组字提示。没有增加长期产品开关、后端接口或持久化格式。
+
+## 已取得的操作证据
+
+环境：Windows，Chromium `149.0.7827.55`。入口为 `packages/web/test/browser/issue1863-preview.mjs`，默认端口 4174；操作脚本 `issue1863-browser.mjs`。
+
+- 网址紧贴中文 → 原生键入空格 → 撤销 → 重做；选区替换成换行：标记与内容随编辑更新。
+- 在 1180 / 760 / 390px 窗口下，长 URL 跨行、内部滚动和末尾换行通过；未出现页面横向溢出。
+- 对应三种宽度，textarea 与镜像的 `scrollHeight` 分别同为 1232 / 1232 / 2432px；滚到底的 `scrollTop` 分别同为 1032 / 1112 / 2312px。
+- Chromium CDP 原生 composition 事件与提交通过，输入值和标记一致。这个结果不代替实体 Windows IME 候选词验收。
+- 将普通 URL、中文 query、显式/引用式链接、完整 URL 行内代码、`www.`、代码块及数学负例从真实输入组件提交给真实 `MarkdownContent`＋`ChatReferenceScope`：标记目标与渲染链接 `href` 一致。
+- 演示消息刷新后保留；暗色可见；切换 classic 后没有标记层。
+- 28 项新解析/渲染测试、10 项原有数学测试、46 项编辑/草稿/高度回归通过。Biome 对改动文件无 error。全仓 TypeScript 检查存在未构建 API 声明及其他既有组件错误，不能宣称全仓类型检查通过。
+
+[浏览器原始结果](../assets/issue1863/browser-results.json)。独立验收由鲸鲸负责；审查结论另附，不能用作者自测代替。
+
+## 尚不能据此宣称的事
+
+这是**真实产品组件的隔离宿主演示**：输入、草稿和 Markdown 组件来自产品；提交边界及 API 响应为演示夹具，不调用猫猫或运行版服务。宿主里的新建会话、消息保存/刷新是本地演示，不能冒充完整产品 API 创建线程、真实消息存储与重启恢复的端到端验收。
+
+实体 Windows IME 候选词选择、macOS，以及完整产品创建线程/后端持久化旅程尚未验证。全覆盖语法与编辑回归还需独立审查。这些结论留给实际稿评审，不写成正式能力已完成。
+
+## 复现
+
+在探索分支安装锁定依赖并构建 `@cat-cafe/shared` 后：
+
+```sh
+node scripts/preview-process.mjs start --port 4174 --cwd /absolute/checkout --lifetime-seconds 14400 -- node packages/web/test/browser/issue1863-preview.mjs
+# 另一个终端，工作目录 packages/web：
+node test/browser/issue1863-browser.mjs
+```
+
+预览只运行隔离组件，默认四小时到期，不会修改运行中的安装版。确认实际稿后，再决定正式产品范围与后续 PR；当前不申请合并或部署。

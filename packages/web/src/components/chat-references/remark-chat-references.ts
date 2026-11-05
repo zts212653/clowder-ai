@@ -35,10 +35,14 @@ function splitText(value: string, node: PhrasingContent, source: string): Phrasi
     if (start > end) result.push({ type: 'text', value: value.slice(end, start) });
     const resolved = link(reference, 'text');
     const sourceStart = source.indexOf(reference, sourceEnd);
-    if (sourceStart >= sourceEnd && sourceStart + reference.length <= (node.position?.end.offset ?? 0)) {
+    if (
+      /^https?:/.test(reference) &&
+      sourceStart >= sourceEnd &&
+      sourceStart + reference.length <= (node.position?.end.offset ?? 0)
+    ) {
       const point = (offset: number) => {
         const lines = source.slice(0, offset).split('\n');
-        return { offset, line: lines.length, column: lines.at(-1)!.length + 1 };
+        return { offset, line: lines.length, column: lines[lines.length - 1].length + 1 };
       };
       resolved.position = { start: point(sourceStart), end: point(sourceStart + reference.length) };
       sourceEnd = sourceStart + reference.length;

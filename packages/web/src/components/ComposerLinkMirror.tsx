@@ -18,6 +18,7 @@ export function ComposerLinkMirror({
   const contentRef = useRef<HTMLDivElement>(null);
   const { ranges, unmapped } = useMemo(() => composerWebLinks(input), [input]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Synchronize after React commits each changed draft, including a change that does not resize the textarea.
   useLayoutEffect(() => {
     const textarea = textareaRef.current;
     const viewport = viewportRef.current;

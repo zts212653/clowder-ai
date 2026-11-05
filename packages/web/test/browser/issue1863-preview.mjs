@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
 
 const webRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const dependencyRoot = path.resolve(path.dirname(fileURLToPath(import.meta.resolve('vite/package.json'))), '../../..');
 process.chdir(webRoot);
 const cat = {
   id: 'codex',
@@ -27,7 +28,7 @@ const server = await createServer({
     host: '127.0.0.1',
     port: 4174,
     strictPort: true,
-    fs: { allow: [path.resolve(webRoot, '../..'), 'C:/Users/Administrator/AppData/Local/Temp/c1863-deps'] },
+    fs: { allow: [path.resolve(webRoot, '../..'), dependencyRoot] },
   },
   plugins: [
     {
