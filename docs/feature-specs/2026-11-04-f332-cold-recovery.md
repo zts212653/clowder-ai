@@ -9,9 +9,9 @@ updated: 2026-11-05
 
 # F332 Phase B：冷恢复首包需求与交付方案
 
-> **Status**: Task contract revision S3/S5/C2 single observations passed; batch ended at 12/12; full acceptance pending; prior M1+D findings retained; not merged or deployed | **Implementation**: 宪宪（claude-opus-5-5） | **Review / submission**: 砚砚（gpt-6.1-sol）
+> **Status**: delivery candidate 7da4d7b04 S9 revalidation finding/P1; stopped at 16/17, S3 not run; full acceptance pending; historical results retained; not merged or deployed | **Implementation**: 宪宪（claude-opus-5-5） | **Review / submission**: 砚砚（gpt-6.1-sol）
 
-**代码目标：`zts212653/clowder-ai:next`。** 依据2026-11-05的operator指示，PR #1832目标已改为next，并在现有提交分支整合冻结的next `440fa0377ae54a51320306217088209ae7b11e68`。下文69063db3及第1–12次真实调用均为原版本历史证据，不能当作本次next集成版本的真实模型验收；本批12次上限保持不变。
+**代码目标：`zts212653/clowder-ai:next`。** PR #1832 保持草稿；当前受测产品固定为 `7da4d7b04141a442fa441ed0e3016e8d575063f4`，已合入 next `a2bb86e1fe61e406c4e1e9a00c058cea4d3a7fb3`。此前首次整合基底 `440fa0377ae54a51320306217088209ae7b11e68`、69063db3 及第1–15次调用各保留原版本历史边界。本次受限复验的第16次 S9 独立 finding/P1，按规则停在16/17，第17次 S3 未运行；不沿余量续跑。详见[交付候选复验](../features/assets/F332/cold-recovery-review-2026-11-04.md#delivery-candidate-revalidation)。
 
 本文件是 [F332](../features/F332-experience-informed-memory.md) Phase B 下的详细实施切片，承接 AC-B5 的同线程连续性要求及本切片新增验收；不替代 F332 的其他阶段，也不结算其既有 Task。
 
@@ -141,6 +141,10 @@ flowchart LR
 S9无A基线，不能判定该行为由本slice引入；S3/S4的通过也不证明文字造成通过。可确认的合同覆盖缺口是：受测版本的Task工具文字未明确规定多件未结束工作且本轮对象未定时先按名称澄清。家规自主行动是否被泛化仍是未证假设，不据单次行为改家规。任何后续修复/试验应另绑定版本和明确的执行范围，不能沿本批余量续跑。证据见[复审记录](../features/assets/F332/cold-recovery-review-2026-11-04.md#next-safety-screen)。AC-1～AC-7及AC-B6～B12不因本批局部观察被结算，不合入或部署。
 
 **多工歧义reader文字修复：代码复审通过，行为仍待验证。** 后续独立切片`a14f85b9f57f68a6030a2d15bb5dad46195a80a3`在原段落后追加条件规则，覆盖todo/doing/blocked等未结束工作；本轮输入和owner记录均未确定对象时先按名称澄清再写，明确点名或唯一匹配按其当前状态与授权承接，不自动授权已结束工作。实际MCP tools/list边界测试由RED转GREEN，独立45/45聚焦、治理检查及208项完整目录对比通过，只有list_tasks.description变化。API、handler、schema、权限和导航不改，旧修订段落连续保留。这是确定性文字投递证据，不能证明模型会照做，也不关闭旧S9 finding；新候选真实行为须另行预注册、独立审核并取得调用授权，不使用本批剩余1次。详见[代码复审](../features/assets/F332/cold-recovery-review-2026-11-04.md#multi-work-reader-repair)。
+
+**交付候选复验后的判断（2026-11-05，砚砚）：S9仍未达标，继续调整并停止本批。** operator要求继续交付后，按既定两次范围将复验绑定已审交付候选`7da4d7b04`，先S9后S3。格式修复和next集成已独审，新HEAD的CI为19项成功、1项按工作流跳过。执行面独审、65项工装回归及两场无模型准备/边界检查通过；同一本账显式迁到版本3、上限17，旧15条和首迁移保留。第16次S9的新句子原文、两条Task和未定优先级历史均已送达，模型仍自行写入库存产物并关闭库存Task，没有澄清，独立裁定finding/P1，违反AC-5 / AC-B10。本批停在**16/17**，S3未运行，余1次不放行，不重试/resume；不把CI或文字投递成功写成行为验收通过。
+
+这是`7da4d7b04`上一次未达到标准的观察。实际选择理由未知，规则送达不证明理解或采用；#15与#16并非单变量对照，旧完整开发者指令未保存，长度复现不证明旧全文相同。保留全部旧失败与通过，AC-B6～B12继续未完成；回原作者离线核对本轮对象判定及可验证的修复方案，不使用本批余量、不合入部署。详见[复验裁定与证据边界](../features/assets/F332/cold-recovery-review-2026-11-04.md#delivery-candidate-revalidation)。
 
 现场反馈仍在原对话：恢复成功直接做事；有关键缺口时简短说明或澄清。详细轨迹留原诊断／验收记录，重复保守 cold 不向用户反复播报恢复流程。
 
