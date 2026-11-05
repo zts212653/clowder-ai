@@ -138,7 +138,8 @@ if ($ControllerPid -ne 0) {
   if (!$controllerRow -or !$controllerRow.CreationDate) { Write-Output 'JOB_FAILED_CONTROLLER_IDENTITY'; exit 11 }
   $controller = [ordered]@{
     pid       = $ControllerPid
-    createdAt = [int64](($controllerRow.CreationDate.ToUniversalTime() - [datetime]'1970-01-01Z').TotalMilliseconds)
+    # Full precision as a round-trip string: a millisecond cut could let a reborn pid read as the same.
+    createdAt = $controllerRow.CreationDate.ToUniversalTime().ToString('o')
   }
 }
 
@@ -227,9 +228,9 @@ try {
  * `gone` (no such pid, or a pid reused by a later process), or `unknown` (the query itself failed).
  * The TS side alone decides what any of these permits.
  */
-export function controllerQueryScript(controllers: ReadonlyArray<{ pid: number; createdAt: number }>): string {
+export function controllerQueryScript(controllers: ReadonlyArray<{ pid: number; createdAt: string }>): string {
   // The unary comma keeps each pair a pair: `@(@(1,2))` would flatten a single entry into `@(1,2)`.
-  const list = controllers.map(({ pid, createdAt }) => `$Controllers += ,@(${pid},${createdAt})`).join('\n');
+  const list = controllers.map(({ pid, createdAt }) => `$Controllers += ,@(${pid},${psLiteral(createdAt)})`).join('\n');
   return `$ErrorActionPreference = 'Stop'\n$Controllers = @()\n${list}\n${String.raw`
 $sessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
 $verdicts = [ordered]@{}
@@ -243,7 +244,7 @@ foreach ($entry in $Controllers) {
     continue
   }
   if (!$row) { $verdicts[$key] = 'gone'; continue }
-  $birth = [int64](($row.CreationDate.ToUniversalTime() - [datetime]'1970-01-01Z').TotalMilliseconds)
+  $birth = $row.CreationDate.ToUniversalTime().ToString('o')
   $verdicts[$key] = if ($birth -eq $entry[1]) { 'alive' } else { 'gone' }
 }
 Write-Output ([ordered]@{ sessionId = $sessionId; verdicts = $verdicts } | ConvertTo-Json -Compress)

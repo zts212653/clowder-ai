@@ -59,7 +59,7 @@ export interface WindowsJobOwnerRecord {
    * Provider-host jobs only: the API that started the host and can still launch into its execution.
    * The job closing proves that host's tree gone; only this API's exit proves no further host comes.
    */
-  controller?: { pid: number; createdAt: number };
+  controller?: { pid: number; createdAt: string };
 }
 
 export type WindowsJobOwnerEntry = WindowsJobOwnerRecord & { path: string };
@@ -93,7 +93,10 @@ export function parseWindowsJobOwnerRecord(value: unknown): WindowsJobOwnerRecor
   if (!isNonNegativeSafeInteger(record.sessionId) || !isPositiveSafeInteger(record.createdAt)) return null;
   const controller = asRecord(record.controller);
   const validController =
-    controller && isPositiveSafeInteger(controller.pid) && isPositiveSafeInteger(controller.createdAt)
+    controller &&
+    isPositiveSafeInteger(controller.pid) &&
+    typeof controller.createdAt === 'string' &&
+    controller.createdAt.length > 0
       ? { pid: controller.pid, createdAt: controller.createdAt }
       : null;
   // The prefix fixes the kind: a provider-host job without a usable controller is unreadable, never
@@ -296,7 +299,7 @@ export async function queryWindowsJobStopEvidence(
 export type WindowsControllerVerdict = 'alive' | 'gone' | 'unknown';
 
 /** One controller API exactly: pid alone could name a later process. */
-export function windowsControllerKey(controller: { pid: number; createdAt: number }): string {
+export function windowsControllerKey(controller: { pid: number; createdAt: string }): string {
   return `${controller.pid}:${controller.createdAt}`;
 }
 
@@ -305,7 +308,7 @@ export function windowsControllerKey(controller: { pid: number; createdAt: numbe
  * session permits anything; a failed or unparseable probe, or another session, stays `unknown`.
  */
 export async function queryWindowsControllers(
-  controllers: ReadonlyArray<{ pid: number; createdAt: number; sessionId: number }>,
+  controllers: ReadonlyArray<{ pid: number; createdAt: string; sessionId: number }>,
   options: { execute?: WindowsJobQueryExecute } = {},
 ): Promise<Map<string, WindowsControllerVerdict>> {
   const verdicts = new Map<string, WindowsControllerVerdict>(

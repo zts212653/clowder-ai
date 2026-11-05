@@ -82,7 +82,7 @@ test(
     t.after(() => killOwned(host.job.apiPid));
     assert.notEqual(host.job.apiPid, process.pid, 'the API itself is not the job owner');
     assert.equal(host.job.controller?.pid, process.pid, 'the record names the API that can launch into it');
-    assert.equal(typeof host.job.controller?.createdAt, 'number');
+    assert.match(host.job.controller?.createdAt ?? '', /^\d{4}-\d{2}-\d{2}T[\d:.]+Z$/, 'full-precision birth');
     assert.equal(existsSync(host.job.path), true, 'the job is recorded before anything is launched');
     await new Promise((resolve) => setTimeout(resolve, 300));
     assert.equal(existsSync(join(dir, 'started')), false, 'nothing runs before launch');
@@ -333,7 +333,7 @@ test(
     const owner = JSON.parse(readFileSync(host.job.path, 'utf8'));
     writeFileSync(
       host.job.path,
-      JSON.stringify({ ...owner, controller: { ...owner.controller, createdAt: owner.controller.createdAt - 1 } }),
+      JSON.stringify({ ...owner, controller: { ...owner.controller, createdAt: '2000-01-01T00:00:00.0000000Z' } }),
     );
     const first = await recordVerifiedWindowsJobTeardowns({ store: flaky, dataDir });
     assert.deepEqual(first.released, []);
