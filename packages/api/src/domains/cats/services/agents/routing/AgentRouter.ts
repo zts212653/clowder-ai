@@ -837,11 +837,12 @@ export class AgentRouter {
     options?: { persist?: boolean; bound?: boolean },
   ): Promise<CatId[]> {
     const pluginIds = new Set((await this.addressedPlugins?.list(true))?.map((plugin) => plugin.id) ?? []);
+    const requestedMemberIds = requestedCatIds.filter((id) => !pluginIds.has(id));
     // First admission validates the whole explicit request. A bound Queue row
     // instead settles each recipient, so an invalid sibling cannot cancel healthy work.
     const resolvedMembers = options?.bound
-      ? requestedCatIds.flatMap((id) => this.resolveAdmissionTargets([id])).filter((id) => this.isRoutableCat(id))
-      : this.resolveAdmissionTargets(requestedCatIds);
+      ? requestedMemberIds.flatMap((id) => this.resolveAdmissionTargets([id])).filter((id) => this.isRoutableCat(id))
+      : this.resolveAdmissionTargets(requestedMemberIds);
     const memberIds = new Set(resolvedMembers);
     const resolved = [...new Set(requestedCatIds)].filter(
       (id) => memberIds.has(id as CatId) || pluginIds.has(id),
@@ -871,7 +872,9 @@ export class AgentRouter {
     const explicit = await this.parseAllMentions(content, threadId, { allowGroupFallback: false });
     if (explicit.mentions.length > 0 || explicit.routing_warnings.length > 0) return explicit.mentions;
     const plugins = new Set((await this.addressedPlugins?.list())?.map((plugin) => plugin.id) ?? []);
-    const hinted = [...new Set(requestedCatIds)].filter((id) => this.isRoutableCat(id) || plugins.has(id)) as CatId[];
+    const hinted = [
+      ...new Set(requestedCatIds.flatMap((id) => (plugins.has(id) ? [id as CatId] : this.filterRoutableCats([id])))),
+    ];
     if (hinted.length > 0) return hinted;
     if ((await Promise.all(requestedCatIds.map((id) => this.addressedPlugins?.isInstanceId(id)))).some(Boolean)) {
       return [];

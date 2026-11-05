@@ -271,7 +271,7 @@ test('address edits do not change activation revision; icon can be restored and 
   );
 });
 
-test('real message ingress binds plugin identity as a participant and rejects plugin whispers', async () => {
+test('real message ingress admits mixed member/plugin targets, rejects unknowns and keeps whispers member-only', async () => {
   const [
     { default: Fastify },
     { messagesRoutes },
@@ -293,13 +293,16 @@ test('real message ingress binds plugin identity as a participant and rejects pl
   const threadStore = new ThreadStore();
   const owner = process.env.DEFAULT_OWNER_USER_ID ?? 'owner';
   const thread = await threadStore.create(owner, 'Plugin addressing');
+  const agentRegistry = new AgentRegistry();
+  agentRegistry.register('opus', {} as never);
   const router = new AgentRouter({
-    agentRegistry: new AgentRegistry(),
+    agentRegistry,
     registry,
     messageStore,
     threadStore,
     addressedPlugins: targets,
   });
+  assert.deepEqual(await router.resolveExplicitTargets(['opus', 'pi_original'], thread.id), ['opus', 'pi_original']);
   const queue = new InvocationQueue(undefined, {
     resolveTargets: (requested, threadId, content, exact) =>
       router.resolveSendTargets(requested, threadId, content, exact),
@@ -328,6 +331,32 @@ test('real message ingress binds plugin identity as a participant and rejects pl
     assert.deepEqual((await threadStore.get(thread.id))?.participants, ['pi_original']);
     await targets.configure('pi_original', { alias: 'renamed', expectedRevision: 1 });
     assert.deepEqual((await queue.listAllDurable(thread.id))[0]?.targets, ['pi_original']);
+    const mixed = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      payload: {
+        threadId: thread.id,
+        content: 'mixed explicit delivery',
+        mentions: ['opus', 'pi_original'],
+      },
+    });
+    assert.equal(mixed.statusCode, 202, mixed.body);
+    assert.ok(
+      (await queue.listAllDurable(thread.id)).some(
+        (entry) => entry.targets.length === 2 && entry.targets[0] === 'opus' && entry.targets[1] === 'pi_original',
+      ),
+    );
+    const mixedUnknown = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      payload: {
+        threadId: thread.id,
+        content: 'mixed invalid delivery',
+        mentions: ['opus', 'pi_original', 'not-a-target'],
+      },
+    });
+    assert.equal(mixedUnknown.statusCode, 400, mixedUnknown.body);
+    assert.equal(mixedUnknown.json().code, 'INVALID_EXPLICIT_TARGETS');
     const whisper = await app.inject({
       method: 'POST',
       url: '/api/messages',
