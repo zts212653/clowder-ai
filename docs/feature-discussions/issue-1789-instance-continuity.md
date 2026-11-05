@@ -9,7 +9,7 @@ created: 2026-11-06
 
 现场的 Windows 桌面版可以列出旧会话和作品，图片在解析旧工作区 ID 时返回 404，上传文档在当前 uploads 根下返回 404。目标是让用户辨认每处断点，并在明确选择后用同一实例上下文访问原件。原始报告基于已安装的 `5d04c944`，本文的隔离证据基于 `next@471b56a4bbe45f331902adeb6c03ca99d19bb30c`。[原 Issue](https://github.com/zts212653/clowder-ai/issues/1789)
 
-维护者接受先做一致性诊断和可回退方案。S2 要求对既有或无标记 Redis 只读探测。归属标记只能由应用为自己新启动、已绑定专属目录的实例写入。Redis 采用、迁移、同目录双写防护和冲突时的启动体验仍需维护者确定。本次提交的命令由操作者单独运行，桌面启动策略仍是下一切片的评审议题。[#1789 triage](https://github.com/zts212653/clowder-ai/issues/1789#issuecomment-6594828392) · [#1459 S2](https://github.com/zts212653/clowder-ai/issues/1459#issuecomment-5658770842)
+维护者在 #1789 的首次回复中允许先围绕一致性诊断和可回退方案收敛。#1869 的方向结论仅将独立只读目录诊断纳入正式审查。S2 要求对既有或无标记 Redis 只读探测。归属标记只能由应用为自己新启动、已绑定专属目录的实例写入。Redis 采用、迁移、同目录双写防护和冲突时的启动体验仍需维护者确定。[#1789 triage](https://github.com/zts212653/clowder-ai/issues/1789#issuecomment-6594828392) · [#1459 S2](https://github.com/zts212653/clowder-ai/issues/1459#issuecomment-5658770842) · [#1869 方向结论](https://github.com/zts212653/clowder-ai/pull/1869#issuecomment-6665038009)
 
 ## 关联变更对账
 
@@ -48,10 +48,12 @@ node desktop/redis-directory-diagnostic.js <absolute-user-data-directory> <port>
 
 ## 恢复切片，待契约批准
 
+以下三条是候选路径，用于评估授权、持久化、部分失败和回退。正式实现范围由维护者决策确定。
+
 ### 选择实例数据面
 
 1. 在拟接续的旧实例和当前实例之间选择一套权威上下文。先从安装标记、实例台账、实际进程和显式配置确认 Redis 目录、数据库、配置、uploads、工作区连接文件及 SQLite/日志根，显示来源和冲突。旧目录、进程、密码或原件有任何未知时保留未知，等待确认。仅凭 PING 或目录比对不得采用。
-2. 维护者应先决定复用同一套已授权数据面还是迁移副本，以及启动遇到外部监听时如何提示。只有获准的迁移才基于备份副本验证 Redis 版本、原写入者与新写入者的交接和读写兼容。复用现有 Electron 数据面或显式 `CAT_CAFE_DATA_DIR`，沿已有实例配置持久化选择。现有 Redis 的只读诊断和任何采用操作应由不同入口承接。
+2. 维护者应先决定复用同一套已授权数据面还是迁移副本，以及启动遇到外部监听时如何提示。只有获准的迁移才基于备份副本验证 Redis 版本、原写入者与新写入者的交接和读写兼容。一个候选是复用现有 Electron 数据面或显式 `CAT_CAFE_DATA_DIR`，沿已有实例配置持久化选择。现有 Redis 的只读诊断和任何采用操作应由不同入口承接。
 3. 切换前记录旧、新生效配置及备份位置和哈希。启动前确认目录、端口与唯一写入者。启动后验证历史、原会话、两类文件和重启时的有效配置。任一根配置不可用时报告具体断点，回到上一个已验证配置。恢复配置选择时保留两套原件和数据库，避免跨实例覆盖或双写。
 
 ### 只接续工作区原件
@@ -68,7 +70,7 @@ node desktop/redis-directory-diagnostic.js <absolute-user-data-directory> <port>
 
 ## 验证与回退
 
-- Windows fixture 用两个明确归属的 Redis 8.10.3 进程和合成 Git worktree、目录、图片及上传文档。用本来的 `_startRedis` 观察 PING 分支，用生产 Fastify 路由和 Redis store 观察首页与聊天返回原引用、非 Git cwd 下别名 404 及只更改 uploads 根后的回读。用实际 root-connection handler 验证伪造 proof 拒绝、有效 proof 写入 canonical ID。仅在合成配置中预置旧别名，独立进程读回映射，重建 Fastify 后使用原 URL 回读两类原件。
+- 初次 Windows 复现用基线的 `_startRedis` 观察到 PING 复用。提交的 fixture 直接接入测试 Redis 和不同归属的文件根，复现同一种状态。它用生产 Fastify 路由和 Redis store 观察首页与聊天返回原引用、非 Git cwd 下别名 404 及只更改 uploads 根后的回读。用实际 root-connection handler 验证伪造 proof 拒绝、有效 proof 写入 canonical ID。旧别名和旧上传根的正例均由 fixture 显式预置。独立进程读回映射，重建 Fastify 后使用原 URL 回读两类原件。产品恢复入口与现场验收留待恢复切片。
 - 同一 fixture 对照 Redis 目录匹配、目录不匹配、第二套独立空实例、无根、根内缺文件、原字节读取及解码失败。恢复合同中剩余的同名根、撤权、跨盘/链接逸出、完整重启和首装验收在实际恢复候选上补齐。
 - 本地检查命令为 `node --test desktop/redis-directory-diagnostic.test.js`、`pnpm --filter @cat-cafe/api build` 和 `pnpm biome check desktop/redis-directory-diagnostic.js desktop/redis-directory-diagnostic.test.js packages/api/test/issue1789-instance-continuity-redis.test.js`。支持 Redis runner 的环境用 `pnpm --filter @cat-cafe/api test:redis -- node --import ./test/helpers/setup-cat-registry.js --test test/issue1789-instance-continuity-redis.test.js`。Windows 证据使用独立 loopback 端口和测试 HOME，未使用现场 Redis、SQLite、会话、配置或认证。
 - 当前交付是诊断命令、计划与测试。回退 PR 提交即可，无运行配置或数据回退步骤。真实已安装 Windows 桌面、现场文件接续和恢复策略的产品入口属于后续验收。

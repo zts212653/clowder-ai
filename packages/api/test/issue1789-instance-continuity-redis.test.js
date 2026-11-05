@@ -63,21 +63,9 @@ test(
     process.env.CAT_CAFE_WORKSPACE_ROOT = project;
     process.env.CAT_CAFE_CONFIG_ROOT = project;
     process.env.CAT_CAFE_DATA_DIR = join(desktop, 'data');
-    process.env.LOCALAPPDATA = join(root, 'local-app-data');
-    delete process.env.CAT_CAFE_DESKTOP_INSTANCE_ROOT;
     delete process.env.WORKSPACE_LINKED_ROOTS;
 
-    const { default: ServiceManager } = await import('../../../desktop/service-manager.js');
-    const statuses = [];
-    const manager = new ServiceManager(root, {
-      redisPort: Number(new URL(redisUrl).port),
-      onStatus: (status) => statuses.push(status),
-    });
-    await manager._startRedis(desktop);
-    assert.deepEqual(statuses, [`Redis already running on ${manager.redisPort}`]);
-    assert.equal(manager.procs.redis, undefined);
-    assert.equal(manager._buildApiEnv(desktop).UPLOAD_DIR, uploads);
-
+    // Reproduce the mixed data plane explicitly, independent of desktop startup policy.
     const redis = new Redis(redisUrl, { keyPrefix: `issue1789-${process.pid}:` });
     t.after(() => redis.quit());
     const [, reportedDir] = await redis.config('GET', 'dir');
@@ -126,7 +114,7 @@ test(
       chat.json().messages[0].extra.rich.blocks.map((block) => block.url ?? block.items[0].url),
       [imageUrl, uploadUrl],
     );
-    t.diagnostic('Desktop PING reuses the fixture Redis; Home and Chat return history while the directory differs');
+    t.diagnostic('Home and Chat return history from the fixture Redis while the file roots belong to another instance');
 
     const missingRoot = await get(imageUrl);
     assert.equal(missingRoot.statusCode, 404);
