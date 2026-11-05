@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ChatInput } from '@/components/ChatInput';
 import { ChatReferenceScope } from '@/components/chat-references/ChatReferenceScope';
@@ -31,6 +31,20 @@ useChatStore.setState({ currentThreadId: '', currentProjectPath: '/preview' });
 function Preview() {
   const params = new URLSearchParams(location.search);
   const [classic, setClassic] = useState(params.get('classic') === '1');
+  const [unmapped, setUnmapped] = useState(0);
+  useEffect(() => {
+    const read = () =>
+      setUnmapped(Number(document.querySelector('[data-unmapped]')?.getAttribute('data-unmapped') ?? 0));
+    const observer = new MutationObserver(read);
+    observer.observe(document.getElementById('root')!, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ['data-unmapped'],
+    });
+    read();
+    return () => observer.disconnect();
+  }, []);
   const [threadId, setThreadId] = useState<string>();
   const [messages, setMessages] = useState<string[]>(JSON.parse(localStorage.getItem('issue1863:messages') ?? '[]'));
   const [seed, setSeed] = useState({
@@ -54,6 +68,9 @@ function Preview() {
           <p style={{ color: 'var(--shell-muted)', fontSize: 12, marginTop: 8 }}>
             探索效果稿 · 标记表示这段源文本发送后会生成网页链接。发送仅进入本地演示消息，不调用猫猫。
           </p>
+          {unmapped > 0 && (
+            <p role="status">这个样例还有 {unmapped} 个网页链接未能定位；不能据此认为未标记部分不会成为链接。</p>
+          )}
           <div style={{ display: 'flex', gap: 16, marginTop: 16 }}>
             <button
               type="button"

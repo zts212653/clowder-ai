@@ -8,7 +8,7 @@ const processor = createMarkdownProcessor(chatMarkdownPlugins(true));
 export function composerWebLinks(source: string) {
   const ranges: { start: number; end: number; href: string }[] = [];
   let unmapped = 0;
-  if (!/https?:|www\./i.test(source)) return { ranges, unmapped };
+  if (!/https?|www|[&\\]/i.test(source)) return { ranges, unmapped };
   const content = source.trim();
   const { md, offset } = prepareChatMarkdown(content);
   const sourceOffset = source.length - source.trimStart().length + offset;

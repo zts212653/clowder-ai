@@ -6,7 +6,11 @@ import { chromium } from 'playwright';
 
 const evidence = path.join(os.tmpdir(), 'cat-cafe-evidence', 'issue1863');
 await fs.mkdir(evidence, { recursive: true });
-const browser = await chromium.launch({ headless: true });
+const browser = await chromium.launch({
+  headless: true,
+  ignoreDefaultArgs: ['--hide-scrollbars'],
+  args: ['--disable-features=OverlayScrollbar,FluentOverlayScrollbar'],
+});
 const context = await browser.newContext({ viewport: { width: 1180, height: 800 }, recordVideo: { dir: evidence } });
 const page = await context.newPage();
 const errors = [];
@@ -90,6 +94,7 @@ for (const width of [1180, 760, 390]) {
     node.dispatchEvent(new Event('scroll'));
     return {
       width: node.clientWidth,
+      scrollbarWidth: node.offsetWidth - node.clientWidth,
       textHeight: node.scrollHeight,
       mirrorHeight: mirror.scrollHeight,
       scrollTop: node.scrollTop,

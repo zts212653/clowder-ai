@@ -85,6 +85,7 @@ export function ComposerLinkMirror({
         className={styles.viewport}
         aria-hidden="true"
         data-testid="composer-link-mirror"
+        data-unmapped={unmapped}
         style={{ visibility: composing ? 'hidden' : undefined }}
       >
         <div ref={contentRef} className={styles.content}>
@@ -93,7 +94,6 @@ export function ComposerLinkMirror({
           {input.endsWith('\n') ? '\u200b' : null}
         </div>
       </div>
-      {unmapped > 0 && <span className="text-xs text-[var(--shell-muted)]">部分链接范围尚无法标记</span>}
     </>
   );
 }

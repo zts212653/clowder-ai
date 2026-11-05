@@ -17,7 +17,8 @@
   ],
   "geometry": [
     {
-      "width": 702,
+      "width": 687,
+      "scrollbarWidth": 15,
       "textHeight": 1232,
       "mirrorHeight": 1232,
       "scrollTop": 1032,
@@ -26,7 +27,8 @@
       "overflow": false
     },
     {
-      "width": 678,
+      "width": 663,
+      "scrollbarWidth": 15,
       "textHeight": 1232,
       "mirrorHeight": 1232,
       "scrollTop": 1112,
@@ -35,11 +37,12 @@
       "overflow": false
     },
     {
-      "width": 308,
-      "textHeight": 2432,
-      "mirrorHeight": 2432,
-      "scrollTop": 2312,
-      "mirrorScrollTop": 2312,
+      "width": 293,
+      "scrollbarWidth": 15,
+      "textHeight": 3032,
+      "mirrorHeight": 3032,
+      "scrollTop": 2912,
+      "mirrorScrollTop": 2912,
       "windowWidth": 390,
       "overflow": false
     }

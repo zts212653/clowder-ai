@@ -27,25 +27,24 @@ function link(value: string, format: 'text' | 'code' | 'link', children?: Phrasi
 function splitText(value: string, node: PhrasingContent, source: string): PhrasingContent[] {
   const result: PhrasingContent[] = [];
   let end = 0;
-  let sourceEnd = node.position?.start.offset ?? 0;
+  const sourceStart = node.position?.start.offset;
+  const sourceEnd = node.position?.end.offset;
+  const exactText = sourceStart != null && sourceEnd != null && source.slice(sourceStart, sourceEnd) === value;
   for (const match of value.matchAll(token)) {
     const reference = match[2].replace(/[.,;:!?，。；：、！？]+$/u, '');
     if (!candidate(reference)) continue;
     const start = match.index + match[1].length;
     if (start > end) result.push({ type: 'text', value: value.slice(end, start) });
     const resolved = link(reference, 'text');
-    const sourceStart = source.indexOf(reference, sourceEnd);
-    if (
-      /^https?:/.test(reference) &&
-      sourceStart >= sourceEnd &&
-      sourceStart + reference.length <= (node.position?.end.offset ?? 0)
-    ) {
+    if (/^https?:/.test(reference) && start === 0 && reference.length === value.length)
+      resolved.position = node.position;
+    if (/^https?:/.test(reference) && exactText && sourceStart != null) {
       const point = (offset: number) => {
         const lines = source.slice(0, offset).split('\n');
         return { offset, line: lines.length, column: lines[lines.length - 1].length + 1 };
       };
-      resolved.position = { start: point(sourceStart), end: point(sourceStart + reference.length) };
-      sourceEnd = sourceStart + reference.length;
+      const offset = sourceStart + start;
+      resolved.position = { start: point(offset), end: point(offset + reference.length) };
     }
     result.push(resolved);
     end = start + reference.length;

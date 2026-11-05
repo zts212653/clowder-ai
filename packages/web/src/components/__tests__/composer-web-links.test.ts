@@ -18,6 +18,7 @@ describe('composer web links use the eventual thread message semantics', () => {
     ['`https://example.com/中文`', ['`https://example.com/中文`']],
     ['  /cmd https://example.com/a  ', ['https://example.com/a']],
     ['www.example.com', ['www.example.com']],
+    ['https\\://example.com', ['https\\://example.com']],
     ['https://a.com https://a.com', ['https://a.com', 'https://a.com']],
     ['```\nhttps://example.com\n```', []],
     ['    https://example.com', ['https://example.com']],
@@ -36,6 +37,10 @@ describe('composer web links use the eventual thread message semantics', () => {
     expect(composerWebLinks(`${use}\n\n[ref]: https://one.com`).ranges[0]?.href).toBe('https://one.com/');
     expect(composerWebLinks(`${use}\n\n[ref]: https://two.com`).ranges[0]?.href).toBe('https://two.com/');
     expect(composerWebLinks(use).ranges).toEqual([]);
+  });
+
+  it('reports a source-position gap for a URL created from escaped prose instead of guessing its position', () => {
+    expect(composerWebLinks('说明 https\\://example.com 后')).toEqual({ ranges: [], unmapped: 1 });
   });
 
   it('keeps duplicate links distinct across a selection replacement', () => {
