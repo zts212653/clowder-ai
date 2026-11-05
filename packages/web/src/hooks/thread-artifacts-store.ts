@@ -21,7 +21,8 @@ function createEntry(key: string, threadId: string | undefined, view?: 'works') 
     complete: false,
   };
   const listeners = new Set<() => void>();
-  const lifetime = new AbortController();
+  let activeListeners = 0;
+  let titleLifetime: AbortController | undefined;
   let controller: AbortController | undefined;
   let scheduled = false;
   let dirty = false;
@@ -30,7 +31,7 @@ function createEntry(key: string, threadId: string | undefined, view?: 'works') 
     listeners.forEach((listener) => listener());
   };
   const fetch = async () => {
-    if (!threadId || !listeners.size) return;
+    if (!threadId || !activeListeners) return;
     if (controller) {
       dirty = true;
       return;
@@ -58,9 +59,10 @@ function createEntry(key: string, threadId: string | undefined, view?: 'works') 
         total: validTotal ? (result.total ?? null) : view ? null : artifacts.length,
         complete: view ? result.complete === true && result.workLineage === 'resolved' && validTotal : true,
       });
-      if (view)
-        void refreshMissingPrTitles(artifacts, key, lifetime.signal).then((titles) => {
-          if (lifetime.signal.aborted || !titles.size || snapshot.artifacts !== artifacts) return;
+      if (view) {
+        const signal = (titleLifetime ??= new AbortController()).signal;
+        void refreshMissingPrTitles(artifacts, key, signal).then((titles) => {
+          if (signal.aborted || !titles.size || snapshot.artifacts !== artifacts) return;
           const titled = artifacts.map((artifact) =>
             artifact.type === 'pr' && artifact.ref && titles.has(artifact.ref)
               ? { ...artifact, name: titles.get(artifact.ref)! }
@@ -72,19 +74,22 @@ function createEntry(key: string, threadId: string | undefined, view?: 'works') 
             works: projectThreadWorks(titled, result.workLineage === 'resolved'),
           });
         });
+      }
     } catch {
       if (!current.signal.aborted)
         publish({ artifacts: empty, works: empty, loading: false, error: true, total: null, complete: false });
     } finally {
-      controller = undefined;
-      if (dirty && !current.signal.aborted) {
-        dirty = false;
-        refetch();
+      if (controller === current) {
+        controller = undefined;
+        if (dirty) {
+          dirty = false;
+          refetch();
+        }
       }
     }
   };
   const refetch = () => {
-    if (scheduled) return;
+    if (!activeListeners || scheduled) return;
     scheduled = true;
     queueMicrotask(() => {
       scheduled = false;
@@ -95,17 +100,24 @@ function createEntry(key: string, threadId: string | undefined, view?: 'works') 
   return {
     getSnapshot,
     refetch,
-    subscribe(listener: () => void) {
+    subscribe(listener: () => void, active: boolean) {
       listeners.add(listener);
-      if (listeners.size === 1 && !controller && !scheduled) refetch();
+      if (active) {
+        activeListeners++;
+        if (activeListeners === 1 && !controller) refetch();
+      }
       return () => {
         listeners.delete(listener);
+        if (active) activeListeners--;
         // StrictMode resubscribes in the same turn; one consumer leaving cannot cancel siblings.
         queueMicrotask(() => {
-          if (listeners.size) return;
+          if (activeListeners) return;
           controller?.abort();
-          lifetime.abort();
-          if (entries.get(key)?.getSnapshot === getSnapshot) entries.delete(key);
+          controller = undefined;
+          titleLifetime?.abort();
+          titleLifetime = undefined;
+          dirty = false;
+          if (!listeners.size && entries.get(key)?.getSnapshot === getSnapshot) entries.delete(key);
         });
       };
     },

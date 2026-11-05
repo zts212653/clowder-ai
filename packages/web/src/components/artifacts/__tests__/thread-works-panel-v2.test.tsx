@@ -411,7 +411,7 @@ it('a mounted Works list rereads delivered materials and owner versions without 
   expect(host.textContent).toContain('3 works');
 });
 
-it('keeps the pending return when a source refresh replaces previews before they settle', async () => {
+it('keeps the pending return and its cards mounted while the source refreshes', async () => {
   const image = {
     ...items[0],
     type: 'image',
@@ -439,6 +439,8 @@ it('keeps the pending return when a source refresh replaces previews before they
   await act(async () =>
     root.render(<ThreadWorksPanelV2 key="returned" threadId="work-source" initialView={initialView} />),
   );
+  const firstCard = host.querySelector('[data-work-anchor]');
+  expect(firstCard).not.toBeNull();
   let finish: (response: Response) => void = () => {};
   data.fetch.mockImplementation(
     () =>
@@ -447,7 +449,7 @@ it('keeps the pending return when a source refresh replaces previews before they
       }),
   );
   await act(async () => window.dispatchEvent(new Event('cat-cafe:entrusted-work-projection-invalidated')));
-  expect(host.querySelector('[data-work-anchor]')).toBeNull();
+  expect(host.querySelector('[data-work-anchor]')).toBe(firstCard);
   await act(async () => finish(Response.json(body)));
   top = 60;
   await act(async () => host.querySelector('img')!.dispatchEvent(new Event('load')));
