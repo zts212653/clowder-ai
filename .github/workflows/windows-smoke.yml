@@ -36,6 +36,16 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @cat-cafe/shared build
       - run: pnpm --filter @cat-cafe/api build
+      - name: Codex managed account login fixtures (no live accounts)
+        run: >-
+          pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs
+          --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1
+          node --import tsx --import ./test/helpers/setup-cat-registry.js
+          --test --test-concurrency=1 --test-timeout=60000
+          test/f320-windows-login.test.ts
+          test/f320-windows-policy.test.ts
+          test/f320-login-lifecycle.test.ts
+          test/codex-native-compat.test.ts
       - name: Windows multi-plugin ACP catalog and cancelled editor requests
         run: |
           pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs node --import tsx --test --test-timeout=60000 test/agent-client-catalog-static-read.test.ts test/agent-client-catalog-configuration.test.ts test/plugin-icon-static-read.test.ts
