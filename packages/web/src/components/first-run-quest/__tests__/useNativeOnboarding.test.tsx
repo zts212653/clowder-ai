@@ -178,6 +178,21 @@ it('repairs a legacy detection draft when the member is no longer in the roster'
   expect(partner.creationRequestKey).not.toBe('acp-old-request');
 });
 
+it('preserves a cleared DSH nickname when restoring a draft', async () => {
+  await act(async () => root.render(<Harness mode="members" />));
+  const before = setup.draft?.partners.find((partner) => partner.runtime.id === 'dsh');
+  if (!before) throw new Error('Missing DSH recommendation');
+  await act(async () => setup.patchPartner(before.id, { form: { ...before.form, nickname: '' } }));
+  const requestKey = setup.draft?.partners.find((partner) => partner.id === before.id)?.creationRequestKey;
+  await act(async () => setup.reload());
+  const restored = setup.draft?.partners.find((partner) => partner.id === before.id);
+  expect(restored?.form.nickname).toBe('');
+  expect(restored?.creationRequestKey).toBe(requestKey);
+  const stored = JSON.parse(localStorage.getItem('cat-cafe:native-team-setup:v2:owner-a') ?? '{}');
+  expect(stored.partners.find((partner: { id: string }) => partner.id === before.id).form.nickname).toBe('');
+  expect(vi.mocked(apiFetch).mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+});
+
 it('retains a legacy draft ID and custom identity when rediscovery recomputes recommendations', async () => {
   await act(async () => root.render(<Harness mode="members" />));
   const saved = JSON.parse(localStorage.getItem('cat-cafe:native-team-setup:v2:owner-a')!);
