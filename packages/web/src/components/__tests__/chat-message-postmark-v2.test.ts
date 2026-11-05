@@ -1,6 +1,9 @@
+// @vitest-environment jsdom
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ChatMessage } from '@/components/ChatMessage';
+import { SHELL_PRESENTATION_STORAGE_KEY, writeShellPresentation } from '../shell/shell-presentation';
 import { CHAT_THREAD_ROUTE_EVENT } from '../ThreadSidebar/thread-navigation';
 
 vi.mock('@/stores/chatStore', () => ({
@@ -12,6 +15,7 @@ vi.mock('@/stores/chatStore', () => ({
       threads: { id: string; title: string }[];
       uiThinkingExpandedByDefault: boolean;
       globalBubbleDefaults: Record<string, never>;
+      threadStates: Record<string, never>;
     }) => unknown,
   ) =>
     selector({
@@ -20,6 +24,7 @@ vi.mock('@/stores/chatStore', () => ({
       messages: [],
       uiThinkingExpandedByDefault: false,
       globalBubbleDefaults: {},
+      threadStates: {},
       threads: [
         { id: 'thread_target_current', title: '当前线程' },
         { id: 'thread_mm72eyvc12345678', title: 'F052 跨线程调度测试' },
@@ -56,6 +61,8 @@ describe('ChatMessage Postmark v2 source pill', () => {
   });
 
   beforeEach(() => {
+    // These assertions exercise the retained classic presentation explicitly.
+    writeShellPresentation('classic');
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -65,12 +72,11 @@ describe('ChatMessage Postmark v2 source pill', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    window.localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
     vi.restoreAllMocks();
   });
 
   it('renders threadId short + thread title, with tooltip and click-to-navigate', async () => {
-    const { ChatMessage } = await import('@/components/ChatMessage');
-
     const sourceThreadId = 'thread_mm72eyvc12345678';
     const message = {
       id: 'm1',
@@ -126,7 +132,6 @@ describe('ChatMessage Postmark v2 source pill', () => {
   });
 
   it('uses the render target thread on the first frame of a thread switch', async () => {
-    const { ChatMessage } = await import('@/components/ChatMessage');
     const sourceThreadId = 'thread_target_current';
     const message = {
       id: 'm-thread-switch',
@@ -162,12 +167,13 @@ describe('ChatMessage Postmark v2 source pill', () => {
       );
     });
 
-    expect(container.textContent).toContain('avatar');
+    expect(container.querySelector('[data-sender-avatar="message"] img')?.getAttribute('src')).toBe(
+      '/avatars/gpt52.png',
+    );
     expect(container.querySelector(`a[href="/thread/${sourceThreadId}"]`)).not.toBeNull();
   });
 
   it('on click, records a pending cross-post scroll target when sourceInvocationId is present', async () => {
-    const { ChatMessage } = await import('@/components/ChatMessage');
     const { consumePendingCrossPostScroll, __resetPendingCrossPostScrollForTest } = await import(
       '@/utils/crosspost-scroll-target'
     );
@@ -220,7 +226,6 @@ describe('ChatMessage Postmark v2 source pill', () => {
   });
 
   it('does not render a direction pill or source card for legacy self-referential crossPost metadata', async () => {
-    const { ChatMessage } = await import('@/components/ChatMessage');
     const message = {
       id: 'm-self',
       type: 'assistant',

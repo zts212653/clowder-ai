@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F113 Phase D: DirectoryBrowser component tests.
  * Covers breadcrumb navigation, directory listing, path input,

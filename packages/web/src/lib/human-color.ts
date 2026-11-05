@@ -1,3 +1,5 @@
+import { parseHexColor } from '@/lib/color-utils';
+
 /**
  * F322 B segment 1 (human message). What colour, if any, the config gives the people in the room.
  *
@@ -10,9 +12,7 @@ export type HumanColorState =
   | { status: 'configured'; color: { primary: string; secondary: string } };
 
 export function isReadableHex(value: unknown): value is string {
-  if (typeof value !== 'string') return false;
-  const hex = value.replace('#', '');
-  return [3, 6, 8].includes(hex.length) && /^[0-9a-f]+$/i.test(hex);
+  return typeof value === 'string' && parseHexColor(value) !== null;
 }
 
 export function humanColorState(

@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * Fix: /queue idle + /messages returns isDraft assistant → hasActiveInvocation must be restored.
  *
@@ -238,7 +239,13 @@ describe('/queue idle + /messages draft → hasActiveInvocation restored (cancel
 
     await act(async () => {
       root.render(React.createElement(HookHost, { threadId: 'thread-draft' }));
-      await new Promise((resolve) => setTimeout(resolve, 100));
+    });
+    await act(async () => {
+      await vi.waitFor(() => {
+        expect(useChatStore.getState().messages.some((message) => message.id === 'draft-msg-after-terminal')).toBe(
+          true,
+        );
+      });
     });
 
     const state = useChatStore.getState();

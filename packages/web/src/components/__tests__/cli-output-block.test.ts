@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F097: CliOutputBlock — collapsed/expanded rendering, terminal substrate, visibility chip
  */
@@ -275,6 +276,23 @@ describe('CliOutputBlock', () => {
     });
     const wrapper = container.querySelector('#wrapper');
     expect(wrapper?.children.length).toBe(0);
+  });
+
+  it('F314-4: a 3-digit breed colour tints the active tool row like its 6-digit form', () => {
+    const activeTool: CliEvent[] = [{ id: 'a1', kind: 'tool_use', timestamp: 1000, label: 'Read index.ts' }];
+    const renderRow = (breedColor: string) => {
+      act(() => {
+        root.render(React.createElement(CliOutputBlock, { events: activeTool, status: 'streaming', breedColor }));
+      });
+      const row = container.querySelector<HTMLElement>('[data-testid="tool-row-a1"]');
+      return { html: row?.outerHTML ?? '', background: row?.style.backgroundColor };
+    };
+
+    const long = renderRow('#aabbcc');
+    expect(long.background).toBe('rgba(170, 187, 204, 0.2)');
+    const short = renderRow('#abc');
+    expect(short.html).not.toContain('NaN');
+    expect(short.background).toBe(long.background);
   });
 
   it('has dark terminal substrate class', () => {

@@ -18,7 +18,7 @@ function assertOriginalSource(h) {
 // The fixture pauses a real native boundary while the sibling uses the same HTTP
 // request and Queue. Only explicit non-acceptance may schedule the original input again.
 for (const firstResult of ['accepted', 'rejected', 'unconfirmed', 'throws']) {
-  test(`one guide request preserves the original Queue owner across a delayed ${firstResult} ACK`, async (t) => {
+  test(`one guide request transfers both targets to History before a delayed ${firstResult} ACK`, async (t) => {
     const h = await harness({ guide: true });
     h.releaseCreate();
     const runs = { opus: bindAppendRun(h, 'opus'), codex: bindAppendRun(h, 'codex') };
@@ -78,16 +78,17 @@ for (const firstResult of ['accepted', 'rejected', 'unconfirmed', 'throws']) {
       await waitFor(() => receipt(h, 'codex')?.appendAcceptance === 'accepted');
       assert.equal(requestFinished, false, 'the HTTP result still includes the held native ACK');
       const pending = await h.queue.getDurableEntry('thread-1', h.entry.id);
-      assert.ok(pending, 'the first Queue owner survives until exact acceptance or recovery is committed');
-      assert.deepEqual(pending.targets, ['opus'], 'the accepted sibling retires without waiting for the held target');
-      assert.equal(pending.payload.messageId, h.source.id);
-      assert.equal(pending.payload.sourceRecordId, h.source.id);
-      assert.equal(pending.enqueuedAt, h.entry.enqueuedAt);
-      assert.equal(pending.delivery.appendPendingByTarget.opus.invocationId, runs.opus.invocationId);
-      assert.equal(pending.delivery.appendPendingByTarget.opus.responseMessageId, runs.opus.responseId);
+      assert.equal(pending, null, 'History owns both targets while the first provider ACK is outstanding');
+      assert.equal(receipt(h, 'opus').statusMessageId, runs.opus.responseId);
+      assert.equal(receipt(h, 'opus').appendDelivery.dispatchStarted, true);
       assert.equal(receipt(h, 'opus').appendAcceptance, 'pending');
       assert.equal(receipt(h, 'opus').inputRead.status, 'pending');
       assert.equal(receipt(h, 'codex').inputRead.status, 'pending', 'acceptance is not model-read evidence');
+      assert.equal(
+        h.store.getById(h.source.id).lifecycle.appendFailures?.some((item) => item.targetId === 'opus') ?? false,
+        false,
+        'finishing a sibling handoff cannot reconcile the first still-outstanding write',
+      );
       assertOriginalSource(h);
     } catch (error) {
       blocked = error;
@@ -119,17 +120,18 @@ for (const firstResult of ['accepted', 'rejected', 'unconfirmed', 'throws']) {
       assert.equal(targets[0].status, 502);
       assert.equal(targets[0].result.code, 'PROVIDER_REJECTED');
       const pending = await h.queue.getDurableEntry('thread-1', h.entry.id);
-      assert.ok(pending);
-      assert.deepEqual(pending.targets, ['opus']);
-      assert.equal(pending.payload.messageId, h.source.id);
-      assert.equal(pending.enqueuedAt, h.entry.enqueuedAt);
+      if (firstResult === 'rejected') {
+        assert.deepEqual(pending.targets, ['opus']);
+        assert.equal(pending.payload.messageId, h.source.id);
+        assert.equal(pending.enqueuedAt, h.entry.enqueuedAt);
+        assert.equal(pending.delivery.authorIntentByTarget.opus.requested, 'next_work');
+      } else assert.equal(pending, null);
       const expectedAcceptance = firstResult === 'rejected' ? 'not_accepted' : 'unknown';
       const failure = h.store.getById(h.source.id).lifecycle.appendFailures.find((item) => item.targetId === 'opus');
       assert.equal(failure.acceptance, expectedAcceptance);
       assert.equal(failure.reason, firstResult === 'throws' ? 'exception' : 'provider_rejected');
       assert.equal(failure.invocationId, runs.opus.invocationId);
       assert.equal(failure.responseMessageId, runs.opus.responseId);
-      assert.equal(pending.delivery.appendRecoveryByTarget.opus.acceptance, expectedAcceptance);
       assert.equal(h.store.getById(runs.opus.responseId).lifecycle.kind, 'response');
       assert.equal(h.store.getById(runs.opus.responseId).lifecycle.status, 'processing');
       assert.equal(h.routeExecution.mock.callCount(), 0, 'a busy original receiver is not interrupted by recovery');
@@ -147,17 +149,18 @@ for (const firstResult of ['accepted', 'rejected', 'unconfirmed', 'throws']) {
           'definite non-acceptance schedules only the original input and original failed target next turn',
         );
       } else {
-        assert.deepEqual(pending.delivery.routingHeldTargetIds, ['opus']);
         assert.equal(receipt(h, 'opus').statusMessageId, runs.opus.responseId);
         assert.equal(receipt(h, 'opus').inputRead.status, 'pending');
         assert.deepEqual(h.store.getById(runs.opus.responseId).lifecycle.inputMessageIds, [h.source.id]);
         await h.processor.reconcileAppendDeliveries('thread-1');
         h.tracker.completeAll('thread-1', ['opus'], runs.opus.controller);
         await h.processor.requestDrain('thread-1');
-        const unresolved = await h.queue.getDurableEntry('thread-1', h.entry.id);
-        assert.deepEqual(unresolved.targets, ['opus']);
-        assert.equal(unresolved.delivery.appendRecoveryByTarget.opus.acceptance, 'unknown');
-        assert.ok(Number.isFinite(unresolved.delivery.appendRecoveryByTarget.opus.checkedAt));
+        assert.equal(await h.queue.getDurableEntry('thread-1', h.entry.id), null);
+        const unresolved = h.store
+          .getById(h.source.id)
+          .lifecycle.appendFailures.find((item) => item.targetId === 'opus');
+        assert.equal(unresolved.acceptance, 'unknown');
+        assert.ok(Number.isFinite(unresolved.checkedAt));
         assert.equal(
           h.routeExecution.mock.callCount(),
           0,

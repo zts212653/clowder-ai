@@ -5,6 +5,7 @@ import type { RightStatusPanelProps } from '@/components/RightStatusPanel';
 import { __resetSessionChainCacheForTest, SessionChainPanel } from '@/components/SessionChainPanel';
 import { useF307ExperienceWorkbenchStore } from '@/components/workbench/experience-workbench-store';
 import { createInitialWorkbenchState } from '@/components/workbench/workbench-model';
+import type { CatData } from '@/hooks/useCatData';
 import type { ChatMessage } from '@/stores/chat-types';
 import { DEFAULT_THREAD_STATE, useChatStore } from '@/stores/chatStore';
 import { WorkspaceStatusPanelV2 } from '../WorkspaceStatusPanelV2';
@@ -13,10 +14,24 @@ const fetchMock = vi.hoisted(() => vi.fn());
 const openSurface = vi.hoisted(() => vi.fn());
 const dispatchWorkbench = useF307ExperienceWorkbenchStore.getState().dispatch;
 vi.mock('@/utils/api-client', () => ({ apiFetch: (...args: unknown[]) => fetchMock(...args) }));
-vi.mock('@/hooks/useCatData', () => ({
-  useCatData: () => ({ cats: [], getCatById: (id: string) => ({ id, displayName: id }) }),
-  formatCatName: (cat: { displayName: string }) => cat.displayName,
-}));
+vi.mock('@/hooks/useCatData', () => {
+  const cat = (id: string): CatData => ({
+    id,
+    displayName: id,
+    color: { primary: '#9B7EBD', secondary: '#F2EDF8' },
+    mentionPatterns: [],
+    clientId: 'test-client',
+    carrier: 'cli',
+    defaultModel: 'test-model',
+    avatar: '/avatars/test.png',
+    roleDescription: 'Status test fixture',
+    personality: 'Status test fixture',
+  });
+  return {
+    useCatData: () => ({ cats: [], getCatById: cat }),
+    formatCatName: (value: CatData) => value.displayName,
+  };
+});
 vi.mock('@/components/CatAvatar', () => ({ CatAvatar: () => <span /> }));
 vi.mock('@/components/PlanBoardPanel', () => ({ PlanBoardPanel: () => null }));
 vi.mock('@/components/CloudConversationLink', () => ({ CloudConversationLink: () => null }));

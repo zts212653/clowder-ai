@@ -23,6 +23,11 @@ export async function declareKnownHostSessionFixture(deps, params, binding) {
       record.hostExecutionBoundary ??= boundary;
       return record;
     };
+  if (!store.isActiveOwnerSession)
+    store.isActiveOwnerSession = async (id, cliSessionId) => {
+      const record = await store.getActive(params.catId, params.threadId, params.userId);
+      return record?.id === id && (record.cliSessionId ?? '') === (cliSessionId ?? '');
+    };
 }
 
 /** Owner regressions that begin with certified native history, rather than legacy unknown state. */

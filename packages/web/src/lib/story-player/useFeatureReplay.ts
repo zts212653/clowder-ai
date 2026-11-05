@@ -37,12 +37,12 @@ import {
   setSpeed,
   stepBackward,
   stepForward,
-  tick,
   toggleAdaptivePacing,
 } from './replay-engine';
 import { applyScenePacingCues, getSceneForIndex, planReplayScenes, sceneToActiveThreadState } from './scene-planner';
 import { fetchThreadReplayEvents } from './thread-replay-fetcher';
 import type { GuestCardState, RawTranscriptEvent, ReplayEngineState, ReplayEvent, SpeedMultiplier } from './types';
+import { useReplayKeyboard, useReplayTick } from './useReplayEngine';
 
 // Re-export for consumers that import from this module
 export type { ThreadPanelData } from './build-thread-panels';
@@ -130,66 +130,6 @@ async function fetchFeatureReplayData(featId: string): Promise<FeatureEventData>
 }
 
 // ---------------------------------------------------------------------------
-// Sub-hooks (extracted from useReplayEngine pattern)
-// ---------------------------------------------------------------------------
-
-type EngineSetter = React.Dispatch<React.SetStateAction<ReplayEngineState>>;
-
-function useFeatureReplayTick(setEngine: EngineSetter, engineRef: React.RefObject<ReplayEngineState>) {
-  const lastTickRef = useRef<number>(0);
-
-  useEffect(() => {
-    let rafId: number;
-
-    function rafLoop(timestamp: number) {
-      if (lastTickRef.current === 0) lastTickRef.current = timestamp;
-      const delta = timestamp - lastTickRef.current;
-      lastTickRef.current = timestamp;
-
-      if (engineRef.current?.state === 'playing') {
-        setEngine((prev) => tick(prev, delta));
-      }
-      rafId = requestAnimationFrame(rafLoop);
-    }
-
-    rafId = requestAnimationFrame(rafLoop);
-    return () => cancelAnimationFrame(rafId);
-  }, [setEngine, engineRef]);
-
-  return lastTickRef;
-}
-
-function useFeatureReplayKeyboard(setEngine: EngineSetter) {
-  useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
-      const target = e.target;
-      if (
-        target instanceof HTMLInputElement ||
-        target instanceof HTMLTextAreaElement ||
-        target instanceof HTMLSelectElement ||
-        target instanceof HTMLButtonElement ||
-        (target instanceof HTMLElement && target.getAttribute('role') === 'slider')
-      )
-        return;
-
-      if (e.key === ' ') {
-        e.preventDefault();
-        setEngine((prev) => (prev.state === 'playing' ? pause(prev) : play(prev)));
-      } else if (e.key === 'ArrowRight') {
-        e.preventDefault();
-        setEngine((prev) => stepForward(prev));
-      } else if (e.key === 'ArrowLeft') {
-        e.preventDefault();
-        setEngine((prev) => stepBackward(prev));
-      }
-    }
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [setEngine]);
-}
-
-// ---------------------------------------------------------------------------
 // Main hook
 // ---------------------------------------------------------------------------
 
@@ -228,8 +168,8 @@ export function useFeatureReplay({ featId }: { featId: string }): UseFeatureRepl
   }, [featId]);
 
   // ── RAF tick loop + keyboard shortcuts ──
-  const lastTickRef = useFeatureReplayTick(setEngine, engineRef);
-  useFeatureReplayKeyboard(setEngine);
+  const lastTickRef = useReplayTick(setEngine, engineRef);
+  useReplayKeyboard(setEngine);
 
   // ── Controls ──
   const togglePlayPause = useCallback(() => {

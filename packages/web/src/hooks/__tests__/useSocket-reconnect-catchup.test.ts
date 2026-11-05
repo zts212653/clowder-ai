@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * Regression test for reconnect catch-up (#276 intake).
  *

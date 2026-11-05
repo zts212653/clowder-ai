@@ -9,6 +9,7 @@ import { MessageActions } from './MessageActions';
 import { MessageViewportBoundary } from './MessageViewportBoundary';
 import type { MessagePartSelection } from './message-part-selection';
 import type { CardConfirmationEntry } from './rich/CardBlock';
+import { WatcherNudgeMessage } from './watcher/WatcherNudgeMessage';
 
 interface ChatMessageRowProps {
   message: ChatMessageData;
@@ -91,23 +92,31 @@ export const ChatMessageRow = memo(function ChatMessageRow({
         onToggleSelection={onToggleSelection}
         forwardingDisabled={forwardingDisabled}
       >
-        <ChatMessage
-          message={message}
-          compact={compact}
-          threadId={threadId}
-          timelineMessages={timelineMessages}
-          activeRuns={activeRuns}
-          getCatById={getCatById}
-          onEditCat={onEditCat}
-          onEditCoCreator={onEditCoCreator}
-          hideDiagnosticsPanel={hideDiagnosticsPanel}
-          dedupCount={dedupCount}
-          forwardingDisabled={forwardingDisabled}
-          showCapabilityTip={showCapabilityTip}
-          capabilityTipContexts={capabilityTipContexts}
-          sendContext={sendContext}
-          confirmations={confirmations}
-        />
+        {message.extra?.watcher?.kind === 'nudge' ? (
+          <WatcherNudgeMessage
+            message={message}
+            threadId={threadId}
+            cat={message.catId ? getCatById(message.catId) : undefined}
+          />
+        ) : (
+          <ChatMessage
+            message={message}
+            compact={compact}
+            threadId={threadId}
+            timelineMessages={timelineMessages}
+            activeRuns={activeRuns}
+            getCatById={getCatById}
+            onEditCat={onEditCat}
+            onEditCoCreator={onEditCoCreator}
+            hideDiagnosticsPanel={hideDiagnosticsPanel}
+            dedupCount={dedupCount}
+            forwardingDisabled={forwardingDisabled}
+            showCapabilityTip={showCapabilityTip}
+            capabilityTipContexts={capabilityTipContexts}
+            sendContext={sendContext}
+            confirmations={confirmations}
+          />
+        )}
       </MessageActions>
     </MessageViewportBoundary>
   );

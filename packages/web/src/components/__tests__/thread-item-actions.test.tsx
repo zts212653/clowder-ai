@@ -68,6 +68,7 @@ describe('ThreadItem actions', () => {
   });
 
   beforeEach(() => {
+    localStorage.setItem('cat-cafe:shell-presentation', 'classic');
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -124,8 +125,8 @@ describe('ThreadItem actions', () => {
     const allPinSvgs = container.querySelectorAll('[data-testid="thread-pin-button"]');
     expect(allPinSvgs.length).toBe(1);
 
-    // Quick deletion follows More; the menu retains its existing delete entry.
-    expect(container.querySelector('[data-testid="thread-quick-delete"]')).not.toBeNull();
+    // Destructive deletion stays inside More.
+    expect(container.querySelector('[data-testid="thread-quick-delete"]')).toBeNull();
     expect(buttonByTitle('更多操作')).not.toBeNull();
   });
 

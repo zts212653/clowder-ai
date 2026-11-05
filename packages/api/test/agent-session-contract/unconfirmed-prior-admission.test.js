@@ -47,32 +47,37 @@ async function fixture(t, change) {
   });
   if (change !== 'not-started') await store.markProviderStarted('prior-native-owner', 0);
   if (change === 'stopped') await store.recordProviderTeardown('prior-native-owner', 1);
+  let priorReads = 0;
   if (change === 'unreadable')
     store.listRunningByUser = async () => {
+      priorReads++;
       throw new Error('prior execution read unavailable');
     };
-  return { deps, catId, store, calls: () => calls };
+  return { deps, catId, store, calls: () => calls, priorReads: () => priorReads };
 }
 
 for (const route of [routeSerial, routeParallel]) {
-  test(`${route.name} refuses a new task while an earlier canonical native stop is unknown`, async (t) => {
+  test(`${route.name} admits ordinary work without inventing an earlier native stop`, async (t) => {
     const f = await fixture(t, 'unconfirmed');
     const messages = await collect(route(f.deps, [f.catId], 'new task', 'owner', 'thread', { thinkingMode: 'play' }));
-    assert.equal(f.calls(), 0, 'an earlier Host ending did not prove the native execution stopped');
-    assert.ok(messages.some((message) => message.type === 'error'));
+    assert.equal(f.calls(), 1, 'unknown historical teardown is not an admission gate');
+    assert.equal(
+      messages.some((message) => message.type === 'error'),
+      false,
+    );
     assert.equal((await f.store.get('prior-native-owner')).status, 'running');
     assert.equal((await f.store.get('prior-native-owner')).providerTeardownAt, undefined);
-    assert.equal((await f.store.get('journey-1')).providerStartedAt, undefined);
-    assert.equal((await f.store.get('journey-1')).status, 'failed');
+    assert.equal(typeof (await f.store.get('journey-1')).providerStartedAt, 'number');
+    assert.equal((await f.store.get('journey-1')).status, 'succeeded');
     await f.store.recordProviderTeardown('prior-native-owner', 1);
     await collect(route(f.deps, [f.catId], 'after exact stop proof', 'owner', 'thread', { thinkingMode: 'play' }));
-    assert.equal(f.calls(), 1);
+    assert.equal(f.calls(), 2);
     assert.equal((await f.store.get('journey-2')).status, 'succeeded');
   });
 }
 
 for (const change of ['other-user', 'other-thread', 'other-cat', 'not-started', 'stopped']) {
-  test(`the prior-owner fence preserves an unrelated or already stopped admission: ${change}`, async (t) => {
+  test(`ordinary admission preserves the unrelated or stopped prior execution: ${change}`, async (t) => {
     const f = await fixture(t, change);
     await collect(routeSerial(f.deps, [f.catId], 'safe task', 'owner', 'thread', { thinkingMode: 'play' }));
     assert.equal(f.calls(), 1);
@@ -80,9 +85,11 @@ for (const change of ['other-user', 'other-thread', 'other-cat', 'not-started', 
   });
 }
 
-test('failure to read canonical running owners cannot expose a task to the provider', async (t) => {
+test('the retired prior-owner lookup is not a new admission dependency', async (t) => {
   const f = await fixture(t, 'unreadable');
-  await collect(routeSerial(f.deps, [f.catId], 'must wait', 'owner', 'thread', { thinkingMode: 'play' }));
-  assert.equal(f.calls(), 0);
-  assert.equal((await f.store.get('journey-1')).providerStartedAt, undefined);
+  await collect(routeSerial(f.deps, [f.catId], 'ordinary work', 'owner', 'thread', { thinkingMode: 'play' }));
+  assert.equal(f.calls(), 1);
+  assert.equal(f.priorReads(), 0);
+  assert.equal((await f.store.get('journey-1')).status, 'succeeded');
+  assert.equal((await f.store.get('prior-native-owner')).providerTeardownAt, undefined);
 });

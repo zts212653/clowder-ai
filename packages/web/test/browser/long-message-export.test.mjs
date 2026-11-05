@@ -18,6 +18,48 @@ const WEB_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../
 const NEXT_BIN = path.resolve(WEB_ROOT, '../../node_modules/next/dist/bin/next');
 const MESSAGE_ID = 'f294-long-message-export-fixture';
 
+test('PNG loads an offscreen lazy image before measuring the stitched capture', { timeout: 20_000 }, async () => {
+  const pixels = await sharp({ create: { width: 200, height: 192, channels: 3, background: '#ff00ff' } })
+    .png()
+    .toBuffer();
+  let imageRequests = 0;
+  const server = createHttpServer(async (request, response) => {
+    if (request.url === '/lazy-image.png') {
+      imageRequests++;
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      response.setHeader('Content-Type', 'image/png');
+      response.end(pixels);
+      return;
+    }
+    response.setHeader('Content-Type', 'text/html');
+    response.end(`<!doctype html><style>body { margin: 0; }</style>
+      <main data-export-root data-export-ready="true">
+        <article data-message-id="lazy-media-fixture">
+          <div style="height:6000px">Offscreen gallery image</div>
+          <img loading="lazy" src="/lazy-image.png" style="display:block;width:200px">
+          <div style="height:32px;background:blue">Bottom after image</div>
+        </article>
+      </main>`);
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const address = server.address();
+  assert(address && typeof address !== 'string');
+  const exporter = new ImageExporter();
+  try {
+    const png = await exporter.capture(`http://127.0.0.1:${address.port}`, 'browser-test-user', {
+      selectionMessageIds: ['lazy-media-fixture'],
+    });
+    assert.equal(imageRequests, 1);
+    assert.equal((await sharp(png).metadata()).height, 6224, 'capture includes the loaded image and following content');
+    assert.equal(await countMagentaPixels(png), 200 * 192, 'the actual lazy image pixels are present exactly once');
+  } finally {
+    await exporter.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 async function findFreePort() {
   const server = createServer();
   server.listen(0, '127.0.0.1');

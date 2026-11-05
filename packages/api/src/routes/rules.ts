@@ -14,17 +14,14 @@ import type { CatCafeConfig } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { readCapabilitiesConfig } from '../config/capabilities/capability-orchestrator.js';
 import { getRoster, loadCatConfig, toAllCatConfigs } from '../config/cat-config-loader.js';
+import { findMonorepoRootOrNull } from '../utils/monorepo-root.js';
 import { resolvePersistentProjectPath } from '../utils/persistent-project-path.js';
 import { getDefaultRootsForPlatform, isPathUnderRoots } from '../utils/project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';
 
+/** The monorepo this code runs from; an install without the workspace marker falls back to cwd. */
 function findProjectRoot(): string {
-  let dir = dirname(fileURLToPath(import.meta.url));
-  while (dir !== dirname(dir)) {
-    if (existsSync(join(dir, 'pnpm-workspace.yaml'))) return dir;
-    dir = dirname(dir);
-  }
-  return process.cwd();
+  return findMonorepoRootOrNull(dirname(fileURLToPath(import.meta.url))) ?? process.cwd();
 }
 
 export type PromptConsumptionKind = 'actual-prompt' | 'harness-injected' | 'reference' | 'skill-on-demand';

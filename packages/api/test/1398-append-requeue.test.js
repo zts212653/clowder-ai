@@ -99,15 +99,19 @@ for (const reason of ['active_run_closed', 'active_run_mismatch', 'provider_reje
     assert.deepEqual(queued.execution, f.admission.entry.execution);
     assert.deepEqual(queued.payload, f.admission.entry.payload);
     assert.deepEqual(queued.targets, ['opus']);
-    assert.equal(queued.delivery.appendRecoveryByTarget.opus.reason, reason);
+    assert.equal(f.messageStore.getById(f.admission.message.id).lifecycle.appendFailures[0].reason, reason);
     assert.equal(f.messageStore.getById(f.admission.message.id).content, 'one original input');
     assert.deepEqual(f.messageStore.getById(f.admission.message.id).lifecycle.dispatchRefs, []);
     assert.deepEqual(f.messageStore.getById(f.response.id).lifecycle.inputMessageIds, []);
-    assert.equal(
-      await f.queue.claimExactExposureDurable('thread', 'owner', queued.id, 'opus', f.admission.message.id),
-      null,
-      'an old run cannot adopt next-work recovery through a full-body read',
-    );
+    const adopted = await f.processor.adoptExposedQueuedEntries({
+      threadId: 'thread',
+      userId: 'owner',
+      catId: 'opus',
+      invocationId: 'turn',
+      entries: [{ entryId: queued.id, messageId: f.admission.message.id }],
+    });
+    assert.equal(adopted.outcome, 'rejected', 'the old exact receiver cannot re-admit its refused attempt');
+    assert.deepEqual((await f.queue.getDurableEntry('thread', queued.id)).targets, ['opus']);
     await f.processor.requestDrain('thread');
     await f.processor.reconcileAppendDeliveries('thread');
     assert.equal(dispatch.mock.calls.length, 1, 'recovery waits for the next run instead of appending again');
@@ -149,12 +153,12 @@ for (const outcome of ['throw', 'unknown', 'legacy-provider-rejected']) {
     const f = await fixture(dispatch);
     await f.append();
     const queued = await f.queue.getDurableEntry('thread', f.admission.entry.id);
-    assert.equal(queued.delivery.appendRecoveryByTarget.opus.acceptance, 'unknown');
+    assert.equal(f.messageStore.getById(f.admission.message.id).lifecycle.appendFailures[0].acceptance, 'unknown');
     assert.equal(
-      queued.delivery.appendRecoveryByTarget.opus.reason,
+      f.messageStore.getById(f.admission.message.id).lifecycle.appendFailures[0].reason,
       outcome === 'throw' ? 'exception' : 'provider_rejected',
     );
-    assert.deepEqual(queued.delivery.routingHeldTargetIds, ['opus']);
+    assert.equal(queued, null, 'unknown delivery belongs only to History');
     await f.processor.requestDrain('thread');
     await f.processor.reconcileAppendDeliveries('thread');
     assert.equal(dispatch.mock.calls.length, 1);
@@ -184,9 +188,9 @@ test('same-ID retry cannot release an uncertain target, even after reconciliatio
     started: false,
   });
   const queued = await f.queue.getDurableEntry('thread', f.admission.entry.id);
-  assert.deepEqual(queued.payload, f.admission.entry.payload);
-  assert.deepEqual(queued.delivery.routingHeldTargetIds, ['opus']);
-  assert.ok(queued.delivery.appendRecoveryByTarget.opus.checkedAt);
+  assert.equal(queued, null, 'same-ID replay cannot recreate the retired Queue owner');
+  assert.equal(f.messageStore.getById(f.admission.message.id).content, f.admission.message.content);
+  assert.ok(f.messageStore.getById(f.admission.message.id).lifecycle.appendFailures[0].checkedAt);
   assert.equal(f.messageStore.getById(f.admission.message.id).lifecycle.dispatchRefs[0].statusMessageId, f.response.id);
   assert.equal(dispatch.mock.calls.length, 1);
 });
