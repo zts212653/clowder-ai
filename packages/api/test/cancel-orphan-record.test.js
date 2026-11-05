@@ -480,7 +480,7 @@ describe('#1838 cancel route: a dead API s started provider stops only with its 
     t,
     execute,
     route = 'cancel',
-    { settleFails = false, tracked = false, parentEnded = false } = {},
+    { settleFails = false, tracked = false, parentEnded = false, childFinished = false } = {},
   ) {
     const dataDir = mkdtempSync(join(tmpdir(), 'issue1838-cancel-'));
     t.after(() => rmSync(dataDir, { recursive: true, force: true }));
@@ -501,6 +501,9 @@ describe('#1838 cancel route: a dead API s started provider stops only with its 
       providerLifecycleTracked: true,
     });
     turns.markProviderStarted(execution.invocationId, 2);
+    // A turn that finished on its own: terminal, its reply still owed on the KD-21 ledger.
+    if (childFinished)
+      turns.transitionTerminal(execution.invocationId, { status: 'succeeded', endedAt: 3, providerTeardownAt: 3 });
     recordWindowsJobExecutionLink({ dataDir, jobName: JOB, execution: { ...execution, userId: USER_ID } });
     // The turn's processing R and its streamed draft, keyed exactly as QueueProcessor writes them.
     const messageStore = new MessageStore();
@@ -611,9 +614,11 @@ describe('#1838 cancel route: a dead API s started provider stops only with its 
       // The same Stop again, after the response store recovers.
       retry: async () => {
         rejectCommit = false;
+        const again = ROUTES[route](parent);
         return app.inject({
           method: 'POST',
-          url: `/api/threads/${THREAD_ID}/cancel/${CAT_ID}`,
+          url: again.url,
+          ...(again.payload ? { payload: again.payload } : {}),
           headers: { 'x-cat-cafe-user': USER_ID },
         });
       },
@@ -792,5 +797,40 @@ describe('#1838 cancel route: a dead API s started provider stops only with its 
       assert.deepEqual(await listed(), []);
       assert.deepEqual(recordStore.updates, [], 'the ended parent is never reopened or rewritten');
     });
+    // The first Stop ended the child but could not commit its reply. The child is no longer running,
+    // so the retry has to find it through the pending ledger and finish that same reply.
+    it(`ended parent: a ${route} retry settles the reply a failed commit left owed`, async (t) => {
+      const { res, child, turns, readResponse, retry, recordStore } = await stopAfterApiDied(
+        t,
+        verdict({ state: 'absent', nativeError: 2, sessionId: 1 }),
+        route,
+        { settleFails: true, parentEnded: true },
+      );
+      assert.equal(res.statusCode, 503, res.body);
+      assert.equal(JSON.parse(res.body).code, 'EXECUTION_RESPONSE_SETTLEMENT_FAILED');
+      assert.equal(child.status, 'canceled', 'the exact proof did end the child');
+      assert.equal((await readResponse()).lifecycle.status, 'processing', 'the first attempt left R owed');
+      assert.equal((await turns.listResponsePending()).length, 1);
+
+      const second = await retry();
+      assert.equal(second.statusCode, 200, second.body);
+      assert.equal((await readResponse()).lifecycle.status, 'canceled', 'the retry settled the old reply');
+      assert.deepEqual(await turns.listResponsePending(), [], 'nothing is left owed');
+      assert.deepEqual(recordStore.updates, [], 'the ended parent is never reopened or rewritten');
+    });
   }
+  // Only a turn a Stop ended is the Stop's to settle. A turn that finished on its own keeps its owed
+  // reply for its own settlement, never relabeled canceled by a later cancel of its cat.
+  it('ended parent: cancel leaves a turn that finished on its own to its own settlement', async (t) => {
+    const { res, turns, readResponse, recordStore } = await stopAfterApiDied(
+      t,
+      verdict({ state: 'absent', nativeError: 2, sessionId: 1 }),
+      'cancel',
+      { parentEnded: true, childFinished: true },
+    );
+    assert.equal(res.statusCode, 404, res.body);
+    assert.equal((await readResponse()).lifecycle.status, 'processing', 'the reply is not relabeled canceled');
+    assert.equal((await turns.listResponsePending()).length, 1, 'its own settlement still owns the reply');
+    assert.deepEqual(recordStore.updates, []);
+  });
 });

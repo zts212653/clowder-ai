@@ -254,6 +254,10 @@ export function createActiveExecutionService(deps: ActiveExecutionServiceDeps): 
       }));
   };
 
+  // The per-thread classifier reads children by parent only. Running children with an ended parent
+  // already reach presence through the user-scoped owner truth, so passing the user-wide child read
+  // here would enumerate that global ledger once more per candidate thread.
+  const turnStore = deps.turnExecutionStore;
   const liveExecutions = (threadId: string, userId: string): Promise<ActiveInvocationProjection[]> =>
     resolveActiveInvocationsStrict(
       threadId,
@@ -261,7 +265,7 @@ export function createActiveExecutionService(deps: ActiveExecutionServiceDeps): 
       deps.invocationTracker,
       deps.recordStore,
       deps.responseStatus,
-      deps.turnExecutionStore,
+      turnStore ? { listByParent: turnStore.listByParent.bind(turnStore) } : undefined,
     );
 
   const buildCandidateSnapshot = async (userId: string, includeManaged: boolean): Promise<ActiveExecutionSnapshot> => {

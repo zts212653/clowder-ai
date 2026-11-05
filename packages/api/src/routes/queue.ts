@@ -798,24 +798,24 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
   };
 
   /**
-   * #1838: the exact (parent, cat) scopes of this thread's started children whose stop is unconfirmed
-   * and whose parent record no longer runs. An older cancel/reset could end the parent and leave such
-   * a child running; admission reads children by user and still refuses its role, so every Stop entry
-   * has to reach it through its exact parent instead of only walking running parents.
+   * #1838: the exact (parent, cat) scopes a Stop entry must reach although the parent record no longer
+   * runs. An older cancel/reset could end the parent and leave a started child running with its stop
+   * unconfirmed; admission reads children by user and still refuses its role. A Stop that then ended
+   * such a child but could not commit its reply leaves it only on the KD-21 ledger, so a retry finds it
+   * there. Only canceled turns qualify: a turn that finished on its own keeps its own settlement.
    */
-  const endedParentUnconfirmedScopes = async (threadId: string, userId: string) => {
+  const endedParentStopScopes = async (threadId: string, userId: string) => {
     const runningParents = new Set(
       ((await opts.invocationRecordStore?.listRunningByThread(threadId, userId)) ?? []).map((record) => record.id),
     );
-    const children = (await opts.turnExecutionStore?.listRunningByUser?.(userId)) ?? [];
-    const scopes = children.flatMap((child) => {
+    const running = (await opts.turnExecutionStore?.listRunningByUser?.(userId)) ?? [];
+    const owed = (await opts.turnExecutionStore?.listResponsePending?.()) ?? [];
+    const scopes = [
+      ...running.filter((child) => child.status === 'running' && hasUnconfirmedProviderTeardown(child)),
+      ...owed.filter((child) => child.status === 'canceled'),
+    ].flatMap((child) => {
       const executionId = child.parentInvocationId;
-      return executionId &&
-        !runningParents.has(executionId) &&
-        child.status === 'running' &&
-        child.threadId === threadId &&
-        child.userId === userId &&
-        hasUnconfirmedProviderTeardown(child)
+      return executionId && !runningParents.has(executionId) && child.threadId === threadId && child.userId === userId
         ? [{ executionId, catId: child.catId as string }]
         : [];
     });
@@ -2197,7 +2197,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
         }
         // #1838: a started child whose parent already ended is no running record, so the branch above
         // cannot reach it. Stop it through its exact parent before reporting the cat as inactive.
-        const endedScopes = (await endedParentUnconfirmedScopes(threadId, guard.userId)).filter(
+        const endedScopes = (await endedParentStopScopes(threadId, guard.userId)).filter(
           (scope) => scope.catId === catId,
         );
         for (const scope of endedScopes) {
@@ -2294,7 +2294,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       }
     }
     // A child whose parent already ended is never in the running records above, yet it still blocks.
-    for (const scope of await endedParentUnconfirmedScopes(threadId, guard.userId)) {
+    for (const scope of await endedParentStopScopes(threadId, guard.userId)) {
       if (invocationTracker.has(threadId, scope.catId)) continue;
       const refusal = await refuseUnconfirmedProviderStop({ threadId, userId: guard.userId, ...scope, request });
       if (refusal) {
