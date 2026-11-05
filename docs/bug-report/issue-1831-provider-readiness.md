@@ -24,8 +24,12 @@ tips_exempt: "修复已有 Pi 失败消息并记录 DSH 调查证据，不新增
 
 在上述 next 基线上，实跑已有 `packages/api/test/dsh-setup-native.test.ts`：
 
+复现时，将 `<DSH_CLI_ENTRY_PATH>` 替换为自己安装的上述版本 DSH CLI 的 JavaScript 入口绝对路径。
+从仓库根目录执行：
+
 ```powershell
-$env:DSH_SETUP_TEST_ENTRY='G:/AIwork/deepseek-harness/apps/cli/lib/bin.js'
+$env:DSH_SETUP_TEST_ENTRY='<DSH_CLI_ENTRY_PATH>'
+Set-Location packages/api
 node --import tsx --test --test-timeout=180000 test/dsh-setup-native.test.ts
 ```
 
