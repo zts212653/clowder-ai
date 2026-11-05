@@ -69,20 +69,34 @@ describe('Task state semantics at the real MCP boundary', () => {
     }
   });
 
-  // F332 S9 (next 821e72a2b, attempt 15, finding P1): a generic resume over several unfinished works wrote to one of
-  // them without asking. The reader contract now states this branch beside the ended-work branch (spec AC-5 / AC-B10).
-  test('list_tasks states the several-unfinished-works branch of a generic resume and keeps the direct branches', () => {
+  // F332 S9 (attempt 15 on 821e72a2b without this branch; attempt 16 on 7da4d7b04 with its first wording delivered; both
+  // finding P1): a generic resume over several unfinished works wrote to one of them without asking. The reader contract
+  // states when that choice is still open and what settles it (spec AC-5 / AC-B10); the anchors follow the reviewer's
+  // seven contract examples and keep the ended-work and explicit-request branches. They prove delivery, not behavior.
+  test('list_tasks states when a choice between unfinished works is still open, what settles it, and keeps the direct branches', () => {
     const description = tool('cat_cafe_list_tasks').description;
     for (const anchor of [
-      'If a generic resume could mean more than one unfinished work',
-      'neither the current input nor the owner records settle which one this turn is for',
-      'ask which to continue by work name before any write',
-      'an explicitly named or the only matching work proceeds under its current state and authorization',
+      // 1. still open between unfinished works: ask by work name before any write
+      'If a generic resume could still mean more than one unfinished work, ask which to continue by work name before any write.',
+      // 2, 4. a current request that clearly refers to one work settles it
+      'The choice is settled by a current request that clearly refers to one work',
+      // 3. a newer explicit request or owner-record selection resolves an earlier open choice
+      'by a newer explicit request or a newer explicit selection in the owner record',
+      // 4, 5. one legitimately matching work proceeds even with unrelated unfinished work
+      'or when only one work legitimately matches, even if unrelated unfinished work exists; that work proceeds under its current state and authorization.',
+      // cues are insufficient alone, not banned
+      'A doing status, a saved why that says to continue, an earlier request or artifact, the listing order or a stop-point link is only a cue: alone it does not settle a choice that is otherwise still open.',
+      // unchanged: the unfinished-state definition, 6. ended work on a generic resume, 7. explicit redo or extension
       'todo/doing/blocked record unfinished work',
       'If a generic resume only identifies ended work',
       'an explicit redo or extension request already authorizes new work within its scope',
     ]) {
       assert.ok(description.includes(anchor), anchor);
     }
+    // The first wording is replaced; the rejected narrowing to a thread-wide single unfinished work is not introduced.
+    assert.ok(
+      !description.includes('neither the current input nor the owner records settle which one this turn is for'),
+    );
+    assert.ok(!description.includes('the only unfinished work'));
   });
 });
