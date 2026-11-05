@@ -194,15 +194,7 @@ export async function recordVerifiedWindowsJobTeardowns(options: {
       pass.preserved.push({ invocationId: execution.invocationId, reason: `teardown_write_failed:${String(error)}` });
     }
   }
-  const liveLinks = [
-    ...resolution.unresolved.filter((job) => job.verdict === 'present').flatMap((job) => job.links ?? []),
-    ...resolution.verifiedStopped
-      .filter(
-        ({ job }) => job.controller && resolution.controllers.get(windowsControllerKey(job.controller)) === 'alive',
-      )
-      .flatMap((job) => job.links),
-  ];
-  for (const { execution } of liveLinks) {
+  for (const { execution } of liveOwnerLinks(resolution)) {
     // A link protects only the canonical execution it names exactly, never one a stray file mentions.
     try {
       const record = await options.store.get(execution.invocationId);
@@ -213,6 +205,43 @@ export async function recordVerifiedWindowsJobTeardowns(options: {
     }
   }
   return pass;
+}
+
+/**
+ * The links that carry positive live-owner proof: a job still present, or a closed job whose exact
+ * controller API is alive and can start another host. An unknown is never in here. Startup recovery
+ * and every uncontrollable failed write read this one rule.
+ */
+function liveOwnerLinks(resolution: WindowsJobStopResolution): WindowsJobExecutionLinkEntry[] {
+  return [
+    ...resolution.unresolved.filter((job) => job.verdict === 'present').flatMap((job) => job.links ?? []),
+    ...resolution.verifiedStopped
+      .filter(
+        ({ job }) => job.controller && resolution.controllers.get(windowsControllerKey(job.controller)) === 'alive',
+      )
+      .flatMap((job) => job.links),
+  ];
+}
+
+/**
+ * The first of these running executions that a live owner can still write, by the same rule startup
+ * recovery uses; each must match its link exactly. Undefined when none has positive proof, so an
+ * unknown settles through the ordinary failure path without a teardown.
+ */
+export async function findWindowsLiveOwner(options: {
+  records: readonly TurnExecutionRecord[];
+  dataDir?: string;
+  execute?: WindowsJobQueryExecute;
+}): Promise<{ invocationId: string } | undefined> {
+  const running = options.records.filter((record) => record.status === 'running');
+  if (running.length === 0) return undefined;
+  const live = liveOwnerLinks(await resolveWindowsJobStopEvidence(options));
+  const owner = running.find((record) =>
+    live.some(
+      (link) => link.execution.invocationId === record.invocationId && matchesLinkedExecution(record, link.execution),
+    ),
+  );
+  return owner ? { invocationId: owner.invocationId } : undefined;
 }
 
 /**

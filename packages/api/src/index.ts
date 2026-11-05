@@ -169,7 +169,10 @@ import {
 } from './domains/cats/services/agents/invocation/sidebar-presence-source.js';
 import { listenBeforeTurnExecutionRecovery } from './domains/cats/services/agents/invocation/TurnExecutionStartupReconciler.js';
 import { createThreadExecutionSituationSource } from './domains/cats/services/agents/invocation/thread-execution-situation.js';
-import { stopWithWindowsJobProof } from './domains/cats/services/agents/invocation/WindowsJobStopRecovery.js';
+import {
+  findWindowsLiveOwner,
+  stopWithWindowsJobProof,
+} from './domains/cats/services/agents/invocation/WindowsJobStopRecovery.js';
 import { createZombieTerminalRecovery } from './domains/cats/services/agents/invocation/ZombieTerminalRecovery.js';
 import {
   type AcpPoolRegistry,
@@ -3468,6 +3471,8 @@ async function main(): Promise<void> {
       ? {
           stopUnconfirmedProvider: (record: TurnExecutionRecord) =>
             stopWithWindowsJobProof({ store: turnExecutionStore, record, dataDir: process.env.CAT_CAFE_DATA_DIR }),
+          findWindowsLiveOwner: (records: readonly TurnExecutionRecord[]) =>
+            findWindowsLiveOwner({ records, dataDir: process.env.CAT_CAFE_DATA_DIR }),
         }
       : {}),
   });

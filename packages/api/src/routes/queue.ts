@@ -133,6 +133,11 @@ export interface QueueRoutesOptions {
   stopUnconfirmedProvider?: (
     record: TurnExecutionRecord,
   ) => Promise<{ stopped: true; record: TurnExecutionRecord } | { stopped: false; reason: string }>;
+  /**
+   * #1838: the first of these executions that a Windows host job or its exact controller API still
+   * owns. No uncontrollable failure may be written over a live owner; an unknown is not one.
+   */
+  findWindowsLiveOwner?: (records: readonly TurnExecutionRecord[]) => Promise<{ invocationId: string } | undefined>;
 }
 
 function liveExecutionCandidateKey(candidate: Pick<LiveExecutionCandidate, 'catId' | 'executionId'>): string {
@@ -490,7 +495,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       reason?: ExecutionFailureReason;
     },
     retirePending = snapshotPendingPrivateStop(input.threadId, input.userId, [input.catId]),
-  ): Promise<{ reconciled: boolean }> => {
+  ): Promise<{ reconciled: boolean; error?: string; code?: 'PROVIDER_LIVE_OWNER' }> => {
     if (!messageStore || !opts.invocationRecordStore) {
       throw new Error('durable execution failure stores are unavailable');
     }
@@ -504,6 +509,15 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
           (child) => child.threadId === input.threadId && child.userId === input.userId && child.catId === input.catId,
         )
       : [];
+    // #1838: an owner the CLI snapshot cannot list may still be a live Windows host or its API. Its
+    // execution is not lost: nothing is written, and the caller reports the exact owner.
+    const liveOwner = await opts.findWindowsLiveOwner?.(childExecutions);
+    if (liveOwner)
+      return {
+        reconciled: false,
+        error: `原执行仍有存活的 owner，保留执行占用（invocationId=${liveOwner.invocationId}）`,
+        code: 'PROVIDER_LIVE_OWNER',
+      };
     const childInvocationIds = [
       ...new Set([
         ...(input.invocationId ? [input.invocationId] : []),
@@ -665,7 +679,8 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     }
     if (!processResult?.complete || !processResult.stopped) {
       try {
-        await failUncontrollableInvocation({ ...input, invocationId: input.invocationId });
+        const failed = await failUncontrollableInvocation({ ...input, invocationId: input.invocationId });
+        if (!failed.reconciled) return { cancelled: false, ...failed };
         return { cancelled: false, reconciled: true };
       } catch (err) {
         input.request.log.error({ err, ...executionOwner }, 'failed to persist control-plane failure terminal');
@@ -1147,7 +1162,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       const snapshot = await retryProcessOwnerSnapshot(request, opts.cliExecutionOwnerService);
       if (!snapshot.complete) {
         try {
-          await failUncontrollableInvocation({
+          const failed = await failUncontrollableInvocation({
             threadId,
             userId,
             catId,
@@ -1155,6 +1170,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
             ...(candidate.invocationId ? { invocationId: candidate.invocationId } : {}),
             request,
           });
+          if (!failed.reconciled) return { cancelled: false, ...failed };
           return { cancelled: false, reconciled: true };
         } catch (err) {
           request.log.error({ err, threadId, catId, executionId }, 'failed to persist control-plane failure terminal');
