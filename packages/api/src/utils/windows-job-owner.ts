@@ -28,7 +28,7 @@
 
 import { execFile, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { chmodSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { chmodSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { promisify } from 'node:util';
 import { resolveCatCafeDataRoot } from './cli-process-ownership.js';
@@ -36,6 +36,7 @@ import { resolveCatCafeDataRoot } from './cli-process-ownership.js';
 const execFileAsync = promisify(execFile);
 
 const WINDOWS_JOB_DIRECTORY = 'windows-api-jobs';
+const WINDOWS_JOB_LINKS_DIRECTORY = 'windows-job-execution-links';
 const JOB_NAME_PREFIX = 'Local\\ClowderApiJob-';
 const HELPER_READY = 'JOB_READY_HELPER_OUTSIDE';
 const HELPER_TIMEOUT_MS = 30_000;
@@ -446,6 +447,110 @@ export function clearWindowsJobOwner(path: string): void {
   rmSync(path, { force: true });
 }
 
+/**
+ * Link one execution to the job that will own its providers.
+ *
+ * Keyed by jobName rather than by API pid: after the owning API dies its pid can be reused, so a
+ * pid-keyed link could let a dead job's absence release a live API's child. The link is written
+ * before provider entry, so an execution that crashed mid-turn is still accounted for.
+ */
+export interface WindowsJobExecutionLink {
+  v: 1;
+  jobName: string;
+  invocationId: string;
+  executionId: string;
+  linkedAt: number;
+}
+
+function executionLinkPath(jobName: string, invocationId: string, dataDir?: string): string {
+  // Both parts are validated by their producers; encode to keep the file name single-segment.
+  return join(
+    resolveWindowsJobLinksDirectory(dataDir),
+    `${encodeURIComponent(jobName)}.${encodeURIComponent(invocationId)}.json`,
+  );
+}
+
+export function resolveWindowsJobLinksDirectory(dataDir?: string): string {
+  return join(resolveCatCafeDataRoot(dataDir), WINDOWS_JOB_LINKS_DIRECTORY);
+}
+
+export function parseWindowsJobExecutionLink(value: unknown): WindowsJobExecutionLink | null {
+  const record = asRecord(value);
+  if (!record || record.v !== 1) return null;
+  if (typeof record.jobName !== 'string' || !record.jobName.startsWith(JOB_NAME_PREFIX)) return null;
+  if (typeof record.invocationId !== 'string' || record.invocationId.trim() === '') return null;
+  if (typeof record.executionId !== 'string' || record.executionId.trim() === '') return null;
+  if (!isPositiveSafeInteger(record.linkedAt)) return null;
+  return {
+    v: 1,
+    jobName: record.jobName,
+    invocationId: record.invocationId.trim(),
+    executionId: record.executionId.trim(),
+    linkedAt: record.linkedAt,
+  };
+}
+
+export function recordWindowsJobExecutionLink(options: {
+  dataDir?: string;
+  jobName: string;
+  invocationId: string;
+  executionId: string;
+}): { path: string; link: WindowsJobExecutionLink } {
+  const directory = resolveWindowsJobLinksDirectory(options.dataDir);
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  chmodSync(directory, 0o700);
+  const link: WindowsJobExecutionLink = {
+    v: 1,
+    jobName: options.jobName,
+    invocationId: options.invocationId,
+    executionId: options.executionId,
+    linkedAt: Date.now(),
+  };
+  const path = executionLinkPath(options.jobName, options.invocationId, options.dataDir);
+  writeFileSync(path, `${JSON.stringify(link)}\n`, { encoding: 'utf8', mode: 0o600 });
+  return { path, link };
+}
+
+/** Executions registered against one job. An unreadable link is reported, never silently dropped. */
+export function readWindowsJobExecutionLinks(
+  jobName: string,
+  dataDir?: string,
+): { links: Array<WindowsJobExecutionLink & { path: string }>; invalidPaths: string[] } {
+  const directory = resolveWindowsJobLinksDirectory(dataDir);
+  let names: string[];
+  try {
+    names = readdirSync(directory).filter((name) => name.endsWith('.json'));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { links: [], invalidPaths: [] };
+    throw error;
+  }
+  const links: Array<WindowsJobExecutionLink & { path: string }> = [];
+  const invalidPaths: string[] = [];
+  const prefix = `${encodeURIComponent(jobName)}.`;
+  for (const name of names) {
+    if (!name.startsWith(prefix)) continue;
+    const path = join(directory, name);
+    let parsed: WindowsJobExecutionLink | null = null;
+    try {
+      parsed = parseWindowsJobExecutionLink(JSON.parse(readFileSync(path, 'utf8')));
+    } catch {
+      parsed = null;
+    }
+    if (parsed?.jobName === jobName) links.push({ ...parsed, path });
+    else invalidPaths.push(path);
+  }
+  return { links, invalidPaths };
+}
+
+/** The invocation ids registered against a job; used to scope a verified stop to real executions. */
+function readWindowsJobExecutionInvocationIds(jobName: string, dataDir?: string): string[] {
+  return readWindowsJobExecutionLinks(jobName, dataDir).links.map((link) => link.invocationId);
+}
+
+export function clearWindowsJobExecutionLink(path: string): void {
+  rmSync(path, { force: true });
+}
+
 export interface WindowsJobQueryOptions {
   execute?: typeof execFileAsync;
 }
@@ -513,7 +618,13 @@ export async function queryWindowsJobStopEvidence(
 
 export interface WindowsJobStopResolution {
   /** API instances whose job is verifiably gone, with the record paths to clear after settlement. */
-  verifiedStopped: Array<{ apiPid: number; helperPid: number; recordPath: string }>;
+  verifiedStopped: Array<{
+    apiPid: number;
+    helperPid: number;
+    recordPath: string;
+    /** Executions registered against this job; these are the ones a stop may release. */
+    executionInvocationIds: string[];
+  }>;
   /** Jobs that still exist or could not be queried; their executions stay protected and visible. */
   unresolved: Array<{ apiPid: number; verdict: WindowsJobStopVerdict; reason: string; activeProcesses: number }>;
 }
@@ -533,7 +644,12 @@ export async function resolveWindowsJobStopEvidence(
   for (const record of records) {
     const evidence = await queryWindowsJobStopEvidence(record.jobName, options);
     if (evidence.verdict === 'absent')
-      verifiedStopped.push({ apiPid: record.apiPid, helperPid: record.helperPid, recordPath: record.path });
+      verifiedStopped.push({
+        apiPid: record.apiPid,
+        helperPid: record.helperPid,
+        recordPath: record.path,
+        executionInvocationIds: readWindowsJobExecutionInvocationIds(record.jobName, options.dataDir),
+      });
     else
       unresolved.push({
         apiPid: record.apiPid,

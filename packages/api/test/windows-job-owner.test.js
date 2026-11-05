@@ -23,6 +23,7 @@ const modulePath = fileURLToPath(new URL('../dist/utils/windows-job-owner.js', i
 
 const { adoptWindowsApiJob, parseWindowsJobOwnerRecord, queryWindowsJobStopEvidence, resolveWindowsJobStopEvidence } =
   await import(pathToFileURL(modulePath).href);
+const { readWindowsJobExecutionLinks, recordWindowsJobExecutionLink } = await import(pathToFileURL(modulePath).href);
 
 function alive(pid) {
   try {
@@ -216,6 +217,32 @@ test('the helper adopts the process it was actually pointed at', { skip: !isWind
     assert.equal(accepted.adopted, true, `adoption must succeed: ${JSON.stringify(accepted)}`);
     const present = await queryWindowsJobStopEvidence(accepted.record.jobName);
     assert.equal(present.verdict, 'present', 'this live test process must read present');
+  } finally {
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('executions are linked to a job by name, not by a reusable pid', { timeout: 20_000 }, async () => {
+  // The link is what scopes a verified stop to real executions. Keying it by job name keeps a dead
+  // API's pid out of the decision: a reused pid can never resolve another instance's job.
+  const dataDir = mkdtempSync(join(tmpdir(), 'issue1838-links-'));
+  // Built from char codes so the separator survives every editing layer unharmed.
+  const sep = String.fromCharCode(92);
+  const jobA = `Local${sep}ClowderApiJob-${'a'.repeat(8)}-0000-4000-8000-00000000000a`;
+  const jobB = `Local${sep}ClowderApiJob-${'b'.repeat(8)}-0000-4000-8000-00000000000b`;
+  try {
+    recordWindowsJobExecutionLink({ dataDir, jobName: jobA, invocationId: 'inv-a', executionId: 'exec-a' });
+    recordWindowsJobExecutionLink({ dataDir, jobName: jobA, invocationId: 'inv-b', executionId: 'exec-b' });
+    recordWindowsJobExecutionLink({ dataDir, jobName: jobB, invocationId: 'inv-c', executionId: 'exec-c' });
+
+    const a = readWindowsJobExecutionLinks(jobA, dataDir);
+    assert.deepEqual(a.links.map((link) => link.invocationId).sort(), ['inv-a', 'inv-b']);
+    assert.equal(a.invalidPaths.length, 0);
+    // A different job's links never leak into this one's evidence.
+    assert.deepEqual(
+      readWindowsJobExecutionLinks(jobB, dataDir).links.map((link) => link.invocationId),
+      ['inv-c'],
+    );
   } finally {
     rmSync(dataDir, { recursive: true, force: true });
   }
