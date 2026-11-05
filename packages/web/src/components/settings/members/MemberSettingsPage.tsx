@@ -250,11 +250,6 @@ export function MemberSettingsPage({
               )}
             </fieldset>
           </div>
-          {editor.error && (
-            <div role="alert" className="mt-4 rounded-xl bg-conn-red-bg p-4 text-sm text-conn-red-text">
-              {editor.error}
-            </div>
-          )}
           {editor.conflicted && (
             <button
               type="button"
@@ -278,6 +273,15 @@ export function MemberSettingsPage({
             className="sticky bottom-0 z-40 mt-5 flex w-full flex-wrap items-center justify-between gap-3 border-t border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-5 py-4"
             data-testid="member-save-bar"
           >
+            {/* The form can be taller than the viewport; keep a rejected save beside the action that caused it. */}
+            {editor.error && (
+              <div
+                role="alert"
+                className="max-h-[30vh] w-full overflow-y-auto break-words rounded-xl bg-conn-red-bg px-4 py-3 text-sm text-conn-red-text"
+              >
+                {editor.error}
+              </div>
+            )}
             {draft.pendingWrite ? (
               <span className="text-sm" role="status">
                 {t(
