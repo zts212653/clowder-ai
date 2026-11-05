@@ -20,7 +20,10 @@ import {
   sdkOperatorArgs,
 } from '../dist/domains/cats/services/agents/providers/claude-sdk-launch.js';
 import { claudeSdkRuntimeFixture } from './helpers/claude-sdk-runtime-fixture.js';
+import { ensureFakeCliOnPath } from './helpers/fake-cli-path.js';
 import { fakeL0Compiler } from './helpers/fake-l0-compiler.js';
+
+ensureFakeCliOnPath('claude');
 
 const sessionId = '11111111-1111-4111-8111-111111111111';
 const callbackEnv = { CAT_CAFE_ANTHROPIC_PROFILE_MODE: 'subscription' };
