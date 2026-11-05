@@ -259,6 +259,7 @@ type ExtraCarrierPersistence = ExtraCarrierPersistenceClassification<{
   taskAssignmentRequestDigest: 'parsed';
   collectiveOwnerAdmissionV1: 'parsed';
   collectiveAuthorizationInvalid: 'derived';
+  pluginAddressedReceipt: 'parsed';
   outputLayout: 'parsed';
   a2aFailureReturn: 'parsed';
   coveredA2AFailureReturns: 'parsed';
@@ -551,6 +552,20 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
       parsed.collectiveWorkDelegationV1 !== undefined
     ) {
       result.collectiveAuthorizationInvalid = true;
+      hasField = true;
+    }
+    const pluginReceipt = parsed.pluginAddressedReceipt;
+    if (
+      pluginReceipt &&
+      isNonEmptyString(pluginReceipt.targetId) &&
+      isNonEmptyString(pluginReceipt.inputMessageId) &&
+      typeof pluginReceipt.accepted === 'boolean'
+    ) {
+      result.pluginAddressedReceipt = {
+        targetId: pluginReceipt.targetId,
+        inputMessageId: pluginReceipt.inputMessageId,
+        accepted: pluginReceipt.accepted,
+      };
       hasField = true;
     }
     const failureReturn = parseA2AFailureReturn(parsed.a2aFailureReturn);

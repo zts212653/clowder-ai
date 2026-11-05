@@ -352,7 +352,27 @@ describe('§3.1/§3.2 console projection and save readiness', () => {
   test('fields() projects the variant declaration onto every field', async (t) => {
     const projectRoot = mkdtempSync(join(tmpdir(), 'feishu-variants-fields-'));
     t.after(() => rmSync(projectRoot, { recursive: true, force: true }));
-    const { service } = serviceWith(feishuManifest(), projectRoot);
+    const base = feishuManifest();
+    const manifest = {
+      ...base,
+      configuration: [
+        ...base.configuration,
+        {
+          key: 'startWebhook',
+          label: 'Start webhook',
+          kind: 'operation',
+          required: false,
+          actions: [{ id: 'start', label: 'Start', render: 'button', action: { method: 'webhook.start' } }],
+        },
+      ],
+      configurationVariants: {
+        ...base.configurationVariants,
+        branches: base.configurationVariants.branches.map((branch) =>
+          branch.id === 'webhook' ? { ...branch, fields: [...branch.fields, 'startWebhook'] } : branch,
+        ),
+      },
+    };
+    const { service } = serviceWith(manifest, projectRoot);
     const fields = await service.fields(PLUGIN_ID);
     const variants = fields.find((field) => field.key === 'appId')?.configurationVariants;
     assert.equal(variants?.discriminator, 'connectionMode');

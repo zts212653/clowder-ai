@@ -88,18 +88,11 @@ import { stampVisibleTurn } from '../domains/cats/services/agents/invocation/vis
 import { extractImageUrls, extractTrustedImagePaths } from '../domains/cats/services/agents/providers/image-paths.js';
 import { analyzeA2AMentions } from '../domains/cats/services/agents/routing/a2a-mentions.js';
 import { buildCallbackPostMessageIdempotencyKey } from '../domains/cats/services/agents/routing/callback-message-idempotency.js';
-import { resolveCatTarget } from '../domains/cats/services/agents/routing/cat-target-resolver.js';
+import { resolveCatTarget, resolveMessageTarget } from '../domains/cats/services/agents/routing/cat-target-resolver.js';
 import { extractRichFromText } from '../domains/cats/services/agents/routing/rich-block-extract.js';
 import { resolveRichMediaBlocks } from '../domains/cats/services/agents/routing/rich-media-urls.js';
 import { buildVoteNotification } from '../domains/cats/services/agents/routing/vote-intercept.js';
 import { buildCloudReturnMessageIdempotencyKey } from '../domains/cats/services/cloud-bridge/cloud-return-message.js';
-import {
-  type DotAskAdmission,
-  hasCompleteDotAskFanout,
-} from '../domains/cats/services/cloud-bridge/dot/DotAskService.js';
-import { resolveDotCallbackReplySource } from '../domains/cats/services/cloud-bridge/dot/dot-callback-reply-source.js';
-import { DOT_CAT_ID } from '../domains/cats/services/cloud-bridge/dot/dot-connection-state.js';
-import type { DotReplyCandidate } from '../domains/cats/services/cloud-bridge/dot/dot-reply-authority.js';
 import { getMessageSpeakerName, getSenderName } from '../domains/cats/services/context/ContextAssembler.js';
 import { FreshnessAttentionEventLog } from '../domains/cats/services/freshness/FreshnessAttentionEventLog.js';
 import type { AgentRouter } from '../domains/cats/services/index.js';
@@ -850,25 +843,6 @@ export interface CallbackRoutesOptions {
     import('../domains/cats/services/cloud-bridge/cloud-return-grant.js').CloudReturnGrantStore,
     'claim' | 'commit' | 'release'
   >;
-  /** Host-only typed admission for a paired dot consultation; never a public callback flag. */
-  admitDotAsk?: (input: {
-    agentKeyId: string;
-    userId: string;
-    threadId: string;
-    content: string;
-    targetCats: readonly string[];
-    clientMessageId?: string;
-  }) => Promise<DotAskAdmission>;
-  dotReplyTarget?: (source: DotReplyCandidate) => Promise<boolean>;
-  /** Event replies still require one current connection and one actually read source. */
-  admitDotReturn?: (input: {
-    agentKeyId: string;
-    userId: string;
-    threadId: string;
-    sourceMessageId: string;
-    eventId: string;
-    content: string;
-  }) => Promise<string>;
   messageStore: IMessageStore;
   /** Exact lifecycle-backed execution state shared by prompts, UI, and thread-context reads. */
   threadExecutionSituationSource?: ThreadExecutionSituationSource;
@@ -1224,7 +1198,6 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
   registerCallbackAuthHook(app, registry, {
     ...(callbackAuthNotifier ? { notifier: callbackAuthNotifier } : {}),
     ...(agentKeyRegistry ? { agentKeyRegistry } : {}),
-    ...(opts.admitDotReturn ? { allowDotSourceBoundReturn: true } : {}),
   });
   if (opts.companionProjectPath) {
     registerCompanionWorkReadRoutes(
@@ -1400,43 +1373,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         return reply.code(403).send(makeCallbackAuthError('cloud_principal_not_configured'));
       }
       const isGptPro = principal.cloudBoundary;
-      const isDot = principal.catId === createCatId('gpt-dot');
-      let dotDispatchInvocationId: string | undefined;
-      let dotAskAdmission: DotAskAdmission | undefined;
-      if (isDot && !replyTo && !cloudReturnBinding && opts.admitDotAsk) {
-        try {
-          dotAskAdmission = await opts.admitDotAsk({
-            agentKeyId: principal.agentKeyId,
-            userId: principal.userId,
-            threadId: effectiveThreadId,
-            content,
-            targetCats: explicitTargetCats ?? [],
-            clientMessageId,
-          });
-        } catch {
-          return reply.code(403).send({ kind: 'dot_ask_not_admitted' });
-        }
-      }
-      if (isDot && !dotAskAdmission) {
-        const eventId = request.headers['x-cat-cafe-dot-event-id'];
-        if (!replyTo || cloudReturnBinding || typeof eventId !== 'string' || !opts.admitDotReturn) {
-          return reply.code(403).send({ kind: 'dot_exact_source_required' });
-        }
-        try {
-          dotDispatchInvocationId = await opts.admitDotReturn({
-            agentKeyId: principal.agentKeyId,
-            userId: principal.userId,
-            threadId: effectiveThreadId,
-            sourceMessageId: replyTo,
-            eventId,
-            content,
-          });
-        } catch {
-          return reply.code(403).send({ kind: 'dot_source_not_admitted' });
-        }
-      }
-      const isCloudReturnAttempt = (isDot && !dotAskAdmission) || (isGptPro && Boolean(replyTo || cloudReturnBinding));
-      const usesServerGrant = (isDot || isGptPro) && Boolean(replyTo) && !cloudReturnBinding;
+      const isCloudReturnAttempt = isGptPro && Boolean(replyTo || cloudReturnBinding);
+      const usesServerGrant = isGptPro && Boolean(replyTo) && !cloudReturnBinding;
       let verifiedLegacyReturn: import('@cat-cafe/shared').CloudBridgeReturnV1 | undefined;
       if (isGptPro && cloudReturnBinding) {
         if (!replyTo) {
@@ -1491,17 +1429,6 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         localReviewVerdict && clientMessageId
           ? buildLocalReviewFactMessageIdempotencyKey(principal.catId, clientMessageId)
           : undefined;
-      const durableDotAskDuplicate = dotAskAdmission
-        ? await messageStore.getByIdempotencyKey(
-            principal.userId,
-            dotAskAdmission.idempotencyScope,
-            dotAskAdmission.idempotencyKey,
-          )
-        : null;
-      const dotAskMatches = (message: StoredMessage) =>
-        !dotAskAdmission || message.extra?.dotAsk?.requestDigest === dotAskAdmission.metadata.requestDigest;
-      if (durableDotAskDuplicate && !dotAskMatches(durableDotAskDuplicate))
-        return reply.code(409).send({ kind: 'dot_ask_idempotency_conflict' });
       const durableCloudReturnDuplicate = cloudReturnMessageIdempotencyKey
         ? await messageStore.getByIdempotencyKey(principal.userId, effectiveThreadId, cloudReturnMessageIdempotencyKey)
         : null;
@@ -1542,7 +1469,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         durableLocalReviewDuplicate && sameRichCallbackRequest(durableLocalReviewDuplicate, extractedBlocks)
           ? durableLocalReviewDuplicate
           : null;
-      const durableMediaDuplicate = durableDotAskDuplicate ?? durableCloudReturnDuplicate ?? durableLocalRichRecovery;
+      const durableMediaDuplicate = durableCloudReturnDuplicate ?? durableLocalRichRecovery;
       const mediaResolution = durableMediaDuplicate
         ? { ok: true as const, blocks: [...(durableMediaDuplicate.extra?.rich?.blocks ?? [])] }
         : await resolveRichMediaBlocks(extractedBlocks);
@@ -1581,12 +1508,16 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       }
 
       // F182 AC-C1: use analyzeA2AMentions (captures routing_warnings for disabled cats)
-      const contentAnalysis = analyzeA2AMentions(storedContent, senderCatId);
+      const contentAnalysis = analyzeA2AMentions(
+        storedContent,
+        senderCatId,
+        await opts.router?.addressedPlugins?.list(),
+      );
       const contentTargets = contentAnalysis.mentions;
       const validExplicitTargets: CatId[] = [];
       const routing_warnings: CatRoutingError[] = [...contentAnalysis.routing_warnings];
       for (const id of explicitTargetCats ?? []) {
-        const resolved = resolveCatTarget(id);
+        const resolved = resolveMessageTarget(id, await opts.router?.addressedPlugins?.list());
         if ('ok' in resolved) {
           validExplicitTargets.push(createCatId(resolved.ok));
         } else {
@@ -1693,7 +1624,6 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           : {}),
         ...targetCatsExtra,
         ...localReviewVerdictExtra,
-        ...(dotAskAdmission ? { dotAsk: dotAskAdmission.metadata } : {}),
       };
       const extra = Object.keys(extraParts).length > 0 ? extraParts : undefined;
 
@@ -1735,10 +1665,6 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           };
         }
         cloudReturnGrantClaim = grant;
-        if (isDot && grant.dispatchInvocationId !== dotDispatchInvocationId) {
-          await cloudReturnGrantStore.release(grant);
-          return reply.code(403).send({ kind: 'dot_dispatch_generation_mismatch' });
-        }
       }
       const localReviewDuplicateMatches = (message: StoredMessage) =>
         Boolean(
@@ -1770,23 +1696,14 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         };
       }
       const callbackMessageIdempotencyKey =
-        dotAskAdmission?.idempotencyKey ??
         notificationMessageIdempotencyKey ??
         (clientMessageId && !usesServerGrant && !localReviewVerdict
           ? buildCallbackPostMessageIdempotencyKey(principal.catId, clientMessageId)
           : undefined);
       const durableCallbackDuplicate = callbackMessageIdempotencyKey
-        ? await messageStore.getByIdempotencyKey(
-            principal.userId,
-            dotAskAdmission?.idempotencyScope ?? effectiveThreadId,
-            callbackMessageIdempotencyKey,
-          )
+        ? await messageStore.getByIdempotencyKey(principal.userId, effectiveThreadId, callbackMessageIdempotencyKey)
         : null;
-      const duplicateMsg =
-        durableDotAskDuplicate ??
-        durableCloudReturnDuplicate ??
-        durableLocalReviewDuplicate ??
-        durableCallbackDuplicate;
+      const duplicateMsg = durableCloudReturnDuplicate ?? durableLocalReviewDuplicate ?? durableCallbackDuplicate;
       const recoverPersistedCallbackMessage = async (persisted: StoredMessage) => {
         persisted = await publishCallbackSearchAnswer(
           opts.messageSearchAnswerService,
@@ -1842,17 +1759,6 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
             ),
           enqueueFailureMessage: '[agent-key/post-message] duplicate wake admission failed',
         });
-        if (
-          dotAskAdmission &&
-          !(await hasCompleteDotAskFanout(await messageStore.getById(persisted.id), opts.invocationQueue))
-        ) {
-          return reply.code(503).send({
-            kind: 'dot_ask_delivery_pending',
-            message: 'The dot question is durable; retry the same clientMessageId to restore its recipient wake.',
-            messageId: persisted.id,
-            clientMessageId,
-          });
-        }
         if (localReviewVerdict && persisted.deliveryStatus === 'queued' && canRecoverWake && !recovered) {
           reply.status(503);
           return {
@@ -1905,11 +1811,9 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         );
       }
 
-      const admittedCloudReturn = !isDot
-        ? cloudReturnGrantClaim
-          ? cloudReturnProof(cloudReturnGrantClaim)
-          : verifiedLegacyReturn
-        : undefined;
+      const admittedCloudReturn = cloudReturnGrantClaim
+        ? cloudReturnProof(cloudReturnGrantClaim)
+        : verifiedLegacyReturn;
       const appendInput: AppendMessageInput = {
         from: { kind: 'agent', catId: principal.catId },
         threadId: effectiveThreadId,
@@ -1956,15 +1860,6 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         if (cloudReturnGrantClaim && cloudReturnGrantStore) {
           await cloudReturnGrantStore.release(cloudReturnGrantClaim);
         }
-        if (dotAskAdmission && a2aAdmissionPlan) {
-          reply.status(503);
-          return {
-            kind: 'dot_ask_delivery_pending',
-            message:
-              'Question admission is unavailable; retry the same clientMessageId. No partial fan-out was published.',
-            clientMessageId,
-          };
-        }
         if (localReviewVerdict && a2aAdmissionPlan) {
           app.log.warn(
             { err: error, threadId: effectiveThreadId, clientMessageId },
@@ -1987,7 +1882,6 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         principal,
         storedMsg,
       );
-      if (!dotAskMatches(storedMsg)) return reply.code(409).send({ kind: 'dot_ask_idempotency_conflict' });
       if (persistedReplay || atomicAdmission.preAdmittedReplayed) {
         return recoverPersistedCallbackMessage(storedMsg);
       }
@@ -2047,18 +1941,6 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         enqueueFailureMessage: '[agent-key/post-message] wake admission failed',
       });
 
-      if (
-        dotAskAdmission &&
-        (deliveryDecision.enqueueFailed ||
-          !(await hasCompleteDotAskFanout(await messageStore.getById(storedMsg.id), opts.invocationQueue)))
-      ) {
-        return reply.code(503).send({
-          kind: 'dot_ask_delivery_pending',
-          message: 'The dot question is durable; retry the same clientMessageId to restore its recipient wake.',
-          messageId: storedMsg.id,
-          clientMessageId,
-        });
-      }
       socketManager.broadcastAgentMessage(
         {
           type: 'text',
@@ -2764,7 +2646,11 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // Parse routing syntax before lifecycle projection. Terminal coordination
     // may suppress only unaddressed courtesy prose; a line-start @mention or
     // structured targetCats is a new active hop and must never be swallowed.
-    const contentAnalysis = analyzeA2AMentions(storedContent, isCrossThread ? undefined : senderCatId);
+    const contentAnalysis = analyzeA2AMentions(
+      storedContent,
+      isCrossThread ? undefined : senderCatId,
+      await opts.router?.addressedPlugins?.list(),
+    );
     const incomingCrossThreadHint = record.a2aTriggerMessageId
       ? await hydrateCrossThreadReplyHint(messageStore, record.a2aTriggerMessageId)
       : null;
@@ -2822,6 +2708,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         : undefined;
     const useAtomicCanonicalActionAdmission = Boolean(atomicCanonicalAdmissionStore);
     const negativeAuthorizationFence = await preflightNegativeAuthorizationFence({
+      plugins: await opts.router?.addressedPlugins?.list(),
       content,
       isCrossThread,
       senderCatId,
@@ -3132,7 +3019,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     const routing_warnings: CatRoutingError[] = [...contentAnalysis.routing_warnings];
     if (explicitTargetCats) {
       for (const id of explicitTargetCats) {
-        const resolved = resolveCatTarget(id);
+        const resolved = resolveMessageTarget(id, await opts.router?.addressedPlugins?.list());
         if ('ok' in resolved) {
           validExplicitTargets.push(createCatId(resolved.ok));
         } else {
@@ -3200,11 +3087,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         );
       }
     }
-    const originalDotReplyTriggerId =
+    const causalTriggerId =
       record.originTriggerMessageId ?? record.a2aTriggerMessageId ?? turnExecution?.causal?.triggerMessageId;
-    // Callback posts are independent speech, not the execution's terminal answer.
-    // Explicit @dot remains supported; automatic consultation return is attached
-    // to the canonical completed response in routeSerial.
     const suppressTerminalRouting = coordinationResult.suppressRouting;
     if (suppressTerminalRouting && mergedTargets.size > 0) {
       throw new Error('terminal ACK projection cannot suppress explicit routing targets');
@@ -3332,22 +3216,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       }
     }
 
-    const dotReplyTriggerId =
-      mentions.some((catId) => catId === DOT_CAT_ID) &&
-      !isCrossThread &&
-      !action &&
-      !localReviewVerdict &&
-      !coordinationResult.suppressRouting &&
-      opts.dotReplyTarget
-        ? await resolveDotCallbackReplySource({
-            triggerMessageId: originalDotReplyTriggerId,
-            replyTo: validatedReplyTo,
-            execution: turnExecution,
-            messages: messageStore,
-          })
-        : originalDotReplyTriggerId;
-
-    const causalTriggerMessage = dotReplyTriggerId ? await messageStore.getById(dotReplyTriggerId) : null;
+    const causalTriggerMessage = causalTriggerId ? await messageStore.getById(causalTriggerId) : null;
 
     // Store the message (scoped to the effective thread)
     // AC-B6-P1: When A2A mentions will be enqueued (invocationQueue available),
@@ -3367,11 +3236,11 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         invocationId: effectiveInvId,
         turnInvocationId: invocationId ?? effectiveInvId,
       },
-      ...(dotReplyTriggerId
+      ...(causalTriggerId
         ? {
             causal: {
               kind: 'invocation_reply' as const,
-              triggerMessageId: dotReplyTriggerId,
+              triggerMessageId: causalTriggerId,
               ...(causalTriggerMessage?.threadId === effectiveThreadId ? { triggerThreadId: effectiveThreadId } : {}),
             },
           }

@@ -1,18 +1,16 @@
 ---
 cell_id: plugin
 title: Plugin Framework
-summary: Plugin Manager, verified package inventory, Host-bound clients, module lifecycle, ordinary actions/messages/streams and Console/Agent management; plugin business stays in packages.
+summary: Plugin Manager, verified package inventory, Host-bound clients, module lifecycle, ordinary actions/messages/streams, owner-approved shared MCP projection and Console/Agent management; plugin business stays in packages.
 canonical_features: [F202, F247, F285, F290, F292]
 code_anchors:
   - packages/api/src/domains/plugin/chatgpt-dot-manifest.ts
-  - packages/api/src/domains/cats/services/cloud-bridge/dot/DotConnectionService.ts
-  - packages/api/src/domains/cats/services/cloud-bridge/dot/DotConnectionStore.ts
-  - packages/api/src/domains/cats/services/cloud-bridge/dot/DotConnectionTestService.ts
-  - packages/api/src/domains/cats/services/cloud-bridge/dot/DotConnectionRuntime.ts
-  - packages/api/src/domains/cats/services/cloud-bridge/dot/DotPluginStateProjection.ts
-  - packages/api/src/routes/chatgpt-dot-connection-routes.ts
-  - packages/api/src/routes/chatgpt-dot-test-routes.ts
-  - packages/web/src/components/settings/plugin-manager/DotConnectionDetail.tsx
+  - packages/api/src/domains/plugin/migration/dot-legacy-migration-coordinator.ts
+  - packages/api/src/domains/plugin/migration/dot-legacy-migration-journey.ts
+  - packages/api/src/domains/plugin/migration/dot-legacy-image-reader.ts
+  - packages/api/src/domains/plugin/shared-extension/plugin-shared-extension.ts
+  - packages/api/src/routes/plugin/plugin-shared-extension-routes.ts
+  - packages/api/src/routes/chatgpt-dot-image-routes.ts
   - packages/api/src/domains/plugin/plugin-config-store.ts
   - packages/api/src/domains/plugin/host-inventory/index.ts
   - packages/api/src/domains/plugin/builtin-runtime/carriers/module-plugin-runtime.ts
@@ -28,6 +26,8 @@ code_anchors:
   - packages/api/src/domains/plugin/desktop-window-runtime/desktop-component.ts
   - packages/api/src/routes/concierge-desktop.ts
   - packages/api/src/domains/plugin/manager/plugin-manager-service.ts
+  - packages/api/src/domains/plugin/manager/addressing/plugin-addressed-targets.ts
+  - packages/api/src/domains/plugin/manager/addressing/addressed-plugin-queue-delivery.ts
   - packages/api/src/domains/plugin/manager/plugin-manager-projection.ts
   - packages/api/src/domains/plugin/official-catalog.ts
   - packages/api/src/domains/plugin/manager/official-catalog-provider.ts
@@ -35,13 +35,14 @@ code_anchors:
   - packages/api/src/routes/plugin-manager-routes.ts
   - packages/shared/src/types/plugin.ts
   - packages/mcp-server/src/tools/plugin-management-tools.ts
+  - packages/mcp-server/src/remote-shared-extension.ts
   - packages/web/src/components/settings/plugin-manager/PluginManagerContent.tsx
   - packages/api/src/domains/cats/services/cloud-bridge/conversation-host-adapter.ts
 doc_anchors:
   - docs/features/F202-plugin-framework.md
   - docs/features/F285-stackchan-physical-limb-plugin.md
   - docs/features/F247-cloud-cat-family.md
-static_scan_hints: [PluginManagerService, PluginInventoryStore, ModulePluginRuntime, createPluginNeutralHost, NativePluginActions, PluginConfigPanel, plugin.yaml]
+static_scan_hints: [PluginManagerService, PluginInventoryStore, ModulePluginRuntime, PluginSharedExtensionService, createPluginNeutralHost, NativePluginActions, PluginConfigPanel, plugin.yaml]
 cited_by:
   - {feature: F247, date: 2026-10-10, delta: dot G1 source-bound Events and private original image consumer}
   - {feature: F202, date: 2026-05-31, delta: new cell}
@@ -58,6 +59,7 @@ cited_by:
   - {feature: F290, date: 2026-08-28, delta: bundled official Connector distribution and hybrid builtin/external lifecycle seam; Collective Service truth stays in collective-runtime}
   - {feature: F309, date: 2026-09-06, delta: archive-bound static editor admission and a separately declared private semantic worker reuse the same inventory and Broker feature authority}
   - {feature: F202, date: 2026-09-01, delta: terminal unified Manager projection, external catalog ownership, and same-source Console/Agent operations}
+  - {feature: F202, date: 2026-10-31, delta: owner-approved single shared MCP projection into one installed plugin fixed handle; verified legacy adoption runs only after enable}
 ---
 
 # Plugin Framework
@@ -88,6 +90,12 @@ consumer and the superseded historical intake boundary.
 
 ## Extend By
 
+Addressed delivery is a manifest opt-in. Inventory owns the installed instance's alias/icon
+and their independent presentation revision. Ordinary admission resolves explicit mentions to
+that stable instance ID; the existing Queue dispatches it through Manager. Input acceptance is
+recorded on ordinary messages, without a member identity or a second queue. Disabled instances
+retain their alias reservation; retirement cannot redirect queued inputs to a replacement.
+
 - Keep `plugin.yaml` the static contribution truth and use the activation's handler map; do not add
   a second dynamic registration surface.
 - Join catalog candidates to verified inventory; installation, desired enablement and live runtime
@@ -100,8 +108,12 @@ consumer and the superseded historical intake boundary.
 
 ## Retained Specialized Consumers
 
-Dot remains a built-in exception in this C1; its deferred alias/addressable-plugin proposal and
-remaining Host-specific dispatch are recorded in F202. This does not authorize a Dot migration.
+Dot business behavior is package-owned. Host retains only the bounded one-time legacy importer,
+old-image compatibility reader and a package-neutral, owner-approved single shared MCP projection.
+The projection freezes one installed instance's complete tool/event surface and invokes only its
+fixed `handle`; it does not understand Dot methods, pairing credentials or package business state.
+Verified legacy adoption runs only after the migrated package is enabled. None of these boundaries
+provides a second Dot runtime.
 The installed personal Chrome companion owns its browser/native-helper business; Host provides
 its existing generic conversation-host capability. Plugin-local HTTP services and their assets are
 owned by the plugin lifecycle; they do not require a Host browser-service binding.

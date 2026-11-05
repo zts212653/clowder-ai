@@ -110,6 +110,7 @@ async function fixture(options = {}) {
     registry: new InvocationRegistry(),
     messageStore: messages,
     threadStore: threads,
+    addressedPlugins: options.addressedPlugins,
   });
   const queue = new InvocationQueue(undefined, { resolveTargets: (...args) => router.resolveSendTargets(...args) });
   const delivery = createPluginConversationDelivery({ messageStore: messages, queue, router });
@@ -159,6 +160,64 @@ async function fixture(options = {}) {
 }
 
 describe('F202 C1 — plugin Host messaging.send', () => {
+  function addressedPlugins() {
+    const targets = [
+      { id: INSTANCE_ID, alias: 'dot', kind: 'plugin' },
+      { id: 'instance-other-plugin', alias: 'helper', kind: 'plugin' },
+    ];
+    return {
+      list: async () => targets,
+      isInstanceId: async (id) => targets.some((target) => target.id === id),
+    };
+  }
+
+  for (const [text, expected] of [
+    ['@dot here — can someone review this?', ['codex']],
+    ['@dot @opus please inspect', ['opus']],
+    ['@dot @helper please inspect', ['instance-other-plugin']],
+    ['Can someone review this?', ['codex']],
+  ]) {
+    test(`plugin auto wake excludes its own instance while preserving ordinary routing: ${text}`, async () => {
+      const { host, messages, threads, queue } = await fixture({ addressedPlugins: addressedPlugins() });
+      const thread = await threads.create(OWNER, 'Plugin question');
+      threads.updateParticipantActivity(thread.id, 'codex', true);
+      const receipt = await host.send(draft(thread.id, { text, wake: 'auto' }));
+      const source = await messages.getById(receipt.messageId);
+      assert.deepEqual(source.from, { kind: 'plugin', instanceId: INSTANCE_ID });
+      assert.equal(source.content, text, 'routing must not rewrite published speech');
+      assert.deepEqual(
+        queue.list(thread.id, OWNER).flatMap((entry) => entry.targets),
+        expected,
+      );
+    });
+  }
+
+  test('external IM ingress may explicitly address another plugin through the ordinary queue', async () => {
+    const { host, threads, bindings, queue, messages } = await fixture({
+      manifest: manifest({ externalKind: 'message-subscription' }),
+      addressedPlugins: addressedPlugins(),
+    });
+    const thread = await threads.create(OWNER, 'IM explicit plugin');
+    await bindings.bind(PLUGIN_ID, 'group-addressed', thread.id, OWNER);
+    const receipt = await host.send(
+      draft(thread.id, {
+        text: '@helper please inspect',
+        origin: {
+          kind: 'external',
+          connectorId: 'fixture-im',
+          sourceAddress: { connectorId: 'fixture-im', chatId: 'group-addressed', messageId: 'external-addressed' },
+        },
+        wake: 'auto',
+        sender: { id: 'person-9', name: 'Ada' },
+      }),
+    );
+    assert.deepEqual(
+      queue.list(thread.id, OWNER).flatMap((entry) => entry.targets),
+      ['instance-other-plugin'],
+    );
+    assert.equal((await messages.getById(receipt.messageId)).extra.pluginMessage.presentation.connector, 'fixture-im');
+  });
+
   test('a module can narrow its send admission after handle preparation without granting a new identity', async () => {
     const { host, messages, threads, messaging, wakes } = await fixture();
     const thread = await threads.create(OWNER, 'Bounded operator request');

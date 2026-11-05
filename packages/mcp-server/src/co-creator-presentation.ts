@@ -19,7 +19,12 @@ const configResponse = z.object({
 
 type Presentation = ReturnType<typeof coCreatorDisplay>;
 type Registration = { name: string; tool: RegisteredTool };
-type ServerPresentation = { registrations: Registration[]; current: Presentation };
+type ExternalToolProvider = () => Promise<readonly Tool[]>;
+type ServerPresentation = {
+  registrations: Registration[];
+  current: Presentation;
+  externalToolProvider?: ExternalToolProvider;
+};
 const presentations = new WeakMap<McpServer, ServerPresentation>();
 const defaultPresentation = coCreatorDisplay({ name: 'co-creator', mentionPatterns: ['@co-creator'] });
 
@@ -113,10 +118,24 @@ export function registerCoCreatorPresentation(server: McpServer, name: string, t
   server.server.setRequestHandler(ListToolsRequestSchema, async () => {
     const current = await readCurrentPresentation(presentation.current);
     presentation.current = current;
+    const own = presentation.registrations
+      .filter(({ tool: registered }) => registered.enabled)
+      .map((registration) => listRegistration(registration, current));
+    const external = (await presentation.externalToolProvider?.()) ?? [];
+    const ownNames = new Set(own.map((toolDefinition) => toolDefinition.name));
+    if (external.some((toolDefinition) => ownNames.has(toolDefinition.name))) {
+      throw new Error('Shared extension tool conflicts with a Host tool');
+    }
     return {
-      tools: presentation.registrations
-        .filter(({ tool: registered }) => registered.enabled)
-        .map((registration) => listRegistration(registration, current)),
+      tools: [...own, ...external.map((toolDefinition) => structuredClone(toolDefinition))],
     };
   });
+}
+
+/** Adds one already-authorized shared extension catalog to the existing Host list. */
+export function registerExternalToolProvider(server: McpServer, provider: ExternalToolProvider): void {
+  const state = presentations.get(server);
+  if (!state) throw new Error('Host tool presentation must be registered before a shared extension');
+  if (state.externalToolProvider) throw new Error('Only one shared extension catalog is supported');
+  state.externalToolProvider = provider;
 }

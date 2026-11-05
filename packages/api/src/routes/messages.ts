@@ -548,9 +548,10 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       return { error: 'One or more selected member identities are invalid', code: 'INVALID_EXPLICIT_TARGETS' };
     }
     if (!replayedSource && whisperVisibility && whisperRecipients?.length) {
-      const validRecipients = await router.resolveExplicitTargets(whisperRecipients, resolvedThreadId, {
-        persist: false,
-      });
+      // Whispers are a member-only visibility boundary. Addressable plugin
+      // instances may receive ordinary conversation work, but they are not
+      // principals in the private member audience model.
+      const validRecipients = router.resolveAdmissionTargets(whisperRecipients);
       if (validRecipients.length !== whisperRecipients.length) {
         return reply
           .code(400)
@@ -1123,6 +1124,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         ...(m.extra?.cloudBridgeReturn ||
         m.extra?.outputLayout ||
         m.extra?.runtimeInteractionCard ||
+        m.extra?.pluginAddressedReceipt ||
         m.extra?.contentModificationReceiptV1 ||
         m.extra?.semanticEvent ||
         m.extra?.liveCompanion ||
@@ -1151,6 +1153,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                 ...(m.extra?.cloudBridgeReturn ? { cloudBridgeReturn: m.extra.cloudBridgeReturn } : {}),
                 ...(m.extra?.outputLayout ? { outputLayout: m.extra.outputLayout } : {}),
                 ...(m.extra?.runtimeInteractionCard ? { runtimeInteractionCard: m.extra.runtimeInteractionCard } : {}),
+                ...(m.extra?.pluginAddressedReceipt ? { pluginAddressedReceipt: m.extra.pluginAddressedReceipt } : {}),
                 ...(m.extra?.contentModificationReceiptV1
                   ? { contentModificationReceiptV1: m.extra.contentModificationReceiptV1 }
                   : {}),

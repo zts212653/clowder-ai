@@ -58,10 +58,18 @@ export function createPluginConversationDelivery(deps: {
         if (rows.length > 0) await deps.queue.adoptCommittedAdmission(rows, stored);
         return 'enqueued';
       }
-      const targetCats =
+      const sourceInstanceId = stored.from.instanceId;
+      const resolvedTargets =
         catId === undefined
           ? await deps.router.resolveSendTargets([], threadId, content)
           : await deps.router.resolveConversationTargetsAtAdmission([catId], threadId, exact ? '' : content);
+      let targetCats = resolvedTargets.filter((id) => id !== sourceInstanceId);
+      if (!exact && targetCats.length === 0 && resolvedTargets.some((id) => id === sourceInstanceId)) {
+        // The source mentioned only itself. Fall back to the conversation's
+        // ordinary healthy recipient without parsing that same self-mention a
+        // second time.
+        targetCats = await deps.router.resolveConversationTargetsAtAdmission([], threadId, '');
+      }
       if (exact && catId !== undefined && (targetCats.length !== 1 || targetCats[0] !== catId))
         throw new Error('explicit plugin recipient is unavailable');
       const admitted = await deps.queue.enqueueExistingMessageDurable(deps.messageStore, messageId, {

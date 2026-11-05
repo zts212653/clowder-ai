@@ -118,6 +118,15 @@ function packageProvenance(value: unknown, label: string): PluginPackageRecord['
       ...(raw.ownerAuthRequired === undefined
         ? {}
         : { ownerAuthRequired: boolean(raw.ownerAuthRequired, `${label}.ownerAuthRequired`) }),
+      ...(raw.dependencyClosure === undefined
+        ? {}
+        : {
+            dependencyClosure: enumValue(
+              raw.dependencyClosure,
+              new Set(['shipped', 'materialized'] as const),
+              `${label}.dependencyClosure`,
+            ),
+          }),
     };
   }
   if (kind === 'git') {
@@ -249,6 +258,22 @@ export function parseInstance(value: unknown, index: number): PluginInstanceReco
     lifecycleRevision: positiveInteger(raw.lifecycleRevision ?? 1, `instances[${index}].lifecycleRevision`),
     installedAt: timestamp(raw.installedAt, `instances[${index}].installedAt`),
     updatedAt: timestamp(raw.updatedAt, `instances[${index}].updatedAt`),
+    ...(raw.address === undefined
+      ? {}
+      : {
+          address: {
+            alias: string(object(raw.address, 'instance.address').alias, 'instance.address.alias'),
+            revision: positiveInteger(
+              object(raw.address, 'instance.address').revision ?? 1,
+              'instance.address.revision',
+            ),
+            ...(object(raw.address, 'instance.address').icon === undefined
+              ? {}
+              : {
+                  icon: string(object(raw.address, 'instance.address').icon, 'instance.address.icon'),
+                }),
+          },
+        }),
     ...(raw.retiredAt === undefined ? {} : { retiredAt: timestamp(raw.retiredAt, `instances[${index}].retiredAt`) }),
     ...(raw.lastRuntimeError === undefined
       ? {}

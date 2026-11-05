@@ -68,11 +68,6 @@ export class CloudInvokeBridge implements ICloudInvokeBridge {
 
   async dispatch(params: CloudInvokeDispatchParams): Promise<BridgeDispatchOutcome> {
     try {
-      if (params.catId === 'gpt-dot') {
-        return this.deps.dispatchDot
-          ? await this.deps.dispatchDot(params)
-          : { kind: 'fallback', reason: 'no-adapter', detail: 'dot 连接尚未准备，请打开 ChatGPT 云端插件详情。' };
-      }
       const outcome = await this.dispatchInternal(params);
       this.logger.info(
         { threadId: params.threadId, catId: params.catId, outcomeKind: outcome.kind },

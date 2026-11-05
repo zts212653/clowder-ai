@@ -16,6 +16,8 @@ export interface CatOption {
   isCloud?: boolean;
   /** F247 AC-C-4: Human-readable provider label for cloud tag (e.g. "via ChatGPT Pro") */
   providerLabel?: string;
+  isPlugin?: boolean;
+  pluginIcon?: PluginIconSpec;
 }
 
 /** Static group mention shortcuts — shown at top of autocomplete.
@@ -100,7 +102,7 @@ function detectCloudProvider(cat: CatData): string | undefined {
   return undefined;
 }
 
-export function buildCatOptions(cats: CatData[]): CatOption[] {
+export function buildCatOptions(cats: CatData[], plugins: readonly PluginMentionTarget[] = []): CatOption[] {
   const breedGroups = buildBreedGroupOptions(cats);
   const individuals = cats
     .filter((cat) => cat.mentionPatterns.length > 0 && isAvailable(cat))
@@ -119,7 +121,17 @@ export function buildCatOptions(cats: CatData[]): CatOption[] {
   // Group mentions (@thread, @all, @全体xx猫) are low-frequency — put them
   // at the bottom so individual cats occupy the prime visible slots.
   // Users can still reach groups via arrow-up or by typing the filter text.
-  return [...individuals, ...STATIC_GROUP_MENTIONS, ...breedGroups];
+  const pluginOptions = plugins.map((plugin) => ({
+    id: plugin.id,
+    label: `@${plugin.alias}`,
+    desc: `插件 · ${plugin.displayName}`,
+    insert: `@${plugin.alias} `,
+    color: 'var(--cafe-text-secondary)',
+    avatar: '',
+    isPlugin: true,
+    pluginIcon: plugin.icon ?? 'blocks',
+  }));
+  return [...individuals, ...pluginOptions, ...STATIC_GROUP_MENTIONS, ...breedGroups];
 }
 
 /** Build whisper target options from dynamic cat data.
@@ -151,3 +163,5 @@ export function detectMenuTrigger(
   }
   return null;
 }
+
+import type { PluginIconSpec, PluginMentionTarget } from '@cat-cafe/shared';

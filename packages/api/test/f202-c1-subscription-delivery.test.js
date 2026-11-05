@@ -120,8 +120,10 @@ describe('F202 C1 — Host-driven subscription delivery', () => {
       'envelope',
       'kind',
       'presentation',
+      'reason',
       'threadId',
     ]);
+    assert.equal(calls[0].input.reason, 'subscription');
     assert.equal(isPluginDeliveryInput(calls[0].input), true);
   });
 

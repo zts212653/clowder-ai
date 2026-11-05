@@ -213,18 +213,21 @@ async function invokeDelivery(
 ): Promise<void> {
   const input: PluginMessageDelivery = {
     kind: 'message',
+    reason: 'subscription',
     deliveryId,
     threadId: event.envelope.threadId,
     envelope: event.envelope,
     ...(lifecycleId === undefined ? {} : { executionId: lifecycleId }),
     ...(presentation === undefined ? {} : { presentation }),
   };
-  if (registration.method !== undefined && !delivery.invoke)
-    throw new Error('subscription delivery invocation port is unavailable');
-  const receipt =
-    registration.method !== undefined
-      ? await delivery.invoke!(registration.subscriberId, registration.method, input)
-      : await delivery.deliver(registration.subscriberId, input);
+  let receipt: unknown;
+  if (registration.method !== undefined) {
+    const invoke = delivery.invoke;
+    if (!invoke) throw new Error('Legacy subscription action transport is unavailable');
+    receipt = await invoke(registration.subscriberId, registration.method, input);
+  } else {
+    receipt = await delivery.deliver(registration.subscriberId, input);
+  }
   if (!isPluginDeliveryReceipt(receipt) || receipt.deliveryId !== deliveryId) {
     throw new Error(`delivery receipt mismatch for ${deliveryId}`);
   }

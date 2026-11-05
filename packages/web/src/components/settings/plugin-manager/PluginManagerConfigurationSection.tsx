@@ -132,9 +132,7 @@ export function PluginManagerConfigurationSection({
   const steps = declaredSteps.filter((step) => !step.mode || step.mode === selectedMode).map((step) => step.text);
   const updates = configurationUpdates(fields, fieldValues, variantActiveKeys, variantProjection !== undefined);
   const displayedFields = fields.filter(
-    (field) =>
-      field.hidden !== true &&
-      (variantActiveKeys === undefined || field.kind === 'operation' || variantActiveKeys.has(field.key)),
+    (field) => field.hidden !== true && (variantActiveKeys === undefined || variantActiveKeys.has(field.key)),
   );
   const [operationRevision, setOperationRevision] = useState(0);
   const handleOperationChange = () => {

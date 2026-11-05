@@ -98,3 +98,28 @@ describe('buildCatOptions vs buildWhisperOptions split', () => {
     expect(options.map((option) => option.id)).not.toContain('spark');
   });
 });
+
+describe('addressed plugin mention projection', () => {
+  it('keeps stable plugin ids and exposes aliases without adding plugins to whisper/member choices', () => {
+    const plugins = [
+      {
+        kind: 'plugin' as const,
+        id: 'pi_dot',
+        pluginId: 'official.dot',
+        alias: 'my-dot',
+        displayName: 'Dot',
+        icon: 'blocks',
+        lifecycleRevision: 1,
+        addressRevision: 2,
+      },
+    ];
+    const options = buildCatOptions(FAKE_CATS, plugins);
+    const plugin = options.find((option) => option.id === 'pi_dot');
+    expect(plugin).toMatchObject({ label: '@my-dot', insert: '@my-dot ', isPlugin: true, pluginIcon: 'blocks' });
+    expect(options.findIndex((option) => option.id === 'pi_dot')).toBeLessThan(
+      options.findIndex((option) => option.id === 'all'),
+    );
+    expect(buildWhisperOptions(FAKE_CATS).some((option) => option.id === 'pi_dot')).toBe(false);
+    expect(buildCatOptions(FAKE_CATS).some((option) => option.id === 'pi_dot')).toBe(false);
+  });
+});

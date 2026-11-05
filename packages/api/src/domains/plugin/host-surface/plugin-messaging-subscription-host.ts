@@ -9,7 +9,7 @@ const SUBSCRIBE_KEYS = new Set(['threadId', 'method', 'includeOwnMessages']);
 
 export interface PluginMessagingSubscribeInput {
   readonly threadId: string;
-  readonly method: string;
+  readonly method?: string;
   readonly includeOwnMessages?: boolean;
 }
 
@@ -55,7 +55,7 @@ function subscribeInput(value: PluginMessagingSubscribeInput): PluginMessagingSu
   }
   return {
     threadId: boundedString(record.threadId, 'threadId', 500),
-    method: boundedString(record.method, 'method', 500),
+    ...(record.method === undefined ? {} : { method: boundedString(record.method, 'method', 500) }),
     ...(record.includeOwnMessages === undefined ? {} : { includeOwnMessages: record.includeOwnMessages as boolean }),
   };
 }
@@ -95,6 +95,9 @@ export function createPluginMessagingSubscriptionSession(
       async subscribe(raw) {
         assertCurrent();
         const input = subscribeInput(raw);
+        if (input.method === undefined && deps.manifest?.call === undefined) {
+          throw new MessagingError('VALIDATION', 'methodless subscription requires a call declaration');
+        }
         await requireThread(input.threadId);
         const { handleId } = await deps.messaging.ensureThreadHandle({
           pluginInstanceId: deps.pluginInstanceId,
@@ -111,7 +114,7 @@ export function createPluginMessagingSubscriptionSession(
           subscriberId: deps.pluginInstanceId,
           threadId: input.threadId,
           handleId,
-          method: input.method,
+          ...(input.method === undefined ? {} : { method: input.method }),
           ...(() => {
             const declared = deps.manifest?.contributions?.find(
               (entry) => entry.type === 'message-subscription' && entry.action.method === input.method,

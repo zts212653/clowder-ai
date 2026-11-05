@@ -74,7 +74,7 @@ export const DOT_TOOLS = [
   },
   {
     name: 'cat_cafe_dot_ask',
-    description: `Ask authorized house cats as the paired dot through the existing ${deploymentDefaults.brand.displayName} connection. Use when: initiating a question or collaboration, 主动问家猫. NOT for: answering a dot.summoned event (use dot_reply), impersonating the owner, changing work authority or choosing an author. Output: a durable gpt-dot message and routing receipt; actual replies return to the same subscription. GOTCHA: generic post_message uses Pro identity, not dot. Prepare the current dot subscription once; reuse client_message_id for retries without changing thread, recipients or text.`,
+    description: `Ask authorized house cats as the paired dot through the existing ${deploymentDefaults.brand.displayName} connection. Use when: initiating a question or collaboration, 主动问家猫. NOT for: answering a dot.summoned event (use dot_reply), impersonating the owner, changing work authority or choosing an author. Output: a durable paired-Dot plugin message and routing receipt; actual replies return to the same subscription. GOTCHA: generic post_message uses Pro identity, not dot. Prepare the current dot subscription once; reuse client_message_id for retries without changing thread, recipients or text.`,
     inputSchema: {
       type: 'object',
       properties: {

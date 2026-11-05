@@ -163,7 +163,9 @@ test('idle native control refuses a raced conversation lease instead of waiting 
         sessionId: binding.cliSessionId,
         nativeSessionBinding: binding,
         invocationId: 'compact-fixture',
-        timeoutMs: 100,
+        // Preflight/filesystem latency must not turn lease contention into timeout cancellation.
+        // The held lease and unchanged spawn count below enforce refusal without queueing.
+        timeoutMs: 5000,
       }),
       /session_owner_unavailable/,
     );

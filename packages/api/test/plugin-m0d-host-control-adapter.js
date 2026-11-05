@@ -119,6 +119,7 @@ export class HostControlBehaviorAdapter {
       await this.supervisor.deliver(this.pluginInstanceId, {
         deliveryId: 'm0d-delivery',
         kind: 'message',
+        reason: 'subscription',
         threadId: input.envelope.threadId,
         envelope: {
           ...input.envelope,

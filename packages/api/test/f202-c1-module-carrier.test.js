@@ -99,11 +99,10 @@ export default {
       async start() {
         log.push({ call: 'start' });
         return {
-          actions: {
-            async 'host.messaging.deliver'(input) {
-              log.push({ call: 'deliver', input });
-              return { deliveryId: input.deliveryId };
-            },
+          actions: {},
+          async deliver(input) {
+            log.push({ call: 'deliver', input });
+            return { deliveryId: input.deliveryId };
           },
           stop: async () => log.push({ call: 'stop' }),
         };
@@ -119,10 +118,30 @@ export default {
     return {
       async start() {
         return {
-          actions: {
-            async 'host.messaging.deliver'() {
-              return { deliveryId: 'wrong-delivery-id' };
-            },
+          actions: {},
+          async deliver() {
+            return { deliveryId: 'wrong-delivery-id' };
+          },
+          stop() {},
+        };
+      },
+    };
+  },
+};
+`;
+
+const externalRequestModule = `
+const log = (globalThis[${JSON.stringify(MODULE_LOG)}] ??= []);
+export default {
+  create() {
+    return {
+      async start(host) {
+        log.push({ call: 'external-access', external: host.external });
+        return {
+          actions: {},
+          async handle(request) {
+            log.push({ call: 'handle', request });
+            return { status: 200, headers: { 'content-type': 'application/json' }, body: request.body };
           },
           stop() {},
         };
@@ -347,6 +366,7 @@ function hostOf(records, options = {}) {
         }),
     ...(options.messaging === undefined ? {} : { messaging: options.messaging }),
     ...(options.media === undefined ? {} : { media: options.media }),
+    ...(options.externalAccess === undefined ? {} : { externalAccess: options.externalAccess }),
     log: options.log ?? (() => {}),
   });
   const router = new PluginRuntimeCarrierRouter(inventory);
@@ -912,13 +932,14 @@ test('an invalid start result is stopped and leaves no active module behind', as
   assert.equal(host.released.length, 1, 'failed start must release the staged package');
 });
 
-test('routes the frozen Host delivery row through the selected module carrier', async () => {
+test('routes the frozen Host delivery row through the plugin fixed delivery port', async () => {
   resetModuleLog();
   const rootDir = await writePackage(deliveryModule);
-  const host = hostOf([{ manifest: manifest(), rootDir }]);
+  const host = hostOf([{ manifest: manifest({ call: { alias: 'fixture', displayName: 'Fixture' } }), rootDir }]);
   const input = {
     deliveryId: 'delivery-module-1',
     kind: 'message',
+    reason: 'addressed',
     threadId: 'thread-1',
     envelope: {
       messageId: 'message-1',
@@ -939,9 +960,68 @@ test('routes the frozen Host delivery row through the selected module carrier', 
   assert.deepEqual(moduleLog(), [{ call: 'start' }, { call: 'deliver', input }]);
 });
 
+test('routes explicit subscriptions and addressed messages through the same plugin delivery port', async () => {
+  resetModuleLog();
+  const rootDir = await writePackage(deliveryModule);
+  const host = hostOf([{ manifest: manifest({ call: { alias: 'fixture', displayName: 'Fixture' } }), rootDir }]);
+  const input = {
+    deliveryId: 'subscription-module-1',
+    kind: 'message',
+    reason: 'subscription',
+    threadId: 'thread-1',
+    envelope: {
+      messageId: 'message-1',
+      revision: 1,
+      threadId: 'thread-1',
+      actor: { kind: 'cat', id: 'opus' },
+      audience: { kind: 'public' },
+      occurredAt: '2026-09-21T00:00:00.000Z',
+      payload: {
+        provenance: { epistemicStatus: 'inference', origin: { kind: 'host' } },
+        elements: [{ elementId: 'e1', kind: 'text', payload: { text: 'subscribed' } }],
+      },
+    },
+  };
+  await host.router.start('instance-0');
+  assert.deepEqual(await host.router.deliver('instance-0', input), { deliveryId: input.deliveryId });
+  assert.deepEqual(moduleLog(), [{ call: 'start' }, { call: 'deliver', input }]);
+});
+
+test('declared call delivery needs no unrelated subscription grant', async () => {
+  resetModuleLog();
+  const rootDir = await writePackage(deliveryModule);
+  const host = hostOf([{ manifest: manifest({ call: { alias: 'fixture', displayName: 'Fixture' } }), rootDir }]);
+
+  await host.router.start('instance-0');
+  const input = {
+    deliveryId: 'delivery-denied',
+    kind: 'message',
+    reason: 'addressed',
+    threadId: 'thread-1',
+    envelope: {
+      messageId: 'message-denied',
+      revision: 1,
+      threadId: 'thread-1',
+      actor: { kind: 'cat', id: 'opus' },
+      audience: { kind: 'public' },
+      occurredAt: '2026-09-21T00:00:00.000Z',
+      payload: {
+        provenance: { epistemicStatus: 'inference', origin: { kind: 'host' } },
+        elements: [{ elementId: 'e1', kind: 'text', payload: { text: 'must not arrive' } }],
+      },
+    },
+  };
+  assert.deepEqual(await host.router.deliver('instance-0', input), { deliveryId: input.deliveryId });
+  assert.deepEqual(
+    moduleLog(),
+    [{ call: 'start' }, { call: 'deliver', input }],
+    'the manifest call declaration is the opt-in for member delivery',
+  );
+});
+
 test('the production carrier router rejects an invalid module delivery receipt', async () => {
   const rootDir = await writePackage(invalidDeliveryReceiptModule);
-  const host = hostOf([{ manifest: manifest(), rootDir }]);
+  const host = hostOf([{ manifest: manifest({ call: { alias: 'fixture', displayName: 'Fixture' } }), rootDir }]);
   const input = {
     deliveryId: 'delivery-invalid-receipt',
     kind: 'message',
@@ -968,6 +1048,32 @@ test('the production carrier router rejects an invalid module delivery receipt',
       return true;
     },
   );
+});
+
+test('routes an external request through one fixed handle port and supplies Host-owned access', async () => {
+  resetModuleLog();
+  const rootDir = await writePackage(externalRequestModule);
+  const host = hostOf([{ manifest: manifest(), rootDir }], {
+    externalAccess: async (pluginInstanceId) => ({
+      endpoint: '/api/plugin-runtime/handle',
+      token: `token-for-${pluginInstanceId}`,
+    }),
+  });
+  const request = { method: 'POST', headers: { 'content-type': 'application/json' }, body: { jsonrpc: '2.0' } };
+
+  await host.router.start('instance-0');
+  assert.deepEqual(await host.router.handle('instance-0', request), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+    body: request.body,
+  });
+  assert.deepEqual(moduleLog(), [
+    {
+      call: 'external-access',
+      external: { endpoint: '/api/plugin-runtime/handle', token: 'token-for-instance-0' },
+    },
+    { call: 'handle', request },
+  ]);
 });
 
 // What this pins: the Host actually hands its admitted record to `create()`. The other
@@ -1428,12 +1534,21 @@ test('absent configRefresh hook does not stop or restart a stateless module', as
   await h.router.stop('instance-0', 'owner_disabled');
 });
 
-async function settingsProbeFixture(t, { hook = false, failStart = false, materialized = true } = {}) {
-  const rootDir = await writePackage(`export default { create() { return {
-    ${hook ? "settings() { return { actions: { inspect: () => 'settings' } }; }," : ''}
+async function settingsProbeFixture(
+  t,
+  { hook = false, statefulHook = false, failStart = false, materialized = true } = {},
+) {
+  const rootDir = await writePackage(`export default { create() {
+    let running = false;
+    return {
+    ${hook ? `settings() { return { actions: { inspect: () => ${statefulHook ? "running ? 'running' : 'stopped'" : "'settings'"} } }; },` : ''}
     start() {
       ${failStart ? "throw Error('startup failed');" : ''}
-      return { actions: { inspect: (_input, _caller, owner) => owner?.userId ?? 'runtime' }, stop() {} };
+      running = true;
+      return {
+        actions: { inspect: (_input, _caller, owner) => owner?.userId ?? 'runtime' },
+        stop() { running = false; },
+      };
     }
   }; } };`);
   const admitted = manifest({ test: { action: { method: 'inspect' } } });
@@ -1527,7 +1642,7 @@ test('settings absence avoids package resolution only for the current loaded gen
     });
 });
 
-test('settings probes retain verified materialization outside a current negative fact', async (t) => {
+test('settings probes use the active definition only for its exact loaded generation', async (t) => {
   for (const mode of ['settings-hook', 'unloaded', 'disabled', 'digest-changed', 'startup-failed'])
     await t.test(mode, async (t) => {
       const f = await settingsProbeFixture(t, { hook: mode === 'settings-hook', failStart: mode === 'startup-failed' });
@@ -1540,8 +1655,58 @@ test('settings probes retain verified materialization outside a current negative
           ? { ...f.input, packageRecord: { ...f.input.packageRecord, packageDigest: 'replacement-digest' } }
           : f.input,
       );
-      assert.equal(f.count(), before + 1);
+      assert.equal(f.count(), before + (mode === 'settings-hook' ? 0 : 1));
       assert.deepEqual(result, mode === 'settings-hook' ? { handled: true, result: 'settings' } : { handled: false });
+    });
+});
+
+test('settings use the started definition while active and a dormant definition while stopped', async (t) => {
+  const f = await settingsProbeFixture(t, { hook: true, statefulHook: true });
+
+  const beforeDormant = f.count();
+  assert.deepEqual(await f.runtime.invokeSettings(f.input), { handled: true, result: 'stopped' });
+  assert.equal(f.count(), beforeDormant + 1, 'a stopped plugin uses a separately materialized dormant definition');
+
+  await f.start();
+  const beforeActive = f.count();
+  assert.deepEqual(await f.runtime.invokeSettings(f.input), { handled: true, result: 'running' });
+  assert.equal(f.count(), beforeActive, 'an active plugin must not recreate its definition for settings');
+
+  await f.runtime.stop('instance-0', 'owner_disabled');
+  const beforeStopped = f.count();
+  assert.deepEqual(await f.runtime.invokeSettings(f.input), { handled: true, result: 'stopped' });
+  assert.equal(f.count(), beforeStopped + 1, 'stopped settings remain readable without starting the plugin');
+});
+
+test('active settings reject stop and same-digest restart across the awaited owner fence', async (t) => {
+  for (const mode of ['stop', 'same-digest-restart'])
+    await t.test(mode, async (t) => {
+      const f = await settingsProbeFixture(t, { hook: true, statefulHook: true });
+      await f.start();
+      let entered;
+      const captured = new Promise((resolve) => {
+        entered = resolve;
+      });
+      let resume;
+      const waiting = new Promise((resolve) => {
+        resume = resolve;
+      });
+      const pending = f.runtime.invokeSettings({
+        ...f.input,
+        assertCurrent: async () => {
+          entered();
+          await waiting;
+        },
+      });
+      const rejected = assert.rejects(
+        pending,
+        (error) => error.code === 'DELIVERY_REJECTED' && /activation.*changed/i.test(error.message),
+      );
+      await captured;
+      await f.runtime.stop('instance-0', 'owner_disabled');
+      if (mode === 'same-digest-restart') await f.start();
+      resume();
+      await rejected;
     });
 });
 

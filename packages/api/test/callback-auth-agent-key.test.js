@@ -6,7 +6,7 @@ const stubInvocationRegistry = {
   verify: async () => ({ ok: false, reason: 'unknown_invocation' }),
 };
 
-function makeAgentKeyRegistry(validSecret = 'valid-secret') {
+function makeAgentKeyRegistry(validSecret = 'valid-secret', catId = 'bengal') {
   return {
     verify: async (secret) => {
       if (secret === validSecret) {
@@ -14,7 +14,7 @@ function makeAgentKeyRegistry(validSecret = 'valid-secret') {
           ok: true,
           record: {
             agentKeyId: 'ak_test1',
-            catId: 'bengal',
+            catId,
             userId: 'user1',
             secretHash: 'x',
             salt: 'y',
@@ -73,6 +73,23 @@ describe('callback-auth-prehandler: agent-key path', () => {
     assert.equal(res.statusCode, 401);
     const body = JSON.parse(res.body);
     assert.ok(body.error || body.reason, 'should have error info');
+  });
+
+  it('refuses retired Dot facade keys on every callback route', async () => {
+    const { registerCallbackAuthHook } = await loadPrehandler();
+    const app = Fastify();
+    registerCallbackAuthHook(app, stubInvocationRegistry, {
+      agentKeyRegistry: makeAgentKeyRegistry('legacy-dot-secret', 'gpt-dot'),
+    });
+    app.post('/api/callbacks/post-message', async () => ({ ok: true }));
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-agent-key-secret': 'legacy-dot-secret' },
+      payload: {},
+    });
+    assert.equal(res.statusCode, 403);
+    assert.deepEqual(res.json(), { error: 'dot_plugin_required', reason: 'dot_callback_scope_retired' });
   });
 
   it('invocation token takes precedence — callbackPrincipal has kind invocation', async () => {

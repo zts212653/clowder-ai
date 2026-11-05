@@ -43,7 +43,7 @@ def checked(result):
 
 
 def metadata(path):
-    st = path.stat(follow_symlinks=False)
+    st = path.lstat()
     encoded = os.fsencode(path)
     size = checked(LIBC.listxattr(encoded, None, 0, 0))
     names = ctypes.create_string_buffer(size)

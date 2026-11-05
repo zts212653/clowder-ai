@@ -82,6 +82,23 @@ describe('GET /api/messages', () => {
     assert.deepEqual(response.json().messages[0].extra, { cloudBridgeReturn: proof });
   });
 
+  it('hydrates the exact plugin acceptance receipt as a system row without a response lifecycle', async () => {
+    const pluginAddressedReceipt = { inputMessageId: 'input', targetId: 'pi_dot', accepted: true };
+    messageStore.append({
+      userId: 'default-user',
+      from: { kind: 'system', service: 'plugin_delivery' },
+      content: '插件已接收消息。',
+      mentions: [],
+      timestamp: 1000,
+      extra: { pluginAddressedReceipt },
+    });
+    const response = await app.inject({ method: 'GET', url: '/api/messages' });
+    const row = response.json().messages[0];
+    assert.deepEqual(row.extra?.pluginAddressedReceipt, pluginAddressedReceipt);
+    assert.equal(row.from?.kind, 'system');
+    assert.equal(row.lifecycle?.kind === 'response', false);
+  });
+
   it('projects the modification source carrier in real history without requiring another extra field', async () => {
     const metadata = {
       v: 1,

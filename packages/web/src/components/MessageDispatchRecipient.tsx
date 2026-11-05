@@ -1,6 +1,7 @@
 'use client';
 
 import { useMessageNavigation } from '@/components/thread-chat/MessageNavigationContext';
+import { usePluginTargets } from '@/hooks/usePluginMentionTargets';
 import {
   dispatchReadText,
   dispatchReceiptDisplay,
@@ -11,7 +12,8 @@ import type { ChatMessage, QueueEntry } from '@/stores/chat-types';
 import { hasAssistantBody } from './assistant-message-renderability';
 import { CatAvatar } from './CatAvatar';
 import { cloudDispatchAudit, cloudDispatchReceipt } from './cloud-dispatch-receipt';
-import type { MessageDispatchAvatarProjection } from './message-dispatch-projection';
+import { type MessageDispatchAvatarProjection, pluginDeliveryReceipt } from './message-dispatch-projection';
+import { PluginTargetIcon } from './PluginTargetIcon';
 import { QueueTargetRetryButton } from './QueueTargetRetryButton';
 import { useShellPresentation } from './shell/shell-presentation';
 import { useCloudReply } from './useCloudReply';
@@ -53,9 +55,14 @@ export function MessageDispatchRecipient({
 }: RecipientProps) {
   const navigateToMessage = useMessageNavigation();
   const shell = useShellPresentation();
+  const { knownTargets } = usePluginTargets();
   const cloud = shell === 'v2' ? cloudDispatchReceipt(message, projection.targetId, timelineMessages) : undefined;
   const logical = useCloudReply(cloud?.identity, threadId, timelineMessages, { readDotEvent: shell === 'v2' });
-  const label = getCatLabel(projection.targetId);
+  const linkedMessage = timelineMessages.find((candidate) => candidate.id === projection.statusMessageId);
+  const pluginReceipt = pluginDeliveryReceipt(linkedMessage);
+  const pluginTarget = knownTargets.find((candidate) => candidate.id === projection.targetId);
+  const pluginRecipient = pluginTarget !== undefined || pluginReceipt !== undefined;
+  const label = pluginTarget?.alias ?? (pluginRecipient ? '插件' : getCatLabel(projection.targetId));
   const ref = message.lifecycle?.dispatchRefs?.find((candidate) => candidate.targetId === projection.targetId);
   const uncertain = isUnconfirmedAppend(ref, message.lifecycle);
   const checking =
@@ -75,7 +82,6 @@ export function MessageDispatchRecipient({
   const retryAction = retryEntry?.recoveryActions?.find(
     (action) => action.kind === 'repeat_target' && action.targetCatId === projection.targetId,
   );
-  const linkedMessage = timelineMessages.find((candidate) => candidate.id === projection.statusMessageId);
   const linked = linkedMessage?.lifecycle;
   const response = linked?.kind === 'response' ? linked : undefined;
   const appended =
@@ -83,7 +89,11 @@ export function MessageDispatchRecipient({
   const running = response ? response.status === 'processing' : ref?.phase !== 'settled';
   const receipt = dispatchReceiptDisplay(ref, running, message.lifecycle);
   const audit = cloud ? cloudDispatchAudit(cloud, logical.state === 'source_replied') : undefined;
-  const title = [dispatchReceiptLabel(receipt, label, 'recipient'), audit].filter(Boolean).join('\n');
+  const title = pluginReceipt
+    ? pluginReceipt.accepted
+      ? '插件确认收到了这条消息；如果它回复，会作为新消息出现'
+      : '插件没有确认收到，请检查插件状态后重新发送'
+    : [dispatchReceiptLabel(receipt, label, 'recipient'), audit].filter(Boolean).join('\n');
   const awaitingCloudReply =
     cloud && linkedMessage && !hasAssistantBody(linkedMessage) && response?.status === 'completed';
   const replyMessageId =
@@ -98,8 +108,11 @@ export function MessageDispatchRecipient({
     cloud.receipt.transport === 'none' &&
     cloud.receipt.idempotency.disposition === 'not_attempted';
   const outcome = response && response.status !== 'processing' ? responseOutcome[response.status] : undefined;
-  const progress =
-    logical.state === 'replied'
+  const progress = pluginReceipt
+    ? pluginReceipt.accepted
+      ? '已接收'
+      : '未确认接收 · 请检查插件后重新发送'
+    : logical.state === 'replied'
       ? '收到，已回复'
       : logical.state === 'source_replied'
         ? '这条消息已有回信'
@@ -134,7 +147,11 @@ export function MessageDispatchRecipient({
       ) : whisper ? (
         <span>悄悄话，只有</span>
       ) : null}
-      <CatAvatar catId={projection.targetId} size={16} status={processing ? 'streaming' : undefined} />
+      {pluginRecipient ? (
+        <PluginTargetIcon icon={pluginTarget?.icon} />
+      ) : (
+        <CatAvatar catId={projection.targetId} size={16} status={processing ? 'streaming' : undefined} />
+      )}
       {!checking ? <span className="font-medium text-cafe-secondary">{label}</span> : null}
       <span>
         {late ? `${formatTime(projection.dispatchedAt!)} ` : ''}

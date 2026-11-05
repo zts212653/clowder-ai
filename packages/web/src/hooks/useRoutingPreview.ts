@@ -38,6 +38,12 @@ export function useRoutingPreview({
   refreshKey?: string | number;
   suspended?: boolean;
 }): RoutingPreviewState {
+  const [pluginRevision, setPluginRevision] = useState(0);
+  useEffect(() => {
+    const changed = () => setPluginRevision((n) => n + 1);
+    window.addEventListener('plugin-addresses-refreshed', changed);
+    return () => window.removeEventListener('plugin-addresses-refreshed', changed);
+  }, []);
   const [state, setState] = useState<RoutingPreviewState>({ status: 'idle', targetCats: [], reason: null });
   const scopeKind = scope?.scope;
   const threadId = scope?.scope === 'thread' ? scope.threadId : '';
@@ -99,7 +105,7 @@ export function useRoutingPreview({
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [content, enabled, preferredCatsKey, refreshKey, scopeKey, scopeKind, suspended, threadId]);
+  }, [content, enabled, pluginRevision, preferredCatsKey, refreshKey, scopeKey, scopeKind, suspended, threadId]);
 
   return state;
 }

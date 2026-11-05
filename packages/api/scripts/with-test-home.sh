@@ -41,6 +41,26 @@ unset CAT_CAFE_RUNTIME_ROOT
 unset CAT_CAFE_MCP_SERVER_PATH
 unset CAT_CAFE_WORKSPACE_ROOT
 
+# Managed-command authority belongs to the outer gate supervisor. Test children
+# must not inherit it: suites that exercise hold_ball/managed jobs need to create
+# their own fixture authority, and an inherited job id makes every launch look
+# like a forbidden nested managed command.
+for managed_env in ${!CAT_CAFE_MANAGED_@}; do
+  unset "$managed_env"
+done
+
+# Bash exports functions as BASH_FUNC_<name>%% environment entries. The outer
+# gate uses exported helpers, but test children must not inherit those shell
+# control functions as invocation environment. Remove only functions carrying
+# Bash's export attribute; local helpers such as cleanup remain available.
+while IFS= read -r exported_function; do
+  if [[ "$exported_function" == "declare -fx "* ]]; then
+    inherited_function="${exported_function#declare -fx }"
+    export -n -f "$inherited_function"
+    unset -f "$inherited_function"
+  fi
+done < <(export -p -f)
+
 # A runtime-selected Codex login/state home overrides HOME. Keep native reads
 # inside the sandbox; individual tests may select their own fixture afterward.
 unset CODEX_HOME

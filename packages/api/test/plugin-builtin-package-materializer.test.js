@@ -267,7 +267,7 @@ test('rejects lockfile v2 instead of accepting its second unvalidated dependency
   assert.equal(installs, 0);
 });
 
-test('prefers an owner-provided dependency closure over an accompanying shrinkwrap', async () => {
+test('uses an admitted shipped dependency closure instead of an accompanying shrinkwrap', async () => {
   const packagesRoot = await mkdtemp(join(tmpdir(), 'cat-cafe-f202-builtin-owner-closure-'));
   roots.push(packagesRoot);
   const archive = await archivedPackage({ includeShrinkwrap: true, includeDependencyClosure: true });
@@ -286,6 +286,35 @@ test('prefers an owner-provided dependency closure over an accompanying shrinkwr
     packageDigest: archive.digest,
     packageName: '@clowder-ai/video-analysis',
     sourceKind: 'local-archive',
+    dependencyClosure: 'shipped',
+  });
+
+  assert.equal(installs, 0);
+  assert.equal(materialized.dependencyRoot, join(materialized.rootDir, 'node_modules'));
+  assert.equal((await stat(join(materialized.dependencyRoot, 'zod', 'package.json'))).isFile(), true);
+  await materialized.release();
+});
+
+test('uses a Host-admitted bundled catalog dependency closure without registry installation', async () => {
+  const packagesRoot = await mkdtemp(join(tmpdir(), 'cat-cafe-f202-builtin-bundled-closure-'));
+  roots.push(packagesRoot);
+  const archive = await archivedPackage({ includeShrinkwrap: false, includeDependencyClosure: true });
+  await publishPluginPackageArchive(packagesRoot, archive.digest, archive.bytes);
+  let installs = 0;
+  const materializer = new FilesystemBuiltinPluginPackageMaterializer({
+    packagesRoot,
+    installDependencies: async () => {
+      installs += 1;
+    },
+  });
+
+  const materialized = await materializer.resolve({
+    pluginInstanceId: 'pi_video',
+    pluginId: 'dev.clowder.video-analysis',
+    packageDigest: archive.digest,
+    packageName: '@clowder-ai/video-analysis',
+    sourceKind: 'catalog',
+    dependencyClosure: 'shipped',
   });
 
   assert.equal(installs, 0);

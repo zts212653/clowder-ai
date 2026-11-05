@@ -432,6 +432,7 @@ function mergeMessageExtra(
   // side only fills a missing field. `rich` merges structurally; startupRecovery
   // chooses its own monotonic version independently of body preference.
   const fields: RequiredMessageExtraFields = {
+    pluginAddressedReceipt: pick('pluginAddressedReceipt'),
     // No fallback inheritance: this layout belongs to the selected full body.
     outputLayout: preferred?.outputLayout,
     liveCompanion: pick('liveCompanion'),

@@ -1,7 +1,9 @@
 'use client';
 
+import type { PluginMentionTarget } from '@cat-cafe/shared';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { type CatData, useCatData } from '@/hooks/useCatData';
+import { refreshPluginMentionTargets, usePluginTargets } from '@/hooks/usePluginMentionTargets';
 import type { ComposerRoutingPreviewReason, RoutingPreviewState } from '@/hooks/useRoutingPreview';
 import { AppTooltip } from './AppTooltip';
 import { ComposerRecipientMenu, type ComposerRecipientOption } from './ComposerRecipientMenu';
@@ -13,6 +15,7 @@ import {
   type ComposerRecipientIdentity,
   composerCatName,
 } from './composer-routing-presentation';
+import { PluginTargetIcon } from './PluginTargetIcon';
 import { ShellCatAvatar } from './shell/ShellCatAvatar';
 import { ShellGlyph } from './shell/ShellIcons';
 import { useShellCopy } from './shell/shell-copy';
@@ -33,8 +36,9 @@ interface RoutingPreviewPresentation {
 function buildRecipientOptions(
   cats: CatData[],
   identities: ReadonlyMap<string, ComposerRecipientIdentity>,
+  plugins: readonly PluginMentionTarget[],
 ): ComposerRecipientOption[] {
-  return buildCatOptions(cats)
+  return buildCatOptions(cats, plugins)
     .filter((option) => !option.isGroup)
     .map((option) => ({ ...option, insert: identities.get(option.id)?.insert ?? null }));
 }
@@ -103,6 +107,7 @@ function presentRoutingPreview(
   language: 'zh' | 'en',
   getCatById: CatLookup,
   identities: ReadonlyMap<string, ComposerRecipientIdentity>,
+  plugins: readonly PluginMentionTarget[],
 ): RoutingPreviewPresentation {
   const names =
     preview.status === 'ready'
@@ -120,8 +125,15 @@ function presentRoutingPreview(
           identities.get(catId)?.label ?? composerCatName(catId, getCatById, language === 'zh' ? '猫猫' : 'Cat'),
       )
       .join(language === 'zh' ? '、' : ', ');
+    const hasUnavailablePlugin = preview.unavailableTargets?.some((id) => plugins.some((p) => p.id === id));
     const unavailableNotice =
-      !whisperPreview && unavailableNames ? copy.unavailableRedirect(unavailableNames, joinedNames) : undefined;
+      !whisperPreview && unavailableNames
+        ? hasUnavailablePlugin
+          ? language === 'zh'
+            ? `${unavailableNames} 当前无法接收；本条仍发给 ${joinedNames}`
+            : `${unavailableNames} cannot receive this message; sending to ${joinedNames}`
+          : copy.unavailableRedirect(unavailableNames, joinedNames)
+        : undefined;
     return {
       joinedNames,
       reason: unavailableNotice ?? explainReason(preview.reason, joinedNames, copy),
@@ -138,7 +150,18 @@ function presentRoutingPreview(
       whisperPreview,
     };
   }
-  const stateLabel = preview.status === 'error' ? copy.unavailable : copy.confirming;
+  const unavailablePluginNames =
+    preview.status === 'ready'
+      ? preview.unavailableTargets
+          ?.map((id) => identities.get(id)?.label)
+          .filter(Boolean)
+          .join('、')
+      : undefined;
+  const stateLabel = unavailablePluginNames
+    ? `${unavailablePluginNames} 当前无法接收`
+    : preview.status === 'error'
+      ? copy.unavailable
+      : copy.confirming;
   return { joinedNames, reason: stateLabel, stateLabel, whisperPreview };
 }
 
@@ -154,19 +177,28 @@ export function ComposerRoutingPreview({
   const copy = useShellCopy(composerRoutingCopy);
   const language = useShellLanguage();
   const { cats, getCatById } = useCatData();
+  const { targets, knownTargets } = usePluginTargets();
   const trigger = useRef<HTMLButtonElement>(null);
   const sendToLabel = useRef<HTMLSpanElement>(null);
   const avatarGroup = useRef<HTMLSpanElement>(null);
   const chevron = useRef<HTMLSpanElement>(null);
   const [open, setOpen] = useState(false);
-  const identities = useMemo(() => buildComposerRecipientIdentities(cats), [cats]);
-  const options = useMemo(() => buildRecipientOptions(cats, identities), [cats, identities]);
+  const identities = useMemo(
+    () =>
+      new Map([
+        ...buildComposerRecipientIdentities(cats),
+        ...knownTargets.map((p) => [p.id, { label: p.alias, insert: `@${p.alias} ` }] as const),
+      ]),
+    [cats, knownTargets],
+  );
+  const options = useMemo(() => buildRecipientOptions(cats, identities, targets), [cats, identities, targets]);
   const { reason, stateLabel, whisperPreview, unavailableNotice } = presentRoutingPreview(
     preview,
     copy,
     language,
     getCatById,
     identities,
+    knownTargets,
   );
   const readyWithRecipients = preview.status === 'ready' && preview.targetCats.length > 0;
   const visibleRecipientCount = readyWithRecipients ? Math.min(preview.targetCats.length, 3) : 0;
@@ -218,7 +250,10 @@ export function ComposerRoutingPreview({
           aria-expanded={whisperPreview ? undefined : open}
           aria-disabled={whisperPreview || undefined}
           onClick={() => {
-            if (!whisperPreview) setOpen((value) => !value);
+            if (!whisperPreview) {
+              void refreshPluginMentionTargets();
+              setOpen((value) => !value);
+            }
           }}
         >
           <span ref={sendToLabel} className="shrink-0 whitespace-nowrap">
@@ -233,7 +268,11 @@ export function ComposerRoutingPreview({
             >
               {preview.targetCats.slice(0, 3).map((catId) => (
                 <span key={catId} className="rounded-full ring-1 ring-[var(--shell-paper)]">
-                  <ShellCatAvatar catId={catId} size={16} />
+                  {knownTargets.some((p) => p.id === catId) ? (
+                    <PluginTargetIcon icon={knownTargets.find((p) => p.id === catId)?.icon} />
+                  ) : (
+                    <ShellCatAvatar catId={catId} size={16} />
+                  )}
                 </span>
               ))}
             </span>

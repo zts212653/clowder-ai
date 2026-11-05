@@ -273,6 +273,7 @@ function SequencedActionRenderer({
       const nextDef = actions.find((candidate) => candidate.id === action.next);
       if (nextDef?.render === 'polling') beginRequest(actionId, nextDef.id, pollingInputKey, operation.updatedAt);
       const epoch = ++requestEpoch.current;
+      setCurrentActionId(actionId);
       setLastResult(undefined);
       setPhase('loading');
       setErrorMsg(null);
@@ -342,12 +343,20 @@ function SequencedActionRenderer({
   }
 
   const currentAction = actions.find((a) => a.id === currentActionId) ?? firstAction;
+  // Without transitions these are independent owner operations, not successive steps.
+  // A status check is explicitly clickable here; mounting never invokes it.
+  const independentActions = actions.every(
+    (action) => !action.next && !action.rollback && ['button', 'status'].includes(action.render),
+  )
+    ? actions
+    : undefined;
 
   return (
     <ActionPanelBody
       connectorId={target.id}
       phase={phase}
       currentAction={currentAction}
+      independentActions={independentActions}
       lastResult={lastResult}
       errorMsg={errorMsg}
       themeColor={themeColor}

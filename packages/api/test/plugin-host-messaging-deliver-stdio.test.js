@@ -5,6 +5,7 @@ import { FakeExternalPluginProcess, readFrame, sendFrame } from './plugin-extern
 
 const DELIVER_INPUT = {
   kind: 'message',
+  reason: 'addressed',
   threadId: 'thread-1',
   deliveryId: 'delivery-1',
   envelope: {

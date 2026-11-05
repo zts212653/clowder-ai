@@ -327,6 +327,8 @@ export interface StoredMessage {
     collectiveOwnerAdmissionV1?: import('@cat-cafe/shared').CollectiveOwnerAdmissionV1;
     /** Retain malformed/revoked legacy provenance so hydration can never revive it. */
     collectiveAuthorizationInvalid?: true;
+    /** Host receipt: input acceptance only, never a model response. */
+    pluginAddressedReceipt?: { inputMessageId: string; targetId: string; accepted: boolean };
     /** Optional references into this message's one normalized full body. */
     outputLayout?: import('@cat-cafe/shared').MessageOutputLayoutV1;
     startupRecovery?: import('@cat-cafe/shared').CodexStartupRecovery;

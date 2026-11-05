@@ -37,7 +37,7 @@ beforeEach(() => {
   mockFetch.mockReset();
 });
 
-it('loads Host-bundled dot setup without requesting a nonexistent package archive README', async () => {
+it('uses the generic package documentation endpoint for Host-bundled plugins', async () => {
   const id = 'official.chatgpt-dot';
   mockFetch.mockImplementation(
     async (url) =>
@@ -45,14 +45,15 @@ it('loads Host-bundled dot setup without requesting a nonexistent package archiv
         JSON.stringify(
           url === `/api/plugin-manager/plugins/${id}`
             ? { plugin: { pluginId: id, artifact: 'installed', live: 'stopped' }, catalog: { status: 'fresh' } }
-            : { error: 'archive unavailable' },
+            : { error: 'documentation unavailable' },
         ),
-        { status: url.endsWith('/documentation') ? 422 : 200 },
+        { status: url.endsWith('/documentation') ? 404 : 200 },
       ),
   );
   const detail = await fetchManagerDetail(id, false);
   expect(detail.pluginId).toBe(id);
-  expect(mockFetch.mock.calls.map(([url]) => url)).not.toContain(`/api/plugin-manager/plugins/${id}/documentation`);
+  expect(mockFetch.mock.calls.map(([url]) => url)).toContain(`/api/plugin-manager/plugins/${id}/documentation`);
+  expect(detail.readme).toEqual({ state: 'absent' });
 });
 
 it('keeps package README discovery for ordinary catalog plugins', async () => {

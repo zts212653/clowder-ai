@@ -257,10 +257,13 @@ for (const resumeKind of ['replacement', 'cold', 'unregistered-project']) {
       let credential;
       try { credential = JSON.parse(readFileSync(process.env.CAT_CAFE_CREDENTIAL_FILE, 'utf8')); }
       catch { return { credentialReadable: false }; }
+      let pluginCredential;
+      try { pluginCredential = JSON.parse(readFileSync(process.env.CLOWDER_PLUGIN_ACTION_CREDENTIAL_FILE, 'utf8')); }
+      catch { return { credentialReadable: true, pluginCredentialReadable: false }; }
       const response = await fetch(process.env.CAT_CAFE_API_URL + '/api/plugin-runtime/action', {
         method: 'POST', headers: { 'content-type': 'application/json',
           'x-invocation-id': credential.invocationId, 'x-callback-token': credential.callbackToken,
-          'x-clowder-plugin-action-token': process.env.CLOWDER_PLUGIN_ACTION_TOKEN },
+          'x-clowder-plugin-action-token': pluginCredential.token },
         body: JSON.stringify({ method: 'fixture.run', input: {} }),
       });
       return { credentialReadable: true, status: response.status };
@@ -286,7 +289,7 @@ for (const resumeKind of ['replacement', 'cold', 'unregistered-project']) {
     };
     let actionCalls = 0;
     let actions = new NativePluginActions(async () => authority);
-    actions.activate(authority, 0, async () => {
+    await actions.activate(authority, 0, async () => {
       actionCalls++;
       return { ok: true };
     });
@@ -294,7 +297,7 @@ for (const resumeKind of ['replacement', 'cold', 'unregistered-project']) {
     if (resumeKind === 'unregistered-project') {
       actions.deactivateAll();
       actions = new NativePluginActions(async () => authority);
-      actions.activate(authority, 0, async () => {
+      await actions.activate(authority, 0, async () => {
         actionCalls++;
         return { ok: true };
       });
@@ -361,7 +364,7 @@ for (const resumeKind of ['replacement', 'cold', 'unregistered-project']) {
         // Both consumer projects are outside this Host and absent from governance.
         // A normal activation rotates only the authoritative descriptor here.
         actions.deactivate('wrapper-fixture');
-        actions.activate(authority, actions.generation('wrapper-fixture'), async () => {
+        await actions.activate(authority, actions.generation('wrapper-fixture'), async () => {
           actionCalls++;
           return { ok: true };
         });
@@ -373,7 +376,7 @@ for (const resumeKind of ['replacement', 'cold', 'unregistered-project']) {
       writeFileSync(hostFile, JSON.stringify(original));
       assert.ok(
         !readFileSync(hostFile, 'utf8').includes(
-          actions.environment('wrapper-fixture', 'native').CLOWDER_PLUGIN_ACTION_TOKEN,
+          actions.environment('wrapper-fixture', 'native').CLOWDER_PLUGIN_ACTION_CREDENTIAL_FILE,
         ),
       );
       assert.ok(!existsSync(join(lateHome, '.cat-cafe/governance-registry.json')));
@@ -391,7 +394,7 @@ for (const resumeKind of ['replacement', 'cold', 'unregistered-project']) {
       const server = config.mcp_servers[pluginName];
       assert.ok(server, 'the plugin must be present on the actual thread/resume wire');
       assert.ok(
-        !JSON.stringify(server).includes(activation.CLOWDER_PLUGIN_ACTION_TOKEN),
+        !JSON.stringify(server).includes('"token"'),
         'activation secrets must remain outside the provider config',
       );
       return callMcpProbe(server);
@@ -459,7 +462,11 @@ for (const resumeKind of ['replacement', 'cold', 'unregistered-project']) {
         args: [childPath],
         env: { ...envFor(current), ...activation, CAT_CAFE_CREDENTIAL_FILE: currentPath },
       });
-      assert.deepEqual(stale, { credentialReadable: true, status: 401 }, 'revoked activation must remain rejected');
+      assert.deepEqual(
+        stale,
+        { credentialReadable: true, pluginCredentialReadable: false },
+        'revoked activation must remove the credential before a child can call the Host',
+      );
       const hostConnection = actions.environment('wrapper-fixture', 'native');
       const sameChild = () =>
         callMcpProbe({
@@ -469,7 +476,7 @@ for (const resumeKind of ['replacement', 'cold', 'unregistered-project']) {
         });
       actions.deactivate('wrapper-fixture');
       assert.equal((await sameChild()).status, 401, 'a disabled plugin must not execute');
-      actions.activate(authority, actions.generation('wrapper-fixture'), async () => {
+      await actions.activate(authority, actions.generation('wrapper-fixture'), async () => {
         actionCalls++;
         return { ok: true };
       });
@@ -481,8 +488,9 @@ for (const resumeKind of ['replacement', 'cold', 'unregistered-project']) {
 
       const unchanged = JSON.parse(readFileSync(join(project, '.cat-cafe/capabilities.json'), 'utf8'));
       assert.equal(
-        unchanged.capabilities.find((entry) => entry.pluginId === 'fixture').mcpServer.env.CLOWDER_PLUGIN_ACTION_TOKEN,
-        activation.CLOWDER_PLUGIN_ACTION_TOKEN,
+        unchanged.capabilities.find((entry) => entry.pluginId === 'fixture').mcpServer.env
+          .CLOWDER_PLUGIN_ACTION_CREDENTIAL_FILE,
+        activation.CLOWDER_PLUGIN_ACTION_CREDENTIAL_FILE,
         'binding must not rewrite project storage',
       );
     }

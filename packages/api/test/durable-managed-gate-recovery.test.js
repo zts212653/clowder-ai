@@ -207,6 +207,23 @@ describe('durable managed gate recovery fence', () => {
     );
   });
 
+  test('the macOS adapter does not report a same-second DarkWake as confirmed sleep', () => {
+    const at = Date.parse('2026-10-20T03:47:23-07:00');
+    assert.deepEqual(
+      parseMacPowerLog(
+        `2026-10-20 03:47:23 -0700 Sleep               Entering Maintenance Sleep\n2026-10-20 03:47:23 -0700 DarkWake            DarkWake from Deep Idle\n2026-10-20 03:47:23 -0700 Wake                DarkWake to FullWake from Deep Idle\n`,
+      ),
+      [
+        {
+          evidenceId: `pmset:full-wake:${at}`,
+          startedAt: at,
+          endedAt: at,
+          wakeKind: 'full',
+        },
+      ],
+    );
+  });
+
   test('the same live owner fences exit/timeout once, then acknowledges one pause epoch', () => {
     const root = mkdtempSync(join(tmpdir(), 'managed-gate-recovery-live-'));
     const job = recoveryJob(root);

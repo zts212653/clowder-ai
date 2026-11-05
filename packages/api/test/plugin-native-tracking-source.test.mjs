@@ -11,6 +11,7 @@ import { NativePluginActions } from '../dist/domains/plugin/declared/native-plug
 import { createPluginTaskHost } from '../dist/domains/plugin/host-surface/task/plugin-task-host.js';
 import { pluginNativeActionRoutes } from '../dist/routes/plugin-native-action-routes.js';
 import { loadTrackingPackage } from './helpers/github-tracking-package.js';
+import { readPluginNativeToken } from './helpers/plugin-native-credential.js';
 
 async function fixture(t, pkg, privateSubscription = false) {
   const taskStore = new TaskStore();
@@ -105,7 +106,7 @@ async function fixture(t, pkg, privateSubscription = false) {
   };
   const carrier = createModuleHostInvocation({ runtime: { actions: () => active.actions } });
   const actions = new NativePluginActions(async () => admission);
-  actions.activate(admission, 0, (method, input) => carrier.invoke(instanceId, method, input));
+  await actions.activate(admission, 0, (method, input) => carrier.invoke(instanceId, method, input));
   const app = Fastify();
   t.after(() => app.close());
   await app.register(pluginNativeActionRoutes, {
@@ -179,8 +180,9 @@ async function fixture(t, pkg, privateSubscription = false) {
         headers: {
           'x-invocation-id': auth.invocationId,
           'x-callback-token': auth.callbackToken,
-          'x-clowder-plugin-action-token': actions.environment(instanceId, 'github-tracking')
-            .CLOWDER_PLUGIN_ACTION_TOKEN,
+          'x-clowder-plugin-action-token': await readPluginNativeToken(
+            actions.environment(instanceId, 'github-tracking'),
+          ),
         },
         payload: {
           method: `github.typed-wait.register-${kind}`,

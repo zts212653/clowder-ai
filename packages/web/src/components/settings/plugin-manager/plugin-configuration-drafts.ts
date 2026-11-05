@@ -105,7 +105,7 @@ export function variantActiveKeysOf(
       ? projection.variants.branches.find((item) => item.id === resolution.branchId)
       : undefined;
   return new Set([
-    ...fields.filter((field) => field.kind !== 'operation' && !claimed.has(field.key)).map((field) => field.key),
+    ...fields.filter((field) => !claimed.has(field.key)).map((field) => field.key),
     ...(branch?.fields ?? []),
   ]);
 }

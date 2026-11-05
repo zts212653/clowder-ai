@@ -1,6 +1,5 @@
 import { type AgentKeyScope, type CatConfig, type CatId, createCatId } from '@cat-cafe/shared';
 import type { CloudConversationHostContribution } from '@clowder-ai/plugin-contract';
-import { DOT_CAT_ID } from './dot/dot-connection-state.js';
 
 /** A cloud-conversation provider as the plugin contract names it. */
 export type CloudConversationProvider = CloudConversationHostContribution['provider'];
@@ -8,7 +7,7 @@ export type CloudConversationProvider = CloudConversationHostContribution['provi
 /**
  * F202 W2-3 h3c-2 — the Host's one table joining the cat provider of a cloud cat (the Host's own
  * cat configuration) to the contract provider its conversations run through. Which cat that is comes
- * from the cat configuration alone, excluding main's separately admitted Dot facade. Every place on the
+ * from the cat configuration alone. Every place on the
  * cloud cat's active path — dispatch prompt, credentials, callback principal, reply ingest — asks this
  * module, so they cannot disagree about who the cloud cat is.
  */
@@ -41,11 +40,6 @@ function configsOf(source: CloudCatConfigSource): CatConfigs {
 }
 
 function providerIn(configs: CatConfigs, catId: string): CloudConversationProvider | undefined {
-  // Main's Dot facade has its own event/source-bound credential and admission.
-  // It shares the provider label, but is not a package cloud-conversation owner.
-  // Its user-bound key remains restricted to the exact Dot callback writer by
-  // callback-auth-prehandler; it never acquires cloud-conversation authority.
-  if (catId === DOT_CAT_ID) return undefined;
   const provider = configs[catId]?.provider;
   return provider !== undefined && Object.hasOwn(CLOUD_CONVERSATION_PROVIDERS, provider)
     ? CLOUD_CONVERSATION_PROVIDERS[provider]

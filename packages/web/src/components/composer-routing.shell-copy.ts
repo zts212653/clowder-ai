@@ -9,7 +9,7 @@ export const composerRoutingCopy = defineShellCopy(
       whisperNoRecipient: '未选择收信猫',
       whisperNeedsRecipient: '悄悄话已开启，请先选择收信猫',
       recipientMenu: '这条发给谁',
-      recipientMenuNote: '选择猫猫会在正文开头写入可见的 @。',
+      recipientMenuNote: '选择后会在正文开头写入可见的 @。',
       recipientUnavailable: '没有唯一 @ 名称',
       preferredHeading: '这条对话 · 没 @ 时先找谁',
       preferredNote: '只在还没有猫回过话时用上',

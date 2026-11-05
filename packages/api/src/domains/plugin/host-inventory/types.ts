@@ -16,6 +16,8 @@ export type PluginPackageProvenance =
       readonly kind: 'catalog';
       readonly catalogId: string;
       readonly packageName: string;
+      /** Host-admitted bundled archives may carry an integrity-covered dependency tree. */
+      readonly dependencyClosure?: PluginDependencyClosure;
       /** Optional admission-time hint; older installations do not acquire an origin from current discovery. */
       readonly ownerAuthRequired?: boolean;
     }
@@ -74,6 +76,8 @@ export interface PluginPackageRecord {
 export type ExecutablePluginPackageRecord = PluginPackageRecord & { readonly manifest: PluginManifest };
 
 export interface PluginInstanceRecord {
+  /** Host-owned presentation, independent of package configuration and activation. */
+  readonly address?: { readonly alias: string; readonly revision: number; readonly icon?: string };
   readonly pluginInstanceId: string;
   readonly pluginId: string;
   readonly packageDigest: string;

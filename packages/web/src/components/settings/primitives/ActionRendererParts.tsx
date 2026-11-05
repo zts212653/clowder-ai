@@ -7,6 +7,7 @@ import Image from 'next/image';
 
 import { CheckCircleIcon, type PlatformActionDef, QrCodeIcon, SpinnerIcon } from '../../HubConfigIcons';
 import { ActionResultLink } from './ActionResultLink';
+import { CopyableActionText } from './CopyableActionText';
 
 // Re-export types used by ActionRenderer for its internal state
 export type ActionPhase = 'idle' | 'loading' | 'result' | 'polling' | 'connected' | 'error' | 'disconnecting';
@@ -86,6 +87,7 @@ export function ActionPanelBody({
   connectorId,
   phase,
   currentAction,
+  independentActions,
   lastResult,
   errorMsg,
   themeColor,
@@ -94,12 +96,13 @@ export function ActionPanelBody({
   connectorId: string;
   phase: ActionPhase;
   currentAction: PlatformActionDef | undefined;
+  independentActions?: readonly PlatformActionDef[];
   lastResult: ResultState | undefined;
   errorMsg: string | null;
   themeColor?: string;
   onAction: (id: string) => void;
 }) {
-  const isButtonAction = currentAction?.render === 'button';
+  const buttons = independentActions ?? (currentAction?.render === 'button' ? [currentAction] : []);
   const canTrigger = phase === 'idle' || phase === 'error' || phase === 'result';
   const imgData = lastResult?.render === 'img' ? (lastResult.data as { url?: string }) : null;
   const statusLabel =
@@ -115,17 +118,30 @@ export function ActionPanelBody({
         </p>
       )}
 
-      {isButtonAction && canTrigger && currentAction && (
-        <button
-          type="button"
-          onClick={() => onAction(currentAction.id)}
-          className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-[var(--cafe-surface)] rounded-lg transition-colors hover:opacity-90"
-          style={{ backgroundColor: themeColor ?? 'var(--conn-blue-text)' }}
-          data-testid={`${connectorId}-action-${currentAction.id}`}
-        >
-          {currentAction.resultRender === 'img' && <QrCodeIcon />}
-          {currentAction.label}
-        </button>
+      {canTrigger && buttons.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {buttons.map((action) => (
+            <button
+              key={action.id}
+              type="button"
+              onClick={() => onAction(action.id)}
+              className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-[var(--cafe-surface)] rounded-lg transition-colors hover:opacity-90"
+              style={{ backgroundColor: themeColor ?? 'var(--conn-blue-text)' }}
+              data-testid={`${connectorId}-action-${action.id}`}
+            >
+              {action.resultRender === 'img' && <QrCodeIcon />}
+              {action.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {phase === 'result' && lastResult?.render === 'text' && (
+        <CopyableActionText
+          text={typeof lastResult.data === 'string' ? lastResult.data : JSON.stringify(lastResult.data, null, 2)}
+          copyText={typeof lastResult.data === 'string' ? lastResult.data : undefined}
+          className="whitespace-pre-wrap break-words rounded-lg border border-cafe-border p-3 text-sm text-cafe-secondary"
+        />
       )}
 
       {phase === 'loading' && (

@@ -18,7 +18,7 @@ for (const [key, entry] of Object.entries(index)) {
     !/^[a-z][a-z0-9-]*$/.test(key) ||
     entry.catalogId !== key ||
     typeof entry.pluginId !== 'string' ||
-    !/^\d+\.\d+\.\d+$/.test(entry.version) ||
+    !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(entry.version) ||
     entry.archivePath !== `${key}/${entry.version}/package.tgz` ||
     entry.archiveUrl !== `builtin://${key}/${entry.version}` ||
     !/^sha512-[A-Za-z0-9+/]{86}==$/.test(entry.packageDigest)

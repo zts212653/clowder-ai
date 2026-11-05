@@ -1,4 +1,7 @@
-import { consumeOwnerOperationInvocation } from '../../carrier/plugin-owner-operation-context.js';
+import {
+  consumeOwnerOperationInvocation,
+  currentOwnerOperation,
+} from '../../carrier/plugin-owner-operation-context.js';
 import { declaresConfigurationVariants, resolveVariant } from '../../configuration-variant-consumption.js';
 import type { ModuleExecutionLease, ModuleExecutionWorker } from '../../execution-worker/client.js';
 import { loadExecutionDefinition } from '../../execution-worker/module-loader.js';
@@ -18,11 +21,51 @@ import {
   ManifestConfigurationProjectionError,
   type PluginRuntimeConfigurationPort,
 } from '../../manifest-configuration-projection.js';
+import type {
+  PluginSharedExtensionService,
+  SharedConnectionView,
+  SharedProposalView,
+} from '../../shared-extension/plugin-shared-extension.js';
 import { snapshotModuleAuthority } from './module-authority-snapshot.js';
+
+export interface ModulePluginSharedExtensionPort {
+  status(): Promise<SharedConnectionView>;
+  prepare(input: { readonly confirmationActionId: string }): Promise<SharedProposalView>;
+  bind(proposalRef: string): Promise<SharedConnectionView>;
+  unbind(expectedBindingRevision: number): Promise<SharedConnectionView>;
+}
+
+export interface ModulePluginCapabilityPort {
+  issueExternal(input: { readonly capabilityId: string; readonly ttlSeconds: number }): Promise<{
+    readonly token: string;
+    readonly tokenId: string;
+    readonly issuedAt: number;
+    readonly expiresAt: number;
+    readonly refreshRecommendedAt: number;
+    readonly forwarding: {
+      readonly upstreamLoopbackOrigin: string;
+      readonly relativePath: string;
+      readonly method: 'POST';
+    };
+  }>;
+  inspectExternal(input: { readonly token: string; readonly capabilityId: string }): Promise<{
+    readonly usable: boolean;
+    readonly reason: string;
+    readonly expiresAt?: number;
+    readonly remainingSeconds?: number;
+    readonly refreshRecommended: boolean;
+  }>;
+}
 
 /** The original loaded-plugin settings surface; it does not start subscriptions or an adapter. */
 export interface ModulePluginSettingsHost {
   readonly pluginInstanceId: string;
+  readonly capability?: ModulePluginCapabilityPort;
+  readonly external: {
+    readonly endpoint: string;
+    readonly token: string;
+    readonly shared?: ModulePluginSharedExtensionPort;
+  };
   readonly dataPath: string;
   readonly config: { get(key: string): Promise<unknown> };
   readonly secrets: { get(key: string): Promise<string | undefined> };
@@ -68,18 +111,42 @@ export function assertModuleSettingsDeclaration(record: ExecutablePluginPackageR
 
 export async function invokeModuleSettings(
   input: PluginSettingsInvocationInput,
-  options: {
-    executionWorker: ModuleExecutionWorker;
-    located: VerifiedPluginPackage;
+  options: (
+    | {
+        executionWorker: ModuleExecutionWorker;
+        located: VerifiedPluginPackage;
+        definition?: never;
+        execution?: never;
+      }
+    | {
+        definition: ModulePluginSettingsFactory;
+        execution: ModuleExecutionLease;
+        executionWorker?: never;
+        located?: never;
+      }
+  ) & {
     configuration: PluginRuntimeConfigurationPort;
     storage?: PluginPrivateStoragePort;
     dataDirectoryParent?: string;
     log: ModulePluginSettingsHost['log'];
+    externalAccess?: (pluginInstanceId: string) => Promise<{ readonly endpoint: string; readonly token: string }>;
+    capabilityAccess?: {
+      issueExternal(
+        instanceId: string,
+        input: Parameters<ModulePluginCapabilityPort['issueExternal']>[0],
+      ): ReturnType<ModulePluginCapabilityPort['issueExternal']>;
+      inspectExternal(
+        instanceId: string,
+        input: Parameters<ModulePluginCapabilityPort['inspectExternal']>[0],
+      ): ReturnType<ModulePluginCapabilityPort['inspectExternal']>;
+    };
+    sharedExtension?: PluginSharedExtensionService;
   },
 ): Promise<PluginSettingsInvocationResult> {
   const record = snapshotModuleAuthority(input.packageRecord);
   let settings: ModulePluginSettingsDefinition | undefined;
   let execution: ModuleExecutionLease | undefined;
+  let ownsExecution = false;
   let disposed = false;
   const current = async () => {
     if (disposed) throw new ExternalPluginRuntimeError('DELIVERY_REJECTED', 'Settings request has ended');
@@ -88,16 +155,23 @@ export async function invokeModuleSettings(
   try {
     assertModuleSettingsDeclaration(record, input.method);
     await current();
-    const { entrypoint } = await verifyPackageEntrypoint(record, options.located);
-    await options.located.verifyIntegrity();
-    const loaded = await loadExecutionDefinition<ModulePluginSettingsFactory>(
-      options.executionWorker,
-      input.pluginInstanceId,
-      entrypoint,
-      record.manifest,
-    );
-    execution = loaded.lease;
-    const definition = loaded.definition;
+    let definition: ModulePluginSettingsFactory;
+    if (options.definition) {
+      definition = options.definition;
+      execution = options.execution;
+    } else {
+      const { entrypoint } = await verifyPackageEntrypoint(record, options.located);
+      await options.located.verifyIntegrity();
+      const loaded = await loadExecutionDefinition<ModulePluginSettingsFactory>(
+        options.executionWorker,
+        input.pluginInstanceId,
+        entrypoint,
+        record.manifest,
+      );
+      execution = loaded.lease;
+      ownsExecution = true;
+      definition = loaded.definition;
+    }
     if (typeof definition?.settings !== 'function') return { handled: false };
     const host = await createModuleSettingsHost(input, options, current);
     settings = await definition.settings(execution.retain(host) as unknown as ModulePluginSettingsHost);
@@ -122,9 +196,9 @@ export async function invokeModuleSettings(
       await settings?.dispose?.();
     } finally {
       try {
-        await execution?.close();
+        if (ownsExecution) await execution?.close();
       } finally {
-        await options.located.release();
+        await options.located?.release();
       }
     }
   }
@@ -147,6 +221,18 @@ export async function createModuleSettingsHost(
      * pass-through so owners can always reach every declared field.
      */
     variantMode?: 'runtime' | 'management';
+    externalAccess?: (pluginInstanceId: string) => Promise<{ readonly endpoint: string; readonly token: string }>;
+    capabilityAccess?: {
+      issueExternal(
+        instanceId: string,
+        input: Parameters<ModulePluginCapabilityPort['issueExternal']>[0],
+      ): ReturnType<ModulePluginCapabilityPort['issueExternal']>;
+      inspectExternal(
+        instanceId: string,
+        input: Parameters<ModulePluginCapabilityPort['inspectExternal']>[0],
+      ): ReturnType<ModulePluginCapabilityPort['inspectExternal']>;
+    };
+    sharedExtension?: PluginSharedExtensionService;
   },
   current: () => Promise<void>,
 ): Promise<ModulePluginSettingsHost> {
@@ -222,8 +308,62 @@ export async function createModuleSettingsHost(
     manifest: record.manifest,
   });
   await current();
+  const owner = () => {
+    const context = currentOwnerOperation(input.pluginInstanceId);
+    if (!context) throw new Error('Shared extension requires a current owner operation');
+    return context;
+  };
+  const sharedCall = async <T>(run: (context: ReturnType<typeof owner>) => Promise<T>): Promise<T> => {
+    await current();
+    const result = await run(owner());
+    await current();
+    return result;
+  };
+  const sharedService = options.sharedExtension;
+  const shared: ModulePluginSharedExtensionPort | undefined = sharedService
+    ? {
+        status: () => sharedCall((context) => sharedService.status(input.pluginInstanceId, context)),
+        prepare: (request) =>
+          sharedCall((context) => sharedService.prepare(input.pluginInstanceId, record, context, request)),
+        bind: (proposalRef) =>
+          sharedCall((context) => sharedService.bind(input.pluginInstanceId, record, context, proposalRef)),
+        unbind: (expectedBindingRevision) =>
+          sharedCall((context) => sharedService.unbind(input.pluginInstanceId, context, expectedBindingRevision)),
+      }
+    : undefined;
+  const capabilityService = options.capabilityAccess;
+  const capabilityCall = async <T>(run: () => Promise<T>): Promise<T> => {
+    await current();
+    const operation = currentOwnerOperation(input.pluginInstanceId);
+    if (!operation) {
+      throw new Error('Capability token operation requires a current owner operation');
+    }
+    operation.signal.throwIfAborted();
+    operation.assertWriteCurrent();
+    await operation.assertCurrent();
+    operation.assertWriteCurrent();
+    const result = await run();
+    operation.signal.throwIfAborted();
+    operation.assertWriteCurrent();
+    await operation.assertCurrent();
+    operation.assertWriteCurrent();
+    await current();
+    return result;
+  };
+  const capability: ModulePluginCapabilityPort | undefined = capabilityService
+    ? {
+        issueExternal: (request) =>
+          capabilityCall(() => capabilityService.issueExternal(input.pluginInstanceId, structuredClone(request))),
+        inspectExternal: (request) =>
+          capabilityCall(() => capabilityService.inspectExternal(input.pluginInstanceId, structuredClone(request))),
+      }
+    : undefined;
+  const external =
+    (await options.externalAccess?.(input.pluginInstanceId)) ?? Object.freeze({ endpoint: '', token: '' });
   return {
     pluginInstanceId: input.pluginInstanceId,
+    ...(capability ? { capability } : {}),
+    external: { ...external, ...(shared ? { shared } : {}) },
     dataPath,
     config: { get: (key: string) => read(key, false) },
     secrets: {

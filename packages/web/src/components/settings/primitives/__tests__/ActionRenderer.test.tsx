@@ -57,6 +57,113 @@ describe('ActionRenderer', () => {
     vi.clearAllMocks();
   });
 
+  it('shows every independent operation, including a leading status check, and its current text result', async () => {
+    const operation = {
+      name: 'connection',
+      label: 'Dot 连接',
+      actions: [
+        { id: 'status', label: '查看连接状态', render: 'status' },
+        { id: 'begin', label: '准备连接', render: 'button' },
+        { id: 'roundtrip', label: '发起往返测试', render: 'button' },
+      ],
+    };
+    await act(async () =>
+      root.render(<ActionRenderer target={{ kind: 'plugin', id: 'fixture' }} operation={operation} />),
+    );
+    expect(mockApiFetch).not.toHaveBeenCalled();
+    for (const action of operation.actions) expect(queryButton(container, action.label)).toBeTruthy();
+    mockApiFetch.mockResolvedValueOnce(
+      jsonResponse({
+        ok: true,
+        render: 'text',
+        data: { instructions: '订阅 dot.summoned', pairingCode: 'current-private-code' },
+      }),
+    );
+    await act(async () => queryButton(container, '准备连接').click());
+    expect(mockApiFetch.mock.calls[0]?.[0]).toBe('/api/plugins/fixture/actions/connection/begin');
+    expect(container.textContent).toContain('订阅 dot.summoned');
+    expect(container.textContent).toContain('current-private-code');
+    mockApiFetch.mockResolvedValueOnce(jsonResponse({ ok: true, render: 'text', data: { paired: false } }));
+    await act(async () => queryButton(container, '查看连接状态').click());
+    expect(mockApiFetch.mock.calls[1]?.[0]).toBe('/api/plugins/fixture/actions/connection/status');
+    expect(container.textContent).not.toContain('current-private-code');
+    expect(container.textContent).toContain('false');
+    for (const action of operation.actions) expect(queryButton(container, action.label)).toBeTruthy();
+  });
+
+  it('copies an exact string text result but never invents a copy payload for structured data', async () => {
+    const clipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    const operation = {
+      name: 'connection',
+      label: 'Connection',
+      actions: [{ id: 'instructions', label: 'Show instructions', render: 'button' as const }],
+    };
+    try {
+      await act(async () =>
+        root.render(<ActionRenderer target={{ kind: 'plugin', id: 'fixture' }} operation={operation} />),
+      );
+      mockApiFetch.mockResolvedValueOnce(
+        jsonResponse({ ok: true, render: 'text', data: 'subscribe dot.summoned\ncode: EXACT-1234' }),
+      );
+      await act(async () => queryButton(container, 'Show instructions').click());
+      await act(async () => queryButton(container, '复制').click());
+      expect(writeText).toHaveBeenCalledWith('subscribe dot.summoned\ncode: EXACT-1234');
+      expect(container.textContent).toContain('已复制');
+
+      mockApiFetch.mockResolvedValueOnce(
+        jsonResponse({ ok: true, render: 'text', data: { state: 'waiting', internal: 'not-a-copy-contract' } }),
+      );
+      await act(async () => queryButton(container, 'Show instructions').click());
+      expect(container.textContent).toContain('not-a-copy-contract');
+      expect(Array.from(container.querySelectorAll('button')).some((button) => button.textContent === '复制')).toBe(
+        false,
+      );
+    } finally {
+      if (clipboard) Object.defineProperty(navigator, 'clipboard', clipboard);
+      else delete (navigator as { clipboard?: Clipboard }).clipboard;
+    }
+  });
+
+  it('clears text credentials on draft changes and discards a late independent action result', async () => {
+    const operation = {
+      name: 'connection',
+      label: 'Connection',
+      actions: [
+        { id: 'status', label: 'Check connection', render: 'status' },
+        { id: 'begin', label: 'Prepare connection', render: 'button' },
+      ],
+    };
+    const render = async (proxy: string) =>
+      act(async () =>
+        root.render(
+          <ActionRenderer
+            target={{ kind: 'plugin', id: 'fixture' }}
+            operation={operation}
+            pendingConfigValues={{ proxy }}
+          />,
+        ),
+      );
+    await render('first');
+    mockApiFetch.mockResolvedValueOnce(jsonResponse({ ok: true, render: 'text', data: 'private-pairing-code' }));
+    await act(async () => queryButton(container, 'Prepare connection').click());
+    expect(container.textContent).toContain('private-pairing-code');
+    await render('second');
+    expect(container.textContent).not.toContain('private-pairing-code');
+    let resolve!: (response: Response) => void;
+    mockApiFetch.mockImplementationOnce(
+      () =>
+        new Promise<Response>((done) => {
+          resolve = done;
+        }),
+    );
+    await act(async () => queryButton(container, 'Prepare connection').click());
+    await render('third');
+    await act(async () => resolve(jsonResponse({ ok: true, render: 'text', data: 'late-private-code' })));
+    expect(container.textContent).not.toContain('late-private-code');
+  });
+
   it('expires an ordinary action receipt and ignores an old request after drafts change', async () => {
     const operation = {
       name: 'probe',

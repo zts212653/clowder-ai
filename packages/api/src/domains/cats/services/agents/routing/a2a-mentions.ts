@@ -76,11 +76,17 @@ export interface InlineActionMention {
  *
  * Line-start @mention = always actionable. No keyword gate.
  */
-export function parseA2AMentions(text: string, currentCatId?: CatId): CatId[] {
-  return analyzeA2AMentions(text, currentCatId).mentions;
+type PluginMention = { readonly id: string; readonly alias: string };
+
+export function parseA2AMentions(text: string, currentCatId?: CatId, plugins: readonly PluginMention[] = []): CatId[] {
+  return analyzeA2AMentions(text, currentCatId, plugins).mentions;
 }
 
-export function analyzeA2AMentions(text: string, currentCatId?: CatId): A2AMentionAnalysis {
+export function analyzeA2AMentions(
+  text: string,
+  currentCatId?: CatId,
+  plugins: readonly PluginMention[] = [],
+): A2AMentionAnalysis {
   if (!text) return { mentions: [], routing_warnings: [] };
 
   // 1. Strip fenced code blocks
@@ -98,6 +104,9 @@ export function analyzeA2AMentions(text: string, currentCatId?: CatId): A2AMenti
     for (const pattern of config.mentionPatterns) {
       entries.push({ catId: id as CatId, pattern: pattern.toLowerCase() });
     }
+  }
+  for (const plugin of plugins) {
+    if (plugin.id !== currentCatId) entries.push({ catId: plugin.id as CatId, pattern: `@${plugin.alias}` });
   }
   entries.sort((a, b) => b.pattern.length - a.pattern.length);
   const normalizedText = repairLineStartMentionWhitespace(stripped, entries);
@@ -128,7 +137,9 @@ export function analyzeA2AMentions(text: string, currentCatId?: CatId): A2AMenti
         const isBoundary = !charAfter || TOKEN_BOUNDARY_RE.test(charAfter) || !HANDLE_CONTINUATION_RE.test(charAfter);
         if (!isBoundary) continue;
         // F182 KD-10: resolver check at match-time (not at pattern-build time)
-        const resolved = resolveCatTarget(entry.catId);
+        const resolved = plugins.some((p) => p.id === entry.catId)
+          ? { ok: entry.catId }
+          : resolveCatTarget(entry.catId);
         if ('error' in resolved) {
           if (!seen.has(entry.catId)) {
             seen.add(entry.catId);

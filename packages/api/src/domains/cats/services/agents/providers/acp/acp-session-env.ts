@@ -43,7 +43,9 @@ export function materializeSessionMcpServers(
   const resolved = baseServers.map((server) => {
     if (!('command' in server)) return server;
     const registered = Object.fromEntries((server.env ?? []).map((e) => [e.name, e.value]));
-    const nativeActionServer = server.hostSource === 'plugin' && Boolean(registered.CLOWDER_PLUGIN_ACTION_TOKEN);
+    const nativeActionServer =
+      server.hostSource === 'plugin' &&
+      Boolean(registered.CLOWDER_PLUGIN_ACTION_CREDENTIAL_FILE || registered.CLOWDER_PLUGIN_ACTION_TOKEN);
     const env = pluginMcpEnvironment(
       { source: nativeActionServer ? 'plugin' : undefined, env: registered },
       callbackEnv ?? {},

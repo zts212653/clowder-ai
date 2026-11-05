@@ -82,12 +82,18 @@ export function parseMacPowerLog(output: string): DurableGateConfirmedSleepInter
     }
     if (at < sleepingAt) continue;
     const wakeKind = kind === 'Wake' ? 'full' : 'dark';
-    intervals.push({
-      evidenceId: `pmset:${sleepingAt}:${at}:${wakeKind}`,
-      startedAt: sleepingAt,
-      endedAt: at,
-      wakeKind,
-    });
+    // pmset only records whole seconds and can emit Sleep → DarkWake in the
+    // same second. That is a transition marker, not a confirmed sleep span.
+    // Full wakes may remain zero-width because they also prove a wake event
+    // when the matching Sleep line is outside the retained log window.
+    if (at > sleepingAt || wakeKind === 'full') {
+      intervals.push({
+        evidenceId: `pmset:${sleepingAt}:${at}:${wakeKind}`,
+        startedAt: sleepingAt,
+        endedAt: at,
+        wakeKind,
+      });
+    }
     sleepingAt = null;
     awaitingFullWake = wakeKind === 'dark';
   }

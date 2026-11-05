@@ -16,8 +16,6 @@ code_anchors:
   - packages/api/src/domains/collaborative-content/asset-canon/service.ts
   - packages/api/src/domains/collaborative-content/asset-canon/store.ts
   - packages/api/src/domains/collaborative-content/asset-canon/service-updates.ts
-  - packages/api/src/domains/cats/services/cloud-bridge/dot/DotImageService.ts
-  - packages/api/src/routes/chatgpt-dot-image-routes.ts
   - packages/api/src/domains/collaborative-content/runtime-composition.ts
   - packages/api/src/domains/collaborative-content/collective-artifact/markdown-owner.ts
   - packages/api/src/domains/collaborative-content/collective-artifact/markdown-reviews.ts
