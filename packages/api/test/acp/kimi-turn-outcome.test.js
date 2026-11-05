@@ -53,12 +53,12 @@ async function withLedger({ pre = [] } = {}, run) {
 test('the ledger path follows the native workspace hash the CLI writes', () => {
   const path = kimiSessionTurnLedgerPath({
     shareDir: '/native/home',
-    cwd: '/home/user/cat-cafe',
+    cwd: '/workspace/cat-cafe',
     sessionId: 'session_3494094f-df2c-48f2-a0fd-e0820d66bf35',
   });
   assert.equal(
     path,
-    '/native/home/sessions/wd_cat-cafe_230809973b9c/session_3494094f-df2c-48f2-a0fd-e0820d66bf35/agents/main/wire.jsonl',
+    '/native/home/sessions/wd_cat-cafe_29816e116854/session_3494094f-df2c-48f2-a0fd-e0820d66bf35/agents/main/wire.jsonl',
   );
 });
 
