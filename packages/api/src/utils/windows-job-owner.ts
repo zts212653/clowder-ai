@@ -86,6 +86,13 @@ function isNonNegativeSafeInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 }
 
+/**
+ * The exact form the native side records a process birth in: `DateTime.ToUniversalTime()
+ * .ToString('o')`, seven fractional digits and `Z`. Anything else is no identity at all, so a
+ * corrupted birth can never read as a different, gone process.
+ */
+const NATIVE_BIRTH = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{7}Z$/;
+
 export function parseWindowsJobOwnerRecord(value: unknown): WindowsJobOwnerRecord | null {
   const record = asRecord(value);
   if (!record || record.v !== 1 || typeof record.jobName !== 'string') return null;
@@ -96,7 +103,7 @@ export function parseWindowsJobOwnerRecord(value: unknown): WindowsJobOwnerRecor
     controller &&
     isPositiveSafeInteger(controller.pid) &&
     typeof controller.createdAt === 'string' &&
-    controller.createdAt.length > 0
+    NATIVE_BIRTH.test(controller.createdAt)
       ? { pid: controller.pid, createdAt: controller.createdAt }
       : null;
   // The prefix fixes the kind: a provider-host job without a usable controller is unreadable, never

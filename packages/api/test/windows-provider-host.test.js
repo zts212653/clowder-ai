@@ -381,3 +381,22 @@ for (const damage of ['missing', 'unreadable']) {
     },
   );
 }
+
+// A corrupted birth is no identity: it must not read as a different, gone process and release an
+// execution whose controlling API still lives.
+test('a corrupted controller birth keeps the execution protected', { skip: !isWindows, timeout: 90_000 }, async (t) => {
+  const { dataDir } = fixture(t);
+  const scope = await createWindowsProviderHostScope({ execution: EXECUTION, dataDir });
+  const host = await scope.take();
+  t.after(() => killOwned(host.job.apiPid));
+  assert.equal(await scope.close(), true);
+  const owner = JSON.parse(readFileSync(host.job.path, 'utf8'));
+  writeFileSync(
+    host.job.path,
+    JSON.stringify({ ...owner, controller: { ...owner.controller, createdAt: 'not-a-process-birth' } }),
+  );
+  const store = startedChild();
+  const pass = await recordVerifiedWindowsJobTeardowns({ store, dataDir });
+  assert.deepEqual(pass.released, []);
+  assert.equal((await store.get(EXECUTION.invocationId)).providerTeardownAt, undefined);
+});
