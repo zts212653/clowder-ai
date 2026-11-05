@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { fetchInChildProcess, startLocalHttpServer } from './helpers/signal-fetcher-child-fixture.js';
 
-const { WebpageFetcher } = await import('../dist/domains/signals/fetchers/webpage-fetcher.js');
+const webpageFetcherModuleUrl = new URL('../dist/domains/signals/fetchers/webpage-fetcher.js', import.meta.url).href;
+const { WebpageFetcher } = await import(webpageFetcherModuleUrl);
 
 function createSource(overrides = {}) {
   return {
@@ -99,5 +101,54 @@ describe('WebpageFetcher', () => {
     assert.equal(result.articles.length, 0);
     assert.equal(result.errors.length, 1);
     assert.equal(result.errors[0].code, 'UNSUPPORTED_SOURCE');
+  });
+
+  it('releases the connection when the listing page answers an error status with a body that never ends', async (t) => {
+    const server = await startLocalHttpServer((_req, res) => {
+      res.writeHead(503, { 'Content-Type': 'text/html' });
+      res.write('<html><body>busy');
+    });
+    t.after(() => server.close());
+
+    const run = await fetchInChildProcess({
+      moduleUrl: webpageFetcherModuleUrl,
+      exportName: 'WebpageFetcher',
+      source: createSource({ id: 'busy-page', url: `${server.origin}/news` }),
+    });
+
+    assert.equal(run.exitedOnItsOwn, true, `unread error body kept the process alive; stderr=${run.stderr}`);
+    assert.equal(run.code, 0, run.stderr);
+    assert.equal(run.result.errors[0].code, 'WEBPAGE_FETCH_FAILED');
+    assert.match(run.result.errors[0].message, /HTTP 503/);
+  });
+
+  it('releases article-page connections that answer an error status with a body that never ends', async (t) => {
+    // Secondary article fetches share the listing request's signal; a non-2xx article
+    // page used to be dropped without reading or cancelling its body.
+    const server = await startLocalHttpServer((req, res) => {
+      if (req.url === '/news') {
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        res.end('<html><body><a href="/posts/hello"><h3>Hello post</h3></a></body></html>');
+        return;
+      }
+      res.writeHead(404, { 'Content-Type': 'text/html' });
+      res.write('<html><body>not here');
+    });
+    t.after(() => server.close());
+
+    const run = await fetchInChildProcess({
+      moduleUrl: webpageFetcherModuleUrl,
+      exportName: 'WebpageFetcher',
+      source: createSource({
+        id: 'article-pages',
+        url: `${server.origin}/news`,
+        fetch: { method: 'webpage', selector: 'a[href*="/posts/"]', timeoutMs: 5000 },
+      }),
+    });
+
+    assert.equal(run.exitedOnItsOwn, true, `unread article body kept the process alive; stderr=${run.stderr}`);
+    assert.equal(run.code, 0, run.stderr);
+    assert.equal(run.result.articles, 1);
+    assert.deepEqual(run.result.errors, []);
   });
 });
