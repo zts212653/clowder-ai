@@ -119,6 +119,13 @@ export function restartTurns({ client, registry, turnExecutionStore, scope }) {
       },
     );
     await draftStore.delete(userId, threadId, admitted.invocationId);
+    // As QueueProcessor does since #1849: the settled R is recorded before the ledger entry goes;
+    // without that record the store keeps the turn pending.
+    await turnExecutionStore.markResponseSettled(admitted.invocationId, {
+      kind: 'message',
+      messageId: admitted.responseMessageId,
+      settledAt: Date.now(),
+    });
     await turnExecutionStore.clearResponsePending(admitted.invocationId);
   };
 
