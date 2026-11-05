@@ -8,6 +8,23 @@ const { prepareAcpProcessEnv, tryPrepareAcpProcessEnv } = await import(
 );
 
 describe('prepareAcpProcessEnv', () => {
+  for (const authType of ['oauth', 'api_key']) {
+    it(`passes literal account envVars through for ${authType} authentication`, () => {
+      const env = prepareAcpProcessEnv({
+        clientId: 'acp',
+        memberEnvironment: { MEMBER_ONLY: 'member-value' },
+        account: {
+          id: 'static-env',
+          authType,
+          ...(authType === 'api_key' ? { apiKey: 'synthetic-key' } : {}),
+          envVars: { STATIC_FLAG: 'account-value' },
+        },
+      });
+      assert.equal(env.STATIC_FLAG, 'account-value', 'static values must reach the child for either auth type');
+      assert.equal(env.MEMBER_ONLY, 'member-value');
+    });
+  }
+
   it('member overrides cannot redirect selected credentials or defeat an omitted account endpoint', () => {
     const env = prepareAcpProcessEnv({
       clientId: 'openai',

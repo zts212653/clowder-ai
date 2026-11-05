@@ -2,7 +2,7 @@ import { DEVELOPMENT_RETURN_TEMPLATE_ID } from '@cat-cafe/shared';
 import { z } from 'zod';
 import type { DynamicTaskDef, DynamicTaskStore } from '../../../infrastructure/scheduler/DynamicTaskStore.js';
 import { isF255ConfigOnlyTemplate } from '../../../infrastructure/scheduler/f255-template-boundary.js';
-import { fingerprintDynamicTaskDef } from '../../../infrastructure/scheduler/schedule-mutation-storage.js';
+import { fingerprintDynamicTaskDef } from '../../../infrastructure/scheduler/mutations/schedule-mutation-storage.js';
 import type { TriggerSpec } from '../../../infrastructure/scheduler/types.js';
 import {
   commitOwnerDynamicTask,

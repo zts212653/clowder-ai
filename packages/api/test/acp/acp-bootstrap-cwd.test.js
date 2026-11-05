@@ -314,25 +314,6 @@ describe('acp bootstrap cwd', () => {
     );
   });
 
-  it('REGRESSION: ACP static envVars merge must be outside authType guard (R5 P2)', () => {
-    // After extraction to acp-spawn-env.ts, the guard reads the extracted module.
-    const source = readFileSync(
-      new URL('../../src/domains/cats/services/agents/providers/acp/acp-spawn-env.ts', import.meta.url),
-      'utf-8',
-    );
-    // The static envVars pass-through must NOT be gated on authType === 'api_key'.
-    // OAuth and static-only accounts also have envVars that must reach the subprocess.
-    // Pattern: the `account?.envVars` loop must appear AFTER the api_key block closes.
-    const apiKeyBlockEnd = source.indexOf("account?.authType === 'api_key'");
-    const staticEnvLoop = source.indexOf('account?.envVars');
-    assert.ok(apiKeyBlockEnd > 0, 'acp-spawn-env.ts must contain api_key auth block');
-    assert.ok(staticEnvLoop > 0, 'acp-spawn-env.ts must contain static envVars pass-through');
-    assert.ok(
-      staticEnvLoop > apiKeyBlockEnd,
-      'REGRESSION: static envVars merge must be outside authType === api_key guard (F171 CLI-path parity)',
-    );
-  });
-
   it('REGRESSION: --pure is NOT auto-injected; generic ACP is not command-sniffed', () => {
     const source = readFileSync(new URL('../../src/index.ts', import.meta.url), 'utf-8');
     // F161 Phase C: --pure is no longer auto-injected for OpenCode members.

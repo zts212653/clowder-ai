@@ -9,7 +9,7 @@ import type {
 } from '@cat-cafe/shared';
 import { producerAttentionReevaluationLinkV1Schema } from '@cat-cafe/shared';
 import type Database from 'better-sqlite3';
-import type { DynamicTaskDef } from './DynamicTaskStore.js';
+import type { DynamicTaskDef } from '../DynamicTaskStore.js';
 
 /** A committed effect may be superseded; recovery then only settles its approval. */
 export type ScheduleMutationEffectResult =

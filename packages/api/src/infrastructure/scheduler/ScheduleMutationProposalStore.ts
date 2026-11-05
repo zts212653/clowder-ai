@@ -12,7 +12,7 @@ import type Database from 'better-sqlite3';
 import type { ApprovalPublicationStore } from '../../domains/approval-hub/ports/ApprovalPublicationStore.js';
 import type { SettledHistoryPageOptions, SettledHistorySourcePage } from '../../utils/settled-history-page.js';
 import { assertSettledHistoryPageOptions } from '../../utils/settled-history-page.js';
-import { ScheduleMutationProposalStoreError } from './schedule-mutation-errors.js';
+import { ScheduleMutationProposalStoreError } from './mutations/schedule-mutation-errors.js';
 import {
   type AuditRow,
   deleteDynamicTaskWithAudit,
@@ -27,17 +27,17 @@ import {
   toAudit,
   toProposal,
   updateDynamicTaskParamsAndEnabledWithAudit,
-} from './schedule-mutation-storage.js';
+} from './mutations/schedule-mutation-storage.js';
 import {
   applyScheduleParameterUpdate,
   updateScheduleParametersWithAudit,
-} from './schedule-parameter-update-effects.js';
+} from './mutations/schedule-parameter-update-effects.js';
 
 export {
   ScheduleMutationProposalStoreError,
   type ScheduleMutationProposalStoreErrorCode,
-} from './schedule-mutation-errors.js';
-export { fingerprintDynamicTaskDef } from './schedule-mutation-storage.js';
+} from './mutations/schedule-mutation-errors.js';
+export { fingerprintDynamicTaskDef } from './mutations/schedule-mutation-storage.js';
 
 type CreateScheduleMutation = Extract<ScheduleMutationProposal['mutation'], { kind: 'create' }>;
 
