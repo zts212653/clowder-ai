@@ -56,7 +56,7 @@ export interface WindowsProviderHost {
   readonly dataDir: string;
   /** Starts the real provider. The returned process is the host: its stdio and exit are the provider's. */
   launch(plan: WindowsProviderLaunch): ChildProcess;
-  /** Ends the host if it still runs and reports its job's verdict; an absent job's record is removed. */
+  /** Ends the host if it still runs and reports its job's verdict. Its owner record is kept. */
   close(): Promise<WindowsJobStopEvidence>;
 }
 
@@ -120,7 +120,7 @@ export async function prepareWindowsProviderHost(options: { dataDir?: string } =
         await delay(CLOSE_QUERY_INTERVAL_MS);
         evidence = await queryWindowsJobStopEvidence(ready);
       }
-      if (evidence.verdict === 'absent') clearWindowsJobOwner(ready.path);
+      // The owner record stays: until the caller records the stop, it is how a restart finds this job.
       return evidence;
     },
   };
@@ -137,8 +137,11 @@ export interface WindowsProviderHostScope {
   take(): Promise<WindowsProviderHost>;
   /** Ends every host and reports whether all of their jobs are verifiably closed. */
   close(): Promise<boolean>;
-  /** Removes this execution's links; only once its stop is recorded, since they are its only proof. */
-  clearLinks(): void;
+  /**
+   * Removes this execution's links and its hosts' owner records together. Only once its stop is
+   * recorded: until then they are its only native proof, and a restart needs both to find it.
+   */
+  clearEvidence(): void;
 }
 
 /** Prepares and links the first host. Throws before anything is linked when no host can be owned. */
@@ -178,8 +181,9 @@ export async function createWindowsProviderHostScope(options: {
       const verdicts = await Promise.all(hosts.map((host) => host.close()));
       return verdicts.every((evidence) => evidence.verdict === 'absent');
     },
-    clearLinks() {
+    clearEvidence() {
       for (const path of linkPaths) clearWindowsJobExecutionLink(path);
+      for (const host of hosts) clearWindowsJobOwner(host.job.path);
     },
   };
 }

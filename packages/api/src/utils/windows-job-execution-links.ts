@@ -122,6 +122,24 @@ export function readWindowsJobExecutionLinks(
   };
 }
 
+/**
+ * The job of every link that names this invocation, read from file names alone so that a link whose
+ * content cannot be read still counts. A stop needs every one of these jobs closed. Null when the
+ * links cannot be listed, since then no set of jobs is known to be complete.
+ */
+export function readWindowsJobNamesLinkedTo(invocationId: string, dataDir?: string): string[] | null {
+  let names: string[];
+  try {
+    names = readdirSync(resolveWindowsJobLinksDirectory(dataDir));
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT' ? [] : null;
+  }
+  const suffix = `.${encodeURIComponent(invocationId)}.json`;
+  // A foreign name that merely ends like this one decodes to a job no closed job matches, so it keeps
+  // the protection instead of releasing anything.
+  return names.filter((name) => name.endsWith(suffix)).map((name) => decodeURIComponent(name.slice(0, -suffix.length)));
+}
+
 export function clearWindowsJobExecutionLink(path: string): void {
   rmSync(path, { force: true });
 }

@@ -110,11 +110,10 @@ import { pathsEqual } from '../../../../../utils/project-path.js';
 import { tcpProbe } from '../../../../../utils/tcp-probe.js';
 import { estimateTokens } from '../../../../../utils/token-counter.js';
 import {
-  clearWindowsJobExecutionLink,
-  recordWindowsJobExecutionLink,
-  type WindowsJobExecutionLinkEntry,
-} from '../../../../../utils/windows-job-execution-links.js';
-import { currentWindowsApiJob } from '../../../../../utils/windows-job-owner.js';
+  bindWindowsProviderHostScope,
+  createWindowsProviderHostScope,
+  type WindowsProviderHostScope,
+} from '../../../../../utils/windows-provider-host.js';
 import { resolveEntrustedWorkTaskRefFromSource } from '../../../../growing/EntrustedWorkRuntimeInteractionBinding.js';
 import {
   type MemoryCueInvocationPromptResolver,
@@ -2329,7 +2328,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
   const unclosedServiceIterators = new Set<AsyncIterator<AgentMessage>>();
   let providerTeardownUnconfirmed = false;
   // #1838: this turn's link to the API's kernel job; removed once its terminal and teardown are durable.
-  let windowsJobLink: WindowsJobExecutionLinkEntry | undefined;
+  let windowsHostScope: WindowsProviderHostScope | undefined;
   const unconfirmedTeardownMessage = () => ({
     type: 'status' as const,
     catId,
@@ -5982,14 +5981,13 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
         );
         if (!bound) throw new Error('execution_boundary_provider_entry_conflict');
       }
-      // #1838: link this execution to the API's kernel job BEFORE the provider is marked started, so
-      // an API killed from here on still leaves a stop proof the next instance can join. A failed
-      // write fails this turn before any provider exists, while its record can still settle.
-      const windowsApiJob = currentWindowsApiJob();
-      if (windowsApiJob && deps.turnExecutionStore?.markProviderStarted)
-        windowsJobLink = recordWindowsJobExecutionLink({
-          dataDir: windowsApiJob.dataDir,
-          jobName: windowsApiJob.record.jobName,
+      // #1838: a covered Windows provider runs in hosts whose own kernel jobs own its tree; the API
+      // stays outside every job. The first host is owned and linked to this exact execution BEFORE
+      // the provider is marked started, so an API killed from here on leaves a stop proof the next
+      // instance can join. A host that cannot be owned fails this turn before any provider exists,
+      // while its record can still settle; nothing is launched until the seam takes the host.
+      if (process.platform === 'win32' && service.windowsProviderHosts && deps.turnExecutionStore?.markProviderStarted)
+        windowsHostScope = await createWindowsProviderHostScope({
           execution: { executionId: executionParentInvocationId, invocationId, threadId, catId, userId },
         });
       if (
@@ -6009,15 +6007,19 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
         throw new Error('execution_boundary_changed_before_provider_entry:implementation');
       const exposureProject = pluginMcpExposureProject(threadProjectPath, workingDirectory);
       if (injectSystemPrompt && !nativeAuthContinuation) _staticIdentityDigest.delete(identityKey);
-      const serviceIter = bindInvocationPluginMcpView(
+      const serviceIter = bindWindowsProviderHostScope(
         () =>
-          (usesProviderContinuityPreflight && service.invokeWithContinuityPreflight
-            ? service.invokeWithContinuityPreflight(continuityPreflight, options)
-            : service.invoke(effectivePrompt, options))[Symbol.asyncIterator](),
-        localPluginMcpView,
-        params.ownerAuthProvenance === 'strict' && exposureProject
-          ? { kind: 'member', projectRoot: exposureProject, memberCatId: catId }
-          : undefined,
+          bindInvocationPluginMcpView(
+            () =>
+              (usesProviderContinuityPreflight && service.invokeWithContinuityPreflight
+                ? service.invokeWithContinuityPreflight(continuityPreflight, options)
+                : service.invoke(effectivePrompt, options))[Symbol.asyncIterator](),
+            localPluginMcpView,
+            params.ownerAuthProvenance === 'strict' && exposureProject
+              ? { kind: 'member', projectRoot: exposureProject, memberCatId: catId }
+              : undefined,
+          ),
+        windowsHostScope,
       );
       activeServiceIterator = serviceIter;
       unclosedServiceIterators.add(serviceIter);
@@ -6943,7 +6945,9 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
         };
       }
       try {
-        if (unclosedServiceIterators.size === 0) {
+        // #1838: a host exit is not a stopped tree. A provider in host jobs is torn down only once
+        // every one of them is verifiably closed; otherwise the turn keeps its stop protection.
+        if (unclosedServiceIterators.size === 0 && (!windowsHostScope || (await windowsHostScope.close()))) {
           terminal = { ...terminal, providerTeardownAt: terminal.endedAt };
           await deps.turnExecutionStore.recordProviderTeardown?.(invocationId, terminal.endedAt);
         }
@@ -6980,8 +6984,8 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
           }
         }
         // #1838: a durable terminal with confirmed teardown needs no stop proof; any other state keeps it.
-        if (windowsJobLink && result.record?.status !== 'running' && result.record?.providerTeardownAt !== undefined)
-          clearWindowsJobExecutionLink(windowsJobLink.path);
+        if (windowsHostScope && result.record?.status !== 'running' && result.record?.providerTeardownAt !== undefined)
+          windowsHostScope.clearEvidence();
       } catch (err) {
         // A running record is deliberately left for startup reconciliation;
         // never manufacture lifecycle truth from logs or the auth registry.

@@ -96,7 +96,7 @@ test(
 
     const evidence = await host.close();
     assert.deepEqual([evidence.verdict, evidence.reason], ['absent', 'job_closed_owner_gone']);
-    assert.equal(existsSync(host.job.path), false, 'an absent job leaves no owner record behind');
+    assert.equal(existsSync(host.job.path), true, 'until a stop is recorded, a restart still finds this job');
   },
 );
 
@@ -219,10 +219,13 @@ test(
       );
     }
     assert.equal(await scope.close(), true, 'every job verifiably closed');
-    for (const host of [first, second]) assert.equal(existsSync(host.job.path), false);
-    scope.clearLinks();
     for (const host of [first, second])
+      assert.equal(existsSync(host.job.path), true, 'evidence stays until the stop is recorded');
+    scope.clearEvidence();
+    for (const host of [first, second]) {
       assert.deepEqual(readWindowsJobExecutionLinks(host.job.jobName, dataDir).links, []);
+      assert.equal(existsSync(host.job.path), false, 'link and owner record leave together');
+    }
   },
 );
 

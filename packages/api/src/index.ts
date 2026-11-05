@@ -602,7 +602,6 @@ import { buildSkillMountTargets } from './utils/skill-mount.js';
 import { resolveCatCafeSkillsSource } from './utils/skill-source.js';
 import { buildThreadDeepLink } from './utils/thread-deep-link.js';
 import { getDefaultConnectorMediaDir, getDefaultUploadDir } from './utils/upload-paths.js';
-import { adoptWindowsApiJob } from './utils/windows-job-owner.js';
 
 const PORT = parseInt(process.env.API_SERVER_PORT ?? String(deploymentDefaults.apiPort), 10);
 const HOST = process.env.API_SERVER_HOST ?? '127.0.0.1';
@@ -643,9 +642,8 @@ function hasRuntimeSessionDrain(service: AgentService): service is AgentService 
 
 async function main(): Promise<void> {
   startupMilestone('module-graph-loaded');
-  // #1838: before anything below can spawn a child, put this API into its own kernel job so every
-  // descendant is reaped if it dies, and a restart can prove that. Not Windows: no-op.
-  const windowsApiJob = await adoptWindowsApiJob();
+  // #1838: the API itself stays outside every kernel job, so the background services and managed
+  // jobs it starts survive its restart. Each covered Windows provider gets its own host job instead.
   const acpHostPolicy = resolveAcpHostPolicy();
   let managedCommandWakeRecovery: ManagedCommandWakeRecoverySweep | undefined;
   const { logger: customLogger, isDebugMode, LOG_DIR_PATH } = await import('./infrastructure/logger.js');
@@ -662,13 +660,6 @@ async function main(): Promise<void> {
 
   const app = Fastify({ logger: customLogger as unknown as import('fastify').FastifyBaseLogger });
   reportAcpHostPolicy(app.log, acpHostPolicy);
-  if (windowsApiJob.adopted)
-    app.log.info({ jobName: windowsApiJob.job.record.jobName }, '[api] Windows API job adopted');
-  else if (windowsApiJob.reason !== 'not_windows')
-    app.log.warn(
-      { reason: windowsApiJob.reason },
-      '[api] Windows API job unavailable; executions interrupted by a crash will need a manual stop check',
-    );
   const messageReadDiagnostics = registerMessageReadDiagnostics(app);
   const privateUserId = (process.env.CAT_CAFE_USER_ID ?? 'default-user').trim();
   let approvalDecisionReceipts: ApprovalDecisionReceiptService;
@@ -7707,7 +7698,6 @@ async function main(): Promise<void> {
           listLiveExecutionOwners: () => cliExecutionOwnerService.listLive(),
           settleEndedTurnResponse: (turn) => settleTurnResponse(turn, responseOutcomeForEndedTurn(turn)),
           windowsJobDataDir: process.env.CAT_CAFE_DATA_DIR,
-          ...(windowsApiJob.adopted ? { currentWindowsJobName: windowsApiJob.job.record.jobName } : {}),
           orphans: {
             invocationRecordStore,
             taskProgressStore,

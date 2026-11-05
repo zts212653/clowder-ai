@@ -25,8 +25,6 @@ export async function recoverPriorProcessExecutions(deps: {
   settleEndedTurnResponse: (turn: TurnExecutionRecord) => Promise<unknown>;
   /** Where the Windows job owner records and execution links live. */
   windowsJobDataDir?: string;
-  /** This process's own job, which is never resolved as a prior one. */
-  currentWindowsJobName?: string;
   orphans: Omit<StartupReconcilerDeps, 'turnExecutionStore' | 'processStartAt'>;
   markStartupRecoveryComplete: () => void;
 }) {
@@ -37,7 +35,6 @@ export async function recoverPriorProcessExecutions(deps: {
   const windowsJobTeardowns = await recordVerifiedWindowsJobTeardowns({
     store,
     dataDir: deps.windowsJobDataDir,
-    ...(deps.currentWindowsJobName ? { currentJobName: deps.currentWindowsJobName } : {}),
   });
   const childReconciler = new TurnExecutionStartupReconciler({
     store,

@@ -19,6 +19,7 @@ import type { CliExecutionOwnerRef } from '../../../../../utils/cli-process-owne
 import {
   clearWindowsJobExecutionLink,
   readWindowsJobExecutionLinks,
+  readWindowsJobNamesLinkedTo,
   type WindowsJobExecutionLinkEntry,
 } from '../../../../../utils/windows-job-execution-links.js';
 import {
@@ -115,9 +116,15 @@ export async function recordVerifiedWindowsJobTeardowns(options: {
       ),
     ],
   };
-  const candidates = resolution.verifiedStopped.flatMap((job) =>
-    job.links.map(({ execution }) => ({ execution, verifiedAt: job.verifiedAt })),
-  );
+  const closedJobs = new Set(resolution.verifiedStopped.map(({ job }) => job.jobName));
+  // One execution can be linked to several closed jobs; it is decided once.
+  const candidates = [
+    ...new Map(
+      resolution.verifiedStopped.flatMap((job) =>
+        job.links.map(({ execution }) => [execution.invocationId, { execution, verifiedAt: job.verifiedAt }] as const),
+      ),
+    ).values(),
+  ];
   for (const { execution, verifiedAt } of candidates) {
     // One unreachable record must not stop the others or fail the whole startup recovery.
     try {
@@ -129,6 +136,13 @@ export async function recordVerifiedWindowsJobTeardowns(options: {
       }
       // Started-but-unconfirmed is the only state that needs the proof; the rest settle normally.
       if (!hasUnconfirmedProviderTeardown(record)) continue;
+      // One closed job says nothing about a writer in another (a retry can rebuild the provider in a
+      // new host): every job this execution ran in must be among the verifiably closed ones.
+      const linkedJobs = readWindowsJobNamesLinkedTo(execution.invocationId, options.dataDir);
+      if (!linkedJobs || linkedJobs.some((jobName) => !closedJobs.has(jobName))) {
+        pass.preserved.push({ invocationId: execution.invocationId, reason: 'linked_job_not_closed' });
+        continue;
+      }
       await options.store.recordProviderTeardown(execution.invocationId, verifiedAt);
       pass.released.push(execution.invocationId);
     } catch (error) {
@@ -153,24 +167,32 @@ export async function stopWithWindowsJobProof(options: {
 }): Promise<{ stopped: true; record: TurnExecutionRecord } | { stopped: false; reason: string }> {
   const { record } = options;
   const resolution = await resolveWindowsJobStopEvidence(options);
-  for (const job of resolution.verifiedStopped) {
-    const link = job.links.find((entry) => entry.execution.invocationId === record.invocationId);
-    if (!link) continue;
-    if (!matchesLinkedExecution(record, link.execution)) return { stopped: false, reason: 'link_identity_mismatch' };
-    const result = await options.store.transitionTerminal(record.invocationId, {
-      status: 'canceled',
-      endedAt: job.verifiedAt,
-      terminalReason: 'user_cancel',
-      providerTeardownAt: job.verifiedAt,
-    });
-    if (!result.record || result.record.status === 'running')
-      return { stopped: false, reason: 'terminal_not_committed' };
-    // The caller settles the ended turn's response next; the terminal record carries what it needs.
-    clearWindowsJobExecutionLink(link.path);
-    return { stopped: true, record: result.record };
-  }
+  // Every job this execution ran in must be verifiably closed: one closed job proves nothing about a
+  // writer in another. A job still open names the reason the user sees.
   const owner = resolution.unresolved.find((job) => job.invocationIds.includes(record.invocationId));
-  return { stopped: false, reason: owner ? `job_${owner.verdict}:${owner.reason}` : 'no_windows_job_link' };
+  if (owner) return { stopped: false, reason: `job_${owner.verdict}:${owner.reason}` };
+  const linkedJobs = readWindowsJobNamesLinkedTo(record.invocationId, options.dataDir);
+  if (!linkedJobs) return { stopped: false, reason: 'links_unreadable' };
+  if (linkedJobs.length === 0) return { stopped: false, reason: 'no_windows_job_link' };
+  const closed = resolution.verifiedStopped.filter(({ job }) => linkedJobs.includes(job.jobName));
+  if (closed.length < linkedJobs.length) return { stopped: false, reason: 'linked_job_not_closed' };
+  const links = closed.flatMap((job) =>
+    job.links.filter((entry) => entry.execution.invocationId === record.invocationId),
+  );
+  if (links.length < linkedJobs.length) return { stopped: false, reason: 'link_unreadable' };
+  if (links.some((link) => !matchesLinkedExecution(record, link.execution)))
+    return { stopped: false, reason: 'link_identity_mismatch' };
+  const verifiedAt = Math.max(...closed.map((job) => job.verifiedAt));
+  const result = await options.store.transitionTerminal(record.invocationId, {
+    status: 'canceled',
+    endedAt: verifiedAt,
+    terminalReason: 'user_cancel',
+    providerTeardownAt: verifiedAt,
+  });
+  if (!result.record || result.record.status === 'running') return { stopped: false, reason: 'terminal_not_committed' };
+  // The caller settles the ended turn's response next; the terminal record carries what it needs.
+  for (const link of links) clearWindowsJobExecutionLink(link.path);
+  return { stopped: true, record: result.record };
 }
 
 export async function clearSettledWindowsJobEvidence(options: {
