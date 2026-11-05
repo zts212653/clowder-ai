@@ -4,7 +4,7 @@ import { expect, it, vi } from 'vitest';
 import type { CatData } from '@/hooks/useCatData';
 import { useMemberModelCatalogs, useMemberModelLabel } from '@/lib/member-model-display';
 import { apiFetch } from '@/utils/api-client';
-import { initialState } from '../hub-cat-editor.model';
+import { type HubCatEditorFormState, initialState } from '../hub-cat-editor.model';
 import { MemberRuntimeFields } from '../settings/members/MemberRuntimeFields';
 
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
@@ -40,12 +40,12 @@ it('keeps a subscribed editor usable while a changed DSH model catalog is pendin
     return new Response(JSON.stringify({ status: 'live', defaultModel: first, models }));
   });
   function Editor() {
-    const [form, setForm] = useState({
+    const [form, setForm] = useState<HubCatEditorFormState>({
       ...initialState(),
       catId: cat.id,
-      clientId: 'acp' as const,
-      configurationSource: 'native_tool' as const,
-      carrier: 'acp' as const,
+      clientId: 'acp',
+      configurationSource: 'native_tool',
+      carrier: 'acp',
       defaultModel: first,
       acpCommand: 'dsh',
       acpStartupArgs: '--profile acp',
