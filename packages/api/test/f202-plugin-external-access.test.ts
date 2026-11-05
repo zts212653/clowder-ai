@@ -28,6 +28,22 @@ const instance = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
+test('production external forwarding targets the registered Host request route', async () => {
+  const [accessSource, indexSource, compositionSource, routeSource] = await Promise.all([
+    readFile(new URL('../src/domains/plugin/external-access/plugin-external-access.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../src/index.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../src/domains/plugin/runtime-composition.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../src/routes/plugin/plugin-external-request-routes.ts', import.meta.url), 'utf8'),
+  ]);
+  const canonicalPath = accessSource.match(/PLUGIN_EXTERNAL_REQUEST_PATH = '([^']+)'/)?.[1];
+
+  assert.equal(canonicalPath, '/api/plugin-runtime/handle');
+  assert.match(indexSource, /const pluginExternalRequestPath = PLUGIN_EXTERNAL_REQUEST_PATH;/);
+  assert.match(compositionSource, /externalRequestEndpoint \?\? PLUGIN_EXTERNAL_REQUEST_PATH/);
+  assert.match(routeSource, /app\.post\(PLUGIN_EXTERNAL_REQUEST_PATH,/);
+  assert.doesNotMatch(indexSource, /['"]\/plugin\/mcp['"]/);
+});
+
 test('one installation keeps one token across Host store recreation; rotate and uninstall revoke it', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'plugin-external-access-'));
   const path = join(root, 'access.json');

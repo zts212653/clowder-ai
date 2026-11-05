@@ -5088,8 +5088,9 @@ async function main(): Promise<void> {
   }
 
   const { createPluginManagerRuntimeComposition } = await import('./domains/plugin/runtime-composition.js');
+  const { PLUGIN_EXTERNAL_REQUEST_PATH } = await import('./domains/plugin/external-access/plugin-external-access.js');
   const pluginProjectRoot = resolveActiveProjectRoot();
-  const pluginExternalRequestPath = '/plugin/mcp';
+  const pluginExternalRequestPath = PLUGIN_EXTERNAL_REQUEST_PATH;
   const pluginExternalRequestEndpoint = process.env.CAT_CAFE_REMOTE_PUBLIC_BASE_URL?.trim()
     ? new URL(pluginExternalRequestPath, process.env.CAT_CAFE_REMOTE_PUBLIC_BASE_URL).href
     : pluginExternalRequestPath;
