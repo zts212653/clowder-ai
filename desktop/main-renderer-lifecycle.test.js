@@ -5,11 +5,13 @@ const path = require('node:path');
 const { test } = require('node:test');
 const vm = require('node:vm');
 const appLifecycle = require('./app-lifecycle');
+const { createDesktopTrayResult } = require('./desktop-update-menu');
 const { showVisibleRenderer } = require('./visible-renderer');
+const { createWindowRecoveryController } = require('./window-recovery');
 
 function mainWindowFixture({ assertServices = () => {}, useVisibleRenderer = false } = {}) {
   const source = fs.readFileSync(path.join(__dirname, 'main.js'), 'utf8');
-  const start = source.indexOf('async function createMainWindow()');
+  const start = source.indexOf('function getPresentableMainWindow()');
   const end = source.indexOf('const shutdown =', start);
   assert.ok(start >= 0 && end > start, 'main window factory must exist');
   const webContents = new EventEmitter();
@@ -30,6 +32,16 @@ function mainWindowFixture({ assertServices = () => {}, useVisibleRenderer = fal
       show() {
         events.push({ name: 'show' });
       }
+      focus() {}
+      isMinimized() {
+        return false;
+      }
+      isDestroyed() {
+        return false;
+      }
+      destroy() {
+        this.emit('closed');
+      }
     },
     path,
     __dirname,
@@ -41,13 +53,15 @@ function mainWindowFixture({ assertServices = () => {}, useVisibleRenderer = fal
     dbg() {},
     appLifecycle,
     lifecycle: (name, details) => events.push({ name, details }),
-    updatePrompt: { markRendererUnavailable: () => invalidations++ },
+    updatePrompt: { markRendererUnavailable: () => invalidations++, presentPending: () => false },
     startupTimeline: { runPhase: (_name, action) => action(), mark() {} },
     showVisibleRenderer: useVisibleRenderer ? showVisibleRenderer : async () => {},
     createVersionedRendererUrl: (url) => url,
     app: { getVersion: () => 'fixture' },
     startupController: new AbortController(),
     services: { assertStartupProcessesRunning: assertServices },
+    mainWindow: null,
+    mainWindowPresentable: false,
     splashWindow: null,
   });
   return {
@@ -56,6 +70,7 @@ function mainWindowFixture({ assertServices = () => {}, useVisibleRenderer = fal
     start: () => vm.runInContext(`${source.slice(start, end)}\ncreateMainWindow();`, context),
     signalFirstFrame: () => window?.emit('ready-to-show'),
     invalidations: () => invalidations,
+    publishedWindow: () => vm.runInContext('getPresentableMainWindow()', context),
   };
 }
 
@@ -69,6 +84,51 @@ test('the actual main window invalidates update readiness when its renderer exit
   assert.deepEqual(events, [{ name: 'renderer-process-gone', details }]);
   webContents.emit('did-navigate');
   assert.equal(invalidations(), 2);
+});
+
+test('second launch and tray cannot show the pending renderer', async () => {
+  const { start, events, signalFirstFrame, publishedWindow } = mainWindowFixture({ useVisibleRenderer: true });
+  let phase = 'starting';
+  let splashShown = 0;
+  const recovery = createWindowRecoveryController({
+    getState: () => ({
+      phase,
+      mainWindow: publishedWindow(),
+      splashWindow: {
+        isDestroyed: () => false,
+        isMinimized: () => false,
+        show: () => splashShown++,
+        focus() {},
+      },
+    }),
+    dbg() {},
+  });
+  const { tray } = createDesktopTrayResult({
+    platform: 'win32',
+    Tray: class extends EventEmitter {
+      setToolTip() {}
+      setContextMenu() {}
+    },
+    Menu: { buildFromTemplate: (template) => template },
+    getMainWindow: publishedWindow,
+  });
+  const startup = start();
+  recovery.handleSecondInstance([], {});
+  tray.emit('double-click');
+  const beforeFirstFrame = events.map(({ name }) => name);
+  signalFirstFrame();
+  await startup;
+  assert.deepEqual(beforeFirstFrame, ['loadURL']);
+  assert.equal(splashShown, 1);
+  assert.ok(publishedWindow());
+
+  phase = 'ready';
+  recovery.handleSecondInstance([], {});
+  tray.emit('double-click');
+  assert.deepEqual(
+    events.map(({ name }) => name),
+    ['loadURL', 'show', 'show', 'show'],
+  );
 });
 
 for (const afterNavigation of [false, true]) {

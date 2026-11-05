@@ -13,6 +13,7 @@ function createDesktopUpdateRuntime({
   dialog,
   Notification,
   getMainWindow,
+  getPresentableMainWindow,
   getTray,
   dbg,
   trustedOrigin,
@@ -27,6 +28,7 @@ function createDesktopUpdateRuntime({
   const updatePrompt = new UpdatePromptController({
     ipcMain,
     getMainWindow,
+    getPresentableMainWindow,
     openExternal: (url) => shell.openExternal(url),
     dbg,
     trustedOrigin,

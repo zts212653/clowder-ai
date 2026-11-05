@@ -52,6 +52,7 @@ function harness(options = {}) {
   const controller = new UpdatePromptController({
     ipcMain,
     getMainWindow: () => window,
+    getPresentableMainWindow: () => window,
     openExternal: async (url) => opened.push(url),
     dbg: (line) => logs.push(line),
     trustedOrigin: 'http://localhost:3003',
@@ -104,6 +105,23 @@ function act(h, action, version = h.payload.version, event = h.event) {
 }
 
 describe('UpdatePromptController', () => {
+  test('keeps trusted IPC readiness without presenting a pending startup window', async (t) => {
+    let presentable = false;
+    const h = harness({ getPresentableMainWindow: () => (presentable ? h.window : null) });
+    t.after(() => h.controller.dispose());
+    const result = h.controller.show(h.payload);
+    assert.deepEqual(readyRenderer(h), h.payload);
+    assert.deepEqual(h.readyEpochs, ['ready']);
+    assert.equal(h.controller.presentPending(), false);
+    assert.deepEqual(h.presentation, []);
+
+    presentable = true;
+    assert.equal(h.controller.presentPending(), true);
+    assert.deepEqual(h.presentation, ['show', 'focus']);
+    act(h, 'later');
+    assert.equal(await result, 'later');
+  });
+
   test('returns a prompt that became pending before trusted renderer readiness', async () => {
     const h = harness();
     let resolved = false;

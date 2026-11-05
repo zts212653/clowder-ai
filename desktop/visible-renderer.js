@@ -46,4 +46,24 @@ function showVisibleRenderer({ window, url, onVisible, signal, timeoutMs = 60_00
     }
   });
 }
-module.exports = { showVisibleRenderer };
+module.exports = { createStartupSplash, showVisibleRenderer };
+const path = require('node:path');
+
+function createStartupSplash(BrowserWindow, apiOrigin) {
+  const window = new BrowserWindow({
+    width: 420,
+    height: 320,
+    frame: false,
+    resizable: false,
+    transparent: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      additionalArguments: [`--cat-cafe-api-origin=${apiOrigin}`],
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  window.loadFile(path.join(__dirname, 'splash.html'));
+  window.center();
+  return window;
+}
