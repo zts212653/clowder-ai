@@ -1,8 +1,5 @@
 import type { FastifyPluginAsync } from 'fastify';
-import {
-  PLUGIN_EXTERNAL_REQUEST_PATH,
-  PluginExternalAccessError,
-} from '../../domains/plugin/external-access/plugin-external-access.js';
+import { PluginExternalAccessError } from '../../domains/plugin/external-access/plugin-external-access.js';
 
 export interface PluginExternalRequestRoutesOptions {
   readonly external: {
@@ -34,7 +31,7 @@ export const pluginExternalRequestRoutes: FastifyPluginAsync<PluginExternalReque
   app,
   opts,
 ) => {
-  app.post(PLUGIN_EXTERNAL_REQUEST_PATH, { bodyLimit: 15 * 1024 * 1024 }, async (request, reply) => {
+  app.post('/api/plugin-runtime/handle', { bodyLimit: 15 * 1024 * 1024 }, async (request, reply) => {
     const token = requestToken(request.headers.authorization, request.query);
     if (token === undefined) return reply.status(401).send({ error: 'Plugin access token required' });
     const headers: Record<string, string> = {};

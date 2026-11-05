@@ -66,7 +66,6 @@ import type {
 import type { PluginStartFailureObserver } from './diagnostics/plugin-start-failure.js';
 import {
   FilePluginExternalAccessStore,
-  PLUGIN_EXTERNAL_REQUEST_PATH,
   PluginExternalAccessService,
 } from './external-access/plugin-external-access.js';
 import { ExternalPluginLifecycleService } from './external-plugin-lifecycle.js';
@@ -345,7 +344,7 @@ export function createDormantPluginRuntimeComposition(
     ...(options.now === undefined ? {} : { now: options.now }),
   });
   const externalAccess = new PluginExternalAccessService({
-    endpoint: options.externalRequestEndpoint ?? PLUGIN_EXTERNAL_REQUEST_PATH,
+    endpoint: options.externalRequestEndpoint ?? '/api/plugin-runtime/handle',
     upstreamLoopbackOrigin: options.externalRequestLoopbackOrigin,
     store: externalAccessStore,
     tokens: capabilityTokens,

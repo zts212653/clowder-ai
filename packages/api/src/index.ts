@@ -5088,12 +5088,7 @@ async function main(): Promise<void> {
   }
 
   const { createPluginManagerRuntimeComposition } = await import('./domains/plugin/runtime-composition.js');
-  const { PLUGIN_EXTERNAL_REQUEST_PATH } = await import('./domains/plugin/external-access/plugin-external-access.js');
   const pluginProjectRoot = resolveActiveProjectRoot();
-  const pluginExternalRequestPath = PLUGIN_EXTERNAL_REQUEST_PATH;
-  const pluginExternalRequestEndpoint = process.env.CAT_CAFE_REMOTE_PUBLIC_BASE_URL?.trim()
-    ? new URL(pluginExternalRequestPath, process.env.CAT_CAFE_REMOTE_PUBLIC_BASE_URL).href
-    : pluginExternalRequestPath;
   const { buildDeliveryPresentation } = await import('./domains/messaging/lifecycle-delivery.js');
   const frontendBaseUrl = resolveFrontendBaseUrl(process.env, app.log);
   const deliveryThreadMeta = async (threadId: string) => {
@@ -5186,7 +5181,6 @@ async function main(): Promise<void> {
     projectRoot: pluginProjectRoot,
     capabilityProjectRoot: pluginCapabilityRoot,
     binaryProjectRoot: runtimeEntrypointRoot,
-    externalRequestEndpoint: pluginExternalRequestEndpoint,
     externalRequestLoopbackOrigin: `http://127.0.0.1:${PORT}`,
     sharedPublicEndpoint: process.env.CAT_CAFE_REMOTE_PUBLIC_BASE_URL?.trim()
       ? new URL('/mcp', process.env.CAT_CAFE_REMOTE_PUBLIC_BASE_URL).href

@@ -8,8 +8,6 @@ import {
 } from '../capability-token/plugin-capability-token.js';
 import type { PluginInventoryStore } from '../host-inventory/ports.js';
 
-export const PLUGIN_EXTERNAL_REQUEST_PATH = '/api/plugin-runtime/handle';
-
 export interface PluginExternalAccessRecord {
   readonly instanceId: string;
   readonly token: string;

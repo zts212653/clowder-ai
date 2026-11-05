@@ -28,20 +28,19 @@ const instance = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
-test('production external forwarding targets the registered Host request route', async () => {
-  const [accessSource, indexSource, compositionSource, routeSource] = await Promise.all([
-    readFile(new URL('../src/domains/plugin/external-access/plugin-external-access.ts', import.meta.url), 'utf8'),
+test('production preserves the converged generic external request route without an endpoint override', async () => {
+  const [indexSource, compositionSource, routeSource] = await Promise.all([
     readFile(new URL('../src/index.ts', import.meta.url), 'utf8'),
     readFile(new URL('../src/domains/plugin/runtime-composition.ts', import.meta.url), 'utf8'),
     readFile(new URL('../src/routes/plugin/plugin-external-request-routes.ts', import.meta.url), 'utf8'),
   ]);
-  const canonicalPath = accessSource.match(/PLUGIN_EXTERNAL_REQUEST_PATH = '([^']+)'/)?.[1];
+  const compositionPath = compositionSource.match(/externalRequestEndpoint \?\? '([^']+)'/)?.[1];
+  const registeredPath = routeSource.match(/app\.post\('([^']+)'/)?.[1];
 
-  assert.equal(canonicalPath, '/api/plugin-runtime/handle');
-  assert.match(indexSource, /const pluginExternalRequestPath = PLUGIN_EXTERNAL_REQUEST_PATH;/);
-  assert.match(compositionSource, /externalRequestEndpoint \?\? PLUGIN_EXTERNAL_REQUEST_PATH/);
-  assert.match(routeSource, /app\.post\(PLUGIN_EXTERNAL_REQUEST_PATH,/);
+  assert.doesNotMatch(indexSource, /\bexternalRequestEndpoint\s*:/);
   assert.doesNotMatch(indexSource, /['"]\/plugin\/mcp['"]/);
+  assert.equal(compositionPath, '/api/plugin-runtime/handle');
+  assert.equal(registeredPath, compositionPath);
 });
 
 test('one installation keeps one token across Host store recreation; rotate and uninstall revoke it', async (t) => {
