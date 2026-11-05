@@ -128,7 +128,20 @@ process.stdin.on('data', (chunk) => {
           break;
         }
         // Adapted from whutzefengxie-ops/clowder-ai#14 (ecafa76d9), with Host empty_response semantics.
-        if (['empty', 'empty-string', 'empty-delta-final', 'thinking-only', 'tool-only'].includes(command.message)) {
+        if (
+          ['empty', 'empty-string', 'empty-delta-final', 'empty-diagnostic', 'thinking-only', 'tool-only'].includes(
+            command.message,
+          )
+        ) {
+          if (command.message === 'empty-diagnostic') {
+            process.stderr.write('provider quota exhausted; api_key=secret-empty-response-token\n');
+            // Allow the independent stderr pipe to be consumed before the terminal wire event.
+            setTimeout(() => {
+              send({ type: 'message_end', message: { role: 'assistant', content: [], stopReason: 'stop' } });
+              send({ type: 'agent_settled', aborted: false });
+            }, 80);
+            break;
+          }
           if (command.message === 'empty-string' || command.message === 'empty-delta-final')
             send({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: '' } });
           if (command.message === 'thinking-only')

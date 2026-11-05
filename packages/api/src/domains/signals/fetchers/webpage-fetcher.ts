@@ -241,6 +241,10 @@ export class WebpageFetcher implements Fetcher {
       };
     } finally {
       clearTimeout(timeoutHandle);
+      // Release every connection on every exit path, including article-page requests that
+      // share this signal: a body left unread (error status) otherwise keeps its socket open.
+      // After fully read bodies this is a no-op.
+      controller.abort();
     }
   }
 }
