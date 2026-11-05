@@ -1,0 +1,30 @@
+.viewport {
+  position: absolute;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+  color: transparent;
+}
+
+.content {
+  box-sizing: border-box;
+  min-height: 100%;
+}
+
+.range {
+  color: transparent;
+  background: color-mix(in srgb, var(--shell-primary-text) 7%, transparent);
+  text-decoration-line: underline;
+  text-decoration-color: color-mix(in srgb, var(--shell-primary-text) 68%, transparent);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 3px;
+  text-decoration-skip-ink: auto;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+:global([data-theme="dark"]) .range {
+  background: color-mix(in srgb, var(--shell-primary-text) 12%, transparent);
+  text-decoration-color: color-mix(in srgb, var(--shell-primary-text) 58%, transparent);
+}

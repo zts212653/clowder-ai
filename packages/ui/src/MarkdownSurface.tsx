@@ -3,7 +3,7 @@ import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
 import remarkParse from 'remark-parse';
-import { unified } from 'unified';
+import { type PluggableList, unified } from 'unified';
 
 type Props = ComponentProps<typeof ReactMarkdown> & { sourceCoordinates?: boolean };
 
@@ -13,7 +13,10 @@ interface MarkdownNode {
   identifier?: string;
   children?: readonly MarkdownNode[];
 }
-const markdownParser = unified().use(remarkParse).use(remarkGfm).use(remarkBreaks);
+const baseRemarkPlugins: PluggableList = [remarkGfm, remarkBreaks];
+export const createMarkdownProcessor = (plugins: PluggableList = []) =>
+  unified().use(remarkParse).use(baseRemarkPlugins).use(plugins);
+const markdownParser = createMarkdownProcessor();
 
 /** Use the same Markdown language, so code/plain links cannot accidentally hide an attached image. */
 export function markdownImageReferences(source: string): ReadonlySet<string> {
@@ -55,7 +58,7 @@ export function MarkdownSurface({ sourceCoordinates, components, remarkPlugins =
   return (
     <ReactMarkdown
       {...props}
-      remarkPlugins={[remarkGfm, remarkBreaks, ...(remarkPlugins ?? [])]}
+      remarkPlugins={[...baseRemarkPlugins, ...(remarkPlugins ?? [])]}
       components={{ ...(sourceCoordinates ? sourceComponents : {}), ...components }}
     />
   );

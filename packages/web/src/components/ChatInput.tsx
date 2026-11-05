@@ -41,6 +41,7 @@ import { ChatInputActionButton } from './ChatInputActionButton';
 import { ChatInputAddMenu } from './ChatInputAddMenu';
 import { ChatInputMenus } from './ChatInputMenus';
 import { ChatInputStickers } from './ChatInputStickers';
+import { ComposerLinkMirror } from './ComposerLinkMirror';
 import { ComposerRoutingPreview } from './ComposerRoutingPreview';
 import { useCatCardComposer } from './cat-profile-card/CatProfileCardContext';
 import { chatComposerCopy } from './chat-composer.shell-copy';
@@ -1133,10 +1134,13 @@ export function ChatInput({
         </AppTooltip>
 
         <div
-          className={shellV2 ? `relative col-span-3 col-start-1 ${textareaRow} min-w-0` : 'flex-1 relative'}
+          className={shellV2 ? `relative isolate col-span-3 col-start-1 ${textareaRow} min-w-0` : 'flex-1 relative'}
           data-bootcamp-step="chat-input"
           data-guide-id="chat.input"
         >
+          {shellV2 && (
+            <ComposerLinkMirror input={input} textareaRef={textareaRef} composing={routingCompositionActive} />
+          )}
           <textarea
             ref={textareaRef}
             value={input}
@@ -1157,7 +1161,7 @@ export function ChatInput({
             placeholder={textareaPlaceholder}
             className={
               shellV2
-                ? `shell-focusable block min-h-[32px] w-full resize-none rounded-lg border-0 bg-transparent px-1 py-1 text-sm leading-6 text-[var(--shell-ink)] placeholder:text-[var(--shell-muted)] ${whisperMode ? 'bg-accent-50/50' : ''}`
+                ? `shell-focusable relative z-10 block min-h-[32px] w-full resize-none rounded-lg border-0 bg-transparent px-1 py-1 text-sm leading-6 text-[var(--shell-ink)] placeholder:text-[var(--shell-muted)] ${whisperMode ? 'bg-accent-50/50' : ''}`
                 : `w-full resize-none rounded-xl border p-3 text-sm focus:outline-none focus:ring-2 placeholder:text-cafe-muted ${
                     whisperMode
                       ? 'border-cafe-accent/30 bg-accent-50/50 focus:ring-cafe-accent'
@@ -1170,7 +1174,7 @@ export function ChatInput({
           {ghostSuggestion && !pathCompletion.isOpen && !contextPickerMode && (
             <div
               data-testid="ghost-suggestion"
-              className={`absolute inset-0 pointer-events-none text-sm whitespace-pre-wrap break-words overflow-hidden rounded-xl ${shellV2 ? 'px-1 py-1 leading-6' : 'p-3'}`}
+              className={`absolute inset-0 pointer-events-none text-sm whitespace-pre-wrap break-words overflow-hidden rounded-xl ${shellV2 ? 'z-20 px-1 py-1 leading-6' : 'p-3'}`}
               aria-hidden="true"
             >
               <span className="invisible">{input}</span>

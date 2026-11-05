@@ -1,0 +1,98 @@
+'use client';
+
+import { type RefObject, useLayoutEffect, useMemo, useRef } from 'react';
+import styles from './composer-link-mirror.module.css';
+import { composerWebLinks } from './composer-web-links';
+
+/** Decorative only: the textarea keeps its text, caret, selection and editing history. */
+export function ComposerLinkMirror({
+  input,
+  textareaRef,
+  composing,
+}: {
+  input: string;
+  textareaRef: RefObject<HTMLTextAreaElement>;
+  composing: boolean;
+}) {
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const { ranges, unmapped } = useMemo(() => composerWebLinks(input), [input]);
+
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current;
+    const viewport = viewportRef.current;
+    const content = contentRef.current;
+    if (!textarea || !viewport || !content) return;
+    const sync = () => {
+      const computed = getComputedStyle(textarea);
+      Object.assign(viewport.style, {
+        left: `${textarea.offsetLeft + Number.parseFloat(computed.borderLeftWidth || '0')}px`,
+        top: `${textarea.offsetTop + Number.parseFloat(computed.borderTopWidth || '0')}px`,
+        width: `${textarea.clientWidth}px`,
+        height: `${textarea.clientHeight}px`,
+      });
+      for (const property of [
+        'font',
+        'line-height',
+        'letter-spacing',
+        'word-spacing',
+        'tab-size',
+        'text-align',
+        'text-indent',
+        'padding',
+        'white-space',
+        'overflow-wrap',
+        'word-break',
+        'direction',
+      ])
+        content.style.setProperty(property, computed.getPropertyValue(property));
+      viewport.scrollTop = textarea.scrollTop;
+      viewport.scrollLeft = textarea.scrollLeft;
+    };
+    sync();
+    textarea.addEventListener('scroll', sync, { passive: true });
+    const observer = new ResizeObserver(sync);
+    observer.observe(textarea);
+    return () => {
+      textarea.removeEventListener('scroll', sync);
+      observer.disconnect();
+    };
+  }, [textareaRef, input]);
+
+  let end = 0;
+  const spans = ranges.flatMap((range) => {
+    const before = input.slice(end, range.start);
+    end = range.end;
+    return [
+      before,
+      <mark
+        key={range.start}
+        className={styles.range}
+        data-link-start={range.start}
+        data-link-end={range.end}
+        data-link-href={range.href}
+      >
+        {input.slice(range.start, range.end)}
+      </mark>,
+    ];
+  });
+
+  return (
+    <>
+      <div
+        ref={viewportRef}
+        className={styles.viewport}
+        aria-hidden="true"
+        data-testid="composer-link-mirror"
+        style={{ visibility: composing ? 'hidden' : undefined }}
+      >
+        <div ref={contentRef} className={styles.content}>
+          {spans}
+          {input.slice(end)}
+          {input.endsWith('\n') ? '\u200b' : null}
+        </div>
+      </div>
+      {unmapped > 0 && <span className="text-xs text-[var(--shell-muted)]">部分链接范围尚无法标记</span>}
+    </>
+  );
+}

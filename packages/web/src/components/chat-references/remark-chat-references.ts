@@ -24,15 +24,26 @@ function link(value: string, format: 'text' | 'code' | 'link', children?: Phrasi
     data: { hProperties: { 'data-chat-reference': value, 'data-chat-format': format } },
   };
 }
-function splitText(value: string): PhrasingContent[] {
+function splitText(value: string, node: PhrasingContent, source: string): PhrasingContent[] {
   const result: PhrasingContent[] = [];
   let end = 0;
+  let sourceEnd = node.position?.start.offset ?? 0;
   for (const match of value.matchAll(token)) {
     const reference = match[2].replace(/[.,;:!?，。；：、！？]+$/u, '');
     if (!candidate(reference)) continue;
     const start = match.index + match[1].length;
     if (start > end) result.push({ type: 'text', value: value.slice(end, start) });
-    result.push(link(reference, 'text'));
+    const resolved = link(reference, 'text');
+    const sourceStart = source.indexOf(reference, sourceEnd);
+    if (sourceStart >= sourceEnd && sourceStart + reference.length <= (node.position?.end.offset ?? 0)) {
+      const point = (offset: number) => {
+        const lines = source.slice(0, offset).split('\n');
+        return { offset, line: lines.length, column: lines.at(-1)!.length + 1 };
+      };
+      resolved.position = { start: point(sourceStart), end: point(sourceStart + reference.length) };
+      sourceEnd = sourceStart + reference.length;
+    }
+    result.push(resolved);
     end = start + reference.length;
   }
   if (end < value.length) result.push({ type: 'text', value: value.slice(end) });
@@ -74,7 +85,7 @@ function markStandaloneGroup(node: Node, children: Array<RootContent | PhrasingC
   for (const child of meaningful)
     child.data = { ...child.data, hProperties: { ...child.data?.hProperties, 'data-chat-layout': 'card' } };
 }
-function visit(node: Node, definitions: Map<string, string>): void {
+function visit(node: Node, definitions: Map<string, string>, source: string): void {
   if (node.type === 'code' || node.type === 'image' || node.type === 'linkReference') return;
   if (node.type === 'link') {
     markReference(node);
@@ -85,17 +96,21 @@ function visit(node: Node, definitions: Map<string, string>): void {
   const transformed = children.flatMap((child): Array<RootContent | PhrasingContent> => {
     if (child.type === 'inlineCode' && candidate(child.value))
       return [
-        link(child.value, 'code', [{ type: 'text', value: parseLegacyChatPathReference(child.value).reference }]),
+        {
+          ...link(child.value, 'code', [{ type: 'text', value: parseLegacyChatPathReference(child.value).reference }]),
+          position: child.position,
+        },
       ];
     if (child.type === 'linkReference') {
       const href = definitions.get(child.identifier);
       if (!href || !candidate(href)) return [child];
       const resolved = link(href, 'link', child.children);
+      resolved.position = child.position;
       markReference(resolved);
       return [resolved];
     }
-    if (child.type === 'text') return splitText(child.value);
-    visit(child, definitions);
+    if (child.type === 'text') return splitText(child.value, child, source);
+    visit(child, definitions, source);
     return [child];
   });
   // Historical messages can select a registered worktree; no current producer emits these tags.
@@ -113,13 +128,13 @@ function visit(node: Node, definitions: Map<string, string>): void {
 }
 /** Parse only Markdown prose. Fenced/indented code, images and existing-link children remain literal. */
 export function remarkChatReferences() {
-  return (tree: Root) => {
+  return (tree: Root, file: { value: unknown }) => {
     const definitions = new Map<string, string>();
     function collect(node: Node) {
       if (node.type === 'definition' && !definitions.has(node.identifier)) definitions.set(node.identifier, node.url);
       if ('children' in node) for (const child of node.children) collect(child);
     }
     collect(tree);
-    visit(tree, definitions);
+    visit(tree, definitions, String(file.value));
   };
 }
