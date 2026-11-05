@@ -73,6 +73,39 @@ describe('cat-config-loader', () => {
       assert.equal(config.breeds[0].id, 'ragdoll');
     });
 
+    it('preserves explicit member env references without copying them into a sibling', () => {
+      const config = validConfig();
+      config.breeds[0].variants.push({ ...config.breeds[0].variants[0], id: 'sibling', catId: 'sibling' });
+      config.breeds[0].variants[0].env = { CUSTOM_ENDPOINT: '${OWNER_ENDPOINT}' };
+      const loaded = loadCatConfig(writeTempConfig(config));
+      const members = toAllCatConfigs(loaded);
+      assert.deepEqual(members.opus.env, { CUSTOM_ENDPOINT: '${OWNER_ENDPOINT}' });
+      assert.equal(members.sibling.env, undefined);
+      loaded.breeds[0].variants[0].env.CUSTOM_ENDPOINT = 'later';
+      assert.equal(members.opus.env.CUSTOM_ENDPOINT, '${OWNER_ENDPOINT}');
+    });
+
+    it('rejects Host authority aliases in member env at the catalog boundary', () => {
+      const config = validConfig();
+      config.breeds[0].variants[0].env = { SECRET: '${CAT_CAFE_CALLBACK_TOKEN}' };
+      assert.throws(() => loadCatConfig(writeTempConfig(config)), /Invalid cat config/);
+    });
+
+    it('member env updates and removals round-trip through the original catalog writer', async () => {
+      const project = dirname(writeTempConfig(validConfig()));
+      mkdirSync(join(project, '.cat-cafe'));
+      const catalog = join(project, '.cat-cafe/cat-catalog.json');
+      writeFileSync(catalog, JSON.stringify(validConfig()));
+      const { updateRuntimeCat, readRuntimeCatCatalog } = await import('../dist/config/runtime-cat-catalog.js');
+      await updateRuntimeCat(project, 'opus', { env: { CUSTOM_ENDPOINT: '${OWNER_ENDPOINT}' } });
+      assert.deepEqual(toAllCatConfigs(readRuntimeCatCatalog(project)).opus.env, {
+        CUSTOM_ENDPOINT: '${OWNER_ENDPOINT}',
+      });
+      await updateRuntimeCat(project, 'opus', { env: null });
+      assert.equal(toAllCatConfigs(readRuntimeCatCatalog(project)).opus.env, undefined);
+      assert.ok(!readFileSync(catalog, 'utf8').includes('OWNER_ENDPOINT'));
+    });
+
     it('tolerates obsolete CLI window fields as inert catalog input', () => {
       for (const cli of [
         { command: 'codex', outputFormat: 'json', autoCompactTokenLimit: 90000 },

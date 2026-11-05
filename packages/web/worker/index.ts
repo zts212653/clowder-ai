@@ -23,6 +23,33 @@ import {
 
 const dedupeRegistry = new Map<string, number>();
 
+// Static routing (Chromium 123+, which covers Chrome and the Electron 35 desktop shell): API and
+// Socket.IO requests go straight to the network without starting this worker. The runtime caching
+// built in next.config.js already declines them; this saves the worker start each request would
+// otherwise wait for. Every component is a wildcard because the API is usually another port, and a
+// pattern given only a pathname inherits this worker's origin. A rejected registration must not
+// fail install, or the previous worker would keep controlling the page.
+const NETWORK_ONLY_PATHNAMES = ['/api/*', '/socket.io/*'];
+type StaticRoute = {
+  condition: { urlPattern: { protocol: string; hostname: string; port: string; pathname: string } };
+  source: 'network';
+};
+self.addEventListener('install', (event: ExtendableEvent) => {
+  const { addRoutes } = event as ExtendableEvent & { addRoutes?: (routes: StaticRoute[]) => Promise<void> };
+  if (typeof addRoutes !== 'function') return;
+  const routes = NETWORK_ONLY_PATHNAMES.map(
+    (pathname): StaticRoute => ({
+      condition: { urlPattern: { protocol: '*', hostname: '*', port: '*', pathname } },
+      source: 'network',
+    }),
+  );
+  event.waitUntil(
+    addRoutes.call(event, routes).catch((error: unknown) => {
+      console.warn('[Clowder AI SW] static routing unavailable; runtime caching still declines API traffic', error);
+    }),
+  );
+});
+
 // Push event: 后端 web-push 推过来的通知
 self.addEventListener('push', (event: PushEvent) => {
   let payload: PushNotificationPayload = {};

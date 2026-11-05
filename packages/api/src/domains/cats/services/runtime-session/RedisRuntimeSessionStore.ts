@@ -1,3 +1,10 @@
+import { recoveryRedis } from '../../../../infrastructure/recovery/recovery-redis.js';
+import {
+  needsRuntimeSealRecovery,
+  preserveRuntimeSealRecovery,
+  runtimeSealRecoveryScore,
+} from './runtime-seal-recovery-state.js';
+import { RuntimeSealRecoveryIndex } from './seal-recovery-index.js';
 /**
  * Redis Runtime Session Store
  * F211 Phase A1: Redis-backed runtime-session metadata sidecar.
@@ -21,6 +28,11 @@ import {
 import type { IRuntimeSessionStore, RuntimeSessionRecentFilter } from './RuntimeSessionStore.js';
 
 const UPSERT_LUA = `
+local recoveryKind = redis.call('TYPE',KEYS[4])
+if type(recoveryKind) == 'table' then recoveryKind = recoveryKind.ok end
+if recoveryKind ~= 'none' and recoveryKind ~= 'zset' then error('runtime_seal_index_wrong_type') end
+if ARGV[10] == '1' and not tonumber(ARGV[13]) then error('invalid_runtime_seal_score') end
+
 local function active_key(runtime, threadId, catId)
   return ARGV[2] .. 'runtime-session-active:' .. runtime .. ':' .. threadId .. ':' .. catId
 end
@@ -39,6 +51,8 @@ local function remove_recent_indexes(sessionId, record)
 end
 
 local existing = redis.call('GET', KEYS[1])
+if ARGV[12] == 'missing' and existing then return 0 end
+if ARGV[12] == 'present' and existing ~= ARGV[11] then return 0 end
 if existing and existing ~= '' then
   local decoded = cjson.decode(existing)
   if decoded.runtime and decoded.runtimeSessionId then
@@ -58,6 +72,8 @@ if existing and existing ~= '' then
   remove_recent_indexes(ARGV[1], decoded)
 end
 
+if ARGV[10] == '1' then redis.call('ZADD',KEYS[4],tonumber(ARGV[13]),ARGV[1])
+else redis.call('ZREM',KEYS[4],ARGV[1]) end
 redis.call('SET', KEYS[1], ARGV[3])
 redis.call('SET', KEYS[2], ARGV[1])
 redis.call('ZADD', KEYS[3], tonumber(ARGV[4]), ARGV[1])
@@ -97,28 +113,55 @@ return ARGV[3]
 `;
 
 export class RedisRuntimeSessionStore implements IRuntimeSessionStore {
-  constructor(private readonly redis: RedisClient) {}
+  private readonly sealRecovery: RuntimeSealRecoveryIndex;
+  constructor(private readonly redis: RedisClient) {
+    this.redis = recoveryRedis(redis);
+    this.sealRecovery = new RuntimeSealRecoveryIndex(this.redis);
+  }
+  initializeSealRecovery(rebuild = false): Promise<void> {
+    return this.sealRecovery.initialize(rebuild);
+  }
+  listSealRecoveryCandidates(limit = 100): Promise<RuntimeSessionMetadata[]> {
+    return this.sealRecovery.list(limit);
+  }
+  parkSealRecovery(record: RuntimeSessionMetadata, now: number): Promise<boolean> {
+    return this.sealRecovery.park(record, now);
+  }
+  failSealRecovery(record: RuntimeSessionMetadata, now: number, maxRetries: number, reason: string): Promise<boolean> {
+    return this.sealRecovery.fail(record, now, maxRetries, reason);
+  }
 
   async upsert(metadata: RuntimeSessionMetadata): Promise<RuntimeSessionMetadata> {
-    const normalized = normalizeRuntimeSessionMetadata(metadata);
-    const payload = JSON.stringify(normalized);
-    await this.redis.eval(
-      UPSERT_LUA,
-      3,
-      RuntimeSessionKeys.detail(normalized.sessionId),
-      RuntimeSessionKeys.byRuntime(normalized.runtime, normalized.runtimeSessionId),
-      RuntimeSessionKeys.byLifecycleState(normalized.lifecycle.state),
-      normalized.sessionId,
-      this.keyPrefix,
-      payload,
-      String(normalized.lifecycle.lastObservedAt),
-      normalized.runtime,
-      normalized.threadId ?? '',
-      normalized.catId,
-      normalized.lifecycle.state,
-      normalized.surface,
-    );
-    return normalized;
+    const incoming = normalizeRuntimeSessionMetadata(metadata);
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const previousRaw = await this.redis.get(RuntimeSessionKeys.detail(incoming.sessionId));
+      const previous = previousRaw ? parseMetadata(previousRaw) : null;
+      const normalized = preserveRuntimeSealRecovery(previous, incoming);
+      const payload = JSON.stringify(normalized);
+      const result = await this.redis.eval(
+        UPSERT_LUA,
+        4,
+        RuntimeSessionKeys.detail(normalized.sessionId),
+        RuntimeSessionKeys.byRuntime(normalized.runtime, normalized.runtimeSessionId),
+        RuntimeSessionKeys.byLifecycleState(normalized.lifecycle.state),
+        RuntimeSessionKeys.sealRecovery(),
+        normalized.sessionId,
+        this.keyPrefix,
+        payload,
+        String(normalized.lifecycle.lastObservedAt),
+        normalized.runtime,
+        normalized.threadId ?? '',
+        normalized.catId,
+        normalized.lifecycle.state,
+        normalized.surface,
+        needsRuntimeSealRecovery(normalized) ? '1' : '0',
+        previousRaw ?? '',
+        previousRaw === null ? 'missing' : 'present',
+        String(runtimeSealRecoveryScore(normalized)),
+      );
+      if (result !== 0) return normalized;
+    }
+    throw new Error('runtime_session_upsert_contention');
   }
 
   async getBySessionId(sessionId: string): Promise<RuntimeSessionMetadata | null> {

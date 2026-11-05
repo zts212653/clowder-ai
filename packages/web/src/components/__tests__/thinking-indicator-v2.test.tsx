@@ -88,7 +88,7 @@ describe('ThinkingIndicator: the line at the top of the conversation', () => {
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
   beforeEach(() => {
-    window.localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
+    writeShellPresentation('classic');
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);

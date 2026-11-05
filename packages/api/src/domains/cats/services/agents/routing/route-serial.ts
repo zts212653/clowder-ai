@@ -2477,7 +2477,7 @@ export async function* routeSerial(
 
       // F22: Consume MCP-buffered rich blocks BEFORE the text/empty branch —
       // blocks must be persisted even when the cat emits no text (cloud Codex P1).
-      const bufferedBlocks = getRichBlockBuffer().consume(threadId, catId as string, ownInvocationId);
+      const bufferedBlocks = await getRichBlockBuffer().consume(threadId, catId as string, ownInvocationId);
 
       // F061: Detect @co-creator mentions in agent response for browser notification
       let mentionsUser = false;

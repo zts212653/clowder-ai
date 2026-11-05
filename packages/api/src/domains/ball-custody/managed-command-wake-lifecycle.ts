@@ -1,9 +1,14 @@
+import { getLifecycleAppendOutcome } from '@cat-cafe/shared';
 import type { DynamicTaskDef, DynamicTaskOwnerAuthorization } from '../../infrastructure/scheduler/DynamicTaskStore.js';
 import type { OwnerAuthProvenance } from '../cats/services/owner-auth-provenance.js';
 import type { InvocationRecord } from '../cats/services/stores/ports/InvocationRecordStore.js';
 import type { AppendMessageInput, IMessageStore, StoredMessage } from '../cats/services/stores/ports/MessageStore.js';
 import type { ActionSuccessorFence } from './ActionSuccessorAdmissionContract.js';
 import type { ActionSuccessorLeaseStore } from './ActionSuccessorLeaseStore.js';
+import type {
+  ManagedCommandWaitRecoveryFact,
+  ManagedCommandWaitRecoverySnapshot,
+} from './managed-command-wait-recovery-state.js';
 import {
   isPlainRecord,
   type ManagedCommandTerminalResult,
@@ -42,7 +47,8 @@ export interface ManagedCommandWakeRecoveryStats {
 }
 
 export type ManagedCommandWakeEventCarrier =
-  | { state: 'missing' | 'pending' | 'orphaned' }
+  | { state: 'missing' | 'orphaned' }
+  | { state: 'pending'; unresolved?: boolean }
   | {
       state: 'failed';
       attemptId: string;
@@ -74,7 +80,13 @@ export function resolveManagedCommandWakeEventCarrier(
     !response ||
     response.id !== ref.statusMessageId ||
     response.threadId !== expected.threadId ||
-    response.userId !== expected.userId
+    (response.userId !== expected.userId &&
+      !(
+        response.userId === 'system' &&
+        response.from?.kind === 'system' &&
+        response.from.service === 'message_delivery' &&
+        response.lifecycle?.kind === 'delivery_failure'
+      ))
   ) {
     return { state: 'orphaned' };
   }
@@ -97,6 +109,13 @@ export function resolveManagedCommandWakeEventCarrier(
   ) {
     return { state: 'orphaned' };
   }
+  const appendOutcome = getLifecycleAppendOutcome(ref, message.lifecycle);
+  if (appendOutcome === 'incomplete' || appendOutcome === 'not_accepted')
+    return { state: 'terminal', reason: 'failed' };
+  if (appendOutcome || (ref.appendDelivery?.requiresCompletion && ref.appendAcceptance !== 'accepted'))
+    return { state: 'pending', ...(lifecycle.status !== 'processing' ? { unresolved: true } : {}) };
+  if (ref.appendDelivery?.requiresCompletion && ref.appendAcceptance === 'accepted')
+    return { state: 'handled', invocationId: lifecycle.invocationId };
   if (lifecycle.status === 'processing') return { state: 'pending' };
   if (lifecycle.status === 'completed') return { state: 'handled', invocationId: lifecycle.invocationId };
   if (lifecycle.status === 'failed') {
@@ -130,7 +149,10 @@ export interface ManagedCommandWakeDynamicTaskStore {
   getPrivateOwnerAuthProvenance?(id: string): OwnerAuthProvenance;
   reconcileRetainedManagedCommand?(task: DynamicTaskDef): 'absent' | 'pending' | 'not_started' | 'conflict';
   getAll(): DynamicTaskDef[];
-  listManagedCommandCandidates?(): DynamicTaskDef[];
+  listManagedCommandCandidates?(now?: number, limit?: number): DynamicTaskDef[];
+  getManagedCommandRecoveryState?(id: string): ManagedCommandWaitRecoverySnapshot | null;
+  updateManagedCommandRecoveryState?(id: string, revision: number, fact: ManagedCommandWaitRecoveryFact): boolean;
+  findManagedCommandWaitsForSource?(messageId: string): string[];
   getById(id: string): DynamicTaskDef | null;
   updateParamsIfCurrent(id: string, current: Record<string, unknown>, next: Record<string, unknown>): boolean;
   setEnabled(id: string, enabled: boolean): boolean;
@@ -169,6 +191,7 @@ export interface ManagedCommandWakeRecoveryDeps {
   readonly now?: () => number;
   readonly dispatchedCarrierGraceMs?: number;
   readonly wakeSlaMs?: number;
+  readonly canNotifyOwner?: (target: { threadId: string; userId: string; catId: string }) => boolean | Promise<boolean>;
   /** Process-local liveness fence: present in production, omitted by isolated consumers. */
   readonly isCommandRunnerActive?: (taskId: string) => boolean;
 }

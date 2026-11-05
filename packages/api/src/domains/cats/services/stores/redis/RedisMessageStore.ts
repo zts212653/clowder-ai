@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { recoveryRedis } from '../../../../../infrastructure/recovery/recovery-redis.js';
 import {
   type CompanionDeliveryAcceptance,
   companionDeliveryMatches,
@@ -185,6 +186,7 @@ import {
   serializeExtra,
 } from './redis-message-parsers.js';
 import { parseRedisNumber } from './redis-number.js';
+import { readAuthoritativeHash } from './redis-pipeline-reply.js';
 import { readRecentMentionIds } from './redis-recent-mentions.js';
 import { readThreadReplyProjection } from './redis-thread-reply-projection.js';
 import { projectRedisUnreadSummaries } from './redis-unread-summary-projection.js';
@@ -1286,6 +1288,7 @@ function parseUserMentionHandlingMetadata(raw: string): UserMentionHandlingMetad
 }
 
 export class RedisMessageStore {
+  private readonly redisAdmissionIdentity: RedisClient;
   async getLastUserMentionHandling(userId: string) {
     const result = (await this.redis.eval(
       READ_LAST_USER_MENTION_HANDLING_LUA,
@@ -1525,6 +1528,8 @@ export class RedisMessageStore {
       readDiagnostics?: MessageReadObserver;
     },
   ) {
+    this.redisAdmissionIdentity = redis;
+    redis = recoveryRedis(redis);
     this.redis = redis;
     this.readDiagnostics = options?.readDiagnostics;
     this.onAppend = options?.onAppend;
@@ -1565,7 +1570,7 @@ export class RedisMessageStore {
     ledgerStore: QueueLedgerStore,
     maxQueuedUserEntries?: number,
   ): Promise<QueueLedgerMessageAdmissionResult> {
-    if (!(ledgerStore instanceof RedisQueueLedgerStore) || !ledgerStore.usesRedisClient(this.redis)) {
+    if (!(ledgerStore instanceof RedisQueueLedgerStore) || !ledgerStore.usesRedisClient(this.redisAdmissionIdentity)) {
       throw new Error('Redis message admission requires the matching Redis Queue ledger');
     }
     const messageId = input.reservedId ?? generateSortableId(input.timestamp);
@@ -1630,7 +1635,7 @@ export class RedisMessageStore {
     entries: readonly QueueLedgerEntry[],
     ledgerStore: QueueLedgerStore,
   ): Promise<QueueLedgerMessageAdmissionResult> {
-    if (!(ledgerStore instanceof RedisQueueLedgerStore) || !ledgerStore.usesRedisClient(this.redis)) {
+    if (!(ledgerStore instanceof RedisQueueLedgerStore) || !ledgerStore.usesRedisClient(this.redisAdmissionIdentity)) {
       throw new Error('Redis message admission requires the matching Redis Queue ledger');
     }
     assertPrivateNoticeQueueAdmission(entries);
@@ -1669,7 +1674,7 @@ export class RedisMessageStore {
     ledgerStore: QueueLedgerStore,
     maxQueuedUserEntries?: number,
   ): Promise<QueueLedgerMessageAdmissionResult> {
-    if (!(ledgerStore instanceof RedisQueueLedgerStore) || !ledgerStore.usesRedisClient(this.redis)) {
+    if (!(ledgerStore instanceof RedisQueueLedgerStore) || !ledgerStore.usesRedisClient(this.redisAdmissionIdentity)) {
       throw new Error('Redis message admission requires the matching Redis Queue ledger');
     }
     if (entries.length === 0) throw new Error('Queue admission requires at least one row');
@@ -1737,7 +1742,7 @@ export class RedisMessageStore {
     ledgerStore: QueueLedgerStore,
     maxQueuedUserEntries?: number,
   ): Promise<QueueLedgerLifecycleAdmissionResult> {
-    if (!(ledgerStore instanceof RedisQueueLedgerStore) || !ledgerStore.usesRedisClient(this.redis)) {
+    if (!(ledgerStore instanceof RedisQueueLedgerStore) || !ledgerStore.usesRedisClient(this.redisAdmissionIdentity)) {
       throw new Error('Redis lifecycle admission requires the matching Redis Queue ledger');
     }
     if (entries.length === 0) throw new Error('lifecycle Queue admission requires at least one row');
@@ -1834,6 +1839,7 @@ export class RedisMessageStore {
       if (persisted.some((entry) => entry === null)) {
         throw new Error(`lifecycle Queue admission rows disappeared after commit: ${messageId}`);
       }
+      notifyMessageTimelineChange(this, message);
       return {
         kind: outcome === 1 || outcome === 4 ? 'applied' : 'replayed',
         message,
@@ -2070,6 +2076,20 @@ export class RedisMessageStore {
   async getById(id: string): Promise<StoredMessage | null> {
     const data = await this.redis.hgetall(MessageKeys.detail(id));
     return this.hydrateHash(data);
+  }
+
+  async getByIds(ids: readonly string[]): Promise<Map<string, StoredMessage | null>> {
+    const result = new Map<string, StoredMessage | null>();
+    const unique = [...new Set(ids)];
+    for (let offset = 0; offset < unique.length; offset += 8) {
+      const batch = unique.slice(offset, offset + 8);
+      const pipeline = this.redis.multi();
+      for (const id of batch) pipeline.hgetall(MessageKeys.detail(id));
+      const replies = await pipeline.exec();
+      const hashes = batch.map((_id, i) => readAuthoritativeHash(replies?.[i], 'canonical message batch'));
+      batch.forEach((id, i) => result.set(id, hashes[i] ? this.hydrateHash(hashes[i]) : null));
+    }
+    return result;
   }
 
   async getArtifactById(id: string): Promise<StoredMessage | null> {
@@ -3800,7 +3820,9 @@ export class RedisMessageStore {
     id: string,
     patch: LifecycleResponseTerminalPatch,
   ): Promise<CommitLifecycleResponseTerminalResult> {
-    return this.commitLifecycleResponseTerminalInternal(id, patch);
+    const result = await this.commitLifecycleResponseTerminalInternal(id, patch);
+    if (result.kind === 'applied' || result.kind === 'replayed') notifyMessageTimelineChange(this, result.message);
+    return result;
   }
 
   private async commitLifecycleResponseTerminalInternal(
@@ -3850,6 +3872,17 @@ export class RedisMessageStore {
   }
 
   async commitLifecyclePreAdmissionFailure(
+    input: LifecyclePreAdmissionFailureInput,
+  ): Promise<CommitLifecyclePreAdmissionFailureResult> {
+    const result = await this.commitLifecyclePreAdmissionFailureInternal(input);
+    if (result.kind === 'applied' || result.kind === 'replayed') {
+      notifyMessageTimelineChange(this, result.inputMessage);
+      notifyMessageTimelineChange(this, result.failureMessage);
+    }
+    return result;
+  }
+
+  private async commitLifecyclePreAdmissionFailureInternal(
     input: LifecyclePreAdmissionFailureInput,
   ): Promise<CommitLifecyclePreAdmissionFailureResult> {
     const source = await this.getById(input.sourceMessageId);
@@ -4045,7 +4078,10 @@ export class RedisMessageStore {
     const locked = await this.withLifecycleDispatchLock(id, () =>
       this.advanceLifecycleInputDispatchUnlocked(id, patch),
     );
-    if (locked !== null) return locked;
+    if (locked !== null) {
+      if (locked.kind === 'applied' || locked.kind === 'replayed') notifyMessageTimelineChange(this, locked.message);
+      return locked;
+    }
     const message = await this.getById(id);
     if (!message) return { kind: 'not_found' };
     return { kind: 'conflict', reason: 'contended', message };

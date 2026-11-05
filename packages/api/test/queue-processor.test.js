@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it, mock } from 'node:test';
+import { recoveryGuarded, withinRecoveryDeadline } from '../dist/infrastructure/recovery/recovery-deadline.js';
 import { canonicalTestMessageInput, canonicalTestQueueInput } from './helpers/message-from-fixtures.js';
 
 const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
@@ -2999,6 +3000,7 @@ describe('F293 routing through the canonical Queue', () => {
           'unavailable Live is durably settled',
         );
       } else {
+        await waitFor(() => providerCalls === 1);
         assert.equal(providerCalls, 1, 'the existing backoff retries automatic work after recovery');
         assert.notEqual(attempts.at(-1).ownerRequestedAttempt, true, 'automatic retry does not borrow owner authority');
       }
@@ -3274,4 +3276,46 @@ it('Task handoff source cannot hide behind a plain primary in a batched Steer st
     h.queue.list('thread-1', 'user-1').map((e) => e.status),
     ['queued', 'queued'],
   );
+});
+
+it('durably admitted Queue work owns its execution after the recovery caller has finished', async () => {
+  let release,
+    entered = false,
+    committed = false;
+  const pending = new Promise((resolve) => {
+    release = resolve;
+  });
+  const receiver = recoveryGuarded({
+    commit: () => {
+      committed = true;
+    },
+  });
+  const h = createHarness({
+    routeExecution: async function* (...args) {
+      await startLifecycle(args, 'independent-recovery-receiver');
+      entered = true;
+      await pending;
+      receiver.commit();
+      yield { type: 'done', catId: args[4][0], isFinal: true, timestamp: Date.now() };
+    },
+  });
+  await admitMessage(h);
+  const drains = [];
+  try {
+    await withinRecoveryDeadline(
+      performance.now() + 1000,
+      () => performance.now(),
+      () => {
+        drains.push(h.processor.requestDrain('thread-1'));
+      },
+    );
+    await waitFor(() => entered);
+    release();
+    await Promise.all(drains);
+    await waitFor(() => committed);
+    assert.equal(committed, true, 'the receiver has its own admitted authority, outside the finished sweep');
+  } finally {
+    release();
+    await Promise.allSettled(drains);
+  }
 });

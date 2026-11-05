@@ -1,6 +1,7 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { SHELL_PRESENTATION_STORAGE_KEY, writeShellPresentation } from '@/components/shell/shell-presentation';
 import { openFileMenu } from '@/test-utils/open-file-menu';
 import { ContentReviewSurface } from '../ContentReviewSurface';
 import { discussionView } from './WorkspaceContentReviewSurface.fixture';
@@ -10,6 +11,7 @@ let root: Root, container: HTMLDivElement;
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   localStorage.clear();
+  writeShellPresentation('v2');
   container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
@@ -17,8 +19,13 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
+  localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
 });
-it('uses separate reply authority while historical canvas and annotation state stay locked', async () => {
+it.each([
+  'classic',
+  'v2',
+] as const)('%s: keeps historical mutations locked while retaining separate reply authority', async (presentation) => {
+  writeShellPresentation(presentation);
   const view = { ...discussionView(), canWrite: false, historyReadOnly: true, canReply: true };
   const action = vi.fn().mockResolvedValue(true);
   const controller = {
@@ -52,7 +59,7 @@ it('uses separate reply authority while historical canvas and annotation state s
   const button = (label: string) =>
     [...container.querySelectorAll<HTMLButtonElement>('button')].find((item) => item.textContent === label);
   expect(button('画笔')?.disabled).toBe(true);
-  expect(button('圈选')?.disabled).toBe(true);
+  expect(button('圈选')?.disabled).toBe(presentation === 'classic');
   await openFileMenu(container);
   await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="打开作品讨论"]')?.click());
   const text = container.querySelector<HTMLTextAreaElement>('textarea[aria-label^="回复批注"]');
@@ -77,4 +84,5 @@ it('uses separate reply authority while historical canvas and annotation state s
     ),
   );
   expect(container.querySelector('textarea[aria-label^="回复批注"]')).toBeNull();
+  expect(controller.submitAnnotation).not.toHaveBeenCalled();
 });

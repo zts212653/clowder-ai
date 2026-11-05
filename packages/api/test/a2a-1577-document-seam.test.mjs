@@ -32,7 +32,7 @@ async function fixture(t) {
   });
   t.after(async () => {
     await app.close();
-    getRichBlockBuffer().consume(auth.threadId, auth.catId, auth.invocationId);
+    await getRichBlockBuffer().consume(auth.threadId, auth.catId, auth.invocationId);
     if (previous === undefined) delete process.env.UPLOAD_DIR;
     else process.env.UPLOAD_DIR = previous;
   });
@@ -64,7 +64,7 @@ test('actual MD HTTP publication binds its rich event to the current response an
 
 test('completed document invocation cannot publish a late rich event', async (t) => {
   const f = await fixture(t);
-  getRichBlockBuffer().consume(f.auth.threadId, f.auth.catId, f.auth.invocationId);
+  await getRichBlockBuffer().consume(f.auth.threadId, f.auth.catId, f.auth.invocationId);
   const response = await f.post();
   assert.equal(response.statusCode, 409, response.body);
   assert.equal(response.json().code, 'RICH_BLOCK_INVOCATION_COMPLETE');

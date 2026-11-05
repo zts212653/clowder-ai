@@ -313,7 +313,9 @@ describe('ChatMessage paw-feel disposition projection', () => {
     );
 
     expect(container.querySelector('[data-testid="paw-feel-disposition-dock"]')).toBeNull();
-    expect(mocks.apiFetch).not.toHaveBeenCalled();
+    // V2 may resolve the source thread's visibility; the forbidden duplicate is a paw-feel projection read.
+    const pawFeelReads = mocks.apiFetch.mock.calls.filter(([path]) => String(path).startsWith('/api/paw-feel/'));
+    expect(pawFeelReads).toEqual([]);
   });
 
   it('does not treat a user-authored marker as a cat-authored F278 signal', async () => {

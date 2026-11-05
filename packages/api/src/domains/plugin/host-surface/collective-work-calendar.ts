@@ -13,7 +13,7 @@ export function createCollectiveWorkCalendarReader(
   operations: Pick<InstalledPluginOperations, 'runAction'>,
   ownerUserId: string,
 ): CollectiveWorkCalendarReader {
-  async function load() {
+  async function load(taskId?: string) {
     const controller = new AbortController();
     try {
       const result = await withOwnerOperationRequest(
@@ -23,6 +23,7 @@ export function createCollectiveWorkCalendarReader(
           actionId: 'read',
           userId: ownerUserId,
           requestId: randomUUID(),
+          ...(taskId === undefined ? {} : { taskReadScope: { taskId } }),
           signal: controller.signal,
           assertCurrent: () => controller.signal.throwIfAborted(),
         },
@@ -52,7 +53,7 @@ export function createCollectiveWorkCalendarReader(
           task.subjectKey?.startsWith('collective-work:') ||
           task.entrustedWork?.dataController?.binding.pluginId === 'official.collective-connector';
         try {
-          const source = await (scoped ? (pending ??= load()) : load());
+          const source = await (scoped ? (pending ??= load()) : load(task.id));
           const item = source?.items.find((item) => item.taskId === task.id);
           if (item)
             return item.taskRevision === task.entrustedWork?.revision

@@ -1,5 +1,6 @@
 import { act } from 'react';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { writeShellPresentation } from '@/components/shell/shell-presentation';
 import {
   createThreadSidebarHarness,
   installThreadSidebarGlobals,
@@ -68,6 +69,7 @@ describe('ThreadSidebar manual organizer', () => {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     resetThreadSidebarMocks();
+    writeShellPresentation('classic');
     harness = createThreadSidebarHarness();
   });
 

@@ -1774,7 +1774,7 @@ async function* routeParallelPrepared(
       // Forget the completed cat's turn: a late event for it must not upsert its draft again after R's
       // commit deleted it. Drafts no longer expire (F117 KD-23), so a recreated one would leak.
       catInvocationId.delete(msg.catId);
-      const bufferedBlocks = getRichBlockBuffer().consume(threadId, msg.catId, ownInvId);
+      const bufferedBlocks = await getRichBlockBuffer().consume(threadId, msg.catId, ownInvId);
       // #573 parallel variant: socket broadcasts in messages.ts use the OUTER
       // parentInvocationId for live bubble identity. Persist formal messages with
       // the same id; otherwise IDB/live bubbles use parent id while hydration uses

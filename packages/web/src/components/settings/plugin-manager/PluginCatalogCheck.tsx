@@ -16,7 +16,7 @@ function CatalogNotice({
     <div
       data-inline-notice
       data-catalog-notice={kind}
-      className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-2 rounded-lg border border-cafe-border bg-[var(--shell-work)] px-2.5 py-2 text-[13px] text-cafe-secondary"
+      className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-2 rounded-lg border border-cafe-border bg-[var(--shell-work)] px-2.5 py-2 text-[length:var(--console-font-compact)] text-cafe-secondary"
     >
       <div className="flex min-w-0 items-start gap-2">
         <span aria-hidden="true" className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-current text-conn-amber-text" />

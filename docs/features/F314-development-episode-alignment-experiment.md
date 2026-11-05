@@ -5,7 +5,7 @@ topics: [development-process, intent-alignment, review, merge-gate, process-cost
 tips_exempt: "Renewed 2026-10-15: this delta records the internal F314-to-F311 coordination and evidence handoff. It adds no shipped user entry or runtime capability and establishes no efficacy verdict; future user-facing F311 delivery retains its own discovery requirement."
 doc_kind: spec
 created: 2026-09-02
-updated: 2026-11-03
+updated: 2026-11-05
 description: "让一项托付跨阶段持续做对，尽早交付真实可用结果，以充分且相称的验证减少等待，并让猫自主续办、少占用人的协调注意力。现有 anchor 实验是其中一个有界机制。"
 description_source: human
 description_author: codex-astra
@@ -46,8 +46,6 @@ You 认定的痛点（本轮 449 引 1483；速度与结果原话见 1352）：
 4. **允许反例改变做法**：方法是否值得保留，用真实工作的方向、时间和人类协调负担判断；F311 对具体不确定机制作有界实验，不把测量变成日常交付前置。
 
 ## Current State / 现状基线
-
-第2簇沿F309/#6445原验收，第7簇暂缓；第9簇不迁历史字节；第18簇在线备份已完成，本轮未重启家里API，真实隐私清理条数和投影结果待后续实际重建核验。新的API挂测修复分支尚未开PR，不计入22个。#5788方法发布已有证据，方法自然采用与效用仍未知；不改变operator B、原Program、Task197/Task613及F314整体关闭边界。
 
 - **11-02当时只到任务稿已备**：稿件已交You，当时尚无已核到的云端接手、私有跟踪issue、基线或PR回执；11-03的实际执行与审合见上文。公开#1729仍只作社区入口；原Task613继续持结果整合，Task197的历史执行责任不被改名或转移。
 - **本批验收要求**：云端干净Linux上实做main安装/构建/测试及README新人启动基线；每个机制给修前修后和完整消费者证据；合入前原本通过的项目及从零启动不得退化。真实登录条件不足时说明停点，不把服务启动写成成员已回话。

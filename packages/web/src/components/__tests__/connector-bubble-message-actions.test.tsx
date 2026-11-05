@@ -20,12 +20,15 @@ describe('ConnectorBubble message actions', () => {
   beforeEach(() => {
     container = document.createElement('div');
     document.body.appendChild(container);
+    // Retained classic contract; newer presentation cases select their mode explicitly.
+    window.localStorage.setItem('cat-cafe:shell-presentation', 'classic');
     root = createRoot(container);
   });
 
   afterEach(() => {
     React.act(() => root.unmount());
     container.remove();
+    window.localStorage.removeItem('cat-cafe:shell-presentation');
   });
 
   it('hosts the ordinary History quote action in the bubble header', () => {

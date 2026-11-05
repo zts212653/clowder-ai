@@ -11,6 +11,11 @@ import { producerAttentionReevaluationLinkV1Schema } from '@cat-cafe/shared';
 import type Database from 'better-sqlite3';
 import type { DynamicTaskDef } from './DynamicTaskStore.js';
 
+/** A committed effect may be superseded; recovery then only settles its approval. */
+export type ScheduleMutationEffectResult =
+  | { applied: boolean; task: ScheduleMutationTaskDefinition; superseded?: false }
+  | { applied: false; superseded: true };
+
 export interface ProposalRow {
   proposal_id: string;
   owner_user_id: string;

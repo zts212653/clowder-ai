@@ -12,6 +12,8 @@ interface WorkspaceFileChangeOptions {
 }
 
 interface WorkspaceFileChangedEvent {
+  /** Echoes the watchId this subscription sent; a change for another watch is ignored. */
+  watchId?: string;
   worktreeId: string;
   path: string;
   sha256: string;
@@ -68,6 +70,8 @@ export function useWorkspaceFileChange({
     if (!enabled || !worktreeId || !path) return;
     let active = true;
     let cleanup: (() => void) | null = null;
+    // The server keys watches by (socket, watchId), so this subscription releases only its own watch.
+    const watchId = crypto.randomUUID();
 
     void import('socket.io-client').then(({ io }) => {
       if (!active) return;
@@ -79,6 +83,7 @@ export function useWorkspaceFileChange({
 
       socket.on('connect', () => {
         socket.emit('workspace:watch-file', {
+          watchId,
           worktreeId,
           path,
           sha256: currentShaRef.current,
@@ -86,6 +91,7 @@ export function useWorkspaceFileChange({
       });
 
       socket.on('workspace:file-changed', (event: WorkspaceFileChangedEvent) => {
+        if (event.watchId !== watchId) return;
         if (event.worktreeId !== worktreeId || event.path !== path || event.sha256 === currentShaRef.current) return;
         if (dirtyRef.current) {
           pendingExternalShaRef.current = event.sha256;
@@ -96,7 +102,7 @@ export function useWorkspaceFileChange({
       });
 
       cleanup = () => {
-        socket.emit('workspace:unwatch-file');
+        socket.emit('workspace:unwatch-file', { watchId });
         socket.disconnect();
       };
     });

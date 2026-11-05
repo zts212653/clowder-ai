@@ -2009,6 +2009,7 @@ async function assembleIncrementalContextInternal(
       : undefined;
   const navigationHeader = formatNavigationHeader({
     threadId,
+    threadTitle: options?.threadTitle,
     currentCatId: catId,
     recentWorkDirectory: Boolean(threadStore) && options?.contextProjection?.contextMode !== 'hot',
     ...(roadmap ? { roadmapPointer: formatRoadmapPointer(roadmap) } : {}),

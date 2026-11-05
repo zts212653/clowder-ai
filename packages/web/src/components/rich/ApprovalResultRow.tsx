@@ -38,7 +38,7 @@ export function ApprovalResultRow({
       <div
         data-testid="decision-result-row"
         data-presentation="chat-receipt"
-        className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[13px]"
+        className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[length:var(--console-font-compact)]"
         style={warning ? { color: 'var(--semantic-warning)' } : undefined}
       >
         <span

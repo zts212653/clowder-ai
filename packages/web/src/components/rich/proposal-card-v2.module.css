@@ -7,13 +7,13 @@
   background: var(--shell-paper);
   --chat-background-role: paper;
   color: var(--shell-body);
-  font-size: 13.5px;
+  font-size: var(--console-font-sm);
 }
 .header {
   padding: 14px 16px 8px;
 }
 .header h3 {
-  font-size: 15px;
+  font-size: var(--console-font-reading);
   font-weight: 600;
   color: var(--shell-ink);
   overflow-wrap: anywhere;
@@ -21,7 +21,7 @@
 .reason {
   margin-top: 3px;
   color: var(--shell-muted);
-  font-size: 13px;
+  font-size: var(--console-font-compact);
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
@@ -34,7 +34,7 @@
   padding: 6px 16px 12px;
 }
 .fields dt {
-  font-size: 13px;
+  font-size: var(--console-font-compact);
   color: var(--shell-muted);
 }
 .fields dd {
@@ -55,7 +55,7 @@
   border: 1px solid var(--shell-hairline-strong);
   border-radius: 5px;
   padding: 0 5px;
-  font-size: 11px;
+  font-size: var(--console-font-label);
   line-height: 16px;
   color: var(--shell-muted);
 }
@@ -68,12 +68,12 @@
   background: var(--shell-paper);
   --chat-background-role: paper;
   color: var(--shell-ink);
-  font-size: 13px;
+  font-size: var(--console-font-compact);
 }
 .why {
   margin-left: 8px;
   color: var(--shell-muted);
-  font-size: 12px;
+  font-size: var(--console-font-xs);
 }
 .message {
   margin: 0 16px 12px;
@@ -82,13 +82,13 @@
   border-radius: 8px;
   background: var(--shell-work);
   --chat-background-role: work;
-  font-size: 13px;
+  font-size: var(--console-font-compact);
   overflow-wrap: anywhere;
 }
 .message summary {
   cursor: pointer;
   color: var(--shell-muted);
-  font-size: 12px;
+  font-size: var(--console-font-xs);
 }
 .message .auto {
   display: block;
@@ -115,7 +115,7 @@
   padding: 0 14px;
   border: 1px solid var(--shell-hairline-strong);
   border-radius: 8px;
-  font-size: 13px;
+  font-size: var(--console-font-compact);
   font-weight: 500;
 }
 .footer .primary,
@@ -148,7 +148,7 @@
   border-radius: 8px;
   background: var(--shell-paper);
   --chat-background-role: paper;
-  font-size: 13px;
+  font-size: var(--console-font-compact);
 }
 .card :is(input, select, button, [tabindex]):focus-visible {
   outline: 2px solid var(--shell-primary);
@@ -161,7 +161,7 @@
   display: block;
   padding: 0 16px 10px;
   color: var(--shell-muted);
-  font-size: 12px;
+  font-size: var(--console-font-xs);
 }
 .switch {
   appearance: none;
@@ -218,7 +218,7 @@
   width: 100%;
   padding: 7px 10px;
   text-align: left;
-  font-size: 13.5px;
+  font-size: var(--console-font-sm);
 }
 .groupList button[aria-selected="true"],
 .groupList button:hover {

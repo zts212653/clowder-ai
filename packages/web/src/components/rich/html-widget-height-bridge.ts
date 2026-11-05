@@ -96,6 +96,22 @@ export function addHtmlWidgetHeightBridge(html: string, blockId: string, instanc
         textNode = textWalker.nextNode();
       }
     }
+    // Descendant rects include leading root/body spacing, but omit their trailing
+    // box edges. Omitting those edges makes every content invalidation alternate
+    // between the descendant extent and the larger scroll extent. Do not include
+    // root/body box heights: height:100% would reintroduce the viewport floor.
+    for (const element of [body, document.documentElement]) {
+      if (!element) continue;
+      const style = getComputedStyle(element);
+      const pixels = (property) => Math.max(0, parseFloat(style[property]) || 0);
+      const padding = pixels('paddingBottom');
+      const border = pixels('borderBottomWidth');
+      const contentBoxBottom = element.getBoundingClientRect().bottom + window.scrollY - padding - border;
+      // Fixed/absolute paint outside the flow box already supplies its own
+      // extent. Appending flow padding there creates viewport feedback.
+      if (contentBottom > contentBoxBottom + 1) continue;
+      contentBottom += padding + border + pixels('marginBottom');
+    }
     const contentHeight = Math.max(1, Math.ceil(contentBottom));
     // Body and root scroll extents cover different generated boxes. Both may
     // also equal the iframe viewport floor, so the parent keeps their proof

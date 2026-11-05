@@ -1,6 +1,10 @@
+import { recoveryRedis } from '../../../../../infrastructure/recovery/recovery-redis.js';
+import type { DeploymentWaitAudit } from '../ports/deployment-wait/recovery-facts.js';
 import { advanceEntrustedTaskAuthority } from '../ports/EntrustedWorkRevision.js';
 import { reconcilePluginWaitTaskMutation } from '../ports/TaskPluginWait.js';
+import { matchesTaskProbeSource, type TaskProbeSource } from '../ports/TaskProbeSource.js';
 import type { ReplacePluginWaitInput } from '../ports/TaskStoreContract.js';
+import { commitTaskTransaction, publishTaskRecovery } from './publish-task-recovery.js';
 /**
  * Redis Task Store (毛线球)
  * Redis-backed task storage with same interface as in-memory TaskStore.
@@ -62,7 +66,16 @@ import {
 import { buildSubjectTaskUpdate } from '../ports/TaskSubjectUpsert.js';
 import { buildTaskWaitReplacement } from '../ports/TaskWaitReplacement.js';
 import { TaskKeys } from '../redis-keys/task-keys.js';
-import { DEPLOYMENT_WAIT_INDEX, listDeploymentWaitProjectionCandidates } from './deployment-wait-index.js';
+import {
+  ackDeploymentWaitAudit,
+  failDeploymentWaitAudit,
+  finishDeploymentWaitRecovery,
+  getDeploymentWaitRecoveryFacts,
+  initializeDeploymentWaitRecovery,
+  listDeploymentWaitAuditCandidates,
+  listDeploymentWaitProjectionCandidates,
+  listDueDeploymentWaitRecovery,
+} from './deployment-wait-index.js';
 import { mutateOrdinaryRedisTask } from './RedisOrdinaryTaskMutation.js';
 import { hydrateTask, hydrateWaitRegistration, serializeTask } from './RedisTaskCodec.js';
 import { fetchRedisTasksByIds, readRedisTaskThreadPage } from './RedisTaskCollectionReader.js';
@@ -121,6 +134,7 @@ export class RedisTaskStore implements ITaskStore {
   private readonly entrustedWorkMutations: RedisTaskEntrustedWorkMutationStore;
 
   constructor(redis: RedisClient, options?: { ttlSeconds?: number }) {
+    redis = recoveryRedis(redis);
     this.redis = redis;
     this.developmentWork = new RedisTaskDevelopmentWorkStore(redis);
     this.dataControllers = new RedisTaskDataControllerStore(
@@ -295,8 +309,29 @@ export class RedisTaskStore implements ITaskStore {
     return updated;
   }
 
+  listDueDeploymentWaitRecovery(limit = 100, now = Date.now()) {
+    return listDueDeploymentWaitRecovery(this.redis, limit, now);
+  }
   listDeploymentWaitProjectionCandidates(): Promise<TaskItem[]> {
     return listDeploymentWaitProjectionCandidates(this.redis);
+  }
+  listDeploymentWaitAuditCandidates(limit = 100, now = Date.now()) {
+    return listDeploymentWaitAuditCandidates(this.redis, limit, now);
+  }
+  ackDeploymentWaitAudit(entry: DeploymentWaitAudit) {
+    return ackDeploymentWaitAudit(this.redis, entry);
+  }
+  failDeploymentWaitAudit(entry: DeploymentWaitAudit, now: number) {
+    return failDeploymentWaitAudit(this.redis, entry, now);
+  }
+  finishDeploymentWaitRecovery(task: TaskItem, now: number, failed: boolean) {
+    return finishDeploymentWaitRecovery(this.redis, task, now, failed);
+  }
+  getDeploymentWaitRecoveryFacts(id: string) {
+    return getDeploymentWaitRecoveryFacts(this.redis, id);
+  }
+  initializeDeploymentWaitRecovery(rebuild = false) {
+    return initializeDeploymentWaitRecovery(this.redis, rebuild);
   }
 
   async listByKind(kind: TaskKind): Promise<TaskItem[]> {
@@ -325,8 +360,8 @@ export class RedisTaskStore implements ITaskStore {
           });
 
           const pipeline = session.multi();
-          pipeline.hset(key, serializeTask(updated));
-          const result = await pipeline.exec();
+          publishTaskRecovery(pipeline, key, serializeTask(updated));
+          const result = await commitTaskTransaction(pipeline);
           return result ? updated : undefined;
         },
       );
@@ -437,7 +472,12 @@ export class RedisTaskStore implements ITaskStore {
           const updated = buildTaskWaitReplacement(existing, input, currentBinding);
           if (input.waitRegistration) assertTypedWaitRegistrationInstallation(updated, input.waitRegistration);
           const pipeline = session.multi();
-          pipeline.hset(key, serializeTask(updated));
+          const fields = serializeTask(updated);
+          const removed: string[] = [];
+          if (input.waitRegistration) fields[TYPED_WAIT_REGISTRATION_FIELD] = JSON.stringify(input.waitRegistration);
+          else if (automationGeneration(existing.automationState) !== automationGeneration(updated.automationState))
+            removed.push(TYPED_WAIT_REGISTRATION_FIELD);
+          publishTaskRecovery(pipeline, key, fields, removed);
           if (updated.threadId !== existing.threadId) {
             pipeline.zrem(TaskKeys.thread(existing.threadId), taskId);
             pipeline.zadd(TaskKeys.thread(updated.threadId), String(updated.createdAt), taskId);
@@ -448,12 +488,7 @@ export class RedisTaskStore implements ITaskStore {
               JSON.stringify({ workId: binding.workId, attemptId: binding.attemptId }),
             );
           }
-          if (input.waitRegistration)
-            pipeline.hset(key, TYPED_WAIT_REGISTRATION_FIELD, JSON.stringify(input.waitRegistration));
-          else if (automationGeneration(existing.automationState) !== automationGeneration(updated.automationState)) {
-            pipeline.hdel(key, TYPED_WAIT_REGISTRATION_FIELD);
-          }
-          const result = await pipeline.exec();
+          const result = await commitTaskTransaction(pipeline);
           return result ? updated : undefined;
         },
       );
@@ -491,7 +526,18 @@ export class RedisTaskStore implements ITaskStore {
     return this.updateIfThreadId(taskId, existing.threadId, input);
   }
 
-  async updateIfThreadId(taskId: string, expectedThreadId: string, input: UpdateTaskInput): Promise<TaskItem | null> {
+  completeProbeIfCurrent(taskId: string, source: TaskProbeSource): Promise<TaskItem | null> {
+    return this.updateIfCurrent(taskId, source.threadId, { status: 'done' }, source);
+  }
+  updateIfThreadId(taskId: string, expectedThreadId: string, input: UpdateTaskInput): Promise<TaskItem | null> {
+    return this.updateIfCurrent(taskId, expectedThreadId, input);
+  }
+  private async updateIfCurrent(
+    taskId: string,
+    expectedThreadId: string,
+    input: UpdateTaskInput,
+    probeSource?: TaskProbeSource,
+  ): Promise<TaskItem | null> {
     const key = TaskKeys.detail(taskId);
     for (let attempt = 0; attempt < MAX_CONDITIONAL_TASK_UPDATE_RETRIES; attempt += 1) {
       const outcome = await runWithExclusiveRedisWatchSession<TaskItem | null | undefined>(
@@ -504,19 +550,22 @@ export class RedisTaskStore implements ITaskStore {
           }
 
           const existing = hydrateTask(data);
-          if (existing.threadId !== expectedThreadId) {
+          if (
+            existing.threadId !== expectedThreadId ||
+            (probeSource && !matchesTaskProbeSource(existing, probeSource))
+          ) {
             return null;
           }
 
           const updated = this.applyTaskUpdate(existing, input);
           const pipeline = session.multi();
-          pipeline.hset(key, serializeTask(updated));
+          publishTaskRecovery(pipeline, key, serializeTask(updated));
           if (input.threadId !== undefined && input.threadId !== existing.threadId) {
             pipeline.zrem(TaskKeys.thread(existing.threadId), taskId);
             pipeline.zadd(TaskKeys.thread(input.threadId), updated.updatedAt, taskId);
           }
 
-          const result = await pipeline.exec();
+          const result = await commitTaskTransaction(pipeline);
           return result ? updated : undefined;
         },
       );
@@ -587,13 +636,13 @@ export class RedisTaskStore implements ITaskStore {
     const key = TaskKeys.detail(task.id);
 
     const pipeline = this.redis.multi();
-    pipeline.hset(key, serializeTask(task));
+    publishTaskRecovery(pipeline, key, serializeTask(task));
     pipeline.zadd(TaskKeys.thread(task.threadId), String(task.createdAt), task.id);
     pipeline.zadd(TaskKeys.kind(task.kind), String(task.createdAt), task.id);
     if ((options?.syncSubject ?? true) && subjectKey) {
       pipeline.set(TaskKeys.subject(subjectKey), task.id);
     }
-    await pipeline.exec();
+    await commitTaskTransaction(pipeline);
     await this.applyTtl(task);
     return true;
   }
@@ -662,7 +711,7 @@ export class RedisTaskStore implements ITaskStore {
         const tx = session.multi();
         if (durable) tx.persist(threadKey);
         else tx.expire(threadKey, this.ttlSeconds ?? 0);
-        return await tx.exec();
+        return await commitTaskTransaction(tx);
       });
       if (committed) return;
     }

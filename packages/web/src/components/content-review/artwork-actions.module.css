@@ -13,11 +13,11 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-weight: 600;
-  font-size: 14px;
+  font-size: var(--console-font-sm);
 }
 .version {
   flex: none;
-  font-size: 12px;
+  font-size: var(--console-font-xs);
 }
 .headerActions {
   display: flex;
@@ -39,7 +39,7 @@
   background: var(--console-overlay-control);
   color: var(--overlay-fg);
   padding: 7px 10px;
-  font-size: 12px;
+  font-size: var(--console-font-xs);
   white-space: nowrap;
 }
 .toolbarTrigger {
@@ -49,7 +49,7 @@
   border-radius: 6px;
   background: transparent;
   color: var(--cafe-text-secondary);
-  font-size: 18px;
+  font-size: var(--console-font-lg);
   line-height: 1;
 }
 .toolbarTrigger:hover {
@@ -97,7 +97,7 @@
   text-align: left;
   border-radius: 6px;
   padding: 9px 10px;
-  font-size: 13px;
+  font-size: var(--console-font-compact);
   color: inherit;
   background: transparent;
   white-space: normal;
@@ -138,13 +138,13 @@
 }
 .info {
   padding: 8px 10px;
-  font-size: 12px;
+  font-size: var(--console-font-xs);
   line-height: 1.6;
   overflow-wrap: anywhere;
 }
 .info strong {
   display: block;
-  font-size: 13px;
+  font-size: var(--console-font-compact);
 }
 .info .path {
   background: var(--cafe-surface-elevated);
@@ -152,7 +152,7 @@
   padding: 6px;
   font-family: monospace;
   margin-top: 6px;
-  font-size: 11px;
+  font-size: var(--console-font-label);
 }
 .notice {
   position: absolute;
@@ -166,7 +166,7 @@
   --chat-background-role: cafe;
   color: var(--cafe-text);
   box-shadow: 0 4px 20px #0004;
-  font-size: 13px;
+  font-size: var(--console-font-compact);
   white-space: nowrap;
 }
 @media (max-width: 600px) {
@@ -174,7 +174,7 @@
     gap: 4px;
   }
   .title {
-    font-size: 12px;
+    font-size: var(--console-font-xs);
   }
   .headerActions {
     gap: 4px;
@@ -186,7 +186,7 @@
   }
   .version {
     max-width: none;
-    font-size: 11px;
+    font-size: var(--console-font-label);
   }
   .version select {
     padding-right: 12px;
@@ -220,7 +220,7 @@
   }
   .workTitle {
     min-width: 3rem;
-    font-size: 12px;
+    font-size: var(--console-font-xs);
   }
   .workVersion {
     max-width: 6rem;

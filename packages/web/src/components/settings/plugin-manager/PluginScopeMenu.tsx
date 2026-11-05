@@ -51,7 +51,7 @@ export function PluginScopeMenu({
         aria-expanded={open}
         aria-haspopup="menu"
         onClick={() => setOpen((v) => !v)}
-        className="flex h-9 items-center gap-2 rounded-[9px] border border-cafe-border bg-[var(--console-card-bg)] px-3 text-[13.5px] font-medium text-cafe"
+        className="flex h-9 items-center gap-2 rounded-[9px] border border-cafe-border bg-[var(--console-card-bg)] px-3 text-[length:var(--console-font-sm)] font-medium text-cafe"
       >
         {scopes.find(([key]) => key === value)?.[1]} <span className="text-cafe-muted">{counts[value] ?? '—'}</span>
         <svg
@@ -81,7 +81,7 @@ export function PluginScopeMenu({
                 setOpen(false);
                 trigger.current?.focus();
               }}
-              className={`flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-[13.5px] text-cafe ${key === value ? 'bg-[var(--console-panel-bg)] font-semibold' : 'hover:bg-[var(--console-hover-bg)]'}`}
+              className={`flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-[length:var(--console-font-sm)] text-cafe ${key === value ? 'bg-[var(--console-panel-bg)] font-semibold' : 'hover:bg-[var(--console-hover-bg)]'}`}
             >
               <span className="flex-1">{label}</span>
               <span className="text-cafe-muted">{counts[key] ?? '—'}</span>

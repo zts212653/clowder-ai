@@ -203,7 +203,7 @@ function Consumers() {
       </div>
       {layers.map((layer) => (
         <div key={layer} data-layer={layer} style={{ background: `var(${layer})`, padding: 20 }}>
-          <div data-lineage-focus="true" style={{ height: 24 }} />
+          <div data-message-jump-focus="true" style={{ height: 24 }} />
         </div>
       ))}
     </div>

@@ -6,7 +6,10 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { catRegistry } from '@cat-cafe/shared';
 import { createAcpServiceForConfig } from '../../dist/domains/cats/services/agents/providers/acp/AcpServiceFactory.js';
-import { materializeSessionMcpServers } from '../../dist/domains/cats/services/agents/providers/acp/acp-session-env.js';
+import {
+  captureSessionMcpServers,
+  materializeSessionMcpServers,
+} from '../../dist/domains/cats/services/agents/providers/acp/acp-session-env.js';
 import { NativePluginActions } from '../../dist/domains/plugin/declared/native-plugin-actions.js';
 
 for (const [clientId, transport] of [
@@ -76,15 +79,17 @@ for (const [clientId, transport] of [
     const client = originalPool.clientFactory();
     assert.ok(hostKeys.every((key) => client.config.preparedEnv[key] === undefined));
     const selected = actions.environment(admission.instance.pluginInstanceId, 'isolated-mcp');
-    const [server] = materializeSessionMcpServers([
-      {
-        name: 'selected-plugin',
-        hostSource: 'plugin',
-        command: process.execPath,
-        args: [],
-        env: Object.entries(references).map(([name, value]) => ({ name, value })),
-      },
-    ]);
+    const [server] = materializeSessionMcpServers(
+      captureSessionMcpServers([
+        {
+          name: 'selected-plugin',
+          hostSource: 'plugin',
+          command: process.execPath,
+          args: [],
+          env: Object.entries(references).map(([name, value]) => ({ name, value })),
+        },
+      ]),
+    );
     assert.ok(
       server.env.some(({ name, value }) => name === 'CLOWDER_PLUGIN_ACTION_TOKEN' && value === selected[name]),
       'the selected MCP server must still receive the current Host connection through its reference',

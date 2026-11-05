@@ -2,26 +2,34 @@ import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ShellPresentationContext } from '@/components/shell/shell-presentation';
 
 Object.assign(globalThis as Record<string, unknown>, { React });
+
+// These cases protect the explicitly selected classic interface, independently of the new-visit default.
+function renderClassic(element: React.ReactNode) {
+  return renderToStaticMarkup(
+    <ShellPresentationContext.Provider value="classic">{element}</ShellPresentationContext.Provider>,
+  );
+}
 
 describe('TaskComposer', () => {
   it('renders title input and submit button when open', async () => {
     const { TaskComposer } = await import('../TaskComposer');
-    const html = renderToStaticMarkup(<TaskComposer threadId="t1" onClose={vi.fn()} />);
+    const html = renderClassic(<TaskComposer threadId="t1" onClose={vi.fn()} />);
     expect(html).toContain('placeholder');
     expect(html).toContain('创建任务');
   });
 
   it('renders why textarea', async () => {
     const { TaskComposer } = await import('../TaskComposer');
-    const html = renderToStaticMarkup(<TaskComposer threadId="t1" onClose={vi.fn()} />);
+    const html = renderClassic(<TaskComposer threadId="t1" onClose={vi.fn()} />);
     expect(html).toContain('textarea');
   });
 
   it('publishes the server limits instead of silently slicing task text', async () => {
     const { TaskComposer } = await import('../TaskComposer');
-    const html = renderToStaticMarkup(<TaskComposer threadId="t1" onClose={vi.fn()} />);
+    const html = renderClassic(<TaskComposer threadId="t1" onClose={vi.fn()} />);
 
     expect(html).toContain('maxLength="200"');
     expect(html).toContain('maxLength="1000"');
@@ -31,7 +39,7 @@ describe('TaskComposer', () => {
 
   it('renders cancel button', async () => {
     const { TaskComposer } = await import('../TaskComposer');
-    const html = renderToStaticMarkup(<TaskComposer threadId="t1" onClose={vi.fn()} />);
+    const html = renderClassic(<TaskComposer threadId="t1" onClose={vi.fn()} />);
     expect(html).toContain('取消');
   });
 
@@ -41,6 +49,7 @@ describe('TaskComposer', () => {
     const originalFetch = globalThis.fetch;
 
     beforeEach(() => {
+      window.localStorage.setItem('cat-cafe:shell-presentation', 'classic');
       container = document.createElement('div');
       document.body.appendChild(container);
       root = createRoot(container);
@@ -50,6 +59,7 @@ describe('TaskComposer', () => {
       act(() => root.unmount());
       container.remove();
       globalThis.fetch = originalFetch;
+      window.localStorage.removeItem('cat-cafe:shell-presentation');
     });
 
     it('does not call onClose when fetch returns non-ok response', async () => {

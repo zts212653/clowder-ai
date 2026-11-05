@@ -9,7 +9,7 @@
   border-radius: 12px;
   border: 1px solid var(--shell-hairline-strong, #e5dfd5);
   background: var(--shell-paper, #fffbf6);
-  font-size: 12px;
+  font-size: var(--console-font-xs);
   color: var(--shell-ink, #3d3d3a);
 }
 .w-dot {
@@ -33,7 +33,7 @@
   border: 1px dashed var(--shell-hairline-strong, #d8d1c6);
   border-radius: 12px;
   padding: 10px 14px 12px;
-  font-size: 14px;
+  font-size: var(--console-font-sm);
   line-height: 1.6;
   color: var(--shell-ink, #3d3d3a);
   background: var(--shell-paper, #fffbf6);
@@ -72,7 +72,7 @@
 }
 @media (max-width: 640px) {
   .w-chip {
-    font-size: 11px;
+    font-size: var(--console-font-label);
     gap: 5px;
     max-width: 100%;
     overflow: hidden;

@@ -2,6 +2,7 @@ import type { ArtifactReviewRound, ArtifactReviewView, ContentModificationRecord
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { SHELL_PRESENTATION_STORAGE_KEY, writeShellPresentation } from '@/components/shell/shell-presentation';
 import { WorkspaceSurfaceVisibilityProvider } from '@/components/workbench/WorkspaceSurfaceVisibility';
 import { useChatStore } from '@/stores/chatStore';
 import { ArtifactReviewSurface } from '../ArtifactReviewSurface';
@@ -143,6 +144,7 @@ const comparing = () => container.querySelector('[data-testid="artifact-media-co
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   localStorage.clear();
+  writeShellPresentation('v2');
   clearModificationFocus();
   pending = null;
   useChatStore.setState({ currentThreadId: THREAD, workspaceOpenRevision: 7, workspaceOpenRequest: null } as never);
@@ -154,6 +156,7 @@ afterEach(async () => {
   clearModificationFocus();
   await act(async () => root.unmount());
   container.remove();
+  localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
   vi.unstubAllGlobals();
 });
 
@@ -345,7 +348,8 @@ describe('the round surface and a receipt asking for the returned version', () =
     expect(pending).toBeNull();
   });
 
-  it("puts the round's own panel aside while the comparison is open, as the person's own button does", async () => {
+  it("classic: puts the round's own decision panel aside while comparison is open", async () => {
+    writeShellPresentation('classic');
     await mount();
     await act(async () => (container.querySelector('button[aria-label="完成审阅"]') as HTMLButtonElement).click());
     expect(container.querySelector('aside[aria-label="审阅结论"]')).not.toBeNull();
@@ -366,7 +370,13 @@ describe('the round surface and a receipt asking for the returned version', () =
 
   it("keeps the person's own choice to compare when a newer navigation arrives", async () => {
     await mount();
-    await act(async () => (container.querySelector('button[aria-label="对比版本"]') as HTMLButtonElement).click());
+    const versions = container.querySelector<HTMLSelectElement>('select[aria-label="作品版本"]');
+    expect(versions).not.toBeNull();
+    if (!versions) throw new Error('v2 version chooser is missing');
+    await act(async () => {
+      versions.value = 'compare';
+      versions.dispatchEvent(new Event('change', { bubbles: true }));
+    });
     expect(comparing()).toBe(true);
     await navigate(8);
     expect(comparing()).toBe(true);

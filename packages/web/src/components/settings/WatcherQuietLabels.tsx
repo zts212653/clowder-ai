@@ -21,7 +21,7 @@ export function WatcherQuietLabels({
         return (
           <span
             key={id}
-            className="inline-flex h-[26px] items-center gap-1.5 rounded-md bg-cafe-surface-elevated px-2 text-[13px] text-cafe-secondary"
+            className="inline-flex h-[26px] items-center gap-1.5 rounded-md bg-cafe-surface-elevated px-2 text-[length:var(--console-font-compact)] text-cafe-secondary"
           >
             {label && (
               <span className="h-2 w-2 rounded-full" style={{ backgroundColor: label.color }} aria-hidden="true" />
@@ -45,7 +45,7 @@ export function WatcherQuietLabels({
         aria-expanded={open}
         aria-controls="watcher-quiet-label-options"
         onClick={() => setOpen(!open)}
-        className="rounded text-[13px] text-cafe-accent disabled:opacity-50"
+        className="rounded text-[length:var(--console-font-compact)] text-cafe-accent disabled:opacity-50"
       >
         添加标签
       </button>

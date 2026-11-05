@@ -30,7 +30,7 @@ vi.mock('@/stores/sidebarStore', () => ({
   initSidebarWidth: () => {},
 }));
 // Stub heavy rail/sidebar children so the test stays focused on AppShell + float host.
-vi.mock('../ActivityBar', () => ({ ActivityBar: () => null }));
+vi.mock('../ActivityBar', () => ({ ActivityBar: () => null, ClapperboardIcon: () => null }));
 vi.mock('../ThreadSidebar', () => ({ ThreadSidebar: () => null }));
 vi.mock('@/utils/api-client', () => ({
   API_URL: 'http://localhost:3112',

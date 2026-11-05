@@ -487,9 +487,9 @@ describe('artifact check reuse after API tests', () => {
           const alias = /^pnpm (?:run )?([\w:.-]+)$/u.exec(command)?.[1];
           return alias && scripts[alias] ? expand(alias) : [command];
         });
-      // These are the real API entrypoint's root and one-directory JS globs.
+      // Node's quoted recursive glob covers the root and nested JS suites without shell expansion.
       // A future suite split must re-establish coverage before reusing this lane.
-      assert.match(apiScripts.test, / test\/\*\.test\.js test\/\*\*\/\*\.test\.js(?:\s|$)/);
+      assert.match(apiScripts.test, / "test\/\*\*\/\*\.test\.js"(?:\s|$)/u);
       assert.match(apiScripts['test:prompt-budget'], / test\/system-prompt-builder\.test\.js$/);
       const full = expand('check:artifacts');
       const remaining = expand('check:artifacts:after-api-tests');

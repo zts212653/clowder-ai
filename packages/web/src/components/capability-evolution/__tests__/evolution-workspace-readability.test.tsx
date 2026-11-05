@@ -36,6 +36,7 @@ describe('F311 real unnamed project readability', () => {
   const open = vi.fn();
   beforeEach(() => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    localStorage.setItem('cat-cafe:shell-presentation', 'classic');
     useEvolutionReading.setState({ workspaceProgramIds: {}, programs: {} });
     programs = [unnamed('instrumenting', 'a', '让审阅更贴近原始需求'), unnamed('constituting', 'b', '路演表达实验')];
     api.fetch.mockReset().mockImplementation(async (path: string) => {
@@ -54,6 +55,7 @@ describe('F311 real unnamed project readability', () => {
   afterEach(() => {
     act(() => root.unmount());
     host.remove();
+    localStorage.removeItem('cat-cafe:shell-presentation');
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
   async function render() {

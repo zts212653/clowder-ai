@@ -138,9 +138,20 @@ test('supports a known cross-project original, then suppresses coordinates when 
   });
   assert.equal(bound.statusCode, 200, bound.body);
   assert.equal((await f.directory()).roadmap.version.commit, null);
+  const topicRead = () =>
+    f.app.inject({
+      url: '/api/callbacks/list-threads?includeWork=true&topic=original.md',
+      headers: f.headers,
+    });
+  assert.equal((await topicRead()).json().threads[0]?.threadId, f.thread.id);
   await f.threadStore.softDelete(otherThread.id);
   const lost = (await f.directory()).roadmap;
   assert.deepEqual(lost, { status: 'unavailable', reason: 'project_identity_unverified' });
+  assert.deepEqual(
+    (await topicRead()).json().threads,
+    [],
+    'an unverified project binding must not supply topic evidence',
+  );
 });
 
 test('the actual opening context renders the original roadmap alongside Task responsibility', async (t) => {

@@ -1,0 +1,582 @@
+{
+  "version": 1,
+  "loops": [
+    {
+      "id": "action-successor",
+      "owner": "ball-custody",
+      "state": "indexed",
+      "reason": "Canonical lease rows own independent recovery facts; all five writer paths update return/dispatch/task ZSETs in the same Lua CAS. Historical discovery runs once; interrupted/error budgets and status outboxes survive rebuild.",
+      "storeAudit": [
+        "packages/api/test/redis-action-successor-due-recovery.test.js",
+        "packages/api/test/redis-action-successor-recovery-budget.test.js",
+        "packages/api/test/redis-action-successor-recovery-disposition.test.js",
+        "packages/api/test/redis-action-successor-recovery-integration.test.js"
+      ],
+      "sites": ["packages/api/src/index.ts#main.recovery:action-successor"]
+    },
+    {
+      "id": "ball-custody-probe",
+      "owner": "ball-custody",
+      "state": "indexed",
+      "reason": "Original EventLog subject metadata owns finite probe/idle duties, immutable admitted-envelope receipts and exact pending audits; projection/index rebuild cannot revive exhausted work. Bounded blocked-probe, independent idle, audit and status-notice ZSETs publish with canonical metadata and projection writes.",
+      "sites": [
+        "packages/api/src/domains/ball-custody/BallCustodyProbeTaskSpec.ts#createBallCustodyProbeTaskSpec.trigger:interval"
+      ],
+      "storeAudit": [
+        "packages/api/test/redis-ball-probe-recovery.test.js",
+        "packages/api/test/redis-ball-probe-facts.test.js",
+        "packages/api/test/redis-ball-probe-audit.test.js"
+      ]
+    },
+    {
+      "id": "deployment-wait",
+      "owner": "runtime-deployment",
+      "state": "indexed",
+      "reason": "Original Task-owned private facts retain every unconfirmed exact event across owner/generation replacement. Separate bounded live/audit due ZSETs share canonical Task writers; metadata-only ack requires original EventLog exact confirmation. User projection is independent of recovery cadence.",
+      "sites": [
+        "packages/api/src/domains/runtime-deployment/DeploymentWaitRecoverySweep.ts#DeploymentWaitRecoverySweep.startPeriodic.periodicTimer"
+      ],
+      "storeAudit": [
+        "packages/api/test/redis-deployment-wait-recovery.test.js",
+        "packages/api/test/f1843-deployment-audit.test.js"
+      ]
+    },
+    {
+      "id": "exempt:config/codex-login-terminal-worker.ts",
+      "owner": "packages/api/src/config/codex-login-terminal-worker.ts",
+      "state": "exempt",
+      "reason": "One login terminal worker monitors its existing lease; it does not enumerate work history.",
+      "sites": ["packages/api/src/config/codex-login-terminal-worker.ts#<module>.monitor"]
+    },
+    {
+      "id": "exempt:domains/approval-hub/approval-decision-receipt-hooks.ts",
+      "owner": "packages/api/src/domains/approval-hub/approval-decision-receipt-hooks.ts",
+      "state": "exempt",
+      "reason": "Approval decision receipt delivery retains the approval owner/ledger; separate governance producer outside the accepted wake-recovery scope.",
+      "sites": [
+        "packages/api/src/domains/approval-hub/approval-decision-receipt-hooks.ts#installApprovalDecisionReceiptHooks.timer"
+      ]
+    },
+    {
+      "id": "exempt:domains/auto-dream/CatLifeSettingsService.ts",
+      "owner": "packages/api/src/domains/auto-dream/CatLifeSettingsService.ts",
+      "state": "exempt",
+      "reason": "User sleep/dream schedule projection, not historical wait/wake recovery.",
+      "sites": ["packages/api/src/domains/auto-dream/CatLifeSettingsService.ts#buildProjectionDef.trigger:cron"]
+    },
+    {
+      "id": "exempt:domains/cats/services/agents/agent-key/AgentKeySidecarRenewalLoop.ts",
+      "owner": "packages/api/src/domains/cats/services/agents/agent-key/AgentKeySidecarRenewalLoop.ts",
+      "state": "exempt",
+      "reason": "Renews one admitted agent credential lease; no historical work selection.",
+      "sites": [
+        "packages/api/src/domains/cats/services/agents/agent-key/AgentKeySidecarRenewalLoop.ts#AgentKeySidecarRenewalLoop.start.timer"
+      ]
+    },
+    {
+      "id": "exempt:domains/cats/services/agents/invocation/QueueProcessor.ts",
+      "owner": "packages/api/src/domains/cats/services/agents/invocation/QueueProcessor.ts",
+      "state": "exempt",
+      "reason": "Renews the current exact execution claim heartbeat; Queue lifecycle remains authoritative.",
+      "sites": [
+        "packages/api/src/domains/cats/services/agents/invocation/QueueProcessor.ts#QueueProcessor.executeEntry.heartbeatInterval"
+      ]
+    },
+    {
+      "id": "exempt:domains/cats/services/agents/invocation/RichBlockBuffer.ts",
+      "owner": "packages/api/src/domains/cats/services/agents/invocation/RichBlockBuffer.ts",
+      "state": "exempt",
+      "reason": "Ephemeral pre-delivery rich block buffer cleanup; no historical recovery ledger.",
+      "sites": [
+        "packages/api/src/domains/cats/services/agents/invocation/RichBlockBuffer.ts#RichBlockBuffer.cleanupTimer"
+      ]
+    },
+    {
+      "id": "exempt:domains/cats/services/agents/providers/acp/AcpClient.ts",
+      "owner": "packages/api/src/domains/cats/services/agents/providers/acp/AcpClient.ts",
+      "state": "exempt",
+      "reason": "Per-prompt idle watchdog resets one live request deadline, not historical work.",
+      "sites": [
+        "packages/api/src/domains/cats/services/agents/providers/acp/AcpClient.ts#AcpClient.promptStream.scheduleIdleCheck.idleTimer"
+      ]
+    },
+    {
+      "id": "exempt:domains/cats/services/agents/providers/acp/AcpHttpStreamClient.ts",
+      "owner": "packages/api/src/domains/cats/services/agents/providers/acp/AcpHttpStreamClient.ts",
+      "state": "exempt",
+      "reason": "Per-prompt idle watchdog resets one live request deadline, not historical work.",
+      "sites": [
+        "packages/api/src/domains/cats/services/agents/providers/acp/AcpHttpStreamClient.ts#AcpHttpStreamClient.promptStream.scheduleIdleCheck.idleTimer"
+      ]
+    },
+    {
+      "id": "exempt:domains/cats/services/agents/providers/acp/AcpProcessPool.ts",
+      "owner": "packages/api/src/domains/cats/services/agents/providers/acp/AcpProcessPool.ts",
+      "state": "exempt",
+      "reason": "Current provider pool health heartbeat; no wait/wake recovery.",
+      "sites": [
+        "packages/api/src/domains/cats/services/agents/providers/acp/AcpProcessPool.ts#AcpProcessPool.startHealthCheck.healthTimer"
+      ]
+    },
+    {
+      "id": "exempt:domains/cats/services/agents/providers/pty/pty-utils.ts",
+      "owner": "packages/api/src/domains/cats/services/agents/providers/pty/pty-utils.ts",
+      "state": "exempt",
+      "reason": "Polls a single current provider transcript file, not historical sessions.",
+      "sites": [
+        "packages/api/src/domains/cats/services/agents/providers/pty/pty-utils.ts#watchForTranscriptFile.pollInterval"
+      ]
+    },
+    {
+      "id": "exempt:domains/cats/services/tts/tts-cache-cleaner.ts",
+      "owner": "packages/api/src/domains/cats/services/tts/tts-cache-cleaner.ts",
+      "state": "exempt",
+      "reason": "Ephemeral TTS cache maintenance; no durable work or wait records.",
+      "sites": ["packages/api/src/domains/cats/services/tts/tts-cache-cleaner.ts#startTtsCacheCleaner.setInterval"]
+    },
+    {
+      "id": "exempt:domains/collaborative-content/modification/composition.ts",
+      "owner": "packages/api/src/domains/collaborative-content/modification/composition.ts",
+      "state": "exempt",
+      "reason": "F309 modification receipt recovery is assigned to collaborative-content owner outside #1843.",
+      "sites": [
+        "packages/api/src/domains/collaborative-content/modification/composition.ts#createContentModificationIntegration.trigger:interval"
+      ]
+    },
+    {
+      "id": "exempt:domains/collaborative-content/modification/service.ts",
+      "owner": "packages/api/src/domains/collaborative-content/modification/service.ts",
+      "state": "exempt",
+      "reason": "Renews one content modification request lease; does not select historical requests.",
+      "sites": [
+        "packages/api/src/domains/collaborative-content/modification/service.ts#ContentModificationService.resume.heartbeat"
+      ]
+    },
+    {
+      "id": "exempt:domains/concierge/live/host/owner-local-note-simulation.ts",
+      "owner": "packages/api/src/domains/concierge/live/host/owner-local-note-simulation.ts",
+      "state": "exempt",
+      "reason": "Renews a live meeting surface during a single call; no historical work.",
+      "sites": [
+        "packages/api/src/domains/concierge/live/host/owner-local-note-simulation.ts#startOwnerLocalNoteSimulation.renewal"
+      ]
+    },
+    {
+      "id": "exempt:domains/concierge/meeting/f317-meeting-feed.ts",
+      "owner": "packages/api/src/domains/concierge/meeting/f317-meeting-feed.ts",
+      "state": "exempt",
+      "reason": "Live meeting feed heartbeat; not wait/wake recovery.",
+      "sites": ["packages/api/src/domains/concierge/meeting/f317-meeting-feed.ts#startF317MeetingFeed.timer"]
+    },
+    {
+      "id": "exempt:domains/concierge/watcher/WatcherSupervisor.ts",
+      "owner": "packages/api/src/domains/concierge/watcher/WatcherSupervisor.ts",
+      "state": "exempt",
+      "reason": "F332 supervises current watcher/provider surfaces; separate active execution owner, not #1843 history selection.",
+      "sites": ["packages/api/src/domains/concierge/watcher/WatcherSupervisor.ts#WatcherSupervisor.start.timer"]
+    },
+    {
+      "id": "exempt:domains/growing/ArtifactReviewRecoveryTaskSpec.ts",
+      "owner": "packages/api/src/domains/growing/ArtifactReviewRecoveryTaskSpec.ts",
+      "state": "exempt",
+      "reason": "F309 artifact review recovery is assigned to the collaborative-content owner outside this implementation scope.",
+      "sites": [
+        "packages/api/src/domains/growing/ArtifactReviewRecoveryTaskSpec.ts#createArtifactReviewRecoveryTaskSpec.trigger:interval"
+      ]
+    },
+    {
+      "id": "exempt:domains/growing/CustodyOpportunityRuntime.ts",
+      "owner": "packages/api/src/domains/growing/CustodyOpportunityRuntime.ts",
+      "state": "exempt",
+      "reason": "Custody opportunity observation belongs to growing owner and is explicitly outside #1843.",
+      "sites": [
+        "packages/api/src/domains/growing/CustodyOpportunityRuntime.ts#startCustodyOpportunityObservation.timer"
+      ]
+    },
+    {
+      "id": "exempt:domains/limb/LimbPresenceManager.ts",
+      "owner": "packages/api/src/domains/limb/LimbPresenceManager.ts",
+      "state": "exempt",
+      "reason": "Physical device presence heartbeat/health; no historical recovery ledger.",
+      "sites": ["packages/api/src/domains/limb/LimbPresenceManager.ts#LimbPresenceManager.start.timer"]
+    },
+    {
+      "id": "exempt:domains/memory/DailyContextReflectionTaskSpec.ts",
+      "owner": "packages/api/src/domains/memory/DailyContextReflectionTaskSpec.ts",
+      "state": "exempt",
+      "reason": "Scheduled reflection creates memory work; no wait/wake recovery.",
+      "sites": [
+        "packages/api/src/domains/memory/DailyContextReflectionTaskSpec.ts#createDailyContextReflectionTaskSpec.trigger:cron"
+      ]
+    },
+    {
+      "id": "exempt:domains/memory/DeferredPersonMemoryDailyTaskSpec.ts",
+      "owner": "packages/api/src/domains/memory/DeferredPersonMemoryDailyTaskSpec.ts",
+      "state": "exempt",
+      "reason": "Deferred person memory judgment has its own source/approval boundary; scheduled judgment is not wait recovery.",
+      "sites": [
+        "packages/api/src/domains/memory/DeferredPersonMemoryDailyTaskSpec.ts#createDeferredPersonMemoryDailyTaskSpec.trigger:cron"
+      ]
+    },
+    {
+      "id": "exempt:domains/memory/PublishedDocumentIndex.ts",
+      "owner": "packages/api/src/domains/memory/PublishedDocumentIndex.ts",
+      "state": "exempt",
+      "reason": "Reconciles published Git documents into the memory-owned derived search index and checkpoint; it does not select historical wait/wake duties or admit/replay executions.",
+      "sites": ["packages/api/src/domains/memory/PublishedDocumentIndex.ts#PublishedDocumentIndex.start.timer"]
+    },
+    {
+      "id": "exempt:domains/memory/SummaryCompactionTaskSpec.ts",
+      "owner": "packages/api/src/domains/memory/SummaryCompactionTaskSpec.ts",
+      "state": "exempt",
+      "reason": "Memory summary maintenance creates compaction work under memory owner; not a pending wake.",
+      "sites": [
+        "packages/api/src/domains/memory/SummaryCompactionTaskSpec.ts#createSummaryCompactionTaskSpec.trigger:interval"
+      ]
+    },
+    {
+      "id": "exempt:domains/memory/thread-index-startup.ts",
+      "owner": "packages/api/src/domains/memory/thread-index-startup.ts",
+      "state": "exempt",
+      "reason": "Incremental memory index catch-up belongs to memory owner; no execution admission or wake replay.",
+      "sites": ["packages/api/src/domains/memory/thread-index-startup.ts#registerThreadIndexCatchUp.start.scheduled"]
+    },
+    {
+      "id": "exempt:domains/plugin/content-editor-runtime/runtime.ts",
+      "owner": "packages/api/src/domains/plugin/content-editor-runtime/runtime.ts",
+      "state": "exempt",
+      "reason": "Current content editor transport heartbeat; no work recovery.",
+      "sites": [
+        "packages/api/src/domains/plugin/content-editor-runtime/runtime.ts#ContentEditorPluginRuntime.scheduleHeartbeat.timer"
+      ]
+    },
+    {
+      "id": "exempt:domains/plugin/content-editor-runtime/semantic-process-budget.ts",
+      "owner": "packages/api/src/domains/plugin/content-editor-runtime/semantic-process-budget.ts",
+      "state": "exempt",
+      "reason": "Bounds one private browser execution resource budget; no historical recovery selection.",
+      "sites": [
+        "packages/api/src/domains/plugin/content-editor-runtime/semantic-process-budget.ts#monitorPrivateBrowser.schedule.timer"
+      ]
+    },
+    {
+      "id": "exempt:domains/plugin/content-editor-runtime/semantic-worker.ts",
+      "owner": "packages/api/src/domains/plugin/content-editor-runtime/semantic-worker.ts",
+      "state": "exempt",
+      "reason": "Current editor request execution watchdog; no historical recovery selection.",
+      "sites": [
+        "packages/api/src/domains/plugin/content-editor-runtime/semantic-worker.ts#ContentEditorSemanticWorker.execute.schedule.timer"
+      ]
+    },
+    {
+      "id": "exempt:domains/plugin/declared/declared-schedule-task.ts",
+      "owner": "packages/api/src/domains/plugin/declared/declared-schedule-task.ts",
+      "state": "exempt",
+      "reason": "Host compiles declared schedules; business wait selection is owned by the plugin. GitHub typed waits are registered and verified in PR C in the plugin repository.",
+      "sites": [
+        "packages/api/src/domains/plugin/declared/declared-schedule-task.ts#scheduleTask.trigger:interval",
+        "packages/api/src/domains/plugin/declared/declared-schedule-task.ts#scheduleTask.trigger:cron"
+      ]
+    },
+    {
+      "id": "exempt:domains/plugin/desktop-window-runtime/observer.ts",
+      "owner": "packages/api/src/domains/plugin/desktop-window-runtime/observer.ts",
+      "state": "exempt",
+      "reason": "Observes current desktop window surface state; not durable wait recovery.",
+      "sites": ["packages/api/src/domains/plugin/desktop-window-runtime/observer.ts#DesktopWindowObserver.start.timer"]
+    },
+    {
+      "id": "exempt:domains/plugin/manager/chrome-setup/personal-chrome-setup-process.ts",
+      "owner": "packages/api/src/domains/plugin/manager/chrome-setup/personal-chrome-setup-process.ts",
+      "state": "exempt",
+      "reason": "One authorized setup process checks its current authority lease, not historical work.",
+      "sites": [
+        "packages/api/src/domains/plugin/manager/chrome-setup/personal-chrome-setup-process.ts#runChromeSetupProcess.authority"
+      ]
+    },
+    {
+      "id": "exempt:domains/runtime-interaction/runtime-interaction-composition.ts",
+      "owner": "packages/api/src/domains/runtime-interaction/runtime-interaction-composition.ts",
+      "state": "exempt",
+      "reason": "Named B5 exclusion allowed by execution plan: F282 conversation-return recovery uses active sets and its own per-input authority. No historical scan; this change must not reinterpret provider submission/return outcomes.",
+      "sites": [
+        "packages/api/src/domains/runtime-interaction/runtime-interaction-composition.ts#createRuntimeInteractionRuntime.bindConversationReturnGateway.timer"
+      ]
+    },
+    {
+      "id": "exempt:domains/terminal/tmux-agent-spawner.ts",
+      "owner": "packages/api/src/domains/terminal/tmux-agent-spawner.ts",
+      "state": "exempt",
+      "reason": "Polls stderr activity for one live terminal execution, not durable recovery candidates.",
+      "sites": [
+        "packages/api/src/domains/terminal/tmux-agent-spawner.ts#spawnCliInTmux.startPlainTextStderrWatcher.stderrPollTimer"
+      ]
+    },
+    {
+      "id": "exempt:domains/workspace/workspace-file-watcher.ts",
+      "owner": "packages/api/src/domains/workspace/workspace-file-watcher.ts",
+      "state": "exempt",
+      "reason": "Filesystem change observation; no recovery ownership or historical records.",
+      "sites": ["packages/api/src/domains/workspace/workspace-file-watcher.ts#startFileMonitor.startPolling.poller"]
+    },
+    {
+      "id": "exempt:infrastructure/harness-eval/domain/eval-domain-daily.ts",
+      "owner": "packages/api/src/infrastructure/harness-eval/domain/eval-domain-daily.ts",
+      "state": "exempt",
+      "reason": "Scheduled effect-quality evaluation; not recovery of pending work.",
+      "sites": [
+        "packages/api/src/infrastructure/harness-eval/domain/eval-domain-daily.ts#createEvalDomainSpec.trigger:cron"
+      ]
+    },
+    {
+      "id": "exempt:infrastructure/harness-eval/domain/eval-domain-nday.ts",
+      "owner": "packages/api/src/infrastructure/harness-eval/domain/eval-domain-nday.ts",
+      "state": "exempt",
+      "reason": "Scheduled effect-quality evaluation; not recovery of pending work.",
+      "sites": [
+        "packages/api/src/infrastructure/harness-eval/domain/eval-domain-nday.ts#createEvalDomainNDaySpec.trigger:cron"
+      ]
+    },
+    {
+      "id": "exempt:infrastructure/harness-eval/paw-feel-disposition/duty-task-spec.ts",
+      "owner": "packages/api/src/infrastructure/harness-eval/paw-feel-disposition/duty-task-spec.ts",
+      "state": "exempt",
+      "reason": "Paw-feel daily triage creates owner-routed work; no wake lifecycle recovery.",
+      "sites": [
+        "packages/api/src/infrastructure/harness-eval/paw-feel-disposition/duty-task-spec.ts#createPawFeelDutyTaskSpec.trigger:cron"
+      ]
+    },
+    {
+      "id": "exempt:infrastructure/harness-eval/paw-feel-disposition/reconciliation-task-spec.ts",
+      "owner": "packages/api/src/infrastructure/harness-eval/paw-feel-disposition/reconciliation-task-spec.ts",
+      "state": "exempt",
+      "reason": "Paw-feel disposition reconciliation remains with its harness-eval owner outside #1843.",
+      "sites": [
+        "packages/api/src/infrastructure/harness-eval/paw-feel-disposition/reconciliation-task-spec.ts#createPawFeelReconciliationTaskSpec.trigger:interval"
+      ]
+    },
+    {
+      "id": "exempt:infrastructure/harness-eval/reeval-closure-task-spec.ts",
+      "owner": "packages/api/src/infrastructure/harness-eval/reeval-closure-task-spec.ts",
+      "state": "exempt",
+      "reason": "Eval verdict closure reconciliation is explicitly owned by harness-eval outside #1843.",
+      "sites": [
+        "packages/api/src/infrastructure/harness-eval/reeval-closure-task-spec.ts#createReevalClosureTaskSpec.trigger:interval"
+      ]
+    },
+    {
+      "id": "exempt:infrastructure/scheduler/TaskRunnerV2.ts",
+      "owner": "packages/api/src/infrastructure/scheduler/TaskRunnerV2.ts",
+      "state": "exempt",
+      "reason": "Mechanical TaskSpec timing/watchdog engine; recovery task owners are separately registered, and generic scheduling must not decide their fate.",
+      "sites": [
+        "packages/api/src/infrastructure/scheduler/TaskRunnerV2.ts#TaskRunnerV2.ensureCronWatchdog.timer",
+        "packages/api/src/infrastructure/scheduler/TaskRunnerV2.ts#TaskRunnerV2.scheduleTask.timer",
+        "packages/api/src/infrastructure/scheduler/TaskRunnerV2.ts#TaskRunnerV2.scheduleCronTick.timer",
+        "packages/api/src/infrastructure/scheduler/TaskRunnerV2.ts#TaskRunnerV2.scheduleOnceTick.timer",
+        "packages/api/src/infrastructure/scheduler/TaskRunnerV2.ts#TaskRunnerV2.scheduleOnceTick.timer[2]",
+        "packages/api/src/infrastructure/scheduler/TaskRunnerV2.ts#TaskRunnerV2.scheduleOnceTick.retryTimer"
+      ]
+    },
+    {
+      "id": "exempt:infrastructure/scheduler/templates/alpha-browser.ts",
+      "owner": "packages/api/src/infrastructure/scheduler/templates/alpha-browser.ts",
+      "state": "exempt",
+      "reason": "Independent Alpha verification subscription owns revision recovery; not a command-hold wake. Existing owner/fences preserved.",
+      "sites": [
+        "packages/api/src/infrastructure/scheduler/templates/alpha-browser.ts#createAlphaBrowserTemplate.defaultTrigger:cron"
+      ]
+    },
+    {
+      "id": "exempt:infrastructure/scheduler/templates/main-health.ts",
+      "owner": "packages/api/src/infrastructure/scheduler/templates/main-health.ts",
+      "state": "exempt",
+      "reason": "Main health verification creates new observations under its own policy; not replay/recovery.",
+      "sites": [
+        "packages/api/src/infrastructure/scheduler/templates/main-health.ts#createMainHealthTemplate.defaultTrigger:cron"
+      ]
+    },
+    {
+      "id": "exempt:infrastructure/scheduler/templates/present-loop.ts",
+      "owner": "packages/api/src/infrastructure/scheduler/templates/present-loop.ts",
+      "state": "exempt",
+      "reason": "User opt-in scheduled presence work, not recovery of an existing wait.",
+      "sites": [
+        "packages/api/src/infrastructure/scheduler/templates/present-loop.ts#createPresentLoopTemplate.defaultTrigger:interval"
+      ]
+    },
+    {
+      "id": "exempt:infrastructure/scheduler/templates/reminder.ts",
+      "owner": "packages/api/src/infrastructure/scheduler/templates/reminder.ts",
+      "state": "exempt",
+      "reason": "Generic user-authored schedule template; timer holds already have native lifecycle/tombstones and are excluded by design v2.",
+      "sites": ["packages/api/src/infrastructure/scheduler/templates/reminder.ts#<module>.defaultTrigger:cron"]
+    },
+    {
+      "id": "exempt:infrastructure/scheduler/templates/web-digest.ts",
+      "owner": "packages/api/src/infrastructure/scheduler/templates/web-digest.ts",
+      "state": "exempt",
+      "reason": "Scheduled content generation, not wait/wake recovery.",
+      "sites": ["packages/api/src/infrastructure/scheduler/templates/web-digest.ts#<module>.defaultTrigger:cron"]
+    },
+    {
+      "id": "exempt:infrastructure/telemetry/burn-rate-monitor.ts",
+      "owner": "packages/api/src/infrastructure/telemetry/burn-rate-monitor.ts",
+      "state": "exempt",
+      "reason": "Budget telemetry monitor, not a recovery queue.",
+      "sites": ["packages/api/src/infrastructure/telemetry/burn-rate-monitor.ts#BurnRateMonitor.start.timer"]
+    },
+    {
+      "id": "exempt:infrastructure/telemetry/cpu/process-cpu-capture.ts",
+      "owner": "packages/api/src/infrastructure/telemetry/cpu/process-cpu-capture.ts",
+      "state": "exempt",
+      "reason": "CPU telemetry sampling; no work lifecycle decisions.",
+      "sites": ["packages/api/src/infrastructure/telemetry/cpu/process-cpu-capture.ts#arm.timer"]
+    },
+    {
+      "id": "exempt:infrastructure/telemetry/init.ts",
+      "owner": "packages/api/src/infrastructure/telemetry/init.ts",
+      "state": "exempt",
+      "reason": "Periodic observability snapshot; no wait/wake recovery.",
+      "sites": ["packages/api/src/infrastructure/telemetry/init.ts#initTelemetry.snapshotTimer"]
+    },
+    {
+      "id": "exempt:infrastructure/worktrees/WorktreeNoticeService.ts",
+      "owner": "packages/api/src/infrastructure/worktrees/WorktreeNoticeService.ts",
+      "state": "exempt",
+      "reason": "Worktree receipt delivery belongs to its existing storage owner and is explicitly outside #1843.",
+      "sites": [
+        "packages/api/src/infrastructure/worktrees/WorktreeNoticeService.ts#WorktreeNoticeService.start.periodic"
+      ]
+    },
+    {
+      "id": "exempt:luna-curation-setup.ts",
+      "owner": "packages/api/src/luna-curation-setup.ts",
+      "state": "exempt",
+      "reason": "Knowledge curation creates scheduled work; it is not wait/wake recovery.",
+      "sites": ["packages/api/src/luna-curation-setup.ts#registerLunaCuration.trigger:interval"]
+    },
+    {
+      "id": "exempt:main.dailyTimer",
+      "owner": "packages/api/src/index.ts",
+      "state": "exempt",
+      "reason": "F150 tool-usage archival is telemetry maintenance, not wait/wake recovery.",
+      "sites": ["packages/api/src/index.ts#main.dailyTimer"]
+    },
+    {
+      "id": "exempt:main.dirtyFlushTimer",
+      "owner": "packages/api/src/index.ts",
+      "state": "exempt",
+      "reason": "Flushes current memory-index dirty state; no recovery lifecycle.",
+      "sites": ["packages/api/src/index.ts#main.dirtyFlushTimer"]
+    },
+    {
+      "id": "exempt:routes/audio-controller-lease.ts",
+      "owner": "packages/api/src/routes/audio-controller-lease.ts",
+      "state": "exempt",
+      "reason": "Renews one audio capture controller lease; no recovery selection.",
+      "sites": ["packages/api/src/routes/audio-controller-lease.ts#AudioCaptureController.accepted.heartbeat"]
+    },
+    {
+      "id": "exempt:routes/connection-diagnostics.ts",
+      "owner": "packages/api/src/routes/connection-diagnostics.ts",
+      "state": "exempt",
+      "reason": "Time-bounded diagnostic observation for a current request, not recovery.",
+      "sites": ["packages/api/src/routes/connection-diagnostics.ts#registerConnectionDiagnostics.timer"]
+    },
+    {
+      "id": "exempt:routes/member-save-diagnostics.ts",
+      "owner": "packages/api/src/routes/member-save-diagnostics.ts",
+      "state": "exempt",
+      "reason": "Time-bounded current member-save diagnostics; no recovery lifecycle.",
+      "sites": ["packages/api/src/routes/member-save-diagnostics.ts#registerMemberSaveDiagnostics.timer"]
+    },
+    {
+      "id": "exempt:services/ApiInstanceLease.ts",
+      "owner": "packages/api/src/services/ApiInstanceLease.ts",
+      "state": "exempt",
+      "reason": "API lease heartbeat renews the current instance; no historical work selection.",
+      "sites": ["packages/api/src/services/ApiInstanceLease.ts#ApiInstanceLease.startHeartbeat.heartbeatTimer"]
+    },
+    {
+      "id": "exempt:utils/cli-spawn.ts",
+      "owner": "packages/api/src/utils/cli-spawn.ts",
+      "state": "exempt",
+      "reason": "Per-invocation idle timeout resets a single live CLI deadline, not a historical recovery scan.",
+      "sites": ["packages/api/src/utils/cli-spawn.ts#spawnCli.resetTimeout.timeoutTimer"]
+    },
+    {
+      "id": "exempt:utils/cli-supervisor.ts",
+      "owner": "packages/api/src/utils/cli-supervisor.ts",
+      "state": "exempt",
+      "reason": "Supervises the current CLI parent/owned process tree; timers are liveness/cleanup checks for that execution.",
+      "sites": [
+        "packages/api/src/utils/cli-supervisor.ts#main.waitForOwnedTree.treePollTimer",
+        "packages/api/src/utils/cli-supervisor.ts#main.parentTimer"
+      ]
+    },
+    {
+      "id": "exempt:utils/ProcessLivenessProbe.ts",
+      "owner": "packages/api/src/utils/ProcessLivenessProbe.ts",
+      "state": "exempt",
+      "reason": "Samples one process identity for liveness; no recovery owner or historical collection.",
+      "sites": ["packages/api/src/utils/ProcessLivenessProbe.ts#ProcessLivenessProbe.start.timer"]
+    },
+    {
+      "id": "invocation-owner",
+      "owner": "dispatch",
+      "state": "indexed",
+      "reason": "Original invocation hashes own due time, finite diagnostic recovery budget and observation/SLA flags; native running transitions and owner repair publish the due ZSET atomically. One census excludes record-namespace running indexes. Health cannot terminate live ownership.",
+      "sites": [
+        "packages/api/src/domains/cats/services/agents/invocation/InvocationOwnerReaperInterval.ts#startSerializedInvocationOwnerReaperInterval.setIntervalFn"
+      ],
+      "storeAudit": [
+        "packages/api/test/redis-invocation-owner-recovery.test.js",
+        "packages/api/test/f1843-invocation-owner-health.test.js"
+      ]
+    },
+    {
+      "id": "managed-command-wake",
+      "owner": "action-plane,ball-custody",
+      "state": "indexed",
+      "reason": "Job/ref and private wait recovery facts own derived partial due indexes; exact History events settle consumption.",
+      "storeAudit": [
+        "packages/api/test/managed-job-recovery-atomicity.test.js",
+        "packages/api/test/managed-job-legacy-census.test.js",
+        "packages/api/test/managed-command-wait-due.test.js"
+      ],
+      "sites": ["packages/api/src/index.ts#main.recovery:managed-command-wake"]
+    },
+    {
+      "id": "runtime-session-seal",
+      "owner": "identity-session",
+      "state": "indexed",
+      "reason": "Original runtime metadata owns finite retries and needs_attention; same-execution writes preserve its budget and disposition. Bounded derived pending ZSET is published with metadata and explicitly rebuildable.",
+      "sites": [
+        "packages/api/src/domains/cats/services/runtime-session/RuntimeSessionSealReaper.ts#startSerializedRuntimeSessionSealReaperInterval.setIntervalFn"
+      ],
+      "storeAudit": [
+        "packages/api/test/redis-runtime-seal-recovery.test.js",
+        "packages/api/test/f1843-runtime-seal-recovery-contract.test.js"
+      ]
+    },
+    {
+      "id": "session-sealing",
+      "owner": "identity-session",
+      "state": "indexed",
+      "reason": "Original session hashes own sealing status/timestamp and finite failure disposition. Native transitions, restore displacement and generic updates atomically publish the bounded due ZSET; cold census/rebuild is explicit.",
+      "sites": ["packages/api/src/index.ts#main.globalReaperTimer"],
+      "storeAudit": [
+        "packages/api/test/redis-session-recovery-index.test.js",
+        "packages/api/test/f1843-session-sealing-budget.test.js"
+      ]
+    },
+    {
+      "id": "exempt:recovery-cadence-factory",
+      "owner": "task-runner",
+      "state": "exempt",
+      "reason": "Shared process-local cadence selects no work or history. Each registerRecoveryLoop owner call is independently inventoried and must have its own owner registration/store audit. The factory owns only serialization, timing and one round observation.",
+      "sites": ["packages/api/src/infrastructure/recovery/recovery-loop.ts#startRecoveryLoop.timer"]
+    }
+  ]
+}

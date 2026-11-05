@@ -196,6 +196,14 @@ describe('F247 R8 P1-1: EXPLICIT_TOOL_ANNOTATIONS regression guard', () => {
     );
   });
 
+  it('parameter updates retain the owner approval write boundary', () => {
+    const ann = EXPLICIT_TOOL_ANNOTATIONS.cat_cafe_update_scheduled_task_params;
+    assert.ok(ann);
+    assert.equal(ann.readOnlyHint, false);
+    assert.equal(ann.destructiveHint, false);
+    assert.equal(ann.openWorldHint, false);
+  });
+
   describe('F197 PR#1058 P1-1: limb_invoke_tool max-risk annotation', () => {
     /**
      * Upstream review P1: limb_invoke_tool routes to plugin commands that

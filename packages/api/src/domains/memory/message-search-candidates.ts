@@ -15,6 +15,7 @@ export async function collectMessageSearchCandidates(input: {
   threadIds: ReadonlySet<string>;
   source?: { threadId: string; messageId: string };
   project: (candidate: MessagePassageCandidate) => Promise<CanonicalSearchCandidate | null>;
+  projectWave?: (candidates: MessagePassageCandidate[]) => Promise<Array<CanonicalSearchCandidate | null>>;
   check: () => void;
   diagnostics?: MessageSearchDiagnostics;
 }): Promise<CanonicalSearchCandidate[]> {
@@ -33,14 +34,15 @@ export async function collectMessageSearchCandidates(input: {
     // Never read beyond the remaining literal page/witness budget on the fast path.
     const width = input.search.sort === 'relevance' ? Math.min(8, limit + 1 - literalWitnesses) : 8;
     const wave = input.candidates.slice(offset, offset + width);
+    const selected = wave.filter(
+      (candidate) =>
+        validReference(candidate, input.threadIds, input.source) &&
+        !seen.has(JSON.stringify([candidate.threadId, candidate.messageId])),
+    );
     const readWave = () =>
-      Promise.all(
-        wave.map(async (candidate) => {
-          if (!validReference(candidate, input.threadIds, input.source)) return null;
-          if (seen.has(JSON.stringify([candidate.threadId, candidate.messageId]))) return null;
-          return input.project(candidate);
-        }),
-      );
+      input.projectWave
+        ? input.projectWave(selected)
+        : Promise.all(selected.map((candidate) => input.project(candidate)));
     const projected = await (input.diagnostics ? input.diagnostics.wave(wave.length, readWave) : readWave());
     offset += width;
     for (const row of projected) {

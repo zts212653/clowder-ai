@@ -30,7 +30,9 @@ function history(t, count = 2283) {
     wakeTarget: { userId: 'u', threadId: 't', catId: 'codex61-sol' },
   };
   const db = openSupervisorStore(job);
-  const insert = db.prepare('INSERT INTO managed_jobs VALUES (?, ?, ?, ?, ?, ?)');
+  const insert =
+    db.prepare(`INSERT INTO managed_jobs(job_id,principal_key,idempotency_key,state,revision,record_json,recovery_json)
+    VALUES (?, ?, ?, ?, ?, ?, '{"version":1,"attempts":0,"nextAttemptAt":null}')`);
   const transition = db.prepare('INSERT INTO managed_job_transitions VALUES (?, ?, ?, ?, ?, ?, ?)');
   db.transaction(() => {
     for (let i = 0; i < count; i++) {
@@ -68,7 +70,7 @@ function history(t, count = 2283) {
   return { root, service: new ManagedJobService(root), path: join(root, 'managed-jobs/supervisor.sqlite') };
 }
 
-test('a full historical reconciliation lets the API event loop progress before it finishes', async (t) => {
+test('due reconciliation excludes settled history while the API event loop remains responsive', async (t) => {
   const { service } = history(t);
   let serviced = false;
   const tick = new Promise((resolve) =>
@@ -80,44 +82,58 @@ test('a full historical reconciliation lets the API event loop progress before i
   const started = performance.now();
   const rows = await service.reconcile([], 100);
   const elapsedMs = performance.now() - started;
-  assert.equal(rows.length, 2283, 'historical terminal evidence remains visible');
-  assert.ok(rows.every(({ inspection, health }) => inspection.state === 'terminal' && health.state === 'succeeded'));
+  assert.equal(rows.length, 0, 'settled history cannot become periodic recovery work');
+  assert.equal(service.list().length, 2283, 'the explicit historical read still retains every record');
   await t.diagnostic(JSON.stringify({ scenario: '2283 terminal jobs', elapsedMs, servicedBeforeFinish: serviced }));
   const progressed = serviced;
   await tick;
   assert.equal(progressed, true, 'a sweep must not monopolize the API loop until every historical job is read');
 });
 
-test('SQLite lock waiting in reconciliation does not delay an unrelated real HTTP request', async (t) => {
-  const { service, path } = history(t, 1);
-  const child = fork(new URL('./helpers/managed-job-lock-holder.mjs', import.meta.url), [path], {
-    stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
-  });
-  t.after(() => {
-    if (child.exitCode === null) child.kill();
-  });
-  await once(child, 'message');
-  const server = createServer((_req, res) => res.end('ready'));
-  server.listen(0, '127.0.0.1');
-  await once(server, 'listening');
-  t.after(() => new Promise((resolve) => server.close(resolve)));
-  // The request is issued before reconciliation, so it is already waiting for
-  // this same event loop when a synchronous SQLite busy wait would begin.
-  const started = performance.now();
-  const response = new Promise((resolve, reject) => {
-    get(`http://127.0.0.1:${server.address().port}`, (res) => {
-      res.resume();
-      res.once('end', () => resolve(performance.now() - started));
-    }).once('error', reject);
-  });
-  const work = service.reconcile([], 100);
-  const healthMs = await response;
-  const rows = await work;
-  await t.diagnostic(JSON.stringify({ scenario: 'held SQLite write lock', healthMs, rows: rows.length }));
-  assert.equal(rows.length, 1);
-  assert.ok(healthMs < 200, `unrelated HTTP must remain responsive during lock contention: ${healthMs}ms`);
-  if (child.exitCode === null && child.signalCode === null) await once(child, 'exit');
-});
+test(
+  'SQLite lock waiting in reconciliation does not delay an unrelated real HTTP request',
+  { timeout: 15_000 },
+  async (t) => {
+    const { service, path } = history(t, 1);
+    const child = fork(new URL('./helpers/managed-job-lock-holder.mjs', import.meta.url), [path], {
+      stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
+      execArgv: [],
+    });
+    let childError = '';
+    child.stderr.on('data', (chunk) => {
+      childError = `${childError}${chunk}`.slice(-2000);
+    });
+    t.after(() => {
+      if (child.exitCode === null) child.kill();
+    });
+    await Promise.race([
+      once(child, 'message', { signal: AbortSignal.timeout(5000) }),
+      once(child, 'exit').then(([code, signal]) => {
+        throw new Error(`lock fixture exited before ready: ${code}/${signal}: ${childError}`);
+      }),
+    ]);
+    const server = createServer((_req, res) => res.end('ready'));
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    t.after(() => new Promise((resolve) => server.close(resolve)));
+    // The request is issued before reconciliation, so it is already waiting for
+    // this same event loop when a synchronous SQLite busy wait would begin.
+    const started = performance.now();
+    const response = new Promise((resolve, reject) => {
+      get(`http://127.0.0.1:${server.address().port}`, (res) => {
+        res.resume();
+        res.once('end', () => resolve(performance.now() - started));
+      }).once('error', reject);
+    });
+    const work = service.reconcile([], 100);
+    const healthMs = await response;
+    const rows = await work;
+    await t.diagnostic(JSON.stringify({ scenario: 'held SQLite write lock', healthMs, rows: rows.length }));
+    assert.equal(rows.length, 0, 'the locked historical row is retained, not selected for recovery');
+    assert.ok(healthMs < 200, `unrelated HTTP must remain responsive during lock contention: ${healthMs}ms`);
+    if (child.exitCode === null && child.signalCode === null) await once(child, 'exit');
+  },
+);
 
 test('a reconciliation scope reuses its database and releases it even on failure', async (t) => {
   const { service } = history(t, 1);

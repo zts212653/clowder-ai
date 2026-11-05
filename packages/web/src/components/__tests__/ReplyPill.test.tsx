@@ -1,6 +1,7 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
+import { ShellPresentationContext } from '@/components/shell/shell-presentation';
 import type { CatData } from '@/hooks/useCatData';
 import { ReplyPill } from '../ReplyPill';
 
@@ -23,9 +24,16 @@ const mockGetCatById = (id: string): CatData | undefined => {
   return cats[id] as CatData | undefined;
 };
 
+// These cases protect the explicitly selected classic interface, independently of the new-visit default.
+function renderClassic(element: React.ReactNode) {
+  return renderToStaticMarkup(
+    <ShellPresentationContext.Provider value="classic">{element}</ShellPresentationContext.Provider>,
+  );
+}
+
 describe('ReplyPill', () => {
   it('renders cat reply with sender name and truncated content', () => {
-    const html = renderToStaticMarkup(
+    const html = renderClassic(
       <ReplyPill
         replyPreview={{ from: { kind: 'agent', catId: 'opus' }, senderCatId: 'opus', content: '这是预览内容' }}
         replyToId="msg-123"
@@ -46,7 +54,7 @@ describe('ReplyPill', () => {
   });
 
   it('renders user reply with configured co-creator label', () => {
-    const html = renderToStaticMarkup(
+    const html = renderClassic(
       <ReplyPill
         replyPreview={{ from: { kind: 'user', userId: 'owner' }, senderCatId: null, content: '用户消息' }}
         replyToId="msg-456"
@@ -58,7 +66,7 @@ describe('ReplyPill', () => {
   });
 
   it('renders deleted message placeholder', () => {
-    const html = renderToStaticMarkup(
+    const html = renderClassic(
       <ReplyPill
         replyPreview={{ from: { kind: 'agent', catId: 'opus' }, senderCatId: 'opus', content: '', deleted: true }}
         replyToId="msg-789"
@@ -70,7 +78,7 @@ describe('ReplyPill', () => {
   });
 
   it('renders as a clickable button', () => {
-    const html = renderToStaticMarkup(
+    const html = renderClassic(
       <ReplyPill
         replyPreview={{ from: { kind: 'agent', catId: 'opus' }, senderCatId: 'opus', content: '内容' }}
         replyToId="msg-123"
@@ -82,7 +90,7 @@ describe('ReplyPill', () => {
   });
 
   it('uses co-creator color for user reply (senderCatId=null)', () => {
-    const html = renderToStaticMarkup(
+    const html = renderClassic(
       <ReplyPill
         replyPreview={{ from: { kind: 'user', userId: 'owner' }, senderCatId: null, content: '用户消息' }}
         replyToId="msg-456"
@@ -95,7 +103,7 @@ describe('ReplyPill', () => {
   });
 
   it('writes the co-creator pill text with the readable name role and tints it with the identity fill', () => {
-    const html = renderToStaticMarkup(
+    const html = renderClassic(
       <ReplyPill
         replyPreview={{ from: { kind: 'user', userId: 'owner' }, senderCatId: null, content: '用户消息' }}
         replyToId="msg-456"
@@ -110,7 +118,7 @@ describe('ReplyPill', () => {
   });
 
   it('keeps a cat pill in the cat colour', () => {
-    const html = renderToStaticMarkup(
+    const html = renderClassic(
       <ReplyPill
         replyPreview={{ from: { kind: 'agent', catId: 'opus' }, senderCatId: 'opus', content: '内容' }}
         replyToId="msg-1"
@@ -121,7 +129,7 @@ describe('ReplyPill', () => {
   });
 
   it('uses fallback color for unknown cat', () => {
-    const html = renderToStaticMarkup(
+    const html = renderClassic(
       <ReplyPill
         replyPreview={{ from: { kind: 'agent', catId: 'unknown-cat' }, senderCatId: 'unknown-cat', content: '内容' }}
         replyToId="msg-123"

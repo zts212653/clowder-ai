@@ -5,6 +5,7 @@ import {
   companionIdentitySnapshotV1Schema,
   isCrossThreadProvenance,
   type LifecycleActiveRun,
+  MESSAGE_BUNDLE_CLI_QUOTE_PROJECTION_VERSION_V2,
 } from '@cat-cafe/shared';
 import { type CSSProperties, memo, type ReactNode } from 'react';
 import { WorkCardMessageContext } from '@/components/artifacts/work-card-message-context';
@@ -1041,7 +1042,19 @@ function ChatMessageContent({
     <ReplyOutputBody output={nativeReplyOutput} className={REPLY_BODY_CLASS} disclosureKey={bodyDisclosureKey} />
   ) : isStreamOrigin ? (
     cliStdoutContent?.trim() ? (
-      <CollapsibleMarkdown content={cliStdoutContent} className={REPLY_BODY_CLASS} disclosureKey={bodyDisclosureKey} />
+      <div
+        data-context-quote-source={cachedR21SpeechStdout ? 'cli_output' : undefined}
+        data-context-quote-segment-id={cachedR21SpeechStdout ? 'stdout' : undefined}
+        data-context-quote-projection-version={
+          cachedR21SpeechStdout ? MESSAGE_BUNDLE_CLI_QUOTE_PROJECTION_VERSION_V2 : undefined
+        }
+      >
+        <CollapsibleMarkdown
+          content={cliStdoutContent}
+          className={REPLY_BODY_CLASS}
+          disclosureKey={bodyDisclosureKey}
+        />
+      </div>
     ) : null
   ) : hasBlocks ? (
     <ContentBlocks

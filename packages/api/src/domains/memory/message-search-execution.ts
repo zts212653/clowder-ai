@@ -6,6 +6,7 @@ type SearchPhase =
   | 'retrieval'
   | 'canonical-projection'
   | 'qualification'
+  | 'decision-sources'
   | 'final-revalidation';
 
 /** Error-only operational evidence. Query, principal and canonical bodies are never captured. */

@@ -1,4 +1,5 @@
 import type { IBallCustodyIngest } from '../../domains/ball-custody/BallCustodyIngest.js';
+import { type RecoveryLoop, startRecoveryLoop } from '../recovery/recovery-loop.js';
 import { holdStaleWakeSuppressedTotal } from '../telemetry/instruments.js';
 import { computeNextCronSlot, countAdditionalDueCronSlots } from './cron-utils.js';
 import type { DynamicTaskDef, DynamicTaskStore } from './DynamicTaskStore.js';
@@ -246,6 +247,24 @@ export class TaskRunnerV2 {
     }
   }
 
+  /** Refresh parameters without retiring the task's timers or in-flight execution. */
+  refreshDynamic(task: AnyTaskSpec, dynamicDefId: string): void {
+    const index = this.tasks.findIndex((candidate) => candidate.id === task.id);
+    if (index < 0) {
+      this.registerDynamic(task, dynamicDefId);
+      return;
+    }
+    const previous = this.tasks[index];
+    if (
+      this.dynamicTaskIds.get(task.id) !== dynamicDefId ||
+      previous?.trigger.type === 'once' ||
+      JSON.stringify(previous?.trigger) !== JSON.stringify(task.trigger)
+    ) {
+      throw new Error('Dynamic parameter refresh cannot change task ownership or trigger');
+    }
+    this.tasks[index] = task;
+  }
+
   /**
    * F202 Phase 2: Register a builtin task that may arrive after start() (e.g., plugin schedule activation).
    * Unlike registerDynamic, this does NOT mark the task in dynamicTaskIds, so it reports
@@ -463,7 +482,9 @@ export class TaskRunnerV2 {
       const runTick = () => {
         // Guard: skip if task was unregistered before tick fires (防幽灵执行)
         if (!this.timers.has(task.id)) return;
-        this.executePipeline(task).catch((err) => {
+        const current = this.tasks.find((candidate) => candidate.id === task.id);
+        if (!current) return;
+        this.executePipeline(current).catch((err) => {
           this.logger.error(`[scheduler] ${task.id}: pipeline error`, err);
         });
       };
@@ -525,6 +546,9 @@ export class TaskRunnerV2 {
   }
 
   private async fireCronSlot(task: AnyTaskSpec, scheduledSlotMs: number): Promise<void> {
+    const current = this.tasks.find((candidate) => candidate.id === task.id);
+    if (!current) return;
+    task = current;
     if (task.trigger.type !== 'cron') return;
     if (!this.tasks.some((t) => t.id === task.id)) return;
     const lastFired = this.cronSlotFired.get(task.id);
@@ -559,8 +583,9 @@ export class TaskRunnerV2 {
     } catch (err) {
       this.logger.error(`[scheduler] ${task.id}: pipeline error`, err);
     } finally {
-      if (this.started && this.tasks.some((t) => t.id === task.id)) {
-        this.scheduleCronTick(task);
+      const next = this.tasks.find((candidate) => candidate.id === task.id);
+      if (this.started && next) {
+        this.scheduleCronTick(next);
       }
     }
   }
@@ -791,6 +816,15 @@ export class TaskRunnerV2 {
   private getSuppressedHoldWakeDef(taskId: string): DynamicTaskDef | null {
     const def = this.dynamicTaskStore?.getById(taskId);
     return def && isSuppressedHoldWakeDef(def) ? def : null;
+  }
+
+  registerRecoveryLoop(loop: RecoveryLoop): void {
+    const id = `recovery:${loop.id}`;
+    if (this.timers.has(id)) throw new Error(`recovery loop already registered: ${loop.id}`);
+    const timer = startRecoveryLoop(loop, {
+      onObserverError: (error) => this.logger.error(`[recovery] ${loop.id}: observer failed`, error),
+    });
+    this.timers.set(id, timer);
   }
 
   stop(): void {

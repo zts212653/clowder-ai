@@ -29,6 +29,8 @@ export interface OwnerOperationRequest {
   readonly actionId: string;
   readonly userId: string;
   readonly requestId: string;
+  /** Preserve a single owner-read's Task selection through the existing module carrier. */
+  readonly taskReadScope?: { readonly taskId: string };
   readonly signal: AbortSignal;
   assertCurrent(): void;
   bindActivation?(assertCurrent: () => void, signal?: AbortSignal): void;
@@ -43,6 +45,7 @@ interface Invocation {
 const requests = new AsyncLocalStorage<OwnerOperationRequest>();
 const invocations = new AsyncLocalStorage<Invocation>();
 const activeCalls = new AsyncLocalStorage<PluginOwnerOperationContext>();
+const taskReadScopes = new WeakMap<PluginOwnerOperationContext, Readonly<{ taskId: string }>>();
 
 export function withOwnerOperationRequest<T>(request: OwnerOperationRequest, run: () => Promise<T>): Promise<T> {
   return withoutOwnerOperationContext(() => requests.run(request, run));
@@ -53,6 +56,11 @@ export function currentOwnerOperationRequest(): OwnerOperationRequest | undefine
 export function currentOwnerOperation(instanceId: string): PluginOwnerOperationContext | undefined {
   const context = activeCalls.getStore();
   return context?.pluginInstanceId === instanceId ? context : undefined;
+}
+/** Private selection, kept out of the caller object passed to installed packages. */
+export function currentOwnerTaskReadScope(instanceId: string | undefined): Readonly<{ taskId: string }> | undefined {
+  const context = instanceId ? currentOwnerOperation(instanceId) : undefined;
+  return context ? taskReadScopes.get(context) : undefined;
 }
 export function withCurrentOwnerOperation<T>(context: PluginOwnerOperationContext, run: () => Promise<T>): Promise<T> {
   return activeCalls.run(context, run);
@@ -125,6 +133,9 @@ export async function consumeOwnerOperationInvocation<T>(
     assertWriteCurrent,
     assertCurrent,
   });
+  if (issued.request.taskReadScope) {
+    taskReadScopes.set(context, Object.freeze({ taskId: issued.request.taskReadScope.taskId }));
+  }
   try {
     await assertCurrent();
     return await requests.exit(() => invocations.exit(() => activeCalls.run(context, () => run(context))));

@@ -10,7 +10,22 @@ const REDUNDANT_PATTERNS = [
   /bg-cafe-surface(?:-elevated|-sunken)? dark:bg-gray-\d+/,
 ];
 
+function hasDarkUtility(line: string): boolean {
+  return /(?:^|[\s"'`])(?!--)(?:[^\s"'`]+:)*dark:[^\s"'`]+/.test(line);
+}
+
 describe('color token audit', () => {
+  it.each([
+    ['className="dark:bg-red-500"', true],
+    ['className="sm:dark:bg-red-500"', true],
+    ['className="hover:dark:text-red-500"', true],
+    ['className="[&>button]:dark:hover:bg-red-500"', true],
+    ['dark: image.opacity.dark', false],
+    ['`--color-cat-dark:var(--color-text);`', false],
+  ])('recognizes dark utility lines: %s', (line, expected) => {
+    expect(hasDarkUtility(line)).toBe(expected);
+  });
+
   it('no redundant dark: overrides on semantic token classes', () => {
     const output = execSync(
       `grep -rn "dark:" --include="*.tsx" --include="*.ts" "${WEB_SRC}" | grep -v node_modules | grep -v "\\.test\\."`,
@@ -29,13 +44,15 @@ describe('color token audit', () => {
     );
   });
 
-  it('remaining dark: usages are within expected count', () => {
+  it('remaining dark: utility lines are within the existing budget', () => {
     const output = execSync(
-      `grep -rn "dark:" --include="*.tsx" --include="*.ts" "${WEB_SRC}" | grep -v node_modules | grep -v "\\.test\\." | wc -l`,
+      `grep -rn "dark:" --include="*.tsx" --include="*.ts" "${WEB_SRC}" | grep -v node_modules | grep -v "\\.test\\."`,
       { encoding: 'utf-8' },
     ).trim();
 
-    const count = parseInt(output, 10);
+    // Typed data fields such as `dark: image.opacity.dark` and CSS custom-property
+    // names are not Tailwind utilities and consume none of this unchanged budget.
+    const count = output.split('\n').filter(hasDarkUtility).length;
     expect(count).toBeLessThanOrEqual(50);
   });
 });

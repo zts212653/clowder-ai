@@ -537,6 +537,17 @@ export interface DefinitiveRichBlockOwner {
   turnInvocationId?: string;
 }
 
+/** Same-id revisions replace the preview at its original position. */
+function upsertMessageRichBlock(message: ChatMessage, block: RichBlock): ChatMessage {
+  const rich = message.extra?.rich ?? { v: 1 as const, blocks: [] };
+  const index = rich.blocks.findIndex((existing) => existing.id === block.id);
+  if (index >= 0 && JSON.stringify(rich.blocks[index]) === JSON.stringify(block)) return message;
+  const blocks = [...rich.blocks];
+  if (index >= 0) blocks[index] = block;
+  else blocks.push(block);
+  return { ...message, extra: { ...message.extra, rich: { ...rich, blocks } } };
+}
+
 /** A messageId-bound callback owns its block; an earlier same-turn stream copy was only a preview. */
 function appendRichBlockToMessages(
   messages: ChatMessage[],
@@ -550,10 +561,9 @@ function appendRichBlockToMessages(
   let changed = false;
   const next = messages.map((message) => {
     if (message.id === messageId) {
-      const rich = message.extra?.rich ?? { v: 1 as const, blocks: [] };
-      if (rich.blocks.some((existing) => existing.id === block.id)) return message;
-      changed = true;
-      return { ...message, extra: { ...message.extra, rich: { ...rich, blocks: [...rich.blocks, block] } } };
+      const updated = upsertMessageRichBlock(message, block);
+      changed ||= updated !== message;
+      return updated;
     }
     if (!definitiveCallback || message.origin !== 'stream' || message.catId !== owner.catId) return message;
     const stream = message.extra?.stream;

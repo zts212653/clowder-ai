@@ -289,6 +289,8 @@ describe('F307 zero-surface canonical Home invariant', () => {
     });
     container = document.createElement('div');
     document.body.appendChild(container);
+    // Legacy owner-surface contracts explicitly retain classic; v2 cases select v2 below.
+    writeShellPresentation('classic');
     root = createRoot(container);
   });
 

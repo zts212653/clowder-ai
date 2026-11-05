@@ -1,6 +1,6 @@
 import type { IMessageStore, StoredMessage } from './ports/MessageStore.js';
 
-/** Canonical CAS owns publication; notifications only invalidate derived indexes. */
+/** Canonical CAS owns publication. Notifications are hints and can never reverse a committed transition. */
 export function notifyMessageTimelineChange(
   store: Pick<IMessageStore, 'onTimelineChanged'>,
   message: StoredMessage,

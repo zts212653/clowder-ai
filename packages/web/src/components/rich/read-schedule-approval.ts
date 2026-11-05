@@ -80,6 +80,7 @@ export function scheduleDetail(p: ScheduleMutationProposal): Record<string, unkn
     ...(p.mutation.kind === 'create'
       ? { templateId: task.templateId }
       : { expectedFingerprint: p.mutation.expectedFingerprint }),
+    ...(p.mutation.kind === 'update' ? { previousParams: task.params, params: p.mutation.params } : {}),
   };
 }
 function matchesItem(p: ScheduleMutationProposal, item: ApprovalHubItem): boolean {
@@ -139,7 +140,9 @@ export async function readScheduleSource(
   )
     return null;
   if (proposal.status === 'approved' || proposal.status === 'rejected') return proposal;
-  if (fresh) await useApprovalHubStore.getState().fetchPending();
+  // An interrupted write may move its row before the Hub's cached pending
+  // vector catches up. Recovery must join the current original-owner read.
+  if (fresh || proposal.status === 'applying') await useApprovalHubStore.getState().fetchPending();
   else await useApprovalHubStore.getState().ensurePending(owner.userId);
   const store = useApprovalHubStore.getState();
   if (!store.pendingReadAvailable || store.isLoading) return null;
@@ -169,12 +172,20 @@ export async function readScheduleSource(
 }
 
 /** An approved lifecycle alone does not prove registration/deletion; require its exact durable effect checkpoint. */
-export function scheduleEffect(p: ScheduleMutationProposal): 'schedule-created' | 'schedule-deleted' | null {
+export function scheduleEffect(
+  p: ScheduleMutationProposal,
+): 'schedule-created' | 'schedule-deleted' | 'schedule-updated' | null {
   if (p.status !== 'approved' || !scheduleObject(p.effectCheckpoint)) return null;
   const checkpoint = p.effectCheckpoint;
   if (checkpoint.kind !== p.mutation.kind || checkpoint.taskId !== scheduleTask(p).id) return null;
   if (p.mutation.kind === 'create' && checkpoint.kind === 'create')
     return time(checkpoint.appliedAt) ? 'schedule-created' : null;
+  if (p.mutation.kind === 'update' && checkpoint.kind === 'update')
+    return checkpoint.expectedFingerprint === p.mutation.expectedFingerprint &&
+      text(checkpoint.resultingFingerprint) &&
+      time(checkpoint.appliedAt)
+      ? 'schedule-updated'
+      : null;
   if (p.mutation.kind !== 'delete' || checkpoint.kind !== 'delete') return null;
   return checkpoint.expectedFingerprint === p.mutation.expectedFingerprint && time(checkpoint.deletedAt)
     ? 'schedule-deleted'

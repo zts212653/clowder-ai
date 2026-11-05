@@ -1,3 +1,4 @@
+import { outsideRecoveryDeadline } from '../../../../../infrastructure/recovery/recovery-deadline.js';
 import { isTaskHandoffSource } from '../../../../ball-custody/OrdinaryTaskHandoffContract.js';
 import { isRetiredTaskAction } from '../../../../ball-custody/retired-task-action.js';
 import type { ITaskStore } from '../../stores/ports/TaskStore.js';
@@ -1731,6 +1732,10 @@ export class QueueProcessor {
     seenAt?: number;
   }): Promise<AdoptExposedQueuedEntriesResult> {
     const { queue, invocationTracker, messageStore } = this.deps;
+    // Sources excluded from public coverage must not fall through to ordinary body adoption.
+    const source = await messageStore.getById(input.candidate.messageId);
+    if (isTaskHandoffSource(source))
+      return { outcome: 'rejected', reason: 'state_changed', entryId: input.candidate.entryId };
     const claimed = await queue.claimExactExposureDurable(
       input.threadId,
       input.userId,
@@ -3361,7 +3366,7 @@ export class QueueProcessor {
    * User-level entry: co-creator manually triggers processing their next entry.
    */
   async processNext(threadId: string, userId: string): Promise<{ started: boolean; entry?: QueueEntry }> {
-    return this.tryExecuteNextForUser(threadId, userId);
+    return outsideRecoveryDeadline(() => this.tryExecuteNextForUser(threadId, userId));
   }
 
   /**
@@ -3370,6 +3375,10 @@ export class QueueProcessor {
    * cancellation fence, or start a second invocation for an admitted row.
    */
   async progressOwnedCarrier(entry: QueueEntry, targetCatId: string): Promise<OwnedQueueProgress> {
+    return outsideRecoveryDeadline(() => this.progressOwnedCarrierInQueue(entry, targetCatId));
+  }
+
+  private async progressOwnedCarrierInQueue(entry: QueueEntry, targetCatId: string): Promise<OwnedQueueProgress> {
     const userId = queueEntryOwnerId(entry);
     const current = this.deps.queue.getEntrySnapshot(entry.threadId, userId, entry.id);
     if (!current) {
@@ -3404,6 +3413,13 @@ export class QueueProcessor {
    * it can retire, so enqueue/terminal/reorder races cannot lose the last wake.
    */
   requestDrain(
+    threadId: string,
+    options?: { bypassSuppressionForCatId?: string; bypassSuppressionEpoch?: number },
+  ): Promise<void> {
+    return outsideRecoveryDeadline(() => this.requestOwnedDrain(threadId, options));
+  }
+
+  private requestOwnedDrain(
     threadId: string,
     options?: { bypassSuppressionForCatId?: string; bypassSuppressionEpoch?: number },
   ): Promise<void> {

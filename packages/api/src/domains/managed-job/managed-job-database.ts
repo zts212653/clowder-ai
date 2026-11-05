@@ -3,6 +3,7 @@ import { chmodSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import Database from 'better-sqlite3';
 import type { DurableManagedGateJob } from './durable-managed-gate-job.js';
+import { migrateManagedJobRecoverySchema } from './managed-job-recovery-schema.js';
 
 const stores = new AsyncLocalStorage<Map<string, Database.Database>>();
 
@@ -21,7 +22,7 @@ export function closeSupervisorStore(database: Database.Database): void {
   if (![...(stores.getStore()?.values() ?? [])].includes(database)) database.close();
 }
 
-export function openSupervisorStore(job: DurableManagedGateJob): Database.Database {
+export function openSupervisorStore(job: Pick<DurableManagedGateJob, 'recordPath'>): Database.Database {
   const directory = dirname(job.recordPath);
   const file = join(directory, 'supervisor.sqlite');
   const existing = stores.getStore()?.get(file);
@@ -91,6 +92,7 @@ export function openSupervisorStore(job: DurableManagedGateJob): Database.Databa
       json_extract(record_json, '$.descriptor.definition.principal.catId'), state
     );
   `);
+    migrateManagedJobRecoverySchema(database);
     stores.getStore()?.set(file, database);
     return database;
   } catch (error) {

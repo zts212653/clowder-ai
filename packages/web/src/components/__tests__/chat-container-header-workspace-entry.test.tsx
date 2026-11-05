@@ -20,6 +20,8 @@ describe('F284 Workspace entry', () => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     container = document.createElement('div');
     document.body.appendChild(container);
+    // The original cases below exercise the retained classic interface.
+    window.localStorage.setItem('cat-cafe:shell-presentation', 'classic');
     root = createRoot(container);
   });
 

@@ -64,6 +64,7 @@ export function validateDurableManagedGateJob(
       job.definition.retryPolicy !== 'never' ||
       !job.definition.command ||
       !job.definition.cwd ||
+      !job.definition.principal ||
       !job.definition.idempotencyKey ||
       !validManagedJobSource(job.definition, job.consumer, job.originTaskId) ||
       job.definition.principal.userId !== job.wakeTarget.userId ||

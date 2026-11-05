@@ -1,6 +1,14 @@
+import { performance } from 'node:perf_hooks';
 import type { CatId, TurnExecutionRecord } from '@cat-cafe/shared';
-import type { InvocationRecord } from '../../stores/ports/InvocationRecordStore.js';
+import { resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
+import type { IInvocationRecordStore, InvocationRecord } from '../../stores/ports/InvocationRecordStore.js';
 import type { CodexAppServerLifecycleSnapshot } from '../providers/CodexAppServerLifecycle.js';
+import {
+  classifyIndependentInvocationOwner,
+  type IndependentOwnerVerdict,
+  PROVIDER_TERMINAL_STAGES,
+} from './InvocationOwnerEvidence.js';
+import { InvocationOwnerHealthReporter } from './InvocationOwnerHealthReporter.js';
 import {
   collectInvocationOwnerCandidates,
   type InvocationOwnerTrackerLike,
@@ -18,9 +26,8 @@ interface InvocationOwnerReaperLog {
 
 export interface InvocationOwnerReaperOptions extends ExitedChildRecovery {
   invocationTracker: InvocationOwnerTrackerLike;
-  invocationRecordStore: {
-    get(id: string): InvocationRecord | null | Promise<InvocationRecord | null>;
-  };
+  invocationRecordStore: Pick<IInvocationRecordStore, 'get'> &
+    Partial<Pick<IInvocationRecordStore, 'observeOwnerRecovery' | 'getOwnerRecoveryFacts'>>;
   getProviderLifecycle(
     threadId: string,
     catId: string,
@@ -36,6 +43,7 @@ export interface InvocationOwnerReaperOptions extends ExitedChildRecovery {
   /** Pre-provider reservations are safe to recover without probing provider lifecycle. */
   reapStalePrestartReservations?: (now?: number) => number | Promise<number>;
   ownerLeaseTtlMs?: number;
+  healthSlaMs?: number;
   now?: () => number;
   log: InvocationOwnerReaperLog;
 }
@@ -51,8 +59,6 @@ export interface InvocationOwnerReaperRunResult {
   errors: number;
 }
 
-type IndependentOwnerVerdict = 'active' | 'terminal' | 'absent' | 'unknown';
-
 interface OwnerProbe {
   record: InvocationRecord | null;
   children: TurnExecutionRecord[];
@@ -60,39 +66,54 @@ interface OwnerProbe {
   verdict: IndependentOwnerVerdict;
 }
 
-const PROVIDER_TERMINAL_STAGES = new Set<CodexAppServerLifecycleSnapshot['stage']>([
-  'completed',
-  'interrupted',
-  'failed',
-  'closed',
-]);
-
 export class InvocationOwnerReaper {
   private readonly now: () => number;
   private readonly ownerLeaseTtlMs: number;
+  private readonly healthSlaMs: number;
+  private readonly health: InvocationOwnerHealthReporter;
 
   constructor(private readonly options: InvocationOwnerReaperOptions) {
     this.now = options.now ?? (() => Date.now());
+    this.health = new InvocationOwnerHealthReporter(options.invocationRecordStore, options.log);
     this.ownerLeaseTtlMs = options.ownerLeaseTtlMs ?? DEFAULT_INVOCATION_SLOT_TTL_MS;
+    // Match the actual work owner's lease SLA, or the member's configured maximum busy-output allowance.
+    // CLI_TIMEOUT_MS=0 disables its timeout; it does not authorize inventing a terminal result here.
+    this.healthSlaMs = options.healthSlaMs ?? Math.max(this.ownerLeaseTtlMs, 2 * resolveCliTimeoutMs(undefined));
   }
 
   async runOnce(): Promise<InvocationOwnerReaperRunResult> {
+    const started = performance.now();
     const now = this.now();
+    this.health.startRound();
     const result = emptyResult();
     result.prestartReaped = (await this.options.reapStalePrestartReservations?.(now)) ?? 0;
     const candidates = await this.collectCandidates(now, result);
     result.scanned = candidates.length;
 
     for (const candidate of candidates) {
-      await this.processCandidate(candidate, now, result);
+      try {
+        await this.processCandidate(candidate, now, result);
+      } catch (err) {
+        result.errors++;
+        result.deferredUnknown++;
+        await this.warnUnknown({
+          executionId: candidate.executionId,
+          reason: 'owner_recovery_failed',
+          err: formatError(err),
+        });
+      }
     }
 
-    if (result.scanned > 0 || result.prestartReaped > 0) {
-      this.options.log.info(
-        { event: 'invocation_owner_reaper_sweep', ...result },
-        '[F118] invocation owner reaper sweep completed',
-      );
-    }
+    this.options.log.info(
+      {
+        event: 'invocation_owner_reaper_sweep',
+        loopId: 'invocation-owner',
+        elapsedMs: performance.now() - started,
+        ...result,
+      },
+      '[F118] invocation owner reaper sweep completed',
+    );
+    this.health.endRound();
     return result;
   }
 
@@ -105,7 +126,7 @@ export class InvocationOwnerReaper {
       now,
       onUnboundTrackerLease: (lease) => {
         result.deferredUnknown += 1;
-        this.warnUnknown({
+        this.health.warnLocalUnknown({
           threadId: lease.threadId,
           catId: lease.catId,
           reason: 'stale_tracker_lease_missing_execution_id',
@@ -127,9 +148,14 @@ export class InvocationOwnerReaper {
     now: number,
     result: InvocationOwnerReaperRunResult,
   ): Promise<void> {
+    const recovery = await this.options.invocationRecordStore.getOwnerRecoveryFacts?.(candidate.executionId);
+    if (recovery?.disposition && recovery.recordStatus === 'running') {
+      result.deferredUnknown++;
+      return;
+    }
     if (candidate.scopeCollision) {
       result.deferredUnknown += 1;
-      this.warnUnknown({ executionId: candidate.executionId, reason: 'execution_scope_collision' });
+      await this.warnUnknown({ executionId: candidate.executionId, reason: 'execution_scope_collision' });
       return;
     }
 
@@ -141,7 +167,7 @@ export class InvocationOwnerReaper {
     }
     if (probe.verdict === 'unknown') {
       result.deferredUnknown += 1;
-      this.warnUnknown({
+      await this.warnUnknown({
         executionId: candidate.executionId,
         threadId: candidate.threadId,
         reason: 'owner_probe_scope_unknown',
@@ -171,7 +197,7 @@ export class InvocationOwnerReaper {
           }
         } catch (err) {
           result.deferredUnknown += 1;
-          this.warnUnknown({
+          await this.warnUnknown({
             executionId: candidate.executionId,
             reason: 'exited_child_recovery_failed',
             err: formatError(err),
@@ -179,7 +205,7 @@ export class InvocationOwnerReaper {
           return;
         }
       }
-      this.recordActiveCandidate(candidate, probe, now, result);
+      await this.recordActiveCandidate(candidate, probe, now, result);
       return;
     }
 
@@ -200,10 +226,10 @@ export class InvocationOwnerReaper {
         record,
         children,
         providerSnapshots,
-        verdict: this.classifyIndependentOwner(candidate, record, children, providerSnapshots),
+        verdict: classifyIndependentInvocationOwner(candidate, record, children, providerSnapshots),
       };
     } catch (err) {
-      this.warnUnknown({
+      await this.warnUnknown({
         executionId: candidate.executionId,
         threadId: candidate.threadId,
         reason: 'owner_probe_failed',
@@ -213,28 +239,44 @@ export class InvocationOwnerReaper {
     }
   }
 
-  private recordActiveCandidate(
+  private async recordActiveCandidate(
     candidate: OwnerCandidate,
     probe: OwnerProbe,
     now: number,
     result: InvocationOwnerReaperRunResult,
-  ): void {
+  ): Promise<void> {
     result.keptActive += 1;
-    this.options.log.info(
-      {
-        event: 'invocation_owner_reaper_kept_active',
-        executionId: candidate.executionId,
-        threadId: candidate.threadId,
-        leaseAgeMs: now - candidate.startedAt,
-        childRunning: probe.children.some((child) => child.status === 'running'),
-        providerStages: probe.providerSnapshots.map((snapshot) => snapshot.stage),
-        lastProviderActivityAt:
-          probe.providerSnapshots.length > 0
-            ? Math.max(...probe.providerSnapshots.map((snapshot) => snapshot.lastActivityAt))
-            : null,
-      },
-      '[F118] stale lease retained because an independent owner is still live',
-    );
+    const stages = probe.providerSnapshots.map((snapshot) => snapshot.stage).sort();
+    const lastActivity = probe.providerSnapshots.length
+      ? Math.max(...probe.providerSnapshots.map((snapshot) => snapshot.lastActivityAt))
+      : null;
+    const signature = JSON.stringify({
+      verdict: 'active',
+      stages,
+      children: probe.children.map((child) => child.status).sort(),
+    });
+    const observation = await this.health.observe(candidate.executionId, {
+      signature,
+      silence: lastActivity !== null && now - lastActivity >= this.healthSlaMs,
+      failed: false,
+    });
+    const fields = {
+      executionId: candidate.executionId,
+      threadId: candidate.threadId,
+      leaseAgeMs: now - candidate.startedAt,
+      providerStages: stages,
+      lastProviderActivityAt: lastActivity,
+    };
+    if (observation.changed)
+      this.options.log.info(
+        { event: 'invocation_owner_reaper_kept_active', ...fields },
+        '[F118] stale lease retained because an independent owner is still live',
+      );
+    if (observation.silenceNew)
+      this.options.log.warn(
+        { event: 'invocation_owner_provider_silence', ...fields, healthSlaMs: this.healthSlaMs },
+        '[F118] provider activity exceeded the work SLA; live ownership retained for inspection',
+      );
   }
 
   private async reconcileCandidate(
@@ -261,7 +303,7 @@ export class InvocationOwnerReaper {
       if (reconciliation.errors > 0 || (reconciliation.reconciled === 0 && reconciliation.alreadyTerminal === 0)) {
         result.deferredUnknown += 1;
         result.errors += reconciliation.errors || 1;
-        this.warnUnknown({
+        await this.warnUnknown({
           executionId: candidate.executionId,
           threadId: candidate.threadId,
           reason: 'terminal_reconciliation_incomplete',
@@ -275,7 +317,7 @@ export class InvocationOwnerReaper {
     } catch (err) {
       result.deferredUnknown += 1;
       result.errors += 1;
-      this.warnUnknown({
+      await this.warnUnknown({
         executionId: candidate.executionId,
         threadId: candidate.threadId,
         reason: 'terminal_reconciliation_failed',
@@ -284,49 +326,18 @@ export class InvocationOwnerReaper {
     }
   }
 
-  private classifyIndependentOwner(
-    candidate: OwnerCandidate,
-    record: InvocationRecord | null,
-    children: TurnExecutionRecord[],
-    providerSnapshots: CodexAppServerLifecycleSnapshot[],
-  ): IndependentOwnerVerdict {
-    if (
-      record &&
-      (record.id !== candidate.executionId ||
-        record.threadId !== candidate.threadId ||
-        record.userId !== candidate.userId)
-    ) {
-      return 'unknown';
-    }
-    if (
-      children.some(
-        (child) =>
-          child.parentInvocationId !== candidate.executionId ||
-          child.threadId !== candidate.threadId ||
-          child.userId !== candidate.userId,
-      )
-    ) {
-      return 'unknown';
-    }
-
-    const childRunning = children.some((child) => child.status === 'running');
-    const providerActive = providerSnapshots.some((snapshot) => !PROVIDER_TERMINAL_STAGES.has(snapshot.stage));
-    if (childRunning || providerActive) return 'active';
-
-    if (record && (record.status === 'succeeded' || record.status === 'failed' || record.status === 'canceled')) {
-      return 'terminal';
-    }
-    if (record?.status === 'queued') return 'unknown';
-    if (children.length > 0 || providerSnapshots.length > 0) return 'terminal';
-    if (record === null || record.status === 'running') return 'absent';
-    return 'unknown';
-  }
-
-  private warnUnknown(fields: Record<string, unknown>): void {
-    this.options.log.warn(
-      { event: 'invocation_owner_reaper_deferred_unknown', ...fields },
-      '[F118] stale owner retained because independent liveness is unknown',
-    );
+  private async warnUnknown(fields: Record<string, unknown>): Promise<void> {
+    const signature = JSON.stringify({ verdict: 'unknown', reason: fields.reason, err: fields.err });
+    const receipt = await this.health.observe(String(fields.executionId), {
+      signature,
+      silence: false,
+      failed: String(fields.reason).endsWith('failed'),
+    });
+    if (receipt.changed)
+      this.options.log.warn(
+        { event: 'invocation_owner_reaper_deferred_unknown', ...fields, recoveryParked: receipt.parked },
+        '[F118] stale owner retained because independent liveness is unknown',
+      );
   }
 }
 

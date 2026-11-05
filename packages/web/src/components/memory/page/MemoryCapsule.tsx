@@ -127,7 +127,12 @@ export function MemoryCapsuleDetail({
   const revision = current?.revision ?? setup?.revision;
   const content = current?.content ?? '';
   const proposals = pendingCapsuleProposals(current?.proposals ?? setup?.proposals);
-  const ready = !read.loading && !read.error && !!revision;
+  const [invalidatedRevision, setInvalidatedRevision] = useState<string>();
+  const awaitingOwner = !!invalidatedRevision && revision === invalidatedRevision;
+  useEffect(() => {
+    if (revision !== invalidatedRevision) setInvalidatedRevision(undefined);
+  }, [revision, invalidatedRevision]);
+  const ready = !read.loading && !read.error && !!revision && !awaitingOwner;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
   const [message, setMessage] = useState('');
@@ -136,6 +141,9 @@ export function MemoryCapsuleDetail({
     onDirtyChange?.(editing && draft !== splitUserCapsule(content).body);
   }, [editing, draft, content, onDirtyChange]);
   const action = useMemoryOwnerAction(`${path}/actions`, 'capsule', (receipt) => {
+    if (current && (receipt.action === 'hard_forget' || receipt.revision !== current.revision)) {
+      setInvalidatedRevision(current.revision);
+    }
     setEditing(false);
     setMessage(receipt.action === 'hard_forget' ? '已遗忘这段。' : '已保存 · 从下一个新对话开始生效');
     // Pinned details refresh after the owner list supplies the new revision.
@@ -192,7 +200,7 @@ export function MemoryCapsuleDetail({
         每次开始新对话时，猫会先读到这段。你可以随时直接编辑；猫起草的更新会在待办「等你决定」。
       </p>
       <MemoryReadState
-        loading={read.loading}
+        loading={read.loading || awaitingOwner}
         error={read.error || (!read.loading && !revision)}
         empty={false}
         noun="关于你"

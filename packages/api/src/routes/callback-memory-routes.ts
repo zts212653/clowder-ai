@@ -6,6 +6,7 @@ import { rankToMatchRank } from '../domains/memory/f163-types.js';
 import type { IEvidenceStore, IMarkerQueue, IReflectionService } from '../domains/memory/interfaces.js';
 import { MessageSearchService } from '../domains/memory/MessageSearchService.js';
 import type { MatterMemoryService } from '../domains/memory/matters/MatterMemoryService.js';
+import { relevanceEvidence } from '../domains/memory/relevance-evidence.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
 import { registerCallbackMessageSearchAnswerRoutes } from './callback-message-search-answer-routes.js';
 import { registerCallbackRecallMetrics } from './callback-recall-metrics.js';
@@ -107,6 +108,8 @@ export async function registerCallbackMemoryRoutes(
         anchor: item.anchor,
         snippet: item.summary ?? '',
         matchRank: rankToMatchRank(index),
+        rank: index + 1,
+        relevance: relevanceEvidence(item, q),
         ...(item.retrievalScore != null ? { retrievalScore: item.retrievalScore } : {}),
         sourceType: mapKindToSourceType(item.kind),
         ...(item.authority ? { authority: item.authority } : {}),

@@ -55,7 +55,7 @@ export function registerCallbackMatterMemoryRoutes(app: FastifyInstance, service
     try {
       return await service.catalog(
         { userId: record.userId, viewer: { type: 'cat', catId: record.catId } },
-        catalogQuery.parse(request.query),
+        { ...catalogQuery.parse(request.query), threadId: record.threadId },
       );
     } catch (error) {
       return failure(reply, error);

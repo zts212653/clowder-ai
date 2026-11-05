@@ -3,6 +3,8 @@ import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fixture, git, idle, NOW } from './lib/worktree-finish-fixture.mjs';
+import { worktreeInventory } from './lib/worktree-inventory.mjs';
+import { mergedNoticeKey, mergedWorktreeNotices } from './lib/worktree-merged-notices.mjs';
 import { createWorktree } from './worktree-new.mjs';
 import { retireMergedWorktree } from './worktree-retire-merged.mjs';
 
@@ -116,6 +118,41 @@ test('a checkout that changes HEAD after the scan is not retired', () => {
     );
     assert(existsSync(join(e.path, 'new.txt')));
     assert(!existsSync(join(f.root, '.worktree-release-archives')));
+  } finally {
+    a.restoreEnv();
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+test('a collected key cannot retire a replacement generation at the same path and HEAD', () => {
+  const f = fixture();
+  const a = setup(f);
+  try {
+    const e = a.make('generation');
+    const birth = git(e.path, 'config', '--worktree', '--get', 'catcafe.lifecycle.createdAt').trim();
+    const noticeKey = mergedNoticeKey(f.repo, e.path, e.head, 'codex61-sol', sourceRef, e.head, birth);
+    git(e.path, 'config', '--worktree', 'catcafe.lifecycle.createdAt', new Date(NOW + 1000).toISOString());
+    assert.throws(() => a.retire(e, { noticeKey }), /checkout generation changed/);
+    assert(existsSync(e.path));
+    assert(!existsSync(join(f.root, '.worktree-release-archives')));
+  } finally {
+    a.restoreEnv();
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+test('a current inventory notice key retires its matching idle merged checkout', () => {
+  const f = fixture();
+  const a = setup(f);
+  try {
+    const e = a.make('matching-generation');
+    const notices = mergedWorktreeNotices(f.repo, worktreeInventory(f.repo), {
+      now: 0,
+      readPr: () => ({ sourceRef, state: 'MERGED', mergedAt: e.head, commits: [e.head] }),
+    }).notices;
+    assert.equal(notices.length, 1);
+    const receipt = a.retire(e, { noticeKey: notices[0].key });
+    assert.equal(receipt.state, 'released');
+    assert.equal(receipt.storageDisposition, 'removed');
+    assert.equal(existsSync(e.path), false);
   } finally {
     a.restoreEnv();
     rmSync(f.root, { recursive: true, force: true });

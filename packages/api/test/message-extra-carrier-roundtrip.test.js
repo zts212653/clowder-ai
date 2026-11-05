@@ -29,6 +29,23 @@ const MESSAGE_BUNDLE = {
 };
 
 describe('durable message extra carriers survive Redis round-trips', () => {
+  it('preserves the buffered publication receipt through Redis hydration without inferring one on legacy messages', async () => {
+    const { serializeExtra, safeParseExtra } = await import(
+      '../dist/domains/cats/services/stores/redis/redis-message-parsers.js'
+    );
+    const publicationId = '00000000-0000-4000-8000-000000000001';
+    const loaded = safeParseExtra(serializeExtra({ richBlockPublicationId: publicationId }));
+    assert.equal(
+      loaded?.richBlockPublicationId,
+      publicationId,
+      'a durable receipt must survive the real hydration whitelist',
+    );
+    assert.equal(safeParseExtra(serializeExtra({ isExplicitPost: true }))?.richBlockPublicationId, undefined);
+    const malformed = safeParseExtra(JSON.stringify({ richBlockPublicationId: 42, isExplicitPost: true }));
+    assert.equal(malformed?.richBlockPublicationId, undefined);
+    assert.equal(malformed?.isExplicitPost, true);
+  });
+
   it('preserves exact conversation-return provenance and drops malformed coordinates', async () => {
     const { serializeExtra, safeParseExtra } = await import(
       '../dist/domains/cats/services/stores/redis/redis-message-parsers.js'

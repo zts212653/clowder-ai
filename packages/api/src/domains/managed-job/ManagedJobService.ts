@@ -25,15 +25,18 @@ import {
 import { CURRENT_DURABLE_GATE_SUPERVISOR_EPOCH } from './durable-managed-gate-supervisor.js';
 import { isManagedJobAdmitted, validManagedJobSource } from './managed-job-admission.js';
 import { withSupervisorStores } from './managed-job-database.js';
-import { observeManagedJobHealthSnapshot, publishManagedJobCensus } from './managed-job-health.js';
+import { publishManagedJobRecoveryBatch } from './managed-job-health.js';
 import { listManagedJobLedger, managedJobPrincipalKey, readManagedJobTransitions } from './managed-job-ledger.js';
+import { readLegacyManagedJobById } from './managed-job-legacy-read.js';
 import { readManagedJobLogTail } from './managed-job-log.js';
+import { readManagedJobDueDescriptors, reconcileManagedJobOwnerBatch } from './managed-job-owner-recovery.js';
 import { reconcileManagedJobDescriptor } from './managed-job-reconcile-descriptor.js';
 import {
   type ManagedJobObservation,
   type ManagedJobReconciliationRequest,
   reconcileManagedJobsOffLoop,
 } from './managed-job-reconciliation.js';
+import { readManagedJobRecovery } from './managed-job-recovery-ledger.js';
 import type { ManagedJobAccess, ManagedJobSubmission } from './managed-job-types.js';
 
 export type { ManagedJobAccess, ManagedJobSubmission } from './managed-job-types.js';
@@ -47,7 +50,8 @@ export class ManagedJobService {
   ) {}
 
   private locator(jobId: string): DurableManagedGateJob {
-    if (!/^managed-job-[a-f0-9]{40}$/u.test(jobId)) throw new Error('managed_job_not_found');
+    if (!/^(?:managed-job-[a-f0-9]{40}|managed-gate-[a-f0-9-]{36})$/u.test(jobId))
+      throw new Error('managed_job_not_found');
     return {
       kind: 'command',
       recordStorage: 'sqlite_v1',
@@ -68,7 +72,12 @@ export class ManagedJobService {
     const locator = this.locator(jobId);
     if (!existsSync(join(this.dataRoot, 'managed-jobs', 'supervisor.sqlite'))) return null;
     const record = rawDurableGateRecord(locator);
-    return record?.descriptor ? (record.descriptor as DurableManagedGateJob) : null;
+    if (record?.descriptor) return record.descriptor as DurableManagedGateJob;
+    if (jobId.startsWith('managed-gate-')) {
+      const read = readLegacyManagedJobById(this.dataRoot, jobId);
+      return read.kind === 'record' ? read.job : null;
+    }
+    return null;
   }
 
   private authorized(principal: ManagedJobAccess, jobId: string): DurableManagedGateJob {
@@ -76,8 +85,9 @@ export class ManagedJobService {
     const allowed =
       'kind' in principal
         ? principal.userId === this.operatorUserId && principal.threadId === job?.wakeTarget.threadId
-        : !!job?.definition && managedJobPrincipalKey(job.definition.principal) === managedJobPrincipalKey(principal);
-    if (!job?.definition || !allowed) {
+        : !!job &&
+          managedJobPrincipalKey(job.definition?.principal ?? job.wakeTarget) === managedJobPrincipalKey(principal);
+    if (!job || !allowed) {
       throw new Error('managed_job_not_found');
     }
     return job;
@@ -249,6 +259,7 @@ export class ManagedJobService {
           : record.state;
     return {
       ...record,
+      recovery: readManagedJobRecovery(job)?.recovery,
       state,
       actionKind:
         job.kind === 'command' ? 'command' : job.kind === 'alpha_revision_v1' ? 'alpha_revision' : 'full_gate',
@@ -276,15 +287,21 @@ export class ManagedJobService {
   }
 
   transitions(principal: ManagedJobAccess, jobId: string) {
-    return readManagedJobTransitions(this.authorized(principal, jobId));
+    const job = this.authorized(principal, jobId);
+    return readManagedJobTransitions(job.recordStorage === 'sqlite_v1' ? job : this.locator(jobId));
   }
 
   /** Scheduler-independent census includes jobs whose wake carrier was consumed or replaced. */
   list() {
     if (!existsSync(join(this.dataRoot, 'managed-jobs', 'supervisor.sqlite'))) return [];
-    return listManagedJobLedger(this.locator(`managed-job-${'0'.repeat(40)}`)).map(
-      (record) => record.descriptor as DurableManagedGateJob,
+    return listManagedJobLedger(this.locator(`managed-job-${'0'.repeat(40)}`)).flatMap((record) =>
+      record.descriptor ? [record.descriptor as DurableManagedGateJob] : [],
     );
+  }
+
+  /** Fixed due owner rows supply production receipts/notices even when the original wait has already settled. */
+  recoveryDueJobs(now: number): DurableManagedGateJob[] {
+    return readManagedJobDueDescriptors(this.dataRoot, this.locator(`managed-job-${'0'.repeat(40)}`), now);
   }
 
   activeExecutions() {
@@ -312,25 +329,26 @@ export class ManagedJobService {
       operatorUserId: this.operatorUserId,
       supervisorEpoch: this.supervisorEpoch,
     });
-    this.observe(row, now);
     return row;
-  }
-
-  private observe(row: ManagedJobObservation, now: number): void {
-    observeManagedJobHealthSnapshot(row.job, row.inspection, row.health, row.observation, now);
   }
 
   async reconcile(
     legacyJobs: readonly DurableManagedGateJob[] = [],
     now = Date.now(),
   ): Promise<ManagedJobObservation[]> {
+    if (
+      !existsSync(join(this.dataRoot, 'managed-jobs', 'supervisor.sqlite')) &&
+      !existsSync(join(this.dataRoot, 'managed-gate-jobs'))
+    )
+      return [];
     if (!isMainThread)
-      return withSupervisorStores(async () => {
-        const results: ManagedJobObservation[] = [];
-        for (const job of [...this.list(), ...legacyJobs])
-          results.push(await reconcileManagedJobDescriptor(job, now, this.supervisorEpoch));
-        return results;
-      });
+      return reconcileManagedJobOwnerBatch(
+        this.dataRoot,
+        this.locator(`managed-job-${'0'.repeat(40)}`),
+        legacyJobs,
+        now,
+        this.supervisorEpoch,
+      );
     const results = await reconcileManagedJobsOffLoop<ManagedJobObservation[]>({
       kind: 'all',
       legacyJobs,
@@ -340,8 +358,7 @@ export class ManagedJobService {
       operatorUserId: this.operatorUserId,
       supervisorEpoch: this.supervisorEpoch,
     });
-    for (const row of results) this.observe(row, now);
-    publishManagedJobCensus(results.map(({ health }) => health));
+    publishManagedJobRecoveryBatch(results.map(({ health }) => health));
     return results;
   }
 }

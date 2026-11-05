@@ -14,6 +14,7 @@ import type { ExpansionHintTargetRef } from '@cat-cafe/shared';
 import type { ConventionGraphAdapter } from './CoverageSearchService.js';
 import type { ExpansionProvenance, ExpansionSourceType } from './coverage-search-types.js';
 import type { EvidenceItem, IEvidenceStore, SearchOptions } from './interfaces.js';
+import { normalizeRecallText, relevanceEvidence } from './relevance-evidence.js';
 
 // ── Output types ─────────────────────────────────────────────────────
 
@@ -65,6 +66,23 @@ export interface ExpandWithMetaResult {
 // have no upper bound. Cap internal searchWithMeta calls to avoid amplifying
 // every default topk search into many sub-queries. (砚砚 review P1-2)
 const MAX_TERMS_PER_TYPE = 5;
+const SECTION_LABELS = new Set([
+  '背景',
+  '验收',
+  '风险',
+  '概述',
+  '总结',
+  '参考',
+  '实现',
+  '测试',
+  'summary',
+  'background',
+  'references',
+  'overview',
+  'testing',
+  'risks',
+  'acceptance',
+]);
 
 // ── Service ──────────────────────────────────────────────────────────
 
@@ -77,14 +95,14 @@ export class TopkExpansionService {
     this.conventionGraph = conventionGraph ?? null;
   }
 
-  async expand(topResults: EvidenceItem[], _query: string, options?: TopkExpansionOptions): Promise<ExpansionHint[]> {
-    const result = await this.expandWithMeta(topResults, _query, options);
+  async expand(topResults: EvidenceItem[], query: string, options?: TopkExpansionOptions): Promise<ExpansionHint[]> {
+    const result = await this.expandWithMeta(topResults, query, options);
     return result.hints;
   }
 
   async expandWithMeta(
     topResults: EvidenceItem[],
-    _query: string,
+    query: string,
     options?: TopkExpansionOptions,
   ): Promise<ExpandWithMetaResult> {
     const emptyFunnel: ExpansionFunnel = {
@@ -115,7 +133,9 @@ export class TopkExpansionService {
     };
 
     // ── Frontmatter-alias expansion ──────────────────────────────────
-    await this.expandViaKeywords(hitsToExpand, seen, hints, maxPerType, funnel.keyword);
+    // Support belongs to each keyword, not to an exact phrase match of the whole
+    // question. Natural questions can contain useful terms without verbatim matches.
+    await this.expandViaKeywords(hitsToExpand, query, seen, hints, maxPerType, funnel.keyword);
 
     // ── Source-thread expansion ──────────────────────────────────────
     await this.expandViaSourceThreads(hitsToExpand, seen, hints, maxPerType, funnel.sourceThread);
@@ -132,6 +152,7 @@ export class TopkExpansionService {
 
   private async expandViaKeywords(
     hits: EvidenceItem[],
+    query: string,
     seen: Set<string>,
     hints: ExpansionHint[],
     maxPerType: number,
@@ -141,7 +162,10 @@ export class TopkExpansionService {
     for (const item of hits) {
       if (item.keywords) {
         for (const kw of item.keywords) {
-          expandTerms.add(kw);
+          const term = normalizeRecallText(kw);
+          const q = normalizeRecallText(query);
+          if (term.length >= 2 && !SECTION_LABELS.has(term) && (q.includes(term) || term.includes(q)))
+            expandTerms.add(kw);
         }
       }
     }
@@ -158,6 +182,7 @@ export class TopkExpansionService {
       } as SearchOptions);
       for (const item of result.items) {
         if (added >= maxPerType) break;
+        if (relevanceEvidence(item, term).state === 'unknown') continue;
         const key = item.anchor.toLowerCase();
         if (seen.has(key)) {
           if (meter) meter.deduped++;
@@ -246,7 +271,7 @@ export class TopkExpansionService {
     meter?: ExpansionSourceFunnel,
   ): Promise<void> {
     const threadRefs = new Set<string>();
-    const threadPattern = /thread-[a-z0-9_-]+/gi;
+    const threadPattern = /(?:thread-)?thread_[a-z0-9_-]+|thread-[a-z0-9_-]+/gi;
 
     for (const item of hits) {
       // Check sourceIds for thread references
@@ -270,13 +295,16 @@ export class TopkExpansionService {
     for (const ref of threadRefs) {
       if (added >= maxPerType || probed >= MAX_TERMS_PER_TYPE) break;
       probed++;
+      const targetAnchor = ref.startsWith('thread_') ? 'thread-' + ref : ref;
       const result = await this.store.searchWithMeta!(ref, {
         scope: 'threads',
+        threadId: targetAnchor.slice('thread-'.length),
         mode: 'hybrid',
         limit: 3,
       } as SearchOptions);
       for (const item of result.items) {
         if (added >= maxPerType) break;
+        if (item.anchor !== targetAnchor) continue;
         const key = item.anchor.toLowerCase();
         if (seen.has(key)) {
           if (meter) meter.deduped++;

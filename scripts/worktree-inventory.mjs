@@ -2,7 +2,11 @@
 /** Read-only lifecycle receipts across every Git-registered linked path. */
 import { fileURLToPath } from 'node:url';
 import { associatedWorktrees, worktreeInventory } from './lib/worktree-inventory.mjs';
-import { mergedWorktreeNotices, releasedWorktreeNotices } from './lib/worktree-merged-notices.mjs';
+import {
+  completedMergedNoticeRelease,
+  mergedWorktreeNotices,
+  releasedWorktreeNotices,
+} from './lib/worktree-merged-notices.mjs';
 import { readPrTruth } from './lib/worktree-pr.mjs';
 import { mainRepoFrom } from './worktree-reaper.mjs';
 
@@ -11,7 +15,7 @@ function parseOptions(argv) {
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--notices') options.notices = true;
     else if (argv[i] === '--merged') options.merged = true;
-    else if (['--repo', '--pr'].includes(argv[i]) && argv[i + 1] && !argv[i + 1].startsWith('--'))
+    else if (['--repo', '--pr', '--released-notice'].includes(argv[i]) && argv[i + 1] && !argv[i + 1].startsWith('--'))
       options[argv[i].slice(2)] = argv[++i];
     else throw new Error('usage: worktree-inventory [--repo path] [--pr pr:owner/repository#number | --notices]');
   }
@@ -21,6 +25,13 @@ function parseOptions(argv) {
 export function inventoryCommand(argv, readPr = readPrTruth) {
   const options = parseOptions(argv);
   const repo = mainRepoFrom(options.repo ?? process.cwd());
+  if (options['released-notice']) {
+    if (options.pr || options.notices || options.merged) throw new Error('choose one exact release query');
+    return {
+      version: 1,
+      released: Boolean(completedMergedNoticeRelease(repo, JSON.parse(options['released-notice']), { readPr })),
+    };
+  }
   if (options.pr && options.notices) throw new Error('choose PR receipt or notices');
   if (options.pr) {
     const truth = readPr(options.pr);

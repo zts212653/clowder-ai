@@ -78,6 +78,7 @@ describe('owner-published preparation and candidates before constitution', () =>
 
   beforeEach(() => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    localStorage.setItem('cat-cafe:shell-presentation', 'classic');
     useEvolutionReading.setState({ programs: {}, workspaceProgramIds: {} });
     useF307ExperienceWorkbenchStore.setState({
       layout: createInitialWorkbenchState([surface]),
@@ -106,6 +107,7 @@ describe('owner-published preparation and candidates before constitution', () =>
   afterEach(() => {
     act(() => root.unmount());
     host.remove();
+    localStorage.removeItem('cat-cafe:shell-presentation');
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
 

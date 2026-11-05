@@ -545,7 +545,7 @@ function measureConsumersInPage() {
     for (const layer of document.querySelectorAll('[data-layer]')) {
       const ring = layer.firstElementChild;
       out.focusRing[layer.getAttribute('data-layer')] = contrast(
-        rgba(getComputedStyle(ring).outlineColor),
+        rgba(getComputedStyle(ring, '::after').borderTopColor),
         rgba(getComputedStyle(layer).backgroundColor),
       );
     }
@@ -680,7 +680,7 @@ test('a translucent human colour keeps its existing reply tint: none is painted 
   measurements.push(...rows);
 });
 
-test('the lineage focus ring (outline in the human primary) reaches 3:1 on the page layers it can sit on, in both themes', async () => {
+test('the message jump ring reaches 3:1 on every page layer and existing surface in both themes', async () => {
   const rows = [];
   for (const base of ['light', 'dark']) {
     const { page, context } = await open({ shell: 'v2', base, color: null, consumers: true });
@@ -688,19 +688,9 @@ test('the lineage focus ring (outline in the human primary) reaches 3:1 on the p
     const m = await page.evaluate(measureConsumersInPage());
     await context.close();
     rows.push({ case: 'focus-ring', base, config: 'cocoa', ...m.focusRing });
-    // The ring sits on the message list (the page layers) and, for a receipt or absorption dock, inside the bubble of its
-    // message. Nothing that takes lineage focus is drawn on the sunken layer, so that one is recorded and not asserted. On a
-    // bubble in the light theme the ring is below 3:1 -- 2.29-2.35 now, 2.40-2.46 before this change (the classic apricot),
-    // so it is a shortfall this work did not create and made 0.1 worse; it is recorded, not hidden, and not asserted.
-    const pageLayers = ['--cafe-surface-canvas', '--cafe-surface', '--cafe-surface-elevated'];
-    const bubbles = ['--color-opus-surface', '--color-codex-surface', '--color-cocreator-surface'];
-    for (const layer of pageLayers) {
-      assert.ok(m.focusRing[layer] >= 3, `${base}: focus ring on ${layer} is ${m.focusRing[layer]}:1 (needs 3:1)`);
-    }
-    if (base === 'dark') {
-      for (const layer of bubbles) {
-        assert.ok(m.focusRing[layer] >= 3, `${base}: focus ring on ${layer} is ${m.focusRing[layer]}:1 (needs 3:1)`);
-      }
+    // The current display-time lightness covers all four page layers and the existing cat/human surfaces.
+    for (const [layer, ratio] of Object.entries(m.focusRing)) {
+      assert.ok(ratio >= 3, `${base}: focus ring on ${layer} is ${ratio}:1 (needs 3:1)`);
     }
   }
   measurements.push(...rows);

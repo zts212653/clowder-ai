@@ -1,3 +1,4 @@
+import { recoveryGuarded } from '../../../../infrastructure/recovery/recovery-deadline.js';
 /**
  * SessionSealer — F24 Phase B+C
  * Manages session lifecycle transitions: active → sealing → sealed.
@@ -12,6 +13,7 @@
 
 import type { CatId, SealResult, SessionRecord } from '@cat-cafe/shared';
 import { createModuleLogger } from '../../../../infrastructure/logger.js';
+import { runDueBatch } from '../../../../infrastructure/recovery/run-due-batch.js';
 import { extractRecentArtifacts } from '../agents/routing/artifact-tracking.js';
 import { AuditEventTypes, getEventAuditLog } from '../orchestration/EventAuditLog.js';
 import type { ISessionChainStore } from '../stores/ports/SessionChainStore.js';
@@ -113,7 +115,9 @@ export class SessionSealer implements ISessionSealer {
     private readonly handoffConfig?: HandoffConfig,
     private readonly summaryStore?: ISummaryStore,
     private readonly options: SessionSealerOptions = {},
-  ) {}
+  ) {
+    this.store = recoveryGuarded(store);
+  }
 
   /**
    * F231 AC-C3 / KD-10: Register a hook to fire after session seal finalize.
@@ -328,46 +332,63 @@ export class SessionSealer implements ISessionSealer {
   }
 
   async reconcileAllStuck(maxAgeMs = 5 * 60_000): Promise<number> {
-    const sealingIds = await this.store.listSealingSessions();
-    if (sealingIds.length === 0) return 0;
-
     const now = Date.now();
     let count = 0;
-    for (const id of sealingIds) {
-      const s = await this.store.get(id);
-      if (!s || s.status !== 'sealing') continue;
-      if (now - (s.updatedAt ?? s.createdAt) > maxAgeMs) {
-        await this.store.update(s.id, {
-          status: 'sealed',
-          sealReason: 'global_reaper',
-          sealedAt: now,
-          updatedAt: now,
-        });
-        log.info(
-          {
-            sessionId: s.id,
-            catId: s.catId,
-            threadId: s.threadId,
-            reason: 'global_reaper',
-            stuckDurationMs: now - (s.updatedAt ?? s.createdAt),
-          },
-          'session force-sealed by global reaper',
-        );
-        getEventAuditLog()
-          .append({
-            type: AuditEventTypes.SEAL_FINALIZE_FAILED,
-            threadId: s.threadId,
-            data: {
+    const batch = await runDueBatch({
+      limit: 100,
+      budgetMs: 5_000,
+      selectDue: (limit) => this.store.listSealingRecoveryCandidates(limit, now - maxAgeMs),
+      process: async ({ id, expectedAt }) => {
+        const s = await this.store.get(id);
+        if (!s || s.status !== 'sealing' || (s.updatedAt ?? s.createdAt) !== expectedAt) return;
+        if (now - (s.updatedAt ?? s.createdAt) > maxAgeMs) {
+          await this.store.update(s.id, {
+            status: 'sealed',
+            sealReason: 'global_reaper',
+            sealedAt: now,
+            updatedAt: now,
+          });
+          log.info(
+            {
               sessionId: s.id,
               catId: s.catId,
-              phase: 'global_reaper',
+              threadId: s.threadId,
+              reason: 'global_reaper',
               stuckDurationMs: now - (s.updatedAt ?? s.createdAt),
             },
-          })
-          .catch(() => {});
-        count++;
-      }
-    }
+            'session force-sealed by global reaper',
+          );
+          getEventAuditLog()
+            .append({
+              type: AuditEventTypes.SEAL_FINALIZE_FAILED,
+              threadId: s.threadId,
+              data: {
+                sessionId: s.id,
+                catId: s.catId,
+                phase: 'global_reaper',
+                stuckDurationMs: now - (s.updatedAt ?? s.createdAt),
+              },
+            })
+            .catch(() => {});
+          count++;
+        }
+      },
+      onItemError: async ({ id, expectedAt }, error) => {
+        await this.store.recordSealingRecoveryFailure(id, expectedAt);
+        log.warn({ err: error, sessionId: id }, 'session sealing recovery deferred');
+      },
+    });
+    log.info(
+      {
+        loopId: 'session-sealing',
+        elapsedMs: batch.elapsedMs,
+        selected: batch.selected,
+        failed: batch.failed,
+        deferred: batch.deferred,
+        reconciled: count,
+      },
+      'session sealing recovery summary',
+    );
     return count;
   }
 

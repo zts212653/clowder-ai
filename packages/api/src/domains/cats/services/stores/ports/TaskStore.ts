@@ -1,7 +1,10 @@
+import { DeploymentWaitTaskMap } from './deployment-wait/projection-index.js';
+import type { DeploymentWaitAudit } from './deployment-wait/recovery-facts.js';
 import type { AttachEntrustedWorkArtifactInput } from './EntrustedWorkArtifactEvidence.js';
 import { advanceEntrustedTaskAuthority } from './EntrustedWorkRevision.js';
 import { admitEntrustedTaskInMemory } from './TaskEntrustedAdmission.js';
 import { reconcilePluginWaitTaskMutation, replaceTaskPluginWait } from './TaskPluginWait.js';
+import { matchesTaskProbeSource, type TaskProbeSource } from './TaskProbeSource.js';
 import type { ReplacePluginWaitInput } from './TaskStoreContract.js';
 /**
  * Task Store (毛线球)
@@ -92,8 +95,8 @@ export class TaskStore implements ITaskStore {
     };
     return writeFence ? Promise.resolve(writeFence.assertCurrent()).then(apply) : apply();
   }
-  private tasks: Map<string, TaskItem> = new Map();
   private readonly waitRegistrations = new Map<string, TypedWaitRegistration>();
+  private tasks = new DeploymentWaitTaskMap((id) => this.waitRegistrations.get(id) ?? null);
   /** subject_key → taskId reverse index */
   private subjectIndex: Map<string, string> = new Map();
   private readonly developmentWork = new TaskDevelopmentWorkStore(this.tasks, this.subjectIndex, () =>
@@ -228,6 +231,28 @@ export class TaskStore implements ITaskStore {
     return this.managedWorkRegistration.upsert(input, binding);
   }
 
+  listDueDeploymentWaitRecovery(limit = 100, now = Date.now()): TaskItem[] {
+    return this.tasks.due(limit, now);
+  }
+  listDeploymentWaitProjectionCandidates(): TaskItem[] {
+    return this.tasks.candidates();
+  }
+  listDeploymentWaitAuditCandidates(limit = 100, now = Date.now()): DeploymentWaitAudit[] {
+    return this.tasks.audits(limit, now);
+  }
+  ackDeploymentWaitAudit(entry: DeploymentWaitAudit): boolean {
+    return this.tasks.ack(entry);
+  }
+  failDeploymentWaitAudit(entry: DeploymentWaitAudit, now: number): void {
+    this.tasks.failAudit(entry, now);
+  }
+  finishDeploymentWaitRecovery(task: TaskItem, now: number, failed: boolean): void {
+    this.tasks.finishLive(task, now, failed);
+  }
+  getDeploymentWaitRecoveryFacts(id: string) {
+    return this.tasks.recoveryFacts(id);
+  }
+
   listByKind(kind: TaskKind): TaskItem[] {
     const result: TaskItem[] = [];
     for (const task of this.tasks.values()) {
@@ -342,6 +367,11 @@ export class TaskStore implements ITaskStore {
     return reconciled;
   }
 
+  completeProbeIfCurrent(taskId: string, source: TaskProbeSource): TaskItem | null {
+    const current = this.tasks.get(taskId);
+    return current && matchesTaskProbeSource(current, source) ? this.update(taskId, { status: 'done' }) : null;
+  }
+
   updateIfThreadId(taskId: string, expectedThreadId: string, input: UpdateTaskInput): TaskItem | null {
     const existing = this.tasks.get(taskId);
     if (!existing) return null;
@@ -402,7 +432,12 @@ export class TaskStore implements ITaskStore {
   }
 
   private evictDoneIfNeeded(): void {
-    evictTaskForAdmission(this.tasks, this.maxTasks, (id, task) => this.deleteTask(id, task));
+    evictTaskForAdmission(
+      this.tasks,
+      this.maxTasks,
+      (id, task) => this.deleteTask(id, task),
+      (task) => this.tasks.hasRecoveryResponsibility(task.id),
+    );
   }
 
   private deleteTask(taskId: string, task?: TaskItem): void {

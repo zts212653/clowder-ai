@@ -389,7 +389,7 @@ describe('MCP Evidence Tools', () => {
     assert.ok(text.includes('hint: get_thread_context'), 'should render drillDown hint');
   });
 
-  test('Hook F-1: appends Read reminder when high/mid doc anchors present', async () => {
+  test('Hook F-1: appends Read reminder when textual evidence supports document candidates', async () => {
     const { handleSearchEvidence } = await import('../dist/tools/evidence-tools.js');
 
     globalThis.fetch = async () => ({
@@ -401,6 +401,7 @@ describe('MCP Evidence Tools', () => {
             title: 'F177 Harness Update',
             anchor: 'F177',
             snippet: 'hotfix governance',
+            relevance: { state: 'exact_anchor' },
             matchRank: 'high',
             sourceType: 'feature',
           },
@@ -414,14 +415,16 @@ describe('MCP Evidence Tools', () => {
           {
             title: 'ADR-019 Hooks',
             anchor: 'doc:decisions/019',
-            snippet: 'hook architecture',
+            snippet: 'F177 hooks architecture',
+            relevance: { state: 'phrase' },
             matchRank: 'mid',
             sourceType: 'decision',
           },
           {
             title: 'Memory System Overview',
             anchor: 'doc:architecture/memory-system-overview',
-            snippet: 'architecture map',
+            snippet: 'F177 hooks architecture map',
+            relevance: { state: 'phrase' },
             matchRank: 'mid',
             sourceType: 'architecture',
           },
@@ -435,7 +438,7 @@ describe('MCP Evidence Tools', () => {
     assert.ok(text.includes('Evidence search results:'), 'should include evidence result marker');
     assert.ok(text.includes('Found 4 result(s) for "F177 hooks":'), 'should include query in result header');
     assert.ok(
-      text.includes('📌 高匹配文档命中 3 个'),
+      text.includes('📌 有文本匹配依据的候选 3 个'),
       'should count only doc-type hits (feature+decision+architecture, not thread)',
     );
     assert.ok(text.includes('F177'), 'should list feature anchor');
@@ -680,8 +683,11 @@ describe('MCP Evidence Tools', () => {
 
     const result = await handleSearchEvidence({ query: 'axes' });
     const text = result.content[0].text;
-    assert.match(text, /\[match:high · authority:validated · updated:2026-07-12T00:00:00Z\] Current result/);
-    assert.match(text, /\[match:mid · authority:unknown · updated:unknown\] Legacy freshness gap/);
+    assert.match(
+      text,
+      /\[rank:high · relevance:unknown · authority:validated · updated:2026-07-12T00:00:00Z\] Current result/,
+    );
+    assert.match(text, /\[rank:mid · relevance:unknown · authority:unknown · updated:unknown\] Legacy freshness gap/);
     assert.doesNotMatch(text, /\[high\]/);
     assert.match(text, /retrievalScore: 0\.88/);
     const sidecar = JSON.parse(text.match(/<recall-meta>(.+)<\/recall-meta>/)?.[1] ?? '{}');

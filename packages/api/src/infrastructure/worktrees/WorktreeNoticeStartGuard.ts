@@ -1,4 +1,4 @@
-/** Revalidate retention reminders at Queue start, including already-persisted private inputs. */
+/** Revalidate lifecycle reminders at Queue start, including already-persisted private inputs. */
 import { execFile } from 'node:child_process';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -18,6 +18,7 @@ const liveNotice = z.object({
   owner: z.string(),
 });
 const inventory = z.object({ version: z.literal(1), notices: z.array(liveNotice).max(10000) });
+const releaseResult = z.object({ version: z.literal(1), released: z.boolean() });
 
 export type WorktreeNoticeStartDecision =
   | { readonly ok: true }
@@ -73,12 +74,19 @@ export class WorktreeNoticeStartGuard {
       return { ok: false, reason: 'evidence_unavailable' };
     const thread = await this.deps.getThread(entry.threadId);
     if (!thread || thread.deletedAt || thread.createdBy !== userId) return { ok: false, reason: 'notice_stale' };
-    // Recovery notices belong to their durable release transactions. This check handles only
-    // retention; it is not a second PR/deletion guard or another scheduled monitor.
-    if (!parsed.data.kind.startsWith('retention-')) return { ok: true };
+    // Genuine interrupted/paused recovery remains actionable. Only a merged busy reminder
+    // with its exact verified completed release can be retired here.
+    const merged = parsed.data.kind === 'merged-unfinished';
+    if (!parsed.data.kind.startsWith('retention-') && !merged) return { ok: true };
+    const query = merged
+      ? [
+          '--released-notice',
+          JSON.stringify({ ...parsed.data, key, threadId: entry.threadId, userId, observedAt: message.timestamp }),
+        ]
+      : ['--notices'];
     const { stdout } = await execute(
       process.execPath,
-      [join(this.deps.scriptRoot, 'scripts/worktree-inventory.mjs'), '--repo', this.deps.repoRoot, '--notices'],
+      [join(this.deps.scriptRoot, 'scripts/worktree-inventory.mjs'), '--repo', this.deps.repoRoot, ...query],
       {
         cwd: this.deps.scriptRoot,
         timeout: 30000,
@@ -86,6 +94,8 @@ export class WorktreeNoticeStartGuard {
         env: { ...process.env, ...this.deps.queryEnv, GIT_OPTIONAL_LOCKS: '0' },
       },
     );
+    if (merged)
+      return releaseResult.parse(JSON.parse(stdout)).released ? { ok: false, reason: 'notice_stale' } : { ok: true };
     const current = inventory.parse(JSON.parse(stdout));
     const present = current.notices.some(
       (notice) =>

@@ -48,7 +48,7 @@
   overflow: hidden;
   height: 40px;
   margin: 10px 11px 0;
-  font-size: 13.5px;
+  font-size: var(--console-font-sm);
   font-weight: 600;
   line-height: 20px;
   overflow-wrap: anywhere;
@@ -104,7 +104,7 @@
   color: var(--shell-ink);
   background: var(--shell-paper);
   --chat-background-role: paper;
-  font-size: 11px;
+  font-size: var(--console-font-label);
 }
 .chat-work-gallery {
   container-type: inline-size;

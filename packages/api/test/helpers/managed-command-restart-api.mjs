@@ -8,6 +8,7 @@ import Database from 'better-sqlite3';
 import Fastify from 'fastify';
 import { createSqliteHoldQuotaStore } from '../../dist/domains/ball-custody/hold-quota-store.js';
 import { ManagedCommandWakeRecoverySweep } from '../../dist/domains/ball-custody/ManagedCommandWakeRecoverySweep.js';
+import { attachManagedCommandWaitLifecycleEvents } from '../../dist/domains/ball-custody/managed-command-wait-lifecycle-events.js';
 import { createManagedCommandWakeAdmission } from '../../dist/domains/ball-custody/managed-command-wake-admission.js';
 import { createManagedCommandWakeCarrierAdapter } from '../../dist/domains/ball-custody/managed-command-wake-carrier-adapter.js';
 import { InvocationQueue } from '../../dist/domains/cats/services/agents/invocation/InvocationQueue.js';
@@ -98,6 +99,12 @@ const sweep = new ManagedCommandWakeRecoverySweep({
 });
 const quota = createSqliteHoldQuotaStore(join(root, 'quota.sqlite'));
 const app = Fastify();
+const detachLifecycle = attachManagedCommandWaitLifecycleEvents(
+  messages,
+  (message) => sweep.onMessageLifecycleChanged(message),
+  console,
+);
+app.addHook('onClose', async () => detachLifecycle());
 registerCallbackAuthHook(app, registry);
 registerCallbackHoldBallRoutes(app, {
   registry,

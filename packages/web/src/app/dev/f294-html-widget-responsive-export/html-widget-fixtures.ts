@@ -1,3 +1,28 @@
+export const ANIMATED_BOX_EDGES_WIDGET_HTML = `<!doctype html>
+<html><head><style>
+  * { box-sizing: border-box; }
+  html { margin: 0; padding: 7px; border: 2px solid; }
+  body { margin: 5px; padding: 12px; border: 3px solid; display: flex; flex-direction: column; gap: 8px; }
+  main { height: 200px; flex: none; }
+  button { height: 24px; flex: none; }
+  footer { height: 40px; flex: none; }
+</style></head><body>
+  <main><span id="status">待机</span></main>
+  <button id="resize">Resize content</button>
+  <footer>Bottom padding must remain visible during animation.</footer>
+  <script>
+    let tick = 0;
+    setInterval(() => {
+      document.body.dataset.tick = String(++tick);
+      document.getElementById('status').textContent = tick % 2 ? '张嘴说话' : '待机';
+    }, 50);
+    document.getElementById('resize').addEventListener('click', () => {
+      const main = document.querySelector('main');
+      main.style.height = main.style.height === '400px' ? '200px' : '400px';
+    });
+  </script>
+</body></html>`;
+
 export const CSSOM_FINAL_PROOF_RACE_WIDGET_HTML = `<!doctype html>
 <html lang="zh-CN">
   <head>

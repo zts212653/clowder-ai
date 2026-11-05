@@ -72,4 +72,18 @@ describe('rich block preview ownership', () => {
     expect(messages.find((m) => m.id === 'stream-direct')?.extra?.rich?.blocks).toEqual([]);
     expect(messages.find((m) => m.id === 'callback-direct')?.extra?.rich?.blocks).toEqual([block]);
   });
+  it.each(['active', 'background'])('replaces a revised widget without duplicating it in %s', (threadId) => {
+    const store = useChatStore.getState();
+    const widget = { id: 'widget', kind: 'html_widget' as const, v: 1 as const, html: '<p>Draft</p>' };
+    store.addMessageToThread(threadId, {
+      ...message('response', 'stream'),
+      extra: { rich: { v: 1, blocks: [block, widget, laterBlock] } },
+    });
+    const revised = { ...widget, html: '<p>Corrected</p>' };
+    store.appendRichBlockToThread(threadId, 'response', revised);
+    const rich = useChatStore.getState().getThreadState(threadId).messages[0]?.extra?.rich;
+    expect(rich?.blocks).toEqual([block, revised, laterBlock]);
+    store.appendRichBlockToThread(threadId, 'response', { ...revised });
+    expect(useChatStore.getState().getThreadState(threadId).messages[0]?.extra?.rich?.blocks).toEqual(rich?.blocks);
+  });
 });

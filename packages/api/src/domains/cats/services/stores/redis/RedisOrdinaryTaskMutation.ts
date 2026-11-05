@@ -6,6 +6,7 @@ import {
 } from '../ports/OrdinaryTaskMutation.js';
 import type { TaskMutationWriteFence } from '../ports/TaskStoreContract.js';
 import { TaskKeys } from '../redis-keys/task-keys.js';
+import { commitTaskTransaction, publishTaskRecovery } from './publish-task-recovery.js';
 import { hydrateTask, serializeTask } from './RedisTaskCodec.js';
 import { runWithExclusiveRedisWatchSession } from './RedisWatchSession.js';
 
@@ -29,8 +30,8 @@ export async function mutateOrdinaryRedisTask(
         // Repeated on every WATCH attempt. A retired callback/source cannot use a stale authorization.
         await writeFence?.assertCurrent();
         const transaction = session.multi();
-        transaction.hset(key, serializeTask(decision.task));
-        const committed = await transaction.exec();
+        publishTaskRecovery(transaction, key, serializeTask(decision.task));
+        const committed = await commitTaskTransaction(transaction);
         return committed ? decision : undefined;
       },
     );

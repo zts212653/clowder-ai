@@ -12,6 +12,8 @@ export interface EvidenceResult {
   anchor: string;
   snippet: string;
   matchRank: EvidenceMatchRank;
+  rank?: number;
+  relevance?: { state: string };
   retrievalScore?: number;
   sourceType: EvidenceSourceType;
   status?: EvidenceStatus;
@@ -67,15 +69,15 @@ const MATCH_RANK_STYLES: Record<
     label: string;
   }
 > = {
-  high: { bg: 'bg-semantic-success-surface', text: 'text-semantic-success', label: '高匹配' },
-  mid: { bg: 'bg-semantic-warning-surface', text: 'text-semantic-warning', label: '中匹配' },
-  low: { bg: 'bg-conn-slate-bg', text: 'text-conn-slate-text', label: '低匹配' },
+  high: { bg: 'bg-conn-slate-bg', text: 'text-conn-slate-text', label: '排序靠前' },
+  mid: { bg: 'bg-conn-slate-bg', text: 'text-conn-slate-text', label: '排序居中' },
+  low: { bg: 'bg-conn-slate-bg', text: 'text-conn-slate-text', label: '排序靠后' },
 };
 
 const UNKNOWN_MATCH_RANK_STYLE = {
   bg: 'bg-conn-slate-bg',
   text: 'text-conn-slate-text',
-  label: '匹配未知',
+  label: '排序未知',
 };
 
 function isEvidenceMatchRank(value: unknown): value is EvidenceMatchRank {
@@ -119,7 +121,8 @@ export function EvidenceCard({ result }: { result: EvidenceResult }) {
               className={`text-xs font-bold text-cafe leading-snug ${result.status === 'archived' ? 'line-through decoration-cafe-muted/50' : ''}`}
             />
             <span className="text-micro text-cafe-muted" data-testid="evidence-result-axes">
-              match:{persistedMatchRank ?? 'unknown'} · authority:{result.authority ?? 'unknown'} · updated:
+              rank:{result.rank ?? persistedMatchRank ?? 'unknown'} · relevance:{result.relevance?.state ?? 'unknown'} ·
+              authority:{result.authority ?? 'unknown'} · updated:
               {result.updatedAt ?? 'unknown'}
             </span>
           </div>
@@ -127,7 +130,7 @@ export function EvidenceCard({ result }: { result: EvidenceResult }) {
             <span
               className={`text-micro font-bold px-1.5 py-0.5 rounded-full uppercase tracking-wider ${matchRank.bg} ${matchRank.text}`}
             >
-              {matchRank.label}
+              {result.rank != null ? `第 ${result.rank} 位` : matchRank.label}
             </span>
             {status?.badge && (
               <span className={`text-micro font-black px-1 py-0.25 rounded border ${status.badge}`}>

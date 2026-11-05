@@ -56,12 +56,12 @@ export class MatterMemoryStore {
       .get(ownerUserId, matterId) as MatterRow | undefined;
     return row ? fromRow(row) : null;
   }
-  list(ownerUserId: string, after = '', includeRetired = false): StoredMatter[] {
+  list(ownerUserId: string, includeRetired = false): StoredMatter[] {
     return (
       this.db
-        .prepare(`SELECT * FROM memory_matters WHERE owner_user_id = ? AND matter_id > ?
-      ${includeRetired ? '' : "AND status = 'active'"} ORDER BY matter_id`)
-        .all(ownerUserId, after) as MatterRow[]
+        .prepare(`SELECT * FROM memory_matters WHERE owner_user_id = ?
+      ${includeRetired ? '' : "AND status = 'active'"} ORDER BY updated_at DESC, matter_id`)
+        .all(ownerUserId) as MatterRow[]
     ).map(fromRow);
   }
   entries(matterId: string): StoredMatterEntry[] {

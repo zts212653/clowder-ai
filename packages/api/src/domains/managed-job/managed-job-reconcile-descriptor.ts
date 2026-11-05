@@ -7,7 +7,6 @@ import {
   writeDurableGateRecord,
 } from './durable-managed-gate-job-store.js';
 import { collectManagedJobHealth } from './managed-job-health.js';
-import { readManagedJobTransitions } from './managed-job-ledger.js';
 import type { ManagedJobObservation } from './managed-job-reconciliation.js';
 import type { DurableManagedGateJob } from './managed-job-types.js';
 
@@ -30,8 +29,8 @@ export async function reconcileManagedJobDescriptor(
     }
   }
   const inspection = inspectDurableManagedGateJob(job, { now, supervisorEpoch });
-  const history =
-    job.recordStorage === 'sqlite_v1' ? readManagedJobTransitions(job) : [rawDurableGateRecord(job) ?? {}];
+  // Recovery observes one current fact. Full transition history remains available only through explicit reads.
+  const history = [rawDurableGateRecord(job) ?? {}];
   const health = collectManagedJobHealth(job, inspection, history, now);
   const latest = history.at(-1) ?? {};
   return {

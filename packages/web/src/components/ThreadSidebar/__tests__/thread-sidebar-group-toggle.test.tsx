@@ -1,5 +1,6 @@
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { writeShellPresentation } from '@/components/shell/shell-presentation';
 import { useLabelStore } from '@/stores/label-store';
 import {
   createThreadSidebarHarness,
@@ -25,6 +26,7 @@ describe('Group header immediate interaction', () => {
   beforeEach(() => {
     installThreadSidebarGlobals();
     resetThreadSidebarMocks();
+    writeShellPresentation('classic');
     savedOpen = { [anchor]: false };
     requests = [];
     Object.assign(mockStore, {

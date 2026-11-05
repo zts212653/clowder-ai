@@ -73,7 +73,7 @@
 .identity h2 {
   margin: 0;
   color: var(--shell-ink);
-  font-size: 18px;
+  font-size: var(--console-font-lg);
   font-weight: 600;
   line-height: 1.3;
 }
@@ -81,7 +81,7 @@
   margin: 0;
   overflow: hidden;
   color: var(--shell-muted);
-  font-size: 12.5px;
+  font-size: var(--console-font-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -95,7 +95,7 @@
   align-items: center;
   gap: 7px;
   margin-bottom: 6px;
-  font-size: 13px;
+  font-size: var(--console-font-compact);
 }
 .status i {
   flex: none;
@@ -122,7 +122,7 @@
 .model {
   margin: 0 0 8px;
   color: var(--shell-muted);
-  font-size: 13px;
+  font-size: var(--console-font-compact);
 }
 .model span {
   color: var(--shell-body);
@@ -131,14 +131,14 @@
   display: -webkit-box;
   margin: 0;
   overflow: hidden;
-  font-size: 13.5px;
+  font-size: var(--console-font-sm);
   line-height: 1.6;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
 }
 .error {
   color: var(--semantic-critical);
-  font-size: 13px;
+  font-size: var(--console-font-compact);
 }
 .actions {
   display: flex;
@@ -163,7 +163,7 @@
   background: var(--shell-paper);
   --chat-background-role: paper;
   color: var(--shell-ink);
-  font-size: 13px;
+  font-size: var(--console-font-compact);
   white-space: nowrap;
 }
 .actions button:disabled {

@@ -979,6 +979,18 @@ describe('MCP Callback Tools', () => {
     assert.ok(capturedUrl.includes('cursor=opaque-next'));
   });
 
+  test('handleListThreads forwards an explicit topic without converting it to a title filter', async () => {
+    const { handleListThreads } = await import('../dist/tools/callback-tools.js');
+    let capturedUrl;
+    globalThis.fetch = async (url) => {
+      capturedUrl = new URL(url);
+      return { ok: true, json: async () => ({ threads: [] }) };
+    };
+    await handleListThreads({ includeWork: true, topic: '机器人 讲解' });
+    assert.equal(capturedUrl.searchParams.get('topic'), '机器人 讲解');
+    assert.equal(capturedUrl.searchParams.has('keyword'), false);
+  });
+
   test('handleCrossPostMessage calls post-message with threadId', async () => {
     const { handleCrossPostMessage } = await import('../dist/tools/callback-tools.js');
 

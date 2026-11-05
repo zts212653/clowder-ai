@@ -1,4 +1,6 @@
 import { createModuleLogger } from '../../infrastructure/logger.js';
+import { recoveryGuarded } from '../../infrastructure/recovery/recovery-deadline.js';
+import { runDueBatch } from '../../infrastructure/recovery/run-due-batch.js';
 import { returnDeliveryOverdueTotal } from '../../infrastructure/telemetry/instruments.js';
 import type { ITaskStore } from '../cats/services/stores/ports/TaskStore.js';
 import { type ActionSuccessorFence, buildActionSuccessorFence } from './ActionSuccessorAdmissionService.js';
@@ -9,6 +11,8 @@ import {
   type DispatchRecoveryResult,
 } from './ActionSuccessorDispatchRecovery.js';
 import type { ActionSuccessorLeaseStore } from './ActionSuccessorLeaseStore.js';
+import { recordActionRecoveryBatchFailure, runActionDueRecovery } from './action-successor-due-recovery.js';
+import type { ActionRecoveryNotification } from './action-successor-recovery-state.js';
 import { type ActionSuccessorLease, isRecoverableActionSuccessorReturn } from './action-successor-state-machine.js';
 import { isRetiredTaskAction } from './retired-task-action.js';
 
@@ -48,11 +52,12 @@ export interface ActionSuccessorRecoverySweepDeps {
   readonly tasks?: Pick<ITaskStore, 'get'>;
   readonly leaseStore: Pick<
     ActionSuccessorLeaseStore,
-    'listPendingReturns' | 'recordReturnDeliveryAttempt' | 'markReturnDelivered'
+    'listPendingReturns' | 'recordReturnDeliveryAttempt' | 'markReturnDelivered' | 'recovery'
   >;
   readonly deliverReturnCarrier: (
     carrier: ActionSuccessorReturnCarrier,
   ) => Promise<ActionSuccessorReturnDeliveryResult>;
+  readonly notifyRecovery?: ActionRecoveryNotification;
   readonly now?: () => number;
   readonly scanLimit?: number;
   readonly onOverdue?: (input: {
@@ -94,6 +99,7 @@ export class ActionSuccessorRecoverySweep {
   private readonly dispatchRecovery?: ActionSuccessorDispatchRecovery;
 
   constructor(private readonly deps: ActionSuccessorRecoverySweepDeps) {
+    this.deps = recoveryGuarded(deps);
     this.now = deps.now ?? Date.now;
     this.scanLimit = deps.scanLimit ?? DEFAULT_SCAN_LIMIT;
     if (deps.dispatch) {
@@ -115,20 +121,39 @@ export class ActionSuccessorRecoverySweep {
   }
 
   private async runCycle(): Promise<ActionSuccessorRecoveryStats> {
-    const leases = (await this.deps.leaseStore.listPendingReturns(this.scanLimit)).filter(
-      isRecoverableActionSuccessorReturn,
-    );
     let delivered = 0;
     let pending = 0;
     let overdue = 0;
 
-    for (const candidate of leases) {
-      const result = await this.recoverLease(candidate);
-      if (result.overdue) overdue += 1;
-      if (result.outcome === 'delivered') delivered += 1;
-      if (result.outcome === 'pending') pending += 1;
-    }
-    return { scanned: leases.length, delivered, pending, overdue };
+    const batch = await runDueBatch({
+      limit: this.scanLimit,
+      budgetMs: 5000,
+      selectDue: async (limit) =>
+        (await this.deps.leaseStore.listPendingReturns(limit, this.now())).filter(isRecoverableActionSuccessorReturn),
+      process: async (candidate) => {
+        const outcome = await runActionDueRecovery({
+          port: this.deps.leaseStore.recovery,
+          lease: candidate,
+          lane: 'return',
+          now: this.now(),
+          notify: this.deps.notifyRecovery,
+          recover: async (lease) => {
+            if (!isRecoverableActionSuccessorReturn(lease)) return { kind: 'settled' };
+            if (lease.mode !== 'single' || lease.holderCatIds.length !== 1 || !lease.predecessorCatId)
+              return { kind: 'permanent_error', reason: 'return_route_invalid' };
+            const result = await this.recoverLease(lease);
+            if (result.overdue) overdue += 1;
+            if (result.outcome === 'delivered') delivered += 1;
+            if (result.outcome === 'pending') pending += 1;
+            return { kind: result.outcome === 'pending' ? 'waiting' : 'settled' };
+          },
+        });
+        if (outcome.kind === 'retryable_error') pending += 1;
+      },
+      onItemError: (candidate, error) =>
+        recordActionRecoveryBatchFailure(this.deps.leaseStore.recovery, candidate, 'return', this.now(), error),
+    });
+    return { scanned: batch.selected, delivered, pending: pending + batch.failed, overdue };
   }
 
   async runDispatchesOnce(): Promise<ActionSuccessorDispatchRecoveryStats> {
@@ -152,15 +177,7 @@ export class ActionSuccessorRecoverySweep {
     this.observeOverdueTransition(lease, attempt.becameOverdue === true, now);
 
     const carrier = carrierFor(lease);
-    let delivery: ActionSuccessorReturnDeliveryResult = { outcome: 'unavailable' };
-    try {
-      delivery = await this.deps.deliverReturnCarrier(carrier);
-    } catch (err) {
-      log.warn(
-        { err, leaseId: lease.leaseId, generation: lease.generation },
-        'F167 S.1-c ActionSuccessor return carrier delivery failed',
-      );
-    }
+    const delivery = await this.deps.deliverReturnCarrier(carrier);
     if (delivery.outcome !== 'completed') {
       return { outcome: 'pending', overdue: lease.returnDeliveryState === 'overdue' };
     }

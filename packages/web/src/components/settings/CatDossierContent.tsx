@@ -252,15 +252,13 @@ function EvidenceSection({
                 <SettingsText variant="xs" tone="default" className="font-medium">
                   {ev.title}
                 </SettingsText>
-                <SettingsBadge
-                  tone={ev.matchRank === 'high' ? 'emerald' : ev.matchRank === 'mid' ? 'amber' : 'slate'}
-                  size="xxs"
-                >
-                  {ev.matchRank}
+                <SettingsBadge tone="slate" size="xxs">
+                  {ev.rank ?? ev.matchRank}
                 </SettingsBadge>
               </div>
               <SettingsText as="p" variant="xs" tone="muted">
-                match:{ev.matchRank} · authority:{ev.authority ?? 'unknown'} · updated:{ev.updatedAt ?? 'unknown'}
+                rank:{ev.rank ?? ev.matchRank} · relevance:{ev.relevance?.state ?? 'unknown'} · authority:
+                {ev.authority ?? 'unknown'} · updated:{ev.updatedAt ?? 'unknown'}
               </SettingsText>
               <ExpandableProse
                 text={ev.snippet}

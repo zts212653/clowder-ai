@@ -8,6 +8,7 @@ import { join, relative, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { setImmediate as yieldToIo } from 'node:timers/promises';
 import { CatCafeScanner } from './CatCafeScanner.js';
+import { isPublicTasteVignettePath } from './CatCafeScannerParsing.js';
 import { GenericRepoScanner } from './GenericRepoScanner.js';
 import type {
   ConsistencyReport,
@@ -20,6 +21,9 @@ import type {
   RepoScanner,
   ThreadIndexRefreshOptions,
 } from './interfaces.js';
+import type { PublishedDocumentIndex } from './PublishedDocumentIndex.js';
+import type { PublishedDocumentSnapshot } from './PublishedDocumentSource.js';
+import { writeEvidenceItems } from './write-evidence-items.js';
 
 // Re-export for backward compatibility — external code imports KIND_DIRS from IndexBuilder
 export { KIND_DIRS } from './CatCafeScanner.js';
@@ -185,6 +189,7 @@ class ThreadIndexSourceUnavailableError extends Error {
 
 export class IndexBuilder implements IIndexBuilder {
   private readonly pendingMentionDocAnchors = new Set<string>();
+  private publishedSnapshot?: PublishedDocumentSnapshot;
   private indexMutationTail: Promise<unknown> = Promise.resolve();
   private readonly pendingDocumentVectorAnchors = new Set<string>();
   /** E-2: Set of threadIds that have been modified since last flush */
@@ -216,6 +221,7 @@ export class IndexBuilder implements IIndexBuilder {
     private readonly excludeThreadIdsFn?: ExcludeThreadIdsFn,
     scanner?: RepoScanner,
     exclude?: string[],
+    readonly publishedDocuments?: PublishedDocumentIndex,
   ) {
     this.store.invalidateVectorProjection();
     if (scanner) {
@@ -226,7 +232,7 @@ export class IndexBuilder implements IIndexBuilder {
       this.scanner = detected.scanner;
       this.scanRoot = detected.scanRoot;
     }
-    this.store.setSourceRoot(this.scanRoot);
+    this.store.setSourceRoot(this.scanRoot, publishedDocuments ? 'published:project' : undefined);
   }
 
   setEmbedDeps(
@@ -249,6 +255,7 @@ export class IndexBuilder implements IIndexBuilder {
   }
 
   addExcludePatterns(patterns: string[]): void {
+    this.publishedDocuments?.source.addExcludePatterns(patterns);
     if (this.scanner instanceof CatCafeScanner) {
       this.scanner.addExcludePatterns(patterns);
     }
@@ -292,7 +299,38 @@ export class IndexBuilder implements IIndexBuilder {
   }
 
   rebuild(options?: Parameters<IndexBuilder['rebuildOnce']>[0]): Promise<RebuildResult> {
-    return this.serializeIndexMutation(() => this.rebuildOnce(options));
+    return this.serializeIndexMutation(() =>
+      this.withPublishedSnapshot(async () => {
+        const result = await this.rebuildOnce(options);
+        await this.flushPendingMentions();
+        if (this.publishedSnapshot) await this.publishedDocuments!.commit(this.publishedSnapshot);
+        return result;
+      }),
+    );
+  }
+
+  private async withPublishedSnapshot<T>(operation: () => Promise<T>, fetchRemote = false): Promise<T> {
+    try {
+      this.publishedSnapshot = await this.publishedDocuments?.open(fetchRemote);
+      return await operation();
+    } catch (error) {
+      this.publishedDocuments?.failure(error);
+      throw error;
+    } finally {
+      this.publishedSnapshot = undefined;
+    }
+  }
+
+  refreshPublishedDocuments(fetchRemote = false): Promise<void> {
+    return this.serializeIndexMutation(() =>
+      this.withPublishedSnapshot(async () => {
+        if (!this.publishedSnapshot || !this.publishedDocuments) return;
+        const paths = this.publishedDocuments.changes(this.publishedSnapshot);
+        if (paths.length) await this.incrementalUpdateOnce(paths.map((path) => resolve(this.scanRoot, path)));
+        await this.flushPendingMentions();
+        await this.publishedDocuments.commit(this.publishedSnapshot);
+      }, fetchRemote),
+    );
   }
 
   private serializeIndexMutation<T>(operation: () => Promise<T>): Promise<T> {
@@ -314,6 +352,7 @@ export class IndexBuilder implements IIndexBuilder {
   }
 
   private async discover(): Promise<import('./interfaces.js').ScannedEvidence[]> {
+    if (this.publishedSnapshot) return this.publishedSnapshot.scan();
     await access(this.scanRoot);
     if (this.scanner instanceof CatCafeScanner || this.scanner instanceof GenericRepoScanner) {
       return runMemoryScan({
@@ -384,7 +423,11 @@ export class IndexBuilder implements IIndexBuilder {
       if (existing && existing.sourcePath !== item.sourcePath) {
         const existingPriority = KIND_PRIORITY[existing.kind] ?? 0;
         const newPriority = KIND_PRIORITY[item.kind] ?? 0;
-        const existingFileExists = existing.sourcePath ? existsSync(join(this.docsRoot, existing.sourcePath)) : false;
+        const existingFileExists = existing.sourcePath
+          ? this.publishedSnapshot
+            ? this.publishedSnapshot.files.has(existing.sourcePath)
+            : existsSync(join(this.docsRoot, existing.sourcePath))
+          : false;
         if (existingFileExists) {
           // Anchor collision warning — two distinct files claim the same anchor
           console.warn(
@@ -402,22 +445,26 @@ export class IndexBuilder implements IIndexBuilder {
       this.pendingMentionDocAnchors.add(item.anchor);
       // A matching hash means passages completed, not merely metadata written.
       // Persist an incomplete stamp until the replacement transaction commits.
-      await this.store.upsertForDocumentIndex(
-        isMarkdownSourcePath(item.sourcePath) ? { ...item, sourceHash: undefined } : item,
-      );
+      if (!isPublicTasteVignettePath(item.sourcePath ?? ''))
+        await this.store.upsertForDocumentIndex(
+          isMarkdownSourcePath(item.sourcePath) ? { ...item, sourceHash: undefined } : item,
+        );
       this.pendingDocumentVectorAnchors.add(item.anchor);
       if (isMarkdownSourcePath(item.sourcePath)) {
-        documentPassageSources.push({ item, passages: scanned.passages });
+        documentPassageSources.push({
+          item,
+          passages: scanned.passages,
+          ...(isPublicTasteVignettePath(item.sourcePath ?? '') ? { document: item } : {}),
+        });
       }
       indexed++;
     }
 
     report('indexing', 30);
 
-    await this.refreshRebuiltDocumentEdges(scannedItems);
-
-    report('indexing', 40);
     await this.indexDocumentPassages(documentPassageSources);
+    await this.refreshRebuiltDocumentEdges(scannedItems);
+    report('indexing', 40);
 
     // Phase D-6: Index session digests (kind=session)
     if (this.transcriptDataDir) {
@@ -686,7 +733,9 @@ export class IndexBuilder implements IIndexBuilder {
   }
 
   incrementalUpdate(changedPaths: string[]): Promise<void> {
-    return this.serializeIndexMutation(() => this.incrementalUpdateOnce(changedPaths));
+    return this.serializeIndexMutation(() =>
+      this.withPublishedSnapshot(() => this.incrementalUpdateOnce(changedPaths)),
+    );
   }
 
   private async incrementalUpdateOnce(changedPaths: string[]): Promise<void> {
@@ -699,27 +748,39 @@ export class IndexBuilder implements IIndexBuilder {
     const affectedAnchors = new Set<string>();
     const documentPassageSources: DocumentPassageSource[] = [];
 
+    const published = this.publishedSnapshot
+      ? await this.publishedSnapshot.scan(changedPaths.map((path) => relative(this.scanRoot, path)))
+      : undefined;
     for (const filePath of changedPaths) {
-      const parsed = await this.parseSingleFile(filePath);
       const path = relative(this.scanRoot, filePath);
+      const singles = published
+        ? published
+            .filter((row) => row.item.sourcePath === path)
+            .map((row) => ({
+              parsed: {
+                ...row.item,
+                sourceHash: createHash('sha256').update(row.rawContent).digest('hex').slice(0, 16),
+                provenance: row.provenance,
+              },
+              passages: row.passages,
+              rawContent: row.rawContent,
+            }))
+        : [await this.parseSingleFile(filePath)].filter((item): item is NonNullable<typeof item> => item !== null);
       const oldClaim = claims.get(path);
       if (oldClaim) affectedAnchors.add(oldClaim);
-      if (parsed) {
+      claims.delete(path);
+      for (const parsed of singles) {
         claims.set(path, parsed.parsed.anchor);
         affectedAnchors.add(parsed.parsed.anchor);
-      } else claims.delete(path);
-      // A changed explicit anchor transfers this source to a new identity. Release
-      // its old identity through the same deletion/backfill path as a removed file.
+      }
       const previous = this.store
         .getDb()
         .prepare('SELECT anchor FROM evidence_docs WHERE source_path = ?')
-        .all(relative(this.scanRoot, filePath)) as Array<{ anchor: string }>;
+        .all(path) as Array<{ anchor: string }>;
       for (const row of previous) {
-        if (!parsed || row.anchor !== parsed.parsed.anchor) anchorsToDelete.add(row.anchor);
+        if (!singles.some((item) => item.parsed.anchor === row.anchor)) anchorsToDelete.add(row.anchor);
       }
-      if (parsed) {
-        toUpsert.push(parsed);
-      }
+      toUpsert.push(...singles);
     }
 
     // Pass 1: deletions (P1: sync vector deletion) + backfill from candidate docs
@@ -769,15 +830,21 @@ export class IndexBuilder implements IIndexBuilder {
         }
       }
       this.pendingMentionDocAnchors.add(parsed.anchor);
-      await this.store.upsertForDocumentIndex(
-        isMarkdownSourcePath(parsed.sourcePath) ? { ...parsed, sourceHash: undefined } : parsed,
-      );
+      if (!isPublicTasteVignettePath(parsed.sourcePath ?? ''))
+        await this.store.upsertForDocumentIndex(
+          isMarkdownSourcePath(parsed.sourcePath) ? { ...parsed, sourceHash: undefined } : parsed,
+        );
       this.pendingDocumentVectorAnchors.add(parsed.anchor);
       if (isMarkdownSourcePath(parsed.sourcePath)) {
-        documentPassageSources.push({ item: parsed, passages });
+        documentPassageSources.push({
+          item: parsed,
+          passages,
+          ...(isPublicTasteVignettePath(parsed.sourcePath ?? '') ? { document: parsed } : {}),
+        });
       }
-      // Embed the new/changed doc
-      if (this.embedDeps?.embedding.isReady()) {
+      // Taste is published by the passage transaction below. Its pending vector
+      // uses embedMissingDocumentVectors after that lifecycle fence has accepted it.
+      if (!isPublicTasteVignettePath(parsed.sourcePath ?? '') && this.embedDeps?.embedding.isReady()) {
         try {
           const [vec] = await this.embedDeps.embedding.embed([`${parsed.title} ${parsed.summary ?? ''}`]);
           this.embedDeps.vectorStore.upsert(parsed.anchor, vec);
@@ -794,9 +861,8 @@ export class IndexBuilder implements IIndexBuilder {
       }
     }
 
-    await this.refreshIncrementalDocumentEdges(toUpsert, pathLinkDependents, claims);
-
     await this.indexDocumentPassages(documentPassageSources);
+    await this.refreshIncrementalDocumentEdges(toUpsert, pathLinkDependents, claims);
 
     await publishDocumentSourceClaims(this.store, claims);
 
@@ -830,6 +896,20 @@ export class IndexBuilder implements IIndexBuilder {
     passages: string[];
     rawContent: string;
   } | null> {
+    if (this.publishedSnapshot) {
+      const scanned = (await this.publishedSnapshot.scan([relative(this.scanRoot, filePath)]))[0];
+      return scanned
+        ? {
+            parsed: {
+              ...scanned.item,
+              sourceHash: createHash('sha256').update(scanned.rawContent).digest('hex').slice(0, 16),
+              provenance: scanned.provenance,
+            },
+            passages: scanned.passages,
+            rawContent: scanned.rawContent,
+          }
+        : null;
+    }
     if ('parseSingle' in this.scanner && typeof this.scanner.parseSingle === 'function') {
       const scanned =
         this.scanner instanceof CatCafeScanner || this.scanner instanceof GenericRepoScanner
@@ -1612,6 +1692,15 @@ export class IndexBuilder implements IIndexBuilder {
         for (const source of docs.slice(offset, offset + 16)) {
           await yieldToIo();
           db.transaction(() => {
+            // The lifecycle fence requires the approved hash at INSERT time. Publish
+            // Taste metadata and complete passages atomically, never an empty hash.
+            if (source.document) {
+              writeEvidenceItems(db, [source.document]);
+              const row = db
+                .prepare('SELECT source_hash AS hash FROM evidence_docs WHERE anchor = ?')
+                .get(source.item.anchor) as { hash: string } | undefined;
+              if (row?.hash !== source.item.sourceHash) return;
+            }
             replaceDocumentPassages(db, [source], createVectorInvalidator(db, 'passage_vectors'));
             complete.run(source.item.sourceHash ?? null, source.item.anchor);
           })();

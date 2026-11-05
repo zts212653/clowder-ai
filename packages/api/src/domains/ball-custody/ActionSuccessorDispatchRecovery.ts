@@ -1,5 +1,7 @@
 import type { DispatchProposal } from '@cat-cafe/shared';
 import { createModuleLogger } from '../../infrastructure/logger.js';
+import { recoveryGuarded } from '../../infrastructure/recovery/recovery-deadline.js';
+import { runDueBatch } from '../../infrastructure/recovery/run-due-batch.js';
 import { normalizeOwnerAuthProvenance, type OwnerAuthProvenance } from '../cats/services/owner-auth-provenance.js';
 import type { ITaskStore } from '../cats/services/stores/ports/TaskStore.js';
 import type { ActionFreshnessResolution, ActionSubjectTruthResolver } from './ActionSubjectTruthResolver.js';
@@ -9,6 +11,8 @@ import {
   buildActionSuccessorFence,
 } from './ActionSuccessorAdmissionService.js';
 import type { ActionSuccessorLeaseStore } from './ActionSuccessorLeaseStore.js';
+import { recordActionRecoveryBatchFailure, runActionDueRecovery } from './action-successor-due-recovery.js';
+import type { ActionRecoveryNotification } from './action-successor-recovery-state.js';
 import type { ActionSuccessorDispatchFailureReason, ActionSuccessorLease } from './action-successor-state-machine.js';
 import { isRetiredTaskAction } from './retired-task-action.js';
 
@@ -38,6 +42,7 @@ export interface ActionSuccessorDispatchRecoveryDeps {
   readonly tasks?: Pick<ITaskStore, 'get'>;
   readonly leaseStore: Pick<
     ActionSuccessorLeaseStore,
+    | 'recovery'
     | 'listPendingDispatches'
     | 'recordDispatchDeliveryAttempt'
     | 'reserveDispatchDelivery'
@@ -54,6 +59,7 @@ export interface ActionSuccessorDispatchRecoveryDeps {
     fence: ActionSuccessorFence,
     ownerAuthProvenance: OwnerAuthProvenance,
   ) => Promise<ActionSuccessorDispatchDeliveryResult>;
+  readonly notifyRecovery?: ActionRecoveryNotification;
   readonly now?: () => number;
   readonly scanLimit?: number;
 }
@@ -61,7 +67,7 @@ export interface ActionSuccessorDispatchRecoveryDeps {
 export type DispatchRecoveryResult =
   | { readonly outcome: 'delivered'; readonly deliveredMessageId: string }
   | { readonly outcome: 'failed'; readonly reason: ActionSuccessorDispatchFailureReason }
-  | { readonly outcome: 'ignored' | 'pending' };
+  | { readonly outcome: 'ignored' | 'pending'; readonly recoveryFailure?: string };
 
 type ApprovedDispatchProposalClassification =
   | { readonly outcome: 'approved'; readonly proposalId: string; readonly proposal: DispatchProposal }
@@ -103,6 +109,7 @@ export class ActionSuccessorDispatchRecovery {
   private readonly scanLimit: number;
 
   constructor(private readonly deps: ActionSuccessorDispatchRecoveryDeps) {
+    this.deps = recoveryGuarded(deps);
     this.now = deps.now ?? Date.now;
     this.scanLimit = deps.scanLimit ?? DEFAULT_SCAN_LIMIT;
   }
@@ -117,20 +124,48 @@ export class ActionSuccessorDispatchRecovery {
   }
 
   private async runCycle(): Promise<ActionSuccessorDispatchRecoveryStats> {
-    const leases = await this.deps.leaseStore.listPendingDispatches(this.scanLimit);
     let delivered = 0;
     let pending = 0;
     let failed = 0;
-    for (const lease of leases) {
-      const result = await this.recover(lease);
-      if (result.outcome === 'delivered') delivered += 1;
-      if (result.outcome === 'pending') pending += 1;
-      if (result.outcome === 'failed') failed += 1;
-    }
-    return { scanned: leases.length, delivered, pending, failed };
+    const batch = await runDueBatch({
+      limit: this.scanLimit,
+      budgetMs: 5000,
+      selectDue: async (limit) => await this.deps.leaseStore.listPendingDispatches(limit, this.now()),
+      process: async (lease) => {
+        const outcome = await runActionDueRecovery({
+          port: this.deps.leaseStore.recovery,
+          lease,
+          lane: 'dispatch',
+          now: this.now(),
+          notify: this.deps.notifyRecovery,
+          recover: async (current) => {
+            if (!current.terminalPredicate) return { kind: 'permanent_error', reason: 'dispatch_predicate_missing' };
+            const result = await this.recover(current);
+            if (result.outcome === 'delivered') delivered += 1;
+            if (result.outcome === 'pending') pending += 1;
+            if (result.outcome === 'failed') failed += 1;
+            if ('recoveryFailure' in result && result.recoveryFailure)
+              return { kind: 'retryable_error', reason: result.recoveryFailure };
+            return { kind: result.outcome === 'pending' ? 'waiting' : 'settled' };
+          },
+        });
+        if (outcome.kind === 'retryable_error') failed += 1;
+      },
+      onItemError: (lease, error) =>
+        recordActionRecoveryBatchFailure(this.deps.leaseStore.recovery, lease, 'dispatch', this.now(), error),
+    });
+    return { scanned: batch.selected, delivered, pending, failed: failed + batch.failed };
   }
 
   async recover(candidate: ActionSuccessorLease): Promise<DispatchRecoveryResult> {
+    try {
+      return await this.recoverCandidate(candidate);
+    } catch {
+      return { outcome: 'pending', recoveryFailure: 'dispatch_recovery_read_failed' };
+    }
+  }
+
+  private async recoverCandidate(candidate: ActionSuccessorLease): Promise<DispatchRecoveryResult> {
     if (await isRetiredTaskAction(this.deps.tasks, candidate)) return { outcome: 'ignored' };
     if (candidate.dispatchDeliveryState === 'delivered' && candidate.dispatchDeliveredMessageId) {
       return { outcome: 'delivered', deliveredMessageId: candidate.dispatchDeliveredMessageId };
@@ -156,7 +191,7 @@ export class ActionSuccessorDispatchRecovery {
         { err, leaseId: candidate.leaseId, generation: candidate.generation },
         'ActionSuccessor dispatch recovery freshness resolution failed closed',
       );
-      return { outcome: 'pending' };
+      return { outcome: 'pending', recoveryFailure: 'dispatch_freshness_read_failed' };
     }
     if (freshness.status === 'insufficient') return { outcome: 'pending' };
     if (freshness.status === 'mismatch') {
@@ -192,7 +227,7 @@ export class ActionSuccessorDispatchRecovery {
     if (proposalState.outcome === 'failure') {
       return this.markFailed(attempt.lease, proposalState.reason, proposalState.evidenceRef, now);
     }
-    const ownerAuthProvenance = await this.loadOwnerAuthProvenance(attempt.lease, proposalState.proposalId);
+    const ownerAuthProvenance = await this.loadOwnerAuthProvenance(proposalState.proposalId);
     if (!ownerAuthProvenance) return { outcome: 'pending' };
     const reservation = await this.deps.leaseStore.reserveDispatchDelivery(attempt.lease.leaseId, {
       expectedGeneration: attempt.lease.generation,
@@ -221,24 +256,13 @@ export class ActionSuccessorDispatchRecovery {
     if (proposalState.outcome === 'failure') {
       return this.markFailed(lease, proposalState.reason, proposalState.evidenceRef, now);
     }
-    const ownerAuthProvenance = await this.loadOwnerAuthProvenance(lease, proposalState.proposalId);
+    const ownerAuthProvenance = await this.loadOwnerAuthProvenance(proposalState.proposalId);
     if (!ownerAuthProvenance) return { outcome: 'pending' };
     return this.deliverApproved(lease, proposalState.proposalId, proposalState.proposal, ownerAuthProvenance, now);
   }
 
-  private async loadOwnerAuthProvenance(
-    lease: ActionSuccessorLease,
-    proposalId: string,
-  ): Promise<OwnerAuthProvenance | null> {
-    try {
-      return normalizeOwnerAuthProvenance(await this.deps.loadOwnerAuthProvenance(proposalId));
-    } catch (err) {
-      log.warn(
-        { err, leaseId: lease.leaseId, generation: lease.generation, proposalId },
-        'F246 ActionSuccessor owner auth provenance recovery failed closed',
-      );
-      return null;
-    }
+  private async loadOwnerAuthProvenance(proposalId: string): Promise<OwnerAuthProvenance | null> {
+    return normalizeOwnerAuthProvenance(await this.deps.loadOwnerAuthProvenance(proposalId));
   }
 
   private async deliverApproved(
@@ -249,6 +273,7 @@ export class ActionSuccessorDispatchRecovery {
     now: number,
   ): Promise<DispatchRecoveryResult> {
     let result: ActionSuccessorDispatchDeliveryResult = { outcome: 'unavailable' };
+    let deliveryErrored = false;
     try {
       result = await this.deps.deliver(
         proposal,
@@ -256,11 +281,14 @@ export class ActionSuccessorDispatchRecovery {
         ownerAuthProvenance,
       );
     } catch (err) {
+      deliveryErrored = true;
       log.warn(
         { err, leaseId: lease.leaseId, generation: lease.generation, proposalId },
         'F246 ActionSuccessor approved carrier delivery failed',
       );
     }
+    if (result.outcome === 'unavailable' && deliveryErrored)
+      return { outcome: 'pending', recoveryFailure: 'dispatch_delivery_failed' };
     if (result.outcome === 'terminal_failure') {
       return this.markFailed(lease, result.reason, result.evidenceRef, now);
     }

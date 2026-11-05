@@ -186,7 +186,11 @@ export function ProposalCardV2({
             // biome-ignore lint/a11y/noNoninteractiveTabindex: bounded first-message text supports keyboard scrolling
             tabIndex={0}
           >
-            <MarkdownContent content={messageBody} className="!text-[13px] [&_p]:mb-0" disableCommandPrefix />
+            <MarkdownContent
+              content={messageBody}
+              className="!text-[length:var(--console-font-compact)] [&_p]:mb-0"
+              disableCommandPrefix
+            />
           </section>
         ) : null}
       </details>

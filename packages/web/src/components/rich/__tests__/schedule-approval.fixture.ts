@@ -59,7 +59,7 @@ export function scheduleItem(proposal = scheduleProposal()): ApprovalHubItem {
     resolution: proposal.status === 'applying' ? 'accepted' : 'open',
     materialization: { state: proposal.status === 'applying' ? 'outcome_unknown' : 'not_started' },
     decisionMode: proposal.status === 'applying' ? undefined : 'approve-reject',
-    summary: `${mutation.kind === 'create' ? 'Create' : 'Delete'} schedule: ${task.display.label}`,
+    summary: `${{ create: 'Create', delete: 'Delete', update: 'Update' }[mutation.kind]} schedule: ${task.display.label}`,
     detail: {
       mutationKind: mutation.kind,
       taskId: task.id,
@@ -68,6 +68,7 @@ export function scheduleItem(proposal = scheduleProposal()): ApprovalHubItem {
       ...(mutation.kind === 'create'
         ? { templateId: task.templateId }
         : { expectedFingerprint: mutation.expectedFingerprint }),
+      ...(mutation.kind === 'update' ? { previousParams: task.params, params: mutation.params } : {}),
     },
     navigation: { state: 'anchored', originRef: proposal.publication.envelope.originRef, approvalCardRef: coordinate },
   };

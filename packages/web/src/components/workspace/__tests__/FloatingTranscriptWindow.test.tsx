@@ -1,11 +1,16 @@
 import React from 'react';
-import { renderToStaticMarkup } from 'react-dom/server';
+import { renderToStaticMarkup as renderMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
+import { ShellPresentationContext } from '@/components/shell/shell-presentation';
 import { FloatingTranscriptWindow } from '../FloatingTranscriptWindow';
 
 Object.assign(globalThis as Record<string, unknown>, { React });
 
-describe('FloatingTranscriptWindow', () => {
+function renderToStaticMarkup(element: React.ReactNode) {
+  return renderMarkup(<ShellPresentationContext.Provider value="classic">{element}</ShellPresentationContext.Provider>);
+}
+
+describe('FloatingTranscriptWindow in classic presentation', () => {
   const sampleLines = [
     { ts: 1715400000, elapsed_s: 10, chunk_num: 1, asr_latency: 0.3, text: '你好世界' },
     { ts: 1715400003, elapsed_s: 13, chunk_num: 2, asr_latency: 0.25, text: '第二句话' },

@@ -1,3 +1,4 @@
+import { performance } from 'node:perf_hooks';
 import type { TaskSpec_P1 } from '../../infrastructure/scheduler/types.js';
 import type { BallCustodyProbeScheduler } from './BallCustodyProbeScheduler.js';
 
@@ -29,11 +30,13 @@ export function createBallCustodyProbeTaskSpec(opts: BallCustodyProbeTaskSpecOpt
       overlap: 'skip',
       timeoutMs: BALL_CUSTODY_PROBE_RUN_TIMEOUT_MS,
       async execute() {
+        const started = performance.now();
         const result = await opts.scheduler.tick();
+        const observation = { loopId: 'ball-custody-probe', elapsedMs: performance.now() - started, result };
         if (result.failed > 0) {
-          opts.log?.warn?.({ result }, '[ball-custody-probe] completed with failures');
-        } else if (result.completed > 0 || result.woken > 0) {
-          opts.log?.info?.({ result }, '[ball-custody-probe] resolved blocked task(s)');
+          opts.log?.warn?.(observation, '[ball-custody-probe] recovery summary');
+        } else {
+          opts.log?.info?.(observation, '[ball-custody-probe] recovery summary');
         }
       },
     },

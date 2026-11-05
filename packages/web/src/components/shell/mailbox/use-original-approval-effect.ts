@@ -15,6 +15,7 @@ export type OriginalApprovalEffect =
   | 'memory-corrected'
   | 'schedule-created'
   | 'schedule-deleted'
+  | 'schedule-updated'
   | 'repair-started'
   | DomainApprovalEffect;
 
@@ -64,6 +65,7 @@ export function useOriginalApprovalEffect(
   ) {
     if (approval.detail.mutationKind === 'create') retained = 'schedule-created';
     if (approval.detail.mutationKind === 'delete') retained = 'schedule-deleted';
+    if (approval.detail.mutationKind === 'update') retained = 'schedule-updated';
   }
   const enabled = eligible && readEnabled && !canonical && !receipt && !repair && !retained;
   const result = useApprovalResult<OriginalApprovalEffect | null>(

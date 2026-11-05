@@ -268,6 +268,8 @@ describe('F307 owner surface renderer', () => {
     Object.assign(artifactFixture, { revision: 7, threadId: 'thread-f310' });
     container = document.createElement('div');
     document.body.appendChild(container);
+    // Legacy owner-surface contracts explicitly retain classic; v2 cases select v2 below.
+    writeShellPresentation('classic');
     root = createRoot(container);
   });
 

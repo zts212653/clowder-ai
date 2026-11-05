@@ -32,6 +32,8 @@ interface SearchResultItem {
   anchor: string;
   snippet: string;
   matchRank: 'high' | 'mid' | 'low';
+  rank?: number;
+  relevance?: { state: string };
   retrievalScore?: number;
   sourceType: string;
   source?: 'project' | 'global';
@@ -263,7 +265,8 @@ export function EvidenceSearch({ initialQuery }: EvidenceSearchProps = {}) {
                 </span>
               )}
               <span className="text-micro text-cafe-secondary/70">
-                match:{item.matchRank} · authority:{item.authority ?? 'unknown'} · updated:{item.updatedAt ?? 'unknown'}
+                rank:{item.rank ?? item.matchRank} · relevance:{item.relevance?.state ?? 'unknown'} · authority:
+                {item.authority ?? 'unknown'} · updated:{item.updatedAt ?? 'unknown'}
               </span>
               <ExpandableText
                 text={item.title}

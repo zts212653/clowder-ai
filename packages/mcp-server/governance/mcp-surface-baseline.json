@@ -44,7 +44,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleAckMentions",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_act_artifact_review",
@@ -1260,7 +1260,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleAdmitEntrustedWork",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_advance_evolution_program_change",
@@ -1596,7 +1596,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleAmendPersonInteraction",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_audio_capture_start",
@@ -2345,7 +2345,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleBootcampEnvCheck",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_bring_to_desk",
@@ -3096,7 +3096,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCloseEntrustedWork",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_constitute_evolution_program",
@@ -3314,7 +3314,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleContinueApprovedTask",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_correct_person_claim",
@@ -3442,7 +3442,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCorrectPersonClaim",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_create_rich_block",
@@ -3572,7 +3572,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCreateRichBlock",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_create_task",
@@ -3666,7 +3666,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCreateTask",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_cross_post_message",
@@ -4002,7 +4002,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCrossPostMessage",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_defer_person_memory_delta",
@@ -4182,7 +4182,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleDeferPersonMemoryDelta",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_development_return",
@@ -4853,7 +4853,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleDisposeDeferredPersonMemory",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_drill_memory_cue",
@@ -4922,7 +4922,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleDrillMemoryCue",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_drill_person_memory",
@@ -5019,7 +5019,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleDrillPersonMemory",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_edit_office_document",
@@ -5209,7 +5209,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleFeatIndex",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_finance_query",
@@ -5349,7 +5349,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleForgetDeferredPersonMemory",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_forget_person",
@@ -5399,7 +5399,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleForgetPerson",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_forget_person_memory_proposal",
@@ -5449,7 +5449,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleForgetPersonMemoryProposal",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_generate_document",
@@ -5509,7 +5509,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGenerateDocument",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_get_available_guides",
@@ -5545,7 +5545,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetAvailableGuides",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_get_custody_events",
@@ -5596,7 +5596,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetCustodyEvents",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_get_evolution_program",
@@ -5735,7 +5735,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetHoldStatus",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_get_message",
@@ -5801,7 +5801,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetMessage",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_get_pending_decisions",
@@ -5850,7 +5850,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetPendingDecisions",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_get_pending_mentions",
@@ -5897,7 +5897,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetPendingMentions",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_get_person_memory_proposal_status",
@@ -5948,7 +5948,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetPersonMemoryProposalStatus",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_get_recall_metrics",
@@ -6074,7 +6074,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetRunningWork",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_get_thread_cats",
@@ -6131,7 +6131,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetThreadCats",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_get_thread_context",
@@ -6237,7 +6237,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetThreadContext",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_get_thread_metadata",
@@ -6271,7 +6271,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetThreadMetadata",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_get_workflow_sop",
@@ -6320,7 +6320,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetWorkflowSop",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_graph_resolve",
@@ -6434,7 +6434,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGuideControl",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_hold_ball",
@@ -6582,7 +6582,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleHoldBall",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_home_action",
@@ -7664,7 +7664,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleListLabels",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_list_memory_matters",
@@ -7674,10 +7674,10 @@
         "list"
       ],
       "activeState": "canonical",
-      "description": "Find shared memory pages about a matter (事情/跨线原话). Use when opening or resuming work, finding what was already discussed or decided, or continuing a paged directory. NOT for reading source messages or proving that a cat has read them; use read_memory_matter. Output: currently readable page titles, IDs, revisions, entry counts and nextCursor; no read receipt. The optional query matches page titles/descriptions; empty does not prove no relevant past conversation exists.",
-      "descriptionDigest": "sha256:4946985527885ed7405b11ba6f44ed099f16557aa1d79b7699257a6241422f9a",
-      "descriptionCharacters": 472,
-      "descriptionTokensCl100kBase": 101,
+      "description": "Find shared memory pages about a matter (事情/跨线原话). Use when opening/resuming work, finding prior discussion or continuing an opening directory. NOT for proving a real read; use read_memory_matter. Output: currently readable titles, IDs, revisions, entry counts, source/summary status and nextCursor; no read receipt. Pages with active unchanged sources from this authenticated invocation thread come first, then updatedAt and stable ID. hasThreadSource means source location, not applicability or authorization. Reuse a cursor with the same reader, thread and query. The optional query matches titles/descriptions; empty does not prove no relevant history exists.",
+      "descriptionDigest": "sha256:3adfa7d1a625ca1953fcc6f3a7b7b6eb82fda0b8860fcd59969fc85907d34c48",
+      "descriptionCharacters": 663,
+      "descriptionTokensCl100kBase": 134,
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -7715,7 +7715,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/matter-memory-tools.js#handleListMemoryMatters",
-      "protectedImplementationDigest": "sha256:25500e798005901281d1399089f9d9ca5e21a1d682de148a0c3d6d3d6fd5779d"
+      "protectedImplementationDigest": "sha256:84a711f304f34f6b023e56f91db4460072d6f9397e3edb7ab85d3657e0a05ad4"
     },
     {
       "name": "cat_cafe_list_paw_feel_inbox",
@@ -7927,7 +7927,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/schedule-tools.js#handleListScheduleTemplates",
-      "protectedImplementationDigest": "sha256:15bc3dbb80a6af734f6ba3f991ed54b9c42b62c718f4a3521f36bde11981d510"
+      "protectedImplementationDigest": "sha256:3a9d380906230d941d659baa318967c34e776c2e284d66a993f1a60838921c9e"
     },
     {
       "name": "cat_cafe_list_session_chain",
@@ -8065,7 +8065,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleListTasks",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_list_threads",
@@ -8075,10 +8075,10 @@
         "read"
       ],
       "activeState": "canonical",
-      "description": "Discover visible threads and recent work without reading conversation bodies. Use when: finding a work line such as “那个3D建模” or “最近在忙什么”; set includeWork=true for titles, up to 3 unfinished Tasks, and actual running members. NOT for: resuming authorization or reading full progress (follow the returned thread/Task pointers), or all-project execution counts (get_running_work is Host-project scoped). Output: thread IDs, titles, activity times; work mode adds project identity, per-source availability, bounded live pages and nextCursor. A bound original roadmap appears directly on the entry with file version/as-of, exact read pointer and later-activity-needs-checking. GOTCHA: Task/project details require the original list_tasks invocation authority; other callers retain title pointers only. Doing does not prove execution. Execution none covers the home thread and visible dispatchGate targets; dispatchedThreadId is a routing target, not proof of execution location. Entrusted work with no canonical execution link remains unknown even when dispatched. Task and roadmap reads also respect the invocation callback allowlist. Partial Task scans cannot claim globally latest Tasks. A later timestamp does not make original decisions obsolete. Discovery grants no file or work authority.",
-      "descriptionDigest": "sha256:15a1e6425c9cf38f20476b5799e1090a385cf70f2fba8587f349eb3de21ff4c3",
-      "descriptionCharacters": 1290,
-      "descriptionTokensCl100kBase": 251,
+      "description": "Discover visible threads and recent work without reading conversation bodies. Use when: finding an earlier work line such as “那个3D建模” or “昨天做的视频”, even without a Matter page; choose short topic clues from the current title/question and set includeWork=true. Without a topic, browse titles, up to 3 unfinished Tasks and actual running members. NOT for: resuming authorization or reading full progress (follow the returned thread/Task pointers), or all-project execution counts (get_running_work is Host-project scoped). Output: bounded metadata candidates and original-read pointers; topic mode also searches authorized completed Tasks and attached references, reports checked/uninspected scope, and offers weak recent pointers plus existing Work/evidence tools after a miss. nextCursor continues the same topic. A bound original roadmap includes file version/as-of and its read pointer. GOTCHA: Task/project details require the original list_tasks invocation authority; other callers retain title pointers only. Doing does not prove execution. Execution none covers the home thread and visible dispatchGate targets; dispatchedThreadId is a routing target, not proof of execution location. Entrusted work with no canonical execution link remains unknown even when dispatched. Task and roadmap reads also respect the invocation callback allowlist. Partial scans or an empty page cannot prove absence. Metadata matches are not original reads, relevance judgments, search-qualified message answers or grants. Follow original pointers, read current sources and assess applicability before answering. A later timestamp does not make original decisions obsolete. Discovery grants no file or work authority.",
+      "descriptionDigest": "sha256:eb95a3d1555fea5888cb9f9c4235cbbada8a20c814206176e9078e2d796a2fe9",
+      "descriptionCharacters": 1699,
+      "descriptionTokensCl100kBase": 314,
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -8094,7 +8094,7 @@
             "type": "string"
           },
           "cursor": {
-            "description": "Opaque nextCursor from includeWork=true; reuse the same activeSince/keyword filters. Live pages are not a frozen snapshot.",
+            "description": "Opaque nextCursor from includeWork=true; reuse the same activeSince/keyword/topic filters. Live pages are not a frozen snapshot.",
             "maxLength": 2000,
             "minLength": 1,
             "type": "string"
@@ -8115,11 +8115,17 @@
             "maximum": 200,
             "minimum": 1,
             "type": "integer"
+          },
+          "topic": {
+            "description": "Work mode only: choose up to 6 short topic clues from the current title/question, separated by spaces. Matches title, owner-scoped Tasks including done, attached artifact refs and active roadmap bindings within a bounded scan. Use topic or keyword, not both. Candidates require original reads; zero matches do not establish absence.",
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
           }
         },
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:4e94bdb15064059f33d38696e8c10c01ddfc724282d2d3c884477bbce953baf2",
+      "inputSchemaDigest": "sha256:735f0ea121ccde171fbf26aeb524b32805cf3dd0d5c07c53bf142b243a6261a2",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
@@ -8137,7 +8143,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleListThreads",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_manage_conversation_decision",
@@ -8745,7 +8751,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleMultiMention",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_nominate_for_global",
@@ -8862,7 +8868,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleOfferCustody",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_offer_suggestion",
@@ -10843,7 +10849,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handlePostMessage",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_prepare_artifact_review",
@@ -11521,7 +11527,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/schedule-tools.js#handlePreviewScheduledTask",
-      "protectedImplementationDigest": "sha256:15bc3dbb80a6af734f6ba3f991ed54b9c42b62c718f4a3521f36bde11981d510"
+      "protectedImplementationDigest": "sha256:3a9d380906230d941d659baa318967c34e776c2e284d66a993f1a60838921c9e"
     },
     {
       "name": "cat_cafe_propose_entity",
@@ -11665,7 +11671,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposeEntity",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_propose_eval_repair",
@@ -11841,7 +11847,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposeEventMemoryCorrection",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_propose_person_memory",
@@ -12751,7 +12757,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposePersonMemory",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_propose_profile_update",
@@ -12831,7 +12837,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposeProfileUpdate",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_propose_session_handoff",
@@ -12908,7 +12914,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposeSessionHandoff",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_propose_taste",
@@ -13096,7 +13102,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposeTaste",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_propose_thread",
@@ -13222,7 +13228,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposeThread",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_publish_harness_history",
@@ -14760,10 +14766,10 @@
         "read"
       ],
       "activeState": "canonical",
-      "description": "Read a bounded line range from a file within allowed directories. Use after search_evidence returns a sourcePath. Returns numbered text within a 24k character budget; follow the returned startLine/charOffset for a long-line continuation. Read-only; rejects paths outside allowed directories.",
-      "descriptionDigest": "sha256:653bfd33d9745e10fbeaf5c876abfcd5a92b4ed726b70ab810a9c2b04a30c261",
-      "descriptionCharacters": 291,
-      "descriptionTokensCl100kBase": 56,
+      "description": "Read a bounded line range from a file within allowed directories. Use when: reading a known file or a search result drillDown path. NOT for: finding unknown documents (use search_evidence). Output: numbered text within a 24k character budget; follow startLine/charOffset for continuation. Published references verify the indexed content hash against the current lawful source; changed or forgotten content requires a fresh search. Read-only; the same allowed-directory checks apply to published and ordinary files.",
+      "descriptionDigest": "sha256:9b9abdaacf35eb76879bd02371f2897668b99e39f6e8184e8b46ce2a99ae9064",
+      "descriptionCharacters": 514,
+      "descriptionTokensCl100kBase": 97,
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -14810,7 +14816,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/file-tools.js#handleReadFileSlice",
-      "protectedImplementationDigest": "sha256:f4a76c24375c7c2bda74b56bb7e7e033e4a55d3ae315e3ac435f77a1323b6b50"
+      "protectedImplementationDigest": "sha256:836bd8e3b1995afa3df5d3d5f93e631424440c02bf8e07bc29cf407223ce443e"
     },
     {
       "name": "cat_cafe_read_invocation_detail",
@@ -14883,10 +14889,10 @@
         "read"
       ],
       "activeState": "canonical",
-      "description": "Read current original messages linked to one shared matter page. Use when a matter is relevant to this turn, including after resume or a correction; reread even if an older version is in context. NOT for granting execution authority or reporting adoption. Output: raw quotes, separate authors/quoted speakers, source coordinates, page/source revisions and pagination; changed sources are marked without substituting new text. A successful nonempty read records a durable explicit-read receipt for this authenticated invocation/cat. Directory, empty and failed reads do not count.",
-      "descriptionDigest": "sha256:b5072141c1ea5d70fbe5fa8992e0c61c01633f7bc3c8376e53f1a6b4bd16466c",
-      "descriptionCharacters": 579,
-      "descriptionTokensCl100kBase": 106,
+      "description": "Read one shared matter page: description is the cat-written contextual interpretation; entries provide exact raw quotes and sources. Use when a matter is relevant to this turn, including after resume or correction; reread its current version. NOT for granting execution authority or proving adoption. Output: interpretation, raw quotes, separate authors/quoted speakers, source coordinates, page/source revisions and pagination. Changed active sources mark the interpretation unverified (summaryStatus=sources_changed); do not treat it as a current conclusion or silently substitute new speech. A successful nonempty read records a durable explicit-read receipt for this invocation/cat. Directory, context hints, empty and failed reads do not count. Verify applicability from the full page; current user instructions take precedence within their scope.",
+      "descriptionDigest": "sha256:8ff7d3c9ed43a7e76bebc1d767617490990e44ddd2c48572c4637be0e408747d",
+      "descriptionCharacters": 852,
+      "descriptionTokensCl100kBase": 151,
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -14932,7 +14938,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/matter-memory-tools.js#handleReadMemoryMatter",
-      "protectedImplementationDigest": "sha256:25500e798005901281d1399089f9d9ca5e21a1d682de148a0c3d6d3d6fd5779d"
+      "protectedImplementationDigest": "sha256:84a711f304f34f6b023e56f91db4460072d6f9397e3edb7ab85d3657e0a05ad4"
     },
     {
       "name": "cat_cafe_read_profile",
@@ -14996,7 +15002,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleReadProfile",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_read_session_digest",
@@ -15403,7 +15409,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRecallPersonRelationship",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_record_eval_lifecycle",
@@ -15927,7 +15933,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRecordMemoryCueOutcome",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_record_proactive_memory_abstention",
@@ -16001,7 +16007,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRecordProactiveMemoryAbstention",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_record_request_review_consumption",
@@ -16459,7 +16465,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRedactPersonMemoryItem",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_register_deployment_wait",
@@ -16571,7 +16577,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRegisterDeploymentWait",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_register_external_runtime_session",
@@ -16772,7 +16778,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/schedule-tools.js#handleRegisterScheduledTask",
-      "protectedImplementationDigest": "sha256:15bc3dbb80a6af734f6ba3f991ed54b9c42b62c718f4a3521f36bde11981d510"
+      "protectedImplementationDigest": "sha256:3a9d380906230d941d659baa318967c34e776c2e284d66a993f1a60838921c9e"
     },
     {
       "name": "cat_cafe_remove_scheduled_task",
@@ -16826,7 +16832,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/schedule-tools.js#handleRemoveScheduledTask",
-      "protectedImplementationDigest": "sha256:15bc3dbb80a6af734f6ba3f991ed54b9c42b62c718f4a3521f36bde11981d510"
+      "protectedImplementationDigest": "sha256:3a9d380906230d941d659baa318967c34e776c2e284d66a993f1a60838921c9e"
     },
     {
       "name": "cat_cafe_request_user_input",
@@ -17571,7 +17577,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRetirePersonClaim",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_retry_custody_admission",
@@ -17717,7 +17723,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRetryCustodyAdmission",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_review_distillation",
@@ -17899,10 +17905,10 @@
           ]
         }
       ],
-      "description": "Search project knowledge or distinct readable messages from earlier conversations. Use when: finding an earlier discussion (\"以前聊过 / 找回旧消息\", resultUnit=message), semantically finding project knowledge, tracing a topic across docs or threads, or building a bounded coverage/source map. NOT for: resolving a known exact anchor (use cat_cafe_graph_resolve), scanning recent items without a query (use cat_cafe_list_recent), or reading raw messages from a known thread (use get_thread_context). Output: document-mode evidence summaries, or message-mode canonical source snippets, thread/message coordinates and honest scope/degradation metadata; this is read-only and does not navigate. To attach that same bounded message result as a source-backed answer card, explicitly use cat_cafe_prepare_message_search_answer; ordinary recall here never publishes a card. MESSAGE CONTRACT: resultUnit=message supports messageSort=time (default) or relevance and mode=hybrid (default); scope is threads, optional threadId means current conversation, omission means all readable project conversations. Authenticated invocation binds the exact question exclusion; caller-supplied user/source IDs are ignored. Limited results and unknown freshness do not prove the first occurrence or complete history. GOTCHA: matchRank is rank position, not trust; authority is document reliability, and broad coverage requires separate docs + threads searches instead of treating one all-scope query as exhaustive. Semantic/fuzzy find entry point for memory recall. For precise anchors (F186, ADR-019), prefer cat_cafe_graph_resolve; for zero-prior scanning, prefer cat_cafe_list_recent; when unsure, start here with mode=hybrid. Supports scope (docs/threads/all), mode (lexical/semantic/hybrid), and depth (summary/raw). QUERY CONTRACT: query has max 2,000 characters; overlong input fails validation instead of being truncated. THREAD FILTER CONTRACT: threadId is enforced at the final response boundary; results can only come from that thread, and empty responses state whether the filter was authoritative or degraded. Related-direction expansion is suppressed for exact thread searches. COVERAGE CONTRACT: caller scope is executed exactly; coverage limit has max 20; latency is bounded; serialized output has a declared budget with explicit truncation and a continuation drill pointer. TOPK CONTRACT: complete API/MCP output is bounded to 24k characters; omitted derived entity explanations report their count and lack a direct pager, while source anchors remain readable. At the 15s API deadline coverage returns an explicit partial/degraded result; the MCP HTTP caller cancels any request that outlives that boundary plus transport grace. SCOPE STRATEGY (decide first!): docs = 结论/真相源 (features, ADRs, architecture maps, plans, lessons). threads = 讨论过程 (who said what, original context). all = broad scan only — docs dominate due to higher BM25 density, so don't rely on all for finding threads. Rule of thumb: \"要结论 → docs, 要过程 → threads, 要全貌 → both separately\". MODE SELECTION: lexical (default) = BM25 keyword match, best for Feature IDs / exact terms (F042, Redis). hybrid = BM25 + vector NN + RRF fusion, RECOMMENDED for most searches — finds both exact AND semantic matches. semantic = pure vector nearest-neighbor, best for cross-language (English query → Chinese docs) or synonym matching. TIP: When unsure, use mode=hybrid. For broad surveys, add one semantic query as blind-spot insurance (hybrid misses cross-language synonyms). QUERY TIPS: Feature IDs (F102, F163) are strong anchors — use them when available. Mix Chinese + English keywords for better recall (记忆 + memory). Split broad topics into 2-3 targeted queries from different angles (e.g. \"how it was built\" vs \"how it is governed\"). Watch for antonym gaps: searching 记忆 misses 失忆/压缩/丢失 — search the opposite angle separately if needed. SEARCH TIPS — coverage/source-map tasks: this is not an exhaustive all-mentions entrypoint. If the user asks \"哪些 / 所有 / 历史上 / 提过 / 沉淀\", follow the memory-search-best-practices skill: expand terms yourself, search docs + threads separately, then drill into canonical docs/source threads and report coverage gaps. READING RESULTS: matchRank = rank-based match position, retrievalScore = store score when available, authority = document reliability, updated = source freshness. These are independent axes. RANKING (F200 live): Results are consumption-weighted — docs that cats actually read/used after searching rank higher. Constitutional docs (ADR/lesson/canon) never get demoted. New docs have 14-day grace period. Near-duplicates are MMR-deduplicated for diversity. No action needed — ranking is automatic. DEPTH: Start with summary (default). Use depth=raw only after narrowing scope to drill into specific passages. BOUNDARY: Use this tool to FIND information across the project. For READING raw messages in a specific thread, use get_thread_context instead. F188 PHASE F 7-TOOL FAMILY (cross-reference, choose by scenario): precise anchor + relations → cat_cafe_graph_resolve; zero-prior / scan recent → cat_cafe_list_recent; this tool (search_evidence) = semantic/fuzzy find; session drill-down → list_session_chain / read_session_digest / read_session_events / read_invocation_detail. When this tool returns no results or only low match-rank hits, payload appends a deterministic nudge pointing to graph_resolve/list_recent (KD-7).",
-      "descriptionDigest": "sha256:e97473ecdaa450af03b9b5e7a43a4afced85b8be6ce18c2794167502da9902b2",
-      "descriptionCharacters": 5418,
-      "descriptionTokensCl100kBase": 1182,
+      "description": "Search project knowledge or distinct readable messages from earlier conversations. Use when: finding an earlier discussion (\"以前聊过 / 找回旧消息\", resultUnit=message), semantically finding project knowledge, tracing a topic across docs or threads, or building a bounded coverage/source map. NOT for: resolving a known exact anchor (use cat_cafe_graph_resolve), scanning recent items without a query (use cat_cafe_list_recent), or reading raw messages from a known thread (use get_thread_context). Output: document-mode evidence summaries, or message-mode canonical source snippets, thread/message coordinates and honest scope/degradation metadata; this is read-only and does not navigate. To attach that same bounded message result as a source-backed answer card, explicitly use cat_cafe_prepare_message_search_answer; ordinary recall here never publishes a card. MESSAGE CONTRACT: resultUnit=message supports messageSort=time (default) or relevance and mode=hybrid (default); scope is threads, optional threadId means current conversation, omission means all readable project conversations. Authenticated invocation binds the exact question exclusion; caller-supplied user/source IDs are ignored. Limited results and unknown freshness do not prove the first occurrence or complete history. GOTCHA: rank/matchRank are position only, never relevance or trust; relevance states observed exact-anchor/title/phrase evidence or unknown; authority is document reliability, and broad coverage requires separate docs + threads searches instead of treating one all-scope query as exhaustive. Semantic/fuzzy find entry point for memory recall. For precise anchors (F186, ADR-019), prefer cat_cafe_graph_resolve; for zero-prior scanning, prefer cat_cafe_list_recent; when unsure, start here with mode=hybrid. Supports scope (docs/threads/all), mode (lexical/semantic/hybrid), and depth (summary/raw). QUERY CONTRACT: query has max 2,000 characters; overlong input fails validation instead of being truncated. THREAD FILTER CONTRACT: threadId is enforced at the final response boundary; results can only come from that thread, and empty responses state whether the filter was authoritative or degraded. Related-direction expansion is suppressed for exact thread searches. COVERAGE CONTRACT: caller scope is executed exactly; coverage limit has max 20; latency is bounded; serialized output has a declared budget with explicit truncation and a continuation drill pointer. TOPK CONTRACT: complete API/MCP output is bounded to 24k characters; omitted derived entity explanations report their count and lack a direct pager, while source anchors remain readable. At the 15s API deadline coverage returns an explicit partial/degraded result; the MCP HTTP caller cancels any request that outlives that boundary plus transport grace. SCOPE STRATEGY (decide first!): docs = 结论/真相源 (features, ADRs, architecture maps, plans, lessons). threads = 讨论过程 (who said what, original context). all = broad scan only — docs dominate due to higher BM25 density, so don't rely on all for finding threads. Rule of thumb: \"要结论 → docs, 要过程 → threads, 要全貌 → both separately\". MODE SELECTION: lexical (default) = BM25 keyword match, best for Feature IDs / exact terms (F042, Redis). hybrid = BM25 + vector NN + RRF fusion, RECOMMENDED for most searches — finds both exact AND semantic matches. semantic = pure vector nearest-neighbor, best for cross-language (English query → Chinese docs) or synonym matching. TIP: When unsure, use mode=hybrid. For broad surveys, add one semantic query as blind-spot insurance (hybrid misses cross-language synonyms). QUERY TIPS: Feature IDs (F102, F163) are strong anchors — use them when available. Mix Chinese + English keywords for better recall (记忆 + memory). Split broad topics into 2-3 targeted queries from different angles (e.g. \"how it was built\" vs \"how it is governed\"). Watch for antonym gaps: searching 记忆 misses 失忆/压缩/丢失 — search the opposite angle separately if needed. SEARCH TIPS — coverage/source-map tasks: this is not an exhaustive all-mentions entrypoint. If the user asks \"哪些 / 所有 / 历史上 / 提过 / 沉淀\", follow the memory-search-best-practices skill: expand terms yourself, search docs + threads separately, then drill into canonical docs/source threads and report coverage gaps. READING RESULTS: rank = position; matchRank is its legacy bucket. relevance = observed textual support, never confidence; unknown keeps alternate-entry hints. retrievalScore = method-specific score, authority = document reliability. sourceProjection reports the observed/indexed publication versions and pending/degraded state; do not infer absence from a stale index. Follow the returned drillDown path to read the same source hash; changed/forgotten sources are refused, never replaced by another quote. RANKING (F200 live): Results are consumption-weighted — docs that cats actually read/used after searching rank higher. Constitutional docs (ADR/lesson/canon) never get demoted. New docs have 14-day grace period. Near-duplicates are MMR-deduplicated for diversity. No action needed — ranking is automatic. DEPTH: Start with summary (default). Use depth=raw only after narrowing scope to drill into specific passages. BOUNDARY: Use this tool to FIND information across the project. For READING raw messages in a specific thread, use get_thread_context instead. F188 PHASE F 7-TOOL FAMILY (cross-reference, choose by scenario): precise anchor + relations → cat_cafe_graph_resolve; zero-prior / scan recent → cat_cafe_list_recent; this tool (search_evidence) = semantic/fuzzy find; session drill-down → list_session_chain / read_session_digest / read_session_events / read_invocation_detail. When this tool returns no results or no text-supported document candidates, payload appends a deterministic nudge pointing to graph_resolve/list_recent (KD-7).",
+      "descriptionDigest": "sha256:ef0aa56f06ef51dbec2c369df95264812f8342a3e0697b7f47d285ffb6991a19",
+      "descriptionCharacters": 5840,
+      "descriptionTokensCl100kBase": 1255,
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -18047,7 +18053,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/evidence-tools.js#handleSearchEvidence",
-      "protectedImplementationDigest": "sha256:b379bce1fc7e067cce94feefd9633cbc197af726f1077abab8e8e9efb085bc64"
+      "protectedImplementationDigest": "sha256:80c2abe591238fe0dcbdf5b05dc74c057b8a0ed214893050b02aa77411403f1f"
     },
     {
       "name": "cat_cafe_set_read_mode",
@@ -18094,7 +18100,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleSetReadMode",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_set_thread_metadata",
@@ -18339,7 +18345,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleSetThreadMetadata",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_settle_present_loop",
@@ -19041,7 +19047,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleStartGuide",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_start_vote",
@@ -19119,7 +19125,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleStartVote",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_submit_evolution_preparation",
@@ -20857,7 +20863,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateBootcampState",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_update_entrusted_work",
@@ -21042,7 +21048,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateEntrustedWork",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_update_evolution_program",
@@ -21389,7 +21395,67 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateGuideState",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
+    },
+    {
+      "name": "cat_cafe_update_scheduled_task_params",
+      "serverFamily": "collab",
+      "resourceFamily": "schedule",
+      "actions": [
+        "update"
+      ],
+      "activeState": "canonical",
+      "description": "Propose changes to template parameters of an existing recurring scheduled task. Use when changing a reminder or subscription while preserving its task ID, trigger, delivery thread and cursor. NOT for creating, deleting, pausing, changing the trigger/destination, or modifying managed owner tasks. Output: an anchored Approval Hub proposal with before/after values; no task changes until the operator approves. GOTCHA: paramsPatch is a JSON object string, omitted values are preserved, and a changed task definition requires a fresh proposal. Active runs keep their original settings. Persistent agent-key callers need agentKeyCatId and an owned sourceThreadId.",
+      "descriptionDigest": "sha256:90787bd2686bde64a3d58db1eda594a4bbdadb45257b8b33a038cfd99eb71110",
+      "descriptionCharacters": 660,
+      "descriptionTokensCl100kBase": 123,
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "agentKeyCatId": {
+            "description": "Persistent-agent identity selector; ignored when invocation credentials are present.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "paramsPatch": {
+            "description": "Non-empty JSON object of template parameters to merge, e.g. {\"executionCarrier\":\"managed\"}. Omitted parameters keep their current values.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "sourceThreadId": {
+            "description": "Owned thread for the approval card. Required for persistent agent-key callers; invocation callers use their authenticated thread.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "taskId": {
+            "description": "Existing recurring dynamic task ID; the subscription identity is preserved.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "taskId",
+          "paramsPatch"
+        ],
+        "type": "object"
+      },
+      "inputSchemaDigest": "sha256:21d1fc7345e28f5837b956204e434535cd48b0638c93bdb76aff48cdc808fe38",
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "runtimeProfiles": [
+        "agent-key",
+        "full"
+      ],
+      "schemaDelivery": {
+        "evidenceRef": "file:packages/mcp-server/src/tools/schedule-parameter-tools.ts",
+        "policy": "host-default"
+      },
+      "implementationRef": "module:./tools/schedule-parameter-tools.js#handleUpdateScheduledTaskParams",
+      "protectedImplementationDigest": "sha256:a05e72856df4ce9c184609c1f717643584051c559462bbb2957cea6a276db95d"
     },
     {
       "name": "cat_cafe_update_task",
@@ -21482,7 +21548,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateTask",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_update_workflow",
@@ -21632,7 +21698,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateWorkflow",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_video_project_command",
@@ -22352,7 +22418,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleWithdrawDeferredPersonMemory",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_withdraw_thread_proposal",
@@ -22396,7 +22462,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleWithdrawThreadProposal",
-      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_work",
@@ -24546,10 +24612,10 @@
         "write"
       ],
       "activeState": "canonical",
-      "description": "Create, append to, correct or retire a shared matter page using exact original message selections. Use when related statements/decisions in different threads should remain findable together, or when a new sourced correction replaces an entry. NOT for personal profiles, people or tastes (use their proposal tools), editing source messages, or authorizing work. Output: durable matterId/revision receipt. Reuse requestId only for the exact same change; updates require expectedRevision from a fresh read. Source selections use raw UTF-16 start/end (end exclusive), segment body/quote_comment/quote_text, and quote attachments require contentBlockIndex and attachmentId. Titles/descriptions are cat-written interpretation, not original speech; owner forgetting is in the memory UI.",
-      "descriptionDigest": "sha256:12f039a960e647749e57781fb917c052c8db2a199ff83c22064137dcd6dad16a",
-      "descriptionCharacters": 779,
-      "descriptionTokensCl100kBase": 149,
+      "description": "Create, append to, correct or retire a shared matter page using exact original message selections. Use when related statements/decisions across threads should remain findable together, or a sourced correction replaces an entry. NOT for personal profiles, people or tastes (use their proposal tools), editing source messages, or authorizing work. Output: durable matterId/revision receipt. description is cat-written contextual interpretation: background, the core issue, subsequent action, and applicable/inapplicable scope; it is optional for simple facts, not a mandatory four-part template. When useful, include one brief, source-grounded way this matter might be asked about in the interpretation; it is only a retrieval clue, not a new fact, applicability rule or instruction. sources retain exact original speech coordinates, never reconstructed speech or hidden reasoning. Reuse requestId only for the exact change; updates need expectedRevision from a fresh read. Selections use raw UTF-16 start/end (end exclusive), body/quote_comment/quote_text; quote attachments need contentBlockIndex and attachmentId. Recheck the interpretation after source correction; current user instructions take precedence within their scope. Owner forgetting is in the memory UI.",
+      "descriptionDigest": "sha256:29ec22a890e48e6a972e8c365f68e1aa8ff551537e51f1faaeb72f250c20d152",
+      "descriptionCharacters": 1266,
+      "descriptionTokensCl100kBase": 237,
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -24811,7 +24877,7 @@
                 "type": "object"
               }
             ],
-            "description": "One exact change. Sources include threadId/messageId, segment, raw start/end and the exact selected quote."
+            "description": "One exact change. description is optional cat-written context and applicability; sources preserve exact original threadId/messageId, segment, raw start/end and selected quote."
           }
         },
         "required": [
@@ -24819,7 +24885,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:0849271e9072c45e07ad725b7905325f182edf7c17ac9b72fcc00f62ab694a6b",
+      "inputSchemaDigest": "sha256:d1b832604ddfec70557fc265a05ab14bdbd31ce7d90eb933a56b514d6920c4f8",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
@@ -24833,7 +24899,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/matter-memory-tools.js#handleWriteMemoryMatter",
-      "protectedImplementationDigest": "sha256:25500e798005901281d1399089f9d9ca5e21a1d682de148a0c3d6d3d6fd5779d"
+      "protectedImplementationDigest": "sha256:84a711f304f34f6b023e56f91db4460072d6f9397e3edb7ab85d3657e0a05ad4"
     },
     {
       "name": "limb_bind_embodiment",

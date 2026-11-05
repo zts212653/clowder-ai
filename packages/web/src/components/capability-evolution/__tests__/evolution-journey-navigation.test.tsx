@@ -23,6 +23,7 @@ describe('F311 journey navigation is reading, not lifecycle advancement', () => 
 
   beforeEach(() => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    localStorage.setItem('cat-cafe:shell-presentation', 'classic');
     useEvolutionReading.setState({ programs: {}, workspaceProgramIds: {} });
     useF307ExperienceWorkbenchStore.setState({
       layout: createInitialWorkbenchState([surface]),
@@ -45,6 +46,7 @@ describe('F311 journey navigation is reading, not lifecycle advancement', () => 
   afterEach(() => {
     act(() => root.unmount());
     host.remove();
+    localStorage.removeItem('cat-cafe:shell-presentation');
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
 

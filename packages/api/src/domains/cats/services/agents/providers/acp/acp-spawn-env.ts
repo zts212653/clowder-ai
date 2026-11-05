@@ -1,4 +1,5 @@
-import { extractUserEnvTemplates, hasSupportedEnvTemplate, resolveEnvMap } from '../env-map.js';
+import { resolveMemberEnvironment } from '../../../../../../config/member-environment.js';
+import { BUILTIN_ENV_MAPS, extractUserEnvTemplates, hasSupportedEnvTemplate, resolveEnvMap } from '../env-map.js';
 
 export interface AcpProcessEnvAccount {
   id: string;
@@ -13,6 +14,7 @@ export interface PrepareAcpProcessEnvOptions {
   provider?: string | null;
   baseModel?: string;
   account?: AcpProcessEnvAccount | null;
+  memberEnvironment?: Readonly<Record<string, string>>;
 }
 
 export type TryPrepareAcpProcessEnvResult =
@@ -21,7 +23,18 @@ export type TryPrepareAcpProcessEnvResult =
 
 export function prepareAcpProcessEnv(options: PrepareAcpProcessEnvOptions): Record<string, string> | undefined {
   const account = options.account ?? null;
-  const resolved: Record<string, string> = {};
+  const resolved: Record<string, string> = resolveMemberEnvironment(options.memberEnvironment);
+  const accountOwnedKeys = new Set([
+    ...Object.keys(BUILTIN_ENV_MAPS[options.clientId] ?? {}),
+    ...Object.keys(options.clientId !== 'acp' ? (BUILTIN_ENV_MAPS[options.provider ?? ''] ?? {}) : {}),
+    ...Object.keys(account?.envVars ?? {}),
+    ...(options.clientId === 'kimi' ? ['KIMI_MODEL_API_KEY', 'KIMI_MODEL_BASE_URL'] : []),
+  ]);
+  if (account?.authType === 'oauth' && Object.keys(resolved).some((key) => accountOwnedKeys.has(key)))
+    throw new Error('member env cannot change selected OAuth credentials or endpoint; configure the account instead');
+  // An omitted account base URL means the adapter's default destination, never
+  // permission for a member override to receive this account's credentials.
+  if (account) for (const key of accountOwnedKeys) delete resolved[key];
 
   if (account?.authType === 'api_key') {
     if (!account.apiKey) {

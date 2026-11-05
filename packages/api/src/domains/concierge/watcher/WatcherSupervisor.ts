@@ -196,9 +196,24 @@ export class WatcherSupervisor {
     const active = this.active.get(threadId);
     if (active) active.catId = catId;
     const member = catRegistry.tryGet(catId);
-    const service = this.deps.service(catId);
-    if (!member || !service || !(await read(this.deps.capability(catId))).supported)
+    if (!member) {
+      // The chosen member can leave the roster while its preference persists. When watching is
+      // off or this thread is not picked there is nothing to run, so do not retry every poll;
+      // existing sessions keep their cursors and earlier wakes still settle in reconcile().
+      const thread = await read(this.deps.threads.get(threadId));
+      if (!thread || thread.deletedAt) return;
+      if (!effectiveWatcherState(preferences.config, thread, preferences.quietLabels).enabled) return;
       throw new Error('WATCHER_SESSION_UNSUPPORTED');
+    }
+    // The provider is only needed to actually run a wake. Resolving it up front made an
+    // unavailable member retry every poll even while watching was off for this thread.
+    let service: ReturnType<Options['service']> | undefined;
+    const requireService = async () => {
+      service ??= this.deps.service(catId);
+      if (!service || !(await read(this.deps.capability(catId))).supported)
+        throw new Error('WATCHER_SESSION_UNSUPPORTED');
+      return service;
+    };
     const chainKey = watcherSessionChainKey(this.deps.userId, catId, threadId);
     let session: SessionRecord = await read(
       this.deps.sessions.getOrCreateActive({
@@ -274,6 +289,7 @@ export class WatcherSupervisor {
         await saveWatcherState(this.deps.sessions, session.id, state, { afterSequence: source.settledSequence! });
         continue;
       }
+      const runService = await requireService();
       try {
         const prior = state.attempt ? await read(this.deps.executions.get(state.attempt.invocationId)) : null;
         const recoveryOnly =
@@ -292,7 +308,7 @@ export class WatcherSupervisor {
         await (this.deps.run ?? runWatcherInvocation)(this.deps, {
           session,
           source,
-          service,
+          service: runService,
           quiet: !effective.maySpeak,
           signal,
           recoveryOnly,

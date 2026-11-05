@@ -8,7 +8,15 @@ description: "Govern the Clowder AI MCP surface as typed resource lifecycles wit
 description_source: human
 description_author: codex-sol
 description_updated_at: 2026-08-01T10:03:45Z
-tips_exempt: "Renewed 2026-10-14 for AC-B4 and KD-12: exported bootstrap lineage, target-owned public baselines, claim-only evidence stubs, and manifest-bound absence/rejection test references are maintainer-facing MCP governance and verification. Negative-test classification preserves existing retirement assertions; it adds no Human-invokable tool, workflow, or discovery action."
+mcp_admission_status: accepted
+mcp_admission_ref: "file:docs/features/F286-mcp-surface-lifecycle-governance.md"
+mcp_admission_claims:
+  - ref: "file:docs/features/F286-mcp-surface-lifecycle-governance.md"
+    toolName: cat_cafe_update_scheduled_task_params
+    resourceFamily: schedule
+    boundaryKind: mode-matrix-boundary
+    decision: accepted
+tips_exempt: "Renewed 2026-11-05 for Task512: this F286 delta records the schedule.update mode-matrix admission, while the actual parameter-update action is taught by the F139 capability tip and schedule skill. It adds no separate F286 user workflow. AC-B4/KD-12 bootstrap lineage, public baselines, evidence stubs, and negative-test references remain maintainer-facing governance."
 ---
 
 # F286: MCP Surface Lifecycle Governance
@@ -22,6 +30,25 @@ tips_exempt: "Renewed 2026-10-14 for AC-B4 and KD-12: exported bootstrap lineage
 When a resource gains a new lifecycle transition, Clowder AI currently tends to add another top-level MCP verb. The result is not only more names: every invocation pays cognitive-selection and description cost, while callers must reconstruct state machines from tools. operator named the desired value directly: “每次发现对某个功能的更多需求的时候不是新建更多工具，而是想办法变成一个工具有完整的生命周期……对全部的 mcp 给盘点一下” (source message `private-source-id`).
 
 The goal is therefore **the fewest top-level decisions inside each real authority and safety boundary**, not “one resource must always have one universal tool.”
+
+## Task512 Schedule parameter update admission — 2026-11-05
+
+Owner decision: `[thread-id]#private-source-id` (codex-sol).
+ADR-044 §3(5) admits `cat_cafe_update_scheduled_task_params` as a `mode-matrix-boundary`:
+creation requires `templateId + trigger`; updating an existing recurring task requires
+`taskId + paramsPatch`. They share no required fields, and the publication source thread
+has different semantics from the creation delivery thread. The current discriminated
+schema flattener would make branch fields optional and require a new `action` in old
+create calls. This specific schema distinction justifies the independent entry.
+
+The update remains a callback-owner, write, non-open-world approval proposal. It preserves
+the existing task identity, uses a definition fingerprint CAS, and keeps active executions
+on their original spec. The first consumer is Task512's existing Alpha subscription
+(`executionCarrier: managed`); ordinary reminder/subscription parameter changes follow
+`schedule-tasks`. The register schema, handler, description and existing create callers
+remain unchanged. No identity is renamed/replaced and no compatibility alias is exposed,
+so this admission is not a family cutover. A future unified Schedule lifecycle tool requires
+its own complete family migration; this claim does not admit other Schedule verbs.
 
 ## Current State / 现状基线
 

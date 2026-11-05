@@ -1,7 +1,7 @@
 import { once } from 'node:events';
 import { createServer, type Server as HttpServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { type ApprovalEnvelope, type ApprovalPublication, createCatId } from '@cat-cafe/shared';
+import { type ApprovalEnvelope, type ApprovalPublication, createCatId, type ThreadProposal } from '@cat-cafe/shared';
 import React, { act, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -90,11 +90,26 @@ describe('F128 proposal card realtime socket journey', () => {
     httpServer = createServer((request, response) => {
       response.setHeader('content-type', 'application/json');
       if (request.url === '/api/session') {
-        response.end('{}');
+        response.end(JSON.stringify({ userId: 'default-user', csrfToken: 'test-csrf-token' }));
         return;
       }
       if (request.url === `/api/proposals/${PROPOSAL_ID}`) {
-        response.end(JSON.stringify({ proposal: { proposalId: PROPOSAL_ID, status: canonicalStatus } }));
+        // V2 reads the canonical producer, not display fields from the historical message block.
+        const proposal: ThreadProposal = {
+          proposalId: PROPOSAL_ID,
+          status: canonicalStatus,
+          createdBy: 'default-user',
+          createdAt: 1,
+          sourceThreadId: THREAD_ID,
+          sourceInvocationId: 'invocation-realtime-card',
+          sourceCatId: createCatId('codex-sol'),
+          title: 'Realtime proposal card',
+          reason: 'Keep the published proposal visible during streaming.',
+          parentThreadId: THREAD_ID,
+          projectPath: '/isolated/realtime-project',
+          preferredCats: [createCatId('codex-sol')],
+        };
+        response.end(JSON.stringify({ proposal }));
         return;
       }
       response.statusCode = 404;
@@ -214,6 +229,7 @@ describe('F128 proposal card realtime socket journey', () => {
       await waitFor(() => useChatStore.getState().messages.some((message) => message.id === cardMessageId));
     });
     await waitFor(() => container.querySelector(`[data-message-id="${cardMessageId}"]`) !== null);
+    await waitFor(() => container.textContent?.includes('Realtime proposal card') === true);
 
     expect(container.textContent).toContain('Realtime proposal card');
     expect(container.querySelectorAll(`[data-message-id="${cardMessageId}"]`)).toHaveLength(1);

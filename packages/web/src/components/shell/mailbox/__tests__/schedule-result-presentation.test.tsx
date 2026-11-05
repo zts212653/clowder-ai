@@ -14,13 +14,35 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 it.each([
-  true,
-  false,
-])('retained scheduled-task effect uses exact private owner/publication: match=%s', async (matches) => {
+  { matches: true, kind: 'create' },
+  { matches: false, kind: 'create' },
+  { matches: true, kind: 'update' },
+  { matches: false, kind: 'update' },
+])('retained scheduled-task effect uses exact private owner/publication: $kind match=$matches', async ({
+  matches,
+  kind,
+}) => {
   vi.stubGlobal('React', React);
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
-  const p = scheduleProposal('approved'),
-    item = scheduleItem();
+  const p = scheduleProposal('approved');
+  if (kind === 'update' && p.mutation.kind === 'create') {
+    const taskSnapshot = { ...p.mutation.task, trigger: { type: 'interval' as const, ms: 60_000 } };
+    p.mutation = {
+      kind: 'update',
+      taskId: taskSnapshot.id,
+      taskSnapshot,
+      expectedFingerprint: 'before',
+      params: { text: 'updated' },
+    };
+    p.effectCheckpoint = {
+      kind: 'update',
+      taskId: taskSnapshot.id,
+      expectedFingerprint: 'before',
+      resultingFingerprint: 'after',
+      appliedAt: 1900,
+    };
+  }
+  const item = scheduleItem(p);
   if (!matches && p.publication.state === 'anchored')
     p.publication.envelope.approvalCardRef = { ...coordinate, messageId: 'foreign-card' };
   vi.mocked(apiFetch).mockImplementation(async (path) =>
@@ -56,13 +78,14 @@ it.each([
     const line = container.querySelector('[data-testid="mailbox-retained-line"]')?.textContent;
     expect(container.querySelector('[data-testid="decision-result-details"]')).toBeNull();
     await act(async () => container.querySelector<HTMLButtonElement>('button[aria-expanded="false"]')?.click());
-    if (matches) expect(line).toContain('定时任务已创建并注册');
+    if (matches) expect(line).toContain(kind === 'update' ? '定时任务参数已更新' : '定时任务已创建并注册');
     else {
       expect(line).toContain('效果暂未确认');
       expect(container.querySelector('[data-testid="mailbox-retained-reread"]')).not.toBeNull();
     }
     expect(container.textContent).not.toContain('owner-1');
     expect(container.textContent).toContain('定时任务: Read the evidence');
+    expect(container.textContent).not.toMatch(/(?:Create|Delete|Update) schedule:/);
     expect(session.model.state.kind === 'decided' ? session.model.state.terminal.effectUnknown : true).toBeUndefined();
     expect(vi.mocked(apiFetch).mock.calls.some(([, o]) => o?.method === 'POST')).toBe(false);
   } finally {

@@ -27,6 +27,12 @@ async function render(sha: string | null) {
   await act(async () => root.render(createElement(WatchHost, { sha })));
   await vi.waitFor(() => expect(socket.handlers.has('workspace:file-changed')).toBe(true));
 }
+/** Connects the mocked socket and returns the watchId the hook subscribed with. */
+function connect(): string {
+  act(() => socket.handlers.get('connect')!());
+  const watch = socket.emit.mock.calls.find(([name]) => name === 'workspace:watch-file');
+  return (watch?.[1] as { watchId: string }).watchId;
+}
 beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   root = createRoot(document.createElement('div'));
@@ -46,20 +52,41 @@ describe('production workspace file watcher resource boundaries', () => {
     ['a different path', { worktreeId: 'wt-1', path: 'other.ts', sha256: 'sha-new' }],
   ])('ignores %s received through the socket subscription', async (_label, event) => {
     await render('sha-current');
-    act(() => socket.handlers.get('workspace:file-changed')!(event));
+    const watchId = connect();
+    act(() => socket.handlers.get('workspace:file-changed')!({ watchId, ...event }));
     expect(onReload).not.toHaveBeenCalled();
+  });
+
+  it("ignores another watch's change and releases only its own watch", async () => {
+    await render('sha-current');
+    const watchId = connect();
+    act(() =>
+      socket.handlers.get('workspace:file-changed')!({
+        watchId: 'another-watch',
+        worktreeId: 'wt-1',
+        path: 'README.md',
+        sha256: 'sha-new',
+      }),
+    );
+    expect(onReload).not.toHaveBeenCalled();
+
+    act(() => root.unmount());
+    expect(socket.emit).toHaveBeenLastCalledWith('workspace:unwatch-file', { watchId });
+    root = createRoot(document.createElement('div'));
   });
 
   it('reloads an event received before the initial content hash is available', async () => {
     await render(null);
-    act(() => socket.handlers.get('connect')!());
+    const watchId = connect();
     expect(socket.emit).toHaveBeenCalledWith('workspace:watch-file', {
+      watchId,
       worktreeId: 'wt-1',
       path: 'README.md',
       sha256: null,
     });
     act(() =>
       socket.handlers.get('workspace:file-changed')!({
+        watchId,
         worktreeId: 'wt-1',
         path: 'README.md',
         sha256: 'sha-new',

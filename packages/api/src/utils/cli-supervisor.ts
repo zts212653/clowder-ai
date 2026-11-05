@@ -213,6 +213,8 @@ async function main(): Promise<void> {
   const childEnv = withCatCliProcessContext({ ...process.env });
   if (owner) childEnv[CLI_PROCESS_OWNER_ENV] = owner.manifest.ownerId;
   delete childEnv[CLI_SUPERVISOR_SOCKET_DIR_ENV];
+  delete childEnv.NODE_CHANNEL_FD;
+  delete childEnv.NODE_CHANNEL_SERIALIZATION_MODE;
   child = spawn(command, args, {
     detached: !IS_WINDOWS,
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -245,6 +247,13 @@ async function main(): Promise<void> {
   child.once('exit', (code, signal) => {
     childExited = true;
     pendingExit = { code, signal };
+    // Optional owned IPC reports the provider root before process-tree cleanup.
+    // It is diagnostics only: the parent must still await this supervisor's close.
+    try {
+      if (process.connected) process.send?.({ type: 'cli-supervisor-root-exit', code, signal }, () => {});
+    } catch {
+      /* A closed observer cannot interrupt tree teardown. */
+    }
     if (parentTimer !== undefined) clearInterval(parentTimer);
 
     const state = readOwnedSnapshot();

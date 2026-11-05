@@ -34,12 +34,15 @@ describe('WorkspaceFileViewer listen mode', () => {
     container = document.createElement('div');
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
     document.body.appendChild(container);
+    // Retained classic contract; newer presentation cases select their mode explicitly.
+    window.localStorage.setItem('cat-cafe:shell-presentation', 'classic');
     root = createRoot(container);
   });
 
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    window.localStorage.removeItem('cat-cafe:shell-presentation');
     Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView');
   });
 

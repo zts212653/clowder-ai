@@ -34,18 +34,4 @@ export class MemoryEventLog {
   }
 }
 
-export class MemoryProjectionStore {
-  projections = new Map();
-  async get(subjectKey) {
-    return structuredClone(this.projections.get(subjectKey) ?? null);
-  }
-  async save(projection) {
-    this.projections.set(projection.subjectKey, structuredClone(projection));
-  }
-  async listSubjectKeys() {
-    return [...this.projections.keys()];
-  }
-  async delete(subjectKey) {
-    this.projections.delete(subjectKey);
-  }
-}
+export { MemoryBallCustodyProjectionStore as MemoryProjectionStore } from '../../dist/domains/ball-custody/MemoryBallCustodyProjectionStore.js';

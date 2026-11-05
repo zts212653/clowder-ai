@@ -40,12 +40,20 @@ function settled(status: 'approved' | 'rejected') {
           effectCheckpoint:
             proposal.mutation.kind === 'create'
               ? { kind: 'create', taskId: proposal.mutation.task.id, appliedAt: 1900 }
-              : {
-                  kind: 'delete',
-                  taskId: proposal.mutation.taskId,
-                  expectedFingerprint: proposal.mutation.expectedFingerprint,
-                  deletedAt: 1900,
-                },
+              : proposal.mutation.kind === 'update'
+                ? {
+                    kind: 'update',
+                    taskId: proposal.mutation.taskId,
+                    expectedFingerprint: proposal.mutation.expectedFingerprint,
+                    resultingFingerprint: 'updated-definition',
+                    appliedAt: 1900,
+                  }
+                : {
+                    kind: 'delete',
+                    taskId: proposal.mutation.taskId,
+                    expectedFingerprint: proposal.mutation.expectedFingerprint,
+                    deletedAt: 1900,
+                  },
         }
       : { rejectedAt: 2000, rejectedBy: 'owner-1' }),
   };
@@ -94,6 +102,67 @@ afterEach(() => {
 });
 
 describe('original scheduled task, both hosts', () => {
+  it('refreshes recovery after the host moves a checkpointed failed write into another group', async () => {
+    const originalFetch = vi.mocked(apiFetch).getMockImplementation();
+    vi.mocked(apiFetch).mockImplementation(async (path, options) => {
+      if (options?.method === 'POST') {
+        proposal.status = 'applying';
+        return {
+          ok: false,
+          status: 500,
+          json: async () => ({ error: 'refresh interrupted after checkpoint' }),
+        } as Response;
+      }
+      return originalFetch?.(path, options) as Promise<Response>;
+    });
+    const renderGroup = (group: string) => (
+      <ApprovalHostContext.Provider value={host}>
+        <div key={group}>
+          <ApprovalItemCard item={scheduleItem(proposal)} />
+        </div>
+      </ApprovalHostContext.Provider>
+    );
+    const host = {
+      ...PERMISSIVE_APPROVAL_HOST,
+      reportRequest: (event: { phase: string }) => {
+        if (event.phase === 'end') flushSync(() => root.render(renderGroup('recovery')));
+      },
+    };
+    await act(async () => root.render(renderGroup('pending')));
+    await click();
+    expect(sent()).toHaveLength(1);
+    expect(button('schedule-approve')?.textContent).toBe('重试执行');
+    expect(button('schedule-reject')).toBeNull();
+  });
+
+  it('shows before/after values for an update, approves it, and retains the update receipt on reopen', async () => {
+    if (proposal.mutation.kind !== 'create') throw new Error('create fixture expected');
+    const taskSnapshot = {
+      ...proposal.mutation.task,
+      trigger: { type: 'interval' as const, ms: 60_000 },
+      params: { text: 'before' },
+    };
+    proposal.mutation = {
+      kind: 'update',
+      taskId: taskSnapshot.id,
+      taskSnapshot,
+      expectedFingerprint: 'original-definition',
+      params: { text: 'after' },
+    };
+    await mount();
+    const changes = container.querySelector('[aria-label="本次修改"]');
+    expect(changes?.textContent).toContain('before');
+    expect(changes?.textContent).toContain('after');
+    expect(button('schedule-approve')?.textContent).toBe('批准并更新');
+    expect(container.textContent).not.toContain('永久删除');
+    await click();
+    expect(sent()).toHaveLength(1);
+    expect(container.textContent).toContain('定时任务参数已更新');
+    await mount();
+    expect(container.textContent).toContain('定时任务参数已更新');
+    expect(button('schedule-approve')).toBeNull();
+  });
+
   it('shows the full original task and names, folded content, theme action, and original create writer', async () => {
     await mount();
     expect(container.textContent).toContain('Read the evidence');

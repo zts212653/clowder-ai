@@ -25,6 +25,7 @@ import {
 } from '../../../../../config/capabilities/managed-mcp-config.js';
 import { resolveWorkspaceRoot } from '../../../../../config/capabilities/mcp-config-adapters.js';
 import { isManagedCatCafeSplit } from '../../../../../config/capabilities/mcp-constants.js';
+import { captureMcpEnvironment } from '../../../../../config/capabilities/mcp-environment-capture.js';
 import {
   resolveMcpArgs,
   resolveMcpCommand,
@@ -122,7 +123,8 @@ export async function captureProviderMcpConfig(input: {
           if (pencil) mcpServers[s.name] = { command: pencil.command, args: pencil.args };
         } else if (s.transport === 'streamableHttp' && s.url) {
           const entry: Record<string, unknown> = { type: 'http', url: s.url };
-          if (s.headers && Object.keys(s.headers).length > 0) entry.headers = s.headers;
+          if (s.headers && Object.keys(s.headers).length > 0)
+            entry.headers = captureMcpEnvironment({ headers: s.headers }).headers;
           mcpServers[s.name] = entry;
         } else if (s.command) {
           const workingDir = resolveMcpWorkingDir(s.workingDir, configSourceRoot);
@@ -178,7 +180,7 @@ export async function captureProviderMcpConfig(input: {
             for (const [name, entry] of Object.entries(userMcp.mcpServers)) {
               if (isRetiredGithubMcpConfigEntry(name, entry)) continue;
               if (!excludedMcpServerNames.has(name) && entry && typeof entry === 'object') {
-                const server = { ...(entry as Record<string, unknown>) };
+                const server = captureMcpEnvironment(entry as Record<string, unknown>);
                 if (input.projectMcpRoot && typeof server.command === 'string') {
                   server.cwd = resolve(userMcpRoot, typeof server.cwd === 'string' ? server.cwd : '.');
                 }

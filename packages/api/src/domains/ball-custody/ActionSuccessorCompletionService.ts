@@ -1,3 +1,4 @@
+import { recoveryGuarded } from '../../infrastructure/recovery/recovery-deadline.js';
 import type { ActionSubjectTruthResolver } from './ActionSubjectTruthResolver.js';
 import type { ActionSuccessorLeaseStore } from './ActionSuccessorLeaseStore.js';
 import type { ActionSuccessorProjectionRetirementService } from './ActionSuccessorProjectionRetirementService.js';
@@ -30,7 +31,11 @@ export class ActionSuccessorCompletionService {
     >,
     private readonly truthResolver: Pick<ActionSubjectTruthResolver, 'resolveCompletion'>,
     private readonly projectionRetirement?: Pick<ActionSuccessorProjectionRetirementService, 'retire'>,
-  ) {}
+  ) {
+    this.leaseStore = recoveryGuarded(leaseStore);
+    this.truthResolver = recoveryGuarded(truthResolver);
+    if (projectionRetirement) this.projectionRetirement = recoveryGuarded(projectionRetirement);
+  }
 
   private async committed(lease: ActionSuccessorLease, input: { leaseId: string; generation: number }) {
     if (lease.status === 'completed') await this.projectionRetirement?.retire(lease);

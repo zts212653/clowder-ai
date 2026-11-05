@@ -54,7 +54,7 @@
   background: var(--shell-paper);
   box-shadow: inset 0 0 0 1px var(--shell-hairline-strong);
   color: var(--shell-ink);
-  font-size: 13px;
+  font-size: var(--console-font-compact);
   font-weight: 500;
 }
 .w-sugg .x {
@@ -73,7 +73,7 @@
 }
 .w-rcpt {
   color: var(--shell-muted);
-  font-size: 13px;
+  font-size: var(--console-font-compact);
 }
 .w-rcpt .ok {
   width: 8px;
@@ -96,7 +96,7 @@
 }
 .w-row-error {
   color: var(--shell-danger);
-  font-size: 12px;
+  font-size: var(--console-font-xs);
 }
 /* Under the person's own message the row sits on the right, like the bubble. */
 .w-row-end {
@@ -117,7 +117,7 @@
 }
 .w-hidden-row > .name {
   color: var(--shell-ink);
-  font-size: 14px;
+  font-size: var(--console-font-sm);
 }
 .w-hidden-row > .restore {
   display: inline-flex;
@@ -129,6 +129,6 @@
   background: var(--shell-paper);
   box-shadow: inset 0 0 0 1px var(--shell-hairline-strong);
   color: var(--shell-body);
-  font-size: 13px;
+  font-size: var(--console-font-compact);
   font-weight: 500;
 }

@@ -35,6 +35,7 @@ export async function createDecisionFixture(options = {}) {
     logger: { info() {}, error() {} },
     ledger: new RunLedger(db),
     dynamicTaskStore: dynamicStore,
+    deliver: options.deliver,
   });
   const notifications = [];
   const messageStore = options.messageStore ?? new MessageStore();
@@ -69,6 +70,7 @@ export async function createDecisionFixture(options = {}) {
   await app.ready();
 
   return {
+    db,
     app,
     dynamicStore,
     store,

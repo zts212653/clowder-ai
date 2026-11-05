@@ -70,7 +70,7 @@ import { formatSuggestedCrossPostActionLines } from './cross-post-suggestion-for
 import { withDegradation } from './degradation.js';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
-import { appendHintToSuccess, htmlWidgetInlineHandlerHint } from './html-widget-publish-hint.js';
+import { appendHintToSuccess, htmlWidgetPublishHint } from './html-widget-publish-hint.js';
 import {
   getInvocationAuthSignal,
   hasInvocationCredentialScope,
@@ -619,13 +619,22 @@ export const listThreadsInputSchema = {
     .describe(
       'Include up to 3 unfinished Task pointers and lifecycle-backed running members per visible thread; page cap 20, 24k characters. Default false.',
     ),
+  topic: z
+    .string()
+    .trim()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe(
+      'Work mode only: choose up to 6 short topic clues from the current title/question, separated by spaces. Matches title, owner-scoped Tasks including done, attached artifact refs and active roadmap bindings within a bounded scan. Use topic or keyword, not both. Candidates require original reads; zero matches do not establish absence.',
+    ),
   cursor: z
     .string()
     .min(1)
     .max(2000)
     .optional()
     .describe(
-      'Opaque nextCursor from includeWork=true; reuse the same activeSince/keyword filters. Live pages are not a frozen snapshot.',
+      'Opaque nextCursor from includeWork=true; reuse the same activeSince/keyword/topic filters. Live pages are not a frozen snapshot.',
     ),
   agentKeyCatId: agentKeyCatIdSchema,
 };
@@ -1353,6 +1362,7 @@ export async function handleListThreads(input: {
   limit?: number | undefined;
   activeSince?: number | undefined;
   keyword?: string | undefined;
+  topic?: string | undefined;
   includeWork?: boolean | undefined;
   cursor?: string | undefined;
   agentKeyCatId?: string | undefined;
@@ -1363,6 +1373,7 @@ export async function handleListThreads(input: {
       ...(input.limit ? { limit: String(input.limit) } : {}),
       ...(input.activeSince !== undefined ? { activeSince: String(input.activeSince) } : {}),
       ...(input.keyword ? { keyword: input.keyword } : {}),
+      ...(input.topic ? { topic: input.topic } : {}),
       ...(input.includeWork !== undefined ? { includeWork: String(input.includeWork) } : {}),
       ...(input.cursor ? { cursor: input.cursor } : {}),
     },
@@ -1946,6 +1957,17 @@ export const createRichBlockInputSchema = {
  * legacy 403 / "not configured" path predates Phase A typed reasons and
  * stays inline (preserves pre-Phase-A behavior, marks DEGRADED:true).
  */
+let lastRichBlockPublicationTime = 0;
+
+function newRichBlockPublication(): { requestId: string; issuedAt: number } {
+  // One stamp per tool operation, retained by every HTTP retry and outbox replay.
+  lastRichBlockPublicationTime = Math.max(
+    performance.timeOrigin + performance.now(),
+    lastRichBlockPublicationTime + 0.001,
+  );
+  return { requestId: randomUUID(), issuedAt: lastRichBlockPublicationTime };
+}
+
 export async function handleCreateRichBlock(input: {
   block: string;
   threadId?: string | undefined;
@@ -1977,7 +1999,7 @@ export async function handleCreateRichBlock(input: {
     return errorResult('Invalid rich block: block does not match required fields for its kind');
   }
   const block = parsed;
-  const inlineHandlerHint = htmlWidgetInlineHandlerHint(block);
+  const publishHint = htmlWidgetPublishHint(block);
   const hasInvocationCreds = getInvocationAuthSignal().hasFullCredentials;
   const hasAgentKeyCreds = hasUsableAgentKeyCredentials(process.env);
 
@@ -1994,7 +2016,7 @@ export async function handleCreateRichBlock(input: {
       },
       { enableOutbox: true, agentKeyCatId: input.agentKeyCatId },
     );
-    return appendHintToSuccess(result, inlineHandlerHint);
+    return appendHintToSuccess(result, publishHint);
   }
 
   const ccRichText = `\`\`\`cc_rich\n${JSON.stringify({ v: 1, blocks: [block] })}\n\`\`\``;
@@ -2036,7 +2058,7 @@ export async function handleCreateRichBlock(input: {
     if (!input.threadId) {
       return errorResult('threadId is required for create_rich_block when using agent-key auth.');
     }
-    return appendHintToSuccess(await runRouteB({ route: 'B_agent_key', degraded: false }), inlineHandlerHint);
+    return appendHintToSuccess(await runRouteB({ route: 'B_agent_key', degraded: false }), publishHint);
   }
 
   // Phase E: framework handles primary call + auth-degradable fallback.
@@ -2044,12 +2066,13 @@ export async function handleCreateRichBlock(input: {
   // returned error text and route to Route B explicitly — preserves the
   // existing behavior without widening the framework's degradable set
   // (AC-E3: framework triggers only on 401-degradable reasons).
+  const publication = newRichBlockPublication();
   const published = await withDegradation({
     toolName: 'create_rich_block',
     primary: async () => {
       const result = await callbackPost(
         '/api/callbacks/create-rich-block',
-        { block, ...(input.threadId ? { threadId: input.threadId } : {}) },
+        { block, publication, ...(input.threadId ? { threadId: input.threadId } : {}) },
         {
           enableOutbox: true,
           agentKeyCatId: input.agentKeyCatId,
@@ -2064,7 +2087,7 @@ export async function handleCreateRichBlock(input: {
     },
     policy: { kind: 'custom', degrade: async () => runRouteB({ route: 'B_fallback', degraded: true }) },
   });
-  return appendHintToSuccess(published, inlineHandlerHint);
+  return appendHintToSuccess(published, publishHint);
 }
 
 /** F088 Phase J2: Generate a document (PDF/DOCX/MD) from Markdown content */
@@ -3799,12 +3822,12 @@ export const callbackTools = [
     name: 'cat_cafe_list_threads',
     description:
       'Discover visible threads and recent work without reading conversation bodies. ' +
-      'Use when: finding a work line such as “那个3D建模” or “最近在忙什么”; set includeWork=true for titles, up to 3 unfinished Tasks, and actual running members. ' +
+      'Use when: finding an earlier work line such as “那个3D建模” or “昨天做的视频”, even without a Matter page; choose short topic clues from the current title/question and set includeWork=true. Without a topic, browse titles, up to 3 unfinished Tasks and actual running members. ' +
       'NOT for: resuming authorization or reading full progress (follow the returned thread/Task pointers), or all-project execution counts (get_running_work is Host-project scoped). ' +
-      'Output: thread IDs, titles, activity times; work mode adds project identity, per-source availability, bounded live pages and nextCursor. A bound original roadmap appears directly on the entry with file version/as-of, exact read pointer and later-activity-needs-checking. ' +
+      'Output: bounded metadata candidates and original-read pointers; topic mode also searches authorized completed Tasks and attached references, reports checked/uninspected scope, and offers weak recent pointers plus existing Work/evidence tools after a miss. nextCursor continues the same topic. A bound original roadmap includes file version/as-of and its read pointer. ' +
       'GOTCHA: Task/project details require the original list_tasks invocation authority; other callers retain title pointers only. ' +
       'Doing does not prove execution. Execution none covers the home thread and visible dispatchGate targets; dispatchedThreadId is a routing target, not proof of execution location. Entrusted work with no canonical execution link remains unknown even when dispatched. ' +
-      'Task and roadmap reads also respect the invocation callback allowlist. Partial Task scans cannot claim globally latest Tasks. A later timestamp does not make original decisions obsolete. Discovery grants no file or work authority.',
+      'Task and roadmap reads also respect the invocation callback allowlist. Partial scans or an empty page cannot prove absence. Metadata matches are not original reads, relevance judgments, search-qualified message answers or grants. Follow original pointers, read current sources and assess applicability before answering. A later timestamp does not make original decisions obsolete. Discovery grants no file or work authority.',
     inputSchema: listThreadsInputSchema,
     handler: handleListThreads,
     governance: {

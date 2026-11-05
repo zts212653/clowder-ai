@@ -2,6 +2,7 @@ import type { ArtifactReviewRound, ArtifactReviewView, ContentModificationDetail
 import { act, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { SHELL_PRESENTATION_STORAGE_KEY, writeShellPresentation } from '@/components/shell/shell-presentation';
 import { ContentModificationResults } from '../ContentModificationResults';
 import { ArtifactMediaCompare } from '../media-compare/ArtifactMediaCompare';
 import { ReviewRoundDecision } from '../ReviewRoundDecision';
@@ -16,6 +17,7 @@ let root: Root, container: HTMLDivElement;
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   localStorage.clear();
+  writeShellPresentation('v2');
   container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
@@ -23,6 +25,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
+  localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
   vi.unstubAllGlobals();
 });
 const base = `sha256:${'a'.repeat(64)}`;
@@ -122,7 +125,8 @@ it('makes workspace adopt/reject explicit, and cancellation removes fresh decisi
   expect(container.querySelector('[data-testid="content-modification-reject"]')).toBeNull();
   expect(container.textContent).toContain('原版与候选');
 });
-it('Task compare uses the original round action and retains an unknown decision draft across close/reopen', async () => {
+it('classic Task compare retains the original round action and unknown decision draft across close/reopen', async () => {
+  writeShellPresentation('classic');
   const round: ArtifactReviewRound = {
     number: 2,
     asset: compareAsset(2),
@@ -164,6 +168,51 @@ it('Task compare uses the original round action and retains an unknown decision 
   expect(container.querySelector('textarea')?.value).toBe('这一版需要继续调整');
   await act(async () => root.render(render(false)));
   expect(container.querySelector('button')).toBeNull();
+});
+
+it('v2 retains the original decision draft until an explicit Chat handoff succeeds', async () => {
+  writeShellPresentation('v2');
+  const key = 'compare:round:2:decision',
+    body = '这一版需要继续调整';
+  localStorage.setItem(key, JSON.stringify({ body, anchor: null }));
+  const decide = vi.fn(),
+    discuss = vi.fn().mockReturnValue(false);
+  const round: ArtifactReviewRound = {
+    number: 2,
+    asset: compareAsset(2),
+    openedAt: '2026-10-02T19:00:00Z',
+    state: 'awaiting_human',
+    annotations: [],
+    responses: [],
+  };
+  const render = () => (
+    <ReviewRoundDecision
+      round={round}
+      ownerUserId="operator"
+      canWrite
+      saving={false}
+      draftKey={key}
+      act={decide}
+      onDiscuss={discuss}
+      compact
+    />
+  );
+  const move = () =>
+    [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === '放到聊天');
+  await act(async () => root.render(render()));
+  expect(container.querySelector('textarea')).toBeNull();
+  expect(move()).toBeDefined();
+  await act(async () => move()?.click());
+  expect(discuss).toHaveBeenCalledWith(body);
+  expect(JSON.parse(localStorage.getItem(key) ?? '{}').body).toBe(body);
+  await act(async () => root.render(<p>返回</p>));
+  await act(async () => root.render(render()));
+  expect(container.textContent).toContain(body);
+  discuss.mockReturnValue(true);
+  await act(async () => move()?.click());
+  expect(container.textContent).not.toContain(body);
+  expect(JSON.parse(localStorage.getItem(key) ?? '{}').body ?? '').toBe('');
+  expect(decide).not.toHaveBeenCalled();
 });
 
 it('keeps original retry visible inside compare when a Task decision receipt is unknown', async () => {

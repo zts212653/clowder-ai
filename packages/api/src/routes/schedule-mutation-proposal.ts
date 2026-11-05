@@ -91,7 +91,6 @@ function scheduleMutationOrigin(
 
 function scheduleMutationCardContent(mutation: ScheduleMutation): string {
   const task = mutation.kind === 'create' ? mutation.task : mutation.taskSnapshot;
-  return mutation.kind === 'create'
-    ? `请求批准创建定时任务「${task.display.label}」`
-    : `请求批准永久删除定时任务「${task.display.label}」`;
+  const verb = { create: '创建', delete: '永久删除', update: '更新' }[mutation.kind];
+  return `请求批准${verb}定时任务「${task.display.label}」`;
 }

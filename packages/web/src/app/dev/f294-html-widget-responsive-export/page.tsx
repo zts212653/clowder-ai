@@ -3,6 +3,7 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { HtmlWidgetBlock } from '@/components/rich/HtmlWidgetBlock';
 import {
+  ANIMATED_BOX_EDGES_WIDGET_HTML,
   CSSOM_FINAL_PROOF_RACE_WIDGET_HTML,
   CSSOM_FIXED_ROOT_PSEUDO_WIDGET_HTML,
   CSSOM_ROOT_PSEUDO_WIDGET_HTML,
@@ -191,6 +192,21 @@ const RESPONSIVE_FIXTURE: HtmlWidgetFixture = {
 };
 
 const FIXTURES: Record<string, HtmlWidgetFixture> = {
+  'animated-box-edges': {
+    id: 'animated-box-edges-widget',
+    title: 'Animated padded widget',
+    height: 500,
+    html: ANIMATED_BOX_EDGES_WIDGET_HTML,
+  },
+  'animated-fixed-edge': {
+    id: 'animated-fixed-edge-widget',
+    title: 'Animated widget with viewport-fixed content',
+    height: 500,
+    html: ANIMATED_BOX_EDGES_WIDGET_HTML.replace(
+      '</body>',
+      '<aside style="position:fixed;bottom:0;height:20px;width:20px">Fixed</aside></body>',
+    ),
+  },
   short: { id: 'short-widget', title: 'Short widget', height: 500, html: SHORT_WIDGET_HTML },
   'viewport-relative': {
     id: 'viewport-relative-widget',

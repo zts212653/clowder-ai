@@ -113,13 +113,42 @@ export function ScheduleApprovalContent({ proposal }: { proposal: ScheduleMutati
     language = useShellLanguage(),
     task = scheduleTask(proposal);
   const template = useScheduleTemplate(task.templateId);
+  const mutation = proposal.mutation;
   return (
     <>
       <p className="font-medium">
-        {proposal.mutation.kind === 'create' ? t.create : t.delete}: {task.display.label}
+        {t[mutation.kind]}: {task.display.label}
       </p>
       {proposal.status === 'pending' ? (
-        <p>{proposal.mutation.kind === 'create' ? t.createReason : t.deleteReason}</p>
+        <p>
+          {mutation.kind === 'update' ? t.updateReason : mutation.kind === 'create' ? t.createReason : t.deleteReason}
+        </p>
+      ) : null}
+      {mutation.kind === 'update' ? (
+        <section aria-label={t.changes} className="space-y-3">
+          {Object.entries(mutation.params)
+            .filter(([name, value]) => JSON.stringify(value) !== JSON.stringify(task.params[name]))
+            .map(([name, value]) => {
+              const field = template?.schema[name];
+              return (
+                <div key={name}>
+                  <p className="font-medium">
+                    {scheduleObject(field) && typeof field.description === 'string' ? field.description : name}
+                  </p>
+                  <dl className="space-y-1 break-words">
+                    <dt className="text-cafe-muted">{t.before}</dt>
+                    <dd>
+                      <ScheduleValue name={name} value={task.params[name] ?? t.unset} owner={proposal.ownerUserId} />
+                    </dd>
+                    <dt className="text-cafe-muted">{t.after}</dt>
+                    <dd>
+                      <ScheduleValue name={name} value={value} owner={proposal.ownerUserId} />
+                    </dd>
+                  </dl>
+                </div>
+              );
+            })}
+        </section>
       ) : null}
       <dl className="space-y-2">
         <div>

@@ -1,6 +1,22 @@
 import { z } from 'zod';
 
 export const CLIENT_REQUEST_DIAGNOSTIC_HEADER = 'x-clowder-client-request';
+/** Browser wall-clock ms when the request was handed to fetch; caller-supplied, timing only. */
+export const CLIENT_SENT_AT_DIAGNOSTIC_HEADER = 'x-clowder-client-sent-at';
+/** Every diagnostic request header the Hub adds; hand-written CORS allow-lists must accept all of them. */
+export const CLIENT_DIAGNOSTIC_REQUEST_HEADERS: readonly string[] = [
+  CLIENT_REQUEST_DIAGNOSTIC_HEADER,
+  CLIENT_SENT_AT_DIAGNOSTIC_HEADER,
+];
+/**
+ * F294: the same runtime revision /api/health publishes, on every Fastify API response (raw or
+ * hijacked replies bypass it). While that revision
+ * is unknown the value is DEPLOYMENT_REVISION_UNKNOWN, never absence: a 304 only replaces headers it
+ * carries, so absence would let a revalidated cached copy keep an older revision.
+ */
+export const DEPLOYMENT_REVISION_HEADER = 'x-clowder-deployment-revision';
+/** Not a revision; browsers treat it as no observation at all. */
+export const DEPLOYMENT_REVISION_UNKNOWN = 'unknown';
 export const CONNECTION_DIAGNOSTIC_UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const id = z.string().regex(CONNECTION_DIAGNOSTIC_UUID);
 const duration = z.number().finite().min(0).max(86_400_000);

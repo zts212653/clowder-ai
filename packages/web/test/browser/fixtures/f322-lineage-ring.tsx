@@ -7,6 +7,7 @@ import { ThemeProvider } from '@/components/ThemeProvider';
 import { primeCoCreatorConfigCache } from '@/hooks/useCoCreatorConfig';
 import { hexToOklch } from '@/lib/color-utils';
 import { useThemeStore } from '@/stores/themeStore';
+import { scrollToMessage } from '@/utils/scrollToMessage';
 import { ActualProbe, themeApplied } from './f322-theme-applied';
 import '@/app/cat-persona-tokens.css';
 import '@/app/globals.css';
@@ -15,7 +16,7 @@ import '@/app/console-tokens.css';
 import '@/app/shell-v2.css';
 
 /**
- * F322 B probe fixture - the lineage ring (`[data-lineage-focus]`) over every layer it can sit on, through the REAL theme
+ * F322 B probe fixture - the message jump ring over every layer it can sit on, through the REAL theme
  * pipeline: the theme store -> `ThemeApplier` -> `applyThemeCSS`, resolved against the cats the registry request returns and the
  * human colour the real co-creator injector paints (`CoCreatorHueInjector`, in the new shell, from a config published through
  * the real co-creator cache). Real cat tokens (`CatHueInjector`) and the real globals.css rule.
@@ -97,7 +98,7 @@ const ANY_CAT = [
 function Strip({ background, label, claimed = true }: { background: string; label: string; claimed?: boolean }) {
   return (
     <div {...(claimed ? { 'data-layer': label } : { 'data-unclaimed': label })} style={{ background, padding: 20 }}>
-      <div data-lineage-focus="true" style={{ height: 24 }} />
+      <div data-message-jump-focus="true" style={{ height: 24 }} />
     </div>
   );
 }
@@ -105,6 +106,9 @@ function Strip({ background, label, claimed = true }: { background: string; labe
 function Page() {
   return (
     <div data-testid="column" style={{ width: 720 }}>
+      <button type="button" onClick={() => scrollToMessage('jump-proof')}>
+        跳到回复
+      </button>
       {LAYERS.map((layer) => (
         <Strip key={layer} label={layer} background={`var(${layer})`} />
       ))}
@@ -114,6 +118,11 @@ function Page() {
       {ANY_CAT.map((background) => (
         <Strip key={background} label={background} background={background} claimed={false} />
       ))}
+      <div style={{ padding: 12, background: 'var(--cafe-surface)' }}>
+        <div data-message-id="jump-proof" style={{ padding: 16 }}>
+          这条回复由真实消息导航定位，环按原时限消退。
+        </div>
+      </div>
     </div>
   );
 }

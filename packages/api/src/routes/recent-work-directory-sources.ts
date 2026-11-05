@@ -7,6 +7,7 @@ import { compareTaskQueryRecency, taskBelongsToQueryOwner } from '../domains/cat
 import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
 import type { Thread } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { migrateStoredProjectPath } from '../utils/persistent-project-path.js';
+import { taskTopicMatch } from './recent-work-topic.js';
 
 const TASK_PAGE_SIZE = 100;
 const TASK_PAGE_BUDGET = 5;
@@ -67,11 +68,22 @@ export async function readDirectoryTasks(
   thread: Thread,
   signal: AbortSignal,
   visible: ReadonlySet<string>,
+  topicTerms: readonly string[] = [],
 ) {
   const links: ExecutionLinks = { threadIds: new Set(), complete: true };
+  const matching = new Map<string, TaskItem>();
+  const matchingPointers = () =>
+    [...matching.values()]
+      .sort(compareTaskQueryRecency)
+      .slice(0, 3)
+      .map((task) => ({
+        ...taskPointer(task, visible),
+        ...taskTopicMatch(task, topicTerms),
+      }));
   const unavailable = (reason: string) => ({
     summary: { status: 'unavailable' as const, reason },
     links: { ...links, complete: false },
+    matching: matchingPointers(),
   });
   if (!hasDirectoryTaskAuthority(input)) return unavailable('not_authorized');
   const readPage = input.taskStore?.listByThreadPage?.bind(input.taskStore);
@@ -85,8 +97,9 @@ export async function readDirectoryTasks(
       signal.throwIfAborted();
       const page = await awaitStoreRead(Promise.resolve(readPage(thread.id, TASK_PAGE_SIZE, cursor)), { signal });
       for (const task of page.tasks) {
-        if (task.threadId !== thread.id || task.status === 'done' || !taskBelongsToQueryOwner(task, input.userId))
-          continue;
+        if (task.threadId !== thread.id || !taskBelongsToQueryOwner(task, input.userId)) continue;
+        if (topicTerms.length && taskTopicMatch(task, topicTerms).sources.length) matching.set(task.id, task);
+        if (task.status === 'done') continue;
         items.set(task.id, task);
         const executionThread =
           task.dispatchGate?.status === 'dispatched' ? task.dispatchGate.dispatchedThreadId : undefined;
@@ -118,6 +131,7 @@ export async function readDirectoryTasks(
         .map((task) => taskPointer(task, visible)),
     },
     links,
+    matching: matchingPointers(),
   };
 }
 

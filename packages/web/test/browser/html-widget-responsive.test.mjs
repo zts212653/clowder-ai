@@ -7,6 +7,7 @@ import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { countMagentaPixels, runF294HtmlWidgetExportContract } from './f294-html-widget-export.harness.mjs';
+import { startHtmlWidgetFixtureApi } from './html-widget-api.fixture.mjs';
 import { createNextDevTestEnvironment } from './next-dev-test-environment.mjs';
 
 await import('tsx/esm');
@@ -60,11 +61,16 @@ async function waitForWidgetMeasurement(page) {
 // Share the read-only fixture compilation; each case owns its exporter/pages.
 let server;
 let nextDev;
+let fixtureApi;
 let url;
 before(async () => {
   const port = await findFreePort();
   const output = [];
-  nextDev = await createNextDevTestEnvironment('html-widget-responsive');
+  fixtureApi = await startHtmlWidgetFixtureApi();
+  nextDev = await createNextDevTestEnvironment('html-widget-responsive', {
+    NEXT_PUBLIC_API_URL: fixtureApi.origin,
+    API_SERVER_PORT: String(fixtureApi.port),
+  });
   server = spawn(process.execPath, [NEXT_BIN, 'dev', '-H', '127.0.0.1', '-p', String(port)], {
     cwd: WEB_ROOT,
     env: nextDev.env,
@@ -80,8 +86,65 @@ after(async () => {
     if (server) await stopServer(server);
   } finally {
     await nextDev?.cleanup();
+    await fixtureApi?.close();
   }
 });
+
+test(
+  'html_widget keeps padded animation stable while allowing real content growth and shrink',
+  { timeout: 120_000 },
+  async () => {
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage({ viewport: { width: 1000, height: 900 } });
+      await page.goto(`${url}?fixture=animated-box-edges`, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+      const widget = await waitForWidgetMeasurement(page);
+      const frame = widget.frameLocator('iframe');
+      // The shell can remount its children once while hydrating. Resolve the
+      // current frame and wait for its animation instead of retaining a handle
+      // to the discarded pre-hydration frame.
+      const animationDeadline = Date.now() + 10_000;
+      while (Number(await frame.locator('body').getAttribute('data-tick')) < 10) {
+        assert.ok(Date.now() < animationDeadline, 'animated fixture must finish mounting');
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      const assertStableHeight = async (height) => {
+        const tickBefore = await frame.locator('body').getAttribute('data-tick');
+        const heights = [];
+        const end = Date.now() + 1_500;
+        while (Date.now() < end) {
+          heights.push(await widget.locator('iframe').evaluate((iframe) => iframe.getBoundingClientRect().height));
+          await new Promise((resolve) => setTimeout(resolve, 16));
+        }
+        const samples = [...new Set(heights)];
+        const tickAfter = await frame.locator('body').getAttribute('data-tick');
+        assert.ok(Number(tickAfter) - Number(tickBefore) >= 10, 'animation must keep running during height sampling');
+        assert.deepEqual(
+          samples,
+          [height],
+          'unchanged content must not oscillate between descendant and scroll extents',
+        );
+        assert.equal(await widget.getAttribute('data-html-widget-measured-height'), String(height));
+      };
+      await assertStableHeight(338);
+      await frame.locator('#resize').click();
+      await page.waitForFunction(
+        () => document.querySelector('[data-html-widget]')?.dataset.htmlWidgetMeasuredHeight === '538',
+      );
+      await assertStableHeight(538);
+      await frame.locator('#resize').click();
+      await page.waitForFunction(
+        () => document.querySelector('[data-html-widget]')?.dataset.htmlWidgetMeasuredHeight === '338',
+      );
+      await assertStableHeight(338);
+      await page.goto(`${url}?fixture=animated-fixed-edge`, { waitUntil: 'domcontentloaded' });
+      await waitForWidgetMeasurement(page);
+      await assertStableHeight(500);
+    } finally {
+      await browser.close();
+    }
+  },
+);
 
 test('html_widget export measures a widget below the initial viewport', { timeout: 120_000 }, async () => {
   const exporter = new ImageExporter();
@@ -104,7 +167,7 @@ test(
     try {
       browser = await chromium.launch({ headless: true });
       const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
-      await page.goto(url, { waitUntil: 'networkidle' });
+      await page.goto(url, { waitUntil: 'domcontentloaded' });
 
       await t.test('live 14KB message mounts and refreshes without ever committing an empty iframe', async () => {
         const livePage = await browser.newPage({ viewport: { width: 1280, height: 900 } });
@@ -133,9 +196,9 @@ test(
         };
 
         try {
-          await livePage.goto(liveUrl, { waitUntil: 'networkidle' });
+          await livePage.goto(liveUrl, { waitUntil: 'domcontentloaded' });
           await assertVisibleLiveWidget();
-          await livePage.reload({ waitUntil: 'networkidle' });
+          await livePage.reload({ waitUntil: 'domcontentloaded' });
           await assertVisibleLiveWidget();
         } finally {
           await livePage.close();

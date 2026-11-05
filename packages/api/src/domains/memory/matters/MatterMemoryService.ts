@@ -13,6 +13,13 @@ import { z } from 'zod';
 import { MemoryCueEpisodeStore } from '../cue/MemoryCueEpisodeStore.js';
 import { MatterMemoryStore, type StoredMatter } from './MatterMemoryStore.js';
 import {
+  compareMatterCatalogKeys,
+  type MatterCatalogContext,
+  type MatterCatalogKey,
+  matterCatalogCursor,
+  readMatterCatalogCursor,
+} from './matter-catalog-cursor.js';
+import {
   captureMatterSource,
   findMatterSourceSelection,
   type MatterActor,
@@ -73,40 +80,61 @@ export class MatterMemoryService {
         attribution: entry.source.segment === 'quote_text' ? 'quoted_in_message' : 'author',
       });
     }
-    return { matter: publicMatter(matter), entries };
+    const sourcesChanged = entries.some((entry) => entry.status === 'active' && entry.sourceStatus !== 'current');
+    return {
+      matter: publicMatter(matter),
+      entries,
+      ...(sourcesChanged ? { summaryStatus: 'sources_changed' as const } : {}),
+    };
   }
 
   async catalog(
     actor: MatterActor,
-    options: { query?: string; cursor?: string; limit?: number; management?: boolean; signal?: AbortSignal } = {},
+    options: MatterCatalogContext & { cursor?: string; limit?: number; signal?: AbortSignal } = {},
   ): Promise<MatterCatalog> {
     const management = options.management === true && actor.viewer.type === 'user';
-    const scope = matterDigest([
-      actor.userId,
-      actorKey(actor),
-      actor.publicReply === true,
-      options.query ?? '',
-      management,
-      'catalog',
-    ]);
-    const after = readCursor(options.cursor, scope);
+    const after = readMatterCatalogCursor(actor, options, options.cursor);
     const limit = Math.max(1, Math.min(options.limit ?? 12, 30));
-    const items: MatterCatalog['items'] = [];
+    const candidates: Array<{ item: MatterCatalog['items'][number]; key: MatterCatalogKey }> = [];
     const query = options.query?.toLocaleLowerCase();
-    for (const matter of this.store.list(actor.userId, after, management)) {
+    for (const matter of this.store.list(actor.userId, management)) {
       options.signal?.throwIfAborted();
       const page = await this.project({ ...actor, signal: options.signal }, matter.matterId);
       if (!page) {
         if (!management || query) continue;
-        items.push({ matterId: matter.matterId, revision: matter.revision, status: matter.status, unavailable: true });
+        candidates.push({
+          item: { matterId: matter.matterId, revision: matter.revision, status: matter.status, unavailable: true },
+          key: { related: false, updatedAt: matter.updatedAt, matterId: matter.matterId },
+        });
       } else {
         if (query && !`${page.matter.title}\n${page.matter.description}`.toLocaleLowerCase().includes(query)) continue;
-        items.push({ ...page.matter, entryCount: page.entries.filter((entry) => entry.status === 'active').length });
+        const related = Boolean(
+          options.threadId &&
+            page.entries.some(
+              (entry) =>
+                entry.status === 'active' &&
+                entry.sourceStatus === 'current' &&
+                entry.source.threadId === options.threadId,
+            ),
+        );
+        candidates.push({
+          item: {
+            ...page.matter,
+            entryCount: page.entries.filter((entry) => entry.status === 'active').length,
+            ...(options.threadId ? { hasThreadSource: related } : {}),
+            ...(page.summaryStatus ? { summaryStatus: page.summaryStatus } : {}),
+          },
+          key: { related, updatedAt: page.matter.updatedAt, matterId: page.matter.matterId },
+        });
       }
-      if (items.length > limit)
-        return { items: items.slice(0, limit), nextCursor: nextCursor(scope, items[limit - 1]!.matterId) };
     }
-    return { items };
+    const visible = candidates
+      .sort((a, b) => compareMatterCatalogKeys(a.key, b.key))
+      .filter((candidate) => !after || compareMatterCatalogKeys(candidate.key, after) > 0);
+    return {
+      items: visible.slice(0, limit).map(({ item }) => item),
+      ...(visible.length > limit ? { nextCursor: matterCatalogCursor(actor, options, visible[limit - 1]!.key) } : {}),
+    };
   }
 
   async read(
@@ -132,6 +160,7 @@ export class MatterMemoryService {
     );
     return {
       matter: page.matter,
+      ...(page.summaryStatus ? { summaryStatus: page.summaryStatus } : {}),
       entries: entries.slice(0, limit),
       ...(entries.length > limit ? { nextCursor: nextCursor(scope, entries[limit - 1]!.entryId) } : {}),
     };
@@ -172,7 +201,8 @@ export class MatterMemoryService {
       details.matterId,
     );
     if (!page) return { status: 'not_available' };
-    if (page.matter.revision !== details.pageRevision || page.matter.status !== 'active') return { status: 'changed' };
+    if (page.matter.revision !== details.pageRevision || page.matter.status !== 'active' || page.summaryStatus)
+      return { status: 'changed' };
     const selected: MatterEntryView[] = [];
     for (const expected of details.entries) {
       const entry = page.entries.find((candidate) => candidate.entryId === expected.entryId);

@@ -273,6 +273,7 @@ type ExtraCarrierPersistence = ExtraCarrierPersistenceClassification<{
   liveAdmission: 'parsed';
   routingTargetSource: 'parsed';
   rich: 'parsed';
+  richBlockPublicationId: 'parsed';
   messageSearchAnswer: 'parsed';
   callbackRichRequestDigest: 'parsed';
   isExplicitPost: 'parsed';
@@ -953,6 +954,10 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
       hasField = true;
     }
 
+    if (isNonEmptyString(parsed.richBlockPublicationId)) {
+      result.richBlockPublicationId = parsed.richBlockPublicationId;
+      hasField = true;
+    }
     if (
       typeof parsed.callbackRichRequestDigest === 'string' &&
       /^[0-9a-f]{64}$/.test(parsed.callbackRichRequestDigest)

@@ -1,3 +1,5 @@
+import { recoveryRedis } from '../../../../../infrastructure/recovery/recovery-redis.js';
+import { PUBLISH_SESSION_STATUS } from './session-status-publication.js';
 /**
  * Redis Session Chain Store
  * F24: Redis-backed session chain storage.
@@ -46,6 +48,15 @@ import { assertScopedSessionCreation } from '../ports/SessionChainStore.js';
 import type { StoreReadOptions } from '../ports/StoreReadOptions.js';
 import { awaitStoreRead, throwIfStoreReadAborted } from '../ports/StoreReadOptions.js';
 import { SessionChainKeys } from '../redis-keys/session-chain-keys.js';
+
+import {
+  initializeSessionSealing,
+  listSessionSealing,
+  listSessionSealingCandidates,
+  PROJECT_SEALING_LUA,
+  recordSessionSealingFailure,
+  SEALING_INDEX_PREFLIGHT,
+} from './session-sealing-index.js';
 
 const DEFAULT_TTL_SECONDS = 0; // persistent — set >0 via env to enable expiry
 
@@ -171,7 +182,7 @@ if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) 
 return 0
 `;
 
-const TRANSITION_TO_SEALING_LUA = `
+const TRANSITION_TO_SEALING_LUA = `${SEALING_INDEX_PREFLIGHT}${PROJECT_SEALING_LUA}
 if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
 if redis.call('HGET', KEYS[1], 'status') ~= 'active' then return -1 end
 if ARGV[4] ~= '' and redis.call('HGET', KEYS[1], 'appliedPolicyRevision') ~= ARGV[4] then return -2 end
@@ -179,6 +190,8 @@ redis.call('HSET', KEYS[1],
   'status', 'sealing',
   'sealReason', ARGV[2],
   'updatedAt', ARGV[3])
+redis.call('HDEL', KEYS[1], '_sealingRecoveryDisposition', '_sealingRecoveryReason', '_sealingRecoveryFailures')
+projectSealing(KEYS[1], ARGV[1], KEYS[4])
 if redis.call('GET', KEYS[2]) == ARGV[1] then redis.call('DEL', KEYS[2]) end
 if redis.call('GET', KEYS[3]) == ARGV[1] then redis.call('DEL', KEYS[3]) end
 return 1
@@ -192,7 +205,7 @@ return 1
  * ARGV[3] displaced seal reason, ARGV[4] now,
  * ARGV[5] user id, ARGV[6] cat id, ARGV[7] thread id.
  */
-const RESTORE_ACTIVE_SESSION_LUA = `
+const RESTORE_ACTIVE_SESSION_LUA = `${SEALING_INDEX_PREFLIGHT}${PROJECT_SEALING_LUA}
 if redis.call('EXISTS', KEYS[1]) == 0 then return {'target_missing'} end
 if redis.call('HGET', KEYS[1], 'userId') ~= ARGV[5]
   or redis.call('HGET', KEYS[1], 'catId') ~= ARGV[6]
@@ -225,7 +238,10 @@ if actualActive ~= '' then
     'status', 'sealing',
     'sealReason', ARGV[3],
     'updatedAt', ARGV[4])
+  redis.call('HDEL', KEYS[4], '_sealingRecoveryDisposition', '_sealingRecoveryReason', '_sealingRecoveryFailures')
+  projectSealing(KEYS[4], ARGV[2], KEYS[5])
 end
+redis.call('ZREM', KEYS[5], ARGV[1])
 redis.call('HSET', KEYS[1], 'status', 'active', 'updatedAt', ARGV[4])
 redis.call('HDEL', KEYS[1], 'sealReason', 'sealedAt')
 ${DEFAULT_TTL_SECONDS > 0 ? `redis.call('SET', KEYS[2], ARGV[1], 'EX', ${DEFAULT_TTL_SECONDS})` : `redis.call('SET', KEYS[2], ARGV[1])`}
@@ -403,7 +419,7 @@ export class RedisSessionChainStore implements ISessionChainStore {
   } | null = null;
 
   constructor(redis: RedisClient) {
-    this.redis = redis;
+    this.redis = recoveryRedis(redis);
   }
 
   async create(input: CreateSessionInput): Promise<SessionRecord> {
@@ -663,10 +679,11 @@ export class RedisSessionChainStore implements ISessionChainStore {
     if (!record) return null;
     const result = await this.redis.eval(
       TRANSITION_TO_SEALING_LUA,
-      3,
+      4,
       SessionChainKeys.detail(id),
       SessionChainKeys.active(record.catId, record.threadId),
       SessionChainKeys.activeOwner(record.userId, record.catId, record.threadId),
+      SessionChainKeys.sealing(),
       id,
       reason,
       String(Date.now()),
@@ -682,11 +699,12 @@ export class RedisSessionChainStore implements ISessionChainStore {
     const expectedActiveSessionId = input.expectedActiveSessionId ?? '';
     const result = (await this.redis.eval(
       RESTORE_ACTIVE_SESSION_LUA,
-      4,
+      5,
       SessionChainKeys.detail(target.id),
       SessionChainKeys.active(target.catId, target.threadId),
       SessionChainKeys.activeOwner(target.userId, target.catId, target.threadId),
       SessionChainKeys.detail(expectedActiveSessionId || '__none__'),
+      SessionChainKeys.sealing(),
       target.id,
       expectedActiveSessionId,
       input.displacedSealReason,
@@ -915,17 +933,7 @@ export class RedisSessionChainStore implements ISessionChainStore {
     const deleteFields: string[] = [];
     pairs.push('updatedAt', String(patch.updatedAt ?? Date.now()));
 
-    if (patch.cliSessionId !== undefined) {
-      // Update CLI index: delete old, set new
-      const oldCliId = await this.redis.hget(detailKey, 'cliSessionId');
-      if (oldCliId) await this.redis.del(SessionChainKeys.byCli(oldCliId));
-      if (DEFAULT_TTL_SECONDS > 0) {
-        await this.redis.set(SessionChainKeys.byCli(patch.cliSessionId), id, 'EX', DEFAULT_TTL_SECONDS);
-      } else {
-        await this.redis.set(SessionChainKeys.byCli(patch.cliSessionId), id);
-      }
-      pairs.push('cliSessionId', patch.cliSessionId);
-    }
+    if (patch.cliSessionId !== undefined) pairs.push('cliSessionId', patch.cliSessionId);
     if (patch.workingDirectory !== undefined) {
       pairs.push('workingDirectory', patch.workingDirectory);
     }
@@ -935,31 +943,6 @@ export class RedisSessionChainStore implements ISessionChainStore {
 
     if (patch.status !== undefined) {
       pairs.push('status', patch.status);
-      const catId = await this.redis.hget(detailKey, 'catId');
-      const threadId = await this.redis.hget(detailKey, 'threadId');
-      const userId = await this.redis.hget(detailKey, 'userId');
-      if (catId && threadId && userId) {
-        const activeKey = SessionChainKeys.active(catId, threadId);
-        const ownerActiveKey = SessionChainKeys.activeOwner(userId, catId, threadId);
-        if (
-          patch.status === 'active' &&
-          !(await this.redis.hexists(detailKey, 'scopedInvocation')) &&
-          (await this.redis.hget(detailKey, 'sessionPurpose')) !== 'watcher'
-        ) {
-          if (DEFAULT_TTL_SECONDS > 0) {
-            await this.redis.set(activeKey, id, 'EX', DEFAULT_TTL_SECONDS);
-            await this.redis.set(ownerActiveKey, id, 'EX', DEFAULT_TTL_SECONDS);
-          } else {
-            await this.redis.set(activeKey, id);
-            await this.redis.set(ownerActiveKey, id);
-          }
-        } else {
-          // A new active record may claim either pointer while this seal write
-          // is in flight. Delete only if the index still names this record.
-          await this.redis.eval(COMPARE_DELETE_LUA, 1, activeKey, id);
-          await this.redis.eval(COMPARE_DELETE_LUA, 1, ownerActiveKey, id);
-        }
-      }
     }
 
     if (patch.contextHealth !== undefined) {
@@ -1029,10 +1012,24 @@ export class RedisSessionChainStore implements ISessionChainStore {
     if (patch.catHandoffNote !== undefined) {
       pairs.push('catHandoffNote', JSON.stringify(patch.catHandoffNote));
     }
-    await this.redis.hset(detailKey, ...pairs);
-    if (deleteFields.length > 0) {
-      await this.redis.hdel(detailKey, ...deleteFields);
-    }
+    const identity = await this.redis.hmget(detailKey, 'catId', 'threadId', 'userId');
+    await this.redis.eval(
+      PUBLISH_SESSION_STATUS,
+      5,
+      detailKey,
+      SessionChainKeys.active(identity[0] ?? '', identity[1] ?? ''),
+      SessionChainKeys.activeOwner(identity[2] ?? '', identity[0] ?? '', identity[1] ?? ''),
+      SessionChainKeys.byCli(patch.cliSessionId ?? '__none__'),
+      SessionChainKeys.sealing(),
+      id,
+      JSON.stringify(pairs),
+      JSON.stringify(deleteFields),
+      patch.status === undefined ? '0' : '1',
+      identity.every(Boolean) ? '1' : '0',
+      patch.cliSessionId === undefined ? '0' : '1',
+      patch.cliSessionId ?? '',
+    );
+
     return this.get(id);
   }
 
@@ -1120,27 +1117,44 @@ export class RedisSessionChainStore implements ISessionChainStore {
     return this.get(id);
   }
 
-  async listSealingSessions(): Promise<string[]> {
-    const detailKeys = await this.scanKeys('session:*');
-    if (detailKeys.length === 0) return [];
+  async initializeSealingRecovery(rebuild = false): Promise<void> {
+    await initializeSessionSealing(this.redis, () => this.scanKeys('session:*'), rebuild);
+  }
 
-    const ids: string[] = [];
-    const BATCH_SIZE = 50;
-    for (let i = 0; i < detailKeys.length; i += BATCH_SIZE) {
-      const batch = detailKeys.slice(i, i + BATCH_SIZE);
-      const pipeline = this.redis.pipeline();
-      for (const key of batch) {
-        pipeline.hmget(key, 'id', 'status');
-      }
-      const results = await pipeline.exec();
-      if (!results) continue;
-      for (const [err, data] of results) {
-        if (err || !data) continue;
-        const [id, status] = data as [string | null, string | null];
-        if (id && status === 'sealing') ids.push(id);
-      }
-    }
-    return ids;
+  async listSealingSessions(limit = 100, before = Number.POSITIVE_INFINITY): Promise<string[]> {
+    await this.initializeSealingRecovery();
+    return listSessionSealing(this.redis, limit, before);
+  }
+
+  async recordSealingRecoveryFailure(id: string, expectedAt: number): Promise<void> {
+    await recordSessionSealingFailure(this.redis, id, expectedAt);
+  }
+
+  async listSealingRecoveryCandidates(
+    limit = 100,
+    before = Number.POSITIVE_INFINITY,
+  ): Promise<{ id: string; expectedAt: number }[]> {
+    await this.initializeSealingRecovery();
+    return listSessionSealingCandidates(this.redis, limit, before);
+  }
+
+  async getSealingRecoveryFacts(
+    id: string,
+  ): Promise<{ failures: number; disposition?: string; reasonCode?: string } | null> {
+    const [exists, failures, disposition, reasonCode] = await this.redis.hmget(
+      SessionChainKeys.detail(id),
+      'id',
+      '_sealingRecoveryFailures',
+      '_sealingRecoveryDisposition',
+      '_sealingRecoveryReason',
+    );
+    return exists
+      ? {
+          failures: Number(failures ?? 0),
+          ...(disposition ? { disposition } : {}),
+          ...(reasonCode ? { reasonCode } : {}),
+        }
+      : null;
   }
 
   private hydrate(data: Record<string, string>): SessionRecord {

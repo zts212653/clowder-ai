@@ -30,6 +30,8 @@ export interface QueryBatchContext extends QualificationContext {
 export type QueryBatchRunner = (batch: QualificationBatch, context: QueryBatchContext) => Promise<string>;
 export type QualificationMeta = NonNullable<MessageSearchResponse['meta']['qualification']>;
 
+export const QUALIFICATION_CLEANUP_RESERVE_MS = 2000;
+
 // One Host-wide bound, shared by all UI/cat/concierge service instances; no retry queue.
 let inFlight = 0;
 
@@ -102,7 +104,12 @@ export class MessageQueryQualifier {
         .map((batch) => batch.rows)
         .filter((rows) => rows.length)
         .map(async (rows) => {
-          if (inFlight >= 2 || Date.now() >= context.deadlineAt - 2000 || context.signal?.aborted) return;
+          if (
+            inFlight >= 2 ||
+            Date.now() >= context.deadlineAt - QUALIFICATION_CLEANUP_RESERVE_MS ||
+            context.signal?.aborted
+          )
+            return;
           inFlight++;
           nativeCalls++;
           const controller = new AbortController();
@@ -122,7 +129,7 @@ export class MessageQueryQualifier {
           let teardown: Promise<void> | undefined;
           const timer = setTimeout(
             () => controller.abort(new DOMException('Qualification deadline', 'TimeoutError')),
-            Math.max(0, context.deadlineAt - Date.now() - 2000),
+            Math.max(0, context.deadlineAt - Date.now() - QUALIFICATION_CLEANUP_RESERVE_MS),
           );
           try {
             const batch = qualificationBatch(query, rows);
@@ -135,7 +142,10 @@ export class MessageQueryQualifier {
                 teardown = closed;
               },
               onResult: (text) => {
-                const eligible = !resultOffered && !signal.aborted && Date.now() < context.deadlineAt - 2000;
+                const eligible =
+                  !resultOffered &&
+                  !signal.aborted &&
+                  Date.now() < context.deadlineAt - QUALIFICATION_CLEANUP_RESERVE_MS;
                 resultOffered = true;
                 resultText = undefined;
                 if (!eligible) return false;

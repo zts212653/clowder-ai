@@ -62,7 +62,7 @@ describe('useCollectiveAppearanceBridge', () => {
   beforeEach(() => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     tokens = defaultTokens();
-    localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
+    writeShellPresentation('classic');
     document.documentElement.removeAttribute('data-theme');
     container = document.createElement('div');
     iframe = document.createElement('iframe');
@@ -78,6 +78,7 @@ describe('useCollectiveAppearanceBridge', () => {
     act(() => root.unmount());
     container.remove();
     iframe.remove();
+    localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
     vi.restoreAllMocks();
     document.documentElement.removeAttribute('data-theme');
     for (const style of document.head.querySelectorAll('style[data-test]')) style.remove();

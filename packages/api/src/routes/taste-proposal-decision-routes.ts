@@ -32,6 +32,7 @@ const paramsSchema = z.object({ id: z.string().min(1).max(200) });
 const rejectBodySchema = z.object({ rejectionReason: z.string().trim().min(1).max(500).optional() }).strict();
 
 export interface TasteDecisionDeps {
+  getIndexProjection?: () => import('../domains/memory/PublishedDocumentIndex.js').PublishedIndexStatus | undefined;
   tasteProposalStore: ITasteProposalStore;
   socketManager: Pick<SocketManager, 'emitToUser'>;
   writeVignette: VignetteWriterFn;
@@ -89,6 +90,9 @@ export function registerTasteProposalDecisionRoutes(app: FastifyInstance, deps: 
         status: result.proposal.status,
         vignettePath: result.proposal.vignettePath,
         recovered: result.recovered,
+        ...(result.proposal.privacy === 'public' && deps.getIndexProjection
+          ? { indexProjection: deps.getIndexProjection() }
+          : {}),
       };
     }
     return projectFailedApproval(result, reply);

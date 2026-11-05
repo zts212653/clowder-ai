@@ -113,6 +113,7 @@ export class WorktreeNoticeService {
             notice.threadId,
             notice.userId,
             notice.owner,
+            notice.key,
           ],
           {
             cwd: this.deps.scriptRoot,

@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { CapabilitiesConfig } from '@cat-cafe/shared';
+import { captureEnvironmentReferences } from '../../utils/env-references.js';
 import { isSameCapabilityRoot } from './invoke-capability-root.js';
 
 const sourceReads = new AsyncLocalStorage<{ versions: Map<string, string | null>; changed: boolean }>();
@@ -40,11 +41,13 @@ function readSource(path: string) {
 /** Track only versions during this admission. Each read still uses its existing source and parsing policy. */
 export async function captureInvocationMcpSources<T>(capture: () => T | Promise<T>) {
   const state = { versions: new Map<string, string | null>(), changed: false };
-  const value = await sourceReads.run(state, capture);
+  const references = await captureEnvironmentReferences(() => sourceReads.run(state, capture));
   return {
-    value,
+    value: references.value,
     isCurrent: () =>
-      !state.changed && [...state.versions].every(([path, version]) => readSource(path).version === version),
+      references.isCurrent() &&
+      !state.changed &&
+      [...state.versions].every(([path, version]) => readSource(path).version === version),
   };
 }
 
@@ -95,13 +98,17 @@ export function readInvocationMcpConfig(
       capabilities: project.capabilities.map((entry) => {
         if (entry.type !== 'mcp') return entry;
         const current = definitions.get(entry.id);
-        if (!current?.mcpServer?.env || !entry.mcpServer) return entry;
-        const references = Object.fromEntries(
-          Object.entries(current.mcpServer.env).filter(([, value]) => /\$\{[^}]+\}/.test(value)),
-        );
+        if (!current?.mcpServer || !entry.mcpServer) return entry;
+        const overlays: { env?: Record<string, string>; headers?: Record<string, string> } = {};
+        for (const field of ['env', 'headers'] as const) {
+          const references = Object.fromEntries(
+            Object.entries(current.mcpServer[field] ?? {}).filter(([, value]) => /\$\{[^}]+\}/.test(value)),
+          );
+          if (Object.keys(references).length) overlays[field] = { ...entry.mcpServer[field], ...references };
+        }
         return {
           ...entry,
-          mcpServer: { ...entry.mcpServer, env: { ...entry.mcpServer.env, ...references } },
+          mcpServer: { ...entry.mcpServer, ...overlays },
         };
       }),
     },

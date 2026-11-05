@@ -220,6 +220,7 @@ export function createAlphaBrowserTemplate(options: AlphaBrowserOptions): TaskTe
       executionCarrier: {
         type: 'string',
         required: false,
+        enum: ['fork', 'managed'],
         description: '执行载体：fork（默认）或 managed；在飞 revision 保持原载体',
       },
     },

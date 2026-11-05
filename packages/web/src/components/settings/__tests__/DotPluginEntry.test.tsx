@@ -53,12 +53,15 @@ describe('F247 default plugin owner and recovery entry', () => {
     window.history.replaceState({}, '', '/settings?s=plugins');
     container = document.createElement('div');
     document.body.appendChild(container);
+    // This suite protects the retained classic presentation and its original labels.
+    window.localStorage.setItem('cat-cafe:shell-presentation', 'classic');
     root = createRoot(container);
     mockApiFetch.mockReset();
   });
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    window.localStorage.removeItem('cat-cafe:shell-presentation');
     window.history.replaceState({}, '', '/settings');
   });
   afterAll(() => {

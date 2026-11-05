@@ -31,7 +31,7 @@ const spawnQualificationCli: SpawnFn = (command, args, options) => {
     });
   }
   const plan = buildUnixSupervisedSpawnPlan(command, args, { env: options.env, killGraceMs: 50 });
-  return spawn(plan.command, plan.args, { cwd: options.cwd, env: plan.env, stdio: options.stdio });
+  return spawn(plan.command, plan.args, { cwd: options.cwd, env: plan.env, stdio: [...options.stdio, 'ipc'] });
 };
 
 export const qualificationSpawnDeps = {
@@ -74,7 +74,9 @@ export const runNativeQueryBatch: QueryBatchRunner = async (batch, context) => {
   let resultText: string | undefined;
   let text = '';
   const observer = nativeQualificationObserver(config.defaultModel, controller, trace, (output) => {
-    if (!signal.aborted && output === text && context.onResult?.(output)) resultText = output;
+    const resultSealed = !signal.aborted && output === text && context.onResult?.(output) === true;
+    if (resultSealed) resultText = output;
+    trace({ phase: 'native-seal', resultSealed });
   });
   let successful = false;
   let failed = false;
@@ -125,8 +127,14 @@ export const runNativeQueryBatch: QueryBatchRunner = async (batch, context) => {
         ...qualificationSpawnDeps,
         spawnFn: (command, args, options) => {
           const child = qualificationSpawnDeps.spawnFn(command, args, options);
+          child.on('message', (value) => {
+            const event = nativeRootExit(value);
+            if (event) trace(event);
+          });
           closePromise = new Promise<void>((resolve) => {
             child.once('exit', (code, exitSignal) => {
+              if (process.platform === 'win32')
+                trace({ phase: 'native-root-exit', rootExitCode: code, rootExitSignal: exitSignal ?? 'none' });
               trace({ phase: 'native-exit', exitCode: code, exitSignal: exitSignal ?? 'none' });
             });
             child.once('close', (code, exitSignal) => {
@@ -277,4 +285,14 @@ function nativeQualificationObserver(
     succeeded: () => succeeded && resultCount === 1,
     resultText: () => resultText,
   };
+}
+
+/** Only the owned Node supervisor has IPC; provider stdio is never a lifecycle receipt. */
+function nativeRootExit(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object') return;
+  const event = value as Record<string, unknown>;
+  if (event.type !== 'cli-supervisor-root-exit') return;
+  if (event.code !== null && !Number.isSafeInteger(event.code)) return;
+  if (event.signal !== null && (typeof event.signal !== 'string' || !/^SIG[A-Z0-9]{1,12}$/.test(event.signal))) return;
+  return { phase: 'native-root-exit', rootExitCode: event.code, rootExitSignal: event.signal ?? 'none' };
 }

@@ -41,6 +41,9 @@ export interface EvidenceResult {
   anchor: string;
   snippet: string;
   matchRank: EvidenceMatchRank;
+  rank?: number;
+  sourceHash?: string;
+  relevance?: import('../domains/memory/relevance-evidence.js').RelevanceEvidence;
   /** F263 AC-A2: retrieval score from the store, never used as direct-hit identity. */
   retrievalScore?: number;
   sourceType: EvidenceSourceType;

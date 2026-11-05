@@ -1,5 +1,6 @@
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { writeShellPresentation } from '@/components/shell/shell-presentation';
 import type { Thread } from '@/stores/chat-types';
 import { useLabelStore } from '@/stores/label-store';
 import { SIDEBAR_TAB_STORAGE_KEY } from '../sidebar-tab-state';
@@ -32,6 +33,7 @@ describe('F277 search Group production journey', () => {
   beforeEach(() => {
     installThreadSidebarGlobals();
     resetThreadSidebarMocks();
+    writeShellPresentation('classic');
     Object.defineProperty(Element.prototype, 'scrollIntoView', { value: vi.fn(), configurable: true });
     window.localStorage.setItem(SIDEBAR_TAB_STORAGE_KEY, 'pinned');
     Object.assign(mockStore, {
