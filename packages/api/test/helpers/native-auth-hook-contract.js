@@ -21,7 +21,10 @@ export function assertNativeAuthHookContract(settings) {
   for (const [command, expected] of [
     ['timeout 12 codex login </dev/null 2>&1 | head -30', 'deny'],
     ['env CODEX_HOME=/tmp/fixture codex login', 'deny'],
+    [String.raw`C:\tools\codex.exe login`, 'deny'],
+    [String.raw`cmd.exe /c C:\tools\codex.exe logout`, 'deny'],
     ['codex login status', undefined],
+    [String.raw`C:\tools\codex.exe login status`, undefined],
     ['codex login --help', undefined],
     ['echo "codex login"', undefined],
     ['touch fixture.txt', undefined],

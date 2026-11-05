@@ -1,5 +1,5 @@
 import { executedInvocations } from './lib/shell-invocation.mjs';
-import { commandName } from './native-effect-shell-tokenizer.mjs';
+import { commandName, shellInvocation } from './native-effect-shell-tokenizer.mjs';
 
 const SHELL_COMMAND_OPTIONS = new Map([
   ['powershell', /^-(?:command|c)$/i],
@@ -40,15 +40,33 @@ export const NATIVE_AUTH_DENIAL =
 /** Classify resolved invocations, never command-looking text in data operands. */
 export function codexAuthenticationEffect(invocations, depth = 0) {
   if (depth > 8) return undefined;
-  const effects = invocations.map(({ name, operands }) => {
-    const program = commandName(name ?? '').replace(/\.(?:exe|cmd|bat|ps1|[cm]?js)$/, '');
+  const effects = invocations.map(({ name, operands, text = '' }) => {
+    // The shared POSIX reader consumes unquoted backslashes. Restore literal Windows
+    // path spelling only for auth identity and delegated cmd/PowerShell code inputs.
+    const rawWords = shellInvocation(text).words.map(({ value, start, end }) => ({
+      value,
+      raw: text.slice(start, end),
+    }));
+    const programWord = rawWords.find(({ value }) => commandName(value) === name);
+    const windowsWords = rawWords.filter(({ raw }) =>
+      /^(?:\\\\|[^\\\s"'`$;&|<>()*?{}]+\\)[^\s"'`$;&|<>()*?{}]+$/.test(raw),
+    );
+    let program = commandName(name ?? '').replace(/\.(?:exe|cmd|bat|ps1|[cm]?js)$/, '');
+    // Preserve a known POSIX identity too: co\dex.exe still executes codex.exe in Bash.
+    if (program !== 'codex' && !SHELL_COMMAND_OPTIONS.has(program) && windowsWords.includes(programWord))
+      program = commandName(programWord.raw).replace(/\.(?:exe|cmd|bat|ps1|[cm]?js)$/, '');
     const commandOption = SHELL_COMMAND_OPTIONS.get(program);
     if (commandOption) {
       const index = operands.findIndex((arg) => commandOption.test(arg));
       return index < 0
         ? undefined
         : codexAuthenticationEffect(
-            executedInvocations(operands.slice(index + 1).join(' ')).pipelines.flat(),
+            executedInvocations(
+              operands
+                .slice(index + 1)
+                .map((arg) => windowsWords.find(({ value }) => value === arg)?.raw ?? arg)
+                .join(' '),
+            ).pipelines.flat(),
             depth + 1,
           );
     }

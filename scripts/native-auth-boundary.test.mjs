@@ -18,6 +18,17 @@ const mutations = [
   'codex login status; codex login',
   '/opt/tools/codex login',
   '& "C:\\tools\\codex.exe" login',
+  String.raw`C:\tools\codex.exe login`,
+  String.raw`C:\tools\Codex.EXE logout`,
+  String.raw`.\tools\codex.cmd login`,
+  String.raw`..\bin\codex.bat logout`,
+  String.raw`tools\codex.exe login`,
+  String.raw`co\dex.exe login`,
+  String.raw`\\server\tools\codex.exe login`,
+  String.raw`env CODEX_HOME=/tmp/fixture C:\tools\codex.exe login`,
+  String.raw`powershell.exe -Command C:\tools\codex.exe login`,
+  String.raw`cmd.exe /c C:\tools\codex.exe logout`,
+  String.raw`pwsh -Command 'C:\tools\codex.exe login'`,
   'codex.cmd logout',
   'codex -c model="fixture" login',
   'codex --config label="--help" login',
@@ -46,6 +57,10 @@ const observations = [
   'codex -c model="fixture" login status',
   'env CODEX_HOME=/tmp/auth-fixture codex login status',
   'cmd.exe /c "codex login status"',
+  String.raw`C:\tools\codex.exe login status`,
+  String.raw`C:\tools\codex.exe login --help`,
+  String.raw`cmd.exe /c C:\tools\codex.exe login status`,
+  String.raw`tools\codex.exe login status`,
 ];
 const ordinary = [
   'echo "codex login"',
@@ -57,6 +72,10 @@ const ordinary = [
   'custom-tool --new-operation',
   'touch fixture.txt',
   'node -e "console.log(\'codex login\')"',
+  String.raw`echo C:\tools\codex.exe login`,
+  String.raw`rg C:\tools\codex.exe docs`,
+  String.raw`C:\tools\mycodex.exe login`,
+  String.raw`C:\tools\codex.exe.log login`,
 ];
 
 const payload = (command, tool_name = 'Bash') => ({
