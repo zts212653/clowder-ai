@@ -9,11 +9,11 @@ updated: 2026-11-05
 
 # F332 Phase B：冷恢复首包需求与交付方案
 
-> **Status**: narrowed R1 code reviewed, behavior not revalidated; latest tested S9 finding/P1 retained; stopped at 16/17, S3 not run; full acceptance pending; not merged or deployed | **Implementation**: 宪宪（claude-opus-5-5） | **Review / submission**: 砚砚（gpt-6.1-sol）
+> **Status**: narrowed R1 bounded revalidation complete: S9/S3 each one independent human pass; S9 frozen screen finding retained; ledger 18/18; full acceptance pending; draft, not merged or deployed | **Implementation**: 宪宪（claude-opus-5-5） | **Review / submission**: 砚砚（gpt-6.1-sol）
 
-**代码目标：`zts212653/clowder-ai:next`。** PR #1832 保持草稿；当前受测产品固定为 `7da4d7b04141a442fa441ed0e3016e8d575063f4`，已合入 next `a2bb86e1fe61e406c4e1e9a00c058cea4d3a7fb3`。此前首次整合基底 `440fa0377ae54a51320306217088209ae7b11e68`、69063db3 及第1–15次调用各保留原版本历史边界。本次受限复验的第16次 S9 独立 finding/P1，按规则停在16/17，第17次 S3 未运行；不沿余量续跑。详见[交付候选复验](../features/assets/F332/cold-recovery-review-2026-11-04.md#delivery-candidate-revalidation)。
+**代码目标：`zts212653/clowder-ai:next`。** PR #1832 保持草稿；最新受测产品为 `0967e37adf48580dcef3e4ed4d30d6efb50c393d`，含已审收窄R1与来源勘误，产品树与作者`a733a02a`一致，已包含next `a2bb86e1fe61e406c4e1e9a00c058cea4d3a7fb3`。operator明确批准新两次后，第17次S9、第18次S3各一次独立人工pass，本批结束于**18/18**。S9冻结机器初筛finding与人工裁定并列保留；旧候选`7da4d7b04`的第16次S9 finding/P1及更早结果不覆盖。详见[收窄R1有界复验](../features/assets/F332/cold-recovery-review-2026-11-04.md#narrowed-r1-bounded-revalidation)。
 
-**后续未受测修订：收窄R1已通过独立代码复审。** 作者提交`a733a02a07e2756fb6edc8963a2cbfb075624576`仅替换原多工文字及对应tools/list测试/治理基线；与已发布来源勘误`86ce76254`整合后产品树仍与作者一致。较新明确请求或有效owner选择可解除旧未决；清楚自然指代或唯一合法匹配不因另有未结束工作被强制追问；旧why、doing、旧请求/产物、排列或停点在仍有歧义时单独不足以定对象。原已结束、明确重做/追加和typed closure合同保留。固定审核脚本重建、45/45、Biome、治理及208项实际tools/list核对通过，只证明确定性投递；尚无R1真实行为观察，不关闭第16次P1，不自动使用余1次。详见[收窄R1复审](../features/assets/F332/cold-recovery-review-2026-11-04.md#narrowed-multi-work-r1)。
+**收窄R1代码与本批证据。** R1仅替换原多工段落及对应tools/list测试/治理基线：较新明确请求/有效owner选择、清楚自然指代或唯一合法匹配可解除旧未决；doing、旧why、旧请求/产物、排列及停点在仍有歧义时单独不足。已结束、明确重做/追加和typed closure合同保留。代码独审、构建、45项聚焦、格式/治理及208项实际tools/list核对通过；执行面另经非作者62项工装回归和两场新隔离无模型预演/边界核验。两场真实结果只证明该版本各一次达标观察，不证明修复因果、收益、发生率或完整验收，不授权采用、合入或部署。
 
 本文件是 [F332](../features/F332-experience-informed-memory.md) Phase B 下的详细实施切片，承接 AC-B5 的同线程连续性要求及本切片新增验收；不替代 F332 的其他阶段，也不结算其既有 Task。
 
@@ -147,6 +147,8 @@ S9无A基线，不能判定该行为由本slice引入；S3/S4的通过也不证�
 **交付候选复验后的判断（2026-11-05，砚砚）：S9仍未达标，继续调整并停止本批。** operator要求继续交付后，按既定两次范围将复验绑定已审交付候选`7da4d7b04`，先S9后S3。格式修复和next集成已独审，新HEAD的CI为19项成功、1项按工作流跳过。执行面独审、65项工装回归及两场无模型准备/边界检查通过；同一本账显式迁到版本3、上限17，旧15条和首迁移保留。第16次S9的新句子原文、两条Task和未定优先级历史均已送达，模型仍自行写入库存产物并关闭库存Task，没有澄清，独立裁定finding/P1，违反AC-5 / AC-B10。本批停在**16/17**，S3未运行，余1次不放行，不重试/resume；不把CI或文字投递成功写成行为验收通过。
 
 这是`7da4d7b04`上一次未达到标准的观察。实际选择理由未知，规则送达不证明理解或采用；#15与#16并非单变量对照，补查原生轨迹已找回#15的generic.developer_instructions原文：从#16该段去掉唯一owner路由指令块后，逐字等于#15该段。此前“旧全文未保存”的判断不准确，现予更正；这一比较仅覆盖该段，不能推广为完整模型输入相同或因果证明。保留全部旧失败与通过，AC-B6～B12继续未完成；回原作者离线核对本轮对象判定及可验证的修复方案，不使用本批余量、不合入部署。详见[复验裁定与证据边界](../features/assets/F332/cold-recovery-review-2026-11-04.md#delivery-candidate-revalidation)。
+
+**收窄R1本批结束后的判断（2026-11-05，砚砚）：保留为待评审候选，PR继续草稿。** 固定`0967e37ad`上的S9、S3各一次独立人工pass。S9实际提交了包含两个完整工作名的结构化选择题（原生ordinal26，ordinal29返回accepted），最终用唯一可辨简称请用户选择；没有写入或Task变更。冻结工具只匹配最终文本完整标题，仍为finding，原件及该差异公开保留，不改oracle或再测。S3只读文件，指出done记录与半成品不一致并问写入授权，Task及工作区不变。总账18/18、版本4、三次迁移，旧记录不变、本批无后续调用。明确点名分支S9n、其他状态、S8来源不可读、全工具基线/成本及自然使用仍未结算，AC-B6～B12保持未完成。详见[逐场证据和结论边界](../features/assets/F332/cold-recovery-review-2026-11-04.md#narrowed-r1-bounded-revalidation)。
 
 现场反馈仍在原对话：恢复成功直接做事；有关键缺口时简短说明或澄清。详细轨迹留原诊断／验收记录，重复保守 cold 不向用户反复播报恢复流程。
 
