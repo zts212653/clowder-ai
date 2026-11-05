@@ -40,19 +40,25 @@ export async function recoverPriorProcessExecutions(deps: {
     store,
     settleEndedTurnResponse: deps.settleEndedTurnResponse,
   });
-  const childRecovery = liveExecutionOwners.complete
-    ? await childReconciler.reconcile({
-        processStartedAt,
-        protectedInvocationIds: liveExecutionOwners.owners.map((owner) => owner.invocationId),
-      })
-    : {
-        interruptedCount: 0,
-        invocationIds: [],
-        // Ended turns have no owner left to wait for; running ones keep their unknown owners.
-        ...(await childReconciler.settleEndedTurnResponses({ processStartedAt })),
-        reconciledAt: Date.now(),
-        skippedReason: 'cli_execution_owner_snapshot_incomplete',
-      };
+  // #1838: a Windows provider whose host job is still present, or whose exact controller API is
+  // still alive, has a live owner as surely as a listed CLI owner; it joins the same exclusion.
+  const childRecovery =
+    liveExecutionOwners.complete && windowsJobTeardowns.liveOwnersComplete
+      ? await childReconciler.reconcile({
+          processStartedAt,
+          protectedInvocationIds: [
+            ...liveExecutionOwners.owners.map((owner) => owner.invocationId),
+            ...windowsJobTeardowns.liveOwners,
+          ],
+        })
+      : {
+          interruptedCount: 0,
+          invocationIds: [],
+          // Ended turns have no owner left to wait for; running ones keep their unknown owners.
+          ...(await childReconciler.settleEndedTurnResponses({ processStartedAt })),
+          reconciledAt: Date.now(),
+          skippedReason: 'cli_execution_owner_snapshot_incomplete',
+        };
   const startupRecovery = await new StartupReconciler({
     ...deps.orphans,
     turnExecutionStore: store,

@@ -49,7 +49,14 @@ export interface WindowsJobStopResolution {
     invalidLinkPaths: string[];
   }>;
   /** Jobs still present, in another session, or unknown. Nothing they own may be released. */
-  unresolved: Array<{ jobName: string; verdict: WindowsJobStopVerdict; reason: string; invocationIds: string[] }>;
+  unresolved: Array<{
+    jobName: string;
+    verdict: WindowsJobStopVerdict;
+    reason: string;
+    invocationIds: string[];
+    /** Readable links of a job that could be queried; none for an unreadable owner record. */
+    links?: WindowsJobExecutionLinkEntry[];
+  }>;
   /** The controlling API of each closed provider-host job, keyed by exact pid and birth. */
   controllers: Map<string, WindowsControllerVerdict>;
 }
@@ -71,6 +78,7 @@ export async function resolveWindowsJobStopEvidence(
         verdict: evidence.verdict,
         reason: evidence.reason,
         invocationIds: links.map((link) => link.execution.invocationId),
+        links,
       });
   }
   for (const path of invalidPaths) {
@@ -114,6 +122,14 @@ export interface WindowsJobTeardownPass {
   released: string[];
   /** Executions or links that keep their protection, with the exact reason. */
   preserved: Array<{ invocationId: string; reason: string }>;
+  /**
+   * Running executions with positive proof that an owner can still write them: exactly linked to a
+   * job still present, or to a closed job whose exact controller API is alive and could start
+   * another host. Only these join the live-owner exclusion; an unknown is not a live owner.
+   */
+  liveOwners: string[];
+  /** False when a candidate's canonical record could not be read: no child may be interrupted then. */
+  liveOwnersComplete: boolean;
 }
 
 export async function recordVerifiedWindowsJobTeardowns(options: {
@@ -126,6 +142,8 @@ export async function recordVerifiedWindowsJobTeardowns(options: {
   const pass: WindowsJobTeardownPass = {
     resolution,
     released: [],
+    liveOwners: [],
+    liveOwnersComplete: true,
     preserved: [
       ...resolution.unresolved.flatMap((job) =>
         job.invocationIds.map((invocationId) => ({ invocationId, reason: `job_${job.verdict}:${job.reason}` })),
@@ -174,6 +192,24 @@ export async function recordVerifiedWindowsJobTeardowns(options: {
       pass.released.push(execution.invocationId);
     } catch (error) {
       pass.preserved.push({ invocationId: execution.invocationId, reason: `teardown_write_failed:${String(error)}` });
+    }
+  }
+  const liveLinks = [
+    ...resolution.unresolved.filter((job) => job.verdict === 'present').flatMap((job) => job.links ?? []),
+    ...resolution.verifiedStopped
+      .filter(
+        ({ job }) => job.controller && resolution.controllers.get(windowsControllerKey(job.controller)) === 'alive',
+      )
+      .flatMap((job) => job.links),
+  ];
+  for (const { execution } of liveLinks) {
+    // A link protects only the canonical execution it names exactly, never one a stray file mentions.
+    try {
+      const record = await options.store.get(execution.invocationId);
+      if (record?.status === 'running' && matchesLinkedExecution(record, execution))
+        pass.liveOwners.push(execution.invocationId);
+    } catch {
+      pass.liveOwnersComplete = false;
     }
   }
   return pass;
