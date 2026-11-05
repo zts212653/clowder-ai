@@ -93,6 +93,7 @@ export default defineConfig({
       'src/__tests__/lifecycle-metadata-coercion.test.ts',
       'src/__tests__/hold-card-cancelability.test.ts',
       'src/__tests__/worktree-notice.test.ts',
+      'src/__tests__/dsh-launcher.test.ts',
     ],
   },
 });

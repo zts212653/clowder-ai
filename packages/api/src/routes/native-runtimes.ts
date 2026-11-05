@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
-import { catRegistry } from '@cat-cafe/shared';
+import { catRegistry, isDshLauncher } from '@cat-cafe/shared';
 import { parse } from 'smol-toml';
 import { getRegisteredAcpConfig } from '../config/cat-config-loader.js';
 import { resolveCliCommand } from '../utils/cli-resolve.js';
@@ -78,7 +78,8 @@ export function discoverNativeRuntimes(projectRoot: string, commandFor = resolve
         id: `acp:${cat.id}`,
         label: agy
           ? 'AGY 官方 ACP'
-          : /dsh|deepseek/i.test([config.command, ...config.startupArgs].join(' '))
+          : isDshLauncher(config.command, config.startupArgs) ||
+              (profileState !== undefined && profileState !== 'custom_startup')
             ? 'DSH'
             : cat.displayName,
         clientId: agy ? 'google' : 'acp',
