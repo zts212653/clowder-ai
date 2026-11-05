@@ -33,6 +33,9 @@ const JWT = /eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g;
 // PEM block: -----BEGIN ... PRIVATE KEY----- to matching END
 const PEM = /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g;
 
+// URL userinfo. Anchoring the scheme after a non-scheme character prevents the
+// engine from retrying an unbounded scheme prefix at every word boundary.
+const URL_USERINFO = /(^|[^a-z0-9+.-])([a-z][a-z0-9+.-]*:\/\/)[^/\s'"<>@]+@/gi;
 // URL query — everything after ? until whitespace or closing quote/paren
 const URL_QUERY = /(\?)([^\s'"<>)]+)/g;
 // URL fragment — OAuth implicit/callback flows often place access_token/state after #.
@@ -69,6 +72,7 @@ export const SANITIZER_PATTERNS = {
   osc: OSC,
   jwt: JWT,
   pem: PEM,
+  urlUserinfo: URL_USERINFO,
   urlQuery: URL_QUERY,
   urlFragment: URL_FRAGMENT,
   cookieHeader: COOKIE_HEADER,
