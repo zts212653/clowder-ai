@@ -39,5 +39,7 @@ ADR-043 D9 将 claim 定义为短暂的持久预留。D10 将 canonical 结果�
 
 - RED 在基线用真实 AgentRouter 捕获 Gemini 的合成执行身份冲突。捕获 2 次、provider 启动 0 次，socket 产出绑定错误及汇总错误。History 失败行断言为 `0 !== 1`。
 - GREEN 覆盖串行和并行 A2A、非 A2A、取消、暂时冲突和 worker 替换。Redis 用例在真正的 Node 子进程内提交事务，随后在原 claim 退休前退出。新进程侧从独立 Redis 客户端重建 Queue，确认原目标退休、caller 收到含原 source/target/失败 ID 的提示且只运行一次。队列清空后再次恢复仍为空。
+- 首轮独立 review 后另有五条 RED → GREEN。已公开的精确来源沿用 #1849 同步提交 `f8a9169248983d1de5c0afb26f363f63382feb1b` 的未送达判据。并行 claim 按实际目标集合区分 attempt，未送达子集恢复时不会重用已完成 sibling 的父记录。待消费的私有 failure wake 由现有短 claim、退休和私有准入收据约束，暂拒后可以重领。
+- 消息事务确认丢失后，当前 worker 在退休源目标前，用已结算的 ref 重新加载已经存在的控制项。已入队成员变为无效时也沿用相同逐目标结算。旧的分组失败仍使用原幂等键读回。
 - 本修复沿用现有生命周期存储和 Queue 编码，新增两个明确的失败原因。代码回退可整组 revert，旧版仍能读取系统消息正文，但可能忽略新增的 lifecycle 原因，并缺少待消费控制载体的精确失败提示。回退保留已有失败与 source ref，避免重新派发原目标。
 - 使用隔离测试 HOME、进程和 Redis。Provider 是测试替身，已装桌面及真实 DSH 会话留待部署验收。

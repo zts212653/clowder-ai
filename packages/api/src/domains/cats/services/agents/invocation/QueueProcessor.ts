@@ -4462,21 +4462,43 @@ export class QueueProcessor {
         source.threadId,
         preAdmissionFailureIdempotencyKey(claimed.id),
       );
-      const result = await this.deps.messageStore.commitLifecyclePreAdmissionFailure({
-        sourceMessageId: source.id,
-        expectedEntryId: claimed.id,
-        requestedTargets: failedTargets,
-        reason,
-        content,
-        failedAt: committedFailure?.timestamp ?? Math.max(Date.now(), source.timestamp),
-      });
-      if (result.kind !== 'applied' && result.kind !== 'replayed') {
-        throw new Error(
-          `pre-admission failure transaction rejected ${claimed.id}: ${result.kind}:${
-            'reason' in result ? result.reason : 'missing'
-          }`,
+      const settleExactA2A =
+        claimed.sourceCategory === 'a2a' && reason === 'invalid_explicit_target' && !committedFailure;
+      const results = [];
+      if (settleExactA2A) {
+        for (const target of failedTargets) {
+          results.push(
+            await this.deps.queue.terminalizeClaimedAdmissionFailure(
+              this.deps.messageStore,
+              source,
+              claimed,
+              target,
+              reason,
+            ),
+          );
+        }
+      } else {
+        results.push(
+          await this.deps.messageStore.commitLifecyclePreAdmissionFailure({
+            sourceMessageId: source.id,
+            expectedEntryId: claimed.id,
+            requestedTargets: failedTargets,
+            reason,
+            content,
+            failedAt: committedFailure?.timestamp ?? Math.max(Date.now(), source.timestamp),
+          }),
         );
       }
+      const committed = results.map((result) => {
+        if (result.kind !== 'applied' && result.kind !== 'replayed') {
+          throw new Error(
+            `pre-admission failure transaction rejected ${claimed.id}: ${result.kind}:${
+              'reason' in result ? result.reason : 'missing'
+            }`,
+          );
+        }
+        return result;
+      });
       if (claimed.execution.liveSessionId)
         await this.deps.liveCompanionSessions?.rejectUnclaimed(
           claimed.execution.liveSessionId,
@@ -4484,7 +4506,6 @@ export class QueueProcessor {
           claimed.threadId,
           failedTargets,
         );
-      this.callerDispatchObservations.registerPersistedSource(result.inputMessage, failedTargets);
       const removed = await this.deps.queue.removeProcessedAcrossUsersDurable(
         claimed.threadId,
         claimed.id,
@@ -4496,8 +4517,11 @@ export class QueueProcessor {
       if (!removed) {
         throw new Error(`pre-admission failure transaction lost claimed Queue entry: ${claimed.id}`);
       }
-      this.emitLifecycleMessageUpdated(queueEntryOwnerId(claimed), result.inputMessage);
-      this.emitLifecycleMessageUpdated(queueEntryOwnerId(claimed), result.failureMessage);
+      for (const result of committed) {
+        this.callerDispatchObservations.registerPersistedSource(result.inputMessage, failedTargets);
+        this.emitLifecycleMessageUpdated(queueEntryOwnerId(claimed), result.inputMessage);
+        this.emitLifecycleMessageUpdated(queueEntryOwnerId(claimed), result.failureMessage);
+      }
       await emitQueueUpdated(
         this.deps.socketManager,
         queueEntryOwnerId(claimed),
@@ -4509,6 +4533,7 @@ export class QueueProcessor {
         { threadId: claimed.threadId, entryId: claimed.id, routingClass, reason },
         '[QueueProcessor] public Queue head terminalized before admission',
       );
+      if (settleExactA2A) void this.requestDrain(claimed.threadId);
       return removed;
     } catch (error) {
       // A lost durable acknowledgement is unknown, not permission to re-admit Live.
@@ -4637,6 +4662,7 @@ export class QueueProcessor {
     let prestartClaimRestored = false;
     let lifecycleTransferStarted = false;
     let lifecycleReceiverPersisted = false;
+    let preAdmissionSettlementAttempted = false;
     let lifecycleAdmissionUnknown = false;
     const unconfirmedProviderCats = new Set<string>();
     let lifecycleQueueTargetsRetired = false;
@@ -5034,16 +5060,23 @@ export class QueueProcessor {
       // pending targets independently without treating a sibling as a replay.
       const source = queueEntrySource(entry);
       const connectorReplayCarrier = source === 'connector' || entry.sourceCategory === 'scheduled';
+      // Provider startup follows durable retirement of this exact private carrier.
+      const pendingFailureReturnReplay =
+        entry.kind === 'private_input' &&
+        entry.sourceCategory === 'a2a_failure' &&
+        entry.execution.a2aTriggerMessageId === entry.payload.sourceRecordId;
       const actionSuccessorKey =
         entry.execution.actionSuccessorFence && entry.payload.sourceRecordId
           ? actionSuccessorInvocationKeyForTarget(entry.payload.sourceRecordId, primaryCat)
           : undefined;
+      // A partial fan-out retry has a different target set even when its primary cat is unchanged.
+      const targetScope = messageId && targetCats.length > 1 ? `:${JSON.stringify(targetCats)}` : '';
       const idempotencyKey =
         connectorReplayCarrier && messageId
           ? `connector-${messageId}:${primaryCat}`
           : actionSuccessorKey
             ? actionSuccessorKey
-            : `queue-${entry.id}:${primaryCat}`;
+            : `queue-${entry.id}:${primaryCat}${targetScope}`;
       const actionLeaseCarrier: InvocationActionLeaseCarrier = entry.execution.actionSuccessorFence
         ? {
             kind: 'action_successor',
@@ -5077,17 +5110,20 @@ export class QueueProcessor {
           lifecycleAdmissionUnknown = true;
           throw error;
         }
-        const pendingInputReplay =
-          pendingSource?.lifecycle?.kind === 'input' &&
+        const pendingSourceReplay =
+          pendingSource !== null &&
           pendingSource.userId === userId &&
           pendingSource.threadId === threadId &&
-          pendingSource.deliveryStatus === 'queued' &&
+          pendingSource.deliveryStatus !== 'canceled' &&
+          !pendingSource.recall &&
+          !pendingSource._tombstone &&
           existing?.userMessageId === messageId &&
-          !pendingSource.lifecycle.dispatchRefs?.some((ref) => targetCats.includes(ref.targetId as CatId));
+          !pendingSource.lifecycle?.dispatchRefs?.some((ref) => targetCats.includes(ref.targetId as CatId));
         const replayEligible =
+          pendingFailureReturnReplay ||
           (connectorReplayCarrier && Boolean(messageId)) ||
           Boolean(entry.execution.actionSuccessorFence) ||
-          pendingInputReplay;
+          pendingSourceReplay;
         if (
           !replayEligible ||
           !isExactReplayableQueueRecord(existing, {
@@ -5705,6 +5741,7 @@ export class QueueProcessor {
               const source = await messageStore.getById(candidate.payload.messageId!);
               if (!source) throw new Error(`pre-admission failure source missing: ${candidate.id}`);
               if (admittedControllerByCat.get(catId)?.signal.aborted || controller?.signal.aborted) return false;
+              preAdmissionSettlementAttempted = true;
               const result = await queue.terminalizeClaimedAdmissionFailure(
                 messageStore,
                 source,
@@ -6772,7 +6809,7 @@ export class QueueProcessor {
             } else if (
               lifecycleTransferStarted &&
               !lifecycleReceiverPersisted &&
-              preAdmissionFailedTargets.size === 0 &&
+              !preAdmissionSettlementAttempted &&
               !preReceiverUserCancel
             ) {
               if (!(await queue.restoreClaimedEntries(threadId, [entry.id, ...batchedEntryIds]))) {
@@ -6782,7 +6819,7 @@ export class QueueProcessor {
               // the same failed pre-receiver transfer from onInvocationComplete.
               if (returnedExecutionResult) returnedExecutionResult.primarySettlementIncomplete = true;
             } else if (
-              (lifecycleReceiverPersisted || preAdmissionFailedTargets.size > 0) &&
+              (lifecycleReceiverPersisted || preAdmissionSettlementAttempted) &&
               !lifecycleQueueTargetsRetired
             ) {
               if (

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { InvocationQueue } from '../dist/domains/cats/services/agents/invocation/InvocationQueue.js';
 import { InMemoryQueueLedgerStore } from '../dist/domains/cats/services/agents/invocation/queue-ledger/InMemoryQueueLedgerStore.js';
+import { ExecutionAdmissionConflict } from '../dist/domains/cats/services/agents/registry/AgentServiceUnavailableError.js';
 import { queueHttpFixture } from './helpers/1398-queue-http-fixture.js';
 import { runDispatch, waitFor } from './helpers/issue1862-dispatch-fixture.js';
 
@@ -50,17 +51,126 @@ for (const [label, options] of [
   });
 }
 
-test('a transient binding race remains queued without a terminal History row or caller wake', async (t) => {
-  const { messages, queue, threadId, entry } = await runDispatch(t, { retryable: true });
-  await waitFor(async () => (await queue.getDurableEntry(threadId, entry.id))?.status === 'queued');
-  assert.equal(
-    (await messages.getByThread(threadId)).some((message) => message.lifecycle?.kind === 'delivery_failure'),
-    false,
+for (const parallel of [false, true]) {
+  test(`a transient binding race keeps the unserved target retryable (parallel=${parallel})`, async (t) => {
+    const {
+      agents,
+      messages,
+      queue,
+      router,
+      processor,
+      threadId,
+      userId,
+      entry,
+      target,
+      sibling,
+      source,
+      invocationTracker,
+    } = await runDispatch(t, { retryable: true, parallel });
+    await waitFor(async () => (await queue.getDurableEntry(threadId, entry.id))?.status === 'queued');
+    assert.equal(
+      (await messages.getByThread(threadId)).some((message) => message.lifecycle?.kind === 'delivery_failure'),
+      false,
+    );
+    const rows = await queue.listAllDurable(threadId);
+    assert.deepEqual(
+      rows.map((row) => [row.id, row.status]),
+      [[entry.id, 'queued']],
+    );
+    let launches = 0;
+    const service = agents.get(target);
+    service.captureInvocationOptions = () => ({});
+    service.invoke = async function* () {
+      launches++;
+      yield { type: 'text', catId: target, content: 'Recovered recipient', timestamp: Date.now() };
+      yield { type: 'done', catId: target, timestamp: Date.now() };
+    };
+    router.refreshFromRegistry(agents);
+    await processor.processNext(threadId, userId);
+    await waitFor(async () => !(await queue.getDurableEntry(threadId, entry.id)));
+    await waitFor(() => !invocationTracker.getActiveSlots(threadId).some((slot) => slot.catId === target));
+    assert.equal(launches, 1, 'the exact already-public source must reach its unserved recipient');
+    if (parallel) {
+      const history = await messages.getByThread(threadId);
+      assert.equal(
+        history.filter((row) => row.lifecycle?.kind === 'response' && row.lifecycle.targetId === sibling).length,
+        1,
+      );
+      assert.equal(
+        history.filter((row) => row.lifecycle?.kind === 'response' && row.lifecycle.inputMessageIds.includes(source.id))
+          .length,
+        2,
+      );
+    }
+  });
+}
+
+test('the caller can retry its still-pending failure wake after a transient refusal', async (t) => {
+  const { agents, queue, router, processor, threadId, userId, caller, invocationTracker } = await runDispatch(t);
+  const [wake] = await queue.listAllDurable(threadId);
+  const service = agents.get(caller);
+  let captures = 0;
+  let launches = 0;
+  service.captureInvocationOptions = () => {
+    captures++;
+    throw new ExecutionAdmissionConflict('fixture: caller config refreshing', true);
+  };
+  router.refreshFromRegistry(agents);
+  invocationTracker.complete(threadId, caller);
+  await processor.processNext(threadId, userId);
+  await waitFor(async () => captures === 2 && (await queue.getDurableEntry(threadId, wake.id))?.status === 'queued');
+  service.captureInvocationOptions = () => ({});
+  service.invoke = async function* () {
+    launches++;
+    yield { type: 'text', catId: caller, content: 'Caller read the failure', timestamp: Date.now() };
+    yield { type: 'done', catId: caller, timestamp: Date.now() };
+  };
+  await processor.processNext(threadId, userId);
+  await waitFor(
+    async () => !(await queue.getDurableEntry(threadId, wake.id)) && !invocationTracker.has(threadId, caller),
   );
+  assert.equal(launches, 1);
+});
+
+test('an A2A target retired after enqueue still settles the exact result and wake', async (t) => {
+  const { messages, queue, source, entry, caller, target, threadId } = await runDispatch(t, { unavailable: true });
+  const failures = (await messages.getByThread(threadId)).filter((row) => row.lifecycle?.kind === 'delivery_failure');
+  assert.equal(failures.length, 1);
+  assert.equal(failures[0].lifecycle.reason, 'invalid_explicit_target');
+  const ref = (await messages.getById(source.id)).lifecycle.dispatchRefs[0];
+  assert.deepEqual([ref.targetId, ref.phase, ref.statusMessageId], [target, 'settled', failures[0].id]);
+  assert.equal(await queue.getDurableEntry(threadId, entry.id), null);
   const rows = await queue.listAllDurable(threadId);
   assert.deepEqual(
-    rows.map((row) => [row.id, row.status]),
-    [[entry.id, 'queued']],
+    rows.map((row) => [row.sourceCategory, row.targets, row.payload.sourceRecordId]),
+    [['a2a_failure', [caller], failures[0].id]],
+  );
+});
+
+test('lost transaction acknowledgement projects the durable caller wake on the same worker', async (t) => {
+  const f = await queueHttpFixture(t);
+  const commit = f.messages.commitLifecyclePreAdmissionFailure.bind(f.messages);
+  let lostAck = false;
+  f.messages.commitLifecyclePreAdmissionFailure = (...args) => {
+    const result = commit(...args);
+    if (result.kind === 'applied' && !lostAck) {
+      lostAck = true;
+      throw new Error('fixture: transaction applied but acknowledgement lost');
+    }
+    return result;
+  };
+  const { queue, threadId, userId, processor, caller, entry } = await runDispatch(t, { f });
+  assert.ok(lostAck);
+  if (await queue.getDurableEntry(threadId, entry.id)) await processor.processNext(threadId, userId);
+  const rows = await queue.listAllDurable(threadId);
+  const [wake] = rows.filter((row) => row.sourceCategory === 'a2a_failure');
+  assert.deepEqual(wake.targets, [caller]);
+  assert.deepEqual(
+    queue
+      .listPendingAcrossUsers(threadId)
+      .filter((row) => row.sourceCategory === 'a2a_failure')
+      .map((row) => row.id),
+    [wake.id],
   );
 });
 

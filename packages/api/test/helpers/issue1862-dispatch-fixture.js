@@ -16,7 +16,15 @@ export async function waitFor(predicate) {
 
 export async function runDispatch(
   t,
-  { f, agent = true, parallel = false, failSibling = false, retryable = false, cancel = false } = {},
+  {
+    f,
+    agent = true,
+    parallel = false,
+    failSibling = false,
+    retryable = false,
+    cancel = false,
+    unavailable = false,
+  } = {},
 ) {
   f ??= await queueHttpFixture(t);
   const userId = 'owner';
@@ -91,6 +99,10 @@ export async function runDispatch(
     source = await f.messages.getById(entry.payload.messageId);
   }
   assert.ok(entry);
+  if (unavailable) {
+    f.agents.markUnavailable(target, { code: 'AGY_IDE_EXECUTION_RETIRED', message: 'fixture: member retired' });
+    f.router.refreshFromRegistry(f.agents);
+  }
   invocationTracker.start(threadId, caller, userId, [caller], 'busy-caller');
   const records = new InvocationRecordStore();
   const frames = [];
@@ -108,8 +120,22 @@ export async function runDispatch(
   );
   await processor.requestDrain(threadId);
   await waitFor(() => !invocationTracker.getActiveSlots(threadId).some((slot) => targets.includes(slot.catId)));
-  assert.ok(records.listLatestTerminalByThreadIds([threadId], userId).has(threadId), JSON.stringify(frames));
-  assert.equal(captures, cancel ? 1 : 2, JSON.stringify(frames));
+  if (!unavailable)
+    assert.ok(records.listLatestTerminalByThreadIds([threadId], userId).has(threadId), JSON.stringify(frames));
+  assert.equal(captures, unavailable ? 0 : cancel ? 1 : 2, JSON.stringify(frames));
   assert.equal(launches, 0);
-  return { ...f, source, entry, caller, target, sibling, threadId, userId, processor, frames, siblingLaunches };
+  return {
+    ...f,
+    source,
+    entry,
+    caller,
+    target,
+    sibling,
+    threadId,
+    userId,
+    processor,
+    frames,
+    siblingLaunches,
+    invocationTracker,
+  };
 }
