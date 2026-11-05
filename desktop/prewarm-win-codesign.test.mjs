@@ -86,6 +86,25 @@ test('winCodeSign mirror URL keeps a trailing slash', () => {
   );
 });
 
+test('winCodeSign URL follows npm mirror, custom-dir and override precedence', () => {
+  assert.equal(
+    winCodeSignArchiveUrl({
+      ELECTRON_BUILDER_BINARIES_MIRROR: 'https://ignored.example/',
+      NPM_CONFIG_ELECTRON_BUILDER_BINARIES_MIRROR: 'https://npm.example/binaries/',
+      NPM_CONFIG_ELECTRON_BUILDER_BINARIES_CUSTOM_DIR: '/tools/',
+    }),
+    `https://npm.example/binaries/tools/${RELEASE}.7z`,
+  );
+  assert.equal(
+    winCodeSignArchiveUrl({ ELECTRON_BUILDER_BINARIES_CUSTOM_DIR: 'win-tools' }),
+    `${'https://github.com/electron-userland/electron-builder-binaries/releases/download'}/win-tools/${RELEASE}.7z`,
+  );
+  assert.equal(
+    winCodeSignArchiveUrl({ ELECTRON_BUILDER_BINARIES_DOWNLOAD_OVERRIDE_URL: 'https://override.example/assets/' }),
+    `https://override.example/assets/${RELEASE}.7z`,
+  );
+});
+
 test('extraction excludes darwin and linux symlink payloads', () => {
   const args = extractionArgs('C:\\cache\\winCodeSign.7z', 'C:\\cache\\out');
   assert.deepEqual(args, ['x', 'C:\\cache\\winCodeSign.7z', '-oC:\\cache\\out', '-x!darwin\\*', '-x!linux\\*', '-y']);
@@ -262,4 +281,76 @@ test('ensurePrewarmedWinCodeSign is idempotent after a verified prewarm', async 
   });
   assert.equal(second.skipped, true);
   assert.equal(readFileSync(join(second.target, PREWARM_MARKER), 'utf8').includes(RELEASE), true);
+});
+
+test('does not delete a builder-owned valid target without a prewarm marker', async (t) => {
+  const root = tempRoot(t);
+  const target = expectedWinCodeSignDir(root);
+  mkdirSync(join(target, 'windows-10', 'x64'), { recursive: true });
+  writeFileSync(join(target, 'rcedit-x64.exe'), 'builder-rcedit');
+  writeFileSync(join(target, 'windows-10', 'x64', 'signtool.exe'), 'builder-signtool');
+
+  const result = await ensurePrewarmedWinCodeSign({
+    cacheRoot: root,
+    sevenZipPath: stubSevenZip(root),
+    expectedSha512: WIN_CODE_SIGN_SHA512,
+    platform: 'win32',
+    extract: () => {
+      throw new Error('must not extract over builder-owned tools');
+    },
+    log: () => {},
+  });
+
+  assert.equal(result.skipped, true);
+  assert.equal(readFileSync(join(target, 'rcedit-x64.exe'), 'utf8'), 'builder-rcedit');
+  assert.equal(readFileSync(join(target, 'windows-10', 'x64', 'signtool.exe'), 'utf8'), 'builder-signtool');
+});
+
+test('concurrent prewarm keeps the first published target instead of deleting it', async (t) => {
+  const root = tempRoot(t);
+  const bytes = Buffer.from('verified archive bytes');
+  seedArchive(root, `${RELEASE}.7z`, bytes);
+  const target = expectedWinCodeSignDir(root);
+  let extractCount = 0;
+  let releaseFirstExtract;
+  let releaseSecondExtract;
+  const firstExtractStarted = new Promise((resolve) => {
+    releaseFirstExtract = resolve;
+  });
+  const firstPublished = new Promise((resolve) => {
+    releaseSecondExtract = resolve;
+  });
+
+  const extract = async ({ outputDir }) => {
+    const call = ++extractCount;
+    mkdirSync(join(outputDir, 'windows-10', 'x64'), { recursive: true });
+    writeFileSync(join(outputDir, 'rcedit-x64.exe'), `rcedit-${call}`);
+    writeFileSync(join(outputDir, 'windows-10', 'x64', 'signtool.exe'), `signtool-${call}`);
+    if (call === 1) {
+      releaseFirstExtract();
+    } else {
+      await firstPublished;
+    }
+  };
+
+  const options = {
+    cacheRoot: root,
+    sevenZipPath: stubSevenZip(root),
+    expectedSha512: sha512(bytes),
+    platform: 'win32',
+    extract,
+    log: () => {},
+  };
+
+  const first = ensurePrewarmedWinCodeSign(options);
+  await firstExtractStarted;
+  const second = ensurePrewarmedWinCodeSign(options);
+  const firstResult = await first;
+  releaseSecondExtract();
+  const secondResult = await second;
+
+  assert.equal(firstResult.skipped, false);
+  assert.equal(secondResult.skipped, true);
+  assert.equal(readFileSync(join(target, 'rcedit-x64.exe'), 'utf8'), 'rcedit-1');
+  assert.equal(readFileSync(join(target, 'windows-10', 'x64', 'signtool.exe'), 'utf8'), 'signtool-1');
 });

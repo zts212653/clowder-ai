@@ -36,8 +36,23 @@ export function expectedWinCodeSignDir(cacheRoot) {
 }
 
 export function winCodeSignArchiveUrl(env = process.env) {
-  const base = (env.ELECTRON_BUILDER_BINARIES_MIRROR || DEFAULT_MIRROR).replace(/\/?$/, '/');
-  return `${base}${RELEASE}/${RELEASE}.7z`;
+  const override = env.ELECTRON_BUILDER_BINARIES_DOWNLOAD_OVERRIDE_URL?.trim();
+  if (override) return `${override.replace(/\/+$/, '')}/${RELEASE}.7z`;
+
+  const base = (
+    env.NPM_CONFIG_ELECTRON_BUILDER_BINARIES_MIRROR ||
+    env.npm_config_electron_builder_binaries_mirror ||
+    env.npm_package_config_electron_builder_binaries_mirror ||
+    env.ELECTRON_BUILDER_BINARIES_MIRROR ||
+    DEFAULT_MIRROR
+  ).replace(/\/+$/, '');
+  const customDir =
+    env.NPM_CONFIG_ELECTRON_BUILDER_BINARIES_CUSTOM_DIR ||
+    env.npm_config_electron_builder_binaries_custom_dir ||
+    env.npm_package_config_electron_builder_binaries_custom_dir ||
+    env.ELECTRON_BUILDER_BINARIES_CUSTOM_DIR ||
+    RELEASE;
+  return `${base}/${customDir.replace(/^\/+|\/+$/g, '')}/${RELEASE}.7z`;
 }
 
 export function extractionArgs(archivePath, outputDir) {
@@ -70,6 +85,34 @@ export function isPrewarmed(targetDir, expectedSha512 = WIN_CODE_SIGN_SHA512) {
 
 function sha512OfFile(file) {
   return createHash('sha512').update(readFileSync(file)).digest('base64');
+}
+
+const PUBLISH_LOCK = '.prewarm-publish.lock';
+
+async function acquirePublishLock(cacheDir, { timeoutMs = 30_000, staleMs = 120_000 } = {}) {
+  const lockDir = join(cacheDir, PUBLISH_LOCK);
+  const startedAt = Date.now();
+  for (;;) {
+    try {
+      mkdirSync(lockDir);
+      return () => rmSync(lockDir, { recursive: true, force: true });
+    } catch (error) {
+      if (error?.code !== 'EEXIST') throw error;
+      try {
+        if (Date.now() - statSync(lockDir).mtimeMs > staleMs) {
+          rmSync(lockDir, { recursive: true, force: true });
+          continue;
+        }
+      } catch {
+        // The lock disappeared between EEXIST and stat; retry immediately.
+        continue;
+      }
+      if (Date.now() - startedAt > timeoutMs) {
+        throw new Error(`timed out waiting for winCodeSign publish lock: ${lockDir}`);
+      }
+      await new Promise((resolveSleep) => setTimeout(resolveSleep, 25));
+    }
+  }
 }
 
 // Cache entries are only trusted when their bytes match the pinned release
@@ -139,6 +182,12 @@ export async function ensurePrewarmedWinCodeSign({
     log(`winCodeSign already prewarmed: ${target}`);
     return { skipped: true, target };
   }
+  // app-builder may have published a valid toolset without our prewarm marker.
+  // Treat it as builder-owned: never delete or replace it just to add a marker.
+  if (hasWindowsTools(target)) {
+    log(`winCodeSign already published by builder: ${target}`);
+    return { skipped: true, target };
+  }
 
   if (!existsSync(sevenZipPath)) {
     throw new Error(`7za.exe not found: ${sevenZipPath}; run npm ci in desktop/ first`);
@@ -159,7 +208,7 @@ export async function ensurePrewarmedWinCodeSign({
   const temp = join(cacheDir, `.extract-${process.pid}-${Date.now()}`);
   try {
     mkdirSync(temp, { recursive: true });
-    extract({ sevenZipPath, archivePath, outputDir: temp });
+    await extract({ sevenZipPath, archivePath, outputDir: temp });
     if (!hasWindowsTools(temp)) {
       throw new Error(`winCodeSign extraction did not produce the Windows tools: ${temp}`);
     }
@@ -167,8 +216,17 @@ export async function ensurePrewarmedWinCodeSign({
       join(temp, PREWARM_MARKER),
       `${JSON.stringify({ release: RELEASE, sha512: expectedSha512 }, null, 2)}\n`,
     );
-    if (existsSync(target)) rmSync(target, { recursive: true, force: true });
-    renameSync(temp, target);
+    const releaseLock = await acquirePublishLock(cacheDir);
+    try {
+      if (isPrewarmed(target, expectedSha512) || hasWindowsTools(target)) {
+        log(`winCodeSign already published by another process: ${target}`);
+        return { skipped: true, target };
+      }
+      if (existsSync(target)) rmSync(target, { recursive: true, force: true });
+      renameSync(temp, target);
+    } finally {
+      releaseLock();
+    }
     log(`winCodeSign prewarmed: ${target}`);
     return { skipped: false, target };
   } finally {
