@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type TestContext, test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { resolveInvokeCapabilityRoot } from '../src/config/capabilities/invoke-capability-root.js';
 import { resolveStartupCliConfigContext } from '../src/config/capabilities/startup-cli-config.js';
 import { resolveAcpMcpServers } from '../src/domains/cats/services/agents/providers/acp/acp-mcp-resolver.js';
@@ -66,7 +67,7 @@ test('native MCP admission reads the configuration root and leaves its file unch
   const server = result.servers['cat-cafe-collab'];
   const { upstream: spec } = directMcpContract(server);
   assert.equal(spec.command, process.execPath);
-  assert.deepEqual(spec.args, [join(f.dist, 'collab.js')]);
+  assert.deepEqual(spec.args, [fileURLToPath(import.meta.resolve('@cat-cafe/mcp-server/dist/collab.js'))]);
   assert.ok((await readFile(f.file)).equals(before));
 });
 
@@ -76,7 +77,7 @@ test('a declared invalid configuration root is rejected instead of falling back 
   await assert.rejects(resolveInvokeCapabilityRoot(f.binary), /persistent global capabilities root/i);
 });
 
-test('ACP builtins use runtime binaries while external MCP paths remain relative to their configuration', async (t) => {
+test('ACP builtins use the API package while external MCP paths remain relative to their configuration', async (t) => {
   const f = await fixture(t);
   const result = await resolveAcpMcpServers(f.config, ['cat-cafe-collab', 'external'], undefined, {
     capabilitiesConfig: {
@@ -93,7 +94,9 @@ test('ACP builtins use runtime binaries while external MCP paths remain relative
     },
     configSourceRoot: f.config,
   });
-  assert.deepEqual(result.find((server) => server.name === 'cat-cafe-collab')?.args, [join(f.dist, 'collab.js')]);
+  assert.deepEqual(result.find((server) => server.name === 'cat-cafe-collab')?.args, [
+    fileURLToPath(import.meta.resolve('@cat-cafe/mcp-server/dist/collab.js')),
+  ]);
   assert.deepEqual(result.find((server) => server.name === 'external')?.args, ['./external.js']);
 });
 

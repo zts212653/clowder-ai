@@ -20,6 +20,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { mock, test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { assertClaudeSettingsPreserved, claudeUserSettings } from './helpers/claude-settings-contract.js';
 import { assertCurrentCallback, directMcpContract } from './helpers/direct-mcp-contract.js';
 import { ensureFakeCliOnPath } from './helpers/fake-cli-path.js';
@@ -1212,7 +1213,7 @@ test('#712: merges user .mcp.json servers as base layer — managed entries take
 
     assert.deepEqual(
       collab.args.map((path) => realpathSync(path)),
-      [realpathSync(join(mcpDistDir, 'collab.js'))],
+      [realpathSync(fileURLToPath(import.meta.resolve('@cat-cafe/mcp-server/dist/collab.js')))],
     );
     assert.equal(collab.command, process.execPath, 'managed entry should use the runtime Node executable');
     assert.equal(
@@ -1484,7 +1485,10 @@ test('falls back to default MCP path when CAT_CAFE_MCP_SERVER_PATH is empty', as
     const { launchEnv, upstream: collab } = directMcpContract(parsed.mcpServers['cat-cafe-collab']);
 
     assert.equal(collab.command, process.execPath);
-    assert.equal(realpathSync(collab.args[0]), realpathSync(join(mcpDistDir, 'collab.js')));
+    assert.equal(
+      realpathSync(collab.args[0]),
+      realpathSync(fileURLToPath(import.meta.resolve('@cat-cafe/mcp-server/dist/collab.js'))),
+    );
     for (const env of [launchEnv, collab.env]) {
       assert.equal(env.CAT_CAFE_API_URL, 'http://localhost:3004');
       assert.equal(env.CAT_CAFE_INVOCATION_ID, 'inv-1');

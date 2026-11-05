@@ -132,6 +132,10 @@ test('Task 4: codex argv carries -c developer_instructions=<compiled L0>', async
   assert.ok(args.includes('--config'), 'argv must include --config');
   const developerInstructions = assertCompiledL0Preserved(args, 'DEV-L0-BODY');
   assert.match(developerInstructions, /do not append the cat signature to commentary\/progress messages/);
+  assert.match(developerInstructions, /registered.*namespace/i);
+  assert.match(developerInstructions, /ALL_TOOLS/);
+  assert.match(developerInstructions, /unsupported call/);
+  assert.match(developerInstructions, /credential file|private HTTP headers/);
 });
 
 test('the real Codex L0 child consumes the invocation snapshot and refuses a missing snapshot before spawn', async () => {
