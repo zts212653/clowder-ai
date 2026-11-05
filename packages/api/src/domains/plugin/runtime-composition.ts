@@ -82,7 +82,10 @@ import { connectorPermissionsProjection } from './manager/connector-settings.js'
 import { GitPluginPackageAdmission } from './manager/git-package-admission.js';
 import { LocalPluginPackageAdmission } from './manager/local-package-admission.js';
 import { GitMarketplaceCatalog } from './manager/marketplace/git-marketplace-catalog.js';
-import { prepareMarketplaceDirectory } from './manager/marketplace/git-marketplace-preparation.js';
+import {
+  MarketplacePreparationError,
+  prepareMarketplaceDirectory,
+} from './manager/marketplace/git-marketplace-preparation.js';
 import type { GitMarketplaceRepository } from './manager/marketplace/git-marketplace-repository.js';
 import type { GitMarketplaceSources } from './manager/marketplace/git-marketplace-sources.js';
 import type {
@@ -1036,6 +1039,7 @@ export function createPluginManagerRuntimeComposition(
             throw new PluginManagerServiceError(
               'INSTALL_UNAVAILABLE',
               error instanceof Error ? error.message : 'Repository installation failed',
+              error instanceof MarketplacePreparationError ? error.diagnostic : undefined,
             );
           }
         }

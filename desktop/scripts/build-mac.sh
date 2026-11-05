@@ -145,8 +145,22 @@ download_node() {
   ok "node-darwin-${arch} bundled"
 }
 
+verify_node_toolchain() {
+  local arch="$1"
+  local dest="${BUNDLED_DIR}/node-darwin-${arch}"
+  local node="${dest}/bin/node"
+  local corepack="${dest}/bin/corepack"
+  [[ -x "$node" ]] || die "Node executable missing from bundled runtime (${arch}: ${node})"
+  [[ -x "$corepack" ]] || die "Corepack executable missing beside bundled Node (${arch}: ${corepack})"
+  local corepack_version
+  corepack_version="$("$corepack" --version 2>/dev/null)" || die "Corepack beside bundled Node could not execute (${arch}: ${corepack})"
+  [[ -n "$corepack_version" ]] || die "Corepack beside bundled Node returned no version (${arch}: ${corepack})"
+  ok "node-darwin-${arch} toolchain ready ($("$node" --version), Corepack ${corepack_version}; adjacent bin/corepack)"
+}
+
 for arch in "${ARCHS[@]}"; do
   download_node "$arch"
+  verify_node_toolchain "$arch"
 done
 
 # ─── Step 4: Build Redis portable (both archs) ─────────────────────────

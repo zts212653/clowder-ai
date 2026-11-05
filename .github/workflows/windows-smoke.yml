@@ -36,6 +36,13 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @cat-cafe/shared build
       - run: pnpm --filter @cat-cafe/api build
+      - name: Git marketplace pnpm isolation and diagnostic sanitization
+        run: >-
+          pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs
+          --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1
+          node --test --test-timeout=60000
+          test/git-marketplace-preparation.test.js
+          test/sanitize-cli-stderr.test.js
       - name: Codex managed account login fixtures (no live accounts)
         run: >-
           pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs
