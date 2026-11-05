@@ -137,7 +137,12 @@ export function useGlobalArtifacts(
   }, [enabled, refetch, worksView]);
 
   // The paged Works view re-reads the whole owner catalogue, so host-thread changes are coalesced.
-  useWorksSourceRefresh(hostThreadId, enabled && query !== undefined, worksView ? paged.scheduleRefresh : refetch);
+  useWorksSourceRefresh(
+    hostThreadId,
+    enabled && query !== undefined,
+    worksView ? paged.scheduleRefresh : refetch,
+    false,
+  );
 
   return worksView
     ? paged
