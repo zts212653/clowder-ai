@@ -7,7 +7,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const coCreator = vi.hoisted(() => ({
-  value: { name: 'operator', avatar: 'https://example.invalid/me.png' as string | undefined },
+  value: { name: 'riley', avatar: 'https://example.invalid/me.png' as string | undefined },
 }));
 
 vi.mock('next/navigation', () => ({ usePathname: () => '/', useRouter: () => ({ push: vi.fn() }) }));
@@ -33,7 +33,7 @@ let container: HTMLElement;
 let root: Root;
 
 beforeEach(() => {
-  coCreator.value = { name: 'operator', avatar: 'https://example.invalid/me.png' };
+  coCreator.value = { name: 'riley', avatar: 'https://example.invalid/me.png' };
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -63,21 +63,21 @@ describe('WorldRail co-creator avatar (F314-1)', () => {
     expect(visibleAvatar()).toBe('img https://example.invalid/me.png');
 
     await act(async () => avatarButton().querySelector('img')?.dispatchEvent(new Event('error')));
-    expect(visibleAvatar()).toBe('text "L"');
+    expect(visibleAvatar()).toBe('text "R"');
   });
 
   it('shows the new avatar after the owner replaces a broken one', async () => {
     await act(async () => root.render(<WorldRail />));
     await act(async () => avatarButton().querySelector('img')?.dispatchEvent(new Event('error')));
 
-    coCreator.value = { name: 'operator', avatar: 'https://example.invalid/me-v2.png' };
+    coCreator.value = { name: 'riley', avatar: 'https://example.invalid/me-v2.png' };
     await act(async () => root.render(<WorldRail />));
     expect(visibleAvatar()).toBe('img https://example.invalid/me-v2.png');
   });
 
   it('shows the initial when no avatar is set', async () => {
-    coCreator.value = { name: 'operator', avatar: undefined };
+    coCreator.value = { name: 'riley', avatar: undefined };
     await act(async () => root.render(<WorldRail />));
-    expect(visibleAvatar()).toBe('text "L"');
+    expect(visibleAvatar()).toBe('text "R"');
   });
 });

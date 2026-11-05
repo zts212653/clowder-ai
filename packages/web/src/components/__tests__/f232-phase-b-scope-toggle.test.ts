@@ -6,6 +6,7 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { SHELL_PRESENTATION_STORAGE_KEY, writeShellPresentation } from '@/components/shell/shell-presentation';
 
 const THREAD_ARTIFACTS = [
   {
@@ -71,7 +72,7 @@ import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { ArtifactsPanel } from '../ArtifactsPanel';
 
-describe('F232 Phase B scope toggle', () => {
+describe('F232 classic Phase B scope toggle', () => {
   let container: HTMLDivElement;
   let root: Root;
 
@@ -84,6 +85,7 @@ describe('F232 Phase B scope toggle', () => {
   });
 
   beforeEach(() => {
+    writeShellPresentation('classic');
     useChatStore.setState({ currentThreadId: 'T-current', workspaceWorktreeId: 'main', workspaceOpenRequest: null });
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -93,6 +95,7 @@ describe('F232 Phase B scope toggle', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
     vi.clearAllMocks();
   });
 

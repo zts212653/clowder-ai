@@ -5,6 +5,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { ChatContainer } from '@/components/ChatContainer';
 import { ThreadChatRuntimeProvider } from '@/components/thread-chat';
 import type { ChatMessage, ThreadState } from '@/stores/chat-types';
+import { SHELL_PRESENTATION_STORAGE_KEY, writeShellPresentation } from '../shell/shell-presentation';
 
 function renderChatContainer(threadId: string) {
   return React.createElement(
@@ -127,7 +128,10 @@ vi.mock('../MessageActions', () => ({
 }));
 vi.mock('../MessageNavigator', () => ({ MessageNavigator: () => null }));
 vi.mock('../ProjectSetupCard', () => ({ ProjectSetupCard: () => null }));
-vi.mock('../QueuePanel', () => ({ QueuePanel: () => null }));
+vi.mock('../QueuePanel', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../QueuePanel')>()),
+  QueuePanel: () => null,
+}));
 vi.mock('../RightStatusPanel', () => ({ RightStatusPanel: () => null }));
 vi.mock('../ScrollToBottomButton', () => ({ ScrollToBottomButton: () => null }));
 vi.mock('../SplitPaneView', () => ({
@@ -143,7 +147,7 @@ vi.mock('../VoteConfigModal', () => ({ VoteConfigModal: () => null }));
 vi.mock('../WorkspacePanel', () => ({ WorkspacePanel: () => null }));
 vi.mock('../workspace/ResizeHandle', () => ({ ResizeHandle: () => null }));
 
-describe('ChatContainer intent_mode loading lock', () => {
+describe.each(['classic', 'v2'] as const)('ChatContainer intent_mode loading lock (%s)', (presentation) => {
   let container: HTMLDivElement;
   let root: Root;
 
@@ -158,6 +162,7 @@ describe('ChatContainer intent_mode loading lock', () => {
   });
 
   beforeEach(() => {
+    writeShellPresentation(presentation);
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -177,6 +182,7 @@ describe('ChatContainer intent_mode loading lock', () => {
       root.unmount();
     });
     container.remove();
+    window.localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
   });
 
   it('locks input when current thread receives intent_mode', () => {

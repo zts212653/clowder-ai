@@ -435,7 +435,7 @@ describe('ServiceStatusPanel', () => {
       if (path === '/api/services') {
         return { ok: true, json: async () => installablePayload };
       }
-      if (path === '/api/services/audio-capture/install-preview') {
+      if (new URL(path, 'http://test.local').pathname === '/api/services/audio-capture/install-preview') {
         return {
           ok: true,
           json: async () => ({

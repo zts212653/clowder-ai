@@ -5,9 +5,10 @@ import path from 'node:path';
 /** Only external GitHub CLI bytes are controlled; the real owner/root admission and reference/diff readers run. */
 export async function installChatPathGitHubFixture(directory, baseSha, headSha) {
   const responses = {};
+  const referenceRepo = 'zts212653/clowder-ai';
   for (const [repo, number] of [
     ['controlled-fixture/path-reference-workspace', 5961],
-    ['zts212653/clowder-ai', 5963],
+    [referenceRepo, 5963],
   ]) {
     responses[JSON.stringify(['api', `repos/${repo}/pulls/${number}`])] = {
       number,
@@ -29,7 +30,7 @@ export async function installChatPathGitHubFixture(directory, baseSha, headSha) 
       statusCheckRollup: [{ conclusion: 'SUCCESS' }],
     };
   }
-  responses[JSON.stringify(['api', `repos/zts212653/cat-cafe/compare/${baseSha}...${headSha}?per_page=100&page=1`])] = {
+  responses[JSON.stringify(['api', `repos/${referenceRepo}/compare/${baseSha}...${headSha}?per_page=100&page=1`])] = {
     base_commit: { sha: baseSha },
     merge_base_commit: { sha: baseSha },
     files: ['report.md', 'actions.md'].map((name) => ({

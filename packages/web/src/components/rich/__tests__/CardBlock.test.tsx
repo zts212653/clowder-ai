@@ -5,6 +5,7 @@ import type { RichCardBlock } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { observeApiSessionOwner } from '@/utils/api-session-identity';
+import { SHELL_PRESENTATION_STORAGE_KEY, writeShellPresentation } from '../../shell/shell-presentation';
 import { CardBlock } from '../CardBlock';
 
 vi.mock('@/utils/api-client', () => ({
@@ -61,7 +62,7 @@ describe('CardBlock — unhandled action defense (F225 dogfood)', () => {
 // F231 Phase C Task5: the profile-update confirmation card is a GENERIC `kind:'card'` block (not a
 // dedicated renderer like thread/handoff proposals), so its approve/reject actions dispatch through
 // CardBlock.handleAction. These pin the decision-route contract the operator triggers from the card.
-describe('CardBlock — F231 profile-update decision dispatch', () => {
+describe('Classic CardBlock — F231 profile-update decision dispatch', () => {
   let container: HTMLDivElement;
   let root: Root;
 
@@ -72,6 +73,7 @@ describe('CardBlock — F231 profile-update decision dispatch', () => {
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
   beforeEach(() => {
+    writeShellPresentation('classic');
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -82,6 +84,7 @@ describe('CardBlock — F231 profile-update decision dispatch', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    window.localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
     vi.restoreAllMocks();
   });
 

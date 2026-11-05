@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 vi.mock('@/hooks/useCoCreatorConfig', () => ({
-  useCoCreatorConfig: () => ({ name: 'You', avatar: 'https://example.invalid/me.png' }),
+  useCoCreatorConfig: () => ({ name: 'Riley', avatar: 'https://example.invalid/me.png' }),
 }));
 vi.mock('@/hooks/useCatData', () => ({ useCatData: () => ({ getCatById: () => undefined }) }));
 
@@ -37,7 +37,7 @@ it('shows the owner initial instead of a broken image (F314-1)', async () => {
 
   await act(async () => avatarSlot().querySelector('img')?.dispatchEvent(new Event('error')));
   expect(avatarSlot().querySelector('img')).toBeNull();
-  expect(avatarSlot().textContent).toBe('L');
+  expect(avatarSlot().textContent).toBe('R');
 });
 
 it('keeps the initial for a person other than the owner', async () => {

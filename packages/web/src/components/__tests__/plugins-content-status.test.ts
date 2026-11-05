@@ -82,7 +82,7 @@ describe('PluginsContent GitHub configuration', () => {
     expect(tokenInput).toBeTruthy();
     expect(noiseInput).toBeTruthy();
     if (!tokenInput || !noiseInput) throw new Error('GitHub config inputs did not render');
-    expect(noiseInput?.placeholder).toBe('chatgpt-codex-connector[bot]');
+    expect(noiseInput.value).toBe('chatgpt-codex-connector[bot]');
 
     await act(async () => {
       setInputValue(tokenInput, 'ghp_new');

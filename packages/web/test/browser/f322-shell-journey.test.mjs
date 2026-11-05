@@ -14,6 +14,7 @@ import { registerMentionCutoverJourney } from './f322-user-mention-cutover.journ
 import { registerUserMentionJourney } from './f322-user-mention-todo.journey.mjs';
 import { visibleAttentionFixture } from './f322-visible-attention.fixture.mjs';
 import { registerWorkspaceMenuTests } from './f322-workspace-menu.journey.mjs';
+import { disabledWatcherRead } from './fixtures/f322-watcher-read.mjs';
 
 // Real rail, mailbox, tooltip, settings shell, preference/pin stores and navigation hooks.
 // Only Next routing and domain content renderers are test boundaries. Every request is
@@ -247,6 +248,8 @@ async function openProof({
           body: custom.raw ?? JSON.stringify(custom.body),
         });
       }
+      const watcher = disabledWatcherRead(request, url, ['thread-return', 'thread-other', 'thread-created']);
+      if (watcher) return handler.fulfill(watcher);
       // Non-mention scenarios have no handling receipt. Real-owner journeys override
       // this exact GET via `api`; every other unknown endpoint still fails closeProof.
       if (request.method() === 'GET' && url.pathname === '/api/config/ignored-items') {

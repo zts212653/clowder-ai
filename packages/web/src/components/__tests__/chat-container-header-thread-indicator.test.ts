@@ -8,6 +8,11 @@ import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatContainerHeader, ThreadIndicator, tailTruncate } from '@/components/ChatContainerHeader';
+import {
+  SHELL_PRESENTATION_STORAGE_KEY,
+  ShellPresentationContext,
+  writeShellPresentation,
+} from '../shell/shell-presentation';
 
 vi.mock('next/link', () => ({
   default: ({ href, children, ...rest }: { href: string; children: React.ReactNode }) =>
@@ -76,6 +81,8 @@ describe('ChatContainerHeader thread indicator', () => {
   });
 
   beforeEach(() => {
+    // These assertions exercise the retained classic presentation explicitly.
+    writeShellPresentation('classic');
     container = document.createElement('div');
     document.body.appendChild(container);
     root = null;
@@ -89,10 +96,17 @@ describe('ChatContainerHeader thread indicator', () => {
       root = null;
     }
     container.remove();
+    window.localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
   });
 
   const renderHeader = (threadId: string) => {
-    container.innerHTML = renderToStaticMarkup(React.createElement(ChatContainerHeader, { ...defaultProps, threadId }));
+    container.innerHTML = renderToStaticMarkup(
+      React.createElement(
+        ShellPresentationContext.Provider,
+        { value: 'classic' },
+        React.createElement(ChatContainerHeader, { ...defaultProps, threadId }),
+      ),
+    );
     return container;
   };
 

@@ -1,6 +1,7 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { SHELL_PRESENTATION_STORAGE_KEY, writeShellPresentation } from '@/components/shell/shell-presentation';
 import type { RichCardBlock } from '@/stores/chat-types';
 import { apiFetch } from '@/utils/api-client';
 import { observeApiSessionOwner } from '@/utils/api-session-identity';
@@ -36,7 +37,10 @@ function okJson(body: unknown): Response {
   return { ok: true, status: 200, json: async () => body } as Response;
 }
 
-describe('HandoffProposalCard (F225 P1-2 — buttons no longer inert)', () => {
+describe.each([
+  'classic',
+  'v2',
+] as const)('HandoffProposalCard (F225 P1-2 — buttons no longer inert) (%s)', (presentation) => {
   let container: HTMLDivElement;
   let root: Root;
 
@@ -47,6 +51,7 @@ describe('HandoffProposalCard (F225 P1-2 — buttons no longer inert)', () => {
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
   beforeEach(() => {
+    writeShellPresentation(presentation);
     observeApiSessionOwner('owner-1');
     vi.mocked(apiFetch).mockReset();
     // 云端 P2 added a mount GET status fetch, so every render now also calls apiFetch. Default:
@@ -64,6 +69,7 @@ describe('HandoffProposalCard (F225 P1-2 — buttons no longer inert)', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    window.localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
   });
 
   it('isHandoffProposalCardBlock recognizes handoff:approve (not F128 propose:approve)', () => {
@@ -77,9 +83,15 @@ describe('HandoffProposalCard (F225 P1-2 — buttons no longer inert)', () => {
 
   it('renders 五件套 fields + two real approve/reject buttons', () => {
     act(() => root.render(<HandoffProposalCard block={handoffBlock} />));
-    expect(container.textContent).toContain('提议 session 接力');
+    expect(container.textContent).toContain(presentation === 'classic' ? '提议 session 接力' : '封印当前会话并接力');
     expect(container.textContent).not.toContain(legacyHandoffTitlePrefix);
-    expect(container.querySelector('svg[data-testid="handoff-card-icon"]')).not.toBeNull();
+    expect(
+      container.querySelector(
+        presentation === 'classic'
+          ? 'svg[data-testid="handoff-card-icon"]'
+          : '[data-testid="original-approval-long-content"]',
+      ),
+    ).not.toBeNull();
     expect(container.textContent).toContain('sess_1');
     expect(container.textContent).toContain('wire B');
     expect(container.querySelectorAll('button').length).toBe(2);
@@ -117,7 +129,7 @@ describe('HandoffProposalCard (F225 P1-2 — buttons no longer inert)', () => {
       '/api/session-handoff/prop_1/approve',
       expect.objectContaining({ method: 'POST' }),
     );
-    expect(container.textContent).toContain('已批准');
+    expect(container.textContent).toContain(presentation === 'classic' ? '已批准' : '已同意 · 接力已发起');
   });
 
   it('reject button POSTs /api/session-handoff/:id/reject then shows rejected', async () => {
@@ -132,7 +144,7 @@ describe('HandoffProposalCard (F225 P1-2 — buttons no longer inert)', () => {
       '/api/session-handoff/prop_1/reject',
       expect.objectContaining({ method: 'POST' }),
     );
-    expect(container.textContent).toContain('已驳回');
+    expect(container.textContent).toContain(presentation === 'classic' ? '已驳回' : '已拒绝 · 当前会话继续');
   });
 
   it('reject-after-expire reflects SERVER status (已过期), not the optimistic verb (gpt52 P2)', async () => {
@@ -175,7 +187,7 @@ describe('HandoffProposalCard (F225 P1-2 — buttons no longer inert)', () => {
       approveBtn?.click();
     });
     expect(container.textContent).toContain('已过期');
-    expect(container.querySelectorAll('button').length).toBe(0);
+    expect(container.querySelectorAll('button:not([aria-expanded])').length).toBe(0);
   });
 
   it('hydrates durable status on mount — settled card shows no live buttons (云端 P2)', async () => {
@@ -187,8 +199,8 @@ describe('HandoffProposalCard (F225 P1-2 — buttons no longer inert)', () => {
       root.render(<HandoffProposalCard block={handoffBlock} />);
     });
     expect(apiFetch).toHaveBeenCalledWith('/api/session-handoff/prop_1', expect.anything(), { afterCurrentGet: true });
-    expect(container.textContent).toContain('已批准');
-    expect(container.querySelectorAll('button').length).toBe(0);
+    expect(container.textContent).toContain(presentation === 'classic' ? '已批准' : '已同意 · 接力已发起');
+    expect(container.querySelectorAll('button:not([aria-expanded])').length).toBe(0);
   });
 
   it('monotonic hydration — a late pending GET does NOT revert a settled click (砚砚 re-review P2)', async () => {
@@ -208,14 +220,14 @@ describe('HandoffProposalCard (F225 P1-2 — buttons no longer inert)', () => {
     await act(async () => {
       approveBtn?.click();
     });
-    expect(container.textContent).toContain('已批准');
+    expect(container.textContent).toContain(presentation === 'classic' ? '已批准' : '已同意 · 接力已发起');
     // now the late mount GET resolves with a STALE 'pending'
     await act(async () => {
       resolveGet?.(okJson({ proposal: { proposalId: 'prop_1', status: 'pending' } }));
       await lateGet;
     });
     // monotonic: settled 'approved' survives the late pending GET — no live buttons reappear
-    expect(container.textContent).toContain('已批准');
-    expect(container.querySelectorAll('button').length).toBe(0);
+    expect(container.textContent).toContain(presentation === 'classic' ? '已批准' : '已同意 · 接力已发起');
+    expect(container.querySelectorAll('button:not([aria-expanded])').length).toBe(0);
   });
 });

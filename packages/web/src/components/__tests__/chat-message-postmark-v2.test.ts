@@ -3,6 +3,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatMessage } from '@/components/ChatMessage';
+import { SHELL_PRESENTATION_STORAGE_KEY, writeShellPresentation } from '../shell/shell-presentation';
 import { CHAT_THREAD_ROUTE_EVENT } from '../ThreadSidebar/thread-navigation';
 
 vi.mock('@/stores/chatStore', () => ({
@@ -60,6 +61,8 @@ describe('ChatMessage Postmark v2 source pill', () => {
   });
 
   beforeEach(() => {
+    // These assertions exercise the retained classic presentation explicitly.
+    writeShellPresentation('classic');
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -69,6 +72,7 @@ describe('ChatMessage Postmark v2 source pill', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    window.localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
     vi.restoreAllMocks();
   });
 

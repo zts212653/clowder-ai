@@ -2,6 +2,7 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { SHELL_PRESENTATION_STORAGE_KEY, writeShellPresentation } from '../shell/shell-presentation';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
@@ -48,6 +49,7 @@ describe('ChatMessage author precedence', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    window.localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
   });
 
   afterAll(() => {
@@ -141,7 +143,8 @@ describe('ChatMessage author precedence', () => {
     expect(container.textContent).not.toContain('缅因猫（Codex）');
   });
 
-  it('uses configured co-creator name and avatar for plain user messages', async () => {
+  it('classic uses configured co-creator name and avatar for plain user messages', async () => {
+    writeShellPresentation('classic');
     const { ChatMessage } = await import('@/components/ChatMessage');
     const msg = {
       id: 'm2',

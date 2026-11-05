@@ -6,7 +6,10 @@ import { markApiGetGeneration } from '@/utils/api-get-generation';
 import { ThreadSidebar } from '../ThreadSidebar';
 
 const mockPush = vi.fn();
-vi.mock('next/navigation', () => ({ useRouter: () => ({ push: mockPush }) }));
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: mockPush }),
+  usePathname: () => window.location.pathname,
+}));
 
 const mockApiFetch = vi.fn();
 vi.mock('@/utils/api-client', () => ({

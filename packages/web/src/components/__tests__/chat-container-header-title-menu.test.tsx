@@ -115,6 +115,7 @@ describe('ChatContainerHeader: the title ⌄ menu', () => {
   }
 
   it('classic header, something running: no ⌄ menu — the classic header is unchanged', () => {
+    writeShellPresentation('classic');
     seedRunning(true);
     renderHeader();
     expect(container.querySelector('[data-shell-header="v2"]')).toBeNull();
