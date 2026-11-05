@@ -63,6 +63,18 @@ public static class ClowderJobInterop {
     public IoCounters Io;
     public UIntPtr ProcessMemory, JobMemory, PeakProcess, PeakJob;
   }
+  // JOBOBJECT_BASIC_ACCOUNTING_INFORMATION: TotalUserTime, TotalKernelTime, ThisPeriodTotalUserTime,
+  // ThisPeriodTotalKernelTime, TotalPageFaultCount, TotalProcesses, ActiveProcesses, TotalTerminated.
+  [StructLayout(LayoutKind.Sequential)] struct BasicAccounting {
+    public long TotalUserTime;
+    public long TotalKernelTime;
+    public long ThisPeriodUserTime;
+    public long ThisPeriodKernelTime;
+    public uint TotalPageFaultCount;
+    public uint TotalProcesses;
+    public uint ActiveProcesses;
+    public uint TotalTerminatedProcesses;
+  }
 
   [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
   public static extern IntPtr CreateJobObject(IntPtr security, string name);
@@ -70,6 +82,10 @@ public static class ClowderJobInterop {
   public static extern IntPtr OpenJobObject(uint access, bool inherit, string name);
   [DllImport("kernel32.dll", SetLastError = true)]
   static extern bool SetInformationJobObject(IntPtr job, int kind, ref ExtendedLimit info, uint size);
+  // QueryInformationJobObject is a single export whose result layout depends on the information
+  // class, so each class gets its own P/Invoke signature over the matching structure.
+  [DllImport("kernel32.dll", SetLastError = true, EntryPoint = "QueryInformationJobObject")]
+  static extern bool QueryBasicAccounting(IntPtr job, int kind, ref BasicAccounting info, uint size, out uint returned);
   [DllImport("kernel32.dll", SetLastError = true)]
   static extern bool QueryInformationJobObject(IntPtr job, int kind, ref ExtendedLimit info, uint size, out uint returned);
   [DllImport("kernel32.dll", SetLastError = true)]
@@ -90,12 +106,14 @@ public static class ClowderJobInterop {
   }
 
   public static int ActiveProcesses(IntPtr job, out uint active) {
-    var info = new ExtendedLimit();
+    // JobObjectBasicAccountingInformation (class 1) has its own layout; reuse of the extended-limit
+    // struct for this query returns ERROR_BAD_LENGTH (24).
+    var info = new BasicAccounting();
     uint returned;
     active = 0;
-    if (!QueryInformationJobObject(job, 1, ref info, (uint)Marshal.SizeOf(info), out returned))
+    if (!QueryBasicAccounting(job, 1, ref info, (uint)Marshal.SizeOf(info), out returned))
       return Marshal.GetLastWin32Error();
-    active = info.Basic.ActiveLimit;
+    active = info.ActiveProcesses;
     return 0;
   }
 }
