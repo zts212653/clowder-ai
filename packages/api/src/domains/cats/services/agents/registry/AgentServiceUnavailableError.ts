@@ -32,11 +32,11 @@ export class AgentServiceUnavailableError extends Error {
 
 export function terminalExecutionBindingFailure(error: unknown) {
   if (error instanceof ExecutionAdmissionConflict && !error.retryable) return 'execution_binding_conflict';
-  // An unpopulated registry or an unready bootstrap can recover on a later attempt.
-  if (
-    error instanceof AgentServiceUnavailableError &&
-    error.reason.code !== 'not-registered' &&
-    error.reason.code !== 'ACP_BOOTSTRAP_UNAVAILABLE'
-  )
+  if (error instanceof AgentServiceUnavailableError && !isRetryableAgentRegistration(error.reason))
     return 'execution_binding_unavailable';
+}
+
+/** An unpopulated registry or an unready bootstrap can recover on a later attempt. */
+export function isRetryableAgentRegistration(reason: AgentRegistrationFailure) {
+  return reason.code === 'not-registered' || reason.code === 'ACP_BOOTSTRAP_UNAVAILABLE';
 }

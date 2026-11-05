@@ -24,6 +24,8 @@ export async function runDispatch(
     retryable = false,
     cancel = false,
     unavailable = false,
+    busyCaller = true,
+    drainError,
   } = {},
 ) {
   f ??= await queueHttpFixture(t);
@@ -100,10 +102,11 @@ export async function runDispatch(
   }
   assert.ok(entry);
   if (unavailable) {
-    f.agents.markUnavailable(target, { code: 'AGY_IDE_EXECUTION_RETIRED', message: 'fixture: member retired' });
+    const code = unavailable === true ? 'AGY_IDE_EXECUTION_RETIRED' : unavailable;
+    f.agents.markUnavailable(target, { code, message: 'fixture: member unavailable' });
     f.router.refreshFromRegistry(f.agents);
   }
-  invocationTracker.start(threadId, caller, userId, [caller], 'busy-caller');
+  if (busyCaller) invocationTracker.start(threadId, caller, userId, [caller], 'busy-caller');
   const records = new InvocationRecordStore();
   const frames = [];
   const processor = new QueueProcessor(
@@ -118,7 +121,9 @@ export async function runDispatch(
     },
     { retryDeferral: { baseDelayMs: 60_000 } },
   );
-  await processor.requestDrain(threadId);
+  const drain = processor.requestDrain(threadId);
+  if (drainError) await assert.rejects(drain, drainError);
+  else await drain;
   await waitFor(() => !invocationTracker.getActiveSlots(threadId).some((slot) => targets.includes(slot.catId)));
   if (!unavailable)
     assert.ok(records.listLatestTerminalByThreadIds([threadId], userId).has(threadId), JSON.stringify(frames));

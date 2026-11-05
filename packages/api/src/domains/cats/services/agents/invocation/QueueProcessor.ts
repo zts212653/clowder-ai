@@ -432,6 +432,7 @@ function isExactReplayableQueueRecord(
 }
 
 export interface RouterLike {
+  isRetryableTargetUnavailable?(catId: string): boolean;
   resolveExplicitTargets(
     requestedCatIds: readonly string[],
     threadId: string,
@@ -4122,6 +4123,16 @@ export class QueueProcessor {
     );
   }
 
+  private deferRetryableUnavailableTargets(entry: QueueEntry): boolean {
+    if (
+      entry.execution.liveSessionId ||
+      !entry.targets.some((catId) => this.deps.router.isRetryableTargetUnavailable?.(catId))
+    )
+      return false;
+    if (!this.retryDeferrals.isDeferred(entry.id)) this.retryDeferrals.defer(entry.threadId, entry.id);
+    return true;
+  }
+
   /**
    * The targets a queued entry would start with now. Failure settlement uses the
    * Queue's current per-recipient order, so unrelated waiting work is not a barrier.
@@ -4170,7 +4181,8 @@ export class QueueProcessor {
           },
         };
       }
-      if (entry.delivery.routingHeldTargetIds?.length) return { kind: 'unresolved' };
+      if (entry.delivery.routingHeldTargetIds?.length || this.deferRetryableUnavailableTargets(entry))
+        return { kind: 'unresolved' };
       const terminalized = await this.terminalizeUnavailableConversationEntry(entry, routingClass);
       return terminalized
         ? { kind: 'settled', attempt: QueueProcessor.terminalizedEntryAttempt(terminalized) }
@@ -4178,7 +4190,8 @@ export class QueueProcessor {
     }
     const targets = await this.deps.router.resolveExplicitTargets(requestedTargets, threadId, { bound: true });
     if (targets.length > 0) return { kind: 'resolved', targets };
-    if (entry.delivery.routingHeldTargetIds?.length) return { kind: 'unresolved' };
+    if (entry.delivery.routingHeldTargetIds?.length || this.deferRetryableUnavailableTargets(entry))
+      return { kind: 'unresolved' };
     const terminalized =
       entry.kind === 'private_input'
         ? await this.terminalizeUnavailablePrivateEntry(entry)
@@ -4350,6 +4363,7 @@ export class QueueProcessor {
       }
       resolvedTargetCats = await this.resolveQueuedConversationTargets(nextEntry);
       if (resolvedTargetCats.length === 0) {
+        if (this.deferRetryableUnavailableTargets(nextEntry)) return { started: false };
         const terminalized = await this.terminalizeUnavailableConversationEntry(nextEntry, routingClass);
         return { started: false, progressed: terminalized !== null, ...(terminalized ? { entry: terminalized } : {}) };
       }
@@ -4363,6 +4377,7 @@ export class QueueProcessor {
         bound: true,
       });
       if (resolvedTargetCats.length === 0) {
+        if (this.deferRetryableUnavailableTargets(nextEntry)) return { started: false };
         const terminalized =
           nextEntry.kind === 'private_input'
             ? await this.terminalizeUnavailablePrivateEntry(nextEntry)
@@ -4538,9 +4553,19 @@ export class QueueProcessor {
     } catch (error) {
       // A lost durable acknowledgement is unknown, not permission to re-admit Live.
       if (claimed.execution.liveSessionId) throw error;
-      await this.deps.queue.reconcileClaimedLifecycleTargets(claimed.threadId, [claimed.id], this.deps.messageStore, [
-        claimed,
-      ]);
+      const recovered = await this.deps.queue.reconcileClaimedLifecycleTargets(
+        claimed.threadId,
+        [claimed.id],
+        this.deps.messageStore,
+        [claimed],
+      );
+      if (
+        recovered &&
+        claimed.sourceCategory === 'a2a' &&
+        this.deps.queue.getEntrySnapshotAcrossUsers(claimed.threadId, claimed.id)?.targets.length !==
+          claimed.targets.length
+      )
+        void this.requestDrain(claimed.threadId).catch(() => {});
       throw error;
     }
   }

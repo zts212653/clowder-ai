@@ -67,7 +67,10 @@ import {
 } from '../invocation/invocation-capacity-snapshot.js';
 import type { TaskProgressStore } from '../invocation/TaskProgressStore.js';
 import type { AgentRegistry } from '../registry/AgentRegistry.js';
-import type { AgentRegistrationFailure } from '../registry/AgentServiceUnavailableError.js';
+import {
+  type AgentRegistrationFailure,
+  isRetryableAgentRegistration,
+} from '../registry/AgentServiceUnavailableError.js';
 import type { RouteExecutionOptions, RouteOptions, RouteStrategyDeps } from '../routing/route-helpers.js';
 import { routeParallel } from '../routing/route-parallel.js';
 import { routeSerial } from '../routing/route-serial.js';
@@ -826,6 +829,11 @@ export class AgentRouter {
       return id !== '__none__' && catRegistry.has(id) && isCatAvailable(id) ? (id as CatId) : null;
     });
     return targets.every((id): id is CatId => id !== null) ? [...new Set(targets)] : [];
+  }
+
+  isRetryableTargetUnavailable(catId: string): boolean {
+    const reason = this.unavailableServices.get(catId);
+    return reason !== undefined && isRetryableAgentRegistration(reason);
   }
 
   /**
