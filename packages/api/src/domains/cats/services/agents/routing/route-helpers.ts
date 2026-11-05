@@ -426,6 +426,10 @@ export interface RouteOptions {
       }) => Promise<void>)
     | undefined;
   /** Create the exact child's durable processing response before provider startup. */
+  onExecutionBindingRejected?: (
+    catId: CatId,
+    reason: 'execution_binding_conflict' | 'execution_binding_unavailable',
+  ) => Promise<boolean>;
   onLifecycleInvocationStarted?:
     | ((input: {
         threadId: string;

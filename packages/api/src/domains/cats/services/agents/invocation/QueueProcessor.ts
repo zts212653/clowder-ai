@@ -4641,6 +4641,7 @@ export class QueueProcessor {
     const unconfirmedProviderCats = new Set<string>();
     let lifecycleQueueTargetsRetired = false;
     const lifecycleRetiredTargets = new Set<string>();
+    const preAdmissionFailedTargets = new Set<string>();
     let lifecycleClaimRestorePromise: Promise<boolean> | undefined;
     // Freeze the controllers installed for this parent before the first await after
     // startAll. Later slot replacements must never lend state or signals to this run.
@@ -5470,6 +5471,19 @@ export class QueueProcessor {
       const callerDispatchProjectionByCat = new Map<string, CallerDispatchObservationProjection>();
       const callerDispatchProcessStartPromptCats = new Set<string>();
       const callerDispatchPromptByCat: Record<string, string> = {};
+      if (entry.kind === 'private_input' && entry.sourceCategory === 'a2a_failure') {
+        const failure = await messageStore.getById(entry.payload.sourceRecordId);
+        if (failure?.threadId === threadId && failure.lifecycle?.kind === 'delivery_failure') {
+          const original = await messageStore.getById(failure.lifecycle.inputMessageId);
+          if (
+            original?.threadId === threadId &&
+            original.userId === userId &&
+            original.from?.kind === 'agent' &&
+            original.from.catId === primaryCat
+          )
+            this.callerDispatchObservations.registerPersistedSource(original, failure.lifecycle.requestedTargets);
+        }
+      }
       for (const catId of targetCats) {
         const scope = {
           ownerId: userId,
@@ -5680,6 +5694,39 @@ export class QueueProcessor {
           // from becoming either a prompt fallback or durable exposure evidence.
           persistedPromptMessages,
           targetDispatchMode: targetCats.length > 1 ? 'parallel' : 'serial',
+          onExecutionBindingRejected: async (
+            catId: CatId,
+            reason: 'execution_binding_conflict' | 'execution_binding_unavailable',
+          ) => {
+            if (entry.execution.actionSuccessorFence || entry.execution.liveSessionId) return false;
+            const sources = admissionEntries.filter((candidate) => candidate.claimedTargetIds?.includes(catId));
+            if (sources.length === 0 || sources.some((candidate) => !candidate.payload.messageId)) return false;
+            for (const candidate of sources) {
+              const source = await messageStore.getById(candidate.payload.messageId!);
+              if (!source) throw new Error(`pre-admission failure source missing: ${candidate.id}`);
+              if (admittedControllerByCat.get(catId)?.signal.aborted || controller?.signal.aborted) return false;
+              const result = await queue.terminalizeClaimedAdmissionFailure(
+                messageStore,
+                source,
+                candidate,
+                catId,
+                reason,
+              );
+              if (result.kind !== 'applied' && result.kind !== 'replayed')
+                throw new Error(`pre-admission failure transaction rejected ${candidate.id}: ${result.kind}`);
+              this.callerDispatchObservations.registerPersistedSource(result.inputMessage, [catId]);
+              const retired = await queue.retireClaimedLifecycleTarget(threadId, candidate.id, catId);
+              if (retired.outcome !== 'retired')
+                throw new Error(`pre-admission failure target retirement changed: ${candidate.id}/${catId}`);
+              this.emitLifecycleMessageUpdated(userId, result.inputMessage);
+              this.emitLifecycleMessageUpdated(userId, result.failureMessage);
+            }
+            preAdmissionFailedTargets.add(catId);
+            lifecycleRetiredTargets.add(catId);
+            lifecycleQueueTargetsRetired = targetCats.every((target) => lifecycleRetiredTargets.has(target));
+            void this.requestDrain(threadId);
+            return true;
+          },
           onLifecycleInvocationStarted: async (
             input: Parameters<NonNullable<RouteOptions['onLifecycleInvocationStarted']>>[0],
           ) => {
@@ -6400,6 +6447,11 @@ export class QueueProcessor {
       }
 
       if (!entry.execution.actionSuccessorFence && terminalDispositions.getSuccessfulCatIds().length === 0) {
+        if (preAdmissionFailedTargets.size === targetCats.length) {
+          await invocationRecordStore.update(invocationId, { status: 'failed', error: 'pre_admission_failed' });
+          await this.cleanupStreamingOnFailure(threadId, invocationId, streamStartPromise, log);
+          return executionResult('failed');
+        }
         if (targetCats.every((catId) => routingRejectedTargets.has(catId))) {
           await invocationRecordStore.update(invocationId, { status: 'failed', error: 'routing_preflight_rejected' });
           log.info(
@@ -6717,14 +6769,22 @@ export class QueueProcessor {
             if (lifecycleAdmissionUnknown) {
               // The original short claim fences an uncertain durable commit until canonical recovery.
               if (returnedExecutionResult) returnedExecutionResult.primarySettlementIncomplete = true;
-            } else if (lifecycleTransferStarted && !lifecycleReceiverPersisted && !preReceiverUserCancel) {
+            } else if (
+              lifecycleTransferStarted &&
+              !lifecycleReceiverPersisted &&
+              preAdmissionFailedTargets.size === 0 &&
+              !preReceiverUserCancel
+            ) {
               if (!(await queue.restoreClaimedEntries(threadId, [entry.id, ...batchedEntryIds]))) {
                 throw new Error('pre-receiver Queue claim restoration did not converge');
               }
               // The body remains pending by design. Do not immediately hot-loop
               // the same failed pre-receiver transfer from onInvocationComplete.
               if (returnedExecutionResult) returnedExecutionResult.primarySettlementIncomplete = true;
-            } else if (lifecycleReceiverPersisted && !lifecycleQueueTargetsRetired) {
+            } else if (
+              (lifecycleReceiverPersisted || preAdmissionFailedTargets.size > 0) &&
+              !lifecycleQueueTargetsRetired
+            ) {
               if (
                 !(await queue.reconcileClaimedLifecycleTargets(threadId, [entry.id, ...batchedEntryIds], messageStore, [
                   entry,

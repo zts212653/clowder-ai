@@ -9,7 +9,7 @@ import { ThreadStore } from '../../dist/domains/cats/services/stores/ports/Threa
 import { messagesRoutes } from '../../dist/routes/messages.js';
 import { routingPreviewRoutes } from '../../dist/routes/routing-preview.js';
 
-export async function queueHttpFixture(t, { messageStore } = {}) {
+export async function queueHttpFixture(t, { messageStore, threadStore, threadId, ledgerStore } = {}) {
   const agents = new AgentRegistry();
   for (const catId of ['opus', 'codex', 'gemini']) {
     agents.register(catId, {
@@ -19,11 +19,11 @@ export async function queueHttpFixture(t, { messageStore } = {}) {
     });
   }
   const messages = messageStore ?? new MessageStore();
-  const threads = new ThreadStore();
-  const thread = threads.create('owner', 'real preview and admission');
+  const threads = threadStore ?? new ThreadStore();
+  const thread = threadId ? await threads.get(threadId) : await threads.create('owner', 'real preview and admission');
   const registry = new InvocationRegistry();
   const router = new AgentRouter({ agentRegistry: agents, registry, messageStore: messages, threadStore: threads });
-  const queue = new InvocationQueue(undefined, {
+  const queue = new InvocationQueue(ledgerStore, {
     resolveTargets: (targets, threadId, content, exact) => router.resolveSendTargets(targets, threadId, content, exact),
   });
   const app = Fastify();
