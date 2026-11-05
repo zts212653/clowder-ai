@@ -21,6 +21,7 @@ import {
 import {
   bindManagedMcpStdioConfig,
   materializeNativeMcpHttp,
+  resolveManagedMcpEntrypoint,
 } from '../../../../../config/capabilities/managed-mcp-config.js';
 import { isManagedCatCafeSplit } from '../../../../../config/capabilities/mcp-constants.js';
 import {
@@ -115,7 +116,7 @@ export async function captureProviderMcpConfig(input: {
         if (!s.enabled) continue;
         if (isManagedCatCafeSplit(s)) {
           const ep = CAT_CAFE_SPLIT_ENTRYPOINTS.get(s.name)!;
-          const epPath = join(distDir, ep);
+          const epPath = resolveManagedMcpEntrypoint(ep);
           if (existsSync(epPath)) {
             catCafeMcpServerNames.push(s.name);
             mcpServers[s.name] = {
@@ -152,7 +153,7 @@ export async function captureProviderMcpConfig(input: {
   assertMappedCapabilitySource(resolved, binaryProjectRoot, capabilitiesProjectRoot);
   if (!resolved) {
     for (const [name, ep] of CAT_CAFE_SPLIT_ENTRYPOINTS) {
-      const epPath = join(distDir, ep);
+      const epPath = resolveManagedMcpEntrypoint(ep);
       if (existsSync(epPath)) {
         catCafeMcpServerNames.push(name);
         mcpServers[name] = {
