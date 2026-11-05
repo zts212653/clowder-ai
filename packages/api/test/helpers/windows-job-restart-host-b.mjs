@@ -4,9 +4,11 @@
  *
  * All modes run the product's `recoverPriorProcessExecutions`. `baseline` is the pre-#1838 recovery
  * (no job adoption, no job evidence); `fixed` is the current one; `settle-fail` is `fixed` with a
- * response settlement that throws; `next` is `fixed` followed by the user's next turn of the same
- * thread and role passing admission and the provider-entry fence.
+ * response settlement that throws. `baseline` and `next` then run the user's next turn of the same
+ * thread and role through the real invokeSingleCat, which must refuse it (baseline) or reach its
+ * provider resuming the session API A left (next).
  */
+import './setup-cat-registry.js';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createRedisClient } from '../../../shared/dist/utils/index.js';
@@ -30,6 +32,7 @@ import {
 import { RedisTurnExecutionStore } from '../../dist/domains/cats/services/stores/redis/RedisTurnExecutionStore.js';
 import { createCliExecutionOwnerService } from '../../dist/utils/cli-process-ownership.js';
 import { adoptWindowsApiJob } from '../../dist/utils/windows-job-owner.js';
+import { restartTurns } from './windows-job-restart-turn.mjs';
 
 const PROCESS_START_AT = Date.now();
 const [configPath, mode, outFile] = process.argv.slice(2);
@@ -81,27 +84,29 @@ const child = await store.get(e.invocationId);
 const running = await store.listRunningByUser(e.userId);
 const next = { invocationId: `next-${PROCESS_START_AT}`, threadId: e.threadId, catId: e.catId };
 const blocker = findUnconfirmedProviderBlocker(running, next);
-let nextProviderStarted = null;
-if (mode === 'next' && !blocker) {
-  await store.createRunning({
-    invocationId: next.invocationId,
-    parentInvocationId: next.invocationId,
-    threadId: e.threadId,
-    userId: e.userId,
-    catId: e.catId,
-    executionKind: 'ordinary',
-    startedAt: Date.now(),
-    providerLifecycleTracked: true,
-  });
-  nextProviderStarted = await store.markProviderStarted(next.invocationId, Date.now());
-}
 const response = await messageStore.getByIdempotencyKey(
   e.userId,
   e.threadId,
   lifecycleResponseIdempotencyKey(e.invocationId),
 );
 const parent = await records.get(e.executionId);
+// Read the crashed child's own truth first: a refused next turn still mints its credential and
+// retires the slot's previous one, which is not what this evidence is about.
 const auth = await registry.verify(e.invocationId, callbackToken);
+const drafts = (await draftStore.getByThread(e.userId, e.threadId)).length;
+const responsePending = (await store.listResponsePending()).map((turn) => turn.invocationId);
+// The user's next message of the same thread and role, through the product's invokeSingleCat.
+let nextTurn = null;
+if (mode === 'next' || mode === 'baseline') {
+  const turns = restartTurns({
+    client,
+    registry,
+    turnExecutionStore: store,
+    scope: config.scope,
+  });
+  const { errors } = await turns.run();
+  nextTurn = { errors, providerCalls: turns.calls, session: await turns.session() };
+}
 writeFileSync(
   outFile,
   JSON.stringify({
@@ -119,7 +124,7 @@ writeFileSync(
     terminalReason: child?.terminalReason ?? null,
     blocked: hasUnconfirmedProviderTeardown(child),
     blockerId: blocker?.invocationId ?? null,
-    nextProviderStarted,
+    nextTurn,
     runningIds: running.map((record) => record.invocationId),
     parent: { status: parent?.status, error: parent?.error ?? null },
     response: {
@@ -127,8 +132,8 @@ writeFileSync(
       reason: response?.lifecycle?.reason ?? null,
       content: response?.content,
     },
-    drafts: (await draftStore.getByThread(e.userId, e.threadId)).length,
-    responsePending: (await store.listResponsePending()).map((turn) => turn.invocationId),
+    drafts,
+    responsePending,
     authOk: auth.ok,
     authReason: auth.ok ? null : auth.reason,
   }),

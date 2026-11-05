@@ -1,21 +1,22 @@
 /**
- * #1838 API A of windows-job-restart-recovery.test.js: admits one turn the way the router and
- * invoke-single-cat do (parent invocation, callback credential, child, response R, streamed draft),
- * links it to this API's kernel job, marks the provider started, then starts a provider tree whose
- * PPID chain breaks. It stays alive until the test kills it.
+ * #1838 API A of windows-job-restart-recovery.test.js. After adopting its kernel job it runs two real
+ * invokeSingleCat turns of one thread and role. The first completes and leaves the persistent
+ * logical/native session mapping. The second is admitted the way the router does it (parent
+ * invocation, then the child's response R and streamed draft once invokeSingleCat names the child);
+ * invokeSingleCat itself links it to the job and passes the provider-entry fence, and its provider
+ * starts a tree whose PPID chain breaks. It stays inside that provider until the test kills it.
  */
+import './setup-cat-registry.js';
 import { spawn } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRedisClient } from '../../../shared/dist/utils/index.js';
+import { CallbackAuthTurnExecutionLifecycle } from '../../dist/domains/cats/services/agents/invocation/CallbackAuthTurnExecutionLifecycle.js';
 import { InvocationRegistry } from '../../dist/domains/cats/services/agents/invocation/InvocationRegistry.js';
 import { RedisAuthInvocationBackend } from '../../dist/domains/cats/services/agents/invocation/RedisAuthInvocationBackend.js';
-import { lifecycleResponseIdempotencyKey } from '../../dist/domains/cats/services/agents/invocation/response-draft-settlement.js';
-import { createDraftStore } from '../../dist/domains/cats/services/stores/factories/DraftStoreFactory.js';
 import { createInvocationRecordStore } from '../../dist/domains/cats/services/stores/factories/InvocationRecordStoreFactory.js';
-import { createMessageStore } from '../../dist/domains/cats/services/stores/factories/MessageStoreFactory.js';
 import { RedisTurnExecutionStore } from '../../dist/domains/cats/services/stores/redis/RedisTurnExecutionStore.js';
-import { recordWindowsJobExecutionLink } from '../../dist/utils/windows-job-execution-links.js';
 import { adoptWindowsApiJob } from '../../dist/utils/windows-job-owner.js';
+import { restartTurns } from './windows-job-restart-turn.mjs';
 
 const config = JSON.parse(readFileSync(process.argv[2], 'utf8'));
 const fail = (error) => {
@@ -26,10 +27,36 @@ const fail = (error) => {
 const adoption = await adoptWindowsApiJob({ dataDir: config.dataDir });
 if (!adoption.adopted) fail(adoption.reason);
 const redis = createRedisClient({ url: config.redisUrl, keyPrefix: config.prefix });
-const store = new RedisTurnExecutionStore(redis);
 const { threadId, userId, catId } = config.scope;
 
-// The parent invocation, then the child's callback credential, as the router admits a turn.
+// The index.ts composition invokeSingleCat runs with: callback auth wraps the canonical store.
+const canonical = new RedisTurnExecutionStore(redis);
+const registry = new InvocationRegistry({
+  backend: new RedisAuthInvocationBackend(redis),
+  turnExecutionStore: canonical,
+});
+// Test-only tap: the child's callback token goes to this test's private temp file, so B can try it.
+const minted = [];
+const create = registry.create.bind(registry);
+registry.create = async (...args) => {
+  const auth = await create(...args);
+  minted.push(auth);
+  return auth;
+};
+const turns = restartTurns({
+  client: redis,
+  registry,
+  turnExecutionStore: new CallbackAuthTurnExecutionLifecycle(canonical, registry),
+  scope: config.scope,
+});
+
+// --- turn 1 completes and leaves the logical/native session mapping ---
+const first = await turns.run();
+if (first.errors.length > 0 || turns.calls.length !== 1) fail(`first turn: ${first.errors.join('; ')}`);
+const session = await turns.session();
+if (!session.logicalId || !session.nativeId) fail(`no session mapping: ${JSON.stringify(session)}`);
+
+// --- turn 2: the parent invocation as the router admits a turn ---
 const records = createInvocationRecordStore(redis);
 const parent = await records.create({
   threadId,
@@ -42,69 +69,34 @@ const parent = await records.create({
 if (!(await records.update(parent.invocationId, { status: 'running', expectedStatus: 'queued' }))) {
   fail('parent not running');
 }
-const registry = new InvocationRegistry({ backend: new RedisAuthInvocationBackend(redis), turnExecutionStore: store });
-const auth = await registry.create(userId, catId, threadId, parent.invocationId);
-const execution = { executionId: parent.invocationId, invocationId: auth.invocationId, threadId, catId, userId };
-const startedAt = Date.now();
-const created = await store.createRunning({
-  invocationId: execution.invocationId,
-  parentInvocationId: execution.executionId,
-  threadId,
-  userId,
-  catId,
-  executionKind: 'ordinary',
-  startedAt,
-  providerLifecycleTracked: true,
-});
-if (created.outcome !== 'created') fail(`not created: ${created.outcome}`);
-
-// The original response R and the body its draft streamed before the crash.
-await createMessageStore(redis).append({
-  from: { kind: 'agent', catId },
-  userId,
-  content: '',
-  mentions: [],
-  origin: 'stream',
-  timestamp: startedAt,
-  threadId,
-  idempotencyKey: lifecycleResponseIdempotencyKey(execution.invocationId),
-  lifecycle: {
-    kind: 'response',
-    orderKey: `${startedAt}:${execution.invocationId}`,
-    invocationId: execution.invocationId,
-    targetId: catId,
-    inputEntryIds: [],
-    inputMessageIds: [],
-    status: 'processing',
-    startedAt,
+let execution;
+const killed = await turns.run({
+  parentInvocationId: parent.invocationId,
+  streamedBody: config.streamedBody,
+  // Inside the provider, after invokeSingleCat linked the job and passed the entry fence: the
+  // product's stdio shape, after adoption, so the tree lands inside the job. Then it never returns.
+  inProvider: async () => {
+    spawn(process.execPath, [config.launcher], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+    while (!existsSync(config.treeFile)) await new Promise((resolve) => setTimeout(resolve, 100));
+    const tree = JSON.parse(readFileSync(config.treeFile, 'utf8'));
+    const auth = minted.find((entry) => entry.invocationId === execution.invocationId);
+    writeFileSync(
+      config.hostAFile,
+      JSON.stringify({
+        host: process.pid,
+        ...tree,
+        jobName: adoption.job.record.jobName,
+        execution,
+        callbackToken: auth?.callbackToken,
+        session,
+        resumed: turns.calls[1].resume,
+      }),
+    );
+    await new Promise(() => {});
+  },
+  onTurn: async (admitted) => {
+    const { responseMessageId, startedAt, ...identity } = admitted;
+    execution = { executionId: parent.invocationId, ...identity, threadId, catId, userId };
   },
 });
-await createDraftStore(redis).upsert({
-  userId,
-  threadId,
-  invocationId: execution.invocationId,
-  catId,
-  content: config.streamedBody,
-  updatedAt: Date.now(),
-});
-
-// The provider-entry order in invoke-single-cat: link to the job, then mark the provider started.
-recordWindowsJobExecutionLink({ dataDir: adoption.job.dataDir, jobName: adoption.job.record.jobName, execution });
-if (!(await store.markProviderStarted(execution.invocationId, Date.now()))) fail('provider entry fence rejected');
-
-// Spawned with the product's stdio shape, after adoption, so the tree lands inside the job.
-spawn(process.execPath, [config.launcher], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
-while (!existsSync(config.treeFile)) await new Promise((resolve) => setTimeout(resolve, 100));
-const tree = JSON.parse(readFileSync(config.treeFile, 'utf8'));
-// The callback token goes only to this test's private temp file, so B can try it after recovery.
-writeFileSync(
-  config.hostAFile,
-  JSON.stringify({
-    host: process.pid,
-    ...tree,
-    jobName: adoption.job.record.jobName,
-    execution,
-    callbackToken: auth.callbackToken,
-  }),
-);
-setInterval(() => {}, 1000);
+fail(`the killed turn ended by itself: ${killed.errors.join('; ')}`);

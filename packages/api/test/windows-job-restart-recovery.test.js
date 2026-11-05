@@ -3,10 +3,13 @@
  * really killed, Redis really restarts, and a separate API B recovers from the durable store.
  *
  * A and B are independent Node processes using the product modules in the order the product runs
- * them: A admits a turn with its parent invocation, callback credential, response R and streamed
- * draft; B runs the index.ts startup recovery through the callback-auth lifecycle, response
- * settlement and invocation reconciler. B first runs the pre-#1838 recovery on the same durable
- * state to show the original block, then the fixed one, then the user's next turn. Only this test's
+ * them: A runs two real invokeSingleCat turns (only the provider is deterministic); the first leaves
+ * the persistent logical/native session mapping, the second is admitted with its parent invocation,
+ * callback credential, response R and streamed draft, linked to A's job by invokeSingleCat, and is
+ * still inside its provider when A is killed. B runs the index.ts startup recovery through the
+ * callback-auth lifecycle, response settlement and invocation reconciler. B first runs the pre-#1838
+ * recovery on the same durable state to show the original block, then the fixed one, then the
+ * user's next turn through invokeSingleCat. Only this test's
  * own PIDs, private Redis (random port, own password and data directory) and temp directories are
  * touched.
  *
@@ -174,6 +177,8 @@ test('a killed Windows API leaves no stuck execution after a real restart', { sk
     assert.equal(alive(tree.writer), true, 'the writer outlives its launcher with a broken PPID chain');
 
     const childId = tree.execution.invocationId;
+    // A's killed turn resumed the native session its first, completed turn left.
+    assert.equal(tree.resumed, tree.session.nativeId);
     // A turn still running keeps every object of its lifecycle open.
     const untouched = (result) => {
       assert.deepEqual([result.status, result.blocked, result.blockerId], ['running', true, childId]);
@@ -202,6 +207,10 @@ test('a killed Windows API leaves no stuck execution after a real restart', { sk
     assert.equal(baseline.liveComplete, true);
     assert.deepEqual(baseline.interrupted, []);
     untouched(baseline);
+    // The user's next message is refused by invokeSingleCat itself, naming the exact blocking child.
+    assert.deepEqual(baseline.nextTurn.providerCalls, []);
+    assert.equal(baseline.nextTurn.errors.length, 1);
+    assert.match(baseline.nextTurn.errors[0], new RegExp(`invocationId=${childId}`));
 
     // GREEN, with a failing response store: the job proof ends the child, and R stays pending.
     const settleFailed = runB('settle-fail');
@@ -247,11 +256,18 @@ test('a killed Windows API leaves no stuck execution after a real restart', { sk
       [repeated.settledResponses, repeated.sweptParents, repeated.response.status],
       [0, 0, 'interrupted'],
     );
-    assert.deepEqual([repeated.blockerId, repeated.nextProviderStarted], [null, true]);
+    assert.equal(repeated.blockerId, null);
+    // It reaches the provider through invokeSingleCat, resuming the same native and logical session.
+    assert.deepEqual(repeated.nextTurn.errors, []);
+    assert.deepEqual(repeated.nextTurn.providerCalls, [{ resume: tree.session.nativeId }]);
+    assert.deepEqual(repeated.nextTurn.session, tree.session);
+    // That turn linked itself to B's job and removed the link once its terminal was durable.
+    assert.deepEqual(readdirSync(join(dataDir, 'windows-job-execution-links')), []);
   } finally {
     if (hostA && hostA.exitCode === null) hostA.kill();
+    // The job reaps the writer once its API dies; both may already be gone, so never fail on that.
     for (const pid of [tree?.writer, tree?.launcher]) {
-      if (pid && alive(pid)) execFileSync('taskkill', ['/PID', String(pid), '/F'], { stdio: 'ignore' });
+      if (pid && alive(pid)) spawn('taskkill', ['/PID', String(pid), '/F'], { stdio: 'ignore', windowsHide: true });
     }
     await redis.stop();
     rmSync(root, { recursive: true, force: true });
