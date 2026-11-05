@@ -96,6 +96,8 @@ async function persistOwnerRevision(
   input: ContentCommitInput,
   state: ProjectContentStateV1,
 ) {
+  // Durable candidate membership precedes publication, including the first blob/directory write.
+  await store.prepareWorkIndex(state);
   if (!input.previousState && input.authorizeEffect && (input.collectiveScope || !Buffer.isBuffer(input.bytes))) {
     await store.commitInitialState(state, input.bytes, input.authorizeEffect);
   } else {
