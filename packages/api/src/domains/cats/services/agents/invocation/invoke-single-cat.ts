@@ -5986,7 +5986,14 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
       // the provider is marked started, so an API killed from here on leaves a stop proof the next
       // instance can join. A host that cannot be owned fails this turn before any provider exists,
       // while its record can still settle; nothing is launched until the seam takes the host.
-      if (process.platform === 'win32' && service.windowsProviderHosts && deps.turnExecutionStore?.markProviderStarted)
+      // An opt-in tmux carrier launches the provider in a pane, never in a host: no link for it.
+      if (
+        process.platform === 'win32' &&
+        service.windowsProviderHosts &&
+        !spawnCliOverride &&
+        !agentCarrierSessionFactory &&
+        deps.turnExecutionStore?.markProviderStarted
+      )
         windowsHostScope = await createWindowsProviderHostScope({
           execution: { executionId: executionParentInvocationId, invocationId, threadId, catId, userId },
         });

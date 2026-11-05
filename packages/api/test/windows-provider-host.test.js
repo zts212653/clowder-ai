@@ -400,3 +400,50 @@ test('a corrupted controller birth keeps the execution protected', { skip: !isWi
   assert.deepEqual(pass.released, []);
   assert.equal((await store.get(EXECUTION.invocationId)).providerTeardownAt, undefined);
 });
+
+const { createDirectAgentCarrierSession } = await import(
+  new URL('../dist/domains/cats/services/agents/providers/DirectAgentCarrierSession.js', import.meta.url)
+);
+
+// Seam 2: a direct app_server session of the turn starts in a linked host, like spawnCli does; a
+// session under another invocationId (a read-only command) is not this execution's to own.
+for (const owner of ['own', 'other']) {
+  test(
+    `a direct session ${owner === 'own' ? 'of the turn reaps' : 'of another invocation leaves'} a broken-chain writer`,
+    { skip: !isWindows, timeout: 90_000 },
+    async (t) => {
+      const { dir, dataDir, script } = fixture(t);
+      const writer = script('writer.cjs', ['setInterval(() => {}, 1000);']);
+      const provider = script('provider.cjs', [
+        "const { spawn } = require('node:child_process');",
+        "const fs = require('node:fs');",
+        `const writer = spawn(process.execPath, [${JSON.stringify(writer)}], { stdio: 'ignore', detached: true });`,
+        'writer.unref();',
+        `fs.writeFileSync(${JSON.stringify(join(dir, 'writer.pid'))}, String(writer.pid));`,
+        'setInterval(() => {}, 1000);',
+      ]);
+      const scope = await createWindowsProviderHostScope({ execution: EXECUTION, dataDir });
+      const invocationId = owner === 'own' ? EXECUTION.invocationId : 'readonly-command';
+      const iterator = bindWindowsProviderHostScope(
+        () =>
+          (async function* () {
+            yield await createDirectAgentCarrierSession({ command: process.execPath, args: [provider], invocationId });
+          })(),
+        scope,
+      );
+      const wire = (await iterator.next()).value;
+      const writerPid = Number(
+        await waitFor(
+          () => existsSync(join(dir, 'writer.pid')) && readFileSync(join(dir, 'writer.pid'), 'utf8'),
+          15_000,
+          'writer',
+        ),
+      );
+      t.after(() => killOwned(writerPid));
+      await wire.terminate?.();
+      assert.equal(await scope.close(), true);
+      if (owner === 'own') await waitFor(() => !alive(writerPid), 5_000, 'writer reaped with its host job');
+      else assert.equal(alive(writerPid), true, "a session of another invocation is not this execution's to stop");
+    },
+  );
+}
