@@ -81,6 +81,8 @@ describe('Task state semantics at the real MCP boundary', () => {
       'todo/doing/blocked record unfinished work',
       'If a generic resume only identifies ended work',
       'an explicit redo or extension request already authorizes new work within its scope',
-    ]) assert.ok(description.includes(anchor), anchor);
+    ]) {
+      assert.ok(description.includes(anchor), anchor);
+    }
   });
 });
