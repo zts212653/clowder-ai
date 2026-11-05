@@ -132,6 +132,8 @@ test('a killed Windows API leaves no stuck execution after a real restart', { sk
     scope: { threadId: 'issue1838-thread', catId: 'codex', userId: 'issue1838-user' },
     streamedBody: 'streamed before the API was killed',
     launcher: join(root, 'launcher.cjs'),
+    // The provider root spawnCli starts in its host: it starts the launcher and stays running.
+    root: join(root, 'provider-root.cjs'),
     treeFile: join(root, 'tree.json'),
     hostAFile: join(root, 'host-a.json'),
   };
@@ -145,6 +147,14 @@ test('a killed Windows API leaves no stuck execution after a real restart', { sk
       "const writer = spawn(process.execPath, [path.join(__dirname, 'writer.cjs')], { stdio: 'ignore', detached: true });",
       'writer.unref();',
       `require('node:fs').writeFileSync(${JSON.stringify(config.treeFile)}, JSON.stringify({ launcher: process.pid, writer: writer.pid }));`,
+    ].join('\n'),
+  );
+  writeFileSync(
+    config.root,
+    [
+      "const { spawn } = require('node:child_process');",
+      `spawn(process.execPath, [${JSON.stringify(config.launcher)}], { stdio: 'ignore' });`,
+      'setInterval(() => {}, 1000);',
     ].join('\n'),
   );
   const configPath = join(root, 'config.json');
@@ -214,7 +224,6 @@ test('a killed Windows API leaves no stuck execution after a real restart', { sk
 
     // GREEN, with a failing response store: the job proof ends the child, and R stays pending.
     const settleFailed = runB('settle-fail');
-    assert.equal(settleFailed.adopted, true, 'API B adopts its own job and still exits by itself');
     assert.deepEqual(settleFailed.released, [childId]);
     assert.deepEqual(settleFailed.interrupted, [childId]);
     assert.deepEqual([settleFailed.status, settleFailed.terminalReason], ['interrupted', 'process_restart']);

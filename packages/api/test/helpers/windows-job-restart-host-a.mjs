@@ -7,7 +7,6 @@
  * starts a tree whose PPID chain breaks. It stays inside that provider until the test kills it.
  */
 import './setup-cat-registry.js';
-import { spawn } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRedisClient } from '../../../shared/dist/utils/index.js';
 import { CallbackAuthTurnExecutionLifecycle } from '../../dist/domains/cats/services/agents/invocation/CallbackAuthTurnExecutionLifecycle.js';
@@ -15,7 +14,8 @@ import { InvocationRegistry } from '../../dist/domains/cats/services/agents/invo
 import { RedisAuthInvocationBackend } from '../../dist/domains/cats/services/agents/invocation/RedisAuthInvocationBackend.js';
 import { createInvocationRecordStore } from '../../dist/domains/cats/services/stores/factories/InvocationRecordStoreFactory.js';
 import { RedisTurnExecutionStore } from '../../dist/domains/cats/services/stores/redis/RedisTurnExecutionStore.js';
-import { adoptWindowsApiJob } from '../../dist/utils/windows-job-owner.js';
+import { spawnCli } from '../../dist/utils/cli-spawn.js';
+import { readWindowsJobNamesLinkedTo } from '../../dist/utils/windows-job-execution-links.js';
 import { restartTurns } from './windows-job-restart-turn.mjs';
 
 const config = JSON.parse(readFileSync(process.argv[2], 'utf8'));
@@ -24,8 +24,9 @@ const fail = (error) => {
   process.exit(3);
 };
 
-const adoption = await adoptWindowsApiJob({ dataDir: config.dataDir });
-if (!adoption.adopted) fail(adoption.reason);
+// The API itself never adopts a job: invokeSingleCat puts the covered provider in a host whose own
+// job owns it, under this data root.
+process.env.CAT_CAFE_DATA_DIR = config.dataDir;
 const redis = createRedisClient({ url: config.redisUrl, keyPrefix: config.prefix });
 const { threadId, userId, catId } = config.scope;
 
@@ -73,19 +74,22 @@ let execution;
 const killed = await turns.run({
   parentInvocationId: parent.invocationId,
   streamedBody: config.streamedBody,
-  // Inside the provider, after invokeSingleCat linked the job and passed the entry fence: the
-  // product's stdio shape, after adoption, so the tree lands inside the job. Then it never returns.
-  inProvider: async () => {
-    spawn(process.execPath, [config.launcher], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+  // Inside the provider, after invokeSingleCat linked the turn to its host and passed the entry
+  // fence: the real spawnCli seam launches the provider root in that host. The root stays, its
+  // launcher exits after detaching the writer (the broken PPID chain). Then it never returns.
+  inProvider: async (options) => {
+    const provider = spawnCli({ command: process.execPath, args: [config.root], invocationId: options.invocationId });
+    void provider[Symbol.asyncIterator]().next();
     while (!existsSync(config.treeFile)) await new Promise((resolve) => setTimeout(resolve, 100));
     const tree = JSON.parse(readFileSync(config.treeFile, 'utf8'));
     const auth = minted.find((entry) => entry.invocationId === execution.invocationId);
+    const [jobName] = readWindowsJobNamesLinkedTo(execution.invocationId, config.dataDir) ?? [];
     writeFileSync(
       config.hostAFile,
       JSON.stringify({
         host: process.pid,
         ...tree,
-        jobName: adoption.job.record.jobName,
+        jobName,
         execution,
         callbackToken: auth?.callbackToken,
         session,

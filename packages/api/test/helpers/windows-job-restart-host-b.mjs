@@ -31,7 +31,6 @@ import {
 } from '../../dist/domains/cats/services/stores/ports/TurnExecutionStore.js';
 import { RedisTurnExecutionStore } from '../../dist/domains/cats/services/stores/redis/RedisTurnExecutionStore.js';
 import { createCliExecutionOwnerService } from '../../dist/utils/cli-process-ownership.js';
-import { adoptWindowsApiJob } from '../../dist/utils/windows-job-owner.js';
 import { restartTurns } from './windows-job-restart-turn.mjs';
 
 const PROCESS_START_AT = Date.now();
@@ -40,7 +39,6 @@ const config = JSON.parse(readFileSync(configPath, 'utf8'));
 const { execution: e, callbackToken } = JSON.parse(readFileSync(config.hostAFile, 'utf8'));
 // `settle-fail` is the fixed recovery whose response settlement throws, as a Redis error would.
 const fixed = mode !== 'baseline';
-const adoption = fixed ? await adoptWindowsApiJob({ dataDir: config.dataDir }) : null;
 const client = createRedisClient({ url: config.redisUrl, keyPrefix: config.prefix });
 
 // The index.ts composition: callback auth wraps the canonical store; recovery settles through it.
@@ -74,7 +72,6 @@ const recovery = await recoverPriorProcessExecutions({
     );
   },
   windowsJobDataDir: fixed ? config.dataDir : join(config.dataDir, 'pre-1838-no-job-evidence'),
-  ...(adoption?.adopted ? { currentWindowsJobName: adoption.job.record.jobName } : {}),
   orphans: { invocationRecordStore: records, taskProgressStore: createTaskProgressStore(client), log, messageStore },
   markStartupRecoveryComplete: () => registry.markStartupRecoveryComplete(),
 });
@@ -111,7 +108,6 @@ writeFileSync(
   outFile,
   JSON.stringify({
     pid: process.pid,
-    adopted: adoption?.adopted ?? null,
     liveComplete: recovery.liveOwnersComplete,
     released: pass.released,
     preserved: pass.preserved,

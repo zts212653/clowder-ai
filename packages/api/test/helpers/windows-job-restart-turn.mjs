@@ -33,13 +33,16 @@ export function restartTurns({ client, registry, turnExecutionStore, scope }) {
   const calls = [];
   // `during` runs inside the provider once its session is known, so a turn can work or hang there.
   let during;
+  // Covered like the real CLI services: its provider starts through spawnCli with the turn's own
+  // invocationId, so on Windows the Host links the turn to a provider host before the fence.
   const service = {
+    windowsProviderHosts: true,
     implementationSnapshot: () => ({ key: 'test:issue1838-restart', generation: 'g1', compatibilityRevision: 'g1' }),
     async *invoke(_prompt, options) {
       calls.push({ resume: options.cliSessionId ?? null });
       const sessionId = options.cliSessionId ?? `native-${randomUUID()}`;
       yield { type: 'session_init', catId, sessionId, timestamp: Date.now() };
-      await during?.();
+      await during?.(options);
       yield { type: 'done', catId, timestamp: Date.now() };
     },
   };
