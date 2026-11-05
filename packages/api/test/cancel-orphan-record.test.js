@@ -658,6 +658,7 @@ describe('#1838 cancel route: a dead API s started provider stops only with its 
       readResponse: () => messageStore.getById(response.id),
       readSibling: () => (siblingResponse ? messageStore.getById(siblingResponse.id) : undefined),
       draft: draftStore.getByThread(USER_ID, THREAD_ID)[0],
+      readDraft: () => draftStore.getByThread(USER_ID, THREAD_ID)[0],
       // The same Stop again, after the response store recovers.
       retry: async () => {
         rejectCommit = false;
@@ -853,7 +854,7 @@ describe('#1838 cancel route: a dead API s started provider stops only with its 
       // The unknown case when the first Stop ended the child but could not commit its reply: the same
       // Stop again settles that reply, still without a teardown and without reopening the parent.
       it(`ended parent: a ${route} retry settles the reply of a child whose job is ${evidence}`, async (t) => {
-        const { res, turns, readResponse, retry, recordStore } = await stopAfterApiDied(
+        const { res, turns, readResponse, readDraft, retry, recordStore } = await stopAfterApiDied(
           t,
           verdict({ state: 'unknown', nativeError: 5, sessionId: 1 }),
           route,
@@ -878,6 +879,7 @@ describe('#1838 cancel route: a dead API s started provider stops only with its 
         );
         assert.deepEqual(await turns.listResponsePending(), [], 'nothing is left owed');
         assert.equal((await turns.get('child-dead-api')).providerTeardownAt, undefined, 'still no teardown');
+        assert.equal(readDraft(), undefined, 'the settled draft is gone');
         assert.deepEqual(recordStore.updates, [], 'the ended parent is never reopened or rewritten');
       });
     }
