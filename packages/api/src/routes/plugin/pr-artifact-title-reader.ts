@@ -10,7 +10,7 @@ export function pluginPrTitleReader(app: FastifyInstance, request: FastifyReques
     // network boundary. This must not manufacture a localhost owner or bypass plugin admission.
     const response = await app.inject({
       method: 'GET',
-      url: `/api/plugins/official.github-operations/github/pr-title?${new URLSearchParams({ ref })}`,
+      url: `/api/plugins/official.github-operations/github/pr-title?${new URLSearchParams({ ref, mode: 'local' })}`,
       headers: { ...request.headers },
       remoteAddress,
       signal,

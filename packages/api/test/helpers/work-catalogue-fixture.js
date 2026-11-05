@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import fs, { mkdtemp, rm } from 'node:fs/promises';
 import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { Readable } from 'node:stream';
 import { ArtifactReviewStore } from '../../dist/domains/collaborative-content/artifact-review/store.js';
 import { LivingWorkService } from '../../dist/domains/collaborative-content/works/service.js';
@@ -96,9 +96,11 @@ export async function workCatalogueFixture(t, options = {}) {
       fs.readFile = async (path, ...args) => {
         const value = await originalRead(path, ...args);
         if (String(path).startsWith(join(root, 'projects', 'content-owner-v1'))) {
-          assert.ok(String(path).endsWith('/state.json'), 'catalogue never reads retained blob bytes');
-          stateReads++;
-          manifestBytes += Buffer.byteLength(value);
+          assert.ok(!String(path).split(/[\\/]/).includes('blobs'), 'catalogue never reads retained blob bytes');
+          if (basename(String(path)) === 'state.json') {
+            stateReads++;
+            manifestBytes += Buffer.byteLength(value);
+          }
         }
         return value;
       };
