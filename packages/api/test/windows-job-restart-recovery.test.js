@@ -2,11 +2,13 @@
  * #1838 RED/GREEN on real processes: API A really starts a provider whose PPID chain breaks, A is
  * really killed, Redis really restarts, and a separate API B recovers from the durable store.
  *
- * A and B are independent Node processes using the product modules — the kernel job adoption, the
- * provider-entry link, the RedisTurnExecutionStore and the startup reconciler — in the order the
- * product runs them. B first runs the pre-#1838 recovery (reconciler only) on the same durable state
- * to show the original block, then the fixed recovery. Only this test's own PIDs, private Redis
- * (random port, own password and data directory) and temp directories are touched.
+ * A and B are independent Node processes using the product modules in the order the product runs
+ * them: A admits a turn with its parent invocation, callback credential, response R and streamed
+ * draft; B runs the index.ts startup recovery through the callback-auth lifecycle, response
+ * settlement and invocation reconciler. B first runs the pre-#1838 recovery on the same durable
+ * state to show the original block, then the fixed one, then the user's next turn. Only this test's
+ * own PIDs, private Redis (random port, own password and data directory) and temp directories are
+ * touched.
  *
  * Needs Windows and `redis-server`/`redis-cli` on PATH (e.g. the desktop's bundled
  * `.cat-cafe/redis/windows`); otherwise it skips with the reason.
@@ -22,6 +24,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
+import { fileURLToPath } from 'node:url';
 
 function findRedisServer() {
   if (process.platform !== 'win32') return null;
@@ -39,68 +42,9 @@ const redisServer = findRedisServer();
 const skip =
   process.platform !== 'win32' ? 'Windows kernel jobs only' : redisServer ? false : 'redis-server is not on PATH';
 
-const HOST_A = `
-import { spawn } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-const config = JSON.parse(readFileSync(process.argv[2], 'utf8'));
-const load = (path) => import(new URL(path, config.distUrl).href);
-const { adoptWindowsApiJob } = await load('utils/windows-job-owner.js');
-const { recordWindowsJobExecutionLink } = await load('utils/windows-job-execution-links.js');
-const { RedisTurnExecutionStore } = await load('domains/cats/services/stores/redis/RedisTurnExecutionStore.js');
-const { createRedisClient } = await import(config.sharedUrl);
-const fail = (error) => { writeFileSync(config.hostAFile, JSON.stringify({ error })); process.exit(3); };
-const adoption = await adoptWindowsApiJob({ dataDir: config.dataDir });
-if (!adoption.adopted) fail(adoption.reason);
-const store = new RedisTurnExecutionStore(createRedisClient({ url: config.redisUrl, keyPrefix: config.prefix }));
-const e = config.execution;
-const created = await store.createRunning({ invocationId: e.invocationId, parentInvocationId: e.executionId,
-  threadId: e.threadId, userId: e.userId, catId: e.catId, executionKind: 'ordinary', startedAt: Date.now(),
-  providerLifecycleTracked: true });
-if (created.outcome !== 'created') fail('not created: ' + created.outcome);
-// The provider-entry order in invoke-single-cat: link to the job, then mark the provider started.
-recordWindowsJobExecutionLink({ dataDir: adoption.job.dataDir, jobName: adoption.job.record.jobName, execution: e });
-if (!(await store.markProviderStarted(e.invocationId, Date.now()))) fail('provider entry fence rejected');
-// Spawned with the product's stdio shape, after adoption, so the tree lands inside the job.
-spawn(process.execPath, [config.launcher], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
-while (!existsSync(config.treeFile)) await new Promise((resolve) => setTimeout(resolve, 100));
-const tree = JSON.parse(readFileSync(config.treeFile, 'utf8'));
-writeFileSync(config.hostAFile, JSON.stringify({ host: process.pid, ...tree, jobName: adoption.job.record.jobName }));
-setInterval(() => {}, 1000);
-`;
-
-const HOST_B = `
-import { readFileSync, writeFileSync } from 'node:fs';
-const PROCESS_START_AT = Date.now();
-const [configPath, mode, outFile] = process.argv.slice(2);
-const config = JSON.parse(readFileSync(configPath, 'utf8'));
-const load = (path) => import(new URL(path, config.distUrl).href);
-const { adoptWindowsApiJob } = await load('utils/windows-job-owner.js');
-const { createCliExecutionOwnerService } = await load('utils/cli-process-ownership.js');
-const { RedisTurnExecutionStore } = await load('domains/cats/services/stores/redis/RedisTurnExecutionStore.js');
-const { hasUnconfirmedProviderTeardown } = await load('domains/cats/services/stores/ports/TurnExecutionStore.js');
-const { TurnExecutionStartupReconciler } = await load('domains/cats/services/agents/invocation/TurnExecutionStartupReconciler.js');
-const recovery = await load('domains/cats/services/agents/invocation/WindowsJobStopRecovery.js');
-const { createRedisClient } = await import(config.sharedUrl);
-const fixed = mode === 'fixed';
-const adoption = fixed ? await adoptWindowsApiJob({ dataDir: config.dataDir }) : null;
-const client = createRedisClient({ url: config.redisUrl, keyPrefix: config.prefix });
-const store = new RedisTurnExecutionStore(client);
-// The index.ts startup order: owner snapshot, job teardown proof, reconciler, then evidence cleanup.
-const live = await createCliExecutionOwnerService({ dataDir: config.dataDir }).listLive();
-const pass = fixed ? await recovery.recordVerifiedWindowsJobTeardowns({ store, dataDir: config.dataDir,
-  ...(adoption.adopted ? { currentJobName: adoption.job.record.jobName } : {}) }) : null;
-const reconciled = live.complete ? await new TurnExecutionStartupReconciler({ store,
-  settleEndedTurnResponse: async (turn) => store.clearResponsePending(turn.invocationId) })
-  .reconcile({ processStartedAt: PROCESS_START_AT, protectedInvocationIds: live.owners.map((o) => o.invocationId) }) : null;
-const cleared = pass ? await recovery.clearSettledWindowsJobEvidence({ store, pass }) : null;
-const record = await store.get(config.execution.invocationId);
-const running = await store.listRunningByUser(config.execution.userId);
-writeFileSync(outFile, JSON.stringify({ pid: process.pid, adopted: adoption?.adopted ?? null, liveComplete: live.complete,
-  released: pass?.released ?? [], preserved: pass?.preserved ?? [], interrupted: reconciled?.invocationIds ?? [], cleared,
-  status: record?.status, terminalReason: record?.terminalReason ?? null, blocked: hasUnconfirmedProviderTeardown(record),
-  runningIds: running.map((r) => r.invocationId) }));
-await client.quit();
-`;
+// API A and API B are separate processes; each lives in its own helper so it reads as a program.
+const HOST_A = fileURLToPath(new URL('./helpers/windows-job-restart-host-a.mjs', import.meta.url));
+const HOST_B = fileURLToPath(new URL('./helpers/windows-job-restart-host-b.mjs', import.meta.url));
 
 function alive(pid) {
   try {
@@ -180,17 +124,10 @@ test('a killed Windows API leaves no stuck execution after a real restart', { sk
   const redis = privateRedis(redisDir, redisPort, password);
   const config = {
     redisUrl: `redis://:${password}@127.0.0.1:${redisPort}`,
-    distUrl: new URL('../dist/', import.meta.url).href,
-    sharedUrl: new URL('../../shared/dist/utils/index.js', import.meta.url).href,
     prefix: `issue1838-restart:${randomUUID()}:`,
     dataDir,
-    execution: {
-      executionId: `parent-${randomUUID()}`,
-      invocationId: `child-${randomUUID()}`,
-      threadId: 'issue1838-thread',
-      catId: 'codex',
-      userId: 'issue1838-user',
-    },
+    scope: { threadId: 'issue1838-thread', catId: 'codex', userId: 'issue1838-user' },
+    streamedBody: 'streamed before the API was killed',
     launcher: join(root, 'launcher.cjs'),
     treeFile: join(root, 'tree.json'),
     hostAFile: join(root, 'host-a.json'),
@@ -207,13 +144,11 @@ test('a killed Windows API leaves no stuck execution after a real restart', { sk
       `require('node:fs').writeFileSync(${JSON.stringify(config.treeFile)}, JSON.stringify({ launcher: process.pid, writer: writer.pid }));`,
     ].join('\n'),
   );
-  writeFileSync(join(root, 'host-a.mjs'), HOST_A);
-  writeFileSync(join(root, 'host-b.mjs'), HOST_B);
   const configPath = join(root, 'config.json');
   const runB = (mode) => {
     const out = join(root, `b-${mode}-${randomUUID()}.json`);
     // A timeout here also catches an API that cannot exit by itself after adopting its job.
-    execFileSync(process.execPath, [join(root, 'host-b.mjs'), configPath, mode, out], {
+    execFileSync(process.execPath, [HOST_B, configPath, mode, out], {
       stdio: ['ignore', 'pipe', 'pipe'],
       timeout: 90_000,
       windowsHide: true,
@@ -228,7 +163,7 @@ test('a killed Windows API leaves no stuck execution after a real restart', { sk
   try {
     await redis.start();
     // --- API A: adopts its job, links and starts the execution, spawns the broken-chain tree ---
-    hostA = spawn(process.execPath, [join(root, 'host-a.mjs'), configPath], { stdio: 'ignore', windowsHide: true });
+    hostA = spawn(process.execPath, [HOST_A, configPath], { stdio: 'ignore', windowsHide: true });
     tree = await waitFor(
       () => (existsSync(config.hostAFile) ? JSON.parse(readFileSync(config.hostAFile, 'utf8')) : null),
       60_000,
@@ -238,12 +173,20 @@ test('a killed Windows API leaves no stuck execution after a real restart', { sk
     await waitFor(() => !alive(tree.launcher), 15_000, 'the launcher to exit');
     assert.equal(alive(tree.writer), true, 'the writer outlives its launcher with a broken PPID chain');
 
+    const childId = tree.execution.invocationId;
+    // A turn still running keeps every object of its lifecycle open.
+    const untouched = (result) => {
+      assert.deepEqual([result.status, result.blocked, result.blockerId], ['running', true, childId]);
+      assert.deepEqual(result.runningIds, [childId]);
+      assert.deepEqual([result.parent.status, result.response.status, result.drafts], ['running', 'processing', 1]);
+      assert.deepEqual([result.authOk, result.sweptParents, result.settledResponses], [true, 0, 0]);
+    };
+
     // --- while A is alive, a second API must not release its execution ---
     const whileAlive = runB('fixed');
     assert.deepEqual(whileAlive.released, []);
-    assert.equal(whileAlive.status, 'running');
-    assert.equal(whileAlive.blocked, true);
-    assert.ok(whileAlive.preserved.some((entry) => entry.invocationId === config.execution.invocationId));
+    untouched(whileAlive);
+    assert.ok(whileAlive.preserved.some((entry) => entry.invocationId === childId));
 
     // --- API A is killed on its own; the kernel job must reap the disconnected writer ---
     hostA.kill();
@@ -258,19 +201,25 @@ test('a killed Windows API leaves no stuck execution after a real restart', { sk
     const baseline = runB('baseline');
     assert.equal(baseline.liveComplete, true);
     assert.deepEqual(baseline.interrupted, []);
-    assert.equal(baseline.status, 'running');
-    assert.equal(baseline.blocked, true, 'without stop evidence the old recovery leaves the session blocked');
-    assert.deepEqual(baseline.runningIds, [config.execution.invocationId]);
+    untouched(baseline);
 
-    // GREEN: the fixed recovery proves the job closed and the existing owner settles the execution.
+    // GREEN: the fixed recovery proves the job closed and the existing owners settle every object.
     const recovered = runB('fixed');
     assert.equal(recovered.adopted, true, 'API B adopts its own job and still exits by itself');
-    assert.deepEqual(recovered.released, [config.execution.invocationId]);
-    assert.deepEqual(recovered.interrupted, [config.execution.invocationId]);
-    assert.equal(recovered.status, 'interrupted');
-    assert.equal(recovered.terminalReason, 'process_restart');
-    assert.equal(recovered.blocked, false);
-    assert.deepEqual(recovered.runningIds, [], 'the original thread/cat is no longer blocked');
+    assert.deepEqual(recovered.released, [childId]);
+    assert.deepEqual(recovered.interrupted, [childId]);
+    assert.deepEqual([recovered.status, recovered.terminalReason], ['interrupted', 'process_restart']);
+    assert.deepEqual([recovered.blocked, recovered.blockerId, recovered.runningIds], [false, null, []]);
+    assert.deepEqual(recovered.parent, { status: 'failed', error: 'process_restart' });
+    assert.equal(recovered.sweptParents, 1);
+    // R keeps the streamed body and says it was interrupted; it does not claim the work finished.
+    assert.deepEqual(recovered.response, {
+      status: 'interrupted',
+      reason: 'process_restart',
+      content: config.streamedBody,
+    });
+    assert.deepEqual([recovered.settledResponses, recovered.drafts, recovered.responsePending], [1, 0, []]);
+    assert.equal(recovered.authOk, false, "the old child's callback credential no longer verifies");
     assert.deepEqual(readdirSync(join(dataDir, 'windows-job-execution-links')), []);
     const owners = readdirSync(join(dataDir, 'windows-api-jobs')).map((name) =>
       JSON.parse(readFileSync(join(dataDir, 'windows-api-jobs', name), 'utf8')),
@@ -282,9 +231,14 @@ test('a killed Windows API leaves no stuck execution after a real restart', { sk
     );
 
     t.diagnostic(JSON.stringify({ whileAlive, baseline, recovered }));
-    // Recovery again changes nothing.
-    const repeated = runB('fixed');
+    // Recovery again changes nothing, and the next message of the same thread/role reaches its provider.
+    const repeated = runB('next');
     assert.deepEqual([repeated.released, repeated.interrupted, repeated.status], [[], [], 'interrupted']);
+    assert.deepEqual(
+      [repeated.settledResponses, repeated.sweptParents, repeated.response.status],
+      [0, 0, 'interrupted'],
+    );
+    assert.deepEqual([repeated.blockerId, repeated.nextProviderStarted], [null, true]);
   } finally {
     if (hostA && hostA.exitCode === null) hostA.kill();
     for (const pid of [tree?.writer, tree?.launcher]) {

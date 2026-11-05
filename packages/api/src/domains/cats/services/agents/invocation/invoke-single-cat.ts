@@ -642,7 +642,7 @@ import type { CreateSessionInput, ISessionChainStore } from '../../stores/ports/
 import type { IThreadStore } from '../../stores/ports/ThreadStore.js';
 import { DEFAULT_THREAD_ID } from '../../stores/ports/ThreadStore.js';
 import {
-  hasUnconfirmedProviderTeardown,
+  findUnconfirmedProviderBlocker,
   type ITurnExecutionStore,
   type TurnExecutionCausalRefs,
   type TurnExecutionKind,
@@ -3009,13 +3009,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
         'turnExecutionStore.priorProviderStop',
         signal,
       );
-      const blockingChild = running.find(
-        (record) =>
-          record.invocationId !== invocationId &&
-          record.threadId === threadId &&
-          record.catId === catId &&
-          hasUnconfirmedProviderTeardown(record),
-      );
+      const blockingChild = findUnconfirmedProviderBlocker(running, { invocationId, threadId, catId });
       if (blockingChild) {
         turnExecutionFailureReason = 'prior_provider_teardown_unconfirmed';
         // #1838: name the exact blocking child so the user can locate and stop it, instead of
