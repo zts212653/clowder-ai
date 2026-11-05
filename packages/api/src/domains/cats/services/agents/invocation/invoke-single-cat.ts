@@ -109,6 +109,8 @@ import { readProcessActivity } from '../../../../../utils/process-activity-regis
 import { pathsEqual } from '../../../../../utils/project-path.js';
 import { tcpProbe } from '../../../../../utils/tcp-probe.js';
 import { estimateTokens } from '../../../../../utils/token-counter.js';
+import { recordWindowsJobExecutionLink } from '../../../../../utils/windows-job-execution-links.js';
+import { currentWindowsApiJob } from '../../../../../utils/windows-job-owner.js';
 import { resolveEntrustedWorkTaskRefFromSource } from '../../../../growing/EntrustedWorkRuntimeInteractionBinding.js';
 import {
   type MemoryCueInvocationPromptResolver,
@@ -5980,6 +5982,16 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
         );
         if (!bound) throw new Error('execution_boundary_provider_entry_conflict');
       }
+      // #1838: link this execution to the API's kernel job BEFORE the provider is marked started, so
+      // an API killed from here on still leaves a stop proof the next instance can join. A failed
+      // write fails this turn before any provider exists, while its record can still settle.
+      const windowsApiJob = currentWindowsApiJob();
+      if (windowsApiJob && deps.turnExecutionStore?.markProviderStarted)
+        recordWindowsJobExecutionLink({
+          dataDir: windowsApiJob.dataDir,
+          jobName: windowsApiJob.record.jobName,
+          execution: { executionId: executionParentInvocationId, invocationId, threadId, catId, userId },
+        });
       if (
         deps.turnExecutionStore?.markProviderStarted &&
         !(await deps.turnExecutionStore.markProviderStarted(invocationId, Date.now()))

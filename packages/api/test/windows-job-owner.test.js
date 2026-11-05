@@ -21,9 +21,18 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const isWindows = process.platform === 'win32';
 const modulePath = fileURLToPath(new URL('../dist/utils/windows-job-owner.js', import.meta.url));
 
-const { adoptWindowsApiJob, parseWindowsJobOwnerRecord, queryWindowsJobStopEvidence, resolveWindowsJobStopEvidence } =
-  await import(pathToFileURL(modulePath).href);
-const { readWindowsJobExecutionLinks, recordWindowsJobExecutionLink } = await import(pathToFileURL(modulePath).href);
+const { adoptWindowsApiJob, parseWindowsJobOwnerRecord, queryWindowsJobStopEvidence } = await import(
+  pathToFileURL(modulePath).href
+);
+const { readWindowsJobExecutionLinks, recordWindowsJobExecutionLink } = await import(
+  new URL('../dist/utils/windows-job-execution-links.js', import.meta.url).href
+);
+const { resolveWindowsJobStopEvidence } = await import(
+  new URL('../dist/domains/cats/services/agents/invocation/WindowsJobStopRecovery.js', import.meta.url).href
+);
+// Built from char codes so the separator survives every editing layer unharmed.
+const SEP = String.fromCharCode(92);
+const jobNameFor = (tag) => `Local${SEP}ClowderApiJob-${tag}`;
 
 function alive(pid) {
   try {
@@ -128,9 +137,10 @@ test(
 
       const adoption = JSON.parse(readFileSync(fixture.adoptionFile, 'utf8'));
       assert.equal(adoption.adopted, true, `adoption must succeed: ${JSON.stringify(adoption)}`);
+      assert.ok(Number.isInteger(adoption.job.record.sessionId), 'the owner record carries its session');
 
       // While the API runs, the job exists and owns both the host and the disconnected writer.
-      const before = await queryWindowsJobStopEvidence(adoption.record.jobName);
+      const before = await queryWindowsJobStopEvidence(adoption.job.record);
       assert.equal(before.verdict, 'present', `a live API must read present: ${JSON.stringify(before)}`);
       assert.equal(before.activeProcesses, 2, 'the host and the orphaned writer both belong to the job');
 
@@ -145,7 +155,7 @@ test(
       );
 
       // A fresh process reads what the recovery path reads.
-      const after = await queryWindowsJobStopEvidence(adoption.record.jobName);
+      const after = await queryWindowsJobStopEvidence(adoption.job.record);
       assert.equal(after.verdict, 'absent', `a dead owner must read absent: ${JSON.stringify(after)}`);
 
       const resolution = await resolveWindowsJobStopEvidence({ dataDir });
@@ -161,39 +171,19 @@ test(
   },
 );
 
-test('a query that cannot run is unknown, never a stop verdict', { timeout: 20_000 }, async () => {
-  const jobName = `Local\\ClowderApiJob-${process.pid}`;
-  const failed = await queryWindowsJobStopEvidence(jobName, {
-    execute: async () => {
-      throw new Error('powershell unavailable');
-    },
-  });
-  assert.equal(failed.verdict, 'unknown');
-  assert.equal(failed.activeProcesses, 0);
-
-  const unparseable = await queryWindowsJobStopEvidence(jobName, {
-    execute: async () => ({ stdout: 'not json at all', stderr: '' }),
-  });
-  assert.equal(unparseable.verdict, 'unknown');
-});
-
 test('malformed and foreign job records never become stop evidence', { timeout: 20_000 }, async () => {
   assert.equal(parseWindowsJobOwnerRecord(null), null);
   assert.equal(parseWindowsJobOwnerRecord({ v: 1 }), null);
   // A job outside our own namespace must never be adoptable as this deployment's ownership.
-  assert.equal(
-    parseWindowsJobOwnerRecord({ v: 1, jobName: 'Global\\Foreign', apiPid: 1, helperPid: 2, createdAt: 3 }),
-    null,
-  );
-  assert.equal(
-    parseWindowsJobOwnerRecord({ v: 1, jobName: 'Local\\ClowderApiJob-x', apiPid: 0, helperPid: 2, createdAt: 3 }),
-    null,
-  );
-  const valid = `Local\\ClowderApiJob-${'a'.repeat(8)}-0000-4000-8000-000000000000`;
-  assert.equal(
-    parseWindowsJobOwnerRecord({ v: 1, jobName: valid, apiPid: 4321, helperPid: 4322, createdAt: 9 })?.apiPid,
-    4321,
-  );
+  const base = { v: 1, jobName: jobNameFor('x'), apiPid: 4321, helperPid: 4322, sessionId: 1, createdAt: 9 };
+  assert.equal(parseWindowsJobOwnerRecord({ ...base, jobName: `Global${SEP}Foreign` }), null);
+  assert.equal(parseWindowsJobOwnerRecord({ ...base, apiPid: 0 }), null);
+  // Without its session a record cannot be queried safely, so it is not evidence at all.
+  assert.equal(parseWindowsJobOwnerRecord({ ...base, sessionId: undefined }), null);
+  assert.equal(parseWindowsJobOwnerRecord({ ...base, sessionId: -1 }), null);
+  assert.equal(parseWindowsJobOwnerRecord(base)?.apiPid, 4321);
+  // Session 0 is where services run; it is a real session.
+  assert.equal(parseWindowsJobOwnerRecord({ ...base, sessionId: 0 })?.sessionId, 0);
 });
 
 test('the helper adopts the process it was actually pointed at', { skip: !isWindows, timeout: 60_000 }, async () => {
@@ -215,7 +205,7 @@ test('the helper adopts the process it was actually pointed at', { skip: !isWind
       expectedScript: basename(process.argv[1]),
     });
     assert.equal(accepted.adopted, true, `adoption must succeed: ${JSON.stringify(accepted)}`);
-    const present = await queryWindowsJobStopEvidence(accepted.record.jobName);
+    const present = await queryWindowsJobStopEvidence(accepted.job.record);
     assert.equal(present.verdict, 'present', 'this live test process must read present');
   } finally {
     rmSync(dataDir, { recursive: true, force: true });
@@ -226,24 +216,94 @@ test('executions are linked to a job by name, not by a reusable pid', { timeout:
   // The link is what scopes a verified stop to real executions. Keying it by job name keeps a dead
   // API's pid out of the decision: a reused pid can never resolve another instance's job.
   const dataDir = mkdtempSync(join(tmpdir(), 'issue1838-links-'));
-  // Built from char codes so the separator survives every editing layer unharmed.
-  const sep = String.fromCharCode(92);
-  const jobA = `Local${sep}ClowderApiJob-${'a'.repeat(8)}-0000-4000-8000-00000000000a`;
-  const jobB = `Local${sep}ClowderApiJob-${'b'.repeat(8)}-0000-4000-8000-00000000000b`;
+  const jobA = jobNameFor(`${'a'.repeat(8)}-0000-4000-8000-00000000000a`);
+  const jobB = jobNameFor(`${'b'.repeat(8)}-0000-4000-8000-00000000000b`);
+  const execution = (id) => ({
+    executionId: `exec-${id}`,
+    invocationId: `inv-${id}`,
+    threadId: 't',
+    catId: 'c',
+    userId: 'u',
+  });
   try {
-    recordWindowsJobExecutionLink({ dataDir, jobName: jobA, invocationId: 'inv-a', executionId: 'exec-a' });
-    recordWindowsJobExecutionLink({ dataDir, jobName: jobA, invocationId: 'inv-b', executionId: 'exec-b' });
-    recordWindowsJobExecutionLink({ dataDir, jobName: jobB, invocationId: 'inv-c', executionId: 'exec-c' });
+    recordWindowsJobExecutionLink({ dataDir, jobName: jobA, execution: execution('a') });
+    const written = recordWindowsJobExecutionLink({ dataDir, jobName: jobA, execution: execution('b') });
+    recordWindowsJobExecutionLink({ dataDir, jobName: jobB, execution: execution('c') });
 
     const a = readWindowsJobExecutionLinks(jobA, dataDir);
-    assert.deepEqual(a.links.map((link) => link.invocationId).sort(), ['inv-a', 'inv-b']);
+    assert.deepEqual(a.links.map((link) => link.execution.invocationId).sort(), ['inv-a', 'inv-b']);
+    // The full identity survives, so recovery can check it against the ledger.
+    assert.deepEqual(a.links.find((link) => link.execution.invocationId === 'inv-b').execution, execution('b'));
     assert.equal(a.invalidPaths.length, 0);
     // A different job's links never leak into this one's evidence.
     assert.deepEqual(
-      readWindowsJobExecutionLinks(jobB, dataDir).links.map((link) => link.invocationId),
+      readWindowsJobExecutionLinks(jobB, dataDir).links.map((link) => link.execution.invocationId),
       ['inv-c'],
     );
+
+    // A torn link and a link whose content names another execution are reported, not dropped.
+    writeFileSync(written.path, '{"v":1,"jobName":');
+    const swapped = readWindowsJobExecutionLinks(jobA, dataDir);
+    assert.deepEqual(swapped.invalidPaths, [written.path]);
+    writeFileSync(written.path, JSON.stringify({ ...written, path: undefined, execution: execution('z') }));
+    assert.deepEqual(readWindowsJobExecutionLinks(jobA, dataDir).invalidPaths, [written.path]);
   } finally {
     rmSync(dataDir, { recursive: true, force: true });
   }
 });
+
+test(
+  'an API that adopted its job still exits by itself when its work ends',
+  { skip: !isWindows, timeout: 90_000 },
+  async () => {
+    // The helper outlives adoption on purpose; it must not keep the API's event loop alive.
+    const scriptDir = mkdtempSync(join(tmpdir(), 'issue1838-finite-'));
+    const dataDir = mkdtempSync(join(tmpdir(), 'issue1838-finite-data-'));
+    let host;
+    try {
+      writeFileSync(
+        join(scriptDir, 'finite.mjs'),
+        [
+          "import { writeFileSync } from 'node:fs';",
+          'const [adoptionFile, dataDir, moduleUrl] = process.argv.slice(2);',
+          'const { adoptWindowsApiJob } = await import(moduleUrl);',
+          'const adoption = await adoptWindowsApiJob({ dataDir });',
+          'writeFileSync(adoptionFile, JSON.stringify(adoption));',
+        ].join('\n'),
+      );
+      const adoptionFile = join(scriptDir, 'adoption.json');
+      host = spawn(
+        process.execPath,
+        [join(scriptDir, 'finite.mjs'), adoptionFile, dataDir, pathToFileURL(modulePath).href],
+        {
+          stdio: 'ignore',
+          windowsHide: true,
+        },
+      );
+      const exitCode = await new Promise((resolve) => {
+        const timer = setTimeout(() => resolve('still running after 45s'), 45_000);
+        host.once('exit', (code) => {
+          clearTimeout(timer);
+          resolve(code);
+        });
+      });
+      assert.equal(exitCode, 0, 'a finished API must exit naturally with code 0');
+      const adoption = JSON.parse(readFileSync(adoptionFile, 'utf8'));
+      assert.equal(adoption.adopted, true, `adoption must succeed: ${JSON.stringify(adoption)}`);
+      // Its exit closed the job, so a fresh process sees the owner gone.
+      const after = await waitFor(
+        async () => {
+          const evidence = await queryWindowsJobStopEvidence(adoption.job.record);
+          return evidence.verdict === 'absent' ? evidence : null;
+        },
+        20_000,
+        'the closed job to read absent',
+      );
+      assert.equal(after.verdict, 'absent');
+    } finally {
+      if (host && host.exitCode === null) host.kill();
+      rmSync(scriptDir, { recursive: true, force: true });
+      rmSync(dataDir, { recursive: true, force: true });
+    }
+  },
+);

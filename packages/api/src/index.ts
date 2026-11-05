@@ -171,6 +171,10 @@ import {
   TurnExecutionStartupReconciler,
 } from './domains/cats/services/agents/invocation/TurnExecutionStartupReconciler.js';
 import { createThreadExecutionSituationSource } from './domains/cats/services/agents/invocation/thread-execution-situation.js';
+import {
+  clearSettledWindowsJobEvidence,
+  recordVerifiedWindowsJobTeardowns,
+} from './domains/cats/services/agents/invocation/WindowsJobStopRecovery.js';
 import { createZombieTerminalRecovery } from './domains/cats/services/agents/invocation/ZombieTerminalRecovery.js';
 import {
   type AcpPoolRegistry,
@@ -595,7 +599,6 @@ import { registerWaitTerminationRoutes } from './routes/wait-termination-routes.
 import { ApiInstanceLease, type ApiInstanceLeaseInvalidation } from './services/ApiInstanceLease.js';
 import { resolveActiveProjectRoot } from './utils/active-project-root.js';
 import { createCliExecutionOwnerService } from './utils/cli-process-ownership.js';
-import { resolveWindowsStopEvidence } from './utils/windows-cli-child-owner.js';
 import { resolveMemoryRepoPaths } from './utils/memory-root.js';
 import { findMonorepoRoot } from './utils/monorepo-root.js';
 import { emitQueueUpdated } from './utils/queue-enrichment.js';
@@ -604,6 +607,7 @@ import { buildSkillMountTargets } from './utils/skill-mount.js';
 import { resolveCatCafeSkillsSource } from './utils/skill-source.js';
 import { buildThreadDeepLink } from './utils/thread-deep-link.js';
 import { getDefaultConnectorMediaDir, getDefaultUploadDir } from './utils/upload-paths.js';
+import { adoptWindowsApiJob } from './utils/windows-job-owner.js';
 
 const PORT = parseInt(process.env.API_SERVER_PORT ?? String(deploymentDefaults.apiPort), 10);
 const HOST = process.env.API_SERVER_HOST ?? '127.0.0.1';
@@ -644,6 +648,9 @@ function hasRuntimeSessionDrain(service: AgentService): service is AgentService 
 
 async function main(): Promise<void> {
   startupMilestone('module-graph-loaded');
+  // #1838: before anything below can spawn a child, put this API into its own kernel job so every
+  // descendant is reaped if it dies, and a restart can prove that. Not Windows: no-op.
+  const windowsApiJob = await adoptWindowsApiJob();
   const acpHostPolicy = resolveAcpHostPolicy();
   let managedCommandWakeRecovery: ManagedCommandWakeRecoverySweep | undefined;
   const { logger: customLogger, isDebugMode, LOG_DIR_PATH } = await import('./infrastructure/logger.js');
@@ -660,6 +667,13 @@ async function main(): Promise<void> {
 
   const app = Fastify({ logger: customLogger as unknown as import('fastify').FastifyBaseLogger });
   reportAcpHostPolicy(app.log, acpHostPolicy);
+  if (windowsApiJob.adopted)
+    app.log.info({ jobName: windowsApiJob.job.record.jobName }, '[api] Windows API job adopted');
+  else if (windowsApiJob.reason !== 'not_windows')
+    app.log.warn(
+      { reason: windowsApiJob.reason },
+      '[api] Windows API job unavailable; executions interrupted by a crash will need a manual stop check',
+    );
   const messageReadDiagnostics = registerMessageReadDiagnostics(app);
   const privateUserId = (process.env.CAT_CAFE_USER_ID ?? 'default-user').trim();
   let approvalDecisionReceipts: ApprovalDecisionReceiptService;
@@ -7680,15 +7694,16 @@ async function main(): Promise<void> {
         if (!redis) return;
         const authRecovery = await turnExecutionStore.reconcileStartup({ processStartedAt: PROCESS_START_AT });
         const liveExecutionOwners = await cliExecutionOwnerService.listLive();
-        // #1838: Windows providers have no supervisor manifest, so their durable
-        // Windows child-owner records plus a native identity probe are the stop evidence.
-        // Only a verified stop releases an execution; alive/unknown keep the protection.
-        const windowsStopEvidence = await resolveWindowsStopEvidence({ dataDir: process.env.CAT_CAFE_DATA_DIR });
-        for (const invocationId of windowsStopEvidence.verifiedStoppedInvocationIds) {
-          await turnExecutionStore.recordProviderTeardown?.(invocationId, Date.now());
-        }        if (windowsStopEvidence.unresolved.length > 0) {
+        // #1838: a Windows API job that verifiably closed proves every provider it owned is gone.
+        // Only that writes teardown proof; the reconciler below then settles those executions.
+        const windowsJobTeardowns = await recordVerifiedWindowsJobTeardowns({
+          store: turnExecutionStore,
+          dataDir: process.env.CAT_CAFE_DATA_DIR,
+          ...(windowsApiJob.adopted ? { currentJobName: windowsApiJob.job.record.jobName } : {}),
+        });
+        if (windowsJobTeardowns.preserved.length > 0) {
           app.log.warn(
-            { windowsStopEvidence: windowsStopEvidence.unresolved },
+            { windowsJobStopEvidence: windowsJobTeardowns.preserved },
             '[api] Preserved Windows provider executions whose stop could not be verified',
           );
         }
@@ -7729,6 +7744,11 @@ async function main(): Promise<void> {
         });
         const startupRecovery = await reconciler.reconcileOrphans();
         registry.markStartupRecoveryComplete();
+        // Evidence is removed only after settlement, so a failure here keeps it for the next start.
+        const windowsJobEvidence = await clearSettledWindowsJobEvidence({
+          store: turnExecutionStore,
+          pass: windowsJobTeardowns,
+        }).catch((error: unknown) => ({ clearFailed: String(error) }));
         for (const scope of startupRecovery.queueResumeScopes) {
           try {
             await queueProcessor.requestDrain(scope.threadId);
@@ -7740,7 +7760,12 @@ async function main(): Promise<void> {
           }
         }
         app.log.info(
-          { authRecovery, childRecovery, startupRecovery },
+          {
+            authRecovery,
+            childRecovery,
+            startupRecovery,
+            windowsJobRecovery: { released: windowsJobTeardowns.released, ...windowsJobEvidence },
+          },
           '[api] F298 callback auth + TurnExecution + Queue/History startup recovery completed',
         );
       },
