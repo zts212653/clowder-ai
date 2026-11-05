@@ -1,9 +1,12 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { expect, it, vi } from 'vitest';
+import type { CatData } from '@/hooks/useCatData';
 import { dshModelLabel } from '@/lib/dsh-model-label';
+import { useMemberModelCatalogs } from '@/lib/member-model-display';
 import { apiFetch } from '@/utils/api-client';
 import { initialState } from '../hub-cat-editor.model';
+import { MemberRuntimeSummary } from '../members/MemberRuntimeSummary';
 import { MemberRuntimeFields } from '../settings/members/MemberRuntimeFields';
 
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
@@ -129,6 +132,134 @@ it('preserves another ACP client opaque ID when its arguments mention DeepSeek',
     );
     expect(host.querySelector('[role=combobox]')?.textContent).toContain(route);
     expect(host.textContent).not.toContain('DSH 自定义 LLM');
+  } finally {
+    await act(async () => root.unmount());
+    vi.resetAllMocks();
+  }
+});
+
+it.each([
+  'explicit',
+  'inherited',
+])('distinguishes routes with identical model and group names: %s', async (selection) => {
+  const first = '["gateway-a","flash"]',
+    second = '["gateway-b","flash"]';
+  const cat = {
+    id: 'dsh',
+    clientId: 'acp',
+    configurationSource: 'native_tool',
+    defaultModel: selection === 'inherited' ? '' : second,
+    acp: { command: 'dsh', startupArgs: ['--profile', 'acp'] },
+  } as CatData;
+  vi.mocked(apiFetch).mockImplementation(
+    async (url) =>
+      new Response(
+        JSON.stringify(
+          url === '/api/cats/native-runtimes'
+            ? { runtimes: [{ id: 'dsh', label: 'DSH', clientId: 'acp', installed: true, models: [], acp: cat.acp }] }
+            : url === '/api/agent-providers'
+              ? { libraries: [] }
+              : {
+                  status: 'live',
+                  defaultModel: second,
+                  defaultModelLabel: 'Gateway / Flash',
+                  models: [
+                    { value: first, label: 'Flash', group: 'Gateway' },
+                    { value: second, label: 'Flash', group: 'Gateway' },
+                  ],
+                },
+        ),
+      ),
+  );
+  const patch = vi.fn();
+  const host = document.createElement('div');
+  const root = createRoot(host);
+  try {
+    await act(async () =>
+      root.render(
+        <>
+          <MemberRuntimeFields
+            form={{
+              ...initialState(),
+              catId: cat.id,
+              clientId: 'acp',
+              carrier: 'acp',
+              configurationSource: 'native_tool',
+              defaultModel: cat.defaultModel,
+              acpCommand: 'dsh',
+              acpStartupArgs: '--profile acp',
+            }}
+            accounts={[]}
+            patch={patch}
+            t={(zh) => zh}
+            accountHref="/settings?s=accounts"
+            editing
+          />
+          <div data-testid="shared-summary">
+            <MemberRuntimeSummary cat={cat} />
+          </div>
+        </>,
+      ),
+    );
+    const trigger = host.querySelector<HTMLButtonElement>('[role=combobox]');
+    expect(trigger?.textContent).toContain('Flash · gateway-b / flash');
+    expect(host.querySelector('[data-testid=shared-summary]')?.textContent).toContain('Flash · gateway-b / flash');
+    expect(host.querySelector('[data-testid=member-model-summary]')?.textContent).toContain(
+      'Flash · gateway-b / flash',
+    );
+    if (selection === 'inherited') expect(trigger?.textContent).toContain('跟随 DSH 设置');
+    expect(patch).not.toHaveBeenCalled();
+    await act(async () => trigger?.click());
+    const options = Array.from(host.querySelectorAll<HTMLButtonElement>('[role=option]'));
+    expect(options[1].textContent).toContain('Flash · gateway-a / flash');
+    expect(options[2].textContent).toContain('Flash · gateway-b / flash');
+    expect(options.filter((option) => option.getAttribute('aria-selected') === 'true')).toHaveLength(1);
+    expect(options[selection === 'inherited' ? 0 : 2].getAttribute('aria-selected')).toBe('true');
+    if (selection === 'inherited') expect(options[2].textContent).toContain('当前继承模型');
+    await act(async () => options[1].click());
+    expect(patch).toHaveBeenLastCalledWith({ defaultModel: first });
+    await act(async () => trigger?.click());
+    await act(async () => host.querySelector<HTMLButtonElement>('[role=option]')?.click());
+    expect(patch).toHaveBeenLastCalledWith({ defaultModel: '' });
+  } finally {
+    await act(async () => root.unmount());
+    useMemberModelCatalogs.setState({ catalogs: {} });
+    vi.resetAllMocks();
+  }
+});
+
+it('preserves plugin opaque IDs despite a retained DSH launcher', async () => {
+  const route = '["plugin-provider","plugin-model"]';
+  vi.mocked(apiFetch).mockResolvedValue(new Response('{}', { status: 503 }));
+  const patch = vi.fn();
+  const host = document.createElement('div');
+  const root = createRoot(host);
+  try {
+    await act(async () =>
+      root.render(
+        <MemberRuntimeFields
+          form={{
+            ...initialState(),
+            catId: 'plugin',
+            clientId: 'acp',
+            carrier: 'acp',
+            configurationSource: 'native_tool',
+            acpAgentProvider: 'plugin:official.codeagent/codeagent',
+            acpCommand: 'dsh',
+            acpStartupArgs: '--profile acp',
+            defaultModel: route,
+          }}
+          accounts={[]}
+          patch={patch}
+          t={(zh) => zh}
+          accountHref="/settings?s=accounts"
+          editing
+        />,
+      ),
+    );
+    expect(host.querySelector('[role=combobox]')?.textContent).toContain(route);
+    expect(host.textContent).not.toContain('DSH 自定义 LLM');
+    expect(patch).not.toHaveBeenCalled();
   } finally {
     await act(async () => root.unmount());
     vi.resetAllMocks();

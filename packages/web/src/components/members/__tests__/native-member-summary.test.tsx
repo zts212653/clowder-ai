@@ -111,3 +111,28 @@ it('shows the saved DSH route as a model ID without renaming another ACP tool', 
   expect(host.textContent).not.toContain('DSH');
   act(() => root.unmount());
 });
+
+it.each([
+  { agentProvider: 'plugin:official.codeagent/codeagent', nested: undefined, dsh: false },
+  { agentProvider: undefined, nested: 'plugin:official.codeagent/codeagent', dsh: false },
+  { agentProvider: null, nested: 'plugin:official.codeagent/codeagent', dsh: true },
+  { agentProvider: undefined, nested: undefined, dsh: true },
+])('respects effective plugin binding over retained DSH fields: %j', ({ agentProvider, nested, dsh }) => {
+  const cat = {
+    id: 'binding',
+    clientId: 'acp',
+    configurationSource: 'native_tool',
+    defaultModel: '["plugin-provider","plugin-model"]',
+    agentProvider,
+    acp: { command: 'dsh', startupArgs: ['--profile', 'acp'], agentProvider: nested },
+  } as CatData;
+  const host = document.createElement('div');
+  const root = createRoot(host);
+  try {
+    act(() => root.render(<MemberRuntimeSummary cat={cat} />));
+    expect(host.textContent).toContain(dsh ? 'DSH · plugin-provider / plugin-model · 模型 ID' : cat.defaultModel);
+    if (!dsh) expect(host.textContent).not.toContain('DSH');
+  } finally {
+    act(() => root.unmount());
+  }
+});

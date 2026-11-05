@@ -24,7 +24,7 @@ it('keeps a subscribed editor usable while a changed DSH model catalog is pendin
     { value: second, label: 'Second Model' },
   ];
   let reads = 0;
-  let finish = (_response: Response) => {};
+  let finish: (response: Response) => void = () => {};
   const deferred = new Promise<Response>((resolve) => {
     finish = resolve;
   });

@@ -1,9 +1,13 @@
 'use client';
-import { isDshLauncher } from '@cat-cafe/shared';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { useAgentClientLibraries } from '@/hooks/useAgentClientLibraries';
-import { memberModelCatalogKey, memberModelValueLabel, useMemberModelCatalogs } from '@/lib/member-model-display';
+import {
+  isDshMember,
+  memberModelCatalogKey,
+  memberModelValueLabel,
+  useMemberModelCatalogs,
+} from '@/lib/member-model-display';
 import { apiFetch } from '@/utils/api-client';
 import type { ProfileItem } from '../../hub-accounts.types';
 import { usesAgyAcp, usesAgyNative } from '../../hub-cat-editor.agy';
@@ -86,7 +90,15 @@ export function MemberRuntimeFields({
           ? 'ACP'
           : form.clientId);
   const native = form.configurationSource === 'native_tool';
-  const dsh = form.clientId === 'acp' && isDshLauncher(form.acpCommand, splitCommandArgs(form.acpStartupArgs));
+  const displayMember = {
+    id: form.catId,
+    clientId: form.clientId,
+    agentProvider: form.acpAgentProvider,
+    acp: { command: form.acpCommand, startupArgs: splitCommandArgs(form.acpStartupArgs) },
+    accountRef: form.accountRef,
+    cliConfigArgs: form.cliConfigArgs,
+  };
+  const dsh = isDshMember(displayMember);
   const english = t('zh', 'en') === 'en';
   const availableAccounts = filterAccounts(form.clientId, accounts),
     identity = availableAccounts.find((item) => item.id === form.accountRef);
@@ -101,13 +113,7 @@ export function MemberRuntimeFields({
     refresh,
     form.cliConfigArgs.length > 0,
   );
-  const displayKey = memberModelCatalogKey({
-    id: form.catId,
-    clientId: form.clientId,
-    acp: { command: form.acpCommand, startupArgs: splitCommandArgs(form.acpStartupArgs) },
-    accountRef: form.accountRef,
-    cliConfigArgs: form.cliConfigArgs,
-  });
+  const displayKey = memberModelCatalogKey(displayMember);
   useEffect(() => {
     if (dsh && catalog)
       useMemberModelCatalogs.setState((state) => ({ catalogs: { ...state.catalogs, [displayKey]: catalog } }));
@@ -118,9 +124,9 @@ export function MemberRuntimeFields({
   const modelLabel = (value: string) => (dsh ? memberModelValueLabel(value, true, catalog?.models, english) : value);
   const defaultModelLabel =
     defaultModel !== undefined
-      ? configuredModelLabel !== defaultModel
-        ? configuredModelLabel
-        : modelLabel(defaultModel)
+      ? dsh
+        ? memberModelValueLabel(defaultModel, true, catalog?.models, english, catalog?.defaultModelLabel)
+        : configuredModelLabel
       : undefined;
   const defaultModelSource =
     catalog?.defaultModelSource === 'client_report'
