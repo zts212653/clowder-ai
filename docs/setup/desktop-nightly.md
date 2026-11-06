@@ -17,6 +17,8 @@ created: 2026-11-07
 
 首次回溯示例是 [#1749](https://github.com/zts212653/clowder-ai/issues/1749)。窗口打开和 HTTP 200 都可能来自外来实例，只有干净首装的用例也不会制造争抢。把早期端口占用和预查后竞争补入 `DESKTOP-PORT-OWNERSHIP`，要求记录监听 PID、数据根和渲染器实际加载的内容。旧包曾在预查后显示外来页面，修复包在同一场景拒绝就绪。已合入的源码测试覆盖归属断言，安装包全量仍须保留这一旅程。见 [修复及回归入口](https://github.com/zts212653/clowder-ai/pull/1870)。
 
+首次合入复盘从试跑源码 `b58412451` 扫到 `12514727`，范围内只有 DSH 图片路由修复。原有续聊用例只验证文本上下文，无法发现图片握手仍绑定旧路由。新增 `DESKTOP-DSH-IMAGE-ROUTE` 为 L2，覆盖视觉、文本和恢复原会话三种结果。该用例依赖专用 DSH 和模型额度，保留在全量选集。见 [合入变更与已有证据](https://github.com/zts212653/clowder-ai/pull/1896)。
+
 ## 触发和证据
 
 [Desktop Nightly](../../.github/workflows/desktop-nightly.yml) 进默认分支后，每天北京时间 00:00 选 `next` 跑双平台冒烟。手动入口可选源分支、平台和测试范围。触发端提交和被测源码提交分别保存。构建与下载按同一 run ID 和 attempt 配对。需要重跑时使用新的手动运行或重跑整个 workflow，避免混用部分重跑前的产物。
