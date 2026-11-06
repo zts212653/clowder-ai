@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { lstat, stat } from 'node:fs/promises';
+import { lstat, readFile, stat } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
@@ -35,11 +35,27 @@ function isNotAGitRepositoryError(err: unknown): boolean {
   return /not a git repository/i.test(gitErrorStderr(err));
 }
 
+/** Tolerant discovery marker: keeps the existing exported-root behavior. */
 async function hasGitMarkerInParents(cwd: string): Promise<boolean> {
   let current = resolve(cwd);
   while (true) {
-    // lstat, not stat: a dangling `.git` symlink is still a damaged checkout
-    // marker and must not be classified as a plain non-Git directory.
+    if (
+      await stat(join(current, '.git')).then(
+        () => true,
+        () => false,
+      )
+    )
+      return true;
+    const parent = dirname(current);
+    if (parent === current) return false;
+    current = parent;
+  }
+}
+
+/** Strict user-visible probe marker: a dangling `.git` symlink is damaged state. */
+async function hasStrictGitMarkerInParents(cwd: string): Promise<boolean> {
+  let current = resolve(cwd);
+  while (true) {
     if (
       await lstat(join(current, '.git')).then(
         () => true,
@@ -60,18 +76,32 @@ async function pathKind(path: string): Promise<'file' | 'directory' | null> {
   );
 }
 
+/** Tolerant bare-repository marker used only by worktree discovery. */
 async function hasBareGitRepositoryMarkers(cwd: string): Promise<boolean> {
   const root = resolve(cwd);
-  const [head, config, objects, refs] = await Promise.all([
+  const [head, objects, refs] = await Promise.all([
     pathKind(join(root, 'HEAD')),
-    pathKind(join(root, 'config')),
     pathKind(join(root, 'objects')),
     pathKind(join(root, 'refs')),
   ]);
+  return head === 'file' && objects === 'directory' && refs === 'directory';
+}
+
+async function hasBareConfig(root: string): Promise<boolean> {
+  const config = await readFile(join(root, 'config'), 'utf8').catch(() => '');
+  return /^\s*bare\s*=\s*true\s*$/im.test(config);
+}
+
+/**
+ * A damaged bare repository still has a Git-authored ownership signal: either
+ * `core.bare = true`, or canonical object/ref storage. Empty `objects/refs`
+ * directories alone are not enough.
+ */
+async function hasDamagedBareRepository(cwd: string): Promise<boolean> {
+  const root = resolve(cwd);
+  if (await hasBareConfig(root)) return true;
+  const [objects, refs] = await Promise.all([pathKind(join(root, 'objects')), pathKind(join(root, 'refs'))]);
   if (objects !== 'directory' || refs !== 'directory') return false;
-  if (head === 'file' || config === 'file') return true;
-  // A bare repository whose HEAD/config were removed still has canonical
-  // storage. Plain directories with empty objects/refs remain non-Git.
   const [pack, heads] = await Promise.all([
     pathKind(join(root, 'objects', 'pack')),
     pathKind(join(root, 'refs', 'heads')),
@@ -102,7 +132,6 @@ export type GitWorkTreeProbe = 'git' | 'bare' | 'not-git' | 'unavailable';
 /**
  * Classify the registered root as a normal worktree, a readable bare
  * repository, a confirmed non-Git directory, or an environment/probe failure.
- * Bare repositories are still Git repositories, but they have no working tree.
  */
 export async function probeGitWorkTree(cwd: string): Promise<GitWorkTreeProbe> {
   const result = await execGit(cwd, ['rev-parse', '--is-inside-work-tree']);
@@ -114,8 +143,8 @@ export async function probeGitWorkTree(cwd: string): Promise<GitWorkTreeProbe> {
   }
   if (isGitExecutableUnavailableError(result.err)) return 'unavailable';
   if (isGitExit128(result.err)) {
-    if (await hasGitMarkerInParents(cwd)) return 'unavailable';
-    if (await hasBareGitRepositoryMarkers(cwd)) return 'unavailable';
+    if (await hasStrictGitMarkerInParents(cwd)) return 'unavailable';
+    if (await hasDamagedBareRepository(cwd)) return 'unavailable';
     if (isNotAGitRepositoryError(result.err)) return 'not-git';
   }
   return 'unavailable';

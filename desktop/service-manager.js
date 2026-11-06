@@ -137,13 +137,23 @@ function resolveNode(projectRoot) {
 class ServiceManager {
   constructor(
     projectRoot,
-    { frontendPort, apiPort, redisPort = 6399, onStatus, allowMemoryFallback = false, pluginNetworkFetch },
+    {
+      frontendPort,
+      apiPort,
+      redisPort = 6399,
+      onStatus,
+      onUnexpectedExit,
+      allowMemoryFallback = false,
+      pluginNetworkFetch,
+    },
   ) {
     this.root = projectRoot;
     this.frontendPort = frontendPort;
     this.apiPort = apiPort;
     this.redisPort = redisPort;
     this.onStatus = onStatus || (() => {});
+    this.onUnexpectedExit = onUnexpectedExit || (() => {});
+    this.running = false;
     this.procs = {};
     this.memoryMode = false;
     // Explicit consent only: constructor option or startAll({ allowMemoryFallback }).
@@ -156,10 +166,13 @@ class ServiceManager {
   }
 
   async startAll({ allowMemoryFallback = false } = {}) {
+    this.running = false;
     if (allowMemoryFallback) this.allowMemoryFallback = true;
     this.startupAbort = new AbortController();
     try {
-      return await this.timeline.runPhase('all-services', () => this._startAll());
+      const result = await this.timeline.runPhase('all-services', () => this._startAll());
+      this.running = true;
+      return result;
     } catch (error) {
       await this._stopPluginNetworkBridge();
       throw error;
@@ -808,6 +821,11 @@ class ServiceManager {
 
     proc.on('exit', (code, signal) => {
       log(`[${name}] exited: code=${code} signal=${signal}`);
+      if (this.running && this.procs[name] === proc) {
+        // The first lost dependency owns this incident; sibling exits only log.
+        this.running = false;
+        this.onUnexpectedExit({ name, code, signal });
+      }
     });
 
     proc.stdout?.on('data', (d) => log(`[${name}] ${d.toString().trim()}`));
@@ -905,6 +923,7 @@ class ServiceManager {
   }
 
   async stopAll() {
+    this.running = false;
     this.startupAbort?.abort(new Error('Desktop startup cancelled'));
     const KILL_TIMEOUT_MS = 5000;
     const entries = Object.entries(this.procs);

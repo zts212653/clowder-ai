@@ -53,7 +53,11 @@ import type { IDraftStore } from '../domains/cats/services/stores/ports/DraftSto
 import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
 import { type IMessageStore, isTimelinePublished } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { IThreadStore, Thread } from '../domains/cats/services/stores/ports/ThreadStore.js';
-import { type ITurnExecutionStore } from '../domains/cats/services/stores/ports/TurnExecutionStore.js';
+import {
+  hasUnconfirmedProviderTeardown,
+  type ITurnExecutionStore,
+  type TurnExecutionRecord,
+} from '../domains/cats/services/stores/ports/TurnExecutionStore.js';
 import type { DynamicTaskStore } from '../infrastructure/scheduler/DynamicTaskStore.js';
 import { buildCancelMessages, type SocketManager } from '../infrastructure/websocket/index.js';
 import type { CliExecutionOwnerService, LiveCliExecutionOwner } from '../utils/cli-process-ownership.js';
@@ -105,8 +109,9 @@ export interface QueueRoutesOptions {
   /** Durable child turns: the KD-21 ledger, and a running child standing in for an owner no snapshot can verify. */
   turnExecutionStore?: Pick<
     ITurnExecutionStore,
-    'get' | 'listByParent' | 'transitionTerminal' | 'clearResponsePending'
-  >;
+    'get' | 'listByParent' | 'transitionTerminal' | 'clearResponsePending' | 'listResponsePending'
+  > &
+    Partial<Pick<ITurnExecutionStore, 'listRunningByUser'>>;
   /** Existing managed-wake receipt owner; late-bound after delivery composition. */
   getManagedCommandWakeRecovery?: () => ManagedCommandWakeRecoveryLike | undefined;
   /** F295: existing durable task truth used only to project active managed commands. */
@@ -120,6 +125,19 @@ export interface QueueRoutesOptions {
   };
   /** Durable OS owner truth used when the in-memory tracker handle is gone. */
   cliExecutionOwnerService?: CliExecutionOwnerService;
+  /**
+   * #1838: Stop of one execution whose provider started and whose stop is unconfirmed. It ends the
+   * execution only with an exact stop proof (the Windows API job it belonged to verifiably closed);
+   * otherwise it names why it could not, and the execution keeps its occupancy.
+   */
+  stopUnconfirmedProvider?: (
+    record: TurnExecutionRecord,
+  ) => Promise<{ stopped: true; record: TurnExecutionRecord } | { stopped: false; reason: string }>;
+  /**
+   * #1838: the first of these executions that a Windows host job or its exact controller API still
+   * owns. No uncontrollable failure may be written over a live owner; an unknown is not one.
+   */
+  findWindowsLiveOwner?: (records: readonly TurnExecutionRecord[]) => Promise<{ invocationId: string } | undefined>;
 }
 
 function liveExecutionCandidateKey(candidate: Pick<LiveExecutionCandidate, 'catId' | 'executionId'>): string {
@@ -477,7 +495,12 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       reason?: ExecutionFailureReason;
     },
     retirePending = snapshotPendingPrivateStop(input.threadId, input.userId, [input.catId]),
-  ): Promise<{ reconciled: boolean }> => {
+  ): Promise<{
+    reconciled: boolean;
+    controlPlaneUnavailable?: boolean;
+    error?: string;
+    code?: 'PROVIDER_LIVE_OWNER';
+  }> => {
     if (!messageStore || !opts.invocationRecordStore) {
       throw new Error('durable execution failure stores are unavailable');
     }
@@ -491,6 +514,17 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
           (child) => child.threadId === input.threadId && child.userId === input.userId && child.catId === input.catId,
         )
       : [];
+    // #1838: an owner the CLI snapshot cannot list may still be a live Windows host or its API. Its
+    // execution is not lost: nothing is written, and the caller reports the exact owner.
+    const liveOwner = await opts.findWindowsLiveOwner?.(childExecutions);
+    if (liveOwner)
+      return {
+        reconciled: false,
+        // The existing refusal contract: the Stop routes answer 503 with this exact reason.
+        controlPlaneUnavailable: true,
+        error: `原执行仍有存活的 owner，保留执行占用（invocationId=${liveOwner.invocationId}）`,
+        code: 'PROVIDER_LIVE_OWNER',
+      };
     const childInvocationIds = [
       ...new Set([
         ...(input.invocationId ? [input.invocationId] : []),
@@ -632,7 +666,13 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     invocationId: string;
     ownerUserId?: string;
     request: FastifyRequest;
-  }): Promise<{ cancelled: boolean; reconciled?: boolean; controlPlaneUnavailable?: boolean }> => {
+  }): Promise<{
+    cancelled: boolean;
+    reconciled?: boolean;
+    controlPlaneUnavailable?: boolean;
+    error?: string;
+    code?: string;
+  }> => {
     const executionOwner = {
       executionId: input.executionId,
       invocationId: input.invocationId,
@@ -652,7 +692,8 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     }
     if (!processResult?.complete || !processResult.stopped) {
       try {
-        await failUncontrollableInvocation({ ...input, invocationId: input.invocationId });
+        const failed = await failUncontrollableInvocation({ ...input, invocationId: input.invocationId });
+        if (!failed.reconciled) return { cancelled: false, ...failed };
         return { cancelled: false, reconciled: true };
       } catch (err) {
         input.request.log.error({ err, ...executionOwner }, 'failed to persist control-plane failure terminal');
@@ -720,6 +761,151 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     return { cancelled: cancelResult.cancelled };
   };
 
+  /**
+   * #1838: a member whose provider started and whose stop is unconfirmed ends only with an exact stop
+   * proof. Every such child of this execution is stopped through that proof; the first one that cannot
+   * be names the reason, and the caller then keeps the execution and its occupancy. A child that
+   * already ended but whose reply is still owed settles here too, so a retry of the same Stop closes
+   * that reply instead of reporting a success it did not reach. Null means nothing is left.
+   */
+  const refuseUnconfirmedProviderStop = async (input: {
+    threadId: string;
+    userId: string;
+    catId: string;
+    executionId: string;
+    request: FastifyRequest;
+  }): Promise<{
+    error: string;
+    code: 'PROVIDER_TEARDOWN_UNCONFIRMED' | 'EXECUTION_RESPONSE_SETTLEMENT_FAILED';
+  } | null> => {
+    const children = await opts.turnExecutionStore?.listByParent(input.executionId);
+    const unconfirmed = (children ?? []).filter(
+      (child) =>
+        child.parentInvocationId === input.executionId &&
+        child.threadId === input.threadId &&
+        child.userId === input.userId &&
+        child.catId === input.catId &&
+        child.status === 'running' &&
+        hasUnconfirmedProviderTeardown(child),
+    );
+    for (const child of unconfirmed) {
+      let stop: Awaited<ReturnType<NonNullable<QueueRoutesOptions['stopUnconfirmedProvider']>>>;
+      try {
+        stop = opts.stopUnconfirmedProvider
+          ? await opts.stopUnconfirmedProvider(child)
+          : { stopped: false, reason: 'no_stop_proof' };
+      } catch (err) {
+        input.request.log.error({ err, invocationId: child.invocationId }, 'stop proof could not be committed');
+        stop = { stopped: false, reason: 'stop_proof_unavailable' };
+      }
+      if (stop.stopped) continue;
+      // Without a stop proof, only positive proof of a live owner keeps the execution: a host job
+      // still present or its exact controller alive, or this exact child in the CLI owner snapshot.
+      const snapshot = await retryProcessOwnerSnapshot(input.request, opts.cliExecutionOwnerService);
+      const liveOwner =
+        snapshot.owners.some((owner) => owner.invocationId === child.invocationId) ||
+        (await opts.findWindowsLiveOwner?.([child])) !== undefined;
+      if (liveOwner)
+        return { error: `原执行停止尚未确认，保留执行占用（${stop.reason}）`, code: 'PROVIDER_TEARDOWN_UNCONFIRMED' };
+      // #1849: an unknown or unlinked one is canceled through its owner path; its physical exit stays
+      // unknown, so no teardown is written. Its R settles from the ledger below.
+      const ended = await opts.turnExecutionStore?.transitionTerminal(child.invocationId, {
+        status: 'canceled',
+        endedAt: Date.now(),
+        terminalReason: 'user_cancel',
+      });
+      if (!ended?.record || ended.record.status === 'running')
+        return { error: '原执行终态未能写入，请重试', code: 'EXECUTION_RESPONSE_SETTLEMENT_FAILED' };
+    }
+    // The KD-21 ledger is the authority on which R is still owed: it holds every ended child of this
+    // execution whose reply never committed, whether the proof above just ended it or an earlier
+    // attempt failed after ending it. Settling from there makes the retry complete the same reply.
+    // Only a canceled turn is a Stop's to settle, and it settles as canceled. A turn of the same
+    // execution that ended any other way keeps its own outcome and its own settlement.
+    const owed = (await opts.turnExecutionStore?.listResponsePending?.()) ?? [];
+    for (const child of owed.filter(
+      (record) =>
+        record.status === 'canceled' &&
+        record.parentInvocationId === input.executionId &&
+        record.threadId === input.threadId &&
+        record.userId === input.userId &&
+        record.catId === input.catId,
+    )) {
+      try {
+        await settleStoppedChildResponse(child, input);
+      } catch (err) {
+        input.request.log.error(
+          { err, invocationId: child.invocationId },
+          'stopped execution response could not be settled',
+        );
+        return {
+          error: `原执行已停止，但原回复未能结算，请重试（${String(err)}）`,
+          code: 'EXECUTION_RESPONSE_SETTLEMENT_FAILED',
+        };
+      }
+    }
+    return null;
+  };
+
+  /**
+   * #1838: the exact (parent, cat) scopes a Stop entry must reach although the parent record no longer
+   * runs. An older cancel/reset could end the parent and leave a started child running with its stop
+   * unconfirmed; admission reads children by user and still refuses its role. A Stop that then ended
+   * such a child but could not commit its reply leaves it only on the KD-21 ledger, so a retry finds it
+   * there. Only canceled turns qualify: a turn that finished on its own keeps its own settlement.
+   */
+  const endedParentStopScopes = async (threadId: string, userId: string) => {
+    const runningParents = new Set(
+      ((await opts.invocationRecordStore?.listRunningByThread(threadId, userId)) ?? []).map((record) => record.id),
+    );
+    const running = (await opts.turnExecutionStore?.listRunningByUser?.(userId)) ?? [];
+    const owed = (await opts.turnExecutionStore?.listResponsePending?.()) ?? [];
+    const scopes = [
+      ...running.filter((child) => child.status === 'running' && hasUnconfirmedProviderTeardown(child)),
+      ...owed.filter((child) => child.status === 'canceled'),
+    ].flatMap((child) => {
+      const executionId = child.parentInvocationId;
+      return executionId && !runningParents.has(executionId) && child.threadId === threadId && child.userId === userId
+        ? [{ executionId, catId: child.catId as string }]
+        : [];
+    });
+    return [...new Map(scopes.map((scope) => [`${scope.executionId}\u0000${scope.catId}`, scope])).values()];
+  };
+
+  /**
+   * KD-21: the child's terminal transition already ended its turn, so R settles from what it
+   * streamed, keeping the live body and clearing the draft and its pending ledger entry.
+   */
+  const settleStoppedChildResponse = async (
+    child: TurnExecutionRecord,
+    input: { threadId: string; userId: string; request: FastifyRequest },
+  ): Promise<void> => {
+    if (!messageStore || !opts.turnExecutionStore) return;
+    await settleResponseFromDraft(
+      {
+        messageStore,
+        ...(opts.draftStore ? { draftStore: opts.draftStore } : {}),
+        turnStore: opts.turnExecutionStore,
+        ...(opts.invocationRecordStore ? { invocationRecords: opts.invocationRecordStore } : {}),
+        commitFailedResponse: (response, patch) =>
+          commitRecoveredFailedResponse(
+            { socketManager, messageStore, invocationQueue, queueProcessor, log: input.request.log },
+            response,
+            patch,
+          ),
+        emit: (userId, message) => emitLifecycleMessageUpdated(socketManager, userId, message),
+      },
+      {
+        userId: input.userId,
+        threadId: input.threadId,
+        invocationId: child.invocationId,
+        status: 'canceled',
+        reason: child.terminalReason ?? 'user_cancel',
+        endedAt: child.endedAt ?? Date.now(),
+      },
+    );
+  };
+
   const reconcileInactiveLiveInvocation = async (input: {
     threadId: string;
     userId: string;
@@ -774,8 +960,15 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
         reconciled: result.cancelled || result.reconciled === true,
         ...(processOwner.executionId !== input.executionId ? { replacement: true } : {}),
         ...(result.controlPlaneUnavailable ? { controlPlaneUnavailable: true } : {}),
+        ...(result.error ? { error: result.error } : {}),
+        ...(result.code ? { code: result.code } : {}),
       };
     }
+
+    // An empty owner snapshot cannot certify a dispatched child whose exact
+    // teardown has never been recorded (including unsupported Windows owners).
+    const refusal = await refuseUnconfirmedProviderStop(input);
+    if (refusal) return { reconciled: false, controlPlaneUnavailable: true, ...refusal };
 
     const inflight = invocationQueue.findProcessingByCat(input.threadId, input.catId);
     if (inflight && queueEntryOwnerId(inflight) !== input.userId) {
@@ -1000,7 +1193,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       const snapshot = await retryProcessOwnerSnapshot(request, opts.cliExecutionOwnerService);
       if (!snapshot.complete) {
         try {
-          await failUncontrollableInvocation({
+          const failed = await failUncontrollableInvocation({
             threadId,
             userId,
             catId,
@@ -1008,6 +1201,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
             ...(candidate.invocationId ? { invocationId: candidate.invocationId } : {}),
             request,
           });
+          if (!failed.reconciled) return { cancelled: false, ...failed };
           return { cancelled: false, reconciled: true };
         } catch (err) {
           request.log.error({ err, threadId, catId, executionId }, 'failed to persist control-plane failure terminal');
@@ -1032,7 +1226,11 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       return {
         cancelled: false,
         reconciled: reconciled.reconciled,
+        // The exact refusal (its code and its reason) is what the user needs to see, so it travels
+        // with controlPlaneUnavailable instead of being flattened into a generic control-plane error.
         ...(reconciled.controlPlaneUnavailable ? { controlPlaneUnavailable: true } : {}),
+        ...(reconciled.error ? { error: reconciled.error } : {}),
+        ...(reconciled.code ? { code: reconciled.code } : {}),
       };
     },
     reconcileInactiveLiveInvocation,
@@ -2034,6 +2232,21 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
               reply.status(404);
               return { error: '该猫当前未在执行', code: 'CAT_NOT_ACTIVE' };
             }
+            // #1838: canceling the record must not strand a started provider of any member: that
+            // child would leave the live list while it still blocks its thread/role.
+            for (const memberCat of orphanRecord.targetCats as string[]) {
+              const refusal = await refuseUnconfirmedProviderStop({
+                threadId,
+                userId: guard.userId,
+                catId: memberCat,
+                executionId: orphanRecord.id,
+                request,
+              });
+              if (refusal) {
+                reply.status(503);
+                return refusal;
+              }
+            }
 
             await snapshotPendingPrivateStop(threadId, guard.userId, orphanRecord.targetCats)();
             await opts.invocationRecordStore.update(orphanRecord.id, { status: 'canceled' });
@@ -2060,7 +2273,28 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
             return { ok: true, cancelled: true };
           }
         }
+        // #1838: a started child whose parent already ended is no running record, so the branch above
+        // cannot reach it. Stop it through its exact parent before reporting the cat as inactive.
+        const endedScopes = (await endedParentStopScopes(threadId, guard.userId)).filter(
+          (scope) => scope.catId === catId,
+        );
+        for (const scope of endedScopes) {
+          const refusal = await refuseUnconfirmedProviderStop({ threadId, userId: guard.userId, ...scope, request });
+          if (refusal) {
+            reply.status(503);
+            return refusal;
+          }
+        }
         const lockRelease = releaseAgentSessionLocks({ threadId, userId: guard.userId, catId }, request, 'cancel');
+        if (endedScopes.length > 0) {
+          await retirePending();
+          for (const m of buildCancelMessages({ cancelled: true, catIds: [catId] })) {
+            socketManager.broadcastAgentMessage(m, threadId);
+          }
+          if (queueProcessor.canReleaseSlotForUser(threadId, catId, guard.userId))
+            queueProcessor.releaseSlot(threadId, catId);
+          return { ok: true, cancelled: true };
+        }
         if (
           (lockRelease.releasedHolders > 0 || lockRelease.rejectedWaiters > 0) &&
           queueProcessor.canReleaseSlotForUser(threadId, catId, guard.userId)
@@ -2112,6 +2346,40 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     if (!guard) return;
 
     const retirePending = snapshotPendingPrivateStop(threadId, guard.userId);
+    // #1838: a running record may still own a started provider whose stop is unconfirmed, exactly
+    // like the orphan-cancel path. Consume the same exact proof *before* mutating anything: a reset
+    // that canceled the parent but left that child running would hide it from the live list while it
+    // still blocks the next message of the same thread and role. A cat this API still controls
+    // locally is not one of those: cancelAll below aborts it through its normal path, so demanding
+    // external kernel proof there would refuse a reset the product can perform itself.
+    const preResetRunningRecords = opts.invocationRecordStore
+      ? await opts.invocationRecordStore.listRunningByThread(threadId, guard.userId)
+      : [];
+    for (const record of preResetRunningRecords) {
+      for (const memberCat of record.targetCats as string[]) {
+        if (invocationTracker.has(threadId, memberCat)) continue;
+        const refusal = await refuseUnconfirmedProviderStop({
+          threadId,
+          userId: guard.userId,
+          catId: memberCat,
+          executionId: record.id,
+          request,
+        });
+        if (refusal) {
+          reply.status(503);
+          return refusal;
+        }
+      }
+    }
+    // A child whose parent already ended is never in the running records above, yet it still blocks.
+    for (const scope of await endedParentStopScopes(threadId, guard.userId)) {
+      if (invocationTracker.has(threadId, scope.catId)) continue;
+      const refusal = await refuseUnconfirmedProviderStop({ threadId, userId: guard.userId, ...scope, request });
+      if (refusal) {
+        reply.status(503);
+        return refusal;
+      }
+    }
     // 1. Abort all active InvocationTracker slots (controllers + slot deletion).
     //    This clears the primary busy source (invocationTracker.has) that hasActiveExecution checks.
     //    cancelAll aborts in-flight requests and removes active slots atomically.

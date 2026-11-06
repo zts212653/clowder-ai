@@ -632,6 +632,15 @@ export class InvocationQueue {
     return count;
   }
 
+  /** Restore the local projection of already committed control edges after a lost acknowledgement. */
+  async reprojectFailureWakes(source: StoredMessage, targetIds: readonly string[]): Promise<void> {
+    for (const ref of source.lifecycle?.dispatchRefs ?? []) {
+      if (ref.phase !== 'settled' || !targetIds.includes(ref.targetId)) continue;
+      const wake = await this.ledgerStore.get(source.threadId, queueEntryId(ref.statusMessageId));
+      if (wake?.kind === 'private_input' && wake.sourceCategory === 'a2a_failure') this.cacheLedgerEntries([wake]);
+    }
+  }
+
   private async reconcileClaimedLedgerEntry(
     row: QueueLedgerEntry,
     messageStore?: Pick<IMessageStore, 'getById'>,
@@ -644,15 +653,7 @@ export class InvocationQueue {
     }
     const dispatchedTargets = new Set(source?.lifecycle?.dispatchRefs?.map((ref) => ref.targetId) ?? []);
     const claimedTargets = row.claimedTargetIds ?? [];
-    if (row.sourceCategory === 'a2a') {
-      for (const ref of source?.lifecycle?.dispatchRefs ?? []) {
-        if (ref.phase !== 'settled' || !row.targets.includes(ref.targetId) || !dispatchedTargets.has(ref.targetId))
-          continue;
-        const wake = await this.ledgerStore.get(row.threadId, queueEntryId(ref.statusMessageId));
-        // Reproject an already admitted control edge after a lost write or read acknowledgement.
-        if (wake?.kind === 'private_input' && wake.sourceCategory === 'a2a_failure') this.cacheLedgerEntries([wake]);
-      }
-    }
+    if (row.sourceCategory === 'a2a' && source) await this.reprojectFailureWakes(source, row.targets);
     if (claimedTargets.length > 0 && claimedTargets.every((targetId) => dispatchedTargets.has(targetId))) {
       // A response lifecycle is the durable receiver. A crash after that
       // History commit may leave the short Queue claim behind; retire only
@@ -972,20 +973,23 @@ export class InvocationQueue {
     };
   }
 
-  /** One storage transaction for a claimed target's failure and its exact caller wake. */
+  /** One transaction for a prestart target's failure and its exact caller wake. */
   async terminalizeClaimedAdmissionFailure(
     messageStore: IMessageStore,
     source: StoredMessage,
     entry: QueueEntry,
-    targetId: string,
+    targetId: string | readonly string[],
     reason: LifecyclePreAdmissionFailureInput['reason'],
+    content?: string,
   ) {
-    if (!entry.claimId) throw new Error('pre-admission failure requires a durable Queue claim');
+    if (!entry.claimId && entry.status !== 'processing')
+      throw new Error('pre-admission failure requires its Queue claim or retired prestart attempt');
+    const requestedTargets = typeof targetId === 'string' ? [targetId] : [...targetId].sort();
     const caller = queueEntryCallerCatId(entry);
     const returnToCaller =
       entry.sourceCategory === 'a2a' &&
       caller &&
-      caller !== targetId &&
+      !requestedTargets.includes(caller) &&
       source.from?.kind === 'agent' &&
       source.from.catId === caller &&
       source.userId === queueEntryOwnerId(entry) &&
@@ -996,20 +1000,21 @@ export class InvocationQueue {
     const committed = await messageStore.getByIdempotencyKey(
       'system',
       source.threadId,
-      preAdmissionFailureIdempotencyKey(entry.id, targetId),
+      preAdmissionFailureIdempotencyKey(entry.id, requestedTargets),
     );
     const failure = await messageStore.commitLifecyclePreAdmissionFailure({
       sourceMessageId: source.id,
       expectedEntryId: entry.id,
-      requestedTargets: [targetId],
+      requestedTargets,
       reason,
       content:
-        reason === 'invalid_explicit_target'
-          ? `唤起 ${targetId} 失败：指定的接收对象当前无效。`
-          : `唤起 ${targetId} 失败：成员的执行绑定无法通过准入。`,
+        content ??
+        (reason === 'invalid_explicit_target'
+          ? `唤起 ${requestedTargets.join('、')} 失败：指定的接收对象当前无效。`
+          : `唤起 ${requestedTargets.join('、')} 失败：成员的执行绑定无法通过准入。`),
       failedAt: committed?.timestamp ?? Math.max(Date.now(), source.timestamp),
       claim: {
-        id: entry.claimId,
+        ...(entry.claimId ? { id: entry.claimId } : {}),
         ledger: this.ledgerStore,
         ...(returnToCaller
           ? {

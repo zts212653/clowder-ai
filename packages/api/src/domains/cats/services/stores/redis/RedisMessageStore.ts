@@ -727,7 +727,7 @@ local ttlSec = tonumber(ARGV[13])
 local sourceMode = ARGV[14]
 local failureFromRaw = ARGV[15]
 local claimId = ARGV[16]
-local failedTarget = ARGV[17]
+local failedTargetsRaw = ARGV[17]
 local wakeRaw = ARGV[18]
 local wakeFingerprint = ARGV[19]
 
@@ -745,17 +745,30 @@ if existingFailureId and redis.call('EXISTS', kp .. 'msg:' .. existingFailureId)
 end
 
 local wakeId = nil
-if claimId ~= '' then
+if #KEYS > 1 then
+  local failedTargets = cjson.decode(failedTargetsRaw)
   local raw = redis.call('HGET', KEYS[2], expectedEntryId)
-  if not raw then return {-4, ''} end
-  local row = cjson.decode(raw)
-  if row.status ~= 'claimed' or row.claimId ~= claimId or
-     row.payload.messageId ~= redis.call('HGET', sourceHash, 'id') then return {-4, ''} end
-  local found = false
-  for _, target in ipairs(row.claimedTargetIds or {}) do
-    if target == failedTarget then found = true end
+  if claimId ~= '' then
+    if not raw then return {-4, ''} end
+    local row = cjson.decode(raw)
+    if row.status ~= 'claimed' or row.claimId ~= claimId or
+       row.payload.messageId ~= redis.call('HGET', sourceHash, 'id') then return {-4, ''} end
+    for _, failedTarget in ipairs(failedTargets) do
+      local found = false
+      for _, target in ipairs(row.claimedTargetIds or {}) do
+        if target == failedTarget then found = true end
+      end
+      if not found then return {-4, ''} end
+    end
+  elseif raw then
+    local row = cjson.decode(raw)
+    if row.payload.messageId ~= redis.call('HGET', sourceHash, 'id') then return {-4, ''} end
+    for _, target in ipairs(row.targets) do
+      for _, failedTarget in ipairs(failedTargets) do
+        if target == failedTarget then return {-4, ''} end
+      end
+    end
   end
-  if not found then return {-4, ''} end
   if wakeRaw ~= '' then
     wakeId = cjson.decode(wakeRaw).id
     if redis.call('HEXISTS', KEYS[2], wakeId) == 1 or
@@ -3884,7 +3897,7 @@ export class RedisMessageStore {
     if (!source) return { kind: 'not_found' };
     const idempotencyKey = preAdmissionFailureIdempotencyKey(
       input.expectedEntryId,
-      input.claim ? input.requestedTargets[0] : undefined,
+      input.claim ? input.requestedTargets : undefined,
     );
     const existingFailure = await this.getByIdempotencyKey('system', source.threadId, idempotencyKey);
     if (existingFailure) {
@@ -3940,7 +3953,7 @@ export class RedisMessageStore {
       input.failedAt < source.timestamp ||
       input.requestedTargets.some((target) => typeof target !== 'string' || target.length === 0) ||
       uniqueTargets.size !== input.requestedTargets.length ||
-      (input.claim && input.requestedTargets.length !== 1) ||
+      (input.claim && input.requestedTargets.length === 0) ||
       (!isQueuedInput && input.requestedTargets.length === 0) ||
       (!isQueuedInput && !isDeliveredInput && !isPublicAgentWake)
     ) {
@@ -4027,7 +4040,7 @@ export class RedisMessageStore {
       isQueuedInput ? 'queued_input' : isDeliveredInput ? 'delivered_input' : 'public_wake',
       JSON.stringify(failureInput.from),
       input.claim?.id ?? '',
-      input.claim ? input.requestedTargets[0]! : '',
+      JSON.stringify(input.requestedTargets),
       wake ? JSON.stringify(wake) : '',
       wake ? queueLedgerAdmissionFingerprint(wake) : '',
     )) as [number | string, string];

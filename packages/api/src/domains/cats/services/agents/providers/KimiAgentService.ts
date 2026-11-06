@@ -117,6 +117,11 @@ interface KimiAgentServiceOptions {
 export class KimiAgentService implements AgentService {
   readonly catId: CatId;
   private readonly spawnFn: SpawnFn | undefined;
+
+  /** #1838: the turn's only provider spawn is spawnCli with its invocationId; an injected spawnFn owns its own. */
+  get windowsProviderHosts(): boolean {
+    return this.spawnFn === undefined;
+  }
   private readonly model: string;
   /** #780: Raw NDJSON archive for post-mortem diagnostics */
   private readonly rawArchive: RawArchiveSink;

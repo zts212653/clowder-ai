@@ -27,6 +27,10 @@ interface PreparedBinding {
 }
 export class RegisteredSessionAgentService implements AgentService {
   readonly cancellationMode = 'drain' as const;
+  /** The concrete carrier owns this capability; the registered view must not invent coverage. */
+  get windowsProviderHosts(): AgentService['windowsProviderHosts'] {
+    return this.hostService()?.windowsProviderHosts;
+  }
   private cached?: { provider: AgentSessionProvider; bridge: AgentSessionBridgeService; lifetime: AbortController };
   constructor(private readonly input: RegisteredInput) {}
   get implementationKey(): string {
@@ -131,6 +135,7 @@ export class RegisteredSessionAgentService implements AgentService {
     const { service } = binding;
     const view: AgentService = {
       cancellationMode: this.cancellationMode,
+      windowsProviderHosts: service?.windowsProviderHosts,
       forInvocation: () => view,
       implementationSnapshot: () => this.snapshot(binding),
       injectsL0Natively: service?.injectsL0Natively?.bind(service),

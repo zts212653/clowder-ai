@@ -92,6 +92,8 @@ export class AcpHttpStreamClient {
   private exited = false;
   /** Sessions whose local prompt ended before provider completion was acknowledged. */
   private readonly unquiescedSessionIds = new Set<string>();
+  /** Sessions whose latest prompt received its final RPC response, success or provider error. */
+  private readonly promptFinalResponses = new Set<string>();
   private port: number | null = null;
   private baseUrl = '';
   private initResult: AcpInitializeResult | null = null;
@@ -306,6 +308,7 @@ export class AcpHttpStreamClient {
     input: AcpPromptInput,
     options?: { timeoutMs?: number; idleWarningMs?: number; idleStallMs?: number },
   ): AsyncGenerator<AcpSessionUpdate, AcpStopReason> {
+    this.promptFinalResponses.delete(sessionId);
     const prompt = toAcpPromptContent(input, this.promptCapabilities);
     const timeoutMs = options?.timeoutMs ?? 900_000;
     const idleWarningMs = options?.idleWarningMs ?? 20_000;
@@ -530,6 +533,7 @@ export class AcpHttpStreamClient {
             if (msgId === id && !method) {
               // Final response to our prompt request — protocol is done
               finalResponseReceived = true;
+              this.promptFinalResponses.add(sessionId);
               const resp = msg as unknown as AcpResponse;
               if (resp.error) {
                 promptError = new AcpProtocolError(resp.error.code, resp.error.message, resp.error.data);
@@ -567,6 +571,7 @@ export class AcpHttpStreamClient {
             const method = msg.method as string | undefined;
             if (msgId === id && !method) {
               finalResponseReceived = true;
+              this.promptFinalResponses.add(sessionId);
               const resp = msg as unknown as AcpResponse;
               if (resp.error) {
                 promptError = new AcpProtocolError(resp.error.code, resp.error.message, resp.error.data);
@@ -657,6 +662,17 @@ export class AcpHttpStreamClient {
   }
   get isAlive(): boolean {
     return this.child !== null && !this.child.killed && !this.closed && !this.exited;
+  }
+  /**
+   * True only after the child emitted its own exit event. A transport error sets `closed` and makes
+   * `isAlive` false without any native exit, so availability is not stop proof.
+   */
+  get hasExited(): boolean {
+    return this.exited;
+  }
+  /** True when the latest prompt received a final RPC response, including a provider error. */
+  hasPromptFinalResponse(sessionId: string): boolean {
+    return this.promptFinalResponses.has(sessionId);
   }
   /**
    * #1203: False when the bootstrap cwd was deleted after spawn — including the
