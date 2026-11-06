@@ -19,17 +19,4 @@ describe('Marker collection routing', () => {
     assert.ok(!isWidening('internal', 'private'), 'internal→private is NOT widening');
     assert.ok(!isWidening('internal', 'internal'), 'same→same is NOT widening');
   });
-
-  it('Marker fields are optional (backwards compat)', async () => {
-    const marker = {
-      id: '1',
-      content: 'test',
-      source: 'manual',
-      status: 'captured',
-      createdAt: '2026-05-03',
-    };
-    assert.equal(marker.sourceCollectionId, undefined);
-    assert.equal(marker.targetCollectionId, undefined);
-    assert.equal(marker.promoteReviewStatus, undefined);
-  });
 });

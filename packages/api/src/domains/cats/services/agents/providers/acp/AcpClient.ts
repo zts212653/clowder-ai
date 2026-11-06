@@ -201,6 +201,9 @@ interface PendingAcpRequest {
   refreshTimeout: () => void;
 }
 
+/** Only these keys may cross into host-side native-home resolution; never the whole child env. */
+const NATIVE_HOME_ENV_KEYS = ['HOME', 'USERPROFILE', 'KIMI_CODE_HOME'] as const;
+
 export class AcpClient {
   private providerDiagnosticTail = '';
   private readonly failedProviderSessions = new Set<string>();
@@ -216,6 +219,12 @@ export class AcpClient {
   }
   private readonly liveSessions = new ActiveSessionCache();
   private child: ChildProcess | null = null;
+  /**
+   * Exact environment the child received, captured at spawn. Host-side provider
+   * evidence readers must resolve the same native home the CLI used — never the
+   * ambient process env, which may belong to a different account.
+   */
+  private childEnv: Readonly<Record<string, string | undefined>> = {};
   private rl: ReadlineInterface | null = null;
   private readonly pending = new Map<string, PendingAcpRequest>();
   private readonly notificationListeners: Array<(n: AcpNotification) => void> = [];
@@ -259,6 +268,20 @@ export class AcpClient {
     this.cwdIdentityTracker = new AcpCwdIdentityTracker(this.config.cwd);
   }
 
+  /**
+   * Spawn coordinates for bounded host-side provider diagnostics (e.g. reading
+   * the Kimi CLI's own turn ledger). Read-only and account-exact: env carries
+   * only the native-home selectors the child actually received, never ambient
+   * process state or unrelated credentials.
+   */
+  get spawnContext(): { cwd: string; env: Readonly<Record<string, string | undefined>> } {
+    const env: Record<string, string | undefined> = {};
+    for (const key of NATIVE_HOME_ENV_KEYS) {
+      if (this.childEnv[key]) env[key] = this.childEnv[key];
+    }
+    return { cwd: this.config.cwd, env };
+  }
+
   // ── Lifecycle ────────────────────────────────────────────────
 
   async initialize(): Promise<AcpInitializeResult> {
@@ -285,6 +308,7 @@ export class AcpClient {
       const binDir = dirname(command);
       childEnv.PATH = childEnv.PATH ? `${binDir}:${childEnv.PATH}` : binDir;
     }
+    this.childEnv = childEnv;
     // #712: Re-create bootstrap CWD if it was cleaned up by OS temp-dir rotation
     // or by the ACP agent process on exit. Node.js spawn() returns ENOENT when the
     // cwd doesn't exist, even though the command binary itself exists — the error
@@ -509,7 +533,7 @@ export class AcpClient {
         error instanceof AcpProtocolError &&
         error.code === PI_SESSION_BINDING_ERROR
       )
-        throw new AcpSessionBindingError(error.message);
+        throw new AcpSessionBindingError(error.message, { cause: error });
       throw error;
     });
     log.info(

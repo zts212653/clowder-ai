@@ -52,6 +52,7 @@ import { InMemoryQueueLedgerStore } from '../../agents/invocation/queue-ledger/I
 import {
   type QueueLedgerEntry,
   type QueueLedgerStore,
+  queueEntryId,
   queueLedgerAdmissionsMatch,
 } from '../../agents/invocation/queue-ledger/QueueLedger.js';
 import type { MessageMetadata } from '../../types.js';
@@ -61,6 +62,7 @@ import {
   type LifecycleAppendRecoveryResult,
   prepareLifecycleAppendRecovery,
 } from '../lifecycle-append-recovery.js';
+import { hasUnresolvedLifecycleAppend } from '../lifecycle-append-state.js';
 import {
   type LifecycleWakeCoverageInput,
   type LifecycleWakeCoverageResult,
@@ -316,6 +318,7 @@ export interface StoredMessage {
   metadata?: MessageMetadata;
   /** F022+F052+F098-C1+F153-F: Extensible extra data (rich blocks, stream metadata, cross-post origin, explicit targets, tracing pointers) */
   extra?: {
+    watcher?: { kind: 'nudge'; sourceInvocationId: string; sourceMessageId: string; watcherInvocationId: string };
     /** Authenticated cloud-return scope, never a replacement for native delivery history. */
     cloudBridgeReturn?: import('@cat-cafe/shared').CloudBridgeReturnV1;
     /** F167: one authenticated immutable ordinary Task handoff, recovered by the existing Queue. */
@@ -775,6 +778,7 @@ export type AppendMessageInput = Omit<
   | 'companionDeliveryReceipt'
   | 'extra'
 > & {
+  watcherOutputFence?: import('../../../../concierge/watcher/watcher-output-fence.js').WatcherOutputFence;
   from: MessageFrom;
   extra?: Omit<
     NonNullable<StoredMessage['extra']>,
@@ -1041,6 +1045,7 @@ export type CommitLifecycleResponseTerminalResult =
 export type LifecycleInputDispatchPatch = {
   inputRead?: LifecycleInputReadReceipt;
   appendAcceptance?: LifecycleDispatchRef['appendAcceptance'];
+  appendDelivery?: LifecycleDispatchRef['appendDelivery'];
   orderKey: string;
   producerInvocationId?: string;
   targetId: string;
@@ -1073,6 +1078,7 @@ export interface LifecycleAppendAdmissionInput {
     /** Optional adapter capability; presentation only. */
     inputReadSupported?: boolean;
     awaitingAcceptance?: boolean;
+    requiresCompletion?: boolean;
     /** Exact time this source was admitted to the target response. */
     dispatchedAt: number;
   }[];
@@ -1137,6 +1143,12 @@ export interface LifecyclePreAdmissionFailureInput {
   content: string;
   contentBlocks?: readonly MessageContent[];
   failedAt: number;
+  /** Binding rejection belongs to a specific target of the original short claim. */
+  claim?: {
+    id: string;
+    ledger: QueueLedgerStore;
+    makeWake?: (failureId: string) => QueueLedgerEntry;
+  };
 }
 
 export type CommitLifecyclePreAdmissionFailureResult =
@@ -1149,8 +1161,9 @@ export type CommitLifecyclePreAdmissionFailureResult =
     }
   | { kind: 'not_found' };
 
-export function preAdmissionFailureIdempotencyKey(entryId: string): string {
-  return `message-lifecycle:pre-admission-failure:${entryId}`;
+export function preAdmissionFailureIdempotencyKey(entryId: string, targetId?: string): string {
+  const key = `message-lifecycle:pre-admission-failure:${entryId}`;
+  return targetId === undefined ? key : `${key}:${JSON.stringify(targetId)}`;
 }
 
 export function matchesLifecyclePreAdmissionFailure(
@@ -1261,6 +1274,7 @@ export function advanceLifecycleInputDispatchMetadata(
             ...(patch.dispatchedAt !== undefined ? { dispatchedAt: patch.dispatchedAt } : {}),
             ...(patch.inputRead ? { inputRead: patch.inputRead } : {}),
             ...(patch.appendAcceptance ? { appendAcceptance: patch.appendAcceptance } : {}),
+            ...(patch.appendDelivery ? { appendDelivery: patch.appendDelivery } : {}),
           },
         ],
       },
@@ -1298,6 +1312,7 @@ export function advanceLifecycleInputDispatchMetadata(
             ...(patch.dispatchedAt !== undefined ? { dispatchedAt: patch.dispatchedAt } : {}),
             ...(patch.inputRead ? { inputRead: patch.inputRead } : {}),
             ...(patch.appendAcceptance ? { appendAcceptance: patch.appendAcceptance } : {}),
+            ...(patch.appendDelivery ? { appendDelivery: patch.appendDelivery } : {}),
           },
         ],
       },
@@ -1305,6 +1320,25 @@ export function advanceLifecycleInputDispatchMetadata(
   }
   if (existing.statusMessageId !== patch.statusMessageId) {
     return { kind: 'conflict', reason: 'status_message_mismatch' };
+  }
+  if (patch.appendDelivery) {
+    if (existing.appendDelivery?.dispatchStarted && !patch.appendDelivery.dispatchStarted)
+      return { kind: 'conflict', reason: 'invalid_transition' };
+    if (
+      existing.appendDelivery &&
+      Boolean(existing.appendDelivery.requiresCompletion) !== Boolean(patch.appendDelivery.requiresCompletion)
+    )
+      return { kind: 'conflict', reason: 'invalid_transition' };
+    if (!isDeepStrictEqual(existing.appendDelivery, patch.appendDelivery))
+      return {
+        kind: 'applied',
+        lifecycle: {
+          ...current,
+          dispatchRefs: refs.map((ref) =>
+            ref === existing ? { ...ref, appendDelivery: structuredClone(patch.appendDelivery) } : ref,
+          ),
+        },
+      };
   }
   if (
     (patch.appendAcceptance === 'accepted' && ['pending', 'written'].includes(existing.appendAcceptance ?? '')) ||
@@ -1445,6 +1479,21 @@ export function prepareLifecycleAppendAdmission(
     const message = messages[index]!;
     let lifecycle = message.lifecycle;
     for (const [runIndex, run] of input.runs.entries()) {
+      // A retry belongs to a fresh receiver. Reading the body through the old run
+      // cannot recreate a dispatch that this same attempt definitively refused.
+      if (
+        lifecycle?.appendFailures?.some(
+          (failure) =>
+            failure.targetId === run.targetId &&
+            failure.invocationId === run.invocationId &&
+            failure.responseMessageId === run.responseMessageId,
+        ) &&
+        !lifecycle.dispatchRefs?.some(
+          (ref) => ref.targetId === run.targetId && ref.statusMessageId === run.responseMessageId,
+        )
+      )
+        return { kind: 'conflict', reason: 'input_lifecycle_conflict' };
+
       const transition = advanceLifecycleInputDispatchMetadata(lifecycle, {
         ...lifecycleInputIdentityForStoredMessage(message),
         targetId: run.targetId,
@@ -1453,6 +1502,14 @@ export function prepareLifecycleAppendAdmission(
         dispatchedAt: run.dispatchedAt,
         ...(run.inputReadSupported ? { inputRead: { status: 'pending' as const } } : {}),
         ...(run.awaitingAcceptance ? { appendAcceptance: 'pending' as const } : {}),
+        ...(run.awaitingAcceptance
+          ? {
+              appendDelivery: {
+                dispatchStarted: false,
+                ...(run.requiresCompletion ? { requiresCompletion: true } : {}),
+              },
+            }
+          : {}),
       });
       if (transition.kind === 'conflict') return { kind: 'conflict', reason: 'input_lifecycle_conflict' };
       if (transition.kind === 'applied') {
@@ -2281,6 +2338,9 @@ export interface IMessageStore {
     input: LifecycleAppendRecoveryInput,
     ledgerStore: QueueLedgerStore,
   ): LifecycleAppendRecoveryResult | Promise<LifecycleAppendRecoveryResult>;
+  /** Candidate lookup only; callers reread exact History facts before acting. */
+  listUnresolvedAppendMessages(threadId: string): StoredMessage[] | Promise<StoredMessage[]>;
+  listUnresolvedAppendThreadIds(): string[] | Promise<string[]>;
   commitLifecycleWakeCoverage(
     input: LifecycleWakeCoverageInput,
     ledgerStore: QueueLedgerStore,
@@ -2836,7 +2896,12 @@ export class MessageStore {
       }
     }
 
-    const { idempotencyKey, reservedId: mediaReservedId, ...payload } = normalizedMessage;
+    const {
+      idempotencyKey,
+      reservedId: mediaReservedId,
+      watcherOutputFence: _watcherOutputFence,
+      ...payload
+    } = normalizedMessage;
     if (mediaReservedId !== undefined && !/^\d{16}-\d{6,}-[0-9a-f]{8}$/.test(mediaReservedId))
       throw new TypeError('reserved message id has invalid shape');
     if (reservedId !== undefined && mediaReservedId !== undefined && reservedId !== mediaReservedId)
@@ -3830,7 +3895,10 @@ export class MessageStore {
     const index = this.messages.findIndex((message) => message.id === input.sourceMessageId);
     if (index === -1) return { kind: 'not_found' };
     const source = this.messages[index]!;
-    const idempotencyKey = preAdmissionFailureIdempotencyKey(input.expectedEntryId);
+    const idempotencyKey = preAdmissionFailureIdempotencyKey(
+      input.expectedEntryId,
+      input.claim ? input.requestedTargets[0] : undefined,
+    );
     const existingFailure = this.getByIdempotencyKey('system', source.threadId, idempotencyKey);
     if (existingFailure) {
       if (!matchesLifecyclePreAdmissionFailure(existingFailure, source, input)) {
@@ -3944,6 +4012,24 @@ export class MessageStore {
     if (!settledLifecycle) {
       return { kind: 'conflict', reason: 'invalid_failure', inputMessage: structuredClone(source) };
     }
+    if (input.claim) {
+      const { ledger, id, makeWake } = input.claim;
+      if (!(ledger instanceof InMemoryQueueLedgerStore)) {
+        throw new Error('pre-admission failure requires the matching in-memory Queue ledger');
+      }
+      const row = ledger.getNow(source.threadId, input.expectedEntryId);
+      if (
+        row?.status !== 'claimed' ||
+        row.claimId !== id ||
+        row.payload.messageId !== source.id ||
+        input.requestedTargets.length !== 1 ||
+        !row.claimedTargetIds?.includes(input.requestedTargets[0]!)
+      )
+        return { kind: 'conflict', reason: 'invalid_failure', inputMessage: structuredClone(source) };
+      if (makeWake && ledger.enqueueNow([makeWake(failureId)]).outcome !== 'enqueued') {
+        throw new Error('pre-admission failure wake admission conflict');
+      }
+    }
     // Validate the entire settlement before append can publish effects. Notify
     // consumers only after the source and its failure are both committed.
     const failureMessage = this.appendWithReservedId(failureInput, failureId, { deferAppendNotification: true });
@@ -4002,22 +4088,52 @@ export class MessageStore {
     return { kind: 'applied', messages: (messages as StoredMessage[]).map((message) => structuredClone(message)) };
   }
 
+  listUnresolvedAppendMessages(threadId: string): StoredMessage[] {
+    return this.messages
+      .filter(
+        (message) =>
+          message.threadId === threadId &&
+          !message.recall &&
+          !message._tombstone &&
+          !message.deletedAt &&
+          hasUnresolvedLifecycleAppend(message.lifecycle),
+      )
+      .map((message) => structuredClone(message));
+  }
+
+  listUnresolvedAppendThreadIds(): string[] {
+    return [
+      ...new Set(
+        this.messages
+          .filter((message) => hasUnresolvedLifecycleAppend(message.lifecycle))
+          .map((message) => message.threadId),
+      ),
+    ];
+  }
+
   commitLifecycleAppendRecovery(
     input: LifecycleAppendRecoveryInput,
     ledgerStore: QueueLedgerStore,
   ): LifecycleAppendRecoveryResult {
     if (!(ledgerStore instanceof InMemoryQueueLedgerStore))
       throw new Error('Append recovery requires the matching memory Queue ledger');
-    const source = this.messages.find((message) => message.id === input.entry.payload.messageId);
+    const source = this.messages.find(
+      (message) => message.id === (input.sourceMessageId ?? input.entry?.payload.messageId),
+    );
     const response = this.messages.find((message) => message.id === input.failure.responseMessageId);
     if (!source || !response) return { kind: 'not_found' };
-    const current = ledgerStore.getNow(input.entry.threadId, input.entry.id);
+    const current = ledgerStore.getNow(source.threadId, queueEntryId(source.id));
     const prepared = prepareLifecycleAppendRecovery(source, response, current, input);
     if (prepared.kind !== 'prepared') return structuredClone(prepared);
     ledgerStore.replaceAppendRecoveryNow(current, prepared.entry);
     source.lifecycle = structuredClone(prepared.lifecycles[0]);
     response.lifecycle = structuredClone(prepared.lifecycles[1]);
-    return { kind: 'applied', messages: [structuredClone(source), structuredClone(response)], entry: prepared.entry };
+    return {
+      kind: 'applied',
+      messages: [structuredClone(source), structuredClone(response)],
+      entry: prepared.entry,
+      resumed: prepared.resumed,
+    };
   }
 
   commitLifecycleWakeCoverage(

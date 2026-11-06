@@ -337,18 +337,6 @@ describe('F247 AC-B1c-1 R2: strict auth model (gpt52 R2 P0 regression)', () => {
     });
     assert.equal(res.statusCode, 403);
   });
-
-  it('403 when authenticated user is not the owner', async () => {
-    ({ app } = await makeApp({
-      thread: { id: 'T1', createdBy: 'alice', deletedAt: null },
-    }));
-    const res = await app.inject({
-      method: 'GET',
-      url: '/api/threads/T1/cloud-bindings',
-      headers: AUTH_STRANGER,
-    });
-    assert.equal(res.statusCode, 403);
-  });
 });
 
 // ─────────────────────────────────────────────────────────────

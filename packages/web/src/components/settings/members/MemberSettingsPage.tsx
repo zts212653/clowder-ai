@@ -1,8 +1,8 @@
 'use client';
 import { useSearchParams } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { type CatData, formatCatName } from '@/hooks/useCatData';
-import { isDshMember } from '@/lib/member-model-display';
+import { useIsDshMember } from '@/lib/member-model-display';
 import type { MemberSaveTrace } from '@/utils/member-save-trace';
 import { usesAgyAcp, usesAgyNative } from '../../hub-cat-editor.agy';
 import { splitCommandArgs } from '../../hub-cat-editor.model';
@@ -52,15 +52,21 @@ export function MemberSettingsPage({
   const english = useShellLanguage() === 'en';
   const t = (zh: string, en: string) => (english ? en : zh);
   const editor = useMemberEditor(cat, cats, onSaved, onBeforeCreate);
+  const dshMember = useIsDshMember();
   const { draft, accounts, ready, saving, dirtyCount } = editor;
   const { form, baseline, section } = draft;
+  const runtimeScope = draft.baseline?.id ?? 'new';
+  const [runtimeVisitedFor, setRuntimeVisitedFor] = useState<string>();
+  useEffect(() => {
+    if (ready && section === 'runtime') setRuntimeVisitedFor(runtimeScope);
+  }, [ready, section, runtimeScope]);
   const identity = accounts.find((account) => account.id === form.accountRef);
   const tool = usesAgyAcp(form)
     ? t('AGY 官方 ACP', 'AGY official ACP')
     : usesAgyNative(form)
       ? 'AGY Native'
       : form.carrier === 'acp'
-        ? isDshMember({
+        ? dshMember({
             clientId: form.clientId,
             agentProvider: form.acpAgentProvider,
             acp: { command: form.acpCommand, startupArgs: splitCommandArgs(form.acpStartupArgs) },
@@ -212,12 +218,12 @@ export function MemberSettingsPage({
               disabled={saving}
               className="min-w-0 rounded-2xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-5 sm:p-6"
             >
-              {section === 'runtime' ? (
-                cat?.identityProtection ? (
-                  <MemberCloudIdentity cat={cat} onSaved={onSaved} t={t} />
-                ) : (
+              {!cat?.identityProtection && (section === 'runtime' || runtimeVisitedFor === runtimeScope) && (
+                <div hidden={section !== 'runtime'}>
                   <MemberRuntimeFields
                     form={form}
+                    preparedRuntime={draft.preparedRuntime}
+                    onPreparedRuntime={editor.setPreparedRuntime}
                     accounts={accounts}
                     patch={editor.patch}
                     onToolChange={editor.switchRuntime}
@@ -227,7 +233,12 @@ export function MemberSettingsPage({
                     editing={Boolean(cat)}
                     onValidityChange={setRuntimeValid}
                   />
-                )
+                </div>
+              )}
+              {section === 'runtime' ? (
+                cat?.identityProtection ? (
+                  <MemberCloudIdentity cat={cat} onSaved={onSaved} t={t} />
+                ) : null
               ) : (
                 <MemberAdditionalFields
                   section={section}

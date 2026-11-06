@@ -46,6 +46,7 @@ export function sdkOperatorArgs(args: readonly string[]): {
   const reserved = new Set([
     'system-prompt',
     'system-prompt-file',
+    'system-prompt-snapshot',
     'append-system-prompt',
     'append-system-prompt-file',
     'input-format',
@@ -221,7 +222,14 @@ export async function prepareClaudeSdkLaunch(input: {
       ...(options?.workingDirectory ? { cwd: options.workingDirectory } : {}),
       ...(!useEnvModelOverride && effectiveModel ? { model: effectiveModel } : {}),
       effort,
-      systemPrompt: nativeInstructions.map((entry) => entry.body).join('\n\n'),
+      // L0 is compiled per invocation. A bare string is recorded on the first
+      // request and resent verbatim on every resume (SDK snapshot default), so a
+      // long-lived thread would keep the L0 it was born with.
+      systemPrompt: {
+        type: 'custom',
+        prompt: nativeInstructions.map((entry) => entry.body).join('\n\n'),
+        snapshot: false,
+      },
       includePartialMessages: true,
       permissionMode: member ? 'default' : readOnly ? 'plan' : 'bypassPermissions',
       ...(readOnly || member ? { tools: [] } : { allowDangerouslySkipPermissions: true }),

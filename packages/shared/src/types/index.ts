@@ -1095,7 +1095,9 @@ export type {
   TimelineMessageKind,
 } from './message-lifecycle.js';
 export {
+  getLifecycleAppendOutcome,
   hasExactLifecycleProcessingDispatch,
+  isAppendRepeatSource,
   isLifecycleAppendFailure,
   isLifecycleInputReadReceipt,
   isLifecycleStoredMessageMetadata,
@@ -1690,6 +1692,7 @@ export type {
 } from './study.js';
 // F335 交付二：回话下面那一排（一键提议 + 原地回执）
 export * from './suggestion.js';
+export * from './suggestion-desk.js';
 // Summary types (拍立得照片墙)
 export type {
   CreateSummaryInput,
@@ -1787,6 +1790,7 @@ export type {
   TurnExecutionTerminalStatus,
   TurnOutputFence,
   TurnOutputFenceVerdict,
+  TurnResponseSettlement,
 } from './turn-execution.js';
 export * from './unified-attention.js';
 export * from './unified-attention-decision.js';
@@ -1816,6 +1820,7 @@ export {
   waitTerminationEventSchema,
   waitTerminationReasonSchema,
 } from './wait-termination.js';
+export * from './watcher.js';
 export type {
   CheckStatus,
   ResumeCapsule,

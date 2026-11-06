@@ -804,7 +804,7 @@
     "kind": "capability",
     "sourceRef": {
       "path": "cat-cafe-skills/refs/capability-wakeup-index.md",
-      "anchor": "expert-panel"
+      "anchor": "`collaborative-thinking` — 探索与多视角判断"
     },
     "structureSource": {
       "path": "packages/api/src/infrastructure/harness-eval/capability-wakeup/capability-wakeup-rules.ts",
@@ -812,7 +812,7 @@
     },
     "bodySource": {
       "path": "cat-cafe-skills/refs/capability-wakeup-index.md",
-      "anchor": "`expert-panel`"
+      "anchor": "「专家辩论」「多猫分析」「三猫讨论」"
     },
     "contexts": ["review", "feature_dev"],
     "audience": ["cvo", "developer"],

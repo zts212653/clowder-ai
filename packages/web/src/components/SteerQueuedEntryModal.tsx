@@ -238,7 +238,9 @@ export function SteerQueuedEntryModal({
                     <AvatarImageWithFallback src={target.avatar} alt="" className="h-5 w-5 rounded-full object-cover" />
                   )}
                   <span>{target.label}</span>
-                  {target.delivered ? <span className="text-xs text-cafe-muted">已投递</span> : null}
+                  {target.delivered ? (
+                    <span className="text-xs text-cafe-muted">已交接 · 在原消息下方查看进度</span>
+                  ) : null}
                   {target.unavailable ? <span className="text-xs text-cafe-muted">不可用</span> : null}
                 </button>
               );

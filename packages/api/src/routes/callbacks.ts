@@ -254,7 +254,7 @@ import { registerCompanionWorkReadRoutes } from './companion-work-read.js';
 import { resolveCrossThreadCoordination } from './cross-thread-coordination.js';
 import { type FeatIndexEntry, readFeatIndexEntries } from './feat-index-doc-import.js';
 import { buildThreadIdsByFeatId, normalizeFeatId } from './feature-thread-resolver.js';
-import { guardLiveCarrierRead } from './live-carrier-read-guard.js';
+import { guardLiveCarrierRead, isWatcherRead } from './live-carrier-read-guard.js';
 import {
   decodeThreadContextCursor,
   hashThreadContextCursorScope,
@@ -4299,7 +4299,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       principal.kind === 'invocation' ? (principal.parentInvocationId ?? principal.invocationId) : undefined;
     // Queued bodies are execution-owned, unlike already-published history. A cross-thread
     // history read must not expose or acknowledge another thread's queued receipt custody.
-    const canExposeQueuedBodies = principal.kind === 'invocation' && effectiveThreadId === principal.threadId;
+    const canExposeQueuedBodies =
+      !isWatcherRead(request) && principal.kind === 'invocation' && effectiveThreadId === principal.threadId;
     const queuedFullEntries =
       isFullMode && (isContiguousRead || messageId !== undefined) && canExposeQueuedBodies && opts.invocationQueue
         ? opts.invocationQueue
@@ -5014,7 +5015,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // visibilitySeq order, advancing ONLY through a contiguous run from the
     // current cursor. Gaps stop the advance — no false "seen" claims.
     // Only advance on plain thread reads (no keyword filter, no messageId window).
-    if (deliveryCursorStore && isFullMode && isContiguousRead) {
+    if (!isWatcherRead(request) && deliveryCursorStore && isFullMode && isContiguousRead) {
       try {
         const currentSeen = await deliveryCursorStore.getSeenCursor(
           principalUserId,
@@ -5114,6 +5115,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     if (
       opts.redis &&
       principal.kind === 'invocation' &&
+      !isWatcherRead(request) &&
       isFullMode &&
       isContiguousRead &&
       fullyReturnedFiltered.length > 0

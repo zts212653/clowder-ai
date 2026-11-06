@@ -193,7 +193,7 @@ test('scroll and Tab respect the menu anchor and leave the whole menu hierarchy'
       await page.keyboard.press(key);
       await menu.waitFor({ state: 'detached' });
       assert.equal(await formats.count(), 0);
-      const destination = key === 'Tab' ? row.getByTestId('thread-quick-delete') : row.getByRole('link');
+      const destination = key === 'Tab' ? page.getByTestId('trash-bin-toggle') : row.getByRole('link');
       assert.equal(await destination.evaluate((element) => element === document.activeElement), true);
     }
   }

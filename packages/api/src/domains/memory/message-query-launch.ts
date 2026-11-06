@@ -19,6 +19,7 @@ export function prepareQualificationLaunch(
     '--setting-sources',
     '--tools',
     '--system-prompt-file',
+    '--system-prompt-snapshot',
     '--append-system-prompt-file',
     '--settings',
   ]);
@@ -46,6 +47,8 @@ export function prepareQualificationLaunch(
     at('--permission-mode') !== 'plan' ||
     at('--output-format') !== 'stream-json' ||
     at('--setting-sources') !== 'project,local,user' ||
+    // The shared carrier renders full L0 fresh; a recorded prompt would be stale.
+    at('--system-prompt-snapshot') !== 'off' ||
     original.env?.CAT_CAFE_READONLY !== 'true'
   )
     throw new Error('Qualification launch mismatch');

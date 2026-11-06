@@ -3,6 +3,7 @@ import { Readable } from 'node:stream';
 import { isMainThread } from 'node:worker_threads';
 import { ExternalPluginRuntimeError, type ExternalPluginRuntimeErrorCode } from '../external-runtime/types.js';
 import { PluginExecutionWorkerError, type RemoteValue, RetainedRemoteValue, TeardownRemoteValue } from './protocol.js';
+import { ResponseLifetime } from './response-lifetime.js';
 
 type Callable = (...args: unknown[]) => unknown;
 interface FunctionEntry {
@@ -86,8 +87,26 @@ export class RemoteValues {
     this.#remoteFunctions.clear();
   }
 
-  encode(value: unknown, scopeId: string, path: readonly string[] = [], receiver?: unknown): RemoteValue {
-    if (value instanceof RetainedRemoteValue) return this.encode(value.value, 'retained', path, receiver);
+  encodeResponse(value: unknown, scopeId: string, retire: () => void): { value: RemoteValue; retained: boolean } {
+    const lifetime = new ResponseLifetime(retire);
+    const encoded = this.encode(value, scopeId, [], undefined, lifetime);
+    return { value: encoded, retained: lifetime.complete() };
+  }
+
+  decodeResponse(value: RemoteValue, retire: () => void): { value: unknown; retained: boolean } {
+    const lifetime = new ResponseLifetime(retire);
+    const decoded = this.decode(value, lifetime);
+    return { value: decoded, retained: lifetime.complete() };
+  }
+
+  encode(
+    value: unknown,
+    scopeId: string,
+    path: readonly string[] = [],
+    receiver?: unknown,
+    lifetime?: ResponseLifetime,
+  ): RemoteValue {
+    if (value instanceof RetainedRemoteValue) return this.encode(value.value, 'retained', path, receiver, lifetime);
     if (value instanceof TeardownRemoteValue) {
       if (typeof value.value !== 'function') throw new TypeError('Execution disposer must be callable');
       return this.#encodeFunction(value.value as Callable, scopeId, receiver, 'teardown');
@@ -95,12 +114,13 @@ export class RemoteValues {
     if (typeof value === 'function') {
       return this.#encodeCallable(value as Callable, scopeId, path, receiver);
     }
-    if (value instanceof Error) return this.#encodeError(value, scopeId);
+    if (value instanceof Error) return this.#encodeError(value, scopeId, lifetime);
     if (value instanceof AbortSignal) {
-      return this.#encodeSignal(value, scopeId);
+      return this.#encodeSignal(value, scopeId, lifetime);
     }
     if (value instanceof Readable) {
       this.#trackReadable(value, scopeId);
+      lifetime?.readable(value);
       return {
         kind: 'readable',
         objectMode: value.readableObjectMode,
@@ -109,20 +129,10 @@ export class RemoteValues {
       };
     }
     if (value && typeof value === 'object' && Symbol.asyncIterator in value) {
-      const iterator = (value as AsyncIterable<unknown>)[Symbol.asyncIterator]();
-      return {
-        kind: 'iterator',
-        next: this.encode((...args: unknown[]) => iterator.next(...(args as [] | [unknown])), scopeId),
-        end: this.encode(
-          new TeardownRemoteValue(async () => {
-            await iterator.return?.();
-            return { done: true };
-          }),
-          scopeId,
-        ),
-      };
+      return this.#encodeIterator(value as AsyncIterable<unknown>, scopeId, lifetime);
     }
-    if (Array.isArray(value)) return { kind: 'array', items: value.map((item) => this.encode(item, scopeId)) };
+    if (Array.isArray(value))
+      return { kind: 'array', items: value.map((item) => this.encode(item, scopeId, [], undefined, lifetime)) };
     if (
       value &&
       typeof value === 'object' &&
@@ -131,28 +141,44 @@ export class RemoteValues {
       return {
         kind: 'object',
         entries: Object.entries(value).map(
-          ([key, child]) => [key, this.encode(child, scopeId, [...path, key], value)] as const,
+          ([key, child]) => [key, this.encode(child, scopeId, [...path, key], value, lifetime)] as const,
         ),
       };
     }
     return { kind: 'data', value };
   }
 
-  decode(value: RemoteValue): unknown {
+  #encodeIterator(value: AsyncIterable<unknown>, scopeId: string, lifetime?: ResponseLifetime): RemoteValue {
+    const source = value[Symbol.asyncIterator]();
+    const iterator = lifetime ? lifetime.iterator(source) : source;
+    return {
+      kind: 'iterator',
+      next: this.encode((...args: unknown[]) => iterator.next(...(args as [] | [unknown])), scopeId),
+      end: this.encode(
+        new TeardownRemoteValue(async () => {
+          await iterator.return?.();
+          return { done: true };
+        }),
+        scopeId,
+      ),
+    };
+  }
+
+  decode(value: RemoteValue, lifetime?: ResponseLifetime): unknown {
     switch (value.kind) {
       case 'data':
         return value.value;
       case 'array':
-        return value.items.map((item) => this.decode(item));
+        return value.items.map((item) => this.decode(item, lifetime));
       case 'object':
-        return Object.fromEntries(value.entries.map(([key, item]) => [key, this.decode(item)]));
+        return Object.fromEntries(value.entries.map(([key, item]) => [key, this.decode(item, lifetime)]));
       case 'return-error': {
         const original = this.#errors.get(value.id)?.deref();
-        if (original) return original;
-        return this.#decodeError(value);
+        if (original && !lifetime) return original;
+        return this.#decodeError(value, lifetime, original);
       }
       case 'error': {
-        return this.#decodeError(value);
+        return this.#decodeError(value, lifetime);
       }
       case 'function':
         return this.#function(value);
@@ -162,23 +188,25 @@ export class RemoteValues {
           highWaterMark: value.highWaterMark,
         });
         this.#trackReadable(stream);
+        lifetime?.readable(stream);
         return stream;
       }
       case 'iterator': {
         const next = this.decode(value.next) as () => Promise<IteratorResult<unknown>>;
         const end = this.decode(value.end) as () => Promise<IteratorResult<unknown>>;
-        return {
+        const iterator = {
           [Symbol.asyncIterator]() {
             return this;
           },
           next,
           return: end,
         };
+        return lifetime ? lifetime.iterator(iterator) : iterator;
       }
       case 'signal': {
         const controller = new AbortController();
         const flag = new Int32Array(value.state);
-        const reason = this.decode(value.reason);
+        const reason = this.decode(value.reason, lifetime);
         if (Atomics.load(flag, 0)) controller.abort(reason);
         this.#signals.set(value.id, controller);
         const signal = controller.signal;
@@ -227,7 +255,7 @@ export class RemoteValues {
     return this.#encodeFunction(value, scopeId, receiver, mode);
   }
 
-  #encodeError(value: Error, scopeId: string): RemoteValue {
+  #encodeError(value: Error, scopeId: string, lifetime?: ResponseLifetime): RemoteValue {
     const remoteId = this.#remoteErrors.get(value);
     const id = remoteId ?? randomUUID();
     if (!remoteId) {
@@ -240,11 +268,11 @@ export class RemoteValues {
       name: value.name,
       message: value.message,
       ...(value.stack === undefined ? {} : { stack: value.stack }),
-      fields: this.encode(Object.fromEntries(Object.entries(value)), scopeId),
+      fields: this.encode(Object.fromEntries(Object.entries(value)), scopeId, [], undefined, lifetime),
     };
   }
 
-  #encodeSignal(value: AbortSignal, scopeId: string): RemoteValue {
+  #encodeSignal(value: AbortSignal, scopeId: string, lifetime?: ResponseLifetime): RemoteValue {
     const id = randomUUID();
     const state = new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT);
     const flag = new Int32Array(state);
@@ -259,19 +287,26 @@ export class RemoteValues {
       Atomics.store(flag, 0, 1);
       this.calls.abort(id, this.encode(new DOMException('Execution call ended', 'AbortError'), 'retained'));
     });
-    return { kind: 'signal', id, state, reason: this.encode(value.reason, scopeId) };
+    return { kind: 'signal', id, state, reason: this.encode(value.reason, scopeId, [], undefined, lifetime) };
   }
 
-  #decodeError(value: Extract<RemoteValue, { kind: 'error' | 'return-error' }>): Error {
-    const fields = this.decode(value.fields) as Record<string, unknown>;
+  #decodeError(
+    value: Extract<RemoteValue, { kind: 'error' | 'return-error' }>,
+    lifetime?: ResponseLifetime,
+    original?: Error,
+  ): Error {
+    const fields = this.decode(value.fields, lifetime) as Record<string, unknown>;
     const error =
-      value.name === 'ExternalPluginRuntimeError' && typeof fields.code === 'string'
+      original ??
+      (value.name === 'ExternalPluginRuntimeError' && typeof fields.code === 'string'
         ? new ExternalPluginRuntimeError(fields.code as ExternalPluginRuntimeErrorCode, value.message)
-        : new Error(value.message);
-    error.name = value.name;
-    if (value.stack) error.stack = value.stack;
+        : new Error(value.message));
+    if (!original) {
+      error.name = value.name;
+      if (value.stack) error.stack = value.stack;
+      this.#remoteErrors.set(error, value.id);
+    }
     Object.assign(error, fields);
-    this.#remoteErrors.set(error, value.id);
     return error;
   }
 

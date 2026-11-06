@@ -36,6 +36,9 @@ export class RegisteredSessionAgentService implements AgentService {
   async prepare(): Promise<void> {
     await this.input.registry.resolve(this.input.ref, { catId: this.input.catId })?.prepareHostService?.();
   }
+  async prepareWatcherSession(): Promise<void> {
+    await this.prepare();
+  }
   private hostService(): AgentService | undefined {
     return this.input.registry.resolve(this.input.ref, { catId: this.input.catId })?.hostService?.();
   }
@@ -50,6 +53,10 @@ export class RegisteredSessionAgentService implements AgentService {
   get supportsToolExecutionPolicy(): AgentService['supportsToolExecutionPolicy'] {
     const service = this.hostService();
     return service?.supportsToolExecutionPolicy?.bind(service);
+  }
+  get boundedWatcherSessionCapability(): AgentService['boundedWatcherSessionCapability'] {
+    const service = this.hostService();
+    return service?.boundedWatcherSessionCapability?.bind(service);
   }
   get assertScopedMemberAccount(): AgentService['assertScopedMemberAccount'] {
     const service = this.hostService();
@@ -101,7 +108,10 @@ export class RegisteredSessionAgentService implements AgentService {
   private snapshot(binding: PreparedBinding) {
     const failure = this.bindingFailure(binding);
     if (failure || !binding.generation)
-      throw new ExecutionAdmissionConflict(failure ?? 'session_implementation_unavailable');
+      throw new ExecutionAdmissionConflict(
+        failure ?? 'session_implementation_unavailable',
+        failure === 'session_host_generation_changed',
+      );
     const implementation = binding.service?.implementationSnapshot?.();
     return Object.freeze({
       key: this.implementationKey,
@@ -126,6 +136,7 @@ export class RegisteredSessionAgentService implements AgentService {
       injectsL0Natively: service?.injectsL0Natively?.bind(service),
       captureInvocationOptions: service?.captureInvocationOptions?.bind(service),
       supportsToolExecutionPolicy: service?.supportsToolExecutionPolicy?.bind(service),
+      boundedWatcherSessionCapability: service?.boundedWatcherSessionCapability?.bind(service),
       assertScopedMemberAccount: service?.assertScopedMemberAccount?.bind(service),
       resolveScopedNativeAccount: service?.resolveScopedNativeAccount?.bind(service),
       freshnessCarrierCapability: service?.freshnessCarrierCapability?.bind(service),

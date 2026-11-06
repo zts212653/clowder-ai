@@ -30,8 +30,8 @@ const OSC = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
 // JWT: 3 base64url segments separated by '.', first 2 begin with 'eyJ'
 const JWT = /eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g;
 
-// PEM block: -----BEGIN ... PRIVATE KEY----- to matching END
-const PEM = /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g;
+// Truncated diagnostics may omit END; suppress the remaining private-key block through EOF.
+const PEM = /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g;
 
 // URL userinfo. Anchoring the scheme after a non-scheme character prevents the
 // engine from retrying an unbounded scheme prefix at every word boundary.

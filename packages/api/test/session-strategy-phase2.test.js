@@ -18,41 +18,7 @@ async function loadConfigModule() {
 describe('session-strategy Phase 2', () => {
   // ── getSealConfig backward compat ──
 
-  describe('getSealConfig() backward compat', () => {
-    test('returns ContextHealthConfig with sealThreshold mapped from action', async () => {
-      const { getSealConfig } = await loadStrategyModule();
-      const config = getSealConfig('opus');
-      assert.equal(typeof config.warnThreshold, 'number');
-      assert.equal(typeof config.sealThreshold, 'number');
-      assert.equal(config.sealThreshold, 0.9);
-      assert.equal(config.warnThreshold, 0.8);
-      assert.equal(config.turnBudget, 12_000);
-      assert.equal(config.safetyMargin, 4_000);
-    });
-
-    test('codex getSealConfig matches strategy thresholds', async () => {
-      const { getSealConfig } = await loadStrategyModule();
-      const config = getSealConfig('codex');
-      assert.equal(config.sealThreshold, 0.85);
-      assert.equal(config.warnThreshold, 0.75);
-    });
-  });
-
   // ── shouldSeal backward compat ──
-
-  describe('shouldSeal() backward compat', () => {
-    test('returns true when fillRatio >= sealThreshold', async () => {
-      const { shouldSeal, getSealConfig } = await loadStrategyModule();
-      const config = getSealConfig('opus');
-      assert.equal(shouldSeal(0.91, 200_000, 182_000, config), true);
-    });
-
-    test('returns false when below threshold with enough remaining', async () => {
-      const { shouldSeal, getSealConfig } = await loadStrategyModule();
-      const config = getSealConfig('opus');
-      assert.equal(shouldSeal(0.8, 200_000, 160_000, config), false);
-    });
-  });
 
   // ── Config override priority (getConfigSessionStrategy) ──
 

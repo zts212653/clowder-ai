@@ -8,14 +8,10 @@ import type {
 import { ContextSourceWorkBudget } from '../../../../memory/cue/ContextSourceWorkBudget.js';
 import { captureInvocationL0Input } from '../providers/l0-input-capture.js';
 import { agentServiceGeneration } from '../registry/AgentRegistry.js';
-import { ExecutionAdmissionConflict } from '../registry/AgentServiceUnavailableError.js';
+import { ExecutionAdmissionConflict, StaleServiceSourceConflict } from '../registry/AgentServiceUnavailableError.js';
 import { deepFreeze, type FrozenExecutionBinding, freezeExecutionAccountBinding } from './execution-account-binding.js';
 import { freezeExecutionWorkspace } from './execution-workspace.js';
-import {
-  captureHostExecutionBoundary,
-  changedHostExecutionBoundary,
-  hostExecutionBoundaryRef,
-} from './host-execution-boundary.js';
+import { captureHostExecutionBoundary, changedHostExecutionBoundary } from './host-execution-boundary.js';
 import { InvocationServiceScope } from './invocation-service-scope.js';
 import {
   isConfirmedNativeAuthFailure,
@@ -640,7 +636,6 @@ import type { CreateSessionInput, ISessionChainStore } from '../../stores/ports/
 import type { IThreadStore } from '../../stores/ports/ThreadStore.js';
 import { DEFAULT_THREAD_ID } from '../../stores/ports/ThreadStore.js';
 import {
-  hasUnconfirmedProviderTeardown,
   type ITurnExecutionStore,
   type TurnExecutionCausalRefs,
   type TurnExecutionKind,
@@ -1459,11 +1454,14 @@ export async function prepareInvocationExecutionBinding(
   const memberRegistryRevision = catRegistry.getRevision();
   const catConfig = catRegistry.tryGet(input.catId as string)?.config;
   if (!isPublishedCatalogSnapshotCurrent(catConfig))
-    throw new ExecutionAdmissionConflict('Member catalog publication is stale; retry after configuration refresh.');
+    throw new ExecutionAdmissionConflict(
+      'Member catalog publication is stale; retry after configuration refresh.',
+      true,
+    );
   const carrier = input.service?.freshnessCarrierCapability?.();
   const declaredImplementation = input.service?.implementationSnapshot?.();
   if (declaredImplementation?.clientId && declaredImplementation.clientId !== catConfig?.clientId)
-    throw new ExecutionAdmissionConflict(
+    throw new StaleServiceSourceConflict(
       'execution_client_changed: 成员与已准备的 client 不一致，请在配置刷新后重试。',
     );
   const implementationSource =
@@ -1608,10 +1606,12 @@ export async function prepareInvocationExecutionBinding(
   if (workspaceChanged || !isDeepStrictEqual(threadPreferences, currentThread.threadPreferences))
     throw new ExecutionAdmissionConflict(
       'Thread execution configuration changed during admission; retry this invocation.',
+      true,
     );
   if (catRegistry.getRevision() !== memberRegistryRevision || !isPublishedCatalogSnapshotCurrent(catConfig))
     throw new ExecutionAdmissionConflict(
       'Member configuration changed during execution admission; retry this invocation.',
+      true,
     );
   const currentAccountBinding = freezeExecutionAccountBinding({
     catId: input.catId,
@@ -1622,19 +1622,22 @@ export async function prepareInvocationExecutionBinding(
   if (!isDeepStrictEqual(binding, currentAccountBinding))
     throw new ExecutionAdmissionConflict(
       'Execution configuration changed during execution admission; retry this invocation.',
+      true,
     );
   if (
     input.service?.implementationSnapshot &&
     !isDeepStrictEqual(input.service.implementationSnapshot(), implementation)
   )
-    throw new ExecutionAdmissionConflict('session_host_generation_changed');
+    throw new ExecutionAdmissionConflict('session_host_generation_changed', true);
   if (!mcpSources.isCurrent())
     throw new ExecutionAdmissionConflict(
       'MCP configuration changed during execution admission; retry this invocation.',
+      true,
     );
   if (!isPluginMcpCurrent())
     throw new ExecutionAdmissionConflict(
       'Plugin MCP activation changed during execution admission; retry this invocation.',
+      true,
     );
   const frozenL0Input =
     catConfig && (input.service?.injectsL0Natively?.() || catConfig.clientId === 'opencode')
@@ -3000,115 +3003,12 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
       await refreshInvocationPolicyExecution();
     }
 
-    if (deps.turnExecutionStore) {
-      signal.throwIfAborted();
-      const running = await preflightRace(
-        Promise.resolve(deps.turnExecutionStore.listRunningByUser(userId)),
-        'turnExecutionStore.priorProviderStop',
-        signal,
-      );
-      if (
-        running.some(
-          (record) =>
-            record.invocationId !== invocationId &&
-            record.threadId === threadId &&
-            record.catId === catId &&
-            hasUnconfirmedProviderTeardown(record),
-        )
-      ) {
-        turnExecutionFailureReason = 'prior_provider_teardown_unconfirmed';
-        throw new Error('同一角色的上一轮执行尚未确认停止，暂不能开始新任务。请先核对或受控停止原执行。');
-      }
-    }
-
     const catConfig = frozenExecutionBinding.catConfig;
     const provider = catConfig?.clientId;
     let firstReplyNamingInstruction = '';
     const { workingDirectory, threadProjectPath } = frozenExecutionBinding.workspace;
     const hostExecutionBoundary = frozenExecutionBinding.hostExecutionBoundary;
     if (deps.sessionChainStore && !hostExecutionBoundary) throw new Error('execution_boundary_missing');
-    const boundaryPreflight = <T>(label: string, run: () => T | Promise<T>): Promise<T> => {
-      signal.throwIfAborted();
-      // Attach the race observer before calling an owner that may synchronously abort and reject.
-      return preflightRace(Promise.resolve().then(run), label, signal);
-    };
-    if (deps.sessionChainStore && activeSessionRecordForResume && hostExecutionBoundary) {
-      const prior = activeSessionRecordForResume;
-      const changes = changedHostExecutionBoundary(prior.hostExecutionBoundary, hostExecutionBoundary);
-      if (changes.length > 0 && (prior.cliSessionId || prior.hostExecutionBoundary)) {
-        if (prior.externalImport)
-          throw new Error(
-            'imported_session_execution_boundary_unproven: 无法核验导入会话的执行绑定，未发送任务或替换历史。请先核验原客户端、账号和工作区。',
-          );
-        // Do not seal a history unless a replacement can receive authorized context.
-        if (!deps.sessionSealer || (!params.contextPromptFactory && !params.rebuildPromptAfterSessionSeal))
-          throw new Error(
-            'execution_boundary_rollover_unavailable: 会话执行绑定已变化或无法核验，当前入口不能安全建立带上下文的新片段，未发送任务。',
-          );
-        const reason = `execution_boundary:${changes.join(',')}`;
-        const sealer = deps.sessionSealer;
-        const sealed = await boundaryPreflight('executionBoundary.requestSeal', () =>
-          sealer.requestSeal({ sessionId: prior.id, reason }),
-        );
-        if (!sealed.accepted) throw new Error('execution_boundary_seal_conflict');
-        const finalized = await boundaryPreflight('executionBoundary.finalize', () =>
-          sealer.finalize({ sessionId: prior.id }),
-        );
-        if (!finalized.sealed) throw new Error('execution_boundary_finalize_failed');
-        await boundaryPreflight('executionBoundary.clearResume', () => sessionManager.delete(userId, catId, threadId));
-        sessionId = undefined;
-        const store = deps.sessionChainStore;
-        const replacement = await boundaryPreflight('executionBoundary.replacement', () =>
-          getOrCreateManagedSessionRecord(store, {
-            threadId,
-            catId,
-            userId,
-            ...(bgChainKey ? { chainKey: bgChainKey } : {}),
-            compressionCount: invocationCapacitySnapshot?.capability.observesCompression === true ? 0 : null,
-          }),
-        );
-        if (replacement.id === prior.id || replacement.cliSessionId)
-          throw new Error('execution_boundary_replacement_conflict');
-        activeSessionRecordForResume = replacement;
-        invocationPolicyRecordId = replacement.id;
-        invocationHasAuthoritativeUsage = false;
-        await refreshInvocationPolicyExecution();
-        if (params.rebuildPromptAfterSessionSeal) prompt = await params.rebuildPromptAfterSessionSeal();
-        yield {
-          type: 'system_info',
-          catId,
-          timestamp: Date.now(),
-          content: JSON.stringify({
-            type: 'session_seal_requested',
-            sessionId: prior.id,
-            sessionSeq: prior.seq + 1,
-            catId,
-            reason,
-          }),
-        };
-      }
-      const store = deps.sessionChainStore;
-      const target = activeSessionRecordForResume;
-      const bound = await boundaryPreflight('executionBoundary.persist', () =>
-        store.bindHostExecutionBoundary(target.id, target.cliSessionId, hostExecutionBoundary),
-      );
-      if (!bound) throw new Error('execution_boundary_binding_conflict');
-      try {
-        await auditLog.append({
-          type: AuditEventTypes.SESSION_EXECUTION_BOUNDARY_RECORDED,
-          threadId,
-          data: {
-            sessionId: bound.id,
-            invocationId,
-            boundaryRef: hostExecutionBoundaryRef(hostExecutionBoundary),
-            changedDimensions: changes,
-          },
-        });
-      } catch (error) {
-        throw new Error('execution_boundary_audit_write_failed', { cause: error });
-      }
-      activeSessionRecordForResume = bound;
-    }
     if (frozenExecutionBinding.workspace.usesDefaultWorkspace)
       yield { type: 'system_info', catId, content: `本次使用默认工作区：${workingDirectory}`, timestamp: Date.now() };
     if (threadStore) {
@@ -5961,17 +5861,20 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
         const entryChanges = changedHostExecutionBoundary(hostExecutionBoundary, providerEntryBoundary);
         if (entryChanges.length > 0)
           throw new Error(`execution_boundary_changed_before_provider_entry:${entryChanges.join(',')}`);
+        // Session identity fence (read-only, atomic in the store): the logical session must still be the
+        // active owner and carry the native ID this turn resumes. A concurrent bind/restore/registration
+        // during prompt preparation would otherwise send the task to a stale native session.
         const store = deps.sessionChainStore;
         const logicalId = invocationPolicyRecordId;
         const target = activeSessionRecordForResume;
-        const bound = await boundaryPreflight('executionBoundary.providerEntry', () =>
-          store.bindHostExecutionBoundary(
-            logicalId,
-            target?.id === logicalId ? target.cliSessionId : undefined,
-            hostExecutionBoundary,
-          ),
+        const expectedCliSessionId = target?.id === logicalId ? target.cliSessionId : undefined;
+        signal.throwIfAborted();
+        const identityHolds = await preflightRace(
+          Promise.resolve().then(() => store.isActiveOwnerSession(logicalId, expectedCliSessionId)),
+          'sessionIdentity.providerEntry',
+          signal,
         );
-        if (!bound) throw new Error('execution_boundary_provider_entry_conflict');
+        if (!identityHolds) throw new Error('session_identity_changed_before_provider_entry');
       }
       if (
         deps.turnExecutionStore?.markProviderStarted &&

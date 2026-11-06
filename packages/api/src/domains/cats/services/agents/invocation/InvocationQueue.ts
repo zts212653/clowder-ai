@@ -44,9 +44,11 @@ import {
   assertQueueMessageReplay,
   type IMessageStore,
   isTimelinePublished,
+  type LifecyclePreAdmissionFailureInput,
   LifecycleResponseInputsChangedError,
   type LifecycleResponseTerminalPatch,
   messageIdempotencyScope,
+  preAdmissionFailureIdempotencyKey,
   reusesProseRouting,
   type StoredMessage,
 } from '../../stores/ports/MessageStore.js';
@@ -67,17 +69,7 @@ import { isOwnerRecoverableRoutingTarget } from './queue-routing-recovery-policy
 
 export type QueueEntry = QueueLedgerEntry;
 
-/** Sent or uncertain input still belongs to its original run, even while its row is queued. */
-export function hasInFlightLifecycleAppend(entry: Pick<QueueEntry, 'delivery'>): boolean {
-  return (
-    hasPendingLifecycleAppend(entry) ||
-    Object.values(entry.delivery.appendRecoveryByTarget ?? {}).some((failure) => failure.acceptance === 'unknown')
-  );
-}
-
-function hasPendingLifecycleAppend(entry: Pick<QueueEntry, 'delivery'>): boolean {
-  return Object.keys(entry.delivery.appendPendingByTarget ?? {}).length > 0;
-}
+export class QueueAdmissionTargetUnavailableError extends Error {}
 
 type QueueAttemptSettlementOutcome = 'handled' | 'failed' | 'interrupted' | 'cancelled';
 
@@ -422,7 +414,8 @@ export class InvocationQueue {
       Object.keys(input.authorIntentByCatId ?? {}).length === 0 &&
       input.sourceCategory !== 'a2a_failure';
     const targetCats = this.admissionPolicy.resolvePreResolvedTargets(input.targetCats, implicit);
-    if (input.targetCats.length > 0 && targetCats.length === 0) throw new Error('Queue admission has no valid target');
+    if (input.targetCats.length > 0 && targetCats.length === 0)
+      throw new QueueAdmissionTargetUnavailableError('Queue admission has no valid target');
     return { ...input, targetCats };
   }
 
@@ -546,7 +539,9 @@ export class InvocationQueue {
     return projected;
   }
 
-  async hydrateFromLedger(messageStore?: Pick<IMessageStore, 'getById'>): Promise<number> {
+  async hydrateFromLedger(
+    messageStore?: Pick<IMessageStore, 'getById'> & Partial<Pick<IMessageStore, 'advanceLifecycleInputDispatch'>>,
+  ): Promise<number> {
     this.queues.clear();
     this.admittedEntries.clear();
     this.ledgerClaimIds.clear();
@@ -554,11 +549,83 @@ export class InvocationQueue {
     for (const threadId of await this.ledgerStore.listThreadIds()) {
       const rows: QueueLedgerEntry[] = [];
       for (const row of await this.ledgerStore.list(threadId)) {
-        if (row.status !== 'claimed' || !row.claimId) {
-          rows.push(row);
-          continue;
+        let source = row.payload.messageId ? await messageStore?.getById(row.payload.messageId) : undefined;
+        for (const ref of source?.lifecycle?.dispatchRefs ?? []) {
+          const pending = row.delivery.appendPendingByTarget?.[ref.targetId];
+          const recovery = row.delivery.appendRecoveryByTarget?.[ref.targetId];
+          const legacy =
+            pending?.responseMessageId === ref.statusMessageId
+              ? pending
+              : recovery?.responseMessageId === ref.statusMessageId
+                ? recovery
+                : undefined;
+          if (!source || !legacy || ref.appendDelivery) continue;
+          if (!messageStore?.advanceLifecycleInputDispatch)
+            throw new Error('Legacy Append upgrade needs its History writer');
+          const upgraded = await messageStore.advanceLifecycleInputDispatch(source.id, {
+            orderKey: source.lifecycle!.orderKey,
+            ...(source.lifecycle!.producerInvocationId
+              ? { producerInvocationId: source.lifecycle!.producerInvocationId }
+              : {}),
+            targetId: ref.targetId,
+            statusMessageId: ref.statusMessageId,
+            ...(ref.phase === 'settled'
+              ? { phase: 'settled' as const }
+              : { phase: 'dispatched' as const, dispatchedAt: ref.dispatchedAt ?? source.timestamp }),
+            appendDelivery: {
+              dispatchStarted: 'dispatchStarted' in legacy ? legacy.dispatchStarted : true,
+              ...('requiresCompletion' in legacy && legacy.requiresCompletion ? { requiresCompletion: true } : {}),
+            },
+          });
+          if (upgraded.kind !== 'applied' && upgraded.kind !== 'replayed')
+            throw new Error('Legacy Append facts did not persist');
+          source = upgraded.message;
         }
-        rows.push(...(await this.reconcileClaimedLedgerEntry(row, messageStore)));
+        let current: QueueLedgerEntry | null = row;
+        if (row.status === 'claimed' && row.claimId) {
+          current = (await this.reconcileClaimedLedgerEntry(row, messageStore))[0] ?? null;
+        } else {
+          const retired = row.targets.filter((target) =>
+            source?.lifecycle?.dispatchRefs?.some((ref) => ref.targetId === target),
+          );
+          if (retired.length) {
+            const result = await this.ledgerStore.reconcileTargets(threadId, row.id, [], retired, {});
+            if (result.outcome !== 'updated' && result.outcome !== 'replayed')
+              throw new Error('Legacy Append Queue did not converge');
+            current = result.entry ?? null;
+          }
+        }
+        if (current && (current.delivery.appendPendingByTarget || current.delivery.appendRecoveryByTarget)) {
+          const claimId = randomUUID();
+          const claimed = await this.ledgerStore.claim(threadId, current.id, claimId, Date.now());
+          if (claimed.outcome !== 'claimed') throw new Error('Legacy Append pending cleanup lost its claim');
+          const clean = structuredClone(claimed.entries[0]!);
+          const legacyTargets = new Set([
+            ...Object.keys(clean.delivery.appendPendingByTarget ?? {}),
+            ...Object.keys(clean.delivery.appendRecoveryByTarget ?? {}),
+          ]);
+          for (const target of legacyTargets) {
+            if (!clean.targets.includes(target)) continue;
+            const previous = clean.delivery.authorIntentByTarget?.[target];
+            clean.delivery.authorIntentByTarget = {
+              ...clean.delivery.authorIntentByTarget,
+              [target]: {
+                requested: 'next_work',
+                ...(previous?.carrierCapability ? { carrierCapability: previous.carrierCapability } : {}),
+              },
+            };
+          }
+          delete clean.delivery.appendPendingByTarget;
+          delete clean.delivery.appendRecoveryByTarget;
+          if (clean.delivery.routingHeldTargetIds)
+            clean.delivery.routingHeldTargetIds = clean.delivery.routingHeldTargetIds.filter(
+              (target) => !legacyTargets.has(target),
+            );
+          const result = await this.ledgerStore.commit(threadId, clean.id, claimId, 'queued', Date.now(), clean);
+          if (result.outcome !== 'updated') throw new Error('Legacy Append pending cleanup did not commit');
+          current = result.entry;
+        }
+        if (current) rows.push(current);
       }
       count += this.cacheLedgerEntries(rows).length;
     }
@@ -575,18 +642,17 @@ export class InvocationQueue {
       const terminal = await this.ledgerStore.commit(row.threadId, row.id, row.claimId, 'withdrawn', Date.now());
       return terminal.outcome === 'updated' ? [terminal.entry] : [];
     }
-    const dispatchedTargets = new Set(
-      source?.lifecycle?.dispatchRefs
-        ?.filter(
-          (ref) =>
-            !row.delivery.appendPendingByTarget?.[ref.targetId] ||
-            ref.appendAcceptance === 'accepted' ||
-            (!row.delivery.appendPendingByTarget?.[ref.targetId]?.requiresCompletion &&
-              ref.inputRead?.status === 'read'),
-        )
-        .map((ref) => ref.targetId) ?? [],
-    );
+    const dispatchedTargets = new Set(source?.lifecycle?.dispatchRefs?.map((ref) => ref.targetId) ?? []);
     const claimedTargets = row.claimedTargetIds ?? [];
+    if (row.sourceCategory === 'a2a') {
+      for (const ref of source?.lifecycle?.dispatchRefs ?? []) {
+        if (ref.phase !== 'settled' || !row.targets.includes(ref.targetId) || !dispatchedTargets.has(ref.targetId))
+          continue;
+        const wake = await this.ledgerStore.get(row.threadId, queueEntryId(ref.statusMessageId));
+        // Reproject an already admitted control edge after a lost write or read acknowledgement.
+        if (wake?.kind === 'private_input' && wake.sourceCategory === 'a2a_failure') this.cacheLedgerEntries([wake]);
+      }
+    }
     if (claimedTargets.length > 0 && claimedTargets.every((targetId) => dispatchedTargets.has(targetId))) {
       // A response lifecycle is the durable receiver. A crash after that
       // History commit may leave the short Queue claim behind; retire only
@@ -904,6 +970,76 @@ export class InvocationQueue {
         : undefined,
       deduped: result.deduped,
     };
+  }
+
+  /** One storage transaction for a claimed target's failure and its exact caller wake. */
+  async terminalizeClaimedAdmissionFailure(
+    messageStore: IMessageStore,
+    source: StoredMessage,
+    entry: QueueEntry,
+    targetId: string,
+    reason: LifecyclePreAdmissionFailureInput['reason'],
+  ) {
+    if (!entry.claimId) throw new Error('pre-admission failure requires a durable Queue claim');
+    const caller = queueEntryCallerCatId(entry);
+    const returnToCaller =
+      entry.sourceCategory === 'a2a' &&
+      caller &&
+      caller !== targetId &&
+      source.from?.kind === 'agent' &&
+      source.from.catId === caller &&
+      source.userId === queueEntryOwnerId(entry) &&
+      source.threadId === entry.threadId &&
+      source.visibility !== 'whisper' &&
+      !source.deletedAt &&
+      (!entry.execution.a2aTriggerMessageId || entry.execution.a2aTriggerMessageId === source.id);
+    const committed = await messageStore.getByIdempotencyKey(
+      'system',
+      source.threadId,
+      preAdmissionFailureIdempotencyKey(entry.id, targetId),
+    );
+    const failure = await messageStore.commitLifecyclePreAdmissionFailure({
+      sourceMessageId: source.id,
+      expectedEntryId: entry.id,
+      requestedTargets: [targetId],
+      reason,
+      content:
+        reason === 'invalid_explicit_target'
+          ? `唤起 ${targetId} 失败：指定的接收对象当前无效。`
+          : `唤起 ${targetId} 失败：成员的执行绑定无法通过准入。`,
+      failedAt: committed?.timestamp ?? Math.max(Date.now(), source.timestamp),
+      claim: {
+        id: entry.claimId,
+        ledger: this.ledgerStore,
+        ...(returnToCaller
+          ? {
+              makeWake: (failureId: string) =>
+                createQueueLedgerAdmission({
+                  kind: 'private_input',
+                  from: { kind: 'system', service: 'message_delivery' },
+                  threadId: entry.threadId,
+                  owner: entry.owner,
+                  sourceCategory: 'a2a_failure',
+                  sourceId: failureId,
+                  content: '',
+                  targetCatIds: [caller],
+                  ownerAuthProvenance: entry.execution.ownerAuthProvenance,
+                  intent: 'execute',
+                  autoExecute: true,
+                  a2aTriggerMessageId: failureId,
+                  a2aParentInvocationId: entry.execution.a2aParentInvocationId,
+                  enqueuedAt: this.nextEnqueuedAt(),
+                })[0]!,
+            }
+          : {}),
+      },
+    });
+    if (failure.kind !== 'applied' && failure.kind !== 'replayed') return failure;
+    if (returnToCaller) {
+      const wake = await this.ledgerStore.get(entry.threadId, queueEntryId(failure.failureMessage.id));
+      if (wake) this.cacheLedgerEntries([wake]);
+    }
+    return failure;
   }
 
   /** One storage transaction for a terminal response bubble and its outbound A2A fan-out. */
@@ -1367,31 +1503,7 @@ export class InvocationQueue {
     return restoredAll;
   }
 
-  /** Persist first-handoff custody before any native call; release its short claim only after History admission. */
-  async prepareLifecycleAppendHandoff(
-    entry: QueueEntry,
-    pending: NonNullable<QueueEntry['delivery']['appendPendingByTarget']>,
-    releaseClaim = false,
-  ): Promise<void> {
-    const current = await this.ledgerStore.get(entry.threadId, entry.id);
-    const claimId = this.ledgerClaimIds.get(entry.id);
-    if (!current || current.status !== 'claimed' || !claimId || current.claimId !== claimId)
-      throw new Error('Append preparation lost its original Queue claim');
-    const replacement = structuredClone(current);
-    replacement.delivery.appendPendingByTarget = { ...replacement.delivery.appendPendingByTarget, ...pending };
-    replacement.delivery.routingHeldTargetIds = [
-      ...new Set([...(replacement.delivery.routingHeldTargetIds ?? []), ...Object.keys(pending)]),
-    ];
-    const result = await this.ledgerStore.commit(entry.threadId, entry.id, claimId, 'claimed', Date.now(), replacement);
-    if (result.outcome !== 'updated') throw new Error('Append preparation did not commit');
-    this.cacheLedgerEntries([result.entry]);
-    if (releaseClaim && !(await this.restoreClaimedEntries(entry.threadId, [entry.id])))
-      throw new Error('Append handoff claim release did not commit');
-  }
-
   async recoverLifecycleAppend(messageStore: IMessageStore, input: LifecycleAppendRecoveryInput) {
-    // A lost store reply cannot justify dropping the original Queue owner. Replay
-    // this one atomic transaction, never the provider call or source admission.
     const commit = () => messageStore.commitLifecycleAppendRecovery(input, this.ledgerStore);
     let result;
     try {
@@ -1400,51 +1512,21 @@ export class InvocationQueue {
       result = await commit();
     }
     if (result.kind === 'applied' || result.kind === 'replayed') {
-      if (result.entry.status !== 'claimed') this.ledgerClaimIds.delete(result.entry.id);
-      this.forgetAdmittedTargets(result.entry.threadId, result.entry.id, [input.failure.targetId]);
-      this.cacheLedgerEntries([result.entry]);
+      const source = result.messages[0]!;
+      const entryId = queueEntryId(source.id);
+      this.removeCachedEntry(source.threadId, entryId);
+      if (result.entry) this.cacheLedgerEntries([result.entry]);
+      if (result.entry?.status !== 'claimed') this.ledgerClaimIds.delete(entryId);
+      if (result.resumed) this.forgetAdmittedTargets(source.threadId, entryId, [input.failure.targetId]);
     }
     return result;
-  }
-
-  async retireReadAppendRecovery(
-    threadId: string,
-    messageId: string,
-    targetId: string,
-    responseMessageId: string,
-    completed = false,
-  ): Promise<boolean> {
-    const entryId = queueEntryId(messageId);
-    const entry = await this.ledgerStore.get(threadId, entryId);
-    if (
-      !entry ||
-      (entry.delivery.appendRecoveryByTarget?.[targetId]?.responseMessageId !== responseMessageId &&
-        entry.delivery.appendPendingByTarget?.[targetId]?.responseMessageId !== responseMessageId)
-    )
-      return false;
-    if (entry.delivery.appendPendingByTarget?.[targetId]?.requiresCompletion && !completed) return false;
-    const result = await this.ledgerStore.reconcileTargets(threadId, entryId, [], [targetId], {});
-    if (result.outcome !== 'updated' && result.outcome !== 'replayed') return false;
-    this.removeCachedEntry(threadId, entryId);
-    if (result.entry) this.cacheLedgerEntries([result.entry]);
-    return true;
   }
 
   /** Claim one queued row before an external withdrawal side effect. */
   async claimQueuedEntryForWithdrawal(threadId: string, userId: string, entryId: string): Promise<QueueEntry | null> {
     const entry = this.findEntry(threadId, userId, entryId);
-    // Withdrawal stops future work; an uncertain *finished* handoff stays in
-    // History and does not permanently veto this owner action. True recall
-    // still uses hasInFlightLifecycleAppend because it retracts source content.
-    if (!entry || entry.status !== 'queued' || hasPendingLifecycleAppend(entry)) return null;
-    const claimed = await this.claimLedgerEntry(entry);
-    // The cache can predate a concurrent Append. Inspect the canonical claim
-    // before any History cancellation or ledger withdrawal side effect.
-    if (claimed && hasPendingLifecycleAppend(claimed)) {
-      await this.restoreClaimedEntries(threadId, [claimed.id]);
-      return null;
-    }
-    return claimed;
+    if (!entry || entry.status !== 'queued') return null;
+    return this.claimLedgerEntry(entry);
   }
 
   /** Freeze the source entry for one message before its withdrawal side effect. */
@@ -1460,8 +1542,7 @@ export class InvocationQueue {
     if (matches.length === 0 || matches.some((entry) => queueEntryOwnerId(entry) !== userId)) {
       return { outcome: 'not_found' };
     }
-    if (matches.some((entry) => entry.status !== 'queued' || hasInFlightLifecycleAppend(entry)))
-      return { outcome: 'processing' };
+    if (matches.some((entry) => entry.status !== 'queued')) return { outcome: 'processing' };
     const claimId = randomUUID();
     const claimed = await this.ledgerStore.claimPrefix(
       threadId,
@@ -1473,13 +1554,6 @@ export class InvocationQueue {
       return { outcome: claimed.outcome === 'not_found' ? 'not_found' : 'processing' };
     }
     const entries = this.cacheLedgerClaim(claimed.entries, claimId);
-    if (entries.some(hasInFlightLifecycleAppend)) {
-      await this.restoreClaimedEntries(
-        threadId,
-        entries.map((entry) => entry.id),
-      );
-      return { outcome: 'processing' };
-    }
     return { outcome: 'claimed', entries };
   }
 
@@ -1704,7 +1778,6 @@ export class InvocationQueue {
       !entry.targets.includes(targetCatId) ||
       !isOrdinaryQueueTargetEligible(entry, targetCatId) ||
       !isOrdinaryBodyReadEntry(entry) ||
-      entry.delivery.appendRecoveryByTarget?.[targetCatId] ||
       entry.payload.messageId !== messageId
     ) {
       return null;
@@ -2326,7 +2399,6 @@ export class InvocationQueue {
     catId: string,
     parentInvocationId: string | undefined,
   ): boolean {
-    if (entry.delivery.appendRecoveryByTarget?.[catId]) return false;
     // All ordinary sources follow the same saved policy and exact-parent fence.
     const authorIntent = entry.delivery.authorIntentByTarget?.[catId];
     return Boolean(

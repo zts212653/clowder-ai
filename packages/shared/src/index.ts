@@ -7,6 +7,8 @@
  * Import from '@cat-cafe/shared/utils' instead.
  */
 
+// F046 / F314-17: the A2A line-start @mention grammar (API routing + chat direction display).
+export * from './a2a-mention-grammar.js';
 // F246 Phase I: shared Approval Hub producer metadata (API + Web single source).
 export * from './approval-producer-catalog.js';
 // Export avatar size limits (shared between API route bodyLimit and frontend size gate)

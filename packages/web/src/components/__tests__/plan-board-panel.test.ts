@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F055: PlanBoardPanel — 猫猫祟祟
  * Tests for independent per-cat plan board in right sidebar.

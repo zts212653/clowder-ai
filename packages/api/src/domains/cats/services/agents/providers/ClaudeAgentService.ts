@@ -74,6 +74,7 @@ const PERMISSION_MODE = 'bypassPermissions';
 const RESERVED_SYSTEM_PROMPT_FLAGS = new Set([
   '--system-prompt-file',
   '--system-prompt',
+  '--system-prompt-snapshot',
   '--append-system-prompt',
   '--append-system-prompt-file',
 ]);
@@ -614,6 +615,9 @@ export class ClaudeAgentService implements AgentService {
         scoped ? effectiveModel : undefined,
       );
       args.push('--system-prompt-file', l0Path);
+      // Per-invocation L0 must reach resumed sessions; the CLI otherwise records
+      // the first prompt and resends it on every resume.
+      args.push('--system-prompt-snapshot', 'off');
       // Route layer passes pack-only systemPrompt for native-L0 providers.
       // Keep it as an append layer, but never use it as the carrier's L0 source.
       // #840: route through file carrier (not inline argv) to avoid ENAMETOOLONG

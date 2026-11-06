@@ -418,6 +418,60 @@ after(() => {
 
 describe('AgentRouter', () => {
   for (const mode of ['serial', 'parallel'])
+    test(`${mode} refreshes a stale service source before retrying admission`, async () => {
+      const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+      const { StaleServiceSourceConflict } = await import(
+        '../dist/domains/cats/services/agents/registry/AgentServiceUnavailableError.js'
+      );
+      const launched = [];
+      const source = (catId, stale = false) => ({
+        forInvocation: () => ({
+          async captureInvocationOptions() {
+            if (stale) throw new StaleServiceSourceConflict('fixture environment changed');
+            return {};
+          },
+          async *invoke() {
+            launched.push(catId);
+            yield { type: 'text', catId, content: 'fresh source', timestamp: Date.now() };
+            yield { type: 'done', catId, timestamp: Date.now() };
+          },
+        }),
+        async *invoke() {
+          assert.fail('the mutable root must never launch');
+        },
+      });
+      const codex = source('codex');
+      const gemini = source('gemini');
+      const options = await migrateRouterOpts({
+        claudeService: source('opus', true),
+        codexService: codex,
+        geminiService: gemini,
+        registry: createMockRegistry(),
+        messageStore: createMockMessageStore(),
+        threadStore: createMockThreadStore(),
+      });
+      let refreshed = 0;
+      options.refreshServices = async () => {
+        refreshed++;
+        await options.agentRegistry.refresh(async () => {
+          options.agentRegistry.register('opus', source('opus'));
+          options.agentRegistry.register('codex', codex);
+          options.agentRegistry.register('gemini', gemini);
+        });
+        router.refreshFromRegistry(options.agentRegistry);
+      };
+      const router = new AgentRouter(options);
+      for await (const _ of router.route(
+        'owner',
+        `${mode === 'parallel' ? '#ideate' : '#execute'} @opus @codex refresh source`,
+        `admission-refresh-${mode}`,
+      )) {
+      }
+      assert.equal(refreshed, 1, 'the public router must forward the configuration refresh port');
+      assert.deepEqual(launched.sort(), ['codex', 'opus'], 'each admitted member launches only once');
+    });
+
+  for (const mode of ['serial', 'parallel'])
     test(`${mode} releases pinned services when Host capacity preflight fails before launch`, async () => {
       const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
       const pinned = ['opus', 'codex'].map((catId) => ({

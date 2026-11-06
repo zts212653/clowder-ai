@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F098-B1: Evidence Panel dark slate theme for readability
  */

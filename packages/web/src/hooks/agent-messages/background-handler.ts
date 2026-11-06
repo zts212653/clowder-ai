@@ -1,6 +1,7 @@
 import {
   finishNamedMessage,
   type NamedMessageStore,
+  writeCliDiagnostics,
   writePersistedPost,
   writeStreamText,
   writeToolEvent,
@@ -174,6 +175,8 @@ function handleError(msg: BackgroundAgentMessage, options: Options): void {
     msg.turnInvocationId,
   );
   const target = namedTarget(msg, msg.threadId);
+  if (target && msg.metadata?.cliDiagnostics && !isLateForCommittedResponse(msg, msg.threadId, store))
+    writeCliDiagnostics(target, msg.metadata.cliDiagnostics, writerStore(options));
   if (target && !recoverable) finishNamedMessage(target, writerStore(options));
   if (stale) return;
   markThreadInvocationActive(msg, options);

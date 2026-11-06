@@ -52,7 +52,7 @@ describe('F307 real surface adapters', () => {
   it.each([
     { name: 'guide.md', type: 'file' as const, context: 'Markdown' },
     { name: 'guide.MARKDOWN', type: 'file' as const, context: 'Markdown' },
-    { name: 'report.pdf', type: 'file' as const, context: '文件' },
+    { name: 'report.pdf', type: 'file' as const, context: '文档' },
     { name: 'photo.png', type: 'image' as const, context: '图片' },
     { name: 'example.ts', type: 'code' as const, context: '代码' },
   ])('names $name with a human-readable artifact type', ({ name, type, context }) => {

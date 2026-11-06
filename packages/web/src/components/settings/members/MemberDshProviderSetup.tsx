@@ -8,11 +8,13 @@ export function MemberDshProviderSetup({
   form,
   runtimeId,
   patch,
+  onPrepared,
   t,
 }: {
   form: HubCatEditorFormState;
   runtimeId: string;
   patch: (value: Partial<HubCatEditorFormState>) => void;
+  onPrepared?: (command: string, args: string[], runtimeId: string) => void;
   t: (zh: string, en: string) => string;
 }) {
   const [prepared, setPrepared] = useState<{
@@ -25,7 +27,9 @@ export function MemberDshProviderSetup({
   // A manual edit or tool switch must still invalidate pending requests/receipts.
   const matches = prepared?.command === form.acpCommand && prepared.args === form.acpStartupArgs;
   const source = matches ? prepared.runtimeId : runtimeId;
-  const configurationKey = matches ? prepared.configurationKey : JSON.stringify([form.acpCommand, form.acpStartupArgs]);
+  const configurationKey = matches
+    ? prepared.configurationKey
+    : JSON.stringify([form.acpCommand, form.acpStartupArgs, prepared?.args]);
   return (
     <DshProviderSetup
       runtimeId={source}
@@ -34,6 +38,7 @@ export function MemberDshProviderSetup({
       onPrepared={(command, args) => {
         const startupArgs = serializeCommandArgs(args);
         setPrepared({ command, args: startupArgs, runtimeId: source, configurationKey });
+        onPrepared?.(command, args, source);
         patch({ acpCommand: command, acpStartupArgs: startupArgs, defaultModel: '', cliEffort: '' });
       }}
     />

@@ -61,12 +61,16 @@
   outline-offset: 2px;
 }
 .menu {
+  --file-menu-width: min(300px, calc(100vw - 16px));
+  --file-menu-height: min(550px, calc(100dvh - 24px));
   position: fixed;
+  /* Recompute viewport bounds during resize without replacing the focused menu. */
+  left: clamp(8px, var(--file-menu-x), max(8px, calc(100vw - var(--file-menu-width) - 8px)));
+  top: clamp(8px, var(--file-menu-y), max(8px, calc(100dvh - var(--file-menu-height) - 8px)));
   margin: 0;
   z-index: 90;
-  width: 300px;
-  max-width: calc(100vw - 16px);
-  max-height: min(550px, calc(100dvh - 24px));
+  width: var(--file-menu-width);
+  max-height: var(--file-menu-height);
   overflow: auto;
   padding: 6px;
   border: 1px solid var(--cafe-border);

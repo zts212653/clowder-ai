@@ -14,7 +14,7 @@ export function QueueEntryActions({ entry, onSteer }: QueueEntryActionsProps) {
   return (
     <>
       {entry.recoveryActions?.flatMap((action) =>
-        action.kind === 'retry_target' || action.kind === 'repeat_target'
+        action.kind === 'retry_target'
           ? [
               <QueueTargetRetryButton
                 key={action.id}

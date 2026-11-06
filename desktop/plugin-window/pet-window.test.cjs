@@ -289,6 +289,22 @@ test('application assistance uses the ordinary bounded interactive panel lane', 
   assert.equal(f.ignores.at(-1), false);
 });
 
+test('F335 desk: the desk bubble lays out in the same bounded interactive panel lane', (t) => {
+  // Real desktop 11-04: alpha.37 asked for view.layout panel "desk" and the Host refused it, so the bubble
+  // never opened (the delivery sat in state with no countdown and no "shown").
+  const f = fixture();
+  t.after(() => f.host.close());
+  const reply = f.host.request({ kind: 'view.layout', panel: 'desk', width: 300, height: 210 });
+  assert.equal(reply.kind, 'layout');
+  assert.ok(reply.panel.width > 0 && reply.panel.height > 0, 'the Host places a real panel for the bubble');
+  f.cursor({ x: f.bounds().x - 4, y: f.bounds().y - 4 });
+  f.host.tick();
+  assert.equal(f.ignores.at(-1), true, 'outside the bubble the desktop stays clickable');
+  f.cursor({ x: f.bounds().x + reply.panel.x + 3, y: f.bounds().y + reply.panel.y + 3 });
+  f.host.tick();
+  assert.equal(f.ignores.at(-1), false, 'its 忽略 / 打开 stay clickable');
+});
+
 test('native split-call validation rejects authority-shaped or unbounded layout additions', (t) => {
   const f = fixture();
   t.after(() => f.host.close());

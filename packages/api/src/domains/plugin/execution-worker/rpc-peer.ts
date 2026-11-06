@@ -9,7 +9,6 @@ import {
   type RemoteValue,
 } from './protocol.js';
 import { RemoteValues } from './remote-values.js';
-import { retainResponseReadables } from './response-lifetime.js';
 import { messageTransfers, valueTransfers } from './transfer-values.js';
 
 export type RestoreExecutionContext = <T>(run: () => T) => T;
@@ -21,9 +20,13 @@ export interface RpcPeerOptions {
   readonly onTransportClose?: () => Promise<Error>;
 }
 interface Pending {
-  readonly resolve: (value: unknown) => void;
+  readonly resolve: (value: RemoteValue) => void;
   readonly reject: (error: unknown) => void;
   readonly teardown: boolean;
+}
+interface IncomingCallScope {
+  readonly context: RemoteCallContext;
+  active: boolean;
 }
 
 /** Asynchronous on the API side; only an execution worker may wait on a synchronous Host assertion. */
@@ -31,7 +34,7 @@ export class ExecutionRpcPeer {
   readonly #values: RemoteValues;
   readonly #pending = new Map<string, Pending>();
   readonly #contexts = new Map<string, RestoreExecutionContext>();
-  readonly #context = new AsyncLocalStorage<RemoteCallContext>();
+  readonly #context = new AsyncLocalStorage<IncomingCallScope>();
   #closed: Error | undefined;
   #transportClosing = false;
   readonly #pendingCounts = { business: 0, teardown: 0 };
@@ -82,7 +85,7 @@ export class ExecutionRpcPeer {
   async call(target: string, args: readonly unknown[], teardown = false): Promise<unknown> {
     if (this.#closed) throw this.#closed;
     if (this.#transportClosing) throw new PluginExecutionWorkerError('Execution teardown is pending');
-    const inherited = this.#context.getStore();
+    const inherited = this.#inheritedContext();
     const disposing = teardown || inherited?.teardown === true;
     const lane = disposing ? 'teardown' : 'business';
     if (this.#pendingCounts[lane] >= MAX_PENDING_EXECUTION_REQUESTS)
@@ -93,7 +96,7 @@ export class ExecutionRpcPeer {
     let retain = false;
     try {
       const encoded = this.#values.encode(args, id);
-      const result = new Promise<unknown>((resolve, reject) => {
+      const result = new Promise<RemoteValue>((resolve, reject) => {
         this.#pending.set(id, { resolve, reject, teardown: disposing });
         this.#pendingCounts[lane]++;
       });
@@ -104,20 +107,18 @@ export class ExecutionRpcPeer {
         args: encoded,
         context,
       });
-      const value = await result;
-      if (retainResponseReadables(value, finish)) {
-        retain = true;
-        return value;
-      }
-      if (value && typeof value === 'object' && Symbol.asyncIterator in value) {
-        retain = true;
-        return this.#stream(value as AsyncIterable<unknown>, finish);
-      }
-      return value;
+      const decoded = this.#values.decodeResponse(await result, finish);
+      retain = decoded.retained;
+      return decoded.value;
     } finally {
       release?.();
       if (!retain) finish();
     }
+  }
+
+  #inheritedContext(): RemoteCallContext | undefined {
+    const scope = this.#context.getStore();
+    return scope?.active ? scope.context : undefined;
   }
 
   #callContext(id: string, teardown: boolean, inherited: RemoteCallContext | undefined) {
@@ -138,47 +139,11 @@ export class ExecutionRpcPeer {
     };
   }
 
-  #stream(value: AsyncIterable<unknown>, finish: () => void): AsyncIterableIterator<unknown> {
-    const iterator = value[Symbol.asyncIterator]();
-    let done = false;
-    const end = () => {
-      if (!done) {
-        done = true;
-        finish();
-      }
-    };
-    return {
-      [Symbol.asyncIterator]() {
-        return this;
-      },
-      async next() {
-        if (done) return { done: true, value: undefined };
-        try {
-          const result = await iterator.next();
-          if (result.done) end();
-          return result;
-        } catch (error) {
-          end();
-          throw error;
-        }
-      },
-      async return() {
-        if (done) return { done: true, value: undefined };
-        try {
-          await iterator.return?.();
-          return { done: true, value: undefined };
-        } finally {
-          end();
-        }
-      },
-    };
-  }
-
   #callSync(target: string, args: readonly unknown[]): unknown {
     if (isMainThread) throw new PluginExecutionWorkerError('API execution cannot synchronously wait on a plugin');
     if (this.#closed) throw this.#closed;
     const id = randomUUID();
-    const context = this.#context.getStore() ?? { rootId: id };
+    const context = this.#inheritedContext() ?? { rootId: id };
     const { port1, port2 } = new MessageChannel();
     const state = this.#synchronousState.buffer as SharedArrayBuffer;
     try {
@@ -227,9 +192,8 @@ export class ExecutionRpcPeer {
       this.#pending.delete(message.id);
       this.#pendingCounts[pending.teardown ? 'teardown' : 'business']--;
       try {
-        const value = this.#values.decode(message.value);
-        if (message.returned) pending.resolve(value);
-        else pending.reject(value);
+        if (message.returned) pending.resolve(message.value);
+        else pending.reject(this.#values.decode(message.value));
       } catch (error) {
         pending.reject(error);
       }
@@ -241,6 +205,11 @@ export class ExecutionRpcPeer {
   async #serve(message: Extract<RemoteMessage, { kind: 'call' }>): Promise<void> {
     let returned = false;
     let value: RemoteValue;
+    const incoming: IncomingCallScope = { context: message.context, active: true };
+    const finish = () => {
+      incoming.active = false;
+    };
+    let retain = false;
     const scope = isMainThread && this.#pending.has(message.context.rootId) ? message.context.rootId : 'retained';
     try {
       const restore = message.context.authorityId
@@ -249,7 +218,7 @@ export class ExecutionRpcPeer {
       if (isMainThread && message.context.authorityId && !restore)
         throw new PluginExecutionWorkerError('Calling authority has ended');
       const run = () =>
-        this.#context.run(message.context, () =>
+        this.#context.run(incoming, () =>
           this.#values.invoke(message.target, this.#values.decode(message.args) as unknown[]),
         );
       const result = await (restore ? restore(run) : run());
@@ -257,8 +226,10 @@ export class ExecutionRpcPeer {
         message.synchronous?.port.close();
         return;
       }
-      const encode = () => this.#context.run(message.context, () => this.#values.encode(result, scope));
-      value = restore ? restore(encode) : encode();
+      const encode = () => this.#context.run(incoming, () => this.#values.encodeResponse(result, scope, finish));
+      const encoded = restore ? restore(encode) : encode();
+      value = encoded.value;
+      retain = encoded.retained;
       returned = true;
     } catch (error) {
       if (this.#closed) {
@@ -266,6 +237,9 @@ export class ExecutionRpcPeer {
         return;
       }
       value = this.#values.encode(error, scope);
+    } finally {
+      // Detached work keeps its activation but must not inherit a completed call's authority.
+      if (!retain) finish();
     }
     const reply: RemoteMessage = { kind: 'result', id: message.id, returned, value };
     this.#reply(message, reply);

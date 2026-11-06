@@ -48,8 +48,11 @@ export function hashContent(content: string): string {
 }
 
 /**
- * Rough token estimate: ~4 chars per token for mixed CJK/English content.
- * Good enough for trace display — not for billing.
+ * Character heuristic for hook trace events: length / 4. Display only — it is
+ * neither a budget nor a bill. It is not the budget counter either: on Chinese
+ * text it reads about a quarter of the o200k count (120 chars: 30 vs 119), on
+ * English prose a little above it (201 chars: 51 vs 42). Budget decisions use
+ * `utils/token-counter`.
  */
 export function estimateTokens(content: string): number {
   return Math.ceil(content.length / 4);

@@ -42,20 +42,36 @@ test('api build keeps native copy and packaging behind the selected edition entr
   assert.doesNotMatch(actualBuildScript, /\bcp\s+src\/marketplace\/catalog-data/);
 });
 
-test('api test script builds mcp-server with workspace dependencies first', async () => {
+test('api build compiles every mcp-server workspace dependency before mcp-server', async () => {
   const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf8'));
-  const testScript = packageJson.scripts?.test;
-
-  assert.equal(typeof testScript, 'string');
-  assert.match(testScript, /pnpm --filter @cat-cafe\/mcp-server\.\.\. build/);
-  assert.doesNotMatch(
-    testScript,
-    /pnpm --dir \.\.\/mcp-server build/,
-    'direct mcp-server build can run before workspace deps have dist artifacts',
+  const mcpPackage = JSON.parse(
+    await readFile(path.resolve(import.meta.dirname, '../../mcp-server/package.json'), 'utf8'),
   );
-  assert.ok(
-    testScript.indexOf('pnpm --filter @cat-cafe/mcp-server... build') < testScript.indexOf('pnpm run build'),
-    'mcp-server dependency build must run before API build/test execution',
+  const { activeProfile } = JSON.parse(
+    await readFile(new URL('../../shared/src/deployment-profiles.json', import.meta.url), 'utf8'),
+  );
+  // Same edition contract as the test above: home keeps the native chain in build:actual,
+  // the public export moves it to build.
+  const nativeBuild = activeProfile === 'home' ? packageJson.scripts?.['build:actual'] : packageJson.scripts?.build;
+  assert.equal(typeof nativeBuild, 'string', 'the selected edition has a native build chain');
+  const steps = nativeBuild.split(' && ');
+  const position = (dir) => steps.indexOf(`pnpm --dir ../${dir} build`);
+  const workspaceDependencies = Object.entries(mcpPackage.dependencies ?? {})
+    .filter(([, version]) => String(version).startsWith('workspace:'))
+    .map(([name]) => name.replace(/^@cat-cafe\//, ''));
+
+  assert.ok(workspaceDependencies.length > 0, 'mcp-server declares workspace dependencies');
+  assert.ok(position('mcp-server') >= 0, 'the native build builds mcp-server');
+  for (const dependency of workspaceDependencies) {
+    assert.ok(
+      position(dependency) >= 0 && position(dependency) < position('mcp-server'),
+      `${dependency} must build before mcp-server: a direct mcp-server build can run before workspace deps have dist artifacts`,
+    );
+  }
+  assert.match(
+    packageJson.scripts.test,
+    /^pnpm run build && /,
+    'API tests run only after the native build has built them',
   );
 });
 

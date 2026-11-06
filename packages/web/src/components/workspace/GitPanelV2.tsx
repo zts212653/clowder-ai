@@ -271,7 +271,11 @@ export function GitPanelV2() {
     <div className="flex flex-col h-full overflow-hidden">
       <div className="flex items-center justify-between px-3 py-1.5 border-b border-cafe-subtle/40">
         <span className="text-xs font-semibold text-cafe-black truncate">
-          {status?.branch ? copy.branch(status.branch) : copy.fallbackTitle}
+          {status?.isGitRepository === false
+            ? copy.fallbackTitle
+            : status?.branch
+              ? copy.branch(status.branch)
+              : copy.fallbackTitle}
         </span>
         <button
           type="button"
@@ -291,11 +295,13 @@ export function GitPanelV2() {
 
       <div className="flex-1 overflow-y-auto">
         <Section
-          title={status ? copy.status(totalChanges) : copy.statusTitle}
+          title={status && status.isGitRepository !== false ? copy.status(totalChanges) : copy.statusTitle}
           collapsed={collapsed.status}
           onToggle={() => toggleSection('status')}
         >
-          {status === null ? (
+          {status?.isGitRepository === false ? (
+            <div className="text-xs text-cafe-interactive/50">{copy.notGitRepository}</div>
+          ) : status === null ? (
             <div className="text-micro text-cafe-interactive/40">
               {statusError ? copy.statusFailed : copy.statusLoading}
             </div>
@@ -321,7 +327,11 @@ export function GitPanelV2() {
         </Section>
 
         <Section title={copy.health} collapsed={collapsed.health} onToggle={() => toggleSection('health')}>
-          <HealthSectionBody health={health} healthLoading={healthLoading} healthError={healthError} copy={copy} />
+          {health?.isGitRepository === false ? (
+            <div className="text-micro text-cafe-interactive/40">{copy.notGitRepository}</div>
+          ) : (
+            <HealthSectionBody health={health} healthLoading={healthLoading} healthError={healthError} copy={copy} />
+          )}
         </Section>
 
         <Section

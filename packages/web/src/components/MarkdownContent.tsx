@@ -18,6 +18,7 @@ import type { Components } from 'react-markdown';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import { UNKNOWN_CAT_COLOR } from '@/lib/color-defaults';
+import { hexToRgba } from '@/lib/color-utils';
 import { createListenSentenceRemarkPlugin, type ListenSentence } from '@/lib/listen-mode/markdown-sentences';
 import {
   getDisplayMentionRe,
@@ -82,12 +83,9 @@ function highlightMentions(text: string): ReactNode[] {
     const alias = m[1].toLowerCase();
     const catId = toCat[alias] ?? 'opus';
     const catColor = colorMap[catId] ?? UNKNOWN_CAT_COLOR.primary;
-    const r = Number.parseInt(catColor.slice(1, 3), 16);
-    const g = Number.parseInt(catColor.slice(3, 5), 16);
-    const b = Number.parseInt(catColor.slice(5, 7), 16);
     const style = {
       color: catColor,
-      backgroundColor: `rgba(${r}, ${g}, ${b}, 0.15)`,
+      backgroundColor: hexToRgba(catColor, 0.15),
       borderRadius: 4,
       padding: '1px 5px',
     };
