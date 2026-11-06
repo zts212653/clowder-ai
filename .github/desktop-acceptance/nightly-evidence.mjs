@@ -42,6 +42,21 @@ if (command === 'collect') {
   const receipts = selected
     .filter((entry) => entry.platform === platform)
     .flatMap(({ id, executor }) => {
+      if (executor === 'windows-port-preflight') {
+        const evidence = 'installer/port-conflicts.json';
+        const receipt = readJson(path.join(directory, evidence));
+        return [
+          receipt
+            ? {
+                id,
+                platform,
+                status: receipt.status,
+                code: receipt.code,
+                evidence: `${artifact(platform)}/${evidence}`,
+              }
+            : { id, platform, status: 'blocked', code: 'windows-port-preflight-unavailable' },
+        ];
+      }
       if (executor.startsWith('windows-')) {
         const kind = executor.slice('windows-'.length);
         const check = results?.checks.find(({ name }) => name === kind);
@@ -52,13 +67,20 @@ if (command === 'collect') {
           return [{ id, platform, status: 'passed', evidence: `${artifact(platform)}/${kind}/result.json` }];
         }
         if (check.status === 'failed' && phase) {
+          const phaseEvidence = `${kind}/${phase}-checks.json`;
+          const phaseChecks =
+            !check.reason && ['create', 'restore'].includes(phase)
+              ? readJson(path.join(directory, phaseEvidence))
+              : undefined;
+          const failures =
+            phaseChecks?.checks.filter(({ status }) => status === 'failed').map(({ name }) => name) ?? [];
           return [
             {
               id,
               platform,
               status: 'failed',
-              code: check.reason ?? `windows-${phase}`,
-              evidence: `${artifact(platform)}/distribution-results.json`,
+              code: check.reason ?? `windows-${phase}${failures.length ? `-${failures.join('+')}` : ''}`,
+              evidence: `${artifact(platform)}/${failures.length ? phaseEvidence : 'distribution-results.json'}`,
             },
           ];
         }

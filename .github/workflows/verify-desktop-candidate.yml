@@ -1,33 +1,21 @@
-name: Desktop Windows same-package restore diagnosis
+name: Windows installer port conflict proof
 on:
   workflow_dispatch:
-    inputs:
-      producer-run:
-        required: true
-        type: string
-      producer-head:
-        required: true
-        type: string
-      version:
-        required: true
-        type: string
 permissions:
   contents: read
   actions: read
 jobs:
-  restore:
+  windows:
     runs-on: windows-latest
-    timeout-minutes: 40
-    strategy:
-      fail-fast: false
-      matrix:
-        mode: [unaltered, observer]
+    timeout-minutes: 35
     env:
-      PRODUCER_RUN: ${{ inputs.producer-run }}
-      CANDIDATE_SOURCE_SHA: ${{ inputs.producer-head }}
-      CANDIDATE_VERSION: ${{ inputs.version }}
+      CANDIDATE_SOURCE_SHA: 12514727ac0f4e13384c0ae50607ab4899af1f40
+      CANDIDATE_VERSION: '1.14.0'
       CANDIDATE_DIRECT_ARTIFACTS: '1'
-      MODE: ${{ matrix.mode }}
+      NIGHTLY_DATE: '2026-11-07'
+      NIGHTLY_SUITE: full
+      NIGHTLY_PLATFORM: windows-x64
+      NIGHTLY_PLATFORMS: '["windows-x64"]'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -36,37 +24,36 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - name: Verify the exact original producer and allocate test directories
+      - name: Verify original installer artifact and allocate isolated root
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if ($env:PRODUCER_RUN -ne '42270800297' -or $env:CANDIDATE_SOURCE_SHA -ne '12514727ac0f4e13384c0ae50607ab4899af1f40' -or $env:CANDIDATE_VERSION -ne '1.14.0') { throw 'Unexpected reproduction coordinates' }
-          $artifact = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:PRODUCER_RUN/artifacts" --jq '.artifacts[]|select(.name=="windows-installer-1.14.0-attempt-1" and .expired==false)|{id,digest}' | ConvertFrom-Json
-          if ($LASTEXITCODE -ne 0 -or $artifact.id -ne 13532920124 -or $artifact.digest -ne 'sha256:fde036f1f97109c6b5466d6b008be12023ce6a63e0efa3b3f3985ce8f2b3c89d') { throw 'Unexpected original workflow artifact' }
+          $artifact = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/42278446613/artifacts" --jq '.artifacts[]|select(.name=="windows-installer-1.14.0-attempt-1" and .expired==false)|{id,digest}' | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $artifact.id -ne 13534667720 -or $artifact.digest -ne 'sha256:95a11df6c393e337949b99c02fe2c6397abdf0775db02b7da4ced88a127e7b8a') { throw 'Unexpected producer artifact' }
           $root = Join-Path $env:RUNNER_TEMP "f330-candidate-$([guid]::NewGuid())"
           New-Item -ItemType Directory -Path $root | Out-Null
           "CANDIDATE_ROOT=$root" >> $env:GITHUB_ENV
       - uses: actions/download-artifact@v4
         with:
           name: windows-installer-1.14.0-attempt-1
-          run-id: ${{ inputs.producer-run }}
+          run-id: 42278446613
           github-token: ${{ github.token }}
           path: ${{ env.CANDIDATE_ROOT }}/installer-distribution
-      - name: Run same-package install and restore
+      - name: Exercise the original installer with the full Windows verifier
         shell: pwsh
         run: |
           $files = @(Get-ChildItem -LiteralPath (Join-Path $env:CANDIDATE_ROOT 'installer-distribution') -File)
-          if ($files.Count -ne 1 -or (Get-FileHash -LiteralPath $files[0].FullName -Algorithm SHA256).Hash -ne '8B43301AE4551108010D05548BD8D02BC6F0539BBB646F656B9CB56F107EDEA1') { throw 'Installer bytes differ from the original failing attempt' }
-          if ($env:MODE -eq 'observer') {
-            & .github/desktop-acceptance/windows.ps1 -Distribution installer -AttemptId ([guid]::NewGuid().ToString()) -ObservePrivatePath
-          } else {
-            node .github/desktop-acceptance/distributions.mjs installer
-          }
+          if ($files.Count -ne 1 -or (Get-FileHash -LiteralPath $files[0].FullName -Algorithm SHA256).Hash -ne 'B30A3B1CB3F6B926692B26AA4BD33E36E5EAA96D5E7C33E85CBA3552B9BD7F74') { throw 'Installer digest changed' }
+          node .github/desktop-acceptance/distributions.mjs installer
           exit $LASTEXITCODE
+      - name: Collect selected results including port conflict evidence
+        if: always() && env.CANDIDATE_ROOT != ''
+        shell: pwsh
+        run: node .github/desktop-acceptance/nightly-evidence.mjs collect (Join-Path $env:CANDIDATE_ROOT 'evidence')
       - uses: actions/upload-artifact@v4
         if: always() && env.CANDIDATE_ROOT != ''
         with:
-          name: windows-restore-${{ matrix.mode }}
+          name: desktop-evidence-windows-x64-attempt-${{ github.run_attempt }}
           path: ${{ env.CANDIDATE_ROOT }}/evidence
           retention-days: 14

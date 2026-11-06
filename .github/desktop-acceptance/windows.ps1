@@ -92,6 +92,63 @@ function Quit-Owned([string]$Exe, [string]$Install, [string]$State, [int[]]$Port
   throw 'Normal application exit did not release its owned processes'
 }
 
+function Test-PortConflicts([string]$Exe, [string]$Install, [string]$Output, [int[]]$Ports) {
+  if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted') { throw 'Port conflicts require a disposable GitHub-hosted runner' }
+  $portByService = @{ API=$Ports[1]; Web=$Ports[0] }
+  $scenarios = [ordered]@{ api=@('API'); web=@('Web'); both=@('API','Web') }
+  $checks = foreach ($scenario in $scenarios.GetEnumerator()) {
+    Assert-Free $Ports
+    $state = Join-Path $root "port-conflict-$($scenario.Key)-state"
+    $listeners = [Collections.Generic.List[Net.Sockets.TcpListener]]::new()
+    $candidate = $null
+    try {
+      $claims = @($scenario.Value | ForEach-Object { @{ service=$_; port=$portByService[$_] } })
+      foreach ($claim in $claims) {
+        $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, $claim.port)
+        $listener.ExclusiveAddressUse = $true
+        $listener.Start()
+        $listeners.Add($listener)
+      }
+      $candidate = Start-Owned $Exe @("--remote-debugging-port=$($Ports[3])", '--remote-debugging-address=127.0.0.1') $Install $state $Ports "port-conflict-$($scenario.Key)"
+      $startup = $null
+      $startupPath = Join-Path $state 'data/logs/startup-state.json'
+      $deadline = [DateTime]::UtcNow.AddSeconds(45)
+      do {
+        if (Test-Path -LiteralPath $startupPath -PathType Leaf) {
+          $startup = Get-Content -Raw -LiteralPath $startupPath | ConvertFrom-Json -AsHashtable
+          if ($startup.phase -in @('failed', 'ready')) { break }
+        }
+        if ($candidate.HasExited) { break }
+        Start-Sleep -Milliseconds 250
+      } while ([DateTime]::UtcNow -lt $deadline)
+      $owners = @(Get-NetTCPConnection -LocalPort $claims.port -State Listen -ErrorAction SilentlyContinue |
+        Select-Object LocalAddress, LocalPort, OwningProcess)
+      $retained = $owners.Count -eq $claims.Count -and @($owners | Where-Object OwningProcess -ne $PID).Count -eq 0
+      $reported = $startup -and $startup.pid -eq $candidate.Id -and $startup.phase -eq 'failed' -and
+        @($claims | Where-Object { -not $startup.message.Contains("$($_.service) $($_.port)") }).Count -eq 0
+      $pages = $null
+      if (Get-NetTCPConnection -LocalPort $Ports[3] -OwningProcess $candidate.Id -State Listen -ErrorAction SilentlyContinue) {
+        try {
+          $pages = @((Invoke-RestMethod "http://127.0.0.1:$($Ports[3])/json/list" -TimeoutSec 5) |
+            Where-Object type -eq 'page' | Select-Object -ExpandProperty url)
+        } catch { Write-Warning "Could not read owned Electron targets for $($scenario.Key): $_" }
+      }
+      $webAbsent = $null -ne $pages -and @($pages | Where-Object { $_ -match '^https?://' }).Count -eq 0
+      @{ scenario=$scenario.Key; passed=($reported -and $retained -and $webAbsent); state=$state;
+        candidatePid=$candidate.Id; listenerPid=$PID; claims=$claims; startup=$startup; owners=$owners; pages=$pages }
+    } finally {
+      foreach ($listener in $listeners) { $listener.Stop() }
+      if ($candidate) { Quit-Owned $Exe $Install $state $Ports }
+      Assert-Free $Ports
+    }
+  }
+  $result = if (@($checks | Where-Object { -not $_.passed }).Count) {
+    @{ status='failed'; code='windows-port-conflict-assertion' }
+  } else { @{ status='passed' } }
+  $result.checks = @($checks)
+  $result | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $Output 'port-conflicts.json')
+}
+
 foreach ($kind in @($Distribution)) {
   $install = Join-Path $root "$kind-install"
   $state = Join-Path $root "$kind-state"
@@ -130,6 +187,9 @@ foreach ($kind in @($Distribution)) {
     }
     $executables[0].VersionInfo | Select-Object FileName,ProductVersion,FileVersion,ProductName | ConvertTo-Json | Set-Content (Join-Path $output 'executable-version.json')
     if ($kind -eq 'portable') { Quit-Owned $exe $install $state $ports }
+    if ($kind -eq 'installer' -and $env:NIGHTLY_SUITE -eq 'full' -and -not $ObservePrivatePath) {
+      Test-PortConflicts $exe $install $output $ports
+    }
     $launchArgs = @("--remote-debugging-port=$($ports[3])", '--remote-debugging-address=127.0.0.1')
     foreach ($phase in @('create','restore')) {
       $phase | Set-Content (Join-Path $output 'phase.txt')
