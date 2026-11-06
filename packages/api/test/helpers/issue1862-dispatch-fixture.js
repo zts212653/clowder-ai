@@ -141,6 +141,7 @@ export async function runDispatch(
     processor,
     frames,
     siblingLaunches,
+    invocationRecordStore: records,
     invocationTracker,
   };
 }

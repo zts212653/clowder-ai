@@ -972,15 +972,17 @@ export class InvocationQueue {
     };
   }
 
-  /** One storage transaction for a claimed target's failure and its exact caller wake. */
+  /** One transaction for a prestart target's failure and its exact caller wake. */
   async terminalizeClaimedAdmissionFailure(
     messageStore: IMessageStore,
     source: StoredMessage,
     entry: QueueEntry,
     targetId: string,
     reason: LifecyclePreAdmissionFailureInput['reason'],
+    content?: string,
   ) {
-    if (!entry.claimId) throw new Error('pre-admission failure requires a durable Queue claim');
+    if (!entry.claimId && entry.status !== 'processing')
+      throw new Error('pre-admission failure requires its Queue claim or retired prestart attempt');
     const caller = queueEntryCallerCatId(entry);
     const returnToCaller =
       entry.sourceCategory === 'a2a' &&
@@ -1004,12 +1006,13 @@ export class InvocationQueue {
       requestedTargets: [targetId],
       reason,
       content:
-        reason === 'invalid_explicit_target'
+        content ??
+        (reason === 'invalid_explicit_target'
           ? `唤起 ${targetId} 失败：指定的接收对象当前无效。`
-          : `唤起 ${targetId} 失败：成员的执行绑定无法通过准入。`,
+          : `唤起 ${targetId} 失败：成员的执行绑定无法通过准入。`),
       failedAt: committed?.timestamp ?? Math.max(Date.now(), source.timestamp),
       claim: {
-        id: entry.claimId,
+        ...(entry.claimId ? { id: entry.claimId } : {}),
         ledger: this.ledgerStore,
         ...(returnToCaller
           ? {

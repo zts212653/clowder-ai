@@ -745,17 +745,25 @@ if existingFailureId and redis.call('EXISTS', kp .. 'msg:' .. existingFailureId)
 end
 
 local wakeId = nil
-if claimId ~= '' then
+if #KEYS > 1 then
   local raw = redis.call('HGET', KEYS[2], expectedEntryId)
-  if not raw then return {-4, ''} end
-  local row = cjson.decode(raw)
-  if row.status ~= 'claimed' or row.claimId ~= claimId or
-     row.payload.messageId ~= redis.call('HGET', sourceHash, 'id') then return {-4, ''} end
-  local found = false
-  for _, target in ipairs(row.claimedTargetIds or {}) do
-    if target == failedTarget then found = true end
+  if claimId ~= '' then
+    if not raw then return {-4, ''} end
+    local row = cjson.decode(raw)
+    if row.status ~= 'claimed' or row.claimId ~= claimId or
+       row.payload.messageId ~= redis.call('HGET', sourceHash, 'id') then return {-4, ''} end
+    local found = false
+    for _, target in ipairs(row.claimedTargetIds or {}) do
+      if target == failedTarget then found = true end
+    end
+    if not found then return {-4, ''} end
+  elseif raw then
+    local row = cjson.decode(raw)
+    if row.payload.messageId ~= redis.call('HGET', sourceHash, 'id') then return {-4, ''} end
+    for _, target in ipairs(row.targets) do
+      if target == failedTarget then return {-4, ''} end
+    end
   end
-  if not found then return {-4, ''} end
   if wakeRaw ~= '' then
     wakeId = cjson.decode(wakeRaw).id
     if redis.call('HEXISTS', KEYS[2], wakeId) == 1 or

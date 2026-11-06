@@ -1143,9 +1143,9 @@ export interface LifecyclePreAdmissionFailureInput {
   content: string;
   contentBlocks?: readonly MessageContent[];
   failedAt: number;
-  /** Binding rejection belongs to a specific target of the original short claim. */
+  /** A prestart failure belongs to an exact target; omit id only after that target left the ledger. */
   claim?: {
-    id: string;
+    id?: string;
     ledger: QueueLedgerStore;
     makeWake?: (failureId: string) => QueueLedgerEntry;
   };
@@ -4018,13 +4018,14 @@ export class MessageStore {
         throw new Error('pre-admission failure requires the matching in-memory Queue ledger');
       }
       const row = ledger.getNow(source.threadId, input.expectedEntryId);
-      if (
-        row?.status !== 'claimed' ||
-        row.claimId !== id ||
-        row.payload.messageId !== source.id ||
-        input.requestedTargets.length !== 1 ||
-        !row.claimedTargetIds?.includes(input.requestedTargets[0]!)
-      )
+      const targetId = input.requestedTargets[0]!;
+      const ownedTarget = id
+        ? row?.status === 'claimed' &&
+          row.claimId === id &&
+          row.payload.messageId === source.id &&
+          row.claimedTargetIds?.includes(targetId)
+        : !row || (row.payload.messageId === source.id && !row.targets.includes(targetId));
+      if (input.requestedTargets.length !== 1 || !ownedTarget)
         return { kind: 'conflict', reason: 'invalid_failure', inputMessage: structuredClone(source) };
       if (makeWake && ledger.enqueueNow([makeWake(failureId)]).outcome !== 'enqueued') {
         throw new Error('pre-admission failure wake admission conflict');

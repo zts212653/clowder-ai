@@ -5,6 +5,7 @@ import { once } from 'node:events';
 import { test } from 'node:test';
 import { createRedisClient } from '@cat-cafe/shared/utils';
 import { Redis } from 'ioredis';
+import { InvocationQueue } from '../dist/domains/cats/services/agents/invocation/InvocationQueue.js';
 import { InvocationTracker } from '../dist/domains/cats/services/agents/invocation/InvocationTracker.js';
 import { QueueProcessor } from '../dist/domains/cats/services/agents/invocation/QueueProcessor.js';
 import { RedisQueueLedgerStore } from '../dist/domains/cats/services/agents/invocation/queue-ledger/RedisQueueLedgerStore.js';
@@ -13,6 +14,7 @@ import { RedisMessageStore } from '../dist/domains/cats/services/stores/redis/Re
 import { RedisThreadStore } from '../dist/domains/cats/services/stores/redis/RedisThreadStore.js';
 import { queueHttpFixture } from './helpers/1398-queue-http-fixture.js';
 import { runDispatch, waitFor } from './helpers/issue1862-dispatch-fixture.js';
+import { runPrestartFailure } from './helpers/issue1862-prestart-fixture.js';
 import { ownedRedisFixture } from './helpers/owned-redis-fixture.js';
 import { assertRedisIsolationOrThrow, redisIsolationSkipReason } from './helpers/redis-test-helpers.js';
 
@@ -51,6 +53,61 @@ if (process.send && process.env.ISSUE1862_CRASH_FIXTURE) {
 } else {
   const isolated = !redisIsolationSkipReason(redisUrl);
   const owned = !isolated && process.platform !== 'win32' ? ownedRedisFixture('issue1862-admission') : null;
+  for (const processing of [false, true]) {
+    test(
+      `Redis prestart failure commits its result and caller wake together (processing=${processing})`,
+      {
+        skip: !isolated && !owned && 'Windows requires an isolated Redis runner',
+      },
+      async (t) => {
+        const prefix = `issue1862:${randomUUID()}:`;
+        const redis = owned ? owned.client(prefix) : isolatedClient(prefix);
+        t.after(() => redis.disconnect());
+        const f = await redisFixture(t, redis);
+        const commit = f.messages.commitLifecyclePreAdmissionFailure.bind(f.messages);
+        f.messages.commitLifecyclePreAdmissionFailure = async (input) => {
+          if (!processing) {
+            const withoutClaim = await commit({ ...input, claim: { ...input.claim, id: undefined } });
+            assert.equal(withoutClaim.kind, 'conflict', 'a live ledger target cannot use retired-attempt settlement');
+            assert.equal(
+              (await f.queue.ledgerStore.list(f.thread.id)).filter((row) => row.sourceCategory === 'a2a_failure')
+                .length,
+              0,
+            );
+          }
+          const result = await commit(input);
+          assert.ok(result.kind === 'applied' || result.kind === 'replayed', JSON.stringify(result));
+          const wakes = (await f.queue.ledgerStore.list(f.thread.id)).filter(
+            (row) => row.sourceCategory === 'a2a_failure',
+          );
+          assert.equal(wakes.length, 1, 'the caller wake must exist when the Redis transaction returns');
+          assert.equal(wakes[0].payload.sourceRecordId, result.failureMessage.id);
+          return result;
+        };
+        const { outcome, source, entry, threadId } = await runPrestartFailure(t, {
+          f,
+          reason: 'prestart_timeout',
+          processing,
+        });
+        assert.equal(outcome, 'retired');
+        const recovered = new InvocationQueue(f.queue.ledgerStore);
+        await recovered.hydrateFromLedger(f.messages);
+        assert.equal(await recovered.getDurableEntry(threadId, entry.id), null);
+        const [wake, ...duplicates] = await recovered.listAllDurable(threadId);
+        assert.deepEqual(duplicates, []);
+        assert.deepEqual(wake.targets, ['codex']);
+        const [ref] = (await f.messages.getById(source.id)).lifecycle.dispatchRefs;
+        assert.deepEqual(
+          [ref.targetId, ref.phase, ref.statusMessageId],
+          ['gemini', 'settled', wake.payload.sourceRecordId],
+        );
+        assert.equal(
+          (await f.messages.getByThread(threadId)).filter((row) => row.lifecycle?.kind === 'delivery_failure').length,
+          1,
+        );
+      },
+    );
+  }
   test(
     'API process loss after the atomic Redis write preserves the exact result and one caller turn',
     {
