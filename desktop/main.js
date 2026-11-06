@@ -3,6 +3,7 @@ const path = require('node:path');
 const { resolveProjectRootFromDir } = require('./project-root');
 const { installationIdentity, isInstallationShutdownRequest } = require('./installation-lifecycle');
 const ServiceManager = require('./service-manager');
+const { createServiceFailureHandler } = require('./service-failure-handler');
 const { createStartupReporter, showStartupFailure } = require('./startup-state');
 const { createStartupTimeline } = require('./startup-timing');
 const { createStartupSplash, showVisibleRenderer } = require('./visible-renderer');
@@ -202,6 +203,12 @@ function requestQuit(source = 'unknown') {
 }
 
 const quitApp = () => requestQuit('startup-failure');
+const handleServiceFailure = createServiceFailureHandler({
+  dialog,
+  isQuitting: () => isQuitting,
+  quitApp: () => requestQuit('service-failure'),
+  dbg,
+});
 
 const getLifecycleState = () => ({ isQuitting, quitSource, trayAvailable: Boolean(tray), startupPhase });
 appLifecycle.installAppLifecycleDiagnostics({ app, lifecycle, requestQuit, shutdown, getState: getLifecycleState });
@@ -293,6 +300,7 @@ app.on('ready', async () => {
     apiPort: API_PORT,
     redisPort: desktopRuntime.redisPort,
     onStatus: sendSplashStatus,
+    onUnexpectedExit: handleServiceFailure,
     pluginNetworkFetch: net.fetch.bind(net),
   });
   ({ updater, updatePrompt } = createDesktopUpdateRuntime({
@@ -319,6 +327,7 @@ app.on('ready', async () => {
         frontendPort: FRONTEND_PORT,
         apiPort: API_PORT,
         redisPort: desktopRuntime.redisPort,
+        onUnexpectedExit: handleServiceFailure,
         pluginNetworkFetch: net.fetch.bind(net),
       });
       await services.startAll();
