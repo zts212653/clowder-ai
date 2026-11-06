@@ -16,6 +16,7 @@ export interface ChangedFile {
 }
 
 export interface ChangesDiffData {
+  isGitRepository?: boolean;
   changedFiles: ChangedFile[];
   diff: string;
   target?: PullRequestChangesTarget;
