@@ -95,6 +95,7 @@ export function OperationRowsRenderer({
   target,
   operation,
   onStatusChange,
+  refreshRevision,
   listAction,
   pendingConfigValues,
 }: ActionRendererProps & { listAction: PlatformActionDef }) {
@@ -127,6 +128,7 @@ export function OperationRowsRenderer({
   const inputKey = JSON.stringify([stableTarget, operation.name, operation.actions, operation.rowActions]);
   const configKey = JSON.stringify(pendingConfigValues ?? {});
   const previousConfigKey = useRef(configKey);
+  const previousRefreshRevision = useRef(refreshRevision);
 
   const invalidateListRequests = useCallback((updateState = true) => {
     listRequestId.current += 1;
@@ -225,6 +227,13 @@ export function OperationRowsRenderer({
       operationEpoch.current += 1;
     };
   }, [invalidateListRequests, list, inputKey]);
+
+  useEffect(() => {
+    if (previousRefreshRevision.current === refreshRevision) return;
+    previousRefreshRevision.current = refreshRevision;
+    if (ownerActionsInFlight.current.size > 0) reconcileAfterOwnerActions.current = true;
+    else void list(true);
+  }, [list, refreshRevision]);
 
   useEffect(() => {
     if (previousConfigKey.current === configKey) return;

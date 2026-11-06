@@ -287,7 +287,8 @@ test('real message ingress admits mixed member/plugin targets, rejects unknowns 
     import('../src/domains/cats/services/agents/invocation/InvocationRegistry.js'),
     import('../src/domains/cats/services/agents/invocation/InvocationQueue.js'),
   ]);
-  const targets = service();
+  const inventory = new MemoryPluginInventoryStore(snapshot(), { contract });
+  const targets = service(inventory);
   const registry = new InvocationRegistry();
   const messageStore = new MessageStore();
   const threadStore = new ThreadStore();
@@ -304,6 +305,8 @@ test('real message ingress admits mixed member/plugin targets, rejects unknowns 
   });
   assert.deepEqual(await router.resolveExplicitTargets(['opus', 'pi_original'], thread.id), ['opus', 'pi_original']);
   const queue = new InvocationQueue(undefined, {
+    resolveTargetKinds: (requested) => router.resolveQueueTargetKinds(requested),
+    resolvePreResolvedTargets: (requested, implicit) => router.resolveAdmissionTargets(requested, implicit),
     resolveTargets: (requested, threadId, content, exact) =>
       router.resolveSendTargets(requested, threadId, content, exact),
   });
@@ -324,7 +327,11 @@ test('real message ingress admits mixed member/plugin targets, rejects unknowns 
     const response = await app.inject({
       method: 'POST',
       url: '/api/messages',
-      payload: { threadId: thread.id, content: '@assistant-2 help' },
+      payload: {
+        threadId: thread.id,
+        content: '@assistant-2 help',
+        idempotencyKey: '11111111-1111-4111-8111-111111111111',
+      },
     });
     assert.equal(response.statusCode, 202, response.body);
     assert.deepEqual((await queue.listAllDurable(thread.id))[0]?.targets, ['pi_original']);
@@ -368,7 +375,185 @@ test('real message ingress admits mixed member/plugin targets, rejects unknowns 
       },
     });
     assert.equal(whisper.statusCode, 400, whisper.body);
+    const { AddressedPluginQueueDelivery } = await import(
+      '../src/domains/plugin/manager/addressing/addressed-plugin-queue-delivery.js'
+    );
+    let delivered = 0;
+    const delivery = new AddressedPluginQueueDelivery({
+      targets,
+      queue,
+      messageStore,
+      manager: {
+        deliverAddressed: async (id, input) => {
+          assert.equal(id, 'pi_original');
+          delivered++;
+          return { deliveryId: input.deliveryId };
+        },
+      } as never,
+    });
+    const first = (await queue.listAllDurable(thread.id))[0]!;
+    const claimed = await queue.markProcessingByIdDurable(thread.id, first.id, 'pi_original');
+    assert.ok(claimed);
+    await delivery.deliver(claimed, 'pi_original');
+    await delivery.deliver(claimed, 'pi_original');
+    assert.equal(delivered, 1, 'the accepted source has one durable delivery receipt');
+    await inventory.transaction((tx) => {
+      const old = tx.instances.get('pi_original')!;
+      tx.instances.put({ ...old, lifecycleState: 'retired', retiredAt: 10 });
+    });
+    const replay = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      payload: {
+        threadId: thread.id,
+        content: '@assistant-2 help',
+        idempotencyKey: '11111111-1111-4111-8111-111111111111',
+      },
+    });
+    assert.equal(replay.statusCode, 202, replay.body);
+    assert.equal(replay.json().userMessageId, response.json().userMessageId);
+    assert.equal(delivered, 1);
+    const retired = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      payload: { threadId: thread.id, content: 'new work', mentions: ['pi_original'] },
+    });
+    assert.equal(retired.statusCode, 400, retired.body);
   } finally {
     await app.close();
   }
+});
+
+test('server-classified plugin targets work through durable wake, existing-message and target expansion admissions', async () => {
+  const [{ InvocationQueue }, { MessageStore }] = await Promise.all([
+    import('../src/domains/cats/services/agents/invocation/InvocationQueue.js'),
+    import('../src/domains/cats/services/stores/ports/MessageStore.js'),
+  ]);
+  const router = new AgentRouter({
+    agentRegistry: new AgentRegistry(),
+    registry: {} as never,
+    messageStore: {} as never,
+    addressedPlugins: service(),
+  });
+  const queue = new InvocationQueue(undefined, {
+    resolveTargetKinds: (requested) => router.resolveQueueTargetKinds(requested),
+    resolvePreResolvedTargets: (requested, implicit) => router.resolveAdmissionTargets(requested, implicit),
+  });
+  const store = new MessageStore();
+  const from = { kind: 'user', userId: 'owner' } as const;
+  const source = store.append({
+    userId: 'owner',
+    threadId: 'thread',
+    from,
+    content: 'plugin work',
+    mentions: [],
+    timestamp: 1,
+    deliveryStatus: 'queued',
+  });
+  const input = {
+    userId: 'owner',
+    threadId: 'thread',
+    from,
+    content: source.content,
+    targetCats: ['pi_original'],
+    kind: 'conversation_input',
+    ownerAuthProvenance: 'strict',
+    intent: 'execute',
+  } as const;
+  const admitted = await queue.enqueueExistingMessageDurable(store, source.id, {
+    ...input,
+    targetCats: [...input.targetCats],
+  });
+  assert.equal(admitted.outcome, 'enqueued');
+  assert.deepEqual(admitted.outcome === 'enqueued' && admitted.entries[0]?.targets, ['pi_original']);
+  const wake = await queue.enqueueDurable({
+    ...input,
+    targetCats: ['pi_original'],
+    messageId: source.id,
+    kind: 'message_wake',
+    sourceId: 'wake',
+  });
+  assert.deepEqual(wake.entries?.[0]?.targets, ['pi_original']);
+  const expansionSource = store.append({
+    userId: 'owner',
+    threadId: 'thread',
+    from,
+    content: input.content,
+    mentions: [],
+    timestamp: 2,
+    deliveryStatus: 'queued',
+  });
+  const anchor = await queue.enqueueExistingMessageDurable(store, expansionSource.id, { ...input, targetCats: [] });
+  assert.ok(anchor.outcome === 'enqueued' && anchor.entries?.[0]);
+  if (anchor.outcome !== 'enqueued') throw new Error('anchor not admitted');
+  const expanded = await queue.mapQueuedMessageTargetsDurable(
+    store,
+    expansionSource.id,
+    anchor.entries[0].id,
+    'pi_original',
+    [anchor.entries[0].id],
+    { ...input, targetCats: ['pi_original'] },
+  );
+  assert.ok(['expanded', 'replayed'].includes(expanded.outcome));
+  await assert.rejects(
+    queue.enqueueDurable({
+      ...input,
+      targetCats: ['pi_original', 'unknown'],
+      messageId: source.id,
+      sourceId: 'unknown',
+    }),
+    /target/i,
+  );
+});
+
+test('mixed targets reject atomically when a member becomes unavailable after async routing', async () => {
+  const [{ InvocationQueue }, { MessageStore }] = await Promise.all([
+    import('../src/domains/cats/services/agents/invocation/InvocationQueue.js'),
+    import('../src/domains/cats/services/stores/ports/MessageStore.js'),
+  ]);
+  const router = new AgentRouter({
+    agentRegistry: new AgentRegistry(),
+    registry: {} as never,
+    messageStore: {} as never,
+    addressedPlugins: service(),
+  });
+  let disabled = false;
+  const queue = new InvocationQueue(undefined, {
+    resolveTargetKinds: (requested) => router.resolveQueueTargetKinds(requested),
+    resolveTargets: async (requested) => {
+      disabled = true;
+      return [...requested];
+    },
+    resolvePreResolvedTargets: (requested, implicit) =>
+      disabled && requested.includes('opus') ? [] : router.resolveAdmissionTargets(requested, implicit),
+  });
+  const store = new MessageStore();
+  const from = { kind: 'user', userId: 'owner' } as const;
+  await assert.rejects(
+    queue.send(
+      store,
+      {
+        userId: 'owner',
+        threadId: 'thread',
+        from,
+        content: 'mixed work',
+        mentions: ['opus', 'pi_original'] as never,
+        timestamp: 1,
+        deliveryStatus: 'queued',
+      },
+      {
+        userId: 'owner',
+        threadId: 'thread',
+        from,
+        content: 'mixed work',
+        targetCats: ['opus', 'pi_original'],
+        kind: 'conversation_input',
+        ownerAuthProvenance: 'strict',
+        intent: 'execute',
+      },
+    ),
+    /target/i,
+  );
+  assert.deepEqual(store.getByThread('thread'), []);
+  assert.deepEqual(await queue.listAllDurable('thread'), []);
 });

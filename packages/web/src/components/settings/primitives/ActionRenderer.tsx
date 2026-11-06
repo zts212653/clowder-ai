@@ -35,6 +35,8 @@ export interface ActionRendererProps {
   pendingConfigValues?: Readonly<Record<string, string>>;
   /** Called after connect/disconnect lifecycle completes. */
   onStatusChange?: () => void;
+  /** A successful sibling operation invalidates status without remounting inputs/results. */
+  refreshRevision?: number;
   /** Platform theme color for the primary action button. */
   themeColor?: string;
 }
@@ -86,6 +88,7 @@ function SequencedActionRenderer({
   const abortedRef = useRef(false);
   const autoStartedRef = useRef(false);
   const requestEpoch = useRef(0);
+  const localResult = useRef<{ inputKey: string; actionId: string }>();
   const pollingInputKey = JSON.stringify([target, operation.name, actions, configured, pendingConfigValues ?? {}]);
   const confirmAction = useActionConfirmation();
 
@@ -104,6 +107,11 @@ function SequencedActionRenderer({
   }, [lastResult]);
 
   useEffect(() => {
+    if (
+      localResult.current?.inputKey === pollingInputKey &&
+      (!operation.currentAction || operation.currentAction === localResult.current.actionId)
+    )
+      return;
     const nextState = deriveActionState(operation, actions, configured, disconnectId, firstAction?.id);
     if (retainsSnapshot(nextState.currentActionId, pollingInputKey, operation.updatedAt)) return;
     requestEpoch.current += 1;
@@ -271,6 +279,7 @@ function SequencedActionRenderer({
       if (!action || !(await confirmAction(action.label, action.confirm))) return;
 
       const nextDef = actions.find((candidate) => candidate.id === action.next);
+      localResult.current = undefined;
       if (nextDef?.render === 'polling') beginRequest(actionId, nextDef.id, pollingInputKey, operation.updatedAt);
       const epoch = ++requestEpoch.current;
       setCurrentActionId(actionId);
@@ -295,7 +304,9 @@ function SequencedActionRenderer({
       } else if (action.next) {
         advanceTo(action.next);
       } else {
+        localResult.current = { inputKey: pollingInputKey, actionId };
         setPhase('result');
+        onStatusChange?.();
       }
     },
     [
@@ -304,6 +315,7 @@ function SequencedActionRenderer({
       beginRequest,
       confirmAction,
       executeAction,
+      onStatusChange,
       operation.updatedAt,
       pollingInputKey,
       startPolling,

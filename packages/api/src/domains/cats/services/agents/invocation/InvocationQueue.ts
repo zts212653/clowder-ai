@@ -405,7 +405,10 @@ export class InvocationQueue {
     );
   }
 
-  private resolveAdmissionInput(input: QueueEnqueueInput): QueueEnqueueInput {
+  private resolveAdmissionInput(
+    input: QueueEnqueueInput,
+    targetKinds?: ReadonlyMap<string, 'member' | 'plugin'>,
+  ): QueueEnqueueInput {
     if (!this.admissionPolicy.resolvePreResolvedTargets) return input;
     const implicit =
       input.from.kind === 'system' &&
@@ -421,9 +424,20 @@ export class InvocationQueue {
       !input.a2aParentInvocationId &&
       Object.keys(input.authorIntentByCatId ?? {}).length === 0 &&
       input.sourceCategory !== 'a2a_failure';
-    const targetCats = this.admissionPolicy.resolvePreResolvedTargets(input.targetCats, implicit);
-    if (input.targetCats.length > 0 && targetCats.length === 0) throw new Error('Queue admission has no valid target');
-    return { ...input, targetCats };
+    const memberTargets = input.targetCats.filter((id) => targetKinds?.get(id) !== 'plugin');
+    const members = this.admissionPolicy.resolvePreResolvedTargets(memberTargets, implicit);
+    if (memberTargets.length > 0 && members.length === 0) throw new Error('Queue admission has no valid target');
+    if (memberTargets.length === input.targetCats.length) return { ...input, targetCats: members };
+    // Plugin IDs were confirmed by inventory for this request. Recheck members at commit,
+    // and reject the entire mixed set if any member failed (never silently drop a sibling).
+    if (members.length !== memberTargets.length) throw new Error('Queue admission target identity changed');
+    let memberIndex = 0;
+    return {
+      ...input,
+      targetCats: [
+        ...new Set(input.targetCats.map((id) => (targetKinds?.get(id) === 'plugin' ? id : members[memberIndex++]))),
+      ],
+    };
   }
 
   /** A receipt probe carries the immutable producer request, before any current routing choice. */
@@ -442,6 +456,7 @@ export class InvocationQueue {
     reuseResolvedTargets = false,
     requestedTargetCats?: readonly string[],
     resolveTargets = true,
+    targetKinds?: ReadonlyMap<string, 'member' | 'plugin'>,
   ): QueueLedgerEntry[] {
     InvocationQueue.requireAdmissionContract({ ...input, messageId: messageId ?? input.messageId });
     // A stable source reuses its winning policy, including an exact parent or
@@ -453,7 +468,7 @@ export class InvocationQueue {
         throw new Error(`Queue admission identity conflict: ${sourceId}`);
       }
       if (resolveTargets)
-        input = replay ? { ...input, targetCats: [...replay.targets] } : this.resolveAdmissionInput(input);
+        input = replay ? { ...input, targetCats: [...replay.targets] } : this.resolveAdmissionInput(input, targetKinds);
     }
     if (
       requestedTargetCats &&
@@ -653,6 +668,10 @@ export class InvocationQueue {
           enqueuedAt,
           input.messageId ?? undefined,
           existing ? [existing] : undefined,
+          false,
+          undefined,
+          true,
+          existing ? undefined : await this.admissionPolicy.resolveTargetKinds?.(input.targetCats),
         );
     const result =
       replay ?? (await this.ledgerStore.enqueue(rows, input.from.kind === 'user' ? MAX_QUEUE_DEPTH : undefined));
@@ -695,7 +714,17 @@ export class InvocationQueue {
     const rows =
       replay && probe
         ? [probe]
-        : this.createLedgerRows(input, sourceId, enqueuedAt, undefined, existing ? [existing] : undefined);
+        : this.createLedgerRows(
+            input,
+            sourceId,
+            enqueuedAt,
+            undefined,
+            existing ? [existing] : undefined,
+            false,
+            undefined,
+            true,
+            existing ? undefined : await this.admissionPolicy.resolveTargetKinds?.(input.targetCats),
+          );
     const result = await messageStore.appendNoticeWithPrivateQueueAdmission(notice, rows, this.ledgerStore);
     if (result.outcome === 'full') return { outcome: 'full' };
     const entries = this.cacheLedgerEntries(result.entries);
@@ -851,7 +880,9 @@ export class InvocationQueue {
       assertQueueMessageReplay(committed, message);
       return { outcome: 'enqueued', message: committed, entries: [], deduped: true };
     }
-    if (!committedRow && !exactTargets && input.from.kind === 'system') input = this.resolveAdmissionInput(input);
+    if (!committed && !committedRow && !exactTargets && input.from.kind === 'system') {
+      input = this.resolveAdmissionInput(input, await this.admissionPolicy.resolveTargetKinds?.(input.targetCats));
+    }
     input = {
       ...input,
       targetCats: committedRow
@@ -863,6 +894,7 @@ export class InvocationQueue {
             exactTargets || input.allowConversationFallback === false,
           ),
     };
+    const targetKinds = committed ? undefined : await this.admissionPolicy.resolveTargetKinds?.(input.targetCats);
     const enqueuedAt = this.nextEnqueuedAt();
     const result = await messageStore.appendWithQueueLedgerAdmission(
       message,
@@ -874,7 +906,7 @@ export class InvocationQueue {
         // Async policy already selected canonical recipients. Validate those identities
         // at commit without interpreting a newly disabled successor as another predecessor.
         const admissionInput =
-          committed || replaySource ? input : this.resolveAdmissionInput({ ...input, exactTargets: true });
+          committed || replaySource ? input : this.resolveAdmissionInput({ ...input, exactTargets: true }, targetKinds);
         return this.createLedgerRows(
           replay ? { ...admissionInput, intent: replay.execution.intent } : admissionInput,
           messageId,
@@ -935,6 +967,10 @@ export class InvocationQueue {
       source.timestamp,
       responseMessageId,
       existing ? [existing] : undefined,
+      false,
+      undefined,
+      true,
+      existing ? undefined : await this.admissionPolicy.resolveTargetKinds?.(input.targetCats),
     );
     const result = await messageStore.commitLifecycleResponseTerminalWithQueueLedgerAdmission(
       responseMessageId,
@@ -984,7 +1020,17 @@ export class InvocationQueue {
     }
     const enqueuedAt = this.nextEnqueuedAt();
     const existing = await this.ledgerStore.get(input.threadId, queueEntryId(messageId));
-    const rows = this.createLedgerRows(input, messageId, enqueuedAt, messageId, existing ? [existing] : undefined);
+    const rows = this.createLedgerRows(
+      input,
+      messageId,
+      enqueuedAt,
+      messageId,
+      existing ? [existing] : undefined,
+      false,
+      undefined,
+      true,
+      existing ? undefined : await this.admissionPolicy.resolveTargetKinds?.(input.targetCats),
+    );
     const result = await messageStore.enqueueExistingMessageWithQueueLedgerAdmission(
       messageId,
       rows,
@@ -1033,16 +1079,29 @@ export class InvocationQueue {
     }
     const anchor = await this.ledgerStore.get(input.threadId, entryId);
     if (!anchor) return { outcome: 'not_found' as const, entries: [] };
+    const targetKinds = await this.admissionPolicy.resolveTargetKinds?.([...input.targetCats, bindTargetCatId]);
     if (
-      this.admissionPolicy.resolvePreResolvedTargets &&
-      !this.admissionPolicy.resolvePreResolvedTargets([bindTargetCatId], false).includes(bindTargetCatId)
+      !this.resolveAdmissionInput(
+        { ...input, targetCats: [bindTargetCatId], exactTargets: true },
+        targetKinds,
+      ).targetCats.includes(bindTargetCatId)
     ) {
       throw new Error('Queue target expansion has no valid target');
     }
     const siblingInput: QueueEnqueueInput = { ...input, sourceId: messageId, messageId };
     const siblingRows =
       siblingInput.targetCats.length > 0
-        ? this.createLedgerRows(siblingInput, messageId, anchor.enqueuedAt, messageId).map((row) => ({
+        ? this.createLedgerRows(
+            siblingInput,
+            messageId,
+            anchor.enqueuedAt,
+            messageId,
+            undefined,
+            false,
+            undefined,
+            true,
+            targetKinds,
+          ).map((row) => ({
             ...row,
             ...(anchor.position !== undefined ? { position: anchor.position } : {}),
           }))
@@ -1077,9 +1136,10 @@ export class InvocationQueue {
     if (current && queueEntryOwnerId(current) !== userId) {
       throw new Error('Queue target reconciliation owner mismatch');
     }
+    const targetKinds = await this.admissionPolicy.resolveTargetKinds?.(addTargetIds);
     const resolveTargets = this.admissionPolicy.resolvePreResolvedTargets;
     const validAdditions = resolveTargets
-      ? addTargetIds.filter((id) => resolveTargets([id], false).includes(id))
+      ? addTargetIds.filter((id) => targetKinds?.get(id) === 'plugin' || resolveTargets([id], false).includes(id))
       : addTargetIds;
     const validIntent = Object.fromEntries(
       Object.entries(authorIntentByTarget).filter(

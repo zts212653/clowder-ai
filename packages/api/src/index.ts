@@ -1080,6 +1080,7 @@ async function main(): Promise<void> {
 
   const queueLedgerStore = redis ? new RedisQueueLedgerStore(redis) : new InMemoryQueueLedgerStore();
   const invocationQueue = new InvocationQueue(queueLedgerStore, {
+    resolveTargetKinds: (requested) => router.resolveQueueTargetKinds(requested),
     resolvePreResolvedTargets: (requested, implicit) => router.resolveAdmissionTargets(requested, implicit),
     projectRoot: resolveActiveProjectRoot(),
     invocationTracker,

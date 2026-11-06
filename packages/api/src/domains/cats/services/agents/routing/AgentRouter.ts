@@ -817,6 +817,12 @@ export class AgentRouter {
     );
   }
 
+  /** Inventory snapshot belongs to one Queue admission, not a process identity cache. */
+  async resolveQueueTargetKinds(requested: readonly string[]): Promise<ReadonlyMap<string, 'member' | 'plugin'>> {
+    const plugins = new Set((await this.addressedPlugins?.list(true))?.map((plugin) => plugin.id) ?? []);
+    return new Map(requested.map((id) => [id, plugins.has(id) ? 'plugin' : 'member'] as const));
+  }
+
   /** Validate before first persistence; bound/explicit recipients never follow successors. */
   resolveAdmissionTargets(requested: readonly string[], implicit = false): CatId[] {
     const targets = requested.map((id) => {
