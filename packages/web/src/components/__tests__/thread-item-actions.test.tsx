@@ -78,6 +78,8 @@ describe('ThreadItem actions', () => {
     act(() => root.unmount());
     container.remove();
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    localStorage.removeItem('cat-cafe:shell-language');
   });
 
   function renderThread(overrides: Partial<React.ComponentProps<typeof ThreadItem>> = {}) {
@@ -221,6 +223,67 @@ describe('ThreadItem actions', () => {
 
     expect(container.querySelector('[role="menu"]')).toBeNull();
     expect(container.querySelector('[data-testid="thread-settings-panel"]')).not.toBeNull();
+  });
+
+  it.each([
+    ['classic', false],
+    ['classic', true],
+    ['v2', false],
+    ['v2', true],
+  ] as const)('copies the full thread ID without selecting it (shell=%s, active=%s)', async (shell, isActive) => {
+    localStorage.setItem('cat-cafe:shell-presentation', shell);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('navigator', { clipboard: { writeText } });
+    const onSelect = vi.fn();
+    const id = 'thread_owned_ade41eb0e62d4d1ce66cd33ba70cc70d0e083b68';
+    renderThread({ id, isActive, onSelect });
+    act(() => container.querySelector<HTMLButtonElement>('[aria-label="更多操作"]')?.click());
+    const copy = container.querySelector<HTMLButtonElement>('[role="menuitem"][aria-label="复制 Thread ID"]');
+    expect(copy).not.toBeNull();
+    await act(async () => copy?.click());
+    expect(writeText).toHaveBeenCalledExactlyOnceWith(id);
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(copy?.textContent).toBe('已复制');
+    expect(copy?.querySelector('output[aria-live="polite"]')).not.toBeNull();
+  });
+
+  it('reports a clipboard rejection and lets the user retry copying the thread ID', async () => {
+    const writeText = vi.fn().mockRejectedValueOnce(new Error('denied')).mockResolvedValueOnce(undefined);
+    vi.stubGlobal('navigator', { clipboard: { writeText } });
+    renderThread();
+    act(() => buttonByTitle('更多操作')?.click());
+    const copy = container.querySelector<HTMLButtonElement>('[role="menuitem"][aria-label="复制 Thread ID"]');
+    expect(copy).not.toBeNull();
+    await act(async () => copy?.click());
+    expect(copy?.textContent).toBe('复制失败，重试');
+    await act(async () => copy?.click());
+    expect(writeText).toHaveBeenNthCalledWith(2, 'thread-1');
+    expect(copy?.textContent).toBe('已复制');
+  });
+
+  it('reports an unavailable clipboard without claiming success', async () => {
+    vi.stubGlobal('navigator', {});
+    renderThread();
+    act(() => buttonByTitle('更多操作')?.click());
+    const copy = container.querySelector<HTMLButtonElement>('[role="menuitem"][aria-label="复制 Thread ID"]');
+    expect(copy).not.toBeNull();
+    await act(async () => copy?.click());
+    expect(copy?.textContent).toBe('复制失败，重试');
+  });
+
+  it('localizes the copy action and feedback in the English shell', async () => {
+    localStorage.setItem('cat-cafe:shell-presentation', 'v2');
+    localStorage.setItem('cat-cafe:shell-language', 'en');
+    const writeText = vi.fn().mockRejectedValueOnce(new Error('denied')).mockResolvedValueOnce(undefined);
+    vi.stubGlobal('navigator', { clipboard: { writeText } });
+    renderThread();
+    act(() => container.querySelector<HTMLButtonElement>('[aria-label="更多操作"]')?.click());
+    const copy = container.querySelector<HTMLButtonElement>('[role="menuitem"][aria-label="Copy Thread ID"]');
+    expect(copy?.textContent).toBe('Copy Thread ID');
+    await act(async () => copy?.click());
+    expect(copy?.textContent).toBe('Copy failed, retry');
+    await act(async () => copy?.click());
+    expect(copy?.textContent).toBe('Copied');
   });
 
   it('does not select the thread when using controls inside the portaled settings surface', () => {
