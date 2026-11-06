@@ -206,9 +206,7 @@ it('lets a save issued after clear become the new pending and survive the delete
   const saving = saveNewConversationIntent(record(ALICE, [oldGate.file])).catch((error: unknown) => error);
   const clearing = clearNewConversationIntent(ALICE);
   const newGate = gatedFile('new.png');
-  const replacement = saveNewConversationIntent(record(ALICE, [newGate.file], 3)).catch(
-    (error: unknown) => error,
-  );
+  const replacement = saveNewConversationIntent(record(ALICE, [newGate.file], 3)).catch((error: unknown) => error);
   try {
     expect((await loadNewConversationIntent(ALICE))?.files.map((file) => file.name)).toEqual(['new.png']);
     await clearing;
