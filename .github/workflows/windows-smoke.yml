@@ -131,6 +131,7 @@ jobs:
           desktop/runtime-config.test.js
           desktop/instance-upgrade.test.js
           desktop/instance-data-boundary.test.js
+          desktop/redis-directory-diagnostic.test.js
           desktop/runtime-web-server.test.js
           desktop/runtime-web-config.test.js
           desktop/service-startup.test.js

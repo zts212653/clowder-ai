@@ -182,6 +182,8 @@ export function isLifecycleAppendFailure(value: unknown): value is LifecycleAppe
 export type LifecycleDeliveryFailureReason =
   | 'no_available_target'
   | 'invalid_explicit_target'
+  | 'execution_binding_conflict'
+  | 'execution_binding_unavailable'
   | 'control_carrier_missing'
   | 'control_carrier_replaced'
   | 'control_plane_unavailable'
@@ -355,6 +357,8 @@ export function isLifecycleStoredMessageMetadata(value: unknown): value is Lifec
       isOneOf(candidate.reason, [
         'no_available_target',
         'invalid_explicit_target',
+        'execution_binding_conflict',
+        'execution_binding_unavailable',
         'control_carrier_missing',
         'control_carrier_replaced',
         'control_plane_unavailable',

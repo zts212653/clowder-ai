@@ -726,6 +726,10 @@ local idempotencyKey = kp .. ARGV[12]
 local ttlSec = tonumber(ARGV[13])
 local sourceMode = ARGV[14]
 local failureFromRaw = ARGV[15]
+local claimId = ARGV[16]
+local failedTarget = ARGV[17]
+local wakeRaw = ARGV[18]
+local wakeFingerprint = ARGV[19]
 
 if redis.call('EXISTS', sourceHash) == 0 then return {-1, ''} end
 if redis.call('HGET', sourceHash, 'threadId') ~= threadId or
@@ -738,6 +742,25 @@ end
 local existingFailureId = redis.call('GET', idempotencyKey)
 if existingFailureId and redis.call('EXISTS', kp .. 'msg:' .. existingFailureId) == 1 then
   return {2, existingFailureId}
+end
+
+local wakeId = nil
+if claimId ~= '' then
+  local raw = redis.call('HGET', KEYS[2], expectedEntryId)
+  if not raw then return {-4, ''} end
+  local row = cjson.decode(raw)
+  if row.status ~= 'claimed' or row.claimId ~= claimId or
+     row.payload.messageId ~= redis.call('HGET', sourceHash, 'id') then return {-4, ''} end
+  local found = false
+  for _, target in ipairs(row.claimedTargetIds or {}) do
+    if target == failedTarget then found = true end
+  end
+  if not found then return {-4, ''} end
+  if wakeRaw ~= '' then
+    wakeId = cjson.decode(wakeRaw).id
+    if redis.call('HEXISTS', KEYS[2], wakeId) == 1 or
+       redis.call('HEXISTS', KEYS[4], wakeId) == 1 then return {-4, ''} end
+  end
 end
 
 if redis.call('HGET', sourceHash, 'recall') or redis.call('HGET', sourceHash, '_tombstone') then
@@ -843,6 +866,11 @@ redis.call('ZADD', threadKey, failedAt, failureId)
 redis.call('ZADD', visibilityKey, failureSeq, failureId)
 redis.call('HSET', metaKey, 'hwm', tostring(failureSeq), 'migrated', '1')
 redis.call('SET', idempotencyKey, failureId)
+if wakeId then
+  redis.call('HSET', KEYS[2], wakeId, wakeRaw)
+  redis.call('RPUSH', KEYS[3], wakeId)
+  redis.call('HSET', KEYS[4], wakeId, wakeFingerprint)
+end
 
 if ttlSec > 0 then
   redis.call('EXPIRE', failureHash, ttlSec)
@@ -3854,7 +3882,10 @@ export class RedisMessageStore {
   ): Promise<CommitLifecyclePreAdmissionFailureResult> {
     const source = await this.getById(input.sourceMessageId);
     if (!source) return { kind: 'not_found' };
-    const idempotencyKey = preAdmissionFailureIdempotencyKey(input.expectedEntryId);
+    const idempotencyKey = preAdmissionFailureIdempotencyKey(
+      input.expectedEntryId,
+      input.claim ? input.requestedTargets[0] : undefined,
+    );
     const existingFailure = await this.getByIdempotencyKey('system', source.threadId, idempotencyKey);
     if (existingFailure) {
       if (!matchesLifecyclePreAdmissionFailure(existingFailure, source, input)) {
@@ -3909,11 +3940,17 @@ export class RedisMessageStore {
       input.failedAt < source.timestamp ||
       input.requestedTargets.some((target) => typeof target !== 'string' || target.length === 0) ||
       uniqueTargets.size !== input.requestedTargets.length ||
+      (input.claim && input.requestedTargets.length !== 1) ||
       (!isQueuedInput && input.requestedTargets.length === 0) ||
       (!isQueuedInput && !isDeliveredInput && !isPublicAgentWake)
     ) {
       return { kind: 'conflict', reason: 'invalid_failure', inputMessage: source };
     }
+    if (
+      input.claim &&
+      (!(input.claim.ledger instanceof RedisQueueLedgerStore) || !input.claim.ledger.usesRedisClient(this.redis))
+    )
+      throw new Error('pre-admission failure requires the matching Redis Queue ledger');
     const inputIdentity = lifecycleInputIdentityForStoredMessage(source);
     const assigned = assignLifecycleDispatchTargetsMetadata(source.lifecycle, inputIdentity, input.requestedTargets);
     if (assigned.kind === 'conflict') {
@@ -3960,10 +3997,20 @@ export class RedisMessageStore {
       return { kind: 'conflict', reason: 'invalid_failure', inputMessage: source };
     }
     await this.ensureVisibilityMigrated(source.threadId);
+    const wake = input.claim?.makeWake?.(failureId);
+    if (wake) assertQueueLedgerEntry(wake);
+    const ledgerKeys = input.claim
+      ? [
+          QueueLedgerKeys.entries(source.threadId),
+          QueueLedgerKeys.order(source.threadId),
+          QueueLedgerKeys.privateAdmissions(source.threadId),
+        ]
+      : [];
     const result = (await this.redis.eval(
       COMMIT_LIFECYCLE_PRE_ADMISSION_FAILURE_LUA,
-      1,
+      1 + ledgerKeys.length,
       MessageKeys.detail(source.id),
+      ...ledgerKeys,
       this.keyPrefix,
       failureId,
       source.threadId,
@@ -3979,6 +4026,10 @@ export class RedisMessageStore {
       String(this.ttlSeconds ?? 0),
       isQueuedInput ? 'queued_input' : isDeliveredInput ? 'delivered_input' : 'public_wake',
       JSON.stringify(failureInput.from),
+      input.claim?.id ?? '',
+      input.claim ? input.requestedTargets[0]! : '',
+      wake ? JSON.stringify(wake) : '',
+      wake ? queueLedgerAdmissionFingerprint(wake) : '',
     )) as [number | string, string];
     const outcome = Number(result[0]);
     if (outcome === -1) return { kind: 'not_found' };
