@@ -88,10 +88,32 @@ function isNonNegativeSafeInteger(value: unknown): value is number {
 
 /**
  * The exact form the native side records a process birth in: `DateTime.ToUniversalTime()
- * .ToString('o')`, seven fractional digits and `Z`. Anything else is no identity at all, so a
- * corrupted birth can never read as a different, gone process.
+ * .ToString('o')`, seven fractional digits and `Z`. Shape alone is not identity: an impossible
+ * calendar value would differ from the live controller's real birth and read as a different, gone
+ * process, so `isNativeBirth` also checks real calendar semantics below.
  */
-const NATIVE_BIRTH = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{7}Z$/;
+const NATIVE_BIRTH = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})\.(\d{7})Z$/;
+const DAYS_PER_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31] as const;
+
+/**
+ * Whether a `ToString('o')` birth is a real instant. The seven fractional digits are kept exactly;
+ * no Date conversion or normalization runs here, so an impossible value stays unreadable instead of
+ * becoming a guessed identity that could manufacture a "gone" verdict.
+ */
+function isNativeBirth(value: string): boolean {
+  const match = NATIVE_BIRTH.exec(value);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  const second = Number(match[6]);
+  if (year < 1 || month < 1 || month > 12 || hour > 23 || minute > 59 || second > 59) return false;
+  const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+  const lastDay = month === 2 && leap ? 29 : DAYS_PER_MONTH[month - 1];
+  return day >= 1 && day <= lastDay;
+}
 
 export function parseWindowsJobOwnerRecord(value: unknown): WindowsJobOwnerRecord | null {
   const record = asRecord(value);
@@ -103,7 +125,7 @@ export function parseWindowsJobOwnerRecord(value: unknown): WindowsJobOwnerRecor
     controller &&
     isPositiveSafeInteger(controller.pid) &&
     typeof controller.createdAt === 'string' &&
-    NATIVE_BIRTH.test(controller.createdAt)
+    isNativeBirth(controller.createdAt)
       ? { pid: controller.pid, createdAt: controller.createdAt }
       : null;
   // The prefix fixes the kind: a provider-host job without a usable controller is unreadable, never

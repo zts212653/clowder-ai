@@ -27,6 +27,7 @@ const { adoptWindowsApiJob, parseWindowsJobOwnerRecord, queryWindowsJobStopEvide
 const { readWindowsJobExecutionLinks, recordWindowsJobExecutionLink } = await import(
   new URL('../dist/utils/windows-job-execution-links.js', import.meta.url).href
 );
+const { PROVIDER_JOB_NAME_PREFIX } = await import(new URL('../dist/utils/windows-job-native.js', import.meta.url).href);
 const { resolveWindowsJobStopEvidence } = await import(
   new URL('../dist/domains/cats/services/agents/invocation/WindowsJobStopRecovery.js', import.meta.url).href
 );
@@ -184,6 +185,34 @@ test('malformed and foreign job records never become stop evidence', { timeout: 
   assert.equal(parseWindowsJobOwnerRecord(base)?.apiPid, 4321);
   // Session 0 is where services run; it is a real session.
   assert.equal(parseWindowsJobOwnerRecord({ ...base, sessionId: 0 })?.sessionId, 0);
+});
+
+test('a controller birth must be a real native instant, not only the right shape', () => {
+  const providerRecord = (birth) => ({
+    v: 1,
+    jobName: `${PROVIDER_JOB_NAME_PREFIX}review-birth`,
+    apiPid: 4321,
+    helperPid: 4322,
+    sessionId: 1,
+    createdAt: 9,
+    controller: { pid: 4321, createdAt: birth },
+  });
+  const native = '2026-11-05T19:00:00.1234567Z';
+  assert.equal(parseWindowsJobOwnerRecord(providerRecord(native))?.controller?.createdAt, native);
+  assert.ok(parseWindowsJobOwnerRecord(providerRecord('2024-02-29T19:00:00.0000000Z')), 'a real leap day is valid');
+  for (const birth of [
+    'not-a-process-birth',
+    '2026-13-05T19:00:00.0000000Z',
+    '2026-02-30T19:00:00.0000000Z',
+    '2026-02-29T19:00:00.0000000Z',
+    '0000-01-01T00:00:00.0000000Z',
+    '2026-11-05T24:00:00.0000000Z',
+    '2026-11-05T19:60:00.0000000Z',
+    '2026-11-05T19:00:60.0000000Z',
+    '2026-11-05T19:00:00.123456Z',
+    '2026-11-05T19:00:00.12345678Z',
+  ])
+    assert.equal(parseWindowsJobOwnerRecord(providerRecord(birth)), null, `impossible birth: ${birth}`);
 });
 
 test('the helper adopts the process it was actually pointed at', { skip: !isWindows, timeout: 60_000 }, async () => {
