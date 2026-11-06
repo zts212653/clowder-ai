@@ -1338,7 +1338,7 @@ describe('main process update-schedule lifecycle', () => {
       mainSource,
       /const \{ createStartupSplash, showVisibleRenderer \} = require\('\.\/visible-renderer'\)/,
     );
-    assert.match(visibleSource, /window\.loadURL\(url\)/);
+    assert.match(visibleSource, /window\.loadURL\(/);
     assert.match(source, /rendererLinkOrigins\s*=\s*createBaseRendererLinkOrigins\(\)/);
     assert.match(source, /resolveRendererLinkOrigins/);
     assert.match(source, /net\.fetch\(`\$\{API_ORIGIN\}\/api\/preview\/status`/);

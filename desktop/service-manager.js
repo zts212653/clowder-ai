@@ -264,6 +264,12 @@ class ServiceManager {
     assertStartupProcess(this.procs.web, 'Web', this.frontendPort, LOG_FILE);
   }
 
+  get webStartupId() {
+    const id = startupIds.get(this.procs.web);
+    if (!id) throw new Error('Web 启动归属标记不可用。');
+    return id;
+  }
+
   async _startApiWithFallback(nodeExe, userDataDir, signal) {
     try {
       await this._startApi(nodeExe, userDataDir, signal);

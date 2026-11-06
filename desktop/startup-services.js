@@ -43,7 +43,7 @@ const http = require('node:http');
 
 function occupiedDesktopPorts(endpoints) {
   return Object.assign(
-    new Error(`端口 ${endpoints} 已被占用，无法连接到本次启动的服务。请关闭占用端口的程序后重试。`),
+    new Error(`端口 ${endpoints} 上的服务无法确认属于本次启动，可能由另一套 Clowder AI 或其他程序占用。`),
     {
       code: 'DESKTOP_PORT_CONFLICT',
     },

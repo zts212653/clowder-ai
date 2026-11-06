@@ -1,8 +1,20 @@
-/** Resolve only after Electron's first visible frame, not merely after loadURL. */
-function showVisibleRenderer({ window, url, onVisible, signal, timeoutMs = 60_000 }) {
+const { randomUUID } = require('node:crypto');
+const path = require('node:path');
+const { occupiedDesktopPorts } = require('./startup-services');
+
+/** Resolve after the owned navigation produces its first visible frame. */
+function showVisibleRenderer({ window, url, startupId, onVisible, signal, timeoutMs = 60_000 }) {
   return new Promise((resolve, reject) => {
+    let webRequest;
+    let verified = false;
+    let conflict;
+    let loadOptions;
+    const startupUrl = new URL(url);
+    const foreignResponse = () => occupiedDesktopPorts(`Web ${startupUrl.port}`);
     const cleanup = () => {
       clearTimeout(timer);
+      webRequest?.onHeadersReceived(null);
+      webRequest = null;
       window.removeListener('ready-to-show', ready);
       window.removeListener('closed', closed);
       window.webContents.removeListener('did-fail-load', failed);
@@ -11,12 +23,13 @@ function showVisibleRenderer({ window, url, onVisible, signal, timeoutMs = 60_00
     };
     const fail = (error) => {
       cleanup();
-      reject(error);
+      reject(conflict ?? error);
     };
     const ready = () => {
       cleanup();
       try {
         signal?.throwIfAborted();
+        if (startupId && !verified) throw conflict ?? foreignResponse();
         onVisible();
         resolve();
       } catch (error) {
@@ -40,15 +53,31 @@ function showVisibleRenderer({ window, url, onVisible, signal, timeoutMs = 60_00
       return;
     }
     try {
-      Promise.resolve(window.loadURL(url)).catch(fail);
+      if (startupId) {
+        // A new navigation URL prevents an earlier launch's document from satisfying this proof.
+        startupUrl.searchParams.set('__clowder_desktop_launch', randomUUID());
+        webRequest = window.webContents.session.webRequest;
+        webRequest.onHeadersReceived({ urls: [`${startupUrl.origin}/*`] }, (details, callback) => {
+          if (details.resourceType !== 'mainFrame' || details.webContentsId !== window.webContents.id) {
+            callback({});
+            return;
+          }
+          const owned = Object.entries(details.responseHeaders ?? {}).some(
+            ([name, values]) =>
+              name.toLowerCase() === 'x-clowder-desktop-startup-id' && values.length === 1 && values[0] === startupId,
+          );
+          if (!owned) conflict = foreignResponse();
+          verified = owned && details.statusCode >= 200 && details.statusCode < 300;
+          callback({ cancel: !owned });
+        });
+        loadOptions = { extraHeaders: 'x-clowder-desktop-probe: 1\r\nCache-Control: no-cache' };
+      }
+      Promise.resolve(window.loadURL(startupId ? startupUrl.href : url, loadOptions)).catch(fail);
     } catch (error) {
       fail(error);
     }
   });
 }
-module.exports = { createStartupSplash, showVisibleRenderer };
-const path = require('node:path');
-
 function createStartupSplash(BrowserWindow, apiOrigin) {
   const window = new BrowserWindow({
     width: 420,
@@ -67,3 +96,5 @@ function createStartupSplash(BrowserWindow, apiOrigin) {
   window.center();
   return window;
 }
+
+module.exports = { createStartupSplash, showVisibleRenderer };

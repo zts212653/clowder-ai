@@ -7,7 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { after, test } = require('node:test');
 
-const root = fs.mkdtempSync(path.join(os.tmpdir(), 'desktop-listener-ownership-'));
+const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'desktop-listener-ownership-')));
 process.env.LOCALAPPDATA = root;
 process.env.HOME = root;
 process.env.USERPROFILE = root;

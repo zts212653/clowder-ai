@@ -41,6 +41,8 @@ const PROJECT_ROOT = resolveProjectRootFromDir(__dirname);
 const desktopRuntime = resolveDesktopRuntime();
 const FRONTEND_PORT = desktopRuntime.frontendPort;
 const API_PORT = desktopRuntime.apiPort;
+// Keep the renderer's API origin and cookies on localhost while using the IPv4 address verified at startup.
+app.commandLine.appendSwitch('host-resolver-rules', `MAP localhost:${API_PORT} 127.0.0.1`);
 prepareDesktopInstance(app, desktopRuntime);
 const APP_URL = `http://localhost:${FRONTEND_PORT}`;
 const APP_ORIGIN = new URL(APP_URL).origin;
@@ -166,6 +168,7 @@ async function createMainWindow() {
     showVisibleRenderer({
       window: mainWindow,
       url: createVersionedRendererUrl(APP_URL, app.getVersion()),
+      startupId: activeServices.webStartupId,
       signal: startupController.signal,
       onVisible: () => {
         activeServices.assertStartupProcessesRunning();

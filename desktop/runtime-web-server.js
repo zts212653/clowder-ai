@@ -26,7 +26,7 @@ function createDesktopWebGateway(handler, apiPort, timeline) {
   let observedFirstRequest = false;
   const server = http.createServer((request, response) => {
     if (!proxy(request.url)) {
-      if (startupId && request.url === '/' && request.headers['x-clowder-desktop-probe'] === '1') {
+      if (startupId && request.headers['x-clowder-desktop-probe'] === '1') {
         response.setHeader('x-clowder-desktop-startup-id', startupId);
       }
       if (!observedFirstRequest && (request.url === '/' || request.url?.startsWith('/?'))) {
