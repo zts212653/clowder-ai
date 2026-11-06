@@ -4,6 +4,8 @@ type
 var
   FileUseStage: TFileUseStage;
   PreparationStartedAt, FileUseStartedAt, ReplacementStartedAt: Cardinal;
+  ReadyCaption: String;
+  ReadyMemoWasVisible: Boolean;
 
 function GetTickCount: Cardinal;
   external 'GetTickCount@kernel32.dll stdcall setuponly';
@@ -13,6 +15,14 @@ begin
   Log('Setup stage ' + Stage + ': finished, elapsedMs=' + IntToStr(GetTickCount - StartedAt) + Detail);
 end;
 
+procedure ShowPreparationBody(LabelControl: TNewStaticText; const MessageKey: String);
+begin
+  LabelControl.Caption := CustomMessage(MessageKey) + #13#10#13#10 + CustomMessage('SetupPreparingHint');
+  WizardForm.AdjustLabelHeight(LabelControl);
+  LabelControl.Visible := True;
+  LabelControl.Update;
+end;
+
 function NextButtonClick(CurPageID: Integer): Boolean;
 begin
   Result := True;
@@ -20,8 +30,17 @@ begin
     // Inno can do native checks before it switches to wpPreparing.
     FileUseStage := fuNone;
     PreparationStartedAt := GetTickCount;
-    WizardForm.PageDescriptionLabel.Caption := CustomMessage('SetupBeforePreparing');
-    WizardForm.PageDescriptionLabel.Update;
+    if not WizardSilent then begin
+      ReadyCaption := WizardForm.ReadyLabel.Caption;
+      ReadyMemoWasVisible := WizardForm.ReadyMemo.Visible;
+      WizardForm.ReadyMemo.Visible := False;
+      WizardForm.PageNameLabel.Caption := SetupMessage(msgWizardPreparing);
+      WizardForm.PageDescriptionLabel.Caption := '';
+      ShowPreparationBody(WizardForm.ReadyLabel, 'SetupBeforePreparing');
+      WizardForm.ReadyPage.Update;
+      WizardForm.PageNameLabel.Update;
+      WizardForm.PageDescriptionLabel.Update;
+    end;
     Log('Setup stage native-preparation: ready confirmed');
   end else if (CurPageID = wpPreparing) and (FileUseStage = fuPrompt) then begin
     FinishSetupStage('file-use-prompt', FileUseStartedAt, ', outcome=continue-requested');
@@ -29,19 +48,11 @@ begin
   end;
 end;
 
-procedure ShowPreparingStatus(const MessageKey: String);
-begin
-  WizardForm.PreparingLabel.Caption := CustomMessage(MessageKey);
-  WizardForm.AdjustLabelHeight(WizardForm.PreparingLabel);
-  WizardForm.PreparingLabel.Visible := True;
-  WizardForm.PreparingLabel.Update;
-end;
-
 function ExtractPreparationHelper(const FileName, Stage, MessageKey: String): Boolean;
 var
   StartedAt: Cardinal;
 begin
-  ShowPreparingStatus(MessageKey);
+  ShowPreparationBody(WizardForm.PreparingLabel, MessageKey);
   Log('Setup stage ' + Stage + ': started');
   StartedAt := GetTickCount;
   try
@@ -89,7 +100,7 @@ begin
     if ApiPort <> '' then Cmd := Cmd + ' -ApiPort "' + ApiPort + '"';
     if RedisPort <> '' then Cmd := Cmd + ' -RedisPort "' + RedisPort + '"';
   end;
-  ShowPreparingStatus('SetupCheckIdentity');
+  ShowPreparationBody(WizardForm.PreparingLabel, 'SetupCheckIdentity');
   Log('Setup stage identity-check: started');
   Log('Identity helper command: ' + Cmd);
   StartedAt := GetTickCount;
@@ -108,7 +119,7 @@ begin
   Cmd := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{tmp}') +
          '\stop-installed-desktop.ps1" -AppDir "' + AppDir + '"';
   if InstanceRoot <> '' then Cmd := Cmd + ' -InstanceRoot "' + InstanceRoot + '"';
-  ShowPreparingStatus('SetupWaitForExit');
+  ShowPreparationBody(WizardForm.PreparingLabel, 'SetupWaitForExit');
   Log('Setup stage shutdown: started');
   StartedAt := GetTickCount;
   Started := ExecAsOriginalUser('powershell.exe', Cmd, '', SW_HIDE, ewWaitUntilTerminated, ExitCode);
@@ -126,9 +137,16 @@ begin
   // Inno re-enters wpPreparing after successful script preparation only when
   // it will query Restart Manager. It owns any resulting file-in-use prompt.
   if CurPageID = wpPreparing then begin
+    // Back from a file-in-use prompt must restore the actual Ready summary.
+    if ReadyCaption <> '' then begin
+      WizardForm.ReadyLabel.Caption := ReadyCaption;
+      WizardForm.AdjustLabelHeight(WizardForm.ReadyLabel);
+      WizardForm.ReadyMemo.Visible := ReadyMemoWasVisible;
+      ReadyCaption := '';
+    end;
     if FileUseStage = fuPending then begin
       FileUseStage := fuChecking;
-      ShowPreparingStatus('SetupCheckFilesInUse');
+      ShowPreparationBody(WizardForm.PreparingLabel, 'SetupCheckFilesInUse');
       Log('Setup stage file-use-check: started (Windows Restart Manager handoff)');
       FileUseStartedAt := GetTickCount;
     end else if (FileUseStage = fuChecking) and not WizardSilent and WizardForm.PreparingMemo.Visible then begin
