@@ -92,6 +92,18 @@
       "evidence": "脱敏请求和回复、provider 路线、原生测试会话归属"
     },
     {
+      "id": "DESKTOP-NATIVE-AUTH-DIAGNOSTIC",
+      "level": "L2",
+      "platforms": ["windows-x64", "macos-arm64", "macos-x64"],
+      "title": "安装版原生诊断隔离认证副作用",
+      "executor": "installed-auth",
+      "setup": "在临时 runner 安装候选，从已安装 API 解析原生工具 hook 的包路径",
+      "steps": "以惰性命令载荷调用 Kimi、OpenCode 和 DSH 的实际安装入口，覆盖裸登录、登出、事故形态的命令包装、状态和帮助查询",
+      "expected": "三个入口明确拒绝认证变更并允许只读查询。夹具只执行准入逻辑",
+      "evidence": "包哈希、实际 hook 路径和逐 provider 的准入检查",
+      "issues": [1811]
+    },
+    {
       "id": "DESKTOP-DSH-IMAGE-ROUTE",
       "level": "L2",
       "platforms": ["windows-x64", "macos-arm64", "macos-x64"],

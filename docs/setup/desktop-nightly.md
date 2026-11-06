@@ -19,6 +19,8 @@ created: 2026-11-07
 
 首次合入复盘从试跑源码 `b58412451` 扫到 `12514727`，范围内只有 DSH 图片路由修复。原有续聊用例只验证文本上下文，无法发现图片握手仍绑定旧路由。新增 `DESKTOP-DSH-IMAGE-ROUTE` 为 L2，覆盖视觉、文本和恢复原会话三种结果。该用例依赖专用 DSH 和模型额度，保留在全量选集。见 [合入变更与已有证据](https://github.com/zts212653/clowder-ai/pull/1896)。
 
+第二次复盘从 `12514727` 扫到 `3569a9b6`，纳入 [#1811](https://github.com/zts212653/clowder-ai/issues/1811) 的认证边界修复。真实客户端续聊无法发现普通诊断的认证副作用，新增全量 L2 `DESKTOP-NATIVE-AUTH-DIAGNOSTIC`，从已安装 API 解析 Kimi、OpenCode 和 DSH 的生产准入入口。用现有夹具提交惰性载荷，检查拒绝变更和允许查询。真实 OAuth、取消和超时清理仍是母单中的独立授权验收。见 [合入证据](https://github.com/zts212653/clowder-ai/pull/1822)。
+
 ## 触发和证据
 
 [Desktop Nightly](../../.github/workflows/desktop-nightly.yml) 进默认分支后，每天北京时间 00:00 选 `next` 跑双平台冒烟。手动入口可选源分支、平台和测试范围。触发端提交和被测源码提交分别保存。构建与下载按同一 run ID 和 attempt 配对。需要重跑时使用新的手动运行或重跑整个 workflow，避免混用部分重跑前的产物。
@@ -42,7 +44,7 @@ Windows 测试运行真实 EXE，全量也测试便携 ZIP。macOS 在相应架�
 各测试机和协调端使用同一个获准的共享证据位置，每个 run ID 和 attempt 使用独立子目录。协调端运行 `node .github/desktop-acceptance/nightly-desktop.mjs zts212653/clowder-ai <run-id|today> report <新目录>`，下载原报告和 Actions 的安装包哈希。协调端只需这些小文件。
 
 - 协调端先准备共享运行目录。测试机等同轮 `report.json` 到位并核对运行身份，再把截图放入 `desktop-receipts/<平台>/`。写完截图后，把同目录的临时收据重命名为 `<名称>.receipt.json`。不同平台各写自己的目录，每个用例只提交一份最终收据。
-- 所有本轮桌面任务已提交结果或到达约定截止时间后，由协调端单独运行 `node .github/desktop-acceptance/nightly-evidence.mjs reconcile <共享运行目录>`。在报告指定的用例版本运行，令 `GITHUB_SHA` 为该版本。命令自动发现已提交的收据，使用协调端从 Actions 下载的哈希核验，缺收据的用例保留为阻塞。
+- 协调端单独运行 `node .github/desktop-acceptance/nightly-evidence.mjs reconcile <共享运行目录> --until <带时区的截止时间>`，时间使用 ISO 8601，例如 `2026-11-07T04:00:00+08:00`。在报告指定的用例版本运行，令 `GITHUB_SHA` 为该版本。命令用协调端从 Actions 下载的哈希核验收据，齐备后立即出报告。到期时把仍缺收据的桌面用例标为 `desktop-receipt-deadline`，已提交的阻塞原因照常保留。
 - 汇总写入 `report-with-desktop.md` 和 `report-with-desktop.json`，证据路径相对于共享运行目录。原报告保留。迟到的有效收据提交后可对同一目录重新汇总。
 
 Codex 定时接入的验收包括一次真实手动首启、一次从 Codex 本地定时任务触发的首启和一次桌面不可用的故障演练。定时任务能否在目标机器调用 Computer Use 和拿到新候选包，需要实际运行才能确认。
@@ -63,6 +65,6 @@ Codex 定时接入的验收包括一次真实手动首启、一次从 Codex 本�
 按 desktop-plan.json 中的 computer-use 用例顺序实际操作安装后的窗口。逐项记录可见行为、结果和截图。结束时正常退出本次实例，把包哈希及运行身份写入收据，再按多平台汇总约定提交收据和截图。
 ```
 
-协调端使用独立的本地定时任务。用同一天的 `today report` 入口在共享位置准备报告，在各桌面任务结束或截止后运行汇总命令。主动试跑指定同一个 run ID。协调端负责输出一份合并报告并记录未收到收据的平台。
+协调端使用独立的本地定时任务。用同一天的 `today report` 入口在共享位置准备报告，再用 `reconcile --until` 等待提交至本轮截止时间。主动试跑指定同一个 run ID。可以省略 `--until` 立即按当前收据重新汇总。
 
 首次验收时按真实手动运行、定时运行、锁屏或无可用窗口三种状态分别留证。三次均须保留可归属的报告，阻塞场景应明确指出未执行的用例。

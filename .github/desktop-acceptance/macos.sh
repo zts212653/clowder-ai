@@ -100,6 +100,11 @@ version="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$info"
 [[ "$(cat "$resources/packages/web/.next/.build-commit")" == "$CANDIDATE_SOURCE_SHA" ]]
 printf '%s\n' "$version" "$CANDIDATE_SOURCE_SHA" "$(uname -m)" > "$evidence/installed-identity.txt"
 
+if [[ "${NIGHTLY_SUITE:-}" == full ]]; then
+  node "$(dirname "$0")/installed-auth.mjs" "$resources" "$evidence" "$root" ||
+    echo 'Installed authentication admission verifier did not write a result' >&2
+fi
+
 for phase in create restore; do
   assert_free
   launch "--remote-debugging-port=$debug" --remote-debugging-address=127.0.0.1 \

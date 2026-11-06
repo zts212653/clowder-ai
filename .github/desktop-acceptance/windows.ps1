@@ -188,6 +188,8 @@ foreach ($kind in @($Distribution)) {
     $executables[0].VersionInfo | Select-Object FileName,ProductVersion,FileVersion,ProductName | ConvertTo-Json | Set-Content (Join-Path $output 'executable-version.json')
     if ($kind -eq 'portable') { Quit-Owned $exe $install $state $ports }
     if ($kind -eq 'installer' -and $env:NIGHTLY_SUITE -eq 'full' -and -not $ObservePrivatePath) {
+      & $node (Join-Path $PSScriptRoot 'installed-auth.mjs') $install $evidence $root
+      if ($LASTEXITCODE -ne 0) { Write-Warning 'Installed authentication admission verifier did not write a result' }
       Test-PortConflicts $exe $install $output $ports
     }
     $launchArgs = @("--remote-debugging-port=$($ports[3])", '--remote-debugging-address=127.0.0.1')
