@@ -239,7 +239,9 @@ export async function resolveActiveInvocationsStrict(
   invocationTracker: InvocationTrackerLike,
   recordStore: IInvocationRecordStore | undefined,
   responseStatus: ResponseStatusReader | undefined,
-  turnExecutionStore: Pick<ITurnExecutionStore, 'listByParent'> | undefined,
+  turnExecutionStore:
+    | (Pick<ITurnExecutionStore, 'listByParent'> & Partial<Pick<ITurnExecutionStore, 'listRunningByUser'>>)
+    | undefined,
   /** F117 KD-23: the caller's CLI owner snapshot; without a complete one, running members stay listed unverified. */
   ownerSnapshot?: OwnerSnapshot,
   options: { verifiedOnly?: boolean } = {},
@@ -260,6 +262,9 @@ export async function resolveActiveInvocationsStrict(
             childrenByParent.set(parentId, children);
             return children;
           },
+          ...(turnExecutionStore.listRunningByUser
+            ? { listRunningChildrenByUser: turnExecutionStore.listRunningByUser.bind(turnExecutionStore) }
+            : {}),
         }
       : {}),
     ...(ownerSnapshot ? { ownerSnapshot } : {}),
@@ -319,6 +324,7 @@ export async function resolveActiveInvocations(
   turnExecutionStore: Pick<ITurnExecutionStore, 'listByParent'> | undefined,
   log: { info: (obj: unknown, msg?: string) => void; warn: (obj: unknown, msg?: string) => void },
   ownerSnapshot?: OwnerSnapshot,
+  options: { verifiedOnly?: boolean } = {},
 ): Promise<ActiveInvocationProjection[]> {
   try {
     return await resolveActiveInvocationsStrict(
@@ -329,6 +335,7 @@ export async function resolveActiveInvocations(
       responseStatus,
       turnExecutionStore,
       ownerSnapshot,
+      options,
     );
   } catch (err) {
     // F194 AC-B13: fallback metric — split-brain protection bypassed when this fires.

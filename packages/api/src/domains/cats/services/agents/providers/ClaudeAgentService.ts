@@ -376,6 +376,11 @@ export function resolveDefaultClaudeMcpServerPath(cwd = process.cwd()): string |
 export class ClaudeAgentService implements AgentService {
   readonly catId: CatId;
   private readonly spawnFn: SpawnFn | undefined;
+
+  /** #1838: the turn's only provider spawn is spawnCli with its invocationId; an injected spawnFn owns its own. */
+  get windowsProviderHosts(): boolean {
+    return this.spawnFn === undefined;
+  }
   private readonly model: string;
   private readonly mcpServerPath: string | undefined;
   /** F203: compiles per-cat L0 → file for --system-prompt-file. */

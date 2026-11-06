@@ -1270,6 +1270,13 @@ export interface AgentService {
   boundedWatcherSessionCapability?(): import('@cat-cafe/shared').WatcherCapability;
   /** The adapter handles AbortSignal and owns teardown; Host must drain it before terminalizing. */
   readonly cancellationMode?: 'drain';
+  /**
+   * #1838: every Windows provider this service starts for a turn goes through a host-aware spawn
+   * seam with the turn's own invocationId, so the turn's host jobs own its whole provider tree.
+   * Only then may the Host link the turn to those jobs; a provider started any other way would make
+   * that link claim a stop it cannot prove.
+   */
+  readonly windowsProviderHosts?: boolean;
   /** Host-owned implementation identity; a pinned registered view rejects a replaced generation. */
   implementationSnapshot?(): Readonly<{
     key: string;
