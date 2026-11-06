@@ -314,8 +314,116 @@ describe('MessageDispatchAvatars', () => {
     expect(firstJump).not.toHaveBeenCalled();
   });
 
-  it('checks uncertain Append without a button, then offers an explicit repeat until exact read proof', () => {
-    const message = source('dispatched');
+  it.each([
+    'not_accepted',
+    'incomplete',
+  ] as const)('shows %s from History without a Queue recovery action', (acceptance) => {
+    const message = { ...source('settled'), from: { kind: 'user' as const, userId: 'owner' } };
+    message.lifecycle = {
+      ...message.lifecycle!,
+      dispatchRefs: message.lifecycle!.dispatchRefs!.map((ref) => ({
+        ...ref,
+        appendAcceptance: 'pending',
+        appendDelivery: { dispatchStarted: true, requiresCompletion: true },
+        ...(acceptance === 'incomplete' ? { inputRead: { status: 'read' as const, at: DISPATCHED_AT + 1 } } : {}),
+      })),
+      appendFailures: [
+        {
+          targetId: 'opus',
+          invocationId: 'turn-1',
+          responseMessageId: 'response-1',
+          reason: 'exception',
+          acceptance,
+          at: DISPATCHED_AT + 2,
+        },
+      ],
+    };
+    act(() =>
+      root.render(
+        <MessageDispatchAvatars
+          message={message}
+          timelineMessages={[response('completed')]}
+          activeRuns={[]}
+          queue={[]}
+          threadId="thread-1"
+          getCatLabel={() => '宪宪'}
+        />,
+      ),
+    );
+    expect(container.textContent).toContain('宪宪');
+    expect(container.textContent).toContain(acceptance === 'not_accepted' ? '未并进上一轮（未接收）' : '追加未完成');
+    expect(container.textContent).toContain(acceptance === 'not_accepted' ? '重新发送' : '再发一次');
+    expect(container.textContent?.includes('可能重复执行')).toBe(acceptance === 'incomplete');
+    expect(container.textContent).not.toContain('收到，已回复');
+    expect(container.textContent).not.toContain('核对状态');
+  });
+
+  it.each([
+    { kind: 'external', connectorId: 'collective' },
+    { kind: 'system', service: 'scheduler' },
+    { kind: 'agent', catId: 'codex' },
+  ] as const)('offers checks but no owner repeat for an unknown $kind source', (from) => {
+    const message = { ...source('dispatched'), from };
+    message.lifecycle = {
+      ...message.lifecycle!,
+      appendFailures: [
+        {
+          targetId: 'opus',
+          invocationId: 'turn-1',
+          responseMessageId: 'response-1',
+          reason: 'exception',
+          acceptance: 'unknown',
+          at: DISPATCHED_AT + 1,
+          checkedAt: DISPATCHED_AT + 2,
+        },
+      ],
+    };
+    act(() =>
+      root.render(
+        <MessageDispatchAvatars
+          message={message}
+          timelineMessages={[response('processing')]}
+          activeRuns={[activeRun]}
+          queue={[]}
+          threadId="thread-1"
+          getCatLabel={() => '宪宪'}
+        />,
+      ),
+    );
+    expect(container.textContent).toContain('核对状态');
+    expect(container.textContent).not.toContain('再发一次');
+  });
+
+  it('does not borrow a parent completion for a native input still waiting for its own result', () => {
+    const message = { ...source('settled'), from: { kind: 'agent' as const, catId: 'codex' } };
+    message.lifecycle = {
+      ...message.lifecycle!,
+      dispatchRefs: message.lifecycle!.dispatchRefs!.map((ref) => ({
+        ...ref,
+        appendAcceptance: 'written',
+        appendDelivery: { dispatchStarted: true, requiresCompletion: true },
+        inputRead: { status: 'read' as const, at: DISPATCHED_AT + 1 },
+      })),
+    };
+    act(() =>
+      root.render(
+        <MessageDispatchAvatars
+          message={message}
+          timelineMessages={[response('completed')]}
+          activeRuns={[]}
+          queue={[]}
+          threadId="thread-1"
+          getCatLabel={() => '宪宪'}
+        />,
+      ),
+    );
+    expect(container.textContent).toContain('本条补充消息还未确认完成');
+    expect(container.textContent).not.toContain('已回复');
+    expect(container.textContent).not.toContain('再发一次');
+  });
+
+  it('keeps History check and repeat actions usable with an empty Queue until exact receipt proof', () => {
+    const message = { ...source('dispatched'), from: { kind: 'user' as const, userId: 'owner' } };
     message.lifecycle = {
       ...message.lifecycle!,
       appendFailures: [
@@ -329,30 +437,6 @@ describe('MessageDispatchAvatars', () => {
         },
       ],
     };
-    const entry: QueueEntry = {
-      id: 'entry-1',
-      threadId: 'thread-1',
-      userId: 'user-1',
-      content: message.content,
-      messageId: message.id,
-      mergedMessageIds: [],
-      targetCats: ['opus'],
-      status: 'queued',
-      createdAt: 100,
-      autoExecute: true,
-      intent: 'execute',
-      from: message.from!,
-      priority: 'normal',
-      recoveryActions: [
-        {
-          id: 'repeat:entry-1:opus',
-          entryId: 'entry-1',
-          kind: 'repeat_target',
-          targetCatId: 'opus',
-          request: { method: 'POST', path: '/api/threads/thread-1/messages/source-1/routing-targets/opus/repeat' },
-        },
-      ],
-    };
     const render = () =>
       act(() =>
         root.render(
@@ -360,7 +444,8 @@ describe('MessageDispatchAvatars', () => {
             message={message}
             timelineMessages={[response('processing')]}
             activeRuns={[activeRun]}
-            queue={[entry]}
+            queue={[]}
+            threadId="thread-1"
             getCatLabel={() => '宪宪'}
           />,
         ),
@@ -368,7 +453,7 @@ describe('MessageDispatchAvatars', () => {
     render();
     expect(container.textContent).toContain('正在核对 宪宪 收到没…');
     expect(container.textContent).not.toContain('再发一次');
-    expect(container.querySelector('button')).toBeNull();
+    expect(container.textContent).toContain('核对状态');
     message.lifecycle = {
       ...message.lifecycle!,
       appendFailures: message.lifecycle!.appendFailures!.map((failure) => ({
@@ -379,7 +464,7 @@ describe('MessageDispatchAvatars', () => {
     render();
     expect(container.textContent).toContain('已送出，没确认收到');
     expect(container.textContent).toContain('再发一次');
-    expect(container.textContent).toContain('会作为新消息再次发送，可能重复执行');
+    expect(container.textContent).toContain('如果它其实收到了，会再回一遍');
     expect(container.textContent).not.toContain('收到，正在回');
     expect(container.textContent).not.toContain('没送到');
     expect(container.textContent).not.toContain('Agent Client');

@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { WATCHER_CONFIG_DEFAULTS } from '@cat-cafe/shared';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -42,13 +43,41 @@ describe('ConciergeSettingsContent behavior controls', () => {
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
-    mockApiFetch.mockImplementation(async (_url: string, init?: RequestInit) => ({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        config: init?.method === 'PUT' ? { ...CONFIG, ...JSON.parse(String(init.body)) } : CONFIG,
-      }),
-    }));
+    mockApiFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === '/api/watcher/config' && (init?.method ?? 'GET') === 'GET') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            config: { ...WATCHER_CONFIG_DEFAULTS, enabled: false },
+            quietLabels: [],
+            availableLabels: [],
+            members: [
+              {
+                catId: WATCHER_CONFIG_DEFAULTS.memberCatId,
+                displayName: '小太阳',
+                capability: {
+                  supported: true,
+                  mechanism: 'native_revert',
+                  maxWorkingContextTokens: 30000,
+                  toolPolicy: 'watcher',
+                },
+              },
+            ],
+            rolloutEnabled: false,
+          }),
+        };
+      }
+      if (url !== '/api/concierge/config')
+        throw new Error(`Unexpected settings request: ${init?.method ?? 'GET'} ${url}`);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          config: init?.method === 'PUT' ? { ...CONFIG, ...JSON.parse(String(init.body)) } : CONFIG,
+        }),
+      };
+    });
   });
 
   afterEach(() => {
@@ -70,11 +99,14 @@ describe('ConciergeSettingsContent behavior controls', () => {
     expect(container.textContent).not.toContain('静音模式');
     expect(container.textContent).toContain('猫猫自主活动');
 
-    const switches = container.querySelectorAll('button[role="switch"]');
+    expect(container.querySelector('button[aria-label="守望猫总开关"]')).not.toBeNull();
+    const switches = Array.from(container.querySelectorAll<HTMLButtonElement>('button[role="switch"]')).filter(
+      (button) => button.closest('section')?.querySelector('h3')?.textContent === '主动性策略',
+    );
     expect(switches.length).toBe(1);
 
     await act(async () => {
-      (switches[0] as HTMLButtonElement).click();
+      switches[0].click();
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
     const put = mockApiFetch.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'PUT');

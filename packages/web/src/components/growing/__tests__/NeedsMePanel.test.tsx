@@ -2,6 +2,7 @@ import type { EntrustedWorkOwnerReadV1, GlobalArtifactDTO } from '@cat-cafe/shar
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { primeCoCreatorConfigCache, resetCoCreatorConfigCacheForTest } from '@/hooks/useCoCreatorConfig';
 import { useChatStore } from '@/stores/chatStore';
 
 const mocks = vi.hoisted(() => ({
@@ -145,6 +146,7 @@ describe('F310 NeedsMePanel', () => {
   });
 
   beforeEach(() => {
+    primeCoCreatorConfigCache({ name: 'Ada', aliases: [], mentionPatterns: ['@ada'] });
     mocks.ownerReads = [];
     mocks.confirmed = false;
     mocks.loading = false;
@@ -159,6 +161,7 @@ describe('F310 NeedsMePanel', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    resetCoCreatorConfigCacheForTest();
   });
 
   afterAll(() => {
@@ -293,7 +296,7 @@ describe('F310 NeedsMePanel', () => {
     expect(items[0]?.textContent).toContain('已可查看');
     expect(items[0]?.textContent).toContain('A reviewable presentation for tomorrow');
     expect(items[0]?.textContent).toContain('已到需要你判断的节点');
-    expect(items[0]?.textContent).toContain('You');
+    expect(items[0]?.textContent).toContain('Ada');
     expect(items[0]?.textContent).toContain('需要你吗');
     expect(items[0]?.textContent).toContain('准备好的内容');
     expect(items[0]?.textContent).toContain('现在需要你');

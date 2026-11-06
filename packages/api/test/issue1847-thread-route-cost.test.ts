@@ -67,7 +67,7 @@ test('real thread Works HTTP includes media lineage without owner-wide scans at 
       { ...f.human, threadId },
     );
   await Promise.all(Array.from({ length: 3 }, (_, i) => create(`selected-${i}`, f.thread.id)));
-  const other = f.threads.create('operator', 'Other', root);
+  const other = f.threads.create(f.human.userId, 'Other', root);
   await Promise.all(Array.from({ length: 10 }, (_, i) => create(`small-${i}`, other.id)));
   await app.register(threadsRoutes, {
     threadStore: f.threads,
@@ -76,7 +76,10 @@ test('real thread Works HTTP includes media lineage without owner-wide scans at 
     artifactWorkLineage: { current: f.globalArtifactWorkLineage, independent: new WorkCatalogue(works) },
   });
   const request = () =>
-    app.inject({ url: `/api/threads/${f.thread.id}/artifacts?view=works`, headers: { 'x-cat-cafe-user': 'operator' } });
+    app.inject({
+      url: `/api/threads/${f.thread.id}/artifacts?view=works`,
+      headers: { 'x-cat-cafe-user': f.human.userId },
+    });
   assert.equal((await request()).statusCode, 200, 'backfill completes before steady-state measurements');
   const ownerRoot = join(root, 'projects', 'content-owner-v1');
   const read = fs.readFile,

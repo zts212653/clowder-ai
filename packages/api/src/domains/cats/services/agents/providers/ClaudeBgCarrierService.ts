@@ -399,6 +399,8 @@ export class ClaudeBgCarrierService implements AgentService {
       if (effortLevel) args.push('--effort', effortLevel);
       // F203 Phase C: native system role from compiled L0 file (above).
       args.push('--system-prompt-file', l0Path);
+      // Resumed daemons must render the current L0, not the recorded first prompt.
+      args.push('--system-prompt-snapshot', 'off');
 
       // F198 Bug #3: resume an existing conversation when the caller hands us a
       // valid-UUID sessionId — the daemon's previous fork id, surfaced via

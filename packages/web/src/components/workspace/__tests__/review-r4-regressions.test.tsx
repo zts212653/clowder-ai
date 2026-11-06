@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs';
-import { runInNewContext } from 'node:vm';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -8,7 +6,6 @@ import { writeShellPresentation } from '@/components/shell/shell-presentation';
 import { useChatStore } from '@/stores/chatStore';
 import { MeetingShareControl } from '../MeetingShareControl';
 import { clearMeetingSessionSummary, readMeetingSessionSummary } from '../meeting-session-summary';
-import { TranscriptLinesV2 } from '../TranscriptLinesV2';
 import { TranscriptPanel } from '../TranscriptPanel';
 
 const api = vi.fn();
@@ -152,41 +149,34 @@ describe('R4 independent lifecycle and source probes', () => {
     });
   });
 
-  it('fixture exact-path assertion rejects a different file with the original path as prefix', async () => {
-    const oldPath = '/repo/meeting.md';
-    const newPath = '/repo/meeting.md.backup';
-    const show = (path: string) => (
-      <div>
-        <span>已停止</span>
-        <TranscriptLinesV2
-          lines={[{ ts: 101, elapsed_s: 1, chunk_num: 1, asr_latency: 0.3, text: 'Unchanged complete body' }]}
-          waiting={false}
-          emptyText=""
-          waitingText=""
-        />
-        <span title={path}>{path}</span>
-      </div>
+  it('restores the complete stopped transcript and its exact file after leaving and returning', async () => {
+    // Replaces two tests of a private browser probe's source with the actual retained-result consumer.
+    useChatStore.setState({ currentThreadId: 'thread-A' });
+    await act(async () => root.render(<TranscriptPanel />));
+    const transcriptPath = '/repo/meeting.md';
+    await act(async () =>
+      events.onmessage?.({
+        data: JSON.stringify({ ...stoppedA, transcript_path: transcriptPath }),
+      }),
     );
-    await act(async () => {
-      root.render(show(oldPath));
+    expect(readMeetingSessionSummary()?.transcriptPath).toBe(transcriptPath);
+    expect(readMeetingSessionSummary()?.lines.map((line) => line.text)).toEqual(['A capture content']);
+    await act(async () => root.render(null));
+    api.mockImplementation((path: string) => {
+      if (path === '/api/audio/status') return Promise.resolve(json({ running: false, thread_id: 'thread-A' }));
+      if (path === '/api/audio/transcript') return Promise.resolve(json({ lines: [] }));
+      return defaultApi(path);
     });
-    const exactLines = [...container.querySelectorAll('span.min-w-0.basis-full')].map((row) => row.textContent ?? '');
-    await act(async () => {
-      root.render(show(newPath));
+    await act(async () => root.render(<TranscriptPanel />));
+    const path = container.querySelector('[data-testid="saved-paths-v2"] span[title]');
+    expect(path?.getAttribute('title')).toBe(transcriptPath);
+    expect(path?.textContent).toBe(transcriptPath);
+    expect(container.textContent).toContain('A capture content');
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="saved-path-open"]')?.click());
+    expect(useChatStore.getState().workspaceOpenFilePath).toBe('meeting.md');
+    expect(useChatStore.getState()._workspaceFileSetAt.navigationOrigin).toEqual({
+      kind: 'meeting-transcript',
+      threadId: 'thread-A',
     });
-    const returned = `${container.textContent}\n${newPath}`;
-    const source = readFileSync(
-      '/home/user/.cat-cafe/evidence/f322-voice-meeting-v2/harness/voice-meeting-v2-fixture.mjs',
-      'utf8',
-    );
-    const pathCheck = source.match(/^\s*const pathRestored = .*;$/m)?.[0];
-    const linesCheck = source.match(/^\s*const linesRestored = .*;$/m)?.[0];
-    expect(pathCheck).toBeTruthy();
-    expect(linesCheck).toBeTruthy();
-    const verdict = runInNewContext(
-      `${pathCheck}\n${linesCheck}\nreturned.includes('已停止') && pathRestored && linesRestored`,
-      { exactTranscriptPath: oldPath, exactLines, returned },
-    );
-    expect(verdict).toBe(false);
   });
 });

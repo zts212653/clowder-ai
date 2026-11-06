@@ -73,6 +73,7 @@ describe('F322 B segment 1 — cat nameplate, no outer bubble', () => {
   beforeEach(() => {
     registry.cats = [OPUS, MAINE];
     window.localStorage.clear();
+    window.localStorage.setItem(SHELL_PRESENTATION_STORAGE_KEY, 'classic');
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);

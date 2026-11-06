@@ -39,11 +39,19 @@ function linkFailures(states: State[]): number[] {
   return order;
 }
 
-function markMatches(states: State[], order: number[], content: string): Uint8Array {
+function markMatches(states: State[], order: number[], starts: RegExp, content: string): Uint8Array {
   const seen = new Uint8Array(states.length);
   let state = 0;
   // UTF-16 units preserve String.includes semantics, including surrogate input.
   for (let i = 0; i < content.length; i++) {
+    if (state === 0) {
+      // With no active prefix, only a query's first unit can begin a match.
+      // Native class search skips the rest once, regardless of term count.
+      starts.lastIndex = i;
+      const next = starts.exec(content);
+      if (!next) break;
+      i = next.index;
+    }
     state = advance(states, state, content[i]);
     seen[state] = 1;
   }
@@ -56,8 +64,9 @@ function markMatches(states: State[], order: number[], content: string): Uint8Ar
   return seen;
 }
 
-/** Aho-Corasick distinct-term coverage: O(content length + query states) per row.
- * At most sum(word.length)+1 states; no term cap or change to substring semantics.
+/** Distinct-term coverage with bounded native scans for short queries.
+ * Larger queries use Aho-Corasick: O(content length + query states) per row,
+ * at most sum(word.length)+1 states; no term cap or change to substring semantics.
  */
 export function literalTermCoverage(words: string[]): (content: string) => number {
   const unique = [...new Set(words.filter(Boolean))];
@@ -69,8 +78,14 @@ export function literalTermCoverage(words: string[]): (content: string) => numbe
   }
   const { states, ends } = buildTrie(unique);
   const order = linkFailures(states);
+  // Encode code units instead of interpolating regex syntax. No Unicode flag:
+  // NUL and isolated surrogate units retain the original includes semantics.
+  const firstUnits = [...states[0].edges.keys()].map(
+    (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`,
+  );
+  const starts = new RegExp(`[${firstUnits.join('')}]`, 'g');
   return (content) => {
-    const seen = markMatches(states, order, content);
+    const seen = markMatches(states, order, starts, content);
     return ends.reduce((count, state) => count + seen[state], 0);
   };
 }

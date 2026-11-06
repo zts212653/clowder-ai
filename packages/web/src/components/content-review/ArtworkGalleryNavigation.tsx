@@ -72,6 +72,7 @@ export function ArtworkGalleryArrows({ gallery }: { gallery: ArtworkGallery }) {
         type="button"
         className={`${styles.arrow} ${styles.previous}`}
         aria-label={english ? 'Previous artwork' : '上一件作品'}
+        data-artwork-gallery-direction="previous"
         disabled={gallery.busy || gallery.index === 0}
         onClick={() => gallery.onSelect(gallery.index - 1)}
       >
@@ -81,6 +82,7 @@ export function ArtworkGalleryArrows({ gallery }: { gallery: ArtworkGallery }) {
         type="button"
         className={`${styles.arrow} ${styles.next}`}
         aria-label={english ? 'Next artwork' : '下一件作品'}
+        data-artwork-gallery-direction="next"
         disabled={gallery.busy || gallery.index === gallery.items.length - 1}
         onClick={() => gallery.onSelect(gallery.index + 1)}
       >

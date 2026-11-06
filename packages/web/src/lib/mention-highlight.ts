@@ -54,6 +54,7 @@ let _mentionLabel: Record<string, string> = {};
 let _displayMentionToCat: Record<string, string> = {};
 let _displayMentionRe = buildMentionRe(_displayMentionToCat);
 let _canonicalOnlyMentionAliases = new Set<string>();
+let _unavailableMentionToCat: Record<string, string> = {};
 
 function normalizeCoCreatorMentionPatterns(mentionPatterns: readonly string[]): string[] {
   const normalized = mentionPatterns
@@ -94,6 +95,7 @@ rebuildMentionCache();
  *  Filters out disabled members (roster.available === false) so they don't highlight. */
 export function refreshMentionData(cats: CatData[]): void {
   _cats = cats.filter((cat) => cat.roster?.available !== false);
+  _unavailableMentionToCat = buildMentionToCat(cats.filter((cat) => cat.roster?.available === false));
   rebuildMentionCache();
 }
 
@@ -131,6 +133,15 @@ export function getDisplayMentionToCat(): Record<string, string> {
   return _displayMentionToCat;
 }
 
+/**
+ * Handles of disabled members (alias → catId). The A2A grammar still matches them and the API then
+ * rejects the target (F182 KD-10), so a line like `@disabled @available` reaches the available cat.
+ * They are never highlighted and never shown as a target.
+ */
+export function getUnavailableMentionToCat(): Record<string, string> {
+  return _unavailableMentionToCat;
+}
+
 /** True when an alias came only from the canonical-id display fallback. */
 export function isCanonicalOnlyMentionAlias(alias: string): boolean {
   return _canonicalOnlyMentionAliases.has(alias.toLowerCase());
@@ -138,6 +149,7 @@ export function isCanonicalOnlyMentionAlias(alias: string): boolean {
 
 export function resetMentionDataForTest(): void {
   _cats = [];
+  _unavailableMentionToCat = {};
   _coCreatorMentionPatterns = [...DEFAULT_CO_CREATOR_MENTION_PATTERNS];
   rebuildMentionCache();
 }

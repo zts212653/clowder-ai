@@ -250,6 +250,8 @@ it('keeps an injected-action correction copy readonly instead of sending a gener
 });
 
 it('places the original correction on the closed first layer instead of requiring a generic row toggle', async () => {
+  // The host consumes the already completed shared pending read; mounting a card must not fetch that table.
+  useApprovalHubStore.setState({ items: [item], pendingReadAvailable: true, isLoading: false });
   const row = approvalRow(item),
     read = okRead([row]);
   const sessions = createApprovalSessions({

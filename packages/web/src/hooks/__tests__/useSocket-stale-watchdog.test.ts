@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * Regression: stale-invocation watchdog unsticks the UI when a done(isFinal)
  * event is dropped on a still-connected socket.

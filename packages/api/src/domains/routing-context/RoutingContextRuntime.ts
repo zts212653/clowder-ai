@@ -68,7 +68,7 @@ export function createRoutingContextRuntime(options: CreateRoutingContextRuntime
   });
   const promptProjection = {
     async resolve(input: { ownerId: string; intent?: 'review' | 'architecture' }): Promise<string> {
-      const readModel = await readService.read({
+      const readModel = await readService.readForPrompt({
         ownerId: input.ownerId,
         observedAt: Date.now(),
         ...(input.intent ? { intent: input.intent } : {}),

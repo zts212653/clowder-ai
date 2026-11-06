@@ -43,15 +43,20 @@ for (const operation of ['hydrate', 'reconcile']) {
     if (operation === 'hydrate') await queue.hydrateFromLedger(f.messageStore);
     else await queue.reconcileClaimedLifecycleTargets('thread', [f.admission.entry.id], f.messageStore);
     const row = await f.ledger.get('thread', f.admission.entry.id);
-    assert.deepEqual(new Set(row.targets), new Set(['opus', 'codex']));
-    assert.equal(row.delivery.appendPendingByTarget.opus.requiresCompletion, true);
+    assert.deepEqual(row.targets, ['codex']);
+    assert.equal(row.status, 'queued', 'startup releases the orphan sibling claim but retains its work');
+    assert.equal(
+      (await f.messageStore.getById(f.admission.message.id)).lifecycle.dispatchRefs[0].appendDelivery
+        .requiresCompletion,
+      true,
+    );
     const restarted = recoveryProcessor({ queue, messageStore: f.messageStore });
     await restarted.reconcileAppendDeliveries('thread');
     await restarted.requestDrain('thread');
     await restarted.reconcileAppendDeliveries('thread');
     assert.equal(
-      (await f.ledger.get('thread', f.admission.entry.id)).delivery.appendRecoveryByTarget.opus.acceptance,
-      'unknown',
+      (await f.messageStore.getById(f.admission.message.id)).lifecycle.appendFailures[0].acceptance,
+      'incomplete',
     );
     assert.equal(await f.client.ttl('msg:' + f.admission.message.id), -1);
   });
@@ -68,13 +73,17 @@ for (const operation of ['entry', 'message']) {
     else
       assert.equal(
         (await stale.claimMessageEntriesForWithdrawal('thread', 'owner', f.admission.message.id)).outcome,
-        'processing',
+        'not_found',
       );
-    assert.equal((await f.ledger.get('thread', f.admission.entry.id)).status, 'queued');
+    assert.equal(await f.ledger.get('thread', f.admission.entry.id), null);
     await f.input().onInputCompleted(false);
     await f.processor.requestDrain('thread');
     await f.processor.reconcileAppendDeliveries('thread');
-    assert.equal((await f.messageStore.getById(f.response.id)).lifecycle.inputMessageIds.length, 0);
+    assert.equal((await f.messageStore.getById(f.response.id)).lifecycle.inputMessageIds.length, 1);
+    assert.equal(
+      (await f.messageStore.getById(f.admission.message.id)).lifecycle.appendFailures[0].acceptance,
+      'incomplete',
+    );
   });
 }
 
@@ -100,8 +109,8 @@ test('Redis read racing incomplete native compensation preserves exact membershi
     'read',
   );
   assert.equal(
-    (await f.ledger.get('thread', f.admission.entry.id)).delivery.appendRecoveryByTarget.opus.acceptance,
-    'unknown',
+    (await f.messageStore.getById(f.admission.message.id)).lifecycle.appendFailures[0].acceptance,
+    'incomplete',
   );
 });
 
@@ -113,8 +122,7 @@ test('Redis uncertain native write and late read preserve the completion fence a
   const queue = new InvocationQueue(new RedisQueueLedgerStore(f.client));
   await queue.hydrateFromLedger(reopened);
   assert.equal(
-    (await queue.getDurableEntry('thread', f.admission.entry.id)).delivery.appendPendingByTarget.opus
-      .requiresCompletion,
+    (await reopened.getById(f.admission.message.id)).lifecycle.dispatchRefs[0].appendDelivery.requiresCompletion,
     true,
   );
   const restarted = recoveryProcessor({ queue, messageStore: reopened });
@@ -122,7 +130,7 @@ test('Redis uncertain native write and late read preserve the completion fence a
   await restarted.requestDrain('thread');
   await restarted.reconcileAppendDeliveries('thread');
   assert.equal(
-    (await f.ledger.get('thread', f.admission.entry.id)).delivery.appendRecoveryByTarget.opus.acceptance,
-    'unknown',
+    (await f.messageStore.getById(f.admission.message.id)).lifecycle.appendFailures[0].acceptance,
+    'incomplete',
   );
 });

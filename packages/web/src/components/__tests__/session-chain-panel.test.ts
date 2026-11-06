@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F24: SessionChainPanel tests.
  * Verifies session chain visualization: active sessions with health bar,
@@ -252,7 +253,7 @@ describe('F24: SessionChainPanel', () => {
     await flushFetch();
 
     expect(mockApiFetch.mock.calls.filter(([url]) => url === '/api/threads/thread-1/sessions')).toHaveLength(2);
-    expect(container.textContent).toContain('Session sealed, but transcript or digest finalization did not complete');
+    expect(container.textContent).toContain('会话已封存，但部分记录仍不可用。');
     expect(container.textContent).toContain('0 未封存');
   });
 

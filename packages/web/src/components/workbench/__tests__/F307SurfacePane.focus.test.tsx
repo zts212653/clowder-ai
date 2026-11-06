@@ -37,6 +37,7 @@ describe('F307 surface focus mode', () => {
   });
 
   beforeEach(() => {
+    writeShellPresentation('classic');
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);

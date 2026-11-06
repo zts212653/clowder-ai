@@ -10,7 +10,6 @@ const DIVIDER_SCOPE = new Set([
   'PushSettingsPanel.tsx',
   'ThreadExecutionBar.tsx',
   'ParallelStatusBar.tsx',
-  'audit/AuditExplorerPanel.tsx',
   'mission-control/WorkflowSopPanel.tsx',
   'mission-control/FeatureRowList.tsx',
   'workspace/WorldPanel.tsx',

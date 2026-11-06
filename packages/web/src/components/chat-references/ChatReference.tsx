@@ -112,6 +112,21 @@ export function ChatReference({
             navigationOrigin: origin(),
           },
           origin: origin(),
+          // Chat links are permanent file intent; the shared content opener still
+          // chooses media presentation before the original Workspace request attaches.
+          attach: () =>
+            state.openWorkspacePath(
+              threadId,
+              {
+                kind: 'file',
+                worktreeId: value.worktreeId,
+                path: value.path,
+                line: value.line,
+                navigationOrigin: origin(),
+              },
+              undefined,
+              'permanent',
+            ),
         });
     } else if (value.kind === 'github' && value.objectType === 'pull' && value.worktreeId) {
       const surface = createPullRequestChangesSurface({

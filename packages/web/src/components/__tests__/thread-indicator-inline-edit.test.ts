@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * ThreadIndicator inline title editing tests.
  * Covers: double-click/F2 entry, Enter/Escape/blur submit/cancel, IME guard.
