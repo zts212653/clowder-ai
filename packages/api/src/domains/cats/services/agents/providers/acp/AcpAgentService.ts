@@ -698,6 +698,10 @@ export class AcpAgentService implements AgentService {
     const cwd = options?.workingDirectory ?? this.projectRoot;
     let sessionId: string | undefined;
     let promptPhase: PromptPhase = 'not_started';
+    // #1838: an abnormal terminal is held until lease.release reports whether this release actually
+    // stopped the carrier. Emitting it earlier would mark an unknown stop even when the pool then
+    // completes a controlled close, suppressing the cancel terminal the route must broadcast.
+    let deferredTerminal: { metadata: MessageMetadata; unconfirmed: boolean } | undefined;
     /** F306 Phase C: iCode ask-user bridge active for this turn. */
     let requestInputBridge: AcpRequestInputBridge | null = null;
     let agyActive = true;
@@ -1451,13 +1455,7 @@ export class AcpAgentService implements AgentService {
             },
             timestamp: Date.now(),
           };
-          yield {
-            type: 'done',
-            catId: this.catId,
-            metadata,
-            ...(promptStopUnconfirmed() ? { providerTeardown: 'unconfirmed' as const } : {}),
-            timestamp: Date.now(),
-          };
+          deferredTerminal = { metadata, unconfirmed: promptStopUnconfirmed() };
           return; // Exit — error path handled completion
         }
       }
@@ -1505,13 +1503,7 @@ export class AcpAgentService implements AgentService {
         },
         timestamp: Date.now(),
       };
-      yield {
-        type: 'done',
-        catId: this.catId,
-        metadata,
-        ...(promptStopUnconfirmed() ? { providerTeardown: 'unconfirmed' as const } : {}),
-        timestamp: Date.now(),
-      };
+      deferredTerminal = { metadata, unconfirmed: promptStopUnconfirmed() };
     } finally {
       if (sessionId) cancelActivePromptSession(sessionId);
       agyActive = false;
@@ -1574,7 +1566,43 @@ export class AcpAgentService implements AgentService {
         if (onAbort && options?.signal) {
           options.signal.removeEventListener('abort', onAbort);
         }
-        await lease.release();
+        let releaseError: unknown;
+        let releaseStoppedCarrier = false;
+        try {
+          releaseStoppedCarrier = await lease.release();
+        } catch (err) {
+          releaseError = err;
+        }
+        // A release that kept the shared process alive is not stop proof. A carrier that is no
+        // longer alive (including a turn-bound close) is the existing close result, not a shortcut.
+        const carrierStopped = releaseStoppedCarrier || lease.client.isAlive === false;
+        if (releaseError) {
+          log.warn(
+            { ...ctx, sessionId, err: releaseError instanceof Error ? releaseError.message : String(releaseError) },
+            'ACP lease release did not confirm the carrier stop; keeping the turn stop unknown',
+          );
+          if (deferredTerminal) {
+            // Mark the stop unknown before the failure propagates. invoke-single-cat stops on this
+            // flag; the bridge instead receives the rejected return and emits session_contract_failed.
+            yield {
+              type: 'status',
+              catId: this.catId,
+              providerTeardown: 'unconfirmed' as const,
+              content: '停止尚未确认，执行绑定仍被占用',
+              timestamp: Date.now(),
+            };
+          }
+          throw releaseError;
+        }
+        if (deferredTerminal) {
+          yield {
+            type: 'done',
+            catId: this.catId,
+            metadata: deferredTerminal.metadata,
+            ...(deferredTerminal.unconfirmed && !carrierStopped ? { providerTeardown: 'unconfirmed' as const } : {}),
+            timestamp: Date.now(),
+          };
+        }
       }
     }
   }

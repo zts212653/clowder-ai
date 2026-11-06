@@ -47,8 +47,12 @@ export interface AcpLease {
   readonly canResumeRequestedSession?: boolean;
   /** End only this turn's MCP instances; retire an exclusive carrier without session/close. */
   closeTurn(sessionId: string): Promise<void>;
-  /** Resolve only after any retirement caused by this lease has actually completed. */
-  release(): Promise<void>;
+  /**
+   * Resolve only after any retirement caused by this lease has actually completed. True means this
+   * release verifiably stopped the carrier (its close completed); false means the process stays in
+   * the pool, so this release is not stop proof for the turn.
+   */
+  release(): Promise<boolean>;
 }
 
 export interface AcpAcquireOptions {
@@ -492,11 +496,12 @@ export class AcpProcessPool {
         }
       },
       release: () => {
-        if (released) return this.retirements.wait(serializeKey(poolKey));
+        if (released) return this.retirements.wait(serializeKey(poolKey)).then(() => false);
         released = true;
         // Stale lease guard: generation mismatch means this lease was force-released
         // and a new lease has been issued on the same entry. The old release is a no-op.
-        if (entry.leaseGeneration !== creationGeneration) return this.retirements.wait(serializeKey(poolKey));
+        if (entry.leaseGeneration !== creationGeneration)
+          return this.retirements.wait(serializeKey(poolKey)).then(() => false);
         // Persist session-scoped poison before either returning a multiplexed
         // carrier to the pool or retiring a single-flight carrier.
         this.sealUnsafeSessionsForEntry(entry, poolKey);
@@ -506,7 +511,7 @@ export class AcpProcessPool {
         // while the lease is still counted active, then let the next acquire spawn.
         if (!this.supportsMultiplexing && entry.client.isSafeForSingleFlightReuse === false) {
           this.retireEntry(entry, poolKey, 'cancelled prompt still unquiesced');
-          return this.retirements.wait(serializeKey(poolKey));
+          return this.retirements.wait(serializeKey(poolKey)).then(() => true);
         }
         entry.leaseCount--;
         this._metrics.activeLeaseCount--;
@@ -514,12 +519,12 @@ export class AcpProcessPool {
           entry.leaseCount = 0;
           if (this.retiring || entry.turnCloseFailed) {
             this.closeRetiredEntry(entry, poolKey, false);
-          } else {
-            this._metrics.idleProcessCount++;
-            this.startIdleTimer(entry, poolKey);
+            return this.retirements.wait(serializeKey(poolKey)).then(() => true);
           }
+          this._metrics.idleProcessCount++;
+          this.startIdleTimer(entry, poolKey);
         }
-        return this.retirements.wait(serializeKey(poolKey));
+        return this.retirements.wait(serializeKey(poolKey)).then(() => false);
       },
     };
   }

@@ -1512,7 +1512,7 @@ describe('GeminiAcpAdapter integration', () => {
     assert.ok(!sawPrompt, 'Prompt should NOT have been sent after abort');
   });
 
-  it('#1838: an aborted ACP prompt keeps the physical stop unknown', async () => {
+  it('#1838: a cancelled ACP prompt on a shared carrier keeps the physical stop unknown', async () => {
     const { child, clientStdin, agentStdout } = createMockChild();
     let promptSeen;
     const promptSent = new Promise((resolve) => {
@@ -1539,6 +1539,57 @@ describe('GeminiAcpAdapter integration', () => {
     });
 
     const ac = new AbortController();
+    // A multiplex carrier keeps serving other leases after this turn; its process staying alive is
+    // exactly the case where the cancelled prompt cannot be called stopped.
+    pool = createPoolWithSpawn(() => child, { supportsMultiplexing: true });
+    const adapter = new GeminiAcpAdapter({
+      catId: 'gemini',
+      pool,
+      poolKey: TEST_POOL_KEY,
+      projectRoot: '/tmp',
+      providerName: 'google',
+      modelName: 'gemini-acp',
+    });
+
+    const messages = [];
+    const run = (async () => {
+      for await (const msg of adapter.invoke('hello', { signal: ac.signal })) messages.push(msg);
+    })();
+    await promptSent;
+    ac.abort();
+    await run;
+
+    const done = messages.find((m) => m.type === 'done');
+    assert.ok(done, `Should yield done, got: ${JSON.stringify(messages.map((m) => m.type))}`);
+    assert.equal(done.providerTeardown, 'unconfirmed', 'a shared carrier still alive is not stop proof');
+  });
+
+  it('#1838: a controlled single-flight close ends a cancelled ACP turn normally', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+    let promptSeen;
+    const promptSent = new Promise((resolve) => {
+      promptSeen = resolve;
+    });
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          setImmediate(() =>
+            agentStdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: INIT_RESULT })}\n`),
+          );
+        } else if (msg.method === 'session/new') {
+          setImmediate(() =>
+            agentStdout.write(
+              `${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { sessionId: 'hung-sess' } })}\n`,
+            ),
+          );
+        } else if (msg.method === 'session/prompt') {
+          promptSeen();
+        }
+      }
+    });
+
+    const ac = new AbortController();
     pool = createPoolWithSpawn(() => child);
     const adapter = new GeminiAcpAdapter({
       catId: 'gemini',
@@ -1559,7 +1610,8 @@ describe('GeminiAcpAdapter integration', () => {
 
     const done = messages.find((m) => m.type === 'done');
     assert.ok(done, `Should yield done, got: ${JSON.stringify(messages.map((m) => m.type))}`);
-    assert.equal(done.providerTeardown, 'unconfirmed', 'an abort is not proof the upstream prompt stopped');
+    assert.equal(done.providerTeardown, undefined, 'the pool retired and closed this single-flight carrier');
+    assert.equal(child.killed, true, 'the controlled close actually stopped the carrier');
   });
 
   it('#1838: a completed ACP prompt is not marked as an unknown stop', async () => {
