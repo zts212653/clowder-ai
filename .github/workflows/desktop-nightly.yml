@@ -204,6 +204,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CANDIDATE_SOURCE_SHA: ${{ needs.resolve.outputs.source }}
+      CANDIDATE_VERSION: ${{ needs.resolve.outputs.version }}
       NIGHTLY_SUITE: ${{ inputs.suite || 'smoke' }}
       NIGHTLY_PLATFORMS: ${{ needs.resolve.outputs.platforms }}
       NIGHTLY_DATE: ${{ needs.resolve.outputs.date }}

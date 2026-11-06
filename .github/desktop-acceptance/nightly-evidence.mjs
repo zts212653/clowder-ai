@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { installerSha256 } from './nightly-desktop.mjs';
 import { buildReport, renderReport, selectCases } from './nightly-report.mjs';
 
 const { cases, expectedFailures } = JSON.parse(
@@ -10,6 +11,7 @@ const [command, directory, extra] = process.argv.slice(2);
 const { CANDIDATE_SOURCE_SHA: source, NIGHTLY_SUITE: suite, GITHUB_SHA: catalogRevision } = process.env;
 const fromActions = {
   source,
+  packageVersion: process.env.CANDIDATE_VERSION,
   catalogRevision,
   date: process.env.NIGHTLY_DATE,
   suite,
@@ -87,17 +89,25 @@ if (command === 'collect') {
     JSON.stringify({ source, catalogRevision, runId: run.runId, attempt: run.attempt, platform, receipts }, null, 2),
   );
 } else if (command === 'report' || command === 'reconcile') {
-  const receipts = run.platforms.flatMap((platform) => {
-    const bundle = readJson(path.join(directory, artifact(platform), 'receipts.json'));
-    if (!bundle) return [];
-    assert.equal(bundle.runId, run.runId);
-    assert.equal(bundle.attempt, run.attempt);
-    assert.equal(bundle.source, run.source);
-    assert.equal(bundle.catalogRevision, run.catalogRevision);
-    assert.equal(bundle.platform, platform);
-    assert.ok(bundle.receipts.every((receipt) => receipt.platform === platform));
-    return bundle.receipts;
-  });
+  const receipts = baseReport
+    ? baseReport.cases.map(({ id, platform, rawStatus, code, evidence }) => ({
+        id,
+        platform,
+        status: rawStatus,
+        code,
+        evidence,
+      }))
+    : run.platforms.flatMap((platform) => {
+        const bundle = readJson(path.join(directory, artifact(platform), 'receipts.json'));
+        if (!bundle) return [];
+        assert.equal(bundle.runId, run.runId);
+        assert.equal(bundle.attempt, run.attempt);
+        assert.equal(bundle.source, run.source);
+        assert.equal(bundle.catalogRevision, run.catalogRevision);
+        assert.equal(bundle.platform, platform);
+        assert.ok(bundle.receipts.every((receipt) => receipt.platform === platform));
+        return bundle.receipts;
+      });
   if (command === 'reconcile') {
     assert.ok(baseReport && extra, 'The original report and the desktop receipt file are required');
     const desktop = readJson(extra);
@@ -121,14 +131,10 @@ if (command === 'collect') {
           'Missing desktop evidence file',
         );
         const native = path.join(directory, artifact(receipt.platform));
-        const hash =
-          receipt.platform === 'windows-x64'
-            ? readJson(path.join(native, 'installer', 'distribution-sha256.json'))?.Hash
-            : fs.readFileSync(path.join(native, 'distribution-sha256.txt'), 'utf8').split(/\s+/, 1)[0];
         assert.match(receipt.packageSha256, /^[a-f0-9]{64}$/);
         assert.equal(
           receipt.packageSha256,
-          hash?.toLowerCase(),
+          installerSha256(native, receipt.platform),
           'Desktop evidence is for a different installation package',
         );
       }
