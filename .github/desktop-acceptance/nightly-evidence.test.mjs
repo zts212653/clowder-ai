@@ -101,4 +101,20 @@ test('a Windows desktop receipt completes its case and preserves the remote Mac 
   assert.equal(all.status, 0, all.stderr);
   assert.equal(JSON.parse(fs.readFileSync(path.join(root, 'report-with-desktop.json'), 'utf8')).status, 'passed');
   assert.equal(fs.readFileSync(path.join(root, 'report.json'), 'utf8'), base);
+
+  write(path.join(evidence, 'distribution-results.json'), { checks: [{ name: 'installer', status: 'failed' }] });
+  fs.writeFileSync(path.join(installer, 'phase.txt'), 'restore');
+  write(path.join(installer, 'restore-checks.json'), {
+    checks: [
+      { name: 'persisted-readback', status: 'passed' },
+      { name: 'default-plugins', status: 'failed' },
+    ],
+  });
+  assert.equal(run('collect', evidence).status, 0);
+  assert.equal(run('report', root).status, 1);
+  const failed = JSON.parse(fs.readFileSync(path.join(root, 'report.json'), 'utf8')).cases.find(
+    ({ id }) => id === 'WIN-CLEAN-INSTALL',
+  );
+  assert.equal(failed.code, 'windows-restore-default-plugins');
+  assert.equal(failed.evidence, 'desktop-evidence-windows-x64-attempt-2/installer/restore-checks.json');
 });

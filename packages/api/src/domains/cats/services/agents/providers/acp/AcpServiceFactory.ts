@@ -402,7 +402,12 @@ export async function createAcpServiceForConfig(
     env: spawn.env ?? {},
     projectRoot: bootstrap.projectRoot,
   });
-  bootstrap.args = await prepareDshSecretPatch(bootstrap.command, originalArgs, bootstrap.projectRoot);
+  bootstrap.args = await prepareDshSecretPatch(
+    bootstrap.command,
+    originalArgs,
+    bootstrap.projectRoot,
+    spawn.sessionModel,
+  );
   const nativeKimi =
     config.clientId === 'kimi' && accountContext.account?.id && acpConfig.transport !== 'httpstream'
       ? inspectKimiNativeLaunch({
