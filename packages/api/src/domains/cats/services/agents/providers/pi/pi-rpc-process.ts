@@ -10,6 +10,17 @@ export const record = (value: unknown): PiRecord =>
 /** Official success:false is an admission rejection, not an unknown in-flight timeout. */
 export class PiRpcRequestRejectedError extends Error {}
 
+/** Failure cause and recent process context cross ACP as separate fields. */
+export class PiDiagnosticError extends Error {
+  constructor(
+    message: string,
+    readonly diagnostics: string,
+    options?: ErrorOptions,
+  ) {
+    super(message, options);
+  }
+}
+
 /** Pi speaks JSONL RPC, not JSON-RPC. This child is owned exclusively by one ACP session. */
 export class PiRpcProcess {
   private readonly child: ChildProcessWithoutNullStreams;
@@ -77,16 +88,16 @@ export class PiRpcProcess {
 
   diagnosticContext(): string {
     const context = this.diagnostics.context();
-    return context ? `; recent Pi CLI diagnostics${context}` : '';
+    return context ? `recent Pi CLI diagnostics${context}` : '';
   }
 
   private fail(error: Error): void {
     if (this.failure) return;
-    error.message += this.diagnostics.context();
-    this.failure = error;
-    for (const pending of this.pending.values()) pending.reject(error);
+    const failure = new PiDiagnosticError(error.message, this.diagnosticContext(), { cause: error });
+    this.failure = failure;
+    for (const pending of this.pending.values()) pending.reject(failure);
     this.pending.clear();
-    for (const listener of this.listeners) listener({ type: '__exit', error });
+    for (const listener of this.listeners) listener({ type: '__exit', error: failure });
   }
 
   private receive(event: PiRecord): void {

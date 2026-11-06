@@ -4,7 +4,7 @@ import { ChatFileReferenceView } from '../../../src/components/chat-references/C
 import { FileActions } from '../../../src/components/content-review/FileActions';
 import { writeShellLanguage } from '../../../src/components/shell/shell-language';
 
-writeShellLanguage('en');
+writeShellLanguage(new URLSearchParams(window.location.search).get('language') === 'zh' ? 'zh' : 'en');
 const absolutePath = `C:\\demo\\${'long directory with spaces\\'.repeat(4)}${'a'.repeat(180)}\\report.md`;
 function Surface() {
   const anchor = useRef<HTMLSpanElement>(null);

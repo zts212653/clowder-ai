@@ -3,6 +3,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { writeShellLanguage } from '@/components/shell/shell-language';
+import { primeCoCreatorConfigCache, resetCoCreatorConfigCacheForTest } from '@/hooks/useCoCreatorConfig';
 import { useChatStore } from '@/stores/chatStore';
 import { useToastStore } from '@/stores/toastStore';
 
@@ -503,6 +504,7 @@ describe('F310 ProductSchedulePanel', () => {
   });
 
   beforeEach(() => {
+    primeCoCreatorConfigCache({ name: 'Ada', aliases: [], mentionPatterns: ['@ada'] });
     vi.stubGlobal(
       'ResizeObserver',
       class {
@@ -557,6 +559,7 @@ describe('F310 ProductSchedulePanel', () => {
     act(() => root.unmount());
     writeShellLanguage('zh');
     container.remove();
+    resetCoCreatorConfigCacheForTest();
     vi.unstubAllGlobals();
   });
 
@@ -609,7 +612,7 @@ describe('F310 ProductSchedulePanel', () => {
     expect(rows[0]?.textContent).toContain('等你判断');
     expect(rows[0]?.textContent).toContain('Prepare actionable outcome');
     expect(rows[0]?.textContent).toContain('已到需要你判断的节点');
-    expect(rows[0]?.textContent).toContain('You');
+    expect(rows[0]?.textContent).toContain('Ada');
     expect(rows[0]?.textContent).toContain('现在需要你');
     // Technical coordinates stay in the innermost details, not in the brief's Artifact field.
     expect(rows[0]?.textContent).not.toContain('Artifact r7');

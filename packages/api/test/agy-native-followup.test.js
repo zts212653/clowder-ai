@@ -109,7 +109,7 @@ async function runNative(script, { signal, registered = true, invocationId = 'in
 
 for (const mode of ['exit-before-B', 'cancel-after-read', 'error-B', 'success-B']) {
   test(
-    `public Native terminal follows Queue cleanup without waiting for an optional read (${mode})`,
+    `public Native terminal preserves its History outcome without waiting for an optional read (${mode})`,
     { timeout: 5000 },
     async () => {
       const abort = new AbortController();
@@ -136,7 +136,7 @@ for (const mode of ['exit-before-B', 'cancel-after-read', 'error-B', 'success-B'
       };
       const completed = f.messageStore.commitLifecycleAppendRecovery.bind(f.messageStore);
       f.messageStore.commitLifecycleAppendRecovery = async (...args) => {
-        assert.equal(terminalSeen, false, 'route consumers must not see done before incomplete inputs are detached');
+        assert.equal(terminalSeen, false, 'route consumers must not see done before incomplete History facts commit');
         await Promise.resolve();
         return completed(...args);
       };
@@ -165,12 +165,11 @@ for (const mode of ['exit-before-B', 'cancel-after-read', 'error-B', 'success-B'
               terminalSeen = true;
               const source = await f.messageStore.getById(f.admission.message.id);
               const response = await f.messageStore.getById(f.response.id);
-              if (mode === 'success-B') assert.equal(f.queue.list('thread', 'owner').length, 0);
-              else {
-                assert.equal(source.lifecycle.dispatchRefs.length, 0);
-                assert.equal(response.lifecycle.inputMessageIds.length, 0);
-                assert.equal(f.invocationTracker.getActiveSlots('thread')[0].activeRun.inputMessageIds.length, 0);
-              }
+              assert.equal(f.queue.list('thread', 'owner').length, 0, 'handoff already belongs to History');
+              assert.equal(source.lifecycle.dispatchRefs[0].statusMessageId, f.response.id);
+              assert.deepEqual(response.lifecycle.inputMessageIds, [source.id]);
+              if (mode === 'success-B') assert.equal(source.lifecycle.dispatchRefs[0].appendAcceptance, 'accepted');
+              else assert.equal(source.lifecycle.appendFailures[0].acceptance, 'incomplete');
             },
           },
         );
@@ -178,12 +177,19 @@ for (const mode of ['exit-before-B', 'cancel-after-read', 'error-B', 'success-B'
         assert.equal(output.messages.filter((message) => message.type === 'done').length, 1);
         releaseRead();
         await lateRead;
-        if (mode !== 'success-B')
-          assert.equal(
-            (await f.messageStore.getById(f.admission.message.id)).lifecycle.dispatchRefs.length,
-            0,
-            'a late read must not recreate a compensated binding',
-          );
+        // #1827 supersedes #6026's restore-Queue-on-failure contract: late reading stays History evidence.
+        const stored = await f.messageStore.getById(f.admission.message.id);
+        assert.equal(stored.lifecycle.dispatchRefs[0].statusMessageId, f.response.id);
+        if (mode !== 'success-B') assert.equal(stored.lifecycle.appendFailures[0].acceptance, 'incomplete');
+        await f.processor.reconcileAppendDeliveries('thread');
+        await f.processor.requestDrain('thread');
+        assert.equal(f.queue.list('thread', 'owner').length, 0);
+        assert.equal(
+          f.processor.deps.router.routeExecution.mock.callCount(),
+          0,
+          'incomplete effects must not run again',
+        );
+        assert.equal(output.writes.length, 2, 'one initial input and one native Append, never an automatic repeat');
       } finally {
         releaseRead();
       }

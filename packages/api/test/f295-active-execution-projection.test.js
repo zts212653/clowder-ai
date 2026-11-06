@@ -239,6 +239,7 @@ function buildDeps() {
       }),
     },
     turnExecutionStore: {
+      get: mock.fn(async () => null),
       listByParent: mock.fn(async () => []),
       transitionTerminal: mock.fn(async (invocationId, terminal) => {
         turnTerminalCalls.push({ invocationId, terminal });

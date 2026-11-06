@@ -2,7 +2,7 @@
 
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import type { CallerTraceContext } from '../../../../../infrastructure/telemetry/genai-semconv.js';
-import { AuthInvocationKeys } from './auth-invocation-keys.js';
+import { AuthInvocationKeys, authInvocationPurpose } from './auth-invocation-keys.js';
 import type {
   AuthInvocationInput,
   AuthInvocationMigrationResult,
@@ -23,6 +23,7 @@ import {
   VERIFY_AUTH_INVOCATION_LUA,
 } from './RedisAuthInvocationLua.js';
 import { authRecordFromRedisHash, isAuthTerminalState, parseRedisHashArray } from './RedisAuthInvocationRecord.js';
+import { RedisWatcherToolTickets } from './RedisWatcherToolTickets.js';
 import { assertCurrentAuthPrincipal } from './retired-auth-authorization.js';
 
 const KEY_INV = AuthInvocationKeys.record;
@@ -37,6 +38,21 @@ function principalKind(input: AuthInvocationInput): string {
 }
 
 export class RedisAuthInvocationBackend implements IAuthInvocationBackend {
+  async isWatcherToolCallAdmitted(invocationId: string, callId: string) {
+    return new RedisWatcherToolTickets(this.redis).has(invocationId, callId);
+  }
+  async consumeWatcherToolCall(invocationId: string, callId: string, toolName: string) {
+    return new RedisWatcherToolTickets(this.redis).admit(invocationId, callId, toolName);
+  }
+  async watcherToolCallCount(invocationId: string) {
+    return new RedisWatcherToolTickets(this.redis).count(invocationId);
+  }
+  async claimWatcherToolCallback(...args: Parameters<RedisWatcherToolTickets['claim']>) {
+    return new RedisWatcherToolTickets(this.redis).claim(...args);
+  }
+  async completeWatcherToolCallback(...args: Parameters<RedisWatcherToolTickets['complete']>) {
+    return new RedisWatcherToolTickets(this.redis).complete(...args);
+  }
   private readonly tombstoneGcTtlMs: number;
 
   constructor(
@@ -80,7 +96,7 @@ export class RedisAuthInvocationBackend implements IAuthInvocationBackend {
     if (input.toolExecutionPolicy) fields.push('toolExecutionPolicy', JSON.stringify(input.toolExecutionPolicy));
     if (input.sharedMcpContext) fields.push('sharedMcpContext', JSON.stringify(input.sharedMcpContext));
 
-    const latestKey = KEY_LATEST(input.threadId, input.catId as string);
+    const latestKey = KEY_LATEST(input.threadId, input.catId as string, authInvocationPurpose(input));
     for (let attempt = 0; attempt < 8; attempt += 1) {
       const previousId = (await this.redis.get(latestKey)) ?? '';
       const oldKey = previousId ? KEY_INV(previousId) : KEY_INV(input.invocationId);
@@ -119,7 +135,7 @@ export class RedisAuthInvocationBackend implements IAuthInvocationBackend {
   }
 
   async commitTerminal(input: AuthTerminalCommitInput): Promise<AuthTerminalCommitResult> {
-    const meta = await this.redis.hmget(KEY_INV(input.invocationId), 'threadId', 'catId');
+    const meta = await this.redis.hmget(KEY_INV(input.invocationId), 'threadId', 'catId', 'toolExecutionPolicy');
     const threadId = meta?.[0] ?? '';
     const catId = meta?.[1] ?? '';
     const expiresAt = Date.now() + this.tombstoneGcTtlMs;
@@ -128,7 +144,7 @@ export class RedisAuthInvocationBackend implements IAuthInvocationBackend {
       3,
       KEY_INV(input.invocationId),
       KEY_MSGS(input.invocationId),
-      KEY_LATEST(threadId, catId),
+      KEY_LATEST(threadId, catId, meta?.[2] && JSON.parse(meta[2]).mode === 'watcher' ? 'watcher' : undefined),
       input.invocationId,
       input.disposition,
       String(input.endedAt),
@@ -189,7 +205,10 @@ export class RedisAuthInvocationBackend implements IAuthInvocationBackend {
   async isLatest(invocationId: string): Promise<boolean> {
     const record = await this.getRecord(invocationId);
     if (!record || record.state !== 'active') return false;
-    return (await this.redis.get(KEY_LATEST(record.threadId, record.catId as string))) === invocationId;
+    return (
+      (await this.redis.get(KEY_LATEST(record.threadId, record.catId as string, authInvocationPurpose(record)))) ===
+      invocationId
+    );
   }
 
   async getLatestId(threadId: string, catId: string): Promise<string | undefined> {
@@ -236,7 +255,7 @@ export class RedisAuthInvocationBackend implements IAuthInvocationBackend {
     callbackToken: string,
     requireLatest: boolean,
   ): Promise<VerifyResult> {
-    const meta = await this.redis.hmget(KEY_INV(invocationId), 'threadId', 'catId');
+    const meta = await this.redis.hmget(KEY_INV(invocationId), 'threadId', 'catId', 'toolExecutionPolicy');
     const threadId = meta?.[0];
     const catId = meta?.[1];
     if (!threadId || !catId) return { ok: false, reason: 'unknown_invocation' };
@@ -245,7 +264,7 @@ export class RedisAuthInvocationBackend implements IAuthInvocationBackend {
       3,
       KEY_INV(invocationId),
       KEY_MSGS(invocationId),
-      KEY_LATEST(threadId, catId),
+      KEY_LATEST(threadId, catId, meta?.[2] && JSON.parse(meta[2]).mode === 'watcher' ? 'watcher' : undefined),
       callbackToken,
       invocationId,
       requireLatest ? '1' : '0',
@@ -330,7 +349,7 @@ export class RedisAuthInvocationBackend implements IAuthInvocationBackend {
     const slots = new Map<string, InvocationRecord[]>();
     for (const record of records) {
       if (record.state !== 'active') continue;
-      const slot = `${record.threadId}\u0000${record.catId as string}`;
+      const slot = KEY_LATEST(record.threadId, record.catId as string, authInvocationPurpose(record));
       const values = slots.get(slot) ?? [];
       values.push(record);
       slots.set(slot, values);
@@ -345,7 +364,7 @@ export class RedisAuthInvocationBackend implements IAuthInvocationBackend {
       (left, right) => left.createdAt - right.createdAt || left.invocationId.localeCompare(right.invocationId),
     );
     const sample = values[0];
-    const latestKey = KEY_LATEST(sample.threadId, sample.catId as string);
+    const latestKey = KEY_LATEST(sample.threadId, sample.catId as string, authInvocationPurpose(sample));
     const recordKeys = values.flatMap((record) => [KEY_INV(record.invocationId), KEY_MSGS(record.invocationId)]);
     for (let attempt = 0; attempt < 8; attempt += 1) {
       const expectedLatest = (await this.redis.get(latestKey)) ?? '';

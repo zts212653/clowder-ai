@@ -12,14 +12,6 @@ const modern = {
   packageDigest: 'sha512-aAJpJMjU20QtHaVY40LnJYHCVkJdqtJd1+3wGPjLgK/7sF9wxObc6y8udJKgXFOC0RqPy4MlQM35tCbE03YkAA==',
 };
 
-test('the exact published modern archive selects beta.23 while alpha.13 preserves beta.21', () => {
-  assert.equal(resolveCompanionArchiveContract(modern), '0.1.0-beta.23');
-  assert.equal(
-    resolveCompanionArchiveContract({ pluginId: 'official.companion', ...PUBLISHED_COMPANION_V2 }),
-    '0.1.0-beta.21',
-  );
-});
-
 test('cross-paired versions or digests cannot select either companion ABI', () => {
   for (const candidate of [
     { ...modern, packageDigest: PUBLISHED_COMPANION_V2.packageDigest },

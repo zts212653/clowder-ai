@@ -125,15 +125,13 @@ test('revocation stops tools but still records the original canonical canceled r
   const f = await fixture();
   await f.host().claim(f.claim);
   await f.owner(() => f.port.revoke(f.session.sessionId));
-  assert.throws(
-    () =>
-      f.turns.transitionTerminal(f.claim.invocationId, {
-        status: 'canceled',
-        endedAt: 200,
-        terminalReason: 'user_stop',
-      }),
-    /provider_teardown_unconfirmed/,
-  );
+  f.turns.transitionTerminal(f.claim.invocationId, {
+    status: 'canceled',
+    endedAt: 200,
+    terminalReason: 'user_stop',
+  });
+  assert.equal(f.turns.get(f.claim.invocationId)?.status, 'canceled');
+  assert.equal(f.turns.get(f.claim.invocationId)?.providerTeardownAt, undefined);
   f.messages.commitLifecycleResponseTerminal(f.response.id, {
     invocationId: f.claim.invocationId,
     status: 'canceled',
@@ -144,7 +142,6 @@ test('revocation stops tools but still records the original canonical canceled r
   });
   await assert.rejects(() => f.host().settle(f.claim), /settlement_pending/);
   f.turns.recordProviderTeardown(f.claim.invocationId, 201);
-  f.turns.transitionTerminal(f.claim.invocationId, { status: 'canceled', endedAt: 201, terminalReason: 'user_stop' });
   f.changeAccount();
   f.revokeInstallation();
   const stopped = f.service().hostExecutionsForInstance({

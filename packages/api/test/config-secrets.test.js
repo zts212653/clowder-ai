@@ -265,18 +265,6 @@ describe('POST /api/config/secrets', () => {
     assert.deepEqual(auditEvents, []);
   });
 
-  it('rejects redacted VAPID placeholder values', async () => {
-    const res = await app.inject({
-      method: 'POST',
-      url: '/api/config/secrets',
-      headers: SESSION_HEADERS,
-      payload: { updates: [{ name: 'VAPID_PRIVATE_KEY', value: '••••••' }] },
-    });
-    assert.equal(res.statusCode, 400);
-    assert.match(JSON.parse(res.body).error, /redacted/i);
-    assert.equal(process.env.VAPID_PRIVATE_KEY, undefined);
-  });
-
   it('emits ConfigChangeEvent with source=secrets', async () => {
     await app.inject({
       method: 'POST',

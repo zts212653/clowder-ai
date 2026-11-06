@@ -9,7 +9,7 @@ import { routingJourneyDeps } from './routing-journey-deps.js';
 const restore = isolateAccountAuthEnvironment();
 const catId = 'prior-read-cancel';
 const threadId = 'prior-read-cancel-thread';
-const duringRead = process.argv.includes('--during-read');
+const whileWaiting = process.argv.includes('--while-waiting');
 catRegistry.register(catId, {
   ...catRegistry.getAllConfigs().codex,
   id: catId,
@@ -28,17 +28,21 @@ const service = {
 const { deps } = routingJourneyDeps(undefined, undefined, service);
 deps.services = { [catId]: service };
 deps.invocationDeps.sessionManager.get = async () => 'owned-runtime';
-let reads = 0;
-deps.invocationDeps.turnExecutionStore.listRunningByUser = async () => {
-  reads++;
-  await new Promise((resolve) => setImmediate(resolve));
-  if (duringRead) controller.abort(new Error('cancel during the owner read'));
-  throw new Error('prior owner read rejected');
-};
-const acquire = agentSessionMutex.acquire.bind(agentSessionMutex);
+const originalAcquire = agentSessionMutex.acquire;
+const acquire = originalAcquire.bind(agentSessionMutex);
+let acquisitions = 0;
+let releaseBlocker;
 agentSessionMutex.acquire = async (holder, signal) => {
+  if (holder.threadId !== threadId) return acquire(holder, signal);
+  acquisitions++;
+  if (whileWaiting) {
+    releaseBlocker = await acquire({ ...holder, invocationId: 'existing-holder', executionId: 'existing-parent' });
+    const waiting = acquire(holder, signal);
+    setImmediate(() => controller.abort(new Error('cancel while waiting for actual session custody')));
+    return waiting;
+  }
   const release = await acquire(holder, signal);
-  if (!duringRead && holder.threadId === threadId) controller.abort(new Error('cancel after custody'));
+  controller.abort(new Error('cancel after actual session custody'));
   return release;
 };
 try {
@@ -51,10 +55,13 @@ try {
   // Allow a detached rejection to reach Node's real strict unhandled-rejection boundary.
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(calls, 0);
-  assert.equal(reads, duringRead ? 1 : 0);
-  process.stdout.write('prior-read-cancellation-safe\n');
+  assert.equal(acquisitions, 1);
+  assert.equal(controller.signal.aborted, true);
+  assert.equal((await deps.invocationDeps.turnExecutionStore.get('journey-1')).status, 'canceled');
+  process.stdout.write('session-custody-cancellation-safe\n');
 } finally {
-  agentSessionMutex.acquire = acquire;
+  agentSessionMutex.acquire = originalAcquire;
+  releaseBlocker?.();
   agentSessionMutex.forceReleaseByScope({ threadId, catId, userId: 'owner' });
   restore();
 }

@@ -69,12 +69,27 @@ export function MailboxHandledHistory({
             : item.resolution === outcome)) &&
         (kind === 'all' || item.sourceFeatureId === kind),
     ) ?? [];
+  const ignoredSnapshot = personal.ignoredSnapshot;
+  const ignoredKeys = new Set(ignoredSnapshot?.entries.map((entry) => ignoredItemKey(entry.coordinate)));
   const attentionWindow = [
     ...new Map(
       [...(view.pages?.length ? view.pages : ownerRead ? [ownerRead] : [])]
         .reverse()
         .filter((page) => page.identity.ownerUserId === owner)
-        .flatMap((page) => page.items)
+        .flatMap((page) => {
+          // Retain old display pages, but a newer owner-private snapshot supersedes their ignored membership.
+          const reconcileIgnored =
+            currentTab === 'ignored' &&
+            ignoredSnapshot?.ownerUserId === page.identity.ownerUserId &&
+            page.personalView?.mode === 'ignored' &&
+            typeof page.personalView.preferenceRevision === 'number' &&
+            ignoredSnapshot.revision >= page.personalView.preferenceRevision;
+          return reconcileIgnored
+            ? page.items.filter(
+                (item) => item.preferenceCoordinate && ignoredKeys.has(ignoredItemKey(item.preferenceCoordinate)),
+              )
+            : page.items;
+        })
         .map((item) => [item.decisionRef, item]),
     ).values(),
   ];

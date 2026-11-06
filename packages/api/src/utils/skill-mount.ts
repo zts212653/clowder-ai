@@ -107,6 +107,30 @@ export function buildProjectSkillMountDirs(
   return [...new Set([...standardDirs, ...customDirs])];
 }
 
+/** The project-local directories one mount point links skills into. */
+export interface ProjectSkillMountTarget {
+  id: string;
+  kind: MountTarget['kind'];
+  dirs: string[];
+}
+
+/**
+ * The directories of `buildProjectSkillMountDirs`, grouped by mount point: enabled standard
+ * mount points (project path only) and custom paths, in the order of `buildSkillMountTargets`.
+ */
+export function buildProjectSkillMountTargets(
+  projectRoot: string,
+  home: string,
+  rules: MountRules = DEFAULT_MOUNT_RULES,
+): ProjectSkillMountTarget[] {
+  // A standard target lists its project path first; the home candidate is for detection, not writeback.
+  return buildSkillMountTargets(projectRoot, home, rules).map(({ id, kind, candidates }) => ({
+    id,
+    kind,
+    dirs: kind === 'standard' ? candidates.slice(0, 1) : candidates,
+  }));
+}
+
 export async function isManagedDirectoryLevelSkillsSymlink(
   skillsDir: string,
   skillsSource: string,
@@ -138,6 +162,11 @@ export async function isManagedDirectoryLevelSkillsSymlink(
     );
   }
   return true;
+}
+
+/** A skill link's target: relative on POSIX, absolute on Windows (a junction needs an absolute path). */
+export function symlinkTargetFor(linkPath: string, sourcePath: string): string {
+  return process.platform === 'win32' ? sourcePath : relative(dirname(linkPath), sourcePath);
 }
 
 /**

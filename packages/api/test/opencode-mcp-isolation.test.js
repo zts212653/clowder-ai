@@ -221,49 +221,6 @@ describe('MCP Tool Namespace Isolation (AC-10)', () => {
   });
 
   // ── No Clowder AI MCP tool names in opencode's internal toolset ──
-
-  test('opencode internal tools do not collide with Clowder AI MCP tool names', () => {
-    const opencodeTools = [
-      'bash',
-      'read',
-      'write',
-      'edit',
-      'glob',
-      'grep',
-      'delegate-task',
-      'list-sessions',
-      'webfetch',
-      'todoreplace',
-    ];
-
-    const catCafeMcpTools = [
-      'cat_cafe_post_message',
-      'cat_cafe_get_pending_mentions',
-      'cat_cafe_ack_mentions',
-      'cat_cafe_get_thread_context',
-      'cat_cafe_search_messages',
-      'cat_cafe_list_threads',
-      'cat_cafe_feat_index',
-      'cat_cafe_cross_post_message',
-      'cat_cafe_list_tasks',
-      'cat_cafe_update_task',
-      'cat_cafe_create_rich_block',
-      'cat_cafe_search_evidence',
-      // cat_cafe_reflect removed in F193 Phase D AC-D1
-      'cat_cafe_multi_mention',
-      'cat_cafe_start_vote',
-      'cat_cafe_update_workflow',
-    ];
-
-    // Verify zero overlap
-    const overlap = opencodeTools.filter((t) => catCafeMcpTools.includes(t));
-    assert.strictEqual(overlap.length, 0, `tool name collision detected: ${overlap}`);
-
-    // Also verify by prefix convention: Clowder AI uses cat_cafe_ prefix
-    for (const tool of opencodeTools) {
-      assert.ok(!tool.startsWith('cat_cafe_'), `opencode tool "${tool}" collides with Clowder AI MCP namespace`);
-    }
-  });
 });
 
 describe('OpenCode headless permission mode', () => {

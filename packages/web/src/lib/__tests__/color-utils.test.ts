@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { hexToOklch, tintedLight } from '../color-utils';
+import { hexToOklch, hexToRgba, parseHexColor, tintedLight } from '../color-utils';
 
 describe('tintedLight', () => {
   it('blends hex color toward white at given ratio', () => {
@@ -26,6 +26,24 @@ describe('tintedLight', () => {
   it('returns white at ratio 0', () => {
     const result = tintedLight('#FF0000', 0);
     expect(result).toBe('rgb(255, 255, 255)');
+  });
+});
+
+describe('parseHexColor (F314-4: one hex reading for every colour helper)', () => {
+  it('reads #rgb, #rrggbb and #rrggbbaa to the same channels', () => {
+    expect(parseHexColor('#abc')).toEqual([170, 187, 204]);
+    expect(parseHexColor('#AABBCC')).toEqual([170, 187, 204]);
+    expect(parseHexColor('#aabbccdd')).toEqual([170, 187, 204]);
+  });
+
+  it('rejects anything that is not a 3/6/8-digit hex colour', () => {
+    for (const value of ['red', '#abcd', '#ggg', 'rgb(1, 2, 3)', '']) expect(parseHexColor(value)).toBeNull();
+  });
+
+  it('gives tintedLight and hexToRgba the same answer for #abc and #aabbcc', () => {
+    expect(tintedLight('#abc', 0.4)).toBe(tintedLight('#aabbcc', 0.4));
+    expect(tintedLight('#abc', 0.4)).not.toContain('NaN');
+    expect(hexToRgba('#abc', 0.2)).toBe(hexToRgba('#aabbcc', 0.2));
   });
 });
 

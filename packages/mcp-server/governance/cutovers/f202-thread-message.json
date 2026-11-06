@@ -4,17 +4,11 @@
     "resourceFamily": "thread-message"
   },
   "retiredNames": [],
-  "canonicalNames": [],
+  "canonicalNames": ["cat_cafe_watcher_nudge"],
   "expectedProfiles": {
-    "cat_cafe_post_message": [
-      "full",
-      "agent-key",
-      "desktop:fable-phase0",
-      "desktop:cloud-pro-phase0",
-      "desktop:live-companion"
-    ]
+    "cat_cafe_watcher_nudge": ["full"]
   },
-  "rollbackRevision": "466d4549fe2d75c9cc5c96b9497f47e464d13cf2",
+  "rollbackRevision": "9b3c73184bc32a6d7841693a0b3c5d8234110085",
   "layers": {
     "mcp-definition": {
       "status": "covered",
@@ -38,9 +32,9 @@
     "fixture-test": {
       "status": "covered",
       "consumers": [
-        "packages/mcp-server/test/tool-registration.test.js",
-        "packages/mcp-server/test/f202-native-tracking-ownership.test.js",
-        "packages/api/test/system-prompt-builder.test.js"
+        "packages/api/test/watcher-callbacks.test.js",
+        "packages/api/test/watcher-consumer-native.test.js",
+        "packages/mcp-server/test/watcher-native-bridge.test.js"
       ]
     },
     "eval": {

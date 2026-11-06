@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * Real mermaid + DOMPurify integration test.
  *

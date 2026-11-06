@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F122B AC-B8: ThreadExecutionBar shows per-cat active status with elapsed time.
  * B8/B9 polish: cat names from cat-config (formatCatName), colors from cat.color.primary.
@@ -248,7 +249,7 @@ describe('ThreadExecutionBar (F122B AC-B8 + B8/B9 polish)', () => {
     // Should show display name (布偶猫) not raw catId (opus)
     expect(text).toContain('布偶猫');
     expect(text).toMatch(/0:0[0-9]/);
-    expect(container.querySelector('[data-testid="execution-kind"]')?.textContent).toBe('实时回合');
+    expect(container.querySelector('[data-testid="execution-kind"]')?.textContent).toBe('实时回合 · Test thread');
   });
 
   it('renders multiple active cats with their respective display names', async () => {
@@ -263,17 +264,17 @@ describe('ThreadExecutionBar (F122B AC-B8 + B8/B9 polish)', () => {
     expect(text).toContain('缅因猫');
   });
 
-  it('names managed work 托管命令 without exposing its activity or thread detail', async () => {
+  it('shows the canonical managed activity and its thread without exposing the command', async () => {
     seedExecutions([managedGateExecution()]);
     await act(async () => root.render(React.createElement(ThreadExecutionBar)));
 
-    expect(container.querySelector('[data-testid="execution-kind"]')?.textContent).toBe('托管命令');
-    expect(container.textContent).not.toContain('全量门禁');
-    expect(container.textContent).not.toContain('Gate thread');
+    expect(container.querySelector('[data-testid="execution-kind"]')?.textContent).toBe('全量门禁 · Gate thread');
+    expect(container.textContent).toContain('全量门禁');
+    expect(container.textContent).toContain('Gate thread');
     expect(container.textContent).not.toContain('pnpm gate');
   });
 
-  it('does not expose newer managed activity values in the compact bar', async () => {
+  it('uses a neutral managed label for unknown activity while retaining thread identity', async () => {
     seedExecutions([
       {
         ...managedGateExecution(),
@@ -282,9 +283,9 @@ describe('ThreadExecutionBar (F122B AC-B8 + B8/B9 polish)', () => {
     ]);
     await act(async () => root.render(React.createElement(ThreadExecutionBar)));
 
-    expect(container.querySelector('[data-testid="execution-kind"]')?.textContent).toBe('托管命令');
+    expect(container.querySelector('[data-testid="execution-kind"]')?.textContent).toBe('托管命令 · Gate thread');
     expect(container.textContent).not.toContain('future_activity');
-    expect(container.textContent).not.toContain('Gate thread');
+    expect(container.textContent).toContain('Gate thread');
   });
 
   it('keeps exact member controls without adding a second whole-thread Stop', async () => {
@@ -361,8 +362,8 @@ describe('ThreadExecutionBar (F122B AC-B8 + B8/B9 polish)', () => {
     });
     await act(async () => root.render(React.createElement(ThreadExecutionBar)));
 
-    expect(container.textContent).not.toContain('运行回合');
-    expect(container.textContent).not.toContain('活动');
+    expect(container.textContent).toContain('运行回合');
+    expect(container.textContent).toMatch(/活动 [56] 秒前/);
   });
 
   it('marks a silent active app-server turn as visible warning without auto-canceling it', async () => {
@@ -386,8 +387,9 @@ describe('ThreadExecutionBar (F122B AC-B8 + B8/B9 polish)', () => {
     });
     await act(async () => root.render(React.createElement(ThreadExecutionBar)));
 
-    expect(container.querySelector('[data-app-server-stalled="true"]')).toBeNull();
-    expect(container.textContent).not.toContain('可能在等待模型');
+    expect(container.querySelector('[data-app-server-stalled="true"]')).not.toBeNull();
+    expect(vi.mocked(apiFetch).mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+    expect(container.textContent).toContain('可能在等待模型');
     expect(container.querySelector('[aria-label="Stop codex live_invocation inv-1"]')).not.toBeNull();
   });
 });

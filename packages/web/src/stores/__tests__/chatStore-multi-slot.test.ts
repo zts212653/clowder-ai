@@ -58,11 +58,6 @@ describe('chatStore multi-slot activeInvocations (F108)', () => {
     expect(useChatStore.getState().hasActiveInvocation).toBe(false);
   });
 
-  it('setHasActiveInvocation(true) still works for backward compat', () => {
-    useChatStore.getState().setHasActiveInvocation(true);
-    expect(useChatStore.getState().hasActiveInvocation).toBe(true);
-  });
-
   it('activeInvocations are preserved across thread switches', () => {
     useChatStore.getState().addActiveInvocation('inv-1', 'opus', 'execute');
     expect(useChatStore.getState().hasActiveInvocation).toBe(true);

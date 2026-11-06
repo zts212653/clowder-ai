@@ -26,22 +26,29 @@ function client(t) {
 }
 
 for (const status of ['succeeded', 'failed', 'canceled', 'interrupted'])
-  test(`Redis atomically rejects ${status} without provider teardown proof`, { skip }, async (t) => {
+  test(`Redis separates Host ${status} from physical provider teardown`, { skip }, async (t) => {
     const redis = client(t);
     const store = new RedisTurnExecutionStore(redis);
     await store.createRunning(input('unknown'));
     await store.markProviderStarted('unknown', 0);
-    await assert.rejects(
-      store.transitionTerminal('unknown', { status, endedAt: 100, terminalReason: 'host_only' }),
-      /provider_teardown_unconfirmed/,
-    );
-    assert.equal((await store.get('unknown')).status, 'running');
-    assert.deepEqual(await redis.smembers('turnexec:running'), ['unknown']);
-    assert.deepEqual(await redis.smembers('turnexec:response-pending'), []);
+    if (status === 'succeeded') {
+      await assert.rejects(
+        store.transitionTerminal('unknown', { status, endedAt: 100, terminalReason: 'host_only' }),
+        /provider_teardown_unconfirmed/,
+      );
+    } else {
+      assert.equal(
+        (await store.transitionTerminal('unknown', { status, endedAt: 100, terminalReason: 'host_only' })).outcome,
+        'transitioned',
+      );
+      assert.equal((await store.get('unknown')).providerTeardownAt, undefined);
+    }
+    assert.equal((await store.get('unknown')).status, status === 'succeeded' ? 'running' : status);
+    assert.deepEqual(await redis.smembers('turnexec:running'), status === 'succeeded' ? ['unknown'] : []);
     await store.recordProviderTeardown('unknown', 0);
     assert.equal(
       (await store.transitionTerminal('unknown', { status, endedAt: 100, terminalReason: 'exact_stop' })).outcome,
-      'transitioned',
+      status === 'succeeded' ? 'transitioned' : 'already_terminal',
     );
     assert.equal((await new RedisTurnExecutionStore(redis).get('unknown')).status, status);
   });
