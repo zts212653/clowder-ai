@@ -25,13 +25,21 @@ export async function ensureProjectCollection(
   catalog: LibraryCatalog,
   stores: Map<string, IEvidenceStore>,
   dataDir: string,
+  ownerUserId: string,
   getEmbeddingService?: () => IEmbeddingService | undefined,
 ): Promise<{ docsIndexed: number; durationMs: number }> {
+  const owner = ownerUserId?.trim();
+  if (!owner) throw new Error('project_collection_owner_required');
   const startMs = Date.now();
   const collectionId = deriveProjectCollectionId(projectPath);
 
   let manifest = catalog.get(collectionId);
   let store = stores.get(collectionId) as SqliteEvidenceStore | undefined;
+
+  if (manifest) {
+    if (!manifest.ownerUserId) throw new Error('project_collection_owner_unbound');
+    if (manifest.ownerUserId !== owner) throw new Error('project_collection_owner_mismatch');
+  }
 
   if (!manifest) {
     const now = new Date().toISOString();
@@ -41,6 +49,7 @@ export async function ensureProjectCollection(
       name: collectionId.replace('project:', ''),
       displayName: basename(projectPath),
       root: projectPath,
+      ownerUserId: owner,
       sensitivity: 'private',
       scannerLevel: 'auto',
       indexPolicy: { autoRebuild: false },
