@@ -137,11 +137,20 @@ export function ActionPanelBody({
       )}
 
       {phase === 'result' && lastResult?.render === 'text' && (
-        <CopyableActionText
-          text={typeof lastResult.data === 'string' ? lastResult.data : JSON.stringify(lastResult.data, null, 2)}
-          copyText={typeof lastResult.data === 'string' ? lastResult.data : undefined}
-          className="whitespace-pre-wrap break-words rounded-lg border border-cafe-border p-3 text-sm text-cafe-secondary"
-        />
+        <>
+          {lastResult.label && lastResult.label !== lastResult.data && (
+            <CopyableActionText
+              text={lastResult.label}
+              copyText={lastResult.label}
+              className="whitespace-pre-wrap break-words rounded-lg border border-cafe-border p-3 text-sm text-cafe-secondary"
+            />
+          )}
+          <CopyableActionText
+            text={typeof lastResult.data === 'string' ? lastResult.data : JSON.stringify(lastResult.data, null, 2)}
+            copyText={typeof lastResult.data === 'string' ? lastResult.data : undefined}
+            className="whitespace-pre-wrap break-words rounded-lg border border-cafe-border p-3 text-sm text-cafe-secondary"
+          />
+        </>
       )}
 
       {phase === 'loading' && (
