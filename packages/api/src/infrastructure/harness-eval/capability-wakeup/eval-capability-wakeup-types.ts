@@ -209,7 +209,7 @@ export const HOW_TO_PATH_HINTS: Record<string, string[]> = {
   'image-generation': ['image-generation/SKILL.md', 'imagegen/SKILL.md', 'capability-wakeup-index.md'],
   'pencil-design': ['pencil-design/SKILL.md', 'capability-wakeup-index.md'],
   'guide-interaction': ['guide-interaction/SKILL.md', 'capability-wakeup-index.md'],
-  'expert-panel': ['expert-panel/SKILL.md', 'collaborative-thinking/SKILL.md', 'capability-wakeup-index.md'],
+  'expert-panel': ['collaborative-thinking/SKILL.md', 'capability-wakeup-index.md'],
   'propose-thread': ['thread-orchestration/SKILL.md', 'capability-wakeup-index.md'],
   'external-runtime-sessions': ['capability-wakeup-index.md', 'F211-cross-runtime-session-transparency.md'],
   'cli-diagnostics': ['capability-wakeup-index.md', 'F212'],
@@ -225,7 +225,9 @@ export const CAPABILITY_SKILL_IDS: Record<string, string[]> = {
   'image-generation': ['image-generation', 'imagegen'],
   'pencil-design': ['pencil-design'],
   'guide-interaction': ['guide-interaction'],
-  'expert-panel': ['expert-panel', 'collaborative-thinking'],
+  // 'expert-panel' stays as the eval capability id so history lines up; the skill was retired 2026-11-03 and
+  // multi-cat thinking (incl. 「专家辩论」) is served by collaborative-thinking.
+  'expert-panel': ['collaborative-thinking'],
   'propose-thread': ['thread-orchestration'],
   'external-runtime-sessions': [],
   'cli-diagnostics': [],

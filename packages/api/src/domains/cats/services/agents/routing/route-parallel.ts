@@ -105,6 +105,7 @@ import {
 import { getRichBlockBuffer } from '../invocation/RichBlockBuffer.js';
 import { recordTurnOutputVerdict, requireTurnOutputAllowed } from '../invocation/response-draft-settlement.js';
 import { resolveManagedSessionPolicySnapshot } from '../invocation/session-policy-snapshot.js';
+import { settleChildResponse } from '../invocation/settle-child-response.js';
 import { mergeStreams } from '../invocation/stream-merge.js';
 import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentService.js';
 import { AgentServiceUnavailableError, ExecutionAdmissionConflict } from '../registry/AgentServiceUnavailableError.js';
@@ -262,6 +263,7 @@ async function* routeParallelPrepared(
         () => getService(deps.services, catId, deps.unavailableServices),
         capture,
         catSignal,
+        deps.refreshServices,
       );
       pinnedServices.set(catId, admitted.service);
       return admitted.executionBinding;
@@ -2660,6 +2662,23 @@ async function* routeParallelPrepared(
       // Re-querying the map here returns undefined → done event yielded without
       // invocationId → downstream broadcaster falls back to parent → bubble
       // identity / liveness wrongly attached to parent (instead of own turn).
+      if (ownInvId) {
+        await settleChildResponse(
+          { messageStore: deps.messageStore, turnStore: deps.invocationDeps.turnExecutionStore },
+          {
+            invocationId: ownInvId,
+            ...((turnStoredMessageId ?? lifecycleAdmission?.messageId)
+              ? { responseMessageId: turnStoredMessageId ?? lifecycleAdmission?.messageId }
+              : {}),
+            ...(!catProducedOutput && !turnStoredMessageId && !lifecycleAdmission
+              ? {
+                  noResponseReason: 'empty_turn' as const,
+                  noResponseProof: 'route_completed_without_response_admission' as const,
+                }
+              : {}),
+          },
+        ).catch((err) => log.warn({ err, invocationId: ownInvId }, 'Child response settlement retained for recovery'));
+      }
       const stampedDone = ownInvId && !msg.invocationId ? { ...msg, invocationId: ownInvId } : msg;
       // F117 KD-22: the response is committed; report the timeout before the done, so the Queue
       // counts this member failed (not cancelled) and releases its slot. The done names the

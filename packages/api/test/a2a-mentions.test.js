@@ -222,6 +222,43 @@ describe('parseA2AMentions', () => {
     assert.deepEqual(result, ['codex']);
   });
 
+  it('F314-17: routes the report inputs exactly as the chat direction badge shows them', async () => {
+    // Same inputs and expected targets as web parse-direction.test.ts ("direction badge follows the API A2A grammar").
+    const { parseA2AMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    const { loadCatConfig, toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
+
+    const originalConfigs = catRegistry.getAllConfigs();
+    catRegistry.reset();
+    try {
+      for (const [id, config] of Object.entries(toAllCatConfigs(loadCatConfig(REPO_TEMPLATE_PATH)))) {
+        catRegistry.register(id, config);
+      }
+      assert.deepEqual(parseA2AMentions('ask @opus in prose', 'kimi'), []);
+      assert.deepEqual(parseA2AMentions('@opus 请继续，如果需要再找 @codex', 'kimi'), ['opus']);
+      assert.deepEqual(parseA2AMentions('```\n@opus\n```', 'kimi'), []);
+      assert.deepEqual(parseA2AMentions('@opus请继续', 'kimi'), ['opus']);
+      assert.deepEqual(parseA2AMentions('@opus\n@codex', 'opus'), ['codex']);
+      assert.deepEqual(parseA2AMentions('@opus @codex @gpt52', 'kimi'), ['opus', 'codex']);
+      assert.deepEqual(parseA2AMentions('@co-creator @codex', 'kimi'), []);
+
+      // F182 KD-10: a disabled member (antigravity in the template roster) is matched, then rejected,
+      // and the line goes on; the badge test uses the same inputs.
+      const { analyzeA2AMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+      const disabledFirst = analyzeA2AMentions('@antigravity @codex', 'kimi');
+      assert.deepEqual(disabledFirst.mentions, ['codex']);
+      assert.deepEqual(
+        disabledFirst.routing_warnings.map((warning) => [warning.kind, warning.catId]),
+        [['cat_disabled', 'antigravity']],
+      );
+      assert.deepEqual(parseA2AMentions('@antigravity @opus @codex', 'kimi'), ['opus', 'codex']);
+    } finally {
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(originalConfigs)) {
+        catRegistry.register(id, config);
+      }
+    }
+  });
+
   it('matches gpt52 variant alias @gpt5.2 from runtime cat-config', async () => {
     const { parseA2AMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
     const { loadCatConfig, toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');

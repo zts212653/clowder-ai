@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F39 Bug 1: useChatHistory fetches queue state on mount/thread-switch
  * so that F5 refresh restores QueuePanel correctly.

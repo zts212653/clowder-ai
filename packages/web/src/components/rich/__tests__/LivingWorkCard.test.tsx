@@ -1,6 +1,7 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { WorkCardMessageContext, workCardTime } from '@/components/artifacts/work-card-message-context';
 import { ArtworkLightboxProvider, useArtworkLightboxScope } from '@/components/content-review/ArtworkLightboxScope';
 import { writeShellLanguage } from '@/components/shell/shell-language';
 import { writeShellPresentation } from '@/components/shell/shell-presentation';
@@ -201,5 +202,38 @@ it('opens a saved HTML chat reference in its original publication owner, keeping
   } finally {
     await act(async () => root.unmount());
     useChatStore.setState({ openPublication: originalOpen });
+  }
+});
+
+it('F335 交付三: the chat card footer reads 「守望猫 · 名字 · 第 1 版 · 时间」 from the message it sits in', async () => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  fetcher.mockResolvedValue({ ok: true, json: async () => description() });
+  const at = new Date(2026, 10, 2, 2, 5).getTime();
+  const host = document.createElement('div'),
+    root = createRoot(host);
+  const footer = () => host.querySelector('.chat-work-card small')?.textContent;
+  try {
+    await act(async () =>
+      root.render(
+        <ArtworkLightboxProvider threadId="host">
+          <LivingWorkCard block={block} messageId="m" catId="codex61-sol" />
+        </ArtworkLightboxProvider>,
+      ),
+    );
+    expect(footer()).toBe('codex61-sol · 第 1 版');
+    await act(async () =>
+      root.render(
+        <ArtworkLightboxProvider threadId="host">
+          <WorkCardMessageContext.Provider value={{ at, byline: 'watcher' }}>
+            <LivingWorkCard block={block} messageId="m" catId="codex61-sol" />
+          </WorkCardMessageContext.Provider>
+        </ArtworkLightboxProvider>,
+      ),
+    );
+    expect(footer()).toBe(`守望猫 · codex61-sol · 第 1 版 · ${workCardTime(at)}`);
+    expect(workCardTime(at, at + 60_000)).toBe('02:05');
+    expect(workCardTime(at, at + 86_400_000)).toBe('11/2 02:05');
+  } finally {
+    await act(async () => root.unmount());
   }
 });

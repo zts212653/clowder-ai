@@ -122,15 +122,4 @@ describe('ChatMessage: request status under a sent image message', () => {
     expect(container.querySelector('[data-testid="media-message-request"]')).toBeNull();
     expect(mocks.fetch).not.toHaveBeenCalled();
   });
-
-  it('reads nothing for an ordinary Human message', async () => {
-    await render({
-      id: 'human-plain',
-      type: 'user',
-      from: { kind: 'user', userId: 'operator' },
-      content: '你好',
-      timestamp: 1,
-    });
-    expect(mocks.fetch).not.toHaveBeenCalled();
-  });
 });

@@ -9,10 +9,19 @@
  * 4. 过滤自调用
  * 5. F27: 返回所有匹配的猫 (上限 MAX_A2A_MENTION_TARGETS)
  * 6. 只在猫回复完整结束后解析 (由调用方保证)
+ *
+ * 1–3 的语法在 @cat-cafe/shared 的 findLineStartMentions（聊天里的方向徽章读同一份）；
+ * 这里决定有哪些句柄（自调用、停用猫）和最多几个目标。
  */
 
 import type { CatId, CatRoutingError } from '@cat-cafe/shared';
-import { catRegistry } from '@cat-cafe/shared';
+import {
+  catRegistry,
+  findLineStartMentions,
+  HANDLE_CONTINUATION_RE,
+  MAX_A2A_MENTION_TARGETS,
+  TOKEN_BOUNDARY_RE,
+} from '@cat-cafe/shared';
 import { isCatAvailable } from '../../../../../config/cat-config-loader.js';
 import { resolveCatTarget } from './cat-target-resolver.js';
 
@@ -21,41 +30,12 @@ export function getMaxA2ADepth(): number {
   return Number(process.env.MAX_A2A_DEPTH) || 15;
 }
 
-/** Max number of distinct cats a single message can @mention (F27 safety limit) */
-const MAX_A2A_MENTION_TARGETS = 2;
-/** @internal Exported for a2a-shadow-detection.ts. */
-export const TOKEN_BOUNDARY_RE = /[\s,.:;!?()[\]{}<>，。！？、：；（）【】《》「」『』〈〉]/;
-/** @internal Exported for a2a-shadow-detection.ts. */
-export const HANDLE_CONTINUATION_RE = /[a-z0-9_.-]/;
-const LEADING_MARKDOWN_MENTION_PREFIX_RE = /^(?:(?:>\s*)|(?:[-*+]\s+)|(?:\d+[.)]\s+))+/;
-const LINE_START_MARKDOWN_PREFIX_PATTERN = String.raw`\s*(?:(?:>\s*)|(?:[-*+]\s+)|(?:\d+[.)]\s+))*`;
-const HANDLE_BOUNDARY_PATTERN = String.raw`(?=$|[\s,.:;!?()\[\]{}<>，。！？、：；（）【】《》「」『』〈〉]|[^a-z0-9_.-])`;
+/** @internal Re-exported for a2a-shadow-detection.ts; the grammar lives in @cat-cafe/shared. */
+export { HANDLE_CONTINUATION_RE, TOKEN_BOUNDARY_RE };
 
 interface MentionPatternEntry {
   readonly catId: CatId;
   readonly pattern: string;
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function buildWhitespaceTolerantMentionPattern(pattern: string): RegExp {
-  const interleaved = Array.from(pattern)
-    .map((ch) => escapeRegExp(ch))
-    .join(String.raw`\s*`);
-  return new RegExp(`(^|\\n)(${LINE_START_MARKDOWN_PREFIX_PATTERN})${interleaved}${HANDLE_BOUNDARY_PATTERN}`, 'giu');
-}
-
-function repairLineStartMentionWhitespace(text: string, entries: readonly MentionPatternEntry[]): string {
-  let repaired = text;
-  for (const entry of entries) {
-    repaired = repaired.replace(
-      buildWhitespaceTolerantMentionPattern(entry.pattern),
-      (_match, lineStart: string, prefix: string) => `${lineStart}${prefix}${entry.pattern}`,
-    );
-  }
-  return repaired;
 }
 
 export interface A2AMentionAnalysis {
@@ -81,77 +61,30 @@ export function parseA2AMentions(text: string, currentCatId?: CatId): CatId[] {
 }
 
 export function analyzeA2AMentions(text: string, currentCatId?: CatId): A2AMentionAnalysis {
-  if (!text) return { mentions: [], routing_warnings: [] };
-
-  // 1. Strip fenced code blocks
-  const stripped = text.replace(/```[\s\S]*?```/g, '');
-
   // F32-a: read from catRegistry (.cat-cafe/cat-catalog.json)
   const allConfigs = catRegistry.getAllConfigs();
 
-  // 2. Build patterns and sort longest-first to avoid prefix collisions
   // F182 KD-10: include ALL cats (including disabled) so patterns participate in matching;
   // availability is checked at match-time via resolveCatTarget, not here.
-  const entries: MentionPatternEntry[] = [];
+  const handles: MentionPatternEntry[] = [];
   for (const [id, config] of Object.entries(allConfigs)) {
-    if (currentCatId && id === currentCatId) continue; // 4. Filter self (skip when cross-thread)
+    if (currentCatId && id === currentCatId) continue; // Filter self (skip when cross-thread)
     for (const pattern of config.mentionPatterns) {
-      entries.push({ catId: id as CatId, pattern: pattern.toLowerCase() });
+      handles.push({ catId: id as CatId, pattern: pattern.toLowerCase() });
     }
   }
-  entries.sort((a, b) => b.pattern.length - a.pattern.length);
-  const normalizedText = repairLineStartMentionWhitespace(stripped, entries);
 
-  // 3. Line-start matching with token boundary — always actionable (no keyword gate)
   const found: CatId[] = [];
   const seen = new Set<string>();
   const routing_warnings: CatRoutingError[] = [];
-  const lines = normalizedText.split(/\r?\n/);
-  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
-    const rawLine = lines[lineIndex]!;
-    if (found.length >= MAX_A2A_MENTION_TARGETS) break; // 5. Safety limit
-
-    const leadingWs = rawLine.match(/^\s*/)?.[0].length ?? 0;
-    const normalized = rawLine.slice(leadingWs).toLowerCase().replace(LEADING_MARKDOWN_MENTION_PREFIX_RE, '');
-    if (!normalized.startsWith('@')) {
-      continue;
-    }
-
-    let cursor = 0;
-    while (cursor < normalized.length && found.length < MAX_A2A_MENTION_TARGETS) {
-      const segment = normalized.slice(cursor);
-      let matched = false;
-
-      for (const entry of entries) {
-        if (!segment.startsWith(entry.pattern)) continue;
-        const charAfter = segment[entry.pattern.length];
-        const isBoundary = !charAfter || TOKEN_BOUNDARY_RE.test(charAfter) || !HANDLE_CONTINUATION_RE.test(charAfter);
-        if (!isBoundary) continue;
-        // F182 KD-10: resolver check at match-time (not at pattern-build time)
-        const resolved = resolveCatTarget(entry.catId);
-        if ('error' in resolved) {
-          if (!seen.has(entry.catId)) {
-            seen.add(entry.catId);
-            routing_warnings.push(resolved.error);
-          }
-        } else if (!seen.has(entry.catId)) {
-          seen.add(entry.catId);
-          found.push(entry.catId);
-        }
-        cursor += entry.pattern.length;
-        matched = true;
-        break; // longest-match-first: lock one winner at current cursor
-      }
-
-      if (!matched) break;
-
-      while (cursor < normalized.length && TOKEN_BOUNDARY_RE.test(normalized[cursor]!)) {
-        cursor += 1;
-      }
-      if (normalized[cursor] !== '@') {
-        break;
-      }
-    }
+  for (const catId of findLineStartMentions(text, handles) as CatId[]) {
+    if (found.length >= MAX_A2A_MENTION_TARGETS) break; // F27 safety limit
+    if (seen.has(catId)) continue;
+    seen.add(catId);
+    // F182 KD-10: resolver check at match-time (not at pattern-build time)
+    const resolved = resolveCatTarget(catId);
+    if ('error' in resolved) routing_warnings.push(resolved.error);
+    else found.push(catId);
   }
 
   return { mentions: found, routing_warnings };

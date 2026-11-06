@@ -192,6 +192,7 @@ export function useMemberEditor(
       ...previous,
       templateId: template?.id ?? null,
       runtimeDrafts: undefined,
+      preparedRuntime: undefined,
       form: template ? templateForm(template, cats, previous.form) : initialState(),
     }));
   const patchStrategy = (change: Partial<StrategyFormState>) =>
@@ -281,6 +282,7 @@ export function useMemberEditor(
   };
   return {
     draft,
+    setPreparedRuntime: (runtime: RuntimeChoice) => setDraft((previous) => ({ ...previous, preparedRuntime: runtime })),
     accounts,
     templates,
     ready,

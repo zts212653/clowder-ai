@@ -366,6 +366,8 @@ export {
   skillConsumptionTools,
 } from './skill-consumption-tools.js';
 export {
+  bringToDeskInputShape,
+  handleBringToDesk,
   handleOfferSuggestion,
   handlePostActionReceipt,
   handleSuggestionFacts,

@@ -114,17 +114,17 @@ describe('F322 AppShell presentation isolation', () => {
     window.history.replaceState(null, '', '/');
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
-  it('default classic, v2, and back do not share rails or remount the unsent draft', () => {
+  it('default v2, classic, and back do not share rails or remount the unsent draft', () => {
     render();
-    expectShell(false);
+    expectShell(true);
     const draft = host.querySelector('input');
     if (!draft) throw new Error('Unsent draft input is missing');
     draft.value = 'still unsent';
-    act(() => writeShellPresentation('v2'));
-    expectShell(true);
-    expect(host.querySelector('input')).toBe(draft);
     act(() => writeShellPresentation('classic'));
     expectShell(false);
+    expect(host.querySelector('input')).toBe(draft);
+    act(() => writeShellPresentation('v2'));
+    expectShell(true);
     expect(draft.value).toBe('still unsent');
   });
   it('paints the explicit v2 URL and its route children consistently before passive effects', () => {

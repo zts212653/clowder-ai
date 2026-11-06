@@ -13,6 +13,8 @@ export interface RuntimeChoice {
   agyCarrier?: 'native' | 'acp';
   readiness?: NativeLoginState;
   discoveryStatus?: 'configured' | 'acp_profile_missing' | 'acp_profile_invalid' | 'adapter_missing' | 'not_installed';
+  /** Existing backend setup validator accepted this exact native descriptor; display only. */
+  dshSetupSupported?: boolean;
   models: string[];
   configuredModel?: string;
   modelSource?: 'tool_config' | 'tool_recent';

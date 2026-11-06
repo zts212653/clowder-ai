@@ -5,20 +5,35 @@ import { assertQueueLedgerEntry, type QueueLedgerEntry } from '../agents/invocat
 import type { StoredMessage } from './ports/MessageStore.js';
 
 export interface LifecycleAppendRecoveryInput {
-  /** Exact admission snapshot taken before the provider call; never reconstructed from message prose. */
-  entry: QueueLedgerEntry;
+  /** Available only to the live handoff. A restart never reconstructs authority from History prose. */
+  entry?: QueueLedgerEntry;
+  sourceMessageId?: string;
+  threadId?: string;
   failure: LifecycleAppendFailure;
-  /** Read-only reconciliation of the original attempt, never a manual replay authorization. */
+  /** Re-evaluated immediately before the atomic commit, after asynchronous reads. */
+  canResume?: () => boolean;
   checked?: { acceptance: 'not_accepted' | 'unknown'; at: number };
 }
 
 export type LifecycleAppendRecoveryResult =
-  | { kind: 'applied' | 'replayed'; messages: StoredMessage[]; entry: QueueLedgerEntry }
+  | { kind: 'applied' | 'replayed'; messages: StoredMessage[]; entry: QueueLedgerEntry | null; resumed: boolean }
   | { kind: 'already_received'; messages: StoredMessage[] }
   | { kind: 'conflict'; reason: string }
   | { kind: 'not_found' };
 
-/** Prepare all three records before a single memory/Redis commit. */
+function clearLegacyAppend(entry: QueueLedgerEntry, targetId: string): void {
+  for (const key of ['appendPendingByTarget', 'appendRecoveryByTarget'] as const) {
+    if (!entry.delivery[key]) continue;
+    delete entry.delivery[key][targetId];
+    if (!Object.keys(entry.delivery[key]).length) delete entry.delivery[key];
+  }
+  if (entry.delivery.routingHeldTargetIds) {
+    entry.delivery.routingHeldTargetIds = entry.delivery.routingHeldTargetIds.filter((id) => id !== targetId);
+    if (!entry.delivery.routingHeldTargetIds.length) delete entry.delivery.routingHeldTargetIds;
+  }
+}
+
+/** History owns the outcome. Only a live, uncanceled, definite rejection may admit fresh pending work. */
 export function prepareLifecycleAppendRecovery(
   source: StoredMessage,
   response: StoredMessage,
@@ -28,7 +43,8 @@ export function prepareLifecycleAppendRecovery(
   | {
       kind: 'prepared';
       lifecycles: readonly [LifecycleStoredMessageMetadata, LifecycleStoredMessageMetadata];
-      entry: QueueLedgerEntry;
+      entry: QueueLedgerEntry | null;
+      resumed: boolean;
     }
   | LifecycleAppendRecoveryResult {
   const { entry: admitted, failure } = input;
@@ -39,13 +55,11 @@ export function prepareLifecycleAppendRecovery(
     return { kind: 'conflict', reason: 'invalid_outcome' };
   const { targetId, invocationId, responseMessageId } = failure;
   if (
-    source.id !== admitted.payload.messageId ||
-    source.id !== admitted.payload.sourceRecordId ||
-    source.threadId !== admitted.threadId ||
+    source.id !== (input.sourceMessageId ?? admitted?.payload.messageId) ||
+    source.threadId !== (input.threadId ?? admitted?.threadId) ||
     response.threadId !== source.threadId ||
+    response.userId !== source.userId ||
     response.id !== responseMessageId ||
-    !admitted.targets.includes(targetId) ||
-    !isDeepStrictEqual(admitted.from, source.from) ||
     source.recall ||
     source._tombstone ||
     source.deletedAt ||
@@ -63,109 +77,114 @@ export function prepareLifecycleAppendRecovery(
   )
     return { kind: 'conflict', reason: 'receiver_changed' };
   const ref = lifecycle.dispatchRefs?.find((candidate) => candidate.targetId === targetId);
-  const pending = currentEntry?.delivery.appendPendingByTarget?.[targetId];
-  const observedFailure = input.checked
-    ? { ...failure, acceptance: input.checked.acceptance, checkedAt: input.checked.at }
-    : failure;
-  // The source may have been read through MCP or the native turn. Neither read proves completion,
-  // but either defeats the negative assumption required for automatic replay of unknown effects.
-  const readWithoutCompletion =
-    pending?.requiresCompletion &&
-    pending.invocationId === invocationId &&
-    ref?.statusMessageId === response.id &&
-    ref.inputRead?.status === 'read';
-  const outcome: LifecycleAppendFailure = readWithoutCompletion
-    ? { ...observedFailure, acceptance: 'unknown' }
-    : observedFailure;
-  const incomplete = failure.acceptance === 'incomplete';
+  const previous = lifecycle.appendFailures?.find(
+    (candidate) =>
+      candidate.targetId === targetId &&
+      candidate.invocationId === invocationId &&
+      candidate.responseMessageId === responseMessageId,
+  );
+  // A replay must not recreate a retry that was already dispatched, stopped, or withdrawn.
+  if (previous && ref?.statusMessageId !== responseMessageId)
+    return {
+      kind: 'replayed',
+      messages: [source, response],
+      entry: currentEntry,
+      resumed: previous.acceptance === 'not_accepted' && !ref && Boolean(currentEntry?.targets.includes(targetId)),
+    };
+  if (ref?.statusMessageId !== responseMessageId) return { kind: 'conflict', reason: 'delivery_changed' };
+  const delivery = ref.appendDelivery;
   if (
-    ref?.statusMessageId === response.id &&
-    (ref.appendAcceptance === 'accepted' ||
-      (!incomplete && !pending?.requiresCompletion && ref.inputRead?.status === 'read'))
+    ref.appendAcceptance === 'accepted' ||
+    (!delivery?.requiresCompletion && failure.acceptance !== 'incomplete' && ref.inputRead?.status === 'read')
   )
     return { kind: 'already_received', messages: [source, response] };
-  const previous = lifecycle.appendFailures?.find(
-    (candidate) => candidate.targetId === targetId && candidate.invocationId === invocationId,
-  );
-  // The first Queue owner now survives the native call. A missing/retired
-  // recipient is an ownership change, never permission to rebuild old work.
-  if (!currentEntry || !currentEntry.targets.includes(targetId) || !['queued', 'claimed'].includes(currentEntry.status))
-    return { kind: 'conflict', reason: 'queue_retired' };
-  const recovery = currentEntry?.delivery.appendRecoveryByTarget?.[targetId];
-  if (input.checked && (!previous || recovery?.invocationId !== invocationId))
-    return { kind: 'conflict', reason: 'reconciliation_not_available' };
-  if (input.checked && recovery?.checkedAt && currentEntry)
-    return { kind: 'replayed', messages: [source, response], entry: currentEntry };
+  // Exact completion/refusal outranks an earlier or racing inconclusive probe.
+  let outcome =
+    previous?.acceptance === 'incomplete'
+      ? previous
+      : failure.acceptance === 'incomplete'
+        ? failure
+        : previous?.acceptance === 'not_accepted'
+          ? previous
+          : failure.acceptance === 'not_accepted' && !input.checked
+            ? failure
+            : input.checked
+              ? { ...failure, acceptance: input.checked.acceptance, checkedAt: input.checked.at }
+              : previous?.checkedAt !== undefined
+                ? previous
+                : failure;
+  if (outcome.acceptance === 'not_accepted' && ref.inputRead?.status === 'read')
+    outcome = { ...outcome, acceptance: 'unknown' };
+  const resumed = outcome.acceptance === 'not_accepted' && Boolean(admitted && input.canResume?.());
   if (
-    previous &&
-    currentEntry?.delivery.appendRecoveryByTarget?.[targetId]?.invocationId === invocationId &&
-    !input.checked &&
-    (outcome.acceptance !== 'unknown' ? !ref : ref?.statusMessageId === response.id)
+    resumed &&
+    (!admitted ||
+      admitted.payload.sourceRecordId !== source.id ||
+      !admitted.targets.includes(targetId) ||
+      !isDeepStrictEqual(admitted.from, source.from))
   )
-    return { kind: 'replayed', messages: [source, response], entry: currentEntry };
-  if (incomplete && (!pending?.requiresCompletion || pending.invocationId !== invocationId))
-    return { kind: 'conflict', reason: 'completion_not_available' };
-  const neverHandedOff =
-    !ref && pending?.invocationId === invocationId && !pending.dispatchStarted && failure.acceptance === 'not_accepted';
-  if (ref?.statusMessageId !== response.id && !neverHandedOff) return { kind: 'conflict', reason: 'delivery_changed' };
-
+    return { kind: 'conflict', reason: 'admission_changed' };
   if (
+    admitted &&
     currentEntry &&
     (currentEntry.id !== admitted.id ||
-      !isDeepStrictEqual(currentEntry.from, admitted.from) ||
       !isDeepStrictEqual(currentEntry.owner, admitted.owner) ||
       !isDeepStrictEqual(currentEntry.payload, admitted.payload) ||
       !isDeepStrictEqual(currentEntry.execution, admitted.execution))
   )
     return { kind: 'conflict', reason: 'queue_identity_changed' };
-  const restored = structuredClone(currentEntry);
-  // An uncertain write is still the same unfinished native turn. Keep its
-  // completion fence until that turn succeeds or its original run ends.
-  if (restored.delivery.appendPendingByTarget && !(outcome.acceptance === 'unknown' && pending?.requiresCompletion)) {
-    delete restored.delivery.appendPendingByTarget[targetId];
-    if (!Object.keys(restored.delivery.appendPendingByTarget).length) delete restored.delivery.appendPendingByTarget;
+
+  let entry = currentEntry ? structuredClone(currentEntry) : resumed ? structuredClone(admitted!) : null;
+  if (entry) {
+    if (!currentEntry) entry.targets = [];
+    clearLegacyAppend(entry, targetId);
+    entry.targets = resumed
+      ? [...new Set([...entry.targets, targetId])]
+      : entry.targets.filter((id) => id !== targetId);
+    if (resumed) {
+      const originalIntent = admitted?.delivery.authorIntentByTarget?.[targetId];
+      entry.delivery.authorIntentByTarget = {
+        ...entry.delivery.authorIntentByTarget,
+        [targetId]: {
+          requested: 'next_work',
+          ...(originalIntent?.carrierCapability ? { carrierCapability: originalIntent.carrierCapability } : {}),
+        },
+      };
+    } else if (entry.delivery.authorIntentByTarget) delete entry.delivery.authorIntentByTarget[targetId];
+    const claims = currentEntry?.claimedTargetIds?.filter((id) => id !== targetId) ?? [];
+    if (currentEntry?.status === 'claimed' && claims.length) entry.claimedTargetIds = claims;
+    else {
+      entry.status = 'queued';
+      delete entry.claimId;
+      delete entry.claimedAt;
+      delete entry.claimedTargetIds;
+      delete entry.claimedFromTargetless;
+      delete entry.processingStartedAt;
+      delete entry.terminalAt;
+    }
+    if (entry.targets.length) assertQueueLedgerEntry(entry);
+    else entry = null;
   }
-  restored.delivery.appendRecoveryByTarget = {
-    ...restored.delivery.appendRecoveryByTarget,
-    [targetId]: outcome,
-  };
-  const held = new Set(restored.delivery.routingHeldTargetIds ?? []);
-  if (outcome.acceptance === 'unknown') held.add(targetId);
-  else held.delete(targetId);
-  if (held.size) restored.delivery.routingHeldTargetIds = [...held];
-  else delete restored.delivery.routingHeldTargetIds;
-  // Preserve another recipient's live claim while releasing only this failed target.
-  const claims = currentEntry?.claimedTargetIds?.filter((id) => id !== targetId) ?? [];
-  if (claims.length && currentEntry?.status === 'claimed') {
-    restored.claimedTargetIds = claims;
-  } else {
-    restored.status = 'queued';
-    delete restored.claimId;
-    delete restored.claimedAt;
-    delete restored.claimedTargetIds;
-    delete restored.claimedFromTargetless;
-    delete restored.processingStartedAt;
-    delete restored.terminalAt;
-  }
-  assertQueueLedgerEntry(restored);
-  const rejected = outcome.acceptance !== 'unknown';
   return {
     kind: 'prepared',
-    entry: restored,
+    entry,
+    resumed,
     lifecycles: [
       {
         ...lifecycle,
         appendFailures: previous
-          ? lifecycle.appendFailures?.map((candidate) => (candidate === previous ? outcome : candidate))
+          ? lifecycle.appendFailures?.map((item) => (item === previous ? outcome : item))
           : [...(lifecycle.appendFailures ?? []), outcome],
-        dispatchRefs: rejected
-          ? lifecycle.dispatchRefs?.filter((candidate) => candidate.targetId !== targetId)
-          : lifecycle.dispatchRefs,
+        dispatchRefs: resumed
+          ? lifecycle.dispatchRefs?.filter((item) => item.targetId !== targetId)
+          : lifecycle.dispatchRefs?.map((item) =>
+              item === ref && delivery ? { ...item, appendDelivery: delivery } : item,
+            ),
       },
-      rejected
+      resumed
         ? {
             ...receiver,
-            inputEntryIds: receiver.inputEntryIds.filter((id) => id !== admitted.id),
+            inputEntryIds: receiver.inputEntryIds.filter((id) => id !== admitted!.id),
             inputMessageIds: receiver.inputMessageIds.filter((id) => id !== source.id),
           }
         : receiver,

@@ -12,6 +12,12 @@ import type {
   TurnOutputFence,
   TurnOutputFenceVerdict,
 } from '@cat-cafe/shared';
+import type {
+  SettledTurnPage,
+  SettledTurnQuery,
+  SettleTurnResponseResult,
+  TurnResponseSettlement,
+} from './TurnExecutionSettlement.js';
 
 export type {
   CreateTurnExecutionInput,
@@ -72,6 +78,14 @@ export type TurnExecutionSourceReadPort = Pick<ITurnExecutionStore, 'get'> &
   Partial<Pick<ITurnExecutionStore, 'listBySource'>>;
 
 export interface ITurnExecutionStore {
+  recordWatcherModelAttempt(
+    invocationId: string,
+    turnId: string,
+    startedAt: number,
+    usage?: import('@cat-cafe/shared').WatcherUsage,
+  ): boolean | Promise<boolean>;
+  settledHead(userId: string, threadId?: string): number | Promise<number>;
+  recordWatcherUsage(invocationId: string, usage: import('@cat-cafe/shared').WatcherUsage): boolean | Promise<boolean>;
   createRunning(input: CreateTurnExecutionInput): CreateTurnExecutionResult | Promise<CreateTurnExecutionResult>;
   bindCoveredMessageIds(
     invocationId: string,
@@ -95,7 +109,7 @@ export interface ITurnExecutionStore {
     invocationId: string,
     input: TurnExecutionTerminalInput,
   ): TransitionTurnExecutionResult | Promise<TransitionTurnExecutionResult>;
-  /** Restart age cannot retire a dispatched provider until this record carries teardown proof. */
+  /** Retire abandoned Host turns; callers exclude live owners. This does not certify provider teardown. */
   interruptRunningBefore(
     cutoffStartedAt: number,
     input: InterruptRunningTurnExecutionsInput,
@@ -108,6 +122,11 @@ export interface ITurnExecutionStore {
   listResponsePending(): TurnExecutionRecord[] | Promise<TurnExecutionRecord[]>;
   /** Leaves the ledger once the turn's response R is confirmed terminal (or the turn has none). */
   clearResponsePending(invocationId: string): void | Promise<void>;
+  markResponseSettled(
+    invocationId: string,
+    settlement: TurnResponseSettlement,
+  ): SettleTurnResponseResult | Promise<SettleTurnResponseResult>;
+  listSettled(query: SettledTurnQuery): SettledTurnPage | Promise<SettledTurnPage>;
   /**
    * F117 KD-21: records the action fence's verdict on a gated child's output, so every later
    * settlement reads it instead of a process-local decision. The fence only moves forward
@@ -136,7 +155,7 @@ export function assertCoveredMessageIds(messageIds: readonly string[]): void {
   }
 }
 
-const EXECUTION_KINDS = new Set<TurnExecutionKind>(['ordinary', 'routing_guard']);
+const EXECUTION_KINDS = new Set<TurnExecutionKind>(['ordinary', 'routing_guard', 'watcher']);
 const OUTPUT_FENCES = new Set<string>(['open', 'gated', 'allowed', 'rejected']);
 const GATED_FENCE_RANK: Record<Exclude<TurnOutputFence, 'open'>, number> = { gated: 0, allowed: 1, rejected: 2 };
 
@@ -240,6 +259,9 @@ export function cloneTurnExecutionRecord(record: TurnExecutionRecord): TurnExecu
     ...(record.providerLifecycleTracked ? { providerLifecycleTracked: true } : {}),
     ...(record.providerStartedAt !== undefined ? { providerStartedAt: record.providerStartedAt } : {}),
     ...(record.providerTeardownAt !== undefined ? { providerTeardownAt: record.providerTeardownAt } : {}),
+    ...(record.responseSettlement ? { responseSettlement: { ...record.responseSettlement } } : {}),
+    ...(record.pendingResponseSettlement ? { pendingResponseSettlement: { ...record.pendingResponseSettlement } } : {}),
+    ...(record.settledSequence !== undefined ? { settledSequence: record.settledSequence } : {}),
     invocationId: record.invocationId,
     parentInvocationId: record.parentInvocationId,
     threadId: record.threadId,
@@ -260,6 +282,8 @@ export function cloneTurnExecutionRecord(record: TurnExecutionRecord): TurnExecu
         }
       : {}),
     status: record.status,
+    ...(record.watcherUsage ? { watcherUsage: { ...record.watcherUsage } } : {}),
+    ...(record.watcherModelAttempts ? { watcherModelAttempts: structuredClone(record.watcherModelAttempts) } : {}),
     ...(record.endedAt !== undefined ? { endedAt: record.endedAt } : {}),
     ...(record.terminalReason !== undefined ? { terminalReason: record.terminalReason } : {}),
     ...(record.outputFence !== undefined ? { outputFence: record.outputFence } : {}),
@@ -285,6 +309,7 @@ function copyRoutingPreflight(provenance: NonNullable<TurnExecutionCausalRefs['r
 
 function canonicalCausalRefs(causal: TurnExecutionCausalRefs | undefined): TurnExecutionCausalRefs {
   return {
+    ...(causal?.watcherSourceInvocationId ? { watcherSourceInvocationId: causal.watcherSourceInvocationId } : {}),
     ...(causal?.routingPreflight
       ? {
           routingPreflight: copyRoutingPreflight(causal.routingPreflight),

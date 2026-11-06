@@ -85,28 +85,32 @@ describe('a media attachment reads as the places the person circled', () => {
     expect(text()).toContain('原话第一行\n原话第二行');
   });
 
-  it('in a sent message, numbers each place, says what was done there and shows the words for it', () => {
+  it('in a sent message, numbers each place and shows its words or selection kind', () => {
     render(<ContextAttachmentView attachment={TWO} />);
     expect(text()).toContain('窄屏设计稿');
-    expect(text()).toContain('图片 · 2处选区');
+    expect(text()).toContain('1 张图 · 2 处');
     const rows = [...container.querySelectorAll('[data-selection-id]')];
     expect(rows.map((row) => row.getAttribute('data-selection-id'))).toEqual(['1', '2']);
     expect(rows[0]?.textContent).toContain('1');
-    expect(rows[0]?.textContent).toContain('圈选');
     expect(rows[0]?.textContent).toContain('移除这里的字');
     expect(rows[1]?.textContent).toContain('2');
     expect(rows[1]?.textContent).toContain('点选');
   });
 
-  it('never shows coordinates, and offers nothing to remove or click in a sent message', () => {
+  it('keeps sent places readable and reopenable without exposing coordinates or removal actions', () => {
     render(<ContextAttachmentView attachment={TWO} />);
     expect(text()).not.toMatch(/411|622|733|144|987|654|image-region|image-point|sha256|review-1/);
-    expect(container.querySelector('button')).toBeNull();
+    expect(
+      [...container.querySelectorAll('[data-selection-id] button')].map((node) => node.getAttribute('aria-label')),
+    ).toEqual(['打开图 1 · 第 1 处', '打开图 1 · 第 2 处']);
+    expect(container.querySelector('button[aria-label^="移除"]')).toBeNull();
+    expect(useChatStore.getState().pendingChatInsert).toBeNull();
   });
 
-  it('says whole work when no place was circled, with no numbered places', () => {
+  it('opens the whole artwork when no place was circled, without inventing numbered places', () => {
     render(<ContextAttachmentView attachment={media([])} />);
-    expect(text()).toContain('图片 · 整件作品');
+    expect(text()).toContain('1 张图 · 0 处');
+    expect(button('打开窄屏设计稿')).not.toBeNull();
     expect(container.querySelector('[data-selection-id]')).toBeNull();
   });
 

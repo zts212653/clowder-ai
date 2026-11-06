@@ -51,10 +51,15 @@ export function useArtworkViewport(
       setSpaceHeld(false);
       return;
     }
-    const editable = (target: EventTarget | null) =>
-      target instanceof HTMLElement && Boolean(target.closest('input, textarea, [contenteditable="true"]'));
+    const interactive = (target: EventTarget | null) =>
+      target instanceof Element &&
+      Boolean(
+        target.closest(
+          'button, a[href], input, textarea, select, [role="button"], [role="menuitem"], [contenteditable="true"]',
+        ),
+      );
     const down = (event: KeyboardEvent) => {
-      if (event.code !== 'Space' || event.isComposing || editable(event.target)) return;
+      if (event.code !== 'Space' || event.isComposing || interactive(event.target)) return;
       event.preventDefault();
       setSpaceHeld(true);
     };

@@ -7,7 +7,7 @@ import { AgyNativeAgentService } from '../dist/domains/cats/services/agents/prov
 import { spawnCli } from '../dist/utils/cli-spawn.js';
 import { appendRecoveryFixture } from './helpers/append-recovery-fixture.js';
 
-test('real stream-json child and Queue deliver A then B once in one process', { timeout: 10000 }, async () => {
+test('real stream-json child and History deliver A then B once in one process', { timeout: 10000 }, async () => {
   const root = mkdtempSync(join(tmpdir(), 'native-followup-wire-'));
   const workspace = join(root, 'workspace');
   mkdirSync(workspace);
@@ -65,7 +65,10 @@ test('real stream-json child and Queue deliver A then B once in one process', { 
           delivery = value.initialInputRead.then(async () => {
             assert.equal(history.filter((x) => x.event === 'result').length, 0);
             const result = await queue.append();
-            assert.equal(queue.queue.list('thread', 'owner').length, 1);
+            assert.equal(queue.queue.list('thread', 'owner').length, 0);
+            const source = await queue.messageStore.getById(queue.admission.message.id);
+            assert.equal(source.lifecycle.dispatchRefs[0].appendAcceptance, 'written');
+            assert.equal(source.lifecycle.dispatchRefs[0].appendDelivery.requiresCompletion, true);
             return result;
           });
         },
@@ -104,7 +107,7 @@ test('real stream-json child and Queue deliver A then B once in one process', { 
   }
 });
 
-test('real stream-json child and Queue complete recovered A before B', { timeout: 10000 }, async () => {
+test('real stream-json child and History complete recovered A before B', { timeout: 10000 }, async () => {
   const root = mkdtempSync(join(tmpdir(), 'native-followup-wire-recovered-'));
   const workspace = join(root, 'workspace');
   mkdirSync(workspace);
@@ -178,7 +181,10 @@ test('real stream-json child and Queue complete recovered A before B', { timeout
           delivery = value.initialInputRead.then(async () => {
             assert.equal(history.filter((x) => x.event === 'result').length, 0);
             const result = await queue.append();
-            assert.equal(queue.queue.list('thread', 'owner').length, 1);
+            assert.equal(queue.queue.list('thread', 'owner').length, 0);
+            const source = await queue.messageStore.getById(queue.admission.message.id);
+            assert.equal(source.lifecycle.dispatchRefs[0].appendAcceptance, 'written');
+            assert.equal(source.lifecycle.dispatchRefs[0].appendDelivery.requiresCompletion, true);
             return result;
           });
         },

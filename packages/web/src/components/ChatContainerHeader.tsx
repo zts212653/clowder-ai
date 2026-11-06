@@ -17,6 +17,7 @@ import { ThreadSettingsButton } from './shell/ThreadSettingsButton';
 import { useSettingsReadingEntry } from './shell/useSettingsSourceReturn';
 import { ThreadCatPill } from './ThreadCatPill';
 import { ThreadIndicator } from './ThreadIndicator';
+import { WatcherChip } from './watcher/WatcherThreadControls';
 
 interface ChatContainerHeaderProps {
   sidebarOpen: boolean;
@@ -87,6 +88,7 @@ export function ChatContainerHeader({
               <ThreadTitleResetMenu key={threadId} threadId={threadId} />
               {/* F198 Phase C AC-C5: Daemon active indicator */}
               <DaemonActiveIndicator threadId={threadId} />
+              <WatcherChip threadId={threadId} />
             </div>
             <ConversationViewMenu
               key={threadId}
@@ -137,6 +139,7 @@ export function ChatContainerHeader({
             <ThreadIndicator threadId={threadId} />
             {/* F198 Phase C AC-C5: Daemon active indicator */}
             <DaemonActiveIndicator threadId={threadId} />
+            <WatcherChip threadId={threadId} />
             {/* F154 Phase B: Preferred cat pill — desktop only (KD-10) */}
             <div className="hidden lg:block flex-shrink-0">
               <ThreadCatPill threadId={threadId} />

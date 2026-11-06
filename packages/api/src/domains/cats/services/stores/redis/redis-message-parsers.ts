@@ -253,6 +253,7 @@ type ExtraCarrierPersistenceClassification<
  * Every StoredMessage.extra key must be classified when it is introduced.
  */
 type ExtraCarrierPersistence = ExtraCarrierPersistenceClassification<{
+  watcher: 'parsed';
   cloudBridgeReturn: 'parsed';
   taskHandoff: 'parsed';
   taskHandoffInvalid: 'derived';
@@ -831,6 +832,22 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
       hasField = true;
     }
 
+    const watcher =
+      typeof parsed.watcher === 'object' && parsed.watcher !== null
+        ? (parsed.watcher as Record<string, unknown>)
+        : undefined;
+    if (
+      watcher?.kind === 'nudge' &&
+      isNonEmptyString(watcher.sourceInvocationId) &&
+      isNonEmptyString(watcher.sourceMessageId) &&
+      isNonEmptyString(watcher.watcherInvocationId)
+    )
+      result.watcher = {
+        kind: 'nudge',
+        sourceInvocationId: watcher.sourceInvocationId,
+        sourceMessageId: watcher.sourceMessageId,
+        watcherInvocationId: watcher.watcherInvocationId,
+      };
     const turnExecution = parseTurnExecutionProjection(parsed.turnExecution);
     if (turnExecution) {
       result.turnExecution = turnExecution;

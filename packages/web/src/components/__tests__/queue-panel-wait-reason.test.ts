@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * QueuePanel A2A queue visibility (2026-06-02): the queue header explains WHY entries wait
  * (behind the active turn) so the user can tell "waiting for the current turn" from "stuck".

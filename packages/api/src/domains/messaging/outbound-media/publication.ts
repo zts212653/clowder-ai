@@ -64,6 +64,8 @@ export interface OutboundMediaPublicationDeps {
   readonly resolvePath: HostMediaPathResolver;
   readonly speech?: OutboundSpeechSynthesizer;
   readonly onPublished?: (threadId: string) => void;
+  /** In-process observers of the message this job just published (see PublishingMessageStoreDeps). */
+  readonly onMessagePublished?: (message: StoredMessage) => void;
   /** Required: a job that fails leaves a message no subscriber receives until recovery. */
   onPublishFailure(error: unknown, messageId: string): void;
   readonly retentionCount?: number;
@@ -191,6 +193,7 @@ export class OutboundMediaPublication {
         });
       }
       this.deps.onPublished?.(msg.threadId);
+      this.deps.onMessagePublished?.(msg);
     }
   }
 
