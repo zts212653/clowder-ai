@@ -14,16 +14,22 @@ const native = {
   skip: process.platform !== 'win32' || !compiler ? 'Requires Windows and native Inno' : false,
 };
 
-// Execute the production Pascal gate, not a copy of its logic.
+// Embed the production callbacks and their default messages. The probe does
+// not require the optional Chinese language pack to be installed.
 const installerSource = fs.readFileSync(path.join(__dirname, 'installer/cat-cafe.iss'), 'utf8');
 const extractionOutput = installerSource.slice(
   installerSource.indexOf('procedure ExtractionOutput'),
-  installerSource.indexOf('function ShouldAutoLaunch'),
+  installerSource.indexOf('#include "install-preparation.iss"'),
 );
-const prepareToInstall = installerSource.slice(installerSource.indexOf('function PrepareToInstall'));
+const messages = installerSource
+  .split('[CustomMessages]')[1]
+  .split('[Dirs]')[0]
+  .split(/\r?\n/)
+  .filter((line) => !line.startsWith('chinese_simplified.'))
+  .join('\n');
+const installDelete = installerSource.split('[InstallDelete]')[1].split('[UninstallRun]')[0];
 
-// Compile a throwaway native Setup that embeds the production PrepareToInstall
-// and ExtractionOutput procedures plus test-only helper payloads.
+// Use real Inno execution and test-only PowerShell helper payloads.
 async function writeProbe(root, { createAppDir = false, helpers }) {
   const helperSources = helpers
     .map(({ name, body }) => {
@@ -47,12 +53,16 @@ OutputDir=${root}
 OutputBaseFilename=probe
 Compression=none
 SetupLogging=yes
+[CustomMessages]
+${messages}
 [Files]
 ${helperSources}
+[InstallDelete]
+${installDelete}
 [Code]
 #include "${path.join(__dirname, 'installer/runtime-failure.iss')}"
 ${extractionOutput}
-${prepareToInstall}
+#include "${path.join(__dirname, 'installer/install-preparation.iss')}"
 `,
     'utf8',
   );
@@ -131,6 +141,44 @@ test('native Setup keeps identity-helper stderr in the setup log even when the h
     const { installed, recorded } = await runProbe(root);
     assert.equal(installed.status, 0, installed.stdout + installed.stderr);
     assert.match(recorded, /PR1519_STDERR_RETAINED/, 'helper stderr must reach the Setup log on the success path too');
+    const completed = [...recorded.matchAll(/Setup stage ([\w-]+): finished, elapsedMs=\d+/g)].map((match) => match[1]);
+    assert.deepEqual(completed, [
+      'identity-extract',
+      'identity-check',
+      'shutdown-extract',
+      'shutdown',
+      'file-use-check',
+      'preparation',
+      'payload-replacement',
+    ]);
+    assert.match(recorded, /Setup stage identity-check: finished, elapsedMs=\d+, started=1, exit=0/);
+    assert.match(recorded, /Setup stage shutdown: finished, elapsedMs=\d+, started=1, exit=0/);
+    assert.match(
+      recorded,
+      /Setup stage native-preparation: ready confirmed[\s\S]*Setup stage identity-extract: started/,
+    );
+    assert.match(
+      recorded,
+      /Setup stage file-use-check: started \(Windows Restart Manager handoff\)[\s\S]*Setup stage file-use-check: finished, elapsedMs=\d+, outcome=installing[\s\S]*Setup stage payload-replacement: started/,
+    );
+    const noFileCheck = await runProbe(root, ['/NOCLOSEAPPLICATIONS']);
+    assert.equal(noFileCheck.installed.status, 0, noFileCheck.installed.stdout + noFileCheck.installed.stderr);
+    assert.doesNotMatch(noFileCheck.recorded, /Setup stage file-use-check:/);
+  });
+});
+
+test('native Setup times a failed shutdown and refuses installation before replacement', native, async () => {
+  await withTempRoot('issue1788-stop-log-', async (root) => {
+    await writeProbe(root, {
+      createAppDir: true,
+      helpers: [configureHelper('exit 0\n'), { ...stopHelper, body: 'exit 74\n' }],
+    });
+    const { installed, recorded } = await runProbe(root);
+    assert.equal(installed.status, 7, installed.stdout + installed.stderr);
+    assert.match(recorded, /Setup stage shutdown: finished, elapsedMs=\d+, started=1, exit=74/);
+    assert.match(recorded, /Unable to stop the target installation safely/);
+    assert.doesNotMatch(recorded, /Setup stage payload-replacement: started/);
+    assert.equal(fs.existsSync(path.join(root, 'program')), false);
   });
 });
 

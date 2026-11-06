@@ -76,9 +76,8 @@ test(
 );
 
 test('installer preserves identity before any payload delete', () => {
-  const iss = fs.readFileSync(path.join(__dirname, 'installer/cat-cafe.iss'), 'utf8');
-  const prepare = iss.slice(iss.indexOf('function PrepareToInstall'));
+  const prepare = fs.readFileSync(path.join(__dirname, 'installer/install-preparation.iss'), 'utf8');
   assert.match(prepare, /configure-desktop-instance\.ps1/);
   assert.ok(prepare.indexOf('configure-desktop-instance.ps1') < prepare.indexOf('stop-installed-desktop.ps1'));
-  assert.match(prepare, /Unable to preserve the target installation identity/);
+  assert.match(prepare, /Result := CustomMessage\('SetupIdentityFailed'\)/);
 });
