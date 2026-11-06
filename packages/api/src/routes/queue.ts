@@ -32,7 +32,7 @@ import {
 } from '../domains/cats/services/agents/invocation/active-execution-service.js';
 import {
   type InvocationQueue,
-  isSteerableQueueEntry,
+  isQueueMessageSelectionEligible,
   isSystemPinnedQueueEntry,
   type QueueEntry,
   queueEntryMessageIds,
@@ -1466,7 +1466,12 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       const anchor = invocationQueue
         .list(threadId, guard.userId)
         .find((candidate) => candidate.id === entryId && isPublicQueueEntry(candidate));
-      if (!anchor || anchor.status !== 'queued' || !isSteerableQueueEntry(anchor) || !anchor.payload.messageId) {
+      if (
+        !anchor ||
+        anchor.status !== 'queued' ||
+        !isQueueMessageSelectionEligible(anchor) ||
+        !anchor.payload.messageId
+      ) {
         reply.status(409);
         return { error: '该消息当前不可 Steer', code: 'STEER_ENTRY_UNAVAILABLE' };
       }
@@ -1666,7 +1671,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
         anchor &&
         (!isPublicQueueEntry(anchor) ||
           anchor.status !== 'queued' ||
-          !isSteerableQueueEntry(anchor) ||
+          !isQueueMessageSelectionEligible(anchor) ||
           anchor.payload.messageId !== sourceRecordId)
       ) {
         reply.status(409);
@@ -1733,11 +1738,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
         intent: anchor?.execution.intent ?? 'execute',
         autoExecute: anchor?.execution.autoExecute ?? true,
         priority: anchor?.priority ?? 'normal',
-        ...(anchor?.sourceCategory
-          ? { sourceCategory: anchor.sourceCategory }
-          : source.from?.kind === 'agent'
-            ? { sourceCategory: 'a2a' as const }
-            : {}),
+        ...(anchor?.sourceCategory ? { sourceCategory: anchor.sourceCategory } : {}),
       });
 
       let reconciled = await invocationQueue.reconcileQueuedMessageTargetsDurable(
@@ -1902,7 +1903,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
         reply.status(409);
         return { error: '条目正在处理中，无法改派', code: 'ENTRY_PROCESSING' };
       }
-      if (!isSteerableQueueEntry(entry)) {
+      if (!isQueueMessageSelectionEligible(entry)) {
         reply.status(409);
         return { error: '该条目不支持不中断发送', code: 'ENTRY_CONTINUE_UNAVAILABLE' };
       }

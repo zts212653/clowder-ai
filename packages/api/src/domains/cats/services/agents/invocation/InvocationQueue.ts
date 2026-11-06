@@ -263,8 +263,8 @@ function isOrdinaryBodyReadEntry(entry: Pick<QueueEntry, 'sourceCategory' | 'exe
   );
 }
 
-/** Operator message controls retain typed/domain carriers under their existing owner. */
-export function isSteerableQueueEntry(entry: QueueEntry): boolean {
+/** Public message target selection and continue do not acquire a domain carrier's work. */
+export function isQueueMessageSelectionEligible(entry: QueueEntry): boolean {
   return (
     !isSystemPinnedQueueEntry(entry) &&
     (entry.kind === 'conversation_input' ||
@@ -1427,7 +1427,7 @@ export class InvocationQueue {
     at = Date.now(),
   ): Promise<QueueEntry | null> {
     const entry = this.findEntry(threadId, userId, entryId);
-    if (!entry || entry.status !== 'queued' || !isSteerableQueueEntry(entry)) {
+    if (!entry || entry.status !== 'queued' || !isQueueMessageSelectionEligible(entry)) {
       return null;
     }
     const assignsTargetlessConversation = entry.targets.length === 0;
