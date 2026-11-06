@@ -1512,6 +1512,76 @@ describe('GeminiAcpAdapter integration', () => {
     assert.ok(!sawPrompt, 'Prompt should NOT have been sent after abort');
   });
 
+  it('#1838: an aborted ACP prompt keeps the physical stop unknown', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+    let promptSeen;
+    const promptSent = new Promise((resolve) => {
+      promptSeen = resolve;
+    });
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          setImmediate(() =>
+            agentStdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: INIT_RESULT })}\n`),
+          );
+        } else if (msg.method === 'session/new') {
+          setImmediate(() =>
+            agentStdout.write(
+              `${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { sessionId: 'hung-sess' } })}\n`,
+            ),
+          );
+        } else if (msg.method === 'session/prompt') {
+          // The upstream prompt is never answered: session/cancel is only a notification.
+          promptSeen();
+        }
+      }
+    });
+
+    const ac = new AbortController();
+    pool = createPoolWithSpawn(() => child);
+    const adapter = new GeminiAcpAdapter({
+      catId: 'gemini',
+      pool,
+      poolKey: TEST_POOL_KEY,
+      projectRoot: '/tmp',
+      providerName: 'google',
+      modelName: 'gemini-acp',
+    });
+
+    const messages = [];
+    const run = (async () => {
+      for await (const msg of adapter.invoke('hello', { signal: ac.signal })) messages.push(msg);
+    })();
+    await promptSent;
+    ac.abort();
+    await run;
+
+    const done = messages.find((m) => m.type === 'done');
+    assert.ok(done, `Should yield done, got: ${JSON.stringify(messages.map((m) => m.type))}`);
+    assert.equal(done.providerTeardown, 'unconfirmed', 'an abort is not proof the upstream prompt stopped');
+  });
+
+  it('#1838: a completed ACP prompt is not marked as an unknown stop', async () => {
+    const result = createPoolWithAutoRespond();
+    pool = result.pool;
+    const adapter = new GeminiAcpAdapter({
+      catId: 'gemini',
+      pool,
+      poolKey: TEST_POOL_KEY,
+      projectRoot: '/tmp',
+      providerName: 'google',
+      modelName: 'gemini-acp',
+    });
+
+    const messages = [];
+    for await (const msg of adapter.invoke('hello')) messages.push(msg);
+
+    const done = messages.find((m) => m.type === 'done');
+    assert.ok(done, `Should yield done, got: ${JSON.stringify(messages.map((m) => m.type))}`);
+    assert.equal(done.providerTeardown, undefined, 'the final prompt response is this turn stop proof');
+  });
+
   it('P2: pre-aborted signal short-circuits immediately', async () => {
     const result = createPoolWithAutoRespond();
     pool = result.pool;

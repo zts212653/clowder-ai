@@ -713,6 +713,12 @@ export class AcpAgentService implements AgentService {
     const markPromptAcknowledged = () => {
       if (promptPhase === 'active_unacknowledged') promptPhase = 'provider_acknowledged';
     };
+    // #1838: only the final prompt RPC response proves this turn's provider work ended. An abort,
+    // timeout or stream failure can leave the upstream prompt running (session/cancel is a
+    // notification; lease release and iterator return are not stop receipts), so the Host must
+    // keep the physical stop unknown. A prompt that never left the Host owns no writer.
+    const promptStopUnconfirmed = () =>
+      promptPhase === 'active_unacknowledged' || promptPhase === 'locally_terminated_unacknowledged';
 
     // Per-invoke capacity listener — covers the entire invoke lifecycle (newSession + prompt + grace).
     // This is intentionally invoke-level, not prompt-level: capacity is a provider-level property
@@ -1438,7 +1444,13 @@ export class AcpAgentService implements AgentService {
             },
             timestamp: Date.now(),
           };
-          yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
+          yield {
+            type: 'done',
+            catId: this.catId,
+            metadata,
+            ...(promptStopUnconfirmed() ? { providerTeardown: 'unconfirmed' as const } : {}),
+            timestamp: Date.now(),
+          };
           return; // Exit — error path handled completion
         }
       }
@@ -1486,7 +1498,13 @@ export class AcpAgentService implements AgentService {
         },
         timestamp: Date.now(),
       };
-      yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
+      yield {
+        type: 'done',
+        catId: this.catId,
+        metadata,
+        ...(promptStopUnconfirmed() ? { providerTeardown: 'unconfirmed' as const } : {}),
+        timestamp: Date.now(),
+      };
     } finally {
       if (sessionId) cancelActivePromptSession(sessionId);
       agyActive = false;
