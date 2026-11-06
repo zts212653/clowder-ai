@@ -1,18 +1,20 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { installerSha256 } from './nightly-desktop.mjs';
 import { buildReport, renderReport, selectCases } from './nightly-report.mjs';
 
-const { cases, expectedFailures } = JSON.parse(
-  fs.readFileSync(new URL('./nightly-cases.json', import.meta.url), 'utf8'),
-);
-const [command, directory, extra] = process.argv.slice(2);
+const catalog = JSON.parse(fs.readFileSync(new URL('./nightly-cases.json', import.meta.url), 'utf8'));
+const { cases, expectedFailures } = catalog;
+const catalogDigest = createHash('sha256').update(JSON.stringify(catalog)).digest('hex');
+const [command, directory, ...desktopFiles] = process.argv.slice(2);
 const { CANDIDATE_SOURCE_SHA: source, NIGHTLY_SUITE: suite, GITHUB_SHA: catalogRevision } = process.env;
 const fromActions = {
   source,
   packageVersion: process.env.CANDIDATE_VERSION,
   catalogRevision,
+  catalogDigest,
   date: process.env.NIGHTLY_DATE,
   suite,
   platforms: JSON.parse(process.env.NIGHTLY_PLATFORMS ?? '[]'),
@@ -25,7 +27,10 @@ const baseReport = command === 'reconcile' ? readJson(path.join(directory, 'repo
 const run = baseReport ?? fromActions;
 assert.match(run.runId, /^[1-9]\d*$/);
 assert.match(run.attempt, /^[1-9]\d*$/);
-if (baseReport) assert.equal(catalogRevision, run.catalogRevision, 'Use the original catalog revision');
+if (baseReport) {
+  assert.equal(catalogRevision, run.catalogRevision, 'Use the original catalog revision');
+  assert.equal(catalogDigest, run.catalogDigest, 'The checked-out case catalog differs from the run');
+}
 const selected = selectCases(cases, run.suite, run.platforms);
 const artifact = (platform) => `desktop-evidence-${platform}-attempt-${run.attempt}`;
 
@@ -109,13 +114,20 @@ if (command === 'collect') {
         return bundle.receipts;
       });
   if (command === 'reconcile') {
-    assert.ok(baseReport && extra, 'The original report and the desktop receipt file are required');
-    const desktop = readJson(extra);
-    for (const key of ['runId', 'attempt', 'source', 'catalogRevision']) {
-      assert.equal(desktop[key], run[key], `Desktop receipt ${key} does not match the run`);
-    }
+    assert.ok(
+      baseReport && desktopFiles.length,
+      'The original report and at least one desktop receipt file are required',
+    );
+    const desktopReceipts = desktopFiles.flatMap((file) => {
+      const desktop = readJson(file);
+      assert.ok(desktop, `Missing desktop receipt file: ${file}`);
+      for (const key of ['runId', 'attempt', 'source', 'catalogRevision']) {
+        assert.equal(desktop[key], run[key], `Desktop receipt ${key} does not match the run`);
+      }
+      return desktop.receipts.map((receipt) => ({ receipt, root: path.dirname(file) }));
+    });
     const received = new Set();
-    for (const receipt of desktop.receipts) {
+    for (const { receipt, root } of desktopReceipts) {
       const entry = selected.find(({ id, platform }) => receipt.id === id && receipt.platform === platform);
       assert.ok(
         entry && ['computer-use', 'manual'].includes(entry.executor),
@@ -126,11 +138,8 @@ if (command === 'collect') {
       received.add(key);
       if (receipt.status !== 'blocked') {
         assert.match(receipt.evidence, /^[A-Za-z0-9][A-Za-z0-9_.-]+$/);
-        assert.ok(
-          fs.statSync(path.join(path.dirname(extra), receipt.evidence)).isFile(),
-          'Missing desktop evidence file',
-        );
-        const native = path.join(directory, artifact(receipt.platform));
+        assert.ok(fs.statSync(path.join(root, receipt.evidence)).isFile(), 'Missing desktop evidence file');
+        const native = path.join(root, artifact(receipt.platform));
         assert.match(receipt.packageSha256, /^[a-f0-9]{64}$/);
         assert.equal(
           receipt.packageSha256,
