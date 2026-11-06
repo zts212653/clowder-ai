@@ -24,6 +24,7 @@ const fromActions = {
 };
 const readJson = (file) => (fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : undefined);
 const baseReport = command === 'reconcile' ? readJson(path.join(directory, 'report.json')) : undefined;
+if (command === 'reconcile') assert.ok(baseReport, 'The original report is required');
 const run = baseReport ?? fromActions;
 assert.match(run.runId, /^[1-9]\d*$/);
 assert.match(run.attempt, /^[1-9]\d*$/);
@@ -136,11 +137,19 @@ if (command === 'collect') {
         return bundle.receipts;
       });
   if (command === 'reconcile') {
-    assert.ok(
-      baseReport && desktopFiles.length,
-      'The original report and at least one desktop receipt file are required',
-    );
-    const desktopReceipts = desktopFiles.flatMap((file) => {
+    const inboxMode = desktopFiles.length === 0;
+    const receiptFiles = inboxMode
+      ? run.platforms.flatMap((platform) => {
+          const inbox = path.join(directory, 'desktop-receipts', platform);
+          if (!fs.existsSync(inbox)) return [];
+          return fs
+            .readdirSync(inbox, { withFileTypes: true })
+            .filter((entry) => entry.isFile() && entry.name.endsWith('.receipt.json'))
+            .map((entry) => path.join(inbox, entry.name))
+            .sort();
+        })
+      : desktopFiles;
+    const desktopReceipts = receiptFiles.flatMap((file) => {
       const desktop = readJson(file);
       assert.ok(desktop, `Missing desktop receipt file: ${file}`);
       for (const key of ['runId', 'attempt', 'source', 'catalogRevision']) {
@@ -150,6 +159,7 @@ if (command === 'collect') {
     });
     const received = new Set();
     for (const { receipt, root } of desktopReceipts) {
+      if (inboxMode) assert.equal(receipt.platform, path.basename(root), 'Desktop receipt is in the wrong inbox');
       const entry = selected.find(({ id, platform }) => receipt.id === id && receipt.platform === platform);
       assert.ok(
         entry && ['computer-use', 'manual'].includes(entry.executor),
@@ -158,10 +168,12 @@ if (command === 'collect') {
       const key = `${receipt.platform}/${receipt.id}`;
       assert.ok(!received.has(key), 'Duplicate desktop receipt');
       received.add(key);
-      if (receipt.status !== 'blocked') {
+      if (receipt.evidence || receipt.status !== 'blocked') {
         assert.match(receipt.evidence, /^[A-Za-z0-9][A-Za-z0-9_.-]+$/);
         assert.ok(fs.statSync(path.join(root, receipt.evidence)).isFile(), 'Missing desktop evidence file');
-        const native = path.join(root, artifact(receipt.platform));
+      }
+      if (receipt.status !== 'blocked') {
+        const native = path.join(inboxMode ? directory : root, artifact(receipt.platform));
         assert.match(receipt.packageSha256, /^[a-f0-9]{64}$/);
         assert.equal(
           receipt.packageSha256,
@@ -172,7 +184,10 @@ if (command === 'collect') {
       const index = receipts.findIndex(({ id, platform }) => receipt.id === id && receipt.platform === platform);
       assert.ok(index === -1 || receipts[index].status === 'blocked', 'Existing execution result cannot be replaced');
       if (index !== -1) receipts.splice(index, 1);
-      receipts.push(receipt);
+      const evidence = receipt.evidence
+        ? path.relative(directory, path.join(root, receipt.evidence)).split(path.sep).join('/')
+        : undefined;
+      receipts.push({ ...receipt, evidence });
     }
   }
   const report = buildReport(cases, run, receipts, expectedFailures);

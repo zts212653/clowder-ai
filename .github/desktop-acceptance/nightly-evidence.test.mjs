@@ -102,6 +102,41 @@ test('a Windows desktop receipt completes its case and preserves the remote Mac 
   assert.equal(JSON.parse(fs.readFileSync(path.join(root, 'report-with-desktop.json'), 'utf8')).status, 'passed');
   assert.equal(fs.readFileSync(path.join(root, 'report.json'), 'utf8'), base);
 
+  const inbox = path.join(root, 'desktop-receipts');
+  const winInbox = path.join(inbox, 'windows-x64');
+  const macInbox = path.join(inbox, 'macos-arm64');
+  fs.mkdirSync(winInbox, { recursive: true });
+  fs.mkdirSync(macInbox, { recursive: true });
+  fs.mkdirSync(mac, { recursive: true });
+  fs.copyFileSync(path.join(macNative, 'distribution-sha256.txt'), path.join(mac, 'distribution-sha256.txt'));
+  const discovered = () => JSON.parse(fs.readFileSync(path.join(root, 'report-with-desktop.json'), 'utf8'));
+  write(path.join(macInbox, 'desktop.receipt.json.pending'), { ...desktop, attempt: 'wrong' });
+  assert.equal(run('reconcile', root).status, 1);
+  assert.equal(discovered().status, 'incomplete');
+  fs.copyFileSync(path.join(root, 'onboarding.png'), path.join(winInbox, 'onboarding.png'));
+  write(path.join(winInbox, 'desktop.receipt.json'), desktop);
+  assert.equal(run('reconcile', root).status, 1);
+  assert.equal(discovered().status, 'incomplete');
+  fs.copyFileSync(path.join(macRoot, 'onboarding.png'), path.join(macInbox, 'onboarding.png'));
+  write(path.join(macInbox, 'desktop.receipt.json'), desktop);
+  assert.match(run('reconcile', root).stderr, /wrong inbox/);
+  write(path.join(macInbox, 'desktop.receipt.json'), {
+    ...desktop,
+    receipts: [{ ...desktop.receipts[0], platform: 'macos-arm64', packageSha256: 'd'.repeat(64) }],
+  });
+  assert.match(run('reconcile', root).stderr, /different installation package/);
+  fs.copyFileSync(macReceipt, path.join(macInbox, 'desktop.receipt.json'));
+  const combined = run('reconcile', root);
+  assert.equal(combined.status, 0, combined.stderr);
+  assert.equal(discovered().status, 'passed');
+  assert.deepEqual(
+    discovered()
+      .cases.filter(({ id }) => id === 'DESKTOP-ONBOARDING')
+      .map(({ evidence }) => evidence),
+    ['desktop-receipts/windows-x64/onboarding.png', 'desktop-receipts/macos-arm64/onboarding.png'],
+  );
+  assert.equal(fs.readFileSync(path.join(root, 'report.json'), 'utf8'), base);
+
   write(path.join(evidence, 'distribution-results.json'), { checks: [{ name: 'installer', status: 'failed' }] });
   fs.writeFileSync(path.join(installer, 'phase.txt'), 'restore');
   write(path.join(installer, 'restore-checks.json'), {
