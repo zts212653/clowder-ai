@@ -1454,7 +1454,10 @@ export async function prepareInvocationExecutionBinding(
   const memberRegistryRevision = catRegistry.getRevision();
   const catConfig = catRegistry.tryGet(input.catId as string)?.config;
   if (!isPublishedCatalogSnapshotCurrent(catConfig))
-    throw new ExecutionAdmissionConflict('Member catalog publication is stale; retry after configuration refresh.');
+    throw new ExecutionAdmissionConflict(
+      'Member catalog publication is stale; retry after configuration refresh.',
+      true,
+    );
   const carrier = input.service?.freshnessCarrierCapability?.();
   const declaredImplementation = input.service?.implementationSnapshot?.();
   if (declaredImplementation?.clientId && declaredImplementation.clientId !== catConfig?.clientId)
@@ -1603,10 +1606,12 @@ export async function prepareInvocationExecutionBinding(
   if (workspaceChanged || !isDeepStrictEqual(threadPreferences, currentThread.threadPreferences))
     throw new ExecutionAdmissionConflict(
       'Thread execution configuration changed during admission; retry this invocation.',
+      true,
     );
   if (catRegistry.getRevision() !== memberRegistryRevision || !isPublishedCatalogSnapshotCurrent(catConfig))
     throw new ExecutionAdmissionConflict(
       'Member configuration changed during execution admission; retry this invocation.',
+      true,
     );
   const currentAccountBinding = freezeExecutionAccountBinding({
     catId: input.catId,
@@ -1617,19 +1622,22 @@ export async function prepareInvocationExecutionBinding(
   if (!isDeepStrictEqual(binding, currentAccountBinding))
     throw new ExecutionAdmissionConflict(
       'Execution configuration changed during execution admission; retry this invocation.',
+      true,
     );
   if (
     input.service?.implementationSnapshot &&
     !isDeepStrictEqual(input.service.implementationSnapshot(), implementation)
   )
-    throw new ExecutionAdmissionConflict('session_host_generation_changed');
+    throw new ExecutionAdmissionConflict('session_host_generation_changed', true);
   if (!mcpSources.isCurrent())
     throw new ExecutionAdmissionConflict(
       'MCP configuration changed during execution admission; retry this invocation.',
+      true,
     );
   if (!isPluginMcpCurrent())
     throw new ExecutionAdmissionConflict(
       'Plugin MCP activation changed during execution admission; retry this invocation.',
+      true,
     );
   const frozenL0Input =
     catConfig && (input.service?.injectsL0Natively?.() || catConfig.clientId === 'opencode')

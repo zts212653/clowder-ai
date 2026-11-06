@@ -1143,6 +1143,12 @@ export interface LifecyclePreAdmissionFailureInput {
   content: string;
   contentBlocks?: readonly MessageContent[];
   failedAt: number;
+  /** Binding rejection belongs to a specific target of the original short claim. */
+  claim?: {
+    id: string;
+    ledger: QueueLedgerStore;
+    makeWake?: (failureId: string) => QueueLedgerEntry;
+  };
 }
 
 export type CommitLifecyclePreAdmissionFailureResult =
@@ -1155,8 +1161,9 @@ export type CommitLifecyclePreAdmissionFailureResult =
     }
   | { kind: 'not_found' };
 
-export function preAdmissionFailureIdempotencyKey(entryId: string): string {
-  return `message-lifecycle:pre-admission-failure:${entryId}`;
+export function preAdmissionFailureIdempotencyKey(entryId: string, targetId?: string): string {
+  const key = `message-lifecycle:pre-admission-failure:${entryId}`;
+  return targetId === undefined ? key : `${key}:${JSON.stringify(targetId)}`;
 }
 
 export function matchesLifecyclePreAdmissionFailure(
@@ -3888,7 +3895,10 @@ export class MessageStore {
     const index = this.messages.findIndex((message) => message.id === input.sourceMessageId);
     if (index === -1) return { kind: 'not_found' };
     const source = this.messages[index]!;
-    const idempotencyKey = preAdmissionFailureIdempotencyKey(input.expectedEntryId);
+    const idempotencyKey = preAdmissionFailureIdempotencyKey(
+      input.expectedEntryId,
+      input.claim ? input.requestedTargets[0] : undefined,
+    );
     const existingFailure = this.getByIdempotencyKey('system', source.threadId, idempotencyKey);
     if (existingFailure) {
       if (!matchesLifecyclePreAdmissionFailure(existingFailure, source, input)) {
@@ -4001,6 +4011,24 @@ export class MessageStore {
           );
     if (!settledLifecycle) {
       return { kind: 'conflict', reason: 'invalid_failure', inputMessage: structuredClone(source) };
+    }
+    if (input.claim) {
+      const { ledger, id, makeWake } = input.claim;
+      if (!(ledger instanceof InMemoryQueueLedgerStore)) {
+        throw new Error('pre-admission failure requires the matching in-memory Queue ledger');
+      }
+      const row = ledger.getNow(source.threadId, input.expectedEntryId);
+      if (
+        row?.status !== 'claimed' ||
+        row.claimId !== id ||
+        row.payload.messageId !== source.id ||
+        input.requestedTargets.length !== 1 ||
+        !row.claimedTargetIds?.includes(input.requestedTargets[0]!)
+      )
+        return { kind: 'conflict', reason: 'invalid_failure', inputMessage: structuredClone(source) };
+      if (makeWake && ledger.enqueueNow([makeWake(failureId)]).outcome !== 'enqueued') {
+        throw new Error('pre-admission failure wake admission conflict');
+      }
     }
     // Validate the entire settlement before append can publish effects. Notify
     // consumers only after the source and its failure are both committed.

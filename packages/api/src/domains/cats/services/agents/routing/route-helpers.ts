@@ -427,6 +427,11 @@ export interface RouteOptions {
         seenAt: number;
       }) => Promise<void>)
     | undefined;
+  /** Give the Queue owner the final binding rejection before any child is admitted. */
+  onExecutionBindingRejected?: (
+    catId: CatId,
+    reason: 'execution_binding_conflict' | 'execution_binding_unavailable',
+  ) => Promise<boolean>;
   /** Create the exact child's durable processing response before provider startup. */
   onLifecycleInvocationStarted?:
     | ((input: {

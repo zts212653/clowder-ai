@@ -108,7 +108,11 @@ import { resolveManagedSessionPolicySnapshot } from '../invocation/session-polic
 import { settleChildResponse } from '../invocation/settle-child-response.js';
 import { mergeStreams } from '../invocation/stream-merge.js';
 import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentService.js';
-import { AgentServiceUnavailableError, ExecutionAdmissionConflict } from '../registry/AgentServiceUnavailableError.js';
+import {
+  AgentServiceUnavailableError,
+  ExecutionAdmissionConflict,
+  terminalExecutionBindingFailure,
+} from '../registry/AgentServiceUnavailableError.js';
 import { parseA2AMentions } from '../routing/a2a-mentions.js';
 import { accumulateTextAggregate } from '../text-aggregation.js';
 import { commitCompletedRouteResponse, isCollectiveBoundResponse } from './commit-completed-response.js';
@@ -257,6 +261,9 @@ async function* routeParallelPrepared(
           signal: catSignal,
         });
       const current = pinnedServices.get(catId);
+      const preparationError = servicePreparationErrors.get(catId);
+      if (!current && terminalExecutionBindingFailure(preparationError) && options.onExecutionBindingRejected)
+        throw preparationError;
       if (!current) return capture();
       const admitted = await invocationServices.admit(
         current,
@@ -274,17 +281,23 @@ async function* routeParallelPrepared(
     const catId = targetCats[index];
     if (!catId) continue;
     if (result.status === 'fulfilled') executionBindings.set(catId, result.value);
-    else
+    else {
+      const error = result.reason;
+      const terminalReason = terminalExecutionBindingFailure(error);
+      if (
+        executionControls.get(catId)?.signal.aborted ||
+        (terminalReason && (await options.onExecutionBindingRejected?.(catId, terminalReason)))
+      )
+        continue;
       yield {
         type: 'error',
         catId,
         errorCode:
-          result.reason instanceof ExecutionAdmissionConflict
-            ? 'execution_binding_conflict'
-            : 'execution_binding_unavailable',
-        error: result.reason instanceof Error ? result.reason.message : 'Execution binding is unavailable',
+          error instanceof ExecutionAdmissionConflict ? 'execution_binding_conflict' : 'execution_binding_unavailable',
+        error: error instanceof Error ? error.message : 'Execution binding is unavailable',
         timestamp: Date.now(),
       };
+    }
   }
   targetCats = targetCats.filter((catId) => executionBindings.has(catId));
   if (targetCats.length === 0) {

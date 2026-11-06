@@ -5,7 +5,7 @@ const { installationIdentity, isInstallationShutdownRequest } = require('./insta
 const ServiceManager = require('./service-manager');
 const { createStartupReporter, showStartupFailure } = require('./startup-state');
 const { createStartupTimeline } = require('./startup-timing');
-const { showVisibleRenderer } = require('./visible-renderer');
+const { createStartupSplash, showVisibleRenderer } = require('./visible-renderer');
 const { installRendererNavigation } = require('./renderer-navigation');
 const {
   resolveDesktopRuntime,
@@ -41,6 +41,8 @@ const PROJECT_ROOT = resolveProjectRootFromDir(__dirname);
 const desktopRuntime = resolveDesktopRuntime();
 const FRONTEND_PORT = desktopRuntime.frontendPort;
 const API_PORT = desktopRuntime.apiPort;
+// Keep the renderer's API origin and cookies on localhost while using the IPv4 address verified at startup.
+app.commandLine.appendSwitch('host-resolver-rules', `MAP localhost:${API_PORT} 127.0.0.1`);
 prepareDesktopInstance(app, desktopRuntime);
 const APP_URL = `http://localhost:${FRONTEND_PORT}`;
 const APP_ORIGIN = new URL(APP_URL).origin;
@@ -65,6 +67,7 @@ dbg(`process.type=${process.type}, versions.electron=${process.versions.electron
 appLifecycle.logRuntimeIdentity({ dbg, app, projectRoot: PROJECT_ROOT });
 
 let mainWindow = null;
+let mainWindowPresentable = false;
 let splashWindow = null;
 let tray = null;
 let services = null;
@@ -96,24 +99,15 @@ async function refreshRendererLinkOrigins() {
     dbg(`Could not resolve preview gateway origin: ${safeErrorMessage(error)}`);
   }
 }
-function createSplashWindow() {
-  splashWindow = new BrowserWindow({
-    width: 420,
-    height: 320,
-    frame: false,
-    resizable: false,
-    transparent: false,
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      additionalArguments: [`--cat-cafe-api-origin=${API_ORIGIN}`],
-      contextIsolation: true,
-      nodeIntegration: false,
-    },
-  });
-  splashWindow.loadFile(path.join(__dirname, 'splash.html'));
-  splashWindow.center();
+function getPresentableMainWindow() {
+  // Keep early renderer IPC identity separate from permission to show the window.
+  return mainWindowPresentable ? mainWindow : null;
 }
 async function createMainWindow() {
+  // Service readiness can expire while resolving preview origins or loading
+  // the first frame. Use the same owned child handles at both boundaries.
+  const activeServices = services;
+  activeServices.assertStartupProcessesRunning();
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -145,9 +139,6 @@ async function createMainWindow() {
     lifecycle,
     onUnavailable: () => updatePrompt?.markRendererUnavailable(),
   });
-  mainWindow.webContents.once('dom-ready', () => startupTimeline.mark('renderer-dom-ready'));
-  mainWindow.webContents.once('did-finish-load', () => startupTimeline.mark('renderer-did-finish-load'));
-
   mainWindow.on('close', (e) => {
     const decision = decideWindowClose({
       platform: process.platform,
@@ -168,15 +159,23 @@ async function createMainWindow() {
 
   mainWindow.on('closed', () => {
     mainWindow = null;
+    mainWindowPresentable = false;
   });
+  await mainWindow.loadURL('about:blank');
+  startupController.signal.throwIfAborted();
+  mainWindow.webContents.once('dom-ready', () => startupTimeline.mark('renderer-dom-ready'));
+  mainWindow.webContents.once('did-finish-load', () => startupTimeline.mark('renderer-did-finish-load'));
   return startupTimeline.runPhase('renderer-visible', () =>
     showVisibleRenderer({
       window: mainWindow,
       url: createVersionedRendererUrl(APP_URL, app.getVersion()),
+      startupId: activeServices.webStartupId,
       signal: startupController.signal,
       onVisible: () => {
+        activeServices.assertStartupProcessesRunning();
         if (splashWindow && !splashWindow.isDestroyed()) splashWindow.close();
-        mainWindow.show();
+        mainWindowPresentable = true;
+        if (!updatePrompt?.presentPending()) mainWindow.show();
       },
     }),
   );
@@ -227,7 +226,7 @@ const handleStartupFailure = createStartupFailureHandler({
 });
 
 const windowRecovery = createWindowRecoveryController({
-  getState: () => ({ phase: startupPhase, mainWindow, splashWindow, services, isQuitting }),
+  getState: () => ({ phase: startupPhase, mainWindow: getPresentableMainWindow(), splashWindow, services, isQuitting }),
   createMainWindow,
   quitArg: QUIT_FOR_UPDATE_ARG,
   isShutdownRequest: isInstallationShutdownRequest,
@@ -258,7 +257,7 @@ app.on('ready', async () => {
     return;
   }
 
-  createSplashWindow();
+  splashWindow = createStartupSplash(BrowserWindow, API_ORIGIN);
   lifecycle('splash-created');
   startupPhase = 'starting';
   initializeDesktopInstance(session, desktopRuntime, PROJECT_ROOT);
@@ -267,7 +266,7 @@ app.on('ready', async () => {
   lifecycle('tray-create-requested');
   const trayResult = createNativeDesktopTrayResult({
     electron: require('electron'),
-    getMainWindow: () => mainWindow,
+    getMainWindow: getPresentableMainWindow,
     onManualUpdate: checkForUpdatesManually,
     onQuit: () => requestQuit('tray'),
     showAbout,
@@ -305,6 +304,7 @@ app.on('ready', async () => {
     dialog,
     Notification,
     getMainWindow: () => mainWindow,
+    getPresentableMainWindow,
     getTray: () => tray,
     trustedOrigin: APP_ORIGIN,
     quitApp: () => requestQuit('update'),

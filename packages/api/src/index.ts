@@ -54,7 +54,7 @@ import { createRedisClient, SessionStore } from '@cat-cafe/shared/utils';
 import fastifyCookie from '@fastify/cookie';
 import cors from '@fastify/cors';
 import fastifyWebsocket from '@fastify/websocket';
-import type { FastifyReply } from 'fastify';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import { resolveAnthropicRuntimeProfile, validateRuntimeProviderBinding } from './config/account-resolver.js';
 import { resolveInvokeCapabilityRoot } from './config/capabilities/invoke-capability-root.js';
 import { migrateStartupCodexMcpConfig, regenerateStartupCliConfigs } from './config/capabilities/startup-cli-config.js';
@@ -726,22 +726,28 @@ async function main(): Promise<void> {
     backend: 'initializing' | 'redis' | 'memory';
     durability: 'initializing' | 'durable' | 'degraded_memory';
   } = { backend: 'initializing', durability: 'initializing' };
-  const healthHandler = async () => ({
-    status: 'ok' as const,
-    timestamp: Date.now(),
-    deploymentRevision: runtimeDeploymentRevision,
-    ...(runtimeDeploymentContext
-      ? {
-          deploymentSubjectRef: runtimeDeploymentSubjectRef(
-            runtimeDeploymentContext.installationId,
-            runtimeDeploymentContext.deploymentId,
-          ),
-          deploymentBootId: runtimeDeploymentContext.bootId,
-          deploymentBootSequence: runtimeDeploymentContext.bootSequence,
-        }
-      : {}),
-    callbackAuth: callbackAuthCapability,
-  });
+  const desktopStartupId = process.env.CAT_CAFE_DESKTOP_STARTUP_ID;
+  const healthHandler = async (request: FastifyRequest, reply: FastifyReply) => {
+    if (desktopStartupId && request.headers['x-clowder-desktop-probe'] === '1') {
+      reply.header('x-clowder-desktop-startup-id', desktopStartupId);
+    }
+    return {
+      status: 'ok' as const,
+      timestamp: Date.now(),
+      deploymentRevision: runtimeDeploymentRevision,
+      ...(runtimeDeploymentContext
+        ? {
+            deploymentSubjectRef: runtimeDeploymentSubjectRef(
+              runtimeDeploymentContext.installationId,
+              runtimeDeploymentContext.deploymentId,
+            ),
+            deploymentBootId: runtimeDeploymentContext.bootId,
+            deploymentBootSequence: runtimeDeploymentContext.bootSequence,
+          }
+        : {}),
+      callbackAuth: callbackAuthCapability,
+    };
+  };
   app.get('/health', healthHandler);
   app.get('/api/health', healthHandler);
 
