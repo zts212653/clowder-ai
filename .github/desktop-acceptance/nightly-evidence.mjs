@@ -52,13 +52,20 @@ if (command === 'collect') {
           return [{ id, platform, status: 'passed', evidence: `${artifact(platform)}/${kind}/result.json` }];
         }
         if (check.status === 'failed' && phase) {
+          const phaseEvidence = `${kind}/${phase}-checks.json`;
+          const phaseChecks =
+            !check.reason && ['create', 'restore'].includes(phase)
+              ? readJson(path.join(directory, phaseEvidence))
+              : undefined;
+          const failures =
+            phaseChecks?.checks.filter(({ status }) => status === 'failed').map(({ name }) => name) ?? [];
           return [
             {
               id,
               platform,
               status: 'failed',
-              code: check.reason ?? `windows-${phase}`,
-              evidence: `${artifact(platform)}/distribution-results.json`,
+              code: check.reason ?? `windows-${phase}${failures.length ? `-${failures.join('+')}` : ''}`,
+              evidence: `${artifact(platform)}/${failures.length ? phaseEvidence : 'distribution-results.json'}`,
             },
           ];
         }
