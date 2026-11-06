@@ -12,7 +12,7 @@ created: 2026-11-06
 
 维护者接纳的结果是：持续故障不能反复挤占交互区域；关闭提示应有效，恢复后应清理；自有进程意外退出应给出可理解的状态，并区分启动失败、主动退出和升级停止。
 
-本方案提供故障通知与明确的退出重开路径，不自动重启 Redis、不自动降级内存、不全局暂停轮询。维持普通 toast、用户主动打开的通知全文、设置返回提示的原有语义，不更改通用容量与点击能力。
+本方案提供故障通知与明确的退出重开路径，不自动重启 Redis、不自动降级内存、不全局暂停轮询。普通临时通知仍限 10 条，用户主动打开的通知全文保留原有语义；连接状态通知独立保留且只让文字区域的点击穿过，按钮仍可操作。设置返回提示不变。
 
 ## 复现与证据分层
 
@@ -20,6 +20,8 @@ created: 2026-11-06
 - Web 状态：使用真实 `apiFetch` 和 toast store，连续请求失败时，手动关闭后仍会被下一次轮询重新创建；恢复请求成功后原提示也没有主动清理。store 测试同时覆盖用户持有通知的去重边界。
 - 实际浏览器组件：渲染生产 `ToastContainer`、生产 CSS 和 `apiFetch`，只替换 HTTP 线。原代码运行相同场景，在第 60 秒观察到 **2 条**可见提示，断言 `2 !== 1`；修复后走通持续断联、关闭、恢复、再次断联、再次恢复和输入框点击输入。
 - 这不是安装版三服务终止后的整体验收。普通 5000ms toast 的计时与 300ms 退出动画能够产生重叠，但本轮不能据此声称已复现报告中的“10 条锁屏堆积”。安装包 build SHA、锁屏、设置返回与打开全文等现场条件仍需单独验证。
+
+鲸鲸独立核对原 Issue、维护者首反和当前调用链后，指出 `duration: 0` 不受临时队列淘汰保护，以及原浏览器 fixture 输入框在顶部不能证明右下输入区不受遮挡。本轮补出了两个状态 RED（其他通知淘汰连接提示、恢复时中断用户打开的全文），并在右下角实际覆盖的输入框上复现了点击被 toast 拦截。修复后同一坐标应可输入并点击发送，而连接提示关闭按钮仍可用。
 
 原始命令输出保留于本工位的 `artifacts/issue1881/`，不提交本机绝对路径日志。
 
@@ -29,7 +31,9 @@ created: 2026-11-06
 
 `apiFetch → performApiFetch → performSessionRequest → diagnosticFetch`；传输失败由 `reportApiConnectionFailure → toastStore.addToast → ToastContainer` 展示。
 
-`api-client.ts` 用当前故障的 toast ID 表示一个提示周期。第一次 TypeError/TimeoutError 创建现有的可关闭常驻提示；同周期后续失败仅记诊断，不新增 toast。手动关闭不会解除故障周期。普通业务请求实际返回 2xx 或条件 GET 返回 304 后，仅删除该故障 toast 并解除周期，允许之后的新故障再提示。503、调用者 abort、仅 session bootstrap 或诊断上报成功均不作为业务恢复。
+`api-client.ts` 用当前故障的 toast ID 表示一个提示周期。第一次 TypeError/TimeoutError 创建可关闭常驻提示，并标记 `pinned`，以免 10 条无关临时通知将它挤掉；同周期后续失败仅记诊断，不新增 toast。手动关闭不会解除故障周期。普通业务请求收到任意 HTTP 响应即结束传输故障周期：包括 304、503、401，后两者的业务/会话错误仍交给原调用方。调用者 abort、仅 session bootstrap 或诊断上报成功不作为业务传输恢复。
+
+恢复时只自动删除本故障提示，用户已打开全文的 `manualDismissOnly` 通知继续留存，标题变为“后端连接已恢复”，原文与阅读器保持打开。下一次故障可以另建当前连接提示，历史阅读内容不会冒充当前异常。系统 `pinned` 与用户打开全文明确分开。连接提示设置 `passThrough`，仅其文字与卡片背景不接收点击，关闭、查看全文、action 等按钮仍可点击；普通通知点击方式不变。
 
 使用已有请求继续探测恢复，不增加计时器、探针、自动重试或对 mutating 请求的重放。故障周期仅在当前页面内存中，刷新后重新识别；它是临时连接反馈，不是用户持久化状态。
 
@@ -47,7 +51,7 @@ created: 2026-11-06
 
 ```powershell
 node --test desktop/service-runtime-exit.test.js desktop/service-failure-handler.test.js desktop/service-startup.test.js desktop/service-shutdown.test.js
-pnpm --filter @cat-cafe/web exec vitest run src/utils/__tests__/api-client-outage.test.ts src/utils/__tests__/api-client-retry.test.ts src/utils/__tests__/api-client-timeout.test.ts src/utils/__tests__/api-client-diagnostics.test.ts src/stores/__tests__/toastStore.test.ts src/components/__tests__/ToastContainer.test.tsx
+pnpm --filter @cat-cafe/web exec vitest run src/utils/__tests__/api-client src/stores/__tests__/toastStore.test.ts src/components/__tests__/ToastContainer.test.tsx
 pnpm --filter @cat-cafe/web exec node --test test/browser/issue1881-connection-notice.test.mjs
 ```
 
@@ -55,12 +59,12 @@ pnpm --filter @cat-cafe/web exec node --test test/browser/issue1881-connection-n
 
 扩大验证时，`desktop/installation-write-boundary.test.js` 的 `source provider initialization preserves skill links...` 在 Windows 上比较 `../../...` 与 `..\\..\\...` 失败。用 `git archive` 导出未修改的同一 `upstream/next` 测试与四个依赖模块后，单独运行仍以相同断言失败；该基线问题不在本修复中改动。打包文件 allowlist 相关用例通过。
 
-验收应同时满足：同一断联周期至多一条提示、关闭后不再出现、成功后清理且下一次故障可重报、保留其他用户持有通知、业务失败不重放、主动停止不误报、三个服务连续退出不打开三个框。
+验收应同时满足：同一断联周期至多一条提示、关闭后不再出现、传输恢复后清理且下一次故障可重报、保留用户持有的通知全文、其他临时通知不能挤掉当前连接状态、文字覆盖区域仍可点击输入及发送、关闭按钮可用、业务失败不重放、主动停止不误报、三个服务连续退出不打开三个框。
 
 ## 风险、责任与回退
 
 Architecture cell：既有 Desktop 运行生命周期与 Web 传输反馈。Map delta：none；未转移 owner，未新增持久状态或协议。
 
-行为变化为连接提示由 5 秒消失改为手动关闭或恢复清理，以及桌面依赖退出新增原生通知。数据、安全、API 契约及部署边界没有变化。取消单次修复提交可回退；不需要数据迁移。
+行为变化为连接提示由 5 秒消失改为手动关闭或恢复清理、常驻文字不拦截底层点击，以及桌面依赖退出新增原生通知。数据、安全、API 契约及部署边界没有变化。撤销本 PR 可回退；不需要数据迁移。
 
 作者负责复现、实现、验证与 PR；鲸鲸负责独立分析及方案反例；非作者完成最终内容审查；维护者决定合入。安装包现场复验属于待验证项，不能把本轮隔离组件和进程测试写成安装版通过，也不在本轮关闭 Issue。

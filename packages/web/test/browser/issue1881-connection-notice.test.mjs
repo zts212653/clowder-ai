@@ -55,6 +55,17 @@ test('continuous polling honors close, recovery, a new outage and message input'
   await notices.waitFor();
   await page.clock.runFor(60_000);
   assert.equal(await notices.count(), 1);
+  const noticeBox = await notices.boundingBox();
+  const editor = page.getByLabel('Message', { exact: true });
+  const editorBox = await editor.boundingBox();
+  const point = { x: noticeBox.x + 35, y: noticeBox.y + 35 };
+  assert.ok(point.x > editorBox.x && point.x < editorBox.x + editorBox.width);
+  assert.ok(point.y > editorBox.y && point.y < editorBox.y + editorBox.height);
+  await editor.click({ position: { x: point.x - editorBox.x, y: point.y - editorBox.y }, timeout: 2_000 });
+  await page.keyboard.type('Input remains usable');
+  assert.equal(await editor.inputValue(), 'Input remains usable');
+  await page.getByRole('button', { name: 'Send', exact: true }).click({ timeout: 2_000 });
+  await page.getByText('Sent', { exact: true }).waitFor();
   const evidence = process.env.ISSUE1881_EVIDENCE_DIR;
   if (evidence) {
     mkdirSync(evidence, { recursive: true });
@@ -63,21 +74,19 @@ test('continuous polling honors close, recovery, a new outage and message input'
   await page.getByRole('button', { name: '关闭“后端连接异常”通知', exact: true }).click();
   await page.clock.runFor(60_000);
   assert.equal(await notices.count(), 0, 'closing a notice suppresses further polling reminders in the same outage');
-  await page.getByLabel('Message').click();
-  await page.keyboard.type('Input remains usable');
   assert.equal(await page.getByLabel('Message').inputValue(), 'Input remains usable');
 
   offline = false;
   await page.clock.runFor(6_000);
-  await page.getByRole('status').getByText('connected', { exact: true }).waitFor();
+  await page.getByRole('status', { name: 'Connection state' }).getByText('connected', { exact: true }).waitFor();
   offline = true;
   await page.clock.runFor(6_000);
-  await page.getByRole('status').getByText('offline', { exact: true }).waitFor();
+  await page.getByRole('status', { name: 'Connection state' }).getByText('offline', { exact: true }).waitFor();
   await notices.waitFor();
   assert.equal(await notices.count(), 1, 'a new outage can notify again after a successful recovery');
   offline = false;
   await page.clock.runFor(6_000);
-  await page.getByRole('status').getByText('connected', { exact: true }).waitFor();
+  await page.getByRole('status', { name: 'Connection state' }).getByText('connected', { exact: true }).waitFor();
   assert.equal(await notices.count(), 0, 'successful polling clears the connection notice');
   assert.deepEqual(errors, []);
   if (evidence) {

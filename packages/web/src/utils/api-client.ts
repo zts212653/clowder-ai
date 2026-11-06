@@ -50,6 +50,8 @@ export function reportApiConnectionFailure(error: unknown): boolean {
       title: t.connectionTitle,
       message: t.connectionMessage,
       duration: 0,
+      pinned: true,
+      passThrough: true,
     });
   }
   recordConnectionNotice(error, shown);
@@ -246,8 +248,21 @@ async function performApiFetch(
 ): Promise<Response> {
   try {
     const response = await performSessionRequest(path, init, timeoutMs, notifyFailure);
-    if (notifyFailure && (response.ok || response.status === 304) && connectionFailureToastId !== null) {
-      useToastStore.getState().removeToast(connectionFailureToastId);
+    if (notifyFailure && connectionFailureToastId !== null) {
+      const toastState = useToastStore.getState();
+      const notice = toastState.toasts.find((toast) => toast.id === connectionFailureToastId);
+      // Any business HTTP response ends transport loss. Do not close a reader
+      // that the user explicitly opened, even when the connection recovers.
+      if (notice?.manualDismissOnly) {
+        const title = connectionCopy().connectionRecoveredTitle;
+        useToastStore.setState((state) => ({
+          toasts: state.toasts.map((toast) =>
+            toast.id === notice.id ? { ...toast, type: 'info' as const, title } : toast,
+          ),
+        }));
+      } else {
+        toastState.removeToast(connectionFailureToastId);
+      }
       connectionFailureToastId = null;
     }
     return response;
