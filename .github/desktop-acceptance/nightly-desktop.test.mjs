@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { findScheduledRun, prepareDesktop } from './nightly-desktop.mjs';
+import { findScheduledRun, prepareDesktop, stageNightlyReport } from './nightly-desktop.mjs';
 
 test('the Codex scheduled entry selects only the current Shanghai calendar day', () => {
   const repository = 'zts212653/clowder-ai';
@@ -39,34 +39,46 @@ test('desktop preparation stages the same attempt and rejects different installe
     platforms: [platform],
     cases: [{ id: 'DESKTOP-ONBOARDING', platform, executor: 'computer-use' }],
   };
-  const prepare = (dir, bytes) =>
-    prepareDesktop(repo, '123', platform, dir, (args) => {
-      if (args[0] === 'api') {
-        return JSON.stringify({
-          status: 'completed',
-          path: '.github/workflows/desktop-nightly.yml',
-          head_sha: catalogRevision,
-          run_attempt: 2,
-        });
-      }
-      const [artifact, , destination] = args.slice(-3);
-      fs.mkdirSync(destination, { recursive: true });
-      if (artifact === 'desktop-nightly-report-attempt-2') {
-        fs.writeFileSync(path.join(destination, 'report.json'), JSON.stringify(report));
-      } else if (artifact === 'desktop-evidence-windows-x64-attempt-2') {
-        fs.mkdirSync(path.join(destination, 'installer'));
-        fs.writeFileSync(
-          path.join(destination, 'installer', 'distribution-sha256.json'),
-          JSON.stringify({ Hash: digest.toUpperCase() }),
-        );
-      } else {
-        assert.equal(artifact, 'windows-installer-1.14.0-attempt-2');
-        fs.writeFileSync(path.join(destination, 'ClowderAI-Setup-1.14.0.exe'), bytes);
-      }
-      return '';
-    });
+  const gh = (bytes) => (args) => {
+    if (args[0] === 'api') {
+      return JSON.stringify({
+        status: 'completed',
+        path: '.github/workflows/desktop-nightly.yml',
+        head_sha: catalogRevision,
+        run_attempt: 2,
+      });
+    }
+    const [artifact, , destination] = args.slice(-3);
+    fs.mkdirSync(destination, { recursive: true });
+    if (artifact === 'desktop-nightly-report-attempt-2') {
+      fs.writeFileSync(path.join(destination, 'report.json'), JSON.stringify(report));
+    } else if (artifact === 'desktop-evidence-windows-x64-attempt-2') {
+      fs.mkdirSync(path.join(destination, 'installer'));
+      fs.writeFileSync(
+        path.join(destination, 'installer', 'distribution-sha256.json'),
+        JSON.stringify({ Hash: digest.toUpperCase() }),
+      );
+    } else {
+      assert.equal(artifact, 'windows-installer-1.14.0-attempt-2');
+      fs.writeFileSync(path.join(destination, 'ClowderAI-Setup-1.14.0.exe'), bytes);
+    }
+    return '';
+  };
 
-  const ready = await prepare(path.join(root, 'ready'), 'candidate bytes');
+  const coordinator = path.join(root, 'coordinator');
+  const calls = [];
+  const staged = stageNightlyReport(repo, '123', coordinator, (args) => {
+    calls.push(args);
+    return gh('unused')(args);
+  });
+  assert.equal(staged.report.attempt, '2');
+  assert.deepEqual(
+    calls.filter(([cmd]) => cmd === 'run').map((args) => args.at(-3)),
+    ['desktop-nightly-report-attempt-2'],
+  );
+  assert.equal(fs.existsSync(path.join(coordinator, 'package')), false);
+
+  const ready = await prepareDesktop(repo, '123', platform, path.join(root, 'ready'), gh('candidate bytes'));
   assert.equal(ready.packageSha256, digest);
   assert.equal(ready.source, source);
   assert.equal(ready.attempt, '2');
@@ -74,6 +86,9 @@ test('desktop preparation stages the same attempt and rejects different installe
     ready.cases.map(({ id }) => id),
     ['DESKTOP-ONBOARDING'],
   );
-  await assert.rejects(prepare(path.join(root, 'wrong'), 'other bytes'), /Candidate package hash mismatch/);
+  await assert.rejects(
+    prepareDesktop(repo, '123', platform, path.join(root, 'wrong'), gh('other bytes')),
+    /Candidate package hash mismatch/,
+  );
   assert.equal(fs.existsSync(path.join(root, 'wrong', 'desktop-plan.json')), false);
 });

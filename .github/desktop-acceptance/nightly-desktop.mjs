@@ -31,10 +31,9 @@ export function installerSha256(directory, platform) {
   return hash.toLowerCase();
 }
 
-export async function prepareDesktop(repository, runId, platform, directory, gh = ghCli) {
+export function stageNightlyReport(repository, runId, directory, gh = ghCli) {
   assert.match(repository, repositoryName);
   assert.match(runId, /^[1-9]\d*$/);
-  assert.ok(['windows-x64', 'macos-arm64', 'macos-x64'].includes(platform), 'Unsupported desktop platform');
   const run = JSON.parse(gh(['api', `repos/${repository}/actions/runs/${runId}`]));
   assert.equal(run.path, '.github/workflows/desktop-nightly.yml');
   assert.equal(run.status, 'completed', 'The candidate workflow has not finished');
@@ -52,12 +51,19 @@ export async function prepareDesktop(repository, runId, platform, directory, gh 
   assert.equal(report.catalogRevision, run.head_sha);
   assert.match(report.source, /^[a-f0-9]{40}$/);
   assert.match(report.packageVersion, /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/);
+  return { report, root, download };
+}
+
+export async function prepareDesktop(repository, runId, platform, directory, gh = ghCli) {
+  assert.ok(['windows-x64', 'macos-arm64', 'macos-x64'].includes(platform), 'Unsupported desktop platform');
+  const { report, root, download } = stageNightlyReport(repository, runId, directory, gh);
+  const { attempt } = report;
   assert.ok(report.platforms.includes(platform), 'Platform was not requested by the candidate run');
   const cases = report.cases.filter((entry) => entry.platform === platform && entry.executor === 'computer-use');
   assert.ok(cases.length, 'The selected suite has no Computer Use cases on this platform');
 
   const evidenceName = `desktop-evidence-${platform}`;
-  const evidenceDirectory = path.join(root, evidenceName + suffix);
+  const evidenceDirectory = path.join(root, `${evidenceName}-attempt-${attempt}`);
   download(evidenceName, evidenceDirectory);
   const expected = installerSha256(evidenceDirectory, platform);
   const packageDirectory = path.join(root, 'package');
@@ -89,8 +95,11 @@ export async function prepareDesktop(repository, runId, platform, directory, gh 
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [repository, run, platform, directory] = process.argv.slice(2);
-  assert.ok(directory, 'Usage: node nightly-desktop.mjs <owner/repo> <run-id|today> <platform> <new-directory>');
+  assert.ok(directory, 'Usage: node nightly-desktop.mjs <owner/repo> <run-id|today> <platform|report> <new-directory>');
   const runId = run === 'today' ? findScheduledRun(repository) : run;
-  const plan = await prepareDesktop(repository, runId, platform, directory);
-  process.stdout.write(JSON.stringify(plan, null, 2) + '\n');
+  const result =
+    platform === 'report'
+      ? stageNightlyReport(repository, runId, directory).report
+      : await prepareDesktop(repository, runId, platform, directory);
+  process.stdout.write(JSON.stringify(result, null, 2) + '\n');
 }

@@ -15,7 +15,7 @@ created: 2026-11-07
 - PR 改变安装或产品旅程时，在 PR 中列出受影响的用例 ID，随改动更新其步骤、断言、适用性或证据。按周从上次复盘 SHA 起扫合入记录，核对遗漏和失效样本。产品负责人决定等级，执行维护人核对证据和可重复性。
 - 预期失败提前登记 `id`、`platform`、`code`、`issue`、`expires`。实际失败须匹配平台、用例和失败码，且仍在有效期。登记不会把缺测、其他失败或原始失败改成通过。
 
-首次回溯示例是 [#1749](https://github.com/zts212653/clowder-ai/issues/1749)。窗口打开和 HTTP 200 都可能来自外来实例，只有干净首装的用例也不会制造争抢。把早期端口占用和预查后竞争补入 `DESKTOP-PORT-OWNERSHIP`，要求记录监听 PID、数据根和渲染器实际加载的内容。旧包曾在预查后显示外来页面，修复包在同一场景拒绝就绪。已合入的源码测试覆盖归属断言，安装包全量仍须保留这一旅程。见 [修复及回归入口](https://github.com/zts212653/clowder-ai/pull/1870)。
+首次回溯示例是 [#1749](https://github.com/zts212653/clowder-ai/issues/1749)。窗口打开和 HTTP 200 都可能来自外来实例，干净首装也不会制造争抢。Windows 全量的 `WIN-PORT-PREFLIGHT` 用已安装的 EXE 和受控监听者复测启动前的 API、Web 和同时占用，保存端口监听 PID、启动状态和 Electron 页面。各平台的健康实例冲突和预查后抢占由 `DESKTOP-PORT-OWNERSHIP` 验证。旧 Windows 包曾在预查后显示外来页面，修复包在同一场景拒绝就绪。见 [修复及回归入口](https://github.com/zts212653/clowder-ai/pull/1870)。
 
 首次合入复盘从试跑源码 `b58412451` 扫到 `12514727`，范围内只有 DSH 图片路由修复。原有续聊用例只验证文本上下文，无法发现图片握手仍绑定旧路由。新增 `DESKTOP-DSH-IMAGE-ROUTE` 为 L2，覆盖视觉、文本和恢复原会话三种结果。该用例依赖专用 DSH 和模型额度，保留在全量选集。见 [合入变更与已有证据](https://github.com/zts212653/clowder-ai/pull/1896)。
 
@@ -35,8 +35,15 @@ Windows 测试运行真实 EXE，全量也测试便携 ZIP。macOS 在相应架�
 
 1. 运行 `node .github/desktop-acceptance/nightly-desktop.mjs zts212653/clowder-ai <run-id> <platform> <新目录>`。它只下载同一运行和 attempt 的报告、平台证据和候选包，核对 SHA-256 后写出 `desktop-plan.json`。核对目标机、测试目录、端口和安装权限，由已授权的测试环境安装，先记录程序路径和安装实例身份。
 2. 在 Codex 中打开该次运行的用例目录，按选集执行 `computer-use` 用例。为每条保存具体观察和截图。前置条件不满足时记录 `blocked` 和原因。人工用例可按相同方式补录。
-3. 把报告 JSON 放入证据根目录。保持 Actions 下载的 `desktop-evidence-平台-attempt-N` 目录名。在同一位置保存桌面收据 JSON，截图和收据放在一起。收据顶层复制原报告的 `runId`、`attempt`、`source`、`catalogRevision`，逐例记录 `id`、`platform`、`status`、`code`、证据文件名 `evidence` 和安装包 `packageSha256`。
-4. 在报告指定的用例版本执行 `node .github/desktop-acceptance/nightly-evidence.mjs reconcile <证据根目录> <桌面收据JSON> [其他平台的收据JSON]`。令 `GITHUB_SHA` 为该用例版本。每份收据和截图、对应平台证据目录一起保存。输出 `report-with-desktop.md` 和 `report-with-desktop.json`，保留 Actions 的原始报告和其他平台已完成的结果。
+3. 收据顶层复制原报告的 `runId`、`attempt`、`source`、`catalogRevision`。逐例记录 `id`、`platform`、`status`、`code`、证据文件名 `evidence` 和安装包 `packageSha256`。合并单机试跑时，在报告指定的用例版本执行 `node .github/desktop-acceptance/nightly-evidence.mjs reconcile <证据根目录> <桌面收据JSON>`，令 `GITHUB_SHA` 为该用例版本。桌面收据、截图和 Actions 平台证据目录一起保存。
+
+### 多平台汇总
+
+各测试机和协调端使用同一个获准的共享证据位置，每个 run ID 和 attempt 使用独立子目录。协调端运行 `node .github/desktop-acceptance/nightly-desktop.mjs zts212653/clowder-ai <run-id|today> report <新目录>`，下载原报告和 Actions 的安装包哈希。协调端只需这些小文件。
+
+- 协调端先准备共享运行目录。测试机等同轮 `report.json` 到位并核对运行身份，再把截图放入 `desktop-receipts/<平台>/`。写完截图后，把同目录的临时收据重命名为 `<名称>.receipt.json`。不同平台各写自己的目录，每个用例只提交一份最终收据。
+- 所有本轮桌面任务已提交结果或到达约定截止时间后，由协调端单独运行 `node .github/desktop-acceptance/nightly-evidence.mjs reconcile <共享运行目录>`。在报告指定的用例版本运行，令 `GITHUB_SHA` 为该版本。命令自动发现已提交的收据，使用协调端从 Actions 下载的哈希核验，缺收据的用例保留为阻塞。
+- 汇总写入 `report-with-desktop.md` 和 `report-with-desktop.json`，证据路径相对于共享运行目录。原报告保留。迟到的有效收据提交后可对同一目录重新汇总。
 
 Codex 定时接入的验收包括一次真实手动首启、一次从 Codex 本地定时任务触发的首启和一次桌面不可用的故障演练。定时任务能否在目标机器调用 Computer Use 和拿到新候选包，需要实际运行才能确认。
 
@@ -53,7 +60,9 @@ Codex 定时接入的验收包括一次真实手动首启、一次从 Codex 本�
 
 仅在获准的专用测试机和全新测试实例上安装 desktop-plan.json 中通过哈希校验的包。检查程序目录、数据目录、测试端口和桌面会话。无法确认权限、隔离或窗口时记录阻塞。
 
-按 desktop-plan.json 中的 computer-use 用例顺序实际操作安装后的窗口。逐项记录可见行为、结果和截图。把包哈希及运行身份写入收据，再使用 nightly-evidence.mjs reconcile 生成桌面报告。结束时正常退出本次实例并保存证据路径。
+按 desktop-plan.json 中的 computer-use 用例顺序实际操作安装后的窗口。逐项记录可见行为、结果和截图。结束时正常退出本次实例，把包哈希及运行身份写入收据，再按多平台汇总约定提交收据和截图。
 ```
+
+协调端使用独立的本地定时任务。用同一天的 `today report` 入口在共享位置准备报告，在各桌面任务结束或截止后运行汇总命令。主动试跑指定同一个 run ID。协调端负责输出一份合并报告并记录未收到收据的平台。
 
 首次验收时按真实手动运行、定时运行、锁屏或无可用窗口三种状态分别留证。三次均须保留可归属的报告，阻塞场景应明确指出未执行的用例。
