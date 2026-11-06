@@ -185,7 +185,13 @@ describe('F117 KD-21 settleResponseFromDraft', () => {
     await upsertDraft(drafts, 'turn-orphan');
     const emitted = [];
 
-    const settlement = await settle(store, drafts, emitted, { invocationId: 'turn-orphan' }, turns);
+    const settlement = await settle(
+      store,
+      drafts,
+      emitted,
+      { invocationId: 'turn-orphan', noResponseProof: 'route_completed_without_response_admission' },
+      turns,
+    );
 
     assert.deepEqual(settlement, { kind: 'no_response' });
     assert.deepEqual(await drafts.getByThread(USER, THREAD), [], 'no R will take it, and drafts no longer expire');
@@ -211,11 +217,12 @@ describe('F117 KD-21 settleResponseFromDraft', () => {
         return deleteDraft(...args);
       };
 
-      await assert.rejects(settle(store, drafts, [], { invocationId: 'turn-1' }, turns), /redis unavailable/);
+      const proof = withResponse ? {} : { noResponseProof: 'route_completed_without_response_admission' };
+      await assert.rejects(settle(store, drafts, [], { invocationId: 'turn-1', ...proof }, turns), /redis unavailable/);
       assert.deepEqual(pendingIds(turns), ['turn-1'], 'the turn stays for the next settlement');
       assert.equal((await drafts.getByThread(USER, THREAD)).length, 1);
 
-      const retried = await settle(store, drafts, [], { invocationId: 'turn-1' }, turns);
+      const retried = await settle(store, drafts, [], { invocationId: 'turn-1', ...proof }, turns);
 
       assert.equal(retried.kind, withResponse ? 'already_terminal' : firstKind);
       assert.deepEqual(await drafts.getByThread(USER, THREAD), []);
@@ -272,7 +279,16 @@ describe('F117 KD-21 settleResponseFromDraft', () => {
     const turns = new InMemoryTurnExecutionStore();
     await endedTurn(turns, 'turn-guard');
 
-    assert.deepEqual(await settle(store, drafts, [], { invocationId: 'turn-guard' }, turns), { kind: 'no_response' });
+    assert.deepEqual(
+      await settle(
+        store,
+        drafts,
+        [],
+        { invocationId: 'turn-guard', noResponseProof: 'route_completed_without_response_admission' },
+        turns,
+      ),
+      { kind: 'no_response' },
+    );
     assert.deepEqual(pendingIds(turns), []);
   });
 

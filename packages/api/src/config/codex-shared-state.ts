@@ -7,6 +7,13 @@ import {
   resolveCodexAccountLaunch,
 } from './codex-account-launch.js';
 
+/** Authentication passthrough does not release a default account's shared-state ownership. */
+export function codexUsesSharedState(
+  launch: Pick<CodexAccountLaunchDescriptor, 'accountRef' | 'authMode' | 'managed'>,
+): boolean {
+  return launch.managed === true || (launch.accountRef === 'codex' && launch.authMode !== 'api_key');
+}
+
 /** Durable layout claims reserve one owner, including an interrupted, unprepared creation.
  * Check prospective mutations and actual admission before writes/spawn; never migrate roots.
  */
@@ -29,11 +36,7 @@ export function assertCodexSharedStateRoots(
     throw new Error('codex_default_account_unavailable');
   const source = resolveCodexAccountLaunch(profile, { cwd: projectRoot });
   const roots = layouts.map((layout) => ({ stateRoot: layout.stateRoot, sqliteHome: layout.sqliteHome }));
-  if (
-    input.launch &&
-    (input.launch.managed || (input.launch.accountRef === 'codex' && input.launch.authMode === 'oauth'))
-  )
-    roots.push(input.launch);
+  if (input.launch && codexUsesSharedState(input.launch)) roots.push(input.launch);
   for (const root of roots)
     if (
       codexCanonicalPath(root.stateRoot, projectRoot) !== source.stateRoot ||

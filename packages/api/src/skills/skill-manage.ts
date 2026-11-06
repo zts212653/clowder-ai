@@ -10,12 +10,14 @@
  */
 
 import { existsSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 import { type CapabilitiesConfig, type CapabilityEntry, type MountRules } from '@cat-cafe/shared';
 import { readCapabilitiesConfig, writeCapabilitiesConfig } from '../config/capabilities/capability-orchestrator.js';
 import { readMountRules } from '../config/mount/mount-rules-store.js';
-import { activeMountTargets, mountSkillSymlinks, unmountSkillSymlinks } from './skill-mount-ops.js';
+import { buildProjectSkillMountTargets } from '../utils/skill-mount.js';
+import { mountSkillSymlinks, unmountSkillSymlinks } from './skill-mount-ops.js';
 import { syncAll } from './skill-sync-all.js';
 import type { MountConflict } from './skill-sync-engine.js';
 
@@ -225,7 +227,7 @@ export async function addSkill(
     : existing?.mountPaths?.length && !wasDisabled
       ? [...existing.mountPaths]
       : enabled
-        ? activeMountTargets(projectRoot, mountRules).map((t) => t.id)
+        ? buildProjectSkillMountTargets(projectRoot, homedir(), mountRules).map((t) => t.id)
         : [];
 
   if (existing) {

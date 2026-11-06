@@ -31,7 +31,7 @@ describe('F297 production presence source (real service, no classifier stub)', (
     assert.deepEqual(presence.get('thread_live')?.cats, ['opus5']);
     assert.equal(presence.has('thread_quiet'), false, 'a thread without any execution must not be reported active');
   });
-  it("R2 P1-1: tracker empty but the running record's durable child still runs → working", async () => {
+  it('an unverified durable child stays neutral and cannot fall through to old terminal activity', async () => {
     const deps = await realDeps();
     const parent = await startRunningRecord(deps, { threadId: 'thread_record', userId: 'alice', catId: 'opus5' });
     await startRunningChild(deps, {
@@ -46,10 +46,10 @@ describe('F297 production presence source (real service, no classifier stub)', (
     const presence = await source.getPresence(['thread_record'], 'alice');
     assert.equal(
       presence.get('thread_record')?.status,
-      'working',
+      'idle',
       'a running child with no verifiable owner must never fall through to terminal activity',
     );
-    assert.deepEqual(presence.get('thread_record')?.cats, ['opus5']);
+    assert.equal(presence.get('thread_record')?.cats, undefined);
   });
 
   it('F117 KD-23: a running record with only a draft is not working', async () => {
@@ -99,7 +99,7 @@ describe('F297 production presence source (real service, no classifier stub)', (
     assert.equal(presence.has('thread_finished'), false, 'a non-running command is not working');
   });
 
-  it('R3 P1-2: a standalone running child (no running parent record) is qualified as working', async () => {
+  it('a standalone running child with an exact live CLI owner is qualified as working', async () => {
     const deps = await realDeps();
     // parent record 不存在 —— F194 的 buildRunningChildExecutionLink 只从 running parent 反查，
     // 所以这个 canonical child 对 live-invocation classifier 完全不可见。
@@ -110,6 +110,14 @@ describe('F297 production presence source (real service, no classifier stub)', (
       userId: 'alice',
       catId: 'sonnet',
       executionKind: 'ordinary',
+      startedAt: 2000,
+    });
+    deps.cliOwners.push({
+      executionId: 'parent_absent',
+      invocationId: 'child_1',
+      threadId: 'thread_child',
+      userId: 'alice',
+      catId: 'sonnet',
       startedAt: 2000,
     });
     const { service, source } = await realPresenceSource(deps);
@@ -137,6 +145,14 @@ describe('F297 production presence source (real service, no classifier stub)', (
       executionKind: 'ordinary',
       startedAt: 2000,
     });
+    deps.cliOwners.push({
+      executionId: 'parent_absent',
+      invocationId: 'child_done',
+      threadId: 'thread_child',
+      userId: 'alice',
+      catId: 'sonnet',
+      startedAt: 2000,
+    });
     await deps.turnExecutionStore.transitionTerminal('child_done', { status: 'succeeded', endedAt: 3000 });
     const { source } = await realPresenceSource(deps);
 
@@ -155,6 +171,14 @@ describe('F297 production presence source (real service, no classifier stub)', (
       userId: 'alice',
       catId: 'sonnet',
       executionKind: 'ordinary',
+      startedAt: 2000,
+    });
+    deps.cliOwners.push({
+      executionId: 'parent_absent',
+      invocationId: 'child_x',
+      threadId: 'thread_all',
+      userId: 'alice',
+      catId: 'sonnet',
       startedAt: 2000,
     });
     const { source } = await realPresenceSource(deps);
@@ -209,6 +233,14 @@ describe('F297 production presence source (real service, no classifier stub)', (
         userId: 'alice',
         catId: 'sonnet',
         executionKind: 'ordinary',
+        startedAt: 100 + index,
+      });
+      deps.cliOwners.push({
+        executionId: 'parent_absent',
+        invocationId: `child_${index}`,
+        threadId,
+        userId: 'alice',
+        catId: 'sonnet',
         startedAt: 100 + index,
       });
     }

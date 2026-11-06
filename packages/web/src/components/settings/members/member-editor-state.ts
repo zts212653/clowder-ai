@@ -9,9 +9,11 @@ import {
 } from '../../hub-cat-editor.model';
 import type { CatPayloadContext } from '../../hub-cat-editor.payload';
 import { normalizeMemberDraftBaseline, normalizeMemberDraftForm } from './member-carrier-compat';
-import type { RuntimeDrafts } from './member-runtime-draft';
+import type { RuntimeChoice, RuntimeDrafts } from './member-runtime-draft';
 
 export interface MemberDraft {
+  /** Cached server observation for this exact pending launch; never a save payload or auth receipt. */
+  preparedRuntime?: RuntimeChoice;
   runtimeDrafts?: RuntimeDrafts;
   version: 1;
   form: HubCatEditorFormState;

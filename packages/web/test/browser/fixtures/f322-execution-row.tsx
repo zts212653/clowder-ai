@@ -1,4 +1,5 @@
 import type { ActiveExecutionProjection } from '@cat-cafe/shared';
+import type { ComponentProps } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ChatContainerHeader } from '@/components/ChatContainerHeader';
 import { ChatInput } from '@/components/ChatInput';
@@ -26,7 +27,7 @@ import '@/app/shell-v2.css';
  *
  * `?mount=1` renders the footer as the app now mounts it: the REAL ChatContainerHeader, ThreadExecutionLayer and
  * ChatInput one above the other, in whichever shell the stored preference says (v2 shows the one row, the title ⌄ and the
- * stop as the composer's last control; classic keeps the old bar, the old "replying… cancel" bar and the stop first).
+ * stop as the composer's last control; classic keeps its execution bar and one composer stop).
  */
 const THREAD = 'thread-row';
 const NOW = Date.now();
@@ -79,21 +80,9 @@ function entry(id: string, createdAt: number, over: Partial<QueueEntry> = {}): Q
   };
 }
 
-const STUCK = entry('stuck', NOW - 10_000, {
-  recoveryActions: [
-    {
-      id: 'queue-force-reset:stuck:1',
-      entryId: 'stuck',
-      kind: 'force_reset',
-      request: { method: 'POST', path: `/api/threads/${THREAD}/force-reset` },
-    },
-  ],
-});
-
 interface Scene {
   runs: ActiveExecutionProjection[];
   queue: QueueEntry[];
-  paused?: boolean;
   status?: Record<string, string>;
   pending?: boolean;
   legacy?: boolean;
@@ -121,8 +110,12 @@ const SCENES: Record<string, () => Scene> = {
   }),
   confirming: () => ({ runs: [], queue: [], legacy: true }),
   unverified: () => ({ runs: [], queue: [], legacy: true, hydrationError: true }),
-  stuck: () => ({ runs: [], queue: [STUCK, entry('a', NOW - 3), entry('b', NOW - 2)] }),
-  paused: () => ({ runs: [], queue: [entry('1', NOW - 3), entry('2', NOW - 2), entry('3', NOW - 1)], paused: true }),
+  // Only canonical pending entries enter the queue; execution state lives in its own projection.
+  mixed: () => ({
+    runs: [],
+    queue: [entry('a', NOW - 3), entry('b', NOW - 2)],
+  }),
+  orphaned: () => ({ runs: [], queue: [entry('1', NOW - 3), entry('2', NOW - 2), entry('3', NOW - 1)] }),
 };
 
 function seed(name: string) {
@@ -181,16 +174,16 @@ function seed(name: string) {
       : Object.fromEntries(live.map((r) => [r.executionId, { catId: r.catId, startedAt: r.startedAt }])),
     hasActiveInvocation: Boolean(scene.legacy) || live.length > 0,
     queue: scene.queue,
-    queuePaused: scene.paused ?? false,
-    queuePauseReason: scene.paused ? 'canceled' : undefined,
   } as never);
 }
 
 seed(new URLSearchParams(window.location.search).get('s') ?? 'working');
 
+const sends: Parameters<ComponentProps<typeof ChatInput>['onSend']>[] = [];
 (window as unknown as { __row: unknown }).__row = {
   toasts: () => useToastStore.getState().toasts.map((t) => ({ title: t.title, type: t.type })),
   queueIds: () => useChatStore.getState().queue.map((e) => e.id),
+  sends: () => sends,
 };
 
 function Preview() {
@@ -249,7 +242,9 @@ function MountedPreview() {
       <ChatInput
         presentation={presentation}
         threadId={THREAD}
-        onSend={() => {}}
+        onSend={(...args) => {
+          sends.push(args);
+        }}
         hasActiveInvocation={useChatStore.getState().hasActiveInvocation}
       />
     </div>

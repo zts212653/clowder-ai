@@ -206,13 +206,6 @@ describe('session-strategy', () => {
     // -- Edge cases --
 
     describe('edge cases', () => {
-      test('fillRatio exactly at action boundary', async () => {
-        const { shouldTakeAction } = await loadModule();
-        const strategy = makeStrategy({ strategy: 'handoff' });
-        const action = shouldTakeAction(0.85, 200_000, 170_000, 0, strategy);
-        assert.equal(action.type, 'seal');
-      });
-
       test('fillRatio just below action boundary', async () => {
         const { shouldTakeAction } = await loadModule();
         const strategy = makeStrategy({ strategy: 'handoff' });

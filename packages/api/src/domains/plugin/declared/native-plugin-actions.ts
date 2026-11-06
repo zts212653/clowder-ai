@@ -1,7 +1,8 @@
-import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
+import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import type { PluginNativeActionTarget } from '../../cats/services/types.js';
 import { type PluginCallContext, withPluginCallContext } from '../carrier/plugin-call-context.js';
 import type { PluginRuntimeAdmission } from '../carrier/runtime-carrier.js';
+import { nativePluginActionEnvironmentKey } from './native-plugin-action-environment.js';
 
 export class NativePluginActionError extends Error {
   constructor(
@@ -64,8 +65,8 @@ export class NativePluginActions {
     this.#bindings.set(instanceId, binding);
     for (const [contributionId, connection] of connections) {
       this.#tokens.set(connection.token, { binding, contributionId });
-      process.env[this.environmentKey(instanceId, contributionId, 'TOKEN')] = connection.token;
-      process.env[this.environmentKey(instanceId, contributionId, 'PATH')] = '/api/plugin-runtime/action';
+      process.env[nativePluginActionEnvironmentKey(instanceId, contributionId, 'TOKEN')] = connection.token;
+      process.env[nativePluginActionEnvironmentKey(instanceId, contributionId, 'PATH')] = '/api/plugin-runtime/action';
     }
   }
 
@@ -93,17 +94,9 @@ export class NativePluginActions {
   environmentReferences(instanceId: string, contributionId: string): Readonly<Record<string, string>> {
     if (!this.#bindings.get(instanceId)?.connections.has(contributionId)) return {};
     return {
-      CLOWDER_PLUGIN_ACTION_TOKEN: `\${${this.environmentKey(instanceId, contributionId, 'TOKEN')}}`,
-      CLOWDER_PLUGIN_ACTION_PATH: `\${${this.environmentKey(instanceId, contributionId, 'PATH')}}`,
+      CLOWDER_PLUGIN_ACTION_TOKEN: `\${${nativePluginActionEnvironmentKey(instanceId, contributionId, 'TOKEN')}}`,
+      CLOWDER_PLUGIN_ACTION_PATH: `\${${nativePluginActionEnvironmentKey(instanceId, contributionId, 'PATH')}}`,
     };
-  }
-
-  private environmentKey(instanceId: string, contributionId: string, field: 'TOKEN' | 'PATH'): string {
-    const id = createHash('sha256')
-      .update(JSON.stringify([instanceId, contributionId]))
-      .digest('hex')
-      .toUpperCase();
-    return `CLOWDER_PLUGIN_${id}_ACTION_${field}`;
   }
 
   deactivate(instanceId: string): void {

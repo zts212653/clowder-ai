@@ -24,8 +24,9 @@ import { invalidateCliCommand, resolveCliCommandOrBare } from '../../../../../..
 import { buildChildEnv } from '../../../../../../utils/cli-spawn.js';
 import { resolveWindowsSpawnPlan, type WindowsSpawnPlan } from '../../../../../../utils/cli-spawn-win.js';
 import { saveSpan } from '../../../../../../utils/member-save-diagnostics.js';
+import { isNativePluginActionEnvironmentKey } from '../../../../../plugin/declared/native-plugin-action-environment.js';
 import type { AgentRegistrationFailure } from '../../registry/AgentServiceUnavailableError.js';
-import { ExecutionAdmissionConflict } from '../../registry/AgentServiceUnavailableError.js';
+import { StaleServiceSourceConflict } from '../../registry/AgentServiceUnavailableError.js';
 import { prepareDshSecretPatch, verifyDshSecretPatch } from '../dsh-secret-patch.js';
 import { ensureKimiSecretHooks } from '../kimi-secret-hooks.js';
 import { prepareOpenCodeAcpSpawnConfig } from '../opencode-acp-spawn-config.js';
@@ -456,16 +457,33 @@ export async function createAcpServiceForConfig(
         }),
       )
         .filter((entry): entry is [string, string] => entry[1] !== undefined)
+        // Plugins recover after registry construction. Their Host lookup keys belong to
+        // the per-invocation MCP view, not the long-lived provider process environment.
+        .filter(([key]) => !isNativePluginActionEnvironmentKey(key))
         .sort(([left], [right]) => left.localeCompare(right)),
     );
   const preparedEnv = Object.freeze(prepareEnvironment());
   const assertConstructionCurrent = () => {
     if (resolveCurrentAcpConfig && !isDeepStrictEqual(acpConfig, resolveCurrentAcpConfig()))
-      throw new ExecutionAdmissionConflict('ACP launch source changed; refresh this member before admission.');
+      throw new StaleServiceSourceConflict('ACP launch source changed; refresh this member before admission.');
     if (!isDeepStrictEqual(accountSource, resolveAcpAccount(bootstrap.projectRoot, config)))
-      throw new ExecutionAdmissionConflict('ACP account source changed; refresh this member before admission.');
-    if (!isDeepStrictEqual(preparedEnv, prepareEnvironment()))
-      throw new ExecutionAdmissionConflict('ACP process environment changed; refresh this member before admission.');
+      throw new StaleServiceSourceConflict('ACP account source changed; refresh this member before admission.');
+    const currentEnv = prepareEnvironment();
+    if (!isDeepStrictEqual(preparedEnv, currentEnv)) {
+      const changed = [...new Set([...Object.keys(preparedEnv), ...Object.keys(currentEnv)])].filter(
+        (key) => preparedEnv[key] !== currentEnv[key],
+      );
+      input.log.warn(
+        {
+          catId,
+          profileId,
+          changedEnvironmentKeys: changed.filter((key) => /^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(key)).slice(0, 16),
+          changedEnvironmentKeyCount: changed.length,
+        },
+        'ACP process environment changed before admission',
+      );
+      throw new StaleServiceSourceConflict('ACP process environment changed; refresh this member before admission.');
+    }
   };
   const { pool, lease } = await saveSpan('acp.pool', () =>
     ensureAcpPool(effectiveInput, verified, spawn, preparedEnv, preparedSpawn),
@@ -508,7 +526,7 @@ export async function createAcpServiceForConfig(
   const captureOptions = service.captureInvocationOptions.bind(service);
   service.captureInvocationOptions = async (options) => {
     if ('accountRef' in options && options.accountRef !== accountSource.account?.id)
-      throw new ExecutionAdmissionConflict('ACP selected account changed; refresh this member before admission.');
+      throw new StaleServiceSourceConflict('ACP selected account changed; refresh this member before admission.');
     assertConstructionCurrent();
     const captured = await captureOptions(options);
     assertConstructionCurrent();

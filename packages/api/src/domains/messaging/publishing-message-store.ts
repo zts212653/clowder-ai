@@ -45,6 +45,12 @@ export interface PublishingMessageStoreDeps {
   readonly events: Pick<EventLogStore, 'append'>;
   /** Schedules subscriber delivery after a durable publish. Must return immediately. */
   readonly onPublished?: (threadId: string) => void;
+  /**
+   * In-process observers of a message that just became complete and visible (a plain append, or a
+   * reply's terminal commit; never a processing placeholder, whisper or plugin message). Must return
+   * immediately. F335 交付三: the desk hears that a reply's work card has landed.
+   */
+  readonly onMessagePublished?: (message: StoredMessage) => void;
   /** Event-log retention per thread; the same bound the send path uses. */
   readonly retentionCount?: number;
   /**
@@ -104,6 +110,7 @@ export function createPublishingMessageStore<T extends IMessageStore>(inner: T, 
         retention,
       );
       deps.onPublished?.(stored.threadId);
+      deps.onMessagePublished?.(stored);
     } catch (error) {
       deps.onPublishFailure(error, stored);
     }

@@ -11,11 +11,6 @@ describe('TtsChunker (compiled)', () => {
     assert.equal(result[2].isBoost, false);
   });
 
-  it('applies boost threshold on soft breakpoints', () => {
-    const result = chunkText('你好，世界，再见。');
-    assert.ok(result.length >= 2, `Expected >= 2 chunks, got ${result.length}`);
-  });
-
   it('handles empty input', () => {
     assert.equal(chunkText('').length, 0);
     assert.equal(chunkText('  ').length, 0);

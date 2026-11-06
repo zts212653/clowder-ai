@@ -1,4 +1,8 @@
 import type { DesktopWindowContribution, PluginManifest } from '@clowder-ai/plugin-contract';
+import {
+  validateCompanionCommand as validateDeskCommand,
+  validateCompanionReply as validateDeskReply,
+} from '@clowder-ai/plugin-contract-033c0';
 import { validateCompanionCommand as validateLegacyCommand } from '@clowder-ai/plugin-contract-beta21';
 import { validateCompanionCommand as validateModernCommand } from '@clowder-ai/plugin-contract-beta23';
 import { validateCompanionCommand as validateUnifiedCommand } from '@clowder-ai/plugin-contract-beta24';
@@ -9,26 +13,43 @@ import {
   validateCompanionCommand as validateAppAssistCommand,
   validateCompanionReply as validateAppAssistReply,
 } from '@clowder-ai/plugin-contract-beta29';
-import type { CompanionArchiveContract } from './published-companion-v2.js';
+import type { CompanionContract } from './published-companion-v2.js';
 
 // The trusted CJS desktop kernel imports this compiled ESM Host boundary. Package
 // resolution stays in the API installation and uses the contract's import export.
 export { validateCompanionCommand } from '@clowder-ai/plugin-contract-beta21';
 
-export function companionCommandValidator(contract: CompanionArchiveContract['contract'] = '0.1.0-beta.21') {
-  if (contract === '0.1.0-beta.21') return validateLegacyCommand;
-  if (contract === '0.1.0-beta.23') return validateModernCommand;
-  if (contract === '0.1.0-beta.24') return validateUnifiedCommand;
-  if (contract === '0.1.0-beta.25') return validateWorkCommand;
-  if (contract === '0.1.0-beta.27') return validatePresentationCommand;
-  if (contract === '0.1.0-beta.28') return validateLetterCommand;
-  if (contract === '0.1.0-beta.29') return validateAppAssistCommand;
-  throw new Error('Unsupported companion contract');
+// The kernel reads capabilities from the same table the Host admitted the archive with.
+export { companionContractHas } from './published-companion-v2.js';
+
+/** One public command schema per admitted contract line. */
+const COMMAND_VALIDATORS: Record<CompanionContract, (value: unknown) => boolean> = {
+  '0.1.0-beta.21': validateLegacyCommand,
+  '0.1.0-beta.23': validateModernCommand,
+  '0.1.0-beta.24': validateUnifiedCommand,
+  '0.1.0-beta.25': validateWorkCommand,
+  '0.1.0-beta.27': validatePresentationCommand,
+  '0.1.0-beta.28': validateLetterCommand,
+  '0.1.0-beta.29': validateAppAssistCommand,
+  '0.3.3-candidate.0': validateDeskCommand,
+};
+
+/** The complete reply the desktop session assembles (base + `appAssist`, and `desk` from 0.3.3). */
+const FULL_REPLY_VALIDATORS: Partial<Record<CompanionContract, (value: unknown) => boolean>> = {
+  '0.1.0-beta.29': validateAppAssistReply,
+  '0.3.3-candidate.0': validateDeskReply,
+};
+
+export function companionCommandValidator(contract: CompanionContract = '0.1.0-beta.21') {
+  const validator = COMMAND_VALIDATORS[contract];
+  if (!validator) throw new Error('Unsupported companion contract');
+  return validator;
 }
 
-export function appAssistReplyValidator(contract: CompanionArchiveContract['contract']) {
-  if (contract !== '0.1.0-beta.29') throw new Error('Unsupported app-assist contract');
-  return validateAppAssistReply;
+export function appAssistReplyValidator(contract: CompanionContract) {
+  const validator = FULL_REPLY_VALIDATORS[contract];
+  if (!validator) throw new Error('Unsupported app-assist contract');
+  return validator;
 }
 
 /** This Host consumer admits one declarative companion body. Package code never

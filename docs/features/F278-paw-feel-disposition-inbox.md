@@ -4,7 +4,7 @@ related_features: [F245, F222, F248, F128, F266, F167, F264, F311, F313]
 topics: [paw-feel, friction, disposition, inbox, triage, system-thread, workspace, eval]
 doc_kind: spec
 created: 2026-07-26
-tips_exempt: "Renewed 2026-10-27 for Task738 repairBinding compatibility: cat-internal repair proof now consumes the canonical Task assignment or an existing governed lease; automated duty remains paused and no new human operation is added."
+tips_exempt: "Renewed 2026-11-04: the existing inbox duty and reconciler remain paused; separate internal daily triage groups recent thread reports without reading or writing this ledger. No new product surface or human operation is added."
 mcp_admission_status: accepted
 mcp_admission_ref: "file:docs/features/F278-paw-feel-disposition-inbox.md"
 mcp_admission_claims:
@@ -44,6 +44,7 @@ operator 要的不是“采到过”，而是每条爪感差都有人负责看�
 - `private-source-id`：授权把真实 friction signal 推进到可验证责任状态，并要求每班留下逐 bundle rich receipt；本轮不启动 runtime、不碰 Redis 6399、不做 production activation。
 - `private-source-id`：要求 F311 连接既有能力时，由 F278 owner 修复并验收真实 responsibility inbox；禁止在 F311 复制第二套 inbox、duty ledger 或 disposition workflow。
 - `private-source-id`：operator 要求停止高成本 F278 duty；`private-source-id` 将机制反思归 F313；`private-source-id` 证明 duty、reconciler 与 eval-domain 均已停用。暂停的是自动消费，不是 canonical ledger 或只读审计入口。
+- `[thread-id]#private-source-id`（2026-11-02 洛杉矶）：operator 定不重启原爪感差 duty / reconciler；每日分拣改为 `paw-feel-daily` skill，由 Sol6.1 在专门线程每天跑一次，按线程读新报告、合并成问题、至多派三个修复，不读写本账本、不逐条签处置。
 
 当前 F245 会回扫、聚类并产生周期 verdict，但 Top-N 之外的原始 signal 没有逐条责任状态。结果是“分析系统知道存在”不等于“某只猫必须看完”。F278 补的是责任控制面，不是 embedding 阈值。
 

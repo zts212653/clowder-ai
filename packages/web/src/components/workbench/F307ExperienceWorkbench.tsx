@@ -232,6 +232,7 @@ function useExplicitWorkspaceNavigation({
     ) {
       return;
     }
+    const perFile = previewEnabled || request.disposition === 'permanent';
     const surface =
       request.target.kind === 'message-publication'
         ? createMessagePublicationSurface(request.target.source, request.target.title)
@@ -250,7 +251,7 @@ function useExplicitWorkspaceNavigation({
                       navigationOrigin: request.target.navigationOrigin,
                     })
                   : request.target.kind === 'file'
-                    ? (previewEnabled ? createFilePreviewSurface : createFileSurface)({
+                    ? (perFile ? createFilePreviewSurface : createFileSurface)({
                         worktreeId: request.target.worktreeId,
                         path: request.target.path,
                         scrollToLine: request.target.line ?? null,
@@ -286,7 +287,7 @@ function useExplicitWorkspaceNavigation({
     if (isDesktop && request.target.kind === 'mode' && request.target.mode === 'product-schedule')
       captureChatReadingBeforeLayoutChange();
     consumedRevision.current = request.revision;
-    const fileTarget = previewEnabled && request.target.kind === 'file' ? resolveFileTarget(surface) : null;
+    const fileTarget = perFile && request.target.kind === 'file' ? resolveFileTarget(surface) : null;
     const existing = layout.surfaces.find((candidate) => {
       if (candidate.id === surface.id) return true;
       if (!fileTarget) return false;
@@ -297,6 +298,14 @@ function useExplicitWorkspaceNavigation({
     if (fileTarget && existing) {
       surface.id = existing.id;
       surface.objectRef = existing.objectRef;
+      if (request.disposition === 'permanent' && layout.previewSurfaceId === existing.id) {
+        dispatch({
+          type: 'promote-preview-surface',
+          surfaceId: existing.id,
+          entitlement: { kind: 'user', reason: 'open-from-chat' },
+          visitThreadId: request.threadId,
+        });
+      }
     }
     // A reveal is an action on the tree, so asking again re-runs it even when the same tree is showing.
     const alreadyFocused =

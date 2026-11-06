@@ -131,6 +131,8 @@ export interface RouteStrategyDeps {
   messageSearchAnswerService?: import('../../../../memory/MessageSearchAnswerPublicationService.js').MessageSearchAnswerPublicationService;
   routingDispatchPreflight?: import('../../../../routing-context/RoutingDispatchPreflightPort.js').RoutingDispatchPreflightPort;
   services: Record<string, AgentService>;
+  /** Rebuild stale configuration before retrying preflight; never invokes a provider. */
+  refreshServices?: () => Promise<void>;
   unavailableServices?: ReadonlyMap<string, AgentRegistrationFailure>;
   invocationDeps: InvocationDeps;
   dotReplyTarget?: (

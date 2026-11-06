@@ -5,6 +5,6 @@ description: Schema fixture only. Not part of runtime codegen.
 stages:
   - id: research
     label: Research
-    suggested_skill: expert-panel
+    suggested_skill: collaborative-thinking
     hard_rules: []
     pitfalls: []

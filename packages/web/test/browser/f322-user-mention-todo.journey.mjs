@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
-import { installMentionPreferences } from './f322-mention-personal-owner.mjs';
+import { emptyCollectiveAttentionFor, installMentionPreferences } from './f322-mention-personal-owner.mjs';
 
 /** Real message owner and decision routes behind the real shell/mailbox. Browser transport alone is isolated. */
 export function registerUserMentionJourney({ test, openProof, closeProof }) {
@@ -30,6 +30,7 @@ export function registerUserMentionJourney({ test, openProof, closeProof }) {
     const preferences = await installMentionPreferences(app);
     await app.register(companionDecisionRoutes, {
       ownerUserId: 'owner-1',
+      collectiveAccountability: emptyCollectiveAttentionFor('owner-1'),
       messageStore: messages,
       runtimeInteractionStore: new InMemoryRuntimeInteractionStore(),
       readIgnoredItemPreferences: preferences.read,
@@ -145,6 +146,10 @@ export function registerUserMentionJourney({ test, openProof, closeProof }) {
       assert.equal(await page.getByTestId('rail-badge-count').count(), 0);
       await page.getByTestId('mailbox-item-toggle').click();
       await page.getByTestId('mailbox-item-ignore').click();
+      await page.getByTestId('mailbox-transient-result').filter({ hasText: '忽略了' }).waitFor();
+      assert.equal(await page.getByTestId('mailbox-item').count(), 0);
+      await page.getByTestId('mailbox-close').click();
+      await page.getByTestId('mailbox-button').click();
       await page.getByTestId('mailbox-group-mentions').getByText('暂无 @你 请求', { exact: true }).waitFor();
       assert.equal(preferences.read('owner-1').entries.length, 1);
       assert.equal(

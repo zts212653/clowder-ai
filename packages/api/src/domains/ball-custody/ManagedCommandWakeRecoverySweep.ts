@@ -188,7 +188,8 @@ export class ManagedCommandWakeRecoverySweep {
       const completion = {
         taskId: task.id,
         wakeContent:
-          `持球唤醒（命令完成）：${inspection.result.tailOutput ?? inspection.state}` +
+          `持球唤醒（命令完成）：退出码 ${inspection.result.exitCode}${inspection.result.timedOut ? '（超时）' : ''}\n` +
+          (inspection.result.tailOutput ?? inspection.state) +
           (consumerLines.length > 0 ? `\n${consumerLines.join('\n')}` : ''),
         result: inspection.result,
       };
@@ -298,6 +299,7 @@ export class ManagedCommandWakeRecoverySweep {
       const parsed = parseWakeTask(task) ?? parseRetiredManagedCommandWakeTask(task);
       return parsed &&
         parsed.command.state === 'command_running' &&
+        !parsed.command.jobId &&
         !parsed.command.durableJob &&
         !isRunnerActive(task.id)
         ? [parsed]

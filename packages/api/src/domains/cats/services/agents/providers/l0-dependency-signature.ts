@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import { findMonorepoRoot } from '../../../../../utils/monorepo-root.js';
 import { SHARED_RULES_RELPATH } from '../../context/governance-l0.js';
 
 const GOVERNANCE_RULES_RELPATHS = [
@@ -8,15 +9,6 @@ const GOVERNANCE_RULES_RELPATHS = [
   'cat-cafe-skills/refs/shared-rules.local.md',
   'cat-cafe-skills/refs/shared-rules.local-override.md',
 ] as const;
-
-function findWorkspaceRoot(start: string): string {
-  let dir = resolve(start);
-  while (dir !== dirname(dir)) {
-    if (existsSync(resolve(dir, 'pnpm-workspace.yaml'))) return dir;
-    dir = dirname(dir);
-  }
-  return resolve(start);
-}
 
 function addDependencyFingerprint(filePath: string, label: string, entries: string[]): boolean {
   try {
@@ -60,7 +52,7 @@ function collectDirectoryFingerprints(dirPath: string, label: string, entries: s
 
 function computeSignature(cwd: string, scriptPath: string): string | null {
   const repoRoot = resolve(dirname(scriptPath), '..');
-  const workspaceRoot = findWorkspaceRoot(cwd);
+  const workspaceRoot = findMonorepoRoot(cwd);
   const entries: string[] = [];
   if (
     !addDependencyFingerprint(

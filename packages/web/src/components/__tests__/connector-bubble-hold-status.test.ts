@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F167 Phase Q — hold-ball lifecycle status refresh.
  */

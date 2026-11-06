@@ -1,6 +1,7 @@
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Thread } from '@/stores/chat-types';
+import { writeShellPresentation } from '../../shell/shell-presentation';
 
 const navigation = vi.hoisted(() => ({ push: vi.fn() }));
 vi.mock('../thread-navigation', async (importOriginal) => ({
@@ -29,13 +30,14 @@ const thread = (id: string, title: string, lastActiveAt: number): Thread & { las
   createdAt: NOW,
 });
 
-describe('F322 sidebar while a Café destination (记忆) is the current page', () => {
+describe.each(['classic', 'v2'] as const)('F322 sidebar while a Café destination is current (%s)', (presentation) => {
   let harness: ThreadSidebarHarness;
   const row = (id: string) => harness.container.querySelector<HTMLElement>(`[data-thread-id="${id}"]`);
 
   beforeEach(() => {
     installThreadSidebarGlobals();
     resetThreadSidebarMocks();
+    writeShellPresentation(presentation);
     navigation.push.mockReset();
     Object.defineProperty(Element.prototype, 'scrollIntoView', { value: vi.fn(), configurable: true });
     Object.assign(mockStore, {
@@ -101,7 +103,7 @@ describe('F322 sidebar while a Café destination (记忆) is the current page', 
   async function deleteRow(id: string) {
     const expand = harness.container.querySelector<HTMLButtonElement>('[data-testid="expand-all-btn"]');
     if (expand) act(() => expand.click());
-    const more = row(id)?.querySelector<HTMLButtonElement>('button[title="更多操作"]');
+    const more = row(id)?.querySelector<HTMLButtonElement>('button[aria-label="更多操作"]');
     if (!more) throw new Error(`no more-actions button on ${id}`);
     act(() => more.click());
     const del = button('删除对话');
@@ -114,17 +116,18 @@ describe('F322 sidebar while a Café destination (记忆) is the current page', 
   }
 
   async function archiveProject() {
-    const projectTab = Array.from(harness.container.querySelectorAll('[role="tab"]')).find(
-      (tab) => tab.textContent?.trim() === '项目',
-    ) as HTMLElement | undefined;
+    if (presentation === 'v2') {
+      await act(async () =>
+        harness.container.querySelector<HTMLButtonElement>('[data-testid="sidebar-view-menu"]')!.click(),
+      );
+    }
+    const projectTab = harness.container.querySelector<HTMLElement>('[data-testid="sidebar-tab-project"]');
     if (!projectTab) throw new Error('no project tab');
     await act(async () => projectTab.click());
     await harness.flush();
     const expand = harness.container.querySelector<HTMLButtonElement>('[data-testid="expand-all-btn"]');
     if (expand) act(() => expand.click());
-    const header = Array.from(harness.container.querySelectorAll<HTMLButtonElement>('button[title="更多操作"]')).find(
-      (b) => b.closest('[data-thread-id]') === null,
-    );
+    const header = harness.container.querySelector<HTMLButtonElement>('[data-testid="project-menu-btn"]');
     if (!header) throw new Error('no project header menu');
     act(() => header.click());
     const archive = Array.from(harness.container.querySelectorAll('button, [role="menuitem"], div')).find(

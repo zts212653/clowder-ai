@@ -1,3 +1,5 @@
+import { isDshLauncher } from './dsh-launcher.js';
+
 /**
  * Human-facing identities for agent tools that are discovered directly on the
  * host (Kimi CLI, DSH ACP, Pi ACP).
@@ -103,19 +105,29 @@ export const NATIVE_TOOL_IDENTITIES: Record<NativeToolKey, NativeToolIdentity> =
 export interface NativeToolIdentityInput {
   /** Discovery client id (`kimi`, `acp`, ...). */
   clientId?: string | null;
-  /** Runtime id or catalog cat id (`kimi`, `dsh`, `pi`, ...). */
-  catId?: string | null;
-  /** ACP launch descriptor; only used to tell DSH and Pi apart. */
+  /** ID and status from native discovery. Catalog member IDs are user-chosen. */
+  id?: string;
+  discoveryStatus?: string;
+  /** A top-level binding overrides the launch descriptor, including explicit null. */
+  agentProvider?: string | null;
   acp?: unknown;
 }
 
-function descriptorText(value: unknown): string {
-  if (value === undefined || value === null) return '';
-  try {
-    return JSON.stringify(value).toLowerCase();
-  } catch {
-    return '';
+function resolveAcpLauncherKey(acp: object): NativeToolKey | undefined {
+  if (!('command' in acp) || typeof acp.command !== 'string') return undefined;
+  const args = 'startupArgs' in acp ? acp.startupArgs : undefined;
+  if (args !== undefined && (!Array.isArray(args) || !args.every((arg) => typeof arg === 'string'))) return undefined;
+  if (isDshLauncher(acp.command, args)) return 'dsh';
+
+  const executable = acp.command.replaceAll('\\', '/').split('/').at(-1) ?? '';
+  const entry = (args?.[0] ?? '').replaceAll('\\', '/');
+  if (
+    /^pi-acp(?:\.(?:cmd|exe|bat))?$/i.test(executable) ||
+    (/^node(?:\.exe)?$/i.test(executable) && /(?:^|\/)pi-acp-bridge\.js$/.test(entry))
+  ) {
+    return 'pi';
   }
+  return undefined;
 }
 
 /**
@@ -123,19 +135,25 @@ function descriptorText(value: unknown): string {
  * identities this module owns. Returns undefined for unrelated tools.
  */
 export function resolveNativeToolKey(input: NativeToolIdentityInput): NativeToolKey | undefined {
-  const clientId = (input.clientId ?? '').trim().toLowerCase();
-  const catId = (input.catId ?? '').trim().toLowerCase();
+  const acp = input.acp && typeof input.acp === 'object' ? input.acp : {};
+  const agentProvider =
+    input.agentProvider !== undefined ? input.agentProvider : 'agentProvider' in acp && acp.agentProvider;
+  if (agentProvider) return undefined;
 
-  if (clientId === 'kimi' || catId === 'kimi') return 'kimi';
-
-  if (catId === 'dsh' || catId === 'pi') return catId;
-
+  const clientId = input.clientId?.trim().toLowerCase();
+  if (clientId === 'kimi') return 'kimi';
   if (clientId !== 'acp') return undefined;
+  if ('transport' in acp && acp.transport !== undefined && acp.transport !== 'stdio') return undefined;
 
-  const descriptor = descriptorText(input.acp);
-  if (descriptor.includes('pi-acp-bridge') || descriptor.includes('pi-coding-agent')) return 'pi';
-  if (descriptor.includes('dsh') || descriptor.includes('deepseek')) return 'dsh';
-  return undefined;
+  if (input.id === 'dsh' || input.id === 'pi') return input.id;
+  // For registered ACP discoveries these states follow official DSH package and profile validation.
+  if (
+    input.id?.startsWith('acp:') &&
+    (input.discoveryStatus === 'configured' || input.discoveryStatus === 'acp_profile_missing')
+  )
+    return 'dsh';
+
+  return resolveAcpLauncherKey(acp);
 }
 
 export function nativeToolIdentityFor(input: NativeToolIdentityInput): NativeToolIdentity | undefined {
