@@ -184,3 +184,38 @@ it('keeps owners independent and treats missing owners as idle', async () => {
   gate.release();
   await saving;
 });
+
+it('does not return a clearing snapshot to a load issued right after clear', async () => {
+  await saveNewConversationIntent(record(ALICE));
+  const gate = gatedFile('cleared.png');
+  const saving = saveNewConversationIntent(record(ALICE, [gate.file])).catch((error: unknown) => error);
+  const clearing = clearNewConversationIntent(ALICE);
+  const restoring = loadNewConversationIntent(ALICE);
+  try {
+    await expect(restoring).resolves.toBeNull();
+  } finally {
+    gate.release();
+    await Promise.all([saving, clearing]);
+  }
+  expect(await loadNewConversationIntent(ALICE)).toBeNull();
+});
+
+it('lets a save issued after clear become the new pending and survive the delete', async () => {
+  await saveNewConversationIntent(record(ALICE));
+  const oldGate = gatedFile('old.png');
+  const saving = saveNewConversationIntent(record(ALICE, [oldGate.file])).catch((error: unknown) => error);
+  const clearing = clearNewConversationIntent(ALICE);
+  const newGate = gatedFile('new.png');
+  const replacement = saveNewConversationIntent(record(ALICE, [newGate.file], 3)).catch(
+    (error: unknown) => error,
+  );
+  try {
+    expect((await loadNewConversationIntent(ALICE))?.files.map((file) => file.name)).toEqual(['new.png']);
+    await clearing;
+  } finally {
+    oldGate.release();
+    newGate.release();
+    await Promise.all([saving, replacement]);
+  }
+  expect((await loadNewConversationIntent(ALICE))?.files.map((file) => file.name)).toEqual(['new.png']);
+});

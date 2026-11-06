@@ -41,6 +41,8 @@ interface PendingSave {
   value: PersistedNewConversationIntent;
   status: PendingSaveStatus;
   phase: PendingSavePhase;
+  /** A clear owns the row; load waits for the delete instead of returning this snapshot. */
+  clearing: boolean;
   controller: AbortController;
   promise: Promise<void>;
 }
@@ -104,10 +106,6 @@ function abortError(): Error {
   return error;
 }
 
-function isAbortError(value: unknown): boolean {
-  return !!value && typeof value === 'object' && (value as { name?: unknown }).name === 'AbortError';
-}
-
 function normalizeValue(value: PersistedNewConversationIntent): PersistedNewConversationIntent {
   const parsedContext = ContextAttachmentsSchema.safeParse(value.contextAttachments);
   return {
@@ -129,38 +127,22 @@ function copyValue(value: PersistedNewConversationIntent): PersistedNewConversat
   };
 }
 
-/** Stable key order; `updatedAt` is intentionally not part of any comparison. */
-function stableJson(value: unknown): string {
-  return (
-    JSON.stringify(value, (_key, current: unknown) => {
-      if (!current || typeof current !== 'object' || Array.isArray(current)) return current;
-      const record = current as Record<string, unknown>;
-      return Object.fromEntries(Object.keys(record).sort().map((key) => [key, record[key]]));
-    }) ?? ''
-  );
-}
-
+/** Stable enough for the normalized intent/context shapes; updatedAt is never compared. */
 function sameSnapshot(left: PersistedNewConversationIntent, right: PersistedNewConversationIntent): boolean {
   if (left.files.length !== right.files.length) return false;
   for (let index = 0; index < left.files.length; index += 1) {
     if (left.files[index] !== right.files[index]) return false;
   }
   return (
-    stableJson(left.intent) === stableJson(right.intent) &&
-    stableJson(left.contextAttachments) === stableJson(right.contextAttachments)
+    JSON.stringify(left.intent) === JSON.stringify(right.intent) &&
+    JSON.stringify(left.contextAttachments) === JSON.stringify(right.contextAttachments)
   );
 }
 
 function notifySaveState(ownerUserId: string): void {
   const listeners = saveStateListeners.get(ownerUserId);
   if (!listeners) return;
-  for (const listener of [...listeners]) {
-    try {
-      listener();
-    } catch {
-      // A listener must not break persistence or another listener.
-    }
-  }
+  for (const listener of [...listeners]) listener();
 }
 
 function readFileBytes(file: File, signal: AbortSignal): Promise<ArrayBuffer> {
@@ -173,18 +155,10 @@ function readFileBytes(file: File, signal: AbortSignal): Promise<ArrayBuffer> {
       modern.arrayBuffer().then(
         (bytes) => {
           signal.removeEventListener('abort', onAbort);
-          if (signal.aborted) {
-            reject(abortError());
-            return;
-          }
           resolve(bytes);
         },
         (error) => {
           signal.removeEventListener('abort', onAbort);
-          if (signal.aborted) {
-            reject(abortError());
-            return;
-          }
           reject(error);
         },
       );
@@ -197,11 +171,7 @@ function readFileBytes(file: File, signal: AbortSignal): Promise<ArrayBuffer> {
     }
     function onAbort() {
       cleanup();
-      try {
-        reader.abort();
-      } catch {
-        // The reader may already be inactive.
-      }
+      reader.abort();
       reject(abortError());
     }
     signal.addEventListener('abort', onAbort, { once: true });
@@ -230,16 +200,6 @@ function isStoredArrayBuffer(value: unknown): value is ArrayBuffer {
   return value instanceof ArrayBuffer || Object.prototype.toString.call(value) === '[object ArrayBuffer]';
 }
 
-async function putRecord(value: PersistedNewConversationIntent, files: StoredFile[]): Promise<void> {
-  await (await database()).put(STORE, {
-    ownerUserId: value.ownerUserId,
-    intent: { ...value.intent, preferredCats: [...value.intent.preferredCats] },
-    files,
-    contextAttachments: [...value.contextAttachments],
-    updatedAt: value.updatedAt,
-  });
-}
-
 async function runAttempt(attempt: PendingSave): Promise<void> {
   const ownerUserId = attempt.value.ownerUserId;
   try {
@@ -262,7 +222,13 @@ async function runAttempt(attempt: PendingSave): Promise<void> {
         throw abortError();
       }
       attempt.phase = 'writing';
-      await putRecord(attempt.value, files);
+      await (await database()).put(STORE, {
+        ownerUserId: attempt.value.ownerUserId,
+        intent: { ...attempt.value.intent, preferredCats: [...attempt.value.intent.preferredCats] },
+        files,
+        contextAttachments: [...attempt.value.contextAttachments],
+        updatedAt: attempt.value.updatedAt,
+      });
     });
     attempt.phase = 'settled';
     if (pendingSaves.get(ownerUserId) === attempt && attempt.status === 'saving') {
@@ -271,7 +237,7 @@ async function runAttempt(attempt: PendingSave): Promise<void> {
     }
   } catch (error) {
     attempt.phase = 'settled';
-    if (attempt.controller.signal.aborted || isAbortError(error)) {
+    if (attempt.controller.signal.aborted) {
       if (pendingSaves.get(ownerUserId) === attempt) {
         attempt.status = 'cancelled';
         notifySaveState(ownerUserId);
@@ -293,7 +259,7 @@ function startSave(value: PersistedNewConversationIntent, force: boolean): Promi
   const normalized = normalizeValue(value);
   const ownerUserId = normalized.ownerUserId;
   const existing = pendingSaves.get(ownerUserId);
-  if (!force && existing && sameSnapshot(existing.value, normalized)) return existing.promise;
+  if (!force && existing && !existing.clearing && sameSnapshot(existing.value, normalized)) return existing.promise;
   if (existing && (existing.phase === 'reading' || existing.phase === 'queued')) {
     existing.status = 'cancelled';
     existing.controller.abort();
@@ -302,6 +268,7 @@ function startSave(value: PersistedNewConversationIntent, force: boolean): Promi
     value: normalized,
     status: 'saving',
     phase: 'reading',
+    clearing: false,
     controller: new AbortController(),
     promise: Promise.resolve(),
   };
@@ -314,8 +281,10 @@ function startSave(value: PersistedNewConversationIntent, force: boolean): Promi
 
 export function loadNewConversationIntent(ownerUserId: string): Promise<PersistedNewConversationIntent | null> {
   const pending = pendingSaves.get(ownerUserId);
-  if (pending) return Promise.resolve(copyValue(pending.value));
+  if (pending && !pending.clearing) return Promise.resolve(copyValue(pending.value));
   return enqueueOwnerOperation(ownerUserId, async () => {
+    const current = pendingSaves.get(ownerUserId);
+    if (current && !current.clearing) return copyValue(current.value);
     const record = await (await database()).get(STORE, ownerUserId);
     if (!record || record.ownerUserId !== ownerUserId || !isIntent(record.intent)) return null;
     const parsedContext = ContextAttachmentsSchema.safeParse(record.contextAttachments);
@@ -350,32 +319,36 @@ export function loadNewConversationIntent(ownerUserId: string): Promise<Persiste
   });
 }
 
-export function saveNewConversationIntent(value: PersistedNewConversationIntent): Promise<void> {
+export async function saveNewConversationIntent(value: PersistedNewConversationIntent): Promise<void> {
   return startSave(value, false);
 }
 
 export async function clearNewConversationIntent(ownerUserId: string): Promise<void> {
   const existing = pendingSaves.get(ownerUserId);
-  if (existing && existing.status === 'saving') {
-    existing.status = 'cancelled';
-    if (existing.phase === 'reading' || existing.phase === 'queued') existing.controller.abort();
-    notifySaveState(ownerUserId);
-  }
-  try {
-    await enqueueOwnerOperation(ownerUserId, async () => {
-      await (await database()).delete(STORE, ownerUserId);
-    });
-  } catch (error) {
-    if (existing && pendingSaves.get(ownerUserId) === existing) {
-      existing.status = 'failed';
+  if (existing) {
+    existing.clearing = true;
+    if (existing.status === 'saving') {
+      existing.status = 'cancelled';
+      if (existing.phase === 'reading' || existing.phase === 'queued') existing.controller.abort();
       notifySaveState(ownerUserId);
     }
-    throw error;
   }
-  if (existing && pendingSaves.get(ownerUserId) === existing) {
-    pendingSaves.delete(ownerUserId);
-    notifySaveState(ownerUserId);
-  }
+  await enqueueOwnerOperation(ownerUserId, async () => {
+    try {
+      await (await database()).delete(STORE, ownerUserId);
+    } catch (error) {
+      if (existing && pendingSaves.get(ownerUserId) === existing) {
+        existing.clearing = false;
+        existing.status = 'failed';
+        notifySaveState(ownerUserId);
+      }
+      throw error;
+    }
+    if (existing && pendingSaves.get(ownerUserId) === existing) {
+      pendingSaves.delete(ownerUserId);
+      notifySaveState(ownerUserId);
+    }
+  });
 }
 
 export function getNewConversationIntentSaveState(ownerUserId: string | null): NewConversationIntentSaveState {
@@ -403,7 +376,7 @@ export function subscribeNewConversationIntentSaveState(
 
 export function cancelNewConversationIntentSave(ownerUserId: string): void {
   const attempt = pendingSaves.get(ownerUserId);
-  if (!attempt || attempt.status !== 'saving') return;
+  if (!attempt || attempt.status !== 'saving' || attempt.clearing) return;
   if (attempt.phase === 'writing' || attempt.phase === 'settled') return;
   attempt.status = 'cancelled';
   attempt.controller.abort();
@@ -412,7 +385,7 @@ export function cancelNewConversationIntentSave(ownerUserId: string): void {
 
 export async function retryNewConversationIntentSave(ownerUserId: string): Promise<void> {
   const attempt = pendingSaves.get(ownerUserId);
-  if (!attempt) return;
+  if (!attempt || attempt.clearing) return;
   if (attempt.status === 'saving') {
     await attempt.promise;
     return;
