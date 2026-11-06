@@ -139,6 +139,17 @@ export class RichBlockBuffer {
     return false;
   }
 
+  /** Content-free: whether one of these invocations has a block still waiting to land on its reply. */
+  hasPendingBlock(
+    threadId: string,
+    catId: string,
+    invocationIds: readonly string[],
+    match: (block: RichBlock) => boolean,
+  ): boolean {
+    const entry = this.entries.get(bufferKey(threadId, catId));
+    return Boolean(entry && invocationIds.includes(entry.invocationId) && entry.blocks.some(match));
+  }
+
   hasKind(threadId: string, catId: string, invocationId: string, kind: RichBlock['kind']): boolean {
     const entry = this.entries.get(bufferKey(threadId, catId));
     return Boolean(entry && entry.invocationId === invocationId && entry.blocks.some((block) => block.kind === kind));

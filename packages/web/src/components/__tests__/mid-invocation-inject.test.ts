@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F24: Mid-invocation message injection regression tests.
  * During active work the composer stays simple: Stop is always available,

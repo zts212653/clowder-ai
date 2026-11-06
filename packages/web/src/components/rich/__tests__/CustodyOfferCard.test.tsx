@@ -2,6 +2,7 @@ import type { CustodyOfferV1 } from '@cat-cafe/shared';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { SHELL_PRESENTATION_STORAGE_KEY, writeShellPresentation } from '@/components/shell/shell-presentation';
 import { apiFetch } from '@/utils/api-client';
 import { CustodyOfferCard } from '../CustodyOfferCard';
 
@@ -45,7 +46,7 @@ function accepted(result: 'admitted' | 'resumed' | 'needs_clarification'): Custo
   };
 }
 
-describe('CustodyOfferCard', () => {
+describe.each(['classic', 'v2'] as const)('CustodyOfferCard (%s)', (presentation) => {
   let container: HTMLDivElement;
   let root: Root;
 
@@ -54,6 +55,7 @@ describe('CustodyOfferCard', () => {
   });
   afterAll(() => delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT);
   beforeEach(() => {
+    writeShellPresentation(presentation);
     vi.mocked(apiFetch).mockReset();
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -62,6 +64,7 @@ describe('CustodyOfferCard', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    window.localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
   });
 
   it('shows exactly one accept/decline choice and submits the exact source revision', async () => {
@@ -88,8 +91,8 @@ describe('CustodyOfferCard', () => {
         body: JSON.stringify({ sourceMessageRevision, offerId: pending.offerId }),
       }),
     );
-    expect(container.textContent).toContain('我们接住了');
-    expect(container.querySelectorAll('button')).toHaveLength(0);
+    expect(container.textContent).toContain(presentation === 'classic' ? '我们接住了' : '已同意 · 任务已接住');
+    expect(container.querySelectorAll('button:not([aria-expanded])')).toHaveLength(0);
   });
 
   it('fails closed when the hydrated owner no longer matches the source-bound card', async () => {
@@ -116,10 +119,10 @@ describe('CustodyOfferCard', () => {
       root.render(<CustodyOfferCard sourceMessageId={sourceMessageId} expectedOffer={pending} />);
       await Promise.resolve();
     });
-    expect(container.textContent).toContain('还差一个关键信息');
-    expect(container.textContent).toContain('还没有建立任务');
+    expect(container.textContent).toContain(presentation === 'classic' ? '还差一个关键信息' : '还需补充信息');
+    expect(container.textContent).toContain(presentation === 'classic' ? '还没有建立任务' : '任务尚未建立');
     expect(container.textContent).not.toContain('我们接住了');
-    expect(container.querySelectorAll('button')).toHaveLength(0);
+    expect(container.querySelectorAll('button:not([aria-expanded])')).toHaveLength(0);
   });
 
   it('refetches canonical truth after the source-owner invalidation event', async () => {
@@ -137,6 +140,6 @@ describe('CustodyOfferCard', () => {
       await Promise.resolve();
     });
     expect(apiFetch).toHaveBeenCalledTimes(2);
-    expect(container.textContent).toContain('我们接住了');
+    expect(container.textContent).toContain(presentation === 'classic' ? '我们接住了' : '已同意 · 已接回原任务');
   });
 });

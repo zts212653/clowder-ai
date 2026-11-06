@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * P1/P2 regression: BubbleToggle must sync chatStore after success
  * and clear optimistic state.

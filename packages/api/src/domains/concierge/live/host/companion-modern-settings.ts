@@ -1,4 +1,5 @@
 import { CONCIERGE_CONFIG_DEFAULTS, clampBallSize } from '@cat-cafe/shared';
+import { validateCompanionReply as validateDeskReply } from '@clowder-ai/plugin-contract-033c0';
 import { type CompanionCommand, validateCompanionReply } from '@clowder-ai/plugin-contract-beta23';
 import { validateCompanionReply as validateWorkReply } from '@clowder-ai/plugin-contract-beta25';
 import { validateCompanionReply as validatePresentationReply } from '@clowder-ai/plugin-contract-beta27';
@@ -9,7 +10,11 @@ import {
 } from '@clowder-ai/plugin-contract-beta29';
 import { z } from 'zod';
 import type { HostCompanionReply } from '../../../plugin/desktop-window-runtime/companion-private-wire.js';
-import type { CompanionArchiveContract } from '../../../plugin/desktop-window-runtime/published-companion-v2.js';
+import {
+  type CompanionArchiveContract,
+  type CompanionContract,
+  companionContractHas,
+} from '../../../plugin/desktop-window-runtime/published-companion-v2.js';
 import type { CompanionOwnerClient } from '../companion-owner-client.js';
 
 const unavailable = () => ({ kind: 'settings', status: 'unavailable', reason: 'temporarily_unavailable' }) as const;
@@ -18,12 +23,18 @@ const settledCall = z.enum(['unchanged', 'stopped']);
 // Published beta.23/24 archives reject smaller replies. Keep the saved owner
 // preference intact, but project a value their public contract can consume.
 const publishedModernBallSizeMin = 48;
+/** The settings reply schema of each line that changed it; earlier modern lines read beta.23's. */
+const SETTINGS_REPLIES: Partial<Record<CompanionContract, (value: unknown) => value is HostCompanionReply>> = {
+  '0.1.0-beta.25': validateWorkReply,
+  '0.1.0-beta.27': validatePresentationReply,
+  '0.1.0-beta.28': validateLetterReply,
+  '0.1.0-beta.29': validateAppAssistReply,
+  '0.3.3-candidate.0': validateDeskReply,
+};
 
 function publishedBallSize(size: number | null | undefined, contract: CompanionArchiveContract['contract']) {
   const clamped = clampBallSize(size);
-  return ['0.1.0-beta.25', '0.1.0-beta.27', '0.1.0-beta.28', '0.1.0-beta.29'].includes(contract)
-    ? clamped
-    : Math.max(publishedModernBallSizeMin, clamped);
+  return companionContractHas(contract, 'smallBall') ? clamped : Math.max(publishedModernBallSizeMin, clamped);
 }
 
 /** Read the same owner record, applying only its canonical legacy defaults. */
@@ -55,16 +66,12 @@ export async function readModernCompanionSettings(
       proactivePolicy: config.proactivePolicy,
       personaTone: config.personaTone,
       householdReadsAllowed: config.householdReadsAllowed ?? true,
-      ...(contract === '0.1.0-beta.29' ? { appAssistEnabled: config.appAssistEnabled === true } : {}),
+      ...(companionContractHas(contract, 'appAssist') ? { appAssistEnabled: config.appAssistEnabled === true } : {}),
     },
     companions: response.body.companions,
     selectedCompanionStatus: response.body.selectedCompanionStatus,
   };
-  if (contract === '0.1.0-beta.25') return validateWorkReply(candidate) ? candidate : unavailable();
-  if (contract === '0.1.0-beta.27') return validatePresentationReply(candidate) ? candidate : unavailable();
-  if (contract === '0.1.0-beta.28') return validateLetterReply(candidate) ? candidate : unavailable();
-  if (contract === '0.1.0-beta.29') return validateAppAssistReply(candidate) ? candidate : unavailable();
-  return validateCompanionReply(candidate) ? candidate : unavailable();
+  return (SETTINGS_REPLIES[contract] ?? validateCompanionReply)(candidate) ? candidate : unavailable();
 }
 
 export async function updateModernCompanionSettings(

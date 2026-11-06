@@ -1,6 +1,6 @@
 'use client';
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useAgentClientLibraries } from '@/hooks/useAgentClientLibraries';
 import {
   isDshMember,
@@ -39,6 +39,8 @@ export function MemberRuntimeFields({
   editing,
   onValidityChange,
   nativeSetup = false,
+  preparedRuntime: draftPreparedRuntime,
+  onPreparedRuntime,
 }: {
   form: HubCatEditorFormState;
   accounts: ProfileItem[];
@@ -51,11 +53,24 @@ export function MemberRuntimeFields({
   onValidityChange?: (valid: boolean) => void;
   /** First-run keeps the detected tool and its existing connection, exposing only model preferences. */
   nativeSetup?: boolean;
+  preparedRuntime?: RuntimeChoice;
+  onPreparedRuntime?: (runtime: RuntimeChoice) => void;
 }) {
   const [runtimes, setRuntimes] = useState<RuntimeChoice[]>([]),
     [error, setError] = useState(false),
     [loading, setLoading] = useState(true),
     [refresh, setRefresh] = useState(0);
+  const [localPreparedRuntime, setLocalPreparedRuntime] = useState<RuntimeChoice>();
+  const preparedRuntime = onPreparedRuntime ? draftPreparedRuntime : localPreparedRuntime;
+  const setPreparedRuntime = onPreparedRuntime ?? setLocalPreparedRuntime;
+  const preparedSelected = preparedRuntime !== undefined && matchesRuntime(form, preparedRuntime);
+  const runtimeEvidence = useMemo(
+    () => (preparedSelected && preparedRuntime ? [...runtimes, preparedRuntime] : runtimes),
+    [runtimes, preparedRuntime, preparedSelected],
+  );
+  useEffect(() => {
+    useMemberModelCatalogs.setState({ runtimes: runtimeEvidence });
+  }, [runtimeEvidence]);
   const { libraries: clientLibraries, error: libraryError } = useAgentClientLibraries(String(refresh), !nativeSetup);
   useEffect(() => {
     const controller = new AbortController();
@@ -67,7 +82,9 @@ export function MemberRuntimeFields({
         return (await response.json()) as { runtimes: RuntimeChoice[] };
       })
       .then((data) => {
-        if (!controller.signal.aborted) setRuntimes(data.runtimes);
+        if (!controller.signal.aborted) {
+          setRuntimes(data.runtimes);
+        }
       })
       .catch(() => {
         if (!controller.signal.aborted) setError(true);
@@ -77,7 +94,13 @@ export function MemberRuntimeFields({
       });
     return () => controller.abort();
   }, [refresh]);
-  const tools = memberRuntimeTools(runtimes, clientLibraries, runtimeDrafts);
+  const tools = memberRuntimeTools(
+    preparedSelected && preparedRuntime
+      ? runtimes.map((runtime) => (runtime.id === preparedRuntime.id ? preparedRuntime : runtime))
+      : runtimes,
+    clientLibraries,
+    runtimeDrafts,
+  );
   const selected = tools.find((item) => matchesRuntime(form, item));
   const agy = usesAgyNative(form) || usesAgyAcp(form);
   const tool =
@@ -98,7 +121,7 @@ export function MemberRuntimeFields({
     accountRef: form.accountRef,
     cliConfigArgs: form.cliConfigArgs,
   };
-  const dsh = isDshMember(displayMember);
+  const dsh = isDshMember(displayMember, runtimeEvidence);
   const english = t('zh', 'en') === 'en';
   const availableAccounts = filterAccounts(form.clientId, accounts),
     identity = availableAccounts.find((item) => item.id === form.accountRef);
@@ -270,6 +293,15 @@ export function MemberRuntimeFields({
           runtimeId={selected?.id ?? (editing ? `acp:${form.catId}` : 'dsh')}
           t={t}
           patch={patch}
+          onPrepared={(command, args, runtimeId) => {
+            const source = runtimes.find((runtime) => runtime.id === runtimeId);
+            if (source?.acp)
+              setPreparedRuntime({
+                ...source,
+                dshSetupSupported: true,
+                acp: { ...source.acp, command, startupArgs: args },
+              });
+          }}
         />
       )}
       <div className="grid gap-4 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">

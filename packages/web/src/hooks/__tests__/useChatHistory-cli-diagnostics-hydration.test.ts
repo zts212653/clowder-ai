@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F212 Phase B 云端 codex P2 regression (2026-05-27):
  *

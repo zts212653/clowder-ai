@@ -101,7 +101,9 @@ process.stdin.on('data', (chunk) => {
             command: 'prompt',
             id: command.id,
             success: false,
-            error: 'model is unavailable; api_key=secret-fixture-token',
+            error: existsSync(path.join(root, 'primary-error-text'))
+              ? readFileSync(path.join(root, 'primary-error-text'), 'utf8')
+              : 'model is unavailable; api_key=secret-fixture-token',
           });
           break;
         }
@@ -134,10 +136,14 @@ process.stdin.on('data', (chunk) => {
           )
         ) {
           if (command.message === 'empty-diagnostic') {
-            process.stderr.write('provider quota exhausted; api_key=secret-empty-response-token\n');
+            const diagnosticFile = path.join(root, 'diagnostic-text');
+            process.stderr.write(
+              `${existsSync(diagnosticFile) ? readFileSync(diagnosticFile, 'utf8') : 'provider quota exhausted; api_key=secret-empty-response-token'}\n`,
+            );
             // Allow the independent stderr pipe to be consumed before the terminal wire event.
             setTimeout(() => {
-              send({ type: 'message_end', message: { role: 'assistant', content: [], stopReason: 'stop' } });
+              if (!existsSync(path.join(root, 'incomplete-diagnostic')))
+                send({ type: 'message_end', message: { role: 'assistant', content: [], stopReason: 'stop' } });
               send({ type: 'agent_settled', aborted: false });
             }, 80);
             break;

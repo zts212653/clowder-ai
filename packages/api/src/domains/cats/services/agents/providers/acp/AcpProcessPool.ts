@@ -69,6 +69,12 @@ export interface AcpPoolClient {
    */
   readonly isCwdIntact: boolean;
   /**
+   * Exact spawn coordinates, exposed only for bounded host-side provider
+   * diagnostics (e.g. Kimi's own turn ledger). Optional: test doubles and
+   * transports without a local native home omit it.
+   */
+  readonly spawnContext?: { readonly cwd: string; readonly env: Readonly<Record<string, string | undefined>> };
+  /**
    * False after a cancelled prompt may still be running upstream. The pool only
    * acts on this for non-multiplexed carriers; multiplexed clients can keep
    * serving unrelated sessions.

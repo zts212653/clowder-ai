@@ -4,7 +4,7 @@ related_features: [F152, F200, F221, F227, F231, F243, F256, F260, F263, F271, F
 topics: [memory, experience, generalization, continuity]
 doc_kind: spec
 created: 2026-10-23
-updated: 2026-11-03
+updated: 2026-11-04
 tips_exempt: "Renewed 2026-10-25 for KD-4 through KD-8, OQ-3, delivery roadmap v1 and status records: this documentation records capsule approval before opening delivery, a pluggable per-user capsule that every owner can see and edit through one shared entry, stable-persona relationships versus model-specific capabilities, owner-controlled per-thread watcher design and trials, and delivery sequencing. These decisions extend the architecture discussion without delivering or enabling a new user entry, memory injection or watcher configuration; the existing F321/Luna obligations remain."
 description: 让共同经历在未见情境中帮助猫自主联想、核证与修正判断，并让人看见和纠正记忆。
 description_source: human
@@ -38,7 +38,6 @@ You 要的，是共同经历能帮助猫理解新的处境、接住关系、减�
 开场/恢复能按需回看；人物、品味与授权仍沿原权威。2a/2b已完成的Task1569不重开。
 
 **11-03 00:03 UTC施工验收完成**：PR #6486已合入main `da4ada6baf2d7d1a9a703f45ddec0645f40ae000`，非作者审查、定向验证和标准Alpha跨线更正/出处/历史界面通过。F333 #6491修复由标准Alpha正常加载后，Codex新会话与同一会话恢复均经原生MCP读到六条原消息和设置页revision2，并在回答中使用、区分适用性及修正过度推断。原失败保留；实际成员为原样本codex6-sol、模型gpt-6.1-sol，选定codex61-sol的Alpha账号不一致单列。
-原Task `private-source-id`由原指挥按完整回报收口，施工线程不越权代关；施工现场`[thread-id]`与原生1455承接不变。
 原Alpha目标11-05周四18:00 America/Los_Angeles保留；正式环境未因本轮重启或宣称加载，整项F332/F335不关闭。
 F335的跨线使用依赖2c实物验收，不等整个F332关闭；两周粒度观察从能力可用和实际试用起算。
 当天检索问题沿原Task528/原F322 Task168责任；本轮窄查询已找到当日原消息，但coverage/freshness仍unknown，

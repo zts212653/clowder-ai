@@ -13,14 +13,11 @@ import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { HookRegistry } from '../domains/prompt-hooks/HookRegistry.js';
+import { findMonorepoRootOrNull } from '../utils/monorepo-root.js';
 
+/** The monorepo this code runs from; an install without the workspace marker falls back to cwd. */
 function findProjectRoot(): string {
-  let dir = dirname(fileURLToPath(import.meta.url));
-  while (dir !== dirname(dir)) {
-    if (existsSync(join(dir, 'pnpm-workspace.yaml'))) return dir;
-    dir = dirname(dir);
-  }
-  return process.cwd();
+  return findMonorepoRootOrNull(dirname(fileURLToPath(import.meta.url))) ?? process.cwd();
 }
 
 export interface HookContentResult {

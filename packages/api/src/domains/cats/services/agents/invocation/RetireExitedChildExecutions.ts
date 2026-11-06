@@ -3,7 +3,8 @@ import type { ITurnExecutionStore } from '../../stores/ports/TurnExecutionStore.
 import type { OwnerCandidate } from './InvocationOwnerLeaseCandidates.js';
 
 export interface ExitedChildRecovery {
-  getChildProcessExit?: (child: TurnExecutionRecord) => { exitedAt: number } | undefined;
+  getChildProcessExit?: (child: TurnExecutionRecord) => { exitedAt: number; origins?: readonly string[] } | undefined;
+  log?: { info(bindings: unknown, message?: string): void };
   /** Synchronous exact-owner fence. Missing/ambiguous control must return false. */
   fenceExitedExecution?: (candidate: OwnerCandidate, children: readonly TurnExecutionRecord[]) => boolean;
   turnExecutionStore: Pick<ITurnExecutionStore, 'listByParent'> &
@@ -32,7 +33,7 @@ export async function retireExitedChildExecutions(
     return false;
   const running = children.filter((child) => child.status === 'running');
   if (!running.length) return false;
-  const exits = new Map<string, number>();
+  const exits = new Map<string, { exitedAt: number; origins?: readonly string[] }>();
   for (const child of running) {
     const exit = deps.getChildProcessExit(child);
     if (
@@ -42,7 +43,7 @@ export async function retireExitedChildExecutions(
       now - exit.exitedAt < FINALIZATION_GRACE_MS
     )
       return false;
-    exits.set(child.invocationId, exit.exitedAt);
+    exits.set(child.invocationId, exit);
   }
   // Fence continued actor work before durable retirement. A fresh process observed since the read vetoes this.
   if (!deps.fenceExitedExecution(candidate, running)) return false;
@@ -51,9 +52,19 @@ export async function retireExitedChildExecutions(
       status: 'interrupted',
       endedAt: now,
       terminalReason: 'provider_exited_without_terminal',
-      providerTeardownAt: exits.get(child.invocationId),
+      providerTeardownAt: exits.get(child.invocationId)?.exitedAt,
     });
     if (!outcome.record || outcome.record.status === 'running') throw new Error('exited_child_terminal_not_committed');
+    deps.log?.info(
+      {
+        event: 'provider_stop_proof_recovered',
+        invocationId: child.invocationId,
+        parentInvocationId: candidate.executionId,
+        origins: exits.get(child.invocationId)?.origins ?? ['process_exit_event'],
+        providerTeardownAt: exits.get(child.invocationId)?.exitedAt,
+      },
+      'Exact stopped-provider evidence retired child',
+    );
   }
   return true;
 }

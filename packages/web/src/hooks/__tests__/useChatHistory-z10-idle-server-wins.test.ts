@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F194 Phase Z10 AC-Z28 — 砚砚 R1 P1: server-idle truth must win the race.
  *

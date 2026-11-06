@@ -96,3 +96,26 @@ describe('MarkdownContent mention highlighting', () => {
     expect(html).toContain('color:#D4A76A');
   });
 });
+
+describe('MarkdownContent mention chip colour (F314-4)', () => {
+  it('tints the chip of a cat whose colour is written as #rgb like its #rrggbb form', () => {
+    resetMentionDataForTest();
+    refreshMentionData([
+      {
+        id: 'shortcolor',
+        displayName: '短色猫',
+        color: { primary: '#abc', secondary: '#def' },
+        mentionPatterns: ['@shortcolor'],
+        clientId: 'openai',
+        carrier: 'cli',
+        defaultModel: 'gpt-5.5',
+        avatar: '',
+        roleDescription: '',
+        personality: '',
+      },
+    ]);
+    const html = render('hello @shortcolor');
+    expect(html).not.toContain('NaN');
+    expect(html).toContain('rgba(170,187,204,0.15)');
+  });
+});

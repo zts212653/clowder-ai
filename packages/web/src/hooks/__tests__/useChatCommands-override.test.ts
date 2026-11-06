@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * Tests that processCommand uses overrideThreadId when provided,
  * rather than falling back to currentThreadId from the store.

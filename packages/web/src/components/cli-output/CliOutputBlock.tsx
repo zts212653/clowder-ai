@@ -5,29 +5,9 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { MarkdownContent } from '@/components/MarkdownContent';
 import { useMessageDisclosureState } from '@/components/message-disclosure-state';
 import { UNKNOWN_CAT_COLOR } from '@/lib/color-defaults';
+import { hexToRgba, tintedLight } from '@/lib/color-utils';
 import type { CliEvent, CliStatus } from '@/stores/chat-types';
 import typographyTokens from '@/styles/typography-tokens.json';
-
-/* ── Helpers ── */
-
-/** Convert hex to rgba */
-function hexToRgba(hex: string, opacity: number): string {
-  const r = Number.parseInt(hex.slice(1, 3), 16);
-  const g = Number.parseInt(hex.slice(3, 5), 16);
-  const b = Number.parseInt(hex.slice(5, 7), 16);
-  return `rgba(${r}, ${g}, ${b}, ${opacity})`;
-}
-
-/** Lighten a hex color toward white by ratio (0-1) */
-function lighten(hex: string, ratio: number): string {
-  const r = Number.parseInt(hex.slice(1, 3), 16);
-  const g = Number.parseInt(hex.slice(3, 5), 16);
-  const b = Number.parseInt(hex.slice(5, 7), 16);
-  const lr = Math.round(r + (255 - r) * ratio);
-  const lg = Math.round(g + (255 - g) * ratio);
-  const lb = Math.round(b + (255 - b) * ratio);
-  return `rgb(${lr}, ${lg}, ${lb})`;
-}
 
 /* ── Divider stays neutral; surface colors are now breed-tinted (see buildSurface) ── */
 const DIVIDER = 'var(--console-border-strong)';
@@ -226,8 +206,8 @@ function ToolRow({
   const hasResult = event.detail != null;
   usePublishLayoutAfterDisclosure(rowExpanded);
   // Design: active = breed bg 20% + left border 2px + lighter text
-  const accentLight = lighten(accent, 0.6); // ~#C084FC equivalent
-  const accentVeryLight = lighten(accent, 0.9); // ~#F5F3FF equivalent
+  const accentLight = tintedLight(accent, 0.4); // 60% toward white, ~#C084FC equivalent
+  const accentVeryLight = tintedLight(accent, 0.1); // 90% toward white, ~#F5F3FF equivalent
 
   return (
     <button

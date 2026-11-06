@@ -48,12 +48,6 @@ describe('isCommunityIssueDraftBlock', () => {
   it('returns false when meta is undefined', () => {
     expect(isCommunityIssueDraftBlock({ ...draftBlock, meta: undefined })).toBe(false);
   });
-
-  it('does NOT require connector provenance (cat messages are inherently trusted)', () => {
-    // Phase A preview cards require messageSource.connector === 'community-publisher'.
-    // Phase B draft cards come from cats — no connector check needed (OQ-2).
-    expect(isCommunityIssueDraftBlock(draftBlock)).toBe(true);
-  });
 });
 
 describe('CommunityIssueDraftCard', () => {

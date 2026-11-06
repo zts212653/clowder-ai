@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F079: useChatCommands /vote tests
  */

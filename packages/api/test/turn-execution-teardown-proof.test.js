@@ -14,21 +14,28 @@ const input = (invocationId, tracked = true) => ({
 });
 
 for (const status of ['succeeded', 'failed', 'canceled', 'interrupted'])
-  test(`the canonical writer rejects ${status} without dispatched provider teardown`, () => {
+  test(`Host ${status} and physical teardown remain separate`, () => {
     const store = new InMemoryTurnExecutionStore();
     store.createRunning(input('unknown'));
     store.markProviderStarted('unknown', 0);
-    assert.throws(
-      () => store.transitionTerminal('unknown', { status, endedAt: 100, terminalReason: 'host_only' }),
-      /provider_teardown_unconfirmed/,
-    );
-    assert.equal(store.get('unknown').status, 'running');
-    assert.equal(store.listRunningByUser('proof-user').length, 1);
-    assert.deepEqual(store.listResponsePending(), []);
+    if (status === 'succeeded') {
+      assert.throws(
+        () => store.transitionTerminal('unknown', { status, endedAt: 100, terminalReason: 'host_only' }),
+        /provider_teardown_unconfirmed/,
+      );
+    } else {
+      assert.equal(
+        store.transitionTerminal('unknown', { status, endedAt: 100, terminalReason: 'host_only' }).outcome,
+        'transitioned',
+      );
+      assert.equal(store.get('unknown').providerTeardownAt, undefined);
+    }
+    assert.equal(store.get('unknown').status, status === 'succeeded' ? 'running' : status);
+    assert.equal(store.listRunningByUser('proof-user').length, status === 'succeeded' ? 1 : 0);
     store.recordProviderTeardown('unknown', 0);
     assert.equal(
       store.transitionTerminal('unknown', { status, endedAt: 100, terminalReason: 'exact_stop' }).outcome,
-      'transitioned',
+      status === 'succeeded' ? 'transitioned' : 'already_terminal',
     );
   });
 

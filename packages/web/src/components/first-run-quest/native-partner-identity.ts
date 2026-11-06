@@ -30,11 +30,7 @@ function identityForm(identity: NativeToolIdentity) {
 
 /** Tool identities are independent of the model/provider chosen in that tool. */
 export function nativePartnerIdentity(runtime: RuntimeChoice, templates: TemplateCard[], cats: CatData[]) {
-  const identity = nativeToolIdentityFor({
-    clientId: runtime.clientId,
-    catId: runtime.id,
-    acp: runtime.acp,
-  });
+  const identity = nativeToolIdentityFor(runtime);
   const templateId = identity?.templateId ?? templatesByClient[runtime.clientId];
   const template = templates.find((item) => item.id === templateId);
   const form = template

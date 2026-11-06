@@ -88,17 +88,23 @@ const worldRail = (
  * A navigation that arrives with the same value on a different route is a fresh intent; re-rendering the current URL is not.
  * Storage stays the truth; the location is only read, not remembered.
  */
-function useShellPresentationFromUrl(pathname: string, shellParam: string | null): ShellPresentation {
+function useShellPresentationFromUrl(
+  pathname: string,
+  shellParam: string | null,
+  isExport: boolean,
+): ShellPresentation {
   const stored = useShellPresentation();
   const requested = parseShellPresentation(shellParam);
   const intent = JSON.stringify([pathname, shellParam]);
   const [appliedIntent, setAppliedIntent] = useState<string | null>(null);
   // Resolve navigation intent in render; do not paint the old shell before writing its preference.
-  const presentation = appliedIntent !== intent && requested ? requested : stored;
+  // An exported document always uses v2, independently of the browser's saved interface.
+  const presentation = isExport ? 'v2' : appliedIntent !== intent && requested ? requested : stored;
   useLayoutEffect(() => {
+    if (isExport) return;
     if (requested && requested !== readShellPresentation()) writeShellPresentation(requested);
     setAppliedIntent(intent);
-  }, [intent, requested]);
+  }, [intent, requested, isExport]);
   // Tokens are scoped to [data-shell="v2"] on <html> so portalled tips/menus get them too.
   useLayoutEffect(() => {
     if (presentation !== 'v2') return;
@@ -153,7 +159,7 @@ function AppShellContent({ children, pathname }: AppShellProps & { pathname: str
   const isExport = searchParams.get('export') === 'true';
   const { isOpen, initialized: sidebarInitialized, open, width, close, handleResize, resetWidth } = useSidebarStore();
   const isDesktop = useIsDesktop();
-  const presentation = useShellPresentationFromUrl(pathname, searchParams.get('shell'));
+  const presentation = useShellPresentationFromUrl(pathname, searchParams.get('shell'), isExport);
   const isV2 = presentation === 'v2';
   // F322 v2: 记忆 is a Café destination, so its route family keeps the sidebar (and the 记忆 row is the current page).
   // Every other hidden route, classic, and the user's own collapse preference are untouched.
@@ -207,7 +213,11 @@ function AppShellContent({ children, pathname }: AppShellProps & { pathname: str
 
   if (isExport || isChromeless) {
     if (isChromeless) return <>{children}</>;
-    return <ThreadChatRuntimeProvider routeThreadId={routeThreadId}>{children}</ThreadChatRuntimeProvider>;
+    return (
+      <ShellPresentationContext.Provider value={presentation}>
+        <ThreadChatRuntimeProvider routeThreadId={routeThreadId}>{children}</ThreadChatRuntimeProvider>
+      </ShellPresentationContext.Provider>
+    );
   }
 
   const routeHidesSidebar = SIDEBAR_HIDDEN_ROUTES.some((r) => pathname.startsWith(r)) && activeDestination === null;
