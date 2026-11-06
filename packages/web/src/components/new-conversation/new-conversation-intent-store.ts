@@ -129,11 +129,9 @@ function copyValue(value: PersistedNewConversationIntent): PersistedNewConversat
 
 /** Stable enough for the normalized intent/context shapes; updatedAt is never compared. */
 function sameSnapshot(left: PersistedNewConversationIntent, right: PersistedNewConversationIntent): boolean {
-  if (left.files.length !== right.files.length) return false;
-  for (let index = 0; index < left.files.length; index += 1) {
-    if (left.files[index] !== right.files[index]) return false;
-  }
   return (
+    left.files.length === right.files.length &&
+    left.files.every((file, index) => file === right.files[index]) &&
     JSON.stringify(left.intent) === JSON.stringify(right.intent) &&
     JSON.stringify(left.contextAttachments) === JSON.stringify(right.contextAttachments)
   );
@@ -142,7 +140,9 @@ function sameSnapshot(left: PersistedNewConversationIntent, right: PersistedNewC
 function notifySaveState(ownerUserId: string): void {
   const listeners = saveStateListeners.get(ownerUserId);
   if (!listeners) return;
-  for (const listener of [...listeners]) listener();
+  [...listeners].forEach((listener) => {
+    listener();
+  });
 }
 
 function readFileBytes(file: File, signal: AbortSignal): Promise<ArrayBuffer> {
@@ -358,10 +358,7 @@ export function getNewConversationIntentSaveState(ownerUserId: string | null): N
   return pendingSaves.get(ownerUserId)?.status ?? 'idle';
 }
 
-export function subscribeNewConversationIntentSaveState(
-  ownerUserId: string,
-  listener: () => void,
-): () => void {
+export function subscribeNewConversationIntentSaveState(ownerUserId: string, listener: () => void): () => void {
   let listeners = saveStateListeners.get(ownerUserId);
   if (!listeners) {
     listeners = new Set();
@@ -396,7 +393,9 @@ export async function retryNewConversationIntentSave(ownerUserId: string): Promi
 }
 
 export function _resetNewConversationIntentDbForTests(): void {
-  for (const attempt of pendingSaves.values()) attempt.controller.abort();
+  pendingSaves.forEach((attempt) => {
+    attempt.controller.abort();
+  });
   pendingSaves.clear();
   saveStateListeners.clear();
   const current = dbPromise;
